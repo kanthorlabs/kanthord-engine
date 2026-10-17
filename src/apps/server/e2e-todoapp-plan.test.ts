@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { test, type TestContext } from "node:test";
 import type { z } from "zod";
 import { ulid } from "ulid";
@@ -15,6 +15,7 @@ import {
   ImportFormat,
   MISSION_INITIAL_VERSION,
   MissionErrorCode,
+  missionOperations,
   NodeState,
   Work,
   type ControlResult,
@@ -57,9 +58,9 @@ const NO_ATTEMPT = 0;
 const NO_ITEMS = 0;
 const INITIAL_REVISION = 1;
 const SECOND_REVISION = 2;
+const FIRST_ATTEMPT = 1;
 const VERSION_INCREMENT = 1;
 const SINGLE_ITEM = 1;
-const RETIRED_EDGE_COUNT = 7;
 const PREVIEW_DIGEST = /^[0-9a-f]{64}$/;
 const TASK_IDENTITY = /^task_[0-9A-HJKMNP-TV-Z]{26}$/;
 const TASK_IDENTITY_PREFIX = "task_";
@@ -114,7 +115,11 @@ const QUEUE_AFTER_OVERRIDE = [
   [ACCEPTANCE],
   [TODO_API],
 ];
-const NEW_CRITERION = "- A new criterion item that the edit adds.";
+const LINT_COMMAND = "npm run lint && npm run format:check";
+const EXPECTED_CLAIMS = ["Available", "External.Requested", "Waiting"];
+const WRONG_DIGEST = "0".repeat(64);
+const NEW_CRITERION_TEXT = "A new criterion item that the edit adds.";
+const NEW_CRITERION = `- ${NEW_CRITERION_TEXT}`;
 const UPDATED_CRITERION = "A criterion that the human update writes.";
 const TODOAPP_TIMEOUT_MS = 120000;
 
@@ -127,7 +132,6 @@ type Project = {
   projectId: string;
   missionId: string;
   bindingId: string;
-  workerBindingIds: string[];
 };
 type BindingSetBody = z.input<
   (typeof projectOperations)["bindingSet.write"]["input"]
@@ -159,6 +163,14 @@ function replaced(
     `${name}: ${from}`,
   );
   files[name] = content.replace(from, to);
+}
+
+function claimsOf(details: unknown): string[] {
+  const { claims } = details as {
+    claims: { revision: number; claim: string }[];
+  };
+  for (const item of claims) assert.equal(item.revision, INITIAL_REVISION);
+  return claims.map((item) => item.claim).sort();
 }
 
 function bindingNames(names: string[]): string {
@@ -248,9 +260,6 @@ async function setup(t: TestContext) {
       projectId: created.id,
       missionId: mission.id,
       bindingId: applied.bindings[REPOSITORY_BINDING]!.id,
-      workerBindingIds: Object.keys(COVERING_WORKER_BINDINGS).map(
-        (name) => applied.bindings[name]!.id,
-      ),
     };
   };
   const missionVersion = async (project: Project) =>
@@ -319,6 +328,10 @@ async function setup(t: TestContext) {
     const versionBefore = await missionVersion(project);
     const nodesBefore = await nodes(project);
     const previewed = await preview(project, paths);
+    assert.deepEqual(
+      [...new Set(previewed.violations.map((item) => item.code))],
+      [code],
+    );
     const found = previewed.violations.filter((item) => item.code === code);
     assert.notEqual(
       found.length,
@@ -427,6 +440,32 @@ async function setup(t: TestContext) {
     if (result.type !== OperationResultType.Failure) throw new Error();
     return result.error.error;
   };
+  const failedImportApply = async (project: Project, paths: string[]) => {
+    const previewed = await preview(project, paths);
+    const result = (await httpClient(
+      { operation: missionOperations["import.apply"] },
+      fixture.endpoint,
+      fixture.token,
+    ).operation({
+      params: { mission_id: project.missionId },
+      query: {},
+      body: {
+        format: ImportFormat.Markdown,
+        mission_id: project.missionId,
+        mission_version: previewed.expected_mission_version,
+        reason: REASON,
+        files: paths.map((path) => ({
+          filename: basename(path),
+          content: readFileSync(path, UTF8),
+        })),
+        preview_digest: previewed.preview_digest,
+        confirmed_retirements: [],
+      },
+    })) as OperationResult<unknown>;
+    assert.equal(result.type, OperationResultType.Failure);
+    if (result.type !== OperationResultType.Failure) throw new Error();
+    return result.error.error;
+  };
   return {
     read,
     write,
@@ -449,6 +488,9 @@ async function setup(t: TestContext) {
     control,
     overrideInOrder,
     failedBindingSet,
+    failedImportApply,
+    applyArgs,
+    applyBody,
   };
 }
 
@@ -527,8 +569,6 @@ todoapp(
       assert.deepEqual(found.content.bindings, [project.bindingId]);
       for (const task of found.tasks)
         assert.deepEqual(task.content.bindings, []);
-      for (const worker of project.workerBindingIds)
-        assert.ok(!found.content.bindings.includes(worker));
     }
   },
 );
@@ -670,19 +710,19 @@ todoapp(
   "EF06.12 a node verification that no task holds is refused",
   async (h) => {
     const project = await h.todoappProject();
-    await h.refusedImport(
+    const found = await h.refusedImport(
       project,
       h.planFiles((files) =>
-        replaced(
-          files,
-          FOUNDATION_RUNTIME,
-          "  - npm run lint && npm run format:check\n",
-          "",
-        ),
+        replaced(files, FOUNDATION_RUNTIME, `  - ${LINT_COMMAND}\n`, ""),
       ),
       MissionErrorCode.VerificationUncovered,
       FOUNDATION,
     );
+    assert.equal(found.length, SINGLE_ITEM);
+    assert.deepEqual(found[0]!.details, {
+      name: FOUNDATION,
+      command: LINT_COMMAND,
+    });
   },
 );
 
@@ -712,21 +752,26 @@ todoapp(
   "EF06.15 a requirement that no worker binding meets is refused",
   async (h) => {
     const project = await h.todoappProject();
+    const paths = h.planFiles((files) =>
+      replaced(
+        files,
+        FOUNDATION,
+        "depends_on: []",
+        "depends_on: []\nrequires: [platform.macos]",
+      ),
+    );
     const found = await h.refusedImport(
       project,
-      h.planFiles((files) =>
-        replaced(
-          files,
-          FOUNDATION,
-          "depends_on: []",
-          "depends_on: []\nrequires: [platform.macos]",
-        ),
-      ),
+      paths,
       MissionErrorCode.RequiresUnmatched,
       FOUNDATION,
     );
-    const details = found[0]!.details as { claims: unknown[] };
-    assert.notEqual(details.claims.length, NO_ITEMS);
+    assert.equal(found.length, SINGLE_ITEM);
+    assert.equal(found[0]!.filename, FOUNDATION);
+    assert.deepEqual(claimsOf(found[0]!.details), EXPECTED_CLAIMS);
+    const refused = await h.failedImportApply(project, paths);
+    assert.equal(refused.code, MissionErrorCode.RequiresUnmatched);
+    assert.deepEqual(claimsOf(refused.details), EXPECTED_CLAIMS);
   },
 );
 
@@ -773,6 +818,8 @@ todoapp(
     assert.deepEqual(prepared.violations, []);
     const todos = byFilename(await h.nodes(project))[TODOS]!;
     await h.update(project, todos, { criterion: UPDATED_CRITERION });
+    const versionAfterUpdate = await h.missionVersion(project);
+    const nodesAfterUpdate = await h.nodes(project);
     await h.refuses(
       ["mission", "import", "apply", project.missionId, ...paths],
       {
@@ -783,6 +830,13 @@ todoapp(
         confirmed_retirements: [],
       },
       MissionErrorCode.VersionConflict,
+    );
+    assert.equal(await h.missionVersion(project), versionAfterUpdate);
+    const nodesAfterRefusal = await h.nodes(project);
+    assert.deepEqual(nodesAfterRefusal, nodesAfterUpdate);
+    assert.equal(
+      byFilename(nodesAfterRefusal)[OPERATIONS]!.visible_revision,
+      INITIAL_REVISION,
     );
     assert.equal((await h.node(todos.id)).content.criterion, UPDATED_CRITERION);
   },
@@ -809,6 +863,10 @@ todoapp(
       after[TODOS]!.tasks.map((item) => item.id),
       todos.tasks.map((item) => item.id),
     );
+    const edited = after[TODOS]!.tasks.find(
+      (item) => item.filename === TODOS_CRUD,
+    )!;
+    assert.ok(edited.content.criterion.includes(NEW_CRITERION_TEXT));
     for (const name of Object.keys(after).filter((file) => file !== TODOS))
       assert.deepEqual(after[name], byFilename(before)[name], name);
   },
@@ -817,31 +875,79 @@ todoapp(
 todoapp(
   "EF06.19 an omitted task revises its node and an omitted node retires with its edges",
   async (h) => {
-    const { project } = await h.baseline();
-    const before = byFilename(await h.nodes(project));
-    const { version, paths } = await h.exported(project);
-    const without = (name: string) =>
-      paths.filter((path) => !path.endsWith(`/${name}`));
+    const omission = await h.baseline();
+    const taskBefore = byFilename(await h.nodes(omission.project));
+    const exportedTasks = await h.exported(omission.project);
+    const isolation = taskBefore[TODOS]!.tasks.find(
+      (item) => item.filename === TODOS_ISOLATION,
+    )!;
+    const withoutIsolation = exportedTasks.paths.filter(
+      (path) => !path.endsWith(`/${TODOS_ISOLATION}`),
+    );
     const taskOmission = await h.preview(
-      project,
-      without(TODOS_ISOLATION),
-      version,
+      omission.project,
+      withoutIsolation,
+      exportedTasks.version,
     );
     assert.deepEqual(taskOmission.violations, []);
     assert.deepEqual(taskOmission.retirements, []);
-    assert.deepEqual(taskOmission.updates, [before[TODOS]!.id]);
-    const nodeOmission = await h.preview(project, without(TODO_API), version);
+    assert.deepEqual(taskOmission.updates, [taskBefore[TODOS]!.id]);
+    await h.apply(omission.project, withoutIsolation, taskOmission);
+    const taskAfter = byFilename(await h.nodes(omission.project));
+    assert.equal(taskAfter[TODOS]!.visible_revision, SECOND_REVISION);
+    assert.deepEqual(
+      taskAfter[TODOS]!.tasks.map((item) => item.id),
+      taskBefore[TODOS]!.tasks.map((item) => item.id).filter(
+        (id) => id !== isolation.id,
+      ),
+    );
+    for (const name of Object.keys(taskAfter).filter((file) => file !== TODOS))
+      assert.deepEqual(taskAfter[name], taskBefore[name], name);
+
+    const { project } = await h.baseline();
+    const before = byFilename(await h.nodes(project));
+    const { version, paths } = await h.exported(project);
+    const withoutExamine = paths.filter(
+      (path) => !path.endsWith(`/${TODO_API}`),
+    );
+    const nodeOmission = await h.preview(project, withoutExamine, version);
     assert.deepEqual(nodeOmission.violations, []);
     assert.deepEqual(nodeOmission.retirements, [before[TODO_API]!.id]);
+    const nodesBefore = await h.nodes(project);
+    const edgesBefore = await h.edges(project);
+    const refusedBodies = [
+      await h.applyBody(project, nodeOmission, []),
+      await h.applyBody(
+        project,
+        { ...nodeOmission, preview_digest: WRONG_DIGEST },
+        nodeOmission.retirements,
+      ),
+    ];
+    for (const body of refusedBodies)
+      await h.refuses(
+        h.applyArgs(project, withoutExamine),
+        body,
+        MissionErrorCode.RetirementMismatch,
+      );
+    assert.equal(await h.missionVersion(project), version);
+    assert.deepEqual(await h.nodes(project), nodesBefore);
+    assert.deepEqual(await h.edges(project), edgesBefore);
     await h.apply(
       project,
-      without(TODO_API),
+      withoutExamine,
       nodeOmission,
       nodeOmission.retirements,
     );
     const retired = await h.node(before[TODO_API]!.id);
     assert.ok(retired.retired_at !== null);
-    assert.equal((await h.edges(project)).length, RETIRED_EDGE_COUNT);
+    assert.deepEqual(
+      edgeNames(await h.nodes(project), await h.edges(project)),
+      EDGES.filter((edge) => !edge.startsWith(`${TODO_API} -> `)),
+    );
+    assert.equal(
+      (await h.edges(project)).length,
+      EDGES.length - IMPLEMENT_FILES.length,
+    );
   },
 );
 
@@ -878,6 +984,8 @@ todoapp(
     const foundation = byFilename(await h.nodes(project))[FOUNDATION]!;
     const readied = await h.control("ready", foundation.id, project);
     assert.equal(readied.node.state, NodeState.Waiting);
+    assert.equal(readied.attempt?.attempt, FIRST_ATTEMPT);
+    assert.equal(readied.attempt?.closed_at, null);
     const current = await h.node(foundation.id);
     await h.refuses(
       ["mission", "node", "update", foundation.id],
@@ -891,10 +999,10 @@ todoapp(
       },
       MissionErrorCode.WorkLocked,
     );
-    assert.equal(
-      (await h.node(foundation.id)).visible_revision,
-      current.visible_revision,
-    );
+    const after = await h.node(foundation.id);
+    assert.equal(after.visible_revision, current.visible_revision);
+    assert.equal(after.content.work, Work.Implement);
+    assert.equal(after.work, Work.Implement);
   },
 );
 
@@ -927,14 +1035,16 @@ todoapp(
 
 todoapp("EF06.24 no job and no execution names a task", async (h) => {
   const { project } = await h.baseline();
-  await h.overrideInOrder(project);
+  const { names } = await h.overrideInOrder(project);
   const executions = await h.read<Page<unknown>>([
     "scheduler",
     "execution",
     "list",
     project.projectId,
   ]);
-  const names = [await h.jobs(project), executions.items];
-  for (const listed of names)
-    assert.ok(!JSON.stringify(listed).includes(TASK_IDENTITY_PREFIX));
+  assert.deepEqual(executions.items, []);
+  const queued = await h.jobs(project);
+  assert.equal(queued.length, SINGLE_ITEM);
+  for (const job of queued) assert.ok(job.node_id in names, job.node_id);
+  assert.ok(!JSON.stringify(queued).includes(TASK_IDENTITY_PREFIX));
 });
