@@ -201,11 +201,13 @@ export const repositoryConfigSchema = z.strictObject({
 export const WorkerPlacement = { Server: "server", Worker: "worker" } as const;
 export type WorkerPlacement =
   (typeof WorkerPlacement)[keyof typeof WorkerPlacement];
-export const workerConfigSchema = z.strictObject({
+export const workerTraitsSchema = z
+  .array(traitKeySchema)
+  .refine((keys) => new Set(keys).size === keys.length);
+const workerConfigFields = {
   worker: z.string().min(1),
   instance_count: z.number().int(),
   placement: z.enum(WorkerPlacement).optional(),
-  traits: z.unknown().optional(),
   resource_budget: z
     .strictObject({
       turns: z.number().int().positive(),
@@ -223,10 +225,15 @@ export const workerConfigSchema = z.strictObject({
       }),
     )
     .optional(),
+};
+export const workerConfigWriteSchema = z.strictObject({
+  ...workerConfigFields,
+  traits: z.unknown().optional(),
 });
-export const workerTraitsSchema = z
-  .array(traitKeySchema)
-  .refine((keys) => new Set(keys).size === keys.length);
+export const workerConfigSchema = z.strictObject({
+  ...workerConfigFields,
+  traits: workerTraitsSchema.optional(),
+});
 export const storageConfigSchema = z.strictObject({
   available: z.boolean(),
   endpoint: z.url(),
@@ -236,6 +243,20 @@ export const storageConfigSchema = z.strictObject({
   credential: z.string().min(1),
 });
 export const bindingEditSchema = z.discriminatedUnion("kind", [
+  z.strictObject({
+    kind: z.literal(BindingKind.Repository),
+    config: repositoryConfigSchema,
+  }),
+  z.strictObject({
+    kind: z.literal(BindingKind.Worker),
+    config: workerConfigWriteSchema,
+  }),
+  z.strictObject({
+    kind: z.literal(BindingKind.Storage),
+    config: storageConfigSchema,
+  }),
+]);
+export const bindingSchema = z.discriminatedUnion("kind", [
   z.strictObject({
     kind: z.literal(BindingKind.Repository),
     config: repositoryConfigSchema,
@@ -271,7 +292,7 @@ function followsPath(name: string): string[] {
 
 function refineAgentSelectors(
   name: string,
-  config: z.infer<typeof workerConfigSchema>,
+  config: z.infer<typeof workerConfigWriteSchema>,
   ctx: z.RefinementCtx,
 ): void {
   const selectors = new Set<string>();
@@ -355,6 +376,10 @@ export const bindingSetWriteInputSchema = z
     bindings: z.record(bindingNameSchema, bindingEditSchema),
   })
   .superRefine(({ bindings }, ctx) => refineBindingRelations(bindings, ctx));
+export const bindingSetSchema = z.strictObject({
+  version: z.number().int().positive(),
+  bindings: z.record(bindingNameSchema, bindingSchema),
+});
 
 export type CustodySuitability = (
   tx: Transaction,
@@ -694,7 +719,7 @@ export const projectOperations = {
     method: HttpMethod.Get,
     path: "/api/project/:project_id/binding-set",
     input: readInput(projectParams, emptyFields),
-    output: bindingSetWriteInputSchema,
+    output: bindingSetSchema,
     description: "Export the complete current binding set.",
   },
   "bindingSet.write": {

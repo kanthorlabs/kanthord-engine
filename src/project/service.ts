@@ -68,11 +68,13 @@ import {
   WorkerField,
   WorkerPlacement,
   bindingEditSchema,
+  bindingSchema,
   bindingSetWriteInputSchema,
   projectOperations,
   repositoryConfigSchema,
   storageConfigSchema,
   workerConfigSchema,
+  workerConfigWriteSchema,
   workerTraitsSchema,
   type ProjectBindings,
   type AgentDependentBinding,
@@ -487,7 +489,7 @@ export class ProjectService implements Service, ProjectBindings {
               readCurrentBindingSet(tx, project.id),
               ([name, binding]) => [
                 name,
-                bindingEditSchema.parse({
+                bindingSchema.parse({
                   kind: kindOf(binding.resource_identity),
                   config: binding.config,
                 }),
@@ -1011,7 +1013,7 @@ export class ProjectService implements Service, ProjectBindings {
   private validateWorker(
     tx: Transaction,
     name: string,
-    config: typeof workerConfigSchema._output,
+    config: typeof workerConfigWriteSchema._output,
   ): void {
     if (
       config.instance_count < INSTANCE_COUNT_MIN ||
@@ -1139,7 +1141,7 @@ export class ProjectService implements Service, ProjectBindings {
     );
     assert.ok(latest, "A retained binding must have a latest revision.");
     assert.ok(latest.revision >= binding.revision);
-    const current = bindingEditSchema.parse({
+    const current = bindingSchema.parse({
       kind: kindOf(latest.resource_identity),
       config: latest.config,
     });
@@ -1253,7 +1255,7 @@ export class ProjectService implements Service, ProjectBindings {
         readGeneration(tx, projectId, resourceIdentity) ?? NO_GENERATION,
       resource_budget: config.resource_budget ?? null,
       entries: config.entries ?? [],
-      traits: workerTraitsSchema.parse(config.traits ?? []),
+      traits: config.traits ?? [],
       tombstone: row.removed_at !== null,
     };
   }
