@@ -194,6 +194,16 @@ async function* contentOf(file: FileHandle, size: number) {
   }
 }
 
+function pathRefusalOf(error: unknown): Diagnostic | null {
+  for (const candidate of [error, error instanceof Error ? error.cause : null])
+    if (
+      candidate instanceof Diagnostic &&
+      candidate.code === WorkerErrorCode.EvidenceUploadPathRefused
+    )
+      return candidate;
+  return null;
+}
+
 async function transfer(
   file: FileHandle,
   size: number,
@@ -221,6 +231,8 @@ async function transfer(
       );
   } catch (error) {
     if (error instanceof Diagnostic) throw error;
+    const refusal = pathRefusalOf(error);
+    if (refusal) throw refusal;
     throw new Diagnostic(
       WorkerErrorCode.EvidenceUploadTransferFailed,
       "evidence upload: the transfer failed.",
@@ -264,7 +276,11 @@ async function publish(
   context: Context,
 ) {
   await transfer(file, size, upload.put_url, upload.headers, context).catch(
-    () => throwIfCancelled(context),
+    (error: unknown) => {
+      const refusal = pathRefusalOf(error);
+      if (refusal) throw refusal;
+      throwIfCancelled(context);
+    },
   );
   throwIfCancelled(context);
   return completed(

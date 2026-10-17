@@ -38,6 +38,8 @@ const CONFLICT = 409;
 const TRANSFER_ACCEPTED = 200;
 const FAILED_STORES = 2;
 const SINGLE_CHECK = 1;
+const NO_BYTES = 0;
+const NO_COMPLETES = 0;
 const REFUSED = MissionErrorCode.AuthorizationRefused;
 
 function refusal(code: string) {
@@ -408,4 +410,25 @@ test("a repeated grant after a failed check stops the upload", async (t) => {
   });
   assert.equal(completes, SINGLE_CHECK);
   assert.deepEqual(submits, []);
+});
+
+test("a file truncated after the hash answers path_refused with no complete", async (t) => {
+  const { api, reachablePut, input } = await failoverInput(t);
+  let completes = 0;
+  t.mock.method(api.mission, "evidence.submit", async () => {
+    await truncate(join(input.workspace, input.path), NO_BYTES);
+    return granted(
+      "evidence_asset_01ARZ3NDEKTSV4RRFFQ69G5FAA",
+      PRIMARY,
+      reachablePut,
+    );
+  });
+  t.mock.method(api.mission, "evidence.asset.complete", async () => {
+    completes++;
+    return refusal(IntakeErrorCode.StorageObjectMismatch);
+  });
+  await assert.rejects(uploadEvidence(input), {
+    code: WorkerErrorCode.EvidenceUploadPathRefused,
+  });
+  assert.equal(completes, NO_COMPLETES);
 });
