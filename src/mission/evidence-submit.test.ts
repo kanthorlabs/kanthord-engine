@@ -456,24 +456,38 @@ test("a failure row of another attempt leaves every binding grantable", async (t
 
 test("no binding left answers mission.evidence.storage_exhausted", async (t) => {
   const h = failoverFixture(t);
-  h.states.set(h.storageId, { tombstone: false, disabled: true });
-  h.fail(h.second, h.claim.attempt);
-  await assert.rejects(h.submit, {
+  const exhausted = (bindings: string[]) => ({
     status: HttpStatus.Conflict,
     code: MissionErrorCode.EvidenceStorageExhausted,
-    details: {
-      node_id: h.node_id,
-      attempt: h.claim.attempt,
-      bindings: [h.storageId, h.second],
-    },
+    details: { node_id: h.node_id, attempt: h.claim.attempt, bindings },
   });
+  h.states.set(h.storageId, { tombstone: false, disabled: true });
+  h.fail(h.second, h.claim.attempt);
+  await assert.rejects(h.submit, exhausted([h.second]));
   assert.deepEqual(h.granted, []);
   h.fail(h.storageId, h.claim.attempt);
   h.states.clear();
-  await assert.rejects(h.submit, {
-    code: MissionErrorCode.EvidenceStorageExhausted,
-  });
+  await assert.rejects(h.submit, exhausted([h.storageId, h.second]));
   assert.equal(h.evidenceCount(), NO_ITEMS);
+});
+
+test("an exhausted answer with no failure row lists no binding", async (t) => {
+  const h = failoverFixture(t);
+  h.states.set(h.storageId, { tombstone: false, disabled: true });
+  h.states.set(h.second, { tombstone: false, disabled: true });
+  const exhausted = {
+    code: MissionErrorCode.EvidenceStorageExhausted,
+    details: { node_id: h.node_id, attempt: h.claim.attempt, bindings: [] },
+  };
+  await assert.rejects(h.submit, exhausted);
+  assert.deepEqual(h.granted, []);
+  h.states.clear();
+  for (const id of [h.storageId, h.second])
+    h.refusals.set(id, () =>
+      authorizationRefused(AuthorizationRefusal.BindingRemoved),
+    );
+  await assert.rejects(h.submit, exhausted);
+  assert.deepEqual(h.granted, [h.storageId, h.second]);
 });
 
 test("a cancelled context during signing stops with no failover", async (t) => {

@@ -46,7 +46,7 @@ type ObjectUpload = {
   size: number;
   sha256: string | null;
 };
-type StorageCandidates = { bindings: string[]; grantable: string[] };
+type StorageCandidates = { failed: string[]; grantable: string[] };
 type Upload = {
   asset_id: string;
   put_url: string;
@@ -69,7 +69,7 @@ function storageCandidates(
   const storage = storageBindingIdsOf(tx, bindings, revision);
   const failed = new Set(failedBindingsOf(tx, revision.node_id, attempt));
   return {
-    bindings: storage,
+    failed: storage.filter((id) => failed.has(id)),
     grantable: storage.filter(
       (id) => !failed.has(id) && storageEnabled(tx, bindings, id),
     ),
@@ -284,7 +284,7 @@ export async function submitEvidence(
   const uploads: Upload[] = [];
   const grants = new Map<string, string>();
   if (body.assets.some((asset) => asset.kind === AssetKind.Object)) {
-    const { bindings, grantable } = dependencies.store.transaction((tx) => {
+    const { failed, grantable } = dependencies.store.transaction((tx) => {
       const { revision } = prepareEvidence(
         tx,
         dependencies,
@@ -311,7 +311,7 @@ export async function submitEvidence(
         grantable,
         next,
       );
-      if (!granted) storageExhausted(nodeId, claim.attempt, bindings);
+      if (!granted) storageExhausted(nodeId, claim.attempt, failed);
       next = granted.index;
       grants.set(object.assetId, granted.storageBindingId);
       uploads.push({ asset_id: object.assetId, ...granted.signed });
