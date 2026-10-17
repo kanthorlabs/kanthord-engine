@@ -20,7 +20,7 @@ const OVERRIDE_TEXT = "Fix it: {{rationale}}\n";
 const UNSAFE_RATIONALE = "<a & b>";
 const OVERRIDE_RENDERED = `Fix it: ${UNSAFE_RATIONALE}`;
 const REPORT_RENDERED_TAIL =
-  '\nObjectives: [{"id":"o"}]\nOutcomes: []\nEvidence: null\nFinal-snapshot verification: null';
+  '\nDependencies: [{"id":"o"}]\nOutcomes: []\nEvidence: null\nFinal-snapshot verification: null';
 
 function templateInvalid(path: string | null, reason: string) {
   return (error: unknown) => {
@@ -105,7 +105,7 @@ test("a render fails on a placeholder without a value", () => {
 test("shipped templates render JSON values and drop the final newline", () => {
   assert.equal(
     renderTemplate(SHIPPED_TEMPLATES, PromptTemplate.Report, {
-      objectives: [{ id: "o" }],
+      dependencies: [{ id: "o" }],
       outcomes: [],
       evidence: null,
       verification: null,

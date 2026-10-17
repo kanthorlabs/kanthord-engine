@@ -15,7 +15,7 @@ import {
 } from "./execution-run.ts";
 import {
   readAttemptEvidence,
-  readObjectives,
+  readDependencies,
   readPinnedRevision,
 } from "./node-reads.ts";
 import { NodeKind, type NativeAgent } from "./native-agent.ts";
@@ -71,7 +71,7 @@ async function judge(
   verificationRun: VerificationRun,
   directory: string,
   openAgent: OpenAgent,
-  objectives: Awaited<ReturnType<typeof readObjectives>> | null,
+  dependencies: Awaited<ReturnType<typeof readDependencies>> | null,
 ) {
   const kind = input.setup.node_kind;
   const commands = verificationCommands(revision);
@@ -96,7 +96,7 @@ async function judge(
       tasks: revision.tasks,
       verification,
       evidence,
-      objectives,
+      dependencies,
     }),
   );
   if (agent.budget.exhausted()) return run.stop(EndReason.AssessmentAbsent);
@@ -168,8 +168,8 @@ async function evaluate(
     ],
     verification,
   });
-  const objectives =
-    kind === NodeKind.Initiative ? await readObjectives(run) : null;
+  const dependencies =
+    kind === NodeKind.Initiative ? await readDependencies(run) : null;
   let judgement: Awaited<ReturnType<typeof judge>>;
   try {
     judgement = await judge(
@@ -180,7 +180,7 @@ async function evaluate(
       verificationRun,
       prepared.directory,
       openAgent,
-      objectives,
+      dependencies,
     );
   } catch (error) {
     if (
@@ -195,7 +195,7 @@ async function evaluate(
   return {
     evidence_ids: [recorded.id, ...prepared.evidenceIds],
     dependency_outcome_ids:
-      objectives?.outcomes.map((outcome) => outcome.id) ?? [],
+      dependencies?.outcomes.map((outcome) => outcome.id) ?? [],
     ...judgement,
   };
 }

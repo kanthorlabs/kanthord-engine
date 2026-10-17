@@ -239,11 +239,11 @@ export function evaluationInstruction(
     tasks: readonly TaskContent[];
     verification: Verification;
     evidence: unknown;
-    objectives?: unknown;
+    dependencies?: unknown;
   },
 ): string {
   return renderTemplate(templates, PromptTemplate.Evaluation, {
-    initiative: input.kind === NodeKind.Initiative,
+    examine: input.kind === NodeKind.Initiative,
     tasks: input.tasks.map((task) => ({
       id: task.id,
       criterion: task.content.criterion,
@@ -251,20 +251,20 @@ export function evaluationInstruction(
     tested_input: input.verification.tested_input,
     results: input.verification.results,
     evidence: input.evidence,
-    objectives: input.objectives ?? null,
+    dependencies: input.dependencies ?? null,
     marker: JUDGEMENT_MARKER,
   });
 }
 
 export function reportInstruction(
   templates: PromptTemplates,
-  objectives: unknown,
+  dependencies: unknown,
   outcomes: unknown,
   evidence: unknown,
   verification: Verification | null,
 ): string {
   return renderTemplate(templates, PromptTemplate.Report, {
-    objectives,
+    dependencies,
     outcomes,
     evidence,
     verification,

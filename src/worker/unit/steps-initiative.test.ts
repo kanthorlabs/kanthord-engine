@@ -24,27 +24,13 @@ import { setTimeout } from "node:timers/promises";
 const EVIDENCE_UPLOAD_COUNT = 1;
 const EXPECTED_RELEASES = 1;
 const NO_EVIDENCE_UPLOADS = 0;
-test("initiative reports terminal objectives, rechecks graph changes and removes its workspace", async (t) => {
+test("initiative reports its dependencies once and removes its workspace", async (t) => {
   const scenarios = [
     {
-      states: ["Completed", "Completed"],
+      states: ["Completed"],
       report: "report",
       further: false,
       evidence: true,
-      opens: 1,
-    },
-    {
-      states: ["Available"],
-      report: "report",
-      further: true,
-      evidence: false,
-      opens: 0,
-    },
-    {
-      states: ["Completed", "Available"],
-      report: "report",
-      further: true,
-      evidence: false,
       opens: 1,
     },
     {
@@ -82,7 +68,7 @@ test("initiative reports terminal objectives, rechecks graph changes and removes
       mission: {
         "execution.dependency.list": async () =>
           completed({
-            items: [{ id: "objective", state: scenario.states[reads++] }],
+            items: [{ id: "dependency", state: scenario.states[reads++] }],
             next_cursor: null,
           }),
         "execution.dependency.outcome.list": empty,

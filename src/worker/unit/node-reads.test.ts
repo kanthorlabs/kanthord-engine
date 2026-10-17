@@ -2,10 +2,9 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { background } from "../../kernel/context.ts";
 import { OperationResultType } from "../../kernel/operation.ts";
-import { ClosingEvent, NodeState } from "../../mission/contract.ts";
+import { ClosingEvent } from "../../mission/contract.ts";
 import { ExecutionRun, ExecutionStop } from "./execution-run.ts";
 import {
-  allTerminal,
   readAllPages,
   readClearedAssessment,
   readPriorRationale,
@@ -68,17 +67,6 @@ test("reads concatenate ordered pages and enforce their finite limit", async (t)
     ExecutionStop,
   );
   assert.equal(calls, READ_PAGE_LIMIT);
-});
-
-test("terminal states follow the pinned revision", () => {
-  assert.equal(allTerminal([{ id: "node", state: NodeState.Blocked }]), false);
-  assert.equal(
-    allTerminal([
-      { id: "node", state: NodeState.Completed },
-      { id: "other", state: NodeState.Discarded },
-    ]),
-    true,
-  );
 });
 
 test("the assessment reads answer null only on a record not found", async (t) => {

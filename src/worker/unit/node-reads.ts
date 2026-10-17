@@ -7,9 +7,7 @@ import {
 import {
   ClosingEvent,
   MissionErrorCode,
-  NodeState,
   type Assessment,
-  type ExecutionDependency,
   type Outcome,
 } from "../../mission/contract.ts";
 import { requestedChangesText } from "./judgement.ts";
@@ -17,10 +15,6 @@ import { EndReason, ExecutionRun } from "./execution-run.ts";
 
 export const READ_PAGE_LIMIT = 1000;
 const FIRST_ATTEMPT = 1;
-export const TERMINAL_STATES: readonly NodeState[] = [
-  NodeState.Completed,
-  NodeState.Discarded,
-];
 
 export async function readAllPages<T>(
   run: ExecutionRun,
@@ -66,13 +60,13 @@ export function readAttemptEvidence(run: ExecutionRun) {
   );
 }
 
-export async function readObjectives(run: ExecutionRun) {
+export async function readDependencies(run: ExecutionRun) {
   const input = (cursor: string | null) => ({
     params: { execution_id: run.claim.execution_id },
     query: cursor === null ? {} : { cursor },
     body: null,
   });
-  const objectives = await readAllPages(run, (cursor, options) =>
+  const dependencies = await readAllPages(run, (cursor, options) =>
     run.clients.mission["execution.dependency.list"](input(cursor), options),
   );
   const outcomes = await readAllPages(run, (cursor, options) =>
@@ -87,7 +81,7 @@ export async function readObjectives(run: ExecutionRun) {
       options,
     ),
   );
-  return { objectives, outcomes, evidence };
+  return { dependencies, outcomes, evidence };
 }
 
 function nullOnRecordNotFound<T extends Assessment | Outcome>(
@@ -185,12 +179,4 @@ export async function readPriorRationale(
     rationale: (await readClearedAssessment(run))?.rationale ?? null,
     rework: false,
   };
-}
-
-export function allTerminal(
-  objectives: readonly ExecutionDependency[],
-): boolean {
-  return objectives.every((objective) =>
-    TERMINAL_STATES.includes(objective.state),
-  );
 }

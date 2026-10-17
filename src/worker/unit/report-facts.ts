@@ -7,8 +7,8 @@ import type { Verification } from "./verification.ts";
 
 const ABSENT = "none";
 
-function labelOf(objective: ExecutionDependency): string {
-  return "filename" in objective ? objective.filename : objective.id;
+function labelOf(dependency: ExecutionDependency): string {
+  return "filename" in dependency ? dependency.filename : dependency.id;
 }
 
 function currentOutcome(
@@ -24,16 +24,16 @@ function code(value: string): string {
   return `\`${value}\``;
 }
 
-function objectiveTable(
-  objectives: readonly ExecutionDependency[],
+function dependencyTable(
+  dependencies: readonly ExecutionDependency[],
   outcomes: readonly Outcome[],
 ): string {
-  const rows = objectives.map((objective) => {
-    const outcome = currentOutcome(outcomes, objective.id);
-    return `| ${labelOf(objective)} | ${code(objective.id)} | ${objective.state} | ${outcome ? code(outcome.id) : ABSENT} | ${outcome?.result ?? ABSENT} | ${outcome ? code(outcome.assessment_id) : ABSENT} |`;
+  const rows = dependencies.map((dependency) => {
+    const outcome = currentOutcome(outcomes, dependency.id);
+    return `| ${labelOf(dependency)} | ${code(dependency.id)} | ${dependency.state} | ${outcome ? code(outcome.id) : ABSENT} | ${outcome?.result ?? ABSENT} | ${outcome ? code(outcome.assessment_id) : ABSENT} |`;
   });
   return [
-    "| Objective | Node | State | Outcome | Result | Assessment |",
+    "| Dependency | Node | State | Outcome | Result | Assessment |",
     "| --- | --- | --- | --- | --- | --- |",
     ...rows,
   ].join("\n");
@@ -64,9 +64,9 @@ function verificationSection(verification: Verification | null): string {
 }
 
 export function reportFacts(
-  objectives: readonly ExecutionDependency[],
+  dependencies: readonly ExecutionDependency[],
   outcomes: readonly Outcome[],
   verification: Verification | null,
 ): string {
-  return `## Facts recorded by KanthorD\n\n${objectiveTable(objectives, outcomes)}\n\n### Final-snapshot verification\n\n${verificationSection(verification)}`;
+  return `## Facts recorded by KanthorD\n\n${dependencyTable(dependencies, outcomes)}\n\n### Final-snapshot verification\n\n${verificationSection(verification)}`;
 }

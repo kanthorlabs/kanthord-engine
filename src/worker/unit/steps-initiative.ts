@@ -5,7 +5,7 @@ import {
   type ExecutionEnd,
   type ExecutionRun,
 } from "./execution-run.ts";
-import { readObjectives, allTerminal } from "./node-reads.ts";
+import { readDependencies } from "./node-reads.ts";
 import { reportInstruction } from "./judgement.ts";
 import { renderWorkPrompt } from "../../agent/prompt-composer.ts";
 import { WorkspaceKind } from "./workspace.ts";
@@ -16,7 +16,7 @@ import { runVerifications } from "./verification.ts";
 import { reportFacts } from "./report-facts.ts";
 import { testedCommitOf, verificationObserver } from "./method-telemetry.ts";
 
-export const REPORT_SUBJECT = "Report on current objective outcomes";
+export const REPORT_SUBJECT = "Report on current dependency outcomes";
 export const REPORT_MEDIA_TYPE = "text/markdown";
 
 export async function runStepsInitiative(
@@ -39,8 +39,7 @@ export async function runStepsInitiative(
   });
   const { directory } = workspace;
   try {
-    const current = await readObjectives(run);
-    if (!allTerminal(current.objectives)) return await run.release(true);
+    const current = await readDependencies(run);
     if (budget.exhausted()) return await run.release(true);
     const agent = await openAgent(directory);
     if (agent.budget.exhausted()) return await run.release(true);
@@ -68,7 +67,7 @@ export async function runStepsInitiative(
       work,
       reportInstruction(
         input.setup.templates,
-        current.objectives,
+        current.dependencies,
         current.outcomes,
         current.evidence,
         verification,
@@ -77,9 +76,7 @@ export async function runStepsInitiative(
     if (agent.budget.exhausted()) return await run.release(true);
     const assessment = agent.lastText();
     if (!assessment?.trim()) run.stop(EndReason.ReportAbsent);
-    const report = `${reportFacts(current.objectives, current.outcomes, verification)}\n\n## Assessment\n\n${assessment}`;
-    if (!allTerminal((await readObjectives(run)).objectives))
-      return await run.release(true);
+    const report = `${reportFacts(current.dependencies, current.outcomes, verification)}\n\n## Assessment\n\n${assessment}`;
     await run.submitEvidence(input.claim.node_id, {
       subject: REPORT_SUBJECT,
       assets: [
