@@ -21,6 +21,7 @@ const GIT_EXCLUDE = [".git", "info", "exclude"];
 export const WORKSPACE_RETENTION_MS = 7 * 24 * 3600 * 1000;
 export const SWEEP_INTERVAL_MS = 3600000;
 export const CHECKOUTS_DIRECTORY = "checkouts";
+export const EVIDENCE_DIRECTORY = "evidence";
 const SINGLE_CHECKOUT = 1;
 const FIRST_CHECKOUT = 0;
 export const WorkspaceKind = {

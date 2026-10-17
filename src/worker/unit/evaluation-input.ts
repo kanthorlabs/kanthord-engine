@@ -1,6 +1,7 @@
 import { addedFiles } from "./local-git.ts";
 import { writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { join, relative } from "node:path";
+import { ensureDirectory } from "../../kernel/files.ts";
 import { abortSignal, CancellationContext } from "../../kernel/context.ts";
 import { identitySchema } from "../../kernel/identity.ts";
 import {
@@ -11,9 +12,15 @@ import {
 } from "../../mission/contract.ts";
 import { EndReason, type ExecutionRun } from "./execution-run.ts";
 import { NodeKind } from "./native-agent.ts";
-import { WorkspaceKind, type InitiativeCheckout } from "./workspace.ts";
+import {
+  EVIDENCE_DIRECTORY,
+  WorkspaceKind,
+  type InitiativeCheckout,
+} from "./workspace.ts";
 import type { StepsInput } from "./steps-objective.ts";
 import type { TestedInput } from "./verification.ts";
+
+const NO_CHECKOUTS = 0;
 
 export function snapshotOf(evidence: readonly Evidence[], bindingId: string) {
   const candidates = evidence
@@ -189,8 +196,14 @@ export async function prepareEvaluation(
       input.claim.created_at + input.setup.resource_budget.wall_time_ms,
       input.claim.expired_at,
     );
+    const placement =
+      workspace.checkouts.length > NO_CHECKOUTS
+        ? join(workspace.key, EVIDENCE_DIRECTORY)
+        : workspace.directory;
+    ensureDirectory(placement);
     for (const { evidenceId, asset } of selected) {
-      const path = await placeAsset(workspace.directory, run, asset, deadline);
+      const name = await placeAsset(placement, run, asset, deadline);
+      const path = relative(workspace.directory, join(placement, name));
       evidenceIds.add(evidenceId);
       assets.push({ evidence_id: evidenceId, asset_id: asset.id, path });
     }
