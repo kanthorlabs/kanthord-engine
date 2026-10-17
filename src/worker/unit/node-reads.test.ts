@@ -17,6 +17,7 @@ import type { MethodClients } from "./method-clients.ts";
 const SECOND_ATTEMPT = 2;
 const ONE_READ = 1;
 const CLEARED_RATIONALE = "cleared";
+const REMOVED_BINDING = "binding_removed";
 const REPOSITORIES = [
   { binding_id: "binding_api", name: "api" },
   { binding_id: "binding_web", name: "web" },
@@ -321,5 +322,29 @@ test("each change request names its binding", async (t) => {
       (name) =>
         `Reviewer octo requests changes on ${name} at commit ${"a".repeat(40)}: Rename the route.`,
     ),
+  );
+});
+
+test("a change request of a binding that the pinned revision does not name names its binding_id", async (t) => {
+  const run = fixture(SECOND_ATTEMPT);
+  t.after(() => run.dispose());
+  const [item] = CHANGE_REQUESTS.items;
+  assert.ok(item);
+  run.clients.mission = {
+    "execution.clearedOutcome.get": async () =>
+      clearedOutcome(ClosingEvent.ExternalFailed),
+  } as unknown as MethodClients["mission"];
+  run.clients.worker = {
+    "execution.change_request.get": async () => ({
+      type: OperationResultType.Completed,
+      status: 200,
+      data: { items: [{ ...item, binding_id: REMOVED_BINDING }] },
+    }),
+  } as unknown as MethodClients["worker"];
+  const text = await readRequestedChanges(run, REPOSITORIES);
+  assert.ok(text);
+  assert.equal(
+    text.split("\n")[1],
+    `Reviewer octo requests changes on ${REMOVED_BINDING} at commit ${"a".repeat(40)}: Rename the route.`,
   );
 });
