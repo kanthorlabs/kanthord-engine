@@ -12,7 +12,11 @@ import {
   mergeRef,
   resetTo,
 } from "./local-git.ts";
-import { repositoryOf, type StepsState } from "./steps-implement.ts";
+import {
+  repositoryOf,
+  implementRepositoriesOf,
+  type StepsState,
+} from "./steps-implement.ts";
 import type { WorkspaceCheckout } from "./workspace.ts";
 import { GitStep, withinGit } from "./method-telemetry.ts";
 
@@ -51,6 +55,7 @@ export function nodeWork(state: StepsState) {
     node_id: state.input.claim.node_id,
     revision: state.input.claim.pinned_revision,
     content: state.revision.content,
+    repositories: implementRepositoriesOf(state),
   });
 }
 

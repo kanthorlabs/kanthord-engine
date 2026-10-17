@@ -120,7 +120,10 @@ export async function runNativeExecution(
       );
       let working: NativeAgent;
       try {
-        working = await open(workspace.root);
+        working = await open(
+          workspace.root,
+          workspace.checkouts.map((checkout) => checkout.directory),
+        );
       } catch (error) {
         input.workspaces.release(
           input.workspaces.nodeKey(input.claim.node_id),

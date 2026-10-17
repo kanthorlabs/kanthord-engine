@@ -7,6 +7,7 @@ import {
 import type { ExecutionSetup, RepositoryTransport } from "../contract.ts";
 import {
   WorkspaceKind,
+  workRepositoriesOf,
   type WorkspaceCheckout,
   type WorkspaceRoot,
 } from "./workspace.ts";
@@ -512,7 +513,19 @@ export function taskWork(state: StepsState, task: TaskContent) {
     node_id: task.id,
     revision: state.input.claim.pinned_revision,
     content: task.content,
+    repositories: implementRepositoriesOf(state),
   });
+}
+
+export function implementRepositoriesOf(state: StepsState) {
+  return workRepositoriesOf(
+    state.root,
+    state.checkouts.map((checkout) => ({
+      name: checkout.name,
+      directory: checkout.directory,
+      base_branch: repositoryOf(state, checkout).strategy.base_branch,
+    })),
+  );
 }
 
 export async function verifyTask(state: StepsState, task: TaskContent) {
