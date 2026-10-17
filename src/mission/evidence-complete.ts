@@ -5,13 +5,19 @@ import { HttpStatus } from "../kernel/http.ts";
 import { canonicalJSON } from "../kernel/json.ts";
 import type { CallerContext, ExecutionClaim } from "../kernel/operation.ts";
 import type { Transaction } from "../kernel/store.ts";
+import { IntakeErrorCode } from "../intake/contract.ts";
+import { S3_RESULT_CODE_PREFIX } from "../storage/contract.ts";
 import {
   AssetKind,
   MissionErrorCode,
   type ExecutionContext,
 } from "./contract.ts";
 import { admitExecution } from "./execution.ts";
-import { readEvidence, type AssetRow } from "./record-store.ts";
+import {
+  insertUploadFailure,
+  readEvidence,
+  type AssetRow,
+} from "./record-store.ts";
 import type { Dependencies } from "./service.ts";
 import {
   authorizeClaim,
@@ -60,7 +66,18 @@ export function prepareComplete(
   };
   if (!pending) return { result, pending: null };
   authorizeStorage(tx, dependencies.bindings, content.storage_binding_id);
-  return { result, pending: { content } };
+  return {
+    result,
+    pending: { content, nodeId: evidence.node_id, attempt: evidence.attempt },
+  };
+}
+
+function checkFailed(error: unknown): boolean {
+  return (
+    error instanceof OperationError &&
+    (error.code === IntakeErrorCode.StorageObjectMismatch ||
+      error.code.startsWith(S3_RESULT_CODE_PREFIX))
+  );
 }
 
 export async function completeEvidence(
@@ -81,15 +98,29 @@ export async function completeEvidence(
         prepareComplete(tx, dependencies, claim, assetId, context, Date.now())
           .result,
     );
-  const { content } = prepared.pending;
-  const checked = await dependencies.intakeStorage.check(
-    {
-      context: caller.context,
-      identity: caller.identity,
-      executionId: claim.executionId,
-    },
-    assetId,
-  );
+  const { content, nodeId, attempt } = prepared.pending;
+  const checked = await dependencies.intakeStorage
+    .check(
+      {
+        context: caller.context,
+        identity: caller.identity,
+        executionId: claim.executionId,
+      },
+      assetId,
+    )
+    .catch((error: unknown) => {
+      if (checkFailed(error))
+        dependencies.store.transaction((tx) =>
+          insertUploadFailure(tx, {
+            node_id: nodeId,
+            attempt,
+            storage_binding_id: content.storage_binding_id,
+            asset_id: assetId,
+            failed_at: Date.now(),
+          }),
+        );
+      throw error;
+    });
   assert.equal(checked.location, content.location);
   return caller.commit((tx) => {
     const now = Date.now();
