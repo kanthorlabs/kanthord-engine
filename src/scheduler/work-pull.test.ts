@@ -7,7 +7,7 @@ import { testMachineIdentity } from "../kernel/test-identity.ts";
 import type { CallerContext } from "../kernel/operation.ts";
 import {
   ClaimNodeState,
-  NodeFormatField,
+  ClaimWork,
   WorkPullKind,
   WORK_PULL_WAIT_MS,
 } from "./contract.ts";
@@ -48,7 +48,7 @@ function harness(t: TestContext) {
   });
   h.dependencies.declarations.declarationOf = () => ({
     declared_node_states: [ClaimNodeState.Available],
-    required_node_format: Object.values(NodeFormatField),
+    declared_works: Object.values(ClaimWork),
     resource_budget: { wall_time_ms: 7200000 },
   });
   h.dependencies.transitions.claim = (tx, nodeId) => {

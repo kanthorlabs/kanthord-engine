@@ -2,11 +2,7 @@ import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
 import { createIdentity } from "../kernel/identity.ts";
 import { testMachineIdentity } from "../kernel/test-identity.ts";
-import {
-  AgentChoiceKind,
-  ClaimNodeState,
-  NodeFormatField,
-} from "./contract.ts";
+import { AgentChoiceKind, ClaimNodeState, ClaimWork } from "./contract.ts";
 import { claimOnce, ClaimOutcome } from "./claim.ts";
 import { insertExecution, readExecution } from "./execution-store.ts";
 import {
@@ -56,7 +52,7 @@ export function claimHarness(
   h.dependencies.bindings.workerBindingOf = () => binding;
   h.dependencies.declarations.declarationOf = () => ({
     declared_node_states: states,
-    required_node_format: Object.values(NodeFormatField),
+    declared_works: Object.values(ClaimWork),
     resource_budget: { wall_time_ms: WALL_TIME },
   });
   h.dependencies.transitions.claim = (
@@ -182,6 +178,21 @@ test("health, tombstones, zero counts and occupied binding counts refuse admissi
     insertExecution(tx, executionFixture({ project_id: h.row.project_id })),
   );
   assert.equal(h.claim().outcome, ClaimOutcome.None);
+  assert.deepEqual(
+    h.calls.filter((call) => call.method === CLAIM_METHOD),
+    [],
+  );
+});
+
+test("a worker name with no declaration answers no work and asserts nothing", (t) => {
+  const h = claimHarness(t);
+  h.store.transaction((tx) =>
+    h.service.insert(tx, h.row.node_id, h.row.project_id, 0),
+  );
+  h.dependencies.declarations.declarationOf = () => null;
+  const result = h.claim();
+  assert.equal(result.outcome, ClaimOutcome.None);
+  assert.equal(result.row, null);
   assert.deepEqual(
     h.calls.filter((call) => call.method === CLAIM_METHOD),
     [],

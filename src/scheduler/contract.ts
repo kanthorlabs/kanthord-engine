@@ -37,15 +37,11 @@ export const ClaimNodeState = {
 } as const;
 export const claimNodeStateSchema = z.enum(ClaimNodeState);
 export type ClaimNodeState = z.infer<typeof claimNodeStateSchema>;
-export const NodeFormatField = {
-  Name: "name",
-  Requirement: "requirement",
-  Criterion: "criterion",
-  Verifications: "verifications",
-  Bindings: "bindings",
+export const ClaimWork = {
+  Implement: "implement",
+  Examine: "examine",
 } as const;
-export const nodeFormatFieldSchema = z.enum(NodeFormatField);
-export type NodeFormatField = z.infer<typeof nodeFormatFieldSchema>;
+export type ClaimWork = (typeof ClaimWork)[keyof typeof ClaimWork];
 export const ExecutionStopReason = {
   OperationFailed: "operation_failed",
   JudgementInvalid: "judgement_invalid",
@@ -305,7 +301,7 @@ export interface ProjectPauses {
 export interface WorkerDeclarations {
   declarationOf(workerName: string): {
     declared_node_states: readonly string[];
-    required_node_format: readonly string[];
+    declared_works: readonly ClaimWork[];
     resource_budget: { wall_time_ms: number };
   } | null;
 }

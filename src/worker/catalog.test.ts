@@ -3,7 +3,6 @@ import { test } from "node:test";
 import { getAgentDeclaration } from "../agent/catalog.ts";
 import {
   RELEASED_WORKER_NAMES,
-  REQUIRED_NODE_FORMAT,
   WORKER_CATALOG,
   WorkerHost,
   WorkerMethod,
@@ -11,16 +10,9 @@ import {
   getWorkerDeclaration,
 } from "./catalog.ts";
 
-const requiredNodeFormat = [
-  "name",
-  "requirement",
-  "criterion",
-  "verifications",
-  "bindings",
-];
+const declaredWorks = ["implement", "examine"];
 
 test("static worker declarations", () => {
-  assert.deepEqual(REQUIRED_NODE_FORMAT, requiredNodeFormat);
   assert.deepEqual(Object.keys(WORKER_CATALOG), [
     "coder@1",
     "reviewer@1",
@@ -33,7 +25,7 @@ test("static worker declarations", () => {
     agent_names: ["swe@1"],
     resource_budget: { turns: 200, wall_time_ms: 7200000 },
     declared_node_states: ["Available"],
-    required_node_format: requiredNodeFormat,
+    declared_works: declaredWorks,
   });
   assert.deepEqual(getWorkerDeclaration("reviewer@1"), {
     name: "reviewer@1",
@@ -42,7 +34,7 @@ test("static worker declarations", () => {
     agent_names: ["re@1"],
     resource_budget: { turns: 200, wall_time_ms: 7200000 },
     declared_node_states: ["Waiting", "External.Requested"],
-    required_node_format: requiredNodeFormat,
+    declared_works: declaredWorks,
   });
   assert.deepEqual(getWorkerDeclaration("claude-code@1"), {
     name: "claude-code@1",
@@ -50,7 +42,7 @@ test("static worker declarations", () => {
     harness: "claude-code",
     resource_budget: { wall_time_ms: 7200000 },
     declared_node_states: ["Available", "Waiting", "External.Requested"],
-    required_node_format: requiredNodeFormat,
+    declared_works: declaredWorks,
   });
 });
 
