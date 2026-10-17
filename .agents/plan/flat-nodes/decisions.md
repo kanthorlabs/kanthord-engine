@@ -1,6 +1,6 @@
 # Flat-node plan decisions
 
-The plans cite these decisions as D1 to D29. Each decision binds every plan and every task of this set. A decision records only what the design pages of pull request #87 leave open. A retired decision keeps its identifier and names the page line that now holds the rule.
+The plans cite these decisions as D1 to D30. Each decision binds every plan and every task of this set. A decision records only what the design pages of pull request #87 leave open. A retired decision keeps its identifier and names the page line that now holds the rule.
 
 ## D1 — Source and gaps
 
@@ -165,3 +165,10 @@ RULED 2026-10-17 by Ulrich (R13).
 - Plan 03b adds the failover: the enabled check, the failover on a refused signing call, the failed upload check and the refusal when no binding is left. It starts after plan 03 and merges before plan 08.
 - Ruling R15 (2026-10-17): the table `mission_evidence_upload_failure (node_id, attempt, storage_binding_id, asset_id, failed_at)` keys a failed upload check by `(node_id, attempt, storage_binding_id)`. The grant skips a binding that holds a failure row of the open attempt, and a new attempt tries every binding again. `asset_id` names the asset whose check failed.
 - Ruling R16 (2026-10-17): no binding left answers 409 `mission.evidence.storage_exhausted`. 503 `mission.evidence.storage_unavailable` keeps the meaning "No object storage is wired" (`src/mission/storage-unavailable.ts:5-18`).
+
+## D30 — The node kind of an execution
+
+- `ExecutionSetup.node_kind` holds the kind of the claimed node: `initiative` or `objective` (`src/worker/contract.ts:742`). The worker unit reads the kind from this field alone and infers no kind from the bindings.
+- `MissionCollaborations.nodeKindOf(tx, nodeId)` answers the kind of the node (`src/mission/service.ts:969`). `src/worker/execution-setup.ts:155` fills `node_kind` with it, and `src/apps/server/index.ts:447` wires it.
+- The worker contract declares its own `ExecutionNodeKind` and `NodeKindOf` (`src/worker/contract.ts:423-429`), because a service contract imports no other service.
+- Plan 03 deletes the field and the seam, or replaces them with `work` (task 03.14).
