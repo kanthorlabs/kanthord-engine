@@ -256,17 +256,15 @@ export function evaluationInstruction(
   });
 }
 
-export function reportInstruction(
+export function examineInstruction(
   templates: PromptTemplates,
-  dependencies: unknown,
-  outcomes: unknown,
-  evidence: unknown,
-  verification: Verification | null,
+  input: {
+    repositories: readonly unknown[];
+    verification: Verification | null;
+    dependencies: readonly unknown[];
+    outcomes: unknown;
+    evidence: unknown;
+  },
 ): string {
-  return renderTemplate(templates, PromptTemplate.Report, {
-    dependencies,
-    outcomes,
-    evidence,
-    verification,
-  });
+  return renderTemplate(templates, PromptTemplate.Examine, input);
 }

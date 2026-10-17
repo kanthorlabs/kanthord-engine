@@ -227,7 +227,7 @@ components:
               type: string
             evaluation:
               type: string
-            report:
+            examine:
               type: string
             repair:
               type: string
@@ -243,7 +243,7 @@ components:
             - task-revision
             - criterion-revision
             - evaluation
-            - report
+            - examine
             - repair
             - conflict
           additionalProperties: false

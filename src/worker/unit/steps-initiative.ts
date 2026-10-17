@@ -6,7 +6,7 @@ import {
   type ExecutionRun,
 } from "./execution-run.ts";
 import { readDependencies } from "./node-reads.ts";
-import { reportInstruction } from "./judgement.ts";
+import { examineInstruction } from "./judgement.ts";
 import { renderWorkPrompt } from "../../agent/prompt-composer.ts";
 import { WorkspaceKind, workRepositoriesOf } from "./workspace.ts";
 import type { StepsInput } from "./steps-objective.ts";
@@ -72,13 +72,13 @@ export async function runStepsInitiative(
           });
     await agent.instruct(
       work,
-      reportInstruction(
-        input.setup.templates,
-        current.dependencies,
-        current.outcomes,
-        current.evidence,
+      examineInstruction(input.setup.templates, {
+        repositories: workRepositoriesOf(directory, checkouts),
         verification,
-      ),
+        dependencies: current.dependencies,
+        outcomes: current.outcomes,
+        evidence: current.evidence,
+      }),
     );
     if (agent.budget.exhausted()) return await run.release(true);
     const assessment = agent.lastText();
