@@ -1,10 +1,10 @@
 # Flat-node plan decisions
 
-The plans cite these decisions as D1 to D27. Each decision binds every plan and every task of this set. A decision records only what the design pages of pull request #87 leave open.
+The plans cite these decisions as D1 to D29. Each decision binds every plan and every task of this set. A decision records only what the design pages of pull request #87 leave open. A retired decision keeps its identifier and names the page line that now holds the rule.
 
 ## D1 — Source and gaps
 
-The design pages at root `1283c7f` are the rule. A plan task implements the page as written. A task that meets a gap that no decision below covers writes one `DEBATE:` line in its report with the page line that proves the gap. The main session brings it to Ulrich as one open item. Cross-plan alignment, a split of a task and a one-line fix are plan work, never a gap.
+The design pages at root `6b48a56` are the rule. A plan task implements the page as written. A task that meets a gap that no decision below covers writes one `DEBATE:` line in its report with the page line that proves the gap. The main session brings it to Ulrich as one open item. Cross-plan alignment, a split of a task and a one-line fix are plan work, never a gap.
 
 ## D2 — Schema in place and the database discard
 
@@ -17,25 +17,27 @@ RULED 2026-10-17 by Ulrich: kanthord is not deployed, so the refactor keeps no b
 
 ## D3 — Layer order
 
-The order of `00-index.md` "Plans" binds. Plans 01 and 02 ship an intermediate model: initiatives and objectives exist, tasks are content, and the report semantics read direct dependencies. That model is green and usable through the CLI. No plan adds code that a later plan of the set deletes, except the `kind`-keyed branches that plan 03 replaces by `work`-keyed branches.
+The order of `00-index.md` "Plans" binds. Plans 01 and 02 ship an intermediate model: initiatives and objectives exist, tasks are content, and the initiative reads its direct dependencies and its own repository bindings. That model is green and usable through the CLI. No plan adds code that a later plan of the set deletes, except the `kind`-keyed branches that plan 03 replaces by `work`-keyed branches.
+
+RULED 2026-10-17 by Ulrich (R14): pull request #87 stays open until plan 08. Task 08.1 rebases it on root `main`, merges it after review, and then moves the `engine` and `apps` pointers. Plan 06 copies the fixture from the head of pull request #87. No live `make e2e` runs on the new fixture before plan 08.
 
 ## D4 — Content, task body and the node read
 
 - `Content` holds `name`, `requirement`, `criterion`, `verifications`, `bindings`, `work` and `requires` (plan 03). Before plan 03 it holds the first five.
-- `TaskBody` holds `name`, `requirement`, `criterion`, `verifications` and `bindings`. `bindings` is `[]`; another list answers `mission.node.bindings_invalid` (`mission-service.impl.md:53`).
+- `TaskBody` holds `name`, `requirement`, `criterion`, `verifications` and `bindings`. `bindings` is `[]`; another list answers `mission.node.bindings_invalid` (`mission-service.impl.md:54`).
 - `TaskContent` holds `id: TaskId`, `filename: PlanFileName` and `content: TaskBody`.
-- `Revision.tasks` is a required list. A `report` node and, before plan 03, an initiative hold `[]`.
-- The node read `Node` holds `work` and `requires` at the claim revision (`mission-service.impl.md:488`), and `tasks: TaskContent[]` of the visible revision (decision D9).
-- `NodeCreate`, `NodeUpdate` and `UnblockChange` hold a required `tasks: TaskWrite[]`. `TaskWrite` holds an optional `id: TaskId`, `filename` and `content: TaskBody`.
+- `Revision.tasks` is a required list that accepts `[]` on every write path (`mission-service.impl.md:42`). An `examine` node and, before plan 03, an initiative hold `[]`. An `implement` node with `[]` is its own single work unit (`mission-service.md:45-46`).
+- The node read `Node` holds `work` and `requires` at the claim revision (`mission-service.impl.md:495`), and `tasks: TaskContent[]` of that revision (`mission-service.impl.md:496`).
+- `NodeCreate`, `NodeUpdate` and `UnblockChange` hold a required `tasks: TaskWrite[]` that accepts `[]`. `TaskWrite` holds an optional `id: TaskId`, `filename` and `content: TaskBody`.
   - On `NodeCreate` a `TaskWrite` with an `id` answers `mission.node.content_invalid`. The service mints `task_<ulid>` for each task.
-  - On `NodeUpdate` and `UnblockChange` a `TaskWrite` without an `id` creates a task with a minted identity. An `id` names a current task of the same node, else the write answers `mission.node.content_invalid` (`mission-service.impl.md:68`). A current task that the list omits is removed with `change: retired` (`mission-service.impl.md:609`).
-  - The node API never moves a task. Only an import moves a task (`mission-service.md:188`).
+  - On `NodeUpdate` and `UnblockChange` a `TaskWrite` without an `id` creates a task with a minted identity. An `id` names a current task of the same node, else the write answers `mission.node.content_invalid` (`mission-service.impl.md:69`). A current task that the list omits is removed with `change: retired` (`mission-service.impl.md:617`).
+  - The node API never moves a task. Only an import moves a task (`mission-service.md:187`).
 
 ## D5 — Task identity
 
 - `TASK_IDENTITY_PREFIX = "task"` in `src/mission/contract.ts`. `identitySchema("task")` validates a task identity.
-- `readLastTaskSnapshot` (`src/mission/store.ts:279-293`) becomes `taskOwnerOf(tx, missionId, taskId): { node_id; revision } | null`. It reads the latest revision of any node of the mission that holds the task in `tasks`. The import answers `mission.import.retired_id` for a task identity whose owner revision no longer holds it (`mission-service.impl.md:202`).
-- A plan file `id` with the prefix of the other file form answers `mission.import.plan_invalid` (`mission-service.impl.md:145`). Before plan 03 the form is `kind: task`; from plan 03 on it is `node:`.
+- `readLastTaskSnapshot` (`src/mission/store.ts:279-293`) becomes `taskOwnerOf(tx, missionId, taskId): { node_id; revision } | null`. It reads the latest revision of any node of the mission that holds the task in `tasks`. The import answers `mission.import.retired_id` for a task identity whose owner revision no longer holds it (`mission-service.impl.md:205`).
+- A plan file `id` with the prefix of the other file form answers `mission.import.plan_invalid` (`mission-service.impl.md:147`). Before plan 03 the form is `kind: task`; from plan 03 on it is `node:`.
 
 ## D6 — Edge shape
 
@@ -48,36 +50,29 @@ The order of `00-index.md` "Plans" binds. Plans 01 and 02 ship an intermediate m
 - A node entry: `filename`, `id?`, `work`, `name`, `requirement`, `criterion`, `verifications`, `bindings`, `requires?`, `depends_on?`.
 - A task entry: `filename`, `id?`, `node`, `name`, `requirement`, `criterion`, `verifications`, `bindings`.
 
-An export entry requires `id`. A Markdown export writes `requires` on every node file, also `requires: []`, as the vocabulary example does (`mission-service.vocabulary.md:600-660`).
+An export entry requires `id`. A Markdown export writes `requires` on every node file, also `requires: []`, as the vocabulary example does (`mission-service.vocabulary.md:606-666`).
 
 ## D8 — Removed codes and fields
 
 - Plan 01 removes `mission.node.priority_task` (`src/mission/contract.ts:265`), `mission.node.control_task` (`ControlError.Task`, `src/mission/control.ts:38-43`), the endpoint reason `task_endpoint` (`src/mission/dependency.ts:34-37`), `cli.mission.node.list.kind_state_conflict` (`src/apps/cli/mission.ts:112`) and the documentation row `scheduler.eligibility.node_task` (`docs/cli/scheduler.md:595`).
 - Plan 03 removes `mission.node.create_refused`, `mission.import.kind_changed`, `RevisionWrite.NodeMove`, the operation `mission.node.move`, `EdgeKind`, `NodeKind` and the CLI codes `cli.mission.node.move.invalid_node_id`, `cli.mission.node.list.invalid_kind`, `cli.mission.node.list.invalid_node_id` and `cli.mission.edge.list.invalid_kind`.
-- `TaskChange.MovedIn` and `TaskChange.MovedOut` stay, because an import moves a task (`mission-service.impl.md:606`, `:609`).
+- `TaskChange.MovedIn` and `TaskChange.MovedOut` stay, because an import moves a task (`mission-service.impl.md:614`, `:617`).
 
-## D9 — The node read answers the tasks
+## D9 — Retired
 
-`Node` holds `tasks: TaskContent[]` of its visible revision. `mission-service.impl.md:624` requires a `Tasks (<count>)` section on each `change` node card, and the node read of `:486-488` names no task field. The dashboard reads the card from `node list` with no read per node.
+`mission-service.impl.md:496` holds the rule: the node read answers `tasks`.
 
-## D10 — Binding resolution
+## D10 — Retired
 
-The Mission Service resolves each binding kind on its own (`mission-service.md:72-81`):
+`mission-service.md:73-74` and `mission-service.impl.md:52` hold the rule: a node names every binding that it uses, and no work takes a binding from the project.
 
-1. The bindings of that kind that the write names.
-2. Else, for an existing node, its stored bindings of that kind (`mission-service.md:80`).
-3. Else, when the rule table of the work permits one or more bindings of that kind, the one binding of that kind of the project (`mission-service.md:74-75`). Two or more answer `mission.node.bindings_invalid` (`mission-service.md:78`).
-4. Else no binding.
+## D11 — Retired
 
-Rule 3 is new code. `MissionBindings.projectBindingsOf(tx, projectId, kind)` serves it, and `ProjectService` implements it over `readLatestBinding` rows that are no tombstone. The worker kind is never resolved, because both columns hold 0.
+`mission-service.impl.md:66` holds the rule: the before read and the after read compare pairs by node and claim.
 
-## D11 — Unmatched pair identity
+## D12 — Retired
 
-A pair is `(node_id, claim)`. The before read and the after read of a write compare pairs by that key alone. `revision` is reported in `details.claims` and takes no part in the comparison. A revision that a write creates therefore never turns an existing unmatched pair into an added pair (`scheduler-service.vocabulary.md:58`, `mission-service.md:37`).
-
-## D12 — Import preview coverage
-
-The preview runs the write steps of `applyImport` inside a probe transaction that throws to roll back, as the work pull does (`src/scheduler/work-pull.ts:46-60`). It reads `unmatchedClaims` before and after the probe write. The probe runs only when the three validation stages pass (`mission-service.impl.md:185`). The preview answers one violation `mission.node.requires_unmatched` for each node with an added pair, with `filename` and `node_id` as locators (null `node_id` for a new node) and `details: { claims }`.
+`mission-service.impl.md:191-192` holds the rule: the preview runs the write steps in a probe transaction.
 
 ## D13 — `workerBindingsOf`
 
@@ -94,26 +89,26 @@ The preview runs the write steps of `applyImport` inside a probe transaction tha
 ## D16 — Prompt template variables
 
 - `report.md` takes `dependencies`, `outcomes`, `evidence` and `verification` (`agent.impl.md:280`).
-- `evaluation.md` takes `report` (boolean, replaces `initiative`), `tasks`, `tested_input`, `results`, `evidence`, `dependencies` (replaces `objectives`) and `marker` (`agent.impl.md:279`).
-- The proposal JSON of the evaluation template names `dependency_id` (`mission-service.impl.md:260`).
+- `evaluation.md` takes `examine` (boolean, replaces `initiative`), `tasks`, `tested_input`, `results`, `evidence`, `dependencies` (replaces `objectives`) and `marker` (`agent.impl.md:279`).
+- The proposal JSON of the evaluation template names `dependency_id` (`mission-service.impl.md:263`).
 
 ## D17 — Worker unit names
 
 | Before                                      | After                                     |
 | ------------------------------------------- | ----------------------------------------- |
-| `steps-objective.ts`, `runStepsObjective`   | `steps-change.ts`, `runStepsChange`       |
-| `steps-initiative.ts`, `runStepsInitiative` | `steps-report.ts`, `runStepsReport`       |
+| `steps-objective.ts`, `runStepsObjective`   | `steps-implement.ts`, `runStepsImplement` |
+| `steps-initiative.ts`, `runStepsInitiative` | `steps-examine.ts`, `runStepsExamine`     |
 | `WorkspaceKind.Objective` (`"objective"`)   | `WorkspaceKind.Node` (`"node"`)           |
 | `objectiveKey`, `objectiveDirectory`        | `nodeKey`, `nodeDirectory`                |
-| `prepareObjective`, `prepareInitiative`     | `prepareChange`, `prepareReport`          |
+| `prepareObjective`, `prepareInitiative`     | `prepareImplement`, `prepareExamine`      |
 | `readObjectives`, `ExecutionObjective`      | `readDependencies`, `ExecutionDependency` |
 | `NativeAgentInput.nodeKind`                 | `NativeAgentInput.work`                   |
 
-The workspace path stays `workspaces/<node identity>/<repository binding identity>/` (`worker-service.impl.md:574`).
+The workspace path of an `implement` node stays `workspaces/<node identity>/<repository binding identity>/` until plan 09 (decision D28).
 
 ## D18 — The todoapp fixture copy
 
-`src/apps/server/__fixtures__/todoapp/plan/` of the engine holds a byte copy of the 25 files of `docs/brainstorm/assets/todoapp/plan/`. The engine test reads the copy, because the engine repository holds no root document. `.prettierignore:5` excludes `src/**/__fixtures__/`, so no format step rewrites the copy. Plan 08 adds a root check that fails when the two sets differ, as `scripts/docs/prompts.sh` does for the prompts.
+`src/apps/server/__fixtures__/todoapp/plan/` of the engine holds a byte copy of the 26 files of `docs/brainstorm/assets/todoapp/plan/` at the head of pull request #87 (`origin/design/flat-nodes`). The engine test reads the copy, because the engine repository holds no root document. `.prettierignore:5` excludes `src/**/__fixtures__/`, so no format step rewrites the copy. Plan 08 adds a root check that fails when the two sets differ, as `scripts/docs/prompts.sh` does for the prompts.
 
 ## D19 — Task size and the green state
 
@@ -135,20 +130,35 @@ Each plan writes every code that it adds or removes into the error table of its 
 
 No code implements `scheduler.eligibility.get` or the on-demand request. Plans 01 and 02 change their rows in `docs/cli/scheduler.md` only: the `node_task` code and the conditions `initiative-steps` and `readiness` go away (`scheduler-service.impl.md:80-93`).
 
-## D24 — The coverage write list
+## D24 — The coverage check placement
 
-The coverage check runs in the five node writes that `mission-service.impl.md:65` names: import apply, node create, node update, an unblock with a change and a proposal approval. `node rebind`, `criterion set`, a dependency edit and a retirement run no coverage check.
+`mission-service.impl.md:66` names the node writes that run the coverage check.
 
 The check sits in one function `guardCoverage(tx, dependencies, projectId, write)` of `src/mission/coverage.ts`. Each of the five handlers calls it inside its `caller.commit` closure: the before read, the write, the after read, then the refusal of an added pair. `commitGraph` (`src/mission/service.ts:861-883`) stays as it is, because `node.update` does not use it (`src/mission/service.ts:818-831`).
 
-## D25 — The proposal approval answer
+## D25 — Retired
 
-`mission.proposal.approve` answers `ProposalApproveResult = { created: NodeChange; proposer: ControlResult }`. `created` is the `NodeChange` of the node that the approval creates. `proposer` is the `ControlResult` of the unblock of the proposer (`mission-service.impl.md:303-305`).
+`mission-service.impl.md:307` holds the rule: the approval answers `{ created: NodeChange; proposer: ControlResult }`.
 
-## D26 — The binding cardinality check of the todoapp fixture
+## D26 — Retired
 
-The check "Binding cardinality" of `docs/brainstorm/assets/todoapp/kanthord-checks.md:26` adds a second repository binding to the project before it removes the repository binding from one change node. The expected result stays `mission.node.bindings_invalid` (`mission-service.md:78`). Plan 06 tests this form, and plan 08 writes it into `kanthord-checks.md:26`.
+`docs/brainstorm/assets/todoapp/kanthord-checks.md:26` holds the check, and `mission-service.md:78` holds its refusal. No project binding exists to add.
 
-## D27 — The traits field of the dashboard
+## D27 — Retired
 
-The worker binding form of the dashboard holds a `Traits` field with one key per line, and the worker binding row shows the traits as badges. The draft carries the order of the keys unchanged.
+`project-service.impl.md:331-332` holds the rule: the worker binding form holds the `Traits` field.
+
+## D28 — One repository binding on an `implement` node until plan 09
+
+RULED 2026-10-17 by Ulrich (R13).
+
+- In plans 01 to 08, the repository range of `implement` in the rule table is exactly one. A second repository binding answers `mission.node.bindings_invalid`.
+- An `examine` node names zero or more repository bindings from plan 02 on. It checks out each base-branch head read-only under `checkouts/<binding name>/`.
+- The workspace of an `implement` node stays `workspaces/<node identity>/<repository binding identity>/`, and the worker reads `repositories[0]` for it.
+- Plan 09 lifts the range to one or more. It moves the checkout of an `implement` node to `workspaces/<node identity>/checkouts/<binding name>/` (`worker-service.impl.md:578-582`) and replaces each `repositories[0]` read with a loop.
+
+## D29 — The failed upload check and the storage failover
+
+- Plan 03 owns the storage failover. The rule table of plan 03 admits an ordered list of storage bindings, and a list with two entries breaks the single-match grant of `bindingOf` (`src/mission/evidence-content.ts:61`).
+- The table `mission_evidence_upload_failure (node_id, attempt, storage_binding_id, asset_id, failed_at)` records a failed upload check. Its primary key is `(node_id, attempt, storage_binding_id)`. `asset_id` names the asset whose check failed.
+- The grant skips a storage binding that holds a failure row of the same node and attempt. A new attempt tries every binding again.

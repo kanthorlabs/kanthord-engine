@@ -6,8 +6,10 @@ This plan delivers:
 
 - No task row in `mission_node`. A task exists only in `tasks` of the revision of its owner node.
 - The task identity `task_<ulid>` (decision D5).
-- Task writes through the owner: `NodeCreate.tasks`, `NodeUpdate.tasks`, `UnblockChange.tasks` and the import (decision D4).
-- The node read answers `tasks` of its visible revision (decision D9).
+- Task writes through the owner: `NodeCreate.tasks`, `NodeUpdate.tasks`, `UnblockChange.tasks` and the import (decision D4). An objective, the later `implement` node, holds zero or more tasks on every write path (R7).
+- The import coverage rule applies only to an objective with one or more tasks.
+- An objective with no task is its own single work unit in the worker unit, with the node identity as the judged key.
+- The node read answers `tasks` of its visible revision (`mission-service.impl.md:496`).
 - No `mission.node.priority_task`, no `mission.node.control_task`, no `task_endpoint` reason (decision D8).
 
 Out of scope:
@@ -21,20 +23,22 @@ Opus at medium effort. The task identity in the import (creates, moves, retireme
 
 ## Sources
 
-- `docs/brainstorm/mission-service.md:39-45` — a task is content of its node, with no edge, state, attempt or priority.
-- `docs/brainstorm/mission-service.md:100-106`, `:120` — the priority of a node; the node API update creates, changes and removes tasks.
-- `docs/brainstorm/mission-service.md:164`, `:185-188` — a retirement and the import condition of a task; an import moves a task.
-- `docs/brainstorm/mission-service.md:239-242` — a task holds no revision; its content belongs to the revision of its node.
+- `docs/brainstorm/mission-service.md:40-46` — a task is content of its node, with no edge, state, attempt or priority; zero or more tasks; a node with no task is its own single work unit.
+- `docs/brainstorm/mission-service.md:256` — the import coverage rule applies only to a node with one or more tasks.
+- `docs/brainstorm/worker-service.md:325-329`; `docs/brainstorm/worker-service.impl.md:512`, `:539`, `:562` — the single work unit of a node with no task, its judged key and its tests.
+- `docs/brainstorm/mission-service.md:99-105`, `:119` — the priority of a node; the node API update creates, changes and removes tasks.
+- `docs/brainstorm/mission-service.md:163`, `:184-187` — a retirement and the import condition of a task; an import moves a task.
+- `docs/brainstorm/mission-service.md:238-241` — a task holds no revision; its content belongs to the revision of its node.
 - `docs/brainstorm/mission-service.impl.md:17` — `task_<ulid>`; no task identity takes `node_`.
-- `docs/brainstorm/mission-service.impl.md:42`, `:53`, `:68` — `tasks` of a node; a task names no binding; a task of another node answers `mission.node.content_invalid`.
-- `docs/brainstorm/mission-service.impl.md:79` — a task holds no priority.
-- `docs/brainstorm/mission-service.impl.md:136-139`, `:145` — the task file `id` and the prefix refusal.
-- `docs/brainstorm/mission-service.impl.md:159` — a task file name is unique among the node and task file names.
-- `docs/brainstorm/mission-service.impl.md:183` — the import result maps each task file name to its task identity.
-- `docs/brainstorm/mission-service.impl.md:202` — the identity of a removed task answers `mission.import.retired_id`.
-- `docs/brainstorm/mission-service.impl.md:606-609` — `change.tasks` and the task changes.
-- `docs/brainstorm/mission-service.impl.md:748`, `:812` — the tests of a foreign task, a task binding list, a removed task and the minted identity.
-- `docs/brainstorm/mission-service.vocabulary.md:413-430` — the content owner.
+- `docs/brainstorm/mission-service.impl.md:42`, `:54`, `:69` — `tasks` of a node; a task names no binding; a task of another node answers `mission.node.content_invalid`.
+- `docs/brainstorm/mission-service.impl.md:80` — a task holds no priority.
+- `docs/brainstorm/mission-service.impl.md:138-141`, `:147` — the task file `id` and the prefix refusal.
+- `docs/brainstorm/mission-service.impl.md:161` — a task file name is unique among the node and task file names.
+- `docs/brainstorm/mission-service.impl.md:185` — the import result maps each task file name to its task identity.
+- `docs/brainstorm/mission-service.impl.md:205` — the identity of a removed task answers `mission.import.retired_id`.
+- `docs/brainstorm/mission-service.impl.md:614-617` — `change.tasks` and the task changes.
+- `docs/brainstorm/mission-service.impl.md:756`, `:825` — the tests of a foreign task, a task binding list, a removed task and the minted identity.
+- `docs/brainstorm/mission-service.vocabulary.md:419-436` — the content owner.
 - `docs/brainstorm/scheduler-service.md:110` — a task is never a unit of scheduling.
 
 ## Depends on
@@ -56,10 +60,10 @@ Opus at medium effort. The task identity in the import (creates, moves, retireme
 
 - Files: `src/mission/migrations.ts` (edit), `src/apps/server/migrations.test.ts` (edit)
 - Do:
-  1. In `createMissionTables` (`src/mission/migrations.ts:11-22`) change `state TEXT` to `state TEXT NOT NULL` and `attempt INTEGER` to `attempt INTEGER NOT NULL`. Keep `priority INTEGER` nullable, because an absent priority reads 0 (`mission-service.impl.md:81`).
+  1. In `createMissionTables` (`src/mission/migrations.ts:11-22`) change `state TEXT` to `state TEXT NOT NULL` and `attempt INTEGER` to `attempt INTEGER NOT NULL`. Keep `priority INTEGER` nullable, because an absent priority reads 0 (`mission-service.impl.md:82`).
   2. Edit no other migration (decision D2).
   3. Assert both `NOT NULL` flags through `PRAGMA table_info(mission_node)` in `src/apps/server/migrations.test.ts`.
-- Cite: `mission-service.md:41`; decision D2.
+- Cite: `mission-service.md:42`; decision D2.
 - Verify: `node --test --test-timeout=30000 src/apps/server/migrations.test.ts`.
 
 ### 01.2 Declare the task identity and the task schemas
@@ -76,7 +80,7 @@ Opus at medium effort. The task identity in the import (creates, moves, retireme
   8. Delete the refine `kind !== Task || state === undefined` of the `node.list` query (`:1998`).
   9. Delete `MissionErrorCode.PriorityTask` (`:265`).
   10. Assert each schema in `src/mission/contract.test.ts`: a `node_` task identity fails, a task body with a binding fails, a `NodeCreate` without `tasks` fails.
-- Cite: `mission-service.impl.md:17`, `:42`, `:53`; decisions D4, D5, D8, D9.
+- Cite: `mission-service.impl.md:17`, `:42`, `:54`; decisions D4, D5, D8; `mission-service.impl.md:496`.
 - Verify: `node --test --test-timeout=30000 src/mission/contract.test.ts`.
 
 ### 01.3 Remove the task row from the store and the guards
@@ -89,7 +93,7 @@ Opus at medium effort. The task identity in the import (creates, moves, retireme
   4. Delete `ControlError.Task` and `requireRunnable` task branch (`src/mission/control.ts:38-55`).
   5. Delete `EndpointReason.Task` and its check (`src/mission/dependency.ts:34-54`). `validateEndpoints` keeps `cross_mission`.
   6. Delete the task filter of `validateCycle` (`src/mission/dependency.ts:56-84`).
-- Cite: `mission-service.md:41-43`, `:93`, `:750`; `scheduler-service.md:110`; decision D8.
+- Cite: `mission-service.md:42-44`, `:92`, `:764`; `scheduler-service.md:110`; decision D8.
 - Verify: `node --test --test-timeout=30000 src/mission/transitions.test.ts src/mission/control.test.ts src/mission/conditions.test.ts src/mission/record-store.test.ts`.
 
 ### 01.4 Write the tasks through node create
@@ -98,12 +102,12 @@ Opus at medium effort. The task identity in the import (creates, moves, retireme
 - Do:
   1. Delete the task branch of `createdRevision` (`src/mission/node-create.ts:153-211`) and the `Task` row of `requireParent` (`:62-122`). An objective names an initiative parent; an initiative names none.
   2. Mint `task_<ulid>` for each `TaskWrite` of `NodeCreate.tasks`. A `TaskWrite` with an `id` answers `mission.node.content_invalid` (decision D4).
-  3. Validate each task body with `validateNodeContent` and refuse a nonempty task `bindings` list with `mission.node.bindings_invalid` (`mission-service.impl.md:53`).
-  4. An initiative with a nonempty `tasks` list answers `mission.node.content_invalid`.
-  5. Check each task file name against the node and task file names of the current nodes of the mission (`mission-service.impl.md:159-160`); a used name answers `mission.node.filename_conflict`.
-  6. Write `change.tasks` with `created` for each task (`mission-service.impl.md:609`).
+  3. Validate each task body with `validateNodeContent` and refuse a nonempty task `bindings` list with `mission.node.bindings_invalid` (`mission-service.impl.md:54`).
+  4. An initiative with a nonempty `tasks` list answers `mission.node.content_invalid`. An objective accepts `tasks: []` (`mission-service.md:45`).
+  5. Check each task file name against the node and task file names of the current nodes of the mission (`mission-service.impl.md:161-162`); a used name answers `mission.node.filename_conflict`.
+  6. Write `change.tasks` with `created` for each task (`mission-service.impl.md:617`).
   7. Delete the `Task` row of `bindingRules` (`src/mission/content.ts:36-55`).
-- Cite: `mission-service.md:44`, `:120`; `mission-service.impl.md:53`, `:159-160`, `:609`, `:812`; decision D4.
+- Cite: `mission-service.md:45`, `:119`; `mission-service.impl.md:54`, `:161-162`, `:617`, `:825`; decision D4.
 - Verify: a new test in `src/mission/service.test.ts` "node create mints a task identity for each task and writes it in revision 1"; `node --test --test-timeout=30000 src/mission/service.test.ts`.
 
 ### 01.5 Write the tasks through node update and criterion set
@@ -113,7 +117,7 @@ Opus at medium effort. The task identity in the import (creates, moves, retireme
   1. Delete `contentOwner` (`src/mission/node-update.ts:58-73`). Every update names the node itself.
   2. In `updatedRevision` (`:132-186`) diff `NodeUpdate.tasks` against the current tasks: a `TaskWrite` without `id` is `created`, a changed task is `updated` with its `changed_fields`, an omitted task is `retired` with empty `changed_fields`. A task `id` that the current revision does not hold answers `mission.node.content_invalid`.
   3. `setCriterion` (`:268-295`) keeps the task list unchanged.
-- Cite: `mission-service.md:120`; `mission-service.impl.md:68`, `:609`; decision D4.
+- Cite: `mission-service.md:119`; `mission-service.impl.md:69`, `:617`; decision D4.
 - Verify: new tests in `src/mission/service.test.ts` "node update creates, changes and removes tasks" and "node update refuses a task of another node with mission.node.content_invalid".
 
 ### 01.6 Write the tasks through an unblock change
@@ -122,7 +126,7 @@ Opus at medium effort. The task identity in the import (creates, moves, retireme
 - Do:
   1. Delete `renameTasks` (`src/mission/control-unblock.ts:51-74`).
   2. Replace `tasksOfChange` (`:98-139`) by the diff of task 01.5. An initiative with a nonempty list answers `mission.node.content_invalid`.
-- Cite: `mission-service.impl.md:39`, `:68`; decision D4.
+- Cite: `mission-service.impl.md:39`, `:69`; decision D4.
 - Verify: `node --test --test-timeout=30000 src/mission/control-unblock.test.ts` with a case "unblock change adds and removes a task".
 
 ### 01.7 Answer the tasks on the node read
@@ -131,7 +135,7 @@ Opus at medium effort. The task identity in the import (creates, moves, retireme
 - Do:
   1. Delete `ownerId` (`src/mission/node-read.ts:89-93`) and the task branch of `nodeRecord` (`:95-142`). `nodeRecord` answers `tasks` of the visible revision.
   2. Delete the `PriorityTask` refusal of the `node.priority.set` handler (`src/mission/service.ts:760-766`).
-- Cite: `mission-service.md:101`; `mission-service.impl.md:79`; decision D9.
+- Cite: `mission-service.md:100`; `mission-service.impl.md:80`, `:496`.
 - Verify: a test in `src/mission/service.test.ts` "node get answers the tasks of the visible revision".
 
 ### 01.8 Retire a task through its owner alone
@@ -139,8 +143,8 @@ Opus at medium effort. The task identity in the import (creates, moves, retireme
 - Files: `src/mission/node-retire.ts` (edit)
 - Do:
   1. Delete the task branch of `checkRetirement` (`src/mission/node-retire.ts:80-98`), `retireTasks` (`:171-206`) and the task grouping of `retireRows` (`:208-234`).
-  2. The retirement set of `retirementSet` (`:44-78`) holds node rows alone. The tasks leave the work with their node (`mission-service.md:164`).
-- Cite: `mission-service.md:164`; `mission-service.impl.md:553`.
+  2. The retirement set of `retirementSet` (`:44-78`) holds node rows alone. The tasks leave the work with their node (`mission-service.md:163`).
+- Cite: `mission-service.md:163`; `mission-service.impl.md:561`.
 - Verify: `node --test --test-timeout=30000 src/mission/service.test.ts` with the case "node retire of an objective keeps its tasks in its last revision".
 
 ### 01.9 Map the task plan files onto content in the import and the export
@@ -150,12 +154,13 @@ Opus at medium effort. The task identity in the import (creates, moves, retireme
   1. A task entry (still `kind: task` with `parent:`) takes an `id` with the prefix `task`; a node entry takes `node`. Another prefix answers `mission.import.plan_invalid` (decision D5).
   2. `resolveIdentity` (`src/mission/import.ts:268-275`) resolves a task identity with `taskOwnerOf`. An identity that no current owner revision holds answers `mission.import.retired_id`; an unknown identity answers `mission.import.unknown_id`.
   3. `assignIdentities` and `writeNodes` (`src/mission/import-apply.ts:99`, `:212-242`) insert no row for a task entry and mint `task_<ulid>` for a new task.
-  4. `taskList` (`src/mission/import-revisions.ts:60-108`) keeps `created`, `updated`, `moved-in`, `moved-out` and `retired`. A moved task revises both owners with `write: import` (`mission-service.impl.md:606`).
-  5. `checkImportCondition` (`src/mission/import.ts:619-660`) reads the condition of the old owner and of the new owner of a moved task (`mission-service.md:188`).
-  6. The import result maps each task file name to its task identity (`mission-service.impl.md:183`).
-  7. `exportEntry` (`src/mission/export.ts:35-67`) writes a task entry from the owner revision with its `task_` identity.
-- Cite: `mission-service.md:185-188`; `mission-service.impl.md:145`, `:183`, `:202`, `:606`.
-- Verify: `node --test --test-timeout=30000 src/mission/import.test.ts src/mission/parser.test.ts` with the cases "import mints task identities", "import refuses a node prefix on a task file", "import refuses a removed task identity with mission.import.retired_id", and "export and import round trip keeps every task identity".
+  4. `taskList` (`src/mission/import-revisions.ts:60-108`) keeps `created`, `updated`, `moved-in`, `moved-out` and `retired`. A moved task revises both owners with `write: import` (`mission-service.impl.md:614`).
+  5. `checkImportCondition` (`src/mission/import.ts:619-660`) reads the condition of the old owner and of the new owner of a moved task (`mission-service.md:187`).
+  6. The import result maps each task file name to its task identity (`mission-service.impl.md:185`).
+  7. `checkVerificationCoverage` (`src/mission/import.ts:352-373`) skips an objective with no task file in the import set (`mission-service.md:256`, `mission-service.impl.md:190`).
+  8. `exportEntry` (`src/mission/export.ts:35-67`) writes a task entry from the owner revision with its `task_` identity.
+- Cite: `mission-service.md:184-187`; `mission-service.impl.md:147`, `:185`, `:205`, `:614`.
+- Verify: `node --test --test-timeout=30000 src/mission/import.test.ts src/mission/parser.test.ts` with the cases "import mints task identities", "import refuses a node prefix on a task file", "import refuses a removed task identity with mission.import.retired_id", and "export and import round trip keeps every task identity" and "import accepts an objective with no task file".
 
 ### 01.10 Update the colocated Mission tests
 
@@ -214,6 +219,18 @@ Opus at medium effort. The task identity in the import (creates, moves, retireme
 - Cite: root `AGENTS.md:107-108`; decisions D8, D22, D23.
 - Verify: `pnpm exec prettier --check docs/cli/mission.md docs/cli/scheduler.md`.
 
+### 01.16 Run an objective with no task as one work unit
+
+- Files: `src/worker/unit/steps-objective.ts`, `src/worker/unit/judged-tasks.ts`, `src/worker/unit/evaluation.ts`, `src/worker/unit/steps-objective-check.test.ts`, `src/worker/unit/steps-objective.test.ts` (edit)
+- Do:
+  1. Add `workUnitsOf(nodeId, revision)` in `src/worker/unit/steps-objective.ts`. It answers the tasks of the revision, or one unit `{ id: <node identity>, filename, content }` from the node content when the revision holds no task.
+  2. `startCheck` (`:587-620`), the task loop (`:498-536`) and the verification of a unit (`:455-497`) read `workUnitsOf`. The single unit runs the node verifications and judges the node criterion.
+  3. `recordJudged` and `judgedAt` (`src/worker/unit/judged-tasks.ts:28-50`) take the node identity as the key of the single unit.
+  4. The task choice (`:568-585`) sends no `task-choice` instruction for the single unit. The unit stays pending with the failure text (`worker-service.impl.md:539`).
+  5. The evaluation of an objective with no task judges the node criterion alone.
+- Cite: `mission-service.md:45-46`; `worker-service.md:325-329`; `worker-service.impl.md:512`, `:539`, `:562`.
+- Verify: `node --test --test-timeout=30000 src/worker/unit/steps-objective.test.ts src/worker/unit/steps-objective-check.test.ts` with "an objective with no task runs the node verifications under the node identity as the judged key" and "a failed node verification sends no task-choice instruction".
+
 ### 01.E Run the gate
 
 - Do: run the gate row 01 of `00-index.md`.
@@ -223,13 +240,14 @@ Opus at medium effort. The task identity in the import (creates, moves, retireme
 
 The E2E suites of task 01.12 prove the plan through the CLI. `e2e-mission-service.test.ts` adds these rows:
 
-| Id     | Commands                                                                                                  | Exit | Expect                                                                                               |
-| ------ | --------------------------------------------------------------------------------------------------------- | ---- | ---------------------------------------------------------------------------------------------------- |
-| EF01.1 | `kanthord mission node create <missionId> --file objective.json` with two `tasks` without `id`            | 0    | `revisions[0].tasks[*].id` match `^task_[0-9A-HJKMNP-TV-Z]{26}$`; `change.tasks[*].change` `created` |
-| EF01.2 | `kanthord mission node get <objectiveId>`                                                                 | 0    | `tasks` holds both tasks                                                                             |
-| EF01.3 | `kanthord mission node update <objectiveId> --file update.json` that omits the first task                 | 0    | `change.tasks` holds `{ id: <first>, change: "retired", changed_fields: [] }`                        |
-| EF01.4 | `kanthord mission node get <taskId>`                                                                      | 1    | stderr starts with `cli.mission.node.get.invalid_node_id:`                                           |
-| EF01.5 | `kanthord mission export <missionId> --format json`, then `kanthord mission import apply` of that payload | 0, 0 | the same task identities, no new revision                                                            |
+| Id     | Commands                                                                                                                                                    | Exit | Expect                                                                                               |
+| ------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | ---- | ---------------------------------------------------------------------------------------------------- |
+| EF01.1 | `kanthord mission node create <missionId> --file objective.json` with two `tasks` without `id`                                                              | 0    | `revisions[0].tasks[*].id` match `^task_[0-9A-HJKMNP-TV-Z]{26}$`; `change.tasks[*].change` `created` |
+| EF01.2 | `kanthord mission node get <objectiveId>`                                                                                                                   | 0    | `tasks` holds both tasks                                                                             |
+| EF01.3 | `kanthord mission node update <objectiveId> --file update.json` that omits the first task                                                                   | 0    | `change.tasks` holds `{ id: <first>, change: "retired", changed_fields: [] }`                        |
+| EF01.4 | `kanthord mission node get <taskId>`                                                                                                                        | 1    | stderr starts with `cli.mission.node.get.invalid_node_id:`                                           |
+| EF01.5 | `kanthord mission export <missionId> --format json`, then `kanthord mission import apply` of that payload                                                   | 0, 0 | the same task identities, no new revision                                                            |
+| EF01.6 | `kanthord mission node create <missionId> --file objective.json` with `tasks: []`; `kanthord mission import preview` of an objective file with no task file | 0, 0 | the revision holds `tasks: []`; the preview holds no `mission.import.verification_uncovered`         |
 
 ## Blockers
 

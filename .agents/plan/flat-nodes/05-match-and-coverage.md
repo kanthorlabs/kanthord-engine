@@ -27,14 +27,14 @@ Opus at medium effort. The plan wires a collaboration cycle between three servic
 - `docs/brainstorm/scheduler-service.impl.md:149-188` — `admits`, `covered`, `unmatchedClaims` and the collaborations.
 - `docs/brainstorm/scheduler-service.impl.md:276-279` — the match tests.
 - `docs/brainstorm/scheduler-service.vocabulary.md:33-68` — the declared works, the match and the unmatched pair.
-- `docs/brainstorm/mission-service.md:34-37` — the requires list and the node write refusal.
-- `docs/brainstorm/mission-service.impl.md:65-67`, `:187`, `:189`, `:307`, `:547`, `:746` — the node write refusal, the import codes, the preview, the proposal refusal, the claim facts and their tests.
-- `docs/brainstorm/project-service.md:98-110` — the traits of a worker binding.
-- `docs/brainstorm/project-service.impl.md:133`, `:172-173`, `:220`, `:226-228`, `:372-373` — the binding-set write, the traits field, `workerBindingsOf` and the tests.
+- `docs/brainstorm/mission-service.md:35-38` — the requires list and the node write refusal.
+- `docs/brainstorm/mission-service.impl.md:66-68`, `:189`, `:191`, `:311`, `:555`, `:754` — the node write refusal, the import codes, the preview, the proposal refusal, the claim facts and their tests.
+- `docs/brainstorm/project-service.md:97-109` — the traits of a worker binding.
+- `docs/brainstorm/project-service.impl.md:133`, `:172-173`, `:220`, `:226-228`, `:374-375` — the binding-set write, the traits field, `workerBindingsOf` and the tests.
 - `docs/brainstorm/project-service.vocabulary.md:43-75` — the trait.
-- `docs/brainstorm/worker-service.md:22`, `:26-32`, `:44`, `:204` — the declarations and the compatibility declarations.
+- `docs/brainstorm/worker-service.md:22`, `:26-32`, `:44`, `:207` — the declarations and the compatibility declarations.
 - `docs/brainstorm/worker-service.impl.md:54-55`, `:95` — `declared_works`, `declarationOf` and the catalog item.
-- `docs/brainstorm/worker-service.vocabulary.md:273-289` — the compatibility declarations and the declared works.
+- `docs/brainstorm/worker-service.vocabulary.md:274-290` — the compatibility declarations and the declared works.
 - `docs/brainstorm/architecture.md:203-205`; `docs/brainstorm/architecture.impl.md:686-689` — the collaborations and the co-location.
 
 ## Depends on
@@ -55,18 +55,18 @@ The seams `claimFacts`, `claimFactsOf`, `workerBindingsOf` with `traits`, `worke
   2. `validateWorker` (`src/project/service.ts:954-999`) refuses a nonlist value, a repeated key and a key that fails `traitKeySchema` of `src/kernel/trait.ts` with 400 `project.bindings.worker.traits_invalid` and `details: { binding, trait }`. Add the code to `ProjectErrorCode` (`src/project/contract.ts:92-113`).
   3. `WorkerBindingRow` (`src/project/contract.ts:829-841`) and `workerBindingOf` (`src/project/service.ts:1175-1200`) answer `traits: config.traits ?? []`. `workerBindingsOf` (`:1201-1225`) answers `traits` on each row (decision D13).
   4. A change of `traits` creates the next revision through the canonical comparison of `classify` (`src/project/store.ts:420-467`). A test asserts the new revision.
-- Cite: `project-service.md:99-105`; `project-service.impl.md:172-173`, `:220`, `:226-228`, `:372`.
-- Verify: `node --test --test-timeout=30000 src/project/service.test.ts` with the cases of `project-service.impl.md:372`.
+- Cite: `project-service.md:98-104`; `project-service.impl.md:172-173`, `:220`, `:226-228`, `:374`.
+- Verify: `node --test --test-timeout=30000 src/project/service.test.ts` with the cases of `project-service.impl.md:374`.
 
 ### 05.2 Declare the works of each worker
 
 - Files: `src/worker/catalog.ts`, `src/worker/contract.ts`, `src/worker/service.ts`, `src/worker/catalog.test.ts`, `src/worker/service.test.ts` (edit)
 - Do:
   1. Delete `REQUIRED_NODE_FORMAT` (`src/worker/catalog.ts:8-14`) and `required_node_format` (`:24`, `:42`, `:51`, `:59`, `:90-97`).
-  2. Add `declared_works: [Work.Change, Work.Report]` to `coder@1`, `reviewer@1` and `claude-code@1` (`:34-61`).
+  2. Add `declared_works: [Work.Implement, Work.Examine]` to `coder@1`, `reviewer@1` and `claude-code@1` (`:34-61`).
   3. `catalogItemSchema` (`src/worker/contract.ts:691-696`) and `catalogEntrySchema` (`:746-758`) answer `declared_works`.
   4. `declarationOf` (`src/worker/service.ts:454-462`) answers `null` for a name that the registry does not hold (decision D14).
-- Cite: `worker-service.impl.md:54-55`, `:95`; `worker-service.vocabulary.md:279-289`.
+- Cite: `worker-service.impl.md:54-55`, `:95`; `worker-service.vocabulary.md:280-290`.
 - Verify: `node --test --test-timeout=30000 src/worker/catalog.test.ts src/worker/service.test.ts`.
 
 ### 05.3 Offer the claim facts of the Mission Service
@@ -76,7 +76,7 @@ The seams `claimFacts`, `claimFactsOf`, `workerBindingsOf` with `traits`, `worke
   1. `claimFacts(tx, nodeId)` answers `{ work, requires }` at the revision that the open attempt pins, else the current revision, and `null` for an absent, retired or terminal node.
   2. `claimFactsOf(tx, projectId)` answers one row for the current revision of each node that is not terminal and not retired, and one more row when the open attempt pins another revision. `claims` holds `Available` and `Waiting`, and `External.Requested` when `requiredActionsOf` of that revision is nonempty.
   3. Add both to `MissionCollaborations` (`src/mission/contract.ts:83-86`) and to `MissionService` after `liveNodesPinning` (`src/mission/service.ts:890-892`). Neither writes a record.
-- Cite: `mission-service.impl.md:547`; `scheduler-service.md:253-258`; `scheduler-service.impl.md:178`, `:184-185`.
+- Cite: `mission-service.impl.md:555`; `scheduler-service.md:253-258`; `scheduler-service.impl.md:178`, `:184-185`.
 - Verify: `node --test --test-timeout=30000 src/mission/claim-facts.test.ts` with "a node with a pull request action claims External.Requested", "an open attempt adds its pinned revision", "a terminal node answers no row".
 
 ### 05.4 Implement the match in the Scheduler Service
@@ -88,7 +88,7 @@ The seams `claimFacts`, `claimFactsOf`, `workerBindingsOf` with `traits`, `worke
   3. `claimOnce` (`src/scheduler/claim.ts:142-199`): a `null` declaration answers `ClaimOutcome.None` (`:170`). Delete both `required_node_format` asserts (`:54-58`, `:171-175`).
   4. `acquire` (`:88-140`) passes the claimant `{ declared_node_states, declared_works, traits }` to `selectJob`. `selectJob` (`:45-86`) calls `claimFacts` for each job and skips a job that the claimant does not admit, before `transitions.claim` (`:71-82`).
   5. `SchedulerService` offers `unmatchedClaims(tx, projectId)` in its collaboration block (`src/scheduler/service.ts:159-225`). Add `facts: MissionClaimFacts` to `Dependencies` (`:126-138`).
-- Cite: `scheduler-service.md:235-259`; `scheduler-service.impl.md:149-188`; decisions D11, D14.
+- Cite: `scheduler-service.md:235-259`; `scheduler-service.impl.md:149-188`; decision D14; `mission-service.impl.md:66`.
 - Verify: `node --test --test-timeout=30000 src/scheduler/match.test.ts src/scheduler/claim.test.ts src/scheduler/work-pull.test.ts` with the tests of `scheduler-service.impl.md:276-279`.
 
 ### 05.5 Wire the collaborations
@@ -107,19 +107,19 @@ The seams `claimFacts`, `claimFactsOf`, `workerBindingsOf` with `traits`, `worke
 - Files: `src/mission/coverage.ts` (create), `src/mission/coverage.test.ts` (create), `src/mission/contract.ts`, `src/mission/service.ts` (edit)
 - Do:
   1. Add `MissionErrorCode.RequiresUnmatched = "mission.node.requires_unmatched"` and the dependency type `SchedulerMatch.unmatchedClaims` (`src/mission/contract.ts:88-101`).
-  2. `guardCoverage(tx, dependencies, projectId, write)` reads `unmatchedClaims`, runs `write(tx)`, reads `unmatchedClaims` again, and throws 409 `mission.node.requires_unmatched` with `details: { claims }` for each pair of the after read whose `(node_id, claim)` the before read lacks (decisions D11, D24).
+  2. `guardCoverage(tx, dependencies, projectId, write)` reads `unmatchedClaims`, runs `write(tx)`, reads `unmatchedClaims` again, and throws 409 `mission.node.requires_unmatched` with `details: { claims }` for each pair of the after read whose `(node_id, claim)` the before read lacks (decision D24; `mission-service.impl.md:66`).
   3. Call it inside the commit closure of `import.apply` (`src/mission/service.ts:591-606`), `node.create` (`:832-846`), `node.update` (`:818-831`), `node.unblock` with a change (`:483-496`) and `proposal.approve` (`:469-482`).
-- Cite: `mission-service.md:36-37`; `mission-service.impl.md:65-67`, `:307`, `:746`; `architecture.impl.md:687`.
+- Cite: `mission-service.md:37-38`; `mission-service.impl.md:66-68`, `:311`, `:754`; `architecture.impl.md:687`.
 - Verify: `node --test --test-timeout=30000 src/mission/coverage.test.ts` with "a node create with requires [platform.macos] and no such trait answers mission.node.requires_unmatched and writes nothing" and "an update of a node with an existing unmatched pair succeeds".
 
 ### 05.7 Report the unmatched pairs in the import preview
 
 - Files: `src/mission/import.ts`, `src/mission/import-apply.ts`, `src/mission/service.ts`, `src/mission/import.test.ts` (edit)
 - Do:
-  1. When the three validation stages pass, the preview runs the write steps of `applyImport` (`src/mission/import-apply.ts:271-350`) in a probe transaction that throws to roll back (decision D12).
+  1. When the three validation stages pass, the preview runs the write steps of `applyImport` (`src/mission/import-apply.ts:271-350`) in a probe transaction that throws to roll back (`mission-service.impl.md:192`).
   2. The preview answers one violation `mission.node.requires_unmatched` for each node with an added pair, with `filename`, `node_id` and `details: { claims }`. The preview writes nothing.
   3. The apply answers 409 `mission.node.requires_unmatched` through task 05.6.
-- Cite: `mission-service.impl.md:185`, `:187`, `:189`; `scheduler-service.md:265`; decision D12.
+- Cite: `mission-service.impl.md:187`, `:189`, `:191-192`; `scheduler-service.md:265`.
 - Verify: `node --test --test-timeout=30000 src/mission/import.test.ts` with "preview reports the unmatched pairs and leaves the mission version unchanged".
 
 ### 05.8 Refuse a binding-set write that adds an unmatched pair
@@ -127,8 +127,8 @@ The seams `claimFacts`, `claimFactsOf`, `workerBindingsOf` with `traits`, `worke
 - Files: `src/project/contract.ts`, `src/project/service.ts`, `src/project/service.test.ts` (edit)
 - Do:
   1. Add `ProjectErrorCode.WorkerNodeUnmatched = "project.bindings.worker.node_unmatched"` and the dependency `unmatchedClaims` to `Dependencies` (`src/project/service.ts:297-316`).
-  2. In `writeBindings` (`:756-793`) read `unmatchedClaims` after `validateBinding` (`:774-775`) and again after `endUnavailableRegistrations` (`:777`). An added pair refuses the write with 409 and `details: { node_ids }` (decision D11). The refusal writes no row.
-- Cite: `project-service.md:107-110`; `project-service.impl.md:133`, `:373`.
+  2. In `writeBindings` (`:756-793`) read `unmatchedClaims` after `validateBinding` (`:774-775`) and again after `endUnavailableRegistrations` (`:777`). An added pair refuses the write with 409 and `details: { node_ids }` (`mission-service.impl.md:66`). The refusal writes no row.
+- Cite: `project-service.md:106-109`; `project-service.impl.md:133`, `:375`.
 - Verify: `node --test --test-timeout=30000 src/project/service.test.ts` with "a binding set without the only macOS reviewer answers project.bindings.worker.node_unmatched" and "a write that keeps an earlier unmatched pair succeeds".
 
 ### 05.9 Give every colocated test its stand-ins
@@ -136,7 +136,7 @@ The seams `claimFacts`, `claimFactsOf`, `workerBindingsOf` with `traits`, `worke
 - Files: `src/mission/test-support.ts`, `src/scheduler/test-support.ts`, `src/project/*.test.ts`, `src/scheduler/claim.test.ts`, `src/scheduler/work-pull.test.ts`, `src/scheduler/settlement.test.ts`, `src/worker/catalog.test.ts` (edit)
 - Do:
   1. The default Mission and Project dependencies answer `unmatchedClaims: () => []` (decision D15).
-  2. The default Scheduler dependencies answer `claimFacts` with `{ work: "change", requires: [] }` and `claimFactsOf` with `[]` (`src/scheduler/test-support.ts:68-127`).
+  2. The default Scheduler dependencies answer `claimFacts` with `{ work: "implement", requires: [] }` and `claimFactsOf` with `[]` (`src/scheduler/test-support.ts:68-127`).
   3. The binding fixtures of `claim.test.ts:49-61` and `work-pull.test.ts:43-53` add `traits` and `declared_works` and drop `required_node_format`.
 - Cite: decision D15.
 - Verify: `node --test --test-timeout=30000 'src/scheduler/*.test.ts' 'src/project/*.test.ts' 'src/worker/*.test.ts' 'src/mission/*.test.ts'`.
@@ -148,7 +148,7 @@ The seams `claimFacts`, `claimFactsOf`, `workerBindingsOf` with `traits`, `worke
   1. Export `COVERING_WORKER_BINDINGS` from `src/apps/server/test-support.ts` (decision D15).
   2. Each setup applies them in its binding set before its first node write. A setup that already names `coder@1` and `reviewer@1` bindings keeps its own bindings.
   3. `e2e-worker-registration.test.ts:251` asserts `declared_works` instead of `required_node_format`.
-- Cite: `project-service.md:110`; `docs/brainstorm/assets/todoapp/README.md:56`; decision D15.
+- Cite: `project-service.md:109`; `docs/brainstorm/assets/todoapp/README.md:58`; decision D15.
 - Verify: `node --test --test-timeout=60000 'src/apps/server/*.test.ts'`.
 
 ### 05.11 Prove the match end to end
@@ -196,14 +196,14 @@ Setup, in order (each command exits 0):
 
 | Id     | Commands                                                                                                                                                                                  | Exit | Expect                                                                                                   |
 | ------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---- | -------------------------------------------------------------------------------------------------------- |
-| EF05.1 | `kanthord mission node create <missionId> --file ios.json` with `work: change`, `requires: ["platform.macos"]`                                                                            | 1    | stderr starts with `mission.node.requires_unmatched:`; `node list` holds no node                         |
+| EF05.1 | `kanthord mission node create <missionId> --file ios.json` with `work: implement`, `requires: ["platform.macos"]`                                                                         | 1    | stderr starts with `mission.node.requires_unmatched:`; `node list` holds no node                         |
 | EF05.2 | `binding apply` that adds `macos-coder` (`coder@1`, `traits: ["platform.macos", "toolchain.xcode"]`) and `macos-reviewer` (`reviewer@1`, `traits: ["platform.macos"]`); then EF05.1 again | 0, 0 | the node exists                                                                                          |
 | EF05.3 | `binding apply` that omits `macos-reviewer`                                                                                                                                               | 1    | stderr starts with `project.bindings.worker.node_unmatched:`; the binding-set version is unchanged       |
 | EF05.4 | `binding apply` with the trait `platform.macOS`                                                                                                                                           | 1    | stderr starts with `project.bindings.worker.traits_invalid:`                                             |
 | EF05.5 | A work pull of a `linux-coder` instance                                                                                                                                                   | 0    | `kind` `no-work`; the node stays `Available` with its job                                                |
 | EF05.6 | A work pull of a `macos-coder` instance                                                                                                                                                   | 0    | `kind` `claimed`, `execution.node_id` = the node                                                         |
 | EF05.7 | `kanthord mission import preview` of an export of the mission with `requires: ["platform.linux"]` on the node                                                                             | 0    | one violation `mission.node.requires_unmatched` with `details.claims`; the mission version stays `M + 1` |
-| EF05.8 | `kanthord worker catalog list`                                                                                                                                                            | 0    | each item holds `declared_works` `["change", "report"]` and no `required_node_format`                    |
+| EF05.8 | `kanthord worker catalog list`                                                                                                                                                            | 0    | each item holds `declared_works` `["implement", "examine"]` and no `required_node_format`                |
 
 ## Blockers
 
