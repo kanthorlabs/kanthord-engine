@@ -450,7 +450,6 @@ components:
                       - import
                       - node.create
                       - node.update
-                      - node.retire
                       - node.rebind
                       - criterion.set
                       - unblock

@@ -181,7 +181,10 @@ export function importRevisions(
 ): Revision[] {
   assert.equal(resolved.violations.length, NO_VIOLATIONS);
   assert.equal(entries.length, resolved.resolved_entries.length);
-  const owners = new Set(resolved.current_nodes.keys());
+  const retiring = new Set(resolved.retirements);
+  const owners = new Set(
+    [...resolved.current_nodes.keys()].filter((id) => !retiring.has(id)),
+  );
   const byId = new Map(entries.map((item) => [item.key, item]));
   for (const item of entries) {
     if (!isTaskEntry(item.entry)) owners.add(item.key);
