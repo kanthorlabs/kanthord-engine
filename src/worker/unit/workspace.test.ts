@@ -161,13 +161,16 @@ test("workspace preparation refreshes implement branches and creates disposable 
   assert.equal(second.directory, first.directory);
   assert.equal(second.head, pushed);
   workspace.release(workspace.nodeKey(nodeId), WorkspaceKind.Node);
-  const snapshot = await workspace.prepareSnapshot({
+  const snapshot = await workspace.prepareSnapshots({
     ...common,
     executionId: createIdentity("execution"),
-    repository,
+    snapshots: [{ repository, commit: pushed }],
+  });
+  assert.deepEqual(snapshot.tested_input, {
+    kind: "repository",
+    binding_id: repository.binding_id,
     commit: pushed,
   });
-  assert.equal(snapshot.head, pushed);
   assert.equal(
     snapshot.directory,
     join(snapshot.key, CHECKOUTS_DIRECTORY, repository.name),
@@ -301,11 +304,10 @@ test("a drifted SSH identity stops every workspace preparation before its git op
     (error) => error === drift,
   );
   await assert.rejects(
-    workspace.prepareSnapshot({
+    workspace.prepareSnapshots({
       ...common,
       executionId: createIdentity("execution"),
-      repository,
-      commit: "head",
+      snapshots: [{ repository, commit: "head" }],
     }),
     (error) => error === drift,
   );

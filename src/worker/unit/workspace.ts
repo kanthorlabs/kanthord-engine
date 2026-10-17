@@ -159,40 +159,29 @@ export class WorkspaceRoot {
       throw error;
     }
   }
-  async prepareSnapshot(
+  async prepareSnapshots(
     input: Preparation & {
       executionId: string;
-      repository: {
-        name: string;
-        address: string;
-        ssh_identity: SshIdentityPin;
-      };
-      commit: string;
+      snapshots: readonly {
+        repository: WorkspaceRepository;
+        commit: string;
+      }[];
     },
-  ): Promise<{ key: string; directory: string; head: string }> {
-    const { directory: key } = this.prepareExecution(input);
-    const end = performance.now() + input.deadlineMs;
-    try {
-      const name = bindingNameSchema.parse(input.repository.name);
-      const directory = join(key, CHECKOUTS_DIRECTORY, name);
-      ensureDirectory(directory);
-      await input.transport.proveSshIdentity(
-        input.repository.ssh_identity,
-        input.context,
-        end - performance.now(),
-      );
-      const head = await input.transport.cloneSnapshot(
-        input.repository.address,
-        input.commit,
-        directory,
-        input.context,
-        end - performance.now(),
-      );
-      return { key, directory, head };
-    } catch (error) {
-      this.release(key, WorkspaceKind.Execution);
-      throw error;
-    }
+  ): Promise<{
+    key: string;
+    directory: string;
+    checkouts: ExamineCheckout[];
+    tested_input: RepositoryAddress | RepositoryAddress[];
+  }> {
+    assert.ok(input.snapshots.length > NO_CHECKOUTS);
+    const prepared = await this.prepareCheckouts(
+      input,
+      input.snapshots.map(({ repository, commit }) => ({
+        repository,
+        ref: commit,
+      })),
+    );
+    return { ...prepared, tested_input: prepared.tested_input! };
   }
   async prepareExamine(
     input: Preparation & {
@@ -205,12 +194,29 @@ export class WorkspaceRoot {
     checkouts: ExamineCheckout[];
     tested_input: RepositoryAddress | RepositoryAddress[] | null;
   }> {
+    return this.prepareCheckouts(
+      input,
+      input.repositories.map((repository) => ({
+        repository,
+        ref: `origin/${repository.strategy.base_branch}`,
+      })),
+    );
+  }
+  private async prepareCheckouts(
+    input: Preparation & { executionId: string },
+    entries: readonly { repository: WorkspaceRepository; ref: string }[],
+  ): Promise<{
+    key: string;
+    directory: string;
+    checkouts: ExamineCheckout[];
+    tested_input: RepositoryAddress | RepositoryAddress[] | null;
+  }> {
     const { directory: key } = this.prepareExecution(input);
     const end = performance.now() + input.deadlineMs;
     const checkouts: ExamineCheckout[] = [];
     const testedInput: RepositoryAddress[] = [];
     try {
-      for (const repository of input.repositories) {
+      for (const { repository, ref } of entries) {
         const name = bindingNameSchema.parse(repository.name);
         const target = join(key, CHECKOUTS_DIRECTORY, name);
         assert.ok(!existsSync(target), "Duplicate repository binding");
@@ -222,7 +228,7 @@ export class WorkspaceRoot {
         );
         const commit = await input.transport.cloneSnapshot(
           repository.address,
-          `origin/${repository.strategy.base_branch}`,
+          ref,
           target,
           input.context,
           end - performance.now(),

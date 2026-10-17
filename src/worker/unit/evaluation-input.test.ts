@@ -24,7 +24,7 @@ import {
   repositorySetup,
   WORKING_LAYER_ALL_ON,
 } from "./test-support.ts";
-import { ExecutionRun } from "./execution-run.ts";
+import { EndReason, ExecutionRun, ExecutionStop } from "./execution-run.ts";
 import { ExecutionWork } from "../contract.ts";
 import {
   CHECKOUTS_DIRECTORY,
@@ -490,4 +490,136 @@ test("an implement snapshot evaluation places the produced evidence outside its 
   assert.deepEqual(prepared.reviewBundle.added_files, [ADDED_FILE]);
   workspaces.release(prepared.key, WorkspaceKind.Execution);
   assert.equal(existsSync(prepared.key), false);
+});
+
+async function snapshotOrigin(state: string, name: string) {
+  const origin = join(state, `${name}-origin`);
+  mkdirSync(origin);
+  const git = simpleGit(origin);
+  await git.raw(["init", "-b", "main"]);
+  const commit = async (file: string) => {
+    writeFileSync(join(origin, file), file);
+    await git.add(file);
+    await git.raw([
+      "-c",
+      "user.name=Test",
+      "-c",
+      "user.email=test@example.invalid",
+      "commit",
+      "-m",
+      file,
+    ]);
+    return (await git.revparse(["HEAD"])).trim();
+  };
+  await commit("base");
+  await git.raw(["checkout", "-b", "node"]);
+  const snapshot = await commit(`${name}.md`);
+  await git.raw(["checkout", "main"]);
+  return {
+    repository: { ...repositorySetup(), name, address: origin },
+    snapshot,
+  };
+}
+
+async function twoBindingEvaluation(t: test.TestContext, names: string[]) {
+  const state = temporary(t);
+  const api = await snapshotOrigin(state, "api");
+  const web = await snapshotOrigin(state, "web");
+  const setup = anthropicSetup({
+    work: ExecutionWork.Implement,
+    repositories: [api.repository, web.repository],
+  });
+  const claim = {
+    execution_id: setup.execution_id,
+    node_id: createIdentity("node"),
+    attempt: 1,
+    pinned_revision: 1,
+    node_branch: "kanthord/node_01ARZ3NDEKTSV4RRFFQ69G5FAA",
+    created_at: Date.now(),
+    expired_at: Date.now() + 60000,
+    trace_id: "trace",
+    root_span_id: "1".repeat(16),
+  };
+  const evidence = [
+    {
+      id: "evidence_1",
+      assets: [api, web]
+        .filter(({ repository }) => names.includes(repository.name))
+        .map(({ repository, snapshot }) => ({
+          id: createIdentity("evidence_asset"),
+          kind: "repository",
+          address: {
+            kind: "repository",
+            binding_id: repository.binding_id,
+            commit: snapshot,
+          },
+        })),
+    },
+  ] as Evidence[];
+  const run = new ExecutionRun({
+    claim,
+    clients: {} as MethodClients,
+    credentials: { release: async () => {} },
+    context: background,
+  });
+  t.after(() => run.dispose());
+  const workspaces = WorkspaceRoot.open(join(state, "workspaces"));
+  const pending = prepareEvaluation(
+    {
+      setup,
+      claim,
+      workspaces,
+      transport: {
+        ...connector,
+        proveSshIdentity: async () => {},
+      } as unknown as RepositoryTransport,
+      env: hostEnvironment(),
+    },
+    run,
+    ExecutionWork.Implement,
+    evidence,
+  );
+  return { pending, workspaces, claim, checkouts: [api, web] };
+}
+
+test("two bindings check out two snapshots and record one tested commit for each", async (t) => {
+  const h = await twoBindingEvaluation(t, ["api", "web"]);
+  const prepared = await h.pending;
+  assert.equal(prepared.directory, join(prepared.key, CHECKOUTS_DIRECTORY));
+  for (const { repository, snapshot } of h.checkouts) {
+    const directory = join(prepared.directory, repository.name);
+    assert.equal(
+      (await simpleGit(directory).revparse(["HEAD"])).trim(),
+      snapshot,
+    );
+    assert.deepEqual((await simpleGit(directory).status()).files, []);
+  }
+  assert.deepEqual(
+    prepared.tested_input,
+    h.checkouts.map(({ repository, snapshot }) => ({
+      kind: "repository",
+      binding_id: repository.binding_id,
+      commit: snapshot,
+    })),
+  );
+  assert.deepEqual(prepared.evidenceIds, ["evidence_1"]);
+  assert.deepEqual(prepared.reviewBundle.added_files, [
+    join("api", "api.md"),
+    join("web", "web.md"),
+  ]);
+  h.workspaces.release(prepared.key, WorkspaceKind.Execution);
+});
+
+test("a snapshot that misses a binding stops with operation_failed", async (t) => {
+  const h = await twoBindingEvaluation(t, ["api"]);
+  await assert.rejects(
+    h.pending,
+    (error) =>
+      error instanceof ExecutionStop &&
+      error.reason === EndReason.OperationFailed,
+  );
+  assert.equal(
+    existsSync(h.workspaces.executionKey(h.claim.execution_id)),
+    false,
+  );
 });
