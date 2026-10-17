@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import type { Transaction } from "../kernel/store.ts";
-import { z } from "zod";
 import { OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import { createIdentity } from "../kernel/identity.ts";
@@ -10,7 +9,6 @@ import {
   NodeState,
   Work,
   AssetKind,
-  MissionBindingKind,
   type Override,
   type RepositoryAddress,
   type HumanAct,
@@ -18,7 +16,9 @@ import {
   type Mission,
 } from "./contract.ts";
 import type { Dependencies } from "./service.ts";
-import { readRevision, type NodeRow } from "./store.ts";
+import type { NodeRow } from "./store.ts";
+import { getRevision } from "./node-read.ts";
+import { requireRepositoryInput } from "./evidence-content.ts";
 import {
   closeAttempt,
   readLandedCommitEvidence,
@@ -46,34 +46,36 @@ const OVERRIDE_STATES = [
   NodeState.ExternalFailed,
 ];
 const BINDING_MISMATCH = "mission.evidence.binding_mismatch";
+const LANDED_COMMIT_FIELD = "landed_commit";
 
 function landedEvidence(
   tx: Transaction,
   dependencies: Dependencies,
   node: NodeRow,
-  address: RepositoryAddress,
+  landed: RepositoryAddress | RepositoryAddress[],
   reason: string,
   actor: HumanActor,
   now: number,
 ): string {
-  const revision = readRevision(tx, node.id, actRevision(tx, node));
-  assert.ok(revision && node.attempt !== null);
-  const pins = z.array(z.string()).parse(JSON.parse(revision.bindings));
-  const binding = dependencies.bindings.getBindingRevision(
-    tx,
-    address.binding_id,
-  );
-  if (
-    revision.work !== Work.Implement ||
-    !pins.includes(address.binding_id) ||
-    binding?.resource_identity.split(":")[0] !== MissionBindingKind.Repository
-  )
+  const revision = getRevision(tx, node.id, actRevision(tx, node));
+  assert.ok(node.attempt !== null);
+  const addresses = Array.isArray(landed) ? landed : [landed];
+  const [first] = addresses;
+  assert.ok(first);
+  if (revision.content.work !== Work.Implement)
     throw new OperationError(
       HttpStatus.BadRequest,
       BINDING_MISMATCH,
       "Landed commit does not name the pinned repository of an implement node.",
-      { binding_id: address.binding_id },
+      { binding_id: first.binding_id },
     );
+  requireRepositoryInput(
+    tx,
+    dependencies.bindings,
+    revision,
+    landed,
+    LANDED_COMMIT_FIELD,
+  );
   const id = createIdentity("evidence");
   insertEvidence(
     tx,
@@ -88,19 +90,17 @@ function landedEvidence(
       provenance: canonicalJSON(actor),
       created_at: now,
     },
-    [
-      {
-        id: createIdentity("evidence_asset"),
-        evidence_id: id,
-        kind: AssetKind.Repository,
-        content: canonicalJSON({
-          binding_id: address.binding_id,
-          commit: address.commit,
-        }),
-        published_at: now,
-        expired_at: null,
-      },
-    ],
+    addresses.map((address) => ({
+      id: createIdentity("evidence_asset"),
+      evidence_id: id,
+      kind: AssetKind.Repository,
+      content: canonicalJSON({
+        binding_id: address.binding_id,
+        commit: address.commit,
+      }),
+      published_at: now,
+      expired_at: null,
+    })),
   );
   return id;
 }

@@ -5,6 +5,7 @@ import { createIdentity } from "../kernel/identity.ts";
 import { testHumanIdentity } from "../kernel/test-identity.ts";
 import {
   AssessmentResult,
+  AssetKind,
   CheckEndState,
   MissionErrorCode,
   NodeState,
@@ -14,6 +15,7 @@ import {
 import { applyEndState } from "./node-check.ts";
 import { outcomeRecord } from "./record-read.ts";
 import {
+  insertEvidence,
   readCurrentOutcome,
   readLandedCommitEvidence,
   readEvidence,
@@ -340,4 +342,58 @@ test("paused nodes keep their state and a concurrent conclusive end state wins",
       NO_LANDED_COMMITS,
     );
   });
+});
+
+test("one other end blocks the node after a sibling landed", async (t) => {
+  const h = await externalRequestHarness(t, IDENTITY, true);
+  const nextId = createIdentity("evidence");
+  h.store.transaction((tx) =>
+    insertEvidence(
+      tx,
+      {
+        id: nextId,
+        node_id: h.node_id,
+        attempt: FIRST_ATTEMPT,
+        subject: "PR",
+        requirement_key: "next.pull_request",
+        end_state: null,
+        verification: null,
+        provenance: JSON.stringify(h.executionActor),
+        created_at: FIRST_ATTEMPT,
+      },
+      [
+        {
+          id: createIdentity("evidence_asset"),
+          evidence_id: nextId,
+          kind: AssetKind.Platform,
+          content: JSON.stringify({
+            ...h.address,
+            resource_identity: "repository:github:owner/next",
+          }),
+          published_at: FIRST_ATTEMPT,
+          expired_at: null,
+        },
+      ],
+    ),
+  );
+  h.dependencies.intakeCheck.check = async (_context, evidenceId) =>
+    evidenceId === h.request.id
+      ? { end_state: CheckEndState.Expected, landed_commits: [COMMIT] }
+      : { end_state: CheckEndState.Other, landed_commits: [] };
+  const answer = await h.invoke("node.check", {
+    params: { node_id: h.node_id },
+    query: {},
+    body: { expected_mission_version: FIRST_MISSION_VERSION },
+  });
+  assert.deepEqual(
+    answer.results.map((result) => result.resolution).sort(),
+    [Resolution.ExpectedEnd, Resolution.OtherEnd].sort(),
+  );
+  assert.equal(h.node().state, NodeState.Blocked);
+  h.store.transaction((tx) =>
+    assert.deepEqual(
+      readLandedCommitEvidence(tx, h.node_id, FIRST_ATTEMPT).length,
+      SINGLE_LANDED_COMMIT,
+    ),
+  );
 });

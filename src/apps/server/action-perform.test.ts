@@ -8,6 +8,7 @@ import { ulid } from "ulid";
 import type { Material } from "../../custody/contract.ts";
 import { directClient } from "../../gateway/index.ts";
 import {
+  CheckEndState,
   IntakeErrorCode,
   OutboundOperation,
   OutboundRequestState,
@@ -21,8 +22,10 @@ import {
   OperationResultType,
   type OperationResult,
 } from "../../kernel/operation.ts";
+import { mintServiceIdentity } from "../../kernel/service-mint.ts";
 import { temporary } from "../../kernel/test-support.ts";
 import {
+  MISSION_SERVICE_NAME,
   MissionErrorCode,
   PlatformAddressKind,
   StartPoint,
@@ -118,14 +121,34 @@ function failed<T>(result: OperationResult<T>, status: number, code: string) {
   assert.equal(result.error.error.code, code);
 }
 
-async function commitOnBranch(t: TestContext, bare: string, branch: string) {
+async function mergeIntoMain(t: TestContext, bare: string, branch: string) {
+  const directory = join(temporary(t), "merge");
+  await simpleGit().clone(bare, directory);
+  const git = simpleGit(directory);
+  await git.addConfig("user.name", "Test Merge");
+  await git.addConfig("user.email", "test_merge@example.invalid");
+  await git.raw(["merge", "--no-ff", "-m", "merge", `origin/${branch}`]);
+  const merge = (await git.revparse(["HEAD"])).trim();
+  writeFileSync(join(directory, "later.md"), "later work\n");
+  await git.add("later.md");
+  await git.commit("later work");
+  await git.push("origin", "main");
+  return merge;
+}
+
+async function commitOnBranch(
+  t: TestContext,
+  bare: string,
+  branch: string,
+  content = "node work\n",
+) {
   const directory = join(temporary(t), "node");
   await simpleGit().clone(bare, directory);
   const git = simpleGit(directory);
   await git.addConfig("user.name", "Test Node");
   await git.addConfig("user.email", "test_node@example.invalid");
   await git.raw(["checkout", "-b", branch]);
-  writeFileSync(join(directory, "node.md"), "node work\n");
+  writeFileSync(join(directory, "node.md"), content);
   await git.add("node.md");
   await git.commit("node work");
   await git.push("origin", branch);
@@ -281,6 +304,17 @@ async function setup(t: TestContext, landing = "human") {
     pushed.bare,
     `kanthord/${pushedNode}`,
   );
+  await simpleGit(pushed.bare).raw([
+    "push",
+    gated.bare,
+    "main:refs/heads/pushed",
+  ]);
+  const gatedSnapshot = await commitOnBranch(
+    t,
+    gated.bare,
+    "snapshot",
+    "snapshot work\n",
+  );
   const token = await fixture.machineToken(project.id, "harness");
   const W = { ...H, KANTHORD_TOKEN: token };
   const { runtime_identity: runtimeIdentity } = await read<{
@@ -417,6 +451,11 @@ async function setup(t: TestContext, landing = "human") {
       },
       { identity, idempotencyKey: ulid() },
     ) as Promise<OperationResult<Answer>>;
+  const check = (evidenceId: string) =>
+    intake["action.check"](
+      { params: {}, query: {}, body: { evidence_id: evidenceId } },
+      { identity: mintServiceIdentity(MISSION_SERVICE_NAME) },
+    );
   const materials: Material[] = [];
   const releaseMaterial = fixture.custody.release.bind(fixture.custody);
   fixture.custody.release = (...args) => {
@@ -447,6 +486,7 @@ async function setup(t: TestContext, landing = "human") {
     gitHub,
     pushed,
     gated,
+    gatedSnapshot,
     snapshot,
     nodes: { gated: gatedNode, pushed: pushedNode },
     resource: (name: string) => binding(name).resource_identity,
@@ -456,6 +496,7 @@ async function setup(t: TestContext, landing = "human") {
     request,
     requested,
     perform,
+    check,
     materials,
     rows,
     row,
@@ -611,6 +652,30 @@ test(
       assert.equal(h.row("refusal")?.state, OutboundRequestState.Failed);
       dropped(h.materials);
     });
+
+    await t.test(
+      "a git failure of the contained check answers git_failed and opens no pull request",
+      async () => {
+        const landedOn = h.fixture.gitWriter.landedOn;
+        h.fixture.gitWriter.landedOn = async () => {
+          throw new Diagnostic(GIT_FAILED_CODE, "landing read failed");
+        };
+        const before = posts();
+        try {
+          const answer = completed(
+            await h.perform(gated, gatedBody("landing")),
+          );
+          assert.ok("class" in answer);
+          assert.equal(answer.class, ResultClass.ConfirmedFailure);
+          assert.equal(answer.code, GIT_FAILED_CODE);
+        } finally {
+          h.fixture.gitWriter.landedOn = landedOn;
+        }
+        assert.equal(h.row("landing")?.state, OutboundRequestState.Failed);
+        assert.equal(posts(), before);
+        dropped(h.materials);
+      },
+    );
 
     await t.test(
       "a thrown call keeps the pending row and the pin and drops the material",
@@ -1092,10 +1157,10 @@ test(
   async (t) => {
     const h = await setup(t, KANTHORD_LANDING);
     const G = h.nodes.gated;
-    const execution = await h.evaluated(G, "gated", h.gated.head);
+    const execution = await h.evaluated(G, "gated", h.gatedSnapshot);
     const body = (requestKey: string) => ({
       key: "gated.pull_request",
-      commit: h.gated.head,
+      commit: h.gatedSnapshot,
       request_key: requestKey,
     });
     const merges = () =>
@@ -1142,10 +1207,10 @@ test(
   async (t) => {
     const h = await setup(t, KANTHORD_LANDING);
     const G = h.nodes.gated;
-    const execution = await h.evaluated(G, "gated", h.gated.head);
+    const execution = await h.evaluated(G, "gated", h.gatedSnapshot);
     const mergeBody = (requestKey: string) => ({
       key: "gated.pull_request",
-      commit: h.gated.head,
+      commit: h.gatedSnapshot,
       request_key: requestKey,
     });
     const merges = () =>
@@ -1213,7 +1278,7 @@ test(
         assert.equal(h.row("pending")?.state, OutboundRequestState.Pending);
         const lastMerge = merges().at(-1);
         assert.deepEqual(lastMerge?.body, {
-          sha: h.gated.head,
+          sha: h.gatedSnapshot,
           merge_method: "merge",
         });
         assert.equal(merges().length, mergesBefore + ONE_CREATE);
@@ -1244,10 +1309,10 @@ test(
   async (t) => {
     const h = await setup(t, KANTHORD_LANDING);
     const G = h.nodes.gated;
-    const execution = await h.evaluated(G, "gated", h.gated.head);
+    const execution = await h.evaluated(G, "gated", h.gatedSnapshot);
     const mergeBody = (requestKey: string) => ({
       key: "gated.pull_request",
-      commit: h.gated.head,
+      commit: h.gatedSnapshot,
       request_key: requestKey,
     });
     const answer = completed(await h.perform(execution, mergeBody("create")));
@@ -1282,5 +1347,48 @@ test(
     assert.ok("class" in readBack, JSON.stringify(readBack));
     assert.equal(readBack.class, ResultClass.UnknownOutcome);
     assert.equal(h.row("other-head")?.state, OutboundRequestState.Pending);
+  },
+);
+
+test(
+  "a pull request whose base branch contains the snapshot opens no pull request and answers the branch push address of the oldest first-parent commit",
+  { timeout: TIMEOUT },
+  async (t) => {
+    const h = await setup(t);
+    const merge = await mergeIntoMain(t, h.gated.bare, "snapshot");
+    const execution = await h.evaluated(
+      h.nodes.gated,
+      "gated",
+      h.gatedSnapshot,
+    );
+    const answer = completed(
+      await h.perform(execution, {
+        key: "gated.pull_request",
+        commit: h.gatedSnapshot,
+        request_key: "contained",
+      }),
+    );
+    const landed = {
+      kind: PlatformAddressKind.BranchPush,
+      resource_identity: h.resource("gated"),
+      branch: "main",
+      commit: merge,
+    } as const;
+    assert.deepEqual(answer, landed);
+    assert.equal(
+      h.gitHub.calls.filter((call) => call.method === HttpMethod.Post).length,
+      NO_ROWS,
+    );
+    assert.equal(h.row("contained")?.state, OutboundRequestState.Succeeded);
+    const evidenceId = await h.request(
+      h.nodes.gated,
+      execution,
+      "gated.pull_request",
+      landed,
+    );
+    assert.deepEqual(completed(await h.check(evidenceId)), {
+      end_state: CheckEndState.Expected,
+      landed_commits: [merge],
+    });
   },
 );

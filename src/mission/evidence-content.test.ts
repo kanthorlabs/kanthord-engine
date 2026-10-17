@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { test } from "node:test";
+import { test, type TestContext } from "node:test";
 import { createIdentity } from "../kernel/identity.ts";
 import { OperationError } from "../kernel/errors.ts";
 import { testHumanIdentity } from "../kernel/test-identity.ts";
@@ -13,6 +13,7 @@ import {
   repositoryAddressSchema,
   type Revision,
   type StorageBinding,
+  type TestedInput,
   type Verification,
 } from "./contract.ts";
 import {
@@ -212,7 +213,9 @@ test("the tested input of an examine node with two repository bindings is a list
         requireTestedInput(tx, h.dependencies.bindings, examine, pair, [
           address,
         ]),
-      (error) => error instanceof OperationError && error.code === VALIDATION,
+      (error) =>
+        error instanceof OperationError &&
+        error.code === MissionErrorCode.EvidenceBindingMismatch,
     );
     assert.throws(
       () =>
@@ -240,6 +243,80 @@ test("the tested input of an examine node with two repository bindings is a list
     );
     assert.equal(implementNodes.length, IMPLEMENT_COUNT);
   });
+});
+
+function implementPair(t: TestContext) {
+  const h = executionHarness(t, IDENTITY);
+  const firstId = createIdentity("binding");
+  const secondId = createIdentity("binding");
+  h.dependencies.bindings.getBindingRevision = (_tx, id) => ({
+    binding_id: id,
+    project_id: h.project_id,
+    name: id,
+    resource_identity: id === secondId ? OTHER_RESOURCE : RESOURCE,
+    revision: FIRST_REVISION,
+    tombstone: false,
+    disabled: false,
+  });
+  const address = (bindingId: string) =>
+    ({
+      kind: AssetKind.Repository,
+      binding_id: bindingId,
+      commit: COMMIT,
+    }) as const;
+  const check = (testedInput: TestedInput) =>
+    h.store.transaction((tx) => {
+      const prior = getRevision(tx, h.node_id, FIRST_REVISION);
+      const revision: Revision = {
+        ...prior,
+        content: {
+          ...prior.content,
+          work: Work.Implement,
+          bindings: [firstId, secondId],
+        },
+        tasks: [],
+      };
+      requireTestedInput(
+        tx,
+        h.dependencies.bindings,
+        readNode(tx, h.node_id)!,
+        revision,
+        testedInput,
+      );
+    });
+  const mismatch = (bindingId: string) => (error: unknown) =>
+    error instanceof OperationError &&
+    error.code === MissionErrorCode.EvidenceBindingMismatch &&
+    JSON.stringify(error.details) === JSON.stringify({ binding_id: bindingId });
+  return { firstId, secondId, address, check, mismatch };
+}
+
+test("a node with two bindings writes a tested input list in binding order", (t) => {
+  const h = implementPair(t);
+  h.check([h.address(h.firstId), h.address(h.secondId)]);
+  assert.throws(
+    () => h.check(h.address(h.firstId)),
+    (error) => error instanceof OperationError && error.code === VALIDATION,
+  );
+});
+
+test("a list out of binding order answers mission.evidence.binding_mismatch", (t) => {
+  const h = implementPair(t);
+  const foreignId = createIdentity("binding");
+  assert.throws(
+    () => h.check([h.address(h.secondId), h.address(h.firstId)]),
+    h.mismatch(h.secondId),
+  );
+  assert.throws(() => h.check([h.address(h.firstId)]), h.mismatch(h.secondId));
+  assert.throws(
+    () =>
+      h.check([
+        h.address(h.firstId),
+        h.address(h.secondId),
+        h.address(foreignId),
+      ]),
+    h.mismatch(foreignId),
+  );
 });
 
 test("produced bytes have canonical base64, an exact decoded limit and the decoded digest", () => {

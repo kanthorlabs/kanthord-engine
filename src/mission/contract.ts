@@ -839,6 +839,10 @@ export const testedInputSchema = z.union([
   z.array(repositoryAddressSchema).min(1),
 ]);
 export type TestedInput = z.infer<typeof testedInputSchema>;
+export const landedCommitSchema = z.union([
+  repositoryAddressSchema,
+  z.array(repositoryAddressSchema).min(1),
+]);
 export const verificationSchema = z.strictObject({
   tested_input: testedInputSchema,
   results: z.array(
@@ -1040,7 +1044,7 @@ export const resumeSchema = humanActSchema.extend({
 export type Resume = z.infer<typeof resumeSchema>;
 export const overrideSchema = humanActSchema.extend({
   result: z.enum([AssessmentResult.Success]),
-  landed_commit: repositoryAddressSchema.optional(),
+  landed_commit: landedCommitSchema.optional(),
 });
 export type Override = z.infer<typeof overrideSchema>;
 export const unblockChangeSchema = z.strictObject({

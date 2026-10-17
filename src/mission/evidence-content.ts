@@ -87,6 +87,32 @@ export function requireRepositoryAddress(
     bindingMismatch(address.binding_id);
 }
 
+export function repositorySetMismatch(
+  expected: readonly string[],
+  actual: readonly string[],
+): string | null {
+  const foreign = actual.find((id) => !expected.includes(id));
+  if (foreign !== undefined) return foreign;
+  const repeated = actual.find((id, index) => actual.indexOf(id) !== index);
+  if (repeated !== undefined) return repeated;
+  return expected.find((id) => !actual.includes(id)) ?? null;
+}
+
+export function requireRepositorySet(
+  tx: Transaction,
+  bindings: MissionBindings,
+  revision: Revision,
+  bindingIds: readonly string[],
+): void {
+  const mismatch = repositorySetMismatch(
+    bindingsOf(tx, bindings, revision, MissionBindingKind.Repository).map(
+      (binding) => binding.binding_id,
+    ),
+    bindingIds,
+  );
+  if (mismatch !== null) bindingMismatch(mismatch);
+}
+
 export function repositoryBindingIdsOf(
   tx: Transaction,
   bindings: MissionBindings,
@@ -99,6 +125,51 @@ export function repositoryBindingIdsOf(
     getRevision(tx, nodeId, nodeRevision),
     MissionBindingKind.Repository,
   ).map((binding) => binding.binding_id);
+}
+
+function requireAddressList(
+  expected: readonly string[],
+  addresses: readonly RepositoryAddress[],
+): void {
+  const length = Math.max(expected.length, addresses.length);
+  for (let index = 0; index < length; index++) {
+    const named = addresses[index]?.binding_id;
+    const required = expected[index];
+    if (named === required) continue;
+    const bindingId = named ?? required;
+    assert.ok(bindingId !== undefined);
+    bindingMismatch(bindingId);
+  }
+}
+
+function requireRepositoryForm(
+  expected: readonly string[],
+  input: RepositoryAddress | RepositoryAddress[],
+  field: string,
+): void {
+  if (expected.length > SINGLE_BINDING_MATCH) {
+    if (!Array.isArray(input)) invalidExecutionInput(field);
+    requireAddressList(expected, input);
+    return;
+  }
+  if (Array.isArray(input)) invalidExecutionInput(field);
+  if (!expected.includes(input.binding_id)) bindingMismatch(input.binding_id);
+}
+
+export function requireRepositoryInput(
+  tx: Transaction,
+  bindings: MissionBindings,
+  revision: Revision,
+  input: RepositoryAddress | RepositoryAddress[],
+  field: string,
+): void {
+  requireRepositoryForm(
+    bindingsOf(tx, bindings, revision, MissionBindingKind.Repository).map(
+      (binding) => binding.binding_id,
+    ),
+    input,
+    field,
+  );
 }
 
 export function requireTestedInput(
@@ -115,20 +186,14 @@ export function requireTestedInput(
     revision,
     MissionBindingKind.Repository,
   ).map((binding) => binding.binding_id);
-  if (expected.length <= SINGLE_BINDING_MATCH) {
-    if (Array.isArray(testedInput)) invalidExecutionInput("tested_input");
-    if (testedInput.kind !== AssetKind.Repository) return;
+  if (Array.isArray(testedInput) || testedInput.kind === AssetKind.Repository) {
     if (expected.length === NO_REPOSITORY_BINDINGS)
       invalidExecutionInput("tested_input");
-    requireRepositoryAddress(tx, bindings, node, revision, testedInput);
+    requireRepositoryForm(expected, testedInput, "tested_input");
     return;
   }
-  if (!Array.isArray(testedInput) || testedInput.length !== expected.length)
+  if (expected.length > SINGLE_BINDING_MATCH)
     invalidExecutionInput("tested_input");
-  testedInput.forEach((address, index) => {
-    if (address.binding_id !== expected[index])
-      bindingMismatch(address.binding_id);
-  });
 }
 
 export function producedContent(bytes: { media_type: string; data: string }) {

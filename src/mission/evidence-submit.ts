@@ -11,6 +11,7 @@ import {
   AssetKind,
   MissionErrorCode,
   UPLOAD_LIFETIME_MS,
+  Work,
   type EvidenceSubmit,
   type MissionBindings,
   type Revision,
@@ -21,6 +22,7 @@ import {
   objectLocation,
   producedContent,
   requireRepositoryAddress,
+  requireRepositorySet,
   requireTestedInput,
   storageBindingIdsOf,
 } from "./evidence-content.ts";
@@ -54,6 +56,7 @@ type Upload = {
   expires_at: number;
 };
 const NO_STORAGE_BINDINGS = 0;
+const NO_REPOSITORY_ASSETS = 0;
 const FIRST_CANDIDATE = 0;
 const FAILOVER_REFUSALS: readonly string[] = [
   AuthorizationRefusal.BindingDisabled,
@@ -118,6 +121,19 @@ export function prepareEvidence(
       node,
       revision,
       body.verification.tested_input,
+    );
+  const repositoryBindingIds = body.assets.flatMap((asset) =>
+    asset.kind === AssetKind.Repository ? [asset.address.binding_id] : [],
+  );
+  if (
+    revision.content.work === Work.Implement &&
+    repositoryBindingIds.length > NO_REPOSITORY_ASSETS
+  )
+    requireRepositorySet(
+      tx,
+      dependencies.bindings,
+      revision,
+      repositoryBindingIds,
     );
   const rows = body.assets.map((asset, index): AssetRow | null => {
     const id = ids.asset_ids[index];

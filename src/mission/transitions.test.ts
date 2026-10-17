@@ -838,3 +838,71 @@ test("deferred check with a live claim and expected end state writes no end stat
   const row = h.store.transaction((tx) => readEvidence(tx, h.evidenceId));
   assert.equal(row?.end_state, null);
 });
+
+function repositoryPairFixture(t: TestContext) {
+  const h = fixture(t);
+  const secondId = createIdentity("binding");
+  const lookup = h.dependencies.bindings.getBindingRevision;
+  h.dependencies.bindings.getBindingRevision = (tx, bindingId) => {
+    const binding = lookup(tx, bindingId);
+    return binding && { ...binding, binding_id: bindingId };
+  };
+  h.store.transaction((tx) =>
+    tx.database
+      .prepare(
+        "UPDATE mission_node_revision SET bindings = ? WHERE node_id = ?",
+      )
+      .run(JSON.stringify([h.binding_id, secondId]), h.node_id),
+  );
+  const evidence = (bindingIds: string[]) =>
+    h.store.transaction((tx) => {
+      const id = createIdentity("evidence");
+      insertEvidence(
+        tx,
+        {
+          id,
+          node_id: h.node_id,
+          attempt: FIRST_ATTEMPT,
+          subject: "Work",
+          requirement_key: null,
+          end_state: null,
+          verification: null,
+          provenance: JSON.stringify(h.opener),
+          created_at: NOW,
+        },
+        bindingIds.map((bindingId) => ({
+          id: createIdentity("evidence_asset"),
+          evidence_id: id,
+          kind: AssetKind.Repository,
+          content: JSON.stringify({
+            binding_id: bindingId,
+            commit: "a".repeat(40),
+          }),
+          published_at: NOW,
+          expired_at: null,
+        })),
+      );
+    });
+  return { ...h, second_id: secondId, evidence };
+}
+
+test("a release with one asset for one of two bindings is refused", (t) => {
+  const h = repositoryPairFixture(t);
+  h.claim();
+  h.evidence([h.binding_id]);
+  h.refuses(ReleaseObligation.Evidence);
+  h.evidence([h.second_id]);
+  h.refuses(ReleaseObligation.Evidence);
+  h.evidence([h.binding_id, h.binding_id]);
+  h.refuses(ReleaseObligation.Evidence);
+  h.evidence([h.binding_id, h.second_id, createIdentity("binding")]);
+  h.refuses(ReleaseObligation.Evidence);
+});
+
+test("one asset for each of two bindings releases", (t) => {
+  const h = repositoryPairFixture(t);
+  h.claim();
+  h.evidence([h.second_id, h.binding_id]);
+  h.release();
+  assert.equal(h.node().state, NodeState.Waiting);
+});

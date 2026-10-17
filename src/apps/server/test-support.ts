@@ -1356,7 +1356,7 @@ async function seededBareRepository(root: string, name: string) {
   const git = simpleGit(seed);
   await git.addConfig("user.name", "Test Journey");
   await git.addConfig("user.email", "test_journey@example.invalid");
-  writeFileSync(join(seed, "README.md"), "test_journey repository\n");
+  writeFileSync(join(seed, "README.md"), `test_journey ${name} repository\n`);
   await git.add("README.md");
   await git.commit("initial");
   await git.push("origin", "main");
