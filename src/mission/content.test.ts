@@ -167,12 +167,6 @@ const resolved = (kind: string, index: number): ResolvedBinding => ({
 const rules = [
   {
     kind: NodeKind.Initiative,
-    binding: MissionBindingKind.Repository,
-    allowed: [NO_BINDINGS],
-    forbidden: SINGLE_BINDING,
-  },
-  {
-    kind: NodeKind.Initiative,
     binding: MissionBindingKind.Worker,
     allowed: [NO_BINDINGS],
     forbidden: SINGLE_BINDING,
@@ -245,4 +239,14 @@ test("unknown resource kind is rejected", () => {
       resolved("other", NO_BINDINGS),
     ]),
   );
+});
+
+test("an initiative accepts zero, one and two repository bindings", () => {
+  for (const count of [NO_BINDINGS, SINGLE_BINDING, 2])
+    checkBindingRuleTable(
+      NodeKind.Initiative,
+      Array.from({ length: count }, (_, index) =>
+        resolved(MissionBindingKind.Repository, index),
+      ),
+    );
 });

@@ -269,6 +269,19 @@ async function setup(t: TestContext, adapter: Adapter, path?: string) {
     }),
   );
   const nodeId = objective.revisions[0]!.node_id;
+  completed(
+    await call(missionOperations["dependency.add"], {
+      params: {
+        node_id: initiative.revisions[0]!.node_id,
+        depends_on_id: nodeId,
+      },
+      query: {},
+      body: {
+        reason: "plan",
+        expected_mission_version: objective.mission_version,
+      },
+    }),
+  );
   const generalToken = await f.machineToken(projectId, "general", "general-a");
   const otherToken = await f.machineToken(projectId, "general", "general-b");
   const reviewerToken = await f.machineToken(projectId, "reviewer", "reviewer");
@@ -560,7 +573,7 @@ test("pull, registration resume and human pause settle an expired row before adm
       query: {},
       body: {
         reason: "hold",
-        expected_mission_version: 3,
+        expected_mission_version: 4,
         expected_state: NodeState.Available,
         expected_attempt: 1,
       },
@@ -652,7 +665,7 @@ test("real Mission sweeps steps and evaluation claims below and at the loss limi
             query: {},
             body: {
               reason: "review",
-              expected_mission_version: 3,
+              expected_mission_version: 4,
               expected_state: NodeState.Available,
               expected_attempt: 1,
             },
@@ -714,7 +727,7 @@ async function prepareEvaluation(h: Awaited<ReturnType<typeof setup>>) {
       query: {},
       body: {
         reason: "review",
-        expected_mission_version: 3,
+        expected_mission_version: 4,
         expected_state: NodeState.Available,
         expected_attempt: 1,
       },
@@ -856,7 +869,7 @@ test("sweep and human revocation defeat an already proved release with one termi
               query: {},
               body: {
                 reason: "hold",
-                expected_mission_version: 3,
+                expected_mission_version: 4,
                 expected_state: NodeState.Executing,
                 expected_attempt: 1,
               },

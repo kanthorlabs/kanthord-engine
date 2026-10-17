@@ -159,7 +159,7 @@ test("assessment and outcome reads filter attempt zero, evaluate currency, union
       evidence_ids: JSON.stringify(
         evidenceIds.slice(FIRST_INDEX, SECOND_ATTEMPT),
       ),
-      child_outcome_ids: "[]",
+      dependency_outcome_ids: "[]",
       tested_input: null,
       execution_id: createIdentity("execution"),
       actor: null,

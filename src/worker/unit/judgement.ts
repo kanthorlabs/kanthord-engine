@@ -31,7 +31,7 @@ const unmetItemSchema = z.strictObject({
 });
 const proposalTextSchema = z.string().trim().min(1);
 const proposalSchema = z.strictObject({
-  objective_id: proposalTextSchema,
+  dependency_id: proposalTextSchema,
   name: proposalTextSchema,
   requirement: proposalTextSchema,
   criterion: proposalTextSchema,
@@ -239,11 +239,11 @@ export function evaluationInstruction(
     tasks: readonly TaskContent[];
     verification: Verification;
     evidence: unknown;
-    objectives?: unknown;
+    dependencies?: unknown;
   },
 ): string {
   return renderTemplate(templates, PromptTemplate.Evaluation, {
-    initiative: input.kind === NodeKind.Initiative,
+    examine: input.kind === NodeKind.Initiative,
     tasks: input.tasks.map((task) => ({
       id: task.id,
       criterion: task.content.criterion,
@@ -251,22 +251,20 @@ export function evaluationInstruction(
     tested_input: input.verification.tested_input,
     results: input.verification.results,
     evidence: input.evidence,
-    objectives: input.objectives ?? null,
+    dependencies: input.dependencies ?? null,
     marker: JUDGEMENT_MARKER,
   });
 }
 
-export function reportInstruction(
+export function examineInstruction(
   templates: PromptTemplates,
-  objectives: unknown,
-  outcomes: unknown,
-  evidence: unknown,
-  verification: Verification | null,
+  input: {
+    repositories: readonly unknown[];
+    verification: Verification | null;
+    dependencies: readonly unknown[];
+    outcomes: unknown;
+    evidence: unknown;
+  },
 ): string {
-  return renderTemplate(templates, PromptTemplate.Report, {
-    objectives,
-    outcomes,
-    evidence,
-    verification,
-  });
+  return renderTemplate(templates, PromptTemplate.Examine, input);
 }

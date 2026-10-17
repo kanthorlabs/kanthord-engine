@@ -145,7 +145,7 @@ export function writeHumanRecords(
     result,
     rationale,
     evidence_ids: "[]",
-    child_outcome_ids: "[]",
+    dependency_outcome_ids: "[]",
     tested_input: null,
     execution_id: null,
     actor: canonicalJSON(actor),

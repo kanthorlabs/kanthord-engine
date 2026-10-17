@@ -77,7 +77,7 @@ function fixture(t: TestContext) {
     result: AssessmentResult.Undetermined,
     rationale: RATIONALE,
     evidence_ids: EMPTY_SET,
-    child_outcome_ids: EMPTY_SET,
+    dependency_outcome_ids: EMPTY_SET,
     tested_input: null,
     execution_id: null,
     actor: canonicalJSON(ACTOR),
@@ -216,7 +216,7 @@ test("JSON sets canonicalize order, reject duplicates and preserve sequence on r
     assert.throws(() =>
       insertAssessment(tx, {
         ...h.assessment(),
-        child_outcome_ids: '["a","a"]',
+        dependency_outcome_ids: '["a","a"]',
       }),
     );
     assert.equal(insertAssessment(tx, h.assessment()).sequence, SECOND_ATTEMPT);

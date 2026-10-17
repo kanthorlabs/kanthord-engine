@@ -260,14 +260,11 @@ nothing, moves no job and predicts no claim.
 | `checks`                | Five `EligibilityCheck` objects in this order: `project-pause`, `node-state`, `mission-condition`, `queue-job`, `no-live-claim`. |
 
 `EligibilityCheck` holds `name`, `result` (`passed`, `failed` or
-`not-applicable`) and `condition` (`initiative-steps`, `readiness`,
-`continuation` or `null`). Only `mission-condition` holds a non-null
-`condition`. `project-pause` passes when the project is not paused; an absent project still answers `404 scheduler.eligibility.node_not_found`. `node-state` passes for a node that is not retired in
+`not-applicable`) and `condition` (`continuation` or `null`). Only
+`mission-condition` holds a non-null `condition`. `project-pause` passes when the project is not paused; an absent project still answers `404 scheduler.eligibility.node_not_found`. `node-state` passes for a node that is not retired in
 `Available`, `Waiting` or `External.Requested`. `mission-condition` reads the
-initiative steps condition for an initiative in `Available`, the readiness
-condition for `Waiting` and the continuation condition for
-`External.Requested`; it is `not-applicable` for an objective in `Available`
-and when `node-state` fails. `queue-job` passes when the queue holds a job of
+continuation condition for `External.Requested`; it is `not-applicable` for a
+node in `Available` or `Waiting` and when `node-state` fails. `queue-job` passes when the queue holds a job of
 the node. `no-live-claim` passes when no execution of the node is `running`.
 
 The report never answers binding availability and instance count, declared

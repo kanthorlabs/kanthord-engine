@@ -1,14 +1,9 @@
 import assert from "node:assert/strict";
 import type { Transaction } from "../kernel/store.ts";
-import { isTerminal, reconcileJob } from "./admission.ts";
-import {
-  NodeKind,
-  NodeState,
-  type WorkQueue,
-  type MissionBindings,
-} from "./contract.ts";
+import { reconcileJob } from "./admission.ts";
+import { NodeState, type WorkQueue, type MissionBindings } from "./contract.ts";
 import { readinessOf, continuationHolds } from "./conditions.ts";
-import { buildDependencyClosureOf } from "./graph.ts";
+import { directDependenciesOf } from "./graph.ts";
 import { readDependencies, readMissionNodes, setNodeState } from "./store.ts";
 
 export function claimableMap(
@@ -17,24 +12,10 @@ export function claimableMap(
   bindings: MissionBindings,
 ): Map<string, boolean> {
   const nodes = readMissionNodes(tx, missionId);
-  const nonterminalParents = new Set(
-    nodes
-      .filter(
-        (node) =>
-          node.retired_at === null &&
-          node.kind === NodeKind.Objective &&
-          !isTerminal(node.state),
-      )
-      .map((node) => node.parent_id),
-  );
   return new Map(
     nodes.map((node) => {
       if (node.retired_at !== null) return [node.id, false];
-      if (node.state === NodeState.Available)
-        return [
-          node.id,
-          node.kind === NodeKind.Objective || !nonterminalParents.has(node.id),
-        ];
+      if (node.state === NodeState.Available) return [node.id, true];
       if (node.state === NodeState.Waiting)
         return [node.id, readinessOf(tx, node).holds];
       if (node.state === NodeState.ExternalRequested)
@@ -49,16 +30,11 @@ export function routeMission(tx: Transaction, missionId: string): void {
     (node) => node.retired_at === null,
   );
   const states = new Map(nodes.map((node) => [node.id, node.state]));
-  const parents = new Map<string, string>();
-  for (const node of nodes) {
-    if (node.parent_id !== null) parents.set(node.id, node.parent_id);
-  }
   const dependencies = readDependencies(tx, missionId);
   for (const node of nodes) {
     if (node.state !== NodeState.Pending && node.state !== NodeState.Available)
       continue;
-    const closure = buildDependencyClosureOf(node.id, dependencies, parents);
-    const available = Array.from(closure).every(
+    const available = directDependenciesOf(node.id, dependencies).every(
       (id) => states.get(id) === NodeState.Completed,
     );
     setNodeState(

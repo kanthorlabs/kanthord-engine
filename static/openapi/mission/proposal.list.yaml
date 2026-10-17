@@ -4,7 +4,7 @@ pathItem:
     operationId: mission.proposal.list
     tags:
       - mission
-    description: List fix-objective proposals of an initiative.
+    description: List the fix-node proposals of an examine proposer.
     x-access-policy: human
     x-timeout-ms: 30000
     x-mutation: false
@@ -135,7 +135,7 @@ components:
               content:
                 type: object
                 properties:
-                  objective_id:
+                  dependency_id:
                     type: string
                     minLength: 31
                     maxLength: 31
@@ -175,13 +175,13 @@ components:
                       - verifications
                     additionalProperties: false
                 required:
-                  - objective_id
+                  - dependency_id
                   - name
                   - requirement
                   - criterion
                   - task
                 additionalProperties: false
-              objective_node_id:
+              created_node_id:
                 anyOf:
                   - type: string
                     minLength: 31
@@ -207,7 +207,7 @@ components:
               - attempt
               - assessment_id
               - content
-              - objective_node_id
+              - created_node_id
               - approved_at
               - created_at
             additionalProperties: false

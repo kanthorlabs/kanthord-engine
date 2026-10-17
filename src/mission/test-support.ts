@@ -27,6 +27,7 @@ import {
   type PlatformAddress,
 } from "./contract.ts";
 import {
+  insertDependency,
   insertMission,
   insertNode,
   insertRevision,
@@ -143,6 +144,7 @@ export function evidenceHarness(t: TestContext, identity: CallerIdentity) {
       content: { ...revision.content, bindings: [repositoryId, storageId] },
       tasks: [],
     });
+    insertDependency(tx, h.mission_id, h.node_id, nodeId);
     openAttempt(tx, nodeId, FIRST_REVISION, h.executionActor, FIXTURE_TIME);
     setNodeState(tx, nodeId, NodeState.Executing);
   });
@@ -368,7 +370,7 @@ export function authorizationHarness(t: TestContext, identity: CallerIdentity) {
         result,
         rationale: "Reviewed",
         evidence_ids: "[]",
-        child_outcome_ids: "[]",
+        dependency_outcome_ids: "[]",
         tested_input: canonicalJSON({
           kind: AssetKind.Repository,
           binding_id: h.repositoryId,
@@ -506,7 +508,7 @@ export async function externalRequestHarness(
     body: {
       ...h.context,
       evidence_ids: [evidence.evidence.id],
-      child_outcome_ids: [],
+      dependency_outcome_ids: [],
       result: AssessmentResult.Success,
       rationale: "Passed",
       tested_input: testedInput,

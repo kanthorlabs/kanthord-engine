@@ -72,6 +72,8 @@ async function fixture(
     method?: WorkerMethod;
     prepare?: (workspace: string, hostHome: string) => void;
     turnCheck?: (context: CancellationContext) => Promise<void>;
+    nodeKind?: NodeKind;
+    checkouts?: (workspace: string) => string[];
   } = {},
 ) {
   const setup = anthropicSetup(overrides);
@@ -95,7 +97,7 @@ async function fixture(
       created_at: Date.now(),
       expired_at: Date.now() + 60000,
     },
-    nodeKind: NodeKind.Objective,
+    nodeKind: options.nodeKind ?? NodeKind.Objective,
     agent: setup.agents[0]!,
     credential: {
       credential_id: setup.agents[0]!.credential_id,
@@ -110,6 +112,7 @@ async function fixture(
     workspaceAgentFiles:
       (options.method ?? WorkerMethod.Steps) !== WorkerMethod.Evaluation,
     workspace,
+    checkouts: options.checkouts?.(workspace) ?? [workspace],
     hostHome,
     env: hostEnvironment(),
     modelRuntimeFactory: scriptedModelRuntime(provider),
@@ -213,6 +216,49 @@ test("native agent composes only the switched-on workspace files and the project
     h.agent.composition.selected.every(({ digest }) =>
       /^[a-f0-9]{64}$/.test(digest),
     ),
+  );
+});
+
+test("an initiative composes one project prompt part for each repository binding in binding order", async (t) => {
+  const names = ["first", "second"];
+  const checkoutsOf = (workspace: string) =>
+    names.map((name) => join(workspace, "checkouts", name));
+  const h = await fixture(
+    t,
+    [fauxAssistantMessage("done")],
+    {
+      repositories: names.map((name) => ({
+        ...repositoryOf({}, `${name} project prompt`),
+        name,
+      })),
+    },
+    unusedHostTools,
+    {
+      nodeKind: NodeKind.Initiative,
+      checkouts: checkoutsOf,
+      prepare: (workspace) => {
+        for (const [index, directory] of checkoutsOf(workspace).entries()) {
+          mkdirSync(directory, { recursive: true });
+          writeFileSync(join(directory, "AGENTS.md"), `${names[index]} agents`);
+        }
+      },
+    },
+  );
+  await h.agent.prompt(WORK);
+  const text = callText(h);
+  for (const name of names) {
+    assert.ok(text.includes(`${name} agents`));
+    assert.ok(text.includes(`${name} project prompt`));
+  }
+  assert.deepEqual(
+    h.agent.composition.selected.map(({ owner, source }) => [owner, source]),
+    checkoutsOf(h.workspace).flatMap((directory, index) => [
+      [
+        `repository binding ${names[index]}`,
+        `file ${join(directory, "AGENTS.md")}`,
+      ],
+      [`repository binding ${names[index]}`, "database project prompt"],
+    ]),
   );
 });
 

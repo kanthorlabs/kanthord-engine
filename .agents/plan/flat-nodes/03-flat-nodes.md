@@ -222,9 +222,9 @@ Opus at medium effort. The plan replaces the kind model in about forty files.
 
 ### 03.14 Select the worker method form by work
 
-- Files: `src/worker/unit/node-reads.ts`, `src/worker/unit/native-method.ts`, `src/worker/unit/native-agent.ts`, `src/worker/unit/evaluation.ts`, `src/worker/unit/evaluation-input.ts`, `src/worker/unit/judgement.ts`, `src/worker/unit/test-support.ts` and their tests (edit)
+- Files: `src/worker/contract.ts`, `src/worker/service.ts`, `src/worker/execution-setup.ts`, `src/mission/service.ts`, `src/apps/server/index.ts`, `static/openapi/worker/execution.setup.get.yaml` (generated), `src/worker/unit/native-method.ts`, `src/worker/unit/native-agent.ts`, `src/worker/unit/evaluation.ts`, `src/worker/unit/evaluation-input.ts`, `src/worker/unit/judgement.ts`, `src/worker/unit/test-support.ts` and their tests (edit)
 - Do:
-  1. Replace `nodeKindOf` (`src/worker/unit/node-reads.ts:58-62`) by `workOf(revision) = revision.content.work`.
+  1. Replace the node kind of decision D30 with `work`. Replace `node_kind` of `executionSetupSchema` (`src/worker/contract.ts:742`) with `work`, and delete `ExecutionNodeKind` and `NodeKindOf` (`:423-429`). Delete `nodeKindOf` of `Dependencies` (`src/worker/service.ts:113`), `MissionService.nodeKindOf` (`src/mission/service.ts:969`) and its wiring in `composeServices` (`src/apps/server/index.ts:447`). `src/worker/execution-setup.ts:155` fills `work` from the pinned revision. Regenerate `static/openapi/worker/execution.setup.get.yaml`.
   2. `runNativeExecution` (`src/worker/unit/native-method.ts:81-139`) sends an `examine` node to the examine form and an `implement` node to the implement form.
   3. `NativeAgentInput.nodeKind` (`src/worker/unit/native-agent.ts:32-45`) becomes `work`; the repository layer reads one part for each repository binding of either work, as task 02.12 states (`:172-175`).
   4. `evaluation.ts`, `evaluation-input.ts` and `judgement.ts` read `work` instead of the kind (`evaluation.ts:77`, `:118`, `:141`, `:172-173`, `:211-212`; `evaluation-input.ts:97-156`; `judgement.ts:235-257`).

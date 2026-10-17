@@ -6,6 +6,7 @@ import { validateText } from "./content.ts";
 import {
   EdgeKind,
   MissionErrorCode,
+  NodeState,
   type Edge,
   type GraphEdit,
   type Mission,
@@ -14,8 +15,10 @@ import {
   type MissionBindings,
   type SchedulerClaims,
 } from "./contract.ts";
+import { stateConflict } from "./control.ts";
 import { hasDependencyCycle } from "./graph.ts";
 import { requireNode } from "./node-read.ts";
+import { readOpenAttempt, readRequests } from "./record-store.ts";
 import { claimableMap, reconcileMission, routeMission } from "./routing.ts";
 import {
   deleteDependency,
@@ -23,17 +26,38 @@ import {
   incrementMissionVersion,
   insertDependency,
   readDependencies,
-  readMissionNodes,
   type NodeRow,
 } from "./store.ts";
 import { requireActive, requireMission, requireNonterminal } from "./write.ts";
 
 const REASON_FIELD = "reason";
 const VERSION_INCREMENT = 1;
+const NO_REQUESTS = 0;
 const EndpointReason = {
   CrossMission: "cross_mission",
 } as const;
+const DEPENDENCY_GUARDED_STATES: ReadonlySet<string | null> = new Set([
+  NodeState.Waiting,
+  NodeState.Evaluating,
+  NodeState.ExternalRequested,
+  NodeState.ExternalSuccess,
+  NodeState.ExternalFailed,
+]);
 type DependencyEdge = Extract<Edge, { kind: typeof EdgeKind.Dependency }>;
+
+export function dependencyEditGuarded(
+  tx: Transaction,
+  node: NodeRow,
+  adding: boolean,
+): boolean {
+  if (DEPENDENCY_GUARDED_STATES.has(node.state)) return true;
+  if (!adding || node.state !== NodeState.Paused) return false;
+  const open = readOpenAttempt(tx, node.id);
+  return (
+    open !== null &&
+    readRequests(tx, node.id, open.attempt).length > NO_REQUESTS
+  );
+}
 
 function validateEndpoints(node: NodeRow, target: NodeRow): void {
   const reason =
@@ -54,24 +78,11 @@ function validateCycle(
   missionId: string,
   edge: DependencyEdge,
 ): void {
-  const nodes = readMissionNodes(tx, missionId).filter(
-    (node) => node.retired_at === null,
-  );
-  const parents = new Map<string, string>();
-  for (const node of nodes) {
-    if (node.parent_id !== null) parents.set(node.id, node.parent_id);
-  }
   const edges = [
     ...readDependencies(tx, missionId),
     { dependent: edge.dependent_id, depends_on: edge.depends_on_id },
   ];
-  if (
-    hasDependencyCycle(
-      nodes.map((node) => node.id),
-      edges,
-      parents,
-    )
-  )
+  if (hasDependencyCycle(edges))
     throw new OperationError(
       HttpStatus.Conflict,
       MissionErrorCode.Cycle,
@@ -150,7 +161,8 @@ export function addDependency(
   );
   validateEndpoints(node, target);
   requireNonterminal(node);
-  requireNoLiveSubtree(tx, node, schedulerClaims, Date.now());
+  if (dependencyEditGuarded(tx, node, true)) stateConflict(node);
+  requireNoLiveClaim(tx, nodeId, schedulerClaims, Date.now());
   validateText(REASON_FIELD, body.reason, textMaxBytes);
   if (hasDependency(tx, nodeId, dependsOnId))
     return emptyChange(mission.version);
@@ -163,34 +175,21 @@ export function addDependency(
   return applyDependency(tx, mission, edge, workQueue, true, bindings);
 }
 
-export function requireNoLiveSubtree(
+export function requireNoLiveClaim(
   tx: Transaction,
-  node: NodeRow,
+  nodeId: string,
   claims: SchedulerClaims,
   now: number,
 ): void {
-  const current = readMissionNodes(tx, node.mission_id).filter(
-    (row) => row.retired_at === null,
-  );
-  const descendants = new Set([node.id]);
-  for (let pass = 0; pass < current.length; pass++) {
-    const before = descendants.size;
-    for (const row of current)
-      if (row.parent_id !== null && descendants.has(row.parent_id))
-        descendants.add(row.id);
-    if (before === descendants.size) break;
-  }
-  for (const id of descendants) {
-    claims.settle(tx, id, now);
-    const live = claims.liveExecutionOf(tx, id, now);
-    if (live !== null)
-      throw new OperationError(
-        HttpStatus.Conflict,
-        MissionErrorCode.ClaimLive,
-        "A node in the dependency subtree has a live claim.",
-        { node_id: id, execution_id: live.execution_id },
-      );
-  }
+  claims.settle(tx, nodeId, now);
+  const live = claims.liveExecutionOf(tx, nodeId, now);
+  if (live !== null)
+    throw new OperationError(
+      HttpStatus.Conflict,
+      MissionErrorCode.ClaimLive,
+      "The dependent has a live claim.",
+      { node_id: nodeId, execution_id: live.execution_id },
+    );
 }
 
 export function removeDependency(
@@ -210,6 +209,7 @@ export function removeDependency(
     body.expected_mission_version,
   );
   requireNonterminal(node);
+  if (dependencyEditGuarded(tx, node, false)) stateConflict(node);
   validateText(REASON_FIELD, body.reason, textMaxBytes);
   if (!hasDependency(tx, nodeId, dependsOnId))
     return emptyChange(mission.version);

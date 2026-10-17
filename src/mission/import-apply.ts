@@ -36,7 +36,8 @@ import {
   insertRevision,
 } from "./store.ts";
 import { requireMission } from "./write.ts";
-import { requireNoLiveSubtree } from "./dependency.ts";
+import { ControlError } from "./control.ts";
+import { requireNoLiveClaim } from "./dependency.ts";
 
 const NO_VIOLATIONS = 0;
 const MINIMUM_MISSION_VERSION = 0;
@@ -49,6 +50,7 @@ const INSERT_ORDER = [NodeKind.Initiative, NodeKind.Objective];
 const CONFLICT_CODES: ReadonlySet<string> = new Set([
   MissionErrorCode.ConditionFailed,
   MissionErrorCode.TerminalChange,
+  ControlError.StateConflict,
 ]);
 
 function confirmImport(preview: ImportPreview, body: ImportApply): void {
@@ -316,7 +318,7 @@ export function applyImport(
         .map((edge) => edge.depends_on),
     );
     if ([...item.depends_on].some((target) => !previous.has(target)))
-      requireNoLiveSubtree(tx, item.current, schedulerClaims, acceptedAt);
+      requireNoLiveClaim(tx, item.current.id, schedulerClaims, acceptedAt);
   }
   const result = initialResult(mission, entries, actor, acceptedAt);
   if (

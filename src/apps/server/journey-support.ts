@@ -104,8 +104,20 @@ export async function createJourneyNode(
     },
   );
   assert.ok(result.revisions.length);
-  assert.ok(result.revisions[0]!.node_id);
-  return result.revisions[0]!.node_id;
+  const nodeId = result.revisions[0]!.node_id;
+  assert.ok(nodeId);
+  if (parentId) {
+    const current = await cli.read<{ version: number }>([
+      "mission",
+      "get",
+      projectId,
+    ]);
+    await cli.write(["mission", "dependency", "add", parentId, nodeId], {
+      reason: "plan",
+      expected_mission_version: current.version,
+    });
+  }
+  return nodeId;
 }
 
 export async function createJourneyTask(

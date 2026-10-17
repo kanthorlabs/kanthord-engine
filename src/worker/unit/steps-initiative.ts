@@ -5,10 +5,10 @@ import {
   type ExecutionEnd,
   type ExecutionRun,
 } from "./execution-run.ts";
-import { readObjectives, allTerminal } from "./node-reads.ts";
-import { reportInstruction } from "./judgement.ts";
+import { readDependencies } from "./node-reads.ts";
+import { examineInstruction } from "./judgement.ts";
 import { renderWorkPrompt } from "../../agent/prompt-composer.ts";
-import { WorkspaceKind } from "./workspace.ts";
+import { WorkspaceKind, workRepositoriesOf } from "./workspace.ts";
 import type { StepsInput } from "./steps-objective.ts";
 import type { ExecutionBudget } from "./budget.ts";
 import { ContextCancelled, DeadlineExceeded } from "../../kernel/context.ts";
@@ -16,7 +16,7 @@ import { runVerifications } from "./verification.ts";
 import { reportFacts } from "./report-facts.ts";
 import { testedCommitOf, verificationObserver } from "./method-telemetry.ts";
 
-export const REPORT_SUBJECT = "Report on current objective outcomes";
+export const REPORT_SUBJECT = "Report on current dependency outcomes";
 export const REPORT_MEDIA_TYPE = "text/markdown";
 
 export async function runStepsInitiative(
@@ -24,7 +24,10 @@ export async function runStepsInitiative(
   run: ExecutionRun,
   revision: Revision,
   budget: ExecutionBudget,
-  openAgent: (directory: string) => Promise<NativeAgent>,
+  openAgent: (
+    directory: string,
+    checkouts: readonly string[],
+  ) => Promise<NativeAgent>,
 ): Promise<ExecutionEnd> {
   const deadline = Math.min(
     input.claim.created_at + input.setup.resource_budget.wall_time_ms,
@@ -37,17 +40,20 @@ export async function runStepsInitiative(
     deadlineMs: deadline - Date.now(),
     repositories: input.setup.repositories,
   });
-  const { directory } = workspace;
+  const { directory, checkouts } = workspace;
   try {
-    const current = await readObjectives(run);
-    if (!allTerminal(current.objectives)) return await run.release(true);
+    const current = await readDependencies(run);
     if (budget.exhausted()) return await run.release(true);
-    const agent = await openAgent(directory);
+    const agent = await openAgent(
+      directory,
+      checkouts.map((checkout) => checkout.directory),
+    );
     if (agent.budget.exhausted()) return await run.release(true);
     const work = renderWorkPrompt(input.setup.templates, {
       node_id: input.claim.node_id,
       revision: input.claim.pinned_revision,
       content: revision.content,
+      repositories: workRepositoriesOf(directory, checkouts),
     });
     const verification =
       workspace.tested_input === null
@@ -66,20 +72,18 @@ export async function runStepsInitiative(
           });
     await agent.instruct(
       work,
-      reportInstruction(
-        input.setup.templates,
-        current.objectives,
-        current.outcomes,
-        current.evidence,
+      examineInstruction(input.setup.templates, {
+        repositories: workRepositoriesOf(directory, checkouts),
         verification,
-      ),
+        dependencies: current.dependencies,
+        outcomes: current.outcomes,
+        evidence: current.evidence,
+      }),
     );
     if (agent.budget.exhausted()) return await run.release(true);
     const assessment = agent.lastText();
     if (!assessment?.trim()) run.stop(EndReason.ReportAbsent);
-    const report = `${reportFacts(current.objectives, current.outcomes, verification)}\n\n## Assessment\n\n${assessment}`;
-    if (!allTerminal((await readObjectives(run)).objectives))
-      return await run.release(true);
+    const report = `${reportFacts(current.dependencies, current.outcomes, verification)}\n\n## Assessment\n\n${assessment}`;
     await run.submitEvidence(input.claim.node_id, {
       subject: REPORT_SUBJECT,
       assets: [
@@ -104,6 +108,6 @@ export async function runStepsInitiative(
       return await run.release(true);
     throw error;
   } finally {
-    input.workspaces.release(directory, WorkspaceKind.Execution);
+    input.workspaces.release(workspace.key, WorkspaceKind.Execution);
   }
 }

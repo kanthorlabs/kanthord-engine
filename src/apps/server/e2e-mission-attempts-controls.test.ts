@@ -229,17 +229,6 @@ test(
     let blockedOutcome = "";
     let assessmentId = "";
     await scenario(
-      "E01.1 initiative ready refuses nonterminal children",
-      async () => {
-        await refuse(
-          "ready",
-          h.initiativeId,
-          act(NodeState.Available, INITIAL_ATTEMPT),
-          "mission.node.not_ready",
-        );
-      },
-    );
-    await scenario(
       "E01.2 ready opens and pins an attempt and queues evaluation",
       async () => {
         const answer = await control(
@@ -521,7 +510,7 @@ test(
       assert.equal(answer.outcome?.closing_event, ClosingEvent.HumanDiscard);
     });
     await scenario(
-      "E01.14 terminal objectives admit initiative readiness",
+      "E01.14 an initiative with no dependency admits readiness",
       async () => {
         assert.ok(
           (await queue()).items.some((item) => item.node_id === h.initiativeId),

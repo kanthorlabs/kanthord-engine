@@ -198,6 +198,7 @@ export async function objectiveFixture(
     }),
     workspaceAgentFiles: true,
     workspace: workspace.directory,
+    checkouts: [workspace.directory],
     hostHome: temporary(t),
     env: hostEnvironment(),
     modelRuntimeFactory: scriptedModelRuntime(provider),

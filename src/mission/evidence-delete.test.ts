@@ -121,7 +121,7 @@ function fixture(t: TestContext, request = false) {
   return { ...h, evidence_id: evidenceId, asset_id: assetId, remove };
 }
 
-test("asset deletes require a terminal ancestor chain or force and preserve the empty evidence", async (t) => {
+test("asset deletes require a terminal node and terminal direct examine dependents or force and preserve the empty evidence", async (t) => {
   const h = fixture(t);
   h.dependencies.intakeStorage.delete = async (_call, assetId) => {
     assert.equal(assetId, h.asset_id);
@@ -221,7 +221,7 @@ test("whole evidence deletion clears assessment and outcome sets without changin
       result: AssessmentResult.Undetermined,
       rationale: "Human block",
       evidence_ids: canonicalJSON([h.evidence_id]),
-      child_outcome_ids: "[]",
+      dependency_outcome_ids: "[]",
       tested_input: null,
       execution_id: null,
       actor: canonicalJSON(h.actor),

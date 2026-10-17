@@ -28,6 +28,7 @@ const LOOP_START = 0;
 const RESOURCE_KIND_SEGMENT = 0;
 const INITIAL_BINDING_COUNT = 0;
 const SINGLE_BINDING = 1;
+const UNBOUNDED_BINDINGS = Number.POSITIVE_INFINITY;
 const LOOP_STEP = 1;
 const BINDING_COUNT_STEP = 1;
 const SPLIT_FIRST_PART_LIMIT = 1;
@@ -36,7 +37,10 @@ type Range = { min: number; max: number };
 
 const bindingRules: Record<NodeKind, Record<BindingKind, Range>> = {
   [NodeKind.Initiative]: {
-    [MissionBindingKind.Repository]: { min: NO_BINDINGS, max: NO_BINDINGS },
+    [MissionBindingKind.Repository]: {
+      min: NO_BINDINGS,
+      max: UNBOUNDED_BINDINGS,
+    },
     [MissionBindingKind.Worker]: { min: NO_BINDINGS, max: NO_BINDINGS },
     [MissionBindingKind.Storage]: { min: NO_BINDINGS, max: SINGLE_BINDING },
   },

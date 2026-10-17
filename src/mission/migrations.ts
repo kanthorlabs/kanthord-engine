@@ -86,7 +86,7 @@ const createExecutionRecordTables: Migration = (database) => {
       result TEXT NOT NULL,
       rationale TEXT NOT NULL,
       evidence_ids TEXT NOT NULL,
-      child_outcome_ids TEXT NOT NULL,
+      dependency_outcome_ids TEXT NOT NULL,
       tested_input TEXT,
       execution_id TEXT,
       actor TEXT,
@@ -115,7 +115,7 @@ const createProposalTable: Migration = (database) => {
       attempt INTEGER NOT NULL,
       assessment_id TEXT NOT NULL REFERENCES mission_assessment(id),
       content TEXT NOT NULL,
-      objective_node_id TEXT REFERENCES mission_node(id),
+      created_node_id TEXT REFERENCES mission_node(id),
       approved_at INTEGER,
       created_at INTEGER NOT NULL
     );

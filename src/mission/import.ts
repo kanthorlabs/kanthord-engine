@@ -29,6 +29,8 @@ import {
   type TaskContent,
   type Violation,
 } from "./contract.ts";
+import { ControlError } from "./control.ts";
+import { dependencyEditGuarded } from "./dependency.ts";
 import { hasDependencyCycle, type DepEdge } from "./graph.ts";
 import { nodeRecord } from "./node-read.ts";
 import { parsePlanFile, type ParsedPlanFile } from "./parser.ts";
@@ -464,10 +466,7 @@ function resolveGraph(result: ResolvedImport): void {
       depends_on: dependsOn,
     })),
   );
-  const runnable = result.resolved_entries
-    .filter((item) => item.entry.kind !== PlanFileKind.Task)
-    .map((item) => item.key);
-  if (hasDependencyCycle(runnable, edges, result.parent_map))
+  if (hasDependencyCycle(edges))
     result.violations.push(
       violation(
         MissionErrorCode.Cycle,
@@ -749,11 +748,30 @@ export function checkImportCondition(
       );
       continue;
     }
-    if (modified.has(id) && !importAdmissible(node.state, node.attempt))
+    if (modified.has(id) && !importAdmissible(node.state, node.attempt)) {
       violations.push(
         violation(
           MissionErrorCode.ConditionFailed,
           "Node does not satisfy the import condition.",
+          { state: node.state, attempt: node.attempt },
+          locator,
+        ),
+      );
+      continue;
+    }
+    const previous = new Set(
+      resolved.current_dependencies
+        .filter((edge) => edge.dependent === id)
+        .map((edge) => edge.depends_on),
+    );
+    const next = resolved.dependencies.get(id) ?? new Set<string>();
+    const adding = [...next].some((target) => !previous.has(target));
+    const removing = [...previous].some((target) => !next.has(target));
+    if ((adding || removing) && dependencyEditGuarded(tx, node, adding))
+      violations.push(
+        violation(
+          ControlError.StateConflict,
+          "Node state refuses a dependency edit.",
           { state: node.state, attempt: node.attempt },
           locator,
         ),

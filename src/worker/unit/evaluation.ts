@@ -14,9 +14,8 @@ import {
   type ExecutionRun,
 } from "./execution-run.ts";
 import {
-  nodeKindOf,
   readAttemptEvidence,
-  readObjectives,
+  readDependencies,
   readPinnedRevision,
 } from "./node-reads.ts";
 import { NodeKind, type NativeAgent } from "./native-agent.ts";
@@ -36,7 +35,11 @@ import {
 } from "./judgement.ts";
 import { renderWorkPrompt } from "../../agent/prompt-composer.ts";
 import type { StepsInput } from "./steps-objective.ts";
-import { WorkspaceKind } from "./workspace.ts";
+import {
+  WorkspaceKind,
+  workRepositoriesOf,
+  type InitiativeCheckout,
+} from "./workspace.ts";
 import { ActionResultKind } from "../contract.ts";
 import {
   evaluationEnd,
@@ -71,10 +74,11 @@ async function judge(
   evidence: unknown,
   verificationRun: VerificationRun,
   directory: string,
+  checkouts: readonly InitiativeCheckout[],
   openAgent: OpenAgent,
-  objectives: Awaited<ReturnType<typeof readObjectives>> | null,
+  dependencies: Awaited<ReturnType<typeof readDependencies>> | null,
 ) {
-  const kind = nodeKindOf(revision, input.setup);
+  const kind = input.setup.node_kind;
   const commands = verificationCommands(revision);
   const verification = verificationRun.verification;
   if (!verificationPassed(verification, commands))
@@ -89,6 +93,7 @@ async function judge(
     node_id: input.claim.node_id,
     revision: input.claim.pinned_revision,
     content: revision.content,
+    repositories: workRepositoriesOf(directory, checkouts),
   });
   await agent.instruct(
     work,
@@ -97,7 +102,7 @@ async function judge(
       tasks: revision.tasks,
       verification,
       evidence,
-      objectives,
+      dependencies,
     }),
   );
   if (agent.budget.exhausted()) return run.stop(EndReason.AssessmentAbsent);
@@ -138,7 +143,7 @@ async function evaluate(
 ) {
   assert.ok(prepared.directory);
   assert.equal(input.claim.execution_id, input.setup.execution_id);
-  const kind = nodeKindOf(revision, input.setup);
+  const kind = input.setup.node_kind;
   const verificationRun = await runVerificationsWithOutput({
     observe: verificationObserver(
       run.spans,
@@ -169,8 +174,8 @@ async function evaluate(
     ],
     verification,
   });
-  const objectives =
-    kind === NodeKind.Initiative ? await readObjectives(run) : null;
+  const dependencies =
+    kind === NodeKind.Initiative ? await readDependencies(run) : null;
   let judgement: Awaited<ReturnType<typeof judge>>;
   try {
     judgement = await judge(
@@ -180,8 +185,9 @@ async function evaluate(
       prepared.reviewBundle,
       verificationRun,
       prepared.directory,
+      prepared.checkouts,
       openAgent,
-      objectives,
+      dependencies,
     );
   } catch (error) {
     if (
@@ -195,7 +201,8 @@ async function evaluate(
   }
   return {
     evidence_ids: [recorded.id, ...prepared.evidenceIds],
-    child_outcome_ids: objectives?.outcomes.map((outcome) => outcome.id) ?? [],
+    dependency_outcome_ids:
+      dependencies?.outcomes.map((outcome) => outcome.id) ?? [],
     ...judgement,
   };
 }
@@ -208,7 +215,7 @@ export async function runEvaluation(
 ): Promise<ExecutionEnd> {
   const revision = await readPinnedRevision(run);
   const evidence = await readAttemptEvidence(run);
-  const kind = nodeKindOf(revision, input.setup);
+  const kind = input.setup.node_kind;
   const prepared = await prepareEvaluation(input, run, kind, evidence);
   try {
     const assessment = await run.spans.within(
@@ -235,6 +242,6 @@ export async function runEvaluation(
       };
     return run.stop(EndReason.OperationFailed);
   } finally {
-    input.workspaces.release(prepared.directory, WorkspaceKind.Execution);
+    input.workspaces.release(prepared.key, WorkspaceKind.Execution);
   }
 }

@@ -10,7 +10,8 @@ import {
   readAssessmentsOfAttempt,
   type AssessmentRow,
 } from "./record-store.ts";
-import { readNode, readMissionNodes, type NodeRow } from "./store.ts";
+import { directDependenciesOf } from "./graph.ts";
+import { readDependencies, readNode, type NodeRow } from "./store.ts";
 
 export const CurrencyReason = {
   Context: "The assessment no longer matches its pinned context.",
@@ -19,25 +20,23 @@ export const CurrencyReason = {
 } as const;
 const stringSet = z.array(z.string());
 
-function childrenMatch(
+function dependenciesMatch(
   tx: Transaction,
   row: AssessmentRow,
   node: NodeRow,
 ): boolean {
   if (node.kind !== NodeKind.Initiative) return true;
-  const objectives = readMissionNodes(tx, node.mission_id).filter(
-    (child) =>
-      child.kind === NodeKind.Objective &&
-      child.parent_id === node.id &&
-      child.retired_at === null,
+  const direct = directDependenciesOf(
+    node.id,
+    readDependencies(tx, node.mission_id),
   );
   const outcomes = stringSet
-    .parse(JSON.parse(row.child_outcome_ids))
+    .parse(JSON.parse(row.dependency_outcome_ids))
     .map((id) => readOutcome(tx, id));
-  const childIds = new Set(outcomes.map((outcome) => outcome?.node_id));
+  const named = new Set(outcomes.map((outcome) => outcome?.node_id));
   return (
-    childIds.size === objectives.length &&
-    objectives.every((child) => childIds.has(child.id)) &&
+    named.size === direct.length &&
+    direct.every((id) => named.has(id)) &&
     outcomes.every(
       (outcome) =>
         outcome !== null &&
@@ -56,7 +55,7 @@ function contextMatches(tx: Transaction, row: AssessmentRow): boolean {
     stringSet
       .parse(JSON.parse(row.evidence_ids))
       .every((id) => readEvidence(tx, id)?.node_id === row.node_id) &&
-    childrenMatch(tx, row, node)
+    dependenciesMatch(tx, row, node)
   );
 }
 

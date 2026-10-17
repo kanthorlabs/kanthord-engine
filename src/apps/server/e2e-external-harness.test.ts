@@ -105,7 +105,7 @@ test(
       project.id,
       "initiative-1.md",
       "initiative",
-      [],
+      [bindings.bindings.repo!.id],
     );
     const objective = await createJourneyNode(
       cli,
@@ -325,7 +325,7 @@ test(
         {
           ...ctx(second.execution),
           evidence_ids: [run.id, work.id],
-          child_outcome_ids: [],
+          dependency_outcome_ids: [],
           result: SUCCESS,
           rationale: "hello.txt exists",
           tested_input: repoAt("a"),
@@ -356,7 +356,7 @@ test(
           [
             "mission",
             "execution",
-            "objective",
+            "dependency",
             "list",
             third.execution.execution_id,
           ],
@@ -371,7 +371,7 @@ test(
           [
             "mission",
             "execution",
-            "objective",
+            "dependency",
             "outcome",
             "list",
             third.execution.execution_id,
@@ -411,14 +411,14 @@ test(
       async () => {
         const fourth = await pull();
         assert.equal(fourth.execution.node_id, initiative);
-        const testedInput = [repoAt("b")];
+        const testedInput = repoAt("b");
         const run = await verification(fourth.execution, testedInput, "true");
         const assessed = await cli.write<Assessed>(
           ["mission", "assessment", "submit", initiative],
           {
             ...ctx(fourth.execution),
             evidence_ids: [run.id, report.id],
-            child_outcome_ids: [outcomeA],
+            dependency_outcome_ids: [outcomeA],
             result: SUCCESS,
             rationale: "A is complete.",
             tested_input: testedInput,
@@ -426,7 +426,7 @@ test(
           auth.token,
         );
         assert.equal(assessed.node.state, NodeState.Completed);
-        assert.deepEqual(assessed.assessment.child_node_ids, [objective]);
+        assert.deepEqual(assessed.assessment.dependency_node_ids, [objective]);
         assert.equal(assessed.outcome.result, SUCCESS);
       },
     );

@@ -42,6 +42,7 @@ import {
   type IntakeStorage,
   type IntakeCheck,
   type EventDecoder,
+  type NodeKind,
 } from "./contract.ts";
 import { addDependency, removeDependency } from "./dependency.ts";
 import { pauseNode, readyNode, resumeNode } from "./control-hold.ts";
@@ -69,9 +70,9 @@ import {
   clearedOutcome,
   clearedAssessment,
   reworkAssessment,
-  executionObjectives,
-  executionObjectiveOutcomes,
-  executionObjectiveEvidence,
+  executionDependencies,
+  executionDependencyOutcomes,
+  executionDependencyEvidence,
 } from "./execution-read.ts";
 import { claim, release, failure } from "./transitions.ts";
 import { actionContextOf } from "./action-context.ts";
@@ -188,32 +189,32 @@ export class MissionService
 
   declare(registry: OperationRegistry): void {
     registry.register(
-      missionOperations["execution.objective.list"],
+      missionOperations["execution.dependency.list"],
       ({ query }, caller) => {
         assert.ok(caller.execution);
         const claim = caller.execution;
         return caller.commit((tx) =>
-          executionObjectives(tx, this.dependencies, claim, query),
+          executionDependencies(tx, this.dependencies, claim, query),
         );
       },
     );
     registry.register(
-      missionOperations["execution.objective.outcome.list"],
+      missionOperations["execution.dependency.outcome.list"],
       ({ query }, caller) => {
         assert.ok(caller.execution);
         const claim = caller.execution;
         return caller.commit((tx) =>
-          executionObjectiveOutcomes(tx, this.dependencies, claim, query),
+          executionDependencyOutcomes(tx, this.dependencies, claim, query),
         );
       },
     );
     registry.register(
-      missionOperations["execution.objective.evidence.list"],
+      missionOperations["execution.dependency.evidence.list"],
       ({ query }, caller) => {
         assert.ok(caller.execution);
         const claim = caller.execution;
         return caller.commit((tx) =>
-          executionObjectiveEvidence(tx, this.dependencies, claim, query),
+          executionDependencyEvidence(tx, this.dependencies, claim, query),
         );
       },
     );
@@ -963,6 +964,10 @@ export class MissionService
       nodeId,
       nodeRevision,
     );
+  }
+
+  nodeKindOf(tx: Transaction, nodeId: string): NodeKind {
+    return requireNode(tx, nodeId).kind;
   }
 
   start(): Promise<Error | null> {

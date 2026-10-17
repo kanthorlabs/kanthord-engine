@@ -39,6 +39,7 @@ import {
   type PoolHost,
   type RepositoryPolicyOf,
   type RepositoryBindingIdsOf,
+  type NodeKindOf,
   type PinnedCredentialMetadataFn,
   type CredentialMetadataOf,
   type SchedulerClaims,
@@ -109,6 +110,7 @@ export interface Dependencies {
   workerBindingRowOf: WorkerBindingRowOf;
   repositoryPolicyOf: RepositoryPolicyOf;
   repositoryBindingIdsOf: RepositoryBindingIdsOf;
+  nodeKindOf: NodeKindOf;
   pinnedCredentialMetadata: PinnedCredentialMetadataFn;
   credentialMetadata: CredentialMetadataOf;
   monotonicNow?: () => number;

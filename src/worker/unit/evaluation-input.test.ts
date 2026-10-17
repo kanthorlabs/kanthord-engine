@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { readFileSync, statSync, existsSync } from "node:fs";
+import { readFileSync, readdirSync, statSync, existsSync } from "node:fs";
 import { createServer } from "node:http";
 import { once } from "node:events";
 import type { AddressInfo } from "node:net";
@@ -10,10 +10,19 @@ import { temporary, hostEnvironment } from "../../kernel/test-support.ts";
 import { createIdentity } from "../../kernel/identity.ts";
 import type { Evidence } from "../../mission/contract.ts";
 import type { MethodClients } from "./method-clients.ts";
-import { anthropicSetup, WORKING_LAYER_ALL_ON } from "./test-support.ts";
+import {
+  anthropicSetup,
+  repositorySetup,
+  WORKING_LAYER_ALL_ON,
+} from "./test-support.ts";
 import { ExecutionRun } from "./execution-run.ts";
 import { NodeKind } from "./native-agent.ts";
-import { WorkspaceRoot, WorkspaceKind } from "./workspace.ts";
+import {
+  CHECKOUTS_DIRECTORY,
+  EVIDENCE_DIRECTORY,
+  WorkspaceRoot,
+  WorkspaceKind,
+} from "./workspace.ts";
 import type { RepositoryTransport } from "../contract.ts";
 import {
   snapshotOf,
@@ -41,7 +50,7 @@ test("snapshot selection excludes requests and verifications and orders by ident
   assert.equal(placedOf(evidence), null);
 });
 
-test("B3 review bundle places all supporting assets beside repositories and removes partial object failures", async (t) => {
+test("B3 review bundle places all supporting assets in the evidence directory outside the checkouts and removes partial object failures", async (t) => {
   for (const mode of ["success", "failure", "cancel"] as const) {
     const setup = anthropicSetup();
     const repository = {
@@ -162,12 +171,22 @@ test("B3 review bundle places all supporting assets beside repositories and remo
         ASSET_REVIEW_COUNT,
       );
       assert.equal(JSON.stringify(result).includes(url), false);
+      assert.equal(
+        result.directory,
+        join(workspaces.executionKey(claim.execution_id), CHECKOUTS_DIRECTORY),
+      );
+      const evidenceDirectory = join(result.key, EVIDENCE_DIRECTORY);
+      assert.deepEqual(
+        result.reviewBundle.assets.map((item) => item.path).sort(),
+        [first, second].map((id) => join("..", EVIDENCE_DIRECTORY, id)).sort(),
+      );
       const OBJECT_REPORT = "object report";
       assert.equal(
-        readFileSync(join(result.directory, second), "utf8"),
+        readFileSync(join(evidenceDirectory, second), "utf8"),
         OBJECT_REPORT,
       );
-      workspaces.release(result.directory, WorkspaceKind.Execution);
+      assert.equal(existsSync(join(result.directory, second)), false);
+      workspaces.release(result.key, WorkspaceKind.Execution);
     } finally {
       run.dispose();
       server.closeAllConnections();
@@ -178,7 +197,7 @@ test("B3 review bundle places all supporting assets beside repositories and remo
   }
 });
 
-test("evaluation places a produced report privately and preserves command order", async (t) => {
+test("an initiative with no binding places the produced evidence privately and preserves command order", async (t) => {
   const setup = anthropicSetup({ repositories: [] });
   const claim = {
     execution_id: setup.execution_id,
@@ -239,7 +258,8 @@ test("evaluation places a produced report privately and preserves command order"
     statSync(join(prepared.directory, assetId)).mode & 0o777,
     PRIVATE,
   );
-  workspaces.release(prepared.directory, WorkspaceKind.Execution);
+  assert.equal(prepared.directory, prepared.key);
+  workspaces.release(prepared.key, WorkspaceKind.Execution);
   const content = {
     name: "name",
     requirement: "requirement",
@@ -260,4 +280,78 @@ test("evaluation places a produced report privately and preserves command order"
     }),
     ["node", "task"],
   );
+});
+
+const PLACED_REPORT = "placed report";
+
+test("an initiative with one binding places the produced evidence outside its clean checkout", async (t) => {
+  const setup = anthropicSetup({ repositories: [repositorySetup()] });
+  const claim = {
+    execution_id: setup.execution_id,
+    node_id: createIdentity("node"),
+    attempt: 1,
+    pinned_revision: 1,
+    node_branch: "kanthord/node_01ARZ3NDEKTSV4RRFFQ69G5FAA",
+    created_at: Date.now(),
+    expired_at: Date.now() + 60000,
+    trace_id: "trace",
+    root_span_id: "1".repeat(16),
+  };
+  const assetId = createIdentity("evidence_asset");
+  const address = { kind: "produced", sha256: "a".repeat(64) };
+  const evidence = [
+    { id: "evidence", assets: [{ id: assetId, kind: "produced", address }] },
+  ] as Evidence[];
+  const clients = {
+    mission: {
+      "execution.evidence.asset.content.get": async () => ({
+        type: "completed",
+        status: 200,
+        data: {
+          asset_id: assetId,
+          address,
+          data: Buffer.from(PLACED_REPORT).toString("base64"),
+          encoding: "base64",
+          media_type: "text/markdown",
+        },
+      }),
+    },
+  } as unknown as MethodClients;
+  const run = new ExecutionRun({
+    claim,
+    clients,
+    credentials: { release: async () => {} },
+    context: background,
+  });
+  t.after(() => run.dispose());
+  const workspaces = WorkspaceRoot.open(temporary(t));
+  const prepared = await prepareEvaluation(
+    {
+      setup,
+      claim,
+      workspaces,
+      transport: {
+        proveSshIdentity: async () => {},
+        cloneSnapshot: async () => "a".repeat(40),
+      } as unknown as RepositoryTransport,
+      env: hostEnvironment(),
+    },
+    run,
+    NodeKind.Initiative,
+    evidence,
+  );
+  assert.equal(
+    prepared.directory,
+    join(prepared.key, CHECKOUTS_DIRECTORY, setup.repositories[0]!.name),
+  );
+  assert.deepEqual(readdirSync(prepared.directory), []);
+  assert.equal(
+    readFileSync(join(prepared.key, EVIDENCE_DIRECTORY, assetId), "utf8"),
+    PLACED_REPORT,
+  );
+  assert.deepEqual(
+    prepared.reviewBundle.assets.map((item) => item.path),
+    [join("..", "..", EVIDENCE_DIRECTORY, assetId)],
+  );
+  workspaces.release(prepared.key, WorkspaceKind.Execution);
 });

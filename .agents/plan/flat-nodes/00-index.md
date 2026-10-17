@@ -136,6 +136,7 @@ Every seam below is a Kind 2 collaboration (`docs/brainstorm/architecture.impl.m
 | `ProjectBindings.workerBindingOf`    | the existing answer plus `traits: string[]`                                                                                                | Project   | 05   |
 | `WorkerDeclarations.declarationOf`   | `(workerName: string): { declared_node_states; declared_works; resource_budget; … } \| null`                                               | Worker    | 05   |
 | `SchedulerMatch.unmatchedClaims`     | `(tx, projectId: string): { node_id: string; revision: number; claim: ClaimableState }[]`                                                  | Scheduler | 05   |
+| `MissionCollaborations.nodeKindOf`   | `(tx, nodeId: string): ExecutionNodeKind` — the kind of the node, for `ExecutionSetup.node_kind` (decision D30)                            | Mission   | 02   |
 
 ## Citations
 

@@ -16,7 +16,7 @@ export function addExecutionCommands(mission: Command): void {
     .description("Execution-scoped Mission reads");
   execution.action(() => execution.help());
   addRevisionReads(execution);
-  addObjectiveReads(execution);
+  addDependencyReads(execution);
   const evidence = execution.command("evidence").description("Bound evidence");
   evidence.action(() => evidence.help());
   addPagination(
@@ -157,34 +157,30 @@ function executionIdentity(executionId: string, code: string): void {
     throw new Diagnostic(code, "invalid execution ID");
 }
 
-function addObjectiveReads(execution: Command): void {
-  const objective = execution
-    .command("objective")
-    .description("Current child objectives");
-  objective.action(() => objective.help());
-  const outcome = objective
+function addDependencyReads(execution: Command): void {
+  const dependency = execution
+    .command("dependency")
+    .description("Direct dependencies of an initiative");
+  dependency.action(() => dependency.help());
+  const outcome = dependency
     .command("outcome")
-    .description("Current objective outcomes");
+    .description("Current dependency outcomes");
   outcome.action(() => outcome.help());
-  const evidence = objective
+  const evidence = dependency
     .command("evidence")
-    .description("Current objective evidence");
+    .description("Current dependency evidence");
   evidence.action(() => evidence.help());
   for (const [group, operation, description] of [
-    [
-      objective,
-      "execution.objective.list",
-      "List the current child objectives",
-    ],
+    [dependency, "execution.dependency.list", "List the direct dependencies"],
     [
       outcome,
-      "execution.objective.outcome.list",
-      "List the current outcomes of the child objectives",
+      "execution.dependency.outcome.list",
+      "List the current outcomes of the direct dependencies",
     ],
     [
       evidence,
-      "execution.objective.evidence.list",
-      "List the current evidence of the child objectives",
+      "execution.dependency.evidence.list",
+      "List the current evidence of the direct dependencies",
     ],
   ] as const) {
     addPagination(

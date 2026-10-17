@@ -18,7 +18,12 @@ import {
   insertOutcome,
 } from "./record-store.ts";
 import { getRevision } from "./node-read.ts";
-import { insertRevision, insertNode, setNodeState } from "./store.ts";
+import {
+  insertDependency,
+  insertRevision,
+  insertNode,
+  setNodeState,
+} from "./store.ts";
 import { evidenceHarness, executionHarness } from "./test-support.ts";
 
 const IDENTITY = testHumanIdentity("ulrich", "Ulrich", "token");
@@ -37,7 +42,7 @@ const THIRD_REVISION = 3;
 const PINNED = "Pinned";
 const PINNED_FILENAME = "initiative.md";
 
-test("initiative reads use outcome revisions, include discarded children, minimize new children and exclude retired children", async (t) => {
+test("initiative reads use outcome revisions, include discarded dependencies, minimize new dependencies and exclude retired dependencies", async (t) => {
   const h = executionHarness(t, IDENTITY);
   const childId = createIdentity("node");
   const freshId = createIdentity("node");
@@ -60,6 +65,7 @@ test("initiative reads use outcome revisions, include discarded children, minimi
         content: { ...base.content, name: PINNED },
         tasks: [],
       });
+      insertDependency(tx, h.mission_id, h.node_id, id);
     }
     setNodeState(tx, childId, NodeState.Discarded);
     insertEvidence(
@@ -85,7 +91,7 @@ test("initiative reads use outcome revisions, include discarded children, minimi
       result: AssessmentResult.Undetermined,
       rationale: "Discard",
       evidence_ids: canonicalJSON([evidenceId]),
-      child_outcome_ids: "[]",
+      dependency_outcome_ids: "[]",
       tested_input: null,
       execution_id: null,
       actor: canonicalJSON(h.actor),
@@ -117,7 +123,7 @@ test("initiative reads use outcome revisions, include discarded children, minimi
     query: {},
     body: null,
   };
-  const page = await h.invoke("execution.objective.list", input);
+  const page = await h.invoke("execution.dependency.list", input);
   const child = page.items.find((item) => item.id === childId)!;
   assert.ok("content" in child);
   assert.equal(child.content.name, PINNED);
@@ -128,13 +134,13 @@ test("initiative reads use outcome revisions, include discarded children, minimi
     { id: freshId, state: NodeState.Pending },
   );
   assert.deepEqual(
-    (await h.invoke("execution.objective.outcome.list", input)).items.map(
+    (await h.invoke("execution.dependency.outcome.list", input)).items.map(
       (item) => item.id,
     ),
     [outcomeId],
   );
   assert.deepEqual(
-    (await h.invoke("execution.objective.evidence.list", input)).items.map(
+    (await h.invoke("execution.dependency.evidence.list", input)).items.map(
       (item) => item.id,
     ),
     [evidenceId],
@@ -145,22 +151,22 @@ test("initiative reads use outcome revisions, include discarded children, minimi
       .run(LATER_TS, childId),
   );
   assert.equal(
-    (await h.invoke("execution.objective.list", input)).items.length,
+    (await h.invoke("execution.dependency.list", input)).items.length,
     SINGLE_ITEM,
   );
   assert.equal(
-    (await h.invoke("execution.objective.outcome.list", input)).items.length,
+    (await h.invoke("execution.dependency.outcome.list", input)).items.length,
     NO_ITEMS,
   );
   assert.equal(
-    (await h.invoke("execution.objective.evidence.list", input)).items.length,
+    (await h.invoke("execution.dependency.evidence.list", input)).items.length,
     NO_ITEMS,
   );
   const objective = evidenceHarness(t, IDENTITY);
   for (const operation of [
-    "execution.objective.list",
-    "execution.objective.outcome.list",
-    "execution.objective.evidence.list",
+    "execution.dependency.list",
+    "execution.dependency.outcome.list",
+    "execution.dependency.evidence.list",
   ] as const)
     assert.deepEqual(
       await objective.invoke(operation, {
@@ -197,7 +203,7 @@ test("execution evidence is attempt-bound and cleared outcome appears only after
       result: AssessmentResult.Undetermined,
       rationale: "Blocked",
       evidence_ids: "[]",
-      child_outcome_ids: "[]",
+      dependency_outcome_ids: "[]",
       tested_input: null,
       execution_id: null,
       actor: canonicalJSON(h.actor),

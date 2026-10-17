@@ -173,7 +173,13 @@ export async function setup(t: TestContext, options: SetupOptions = {}) {
           : {}),
       },
     );
-    return result.revisions[FIRST_INDEX]!.node_id;
+    const nodeId = result.revisions[FIRST_INDEX]!.node_id;
+    if (parentId)
+      await c.write(["mission", "dependency", "add", parentId, nodeId], {
+        reason: "plan",
+        expected_mission_version: await missionVersion(),
+      });
+    return nodeId;
   };
   const machine = await cliMachine(c.session, {
     masterKey: c.fixture.config.master_key,

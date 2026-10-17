@@ -954,14 +954,14 @@ export const assessmentSchema = z.strictObject({
   attempt: z.number().int().nonnegative(),
   node_revision: z.number().int().positive(),
   evidence_ids: z.array(identitySchema("evidence")),
-  child_outcome_ids: z.array(identitySchema("outcome")),
+  dependency_outcome_ids: z.array(identitySchema("outcome")),
   result: assessmentResultSchema,
   rationale: textSchema,
   tested_input: testedInputSchema.nullable(),
   actor: actorSchema,
   created_at: timestamp,
   currency: currencySchema.nullable(),
-  child_node_ids: z.array(identitySchema("node")),
+  dependency_node_ids: z.array(identitySchema("node")),
   worker_version: textSchema.nullable(),
 });
 export type Assessment = z.infer<typeof assessmentSchema>;
@@ -1114,7 +1114,7 @@ export const PROPOSAL_MAX = 10;
 export const proposalTaskSchema = contentSchema.omit({ bindings: true });
 export type ProposalTask = z.infer<typeof proposalTaskSchema>;
 export const proposalContentSchema = z.strictObject({
-  objective_id: identitySchema(NODE_IDENTITY_PREFIX),
+  dependency_id: identitySchema(NODE_IDENTITY_PREFIX),
   ...contentSchema.pick({ name: true, requirement: true, criterion: true })
     .shape,
   task: proposalTaskSchema,
@@ -1126,7 +1126,7 @@ export const proposalSchema = z.strictObject({
   attempt: z.number().int().nonnegative(),
   assessment_id: identitySchema("assessment"),
   content: proposalContentSchema,
-  objective_node_id: identitySchema(NODE_IDENTITY_PREFIX).nullable(),
+  created_node_id: identitySchema(NODE_IDENTITY_PREFIX).nullable(),
   approved_at: timestamp.nullable(),
   created_at: timestamp,
 });
@@ -1137,15 +1137,15 @@ export const proposalApproveSchema = z.strictObject({
 });
 export type ProposalApprove = z.infer<typeof proposalApproveSchema>;
 export const proposalApproveResultSchema = z.strictObject({
-  objective: nodeChangeSchema,
-  initiative: controlResultSchema,
+  created: nodeChangeSchema,
+  proposer: controlResultSchema,
 });
 export const assessmentSubmitSchema = executionContextSchema.extend({
   evidence_ids: z
     .array(identitySchema("evidence"))
     .refine((items) => new Set(items).size === items.length)
     .meta({ uniqueItems: true }),
-  child_outcome_ids: z
+  dependency_outcome_ids: z
     .array(identitySchema("outcome"))
     .refine((items) => new Set(items).size === items.length)
     .meta({ uniqueItems: true }),
@@ -1282,9 +1282,9 @@ export const admissionAnswerSchema = z.union([
   }),
 ]);
 export type AdmissionAnswer = z.infer<typeof admissionAnswerSchema>;
-export type ExecutionObjective = z.infer<typeof executionObjectiveSchema>;
-export const executionObjectiveSchema = z.union([
-  nodeSchema.options[1],
+export type ExecutionDependency = z.infer<typeof executionDependencySchema>;
+export const executionDependencySchema = z.union([
+  nodeSchema,
   z.strictObject({ id: identitySchema("node"), state: nodeStateSchema }),
 ]);
 export const rebindResultSchema = z.strictObject({
@@ -1358,47 +1358,50 @@ const dependencyInput = z.strictObject({
 });
 
 export const missionOperations = {
-  "execution.objective.list": {
+  "execution.dependency.list": {
     ...readOperation,
     access: AccessPolicy.Client,
     requiresExecution: true,
-    id: "mission.execution.objective.list",
+    id: "mission.execution.dependency.list",
     method: HttpMethod.Get,
-    path: "/api/mission/execution/:execution_id/objective",
+    path: "/api/mission/execution/:execution_id/dependency",
     input: readInput(
       z.strictObject({ execution_id: identitySchema("execution") }),
       z.strictObject(pageQuery),
     ),
-    output: pageOf(executionObjectiveSchema),
-    description: "List current objectives at their outcome revisions.",
+    output: pageOf(executionDependencySchema),
+    description:
+      "List the direct dependencies of an initiative at their outcome revisions.",
   },
-  "execution.objective.outcome.list": {
+  "execution.dependency.outcome.list": {
     ...readOperation,
     access: AccessPolicy.Client,
     requiresExecution: true,
-    id: "mission.execution.objective.outcome.list",
+    id: "mission.execution.dependency.outcome.list",
     method: HttpMethod.Get,
-    path: "/api/mission/execution/:execution_id/objective/outcome",
+    path: "/api/mission/execution/:execution_id/dependency/outcome",
     input: readInput(
       z.strictObject({ execution_id: identitySchema("execution") }),
       z.strictObject(pageQuery),
     ),
     output: pageOf(outcomeSchema),
-    description: "List current outcomes of current objectives.",
+    description:
+      "List the current outcomes of the direct dependencies of an initiative.",
   },
-  "execution.objective.evidence.list": {
+  "execution.dependency.evidence.list": {
     ...readOperation,
     access: AccessPolicy.Client,
     requiresExecution: true,
-    id: "mission.execution.objective.evidence.list",
+    id: "mission.execution.dependency.evidence.list",
     method: HttpMethod.Get,
-    path: "/api/mission/execution/:execution_id/objective/evidence",
+    path: "/api/mission/execution/:execution_id/dependency/evidence",
     input: readInput(
       z.strictObject({ execution_id: identitySchema("execution") }),
       z.strictObject(pageQuery),
     ),
     output: pageOf(evidenceSchema),
-    description: "List evidence named by current objective outcomes.",
+    description:
+      "List the evidence that the current outcomes of the direct dependencies name.",
   },
   "execution.evidence.list": {
     ...readOperation,
@@ -1811,7 +1814,7 @@ export const missionOperations = {
       z.strictObject({ ...pageQuery, attempt: attemptSelector(0).optional() }),
     ),
     output: pageOf(proposalSchema),
-    description: "List fix-objective proposals of an initiative.",
+    description: "List the fix-node proposals of an examine proposer.",
   },
   "proposal.approve": {
     ...writeOperation,
@@ -1827,7 +1830,7 @@ export const missionOperations = {
     }),
     output: proposalApproveResultSchema,
     description:
-      "Approve a fix-objective proposal, create its objective and unblock the initiative.",
+      "Approve a fix-node proposal, create its node, add the dependency of the proposer on it and unblock the proposer.",
   },
   "node.unblock": {
     ...writeOperation,

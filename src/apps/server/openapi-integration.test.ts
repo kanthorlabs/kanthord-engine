@@ -123,11 +123,11 @@ test("published handover operations preserve execution proof and bodyless report
   }
 });
 
-test("published execution objective reads name their operations", () => {
+test("published execution dependency reads name their operations", () => {
   for (const name of [
-    "execution.objective.list",
-    "execution.objective.outcome.list",
-    "execution.objective.evidence.list",
+    "execution.dependency.list",
+    "execution.dependency.outcome.list",
+    "execution.dependency.evidence.list",
   ] as const) {
     const fragment = parse(
       readFileSync(
@@ -350,7 +350,7 @@ const MISSION_BLOCKED_CONTEXT_FRAGMENT_EXCEPTIONS = [
     "proposal.approve",
     "mission.proposal.approve",
     "properties",
-    "initiative",
+    "proposer",
     "properties",
     "node",
   ],
@@ -380,8 +380,8 @@ const EVIDENCE_FRAGMENT_EXCEPTIONS = [
   ["evidence.request", "mission.evidence.request", false],
   ["execution.evidence.list", "mission.execution.evidence.list", true],
   [
-    "execution.objective.evidence.list",
-    "mission.execution.objective.evidence.list",
+    "execution.dependency.evidence.list",
+    "mission.execution.dependency.evidence.list",
     true,
   ],
 ] as const;
@@ -401,7 +401,7 @@ const NAMED_FRAGMENT_EXCEPTIONS = new Set([
   ...EVIDENCE_FRAGMENT_EXCEPTIONS.map(
     ([file]) => `openapi/mission/${file}.yaml`,
   ),
-  "openapi/mission/execution.objective.list.yaml",
+  "openapi/mission/execution.dependency.list.yaml",
   ...LEGACY_FRAGMENT_EXCEPTIONS,
   AGENT_PROVIDER_FRAGMENT_EXCEPTION,
 ]);
@@ -732,9 +732,9 @@ const OPERATION_INVENTORY: readonly (readonly [string, AccessPolicy])[] = [
   ["mission.execution.revision.get", AccessPolicy.Client],
   ["mission.execution.evidence.list", AccessPolicy.Client],
   ["mission.execution.evidence.asset.content.get", AccessPolicy.Client],
-  ["mission.execution.objective.list", AccessPolicy.Client],
-  ["mission.execution.objective.outcome.list", AccessPolicy.Client],
-  ["mission.execution.objective.evidence.list", AccessPolicy.Client],
+  ["mission.execution.dependency.list", AccessPolicy.Client],
+  ["mission.execution.dependency.outcome.list", AccessPolicy.Client],
+  ["mission.execution.dependency.evidence.list", AccessPolicy.Client],
   ["mission.execution.clearedOutcome.get", AccessPolicy.Client],
   ["mission.execution.cleared_assessment.get", AccessPolicy.Client],
   ["mission.execution.rework_assessment.get", AccessPolicy.Client],
@@ -1025,7 +1025,7 @@ test("named evidence exceptions retain record shapes and conditional request val
       "utf8",
     ),
   );
-  for (const field of ["evidence_ids", "child_outcome_ids"])
+  for (const field of ["evidence_ids", "dependency_outcome_ids"])
     assert.equal(
       assessment.components.schemas["mission.assessment.submit.Input"]
         .properties.body.properties[field].uniqueItems,
@@ -1033,43 +1033,52 @@ test("named evidence exceptions retain record shapes and conditional request val
     );
 });
 
-test("objective list exception preserves full objective and identity-only variants", () => {
+test("dependency list exception preserves full dependency and identity-only variants", () => {
   const fragment = parse(
     readFileSync(
       join(
         dirname(openapiPath()),
-        "openapi/mission/execution.objective.list.yaml",
+        "openapi/mission/execution.dependency.list.yaml",
       ),
       "utf8",
     ),
   );
   const output =
-    fragment.components.schemas["mission.execution.objective.list.Output"];
+    fragment.components.schemas["mission.execution.dependency.list.Output"];
   assert.deepEqual(output.required, ["items", "next_cursor"]);
   const [full, minimal] = output.properties.items.items.anyOf;
   assert.deepEqual(minimal.required, ["id", "state"]);
   assert.deepEqual(Object.keys(minimal.properties).sort(), ["id", "state"]);
   assert.equal(minimal.additionalProperties, false);
-  assert.deepEqual(full.required, [
-    "id",
-    "filename",
-    "mission_id",
-    "parent_id",
-    "visible_revision",
-    "content",
-    "tasks",
-    "retired_at",
-    "pinned_by_attempts",
-    "kind",
-    "state",
-    "attempt",
-    "priority",
-    "depends_on",
-  ]);
-  assert.deepEqual(full.properties.blocked_context.required, [
-    "outcome",
-    "requests",
-  ]);
+  assert.deepEqual(
+    full.oneOf.map(
+      (variant: { properties: { kind: { const: string } } }) =>
+        variant.properties.kind.const,
+    ),
+    ["initiative", "objective"],
+  );
+  for (const variant of full.oneOf) {
+    assert.deepEqual(variant.required, [
+      "id",
+      "filename",
+      "mission_id",
+      "parent_id",
+      "visible_revision",
+      "content",
+      "tasks",
+      "retired_at",
+      "pinned_by_attempts",
+      "kind",
+      "state",
+      "attempt",
+      "priority",
+      "depends_on",
+    ]);
+    assert.deepEqual(variant.properties.blocked_context.required, [
+      "outcome",
+      "requests",
+    ]);
+  }
 });
 
 test("named Mission fragment size exceptions retain the complete blocked context", () => {

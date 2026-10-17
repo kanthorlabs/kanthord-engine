@@ -75,7 +75,6 @@ const SINGLE_TURN = 1;
 const FAILURE_EXIT = 1;
 const BRACKET_TRIM_OFFSET = 1;
 const SINGLE_CALL = 1;
-const MISSION_VERSION_BASE = 2;
 const THREE_CALLS = 3;
 const PRIVATE_MODE = 0o700;
 const NO_OUTPUT = "";
@@ -219,17 +218,39 @@ test(
         expected_mission_version: FIRST_REVISION,
       },
     );
-    for (const [index, name] of ["a", "b"].entries())
-      await write(["mission", "node", "create", mission.id], {
+    for (const name of ["a", "b"]) {
+      const { version } = await read<{ version: number }>([
+        "mission",
+        "get",
+        project.id,
+      ]);
+      const objective = await write<{
+        mission_version: number;
+        revisions: { node_id: string }[];
+      }>(["mission", "node", "create", mission.id], {
         filename: `${name}.md`,
         kind: "objective",
         content: { ...CONTENT, bindings: [bindingSet.bindings.repo!.id] },
         tasks: [],
         reason: "runtime acceptance",
-        expected_mission_version: index + MISSION_VERSION_BASE,
+        expected_mission_version: version,
         parent_id: initiative.revisions[0]!.node_id,
         expected_parent_revision: FIRST_REVISION,
       });
+      await write(
+        [
+          "mission",
+          "dependency",
+          "add",
+          initiative.revisions[0]!.node_id,
+          objective.revisions[0]!.node_id,
+        ],
+        {
+          reason: "runtime acceptance",
+          expected_mission_version: objective.mission_version,
+        },
+      );
+    }
     writePrivate(
       join(directory, "server.yaml"),
       stringify(
@@ -492,6 +513,7 @@ test(
       }),
       workspaceAgentFiles: true,
       workspace: prepared.directory,
+      checkouts: [prepared.directory],
       hostHome,
       env: hostEnvironment(),
       modelRuntimeFactory: scriptedModelRuntime(provider),
@@ -675,6 +697,7 @@ test(
         }),
         workspaceAgentFiles: true,
         workspace: lab.directory,
+        checkouts: [lab.directory],
         hostHome,
         env: hostEnvironment(),
         modelRuntimeFactory: scriptedModelRuntime(fake),

@@ -86,7 +86,7 @@ const PRODUCED = {
 const ASSESSMENT = {
   ...CONTEXT,
   evidence_ids: [],
-  child_outcome_ids: [],
+  dependency_outcome_ids: [],
   result: AssessmentResult.Success,
   rationale: REASON,
   tested_input: { kind: "produced", sha256: "a".repeat(64) },
@@ -150,7 +150,7 @@ test("execution and evidence control inputs are strict and refuse forged actors"
   assert.equal(
     assessmentSubmitSchema.safeParse({
       ...ASSESSMENT,
-      child_outcome_ids: [outcomeId, outcomeId],
+      dependency_outcome_ids: [outcomeId, outcomeId],
     }).success,
     false,
   );

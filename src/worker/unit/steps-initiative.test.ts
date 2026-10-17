@@ -1,13 +1,14 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { temporary, hostEnvironment } from "../../kernel/test-support.ts";
 import { createIdentity } from "../../kernel/identity.ts";
 import { background } from "../../kernel/context.ts";
 import type { Revision } from "../../mission/contract.ts";
 import { ExecutionRun, ExecutionStop } from "./execution-run.ts";
-import { anthropicSetup } from "./test-support.ts";
-import { WorkspaceRoot } from "./workspace.ts";
+import { anthropicSetup, repositorySetup } from "./test-support.ts";
+import { CHECKOUTS_DIRECTORY, WorkspaceRoot } from "./workspace.ts";
 import type { MethodClients } from "./method-clients.ts";
 import type { RepositoryTransport } from "../contract.ts";
 import type { NativeAgent } from "./native-agent.ts";
@@ -24,27 +25,13 @@ import { setTimeout } from "node:timers/promises";
 const EVIDENCE_UPLOAD_COUNT = 1;
 const EXPECTED_RELEASES = 1;
 const NO_EVIDENCE_UPLOADS = 0;
-test("initiative reports terminal objectives, rechecks graph changes and removes its workspace", async (t) => {
+test("initiative reports its dependencies once and removes its workspace", async (t) => {
   const scenarios = [
     {
-      states: ["Completed", "Completed"],
+      states: ["Completed"],
       report: "report",
       further: false,
       evidence: true,
-      opens: 1,
-    },
-    {
-      states: ["Available"],
-      report: "report",
-      further: true,
-      evidence: false,
-      opens: 0,
-    },
-    {
-      states: ["Completed", "Available"],
-      report: "report",
-      further: true,
-      evidence: false,
       opens: 1,
     },
     {
@@ -80,13 +67,13 @@ test("initiative reports terminal objectives, rechecks graph changes and removes
     const empty = async () => completed({ items: [], next_cursor: null });
     const clients = {
       mission: {
-        "execution.objective.list": async () =>
+        "execution.dependency.list": async () =>
           completed({
-            items: [{ id: "objective", state: scenario.states[reads++] }],
+            items: [{ id: "dependency", state: scenario.states[reads++] }],
             next_cursor: null,
           }),
-        "execution.objective.outcome.list": empty,
-        "execution.objective.evidence.list": empty,
+        "execution.dependency.outcome.list": empty,
+        "execution.dependency.evidence.list": empty,
         "evidence.submit": async (input: {
           body: { assets: { content: { data: string } }[] };
         }) => {
@@ -191,9 +178,9 @@ test("B4 initiative releases when reads or agent opening consume the wall budget
     let releases = 0;
     const clients = {
       mission: {
-        "execution.objective.list": page,
-        "execution.objective.outcome.list": page,
-        "execution.objective.evidence.list": page,
+        "execution.dependency.list": page,
+        "execution.dependency.outcome.list": page,
+        "execution.dependency.evidence.list": page,
       },
       scheduler: {
         executionRelease: async () => {
@@ -259,9 +246,9 @@ test("an initiative that its agent deadline cuts releases with further work and 
   const releases: unknown[] = [];
   const clients = {
     mission: {
-      "execution.objective.list": page,
-      "execution.objective.outcome.list": page,
-      "execution.objective.evidence.list": page,
+      "execution.dependency.list": page,
+      "execution.dependency.outcome.list": page,
+      "execution.dependency.evidence.list": page,
     },
     scheduler: {
       executionRelease: async (input: { body: unknown }) => {
@@ -318,4 +305,104 @@ test("an initiative that its agent deadline cuts releases with further work and 
   );
   assert.deepEqual(end, { kind: "released", furtherWork: true });
   assert.deepEqual(releases, [{ further_work: true, stop: null }]);
+});
+
+test("an initiative with two repository bindings runs from checkouts/ and lists each repository in the work and examine prompts", async (t) => {
+  const names = ["first", "second"];
+  const setup = anthropicSetup({
+    repositories: names.map((name) => ({ ...repositorySetup(), name })),
+  });
+  const claim = {
+    execution_id: setup.execution_id,
+    node_id: createIdentity("node"),
+    attempt: 1,
+    pinned_revision: 1,
+    node_branch: "kanthord/node_01ARZ3NDEKTSV4RRFFQ69G5FAA",
+    created_at: Date.now(),
+    expired_at: Date.now() + 60000,
+    trace_id: "trace",
+    root_span_id: "1".repeat(16),
+  };
+  const output = join(temporary(t), "directory");
+  const completed = (data: unknown) => ({
+    type: "completed",
+    status: 200,
+    data,
+  });
+  const page = async () => completed({ items: [], next_cursor: null });
+  const clients = {
+    mission: {
+      "execution.dependency.list": page,
+      "execution.dependency.outcome.list": page,
+      "execution.dependency.evidence.list": page,
+      "evidence.submit": async () => completed({ evidence: {} }),
+    },
+    scheduler: {
+      executionRelease: async () => completed({}),
+    },
+  } as unknown as MethodClients;
+  const run = new ExecutionRun({
+    claim,
+    clients,
+    credentials: { release: async () => {} },
+    context: background,
+  });
+  t.after(() => run.dispose());
+  const workspaces = WorkspaceRoot.open(temporary(t));
+  const key = workspaces.executionKey(claim.execution_id);
+  const root = join(key, CHECKOUTS_DIRECTORY);
+  const transport = {
+    proveSshIdentity: async () => {},
+    cloneSnapshot: async () => "a".repeat(40),
+  } as unknown as RepositoryTransport;
+  const opened: { directory: string; checkouts: readonly string[] }[] = [];
+  const texts: string[] = [];
+  const open = async (directory: string, checkouts: readonly string[]) => {
+    opened.push({ directory, checkouts });
+    return {
+      instruct: async (work: { text: string }, text: string) => {
+        texts.push(work.text, text);
+      },
+      lastText: () => "report",
+      budget: { exhausted: () => false },
+    } as unknown as NativeAgent;
+  };
+  assert.deepEqual(
+    await runStepsInitiative(
+      {
+        setup,
+        claim,
+        workspaces,
+        transport,
+        env: hostEnvironment(),
+      },
+      run,
+      {
+        content: {
+          name: "initiative",
+          requirement: "examine",
+          criterion: "examine",
+          verifications: [`pwd > ${output}`],
+        },
+      } as unknown as Revision,
+      new ExecutionBudget({
+        ...claim,
+        resource_budget: setup.resource_budget,
+      }),
+      open,
+    ),
+    { kind: "released", furtherWork: false },
+  );
+  assert.equal(readFileSync(output, "utf8").trim(), root);
+  assert.deepEqual(opened, [
+    { directory: root, checkouts: names.map((name) => join(root, name)) },
+  ]);
+  const [work, examine] = texts;
+  for (const text of [work, examine])
+    for (const name of names)
+      assert.ok(
+        text?.includes(
+          `Repository ${name}: directory \`${name}\`, base branch \`main\``,
+        ),
+      );
 });

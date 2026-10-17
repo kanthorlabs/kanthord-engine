@@ -292,9 +292,9 @@ HTTP `200` returns the summary fields plus:
   judgement stops the execution with `judgement_invalid`, and a second invalid
   review reply ends the review of that task.
   An evaluation judgement of an initiative may carry `proposals`: one
-  fix-objective proposal for each defect inside a completed objective. Each
-  proposal holds `objective_id`, `name`, `requirement`, `criterion` and one
-  `task`. When `proposals` is not empty, the reviewer submits the result
+  fix-node proposal for each defect inside a completed objective dependency.
+  Each proposal holds `dependency_id`, `name`, `requirement`, `criterion` and
+  one `task`. When `proposals` is not empty, the reviewer submits the result
   `undetermined` with the proposals. The reviewer drops `proposals` for an
   objective. See `mission proposal approve` in the [Mission CLI](mission.md).
   A steps execution reads the assessment that caused the latest rework of its

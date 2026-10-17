@@ -2,11 +2,9 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { background } from "../../kernel/context.ts";
 import { OperationResultType } from "../../kernel/operation.ts";
-import { ClosingEvent, NodeState } from "../../mission/contract.ts";
+import { ClosingEvent } from "../../mission/contract.ts";
 import { ExecutionRun, ExecutionStop } from "./execution-run.ts";
 import {
-  allTerminal,
-  nodeKindOf,
   readAllPages,
   readClearedAssessment,
   readPriorRationale,
@@ -14,8 +12,6 @@ import {
   readReworkAssessment,
   READ_PAGE_LIMIT,
 } from "./node-reads.ts";
-import { NodeKind } from "./native-agent.ts";
-import { repositorySetup } from "./test-support.ts";
 import type { MethodClients } from "./method-clients.ts";
 
 const SECOND_ATTEMPT = 2;
@@ -71,36 +67,6 @@ test("reads concatenate ordered pages and enforce their finite limit", async (t)
     ExecutionStop,
   );
   assert.equal(calls, READ_PAGE_LIMIT);
-});
-
-test("node kind follows the repository binding of the content and terminal states follow the pinned revision", () => {
-  const repository = repositorySetup();
-  const content = {
-    name: "node",
-    requirement: "node",
-    criterion: "node",
-    verifications: ["true"],
-    bindings: [repository.binding_id],
-  };
-  assert.equal(
-    nodeKindOf({ content }, { repositories: [repository] }),
-    NodeKind.Objective,
-  );
-  assert.equal(
-    nodeKindOf(
-      { content: { ...content, bindings: [] } },
-      { repositories: [repository] },
-    ),
-    NodeKind.Initiative,
-  );
-  assert.equal(allTerminal([{ id: "node", state: NodeState.Blocked }]), false);
-  assert.equal(
-    allTerminal([
-      { id: "node", state: NodeState.Completed },
-      { id: "other", state: NodeState.Discarded },
-    ]),
-    true,
-  );
 });
 
 test("the assessment reads answer null only on a record not found", async (t) => {

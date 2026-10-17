@@ -188,7 +188,7 @@ test("submissions pin claim fields and settle credentials before an assessment",
   );
   await run.submitAssessment(CLAIM.node_id, {
     evidence_ids: [],
-    child_outcome_ids: [],
+    dependency_outcome_ids: [],
     result: "undetermined",
     rationale: "unknown",
     tested_input: { kind: "produced", sha256: "a".repeat(64) },

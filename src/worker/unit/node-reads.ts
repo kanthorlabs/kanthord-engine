@@ -7,23 +7,14 @@ import {
 import {
   ClosingEvent,
   MissionErrorCode,
-  NodeState,
-  type Revision,
   type Assessment,
-  type ExecutionObjective,
   type Outcome,
 } from "../../mission/contract.ts";
-import type { ExecutionSetup } from "../contract.ts";
 import { requestedChangesText } from "./judgement.ts";
 import { EndReason, ExecutionRun } from "./execution-run.ts";
-import { NodeKind } from "./native-agent.ts";
 
 export const READ_PAGE_LIMIT = 1000;
 const FIRST_ATTEMPT = 1;
-export const TERMINAL_STATES: readonly NodeState[] = [
-  NodeState.Completed,
-  NodeState.Discarded,
-];
 
 export async function readAllPages<T>(
   run: ExecutionRun,
@@ -56,17 +47,6 @@ export function readPinnedRevision(run: ExecutionRun) {
   );
 }
 
-export function nodeKindOf(
-  revision: Pick<Revision, "content">,
-  setup: Pick<ExecutionSetup, "repositories">,
-): NodeKind {
-  return setup.repositories.some(({ binding_id }) =>
-    revision.content.bindings.includes(binding_id),
-  )
-    ? NodeKind.Objective
-    : NodeKind.Initiative;
-}
-
 export function readAttemptEvidence(run: ExecutionRun) {
   return readAllPages(run, (cursor, options) =>
     run.clients.mission["execution.evidence.list"](
@@ -80,28 +60,28 @@ export function readAttemptEvidence(run: ExecutionRun) {
   );
 }
 
-export async function readObjectives(run: ExecutionRun) {
+export async function readDependencies(run: ExecutionRun) {
   const input = (cursor: string | null) => ({
     params: { execution_id: run.claim.execution_id },
     query: cursor === null ? {} : { cursor },
     body: null,
   });
-  const objectives = await readAllPages(run, (cursor, options) =>
-    run.clients.mission["execution.objective.list"](input(cursor), options),
+  const dependencies = await readAllPages(run, (cursor, options) =>
+    run.clients.mission["execution.dependency.list"](input(cursor), options),
   );
   const outcomes = await readAllPages(run, (cursor, options) =>
-    run.clients.mission["execution.objective.outcome.list"](
+    run.clients.mission["execution.dependency.outcome.list"](
       input(cursor),
       options,
     ),
   );
   const evidence = await readAllPages(run, (cursor, options) =>
-    run.clients.mission["execution.objective.evidence.list"](
+    run.clients.mission["execution.dependency.evidence.list"](
       input(cursor),
       options,
     ),
   );
-  return { objectives, outcomes, evidence };
+  return { dependencies, outcomes, evidence };
 }
 
 function nullOnRecordNotFound<T extends Assessment | Outcome>(
@@ -199,12 +179,4 @@ export async function readPriorRationale(
     rationale: (await readClearedAssessment(run))?.rationale ?? null,
     rework: false,
   };
-}
-
-export function allTerminal(
-  objectives: readonly ExecutionObjective[],
-): boolean {
-  return objectives.every((objective) =>
-    TERMINAL_STATES.includes(objective.state),
-  );
 }

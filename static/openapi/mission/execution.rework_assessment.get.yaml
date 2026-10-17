@@ -112,7 +112,7 @@ components:
             maxLength: 35
             pattern: ^evidence_[0-7][0-9A-HJKMNP-TV-Z]{25}$
             description: evidence_ followed by a canonical 26-character uppercase ULID.
-        child_outcome_ids:
+        dependency_outcome_ids:
           type: array
           items:
             type: string
@@ -301,7 +301,7 @@ components:
                 - reasons
               additionalProperties: false
             - type: "null"
-        child_node_ids:
+        dependency_node_ids:
           type: array
           items:
             type: string
@@ -321,13 +321,13 @@ components:
         - attempt
         - node_revision
         - evidence_ids
-        - child_outcome_ids
+        - dependency_outcome_ids
         - result
         - rationale
         - tested_input
         - actor
         - created_at
         - currency
-        - child_node_ids
+        - dependency_node_ids
         - worker_version
       additionalProperties: false

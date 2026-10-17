@@ -54,8 +54,10 @@ const ABOVE_PINNED_REVISION = 2;
 const STALE_ATTEMPT_NUMBER = 2;
 const PAIR_COUNT = 2;
 const THIRD_MISSION_VERSION = 3;
+const FOURTH_MISSION_VERSION = 4;
+const FIFTH_MISSION_VERSION = 5;
 const PRIMARY_PRIORITY = 3;
-const POST_PLANNING_MISSION_VERSION = 4;
+const POST_PLANNING_MISSION_VERSION = 6;
 const TOTAL_EVIDENCE_COUNT = 4;
 const OBJECT_SIZE_BYTES = 5;
 const NO_OUTPUT = "";
@@ -269,6 +271,14 @@ async function setup(t: TestContext) {
     THIRD_MISSION_VERSION,
     initiative,
   );
+  for (const [objective, version] of [
+    [objectiveA, FOURTH_MISSION_VERSION],
+    [objectiveB, FIFTH_MISSION_VERSION],
+  ] as const)
+    await write(["mission", "dependency", "add", initiative, objective], {
+      reason: "plan",
+      expected_mission_version: version,
+    });
   await write(["mission", "node", "priority", "set", objectiveA], {
     value: PRIMARY_PRIORITY,
     expected_mission_version: POST_PLANNING_MISSION_VERSION,
@@ -374,7 +384,7 @@ test(
     ) => ({
       ...ctx(executionId),
       evidence_ids: evidenceIds,
-      child_outcome_ids: [],
+      dependency_outcome_ids: [],
       result: AssessmentResult.Success,
       rationale: "met",
       tested_input: address(gated),
@@ -870,28 +880,28 @@ test(
       );
     });
     await t.test(
-      "E04.28 initiative reads its outcome-pinned objective context",
+      "E04.28 initiative reads its outcome-pinned dependency context",
       async () => {
         const answer = await h.pull();
         assert.equal(answer.execution.node_id, h.initiative);
         e5 = answer.execution.execution_id;
-        const objectives = await h.read<Page<{ visible_revision: number }>>(
-          ["mission", "execution", "objective", "list", e5],
+        const dependencies = await h.read<Page<{ visible_revision: number }>>(
+          ["mission", "execution", "dependency", "list", e5],
           h.W,
         );
-        assert.equal(objectives.items.length, PAIR_COUNT);
+        assert.equal(dependencies.items.length, PAIR_COUNT);
         assert.ok(
-          objectives.items.every(
+          dependencies.items.every(
             (item) => item.visible_revision === FIRST_REVISION,
           ),
         );
         const outcomes = await h.read<Page<Outcome>>(
-          ["mission", "execution", "objective", "outcome", "list", e5],
+          ["mission", "execution", "dependency", "outcome", "list", e5],
           h.W,
         );
         assert.equal(outcomes.items.length, PAIR_COUNT);
         const evidence = await h.read<Page<Evidence>>(
-          ["mission", "execution", "objective", "evidence", "list", e5],
+          ["mission", "execution", "dependency", "evidence", "list", e5],
           h.W,
         );
         assert.equal(evidence.items.length, TOTAL_EVIDENCE_COUNT);
