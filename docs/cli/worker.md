@@ -242,21 +242,22 @@ shared types, requiredness, defaults and validation. HTTP `200` returns
 one page of released worker summaries in ascending alphabetical order by exact name,
 under the shared [pagination rule](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/architecture.impl.md#pagination). Each item contains
 `name: WorkerName`, `host: "kanthord" | "external-harness"`,
-`declared_node_states: string[]` and `required_node_format: string[]`.
+`declared_node_states: string[]` and `declared_works: ("implement" | "examine")[]`.
+The Scheduler admits a node only when the declared works hold the work of the node.
 
 The catalog describes supplied static templates. It is not a
 runtime plugin store, and registration does not add entries. The declared workers
 and their capabilities are:
 
-| Worker          | Host                           | Method / agent      | Declared node states                         |
-| --------------- | ------------------------------ | ------------------- | -------------------------------------------- |
-| `coder@1`       | kanthord                       | steps / `swe@1`     | `Available`                                  |
-| `reviewer@1`    | kanthord                       | evaluation / `re@1` | `Waiting`, `External.Requested`              |
-| `claude-code@1` | external harness `claude-code` | Harness-owned       | `Available`, `Waiting`, `External.Requested` |
+| Worker          | Host                           | Method / agent      | Declared node states                         | Declared works         |
+| --------------- | ------------------------------ | ------------------- | -------------------------------------------- | ---------------------- |
+| `coder@1`       | kanthord                       | steps / `swe@1`     | `Available`                                  | `implement`, `examine` |
+| `reviewer@1`    | kanthord                       | evaluation / `re@1` | `Waiting`, `External.Requested`              | `implement`, `examine` |
+| `claude-code@1` | external harness `claude-code` | Harness-owned       | `Available`, `Waiting`, `External.Requested` | `implement`, `examine` |
 
 All three declarations are in the current catalog; external-harness integration
 remains later work. `list` returns only the released native workers `coder@1`
-and `reviewer@1`. `get` and binding validation accept all three declarations. All three require a name, a requirement, a criterion, verifications and bindings. No worker named `tdd@1`
+and `reviewer@1`. `get` and binding validation accept all three declarations. No worker named `tdd@1`
 is promised by this specification.
 
 ### `get <worker-name>`
