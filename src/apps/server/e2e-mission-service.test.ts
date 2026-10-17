@@ -26,6 +26,8 @@ import {
   PlanFileKind,
   MissionErrorCode,
   RebindSkipCondition,
+  type Attempt,
+  type ControlResult,
   type Node,
   type Revision,
   type RebindResult,
@@ -84,6 +86,12 @@ const SINGLE_ITEM = 1;
 const SECOND_REVISION = 2;
 const REPOSITORY_NAME = "repo";
 const REPOSITORY_ADDRESS = "git@github.com:owner/repo.git";
+const OTHER_REPOSITORY_NAME = "other-repo";
+const OTHER_REPOSITORY_ADDRESS = "git@github.com:owner/other-repo.git";
+const READY = "ready";
+const ATTEMPT = "attempt";
+const NO_ATTEMPT = 0;
+const STATE_CONFLICT = "mission.node.state_conflict";
 const REASON = "planning edit";
 const CONTENT = {
   name: "Plan",
@@ -2030,6 +2038,135 @@ test(
       "E06.27 rebinding to a tombstoned binding is refused without changing pins",
       async () => {
         await scenarioRemovedBinding(scenario);
+      },
+    );
+  },
+);
+
+async function readyAct(scenario: Scenario, nodeId: string) {
+  const { fixture, mission } = scenario;
+  const path = jsonFile(fixture, SCENARIO_FILE, {
+    reason: REASON,
+    expected_mission_version: scenario.version,
+    expected_state: NodeState.Available,
+    expected_attempt: NO_ATTEMPT,
+  });
+  const answer = success<ControlResult>(
+    await kanthord([MISSION, NODE, READY, nodeId, FILE, path], fixture.env),
+  );
+  assert.equal(answer.node.state, NodeState.Waiting);
+  scenario.version = success<Mission>(
+    await kanthord([MISSION, GET, mission.project_id], fixture.env),
+  ).version;
+  return answer;
+}
+
+test(
+  "EF02.1-EF02.5 direct dependencies gate an initiative through the CLI",
+  { timeout: NODE_EDIT_LIFECYCLE_TIMEOUT_MS },
+  async (t) => {
+    const scenario = await scenarioInitiative(await setup(t));
+    await scenarioChildren(scenario);
+    const { fixture, mission, initiativeId, objectiveId } = scenario;
+    await t.test(
+      "EF02.1 an initiative with no dependency holds a queue job",
+      async () => {
+        await queued(scenario, initiativeId);
+        assert.equal(
+          (await readNode(fixture, initiativeId)).state,
+          NodeState.Available,
+        );
+      },
+    );
+    await t.test(
+      "EF02.2 a dependency of the initiative on an objective routes it to Pending",
+      async () => {
+        await scenarioChange(scenario, [
+          DEPENDENCY,
+          ADD,
+          initiativeId,
+          objectiveId,
+        ]);
+        const initiative = await readNode(fixture, initiativeId);
+        assert.deepEqual(initiative.depends_on, [objectiveId]);
+        assert.equal(initiative.state, NodeState.Pending);
+      },
+    );
+    await t.test(
+      "EF02.3 a dependency add on a Waiting dependent answers state_conflict",
+      async () => {
+        const other = await createNode(
+          fixture,
+          mission.id,
+          NodeKind.Objective,
+          scenario.version,
+          initiativeId,
+          (await readNode(fixture, initiativeId)).visible_revision,
+          [scenario.bindingId],
+        );
+        scenario.version = other.mission_version;
+        await readyAct(scenario, objectiveId);
+        const path = jsonFile(fixture, SCENARIO_FILE, {
+          reason: REASON,
+          expected_mission_version: scenario.version,
+        });
+        refusal(
+          await kanthord(
+            [
+              MISSION,
+              DEPENDENCY,
+              ADD,
+              objectiveId,
+              other.revisions[0]!.node_id,
+              FILE,
+              path,
+            ],
+            fixture.env,
+          ),
+          STATE_CONFLICT,
+        );
+      },
+    );
+    await t.test(
+      "EF02.5 an initiative pins two repository bindings in write order and requires no external action",
+      async () => {
+        const bindings = await applyRepositorySet(scenario, {
+          [REPOSITORY_NAME]: {
+            kind: BindingKind.Repository,
+            config: REPOSITORY_CONFIGURATION,
+          },
+          [OTHER_REPOSITORY_NAME]: {
+            kind: BindingKind.Repository,
+            config: {
+              ...REPOSITORY_CONFIGURATION,
+              address: OTHER_REPOSITORY_ADDRESS,
+            },
+          },
+        });
+        const order = [OTHER_REPOSITORY_NAME, REPOSITORY_NAME].map(
+          (name) => bindings.find((binding) => binding.name === name)!.id,
+        );
+        const created = await createNode(
+          fixture,
+          mission.id,
+          NodeKind.Initiative,
+          scenario.version,
+          undefined,
+          FIRST_REVISION,
+          order,
+        );
+        scenario.version = created.mission_version;
+        const nodeId = created.revisions[0]!.node_id;
+        assert.deepEqual(
+          (await readNode(fixture, nodeId)).content.bindings,
+          order,
+        );
+        await readyAct(scenario, nodeId);
+        const attempts = success<Page<Attempt>>(
+          await kanthord([MISSION, ATTEMPT, LIST, nodeId], fixture.env),
+        );
+        assert.equal(attempts.items.length, SINGLE_ITEM);
+        assert.deepEqual(attempts.items[0]!.required_external_actions, []);
       },
     );
   },

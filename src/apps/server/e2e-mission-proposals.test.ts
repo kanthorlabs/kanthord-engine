@@ -13,6 +13,7 @@ import { temporary } from "../../kernel/test-support.ts";
 import {
   AssessmentResult,
   AssetKind,
+  EdgeKind,
   MissionErrorCode,
   NodeKind,
   NodeState,
@@ -396,38 +397,52 @@ test(
       assert.deepEqual(page.items, [proposal]);
     });
 
-    await t.test("approval creates the objective and its task", async () => {
-      approved = await write<typeof approved>(
-        ["mission", "proposal", "approve", proposal.id],
-        { expected_mission_version: await h.missionVersion() },
-      );
-      assert.equal(approved.created.revisions.length, SINGLE_ITEM);
-      const created = approved.created.revisions[FIRST_INDEX]!;
-      const objectiveId = created.node_id;
-      assert.equal(created.content.name, PROPOSAL_NAME);
-      assert.equal(created.tasks.length, SINGLE_ITEM);
-      const taskContent = created.tasks[FIRST_INDEX]!;
-      assert.ok(taskContent.id.startsWith(`${TASK_IDENTITY_PREFIX}_`));
-      assert.equal(taskContent.content.name, TASK_NAME);
-      const objective = await read<Node>([
-        "mission",
-        "node",
-        "get",
-        objectiveId,
-      ]);
-      assert.equal(objective.kind, NodeKind.Objective);
-      assert.equal(objective.parent_id, h.initiativeId);
-      assert.deepEqual(objective.content.bindings, [h.repositoryId]);
-      assert.deepEqual(
-        objective.tasks.map((task) => task.id),
-        [taskContent.id],
-      );
-      const listed = await read<Page<Proposal>>(listArguments());
-      assert.equal(typeof listed.items[FIRST_INDEX]!.approved_at, NUMBER_TYPE);
-      assert.equal(listed.items[FIRST_INDEX]!.created_node_id, objectiveId);
-    });
+    await t.test(
+      "EF02.4 approval creates the fix node, its task and the dependency of the proposer on it",
+      async () => {
+        approved = await write<typeof approved>(
+          ["mission", "proposal", "approve", proposal.id],
+          { expected_mission_version: await h.missionVersion() },
+        );
+        assert.equal(approved.created.revisions.length, SINGLE_ITEM);
+        const created = approved.created.revisions[FIRST_INDEX]!;
+        const objectiveId = created.node_id;
+        assert.equal(created.content.name, PROPOSAL_NAME);
+        assert.equal(created.tasks.length, SINGLE_ITEM);
+        const taskContent = created.tasks[FIRST_INDEX]!;
+        assert.ok(taskContent.id.startsWith(`${TASK_IDENTITY_PREFIX}_`));
+        assert.equal(taskContent.content.name, TASK_NAME);
+        const objective = await read<Node>([
+          "mission",
+          "node",
+          "get",
+          objectiveId,
+        ]);
+        assert.equal(objective.kind, NodeKind.Objective);
+        assert.equal(objective.parent_id, h.initiativeId);
+        assert.deepEqual(objective.content.bindings, [h.repositoryId]);
+        assert.deepEqual(
+          objective.tasks.map((task) => task.id),
+          [taskContent.id],
+        );
+        const listed = await read<Page<Proposal>>(listArguments());
+        assert.equal(
+          typeof listed.items[FIRST_INDEX]!.approved_at,
+          NUMBER_TYPE,
+        );
+        assert.equal(listed.items[FIRST_INDEX]!.created_node_id, objectiveId);
+        assert.ok(
+          approved.created.added_edges.some(
+            (edge) =>
+              edge.kind === EdgeKind.Dependency &&
+              edge.dependent_id === h.initiativeId &&
+              edge.depends_on_id === objectiveId,
+          ),
+        );
+      },
+    );
 
-    await t.test("the initiative reopens in a new attempt", async () => {
+    await t.test("the proposer reopens in a new attempt", async () => {
       const { node } = approved.proposer;
       assert.ok(node.kind === NodeKind.Initiative);
       assert.equal(node.state, NodeState.Pending);
