@@ -222,7 +222,8 @@ test("upgrade writes each row when it happens, before a later step fails", async
   const previous = process.env.XDG_DATA_HOME;
   process.env.XDG_DATA_HOME = paths.env.XDG_DATA_HOME;
   t.after(() => {
-    process.env.XDG_DATA_HOME = previous;
+    if (previous === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = previous;
   });
   const written: string[] = [];
   await assert.rejects(
