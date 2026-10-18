@@ -13,6 +13,7 @@ export const unusedHostTools: HostTools = {
     Promise.reject(new Error("Unexpected evidence upload in fixture")),
 };
 import { createIdentity } from "../kernel/identity.ts";
+import { ChainLevel } from "../agent/contract.ts";
 import { SHIPPED_TEMPLATES } from "../agent/prompt-templates.ts";
 import { ExecutionIntent } from "./contract.ts";
 
@@ -49,7 +50,7 @@ export function anthropicAgent(
       reasoning_effort: "off",
     },
     position: 0,
-    level: "enablement",
+    level: ChainLevel.Enablement,
     metadata: null,
     prompt: { final: SETUP_PROMPT },
     ...overrides,

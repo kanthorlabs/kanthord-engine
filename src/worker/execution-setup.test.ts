@@ -9,6 +9,7 @@ import { OperationError } from "../kernel/errors.ts";
 import { executionSetup } from "./execution-setup.ts";
 import { getWorkerDeclaration } from "./catalog.ts";
 import {
+  ChainLevel,
   PromptLayerKind,
   PromptOrigin,
   PromptSourceState,
@@ -32,6 +33,7 @@ import { ExecutionIntent } from "./contract.ts";
 import type { AgentSelection } from "../scheduler/contract.ts";
 
 const SSH_CREDENTIAL = "kanthorlabs-ssh";
+const NO_REQUESTS = 0;
 const SYSTEM_TEXT = "system layer text";
 const AGENT_TEXT = "agent layer text";
 const WORKING_TEXT = "working layer text";
@@ -82,7 +84,7 @@ test("setup answers the system and agent prompt after its single snapshot and su
   const selection: AgentSelection = {
     agent_name: agent.agent_name,
     position: 1,
-    level: "binding",
+    level: ChainLevel.Binding,
     agent_provider: entry.agent_provider,
     provider: agent.effective_configuration.provider,
     credential: "pinned-key",
@@ -90,6 +92,7 @@ test("setup answers the system and agent prompt after its single snapshot and su
     reasoning_effort: entry.reasoning_effort,
   };
   const composed: string[] = [];
+  const requested: string[] = [];
   let commits = 0;
   const claim = {
     executionId: setup.execution_id,
@@ -130,16 +133,18 @@ test("setup answers the system and agent prompt after its single snapshot and su
       entries: [entry],
       resource_budget: null,
     }),
-    pinnedCredentialMetadata: (
-      _tx: unknown,
-      _claim: unknown,
-      name: string,
-    ) => ({
-      id: agent.credential_id,
-      name,
-      platform: agent.effective_configuration.provider,
-      metadata: null,
-    }),
+    pinnedCredentialMetadata: (_tx: unknown, _claim: unknown, name: string) => {
+      requested.push(name);
+      return {
+        id:
+          name === selection.credential
+            ? agent.credential_id
+            : createIdentity("credential"),
+        name,
+        platform: agent.effective_configuration.provider,
+        metadata: null,
+      };
+    },
     repositoryBindingIdsOf: () => [],
     intentOf: () => ExecutionIntent.Implement,
     repositoryPolicyOf: () => null,
@@ -155,6 +160,7 @@ test("setup answers the system and agent prompt after its single snapshot and su
     ) => {
       assert.deepEqual(args[2], selection);
       assert.ok(args[3]);
+      args[3](args[0], selection.credential);
       return {
         effective: {
           ...agent.effective_configuration,
@@ -190,6 +196,9 @@ test("setup answers the system and agent prompt after its single snapshot and su
     answered.effective_configuration.credential,
     selection.credential,
   );
+  assert.equal(answered.credential_id, agent.credential_id);
+  assert.deepEqual(new Set(requested), new Set([selection.credential]));
+  assert.ok(requested.length > NO_REQUESTS);
   assert.equal(answered.position, selection.position);
   assert.equal(answered.level, selection.level);
   assert.equal(commits, before + 1);
@@ -303,7 +312,7 @@ test("setup answers one entry per agent of a two-agent worker with its own promp
           Object.entries(credentials).map(([agent, credential]) => ({
             agent_name: agent,
             position: 0,
-            level: "enablement",
+            level: ChainLevel.Enablement,
             agent_provider: "default",
             provider: "anthropic",
             credential,

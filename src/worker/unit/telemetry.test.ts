@@ -37,7 +37,7 @@ const SECOND_POSITION = 1;
 const TRACED_AGENT = {
   agent_name: "swe@1",
   position: 0,
-  level: "enablement",
+  level: ChainLevel.Enablement,
 } as const;
 
 function recorder() {
