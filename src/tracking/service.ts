@@ -120,20 +120,19 @@ export class TrackingService implements Service, ExecutionTelemetry {
   executionOpened(trace: ExecutionTrace, createdAt: number): void {
     assert.ok(trace.trace_id);
     assert.ok(Number.isSafeInteger(createdAt));
-    this.writeServerSpan(trace, {
+    this.serverSpan(trace, SCHEDULER_PRODUCER, {
       record_id: `${trace.root_span_id}:${ROOT_START_RECORD}`,
       span_id: trace.root_span_id,
       parent_span_id: null,
       operation: ROOT_SPAN_OPERATION,
       start_time: createdAt,
-      attributes: identityAttributes(trace),
     });
   }
 
   executionEnded(end: RootSpanEnd): void {
     assert.ok(end.trace.trace_id);
     assert.ok(Number.isSafeInteger(end.ended_at));
-    this.writeServerSpan(end.trace, {
+    this.serverSpan(end.trace, SCHEDULER_PRODUCER, {
       record_id: `${end.trace.root_span_id}:${ROOT_END_RECORD}`,
       span_id: end.trace.root_span_id,
       parent_span_id: null,
@@ -150,30 +149,36 @@ export class TrackingService implements Service, ExecutionTelemetry {
     });
   }
 
-  private writeServerSpan(
+  serverSpan(
     trace: ExecutionTrace,
+    producer: string,
     contribution: SpanContribution,
   ): void {
     assert.ok(contribution.record_id);
-    assert.equal(contribution.span_id, trace.root_span_id);
+    assert.ok(producer);
+    assert.ok(
+      contribution.span_id === trace.root_span_id ||
+        contribution.parent_span_id === trace.root_span_id,
+    );
     try {
       this.dependencies.store.transaction((tx) => {
         const now = Date.now();
         insertTrace(tx, trace, now);
         const reason = admitServerSpan(
           tx,
+          { trace, producer, origin: SpanOrigin.Observed, now },
           {
-            trace,
-            producer: SCHEDULER_PRODUCER,
-            origin: SpanOrigin.Observed,
-            now,
+            ...contribution,
+            attributes: {
+              ...identityAttributes(trace),
+              ...contribution.attributes,
+            },
           },
-          contribution,
         );
         if (reason !== null)
           throw new Diagnostic(
             "system.tracking.record_refused",
-            `tracking: the root span record ${contribution.record_id} was refused: ${reason}.`,
+            `tracking: the span record ${contribution.record_id} was refused: ${reason}.`,
           );
       });
     } catch {

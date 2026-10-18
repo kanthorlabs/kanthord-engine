@@ -28,8 +28,15 @@ import {
   type WorkQueue,
 } from "../../scheduler/contract.ts";
 import { TrackingService, trackingMigrations } from "../../tracking/index.ts";
-import { TRACKING_SERVICE_NAME } from "../../tracking/contract.ts";
-import { MissionService, missionMigrations } from "../../mission/index.ts";
+import {
+  MISSION_PRODUCER,
+  TRACKING_SERVICE_NAME,
+} from "../../tracking/contract.ts";
+import {
+  MissionService,
+  missionMigrations,
+  uploadCheckSpan,
+} from "../../mission/index.ts";
 import {
   MISSION_SERVICE_NAME,
   missionOperations,
@@ -583,6 +590,18 @@ export function composeServices(options: {
     wakeup: { wake: (projectId) => scheduler.wake(projectId) },
     executionAttribution: {
       of: (...args) => scheduler.executionAttribution(...args),
+    },
+    telemetry: {
+      uploadCheckFailed: (failure) => {
+        const row = scheduler.executionOf(failure.execution_id);
+        if (row === undefined) return;
+        const trace = executionTrace(row);
+        tracking.serverSpan(
+          trace,
+          MISSION_PRODUCER,
+          uploadCheckSpan(trace, failure, randomBytes(8).toString("hex")),
+        );
+      },
     },
     logger: options.logger,
     bindings: {

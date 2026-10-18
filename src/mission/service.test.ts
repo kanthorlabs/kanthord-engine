@@ -357,6 +357,7 @@ function makeService(
         throw new Error(UNEXPECTED_COLLABORATION);
       },
     },
+    telemetry: { uploadCheckFailed: () => {} },
     logger: pino({ enabled: false }),
     ...collaborators,
   });

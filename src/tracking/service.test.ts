@@ -8,9 +8,11 @@ import { IN_MEMORY_DATABASE, Store } from "../kernel/store.ts";
 import {
   Disposition,
   ExecutionEnd,
+  MISSION_PRODUCER,
   RecordKind,
   ROOT_SPAN_OPERATION,
   SCHEDULER_PRODUCER,
+  SpanOrigin,
   SpanStatus,
   TextState,
   TRACKING_SERVICE_NAME,
@@ -34,6 +36,7 @@ const ENDED = 5000;
 const NO_DROP = 0;
 const ONE_DROP = 1;
 const PAGE_OF_ONE = 1;
+const SPAN_PAGE = 10;
 const RATE_LIMITED = "rate_limited";
 const INPUT_TEXT = "npm test";
 const TRACE_NOT_FOUND = "tracking.trace.not_found";
@@ -165,6 +168,56 @@ test("the claimant writes spans and texts of its execution", (t) => {
   const text = service.textGet(TRACE.trace_id, `${SPAN}:input`, caller(store));
   assert.equal(text.state, TextState.Present);
   assert.equal(text.content, INPUT_TEXT);
+});
+
+test("a server span of another producer under the root span is stored", (t) => {
+  const { store, service } = harness(t);
+  service.executionOpened(TRACE, CREATED);
+  const contribution = {
+    record_id: `${SPAN}:end`,
+    span_id: SPAN,
+    parent_span_id: TRACE.root_span_id,
+    operation: "mission.evidence.asset.complete",
+    start_time: CREATED,
+    end_time: CREATED,
+    status: SpanStatus.Error,
+    attributes: { "error.type": "intake.storage.object_mismatch" },
+  };
+  service.serverSpan(TRACE, MISSION_PRODUCER, contribution);
+  const spans = service.spanList(
+    TRACE.trace_id,
+    { limit: SPAN_PAGE },
+    caller(store),
+  ).items;
+  const span = spans.find((entry) => entry.span_id === SPAN);
+  assert.equal(span?.producer, MISSION_PRODUCER);
+  assert.equal(span?.origin, SpanOrigin.Observed);
+  assert.equal(span?.parent_span_id, TRACE.root_span_id);
+  assert.equal(span?.status, SpanStatus.Error);
+  assert.equal(
+    span?.attributes["error.type"],
+    contribution.attributes["error.type"],
+  );
+  assert.equal(span?.attributes["kanthord.execution.id"], TRACE.execution_id);
+  assert.equal(service.droppedRecords(), NO_DROP);
+  service.serverSpan(TRACE, "other", {
+    ...contribution,
+    record_id: `${SPAN}:other`,
+  });
+  assert.equal(service.droppedRecords(), ONE_DROP);
+});
+
+test("a server span outside the root span is refused by assertion", (t) => {
+  const { service } = harness(t);
+  assert.throws(() =>
+    service.serverSpan(TRACE, MISSION_PRODUCER, {
+      record_id: `${SPAN}:end`,
+      span_id: SPAN,
+      parent_span_id: "3".repeat(16),
+      operation: "mission.evidence.asset.complete",
+      end_time: CREATED,
+    }),
+  );
 });
 
 test("a span page continues from its cursor", (t) => {

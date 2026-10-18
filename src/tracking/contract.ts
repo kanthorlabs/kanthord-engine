@@ -12,6 +12,7 @@ export const TRACKING_SERVICE_NAME = "tracking";
 export const EXECUTION_IDENTITY_PREFIX = "execution";
 export const ROOT_SPAN_OPERATION = "scheduler.execution";
 export const SCHEDULER_PRODUCER = "scheduler";
+export const MISSION_PRODUCER = "mission";
 const ONE_KIND_AT_MOST = 1;
 export const TRACKING_TIMEOUT_MS = 30000;
 export const TELEMETRY_WRITE_MAX_BODY_BYTES = 1048576;

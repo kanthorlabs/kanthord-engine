@@ -215,6 +215,23 @@ export interface ExecutionAttribution {
   } | null;
 }
 
+export const UploadCheckSpan = {
+  Operation: "mission.evidence.asset.complete",
+  AssetId: "kanthord.evidence_asset.id",
+  StorageBindingId: "kanthord.storage_binding.id",
+  ErrorType: "error.type",
+} as const;
+export interface UploadCheckFailure {
+  execution_id: string;
+  asset_id: string;
+  storage_binding_id: string;
+  code: string;
+  failed_at: number;
+}
+export interface MissionTelemetry {
+  uploadCheckFailed(failure: UploadCheckFailure): void;
+}
+
 export type ExecutionActor = Extract<Actor, { kind: "execution" }>;
 export type ClaimAdmission = {
   kind: ClaimKind;

@@ -38,6 +38,7 @@ import {
   type SchedulerMatch,
   type SchedulerWakeup,
   type ExecutionAttribution,
+  type MissionTelemetry,
   type MissionTransitions,
   type MissionActions,
   type IntakeStorage,
@@ -173,6 +174,7 @@ export interface Dependencies {
   schedulerMatch: SchedulerMatch;
   wakeup: SchedulerWakeup;
   executionAttribution: ExecutionAttribution;
+  telemetry: MissionTelemetry;
   logger: Logger;
 }
 
