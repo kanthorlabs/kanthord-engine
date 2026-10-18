@@ -234,6 +234,47 @@ export function readMissionNodes(
     .all(missionId) as unknown as NodeRow[];
 }
 
+export function readLiveMissionNodes(
+  tx: Transaction,
+  missionId: string,
+): NodeRow[] {
+  return tx.database
+    .prepare(
+      `SELECT * FROM mission_node
+       WHERE mission_id = ? AND retired_at IS NULL AND state NOT IN (?, ?)
+       ORDER BY id`,
+    )
+    .all(
+      missionId,
+      NodeState.Completed,
+      NodeState.Discarded,
+    ) as unknown as NodeRow[];
+}
+
+export function readRoutableNodes(
+  tx: Transaction,
+  missionId: string,
+): Array<{ id: string; state: NodeState; unmet: number }> {
+  return tx.database
+    .prepare(
+      `SELECT n.id, n.state, (
+         SELECT COUNT(*) FROM mission_dependency d
+         JOIN mission_node target ON target.id = d.depends_on_id
+         WHERE d.dependent_id = n.id AND d.mission_id = n.mission_id
+           AND target.retired_at IS NULL AND target.state != ?
+       ) AS unmet
+       FROM mission_node n
+       WHERE n.mission_id = ? AND n.retired_at IS NULL AND n.state IN (?, ?)
+       ORDER BY n.id`,
+    )
+    .all(
+      NodeState.Completed,
+      missionId,
+      NodeState.Pending,
+      NodeState.Available,
+    ) as unknown as Array<{ id: string; state: NodeState; unmet: number }>;
+}
+
 export interface NodeListFilter {
   intent?: Intent;
   state?: NodeState;

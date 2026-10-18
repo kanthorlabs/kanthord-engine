@@ -2,14 +2,22 @@ import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
 import { createIdentity } from "../kernel/identity.ts";
 import { testHumanIdentity } from "../kernel/test-identity.ts";
+import { isTerminal } from "./admission.ts";
+import { continuationHolds, readinessOf } from "./conditions.ts";
 import { NodeState } from "./contract.ts";
 import { directDependenciesOf, type DepEdge } from "./graph.ts";
-import { routeMission } from "./routing.ts";
+import {
+  claimableMap,
+  nodeClaimable,
+  reconcileMission,
+  routeMission,
+} from "./routing.ts";
 import {
   insertDependency,
   insertMission,
   insertNode,
   readMissionNodes,
+  readNode,
   setNodeState,
 } from "./store.ts";
 import { missionHarness } from "./test-support.ts";
@@ -21,6 +29,9 @@ const RETIRED_REMAINDER = 0;
 const NO_CHANGES = 0;
 const EDGE_ODDS = 0.08;
 const GENERATOR_SEED = 20261018;
+const QUEUE_PREFIX = "workQueue.";
+const QUEUE_DELETE = "workQueue.delete";
+const NODE_ID_ARGUMENT = 1;
 const NODE_STATES = Object.values(NodeState);
 const ROUTED_STATES: string[] = [NodeState.Pending, NodeState.Available];
 
@@ -76,7 +87,7 @@ function routingHarness(t: TestContext) {
         readMissionNodes(tx, missionId).map((node) => [node.id, node.state]),
       ),
     );
-  return { ...h, create, depend, retire, route, states };
+  return { ...h, projectId, missionId, create, depend, retire, route, states };
 }
 
 function randomGraph(h: ReturnType<typeof routingHarness>) {
@@ -169,4 +180,107 @@ test("routing writes the state of a node only when the state changes", (t) => {
   assert.deepEqual(logged(), changed);
   h.route();
   assert.deepEqual(logged(), changed);
+});
+
+function queueCalls(h: ReturnType<typeof routingHarness>) {
+  return h.calls
+    .filter((call) => call.method.startsWith(QUEUE_PREFIX))
+    .map((call) => [call.method, call.arguments[NODE_ID_ARGUMENT]]);
+}
+
+test("claimableMap answers each live node and no terminal or retired node", (t) => {
+  const h = routingHarness(t);
+  const { ids, retired } = randomGraph(h);
+  h.store.transaction((tx) => {
+    const map = claimableMap(tx, h.missionId, h.dependencies.bindings);
+    const nodes = new Map(ids.map((id) => [id, readNode(tx, id)!]));
+    const live = ids
+      .filter((id) => !retired.has(id) && !isTerminal(nodes.get(id)!.state))
+      .sort();
+    assert.deepEqual([...map.keys()].sort(), live);
+    for (const [id, claimable] of map) {
+      const node = nodes.get(id)!;
+      const expected =
+        node.state === NodeState.Available ||
+        (node.state === NodeState.Waiting && readinessOf(tx, node).holds) ||
+        (node.state === NodeState.ExternalRequested &&
+          continuationHolds(tx, h.dependencies.bindings, node));
+      assert.equal(claimable, expected, id);
+    }
+  });
+});
+
+test("reconcileMission deletes the job of a node that becomes terminal or retired in the write", (t) => {
+  const h = routingHarness(t);
+  const done = h.create(NodeState.Available);
+  const gone = h.create(NodeState.Available);
+  h.store.transaction((tx) => {
+    const before = claimableMap(tx, h.missionId, h.dependencies.bindings);
+    setNodeState(tx, done, NodeState.Completed);
+    tx.database
+      .prepare("UPDATE mission_node SET retired_at = ? WHERE id = ?")
+      .run(NOW, gone);
+    reconcileMission(
+      tx,
+      h.dependencies.workQueue,
+      h.missionId,
+      h.projectId,
+      before,
+      h.dependencies.bindings,
+    );
+  });
+  assert.deepEqual(
+    queueCalls(h),
+    [done, gone].sort().map((id) => [QUEUE_DELETE, id]),
+  );
+});
+
+test("reconcileMission makes no queue call for a node that stays terminal or retired", (t) => {
+  const h = routingHarness(t);
+  const { ids, retired } = randomGraph(h);
+  h.store.transaction((tx) => {
+    const before = claimableMap(tx, h.missionId, h.dependencies.bindings);
+    const nodes = ids.map((id) => readNode(tx, id)!);
+    const retiring = nodes.find(
+      (node) => node.state === NodeState.Completed && !retired.has(node.id),
+    );
+    assert.ok(retiring, "A live Completed node exists.");
+    for (const node of nodes) {
+      if (node.state === NodeState.Completed)
+        setNodeState(tx, node.id, NodeState.Discarded);
+      if (node.state === NodeState.Discarded)
+        setNodeState(tx, node.id, NodeState.Completed);
+    }
+    tx.database
+      .prepare("UPDATE mission_node SET retired_at = ? WHERE id = ?")
+      .run(NOW, retiring.id);
+    reconcileMission(
+      tx,
+      h.dependencies.workQueue,
+      h.missionId,
+      h.projectId,
+      before,
+      h.dependencies.bindings,
+    );
+  });
+  assert.deepEqual(queueCalls(h), []);
+});
+
+test("nodeClaimable answers the claimable map value of each node", (t) => {
+  const h = routingHarness(t);
+  const { ids, retired } = randomGraph(h);
+  assert.ok(
+    ids.some((id) => retired.has(id)),
+    "The graph holds a retired node.",
+  );
+  h.store.transaction((tx) => {
+    const map = claimableMap(tx, h.missionId, h.dependencies.bindings);
+    for (const id of ids) {
+      assert.equal(
+        nodeClaimable(tx, readNode(tx, id)!, h.dependencies.bindings),
+        map.get(id) ?? false,
+        id,
+      );
+    }
+  });
 });
