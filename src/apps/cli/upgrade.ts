@@ -1,6 +1,10 @@
 import { join } from "node:path";
 import { audit, writePrivate } from "../../kernel/files.ts";
-import { Store } from "../../kernel/store.ts";
+import {
+  Store,
+  type Migrations,
+  type PendingMigration,
+} from "../../kernel/store.ts";
 import { directories } from "../../kernel/xdg.ts";
 import { formatRows, rowWidth, type RowValue } from "../../kernel/rows.ts";
 
@@ -14,6 +18,24 @@ const UpgradeRow = {
   ConfigVersion: "config_version",
 } as const;
 const UPGRADE_ROW_WIDTH = rowWidth(Object.values(UpgradeRow));
+
+interface Target {
+  store: Store;
+  path: string;
+  migrations: Migrations;
+  pending: readonly PendingMigration[];
+}
+
+function openTarget(path: string, migrations: Migrations): Target | null {
+  if (!audit(path, "file", true)) return null;
+  const store = new Store(path);
+  try {
+    return { store, path, migrations, pending: store.plan(migrations).pending };
+  } catch (error) {
+    store.close();
+    throw error;
+  }
+}
 
 function backupStamp(now: Date): string {
   return now.toISOString().replace(/[-:]/g, "").slice(0, STAMP_LENGTH);
@@ -29,24 +51,36 @@ export async function upgrade(
   const { configuration, readConfig } = await import("../../config/index.ts");
   const { parseMapping } = await import("../../kernel/yaml.ts");
   const { upgradeConfig } = await import("../../config/upgrade.ts");
-  const { serverMigrations, DATABASE_FILE, verifyMasterKey } =
-    await import("../server/index.ts");
+  const {
+    serverMigrations,
+    trackingDatabaseMigrations,
+    DATABASE_FILE,
+    TRACKING_DATABASE_FILE,
+    verifyMasterKey,
+  } = await import("../server/index.ts");
   const original = readConfig(path);
   const config = upgradeConfig(original);
-  const databasePath = join(directories().data, DATABASE_FILE);
-  const store = audit(databasePath, "file", true)
-    ? new Store(databasePath)
-    : null;
+  const targets: Target[] = [];
   try {
-    const pending = store?.plan(serverMigrations).pending ?? [];
-    if (store)
+    const server = openTarget(
+      join(directories().data, DATABASE_FILE),
+      serverMigrations,
+    );
+    if (server) targets.push(server);
+    const tracking = openTarget(
+      join(directories().data, TRACKING_DATABASE_FILE),
+      trackingDatabaseMigrations,
+    );
+    if (tracking) targets.push(tracking);
+    if (server)
       verifyMasterKey(
-        store,
+        server.store,
         configuration(parseMapping(config.content ?? original)).getProperties()
           .master_key,
         path,
       );
-    if (config.content === null && !pending.length) {
+    const behind = targets.filter(({ pending }) => pending.length);
+    if (config.content === null && !behind.length) {
       row(UpgradeRow.UpToDate, path);
       return;
     }
@@ -56,11 +90,11 @@ export async function upgrade(
       writePrivate(backup, original);
       row(UpgradeRow.Backup, backup);
     }
-    if (store && pending.length) {
+    for (const { store, path: databasePath, migrations } of behind) {
       const backup = `${databasePath}.bak-${stamp}`;
       store.backup(backup);
       row(UpgradeRow.Backup, backup);
-      store.migrate(serverMigrations, ({ service, from, to }) =>
+      store.migrate(migrations, ({ service, from, to }) =>
         row(UpgradeRow.Migrated, `${service} ${from} -> ${to}`),
       );
     }
@@ -72,6 +106,6 @@ export async function upgrade(
       row(UpgradeRow.ConfigVersion, `${config.from} -> ${config.to}`);
     }
   } finally {
-    store?.close();
+    for (const { store } of targets) store.close();
   }
 }

@@ -535,8 +535,8 @@ kanthord upgrade [--config <path>]
 ```
 
 **Implemented; route/access: none, local filesystem and database.** Bring the
-selected configuration file and `kanthord.db` of the data directory to the
-versions of this binary. Stop the server before this command.
+selected configuration file, `kanthord.db` and `tracking.db` of the data
+directory to the versions of this binary. Stop the server before this command.
 
 - The root field `version` holds the configuration version. A file without it
   is version 1. `config init` writes the version of the binary.
@@ -552,15 +552,20 @@ The command runs in this order:
    `system.config.version_ahead`. A file that holds both an old key and its new
    key fails with `system.config.rename_conflict`.
 2. If `kanthord.db` exists, open it with its exclusive lock and validate its
-   migration history. A running server makes this fail with
-   `system.database.initialization_failed` (`database is locked`).
+   schema and migration history. Do the same for `tracking.db`. A missing
+   `tracking.db` stays missing. A running server makes this fail with
+   `system.database.initialization_failed` (`database is locked`). A database
+   of another migration text fails with `system.database.migration.schema_mismatch`.
+   The command checks both files before it writes a backup or a change.
 3. If nothing changes, print `up_to_date: <path>` and write nothing.
 4. Write the backups with one UTC timestamp: the original configuration to
-   `<path>.bak-<timestamp>`, and the database with `VACUUM INTO` to
-   `kanthord.db.bak-<timestamp>` in the data directory. Print `backup: <path>`
+   `<path>.bak-<timestamp>`, and each database with a pending migration with
+   `VACUUM INTO` to `kanthord.db.bak-<timestamp>` or
+   `tracking.db.bak-<timestamp>` in the data directory. Print `backup: <path>`
    for each. An existing backup path fails the command.
-5. Apply the pending migrations, one transaction each. Print
-   `migrated: <service> <a> -> <b>` for each service.
+5. Apply the pending migrations of `kanthord.db` and then of `tracking.db`,
+   one transaction each. Print `migrated: <service> <a> -> <b>` for each
+   service.
 6. Replace the configuration file atomically. Print
    `renamed: <old key> -> <new key>` for each rename, then
    `upgraded: <path>` and `config_version: <a> -> <b>`.
