@@ -18,6 +18,6 @@ Add an MIT `LICENSE` file at the repository root. Add a `CONTRIBUTING.md` that s
 
 ## Criterion
 
-- `LICENSE` holds the MIT License text with the current year and the owner `kanthorlabs`.
+- `LICENSE` holds the MIT License text with the year 2026 and the owner `kanthorlabs`.
 - `CONTRIBUTING.md` names Node.js 24, `npm ci` and `npm run verify`, and it states that a pull request passes `npm run verify`.
 - No other file changes.
