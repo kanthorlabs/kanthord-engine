@@ -389,7 +389,7 @@ test("selection skips a job until its stop backoff ends", (t) => {
   h.store.transaction((tx) => {
     h.service.insert(tx, h.row.node_id, h.row.project_id, 0);
     tx.database
-      .prepare("UPDATE scheduler_job SET not_before = ? WHERE node_id = ?")
+      .prepare("UPDATE scheduler_job SET available_at = ? WHERE node_id = ?")
       .run(heldAt, h.row.node_id);
   });
   assert.equal(h.claim().outcome, ClaimOutcome.None);

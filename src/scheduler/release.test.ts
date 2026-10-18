@@ -318,11 +318,11 @@ test("a release with a stop holds the job of the node until the stop backoff end
   const job = h.store.transaction(
     (tx) =>
       tx.database
-        .prepare("SELECT not_before FROM scheduler_job WHERE node_id = ?")
-        .get(h.row.node_id) as { not_before: number | null },
+        .prepare("SELECT available_at FROM scheduler_job WHERE node_id = ?")
+        .get(h.row.node_id) as { available_at: number | null },
   );
   assert.equal(
-    job.not_before,
+    job.available_at,
     FIXTURE_NOW + DEFAULT_STOP_BACKOFF_SECONDS * 1000,
   );
 });

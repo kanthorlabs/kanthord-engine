@@ -365,7 +365,7 @@ test("a waiting pull claims a held job when its stop backoff ends inside the win
   h.enqueue();
   h.store.transaction((tx) =>
     tx.database
-      .prepare("UPDATE scheduler_job SET not_before = ? WHERE node_id = ?")
+      .prepare("UPDATE scheduler_job SET available_at = ? WHERE node_id = ?")
       .run(Date.now() + heldMs, h.row.node_id),
   );
   const started = performance.now();

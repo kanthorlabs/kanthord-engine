@@ -59,7 +59,7 @@ export function recordFailure(
   const until = heldUntil(failures, now, dependencies.config.stop_backoff);
   if (until === null) return;
   tx.database
-    .prepare("UPDATE scheduler_job SET not_before = ? WHERE node_id = ?")
+    .prepare("UPDATE scheduler_job SET available_at = ? WHERE node_id = ?")
     .run(until, nodeId);
 }
 

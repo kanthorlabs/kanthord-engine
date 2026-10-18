@@ -54,7 +54,7 @@ function selectJob(
   assert.ok(identity.runtimeIdentity);
   const jobs = tx.database
     .prepare(
-      "SELECT node_id FROM scheduler_job WHERE project_id = ? AND (not_before IS NULL OR not_before <= ?) ORDER BY priority DESC, id ASC",
+      "SELECT node_id FROM scheduler_job WHERE project_id = ? AND (available_at IS NULL OR available_at <= ?) ORDER BY priority DESC, id ASC",
     )
     .all(identity.projectId, now) as { node_id: string }[];
   let settled = false;
