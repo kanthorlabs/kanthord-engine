@@ -40,7 +40,7 @@ import {
   workRepositoriesOf,
   type ExamineCheckout,
 } from "./workspace.ts";
-import { ActionResultKind, ExecutionWork } from "../contract.ts";
+import { ActionResultKind, ExecutionIntent } from "../contract.ts";
 import {
   evaluationEnd,
   evaluationSpan,
@@ -78,7 +78,7 @@ async function judge(
   openAgent: OpenAgent,
   dependencies: Awaited<ReturnType<typeof readDependencies>> | null,
 ) {
-  const examine = input.setup.work === ExecutionWork.Examine;
+  const examine = input.setup.intent === ExecutionIntent.Examine;
   const commands = verificationCommands(revision);
   const verification = verificationRun.verification;
   if (!verificationPassed(verification, commands))
@@ -174,7 +174,7 @@ async function evaluate(
     verification,
   });
   const dependencies =
-    input.setup.work === ExecutionWork.Examine
+    input.setup.intent === ExecutionIntent.Examine
       ? await readDependencies(run)
       : null;
   let judgement: Awaited<ReturnType<typeof judge>>;
@@ -219,7 +219,7 @@ export async function runEvaluation(
   const prepared = await prepareEvaluation(
     input,
     run,
-    input.setup.work,
+    input.setup.intent,
     evidence,
   );
   try {

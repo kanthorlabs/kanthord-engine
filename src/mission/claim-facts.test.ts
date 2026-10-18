@@ -9,7 +9,7 @@ import {
   ClaimableState,
   NodeState,
   RepositoryAction,
-  Work,
+  Intent,
   type MissionBindings,
 } from "./contract.ts";
 import { openAttempt } from "./record-store.ts";
@@ -63,27 +63,27 @@ function factsHarness(t: TestContext) {
     tx: Transaction,
     nodeId: string,
     revision: number,
-    input: { bindings?: string[]; requires?: string[]; work?: Work },
+    input: { bindings?: string[]; tags?: string[]; intent?: Intent },
   ) {
     tx.database
       .prepare(
-        "INSERT INTO mission_node_revision (node_id, revision, filename, name, requirement, criterion, verifications, bindings, work, requires, tasks, change, reason, actor, created_at) VALUES (?, ?, ?, 'name', 'requirement', 'criterion', '[]', ?, ?, ?, '[]', '{}', 'reason', ?, ?)",
+        "INSERT INTO mission_node_revision (node_id, revision, filename, name, requirement, criterion, verifications, bindings, intent, tags, tasks, change, reason, actor, created_at) VALUES (?, ?, ?, 'name', 'requirement', 'criterion', '[]', ?, ?, ?, '[]', '{}', 'reason', ?, ?)",
       )
       .run(
         nodeId,
         revision,
         `${nodeId}.md`,
         canonicalJSON(input.bindings ?? []),
-        input.work ?? Work.Implement,
-        canonicalJSON(input.requires ?? []),
+        input.intent ?? Intent.Implement,
+        canonicalJSON(input.tags ?? []),
         canonicalJSON(ACTOR),
         NOW,
       );
   }
   function node(input: {
     bindings?: string[];
-    requires?: string[];
-    work?: Work;
+    tags?: string[];
+    intent?: Intent;
   }) {
     const nodeId = createIdentity("node");
     h.store.transaction((tx) => {
@@ -116,15 +116,15 @@ function factsHarness(t: TestContext) {
 test("a node with a pull request action claims External.Requested", (t) => {
   const h = factsHarness(t);
   const action = h.node({ bindings: [h.pullRequestBinding] });
-  const plain = h.node({ work: Work.Examine, requires: [MACOS] });
+  const plain = h.node({ intent: Intent.Examine, tags: [MACOS] });
   const rows = h.factsOf();
   assert.deepEqual(
     rows.find((row) => row.node_id === action),
     {
       node_id: action,
       revision: FIRST_REVISION,
-      work: Work.Implement,
-      requires: [],
+      intent: Intent.Implement,
+      tags: [],
       claims: [
         ClaimableState.Available,
         ClaimableState.Waiting,
@@ -137,31 +137,31 @@ test("a node with a pull request action claims External.Requested", (t) => {
     {
       node_id: plain,
       revision: FIRST_REVISION,
-      work: Work.Examine,
-      requires: [MACOS],
+      intent: Intent.Examine,
+      tags: [MACOS],
       claims: [ClaimableState.Available, ClaimableState.Waiting],
     },
   );
   assert.equal(rows.length, [action, plain].length);
-  assert.deepEqual(h.facts(plain), { work: Work.Examine, requires: [MACOS] });
+  assert.deepEqual(h.facts(plain), { intent: Intent.Examine, tags: [MACOS] });
   assert.deepEqual(h.factsOf(), rows);
 });
 
 test("an open attempt adds its pinned revision", (t) => {
   const h = factsHarness(t);
-  const nodeId = h.node({ requires: [] });
+  const nodeId = h.node({ tags: [] });
   h.store.transaction((tx) => {
     openAttempt(tx, nodeId, FIRST_REVISION, ACTOR, NOW);
-    h.revise(tx, nodeId, SECOND_REVISION, { requires: [MACOS] });
+    h.revise(tx, nodeId, SECOND_REVISION, { tags: [MACOS] });
   });
   assert.deepEqual(
-    h.factsOf().map(({ revision, requires }) => ({ revision, requires })),
+    h.factsOf().map(({ revision, tags }) => ({ revision, tags })),
     [
-      { revision: SECOND_REVISION, requires: [MACOS] },
-      { revision: FIRST_REVISION, requires: [] },
+      { revision: SECOND_REVISION, tags: [MACOS] },
+      { revision: FIRST_REVISION, tags: [] },
     ],
   );
-  assert.deepEqual(h.facts(nodeId), { work: Work.Implement, requires: [] });
+  assert.deepEqual(h.facts(nodeId), { intent: Intent.Implement, tags: [] });
   h.store.transaction((tx) =>
     tx.database
       .prepare("UPDATE mission_attempt SET closed_at = ? WHERE node_id = ?")
@@ -172,8 +172,8 @@ test("an open attempt adds its pinned revision", (t) => {
     [SECOND_REVISION],
   );
   assert.deepEqual(h.facts(nodeId), {
-    work: Work.Implement,
-    requires: [MACOS],
+    intent: Intent.Implement,
+    tags: [MACOS],
   });
 });
 

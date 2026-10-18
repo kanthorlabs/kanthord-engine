@@ -22,7 +22,7 @@ import {
   type Revision,
   type RevisionChange,
   type TaskContent,
-  type Work,
+  type Intent,
 } from "./contract.ts";
 import { resolveContent, resolveTasks } from "./node-create.ts";
 import { requireNode } from "./node-read.ts";
@@ -86,16 +86,16 @@ function editContext(
   return { node, mission, previous: revisionFromRow(tx, current) };
 }
 
-export function requireWorkUnlocked(
+export function requireIntentUnlocked(
   node: NodeRow,
-  previous: Work,
-  next: Work,
+  previous: Intent,
+  next: Intent,
 ): void {
   if (previous !== next && node.attempt > NO_ATTEMPT)
     throw new OperationError(
       HttpStatus.Conflict,
-      MissionErrorCode.WorkLocked,
-      "Node work cannot change after the first claim.",
+      MissionErrorCode.IntentLocked,
+      "Node intent cannot change after the first claim.",
       { node_id: node.id, attempt: node.attempt },
     );
 }
@@ -216,14 +216,14 @@ export function updateNode(
     body,
     textMaxBytes,
   );
-  requireWorkUnlocked(
+  requireIntentUnlocked(
     context.node,
-    context.previous.content.work,
-    content.work,
+    context.previous.content.intent,
+    content.intent,
   );
   const tasks = resolveTasks(
     tx,
-    { ...context.node, work: content.work },
+    { ...context.node, intent: content.intent },
     body.filename,
     body.tasks,
     context.previous.tasks,

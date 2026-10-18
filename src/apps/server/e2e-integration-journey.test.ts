@@ -22,7 +22,7 @@ import {
   missionOperations,
   type Evidence,
   type Revision,
-  Work,
+  Intent,
 } from "../../mission/contract.ts";
 import { type ExecutionRecord } from "../../scheduler/contract.ts";
 import {
@@ -186,7 +186,7 @@ async function setup(t: TestContext) {
   };
   const create = async (
     filename: string,
-    work: Work,
+    intent: Intent,
     names: string[],
     dependentId?: string,
   ) => {
@@ -196,7 +196,7 @@ async function setup(t: TestContext) {
         filename,
         content: {
           ...CONTENT,
-          work,
+          intent,
           bindings: names.map((name) => binding(name).id),
         },
         tasks: [],
@@ -212,8 +212,13 @@ async function setup(t: TestContext) {
       });
     return nodeId;
   };
-  const I = await create("examine-1.md", Work.Examine, [GATED, MERGE]);
-  const P = await create("implement-p.md", Work.Implement, [GATED, "store"], I);
+  const I = await create("examine-1.md", Intent.Examine, [GATED, MERGE]);
+  const P = await create(
+    "implement-p.md",
+    Intent.Implement,
+    [GATED, "store"],
+    I,
+  );
   const p = await pushNodeBranch(t, gatedBare.bare, P, "implement p\n");
   const inbound = async (kind: string, resource: string) => {
     const created = await write<{ id: string }>(
@@ -509,7 +514,7 @@ test("E10 integration journey", { timeout: JOURNEY_TIMEOUT }, async (t) => {
       inbound_event_id: E1.id,
     });
   });
-  const Q = await h.create("implement-q.md", Work.Implement, [MERGE], h.I);
+  const Q = await h.create("implement-q.md", Intent.Implement, [MERGE], h.I);
   const q = await pushNodeBranch(h.t, h.mergeBare.bare, Q, "implement q\n");
   const eQ = await passingEvaluation(h.session, h.machine, {
     nodeId: Q,

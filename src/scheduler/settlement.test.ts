@@ -90,7 +90,7 @@ test("execution attribution reads retained registration and tombstoned binding a
       binding_id: row.worker_binding_id,
       worker_name: workerName,
       instance_count: 0,
-      traits: [],
+      tags: [],
       tombstone: true,
     };
   };

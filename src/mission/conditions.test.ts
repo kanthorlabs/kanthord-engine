@@ -145,7 +145,7 @@ test("open-attempt unresolved actions do not block readiness but stop continuati
   h.store.transaction((tx) => {
     tx.database
       .prepare(
-        "INSERT INTO mission_node_revision (node_id, revision, filename, name, requirement, criterion, verifications, bindings, work, requires, tasks, change, reason, actor, created_at) VALUES (?, 1, 'implement.md', 'name', 'requirement', 'criterion', '[]', ?, 'implement', '[]', '[]', '{}', 'reason', ?, ?)",
+        "INSERT INTO mission_node_revision (node_id, revision, filename, name, requirement, criterion, verifications, bindings, intent, tags, tasks, change, reason, actor, created_at) VALUES (?, 1, 'implement.md', 'name', 'requirement', 'criterion', '[]', ?, 'implement', '[]', '[]', '{}', 'reason', ?, ?)",
       )
       .run(nodeId, canonicalJSON([bindingId]), canonicalJSON(ACTOR), NOW);
     openAttempt(tx, nodeId, FIRST_ATTEMPT, ACTOR, NOW);

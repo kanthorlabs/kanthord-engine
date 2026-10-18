@@ -10,7 +10,7 @@ import {
 } from "./config.ts";
 import {
   AgentChoiceKind,
-  ClaimWork,
+  ClaimIntent,
   SCHEDULER_SERVICE_NAME,
   schedulerOperations,
   type ExecutionRow,
@@ -114,7 +114,7 @@ export function schedulerHarness(
     facts: {
       claimFacts: (...args) => {
         record("claimFacts", args);
-        return { work: ClaimWork.Implement, requires: [] };
+        return { intent: ClaimIntent.Implement, tags: [] };
       },
       claimFactsOf: (...args) => {
         record("claimFactsOf", args);

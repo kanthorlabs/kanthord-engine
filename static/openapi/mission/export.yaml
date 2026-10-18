@@ -115,7 +115,7 @@ components:
                         maxLength: 31
                         pattern: ^node_[0-7][0-9A-HJKMNP-TV-Z]{25}$
                         description: node_ followed by a canonical 26-character uppercase ULID.
-                      work:
+                      intent:
                         type: string
                         enum:
                           - implement
@@ -139,7 +139,7 @@ components:
                         type: array
                         items:
                           type: string
-                      requires:
+                      tags:
                         type: array
                         items:
                           type: string
@@ -153,13 +153,13 @@ components:
                     required:
                       - filename
                       - id
-                      - work
+                      - intent
                       - name
                       - requirement
                       - criterion
                       - verifications
                       - bindings
-                      - requires
+                      - tags
                       - depends_on
                     additionalProperties: false
                   - type: object

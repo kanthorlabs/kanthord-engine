@@ -239,14 +239,14 @@ test("each service migration set applies alone to an empty store", () => {
         assert.deepEqual(
           store.database
             .prepare(
-              `SELECT name, type, "notnull" FROM pragma_table_info('${MISSION_NODE_REVISION_TABLE}') WHERE name IN ('work', 'requires', 'tasks') ORDER BY name`,
+              `SELECT name, type, "notnull" FROM pragma_table_info('${MISSION_NODE_REVISION_TABLE}') WHERE name IN ('intent', 'tags', 'tasks') ORDER BY name`,
             )
             .all()
             .map((row) => ({ ...row })),
           [
-            { name: "requires", type: "TEXT", notnull: 1 },
+            { name: "intent", type: "TEXT", notnull: 1 },
+            { name: "tags", type: "TEXT", notnull: 1 },
             { name: "tasks", type: "TEXT", notnull: 1 },
-            { name: "work", type: "TEXT", notnull: 1 },
           ],
         );
       }

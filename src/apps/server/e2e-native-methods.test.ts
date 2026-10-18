@@ -27,7 +27,7 @@ import {
   AssessmentResult,
   missionOperations,
   NodeState,
-  Work,
+  Intent,
   type Evidence,
 } from "../../mission/contract.ts";
 import { RepositoryComponent } from "../../repository/index.ts";
@@ -252,7 +252,7 @@ async function methodsFixture(t: TestContext) {
       bindingSet.bindings[index === GATED_BINDING_INDEX ? "gated" : "repo"]!.id;
     const node = await create({
       filename: `${name}.md`,
-      content: { ...CONTENT, work: Work.Implement, bindings: [binding] },
+      content: { ...CONTENT, intent: Intent.Implement, bindings: [binding] },
       tasks: [
         {
           filename: `task-${name}.md`,
@@ -705,7 +705,7 @@ test(
           name: "Checkout flow",
           criterion: "each checkout holds hello.txt",
           verifications: ["test -f api/hello.txt && test -f web/hello.txt"],
-          work: Work.Implement,
+          intent: Intent.Implement,
           bindings: [api, web],
         },
         tasks: [

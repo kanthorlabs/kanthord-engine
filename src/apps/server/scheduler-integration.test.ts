@@ -11,7 +11,11 @@ import { repositoryOperations } from "../../repository/contract.ts";
 import { projectOperations } from "../../project/contract.ts";
 import { workerOperations } from "../../worker/contract.ts";
 import { agentOperations } from "../../agent/contract.ts";
-import { missionOperations, NodeState, Work } from "../../mission/contract.ts";
+import {
+  missionOperations,
+  NodeState,
+  Intent,
+} from "../../mission/contract.ts";
 import {
   schedulerOperations,
   ClaimState,
@@ -240,7 +244,7 @@ async function setup(t: TestContext, adapter: Adapter, path?: string) {
       query: {},
       body: {
         filename: "examine-1.md",
-        content: { ...CONTENT, work: Work.Examine },
+        content: { ...CONTENT, intent: Intent.Examine },
         tasks: [],
         reason: "plan",
         expected_mission_version: 1,
@@ -255,7 +259,7 @@ async function setup(t: TestContext, adapter: Adapter, path?: string) {
         filename: "implement-1.md",
         content: {
           ...CONTENT,
-          work: Work.Implement,
+          intent: Intent.Implement,
           bindings: [bindingSet.bindings.repo!.id],
         },
         tasks: [],

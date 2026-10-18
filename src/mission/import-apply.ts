@@ -343,7 +343,7 @@ export function probeCoverage(
     const nodeId = item.current?.id ?? null;
     return [
       {
-        code: MissionErrorCode.RequiresUnmatched,
+        code: MissionErrorCode.TagsUnmatched,
         message: UNMATCHED_MESSAGE,
         filename: item.entry.filename,
         node_id: nodeId,

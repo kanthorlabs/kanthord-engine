@@ -43,7 +43,7 @@ import {
   type IntakeStorage,
   type IntakeCheck,
   type EventDecoder,
-  type Work,
+  type Intent,
   type ImportPreview,
 } from "./contract.ts";
 import { addDependency, removeDependency } from "./dependency.ts";
@@ -732,7 +732,7 @@ export class MissionService
             this.dependencies.bindings,
             params.mission_id,
             {
-              work: query.work,
+              intent: query.intent,
               state: query.state,
               include_retired: query.include_retired === QUERY_TRUE,
               after,
@@ -1017,8 +1017,8 @@ export class MissionService
     );
   }
 
-  workOf(tx: Transaction, nodeId: string, nodeRevision: number): Work {
-    return getRevision(tx, nodeId, nodeRevision).content.work;
+  intentOf(tx: Transaction, nodeId: string, nodeRevision: number): Intent {
+    return getRevision(tx, nodeId, nodeRevision).content.intent;
   }
 
   start(): Promise<Error | null> {

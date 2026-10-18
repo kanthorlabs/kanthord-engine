@@ -36,7 +36,7 @@ import {
 import {
   AssetKind,
   NodeState,
-  Work,
+  Intent,
   AssessmentResult,
   ClosingEvent,
   type Evidence,
@@ -244,14 +244,14 @@ async function setupInternal(t: TestContext) {
     cli,
     project.id,
     "examine-1.md",
-    Work.Examine,
+    Intent.Examine,
     [bindingSet.bindings.repo!.id, bindingSet.bindings.gated!.id],
   );
   const implement = await createJourneyNode(
     cli,
     project.id,
     "implement-a.md",
-    Work.Implement,
+    Intent.Implement,
     [bindingSet.bindings.repo!.id, bindingSet.bindings.store!.id],
   );
   await addDependency(cli, project.id, examine, implement);
@@ -260,7 +260,7 @@ async function setupInternal(t: TestContext) {
     cli,
     project.id,
     "implement-c.md",
-    Work.Implement,
+    Intent.Implement,
     [bindingSet.bindings.gated!.id],
   );
   await addDependency(cli, project.id, examine, gated);

@@ -31,7 +31,7 @@ import {
   type MissionBindings,
   type SchedulerClaims,
   type WorkQueue,
-  Work,
+  Intent,
 } from "./contract.ts";
 import { exportMission } from "./export.ts";
 import { applyImport } from "./import-apply.ts";
@@ -111,7 +111,7 @@ const bindings: MissionBindings = {
     assert.fail("Import resolves names, not historical bindings."),
 };
 const markdown = `---
-work: examine
+intent: examine
 bindings: []
 verifications: [true-command]
 ---
@@ -127,8 +127,8 @@ type EntryPatch = Partial<ParsedNodeFile> & { node?: string };
 function entry(filename = "a.md", extra: EntryPatch = {}): NormalizedEntry {
   return {
     filename,
-    work: Work.Examine,
-    requires: [],
+    intent: Intent.Examine,
+    tags: [],
     ...structuredClone(content),
     depends_on: [],
     ...extra,
@@ -137,7 +137,7 @@ function entry(filename = "a.md", extra: EntryPatch = {}): NormalizedEntry {
 
 function implement(filename: string, extra: EntryPatch = {}): NormalizedEntry {
   return entry(filename, {
-    work: Work.Implement,
+    intent: Intent.Implement,
     bindings: [REPOSITORY],
     ...extra,
   });
@@ -187,8 +187,8 @@ function contentOf(item: NormalizedEntry): Content {
   assert.ok(!isTaskEntry(item));
   return {
     ...bodyOf(item),
-    work: item.work as Work,
-    requires: item.requires,
+    intent: item.intent as Intent,
+    tags: item.tags,
   };
 }
 
@@ -365,7 +365,7 @@ test("import wire schemas accept malformed nonempty names but node writes remain
   assert.ok(
     !nodeCreateSchema.safeParse({
       filename: INVALID_FILENAME,
-      content: { ...content, work: Work.Examine },
+      content: { ...content, intent: Intent.Examine },
       tasks: [],
       reason: REASON,
       expected_mission_version: VERSION,
@@ -440,15 +440,15 @@ for (const [label, patch, code] of [
     { criterion: "x".repeat(TEXT_MAX_BYTES + TEXT_OVERFLOW) },
     MissionErrorCode.ContentInvalid,
   ],
-  ["unknown work", { work: "task" }, MissionErrorCode.ContentInvalid],
+  ["unknown intent", { intent: "task" }, MissionErrorCode.ContentInvalid],
   [
-    "repeated trait key",
-    { requires: ["platform.macos", "platform.macos"] },
+    "repeated tag",
+    { tags: ["platform.macos", "platform.macos"] },
     MissionErrorCode.ContentInvalid,
   ],
   [
-    "malformed trait key",
-    { requires: ["platform.macOS"] },
+    "malformed tag",
+    { tags: ["platform.macOS"] },
     MissionErrorCode.ContentInvalid,
   ],
 ] satisfies Array<[string, EntryPatch, string]>) {
@@ -502,7 +502,7 @@ for (const [label, value, reason] of [
 }
 
 test("a Markdown task file normalizes to a task entry that names its node", () => {
-  const taskFile = markdown.replace("work: examine", "node: implement.md");
+  const taskFile = markdown.replace("intent: examine", "node: implement.md");
   const result = normalizeImportSnapshot(
     {
       format: ImportFormat.Markdown,
@@ -573,13 +573,13 @@ test("stage one collects violations from every file, including duplicate refused
 });
 
 for (const [label, line, field, value] of [
-  ["a nontext work", "work: [implement]", "work", ["implement"]],
-  ["an unknown work", "work: build", "work", "build"],
-  ["a nonlist requires", "work: examine\nrequires: x", "requires", "x"],
-  ["a nontext requires item", "work: examine\nrequires: [7]", "requires", [7]],
+  ["a nontext intent", "intent: [implement]", "intent", ["implement"]],
+  ["an unknown intent", "intent: build", "intent", "build"],
+  ["a nonlist tags field", "intent: examine\ntags: x", "tags", "x"],
+  ["a nontext tag", "intent: examine\ntags: [7]", "tags", [7]],
 ] as const) {
   test(`markdown and JSON imports answer ${label} with mission.node.content_invalid`, () => {
-    const file = markdown.replace("work: examine", line);
+    const file = markdown.replace("intent: examine", line);
     const snapshots: ImportSnapshot[] = [
       {
         format: ImportFormat.Markdown,
@@ -665,7 +665,7 @@ test("foreign and retired identities retain exact identity details", (t) => {
   );
 });
 
-test("a duplicate id is collected and a work change of a current node is an update", (t) => {
+test("a duplicate id is collected and an intent change of a current node is an update", (t) => {
   const { entries, resolve } = fixture(t);
   const existing = entries[FIRST_ENTRY_INDEX]!;
   const duplicated = resolve([
@@ -677,7 +677,10 @@ test("a duplicate id is collected and a work change of a current node is an upda
     [{ code: MissionErrorCode.DuplicateId, details: { id: existing.id! } }],
   );
   const changed = resolve(
-    change(entries, "a.md", { work: Work.Implement, bindings: [REPOSITORY] }),
+    change(entries, "a.md", {
+      intent: Intent.Implement,
+      bindings: [REPOSITORY],
+    }),
   );
   assert.deepEqual(changed.violations, []);
   assert.deepEqual(changed.updates, [existing.id]);
@@ -745,7 +748,7 @@ test("a task naming an examine node or a task, and a dependency on a task, are r
   );
 });
 
-test("binding resolution answers one violation for each entry and applies the work rule table", (t) => {
+test("binding resolution answers one violation for each entry and applies the intent rule table", (t) => {
   const { resolve } = fixture(t, []);
   const result = resolve([
     entry("a.md", { bindings: [MISSING_BINDING, "also-missing"] }),
@@ -765,7 +768,7 @@ test("binding resolution answers one violation for each entry and applies the wo
     [
       { binding: MISSING_BINDING },
       {
-        work: Work.Implement,
+        intent: Intent.Implement,
         binding_kind: "repository",
         count: NO_BINDING_COUNT,
       },
@@ -863,8 +866,13 @@ for (const [label, filename, patch, owners] of [
   ["criterion", "a.md", { criterion: "Changed" }, ["a.md"]],
   ["verifications", "a.md", { verifications: ["echo changed"] }, ["a.md"]],
   ["filename", "b.md", { filename: "renamed.md" }, ["b.md"]],
-  ["work", "a.md", { work: Work.Implement, bindings: [REPOSITORY] }, ["a.md"]],
-  ["requires", "a.md", { requires: ["platform.macos"] }, ["a.md"]],
+  [
+    "intent",
+    "a.md",
+    { intent: Intent.Implement, bindings: [REPOSITORY] },
+    ["a.md"],
+  ],
+  ["tags", "a.md", { tags: ["platform.macos"] }, ["a.md"]],
   ["depends_on", "b.md", { depends_on: ["a.md"] }, ["b.md"]],
   ["task content", "t.md", { name: "Changed task" }, ["o.md"]],
   ["task node", "t.md", { node: "p.md" }, ["o.md", "p.md"]],
@@ -1284,7 +1292,7 @@ test("prepared import exposes the resolved state without resolving bindings twic
   assert.equal(
     resolutions,
     hierarchy().filter(
-      (value) => !isTaskEntry(value) && value.work === Work.Implement,
+      (value) => !isTaskEntry(value) && value.intent === Intent.Implement,
     ).length,
   );
   assert.ok(prepared.resolved);
@@ -1617,7 +1625,7 @@ test("an import that retires a node keeps its tasks in the last revision", (t) =
 
 test("export and import both formats unchanged", (t) => {
   const { mission, store, apply } = importer(t);
-  const first = apply(change(plan(), "o.md", { requires: ["platform.macos"] }));
+  const first = apply(change(plan(), "o.md", { tags: ["platform.macos"] }));
   for (const format of [ImportFormat.Json, ImportFormat.Markdown]) {
     const exported = store.transaction((tx) =>
       exportMission(tx, mission.id, format, exportBindings),
@@ -1626,8 +1634,8 @@ test("export and import both formats unchanged", (t) => {
       for (const file of exported.files) {
         const isTask = ["t.md", "s.md"].includes(file.filename);
         assert.equal(/^node: /m.test(file.content), isTask, file.filename);
-        assert.equal(/^work: /m.test(file.content), !isTask, file.filename);
-        assert.equal(/^requires:/m.test(file.content), !isTask, file.filename);
+        assert.equal(/^intent: /m.test(file.content), !isTask, file.filename);
+        assert.equal(/^tags:/m.test(file.content), !isTask, file.filename);
         assert.equal(
           /^depends_on:/m.test(file.content),
           !isTask,
@@ -1639,12 +1647,12 @@ test("export and import both formats unchanged", (t) => {
         exported.entries.map((value) =>
           "node" in value
             ? [value.filename, value.node]
-            : [value.filename, value.work, value.requires, value.depends_on],
+            : [value.filename, value.intent, value.tags, value.depends_on],
         ),
         [
-          ["a.md", Work.Examine, [], ["o.md", "p.md"]],
-          ["o.md", Work.Implement, ["platform.macos"], []],
-          ["p.md", Work.Implement, [], ["o.md"]],
+          ["a.md", Intent.Examine, [], ["o.md", "p.md"]],
+          ["o.md", Intent.Implement, ["platform.macos"], []],
+          ["p.md", Intent.Implement, [], ["o.md"]],
           ["s.md", "o.md"],
           ["t.md", "o.md"],
         ],
@@ -1735,11 +1743,11 @@ function checkSet() {
   return [
     markdownFile(
       "todo-api.md",
-      "work: examine\ndepends_on: [foundation.md, contributing.md]\nbindings: [repo]\nverifications: [npm run verify]",
+      "intent: examine\ndepends_on: [foundation.md, contributing.md]\nbindings: [repo]\nverifications: [npm run verify]",
     ),
     markdownFile(
       "foundation.md",
-      "work: implement\nbindings: [repo]\nverifications: [npm run test:foundation, npm run lint]",
+      "intent: implement\nbindings: [repo]\nverifications: [npm run test:foundation, npm run lint]",
     ),
     markdownFile(
       "foundation-runtime.md",
@@ -1747,7 +1755,7 @@ function checkSet() {
     ),
     markdownFile(
       "contributing.md",
-      "work: implement\ndepends_on: [foundation.md]\nbindings: [repo]\nverifications: [npm run lint]",
+      "intent: implement\ndepends_on: [foundation.md]\nbindings: [repo]\nverifications: [npm run lint]",
     ),
   ];
 }
@@ -1816,7 +1824,11 @@ test("kanthord check: the baseline check set previews with no violation", (t) =>
 
 test("kanthord check: an unknown front-matter field or H2 names the file", (t) => {
   for (const files of [
-    replaced("foundation.md", "work: implement", "work: implement\nowner: me"),
+    replaced(
+      "foundation.md",
+      "intent: implement",
+      "intent: implement\nowner: me",
+    ),
     replaced("foundation.md", "## Criterion", "## Notes\nnone\n## Criterion"),
   ])
     assert.deepEqual(
@@ -1853,11 +1865,11 @@ test("kanthord check: two entries with the same filename are a duplicate file", 
   );
 });
 
-test("kanthord check: a task file with depends_on, requires or work names the file", (t) => {
+test("kanthord check: a task file with depends_on, tags or intent names the file", (t) => {
   for (const [key, reason] of [
     ["depends_on: []", "depends_on_forbidden"],
-    ["requires: []", "requires_forbidden"],
-    ["work: implement", "form_invalid"],
+    ["tags: []", "tags_forbidden"],
+    ["intent: implement", "form_invalid"],
   ])
     assert.deepEqual(
       checkPreview(
@@ -1909,7 +1921,7 @@ test("kanthord check: an implement node with no repository binding is refused", 
         code: MissionErrorCode.BindingsInvalid,
         filename: "contributing.md",
         details: {
-          work: Work.Implement,
+          intent: Intent.Implement,
           binding_kind: "repository",
           count: NO_BINDING_COUNT,
         },
@@ -1946,7 +1958,7 @@ test("kanthord check: an implement node with no task holds an empty task list", 
   );
   assert.ok(revision);
   assert.deepEqual(revision.tasks, []);
-  assert.equal(revision.content.work, Work.Implement);
+  assert.equal(revision.content.intent, Intent.Implement);
 });
 
 const LINUX = "platform.linux";
@@ -1960,7 +1972,7 @@ test("preview reports the unmatched pairs and leaves the mission version unchang
         reads.push(projectId);
         return h.service
           .claimFactsOf(tx, projectId)
-          .filter((row) => row.requires.includes(LINUX))
+          .filter((row) => row.tags.includes(LINUX))
           .flatMap((row) =>
             row.claims.map((claim) => ({
               node_id: row.node_id,
@@ -1990,13 +2002,13 @@ test("preview reports the unmatched pairs and leaves the mission version unchang
       body: snapshot(entries, mission.id),
     });
   const unmatched = await preview([
-    { ...entry("a.md", { requires: [LINUX] }), id: seeded.id },
-    entry("b.md", { requires: [LINUX] }),
+    { ...entry("a.md", { tags: [LINUX] }), id: seeded.id },
+    entry("b.md", { tags: [LINUX] }),
     entry("c.md"),
   ]);
   assert.deepEqual(unmatched.violations, [
     {
-      code: MissionErrorCode.RequiresUnmatched,
+      code: MissionErrorCode.TagsUnmatched,
       message:
         "The node write adds a node and claimable state pair that no worker binding covers.",
       filename: "a.md",
@@ -2017,7 +2029,7 @@ test("preview reports the unmatched pairs and leaves the mission version unchang
       },
     },
     {
-      code: MissionErrorCode.RequiresUnmatched,
+      code: MissionErrorCode.TagsUnmatched,
       message:
         "The node write adds a node and claimable state pair that no worker binding covers.",
       filename: "b.md",

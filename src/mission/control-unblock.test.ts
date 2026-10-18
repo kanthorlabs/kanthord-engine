@@ -4,7 +4,7 @@ import { testHumanIdentity } from "../kernel/test-identity.ts";
 import { OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import { createIdentity } from "../kernel/identity.ts";
-import { MissionErrorCode, Work, NodeState, TaskChange } from "./contract.ts";
+import { MissionErrorCode, Intent, NodeState, TaskChange } from "./contract.ts";
 import { ControlError } from "./control.ts";
 import { openAttempt } from "./record-store.ts";
 import {
@@ -75,8 +75,10 @@ for (const filenames of [
         .prepare("UPDATE mission_node SET state = ? WHERE id = ?")
         .run(NodeState.Paused, h.node_id);
       tx.database
-        .prepare("UPDATE mission_node_revision SET work = ? WHERE node_id = ?")
-        .run(Work.Implement, h.node_id);
+        .prepare(
+          "UPDATE mission_node_revision SET intent = ? WHERE node_id = ?",
+        )
+        .run(Intent.Implement, h.node_id);
       tx.database
         .prepare(
           "UPDATE mission_node_revision SET bindings = ?, tasks = ? WHERE node_id = ?",
@@ -90,7 +92,7 @@ for (const filenames of [
       body: h.body(NodeState.Paused, FIRST_ATTEMPT),
     });
     const change = {
-      content: { ...content, work: Work.Implement, bindings: [bindingId] },
+      content: { ...content, intent: Intent.Implement, bindings: [bindingId] },
       reason: "Rename",
       tasks: tasks.map((task, index) => ({
         ...task,
@@ -182,8 +184,8 @@ test("implement unblock refuses a task of another set and writes the changed tas
       .prepare("UPDATE mission_node SET state = ? WHERE id = ?")
       .run(NodeState.Paused, h.node_id);
     tx.database
-      .prepare("UPDATE mission_node_revision SET work = ? WHERE node_id = ?")
-      .run(Work.Implement, h.node_id);
+      .prepare("UPDATE mission_node_revision SET intent = ? WHERE node_id = ?")
+      .run(Intent.Implement, h.node_id);
     tx.database
       .prepare(
         "UPDATE mission_node_revision SET bindings = ?, tasks = ? WHERE node_id = ?",
@@ -200,7 +202,7 @@ test("implement unblock refuses a task of another set and writes the changed tas
     body: h.body(NodeState.Paused),
   });
   const change = {
-    content: { ...content, work: Work.Implement, bindings: [bindingId] },
+    content: { ...content, intent: Intent.Implement, bindings: [bindingId] },
     reason: "Redirect",
     tasks: [
       {
@@ -242,7 +244,7 @@ test("implement unblock refuses a task of another set and writes the changed tas
         ...input.body,
         change: {
           ...change,
-          content: { ...content, work: Work.Implement, bindings: ["repo"] },
+          content: { ...content, intent: Intent.Implement, bindings: ["repo"] },
         },
       },
     }),
@@ -472,8 +474,8 @@ test("unblock change adds and removes a task", async (t) => {
       .prepare("UPDATE mission_node SET state = ? WHERE id = ?")
       .run(NodeState.Paused, h.node_id);
     tx.database
-      .prepare("UPDATE mission_node_revision SET work = ? WHERE node_id = ?")
-      .run(Work.Implement, h.node_id);
+      .prepare("UPDATE mission_node_revision SET intent = ? WHERE node_id = ?")
+      .run(Intent.Implement, h.node_id);
     tx.database
       .prepare(
         "UPDATE mission_node_revision SET bindings = ?, tasks = ? WHERE node_id = ?",
@@ -500,7 +502,11 @@ test("unblock change adds and removes a task", async (t) => {
       expected_revision: FIRST_ATTEMPT,
       expected_mission_version: FIRST_ATTEMPT,
       change: {
-        content: { ...content, work: Work.Implement, bindings: [bindingId] },
+        content: {
+          ...content,
+          intent: Intent.Implement,
+          bindings: [bindingId],
+        },
         tasks: [
           { id: kept, filename: "kept.md", content },
           { filename: ADDED_TASK_FILE, content },
@@ -543,7 +549,7 @@ test("unblock change adds and removes a task", async (t) => {
   assert.deepEqual(result.node.tasks, revision.tasks);
 });
 
-test("unblock refuses a work change after the first claim with mission.node.work_locked", async (t) => {
+test("unblock refuses an intent change after the first claim with mission.node.intent_locked", async (t) => {
   const h = controlHarness(t, IDENTITY);
   const bindingId = createIdentity("binding");
   h.dependencies.bindings.getBindingRevision = () => ({
@@ -588,9 +594,9 @@ test("unblock refuses a work change after the first claim with mission.node.work
       .run(NodeState.Paused, h.node_id);
     tx.database
       .prepare(
-        "UPDATE mission_node_revision SET work = ?, bindings = ? WHERE node_id = ?",
+        "UPDATE mission_node_revision SET intent = ?, bindings = ? WHERE node_id = ?",
       )
-      .run(Work.Implement, JSON.stringify([bindingId]), h.node_id);
+      .run(Intent.Implement, JSON.stringify([bindingId]), h.node_id);
     openAttempt(tx, h.node_id, FIRST_ATTEMPT, h.actor, NOW);
   });
   await h.invoke("node.block", {
@@ -610,7 +616,11 @@ test("unblock refuses a work change after the first claim with mission.node.work
         expected_revision: FIRST_ATTEMPT,
         expected_mission_version: FIRST_ATTEMPT,
         change: {
-          content: { ...content, work: Work.Examine, bindings: [bindingId] },
+          content: {
+            ...content,
+            intent: Intent.Examine,
+            bindings: [bindingId],
+          },
           tasks: [],
           reason: "Redirect",
         },
@@ -619,7 +629,7 @@ test("unblock refuses a work change after the first claim with mission.node.work
     (error: unknown) => {
       assert.ok(error instanceof OperationError);
       assert.equal(error.status, HttpStatus.Conflict);
-      assert.equal(error.code, MissionErrorCode.WorkLocked);
+      assert.equal(error.code, MissionErrorCode.IntentLocked);
       assert.deepEqual(error.details, {
         node_id: h.node_id,
         attempt: FIRST_ATTEMPT,

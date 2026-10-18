@@ -8,7 +8,7 @@ import {
   ClaimableState,
   ImportFormat,
   NodeState,
-  Work,
+  Intent,
 } from "../../mission/contract.ts";
 import {
   WorkPullKind,
@@ -31,7 +31,7 @@ const LINUX = "platform.linux";
 const NODE_CREATE = 1;
 const NO_ATTEMPT = 0;
 const RELEASED_WORKERS = ["coder@1", "reviewer@1"];
-const DECLARED_WORKS = [Work.Implement, Work.Examine];
+const DECLARED_INTENTS = [Intent.Implement, Intent.Examine];
 const CONFIGURATION = {
   agent_provider: "default",
   model_identifier: "claude-sonnet-4-5",
@@ -64,10 +64,10 @@ type Violation = {
   details: { claims: { node_id: string | null; claim: string }[] };
 };
 
-function worker(name: string, traits: string[]) {
+function worker(name: string, tags: string[]) {
   return {
     kind: "worker",
-    config: { worker: name, instance_count: 1, traits },
+    config: { worker: name, instance_count: 1, tags },
   };
 }
 
@@ -181,8 +181,8 @@ async function setup(t: TestContext) {
     filename: "ios.md",
     content: {
       ...CONTENT,
-      work: Work.Implement,
-      requires: [MACOS],
+      intent: Intent.Implement,
+      tags: [MACOS],
       bindings: [applied.bindings["api-repo"]!.id],
     },
     tasks: [],
@@ -226,7 +226,7 @@ async function setup(t: TestContext) {
   };
 }
 
-test("EF05.1-EF05.8 the match admits a node by work and traits and refuses an uncovered node", async (t) => {
+test("EF05.1-EF05.8 the match admits a node by intent and tags and refuses an uncovered node", async (t) => {
   const h = await setup(t);
   const macos = {
     ...h.linux,
@@ -242,12 +242,12 @@ test("EF05.1-EF05.8 the match admits a node by work and traits and refuses an un
     ]);
   let nodeId = "";
   await t.test(
-    "EF05.1 a node that requires an absent trait is refused",
+    "EF05.1 a node that requires an absent tag is refused",
     async () => {
       await h.refuses(
         ["mission", "node", "create", h.mission.id],
         h.node,
-        "mission.node.requires_unmatched",
+        "mission.node.tags_unmatched",
       );
       assert.deepEqual((await nodes()).items, []);
     },
@@ -277,10 +277,10 @@ test("EF05.1-EF05.8 the match admits a node by work and traits and refuses an un
       assert.equal(await h.version(), before);
     },
   );
-  await t.test("EF05.4 an upper-case trait key is refused", async () => {
+  await t.test("EF05.4 an upper-case tag is refused", async () => {
     await h.refusedApply(
       { ...macos, "macos-coder": worker("coder@1", ["platform.macOS"]) },
-      "project.bindings.worker.traits_invalid",
+      "project.bindings.worker.tags_invalid",
     );
   });
   await t.test(
@@ -298,7 +298,7 @@ test("EF05.1-EF05.8 the match admits a node by work and traits and refuses an un
       ]);
       const exported = JSON.parse(readFileSync(out, UTF8)) as {
         mission_version: number;
-        entries: { id: string; requires?: string[] }[];
+        entries: { id: string; tags?: string[] }[];
       };
       const preview = await h.write<{ violations: Violation[] }>(
         ["mission", "import", "preview", h.mission.id],
@@ -308,7 +308,7 @@ test("EF05.1-EF05.8 the match admits a node by work and traits and refuses an un
           mission_version: exported.mission_version,
           reason: "plan",
           entries: exported.entries.map((entry) =>
-            entry.id === nodeId ? { ...entry, requires: [LINUX] } : entry,
+            entry.id === nodeId ? { ...entry, tags: [LINUX] } : entry,
           ),
         },
       );
@@ -320,7 +320,7 @@ test("EF05.1-EF05.8 the match admits a node by work and traits and refuses an un
         })),
         [
           {
-            code: "mission.node.requires_unmatched",
+            code: "mission.node.tags_unmatched",
             node_id: nodeId,
             claims: [ClaimableState.Available, ClaimableState.Waiting],
           },
@@ -335,7 +335,7 @@ test("EF05.1-EF05.8 the match admits a node by work and traits and refuses an un
     },
   );
   await t.test(
-    "EF05.8 the catalog answers the declared works of each worker",
+    "EF05.8 the catalog answers the declared intents of each worker",
     async () => {
       const page = await h.read<Page<Record<string, unknown>>>([
         "worker",
@@ -346,10 +346,10 @@ test("EF05.1-EF05.8 the match admits a node by work and traits and refuses an un
         RELEASED_WORKERS,
       );
       for (const item of page.items) {
-        assert.deepEqual(item.declared_works, DECLARED_WORKS);
+        assert.deepEqual(item.declared_intents, DECLARED_INTENTS);
         assert.deepEqual(Object.keys(item).sort(), [
+          "declared_intents",
           "declared_node_states",
-          "declared_works",
           "host",
           "name",
         ]);

@@ -24,7 +24,7 @@ import { repositoryOperations } from "../../repository/contract.ts";
 import { projectOperations } from "../../project/contract.ts";
 import { workerOperations } from "../../worker/contract.ts";
 import { agentOperations } from "../../agent/contract.ts";
-import { missionOperations, Work } from "../../mission/contract.ts";
+import { missionOperations, Intent } from "../../mission/contract.ts";
 import { schedulerOperations, WorkPullKind } from "../../scheduler/contract.ts";
 import {
   OperationResultType,
@@ -531,7 +531,7 @@ async function setup(
       query: {},
       body: {
         filename: "examine-1.md",
-        content: { ...CONTENT, work: Work.Examine },
+        content: { ...CONTENT, intent: Intent.Examine },
         tasks: [],
         reason: "plan",
         expected_mission_version: 1,
@@ -546,7 +546,7 @@ async function setup(
         filename: "implement-1.md",
         content: {
           ...CONTENT,
-          work: Work.Implement,
+          intent: Intent.Implement,
           bindings: [bindingSet.bindings.repo!.id],
         },
         tasks: [],

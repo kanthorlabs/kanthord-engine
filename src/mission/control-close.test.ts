@@ -3,7 +3,12 @@ import { test } from "node:test";
 import { testHumanIdentity } from "../kernel/test-identity.ts";
 import { createIdentity } from "../kernel/identity.ts";
 import { OperationError } from "../kernel/errors.ts";
-import { AssessmentResult, ClosingEvent, Work, NodeState } from "./contract.ts";
+import {
+  AssessmentResult,
+  ClosingEvent,
+  Intent,
+  NodeState,
+} from "./contract.ts";
 import { ControlError } from "./control.ts";
 import {
   openAttempt,
@@ -60,8 +65,8 @@ test("implement override validates its attempt repository pin after the current 
   });
   h.store.transaction((tx) => {
     tx.database
-      .prepare("UPDATE mission_node_revision SET work = ? WHERE node_id = ?")
-      .run(Work.Implement, h.node_id);
+      .prepare("UPDATE mission_node_revision SET intent = ? WHERE node_id = ?")
+      .run(Intent.Implement, h.node_id);
     tx.database
       .prepare(
         "UPDATE mission_node_revision SET bindings = ? WHERE node_id = ?",
@@ -115,8 +120,8 @@ test("attempt-zero success override publishes a human repository evidence and sa
   });
   h.store.transaction((tx) => {
     tx.database
-      .prepare("UPDATE mission_node_revision SET work = ? WHERE node_id = ?")
-      .run(Work.Implement, h.node_id);
+      .prepare("UPDATE mission_node_revision SET intent = ? WHERE node_id = ?")
+      .run(Intent.Implement, h.node_id);
     tx.database
       .prepare(
         "UPDATE mission_node_revision SET bindings = ? WHERE node_id = ?",
@@ -220,9 +225,9 @@ test("override rejects a landed commit on the pinned repository of an examine no
   h.store.transaction((tx) =>
     tx.database
       .prepare(
-        "UPDATE mission_node_revision SET work = ?, bindings = ? WHERE node_id = ?",
+        "UPDATE mission_node_revision SET intent = ?, bindings = ? WHERE node_id = ?",
       )
-      .run(Work.Examine, JSON.stringify([bindingId]), h.node_id),
+      .run(Intent.Examine, JSON.stringify([bindingId]), h.node_id),
   );
   await assert.rejects(
     h.invoke("node.override", {
@@ -406,8 +411,8 @@ test("a success override of a node with two bindings lands a list in binding ord
   });
   h.store.transaction((tx) => {
     tx.database
-      .prepare("UPDATE mission_node_revision SET work = ? WHERE node_id = ?")
-      .run(Work.Implement, h.node_id);
+      .prepare("UPDATE mission_node_revision SET intent = ? WHERE node_id = ?")
+      .run(Intent.Implement, h.node_id);
     tx.database
       .prepare(
         "UPDATE mission_node_revision SET bindings = ? WHERE node_id = ?",

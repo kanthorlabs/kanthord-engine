@@ -43,7 +43,7 @@ export function guardCoverage<T>(
   if (added.length > NO_PAIRS)
     throw new OperationError(
       HttpStatus.Conflict,
-      MissionErrorCode.RequiresUnmatched,
+      MissionErrorCode.TagsUnmatched,
       UNMATCHED_MESSAGE,
       { claims: added },
     );

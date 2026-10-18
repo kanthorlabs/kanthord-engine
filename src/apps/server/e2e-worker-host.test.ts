@@ -8,7 +8,7 @@ import { Diagnostic } from "../../kernel/errors.ts";
 import {
   AssetKind,
   NodeState,
-  Work,
+  Intent,
   type Evidence,
 } from "../../mission/contract.ts";
 import { RepositoryComponent } from "../../repository/index.ts";
@@ -80,7 +80,7 @@ async function fixture(t: TestContext) {
     ["mission", "node", "create", mission.id],
     {
       filename: "examine-1.md",
-      content: { ...content, work: Work.Examine, verifications: ["true"] },
+      content: { ...content, intent: Intent.Examine, verifications: ["true"] },
       tasks: [],
       reason: "plan",
       expected_mission_version: FIRST_REVISION,
@@ -92,7 +92,7 @@ async function fixture(t: TestContext) {
       filename: "implement-a.md",
       content: {
         ...content,
-        work: Work.Implement,
+        intent: Intent.Implement,
         bindings: [setup.bindings.repo!.id, setup.bindings.store!.id],
       },
       tasks: [{ filename: "task-a.md", content }],

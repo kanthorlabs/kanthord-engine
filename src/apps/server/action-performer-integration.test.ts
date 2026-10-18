@@ -8,7 +8,7 @@ import { repositoryOperations } from "../../repository/contract.ts";
 import { projectOperations } from "../../project/contract.ts";
 import {
   missionOperations,
-  Work,
+  Intent,
   AssetKind,
   AssessmentResult,
   NodeState,
@@ -206,7 +206,7 @@ async function setup(t: TestContext, adapter: typeof HTTP | typeof DIRECT) {
       query: {},
       body: {
         filename: "examine-1.md",
-        content: { ...CONTENT, work: Work.Examine },
+        content: { ...CONTENT, intent: Intent.Examine },
         tasks: [],
         reason: "plan",
         expected_mission_version: FIRST_REVISION,
@@ -219,7 +219,11 @@ async function setup(t: TestContext, adapter: typeof HTTP | typeof DIRECT) {
       query: {},
       body: {
         filename: "implement-1.md",
-        content: { ...CONTENT, work: Work.Implement, bindings: [binding.id] },
+        content: {
+          ...CONTENT,
+          intent: Intent.Implement,
+          bindings: [binding.id],
+        },
         tasks: [],
         reason: "plan",
         expected_mission_version: SECOND_REVISION,

@@ -7,7 +7,7 @@ import { canonicalJSON } from "../kernel/json.ts";
 import {
   AssessmentResult,
   NodeState,
-  Work,
+  Intent,
   AssetKind,
   type Override,
   type RepositoryAddress,
@@ -62,7 +62,7 @@ function landedEvidence(
   const addresses = Array.isArray(landed) ? landed : [landed];
   const [first] = addresses;
   assert.ok(first);
-  if (revision.content.work !== Work.Implement)
+  if (revision.content.intent !== Intent.Implement)
     throw new OperationError(
       HttpStatus.BadRequest,
       BINDING_MISMATCH,

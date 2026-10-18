@@ -331,7 +331,7 @@ components:
                           required:
                             - agent
                           additionalProperties: false
-                      traits:
+                      tags:
                         type: array
                         items:
                           type: string
@@ -605,7 +605,7 @@ components:
                               required:
                                 - agent
                               additionalProperties: false
-                          traits: {}
+                          tags: {}
                         required:
                           - worker
                           - instance_count

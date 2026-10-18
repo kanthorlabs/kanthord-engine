@@ -7,7 +7,7 @@ import {
   ActorKind,
   EndState,
   ExpectedEndState,
-  Work,
+  Intent,
   RepositoryAction,
   Resolution,
   type MissionBindings,
@@ -97,7 +97,7 @@ test("an examine node with a repository binding requires no external action, and
       created_at: NOW,
     });
     const statement = tx.database.prepare(
-      "INSERT INTO mission_node_revision (node_id, revision, filename, name, requirement, criterion, verifications, bindings, work, requires, tasks, change, reason, actor, created_at) VALUES (?, ?, 'implement.md', 'name', 'requirement', 'criterion', '[]', ?, 'implement', '[]', '[]', '{}', 'reason', ?, ?)",
+      "INSERT INTO mission_node_revision (node_id, revision, filename, name, requirement, criterion, verifications, bindings, intent, tags, tasks, change, reason, actor, created_at) VALUES (?, ?, 'implement.md', 'name', 'requirement', 'criterion', '[]', ?, 'implement', '[]', '[]', '{}', 'reason', ?, ?)",
     );
     statement.run(
       nodeId,
@@ -168,8 +168,8 @@ test("an examine node with a repository binding requires no external action, and
       Resolution.OtherEnd,
     );
     tx.database
-      .prepare("UPDATE mission_node_revision SET work = ? WHERE node_id = ?")
-      .run(Work.Examine, nodeId);
+      .prepare("UPDATE mission_node_revision SET intent = ? WHERE node_id = ?")
+      .run(Intent.Examine, nodeId);
     assert.deepEqual(
       requiredActionsOf(tx, bindings, nodeId, FIRST_ATTEMPT),
       [],
@@ -269,7 +269,7 @@ test("two bindings freeze one action each", (t) => {
     });
     tx.database
       .prepare(
-        "INSERT INTO mission_node_revision (node_id, revision, filename, name, requirement, criterion, verifications, bindings, work, requires, tasks, change, reason, actor, created_at) VALUES (?, ?, 'implement.md', 'name', 'requirement', 'criterion', '[]', ?, 'implement', '[]', '[]', '{}', 'reason', ?, ?)",
+        "INSERT INTO mission_node_revision (node_id, revision, filename, name, requirement, criterion, verifications, bindings, intent, tags, tasks, change, reason, actor, created_at) VALUES (?, ?, 'implement.md', 'name', 'requirement', 'criterion', '[]', ?, 'implement', '[]', '[]', '{}', 'reason', ?, ?)",
       )
       .run(
         nodeId,

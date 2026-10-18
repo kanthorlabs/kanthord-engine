@@ -8,7 +8,7 @@ import {
   AssessmentResult,
   AssetKind,
   MissionErrorCode,
-  Work,
+  Intent,
   type AssessmentSubmit,
   type Verification,
 } from "./contract.ts";
@@ -103,7 +103,7 @@ function fixture(t: TestContext) {
       const node = readNode(tx, h.node_id)!;
       const revision = getRevision(tx, h.node_id, FIRST_REVISION);
       if (implement) {
-        revision.content.work = Work.Implement;
+        revision.content.intent = Intent.Implement;
         revision.tasks = [
           {
             id: createIdentity("node"),
@@ -280,7 +280,7 @@ test("examine admission tracks replacement dependency outcomes and excludes reti
       ...base,
       node_id: dependencyId,
       filename: "dependency.md",
-      content: { ...base.content, work: Work.Implement },
+      content: { ...base.content, intent: Intent.Implement },
       tasks: [],
     });
     insertDependency(tx, h.mission_id, h.node_id, dependencyId);
@@ -330,7 +330,7 @@ test("examine admission tracks replacement dependency outcomes and excludes reti
 test("proposals refuse an implement node with no dependency edge and an examine dependency", (t) => {
   const h = fixture(t);
   h.body.evidence_ids = [h.seed({ tested_input: INPUT, results: [RESULT] })];
-  const node = (work: Work) => {
+  const node = (intent: Intent) => {
     const id = createIdentity("node");
     h.store.transaction((tx) => {
       const base = getRevision(tx, h.node_id, FIRST_REVISION);
@@ -344,15 +344,15 @@ test("proposals refuse an implement node with no dependency edge and an examine 
         ...base,
         node_id: id,
         filename: `${id.toLowerCase()}.md`,
-        content: { ...base.content, work },
+        content: { ...base.content, intent },
         tasks: [],
       });
     });
     return id;
   };
-  const unrelated = node(Work.Implement);
-  const examine = node(Work.Examine);
-  const implement = node(Work.Implement);
+  const unrelated = node(Intent.Implement);
+  const examine = node(Intent.Examine);
+  const implement = node(Intent.Implement);
   h.store.transaction((tx) => {
     insertDependency(tx, h.mission_id, h.node_id, examine);
     insertDependency(tx, h.mission_id, h.node_id, implement);

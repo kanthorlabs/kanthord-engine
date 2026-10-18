@@ -32,7 +32,7 @@ import {
   missionOperations,
   type PlatformAddress,
   type Revision,
-  Work,
+  Intent,
 } from "../../mission/contract.ts";
 import { httpClient } from "../../gateway/client.ts";
 import { GitStage, GitWriteError } from "../../repository/index.ts";
@@ -279,7 +279,7 @@ async function setup(t: TestContext, landing = "human") {
         filename,
         content: {
           ...CONTENT,
-          work: Work.Implement,
+          intent: Intent.Implement,
           bindings: names.map((name) => binding(name).id),
         },
         tasks: [],

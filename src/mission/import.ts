@@ -15,7 +15,7 @@ import {
   MissionErrorCode,
   NODE_IDENTITY_PREFIX,
   TASK_IDENTITY_PREFIX,
-  Work,
+  Intent,
   planFileNameSchema,
   type Content,
   type Edge,
@@ -67,9 +67,9 @@ type Locator = Pick<NormalizedEntry, "filename" | "id">;
 
 export type NormalizedEntry =
   | ParsedTaskFile
-  | (Omit<ParsedNodeFile, "work" | "requires"> & {
-      work: Work;
-      requires: string[];
+  | (Omit<ParsedNodeFile, "intent" | "tags"> & {
+      intent: Intent;
+      tags: string[];
     });
 
 export function isTaskEntry(
@@ -183,8 +183,8 @@ function normalizeEntry(entry: ImportEntry): NormalizedEntry {
   if (isTaskEntry(entry)) return { ...shared, node: entry.node };
   return {
     ...shared,
-    work: entry.work as Work,
-    requires: Array.isArray(entry.requires) ? [...entry.requires] : [],
+    intent: entry.intent as Intent,
+    tags: Array.isArray(entry.tags) ? [...entry.tags] : [],
     depends_on: [...(entry.depends_on ?? [])],
   };
 }
@@ -337,7 +337,8 @@ function resolveReference(
   }
   const valid =
     !isTaskEntry(target.entry) &&
-    (reference === REFERENCE.DependsOn || target.entry.work === Work.Implement);
+    (reference === REFERENCE.DependsOn ||
+      target.entry.intent === Intent.Implement);
   if (!valid) {
     violations.push(
       violation(
@@ -371,14 +372,14 @@ function resolveBindings(
       );
     return [];
   }
-  const work = entry.work as Work;
+  const intent = entry.intent as Intent;
   const resolved = collect(violations, entry, () =>
     resolveNodeBindings(
       tx,
       (inner, projectId, name) =>
         bindings.resolveBinding(inner, projectId, name),
       mission.project_id,
-      work,
+      intent,
       entry.bindings,
     ),
   );
@@ -396,7 +397,7 @@ function checkVerificationCoverage(result: ResolvedImport): void {
   for (const item of result.resolved_entries) {
     if (
       isTaskEntry(item.entry) ||
-      item.entry.work !== Work.Implement ||
+      item.entry.intent !== Intent.Implement ||
       !covered.has(item.key)
     )
       continue;
@@ -475,8 +476,8 @@ function entryChanged(
     criterion: entry.criterion,
     verifications: entry.verifications,
     bindings: item.binding_ids,
-    work: entry.work as Work,
-    requires: entry.requires,
+    intent: entry.intent as Intent,
+    tags: entry.tags,
   };
   return (
     current.filename !== entry.filename ||

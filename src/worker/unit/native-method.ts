@@ -13,7 +13,7 @@ import type { Context } from "../../kernel/context.ts";
 import { ExecutionRun as Run, type MethodClaim } from "./execution-run.ts";
 import type { MethodClients } from "./method-clients.ts";
 import {
-  ExecutionWork,
+  ExecutionIntent,
   WorkerMethod,
   type ExecutionSetup,
   type RepositoryTransport,
@@ -78,7 +78,7 @@ export async function runNativeExecution(
       const method = getWorkerDeclaration(input.setup.worker_name)?.method;
       if (!method) return run.stop(EndReason.OperationFailed);
       const revision = await readPinnedRevision(run);
-      const work = input.setup.work;
+      const intent = input.setup.intent;
       const open = async (
         workspace: string,
         checkouts: readonly string[] = [workspace],
@@ -92,7 +92,7 @@ export async function runNativeExecution(
         const native = await openNativeAgent({
           setup: input.setup,
           claim: input.claim,
-          work,
+          intent,
           agent,
           credential,
           budget,
@@ -112,7 +112,7 @@ export async function runNativeExecution(
       };
       if (method === WorkerMethod.Evaluation)
         return runEvaluation(input, run, budget, open);
-      if (work === ExecutionWork.Examine)
+      if (intent === ExecutionIntent.Examine)
         return runStepsExamine(input, run, revision, budget, open);
       const prior = await readPriorRationale(run, input.setup.repositories);
       const workspace = await run.spans.within(phaseSpan(Phase.Prepare), () =>

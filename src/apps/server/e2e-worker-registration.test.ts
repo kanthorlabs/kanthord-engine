@@ -248,13 +248,13 @@ test(
       assert.deepEqual(page.items[FIRST_ITEM]!.declared_node_states, [
         "Available",
       ]);
-      assert.deepEqual(page.items[FIRST_ITEM]!.declared_works, [
+      assert.deepEqual(page.items[FIRST_ITEM]!.declared_intents, [
         "implement",
         "examine",
       ]);
       assert.deepEqual(Object.keys(page.items[FIRST_ITEM]!).sort(), [
+        "declared_intents",
         "declared_node_states",
-        "declared_works",
         "host",
         "name",
       ]);

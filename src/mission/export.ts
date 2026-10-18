@@ -28,9 +28,9 @@ export function serializePlanFile(entry: ExportEntry): string {
     ...("node" in entry
       ? { node: entry.node }
       : {
-          work: entry.work,
+          intent: entry.intent,
           depends_on: entry.depends_on,
-          requires: entry.requires,
+          tags: entry.tags,
         }),
     bindings: entry.bindings,
     verifications: entry.verifications,

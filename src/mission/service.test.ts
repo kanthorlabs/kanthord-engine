@@ -41,7 +41,7 @@ import {
   NODE_IDENTITY_PREFIX,
   NodeState,
   RevisionWrite,
-  Work,
+  Intent,
   RebindSkipCondition,
   type Rebind,
   TaskChange,
@@ -201,8 +201,9 @@ test("dependency admission settles the dependent before testing its live claim",
     },
   });
   const parent = f.examine();
-  const child = f.create(f.body(Work.Implement)).revisions[FIRST_ELEMENT_INDEX]!
-    .node_id;
+  const child = f.create(f.body(Intent.Implement)).revisions[
+    FIRST_ELEMENT_INDEX
+  ]!.node_id;
   const target = f.create({ ...f.body(), filename: OTHER_FILENAME }).revisions[
     FIRST_ELEMENT_INDEX
   ]!.node_id;
@@ -441,7 +442,7 @@ function insertRevision(
     .prepare(
       `INSERT INTO mission_node_revision
        (node_id, revision, filename, name, requirement, criterion,
-        verifications, bindings, work, requires, tasks, change, reason, actor,
+        verifications, bindings, intent, tags, tasks, change, reason, actor,
         created_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, '[]', '[]', ?, ?, ?, ?)`,
     )
@@ -454,7 +455,7 @@ function insertRevision(
       NODE_TEXT,
       NO_VERIFICATIONS,
       JSON.stringify(bindings),
-      Work.Implement,
+      Intent.Implement,
       REVISION_CHANGE,
       NODE_TEXT,
       REVISION_ACTOR,
@@ -769,17 +770,18 @@ function nodeFixture(
       f.registry.get(operation.id).handler(input, f.caller),
     );
   }
-  function body(work: Work = Work.Examine): NodeCreate {
+  function body(intent: Intent = Intent.Examine): NodeCreate {
     return {
-      filename: work === Work.Examine ? EXAMINE_FILENAME : IMPLEMENT_FILENAME,
+      filename:
+        intent === Intent.Examine ? EXAMINE_FILENAME : IMPLEMENT_FILENAME,
       content: {
         name: NODE_TEXT,
         requirement: NODE_TEXT,
         criterion: NODE_TEXT,
         verifications: [VERIFICATION],
-        bindings: work === Work.Implement ? [BINDING_ID] : [],
-        work,
-        requires: [],
+        bindings: intent === Intent.Implement ? [BINDING_ID] : [],
+        intent,
+        tags: [],
       },
       tasks: [],
       reason: REASON,
@@ -790,7 +792,8 @@ function nodeFixture(
     return create(body()).revisions[FIRST_ELEMENT_INDEX]!.node_id;
   }
   function implement() {
-    return create(body(Work.Implement)).revisions[FIRST_ELEMENT_INDEX]!.node_id;
+    return create(body(Intent.Implement)).revisions[FIRST_ELEMENT_INDEX]!
+      .node_id;
   }
   function node(id: string) {
     return f.store.transaction((tx) => readNode(tx, id));
@@ -933,13 +936,13 @@ test("node.create of an implement node routes Available and queues it", (t) => {
   const f = nodeFixture(t);
   f.examine();
   f.calls.length = EMPTY_CALLS;
-  const result = f.create(f.body(Work.Implement));
+  const result = f.create(f.body(Intent.Implement));
   const revision = result.revisions[FIRST_ELEMENT_INDEX]!;
   assert.equal(result.mission_version, THIRD_REVISION);
   assert.equal(f.node(revision.node_id)?.state, NodeState.Available);
   assert.deepEqual(revision.content.bindings, [BINDING_ID]);
-  assert.equal(revision.content.work, Work.Implement);
-  assert.deepEqual(revision.content.requires, []);
+  assert.equal(revision.content.intent, Intent.Implement);
+  assert.deepEqual(revision.content.tags, []);
   assert.deepEqual(revision.tasks, []);
   assert.deepEqual(revision.change, {
     write: RevisionWrite.NodeCreate,
@@ -962,7 +965,7 @@ test("node create mints a task identity for each task and writes it in revision 
   const f = nodeFixture(t);
   f.calls.length = EMPTY_CALLS;
   const body = {
-    ...f.body(Work.Implement),
+    ...f.body(Intent.Implement),
     tasks: [taskWrite(), taskWrite(NEW_FILENAME)],
   };
   const result = f.create(body);
@@ -993,7 +996,7 @@ test("node create refuses a named task, a task of an examine node and a used tas
   f.examine();
   f.refuses(
     {
-      ...f.body(Work.Implement),
+      ...f.body(Intent.Implement),
       tasks: [{ ...taskWrite(), id: createIdentity("task") }],
     },
     MissionErrorCode.ContentInvalid,
@@ -1008,7 +1011,7 @@ test("node create refuses a named task, a task of an examine node and a used tas
   );
   f.refuses(
     {
-      ...f.body(Work.Implement),
+      ...f.body(Intent.Implement),
       tasks: [taskWrite(EXAMINE_FILENAME)],
     },
     MissionErrorCode.FilenameConflict,
@@ -1016,19 +1019,19 @@ test("node create refuses a named task, a task of an examine node and a used tas
   );
   f.refuses(
     {
-      ...f.body(Work.Implement),
+      ...f.body(Intent.Implement),
       tasks: [taskWrite(), taskWrite()],
     },
     MissionErrorCode.FilenameConflict,
     { filename: TASK_FILENAME },
   );
   f.create({
-    ...f.body(Work.Implement),
+    ...f.body(Intent.Implement),
     tasks: [taskWrite()],
   });
   f.refuses(
     {
-      ...f.body(Work.Implement),
+      ...f.body(Intent.Implement),
       filename: NEW_FILENAME,
       tasks: [taskWrite()],
     },
@@ -1037,7 +1040,7 @@ test("node create refuses a named task, a task of an examine node and a used tas
   );
   f.refuses(
     {
-      ...f.body(Work.Implement),
+      ...f.body(Intent.Implement),
       filename: TASK_FILENAME,
     },
     MissionErrorCode.FilenameConflict,
@@ -1045,7 +1048,7 @@ test("node create refuses a named task, a task of an examine node and a used tas
   );
   f.refuses(
     {
-      ...f.body(Work.Implement),
+      ...f.body(Intent.Implement),
       filename: NEW_FILENAME,
       tasks: [boundTaskWrite(OTHER_FILENAME)],
     },
@@ -1066,7 +1069,7 @@ test("node.create validates mission existence and version before content", (t) =
   );
   f.examine();
   f.refuses(
-    { ...f.body(Work.Implement), expected_mission_version: FIRST_REVISION },
+    { ...f.body(Intent.Implement), expected_mission_version: FIRST_REVISION },
     MissionErrorCode.VersionConflict,
     { current: NEXT_REVISION },
   );
@@ -1142,14 +1145,14 @@ for (const binding of [MISSING_BINDING_ID, STORAGE_NAME]) {
 
 test("node.create pins the latest revision for an older binding revision identity", (t) => {
   const f = nodeFixture(t);
-  const body = f.body(Work.Implement);
+  const body = f.body(Intent.Implement);
   body.content.bindings = [OLDER_BINDING_ID];
   const revision = f.create(body).revisions[FIRST_ELEMENT_INDEX]!;
   assert.deepEqual(revision.content.bindings, [BINDING_ID]);
   assert.deepEqual(f.read(revision.node_id).content.bindings, [BINDING_ID]);
 });
 
-for (const kind of Object.values(Work)) {
+for (const kind of Object.values(Intent)) {
   test(`node.create of an ${kind} node enforces the binding rule table`, (t) => {
     const f = nodeFixture(t);
     const body = f.body(kind);
@@ -1160,7 +1163,7 @@ for (const kind of Object.values(Work)) {
       undefined,
       HttpStatus.BadRequest,
     );
-    if (kind === Work.Examine) {
+    if (kind === Intent.Examine) {
       body.content.bindings = [BINDING_ID];
       assert.deepEqual(
         f.create(body).revisions[FIRST_ELEMENT_INDEX]!.content.bindings,
@@ -1183,7 +1186,7 @@ test("shared routing requires Completed dependencies, preserves held states, and
   const parentId = f.examine();
   const dependency = f.create({ ...f.body(), filename: OTHER_FILENAME })
     .revisions[FIRST_ELEMENT_INDEX]!.node_id;
-  const implement = f.create(f.body(Work.Implement)).revisions[
+  const implement = f.create(f.body(Intent.Implement)).revisions[
     FIRST_ELEMENT_INDEX
   ]!.node_id;
   f.store.database
@@ -1296,15 +1299,15 @@ test("node get answers the tasks of the visible revision", (t) => {
     return operation.output.parse(result);
   }
   const examine = f.examine();
-  const implement = f.create(f.body(Work.Implement)).revisions[
+  const implement = f.create(f.body(Intent.Implement)).revisions[
     FIRST_ELEMENT_INDEX
   ]!.node_id;
   const taskId = addTask(f, implement);
   const implementNode = nodeSchema.parse(
     invoke("node.get", { node_id: implement }),
   );
-  assert.equal(implementNode.work, Work.Implement);
-  assert.deepEqual(implementNode.requires, []);
+  assert.equal(implementNode.intent, Intent.Implement);
+  assert.deepEqual(implementNode.tags, []);
   assert.equal(implementNode.visible_revision, NEXT_REVISION);
   assert.deepEqual(implementNode.tasks, [{ id: taskId, ...taskWrite() }]);
   assert.equal(implementNode.priority, LOWEST_PRIORITY);
@@ -1368,7 +1371,7 @@ test("node get answers the tasks of the visible revision", (t) => {
         invoke(
           "node.list",
           { mission_id: f.mission_id },
-          { work: Work.Implement },
+          { intent: Intent.Implement },
         ),
       )
       .items.map((item) => item.id),
@@ -1382,7 +1385,7 @@ test("node get answers the tasks of the visible revision", (t) => {
       invoke(
         "node.list",
         { mission_id: f.mission_id },
-        { work: Work.Implement },
+        { intent: Intent.Implement },
       ),
     ).items.length,
     NO_ITEMS,
@@ -1391,7 +1394,7 @@ test("node get answers the tasks of the visible revision", (t) => {
     invoke(
       "node.list",
       { mission_id: f.mission_id },
-      { work: Work.Implement, include_retired: "true" },
+      { intent: Intent.Implement, include_retired: "true" },
     ),
   ).items;
   assert.equal(retired.length, SINGLE_ITEM);
@@ -1402,7 +1405,7 @@ test("node get answers the tasks of the visible revision", (t) => {
         invoke(
           "node.list",
           { mission_id: f.mission_id },
-          { work: Work.Examine },
+          { intent: Intent.Examine },
         ),
       )
       .items.map((item) => item.id),
@@ -1410,28 +1413,28 @@ test("node get answers the tasks of the visible revision", (t) => {
   );
 });
 
-test("node get answers work and requires of the pinned revision while an attempt is open", (t) => {
+test("node get answers intent and tags of the pinned revision while an attempt is open", (t) => {
   const f = nodeFixture(t);
   const nodeId = f.examine();
   f.store.transaction((tx) =>
     openAttempt(tx, nodeId, FIRST_REVISION, HUMAN_ACTOR, CREATED_AT),
   );
   const body = updateBody(f, nodeId);
-  body.content.requires = ["platform.macos"];
+  body.content.tags = ["platform.macos"];
   body.tasks = [];
   f.update(nodeId, body);
   const pinned = f.read(nodeId);
   assert.equal(pinned.visible_revision, NEXT_REVISION);
-  assert.equal(pinned.work, Work.Examine);
-  assert.deepEqual(pinned.requires, []);
-  assert.deepEqual(pinned.content.requires, ["platform.macos"]);
+  assert.equal(pinned.intent, Intent.Examine);
+  assert.deepEqual(pinned.tags, []);
+  assert.deepEqual(pinned.content.tags, ["platform.macos"]);
   f.store.transaction((tx) =>
     closeAttempt(tx, nodeId, FIRST_REVISION, RETIRED_AT),
   );
-  assert.deepEqual(f.read(nodeId).requires, ["platform.macos"]);
+  assert.deepEqual(f.read(nodeId).tags, ["platform.macos"]);
 });
 
-test("node list filters work on the pinned revision while an attempt is open", (t) => {
+test("node list filters intent on the pinned revision while an attempt is open", (t) => {
   const f = nodeFixture(t);
   const nodeId = f.examine();
   f.store.transaction((tx) => {
@@ -1440,33 +1443,33 @@ test("node list filters work on the pinned revision while an attempt is open", (
       .prepare(
         `INSERT INTO mission_node_revision
          (node_id, revision, filename, name, requirement, criterion,
-          verifications, bindings, work, requires, tasks, change, reason,
+          verifications, bindings, intent, tags, tasks, change, reason,
           actor, created_at)
          SELECT node_id, ?, filename, name, requirement, criterion,
-          verifications, bindings, ?, requires, tasks, change, reason,
+          verifications, bindings, ?, tags, tasks, change, reason,
           actor, created_at
          FROM mission_node_revision WHERE node_id = ? AND revision = ?`,
       )
-      .run(NEXT_REVISION, Work.Implement, nodeId, FIRST_REVISION);
+      .run(NEXT_REVISION, Intent.Implement, nodeId, FIRST_REVISION);
   });
-  function list(work: Work): string[] {
+  function list(intent: Intent): string[] {
     const operation = missionOperations["node.list"];
     const input = operation.input.parse({
       params: { mission_id: f.mission_id },
-      query: { work },
+      query: { intent },
       body: null,
     });
     return pageOf(nodeSchema)
       .parse(f.registry.get(operation.id).handler(input, f.caller))
       .items.map((item) => item.id);
   }
-  assert.deepEqual(list(Work.Examine), [nodeId]);
-  assert.deepEqual(list(Work.Implement), []);
+  assert.deepEqual(list(Intent.Examine), [nodeId]);
+  assert.deepEqual(list(Intent.Implement), []);
   f.store.transaction((tx) =>
     closeAttempt(tx, nodeId, FIRST_REVISION, RETIRED_AT),
   );
-  assert.deepEqual(list(Work.Examine), []);
-  assert.deepEqual(list(Work.Implement), [nodeId]);
+  assert.deepEqual(list(Intent.Examine), []);
+  assert.deepEqual(list(Intent.Implement), [nodeId]);
 });
 
 test("node reads refuse missing identities and malformed cursors", (t) => {
@@ -2035,7 +2038,7 @@ test("dependency addition on an examine node reroutes the examine node alone", (
     FIRST_ELEMENT_INDEX
   ]!.node_id;
   const other = f.create({
-    ...f.body(Work.Implement),
+    ...f.body(Intent.Implement),
     filename: NEW_FILENAME,
   }).revisions[FIRST_ELEMENT_INDEX]!.node_id;
   f.calls.length = EMPTY_CALLS;
@@ -2165,8 +2168,8 @@ function updateBody(f: TaskFixture, id: string): NodeUpdate {
         criterion: revision.criterion,
         verifications: JSON.parse(revision.verifications),
         bindings: JSON.parse(revision.bindings),
-        work: revision.work,
-        requires: JSON.parse(revision.requires),
+        intent: revision.intent,
+        tags: JSON.parse(revision.tags),
       },
       tasks: JSON.parse(revision.tasks),
       expected_revision: revision.revision,
@@ -2177,7 +2180,7 @@ function updateBody(f: TaskFixture, id: string): NodeUpdate {
     expected_revision: node.expected_revision,
     content: {
       ...node.content,
-      bindings: node.content.work === Work.Implement ? [BINDING_ID] : [],
+      bindings: node.content.intent === Intent.Implement ? [BINDING_ID] : [],
     },
     tasks: node.tasks,
     expected_mission_version: f.version(),
@@ -2327,7 +2330,7 @@ test("node.priority.set reads absent priority as zero and overwrites without rev
   const initial = nodeSchema.parse(
     f.registry.get(get.id).handler(input, f.caller),
   );
-  assert.equal(initial.work, Work.Implement);
+  assert.equal(initial.intent, Intent.Implement);
   assert.equal(initial.priority, LOWEST_PRIORITY);
   const version = f.version();
   const revisions = f.snapshot().revisions;
@@ -2336,12 +2339,12 @@ test("node.priority.set reads absent priority as zero and overwrites without rev
   const commits = f.commits();
   const first = f.set(id, PRIORITY, version);
   assert.equal(f.commits(), commits + ONE_COMMIT);
-  assert.equal(first.work, Work.Implement);
+  assert.equal(first.intent, Intent.Implement);
   assert.equal(first.priority, PRIORITY);
   assert.equal(f.jobs.get(id)?.id, job.id);
   assert.equal(f.jobs.get(id)?.priority, PRIORITY);
   const second = f.set(id, NEGATIVE_PRIORITY, version);
-  assert.equal(second.work, Work.Implement);
+  assert.equal(second.intent, Intent.Implement);
   assert.equal(second.priority, NEGATIVE_PRIORITY);
   assert.equal(f.node(id)?.priority, NEGATIVE_PRIORITY);
   assert.deepEqual(f.updates, [
@@ -2356,7 +2359,7 @@ test("node.priority.set reads absent priority as zero and overwrites without rev
 test("node.priority.set accepts both signed limits and zero on examine and implement nodes", (t) => {
   const f = priorityFixture(t);
   const examine = f.examine();
-  const implement = f.create(f.body(Work.Implement)).revisions[
+  const implement = f.create(f.body(Intent.Implement)).revisions[
     FIRST_ELEMENT_INDEX
   ]!.node_id;
   const version = f.version();
@@ -2470,7 +2473,7 @@ test("node.update of an examine node lists only changed content fields in canoni
     ...body,
     content: {
       ...body.content,
-      requires: ["platform.macos"],
+      tags: ["platform.macos"],
       criterion: "new criterion",
       verifications: ["new verification"],
       requirement: "new requirement",
@@ -2482,7 +2485,8 @@ test("node.update of an examine node lists only changed content fields in canoni
     write: RevisionWrite.NodeUpdate,
     previous_revision: FIRST_REVISION,
     changed_fields: CONTENT_FIELDS.filter(
-      (field) => field !== ContentField.Filename && field !== ContentField.Work,
+      (field) =>
+        field !== ContentField.Filename && field !== ContentField.Intent,
     ),
     tasks: [],
   });
@@ -2630,24 +2634,28 @@ test("node update creates, changes and removes tasks", (t) => {
   );
 });
 
-test("node update changes work while the attempt reads 0", (t) => {
+test("node update changes intent while the attempt reads 0", (t) => {
   const f = nodeFixture(t);
   const id = f.examine();
   const body = updateBody(f, id);
   const changed = f.update(id, {
     ...body,
-    content: { ...body.content, work: Work.Implement, bindings: [BINDING_ID] },
+    content: {
+      ...body.content,
+      intent: Intent.Implement,
+      bindings: [BINDING_ID],
+    },
   });
   const revision = changed.revisions[FIRST_ELEMENT_INDEX]!;
-  assert.equal(revision.content.work, Work.Implement);
+  assert.equal(revision.content.intent, Intent.Implement);
   assert.deepEqual(revision.change.changed_fields, [
     ContentField.Bindings,
-    ContentField.Work,
+    ContentField.Intent,
   ]);
-  assert.equal(f.read(id).work, Work.Implement);
+  assert.equal(f.read(id).intent, Intent.Implement);
 });
 
-test("node update refuses a work change after the first claim with mission.node.work_locked", (t) => {
+test("node update refuses an intent change after the first claim with mission.node.intent_locked", (t) => {
   const f = nodeFixture(t);
   const id = f.implement();
   f.store.transaction((tx) => {
@@ -2660,16 +2668,16 @@ test("node update refuses a work change after the first claim with mission.node.
   updateRefuses(
     f,
     id,
-    { ...body, content: { ...body.content, work: Work.Examine } },
-    MissionErrorCode.WorkLocked,
+    { ...body, content: { ...body.content, intent: Intent.Examine } },
+    MissionErrorCode.IntentLocked,
     { node_id: id, attempt: FIRST_ATTEMPT },
   );
 });
 
 for (const [label, field, value] of [
-  ["an unknown work", ContentField.Work, "build"],
-  ["a nonlist requires", ContentField.Requires, "x"],
-  ["a repeated trait key", ContentField.Requires, ["x", "x"]],
+  ["an unknown intent", ContentField.Intent, "build"],
+  ["a nonlist tags field", ContentField.Tags, "x"],
+  ["a repeated tag", ContentField.Tags, ["x", "x"]],
 ] as const) {
   test(`node create and update refuse ${label} with mission.node.content_invalid`, (t) => {
     const f = nodeFixture(t);
@@ -2699,7 +2707,7 @@ test("node update refuses a task of another node with mission.node.content_inval
   const parentId = f.examine();
   const foreign = addTask(f, implementId);
   const other = f.create({
-    ...f.body(Work.Implement),
+    ...f.body(Intent.Implement),
     filename: OTHER_FILENAME,
   }).revisions[FIRST_ELEMENT_INDEX]!.node_id;
   updateRefuses(
@@ -2798,10 +2806,10 @@ test("node.update checks existence, retirement, version and revision in order", 
   );
 });
 
-for (const kind of [Work.Examine, Work.Implement]) {
+for (const kind of [Intent.Examine, Intent.Implement]) {
   test(`node.update refuses terminal ${kind}`, (t) => {
     const f = nodeFixture(t);
-    const id = kind === Work.Examine ? f.examine() : f.implement();
+    const id = kind === Intent.Examine ? f.examine() : f.implement();
     const body = updateBody(f, id);
     f.setState(id, NodeState.Completed);
     updateRefuses(f, id, body, MissionErrorCode.Terminal, { node_id: id });
@@ -3500,7 +3508,7 @@ test("node.retire rolls back retirement, dependency removal, routing and jobs wh
 });
 
 function isNodeEntry(entry: ImportEntry): entry is ImportNodeEntry {
-  return "work" in entry;
+  return "intent" in entry;
 }
 
 function importPreviewFixture(t: TestContext) {
@@ -3518,7 +3526,7 @@ function importPreviewFixture(t: TestContext) {
           filename: node.filename,
           ...record.content,
           bindings:
-            record.content.work === Work.Implement ? [REPOSITORY_NAME] : [],
+            record.content.intent === Intent.Implement ? [REPOSITORY_NAME] : [],
         },
         ...record.tasks.map((task) => ({
           id: task.id,
@@ -3832,7 +3840,7 @@ test("import.preview equivalent Markdown and JSON plans have identical classific
     {
       ...f.entries
         .filter(isNodeEntry)
-        .find((entry) => entry.work === Work.Examine)!,
+        .find((entry) => entry.intent === Intent.Examine)!,
       id: undefined,
       filename: NEW_FILENAME,
     },
@@ -3883,15 +3891,15 @@ function importApplyFixture(
     text_max_bytes,
     collaborators,
   );
-  function entry(filename: string, work: Work): ImportNodeEntry {
+  function entry(filename: string, intent: Intent): ImportNodeEntry {
     return {
       filename,
-      work,
+      intent,
       name: NODE_TEXT,
       requirement: NODE_TEXT,
       criterion: NODE_TEXT,
       verifications: [VERIFICATION],
-      bindings: work === Work.Implement ? [REPOSITORY_NAME] : [],
+      bindings: intent === Intent.Implement ? [REPOSITORY_NAME] : [],
     };
   }
   function taskEntry(filename: string, node: string): ImportTaskEntry {
@@ -3907,12 +3915,12 @@ function importApplyFixture(
   }
   const initial: ImportEntry[] = [
     {
-      ...entry(EXAMINE_FILENAME, Work.Examine),
+      ...entry(EXAMINE_FILENAME, Intent.Examine),
       depends_on: [IMPLEMENT_FILENAME, OTHER_FILENAME],
     },
-    entry(IMPLEMENT_FILENAME, Work.Implement),
+    entry(IMPLEMENT_FILENAME, Intent.Implement),
     {
-      ...entry(OTHER_FILENAME, Work.Implement),
+      ...entry(OTHER_FILENAME, Intent.Implement),
       depends_on: [IMPLEMENT_FILENAME],
     },
     taskEntry(TASK_FILENAME, IMPLEMENT_FILENAME),
@@ -4023,7 +4031,7 @@ test("import dependency additions settle a live dependent and dependency-only ed
       },
     },
   });
-  const entries = [...f.initial, f.entry(IMPORT_NEW_DEPENDENT, Work.Examine)];
+  const entries = [...f.initial, f.entry(IMPORT_NEW_DEPENDENT, Intent.Examine)];
   const ids = f.identified(
     f.apply(f.request(f.importSnapshot(entries))),
     entries,
@@ -4496,7 +4504,7 @@ test("import.apply task rename and move, implement retirement and dependency rep
         return { ...item, filename: IMPORT_NEW_TASK, node: OTHER_FILENAME };
       return item;
     });
-  next.push(f.entry(NEW_FILENAME, Work.Examine));
+  next.push(f.entry(NEW_FILENAME, Intent.Examine));
   const body = f.request(f.importSnapshot(next));
   const result = f.apply(body);
   assert.equal(
@@ -4743,7 +4751,7 @@ test("import.apply handles filename swaps and a new dependent without transient 
     return item;
   });
   next.push({
-    ...f.entry(IMPORT_NEW_DEPENDENT, Work.Examine),
+    ...f.entry(IMPORT_NEW_DEPENDENT, Intent.Examine),
     depends_on: [OTHER_FILENAME],
   });
   const result = f.apply(f.request(f.importSnapshot(next)));
@@ -4920,18 +4928,18 @@ for (const format of [ImportFormat.Json, ImportFormat.Markdown]) {
       const task = answer.entries.find(
         (entry) => entry.filename === TASK_FILENAME,
       )!;
-      assert.ok("work" in examine && "work" in implement);
+      assert.ok("intent" in examine && "intent" in implement);
       assert.ok("node" in task);
-      assert.equal(examine.work, Work.Examine);
-      assert.deepEqual(examine.requires, []);
+      assert.equal(examine.intent, Intent.Examine);
+      assert.deepEqual(examine.tags, []);
       assert.deepEqual(
         examine.depends_on,
         [IMPLEMENT_FILENAME, OTHER_FILENAME].sort(),
       );
-      assert.equal(implement.work, Work.Implement);
+      assert.equal(implement.intent, Intent.Implement);
       assert.equal(Object.hasOwn(implement, "node"), false);
       assert.deepEqual(implement.bindings, [REPOSITORY_NAME]);
-      for (const key of ["depends_on", "requires", "work"])
+      for (const key of ["depends_on", "tags", "intent"])
         assert.equal(Object.hasOwn(task, key), false);
       assert.equal(task.node, IMPLEMENT_FILENAME);
     } else {
@@ -5020,8 +5028,8 @@ test("serializePlanFile round-trips YAML-special verification strings", () => {
       {
         filename: IMPLEMENT_FILENAME,
         id: UNKNOWN_NODE_ID,
-        work: Work.Implement,
-        requires: [],
+        intent: Intent.Implement,
+        tags: [],
         depends_on: [],
         bindings: [REPOSITORY_NAME],
         verifications: ["echo key: value", "echo #hash", 'echo "quoted"'],
@@ -5136,8 +5144,8 @@ test("mission.node.rebind declares a human write and advances a pin without chan
   assert.equal(operation.access, AccessPolicy.Human);
   assert.equal(operation.mutation, true);
   assert.equal(operation.body, true);
-  const implementBody = f.body(Work.Implement);
-  implementBody.content.requires = ["platform.macos"];
+  const implementBody = f.body(Intent.Implement);
+  implementBody.content.tags = ["platform.macos"];
   const nodeId =
     f.create(implementBody).revisions[FIRST_ELEMENT_INDEX]!.node_id;
   addTask(f, nodeId);
@@ -5175,8 +5183,8 @@ test("mission.node.rebind declares a human write and advances a pin without chan
     criterion: previous.criterion,
     verifications: JSON.parse(previous.verifications),
     bindings: [NEXT_BINDING_ID],
-    work: Work.Implement,
-    requires: ["platform.macos"],
+    intent: Intent.Implement,
+    tags: ["platform.macos"],
   });
   assert.deepEqual(revision.actor, {
     kind: ActorKind.Human,
@@ -5218,7 +5226,7 @@ test("mission rebind changes examine and implement nodes once, preserving unrela
   const examineBody = f.body();
   examineBody.content.bindings = [OTHER_BINDING_ID];
   const examine = f.create(examineBody).revisions[FIRST_ELEMENT_INDEX]!.node_id;
-  const implementBody = f.body(Work.Implement);
+  const implementBody = f.body(Intent.Implement);
   implementBody.content.bindings.push(OTHER_BINDING_ID);
   const implement =
     f.create(implementBody).revisions[FIRST_ELEMENT_INDEX]!.node_id;
@@ -5233,7 +5241,7 @@ test("mission rebind changes examine and implement nodes once, preserving unrela
     (r) => r.node_id === implement,
   )!;
   assert.deepEqual(examineRevision.content.bindings, [NEXT_STORAGE_ID]);
-  assert.equal(examineRevision.content.work, Work.Examine);
+  assert.equal(examineRevision.content.intent, Intent.Examine);
   assert.deepEqual(examineRevision.change.tasks, []);
   assert.deepEqual(examineRevision.tasks, []);
   assert.deepEqual(implementRevision.content.bindings, [
@@ -5254,7 +5262,7 @@ test("mission rebind reports only terminal and retired earlier pins and keeps sk
     NodeState.Available,
   ];
   const expected = conditions.map((state, index) => {
-    const body = f.body(Work.Implement);
+    const body = f.body(Intent.Implement);
     body.filename = `node-${index}.md`;
     const nodeId = f.create(body).revisions[FIRST_ELEMENT_INDEX]!.node_id;
     f.setState(nodeId, state);
@@ -5284,7 +5292,7 @@ test("mission rebind reports only terminal and retired earlier pins and keeps sk
   const body = f.body();
   body.filename = NEW_FILENAME;
   f.create(body);
-  const activeBody = f.body(Work.Implement);
+  const activeBody = f.body(Intent.Implement);
   activeBody.filename = OTHER_FILENAME;
   const active = f.create(activeBody).revisions[FIRST_ELEMENT_INDEX]!.node_id;
   const mixed = f.rebind();
@@ -5414,10 +5422,10 @@ test("mission rebind refuses missing and foreign named nodes", (t) => {
   );
 });
 
-for (const kind of [Work.Examine, Work.Implement]) {
+for (const kind of [Intent.Examine, Intent.Implement]) {
   test(`mission rebind refuses a named ${kind} that pins no matching binding`, (t) => {
     const f = rebindFixture(t);
-    const nodeId = kind === Work.Examine ? f.examine() : f.implement();
+    const nodeId = kind === Intent.Examine ? f.examine() : f.implement();
     const bindingId = NEXT_STORAGE_ID;
     f.refuses(
       { node_id: nodeId, binding_id: bindingId },

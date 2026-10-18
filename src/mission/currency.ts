@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { z } from "zod";
 import type { Transaction } from "../kernel/store.ts";
-import { Work, type Currency } from "./contract.ts";
+import { Intent, type Currency } from "./contract.ts";
 import {
   readAttempt,
   readEvidence,
@@ -32,7 +32,7 @@ function dependenciesMatch(
 ): boolean {
   const revision = readRevision(tx, row.node_id, row.node_revision);
   assert.ok(revision, "An assessment pins a stored revision.");
-  if (revision.work !== Work.Examine) return true;
+  if (revision.intent !== Intent.Examine) return true;
   const direct = directDependenciesOf(
     node.id,
     readDependencies(tx, node.mission_id),

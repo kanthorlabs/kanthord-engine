@@ -4,7 +4,7 @@ import type { TestContext } from "node:test";
 import { writePrivate } from "../../kernel/files.ts";
 import { temporary } from "../../kernel/test-support.ts";
 import { environment, kanthord } from "./cli-support.ts";
-import { Work, type TaskWrite } from "../../mission/contract.ts";
+import { Intent, type TaskWrite } from "../../mission/contract.ts";
 
 const SUCCESS = 0;
 const FAILURE = 1;
@@ -64,7 +64,7 @@ export async function createJourneyNode(
   cli: ReturnType<typeof journeyClient>,
   projectId: string,
   filename: string,
-  work: Work,
+  intent: Intent,
   bindings: string[],
   tasks: TaskWrite[] = [],
 ) {
@@ -80,9 +80,9 @@ export async function createJourneyNode(
       content: {
         ...NODE_CONTENT,
         bindings,
-        work,
+        intent,
         verifications:
-          work === Work.Examine ? ["true"] : NODE_CONTENT.verifications,
+          intent === Intent.Examine ? ["true"] : NODE_CONTENT.verifications,
       },
       tasks,
       reason: "plan",
@@ -109,7 +109,7 @@ export async function createJourneyTask(
   const node = await cli.read<{
     filename: string;
     visible_revision: number;
-    content: typeof NODE_CONTENT & { work: Work; requires: string[] };
+    content: typeof NODE_CONTENT & { intent: Intent; tags: string[] };
   }>(["mission", "node", "get", nodeId]);
   const current = await cli.read<{
     tasks: { id: string; filename: string; content: typeof NODE_CONTENT }[];

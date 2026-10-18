@@ -11,7 +11,7 @@ import {
 import type {
   AgentSetup,
   ExecutionSetup,
-  ExecutionWork,
+  ExecutionIntent,
   HostTools,
 } from "../contract.ts";
 import type { ExecutionBudget } from "./budget.ts";
@@ -42,7 +42,7 @@ export interface NativeAgentInput {
     created_at: number;
     expired_at: number;
   };
-  work: ExecutionWork;
+  intent: ExecutionIntent;
   agent: AgentSetup;
   credential: ExecutionCredential;
   budget: ExecutionBudget;

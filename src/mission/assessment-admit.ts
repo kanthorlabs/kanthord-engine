@@ -6,7 +6,7 @@ import type { Transaction } from "../kernel/store.ts";
 import {
   AssessmentResult,
   MissionErrorCode,
-  Work,
+  Intent,
   verificationSchema,
   type AssessmentSubmit,
   type Revision,
@@ -30,7 +30,7 @@ import { directDependenciesOf } from "./graph.ts";
 import {
   readDependencies,
   readMissionNodes,
-  workOf,
+  intentOf,
   type NodeRow,
 } from "./store.ts";
 
@@ -43,12 +43,12 @@ const PROPOSALS_FIELD = "proposals";
 function requireDependencyOutcomes(
   tx: Transaction,
   node: NodeRow,
-  work: Work,
+  intent: Intent,
   dependencyOutcomeIds: readonly string[],
 ): void {
   assert.ok(tx.database.isTransaction);
   const expected =
-    work === Work.Implement
+    intent === Intent.Implement
       ? []
       : directDependenciesOf(
           node.id,
@@ -69,11 +69,14 @@ function requireProposals(
   tx: Transaction,
   dependencies: Dependencies,
   node: NodeRow,
-  work: Work,
+  intent: Intent,
   body: AssessmentSubmit,
 ): void {
   if (body.proposals.length === NO_PROPOSALS) return;
-  if (work !== Work.Examine || body.result !== AssessmentResult.Undetermined)
+  if (
+    intent !== Intent.Examine ||
+    body.result !== AssessmentResult.Undetermined
+  )
     invalidExecutionInput(PROPOSALS_FIELD);
   const direct = new Set(
     directDependenciesOf(node.id, readDependencies(tx, node.mission_id)),
@@ -83,7 +86,7 @@ function requireProposals(
       .filter(
         (dependency) =>
           direct.has(dependency.id) &&
-          workOf(tx, dependency.id) === Work.Implement,
+          intentOf(tx, dependency.id) === Intent.Implement,
       )
       .map((dependency) => dependency.id),
   );
@@ -192,10 +195,10 @@ export function admitAssessment(
   requireDependencyOutcomes(
     tx,
     node,
-    revision.content.work,
+    revision.content.intent,
     body.dependency_outcome_ids,
   );
-  requireProposals(tx, dependencies, node, revision.content.work, body);
+  requireProposals(tx, dependencies, node, revision.content.intent, body);
   requireTestedInput(
     tx,
     dependencies.bindings,

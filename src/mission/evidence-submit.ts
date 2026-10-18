@@ -11,7 +11,7 @@ import {
   AssetKind,
   MissionErrorCode,
   UPLOAD_LIFETIME_MS,
-  Work,
+  Intent,
   type EvidenceSubmit,
   type MissionBindings,
   type Revision,
@@ -126,7 +126,7 @@ export function prepareEvidence(
     asset.kind === AssetKind.Repository ? [asset.address.binding_id] : [],
   );
   if (
-    revision.content.work === Work.Implement &&
+    revision.content.intent === Intent.Implement &&
     repositoryBindingIds.length > NO_REPOSITORY_ASSETS
   )
     requireRepositorySet(

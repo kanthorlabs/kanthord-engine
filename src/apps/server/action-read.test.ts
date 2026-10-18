@@ -24,7 +24,7 @@ import {
   type Evidence,
   type PlatformAddress,
   type Revision,
-  Work,
+  Intent,
 } from "../../mission/contract.ts";
 import type { ExecutionRecord } from "../../scheduler/contract.ts";
 import { environment, kanthord } from "./cli-support.ts";
@@ -184,7 +184,7 @@ async function setup(t: TestContext) {
         filename,
         content: {
           ...CONTENT,
-          work: Work.Implement,
+          intent: Intent.Implement,
           bindings: names.map((name) => binding(name).id),
         },
         tasks: [],

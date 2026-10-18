@@ -10,7 +10,7 @@ import {
   MissionErrorCode,
   NodeState,
   RepositoryAction,
-  Work,
+  Intent,
   type MissionBindings,
   type UnmatchedClaim,
 } from "./contract.ts";
@@ -98,7 +98,7 @@ function coverageHarness(t: TestContext) {
               .filter(
                 (claim) =>
                   claim === ClaimableState.ExternalRequested ||
-                  row.requires.some((trait) => missing.has(trait)),
+                  row.tags.some((tag) => missing.has(tag)),
               )
               .map((claim) => ({
                 node_id: row.node_id,
@@ -117,7 +117,7 @@ function coverageHarness(t: TestContext) {
       body: null,
     });
   const snapshot = () => databaseSnapshot(h.store);
-  async function create(filename: string, requires: string[]) {
+  async function create(filename: string, tags: string[]) {
     const { id, version } = await mission();
     return h.invoke("node.create", {
       params: { mission_id: id },
@@ -126,8 +126,8 @@ function coverageHarness(t: TestContext) {
         filename,
         content: {
           ...CONTENT,
-          work: Work.Implement,
-          requires,
+          intent: Intent.Implement,
+          tags,
           bindings: [REPOSITORY_NAME],
         },
         tasks: [],
@@ -144,7 +144,7 @@ function coverageHarness(t: TestContext) {
     await assert.rejects(write(), (error) => {
       assert.ok(error instanceof OperationError);
       assert.equal(error.status, HttpStatus.Conflict);
-      assert.equal(error.code, MissionErrorCode.RequiresUnmatched);
+      assert.equal(error.code, MissionErrorCode.TagsUnmatched);
       assert.deepEqual(error.details, { claims });
       return true;
     });
@@ -162,13 +162,13 @@ function coverageHarness(t: TestContext) {
   };
 }
 
-test("a node create with requires [platform.macos] and no such trait answers mission.node.requires_unmatched and writes nothing", async (t) => {
+test("a node create with tags [platform.macos] and no such tag answers mission.node.tags_unmatched and writes nothing", async (t) => {
   const h = coverageHarness(t);
   h.missing.add(MACOS);
   const before = await h.mission();
   await assert.rejects(h.create("ios.md", [MACOS]), (error) => {
     assert.ok(error instanceof OperationError);
-    assert.equal(error.code, MissionErrorCode.RequiresUnmatched);
+    assert.equal(error.code, MissionErrorCode.TagsUnmatched);
     const details = error.details as unknown as { claims: UnmatchedClaim[] };
     assert.deepEqual(
       details.claims.map(({ revision, claim }) => ({ revision, claim })),
@@ -221,7 +221,7 @@ test("an update of a node with an existing unmatched pair succeeds", async (t) =
   const update = async (
     node: { node_id: string; revision: number },
     filename: string,
-    requires: string[],
+    tags: string[],
     name: string,
   ) =>
     h.invoke("node.update", {
@@ -232,8 +232,8 @@ test("an update of a node with an existing unmatched pair succeeds", async (t) =
         content: {
           ...CONTENT,
           name,
-          work: Work.Implement,
-          requires,
+          intent: Intent.Implement,
+          tags,
           bindings: [REPOSITORY_NAME],
         },
         tasks: [],
@@ -266,8 +266,8 @@ test("an import apply that adds an unmatched pair is refused and writes nothing"
       {
         filename: "ios.md",
         ...CONTENT,
-        work: Work.Examine,
-        requires: [MACOS],
+        intent: Intent.Examine,
+        tags: [MACOS],
         bindings: [],
       },
     ],
@@ -291,7 +291,7 @@ test("an import apply that adds an unmatched pair is refused and writes nothing"
     (error) => {
       assert.ok(error instanceof OperationError);
       assert.equal(error.status, HttpStatus.Conflict);
-      assert.equal(error.code, MissionErrorCode.RequiresUnmatched);
+      assert.equal(error.code, MissionErrorCode.TagsUnmatched);
       const details = error.details as unknown as { claims: UnmatchedClaim[] };
       assert.deepEqual(
         details.claims.map(({ revision, claim }) => ({ revision, claim })),
@@ -337,8 +337,8 @@ test("a node unblock with a content change that adds an unmatched pair is refuse
           change: {
             content: {
               ...CONTENT,
-              work: Work.Implement,
-              requires: [MACOS],
+              intent: Intent.Implement,
+              tags: [MACOS],
               bindings: [PLAIN_REPOSITORY],
             },
             reason: REASON,

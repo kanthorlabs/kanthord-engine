@@ -9,7 +9,7 @@ import {
   INLINE_BYTES_MAX,
   MissionBindingKind,
   MissionErrorCode,
-  Work,
+  Intent,
   type MissionBindings,
   type RepositoryAddress,
   type Revision,
@@ -251,7 +251,7 @@ export function requiredVerifications(
 ): string[] {
   assert.equal(revision.node_id, node.id);
   const commands = [...revision.content.verifications];
-  if (revision.content.work === Work.Implement) {
+  if (revision.content.intent === Intent.Implement) {
     for (const task of revision.tasks ?? [])
       commands.push(...task.content.verifications);
   }

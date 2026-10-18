@@ -37,7 +37,7 @@ import {
   validateText,
 } from "../agent/prompt-source.ts";
 import { RepositoryFileState } from "../repository/contract.ts";
-import { traitKeySchema } from "../kernel/trait.ts";
+import { tagSchema } from "../kernel/tag.ts";
 import { isString } from "../kernel/values.ts";
 import {
   assertPinned,
@@ -75,7 +75,7 @@ import {
   storageConfigSchema,
   workerConfigSchema,
   workerConfigWriteSchema,
-  workerTraitsSchema,
+  workerTagsSchema,
   type ProjectBindings,
   type AgentDependentBinding,
   type BindingNaming,
@@ -189,29 +189,29 @@ function refuseAddedUnmatched(
   );
 }
 
-function refuseInvalidTraits(name: string, traits: unknown): void {
-  if (traits === undefined) return;
-  if (!Array.isArray(traits))
+function refuseInvalidTags(name: string, tags: unknown): void {
+  if (tags === undefined) return;
+  if (!Array.isArray(tags))
     throw new OperationError(
       HttpStatus.BadRequest,
-      ProjectErrorCode.WorkerTraitsInvalid,
-      "Worker traits must be a list of unique trait keys.",
-      { binding: name, trait: null },
+      ProjectErrorCode.WorkerTagsInvalid,
+      "Worker tags must be a list of unique tags.",
+      { binding: name, tag: null },
     );
   const seen = new Set<unknown>();
-  for (const trait of traits) {
-    if (traitKeySchema.safeParse(trait).success && !seen.has(trait)) {
-      seen.add(trait);
+  for (const tag of tags) {
+    if (tagSchema.safeParse(tag).success && !seen.has(tag)) {
+      seen.add(tag);
       continue;
     }
     throw new OperationError(
       HttpStatus.BadRequest,
-      ProjectErrorCode.WorkerTraitsInvalid,
-      "Worker traits must be a list of unique trait keys.",
-      { binding: name, trait: isString(trait) ? trait : null },
+      ProjectErrorCode.WorkerTagsInvalid,
+      "Worker tags must be a list of unique tags.",
+      { binding: name, tag: isString(tag) ? tag : null },
     );
   }
-  assert.ok(workerTraitsSchema.safeParse(traits).success);
+  assert.ok(workerTagsSchema.safeParse(tags).success);
 }
 const UTF8_ENCODING = "utf8";
 const CURSOR_ENCODING = "base64url";
@@ -262,7 +262,7 @@ function workerRowOf(
       NO_GENERATION,
     resource_budget: config.resource_budget ?? null,
     entries: config.entries ?? [],
-    traits: config.traits ?? [],
+    tags: config.tags ?? [],
     tombstone: row.removed_at !== null,
   };
 }
@@ -1048,7 +1048,7 @@ export class ProjectService implements Service, ProjectBindings {
         ProjectErrorCode.WorkerInstanceCountRange,
         "Worker instance count is out of range.",
       );
-    refuseInvalidTraits(name, config.traits);
+    refuseInvalidTags(name, config.tags);
     const agents = this.workerAgentsOf(config.worker);
     if (agents.length === EMPTY_LENGTH) {
       this.validateEntry(tx, config.worker, null);

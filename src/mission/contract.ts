@@ -13,7 +13,7 @@ import type { Transaction } from "../kernel/store.ts";
 import type { Context } from "../kernel/context.ts";
 import type { CallerIdentity } from "../kernel/caller.ts";
 import { errorSchema } from "../kernel/errors.ts";
-import { traitKeySchema } from "../kernel/trait.ts";
+import { tagSchema } from "../kernel/tag.ts";
 
 export const MISSION_SERVICE_NAME = "mission";
 export const MISSION_IDENTITY_PREFIX = "mission";
@@ -83,8 +83,8 @@ export interface WorkQueue {
 }
 
 export interface ClaimFacts {
-  work: Work;
-  requires: string[];
+  intent: Intent;
+  tags: string[];
 }
 
 export interface ClaimFactsRow extends ClaimFacts {
@@ -281,8 +281,8 @@ export const MissionErrorCode = {
   VerificationsMissing: "mission.node.verifications_missing",
   BindingsInvalid: "mission.node.bindings_invalid",
   FilenameConflict: "mission.node.filename_conflict",
-  WorkLocked: "mission.node.work_locked",
-  RequiresUnmatched: "mission.node.requires_unmatched",
+  IntentLocked: "mission.node.intent_locked",
+  TagsUnmatched: "mission.node.tags_unmatched",
   Retired: "mission.node.retired",
   Terminal: "mission.node.terminal",
   EndpointInvalid: "mission.dependency.endpoint_invalid",
@@ -317,7 +317,7 @@ export const MissionBindingKind = {
   Storage: "storage",
 } as const;
 
-export const Work = {
+export const Intent = {
   Implement: "implement",
   Examine: "examine",
 } as const;
@@ -468,8 +468,8 @@ export const actionKeySchema = z
   .regex(/^[a-z][a-z0-9-]{0,62}\.(pull_request|merge_push)$/);
 export const textSchema = z.string().min(1);
 
-export const workSchema = z.enum(Work);
-export type Work = z.infer<typeof workSchema>;
+export const intentSchema = z.enum(Intent);
+export type Intent = z.infer<typeof intentSchema>;
 export const planFileIdSchema = z.union([
   identitySchema(NODE_IDENTITY_PREFIX),
   identitySchema(TASK_IDENTITY_PREFIX),
@@ -492,21 +492,21 @@ const planContentFields = {
   verifications: z.array(z.string().min(1)).min(1),
   bindings: z.array(z.string()),
 };
-export const requiresSchema = z
-  .array(traitKeySchema)
+export const tagsSchema = z
+  .array(tagSchema)
   .refine((keys) => new Set(keys).size === keys.length, {
-    message: "Trait keys must be unique.",
+    message: "Tags must be unique.",
   });
 export const contentSchema = z.strictObject({
   ...planContentFields,
-  work: workSchema,
-  requires: requiresSchema.default([]),
+  intent: intentSchema,
+  tags: tagsSchema.default([]),
 });
 export type Content = z.infer<typeof contentSchema>;
 export const contentWriteSchema = z.strictObject({
   ...planContentFields,
-  work: z.unknown().optional(),
-  requires: z.unknown().optional(),
+  intent: z.unknown().optional(),
+  tags: z.unknown().optional(),
 });
 export const taskBodySchema = z.strictObject({
   ...planContentFields,
@@ -666,9 +666,9 @@ const planEntryFields = {
 export const importNodeEntrySchema = z.strictObject({
   filename: z.string().min(1),
   id: planFileIdSchema.optional(),
-  work: z.unknown(),
+  intent: z.unknown(),
   ...planEntryFields,
-  requires: z.unknown().optional(),
+  tags: z.unknown().optional(),
   depends_on: z.array(z.string().min(1)).optional(),
 });
 export type ImportNodeEntry = z.infer<typeof importNodeEntrySchema>;
@@ -688,9 +688,9 @@ export const exportEntrySchema = z.union([
   z.strictObject({
     filename: planFileNameSchema,
     id: identitySchema(NODE_IDENTITY_PREFIX),
-    work: workSchema,
+    intent: intentSchema,
     ...planEntryFields,
-    requires: z.array(traitKeySchema),
+    tags: z.array(tagSchema),
     depends_on: z.array(planFileNameSchema),
   }),
   z.strictObject({
@@ -1087,8 +1087,8 @@ const runnableNodeFields = {
 export const nodeSchema = z.strictObject({
   ...nodeBase,
   ...runnableNodeFields,
-  work: workSchema,
-  requires: z.array(traitKeySchema),
+  intent: intentSchema,
+  tags: z.array(tagSchema),
 });
 export type Node = z.infer<typeof nodeSchema>;
 export const controlResultSchema = z.strictObject({
@@ -2041,7 +2041,7 @@ export const missionOperations = {
       z.strictObject({ mission_id: identitySchema(MISSION_IDENTITY_PREFIX) }),
       z.strictObject({
         ...pageQuery,
-        work: workSchema.optional(),
+        intent: intentSchema.optional(),
         state: nodeStateSchema.optional(),
         include_retired: z.enum(["true", "false"]).default("false").optional(),
       }),

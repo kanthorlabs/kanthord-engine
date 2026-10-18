@@ -9,7 +9,7 @@ import {
   AssetKind,
   ClaimableState,
   MissionErrorCode,
-  Work,
+  Intent,
   NodeState,
   StartPoint,
   type ProposalContent,
@@ -43,7 +43,7 @@ const NO_PROPOSALS = 0;
 const SINGLE_PROPOSAL = 1;
 const TWO_PROPOSALS = 2;
 const NOW = 100;
-const DEPENDENCY_TRAIT = "platform.linux";
+const DEPENDENCY_TAG = "platform.linux";
 const VALIDATION = "gateway.request.validation_failed";
 const RESOURCE_IDENTITY = "repository:github:owner/repo";
 
@@ -83,8 +83,8 @@ async function fixture(t: TestContext) {
       filename: "child.md",
       content: {
         ...base.content,
-        work: Work.Implement,
-        requires: [DEPENDENCY_TRAIT],
+        intent: Intent.Implement,
+        tags: [DEPENDENCY_TAG],
         bindings: [repositoryId],
       },
       tasks: [],
@@ -214,7 +214,7 @@ test("an undetermined proposer assessment records one row per proposal", async (
   const h = await fixture(t);
   const result = await h.submit([h.proposal(), h.proposal(h.childId, "Other")]);
   assert.equal(result.outcome?.result, AssessmentResult.Undetermined);
-  assert.equal(result.node.work, Work.Examine);
+  assert.equal(result.node.intent, Intent.Examine);
   assert.equal(h.node().state, NodeState.Blocked);
   const page = await h.list();
   assert.equal(page.items.length, TWO_PROPOSALS);
@@ -243,8 +243,8 @@ test("approval adds a dependency of the proposer on the created node and routes 
     node: readNode(tx, createdId)!,
     revision: readCurrentRevision(tx, createdId)!,
   }));
-  assert.equal(created.revision.work, Work.Implement);
-  assert.deepEqual(JSON.parse(created.revision.requires), [DEPENDENCY_TRAIT]);
+  assert.equal(created.revision.intent, Intent.Implement);
+  assert.deepEqual(JSON.parse(created.revision.tags), [DEPENDENCY_TAG]);
   assert.equal(created.node.state, NodeState.Available);
   assert.deepEqual(JSON.parse(created.revision.bindings), [h.repositoryId]);
   assert.deepEqual(JSON.parse(created.revision.verifications), ["pnpm test"]);
@@ -305,7 +305,7 @@ test("an approval that adds an unmatched pair is refused and writes nothing", as
     unmatchedClaims: (tx, projectId) =>
       h.service
         .claimFactsOf(tx, projectId)
-        .filter(({ requires }) => requires.includes(DEPENDENCY_TRAIT))
+        .filter(({ tags }) => tags.includes(DEPENDENCY_TAG))
         .flatMap(({ node_id, revision, claims }) =>
           claims.map((claim) => ({ node_id, revision, claim })),
         ),
@@ -313,7 +313,7 @@ test("an approval that adds an unmatched pair is refused and writes nothing", as
   const before = databaseSnapshot(h.store);
   await assert.rejects(h.approve(proposalId), (error) => {
     assert.ok(error instanceof OperationError);
-    assert.equal(error.code, MissionErrorCode.RequiresUnmatched);
+    assert.equal(error.code, MissionErrorCode.TagsUnmatched);
     const details = error.details as unknown as {
       claims: { revision: number; claim: string }[];
     };

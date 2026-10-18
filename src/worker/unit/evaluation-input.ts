@@ -18,7 +18,7 @@ import {
 } from "./workspace.ts";
 import type { StepsInput } from "./steps-implement.ts";
 import type { TestedInput } from "./verification.ts";
-import { ExecutionWork } from "../contract.ts";
+import { ExecutionIntent } from "../contract.ts";
 
 const NO_SNAPSHOTS = 0;
 
@@ -104,7 +104,7 @@ async function placeAsset(
 async function prepareWorkspace(
   input: StepsInput,
   run: ExecutionRun,
-  work: ExecutionWork,
+  intent: ExecutionIntent,
   evidence: readonly Evidence[],
 ) {
   const deadline = Math.min(
@@ -117,7 +117,7 @@ async function prepareWorkspace(
     context: run.operationContext,
     deadlineMs: deadline - Date.now(),
   };
-  if (work === ExecutionWork.Implement) {
+  if (intent === ExecutionIntent.Implement) {
     const snapshots = input.setup.repositories.map((repository) => ({
       repository,
       snapshot: snapshotOf(evidence, repository.binding_id),
@@ -144,7 +144,7 @@ async function prepareWorkspace(
       }
     }
   }
-  if (work === ExecutionWork.Examine)
+  if (intent === ExecutionIntent.Examine)
     return {
       ...(await input.workspaces.prepareExamine({
         ...common,
@@ -188,10 +188,10 @@ async function addedFilesOf(
 export async function prepareEvaluation(
   input: StepsInput,
   run: ExecutionRun,
-  work: ExecutionWork,
+  intent: ExecutionIntent,
   evidence: readonly Evidence[],
 ) {
-  const workspace = await prepareWorkspace(input, run, work, evidence);
+  const workspace = await prepareWorkspace(input, run, intent, evidence);
   try {
     const testedInput: TestedInput | undefined =
       workspace.tested_input ?? placedOf(evidence)?.asset.address;

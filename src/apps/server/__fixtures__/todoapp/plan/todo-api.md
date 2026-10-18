@@ -1,5 +1,5 @@
 ---
-work: examine
+intent: examine
 depends_on:
   - foundation.md
   - persistence.md

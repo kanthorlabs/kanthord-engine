@@ -20,7 +20,7 @@ import {
   NodeState,
   type Evidence,
   type Revision,
-  Work,
+  Intent,
 } from "../../mission/contract.ts";
 import { type ExecutionRecord } from "../../scheduler/contract.ts";
 import { ActionResultKind, workerOperations } from "../../worker/contract.ts";
@@ -151,7 +151,7 @@ async function setup(t: TestContext) {
         filename,
         content: {
           ...CONTENT,
-          work: dependentId ? Work.Implement : Work.Examine,
+          intent: dependentId ? Intent.Implement : Intent.Examine,
           bindings: dependentId ? [binding(GATED).id] : [],
         },
         tasks: [],

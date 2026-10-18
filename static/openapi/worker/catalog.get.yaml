@@ -84,7 +84,7 @@ components:
               type: array
               items:
                 type: string
-            declared_works:
+            declared_intents:
               type: array
               items:
                 type: string
@@ -120,7 +120,7 @@ components:
             - name
             - host
             - declared_node_states
-            - declared_works
+            - declared_intents
             - method
             - agent_names
             - resource_budget
@@ -137,7 +137,7 @@ components:
               type: array
               items:
                 type: string
-            declared_works:
+            declared_intents:
               type: array
               items:
                 type: string
@@ -165,7 +165,7 @@ components:
             - name
             - host
             - declared_node_states
-            - declared_works
+            - declared_intents
             - harness
             - resource_budget
           additionalProperties: false

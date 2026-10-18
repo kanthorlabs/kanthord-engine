@@ -11,7 +11,7 @@ import {
   NodeState,
   RepositoryAction,
   PlatformAddressKind,
-  Work,
+  Intent,
   MissionErrorCode,
   type AssessmentSubmit,
 } from "./contract.ts";
@@ -63,7 +63,7 @@ test("examine currency follows real dependency outcomes and only current closure
       ...base,
       node_id: childId,
       filename: "child.md",
-      content: { ...base.content, work: Work.Implement },
+      content: { ...base.content, intent: Intent.Implement },
       tasks: [],
     });
     insertNode(tx, {

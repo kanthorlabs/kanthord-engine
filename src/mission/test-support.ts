@@ -16,7 +16,7 @@ import {
   MISSION_SERVICE_NAME,
   missionOperations,
   ActorKind,
-  Work,
+  Intent,
   NodeState,
   RevisionWrite,
   type HumanAct,
@@ -33,7 +33,7 @@ import {
   insertRevision,
   readNode,
   setNodeState,
-  workOf,
+  intentOf,
 } from "./store.ts";
 import { missionMigrations } from "./migrations.ts";
 import { MissionService, type Dependencies } from "./service.ts";
@@ -156,7 +156,7 @@ export function evidenceHarness(t: TestContext, identity: CallerIdentity) {
       filename: "implement.md",
       content: {
         ...revision.content,
-        work: Work.Implement,
+        intent: Intent.Implement,
         bindings: [repositoryId, storageId],
       },
       tasks: [],
@@ -168,8 +168,8 @@ export function evidenceHarness(t: TestContext, identity: CallerIdentity) {
   h.claim.nodeId = nodeId;
   const node = () => h.store.transaction((tx) => readNode(tx, nodeId)!);
   assert.equal(
-    h.store.transaction((tx) => workOf(tx, nodeId)),
-    Work.Implement,
+    h.store.transaction((tx) => intentOf(tx, nodeId)),
+    Intent.Implement,
   );
   assert.equal(node().attempt, h.claim.attempt);
   return {
@@ -213,8 +213,8 @@ export function controlHarness(
         criterion: "Criterion",
         verifications: ["true"],
         bindings: [],
-        work: Work.Examine,
-        requires: [],
+        intent: Intent.Examine,
+        tags: [],
       },
       tasks: [],
       change: {

@@ -100,8 +100,8 @@ function acquire(
     identity,
     {
       declared_node_states: declaration.declared_node_states,
-      declared_works: declaration.declared_works,
-      traits: binding.traits,
+      declared_intents: declaration.declared_intents,
+      tags: binding.tags,
     },
     executionId,
     now,

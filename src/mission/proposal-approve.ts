@@ -5,7 +5,7 @@ import type { Transaction } from "../kernel/store.ts";
 import {
   MissionErrorCode,
   NodeState,
-  Work,
+  Intent,
   PROPOSAL_IDENTITY_PREFIX,
   type HumanActor,
   type ProposalApprove,
@@ -18,7 +18,7 @@ import { markProposalApproved } from "./proposal-store.ts";
 import { proposalRecord, requireProposal } from "./proposal-read.ts";
 import { revisionFromRow } from "./revision.ts";
 import type { Dependencies } from "./service.ts";
-import { insertDependency, readCurrentRevision, workOf } from "./store.ts";
+import { insertDependency, readCurrentRevision, intentOf } from "./store.ts";
 import { requireActive, requireMission } from "./write.ts";
 
 const IDENTITY_SEPARATOR_LENGTH = 1;
@@ -52,7 +52,7 @@ export function approveProposal(
     );
   const proposal = proposalRecord(row);
   const proposer = requireNode(tx, proposal.node_id);
-  assert.equal(workOf(tx, proposer.id), Work.Examine);
+  assert.equal(intentOf(tx, proposer.id), Intent.Examine);
   requireActive(proposer);
   const mission = requireMission(
     tx,
@@ -85,8 +85,8 @@ export function approveProposal(
         criterion: proposal.content.criterion,
         verifications: task.verifications,
         bindings: sourceContent.bindings,
-        work: Work.Implement,
-        requires: sourceContent.requires,
+        intent: Intent.Implement,
+        tags: sourceContent.tags,
       },
       tasks: [
         {

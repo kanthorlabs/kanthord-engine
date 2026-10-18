@@ -31,7 +31,7 @@ import {
   type RevisionChange,
   type TaskContent,
   type TaskWrite,
-  type Work,
+  type Intent,
   type WorkQueue,
 } from "./contract.ts";
 import { revisionFromRow } from "./revision.ts";
@@ -78,33 +78,33 @@ export function resolveContent(
   textMaxBytes: number,
 ): Content {
   validateFilename(body.filename);
-  const work = validateNodeContent(body.content, textMaxBytes);
+  const intent = validateNodeContent(body.content, textMaxBytes);
   validateText(REASON_FIELD, body.reason, textMaxBytes);
   const resolved = resolveNodeBindings(
     tx,
     (inner, project, bindingId) =>
       bindings.resolveBindingIdentity(inner, project, bindingId),
     projectId,
-    work,
+    intent,
     body.content.bindings,
   );
   return {
     ...body.content,
-    work,
-    requires: (body.content.requires ?? []) as Content["requires"],
+    intent,
+    tags: (body.content.tags ?? []) as Content["tags"],
     bindings: resolved.map((binding) => binding.binding_id),
   };
 }
 
 export function resolveTasks(
   tx: Transaction,
-  owner: { id: string | null; mission_id: string; work: Work },
+  owner: { id: string | null; mission_id: string; intent: Intent },
   filename: string,
   writes: TaskWrite[],
   current: TaskContent[],
   textMaxBytes: number,
 ): { tasks: TaskContent[]; changes: TaskChangeEntry[] } {
-  validateTaskCount(owner.work, writes.length);
+  validateTaskCount(owner.intent, writes.length);
   const named = writes.flatMap((write) =>
     write.id === undefined ? [] : [write.id],
   );
@@ -213,7 +213,7 @@ export function createNode(
     throw filenameConflict(body.filename);
   const { tasks, changes } = resolveTasks(
     tx,
-    { id: null, mission_id: missionId, work: content.work },
+    { id: null, mission_id: missionId, intent: content.intent },
     body.filename,
     body.tasks,
     [],

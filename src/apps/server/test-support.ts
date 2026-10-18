@@ -12,7 +12,11 @@ import { repositoryOperations } from "../../repository/contract.ts";
 import { projectOperations } from "../../project/contract.ts";
 import { llmOperations } from "../../llm/contract.ts";
 import { agentOperations } from "../../agent/contract.ts";
-import { missionOperations, Work, NodeState } from "../../mission/contract.ts";
+import {
+  missionOperations,
+  Intent,
+  NodeState,
+} from "../../mission/contract.ts";
 import {
   OperationResultType,
   type Operation,
@@ -115,11 +119,11 @@ export const servicePing = {
 export const COVERING_WORKER_BINDINGS = {
   coder: {
     kind: "worker",
-    config: { worker: "coder@1", instance_count: 0, traits: [] },
+    config: { worker: "coder@1", instance_count: 0, tags: [] },
   },
   reviewer: {
     kind: "worker",
-    config: { worker: "reviewer@1", instance_count: 0, traits: [] },
+    config: { worker: "reviewer@1", instance_count: 0, tags: [] },
   },
 } as const;
 export const COVERING_AGENTS = ["swe@1", "re@1"] as const;
@@ -1768,7 +1772,11 @@ async function storageNode(
   ids: { projectId: string; missionId: string },
   bindingIds: string[],
 ) {
-  const create = async (filename: string, work: Work, bindings: string[]) => {
+  const create = async (
+    filename: string,
+    intent: Intent,
+    bindings: string[],
+  ) => {
     const { version } = await cli.read<{ version: number }>([
       "mission",
       "get",
@@ -1778,7 +1786,7 @@ async function storageNode(
       ["mission", "node", "create", ids.missionId],
       {
         filename,
-        content: { ...STORAGE_NODE_CONTENT, work, bindings },
+        content: { ...STORAGE_NODE_CONTENT, intent, bindings },
         tasks: [],
         reason: "plan",
         expected_mission_version: version,
@@ -1786,8 +1794,8 @@ async function storageNode(
     );
     return answer.revisions[STORAGE_FIRST_INDEX]!.node_id;
   };
-  const examine = await create("examine.md", Work.Examine, []);
-  const implement = await create("implement.md", Work.Implement, bindingIds);
+  const examine = await create("examine.md", Intent.Examine, []);
+  const implement = await create("implement.md", Intent.Implement, bindingIds);
   const { version } = await cli.read<{ version: number }>([
     "mission",
     "get",
@@ -2013,7 +2021,7 @@ export async function provisionWorkerProject(
     query: {},
     body: {
       filename: "examine-1.md",
-      content: { ...WORKER_PROJECT_NODE, work: Work.Examine, bindings: [] },
+      content: { ...WORKER_PROJECT_NODE, intent: Intent.Examine, bindings: [] },
       tasks: [],
       reason: "plan",
       expected_mission_version: FIRST_MISSION_VERSION,
@@ -2026,7 +2034,7 @@ export async function provisionWorkerProject(
       filename: "implement-1.md",
       content: {
         ...WORKER_PROJECT_NODE,
-        work: Work.Implement,
+        intent: Intent.Implement,
         bindings: [bindingSet.bindings.repo!.id],
       },
       tasks: [],

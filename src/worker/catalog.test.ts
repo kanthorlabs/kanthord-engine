@@ -10,7 +10,7 @@ import {
   getWorkerDeclaration,
 } from "./catalog.ts";
 
-const declaredWorks = ["implement", "examine"];
+const declaredIntents = ["implement", "examine"];
 
 test("static worker declarations", () => {
   assert.deepEqual(Object.keys(WORKER_CATALOG), [
@@ -25,7 +25,7 @@ test("static worker declarations", () => {
     agent_names: ["swe@1"],
     resource_budget: { turns: 200, wall_time_ms: 7200000 },
     declared_node_states: ["Available"],
-    declared_works: declaredWorks,
+    declared_intents: declaredIntents,
   });
   assert.deepEqual(getWorkerDeclaration("reviewer@1"), {
     name: "reviewer@1",
@@ -34,7 +34,7 @@ test("static worker declarations", () => {
     agent_names: ["re@1"],
     resource_budget: { turns: 200, wall_time_ms: 7200000 },
     declared_node_states: ["Waiting", "External.Requested"],
-    declared_works: declaredWorks,
+    declared_intents: declaredIntents,
   });
   assert.deepEqual(getWorkerDeclaration("claude-code@1"), {
     name: "claude-code@1",
@@ -42,7 +42,7 @@ test("static worker declarations", () => {
     harness: "claude-code",
     resource_budget: { wall_time_ms: 7200000 },
     declared_node_states: ["Available", "Waiting", "External.Requested"],
-    declared_works: declaredWorks,
+    declared_intents: declaredIntents,
   });
 });
 

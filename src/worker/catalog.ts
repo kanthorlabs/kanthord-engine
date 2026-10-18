@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
 
-import { ExecutionWork, WorkerHost, WorkerMethod } from "./contract.ts";
+import { ExecutionIntent, WorkerHost, WorkerMethod } from "./contract.ts";
 export { WorkerHost, WorkerMethod } from "./contract.ts";
 
 export interface WorkerDeclaration {
@@ -13,12 +13,12 @@ export interface WorkerDeclaration {
   harness?: string;
   resource_budget: { turns?: number; wall_time_ms: number };
   declared_node_states: readonly string[];
-  declared_works: readonly ExecutionWork[];
+  declared_intents: readonly ExecutionIntent[];
 }
 
-const DECLARED_WORKS: readonly ExecutionWork[] = [
-  ExecutionWork.Implement,
-  ExecutionWork.Examine,
+const DECLARED_INTENTS: readonly ExecutionIntent[] = [
+  ExecutionIntent.Implement,
+  ExecutionIntent.Examine,
 ];
 const NATIVE_RESOURCE_BUDGET = { turns: 200, wall_time_ms: 7200000 };
 const EXTERNAL_RESOURCE_BUDGET = { wall_time_ms: 7200000 };
@@ -35,7 +35,7 @@ export const WORKER_CATALOG: Readonly<Record<string, WorkerDeclaration>> = {
     agent_names: ["swe@1"],
     resource_budget: NATIVE_RESOURCE_BUDGET,
     declared_node_states: ["Available"],
-    declared_works: DECLARED_WORKS,
+    declared_intents: DECLARED_INTENTS,
   },
   "reviewer@1": {
     name: "reviewer@1",
@@ -44,7 +44,7 @@ export const WORKER_CATALOG: Readonly<Record<string, WorkerDeclaration>> = {
     agent_names: ["re@1"],
     resource_budget: NATIVE_RESOURCE_BUDGET,
     declared_node_states: ["Waiting", "External.Requested"],
-    declared_works: DECLARED_WORKS,
+    declared_intents: DECLARED_INTENTS,
   },
   "claude-code@1": {
     name: "claude-code@1",
@@ -52,7 +52,7 @@ export const WORKER_CATALOG: Readonly<Record<string, WorkerDeclaration>> = {
     harness: "claude-code",
     resource_budget: EXTERNAL_RESOURCE_BUDGET,
     declared_node_states: ["Available", "Waiting", "External.Requested"],
-    declared_works: DECLARED_WORKS,
+    declared_intents: DECLARED_INTENTS,
   },
 };
 
@@ -83,13 +83,13 @@ export function listWorkerDeclarations(limit: number, cursor: string | null) {
     .sort()
     .filter((name) => after === null || name > after);
   const items = names.slice(FIRST_ITEM, limit).map((name) => {
-    const { host, declared_node_states, declared_works } =
+    const { host, declared_node_states, declared_intents } =
       WORKER_CATALOG[name]!;
     return {
       name,
       host,
       declared_node_states: [...declared_node_states],
-      declared_works: [...declared_works],
+      declared_intents: [...declared_intents],
     };
   });
   const nextCursor =

@@ -7,7 +7,7 @@ import { INTAKE_SERVICE_NAME } from "../../intake/contract.ts";
 import { mintServiceIdentity } from "../../kernel/service-mint.ts";
 import {
   missionOperations,
-  Work,
+  Intent,
   type Revision,
 } from "../../mission/contract.ts";
 import { type ExecutionRecord } from "../../scheduler/contract.ts";
@@ -166,7 +166,7 @@ export async function setup(t: TestContext, options: SetupOptions = {}) {
         filename,
         content: {
           ...CONTENT,
-          work: dependentId ? Work.Implement : Work.Examine,
+          intent: dependentId ? Intent.Implement : Intent.Examine,
           bindings: dependentId ? [binding(GATED).id] : [],
         },
         tasks: [],

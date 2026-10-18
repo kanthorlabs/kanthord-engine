@@ -37,11 +37,11 @@ export const ClaimNodeState = {
 } as const;
 export const claimNodeStateSchema = z.enum(ClaimNodeState);
 export type ClaimNodeState = z.infer<typeof claimNodeStateSchema>;
-export const ClaimWork = {
+export const ClaimIntent = {
   Implement: "implement",
   Examine: "examine",
 } as const;
-export type ClaimWork = (typeof ClaimWork)[keyof typeof ClaimWork];
+export type ClaimIntent = (typeof ClaimIntent)[keyof typeof ClaimIntent];
 export const ExecutionStopReason = {
   OperationFailed: "operation_failed",
   JudgementInvalid: "judgement_invalid",
@@ -301,7 +301,7 @@ export interface ProjectPauses {
 export interface WorkerDeclarations {
   declarationOf(workerName: string): {
     declared_node_states: readonly string[];
-    declared_works: readonly ClaimWork[];
+    declared_intents: readonly ClaimIntent[];
     resource_budget: { wall_time_ms: number };
   } | null;
 }
@@ -315,17 +315,17 @@ export interface WorkerBindings {
     worker_name: string;
     instance_count: number;
     resource_budget?: { wall_time_ms: number } | null;
-    traits: readonly string[];
+    tags: readonly string[];
     tombstone: boolean;
   } | null;
   workerBindingsOf(
     tx: Transaction,
     projectId: string,
-  ): { binding_id: string; worker_name: string; traits: readonly string[] }[];
+  ): { binding_id: string; worker_name: string; tags: readonly string[] }[];
 }
 export interface ClaimFacts {
-  work: ClaimWork;
-  requires: readonly string[];
+  intent: ClaimIntent;
+  tags: readonly string[];
 }
 export interface MissionClaimFacts {
   claimFacts(tx: Transaction, nodeId: string): ClaimFacts | null;
@@ -340,8 +340,8 @@ export interface MissionClaimFacts {
 }
 export interface Claimant {
   declared_node_states: readonly string[];
-  declared_works: readonly ClaimWork[];
-  traits: readonly string[];
+  declared_intents: readonly ClaimIntent[];
+  tags: readonly string[];
 }
 export interface UnmatchedClaim {
   node_id: string;

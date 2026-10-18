@@ -24,18 +24,18 @@ const AFTER_CLOSING_DELIMITER_OFFSET = 1;
 const ALIAS_LIMIT = 100;
 const FIELD = {
   Id: "id",
-  Work: "work",
+  Intent: "intent",
   Node: "node",
   DependsOn: "depends_on",
-  Requires: "requires",
+  Tags: "tags",
   Bindings: "bindings",
   Verifications: "verifications",
 } as const;
 const NODE_FILE_FIELDS: readonly string[] = [
   FIELD.Id,
-  FIELD.Work,
+  FIELD.Intent,
   FIELD.DependsOn,
-  FIELD.Requires,
+  FIELD.Tags,
   FIELD.Bindings,
   FIELD.Verifications,
 ];
@@ -55,7 +55,7 @@ const REASON = {
   FormInvalid: "form_invalid",
   IdPrefixInvalid: "id_prefix_invalid",
   DependsOnForbidden: "depends_on_forbidden",
-  RequiresForbidden: "requires_forbidden",
+  TagsForbidden: "tags_forbidden",
   HeadingMissing: "heading_missing",
   HeadingRepeated: "heading_repeated",
   SectionMissing: "section_missing",
@@ -75,8 +75,8 @@ interface ParsedPlanContent {
 }
 
 export interface ParsedNodeFile extends ParsedPlanContent {
-  work: unknown;
-  requires: unknown;
+  intent: unknown;
+  tags: unknown;
   depends_on: string[];
 }
 
@@ -149,13 +149,13 @@ function fields(
   filename: string,
   mapping: Record<string, unknown>,
 ): ParsedFields {
-  const isNode = Object.hasOwn(mapping, FIELD.Work);
+  const isNode = Object.hasOwn(mapping, FIELD.Intent);
   if (isNode === Object.hasOwn(mapping, FIELD.Node))
     refuse(filename, REASON.FormInvalid);
   if (!isNode && Object.hasOwn(mapping, FIELD.DependsOn))
     refuse(filename, REASON.DependsOnForbidden);
-  if (!isNode && Object.hasOwn(mapping, FIELD.Requires))
-    refuse(filename, REASON.RequiresForbidden);
+  if (!isNode && Object.hasOwn(mapping, FIELD.Tags))
+    refuse(filename, REASON.TagsForbidden);
   const permitted = isNode ? NODE_FILE_FIELDS : TASK_FILE_FIELDS;
   for (const key of Object.keys(mapping)) {
     if (!permitted.includes(key)) refuse(filename, REASON.UnknownKey);
@@ -178,11 +178,11 @@ function fields(
       refuse(filename, REASON.FieldInvalid);
     return { ...shared, node: node as string };
   }
-  const requires = mapping[FIELD.Requires];
+  const tags = mapping[FIELD.Tags];
   return {
     ...shared,
-    work: mapping[FIELD.Work],
-    requires: requires === undefined ? [] : requires,
+    intent: mapping[FIELD.Intent],
+    tags: tags === undefined ? [] : tags,
     depends_on: stringList(filename, mapping[FIELD.DependsOn], true),
   };
 }

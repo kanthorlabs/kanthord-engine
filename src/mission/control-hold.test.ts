@@ -4,7 +4,7 @@ import { testHumanIdentity } from "../kernel/test-identity.ts";
 import { OperationError } from "../kernel/errors.ts";
 import { createIdentity } from "../kernel/identity.ts";
 import {
-  Work,
+  Intent,
   NodeState,
   ResumeTarget,
   EndState,
@@ -58,12 +58,12 @@ test("controls reject blank and oversized UTF-8 reasons without writes, preservi
   assert.equal(result.node.state, NodeState.Paused);
 });
 
-for (const work of [Work.Examine, Work.Implement]) {
-  test(`ready opens an attempt and enqueues ${work} atomically; resume preserves its pin`, async (t) => {
+for (const intent of [Intent.Examine, Intent.Implement]) {
+  test(`ready opens an attempt and enqueues ${intent} atomically; resume preserves its pin`, async (t) => {
     const h = controlHarness(t, IDENTITY);
     h.store.database
-      .prepare("UPDATE mission_node_revision SET work = ? WHERE node_id = ?")
-      .run(work, h.node_id);
+      .prepare("UPDATE mission_node_revision SET intent = ? WHERE node_id = ?")
+      .run(intent, h.node_id);
     const result = await h.invoke("node.ready", {
       params: { node_id: h.node_id },
       query: {},
@@ -252,8 +252,10 @@ for (const [end, target] of [
         .prepare("UPDATE mission_node SET state = ? WHERE id = ?")
         .run(NodeState.Paused, h.node_id);
       tx.database
-        .prepare("UPDATE mission_node_revision SET work = ? WHERE node_id = ?")
-        .run(Work.Implement, h.node_id);
+        .prepare(
+          "UPDATE mission_node_revision SET intent = ? WHERE node_id = ?",
+        )
+        .run(Intent.Implement, h.node_id);
       tx.database
         .prepare(
           "UPDATE mission_node_revision SET bindings = ? WHERE node_id = ?",

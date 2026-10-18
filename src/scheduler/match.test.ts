@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { createIdentity } from "../kernel/identity.ts";
-import { ClaimNodeState, ClaimWork, type Claimant } from "./contract.ts";
+import { ClaimNodeState, ClaimIntent, type Claimant } from "./contract.ts";
 import { admits, covered } from "./match.ts";
 import { schedulerHarness } from "./test-support.ts";
 
@@ -12,54 +12,54 @@ const PINNED_BINDING_READ = "workerBindingOf";
 
 const coder: Claimant = {
   declared_node_states: [ClaimNodeState.Available],
-  declared_works: [ClaimWork.Implement, ClaimWork.Examine],
-  traits: [],
+  declared_intents: [ClaimIntent.Implement, ClaimIntent.Examine],
+  tags: [],
 };
-const macosCoder: Claimant = { ...coder, traits: [MACOS, XCODE] };
+const macosCoder: Claimant = { ...coder, tags: [MACOS, XCODE] };
 const reviewer: Claimant = {
   declared_node_states: [
     ClaimNodeState.Waiting,
     ClaimNodeState.ExternalRequested,
   ],
-  declared_works: [ClaimWork.Implement, ClaimWork.Examine],
-  traits: [],
+  declared_intents: [ClaimIntent.Implement, ClaimIntent.Examine],
+  tags: [],
 };
 
-test("a claimant admits a node only when its worker declares the work and its traits hold every required trait", () => {
+test("a claimant admits a node only when its worker declares the intent and its tags include every tag of the node", () => {
   assert.equal(
-    admits(coder, { work: ClaimWork.Implement, requires: [] }),
+    admits(coder, { intent: ClaimIntent.Implement, tags: [] }),
     true,
   );
   assert.equal(
-    admits(coder, { work: ClaimWork.Implement, requires: [MACOS] }),
+    admits(coder, { intent: ClaimIntent.Implement, tags: [MACOS] }),
     false,
   );
   assert.equal(
-    admits(macosCoder, { work: ClaimWork.Examine, requires: [MACOS] }),
+    admits(macosCoder, { intent: ClaimIntent.Examine, tags: [MACOS] }),
     true,
   );
   assert.equal(
     admits(macosCoder, {
-      work: ClaimWork.Implement,
-      requires: [MACOS, "platform.linux"],
+      intent: ClaimIntent.Implement,
+      tags: [MACOS, "platform.linux"],
     }),
     false,
   );
   assert.equal(
     admits(
-      { ...macosCoder, declared_works: [ClaimWork.Examine] },
-      { work: ClaimWork.Implement, requires: [] },
+      { ...macosCoder, declared_intents: [ClaimIntent.Examine] },
+      { intent: ClaimIntent.Implement, tags: [] },
     ),
     false,
   );
   assert.equal(
-    admits(coder, { work: ClaimWork.Implement, requires: ["platform.MACOS"] }),
+    admits(coder, { intent: ClaimIntent.Implement, tags: ["platform.MACOS"] }),
     false,
   );
 });
 
 test("a claimant covers a state only when its worker declares the state and it admits the node", () => {
-  const facts = { work: ClaimWork.Implement, requires: [MACOS] };
+  const facts = { intent: ClaimIntent.Implement, tags: [MACOS] };
   assert.equal(
     covered([coder, reviewer], facts, ClaimNodeState.Available),
     false,
@@ -83,7 +83,7 @@ test("unmatched claims answer each uncovered pair of Available, Waiting and Exte
     Object.hasOwn(declarations, workerName)
       ? {
           declared_node_states: declarations[workerName]!,
-          declared_works: [ClaimWork.Implement, ClaimWork.Examine],
+          declared_intents: [ClaimIntent.Implement, ClaimIntent.Examine],
           resource_budget: { wall_time_ms: WALL_TIME },
         }
       : null;
@@ -91,17 +91,17 @@ test("unmatched claims answer each uncovered pair of Available, Waiting and Exte
     {
       binding_id: createIdentity("binding"),
       worker_name: "coder@1",
-      traits: [MACOS],
+      tags: [MACOS],
     },
     {
       binding_id: createIdentity("binding"),
       worker_name: "reviewer@1",
-      traits: [],
+      tags: [],
     },
     {
       binding_id: createIdentity("binding"),
       worker_name: "unknown@1",
-      traits: [MACOS],
+      tags: [MACOS],
     },
   ];
   h.dependencies.bindings.workerBindingsOf = (_tx, id) => {
@@ -114,22 +114,22 @@ test("unmatched claims answer each uncovered pair of Available, Waiting and Exte
       {
         node_id: linux,
         revision: 1,
-        work: ClaimWork.Implement,
-        requires: [],
+        intent: ClaimIntent.Implement,
+        tags: [],
         claims: [ClaimNodeState.Available, ClaimNodeState.Waiting],
       },
       {
         node_id: macos,
         revision: 2,
-        work: ClaimWork.Implement,
-        requires: [MACOS],
+        intent: ClaimIntent.Implement,
+        tags: [MACOS],
         claims: [ClaimNodeState.Available, ClaimNodeState.Waiting],
       },
       {
         node_id: action,
         revision: 1,
-        work: ClaimWork.Examine,
-        requires: [MACOS],
+        intent: ClaimIntent.Examine,
+        tags: [MACOS],
         claims: [
           ClaimNodeState.Available,
           ClaimNodeState.Waiting,
@@ -145,7 +145,7 @@ test("unmatched claims answer each uncovered pair of Available, Waiting and Exte
     { node_id: action, revision: 1, claim: ClaimNodeState.Waiting },
     { node_id: action, revision: 1, claim: ClaimNodeState.ExternalRequested },
   ]);
-  bindings[1]!.traits = [MACOS];
+  bindings[1]!.tags = [MACOS];
   assert.deepEqual(read(), []);
   bindings.splice(0, 1);
   assert.deepEqual(

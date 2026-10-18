@@ -45,7 +45,7 @@ import {
   prioritySetSchema,
   rebindSchema,
   nodeStateSchema,
-  workSchema,
+  intentSchema,
 } from "../../mission/contract.ts";
 import { CommandName, PROGRAM_NAME } from "./constants.ts";
 import { validateProjectId } from "./project.ts";
@@ -103,7 +103,7 @@ const FALSE = "false";
 const NO_FILES = 0;
 const GET_INVALID_PROJECT_ID = "cli.mission.get.invalid_project_id";
 const NODE_LIST_INVALID_MISSION_ID = "cli.mission.node.list.invalid_mission_id";
-const NODE_LIST_INVALID_WORK = "cli.mission.node.list.invalid_work";
+const NODE_LIST_INVALID_INTENT = "cli.mission.node.list.invalid_intent";
 const NODE_LIST_INVALID_STATE = "cli.mission.node.list.invalid_state";
 const NODE_GET_INVALID_NODE_ID = "cli.mission.node.get.invalid_node_id";
 const NODE_CREATE_INVALID_MISSION_ID =
@@ -161,15 +161,15 @@ async function get(projectId: string, command: Command): Promise<void> {
 async function nodeList(missionId: string, command: Command): Promise<void> {
   validateMissionId(missionId, NODE_LIST_INVALID_MISSION_ID);
   const options = command.optsWithGlobals();
-  const work = workSchema.optional().safeParse(options.work);
-  if (!work.success)
-    throw new Diagnostic(NODE_LIST_INVALID_WORK, "invalid node work");
+  const intent = intentSchema.optional().safeParse(options.intent);
+  if (!intent.success)
+    throw new Diagnostic(NODE_LIST_INVALID_INTENT, "invalid node intent");
   const state = nodeStateSchema.optional().safeParse(options.state);
   if (!state.success)
     throw new Diagnostic(NODE_LIST_INVALID_STATE, "invalid node state");
   const query = {
     ...pagination(options),
-    ...(work.data !== undefined ? { work: work.data } : {}),
+    ...(intent.data !== undefined ? { intent: intent.data } : {}),
     ...(state.data !== undefined ? { state: state.data } : {}),
     include_retired: options.includeRetired ? TRUE : FALSE,
   } as const;
@@ -620,9 +620,9 @@ function addNodeCommands(mission: Command): void {
       .description("List mission nodes as JSON")
       .argument("<mission-id>", "Mission ID")
       .option(
-        "--work <work>",
+        "--intent <intent>",
         "Filter by implement or examine",
-        singleUse("--work"),
+        singleUse("--intent"),
       )
       .option(
         "--state <state>",
