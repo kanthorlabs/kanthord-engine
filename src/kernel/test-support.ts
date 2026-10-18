@@ -4,17 +4,14 @@ import { join } from "node:path";
 import type { TestContext } from "node:test";
 import pino from "pino";
 import { diagnostic, diagnosticRows } from "./errors.ts";
-import { redactionPaths } from "./log.ts";
+import { redaction } from "./log.ts";
 
 export function diagnosticText(error: unknown): string {
   return `${diagnostic(error)}\n${diagnosticRows(error)}`;
 }
 
 export function redactingLogger(lines: string[]): pino.Logger {
-  return pino(
-    { redact: { paths: redactionPaths, censor: "[Redacted]" } },
-    { write: (line) => lines.push(line) },
-  );
+  return pino({ redact: redaction }, { write: (line) => lines.push(line) });
 }
 
 export function temporaryDirectory(): string {
