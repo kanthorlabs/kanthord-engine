@@ -15,16 +15,15 @@ import {
   type SchedulerClaims,
 } from "./contract.ts";
 import { stateConflict } from "./control.ts";
-import { hasDependencyCycle } from "./graph.ts";
 import { requireNode } from "./node-read.ts";
 import { readOpenAttempt, readRequests } from "./record-store.ts";
 import { claimableMap, reconcileMission, routeMission } from "./routing.ts";
 import {
+  dependencyReaches,
   deleteDependency,
   hasDependency,
   incrementMissionVersion,
   insertDependency,
-  readDependencies,
   type NodeRow,
 } from "./store.ts";
 import { requireActive, requireMission, requireNonterminal } from "./write.ts";
@@ -72,11 +71,7 @@ function validateEndpoints(node: NodeRow, target: NodeRow): void {
 }
 
 function validateCycle(tx: Transaction, missionId: string, edge: Edge): void {
-  const edges = [
-    ...readDependencies(tx, missionId),
-    { dependent: edge.dependent_id, depends_on: edge.depends_on_id },
-  ];
-  if (hasDependencyCycle(edges))
+  if (dependencyReaches(tx, missionId, edge.depends_on_id, edge.dependent_id))
     throw new OperationError(
       HttpStatus.Conflict,
       MissionErrorCode.Cycle,

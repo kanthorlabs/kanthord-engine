@@ -439,6 +439,31 @@ export function readDependencies(
     .all(missionId) as DepEdge[];
 }
 
+export function dependencyReaches(
+  tx: Transaction,
+  missionId: string,
+  fromId: string,
+  toId: string,
+): boolean {
+  return (
+    tx.database
+      .prepare(
+        `WITH RECURSIVE reach(id) AS (
+      SELECT ?
+      UNION
+      SELECT d.depends_on_id FROM reach
+      JOIN mission_dependency d ON d.dependent_id = reach.id
+      JOIN mission_node source ON source.id = d.dependent_id
+      JOIN mission_node target ON target.id = d.depends_on_id
+      WHERE reach.id != ? AND d.mission_id = ?
+        AND source.retired_at IS NULL AND target.retired_at IS NULL
+    )
+    SELECT id FROM reach WHERE id = ? LIMIT 1`,
+      )
+      .get(fromId, toId, missionId, toId) !== undefined
+  );
+}
+
 export function readDependsOnIds(tx: Transaction, nodeId: string): string[] {
   const rows = tx.database
     .prepare(
