@@ -149,7 +149,10 @@ export class Store {
     };
   }
 
-  migrate(services: Migrations): void {
+  migrate(
+    services: Migrations,
+    migrated: (step: PendingMigration) => void = () => {},
+  ): void {
     const { pending } = this.plan(services);
     this.transaction(({ database }) =>
       database.exec(
@@ -159,7 +162,8 @@ export class Store {
     const lists = new Map(
       services.map((entry) => [entry.service, entry.migrations]),
     );
-    for (const { service, from, to } of pending) {
+    for (const step of pending) {
+      const { service, from, to } = step;
       const migrations = lists.get(service)!;
       for (let index = from; index < to; index++) {
         this.transaction(({ database }) => {
@@ -169,6 +173,7 @@ export class Store {
             .run(service, index + 1, Date.now());
         });
       }
+      migrated(step);
     }
   }
 

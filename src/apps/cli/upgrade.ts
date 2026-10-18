@@ -60,9 +60,9 @@ export async function upgrade(
       const backup = `${databasePath}.bak-${stamp}`;
       store.backup(backup);
       row(UpgradeRow.Backup, backup);
-      store.migrate(serverMigrations);
-      for (const { service, from, to } of pending)
-        row(UpgradeRow.Migrated, `${service} ${from} -> ${to}`);
+      store.migrate(serverMigrations, ({ service, from, to }) =>
+        row(UpgradeRow.Migrated, `${service} ${from} -> ${to}`),
+      );
     }
     if (config.content !== null) {
       writePrivate(path, config.content, true);
