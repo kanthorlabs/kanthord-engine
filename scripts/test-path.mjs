@@ -1,4 +1,11 @@
-import { accessSync, constants, mkdirSync, rmSync, symlinkSync } from "node:fs";
+import {
+  accessSync,
+  constants,
+  mkdirSync,
+  renameSync,
+  rmSync,
+  symlinkSync,
+} from "node:fs";
 import { delimiter, isAbsolute, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -33,7 +40,12 @@ mkdirSync(TOOL_DIRECTORY, { recursive: true });
 for (const tool of TOOLS) {
   const link = join(TOOL_DIRECTORY, tool);
   const target = resolve(tool, directories);
-  rmSync(link, { force: true });
-  if (target) symlinkSync(target, link);
+  if (target) {
+    const pending = `${link}.${process.pid}`;
+    symlinkSync(target, pending);
+    renameSync(pending, link);
+  } else {
+    rmSync(link, { force: true });
+  }
 }
 process.stdout.write([TOOL_DIRECTORY, path].join(delimiter));
