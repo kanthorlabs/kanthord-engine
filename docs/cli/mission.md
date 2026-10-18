@@ -697,8 +697,10 @@ The path never serves as an evidence address or a server-side path argument.
 3. The component calls asset complete with the asset identity and execution context.
    The server checks the live claim, and the Intake Service checks the object size and optional checksum.
    A check that finds a mismatch, finds no object or fails at the store prevents publication.
-   That failed upload check records the storage binding as failed for the open attempt of the node.
+   That failed upload check records the storage binding as failed for the open attempt of the node, as `failed_at` of the checked asset.
    The record stays after the refusal, and the refusal keeps the code of the check.
+   A human delete of the failed asset, or of its evidence, removes the record, and the binding is grantable again.
+   The server also writes one Mission span with the operation `mission.evidence.asset.complete` and the status `Error`.
    It sets `published_at` of the asset with location, returned version, size, media type and optional SHA-256 only after those checks pass.
    The answer holds the asset identity and `s3://` URI.
    The helper returns those values and the evidence identity to the agent, not the presigned URL.
