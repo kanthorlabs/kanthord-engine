@@ -342,7 +342,7 @@ A cooldown belongs to one credential name. It cools every model of that credenti
 the [fallback chain](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/agent.md#fallback-chain).
 A success on any model of the credential releases it. Both commands are `unary` and use
 `human` access. The server logs `agent.fallback.cooldown_started` when it writes a
-cooldown and `agent.fallback.cooldown_cleared` when a release or a `cooldown clear`
+cooldown, and `agent.fallback.cooldown_cleared` when a success or a `cooldown clear`
 removes one.
 
 ### `cooldown list`
