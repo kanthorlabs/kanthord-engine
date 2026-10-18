@@ -129,9 +129,10 @@ zero. Help exits zero. Input, authentication, authorization and operation
 failures exit nonzero with a diagnostic. An indeterminate result also exits
 nonzero. For a mutation, the diagnostic supplies the retry key without claiming
 that no effect occurred. For a read, it instructs the user to retry the command.
-For `execution release`, the diagnostic instead tells the user to run
-`kanthord scheduler execution get <execution-id>` before any retry, because a
-retry after a committed release fails the execution proof.
+For `execution release`, the diagnostic instead prints
+`<code>: the result is unknown; read the execution before any retry`, then the
+row `command: kanthord scheduler execution get <execution-id>`. A retry after a
+committed release fails the execution proof.
 Tokens and delivery verification material never appear in these outputs.
 
 Every list result is `{ "items": [...], "next_cursor": null | string }`:

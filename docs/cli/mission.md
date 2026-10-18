@@ -937,7 +937,7 @@ verification returned zero, not adequacy, coverage or absence of suppressed fail
 ## Proposed result schemas
 
 CLI result JSON goes to stdout; diagnostics go to stderr.
-A refusal with non-null `details` adds the stderr line `details: <compact JSON of details>` under the [shared rules](./other.md#output-and-exit-behavior).
+A refusal with non-null `details` adds the stderr row `details: <compact JSON of details>` under the [shared rules](./other.md#output-and-exit-behavior).
 Failures exit nonzero; successful reads and mutations exit zero.
 Presigned URLs are component-only API answers, never agent-facing stdout. A successful mutation reports its
 effective `idempotency_key: string` alongside the domain result. Sensitive tokens

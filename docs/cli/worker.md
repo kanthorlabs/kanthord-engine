@@ -184,8 +184,8 @@ whose registration has ended is rejected with `409` `gateway.registration.stale`
 it does not recreate or transfer the instance. A binding with no free slot, or
 an unavailable binding, answers `409` `worker.instance.slot_unavailable`.
 Cancellation does not deregister an accepted registration. There is no automatic
-CLI retry. Declared failures print their HTTP status and key; indeterminate
-results print the key and instruct explicit reuse of it.
+CLI retry. Declared failures print the `status` and `idempotency_key` rows;
+indeterminate results print the `idempotency_key` row and instruct explicit reuse of it.
 
 The [Gateway idempotency component](../../src/gateway/idempotency.ts) stores
 completed responses in process memory and sweeps them by TTL every 60 s.
