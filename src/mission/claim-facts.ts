@@ -7,6 +7,7 @@ import {
   intentSchema,
   type ClaimFacts,
   type ClaimFactsRow,
+  type FrozenAction,
   type MissionBindings,
 } from "./contract.ts";
 import { actionsOfRevision } from "./frozen-action.ts";
@@ -36,12 +37,13 @@ function rowOf(
   tx: Transaction,
   bindings: MissionBindings,
   revision: RevisionRow,
+  actions: Map<string, FrozenAction | null>,
 ): ClaimFactsRow {
   const claims: ClaimableState[] = [
     ClaimableState.Available,
     ClaimableState.Waiting,
   ];
-  if (actionsOfRevision(tx, bindings, revision).length > NO_ACTIONS)
+  if (actionsOfRevision(tx, bindings, revision, actions).length > NO_ACTIONS)
     claims.push(ClaimableState.ExternalRequested);
   return {
     node_id: revision.node_id,
@@ -65,7 +67,8 @@ export function claimFactsOf(
   assert.ok(tx.database.isTransaction);
   const mission = readMissionByProject(tx, projectId);
   if (!mission) return [];
+  const actions = new Map<string, FrozenAction | null>();
   return readClaimRevisions(tx, mission.id)
     .filter(({ node_state }) => !isTerminal(node_state))
-    .map((revision) => rowOf(tx, bindings, revision));
+    .map((revision) => rowOf(tx, bindings, revision, actions));
 }

@@ -14,13 +14,14 @@ import {
 } from "./contract.ts";
 import {
   actionStatesOf,
+  actionsOfRevision,
   eligibleUnrequested,
   requiredActionsOf,
   unresolvedKeys,
   type ActionState,
 } from "./frozen-action.ts";
 import { openAttempt, insertEvidence } from "./record-store.ts";
-import { insertMission, insertNode } from "./store.ts";
+import { insertMission, insertNode, readRevision } from "./store.ts";
 import { missionHarness } from "./test-support.ts";
 
 const FIRST_ATTEMPT = 1;
@@ -293,5 +294,92 @@ test("two bindings freeze one action each", (t) => {
       ).map((state) => state.action.key),
       ["api.merge_push", "app.pull_request"],
     );
+  });
+});
+
+test("actionsOfRevision with a shared map answers the actions of a new map", (t) => {
+  const h = missionHarness(t, testHumanIdentity("ulrich", "Ulrich", "token"));
+  const projectId = createIdentity("project");
+  const appId = createIdentity("binding");
+  const apiId = createIdentity("binding");
+  const names = new Map([
+    [appId, "app"],
+    [apiId, "api"],
+  ]);
+  const bindings: MissionBindings = {
+    storageBindingOf: () =>
+      assert.fail("Actions do not read storage configuration."),
+    resolveBinding: () =>
+      assert.fail("Pinned reads never resolve the latest name."),
+    resolveBindingIdentity: () =>
+      assert.fail("Pinned reads never resolve the latest revision."),
+    getBindingRevision: (_tx, bindingId) => ({
+      binding_id: bindingId,
+      project_id: projectId,
+      name: names.get(bindingId)!,
+      resource_identity: `repository:github:owner/${names.get(bindingId)}`,
+      revision: FIRST_ATTEMPT,
+      tombstone: false,
+      disabled: false,
+    }),
+    repositoryPolicyOf: (_tx, bindingId) => ({
+      binding_id: bindingId,
+      project_id: projectId,
+      name: names.get(bindingId)!,
+      address: `git@github.com:owner/${names.get(bindingId)}.git`,
+      platform: "github",
+      ssh_credential: "github-ssh",
+      credential: "github",
+      base_branch: BASE_BRANCH,
+      action:
+        bindingId === appId
+          ? RepositoryAction.PullRequest
+          : RepositoryAction.MergePush,
+      landing: "human" as const,
+      project_prompt: null,
+    }),
+  };
+  h.store.transaction((tx) => {
+    const missionId = insertMission(tx, projectId, NOW);
+    const nodeId = createIdentity("node");
+    insertNode(tx, {
+      id: nodeId,
+      mission_id: missionId,
+      filename: "implement.md",
+      created_at: NOW,
+    });
+    const statement = tx.database.prepare(
+      "INSERT INTO mission_node_revision (node_id, revision, filename, name, requirement, criterion, verifications, bindings, intent, tags, tasks, change, reason, actor, created_at) VALUES (?, ?, 'implement.md', 'name', 'requirement', 'criterion', '[]', ?, 'implement', '[]', '[]', '{}', 'reason', ?, ?)",
+    );
+    statement.run(
+      nodeId,
+      FIRST_ATTEMPT,
+      canonicalJSON([appId, apiId]),
+      canonicalJSON(ACTOR),
+      NOW,
+    );
+    statement.run(
+      nodeId,
+      SECOND_ATTEMPT,
+      canonicalJSON([apiId]),
+      canonicalJSON(ACTOR),
+      NOW,
+    );
+    const first = readRevision(tx, nodeId, FIRST_ATTEMPT);
+    const second = readRevision(tx, nodeId, SECOND_ATTEMPT);
+    assert.ok(first && second);
+    const shared = new Map();
+    const fromShared = [first, second].map((revision) =>
+      actionsOfRevision(tx, bindings, revision, shared),
+    );
+    const fromNew = [first, second].map((revision) =>
+      actionsOfRevision(tx, bindings, revision),
+    );
+    assert.deepEqual(fromShared, fromNew);
+    assert.deepEqual(
+      fromShared.map((actions) => actions.map((action) => action.key)),
+      [["api.merge_push", "app.pull_request"], ["api.merge_push"]],
+    );
+    assert.equal(shared.size, names.size);
   });
 });
