@@ -1,6 +1,6 @@
 import type { Migration } from "../kernel/store.ts";
 
-const createCredentialTable: Migration = (database) => {
+const createCustodyTables: Migration = (database) => {
   database.exec(`
     CREATE TABLE credential (
       id TEXT NOT NULL PRIMARY KEY,
@@ -14,11 +14,6 @@ const createCredentialTable: Migration = (database) => {
       ended_at INTEGER
     );
     CREATE UNIQUE INDEX credential_name_revision ON credential (name, revision);
-  `);
-};
-
-const createMasterKeyTable: Migration = (database) => {
-  database.exec(`
     CREATE TABLE custody_master_key (
       id INTEGER NOT NULL PRIMARY KEY,
       verifier BLOB NOT NULL,
@@ -27,7 +22,4 @@ const createMasterKeyTable: Migration = (database) => {
   `);
 };
 
-export const custodyMigrations: readonly Migration[] = [
-  createCredentialTable,
-  createMasterKeyTable,
-];
+export const custodyMigrations: readonly Migration[] = [createCustodyTables];

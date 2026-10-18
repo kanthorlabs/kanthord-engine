@@ -5,7 +5,8 @@ const createProjectTables: Migration = (database) => {
     CREATE TABLE project_project (
       id TEXT NOT NULL PRIMARY KEY,
       name TEXT NOT NULL,
-      created_at INTEGER NOT NULL
+      created_at INTEGER NOT NULL,
+      paused_at INTEGER
     );
     CREATE UNIQUE INDEX project_project_name ON project_project (name);
     CREATE TABLE project_binding (
@@ -22,11 +23,4 @@ const createProjectTables: Migration = (database) => {
   `);
 };
 
-const addProjectPausedAt: Migration = (database) => {
-  database.exec(`ALTER TABLE project_project ADD COLUMN paused_at INTEGER;`);
-};
-
-export const projectMigrations: readonly Migration[] = [
-  createProjectTables,
-  addProjectPausedAt,
-];
+export const projectMigrations: readonly Migration[] = [createProjectTables];

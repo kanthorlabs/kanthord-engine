@@ -1,6 +1,6 @@
 import type { Migration } from "../kernel/store.ts";
 
-const createEnablementTable: Migration = (database) => {
+const createAgentTables: Migration = (database) => {
   database.exec(`
     CREATE TABLE agent_enablement (
       id TEXT NOT NULL PRIMARY KEY,
@@ -10,14 +10,10 @@ const createEnablementTable: Migration = (database) => {
       agent_providers TEXT NOT NULL,
       default_configuration TEXT NOT NULL,
       created_at INTEGER NOT NULL,
-      removed_at INTEGER
+      removed_at INTEGER,
+      fallback_configurations TEXT NOT NULL DEFAULT '[]'
     );
     CREATE UNIQUE INDEX agent_enablement_agent_name_revision ON agent_enablement (agent_name, revision);
-  `);
-};
-
-const createPromptTable: Migration = (database) => {
-  database.exec(`
     CREATE TABLE agent_prompt (
       id TEXT NOT NULL PRIMARY KEY,
       scope TEXT NOT NULL,
@@ -29,17 +25,6 @@ const createPromptTable: Migration = (database) => {
       updated_at INTEGER NOT NULL
     );
     CREATE UNIQUE INDEX agent_prompt_scope_agent_name ON agent_prompt (scope, agent_name);
-  `);
-};
-
-const addEnablementFallbackConfigurations: Migration = (database) => {
-  database.exec(
-    `ALTER TABLE agent_enablement ADD COLUMN fallback_configurations TEXT NOT NULL DEFAULT '[]';`,
-  );
-};
-
-const createCooldownTable: Migration = (database) => {
-  database.exec(`
     CREATE TABLE agent_cooldown (
       id TEXT NOT NULL PRIMARY KEY,
       credential TEXT NOT NULL,
@@ -54,9 +39,4 @@ const createCooldownTable: Migration = (database) => {
   `);
 };
 
-export const agentMigrations: readonly Migration[] = [
-  createEnablementTable,
-  createPromptTable,
-  addEnablementFallbackConfigurations,
-  createCooldownTable,
-];
+export const agentMigrations: readonly Migration[] = [createAgentTables];

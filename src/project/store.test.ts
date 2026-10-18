@@ -871,27 +871,6 @@ test("revision lists paginate descending within the pinned row's group, includin
   });
 });
 
-test("the pause migration keeps every earlier project active", () => {
-  const store = new Store(IN_MEMORY_DATABASE);
-  try {
-    const [create, addPausedAt] = projectMigrations;
-    create!(store.database);
-    store.database
-      .prepare(
-        "INSERT INTO project_project (id, name, created_at) VALUES (?, ?, ?)",
-      )
-      .run(createIdentity(PROJECT_ID_PREFIX), PROJECT_NAME, Date.now());
-    addPausedAt!(store.database);
-    assert.equal(
-      store.database.prepare("SELECT paused_at FROM project_project").get()!
-        .paused_at,
-      null,
-    );
-  } finally {
-    store.close();
-  }
-});
-
 test("a new project is active, and pause and resume move paused_at", (t) => {
   const f = fixture(t);
   f.store.transaction((tx) => {
