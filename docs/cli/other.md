@@ -183,8 +183,15 @@ failure writes a diagnostic to stderr. Line 1 of a diagnostic is
 `<code>: <message>`, with the code at the start of the line. The message holds
 no embedded value. Each value is one `name: value` row after line 1.
 The rows align: each value starts in the same column. Line 1 does not take part
-in the alignment. The row names are `path`, `key`, `config`, `status`,
-`idempotency_key`, `command` and `details`.
+in the alignment. The row names are `path`, `key`, `option`, `field`, `config`,
+`database`, `old_key`, `new_key`, `config_version`, `supported_version`,
+`status`, `idempotency_key`, `command` and `details`.
+
+`system.config.invalid_field` with field issues prints
+`<code>: invalid configuration fields`, then the issues as a JSON list in the
+`details` row. An operational log record that holds a diagnostic as `reason`
+also holds its rows as `fields`, an object of row name to value. The record
+holds no `fields` when the diagnostic has no rows.
 
 A declared remote failure of a mutation prints `<code>: request failed`, then the
 rows `status: <status>` and `idempotency_key: <key>`. A declared remote failure of
@@ -556,8 +563,9 @@ The command runs in this order:
    `renamed: <old key> -> <new key>` for each rename, then
    `upgraded: <path>` and `config_version: <a> -> <b>`.
 
-The rows of one run align: each value starts in the same column. The command
-prints the rows also when a later step fails, so the backup paths stay visible.
+The command prints each row when its step happens. A later failure or a stop
+keeps the earlier rows, for example the backup paths, on stdout. Every value
+starts in column 17, after the longest row name `config_version:` and one space.
 
 A rerun after a failure resumes from the recorded state. Steps 1 to 4 write
 nothing to the configuration or the database.
@@ -837,7 +845,7 @@ jti: 01K6...
 ```
 
 `auth jwt generate --verbose` prints this same claim list after the human `token` row,
-the two-line machine fragment, or the `Created <absolute path>` line with
+the two-line machine fragment, or the `created: <absolute path>` row with
 `--output`.
 
 ### Signing, output, errors, and persistence
