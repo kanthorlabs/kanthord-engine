@@ -72,7 +72,8 @@ const createMissionTables: Migration = (database) => {
       kind TEXT NOT NULL,
       content TEXT NOT NULL,
       published_at INTEGER,
-      expired_at INTEGER
+      expired_at INTEGER,
+      failed_at INTEGER
     );
     CREATE TABLE mission_assessment (
       id TEXT NOT NULL PRIMARY KEY,
@@ -100,14 +101,6 @@ const createMissionTables: Migration = (database) => {
       created_at INTEGER NOT NULL
     );
     CREATE UNIQUE INDEX mission_outcome_sequence ON mission_outcome (node_id, sequence);
-    CREATE TABLE mission_evidence_upload_failure (
-      node_id TEXT NOT NULL REFERENCES mission_node(id),
-      attempt INTEGER NOT NULL,
-      storage_binding_id TEXT NOT NULL,
-      asset_id TEXT NOT NULL,
-      failed_at INTEGER NOT NULL,
-      PRIMARY KEY (node_id, attempt, storage_binding_id)
-    );
     CREATE TABLE mission_proposal (
       id TEXT NOT NULL PRIMARY KEY,
       node_id TEXT NOT NULL REFERENCES mission_node(id),

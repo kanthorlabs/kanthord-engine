@@ -675,7 +675,7 @@ async function failoverSetup(t: TestContext) {
   const failures = () =>
     fixture.store.database
       .prepare(
-        "SELECT storage_binding_id FROM mission_evidence_upload_failure WHERE node_id = ? ORDER BY failed_at",
+        "SELECT json_extract(a.content, '$.storage_binding_id') AS storage_binding_id FROM mission_evidence_asset a JOIN mission_evidence e ON e.id = a.evidence_id WHERE e.node_id = ? AND a.failed_at IS NOT NULL ORDER BY a.failed_at",
       )
       .all(nodeId)
       .map((row) => row.storage_binding_id);

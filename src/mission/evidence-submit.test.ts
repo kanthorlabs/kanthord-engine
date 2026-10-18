@@ -5,6 +5,7 @@ import { background, CancellationContext } from "../kernel/context.ts";
 import { OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import { createIdentity } from "../kernel/identity.ts";
+import { canonicalJSON } from "../kernel/json.ts";
 import { testHumanIdentity } from "../kernel/test-identity.ts";
 import {
   AssetKind,
@@ -13,10 +14,10 @@ import {
   UPLOAD_LIFETIME_MS,
   type EvidenceSubmit,
 } from "./contract.ts";
-import { ResultClass } from "../intake/contract.ts";
+import { IntakeErrorCode, ResultClass } from "../intake/contract.ts";
 import { S3_RESULT_CODE_PREFIX } from "../storage/contract.ts";
 import { AuthorizationRefusal, authorizationRefused } from "./authorization.ts";
-import { insertUploadFailure } from "./record-store.ts";
+import { insertEvidence } from "./record-store.ts";
 import { evidenceHarness, executionHarness } from "./test-support.ts";
 import { setNodeState } from "./store.ts";
 
@@ -30,6 +31,7 @@ const VALIDATION = "gateway.request.validation_failed";
 const SECOND_ATTEMPT = 2;
 const BAD_GATEWAY = 502;
 const FAILED_AT = 100;
+const FIRST_MISSION_VERSION = 1;
 const Field = {
   Subject: "subject",
   Command: "command",
@@ -335,16 +337,45 @@ function failoverFixture(t: TestContext) {
       expires_at: Date.now() + UPLOAD_LIFETIME_MS,
     };
   };
-  const fail = (bindingId: string, attempt: number) =>
-    h.store.transaction((tx) =>
-      insertUploadFailure(tx, {
-        node_id: h.node_id,
-        attempt,
-        storage_binding_id: bindingId,
-        asset_id: createIdentity("evidence_asset"),
-        failed_at: FAILED_AT,
-      }),
-    );
+  const fail = (bindingId: string, attempt: number) => {
+    const evidenceId = createIdentity("evidence");
+    const assetId = createIdentity("evidence_asset");
+    h.store.transaction((tx) => {
+      insertEvidence(
+        tx,
+        {
+          id: evidenceId,
+          node_id: h.node_id,
+          attempt,
+          subject: "Failed",
+          requirement_key: null,
+          end_state: null,
+          verification: null,
+          provenance: canonicalJSON(h.executionActor),
+          created_at: FAILED_AT,
+        },
+        [
+          {
+            id: assetId,
+            evidence_id: evidenceId,
+            kind: AssetKind.Object,
+            content: canonicalJSON({
+              location: "s3://bucket/prefix/key",
+              size: SINGLE_ITEM,
+              media_type: "text/plain",
+              storage_binding_id: bindingId,
+            }),
+            published_at: null,
+            expired_at: null,
+          },
+        ],
+      );
+      tx.database
+        .prepare("UPDATE mission_evidence_asset SET failed_at = ? WHERE id = ?")
+        .run(FAILED_AT, assetId);
+    });
+    return { evidenceId, assetId };
+  };
   const submit = () =>
     h.invoke("evidence.submit", {
       params: { node_id: h.node_id },
@@ -361,6 +392,29 @@ function failoverFixture(t: TestContext) {
         ],
       },
     });
+  const complete = (assetId: string) =>
+    h.invoke("evidence.asset.complete", {
+      params: { asset_id: assetId },
+      query: {},
+      body: h.context,
+    });
+  const removal = {
+    force: true,
+    reason: "Remove",
+    expected_mission_version: FIRST_MISSION_VERSION,
+  };
+  const removeAsset = (assetId: string) =>
+    h.invoke("evidence.asset.delete", {
+      params: { asset_id: assetId },
+      query: {},
+      body: removal,
+    });
+  const removeEvidence = (evidenceId: string) =>
+    h.invoke("evidence.delete", {
+      params: { evidence_id: evidenceId },
+      query: {},
+      body: removal,
+    });
   const pinned = (result: Awaited<ReturnType<typeof submit>>) => {
     const asset = result.evidence.assets[FIRST_ASSET_INDEX]!;
     if (asset.kind !== AssetKind.Object) assert.fail();
@@ -371,7 +425,9 @@ function failoverFixture(t: TestContext) {
       (tx) =>
         (
           tx.database
-            .prepare("SELECT COUNT(*) AS count FROM mission_evidence")
+            .prepare(
+              "SELECT COUNT(*) AS count FROM mission_evidence WHERE subject = 'Object'",
+            )
             .get() as { count: number }
         ).count,
     );
@@ -383,6 +439,9 @@ function failoverFixture(t: TestContext) {
     refusals,
     fail,
     submit,
+    complete,
+    removeAsset,
+    removeEvidence,
     pinned,
     evidenceCount,
   };
@@ -440,14 +499,62 @@ test("a lost claim during signing stops with no failover", async (t) => {
   assert.equal(h.evidenceCount(), NO_ITEMS);
 });
 
-test("a binding with a failure row of the attempt is skipped", async (t) => {
+test("a binding with a failed asset of the attempt is skipped", async (t) => {
   const h = failoverFixture(t);
   h.fail(h.storageId, h.claim.attempt);
   assert.equal(h.pinned(await h.submit()), h.second);
   assert.deepEqual(h.granted, [h.second]);
 });
 
-test("a failure row of another attempt leaves every binding grantable", async (t) => {
+test("a failed check of an asset skips its binding for the rest of the attempt", async (t) => {
+  const h = failoverFixture(t);
+  h.dependencies.intakeStorage.check = async () => {
+    throw new OperationError(
+      HttpStatus.Conflict,
+      IntakeErrorCode.StorageObjectMismatch,
+      "The stored object is absent or differs from the asset size or SHA-256.",
+    );
+  };
+  const failedGrant = async () => {
+    const result = await h.submit();
+    const asset = result.evidence.assets[FIRST_ASSET_INDEX]!;
+    await assert.rejects(() => h.complete(asset.id), {
+      code: IntakeErrorCode.StorageObjectMismatch,
+    });
+    return h.pinned(result);
+  };
+  assert.equal(await failedGrant(), h.storageId);
+  assert.equal(await failedGrant(), h.second);
+  await assert.rejects(h.submit, {
+    status: HttpStatus.Conflict,
+    code: MissionErrorCode.EvidenceStorageExhausted,
+    details: {
+      node_id: h.node_id,
+      attempt: h.claim.attempt,
+      bindings: [h.storageId, h.second],
+    },
+  });
+});
+
+test("a human delete of the failed asset makes its binding grantable again", async (t) => {
+  const h = failoverFixture(t);
+  h.dependencies.intakeStorage.delete = async () => undefined;
+  const failed = h.fail(h.storageId, h.claim.attempt);
+  assert.equal(h.pinned(await h.submit()), h.second);
+  await h.removeAsset(failed.assetId);
+  assert.equal(h.pinned(await h.submit()), h.storageId);
+});
+
+test("a human delete of the failed evidence makes its binding grantable again", async (t) => {
+  const h = failoverFixture(t);
+  h.dependencies.intakeStorage.delete = async () => undefined;
+  const failed = h.fail(h.storageId, h.claim.attempt);
+  assert.equal(h.pinned(await h.submit()), h.second);
+  await h.removeEvidence(failed.evidenceId);
+  assert.equal(h.pinned(await h.submit()), h.storageId);
+});
+
+test("a failed asset of another attempt leaves every binding grantable", async (t) => {
   const h = failoverFixture(t);
   h.fail(h.storageId, SECOND_ATTEMPT);
   assert.equal(h.pinned(await h.submit()), h.storageId);
@@ -471,7 +578,7 @@ test("no binding left answers mission.evidence.storage_exhausted", async (t) => 
   assert.equal(h.evidenceCount(), NO_ITEMS);
 });
 
-test("an exhausted answer with no failure row lists no binding", async (t) => {
+test("an exhausted answer with no failed asset lists no binding", async (t) => {
   const h = failoverFixture(t);
   h.states.set(h.storageId, { tombstone: false, disabled: true });
   h.states.set(h.second, { tombstone: false, disabled: true });

@@ -14,7 +14,7 @@ import {
 } from "./contract.ts";
 import { admitExecution } from "./execution.ts";
 import {
-  insertUploadFailure,
+  markAssetFailed,
   readEvidence,
   type AssetRow,
 } from "./record-store.ts";
@@ -68,7 +68,7 @@ export function prepareComplete(
   authorizeStorage(tx, dependencies.bindings, content.storage_binding_id);
   return {
     result,
-    pending: { content, nodeId: evidence.node_id, attempt: evidence.attempt },
+    pending: { content },
   };
 }
 
@@ -98,7 +98,7 @@ export async function completeEvidence(
         prepareComplete(tx, dependencies, claim, assetId, context, Date.now())
           .result,
     );
-  const { content, nodeId, attempt } = prepared.pending;
+  const { content } = prepared.pending;
   const checked = await dependencies.intakeStorage
     .check(
       {
@@ -111,13 +111,7 @@ export async function completeEvidence(
     .catch((error: unknown) => {
       if (checkFailed(error))
         dependencies.store.transaction((tx) =>
-          insertUploadFailure(tx, {
-            node_id: nodeId,
-            attempt,
-            storage_binding_id: content.storage_binding_id,
-            asset_id: assetId,
-            failed_at: Date.now(),
-          }),
+          markAssetFailed(tx, assetId, Date.now()),
         );
       throw error;
     });
