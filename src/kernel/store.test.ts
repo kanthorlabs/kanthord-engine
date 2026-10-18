@@ -491,7 +491,7 @@ test("plan ignores a table of no service and every sqlite_ object", () => {
   }
 });
 
-test("plan runs the duplicate check, then the compare, then the history check", () => {
+test("plan runs the duplicate check, then the history check, then the compare", () => {
   const store = new Store(":memory:");
   try {
     store.migrate([{ service: "one", migrations: [createOne, extendOne] }]);
@@ -502,11 +502,19 @@ test("plan runs the duplicate check, then the compare, then the history check", 
     );
     assert.equal(
       refusal(() => store.plan(changedShort)).code,
-      SCHEMA_MISMATCH_CODE,
+      INCOMPATIBLE_HISTORY_CODE,
     );
     assert.equal(
       refusal(() => store.plan([{ service: "one", migrations: [createOne] }]))
         .code,
+      INCOMPATIBLE_HISTORY_CODE,
+    );
+    assert.equal(
+      refusal(() =>
+        store.plan([
+          { service: "one", migrations: [createOneChanged, extendOne] },
+        ]),
+      ).code,
       SCHEMA_MISMATCH_CODE,
     );
     assert.equal(
@@ -526,6 +534,21 @@ test("plan runs the duplicate check, then the compare, then the history check", 
     );
   } finally {
     forged.close();
+  }
+});
+
+test("plan refuses a recorded version above the list length with incompatible_history and writes nothing", (t) => {
+  const path = join(temporary(t), "kanthord.db");
+  const store = new Store(path);
+  try {
+    store.migrate([{ service: "one", migrations: [createOne, extendOne] }]);
+    const before = snapshot(store);
+    const refused = refusal(() => store.plan(ONE_SERVICES));
+    assert.equal(refused.code, INCOMPATIBLE_HISTORY_CODE);
+    assert.deepEqual(refused.fields, [["path", path]]);
+    assert.deepEqual(snapshot(store), before);
+  } finally {
+    store.close();
   }
 });
 

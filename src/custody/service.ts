@@ -884,7 +884,11 @@ export class CustodyComponent implements Service, CredentialRecords {
           entry,
         )(deadline, (reason) =>
           this.logger.info(
-            { credential: credentialName, platform: row.platform, reason },
+            {
+              credential_name: credentialName,
+              platform: row.platform,
+              reason,
+            },
             "credential verify failed",
           ),
         ),

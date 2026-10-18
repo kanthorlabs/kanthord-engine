@@ -291,6 +291,55 @@ test("upgrade refuses a tracking.db of another migration text before any backup 
   after.close();
 });
 
+test("upgrade refuses a newer migration history before it writes anything", async (t) => {
+  const paths = layout(temporary(t));
+  const current = currentConfig();
+  writePrivate(paths.config, current);
+  const newer = new Store(paths.database);
+  newer.migrate(
+    serverMigrations.map((entry) =>
+      entry.service === BEHIND_SERVICE.service
+        ? {
+            ...entry,
+            migrations: [
+              ...entry.migrations,
+              (database) =>
+                database.exec(
+                  `CREATE TABLE ${entry.service}_newer_extra (value TEXT)`,
+                ),
+            ],
+          }
+        : entry,
+    ),
+  );
+  newer.close();
+  const before = new Store(paths.database);
+  const history = before.database.prepare("SELECT * FROM migration").all();
+  before.close();
+
+  const refused = await run(paths.env, "upgrade");
+  assert.equal(refused.status, ExitCode.Failure);
+  assert.match(
+    refused.stderr,
+    /system\.database\.migration\.incompatible_history/,
+  );
+  assert.doesNotMatch(refused.stderr, RESET_INSTRUCTION);
+  assert.equal(refused.stdout, NO_OUTPUT);
+  assert.equal(readFileSync(paths.config, "utf8"), current);
+  assert.deepEqual(readdirSync(join(paths.env.XDG_CONFIG_HOME!, "kanthord")), [
+    "kanthord.yaml",
+  ]);
+  assert.deepEqual(readdirSync(join(paths.env.XDG_DATA_HOME!, "kanthord")), [
+    DATABASE_FILE,
+  ]);
+  const after = new Store(paths.database);
+  assert.deepEqual(
+    after.database.prepare("SELECT * FROM migration").all(),
+    history,
+  );
+  after.close();
+});
+
 test("upgrade applies a pending tracking.db service with a backup", async (t) => {
   const paths = layout(temporary(t));
   writePrivate(paths.config, currentConfig());

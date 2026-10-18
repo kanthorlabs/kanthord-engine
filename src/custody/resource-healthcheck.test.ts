@@ -7,6 +7,7 @@ import { OperationError } from "../kernel/errors.ts";
 import { HealthScope, ResourceStatus } from "../kernel/health.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import { IN_MEMORY_DATABASE, Store } from "../kernel/store.ts";
+import { redactingLogger } from "../kernel/test-support.ts";
 import {
   CUSTODY_SERVICE_NAME,
   SecretShape,
@@ -32,6 +33,9 @@ const FIRST_REVISION = 1;
 const SECOND_REVISION = 2;
 const THIRD_REVISION = 3;
 const METADATA = { endpoint: "https://probe.example" };
+const FAILURE_REASON = "status=500";
+const PROBED_NAME = "probed";
+const VERIFY_FAILED_MESSAGE = "credential verify failed";
 
 type ProbeCall = { secret: unknown; metadata: unknown };
 
@@ -61,7 +65,10 @@ function platformSet(calls: ProbeCall[]): CredentialPlatformSet {
   };
 }
 
-function fixture(t: TestContext) {
+function fixture(
+  t: TestContext,
+  logger: pino.Logger = pino({ enabled: false }),
+) {
   const store = new Store(IN_MEMORY_DATABASE);
   t.after(() => {
     if (store.database.isOpen) store.close();
@@ -102,7 +109,7 @@ function fixture(t: TestContext) {
     store,
     platforms: {},
     envelopeKey: ENVELOPE_KEY,
-    logger: pino({ enabled: false }),
+    logger,
     agentProvidersDependentOn: () => [],
     bindingsNaming: () => [],
     inboundsNaming: () => [],
@@ -288,6 +295,29 @@ test("verify probes the newest live revision, writes no row and agrees with the 
     { secret: { key: "newest" }, metadata: METADATA },
   ]);
   assert.equal(rowsSnapshot(store), before);
+});
+
+test("verify logs the credential name as credential_name without redaction when the probe reports a failure", async (t) => {
+  const lines: string[] = [];
+  const { store, component } = fixture(t, redactingLogger(lines));
+  insert(store, PROBED_PLATFORM, PROBED_NAME);
+  const set: CredentialPlatformSet = {
+    platforms: {
+      [PROBED_PLATFORM]: {
+        ...platformSet([]).platforms[PROBED_PLATFORM]!,
+        probe: async (_secret, _metadata, _context, observe) => {
+          observe?.(FAILURE_REASON);
+          return ResourceStatus.Unknown;
+        },
+      },
+    },
+  };
+  await component.verify(set, PROBED_NAME, background);
+  const [record] = lines.map((line) => JSON.parse(line));
+  assert.equal(record.msg, VERIFY_FAILED_MESSAGE);
+  assert.equal(record.credential_name, PROBED_NAME);
+  assert.equal(record.reason, FAILURE_REASON);
+  assert.ok(!lines.join("").includes("[Redacted]"));
 });
 
 test("verify refuses an archived record, a platform without a probe, a foreign name and an unknown name before any probe call", async (t) => {

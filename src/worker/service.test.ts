@@ -177,6 +177,7 @@ const fakeAgentCollaborations: Omit<AgentDependencies, "store"> = {
   providerHealthCheck: () => async () => ResourceStatus.Unknown,
   providerCapability: () => PROVIDER_CAPABILITY,
   toolDeclarations: async () => [],
+  logger: pino({ enabled: false }),
 };
 const WORKER_CONFIG = { heartbeat_window: 300, server_slot_limit: 16 };
 

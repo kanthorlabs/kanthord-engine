@@ -552,9 +552,11 @@ The command runs in this order:
    `system.config.version_ahead`. A file that holds both an old key and its new
    key fails with `system.config.rename_conflict`.
 2. If `kanthord.db` exists, open it with its exclusive lock and validate its
-   schema and migration history. Do the same for `tracking.db`. A missing
+   migration history, then its schema. Do the same for `tracking.db`. A missing
    `tracking.db` stays missing. A running server makes this fail with
-   `system.database.initialization_failed` (`database is locked`). A database
+   `system.database.initialization_failed` (`database is locked`). A history
+   newer than the binary fails with
+   `system.database.migration.incompatible_history`. A database
    of another migration text fails with `system.database.migration.schema_mismatch`.
    A `master_key` that differs from the one in `kanthord.db` fails with
    `system.config.master_key_mismatch`. The command checks both files and the
