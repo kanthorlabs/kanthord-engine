@@ -38,6 +38,7 @@ const BOTH_CHECKS = 2;
 const CONFLICT = 409;
 const BAD_GATEWAY = 502;
 const FIRST_FAILED_AT = 1;
+const UPLOAD_CHECK_FAILED = "telemetry.uploadCheckFailed";
 
 function fixture(t: TestContext, expired = false) {
   const h = executionHarness(t, IDENTITY);
@@ -317,6 +318,49 @@ test("a failed check sets failed_at of the asset once", async (t) => {
   assert.deepEqual(
     h.failedAts().map((row) => ({ ...row })),
     [{ id: h.asset_id, failed_at: FIRST_FAILED_AT }],
+  );
+});
+
+test("a failed check writes one Mission span under the root span", async (t) => {
+  const h = fixture(t);
+  refusingCheck(h, mismatch());
+  const before = Date.now();
+  await assert.rejects(h.complete);
+  const reported = h.calls.filter(
+    (call) => call.method === UPLOAD_CHECK_FAILED,
+  );
+  assert.equal(reported.length, SINGLE_ITEM);
+  const [failure] = reported[FIRST_ASSET_INDEX]!.arguments as [
+    {
+      execution_id: string;
+      asset_id: string;
+      storage_binding_id: string;
+      code: string;
+      failed_at: number;
+    },
+  ];
+  assert.equal(failure.execution_id, h.claim.executionId);
+  assert.equal(failure.asset_id, h.asset_id);
+  assert.equal(failure.storage_binding_id, h.binding_id);
+  assert.equal(failure.code, IntakeErrorCode.StorageObjectMismatch);
+  assert.ok(failure.failed_at >= before);
+});
+
+test("a refusal that is no check failure writes no Mission span", async (t) => {
+  const h = fixture(t);
+  refusingCheck(
+    h,
+    new OperationError(
+      CONFLICT,
+      MissionErrorCode.AuthorizationRefused,
+      "The facility refuses the operation.",
+      { reason: "claim_not_live" },
+    ),
+  );
+  await assert.rejects(h.complete);
+  assert.equal(
+    h.calls.filter((call) => call.method === UPLOAD_CHECK_FAILED).length,
+    NO_CALLS,
   );
 });
 

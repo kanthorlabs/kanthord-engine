@@ -322,6 +322,10 @@ export function missionHarness(
         return null;
       },
     },
+    telemetry: {
+      uploadCheckFailed: (...args) =>
+        record("telemetry.uploadCheckFailed", args),
+    },
     logger: pino({ enabled: false }),
     ...overrides,
   };

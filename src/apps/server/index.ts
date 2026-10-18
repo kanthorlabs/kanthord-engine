@@ -28,11 +28,16 @@ import {
   type WorkQueue,
 } from "../../scheduler/contract.ts";
 import { TrackingService, trackingMigrations } from "../../tracking/index.ts";
-import { TRACKING_SERVICE_NAME } from "../../tracking/contract.ts";
+import {
+  MISSION_PRODUCER,
+  SpanStatus,
+  TRACKING_SERVICE_NAME,
+} from "../../tracking/contract.ts";
 import { MissionService, missionMigrations } from "../../mission/index.ts";
 import {
   MISSION_SERVICE_NAME,
   missionOperations,
+  UploadCheckSpan,
 } from "../../mission/contract.ts";
 import {
   RepositoryPlatform,
@@ -583,6 +588,28 @@ export function composeServices(options: {
     wakeup: { wake: (projectId) => scheduler.wake(projectId) },
     executionAttribution: {
       of: (...args) => scheduler.executionAttribution(...args),
+    },
+    telemetry: {
+      uploadCheckFailed: (failure) => {
+        const row = scheduler.executionOf(failure.execution_id);
+        if (row === undefined) return;
+        const trace = executionTrace(row);
+        const spanId = randomBytes(8).toString("hex");
+        tracking.serverSpan(trace, MISSION_PRODUCER, {
+          record_id: `${spanId}:end`,
+          span_id: spanId,
+          parent_span_id: trace.root_span_id,
+          operation: UploadCheckSpan.Operation,
+          start_time: failure.failed_at,
+          end_time: failure.failed_at,
+          status: SpanStatus.Error,
+          attributes: {
+            [UploadCheckSpan.AssetId]: failure.asset_id,
+            [UploadCheckSpan.StorageBindingId]: failure.storage_binding_id,
+            [UploadCheckSpan.ErrorType]: failure.code,
+          },
+        });
+      },
     },
     logger: options.logger,
     bindings: {

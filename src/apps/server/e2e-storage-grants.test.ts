@@ -22,9 +22,11 @@ import {
   MissionErrorCode,
   missionOperations,
   Intent,
+  UploadCheckSpan,
   type EvidenceAsset,
   type Revision,
 } from "../../mission/contract.ts";
+import { SpanStatus } from "../../tracking/contract.ts";
 import {
   WorkPullKind,
   type ExecutionRecord,
@@ -679,6 +681,21 @@ async function failoverSetup(t: TestContext) {
       )
       .all(nodeId)
       .map((row) => row.storage_binding_id);
+  const uploadCheckSpans = () =>
+    fixture.trackingStore.database
+      .prepare(
+        "SELECT operation, parent_span_id, status, attributes FROM tracking_span WHERE producer = 'mission' ORDER BY created_at, span_id",
+      )
+      .all()
+      .map((row) => ({
+        operation: row.operation,
+        parent_span_id: row.parent_span_id,
+        status: row.status,
+        attributes: JSON.parse(row.attributes as string) as Record<
+          string,
+          unknown
+        >,
+      }));
   return {
     primary,
     secondary,
@@ -687,6 +704,7 @@ async function failoverSetup(t: TestContext) {
     upload,
     pinnedOf,
     failures,
+    uploadCheckSpans,
     primaryId: binding("primary").id,
     secondaryId: binding("secondary").id,
   };
@@ -709,6 +727,17 @@ test("EF03b storage failover journey", { timeout: TIMEOUT }, async (t) => {
     assert.ok(result.uri.startsWith(`s3://${h.secondary.bucket}/${PREFIX}/`));
     assert.equal(await h.pinnedOf(result.asset_id), h.secondaryId);
     assert.deepEqual(h.failures(), [h.primaryId]);
+    const [span, ...rest] = h.uploadCheckSpans();
+    assert.ok(span);
+    assert.deepEqual(rest, []);
+    assert.equal(span.operation, UploadCheckSpan.Operation);
+    assert.equal(span.status, SpanStatus.Error);
+    assert.equal(
+      span.attributes[UploadCheckSpan.StorageBindingId],
+      h.primaryId,
+    );
+    assert.ok(span.attributes[UploadCheckSpan.AssetId]);
+    assert.ok(span.attributes[UploadCheckSpan.ErrorType]);
     recovered = result.asset_id;
   });
   await t.test(

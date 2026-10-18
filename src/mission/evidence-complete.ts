@@ -72,7 +72,7 @@ export function prepareComplete(
   };
 }
 
-function checkFailed(error: unknown): boolean {
+function checkFailed(error: unknown): error is OperationError {
   return (
     error instanceof OperationError &&
     (error.code === IntakeErrorCode.StorageObjectMismatch ||
@@ -109,10 +109,19 @@ export async function completeEvidence(
       assetId,
     )
     .catch((error: unknown) => {
-      if (checkFailed(error))
+      if (checkFailed(error)) {
+        const failedAt = Date.now();
         dependencies.store.transaction((tx) =>
-          markAssetFailed(tx, assetId, Date.now()),
+          markAssetFailed(tx, assetId, failedAt),
         );
+        dependencies.telemetry.uploadCheckFailed({
+          execution_id: claim.executionId,
+          asset_id: assetId,
+          storage_binding_id: content.storage_binding_id,
+          code: error.code,
+          failed_at: failedAt,
+        });
+      }
       throw error;
     });
   assert.equal(checked.location, content.location);
