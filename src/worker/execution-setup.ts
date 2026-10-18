@@ -16,7 +16,6 @@ import {
 import { PromptConsumer, systemPrompt } from "../agent/prompt-render.ts";
 import type { ResolvedLayer } from "../agent/prompt-layers.ts";
 import type { Dependencies, WorkerService } from "./service.ts";
-import { entryOf, pinnedEntry } from "./agent-selection.ts";
 
 const FIRST_ISSUE_INDEX = 0;
 const NO_AGENTS = 0;
@@ -33,7 +32,7 @@ export async function executionSetup(
     | "intentOf"
     | "repositoryPolicyOf"
   > & { schedulerClaims: Pick<SchedulerClaims, "agentSelectionsOf"> },
-  worker: Pick<WorkerService, "declarationOf" | "workerAgentView">,
+  worker: Pick<WorkerService, "declarationOf" | "pinnedAgentView">,
   caller: CallerContext,
 ): Promise<ExecutionSetup> {
   const claim = caller.execution;
@@ -91,16 +90,17 @@ export async function executionSetup(
       return approvedModels(record.platform, record.metadata);
     };
     const agents = agentNames.map((agentName) => {
-      const entry = pinnedEntry(
-        selections,
-        agentName,
-        entryOf(row.entries, agentName),
+      const selection = selections.find(
+        ({ agent_name }) => agent_name === agentName,
       );
-      const view = worker.workerAgentView(
+      assert.ok(
+        selection,
+        "A native agent of a claimed execution must hold a pin.",
+      );
+      const view = worker.pinnedAgentView(
         tx,
         row.worker_name,
-        agentName,
-        entry,
+        selection,
         pinnedModels,
       );
       assert.ok(view);
@@ -121,6 +121,8 @@ export async function executionSetup(
       return {
         agent_name: agentName,
         effective_configuration: view.effective,
+        position: selection.position,
+        level: selection.level,
         credential_id: record.id,
         metadata: record.metadata,
         prompt: {

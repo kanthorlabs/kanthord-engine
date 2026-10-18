@@ -824,6 +824,53 @@ export class AgentComponent {
     };
   }
 
+  selectionView(
+    tx: Transaction,
+    selection: AgentSelection,
+    approvedModels: ApprovedModelsFn = this.dependencies.approvedModels,
+  ): Pick<AgentView, "effective" | "valid" | "issues"> {
+    const current = getEnablement(tx, selection.agent_name);
+    if (!current || current.state === EnablementState.Disabled)
+      return {
+        effective: null,
+        valid: false,
+        issues: [{ path: [], code: AgentErrorCode.Unavailable }],
+      };
+    const configuration = {
+      agent_provider: selection.agent_provider,
+      model_identifier: selection.model_identifier,
+      reasoning_effort: selection.reasoning_effort,
+    };
+    const issues = chainIssues(
+      {
+        custodySuitability: this.dependencies.custodySuitability,
+        approvedModels,
+      },
+      tx,
+      selection.agent_name,
+      [
+        {
+          name: selection.agent_provider,
+          provider: selection.provider,
+          credential: selection.credential,
+        },
+      ],
+      configuration,
+      [],
+    );
+    if (issues.length > NO_ITEMS)
+      return { effective: null, valid: false, issues };
+    return {
+      effective: {
+        ...configuration,
+        provider: selection.provider,
+        credential: selection.credential,
+      },
+      valid: true,
+      issues,
+    };
+  }
+
   selectionAt(
     tx: Transaction,
     agentName: string,

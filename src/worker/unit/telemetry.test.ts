@@ -15,6 +15,7 @@ import {
 import { traceAgent } from "./agent-telemetry.ts";
 import { GitStep, withinGit } from "./method-telemetry.ts";
 import { Diagnostic } from "../../kernel/errors.ts";
+import { ChainLevel } from "../../agent/contract.ts";
 
 const CLAIM = {
   execution_id: "execution_01JZ8R2B3C4D5E6F7G8H9J0K1M",
@@ -32,6 +33,12 @@ const INPUT_TOKENS = 10;
 const SPLIT_BEFORE_PAIR = 14999;
 const ONE_FAULT = 1;
 const NO_TOOL_SPANS = 0;
+const SECOND_POSITION = 1;
+const TRACED_AGENT = {
+  agent_name: "swe@1",
+  position: 0,
+  level: ChainLevel.Enablement,
+} as const;
 
 function recorder() {
   const records: TelemetryRecord[] = [];
@@ -146,7 +153,7 @@ test("the agent tracer writes a turn and its tool call", () => {
       return () => {};
     },
   } as unknown as AgentSession;
-  traceAgent(session, spans, "swe@1");
+  traceAgent(session, spans, TRACED_AGENT);
   listener({ type: "turn_start" });
   listener({
     type: "tool_execution_start",
@@ -189,6 +196,38 @@ test("the agent tracer writes a turn and its tool call", () => {
   assert.ok(turnEnd?.text_ids?.some((id) => id.endsWith(":error")));
 });
 
+test("the agent tracer writes the chain position and level of the pinned selection on a turn", () => {
+  const { records, spans } = recorder();
+  let listener: (event: unknown) => void = () => {};
+  const session = {
+    subscribe: (next: (event: unknown) => void) => {
+      listener = next;
+      return () => {};
+    },
+  } as unknown as AgentSession;
+  traceAgent(session, spans, {
+    agent_name: "swe@1",
+    position: SECOND_POSITION,
+    level: ChainLevel.Binding,
+  });
+  listener({ type: "turn_start" });
+  const turn = spanRecords(records).find(
+    (record) => record.operation === SpanOperation.Turn,
+  );
+  assert.equal(
+    turn?.attributes?.["kanthord.agent.name"],
+    TRACED_AGENT.agent_name,
+  );
+  assert.equal(
+    turn?.attributes?.["kanthord.agent.chain_position"],
+    SECOND_POSITION,
+  );
+  assert.equal(
+    turn?.attributes?.["kanthord.agent.chain_level"],
+    ChainLevel.Binding,
+  );
+});
+
 test("a text split never cuts a surrogate pair", () => {
   const { records, spans } = recorder();
   spans.start({
@@ -212,7 +251,7 @@ test("a tracer fault is counted and never thrown", () => {
       return () => {};
     },
   } as unknown as AgentSession;
-  traceAgent(session, spans, "swe@1");
+  traceAgent(session, spans, TRACED_AGENT);
   listener({ type: "turn_start" });
   listener({ type: "tool_execution_start", toolCallId: "", toolName: "bash" });
   assert.doesNotThrow(() =>

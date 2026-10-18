@@ -21,6 +21,7 @@ import type { ExecutionSetup } from "../../worker/contract.ts";
 import { httpTransport } from "./transport.ts";
 import { testClaim } from "./test-support.ts";
 import { hostExecution } from "./execution.ts";
+import { ChainLevel } from "../../agent/contract.ts";
 import { SHIPPED_TEMPLATES } from "../../agent/prompt-templates.ts";
 import { ExecutionIntent } from "../../worker/contract.ts";
 
@@ -132,6 +133,8 @@ test("host takes handover before setup and method, discards on every method end"
           model_identifier: "claude-sonnet-4-5",
           reasoning_effort: "off",
         },
+        position: 0,
+        level: ChainLevel.Enablement,
         metadata: null,
         prompt: { final: "setup prompt" },
       },

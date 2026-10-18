@@ -21,21 +21,6 @@ export function entryOf(
   return agent === agentName ? entry : null;
 }
 
-export function pinnedEntry(
-  selections: readonly AgentSelection[],
-  agentName: string,
-  entry: WorkerEntry | null,
-): WorkerEntry | null {
-  const pin = selections.find(({ agent_name }) => agent_name === agentName);
-  if (!pin) return entry;
-  return {
-    agent_provider: pin.agent_provider,
-    model_identifier: pin.model_identifier,
-    reasoning_effort: pin.reasoning_effort,
-    fallback_configurations: [],
-  };
-}
-
 export function agentChoice(
   dependencies: Pick<Dependencies, "workerBindingRowOf" | "agentConfiguration">,
   worker: Pick<WorkerService, "declarationOf">,

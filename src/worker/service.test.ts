@@ -15,9 +15,13 @@ import {
   InstancePlacement,
   WorkerHost,
   WorkerMethod,
+  ExecutionIntent,
+  type ExecutionSetup,
   type WorkerEntry,
   type WorkerBindingOf,
 } from "./contract.ts";
+import { SHIPPED_TEMPLATES } from "../agent/prompt-templates.ts";
+import { approvedModels, Platform } from "../llm/platforms.ts";
 import { workerMigrations } from "./migrations.ts";
 import {
   AgentComponent,
@@ -39,7 +43,12 @@ import {
   ResourceStatus,
 } from "../kernel/health.ts";
 import { HealthStatus } from "../kernel/service.ts";
-import { Store, IN_MEMORY_DATABASE } from "../kernel/store.ts";
+import {
+  Store,
+  IN_MEMORY_DATABASE,
+  type Transaction,
+} from "../kernel/store.ts";
+import { AgentChoiceKind, type AgentSelection } from "../scheduler/contract.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import { OperationError } from "../kernel/errors.ts";
 import { createIdentity } from "../kernel/identity.ts";
@@ -141,6 +150,9 @@ const fakeCollaborations = {
       throw new Error("UNEXPECTED_COLLABORATION");
     },
     selectionAt: () => {
+      throw new Error("UNEXPECTED_COLLABORATION");
+    },
+    selectionView: () => {
       throw new Error("UNEXPECTED_COLLABORATION");
     },
     agentView: () => {
@@ -323,6 +335,8 @@ const MISSING_MODEL = "claude-3-5-sonnet-20241022";
 const UNKNOWN = "unknown";
 const FIRST_REVISION = 1;
 const SECOND_REVISION = 2;
+const THIRD_REVISION = 3;
+const FOURTH_REVISION = 4;
 const provider = {
   name: "primary",
   provider: AgentProviderKind.Anthropic,
@@ -1167,6 +1181,8 @@ function enablementFixture(
       selectAgent: (tx, name, entry) => agent.selectAgent(tx, name, entry),
       selectionAt: (tx, name, enablementId, entry, position) =>
         agent.selectionAt(tx, name, enablementId, entry, position),
+      selectionView: (tx, selection, models) =>
+        agent.selectionView(tx, selection, models),
     },
     ...collaborations,
   });
@@ -1512,6 +1528,199 @@ test("workerAgentView answers null outside the agents of the worker and delegate
     f.store.transaction((tx) => f.agent.agentView(tx, AGENT, entry)),
   );
   assert.equal(view()?.valid, true);
+});
+
+type CredentialRecord = {
+  platform: string;
+  metadata: Record<string, unknown> | null;
+};
+
+function authorizationFixture(t: TestContext) {
+  const projectId = createIdentity("project");
+  const resourceIdentity = "worker:kanthord:general";
+  const runtimeIdentity = createIdentity("worker_instance");
+  const execution = {
+    execution_id: createIdentity("execution"),
+    project_id: projectId,
+    worker_binding_id: createIdentity("binding"),
+    resource_identity: resourceIdentity,
+  };
+  const claim = {
+    executionId: execution.execution_id,
+    runtimeIdentity,
+    workerBindingId: execution.worker_binding_id,
+    nodeId: createIdentity("node"),
+    pinnedRevision: 1,
+    nodeBranch: "kanthord/node_01ARZ3NDEKTSV4RRFFQ69G5FAA",
+    attempt: 1,
+    projectId,
+  };
+  const identity = testMachineIdentity(
+    {
+      clientId: createIdentity("client_identity"),
+      name: "machine",
+      projectId,
+      resourceIdentity,
+      issuedAt: 0,
+    },
+    "jti",
+    runtimeIdentity,
+  );
+  const anthropicRecord: CredentialRecord = {
+    platform: provider.provider,
+    metadata: null,
+  };
+  const newest = new Map<string, CredentialRecord>();
+  const pinned = new Map<string, CredentialRecord & { id: string }>();
+  const newestOf = (name: string) => newest.get(name) ?? anthropicRecord;
+  let selectionOf: (tx: Transaction) => AgentSelection[] = () => [];
+  const f = enablementFixture(
+    t,
+    {
+      workerBindingRowOf: () => ({
+        binding_id: execution.worker_binding_id,
+        project_id: projectId,
+        resource_identity: resourceIdentity,
+        worker_name: WORKER,
+        entries: [],
+        resource_budget: null,
+        tombstone: false,
+        disabled: false,
+      }),
+      schedulerClaims: {
+        ...fakeCollaborations.schedulerClaims,
+        agentSelectionsOf: (tx) => selectionOf(tx),
+      },
+      pinnedCredentialMetadata: (_tx, _claim, name) => {
+        const record = pinned.get(name);
+        return record ? { ...record, name } : null;
+      },
+      credentialMetadata: (_tx, name) => newestOf(name),
+      agentPrompt: {
+        compose: async () => [],
+        templates: async () => SHIPPED_TEMPLATES,
+      },
+      repositoryBindingIdsOf: () => [],
+      intentOf: () => ExecutionIntent.Implement,
+    },
+    {
+      approvedModels: (_tx, name) =>
+        approvedModels(newestOf(name).platform, newestOf(name).metadata),
+    },
+  );
+  const pin = () => {
+    const chosen = f.store.transaction((tx) =>
+      f.agent.selectAgent(tx, AGENT, null),
+    );
+    assert.ok(chosen.kind === AgentChoiceKind.Selected);
+    selectionOf = (tx) => [
+      f.agent.selectionAt(
+        tx,
+        AGENT,
+        chosen.enablement_id,
+        null,
+        chosen.selection.position,
+      ),
+    ];
+    return chosen.selection;
+  };
+  const authorize = () =>
+    f.store.transaction((tx) =>
+      f.worker.authorizeModelInference(tx, identity, execution),
+    );
+  const setup = () =>
+    f.registry
+      .get(workerOperations["execution.setup.get"].id)
+      .handler(
+        { params: {}, query: {}, body: null },
+        { ...f.caller, identity, execution: claim },
+      ) as Promise<ExecutionSetup>;
+  return { ...f, pin, authorize, setup, newest, pinned };
+}
+
+test("authorization reads the credential of the pinned enablement revision after a newer revision", (t) => {
+  const f = authorizationFixture(t);
+  f.invokeAgent("enablement.put", putBody);
+  f.pin();
+  f.invokeAgent("enablement.put", {
+    ...putBody,
+    expected_revision: FIRST_REVISION,
+    agent_providers: [{ ...provider, credential: "anthropic-b" }],
+  });
+  assert.deepEqual(
+    f.authorize().map((item) => item.credential),
+    [provider.credential],
+  );
+  const other = { ...provider, name: "other", credential: "anthropic-c" };
+  f.invokeAgent("enablement.put", {
+    ...putBody,
+    expected_revision: SECOND_REVISION,
+    agent_providers: [other, provider],
+    default_configuration: { ...defaults, agent_provider: other.name },
+  });
+  f.invokeAgent(
+    "enablement.provider.remove",
+    { expected_revision: THIRD_REVISION },
+    { agent_name: AGENT, provider_name: provider.name },
+  );
+  assert.deepEqual(
+    f.authorize().map((item) => item.credential),
+    [provider.credential],
+  );
+  f.invokeAgent("enablement.disable", { expected_revision: FOURTH_REVISION });
+  refuses(f.authorize, AgentErrorCode.Unavailable);
+});
+
+test("authorization validates the model against the pinned credential revision", (t) => {
+  const f = authorizationFixture(t);
+  const custom = { ...provider, provider: AgentProviderKind.OpenaiCompatible };
+  const models = (id: string) => ({
+    platform: Platform.OpenAICompatible,
+    metadata: {
+      base_url: "http://localhost:1234",
+      models: [{ id, reasoning_levels: [defaults.reasoning_effort] }],
+    },
+  });
+  f.newest.set(custom.credential, models(MODEL));
+  f.invokeAgent("enablement.put", { ...putBody, agent_providers: [custom] });
+  f.pin();
+  f.pinned.set(custom.credential, {
+    ...models(MODEL),
+    id: createIdentity("credential"),
+  });
+  f.newest.set(custom.credential, models(MISSING_MODEL));
+  assert.deepEqual(
+    f.authorize().map((item) => item.credential),
+    [custom.credential],
+  );
+  f.pinned.delete(custom.credential);
+  refuses(f.authorize, AgentErrorCode.ModelUnknown);
+});
+
+test("setup answers the pinned credential after a newer enablement revision maps the provider to another credential", async (t) => {
+  const f = authorizationFixture(t);
+  f.invokeAgent("enablement.put", putBody);
+  const selection = f.pin();
+  const credentialId = createIdentity("credential");
+  f.pinned.set(provider.credential, {
+    platform: provider.provider,
+    metadata: null,
+    id: credentialId,
+  });
+  f.invokeAgent("enablement.put", {
+    ...putBody,
+    expected_revision: FIRST_REVISION,
+    agent_providers: [{ ...provider, credential: "anthropic-b" }],
+  });
+  const [answered] = (await f.setup()).agents;
+  assert.ok(answered);
+  assert.equal(
+    answered.effective_configuration.credential,
+    provider.credential,
+  );
+  assert.equal(answered.credential_id, credentialId);
+  assert.equal(answered.position, selection.position);
+  assert.equal(answered.level, selection.level);
 });
 
 const POOL_PROJECT = "project_01ARZ3NDEKTSV4RRFFQ69G5FAV";

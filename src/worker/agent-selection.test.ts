@@ -2,12 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { Transaction } from "../kernel/store.ts";
 import { AgentChoiceKind, type AgentSelection } from "../scheduler/contract.ts";
-import {
-  agentChoice,
-  agentSelectionsAt,
-  entryOf,
-  pinnedEntry,
-} from "./agent-selection.ts";
+import { agentChoice, agentSelectionsAt } from "./agent-selection.ts";
 import { TWO_AGENT_WORKER, twoAgentDeclarationOf } from "./test-support.ts";
 import type { WorkerEntry } from "./contract.ts";
 
@@ -29,19 +24,6 @@ const ENABLEMENT = "agent_enablement_01ARZ3NDEKTSV4RRFFQ69G5FAA";
 const swePin = { agent_name: SWE, enablement_id: ENABLEMENT, position: 1 };
 const tuning = { reasoning_effort: "low" };
 const tx = {} as Transaction;
-
-test("a pinned selection replaces the entry of its agent with a complete entry and no tail", () => {
-  assert.deepEqual(pinnedEntry([pin], SWE, tuning), {
-    agent_provider: pin.agent_provider,
-    model_identifier: pin.model_identifier,
-    reasoning_effort: pin.reasoning_effort,
-    fallback_configurations: [],
-  });
-  assert.deepEqual(pinnedEntry([pin], RE, tuning), tuning);
-  assert.equal(pinnedEntry([], SWE, null), null);
-  assert.deepEqual(entryOf([{ agent: SWE, ...tuning }], SWE), tuning);
-  assert.equal(entryOf([{ agent: SWE, ...tuning }], RE), null);
-});
 
 const selected = {
   kind: "selected" as const,

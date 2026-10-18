@@ -4,13 +4,14 @@ import { OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import { piProviderId } from "../kernel/pi-provider.ts";
 import type { Transaction } from "../kernel/store.ts";
+import { approvedModels } from "../llm/platforms.ts";
+import type { ApprovedModelsFn } from "../agent/contract.ts";
 import {
   AuthorizationRefusal,
   WorkerErrorCode,
   type SchedulerClaims,
 } from "./contract.ts";
 import type { Dependencies, WorkerService } from "./service.ts";
-import { entryOf, pinnedEntry } from "./agent-selection.ts";
 
 const NO_AGENTS = 0;
 
@@ -24,10 +25,13 @@ function refused(reason: AuthorizationRefusal): never {
 }
 
 export function authorizeModelInference(
-  dependencies: Pick<Dependencies, "workerBindingRowOf"> & {
+  dependencies: Pick<
+    Dependencies,
+    "workerBindingRowOf" | "pinnedCredentialMetadata" | "credentialMetadata"
+  > & {
     schedulerClaims: Pick<SchedulerClaims, "agentSelectionsOf">;
   },
-  worker: Pick<WorkerService, "declarationOf" | "workerAgentView">,
+  worker: Pick<WorkerService, "declarationOf" | "pinnedAgentView">,
   tx: Transaction,
   identity: MachineIdentity,
   execution: {
@@ -56,9 +60,33 @@ export function authorizeModelInference(
     execution.execution_id,
   );
   if (agents.length === NO_AGENTS) refused(AuthorizationRefusal.NoNativeAgent);
+  assert.ok(identity.runtimeIdentity);
+  const claim = {
+    executionId: execution.execution_id,
+    runtimeIdentity: identity.runtimeIdentity,
+  };
+  const pinnedModels: ApprovedModelsFn = (transaction, name) => {
+    const record =
+      dependencies.pinnedCredentialMetadata(
+        transaction,
+        claim,
+        name,
+        Date.now(),
+      ) ?? dependencies.credentialMetadata(transaction, name);
+    return record && approvedModels(record.platform, record.metadata);
+  };
   const authorizations = agents.map((agent) => {
-    const entry = pinnedEntry(selections, agent, entryOf(row.entries, agent));
-    const view = worker.workerAgentView(tx, row.worker_name, agent, entry);
+    const selection = selections.find(({ agent_name }) => agent_name === agent);
+    assert.ok(
+      selection,
+      "A native agent of a claimed execution must hold a pin.",
+    );
+    const view = worker.pinnedAgentView(
+      tx,
+      row.worker_name,
+      selection,
+      pinnedModels,
+    );
     assert.ok(view);
     if (!view.valid) {
       const issue = view.issues[0];

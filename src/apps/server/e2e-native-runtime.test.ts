@@ -39,7 +39,7 @@ import {
   workerOperations,
   type RepositoryTransport,
 } from "../../worker/contract.ts";
-import { agentOperations } from "../../agent/contract.ts";
+import { agentOperations, ChainLevel } from "../../agent/contract.ts";
 import { SWE_AGENT_PROMPT } from "../../agent/prompt-assets.ts";
 import { framing, PromptConsumer } from "../../agent/prompt-render.ts";
 import { WORKING_LAYER_ALL_ON } from "../../worker/test-support.ts";
@@ -74,6 +74,7 @@ const SUCCESSFUL_EXIT = 0;
 const ZERO_BYTE = 0;
 const FIRST_REVISION = 1;
 const SINGLE_INSTANCE = 1;
+const HEAD_POSITION = 0;
 const SINGLE_TURN = 1;
 const FAILURE_EXIT = 1;
 const BRACKET_TRIM_OFFSET = 1;
@@ -435,6 +436,8 @@ test(
         provider: "anthropic",
         credential: "anthro-1",
       });
+      assert.equal(runtimeX.setup.agents[0]!.position, HEAD_POSITION);
+      assert.equal(runtimeX.setup.agents[0]!.level, ChainLevel.Binding);
       assert.equal(runtimeX.setup.agents[0]!.metadata, null);
       assert.deepEqual(runtimeX.setup.resource_budget, {
         turns: 200,

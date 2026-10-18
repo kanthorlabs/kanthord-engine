@@ -178,6 +178,15 @@ components:
                   `openai-compatible` credential. `reasoning_effort` belongs to
                   the supported reasoning levels of that model. JSON Schema
                   validates neither lookup.
+              position:
+                type: integer
+                minimum: 0
+                maximum: 9007199254740991
+              level:
+                type: string
+                enum:
+                  - enablement
+                  - binding
               credential_id:
                 type: string
                 minLength: 37
@@ -202,6 +211,8 @@ components:
             required:
               - agent_name
               - effective_configuration
+              - position
+              - level
               - credential_id
               - metadata
               - prompt
