@@ -12,8 +12,10 @@ import { Store } from "../../kernel/store.ts";
 import { temporary } from "../../kernel/test-support.ts";
 import {
   DATABASE_FILE,
+  TRACKING_DATABASE_FILE,
   enforceMasterKey,
   serverMigrations,
+  trackingDatabaseMigrations,
 } from "../server/index.ts";
 import { Diagnostic } from "../../kernel/errors.ts";
 import { ExitCode } from "./constants.ts";
@@ -26,12 +28,17 @@ const FIXED_STAMP = "20261018T003601";
 const BACKUP_FAILED = "system.database.backup_failed";
 const CONFIGURATION_BACKUP_ONLY = 1;
 const BACKUPS_OF_CONFIGURATION_AND_DATABASE = 2;
+const TRACKING_BACKUP_ONLY = 1;
+const NO_OUTPUT = "";
 const CURRENT_VERSION_LINE = `version: ${CONFIG_VERSION}\n`;
 const OLD_KEY = "consecutive_loss_limit";
 const NEW_KEY = "consecutive_failure_limit";
 const BEHIND_SERVICE = serverMigrations.find(
   ({ migrations }) => migrations.length,
 )!;
+const SCHEMA_MISMATCH = /system\.database\.migration\.schema_mismatch/;
+const RESET_INSTRUCTION =
+  /delete kanthord\.db, tracking\.db and their -wal and -shm files in the data directory, and start again/;
 const olderMigrations = serverMigrations.map((entry) =>
   entry.service === BEHIND_SERVICE.service
     ? { ...entry, migrations: entry.migrations.slice(0, -1) }
@@ -53,7 +60,8 @@ function layout(directory: string) {
   ])
     mkdirSync(join(path, "kanthord"), { mode: 0o700, recursive: true });
   const database = join(env.XDG_DATA_HOME!, "kanthord", DATABASE_FILE);
-  return { env, config: env.KANTHORD_CONFIG!, database };
+  const tracking = join(env.XDG_DATA_HOME!, "kanthord", TRACKING_DATABASE_FILE);
+  return { env, config: env.KANTHORD_CONFIG!, database, tracking };
 }
 
 async function run(env: NodeJS.ProcessEnv, command: string) {
@@ -235,5 +243,102 @@ test("upgrade writes each row when it happens, before a later step fails", async
   );
   assert.deepEqual(written, [
     `backup:         ${paths.config}.bak-${FIXED_STAMP}\n`,
+  ]);
+});
+
+test("upgrade refuses a tracking.db of another migration text before any backup or write", async (t) => {
+  const paths = layout(temporary(t));
+  const legacy = legacyConfig();
+  writePrivate(paths.config, legacy);
+  olderDatabase(paths.database);
+  const foreign = new Store(paths.tracking);
+  foreign.migrate(
+    trackingDatabaseMigrations.map(({ service, migrations }) => ({
+      service,
+      migrations: [
+        (database) => {
+          migrations[0]!(database);
+          database.exec("CREATE TABLE tracking_scratch_extra (value TEXT)");
+        },
+      ],
+    })),
+  );
+  foreign.close();
+  const before = new Store(paths.database);
+  const history = before.database.prepare("SELECT * FROM migration").all();
+  before.close();
+
+  const refused = await run(paths.env, "upgrade");
+  assert.equal(refused.status, ExitCode.Failure);
+  assert.match(refused.stderr, SCHEMA_MISMATCH);
+  assert.match(refused.stderr, /tracking\.db/);
+  assert.match(refused.stderr, /scratch_extra/);
+  assert.match(refused.stderr, RESET_INSTRUCTION);
+  assert.equal(refused.stdout, NO_OUTPUT);
+  assert.equal(readFileSync(paths.config, "utf8"), legacy);
+  assert.deepEqual(readdirSync(join(paths.env.XDG_CONFIG_HOME!, "kanthord")), [
+    "kanthord.yaml",
+  ]);
+  assert.deepEqual(
+    readdirSync(join(paths.env.XDG_DATA_HOME!, "kanthord")).sort(),
+    [DATABASE_FILE, TRACKING_DATABASE_FILE],
+  );
+  const after = new Store(paths.database);
+  assert.deepEqual(
+    after.database.prepare("SELECT * FROM migration").all(),
+    history,
+  );
+  after.close();
+});
+
+test("upgrade applies a pending tracking.db service with a backup", async (t) => {
+  const paths = layout(temporary(t));
+  writePrivate(paths.config, currentConfig());
+  const server = new Store(paths.database);
+  server.migrate(serverMigrations);
+  server.close();
+  const empty = new Store(paths.tracking);
+  empty.migrate([]);
+  empty.close();
+
+  const upgraded = await run(paths.env, "upgrade");
+  assert.equal(upgraded.status, ExitCode.Success, upgraded.stderr);
+  const backups = [...upgraded.stdout.matchAll(/^backup: +(.+)$/gm)].map(
+    (match) => match[1]!,
+  );
+  assert.equal(backups.length, TRACKING_BACKUP_ONLY);
+  assert.match(
+    backups[0]!,
+    new RegExp(`${TRACKING_DATABASE_FILE}\\.bak-\\d{8}T\\d{6}$`),
+  );
+  assert.equal(statSync(backups[0]!).mode & 0o7777, PRIVATE_FILE_MODE);
+  assert.match(upgraded.stdout, /^migrated: +tracking 0 -> 1$/m);
+  const store = new Store(paths.tracking);
+  assert.deepEqual(store.plan(trackingDatabaseMigrations).pending, []);
+  store.close();
+  const copy = new Store(backups[0]!);
+  assert.deepEqual(
+    copy.plan(trackingDatabaseMigrations).pending.map(({ service }) => service),
+    ["tracking"],
+  );
+  copy.close();
+
+  const again = await run(paths.env, "upgrade");
+  assert.equal(again.status, ExitCode.Success, again.stderr);
+  assert.equal(again.stdout, `up_to_date:     ${paths.config}\n`);
+});
+
+test("upgrade keeps a missing tracking.db missing", async (t) => {
+  const paths = layout(temporary(t));
+  writePrivate(paths.config, currentConfig());
+  const server = new Store(paths.database);
+  server.migrate(serverMigrations);
+  server.close();
+
+  const result = await run(paths.env, "upgrade");
+  assert.equal(result.status, ExitCode.Success, result.stderr);
+  assert.equal(result.stdout, `up_to_date:     ${paths.config}\n`);
+  assert.deepEqual(readdirSync(join(paths.env.XDG_DATA_HOME!, "kanthord")), [
+    DATABASE_FILE,
   ]);
 });
