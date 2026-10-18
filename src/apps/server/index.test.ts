@@ -9,13 +9,17 @@ import {
   renameSync,
   writeFileSync,
 } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { stringify } from "yaml";
 import { configuration, CONFIG_VERSION } from "../../config/index.ts";
 import { temporary } from "../../kernel/test-support.ts";
 import { createServer } from "node:http";
 import { writePrivate } from "../../kernel/files.ts";
-import { Store, type Transaction } from "../../kernel/store.ts";
+import {
+  Store,
+  type Migrations,
+  type Transaction,
+} from "../../kernel/store.ts";
 import { CancellationContext } from "../../kernel/context.ts";
 import { isString } from "../../kernel/values.ts";
 import {
@@ -23,7 +27,11 @@ import {
   GATEWAY_STARTED_MESSAGE,
   resourceHealthReport,
 } from "../../gateway/index.ts";
-import { projectScopedIntakeInventory } from "./index.ts";
+import {
+  projectScopedIntakeInventory,
+  serverMigrations,
+  trackingDatabaseMigrations,
+} from "./index.ts";
 import { until } from "./cli-support.ts";
 import { testHumanIdentity } from "../../kernel/test-identity.ts";
 import type { Material } from "../../custody/contract.ts";
@@ -576,6 +584,70 @@ test("serve refuses another master_key against an existing database and writes n
   writePrivate(paths.env.KANTHORD_CONFIG!, stringify(paths.config), true);
   assert.match(serve().stderr, /cannot bind/);
   assert.deepEqual(rows(), recorded);
+});
+
+const SCHEMA_MISMATCH = /system\.database\.migration\.schema_mismatch/;
+const RESET_INSTRUCTION =
+  /delete kanthord\.db, tracking\.db and their -wal and -shm files in the data directory, and start again/;
+
+function withExtraText(migrations: Migrations, service: string): Migrations {
+  return migrations.map((entry) =>
+    entry.service === service
+      ? {
+          service,
+          migrations: [
+            (database) => {
+              entry.migrations[0]!(database);
+              database.exec(
+                `CREATE TABLE ${service}_scratch_extra (value TEXT)`,
+              );
+            },
+          ],
+        }
+      : entry,
+  );
+}
+
+function createDatabase(path: string, migrations: Migrations): void {
+  const store = new Store(path);
+  store.migrate(migrations);
+  store.close();
+}
+
+function serveOnce(env: NodeJS.ProcessEnv) {
+  return spawnSync(
+    process.execPath,
+    [
+      "--input-type=module",
+      "-e",
+      `process.argv=[process.execPath,'kanthord','serve'];await import(${JSON.stringify(entry)});`,
+    ],
+    { env, encoding: "utf8", timeout: 10000 },
+  );
+}
+
+test("serve refuses a kanthord.db that another migration text created", (t) => {
+  const paths = layout(temporary(t));
+  createDatabase(paths.database, withExtraText(serverMigrations, "mission"));
+  const refused = serveOnce(paths.env);
+  assert.equal(refused.status, ExitCode.Failure);
+  assert.match(refused.stderr, SCHEMA_MISMATCH);
+  assert.match(refused.stderr, /scratch_extra/);
+  assert.match(refused.stderr, RESET_INSTRUCTION);
+});
+
+test("serve refuses a tracking.db that another migration text created", (t) => {
+  const paths = layout(temporary(t));
+  createDatabase(paths.database, serverMigrations);
+  createDatabase(
+    join(dirname(paths.database), "tracking.db"),
+    withExtraText(trackingDatabaseMigrations, "tracking"),
+  );
+  const refused = serveOnce(paths.env);
+  assert.equal(refused.status, ExitCode.Failure);
+  assert.match(refused.stderr, SCHEMA_MISMATCH);
+  assert.match(refused.stderr, /tracking\.db/);
+  assert.match(refused.stderr, RESET_INSTRUCTION);
 });
 
 test("serve starts with redirected stdout without issuing a JWT; SIGTERM drains and releases the database", async (t) => {

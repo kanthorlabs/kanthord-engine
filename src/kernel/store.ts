@@ -11,6 +11,15 @@ export const IN_MEMORY_DATABASE = ":memory:";
 export const STATEMENT_CACHE_LIMIT = 256;
 const DATABASE_PROBE_OK = 1;
 const NO_RECORDED_MIGRATION = 0;
+const SCHEMA_KEY_SEPARATOR = "\u0000";
+const SCHEMA_TABLE_TYPE = "table";
+const SCHEMA_OBJECT_TYPE = 0;
+const SCHEMA_OBJECT_NAME = 1;
+const SCHEMA_OBJECT_COLUMNS = ["type", "name", "tbl_name", "sql"] as const;
+const SCHEMA_MISMATCH_MESSAGE =
+  "the schema of this service differs from its migration text; stop the server, delete kanthord.db, tracking.db and their -wal and -shm files in the data directory, and start again";
+const EXPECTED_SCHEMA_SQL = `SELECT ${SCHEMA_OBJECT_COLUMNS.join(", ")} FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY type, name`;
+const LIVE_SCHEMA_SQL = `SELECT ${SCHEMA_OBJECT_COLUMNS.join(", ")} FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' AND (name IN (SELECT value FROM json_each(?)) OR tbl_name IN (SELECT value FROM json_each(?)) OR substr(name, 1, length(?) + 1) = ? || '_') ORDER BY type, name`;
 
 export interface Transaction {
   readonly database: DatabaseSync;
@@ -28,6 +37,82 @@ export interface PendingMigration {
 export interface MigrationPlan {
   readonly fresh: boolean;
   readonly pending: readonly PendingMigration[];
+}
+
+type SchemaObject = readonly [
+  type: string,
+  name: string,
+  table: string,
+  sql: string | null,
+];
+
+function schemaObjects(
+  database: DatabaseSync,
+  sql: string,
+  ...values: string[]
+): SchemaObject[] {
+  return database
+    .prepare(sql)
+    .all(...values)
+    .map((row) => [
+      String(row.type),
+      String(row.name),
+      String(row.tbl_name),
+      row.sql === null ? null : String(row.sql),
+    ]);
+}
+
+function expectedSchema(
+  migrations: readonly Migration[],
+  count: number,
+): SchemaObject[] {
+  const database = new DatabaseSync(IN_MEMORY_DATABASE);
+  try {
+    for (const migration of migrations.slice(0, count)) migration(database);
+    return schemaObjects(database, EXPECTED_SCHEMA_SQL);
+  } finally {
+    database.close();
+  }
+}
+
+function liveSchema(
+  database: DatabaseSync,
+  service: string,
+  expected: readonly SchemaObject[],
+): SchemaObject[] {
+  return schemaObjects(
+    database,
+    LIVE_SCHEMA_SQL,
+    JSON.stringify(expected.map((object) => object[SCHEMA_OBJECT_NAME])),
+    JSON.stringify(
+      expected
+        .filter((object) => object[SCHEMA_OBJECT_TYPE] === SCHEMA_TABLE_TYPE)
+        .map((object) => object[SCHEMA_OBJECT_NAME]),
+    ),
+    service,
+    service,
+  );
+}
+
+function firstSchemaDifference(
+  expected: readonly SchemaObject[],
+  live: readonly SchemaObject[],
+): string | null {
+  const key = (object: SchemaObject) =>
+    [object[SCHEMA_OBJECT_TYPE], object[SCHEMA_OBJECT_NAME]].join(
+      SCHEMA_KEY_SEPARATOR,
+    );
+  const left = new Map(expected.map((object) => [key(object), object]));
+  const right = new Map(live.map((object) => [key(object), object]));
+  const differing = [...new Set([...left.keys(), ...right.keys()])]
+    .sort()
+    .find(
+      (name) =>
+        JSON.stringify(left.get(name)) !== JSON.stringify(right.get(name)),
+    );
+  return differing === undefined
+    ? null
+    : differing.split(SCHEMA_KEY_SEPARATOR)[SCHEMA_OBJECT_NAME]!;
 }
 
 class StatementCache extends DatabaseSync {
@@ -158,6 +243,7 @@ export class Store {
           )
           .all()
       : [];
+    this.assertSchema(known, records);
     const versions = new Map<string, number>();
     for (const record of records) {
       const name = String(record.service);
@@ -184,6 +270,38 @@ export class Store {
         }))
         .filter(({ from, to }) => from < to),
     };
+  }
+
+  private assertSchema(
+    known: ReadonlyMap<string, readonly Migration[]>,
+    records: readonly Record<string, unknown>[],
+  ): void {
+    const recorded = new Map<string, number>();
+    for (const record of records) {
+      const service = String(record.service);
+      const list = known.get(service);
+      if (list !== undefined)
+        recorded.set(service, Math.min(Number(record.version), list.length));
+    }
+    for (const [service, count] of recorded) {
+      const expected = expectedSchema(known.get(service)!, count);
+      const object = firstSchemaDifference(
+        expected,
+        liveSchema(this.database, service, expected),
+      );
+      if (object !== null)
+        throw new Diagnostic(
+          "system.database.migration.schema_mismatch",
+          SCHEMA_MISMATCH_MESSAGE,
+          {
+            fields: [
+              ["path", this.path],
+              ["service", service],
+              ["object", object],
+            ],
+          },
+        );
+    }
   }
 
   migrate(
