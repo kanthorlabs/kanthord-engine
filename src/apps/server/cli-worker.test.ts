@@ -456,12 +456,15 @@ test("worker register reports declared failures and indeterminate transport with
   const args = ["worker", "register", "--idempotency-key", key];
   const refused = await command([...args, "--endpoint", fixture.endpoint], env);
   assert.equal(refused.code, ExitCode.Failure);
-  assert.match(refused.stderr, /HTTP 401/);
-  assert.ok(refused.stderr.includes(key));
+  assert.match(refused.stderr, /^status: +401$/m);
+  assert.match(refused.stderr, new RegExp(`^idempotency_key: ${key}$`, "m"));
   const indeterminate = await command(args, env);
   assert.equal(indeterminate.code, ExitCode.Failure);
   assert.match(indeterminate.stderr, /^cli\.worker\.register\.indeterminate:/);
-  assert.ok(indeterminate.stderr.includes(`--idempotency-key ${key}`));
+  assert.match(
+    indeterminate.stderr,
+    new RegExp(`^idempotency_key: ${key}$`, "m"),
+  );
   assert.equal(refused.stdout + indeterminate.stdout, EMPTY_OUTPUT);
   assert.ok(!(refused.stderr + indeterminate.stderr).includes(token));
   assert.equal(machines.worker.registrations.size, NO_REGISTRATIONS);

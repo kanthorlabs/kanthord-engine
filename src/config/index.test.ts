@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { isDeepStrictEqual } from "node:util";
 import {
   chmodSync,
   mkdirSync,
@@ -12,7 +13,7 @@ import { join, resolve } from "node:path";
 import { randomBytes } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { temporary } from "../kernel/test-support.ts";
+import { diagnosticText, temporary } from "../kernel/test-support.ts";
 import {
   configuration,
   CONFIG_VERSION,
@@ -23,11 +24,14 @@ import {
   showConfig,
 } from "./index.ts";
 import { writePrivate } from "../kernel/files.ts";
+import { Diagnostic } from "../kernel/errors.ts";
 
 const FIRST_AUTH_VERSION = 1;
 const ExitCode = { Success: 0, Failure: 1 } as const;
 
 const EMPTY_OUTPUT = "";
+const ABSENT_CONFIGURATION = "configuration is absent";
+const INVALID_FIELDS = "invalid configuration fields";
 const CONFIGURED_PORT = 12345;
 const DEFAULT_BIND = "127.0.0.1";
 const DEFAULT_LOG_LEVEL = "info";
@@ -140,7 +144,7 @@ test("gateway base path defaults to the root and accepts only a prefix without a
         }),
       (error: Error & { code?: string }) => {
         assert.equal(error.code, INVALID_FIELD_CODE);
-        assert.match(error.message, /gateway\.base_path/);
+        assert.match(diagnosticText(error), /gateway\.base_path/);
         return true;
       },
     );
@@ -179,7 +183,7 @@ test("worker configuration defaults and strict validation", () => {
         }),
       (error: Error & { code?: string }) => {
         assert.equal(error.code, INVALID_FIELD_CODE);
-        assert.match(error.message, /worker/);
+        assert.match(diagnosticText(error), /worker/);
         return true;
       },
     );
@@ -291,7 +295,7 @@ test("Scheduler reserve accepts only a positive safe integer", () => {
         }),
       (error: Error & { code?: string }) => {
         assert.equal(error.code, INVALID_FIELD_CODE);
-        assert.match(error.message, /scheduler.release_reserve/);
+        assert.match(diagnosticText(error), /scheduler.release_reserve/);
         return true;
       },
     );
@@ -334,7 +338,7 @@ test("mission configuration defaults and strict validation", () => {
         }),
       (error: Error & { code?: string }) => {
         assert.equal(error.code, INVALID_FIELD_CODE);
-        assert.match(error.message, /mission/);
+        assert.match(diagnosticText(error), /mission/);
         return true;
       },
     );
@@ -369,9 +373,9 @@ test("configuration is strict, file-only, masks secrets, and reports every inval
         gateway: { bind: "localhost", port: -1 },
       }),
     (error: Error) => {
-      assert.match(error.message, /master_key/);
-      assert.match(error.message, /gateway.bind/);
-      assert.match(error.message, /gateway.port/);
+      assert.match(diagnosticText(error), /master_key/);
+      assert.match(diagnosticText(error), /gateway.bind/);
+      assert.match(diagnosticText(error), /gateway.port/);
       return true;
     },
   );
@@ -383,7 +387,7 @@ test("configuration is strict, file-only, masks secrets, and reports every inval
         unexpected: "secret-marker",
       }),
     (error: Error) => {
-      assert.doesNotMatch(error.message, /secret-marker/);
+      assert.doesNotMatch(diagnosticText(error), /secret-marker/);
       return true;
     },
   );
@@ -393,7 +397,7 @@ test("configuration rejects malformed secrets and accepts its initial document",
   assert.throws(
     () =>
       configuration({ version: CONFIG_VERSION, master_key: "secret-marker" }),
-    /master_key/,
+    (error) => /master_key/.test(diagnosticText(error)),
   );
   assert.doesNotThrow(() => configuration(parseMapping(initialConfig())));
 });
@@ -473,8 +477,8 @@ test("strict validation rejects dotted and prototype keys before Convict can dis
           ),
         ),
       (error: Error) => {
-        assert.match(error.message, /undeclared field/);
-        assert.doesNotMatch(error.message, /secret-marker/);
+        assert.match(diagnosticText(error), /undeclared field/);
+        assert.doesNotMatch(diagnosticText(error), /secret-marker/);
         return true;
       },
     );
@@ -497,8 +501,9 @@ test("diagnostics report explicit nulls rather than substituting defaults", () =
         },
       }),
     (error: Error) => {
-      assert.equal(
-        error.message,
+      assert.equal(error.message, INVALID_FIELDS);
+      assert.deepEqual(
+        (error as Diagnostic).details,
         [
           "master_key",
           "log.level",
@@ -508,11 +513,12 @@ test("diagnostics report explicit nulls rather than substituting defaults", () =
           "gateway.allowed_hosts",
           "gateway.allowed_origins",
           "gateway.auth.token_lifetime",
-        ]
-          .map((path) => `${path}: invalid or missing value.`)
-          .join("\n"),
+        ].map((path) => `${path}: invalid or missing value.`),
       );
-      assert.doesNotMatch(error.message, /configuration: invalid field/);
+      assert.doesNotMatch(
+        diagnosticText(error),
+        /configuration: invalid field/,
+      );
       return true;
     },
   );
@@ -531,7 +537,7 @@ test("diagnostics report explicit nulls rather than substituting defaults", () =
           master_key: randomBytes(32).toString("base64"),
           gateway: { idempotency_ttl: idempotencyTtl },
         }),
-      /gateway.idempotency_ttl/,
+      (error) => /gateway.idempotency_ttl/.test(diagnosticText(error)),
     );
 });
 
@@ -576,12 +582,18 @@ test("programmatic configuration cannot bypass cycle and structure checks", () =
         log: null,
         gateway: [],
       }),
-    {
-      message: "log: expected a mapping.\ngateway: expected a mapping.",
-    },
+    (error) =>
+      error instanceof Diagnostic &&
+      isDeepStrictEqual(error.details, [
+        "log: expected a mapping.",
+        "gateway: expected a mapping.",
+      ]),
   );
   assert.throws(() => configuration(new Map()), /plain mapping/);
-  assert.throws(() => configuration([]), /expected a mapping/);
+  assert.throws(
+    () => configuration([]),
+    (error) => /expected a mapping/.test(diagnosticText(error)),
+  );
 });
 
 test("config option/environment resolution", () => {
@@ -598,7 +610,16 @@ test("config option/environment resolution", () => {
 test("private configuration rejects modes, symlinks and wrong kinds, and creates nothing on validation", (t) => {
   const directory = temporary(t);
   const path = join(directory, "kanthord.yaml");
-  assert.throws(() => loadConfig(path), /kanthord config init/);
+  assert.throws(
+    () => loadConfig(path),
+    (error) =>
+      error instanceof Diagnostic &&
+      error.message === ABSENT_CONFIGURATION &&
+      isDeepStrictEqual(error.fields, [
+        ["config", path],
+        ["command", `kanthord config init --config ${JSON.stringify(path)}`],
+      ]),
+  );
   assert.deepEqual(readdirSync(directory), []);
   writePrivate(path, initialConfig());
   chmodSync(path, 0o644);

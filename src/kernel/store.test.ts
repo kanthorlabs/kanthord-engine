@@ -10,11 +10,11 @@ import {
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { temporary } from "./test-support.ts";
-import { Store } from "./store.ts";
+import { type PendingMigration, Store } from "./store.ts";
 const ExitCode = { Success: 0, Failure: 1 } as const;
 
 const WAL_JOURNAL_MODE = "wal";
-const LOCKED_REASON = "cannot initialize database: database is locked.";
+const LOCKED_REASON = "cannot initialize database: database is locked";
 const FULL_SYNCHRONOUS_MODE = 2;
 const PRESERVED_VALUE = "preserved";
 const COMMITTED_PREFIX_LENGTH = 1;
@@ -71,20 +71,25 @@ test("migrations rollback partial schemas, retain committed prefixes, and valida
       database.exec(
         "CREATE TABLE first (value TEXT); INSERT INTO first VALUES ('preserved')",
       );
+    const migrated: PendingMigration[] = [];
     assert.throws(() =>
-      store.migrate([
-        { service: "one", migrations: [first] },
-        {
-          service: "two",
-          migrations: [
-            (database) => {
-              database.exec("CREATE TABLE second(value TEXT)");
-              database.exec("INVALID SQL");
-            },
-          ],
-        },
-      ]),
+      store.migrate(
+        [
+          { service: "one", migrations: [first] },
+          {
+            service: "two",
+            migrations: [
+              (database) => {
+                database.exec("CREATE TABLE second(value TEXT)");
+                database.exec("INVALID SQL");
+              },
+            ],
+          },
+        ],
+        (step) => migrated.push(step),
+      ),
     );
+    assert.deepEqual(migrated, [{ service: "one", from: 0, to: 1 }]);
     assert.equal(
       store.database.prepare("SELECT value FROM first").get()?.value,
       PRESERVED_VALUE,

@@ -12,15 +12,12 @@ import assert from "node:assert/strict";
 import { Command, CommanderError } from "commander";
 import { dirname } from "node:path";
 import { writePrivate } from "../../kernel/files.ts";
-import {
-  Diagnostic,
-  diagnostic,
-  diagnosticDetails,
-} from "../../kernel/errors.ts";
+import { Diagnostic, diagnostic, diagnosticRows } from "../../kernel/errors.ts";
 import type { Server } from "../server/index.ts";
 import { gatewayOperations } from "../../gateway/contract.ts";
 import { httpClient } from "../../gateway/client.ts";
 import { packageVersion } from "../../kernel/version.ts";
+import { formatRows } from "../../kernel/rows.ts";
 import { OperationResultType } from "../../kernel/operation.ts";
 import { resolveClient } from "../../gateway/client.ts";
 import { addWorkerCommand } from "./worker.ts";
@@ -74,7 +71,7 @@ export async function initConfig(
   const { initialConfig } = await import("../../config/index.ts");
   const content = initialConfig(allowedHosts.map(allowedHost), bind, basePath);
   writePrivate(path, content);
-  process.stdout.write(`Created ${path}\n`);
+  process.stdout.write(formatRows([["created", path]]));
 }
 
 function addConfigCommand(program: Command): void {
@@ -122,7 +119,7 @@ function addConfigCommand(program: Command): void {
       async (path: string) => {
         const { loadConfig } = await import("../../config/index.ts");
         loadConfig(path);
-        process.stdout.write(`Valid configuration: ${path}\n`);
+        process.stdout.write(formatRows([["valid", path]]));
       },
     ],
     [
@@ -151,9 +148,7 @@ function addUpgradeCommand(program: Command): void {
   configHelp(command);
   command.action(async () => {
     const { upgrade } = await import("./upgrade.ts");
-    await upgrade(effectivePath(command), (line) =>
-      process.stdout.write(`${line}\n`),
-    );
+    await upgrade(effectivePath(command), (text) => process.stdout.write(text));
   });
 }
 
@@ -285,13 +280,16 @@ function addGatewayCommand(program: Command): void {
       if (result.type === OperationResultType.Indeterminate)
         throw new Diagnostic(
           "cli.gateway.verify.indeterminate",
-          "gateway verify: result is indeterminate; the server could not be verified.",
+          "gateway verify: the result is unknown; retry the command",
         );
       if (result.type === OperationResultType.Failure)
         throw new Diagnostic(
           result.error.error.code,
-          `gateway verify: request failed (HTTP ${result.status}).`,
-          { details: result.error.error.details },
+          "gateway verify: request failed",
+          {
+            fields: [["status", result.status]],
+            details: result.error.error.details,
+          },
         );
       process.stdout.write(`${JSON.stringify(result.data)}\n`);
     });
@@ -305,7 +303,7 @@ async function writePackageOpenAPI(): Promise<void> {
   const { openapiPath, writeOpenAPI } = await import("../../gateway/local.ts");
   const path = openapiPath();
   writeOpenAPI(apiOperations, dirname(path));
-  process.stdout.write(`${path}\n`);
+  process.stdout.write(formatRows([["openapi", path]]));
 }
 
 export async function runCLI(
@@ -318,9 +316,7 @@ export async function runCLI(
     return ExitCode.Success;
   } catch (error) {
     if (error instanceof CommanderError) return error.exitCode;
-    process.stderr.write(`${diagnostic(error)}\n`);
-    const details = diagnosticDetails(error);
-    if (details !== null) process.stderr.write(`${details}\n`);
+    process.stderr.write(`${diagnostic(error)}\n${diagnosticRows(error)}`);
     return ExitCode.Failure;
   }
 }

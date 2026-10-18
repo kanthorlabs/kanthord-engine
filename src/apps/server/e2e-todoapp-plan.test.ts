@@ -37,9 +37,7 @@ import {
 const FAILURE = 1;
 const NO_OUTPUT = "";
 const UTF8 = "utf8";
-const DETAILS_PREFIX = "details: ";
-const DETAILS_LINE = 1;
-const REFUSAL_LINE_COUNT = 2;
+const DETAILS_ROW = /^details: +(\S.*)$/;
 const MASK = "e2e-todoapp-mask";
 const REASON = "plan";
 const REPOSITORY_BINDING = "todoapp-repo";
@@ -167,10 +165,9 @@ function claimsOf(details: unknown): string[] {
 }
 
 function refusalDetails(stderr: string): unknown {
-  const lines = stderr.trimEnd().split("\n");
-  assert.equal(lines.length, REFUSAL_LINE_COUNT, stderr);
-  assert.ok(lines[DETAILS_LINE]!.startsWith(DETAILS_PREFIX), stderr);
-  return JSON.parse(lines[DETAILS_LINE]!.slice(DETAILS_PREFIX.length));
+  const details = DETAILS_ROW.exec(stderr.trimEnd().split("\n").at(-1)!);
+  assert.ok(details, stderr);
+  return JSON.parse(details[1]!);
 }
 
 function bindingNames(names: string[]): string {

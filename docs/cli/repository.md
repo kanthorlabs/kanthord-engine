@@ -125,7 +125,7 @@ Custody validates the local schema and makes no remote call. HTTP
 `200` returns the credential answer with revision 1. The name is the natural key of
 creation. A taken name answers `409 credential.name.conflict`, with the identity
 of its newest revision in `error.details`, including a retry after restart. The CLI prints
-the code, the HTTP status and the `details` line with that identity. It never prints the submitted secret.
+the code, the `status` row and the `details` row with that identity. It never prints the submitted secret.
 
 ## `list`
 

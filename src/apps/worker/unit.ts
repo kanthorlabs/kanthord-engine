@@ -112,7 +112,13 @@ export class WorkerUnit {
       if (version !== local)
         throw new Diagnostic(
           "worker.version.mismatch",
-          `worker: package version ${local} differs from server version ${version}.`,
+          "worker: the package version differs from the server version.",
+          {
+            fields: [
+              ["version", local],
+              ["server_version", version],
+            ],
+          },
         );
       this.workspaces = WorkspaceRoot.open(directories(this.options.env).state);
       throwIfCancelled(this.shutdown);

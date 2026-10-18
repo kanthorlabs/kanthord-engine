@@ -120,18 +120,18 @@ redirected stdout, and does not require a terminal.
 Failure exits `1`, produces no success JSON, and prints a diagnostic on stderr:
 
 - A well-formed API failure uses its error code with
-  `gateway verify: request failed (HTTP <status>).` The API envelope is
+  `gateway verify: request failed`, then the row `status: <status>`. The API envelope is
   `{"error":{"code":"...","message":"...","details":null},"request_id":"request_<ulid>"}`;
   `details` is null or structured JSON. When `details` is not null, the CLI
-  writes a second stderr line `details: <compact JSON of details>`. The CLI does
+  writes the row `details: <compact JSON of details>`. The CLI does
   not print the envelope or the request ID.
 - A `200` answer that fails the response schema is the failure
   `gateway.client.answer_invalid` with
-  `gateway verify: request failed (HTTP 200).` Stderr also holds the `details:`
-  line with the failed schema paths as a list of `{ path, code }`.
+  `gateway verify: request failed` and the row `status: 200`. Stderr also holds the `details`
+  row with the failed schema paths as a list of `{ path, code }`.
 - A transport failure, redirect refusal, deadline or invalid JSON produces
   `cli.gateway.verify.indeterminate` with
-  `gateway verify: result is indeterminate; the server could not be verified.`
+  `gateway verify: the result is unknown; retry the command`.
 - Invalid local configuration and endpoint values fail before the request
   with their local diagnostic. Diagnostics do not echo the token.
 
@@ -218,8 +218,8 @@ There is no interactive confirmation or runtime asset download.
 
 ### Result
 
-After all generation and cleanup succeeds, stdout contains the absolute path
-to `static/openapi.yaml` followed by a newline, and the command exits `0`.
+After all generation and cleanup succeeds, stdout is exactly
+`openapi: <absolute path of static/openapi.yaml>\n`, and the command exits `0`.
 It does not print the YAML or one line per file. Redirection is allowed. A
 failure exits `1` without the success path; unclassified generator/filesystem
 errors currently become `system.operation.unknown: Operation failed.`

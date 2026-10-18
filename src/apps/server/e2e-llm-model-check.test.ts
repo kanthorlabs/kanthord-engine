@@ -23,7 +23,8 @@ const MODEL = "scripted-model";
 const FIRST_CALL = 0;
 const TWO_CALLS = 2;
 const NO_CALLS = 0;
-const SINGLE_LINE = /^[^\n]*\n$/;
+const READ_REFUSAL =
+  /^[^\n]*: request failed\nstatus: +\d{3}\n(details: +[^\n]*\n)?$/;
 
 const okScript = (): FauxResponseStep[] => [
   fauxAssistantMessage([fauxToolCall("check_tool", {})], {
@@ -120,7 +121,7 @@ test("the CLI model check refuses an unknown credential", async (t) => {
   );
   assert.equal(result.code, ExitCode.Failure);
   assert.ok(result.stderr.startsWith("llm.model.credential_not_found:"));
-  assert.match(result.stderr, SINGLE_LINE);
+  assert.match(result.stderr, READ_REFUSAL);
 });
 
 test("the HTTP model check validates its body and answers under human access only", async (t) => {

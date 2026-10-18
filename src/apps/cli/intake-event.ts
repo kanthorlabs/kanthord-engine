@@ -38,7 +38,7 @@ function requireIdentity(value: string, leaf: string): void {
   if (!identitySchema(INBOUND_EVENT_ID_PREFIX).safeParse(value).success)
     throw new Diagnostic(
       code(leaf, "invalid_inbound_event_id"),
-      "Expected a canonical inbound_event identity.",
+      "invalid inbound event ID",
     );
 }
 
@@ -88,7 +88,7 @@ async function get(eventId: string, command: Command): Promise<void> {
   if (!identitySchema(INBOUND_EVENT_ID_PREFIX).safeParse(eventId).success)
     throw new Diagnostic(
       code(GET, "invalid_inbound_event_id"),
-      "Expected a canonical inbound_event identity.",
+      "invalid inbound event ID",
     );
   const { endpoint, token } = resolveClient(command.optsWithGlobals());
   requireToken(token, code(GET, "token_required"));

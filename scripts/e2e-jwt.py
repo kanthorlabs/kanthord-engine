@@ -151,7 +151,7 @@ class Run:
         os.close(slave)
         try:
             machine = "--binding" in args
-            pattern = rb"^token: " + TOKEN + rb"client_secret: ([^\r\n]+)\r?\n" if machine else rb"^" + TOKEN
+            pattern = rb"^token: +" + TOKEN + rb"client_secret: ([^\r\n]+)\r?\n" if machine else rb"^token: " + TOKEN
             values = terminal_read(master, child, pattern)
             self.secrets.extend(values)
             token = values[0]
@@ -275,7 +275,7 @@ class Run:
             status, body = self.request("/api/auth/verify", token)
             require(status == 401 and json.loads(body)["error"]["code"] == "gateway.authentication.unauthorized", "Invalid token API verification was not rejected")
             cli = self.verify(token)
-            require(cli.returncode == 1 and not cli.stdout and "HTTP 401" in cli.stderr and cli.stderr.startswith("gateway.authentication.unauthorized:"), "Invalid token CLI verification was not rejected")
+            require(cli.returncode == 1 and not cli.stdout and re.search(r"^status: +401$", cli.stderr, re.M) and cli.stderr.startswith("gateway.authentication.unauthorized:"), "Invalid token CLI verification was not rejected")
             require(not any(value in cli.stderr for value in self.secrets), "CLI diagnostic disclosed a credential")
             rejected.append({"case": name, "status": status, "exitCode": cli.returncode, "code": "gateway.authentication.unauthorized"})
         self.step("invalid-verification", {"cases": rejected})

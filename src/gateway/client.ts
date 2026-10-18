@@ -65,7 +65,10 @@ export function resolveClient(
     if (!result.success)
       throw new Diagnostic(
         "cli.config.invalid",
-        `${path}: invalid client configuration.`,
+        "invalid client configuration",
+        {
+          fields: [["path", path]],
+        },
       );
     stored = result.data;
   }

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { z } from "zod";
 import { identitySchema } from "./identity.ts";
+import { formatRows, presentRows, type Row } from "./rows.ts";
 
 const EMPTY_MESSAGE_LENGTH = 0;
 
@@ -31,15 +32,18 @@ export class CodedError extends Error {
 export type ErrorDetails = z.infer<typeof errorDetailsSchema>;
 
 export interface DiagnosticOptions extends ErrorOptions {
+  fields?: readonly Row[];
   details?: ErrorDetails | null;
 }
 
 /** Only explicitly safe diagnostics may cross the process boundary. */
 export class Diagnostic extends CodedError {
+  readonly fields: readonly Row[];
   readonly details: ErrorDetails | null;
 
   constructor(code: string, message: string, options?: DiagnosticOptions) {
     super(code, message, options);
+    this.fields = options?.fields ?? [];
     this.details = options?.details ?? null;
   }
 }
@@ -58,10 +62,23 @@ export function diagnostic(error: unknown): string {
     : "system.operation.unknown: Operation failed.";
 }
 
-export function diagnosticDetails(error: unknown): string | null {
-  return error instanceof Diagnostic && error.details !== null
-    ? `details: ${JSON.stringify(error.details)}`
-    : null;
+export function diagnosticFields(
+  error: unknown,
+): Record<string, string> | undefined {
+  const fields = error instanceof Diagnostic ? presentRows(error.fields) : [];
+  return fields.length ? Object.fromEntries(fields) : undefined;
+}
+
+export function diagnosticRows(error: unknown): string {
+  return error instanceof Diagnostic
+    ? formatRows([
+        ...error.fields,
+        [
+          "details",
+          error.details === null ? null : JSON.stringify(error.details),
+        ],
+      ])
+    : "";
 }
 
 export const errorDetailsSchema = z.json();

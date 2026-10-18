@@ -7,7 +7,11 @@ import {
   type Context,
   DeadlineExceeded,
 } from "../kernel/context.ts";
-import { diagnostic, OperationError } from "../kernel/errors.ts";
+import {
+  diagnostic,
+  diagnosticFields,
+  OperationError,
+} from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import { canonicalJSON } from "../kernel/json.ts";
 import type { CallerContext } from "../kernel/operation.ts";
@@ -357,6 +361,10 @@ async function readBackOnce<TBody>(
           race.kind === RaceKind.Rejected
             ? diagnostic(race.error)
             : race.reason.message,
+        fields:
+          race.kind === RaceKind.Rejected
+            ? diagnosticFields(race.error)
+            : undefined,
       },
       "intake: the read-back of an outbound request did not answer.",
     );

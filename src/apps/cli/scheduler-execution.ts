@@ -149,7 +149,12 @@ async function release(executionId: string, command: Command): Promise<void> {
   if (result.type === OperationResultType.Indeterminate)
     throw new Diagnostic(
       RELEASE_INDETERMINATE,
-      `read the execution with kanthord scheduler execution get ${executionId} before any retry`,
+      "the result is unknown; read the execution before any retry",
+      {
+        fields: [
+          ["command", `kanthord scheduler execution get ${executionId}`],
+        ],
+      },
     );
   process.stdout.write(
     `${JSON.stringify({ ...handleMutationResult(result, RELEASE_INDETERMINATE, key), idempotency_key: key })}\n`,

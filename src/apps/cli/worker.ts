@@ -56,13 +56,20 @@ async function register(command: Command): Promise<void> {
   if (result.type === OperationResultType.Indeterminate)
     throw new Diagnostic(
       "cli.worker.register.indeterminate",
-      `worker register: result is indeterminate; retry with --idempotency-key ${key}.`,
+      "worker register: the result is unknown; retry with the same idempotency key",
+      { fields: [["idempotency_key", key]] },
     );
   if (result.type === OperationResultType.Failure)
     throw new Diagnostic(
       result.error.error.code,
-      `worker register: request failed (HTTP ${result.status}); idempotency key ${key}.`,
-      { details: result.error.error.details },
+      "worker register: request failed",
+      {
+        fields: [
+          ["status", result.status],
+          ["idempotency_key", key],
+        ],
+        details: result.error.error.details,
+      },
     );
   process.stdout.write(
     `${JSON.stringify({ ...result.data, idempotency_key: key })}\n`,
@@ -75,7 +82,7 @@ async function handover(executionId: string, command: Command): Promise<void> {
   if (!identitySchema("execution").safeParse(executionId).success)
     throw new Diagnostic(
       "cli.worker.handover.invalid_execution_id",
-      "Expected a canonical execution identity.",
+      "invalid execution ID",
     );
   const options = command.optsWithGlobals();
   const { endpoint, token } = resolveClient(options);
@@ -88,13 +95,19 @@ async function handover(executionId: string, command: Command): Promise<void> {
   if (result.type === OperationResultType.Indeterminate)
     throw new Diagnostic(
       "cli.worker.handover.indeterminate",
-      "worker handover: result is indeterminate; retry with a new --idempotency-key.",
+      "worker handover: the result is unknown; retry with a new idempotency key",
     );
   if (result.type === OperationResultType.Failure)
     throw new Diagnostic(
       result.error.error.code,
-      `worker handover: request failed (HTTP ${result.status}); idempotency key ${key}.`,
-      { details: result.error.error.details },
+      "worker handover: request failed",
+      {
+        fields: [
+          ["status", result.status],
+          ["idempotency_key", key],
+        ],
+        details: result.error.error.details,
+      },
     );
   process.stdout.write(
     `${JSON.stringify({ received: true, idempotency_key: key })}\n`,
@@ -158,7 +171,7 @@ async function deregister(
   if (!identitySchema("worker_instance").safeParse(runtimeIdentity).success)
     throw new Diagnostic(
       "cli.worker.instance.deregister.invalid_runtime_identity",
-      "Expected a canonical worker_instance identity.",
+      "invalid worker instance ID",
     );
   const options = command.optsWithGlobals();
   const { endpoint, token } = resolveClient(options);
@@ -202,7 +215,7 @@ async function resume(
   if (!identitySchema("worker_instance").safeParse(runtimeIdentity).success)
     throw new Diagnostic(
       "cli.worker.instance.resume.invalid_runtime_identity",
-      "Expected a canonical worker_instance identity.",
+      "invalid worker instance ID",
     );
   const options = command.optsWithGlobals();
   const { endpoint, token } = resolveClient(options);
@@ -233,7 +246,7 @@ function instanceListQuery(options: Record<string, string | undefined>) {
   )
     throw new Diagnostic(
       "cli.worker.instance.list.invalid_project_id",
-      "Expected a canonical project identity.",
+      "invalid project ID",
     );
   if (
     options.binding !== undefined &&
@@ -241,7 +254,7 @@ function instanceListQuery(options: Record<string, string | undefined>) {
   )
     throw new Diagnostic(
       "cli.worker.instance.list.invalid_binding_name",
-      "Expected a worker binding name.",
+      "invalid worker binding name",
     );
   if (options.binding !== undefined && options.project === undefined)
     throw new Diagnostic(
@@ -292,7 +305,7 @@ async function instanceGet(
   if (!identitySchema("worker_instance").safeParse(runtimeIdentity).success)
     throw new Diagnostic(
       "cli.worker.instance.get.invalid_runtime_identity",
-      "Expected a canonical worker_instance identity.",
+      "invalid worker instance ID",
     );
   const { endpoint, token } = resolveClient(command.optsWithGlobals());
   requireToken(token, "cli.worker.instance.get.token_required");

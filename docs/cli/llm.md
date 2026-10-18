@@ -41,7 +41,7 @@ non-symlink file at mode `0600`, checked before reading, without permission
 repair. The contents go to custody and are never echoed. Metadata update uses
 the ordinary JSON-file rules and accepts no secret.
 
-Success exits `0`. Except for the login line output specified below, it prints
+Success exits `0`. Except for the login row output specified below, it prints
 one JSON value. Lists return one page `{ items, next_cursor }`, with a string
 cursor or `null` on the last page. No answer holds a secret, token, ciphertext,
 authentication header or reusable grant. Failures exit nonzero and print a
@@ -63,21 +63,21 @@ Each synopsis follows `kanthord llm credential`. All thirteen commands have `[R]
 `human` access; seven mutations have `[M]`, and one list has `[L]`.
 All paths below are implemented routes under the ruled `/api/llm/credential` prefix.
 
-| #   | Synopsis after `kanthord llm credential`                          | HTTP route                                                            | Operation ID                     | Access/status        |
-| --- | ----------------------------------------------------------------- | --------------------------------------------------------------------- | -------------------------------- | -------------------- |
-| 1   | `create --file <path> [M] [R]`                                    | `POST /api/llm/credential`                                            | `llm.credential.create`          | `human`; implemented |
-| 2   | `list [--platform <platform>] [L] [R]`                            | `GET /api/llm/credential`                                             | `llm.credential.list`            | `human`; implemented |
-| 3   | `get <credential-name> [R]`                                       | `GET /api/llm/credential/:credential_name`                            | `llm.credential.get`             | `human`; implemented |
-| 4   | `rotate <credential-name> --file <path> [M] [R]`                  | `POST /api/llm/credential/:credential_name/revision`                  | `llm.credential.rotate`          | `human`; implemented |
-| 5   | `update-metadata <credential-name> --file <path> [M] [R]`         | `PUT /api/llm/credential/:credential_name/metadata`                   | `llm.credential.update_metadata` | `human`; implemented |
-| 6   | `login <platform> [--mode browser\|device] --name <name> [M] [R]` | `POST /api/llm/credential/login`                                      | `llm.credential.login`           | `human`; implemented |
-| 7   | `login-code <session> <value> [M] [R]`                            | `POST /api/llm/credential/login/:session_id/code`                     | `llm.credential.login_code`      | `human`; implemented |
-| 8   | `login-status <session> [R]`                                      | `GET /api/llm/credential/login/:session_id`                           | `llm.credential.login_status`    | `human`; implemented |
-| 9   | `revoke <credential-name> <revision> [M] [R]`                     | `POST /api/llm/credential/:credential_name/revision/:revision/revoke` | `llm.credential.revoke`          | `human`; implemented |
-| 10  | `archive <credential-name> [M] [R]`                               | `POST /api/llm/credential/:credential_name/archive`                   | `llm.credential.archive`         | `human`; implemented |
-| 11  | `platforms [R]`                                                   | `GET /api/llm/credential/platform`                                    | `llm.credential.platform_list`   | `human`; implemented |
-| 12  | `check --file <path> [R]`                                         | `POST /api/llm/credential/check`                                      | `llm.credential.check`           | `human`; implemented |
-| 13  | `verify <credential-name> [R]`                                    | `POST /api/llm/credential/:credential_name/verify`                    | `llm.credential.verify`          | `human`; implemented |
+| #   | Synopsis after `kanthord llm credential`                                     | HTTP route                                                            | Operation ID                     | Access/status        |
+| --- | ---------------------------------------------------------------------------- | --------------------------------------------------------------------- | -------------------------------- | -------------------- |
+| 1   | `create --file <path> [M] [R]`                                               | `POST /api/llm/credential`                                            | `llm.credential.create`          | `human`; implemented |
+| 2   | `list [--platform <platform>] [L] [R]`                                       | `GET /api/llm/credential`                                             | `llm.credential.list`            | `human`; implemented |
+| 3   | `get <credential-name> [R]`                                                  | `GET /api/llm/credential/:credential_name`                            | `llm.credential.get`             | `human`; implemented |
+| 4   | `rotate <credential-name> --file <path> [M] [R]`                             | `POST /api/llm/credential/:credential_name/revision`                  | `llm.credential.rotate`          | `human`; implemented |
+| 5   | `update-metadata <credential-name> --file <path> [M] [R]`                    | `PUT /api/llm/credential/:credential_name/metadata`                   | `llm.credential.update_metadata` | `human`; implemented |
+| 6   | `login <platform> [--mode browser\|device\|copy_code] --name <name> [M] [R]` | `POST /api/llm/credential/login`                                      | `llm.credential.login`           | `human`; implemented |
+| 7   | `login-code <session> <value> [M] [R]`                                       | `POST /api/llm/credential/login/:session_id/code`                     | `llm.credential.login_code`      | `human`; implemented |
+| 8   | `login-status <session> [R]`                                                 | `GET /api/llm/credential/login/:session_id`                           | `llm.credential.login_status`    | `human`; implemented |
+| 9   | `revoke <credential-name> <revision> [M] [R]`                                | `POST /api/llm/credential/:credential_name/revision/:revision/revoke` | `llm.credential.revoke`          | `human`; implemented |
+| 10  | `archive <credential-name> [M] [R]`                                          | `POST /api/llm/credential/:credential_name/archive`                   | `llm.credential.archive`         | `human`; implemented |
+| 11  | `platforms [R]`                                                              | `GET /api/llm/credential/platform`                                    | `llm.credential.platform_list`   | `human`; implemented |
+| 12  | `check --file <path> [R]`                                                    | `POST /api/llm/credential/check`                                      | `llm.credential.check`           | `human`; implemented |
+| 13  | `verify <credential-name> [R]`                                               | `POST /api/llm/credential/:credential_name/verify`                    | `llm.credential.verify`          | `human`; implemented |
 
 The static `/api/llm/credential/login`, `/api/llm/credential/platform` and `/api/llm/credential/check` paths take precedence over `/:credential_name`, so custody refuses the names `login`, `platform` and `check`. Custody also reserves `ssh`.
 These routes have no project identity.
@@ -307,8 +307,21 @@ of the request. A host that is not `localhost`, `127.*` or `[::1]` refuses
 `--mode`, that host selects `device`.
 
 The unary mutation starts a session and answers its identity, address, code
-and expiry. The command prints those values, one per line, plus the mutation
-key, and exits `0`. This line output is an exception to ordinary JSON output.
+and expiry. The command prints aligned `name: value` rows and exits `0`.
+This row output is an exception to ordinary JSON output:
+
+```text
+session_id:      <session id>
+code:            <code>
+expires_at:      <ISO 8601 UTC time>
+idempotency_key: <key>
+
+address:
+<address>
+```
+
+The `code` row is absent when the code is `null`. The address URL stands alone
+on the last line, at column 0, with no quotes or punctuation.
 Expiry falls 15 minutes after start. At most one pending session exists per
 platform and human; another start answers 409. A name conflict at start or
 commit answers `409 credential.name.conflict` and the holder identity.

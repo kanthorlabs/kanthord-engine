@@ -7,6 +7,7 @@ import { pathToFileURL } from "node:url";
 import pino, { type Logger } from "pino";
 import { IdentityKind, type ServiceIdentity } from "../kernel/caller.ts";
 import { background } from "../kernel/context.ts";
+import { Diagnostic } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import { canonicalJSON } from "../kernel/json.ts";
 import {
@@ -63,6 +64,10 @@ const ERROR_ITEMS_PER_FAILURE = 1;
 const HANDOFFS_AFTER_RETRY = 2;
 const PENDING_EVENTS_AT_START = 3;
 const FILL_MESSAGE_LENGTH = 100;
+const READ_FAILED = "system.file.read_failed";
+const READ_FAILED_MESSAGE = "cannot read";
+const CONSUMER_CALL_FAILED =
+  "intake: the consumer call of an inbound event failed.";
 const WAKE_OFFSETS = 12;
 const EVENT_ENCODING = "base64";
 
@@ -450,6 +455,24 @@ test("A thrown consumer call writes failed with system.operation.unknown and no 
   assert.ok(!h.lines.join("").includes(SECRET));
   await handOver(h);
   assert.equal(h.calls.length, HANDOFFS_PER_EVENT);
+});
+
+test("A thrown consumer diagnostic writes its rows as fields in the log record", async (t) => {
+  const h = harness(t);
+  addEvent(h.store, h.inboundId, "d-1");
+  h.answers.push(() =>
+    Promise.reject(
+      new Diagnostic(READ_FAILED, READ_FAILED_MESSAGE, {
+        fields: [["path", "/x"]],
+      }),
+    ),
+  );
+  await handOver(h);
+  const record = h.lines
+    .map((line) => JSON.parse(line) as Record<string, unknown>)
+    .find((line) => line.msg === CONSUMER_CALL_FAILED);
+  assert.equal(record?.reason, `${READ_FAILED}: ${READ_FAILED_MESSAGE}`);
+  assert.deepEqual(record?.fields, { path: "/x" });
 });
 
 test("A configuration that fails to parse sets failed, and a later event is handed over", async (t) => {

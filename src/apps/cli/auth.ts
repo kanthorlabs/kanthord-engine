@@ -4,6 +4,7 @@ import { Command } from "commander";
 import type { ServerConfig } from "../../config/index.ts";
 import { Diagnostic } from "../../kernel/errors.ts";
 import { writePrivate } from "../../kernel/files.ts";
+import { formatRows } from "../../kernel/rows.ts";
 import { isNumber, isObject, isString } from "../../kernel/values.ts";
 import {
   deriveClientSecret,
@@ -213,12 +214,13 @@ export function addAuthCommand(program: Command): void {
           });
           const { stringify } = await import("yaml");
           writePrivate(path, stringify(document));
-          process.stdout.write(`Created ${path}\n`);
-        } else if (clientSecret === undefined)
-          process.stdout.write(`${token}\n`);
-        else
+          process.stdout.write(formatRows([["created", path]]));
+        } else
           process.stdout.write(
-            `token: ${token}\nclient_secret: ${clientSecret}\n`,
+            formatRows([
+              ["token", token],
+              ["client_secret", clientSecret],
+            ]),
           );
         if (command.optsWithGlobals().verbose)
           process.stdout.write(await renderClaims(token));

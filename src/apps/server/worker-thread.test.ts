@@ -148,7 +148,7 @@ test("a worker thread refuses to start without an absolute directory variable", 
       else env[name] = value;
       const thread = startThread(threadData(port2), env);
       const [error] = await once(thread, "error");
-      assert.match(String(error.message), new RegExp(name), name);
+      assert.deepEqual(error.fields, [["variables", name]], name);
       port1.close();
     }
 });

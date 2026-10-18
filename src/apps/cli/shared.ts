@@ -3,8 +3,9 @@ import { ulid } from "ulid";
 import { z } from "zod";
 import { Diagnostic } from "../../kernel/errors.ts";
 import { readPrivate } from "../../kernel/files.ts";
+import type { Row } from "../../kernel/rows.ts";
 import { ulidSchema } from "../../kernel/identity.ts";
-import { ValueType } from "../../kernel/values.ts";
+import { isNumber, ValueType } from "../../kernel/values.ts";
 import {
   OperationResultType,
   type OperationResult,
@@ -71,7 +72,10 @@ export function detectDuplicateKeys(text: string): void {
       const frame = stack.at(-SCAN_STEP);
       if (frame?.expectKey) {
         const key: string = JSON.parse(text.slice(index, end));
-        if (frame.keys.has(key)) throw new Diagnostic(DUPLICATE_KEY, key);
+        if (frame.keys.has(key))
+          throw new Diagnostic(DUPLICATE_KEY, "duplicate JSON key", {
+            fields: [["key", key]],
+          });
         frame.keys.add(key);
         frame.expectKey = false;
       }
@@ -84,16 +88,17 @@ export function readTextFile(path: string, requirePrivate = false): string {
   if (path === STDIN)
     throw new Diagnostic(INVALID_PATH, "stdin is not accepted");
   const stat = statSync(path, { throwIfNoEntry: false });
-  if (!stat) throw new Diagnostic(NOT_FOUND, `${path}: file not found`);
+  const fields: Row[] = [["path", path]];
+  if (!stat) throw new Diagnostic(NOT_FOUND, "file not found", { fields });
   if (!stat.isFile())
-    throw new Diagnostic(NOT_REGULAR, `${path}: not a regular file`);
+    throw new Diagnostic(NOT_REGULAR, "not a regular file", { fields });
   if (requirePrivate) return readPrivate(path);
   const buffer = readFileSync(path);
   try {
     return new TextDecoder("utf-8", { fatal: true }).decode(buffer);
   } catch (error) {
     if (error instanceof TypeError)
-      throw new Diagnostic(INVALID_ENCODING, `${path}: invalid UTF-8`);
+      throw new Diagnostic(INVALID_ENCODING, "invalid UTF-8", { fields });
     throw error;
   }
 }
@@ -110,7 +115,9 @@ export function readJsonFile(path: string, requirePrivate = false): unknown {
     throw error;
   }
   if (raw === null || typeof raw !== ValueType.Object || Array.isArray(raw))
-    throw new Diagnostic(NOT_OBJECT, `${path}: expected a JSON object`);
+    throw new Diagnostic(NOT_OBJECT, "expected a JSON object", {
+      fields: [["path", path]],
+    });
   return raw;
 }
 
@@ -122,12 +129,14 @@ export function readJsonFileAs<S extends z.ZodTypeAny>(
   const raw = readJsonFile(path, requirePrivate);
   const result = schema.safeParse(raw);
   if (!result.success)
-    throw new Diagnostic(
-      INVALID_SCHEMA,
-      JSON.stringify(
-        result.error.issues.map(({ path, code }) => ({ path, code })),
-      ),
-    );
+    throw new Diagnostic(INVALID_SCHEMA, "the file does not match the schema", {
+      details: result.error.issues.map(({ path, code }) => ({
+        path: path.map((segment) =>
+          isNumber(segment) ? segment : String(segment),
+        ),
+        code,
+      })),
+    });
   return result.data;
 }
 
@@ -145,14 +154,17 @@ export function handleMutationResult<T>(
 ): T {
   if (result.type === OperationResultType.Completed) return result.data;
   if (result.type === OperationResultType.Failure)
-    throw new Diagnostic(
-      result.error.error.code,
-      `request failed (HTTP ${result.status}); idempotency key ${key}.`,
-      { details: result.error.error.details },
-    );
+    throw new Diagnostic(result.error.error.code, "request failed", {
+      fields: [
+        ["status", result.status],
+        ["idempotency_key", key],
+      ],
+      details: result.error.error.details,
+    });
   throw new Diagnostic(
     indeterminateCode,
-    "retry with --idempotency-key " + key,
+    "the result is unknown; retry with the same idempotency key",
+    { fields: [["idempotency_key", key]] },
   );
 }
 
@@ -162,12 +174,14 @@ export function handleReadResult<T>(
 ): T {
   if (result.type === OperationResultType.Completed) return result.data;
   if (result.type === OperationResultType.Failure)
-    throw new Diagnostic(
-      result.error.error.code,
-      `request failed (HTTP ${result.status}).`,
-      { details: result.error.error.details },
-    );
-  throw new Diagnostic(indeterminateCode, "retry the command");
+    throw new Diagnostic(result.error.error.code, "request failed", {
+      fields: [["status", result.status]],
+      details: result.error.error.details,
+    });
+  throw new Diagnostic(
+    indeterminateCode,
+    "the result is unknown; retry the command",
+  );
 }
 
 export function requireToken(
@@ -193,7 +207,9 @@ export function singleUse(
 ): (value: string, previous: string | undefined) => string {
   return (value, previous) => {
     if (previous !== undefined)
-      throw new Diagnostic(DUPLICATE_OPTION, name + " may not be repeated");
+      throw new Diagnostic(DUPLICATE_OPTION, "option may not be repeated", {
+        fields: [["option", name]],
+      });
     return value;
   };
 }

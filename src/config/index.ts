@@ -156,12 +156,19 @@ export function configVersion(value: unknown): number {
   if (!isConfigVersion(version))
     throw new Diagnostic(
       "system.config.invalid_field",
-      `${CONFIG_VERSION_FIELD}: invalid or missing value.`,
+      "invalid or missing value",
+      { fields: [["field", CONFIG_VERSION_FIELD]] },
     );
   if (version > CONFIG_VERSION)
     throw new Diagnostic(
       "system.config.version_ahead",
-      `configuration version ${version} is newer than configuration version ${CONFIG_VERSION} of this binary. Install a newer kanthord or restore the configuration backup.`,
+      "the configuration version is newer than this binary; install a newer kanthord or restore the configuration backup",
+      {
+        fields: [
+          ["config_version", version],
+          ["supported_version", CONFIG_VERSION],
+        ],
+      },
     );
   return version;
 }
@@ -175,13 +182,24 @@ export function configuration(value: unknown) {
   if (version < CONFIG_VERSION)
     throw new Diagnostic(
       "system.config.version_behind",
-      `configuration version ${version} is older than configuration version ${CONFIG_VERSION} of this binary. Run kanthord upgrade.`,
+      "the configuration version is older than this binary; run the command",
+      {
+        fields: [
+          ["config_version", version],
+          ["supported_version", CONFIG_VERSION],
+          ["command", "kanthord upgrade"],
+        ],
+      },
     );
   const issues: string[] = [];
   // Inspect the raw keys before Convict can flatten or discard any of them.
   inspect(schema, value, "", issues);
   if (issues.length)
-    throw new Diagnostic("system.config.invalid_field", issues.join("\n"));
+    throw new Diagnostic(
+      "system.config.invalid_field",
+      "invalid configuration fields",
+      { details: issues },
+    );
   const config = convict<ServerConfig>(schema, { args: [], env: {} });
   // Keep even unexpected load/validation failures from disclosing values.
   try {
@@ -204,10 +222,12 @@ export function configuration(value: unknown) {
 
 export function readConfig(path: string): string {
   if (!audit(path, "file", true))
-    throw new Diagnostic(
-      "system.config.not_found",
-      `${path}: configuration is absent. Run kanthord config init --config ${JSON.stringify(path)}.`,
-    );
+    throw new Diagnostic("system.config.not_found", "configuration is absent", {
+      fields: [
+        ["config", path],
+        ["command", `kanthord config init --config ${JSON.stringify(path)}`],
+      ],
+    });
   audit(dirname(path), "directory");
   return readPrivate(path);
 }

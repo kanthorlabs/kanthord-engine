@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { chmodSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
+import { isDeepStrictEqual } from "node:util";
 import { z } from "zod";
 import { Diagnostic } from "../../kernel/errors.ts";
 import { ULID_LENGTH } from "../../kernel/identity.ts";
@@ -31,6 +32,9 @@ const DUPLICATE_KEY = "cli.file.duplicate_key";
 const NOT_JSON = "cli.file.not_json";
 const INVALID_ENCODING = "cli.file.encoding_invalid";
 const INVALID_SCHEMA = "cli.file.schema_invalid";
+const REQUEST_FAILED = "request failed";
+const UNKNOWN_MUTATION_RESULT =
+  "the result is unknown; retry with the same idempotency key";
 const TEXT_CONTENT = "# Title\n{not json";
 const INVALID_PERMISSIONS = "system.files.invalid_permissions";
 const INVALID_KEY = "cli.idempotency_key.invalid";
@@ -122,7 +126,8 @@ test("schema validation does not include secret input in diagnostics", (t) => {
     (error) =>
       error instanceof Diagnostic &&
       error.code === INVALID_SCHEMA &&
-      !error.message.includes("do-not-report"),
+      !error.message.includes("do-not-report") &&
+      !JSON.stringify(error.details).includes("do-not-report"),
   );
   writeFileSync(path, '{"secret":123}');
   assert.deepEqual(readJsonFileAs(path, schema), { secret: 123 });
@@ -159,7 +164,10 @@ test("positive integer parser accepts decimal safe integers only", () => {
 test("single-use option rejects repeats", () => {
   assert.throws(
     () => singleUse("--endpoint")("a", "b"),
-    diagnosticCode(DUPLICATE_OPTION),
+    (error) =>
+      error instanceof Diagnostic &&
+      error.code === DUPLICATE_OPTION &&
+      isDeepStrictEqual(error.fields, [["option", "--endpoint"]]),
   );
   assert.equal(singleUse("--endpoint")(FIRST_VALUE, undefined), FIRST_VALUE);
 });
@@ -190,15 +198,19 @@ test("mutation results return data or include the retry key", () => {
     (error) =>
       error instanceof Diagnostic &&
       error.code === FAILURE_CODE &&
-      error.message ===
-        `request failed (HTTP ${FAILURE_STATUS}); idempotency key ${KEY}.`,
+      error.message === REQUEST_FAILED &&
+      isDeepStrictEqual(error.fields, [
+        ["status", FAILURE_STATUS],
+        ["idempotency_key", KEY],
+      ]),
   );
   assert.throws(
     () => handleMutationResult(indeterminate, INDETERMINATE_CODE, KEY),
     (error) =>
       error instanceof Diagnostic &&
       error.code === INDETERMINATE_CODE &&
-      error.message.includes(KEY),
+      error.message === UNKNOWN_MUTATION_RESULT &&
+      isDeepStrictEqual(error.fields, [["idempotency_key", KEY]]),
   );
 });
 
@@ -228,7 +240,8 @@ test("read results return data, preserve server failures, and signal uncertainty
     (error) =>
       error instanceof Diagnostic &&
       error.code === FAILURE_CODE &&
-      error.message === `request failed (HTTP ${FAILURE_STATUS}).`,
+      error.message === REQUEST_FAILED &&
+      isDeepStrictEqual(error.fields, [["status", FAILURE_STATUS]]),
   );
   assert.throws(
     () => handleReadResult(indeterminate, INDETERMINATE_CODE),

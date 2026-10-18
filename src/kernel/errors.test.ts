@@ -6,7 +6,8 @@ import {
   CodedError,
   Diagnostic,
   diagnostic,
-  diagnosticDetails,
+  diagnosticFields,
+  diagnosticRows,
   errorCodeSchema,
 } from "./errors.ts";
 import { ContextCancelled, DeadlineExceeded } from "./context.ts";
@@ -15,10 +16,12 @@ import { ValueType } from "./values.ts";
 
 const STRING_SCHEMA_TYPE = "string";
 const SECRET_MARKER = "secret-marker";
+const NO_ROWS = "";
+const LOG_PATH = "/var/lib/kanthord/kanthord.db";
 const ExpectedDiagnostic = {
   MissingConfiguration: "cli.config.not_found: Configuration absent.",
   Unknown: "system.operation.unknown: Operation failed.",
-  Details: 'details: {"node_ids":["node_a","node_b"],"count":2}',
+  Rows: 'status:          409\nidempotency_key: 01K0000000000000000000000A\ndetails:         {"node_ids":["node_a","node_b"],"count":2}\n',
 } as const;
 const ExpectedErrorCode = {
   Unknown: "system.operation.unknown",
@@ -98,33 +101,37 @@ test("diagnostics display scoped codes without exposing unexpected errors or cau
   }
 });
 
-test("diagnostic details print compact JSON only for a diagnostic with details", () => {
+test("diagnostic rows align the fields and print details as compact JSON last", () => {
   const details = { node_ids: ["node_a", "node_b"], count: 2 };
   const error = new Diagnostic(
     "cli.config.not_found",
     "Configuration absent.",
     {
+      fields: [
+        ["status", 409],
+        ["idempotency_key", "01K0000000000000000000000A"],
+      ],
       details,
     },
   );
   assert.equal(diagnostic(error), ExpectedDiagnostic.MissingConfiguration);
-  assert.equal(diagnosticDetails(error), ExpectedDiagnostic.Details);
+  assert.equal(diagnosticRows(error), ExpectedDiagnostic.Rows);
   assert.equal(
-    diagnosticDetails(
+    diagnosticRows(
       new Diagnostic("cli.config.not_found", "Configuration absent."),
     ),
-    null,
+    NO_ROWS,
   );
   assert.equal(
-    diagnosticDetails(
+    diagnosticRows(
       new Diagnostic("cli.config.not_found", "Configuration absent.", {
         details: null,
       }),
     ),
-    null,
+    NO_ROWS,
   );
   for (const reason of [new Error(SECRET_MARKER), { details }, SECRET_MARKER])
-    assert.equal(diagnosticDetails(reason), null);
+    assert.equal(diagnosticRows(reason), NO_ROWS);
 });
 
 test("context errors identify cancellation and deadlines without changing their types", () => {
@@ -134,4 +141,25 @@ test("context errors identify cancellation and deadlines without changing their 
   assert.ok(expired instanceof Error);
   assert.equal(cancelled.code, ExpectedErrorCode.Cancelled);
   assert.equal(expired.code, ExpectedErrorCode.DeadlineExceeded);
+});
+
+test("diagnostic fields give log records the present field values by name", () => {
+  const error = new Diagnostic(
+    "system.files.create_failed",
+    "cannot create directory",
+    {
+      fields: [
+        ["path", LOG_PATH],
+        ["command", null],
+      ],
+    },
+  );
+  assert.deepEqual(diagnosticFields(error), { path: LOG_PATH });
+  assert.equal(
+    diagnosticFields(
+      new Diagnostic("cli.config.not_found", "Configuration absent."),
+    ),
+    undefined,
+  );
+  assert.equal(diagnosticFields(new Error(SECRET_MARKER)), undefined);
 });

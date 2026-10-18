@@ -39,7 +39,7 @@ function requireIdentity(value: string, leaf: string): void {
   if (!identitySchema(INBOUND_ID_PREFIX).safeParse(value).success)
     throw new Diagnostic(
       code(leaf, "invalid_inbound_id"),
-      "Expected a canonical inbound identity.",
+      "invalid inbound ID",
     );
 }
 

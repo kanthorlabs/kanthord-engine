@@ -236,8 +236,10 @@ test("version mismatch names both versions, starts nothing and releases signal l
   });
   assert.ok(error instanceof Diagnostic);
   assert.equal(error.code, MISMATCH_CODE);
-  assert.ok(error.message.includes(packageVersion()));
-  assert.ok(error.message.includes(MISMATCH_VERSION));
+  assert.deepEqual(error.fields, [
+    ["version", packageVersion()],
+    ["server_version", MISMATCH_VERSION],
+  ]);
   assert.deepEqual(messages, []);
   assert.deepEqual(
     readdirSync(options.directory, { recursive: true }),

@@ -40,7 +40,9 @@ test("E04.1 serve refuses startup when git is absent from PATH", async (t) => {
   const result = await kanthord(["serve"], { ...baseEnv, PATH: toolsDir });
   assert.equal(result.code, EXIT_FAILURE, result.stderr);
   assert.ok(
-    result.stderr.startsWith(CheckErrorCode.ToolMissing + ": git: not found"),
+    result.stderr.startsWith(
+      `${CheckErrorCode.ToolMissing}: tool not found\ntool: git\n`,
+    ),
     result.stderr,
   );
 });

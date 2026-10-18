@@ -179,14 +179,34 @@ The worker application uses the same
 
 **Implemented:** `runCLI` uses exit `0` for success and `1` for handled failures.
 Commander help exits `0`; parsing failures exit nonzero. A caught CLI or domain
-failure writes a diagnostic to stderr. A declared remote failure of a mutation
-prints `<code>: request failed (HTTP <status>); idempotency key <key>.`, and a
-declared remote failure of a read prints `<code>: request failed (HTTP <status>).`
+failure writes a diagnostic to stderr. Line 1 of a diagnostic is
+`<code>: <message>`, with the code at the start of the line. The message holds
+no embedded value. Each value is one `name: value` row after line 1.
+The rows align: each value starts in the same column. Line 1 does not take part
+in the alignment. The row names are `path`, `key`, `option`, `field`, `config`,
+`database`, `old_key`, `new_key`, `config_version`, `supported_version`,
+`bind`, `port`, `version`, `server_version`, `tool_version`, `minimum_version`, `variables`,
+`tool`, `target`, `license`, `exit_status`, `reason`, `status`,
+`idempotency_key`, `command` and `details`.
+
+`system.config.invalid_field` with field issues prints
+`<code>: invalid configuration fields`, then the issues as a JSON list in the
+`details` row. An operational log record that holds a diagnostic as `reason`
+also holds its rows as `fields`, an object of row name to value. The record
+holds no `fields` when the diagnostic has no rows.
+
+A declared remote failure of a mutation prints `<code>: request failed`, then the
+rows `status: <status>` and `idempotency_key: <key>`. A declared remote failure of
+a read prints `<code>: request failed`, then the row `status: <status>`.
 `gateway verify`, `worker register` and `worker handover` put the command name
 before `request failed`. When the error body holds non-null `details`, the CLI
-writes one more stderr line after the diagnostic: `details: <compact JSON of details>`.
-With `details` null, the CLI writes no such line. The CLI does not print the
-remote message or the request ID. Coded diagnostics use the owning
+writes the last row `details: <compact JSON of details>`. With `details` null,
+the CLI writes no `details` row. An indeterminate mutation prints
+`<code>: the result is unknown; retry with the same idempotency key`, then the
+row `idempotency_key: <key>`. An indeterminate read prints
+`<code>: the result is unknown; retry the command`. The CLI does not print the
+remote message or the request ID. A file diagnostic puts the file
+path in the `path` row. Coded diagnostics use the owning
 `cli`, `system`, or service namespace; Commander syntax diagnostics are not a
 uniform JSON envelope. The launcher rejects unsupported Node.js versions with
 one stderr line and a nonzero exit before loading the application. The supported
@@ -194,13 +214,22 @@ range is `>=24.15.0 <25`.
 
 Current domain results (`gateway verify`, `worker register`) are one JSON value
 followed by a newline on stdout. `worker register` includes its idempotency key.
-Local output has explicit exceptions: help is text, `config init` and
-`config validate` print status/path text, `config show` prints masked YAML, and
-`auth jwt generate` without `--output` prints a human token or a machine client
-fragment only to terminal stdout. With `--output`, it prints the created file
-path to any stdout. `auth jwt inspect` prints the claim list to any stdout.
-`serve` is long-running and produces operational logs, not a domain-result
-JSON object.
+Local output has explicit exceptions: help is text, `config init`,
+`config validate`, `upgrade` and `gateway openapi` print `name: value` rows,
+`config show` prints masked YAML, and `auth jwt generate` without `--output`
+prints the `token` row or a machine client fragment only to terminal stdout.
+With `--output`, it prints the `created` row with the file path to any stdout.
+`auth jwt inspect` prints the claim list to any stdout. `llm credential login`
+prints rows and an address block. `serve` is long-running and produces
+operational logs, not a domain-result JSON object.
+
+Human output that is not JSON is a list of `name: value` rows. A name is lower
+snake_case. The rows of one block align: each value starts in the same column.
+The CLI omits a row with a null or empty value. A time is ISO 8601 UTC, for
+example `2026-10-17T22:33:40.960Z`. A value is bare: no quotes, no trailing
+period and no prose. A URL row comes last, after one empty line. Its label line
+is `name:` with no value. The next line holds the bare URL at column 0. The CLI
+writes no color and no terminal escape sequence.
 
 **PROPOSED:** new unary domain commands follow the existing JSON result style
 without requiring a `--json` flag. Their owning pages define the exact result
@@ -438,7 +467,7 @@ without replacement, and unlink the temporary file. An existing destination
 fails without overwriting it; a publication failure does not leave a partially
 written destination. A directory created before failure can remain.
 
-On success stdout is exactly `Created <absolute-path>\n` and exit is `0`.
+On success stdout is exactly `created: <absolute-path>\n` and exit is `0`.
 It prints no generated configuration or secret. Invalid permissions, an existing
 destination, or a write/publication failure produces a diagnostic and exit `1`.
 Output/cleanup failure after publication does not undo an already created file;
@@ -477,11 +506,11 @@ file must exist. Validation covers its document, field values, and the private
 file/containing-directory checks; it is not a startup probe, listener bind test,
 database lock check, or remote authentication test.
 
-On success stdout is exactly `Valid configuration: <absolute-path>\n` and exit
+On success stdout is exactly `valid: <absolute-path>\n` and exit
 is `0`. On failure stderr reports the safe parse/permission diagnostic or the
 collected invalid fields and exit is `1`. No file is created, repaired, or
-modified. An absent file diagnostic includes its resolved path and the
-`kanthord config init` command that can create it.
+modified. An absent file prints `system.config.not_found: configuration is absent`,
+then the rows `config: <path>` and `command: kanthord config init --config "<path>"`.
 
 ### `config show`
 
@@ -525,16 +554,20 @@ The command runs in this order:
 2. If `kanthord.db` exists, open it with its exclusive lock and validate its
    migration history. A running server makes this fail with
    `system.database.initialization_failed` (`database is locked`).
-3. If nothing changes, print `Up to date: <path>` and write nothing.
+3. If nothing changes, print `up_to_date: <path>` and write nothing.
 4. Write the backups with one UTC timestamp: the original configuration to
    `<path>.bak-<timestamp>`, and the database with `VACUUM INTO` to
-   `kanthord.db.bak-<timestamp>` in the data directory. Print `Backup: <path>`
+   `kanthord.db.bak-<timestamp>` in the data directory. Print `backup: <path>`
    for each. An existing backup path fails the command.
 5. Apply the pending migrations, one transaction each. Print
-   `Migrated <service> from version <a> to version <b>` for each service.
+   `migrated: <service> <a> -> <b>` for each service.
 6. Replace the configuration file atomically. Print
-   `Renamed <old key> to <new key>` for each rename, then
-   `Upgraded configuration version <a> to configuration version <b>: <path>`.
+   `renamed: <old key> -> <new key>` for each rename, then
+   `upgraded: <path>` and `config_version: <a> -> <b>`.
+
+The command prints each row when its step happens. A later failure or a stop
+keeps the earlier rows, for example the backup paths, on stdout. Every value
+starts in column 17, after the longest row name `config_version:` and one space.
 
 A rerun after a failure resumes from the recorded state. Steps 1 to 4 write
 nothing to the configuration or the database.
@@ -733,7 +766,7 @@ without replacement and remove the temporary file. An existing destination
 fails with `system.files.publish_failed` and stays byte-identical. No force
 option exists. A failed publication prints no token.
 
-On success stdout is exactly `Created <absolute path>\n`. With `--verbose`,
+On success stdout is exactly `created: <absolute path>\n`. With `--verbose`,
 the existing claim list follows that line. The token is never printed to
 stdout or stderr when `--output` is used.
 
@@ -813,8 +846,8 @@ jti: 01K6...
 ---
 ```
 
-`auth jwt generate --verbose` prints this same claim list after the human JWT line,
-the two-line machine fragment, or the `Created <absolute path>` line with
+`auth jwt generate --verbose` prints this same claim list after the human `token` row,
+the two-line machine fragment, or the `created: <absolute path>` row with
 `--output`.
 
 ### Signing, output, errors, and persistence
@@ -834,17 +867,17 @@ substitution, or other non-terminal stdout fails with
 `cli.output.terminal_required` and exit `1`, before configuration loading and
 token signing. Stdin need not be a terminal and is never read.
 
-Without `--output` or `--verbose`, human mode prints exactly `<JWT>\n`.
-Without `--output`, machine mode prints exactly `token: <jwt>\nclient_secret: <secret>\n`, as shown
-above. Exit is `0`. With `--verbose`, the same claim list follows the human JWT
-line or the machine fragment. It adds no client secret to the claims.
+Without `--output` or `--verbose`, human mode prints exactly `token: <JWT>\n`.
+Without `--output`, machine mode prints the aligned rows `token` and `client_secret`, as shown
+above. Exit is `0`. With `--verbose`, the same claim list follows the human `token`
+row or the machine fragment. It adds no client secret to the claims.
 No secret is printed to stderr. Invalid inputs, an absent or invalid
 configuration, failed terminal check, or signing failure exits nonzero without
 a successful token result.
 
 `--output` saves a human token, or a machine token with its `client_secret`, in
 an absent private client configuration file under the [human-token
-rules](#human-token). It prints only `Created <absolute path>\n`, followed by
+rules](#human-token). It prints only `created: <absolute path>\n`, followed by
 claims when `--verbose` is given. It never prints the token or the client
 secret, including on a failed publication. Readers use only
 the default client path. Without `--output`, issuance saves no client

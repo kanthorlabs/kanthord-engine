@@ -36,7 +36,13 @@ function verifyIn(
     return true;
   throw new Diagnostic(
     MASTER_KEY_MISMATCH_CODE,
-    `${store.path}: master_key of ${configPath} does not match this database. Restore the configuration file that created this database, or restore the database backup that matches the configuration file.`,
+    "master_key does not match the database; restore the configuration file that created the database, or the database backup that matches the configuration file",
+    {
+      fields: [
+        ["database", store.path],
+        ["config", configPath],
+      ],
+    },
   );
 }
 

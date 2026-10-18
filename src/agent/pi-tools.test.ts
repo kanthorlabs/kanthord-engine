@@ -131,7 +131,11 @@ test("installer refuses a binary whose digest differs from the manifest", (t) =>
         manifest: manifestOf(WORKING_BINARY),
         root: developmentRoot(t, `${WORKING_BINARY}# changed\n`),
       }),
-    { code: "worker.start.tool_missing", message: /^fd: .*digest/ },
+    {
+      code: "worker.start.tool_missing",
+      message: "binary digest differs from the manifest.",
+      fields: [["tool", TOOL]],
+    },
   );
   assert.throws(() => statSync(join(bin, TOOL)), { code: "ENOENT" });
 });
@@ -166,7 +170,14 @@ test("installer refuses a host target outside the manifest", (t) => {
         manifest: manifestOf(WORKING_BINARY),
         root: developmentRoot(t, WORKING_BINARY),
       }),
-    { code: "worker.start.tool_missing", message: /^fd: .*freebsd-x64/ },
+    {
+      code: "worker.start.tool_missing",
+      message: "host target is not in the manifest.",
+      fields: [
+        ["tool", TOOL],
+        ["target", "freebsd-x64"],
+      ],
+    },
   );
   assert.throws(() => readdirSync(bin), { code: "ENOENT" });
 });
@@ -181,7 +192,11 @@ test("installer refuses an absent binary source and an absent license source", (
   assert.throws(
     () =>
       installPiTools({ ...options, root: pathToFileURL(`${temporary(t)}/`) }),
-    { code: "worker.start.tool_missing", message: /^fd: binary source/ },
+    {
+      code: "worker.start.tool_missing",
+      message: "binary source is absent.",
+      fields: [["tool", TOOL]],
+    },
   );
   const root = developmentRoot(t, WORKING_BINARY);
   const embedded = embeddedAssets(WORKING_BINARY);
@@ -192,7 +207,10 @@ test("installer refuses an absent binary source and an absent license source", (
         assets: { ...embedded, getAssetKeys: () => [`pi-tools/bin/${TOOL}`] },
         root,
       }),
-    { code: "worker.start.tool_missing", message: /^fd: license/ },
+    {
+      code: "worker.start.tool_missing",
+      message: "license source is absent.",
+    },
   );
 });
 
@@ -206,7 +224,7 @@ test("installer refuses a tool whose version command fails", (t) => {
         manifest: manifestOf(FAILING_BINARY),
         root: developmentRoot(t, FAILING_BINARY),
       }),
-    { code: "worker.start.tool_missing", message: /^fd: cannot run/ },
+    { code: "worker.start.tool_missing", message: "cannot run." },
   );
 });
 
@@ -222,7 +240,7 @@ test("installer refuses a pi directory that cannot hold the tools", (t) => {
         manifest: manifestOf(WORKING_BINARY),
         root: developmentRoot(t, WORKING_BINARY),
       }),
-    { code: "worker.start.tool_missing", message: /^fd: cannot install/ },
+    { code: "worker.start.tool_missing", message: "cannot install." },
   );
 });
 

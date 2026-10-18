@@ -33,6 +33,10 @@ import { ExitCode } from "./constants.ts";
 import { runKanthord } from "./test-support.ts";
 
 const EMPTY_OUTPUT = "";
+const TOKEN_ROW = "token: ";
+const HANDOVER_LOST =
+  "cli.worker.handover.indeterminate: worker handover: the result is unknown; retry with a new idempotency key\n";
+const MACHINE_TOKEN_ROW = "token:         ";
 const JWT_OUTPUT = /eyJ[A-Za-z0-9_-]*\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/;
 const PROJECT_GET = "get";
 const PROJECT_ID = "project_01ARZ3NDEKTSV4RRFFQ69G5FAV";
@@ -352,6 +356,12 @@ test("worker handover validates locally and prints receipt metadata without the 
     "--idempotency-key",
     key,
   ];
+  const lost = await invocation(
+    [...args, "--endpoint", "http://127.0.0.1:1"],
+    env,
+  );
+  assert.equal(lost.status, ExitCode.Failure);
+  assert.equal(lost.stderr, HANDOVER_LOST);
   const result = spawnSync(
     process.execPath,
     [
@@ -410,11 +420,10 @@ test("scheduler execution release tells the operator to read the execution befor
     result.stderr,
     /^cli\.scheduler\.execution\.release\.indeterminate:/,
   );
-  assert.ok(
-    result.stderr.includes(`kanthord scheduler execution get ${executionId}`),
+  assert.equal(
     result.stderr,
+    `cli.scheduler.execution.release.indeterminate: the result is unknown; read the execution before any retry\ncommand: kanthord scheduler execution get ${executionId}\n`,
   );
-  assert.doesNotMatch(result.stderr, /retry with --idempotency-key/);
 });
 
 test("agent enablement commands expose offline help and validate inputs before I/O", async (t) => {
@@ -704,7 +713,7 @@ test("config init is non-interactive, writes validated private configuration wit
   const accepted = await invocation(["config", "init"], env);
   assert.equal(accepted.status, ExitCode.Success, accepted.stderr);
   const content = readFileSync(env.KANTHORD_CONFIG!, "utf8");
-  assert.equal(accepted.stdout, `Created ${env.KANTHORD_CONFIG!}\n`);
+  assert.equal(accepted.stdout, `created: ${env.KANTHORD_CONFIG!}\n`);
   assert.ok(
     !accepted.stdout.includes(loadConfig(env.KANTHORD_CONFIG!).master_key),
   );
@@ -912,8 +921,8 @@ test("auth jwt uses its optional username or the constant default, the configure
       true,
     );
     assert.equal(result.status, ExitCode.Success, result.stderr);
-    const token = result.stdout.trim();
-    assert.equal(result.stdout, `${token}\n`);
+    const token = result.stdout.slice(TOKEN_ROW.length).trim();
+    assert.equal(result.stdout, `${TOKEN_ROW}${token}\n`);
     const key = await crypto.subtle.importKey(
       "raw",
       new Uint8Array(deriveKey(config.master_key, "gateway/jwt-hs256/v1")),
@@ -949,7 +958,7 @@ test("jwt --output creates a private default client file with a verifiable human
   const result = await invocation(["auth", "jwt", "generate", "--output"], env);
   const path = clientConfigPath(env);
   assert.equal(result.status, ExitCode.Success, result.stderr);
-  assert.equal(result.stdout, `Created ${path}\n`);
+  assert.equal(result.stdout, `created: ${path}\n`);
   assert.equal(result.stderr, EMPTY_OUTPUT);
   assert.equal(statSync(path).mode & 0o7777, PRIVATE_FILE_MODE);
   assert.equal(statSync(dirname(path)).mode & 0o7777, PRIVATE_DIRECTORY_MODE);
@@ -993,7 +1002,7 @@ test("jwt --output with --binding writes the machine token and client secret to 
     env,
   );
   assert.equal(result.status, ExitCode.Success, result.stderr);
-  assert.equal(result.stdout, `Created ${path}\n`);
+  assert.equal(result.stdout, `created: ${path}\n`);
   assert.equal(statSync(path).mode & 0o7777, PRIVATE_FILE_MODE);
   const document = parse(readFileSync(path, "utf8"));
   assert.deepEqual(Object.keys(document), [
@@ -1033,7 +1042,7 @@ test("jwt --output resolves an explicit relative export path and writes the endp
     env,
   );
   assert.equal(result.status, ExitCode.Success, result.stderr);
-  assert.equal(result.stdout, `Created ${resolve(path)}\n`);
+  assert.equal(result.stdout, `created: ${resolve(path)}\n`);
   assert.equal(result.stderr, EMPTY_OUTPUT);
   const content = readFileSync(resolve(path), "utf8");
   const document = parse(content);
@@ -1147,7 +1156,7 @@ test("jwt --verbose --output prints creation then the existing claim list withou
   const { token } = parse(readFileSync(path, "utf8"));
   const inspected = await invocation(["auth", "jwt", "inspect", token], env);
   assert.equal(inspected.status, ExitCode.Success, inspected.stderr);
-  assert.equal(result.stdout, `Created ${path}\n${inspected.stdout}`);
+  assert.equal(result.stdout, `created: ${path}\n${inspected.stdout}`);
   assert.ok(!result.stdout.includes(token));
   assert.ok(!result.stderr.includes(token));
   assert.doesNotMatch(result.stdout + result.stderr, JWT_OUTPUT);
@@ -1182,7 +1191,7 @@ test("jwt accepts display names and issues fresh machine identities without open
     true,
   );
   assert.equal(human.status, ExitCode.Success, human.stderr);
-  assert.equal(decode(human.stdout.trim()).payload.name, name);
+  assert.equal(decode(parse(human.stdout).token).payload.name, name);
   const subjects = new Set<string>();
   const sessions = new Set<string>();
   const secrets = new Set<string>();
@@ -1207,7 +1216,7 @@ test("jwt accepts display names and issues fresh machine identities without open
     const { token, client_secret: clientSecret } = parse(result.stdout);
     assert.equal(
       result.stdout,
-      `token: ${token}\nclient_secret: ${clientSecret}\n`,
+      `${MACHINE_TOKEN_ROW}${token}\nclient_secret: ${clientSecret}\n`,
     );
     assert.equal(result.stderr, EMPTY_OUTPUT);
     const claims = decode(token).payload;
@@ -1291,8 +1300,9 @@ test("auth jwt group, verbose generation, inspection and token precedence", asyn
     true,
   );
   assert.equal(generated.status, ExitCode.Success, generated.stderr);
-  const [token, ...claimLines] = generated.stdout.split("\n");
-  assert.ok(token);
+  const [tokenLine, ...claimLines] = generated.stdout.split("\n");
+  const token = tokenLine!.slice(TOKEN_ROW.length);
+  assert.equal(tokenLine, `${TOKEN_ROW}${token}`);
   const claimList = `${claimLines.join("\n")}`;
   const payload = decode(token).payload;
   assert.deepEqual(
@@ -1316,10 +1326,10 @@ test("auth jwt group, verbose generation, inspection and token precedence", asyn
     true,
   );
   assert.equal(rootVerbose.status, ExitCode.Success, rootVerbose.stderr);
-  assert.match(rootVerbose.stdout, /^\S+\n---\n/);
+  assert.match(rootVerbose.stdout, /^token: \S+\n---\n/);
   const plain = await invocation(["auth", "jwt", "generate"], env, true);
   assert.equal(plain.status, ExitCode.Success, plain.stderr);
-  assert.match(plain.stdout, /^\S+\n$/);
+  assert.match(plain.stdout, /^token: \S+\n$/);
   const inspect = await invocation(["auth", "jwt", "inspect", token], env);
   assert.equal(inspect.status, ExitCode.Success, inspect.stderr);
   assert.equal(inspect.stdout, claimList);
@@ -1338,14 +1348,15 @@ test("auth jwt group, verbose generation, inspection and token precedence", asyn
     true,
   );
   assert.equal(machine.status, ExitCode.Success, machine.stderr);
-  const [tokenLine, secretLine, ...machineClaims] = machine.stdout.split("\n");
-  const machineToken = tokenLine!.slice("token: ".length);
+  const [machineTokenLine, secretLine, ...machineClaims] =
+    machine.stdout.split("\n");
+  const machineToken = machineTokenLine!.slice(MACHINE_TOKEN_ROW.length);
   const machineSecret = deriveClientSecret(
     loadConfig(env.KANTHORD_CONFIG!).master_key,
     loadConfig(env.KANTHORD_CONFIG!).gateway.auth.version,
     String(decode(machineToken).payload.sub),
   );
-  assert.equal(tokenLine, `token: ${machineToken}`);
+  assert.equal(machineTokenLine, `${MACHINE_TOKEN_ROW}${machineToken}`);
   assert.equal(secretLine, `client_secret: ${machineSecret}`);
   const machineInspect = await invocation(
     ["auth", "jwt", "inspect", machineToken],
@@ -1360,7 +1371,7 @@ test("auth jwt group, verbose generation, inspection and token precedence", asyn
   );
   assert.doesNotMatch(machineInspect.stdout, /^binding:/m);
   assert.equal(machine.stderr, EMPTY_OUTPUT);
-  const other = plain.stdout.trim();
+  const other = plain.stdout.slice(TOKEN_ROW.length).trim();
   writePrivate(clientConfigPath(env), `token: ${other}\n`);
   assert.equal(
     (await invocation(["auth", "jwt", "inspect"], env)).stdout,
@@ -1636,10 +1647,7 @@ test("intake outbound discard prints the generated key when the result is indete
     result.stderr,
     /^cli\.intake\.outbound\.discard\.indeterminate:/,
   );
-  assert.match(
-    result.stderr,
-    /retry with --idempotency-key [0-9A-HJKMNP-TV-Z]{26}/,
-  );
+  assert.match(result.stderr, /^idempotency_key: [0-9A-HJKMNP-TV-Z]{26}$/m);
 });
 
 test("intake event mutations print the generated key when the result is indeterminate", async (t) => {
@@ -1660,9 +1668,6 @@ test("intake event mutations print the generated key when the result is indeterm
       result.stderr,
       new RegExp(`^cli\\.intake\\.event\\.${leaf[0]}\\.indeterminate:`),
     );
-    assert.match(
-      result.stderr,
-      /retry with --idempotency-key [0-9A-HJKMNP-TV-Z]{26}/,
-    );
+    assert.match(result.stderr, /^idempotency_key: [0-9A-HJKMNP-TV-Z]{26}$/m);
   }
 });

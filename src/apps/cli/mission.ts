@@ -11,6 +11,7 @@ import { basename, join } from "node:path";
 import { Command } from "commander";
 import { z } from "zod";
 import { Diagnostic } from "../../kernel/errors.ts";
+import type { Row } from "../../kernel/rows.ts";
 import {
   PRIVATE_DIRECTORY_MODE,
   PRIVATE_FILE_MODE,
@@ -373,9 +374,10 @@ async function nodeRetire(nodeId: string, command: Command): Promise<void> {
 
 function readPlanFile(path: string) {
   const stat = statSync(path, { throwIfNoEntry: false });
-  if (!stat) throw new Diagnostic(FILE_NOT_FOUND, `${path}: file not found`);
+  const fields: Row[] = [["path", path]];
+  if (!stat) throw new Diagnostic(FILE_NOT_FOUND, "file not found", { fields });
   if (!stat.isFile())
-    throw new Diagnostic(FILE_NOT_REGULAR, `${path}: not a regular file`);
+    throw new Diagnostic(FILE_NOT_REGULAR, "not a regular file", { fields });
   return { filename: basename(path), content: readFileSync(path, UTF8) };
 }
 
@@ -472,7 +474,10 @@ function createExportDirectory(path: string): void {
   } catch {
     throw new Diagnostic(
       "system.files.create_failed",
-      `${path}: cannot create directory.`,
+      "cannot create directory",
+      {
+        fields: [["path", path]],
+      },
     );
   }
 }
@@ -483,7 +488,8 @@ function writeExport(path: string, content: string): void {
   } catch {
     throw new Diagnostic(
       "system.files.publish_failed",
-      `${path}: cannot publish file; the destination must be absent.`,
+      "cannot publish file; the destination must be absent",
+      { fields: [["path", path]] },
     );
   }
 }

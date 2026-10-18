@@ -471,7 +471,7 @@ than claiming rollback after a lost answer.
 
 All commands answer HTTP `401` for missing, invalid or wrong-kind credentials;
 a machine token never reaches these human handlers. Diagnostics preserve the
-server's code and request identity when available, never a token, a
+server's code, the HTTP status and the idempotency key of a mutation, never a token, a
 verification secret, credential material or raw event content.
 
 ## Error codes

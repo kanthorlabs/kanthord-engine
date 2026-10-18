@@ -15,10 +15,16 @@ import {
   enforceMasterKey,
   serverMigrations,
 } from "../server/index.ts";
+import { Diagnostic } from "../../kernel/errors.ts";
 import { ExitCode } from "./constants.ts";
+import { upgrade } from "./upgrade.ts";
 import { runKanthord, spawnKanthord } from "./test-support.ts";
 
 const PRIVATE_FILE_MODE = 0o600;
+const FIXED_NOW = "2026-10-18T00:36:01.000Z";
+const FIXED_STAMP = "20261018T003601";
+const BACKUP_FAILED = "system.database.backup_failed";
+const CONFIGURATION_BACKUP_ONLY = 1;
 const BACKUPS_OF_CONFIGURATION_AND_DATABASE = 2;
 const CURRENT_VERSION_LINE = `version: ${CONFIG_VERSION}\n`;
 const OLD_KEY = "consecutive_loss_limit";
@@ -80,17 +86,18 @@ test("serve refuses an older configuration and an older database, and upgrade br
   const behind = await run(paths.env, "serve");
   assert.equal(behind.status, ExitCode.Failure);
   assert.match(behind.stderr, /system\.config\.version_behind/);
-  assert.match(behind.stderr, /Run kanthord upgrade/);
+  assert.match(behind.stderr, /^command:           kanthord upgrade$/m);
 
   writePrivate(paths.config, currentConfig(), true);
   const pending = await run(paths.env, "serve");
   assert.equal(pending.status, ExitCode.Failure);
   assert.match(pending.stderr, /system\.database\.migration\.pending/);
+  assert.match(pending.stderr, /^path:    .+\ncommand: kanthord upgrade\n$/m);
   writePrivate(paths.config, legacy, true);
 
   const upgraded = await run(paths.env, "upgrade");
   assert.equal(upgraded.status, ExitCode.Success, upgraded.stderr);
-  const backups = [...upgraded.stdout.matchAll(/^Backup: (.+)$/gm)].map(
+  const backups = [...upgraded.stdout.matchAll(/^backup: +(.+)$/gm)].map(
     (match) => match[1]!,
   );
   assert.equal(backups.length, BACKUPS_OF_CONFIGURATION_AND_DATABASE);
@@ -99,13 +106,25 @@ test("serve refuses an older configuration and an older database, and upgrade br
     assert.equal(statSync(backup).mode & 0o7777, PRIVATE_FILE_MODE);
   assert.match(
     upgraded.stdout,
-    new RegExp(`^Migrated ${BEHIND_SERVICE.service} from version`, "m"),
+    new RegExp(`^migrated: +${BEHIND_SERVICE.service} \\d+ -> \\d+$`, "m"),
   );
   assert.match(
     upgraded.stdout,
-    new RegExp(`^Renamed mission\\.${OLD_KEY} to mission\\.${NEW_KEY}$`, "m"),
+    new RegExp(`^renamed: +mission\\.${OLD_KEY} -> mission\\.${NEW_KEY}$`, "m"),
   );
   assert.equal(loadConfig(paths.config).version, CONFIG_VERSION);
+  assert.match(
+    upgraded.stdout,
+    new RegExp(
+      `^upgraded: +${paths.config}\nconfig_version: \\d+ -> ${CONFIG_VERSION}\n$`,
+      "m",
+    ),
+  );
+  const valueColumns = upgraded.stdout
+    .trimEnd()
+    .split("\n")
+    .map((line) => line.search(/(?<=^[a-z_]+: +)\S/));
+  assert.deepEqual(new Set(valueColumns), new Set(["config_version: ".length]));
   const store = new Store(paths.database);
   assert.deepEqual(store.plan(serverMigrations).pending, []);
   store.close();
@@ -115,7 +134,7 @@ test("serve refuses an older configuration and an older database, and upgrade br
 
   const again = await run(paths.env, "upgrade");
   assert.equal(again.status, ExitCode.Success, again.stderr);
-  assert.equal(again.stdout, `Up to date: ${paths.config}\n`);
+  assert.equal(again.stdout, `up_to_date:     ${paths.config}\n`);
 });
 
 test("upgrade changes nothing while another process holds the database", async (t) => {
@@ -178,7 +197,7 @@ test("upgrade refuses another master_key before the backups and the migrations",
   const refused = await run(paths.env, "upgrade");
   assert.equal(refused.status, ExitCode.Failure);
   assert.match(refused.stderr, /system\.config\.master_key_mismatch/);
-  assert.match(refused.stderr, /Restore the configuration file/);
+  assert.match(refused.stderr, /restore the configuration file/);
   assert.equal(readFileSync(paths.config, "utf8"), foreign);
   assert.deepEqual(readdirSync(join(paths.env.XDG_CONFIG_HOME!, "kanthord")), [
     "kanthord.yaml",
@@ -192,4 +211,29 @@ test("upgrade refuses another master_key before the backups and the migrations",
     history,
   );
   after.close();
+});
+
+test("upgrade writes each row when it happens, before a later step fails", async (t) => {
+  const paths = layout(temporary(t));
+  writePrivate(paths.config, legacyConfig());
+  olderDatabase(paths.database);
+  const now = new Date(FIXED_NOW);
+  writePrivate(`${paths.database}.bak-${FIXED_STAMP}`, "");
+  const previous = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = paths.env.XDG_DATA_HOME;
+  t.after(() => {
+    if (previous === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = previous;
+  });
+  const written: string[] = [];
+  await assert.rejects(
+    upgrade(paths.config, (text) => written.push(text), now),
+    (error) =>
+      error instanceof Diagnostic &&
+      error.code === BACKUP_FAILED &&
+      written.length === CONFIGURATION_BACKUP_ONLY,
+  );
+  assert.deepEqual(written, [
+    `backup:         ${paths.config}.bak-${FIXED_STAMP}\n`,
+  ]);
 });
