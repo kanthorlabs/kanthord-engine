@@ -261,7 +261,12 @@ export default tseslint.config(
             {
               from: element("apps-cli", { fileInternalPath: "*.test.ts" }),
               allow: [
-                { to: element("component", { fileInternalPath: "index.ts" }) },
+                {
+                  to: element("component", {
+                    captured: { name: "{llm,repository,storage}" },
+                    fileInternalPath: "index.ts",
+                  }),
+                },
                 {
                   to: element("service", {
                     captured: { name: "intake" },

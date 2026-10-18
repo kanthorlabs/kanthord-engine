@@ -77,7 +77,11 @@ function acceptsFields(
   return metadataOk && secretOk;
 }
 
-function assertPlatformFields(path: string[], example: unknown): void {
+function assertPlatformFields(
+  path: string[],
+  example: unknown,
+  createdPlatforms: Map<string, string>,
+): void {
   const label = path.join(" ");
   const fields = example as {
     platform?: string;
@@ -97,16 +101,13 @@ function assertPlatformFields(path: string[], example: unknown): void {
   }
   const table = CREDENTIAL_TABLES[path[0]!];
   if (path[1] !== CREDENTIAL_GROUP || table === undefined) return;
-  if (fields.platform !== undefined) {
-    const platform = table[fields.platform];
-    assert.ok(platform, `${label}: unknown platform`);
-    assert.ok(acceptsFields(platform, fields), `${label}: platform fields`);
-    return;
-  }
-  assert.ok(
-    Object.values(table).some((platform) => acceptsFields(platform, fields)),
-    `${label}: platform fields`,
-  );
+  if (fields.platform !== undefined)
+    createdPlatforms.set(path[0]!, fields.platform);
+  const name = fields.platform ?? createdPlatforms.get(path[0]!);
+  assert.ok(name, `${label}: no create example before this command`);
+  const platform = table[name];
+  assert.ok(platform, `${label}: unknown platform`);
+  assert.ok(acceptsFields(platform, fields), `${label}: platform fields`);
 }
 
 function environment(directory: string): NodeJS.ProcessEnv {
@@ -125,6 +126,7 @@ test("every command with a --file option prints a body example that its schema a
   const env = environment(temporary(t));
   const commands = fileCommands(createProgram());
   assert.ok(commands.length >= MIN_FILE_COMMANDS);
+  const createdPlatforms = new Map<string, string>();
   for (const { path, command } of commands) {
     const label = path.join(" ");
     const body = fileBodyOf(command);
@@ -143,7 +145,7 @@ test("every command with a --file option prints a body example that its schema a
     const example: unknown = JSON.parse(printed);
     const parsed = body.schema.safeParse(example);
     assert.ok(parsed.success, `${label}: ${JSON.stringify(parsed.error)}`);
-    assertPlatformFields(path, example);
+    assertPlatformFields(path, example, createdPlatforms);
   }
 });
 
