@@ -1,9 +1,14 @@
-import { DatabaseSync } from "node:sqlite";
+import {
+  DatabaseSync,
+  type PrepareOptions,
+  type StatementSync,
+} from "node:sqlite";
 import { audit } from "./files.ts";
 import { Diagnostic } from "./errors.ts";
 import { isObject, isString } from "./values.ts";
 
 export const IN_MEMORY_DATABASE = ":memory:";
+export const STATEMENT_CACHE_LIMIT = 256;
 const DATABASE_PROBE_OK = 1;
 const NO_RECORDED_MIGRATION = 0;
 
@@ -25,6 +30,38 @@ export interface MigrationPlan {
   readonly pending: readonly PendingMigration[];
 }
 
+class StatementCache extends DatabaseSync {
+  private readonly statements = new Map<string, StatementSync>();
+
+  override prepare(sql: string, options?: PrepareOptions): StatementSync {
+    if (options !== undefined) return super.prepare(sql, options);
+    const cached = this.statements.get(sql);
+    if (cached !== undefined) {
+      this.statements.delete(sql);
+      this.statements.set(sql, cached);
+      return cached;
+    }
+    const statement = super.prepare(sql);
+    this.statements.set(sql, statement);
+    if (this.statements.size > STATEMENT_CACHE_LIMIT)
+      this.statements.delete(this.statements.keys().next().value!);
+    return statement;
+  }
+
+  override exec(sql: string): void {
+    try {
+      super.exec(sql);
+    } finally {
+      this.statements.clear();
+    }
+  }
+
+  override close(): void {
+    super.close();
+    this.statements.clear();
+  }
+}
+
 /** One connection and transaction owner for the operational database. */
 function sqliteReason(error: unknown): string {
   const reason = (error as { errstr?: unknown } | null)?.errstr;
@@ -43,7 +80,7 @@ export class Store {
       for (const suffix of ["", "-wal", "-shm"])
         audit(path + suffix, "file", true);
     try {
-      this.database = new DatabaseSync(path, {
+      this.database = new StatementCache(path, {
         enableForeignKeyConstraints: true,
       });
     } catch {
