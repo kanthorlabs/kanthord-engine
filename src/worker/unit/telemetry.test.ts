@@ -13,6 +13,8 @@ import {
   type TelemetrySink,
 } from "./telemetry.ts";
 import { traceAgent } from "./agent-telemetry.ts";
+import { GitStep, withinGit } from "./method-telemetry.ts";
+import { Diagnostic } from "../../kernel/errors.ts";
 
 const CLAIM = {
   execution_id: "execution_01JZ8R2B3C4D5E6F7G8H9J0K1M",
@@ -89,6 +91,35 @@ test("a failed operation ends its span with Error and keeps the error", async ()
   const end = spanRecords(records).find((record) => record.end_time);
   assert.equal(end?.status, SpanStatus.Error);
   assert.equal(spans.current(), CLAIM.root_span_id);
+});
+
+test("a git failure span text holds the diagnostic line and its rows", async () => {
+  const cases = [
+    {
+      error: new Diagnostic("repository.git.push_failed", "push failed", {
+        fields: [["path", "/x"]],
+      }),
+      text: "repository.git.push_failed: push failed\npath: /x",
+    },
+    {
+      error: new Diagnostic("repository.git.push_failed", "push failed"),
+      text: "repository.git.push_failed: push failed",
+    },
+  ];
+  for (const { error, text } of cases) {
+    const { records, spans } = recorder();
+    await assert.rejects(
+      withinGit(spans, GitStep.Push, async () => {
+        throw error;
+      }),
+    );
+    assert.deepEqual(
+      records.flatMap((record) =>
+        record.kind === RecordKind.Text ? [record.text] : [],
+      ),
+      [text],
+    );
+  }
 });
 
 test("a long text splits into numbered parts", () => {
