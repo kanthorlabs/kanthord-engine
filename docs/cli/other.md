@@ -185,7 +185,7 @@ no embedded value. Each value is one `name: value` row after line 1.
 The rows align: each value starts in the same column. Line 1 does not take part
 in the alignment. The row names are `path`, `key`, `option`, `field`, `config`,
 `database`, `old_key`, `new_key`, `config_version`, `supported_version`,
-`bind`, `port`, `version`, `server_version`, `minimum_version`, `variables`,
+`bind`, `port`, `version`, `server_version`, `tool_version`, `minimum_version`, `variables`,
 `tool`, `target`, `license`, `exit_status`, `reason`, `status`,
 `idempotency_key`, `command` and `details`.
 

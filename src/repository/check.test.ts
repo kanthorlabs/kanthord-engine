@@ -43,7 +43,7 @@ test("parseGitVersion rejects an older version", () => {
     message: "tool version is below the minimum version",
     fields: [
       ["tool", "git"],
-      ["version", "2.39"],
+      ["tool_version", "2.39"],
       ["minimum_version", "2.40"],
     ],
   });

@@ -67,7 +67,7 @@ export function parseGitVersion(output: string): [number, number] {
       {
         fields: [
           ["tool", "git"],
-          ["version", `${major}.${minor}`],
+          ["tool_version", `${major}.${minor}`],
           ["minimum_version", `${GIT_MIN_MAJOR}.${GIT_MIN_MINOR}`],
         ],
       },
@@ -97,7 +97,7 @@ export function parseSshVersion(output: string): [number, number] {
       {
         fields: [
           ["tool", "ssh"],
-          ["version", `${major}.${minor}`],
+          ["tool_version", `${major}.${minor}`],
           ["minimum_version", `${SSH_MIN_MAJOR}.${SSH_MIN_MINOR}`],
         ],
       },
