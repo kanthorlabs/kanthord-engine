@@ -550,6 +550,28 @@ An absent project answers `404 project.project.not_found`.
 The required `ProjectId` maps to `params.project_id`. The required file supplies the body `{ kind: "repository", config }`, where `config` is a repository configuration of `binding apply`. The command takes no mutation key and rejects `--idempotency-key`.
 It checks the unsaved configuration and stores nothing.
 
+A complete file:
+
+```json
+{
+  "kind": "repository",
+  "config": {
+    "available": true,
+    "platform": "github",
+    "address": "git@github.com:owner/repository.git",
+    "strategy": {
+      "base_branch": "main",
+      "action": {
+        "name": "pull_request",
+        "follows": { "type": "assessment_passed" }
+      }
+    },
+    "ssh_credential": "github-ssh",
+    "credential": "github-main"
+  }
+}
+```
+
 - It refuses a static violation with the code of `binding apply`: `credential_required`, `action_unsupported`, `address_invalid` and `ssh_host_mismatch`, and the custody suitability codes of `ssh_credential` and `credential`.
 - Then it runs the checks of `binding verify` on the configuration and answers the same `{ address, ssh_credential, credential }`.
 

@@ -16,6 +16,7 @@ import {
   projectOperations,
 } from "../../project/contract.ts";
 import { CommandName, PROGRAM_NAME } from "./constants.ts";
+import { addFileBodyHelp } from "./file-body.ts";
 import {
   handleMutationResult,
   handleReadResult,
@@ -25,6 +26,39 @@ import {
   resolveKey,
   singleUse,
 } from "./shared.ts";
+
+const REPOSITORY_CONFIG_EXAMPLE = {
+  available: true,
+  platform: "github",
+  address: "git@github.com:owner/repository.git",
+  strategy: {
+    base_branch: "main",
+    action: {
+      name: "pull_request",
+      follows: { type: "assessment_passed" },
+    },
+  },
+  ssh_credential: "github-ssh",
+  credential: "github-main",
+};
+const BINDING_APPLY_EXAMPLE = {
+  version: 1,
+  bindings: {
+    "main-repo": { kind: "repository", config: REPOSITORY_CONFIG_EXAMPLE },
+    "general-main": {
+      kind: "worker",
+      config: {
+        worker: "coder@1",
+        instance_count: 1,
+        entries: [{ agent: "swe@1", reasoning_effort: "high" }],
+      },
+    },
+  },
+};
+const BINDING_CHECK_EXAMPLE = {
+  kind: "repository",
+  config: REPOSITORY_CONFIG_EXAMPLE,
+};
 
 const CREATE = "create";
 const LIST = "list";
@@ -632,19 +666,25 @@ function addBindingCommands(project: Command): void {
     .action((projectId: string, _options, command: Command) =>
       bindingExport(projectId, command),
     );
-  binding
-    .command(APPLY)
-    .description("Apply a complete project binding set as JSON")
-    .argument("<project-id>", "Project ID")
-    .requiredOption(
-      "--file <path>",
-      "Binding set JSON file",
-      singleUse("--file"),
-    )
-    .option("--idempotency-key <key>", "Mutation key", singleUse(KEY_OPTION))
-    .action((projectId: string, _options, command: Command) =>
-      bindingApply(projectId, command),
-    );
+  addFileBodyHelp(
+    binding
+      .command(APPLY)
+      .description("Apply a complete project binding set as JSON")
+      .argument("<project-id>", "Project ID")
+      .requiredOption(
+        "--file <path>",
+        "Binding set JSON file",
+        singleUse("--file"),
+      )
+      .option("--idempotency-key <key>", "Mutation key", singleUse(KEY_OPTION)),
+    {
+      schema: bindingSetWriteInputSchema,
+      example: BINDING_APPLY_EXAMPLE,
+      note: "Copy version from binding export. The file replaces the whole binding set.",
+    },
+  ).action((projectId: string, _options, command: Command) =>
+    bindingApply(projectId, command),
+  );
   const revision = binding
     .command(REVISION)
     .description("Project binding revisions");
@@ -682,16 +722,21 @@ function addBindingCommands(project: Command): void {
       (projectId: string, bindingId: string, _options, command: Command) =>
         bindingInstructionFiles(projectId, bindingId, command),
     );
-  binding
-    .command(CHECK)
-    .description("Check an unsaved repository binding as JSON")
-    .argument("<project-id>", "Project ID")
-    .requiredOption(
-      "--file <path>",
-      "Repository binding JSON file",
-      singleUse("--file"),
-    )
-    .action((projectId: string, _options, command: Command) =>
-      bindingCheck(projectId, command),
-    );
+  addFileBodyHelp(
+    binding
+      .command(CHECK)
+      .description("Check an unsaved repository binding as JSON")
+      .argument("<project-id>", "Project ID")
+      .requiredOption(
+        "--file <path>",
+        "Repository binding JSON file",
+        singleUse("--file"),
+      ),
+    {
+      schema: projectOperations["binding.check"].input.shape.body,
+      example: BINDING_CHECK_EXAMPLE,
+    },
+  ).action((projectId: string, _options, command: Command) =>
+    bindingCheck(projectId, command),
+  );
 }

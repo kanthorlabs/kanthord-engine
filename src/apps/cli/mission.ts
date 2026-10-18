@@ -25,6 +25,8 @@ import {
   addPagination,
   addMutationOptions,
 } from "./mission-support.ts";
+import { IMPORT_MARKDOWN_NOTE, missionExamples } from "./mission-examples.ts";
+import { addFileBodyHelp } from "./file-body.ts";
 import { addControlCommands } from "./mission-control.ts";
 import { addRecordCommands } from "./mission-record.ts";
 import { addProposalCommands } from "./mission-proposal.ts";
@@ -85,6 +87,7 @@ const IMPORT_PREVIEW = "import.preview";
 const IMPORT_APPLY = "import.apply";
 const NODE_RETIRE = "node.retire";
 const RETIRE_FILE_SCHEMA = retireSchema.omit({ force: true });
+const IMPORT_EXAMPLE_MISSION_ID = "mission_01ARZ3NDEKTSV4RRFFQ69G5FAV";
 const UTF8 = "utf8";
 const FILE_NOT_FOUND = "cli.file.not_found";
 const FILE_NOT_REGULAR = "cli.file.not_regular";
@@ -601,6 +604,19 @@ function addImportCommands(mission: Command): void {
         "Mutation key",
         singleUse(KEY_OPTION),
       );
+    addFileBodyHelp(command, {
+      schema: importFileSchema(
+        action === APPLY ? importApplySchema : importSnapshotSchema,
+        IMPORT_EXAMPLE_MISSION_ID,
+        [],
+        action === APPLY ? IMPORT_APPLY : IMPORT_PREVIEW,
+      ),
+      example:
+        action === APPLY
+          ? missionExamples.importApply
+          : missionExamples.importPreview,
+      note: IMPORT_MARKDOWN_NOTE,
+    });
     command.action(
       (missionId: string, paths: string[], _options, leaf: Command) =>
         action === PREVIEW
@@ -645,6 +661,7 @@ function addNodeCommands(mission: Command): void {
       .command(CREATE)
       .description("Create a mission node as JSON")
       .argument("<mission-id>", "Mission ID"),
+    { schema: nodeCreateSchema, example: missionExamples.nodeCreate },
   ).action((missionId: string, _options, command: Command) =>
     nodeCreate(missionId, command),
   );
@@ -653,23 +670,34 @@ function addNodeCommands(mission: Command): void {
       .command(UPDATE)
       .description("Update a mission node as JSON")
       .argument("<node-id>", "Node ID"),
+    { schema: nodeUpdateSchema, example: missionExamples.nodeUpdate },
   ).action((nodeId: string, _options, command: Command) =>
     nodeUpdate(nodeId, command),
   );
-  const retire = node
-    .command(RETIRE)
-    .description("Retire a mission node or preview retirement")
-    .argument("<node-id>", "Node ID")
-    .option(
-      FILE_OPTION + " <path>",
-      "Required retirement JSON file",
-      singleUse(FILE_OPTION),
-    )
-    .option(KEY_OPTION + " <key>", "Mutation key", singleUse(KEY_OPTION))
-    .option("--force", "Remove dependencies of nonterminal dependents", false)
-    .action((nodeId: string, _options, command: Command) =>
-      nodeRetire(nodeId, command),
-    );
+  const retire = addFileBodyHelp(
+    node
+      .command(RETIRE)
+      .description("Retire a mission node or preview retirement")
+      .argument("<node-id>", "Node ID")
+      .option(
+        FILE_OPTION + " <path>",
+        "Required retirement JSON file",
+        singleUse(FILE_OPTION),
+      )
+      .option(KEY_OPTION + " <key>", "Mutation key", singleUse(KEY_OPTION))
+      .option(
+        "--force",
+        "Remove dependencies of nonterminal dependents",
+        false,
+      ),
+    {
+      schema: RETIRE_FILE_SCHEMA,
+      example: missionExamples.retire,
+      note: "Copy preview_digest from retire preview. Set force with --force, not in the file.",
+    },
+  ).action((nodeId: string, _options, command: Command) =>
+    nodeRetire(nodeId, command),
+  );
   retire
     .command(PREVIEW)
     .description("Preview node retirement as JSON")
@@ -691,6 +719,7 @@ function addNodeRebind(node: Command): void {
       .argument("<mission-id>", "Mission ID")
       .argument("<binding-id>", "Binding ID")
       .option("--node <node-id>", "Rebind only this node", singleUse("--node")),
+    { schema: REBIND_FILE_SCHEMA, example: missionExamples.rebind },
   ).action((missionId: string, bindingId: string, _options, command: Command) =>
     nodeRebind(missionId, bindingId, command),
   );
@@ -706,6 +735,7 @@ function addNodePriority(node: Command): void {
       .command(SET)
       .description("Set node priority")
       .argument("<node-id>", "Node ID"),
+    { schema: prioritySetSchema, example: missionExamples.prioritySet },
   ).action((nodeId: string, _options, command: Command) =>
     prioritySet(nodeId, command),
   );
@@ -746,6 +776,7 @@ function addDependencyCommands(mission: Command): void {
         )
         .argument("<node-id>", "Dependent node ID")
         .argument("<depends-on-id>", "Prerequisite node ID"),
+      { schema: graphEditSchema, example: missionExamples.graphEdit },
     ).action(
       (nodeId: string, dependsOnId: string, _options, command: Command) =>
         dependencyEdit(nodeId, dependsOnId, command, action),
@@ -763,6 +794,7 @@ function addCriterionCommands(mission: Command): void {
       .command(SET)
       .description("Set node criterion")
       .argument("<node-id>", "Node ID"),
+    { schema: criterionSetSchema, example: missionExamples.criterionSet },
   ).action((nodeId: string, _options, command: Command) =>
     criterionSet(nodeId, command),
   );

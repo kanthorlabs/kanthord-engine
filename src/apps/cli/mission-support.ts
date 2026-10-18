@@ -8,6 +8,7 @@ import {
   NODE_LIST_LIMIT_DEFAULT,
   NODE_LIST_LIMIT_MAX,
 } from "../../mission/contract.ts";
+import { addFileBodyHelp, type FileBody } from "./file-body.ts";
 import {
   handleMutationResult,
   handleReadResult,
@@ -104,12 +105,15 @@ export function addPagination(command: Command): Command {
     );
 }
 
-export function addMutationOptions(command: Command): Command {
-  return command
-    .requiredOption(
-      FILE_OPTION + " <path>",
-      "Request body JSON file",
-      singleUse(FILE_OPTION),
-    )
-    .option(KEY_OPTION + " <key>", "Mutation key", singleUse(KEY_OPTION));
+export function addMutationOptions(command: Command, body: FileBody): Command {
+  return addFileBodyHelp(
+    command
+      .requiredOption(
+        FILE_OPTION + " <path>",
+        "Request body JSON file",
+        singleUse(FILE_OPTION),
+      )
+      .option(KEY_OPTION + " <key>", "Mutation key", singleUse(KEY_OPTION)),
+    body,
+  );
 }

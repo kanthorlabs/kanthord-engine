@@ -15,6 +15,7 @@ import {
   addMutationOptions,
   mutate,
 } from "./mission-support.ts";
+import { missionExamples } from "./mission-examples.ts";
 
 const MIN_ATTEMPT_FILTER = 0;
 const LIST_INVALID_NODE_ID = "cli.mission.proposal.list.invalid_node_id";
@@ -69,6 +70,7 @@ export function addProposalCommands(mission: Command): void {
         "Approve a fix-node proposal and unblock its examine proposer",
       )
       .argument("<proposal-id>", "Proposal ID"),
+    { schema: proposalApproveSchema, example: missionExamples.proposalApprove },
   ).action(async (proposalId: string, _options, command: Command) => {
     if (!identitySchema(PROPOSAL_IDENTITY_PREFIX).safeParse(proposalId).success)
       throw new Diagnostic(APPROVE_INVALID_PROPOSAL_ID, "invalid proposal ID");

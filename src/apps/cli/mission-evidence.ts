@@ -10,6 +10,7 @@ import {
   pagination,
   printResult,
 } from "./mission-support.ts";
+import { missionExamples } from "./mission-examples.ts";
 import {
   singleUse,
   parsePositiveInt,
@@ -147,6 +148,7 @@ export function addEvidenceCommands(mission: Command): void {
       .command("submit")
       .description("Submit evidence for a node")
       .argument("<node-id>", "Node ID"),
+    { schema: evidenceSubmitSchema, example: missionExamples.evidenceSubmit },
   ).action(async (nodeId: string, _options, command: Command) => {
     if (!identitySchema("node").safeParse(nodeId).success)
       throw new Diagnostic(

@@ -13,6 +13,7 @@ import {
   QUEUE_LIST_LIMIT_MAX,
 } from "../../scheduler/contract.ts";
 import { CommandName } from "./constants.ts";
+import { addFileBodyHelp } from "./file-body.ts";
 import {
   handleMutationResult,
   handleReadResult,
@@ -31,6 +32,11 @@ const EXECUTION = "execution";
 const RELEASE = "release";
 const RELEASE_INDETERMINATE = "cli.scheduler.execution.release.indeterminate";
 const CLAIM = "claim";
+const RELEASE_EXAMPLE = { further_work: true, stop: null };
+const WORK_PULL_EXAMPLE = {
+  resource_identity: "worker:general-main",
+  runtime_identity: "worker_instance_01ARZ3NDEKTSV4RRFFQ69G5FAV",
+};
 const GET = "get";
 const LIST = "list";
 
@@ -221,35 +227,47 @@ export function addExecutionCommands(scheduler: Command): void {
     .action((projectId: string, _options, command: Command) =>
       executionList(projectId, command),
     );
-  execution
-    .command(RELEASE)
-    .description("Release an execution as JSON")
-    .argument("<execution-id>", "Execution ID")
-    .requiredOption(
-      "--file <path>",
-      "Execution release JSON file",
-      singleUse("--file"),
-    )
-    .option(
-      "--idempotency-key <key>",
-      "Mutation retry key",
-      singleUse("--idempotency-key"),
-    )
-    .action((executionId: string, _options, command: Command) =>
-      release(executionId, command),
-    );
+  addFileBodyHelp(
+    execution
+      .command(RELEASE)
+      .description("Release an execution as JSON")
+      .argument("<execution-id>", "Execution ID")
+      .requiredOption(
+        "--file <path>",
+        "Execution release JSON file",
+        singleUse("--file"),
+      )
+      .option(
+        "--idempotency-key <key>",
+        "Mutation retry key",
+        singleUse("--idempotency-key"),
+      ),
+    {
+      schema: executionReleaseSchema,
+      example: RELEASE_EXAMPLE,
+      note: 'Add stop as { "reason": <reason>, "code": <code or null> } only with further_work true.',
+    },
+  ).action((executionId: string, _options, command: Command) =>
+    release(executionId, command),
+  );
   const work = scheduler
     .command(WORK)
     .description("Acquire work for a registered instance");
   work.action(() => work.help());
-  work
-    .command(PULL)
-    .description("Pull compatible work as JSON")
-    .requiredOption("--file <path>", "Work pull JSON file", singleUse("--file"))
-    .option(
-      "--idempotency-key <key>",
-      "Mutation retry key",
-      singleUse("--idempotency-key"),
-    )
-    .action((_options, command: Command) => pull(command));
+  addFileBodyHelp(
+    work
+      .command(PULL)
+      .description("Pull compatible work as JSON")
+      .requiredOption(
+        "--file <path>",
+        "Work pull JSON file",
+        singleUse("--file"),
+      )
+      .option(
+        "--idempotency-key <key>",
+        "Mutation retry key",
+        singleUse("--idempotency-key"),
+      ),
+    { schema: workPullSchema, example: WORK_PULL_EXAMPLE },
+  ).action((_options, command: Command) => pull(command));
 }

@@ -121,6 +121,22 @@ fields have no default:
 - `secret`: a closed object of the secret shape of the platform. For `api_key`, `{ key }`, with a required nonempty
   string whose exact value is preserved. For `none`, `{}`.
 
+A complete `ssh` body. `port` is an integer, not a string:
+
+```json
+{
+  "name": "github-ssh",
+  "platform": "ssh",
+  "metadata": {
+    "host": "github.com",
+    "hostname": "github.com",
+    "port": 22,
+    "identity_file": "/home/user/.ssh/id_ed25519"
+  },
+  "secret": {}
+}
+```
+
 Custody validates the local schema and makes no remote call. HTTP
 `200` returns the credential answer with revision 1. The name is the natural key of
 creation. A taken name answers `409 credential.name.conflict`, with the identity
@@ -144,8 +160,10 @@ No positional arguments, no body and no pagination. HTTP `200` returns
 the platforms of the platform table of this component.
 `login_modes` is `[]` for a
 platform whose secret shape is not `oauth`. `metadata_fields` names the required
-string fields of the metadata. `verifiable` is `true` when the platform validation
-makes a remote call. The command answers only the shared error codes.
+string fields of the metadata and lists no other type. The `ssh` platform also
+requires the integer `port`, which `metadata_fields` leaves out. `verifiable` is
+`true` when the platform validation makes a remote call. The command answers
+only the shared error codes.
 
 ## `check`
 

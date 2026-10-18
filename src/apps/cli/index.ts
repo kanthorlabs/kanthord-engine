@@ -93,7 +93,10 @@ function addConfigCommand(program: Command): void {
       "Append a host to gateway.allowed_hosts (repeatable)",
       collectHost,
     )
-    .option("--gateway-bind <address>", "Set gateway.bind to this IP address")
+    .option(
+      "--gateway-bind <address>",
+      "Set gateway.bind to this IP address (default: 127.0.0.1; use :: in a container)",
+    )
     .option(
       "--gateway-base-path <path>",
       "Set gateway.base_path to this path prefix",

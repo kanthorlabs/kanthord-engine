@@ -10,6 +10,7 @@ import {
   nodeCheckSchema,
 } from "../../mission/contract.ts";
 import { singleUse } from "./shared.ts";
+import { missionExamples } from "./mission-examples.ts";
 import { addMutationOptions, mutate } from "./mission-support.ts";
 
 const PAUSE_INVALID_NODE = "cli.mission.node.pause.invalid_node_id";
@@ -20,6 +21,7 @@ export function addControlCommands(node: Command): void {
       .command("check")
       .description("Check unresolved external requests of a node")
       .argument("<node-id>", "Node ID"),
+    { schema: nodeCheckSchema, example: missionExamples.nodeCheck },
   ).action(async (nodeId: string, _options, command: Command) => {
     if (!identitySchema("node").safeParse(nodeId).success)
       throw new Diagnostic(
@@ -44,6 +46,7 @@ export function addControlCommands(node: Command): void {
         .command(name)
         .description(`${name[0]!.toUpperCase()}${name.slice(1)} a mission node`)
         .argument("<node-id>", "Node ID"),
+      { schema: humanActSchema, example: missionExamples[name] },
     ).action(async (nodeId: string, _options, command: Command) => {
       if (!identitySchema("node").safeParse(nodeId).success)
         throw new Diagnostic(code, "invalid node ID");
@@ -60,6 +63,7 @@ export function addControlCommands(node: Command): void {
       .command("ready")
       .description("Mark a node ready for evaluation")
       .argument("<node-id>", "Node ID"),
+    { schema: humanActSchema, example: missionExamples.ready },
   ).action(async (nodeId: string, _options, command: Command) => {
     if (!identitySchema("node").safeParse(nodeId).success)
       throw new Diagnostic(
@@ -78,6 +82,7 @@ export function addControlCommands(node: Command): void {
       .command("resume")
       .description("Resume a paused node")
       .argument("<node-id>", "Node ID"),
+    { schema: resumeSchema, example: missionExamples.resume },
   ).action(async (nodeId: string, _options, command: Command) => {
     if (!identitySchema("node").safeParse(nodeId).success)
       throw new Diagnostic(
@@ -96,6 +101,7 @@ export function addControlCommands(node: Command): void {
       .command("pause")
       .description("Pause a mission node")
       .argument("<node-id>", "Node ID"),
+    { schema: humanActSchema, example: missionExamples.pause },
   ).action(async (nodeId: string, _options, command: Command) => {
     if (!identitySchema("node").safeParse(nodeId).success)
       throw new Diagnostic(PAUSE_INVALID_NODE, "invalid node ID");
@@ -114,6 +120,7 @@ function addUnblockCommand(node: Command): void {
       .command("unblock")
       .description("Unblock a node")
       .argument("<node-id>", "Node ID"),
+    { schema: unblockSchema, example: missionExamples.unblock },
   ).action(async (nodeId: string, _options, command: Command) => {
     if (!identitySchema("node").safeParse(nodeId).success)
       throw new Diagnostic(
@@ -136,6 +143,10 @@ function addOverrideCommand(node: Command): void {
       .description("Assert node success")
       .argument("<node-id>", "Node ID")
       .requiredOption("--result <result>", "success", singleUse("--result")),
+    {
+      schema: overrideSchema.omit({ result: true }),
+      example: missionExamples.override,
+    },
   ).action(async (nodeId: string, _options, command: Command) => {
     if (!identitySchema("node").safeParse(nodeId).success)
       throw new Diagnostic(

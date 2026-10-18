@@ -395,6 +395,18 @@ tasks.
   `Waiting` opens the attempt when the node holds none, as `node ready` does;
   an open attempt stays open. Every other target opens no attempt.
   It resets no failure count and never invalidates a passing assessment merely by resuming.
+  A complete `Resume` file:
+
+  ```json
+  {
+    "reason": "Describe the reason of the act.",
+    "expected_mission_version": 1,
+    "expected_state": "Paused",
+    "expected_attempt": 0,
+    "target": "Available"
+  }
+  ```
+
 - Block accepts `HumanAct`, returns `ControlResult`, and requires `Paused`.
   It records the human reason in an outcome and closes an open attempt.
   When the attempt reads 0, it opens or closes no attempt.

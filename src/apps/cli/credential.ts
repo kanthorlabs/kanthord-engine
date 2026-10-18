@@ -14,6 +14,7 @@ import type { storageOperations } from "../../storage/contract.ts";
 import { httpClient, resolveClient } from "../../gateway/client.ts";
 import { Diagnostic } from "../../kernel/errors.ts";
 import { PROGRAM_NAME } from "./constants.ts";
+import { addFileBodyHelp } from "./file-body.ts";
 import {
   handleMutationResult,
   handleReadResult,
@@ -48,6 +49,7 @@ export type CredentialGroup = {
   name: string;
   description: string;
   operations: CredentialOperations;
+  example: { platform: string; metadata: unknown; secret: unknown };
 };
 
 export function credentialCode(
@@ -344,54 +346,71 @@ export function addCredentialCommand(
     .command(PLATFORMS)
     .description("List credential platforms as JSON")
     .action((_options, command: Command) => platforms(group, command));
-  credential
-    .command(CREATE)
-    .description("Create a credential as JSON")
-    .requiredOption(
-      "--file <path>",
-      "Private credential JSON file",
-      singleUse(FILE_OPTION),
-    )
-    .option(
-      "--idempotency-key <key>",
-      "Mutation key",
-      singleUse(IDEMPOTENCY_KEY_OPTION),
-    )
-    .action((_options, command: Command) => create(group, command));
-  credential
-    .command(ROTATE)
-    .description("Rotate a credential as JSON")
-    .argument("<credential-name>", "Credential name")
-    .requiredOption(
-      "--file <path>",
-      "Private credential JSON file",
-      singleUse(FILE_OPTION),
-    )
-    .option(
-      "--idempotency-key <key>",
-      "Mutation key",
-      singleUse(IDEMPOTENCY_KEY_OPTION),
-    )
-    .action((name: string, _options, command: Command) =>
-      rotate(group, name, command),
-    );
-  credential
-    .command(UPDATE_METADATA)
-    .description("Update credential metadata as JSON")
-    .argument("<credential-name>", "Credential name")
-    .requiredOption(
-      "--file <path>",
-      "Metadata JSON file",
-      singleUse(FILE_OPTION),
-    )
-    .option(
-      "--idempotency-key <key>",
-      "Mutation key",
-      singleUse(IDEMPOTENCY_KEY_OPTION),
-    )
-    .action((name: string, _options, command: Command) =>
-      updateMetadata(group, name, command),
-    );
+  addFileBodyHelp(
+    credential
+      .command(CREATE)
+      .description("Create a credential as JSON")
+      .requiredOption(
+        "--file <path>",
+        "Private credential JSON file",
+        singleUse(FILE_OPTION),
+      )
+      .option(
+        "--idempotency-key <key>",
+        "Mutation key",
+        singleUse(IDEMPOTENCY_KEY_OPTION),
+      ),
+    {
+      schema: credentialCreateSchema,
+      example: { name: "main", ...group.example },
+      note: "The file must have mode 0600.",
+    },
+  ).action((_options, command: Command) => create(group, command));
+  addFileBodyHelp(
+    credential
+      .command(ROTATE)
+      .description("Rotate a credential as JSON")
+      .argument("<credential-name>", "Credential name")
+      .requiredOption(
+        "--file <path>",
+        "Private credential JSON file",
+        singleUse(FILE_OPTION),
+      )
+      .option(
+        "--idempotency-key <key>",
+        "Mutation key",
+        singleUse(IDEMPOTENCY_KEY_OPTION),
+      ),
+    {
+      schema: credentialRotateBodySchema,
+      example: { expected_revision: 1, secret: group.example.secret },
+      note: "The file must have mode 0600. Add metadata to change it too.",
+    },
+  ).action((name: string, _options, command: Command) =>
+    rotate(group, name, command),
+  );
+  addFileBodyHelp(
+    credential
+      .command(UPDATE_METADATA)
+      .description("Update credential metadata as JSON")
+      .argument("<credential-name>", "Credential name")
+      .requiredOption(
+        "--file <path>",
+        "Metadata JSON file",
+        singleUse(FILE_OPTION),
+      )
+      .option(
+        "--idempotency-key <key>",
+        "Mutation key",
+        singleUse(IDEMPOTENCY_KEY_OPTION),
+      ),
+    {
+      schema: credentialUpdateMetadataBodySchema,
+      example: { expected_revision: 1, metadata: group.example.metadata },
+    },
+  ).action((name: string, _options, command: Command) =>
+    updateMetadata(group, name, command),
+  );
   credential
     .command(REVOKE)
     .description("Revoke a credential revision as JSON")
@@ -417,14 +436,20 @@ export function addCredentialCommand(
     .action((name: string, _options, command: Command) =>
       archive(group, name, command),
     );
-  credential
-    .command(CHECK)
-    .description("Check a typed credential secret before the save as JSON")
-    .requiredOption(
-      "--file <path>",
-      "Private credential JSON file",
-      singleUse(FILE_OPTION),
-    )
-    .action((_options, command: Command) => check(group, command));
+  addFileBodyHelp(
+    credential
+      .command(CHECK)
+      .description("Check a typed credential secret before the save as JSON")
+      .requiredOption(
+        "--file <path>",
+        "Private credential JSON file",
+        singleUse(FILE_OPTION),
+      ),
+    {
+      schema: credentialCheckBodySchema,
+      example: group.example,
+      note: "The file must have mode 0600. The body has no name.",
+    },
+  ).action((_options, command: Command) => check(group, command));
   return credential;
 }

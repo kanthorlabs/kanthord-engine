@@ -26,6 +26,16 @@ export function addRepositoryCommand(program: Command): void {
     name: CommandName.Repository,
     description: "Repository component commands",
     operations: repositoryOperations,
+    example: {
+      platform: "ssh",
+      metadata: {
+        host: "github.com",
+        hostname: "github.com",
+        port: 22,
+        identity_file: "/home/user/.ssh/id_ed25519",
+      },
+      secret: {},
+    },
   });
   credential
     .command(SSH_DISCOVER)
