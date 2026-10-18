@@ -140,6 +140,12 @@ export const agentSelectionSchema = z.strictObject({
   reasoning_effort: z.string().min(1),
 });
 export type AgentSelection = z.infer<typeof agentSelectionSchema>;
+export const agentPinSchema = z.strictObject({
+  agent_name: z.string().min(1),
+  enablement_id: identitySchema("agent_enablement"),
+  position: z.number().int().min(0),
+});
+export type AgentPin = z.infer<typeof agentPinSchema>;
 export const claimantSchema = z.strictObject({
   worker_binding_id: identitySchema("binding"),
   resource_identity: z.string().min(1),
@@ -207,7 +213,7 @@ export interface ExecutionRow {
   attempt: number;
   pinned_revision: number;
   credentials: string[];
-  agent_selections: AgentSelection[];
+  agent_pins: AgentPin[];
   expired_at: number;
   trace_id: string;
   root_span_id: string;
@@ -358,10 +364,19 @@ export const AgentChoiceKind = {
   Cooling: "cooling",
 } as const;
 export type AgentChoice =
-  | { kind: typeof AgentChoiceKind.Selected; selections: AgentSelection[] }
+  | {
+      kind: typeof AgentChoiceKind.Selected;
+      selections: AgentSelection[];
+      pins: AgentPin[];
+    }
   | { kind: typeof AgentChoiceKind.Cooling; until_at: number };
 export interface AgentChains {
   select(tx: Transaction, workerBindingId: string): AgentChoice;
+  resolve(
+    tx: Transaction,
+    workerBindingId: string,
+    pins: readonly AgentPin[],
+  ): AgentSelection[];
   providerFailure(
     tx: Transaction,
     selections: readonly AgentSelection[],

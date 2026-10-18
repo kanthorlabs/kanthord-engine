@@ -43,7 +43,7 @@ export function executionFixture(
     created_at: FIXTURE_NOW,
     ended_at: null,
     stop: null,
-    agent_selections: [],
+    agent_pins: [],
     ...overrides,
   };
   assert.ok(row.attempt > NO_REVISION);
@@ -90,7 +90,12 @@ export function schedulerHarness(
       },
     },
     agentChains: {
-      select: () => ({ kind: AgentChoiceKind.Selected, selections: [] }),
+      select: () => ({
+        kind: AgentChoiceKind.Selected,
+        selections: [],
+        pins: [],
+      }),
+      resolve: () => [],
       providerFailure: () => {},
       success: () => {},
     },

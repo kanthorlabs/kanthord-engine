@@ -306,8 +306,13 @@ const pinnedSelection = {
   model_identifier: "qwen3.6-plus",
   reasoning_effort: "high",
 };
+const pin = {
+  agent_name: "swe@1",
+  enablement_id: createIdentity("agent_enablement"),
+  position: 1,
+};
 
-test("the claim pins the selections and answers no work when a chain cools down", (t) => {
+test("the claim pins the chain positions and answers no work when a chain cools down", (t) => {
   const h = claimHarness(t);
   h.store.transaction((tx) =>
     h.service.insert(tx, h.row.node_id, h.row.project_id, 0),
@@ -324,15 +329,19 @@ test("the claim pins the selections and answers no work when a chain cools down"
   );
   h.dependencies.agentChains.select = (_tx, workerBindingId) => {
     assert.equal(workerBindingId, h.binding.binding_id);
-    return { kind: AgentChoiceKind.Selected, selections: [pinnedSelection] };
+    return {
+      kind: AgentChoiceKind.Selected,
+      selections: [pinnedSelection],
+      pins: [pin],
+    };
   };
   const claimed = h.claim();
   assert.equal(claimed.outcome, ClaimOutcome.Claimed);
-  assert.deepEqual(claimed.row?.agent_selections, [pinnedSelection]);
+  assert.deepEqual(claimed.row?.agent_pins, [pin]);
   assert.deepEqual(
     h.store.transaction((tx) => readExecution(tx, claimed.row!.execution_id))
-      ?.agent_selections,
-    [pinnedSelection],
+      ?.agent_pins,
+    [pin],
   );
 });
 

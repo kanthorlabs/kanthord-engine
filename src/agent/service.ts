@@ -62,6 +62,7 @@ import {
   getLatestRevision,
   insertEnablementRevision,
   listEnablements,
+  readEnablementRevision,
   agentProvidersDependentOn,
   enablementsByModel,
   type EnablementRow,
@@ -335,7 +336,11 @@ export const SelectionKind = {
 } as const;
 
 export type AgentSelectionResult =
-  | { kind: typeof SelectionKind.Selected; selection: AgentSelection }
+  | {
+      kind: typeof SelectionKind.Selected;
+      selection: AgentSelection;
+      enablement_id: string;
+    }
   | { kind: typeof SelectionKind.Cooling; until_at: number }
   | { kind: typeof SelectionKind.Invalid };
 
@@ -810,8 +815,11 @@ export class AgentComponent {
     }
     const entryOfChain = view.chain[view.active_position];
     assert.ok(entryOfChain);
+    const current = getEnablement(tx, agentName);
+    assert.ok(current);
     return {
       kind: SelectionKind.Selected,
+      enablement_id: current.id,
       selection: {
         agent_name: agentName,
         position: entryOfChain.position,
@@ -822,6 +830,38 @@ export class AgentComponent {
         model_identifier: entryOfChain.model_identifier,
         reasoning_effort: entryOfChain.reasoning_effort,
       },
+    };
+  }
+
+  selectionAt(
+    tx: Transaction,
+    agentName: string,
+    enablementId: string,
+    entry: AgentEntry | null,
+    position: number,
+  ): AgentSelection {
+    const revision = readEnablementRevision(tx, enablementId);
+    assert.ok(revision, "A pinned enablement revision must exist.");
+    assert.equal(revision.agent_name, agentName);
+    const item = chainConfigurations(
+      revision.default_configuration,
+      revision.fallback_configurations,
+      entry,
+    )[position];
+    assert.ok(item, "A pinned chain position must exist.");
+    const provider = revision.agent_providers.find(
+      ({ name }) => name === item.agent_provider,
+    );
+    assert.ok(provider, "A pinned chain entry must resolve a provider.");
+    return {
+      agent_name: agentName,
+      position,
+      level: item.level,
+      agent_provider: item.agent_provider,
+      provider: provider.provider,
+      credential: provider.credential,
+      model_identifier: item.model_identifier,
+      reasoning_effort: item.reasoning_effort,
     };
   }
 

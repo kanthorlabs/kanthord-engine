@@ -60,10 +60,13 @@ test("Execution records omit hosted attribution and refuse null or unknown field
     worker_binding_id: workerBindingId,
     resource_identity: resourceIdentity,
     runtime_identity: runtimeIdentity,
+    agent_pins: agentPins,
     ...row
   } = executionFixture();
+  assert.deepEqual(agentPins, []);
   const record = {
     ...row,
+    agent_selections: [],
     node_branch: `kanthord/${row.node_id}`,
     claimant: {
       worker_binding_id: workerBindingId,

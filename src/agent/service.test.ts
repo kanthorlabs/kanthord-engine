@@ -2403,6 +2403,89 @@ test("selection skips a cooling chain entry, returns the head after expiry and a
   assert.equal(recovered.selection.position, HEAD_POSITION);
 });
 
+const CHAIN_ENTRIES: ReadonlyArray<{
+  entry: AgentEntry | null;
+  length: number;
+}> = [
+  { entry: null, length: 3 },
+  { entry: { fallback_configurations: [spareHaiku] }, length: 2 },
+  { entry: { fallback_configurations: [] }, length: 1 },
+  {
+    entry: { model_identifier: HAIKU, fallback_configurations: [primaryOpus] },
+    length: 2,
+  },
+];
+
+test("selectionAt answers the claim selection of every chain position", (t) => {
+  for (const { entry, length } of CHAIN_ENTRIES) {
+    const f = enablementFixture(t);
+    f.invoke("enablement.put", chainBody);
+    const positions: number[] = [];
+    for (;;) {
+      const chosen = f.store.transaction((tx) =>
+        f.agent.selectAgent(tx, AGENT, entry),
+      );
+      if (chosen.kind === SelectionKind.Cooling) break;
+      assert.ok(chosen.kind === SelectionKind.Selected);
+      positions.push(chosen.selection.position);
+      assert.deepEqual(
+        f.store.transaction((tx) =>
+          f.agent.selectionAt(
+            tx,
+            AGENT,
+            chosen.enablement_id,
+            entry,
+            chosen.selection.position,
+          ),
+        ),
+        chosen.selection,
+      );
+      f.store.transaction((tx) =>
+        f.agent.recordProviderFailure(
+          tx,
+          [chosen.selection],
+          AdvancingFailure.RateLimited,
+          EXECUTION,
+          Date.now(),
+        ),
+      );
+    }
+    assert.equal(positions.length, length);
+    assert.deepEqual(positions, [...positions.keys()]);
+  }
+});
+
+test("selectionAt keeps the pinned enablement revision after a newer revision", (t) => {
+  const f = enablementFixture(t);
+  f.invoke("enablement.put", chainBody);
+  const chosen = f.store.transaction((tx) =>
+    f.agent.selectAgent(tx, AGENT, null),
+  );
+  assert.ok(chosen.kind === SelectionKind.Selected);
+  f.invoke("enablement.put", {
+    ...chainBody,
+    expected_revision: FIRST_REVISION,
+    default_configuration: { ...defaults, model_identifier: HAIKU },
+    fallback_configurations: [],
+  });
+  assert.deepEqual(
+    f.store.transaction((tx) =>
+      f.agent.selectionAt(tx, AGENT, chosen.enablement_id, null, 0),
+    ),
+    chosen.selection,
+  );
+  assert.throws(() =>
+    f.store.transaction((tx) =>
+      f.agent.selectionAt(tx, AGENT, chosen.enablement_id, null, 3),
+    ),
+  );
+  assert.throws(() =>
+    f.store.transaction((tx) =>
+      f.agent.selectionAt(tx, AGENT, "agent_enablement_absent", null, 0),
+    ),
+  );
+});
+
 test("a cooldown key is shared by every agent that names the credential and model, and an invalid chain selects nothing", (t) => {
   const f = enablementFixture(t);
   f.invoke("enablement.put", chainBody);

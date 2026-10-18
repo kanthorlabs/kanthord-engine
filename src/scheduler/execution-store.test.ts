@@ -197,3 +197,70 @@ test("record mapping omits hosted attribution and keeps ended registration attri
     assert.equal(retained.claim_state, ClaimState.Finished);
   });
 });
+
+test("the stored agent_selections column holds only the agent name, the enablement revision and the position", (t) => {
+  const h = schedulerHarness(t);
+  const pin = {
+    agent_name: "swe@1",
+    enablement_id: createIdentity("agent_enablement"),
+    position: 2,
+  };
+  const row = executionFixture({ agent_pins: [pin] });
+  h.store.transaction((tx) => insertExecution(tx, row));
+  const stored = h.store.transaction(
+    (tx) =>
+      tx.database
+        .prepare(
+          "SELECT agent_selections FROM scheduler_execution WHERE id = ?",
+        )
+        .get(row.execution_id)!.agent_selections,
+  );
+  assert.deepEqual(JSON.parse(stored as string), [pin]);
+  assert.deepEqual(
+    h.store.transaction(
+      (tx) => readExecution(tx, row.execution_id)?.agent_pins,
+    ),
+    [pin],
+  );
+  assert.throws(() =>
+    h.store.transaction((tx) =>
+      insertExecution(
+        tx,
+        executionFixture({
+          agent_pins: [{ ...pin, credential: "qwen-key" } as never],
+        }),
+      ),
+    ),
+  );
+});
+
+test("the record resolves the pins into the selections of the record", (t) => {
+  const h = schedulerHarness(t);
+  const pin = {
+    agent_name: "swe@1",
+    enablement_id: createIdentity("agent_enablement"),
+    position: 0,
+  };
+  const selection = {
+    agent_name: "swe@1",
+    position: 0,
+    level: "enablement" as const,
+    agent_provider: "qwen",
+    provider: "openai-compatible",
+    credential: "qwen-key",
+    model_identifier: "qwen3.6-plus",
+    reasoning_effort: "high",
+  };
+  const row = executionFixture({ agent_pins: [pin] });
+  const resolved: unknown[][] = [];
+  h.dependencies.agentChains.resolve = (_tx, workerBindingId, pins) => {
+    resolved.push([workerBindingId, pins]);
+    return [selection];
+  };
+  const record = h.store.transaction((tx) =>
+    executionRecord(tx, h.dependencies, row, FIXTURE_NOW),
+  );
+  assert.deepEqual(record.agent_selections, [selection]);
+  assert.equal(Object.hasOwn(record, "agent_pins"), false);
+  assert.deepEqual(resolved, [[row.worker_binding_id, [pin]]]);
+});

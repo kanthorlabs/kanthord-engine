@@ -34,6 +34,11 @@ export function release(
     const now = Date.now();
     const row = requireRunning(tx, executionId, proof.runtimeIdentity, now);
     released = row;
+    const selections = dependencies.agentChains.resolve(
+      tx,
+      row.worker_binding_id,
+      row.agent_pins,
+    );
     const code = body.stop?.code ?? null;
     if (
       body.stop?.reason === ExecutionStopReason.ProviderFailed &&
@@ -41,13 +46,13 @@ export function release(
     )
       dependencies.agentChains.providerFailure(
         tx,
-        row.agent_selections,
+        selections,
         code,
         executionId,
         now,
       );
     else if (body.stop?.reason !== ExecutionStopReason.ProviderFailed)
-      dependencies.agentChains.success(tx, row.agent_selections);
+      dependencies.agentChains.success(tx, selections);
     if (
       body.stop !== null &&
       body.stop.reason !== ExecutionStopReason.BudgetEnd

@@ -58,8 +58,12 @@ import { ActionPerformer } from "./action-performer.ts";
 import { executionSetup } from "./execution-setup.ts";
 import { clearedChangeRequests } from "./change-request.ts";
 import { authorizeModelInference } from "./authorization.ts";
-import { agentChoice } from "./agent-selection.ts";
-import type { AgentChoice } from "../scheduler/contract.ts";
+import { agentChoice, agentSelectionsAt } from "./agent-selection.ts";
+import type {
+  AgentChoice,
+  AgentPin,
+  AgentSelection,
+} from "../scheduler/contract.ts";
 import {
   agentsOfWorker,
   getWorkerDeclaration,
@@ -140,6 +144,13 @@ export class WorkerService implements Service {
   }
   agentChoice(tx: Transaction, workerBindingId: string): AgentChoice {
     return agentChoice(this.dependencies, this, tx, workerBindingId);
+  }
+  agentSelectionsAt(
+    tx: Transaction,
+    workerBindingId: string,
+    pins: readonly AgentPin[],
+  ): AgentSelection[] {
+    return agentSelectionsAt(this.dependencies, tx, workerBindingId, pins);
   }
   readonly registrations: WorkerRegistrations;
   readonly heartbeatClock: HeartbeatClock;

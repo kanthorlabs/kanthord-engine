@@ -17,6 +17,8 @@ const NOT_FOUND = "scheduler.execution.not_found";
 const SINGLE_ITEM_COUNT = 1;
 const TOTAL_ITEM_COUNT = 2;
 const CURSOR_INVALID = "system.pagination.cursor_invalid";
+const DISTINCT_PAGE_KEYS = 3;
+const NO_SELECTIONS = 0;
 const MARKER_BRANCH = "kanthord/marker";
 function harness(t: TestContext) {
   const h = schedulerHarness(t);
@@ -217,4 +219,79 @@ test("claim get isolates runtime, binding and project and distinguishes absent e
     h.store.transaction((tx) => readExecution(tx, h.row.execution_id)),
     h.row,
   );
+});
+
+test("execution list resolves one page with one resolve call for each distinct binding revision and pin", async (t) => {
+  const h = harness(t);
+  t.mock.method(Date, "now", () => FIXTURE_NOW);
+  const bindingA = createIdentity("binding");
+  const bindingB = createIdentity("binding");
+  const pin = {
+    agent_name: "swe@1",
+    enablement_id: createIdentity("agent_enablement"),
+    position: 0,
+  };
+  const rows = [
+    executionFixture({
+      project_id: h.row.project_id,
+      worker_binding_id: bindingA,
+      agent_pins: [pin],
+    }),
+    executionFixture({
+      project_id: h.row.project_id,
+      worker_binding_id: bindingA,
+      agent_pins: [pin],
+    }),
+    executionFixture({
+      project_id: h.row.project_id,
+      worker_binding_id: bindingB,
+      agent_pins: [pin],
+    }),
+  ];
+  h.store.transaction((tx) => {
+    for (const row of rows) insertExecution(tx, row);
+  });
+  const resolved: string[] = [];
+  h.dependencies.agentChains.resolve = (_tx, workerBindingId, pins) => {
+    resolved.push(workerBindingId);
+    return pins.map((item) => ({
+      agent_name: item.agent_name,
+      position: item.position,
+      level: "enablement" as const,
+      agent_provider: "qwen",
+      provider: "openai-compatible",
+      credential: workerBindingId,
+      model_identifier: "qwen3.6-plus",
+      reasoning_effort: "high",
+    }));
+  };
+  const listed = await h.invoke(
+    "executionList",
+    { params: { project_id: h.row.project_id }, query: {}, body: null },
+    h.caller,
+  );
+  assert.equal(listed.items.length, rows.length + SINGLE_ITEM_COUNT);
+  assert.equal(resolved.length, DISTINCT_PAGE_KEYS);
+  assert.deepEqual(
+    [...new Set(resolved)].sort(),
+    [bindingA, bindingB, h.row.worker_binding_id].sort(),
+  );
+  for (const item of listed.items)
+    assert.deepEqual(
+      item.agent_selections.map(({ credential }) => credential),
+      item.agent_selections.length === NO_SELECTIONS
+        ? []
+        : [item.claimant.worker_binding_id],
+    );
+  resolved.length = 0;
+  await h.invoke(
+    "executionGet",
+    {
+      params: { execution_id: rows[0]!.execution_id },
+      query: {},
+      body: null,
+    },
+    h.caller,
+  );
+  assert.deepEqual(resolved, [bindingA]);
 });
