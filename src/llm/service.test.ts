@@ -63,6 +63,7 @@ import {
 import { LlmComponent } from "./service.ts";
 import { scriptedModelRuntime } from "./test-support.ts";
 import { loadPi } from "../agent/pi.ts";
+import { redactingLogger } from "../kernel/test-support.ts";
 import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai";
 import { INTAKE_SERVICE_NAME } from "../intake/contract.ts";
 
@@ -113,6 +114,7 @@ function fixture(
     agentProvidersDependentOn?: AgentProvidersDependentOnFn;
     enablementsDependentOnModel?: EnablementsDependentOnModelFn;
     loadModelRuntime?: () => Promise<ModelRuntimeModule>;
+    logger?: Logger;
   } = {},
 ) {
   const store = new Store(IN_MEMORY_DATABASE);
@@ -120,10 +122,12 @@ function fixture(
     { service: CUSTODY_SERVICE_NAME, migrations: custodyMigrations },
   ]);
   const logs: { credential_id: string; human_identity: string }[] = [];
-  const logger = {
-    info: (record: { credential_id: string; human_identity: string }) =>
-      logs.push(record),
-  } as unknown as Logger;
+  const logger =
+    collaborations.logger ??
+    ({
+      info: (record: { credential_id: string; human_identity: string }) =>
+        logs.push(record),
+    } as unknown as Logger);
   const agentProvidersDependentOn =
     collaborations.agentProvidersDependentOn ?? (() => []);
   const custody = new CustodyComponent({
@@ -2006,6 +2010,9 @@ test("provider check refuses invalid input, an unknown or foreign credential and
 
 const MODEL_CHECK_CALLS = 2;
 const MODEL_CHECK_MODEL = "scripted-model";
+const MODEL_CHECK_FAILED_MESSAGE = "model check failed";
+const PROVIDER_CHECK_FAILED_MESSAGE = "provider check failed";
+const COMPATIBLE_NAME = "compatible";
 const MODEL_CHECK_BODY = {
   credential: "anthropic",
   model_identifier: MODEL_CHECK_MODEL,
@@ -2017,9 +2024,10 @@ const MODEL_REASONING_UNSUPPORTED_CODE = "llm.model.reasoning_unsupported";
 
 async function scriptedModelCheck(
   script: Parameters<typeof scriptedModelRuntime>[1],
+  logger?: Logger,
 ) {
   const scripted = scriptedModelRuntime(await loadPi(), script);
-  const f = fixture({ loadModelRuntime: async () => scripted.module });
+  const f = fixture({ loadModelRuntime: async () => scripted.module, logger });
   f.create({
     name: "anthropic",
     platform: Platform.Anthropic,
@@ -2060,6 +2068,47 @@ test("model check answers a provider failure with a redacted message", async (t)
   assert.ok(
     !f.logs.some((entry) => JSON.stringify(entry).includes(HEALTH_SECRET)),
   );
+});
+
+test("model check logs the credential name as credential_name without redaction", async (t) => {
+  const lines: string[] = [];
+  const { f } = await scriptedModelCheck(
+    [
+      fauxAssistantMessage("", {
+        stopReason: "error",
+        errorMessage: "401 invalid x-api-key",
+      }),
+    ],
+    redactingLogger(lines),
+  );
+  t.after(() => f.store.close());
+  await f.modelCheck(MODEL_CHECK_BODY);
+  const record = lines
+    .map((line) => JSON.parse(line))
+    .find((entry) => entry.msg === MODEL_CHECK_FAILED_MESSAGE);
+  assert.equal(record.credential_name, MODEL_CHECK_BODY.credential);
+  assert.ok(!lines.join("").includes("[Redacted]"));
+});
+
+test("provider check logs the credential name as credential_name without redaction", async (t) => {
+  const lines: string[] = [];
+  const f = fixture({ logger: redactingLogger(lines) });
+  t.after(() => f.store.close());
+  f.create({
+    name: COMPATIBLE_NAME,
+    platform: Platform.OpenAICompatible,
+    secret: { key: HEALTH_SECRET },
+    metadata: { base_url: HEALTH_BASE_URL, models: [] },
+  });
+  t.mock.method(globalThis, "fetch", async () => {
+    throw new Error("connection refused");
+  });
+  await f.providerCheck({ credential: COMPATIBLE_NAME });
+  const record = lines
+    .map((line) => JSON.parse(line))
+    .find((entry) => entry.msg === PROVIDER_CHECK_FAILED_MESSAGE);
+  assert.equal(record.credential_name, COMPATIBLE_NAME);
+  assert.ok(!lines.join("").includes("[Redacted]"));
 });
 
 test("model check refuses an unknown or foreign credential, an unknown model and an unsupported reasoning effort", async (t) => {

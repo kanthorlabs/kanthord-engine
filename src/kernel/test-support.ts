@@ -2,10 +2,16 @@ import { cpSync, mkdtempSync, rmSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { TestContext } from "node:test";
+import pino from "pino";
 import { diagnostic, diagnosticRows } from "./errors.ts";
+import { redaction } from "./log.ts";
 
 export function diagnosticText(error: unknown): string {
   return `${diagnostic(error)}\n${diagnosticRows(error)}`;
+}
+
+export function redactingLogger(lines: string[]): pino.Logger {
+  return pino({ redact: redaction }, { write: (line) => lines.push(line) });
 }
 
 export function temporaryDirectory(): string {

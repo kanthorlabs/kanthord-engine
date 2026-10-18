@@ -48,6 +48,8 @@ export const redactionPaths = [
   "config.client_secret",
 ];
 
+export const redaction = { paths: redactionPaths, censor: "[Redacted]" };
+
 export class OperationalLog {
   readonly logger: pino.Logger;
   private fd = 2;
@@ -68,7 +70,7 @@ export class OperationalLog {
     this.logger = pino(
       {
         level: config.level,
-        redact: { paths: redactionPaths, censor: "[Redacted]" },
+        redact: redaction,
       },
       {
         write: (line: string) => this.destination.write(line),
