@@ -556,16 +556,18 @@ The command runs in this order:
    `tracking.db` stays missing. A running server makes this fail with
    `system.database.initialization_failed` (`database is locked`). A database
    of another migration text fails with `system.database.migration.schema_mismatch`.
-   The command checks both files before it writes a backup or a change.
+   A `master_key` that differs from the one in `kanthord.db` fails with
+   `system.config.master_key_mismatch`. The command checks both files and the
+   master key before it writes a backup or a change.
 3. If nothing changes, print `up_to_date: <path>` and write nothing.
-4. Write the backups with one UTC timestamp: the original configuration to
-   `<path>.bak-<timestamp>`, and each database with a pending migration with
-   `VACUUM INTO` to `kanthord.db.bak-<timestamp>` or
-   `tracking.db.bak-<timestamp>` in the data directory. Print `backup: <path>`
-   for each. An existing backup path fails the command.
-5. Apply the pending migrations of `kanthord.db` and then of `tracking.db`,
-   one transaction each. Print `migrated: <service> <a> -> <b>` for each
-   service.
+4. Write the configuration backup `<path>.bak-<timestamp>` with one UTC
+   timestamp when a configuration step applies. Print `backup: <path>`.
+5. Take `kanthord.db`, then `tracking.db`. For each file with a pending
+   migration, write `VACUUM INTO` to `<file>.bak-<timestamp>` in the data
+   directory and print `backup: <path>`. Then apply the pending migrations of
+   that file, one transaction for each migration. Print
+   `migrated: <service> <a> -> <b>` for each service. An existing backup path
+   fails the command.
 6. Replace the configuration file atomically. Print
    `renamed: <old key> -> <new key>` for each rename, then
    `upgraded: <path>` and `config_version: <a> -> <b>`.
@@ -574,8 +576,10 @@ The command prints each row when its step happens. A later failure or a stop
 keeps the earlier rows, for example the backup paths, on stdout. Every value
 starts in column 17, after the longest row name `config_version:` and one space.
 
-A rerun after a failure resumes from the recorded state. Steps 1 to 4 write
-nothing to the configuration or the database.
+A rerun after a failure resumes from the recorded state. Steps 1 to 3 write
+nothing. Step 4 writes only the configuration backup. Step 5 writes the database
+backups and changes the databases. The command prints the backup path of a
+database before the `migrated` rows of that database.
 
 ## Application startup
 
