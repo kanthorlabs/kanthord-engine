@@ -554,10 +554,10 @@ The command runs in this order:
 2. If `kanthord.db` exists, open it with its exclusive lock and validate its
    migration history, then its schema. Do the same for `tracking.db`. A missing
    `tracking.db` stays missing. A running server makes this fail with
-   `system.database.initialization_failed` (`database is locked`). A database
+   `system.database.initialization_failed` (`database is locked`). A history
+   newer than the binary fails with
+   `system.database.migration.incompatible_history`. A database
    of another migration text fails with `system.database.migration.schema_mismatch`.
-   A history newer than the binary fails with
-   `system.database.migration.incompatible_history`.
    A `master_key` that differs from the one in `kanthord.db` fails with
    `system.config.master_key_mismatch`. The command checks both files and the
    master key before it writes a backup or a change.
