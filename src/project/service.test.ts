@@ -1508,7 +1508,7 @@ function tracedWorker(tags: unknown, worker = NATIVE_WORKER) {
   return { ...binding, config: { ...binding.config, tags } };
 }
 
-test("worker tags accept a key of 64 bytes and read an absent field as an empty list", async (t) => {
+test("worker tags accept a tag of 64 bytes and read an absent field as an empty list", async (t) => {
   const f = writeFixture(t);
   const read = () =>
     f.store.transaction((tx) =>
@@ -1532,7 +1532,7 @@ test("worker tags accept a key of 64 bytes and read an absent field as an empty 
   );
 });
 
-test("worker tags refuse a longer key, an upper-case key, an empty segment, a repeated key and a nonlist value", async (t) => {
+test("worker tags refuse a longer tag, an upper-case tag, an empty segment, a repeated tag and a nonlist value", async (t) => {
   const f = writeFixture(t);
   const before = f.snapshot();
   const cases: Array<{ tags: unknown; tag: string | null }> = [
