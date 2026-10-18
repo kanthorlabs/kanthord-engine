@@ -68,6 +68,36 @@ test("prefix declarations reject empty, non-word and unsafe regular-expression i
   }
 });
 
+const INVALID_PREFIXES = [
+  "",
+  "Project",
+  "project_",
+  "_project",
+  "worker__binding",
+  "worker-binding",
+  "project1",
+  ".*",
+  "project\n",
+];
+
+test("identitySchema answers one schema for each prefix", () => {
+  assert.ok(identitySchema("node") === identitySchema("node"));
+  assert.ok(identitySchema("node") !== identitySchema("task"));
+  const nodeId = `node_${suffix}`;
+  const taskId = `task_${suffix}`;
+  assert.equal(identitySchema("node").safeParse(nodeId).success, true);
+  assert.equal(identitySchema("node").safeParse(taskId).success, false);
+  assert.equal(identitySchema("task").safeParse(taskId).success, true);
+  assert.equal(identitySchema("task").safeParse(nodeId).success, false);
+});
+
+test("identitySchema refuses an invalid prefix on each call", () => {
+  for (const prefix of INVALID_PREFIXES) {
+    assert.throws(() => identitySchema(prefix), assert.AssertionError);
+    assert.throws(() => identitySchema(prefix), assert.AssertionError);
+  }
+});
+
 test("the separate bare ULID scalar preserves protocol contracts without admitting entity IDs", () => {
   assert.equal(ulidSchema.parse(suffix), suffix);
   assert.equal(
