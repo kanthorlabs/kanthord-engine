@@ -141,6 +141,19 @@ export function getEnablement(
   return row && row.removed_at === null ? toEnablement(row) : null;
 }
 
+export function readEnablementRevision(
+  tx: Transaction,
+  id: string,
+): EnablementRow | null {
+  const row = tx.database
+    .prepare(
+      `SELECT id, agent_name, revision, state, agent_providers, default_configuration, fallback_configurations, created_at, removed_at
+       FROM agent_enablement WHERE id = ?`,
+    )
+    .get(id) as DatabaseRow | undefined;
+  return row ? toEnablement(row) : null;
+}
+
 export function getLatestRevision(
   tx: Transaction,
   agentName: string,

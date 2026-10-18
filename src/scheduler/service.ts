@@ -233,7 +233,14 @@ export class SchedulerService implements Service, WorkQueue {
     return settlement.requireRunning(tx, executionId, runtimeIdentity, now);
   }
   agentSelectionsOf(tx: Transaction, executionId: string): AgentSelection[] {
-    return readExecution(tx, executionId)?.agent_selections ?? [];
+    const row = readExecution(tx, executionId);
+    return row
+      ? this.dependencies.agentChains.resolve(
+          tx,
+          row.worker_binding_id,
+          row.agent_pins,
+        )
+      : [];
   }
   unmatchedClaims(tx: Transaction, projectId: string): UnmatchedClaim[] {
     return unmatchedClaims(tx, this.dependencies, projectId);

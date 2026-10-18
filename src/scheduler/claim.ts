@@ -5,7 +5,7 @@ import type { Transaction } from "../kernel/store.ts";
 import {
   AgentChoiceKind,
   EXECUTION_IDENTITY_PREFIX,
-  type AgentSelection,
+  type AgentPin,
   type Claimant,
   traceIdSchema,
   spanIdSchema,
@@ -90,7 +90,7 @@ function acquire(
   pull: WorkPull,
   binding: Binding,
   declaration: Declaration,
-  selections: AgentSelection[],
+  pins: AgentPin[],
   now: number,
 ): ClaimResult {
   const executionId = createIdentity(EXECUTION_IDENTITY_PREFIX);
@@ -126,7 +126,7 @@ function acquire(
     attempt: selected.claim.attempt,
     pinned_revision: selected.claim.node_revision,
     credentials: [],
-    agent_selections: selections,
+    agent_pins: pins,
     expired_at:
       now +
       wallTimeMs +
@@ -188,7 +188,7 @@ export function claimOnce(
     pull,
     binding,
     declaration,
-    choice.selections,
+    choice.pins,
     now,
   );
   return { ...result, settled: result.settled || settled };

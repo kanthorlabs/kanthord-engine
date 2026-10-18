@@ -280,6 +280,8 @@ export function composeServices(options: {
     },
     agentChains: {
       select: (tx, workerBindingId) => worker.agentChoice(tx, workerBindingId),
+      resolve: (tx, workerBindingId, pins) =>
+        worker.agentSelectionsAt(tx, workerBindingId, pins),
       providerFailure: (...args) => {
         agent.recordProviderFailure(...args);
       },
@@ -478,6 +480,8 @@ export function composeServices(options: {
       agentView: (tx, name, entry, models) =>
         agent.agentView(tx, name, entry, models),
       selectAgent: (tx, name, entry) => agent.selectAgent(tx, name, entry),
+      selectionAt: (tx, name, enablementId, entry, position) =>
+        agent.selectionAt(tx, name, enablementId, entry, position),
     },
   });
   const mission: MissionService = new MissionService({

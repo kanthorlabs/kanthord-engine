@@ -2,7 +2,12 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { Transaction } from "../kernel/store.ts";
 import { AgentChoiceKind, type AgentSelection } from "../scheduler/contract.ts";
-import { agentChoice, entryOf, pinnedEntry } from "./agent-selection.ts";
+import {
+  agentChoice,
+  agentSelectionsAt,
+  entryOf,
+  pinnedEntry,
+} from "./agent-selection.ts";
 import { TWO_AGENT_WORKER, twoAgentDeclarationOf } from "./test-support.ts";
 import type { WorkerEntry } from "./contract.ts";
 
@@ -19,6 +24,9 @@ const pin: AgentSelection = {
   model_identifier: "qwen3.6-plus",
   reasoning_effort: "high",
 };
+const BINDING = "binding";
+const ENABLEMENT = "agent_enablement_01ARZ3NDEKTSV4RRFFQ69G5FAA";
+const swePin = { agent_name: SWE, enablement_id: ENABLEMENT, position: 1 };
 const tuning = { reasoning_effort: "low" };
 const tx = {} as Transaction;
 
@@ -35,10 +43,16 @@ test("a pinned selection replaces the entry of its agent with a complete entry a
   assert.equal(entryOf([{ agent: SWE, ...tuning }], RE), null);
 });
 
+const selected = {
+  kind: "selected" as const,
+  selection: pin,
+  enablement_id: ENABLEMENT,
+};
+
 function choice(
   results: Record<
     string,
-    | { kind: "selected"; selection: AgentSelection }
+    | { kind: "selected"; selection: AgentSelection; enablement_id: string }
     | { kind: "cooling"; until_at: number }
     | { kind: "invalid" }
   >,
@@ -71,22 +85,49 @@ function choice(
 }
 
 test("the agent choice pins every selected agent, skips an invalid one and answers cooling for one cooling agent", () => {
-  assert.deepEqual(choice({ [SWE]: { kind: "selected", selection: pin } }), {
+  assert.deepEqual(choice({ [SWE]: selected }), {
     kind: AgentChoiceKind.Selected,
     selections: [pin],
+    pins: [swePin],
   });
   assert.deepEqual(
     choice({
-      [SWE]: { kind: "selected", selection: pin },
+      [SWE]: selected,
       [RE]: { kind: "invalid" },
     }),
-    { kind: AgentChoiceKind.Selected, selections: [pin] },
+    { kind: AgentChoiceKind.Selected, selections: [pin], pins: [swePin] },
   );
   assert.deepEqual(
     choice({
-      [SWE]: { kind: "selected", selection: pin },
+      [SWE]: selected,
       [RE]: { kind: "cooling", until_at: UNTIL },
     }),
     { kind: AgentChoiceKind.Cooling, until_at: UNTIL },
   );
+});
+
+test("agentSelectionsAt resolves each pin against the entry of its agent in the pinned binding revision", () => {
+  const calls: unknown[][] = [];
+  const dependencies = {
+    workerBindingRowOf: (_tx: Transaction, bindingId: string) => {
+      assert.equal(bindingId, BINDING);
+      return { entries: [{ agent: SWE, ...tuning }] } as never;
+    },
+    agentConfiguration: {
+      selectionAt: (...args: unknown[]) => {
+        calls.push(args.slice(1));
+        return pin;
+      },
+    } as never,
+  };
+  const rePin = { agent_name: RE, enablement_id: ENABLEMENT, position: 0 };
+  assert.deepEqual(
+    agentSelectionsAt(dependencies, tx, BINDING, [swePin, rePin]),
+    [pin, pin],
+  );
+  assert.deepEqual(calls, [
+    [SWE, ENABLEMENT, tuning, 1],
+    [RE, ENABLEMENT, null, 0],
+  ]);
+  assert.deepEqual(agentSelectionsAt(dependencies, tx, BINDING, []), []);
 });

@@ -4,10 +4,12 @@ import { canonicalJSON } from "../kernel/json.ts";
 import { identitySchema } from "../kernel/identity.ts";
 import type { Transaction } from "../kernel/store.ts";
 import {
-  agentSelectionSchema,
+  agentPinSchema,
   ClaimState,
   ExecutionStopReason,
   releaseStopSchema,
+  type AgentChains,
+  type AgentSelection,
   type ReleaseStop,
   type ExecutionRow,
   type ExecutionRecord,
@@ -18,21 +20,19 @@ import {
 const NO_ROWS = 0;
 const ONE_ROW = 1;
 const credentialList = z.array(identitySchema("credential"));
-const selectionList = z.array(agentSelectionSchema);
+const pinList = z.array(agentPinSchema);
 const storedStop = releaseStopSchema.nullable();
 interface RecordDependencies {
   registrations: InstanceRegistrations;
   branches: MissionBranches;
+  agentChains: Pick<AgentChains, "resolve">;
 }
 const COLUMNS = `id AS execution_id, project_id, node_id,
   worker_binding_id, resource_identity,
   runtime_identity, attempt, pinned_revision,
   credentials, expired_at, trace_id, root_span_id,
   created_at, ended_at, stop, agent_selections`;
-type StoredRow = Omit<
-  ExecutionRow,
-  "credentials" | "stop" | "agent_selections"
-> & {
+type StoredRow = Omit<ExecutionRow, "credentials" | "stop" | "agent_pins"> & {
   credentials: string;
   stop: string | null;
   agent_selections: string | null;
@@ -46,10 +46,11 @@ function decode(row: StoredRow): ExecutionRow {
     row.stop === null ? null : JSON.parse(row.stop),
   );
   assert.ok(stop === null || row.ended_at !== null);
-  const agentSelections = selectionList.parse(
-    row.agent_selections === null ? [] : JSON.parse(row.agent_selections),
+  const { agent_selections: storedPins, ...fields } = row;
+  const agentPins = pinList.parse(
+    storedPins === null ? [] : JSON.parse(storedPins),
   );
-  return { ...row, credentials, stop, agent_selections: agentSelections };
+  return { ...fields, credentials, stop, agent_pins: agentPins };
 }
 
 export function insertExecution(tx: Transaction, row: ExecutionRow): void {
@@ -82,7 +83,7 @@ export function insertExecution(tx: Transaction, row: ExecutionRow): void {
       row.created_at,
       row.ended_at,
       row.stop === null ? null : canonicalJSON(row.stop),
-      canonicalJSON(selectionList.parse(row.agent_selections)),
+      canonicalJSON(pinList.parse(row.agent_pins)),
     );
 }
 
@@ -225,6 +226,7 @@ export function executionRecord(
     dependencies.registrations,
     row,
     nodeBranchOfExecution(tx, dependencies.branches, row),
+    dependencies.agentChains.resolve(tx, row.worker_binding_id, row.agent_pins),
     now,
   );
 }
@@ -239,28 +241,50 @@ export function executionRecords(
     rows.map((row) => ({ node_id: row.node_id, attempt: row.attempt })),
   );
   assert.equal(nodeBranches.length, rows.length);
-  return rows.map((row, index) =>
-    recordOf(tx, dependencies.registrations, row, nodeBranches[index]!, now),
-  );
+  const memo = new Map<string, AgentSelection[]>();
+  return rows.map((row, index) => {
+    const key = canonicalJSON([row.worker_binding_id, row.agent_pins]);
+    let selections = memo.get(key);
+    if (!selections) {
+      selections = dependencies.agentChains.resolve(
+        tx,
+        row.worker_binding_id,
+        row.agent_pins,
+      );
+      memo.set(key, selections);
+    }
+    return recordOf(
+      tx,
+      dependencies.registrations,
+      row,
+      nodeBranches[index]!,
+      selections,
+      now,
+    );
+  });
 }
 function recordOf(
   tx: Transaction,
   registrations: InstanceRegistrations,
   row: ExecutionRow,
   nodeBranch: string,
+  selections: AgentSelection[],
   now: number,
 ): ExecutionRecord {
   const {
     worker_binding_id: workerBindingId,
     resource_identity: resourceIdentity,
     runtime_identity: runtimeIdentity,
+    agent_pins: pins,
     ...fields
   } = row;
   assert.ok(workerBindingId.length > NO_ROWS);
   assert.ok(runtimeIdentity.length > NO_ROWS);
+  assert.equal(selections.length, pins.length);
   const attribution = registrations.clientAttributionOf(tx, runtimeIdentity);
   return {
     ...fields,
+    agent_selections: selections,
     node_branch: nodeBranch,
     claimant: {
       worker_binding_id: workerBindingId,
