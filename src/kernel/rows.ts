@@ -13,17 +13,22 @@ function present(rows: readonly Row[]): (readonly [string, string])[] {
   );
 }
 
+export function rowWidth(names: readonly string[]): number {
+  return Math.max(
+    0,
+    ...names.map((name) => name.length + NAME_SUFFIX.length + VALUE_GAP),
+  );
+}
+
 export function formatRows(
   rows: readonly Row[],
   urls: readonly Row[] = [],
+  width?: number,
 ): string {
   const values = present(rows);
-  const width = Math.max(
-    0,
-    ...values.map(([name]) => name.length + NAME_SUFFIX.length + VALUE_GAP),
-  );
+  const column = width ?? rowWidth(values.map(([name]) => name));
   const lines = values.map(
-    ([name, value]) => `${`${name}${NAME_SUFFIX}`.padEnd(width)}${value}`,
+    ([name, value]) => `${`${name}${NAME_SUFFIX}`.padEnd(column)}${value}`,
   );
   const links = present(urls).flatMap(([name, url]) => [
     `${name}${NAME_SUFFIX}`,

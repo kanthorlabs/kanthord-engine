@@ -15,10 +15,16 @@ import {
   enforceMasterKey,
   serverMigrations,
 } from "../server/index.ts";
+import { Diagnostic } from "../../kernel/errors.ts";
 import { ExitCode } from "./constants.ts";
+import { upgrade } from "./upgrade.ts";
 import { runKanthord, spawnKanthord } from "./test-support.ts";
 
 const PRIVATE_FILE_MODE = 0o600;
+const FIXED_NOW = "2026-10-18T00:36:01.000Z";
+const FIXED_STAMP = "20261018T003601";
+const BACKUP_FAILED = "system.database.backup_failed";
+const CONFIGURATION_BACKUP_ONLY = 1;
 const BACKUPS_OF_CONFIGURATION_AND_DATABASE = 2;
 const CURRENT_VERSION_LINE = `version: ${CONFIG_VERSION}\n`;
 const OLD_KEY = "consecutive_loss_limit";
@@ -127,7 +133,7 @@ test("serve refuses an older configuration and an older database, and upgrade br
 
   const again = await run(paths.env, "upgrade");
   assert.equal(again.status, ExitCode.Success, again.stderr);
-  assert.equal(again.stdout, `up_to_date: ${paths.config}\n`);
+  assert.equal(again.stdout, `up_to_date:     ${paths.config}\n`);
 });
 
 test("upgrade changes nothing while another process holds the database", async (t) => {
@@ -204,4 +210,28 @@ test("upgrade refuses another master_key before the backups and the migrations",
     history,
   );
   after.close();
+});
+
+test("upgrade writes each row when it happens, before a later step fails", async (t) => {
+  const paths = layout(temporary(t));
+  writePrivate(paths.config, legacyConfig());
+  olderDatabase(paths.database);
+  const now = new Date(FIXED_NOW);
+  writePrivate(`${paths.database}.bak-${FIXED_STAMP}`, "");
+  const previous = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = paths.env.XDG_DATA_HOME;
+  t.after(() => {
+    process.env.XDG_DATA_HOME = previous;
+  });
+  const written: string[] = [];
+  await assert.rejects(
+    upgrade(paths.config, (text) => written.push(text), now),
+    (error) =>
+      error instanceof Diagnostic &&
+      error.code === BACKUP_FAILED &&
+      written.length === CONFIGURATION_BACKUP_ONLY,
+  );
+  assert.deepEqual(written, [
+    `backup:         ${paths.config}.bak-${FIXED_STAMP}\n`,
+  ]);
 });

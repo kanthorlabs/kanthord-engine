@@ -17,7 +17,7 @@ import type { Server } from "../server/index.ts";
 import { gatewayOperations } from "../../gateway/contract.ts";
 import { httpClient } from "../../gateway/client.ts";
 import { packageVersion } from "../../kernel/version.ts";
-import { formatRows, type Row } from "../../kernel/rows.ts";
+import { formatRows } from "../../kernel/rows.ts";
 import { OperationResultType } from "../../kernel/operation.ts";
 import { resolveClient } from "../../gateway/client.ts";
 import { addWorkerCommand } from "./worker.ts";
@@ -148,12 +148,7 @@ function addUpgradeCommand(program: Command): void {
   configHelp(command);
   command.action(async () => {
     const { upgrade } = await import("./upgrade.ts");
-    const rows: Row[] = [];
-    try {
-      await upgrade(effectivePath(command), rows);
-    } finally {
-      process.stdout.write(formatRows(rows));
-    }
+    await upgrade(effectivePath(command), (text) => process.stdout.write(text));
   });
 }
 

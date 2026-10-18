@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { formatRows } from "./rows.ts";
+import { formatRows, rowWidth } from "./rows.ts";
 
 const URL = "https://auth.example/device?user_code=ABCD-EFGH";
 const NO_OUTPUT = "";
+const FIXED_WIDTH = 16;
+const FIXED_WIDTH_ROW = "backup:         /a\n";
 const ALIGNED_ROWS =
   "session_id:      lls_1\ncount:           0\nidempotency_key: 01K0000000000000000000000A\n";
 const REPEATED_ROWS = "backup: /a\nbackup: /b\n";
@@ -39,4 +41,10 @@ test("repeated names keep their order", () => {
     ]),
     REPEATED_ROWS,
   );
+});
+
+test("a fixed width from a closed name set aligns rows that print one at a time", () => {
+  const width = rowWidth(["up_to_date", "config_version"]);
+  assert.equal(width, FIXED_WIDTH);
+  assert.equal(formatRows([["backup", "/a"]], [], width), FIXED_WIDTH_ROW);
 });
