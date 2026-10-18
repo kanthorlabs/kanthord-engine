@@ -290,7 +290,7 @@ export function composeServices(options: {
       resolve: (tx, workerBindingId, pins) =>
         worker.agentSelectionsAt(tx, workerBindingId, pins),
       providerFailure: (tx, selections, code, executionId, now) => {
-        agent.recordProviderFailure(tx, selections, code, now, executionId);
+        agent.recordProviderFailure(tx, selections, code, executionId, now);
       },
       success: (tx, selections, executionId) => {
         agent.recordSuccess(tx, selections, executionId);

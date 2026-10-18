@@ -283,7 +283,7 @@ function pinHarness(t: TestContext) {
         ),
       ),
     providerFailure: (tx, selections, code, executionId, now) => {
-      agent.recordProviderFailure(tx, selections, code, now, executionId);
+      agent.recordProviderFailure(tx, selections, code, executionId, now);
     },
     success: (tx, selections, executionId) => {
       chainCalls.push({ method: "success", arguments: [selections] });
@@ -417,8 +417,8 @@ test("an enablement edit, a binding edit and a hold during a live execution keep
       tx,
       [selection],
       AdvancingFailure.RateLimited,
-      FIXTURE_NOW,
       createIdentity("execution"),
+      FIXTURE_NOW,
     ),
   );
   const fresh = h.store.transaction((tx) =>

@@ -2394,7 +2394,7 @@ function holdFixture(
   };
   const fail = (selection: AgentSelection, code: AdvancingFailure) =>
     f.store.transaction((tx) =>
-      f.agent.recordProviderFailure(tx, [selection], code, now, EXECUTION_ID),
+      f.agent.recordProviderFailure(tx, [selection], code, EXECUTION_ID, now),
     );
   const succeed = (selection: AgentSelection) =>
     f.store.transaction((tx) =>
@@ -2532,8 +2532,8 @@ test("a provider failure logs agent.fallback.cooldown_started once per credentia
         },
       ],
       AdvancingFailure.RateLimited,
-      f.now(),
       EXECUTION_ID,
+      f.now(),
     ),
   );
   const availableAt = f.now() + COOLDOWN_DEFAULTS.rate_limited_ms;
@@ -2567,11 +2567,21 @@ test("a release of a hold logs agent.fallback.cooldown_cleared and a release wit
   const { logger, logs } = capturedLogger();
   const f = holdFixture(t, { logger });
   const head = f.selected();
+  const sameCredentialOtherModel = f.view().chain[2];
+  assert.ok(sameCredentialOtherModel);
+  assert.equal(sameCredentialOtherModel.credential, head.credential);
+  const sameCredential = {
+    ...head,
+    position: sameCredentialOtherModel.position,
+    model_identifier: sameCredentialOtherModel.model_identifier,
+  };
   f.succeed(head);
   assert.deepEqual(logs, []);
   f.fail(head, AdvancingFailure.RateLimited);
   logs.length = 0;
-  f.succeed(head);
+  f.store.transaction((tx) =>
+    f.agent.recordSuccess(tx, [head, sameCredential], EXECUTION_ID),
+  );
   assert.deepEqual(logs, [
     {
       level: pino.levels.values.info,
@@ -2659,8 +2669,8 @@ test("selectionAt answers the claim selection of every chain position", (t) => {
           tx,
           [chosen.selection],
           AdvancingFailure.RateLimited,
-          Date.now(),
           EXECUTION_ID,
+          Date.now(),
         ),
       );
     }
@@ -2713,8 +2723,8 @@ test("a hold is shared by every agent that names the credential, and an invalid 
       tx,
       [selected.selection],
       AdvancingFailure.RateLimited,
-      Date.now(),
       EXECUTION_ID,
+      Date.now(),
     ),
   );
   const other = f.store.transaction((tx) =>
@@ -2744,8 +2754,8 @@ test("a human lists the holds and clears one by credential name, and a clear of 
       tx,
       [selected.selection],
       AdvancingFailure.QuotaExhausted,
-      now,
       EXECUTION_ID,
+      now,
     ),
   );
   assert.deepEqual(f.invoke("cooldown.list", null, {}), {

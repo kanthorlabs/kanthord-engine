@@ -860,8 +860,8 @@ export class AgentComponent {
     tx: Transaction,
     selections: readonly AgentSelection[],
     code: AdvancingFailure,
-    now: number,
     executionId: string,
+    now: number,
   ): void {
     const { credentialHolds, config } = this.dependencies;
     for (const credential of uniqueCredentials(selections)) {
