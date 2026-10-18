@@ -58,7 +58,6 @@ const MISSION_DEPENDENCY_TABLE = "mission_dependency";
 const MISSION_ATTEMPT_TABLE = "mission_attempt";
 const MISSION_EVIDENCE_TABLE = "mission_evidence";
 const MISSION_EVIDENCE_ASSET_TABLE = "mission_evidence_asset";
-const MISSION_EVIDENCE_UPLOAD_FAILURE_TABLE = "mission_evidence_upload_failure";
 const MISSION_ASSESSMENT_TABLE = "mission_assessment";
 const MISSION_OUTCOME_TABLE = "mission_outcome";
 const MISSION_PROPOSAL_TABLE = "mission_proposal";
@@ -74,7 +73,6 @@ const ERD2_MISSION_TABLES = [
   MISSION_EVIDENCE_ASSET_TABLE,
   MISSION_ASSESSMENT_TABLE,
   MISSION_OUTCOME_TABLE,
-  MISSION_EVIDENCE_UPLOAD_FAILURE_TABLE,
   MISSION_PROPOSAL_TABLE,
 ];
 const MISSION_TABLES = [
@@ -108,7 +106,6 @@ const ALL_TABLES = [
   MISSION_DEPENDENCY_TABLE,
   MISSION_EVIDENCE_TABLE,
   MISSION_EVIDENCE_ASSET_TABLE,
-  MISSION_EVIDENCE_UPLOAD_FAILURE_TABLE,
   MISSION_MISSION_TABLE,
   MISSION_NODE_TABLE,
   MISSION_NODE_REVISION_TABLE,
@@ -396,7 +393,7 @@ test("each service migration set applies alone to an empty store", () => {
   }
 });
 
-test("all ERD 1, ERD 2 and ERD 3 migrations produce exactly the twenty-three tables", () => {
+test("all ERD 1, ERD 2 and ERD 3 migrations produce exactly the twenty-two tables", () => {
   const allServices: Migrations = [
     { service: CUSTODY_SERVICE_NAME, migrations: custodyMigrations },
     { service: SCHEDULER_SERVICE_NAME, migrations: schedulerMigrations },
@@ -521,7 +518,6 @@ function assertSchemaRules(store: Store, owners: ReadonlyMap<string, string>) {
     "mission_attempt.node_id->mission_node.id",
     "mission_evidence.node_id->mission_node.id",
     "mission_evidence_asset.evidence_id->mission_evidence.id",
-    "mission_evidence_upload_failure.node_id->mission_node.id",
     "mission_outcome.assessment_id->mission_assessment.id",
     "mission_outcome.node_id->mission_node.id",
     "mission_proposal.assessment_id->mission_assessment.id",
@@ -693,28 +689,4 @@ test("Mission lookups search the lookup indexes", (t) => {
     ),
     /SEARCH mission_evidence_asset USING INDEX mission_evidence_asset_evidence \(evidence_id=\?\)/,
   );
-});
-
-test("the upload failure table keys a failed check by node, attempt and storage binding", () => {
-  const store = new Store(IN_MEMORY_DATABASE);
-  try {
-    store.migrate([
-      { service: MISSION_SERVICE_NAME, migrations: missionMigrations },
-    ]);
-    const columns = store.database
-      .prepare(`PRAGMA table_info('${MISSION_EVIDENCE_UPLOAD_FAILURE_TABLE}')`)
-      .all();
-    assert.deepEqual(
-      columns.map((row) => [row.name, row.type, row.notnull, row.pk]),
-      [
-        ["node_id", "TEXT", 1, 1],
-        ["attempt", "INTEGER", 1, 2],
-        ["storage_binding_id", "TEXT", 1, 3],
-        ["asset_id", "TEXT", 1, 0],
-        ["failed_at", "INTEGER", 1, 0],
-      ],
-    );
-  } finally {
-    store.close();
-  }
 });

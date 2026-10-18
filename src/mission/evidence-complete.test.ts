@@ -37,6 +37,7 @@ const RACED_CHECK = 1;
 const BOTH_CHECKS = 2;
 const CONFLICT = 409;
 const BAD_GATEWAY = 502;
+const FIRST_FAILED_AT = 1;
 
 function fixture(t: TestContext, expired = false) {
   const h = executionHarness(t, IDENTITY);
@@ -131,11 +132,19 @@ function fixture(t: TestContext, expired = false) {
       h.store.transaction((tx) =>
         failedBindingsOf(tx, h.node_id, h.claim.attempt),
       ),
-    failureRows: () =>
+    failedAts: () =>
       h.store.transaction((tx) =>
         tx.database
-          .prepare("SELECT * FROM mission_evidence_upload_failure")
+          .prepare(
+            "SELECT id, failed_at FROM mission_evidence_asset WHERE failed_at IS NOT NULL",
+          )
           .all(),
+      ),
+    setFailedAt: (failedAt: number) =>
+      h.store.transaction((tx) =>
+        tx.database
+          .prepare("UPDATE mission_evidence_asset SET failed_at = ?")
+          .run(failedAt),
       ),
   };
 }
@@ -286,24 +295,29 @@ test("a store failure records the binding", async (t) => {
   assert.equal(h.evidence().assets[FIRST_ASSET_INDEX]!.published_at, null);
 });
 
-test("the failure row stays after the refusal", async (t) => {
+test("the failed asset stays marked after the refusal", async (t) => {
   const h = fixture(t);
   refusingCheck(h, mismatch());
   const commits = h.commits();
   await assert.rejects(h.complete);
-  const [row] = h.failureRows();
+  const [row] = h.failedAts();
   assert.ok(row);
-  assert.deepEqual(
-    { ...row, failed_at: null },
-    {
-      node_id: h.node_id,
-      attempt: h.claim.attempt,
-      storage_binding_id: h.binding_id,
-      asset_id: h.asset_id,
-      failed_at: null,
-    },
-  );
+  assert.equal(h.failedAts().length, SINGLE_ITEM);
+  assert.equal(row.id, h.asset_id);
+  assert.notEqual(row.failed_at, null);
   assert.equal(h.commits(), commits);
+});
+
+test("a failed check sets failed_at of the asset once", async (t) => {
+  const h = fixture(t);
+  refusingCheck(h, mismatch());
+  await assert.rejects(h.complete);
+  h.setFailedAt(FIRST_FAILED_AT);
+  await assert.rejects(h.complete);
+  assert.deepEqual(
+    h.failedAts().map((row) => ({ ...row })),
+    [{ id: h.asset_id, failed_at: FIRST_FAILED_AT }],
+  );
 });
 
 test("a refusal that is no check failure records no binding", async (t) => {

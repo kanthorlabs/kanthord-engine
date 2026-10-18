@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
 import { createIdentity } from "../kernel/identity.ts";
 import { canonicalJSON } from "../kernel/json.ts";
+import type { Transaction } from "../kernel/store.ts";
 import { testHumanIdentity } from "../kernel/test-identity.ts";
 import {
   ActorKind,
@@ -33,7 +34,6 @@ import {
   readRequests,
   readReleaseEvidence,
   readLandedCommitEvidence,
-  insertUploadFailure,
   failedBindingsOf,
   type AssessmentRow,
   type EvidenceRow,
@@ -321,22 +321,53 @@ test("mission harness parses operation contracts and records the one caller tran
   assert.equal(h.commits(), FIRST_ATTEMPT);
 });
 
-test("an upload failure records each binding once for its attempt", (t) => {
+test("failed assets list each binding once for its attempt in failure order", (t) => {
   const h = fixture(t);
   const primary = createIdentity("binding");
   const secondary = createIdentity("binding");
-  const failure = (attempt: number, bindingId: string, failedAt: number) => ({
-    node_id: h.node_id,
-    attempt,
-    storage_binding_id: bindingId,
-    asset_id: createIdentity("evidence_asset"),
-    failed_at: failedAt,
-  });
+  const intact = createIdentity("binding");
+  const failure = (
+    tx: Transaction,
+    attempt: number,
+    bindingId: string,
+    failedAt: number | null,
+  ) => {
+    const evidenceId = createIdentity("evidence");
+    const assetId = createIdentity("evidence_asset");
+    insertEvidence(
+      tx,
+      {
+        id: evidenceId,
+        node_id: h.node_id,
+        attempt,
+        subject: "Upload",
+        requirement_key: null,
+        end_state: null,
+        verification: null,
+        provenance: canonicalJSON(ACTOR),
+        created_at: NOW,
+      },
+      [
+        {
+          id: assetId,
+          evidence_id: evidenceId,
+          kind: AssetKind.Object,
+          content: canonicalJSON({ storage_binding_id: bindingId }),
+          published_at: null,
+          expired_at: null,
+        },
+      ],
+    );
+    tx.database
+      .prepare("UPDATE mission_evidence_asset SET failed_at = ? WHERE id = ?")
+      .run(failedAt, assetId);
+  };
   h.store.transaction((tx) => {
-    insertUploadFailure(tx, failure(FIRST_ATTEMPT, secondary, LATER));
-    insertUploadFailure(tx, failure(FIRST_ATTEMPT, primary, NOW));
-    insertUploadFailure(tx, failure(FIRST_ATTEMPT, primary, LATER));
-    insertUploadFailure(tx, failure(SECOND_ATTEMPT, secondary, NOW));
+    failure(tx, FIRST_ATTEMPT, secondary, LATER);
+    failure(tx, FIRST_ATTEMPT, primary, NOW);
+    failure(tx, FIRST_ATTEMPT, primary, LATER);
+    failure(tx, FIRST_ATTEMPT, intact, null);
+    failure(tx, SECOND_ATTEMPT, secondary, NOW);
   });
   h.store.transaction((tx) => {
     assert.deepEqual(failedBindingsOf(tx, h.node_id, FIRST_ATTEMPT), [

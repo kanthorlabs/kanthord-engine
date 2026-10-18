@@ -62,13 +62,6 @@ export interface AssessmentRow {
   node_revision: number;
   created_at: number;
 }
-export interface UploadFailureRow {
-  node_id: string;
-  attempt: number;
-  storage_binding_id: string;
-  asset_id: string;
-  failed_at: number;
-}
 export interface OutcomeRow {
   id: string;
   node_id: string;
@@ -245,23 +238,6 @@ export function insertEvidence(
       asset.expired_at,
     );
 }
-export function insertUploadFailure(
-  tx: Transaction,
-  row: UploadFailureRow,
-): void {
-  assert.ok(tx.database.isTransaction);
-  tx.database
-    .prepare(
-      "INSERT OR IGNORE INTO mission_evidence_upload_failure (node_id, attempt, storage_binding_id, asset_id, failed_at) VALUES (?, ?, ?, ?, ?)",
-    )
-    .run(
-      row.node_id,
-      row.attempt,
-      row.storage_binding_id,
-      row.asset_id,
-      row.failed_at,
-    );
-}
 export function failedBindingsOf(
   tx: Transaction,
   nodeId: string,
@@ -271,7 +247,7 @@ export function failedBindingsOf(
   return (
     tx.database
       .prepare(
-        "SELECT storage_binding_id FROM mission_evidence_upload_failure WHERE node_id = ? AND attempt = ? ORDER BY failed_at, storage_binding_id",
+        "SELECT json_extract(a.content, '$.storage_binding_id') AS storage_binding_id FROM mission_evidence e JOIN mission_evidence_asset a ON a.evidence_id = e.id WHERE e.node_id = ? AND e.attempt = ? AND a.failed_at IS NOT NULL GROUP BY storage_binding_id ORDER BY MIN(a.failed_at), storage_binding_id",
       )
       .all(nodeId, attempt) as { storage_binding_id: string }[]
   ).map((row) => row.storage_binding_id);
