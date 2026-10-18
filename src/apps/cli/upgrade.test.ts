@@ -90,7 +90,7 @@ test("serve refuses an older configuration and an older database, and upgrade br
 
   const upgraded = await run(paths.env, "upgrade");
   assert.equal(upgraded.status, ExitCode.Success, upgraded.stderr);
-  const backups = [...upgraded.stdout.matchAll(/^Backup: (.+)$/gm)].map(
+  const backups = [...upgraded.stdout.matchAll(/^backup: +(.+)$/gm)].map(
     (match) => match[1]!,
   );
   assert.equal(backups.length, BACKUPS_OF_CONFIGURATION_AND_DATABASE);
@@ -99,13 +99,25 @@ test("serve refuses an older configuration and an older database, and upgrade br
     assert.equal(statSync(backup).mode & 0o7777, PRIVATE_FILE_MODE);
   assert.match(
     upgraded.stdout,
-    new RegExp(`^Migrated ${BEHIND_SERVICE.service} from version`, "m"),
+    new RegExp(`^migrated: +${BEHIND_SERVICE.service} \\d+ -> \\d+$`, "m"),
   );
   assert.match(
     upgraded.stdout,
-    new RegExp(`^Renamed mission\\.${OLD_KEY} to mission\\.${NEW_KEY}$`, "m"),
+    new RegExp(`^renamed: +mission\\.${OLD_KEY} -> mission\\.${NEW_KEY}$`, "m"),
   );
   assert.equal(loadConfig(paths.config).version, CONFIG_VERSION);
+  assert.match(
+    upgraded.stdout,
+    new RegExp(
+      `^upgraded: +${paths.config}\nconfig_version: \\d+ -> ${CONFIG_VERSION}\n$`,
+      "m",
+    ),
+  );
+  const valueColumns = upgraded.stdout
+    .trimEnd()
+    .split("\n")
+    .map((line) => line.search(/(?<=^[a-z_]+: +)\S/));
+  assert.deepEqual(new Set(valueColumns), new Set(["config_version: ".length]));
   const store = new Store(paths.database);
   assert.deepEqual(store.plan(serverMigrations).pending, []);
   store.close();
@@ -115,7 +127,7 @@ test("serve refuses an older configuration and an older database, and upgrade br
 
   const again = await run(paths.env, "upgrade");
   assert.equal(again.status, ExitCode.Success, again.stderr);
-  assert.equal(again.stdout, `Up to date: ${paths.config}\n`);
+  assert.equal(again.stdout, `up_to_date: ${paths.config}\n`);
 });
 
 test("upgrade changes nothing while another process holds the database", async (t) => {

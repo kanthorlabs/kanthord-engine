@@ -151,7 +151,7 @@ class Run:
         os.close(slave)
         try:
             machine = "--binding" in args
-            pattern = rb"^token: " + TOKEN + rb"client_secret: ([^\r\n]+)\r?\n" if machine else rb"^" + TOKEN
+            pattern = rb"^token: +" + TOKEN + rb"client_secret: ([^\r\n]+)\r?\n" if machine else rb"^token: " + TOKEN
             values = terminal_read(master, child, pattern)
             self.secrets.extend(values)
             token = values[0]

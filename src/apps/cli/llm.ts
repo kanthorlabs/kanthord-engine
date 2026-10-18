@@ -3,6 +3,7 @@ import { Command } from "commander";
 import { llmOperations } from "../../llm/contract.ts";
 import { httpClient, resolveClient } from "../../gateway/client.ts";
 import { Diagnostic } from "../../kernel/errors.ts";
+import { formatRows } from "../../kernel/rows.ts";
 import { CommandName } from "./constants.ts";
 import {
   addCredentialCommand,
@@ -90,7 +91,15 @@ async function login(platform: string, command: Command): Promise<void> {
     key,
   );
   process.stdout.write(
-    `${data.session_id}\n${data.address}\n${data.code ?? ""}\n${data.expires_at}\n${key}\n`,
+    formatRows(
+      [
+        ["session_id", data.session_id],
+        ["code", data.code],
+        ["expires_at", new Date(data.expires_at).toISOString()],
+        ["idempotency_key", key],
+      ],
+      [["address", data.address]],
+    ),
   );
 }
 

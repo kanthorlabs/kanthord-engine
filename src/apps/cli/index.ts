@@ -17,6 +17,7 @@ import type { Server } from "../server/index.ts";
 import { gatewayOperations } from "../../gateway/contract.ts";
 import { httpClient } from "../../gateway/client.ts";
 import { packageVersion } from "../../kernel/version.ts";
+import { formatRows, type Row } from "../../kernel/rows.ts";
 import { OperationResultType } from "../../kernel/operation.ts";
 import { resolveClient } from "../../gateway/client.ts";
 import { addWorkerCommand } from "./worker.ts";
@@ -70,7 +71,7 @@ export async function initConfig(
   const { initialConfig } = await import("../../config/index.ts");
   const content = initialConfig(allowedHosts.map(allowedHost), bind, basePath);
   writePrivate(path, content);
-  process.stdout.write(`Created ${path}\n`);
+  process.stdout.write(formatRows([["created", path]]));
 }
 
 function addConfigCommand(program: Command): void {
@@ -118,7 +119,7 @@ function addConfigCommand(program: Command): void {
       async (path: string) => {
         const { loadConfig } = await import("../../config/index.ts");
         loadConfig(path);
-        process.stdout.write(`Valid configuration: ${path}\n`);
+        process.stdout.write(formatRows([["valid", path]]));
       },
     ],
     [
@@ -147,9 +148,12 @@ function addUpgradeCommand(program: Command): void {
   configHelp(command);
   command.action(async () => {
     const { upgrade } = await import("./upgrade.ts");
-    await upgrade(effectivePath(command), (line) =>
-      process.stdout.write(`${line}\n`),
-    );
+    const rows: Row[] = [];
+    try {
+      await upgrade(effectivePath(command), rows);
+    } finally {
+      process.stdout.write(formatRows(rows));
+    }
   });
 }
 
@@ -304,7 +308,7 @@ async function writePackageOpenAPI(): Promise<void> {
   const { openapiPath, writeOpenAPI } = await import("../../gateway/local.ts");
   const path = openapiPath();
   writeOpenAPI(apiOperations, dirname(path));
-  process.stdout.write(`${path}\n`);
+  process.stdout.write(formatRows([["openapi", path]]));
 }
 
 export async function runCLI(

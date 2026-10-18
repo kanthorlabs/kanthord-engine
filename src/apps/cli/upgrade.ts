@@ -2,6 +2,7 @@ import { join } from "node:path";
 import { audit, writePrivate } from "../../kernel/files.ts";
 import { Store } from "../../kernel/store.ts";
 import { directories } from "../../kernel/xdg.ts";
+import type { Row } from "../../kernel/rows.ts";
 
 const STAMP_LENGTH = 15;
 
@@ -11,7 +12,7 @@ function backupStamp(now: Date): string {
 
 export async function upgrade(
   path: string,
-  write: (line: string) => void,
+  rows: Row[],
   now: Date = new Date(),
 ): Promise<void> {
   const { configuration, readConfig } = await import("../../config/index.ts");
@@ -35,29 +36,30 @@ export async function upgrade(
         path,
       );
     if (config.content === null && !pending.length) {
-      write(`Up to date: ${path}`);
+      rows.push(["up_to_date", path]);
       return;
     }
     const stamp = backupStamp(now);
     if (config.content !== null) {
       const backup = `${path}.bak-${stamp}`;
       writePrivate(backup, original);
-      write(`Backup: ${backup}`);
+      rows.push(["backup", backup]);
     }
     if (store && pending.length) {
       const backup = `${databasePath}.bak-${stamp}`;
       store.backup(backup);
-      write(`Backup: ${backup}`);
+      rows.push(["backup", backup]);
       store.migrate(serverMigrations);
       for (const { service, from, to } of pending)
-        write(`Migrated ${service} from version ${from} to version ${to}`);
+        rows.push(["migrated", `${service} ${from} -> ${to}`]);
     }
     if (config.content !== null) {
       writePrivate(path, config.content, true);
       for (const change of config.changes)
-        write(`Renamed ${change.from} to ${change.to}`);
-      write(
-        `Upgraded configuration version ${config.from} to configuration version ${config.to}: ${path}`,
+        rows.push(["renamed", `${change.from} -> ${change.to}`]);
+      rows.push(
+        ["upgraded", path],
+        ["config_version", `${config.from} -> ${config.to}`],
       );
     }
   } finally {
