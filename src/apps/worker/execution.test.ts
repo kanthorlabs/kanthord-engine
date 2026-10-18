@@ -26,7 +26,7 @@ import { ExecutionIntent } from "../../worker/contract.ts";
 
 const SECRET = Buffer.alloc(32, 7).toString("base64");
 const ENDED_RECORD = "execution ended";
-test("host logs the stop of a released execution in the execution ended record", async (t) => {
+test("host logs the stop of a released or ended execution in the execution ended record", async (t) => {
   const api = httpTransport("http://127.0.0.1:1");
   const claim = testClaim();
   const credential = {
