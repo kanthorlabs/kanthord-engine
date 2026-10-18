@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { join } from "node:path";
 import { temporary, hostEnvironment } from "../../kernel/test-support.ts";
 import { createIdentity } from "../../kernel/identity.ts";
@@ -348,7 +348,7 @@ test("an examine node with two repository bindings runs from checkouts/ and list
     context: background,
   });
   t.after(() => run.dispose());
-  const workspaces = WorkspaceRoot.open(temporary(t));
+  const workspaces = WorkspaceRoot.open(realpathSync(temporary(t)));
   const key = workspaces.executionKey(claim.execution_id);
   const root = join(key, CHECKOUTS_DIRECTORY);
   const transport = {
