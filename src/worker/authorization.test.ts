@@ -12,7 +12,7 @@ import {
   WorkerErrorCode,
   type WorkerBindingRowOf,
 } from "./contract.ts";
-import { AgentErrorCode } from "../agent/contract.ts";
+import { AgentErrorCode, ChainLevel } from "../agent/contract.ts";
 import type { AgentSelection } from "../scheduler/contract.ts";
 
 function pinOf(
@@ -22,7 +22,7 @@ function pinOf(
   return {
     agent_name: agentName,
     position: 0,
-    level: "enablement",
+    level: ChainLevel.Enablement,
     agent_provider: "default",
     provider: "anthropic",
     credential: "anthro-1",
@@ -54,6 +54,7 @@ test("Worker authorizes the pinned inference configuration and refuses each brok
       issuedAt: 0,
     },
     "jti",
+    createIdentity("worker_instance"),
   );
   const execution = {
     execution_id: createIdentity("execution"),
@@ -69,12 +70,15 @@ test("Worker authorizes the pinned inference configuration and refuses each brok
       authorizeModelInference(
         {
           workerBindingRowOf: (_tx, id) => (id === row.binding_id ? row : null),
+          pinnedCredentialMetadata: () => null,
+          credentialMetadata: () => null,
           schedulerClaims: { agentSelectionsOf: () => [pinned] },
         },
         {
           declarationOf: () => getWorkerDeclaration(row.worker_name) ?? null,
-          pinnedAgentView: (_tx, worker, selection) => {
+          pinnedAgentView: (_tx, worker, selection, models) => {
             assert.equal(worker, row.worker_name);
+            assert.ok(models);
             assert.ok(
               getWorkerDeclaration(row.worker_name)?.agent_names?.includes(
                 selection.agent_name,
@@ -178,6 +182,7 @@ test("Worker authorizes one credential per distinct credential of the agents of 
       issuedAt: 0,
     },
     "jti",
+    createIdentity("worker_instance"),
   );
   const execution = {
     execution_id: createIdentity("execution"),
@@ -190,6 +195,8 @@ test("Worker authorizes one credential per distinct credential of the agents of 
       authorizeModelInference(
         {
           workerBindingRowOf: (_tx, id) => (id === row.binding_id ? row : null),
+          pinnedCredentialMetadata: () => null,
+          credentialMetadata: () => null,
           schedulerClaims: {
             agentSelectionsOf: () =>
               Object.entries(credentials).map(([agent, credential]) =>
