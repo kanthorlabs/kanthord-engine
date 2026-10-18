@@ -206,7 +206,6 @@ export interface ExecutionRow {
   runtime_identity: string;
   attempt: number;
   pinned_revision: number;
-  node_branch: string;
   credentials: string[];
   agent_selections: AgentSelection[];
   expired_at: number;
@@ -272,7 +271,6 @@ export interface MissionTransitions {
     project_id: string;
     attempt: number;
     node_revision: number;
-    node_branch: string;
   } | null;
   release(
     tx: Transaction,
@@ -287,6 +285,13 @@ export interface MissionTransitions {
     consecutiveFailures: number,
     now: number,
   ): void;
+}
+export interface NodeAttemptKey {
+  node_id: string;
+  attempt: number;
+}
+export interface MissionBranches {
+  nodeBranchesOf(tx: Transaction, keys: readonly NodeAttemptKey[]): string[];
 }
 export interface InstanceRegistrations {
   clientAttributionOf(

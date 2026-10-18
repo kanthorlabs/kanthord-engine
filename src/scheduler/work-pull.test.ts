@@ -61,7 +61,6 @@ function harness(t: TestContext) {
       project_id: row.project_id,
       attempt: 1,
       node_revision: 1,
-      node_branch: `kanthord/${nodeId}`,
     };
   };
   h.store.database.exec("CREATE TABLE attempts (node_id TEXT PRIMARY KEY)");
@@ -134,6 +133,25 @@ test("pull rolls back its probe, rechecks health, and commits exactly one claim"
   );
 });
 const HEALTHCHECK = "instanceHealthcheck";
+const MARKER_BRANCH = "kanthord/marker";
+
+test("the work pull answer derives node_branch from the Mission branches", async (t) => {
+  const h = harness(t);
+  const requests: { node_id: string; attempt: number }[][] = [];
+  h.dependencies.branches = {
+    nodeBranchesOf: (_tx, keys) => {
+      requests.push([...keys]);
+      return keys.map(() => MARKER_BRANCH);
+    },
+  };
+  h.enqueue();
+  const result = await h.pull();
+  assert.equal(result.kind, WorkPullKind.Claimed);
+  assert.equal(result.execution.node_branch, MARKER_BRANCH);
+  assert.deepEqual(requests, [
+    [{ node_id: h.row.node_id, attempt: FIRST_ATTEMPT }],
+  ]);
+});
 
 test("project wake serves parked pulls in arrival order and another project does not", async (t) => {
   const h = harness(t);

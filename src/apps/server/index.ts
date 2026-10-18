@@ -272,6 +272,9 @@ export function composeServices(options: {
       claimFacts: (tx, nodeId) => mission.claimFacts(tx, nodeId),
       claimFactsOf: (tx, projectId) => mission.claimFactsOf(tx, projectId),
     },
+    branches: {
+      nodeBranchesOf: (tx, keys) => mission.nodeBranchesOf(tx, keys),
+    },
     projects: {
       projectPaused: (tx, projectId) => project.projectPaused(tx, projectId),
     },

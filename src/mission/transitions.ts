@@ -24,7 +24,7 @@ import {
 import {
   readOpenAttempt,
   openAttempt,
-  readBranchStartAttempt,
+  readBranchStartPoints,
   readReleaseEvidence,
   readAssets,
 } from "./record-store.ts";
@@ -85,11 +85,24 @@ export function claim(
     project_id: requireMission(tx, node.mission_id).project_id,
     attempt: attempt.attempt,
     node_revision: attempt.node_revision,
-    node_branch: nodeBranchOf(
-      nodeId,
-      readBranchStartAttempt(tx, nodeId, attempt.attempt),
-    ),
   };
+}
+
+export function nodeBranchesOf(
+  tx: Transaction,
+  keys: readonly { node_id: string; attempt: number }[],
+): string[] {
+  const starts = readBranchStartPoints(
+    tx,
+    keys.map((key) => key.node_id),
+  );
+  return keys.map((key) => {
+    const start = (starts.get(key.node_id) ?? []).findLast(
+      (attempt) => attempt <= key.attempt,
+    );
+    assert.ok(start !== undefined);
+    return nodeBranchOf(key.node_id, start);
+  });
 }
 
 function refuse(obligation: ReleaseObligation): never {

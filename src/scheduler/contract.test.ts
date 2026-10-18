@@ -64,6 +64,7 @@ test("Execution records omit hosted attribution and refuse null or unknown field
   } = executionFixture();
   const record = {
     ...row,
+    node_branch: `kanthord/${row.node_id}`,
     claimant: {
       worker_binding_id: workerBindingId,
       resource_identity: resourceIdentity,

@@ -23,6 +23,7 @@ import { ExecutionEnd, type ExecutionTelemetry } from "../tracking/contract.ts";
 import { executionTrace } from "./telemetry.ts";
 import * as settlement from "./settlement.ts";
 import {
+  nodeBranchOfExecution,
   readExecution,
   readExpiredUnsettled,
   readUnendedOfRuntime,
@@ -41,6 +42,7 @@ import {
   type Job,
   type WorkQueue,
   type MissionTransitions,
+  type MissionBranches,
   type AgentChains,
   type AgentSelection,
   type InstanceRegistrations,
@@ -134,6 +136,7 @@ export interface Dependencies {
   declarations: WorkerDeclarations;
   bindings: WorkerBindings;
   facts: MissionClaimFacts;
+  branches: MissionBranches;
   projects: ProjectPauses;
   agentChains: AgentChains;
   traceIdentity: TraceIdentity;
@@ -194,9 +197,14 @@ export class SchedulerService implements Service, WorkQueue {
     };
   }
   executionOf(executionId: string) {
-    return this.dependencies.store.transaction(
-      (tx) => readExecution(tx, executionId) ?? undefined,
-    );
+    return this.dependencies.store.transaction((tx) => {
+      const row = readExecution(tx, executionId);
+      if (row === null) return undefined;
+      return {
+        ...row,
+        node_branch: nodeBranchOfExecution(tx, this.dependencies.branches, row),
+      };
+    });
   }
   revoke(tx: Transaction, nodeId: string, now: number): string | null {
     return settlement.revoke(tx, nodeId, now);

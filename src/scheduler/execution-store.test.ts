@@ -173,12 +173,7 @@ test("record mapping omits hosted attribution and keeps ended registration attri
   const h = schedulerHarness(t);
   const row = executionFixture();
   h.store.transaction((tx) => {
-    const hosted = executionRecord(
-      tx,
-      h.dependencies.registrations,
-      row,
-      FIXTURE_NOW,
-    );
+    const hosted = executionRecord(tx, h.dependencies, row, FIXTURE_NOW);
     assert.equal(Object.hasOwn(hosted.claimant, "client_id"), false);
     assert.equal(Object.hasOwn(hosted.claimant, "name"), false);
     const attribution = {
@@ -188,8 +183,11 @@ test("record mapping omits hosted attribution and keeps ended registration attri
     const retained = executionRecord(
       tx,
       {
-        ...h.dependencies.registrations,
-        clientAttributionOf: () => attribution,
+        ...h.dependencies,
+        registrations: {
+          ...h.dependencies.registrations,
+          clientAttributionOf: () => attribution,
+        },
       },
       { ...row, ended_at: FIXTURE_NOW },
       FIXTURE_DEADLINE,

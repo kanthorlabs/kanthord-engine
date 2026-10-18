@@ -57,7 +57,7 @@ function releaseHarness(t: TestContext) {
       nodeId: row.node_id,
       attempt: row.attempt,
       pinnedRevision: row.pinned_revision,
-      nodeBranch: row.node_branch,
+      nodeBranch: `kanthord/${row.node_id}`,
       runtimeIdentity: row.runtime_identity,
       workerBindingId: row.worker_binding_id,
     },
