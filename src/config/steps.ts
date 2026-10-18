@@ -22,7 +22,13 @@ export function renameKey(
   if (document.hasIn(target))
     throw new Diagnostic(
       "system.config.rename_conflict",
-      `${from} and ${to} are both present. Remove one of them.`,
+      "the old key and the new key are both present; remove one of them",
+      {
+        fields: [
+          ["old_key", from],
+          ["new_key", to],
+        ],
+      },
     );
   document.setIn(target, document.getIn(source));
   document.deleteIn(source);

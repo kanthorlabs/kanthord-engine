@@ -3,7 +3,7 @@ import type { Logger } from "pino";
 import { ulid } from "ulid";
 import type { ServiceIdentity } from "../kernel/caller.ts";
 import type { Context } from "../kernel/context.ts";
-import { diagnostic } from "../kernel/errors.ts";
+import { diagnostic, diagnosticFields } from "../kernel/errors.ts";
 import {
   OperationResultType,
   type OperationResult,
@@ -184,7 +184,7 @@ export class Dispatcher {
 
   private drainFailed(error: unknown): void {
     this.dependencies.logger.error(
-      { reason: diagnostic(error) },
+      { reason: diagnostic(error), fields: diagnosticFields(error) },
       "intake: a drain of the event dispatcher failed.",
     );
   }
@@ -243,7 +243,11 @@ export class Dispatcher {
       handoff = store.transaction((tx) => handoffOf(tx, id));
     } catch (error) {
       logger.error(
-        { inbound_event_id: id, reason: diagnostic(error) },
+        {
+          inbound_event_id: id,
+          reason: diagnostic(error),
+          fields: diagnosticFields(error),
+        },
         "intake: the handoff input of an inbound event failed.",
       );
       return {
@@ -271,6 +275,7 @@ export class Dispatcher {
           inbound_event_id: handoff.input.inbound_event_id,
           consumer: handoff.consumer,
           reason: diagnostic(error),
+          fields: diagnosticFields(error),
         },
         "intake: the consumer call of an inbound event failed.",
       );

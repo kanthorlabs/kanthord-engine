@@ -6,6 +6,7 @@ import {
   CodedError,
   Diagnostic,
   diagnostic,
+  diagnosticFields,
   diagnosticRows,
   errorCodeSchema,
 } from "./errors.ts";
@@ -16,6 +17,7 @@ import { ValueType } from "./values.ts";
 const STRING_SCHEMA_TYPE = "string";
 const SECRET_MARKER = "secret-marker";
 const NO_ROWS = "";
+const LOG_PATH = "/var/lib/kanthord/kanthord.db";
 const ExpectedDiagnostic = {
   MissingConfiguration: "cli.config.not_found: Configuration absent.",
   Unknown: "system.operation.unknown: Operation failed.",
@@ -139,4 +141,25 @@ test("context errors identify cancellation and deadlines without changing their 
   assert.ok(expired instanceof Error);
   assert.equal(cancelled.code, ExpectedErrorCode.Cancelled);
   assert.equal(expired.code, ExpectedErrorCode.DeadlineExceeded);
+});
+
+test("diagnostic fields give log records the present field values by name", () => {
+  const error = new Diagnostic(
+    "system.files.create_failed",
+    "cannot create directory",
+    {
+      fields: [
+        ["path", LOG_PATH],
+        ["command", null],
+      ],
+    },
+  );
+  assert.deepEqual(diagnosticFields(error), { path: LOG_PATH });
+  assert.equal(
+    diagnosticFields(
+      new Diagnostic("cli.config.not_found", "Configuration absent."),
+    ),
+    undefined,
+  );
+  assert.equal(diagnosticFields(new Error(SECRET_MARKER)), undefined);
 });

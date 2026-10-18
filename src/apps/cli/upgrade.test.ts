@@ -86,12 +86,13 @@ test("serve refuses an older configuration and an older database, and upgrade br
   const behind = await run(paths.env, "serve");
   assert.equal(behind.status, ExitCode.Failure);
   assert.match(behind.stderr, /system\.config\.version_behind/);
-  assert.match(behind.stderr, /Run kanthord upgrade/);
+  assert.match(behind.stderr, /^command:           kanthord upgrade$/m);
 
   writePrivate(paths.config, currentConfig(), true);
   const pending = await run(paths.env, "serve");
   assert.equal(pending.status, ExitCode.Failure);
   assert.match(pending.stderr, /system\.database\.migration\.pending/);
+  assert.match(pending.stderr, /^path:    .+\ncommand: kanthord upgrade\n$/m);
   writePrivate(paths.config, legacy, true);
 
   const upgraded = await run(paths.env, "upgrade");
@@ -196,7 +197,7 @@ test("upgrade refuses another master_key before the backups and the migrations",
   const refused = await run(paths.env, "upgrade");
   assert.equal(refused.status, ExitCode.Failure);
   assert.match(refused.stderr, /system\.config\.master_key_mismatch/);
-  assert.match(refused.stderr, /Restore the configuration file/);
+  assert.match(refused.stderr, /restore the configuration file/);
   assert.equal(readFileSync(paths.config, "utf8"), foreign);
   assert.deepEqual(readdirSync(join(paths.env.XDG_CONFIG_HOME!, "kanthord")), [
     "kanthord.yaml",

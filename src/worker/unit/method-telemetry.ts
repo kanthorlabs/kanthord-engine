@@ -15,7 +15,7 @@ import type {
   TestedInput,
 } from "./verification.ts";
 import { isString } from "../../kernel/values.ts";
-import { CodedError, diagnostic } from "../../kernel/errors.ts";
+import { CodedError, diagnostic, diagnosticRows } from "../../kernel/errors.ts";
 import { ReplyRepair, type taskJudgementSchema } from "./judgement.ts";
 
 const SUCCESS = 0;
@@ -45,10 +45,11 @@ export const GitStep = {
 export type GitStep = (typeof GitStep)[keyof typeof GitStep];
 
 function gitFailure(error: unknown): SpanEnd {
-  const text =
+  const line =
     error instanceof CodedError
       ? `${error.code}: ${error.cause instanceof Error ? error.cause.message : error.message}`
       : diagnostic(error);
+  const text = `${line}\n${diagnosticRows(error)}`.trimEnd();
   return { status: SpanStatus.Error, texts: { error: text } };
 }
 

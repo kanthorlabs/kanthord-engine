@@ -45,6 +45,7 @@ import { audit, ensureDirectory } from "../../kernel/files.ts";
 import {
   Diagnostic,
   diagnostic,
+  diagnosticFields,
   asError,
   OperationError,
 } from "../../kernel/errors.ts";
@@ -760,7 +761,13 @@ function openStore(path: string, migrations: Migrations): Store {
     if (!plan.fresh && plan.pending.length)
       throw new Diagnostic(
         "system.database.migration.pending",
-        `${store.path}: the database has pending migrations. Run kanthord upgrade.`,
+        "the database has pending migrations; run the command",
+        {
+          fields: [
+            ["path", store.path],
+            ["command", "kanthord upgrade"],
+          ],
+        },
       );
     store.migrate(migrations);
     return store;
@@ -962,7 +969,7 @@ export class Server implements Service {
         this.log?.reopen();
       } catch (error) {
         this.log?.logger.error(
-          { reason: diagnostic(error) },
+          { reason: diagnostic(error), fields: diagnosticFields(error) },
           "Log reopen failed",
         );
         this.runError = asError(error);

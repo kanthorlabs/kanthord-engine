@@ -569,7 +569,7 @@ test("serve refuses another master_key against an existing database and writes n
   const refused = serve();
   assert.equal(refused.status, ExitCode.Failure);
   assert.match(refused.stderr, /system\.config\.master_key_mismatch/);
-  assert.match(refused.stderr, /Restore the configuration file/);
+  assert.match(refused.stderr, /restore the configuration file/);
   assert.doesNotMatch(refused.stderr, new RegExp(foreign.master_key));
   assert.deepEqual(rows(), recorded);
 

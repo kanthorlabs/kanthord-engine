@@ -33,7 +33,8 @@ function validate(stats: Stats, path: string, kind: FileKind) {
   ) {
     throw new Diagnostic(
       "system.files.invalid_permissions",
-      `${path}: expected an owned ${kind} with mode ${mode.toString(8)} on a POSIX filesystem.`,
+      `expected an owned ${kind} with mode ${mode.toString(8)} on a POSIX filesystem`,
+      { fields: [["path", path]] },
     );
   }
 }
@@ -48,7 +49,8 @@ export function audit(path: string, kind: FileKind, optional = false): boolean {
     if (error instanceof Diagnostic) throw error;
     throw new Diagnostic(
       "system.files.inspect_failed",
-      `${path}: cannot inspect ${kind}.`,
+      `cannot inspect ${kind}`,
+      { fields: [["path", path]] },
     );
   }
 }
@@ -60,7 +62,8 @@ export function ensureDirectory(path: string): void {
     } catch {
       throw new Diagnostic(
         "system.files.create_failed",
-        `${path}: cannot create directory.`,
+        "cannot create directory",
+        { fields: [["path", path]] },
       );
     }
     audit(path, FileKind.Directory);
@@ -79,7 +82,8 @@ export function openPrivate(path: string, flags: number): number {
     if (error instanceof Diagnostic) throw error;
     throw new Diagnostic(
       "system.files.open_failed",
-      `${path}: cannot open private file.`,
+      "cannot open private file",
+      { fields: [["path", path]] },
     );
   }
 }
@@ -118,7 +122,8 @@ export function writePrivate(
     if (error instanceof Diagnostic) throw error;
     throw new Diagnostic(
       "system.files.publish_failed",
-      `${path}: cannot publish file; the destination must be absent.`,
+      "cannot publish file; the destination must be absent",
+      { fields: [["path", path]] },
     );
   } finally {
     if (fd !== undefined) closeSync(fd);

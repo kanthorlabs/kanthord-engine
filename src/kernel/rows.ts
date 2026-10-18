@@ -5,7 +5,9 @@ const NAME_SUFFIX = ":";
 const VALUE_GAP = 1;
 const EMPTY_VALUE = "";
 
-function present(rows: readonly Row[]): (readonly [string, string])[] {
+export function presentRows(
+  rows: readonly Row[],
+): (readonly [string, string])[] {
   return rows.flatMap(([name, value]) =>
     value === null || value === undefined || value === EMPTY_VALUE
       ? []
@@ -25,12 +27,12 @@ export function formatRows(
   urls: readonly Row[] = [],
   width?: number,
 ): string {
-  const values = present(rows);
+  const values = presentRows(rows);
   const column = width ?? rowWidth(values.map(([name]) => name));
   const lines = values.map(
     ([name, value]) => `${`${name}${NAME_SUFFIX}`.padEnd(column)}${value}`,
   );
-  const links = present(urls).flatMap(([name, url]) => [
+  const links = presentRows(urls).flatMap(([name, url]) => [
     `${name}${NAME_SUFFIX}`,
     url,
   ]);

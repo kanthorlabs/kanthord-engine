@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { z } from "zod";
 import { identitySchema } from "./identity.ts";
-import { formatRows, type Row } from "./rows.ts";
+import { formatRows, presentRows, type Row } from "./rows.ts";
 
 const EMPTY_MESSAGE_LENGTH = 0;
 
@@ -60,6 +60,13 @@ export function diagnostic(error: unknown): string {
   return error instanceof Diagnostic
     ? `${error.code}: ${error.message}`
     : "system.operation.unknown: Operation failed.";
+}
+
+export function diagnosticFields(
+  error: unknown,
+): Record<string, string> | undefined {
+  const fields = error instanceof Diagnostic ? presentRows(error.fields) : [];
+  return fields.length ? Object.fromEntries(fields) : undefined;
 }
 
 export function diagnosticRows(error: unknown): string {

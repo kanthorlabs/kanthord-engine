@@ -14,7 +14,7 @@ import { Store } from "./store.ts";
 const ExitCode = { Success: 0, Failure: 1 } as const;
 
 const WAL_JOURNAL_MODE = "wal";
-const LOCKED_REASON = "cannot initialize database: database is locked.";
+const LOCKED_REASON = "cannot initialize database: database is locked";
 const FULL_SYNCHRONOUS_MODE = 2;
 const PRESERVED_VALUE = "preserved";
 const COMMITTED_PREFIX_LENGTH = 1;

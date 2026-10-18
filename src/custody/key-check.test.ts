@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { Diagnostic } from "../kernel/errors.ts";
 import { IN_MEMORY_DATABASE, Store } from "../kernel/store.ts";
+import { diagnosticText } from "../kernel/test-support.ts";
 import {
   enforceMasterKey,
   masterKeyVerifier,
@@ -69,9 +70,10 @@ test("enforce and verify refuse another master_key and keep the record", () => {
         (error: unknown) =>
           error instanceof Diagnostic &&
           error.code === MASTER_KEY_MISMATCH_CODE &&
-          error.message.includes(CONFIG_PATH) &&
-          error.message.includes("Restore the configuration file") &&
-          !error.message.includes(KEY_B),
+          diagnosticText(error).includes(`\nconfig:   ${CONFIG_PATH}\n`) &&
+          diagnosticText(error).includes(`database: ${store.path}\n`) &&
+          error.message.includes("restore the configuration file") &&
+          !diagnosticText(error).includes(KEY_B),
       );
     assert.deepEqual(rows(store), before);
   } finally {

@@ -2,6 +2,12 @@ import { cpSync, mkdtempSync, rmSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { TestContext } from "node:test";
+import { diagnostic, diagnosticRows } from "./errors.ts";
+
+export function diagnosticText(error: unknown): string {
+  return `${diagnostic(error)}\n${diagnosticRows(error)}`;
+}
+
 export function temporaryDirectory(): string {
   process.umask(0o077);
   const parent = join(tmpdir(), "opencode");

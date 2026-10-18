@@ -49,7 +49,8 @@ export class Store {
     } catch {
       throw new Diagnostic(
         "system.database.open_failed",
-        `${path}: cannot open database.`,
+        "cannot open database",
+        { fields: [["path", path]] },
       );
     }
     try {
@@ -67,8 +68,8 @@ export class Store {
       if (error instanceof Diagnostic) throw error;
       throw new Diagnostic(
         "system.database.initialization_failed",
-        `${path}: cannot initialize database: ${sqliteReason(error)}.`,
-        { cause: error },
+        `cannot initialize database: ${sqliteReason(error)}`,
+        { cause: error, fields: [["path", path]] },
       );
     }
   }
@@ -131,7 +132,8 @@ export class Store {
       )
         throw new Diagnostic(
           "system.database.migration.incompatible_history",
-          `${this.path}: the recorded migration history is newer than this binary or comes from another history. Install the matching kanthord or restore the database backup.`,
+          "the recorded migration history is newer than this binary or comes from another history; install the matching kanthord or restore the database backup",
+          { fields: [["path", this.path]] },
         );
       versions.set(name, version);
     }
@@ -174,15 +176,16 @@ export class Store {
     if (audit(path, "file", true))
       throw new Diagnostic(
         "system.database.backup_failed",
-        `${path}: cannot write the database backup: the file exists.`,
+        "cannot write the database backup: the file exists",
+        { fields: [["path", path]] },
       );
     try {
       this.database.prepare("VACUUM INTO ?").run(path);
     } catch (error) {
       throw new Diagnostic(
         "system.database.backup_failed",
-        `${path}: cannot write the database backup: ${sqliteReason(error)}.`,
-        { cause: error },
+        `cannot write the database backup: ${sqliteReason(error)}`,
+        { cause: error, fields: [["path", path]] },
       );
     }
     audit(path, "file");

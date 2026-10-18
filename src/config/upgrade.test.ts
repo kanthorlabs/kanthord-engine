@@ -4,7 +4,7 @@ import { test } from "node:test";
 import { Diagnostic } from "../kernel/errors.ts";
 import { writePrivate } from "../kernel/files.ts";
 import { parseMapping } from "../kernel/yaml.ts";
-import { temporary } from "../kernel/test-support.ts";
+import { diagnosticText, temporary } from "../kernel/test-support.ts";
 import { configuration, initialConfig, loadConfig } from "./index.ts";
 import { CONFIG_VERSION } from "./steps.ts";
 import { upgradeConfig } from "./upgrade.ts";
@@ -32,7 +32,7 @@ function failsWith(code: string, text?: string) {
   return (error: unknown) =>
     error instanceof Diagnostic &&
     error.code === code &&
-    (text === undefined || error.message.includes(text));
+    (text === undefined || diagnosticText(error).includes(text));
 }
 
 test("config init writes the configuration version of the binary", () => {
@@ -50,7 +50,7 @@ test("the loader refuses a configuration without a version as version 1 and name
     () => loadConfig(path),
     failsWith(
       VERSION_BEHIND,
-      `configuration version ${LEGACY_VERSION} is older than configuration version ${CONFIG_VERSION} of this binary. Run kanthord upgrade.`,
+      `the configuration version is older than this binary; run the command\nconfig_version:    ${LEGACY_VERSION}\nsupported_version: ${CONFIG_VERSION}\ncommand:           kanthord upgrade\n`,
     ),
   );
 });
@@ -62,7 +62,7 @@ test("the loader refuses a configuration version newer than the binary", () => {
   );
   assert.throws(
     () => configuration(parseMapping(newer)),
-    failsWith(VERSION_AHEAD, "Install a newer kanthord"),
+    failsWith(VERSION_AHEAD, "install a newer kanthord"),
   );
   assert.throws(() => upgradeConfig(newer), failsWith(VERSION_AHEAD));
 });
@@ -79,7 +79,7 @@ test("the loader refuses a version that is not a positive safe integer as an inv
             ),
           ),
         ),
-      failsWith(INVALID_FIELD, "version: invalid or missing value."),
+      failsWith(INVALID_FIELD, "invalid or missing value\nfield: version\n"),
     );
 });
 
