@@ -14,7 +14,6 @@ import {
   SCHEDULER_PRODUCER,
   SpanOrigin,
   SpanStatus,
-  TextState,
   TRACKING_SERVICE_NAME,
   type ExecutionTrace,
 } from "./contract.ts";
@@ -34,6 +33,7 @@ const RUNTIME = "worker_instance_01JZ8R2B3C4D5E6F7G8H9J0K1M";
 const CREATED = 1000;
 const ENDED = 5000;
 const NO_DROP = 0;
+const NO_ROWS = 0;
 const ONE_DROP = 1;
 const PAGE_OF_ONE = 1;
 const SPAN_PAGE = 10;
@@ -166,8 +166,89 @@ test("the claimant writes spans and texts of its execution", (t) => {
   ).items[0];
   assert.equal(span?.producer, RUNTIME);
   const text = service.textGet(TRACE.trace_id, `${SPAN}:input`, caller(store));
-  assert.equal(text.state, TextState.Present);
   assert.equal(text.content, INPUT_TEXT);
+  assert.equal("state" in text, false);
+});
+
+test("textGet answers exactly the trace, the text id, the content and the creation time", (t) => {
+  const { store, service } = harness(t);
+  service.telemetryWrite(
+    TRACE.execution_id,
+    [
+      {
+        record_id: `${SPAN}:input`,
+        trace_id: TRACE.trace_id,
+        kind: RecordKind.Text,
+        text_id: `${SPAN}:input`,
+        text: INPUT_TEXT,
+      },
+    ],
+    caller(store),
+  );
+  const text = service.textGet(TRACE.trace_id, `${SPAN}:input`, caller(store));
+  assert.deepEqual(Object.keys(text).sort(), [
+    "content",
+    "created_at",
+    "text_id",
+    "trace_id",
+  ]);
+  assert.equal(text.trace_id, TRACE.trace_id);
+  assert.equal(text.text_id, `${SPAN}:input`);
+  assert.equal(text.content, INPUT_TEXT);
+  assert.ok(Number.isSafeInteger(text.created_at));
+});
+
+test("a trace delete removes its spans, records and texts", (t) => {
+  const { store, service } = harness(t);
+  service.executionOpened(TRACE, CREATED);
+  service.telemetryWrite(
+    TRACE.execution_id,
+    [
+      {
+        record_id: `${SPAN}:start`,
+        trace_id: TRACE.trace_id,
+        kind: RecordKind.Span,
+        span_id: SPAN,
+        operation: "agent.tool",
+        parent_span_id: TRACE.root_span_id,
+        start_time: CREATED,
+        text_ids: [`${SPAN}:input`],
+      },
+      {
+        record_id: `${SPAN}:input`,
+        trace_id: TRACE.trace_id,
+        kind: RecordKind.Text,
+        text_id: `${SPAN}:input`,
+        text: INPUT_TEXT,
+      },
+    ],
+    caller(store),
+  );
+  store.transaction((tx) =>
+    tx.database
+      .prepare("DELETE FROM tracking_trace WHERE trace_id = ?")
+      .run(TRACE.trace_id),
+  );
+  for (const read of [
+    () => service.traceGet(TRACE.trace_id, caller(store)),
+    () => service.spanList(TRACE.trace_id, { limit: SPAN_PAGE }, caller(store)),
+    () => service.textGet(TRACE.trace_id, `${SPAN}:input`, caller(store)),
+  ])
+    assert.throws(
+      read,
+      (error) =>
+        error instanceof OperationError && error.code === TRACE_NOT_FOUND,
+    );
+  for (const table of [
+    "tracking_span",
+    "tracking_record",
+    "tracking_telemetry_text",
+  ])
+    assert.equal(
+      store.database.prepare(`SELECT count(*) AS count FROM ${table}`).get()
+        ?.count,
+      NO_ROWS,
+    );
 });
 
 test("a server span of another producer under the root span is stored", (t) => {

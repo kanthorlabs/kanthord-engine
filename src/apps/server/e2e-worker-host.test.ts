@@ -15,7 +15,6 @@ import { RepositoryComponent } from "../../repository/index.ts";
 import { ClaimState, type ExecutionRecord } from "../../scheduler/contract.ts";
 import {
   SpanStatus,
-  TextState,
   type Span,
   type TelemetryText,
 } from "../../tracking/contract.ts";
@@ -185,8 +184,8 @@ async function assertSpanTree(
     traceId,
     `${judgement!.span_id}:rationale`,
   ]);
-  assert.equal(rationale.state, TextState.Present);
   assert.equal(rationale.content, JUDGED_RATIONALE);
+  assert.equal("state" in rationale, false);
   const turns = named(TURN_OPERATION);
   assert.ok(turns.some((turn) => turn.parent_span_id === task!.span_id));
   assert.ok(turns.some((turn) => turn.parent_span_id === judgement!.span_id));

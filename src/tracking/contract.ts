@@ -190,14 +190,10 @@ export const spanSchema = z.strictObject({
   created_at: timestamp,
 });
 export type Span = z.infer<typeof spanSchema>;
-export const TextState = { Present: "present", Expired: "expired" } as const;
-export const textStateSchema = z.enum(TextState);
 export const telemetryTextSchema = z.strictObject({
   trace_id: traceIdSchema,
   text_id: z.string().min(1),
-  state: textStateSchema,
-  content: z.string().nullable(),
-  expired_at: timestamp.nullable(),
+  content: z.string(),
   created_at: timestamp,
 });
 export type TelemetryText = z.infer<typeof telemetryTextSchema>;
@@ -318,7 +314,7 @@ export const trackingOperations = {
     mutation: false,
     body: false,
     status: HttpStatus.OK,
-    description: "Read one telemetry text or its expired state.",
+    description: "Read one telemetry text.",
     input: z.strictObject({
       params: z.strictObject({
         trace_id: traceIdSchema,

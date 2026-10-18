@@ -4,7 +4,7 @@ pathItem:
     operationId: tracking.text.get
     tags:
       - tracking
-    description: Read one telemetry text or its expired state.
+    description: Read one telemetry text.
     x-access-policy: human
     x-timeout-ms: 30000
     x-mutation: false
@@ -90,22 +90,8 @@ components:
         text_id:
           type: string
           minLength: 1
-        state:
-          type: string
-          enum:
-            - present
-            - expired
         content:
-          anyOf:
-            - type: string
-            - type: "null"
-        expired_at:
-          anyOf:
-            - type: integer
-              minimum: 0
-              maximum: 9007199254740991
-              description: Unix timestamp in milliseconds since 1970-01-01T00:00:00Z (UTC).
-            - type: "null"
+          type: string
         created_at:
           type: integer
           minimum: 0
@@ -114,8 +100,6 @@ components:
       required:
         - trace_id
         - text_id
-        - state
         - content
-        - expired_at
         - created_at
       additionalProperties: false
