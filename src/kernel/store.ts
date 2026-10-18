@@ -243,7 +243,6 @@ export class Store {
           )
           .all()
       : [];
-    this.assertSchema(known, records);
     const versions = new Map<string, number>();
     for (const record of records) {
       const name = String(record.service);
@@ -260,6 +259,7 @@ export class Store {
         );
       versions.set(name, version);
     }
+    this.assertSchema(known, versions);
     return {
       fresh: records.length === NO_RECORDED_MIGRATION,
       pending: services
@@ -274,16 +274,9 @@ export class Store {
 
   private assertSchema(
     known: ReadonlyMap<string, readonly Migration[]>,
-    records: readonly Record<string, unknown>[],
+    versions: ReadonlyMap<string, number>,
   ): void {
-    const recorded = new Map<string, number>();
-    for (const record of records) {
-      const service = String(record.service);
-      const list = known.get(service);
-      if (list !== undefined)
-        recorded.set(service, Math.min(Number(record.version), list.length));
-    }
-    for (const [service, count] of recorded) {
+    for (const [service, count] of versions) {
       const expected = expectedSchema(known.get(service)!, count);
       const object = firstSchemaDifference(
         expected,
