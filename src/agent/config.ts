@@ -55,22 +55,22 @@ export const agentConfigSchema: Schema<AgentConfig> = {
   },
   cooldown: {
     rate_limited_ms: {
-      doc: "Base cooldown in milliseconds of a chain entry after a rate_limited provider failure.",
+      doc: "Base cooldown in milliseconds of a credential after a rate_limited provider failure.",
       format: "nat",
       default: COOLDOWN_DEFAULTS.rate_limited_ms,
     },
     unavailable_ms: {
-      doc: "Base cooldown in milliseconds of a chain entry after an unavailable provider failure.",
+      doc: "Base cooldown in milliseconds of a credential after an unavailable provider failure.",
       format: "nat",
       default: COOLDOWN_DEFAULTS.unavailable_ms,
     },
     quota_exhausted_ms: {
-      doc: "Base cooldown in milliseconds of a chain entry after a quota_exhausted provider failure.",
+      doc: "Base cooldown in milliseconds of a credential after a quota_exhausted provider failure.",
       format: "nat",
       default: COOLDOWN_DEFAULTS.quota_exhausted_ms,
     },
     max_ms: {
-      doc: "Maximum cooldown in milliseconds of a chain entry; each strike doubles the base up to this value.",
+      doc: "Maximum cooldown in milliseconds of a credential; each strike doubles the base up to this value.",
       format: "nat",
       default: COOLDOWN_DEFAULTS.max_ms,
     },

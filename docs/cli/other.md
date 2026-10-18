@@ -404,7 +404,7 @@ The implemented fields are:
 - `agent.cooldown.rate_limited_ms`, `agent.cooldown.unavailable_ms`,
   `agent.cooldown.quota_exhausted_ms`: optional Convict `nat` in milliseconds,
   defaults `60000`, `60000` and `3600000`. Each holds the base cooldown of a
-  fallback chain entry after that provider failure. Each strike doubles it.
+  credential after that provider failure. Each strike doubles it.
 - `agent.cooldown.max_ms`: optional Convict `nat` in milliseconds, default
   `86400000`. It caps a cooldown.
 - `mission.consecutive_failure_limit`: optional Convict `nat`, default `3`. It
