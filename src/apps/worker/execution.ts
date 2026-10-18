@@ -35,6 +35,7 @@ export interface HostExecutionInput {
   log(record: Record<string, unknown>): void;
 }
 const ENDED = "ended";
+const RELEASED = "released";
 
 export async function hostExecution(
   input: HostExecutionInput,
@@ -124,6 +125,9 @@ export async function hostExecution(
       execution_id: input.claim.execution_id,
       kind: result.kind,
       ...(result.kind === ENDED ? { code: result.code } : {}),
+      ...(result.kind === RELEASED && result.stop
+        ? { reason: result.stop.reason, code: result.stop.code }
+        : {}),
     });
     if (result.kind !== ENDED || result.reason === EndReason.Revoked)
       return null;

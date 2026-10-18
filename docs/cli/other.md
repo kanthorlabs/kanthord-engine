@@ -677,6 +677,10 @@ application appends the transcript of each agent session to
 `<state>/transcripts/<execution id>.jsonl` with mode 0600, and it keeps the
 newest 50 execution transcripts.
 
+When an execution ends, the application logs one record `execution ended`
+with `execution_id` and `kind`. An `ended` execution adds `code`. A `released`
+execution that holds a `stop` adds the `reason` and the `code` of that `stop`.
+
 An execution that ends with a release or a closure leaves the instance
 registered, and the application pulls again. A release with a `stop` is a
 release. An execution that ends with no release and no closure exits `1`.

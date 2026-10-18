@@ -25,6 +25,82 @@ import { SHIPPED_TEMPLATES } from "../../agent/prompt-templates.ts";
 import { ExecutionIntent } from "../../worker/contract.ts";
 
 const SECRET = Buffer.alloc(32, 7).toString("base64");
+const ENDED_RECORD = "execution ended";
+test("host logs the stop of a released execution in the execution ended record", async (t) => {
+  const api = httpTransport("http://127.0.0.1:1");
+  const claim = testClaim();
+  const credential = {
+    credential_id: "credential_01ARZ3NDEKTSV4RRFFQ69G5FAA",
+    provider_id: "anthropic",
+    credential: { type: "api_key", key: "test_host_key" },
+  };
+  t.mock.method(api.worker, "handover", async () => ({
+    type: OperationResultType.Completed,
+    status: 200,
+    data: sealEnvelope(
+      deriveHandoverKeys(SECRET).handover,
+      handoverAad(claim.execution_id, claim.claimant.runtime_identity),
+      { items: [credential] },
+    ),
+  }));
+  t.mock.method(api.worker, "execution.setup.get", async () => ({
+    type: OperationResultType.Completed,
+    status: 200,
+    data: {
+      execution_id: claim.execution_id,
+      worker_name: "coder@1",
+      agents: [],
+      templates: SHIPPED_TEMPLATES,
+      resource_budget: { turns: 200, wall_time_ms: 7200000 },
+      intent: ExecutionIntent.Implement,
+      repositories: [],
+    },
+  }));
+  const records: Record<string, unknown>[] = [];
+  const input = {
+    api,
+    claim,
+    clientSecret: SECRET,
+    context: background,
+    workspaces: WorkspaceRoot.open(temporary(t)),
+    transport: new RepositoryComponent(),
+    modelRuntimeFactory: async () => {
+      throw new Error("Unexpected inference");
+    },
+    hostHome: temporary(t),
+    env: hostEnvironment(),
+    transcript: noTranscript,
+    log: (record: Record<string, unknown>) => records.push(record),
+  };
+  const stop = {
+    reason: EndReason.OperationFailed,
+    code: "llm.provider.unavailable",
+  };
+  await hostExecution(input, async () => ({
+    kind: "released",
+    furtherWork: true,
+    stop,
+  }));
+  await hostExecution(input, async () => ({
+    kind: "released",
+    furtherWork: false,
+  }));
+  const ended = records.filter((record) => record.msg === ENDED_RECORD);
+  assert.deepEqual(ended, [
+    {
+      msg: ENDED_RECORD,
+      execution_id: claim.execution_id,
+      kind: "released",
+      reason: stop.reason,
+      code: stop.code,
+    },
+    {
+      msg: ENDED_RECORD,
+      execution_id: claim.execution_id,
+      kind: "released",
+    },
+  ]);
+});
 test("host takes handover before setup and method, discards on every method end", async (t) => {
   const api = httpTransport("http://127.0.0.1:1");
   const claim = testClaim();
