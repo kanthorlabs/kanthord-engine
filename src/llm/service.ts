@@ -298,7 +298,7 @@ export class LlmComponent implements Service {
         context,
         (reason) =>
           this.logger.info(
-            { credential: body.data.credential, reason },
+            { credential_name: body.data.credential, reason },
             "provider check failed",
           ),
       );
@@ -344,7 +344,7 @@ export class LlmComponent implements Service {
       if (answer.message !== null)
         this.logger.info(
           {
-            credential: body.credential,
+            credential_name: body.credential,
             model_identifier: body.model_identifier,
             result: answer.result,
             reason: answer.message,
