@@ -896,6 +896,8 @@ test("an unknown operand names the unknown command and suggests a similar one", 
   for (const [args, suggestion] of [
     [["projec"], /Did you mean project\?/],
     [["project", "lst"], /Did you mean list\?/],
+    [["projet", "list", "--token", "x"], /Did you mean project\?/],
+    [["project", "lst", "--limit", "5"], /Did you mean list\?/],
     [["jwt"], /^error: unknown command 'jwt'/],
     [["project", "binding", "nope"], /^error: unknown command 'nope'/],
   ] as const) {
@@ -904,6 +906,14 @@ test("an unknown operand names the unknown command and suggests a similar one", 
     assert.equal(result.stdout, EMPTY_OUTPUT);
     assert.match(result.stderr, /error: unknown command/);
     assert.match(result.stderr, suggestion);
+  }
+  for (const args of [
+    ["project", "--bogus"],
+    ["--bogus", "project"],
+  ]) {
+    const result = await invocation(args, env);
+    assert.equal(result.status, ExitCode.Failure);
+    assert.match(result.stderr, /error: unknown option '--bogus'/);
   }
   const group = await invocation(["project"], env);
   assert.equal(group.status, ExitCode.Success);

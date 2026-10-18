@@ -267,7 +267,7 @@ test("an extra configuration field answers 400 with no project call and inserts 
     VALIDATION_FAILED,
   );
   assert.deepEqual(error.details, [
-    { path: ["body", "configuration"], code: "unrecognized_keys" },
+    { path: ["body", "configuration", "events"], code: "unrecognized_keys" },
   ]);
   assert.equal(h.projectCalls.length, PROJECT_CALLS_AFTER_REFUSAL);
   assert.equal(h.rows().length, ROWS_AFTER_REFUSAL);

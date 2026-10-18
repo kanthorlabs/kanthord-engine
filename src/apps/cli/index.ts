@@ -257,8 +257,11 @@ export function createProgram(
   return program;
 }
 
-interface UnknownCommandRaiser {
+const OPTION_PREFIX = "-";
+
+interface UnknownOperandRaiser {
   unknownCommand(): never;
+  unknownOption(flag: string): never;
 }
 
 function rejectUnknownOperands(program: Command): void {
@@ -269,10 +272,17 @@ function rejectUnknownOperands(program: Command): void {
     if (command.commands.length && !command.registeredArguments.length)
       groups.push(command);
   }
-  for (const group of groups) group.allowExcessArguments(true);
+  for (const group of groups) {
+    group.allowExcessArguments(true);
+    group.allowUnknownOption(true);
+  }
   program.hook("preAction", (_program, action) => {
-    if (groups.includes(action) && action.args.length)
-      (action as unknown as UnknownCommandRaiser).unknownCommand();
+    const operand = action.args.at(0);
+    if (!groups.includes(action) || operand === undefined) return;
+    const raiser = action as unknown as UnknownOperandRaiser;
+    if (!operand.startsWith(OPTION_PREFIX)) raiser.unknownCommand();
+    action.allowUnknownOption(false);
+    raiser.unknownOption(operand);
   });
 }
 
