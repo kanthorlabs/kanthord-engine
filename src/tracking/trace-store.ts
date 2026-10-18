@@ -14,8 +14,7 @@ const EMPTY_PAGE = 0;
 export interface TextRow {
   trace_id: string;
   text_id: string;
-  content: string | null;
-  expired_at: number | null;
+  content: string;
   created_at: number;
 }
 export interface SpanPage {
@@ -226,15 +225,14 @@ export function readText(
   assert.ok(textId);
   const row = tx.database
     .prepare(
-      "SELECT trace_id, text_id, content, expired_at, created_at FROM tracking_telemetry_text WHERE trace_id = ? AND text_id = ?",
+      "SELECT trace_id, text_id, content, created_at FROM tracking_telemetry_text WHERE trace_id = ? AND text_id = ?",
     )
     .get(traceId, textId);
   if (!row) return null;
   return {
     trace_id: String(row.trace_id),
     text_id: String(row.text_id),
-    content: row.content === null ? null : String(row.content),
-    expired_at: row.expired_at === null ? null : Number(row.expired_at),
+    content: String(row.content),
     created_at: Number(row.created_at),
   };
 }
@@ -248,7 +246,7 @@ export function insertText(
   assert.ok(text.text_id);
   tx.database
     .prepare(
-      "INSERT INTO tracking_telemetry_text (trace_id, text_id, content, expired_at, created_at) VALUES (?, ?, ?, NULL, ?)",
+      "INSERT INTO tracking_telemetry_text (trace_id, text_id, content, created_at) VALUES (?, ?, ?, ?)",
     )
     .run(text.trace_id, text.text_id, text.content, now);
 }

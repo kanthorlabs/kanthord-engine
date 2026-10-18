@@ -30,7 +30,6 @@ import {
   ExecutionEnd,
   SpanOrigin,
   SpanStatus,
-  TextState,
   TRACKING_SERVICE_NAME,
   trackingOperations,
   type Acknowledgement,
@@ -242,10 +241,7 @@ export class TrackingService implements Service, ExecutionTelemetry {
           "tracking.text.not_found",
           "The telemetry text is unknown.",
         );
-      return {
-        ...row,
-        state: row.content === null ? TextState.Expired : TextState.Present,
-      };
+      return row;
     });
   }
 

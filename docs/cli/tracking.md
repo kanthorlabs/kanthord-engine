@@ -101,9 +101,11 @@ from the store.
 
 ## `text get`
 
-Reads one telemetry text. `state` is `present` with its `content`, or `expired`
-with `content: null` and `expired_at`. An unknown text answers `404`
-`tracking.text.not_found`.
+Reads one telemetry text. The answer holds `trace_id`, `text_id`, `content` and
+`created_at`. A telemetry text has no state of its own. It expires with its
+trace: one delete of the trace row removes its spans, texts and records. An
+unknown text answers `404` `tracking.text.not_found`. An unknown or deleted
+trace answers `404` `tracking.trace.not_found`.
 
 ## `tracking.telemetry.write`
 

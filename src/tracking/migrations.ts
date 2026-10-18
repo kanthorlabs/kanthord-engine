@@ -38,8 +38,7 @@ const createTraceTables: Migration = (database) => {
     CREATE TABLE tracking_telemetry_text (
       trace_id TEXT NOT NULL REFERENCES tracking_trace (trace_id) ON DELETE CASCADE,
       text_id TEXT NOT NULL,
-      content TEXT,
-      expired_at INTEGER,
+      content TEXT NOT NULL,
       created_at INTEGER NOT NULL,
       PRIMARY KEY (trace_id, text_id)
     );
