@@ -269,10 +269,7 @@ async function fakeEndpoint(t: TestContext): Promise<string> {
   return `http://${LOOPBACK}:${address.port}`;
 }
 
-async function liveEnvironment(
-  t: TestContext,
-): Promise<{ env: NodeJS.ProcessEnv; token: string }> {
-  const fixture = await gatewayFixture(t, { machines: fakeMachines() });
+function insertProject(fixture: Awaited<ReturnType<typeof gatewayFixture>>) {
   fixture.store.transaction((tx) =>
     tx.database
       .prepare(
@@ -280,6 +277,13 @@ async function liveEnvironment(
       )
       .run(TEST_PROJECT_ID, "worker-app", Date.now()),
   );
+}
+
+async function liveEnvironment(
+  t: TestContext,
+): Promise<{ env: NodeJS.ProcessEnv; token: string }> {
+  const fixture = await gatewayFixture(t, { machines: fakeMachines() });
+  insertProject(fixture);
   const token = await fixture.machineToken(
     TEST_PROJECT_ID,
     TEST_WORKER_BINDING,
@@ -297,6 +301,7 @@ async function liveEnvironment(
 
 test("worker starts from the machine JWT fragment pasted below endpoint without exposing secrets", async (t) => {
   const fixture = await gatewayFixture(t, { machines: fakeMachines() });
+  insertProject(fixture);
   const env = workerEnvironment(t);
   env.KANTHORD_ENDPOINT = undefined;
   env.KANTHORD_TOKEN = undefined;
