@@ -20,8 +20,10 @@ import {
 } from "./contract.ts";
 import type { Dependencies } from "./service.ts";
 import {
+  closeAttempt,
   insertEvidence,
   insertAssessment,
+  openAttempt,
   readOpenAttempt,
   readEvidence,
 } from "./record-store.ts";
@@ -181,7 +183,6 @@ test("claim rechecks stale jobs, opens once, and preserves the open attempt pin"
     project_id: h.project_id,
     attempt: FIRST_ATTEMPT,
     node_revision: FIRST_ATTEMPT,
-    node_branch: `kanthord/${h.node_id}`,
   });
   assert.deepEqual(
     JSON.parse(
@@ -525,7 +526,15 @@ test("an unblock from the base branch starts a new node branch that later attemp
       },
     });
   };
-  assert.equal(h.claim()?.node_branch, `kanthord/${h.node_id}`);
+  const branchOf = (claim: { attempt: number } | null) => {
+    assert.ok(claim);
+    return h.store.transaction((tx) =>
+      h.service.nodeBranchesOf(tx, [
+        { node_id: h.node_id, attempt: claim.attempt },
+      ]),
+    )[0];
+  };
+  assert.equal(branchOf(h.claim()), `kanthord/${h.node_id}`);
   const invalid = {
     params: { node_id: h.node_id },
     query: {},
@@ -545,16 +554,47 @@ test("an unblock from the base branch starts a new node branch that later attemp
   assert.equal(restarted.attempt?.start_point, StartPoint.BaseBranch);
   const steps = h.claim();
   assert.equal(steps?.attempt, SECOND_ATTEMPT);
-  assert.equal(steps?.node_branch, restartBranch);
+  assert.equal(branchOf(steps), restartBranch);
   const continued = await blockAndUnblock(SECOND_ATTEMPT);
   assert.equal(continued.attempt?.attempt, THIRD_ATTEMPT);
   assert.equal(continued.attempt?.start_point, StartPoint.NodeBranch);
-  assert.equal(h.claim()?.node_branch, restartBranch);
+  assert.equal(branchOf(h.claim()), restartBranch);
   h.store.transaction((tx) => setNodeState(tx, h.node_id, NodeState.Waiting));
   const evaluation = h.claim([NodeState.Waiting]);
   assert.equal(evaluation?.kind, ClaimKind.Evaluation);
   assert.equal(evaluation?.attempt, THIRD_ATTEMPT);
-  assert.equal(evaluation?.node_branch, restartBranch);
+  assert.equal(branchOf(evaluation), restartBranch);
+});
+
+test("nodeBranchesOf answers the branch of every attempt", (t) => {
+  const h = fixture(t);
+  const restartAttempt = 4;
+  const attempts = [1, 2, 3, 4, 5];
+  h.store.transaction((tx) => {
+    for (const attempt of attempts) {
+      openAttempt(
+        tx,
+        h.node_id,
+        FIRST_ATTEMPT,
+        h.opener,
+        NOW,
+        attempt === restartAttempt
+          ? StartPoint.BaseBranch
+          : StartPoint.NodeBranch,
+      );
+      closeAttempt(tx, h.node_id, attempt, NOW);
+    }
+  });
+  const first = `kanthord/${h.node_id}`;
+  const restarted = `kanthord/${h.node_id}-a${restartAttempt}`;
+  const shuffled = [4, 2, 5, 1, 3];
+  const branches = h.store.transaction((tx) =>
+    h.service.nodeBranchesOf(
+      tx,
+      shuffled.map((attempt) => ({ node_id: h.node_id, attempt })),
+    ),
+  );
+  assert.deepEqual(branches, [restarted, first, restarted, first, first]);
 });
 
 const PULL_REQUEST_NUMBER = 1;

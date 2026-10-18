@@ -99,12 +99,7 @@ function commit(
     if (!result.row) return { kind: WorkPullKind.NoWork } as const;
     return {
       kind: WorkPullKind.Claimed,
-      execution: executionRecord(
-        tx,
-        dependencies.registrations,
-        result.row,
-        now,
-      ),
+      execution: executionRecord(tx, dependencies, result.row, now),
     } as const;
   });
   if (settled) dependencies.waiting.wake(identity.projectId);

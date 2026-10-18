@@ -548,7 +548,6 @@ test("Scheduler executions have exactly the ruled columns and partial unique ind
       ["created_at", "INTEGER", 1, 0],
       ["ended_at", "INTEGER", 0, 0],
       ["stop", "TEXT", 0, 0],
-      ["node_branch", "TEXT", 1, 0],
       ["agent_selections", "TEXT", 0, 0],
     ],
   );

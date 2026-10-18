@@ -221,7 +221,6 @@ export type ClaimAdmission = {
   project_id: string;
   attempt: number;
   node_revision: number;
-  node_branch: string;
 };
 
 export interface MissionTransitions {

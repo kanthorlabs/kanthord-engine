@@ -7,6 +7,7 @@ import type { Transaction } from "../kernel/store.ts";
 import type { Dependencies } from "./service.ts";
 import {
   executionRecord,
+  executionRecords,
   readExecution,
   listExecutions,
 } from "./execution-store.ts";
@@ -25,7 +26,7 @@ export function executionGet(
     const now = Date.now();
     return executionRecord(
       tx,
-      dependencies.registrations,
+      dependencies,
       requireExecution(tx, executionId),
       now,
     );
@@ -48,9 +49,12 @@ export function executionList(
       after,
       limit,
     );
-    const items = rows
-      .slice(FIRST_ROW, limit)
-      .map((row) => executionRecord(tx, dependencies.registrations, row, now));
+    const items = executionRecords(
+      tx,
+      dependencies,
+      rows.slice(FIRST_ROW, limit),
+      now,
+    );
     const nextCursor =
       rows.length > limit
         ? Buffer.from(items.at(-1)!.execution_id, TEXT_ENCODING).toString(
@@ -98,6 +102,6 @@ export function claimGet(
         "scheduler.execution.not_owner",
         "The execution belongs to another claimant.",
       );
-    return executionRecord(tx, dependencies.registrations, row, now);
+    return executionRecord(tx, dependencies, row, now);
   });
 }

@@ -76,7 +76,7 @@ import {
   executionDependencyOutcomes,
   executionDependencyEvidence,
 } from "./execution-read.ts";
-import { claim, release, failure } from "./transitions.ts";
+import { claim, release, failure, nodeBranchesOf } from "./transitions.ts";
 import { actionContextOf } from "./action-context.ts";
 import { claimFacts, claimFactsOf } from "./claim-facts.ts";
 import { guardCoverage } from "./coverage.ts";
@@ -192,6 +192,10 @@ export class MissionService
   failure(...args: Parameters<MissionTransitions["failure"]>) {
     const [tx, ...rest] = args;
     return failure(tx, this.dependencies, ...rest);
+  }
+
+  nodeBranchesOf(...args: Parameters<typeof nodeBranchesOf>) {
+    return nodeBranchesOf(...args);
   }
   private readonly shutdown = new CancellationContext();
   private startTask?: Promise<Error | null>;

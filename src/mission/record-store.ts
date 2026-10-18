@@ -180,20 +180,24 @@ export function listAttempts(
     )
     .all(nodeId, after, after, count) as unknown as AttemptRow[];
 }
-export function readBranchStartAttempt(
+export function readBranchStartPoints(
   tx: Transaction,
-  nodeId: string,
-  attempt: number,
-): number {
-  const row = tx.database
+  nodeIds: readonly string[],
+): Map<string, number[]> {
+  const rows = tx.database
     .prepare(
-      "SELECT max(attempt) AS attempt FROM mission_attempt WHERE node_id = ? AND attempt <= ? AND start_point = ?",
+      "SELECT node_id, attempt FROM mission_attempt WHERE node_id IN (SELECT value FROM json_each(?)) AND start_point = ? ORDER BY node_id, attempt",
     )
-    .get(nodeId, attempt, StartPoint.BaseBranch) as {
-    attempt: number | null;
-  };
-  assert.ok(row.attempt !== null && row.attempt >= FIRST_ATTEMPT);
-  return row.attempt;
+    .all(canonicalJSON([...new Set(nodeIds)]), StartPoint.BaseBranch) as {
+    node_id: string;
+    attempt: number;
+  }[];
+  const starts = new Map<string, number[]>();
+  for (const row of rows) {
+    assert.ok(row.attempt >= FIRST_ATTEMPT);
+    starts.set(row.node_id, [...(starts.get(row.node_id) ?? []), row.attempt]);
+  }
+  return starts;
 }
 export function readAttemptPins(
   tx: Transaction,

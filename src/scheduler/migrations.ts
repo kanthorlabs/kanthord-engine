@@ -26,7 +26,6 @@ const createSchedulerTables: Migration = (database) => {
       created_at INTEGER NOT NULL,
       ended_at INTEGER,
       stop TEXT,
-      node_branch TEXT NOT NULL DEFAULT '',
       agent_selections TEXT
     );
     CREATE UNIQUE INDEX scheduler_execution_node_live ON scheduler_execution (node_id) WHERE ended_at IS NULL;

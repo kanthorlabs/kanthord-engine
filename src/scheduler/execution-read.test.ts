@@ -17,6 +17,7 @@ const NOT_FOUND = "scheduler.execution.not_found";
 const SINGLE_ITEM_COUNT = 1;
 const TOTAL_ITEM_COUNT = 2;
 const CURSOR_INVALID = "system.pagination.cursor_invalid";
+const MARKER_BRANCH = "kanthord/marker";
 function harness(t: TestContext) {
   const h = schedulerHarness(t);
   const row = executionFixture();
@@ -122,6 +123,61 @@ test("human execution reads paginate all states and isolate project, node and at
   const foreign = executionFixture();
   h.store.transaction((tx) => insertExecution(tx, foreign));
   assert.deepEqual((await list({ node_id: foreign.node_id })).items, []);
+});
+
+test("the execution record derives node_branch from the Mission branches", async (t) => {
+  const h = harness(t);
+  t.mock.method(Date, "now", () => FIXTURE_NOW);
+  const ended = executionFixture({
+    project_id: h.row.project_id,
+    node_id: h.row.node_id,
+    attempt: 2,
+    ended_at: FIXTURE_NOW,
+  });
+  h.store.transaction((tx) => insertExecution(tx, ended));
+  const requests: { node_id: string; attempt: number }[][] = [];
+  h.dependencies.branches = {
+    nodeBranchesOf: (_tx, keys) => {
+      requests.push([...keys]);
+      return keys.map(() => MARKER_BRANCH);
+    },
+  };
+  const input = (executionId: string) => ({
+    params: { execution_id: executionId },
+    query: {},
+    body: null,
+  });
+  const got = await h.invoke(
+    "executionGet",
+    input(h.row.execution_id),
+    h.caller,
+  );
+  assert.equal(got.node_branch, MARKER_BRANCH);
+  assert.deepEqual(requests, [
+    [{ node_id: h.row.node_id, attempt: h.row.attempt }],
+  ]);
+  requests.length = 0;
+  const claimed = await h.invoke(
+    "claimGet",
+    input(h.row.execution_id),
+    h.caller,
+  );
+  assert.equal(claimed.node_branch, MARKER_BRANCH);
+  assert.equal(requests.length, SINGLE_ITEM_COUNT);
+  requests.length = 0;
+  const listed = await h.invoke(
+    "executionList",
+    { params: { project_id: h.row.project_id }, query: {}, body: null },
+    h.caller,
+  );
+  assert.equal(listed.items.length, TOTAL_ITEM_COUNT);
+  assert.ok(listed.items.every((item) => item.node_branch === MARKER_BRANCH));
+  assert.deepEqual(requests, [
+    listed.items.map((item) => ({
+      node_id: item.node_id,
+      attempt: item.attempt,
+    })),
+  ]);
 });
 
 test("claim get isolates runtime, binding and project and distinguishes absent executions", async (t) => {

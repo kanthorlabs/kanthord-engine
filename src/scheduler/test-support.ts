@@ -36,7 +36,6 @@ export function executionFixture(
     runtime_identity: createIdentity("worker_instance"),
     attempt: 1,
     pinned_revision: 1,
-    node_branch: "kanthord/node_01ARZ3NDEKTSV4RRFFQ69G5FAA",
     credentials: [],
     expired_at: FIXTURE_DEADLINE,
     trace_id: FIXTURE_TRACE_ID,
@@ -120,6 +119,10 @@ export function schedulerHarness(
         record("claimFactsOf", args);
         return [];
       },
+    },
+    branches: {
+      nodeBranchesOf: (_tx, keys) =>
+        keys.map((key) => `kanthord/${key.node_id}`),
     },
     projects: {
       projectPaused: (...args) => {

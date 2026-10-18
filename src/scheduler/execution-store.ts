@@ -12,6 +12,7 @@ import {
   type ExecutionRow,
   type ExecutionRecord,
   type InstanceRegistrations,
+  type MissionBranches,
 } from "./contract.ts";
 
 const NO_ROWS = 0;
@@ -19,9 +20,13 @@ const ONE_ROW = 1;
 const credentialList = z.array(identitySchema("credential"));
 const selectionList = z.array(agentSelectionSchema);
 const storedStop = releaseStopSchema.nullable();
+interface RecordDependencies {
+  registrations: InstanceRegistrations;
+  branches: MissionBranches;
+}
 const COLUMNS = `id AS execution_id, project_id, node_id,
   worker_binding_id, resource_identity,
-  runtime_identity, attempt, pinned_revision, node_branch,
+  runtime_identity, attempt, pinned_revision,
   credentials, expired_at, trace_id, root_span_id,
   created_at, ended_at, stop, agent_selections`;
 type StoredRow = Omit<
@@ -57,9 +62,9 @@ export function insertExecution(tx: Transaction, row: ExecutionRow): void {
     .prepare(
       `INSERT INTO scheduler_execution
     (id, project_id, node_id, worker_binding_id, resource_identity, runtime_identity,
-     attempt, pinned_revision, node_branch, credentials, expired_at, trace_id, root_span_id, created_at, ended_at, stop,
+     attempt, pinned_revision, credentials, expired_at, trace_id, root_span_id, created_at, ended_at, stop,
      agent_selections)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
       row.execution_id,
@@ -70,7 +75,6 @@ export function insertExecution(tx: Transaction, row: ExecutionRow): void {
       row.runtime_identity,
       row.attempt,
       row.pinned_revision,
-      row.node_branch,
       canonicalJSON(row.credentials),
       row.expired_at,
       row.trace_id,
@@ -199,10 +203,51 @@ export function claimStateOf(row: ExecutionRow, now: number): ClaimState {
       : ClaimState.Lost;
   return now < row.expired_at ? ClaimState.Running : ClaimState.Lost;
 }
+export function nodeBranchOfExecution(
+  tx: Transaction,
+  branches: MissionBranches,
+  row: ExecutionRow,
+): string {
+  const [nodeBranch] = branches.nodeBranchesOf(tx, [
+    { node_id: row.node_id, attempt: row.attempt },
+  ]);
+  assert.ok(nodeBranch);
+  return nodeBranch;
+}
 export function executionRecord(
+  tx: Transaction,
+  dependencies: RecordDependencies,
+  row: ExecutionRow,
+  now: number,
+): ExecutionRecord {
+  return recordOf(
+    tx,
+    dependencies.registrations,
+    row,
+    nodeBranchOfExecution(tx, dependencies.branches, row),
+    now,
+  );
+}
+export function executionRecords(
+  tx: Transaction,
+  dependencies: RecordDependencies,
+  rows: readonly ExecutionRow[],
+  now: number,
+): ExecutionRecord[] {
+  const nodeBranches = dependencies.branches.nodeBranchesOf(
+    tx,
+    rows.map((row) => ({ node_id: row.node_id, attempt: row.attempt })),
+  );
+  assert.equal(nodeBranches.length, rows.length);
+  return rows.map((row, index) =>
+    recordOf(tx, dependencies.registrations, row, nodeBranches[index]!, now),
+  );
+}
+function recordOf(
   tx: Transaction,
   registrations: InstanceRegistrations,
   row: ExecutionRow,
+  nodeBranch: string,
   now: number,
 ): ExecutionRecord {
   const {
@@ -216,6 +261,7 @@ export function executionRecord(
   const attribution = registrations.clientAttributionOf(tx, runtimeIdentity);
   return {
     ...fields,
+    node_branch: nodeBranch,
     claimant: {
       worker_binding_id: workerBindingId,
       resource_identity: resourceIdentity,

@@ -125,7 +125,6 @@ function acquire(
     runtime_identity: pull.runtime_identity,
     attempt: selected.claim.attempt,
     pinned_revision: selected.claim.node_revision,
-    node_branch: selected.claim.node_branch,
     credentials: [],
     agent_selections: selections,
     expired_at:
