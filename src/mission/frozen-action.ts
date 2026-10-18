@@ -29,44 +29,56 @@ export function requiredActionsOf(
   return actionsOfRevision(tx, bindings, revision);
 }
 
+function bindingActionOf(
+  tx: Transaction,
+  bindings: MissionBindings,
+  bindingId: string,
+): FrozenAction | null {
+  const binding = bindings.getBindingRevision(tx, bindingId);
+  assert.ok(binding);
+  if (
+    binding.resource_identity.split(RESOURCE_KIND_SEPARATOR)[0] !==
+    MissionBindingKind.Repository
+  )
+    return null;
+  const policy = bindings.repositoryPolicyOf(tx, bindingId);
+  assert.ok(policy && policy.binding_id === bindingId);
+  if (policy.action === null) return null;
+  return frozenActionSchema.parse({
+    key: `${policy.name}.${policy.action}`,
+    binding_id: bindingId,
+    action: policy.action,
+    expected_end_state:
+      policy.action === RepositoryAction.PullRequest
+        ? ExpectedEndState.PullRequestMerged
+        : ExpectedEndState.BaseBranchPushed,
+    follows: null,
+    configuration: {
+      base_branch: policy.base_branch,
+      landing: policy.landing,
+    },
+  });
+}
+
 export function actionsOfRevision(
   tx: Transaction,
   bindings: MissionBindings,
   revision: RevisionRow,
+  actions: Map<string, FrozenAction | null> = new Map(),
 ): FrozenAction[] {
   if (revision.intent === Intent.Examine) return [];
-  const actions: FrozenAction[] = [];
+  const found: FrozenAction[] = [];
   for (const bindingId of bindingIdsSchema.parse(
     JSON.parse(revision.bindings),
   )) {
-    const binding = bindings.getBindingRevision(tx, bindingId);
-    assert.ok(binding);
-    if (
-      binding.resource_identity.split(RESOURCE_KIND_SEPARATOR)[0] !==
-      MissionBindingKind.Repository
-    )
-      continue;
-    const policy = bindings.repositoryPolicyOf(tx, bindingId);
-    assert.ok(policy && policy.binding_id === bindingId);
-    if (policy.action === null) continue;
-    actions.push(
-      frozenActionSchema.parse({
-        key: `${policy.name}.${policy.action}`,
-        binding_id: bindingId,
-        action: policy.action,
-        expected_end_state:
-          policy.action === RepositoryAction.PullRequest
-            ? ExpectedEndState.PullRequestMerged
-            : ExpectedEndState.BaseBranchPushed,
-        follows: null,
-        configuration: {
-          base_branch: policy.base_branch,
-          landing: policy.landing,
-        },
-      }),
-    );
+    let action = actions.get(bindingId);
+    if (action === undefined) {
+      action = bindingActionOf(tx, bindings, bindingId);
+      actions.set(bindingId, action);
+    }
+    if (action !== null) found.push(action);
   }
-  return actions.sort((left, right) =>
+  return found.sort((left, right) =>
     left.key < right.key ? -1 : left.key > right.key ? 1 : 0,
   );
 }

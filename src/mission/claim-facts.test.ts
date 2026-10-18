@@ -12,17 +12,27 @@ import {
   Intent,
   type MissionBindings,
 } from "./contract.ts";
+import { actionsOfRevision } from "./frozen-action.ts";
 import { openAttempt } from "./record-store.ts";
-import { insertMission, insertNode, setNodeState } from "./store.ts";
+import {
+  insertMission,
+  insertNode,
+  readClaimRevisions,
+  setNodeState,
+} from "./store.ts";
 import { missionHarness } from "./test-support.ts";
 
 const NOW = 100;
 const FIRST_REVISION = 1;
 const SECOND_REVISION = 2;
+const NO_ACTIONS = 0;
 const ACTOR = { kind: ActorKind.Human, account: "ulrich", name: "Ulrich" };
 const MACOS = "platform.macos";
 
-function factsHarness(t: TestContext) {
+function factsHarness(
+  t: TestContext,
+  overrides: Partial<MissionBindings> = {},
+) {
   const projectId = createIdentity("project");
   const pullRequestBinding = createIdentity("binding");
   const bindings: MissionBindings = {
@@ -52,6 +62,7 @@ function factsHarness(t: TestContext) {
       landing: "human" as const,
       project_prompt: null,
     }),
+    ...overrides,
   };
   const h = missionHarness(t, testHumanIdentity("ulrich", "Ulrich", "token"), {
     bindings,
@@ -105,6 +116,7 @@ function factsHarness(t: TestContext) {
   return {
     ...h,
     projectId,
+    missionId,
     pullRequestBinding,
     node,
     revise,
@@ -201,5 +213,82 @@ test("a terminal node answers no row", (t) => {
   assert.deepEqual(
     h.calls.filter(({ method }) => !method.startsWith("bindings.")),
     [],
+  );
+});
+
+test("claimFactsOf reads each binding once per call", (t) => {
+  const revisionCalls: string[] = [];
+  const policyCalls: string[] = [];
+  const fixtures = factsHarness(t);
+  const h = factsHarness(t, {
+    getBindingRevision: (tx, bindingId) => {
+      revisionCalls.push(bindingId);
+      return fixtures.dependencies.bindings.getBindingRevision(tx, bindingId);
+    },
+    repositoryPolicyOf: (tx, bindingId) => {
+      policyCalls.push(bindingId);
+      return fixtures.dependencies.bindings.repositoryPolicyOf(tx, bindingId);
+    },
+  });
+  const nodes = [
+    h.node({ bindings: [h.pullRequestBinding] }),
+    h.node({ bindings: [h.pullRequestBinding] }),
+    h.node({ bindings: [h.pullRequestBinding] }),
+  ];
+  assert.equal(h.factsOf().length, nodes.length);
+  assert.deepEqual(revisionCalls, [h.pullRequestBinding]);
+  assert.deepEqual(policyCalls, [h.pullRequestBinding]);
+  assert.equal(h.factsOf().length, nodes.length);
+  assert.deepEqual(revisionCalls, [h.pullRequestBinding, h.pullRequestBinding]);
+  assert.deepEqual(policyCalls, [h.pullRequestBinding, h.pullRequestBinding]);
+});
+
+test("claimFactsOf answers the same rows with the binding map", (t) => {
+  const withoutActionBinding = createIdentity("binding");
+  const fixtures = factsHarness(t);
+  const h = factsHarness(t, {
+    repositoryPolicyOf: (tx, bindingId) => {
+      const policy = fixtures.dependencies.bindings.repositoryPolicyOf(
+        tx,
+        bindingId,
+      );
+      return policy && bindingId === withoutActionBinding
+        ? { ...policy, action: null }
+        : policy;
+    },
+  });
+  const examine = h.node({
+    intent: Intent.Examine,
+    bindings: [h.pullRequestBinding],
+  });
+  const withAction = h.node({ bindings: [h.pullRequestBinding] });
+  const withoutAction = h.node({ bindings: [withoutActionBinding] });
+  const withTwo = h.node({
+    bindings: [withoutActionBinding, h.pullRequestBinding],
+  });
+  const bindings = h.dependencies.bindings;
+  const expected = h.store.transaction((tx) =>
+    readClaimRevisions(tx, h.missionId).map((revision) => [
+      revision.node_id,
+      actionsOfRevision(tx, bindings, revision).length > NO_ACTIONS,
+    ]),
+  );
+  assert.deepEqual(
+    Object.fromEntries(expected),
+    Object.fromEntries([
+      [examine, false],
+      [withAction, true],
+      [withoutAction, false],
+      [withTwo, true],
+    ]),
+  );
+  assert.deepEqual(
+    h
+      .factsOf()
+      .map(({ node_id, claims }) => [
+        node_id,
+        claims.includes(ClaimableState.ExternalRequested),
+      ]),
+    expected,
   );
 });
