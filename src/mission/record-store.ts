@@ -238,6 +238,19 @@ export function insertEvidence(
       asset.expired_at,
     );
 }
+export function markAssetFailed(
+  tx: Transaction,
+  assetId: string,
+  failedAt: number,
+): void {
+  assert.ok(tx.database.isTransaction);
+  tx.database
+    .prepare(
+      "UPDATE mission_evidence_asset SET failed_at = ? WHERE id = ? AND failed_at IS NULL",
+    )
+    .run(failedAt, assetId);
+}
+
 export function failedBindingsOf(
   tx: Transaction,
   nodeId: string,

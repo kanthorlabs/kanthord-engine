@@ -13,7 +13,11 @@ import {
   type ExecutionContext,
 } from "./contract.ts";
 import { admitExecution } from "./execution.ts";
-import { readEvidence, type AssetRow } from "./record-store.ts";
+import {
+  markAssetFailed,
+  readEvidence,
+  type AssetRow,
+} from "./record-store.ts";
 import type { Dependencies } from "./service.ts";
 import {
   authorizeClaim,
@@ -107,11 +111,7 @@ export async function completeEvidence(
     .catch((error: unknown) => {
       if (checkFailed(error))
         dependencies.store.transaction((tx) =>
-          tx.database
-            .prepare(
-              "UPDATE mission_evidence_asset SET failed_at = ? WHERE id = ? AND failed_at IS NULL",
-            )
-            .run(Date.now(), assetId),
+          markAssetFailed(tx, assetId, Date.now()),
         );
       throw error;
     });
