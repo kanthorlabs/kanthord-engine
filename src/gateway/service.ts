@@ -146,7 +146,13 @@ export class GatewayService implements Service {
           reject(
             new Diagnostic(
               "gateway.listener.bind_failed",
-              `gateway: cannot bind ${this.options.config.bind}:${this.options.config.port}.`,
+              "gateway: cannot bind the listener address.",
+              {
+                fields: [
+                  ["bind", this.options.config.bind],
+                  ["port", this.options.config.port],
+                ],
+              },
             ),
           );
         server.once("error", error);

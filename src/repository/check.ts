@@ -23,14 +23,24 @@ function runTool(
   const result = spawnSync(cmd, args, { encoding: "utf8" });
   if (result.error) {
     if ((result.error as NodeJS.ErrnoException).code === ENOENT_CODE) {
-      throw new Diagnostic(CheckErrorCode.ToolMissing, `${cmd}: not found`);
+      throw new Diagnostic(CheckErrorCode.ToolMissing, "tool not found", {
+        fields: [["tool", cmd]],
+      });
     }
-    throw new Diagnostic(CheckErrorCode.ToolMissing, `${cmd}: spawn failed`);
+    throw new Diagnostic(CheckErrorCode.ToolMissing, "tool spawn failed", {
+      fields: [["tool", cmd]],
+    });
   }
   if (result.status !== EXIT_SUCCESS || result.signal !== null) {
     throw new Diagnostic(
       CheckErrorCode.ToolMissing,
-      `${cmd}: exited with status ${result.status}`,
+      "tool exited with an error",
+      {
+        fields: [
+          ["tool", cmd],
+          ["exit_status", result.status],
+        ],
+      },
     );
   }
   return { stdout: result.stdout ?? "", stderr: result.stderr ?? "" };
@@ -41,7 +51,8 @@ export function parseGitVersion(output: string): [number, number] {
   if (!match?.[1] || !match[2]) {
     throw new Diagnostic(
       CheckErrorCode.ToolMissing,
-      "git: unrecognized version output",
+      "unrecognized version output",
+      { fields: [["tool", "git"]] },
     );
   }
   const major = Number.parseInt(match[1], 10);
@@ -52,7 +63,14 @@ export function parseGitVersion(output: string): [number, number] {
   ) {
     throw new Diagnostic(
       CheckErrorCode.ToolVersion,
-      `git: version ${major}.${minor} is below 2.40`,
+      "tool version is below the minimum version",
+      {
+        fields: [
+          ["tool", "git"],
+          ["version", `${major}.${minor}`],
+          ["minimum_version", `${GIT_MIN_MAJOR}.${GIT_MIN_MINOR}`],
+        ],
+      },
     );
   }
   return [major, minor];
@@ -63,7 +81,8 @@ export function parseSshVersion(output: string): [number, number] {
   if (!match?.[1] || !match[2]) {
     throw new Diagnostic(
       CheckErrorCode.ToolMissing,
-      "ssh: unrecognized version output",
+      "unrecognized version output",
+      { fields: [["tool", "ssh"]] },
     );
   }
   const major = Number.parseInt(match[1], 10);
@@ -74,7 +93,14 @@ export function parseSshVersion(output: string): [number, number] {
   ) {
     throw new Diagnostic(
       CheckErrorCode.ToolVersion,
-      `ssh: version ${major}.${minor} is below 9.0`,
+      "tool version is below the minimum version",
+      {
+        fields: [
+          ["tool", "ssh"],
+          ["version", `${major}.${minor}`],
+          ["minimum_version", `${SSH_MIN_MAJOR}.${SSH_MIN_MINOR}`],
+        ],
+      },
     );
   }
   return [major, minor];

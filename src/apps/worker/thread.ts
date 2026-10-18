@@ -25,7 +25,8 @@ async function main(): Promise<void> {
     if (refused.length)
       throw new Diagnostic(
         "worker.thread.directory_invalid",
-        `worker: ${refused.join(", ")} must be an absolute path.`,
+        "worker: the directory variables must be absolute paths.",
+        { fields: [["variables", refused.join(", ")]] },
       );
     const unit = new WorkerUnit({
       transport: portTransport(data.port),

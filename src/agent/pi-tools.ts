@@ -17,6 +17,7 @@ import {
 } from "../kernel/assets.ts";
 import { Diagnostic } from "../kernel/errors.ts";
 import { PRIVATE_DIRECTORY_MODE } from "../kernel/files.ts";
+import type { Row } from "../kernel/rows.ts";
 import { WorkerErrorCode } from "../worker/contract.ts";
 import { childEnvironment } from "./environment.ts";
 import { piDirectory } from "./pi.ts";
@@ -57,11 +58,14 @@ export interface PiToolsOptions {
   root?: URL;
 }
 
-function toolMissing(tool: string, reason: string): Diagnostic {
-  return new Diagnostic(
-    WorkerErrorCode.StartToolMissing,
-    `${tool}: ${reason}.`,
-  );
+function toolMissing(
+  tool: string,
+  message: string,
+  fields: readonly Row[] = [],
+): Diagnostic {
+  return new Diagnostic(WorkerErrorCode.StartToolMissing, `${message}.`, {
+    fields: [["tool", tool], ...fields],
+  });
 }
 
 function sha256(bytes: Buffer): string {
@@ -116,7 +120,10 @@ function installTool(
         options.assets,
         options.root,
       );
-      if (!bytes) throw toolMissing(tool, `license ${file} source is absent`);
+      if (!bytes)
+        throw toolMissing(tool, "license source is absent", [
+          ["license", file],
+        ]);
       publish(
         join(binDirectory, LICENSES_DIRECTORY_NAME, tool, file),
         bytes,
@@ -125,17 +132,19 @@ function installTool(
     }
   } catch (error) {
     if (error instanceof Diagnostic) throw error;
-    throw toolMissing(tool, `cannot install: ${(error as Error).message}`);
+    throw toolMissing(tool, "cannot install", [
+      ["reason", (error as Error).message],
+    ]);
   }
   const run = spawnSync(path, ["--version"], {
     timeout: VERSION_TIMEOUT_MS,
     env: childEnvironment(options.env ?? process.env),
   });
   if (run.error || run.status !== SUCCESS)
-    throw toolMissing(
-      tool,
-      `cannot run: ${run.error?.message ?? `exit status ${run.status}`}`,
-    );
+    throw toolMissing(tool, "cannot run", [
+      ["reason", run.error?.message],
+      ["exit_status", run.status],
+    ]);
 }
 
 export function installPiTools(options: PiToolsOptions = {}): void {
@@ -150,7 +159,9 @@ export function installPiTools(options: PiToolsOptions = {}): void {
   for (const [tool, definition] of Object.entries(manifest.tools)) {
     const entry = definition.targets[target];
     if (!entry)
-      throw toolMissing(tool, `host target ${target} is not in the manifest`);
+      throw toolMissing(tool, "host target is not in the manifest", [
+        ["target", target],
+      ]);
     installTool(tool, entry, target, binDirectory, options);
   }
 }

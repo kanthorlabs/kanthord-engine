@@ -39,6 +39,14 @@ test("parseGitVersion rejects an older version", () => {
     () => parseGitVersion("git version 2.39.3"),
     CheckErrorCode.ToolVersion,
   );
+  assert.throws(() => parseGitVersion("git version 2.39.3"), {
+    message: "tool version is below the minimum version",
+    fields: [
+      ["tool", "git"],
+      ["version", "2.39"],
+      ["minimum_version", "2.40"],
+    ],
+  });
 });
 
 test("parseGitVersion rejects malformed output", () => {
