@@ -23,7 +23,7 @@ import { llmOperations } from "../../llm/contract.ts";
 import { repositoryOperations } from "../../repository/contract.ts";
 import { projectOperations } from "../../project/contract.ts";
 import { workerOperations } from "../../worker/contract.ts";
-import { agentOperations } from "../../agent/contract.ts";
+import { agentOperations, ChainLevel } from "../../agent/contract.ts";
 import { missionOperations, Intent } from "../../mission/contract.ts";
 import { schedulerOperations, WorkPullKind } from "../../scheduler/contract.ts";
 import {
@@ -60,6 +60,7 @@ const SECRET = "test_handover-integration-secret-one";
 const REFRESHED = "test_handover-integration-secret-two";
 const ROTATED = "test_handover-integration-secret-three";
 const FIRST_REVISION = 1;
+const HEAD_POSITION = 0;
 const TWO_REVISIONS = 2;
 const HTTP = "http";
 const PROOF_FAILED = "gateway.invocation.execution_proof_failed";
@@ -127,6 +128,8 @@ for (const adapter of ["direct", "http"] as const) {
       .get(h.execution.execution_id);
     const answer = completed(await read());
     assert.equal(answer.agents[0]!.credential_id, h.credentialId);
+    assert.equal(answer.agents[0]!.position, HEAD_POSITION);
+    assert.equal(answer.agents[0]!.level, ChainLevel.Binding);
     assert.deepEqual(answer.agents[0]!.effective_configuration, {
       ...CONFIGURATION,
       provider: "anthropic",

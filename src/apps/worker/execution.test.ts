@@ -132,6 +132,8 @@ test("host takes handover before setup and method, discards on every method end"
           model_identifier: "claude-sonnet-4-5",
           reasoning_effort: "off",
         },
+        position: 0,
+        level: "enablement",
         metadata: null,
         prompt: { final: "setup prompt" },
       },

@@ -18,6 +18,7 @@ import {
 import type { Transaction } from "../kernel/store.ts";
 import { HttpMethod, HttpStatus } from "../kernel/http.ts";
 import {
+  ChainLevel,
   effectiveConfigurationSchema,
   promptTemplatesSchema,
   type AgentView,
@@ -745,6 +746,8 @@ export type CredentialMetadataOf = (
 export const agentSetupSchema = z.strictObject({
   agent_name: z.string().min(1),
   effective_configuration: effectiveConfigurationSchema,
+  position: z.number().int().min(0),
+  level: z.enum(ChainLevel),
   credential_id: identitySchema("credential"),
   metadata: z.record(z.string(), z.unknown()).nullable(),
   prompt: z.strictObject({ final: z.string() }),

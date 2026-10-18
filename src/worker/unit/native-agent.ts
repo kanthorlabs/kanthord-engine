@@ -216,7 +216,7 @@ export async function openNativeAgent(
     });
     pins.pinInference(session, input.agent.prompt.final);
     const unsubscribeTrace = input.spans
-      ? traceAgent(session, input.spans, input.agent.agent_name)
+      ? traceAgent(session, input.spans, input.agent)
       : () => {};
     return nativeAgent(
       session,

@@ -121,6 +121,8 @@ export async function executionSetup(
       return {
         agent_name: agentName,
         effective_configuration: view.effective,
+        position: selection.position,
+        level: selection.level,
         credential_id: record.id,
         metadata: record.metadata,
         prompt: {

@@ -81,8 +81,8 @@ test("setup answers the system and agent prompt after its single snapshot and su
   };
   const selection: AgentSelection = {
     agent_name: agent.agent_name,
-    position: 0,
-    level: "enablement",
+    position: 1,
+    level: "binding",
     agent_provider: entry.agent_provider,
     provider: agent.effective_configuration.provider,
     credential: "pinned-key",
@@ -190,6 +190,8 @@ test("setup answers the system and agent prompt after its single snapshot and su
     answered.effective_configuration.credential,
     selection.credential,
   );
+  assert.equal(answered.position, selection.position);
+  assert.equal(answered.level, selection.level);
   assert.equal(commits, before + 1);
   await assert.rejects(
     executionSetup(

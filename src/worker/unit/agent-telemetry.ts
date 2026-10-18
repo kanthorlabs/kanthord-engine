@@ -3,6 +3,7 @@ import type { AgentSession } from "@earendil-works/pi-coding-agent";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { AssistantMessage } from "@earendil-works/pi-ai";
 import { SpanStatus, type Attributes } from "../../tracking/contract.ts";
+import type { AgentSetup } from "../contract.ts";
 import { isObject, isString } from "../../kernel/values.ts";
 import { providerFailureOf } from "../../llm/provider-failure.ts";
 import { SpanOperation, type SpanRecorder } from "./telemetry.ts";
@@ -74,17 +75,23 @@ type EventOf<T extends SessionEvent["type"]> = Extract<
   { type: T }
 >;
 
+type TracedAgent = Pick<AgentSetup, "agent_name" | "position" | "level">;
+
 class AgentTracer {
   private readonly spans: SpanRecorder;
   private readonly agentName: string;
+  private readonly position: number;
+  private readonly level: AgentSetup["level"];
   private turn: string | null = null;
   private readonly tools = new Map<string, { span: string; started: number }>();
 
-  constructor(spans: SpanRecorder, agentName: string) {
+  constructor(spans: SpanRecorder, agent: TracedAgent) {
     assert.ok(spans);
-    assert.ok(agentName);
+    assert.ok(agent.agent_name);
     this.spans = spans;
-    this.agentName = agentName;
+    this.agentName = agent.agent_name;
+    this.position = agent.position;
+    this.level = agent.level;
   }
 
   observe(event: SessionEvent): void {
@@ -106,6 +113,8 @@ class AgentTracer {
       operation: SpanOperation.Turn,
       attributes: {
         "kanthord.agent.name": this.agentName,
+        "kanthord.agent.chain_position": this.position,
+        "kanthord.agent.chain_level": this.level,
         "kanthord.turn.index": index,
       },
     });
@@ -174,11 +183,11 @@ class AgentTracer {
 export function traceAgent(
   session: AgentSession,
   spans: SpanRecorder,
-  agentName: string,
+  agent: TracedAgent,
 ): () => void {
   assert.ok(session);
-  assert.ok(agentName);
-  const tracer = new AgentTracer(spans, agentName);
+  assert.ok(agent.agent_name);
+  const tracer = new AgentTracer(spans, agent);
   return session.subscribe((event) => {
     try {
       tracer.observe(event);
