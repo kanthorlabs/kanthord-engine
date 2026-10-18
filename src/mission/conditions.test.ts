@@ -97,7 +97,8 @@ test("claimability covers all twelve states, attempt zero and retirement", (t) =
     for (const state of Object.values(NodeState)) {
       setNodeState(tx, id, state);
       assert.equal(
-        claimableMap(tx, h.mission_id, h.dependencies.bindings).get(id),
+        claimableMap(tx, h.mission_id, h.dependencies.bindings).get(id) ??
+          false,
         state === NodeState.Available || state === NodeState.Waiting,
         state,
       );
@@ -107,7 +108,7 @@ test("claimability covers all twelve states, attempt zero and retirement", (t) =
       .prepare("UPDATE mission_node SET retired_at = ? WHERE id = ?")
       .run(NOW, id);
     assert.equal(
-      claimableMap(tx, h.mission_id, h.dependencies.bindings).get(id),
+      claimableMap(tx, h.mission_id, h.dependencies.bindings).get(id) ?? false,
       false,
     );
   });

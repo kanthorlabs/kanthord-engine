@@ -29,7 +29,7 @@ import {
   readAssets,
 } from "./record-store.ts";
 import { nodeBranchOf } from "../repository/node-branch.ts";
-import { claimableMap } from "./routing.ts";
+import { nodeClaimable } from "./routing.ts";
 import { requireNode } from "./node-read.ts";
 import { requireMission } from "./write.ts";
 import { transition } from "./control.ts";
@@ -63,8 +63,7 @@ export function claim(
     !declaredStates.includes(node.state)
   )
     return null;
-  if (!claimableMap(tx, node.mission_id, dependencies.bindings).get(nodeId))
-    return null;
+  if (!nodeClaimable(tx, node, dependencies.bindings)) return null;
   assert.ok(node.attempt !== null);
   const revision = readCurrentRevision(tx, nodeId);
   assert.ok(revision);

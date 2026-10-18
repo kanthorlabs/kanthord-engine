@@ -3,41 +3,53 @@ import type { Transaction } from "../kernel/store.ts";
 import { reconcileJob } from "./admission.ts";
 import { NodeState, type WorkQueue, type MissionBindings } from "./contract.ts";
 import { readinessOf, continuationHolds } from "./conditions.ts";
-import { directDependencyMap } from "./graph.ts";
-import { readDependencies, readMissionNodes, setNodeState } from "./store.ts";
+import {
+  readLiveMissionNodes,
+  readNode,
+  readRoutableNodes,
+  setNodeState,
+  type NodeRow,
+} from "./store.ts";
+
+const NO_UNMET_DEPENDENCIES = 0;
+
+export function nodeClaimable(
+  tx: Transaction,
+  node: NodeRow,
+  bindings: MissionBindings,
+): boolean {
+  if (node.retired_at !== null) return false;
+  if (node.state === NodeState.Available) return true;
+  if (node.state === NodeState.Waiting) return readinessOf(tx, node).holds;
+  if (node.state === NodeState.ExternalRequested)
+    return continuationHolds(tx, bindings, node);
+  return false;
+}
+
+function claimableOf(
+  tx: Transaction,
+  nodes: readonly NodeRow[],
+  bindings: MissionBindings,
+): Map<string, boolean> {
+  return new Map(
+    nodes.map((node) => [node.id, nodeClaimable(tx, node, bindings)]),
+  );
+}
 
 export function claimableMap(
   tx: Transaction,
   missionId: string,
   bindings: MissionBindings,
 ): Map<string, boolean> {
-  const nodes = readMissionNodes(tx, missionId);
-  return new Map(
-    nodes.map((node) => {
-      if (node.retired_at !== null) return [node.id, false];
-      if (node.state === NodeState.Available) return [node.id, true];
-      if (node.state === NodeState.Waiting)
-        return [node.id, readinessOf(tx, node).holds];
-      if (node.state === NodeState.ExternalRequested)
-        return [node.id, continuationHolds(tx, bindings, node)];
-      return [node.id, false];
-    }),
-  );
+  return claimableOf(tx, readLiveMissionNodes(tx, missionId), bindings);
 }
 
 export function routeMission(tx: Transaction, missionId: string): void {
-  const nodes = readMissionNodes(tx, missionId).filter(
-    (node) => node.retired_at === null,
-  );
-  const states = new Map(nodes.map((node) => [node.id, node.state]));
-  const dependencies = directDependencyMap(readDependencies(tx, missionId));
-  for (const node of nodes) {
-    if (node.state !== NodeState.Pending && node.state !== NodeState.Available)
-      continue;
-    const available = (dependencies.get(node.id) ?? []).every(
-      (id) => states.get(id) === NodeState.Completed,
-    );
-    const state = available ? NodeState.Available : NodeState.Pending;
+  for (const node of readRoutableNodes(tx, missionId)) {
+    const state =
+      node.unmet === NO_UNMET_DEPENDENCIES
+        ? NodeState.Available
+        : NodeState.Pending;
     if (state !== node.state) setNodeState(tx, node.id, state);
   }
 }
@@ -50,13 +62,12 @@ export function reconcileMission(
   before: Map<string, boolean>,
   bindings: MissionBindings,
 ): void {
-  const after = claimableMap(tx, missionId, bindings);
-  const nodes = new Map(
-    readMissionNodes(tx, missionId).map((node) => [node.id, node]),
-  );
+  const live = readLiveMissionNodes(tx, missionId);
+  const after = claimableOf(tx, live, bindings);
+  const nodes = new Map(live.map((node) => [node.id, node]));
   const ids = new Set([...before.keys(), ...after.keys()]);
   for (const id of ids) {
-    const node = nodes.get(id);
+    const node = nodes.get(id) ?? readNode(tx, id);
     assert.ok(node, "Reconciliation requires persistent node rows.");
     assert.equal(
       node.mission_id,

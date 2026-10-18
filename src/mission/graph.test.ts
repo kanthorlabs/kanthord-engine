@@ -3,7 +3,6 @@ import { test } from "node:test";
 import {
   detectCycle,
   directDependenciesOf,
-  directDependencyMap,
   hasDependencyCycle,
   type DepEdge,
 } from "./graph.ts";
@@ -46,20 +45,4 @@ test("shared dependencies occur once in a closure", () => {
 test("a self dependency is a cycle", () => {
   assert.equal(hasDependencyCycle([edge("a", "a")]), true);
   assert.equal(hasDependencyCycle([edge("a", "b"), edge("b", "c")]), false);
-});
-
-test("directDependencyMap answers the direct dependencies of each dependent", () => {
-  const edges = [
-    edge("a", "b"),
-    edge("a", "c"),
-    edge("b", "d"),
-    edge("c", "d"),
-    edge("e", "d"),
-  ];
-  const map = directDependencyMap(edges);
-  for (const id of ["a", "b", "c", "d", "e", "absent"]) {
-    assert.deepEqual(map.get(id) ?? [], directDependenciesOf(id, edges));
-  }
-  assert.equal(map.has("d"), false);
-  assert.deepEqual(directDependencyMap([]), new Map());
 });
