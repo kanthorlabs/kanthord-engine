@@ -1749,6 +1749,26 @@ test("dependency addition rejects direct and self cycles without writes", (t) =>
   f.refuses(DependencyOperation.Add, nodeId, nodeId, MissionErrorCode.Cycle);
 });
 
+test("dependency addition rejects a three-node cycle and accepts the edge after a retirement breaks the path", (t) => {
+  const f = dependencyFixture(t);
+  const a = f.examine();
+  const b = f.create({ ...f.body(), filename: OTHER_FILENAME }).revisions[
+    FIRST_ELEMENT_INDEX
+  ]!.node_id;
+  const c = f.create({ ...f.body(), filename: NEW_FILENAME }).revisions[
+    FIRST_ELEMENT_INDEX
+  ]!.node_id;
+  f.edit(DependencyOperation.Add, a, b);
+  f.edit(DependencyOperation.Add, b, c);
+  f.refuses(DependencyOperation.Add, c, a, MissionErrorCode.Cycle);
+  f.store.database
+    .prepare("UPDATE mission_node SET retired_at = ? WHERE id = ?")
+    .run(RETIRED_AT, b);
+  assert.deepEqual(f.edit(DependencyOperation.Add, c, a).added_edges, [
+    { dependent_id: c, depends_on_id: a },
+  ]);
+});
+
 test("dependency addition validates cross-mission endpoints", (t) => {
   const f = dependencyFixture(t);
   const { node_id: nodeId } = f.pair();
