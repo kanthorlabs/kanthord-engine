@@ -1429,6 +1429,57 @@ test("agentView resolves valid configurations and returns precise issues without
   });
 });
 
+test("selectionView validates the pinned selection and answers unavailable for a disabled or removed enablement", (t) => {
+  const f = enablementFixture(t);
+  f.invoke("enablement.put", putBody);
+  const chosen = f.store.transaction((tx) =>
+    f.agent.selectAgent(tx, AGENT, null),
+  );
+  assert.ok(chosen.kind === SelectionKind.Selected);
+  const { selection } = chosen;
+  const view = (pinned = selection) =>
+    f.store.transaction((tx) => f.agent.selectionView(tx, pinned));
+  assert.deepEqual(view(), {
+    effective: {
+      ...defaults,
+      provider: provider.provider,
+      credential: provider.credential,
+    },
+    valid: true,
+    issues: [],
+  });
+  f.invoke("enablement.put", {
+    ...putBody,
+    expected_revision: FIRST_REVISION,
+    agent_providers: [{ ...provider, name: "renamed", credential: "other" }],
+    default_configuration: { ...defaults, agent_provider: "renamed" },
+  });
+  assert.deepEqual(view().effective, {
+    ...defaults,
+    provider: provider.provider,
+    credential: provider.credential,
+  });
+  assert.deepEqual(view({ ...selection, model_identifier: MISSING_MODEL }), {
+    effective: null,
+    valid: false,
+    issues: [
+      {
+        path: ["model_identifier"],
+        code: AgentErrorCode.ModelUnknown,
+      },
+    ],
+  });
+  const unavailable = {
+    effective: null,
+    valid: false,
+    issues: [{ path: [], code: AgentErrorCode.Unavailable }],
+  };
+  f.invoke("enablement.disable", { expected_revision: SECOND_REVISION });
+  assert.deepEqual(view(), unavailable);
+  f.invoke("enablement.remove", { expected_revision: THIRD_REVISION });
+  assert.deepEqual(view(), unavailable);
+});
+
 const MODEL_LIST = "enablement.provider.model.list";
 
 test("model list answers the built-in catalog of the provider with its supported levels", (t) => {

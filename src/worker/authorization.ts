@@ -10,7 +10,6 @@ import {
   type SchedulerClaims,
 } from "./contract.ts";
 import type { Dependencies, WorkerService } from "./service.ts";
-import { entryOf, pinnedEntry } from "./agent-selection.ts";
 
 const NO_AGENTS = 0;
 
@@ -27,7 +26,7 @@ export function authorizeModelInference(
   dependencies: Pick<Dependencies, "workerBindingRowOf"> & {
     schedulerClaims: Pick<SchedulerClaims, "agentSelectionsOf">;
   },
-  worker: Pick<WorkerService, "declarationOf" | "workerAgentView">,
+  worker: Pick<WorkerService, "declarationOf" | "pinnedAgentView">,
   tx: Transaction,
   identity: MachineIdentity,
   execution: {
@@ -57,8 +56,12 @@ export function authorizeModelInference(
   );
   if (agents.length === NO_AGENTS) refused(AuthorizationRefusal.NoNativeAgent);
   const authorizations = agents.map((agent) => {
-    const entry = pinnedEntry(selections, agent, entryOf(row.entries, agent));
-    const view = worker.workerAgentView(tx, row.worker_name, agent, entry);
+    const selection = selections.find(({ agent_name }) => agent_name === agent);
+    assert.ok(
+      selection,
+      "A native agent of a claimed execution must hold a pin.",
+    );
+    const view = worker.pinnedAgentView(tx, row.worker_name, selection);
     assert.ok(view);
     if (!view.valid) {
       const issue = view.issues[0];

@@ -496,6 +496,8 @@ export function composeServices(options: {
       selectAgent: (tx, name, entry) => agent.selectAgent(tx, name, entry),
       selectionAt: (tx, name, enablementId, entry, position) =>
         agent.selectionAt(tx, name, enablementId, entry, position),
+      selectionView: (tx, selection, models) =>
+        agent.selectionView(tx, selection, models),
     },
   });
   const mission: MissionService = new MissionService({

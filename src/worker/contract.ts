@@ -581,6 +581,11 @@ export interface AgentConfiguration {
     entry: WorkerEntry | null,
     position: number,
   ): AgentSelection;
+  selectionView(
+    tx: Transaction,
+    selection: AgentSelection,
+    approvedModels?: ApprovedModelsFn,
+  ): Pick<WorkerAgentView, "effective" | "valid" | "issues">;
 }
 
 export interface WorkerRegistrations {

@@ -13,6 +13,24 @@ import {
   type WorkerBindingRowOf,
 } from "./contract.ts";
 import { AgentErrorCode } from "../agent/contract.ts";
+import type { AgentSelection } from "../scheduler/contract.ts";
+
+function pinOf(
+  agentName: string,
+  change: Partial<AgentSelection> = {},
+): AgentSelection {
+  return {
+    agent_name: agentName,
+    position: 0,
+    level: "enablement",
+    agent_provider: "default",
+    provider: "anthropic",
+    credential: "anthro-1",
+    model_identifier: "claude-sonnet-4-5",
+    reasoning_effort: "off",
+    ...change,
+  };
+}
 
 test("Worker authorizes the pinned inference configuration and refuses each broken binding chain", (t) => {
   const store = new Store(IN_MEMORY_DATABASE);
@@ -44,37 +62,34 @@ test("Worker authorizes the pinned inference configuration and refuses each brok
     resource_identity: row.resource_identity,
   };
   let valid = true;
+  let pinned = pinOf("swe@1");
   const issues = [{ path: ["agent"], code: AgentErrorCode.Unavailable }];
   const authorize = (change = {}) =>
     store.transaction((tx) =>
       authorizeModelInference(
         {
           workerBindingRowOf: (_tx, id) => (id === row.binding_id ? row : null),
-          schedulerClaims: { agentSelectionsOf: () => [] },
+          schedulerClaims: { agentSelectionsOf: () => [pinned] },
         },
         {
           declarationOf: () => getWorkerDeclaration(row.worker_name) ?? null,
-          workerAgentView: (_tx, worker, agent, entry) => {
+          pinnedAgentView: (_tx, worker, selection) => {
             assert.equal(worker, row.worker_name);
             assert.ok(
               getWorkerDeclaration(row.worker_name)?.agent_names?.includes(
-                agent,
+                selection.agent_name,
               ),
             );
             return {
               valid,
               issues: valid ? [] : issues,
-              defaults: null,
-              chain: [],
-              active_position: null,
-              cooling: null,
               effective: valid
                 ? {
-                    agent_provider: entry?.agent_provider ?? "default",
-                    provider: "anthropic",
-                    credential: "anthro-1",
-                    model_identifier: "claude-sonnet-4-5",
-                    reasoning_effort: "off",
+                    agent_provider: selection.agent_provider,
+                    provider: selection.provider,
+                    credential: selection.credential,
+                    model_identifier: selection.model_identifier,
+                    reasoning_effort: selection.reasoning_effort,
                   }
                 : null,
             };
@@ -93,8 +108,18 @@ test("Worker authorizes the pinned inference configuration and refuses each brok
       agent_provider: "default",
     },
   ]);
-  row.entries = [{ agent: "swe@1", agent_provider: "override" }];
-  assert.equal(authorize()[0]!.agent_provider, row.entries[0]!.agent_provider);
+  pinned = pinOf("swe@1", {
+    agent_provider: "override",
+    credential: "anthro-2",
+  });
+  assert.deepEqual(authorize(), [
+    {
+      credential: "anthro-2",
+      platform: "anthropic",
+      provider_id: "anthropic",
+      agent_provider: "override",
+    },
+  ]);
   for (const change of [
     { worker_binding_id: "absent" },
     { project_id: "other" },
@@ -165,23 +190,24 @@ test("Worker authorizes one credential per distinct credential of the agents of 
       authorizeModelInference(
         {
           workerBindingRowOf: (_tx, id) => (id === row.binding_id ? row : null),
-          schedulerClaims: { agentSelectionsOf: () => [] },
+          schedulerClaims: {
+            agentSelectionsOf: () =>
+              Object.entries(credentials).map(([agent, credential]) =>
+                pinOf(agent, { credential }),
+              ),
+          },
         },
         {
           declarationOf: () => twoAgentDeclarationOf(row.worker_name),
-          workerAgentView: (_tx, _worker, agent) => ({
+          pinnedAgentView: (_tx, _worker, selection) => ({
             valid: true,
             issues: [],
-            defaults: null,
-            chain: [],
-            active_position: null,
-            cooling: null,
             effective: {
-              agent_provider: "default",
-              provider: "anthropic",
-              credential: credentials[agent]!,
-              model_identifier: "claude-sonnet-4-5",
-              reasoning_effort: "off",
+              agent_provider: selection.agent_provider,
+              provider: selection.provider,
+              credential: selection.credential,
+              model_identifier: selection.model_identifier,
+              reasoning_effort: selection.reasoning_effort,
             },
           }),
         },

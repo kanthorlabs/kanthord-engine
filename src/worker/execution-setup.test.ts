@@ -29,6 +29,7 @@ import {
 import { WorkerErrorCode } from "./contract.ts";
 import { SHIPPED_TEMPLATES } from "../agent/prompt-templates.ts";
 import { ExecutionIntent } from "./contract.ts";
+import type { AgentSelection } from "../scheduler/contract.ts";
 
 const SSH_CREDENTIAL = "kanthorlabs-ssh";
 const SYSTEM_TEXT = "system layer text";
@@ -78,6 +79,16 @@ test("setup answers the system and agent prompt after its single snapshot and su
     model_identifier: agent.effective_configuration.model_identifier,
     reasoning_effort: "low",
   };
+  const selection: AgentSelection = {
+    agent_name: agent.agent_name,
+    position: 0,
+    level: "enablement",
+    agent_provider: entry.agent_provider,
+    provider: agent.effective_configuration.provider,
+    credential: "pinned-key",
+    model_identifier: entry.model_identifier,
+    reasoning_effort: entry.reasoning_effort,
+  };
   const composed: string[] = [];
   let commits = 0;
   const claim = {
@@ -119,9 +130,13 @@ test("setup answers the system and agent prompt after its single snapshot and su
       entries: [entry],
       resource_budget: null,
     }),
-    pinnedCredentialMetadata: () => ({
+    pinnedCredentialMetadata: (
+      _tx: unknown,
+      _claim: unknown,
+      name: string,
+    ) => ({
       id: agent.credential_id,
-      name: agent.effective_configuration.credential,
+      name,
       platform: agent.effective_configuration.provider,
       metadata: null,
     }),
@@ -129,29 +144,22 @@ test("setup answers the system and agent prompt after its single snapshot and su
     intentOf: () => ExecutionIntent.Implement,
     repositoryPolicyOf: () => null,
     credentialMetadata: () => null,
-    schedulerClaims: { agentSelectionsOf: () => [] },
+    schedulerClaims: { agentSelectionsOf: () => [selection] },
   };
   const worker = {
     declarationOf: (name: string) => getWorkerDeclaration(name) ?? null,
-    workerAgentView: (
+    pinnedAgentView: (
       ...args: Parameters<
-        import("./service.ts").WorkerService["workerAgentView"]
+        import("./service.ts").WorkerService["pinnedAgentView"]
       >
     ) => {
-      assert.deepEqual(args[3], {
-        agent_provider: entry.agent_provider,
-        model_identifier: entry.model_identifier,
-        reasoning_effort: entry.reasoning_effort,
-      });
-      assert.ok(args[4]);
+      assert.deepEqual(args[2], selection);
+      assert.ok(args[3]);
       return {
-        defaults: null,
-        chain: [],
-        active_position: null,
-        cooling: null,
         effective: {
           ...agent.effective_configuration,
-          reasoning_effort: entry.reasoning_effort,
+          credential: selection.credential,
+          reasoning_effort: selection.reasoning_effort,
         },
         valid: true,
         issues: [],
@@ -177,6 +185,10 @@ test("setup answers the system and agent prompt after its single snapshot and su
   assert.equal(
     answered.effective_configuration.reasoning_effort,
     entry.reasoning_effort,
+  );
+  assert.equal(
+    answered.effective_configuration.credential,
+    selection.credential,
   );
   assert.equal(commits, before + 1);
   await assert.rejects(
@@ -284,18 +296,26 @@ test("setup answers one entry per agent of a two-agent worker with its own promp
       intentOf: () => ExecutionIntent.Implement,
       repositoryPolicyOf: () => null,
       credentialMetadata: () => null,
-      schedulerClaims: { agentSelectionsOf: () => [] },
+      schedulerClaims: {
+        agentSelectionsOf: () =>
+          Object.entries(credentials).map(([agent, credential]) => ({
+            agent_name: agent,
+            position: 0,
+            level: "enablement",
+            agent_provider: "default",
+            provider: "anthropic",
+            credential,
+            model_identifier: "claude-sonnet-4-5",
+            reasoning_effort: "off",
+          })),
+      },
     },
     {
       declarationOf: twoAgentDeclarationOf,
-      workerAgentView: (_tx, _worker, agent) => ({
-        defaults: null,
-        chain: [],
-        active_position: null,
-        cooling: null,
+      pinnedAgentView: (_tx, _worker, selection) => ({
         effective: {
           ...setup.agents[0]!.effective_configuration,
-          credential: credentials[agent]!,
+          credential: selection.credential,
         },
         valid: true,
         issues: [],

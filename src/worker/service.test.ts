@@ -39,7 +39,12 @@ import {
   ResourceStatus,
 } from "../kernel/health.ts";
 import { HealthStatus } from "../kernel/service.ts";
-import { Store, IN_MEMORY_DATABASE } from "../kernel/store.ts";
+import {
+  Store,
+  IN_MEMORY_DATABASE,
+  type Transaction,
+} from "../kernel/store.ts";
+import { AgentChoiceKind, type AgentSelection } from "../scheduler/contract.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import { OperationError } from "../kernel/errors.ts";
 import { createIdentity } from "../kernel/identity.ts";
@@ -141,6 +146,9 @@ const fakeCollaborations = {
       throw new Error("UNEXPECTED_COLLABORATION");
     },
     selectionAt: () => {
+      throw new Error("UNEXPECTED_COLLABORATION");
+    },
+    selectionView: () => {
       throw new Error("UNEXPECTED_COLLABORATION");
     },
     agentView: () => {
@@ -322,6 +330,8 @@ const MISSING_MODEL = "claude-3-5-sonnet-20241022";
 const UNKNOWN = "unknown";
 const FIRST_REVISION = 1;
 const SECOND_REVISION = 2;
+const THIRD_REVISION = 3;
+const FOURTH_REVISION = 4;
 const provider = {
   name: "primary",
   provider: AgentProviderKind.Anthropic,
@@ -1166,6 +1176,8 @@ function enablementFixture(
       selectAgent: (tx, name, entry) => agent.selectAgent(tx, name, entry),
       selectionAt: (tx, name, enablementId, entry, position) =>
         agent.selectionAt(tx, name, enablementId, entry, position),
+      selectionView: (tx, selection, models) =>
+        agent.selectionView(tx, selection, models),
     },
     ...collaborations,
   });
@@ -1511,6 +1523,91 @@ test("workerAgentView answers null outside the agents of the worker and delegate
     f.store.transaction((tx) => f.agent.agentView(tx, AGENT, entry)),
   );
   assert.equal(view()?.valid, true);
+});
+
+function authorizationFixture(t: TestContext) {
+  const projectId = createIdentity("project");
+  const resourceIdentity = "worker:kanthord:general";
+  const execution = {
+    execution_id: createIdentity("execution"),
+    project_id: projectId,
+    worker_binding_id: createIdentity("binding"),
+    resource_identity: resourceIdentity,
+  };
+  const identity = testMachineIdentity(
+    {
+      clientId: createIdentity("client_identity"),
+      name: "machine",
+      projectId,
+      resourceIdentity,
+      issuedAt: 0,
+    },
+    "jti",
+  );
+  let selectionOf: (tx: Transaction) => AgentSelection[] = () => [];
+  const f = enablementFixture(t, {
+    workerBindingRowOf: () => ({
+      binding_id: execution.worker_binding_id,
+      project_id: projectId,
+      resource_identity: resourceIdentity,
+      worker_name: WORKER,
+      entries: [],
+      resource_budget: null,
+      tombstone: false,
+      disabled: false,
+    }),
+    schedulerClaims: {
+      ...fakeCollaborations.schedulerClaims,
+      agentSelectionsOf: (tx) => selectionOf(tx),
+    },
+  });
+  const pin = () => {
+    const chosen = f.store.transaction((tx) =>
+      f.agent.selectAgent(tx, AGENT, null),
+    );
+    assert.ok(chosen.kind === AgentChoiceKind.Selected);
+    selectionOf = (tx) => [
+      f.agent.selectionAt(tx, AGENT, chosen.enablement_id, null, 0),
+    ];
+  };
+  const authorize = () =>
+    f.store.transaction((tx) =>
+      f.worker.authorizeModelInference(tx, identity, execution),
+    );
+  return { ...f, pin, authorize };
+}
+
+test("authorization reads the credential of the pinned enablement revision after a newer revision", (t) => {
+  const f = authorizationFixture(t);
+  f.invokeAgent("enablement.put", putBody);
+  f.pin();
+  f.invokeAgent("enablement.put", {
+    ...putBody,
+    expected_revision: FIRST_REVISION,
+    agent_providers: [{ ...provider, credential: "anthropic-b" }],
+  });
+  assert.deepEqual(
+    f.authorize().map((item) => item.credential),
+    [provider.credential],
+  );
+  const other = { ...provider, name: "other", credential: "anthropic-c" };
+  f.invokeAgent("enablement.put", {
+    ...putBody,
+    expected_revision: SECOND_REVISION,
+    agent_providers: [other, provider],
+    default_configuration: { ...defaults, agent_provider: other.name },
+  });
+  f.invokeAgent(
+    "enablement.provider.remove",
+    { expected_revision: THIRD_REVISION },
+    { agent_name: AGENT, provider_name: provider.name },
+  );
+  assert.deepEqual(
+    f.authorize().map((item) => item.credential),
+    [provider.credential],
+  );
+  f.invokeAgent("enablement.disable", { expected_revision: FOURTH_REVISION });
+  refuses(f.authorize, AgentErrorCode.Unavailable);
 });
 
 const POOL_PROJECT = "project_01ARZ3NDEKTSV4RRFFQ69G5FAV";

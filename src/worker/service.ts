@@ -464,6 +464,24 @@ export class WorkerService implements Service {
     );
   }
 
+  pinnedAgentView(
+    tx: Transaction,
+    workerName: string,
+    selection: AgentSelection,
+    approvedModels?: ApprovedModelsFn,
+  ): Pick<WorkerAgentView, "effective" | "valid" | "issues"> | null {
+    if (
+      !getWorkerDeclaration(workerName) ||
+      !agentsOfWorker(workerName).includes(selection.agent_name)
+    )
+      return null;
+    return this.dependencies.agentConfiguration.selectionView(
+      tx,
+      selection,
+      approvedModels,
+    );
+  }
+
   declarationOf(workerName: string): WorkerDeclaration | null {
     const declaration = getWorkerDeclaration(workerName) ?? null;
     assert.ok(declaration === null || declaration.name === workerName);
