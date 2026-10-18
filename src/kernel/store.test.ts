@@ -10,7 +10,11 @@ import {
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { temporary } from "./test-support.ts";
-import { type PendingMigration, Store } from "./store.ts";
+import {
+  type PendingMigration,
+  STATEMENT_CACHE_LIMIT,
+  Store,
+} from "./store.ts";
 const ExitCode = { Success: 0, Failure: 1 } as const;
 
 const WAL_JOURNAL_MODE = "wal";
@@ -20,6 +24,17 @@ const PRESERVED_VALUE = "preserved";
 const COMMITTED_PREFIX_LENGTH = 1;
 const COMPLETE_HISTORY_LENGTH = 2;
 const PRIVATE_FILE_MODE = 0o600;
+const SELECT_ALL_SQL = "SELECT * FROM t";
+const FILLER_RESERVED_COUNT = 2;
+const B_VALUE = "b";
+const X_VALUE = "x";
+const Y_VALUE = "y";
+const FIRST_KEY = 1;
+const SECOND_KEY = 2;
+const DATABASE_NOT_OPEN = {
+  code: "ERR_INVALID_STATE",
+  message: "database is not open",
+};
 
 test("exclusive WAL ownership refuses a second process and releases after close", (t) => {
   const path = join(temporary(t), "kanthord.db");
@@ -219,5 +234,134 @@ test("plan reads the history without a write and backup copies a consistent priv
     );
   } finally {
     copy.close();
+  }
+});
+
+test("prepare answers one statement for one SQL text in one transaction", () => {
+  const store = new Store(":memory:");
+  try {
+    const sql = "SELECT 1 AS value";
+    const first = store.transaction(({ database }) => {
+      const statement = database.prepare(sql);
+      assert.equal(database.prepare(sql), statement);
+      return statement;
+    });
+    store.transaction(({ database }) => {
+      assert.notEqual(database.prepare(sql), first);
+    });
+  } finally {
+    store.close();
+  }
+});
+
+test("prepare with options answers a new statement", () => {
+  const store = new Store(":memory:");
+  try {
+    const sql = "SELECT 1 AS value";
+    store.transaction(({ database }) => {
+      assert.notEqual(
+        database.prepare(sql, { readBigInts: false }),
+        database.prepare(sql, { readBigInts: false }),
+      );
+    });
+  } finally {
+    store.close();
+  }
+});
+
+test("the statement cache drops the least recently used statement above the limit", () => {
+  const store = new Store(":memory:");
+  try {
+    const sqlA = "SELECT 'a' AS value";
+    const sqlB = `SELECT '${B_VALUE}' AS value`;
+    const filler = (index: number) => `SELECT ${index} AS value`;
+    store.transaction(({ database }) => {
+      const statementA = database.prepare(sqlA);
+      database.prepare(sqlB);
+      for (
+        let index = 0;
+        index < STATEMENT_CACHE_LIMIT - FILLER_RESERVED_COUNT;
+        index++
+      )
+        database.prepare(filler(index));
+      assert.equal(database.prepare(sqlA), statementA);
+      database.prepare(filler(STATEMENT_CACHE_LIMIT));
+      const statementB = database.prepare(sqlB);
+      assert.equal(statementB.get()?.value, B_VALUE);
+      assert.equal(database.prepare(sqlA), statementA);
+    });
+  } finally {
+    store.close();
+  }
+});
+
+test("a cached statement runs again after a constraint failure", () => {
+  const store = new Store(":memory:");
+  try {
+    store.database.exec("CREATE TABLE t (id INTEGER PRIMARY KEY)");
+    store.transaction(({ database }) => {
+      const insert = () => database.prepare("INSERT INTO t VALUES (?)");
+      insert().run(FIRST_KEY);
+      assert.throws(() => insert().run(FIRST_KEY), /UNIQUE|PRIMARY/);
+      insert().run(SECOND_KEY);
+      assert.equal(
+        database.prepare("SELECT COUNT(*) AS count FROM t").get()?.count,
+        SECOND_KEY,
+      );
+    });
+  } finally {
+    store.close();
+  }
+});
+
+test("a cached statement binds no value of an earlier call", () => {
+  const store = new Store(":memory:");
+  try {
+    store.transaction(({ database }) => {
+      const sql = "SELECT ? AS a, ? AS b";
+      assert.equal(database.prepare(sql).get(X_VALUE, Y_VALUE)?.b, Y_VALUE);
+      const second = database.prepare(sql).get(X_VALUE);
+      assert.equal(second?.a, X_VALUE);
+      assert.equal(second?.b, null);
+    });
+  } finally {
+    store.close();
+  }
+});
+
+test("a prepare after a schema change answers the new columns", () => {
+  const store = new Store(":memory:");
+  try {
+    store.database.exec("CREATE TABLE t (a TEXT); INSERT INTO t VALUES ('x')");
+    const before = store.database.prepare(SELECT_ALL_SQL).all();
+    assert.deepEqual(Object.keys(before[0]!), ["a"]);
+    store.database.exec("ALTER TABLE t ADD COLUMN w TEXT");
+    const after = store.database.prepare(SELECT_ALL_SQL).all();
+    assert.deepEqual(Object.keys(after[0]!), ["a", "w"]);
+  } finally {
+    store.close();
+  }
+});
+
+test("a prepare after close throws database is not open", () => {
+  const store = new Store(":memory:");
+  const sql = "SELECT 1 AS value";
+  store.database.prepare(sql);
+  store.close();
+  assert.throws(() => store.database.prepare(sql), DATABASE_NOT_OPEN);
+});
+
+test("a failed exec clears the statement cache", () => {
+  const store = new Store(":memory:");
+  try {
+    store.database.exec("CREATE TABLE t (a TEXT); INSERT INTO t VALUES ('x')");
+    store.database.prepare(SELECT_ALL_SQL).all();
+    assert.throws(() =>
+      store.database.exec("ALTER TABLE t ADD COLUMN w TEXT; SELEC 1"),
+    );
+    const rows = store.database.prepare(SELECT_ALL_SQL).all();
+    assert.deepEqual(Object.keys(rows[0]!), ["a", "w"]);
+  } finally {
+    store.close();
   }
 });
