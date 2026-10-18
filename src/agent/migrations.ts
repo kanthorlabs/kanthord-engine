@@ -25,17 +25,6 @@ const createAgentTables: Migration = (database) => {
       updated_at INTEGER NOT NULL
     );
     CREATE UNIQUE INDEX agent_prompt_scope_agent_name ON agent_prompt (scope, agent_name);
-    CREATE TABLE agent_cooldown (
-      id TEXT NOT NULL PRIMARY KEY,
-      credential TEXT NOT NULL,
-      model_identifier TEXT NOT NULL,
-      code TEXT NOT NULL,
-      strikes INTEGER NOT NULL,
-      started_at INTEGER NOT NULL,
-      until_at INTEGER NOT NULL,
-      execution_id TEXT NOT NULL
-    );
-    CREATE UNIQUE INDEX agent_cooldown_credential_model_identifier ON agent_cooldown (credential, model_identifier);
   `);
 };
 

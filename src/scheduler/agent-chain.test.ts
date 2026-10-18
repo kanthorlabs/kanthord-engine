@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
 import { COOLDOWN_DEFAULTS } from "../agent/config.ts";
+import { memoryCredentialHolds } from "../agent/test-support.ts";
 import {
   AdvancingFailure,
   type AgentEntry,
@@ -123,7 +124,7 @@ function releaseHarness(t: TestContext) {
   return { ...h, row, chainCalls, prior, release, failureCount };
 }
 
-test("an advancing provider stop writes the cooldown of the pin and is neutral for the failure count", async (t) => {
+test("an advancing provider stop writes the hold of the pin and is neutral for the failure count", async (t) => {
   const h = releaseHarness(t);
   t.mock.method(h.service, "wake", () => {});
   t.mock.method(Date, "now", () => FIXTURE_NOW);
@@ -158,7 +159,7 @@ test("a first advancing provider stop counts no failure", async (t) => {
   assert.equal(h.failureCount(), NO_FAILURES);
 });
 
-test("a non-advancing provider stop counts as a failure and keeps the cooldown", async (t) => {
+test("a non-advancing provider stop counts as a failure and keeps the hold", async (t) => {
   const h = releaseHarness(t);
   t.mock.method(h.service, "wake", () => {});
   t.mock.method(Date, "now", () => FIXTURE_NOW);
@@ -173,7 +174,7 @@ test("a non-advancing provider stop counts as a failure and keeps the cooldown",
   assert.equal(h.failureCount(), TWO_FAILURES);
 });
 
-test("a release without a provider stop deletes the cooldown of the pin", async (t) => {
+test("a release without a provider stop releases the hold of the pin", async (t) => {
   const h = releaseHarness(t);
   t.mock.method(h.service, "wake", () => {});
   t.mock.method(Date, "now", () => FIXTURE_NOW);
@@ -228,6 +229,7 @@ function pinHarness(t: TestContext) {
     hostHome: "/nonexistent/home",
     workbenchDirectory: (agentName) => `/nonexistent/workbench/${agentName}`,
     custodySuitability: () => {},
+    credentialHolds: memoryCredentialHolds(),
     approvedModels: () => null,
     entriesOfAgent: () => [],
     repositoryWorkingOf: () => null,
@@ -247,7 +249,10 @@ function pinHarness(t: TestContext) {
     select: (tx, bindingId) => {
       const chosen = agent.selectAgent(tx, PIN_AGENT, entryOf(bindingId));
       if (chosen.kind === SelectionKind.Cooling)
-        return { kind: AgentChoiceKind.Cooling, until_at: chosen.until_at };
+        return {
+          kind: AgentChoiceKind.Cooling,
+          available_at: chosen.available_at,
+        };
       assert.ok(chosen.kind === SelectionKind.Selected);
       return {
         kind: AgentChoiceKind.Selected,
@@ -271,8 +276,8 @@ function pinHarness(t: TestContext) {
           pin.position,
         ),
       ),
-    providerFailure: (tx, selections, code, executionId, now) => {
-      agent.recordProviderFailure(tx, selections, code, executionId, now);
+    providerFailure: (tx, selections, code, _executionId, now) => {
+      agent.recordProviderFailure(tx, selections, code, now);
     },
     success: (tx, selections) => {
       chainCalls.push({ method: "success", arguments: [selections] });
@@ -403,7 +408,6 @@ test("an enablement edit, a binding edit and a hold during a live execution keep
       tx,
       [selection],
       AdvancingFailure.RateLimited,
-      createIdentity("execution"),
       FIXTURE_NOW,
     ),
   );

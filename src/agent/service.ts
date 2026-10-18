@@ -44,7 +44,6 @@ import {
   type AgentEnablement,
   type AgentEntry,
   type AdvancingFailure,
-  type AgentCooldown,
   type AgentSelection,
   type AgentProviderItem,
   type AgentView,
@@ -68,15 +67,8 @@ import {
   type EnablementRow,
 } from "./enablements.ts";
 import { promptSettings, savePromptSettings } from "./prompts.ts";
-import {
-  cooldownOf,
-  deleteCooldown,
-  deleteCooldownOf,
-  listCooldowns,
-  startCooldown,
-  type CooldownKey,
-} from "./cooldowns.ts";
-import { canonicalJSON } from "../kernel/json.ts";
+import { cooldownDuration } from "./cooldowns.ts";
+import type { CredentialHolds } from "../custody/contract.ts";
 import { applyLocks, lockedSwitches, withLocks } from "./prompt-locks.ts";
 import {
   ProjectErrorCode,
@@ -96,6 +88,8 @@ const LAST_PROVIDER = 1;
 const HEALTH_PAGE_SIZE = 100;
 const ABSENT_REVISION = 0;
 const FIRST_POSITION = 0;
+const NO_STRIKES = 0;
+const FIRST_STRIKE = 1;
 
 function wireRecord(row: EnablementRow) {
   return agentEnablementSchema.parse({
@@ -314,6 +308,7 @@ export interface Dependencies {
   hostHome?: string;
   workbenchDirectory: (agentName: string) => string;
   custodySuitability: CustodySuitability;
+  credentialHolds: CredentialHolds;
   approvedModels: ApprovedModelsFn;
   entriesOfAgent: EntriesOfAgent;
   repositoryWorkingOf: (
@@ -341,17 +336,11 @@ export type AgentSelectionResult =
       selection: AgentSelection;
       enablement_id: string;
     }
-  | { kind: typeof SelectionKind.Cooling; until_at: number }
+  | { kind: typeof SelectionKind.Cooling; available_at: number }
   | { kind: typeof SelectionKind.Invalid };
 
-function uniqueKeys(selections: readonly AgentSelection[]): CooldownKey[] {
-  const keys = new Map<string, CooldownKey>();
-  for (const { credential, model_identifier } of selections)
-    keys.set(canonicalJSON([credential, model_identifier]), {
-      credential,
-      model_identifier,
-    });
-  return [...keys.values()];
+function uniqueCredentials(selections: readonly AgentSelection[]): string[] {
+  return [...new Set(selections.map(({ credential }) => credential))];
 }
 
 export class AgentComponent {
@@ -757,28 +746,23 @@ export class AgentComponent {
         ({ name }) => name === item.agent_provider,
       );
       assert.ok(provider, "Validated configuration must resolve a provider.");
-      const cooldown = cooldownOf(tx, {
-        credential: provider.credential,
-        model_identifier: item.model_identifier,
-      });
+      const cooldown = this.dependencies.credentialHolds.holdOf(
+        tx,
+        provider.credential,
+      );
       return {
         position,
         level,
         ...item,
         provider: provider.provider,
         credential: provider.credential,
-        cooldown: cooldown && {
-          cooldown_id: cooldown.cooldown_id,
-          code: cooldown.code,
-          strikes: cooldown.strikes,
-          until_at: cooldown.until_at,
-        },
+        cooldown,
       };
     });
     const head = chain[FIRST_POSITION];
     assert.ok(head);
     const active = chain.find(
-      ({ cooldown }) => cooldown === null || cooldown.until_at <= now,
+      ({ cooldown }) => cooldown === null || cooldown.available_at <= now,
     );
     return {
       defaults,
@@ -793,8 +777,8 @@ export class AgentComponent {
         ? null
         : {
             code: AgentErrorCode.ChainCooling,
-            until_at: Math.min(
-              ...chain.map(({ cooldown }) => cooldown?.until_at ?? now),
+            available_at: Math.min(
+              ...chain.map(({ cooldown }) => cooldown?.available_at ?? now),
             ),
           },
       valid: true,
@@ -811,7 +795,10 @@ export class AgentComponent {
     if (!view?.valid) return { kind: SelectionKind.Invalid };
     if (view.active_position === null) {
       assert.ok(view.cooling);
-      return { kind: SelectionKind.Cooling, until_at: view.cooling.until_at };
+      return {
+        kind: SelectionKind.Cooling,
+        available_at: view.cooling.available_at,
+      };
     }
     const entryOfChain = view.chain[view.active_position];
     assert.ok(entryOfChain);
@@ -869,26 +856,25 @@ export class AgentComponent {
     tx: Transaction,
     selections: readonly AgentSelection[],
     code: AdvancingFailure,
-    executionId: string,
     now: number,
-  ): AgentCooldown[] {
-    return uniqueKeys(selections).map((key) =>
-      startCooldown(
+  ): void {
+    const { credentialHolds, config } = this.dependencies;
+    for (const credential of uniqueCredentials(selections)) {
+      const strikes =
+        (credentialHolds.holdOf(tx, credential)?.strikes ?? NO_STRIKES) +
+        FIRST_STRIKE;
+      credentialHolds.hold(
         tx,
-        this.dependencies.config.cooldown,
-        key,
-        code,
-        executionId,
-        now,
-      ),
-    );
+        credential,
+        now + cooldownDuration(config.cooldown, code, strikes),
+        strikes,
+      );
+    }
   }
 
-  recordSuccess(
-    tx: Transaction,
-    selections: readonly AgentSelection[],
-  ): CooldownKey[] {
-    return uniqueKeys(selections).filter((key) => deleteCooldownOf(tx, key));
+  recordSuccess(tx: Transaction, selections: readonly AgentSelection[]): void {
+    for (const credential of uniqueCredentials(selections))
+      this.dependencies.credentialHolds.release(tx, credential);
   }
 
   resourceInventory(tx: Transaction): ResourceEntry[] {
@@ -1038,17 +1024,19 @@ export class AgentComponent {
     );
     registry.register(agentOperations["cooldown.list"], (_input, caller) =>
       caller.commit((tx) => ({
-        items: listCooldowns(tx).map((row) => agentCooldownSchema.parse(row)),
+        items: this.dependencies.credentialHolds
+          .listHolds(tx)
+          .map((row) => agentCooldownSchema.parse(row)),
       })),
     );
     registry.register(agentOperations["cooldown.clear"], ({ params }, caller) =>
       caller.commit((tx) => {
-        if (!deleteCooldown(tx, params.cooldown_id))
+        if (!this.dependencies.credentialHolds.release(tx, params.credential))
           throw new OperationError(
             HttpStatus.NotFound,
             AgentErrorCode.CooldownNotFound,
             "Agent cooldown not found.",
-            { cooldown_id: params.cooldown_id },
+            { credential: params.credential },
           );
         return null;
       }),

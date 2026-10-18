@@ -45,6 +45,8 @@ import {
   type CredentialPlatform,
   type CredentialPlatforms,
   type CredentialPlatformSet,
+  type CredentialHoldItem,
+  type CredentialHolds,
   type CredentialRecords,
   type CredentialRotateBody,
   type CredentialUpdateMetadataBody,
@@ -304,7 +306,48 @@ function decodeCursor(cursor: string): string {
   return name;
 }
 
+const NO_STRIKES = 0;
+const ONE_ROW = 1;
+
+function credentialHolds(): CredentialHolds {
+  return {
+    holdOf: (tx, name) => {
+      const row = tx.database
+        .prepare(
+          "SELECT available_at, strikes FROM credential WHERE name = ? AND revision = ?",
+        )
+        .get(name, FIRST_REVISION) as
+        { available_at: number | null; strikes: number } | undefined;
+      return row === undefined || row.available_at === null
+        ? null
+        : { available_at: row.available_at, strikes: row.strikes };
+    },
+    hold: (tx, name, availableAt, strikes) => {
+      const { changes } = tx.database
+        .prepare(
+          "UPDATE credential SET available_at = ?, strikes = ? WHERE name = ? AND revision = ?",
+        )
+        .run(availableAt, strikes, name, FIRST_REVISION);
+      assert.equal(changes, ONE_ROW);
+    },
+    release: (tx, name) =>
+      tx.database
+        .prepare(
+          "UPDATE credential SET available_at = NULL, strikes = ? WHERE name = ? AND revision = ? AND strikes > ?",
+        )
+        .run(NO_STRIKES, name, FIRST_REVISION, NO_STRIKES).changes > NO_ROWS,
+    listHolds: (tx) =>
+      tx.database
+        .prepare(
+          "SELECT name AS credential, strikes, available_at FROM credential WHERE revision = ? AND strikes > ? ORDER BY name",
+        )
+        .all(FIRST_REVISION, NO_STRIKES)
+        .map((row) => ({ ...row }) as CredentialHoldItem),
+  };
+}
+
 export class CustodyComponent implements Service, CredentialRecords {
+  readonly holds: CredentialHolds = credentialHolds();
   private readonly shutdown = new CancellationContext();
   private startTask?: Promise<Error | null>;
   private stopTask?: Promise<Error | null>;

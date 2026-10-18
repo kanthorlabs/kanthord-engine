@@ -572,7 +572,7 @@ export interface AgentConfiguration {
     entry: WorkerEntry | null,
   ):
     | { kind: "selected"; selection: AgentSelection; enablement_id: string }
-    | { kind: "cooling"; until_at: number }
+    | { kind: "cooling"; available_at: number }
     | { kind: "invalid" };
   selectionAt(
     tx: Transaction,

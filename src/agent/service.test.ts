@@ -49,6 +49,7 @@ import { CodedError, OperationError } from "../kernel/errors.ts";
 import { ProjectErrorCode } from "../project/contract.ts";
 import { framing, PromptConsumer } from "./prompt-render.ts";
 import { SHIPPED_TEMPLATES } from "./prompt-templates.ts";
+import { memoryCredentialHolds } from "./test-support.ts";
 
 const PROVIDER_CAPABILITY = "model-list read";
 const DEFAULT_REASONING = "off";
@@ -88,7 +89,7 @@ const putBody = {
   fallback_configurations: [],
 };
 const binding = { binding_id: "binding", worker_name: WORKER, entry: null };
-const fakeCollaborations: Omit<Dependencies, "store"> = {
+const fakeCollaborations: Omit<Dependencies, "store" | "credentialHolds"> = {
   config: {
     prompt: { system_file: "", agent_directory: "", host_file: true },
     cooldown: COOLDOWN_DEFAULTS,
@@ -119,6 +120,7 @@ function enablementFixture(
   const agent = new AgentComponent({
     store,
     ...fakeCollaborations,
+    credentialHolds: memoryCredentialHolds(),
     ...collaborations,
   });
   const registry = new OperationRegistry();
@@ -1752,6 +1754,7 @@ function lockedFixture(t: TestContext, hostFile: boolean) {
     const component = new AgentComponent({
       store: f.store,
       ...fakeCollaborations,
+      credentialHolds: memoryCredentialHolds(),
       config: config(host_file),
       dataDirectory: root,
       hostHome: root,
@@ -2337,82 +2340,160 @@ test("a model named only by a fallback entry makes its enablement a model depend
   });
 });
 
-const EXECUTION = "execution_01ARZ3NDEKTSV4RRFFQ69G5FAA";
 const HEAD_POSITION = 0;
 const SECOND_POSITION = 1;
-const THIRD_POSITION = 2;
 const FIRST_STRIKE = 1;
+const SECOND_STRIKE = 2;
+const CLOCK_START = 1_000_000;
+const DOUBLING_STRIKES = 12;
 
-test("selection skips a cooling chain entry, returns the head after expiry and answers cooling when every entry cools", (t) => {
-  let now = 1_000_000;
+function holdFixture(t: TestContext) {
+  let now = CLOCK_START;
   const f = enablementFixture(t, { clock: () => now });
   f.invoke("enablement.put", chainBody);
   const select = () =>
     f.store.transaction((tx) => f.agent.selectAgent(tx, AGENT, null));
-  const head = select();
-  assert.equal(head.kind, SelectionKind.Selected);
-  assert.ok(head.kind === SelectionKind.Selected);
-  assert.equal(head.selection.position, HEAD_POSITION);
+  const selected = () => {
+    const chosen = select();
+    assert.ok(chosen.kind === SelectionKind.Selected);
+    return chosen.selection;
+  };
+  const view = () => {
+    const answer = f.store.transaction((tx) =>
+      f.agent.agentView(tx, AGENT, null),
+    );
+    assert.ok(answer);
+    return answer;
+  };
   const fail = (selection: AgentSelection, code: AdvancingFailure) =>
     f.store.transaction((tx) =>
-      f.agent.recordProviderFailure(tx, [selection], code, EXECUTION, now),
+      f.agent.recordProviderFailure(tx, [selection], code, now),
     );
-  const [cooldown] = fail(head.selection, AdvancingFailure.RateLimited);
-  assert.equal(cooldown?.until_at, now + COOLDOWN_DEFAULTS.rate_limited_ms);
-  const next = select();
-  assert.ok(next.kind === SelectionKind.Selected);
+  const succeed = (selection: AgentSelection) =>
+    f.store.transaction((tx) => f.agent.recordSuccess(tx, [selection]));
+  return {
+    ...f,
+    select,
+    selected,
+    view,
+    fail,
+    succeed,
+    now: () => now,
+    advance: (ms: number) => {
+      now += ms;
+    },
+  };
+}
+
+test("a provider failure cools every chain entry of its credential", (t) => {
+  const f = holdFixture(t);
+  const head = f.selected();
+  f.fail(head, AdvancingFailure.RateLimited);
+  const afterHead = f.view();
+  const availableAt = f.now() + COOLDOWN_DEFAULTS.rate_limited_ms;
   assert.deepEqual(
-    [next.selection.position, next.selection.model_identifier],
-    [1, HAIKU],
+    afterHead.chain.map(({ cooldown }) => cooldown),
+    [
+      { strikes: FIRST_STRIKE, available_at: availableAt },
+      null,
+      { strikes: FIRST_STRIKE, available_at: availableAt },
+    ],
   );
-  const view = f.store.transaction((tx) => f.agent.agentView(tx, AGENT, null));
-  assert.equal(view?.active_position, SECOND_POSITION);
-  assert.equal(view?.chain[HEAD_POSITION]?.cooldown?.strikes, FIRST_STRIKE);
-  assert.equal(view?.cooling, null);
-  now += COOLDOWN_DEFAULTS.rate_limited_ms;
-  const back = select();
-  assert.ok(back.kind === SelectionKind.Selected);
-  assert.equal(back.selection.position, HEAD_POSITION);
-  fail(head.selection, AdvancingFailure.RateLimited);
-  fail(next.selection, AdvancingFailure.QuotaExhausted);
-  const last = select();
-  assert.ok(last.kind === SelectionKind.Selected);
-  assert.equal(last.selection.position, THIRD_POSITION);
-  fail(last.selection, AdvancingFailure.Unavailable);
-  assert.deepEqual(select(), {
+  assert.equal(afterHead.active_position, SECOND_POSITION);
+  assert.equal(afterHead.cooling, null);
+  const next = f.selected();
+  assert.deepEqual(
+    [next.position, next.model_identifier, next.credential],
+    [SECOND_POSITION, HAIKU, spare.credential],
+  );
+  f.fail(next, AdvancingFailure.QuotaExhausted);
+  assert.deepEqual(f.select(), {
     kind: SelectionKind.Cooling,
-    until_at: now + COOLDOWN_DEFAULTS.unavailable_ms,
+    available_at: availableAt,
   });
-  const cooling = f.store.transaction((tx) =>
-    f.agent.agentView(tx, AGENT, null),
-  );
-  assert.equal(cooling?.valid, true);
-  assert.equal(cooling?.active_position, null);
-  assert.deepEqual(cooling?.cooling, {
+  const cooling = f.view();
+  assert.equal(cooling.valid, true);
+  assert.equal(cooling.active_position, null);
+  assert.deepEqual(cooling.cooling, {
     code: AgentErrorCode.ChainCooling,
-    until_at: now + COOLDOWN_DEFAULTS.unavailable_ms,
+    available_at: availableAt,
   });
   assert.deepEqual(
-    f.store.transaction((tx) =>
-      f.agent.recordSuccess(tx, [head.selection, head.selection]),
-    ),
-    [{ credential: provider.credential, model_identifier: MODEL }],
+    cooling.chain.map(({ cooldown }) => cooldown?.available_at),
+    [availableAt, f.now() + COOLDOWN_DEFAULTS.quota_exhausted_ms, availableAt],
   );
-  const recovered = select();
-  assert.ok(recovered.kind === SelectionKind.Selected);
-  assert.equal(recovered.selection.position, HEAD_POSITION);
+  f.advance(COOLDOWN_DEFAULTS.rate_limited_ms);
+  const back = f.selected();
+  assert.equal(back.position, HEAD_POSITION);
+});
+
+test("a success on any model of the credential releases the hold and resets the strikes", (t) => {
+  const f = holdFixture(t);
+  const head = f.selected();
+  f.fail(head, AdvancingFailure.RateLimited);
+  f.advance(COOLDOWN_DEFAULTS.rate_limited_ms);
+  f.fail(head, AdvancingFailure.RateLimited);
+  assert.deepEqual(f.view().chain[HEAD_POSITION]?.cooldown, {
+    strikes: SECOND_STRIKE,
+    available_at: f.now() + 2 * COOLDOWN_DEFAULTS.rate_limited_ms,
+  });
+  const sameCredentialOtherModel = f.view().chain[2];
+  assert.ok(sameCredentialOtherModel);
+  assert.equal(sameCredentialOtherModel.credential, head.credential);
+  assert.notEqual(
+    sameCredentialOtherModel.model_identifier,
+    head.model_identifier,
+  );
+  f.succeed({
+    ...head,
+    position: sameCredentialOtherModel.position,
+    model_identifier: sameCredentialOtherModel.model_identifier,
+  });
+  assert.deepEqual(
+    f.view().chain.map(({ cooldown }) => cooldown),
+    [null, null, null],
+  );
+  assert.deepEqual(f.invoke("cooldown.list", null, {}), { items: [] });
+  f.fail(head, AdvancingFailure.RateLimited);
+  assert.equal(f.view().chain[HEAD_POSITION]?.cooldown?.strikes, FIRST_STRIKE);
+});
+
+test("a repeated failure doubles the hold up to the maximum and an expired hold keeps its strikes", (t) => {
+  const f = holdFixture(t);
+  const head = f.selected();
+  const { rate_limited_ms, max_ms } = COOLDOWN_DEFAULTS;
+  for (let strike = 1; strike <= DOUBLING_STRIKES; strike++) {
+    f.fail(head, AdvancingFailure.RateLimited);
+    assert.deepEqual(f.view().chain[HEAD_POSITION]?.cooldown, {
+      strikes: strike,
+      available_at:
+        f.now() + Math.min(max_ms, rate_limited_ms * 2 ** (strike - 1)),
+    });
+    f.advance(max_ms);
+  }
+  const expired = f.view();
+  assert.equal(expired.active_position, HEAD_POSITION);
+  assert.equal(
+    expired.chain[HEAD_POSITION]?.cooldown?.strikes,
+    DOUBLING_STRIKES,
+  );
+  f.fail(head, AdvancingFailure.QuotaExhausted);
+  assert.equal(
+    f.view().chain[HEAD_POSITION]?.cooldown?.available_at,
+    f.now() + max_ms,
+  );
 });
 
 const CHAIN_ENTRIES: ReadonlyArray<{
   entry: AgentEntry | null;
   length: number;
 }> = [
-  { entry: null, length: 3 },
+  { entry: null, length: 2 },
   { entry: { fallback_configurations: [spareHaiku] }, length: 2 },
   { entry: { fallback_configurations: [] }, length: 1 },
   {
     entry: { model_identifier: HAIKU, fallback_configurations: [primaryOpus] },
-    length: 2,
+    length: 1,
   },
 ];
 
@@ -2445,7 +2526,6 @@ test("selectionAt answers the claim selection of every chain position", (t) => {
           tx,
           [chosen.selection],
           AdvancingFailure.RateLimited,
-          EXECUTION,
           Date.now(),
         ),
       );
@@ -2486,7 +2566,7 @@ test("selectionAt keeps the pinned enablement revision after a newer revision", 
   );
 });
 
-test("a cooldown key is shared by every agent that names the credential and model, and an invalid chain selects nothing", (t) => {
+test("a hold is shared by every agent that names the credential, and an invalid chain selects nothing", (t) => {
   const f = enablementFixture(t);
   f.invoke("enablement.put", chainBody);
   f.invoke("enablement.put", chainBody, { agent_name: OTHER_AGENT });
@@ -2499,7 +2579,6 @@ test("a cooldown key is shared by every agent that names the credential and mode
       tx,
       [selected.selection],
       AdvancingFailure.RateLimited,
-      EXECUTION,
       Date.now(),
     ),
   );
@@ -2517,34 +2596,40 @@ test("a cooldown key is shared by every agent that names the credential and mode
   );
 });
 
-test("a human lists the cooldowns and clears one, and a clear of an absent cooldown answers not found", (t) => {
-  const f = enablementFixture(t);
+test("a human lists the holds and clears one by credential name, and a clear of an absent hold answers not found", (t) => {
+  const now = 2_000_000;
+  const f = enablementFixture(t, { clock: () => now });
   f.invoke("enablement.put", chainBody);
   const selected = f.store.transaction((tx) =>
     f.agent.selectAgent(tx, AGENT, null),
   );
   assert.ok(selected.kind === SelectionKind.Selected);
-  const [cooldown] = f.store.transaction((tx) =>
+  f.store.transaction((tx) =>
     f.agent.recordProviderFailure(
       tx,
       [selected.selection],
       AdvancingFailure.QuotaExhausted,
-      EXECUTION,
-      Date.now(),
+      now,
     ),
   );
-  assert.ok(cooldown);
-  assert.deepEqual(f.invoke("cooldown.list", null, {}), { items: [cooldown] });
+  assert.deepEqual(f.invoke("cooldown.list", null, {}), {
+    items: [
+      {
+        credential: provider.credential,
+        strikes: FIRST_STRIKE,
+        available_at: now + COOLDOWN_DEFAULTS.quota_exhausted_ms,
+      },
+    ],
+  });
   assert.equal(
-    f.invoke("cooldown.clear", null, { cooldown_id: cooldown.cooldown_id }),
+    f.invoke("cooldown.clear", null, { credential: provider.credential }),
     null,
   );
   assert.deepEqual(f.invoke("cooldown.list", null, {}), { items: [] });
   refuses(
-    () =>
-      f.invoke("cooldown.clear", null, { cooldown_id: cooldown.cooldown_id }),
+    () => f.invoke("cooldown.clear", null, { credential: provider.credential }),
     AgentErrorCode.CooldownNotFound,
     HttpStatus.NotFound,
-    { cooldown_id: cooldown.cooldown_id },
+    { credential: provider.credential },
   );
 });

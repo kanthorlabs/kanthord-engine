@@ -10,6 +10,7 @@ import {
   type StreamFunction,
   type Context as ModelContext,
 } from "@earendil-works/pi-ai";
+import type { CredentialHold, CredentialHolds } from "../custody/contract.ts";
 
 export function scriptedProvider(
   script: FauxResponseStep[],
@@ -65,3 +66,18 @@ export function scriptedProvider(
   return { provider, calls, tools };
 }
 export type ScriptedProvider = ReturnType<typeof scriptedProvider>;
+
+export function memoryCredentialHolds(): CredentialHolds {
+  const holds = new Map<string, CredentialHold>();
+  return {
+    holdOf: (_tx, name) => holds.get(name) ?? null,
+    hold: (_tx, name, availableAt, strikes) => {
+      holds.set(name, { available_at: availableAt, strikes });
+    },
+    release: (_tx, name) => holds.delete(name),
+    listHolds: () =>
+      [...holds]
+        .map(([credential, hold]) => ({ credential, ...hold }))
+        .sort((left, right) => left.credential.localeCompare(right.credential)),
+  };
+}

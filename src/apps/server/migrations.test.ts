@@ -44,7 +44,6 @@ const CREDENTIAL_TABLE = "credential";
 const CUSTODY_MASTER_KEY_TABLE = "custody_master_key";
 const AGENT_ENABLEMENT_TABLE = "agent_enablement";
 const AGENT_PROMPT_TABLE = "agent_prompt";
-const AGENT_COOLDOWN_TABLE = "agent_cooldown";
 const WORKER_INSTANCE_TABLE = "worker_instance";
 const ERD2_WORKER_TABLES = [WORKER_INSTANCE_TABLE];
 const PROJECT_PROJECT_TABLE = "project_project";
@@ -99,7 +98,6 @@ const SINGLE_PREFIX_MATCH = 1;
 const INDEX_SCHEMA_TYPE = "index";
 const UNIQUE_INDEX = 1;
 const ALL_TABLES = [
-  AGENT_COOLDOWN_TABLE,
   AGENT_ENABLEMENT_TABLE,
   AGENT_PROMPT_TABLE,
   CREDENTIAL_TABLE,
@@ -123,7 +121,6 @@ const ALL_TABLES = [
   WORKER_INSTANCE_TABLE,
 ];
 const ALL_INDEXES = [
-  "agent_cooldown_credential_model_identifier",
   "agent_enablement_agent_name_revision",
   "agent_prompt_scope_agent_name",
   "credential_name_revision",
@@ -193,7 +190,6 @@ test("service migrations own distinct prefixes and create only tables in their n
       CUSTODY_MASTER_KEY_TABLE,
       AGENT_ENABLEMENT_TABLE,
       AGENT_PROMPT_TABLE,
-      AGENT_COOLDOWN_TABLE,
       ...ERD2_WORKER_TABLES,
       PROJECT_PROJECT_TABLE,
       PROJECT_BINDING_TABLE,
@@ -273,7 +269,6 @@ test("each service migration set applies alone to an empty store", () => {
         assert.deepEqual(tables(store), [
           AGENT_ENABLEMENT_TABLE,
           AGENT_PROMPT_TABLE,
-          AGENT_COOLDOWN_TABLE,
         ]);
       if (service.service === WORKER_SERVICE_NAME)
         assert.deepEqual(tables(store), ERD2_WORKER_TABLES);
@@ -356,6 +351,20 @@ test("each service migration set applies alone to an empty store", () => {
             { name: "metadata", type: "TEXT", notnull: 0, pk: 0 },
             { name: "created_at", type: "INTEGER", notnull: 1, pk: 0 },
             { name: "ended_at", type: "INTEGER", notnull: 0, pk: 0 },
+            { name: "available_at", type: "INTEGER", notnull: 0, pk: 0 },
+            { name: "strikes", type: "INTEGER", notnull: 1, pk: 0 },
+          ],
+        );
+        assert.deepEqual(
+          store.database
+            .prepare(
+              `SELECT name, dflt_value FROM pragma_table_info('${CREDENTIAL_TABLE}') WHERE name IN ('available_at', 'strikes') ORDER BY cid`,
+            )
+            .all()
+            .map((row) => ({ ...row })),
+          [
+            { name: "available_at", dflt_value: null },
+            { name: "strikes", dflt_value: "0" },
           ],
         );
         assert.deepEqual(
@@ -387,7 +396,7 @@ test("each service migration set applies alone to an empty store", () => {
   }
 });
 
-test("all ERD 1, ERD 2 and ERD 3 migrations produce exactly the twenty-four tables", () => {
+test("all ERD 1, ERD 2 and ERD 3 migrations produce exactly the twenty-three tables", () => {
   const allServices: Migrations = [
     { service: CUSTODY_SERVICE_NAME, migrations: custodyMigrations },
     { service: SCHEDULER_SERVICE_NAME, migrations: schedulerMigrations },

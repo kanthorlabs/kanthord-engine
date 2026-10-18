@@ -569,7 +569,7 @@ async function cooldownList(command: Command): Promise<void> {
 }
 
 async function cooldownClear(
-  cooldownId: string,
+  credential: string,
   command: Command,
 ): Promise<void> {
   const options = command.optsWithGlobals();
@@ -578,10 +578,7 @@ async function cooldownClear(
   const key = resolveKey(options);
   const result = await httpClient(agentOperations, endpoint, token)[
     "cooldown.clear"
-  ](
-    { params: { cooldown_id: cooldownId }, query: {}, body: null },
-    { idempotencyKey: key },
-  );
+  ]({ params: { credential }, query: {}, body: null }, { idempotencyKey: key });
   handleMutationResult(result, COOLDOWN_CLEAR_INDETERMINATE, key);
   process.stdout.write(`${JSON.stringify({ idempotency_key: key })}\n`);
 }
@@ -639,7 +636,7 @@ export function addAgentCommand(program: Command): void {
     .action((_options, command: Command) => credentialModelList(command));
   const cooldown = agent
     .command(COOLDOWN)
-    .description("Inspect and clear fallback chain cooldowns");
+    .description("Inspect and clear credential cooldowns");
   cooldown.action(() => cooldown.help());
   cooldown
     .command(LIST)
@@ -647,11 +644,11 @@ export function addAgentCommand(program: Command): void {
     .action((_options, command: Command) => cooldownList(command));
   cooldown
     .command(CLEAR)
-    .description("Clear one cooldown")
-    .argument("<cooldown-id>", "Cooldown identity")
+    .description("Clear the cooldown of one credential")
+    .argument("<credential>", "Credential name")
     .option("--idempotency-key <key>", "Mutation key", singleUse(KEY_OPTION))
-    .action((cooldownId: string, _options, command: Command) =>
-      cooldownClear(cooldownId, command),
+    .action((credential: string, _options, command: Command) =>
+      cooldownClear(credential, command),
     );
   const prompt = agent
     .command(PROMPT)

@@ -13,7 +13,7 @@ import type { WorkerEntry } from "./contract.ts";
 
 const SWE = "swe@1";
 const RE = "re@1";
-const UNTIL = 5000;
+const AVAILABLE_AT = 5000;
 const pin: AgentSelection = {
   agent_name: SWE,
   position: 1,
@@ -53,7 +53,7 @@ function choice(
   results: Record<
     string,
     | { kind: "selected"; selection: AgentSelection; enablement_id: string }
-    | { kind: "cooling"; until_at: number }
+    | { kind: "cooling"; available_at: number }
     | { kind: "invalid" }
   >,
 ) {
@@ -100,9 +100,9 @@ test("the agent choice pins every selected agent, skips an invalid one and answe
   assert.deepEqual(
     choice({
       [SWE]: selected,
-      [RE]: { kind: "cooling", until_at: UNTIL },
+      [RE]: { kind: "cooling", available_at: AVAILABLE_AT },
     }),
-    { kind: AgentChoiceKind.Cooling, until_at: UNTIL },
+    { kind: AgentChoiceKind.Cooling, available_at: AVAILABLE_AT },
   );
 });
 

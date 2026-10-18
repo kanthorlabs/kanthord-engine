@@ -558,7 +558,7 @@ test("E03.18 prompt read answers over HTTP beside the agent name path", async (t
   assert.deepEqual([answer.scope, answer.system_layer], ["agent", "inherit"]);
 });
 
-test("E03.20 cooldown list answers no cooldown and a clear of an absent cooldown is refused", async (t) => {
+test("E03.20 cooldown list answers no hold and a clear of a credential with no hold is refused", async (t) => {
   const fixture = await setup(t);
   assert.deepEqual(
     success<{ items: unknown[] }>(
@@ -572,7 +572,7 @@ test("E03.20 cooldown list answers no cooldown and a clear of an absent cooldown
         "agent",
         "cooldown",
         "clear",
-        "agent_cooldown_absent",
+        "absent-credential",
         "--idempotency-key",
         ulid(),
       ],

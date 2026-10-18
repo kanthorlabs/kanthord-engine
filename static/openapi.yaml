@@ -4,7 +4,7 @@ info:
   title: kanthord
   version: 28.0.1
 paths:
-  /api/agent/cooldown/{cooldown_id}:
+  /api/agent/cooldown/{credential}:
     $ref: ./openapi/agent/cooldown.clear.yaml#/pathItem
   /api/agent/cooldown:
     $ref: ./openapi/agent/cooldown.list.yaml#/pathItem
