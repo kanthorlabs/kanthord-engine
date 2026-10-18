@@ -204,10 +204,12 @@ export function configuration(value: unknown) {
 
 export function readConfig(path: string): string {
   if (!audit(path, "file", true))
-    throw new Diagnostic(
-      "system.config.not_found",
-      `${path}: configuration is absent. Run kanthord config init --config ${JSON.stringify(path)}.`,
-    );
+    throw new Diagnostic("system.config.not_found", "configuration is absent", {
+      fields: [
+        ["config", path],
+        ["command", `kanthord config init --config ${JSON.stringify(path)}`],
+      ],
+    });
   audit(dirname(path), "directory");
   return readPrivate(path);
 }

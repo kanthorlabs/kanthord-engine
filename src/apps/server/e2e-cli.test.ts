@@ -168,7 +168,10 @@ test("the real process exits with the failure code of a failed command", async (
   const result = await spawnKanthord(["config", "validate"], env);
   assert.equal(result.code, EXIT_FAILURE);
   assert.equal(result.stdout, NO_OUTPUT);
-  assert.ok(result.stderr.includes(env.KANTHORD_CONFIG!), result.stderr);
+  assert.equal(
+    result.stderr,
+    `system.config.not_found: configuration is absent\nconfig:  ${env.KANTHORD_CONFIG!}\ncommand: kanthord config init --config ${JSON.stringify(env.KANTHORD_CONFIG!)}\n`,
+  );
 });
 
 test("the real process sends an authenticated request to the server", async (t) => {

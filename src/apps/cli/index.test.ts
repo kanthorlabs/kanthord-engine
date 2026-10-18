@@ -410,11 +410,10 @@ test("scheduler execution release tells the operator to read the execution befor
     result.stderr,
     /^cli\.scheduler\.execution\.release\.indeterminate:/,
   );
-  assert.ok(
-    result.stderr.includes(`kanthord scheduler execution get ${executionId}`),
+  assert.equal(
     result.stderr,
+    `cli.scheduler.execution.release.indeterminate: the result is unknown; read the execution before any retry\ncommand: kanthord scheduler execution get ${executionId}\n`,
   );
-  assert.doesNotMatch(result.stderr, /retry with --idempotency-key/);
 });
 
 test("agent enablement commands expose offline help and validate inputs before I/O", async (t) => {
@@ -1636,10 +1635,7 @@ test("intake outbound discard prints the generated key when the result is indete
     result.stderr,
     /^cli\.intake\.outbound\.discard\.indeterminate:/,
   );
-  assert.match(
-    result.stderr,
-    /retry with --idempotency-key [0-9A-HJKMNP-TV-Z]{26}/,
-  );
+  assert.match(result.stderr, /^idempotency_key: [0-9A-HJKMNP-TV-Z]{26}$/m);
 });
 
 test("intake event mutations print the generated key when the result is indeterminate", async (t) => {
@@ -1660,9 +1656,6 @@ test("intake event mutations print the generated key when the result is indeterm
       result.stderr,
       new RegExp(`^cli\\.intake\\.event\\.${leaf[0]}\\.indeterminate:`),
     );
-    assert.match(
-      result.stderr,
-      /retry with --idempotency-key [0-9A-HJKMNP-TV-Z]{26}/,
-    );
+    assert.match(result.stderr, /^idempotency_key: [0-9A-HJKMNP-TV-Z]{26}$/m);
   }
 });

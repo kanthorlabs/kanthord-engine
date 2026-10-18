@@ -40,7 +40,7 @@ function requireIdentity(value: string, leaf: string): void {
   if (!identitySchema(OUTBOUND_REQUEST_ID_PREFIX).safeParse(value).success)
     throw new Diagnostic(
       code(leaf, "invalid_outbound_request_id"),
-      "Expected a canonical outbound_request identity.",
+      "invalid outbound request ID",
     );
 }
 

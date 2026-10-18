@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { isDeepStrictEqual } from "node:util";
 import {
   chmodSync,
   mkdirSync,
@@ -23,11 +24,13 @@ import {
   showConfig,
 } from "./index.ts";
 import { writePrivate } from "../kernel/files.ts";
+import { Diagnostic } from "../kernel/errors.ts";
 
 const FIRST_AUTH_VERSION = 1;
 const ExitCode = { Success: 0, Failure: 1 } as const;
 
 const EMPTY_OUTPUT = "";
+const ABSENT_CONFIGURATION = "configuration is absent";
 const CONFIGURED_PORT = 12345;
 const DEFAULT_BIND = "127.0.0.1";
 const DEFAULT_LOG_LEVEL = "info";
@@ -598,7 +601,16 @@ test("config option/environment resolution", () => {
 test("private configuration rejects modes, symlinks and wrong kinds, and creates nothing on validation", (t) => {
   const directory = temporary(t);
   const path = join(directory, "kanthord.yaml");
-  assert.throws(() => loadConfig(path), /kanthord config init/);
+  assert.throws(
+    () => loadConfig(path),
+    (error) =>
+      error instanceof Diagnostic &&
+      error.message === ABSENT_CONFIGURATION &&
+      isDeepStrictEqual(error.fields, [
+        ["config", path],
+        ["command", `kanthord config init --config ${JSON.stringify(path)}`],
+      ]),
+  );
   assert.deepEqual(readdirSync(directory), []);
   writePrivate(path, initialConfig());
   chmodSync(path, 0o644);
