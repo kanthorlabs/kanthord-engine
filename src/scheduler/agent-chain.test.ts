@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
+import pino from "pino";
 import { COOLDOWN_DEFAULTS } from "../agent/config.ts";
 import { memoryCredentialHolds } from "../agent/test-support.ts";
 import {
@@ -78,6 +79,7 @@ function releaseHarness(t: TestContext) {
       chainCalls.push({ method: "providerFailure", arguments: args }),
     success: (_tx, ...args) =>
       chainCalls.push({ method: "success", arguments: args }),
+    selected: () => {},
   };
   const row = executionFixture({ agent_pins: [pin] });
   h.store.transaction((tx) => insertExecution(tx, row));
@@ -180,7 +182,10 @@ test("a release without a provider stop releases the hold of the pin", async (t)
   t.mock.method(Date, "now", () => FIXTURE_NOW);
   await h.release(null);
   assert.deepEqual(h.chainCalls, [
-    { method: "success", arguments: [[selection]] },
+    {
+      method: "success",
+      arguments: [[selection], h.row.execution_id],
+    },
   ]);
   assert.deepEqual(
     h.store.transaction((tx) => readExecution(tx, h.row.execution_id))
@@ -236,6 +241,7 @@ function pinHarness(t: TestContext) {
     providerHealthCheck: () => async () => ResourceStatus.Unknown,
     providerCapability: () => "model-list read",
     toolDeclarations: async () => [],
+    logger: pino({ enabled: false }),
     clock: () => FIXTURE_NOW,
   });
   const bindings = new Map<string, AgentEntry | null>();
@@ -276,12 +282,15 @@ function pinHarness(t: TestContext) {
           pin.position,
         ),
       ),
-    providerFailure: (tx, selections, code, _executionId, now) => {
-      agent.recordProviderFailure(tx, selections, code, now);
+    providerFailure: (tx, selections, code, executionId, now) => {
+      agent.recordProviderFailure(tx, selections, code, now, executionId);
     },
-    success: (tx, selections) => {
+    success: (tx, selections, executionId) => {
       chainCalls.push({ method: "success", arguments: [selections] });
-      agent.recordSuccess(tx, selections);
+      agent.recordSuccess(tx, selections, executionId);
+    },
+    selected: (selections, executionId) => {
+      agent.recordSelection(selections, executionId);
     },
   };
   const row = executionFixture();
@@ -409,6 +418,7 @@ test("an enablement edit, a binding edit and a hold during a live execution keep
       [selection],
       AdvancingFailure.RateLimited,
       FIXTURE_NOW,
+      createIdentity("execution"),
     ),
   );
   const fresh = h.store.transaction((tx) =>

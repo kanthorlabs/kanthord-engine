@@ -10,6 +10,9 @@ import {
   ClaimIntent,
   WorkPullKind,
   WORK_PULL_WAIT_MS,
+  AgentChoiceKind,
+  type AgentPin,
+  type AgentSelection,
 } from "./contract.ts";
 import { insertExecution, readExecution } from "./execution-store.ts";
 import { schedulerHarness, executionFixture } from "./test-support.ts";
@@ -132,6 +135,79 @@ test("pull rolls back its probe, rechecks health, and commits exactly one claim"
     TWO_CHECKS,
   );
 });
+const SELECTION: AgentSelection = {
+  agent_name: "swe@1",
+  position: 1,
+  level: "binding",
+  agent_provider: "qwen",
+  provider: "openai-compatible",
+  credential: "qwen-key",
+  model_identifier: "qwen3.6-plus",
+  reasoning_effort: "high",
+};
+
+const PIN: AgentPin = {
+  agent_name: SELECTION.agent_name,
+  enablement_id: createIdentity("agent_enablement"),
+  position: SELECTION.position,
+};
+
+function selectionHarness(t: TestContext) {
+  const h = harness(t);
+  const reported: {
+    selections: readonly AgentSelection[];
+    executionId: string;
+    stored: boolean;
+  }[] = [];
+  h.dependencies.agentChains.select = () => ({
+    kind: AgentChoiceKind.Selected,
+    selections: [SELECTION],
+    pins: [PIN],
+  });
+  h.dependencies.agentChains.resolve = () => [SELECTION];
+  h.dependencies.agentChains.selected = (selections, executionId) => {
+    reported.push({
+      selections,
+      executionId,
+      stored:
+        h.store.transaction((tx) => readExecution(tx, executionId)) !==
+        undefined,
+    });
+  };
+  return { ...h, reported };
+}
+
+test("a claim reports its selections to the agent chain once, after the commit, with the execution id", async (t) => {
+  const h = selectionHarness(t);
+  h.enqueue();
+  const result = await h.pull();
+  assert.equal(result.kind, WorkPullKind.Claimed);
+  assert.deepEqual(h.reported, [
+    {
+      selections: [SELECTION],
+      executionId: result.execution.execution_id,
+      stored: true,
+    },
+  ]);
+});
+
+test("a pull without work reports no selection", async (t) => {
+  const h = selectionHarness(t);
+  await h.service.quiesce();
+  h.enqueue();
+  assert.deepEqual(await h.pull(), { kind: WorkPullKind.NoWork });
+  assert.deepEqual(h.reported, []);
+});
+
+test("a re-pull that answers the running execution reports no selection", async (t) => {
+  const h = selectionHarness(t);
+  h.enqueue();
+  const claim = await h.pull();
+  assert.equal(claim.kind, WorkPullKind.Claimed);
+  assert.deepEqual(await h.pull(), claim);
+  assert.equal(h.reported.length, ONE_COMMIT);
+});
+
 const HEALTHCHECK = "instanceHealthcheck";
 const MARKER_BRANCH = "kanthord/marker";
 

@@ -93,9 +93,11 @@ function commit(
 ) {
   cancelled(caller);
   let settled = false;
+  let outcome = ClaimOutcome.None as ClaimOutcome;
   const answer = caller.commit((tx) => {
     const result = decide(tx, dependencies, identity, pull, now);
     settled = result.settled;
+    outcome = result.outcome;
     if (!result.row) return { kind: WorkPullKind.NoWork } as const;
     return {
       kind: WorkPullKind.Claimed,
@@ -103,11 +105,17 @@ function commit(
     } as const;
   });
   if (settled) dependencies.waiting.wake(identity.projectId);
-  if (answer.kind === WorkPullKind.Claimed)
+  if (answer.kind === WorkPullKind.Claimed) {
+    if (outcome === ClaimOutcome.Claimed)
+      dependencies.agentChains.selected(
+        answer.execution.agent_selections,
+        answer.execution.execution_id,
+      );
     dependencies.telemetry.executionOpened(
       executionTrace(answer.execution),
       answer.execution.created_at,
     );
+  }
   return answer;
 }
 

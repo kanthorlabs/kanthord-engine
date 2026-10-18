@@ -52,7 +52,7 @@ export function release(
         now,
       );
     else if (body.stop?.reason !== ExecutionStopReason.ProviderFailed)
-      dependencies.agentChains.success(tx, selections);
+      dependencies.agentChains.success(tx, selections, executionId);
     if (
       body.stop !== null &&
       body.stop.reason !== ExecutionStopReason.BudgetEnd

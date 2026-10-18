@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { homedir } from "node:os";
 import { resolve } from "node:path";
+import type { Logger } from "pino";
 import { z } from "zod";
 import type { Context } from "../kernel/context.ts";
 import { OperationError } from "../kernel/errors.ts";
@@ -321,6 +322,7 @@ export interface Dependencies {
   providerHealthCheck: ProviderHealthCheckFn;
   providerCapability: ProviderCapabilityFn;
   toolDeclarations: ToolDeclarationsFn;
+  logger: Logger;
   clock?: () => number;
 }
 
@@ -345,10 +347,12 @@ function uniqueCredentials(selections: readonly AgentSelection[]): string[] {
 
 export class AgentComponent {
   private readonly dependencies: Dependencies;
+  private readonly logger: Logger;
   private readonly now: () => number;
 
   constructor(dependencies: Dependencies) {
     this.dependencies = dependencies;
+    this.logger = dependencies.logger;
     this.now = dependencies.clock ?? Date.now;
   }
 
@@ -857,24 +861,60 @@ export class AgentComponent {
     selections: readonly AgentSelection[],
     code: AdvancingFailure,
     now: number,
+    executionId: string,
   ): void {
     const { credentialHolds, config } = this.dependencies;
     for (const credential of uniqueCredentials(selections)) {
       const strikes =
         (credentialHolds.holdOf(tx, credential)?.strikes ?? NO_STRIKES) +
         FIRST_STRIKE;
-      credentialHolds.hold(
-        tx,
-        credential,
-        now + cooldownDuration(config.cooldown, code, strikes),
-        strikes,
+      const availableAt =
+        now + cooldownDuration(config.cooldown, code, strikes);
+      credentialHolds.hold(tx, credential, availableAt, strikes);
+      this.logger.info(
+        {
+          execution_id: executionId,
+          credential_name: credential,
+          code,
+          strikes,
+          available_at: availableAt,
+        },
+        "agent.fallback.cooldown_started",
       );
     }
   }
 
-  recordSuccess(tx: Transaction, selections: readonly AgentSelection[]): void {
+  recordSuccess(
+    tx: Transaction,
+    selections: readonly AgentSelection[],
+    executionId: string,
+  ): void {
     for (const credential of uniqueCredentials(selections))
-      this.dependencies.credentialHolds.release(tx, credential);
+      if (this.dependencies.credentialHolds.release(tx, credential))
+        this.logger.info(
+          { execution_id: executionId, credential_name: credential },
+          "agent.fallback.cooldown_cleared",
+        );
+  }
+
+  recordSelection(
+    selections: readonly AgentSelection[],
+    executionId: string,
+  ): void {
+    for (const selection of selections)
+      this.logger.info(
+        {
+          execution_id: executionId,
+          agent_name: selection.agent_name,
+          chain_position: selection.position,
+          chain_level: selection.level,
+          agent_provider: selection.agent_provider,
+          provider: selection.provider,
+          model_identifier: selection.model_identifier,
+          credential_name: selection.credential,
+        },
+        "agent.fallback.selected",
+      );
   }
 
   resourceInventory(tx: Transaction): ResourceEntry[] {
@@ -1038,6 +1078,10 @@ export class AgentComponent {
             "Agent cooldown not found.",
             { credential: params.credential },
           );
+        this.logger.info(
+          { credential_name: params.credential },
+          "agent.fallback.cooldown_cleared",
+        );
         return null;
       }),
     );

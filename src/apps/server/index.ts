@@ -289,11 +289,14 @@ export function composeServices(options: {
       select: (tx, workerBindingId) => worker.agentChoice(tx, workerBindingId),
       resolve: (tx, workerBindingId, pins) =>
         worker.agentSelectionsAt(tx, workerBindingId, pins),
-      providerFailure: (tx, selections, code, _executionId, now) => {
-        agent.recordProviderFailure(tx, selections, code, now);
+      providerFailure: (tx, selections, code, executionId, now) => {
+        agent.recordProviderFailure(tx, selections, code, now, executionId);
       },
-      success: (tx, selections) => {
-        agent.recordSuccess(tx, selections);
+      success: (tx, selections, executionId) => {
+        agent.recordSuccess(tx, selections, executionId);
+      },
+      selected: (selections, executionId) => {
+        agent.recordSelection(selections, executionId);
       },
     },
     traceIdentity: {
@@ -395,6 +398,7 @@ export function composeServices(options: {
     entriesOfAgent: (tx, name) => project.entriesOfAgent(tx, name),
     repositoryWorkingOf: (tx, id) => project.repositoryPolicyOf(tx, id),
     toolDeclarations: (name) => toolDeclarations(name),
+    logger: options.logger,
   });
   const repositoryCredentials = new RepositoryCredentials({
     store: options.store,
