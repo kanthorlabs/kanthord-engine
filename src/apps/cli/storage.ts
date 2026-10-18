@@ -8,5 +8,17 @@ export function addStorageCommand(program: Command): void {
     name: CommandName.Storage,
     description: "Storage component commands",
     operations: storageOperations,
+    example: {
+      platform: "s3",
+      metadata: {
+        endpoint: "https://s3.example.com",
+        bucket: "kanthord",
+        region: "us-east-1",
+      },
+      secret: {
+        access_key_id: "<access-key-id>",
+        secret_access_key: "<secret>",
+      },
+    },
   });
 }

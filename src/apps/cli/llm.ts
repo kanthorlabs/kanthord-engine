@@ -43,6 +43,14 @@ const LLM_GROUP: CredentialGroup = {
   name: CommandName.Llm,
   description: "LLM component commands",
   operations: llmOperations,
+  example: {
+    platform: "openai-compatible",
+    metadata: {
+      base_url: "https://api.example.com/v1",
+      models: [{ id: "model-1" }],
+    },
+    secret: { key: "<api-key>" },
+  },
 };
 
 async function loginStatus(session: string, command: Command): Promise<void> {

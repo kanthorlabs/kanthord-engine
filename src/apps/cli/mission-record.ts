@@ -14,6 +14,7 @@ import {
   addMutationOptions,
   mutate,
 } from "./mission-support.ts";
+import { missionExamples } from "./mission-examples.ts";
 
 const MIN_ATTEMPT_FILTER = 0;
 const MIN_ATTEMPT_NUMBER = 1;
@@ -111,6 +112,10 @@ function addAssessmentCommands(mission: Command): void {
       .command("submit")
       .description("Submit an assessment of a node")
       .argument("<node-id>", "Node ID"),
+    {
+      schema: assessmentSubmitSchema,
+      example: missionExamples.assessmentSubmit,
+    },
   ).action(async (nodeId: string, _options, command: Command) => {
     validateNode(nodeId, "cli.mission.assessment.submit.invalid_node_id");
     await mutate(

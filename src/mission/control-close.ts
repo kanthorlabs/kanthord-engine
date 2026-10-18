@@ -7,6 +7,7 @@ import { canonicalJSON } from "../kernel/json.ts";
 import {
   AssessmentResult,
   NodeState,
+  OVERRIDE_STATES,
   Intent,
   AssetKind,
   type Override,
@@ -35,16 +36,6 @@ import {
 } from "./control.ts";
 
 const NO_ATTEMPT = 0;
-const OVERRIDE_STATES = [
-  NodeState.Pending,
-  NodeState.Available,
-  NodeState.Executing,
-  NodeState.Waiting,
-  NodeState.Blocked,
-  NodeState.Paused,
-  NodeState.ExternalSuccess,
-  NodeState.ExternalFailed,
-];
 const BINDING_MISMATCH = "mission.evidence.binding_mismatch";
 const LANDED_COMMIT_FIELD = "landed_commit";
 

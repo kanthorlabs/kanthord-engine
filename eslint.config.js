@@ -259,6 +259,23 @@ export default tseslint.config(
               ],
             },
             {
+              from: element("apps-cli", { fileInternalPath: "*.test.ts" }),
+              allow: [
+                {
+                  to: element("component", {
+                    captured: { name: "{llm,repository,storage}" },
+                    fileInternalPath: "index.ts",
+                  }),
+                },
+                {
+                  to: element("service", {
+                    captured: { name: "intake" },
+                    fileInternalPath: "configuration.ts",
+                  }),
+                },
+              ],
+            },
+            {
               from: element({ anyOf: ["worker-unit", "apps-worker"] }),
               allow: [
                 ...allow("kernel"),

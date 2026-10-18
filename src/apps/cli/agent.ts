@@ -5,6 +5,7 @@ import { Diagnostic } from "../../kernel/errors.ts";
 import { httpClient } from "../../gateway/client.ts";
 import { AccessPolicy } from "../../kernel/operation.ts";
 import { CommandName, PROGRAM_NAME } from "./constants.ts";
+import { addFileBodyHelp } from "./file-body.ts";
 import {
   agentOperations,
   agentProviderItemSchema,
@@ -42,6 +43,25 @@ const providerAddBodySchema = z.strictObject({
   provider: agentProviderKindSchema,
   credential: z.string().min(1),
 });
+
+const PROMPT_TEXT_EXAMPLE = "Review every change for security first.";
+const ENABLEMENT_EXAMPLE = {
+  agent_providers: [
+    { name: "main", provider: "anthropic", credential: "anthropic-main" },
+  ],
+  default_configuration: {
+    agent_provider: "main",
+    model_identifier: "claude-sonnet-4-5",
+    reasoning_effort: "medium",
+  },
+  fallback_configurations: [],
+};
+const PROVIDER_ADD_EXAMPLE = {
+  expected_revision: 1,
+  name: "main",
+  provider: "anthropic",
+  credential: "anthropic-main",
+};
 
 const ENABLEMENT = "enablement";
 const PROVIDER = "provider";
@@ -637,23 +657,32 @@ export function addAgentCommand(program: Command): void {
     .command(PROMPT)
     .description("Manage the prompt settings");
   prompt.action(() => prompt.help());
-  prompt
-    .command(PUT)
-    .description("Replace the custom text of a prompt scope as JSON")
-    .requiredOption(
-      "--scope <scope>",
-      "system, agent or workbench",
-      singleUse("--scope"),
-    )
-    .option("--agent <agent-name>", "Agent name", singleUse("--agent"))
-    .option(
-      "--expected-revision <revision>",
-      "Current revision",
-      singleUse(REVISION_OPTION),
-    )
-    .requiredOption("--file <path>", "Custom text file", singleUse(FILE_OPTION))
-    .option("--idempotency-key <key>", "Mutation key", singleUse(KEY_OPTION))
-    .action((_options, command: Command) => promptPut(command));
+  addFileBodyHelp(
+    prompt
+      .command(PUT)
+      .description("Replace the custom text of a prompt scope as JSON")
+      .requiredOption(
+        "--scope <scope>",
+        "system, agent or workbench",
+        singleUse("--scope"),
+      )
+      .option("--agent <agent-name>", "Agent name", singleUse("--agent"))
+      .option(
+        "--expected-revision <revision>",
+        "Current revision",
+        singleUse(REVISION_OPTION),
+      )
+      .requiredOption(
+        "--file <path>",
+        "Custom text file",
+        singleUse(FILE_OPTION),
+      )
+      .option("--idempotency-key <key>", "Mutation key", singleUse(KEY_OPTION)),
+    {
+      example: PROMPT_TEXT_EXAMPLE,
+      note: "The whole file is the custom text of the scope.",
+    },
+  ).action((_options, command: Command) => promptPut(command));
   prompt
     .command("get")
     .description("Read the settings of a prompt scope as JSON")
@@ -709,19 +738,25 @@ export function addAgentCommand(program: Command): void {
     .action((agentName: string, _options, command: Command) =>
       get(agentName, command),
     );
-  enablement
-    .command(PUT)
-    .description("Create or replace an agent enablement as JSON")
-    .argument("<agent-name>", "Agent name")
-    .requiredOption(
-      "--file <path>",
-      "Enablement JSON file",
-      singleUse(FILE_OPTION),
-    )
-    .option("--idempotency-key <key>", "Mutation key", singleUse(KEY_OPTION))
-    .action((agentName: string, _options, command: Command) =>
-      put(agentName, command),
-    );
+  addFileBodyHelp(
+    enablement
+      .command(PUT)
+      .description("Create or replace an agent enablement as JSON")
+      .argument("<agent-name>", "Agent name")
+      .requiredOption(
+        "--file <path>",
+        "Enablement JSON file",
+        singleUse(FILE_OPTION),
+      )
+      .option("--idempotency-key <key>", "Mutation key", singleUse(KEY_OPTION)),
+    {
+      schema: agentEnablementPutBodySchema,
+      example: ENABLEMENT_EXAMPLE,
+      note: "Add expected_revision to replace an existing enablement.",
+    },
+  ).action((agentName: string, _options, command: Command) =>
+    put(agentName, command),
+  );
   enablement
     .command(ENABLE)
     .description("Enable an agent enablement as JSON")
@@ -765,19 +800,21 @@ export function addAgentCommand(program: Command): void {
     .command(PROVIDER)
     .description("Manage enablement providers");
   provider.action(() => provider.help());
-  provider
-    .command(ADD)
-    .description("Add a provider as JSON")
-    .argument("<agent-name>", "Agent name")
-    .requiredOption(
-      "--file <path>",
-      "Provider JSON file",
-      singleUse(FILE_OPTION),
-    )
-    .option("--idempotency-key <key>", "Mutation key", singleUse(KEY_OPTION))
-    .action((agentName: string, _options, command: Command) =>
-      providerAdd(agentName, command),
-    );
+  addFileBodyHelp(
+    provider
+      .command(ADD)
+      .description("Add a provider as JSON")
+      .argument("<agent-name>", "Agent name")
+      .requiredOption(
+        "--file <path>",
+        "Provider JSON file",
+        singleUse(FILE_OPTION),
+      )
+      .option("--idempotency-key <key>", "Mutation key", singleUse(KEY_OPTION)),
+    { schema: providerAddBodySchema, example: PROVIDER_ADD_EXAMPLE },
+  ).action((agentName: string, _options, command: Command) =>
+    providerAdd(agentName, command),
+  );
   provider
     .command(REMOVE)
     .description("Remove a provider as JSON")

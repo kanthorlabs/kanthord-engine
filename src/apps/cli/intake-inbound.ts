@@ -10,6 +10,7 @@ import {
   inboundCreateSchema,
   intakeOperations,
 } from "../../intake/contract.ts";
+import { addFileBodyHelp } from "./file-body.ts";
 import {
   handleMutationResult,
   handleReadResult,
@@ -26,6 +27,14 @@ const LIST = "list";
 const GET = "get";
 const DELETE = "delete";
 const KEY_OPTION = "--idempotency-key";
+const CREATE_EXAMPLE = {
+  project_id: "project_01ARZ3NDEKTSV4RRFFQ69G5FAV",
+  kind: "poll",
+  platform: "github",
+  consumer: "mission.delivery.admit",
+  credential: "github-main",
+  configuration: { resource: "owner/repository" },
+};
 const LIMIT_INVALID = "cli.pagination.limit_invalid";
 const LIMIT_OUT_OF_RANGE = "cli.pagination.limit_out_of_range";
 
@@ -138,12 +147,22 @@ async function remove(inboundId: string, command: Command): Promise<void> {
 export function addInboundCommands(intake: Command): void {
   const inbound = intake.command(INBOUND).description("Inbound commands");
   inbound.action(() => inbound.help());
-  inbound
-    .command(CREATE)
-    .description("Create an inbound from a JSON file")
-    .requiredOption("--file <path>", "Create file", singleUse("--file"))
-    .option("--idempotency-key <ulid>", "Mutation key", singleUse(KEY_OPTION))
-    .action((_options, command: Command) => create(command));
+  addFileBodyHelp(
+    inbound
+      .command(CREATE)
+      .description("Create an inbound from a JSON file")
+      .requiredOption("--file <path>", "Create file", singleUse("--file"))
+      .option(
+        "--idempotency-key <ulid>",
+        "Mutation key",
+        singleUse(KEY_OPTION),
+      ),
+    {
+      schema: inboundCreateSchema,
+      example: CREATE_EXAMPLE,
+      note: "A poll requires credential. A webhook refuses it.",
+    },
+  ).action((_options, command: Command) => create(command));
   inbound
     .command(LIST)
     .description("List inbounds as JSON")
