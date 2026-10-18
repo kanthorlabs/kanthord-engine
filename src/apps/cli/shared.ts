@@ -1,7 +1,7 @@
 import { readFileSync, statSync } from "node:fs";
 import { ulid } from "ulid";
 import { z } from "zod";
-import { Diagnostic } from "../../kernel/errors.ts";
+import { Diagnostic, validationIssues } from "../../kernel/errors.ts";
 import { readPrivate } from "../../kernel/files.ts";
 import type { Row } from "../../kernel/rows.ts";
 import { ulidSchema } from "../../kernel/identity.ts";
@@ -130,7 +130,7 @@ export function readJsonFileAs<S extends z.ZodTypeAny>(
   const result = schema.safeParse(raw);
   if (!result.success)
     throw new Diagnostic(INVALID_SCHEMA, "the file does not match the schema", {
-      details: result.error.issues.map(({ path, code }) => ({
+      details: validationIssues(result.error).map(({ path, code }) => ({
         path: path.map((segment) =>
           isNumber(segment) ? segment : String(segment),
         ),
@@ -188,7 +188,11 @@ export function requireToken(
   token: string | undefined,
   code: string,
 ): asserts token is string {
-  if (!token?.trim()) throw new Diagnostic(code, "a token is required");
+  if (!token?.trim())
+    throw new Diagnostic(
+      code,
+      "a token is required: pass --token, set KANTHORD_TOKEN, set token in cli.yaml, or run kanthord auth jwt generate",
+    );
 }
 
 export function parsePositiveInt(value: string, code: string): number {

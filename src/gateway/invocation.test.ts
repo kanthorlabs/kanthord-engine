@@ -312,3 +312,33 @@ test("authentication precedes request validation on a credentialed route", async
   assert.equal(response.status, HttpStatus.BadRequest);
   assert.equal(codeOf(response.body), VALIDATION_FAILED);
 });
+
+test("a validation failure names each unrecognized key", async (t) => {
+  const registry = new OperationRegistry();
+  const named = {
+    ...operation,
+    id: "test.named.create",
+    method: "POST",
+    path: "/api/test/named",
+    input: z.strictObject({
+      params: z.strictObject({}),
+      query: z.strictObject({}),
+      body: z.strictObject({ name: z.string() }),
+    }),
+  } as const;
+  registry.register(named, () => COMMITTED_VALUE);
+  const { invocation, token } = await fixture(t, registry);
+  const response = await invocation.invoke(
+    named.id,
+    { params: {}, query: {}, body: { name: "a", first: 1, second: 2 } },
+    { authorization: `Bearer ${token}` },
+  );
+  assert.equal(response.status, HttpStatus.BadRequest);
+  assert.deepEqual(
+    (response.body as { error: { details: unknown } }).error.details,
+    [
+      { path: ["body", "first"], code: "unrecognized_keys" },
+      { path: ["body", "second"], code: "unrecognized_keys" },
+    ],
+  );
+});

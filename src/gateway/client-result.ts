@@ -3,7 +3,11 @@ import assert from "node:assert/strict";
 import { z } from "zod";
 import { resolveRequestId } from "./request-id.ts";
 import { HttpStatus } from "../kernel/http.ts";
-import { errorSchema, type ErrorBody } from "../kernel/errors.ts";
+import {
+  errorSchema,
+  validationIssues,
+  type ErrorBody,
+} from "../kernel/errors.ts";
 import {
   OperationResultType,
   OperationLifetime,
@@ -22,7 +26,7 @@ export function inputValidationFailure(error: z.ZodError): RecordedResponse {
       error: {
         code: "gateway.request.validation_failed",
         message: "Request validation failed.",
-        details: error.issues.map((issue) => ({
+        details: validationIssues(error).map((issue) => ({
           path: issue.path.map(String),
           code: issue.code,
         })),

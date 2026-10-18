@@ -845,6 +845,35 @@ test("HTTP authentication precedes body framing and schema validation", async (t
   }
 });
 
+test("HTTP validation failure names each unrecognized key of the body", async (t) => {
+  const registry = new OperationRegistry();
+  const create = {
+    ...protectedRead,
+    id: "test.create",
+    method: "POST",
+    path: "/api/named",
+    body: true,
+    input: emptyInput.extend({ body: z.strictObject({ name: z.string() }) }),
+  } as const;
+  registry.register(create, () => ({ accountId: HUMAN_USERNAME }));
+  const fixture = await gatewayFixture(t, { registry });
+  const response = await fixture.request(create.path, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${fixture.token}`,
+    },
+    body: JSON.stringify({ name: "a", first: 1, second: 2 }),
+  });
+  assert.equal(response.status, HttpStatus.BadRequest);
+  const { error } = errorSchema.parse(await response.json());
+  assert.equal(error.code, ExpectedErrorCode.ValidationFailed);
+  assert.deepEqual(error.details, [
+    { path: ["body", "first"], code: "unrecognized_keys" },
+    { path: ["body", "second"], code: "unrecognized_keys" },
+  ]);
+});
+
 test("a static path segment registers before a parameter segment at the same position", () => {
   const paths = [
     "/api/agent/:agentName",

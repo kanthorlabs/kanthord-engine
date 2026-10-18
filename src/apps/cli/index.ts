@@ -253,7 +253,37 @@ export function createProgram(
   const names = program.commands.map((command) => command.name());
   assert.equal(names.length, Object.keys(CommandName).length);
   assert.equal(new Set(names).size, names.length);
+  rejectUnknownOperands(program);
   return program;
+}
+
+const OPTION_PREFIX = "-";
+
+interface UnknownOperandRaiser {
+  unknownCommand(): never;
+  unknownOption(flag: string): never;
+}
+
+function rejectUnknownOperands(program: Command): void {
+  const groups: Command[] = [];
+  const pending: Command[] = [program];
+  for (const command of pending) {
+    pending.push(...command.commands);
+    if (command.commands.length && !command.registeredArguments.length)
+      groups.push(command);
+  }
+  for (const group of groups) {
+    group.allowExcessArguments(true);
+    group.allowUnknownOption(true);
+  }
+  program.hook("preAction", (_program, action) => {
+    const operand = action.args.at(0);
+    if (!groups.includes(action) || operand === undefined) return;
+    const raiser = action as unknown as UnknownOperandRaiser;
+    if (!operand.startsWith(OPTION_PREFIX)) raiser.unknownCommand();
+    action.allowUnknownOption(false);
+    raiser.unknownOption(operand);
+  });
 }
 
 function addGatewayCommand(program: Command): void {

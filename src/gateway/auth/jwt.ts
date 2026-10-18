@@ -194,6 +194,6 @@ export function requireTokenTerminal(
   if (!output.isTTY)
     throw new Diagnostic(
       "cli.output.terminal_required",
-      "JWT output: standard output must be a terminal to display a token.",
+      "JWT output: standard output must be a terminal to display a token; pass --output <path>, or run the container command with -t.",
     );
 }

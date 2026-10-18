@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { z } from "zod";
 import type { Store } from "../kernel/store.ts";
 import { digest } from "../kernel/json.ts";
+import { validationIssues } from "../kernel/errors.ts";
 import { isObject, isString } from "../kernel/values.ts";
 import { CancellationContext, type Context } from "../kernel/context.ts";
 import { lifecycle } from "../kernel/service.ts";
@@ -320,7 +321,7 @@ export class Invocation {
           400,
           "gateway.request.validation_failed",
           "Request validation failed.",
-          parsed.error.issues.map((issue) => ({
+          validationIssues(parsed.error).map((issue) => ({
             path: issue.path.map(String),
             code: issue.code,
           })),

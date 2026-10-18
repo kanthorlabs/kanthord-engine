@@ -181,6 +181,40 @@ test("project commands expose offline help and validate inputs before I/O", asyn
   }
 });
 
+test("project name diagnostics and help state the name rule", async (t) => {
+  const env = environment(temporary(t));
+  const rule =
+    "a lowercase letter, then lowercase letters, digits or hyphens, at most 63 characters";
+  for (const args of [
+    ["create", "--name", "Invalid"],
+    ["rename", "project_01ARZ3NDEKTSV4RRFFQ69G5FAV", "--name", "Invalid"],
+  ]) {
+    const result = await invocation(["project", ...args], env);
+    assert.equal(result.status, ExitCode.Failure);
+    assert.ok(result.stderr.includes(rule), result.stderr);
+  }
+  for (const leaf of ["create", "rename"]) {
+    const help = await invocation(["project", leaf, "--help"], env);
+    assert.ok(help.stdout.replace(/\s+/g, " ").includes(rule), help.stdout);
+  }
+});
+
+test("a missing token names every token source", async (t) => {
+  const result = await invocation(
+    ["project", "list"],
+    environment(temporary(t)),
+  );
+  assert.equal(result.status, ExitCode.Failure);
+  assert.match(result.stderr, /^cli\.project\.list\.token_required:/);
+  for (const source of [
+    "--token",
+    "KANTHORD_TOKEN",
+    "cli.yaml",
+    "kanthord auth jwt generate",
+  ])
+    assert.ok(result.stderr.includes(source), result.stderr);
+});
+
 test("project binding commands expose help and reject invalid inputs before I/O", async (t) => {
   const env = environment(temporary(t));
   const group = await invocation(["project", "binding", "--help"], env);
@@ -857,6 +891,38 @@ test("removed authentication commands and excess arguments fail without promptin
   assert.equal(existsSync(clientConfigPath(env)), false);
 });
 
+test("an unknown operand names the unknown command and suggests a similar one", async (t) => {
+  const env = environment(temporary(t));
+  for (const [args, suggestion] of [
+    [["projec"], /Did you mean project\?/],
+    [["project", "lst"], /Did you mean list\?/],
+    [["projet", "list", "--token", "x"], /Did you mean project\?/],
+    [["project", "lst", "--limit", "5"], /Did you mean list\?/],
+    [["jwt"], /^error: unknown command 'jwt'/],
+    [["project", "binding", "nope"], /^error: unknown command 'nope'/],
+  ] as const) {
+    const result = await invocation([...args], env);
+    assert.equal(result.status, ExitCode.Failure);
+    assert.equal(result.stdout, EMPTY_OUTPUT);
+    assert.match(result.stderr, /error: unknown command/);
+    assert.match(result.stderr, suggestion);
+  }
+  for (const args of [
+    ["project", "--bogus"],
+    ["--bogus", "project"],
+  ]) {
+    const result = await invocation(args, env);
+    assert.equal(result.status, ExitCode.Failure);
+    assert.match(result.stderr, /error: unknown option '--bogus'/);
+  }
+  const group = await invocation(["project"], env);
+  assert.equal(group.status, ExitCode.Success);
+  assert.match(group.stdout, /^Usage: kanthord project/);
+  const bare = await invocation([], env);
+  assert.equal(bare.status, ExitCode.Failure);
+  assert.match(bare.stdout, /^Usage: kanthord/);
+});
+
 test("validate/show and serve never create or repair configuration and never disclose invalid values", async (t) => {
   const directory = temporary(t);
   const env = environment(directory);
@@ -1078,6 +1144,26 @@ test("jwt --output refuses an existing destination without changing its bytes or
   assert.ok(!result.stderr.includes("keep-this-token"));
 });
 
+test("jwt --output hints at a second client file only when it has no path", async (t) => {
+  const directory = temporary(t);
+  const env = environment(directory);
+  writePrivate(env.KANTHORD_CONFIG!, initialConfig());
+  writePrivate(clientConfigPath(env), "token: keep-this-token\n");
+  const hint = /^hint: pass --output <path> for a second client file$/m;
+  const defaulted = await invocation(
+    ["auth", "jwt", "generate", "--output"],
+    env,
+  );
+  assert.match(defaulted.stderr, /^system\.files\.publish_failed:/);
+  assert.match(defaulted.stderr, hint);
+  const explicit = await invocation(
+    ["auth", "jwt", "generate", "--output", clientConfigPath(env)],
+    env,
+  );
+  assert.match(explicit.stderr, /^system\.files\.publish_failed:/);
+  assert.doesNotMatch(explicit.stderr, hint);
+});
+
 test("jwt output validation precedes configuration loading and writes no file or token", async (t) => {
   const directory = temporary(t);
   const env = environment(directory);
@@ -1176,6 +1262,10 @@ test("JWT generation requires terminal output before loading configuration in bo
     assert.equal(result.stdout, EMPTY_OUTPUT);
     assert.match(result.stderr, /^cli\.output\.terminal_required:/);
     assert.ok(!existsSync(env.KANTHORD_CONFIG!));
+    assert.match(
+      result.stderr,
+      /pass --output <path>, or run the container command with -t\./,
+    );
   }
 });
 

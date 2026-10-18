@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import type { z } from "zod";
 import type { Material } from "../custody/contract.ts";
 import type { ServiceIdentity } from "../kernel/caller.ts";
-import { OperationError } from "../kernel/errors.ts";
+import { OperationError, validationIssues } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import {
   OperationResultType,
@@ -97,7 +97,7 @@ function validationFailed(
 
 function configurationIssues(error: z.ZodError): OperationError {
   return validationFailed(
-    error.issues.map((issue) => ({
+    validationIssues(error).map((issue) => ({
       path: [BODY_PATH, "configuration", ...issue.path.map(String)],
       code: issue.code,
     })),
