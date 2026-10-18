@@ -11,6 +11,7 @@ import {
   type TranscriptSink,
   isExecutionEnd,
   EndReason,
+  ExecutionEndKind,
   type WorkspaceRoot,
   type RepositoryTransport,
   type ModelRuntimeFactory,
@@ -34,8 +35,6 @@ export interface HostExecutionInput {
   transcript: TranscriptSink;
   log(record: Record<string, unknown>): void;
 }
-const ENDED = "ended";
-const RELEASED = "released";
 
 export async function hostExecution(
   input: HostExecutionInput,
@@ -124,12 +123,17 @@ export async function hostExecution(
       msg: "execution ended",
       execution_id: input.claim.execution_id,
       kind: result.kind,
-      ...(result.kind === ENDED ? { code: result.code } : {}),
-      ...(result.kind === RELEASED && result.stop
+      ...(result.kind === ExecutionEndKind.Ended
+        ? { reason: result.reason, code: result.code }
+        : {}),
+      ...(result.kind === ExecutionEndKind.Released && result.stop
         ? { reason: result.stop.reason, code: result.stop.code }
         : {}),
     });
-    if (result.kind !== ENDED || result.reason === EndReason.Revoked)
+    if (
+      result.kind !== ExecutionEndKind.Ended ||
+      result.reason === EndReason.Revoked
+    )
       return null;
     return new Diagnostic(
       result.code ?? "system.operation.unknown",

@@ -74,7 +74,7 @@ test("host logs the stop of a released execution in the execution ended record",
   };
   const stop = {
     reason: EndReason.OperationFailed,
-    code: "llm.provider.unavailable",
+    code: "repository.credential.ssh_identity_ambiguous",
   };
   await hostExecution(input, async () => ({
     kind: "released",
@@ -85,6 +85,7 @@ test("host logs the stop of a released execution in the execution ended record",
     kind: "released",
     furtherWork: false,
   }));
+  await hostExecution(input, async () => ({ kind: "ended", ...stop }));
   const ended = records.filter((record) => record.msg === ENDED_RECORD);
   assert.deepEqual(ended, [
     {
@@ -98,6 +99,13 @@ test("host logs the stop of a released execution in the execution ended record",
       msg: ENDED_RECORD,
       execution_id: claim.execution_id,
       kind: "released",
+    },
+    {
+      msg: ENDED_RECORD,
+      execution_id: claim.execution_id,
+      kind: "ended",
+      reason: stop.reason,
+      code: stop.code,
     },
   ]);
 });

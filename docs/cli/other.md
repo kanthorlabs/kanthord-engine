@@ -678,8 +678,9 @@ application appends the transcript of each agent session to
 newest 50 execution transcripts.
 
 When an execution ends, the application logs one record `execution ended`
-with `execution_id` and `kind`. An `ended` execution adds `code`. A `released`
-execution that holds a `stop` adds the `reason` and the `code` of that `stop`.
+with `execution_id` and `kind`. The `kind` is `released`, `closed` or `ended`.
+For `ended`, the record adds `reason` and `code`. For `released` with a `stop`,
+the record adds the `reason` and the `code` of that `stop`.
 
 An execution that ends with a release or a closure leaves the instance
 registered, and the application pulls again. A release with a `stop` is a
