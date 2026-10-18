@@ -81,6 +81,24 @@ export function diagnosticRows(error: unknown): string {
     : "";
 }
 
+const UNRECOGNIZED_KEYS = "unrecognized_keys";
+
+export interface ValidationIssue {
+  path: PropertyKey[];
+  code: string;
+}
+
+export function validationIssues(error: z.ZodError): ValidationIssue[] {
+  return error.issues.flatMap((issue): ValidationIssue[] =>
+    issue.code === UNRECOGNIZED_KEYS
+      ? issue.keys.map((key) => ({
+          path: [...issue.path, key],
+          code: issue.code,
+        }))
+      : [{ path: issue.path, code: issue.code }],
+  );
+}
+
 export const errorDetailsSchema = z.json();
 export const errorSchema = z.strictObject({
   error: z.strictObject({

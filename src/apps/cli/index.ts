@@ -253,7 +253,27 @@ export function createProgram(
   const names = program.commands.map((command) => command.name());
   assert.equal(names.length, Object.keys(CommandName).length);
   assert.equal(new Set(names).size, names.length);
+  rejectUnknownOperands(program);
   return program;
+}
+
+interface UnknownCommandRaiser {
+  unknownCommand(): never;
+}
+
+function rejectUnknownOperands(program: Command): void {
+  const groups: Command[] = [];
+  const pending: Command[] = [program];
+  for (const command of pending) {
+    pending.push(...command.commands);
+    if (command.commands.length && !command.registeredArguments.length)
+      groups.push(command);
+  }
+  for (const group of groups) group.allowExcessArguments(true);
+  program.hook("preAction", (_program, action) => {
+    if (groups.includes(action) && action.args.length)
+      (action as unknown as UnknownCommandRaiser).unknownCommand();
+  });
 }
 
 function addGatewayCommand(program: Command): void {

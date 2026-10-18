@@ -31,6 +31,28 @@ const IAT_CLAIM = "iat";
 const EXP_CLAIM = "exp";
 const MAX_DATE_SECONDS = 8640000000000;
 const BASE64URL_SEGMENT = /^[A-Za-z0-9_-]+$/;
+const PUBLISH_FAILED = "system.files.publish_failed";
+const SECOND_CLIENT_FILE_HINT = "pass --output <path> for a second client file";
+
+function publishClientConfig(
+  path: string,
+  content: string,
+  defaultPath: boolean,
+): void {
+  try {
+    writePrivate(path, content);
+  } catch (error) {
+    if (
+      !defaultPath ||
+      !(error instanceof Diagnostic) ||
+      error.code !== PUBLISH_FAILED
+    )
+      throw error;
+    throw new Diagnostic(error.code, error.message, {
+      fields: [...error.fields, ["hint", SECOND_CLIENT_FILE_HINT]],
+    });
+  }
+}
 
 async function claims(token: string): Promise<Record<string, unknown>> {
   const { decode } = await import("hono/jwt");
@@ -213,7 +235,11 @@ export function addAuthCommand(program: Command): void {
               : { client_secret: clientSecret }),
           });
           const { stringify } = await import("yaml");
-          writePrivate(path, stringify(document));
+          publishClientConfig(
+            path,
+            stringify(document),
+            !isString(options.output),
+          );
           process.stdout.write(formatRows([["created", path]]));
         } else
           process.stdout.write(

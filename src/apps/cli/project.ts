@@ -11,6 +11,7 @@ import {
   LIST_LIMIT_DEFAULT,
   LIST_LIMIT_MAX,
   PROJECT_ID_PREFIX,
+  PROJECT_NAME_MAX_LENGTH,
   projectNameSchema,
   projectOperations,
 } from "../../project/contract.ts";
@@ -114,9 +115,14 @@ const BINDING_CHECK_INVALID_PROJECT_ID =
 const BINDING_CHECK_TOKEN_REQUIRED = "cli.project.binding.check.token_required";
 const BINDING_CHECK_INDETERMINATE = "cli.project.binding.check.indeterminate";
 
+const PROJECT_NAME_RULE = `a lowercase letter, then lowercase letters, digits or hyphens, at most ${PROJECT_NAME_MAX_LENGTH} characters`;
+
 function validateName(name: string, code: string): void {
   if (!projectNameSchema.safeParse(name).success)
-    throw new Diagnostic(code, "invalid project name");
+    throw new Diagnostic(
+      code,
+      `invalid project name: use ${PROJECT_NAME_RULE}`,
+    );
 }
 
 export function validateProjectId(id: string, code: string): void {
@@ -490,7 +496,11 @@ export function addProjectCommand(program: Command): void {
   project
     .command(CREATE)
     .description("Create a project as JSON")
-    .requiredOption("--name <name>", "Project name", singleUse(NAME_OPTION))
+    .requiredOption(
+      "--name <name>",
+      `Project name: ${PROJECT_NAME_RULE}`,
+      singleUse(NAME_OPTION),
+    )
     .option("--idempotency-key <key>", "Mutation key", singleUse(KEY_OPTION))
     .action((_options, command: Command) => create(command));
   project
@@ -514,7 +524,11 @@ export function addProjectCommand(program: Command): void {
     .command(RENAME)
     .description("Rename a project as JSON")
     .argument("<project-id>", "Project ID")
-    .requiredOption("--name <name>", "Project name", singleUse(NAME_OPTION))
+    .requiredOption(
+      "--name <name>",
+      `Project name: ${PROJECT_NAME_RULE}`,
+      singleUse(NAME_OPTION),
+    )
     .option("--idempotency-key <key>", "Mutation key", singleUse(KEY_OPTION))
     .action((projectId: string, _options, command: Command) =>
       rename(projectId, command),

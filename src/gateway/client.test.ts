@@ -24,6 +24,29 @@ const PULL_INPUT = {
   },
 };
 
+test("client input validation names each unrecognized key", async () => {
+  const client = httpClient(
+    gatewayOperations,
+    "http://localhost",
+    undefined,
+    async () => {
+      throw new Error("no request expected");
+    },
+  );
+  const result = await client.verify({
+    params: {},
+    query: {},
+    body: null,
+    first: 1,
+    second: 2,
+  } as never);
+  assert.ok(result.type === OperationResultType.Failure);
+  assert.deepEqual(result.error.error.details, [
+    { path: ["first"], code: "unrecognized_keys" },
+    { path: ["second"], code: "unrecognized_keys" },
+  ]);
+});
+
 test("verification client preserves JWT business properties and rejects aliases and metadata", async () => {
   const claims = { kind: "human", sub: " ulrich ", name: " Ulrich " };
   const input = { params: {}, query: {}, body: null };

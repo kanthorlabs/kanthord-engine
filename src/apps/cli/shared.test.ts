@@ -292,6 +292,40 @@ test("server failures carry the error details to the diagnostic", () => {
   );
 });
 
+test("requireToken names every token source", () => {
+  assert.throws(
+    () => requireToken(undefined, TOKEN_CODE),
+    (error) =>
+      error instanceof Diagnostic &&
+      [
+        "--token",
+        "KANTHORD_TOKEN",
+        "cli.yaml",
+        "kanthord auth jwt generate",
+      ].every((source) => error.message.includes(source)),
+  );
+});
+
+test("schema validation reports one issue for each unrecognized key", (t) => {
+  const path = join(temporary(t), "data.json");
+  writeFileSync(path, '{"a":1,"x":1,"y":2,"nested":{"z":3}}');
+  const schema = z.strictObject({
+    a: z.number(),
+    nested: z.strictObject({}),
+  });
+  assert.throws(
+    () => readJsonFileAs(path, schema),
+    (error) =>
+      error instanceof Diagnostic &&
+      error.code === INVALID_SCHEMA &&
+      isDeepStrictEqual(error.details, [
+        { path: ["nested", "z"], code: "unrecognized_keys" },
+        { path: ["x"], code: "unrecognized_keys" },
+        { path: ["y"], code: "unrecognized_keys" },
+      ]),
+  );
+});
+
 test("requireToken rejects absent and blank tokens", () => {
   assert.throws(
     () => requireToken(undefined, TOKEN_CODE),
