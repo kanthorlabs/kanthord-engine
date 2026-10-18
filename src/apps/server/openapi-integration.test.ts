@@ -23,8 +23,8 @@ import { schedulerOperations } from "../../scheduler/contract.ts";
 import { projectOperations } from "../../project/contract.ts";
 import {
   MISSION_INITIAL_VERSION,
-  NodeKind,
   AssetKind,
+  Work,
   missionOperations,
   missionSchema,
 } from "../../mission/contract.ts";
@@ -123,11 +123,11 @@ test("published handover operations preserve execution proof and bodyless report
   }
 });
 
-test("published execution objective reads name their operations", () => {
+test("published execution dependency reads name their operations", () => {
   for (const name of [
-    "execution.objective.list",
-    "execution.objective.outcome.list",
-    "execution.objective.evidence.list",
+    "execution.dependency.list",
+    "execution.dependency.outcome.list",
+    "execution.dependency.evidence.list",
   ] as const) {
     const fragment = parse(
       readFileSync(
@@ -350,7 +350,7 @@ const MISSION_BLOCKED_CONTEXT_FRAGMENT_EXCEPTIONS = [
     "proposal.approve",
     "mission.proposal.approve",
     "properties",
-    "initiative",
+    "proposer",
     "properties",
     "node",
   ],
@@ -380,8 +380,8 @@ const EVIDENCE_FRAGMENT_EXCEPTIONS = [
   ["evidence.request", "mission.evidence.request", false],
   ["execution.evidence.list", "mission.execution.evidence.list", true],
   [
-    "execution.objective.evidence.list",
-    "mission.execution.objective.evidence.list",
+    "execution.dependency.evidence.list",
+    "mission.execution.dependency.evidence.list",
     true,
   ],
 ] as const;
@@ -401,7 +401,7 @@ const NAMED_FRAGMENT_EXCEPTIONS = new Set([
   ...EVIDENCE_FRAGMENT_EXCEPTIONS.map(
     ([file]) => `openapi/mission/${file}.yaml`,
   ),
-  "openapi/mission/execution.objective.list.yaml",
+  "openapi/mission/execution.dependency.list.yaml",
   ...LEGACY_FRAGMENT_EXCEPTIONS,
   AGENT_PROVIDER_FRAGMENT_EXCEPTION,
 ]);
@@ -690,7 +690,6 @@ const OPERATION_INVENTORY: readonly (readonly [string, AccessPolicy])[] = [
   ["mission.node.get", AccessPolicy.Human],
   ["mission.node.create", AccessPolicy.Human],
   ["mission.node.update", AccessPolicy.Human],
-  ["mission.node.move", AccessPolicy.Human],
   ["mission.node.revision.list", AccessPolicy.Human],
   ["mission.node.revision.get", AccessPolicy.Human],
   ["mission.node.retire.preview", AccessPolicy.Human],
@@ -732,9 +731,9 @@ const OPERATION_INVENTORY: readonly (readonly [string, AccessPolicy])[] = [
   ["mission.execution.revision.get", AccessPolicy.Client],
   ["mission.execution.evidence.list", AccessPolicy.Client],
   ["mission.execution.evidence.asset.content.get", AccessPolicy.Client],
-  ["mission.execution.objective.list", AccessPolicy.Client],
-  ["mission.execution.objective.outcome.list", AccessPolicy.Client],
-  ["mission.execution.objective.evidence.list", AccessPolicy.Client],
+  ["mission.execution.dependency.list", AccessPolicy.Client],
+  ["mission.execution.dependency.outcome.list", AccessPolicy.Client],
+  ["mission.execution.dependency.evidence.list", AccessPolicy.Client],
   ["mission.execution.clearedOutcome.get", AccessPolicy.Client],
   ["mission.execution.cleared_assessment.get", AccessPolicy.Client],
   ["mission.execution.rework_assessment.get", AccessPolicy.Client],
@@ -773,8 +772,8 @@ const OPERATION_INVENTORY: readonly (readonly [string, AccessPolicy])[] = [
   ["tracking.span.list", AccessPolicy.Human],
   ["tracking.text.get", AccessPolicy.Human],
 ];
-const OPERATION_COUNT = 186;
-const ROUTED_OPERATION_COUNT = 176;
+const OPERATION_COUNT = 185;
+const ROUTED_OPERATION_COUNT = 175;
 const INTAKE_OPERATION_COUNT = 22;
 const INTAKE_ROUTED_OPERATION_COUNT = 14;
 const SERVICE_OPERATION_IDS = [
@@ -895,38 +894,24 @@ test("the operation inventory agrees with contracts, OpenAPI and live registry",
 });
 
 function assertBlockedNode(schema: unknown): void {
-  assert.ok(
-    isObject(schema) && "oneOf" in schema && Array.isArray(schema.oneOf),
-  );
-  const variants = schema.oneOf as ResolvedSchema[];
-  assert.deepEqual(
-    variants.map((variant) => variant.properties.kind?.const),
-    [NodeKind.Initiative, NodeKind.Objective, NodeKind.Task],
-  );
-  for (const variant of variants) {
-    const context = variant.properties.blocked_context;
-    if (variant.properties.kind?.const === NodeKind.Task) {
-      assert.equal(context, undefined);
-      continue;
-    }
-    assert.ok(context);
-    assert.deepEqual(context.required, ["outcome", "requests"]);
-    assert.equal(context.properties.requests?.type, ARRAY_SCHEMA_TYPE);
-    assert.deepEqual(
-      Object.keys(context.properties.outcome!.properties).sort(),
-      [
-        "assessment_id",
-        "attempt",
-        "closing_event",
-        "created_at",
-        "evidence_ids",
-        "id",
-        "node_id",
-        "node_revision",
-        "result",
-      ],
-    );
-  }
+  assert.ok(isObject(schema) && !("oneOf" in schema));
+  const node = schema as ResolvedSchema;
+  assert.deepEqual(node.properties.work?.enum, [Work.Implement, Work.Examine]);
+  const context = node.properties.blocked_context;
+  assert.ok(context);
+  assert.deepEqual(context.required, ["outcome", "requests"]);
+  assert.equal(context.properties.requests?.type, ARRAY_SCHEMA_TYPE);
+  assert.deepEqual(Object.keys(context.properties.outcome!.properties).sort(), [
+    "assessment_id",
+    "attempt",
+    "closing_event",
+    "created_at",
+    "evidence_ids",
+    "id",
+    "node_id",
+    "node_revision",
+    "result",
+  ]);
 }
 
 function assertEvidenceShape(schema: ResolvedSchema): void {
@@ -1029,7 +1014,7 @@ test("named evidence exceptions retain record shapes and conditional request val
       "utf8",
     ),
   );
-  for (const field of ["evidence_ids", "child_outcome_ids"])
+  for (const field of ["evidence_ids", "dependency_outcome_ids"])
     assert.equal(
       assessment.components.schemas["mission.assessment.submit.Input"]
         .properties.body.properties[field].uniqueItems,
@@ -1037,18 +1022,18 @@ test("named evidence exceptions retain record shapes and conditional request val
     );
 });
 
-test("objective list exception preserves full objective and identity-only variants", () => {
+test("dependency list exception preserves full dependency and identity-only variants", () => {
   const fragment = parse(
     readFileSync(
       join(
         dirname(openapiPath()),
-        "openapi/mission/execution.objective.list.yaml",
+        "openapi/mission/execution.dependency.list.yaml",
       ),
       "utf8",
     ),
   );
   const output =
-    fragment.components.schemas["mission.execution.objective.list.Output"];
+    fragment.components.schemas["mission.execution.dependency.list.Output"];
   assert.deepEqual(output.required, ["items", "next_cursor"]);
   const [full, minimal] = output.properties.items.items.anyOf;
   assert.deepEqual(minimal.required, ["id", "state"]);
@@ -1058,16 +1043,17 @@ test("objective list exception preserves full objective and identity-only varian
     "id",
     "filename",
     "mission_id",
-    "parent_id",
     "visible_revision",
     "content",
+    "tasks",
     "retired_at",
     "pinned_by_attempts",
-    "kind",
     "state",
     "attempt",
     "priority",
     "depends_on",
+    "work",
+    "requires",
   ]);
   assert.deepEqual(full.properties.blocked_context.required, [
     "outcome",

@@ -8,9 +8,9 @@ import {
   actorSchema,
   AssessmentResult,
   MissionErrorCode,
-  NodeKind,
+  Work,
   NODE_LIST_LIMIT_DEFAULT,
-  type ExecutionObjective,
+  type ExecutionDependency,
 } from "./contract.ts";
 import { identitySchema } from "../kernel/identity.ts";
 import { evidencePage } from "./evidence-read.ts";
@@ -27,7 +27,8 @@ import {
   readCurrentOutcome,
   readEvidence,
 } from "./record-store.ts";
-import { readMissionNodes } from "./store.ts";
+import { directDependenciesOf } from "./graph.ts";
+import { readDependencies, readMissionNodes } from "./store.ts";
 import { admitExecution } from "./execution.ts";
 import {
   getRevision,
@@ -45,18 +46,21 @@ const FIRST_ATTEMPT = 1;
 const SORT_EQUAL = 0;
 const SLICE_FROM_START = 0;
 
-export function currentObjectivesOf(tx: Transaction, initiativeId: string) {
-  const initiative = requireNode(tx, initiativeId);
-  assert.equal(initiative.kind, NodeKind.Initiative);
+export function currentDependenciesOf(tx: Transaction, nodeId: string) {
+  const node = requireNode(tx, nodeId);
   assert.ok(tx.database.isTransaction);
-  return readMissionNodes(tx, initiative.mission_id)
+  const direct = new Set(
+    directDependenciesOf(nodeId, readDependencies(tx, node.mission_id)),
+  );
+  return readMissionNodes(tx, node.mission_id)
     .filter(
-      (node) =>
-        node.kind === NodeKind.Objective &&
-        node.parent_id === initiativeId &&
-        node.retired_at === null,
+      (dependency) =>
+        direct.has(dependency.id) && dependency.retired_at === null,
     )
-    .map((node) => ({ node, outcome: readCurrentOutcome(tx, node.id) }));
+    .map((dependency) => ({
+      node: dependency,
+      outcome: readCurrentOutcome(tx, dependency.id),
+    }));
 }
 
 function identityPage<T extends { id: string }>(
@@ -81,35 +85,36 @@ function identityPage<T extends { id: string }>(
   };
 }
 
-export function executionObjectives(
+export function executionDependencies(
   tx: Transaction,
   dependencies: Dependencies,
   claim: ExecutionClaim,
   query: { limit?: number; cursor?: string },
 ) {
-  const { node } = executionRead(tx, dependencies, claim);
+  const { node, revision: pinned } = executionRead(tx, dependencies, claim);
   const page = identityPage(
-    node.kind === NodeKind.Objective
+    pinned.content.work === Work.Implement
       ? []
-      : currentObjectivesOf(tx, node.id).map((item) => ({
+      : currentDependenciesOf(tx, node.id).map((item) => ({
           ...item,
           id: item.node.id,
         })),
     "node",
     query,
   );
-  const items: ExecutionObjective[] = page.items.map(
-    ({ node: child, outcome }) => {
-      assert.ok(child.state);
-      if (!outcome) return { id: child.id, state: child.state };
+  const items: ExecutionDependency[] = page.items.map(
+    ({ node: dependency, outcome }) => {
+      assert.ok(dependency.state);
+      if (!outcome) return { id: dependency.id, state: dependency.state };
       const record = outcomeRecord(tx, dependencies.bindings, outcome);
-      const revision = getRevision(tx, child.id, record.node_revision);
-      const view = nodeRecord(tx, child, dependencies.bindings);
-      assert.ok(view.kind === NodeKind.Objective);
+      const revision = getRevision(tx, dependency.id, record.node_revision);
       return {
-        ...view,
+        ...nodeRecord(tx, dependency, dependencies.bindings),
         filename: revision.filename,
         content: revision.content,
+        work: revision.content.work,
+        requires: revision.content.requires,
+        tasks: revision.tasks,
         visible_revision: revision.revision,
         pinned_by_attempts: revision.pinned_by_attempts,
       };
@@ -118,17 +123,17 @@ export function executionObjectives(
   return { ...page, items };
 }
 
-export function executionObjectiveOutcomes(
+export function executionDependencyOutcomes(
   tx: Transaction,
   dependencies: Dependencies,
   claim: ExecutionClaim,
   query: { limit?: number; cursor?: string },
 ) {
-  const { node } = executionRead(tx, dependencies, claim);
+  const { node, revision } = executionRead(tx, dependencies, claim);
   const items =
-    node.kind === NodeKind.Objective
+    revision.content.work === Work.Implement
       ? []
-      : currentObjectivesOf(tx, node.id).flatMap(({ outcome }) =>
+      : currentDependenciesOf(tx, node.id).flatMap(({ outcome }) =>
           outcome ? [outcome] : [],
         );
   const page = identityPage(items, "outcome", query);
@@ -140,17 +145,17 @@ export function executionObjectiveOutcomes(
   };
 }
 
-export function executionObjectiveEvidence(
+export function executionDependencyEvidence(
   tx: Transaction,
   dependencies: Dependencies,
   claim: ExecutionClaim,
   query: { limit?: number; cursor?: string },
 ) {
-  const { node } = executionRead(tx, dependencies, claim);
+  const { node, revision } = executionRead(tx, dependencies, claim);
   const ids =
-    node.kind === NodeKind.Objective
+    revision.content.work === Work.Implement
       ? []
-      : currentObjectivesOf(tx, node.id).flatMap(({ outcome }) =>
+      : currentDependenciesOf(tx, node.id).flatMap(({ outcome }) =>
           outcome
             ? outcomeRecord(tx, dependencies.bindings, outcome).evidence_ids
             : [],

@@ -12,7 +12,11 @@ import assert from "node:assert/strict";
 import { Command, CommanderError } from "commander";
 import { dirname } from "node:path";
 import { writePrivate } from "../../kernel/files.ts";
-import { Diagnostic, diagnostic } from "../../kernel/errors.ts";
+import {
+  Diagnostic,
+  diagnostic,
+  diagnosticDetails,
+} from "../../kernel/errors.ts";
 import type { Server } from "../server/index.ts";
 import { gatewayOperations } from "../../gateway/contract.ts";
 import { httpClient } from "../../gateway/client.ts";
@@ -287,6 +291,7 @@ function addGatewayCommand(program: Command): void {
         throw new Diagnostic(
           result.error.error.code,
           `gateway verify: request failed (HTTP ${result.status}).`,
+          { details: result.error.error.details },
         );
       process.stdout.write(`${JSON.stringify(result.data)}\n`);
     });
@@ -314,6 +319,8 @@ export async function runCLI(
   } catch (error) {
     if (error instanceof CommanderError) return error.exitCode;
     process.stderr.write(`${diagnostic(error)}\n`);
+    const details = diagnosticDetails(error);
+    if (details !== null) process.stderr.write(`${details}\n`);
     return ExitCode.Failure;
   }
 }

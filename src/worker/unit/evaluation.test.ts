@@ -12,7 +12,8 @@ import {
 import { ExecutionBudget } from "./budget.ts";
 import { EndReason, ExecutionRun, ExecutionStop } from "./execution-run.ts";
 import { executionBoundary } from "./native-method.ts";
-import { anthropicSetup } from "./test-support.ts";
+import { ExecutionWork } from "../contract.ts";
+import { anthropicSetup, repositorySetup } from "./test-support.ts";
 import { WorkspaceRoot } from "./workspace.ts";
 import type { MethodClients } from "./method-clients.ts";
 import type { RepositoryTransport } from "../contract.ts";
@@ -26,7 +27,7 @@ import { SHIPPED_TEMPLATES } from "../../agent/prompt-templates.ts";
 const NO_RELEASES = 0;
 const SINGLE_RELEASE = 1;
 const PROPOSAL = {
-  objective_id: "child",
+  dependency_id: "child",
   name: "Fix the defect",
   requirement: "Repair the defect",
   criterion: "The defect is gone",
@@ -174,14 +175,14 @@ test("evaluation writes failed-verification assessments without inference and ga
       ],
       result: "success",
       opens: 1,
-      initiative: true,
+      examine: true,
     },
     {
       command: "true",
       texts: [PROPOSAL_REPLY],
       result: "undetermined",
       opens: 1,
-      initiative: true,
+      examine: true,
       proposals: [PROPOSAL],
     },
     {
@@ -194,7 +195,11 @@ test("evaluation writes failed-verification assessments without inference and ga
     },
     { command: "true", texts: [""], result: null, opens: 0, refused: true },
   ]) {
-    const setup = anthropicSetup({ repositories: [] });
+    const repository = repositorySetup();
+    const setup = anthropicSetup({
+      work: scenario.examine ? ExecutionWork.Examine : ExecutionWork.Implement,
+      repositories: scenario.examine ? [] : [repository],
+    });
     const claim = {
       execution_id: setup.execution_id,
       node_id: createIdentity("node"),
@@ -226,13 +231,13 @@ test("evaluation writes failed-verification assessments without inference and ga
         "execution.pinnedRevision.get": async () =>
           complete({
             content: {
-              name: "objective",
+              name: "node",
               requirement: "work",
               criterion: "met",
               verifications: [scenario.command],
-              bindings: [],
+              bindings: scenario.examine ? [] : [repository.binding_id],
             },
-            ...(scenario.initiative ? {} : { tasks: [] }),
+            tasks: [],
           }),
         "execution.evidence.list": async () =>
           complete({
@@ -247,19 +252,19 @@ test("evaluation writes failed-verification assessments without inference and ga
             ],
             next_cursor: null,
           }),
-        "execution.objective.list": async () =>
+        "execution.dependency.list": async () =>
           complete({
             items: [{ id: "child", state: "Completed" }],
             next_cursor: null,
           }),
-        "execution.objective.outcome.list": async () =>
+        "execution.dependency.outcome.list": async () =>
           complete({
             items: [
               { id: "child-outcome", result: "success", node_id: "child" },
             ],
             next_cursor: null,
           }),
-        "execution.objective.evidence.list": async () =>
+        "execution.dependency.evidence.list": async () =>
           complete({ items: [], next_cursor: null }),
         "execution.evidence.asset.content.get": async () =>
           complete({
@@ -292,7 +297,7 @@ test("evaluation writes failed-verification assessments without inference and ga
           body: {
             result: string;
             evidence_ids: string[];
-            child_outcome_ids: string[];
+            dependency_outcome_ids: string[];
             rationale: string;
             proposals?: unknown[];
           };
@@ -306,8 +311,8 @@ test("evaluation writes failed-verification assessments without inference and ga
           assert.equal(input.body.result, scenario.result);
           assert.deepEqual(input.body.evidence_ids, ["verification", "placed"]);
           assert.deepEqual(
-            input.body.child_outcome_ids,
-            scenario.initiative ? ["child-outcome"] : [],
+            input.body.dependency_outcome_ids,
+            scenario.examine ? ["child-outcome"] : [],
           );
           if (!scenario.opens)
             assert.match(input.body.rationale, /Verification 1 `false` failed/);
@@ -350,11 +355,11 @@ test("evaluation writes failed-verification assessments without inference and ga
           )
             return;
           assert.ok(instruction.includes(assetId));
-          if (scenario.initiative) {
+          if (scenario.examine) {
             assert.match(instruction, /child-outcome/);
             assert.match(instruction, /Completed/);
             assert.match(instruction, /proposals replace criterion-not-met/);
-          } else assert.doesNotMatch(instruction, /objective_id/);
+          } else assert.doesNotMatch(instruction, /dependency_id/);
         },
         lastText: () =>
           scenario.texts[
@@ -409,7 +414,8 @@ test("evaluation writes failed-verification assessments without inference and ga
 });
 
 test("an evaluation that its agent deadline cuts ends with no assessment and no operation failure", async (t) => {
-  const setup = anthropicSetup({ repositories: [] });
+  const repository = repositorySetup();
+  const setup = anthropicSetup({ repositories: [repository] });
   const claim = {
     execution_id: setup.execution_id,
     node_id: createIdentity("node"),
@@ -435,11 +441,11 @@ test("an evaluation that its agent deadline cuts ends with no assessment and no 
       "execution.pinnedRevision.get": async () =>
         complete({
           content: {
-            name: "objective",
+            name: "node",
             requirement: "work",
             criterion: "met",
             verifications: ["true"],
-            bindings: [],
+            bindings: [repository.binding_id],
           },
           tasks: [],
         }),

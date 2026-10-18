@@ -239,10 +239,12 @@ export function assessmentRecord(
   dependencies: { executionAttribution: ExecutionAttribution },
   row: AssessmentRow,
 ): Assessment {
-  const childOutcomeIds = stringSet.parse(JSON.parse(row.child_outcome_ids));
-  const childNodeIds = [
+  const dependencyOutcomeIds = stringSet.parse(
+    JSON.parse(row.dependency_outcome_ids),
+  );
+  const dependencyNodeIds = [
     ...new Set(
-      childOutcomeIds.map((id) => {
+      dependencyOutcomeIds.map((id) => {
         const child = readOutcome(tx, id);
         assert.ok(child);
         return child.node_id;
@@ -256,8 +258,8 @@ export function assessmentRecord(
     attempt: row.attempt,
     node_revision: row.node_revision,
     evidence_ids: stringSet.parse(JSON.parse(row.evidence_ids)),
-    child_outcome_ids: childOutcomeIds,
-    child_node_ids: childNodeIds,
+    dependency_outcome_ids: dependencyOutcomeIds,
+    dependency_node_ids: dependencyNodeIds,
     result: row.result,
     rationale: row.rationale,
     created_at: row.created_at,

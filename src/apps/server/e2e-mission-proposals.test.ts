@@ -14,8 +14,9 @@ import {
   AssessmentResult,
   AssetKind,
   MissionErrorCode,
-  NodeKind,
+  Work,
   NodeState,
+  TASK_IDENTITY_PREFIX,
   missionOperations,
   type Assessment,
   type ControlResult,
@@ -24,7 +25,6 @@ import {
   type NodeChange,
   type Outcome,
   type Proposal,
-  type Revision,
 } from "../../mission/contract.ts";
 import { FAKE_SSH_IDENTITY, gatewayFixture } from "./test-support.ts";
 import {
@@ -46,7 +46,6 @@ const FIRST_REVISION = 1;
 const FIRST_ATTEMPT = 1;
 const SECOND_ATTEMPT = 2;
 const SINGLE_ITEM = 1;
-const TWO_REVISIONS = 2;
 const NO_ITEMS = 0;
 const WORKER_INSTANCE_COUNT = 1;
 const TIMEOUT = 300000;
@@ -135,34 +134,38 @@ async function setup(t: TestContext) {
     (await read<Mission>(["mission", "get", project.id])).version;
   const create = async (
     filename: string,
-    kind: string,
+    work: Work,
     names: string[],
-    parentId?: string,
+    dependentId?: string,
   ) => {
     const change = await write<NodeChange>(
       ["mission", "node", "create", mission.id],
       {
         filename,
-        kind,
         content: {
           ...CONTENT,
+          work,
           bindings: names.map((name) => binding(name).id),
         },
+        tasks: [],
         reason: "plan",
         expected_mission_version: await missionVersion(),
-        ...(parentId
-          ? { parent_id: parentId, expected_parent_revision: FIRST_REVISION }
-          : {}),
       },
     );
-    return change.revisions[FIRST_INDEX]!.node_id;
+    const nodeId = change.revisions[FIRST_INDEX]!.node_id;
+    if (dependentId)
+      await write(["mission", "dependency", "add", dependentId, nodeId], {
+        reason: "plan",
+        expected_mission_version: await missionVersion(),
+      });
+    return nodeId;
   };
-  const initiativeId = await create("initiative.md", NodeKind.Initiative, []);
-  const objectiveId = await create(
-    "objective.md",
-    NodeKind.Objective,
+  const examineId = await create("examine.md", Work.Examine, [REPOSITORY]);
+  const implementId = await create(
+    "implement.md",
+    Work.Implement,
     [REPOSITORY],
-    initiativeId,
+    examineId,
   );
   const machine = await cliMachine(session, {
     masterKey: fixture.config.master_key,
@@ -170,16 +173,16 @@ async function setup(t: TestContext) {
     resourceIdentity: binding(HARNESS).resource_identity,
   });
   await passingEvaluation(session, machine, {
-    nodeId: objectiveId,
+    nodeId: implementId,
     bindingId: binding(REPOSITORY).id,
     commit: COMMIT,
   });
-  assert.equal((await machine.node(objectiveId)).state, NodeState.Completed);
+  assert.equal((await machine.node(implementId)).state, NodeState.Completed);
   const outcomes = await read<Page<Outcome>>([
     "mission",
     "outcome",
     "list",
-    objectiveId,
+    implementId,
   ]);
   const produced = [
     {
@@ -187,22 +190,22 @@ async function setup(t: TestContext) {
       content: { media_type: "text/plain", encoding: "base64", data: "b2s=" },
     },
   ];
-  const steps = await machine.pull(initiativeId, NodeState.Executing);
+  const steps = await machine.pull(examineId, NodeState.Executing);
   await write(
-    ["mission", "evidence", "submit", initiativeId],
+    ["mission", "evidence", "submit", examineId],
     { ...executionContext(steps), subject: "review notes", assets: produced },
     machine.T,
   );
   await machine.release(steps.execution_id);
-  const evaluation = await machine.pull(initiativeId, NodeState.Evaluating);
+  const evaluation = await machine.pull(examineId, NodeState.Evaluating);
   const run = await write<{ evidence: { id: string } }>(
-    ["mission", "evidence", "submit", initiativeId],
+    ["mission", "evidence", "submit", examineId],
     {
       ...executionContext(evaluation),
       subject: "verification run",
       assets: produced,
       verification: {
-        tested_input: [repositorySnapshot(binding(REPOSITORY).id, COMMIT)],
+        tested_input: repositorySnapshot(binding(REPOSITORY).id, COMMIT),
         results: [
           { command: "true", exit_code: 0, signal: null, timed_out: false },
         ],
@@ -211,17 +214,17 @@ async function setup(t: TestContext) {
     machine.T,
   );
   const judged = await write<{ assessment: Assessment; node: Node }>(
-    ["mission", "assessment", "submit", initiativeId],
+    ["mission", "assessment", "submit", examineId],
     {
       ...executionContext(evaluation),
       evidence_ids: [run.evidence.id],
-      child_outcome_ids: outcomes.items.map((outcome) => outcome.id),
+      dependency_outcome_ids: outcomes.items.map((outcome) => outcome.id),
       result: AssessmentResult.Undetermined,
       rationale: "Recovery is incomplete",
-      tested_input: [repositorySnapshot(binding(REPOSITORY).id, COMMIT)],
+      tested_input: repositorySnapshot(binding(REPOSITORY).id, COMMIT),
       proposals: [
         {
-          objective_id: objectiveId,
+          dependency_id: implementId,
           name: PROPOSAL_NAME,
           requirement: PROPOSAL_REQUIREMENT,
           criterion: PROPOSAL_CRITERION,
@@ -241,8 +244,8 @@ async function setup(t: TestContext) {
     session,
     machine,
     project,
-    initiativeId,
-    objectiveId,
+    examineId,
+    implementId,
     repositoryId: binding(REPOSITORY).id,
     missionVersion,
     judged,
@@ -250,7 +253,7 @@ async function setup(t: TestContext) {
 }
 
 test(
-  "Mission fix-objective proposals through the CLI and the HTTP routes",
+  "Mission fix-node proposals through the CLI and the HTTP routes",
   { timeout: TIMEOUT },
   async (t) => {
     const h = await setup(t);
@@ -269,7 +272,7 @@ test(
       "mission",
       "proposal",
       "list",
-      h.initiativeId,
+      h.examineId,
       ...options,
     ];
     const directory = temporary(t);
@@ -293,9 +296,9 @@ test(
       assert.equal(result.stdout, EMPTY_OUTPUT);
     };
     let proposal!: Proposal;
-    let approved!: { objective: NodeChange; initiative: ControlResult };
+    let approved!: { created: NodeChange; proposer: ControlResult };
 
-    await t.test("the initiative judgement blocks the initiative", () => {
+    await t.test("the examine judgement blocks the examine node", () => {
       assert.equal(h.judged.assessment.result, AssessmentResult.Undetermined);
       assert.equal(
         (h.judged.node as { state: string }).state,
@@ -308,11 +311,11 @@ test(
       assert.equal(page.items.length, SINGLE_ITEM);
       assert.equal(page.next_cursor, null);
       proposal = page.items[FIRST_INDEX]!;
-      assert.equal(proposal.node_id, h.initiativeId);
+      assert.equal(proposal.node_id, h.examineId);
       assert.equal(proposal.attempt, FIRST_ATTEMPT);
       assert.equal(proposal.approved_at, null);
-      assert.equal(proposal.objective_node_id, null);
-      assert.equal(proposal.content.objective_id, h.objectiveId);
+      assert.equal(proposal.created_node_id, null);
+      assert.equal(proposal.content.dependency_id, h.implementId);
       assert.equal(proposal.content.name, PROPOSAL_NAME);
       assert.deepEqual(proposal.content.task.verifications, TASK_VERIFICATIONS);
     });
@@ -354,7 +357,7 @@ test(
     await t.test("a machine token is refused on both routes", async () => {
       const list = refused(
         await machine["proposal.list"]({
-          params: { node_id: h.initiativeId },
+          params: { node_id: h.examineId },
           query: {},
           body: null,
         }),
@@ -380,7 +383,7 @@ test(
     await t.test("a human token lists the proposal over HTTP", async () => {
       const page = completed(
         await human["proposal.list"]({
-          params: { node_id: h.initiativeId },
+          params: { node_id: h.examineId },
           query: {},
           body: null,
         }),
@@ -388,43 +391,54 @@ test(
       assert.deepEqual(page.items, [proposal]);
     });
 
-    await t.test("approval creates the objective and its task", async () => {
-      approved = await write<typeof approved>(
-        ["mission", "proposal", "approve", proposal.id],
-        { expected_mission_version: await h.missionVersion() },
-      );
-      assert.equal(approved.objective.revisions.length, TWO_REVISIONS);
-      const [created, tasked] = approved.objective.revisions as [
-        Revision,
-        Revision,
-      ];
-      const objectiveId = created.node_id;
-      assert.equal(tasked.node_id, objectiveId);
-      assert.equal(tasked.content.name, PROPOSAL_NAME);
-      assert.equal(tasked.tasks?.length, SINGLE_ITEM);
-      const taskContent = tasked.tasks![FIRST_INDEX]!;
-      assert.equal(taskContent.content.name, TASK_NAME);
-      const objective = await read<Node>([
-        "mission",
-        "node",
-        "get",
-        objectiveId,
-      ]);
-      assert.equal(objective.kind, NodeKind.Objective);
-      assert.equal(objective.parent_id, h.initiativeId);
-      assert.deepEqual(objective.content.bindings, [h.repositoryId]);
-      const task = await read<Node>(["mission", "node", "get", taskContent.id]);
-      assert.equal(task.kind, NodeKind.Task);
-      assert.equal(task.parent_id, objectiveId);
-      const listed = await read<Page<Proposal>>(listArguments());
-      assert.equal(typeof listed.items[FIRST_INDEX]!.approved_at, NUMBER_TYPE);
-      assert.equal(listed.items[FIRST_INDEX]!.objective_node_id, objectiveId);
-    });
+    await t.test(
+      "EF02.4 approval creates the fix node, its task and the dependency of the proposer on it",
+      async () => {
+        approved = await write<typeof approved>(
+          ["mission", "proposal", "approve", proposal.id],
+          { expected_mission_version: await h.missionVersion() },
+        );
+        assert.equal(approved.created.revisions.length, SINGLE_ITEM);
+        const created = approved.created.revisions[FIRST_INDEX]!;
+        const implementId = created.node_id;
+        assert.equal(created.content.name, PROPOSAL_NAME);
+        assert.equal(created.tasks.length, SINGLE_ITEM);
+        const taskContent = created.tasks[FIRST_INDEX]!;
+        assert.ok(taskContent.id.startsWith(`${TASK_IDENTITY_PREFIX}_`));
+        assert.equal(taskContent.content.name, TASK_NAME);
+        const implement = await read<Node>([
+          "mission",
+          "node",
+          "get",
+          implementId,
+        ]);
+        assert.equal(implement.work, Work.Implement);
+        assert.deepEqual(implement.requires, []);
+        assert.deepEqual(implement.content.bindings, [h.repositoryId]);
+        assert.deepEqual(
+          implement.tasks.map((task) => task.id),
+          [taskContent.id],
+        );
+        const listed = await read<Page<Proposal>>(listArguments());
+        assert.equal(
+          typeof listed.items[FIRST_INDEX]!.approved_at,
+          NUMBER_TYPE,
+        );
+        assert.equal(listed.items[FIRST_INDEX]!.created_node_id, implementId);
+        assert.ok(
+          approved.created.added_edges.some(
+            (edge) =>
+              edge.dependent_id === h.examineId &&
+              edge.depends_on_id === implementId,
+          ),
+        );
+      },
+    );
 
-    await t.test("the initiative reopens in a new attempt", async () => {
-      const { node } = approved.initiative;
-      assert.ok(node.kind === NodeKind.Initiative);
-      assert.equal(node.state, NodeState.Available);
+    await t.test("the proposer reopens in a new attempt", async () => {
+      const { node } = approved.proposer;
+      assert.equal(node.work, Work.Examine);
+      assert.equal(node.state, NodeState.Pending);
       assert.equal(node.attempt, SECOND_ATTEMPT);
       const queue = await read<Page<{ node_id: string }>>([
         "scheduler",
@@ -434,9 +448,9 @@ test(
       ]);
       const queued = queue.items.map((item) => item.node_id);
       assert.ok(
-        queued.includes(approved.objective.revisions[FIRST_INDEX]!.node_id),
+        queued.includes(approved.created.revisions[FIRST_INDEX]!.node_id),
       );
-      assert.ok(!queued.includes(h.initiativeId));
+      assert.ok(!queued.includes(h.examineId));
     });
 
     await t.test("a second approval answers already approved", async () => {

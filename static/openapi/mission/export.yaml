@@ -103,60 +103,108 @@ components:
             entries:
               type: array
               items:
-                type: object
-                properties:
-                  filename:
-                    type: string
-                    pattern: ^[a-z][a-z0-9_-]*\.md$
-                  id:
-                    type: string
-                    minLength: 31
-                    maxLength: 31
-                    pattern: ^node_[0-7][0-9A-HJKMNP-TV-Z]{25}$
-                    description: node_ followed by a canonical 26-character uppercase ULID.
-                  kind:
-                    type: string
-                    enum:
-                      - initiative
-                      - objective
-                      - task
-                  name:
-                    type: string
-                    minLength: 1
-                  requirement:
-                    type: string
-                    minLength: 1
-                  criterion:
-                    type: string
-                    minLength: 1
-                  verifications:
-                    minItems: 1
-                    type: array
-                    items:
-                      type: string
-                      minLength: 1
-                  bindings:
-                    type: array
-                    items:
-                      type: string
-                  parent:
-                    type: string
-                    pattern: ^[a-z][a-z0-9_-]*\.md$
-                  depends_on:
-                    type: array
-                    items:
-                      type: string
-                      pattern: ^[a-z][a-z0-9_-]*\.md$
-                required:
-                  - filename
-                  - id
-                  - kind
-                  - name
-                  - requirement
-                  - criterion
-                  - verifications
-                  - bindings
-                additionalProperties: false
+                anyOf:
+                  - type: object
+                    properties:
+                      filename:
+                        type: string
+                        pattern: ^[a-z][a-z0-9_-]*\.md$
+                      id:
+                        type: string
+                        minLength: 31
+                        maxLength: 31
+                        pattern: ^node_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                        description: node_ followed by a canonical 26-character uppercase ULID.
+                      work:
+                        type: string
+                        enum:
+                          - implement
+                          - examine
+                      name:
+                        type: string
+                        minLength: 1
+                      requirement:
+                        type: string
+                        minLength: 1
+                      criterion:
+                        type: string
+                        minLength: 1
+                      verifications:
+                        minItems: 1
+                        type: array
+                        items:
+                          type: string
+                          minLength: 1
+                      bindings:
+                        type: array
+                        items:
+                          type: string
+                      requires:
+                        type: array
+                        items:
+                          type: string
+                          maxLength: 64
+                          pattern: ^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)*$
+                      depends_on:
+                        type: array
+                        items:
+                          type: string
+                          pattern: ^[a-z][a-z0-9_-]*\.md$
+                    required:
+                      - filename
+                      - id
+                      - work
+                      - name
+                      - requirement
+                      - criterion
+                      - verifications
+                      - bindings
+                      - requires
+                      - depends_on
+                    additionalProperties: false
+                  - type: object
+                    properties:
+                      filename:
+                        type: string
+                        pattern: ^[a-z][a-z0-9_-]*\.md$
+                      id:
+                        type: string
+                        minLength: 31
+                        maxLength: 31
+                        pattern: ^task_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                        description: task_ followed by a canonical 26-character uppercase ULID.
+                      node:
+                        type: string
+                        pattern: ^[a-z][a-z0-9_-]*\.md$
+                      name:
+                        type: string
+                        minLength: 1
+                      requirement:
+                        type: string
+                        minLength: 1
+                      criterion:
+                        type: string
+                        minLength: 1
+                      verifications:
+                        minItems: 1
+                        type: array
+                        items:
+                          type: string
+                          minLength: 1
+                      bindings:
+                        type: array
+                        items:
+                          type: string
+                    required:
+                      - filename
+                      - id
+                      - node
+                      - name
+                      - requirement
+                      - criterion
+                      - verifications
+                      - bindings
+                    additionalProperties: false
           required:
             - mission_id
             - mission_version

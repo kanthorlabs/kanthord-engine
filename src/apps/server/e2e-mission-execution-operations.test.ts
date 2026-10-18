@@ -22,6 +22,7 @@ import {
   missionOperations,
   evidenceSubmitResultSchema,
   assessmentSubmitResultSchema,
+  Work,
   type Evidence,
   type Node,
   type Outcome,
@@ -54,8 +55,10 @@ const ABOVE_PINNED_REVISION = 2;
 const STALE_ATTEMPT_NUMBER = 2;
 const PAIR_COUNT = 2;
 const THIRD_MISSION_VERSION = 3;
+const FOURTH_MISSION_VERSION = 4;
+const FIFTH_MISSION_VERSION = 5;
 const PRIMARY_PRIORITY = 3;
-const POST_PLANNING_MISSION_VERSION = 4;
+const POST_PLANNING_MISSION_VERSION = 6;
 const TOTAL_EVIDENCE_COUNT = 4;
 const OBJECT_SIZE_BYTES = 5;
 const NO_OUTPUT = "";
@@ -225,54 +228,57 @@ async function setup(t: TestContext) {
   };
   const create = async (
     filename: string,
-    kind: string,
+    work: Work,
     names: string[],
     version: number,
-    parentId?: string,
   ) => {
     const result = await write<{ revisions: Revision[] }>(
       ["mission", "node", "create", mission.id],
       {
         filename,
-        kind,
         content: {
           ...CONTENT,
+          work,
           bindings: names.map((name) => binding(name).id),
         },
+        tasks: [],
         reason: "plan",
         expected_mission_version: version,
-        ...(parentId
-          ? { parent_id: parentId, expected_parent_revision: FIRST_REVISION }
-          : {}),
       },
     );
     return result.revisions[FIRST_ITEM_INDEX]!.node_id;
   };
-  const initiative = await create(
-    "initiative-1.md",
-    "initiative",
+  const examine = await create(
+    "examine-1.md",
+    Work.Examine,
     [],
     FIRST_REVISION,
   );
-  const objectiveA = await create(
-    "objective-a.md",
-    "objective",
+  const implementA = await create(
+    "implement-a.md",
+    Work.Implement,
     ["repo", "store"],
     SECOND_MISSION_VERSION,
-    initiative,
   );
-  const objectiveB = await create(
-    "objective-b.md",
-    "objective",
+  const implementB = await create(
+    "implement-b.md",
+    Work.Implement,
     ["gated"],
     THIRD_MISSION_VERSION,
-    initiative,
   );
-  await write(["mission", "node", "priority", "set", objectiveA], {
+  for (const [implement, version] of [
+    [implementA, FOURTH_MISSION_VERSION],
+    [implementB, FIFTH_MISSION_VERSION],
+  ] as const)
+    await write(["mission", "dependency", "add", examine, implement], {
+      reason: "plan",
+      expected_mission_version: version,
+    });
+  await write(["mission", "node", "priority", "set", implementA], {
     value: PRIMARY_PRIORITY,
     expected_mission_version: POST_PLANNING_MISSION_VERSION,
   });
-  await write(["mission", "node", "priority", "set", objectiveB], {
+  await write(["mission", "node", "priority", "set", implementB], {
     value: SECONDARY_PRIORITY,
     expected_mission_version: POST_PLANNING_MISSION_VERSION,
   });
@@ -288,7 +294,7 @@ async function setup(t: TestContext) {
   };
   const pull = () => write<Pull>(["scheduler", "work", "pull"], pullBody, W);
   const api = httpClient(missionOperations, fixture.endpoint, machineToken);
-  assert.ok(initiative && objectiveA && objectiveB);
+  assert.ok(examine && implementA && implementB);
   assert.ok(binding("repo").id);
   return {
     s3,
@@ -301,9 +307,9 @@ async function setup(t: TestContext) {
     W,
     api,
     binding,
-    initiative,
-    objectiveA,
-    objectiveB,
+    examine,
+    implementA,
+    implementB,
     pull,
   };
 }
@@ -373,7 +379,7 @@ test(
     ) => ({
       ...ctx(executionId),
       evidence_ids: evidenceIds,
-      child_outcome_ids: [],
+      dependency_outcome_ids: [],
       result: AssessmentResult.Success,
       rationale: "met",
       tested_input: address(gated),
@@ -388,10 +394,10 @@ test(
       );
     const badWrite = (args: string[], body: unknown, code: string, env = h.W) =>
       h.refuses([...args, "--file", h.file(body)], code, env);
-    await t.test("E04.1 claim objective A", async () => {
+    await t.test("E04.1 claim implement node A", async () => {
       const answer = await h.pull();
       assert.equal(answer.kind, WorkPullKind.Claimed);
-      assert.equal(answer.execution.node_id, h.objectiveA);
+      assert.equal(answer.execution.node_id, h.implementA);
       assert.equal(answer.execution.attempt, FIRST_ATTEMPT);
       assert.equal(answer.execution.pinned_revision, FIRST_REVISION);
       e1 = answer.execution.execution_id;
@@ -418,7 +424,7 @@ test(
     });
     await t.test("E04.3 repository submission", async () => {
       work = await h.write<Submission>(
-        ["mission", "evidence", "submit", h.objectiveA],
+        ["mission", "evidence", "submit", h.implementA],
         workBody(e1),
         h.W,
       );
@@ -434,14 +440,14 @@ test(
     });
     await t.test("E04.4 stale context", async () => {
       await badWrite(
-        ["mission", "evidence", "submit", h.objectiveA],
+        ["mission", "evidence", "submit", h.implementA],
         { ...workBody(e1), attempt: STALE_ATTEMPT_NUMBER },
         "mission.execution.context_mismatch",
       );
     });
     await t.test("E04.5 CLI object refusal", async () => {
       await badWrite(
-        ["mission", "evidence", "submit", h.objectiveA],
+        ["mission", "evidence", "submit", h.implementA],
         objectBody(),
         "cli.mission.evidence.submit.object_asset",
       );
@@ -449,7 +455,7 @@ test(
     await t.test("E04.6 host object submission", async () => {
       object = completed(
         await h.api["evidence.submit"]({
-          params: { node_id: h.objectiveA },
+          params: { node_id: h.implementA },
           query: {},
           body: objectBody(),
         }),
@@ -470,7 +476,7 @@ test(
     });
     await t.test("E04.7 steps cannot assess", async () => {
       await badWrite(
-        ["mission", "assessment", "submit", h.objectiveA],
+        ["mission", "assessment", "submit", h.implementA],
         assessment(e1, [work.evidence.id]),
         "mission.execution.claim_not_evaluation",
       );
@@ -485,20 +491,20 @@ test(
     });
     await t.test("E04.9 release to Waiting", async () => {
       await release(e1);
-      const answer = await node(h.objectiveA);
+      const answer = await node(h.implementA);
       assert.ok("state" in answer);
       assert.equal(answer.state, NodeState.Waiting);
       assert.equal(answer.attempt, FIRST_ATTEMPT);
     });
     await t.test("E04.10 evaluation claim", async () => {
       const answer = await h.pull();
-      assert.equal(answer.execution.node_id, h.objectiveA);
+      assert.equal(answer.execution.node_id, h.implementA);
       assert.equal(answer.execution.attempt, FIRST_ATTEMPT);
       e2 = answer.execution.execution_id;
     });
     await t.test("E04.11 passing verification evidence", async () => {
       run = await h.write<Submission>(
-        ["mission", "evidence", "submit", h.objectiveA],
+        ["mission", "evidence", "submit", h.implementA],
         runBody(e2),
         h.W,
       );
@@ -509,19 +515,19 @@ test(
     });
     await t.test("E04.12 failed verification refuses success", async () => {
       failed = await h.write<Submission>(
-        ["mission", "evidence", "submit", h.objectiveA],
+        ["mission", "evidence", "submit", h.implementA],
         runBody(e2, false, FAILED_EXIT_CODE),
         h.W,
       );
       await badWrite(
-        ["mission", "assessment", "submit", h.objectiveA],
+        ["mission", "assessment", "submit", h.implementA],
         assessment(e2, [failed.evidence.id]),
         "mission.assessment.verification_failed",
       );
     });
     await t.test("E04.13 pending evidence refusal", async () => {
       await badWrite(
-        ["mission", "assessment", "submit", h.objectiveA],
+        ["mission", "assessment", "submit", h.implementA],
         assessment(e2, [run.evidence.id, object.evidence.id]),
         "mission.assessment.evidence_unpublished",
       );
@@ -599,7 +605,7 @@ test(
     });
     await t.test("E04.17 successful assessment closes A", async () => {
       const answer = await h.write<Assessment>(
-        ["mission", "assessment", "submit", h.objectiveA],
+        ["mission", "assessment", "submit", h.implementA],
         assessment(e2, [run.evidence.id, work.evidence.id]),
         h.W,
       );
@@ -641,7 +647,7 @@ test(
         "mission",
         "evidence",
         "list",
-        h.objectiveA,
+        h.implementA,
         "--attempt",
         String(FIRST_ATTEMPT),
       ]);
@@ -650,7 +656,7 @@ test(
         "mission",
         "attempt",
         "get",
-        h.objectiveA,
+        h.implementA,
         String(FIRST_ATTEMPT),
       ]);
       assert.equal(typeof attempt.closed_at, NUMBER_TYPE);
@@ -682,12 +688,12 @@ test(
         "mission.record.not_found",
       );
     });
-    await t.test("E04.21 work on gated objective B", async () => {
+    await t.test("E04.21 work on gated implement node B", async () => {
       const answer = await h.pull();
-      assert.equal(answer.execution.node_id, h.objectiveB);
+      assert.equal(answer.execution.node_id, h.implementB);
       e3 = answer.execution.execution_id;
       await h.write<Submission>(
-        ["mission", "evidence", "submit", h.objectiveB],
+        ["mission", "evidence", "submit", h.implementB],
         workBody(e3, true),
         h.W,
       );
@@ -696,12 +702,12 @@ test(
     await t.test("E04.22 gated pass keeps evaluation live", async () => {
       e4 = (await h.pull()).execution.execution_id;
       gatedRun = await h.write<Submission>(
-        ["mission", "evidence", "submit", h.objectiveB],
+        ["mission", "evidence", "submit", h.implementB],
         runBody(e4, true),
         h.W,
       );
       const answer = await h.write<Assessment>(
-        ["mission", "assessment", "submit", h.objectiveB],
+        ["mission", "assessment", "submit", h.implementB],
         assessment(e4, [gatedRun.evidence.id], true),
         h.W,
       );
@@ -713,7 +719,7 @@ test(
       const number = h.gitHub.open({
         owner: "owner",
         repo: "gated",
-        head: `kanthord/${h.objectiveB}`,
+        head: `kanthord/${h.implementB}`,
         base: "main",
       });
       const body = {
@@ -728,7 +734,7 @@ test(
       };
       request = completed(
         await h.api["evidence.request"]({
-          params: { node_id: h.objectiveB },
+          params: { node_id: h.implementB },
           query: {},
           body,
         }),
@@ -737,7 +743,7 @@ test(
       assert.equal(request.assets.length, SINGLE_ITEM_COUNT);
       assert.equal(request.assets[FIRST_ITEM_INDEX]!.kind, AssetKind.Platform);
       const duplicate = await h.api["evidence.request"]({
-        params: { node_id: h.objectiveB },
+        params: { node_id: h.implementB },
         query: {},
         body,
       });
@@ -754,7 +760,7 @@ test(
         "mission",
         "external-action",
         "list",
-        h.objectiveB,
+        h.implementB,
         "--attempt",
         String(FIRST_ATTEMPT),
       ]);
@@ -811,7 +817,7 @@ test(
       const answer = await h.write<{
         results: { resolution: string }[];
         failures: unknown[];
-      }>(["mission", "node", "check", h.objectiveB], {
+      }>(["mission", "node", "check", h.implementB], {
         expected_mission_version: POST_PLANNING_MISSION_VERSION,
       });
       assert.equal(
@@ -819,14 +825,14 @@ test(
         Resolution.ExpectedEnd,
       );
       assert.deepEqual(answer.failures, []);
-      const current = await node(h.objectiveB);
+      const current = await node(h.implementB);
       assert.ok("state" in current);
       assert.equal(current.state, NodeState.Completed);
       const outcomes = await h.read<Page<Outcome>>([
         "mission",
         "outcome",
         "list",
-        h.objectiveB,
+        h.implementB,
       ]);
       assert.equal(
         outcomes.items[FIRST_ITEM_INDEX]!.closing_event,
@@ -843,7 +849,7 @@ test(
         "mission",
         "evidence",
         "list",
-        h.objectiveB,
+        h.implementB,
         "--attempt",
         String(FIRST_ATTEMPT),
       ]);
@@ -862,35 +868,35 @@ test(
       assert.ok(asset.kind === AssetKind.Repository);
       assert.equal(asset.address.commit, LANDED);
       await badWrite(
-        ["mission", "node", "check", h.objectiveB],
+        ["mission", "node", "check", h.implementB],
         { expected_mission_version: POST_PLANNING_MISSION_VERSION },
         "mission.node.no_unresolved_request",
         h.H,
       );
     });
     await t.test(
-      "E04.28 initiative reads its outcome-pinned objective context",
+      "E04.28 the examine node reads its outcome-pinned dependency context",
       async () => {
         const answer = await h.pull();
-        assert.equal(answer.execution.node_id, h.initiative);
+        assert.equal(answer.execution.node_id, h.examine);
         e5 = answer.execution.execution_id;
-        const objectives = await h.read<Page<{ visible_revision: number }>>(
-          ["mission", "execution", "objective", "list", e5],
+        const dependencies = await h.read<Page<{ visible_revision: number }>>(
+          ["mission", "execution", "dependency", "list", e5],
           h.W,
         );
-        assert.equal(objectives.items.length, PAIR_COUNT);
+        assert.equal(dependencies.items.length, PAIR_COUNT);
         assert.ok(
-          objectives.items.every(
+          dependencies.items.every(
             (item) => item.visible_revision === FIRST_REVISION,
           ),
         );
         const outcomes = await h.read<Page<Outcome>>(
-          ["mission", "execution", "objective", "outcome", "list", e5],
+          ["mission", "execution", "dependency", "outcome", "list", e5],
           h.W,
         );
         assert.equal(outcomes.items.length, PAIR_COUNT);
         const evidence = await h.read<Page<Evidence>>(
-          ["mission", "execution", "objective", "evidence", "list", e5],
+          ["mission", "execution", "dependency", "evidence", "list", e5],
           h.W,
         );
         assert.equal(evidence.items.length, TOTAL_EVIDENCE_COUNT);

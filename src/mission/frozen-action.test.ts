@@ -7,7 +7,7 @@ import {
   ActorKind,
   EndState,
   ExpectedEndState,
-  NodeKind,
+  Work,
   RepositoryAction,
   Resolution,
   type MissionBindings,
@@ -30,7 +30,7 @@ const BASE_BRANCH = "main";
 const ACTOR = { kind: ActorKind.Human, account: "ulrich", name: "Ulrich" };
 const REQUEST_KEY = "repo.pull_request";
 
-test("required actions preserve pinned policies across later revisions and omit initiatives", (t) => {
+test("an examine node with a repository binding requires no external action, and required actions preserve pinned policies across later revisions", (t) => {
   const h = missionHarness(t, testHumanIdentity("ulrich", "Ulrich", "token"));
   const projectId = createIdentity("project");
   const oldBinding = createIdentity("binding");
@@ -93,13 +93,11 @@ test("required actions preserve pinned policies across later revisions and omit 
     insertNode(tx, {
       id: nodeId,
       mission_id: missionId,
-      kind: NodeKind.Objective,
-      filename: "objective.md",
-      parent_id: null,
+      filename: "implement.md",
       created_at: NOW,
     });
     const statement = tx.database.prepare(
-      "INSERT INTO mission_node_revision (node_id, revision, filename, name, requirement, criterion, verifications, bindings, change, reason, actor, created_at) VALUES (?, ?, 'objective.md', 'name', 'requirement', 'criterion', '[]', ?, '{}', 'reason', ?, ?)",
+      "INSERT INTO mission_node_revision (node_id, revision, filename, name, requirement, criterion, verifications, bindings, work, requires, tasks, change, reason, actor, created_at) VALUES (?, ?, 'implement.md', 'name', 'requirement', 'criterion', '[]', ?, 'implement', '[]', '[]', '{}', 'reason', ?, ?)",
     );
     statement.run(
       nodeId,
@@ -170,8 +168,8 @@ test("required actions preserve pinned policies across later revisions and omit 
       Resolution.OtherEnd,
     );
     tx.database
-      .prepare("UPDATE mission_node SET kind = ? WHERE id = ?")
-      .run(NodeKind.Initiative, nodeId);
+      .prepare("UPDATE mission_node_revision SET work = ? WHERE node_id = ?")
+      .run(Work.Examine, nodeId);
     assert.deepEqual(
       requiredActionsOf(tx, bindings, nodeId, FIRST_ATTEMPT),
       [],
@@ -216,4 +214,84 @@ test("eligibility requires a satisfied predecessor and an unrequested action", (
     [],
   );
   assert.deepEqual(unresolvedKeys([first, second]), []);
+});
+
+test("two bindings freeze one action each", (t) => {
+  const h = missionHarness(t, testHumanIdentity("ulrich", "Ulrich", "token"));
+  const projectId = createIdentity("project");
+  const appId = createIdentity("binding");
+  const apiId = createIdentity("binding");
+  const names = new Map([
+    [appId, "app"],
+    [apiId, "api"],
+  ]);
+  const bindings: MissionBindings = {
+    storageBindingOf: () =>
+      assert.fail("Actions do not read storage configuration."),
+    resolveBinding: () =>
+      assert.fail("Pinned reads never resolve the latest name."),
+    resolveBindingIdentity: () =>
+      assert.fail("Pinned reads never resolve the latest revision."),
+    getBindingRevision: (_tx, bindingId) => ({
+      binding_id: bindingId,
+      project_id: projectId,
+      name: names.get(bindingId)!,
+      resource_identity: `repository:github:owner/${names.get(bindingId)}`,
+      revision: FIRST_ATTEMPT,
+      tombstone: false,
+      disabled: false,
+    }),
+    repositoryPolicyOf: (_tx, bindingId) => ({
+      binding_id: bindingId,
+      project_id: projectId,
+      name: names.get(bindingId)!,
+      address: `git@github.com:owner/${names.get(bindingId)}.git`,
+      platform: "github",
+      ssh_credential: "github-ssh",
+      credential: "github",
+      base_branch: BASE_BRANCH,
+      action:
+        bindingId === appId
+          ? RepositoryAction.PullRequest
+          : RepositoryAction.MergePush,
+      landing: "human" as const,
+      project_prompt: null,
+    }),
+  };
+  h.store.transaction((tx) => {
+    const missionId = insertMission(tx, projectId, NOW);
+    const nodeId = createIdentity("node");
+    insertNode(tx, {
+      id: nodeId,
+      mission_id: missionId,
+      filename: "implement.md",
+      created_at: NOW,
+    });
+    tx.database
+      .prepare(
+        "INSERT INTO mission_node_revision (node_id, revision, filename, name, requirement, criterion, verifications, bindings, work, requires, tasks, change, reason, actor, created_at) VALUES (?, ?, 'implement.md', 'name', 'requirement', 'criterion', '[]', ?, 'implement', '[]', '[]', '{}', 'reason', ?, ?)",
+      )
+      .run(
+        nodeId,
+        FIRST_ATTEMPT,
+        canonicalJSON([appId, apiId]),
+        canonicalJSON(ACTOR),
+        NOW,
+      );
+    openAttempt(tx, nodeId, FIRST_ATTEMPT, ACTOR, NOW);
+    const actions = requiredActionsOf(tx, bindings, nodeId, FIRST_ATTEMPT);
+    assert.deepEqual(
+      actions.map((action) => [action.key, action.binding_id, action.follows]),
+      [
+        ["api.merge_push", apiId, null],
+        ["app.pull_request", appId, null],
+      ],
+    );
+    assert.deepEqual(
+      eligibleUnrequested(
+        actionStatesOf(tx, bindings, nodeId, FIRST_ATTEMPT),
+      ).map((state) => state.action.key),
+      ["api.merge_push", "app.pull_request"],
+    );
+  });
 });

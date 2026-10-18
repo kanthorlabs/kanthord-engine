@@ -4,7 +4,7 @@ import { testHumanIdentity } from "../kernel/test-identity.ts";
 import { OperationError } from "../kernel/errors.ts";
 import { createIdentity } from "../kernel/identity.ts";
 import {
-  NodeKind,
+  Work,
   NodeState,
   ResumeTarget,
   EndState,
@@ -55,22 +55,20 @@ test("controls reject blank and oversized UTF-8 reasons without writes, preservi
     query: {},
     body: { ...h.body(), reason: "界界界界" },
   });
-  assert.ok(result.node.kind !== NodeKind.Task);
   assert.equal(result.node.state, NodeState.Paused);
 });
 
-for (const kind of [NodeKind.Initiative, NodeKind.Objective]) {
-  test(`ready opens an attempt and enqueues ${kind} atomically; resume preserves its pin`, async (t) => {
+for (const work of [Work.Examine, Work.Implement]) {
+  test(`ready opens an attempt and enqueues ${work} atomically; resume preserves its pin`, async (t) => {
     const h = controlHarness(t, IDENTITY);
     h.store.database
-      .prepare("UPDATE mission_node SET kind = ? WHERE id = ?")
-      .run(kind, h.node_id);
+      .prepare("UPDATE mission_node_revision SET work = ? WHERE node_id = ?")
+      .run(work, h.node_id);
     const result = await h.invoke("node.ready", {
       params: { node_id: h.node_id },
       query: {},
       body: h.body(),
     });
-    assert.ok(result.node.kind !== NodeKind.Task);
     assert.equal(result.node.state, NodeState.Waiting);
     assert.equal(result.attempt?.node_revision, FIRST_ATTEMPT);
     assert.equal(result.attempt?.start_point, StartPoint.BaseBranch);
@@ -94,25 +92,30 @@ for (const kind of [NodeKind.Initiative, NodeKind.Objective]) {
   });
 }
 
-test("ready refuses a nonterminal objective child before opening an attempt", async (t) => {
+test("ready refuses an unsatisfied dependency before opening an attempt", async (t) => {
   const h = controlHarness(t, IDENTITY);
-  h.store.transaction((tx) =>
+  const target = createIdentity("node");
+  h.store.transaction((tx) => {
     insertNode(tx, {
-      id: createIdentity("node"),
+      id: target,
       mission_id: h.mission_id,
-      kind: NodeKind.Objective,
-      filename: "child.md",
-      parent_id: h.node_id,
+      filename: "dependency.md",
       created_at: NOW,
-    }),
-  );
+    });
+    insertDependency(tx, h.mission_id, h.node_id, target);
+  });
   await assert.rejects(
     h.invoke("node.ready", {
       params: { node_id: h.node_id },
       query: {},
       body: h.body(),
     }),
-    (error) => error instanceof OperationError && error.code === NOT_READY,
+    (error) => {
+      assert.ok(error instanceof OperationError);
+      assert.equal(error.code, NOT_READY);
+      assert.deepEqual(error.details, { unsatisfied_ids: [target] });
+      return true;
+    },
   );
   assert.equal(h.node().attempt, NO_ATTEMPT);
   assert.equal(h.node().state, NodeState.Available);
@@ -134,7 +137,6 @@ test("resume Waiting at attempt 0 opens attempt 1 as ready does; Available opens
     query: {},
     body: { ...h.body(NodeState.Paused), target: ResumeTarget.Waiting },
   });
-  assert.ok(resumed.node.kind !== NodeKind.Task);
   assert.equal(resumed.node.state, NodeState.Waiting);
   assert.equal(h.node().attempt, FIRST_ATTEMPT);
   assert.equal(resumed.attempt?.node_revision, FIRST_ATTEMPT);
@@ -187,9 +189,7 @@ test("resume Waiting refuses unsatisfied closure; Available routes to Pending wi
     insertNode(tx, {
       id: target,
       mission_id: h.mission_id,
-      kind: NodeKind.Initiative,
       filename: "dependency.md",
-      parent_id: null,
       created_at: NOW,
     });
     insertDependency(tx, h.mission_id, h.node_id, target);
@@ -204,10 +204,7 @@ test("resume Waiting refuses unsatisfied closure; Available routes to Pending wi
     (error) => {
       assert.ok(error instanceof OperationError);
       assert.equal(error.code, NOT_READY);
-      assert.deepEqual(error.details, {
-        objectives_not_terminal: [],
-        unsatisfied_ids: [target],
-      });
+      assert.deepEqual(error.details, { unsatisfied_ids: [target] });
       return true;
     },
   );
@@ -216,7 +213,6 @@ test("resume Waiting refuses unsatisfied closure; Available routes to Pending wi
     query: {},
     body: { ...h.body(NodeState.Paused), target: ResumeTarget.Available },
   });
-  assert.ok(result.node.kind !== NodeKind.Task);
   assert.equal(result.node.state, NodeState.Pending);
   assert.equal(result.attempt, null);
 });
@@ -253,8 +249,11 @@ for (const [end, target] of [
     });
     h.store.transaction((tx) => {
       tx.database
-        .prepare("UPDATE mission_node SET kind = ?, state = ? WHERE id = ?")
-        .run(NodeKind.Objective, NodeState.Paused, h.node_id);
+        .prepare("UPDATE mission_node SET state = ? WHERE id = ?")
+        .run(NodeState.Paused, h.node_id);
+      tx.database
+        .prepare("UPDATE mission_node_revision SET work = ? WHERE node_id = ?")
+        .run(Work.Implement, h.node_id);
       tx.database
         .prepare(
           "UPDATE mission_node_revision SET bindings = ? WHERE node_id = ?",
@@ -285,7 +284,6 @@ for (const [end, target] of [
         target: ResumeTarget.Waiting,
       },
     });
-    assert.ok(result.node.kind !== NodeKind.Task);
     assert.equal(result.node.state, target);
     assert.equal(result.attempt?.closed_at, null);
     assert.equal(result.outcome, null);
@@ -312,7 +310,6 @@ for (const state of [
       query: {},
       body: h.body(state, FIRST_ATTEMPT),
     });
-    assert.ok(result.node.kind !== NodeKind.Task);
     assert.equal(result.node.state, NodeState.Paused);
     assert.equal(result.attempt?.closed_at, null);
     assert.equal(result.attempt?.attempt, FIRST_ATTEMPT);

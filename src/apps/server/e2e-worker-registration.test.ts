@@ -248,12 +248,15 @@ test(
       assert.deepEqual(page.items[FIRST_ITEM]!.declared_node_states, [
         "Available",
       ]);
-      assert.deepEqual(page.items[FIRST_ITEM]!.required_node_format, [
+      assert.deepEqual(page.items[FIRST_ITEM]!.declared_works, [
+        "implement",
+        "examine",
+      ]);
+      assert.deepEqual(Object.keys(page.items[FIRST_ITEM]!).sort(), [
+        "declared_node_states",
+        "declared_works",
+        "host",
         "name",
-        "requirement",
-        "criterion",
-        "verifications",
-        "bindings",
       ]);
     });
     await t.test("E02.2 catalog pages", async () => {

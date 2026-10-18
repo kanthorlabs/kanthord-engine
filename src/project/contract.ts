@@ -11,6 +11,7 @@ import {
 import type { Transaction } from "../kernel/store.ts";
 import { isString } from "../kernel/values.ts";
 import { ResourceStatus } from "../kernel/health.ts";
+import { traitKeySchema } from "../kernel/trait.ts";
 import { fallbackConfigurationsSchema } from "../agent/contract.ts";
 
 export const BINDING_CHECK_TIMEOUT_MS = 10000;
@@ -111,6 +112,8 @@ export const ProjectErrorCode = {
   WorkerInstanceCountRange: "project.bindings.worker.instance_count_range",
   WorkerResourceChanged: "project.bindings.worker.resource_changed",
   WorkerPlacementChanged: "project.bindings.worker.placement_changed",
+  WorkerTraitsInvalid: "project.bindings.worker.traits_invalid",
+  WorkerNodeUnmatched: "project.bindings.worker.node_unmatched",
 } as const;
 
 export const projectNameSchema = z
@@ -198,7 +201,10 @@ export const repositoryConfigSchema = z.strictObject({
 export const WorkerPlacement = { Server: "server", Worker: "worker" } as const;
 export type WorkerPlacement =
   (typeof WorkerPlacement)[keyof typeof WorkerPlacement];
-export const workerConfigSchema = z.strictObject({
+export const workerTraitsSchema = z
+  .array(traitKeySchema)
+  .refine((keys) => new Set(keys).size === keys.length);
+const workerConfigFields = {
   worker: z.string().min(1),
   instance_count: z.number().int(),
   placement: z.enum(WorkerPlacement).optional(),
@@ -219,6 +225,14 @@ export const workerConfigSchema = z.strictObject({
       }),
     )
     .optional(),
+};
+export const workerConfigWriteSchema = z.strictObject({
+  ...workerConfigFields,
+  traits: z.unknown().optional(),
+});
+export const workerConfigSchema = z.strictObject({
+  ...workerConfigFields,
+  traits: workerTraitsSchema.optional(),
 });
 export const storageConfigSchema = z.strictObject({
   available: z.boolean(),
@@ -229,6 +243,20 @@ export const storageConfigSchema = z.strictObject({
   credential: z.string().min(1),
 });
 export const bindingEditSchema = z.discriminatedUnion("kind", [
+  z.strictObject({
+    kind: z.literal(BindingKind.Repository),
+    config: repositoryConfigSchema,
+  }),
+  z.strictObject({
+    kind: z.literal(BindingKind.Worker),
+    config: workerConfigWriteSchema,
+  }),
+  z.strictObject({
+    kind: z.literal(BindingKind.Storage),
+    config: storageConfigSchema,
+  }),
+]);
+export const bindingSchema = z.discriminatedUnion("kind", [
   z.strictObject({
     kind: z.literal(BindingKind.Repository),
     config: repositoryConfigSchema,
@@ -264,7 +292,7 @@ function followsPath(name: string): string[] {
 
 function refineAgentSelectors(
   name: string,
-  config: z.infer<typeof workerConfigSchema>,
+  config: z.infer<typeof workerConfigWriteSchema>,
   ctx: z.RefinementCtx,
 ): void {
   const selectors = new Set<string>();
@@ -348,6 +376,10 @@ export const bindingSetWriteInputSchema = z
     bindings: z.record(bindingNameSchema, bindingEditSchema),
   })
   .superRefine(({ bindings }, ctx) => refineBindingRelations(bindings, ctx));
+export const bindingSetSchema = z.strictObject({
+  version: z.number().int().positive(),
+  bindings: z.record(bindingNameSchema, bindingSchema),
+});
 
 export type CustodySuitability = (
   tx: Transaction,
@@ -368,6 +400,10 @@ export type CreateMission = (
   actor: HumanActor,
 ) => void;
 export type LiveNodesPinning = (tx: Transaction, bindingId: string) => string[];
+export type UnmatchedClaims = (
+  tx: Transaction,
+  projectId: string,
+) => { node_id: string; revision: number; claim: string }[];
 export type RepositoryConnector = {
   resolveSshIdentity(
     host: string,
@@ -683,7 +719,7 @@ export const projectOperations = {
     method: HttpMethod.Get,
     path: "/api/project/:project_id/binding-set",
     input: readInput(projectParams, emptyFields),
-    output: bindingSetWriteInputSchema,
+    output: bindingSetSchema,
     description: "Export the complete current binding set.",
   },
   "bindingSet.write": {
@@ -837,6 +873,7 @@ export interface WorkerBindingRow {
   generation: number;
   resource_budget: { turns: number; wall_time_ms: number } | null;
   entries: NonNullable<z.infer<typeof workerConfigSchema>["entries"]>;
+  traits: string[];
   tombstone: boolean;
 }
 

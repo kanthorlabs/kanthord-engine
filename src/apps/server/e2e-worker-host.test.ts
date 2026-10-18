@@ -5,7 +5,12 @@ import { test, type TestContext } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 import { simpleGit } from "simple-git";
 import { Diagnostic } from "../../kernel/errors.ts";
-import { AssetKind, NodeState, type Evidence } from "../../mission/contract.ts";
+import {
+  AssetKind,
+  NodeState,
+  Work,
+  type Evidence,
+} from "../../mission/contract.ts";
 import { RepositoryComponent } from "../../repository/index.ts";
 import { ClaimState, type ExecutionRecord } from "../../scheduler/contract.ts";
 import {
@@ -29,7 +34,6 @@ const SINGLE_ITEM = 1;
 const SECOND_REVISION = 2;
 const TWO_RESULTS = 2;
 const PROVIDER_AND_STORE_PINS = 2;
-const THIRD_REVISION = 3;
 const FIRST_INDEX = 0;
 const POLL_LIMIT = 30;
 const JOURNEY_TIMEOUT = 240000;
@@ -72,41 +76,35 @@ async function fixture(t: TestContext) {
     verifications: ["test -f hello.txt"],
     bindings: [] as string[],
   };
-  const initiative = await setup.write<{ revisions: { node_id: string }[] }>(
+  const examine = await setup.write<{ revisions: { node_id: string }[] }>(
     ["mission", "node", "create", mission.id],
     {
-      filename: "initiative-1.md",
-      kind: "initiative",
-      content: { ...content, verifications: ["true"] },
+      filename: "examine-1.md",
+      content: { ...content, work: Work.Examine, verifications: ["true"] },
+      tasks: [],
       reason: "plan",
       expected_mission_version: FIRST_REVISION,
     },
   );
-  const objective = await setup.write<{ revisions: { node_id: string }[] }>(
+  const implement = await setup.write<{ revisions: { node_id: string }[] }>(
     ["mission", "node", "create", mission.id],
     {
-      filename: "objective-a.md",
-      kind: "objective",
-      parent_id: initiative.revisions[0]!.node_id,
-      expected_parent_revision: FIRST_REVISION,
+      filename: "implement-a.md",
       content: {
         ...content,
+        work: Work.Implement,
         bindings: [setup.bindings.repo!.id, setup.bindings.store!.id],
       },
+      tasks: [{ filename: "task-a.md", content }],
       reason: "plan",
       expected_mission_version: SECOND_REVISION,
     },
   );
-  const nodeId = objective.revisions[0]!.node_id;
-  await setup.write(["mission", "node", "create", mission.id], {
-    filename: "task-a.md",
-    kind: "task",
-    parent_id: nodeId,
-    expected_parent_revision: FIRST_REVISION,
-    content,
-    reason: "plan",
-    expected_mission_version: THIRD_REVISION,
-  });
+  const nodeId = implement.revisions[0]!.node_id;
+  await setup.write(
+    ["mission", "dependency", "add", examine.revisions[0]!.node_id, nodeId],
+    { reason: "plan", expected_mission_version: SECOND_REVISION + 1 },
+  );
   const seed = join(setup.directory, "seed");
   const bare = join(setup.directory, "bare.git");
   mkdirSync(seed, { mode: 0o700 });

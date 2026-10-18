@@ -28,13 +28,14 @@ import {
   type OperationResult,
 } from "../../kernel/operation.ts";
 import { temporary, hostEnvironment } from "../../kernel/test-support.ts";
-import { missionOperations } from "../../mission/contract.ts";
+import { missionOperations, Work } from "../../mission/contract.ts";
 import { RepositoryComponent } from "../../repository/index.ts";
 import {
   WorkPullKind,
   type ExecutionRecord,
 } from "../../scheduler/contract.ts";
 import {
+  ExecutionWork,
   workerOperations,
   type RepositoryTransport,
 } from "../../worker/contract.ts";
@@ -64,6 +65,8 @@ import {
   FAKE_SSH_CREDENTIAL_BODY,
   FAKE_SSH_IDENTITY,
   gatewayFixture,
+  COVERING_WORKER_BINDINGS,
+  enableCoveringAgents,
 } from "./test-support.ts";
 import { SHIPPED_TEMPLATES } from "../../agent/prompt-templates.ts";
 
@@ -75,7 +78,6 @@ const SINGLE_TURN = 1;
 const FAILURE_EXIT = 1;
 const BRACKET_TRIM_OFFSET = 1;
 const SINGLE_CALL = 1;
-const MISSION_VERSION_BASE = 2;
 const THREE_CALLS = 3;
 const PRIVATE_MODE = 0o700;
 const NO_OUTPUT = "";
@@ -91,7 +93,7 @@ const DEFAULTS = {
   agent_provider: "default",
   model_identifier: "claude-sonnet-4-5",
   reasoning_effort: "off",
-};
+} as const;
 const CONTENT = {
   name: "Say hello",
   requirement: "Write hello.txt",
@@ -161,14 +163,11 @@ test(
       },
       secret: {},
     });
-    for (const agent of ["swe@1", "re@1"])
-      await write(["agent", "enablement", "put", agent], {
-        agent_providers: [
-          { name: "default", provider: "anthropic", credential: "anthro-1" },
-        ],
-        default_configuration: DEFAULTS,
-        fallback_configurations: [],
-      });
+    await enableCoveringAgents(human, {
+      platform: "anthropic",
+      credential: "anthro-1",
+      configuration: DEFAULTS,
+    });
     const project = await read<{ id: string }>([
       "project",
       "create",
@@ -185,6 +184,7 @@ test(
     }>(["project", "binding", "apply", project.id], {
       version: FIRST_REVISION,
       bindings: {
+        ...COVERING_WORKER_BINDINGS,
         repo: {
           kind: "repository",
           config: {
@@ -208,26 +208,50 @@ test(
       },
     });
     const mission = await read<{ id: string }>(["mission", "get", project.id]);
-    const initiative = await write<{ revisions: { node_id: string }[] }>(
+    const examine = await write<{ revisions: { node_id: string }[] }>(
       ["mission", "node", "create", mission.id],
       {
-        filename: "initiative.md",
-        kind: "initiative",
-        content: { ...CONTENT, bindings: [] },
+        filename: "examine.md",
+        content: { ...CONTENT, work: Work.Examine, bindings: [] },
+        tasks: [],
         reason: "runtime acceptance",
         expected_mission_version: FIRST_REVISION,
       },
     );
-    for (const [index, name] of ["a", "b"].entries())
-      await write(["mission", "node", "create", mission.id], {
+    for (const name of ["a", "b"]) {
+      const { version } = await read<{ version: number }>([
+        "mission",
+        "get",
+        project.id,
+      ]);
+      const implement = await write<{
+        mission_version: number;
+        revisions: { node_id: string }[];
+      }>(["mission", "node", "create", mission.id], {
         filename: `${name}.md`,
-        kind: "objective",
-        content: { ...CONTENT, bindings: [bindingSet.bindings.repo!.id] },
+        content: {
+          ...CONTENT,
+          work: Work.Implement,
+          bindings: [bindingSet.bindings.repo!.id],
+        },
+        tasks: [],
         reason: "runtime acceptance",
-        expected_mission_version: index + MISSION_VERSION_BASE,
-        parent_id: initiative.revisions[0]!.node_id,
-        expected_parent_revision: FIRST_REVISION,
+        expected_mission_version: version,
       });
+      await write(
+        [
+          "mission",
+          "dependency",
+          "add",
+          examine.revisions[0]!.node_id,
+          implement.revisions[0]!.node_id,
+        ],
+        {
+          reason: "runtime acceptance",
+          expected_mission_version: implement.mission_version,
+        },
+      );
+    }
     writePrivate(
       join(directory, "server.yaml"),
       stringify(
@@ -447,19 +471,28 @@ test(
       assert.equal(refused.status, HttpStatus.Forbidden);
       assert.equal(refused.error.error.code, PROOF_FAILED);
     });
-    const prepared = await root.prepareObjective({
-      objectiveId: x.execution.node_id,
-      nodeBranch: x.execution.node_branch,
-      pushed: false,
-      repository,
-      transport,
-      context: background,
-      deadlineMs: 10000,
-    });
+    const [prepared] = (
+      await root.prepareImplement({
+        nodeId: x.execution.node_id,
+        nodeBranch: x.execution.node_branch,
+        pushed: new Set(),
+        repositories: [repository],
+        transport,
+        context: background,
+        deadlineMs: 10000,
+      })
+    ).checkouts;
+    assert.ok(prepared);
     await t.test("E07.4 private node workspace", async () => {
       assert.equal(
         prepared.directory,
-        join(state, "workspaces", x.execution.node_id, repository.binding_id),
+        join(
+          state,
+          "workspaces",
+          x.execution.node_id,
+          "checkouts",
+          repository.name,
+        ),
       );
       assert.equal(statSync(prepared.directory).mode & 0o777, PRIVATE_MODE);
       assert.equal(prepared.head, main);
@@ -477,7 +510,7 @@ test(
       hostTools: unusedHostTools,
       setup: runtimeX.setup,
       claim: x.execution,
-      nodeKind: "objective",
+      work: ExecutionWork.Implement,
       agent: runtimeX.setup.agents[0]!,
       credential: {
         credential_id: runtimeX.item.credential_id,
@@ -490,6 +523,7 @@ test(
       }),
       workspaceAgentFiles: true,
       workspace: prepared.directory,
+      checkouts: [prepared.directory],
       hostHome,
       env: hostEnvironment(),
       modelRuntimeFactory: scriptedModelRuntime(provider),
@@ -622,13 +656,13 @@ test(
     await t.test("E07.7 node branch push leaves main unchanged", async () => {
       await transport.pushNodeBranch(
         prepared.directory,
-        prepared.nodeBranch,
+        x.execution.node_branch,
         background,
         10000,
       );
       assert.equal(
         (
-          await git.listRemote([bare, `refs/heads/${prepared.nodeBranch}`])
+          await git.listRemote([bare, `refs/heads/${x.execution.node_branch}`])
         ).split(/\s/)[0],
         head,
       );
@@ -642,15 +676,18 @@ test(
         turns: SINGLE_TURN,
         wall_time_ms: 600000,
       });
-      const lab = await root.prepareObjective({
-        objectiveId: y.execution.node_id,
-        nodeBranch: y.execution.node_branch,
-        pushed: false,
-        repository: runtimeY.setup.repositories[0]!,
-        transport,
-        context: background,
-        deadlineMs: 10000,
-      });
+      const [lab] = (
+        await root.prepareImplement({
+          nodeId: y.execution.node_id,
+          nodeBranch: y.execution.node_branch,
+          pushed: new Set(),
+          repositories: runtimeY.setup.repositories,
+          transport,
+          context: background,
+          deadlineMs: 10000,
+        })
+      ).checkouts;
+      assert.ok(lab);
       const fake = scriptedProvider([
         tool("read", { path: "AGENTS.md" }),
         tool("read", { path: "AGENTS.md" }),
@@ -660,7 +697,7 @@ test(
         hostTools: unusedHostTools,
         setup: runtimeY.setup,
         claim: y.execution,
-        nodeKind: "objective",
+        work: ExecutionWork.Implement,
         agent: runtimeY.setup.agents[0]!,
         credential: {
           credential_id: runtimeY.item.credential_id,
@@ -673,6 +710,7 @@ test(
         }),
         workspaceAgentFiles: true,
         workspace: lab.directory,
+        checkouts: [lab.directory],
         hostHome,
         env: hostEnvironment(),
         modelRuntimeFactory: scriptedModelRuntime(fake),
@@ -688,20 +726,14 @@ test(
         assert.equal(turns.mock.callCount(), SINGLE_TURN);
       } finally {
         labAgent.dispose();
-        root.release(
-          root.objectiveKey(y.execution.node_id),
-          WorkspaceKind.Objective,
-        );
+        root.release(root.nodeKey(y.execution.node_id), WorkspaceKind.Node);
       }
     });
-    await t.test("E07.9 sweep retains only the held objective", () => {
+    await t.test("E07.9 sweep retains only the held implement node", () => {
       root.sweep(Date.now() + 8 * 24 * 3600 * 1000);
-      assert.equal(existsSync(root.objectiveKey(y.execution.node_id)), false);
-      assert.equal(existsSync(root.objectiveKey(x.execution.node_id)), true);
-      root.release(
-        root.objectiveKey(x.execution.node_id),
-        WorkspaceKind.Objective,
-      );
+      assert.equal(existsSync(root.nodeKey(y.execution.node_id)), false);
+      assert.equal(existsSync(root.nodeKey(x.execution.node_id)), true);
+      root.release(root.nodeKey(x.execution.node_id), WorkspaceKind.Node);
     });
   },
 );

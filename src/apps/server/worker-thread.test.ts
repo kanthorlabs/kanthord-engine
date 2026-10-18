@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { randomBytes } from "node:crypto";
-import { existsSync } from "node:fs";
+import { existsSync, mkdirSync, realpathSync } from "node:fs";
+import { join } from "node:path";
 import { once } from "node:events";
 import { MessageChannel, Worker } from "node:worker_threads";
 import { test } from "node:test";
@@ -179,6 +180,12 @@ test("the release bundle of the worker thread starts as an eval worker", async (
     },
     define: { "import.meta.url": "__kanthord_import_meta_url" },
   });
+  const root = realpathSync(temporary(t));
+  const cwd = join(root, "release", "bundle");
+  mkdirSync(cwd, { recursive: true });
+  const previous = process.cwd();
+  process.chdir(cwd);
+  t.after(() => process.chdir(previous));
   const { port1, port2 } = new MessageChannel();
   const thread = new Worker(bundle.outputFiles[0]!.text, {
     eval: true,
@@ -189,9 +196,9 @@ test("the release bundle of the worker thread starts as an eval worker", async (
   t.after(() => thread.terminate());
   port1.close();
   const [error] = await once(thread, "error");
-  assert.match(
+  assert.equal(
     String(error.message),
-    /^ENOENT: no such file or directory, open '.*package\.json'$/,
+    `ENOENT: no such file or directory, open '${join(root, "package.json")}'`,
   );
   await once(thread, "exit");
 });

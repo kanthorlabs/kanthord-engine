@@ -28,12 +28,13 @@ import {
   fauxToolCall,
   scriptedProvider,
   scriptedModelRuntime,
+  repositorySetup,
 } from "./test-support.ts";
 import { WorkspaceRoot } from "./workspace.ts";
 import { noTranscript } from "./transcript.ts";
-import type { RepositoryTransport } from "../contract.ts";
+import { ExecutionWork, type RepositoryTransport } from "../contract.ts";
 import type { MethodClients } from "./method-clients.ts";
-import { NodeKind, openNativeAgent, type NativeAgent } from "./native-agent.ts";
+import { openNativeAgent, type NativeAgent } from "./native-agent.ts";
 import { renderWorkPrompt } from "../../agent/prompt-composer.ts";
 import { SHIPPED_TEMPLATES } from "../../agent/prompt-templates.ts";
 
@@ -76,7 +77,7 @@ test("S1 refusal aborts an active native session and records its stopped transcr
     hostTools: unusedHostTools,
     setup,
     claim,
-    nodeKind: NodeKind.Objective,
+    work: ExecutionWork.Implement,
     agent: setup.agents[0]!,
     credential: {
       credential_id: setup.agents[0]!.credential_id,
@@ -90,6 +91,7 @@ test("S1 refusal aborts an active native session and records its stopped transcr
     }),
     workspaceAgentFiles: true,
     workspace,
+    checkouts: [workspace],
     hostHome: temporary(t),
     env: hostEnvironment(),
     modelRuntimeFactory: scriptedModelRuntime(provider),
@@ -143,10 +145,11 @@ test("S1 refusal aborts an active native session and records its stopped transcr
 });
 
 test("S1 native reviewer evaluates even when the attempt already contains an expected request", async (t) => {
+  const repository = repositorySetup();
   const setup = anthropicSetup({
     worker_name: "reviewer@1",
     agents: [anthropicAgent({ agent_name: "re@1" })],
-    repositories: [],
+    repositories: [repository],
   });
   const claim = {
     execution_id: setup.execution_id,
@@ -172,11 +175,11 @@ test("S1 native reviewer evaluates even when the attempt already contains an exp
       "execution.pinnedRevision.get": async () =>
         complete({
           content: {
-            name: "objective",
+            name: "node",
             requirement: "review",
             criterion: "met",
             verifications: ["true"],
-            bindings: [],
+            bindings: [repository.binding_id],
           },
           tasks: [],
         }),
@@ -249,8 +252,11 @@ test("S1 native reviewer evaluates even when the attempt already contains an exp
   assert.equal(assessments, EXPECTED_CALL_COUNT);
   assert.equal(provider.calls.length, EXPECTED_CALL_COUNT);
 });
-test("native entry runs an initiative report with the scripted provider", async (t) => {
-  const setup = anthropicSetup({ repositories: [] });
+test("native entry runs an examine report with the scripted provider", async (t) => {
+  const setup = anthropicSetup({
+    work: ExecutionWork.Examine,
+    repositories: [],
+  });
   const claim = {
     execution_id: setup.execution_id,
     node_id: createIdentity("node"),
@@ -263,7 +269,7 @@ test("native entry runs an initiative report with the scripted provider", async 
     root_span_id: "1".repeat(16),
   };
   const provider = scriptedProvider([
-    fauxAssistantMessage("All objectives completed."),
+    fauxAssistantMessage("All dependencies completed."),
   ]);
   const store = new InMemoryCredentialStore();
   await store.modify("anthropic", async () => ({
@@ -281,16 +287,16 @@ test("native entry runs an initiative report with the scripted provider", async 
       "execution.pinnedRevision.get": async () =>
         complete({
           content: {
-            name: "initiative",
+            name: "examine",
             requirement: "report",
             criterion: "report",
             verifications: [],
             bindings: [],
           },
         }),
-      "execution.objective.list": page,
-      "execution.objective.outcome.list": page,
-      "execution.objective.evidence.list": page,
+      "execution.dependency.list": page,
+      "execution.dependency.outcome.list": page,
+      "execution.dependency.evidence.list": page,
       "evidence.submit": async () => complete({ evidence: {} }),
     },
     scheduler: { executionRelease: async () => complete({}) },

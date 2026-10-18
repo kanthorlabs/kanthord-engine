@@ -19,6 +19,8 @@ import {
   type Evidence,
   type Revision,
   type ExternalAction,
+  Work,
+  missionOperations,
 } from "../../mission/contract.ts";
 import {
   WorkPullKind,
@@ -57,16 +59,17 @@ const REVIEWER = 1;
 const SINGLE_CALL = 1;
 const SINGLE_ITEM = 1;
 const FAILURE_EXIT = 1;
-const SECOND_REVISION = 2;
 const PUSHED_PRIORITY = 2;
 const TWO_CALLS = 2;
 const UNAUTHORIZED_STATUS = 401;
 const HOOK_MODE = 0o755;
 const SECOND_ATTEMPT = 2;
+const FIRST_MISSION_VERSION = 1;
+const SECOND_MISSION_VERSION = 2;
 const THIRD_MISSION_VERSION = 3;
 const GATED_PRIORITY = 3;
-const FOURTH_MISSION_VERSION = 4;
 const NO_OUTPUT = "";
+const BINDING_MISMATCH = "mission.evidence.binding_mismatch";
 const TIMEOUT = 180000;
 const GATED = "gated";
 const PUSHED = "pushed";
@@ -247,60 +250,34 @@ async function setup(t: TestContext) {
   >(["project", "binding", "list", project.id]);
   const gated = bindings.items.find((item) => item.name === GATED)!;
   const pushed = bindings.items.find((item) => item.name === PUSHED)!;
-  const create = async (
-    filename: string,
-    kind: string,
-    names: string[],
-    version: number,
-    parentId?: string,
-  ) => {
+  const create = async (filename: string, names: string[], version: number) => {
     const result = await write<{ revisions: Revision[] }>(
       ["mission", "node", "create", mission.id],
       {
         filename,
-        kind,
         content: {
           ...CONTENT,
+          work: Work.Implement,
           bindings: names.map(
             (name) => bindings.items.find((item) => item.name === name)!.id,
           ),
         },
+        tasks: [],
         reason: "plan",
         expected_mission_version: version,
-        ...(parentId
-          ? { parent_id: parentId, expected_parent_revision: FIRST_REVISION }
-          : {}),
       },
     );
     return result.revisions[FIRST_INDEX]!.node_id;
   };
-  const initiative = await create(
-    "initiative-1.md",
-    "initiative",
-    [],
-    FIRST_REVISION,
-  );
-  const G = await create(
-    "objective-g.md",
-    "objective",
-    [GATED],
-    SECOND_REVISION,
-    initiative,
-  );
-  const P = await create(
-    "objective-p.md",
-    "objective",
-    [PUSHED],
-    THIRD_MISSION_VERSION,
-    initiative,
-  );
+  const G = await create("implement-g.md", [GATED], FIRST_MISSION_VERSION);
+  const P = await create("implement-p.md", [PUSHED], SECOND_MISSION_VERSION);
   await write(["mission", "node", "priority", "set", G], {
     value: GATED_PRIORITY,
-    expected_mission_version: FOURTH_MISSION_VERSION,
+    expected_mission_version: THIRD_MISSION_VERSION,
   });
   await write(["mission", "node", "priority", "set", P], {
     value: PUSHED_PRIORITY,
-    expected_mission_version: FOURTH_MISSION_VERSION,
+    expected_mission_version: THIRD_MISSION_VERSION,
   });
   const M = (await read<{ version: number }>(["mission", "get", project.id]))
     .version;
@@ -324,6 +301,7 @@ async function setup(t: TestContext) {
     return result.execution;
   };
   const client = httpClient(workerOperations, fixture.endpoint, token);
+  const missionApi = httpClient(missionOperations, fixture.endpoint, token);
   const request = (execution: ExecutionRecord) =>
     client["action.request"](
       {
@@ -404,7 +382,7 @@ async function setup(t: TestContext) {
       {
         ...context(execution),
         evidence_ids: evidenceIds,
-        child_outcome_ids: [],
+        dependency_outcome_ids: [],
         result: "success",
         rationale: "met",
         tested_input: snapshot(bindingId, commit),
@@ -444,6 +422,7 @@ async function setup(t: TestContext) {
     pass,
     release,
     node,
+    missionApi,
   };
 }
 
@@ -568,7 +547,7 @@ test("E06 action performer CLI journey", { timeout: TIMEOUT }, async (t) => {
       assert.equal((await h.node(h.G)).state, NodeState.ExternalRequested);
     },
   );
-  await t.test("E06.9 a change request blocks the objective", async () => {
+  await t.test("E06.9 a change request blocks the implement node", async () => {
     const actions = await h.read<Page<ExternalAction>>([
       "mission",
       "external-action",
@@ -763,3 +742,114 @@ test("E06 action performer CLI journey", { timeout: TIMEOUT }, async (t) => {
     },
   );
 });
+
+test(
+  "EF09a multi-repository mission rules",
+  { timeout: TIMEOUT },
+  async (t) => {
+    const h = await setup(t);
+    const contained = h.gatedBare.head;
+    let steps: ExecutionRecord;
+
+    await t.test(
+      "EF09a.1 a repository asset of a foreign binding answers mission.evidence.binding_mismatch",
+      async () => {
+        steps = await h.pull(h.G, FIRST_ATTEMPT);
+        const result = await kanthord(
+          [
+            "mission",
+            "evidence",
+            "submit",
+            h.G,
+            "--file",
+            h.file({
+              execution_id: steps.execution_id,
+              attempt: steps.attempt,
+              node_revision: steps.pinned_revision,
+              subject: "head commit",
+              assets: [
+                {
+                  kind: "repository",
+                  address: {
+                    kind: "repository",
+                    binding_id: h.pushed.id,
+                    commit: contained,
+                  },
+                },
+              ],
+            }),
+          ],
+          h.W,
+        );
+        assert.equal(result.code, FAILURE_EXIT);
+        assert.ok(
+          result.stderr.startsWith("mission.evidence.binding_mismatch:"),
+          result.stderr,
+        );
+        assert.equal(result.stdout, NO_OUTPUT);
+        const address = {
+          kind: "repository" as const,
+          binding_id: h.gated.id,
+          commit: contained,
+        };
+        const repeated = await h.missionApi["evidence.submit"](
+          {
+            params: { node_id: h.G },
+            query: {},
+            body: {
+              execution_id: steps.execution_id,
+              attempt: steps.attempt,
+              node_revision: steps.pinned_revision,
+              subject: "head commit",
+              assets: [
+                { kind: "repository", address },
+                { kind: "repository", address },
+              ],
+            },
+          },
+          { idempotencyKey: ulid() },
+        );
+        refused(repeated, HttpStatus.BadRequest, BINDING_MISMATCH);
+        assert.ok(repeated.type === OperationResultType.Failure);
+        assert.deepEqual(repeated.error.error.details, {
+          binding_id: h.gated.id,
+        });
+      },
+    );
+    await t.test(
+      "EF09a.2 a snapshot that the base branch contains opens no pull request and folds to pull_request_merged",
+      async () => {
+        const work = (await h.work(steps, h.gated.id, contained)).evidence;
+        await h.release(steps);
+        const review = await h.pull(h.G, FIRST_ATTEMPT);
+        const run = (await h.run(review, h.gated.id, contained)).evidence;
+        await h.pass(review, [run.id, work.id], h.gated.id, contained);
+        const [item] = completed(await h.request(review)).items;
+        assert.ok(
+          item?.kind === ActionResultKind.Submitted,
+          JSON.stringify(item),
+        );
+        assert.deepEqual(
+          (item.evidence as Evidence).assets[FIRST_INDEX]?.address,
+          {
+            kind: PlatformAddressKind.BranchPush,
+            resource_identity: h.gated.resource_identity,
+            branch: "main",
+            commit: contained,
+          },
+        );
+        assert.equal(h.creates(), NO_CALLS);
+        await h.release(review);
+        const check = await h.write<{ results: { resolution: string }[] }>(
+          ["mission", "node", "check", h.G],
+          { expected_mission_version: h.M },
+        );
+        assert.equal(
+          check.results[FIRST_INDEX]?.resolution,
+          Resolution.ExpectedEnd,
+        );
+        assert.equal((await h.node(h.G)).state, NodeState.Completed);
+      },
+    );
+  },
+);

@@ -62,6 +62,30 @@ test("force never bypasses disabled or removed storage authorization", async (t)
   }
 });
 
+test("asset delete authorizes the storage binding that the object pins", async (t) => {
+  const h = fixture(t);
+  const pinnedId = createIdentity("binding");
+  h.store.database
+    .prepare("UPDATE mission_evidence_asset SET content = ? WHERE id = ?")
+    .run(
+      canonicalJSON({
+        location: "s3://bucket/key",
+        size: FIRST_ATTEMPT,
+        media_type: "text/plain",
+        storage_binding_id: pinnedId,
+        object_version: VERSION,
+      }),
+      h.asset_id,
+    );
+  const storage = t.mock.method(h.dependencies.bindings, "storageBindingOf");
+  h.dependencies.intakeStorage.delete = async () => undefined;
+  assert.equal(await h.remove(true), null);
+  assert.deepEqual(
+    storage.mock.calls.map((call) => call.arguments[1]),
+    [pinnedId],
+  );
+});
+
 function fixture(t: TestContext, request = false) {
   const h = evidenceHarness(t, IDENTITY);
   const evidenceId = createIdentity("evidence");
@@ -121,7 +145,7 @@ function fixture(t: TestContext, request = false) {
   return { ...h, evidence_id: evidenceId, asset_id: assetId, remove };
 }
 
-test("asset deletes require a terminal ancestor chain or force and preserve the empty evidence", async (t) => {
+test("asset deletes require a terminal node and terminal direct examine dependents or force and preserve the empty evidence", async (t) => {
   const h = fixture(t);
   h.dependencies.intakeStorage.delete = async (_call, assetId) => {
     assert.equal(assetId, h.asset_id);
@@ -139,7 +163,7 @@ test("asset deletes require a terminal ancestor chain or force and preserve the 
       error instanceof OperationError &&
       error.code === MissionErrorCode.EvidenceRemoveNodeLive,
   );
-  const parentId = h.node().parent_id!;
+  const parentId = h.examine_id;
   h.store.transaction((tx) => setNodeState(tx, parentId, NodeState.Discarded));
   assert.equal(await h.remove(), null);
   h.store.transaction((tx) => {
@@ -221,7 +245,7 @@ test("whole evidence deletion clears assessment and outcome sets without changin
       result: AssessmentResult.Undetermined,
       rationale: "Human block",
       evidence_ids: canonicalJSON([h.evidence_id]),
-      child_outcome_ids: "[]",
+      dependency_outcome_ids: "[]",
       tested_input: null,
       execution_id: null,
       actor: canonicalJSON(h.actor),
@@ -320,7 +344,7 @@ test("both deletes log the human, the force and the reason after the commit", as
     records.push({ fields, message });
   }) as typeof h.dependencies.logger.info;
   await h.remove(true);
-  const parentId = h.node().parent_id!;
+  const parentId = h.examine_id;
   h.store.transaction((tx) => {
     setNodeState(tx, h.node_id, NodeState.Completed);
     setNodeState(tx, parentId, NodeState.Discarded);

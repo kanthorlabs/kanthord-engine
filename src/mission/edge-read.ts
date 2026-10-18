@@ -2,8 +2,6 @@ import assert from "node:assert/strict";
 import { identitySchema } from "../kernel/identity.ts";
 import type { Transaction } from "../kernel/store.ts";
 import {
-  EdgeKind,
-  edgeKindSchema,
   NODE_IDENTITY_PREFIX,
   NODE_LIST_LIMIT_DEFAULT,
   type Edge,
@@ -13,17 +11,16 @@ import { listEdges, type EdgeListFilter, type EdgeRow } from "./store.ts";
 import { requireMission } from "./write.ts";
 
 const KEY_SEPARATOR = "|";
-const KEY_PARTS = 3;
+const KEY_PARTS = 2;
 const FIRST_ROW = 0;
 const EXTRA_ROW = 1;
 
 export function edgeCursor(cursor: string): string {
   const value = decode(cursor);
   const parts = value.split(KEY_SEPARATOR);
-  const [kind, firstId, secondId] = parts;
+  const [firstId, secondId] = parts;
   if (
     parts.length !== KEY_PARTS ||
-    !edgeKindSchema.safeParse(kind).success ||
     !identitySchema(NODE_IDENTITY_PREFIX).safeParse(firstId).success ||
     !identitySchema(NODE_IDENTITY_PREFIX).safeParse(secondId).success
   )
@@ -32,13 +29,7 @@ export function edgeCursor(cursor: string): string {
 }
 
 function edgeRecord(row: EdgeRow): Edge {
-  return row.kind === EdgeKind.Containment
-    ? { kind: row.kind, parent_id: row.first_id, child_id: row.second_id }
-    : {
-        kind: row.kind,
-        dependent_id: row.first_id,
-        depends_on_id: row.second_id,
-      };
+  return { dependent_id: row.first_id, depends_on_id: row.second_id };
 }
 
 export function edgePage(

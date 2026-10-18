@@ -13,10 +13,12 @@ import type { Transaction } from "../kernel/store.ts";
 import type { Context } from "../kernel/context.ts";
 import type { CallerIdentity } from "../kernel/caller.ts";
 import { errorSchema } from "../kernel/errors.ts";
+import { traitKeySchema } from "../kernel/trait.ts";
 
 export const MISSION_SERVICE_NAME = "mission";
 export const MISSION_IDENTITY_PREFIX = "mission";
 export const NODE_IDENTITY_PREFIX = "node";
+export const TASK_IDENTITY_PREFIX = "task";
 export const PROPOSAL_IDENTITY_PREFIX = "proposal";
 export const MISSION_INITIAL_VERSION = 1;
 export const MISSION_OPERATION_TIMEOUT_MS = 30000;
@@ -80,9 +82,22 @@ export interface WorkQueue {
   priorityUpdate(tx: Transaction, nodeId: string, priority: number): void;
 }
 
+export interface ClaimFacts {
+  work: Work;
+  requires: string[];
+}
+
+export interface ClaimFactsRow extends ClaimFacts {
+  node_id: string;
+  revision: number;
+  claims: ClaimableState[];
+}
+
 export interface MissionCollaborations {
   createMission(tx: Transaction, projectId: string, actor: HumanActor): void;
   liveNodesPinning(tx: Transaction, bindingId: string): string[];
+  claimFacts(tx: Transaction, nodeId: string): ClaimFacts | null;
+  claimFactsOf(tx: Transaction, projectId: string): ClaimFactsRow[];
 }
 
 export interface SchedulerClaims {
@@ -98,6 +113,16 @@ export interface SchedulerClaims {
     attempt: number;
     pinned_revision: number;
   } | null;
+}
+
+export type UnmatchedClaim = {
+  node_id: string;
+  revision: number;
+  claim: ClaimableState;
+};
+
+export interface SchedulerMatch {
+  unmatchedClaims(tx: Transaction, projectId: string): UnmatchedClaim[];
 }
 
 export interface IntakeCall {
@@ -239,6 +264,7 @@ export const MissionErrorCode = {
   ExecutionContextMismatch: "mission.execution.context_mismatch",
   EvidenceStorageBindingAbsent: "mission.evidence.storage_binding_absent",
   EvidenceStorageUnavailable: "mission.evidence.storage_unavailable",
+  EvidenceStorageExhausted: "mission.evidence.storage_exhausted",
   EvidenceContentPlatform: "mission.evidence.content_platform",
   ExecutionClaimNotEvaluation: "mission.execution.claim_not_evaluation",
   RequestRequirementUnknown: "mission.request.requirement_unknown",
@@ -255,18 +281,17 @@ export const MissionErrorCode = {
   VerificationsMissing: "mission.node.verifications_missing",
   BindingsInvalid: "mission.node.bindings_invalid",
   FilenameConflict: "mission.node.filename_conflict",
-  CreateRefused: "mission.node.create_refused",
+  WorkLocked: "mission.node.work_locked",
+  RequiresUnmatched: "mission.node.requires_unmatched",
   Retired: "mission.node.retired",
   Terminal: "mission.node.terminal",
   EndpointInvalid: "mission.dependency.endpoint_invalid",
   RetireRefused: "mission.node.retire_refused",
   RetireHasDependents: "mission.node.retire_has_dependents",
   RetireMismatch: "mission.node.retire_mismatch",
-  PriorityTask: "mission.node.priority_task",
   PlanInvalid: "mission.import.plan_invalid",
   MissionMismatch: "mission.import.mission_mismatch",
   ReferenceKindInvalid: "mission.import.reference_kind_invalid",
-  KindChanged: "mission.import.kind_changed",
   UnresolvedReference: "mission.import.unresolved_reference",
   VerificationUncovered: "mission.import.verification_uncovered",
   DuplicateFile: "mission.import.duplicate_file",
@@ -292,10 +317,9 @@ export const MissionBindingKind = {
   Storage: "storage",
 } as const;
 
-export const NodeKind = {
-  Initiative: "initiative",
-  Objective: "objective",
-  Task: "task",
+export const Work = {
+  Implement: "implement",
+  Examine: "examine",
 } as const;
 export const NodeState = {
   Pending: "Pending",
@@ -311,12 +335,17 @@ export const NodeState = {
   ExternalSuccess: "External.Success",
   ExternalFailed: "External.Failed",
 } as const;
+export const ClaimableState = {
+  Available: NodeState.Available,
+  Waiting: NodeState.Waiting,
+  ExternalRequested: NodeState.ExternalRequested,
+} as const;
+export type ClaimableState =
+  (typeof ClaimableState)[keyof typeof ClaimableState];
 export const RevisionWrite = {
   Import: "import",
   NodeCreate: "node.create",
   NodeUpdate: "node.update",
-  NodeMove: "node.move",
-  NodeRetire: "node.retire",
   NodeRebind: "node.rebind",
   CriterionSet: "criterion.set",
   Unblock: "unblock",
@@ -333,10 +362,6 @@ export const TaskChange = {
   MovedIn: "moved-in",
   MovedOut: "moved-out",
   Retired: "retired",
-} as const;
-export const EdgeKind = {
-  Containment: "containment",
-  Dependency: "dependency",
 } as const;
 export const ImportFormat = {
   Markdown: "markdown",
@@ -443,59 +468,83 @@ export const actionKeySchema = z
   .regex(/^[a-z][a-z0-9-]{0,62}\.(pull_request|merge_push)$/);
 export const textSchema = z.string().min(1);
 
-export const nodeKindSchema = z.enum(NodeKind);
-export type NodeKind = z.infer<typeof nodeKindSchema>;
+export const workSchema = z.enum(Work);
+export type Work = z.infer<typeof workSchema>;
+export const planFileIdSchema = z.union([
+  identitySchema(NODE_IDENTITY_PREFIX),
+  identitySchema(TASK_IDENTITY_PREFIX),
+]);
 export const nodeStateSchema = z.enum(NodeState);
 export type NodeState = z.infer<typeof nodeStateSchema>;
 export const revisionWriteSchema = z.enum(RevisionWrite);
 export type RevisionWrite = z.infer<typeof revisionWriteSchema>;
 export const taskChangeSchema = z.enum(TaskChange);
 export type TaskChange = z.infer<typeof taskChangeSchema>;
-export const edgeKindSchema = z.enum(EdgeKind);
-export type EdgeKind = z.infer<typeof edgeKindSchema>;
 export const importFormatSchema = z.enum(ImportFormat);
 export type ImportFormat = z.infer<typeof importFormatSchema>;
 export const actorKindSchema = z.enum(ActorKind);
 export type ActorKind = z.infer<typeof actorKindSchema>;
 
-export const contentSchema = z.strictObject({
+const planContentFields = {
   name: z.string().min(1),
   requirement: z.string().min(1),
   criterion: z.string().min(1),
   verifications: z.array(z.string().min(1)).min(1),
   bindings: z.array(z.string()),
+};
+export const requiresSchema = z
+  .array(traitKeySchema)
+  .refine((keys) => new Set(keys).size === keys.length, {
+    message: "Trait keys must be unique.",
+  });
+export const contentSchema = z.strictObject({
+  ...planContentFields,
+  work: workSchema,
+  requires: requiresSchema.default([]),
 });
 export type Content = z.infer<typeof contentSchema>;
+export const contentWriteSchema = z.strictObject({
+  ...planContentFields,
+  work: z.unknown().optional(),
+  requires: z.unknown().optional(),
+});
+export const taskBodySchema = z.strictObject({
+  ...planContentFields,
+  bindings: z.array(z.string()).max(0),
+});
+export type TaskBody = z.infer<typeof taskBodySchema>;
 export const planFileNameSchema = z.string().regex(/^[a-z][a-z0-9_-]*\.md$/);
 export type PlanFileName = z.infer<typeof planFileNameSchema>;
+export const taskContentSchema = z.strictObject({
+  id: identitySchema(TASK_IDENTITY_PREFIX),
+  filename: planFileNameSchema,
+  content: taskBodySchema,
+});
+export type TaskContent = z.infer<typeof taskContentSchema>;
+export const taskWriteSchema = z.strictObject({
+  id: identitySchema(TASK_IDENTITY_PREFIX).optional(),
+  filename: planFileNameSchema,
+  content: z.strictObject(planContentFields),
+});
+export type TaskWrite = z.infer<typeof taskWriteSchema>;
 
 export const nodeCreateSchema = z.strictObject({
   filename: planFileNameSchema,
-  kind: nodeKindSchema,
-  content: contentSchema,
+  content: contentWriteSchema,
+  tasks: z.array(taskWriteSchema),
   reason: z.string().min(1),
   expected_mission_version: z.number().int().positive(),
-  parent_id: identitySchema("node").optional(),
-  expected_parent_revision: z.number().int().positive().optional(),
 });
 export type NodeCreate = z.infer<typeof nodeCreateSchema>;
 export const nodeUpdateSchema = z.strictObject({
   filename: planFileNameSchema,
-  content: contentSchema,
+  content: contentWriteSchema,
+  tasks: z.array(taskWriteSchema),
   reason: z.string().min(1),
   expected_revision: z.number().int().positive(),
   expected_mission_version: z.number().int().positive(),
 });
 export type NodeUpdate = z.infer<typeof nodeUpdateSchema>;
-export const moveSchema = z.strictObject({
-  new_parent_id: identitySchema("node"),
-  reason: z.string().min(1),
-  expected_mission_version: z.number().int().positive(),
-  expected_revision: z.number().int().positive(),
-  expected_old_parent_revision: z.number().int().positive(),
-  expected_new_parent_revision: z.number().int().positive(),
-});
-export type Move = z.infer<typeof moveSchema>;
 export const graphEditSchema = z.strictObject({
   reason: z.string().min(1),
   expected_mission_version: z.number().int().positive(),
@@ -532,12 +581,6 @@ export const retireSchema = z.strictObject({
   force: z.boolean(),
 });
 export type Retire = z.infer<typeof retireSchema>;
-export const taskContentSchema = z.strictObject({
-  id: identitySchema("node"),
-  filename: planFileNameSchema,
-  content: contentSchema,
-});
-export type TaskContent = z.infer<typeof taskContentSchema>;
 export const revisionChangeSchema = z.strictObject({
   write: revisionWriteSchema,
   previous_revision: z.number().int().positive().nullable(),
@@ -545,7 +588,7 @@ export const revisionChangeSchema = z.strictObject({
   tasks: z
     .array(
       z.strictObject({
-        id: identitySchema("node"),
+        id: identitySchema(TASK_IDENTITY_PREFIX),
         change: taskChangeSchema,
         changed_fields: z.array(z.string()),
       }),
@@ -580,23 +623,15 @@ export const revisionSchema = z.strictObject({
   actor: actorSchema,
   created_at: timestamp,
   content: contentSchema,
-  tasks: z.array(taskContentSchema).optional(),
+  tasks: z.array(taskContentSchema),
   change: revisionChangeSchema,
   pinned_by_attempts: z.array(z.number().int().positive()),
 });
 export type Revision = z.infer<typeof revisionSchema>;
-export const edgeSchema = z.discriminatedUnion("kind", [
-  z.strictObject({
-    kind: z.literal(EdgeKind.Containment),
-    parent_id: identitySchema("node"),
-    child_id: identitySchema("node"),
-  }),
-  z.strictObject({
-    kind: z.literal(EdgeKind.Dependency),
-    dependent_id: identitySchema("node"),
-    depends_on_id: identitySchema("node"),
-  }),
-]);
+export const edgeSchema = z.strictObject({
+  dependent_id: identitySchema("node"),
+  depends_on_id: identitySchema("node"),
+});
 export type Edge = z.infer<typeof edgeSchema>;
 export const nodeChangeSchema = z.strictObject({
   mission_version: z.number().int().positive(),
@@ -621,31 +656,50 @@ export const retirePreviewSchema = z.strictObject({
   preview_digest: z.string().regex(/^[0-9a-f]{64}$/),
 });
 export type RetirePreview = z.infer<typeof retirePreviewSchema>;
-export const importEntrySchema = z.strictObject({
-  filename: z.string().min(1),
-  kind: nodeKindSchema,
+const planEntryFields = {
   name: z.string().min(1),
   requirement: z.string().min(1),
   criterion: z.string().min(1),
   verifications: z.array(z.string().min(1)).min(1),
   bindings: z.array(z.string()),
-  id: identitySchema("node").optional(),
-  parent: z.string().min(1).optional(),
+};
+export const importNodeEntrySchema = z.strictObject({
+  filename: z.string().min(1),
+  id: planFileIdSchema.optional(),
+  work: z.unknown(),
+  ...planEntryFields,
+  requires: z.unknown().optional(),
   depends_on: z.array(z.string().min(1)).optional(),
 });
-export type ImportEntry = z.infer<typeof importEntrySchema>;
-export const exportEntrySchema = z.strictObject({
-  filename: planFileNameSchema,
-  id: identitySchema(NODE_IDENTITY_PREFIX),
-  kind: nodeKindSchema,
-  name: z.string().min(1),
-  requirement: z.string().min(1),
-  criterion: z.string().min(1),
-  verifications: z.array(z.string().min(1)).min(1),
-  bindings: z.array(z.string()),
-  parent: planFileNameSchema.optional(),
-  depends_on: z.array(planFileNameSchema).optional(),
+export type ImportNodeEntry = z.infer<typeof importNodeEntrySchema>;
+export const importTaskEntrySchema = z.strictObject({
+  filename: z.string().min(1),
+  id: planFileIdSchema.optional(),
+  node: z.string().min(1),
+  ...planEntryFields,
 });
+export type ImportTaskEntry = z.infer<typeof importTaskEntrySchema>;
+export const importEntrySchema = z.union([
+  importNodeEntrySchema,
+  importTaskEntrySchema,
+]);
+export type ImportEntry = z.infer<typeof importEntrySchema>;
+export const exportEntrySchema = z.union([
+  z.strictObject({
+    filename: planFileNameSchema,
+    id: identitySchema(NODE_IDENTITY_PREFIX),
+    work: workSchema,
+    ...planEntryFields,
+    requires: z.array(traitKeySchema),
+    depends_on: z.array(planFileNameSchema),
+  }),
+  z.strictObject({
+    filename: planFileNameSchema,
+    id: identitySchema(TASK_IDENTITY_PREFIX),
+    node: planFileNameSchema,
+    ...planEntryFields,
+  }),
+]);
 export type ExportEntry = z.infer<typeof exportEntrySchema>;
 export const planFileEntrySchema = z.strictObject({
   filename: z.string().min(1),
@@ -727,10 +781,16 @@ export const importResultSchema = z.strictObject({
   mission_id: identitySchema("mission"),
   mission_version: z.number().int().positive(),
   assigned_ids: z.array(
-    z.strictObject({
-      filename: planFileNameSchema,
-      node_id: identitySchema("node"),
-    }),
+    z.union([
+      z.strictObject({
+        filename: planFileNameSchema,
+        node_id: identitySchema(NODE_IDENTITY_PREFIX),
+      }),
+      z.strictObject({
+        filename: planFileNameSchema,
+        task_id: identitySchema(TASK_IDENTITY_PREFIX),
+      }),
+    ]),
   ),
   changes: nodeChangeSchema,
   actor: actorSchema,
@@ -779,6 +839,10 @@ export const testedInputSchema = z.union([
   z.array(repositoryAddressSchema).min(1),
 ]);
 export type TestedInput = z.infer<typeof testedInputSchema>;
+export const landedCommitSchema = z.union([
+  repositoryAddressSchema,
+  z.array(repositoryAddressSchema).min(1),
+]);
 export const verificationSchema = z.strictObject({
   tested_input: testedInputSchema,
   results: z.array(
@@ -930,14 +994,14 @@ export const assessmentSchema = z.strictObject({
   attempt: z.number().int().nonnegative(),
   node_revision: z.number().int().positive(),
   evidence_ids: z.array(identitySchema("evidence")),
-  child_outcome_ids: z.array(identitySchema("outcome")),
+  dependency_outcome_ids: z.array(identitySchema("outcome")),
   result: assessmentResultSchema,
   rationale: textSchema,
   tested_input: testedInputSchema.nullable(),
   actor: actorSchema,
   created_at: timestamp,
   currency: currencySchema.nullable(),
-  child_node_ids: z.array(identitySchema("node")),
+  dependency_node_ids: z.array(identitySchema("node")),
   worker_version: textSchema.nullable(),
 });
 export type Assessment = z.infer<typeof assessmentSchema>;
@@ -980,12 +1044,12 @@ export const resumeSchema = humanActSchema.extend({
 export type Resume = z.infer<typeof resumeSchema>;
 export const overrideSchema = humanActSchema.extend({
   result: z.enum([AssessmentResult.Success]),
-  landed_commit: repositoryAddressSchema.optional(),
+  landed_commit: landedCommitSchema.optional(),
 });
 export type Override = z.infer<typeof overrideSchema>;
 export const unblockChangeSchema = z.strictObject({
-  content: contentSchema,
-  tasks: z.array(taskContentSchema).optional(),
+  content: contentWriteSchema,
+  tasks: z.array(taskWriteSchema),
   reason: textSchema,
 });
 export type UnblockChange = z.infer<typeof unblockChangeSchema>;
@@ -1003,9 +1067,9 @@ const nodeBase = {
   id: identitySchema("node"),
   filename: planFileNameSchema,
   mission_id: identitySchema("mission"),
-  parent_id: identitySchema("node").nullable(),
   visible_revision: z.number().int().positive(),
   content: contentSchema,
+  tasks: z.array(taskContentSchema),
   retired_at: timestamp.nullable(),
   pinned_by_attempts: z.array(z.number().int().positive()),
 };
@@ -1020,22 +1084,12 @@ const runnableNodeFields = {
     .max(Number.MAX_SAFE_INTEGER),
   depends_on: z.array(identitySchema("node")),
 };
-export const nodeSchema = z.discriminatedUnion("kind", [
-  z.strictObject({
-    ...nodeBase,
-    kind: z.literal(NodeKind.Initiative),
-    ...runnableNodeFields,
-  }),
-  z.strictObject({
-    ...nodeBase,
-    kind: z.literal(NodeKind.Objective),
-    ...runnableNodeFields,
-  }),
-  z.strictObject({
-    ...nodeBase,
-    kind: z.literal(NodeKind.Task),
-  }),
-]);
+export const nodeSchema = z.strictObject({
+  ...nodeBase,
+  ...runnableNodeFields,
+  work: workSchema,
+  requires: z.array(traitKeySchema),
+});
 export type Node = z.infer<typeof nodeSchema>;
 export const controlResultSchema = z.strictObject({
   node: nodeSchema,
@@ -1090,10 +1144,10 @@ export const evidenceSubmitSchema = executionContextSchema.extend({
 });
 export type EvidenceSubmit = z.infer<typeof evidenceSubmitSchema>;
 export const PROPOSAL_MAX = 10;
-export const proposalTaskSchema = contentSchema.omit({ bindings: true });
+export const proposalTaskSchema = taskBodySchema.omit({ bindings: true });
 export type ProposalTask = z.infer<typeof proposalTaskSchema>;
 export const proposalContentSchema = z.strictObject({
-  objective_id: identitySchema(NODE_IDENTITY_PREFIX),
+  dependency_id: identitySchema(NODE_IDENTITY_PREFIX),
   ...contentSchema.pick({ name: true, requirement: true, criterion: true })
     .shape,
   task: proposalTaskSchema,
@@ -1105,7 +1159,7 @@ export const proposalSchema = z.strictObject({
   attempt: z.number().int().nonnegative(),
   assessment_id: identitySchema("assessment"),
   content: proposalContentSchema,
-  objective_node_id: identitySchema(NODE_IDENTITY_PREFIX).nullable(),
+  created_node_id: identitySchema(NODE_IDENTITY_PREFIX).nullable(),
   approved_at: timestamp.nullable(),
   created_at: timestamp,
 });
@@ -1116,15 +1170,15 @@ export const proposalApproveSchema = z.strictObject({
 });
 export type ProposalApprove = z.infer<typeof proposalApproveSchema>;
 export const proposalApproveResultSchema = z.strictObject({
-  objective: nodeChangeSchema,
-  initiative: controlResultSchema,
+  created: nodeChangeSchema,
+  proposer: controlResultSchema,
 });
 export const assessmentSubmitSchema = executionContextSchema.extend({
   evidence_ids: z
     .array(identitySchema("evidence"))
     .refine((items) => new Set(items).size === items.length)
     .meta({ uniqueItems: true }),
-  child_outcome_ids: z
+  dependency_outcome_ids: z
     .array(identitySchema("outcome"))
     .refine((items) => new Set(items).size === items.length)
     .meta({ uniqueItems: true }),
@@ -1261,9 +1315,9 @@ export const admissionAnswerSchema = z.union([
   }),
 ]);
 export type AdmissionAnswer = z.infer<typeof admissionAnswerSchema>;
-export type ExecutionObjective = z.infer<typeof executionObjectiveSchema>;
-export const executionObjectiveSchema = z.union([
-  nodeSchema.options[1],
+export type ExecutionDependency = z.infer<typeof executionDependencySchema>;
+export const executionDependencySchema = z.union([
+  nodeSchema,
   z.strictObject({ id: identitySchema("node"), state: nodeStateSchema }),
 ]);
 export const rebindResultSchema = z.strictObject({
@@ -1337,47 +1391,50 @@ const dependencyInput = z.strictObject({
 });
 
 export const missionOperations = {
-  "execution.objective.list": {
+  "execution.dependency.list": {
     ...readOperation,
     access: AccessPolicy.Client,
     requiresExecution: true,
-    id: "mission.execution.objective.list",
+    id: "mission.execution.dependency.list",
     method: HttpMethod.Get,
-    path: "/api/mission/execution/:execution_id/objective",
+    path: "/api/mission/execution/:execution_id/dependency",
     input: readInput(
       z.strictObject({ execution_id: identitySchema("execution") }),
       z.strictObject(pageQuery),
     ),
-    output: pageOf(executionObjectiveSchema),
-    description: "List current objectives at their outcome revisions.",
+    output: pageOf(executionDependencySchema),
+    description:
+      "List the direct dependencies of an examine node at their outcome revisions.",
   },
-  "execution.objective.outcome.list": {
+  "execution.dependency.outcome.list": {
     ...readOperation,
     access: AccessPolicy.Client,
     requiresExecution: true,
-    id: "mission.execution.objective.outcome.list",
+    id: "mission.execution.dependency.outcome.list",
     method: HttpMethod.Get,
-    path: "/api/mission/execution/:execution_id/objective/outcome",
+    path: "/api/mission/execution/:execution_id/dependency/outcome",
     input: readInput(
       z.strictObject({ execution_id: identitySchema("execution") }),
       z.strictObject(pageQuery),
     ),
     output: pageOf(outcomeSchema),
-    description: "List current outcomes of current objectives.",
+    description:
+      "List the current outcomes of the direct dependencies of an examine node.",
   },
-  "execution.objective.evidence.list": {
+  "execution.dependency.evidence.list": {
     ...readOperation,
     access: AccessPolicy.Client,
     requiresExecution: true,
-    id: "mission.execution.objective.evidence.list",
+    id: "mission.execution.dependency.evidence.list",
     method: HttpMethod.Get,
-    path: "/api/mission/execution/:execution_id/objective/evidence",
+    path: "/api/mission/execution/:execution_id/dependency/evidence",
     input: readInput(
       z.strictObject({ execution_id: identitySchema("execution") }),
       z.strictObject(pageQuery),
     ),
     output: pageOf(evidenceSchema),
-    description: "List evidence named by current objective outcomes.",
+    description:
+      "List the evidence that the current outcomes of the direct dependencies name.",
   },
   "execution.evidence.list": {
     ...readOperation,
@@ -1790,7 +1847,7 @@ export const missionOperations = {
       z.strictObject({ ...pageQuery, attempt: attemptSelector(0).optional() }),
     ),
     output: pageOf(proposalSchema),
-    description: "List fix-objective proposals of an initiative.",
+    description: "List the fix-node proposals of an examine proposer.",
   },
   "proposal.approve": {
     ...writeOperation,
@@ -1806,7 +1863,7 @@ export const missionOperations = {
     }),
     output: proposalApproveResultSchema,
     description:
-      "Approve a fix-objective proposal, create its objective and unblock the initiative.",
+      "Approve a fix-node proposal, create its node, add the dependency of the proposer on it and unblock the proposer.",
   },
   "node.unblock": {
     ...writeOperation,
@@ -1951,7 +2008,6 @@ export const missionOperations = {
       z.strictObject({ mission_id: identitySchema(MISSION_IDENTITY_PREFIX) }),
       z.strictObject({
         ...pageQuery,
-        kind: edgeKindSchema.optional(),
         node_id: identitySchema(NODE_IDENTITY_PREFIX).optional(),
       }),
     ),
@@ -1983,20 +2039,12 @@ export const missionOperations = {
     path: "/api/mission/:mission_id/node",
     input: readInput(
       z.strictObject({ mission_id: identitySchema(MISSION_IDENTITY_PREFIX) }),
-      z
-        .strictObject({
-          ...pageQuery,
-          kind: nodeKindSchema.optional(),
-          state: nodeStateSchema.optional(),
-          parent_id: identitySchema(NODE_IDENTITY_PREFIX).optional(),
-          include_retired: z
-            .enum(["true", "false"])
-            .default("false")
-            .optional(),
-        })
-        .refine(
-          (query) => query.kind !== NodeKind.Task || query.state === undefined,
-        ),
+      z.strictObject({
+        ...pageQuery,
+        work: workSchema.optional(),
+        state: nodeStateSchema.optional(),
+        include_retired: z.enum(["true", "false"]).default("false").optional(),
+      }),
     ),
     output: pageOf(nodeSchema),
     description: "List mission nodes.",
@@ -2052,7 +2100,7 @@ export const missionOperations = {
       }),
     ),
     output: retirePreviewSchema,
-    description: "Preview retirement of a mission node and its descendants.",
+    description: "Preview retirement of a mission node.",
   },
   "node.rebind": {
     ...writeOperation,
@@ -2080,7 +2128,7 @@ export const missionOperations = {
       body: retireSchema,
     }),
     output: nodeChangeSchema,
-    description: "Retire a mission node and its descendants.",
+    description: "Retire a mission node.",
   },
   "node.priority.set": {
     ...writeOperation,
@@ -2093,20 +2141,7 @@ export const missionOperations = {
       body: prioritySetSchema,
     }),
     output: nodeSchema,
-    description: "Set the priority of a mission initiative or objective.",
-  },
-  "node.move": {
-    ...writeOperation,
-    id: "mission.node.move",
-    method: HttpMethod.Post,
-    path: "/api/mission/node/:node_id/move",
-    input: z.strictObject({
-      params: z.strictObject({ node_id: identitySchema(NODE_IDENTITY_PREFIX) }),
-      query: z.strictObject({}),
-      body: moveSchema,
-    }),
-    output: nodeChangeSchema,
-    description: "Move a mission node to a new parent.",
+    description: "Set the priority of a mission node.",
   },
   "criterion.set": {
     ...writeOperation,

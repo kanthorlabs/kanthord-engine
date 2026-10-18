@@ -22,6 +22,7 @@ import {
   missionOperations,
   type Evidence,
   type Revision,
+  Work,
 } from "../../mission/contract.ts";
 import { type ExecutionRecord } from "../../scheduler/contract.ts";
 import {
@@ -185,31 +186,35 @@ async function setup(t: TestContext) {
   };
   const create = async (
     filename: string,
-    kind: string,
+    work: Work,
     names: string[],
-    parentId?: string,
+    dependentId?: string,
   ) => {
     const result = await write<{ revisions: Revision[] }>(
       ["mission", "node", "create", mission.id],
       {
         filename,
-        kind,
         content: {
           ...CONTENT,
+          work,
           bindings: names.map((name) => binding(name).id),
         },
+        tasks: [],
         reason: "plan",
         expected_mission_version: await missionVersion(),
-        ...(parentId
-          ? { parent_id: parentId, expected_parent_revision: FIRST_REVISION }
-          : {}),
       },
     );
-    return result.revisions[FIRST_INDEX]!.node_id;
+    const nodeId = result.revisions[FIRST_INDEX]!.node_id;
+    if (dependentId)
+      await write(["mission", "dependency", "add", dependentId, nodeId], {
+        reason: "plan",
+        expected_mission_version: await missionVersion(),
+      });
+    return nodeId;
   };
-  const I = await create("initiative-1.md", "initiative", []);
-  const P = await create("objective-p.md", "objective", [GATED, "store"], I);
-  const p = await pushNodeBranch(t, gatedBare.bare, P, "objective p\n");
+  const I = await create("examine-1.md", Work.Examine, [GATED, MERGE]);
+  const P = await create("implement-p.md", Work.Implement, [GATED, "store"], I);
+  const p = await pushNodeBranch(t, gatedBare.bare, P, "implement p\n");
   const inbound = async (kind: string, resource: string) => {
     const created = await write<{ id: string }>(
       ["intake", "inbound", "create"],
@@ -504,8 +509,8 @@ test("E10 integration journey", { timeout: JOURNEY_TIMEOUT }, async (t) => {
       inbound_event_id: E1.id,
     });
   });
-  const Q = await h.create("objective-q.md", "objective", [MERGE], h.I);
-  const q = await pushNodeBranch(h.t, h.mergeBare.bare, Q, "objective q\n");
+  const Q = await h.create("implement-q.md", Work.Implement, [MERGE], h.I);
+  const q = await pushNodeBranch(h.t, h.mergeBare.bare, Q, "implement q\n");
   const eQ = await passingEvaluation(h.session, h.machine, {
     nodeId: Q,
     bindingId: h.merge.id,
@@ -584,7 +589,7 @@ test("E10 integration journey", { timeout: JOURNEY_TIMEOUT }, async (t) => {
       ],
     },
   });
-  await t.test("EJ10.6 the initiative assessment completes I", async () => {
+  await t.test("EJ10.6 the examine assessment completes I", async () => {
     const assessed = await j.write<{
       node: { state: string };
       outcome: { result: string };
@@ -593,7 +598,7 @@ test("E10 integration journey", { timeout: JOURNEY_TIMEOUT }, async (t) => {
       {
         ...executionContext(x2),
         evidence_ids: [ir.evidence.id, rep.evidence.id],
-        child_outcome_ids: [oP, oQ],
+        dependency_outcome_ids: [oP, oQ],
         result: AssessmentResult.Success,
         rationale: "P and Q are complete.",
         tested_input: testedInput,

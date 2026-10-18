@@ -5,7 +5,6 @@ import type { Transaction } from "../kernel/store.ts";
 import {
   ActorKind,
   ActorService,
-  NodeKind,
   type Actor,
   type AssetKind,
   type AssessmentResult,
@@ -56,12 +55,19 @@ export interface AssessmentRow {
   result: AssessmentResult;
   rationale: string;
   evidence_ids: string;
-  child_outcome_ids: string;
+  dependency_outcome_ids: string;
   tested_input: string | null;
   execution_id: string | null;
   actor: string | null;
   node_revision: number;
   created_at: number;
+}
+export interface UploadFailureRow {
+  node_id: string;
+  attempt: number;
+  storage_binding_id: string;
+  asset_id: string;
+  failed_at: number;
 }
 export interface OutcomeRow {
   id: string;
@@ -88,7 +94,7 @@ export function openAttempt(
   startPoint: StartPoint = StartPoint.NodeBranch,
 ): AttemptRow {
   const node = readNode(tx, nodeId);
-  assert.ok(node && node.kind !== NodeKind.Task && node.attempt !== null);
+  assert.ok(node);
   assert.ok(
     tx.database.isTransaction &&
       Number.isSafeInteger(node.attempt + ATTEMPT_INCREMENT),
@@ -235,6 +241,37 @@ export function insertEvidence(
       asset.expired_at,
     );
 }
+export function insertUploadFailure(
+  tx: Transaction,
+  row: UploadFailureRow,
+): void {
+  assert.ok(tx.database.isTransaction);
+  tx.database
+    .prepare(
+      "INSERT OR IGNORE INTO mission_evidence_upload_failure (node_id, attempt, storage_binding_id, asset_id, failed_at) VALUES (?, ?, ?, ?, ?)",
+    )
+    .run(
+      row.node_id,
+      row.attempt,
+      row.storage_binding_id,
+      row.asset_id,
+      row.failed_at,
+    );
+}
+export function failedBindingsOf(
+  tx: Transaction,
+  nodeId: string,
+  attempt: number,
+): string[] {
+  assert.ok(tx.database.isTransaction);
+  return (
+    tx.database
+      .prepare(
+        "SELECT storage_binding_id FROM mission_evidence_upload_failure WHERE node_id = ? AND attempt = ? ORDER BY failed_at, storage_binding_id",
+      )
+      .all(nodeId, attempt) as { storage_binding_id: string }[]
+  ).map((row) => row.storage_binding_id);
+}
 export function readEvidence(tx: Transaction, id: string): EvidenceRow | null {
   return (
     (tx.database
@@ -366,11 +403,11 @@ export function insertAssessment(
     ...row,
     sequence,
     evidence_ids: canonicalSet(row.evidence_ids),
-    child_outcome_ids: canonicalSet(row.child_outcome_ids),
+    dependency_outcome_ids: canonicalSet(row.dependency_outcome_ids),
   };
   tx.database
     .prepare(
-      "INSERT INTO mission_assessment (id, node_id, sequence, attempt, result, rationale, evidence_ids, child_outcome_ids, tested_input, execution_id, actor, node_revision, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      "INSERT INTO mission_assessment (id, node_id, sequence, attempt, result, rationale, evidence_ids, dependency_outcome_ids, tested_input, execution_id, actor, node_revision, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .run(
       stored.id,
@@ -380,7 +417,7 @@ export function insertAssessment(
       stored.result,
       stored.rationale,
       stored.evidence_ids,
-      stored.child_outcome_ids,
+      stored.dependency_outcome_ids,
       stored.tested_input,
       stored.execution_id,
       stored.actor,

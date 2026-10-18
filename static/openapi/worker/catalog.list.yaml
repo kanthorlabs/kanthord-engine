@@ -100,15 +100,18 @@ components:
                 type: array
                 items:
                   type: string
-              required_node_format:
+              declared_works:
                 type: array
                 items:
                   type: string
+                  enum:
+                    - implement
+                    - examine
             required:
               - name
               - host
               - declared_node_states
-              - required_node_format
+              - declared_works
             additionalProperties: false
         next_cursor:
           anyOf:

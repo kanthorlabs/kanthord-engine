@@ -19,8 +19,9 @@ import {
 const OVERRIDE_TEXT = "Fix it: {{rationale}}\n";
 const UNSAFE_RATIONALE = "<a & b>";
 const OVERRIDE_RENDERED = `Fix it: ${UNSAFE_RATIONALE}`;
-const REPORT_RENDERED_TAIL =
-  '\nObjectives: [{"id":"o"}]\nOutcomes: []\nEvidence: null\nFinal-snapshot verification: null';
+const NO_ENTRIES = 0;
+const EXAMINE_RENDERED_TAIL =
+  '\nDependencies: [{"id":"o"}]\nOutcomes: []\nEvidence: null\nFinal-snapshot verification: null';
 
 function templateInvalid(path: string | null, reason: string) {
   return (error: unknown) => {
@@ -104,12 +105,56 @@ test("a render fails on a placeholder without a value", () => {
 
 test("shipped templates render JSON values and drop the final newline", () => {
   assert.equal(
-    renderTemplate(SHIPPED_TEMPLATES, PromptTemplate.Report, {
-      objectives: [{ id: "o" }],
+    renderTemplate(SHIPPED_TEMPLATES, PromptTemplate.Examine, {
+      repositories: [],
+      dependencies: [{ id: "o" }],
       outcomes: [],
       evidence: null,
       verification: null,
-    }).endsWith(REPORT_RENDERED_TAIL),
+    }).endsWith(EXAMINE_RENDERED_TAIL),
     true,
+  );
+});
+
+test("the examine template renders the dependencies and the repositories only when present", () => {
+  const repositories = [
+    { name: "first", directory: "first", base_branch: "main" },
+    { name: "second", directory: "second", base_branch: "dev" },
+  ];
+  for (const listed of [[], repositories])
+    for (const dependencies of [[], [{ id: "o" }]]) {
+      const text = renderTemplate(SHIPPED_TEMPLATES, PromptTemplate.Examine, {
+        repositories: listed,
+        dependencies,
+        outcomes: [],
+        evidence: [],
+        verification: null,
+      });
+      assert.equal(
+        text.includes("Dependencies: "),
+        dependencies.length > NO_ENTRIES,
+      );
+      assert.equal(
+        text.includes(
+          "Repository first: directory `first`, base branch `main`\nRepository second: directory `second`, base branch `dev`",
+        ),
+        listed.length > NO_ENTRIES,
+      );
+      assert.ok(text.endsWith("Final-snapshot verification: null"));
+    }
+});
+
+const CONFLICT_RENDERED =
+  "The merge of origin/main into the node branch of repository web in directory `web` conflicts. Resolve every conflict in these files of that directory so that the base branch change and the node work both stay intact: a.ts, b.ts. Remove every conflict marker. Do not commit and do not abort the merge.";
+
+test("the conflict template names the binding, the directory and the base branch", () => {
+  assert.equal(
+    renderTemplate(SHIPPED_TEMPLATES, PromptTemplate.Conflict, {
+      binding: "web",
+      directory: "web",
+      base_branch: "main",
+      files: "a.ts, b.ts",
+    }),
+    CONFLICT_RENDERED,
   );
 });

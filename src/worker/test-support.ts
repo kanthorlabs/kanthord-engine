@@ -14,6 +14,7 @@ export const unusedHostTools: HostTools = {
 };
 import { createIdentity } from "../kernel/identity.ts";
 import { SHIPPED_TEMPLATES } from "../agent/prompt-templates.ts";
+import { ExecutionWork } from "./contract.ts";
 
 export const TWO_AGENT_WORKER = "two-agent@1";
 export function twoAgentDeclarationOf(name: string): WorkerDeclaration | null {
@@ -62,6 +63,7 @@ export function anthropicSetup(
     agents: [anthropicAgent()],
     templates: SHIPPED_TEMPLATES,
     resource_budget: { turns: 200, wall_time_ms: 7200000 },
+    work: ExecutionWork.Implement,
     repositories: [],
     ...overrides,
   };

@@ -232,7 +232,7 @@ Every field below is required in a result; none has a client default.
 | Field                   | Type and validation / meaning                                                                          |
 | ----------------------- | ------------------------------------------------------------------------------------------------------ |
 | `job_id`                | `job_<ulid>`; the ULID carries the creation time of the job.                                           |
-| `project_id`, `node_id` | Project and Mission node references. Only an initiative or objective can be queued; never a task.      |
+| `project_id`, `node_id` | Project and Mission node references. Only a node is queued.                                            |
 | `priority`              | Safe integer copied from the Mission-owned priority. An absent node priority is Mission's default `0`. |
 
 A priority change preserves the job identity. A release with further work
@@ -260,14 +260,11 @@ nothing, moves no job and predicts no claim.
 | `checks`                | Five `EligibilityCheck` objects in this order: `project-pause`, `node-state`, `mission-condition`, `queue-job`, `no-live-claim`. |
 
 `EligibilityCheck` holds `name`, `result` (`passed`, `failed` or
-`not-applicable`) and `condition` (`initiative-steps`, `readiness`,
-`continuation` or `null`). Only `mission-condition` holds a non-null
-`condition`. `project-pause` passes when the project is not paused; an absent project still answers `404 scheduler.eligibility.node_not_found`. `node-state` passes for a node that is not retired in
+`not-applicable`) and `condition` (`continuation` or `null`). Only
+`mission-condition` holds a non-null `condition`. `project-pause` passes when the project is not paused; an absent project still answers `404 scheduler.eligibility.node_not_found`. `node-state` passes for a node that is not retired in
 `Available`, `Waiting` or `External.Requested`. `mission-condition` reads the
-initiative steps condition for an initiative in `Available`, the readiness
-condition for `Waiting` and the continuation condition for
-`External.Requested`; it is `not-applicable` for an objective in `Available`
-and when `node-state` fails. `queue-job` passes when the queue holds a job of
+continuation condition for `External.Requested`; it is `not-applicable` for a
+node in `Available` or `Waiting` and when `node-state` fails. `queue-job` passes when the queue holds a job of
 the node. `no-live-claim` passes when no execution of the node is `running`.
 
 The report never answers binding availability and instance count, declared
@@ -300,7 +297,7 @@ settlement can also produce an earlier empty answer.
 
 The authenticated binding determines the project. The file accepts no project
 override, node/mission selector, priority, claim kind, worker-name override,
-declared-state override, health assertion, node format, attempt or revision.
+declared-state override, health assertion, trait, attempt or revision.
 An external harness's orchestrator uses the same pull as any other instance;
 it cannot acquire a chosen node or authorize its own claim.
 
@@ -311,12 +308,16 @@ it cannot acquire a chosen node or authorize its own claim.
    at most one outstanding pull or one live execution.
 2. Scheduler selects the first job that the claimant admits
    in the project's queue order. Compatibility includes exact worker name,
-   declared node state and required node format, using the pinned revision
-   of an open attempt or the current revision before the first claim.
+   declared node state and the [match](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/scheduler-service.md#match).
+   A claimant admits a node when its worker declares the `work` of the node
+   and the `traits` of its worker binding hold every trait of the `requires` list of the node.
+   The match reads the pinned revision of an open attempt or the current revision before the first claim.
+   The claim walk skips each job that the claimant does not admit.
+   A worker name with no worker declaration gives no claimant, and its pull answers `no-work`.
 3. Selection and claim are one atomic acquisition. They recheck Mission
    state, the Mission condition, the project pause, binding availability and
    count, compatibility and one-claim-per-node exclusion. A node must be
-   `Available` for a steps claim (with terminal objectives on an initiative)
+   `Available` for a steps claim
    or eligible `Waiting`/`External.Requested`
    for an evaluation claim. A `Blocked`, `Paused`, `Pending`, terminal or
    incompatible node cannot be forced through this path. A paused project
@@ -549,7 +550,7 @@ signed delivery, and a human or machine token is not delivery verification.
 ## Service collaborations and loops excluded from the command surface
 
 - **Queue insert/delete/reorder:** Mission writes affected jobs, including
-  dependency and parent effects, within the transaction committing the
+  dependency effects, within the transaction committing the
   accepted fact. Its public collaboration is a co-location contract, not a
   routable command that can detach queue membership from Mission state.
   Priority edits remain human Mission operations.
@@ -592,7 +593,6 @@ Every remote command can also answer the shared codes of [other.md](other.md#err
 | local | `cli.scheduler.execution.list.invalid_attempt`         | The `--attempt` value is not a positive safe integer.                                                                                                                                                                                                 | execution list                                  |
 | 403   | `scheduler.work.claimant_mismatch`                     | The `resource_identity` or `runtime_identity` of the pull differs from the machine identity and its live registration.                                                                                                                                | work pull                                       |
 | 404   | `scheduler.eligibility.node_not_found`                 | No node of the project holds the identity, or the project is absent.                                                                                                                                                                                  | eligibility get                                 |
-| 400   | `scheduler.eligibility.node_task`                      | The node is a task, which is never a unit of scheduling; details `{ node_id }`.                                                                                                                                                                       | eligibility get                                 |
 | 404   | `scheduler.execution.not_found`                        | No execution holds the identity.                                                                                                                                                                                                                      | claim get, execution get                        |
 | 403   | `scheduler.execution.not_owner`                        | The client does not own the execution.                                                                                                                                                                                                                | claim get                                       |
 | 409   | `scheduler.execution.not_running`                      | The execution is no longer running when its write transaction checks the proof.                                                                                                                                                                       | execution release, and every execution mutation |

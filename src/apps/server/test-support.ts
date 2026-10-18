@@ -12,7 +12,7 @@ import { repositoryOperations } from "../../repository/contract.ts";
 import { projectOperations } from "../../project/contract.ts";
 import { llmOperations } from "../../llm/contract.ts";
 import { agentOperations } from "../../agent/contract.ts";
-import { missionOperations, NodeKind } from "../../mission/contract.ts";
+import { missionOperations, Work, NodeState } from "../../mission/contract.ts";
 import {
   OperationResultType,
   type Operation,
@@ -111,6 +111,93 @@ export const servicePing = {
   status: HttpStatus.OK,
   description: "Test the service access policy.",
 } as const;
+
+export const COVERING_WORKER_BINDINGS = {
+  coder: {
+    kind: "worker",
+    config: { worker: "coder@1", instance_count: 0, traits: [] },
+  },
+  reviewer: {
+    kind: "worker",
+    config: { worker: "reviewer@1", instance_count: 0, traits: [] },
+  },
+} as const;
+export const COVERING_AGENTS = ["swe@1", "re@1"] as const;
+
+type EnablementBody = z.input<
+  (typeof agentOperations)["enablement.put"]["input"]
+>["body"];
+export interface CoveringProvider {
+  platform: EnablementBody["agent_providers"][number]["provider"];
+  credential: string;
+  configuration: EnablementBody["default_configuration"];
+}
+
+export async function enableCoveringAgents(
+  env: NodeJS.ProcessEnv,
+  provider?: CoveringProvider,
+): Promise<void> {
+  assert.ok(env.KANTHORD_ENDPOINT);
+  assert.ok(env.KANTHORD_TOKEN);
+  const call = humanCaller({
+    endpoint: env.KANTHORD_ENDPOINT,
+    token: env.KANTHORD_TOKEN,
+  });
+  const enabled: CoveringProvider = provider ?? {
+    platform: "anthropic",
+    credential: "covering-llm",
+    configuration: NATIVE_DEFAULTS,
+  };
+  if (provider === undefined)
+    await call(llmOperations.create, {
+      params: {},
+      query: {},
+      body: {
+        name: enabled.credential,
+        platform: "anthropic",
+        metadata: null,
+        [SECRET_FIELD]: { key: "covering-provider-key" },
+      },
+    });
+  for (const agent of COVERING_AGENTS)
+    await call(agentOperations["enablement.put"], {
+      params: { agent_name: agent },
+      query: {},
+      body: {
+        agent_providers: [
+          {
+            name: enabled.configuration.agent_provider,
+            provider: enabled.platform,
+            credential: enabled.credential,
+          },
+        ],
+        default_configuration: enabled.configuration,
+        fallback_configurations: [],
+      },
+    });
+}
+
+const COVERING_APPLY_EXIT = 0;
+
+export async function applyCoveringBindings(
+  env: NodeJS.ProcessEnv,
+  directory: string,
+  projectId: string,
+  version = 1,
+): Promise<number> {
+  const path = join(directory, `covering-${projectId}-${version}.json`);
+  writePrivate(
+    path,
+    JSON.stringify({ version, bindings: COVERING_WORKER_BINDINGS }),
+  );
+  const result = await kanthord(
+    ["project", "binding", "apply", projectId, "--file", path],
+    env,
+  );
+  assert.equal(result.code, COVERING_APPLY_EXIT, result.stderr);
+  return (JSON.parse(result.stdout) as { binding_set_version: number })
+    .binding_set_version;
+}
 
 export const domainHealth = {
   repository: { toolchain: HealthStatus.Healthy },
@@ -1189,13 +1276,13 @@ export function seedUnresolvedRequest(
     assert.ok(mission, "The project holds a mission.");
     tx.database
       .prepare(
-        "INSERT INTO mission_node (id, mission_id, kind, filename, parent_id, state, attempt, priority, retired_at, created_at) VALUES (?, ?, ?, ?, NULL, NULL, ?, NULL, NULL, ?)",
+        "INSERT INTO mission_node (id, mission_id, filename, state, attempt, priority, retired_at, created_at) VALUES (?, ?, ?, ?, ?, NULL, NULL, ?)",
       )
       .run(
         nodeId,
         mission.id,
-        NodeKind.Objective,
         `${nodeId}.md`,
+        NodeState.ExternalRequested,
         FIRST_SEEDED_ATTEMPT,
         now,
       );
@@ -1269,7 +1356,7 @@ async function seededBareRepository(root: string, name: string) {
   const git = simpleGit(seed);
   await git.addConfig("user.name", "Test Journey");
   await git.addConfig("user.email", "test_journey@example.invalid");
-  writeFileSync(join(seed, "README.md"), "test_journey repository\n");
+  writeFileSync(join(seed, "README.md"), `test_journey ${name} repository\n`);
   await git.add("README.md");
   await git.commit("initial");
   await git.push("origin", "main");
@@ -1681,12 +1768,7 @@ async function storageNode(
   ids: { projectId: string; missionId: string },
   bindingIds: string[],
 ) {
-  const create = async (
-    filename: string,
-    kind: string,
-    bindings: string[],
-    parentId?: string,
-  ) => {
+  const create = async (filename: string, work: Work, bindings: string[]) => {
     const { version } = await cli.read<{ version: number }>([
       "mission",
       "get",
@@ -1696,22 +1778,26 @@ async function storageNode(
       ["mission", "node", "create", ids.missionId],
       {
         filename,
-        kind,
-        content: { ...STORAGE_NODE_CONTENT, bindings },
+        content: { ...STORAGE_NODE_CONTENT, work, bindings },
+        tasks: [],
         reason: "plan",
         expected_mission_version: version,
-        ...(parentId
-          ? {
-              parent_id: parentId,
-              expected_parent_revision: STORAGE_FIRST_REVISION,
-            }
-          : {}),
       },
     );
     return answer.revisions[STORAGE_FIRST_INDEX]!.node_id;
   };
-  const initiative = await create("initiative.md", "initiative", []);
-  return create("objective.md", "objective", bindingIds, initiative);
+  const examine = await create("examine.md", Work.Examine, []);
+  const implement = await create("implement.md", Work.Implement, bindingIds);
+  const { version } = await cli.read<{ version: number }>([
+    "mission",
+    "get",
+    ids.projectId,
+  ]);
+  await cli.write(["mission", "dependency", "add", examine, implement], {
+    reason: "plan",
+    expected_mission_version: version,
+  });
+  return implement;
 }
 
 async function storageExecution(
@@ -1821,7 +1907,6 @@ const WORKER_PROJECT_NODE = {
 const FIRST_BINDING_SET_VERSION = 1;
 const FIRST_MISSION_VERSION = 1;
 const SECOND_MISSION_VERSION = 2;
-const FIRST_NODE_REVISION = 1;
 
 export function humanCaller(
   fixture: Pick<
@@ -1923,31 +2008,41 @@ export async function provisionWorkerProject(
     query: {},
     body: null,
   });
-  const initiative = await call(missionOperations["node.create"], {
+  const examine = await call(missionOperations["node.create"], {
     params: { mission_id: mission.id },
     query: {},
     body: {
-      filename: "initiative-1.md",
-      kind: NodeKind.Initiative,
-      content: { ...WORKER_PROJECT_NODE, bindings: [] },
+      filename: "examine-1.md",
+      content: { ...WORKER_PROJECT_NODE, work: Work.Examine, bindings: [] },
+      tasks: [],
       reason: "plan",
       expected_mission_version: FIRST_MISSION_VERSION,
     },
   });
-  await call(missionOperations["node.create"], {
+  const implement = await call(missionOperations["node.create"], {
     params: { mission_id: mission.id },
     query: {},
     body: {
-      filename: "objective-1.md",
-      kind: NodeKind.Objective,
+      filename: "implement-1.md",
       content: {
         ...WORKER_PROJECT_NODE,
+        work: Work.Implement,
         bindings: [bindingSet.bindings.repo!.id],
       },
+      tasks: [],
       reason: "plan",
       expected_mission_version: SECOND_MISSION_VERSION,
-      parent_id: initiative.revisions[0]!.node_id,
-      expected_parent_revision: FIRST_NODE_REVISION,
+    },
+  });
+  await call(missionOperations["dependency.add"], {
+    params: {
+      node_id: examine.revisions[0]!.node_id,
+      depends_on_id: implement.revisions[0]!.node_id,
+    },
+    query: {},
+    body: {
+      reason: "plan",
+      expected_mission_version: implement.mission_version,
     },
   });
   return {

@@ -4,13 +4,12 @@ import { testHumanIdentity } from "../kernel/test-identity.ts";
 import { OperationError } from "../kernel/errors.ts";
 import { createIdentity } from "../kernel/identity.ts";
 import {
-  NodeKind,
+  Work,
   RepositoryAction,
   MissionErrorCode,
   AssessmentResult,
   ActorKind,
 } from "./contract.ts";
-import { ControlError } from "./control.ts";
 import { closeAttempt, openAttempt } from "./record-store.ts";
 import {
   insertAssessment,
@@ -65,8 +64,8 @@ test("action pages cross actionless batches and never derive attempts newer than
   };
   h.store.transaction((tx) => {
     tx.database
-      .prepare("UPDATE mission_node SET kind = ? WHERE id = ?")
-      .run(NodeKind.Objective, h.node_id);
+      .prepare("UPDATE mission_node_revision SET work = ? WHERE node_id = ?")
+      .run(Work.Implement, h.node_id);
     tx.database
       .prepare(
         "UPDATE mission_node_revision SET bindings = ? WHERE node_id = ?",
@@ -160,7 +159,7 @@ test("assessment and outcome reads filter attempt zero, evaluate currency, union
       evidence_ids: JSON.stringify(
         evidenceIds.slice(FIRST_INDEX, SECOND_ATTEMPT),
       ),
-      child_outcome_ids: "[]",
+      dependency_outcome_ids: "[]",
       tested_input: null,
       execution_id: createIdentity("execution"),
       actor: null,
@@ -262,8 +261,8 @@ test("attempt and external-action reads page in descending order and filter atte
   });
   h.store.transaction((tx) => {
     tx.database
-      .prepare("UPDATE mission_node SET kind = ? WHERE id = ?")
-      .run(NodeKind.Objective, h.node_id);
+      .prepare("UPDATE mission_node_revision SET work = ? WHERE node_id = ?")
+      .run(Work.Implement, h.node_id);
     tx.database
       .prepare(
         "UPDATE mission_node_revision SET bindings = ? WHERE node_id = ?",
@@ -345,7 +344,7 @@ test("attempt and external-action reads page in descending order and filter atte
   );
 });
 
-test("record reads refuse absent attempts, malformed cursors and task nodes", async (t) => {
+test("record reads refuse absent attempts and malformed cursors", async (t) => {
   const h = controlHarness(t, IDENTITY);
   await assert.rejects(
     h.invoke("attempt.get", {
@@ -367,16 +366,4 @@ test("record reads refuse absent attempts, malformed cursors and task nodes", as
         error.code === MissionErrorCode.CursorInvalid,
     );
   }
-  h.store.database
-    .prepare("UPDATE mission_node SET kind = ? WHERE id = ?")
-    .run(NodeKind.Task, h.node_id);
-  await assert.rejects(
-    h.invoke("attempt.list", {
-      params: { node_id: h.node_id },
-      query: {},
-      body: null,
-    }),
-    (error) =>
-      error instanceof OperationError && error.code === ControlError.Task,
-  );
 });

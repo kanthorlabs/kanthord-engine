@@ -65,6 +65,13 @@ export function layerText(
   };
 }
 
+const LISTED_REPOSITORIES_MIN = 2;
+export interface WorkRepository {
+  name: string;
+  directory: string;
+  base_branch: string;
+}
+
 export function renderWorkPrompt(
   templates: PromptTemplates,
   unit: {
@@ -76,11 +83,13 @@ export function renderWorkPrompt(
       criterion: string;
       verifications: string[];
     };
+    repositories?: readonly WorkRepository[];
   },
 ): WorkPrompt {
   assert.ok(unit.node_id);
   assert.ok(Number.isSafeInteger(unit.revision));
   const { name, requirement, criterion, verifications } = unit.content;
+  const repositories = unit.repositories ?? [];
   const text = renderTemplate(templates, PromptTemplate.Work, {
     name,
     requirement,
@@ -89,6 +98,8 @@ export function renderWorkPrompt(
       number: index + 1,
       command,
     })),
+    repositories:
+      repositories.length >= LISTED_REPOSITORIES_MIN ? repositories : [],
   });
   return { text, digest: digest(text) };
 }

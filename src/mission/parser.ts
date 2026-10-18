@@ -4,10 +4,10 @@ import { HttpStatus } from "../kernel/http.ts";
 import { identitySchema } from "../kernel/identity.ts";
 import {
   MissionErrorCode,
-  NodeKind,
-  nodeKindSchema,
+  NODE_IDENTITY_PREFIX,
+  TASK_IDENTITY_PREFIX,
+  planFileIdSchema,
   planFileNameSchema,
-  type NodeKind as NodeKindType,
 } from "./contract.ts";
 
 const DELIMITER = "---";
@@ -21,16 +21,30 @@ const LINE_STEP = 1;
 const HEADING_CAPTURE_GROUP = 1;
 const AFTER_OPENING_DELIMITER = 1;
 const AFTER_CLOSING_DELIMITER_OFFSET = 1;
-const NODE_PREFIX = "node";
 const ALIAS_LIMIT = 100;
 const FIELD = {
   Id: "id",
-  Kind: "kind",
-  Parent: "parent",
+  Work: "work",
+  Node: "node",
   DependsOn: "depends_on",
+  Requires: "requires",
   Bindings: "bindings",
   Verifications: "verifications",
 } as const;
+const NODE_FILE_FIELDS: readonly string[] = [
+  FIELD.Id,
+  FIELD.Work,
+  FIELD.DependsOn,
+  FIELD.Requires,
+  FIELD.Bindings,
+  FIELD.Verifications,
+];
+const TASK_FILE_FIELDS: readonly string[] = [
+  FIELD.Id,
+  FIELD.Node,
+  FIELD.Bindings,
+  FIELD.Verifications,
+];
 const SECTION = { Requirement: "Requirement", Criterion: "Criterion" } as const;
 const REASON = {
   FrontMatterMissing: "front_matter_missing",
@@ -38,10 +52,10 @@ const REASON = {
   FrontMatterInvalid: "front_matter_invalid",
   UnknownKey: "unknown_key",
   FieldInvalid: "field_invalid",
-  KindInvalid: "kind_invalid",
-  ParentRequired: "parent_required",
-  ParentForbidden: "parent_forbidden",
+  FormInvalid: "form_invalid",
+  IdPrefixInvalid: "id_prefix_invalid",
   DependsOnForbidden: "depends_on_forbidden",
+  RequiresForbidden: "requires_forbidden",
   HeadingMissing: "heading_missing",
   HeadingRepeated: "heading_repeated",
   SectionMissing: "section_missing",
@@ -50,18 +64,30 @@ const REASON = {
   BodyInvalid: "body_invalid",
 } as const;
 
-export interface ParsedPlanFile {
+interface ParsedPlanContent {
   filename: string;
   id?: string;
-  kind: NodeKindType;
-  parent?: string;
-  depends_on: string[];
   bindings: string[];
   verifications: string[];
   name: string;
   requirement: string;
   criterion: string;
 }
+
+export interface ParsedNodeFile extends ParsedPlanContent {
+  work: unknown;
+  requires: unknown;
+  depends_on: string[];
+}
+
+export interface ParsedTaskFile extends ParsedPlanContent {
+  node: string;
+}
+
+export type ParsedPlanFile = ParsedNodeFile | ParsedTaskFile;
+type ParsedFields =
+  | Omit<ParsedNodeFile, "name" | "requirement" | "criterion">
+  | Omit<ParsedTaskFile, "name" | "requirement" | "criterion">;
 
 function refuse(filename: string, reason: string): never {
   throw new OperationError(
@@ -99,12 +125,7 @@ function frontMatter(
   }
   if (value === null || typeof value !== OBJECT_TYPE || Array.isArray(value))
     refuse(filename, REASON.FrontMatterInvalid);
-  const mapping = value as Record<string, unknown>;
-  const permitted = Object.values(FIELD) as string[];
-  for (const key of Object.keys(mapping)) {
-    if (!permitted.includes(key)) refuse(filename, REASON.UnknownKey);
-  }
-  return mapping;
+  return value as Record<string, unknown>;
 }
 
 function stringList(
@@ -127,38 +148,42 @@ function stringList(
 function fields(
   filename: string,
   mapping: Record<string, unknown>,
-): Omit<ParsedPlanFile, "name" | "requirement" | "criterion"> {
-  const kind = mapping[FIELD.Kind];
-  if (!nodeKindSchema.safeParse(kind).success)
-    refuse(filename, REASON.KindInvalid);
-  const typedKind = kind as NodeKindType;
-  const id = mapping[FIELD.Id];
-  if (id !== undefined && !identitySchema(NODE_PREFIX).safeParse(id).success)
-    refuse(filename, REASON.FieldInvalid);
-  const parent = mapping[FIELD.Parent];
-  if (parent !== undefined && !planFileNameSchema.safeParse(parent).success)
-    refuse(filename, REASON.FieldInvalid);
-  if (typedKind === NodeKind.Initiative && parent !== undefined)
-    refuse(filename, REASON.ParentForbidden);
-  if (typedKind !== NodeKind.Initiative && parent === undefined)
-    refuse(filename, REASON.ParentRequired);
-  if (typedKind === NodeKind.Task && Object.hasOwn(mapping, FIELD.DependsOn))
+): ParsedFields {
+  const isNode = Object.hasOwn(mapping, FIELD.Work);
+  if (isNode === Object.hasOwn(mapping, FIELD.Node))
+    refuse(filename, REASON.FormInvalid);
+  if (!isNode && Object.hasOwn(mapping, FIELD.DependsOn))
     refuse(filename, REASON.DependsOnForbidden);
-  const dependsOn = stringList(filename, mapping[FIELD.DependsOn], true);
-  const bindings = stringList(filename, mapping[FIELD.Bindings], false);
-  const verifications = stringList(
-    filename,
-    mapping[FIELD.Verifications],
-    false,
-  );
-  return {
+  if (!isNode && Object.hasOwn(mapping, FIELD.Requires))
+    refuse(filename, REASON.RequiresForbidden);
+  const permitted = isNode ? NODE_FILE_FIELDS : TASK_FILE_FIELDS;
+  for (const key of Object.keys(mapping)) {
+    if (!permitted.includes(key)) refuse(filename, REASON.UnknownKey);
+  }
+  const id = mapping[FIELD.Id];
+  if (id !== undefined && !planFileIdSchema.safeParse(id).success)
+    refuse(filename, REASON.FieldInvalid);
+  const prefix = isNode ? NODE_IDENTITY_PREFIX : TASK_IDENTITY_PREFIX;
+  if (id !== undefined && !identitySchema(prefix).safeParse(id).success)
+    refuse(filename, REASON.IdPrefixInvalid);
+  const shared = {
     filename,
     ...(id !== undefined ? { id: id as string } : {}),
-    kind: typedKind,
-    ...(parent !== undefined ? { parent: parent as string } : {}),
-    depends_on: dependsOn,
-    bindings,
-    verifications,
+    bindings: stringList(filename, mapping[FIELD.Bindings], false),
+    verifications: stringList(filename, mapping[FIELD.Verifications], false),
+  };
+  if (!isNode) {
+    const node = mapping[FIELD.Node];
+    if (!planFileNameSchema.safeParse(node).success)
+      refuse(filename, REASON.FieldInvalid);
+    return { ...shared, node: node as string };
+  }
+  const requires = mapping[FIELD.Requires];
+  return {
+    ...shared,
+    work: mapping[FIELD.Work],
+    requires: requires === undefined ? [] : requires,
+    depends_on: stringList(filename, mapping[FIELD.DependsOn], true),
   };
 }
 

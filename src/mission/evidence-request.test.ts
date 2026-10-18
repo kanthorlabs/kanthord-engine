@@ -7,7 +7,7 @@ import { testHumanIdentity } from "../kernel/test-identity.ts";
 import {
   AssetKind,
   MissionErrorCode,
-  NodeKind,
+  Work,
   NodeState,
   PlatformAddressKind,
   RepositoryAction,
@@ -57,17 +57,19 @@ function fixture(t: TestContext) {
     insertNode(tx, {
       id: nodeId,
       mission_id: h.mission_id,
-      kind: NodeKind.Objective,
-      filename: "objective.md",
-      parent_id: h.node_id,
+      filename: "implement.md",
       created_at: NOW,
     });
     const revision = getRevision(tx, h.node_id, FIRST_ATTEMPT);
     insertRevision(tx, {
       ...revision,
       node_id: nodeId,
-      filename: "objective.md",
-      content: { ...revision.content, bindings: [bindingId] },
+      filename: "implement.md",
+      content: {
+        ...revision.content,
+        work: Work.Implement,
+        bindings: [bindingId],
+      },
       tasks: [],
     });
     openAttempt(tx, nodeId, FIRST_ATTEMPT, h.executionActor, NOW);
@@ -161,6 +163,12 @@ test("request admission rejects a steps claim, unknown action and mismatched pla
     {
       kind: PlatformAddressKind.BranchPush,
       resource_identity: RESOURCE,
+      branch: "develop",
+      commit: "a".repeat(40),
+    },
+    {
+      kind: PlatformAddressKind.BranchPush,
+      resource_identity: "repository:github:foreign/repo",
       branch: "main",
       commit: "a".repeat(40),
     },
@@ -181,4 +189,23 @@ test("request admission rejects a steps claim, unknown action and mismatched pla
     actionStatesOf(tx, h.dependencies.bindings, h.node_id, FIRST_ATTEMPT),
   );
   assert.equal(states[FIRST_INDEX]!.resolution, Resolution.Unrequested);
+});
+
+test("a pull request request admits a branch push address of its binding", async (t) => {
+  const h = fixture(t);
+  h.store.transaction((tx) =>
+    setNodeState(tx, h.node_id, NodeState.Evaluating),
+  );
+  const address = {
+    kind: PlatformAddressKind.BranchPush,
+    resource_identity: RESOURCE,
+    branch: "main",
+    commit: "a".repeat(40),
+  } as const;
+  const evidence = await h.request({ ...h.body, address });
+  assert.deepEqual(evidence.assets[FIRST_INDEX]!.address, address);
+  const states = h.store.transaction((tx) =>
+    actionStatesOf(tx, h.dependencies.bindings, h.node_id, FIRST_ATTEMPT),
+  );
+  assert.equal(states[FIRST_INDEX]!.resolution, Resolution.Unresolved);
 });

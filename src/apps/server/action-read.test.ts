@@ -24,6 +24,7 @@ import {
   type Evidence,
   type PlatformAddress,
   type Revision,
+  Work,
 } from "../../mission/contract.ts";
 import type { ExecutionRecord } from "../../scheduler/contract.ts";
 import { environment, kanthord } from "./cli-support.ts";
@@ -176,43 +177,25 @@ async function setup(t: TestContext) {
   };
   const version = async () =>
     (await read<{ version: number }>(["mission", "get", project.id])).version;
-  const create = async (
-    filename: string,
-    kind: string,
-    names: string[],
-    parentId?: string,
-  ) => {
+  const create = async (filename: string, names: string[]) => {
     const answer = await write<{ revisions: Revision[] }>(
       ["mission", "node", "create", mission.id],
       {
         filename,
-        kind,
         content: {
           ...CONTENT,
+          work: Work.Implement,
           bindings: names.map((name) => binding(name).id),
         },
+        tasks: [],
         reason: "plan",
         expected_mission_version: await version(),
-        ...(parentId
-          ? { parent_id: parentId, expected_parent_revision: FIRST_REVISION }
-          : {}),
       },
     );
     return answer.revisions[FIRST_INDEX]!.node_id;
   };
-  const initiative = await create("initiative.md", "initiative", []);
-  const gatedNode = await create(
-    "gated.md",
-    "objective",
-    ["gated"],
-    initiative,
-  );
-  const pushedNode = await create(
-    "pushed.md",
-    "objective",
-    ["pushed"],
-    initiative,
-  );
+  const gatedNode = await create("gated.md", ["gated"]);
+  const pushedNode = await create("pushed.md", ["pushed"]);
   for (const [nodeId, value] of [
     [gatedNode, GATED_PRIORITY],
     [pushedNode, PUSHED_PRIORITY],
@@ -310,7 +293,7 @@ async function setup(t: TestContext) {
       {
         ...context(evaluation),
         evidence_ids: [run.evidence.id],
-        child_outcome_ids: [],
+        dependency_outcome_ids: [],
         result: "success",
         rationale: "met",
         tested_input: snapshot,

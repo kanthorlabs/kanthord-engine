@@ -9,6 +9,7 @@ import {
   AssetKind,
   NodeState,
   MissionErrorCode,
+  Work,
   type evidenceDeleteSchema,
 } from "./contract.ts";
 import { isTerminal } from "./admission.ts";
@@ -25,7 +26,12 @@ import {
   type AssetRow,
 } from "./record-store.ts";
 import { endLiveClaim, transition } from "./control.ts";
-import { readMissionNodes, type NodeRow } from "./store.ts";
+import {
+  readDependencies,
+  readMissionNodes,
+  workOf,
+  type NodeRow,
+} from "./store.ts";
 import type { Dependencies } from "./service.ts";
 import { requireMission } from "./write.ts";
 import { authorizeStorage } from "./authorization.ts";
@@ -52,25 +58,20 @@ export function admitDelete(
     body.expected_mission_version,
   );
   if (body.force) return mission;
-  const remaining = new Map(
+  const nodes = new Map(
     readMissionNodes(tx, node.mission_id).map((row) => [row.id, row]),
   );
-  let current: NodeRow = node;
-  const bound = remaining.size;
-  for (let index = 0; index < bound; index++) {
-    assert.ok(remaining.delete(current.id));
-    if (!isTerminal(current.state))
-      throw new OperationError(
-        HttpStatus.Conflict,
-        MissionErrorCode.EvidenceRemoveNodeLive,
-        "The evidence node or an ancestor is live.",
-      );
-    if (current.parent_id === null) return mission;
-    const parent = remaining.get(current.parent_id);
-    assert.ok(parent);
-    current = parent;
-  }
-  assert.fail("Containment must reach its root.");
+  const dependents = readDependencies(tx, node.mission_id)
+    .filter((edge) => edge.depends_on === node.id)
+    .map((edge) => nodes.get(edge.dependent))
+    .filter((row) => row !== undefined && workOf(tx, row.id) === Work.Examine);
+  if (![node, ...dependents].every((row) => isTerminal(row?.state ?? null)))
+    throw new OperationError(
+      HttpStatus.Conflict,
+      MissionErrorCode.EvidenceRemoveNodeLive,
+      "The evidence node or a direct examine dependent is live.",
+    );
+  return mission;
 }
 
 export function prepareAssetDelete(

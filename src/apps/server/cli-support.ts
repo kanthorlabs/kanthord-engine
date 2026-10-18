@@ -406,7 +406,7 @@ export async function passingEvaluation(
     {
       ...executionContext(x2),
       evidence_ids: [r1.evidence.id, w1.evidence.id],
-      child_outcome_ids: [],
+      dependency_outcome_ids: [],
       result: "success",
       rationale: "verified",
       tested_input: repositorySnapshot(bindingId, commit),

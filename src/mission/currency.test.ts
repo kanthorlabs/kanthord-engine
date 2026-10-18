@@ -3,12 +3,7 @@ import { test, type TestContext } from "node:test";
 import { createIdentity } from "../kernel/identity.ts";
 import { canonicalJSON } from "../kernel/json.ts";
 import { testHumanIdentity } from "../kernel/test-identity.ts";
-import {
-  ActorKind,
-  AssessmentResult,
-  NodeKind,
-  NodeState,
-} from "./contract.ts";
+import { ActorKind, AssessmentResult, Work, NodeState } from "./contract.ts";
 import { currencyOf, currentAssessmentOf, CurrencyReason } from "./currency.ts";
 import { assessmentRecord } from "./record-read.ts";
 import {
@@ -19,7 +14,13 @@ import {
   insertEvidence,
   type AssessmentRow,
 } from "./record-store.ts";
-import { insertMission, insertNode, setNodeState } from "./store.ts";
+import {
+  deleteDependency,
+  insertDependency,
+  insertMission,
+  insertNode,
+  setNodeState,
+} from "./store.ts";
 import { missionHarness } from "./test-support.ts";
 
 const FIRST_ATTEMPT = 1;
@@ -28,7 +29,7 @@ const NOW = 100;
 const ACTOR = { kind: ActorKind.Human, account: "ulrich", name: "Ulrich" };
 const WORKER = "coder@1";
 
-function fixture(t: TestContext, kind: NodeKind = NodeKind.Objective) {
+function fixture(t: TestContext, work: Work = Work.Implement) {
   const h = missionHarness(t, testHumanIdentity("ulrich", "Ulrich", "token"), {
     executionAttribution: {
       of: () => ({ client_id: null, name: null, worker_name: WORKER }),
@@ -40,11 +41,14 @@ function fixture(t: TestContext, kind: NodeKind = NodeKind.Objective) {
     insertNode(tx, {
       id: nodeId,
       mission_id: missionId,
-      kind,
       filename: "node.md",
-      parent_id: null,
       created_at: NOW,
     });
+    tx.database
+      .prepare(
+        "INSERT INTO mission_node_revision (node_id, revision, filename, name, requirement, criterion, verifications, bindings, work, requires, tasks, change, reason, actor, created_at) VALUES (?, ?, 'node.md', 'name', 'requirement', 'criterion', '[]', '[]', ?, '[]', '[]', '{}', 'reason', ?, ?)",
+      )
+      .run(nodeId, FIRST_ATTEMPT, work, canonicalJSON(ACTOR), NOW);
     openAttempt(tx, nodeId, FIRST_ATTEMPT, ACTOR, NOW);
     return missionId;
   });
@@ -59,7 +63,7 @@ function fixture(t: TestContext, kind: NodeKind = NodeKind.Objective) {
         result: AssessmentResult.Success,
         rationale: "Reviewed",
         evidence_ids: "[]",
-        child_outcome_ids: "[]",
+        dependency_outcome_ids: "[]",
         tested_input: null,
         execution_id: createIdentity("execution"),
         actor: null,
@@ -84,7 +88,7 @@ test("a later human revision and unrelated evidence preserve the pinned assessme
   h.store.transaction((tx) => {
     tx.database
       .prepare(
-        "INSERT INTO mission_node_revision (node_id, revision, filename, name, requirement, criterion, verifications, bindings, change, reason, actor, created_at) VALUES (?, ?, 'node.md', 'changed', 'requirement', 'criterion', '[]', '[]', '{}', 'reason', ?, ?)",
+        "INSERT INTO mission_node_revision (node_id, revision, filename, name, requirement, criterion, verifications, bindings, work, requires, tasks, change, reason, actor, created_at) VALUES (?, ?, 'node.md', 'changed', 'requirement', 'criterion', '[]', '[]', 'implement', '[]', '[]', '{}', 'reason', ?, ?)",
       )
       .run(h.node_id, SECOND_ATTEMPT, canonicalJSON(ACTOR), NOW);
     insertEvidence(
@@ -171,19 +175,18 @@ test("closure whose outcome names the assessment preserves its currency", (t) =>
   assert.equal(h.currency().context_matches, true);
 });
 
-test("a changed child outcome invalidates the initiative's selected context without state changes", (t) => {
-  const h = fixture(t, NodeKind.Initiative);
+test("a new dependency outcome makes an assessment not current", (t) => {
+  const h = fixture(t, Work.Examine);
   const childId = createIdentity("node");
-  h.store.transaction((tx) =>
+  h.store.transaction((tx) => {
     insertNode(tx, {
       id: childId,
       mission_id: h.mission_id,
-      kind: NodeKind.Objective,
       filename: "child.md",
-      parent_id: h.node_id,
       created_at: NOW,
-    }),
-  );
+    });
+    insertDependency(tx, h.mission_id, h.node_id, childId);
+  });
   const childAssessment = h.assessment({
     node_id: childId,
     attempt: 0,
@@ -200,18 +203,18 @@ test("a changed child outcome invalidates the initiative's selected context with
       created_at: NOW,
     }),
   );
-  const parent = h.assessment({
-    child_outcome_ids: canonicalJSON([outcome.id]),
+  const dependent = h.assessment({
+    dependency_outcome_ids: canonicalJSON([outcome.id]),
   });
   assert.equal(
-    h.store.transaction((tx) => currencyOf(tx, parent)).current,
+    h.store.transaction((tx) => currencyOf(tx, dependent)).current,
     true,
   );
   h.store.transaction((tx) =>
     insertOutcome(tx, { ...outcome, id: createIdentity("outcome") }),
   );
   assert.equal(
-    h.store.transaction((tx) => currencyOf(tx, parent)).context_matches,
+    h.store.transaction((tx) => currencyOf(tx, dependent)).context_matches,
     false,
   );
   assert.equal(
@@ -219,6 +222,48 @@ test("a changed child outcome invalidates the initiative's selected context with
       currentAssessmentOf(tx, h.node_id, FIRST_ATTEMPT),
     ),
     null,
+  );
+});
+
+test("a removed dependency makes an assessment not current", (t) => {
+  const h = fixture(t, Work.Examine);
+  const childId = createIdentity("node");
+  h.store.transaction((tx) => {
+    insertNode(tx, {
+      id: childId,
+      mission_id: h.mission_id,
+      filename: "child.md",
+      created_at: NOW,
+    });
+    insertDependency(tx, h.mission_id, h.node_id, childId);
+  });
+  const childAssessment = h.assessment({
+    node_id: childId,
+    attempt: 0,
+    execution_id: null,
+    actor: canonicalJSON(ACTOR),
+  });
+  const outcome = h.store.transaction((tx) =>
+    insertOutcome(tx, {
+      id: createIdentity("outcome"),
+      node_id: childId,
+      result: AssessmentResult.Success,
+      assessment_id: childAssessment.id,
+      evidence_ids: "[]",
+      created_at: NOW,
+    }),
+  );
+  const dependent = h.assessment({
+    dependency_outcome_ids: canonicalJSON([outcome.id]),
+  });
+  assert.equal(
+    h.store.transaction((tx) => currencyOf(tx, dependent)).current,
+    true,
+  );
+  h.store.transaction((tx) => deleteDependency(tx, h.node_id, childId));
+  assert.equal(
+    h.store.transaction((tx) => currencyOf(tx, dependent)).context_matches,
+    false,
   );
 });
 

@@ -15,6 +15,7 @@ import {
   runVerificationsWithOutput,
   verificationPassed,
   type VerificationInput,
+  testedInputOf,
 } from "./verification.ts";
 
 test("verification runs in order and stops on the first failure or unstarted deadline", async (t) => {
@@ -242,4 +243,32 @@ test("a failed command that passes on a rerun is flaky and still fails", async (
     reruns: 0,
   });
   assert.deepEqual(unchecked.flaky, [false]);
+});
+
+test("the tested input is one address for one checkout and the list in binding order for two", () => {
+  const api = {
+    binding_id: "binding_01ARZ3NDEKTSV4RRFFQ69G5FAA",
+    name: "api",
+    directory: "/w/checkouts/api",
+    head: "a".repeat(40),
+  };
+  const web = {
+    binding_id: "binding_01ARZ3NDEKTSV4RRFFQ69G5FAB",
+    name: "web",
+    directory: "/w/checkouts/web",
+    head: "b".repeat(40),
+  };
+  assert.deepEqual(testedInputOf([api]), {
+    kind: "repository",
+    binding_id: api.binding_id,
+    commit: api.head,
+  });
+  assert.deepEqual(
+    testedInputOf([api, web]),
+    [api, web].map((checkout) => ({
+      kind: "repository",
+      binding_id: checkout.binding_id,
+      commit: checkout.head,
+    })),
+  );
 });

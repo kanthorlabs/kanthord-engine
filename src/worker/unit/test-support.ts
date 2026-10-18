@@ -28,12 +28,13 @@ import {
   modelConnectorInput,
   type ModelRuntimeFactory,
 } from "./model-runtime.ts";
+import { ExecutionWork } from "../contract.ts";
 import { ExecutionBudget } from "./budget.ts";
-import { NodeKind, openNativeAgent } from "./native-agent.ts";
+import { openNativeAgent } from "./native-agent.ts";
 import { ExecutionRun } from "./execution-run.ts";
 import type { MethodClients } from "./method-clients.ts";
 import { WorkspaceRoot } from "./workspace.ts";
-import { prepareStepsWorkspace } from "./steps-objective.ts";
+import { prepareStepsWorkspace } from "./steps-implement.ts";
 export {
   scriptedProvider,
   type ScriptedProvider,
@@ -75,6 +76,7 @@ const IDENTITY = [
 ];
 const USER_CONFIG = "[user]\n\tname = Test\n\temail = test@example.invalid\n";
 const BARE_NAME = "origin.git";
+const DEFAULT_BINDING_NAME = "repo";
 const bareTemplate = fixtureTemplate(async (root) => {
   const origin = join(root, "origin");
   mkdirSync(origin);
@@ -86,8 +88,23 @@ const bareTemplate = fixtureTemplate(async (root) => {
   await git.clone(origin, join(root, BARE_NAME), ["--bare"]);
   rmSync(origin, { recursive: true });
 });
+export const repositorySetup = () => ({
+  binding_id: createIdentity("binding"),
+  name: "repo",
+  address: "git@github.com:owner/repo.git",
+  ssh_identity: {
+    host: "github.com",
+    hostname: "github.com",
+    port: 22,
+    identity_file: "~/.ssh/id_test",
+  },
+  strategy: { base_branch: "main" },
+  project_prompt: null,
+  working_layer: WORKING_LAYER_ALL_ON,
+});
+
 export const task = (name: string, command: string): TaskContent => ({
-  id: createIdentity("node"),
+  id: createIdentity("task"),
   filename: `${name}.md`,
   content: {
     name,
@@ -98,32 +115,33 @@ export const task = (name: string, command: string): TaskContent => ({
   },
 });
 
-export async function objectiveFixture(
+export async function implementFixture(
   t: TestContext,
   tasks: TaskContent[],
   script: Parameters<typeof scriptedProvider>[0],
   turns?: number,
+  names: readonly string[] = [DEFAULT_BINDING_NAME],
 ) {
   const state = temporary(t);
-  const bare = join((await bareTemplate(t)).root, BARE_NAME);
+  const bares = await Promise.all(
+    names.map(async () => join((await bareTemplate(t)).root, BARE_NAME)),
+  );
   const setup = anthropicSetup();
   if (turns) setup.resource_budget.turns = turns;
-  setup.repositories = [
-    {
-      binding_id: createIdentity("binding"),
-      name: "repo",
-      address: bare,
-      ssh_identity: {
-        host: "github.com",
-        hostname: "github.com",
-        port: 22,
-        identity_file: "~/.ssh/id_test",
-      },
-      strategy: { base_branch: "main" },
-      project_prompt: null,
-      working_layer: WORKING_LAYER_ALL_ON,
+  setup.repositories = names.map((name, index) => ({
+    binding_id: createIdentity("binding"),
+    name,
+    address: bares[index]!,
+    ssh_identity: {
+      host: "github.com",
+      hostname: "github.com",
+      port: 22,
+      identity_file: "~/.ssh/id_test",
     },
-  ];
+    strategy: { base_branch: "main" },
+    project_prompt: null,
+    working_layer: WORKING_LAYER_ALL_ON,
+  }));
   const claim = {
     execution_id: setup.execution_id,
     node_id: createIdentity("node"),
@@ -158,7 +176,8 @@ export async function objectiveFixture(
   });
   t.after(() => run.dispose());
   const workspace = await prepareStepsWorkspace(input, run);
-  appendFileSync(join(workspace.directory, ".git", "config"), USER_CONFIG);
+  for (const checkout of workspace.checkouts)
+    appendFileSync(join(checkout.directory, ".git", "config"), USER_CONFIG);
   const provider = scriptedProvider(script);
   const credentials = new InMemoryCredentialStore();
   await credentials.modify("anthropic", async () => ({
@@ -169,7 +188,7 @@ export async function objectiveFixture(
     hostTools: unusedHostTools,
     setup,
     claim,
-    nodeKind: NodeKind.Objective,
+    work: ExecutionWork.Implement,
     agent: setup.agents[0]!,
     credential: {
       credential_id: setup.agents[0]!.credential_id,
@@ -182,7 +201,8 @@ export async function objectiveFixture(
       resource_budget: setup.resource_budget,
     }),
     workspaceAgentFiles: true,
-    workspace: workspace.directory,
+    workspace: workspace.root,
+    checkouts: workspace.checkouts.map((checkout) => checkout.directory),
     hostHome: temporary(t),
     env: hostEnvironment(),
     modelRuntimeFactory: scriptedModelRuntime(provider),
@@ -193,12 +213,23 @@ export async function objectiveFixture(
     input,
     run,
     agent,
-    revision: { tasks } as Revision,
+    revision: {
+      filename: "implement.md",
+      content: {
+        name: "implement",
+        requirement: "implement",
+        criterion: "implement",
+        verifications: ["true"],
+        bindings: [],
+      },
+      tasks,
+    } as unknown as Revision,
     ...workspace,
     priorRationale: null as string | null,
     rework: false,
     provider,
-    bare,
+    bare: bares[0]!,
+    bares,
   };
 }
 
@@ -224,7 +255,7 @@ export async function commitOnNode(directory: string, content: string) {
 }
 
 export function recordReleases(
-  h: Awaited<ReturnType<typeof objectiveFixture>>,
+  h: Awaited<ReturnType<typeof implementFixture>>,
 ) {
   const bodies: unknown[] = [];
   h.run.clients.scheduler = {

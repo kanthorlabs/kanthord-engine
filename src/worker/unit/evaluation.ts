@@ -14,12 +14,11 @@ import {
   type ExecutionRun,
 } from "./execution-run.ts";
 import {
-  nodeKindOf,
   readAttemptEvidence,
-  readObjectives,
+  readDependencies,
   readPinnedRevision,
 } from "./node-reads.ts";
-import { NodeKind, type NativeAgent } from "./native-agent.ts";
+import type { NativeAgent } from "./native-agent.ts";
 import { prepareEvaluation, verificationCommands } from "./evaluation-input.ts";
 import {
   runVerificationsWithOutput,
@@ -35,9 +34,13 @@ import {
   ReplyRepair,
 } from "./judgement.ts";
 import { renderWorkPrompt } from "../../agent/prompt-composer.ts";
-import type { StepsInput } from "./steps-objective.ts";
-import { WorkspaceKind } from "./workspace.ts";
-import { ActionResultKind } from "../contract.ts";
+import type { StepsInput } from "./steps-implement.ts";
+import {
+  WorkspaceKind,
+  workRepositoriesOf,
+  type ExamineCheckout,
+} from "./workspace.ts";
+import { ActionResultKind, ExecutionWork } from "../contract.ts";
 import {
   evaluationEnd,
   evaluationSpan,
@@ -71,10 +74,11 @@ async function judge(
   evidence: unknown,
   verificationRun: VerificationRun,
   directory: string,
+  checkouts: readonly ExamineCheckout[],
   openAgent: OpenAgent,
-  objectives: Awaited<ReturnType<typeof readObjectives>> | null,
+  dependencies: Awaited<ReturnType<typeof readDependencies>> | null,
 ) {
-  const kind = nodeKindOf(revision);
+  const examine = input.setup.work === ExecutionWork.Examine;
   const commands = verificationCommands(revision);
   const verification = verificationRun.verification;
   if (!verificationPassed(verification, commands))
@@ -89,15 +93,16 @@ async function judge(
     node_id: input.claim.node_id,
     revision: input.claim.pinned_revision,
     content: revision.content,
+    repositories: workRepositoriesOf(directory, checkouts),
   });
   await agent.instruct(
     work,
     evaluationInstruction(input.setup.templates, {
-      kind,
-      tasks: revision.tasks ?? [],
+      examine,
+      tasks: revision.tasks,
       verification,
       evidence,
-      objectives,
+      dependencies,
     }),
   );
   if (agent.budget.exhausted()) return run.stop(EndReason.AssessmentAbsent);
@@ -115,7 +120,7 @@ async function judge(
     result: judgement.result,
     unmet: judgement.unmet.map((item) => item.id),
   });
-  const proposals = kind === NodeKind.Initiative ? judgement.proposals : [];
+  const proposals = examine ? judgement.proposals : [];
   return {
     result:
       proposals.length > NO_ITEMS
@@ -138,7 +143,6 @@ async function evaluate(
 ) {
   assert.ok(prepared.directory);
   assert.equal(input.claim.execution_id, input.setup.execution_id);
-  const kind = nodeKindOf(revision);
   const verificationRun = await runVerificationsWithOutput({
     observe: verificationObserver(
       run.spans,
@@ -169,8 +173,10 @@ async function evaluate(
     ],
     verification,
   });
-  const objectives =
-    kind === NodeKind.Initiative ? await readObjectives(run) : null;
+  const dependencies =
+    input.setup.work === ExecutionWork.Examine
+      ? await readDependencies(run)
+      : null;
   let judgement: Awaited<ReturnType<typeof judge>>;
   try {
     judgement = await judge(
@@ -180,8 +186,9 @@ async function evaluate(
       prepared.reviewBundle,
       verificationRun,
       prepared.directory,
+      prepared.checkouts,
       openAgent,
-      objectives,
+      dependencies,
     );
   } catch (error) {
     if (
@@ -195,7 +202,8 @@ async function evaluate(
   }
   return {
     evidence_ids: [recorded.id, ...prepared.evidenceIds],
-    child_outcome_ids: objectives?.outcomes.map((outcome) => outcome.id) ?? [],
+    dependency_outcome_ids:
+      dependencies?.outcomes.map((outcome) => outcome.id) ?? [],
     ...judgement,
   };
 }
@@ -208,8 +216,12 @@ export async function runEvaluation(
 ): Promise<ExecutionEnd> {
   const revision = await readPinnedRevision(run);
   const evidence = await readAttemptEvidence(run);
-  const kind = nodeKindOf(revision);
-  const prepared = await prepareEvaluation(input, run, kind, evidence);
+  const prepared = await prepareEvaluation(
+    input,
+    run,
+    input.setup.work,
+    evidence,
+  );
   try {
     const assessment = await run.spans.within(
       evaluationSpan(run.spans, testedCommitOf(prepared.tested_input)),
@@ -235,6 +247,6 @@ export async function runEvaluation(
       };
     return run.stop(EndReason.OperationFailed);
   } finally {
-    input.workspaces.release(prepared.directory, WorkspaceKind.Execution);
+    input.workspaces.release(prepared.key, WorkspaceKind.Execution);
   }
 }

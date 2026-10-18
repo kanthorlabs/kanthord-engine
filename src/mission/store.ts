@@ -4,14 +4,14 @@ import { HttpStatus } from "../kernel/http.ts";
 import { createIdentity } from "../kernel/identity.ts";
 import type { Transaction } from "../kernel/store.ts";
 import {
-  EdgeKind,
   MISSION_IDENTITY_PREFIX,
   MISSION_INITIAL_VERSION,
   MissionErrorCode,
-  NodeKind,
   NodeState,
+  workSchema,
   type Mission,
   type Revision,
+  type Work,
 } from "./contract.ts";
 import type { DepEdge } from "./graph.ts";
 
@@ -24,11 +24,9 @@ const FILENAME_UNIQUE_FAILURE =
 export interface NodeRow {
   id: string;
   mission_id: string;
-  kind: NodeKind;
   filename: string;
-  parent_id: string | null;
-  state: NodeState | null;
-  attempt: number | null;
+  state: NodeState;
+  attempt: number;
   priority: number | null;
   retired_at: number | null;
   created_at: number;
@@ -43,7 +41,9 @@ export interface RevisionRow {
   criterion: string;
   verifications: string;
   bindings: string;
-  tasks: string | null;
+  work: Work;
+  requires: string;
+  tasks: string;
   change: string;
   reason: string;
   actor: string;
@@ -120,6 +120,31 @@ export function filenameTaken(
   );
 }
 
+export function usedFilenames(
+  tx: Transaction,
+  missionId: string,
+  exceptNodeId: string | null,
+): Set<string> {
+  const rows = tx.database
+    .prepare(
+      `SELECT n.filename FROM mission_node n
+     WHERE n.mission_id = ? AND n.retired_at IS NULL AND n.id IS NOT ?
+     UNION ALL
+     SELECT json_extract(task.value, '$.filename') FROM mission_node n
+     JOIN mission_node_revision r ON r.node_id = n.id
+       AND r.revision = (
+         SELECT MAX(latest.revision) FROM mission_node_revision latest
+         WHERE latest.node_id = n.id
+       )
+     JOIN json_each(r.tasks) task
+     WHERE n.mission_id = ? AND n.retired_at IS NULL AND n.id IS NOT ?`,
+    )
+    .all(missionId, exceptNodeId, missionId, exceptNodeId) as {
+    filename: string;
+  }[];
+  return new Set(rows.map((row) => row.filename));
+}
+
 export function filenameConflict(filename: string): OperationError {
   return new OperationError(
     HttpStatus.Conflict,
@@ -131,27 +156,21 @@ export function filenameConflict(filename: string): OperationError {
 
 export function insertNode(
   tx: Transaction,
-  node: Pick<
-    NodeRow,
-    "id" | "mission_id" | "kind" | "filename" | "parent_id" | "created_at"
-  >,
+  node: Pick<NodeRow, "id" | "mission_id" | "filename" | "created_at">,
 ): void {
-  const task = node.kind === NodeKind.Task;
   try {
     tx.database
       .prepare(
         `INSERT INTO mission_node
-      (id, mission_id, kind, filename, parent_id, state, attempt, priority, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      (id, mission_id, filename, state, attempt, priority, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         node.id,
         node.mission_id,
-        node.kind,
         node.filename,
-        node.parent_id,
-        task ? null : NodeState.Pending,
-        task ? null : INITIAL_ATTEMPT,
+        NodeState.Pending,
+        INITIAL_ATTEMPT,
         null,
         node.created_at,
       );
@@ -216,9 +235,8 @@ export function readMissionNodes(
 }
 
 export interface NodeListFilter {
-  kind?: NodeKind;
+  work?: Work;
   state?: NodeState;
-  parent_id?: string;
   include_retired: boolean;
   after?: string;
 }
@@ -231,23 +249,28 @@ export function listNodes(
 ): NodeRow[] {
   return tx.database
     .prepare(
-      `SELECT * FROM mission_node WHERE mission_id = ?
-     AND (? = 1 OR retired_at IS NULL)
-     AND (? IS NULL OR kind = ?)
-     AND (? IS NULL OR state = ?)
-     AND (? IS NULL OR parent_id = ?)
-     AND (? IS NULL OR id < ?)
-     ORDER BY id DESC LIMIT ?`,
+      `SELECT n.* FROM mission_node n WHERE n.mission_id = ?
+     AND (? = 1 OR n.retired_at IS NULL)
+     AND (? IS NULL OR (
+       SELECT r.work FROM mission_node_revision r
+       WHERE r.node_id = n.id AND r.revision = COALESCE(
+         (SELECT a.node_revision FROM mission_attempt a
+          WHERE a.node_id = n.id AND a.closed_at IS NULL),
+         (SELECT MAX(latest.revision) FROM mission_node_revision latest
+          WHERE latest.node_id = n.id)
+       )
+     ) = ?)
+     AND (? IS NULL OR n.state = ?)
+     AND (? IS NULL OR n.id < ?)
+     ORDER BY n.id DESC LIMIT ?`,
     )
     .all(
       missionId,
       Number(filter.include_retired),
-      filter.kind ?? null,
-      filter.kind ?? null,
+      filter.work ?? null,
+      filter.work ?? null,
       filter.state ?? null,
       filter.state ?? null,
-      filter.parent_id ?? null,
-      filter.parent_id ?? null,
       filter.after ?? null,
       filter.after ?? null,
       count,
@@ -276,19 +299,22 @@ export function listRevisions(
     ) as unknown as RevisionRow[];
 }
 
-export function readLastTaskSnapshot(
+export function taskOwnerOf(
   tx: Transaction,
-  objectiveId: string,
+  missionId: string,
   taskId: string,
-): RevisionRow | null {
+): { node_id: string; revision: number } | null {
   return (
     (tx.database
       .prepare(
-        `SELECT * FROM mission_node_revision WHERE node_id = ?
-     AND EXISTS (SELECT 1 FROM json_each(tasks) WHERE json_extract(value, '$.id') = ?)
-     ORDER BY revision DESC LIMIT 1`,
+        `SELECT r.node_id, r.revision FROM mission_node_revision r
+     JOIN mission_node n ON n.id = r.node_id
+     WHERE n.mission_id = ?
+     AND EXISTS (SELECT 1 FROM json_each(r.tasks) WHERE json_extract(value, '$.id') = ?)
+     ORDER BY r.rowid DESC LIMIT 1`,
       )
-      .get(objectiveId, taskId) as RevisionRow | undefined) ?? null
+      .get(missionId, taskId) as
+      { node_id: string; revision: number } | undefined) ?? null
   );
 }
 
@@ -307,8 +333,8 @@ export function insertRevision(tx: Transaction, revision: Revision): void {
     .prepare(
       `INSERT INTO mission_node_revision
     (node_id, revision, filename, name, requirement, criterion, verifications,
-     bindings, tasks, change, reason, actor, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+     bindings, work, requires, tasks, change, reason, actor, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
       revision.node_id,
@@ -319,7 +345,9 @@ export function insertRevision(tx: Transaction, revision: Revision): void {
       revision.content.criterion,
       JSON.stringify(revision.content.verifications),
       JSON.stringify(revision.content.bindings),
-      revision.tasks === undefined ? null : JSON.stringify(revision.tasks),
+      revision.content.work,
+      JSON.stringify(revision.content.requires),
+      JSON.stringify(revision.tasks),
       JSON.stringify(revision.change),
       revision.reason,
       JSON.stringify(revision.actor),
@@ -339,6 +367,46 @@ export function readCurrentRevision(
       )
       .get(nodeId) as unknown as RevisionRow | undefined) ?? null
   );
+}
+
+export function readClaimRevisions(
+  tx: Transaction,
+  missionId: string,
+): Array<RevisionRow & { node_state: NodeState }> {
+  return tx.database
+    .prepare(
+      `SELECT r.*, n.state AS node_state FROM mission_node n
+    JOIN mission_node_revision r ON r.node_id = n.id
+    WHERE n.mission_id = ? AND n.retired_at IS NULL AND (
+      r.revision = (SELECT MAX(latest.revision) FROM mission_node_revision latest
+        WHERE latest.node_id = n.id)
+      OR r.revision = (SELECT a.node_revision FROM mission_attempt a
+        WHERE a.node_id = n.id AND a.closed_at IS NULL))
+    ORDER BY n.id, r.revision DESC`,
+    )
+    .all(missionId) as unknown as Array<
+    RevisionRow & { node_state: NodeState }
+  >;
+}
+
+export function claimRevisionOf(tx: Transaction, nodeId: string): RevisionRow {
+  const row = tx.database
+    .prepare(
+      `SELECT r.* FROM mission_node_revision r
+    WHERE r.node_id = ? AND r.revision = COALESCE(
+      (SELECT a.node_revision FROM mission_attempt a
+       WHERE a.node_id = r.node_id AND a.closed_at IS NULL),
+      (SELECT MAX(latest.revision) FROM mission_node_revision latest
+       WHERE latest.node_id = r.node_id)
+    )`,
+    )
+    .get(nodeId) as unknown as RevisionRow | undefined;
+  assert.ok(row, "A node has a claim revision.");
+  return row;
+}
+
+export function workOf(tx: Transaction, nodeId: string): Work {
+  return workSchema.parse(claimRevisionOf(tx, nodeId).work);
 }
 
 export function readRevision(
@@ -381,13 +449,11 @@ export function readDependsOnIds(tx: Transaction, nodeId: string): string[] {
 }
 
 export interface EdgeListFilter {
-  kind?: EdgeKind;
   node_id?: string;
   after?: string;
 }
 
 export interface EdgeRow {
-  kind: EdgeKind;
   first_id: string;
   second_id: string;
   key: string;
@@ -402,31 +468,21 @@ export function listEdges(
   return tx.database
     .prepare(
       `WITH edges AS (
-      SELECT ? AS kind, parent.id AS first_id, child.id AS second_id
-      FROM mission_node child JOIN mission_node parent ON parent.id = child.parent_id
-      WHERE child.mission_id = ? AND child.retired_at IS NULL AND parent.retired_at IS NULL
-      UNION ALL
-      SELECT ?, d.dependent_id, d.depends_on_id
+      SELECT d.dependent_id AS first_id, d.depends_on_id AS second_id
       FROM mission_dependency d
       JOIN mission_node source ON source.id = d.dependent_id
       JOIN mission_node target ON target.id = d.depends_on_id
       WHERE d.mission_id = ? AND source.retired_at IS NULL AND target.retired_at IS NULL
     ), keyed AS (
-      SELECT *, kind || '|' || first_id || '|' || second_id AS key FROM edges
+      SELECT *, first_id || '|' || second_id AS key FROM edges
     )
     SELECT * FROM keyed
-    WHERE (? IS NULL OR kind = ?)
-      AND (? IS NULL OR first_id = ? OR second_id = ?)
+    WHERE (? IS NULL OR first_id = ? OR second_id = ?)
       AND (? IS NULL OR key < ?)
     ORDER BY key DESC LIMIT ?`,
     )
     .all(
-      EdgeKind.Containment,
       missionId,
-      EdgeKind.Dependency,
-      missionId,
-      filter.kind ?? null,
-      filter.kind ?? null,
       filter.node_id ?? null,
       filter.node_id ?? null,
       filter.node_id ?? null,
@@ -473,25 +529,6 @@ export function deleteDependency(
       "DELETE FROM mission_dependency WHERE dependent_id = ? AND depends_on_id = ?",
     )
     .run(nodeId, dependsOnId);
-}
-
-export function readNodeState(tx: Transaction, nodeId: string): string | null {
-  const row = tx.database
-    .prepare("SELECT state FROM mission_node WHERE id = ?")
-    .get(nodeId) as { state: string | null } | undefined;
-  return row?.state ?? null;
-}
-
-export function readCurrentChildStates(
-  tx: Transaction,
-  parentId: string,
-): Array<string | null> {
-  const rows = tx.database
-    .prepare(
-      "SELECT state FROM mission_node WHERE parent_id = ? AND retired_at IS NULL",
-    )
-    .all(parentId) as Array<{ state: string | null }>;
-  return rows.map((row) => row.state);
 }
 
 export function readLiveNodesPinning(

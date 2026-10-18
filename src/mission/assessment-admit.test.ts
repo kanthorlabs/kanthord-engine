@@ -8,7 +8,7 @@ import {
   AssessmentResult,
   AssetKind,
   MissionErrorCode,
-  NodeKind,
+  Work,
   type AssessmentSubmit,
   type Verification,
 } from "./contract.ts";
@@ -20,7 +20,12 @@ import {
   insertAssessment,
   insertOutcome,
 } from "./record-store.ts";
-import { readNode, insertNode, insertRevision } from "./store.ts";
+import {
+  insertDependency,
+  readNode,
+  insertNode,
+  insertRevision,
+} from "./store.ts";
 import { executionHarness } from "./test-support.ts";
 
 const IDENTITY = testHumanIdentity("ulrich", "Ulrich", "token");
@@ -47,7 +52,7 @@ function fixture(t: TestContext) {
   const body: AssessmentSubmit = {
     ...h.context,
     evidence_ids: [],
-    child_outcome_ids: [],
+    dependency_outcome_ids: [],
     result: AssessmentResult.Success,
     rationale: "Checked",
     tested_input: INPUT,
@@ -93,12 +98,12 @@ function fixture(t: TestContext) {
     );
     return id;
   };
-  const admit = (input = body, objective = false) =>
+  const admit = (input = body, implement = false) =>
     h.store.transaction((tx) => {
       const node = readNode(tx, h.node_id)!;
       const revision = getRevision(tx, h.node_id, FIRST_REVISION);
-      if (objective) {
-        node.kind = NodeKind.Objective;
+      if (implement) {
+        revision.content.work = Work.Implement;
         revision.tasks = [
           {
             id: createIdentity("node"),
@@ -205,7 +210,7 @@ test("assessment result order permits criterion-not-met for a failed run but rej
   );
 });
 
-test("assessment admission checks rationale and evidence ownership before publication and child sets", (t) => {
+test("assessment admission checks rationale and evidence ownership before publication and dependency outcome sets", (t) => {
   const h = fixture(t);
   const pending = h.seed(null, false);
   const foreignAttempt = h.seed(null, true, NO_ATTEMPT);
@@ -225,14 +230,14 @@ test("assessment admission checks rationale and evidence ownership before public
       canonicalJSON(error.details).includes("rationale"),
   );
   h.body.evidence_ids = [pending];
-  h.body.child_outcome_ids = [createIdentity("outcome")];
+  h.body.dependency_outcome_ids = [createIdentity("outcome")];
   refusal(() => h.admit(), MissionErrorCode.AssessmentEvidenceUnpublished);
   h.body.evidence_ids = [h.seed(null, false, FIRST_ATTEMPT, EXPIRED_TIMESTAMP)];
   refusal(() => h.admit(), MissionErrorCode.AssessmentEvidenceUnpublished);
   h.body.evidence_ids = [h.seed(null)];
-  refusal(() => h.admit(), VALIDATION, "child_outcome_ids");
-  refusal(() => h.admit(h.body, true), VALIDATION, "child_outcome_ids");
-  h.body.child_outcome_ids = [];
+  refusal(() => h.admit(), VALIDATION, "dependency_outcome_ids");
+  refusal(() => h.admit(h.body, true), VALIDATION, "dependency_outcome_ids");
+  h.body.dependency_outcome_ids = [];
   refusal(
     () => h.admit({ ...h.body, result: AssessmentResult.Undetermined }),
     VALIDATION,
@@ -259,38 +264,38 @@ test("non-success assessments retain the verification's tested input", (t) => {
     );
 });
 
-test("initiative admission tracks replacement child outcomes and excludes retired children", (t) => {
+test("examine admission tracks replacement dependency outcomes and excludes retired dependencies", (t) => {
   const h = fixture(t);
   h.body.evidence_ids = [h.seed({ tested_input: INPUT, results: [RESULT] })];
-  const childId = createIdentity("node");
+  const dependencyId = createIdentity("node");
   h.store.transaction((tx) => {
     const base = getRevision(tx, h.node_id, FIRST_REVISION);
     insertNode(tx, {
-      id: childId,
+      id: dependencyId,
       mission_id: h.mission_id,
-      kind: NodeKind.Objective,
-      parent_id: h.node_id,
-      filename: "child.md",
+      filename: "dependency.md",
       created_at: NOW,
     });
     insertRevision(tx, {
       ...base,
-      node_id: childId,
-      filename: "child.md",
+      node_id: dependencyId,
+      filename: "dependency.md",
+      content: { ...base.content, work: Work.Implement },
       tasks: [],
     });
+    insertDependency(tx, h.mission_id, h.node_id, dependencyId);
   });
   const outcome = () =>
     h.store.transaction((tx) => {
       const id = createIdentity("assessment");
       insertAssessment(tx, {
         id,
-        node_id: childId,
+        node_id: dependencyId,
         attempt: NO_ATTEMPT,
         result: AssessmentResult.Undetermined,
         rationale: "Blocked",
         evidence_ids: "[]",
-        child_outcome_ids: "[]",
+        dependency_outcome_ids: "[]",
         tested_input: null,
         actor: canonicalJSON(h.actor),
         execution_id: null,
@@ -299,34 +304,87 @@ test("initiative admission tracks replacement child outcomes and excludes retire
       });
       return insertOutcome(tx, {
         id: createIdentity("outcome"),
-        node_id: childId,
+        node_id: dependencyId,
         result: AssessmentResult.Undetermined,
         assessment_id: id,
         evidence_ids: "[]",
         created_at: NOW,
       });
     });
-  h.body.child_outcome_ids = [outcome().id];
+  h.body.dependency_outcome_ids = [outcome().id];
   h.admit();
   const replacement = outcome();
-  refusal(() => h.admit(), VALIDATION, "child_outcome_ids");
-  h.body.child_outcome_ids = [replacement.id];
+  refusal(() => h.admit(), VALIDATION, "dependency_outcome_ids");
+  h.body.dependency_outcome_ids = [replacement.id];
   h.admit();
   h.store.transaction((tx) =>
     tx.database
       .prepare("UPDATE mission_node SET retired_at = ? WHERE id = ?")
-      .run(NOW, childId),
+      .run(NOW, dependencyId),
   );
-  refusal(() => h.admit(), VALIDATION, "child_outcome_ids");
-  h.body.child_outcome_ids = [];
+  refusal(() => h.admit(), VALIDATION, "dependency_outcome_ids");
+  h.body.dependency_outcome_ids = [];
   h.admit();
 });
 
-test("proposals are admitted only for an undetermined initiative with an objective child", (t) => {
+test("proposals refuse an implement node with no dependency edge and an examine dependency", (t) => {
+  const h = fixture(t);
+  h.body.evidence_ids = [h.seed({ tested_input: INPUT, results: [RESULT] })];
+  const node = (work: Work) => {
+    const id = createIdentity("node");
+    h.store.transaction((tx) => {
+      const base = getRevision(tx, h.node_id, FIRST_REVISION);
+      insertNode(tx, {
+        id,
+        mission_id: h.mission_id,
+        filename: `${id.toLowerCase()}.md`,
+        created_at: NOW,
+      });
+      insertRevision(tx, {
+        ...base,
+        node_id: id,
+        filename: `${id.toLowerCase()}.md`,
+        content: { ...base.content, work },
+        tasks: [],
+      });
+    });
+    return id;
+  };
+  const unrelated = node(Work.Implement);
+  const examine = node(Work.Examine);
+  const implement = node(Work.Implement);
+  h.store.transaction((tx) => {
+    insertDependency(tx, h.mission_id, h.node_id, examine);
+    insertDependency(tx, h.mission_id, h.node_id, implement);
+  });
+  const propose = (dependencyId: string) => ({
+    ...h.body,
+    result: AssessmentResult.Undetermined,
+    proposals: [
+      {
+        dependency_id: dependencyId,
+        name: "Fix",
+        requirement: "Repair",
+        criterion: "Repaired",
+        task: {
+          name: "Task",
+          requirement: "Change",
+          criterion: "Changed",
+          verifications: ["true"],
+        },
+      },
+    ],
+  });
+  for (const dependencyId of [unrelated, examine])
+    refusal(() => h.admit(propose(dependencyId)), VALIDATION, "proposals");
+  h.admit(propose(implement));
+});
+
+test("proposals are admitted only for an undetermined examine node with an implement dependency", (t) => {
   const h = fixture(t);
   h.body.evidence_ids = [h.seed({ tested_input: INPUT, results: [RESULT] })];
   const proposal = {
-    objective_id: createIdentity("node"),
+    dependency_id: createIdentity("node"),
     name: "Fix",
     requirement: "Repair",
     criterion: "Repaired",

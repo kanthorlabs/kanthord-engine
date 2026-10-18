@@ -1,10 +1,10 @@
 # Generated from the operation registry by kanthord gateway openapi.
 pathItem:
   get:
-    operationId: mission.execution.objective.list
+    operationId: mission.execution.dependency.list
     tags:
       - mission
-    description: List current objectives at their outcome revisions.
+    description: List the direct dependencies of an examine node at their outcome revisions.
     x-access-policy: client
     x-timeout-ms: 30000
     x-mutation: false
@@ -16,27 +16,27 @@ pathItem:
         in: path
         required: true
         schema:
-          $ref: "#/components/schemas/mission.execution.objective.list.Input/properties/p\
-            arams/properties/execution_id"
+          $ref: "#/components/schemas/mission.execution.dependency.list.Input/properties/\
+            params/properties/execution_id"
       - name: limit
         in: query
         required: false
         schema:
-          $ref: "#/components/schemas/mission.execution.objective.list.Input/properties/q\
-            uery/properties/limit"
+          $ref: "#/components/schemas/mission.execution.dependency.list.Input/properties/\
+            query/properties/limit"
       - name: cursor
         in: query
         required: false
         schema:
-          $ref: "#/components/schemas/mission.execution.objective.list.Input/properties/q\
-            uery/properties/cursor"
+          $ref: "#/components/schemas/mission.execution.dependency.list.Input/properties/\
+            query/properties/cursor"
     responses:
       "200":
         description: Completed result
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/mission.execution.objective.list.Output"
+              $ref: "#/components/schemas/mission.execution.dependency.list.Output"
       "400":
         $ref: ../shared/components.yaml#/components/responses/Error
       "401":
@@ -59,7 +59,7 @@ pathItem:
         $ref: ../shared/components.yaml#/components/responses/Error
 components:
   schemas:
-    mission.execution.objective.list.Input:
+    mission.execution.dependency.list.Input:
       type: object
       properties:
         params:
@@ -92,7 +92,7 @@ components:
         - query
         - body
       additionalProperties: false
-    mission.execution.objective.list.Output:
+    mission.execution.dependency.list.Output:
       type: object
       properties:
         items:
@@ -116,14 +116,6 @@ components:
                     maxLength: 34
                     pattern: ^mission_[0-7][0-9A-HJKMNP-TV-Z]{25}$
                     description: mission_ followed by a canonical 26-character uppercase ULID.
-                  parent_id:
-                    anyOf:
-                      - type: string
-                        minLength: 31
-                        maxLength: 31
-                        pattern: ^node_[0-7][0-9A-HJKMNP-TV-Z]{25}$
-                        description: node_ followed by a canonical 26-character uppercase ULID.
-                      - type: "null"
                   visible_revision:
                     type: integer
                     exclusiveMinimum: 0
@@ -150,13 +142,76 @@ components:
                         type: array
                         items:
                           type: string
+                      work:
+                        type: string
+                        enum:
+                          - implement
+                          - examine
+                      requires:
+                        default: []
+                        type: array
+                        items:
+                          type: string
+                          maxLength: 64
+                          pattern: ^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)*$
                     required:
                       - name
                       - requirement
                       - criterion
                       - verifications
                       - bindings
+                      - work
+                      - requires
                     additionalProperties: false
+                  tasks:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id:
+                          type: string
+                          minLength: 31
+                          maxLength: 31
+                          pattern: ^task_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                          description: task_ followed by a canonical 26-character uppercase ULID.
+                        filename:
+                          type: string
+                          pattern: ^[a-z][a-z0-9_-]*\.md$
+                        content:
+                          type: object
+                          properties:
+                            name:
+                              type: string
+                              minLength: 1
+                            requirement:
+                              type: string
+                              minLength: 1
+                            criterion:
+                              type: string
+                              minLength: 1
+                            verifications:
+                              minItems: 1
+                              type: array
+                              items:
+                                type: string
+                                minLength: 1
+                            bindings:
+                              maxItems: 0
+                              type: array
+                              items:
+                                type: string
+                          required:
+                            - name
+                            - requirement
+                            - criterion
+                            - verifications
+                            - bindings
+                          additionalProperties: false
+                      required:
+                        - id
+                        - filename
+                        - content
+                      additionalProperties: false
                   retired_at:
                     anyOf:
                       - type: integer
@@ -170,9 +225,6 @@ components:
                       type: integer
                       exclusiveMinimum: 0
                       maximum: 9007199254740991
-                  kind:
-                    type: string
-                    const: objective
                   blocked_context:
                     type: object
                     properties:
@@ -743,20 +795,32 @@ components:
                       maxLength: 31
                       pattern: ^node_[0-7][0-9A-HJKMNP-TV-Z]{25}$
                       description: node_ followed by a canonical 26-character uppercase ULID.
+                  work:
+                    type: string
+                    enum:
+                      - implement
+                      - examine
+                  requires:
+                    type: array
+                    items:
+                      type: string
+                      maxLength: 64
+                      pattern: ^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)*$
                 required:
                   - id
                   - filename
                   - mission_id
-                  - parent_id
                   - visible_revision
                   - content
+                  - tasks
                   - retired_at
                   - pinned_by_attempts
-                  - kind
                   - state
                   - attempt
                   - priority
                   - depends_on
+                  - work
+                  - requires
                 additionalProperties: false
               - type: object
                 properties:

@@ -6,13 +6,14 @@ import {
   type ExecutionEnd,
   type ExecutionRun,
 } from "./execution-run.ts";
-import { NodeKind, openNativeAgent, type NativeAgent } from "./native-agent.ts";
+import { openNativeAgent, type NativeAgent } from "./native-agent.ts";
 import type { TranscriptSink } from "./transcript.ts";
 import { Phase, type TelemetrySink } from "./telemetry.ts";
 import type { Context } from "../../kernel/context.ts";
 import { ExecutionRun as Run, type MethodClaim } from "./execution-run.ts";
 import type { MethodClients } from "./method-clients.ts";
 import {
+  ExecutionWork,
   WorkerMethod,
   type ExecutionSetup,
   type RepositoryTransport,
@@ -25,13 +26,9 @@ import type {
   ModelRuntimeFactory,
 } from "./model-runtime.ts";
 import { ExecutionBudget } from "./budget.ts";
-import {
-  nodeKindOf,
-  readPriorRationale,
-  readPinnedRevision,
-} from "./node-reads.ts";
-import { prepareStepsWorkspace, runStepsObjective } from "./steps-objective.ts";
-import { runStepsInitiative } from "./steps-initiative.ts";
+import { readPriorRationale, readPinnedRevision } from "./node-reads.ts";
+import { prepareStepsWorkspace, runStepsImplement } from "./steps-implement.ts";
+import { runStepsExamine } from "./steps-examine.ts";
 import { runEvaluation } from "./evaluation.ts";
 import { phaseSpan } from "./method-telemetry.ts";
 
@@ -81,8 +78,11 @@ export async function runNativeExecution(
       const method = getWorkerDeclaration(input.setup.worker_name)?.method;
       if (!method) return run.stop(EndReason.OperationFailed);
       const revision = await readPinnedRevision(run);
-      const kind = nodeKindOf(revision);
-      const open = async (workspace: string) => {
+      const work = input.setup.work;
+      const open = async (
+        workspace: string,
+        checkouts: readonly string[] = [workspace],
+      ) => {
         const agent = input.setup.agents[WORKING_AGENT];
         assert.ok(agent);
         const credential = input.credentials.items.find(
@@ -92,12 +92,13 @@ export async function runNativeExecution(
         const native = await openNativeAgent({
           setup: input.setup,
           claim: input.claim,
-          nodeKind: kind,
+          work,
           agent,
           credential,
           budget,
           workspaceAgentFiles: method !== WorkerMethod.Evaluation,
           workspace,
+          checkouts,
           hostHome: input.hostHome,
           env: input.env,
           modelRuntimeFactory: input.modelRuntimeFactory,
@@ -111,19 +112,22 @@ export async function runNativeExecution(
       };
       if (method === WorkerMethod.Evaluation)
         return runEvaluation(input, run, budget, open);
-      if (kind === NodeKind.Initiative)
-        return runStepsInitiative(input, run, revision, budget, open);
-      const prior = await readPriorRationale(run);
+      if (work === ExecutionWork.Examine)
+        return runStepsExamine(input, run, revision, budget, open);
+      const prior = await readPriorRationale(run, input.setup.repositories);
       const workspace = await run.spans.within(phaseSpan(Phase.Prepare), () =>
         prepareStepsWorkspace(input, run),
       );
       let working: NativeAgent;
       try {
-        working = await open(workspace.directory);
+        working = await open(
+          workspace.root,
+          workspace.checkouts.map((checkout) => checkout.directory),
+        );
       } catch (error) {
         input.workspaces.release(
-          input.workspaces.objectiveKey(input.claim.node_id),
-          WorkspaceKind.Objective,
+          input.workspaces.nodeKey(input.claim.node_id),
+          WorkspaceKind.Node,
         );
         throw error;
       }
@@ -136,7 +140,7 @@ export async function runNativeExecution(
         priorRationale: prior.rationale,
         rework: prior.rework,
       };
-      return runStepsObjective(state);
+      return runStepsImplement(state);
     });
   } finally {
     try {

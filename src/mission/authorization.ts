@@ -36,7 +36,7 @@ import {
   keyOfLocation,
   objectKey,
   objectLocation,
-  storageBindingIdOf,
+  storageBindingIdsOf,
 } from "./evidence-content.ts";
 import {
   executionContentBound,
@@ -142,6 +142,16 @@ export function authorizeAction(
   if (!action) authorizationRefused(AuthorizationRefusal.NodeMismatch);
   authorizeBinding(tx, dependencies.bindings, action.binding_id);
   return action;
+}
+
+export function storageEnabled(
+  tx: Transaction,
+  bindings: MissionBindings,
+  bindingId: string,
+): boolean {
+  assert.ok(tx.database.isTransaction);
+  const binding = bindings.getBindingRevision(tx, bindingId);
+  return binding !== null && !binding.tombstone && !binding.disabled;
 }
 
 export function authorizeStorage(
@@ -509,10 +519,17 @@ export function authorizeObjectPut(
   const node = readNode(tx, input.nodeId);
   assert.ok(node);
   const revision = getRevision(tx, node.id, attempt.node_revision);
-  const pinned = storageBindingIdOf(tx, dependencies.bindings, revision);
-  if (pinned === null || pinned !== input.storageBindingId)
+  if (
+    !storageBindingIdsOf(tx, dependencies.bindings, revision).includes(
+      input.storageBindingId,
+    )
+  )
     authorizationRefused(AuthorizationRefusal.NodeMismatch);
-  const binding = authorizeStorage(tx, dependencies.bindings, pinned);
+  const binding = authorizeStorage(
+    tx,
+    dependencies.bindings,
+    input.storageBindingId,
+  );
   const key = objectKey(
     binding,
     claim.projectId,

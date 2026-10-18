@@ -122,16 +122,16 @@ paths:
     $ref: ./openapi/mission/execution.clearedOutcome.get.yaml#/pathItem
   /api/mission/execution/{execution_id}/cleared-assessment:
     $ref: ./openapi/mission/execution.cleared_assessment.get.yaml#/pathItem
+  /api/mission/execution/{execution_id}/dependency/evidence:
+    $ref: ./openapi/mission/execution.dependency.evidence.list.yaml#/pathItem
+  /api/mission/execution/{execution_id}/dependency:
+    $ref: ./openapi/mission/execution.dependency.list.yaml#/pathItem
+  /api/mission/execution/{execution_id}/dependency/outcome:
+    $ref: ./openapi/mission/execution.dependency.outcome.list.yaml#/pathItem
   /api/mission/execution/{execution_id}/evidence/asset/{asset_id}/content:
     $ref: ./openapi/mission/execution.evidence.asset.content.get.yaml#/pathItem
   /api/mission/execution/{execution_id}/evidence:
     $ref: ./openapi/mission/execution.evidence.list.yaml#/pathItem
-  /api/mission/execution/{execution_id}/objective/evidence:
-    $ref: ./openapi/mission/execution.objective.evidence.list.yaml#/pathItem
-  /api/mission/execution/{execution_id}/objective:
-    $ref: ./openapi/mission/execution.objective.list.yaml#/pathItem
-  /api/mission/execution/{execution_id}/objective/outcome:
-    $ref: ./openapi/mission/execution.objective.outcome.list.yaml#/pathItem
   /api/mission/execution/{execution_id}/pinned-revision:
     $ref: ./openapi/mission/execution.pinnedRevision.get.yaml#/pathItem
   /api/mission/execution/{execution_id}/revision/{revision}:
@@ -162,8 +162,6 @@ paths:
     $ref: ./openapi/mission/node.discard.yaml#/pathItem
   /api/mission/node/{node_id}:
     $ref: ./openapi/mission/node.get.yaml#/pathItem
-  /api/mission/node/{node_id}/move:
-    $ref: ./openapi/mission/node.move.yaml#/pathItem
   /api/mission/node/{node_id}/override:
     $ref: ./openapi/mission/node.override.yaml#/pathItem
   /api/mission/node/{node_id}/pause:

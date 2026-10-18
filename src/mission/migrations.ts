@@ -11,11 +11,9 @@ const createMissionTables: Migration = (database) => {
     CREATE TABLE mission_node (
       id TEXT NOT NULL PRIMARY KEY,
       mission_id TEXT NOT NULL REFERENCES mission_mission(id),
-      kind TEXT NOT NULL,
       filename TEXT NOT NULL,
-      parent_id TEXT REFERENCES mission_node(id),
-      state TEXT,
-      attempt INTEGER,
+      state TEXT NOT NULL,
+      attempt INTEGER NOT NULL,
       priority INTEGER,
       retired_at INTEGER,
       created_at INTEGER NOT NULL
@@ -30,7 +28,9 @@ const createMissionTables: Migration = (database) => {
       criterion TEXT NOT NULL,
       verifications TEXT NOT NULL,
       bindings TEXT NOT NULL,
-      tasks TEXT,
+      work TEXT NOT NULL,
+      requires TEXT NOT NULL,
+      tasks TEXT NOT NULL,
       change TEXT NOT NULL,
       reason TEXT NOT NULL,
       actor TEXT NOT NULL,
@@ -86,7 +86,7 @@ const createExecutionRecordTables: Migration = (database) => {
       result TEXT NOT NULL,
       rationale TEXT NOT NULL,
       evidence_ids TEXT NOT NULL,
-      child_outcome_ids TEXT NOT NULL,
+      dependency_outcome_ids TEXT NOT NULL,
       tested_input TEXT,
       execution_id TEXT,
       actor TEXT,
@@ -104,6 +104,14 @@ const createExecutionRecordTables: Migration = (database) => {
       created_at INTEGER NOT NULL
     );
     CREATE UNIQUE INDEX mission_outcome_sequence ON mission_outcome (node_id, sequence);
+    CREATE TABLE mission_evidence_upload_failure (
+      node_id TEXT NOT NULL REFERENCES mission_node(id),
+      attempt INTEGER NOT NULL,
+      storage_binding_id TEXT NOT NULL,
+      asset_id TEXT NOT NULL,
+      failed_at INTEGER NOT NULL,
+      PRIMARY KEY (node_id, attempt, storage_binding_id)
+    );
   `);
 };
 
@@ -115,7 +123,7 @@ const createProposalTable: Migration = (database) => {
       attempt INTEGER NOT NULL,
       assessment_id TEXT NOT NULL REFERENCES mission_assessment(id),
       content TEXT NOT NULL,
-      objective_node_id TEXT REFERENCES mission_node(id),
+      created_node_id TEXT REFERENCES mission_node(id),
       approved_at INTEGER,
       created_at INTEGER NOT NULL
     );

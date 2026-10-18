@@ -6,7 +6,6 @@ import { canonicalJSON } from "../kernel/json.ts";
 import type { Transaction } from "../kernel/store.ts";
 import {
   AssessmentResult,
-  NodeKind,
   NodeState,
   type Actor,
   type HumanActor,
@@ -36,20 +35,12 @@ import { validateText } from "./content.ts";
 const NO_ATTEMPT = 0;
 const NO_REQUIREMENT_KEYS = 0;
 export const ControlError = {
-  Task: "mission.node.control_task",
   Refused: "mission.node.control_refused",
   Unresolved: "mission.node.action_unresolved",
   StateConflict: "mission.node.state_conflict",
 } as const;
 
 export function requireRunnable(node: NodeRow): void {
-  if (node.kind === NodeKind.Task)
-    throw new OperationError(
-      HttpStatus.BadRequest,
-      ControlError.Task,
-      "Task nodes have no controls or execution records.",
-      { node_id: node.id },
-    );
   assert.ok(node.state);
   assert.ok(node.attempt !== null);
 }
@@ -112,7 +103,6 @@ export function requireNoUnresolvedAction(
   node: NodeRow,
 ): void {
   assert.ok(node.attempt !== null);
-  assert.notEqual(node.kind, NodeKind.Task);
   const open =
     node.attempt === NO_ATTEMPT ? null : readOpenAttempt(tx, node.id);
   if (open === null) return;
@@ -148,7 +138,6 @@ export function writeHumanRecords(
   now: number,
 ): OutcomeRow {
   assert.ok(node.attempt !== null);
-  assert.notEqual(node.kind, NodeKind.Task);
   const assessment = insertAssessment(tx, {
     id: createIdentity("assessment"),
     node_id: node.id,
@@ -156,7 +145,7 @@ export function writeHumanRecords(
     result,
     rationale,
     evidence_ids: "[]",
-    child_outcome_ids: "[]",
+    dependency_outcome_ids: "[]",
     tested_input: null,
     execution_id: null,
     actor: canonicalJSON(actor),
@@ -179,7 +168,6 @@ export function endLiveClaim(
   node: NodeRow,
   now: number,
 ): void {
-  assert.notEqual(node.kind, NodeKind.Task);
   assert.ok(tx.database.isTransaction);
   if (node.state === NodeState.Executing || node.state === NodeState.Evaluating)
     dependencies.schedulerClaims.revoke(tx, node.id, now);

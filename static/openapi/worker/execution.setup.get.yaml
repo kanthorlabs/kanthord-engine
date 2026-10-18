@@ -227,7 +227,7 @@ components:
               type: string
             evaluation:
               type: string
-            report:
+            examine:
               type: string
             repair:
               type: string
@@ -243,7 +243,7 @@ components:
             - task-revision
             - criterion-revision
             - evaluation
-            - report
+            - examine
             - repair
             - conflict
           additionalProperties: false
@@ -261,6 +261,11 @@ components:
           required:
             - wall_time_ms
           additionalProperties: false
+        work:
+          type: string
+          enum:
+            - implement
+            - examine
         repositories:
           type: array
           items:
@@ -345,5 +350,6 @@ components:
         - agents
         - templates
         - resource_budget
+        - work
         - repositories
       additionalProperties: false

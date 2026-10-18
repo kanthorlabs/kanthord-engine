@@ -8,7 +8,6 @@ import {
   AssessmentResult,
   AssetKind,
   ClosingEvent,
-  NodeKind,
   NodeState,
   RepositoryAction,
   RevisionWrite,
@@ -81,14 +80,12 @@ function fixture(t: TestContext, action: RepositoryAction | null = null) {
     insertNode(tx, {
       id: nodeId,
       mission_id: missionId,
-      kind: NodeKind.Objective,
-      filename: "objective.md",
-      parent_id: null,
+      filename: "implement.md",
       created_at: NOW,
     });
     tx.database
       .prepare(
-        "INSERT INTO mission_node_revision (node_id, revision, filename, name, requirement, criterion, verifications, bindings, change, reason, actor, created_at) VALUES (?, 1, 'objective.md', 'name', 'requirement', 'criterion', '[\"true\"]', ?, ?, 'reason', ?, ?)",
+        "INSERT INTO mission_node_revision (node_id, revision, filename, name, requirement, criterion, verifications, bindings, work, requires, tasks, change, reason, actor, created_at) VALUES (?, 1, 'implement.md', 'name', 'requirement', 'criterion', '[\"true\"]', ?, 'implement', '[]', '[]', ?, 'reason', ?, ?)",
       )
       .run(
         nodeId,
@@ -189,7 +186,7 @@ for (const example of [
         result: example.result,
         rationale: "Reviewed",
         evidence_ids: canonicalJSON([first.id]),
-        child_outcome_ids: "[]",
+        dependency_outcome_ids: "[]",
         tested_input: null,
         execution_id: example.human ? null : createIdentity("execution"),
         actor: example.human ? canonicalJSON(ACTOR) : null,
@@ -234,7 +231,7 @@ test("blocked node projection includes its attempt-zero human outcome and no req
       result: AssessmentResult.Undetermined,
       rationale: "Held",
       evidence_ids: "[]",
-      child_outcome_ids: "[]",
+      dependency_outcome_ids: "[]",
       tested_input: null,
       execution_id: null,
       actor: canonicalJSON(ACTOR),
@@ -256,7 +253,6 @@ test("blocked node projection includes its attempt-zero human outcome and no req
     assert.equal(context.outcome.attempt, NO_ATTEMPT);
     assert.deepEqual(context.requests, []);
     const node = nodeSchema.parse(nodeRecord(tx, row, h.bindings));
-    assert.ok(node.kind !== NodeKind.Task);
     assert.deepEqual(node.blocked_context, context);
     assert.deepEqual(
       externalActionRecords(tx, h.bindings, h.node_id, NO_ATTEMPT),

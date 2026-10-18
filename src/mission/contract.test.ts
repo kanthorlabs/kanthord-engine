@@ -28,6 +28,16 @@ import {
   Disposition,
   admissionAnswerSchema,
   deliveryAdmitSchema,
+  NODE_IDENTITY_PREFIX,
+  TASK_IDENTITY_PREFIX,
+  Work,
+  contentSchema,
+  edgeSchema,
+  nodeCreateSchema,
+  nodeSchema,
+  taskBodySchema,
+  taskContentSchema,
+  taskWriteSchema,
 } from "./contract.ts";
 
 const ZERO_ATTEMPT = 0;
@@ -79,7 +89,7 @@ const PRODUCED = {
 const ASSESSMENT = {
   ...CONTEXT,
   evidence_ids: [],
-  child_outcome_ids: [],
+  dependency_outcome_ids: [],
   result: AssessmentResult.Success,
   rationale: REASON,
   tested_input: { kind: "produced", sha256: "a".repeat(64) },
@@ -143,7 +153,7 @@ test("execution and evidence control inputs are strict and refuse forged actors"
   assert.equal(
     assessmentSubmitSchema.safeParse({
       ...ASSESSMENT,
-      child_outcome_ids: [outcomeId, outcomeId],
+      dependency_outcome_ids: [outcomeId, outcomeId],
     }).success,
     false,
   );
@@ -196,6 +206,7 @@ const CONTENT = {
   verifications: ["true"],
   bindings: [],
 };
+const NODE_CONTENT = { ...CONTENT, work: Work.Implement };
 const INPUTS = [
   { schema: humanActSchema, input: ACT },
   { schema: resumeSchema, input: { ...ACT, target: ResumeTarget.Waiting } },
@@ -203,7 +214,10 @@ const INPUTS = [
     schema: overrideSchema,
     input: { ...ACT, result: AssessmentResult.Success },
   },
-  { schema: unblockChangeSchema, input: { content: CONTENT, reason: REASON } },
+  {
+    schema: unblockChangeSchema,
+    input: { content: NODE_CONTENT, tasks: [], reason: REASON },
+  },
   {
     schema: unblockSchema,
     input: {
@@ -329,6 +343,132 @@ test("the delivery admission answer carries a reason only for a refusal", () => 
       disposition: Disposition.Refused,
       reason: null,
     }).success,
+    false,
+  );
+});
+
+test("a task identity takes the task prefix and a task body names no binding", () => {
+  const task = {
+    id: createIdentity(TASK_IDENTITY_PREFIX),
+    filename: "recover.md",
+    content: CONTENT,
+  };
+  assert.equal(taskContentSchema.safeParse(task).success, true);
+  assert.equal(
+    taskContentSchema.safeParse({
+      ...task,
+      id: createIdentity(NODE_IDENTITY_PREFIX),
+    }).success,
+    false,
+  );
+  assert.equal(
+    taskWriteSchema.safeParse({ filename: task.filename, content: CONTENT })
+      .success,
+    true,
+  );
+  assert.equal(
+    taskBodySchema.safeParse({
+      ...CONTENT,
+      bindings: [createIdentity("binding")],
+    }).success,
+    false,
+  );
+});
+
+test("a node create requires the task list", () => {
+  const create = {
+    filename: "recover.md",
+    content: NODE_CONTENT,
+    reason: REASON,
+    expected_mission_version: FIRST_REVISION,
+  };
+  assert.equal(nodeCreateSchema.safeParse(create).success, false);
+  assert.equal(
+    nodeCreateSchema.safeParse({ ...create, tasks: [] }).success,
+    true,
+  );
+});
+
+test("node content holds work and a requires list that reads [] when absent", () => {
+  assert.deepEqual(contentSchema.parse(NODE_CONTENT).requires, []);
+  assert.equal(
+    contentSchema.safeParse({ ...NODE_CONTENT, work: "task" }).success,
+    false,
+  );
+  const { work, ...noWork } = NODE_CONTENT;
+  assert.equal(work, Work.Implement);
+  assert.equal(contentSchema.safeParse(noWork).success, false);
+  assert.equal(
+    contentSchema.safeParse({
+      ...NODE_CONTENT,
+      requires: ["platform.macos", "toolchain.xcode_16"],
+    }).success,
+    true,
+  );
+  assert.equal(
+    contentSchema.safeParse({ ...NODE_CONTENT, requires: ["platform.macOS"] })
+      .success,
+    false,
+  );
+  assert.equal(
+    taskBodySchema.safeParse({ ...CONTENT, work: Work.Implement }).success,
+    false,
+  );
+});
+
+test("a repeated key fails", () => {
+  assert.equal(
+    contentSchema.safeParse({
+      ...NODE_CONTENT,
+      requires: ["platform.macos", "platform.macos"],
+    }).success,
+    false,
+  );
+});
+
+test("a node create takes no parent and the node read holds work and requires", () => {
+  const create = {
+    filename: "recover.md",
+    content: NODE_CONTENT,
+    tasks: [],
+    reason: REASON,
+    expected_mission_version: FIRST_REVISION,
+  };
+  assert.equal(nodeCreateSchema.safeParse(create).success, true);
+  assert.deepEqual(Object.keys(nodeCreateSchema.shape).sort(), [
+    "content",
+    "expected_mission_version",
+    "filename",
+    "reason",
+    "tasks",
+  ]);
+  assert.deepEqual(Object.keys(nodeSchema.shape).sort(), [
+    "attempt",
+    "blocked_context",
+    "content",
+    "depends_on",
+    "filename",
+    "id",
+    "mission_id",
+    "pinned_by_attempts",
+    "priority",
+    "requires",
+    "retired_at",
+    "state",
+    "tasks",
+    "visible_revision",
+    "work",
+  ]);
+});
+
+test("an edge names the dependent and the dependency alone", () => {
+  const edge = {
+    dependent_id: createIdentity(NODE_IDENTITY_PREFIX),
+    depends_on_id: createIdentity(NODE_IDENTITY_PREFIX),
+  };
+  assert.equal(edgeSchema.safeParse(edge).success, true);
+  assert.equal(
+    edgeSchema.safeParse({ ...edge, kind: "dependency" }).success,
     false,
   );
 });

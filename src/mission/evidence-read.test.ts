@@ -4,9 +4,8 @@ import { OperationError } from "../kernel/errors.ts";
 import { createIdentity } from "../kernel/identity.ts";
 import { canonicalJSON } from "../kernel/json.ts";
 import { testHumanIdentity } from "../kernel/test-identity.ts";
-import { AssetKind, MissionErrorCode, NodeKind } from "./contract.ts";
+import { AssetKind, MissionErrorCode } from "./contract.ts";
 import { insertEvidence } from "./record-store.ts";
-import { insertNode } from "./store.ts";
 import { evidenceHarness } from "./test-support.ts";
 
 const IDENTITY = testHumanIdentity("ulrich", "Ulrich", "token");
@@ -18,7 +17,6 @@ const CREATED_AT = 1;
 const SINGLE_RESULT = 1;
 const FUTURE_EXPIRY = 2;
 const KEY = "repo.pull_request";
-const CONTROL_TASK = "mission.node.control_task";
 
 test("evidence reads paginate descending identities, include attempt zero and preserve pending request fields", async (t) => {
   const h = evidenceHarness(t, IDENTITY);
@@ -90,31 +88,18 @@ test("evidence reads paginate descending identities, include attempt zero and pr
   );
 });
 
-test("evidence reads refuse tasks and absent nodes or records", async (t) => {
+test("evidence reads refuse absent nodes or records", async (t) => {
   const h = evidenceHarness(t, IDENTITY);
-  const task = createIdentity("node");
-  h.store.transaction((tx) =>
-    insertNode(tx, {
-      id: task,
-      mission_id: h.mission_id,
-      kind: NodeKind.Task,
-      filename: "task.md",
-      parent_id: h.node_id,
-      created_at: CREATED_AT,
+  await assert.rejects(
+    h.invoke("evidence.list", {
+      params: { node_id: createIdentity("node") },
+      query: {},
+      body: null,
     }),
+    (error) =>
+      error instanceof OperationError &&
+      error.code === MissionErrorCode.NodeNotFound,
   );
-  for (const [nodeId, code] of [
-    [task, CONTROL_TASK],
-    [createIdentity("node"), MissionErrorCode.NodeNotFound],
-  ])
-    await assert.rejects(
-      h.invoke("evidence.list", {
-        params: { node_id: nodeId },
-        query: {},
-        body: null,
-      }),
-      (error) => error instanceof OperationError && error.code === code,
-    );
   await assert.rejects(
     h.invoke("evidence.get", {
       params: { evidence_id: createIdentity("evidence") },

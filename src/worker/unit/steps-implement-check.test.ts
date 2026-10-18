@@ -20,14 +20,16 @@ import {
 } from "./judgement.ts";
 import type { MethodClients } from "./method-clients.ts";
 import { WorkspaceKind } from "./workspace.ts";
-import { TaskBoundary } from "./steps-objective.ts";
-import { prepareStepsWorkspace, startCheck } from "./steps-objective.ts";
+import { TaskBoundary } from "./steps-implement.ts";
+import { prepareStepsWorkspace, startCheck } from "./steps-implement.ts";
 import { RefreshResult, refreshAtClaim } from "./base-refresh.ts";
+import { judgedAt } from "./judged-tasks.ts";
 import { SHIPPED_TEMPLATES } from "../../agent/prompt-templates.ts";
 import {
   advanceBase,
   commitOnNode,
-  objectiveFixture as fixture,
+  implementFixture as fixture,
+  NO_PROVIDER_CALLS,
   task,
 } from "./test-support.ts";
 
@@ -74,8 +76,16 @@ test("start check judges passing tasks in order and discards verification change
       .filter((call) => call.arguments[0] === TASK_JUDGED)
       .map((call) => call.arguments[1]),
     [
-      { task_id: tasks[1]!.id, commit: h.head, criterion_met: true },
-      { task_id: tasks[2]!.id, commit: h.head, criterion_met: false },
+      {
+        task_id: tasks[1]!.id,
+        commit: h.checkouts[0]!.head,
+        criterion_met: true,
+      },
+      {
+        task_id: tasks[2]!.id,
+        commit: h.checkouts[0]!.head,
+        criterion_met: false,
+      },
     ],
   );
   assert.doesNotMatch(
@@ -83,12 +93,12 @@ test("start check judges passing tasks in order and discards verification change
     /Previous judgement/,
   );
   assert.equal(h.provider.calls.length, PROVIDER_CALL_COUNT);
-  assert.equal(existsSync(join(h.directory, "dirty")), false);
+  assert.equal(existsSync(join(h.root, "dirty")), false);
   assert.ok(JSON.stringify(h.provider.calls[0]).includes(tasks[1]!.id));
   assert.ok(JSON.stringify(h.provider.calls[1]).includes(tasks[2]!.id));
   h.input.workspaces.release(
-    h.input.workspaces.objectiveKey(h.input.claim.node_id),
-    WorkspaceKind.Objective,
+    h.input.workspaces.nodeKey(h.input.claim.node_id),
+    WorkspaceKind.Node,
   );
 });
 
@@ -184,6 +194,7 @@ test("the start check revises a task that the prior rationale names without a ju
 test("the start check judges a task against the requested changes of a change request", async (t) => {
   const requested = requestedChangesText([
     {
+      binding: "repo",
       head_commit: "a".repeat(40),
       change_requests: [
         {
@@ -278,7 +289,7 @@ test("the start check of a rework revises the chosen task when a node verificati
   assert.ok(choice.includes(NODE_FAILURE));
   assert.equal(h.provider.calls.length, CHOICE_AND_TWO_JUDGEMENTS);
   assert.deepEqual(loggedFields(events, "task chosen"), [
-    { task_id: tasks[1]!.id, commit: h.head, fallback: false },
+    { task_id: tasks[1]!.id, commit: h.checkouts[0]!.head, fallback: false },
   ]);
   assert.deepEqual(
     loggedFields(events, TASK_JUDGED).map(
@@ -306,7 +317,7 @@ test("an invalid task choice of a rework falls back to the last task", async (t)
   );
   assert.ok(checked.pending[0]!.instruction?.includes(NODE_FAILURE));
   assert.deepEqual(loggedFields(events, "task chosen"), [
-    { task_id: tasks[2]!.id, commit: h.head, fallback: true },
+    { task_id: tasks[2]!.id, commit: h.checkouts[0]!.head, fallback: true },
   ]);
 });
 
@@ -324,7 +335,7 @@ test("the start check of a rework whose node verifications pass skips every task
   assert.deepEqual((await startCheck(h)).pending, []);
   assert.equal(h.provider.calls.length, THREE_JUDGEMENTS);
   assert.deepEqual(loggedFields(events, "node verified"), [
-    { commit: h.head, passed: true, exit_codes: [0] },
+    { commit: h.checkouts[0]!.head, passed: true, exit_codes: [0] },
   ]);
   assert.deepEqual(loggedFields(events, "task chosen"), []);
 });
@@ -359,15 +370,10 @@ const NODE_CONTENT = {
 test("the claim refresh merges a moved base branch without a conflict", async (t) => {
   const h = await fixture(t, [], []);
   await advanceBase(h, t, MAIN_ADDITION, "other");
-  await h.input.transport.fetchBase(
-    h.directory,
-    "main",
-    background,
-    DEADLINE_MS,
-  );
+  await h.input.transport.fetchBase(h.root, "main", background, DEADLINE_MS);
   assert.equal(await refreshAtClaim(h), RefreshResult.Merged);
-  assert.equal(readFileSync(join(h.directory, "other"), "utf8"), MAIN_ADDITION);
-  const parents = await simpleGit(h.directory).raw([
+  assert.equal(readFileSync(join(h.root, "other"), "utf8"), MAIN_ADDITION);
+  const parents = await simpleGit(h.root).raw([
     "rev-list",
     "--parents",
     "-n",
@@ -381,8 +387,8 @@ test("the claim refresh merges a moved base branch without a conflict", async (t
 test("repository evidence of the attempt stops the preparation when the node branch is gone", async (t) => {
   const h = await fixture(t, [], []);
   h.input.workspaces.release(
-    h.input.workspaces.objectiveKey(h.input.claim.node_id),
-    WorkspaceKind.Objective,
+    h.input.workspaces.nodeKey(h.input.claim.node_id),
+    WorkspaceKind.Node,
   );
   const run = new ExecutionRun({
     claim: h.input.claim,
@@ -400,7 +406,7 @@ test("repository evidence of the attempt stops the preparation when the node bra
                     address: {
                       kind: "repository",
                       binding_id: h.input.setup.repositories[0]!.binding_id,
-                      commit: h.head,
+                      commit: h.checkouts[0]!.head,
                     },
                   },
                 ],
@@ -432,44 +438,41 @@ test("an attempt that continues a restart branch checks out that branch and merg
   const h = await fixture(t, [], []);
   const nodeId = h.input.claim.node_id;
   const restartBranch = nodeBranchOf(nodeId, RESTART_ATTEMPT);
-  await simpleGit(h.directory).raw(["checkout", "-b", restartBranch]);
-  await commitOnNode(h.directory, RESTART_WORK);
-  const restartHead = (await simpleGit(h.directory).revparse(["HEAD"])).trim();
+  await simpleGit(h.root).raw(["checkout", "-b", restartBranch]);
+  await commitOnNode(h.root, RESTART_WORK);
+  const restartHead = (await simpleGit(h.root).revparse(["HEAD"])).trim();
   await h.input.transport.pushNodeBranch(
-    h.directory,
+    h.root,
     restartBranch,
     background,
     DEADLINE_MS,
   );
   await advanceBase(h, t, MAIN_ADDITION, "other");
   h.input.workspaces.release(
-    h.input.workspaces.objectiveKey(nodeId),
-    WorkspaceKind.Objective,
+    h.input.workspaces.nodeKey(nodeId),
+    WorkspaceKind.Node,
   );
-  const prepared = await h.input.workspaces.prepareObjective({
-    objectiveId: nodeId,
+  const prepared = await h.input.workspaces.prepareImplement({
+    nodeId,
     nodeBranch: restartBranch,
-    pushed: false,
-    repository: h.input.setup.repositories[0]!,
+    pushed: new Set(),
+    repositories: h.input.setup.repositories,
     transport: h.input.transport,
     context: background,
     deadlineMs: DEADLINE_MS,
   });
-  assert.equal(prepared.head, restartHead);
+  assert.equal(prepared.checkouts[0]!.head, restartHead);
   assert.equal(
-    (await simpleGit(prepared.directory).branch()).current,
+    (await simpleGit(prepared.root).branch()).current,
     restartBranch,
   );
   const state = { ...h, ...prepared };
   assert.equal(await refreshAtClaim(state), RefreshResult.Merged);
   assert.equal(
-    readFileSync(join(prepared.directory, "other"), "utf8"),
+    readFileSync(join(prepared.root, "other"), "utf8"),
     MAIN_ADDITION,
   );
-  assert.equal(
-    readFileSync(join(prepared.directory, "file"), "utf8"),
-    RESTART_WORK,
-  );
+  assert.equal(readFileSync(join(prepared.root, "file"), "utf8"), RESTART_WORK);
 });
 
 test("the claim refresh lets the agent resolve a merge conflict and commits the merge", async (t) => {
@@ -487,18 +490,13 @@ test("the claim refresh lets the agent resolve a merge conflict and commits the 
     ],
   );
   h.revision = { content: NODE_CONTENT, tasks: [] } as unknown as Revision;
-  await commitOnNode(h.directory, "node side");
+  await commitOnNode(h.root, "node side");
   await advanceBase(h, t, "main side");
-  await h.input.transport.fetchBase(
-    h.directory,
-    "main",
-    background,
-    DEADLINE_MS,
-  );
+  await h.input.transport.fetchBase(h.root, "main", background, DEADLINE_MS);
   assert.equal(await refreshAtClaim(h), RefreshResult.Merged);
-  assert.equal(readFileSync(join(h.directory, "file"), "utf8"), RESOLVED);
+  assert.equal(readFileSync(join(h.root, "file"), "utf8"), RESOLVED);
   assert.ok(JSON.stringify(h.provider.calls[0]).includes("conflicts"));
-  assert.equal((await simpleGit(h.directory).status()).isClean(), true);
+  assert.equal((await simpleGit(h.root).status()).isClean(), true);
 });
 
 test("the claim refresh aborts the merge and stops when a conflict marker remains", async (t) => {
@@ -508,16 +506,61 @@ test("the claim refresh aborts the merge and stops when a conflict marker remain
     [fauxAssistantMessage("I could not resolve it")],
   );
   h.revision = { content: NODE_CONTENT, tasks: [] } as unknown as Revision;
-  await commitOnNode(h.directory, "node side");
-  const before = await simpleGit(h.directory).revparse(["HEAD"]);
+  await commitOnNode(h.root, "node side");
+  const before = await simpleGit(h.root).revparse(["HEAD"]);
   await advanceBase(h, t, "main side");
-  await h.input.transport.fetchBase(
-    h.directory,
-    "main",
-    background,
-    DEADLINE_MS,
-  );
+  await h.input.transport.fetchBase(h.root, "main", background, DEADLINE_MS);
   await assert.rejects(refreshAtClaim(h), ExecutionStop);
-  assert.equal(await simpleGit(h.directory).revparse(["HEAD"]), before);
-  assert.equal((await simpleGit(h.directory).status()).isClean(), true);
+  assert.equal(await simpleGit(h.root).revparse(["HEAD"]), before);
+  assert.equal((await simpleGit(h.root).status()).isClean(), true);
+});
+
+function nodeUnitRevision(command: string): Revision {
+  return {
+    filename: "implement.md",
+    content: { ...NODE_CONTENT, verifications: [command] },
+    tasks: [],
+  } as unknown as Revision;
+}
+
+test("an implement node with no task runs the node verifications under the node identity as the judged key", async (t) => {
+  const h = await fixture(t, [], [fauxAssistantMessage(MET)]);
+  h.revision = nodeUnitRevision("true");
+  const nodeId = h.input.claim.node_id;
+  const events = t.mock.method(h.run, "log");
+  assert.deepEqual((await startCheck(h)).pending, []);
+  assert.deepEqual(loggedFields(events, TASK_JUDGED), [
+    { task_id: nodeId, commit: h.checkouts[0]!.head, criterion_met: true },
+  ]);
+  assert.equal(
+    judgedAt(h.input.workspaces.nodeKey(nodeId), {
+      attempt: h.input.claim.attempt,
+      revision: h.input.claim.pinned_revision,
+      taskId: nodeId,
+    }),
+    h.checkouts[0]!.head,
+  );
+  assert.ok(JSON.stringify(h.provider.calls[0]).includes(nodeId));
+  h.revision = nodeUnitRevision("false");
+  assert.deepEqual(
+    (await startCheck(h)).pending.map((pending) => pending.task.id),
+    [nodeId],
+  );
+  assert.equal(h.provider.calls.length, ONE_JUDGEMENT);
+});
+
+test("a failed node verification sends no task-choice instruction", async (t) => {
+  const h = await fixture(t, [], []);
+  h.revision = nodeUnitRevision(`echo ${NODE_FAILURE}; false`);
+  h.rework = true;
+  const events = t.mock.method(h.run, "log");
+  const checked = await startCheck(h);
+  assert.equal(checked.budgetEnd, null);
+  assert.deepEqual(
+    checked.pending.map((pending) => pending.task.id),
+    [h.input.claim.node_id],
+  );
+  assert.ok(checked.pending[0]!.instruction?.includes(NODE_FAILURE));
+  assert.equal(h.provider.calls.length, NO_PROVIDER_CALLS);
+  assert.deepEqual(loggedFields(events, "task chosen"), []);
 });

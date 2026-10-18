@@ -8,7 +8,7 @@ import {
   rmSync,
   utimesSync,
 } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join, relative, resolve } from "node:path";
 import { ensureDirectory } from "../../kernel/files.ts";
 import { identitySchema } from "../../kernel/identity.ts";
 import { bindingNameSchema } from "../../project/contract.ts";
@@ -20,8 +20,13 @@ export const SCRATCH_DIRECTORY = ".kanthord-scratch/";
 const GIT_EXCLUDE = [".git", "info", "exclude"];
 export const WORKSPACE_RETENTION_MS = 7 * 24 * 3600 * 1000;
 export const SWEEP_INTERVAL_MS = 3600000;
+export const CHECKOUTS_DIRECTORY = "checkouts";
+export const EVIDENCE_DIRECTORY = "evidence";
+const NO_CHECKOUTS = 0;
+const SINGLE_CHECKOUT = 1;
+const FIRST_CHECKOUT = 0;
 export const WorkspaceKind = {
-  Objective: "objective",
+  Node: "node",
   Execution: "execution",
 } as const;
 export type WorkspaceKind = (typeof WorkspaceKind)[keyof typeof WorkspaceKind];
@@ -29,6 +34,22 @@ interface Preparation {
   transport: RepositoryTransport;
   context: Context;
   deadlineMs: number;
+}
+interface RepositoryAddress {
+  kind: "repository";
+  binding_id: string;
+  commit: string;
+}
+export interface ExamineCheckout {
+  name: string;
+  directory: string;
+  base_branch: string;
+}
+export interface WorkspaceCheckout {
+  binding_id: string;
+  name: string;
+  directory: string;
+  head: string;
 }
 interface WorkspaceRepository {
   binding_id: string;
@@ -52,123 +73,152 @@ export class WorkspaceRoot {
     assert.equal(dirname(root), resolve(stateDirectory));
     return new WorkspaceRoot(root);
   }
-  objectiveKey(objectiveId: string): string {
-    return join(this.root, identitySchema("node").parse(objectiveId));
+  nodeKey(nodeId: string): string {
+    return join(this.root, identitySchema("node").parse(nodeId));
   }
-  objectiveDirectory(objectiveId: string, bindingId: string): string {
+  nodeDirectory(nodeId: string, bindingName: string): string {
     return join(
-      this.objectiveKey(objectiveId),
-      identitySchema("binding").parse(bindingId),
+      this.nodeKey(nodeId),
+      CHECKOUTS_DIRECTORY,
+      bindingNameSchema.parse(bindingName),
     );
   }
   executionKey(executionId: string): string {
     return join(this.root, identitySchema("execution").parse(executionId));
   }
-  async prepareObjective(
+  async prepareImplement(
     input: Preparation & {
-      objectiveId: string;
+      nodeId: string;
       nodeBranch: string;
-      pushed: boolean;
-      repository: WorkspaceRepository;
+      pushed: ReadonlySet<string>;
+      repositories: readonly WorkspaceRepository[];
     },
-  ): Promise<{ directory: string; head: string; nodeBranch: string }> {
-    const key = this.objectiveKey(input.objectiveId);
-    const directory = this.objectiveDirectory(
-      input.objectiveId,
-      input.repository.binding_id,
-    );
-    const existing = existsSync(directory);
+  ): Promise<{ root: string; checkouts: WorkspaceCheckout[] }> {
+    assert.ok(input.repositories.length > NO_CHECKOUTS);
+    const key = this.nodeKey(input.nodeId);
     this.hold(key);
     const end = performance.now() + input.deadlineMs;
+    const created: string[] = [];
     try {
       ensureDirectory(key);
-      ensureDirectory(directory);
       this.touch(key);
-      if (!existing) {
+      const checkouts: WorkspaceCheckout[] = [];
+      for (const repository of input.repositories) {
+        const directory = this.nodeDirectory(input.nodeId, repository.name);
+        assert.ok(
+          !checkouts.some((checkout) => checkout.directory === directory),
+          "Duplicate repository binding",
+        );
+        if (!existsSync(directory)) {
+          created.push(directory);
+          ensureDirectory(directory);
+          await input.transport.proveSshIdentity(
+            repository.ssh_identity,
+            input.context,
+            end - performance.now(),
+          );
+          await input.transport.clone(
+            repository.address,
+            directory,
+            input.context,
+            end - performance.now(),
+          );
+        }
         await input.transport.proveSshIdentity(
-          input.repository.ssh_identity,
+          repository.ssh_identity,
           input.context,
           end - performance.now(),
         );
-        await input.transport.clone(
-          input.repository.address,
+        const head = await input.transport.fetchAndCheckout(
           directory,
+          input.nodeBranch,
+          repository.strategy.base_branch,
+          input.pushed.has(repository.binding_id),
           input.context,
           end - performance.now(),
         );
+        excludeScratch(directory);
+        checkouts.push({
+          binding_id: repository.binding_id,
+          name: repository.name,
+          directory,
+          head,
+        });
       }
-      await input.transport.proveSshIdentity(
-        input.repository.ssh_identity,
-        input.context,
-        end - performance.now(),
-      );
-      const head = await input.transport.fetchAndCheckout(
-        directory,
-        input.nodeBranch,
-        input.repository.strategy.base_branch,
-        input.pushed,
-        input.context,
-        end - performance.now(),
-      );
-      excludeScratch(directory);
-      return { directory, head, nodeBranch: input.nodeBranch };
+      return {
+        root:
+          checkouts.length > SINGLE_CHECKOUT
+            ? join(key, CHECKOUTS_DIRECTORY)
+            : checkouts[FIRST_CHECKOUT]!.directory,
+        checkouts,
+      };
     } catch (error) {
       this.held.delete(key);
-      if (!existing) rmSync(directory, { recursive: true, force: true });
+      for (const directory of created)
+        rmSync(directory, { recursive: true, force: true });
       throw error;
     }
   }
-  async prepareSnapshot(
+  async prepareSnapshots(
     input: Preparation & {
       executionId: string;
-      repository: { address: string; ssh_identity: SshIdentityPin };
-      commit: string;
+      snapshots: readonly {
+        repository: WorkspaceRepository;
+        commit: string;
+      }[];
     },
-  ): Promise<{ directory: string; head: string }> {
-    const { directory } = this.prepareExecution(input);
-    const end = performance.now() + input.deadlineMs;
-    try {
-      await input.transport.proveSshIdentity(
-        input.repository.ssh_identity,
-        input.context,
-        end - performance.now(),
-      );
-      const head = await input.transport.cloneSnapshot(
-        input.repository.address,
-        input.commit,
-        directory,
-        input.context,
-        end - performance.now(),
-      );
-      return { directory, head };
-    } catch (error) {
-      this.release(directory, WorkspaceKind.Execution);
-      throw error;
-    }
+  ): Promise<{
+    key: string;
+    directory: string;
+    checkouts: ExamineCheckout[];
+    tested_input: RepositoryAddress | RepositoryAddress[];
+  }> {
+    assert.ok(input.snapshots.length > NO_CHECKOUTS);
+    const prepared = await this.prepareCheckouts(
+      input,
+      input.snapshots.map(({ repository, commit }) => ({
+        repository,
+        ref: commit,
+      })),
+    );
+    return { ...prepared, tested_input: prepared.tested_input! };
   }
-  async prepareInitiative(
+  async prepareExamine(
     input: Preparation & {
       executionId: string;
       repositories: WorkspaceRepository[];
     },
   ): Promise<{
+    key: string;
     directory: string;
-    tested_input:
-      { kind: "repository"; binding_id: string; commit: string }[] | null;
+    checkouts: ExamineCheckout[];
+    tested_input: RepositoryAddress | RepositoryAddress[] | null;
   }> {
-    const { directory } = this.prepareExecution(input);
+    return this.prepareCheckouts(
+      input,
+      input.repositories.map((repository) => ({
+        repository,
+        ref: `origin/${repository.strategy.base_branch}`,
+      })),
+    );
+  }
+  private async prepareCheckouts(
+    input: Preparation & { executionId: string },
+    entries: readonly { repository: WorkspaceRepository; ref: string }[],
+  ): Promise<{
+    key: string;
+    directory: string;
+    checkouts: ExamineCheckout[];
+    tested_input: RepositoryAddress | RepositoryAddress[] | null;
+  }> {
+    const { directory: key } = this.prepareExecution(input);
     const end = performance.now() + input.deadlineMs;
-    const testedInput: {
-      kind: "repository";
-      binding_id: string;
-      commit: string;
-    }[] = [];
+    const checkouts: ExamineCheckout[] = [];
+    const testedInput: RepositoryAddress[] = [];
     try {
-      for (const repository of input.repositories) {
-        const target = join(
-          directory,
-          bindingNameSchema.parse(repository.name),
-        );
+      for (const { repository, ref } of entries) {
+        const name = bindingNameSchema.parse(repository.name);
+        const target = join(key, CHECKOUTS_DIRECTORY, name);
         assert.ok(!existsSync(target), "Duplicate repository binding");
         ensureDirectory(target);
         await input.transport.proveSshIdentity(
@@ -178,23 +228,35 @@ export class WorkspaceRoot {
         );
         const commit = await input.transport.cloneSnapshot(
           repository.address,
-          `origin/${repository.strategy.base_branch}`,
+          ref,
           target,
           input.context,
           end - performance.now(),
         );
+        checkouts.push({
+          name,
+          directory: target,
+          base_branch: repository.strategy.base_branch,
+        });
         testedInput.push({
           kind: "repository",
           binding_id: repository.binding_id,
           commit,
         });
       }
+      const listed = checkouts.length > SINGLE_CHECKOUT;
       return {
-        directory,
-        tested_input: testedInput.length ? testedInput : null,
+        key,
+        directory: listed
+          ? join(key, CHECKOUTS_DIRECTORY)
+          : (checkouts[FIRST_CHECKOUT]?.directory ?? key),
+        checkouts,
+        tested_input: listed
+          ? testedInput
+          : (testedInput[FIRST_CHECKOUT] ?? null),
       };
     } catch (error) {
-      this.release(directory, WorkspaceKind.Execution);
+      this.release(key, WorkspaceKind.Execution);
       throw error;
     }
   }
@@ -224,7 +286,7 @@ export class WorkspaceRoot {
   release(key: string, kind: WorkspaceKind): void {
     assert.equal(dirname(key), this.root);
     assert.ok(this.held.has(key));
-    if (kind === WorkspaceKind.Objective) this.touch(key);
+    if (kind === WorkspaceKind.Node) this.touch(key);
     else rmSync(key, { recursive: true, force: true });
     this.held.delete(key);
   }
@@ -249,6 +311,16 @@ export class WorkspaceRoot {
     clearInterval(this.timer);
     this.timer = undefined;
   }
+}
+
+export function workRepositoriesOf(
+  root: string,
+  checkouts: readonly ExamineCheckout[],
+): ExamineCheckout[] {
+  return checkouts.map((checkout) => ({
+    ...checkout,
+    directory: relative(root, checkout.directory) || ".",
+  }));
 }
 
 function excludeScratch(directory: string): void {

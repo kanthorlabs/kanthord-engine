@@ -36,6 +36,7 @@ engine/
 │   │   ├── json.ts             # Canonical JSON, digests, key derivation, and timestamps
 │   │   ├── handover.ts         # Handover keys, additional authenticated data and envelope codec
 │   │   ├── identity.ts         # Prefixed entity identities and ULID schemas
+│   │   ├── trait.ts            # Trait key form and byte bound
 │   │   ├── values.ts           # JavaScript value predicates
 │   │   ├── version.ts          # Cached package version
 │   │   ├── xdg.ts              # Configuration, data, state, and cache directories
@@ -149,14 +150,18 @@ engine/
 │   │   ├── frozen-action.ts    # Pinned repository requirements and resolutions
 │   │   ├── action-context.ts   # Atomic action eligibility and earlier request candidates
 │   │   ├── currency.ts         # Read-time assessment currency and selection
-│   │   ├── conditions.ts       # Readiness, closure, and continuation conditions
+│   │   ├── graph.ts            # Dependency cycle detection and direct dependencies
+│   │   ├── edge-read.ts        # Dependency edge cursor and page
+│   │   ├── conditions.ts       # Readiness, direct-dependency closure, and continuation conditions
 │   │   ├── control.ts          # Transactional human-control admission and closure
 │   │   ├── control-hold.ts     # Pause, ready, and resume
 │   │   ├── control-close.ts    # Block, discard, and success override
 │   │   ├── control-unblock.ts  # Atomic direction change and next attempt
 │   │   ├── transitions.ts     # Scheduler claim, release admission, and failure
+│   │   ├── claim-facts.ts     # Work, requires and claimable states of a node at its claim revisions
+│   │   ├── coverage.ts        # Unmatched pairs that a node write adds, and the refusal of that write
 │   │   ├── execution.ts       # Live claim and execution context admission
-│   │   ├── execution-read.ts  # Pinned revisions, attempts and current objective outcomes
+│   │   ├── execution-read.ts  # Pinned revisions, attempts and current dependency outcomes
 │   │   ├── evidence-content.ts # Binding, byte and verification validation
 │   │   ├── evidence-submit.ts # Evidence insertion and object upload preparation
 │   │   ├── evidence-complete.ts # Checked object upload publication
@@ -177,6 +182,7 @@ engine/
 │   │   ├── migrations.ts       # scheduler_job and scheduler_execution tables
 │   │   ├── execution-store.ts  # Execution rows, claim-state derivation, and record projection
 │   │   ├── claim.ts            # Transactional work selection and admission
+│   │   ├── match.ts            # Match of a claimant and a node, coverage, and the unmatched pairs of a project
 │   │   ├── work-pull.ts        # Rolled-back probes, waiting, and one final commit
 │   │   ├── wakeup.ts           # Project-scoped waiting pulls and coalesced notifications
 │   │   ├── release.ts          # Transactional proof and Mission release routing
@@ -216,9 +222,9 @@ engine/
 │   │   │   ├── method-clients.ts   # Injected execution-scoped operation clients
 │   │   │   ├── execution-run.ts    # Refusal boundary, submissions and release reconciliation
 │   │   │   ├── judgement.ts        # Strict handoff parsing and method instructions
-│   │   │   ├── node-reads.ts       # Bounded pinned-context and objective reads
-│   │   │   ├── steps-objective.ts  # Start checks, task revisions and objective publication
-│   │   │   ├── steps-initiative.ts # Current objective report and initiative release
+│   │   │   ├── node-reads.ts       # Bounded pinned-context and dependency reads
+│   │   │   ├── steps-implement.ts  # Start checks, task revisions and implement-node publication
+│   │   │   ├── steps-examine.ts    # Dependency outcome report and examine-node release
 │   │   │   ├── evaluation-input.ts # Isolated snapshots and evidence placement
 │   │   │   ├── evaluation.ts       # Verification evidence, assessment and action requests
 │   │   │   ├── transcript.ts       # Execution transcript sink and no-op implementation

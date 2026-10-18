@@ -4,31 +4,24 @@ import { HttpStatus } from "../kernel/http.ts";
 import { digest } from "../kernel/json.ts";
 import type { Transaction } from "../kernel/store.ts";
 import { importAdmissible, isTerminal } from "./admission.ts";
-import { TASKS_FIELD, validateText } from "./content.ts";
+import { validateText } from "./content.ts";
 import {
-  EdgeKind,
   MissionErrorCode,
-  NodeKind,
-  RevisionWrite,
-  TaskChange,
   type Edge,
   type HumanActor,
   type NodeChange,
   type Retire,
   type RetirePreview,
-  type Revision,
   type WorkQueue,
   type MissionBindings,
 } from "./contract.ts";
+import { ControlError } from "./control.ts";
+import { dependencyEditGuarded } from "./dependency.ts";
 import { requireNode } from "./node-read.ts";
-import { revisionFromRow } from "./revision.ts";
-import { openAttemptsOf } from "./store.ts";
 import { claimableMap, reconcileMission, routeMission } from "./routing.ts";
 import {
   deleteDependency,
   incrementMissionVersion,
-  insertRevision,
-  readCurrentRevision,
   readDependencies,
   readMissionNodes,
   type NodeRow,
@@ -39,61 +32,19 @@ const COUNTER_INCREMENT = 1;
 const UPDATED_NODE_COUNT = 1;
 const FIRST_NODE = 0;
 const REASON_FIELD = "reason";
-type DependencyEdge = Extract<Edge, { kind: typeof EdgeKind.Dependency }>;
 
-function retirementSet(tx: Transaction, node: NodeRow): NodeRow[] {
-  const nodes = readMissionNodes(tx, node.mission_id).filter(
-    (item) => item.retired_at === null,
-  );
-  const children = new Map<string, NodeRow[]>();
-  for (const child of nodes) {
-    if (child.parent_id === null) continue;
-    const siblings = children.get(child.parent_id) ?? [];
-    siblings.push(child);
-    children.set(child.parent_id, siblings);
-  }
-  const pending = [node];
-  const ids = new Set([node.id]);
-  for (
-    let index = FIRST_NODE;
-    index < pending.length && index < nodes.length;
-    index++
-  ) {
-    const parent = pending[index]!;
-    const descendants = children.get(parent.id) ?? [];
-    for (const child of descendants) {
-      assert.ok(!ids.has(child.id), "Containment must be acyclic.");
-      ids.add(child.id);
-      pending.push(child);
-    }
-  }
-  assert.ok(
-    pending.length <= nodes.length,
-    "Retirement stays within the current mission.",
-  );
-  return [
-    node,
-    ...nodes.filter((item) => item.id !== node.id && ids.has(item.id)),
-  ];
+function retirementSet(node: NodeRow): NodeRow[] {
+  return [node];
 }
 
 function checkRetirement(tx: Transaction, node: NodeRow): void {
   assert.equal(node.retired_at, null, "Only current nodes enter retirement.");
-  if (node.kind === NodeKind.Task)
-    assert.ok(node.parent_id, "A task has an objective parent.");
-  const checked =
-    node.kind === NodeKind.Task ? requireNode(tx, node.parent_id!) : node;
-  assert.notEqual(
-    checked.kind,
-    NodeKind.Task,
-    "Retirement checks a runnable owner.",
-  );
-  if (!importAdmissible(checked.state, checked.attempt))
+  if (!importAdmissible(node.state, node.attempt))
     throw new OperationError(
       HttpStatus.Conflict,
       MissionErrorCode.RetireRefused,
       "Node cannot be retired.",
-      { node_id: checked.id, state: checked.state, attempt: checked.attempt },
+      { node_id: node.id, state: node.state, attempt: node.attempt },
     );
 }
 
@@ -102,11 +53,11 @@ function removedDependencies(
   missionId: string,
   ids: Set<string>,
   force: boolean,
-): DependencyEdge[] {
+): Edge[] {
   const nodes = new Map(
     readMissionNodes(tx, missionId).map((node) => [node.id, node]),
   );
-  const removed: DependencyEdge[] = [];
+  const removed: Edge[] = [];
   for (const edge of readDependencies(tx, missionId)) {
     if (!ids.has(edge.depends_on) || ids.has(edge.dependent)) continue;
     const dependent = nodes.get(edge.dependent);
@@ -118,7 +69,6 @@ function removedDependencies(
     );
     if (isTerminal(dependent.state)) continue;
     removed.push({
-      kind: EdgeKind.Dependency,
       dependent_id: edge.dependent,
       depends_on_id: edge.depends_on,
     });
@@ -134,6 +84,21 @@ function removedDependencies(
         ].sort(),
       },
     );
+  for (const edge of removed) {
+    const dependent = nodes.get(edge.dependent_id);
+    assert.ok(dependent, "Dependency source exists in its mission.");
+    if (dependencyEditGuarded(tx, dependent, true))
+      throw new OperationError(
+        HttpStatus.Conflict,
+        ControlError.StateConflict,
+        "A dependent state refuses the dependency removal.",
+        {
+          node_id: dependent.id,
+          state: dependent.state,
+          attempt: dependent.attempt,
+        },
+      );
+  }
   return removed;
 }
 
@@ -144,7 +109,7 @@ export function planRetirement(
 ): RetirePreview {
   requireActive(node);
   const mission = requireMission(tx, node.mission_id);
-  const nodes = retirementSet(tx, node);
+  const nodes = retirementSet(node);
   assert.equal(nodes[FIRST_NODE]?.id, node.id, "Named node is checked first.");
   for (const retiring of nodes) checkRetirement(tx, retiring);
   const retiredNodeIds = nodes.map((item) => item.id).sort();
@@ -168,57 +133,9 @@ export function planRetirement(
   return { ...preview, preview_digest: digest(preview) };
 }
 
-function retireTasks(
-  tx: Transaction,
-  objectiveId: string,
-  retiredIds: Set<string>,
-  reason: string,
-  actor: HumanActor,
-  now: number,
-): Revision {
-  const row = readCurrentRevision(tx, objectiveId);
-  assert.ok(row, "Surviving objective has a current revision.");
-  const previous = revisionFromRow(tx, row);
-  assert.ok(previous.tasks, "Objective revision contains tasks.");
-  const retired = previous.tasks.filter((task) => retiredIds.has(task.id));
-  assert.ok(retired.length, "Affected objective loses at least one task.");
-  const revision: Revision = {
-    ...previous,
-    revision: previous.revision + COUNTER_INCREMENT,
-    reason,
-    actor,
-    created_at: now,
-    pinned_by_attempts: [],
-    tasks: previous.tasks.filter((task) => !retiredIds.has(task.id)),
-    change: {
-      write: RevisionWrite.NodeRetire,
-      previous_revision: previous.revision,
-      changed_fields: [TASKS_FIELD],
-      tasks: retired.map((task) => ({
-        id: task.id,
-        change: TaskChange.Retired,
-        changed_fields: [],
-      })),
-    },
-  };
-  insertRevision(tx, revision);
-  return revision;
-}
-
-function retireRows(
-  tx: Transaction,
-  ids: Set<string>,
-  reason: string,
-  actor: HumanActor,
-): Revision[] {
+function retireRows(tx: Transaction, ids: Set<string>): void {
   const now = Date.now();
-  const objectives = new Set<string>();
   for (const id of ids) {
-    const node = requireNode(tx, id);
-    if (node.kind === NodeKind.Task) {
-      assert.ok(node.parent_id, "Retired task has an objective parent.");
-      if (!ids.has(node.parent_id)) objectives.add(node.parent_id);
-    }
     const result = tx.database
       .prepare("UPDATE mission_node SET retired_at = ? WHERE id = ?")
       .run(now, id);
@@ -228,9 +145,6 @@ function retireRows(
       "Retirement retains and marks one node.",
     );
   }
-  return [...objectives]
-    .sort()
-    .map((id) => retireTasks(tx, id, ids, reason, actor, now));
 }
 
 export function retireNode(
@@ -258,21 +172,9 @@ export function retireNode(
       "Retirement preview changed.",
     );
   const before = claimableMap(tx, mission.id, bindings);
-  for (const edge of plan.removed_edges) {
-    assert.equal(
-      edge.kind,
-      EdgeKind.Dependency,
-      "Retirement removes only dependency edges.",
-    );
-    if (edge.kind === EdgeKind.Dependency)
-      deleteDependency(tx, edge.dependent_id, edge.depends_on_id);
-  }
-  const revisions = retireRows(
-    tx,
-    new Set(plan.retired_node_ids),
-    body.reason,
-    actor,
-  );
+  for (const edge of plan.removed_edges)
+    deleteDependency(tx, edge.dependent_id, edge.depends_on_id);
+  retireRows(tx, new Set(plan.retired_node_ids));
   routeMission(tx, mission.id);
   reconcileMission(
     tx,
@@ -295,13 +197,10 @@ export function retireNode(
   );
   return {
     mission_version: missionVersion,
-    revisions,
+    revisions: [],
     retired_node_ids: plan.retired_node_ids,
     added_edges: [],
     removed_edges: plan.removed_edges,
-    open_attempts_unchanged: openAttemptsOf(
-      tx,
-      revisions.map((revision) => revision.node_id),
-    ),
+    open_attempts_unchanged: [],
   };
 }

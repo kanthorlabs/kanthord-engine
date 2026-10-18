@@ -17,8 +17,10 @@ export function revisionFromRow(tx: Transaction, row: RevisionRow): Revision {
       criterion: row.criterion,
       verifications: JSON.parse(row.verifications),
       bindings: JSON.parse(row.bindings),
+      work: row.work,
+      requires: JSON.parse(row.requires),
     },
-    ...(row.tasks === null ? {} : { tasks: JSON.parse(row.tasks) }),
+    tasks: JSON.parse(row.tasks),
     change: JSON.parse(row.change),
     pinned_by_attempts: readAttemptPins(tx, row.node_id)
       .filter((pin) => pin.node_revision === row.revision)

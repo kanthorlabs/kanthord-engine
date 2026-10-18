@@ -3,6 +3,7 @@ import { test } from "node:test";
 import { gatewayOperations } from "../../gateway/contract.ts";
 import {
   NodeState,
+  Work,
   type Evidence,
   type Assessment,
   type Outcome,
@@ -41,9 +42,27 @@ type Assessed = {
   node: { state: string };
 };
 type Claim = { kind: string; execution: ExecutionRecord };
+type CLI = ReturnType<typeof journeyClient>;
+
+async function addDependency(
+  cli: CLI,
+  projectId: string,
+  dependentId: string,
+  dependsOnId: string,
+) {
+  const mission = await cli.read<{ version: number }>([
+    "mission",
+    "get",
+    projectId,
+  ]);
+  await cli.write(["mission", "dependency", "add", dependentId, dependsOnId], {
+    reason: "plan",
+    expected_mission_version: mission.version,
+  });
+}
 
 test(
-  "EX10.1–11 external harness completes objective and initiative through CLI",
+  "EX10.1–11 external harness completes the implement and examine nodes through CLI",
   { timeout: JOURNEY_TIMEOUT_MS },
   async (t) => {
     const hosts = outboundHosts(t);
@@ -100,21 +119,21 @@ test(
         },
       },
     });
-    const initiative = await createJourneyNode(
+    const examine = await createJourneyNode(
       cli,
       project.id,
-      "initiative-1.md",
-      "initiative",
-      [],
-    );
-    const objective = await createJourneyNode(
-      cli,
-      project.id,
-      "objective-a.md",
-      "objective",
+      "examine-1.md",
+      Work.Examine,
       [bindings.bindings.repo!.id],
-      initiative,
     );
+    const implement = await createJourneyNode(
+      cli,
+      project.id,
+      "implement-a.md",
+      Work.Implement,
+      [bindings.bindings.repo!.id],
+    );
+    await addDependency(cli, project.id, examine, implement);
     const issue = (name: string) =>
       generateMachineToken({
         env: cli.human,
@@ -203,7 +222,7 @@ test(
     const first = await pull();
     await t.test("EX10.3 steps claim and instance activity", async () => {
       assert.equal(first.kind, CLAIMED);
-      assert.equal(first.execution.node_id, objective);
+      assert.equal(first.execution.node_id, implement);
       assert.equal(first.execution.attempt, FIRST_ATTEMPT);
       assert.equal(first.execution.claimant.runtime_identity, runtime);
       const instance = await cli.read<{
@@ -251,7 +270,7 @@ test(
         assert.deepEqual(pinned.tasks, []);
         work = (
           await cli.write<Submitted>(
-            ["mission", "evidence", "submit", objective],
+            ["mission", "evidence", "submit", implement],
             {
               ...ctx(first.execution),
               subject: "head commit",
@@ -267,19 +286,19 @@ test(
           first.execution.execution_id,
         );
         assert.ok(Number.isFinite((await release(first.execution)).ended_at));
-        assert.equal((await node(objective)).state, NodeState.Waiting);
+        assert.equal((await node(implement)).state, NodeState.Waiting);
       },
     );
     const second = await pull();
     await t.test("EX10.6 evaluation claim", async () => {
-      assert.equal(second.execution.node_id, objective);
+      assert.equal(second.execution.node_id, implement);
       assert.equal(second.execution.attempt, FIRST_ATTEMPT);
       const claim = await cli.read<{ claim_state: string }>(
         ["scheduler", "claim", "get", second.execution.execution_id],
         auth.token,
       );
       assert.equal(claim.claim_state, ClaimState.Running);
-      assert.equal((await node(objective)).state, NodeState.Evaluating);
+      assert.equal((await node(implement)).state, NodeState.Evaluating);
     });
     async function verification(
       execution: ExecutionRecord,
@@ -314,18 +333,18 @@ test(
       ).evidence;
     }
     let outcomeA!: string;
-    await t.test("EX10.7 assessment closes objective and claim", async () => {
+    await t.test("EX10.7 assessment closes implement and claim", async () => {
       const run = await verification(
         second.execution,
         repoAt("a"),
         "test -f hello.txt",
       );
       const assessed = await cli.write<Assessed>(
-        ["mission", "assessment", "submit", objective],
+        ["mission", "assessment", "submit", implement],
         {
           ...ctx(second.execution),
           evidence_ids: [run.id, work.id],
-          child_outcome_ids: [],
+          dependency_outcome_ids: [],
           result: SUCCESS,
           rationale: "hello.txt exists",
           tested_input: repoAt("a"),
@@ -347,16 +366,16 @@ test(
     const third = await pull();
     let report!: Evidence;
     await t.test(
-      "EX10.8 initiative report follows terminal objective",
+      "EX10.8 examine report follows the terminal implement node",
       async () => {
-        assert.equal(third.execution.node_id, initiative);
+        assert.equal(third.execution.node_id, examine);
         const children = await cli.read<{
           items: { id: string; state: string }[];
         }>(
           [
             "mission",
             "execution",
-            "objective",
+            "dependency",
             "list",
             third.execution.execution_id,
           ],
@@ -364,14 +383,14 @@ test(
         );
         assert.deepEqual(
           children.items.map(({ id }) => id),
-          [objective],
+          [implement],
         );
         assert.equal(children.items[0]!.state, NodeState.Completed);
         const outcomes = await cli.read<{ items: { id: string }[] }>(
           [
             "mission",
             "execution",
-            "objective",
+            "dependency",
             "outcome",
             "list",
             third.execution.execution_id,
@@ -384,7 +403,7 @@ test(
         );
         report = (
           await cli.write<Submitted>(
-            ["mission", "evidence", "submit", initiative],
+            ["mission", "evidence", "submit", examine],
             {
               ...ctx(third.execution),
               subject: "report",
@@ -403,22 +422,22 @@ test(
           )
         ).evidence;
         await release(third.execution);
-        assert.equal((await node(initiative)).state, NodeState.Waiting);
+        assert.equal((await node(examine)).state, NodeState.Waiting);
       },
     );
     await t.test(
-      "EX10.9 initiative assessment closes with child outcome",
+      "EX10.9 examine assessment closes with the dependency outcome",
       async () => {
         const fourth = await pull();
-        assert.equal(fourth.execution.node_id, initiative);
-        const testedInput = [repoAt("b")];
+        assert.equal(fourth.execution.node_id, examine);
+        const testedInput = repoAt("b");
         const run = await verification(fourth.execution, testedInput, "true");
         const assessed = await cli.write<Assessed>(
-          ["mission", "assessment", "submit", initiative],
+          ["mission", "assessment", "submit", examine],
           {
             ...ctx(fourth.execution),
             evidence_ids: [run.id, report.id],
-            child_outcome_ids: [outcomeA],
+            dependency_outcome_ids: [outcomeA],
             result: SUCCESS,
             rationale: "A is complete.",
             tested_input: testedInput,
@@ -426,15 +445,15 @@ test(
           auth.token,
         );
         assert.equal(assessed.node.state, NodeState.Completed);
-        assert.deepEqual(assessed.assessment.child_node_ids, [objective]);
+        assert.deepEqual(assessed.assessment.dependency_node_ids, [implement]);
         assert.equal(assessed.outcome.result, SUCCESS);
       },
     );
     await t.test(
       "EX10.10 terminal graph has four finished executions and empty queue",
       async () => {
-        assert.equal((await node(objective)).state, NodeState.Completed);
-        assert.equal((await node(initiative)).state, NodeState.Completed);
+        assert.equal((await node(implement)).state, NodeState.Completed);
+        assert.equal((await node(examine)).state, NodeState.Completed);
         assert.deepEqual(
           (
             await cli.read<{ items: unknown[] }>([

@@ -5,10 +5,9 @@ import { createIdentity } from "../kernel/identity.ts";
 import { isObject } from "../kernel/values.ts";
 import type { Transaction } from "../kernel/store.ts";
 import {
-  EdgeKind,
   MissionErrorCode,
   NODE_IDENTITY_PREFIX,
-  NodeKind,
+  TASK_IDENTITY_PREFIX,
   type Edge,
   type HumanActor,
   type ImportApply,
@@ -16,11 +15,17 @@ import {
   type ImportResult,
   type Mission,
   type MissionBindings,
+  type Revision,
+  type Violation,
   type WorkQueue,
   type SchedulerClaims,
 } from "./contract.ts";
+import { addedPairs, UNMATCHED_MESSAGE } from "./coverage.ts";
+import type { Dependencies } from "./service.ts";
 import {
+  isTaskEntry,
   prepareImport,
+  type PreparedImport,
   type ResolvedImport,
   type ResolvedImportEntry,
 } from "./import.ts";
@@ -34,7 +39,8 @@ import {
   insertRevision,
 } from "./store.ts";
 import { requireMission } from "./write.ts";
-import { requireNoLiveSubtree } from "./dependency.ts";
+import { ControlError } from "./control.ts";
+import { requireNoLiveClaim } from "./dependency.ts";
 
 const NO_VIOLATIONS = 0;
 const MINIMUM_MISSION_VERSION = 0;
@@ -43,10 +49,15 @@ const EXPECTED_ROW_CHANGE = 1;
 const VERSION_INCREMENT = 1;
 const FIRST_VIOLATION = 0;
 const TEMPORARY_FILENAME_PREFIX = "import:";
-const INSERT_ORDER = [NodeKind.Initiative, NodeKind.Objective, NodeKind.Task];
+const PROBE_QUEUE: WorkQueue = {
+  insert: () => undefined,
+  delete: () => undefined,
+  priorityUpdate: () => undefined,
+};
 const CONFLICT_CODES: ReadonlySet<string> = new Set([
   MissionErrorCode.ConditionFailed,
   MissionErrorCode.TerminalChange,
+  ControlError.StateConflict,
 ]);
 
 function confirmImport(preview: ImportPreview, body: ImportApply): void {
@@ -83,20 +94,23 @@ function assignIdentities(resolved: ResolvedImport): ResolvedImportEntry[] {
   const ids = new Map(
     resolved.resolved_entries.map((item) => [
       item.key,
-      item.current?.id ?? createIdentity(NODE_IDENTITY_PREFIX),
+      item.current?.id ??
+        item.task?.id ??
+        createIdentity(
+          isTaskEntry(item.entry) ? TASK_IDENTITY_PREFIX : NODE_IDENTITY_PREFIX,
+        ),
     ]),
   );
   assert.equal(ids.size, resolved.resolved_entries.length);
   const identity = (key: string): string => {
     const id = ids.get(key);
     assert.ok(id, "Resolved references belong to the imported set.");
-    assert.ok(id.startsWith(`${NODE_IDENTITY_PREFIX}_`));
     return id;
   };
   const entries = resolved.resolved_entries.map((item) => ({
     ...item,
     key: identity(item.key),
-    parent_id: item.parent_id === null ? null : identity(item.parent_id),
+    owner_id: item.owner_id === null ? null : identity(item.owner_id),
     depends_on: new Set([...item.depends_on].map(identity)),
   }));
   assert.equal(new Set(entries.map((item) => item.key)).size, entries.length);
@@ -107,10 +121,7 @@ function addedEdges(
   resolved: ResolvedImport,
   entries: ResolvedImportEntry[],
 ): Edge[] {
-  const containment: Extract<Edge, { kind: typeof EdgeKind.Containment }>[] =
-    [];
-  const dependencies: Extract<Edge, { kind: typeof EdgeKind.Dependency }>[] =
-    [];
+  const dependencies: Edge[] = [];
   const previous = new Map<string, Set<string>>();
   for (const edge of resolved.current_dependencies) {
     const targets = previous.get(edge.dependent) ?? new Set<string>();
@@ -118,16 +129,9 @@ function addedEdges(
     previous.set(edge.dependent, targets);
   }
   for (const item of entries) {
-    if (item.parent_id !== null && item.current?.parent_id !== item.parent_id)
-      containment.push({
-        kind: EdgeKind.Containment,
-        parent_id: item.parent_id,
-        child_id: item.key,
-      });
     for (const target of item.depends_on) {
       if (!previous.get(item.key)?.has(target))
         dependencies.push({
-          kind: EdgeKind.Dependency,
           dependent_id: item.key,
           depends_on_id: target,
         });
@@ -135,17 +139,12 @@ function addedEdges(
   }
   assert.equal(entries.length, resolved.resolved_entries.length);
   assert.equal(resolved.violations.length, NO_VIOLATIONS);
-  containment.sort(
-    (a, b) =>
-      a.parent_id.localeCompare(b.parent_id) ||
-      a.child_id.localeCompare(b.child_id),
-  );
   dependencies.sort(
     (a, b) =>
       a.dependent_id.localeCompare(b.dependent_id) ||
       a.depends_on_id.localeCompare(b.depends_on_id),
   );
-  return [...containment, ...dependencies];
+  return dependencies;
 }
 
 function updateRows(
@@ -172,10 +171,8 @@ function updateRows(
   }
   for (const item of changed) {
     const result = tx.database
-      .prepare(
-        "UPDATE mission_node SET filename = ?, parent_id = ? WHERE id = ?",
-      )
-      .run(item.entry.filename, item.parent_id, item.key);
+      .prepare("UPDATE mission_node SET filename = ? WHERE id = ?")
+      .run(item.entry.filename, item.key);
     assert.equal(result.changes, EXPECTED_ROW_CHANGE);
   }
 }
@@ -226,18 +223,16 @@ function writeNodes(
     resolved,
     entries.filter((item) => item.current !== null),
   );
-  const creates = entries.filter((item) => item.current === null);
-  for (const kind of INSERT_ORDER) {
-    for (const item of creates.filter((item) => item.entry.kind === kind))
-      insertNode(tx, {
-        id: item.key,
-        mission_id: missionId,
-        kind,
-        filename: item.entry.filename,
-        parent_id: item.parent_id,
-        created_at: now,
-      });
-  }
+  const creates = entries.filter(
+    (item) => item.current === null && !isTaskEntry(item.entry),
+  );
+  for (const item of creates)
+    insertNode(tx, {
+      id: item.key,
+      mission_id: missionId,
+      filename: item.entry.filename,
+      created_at: now,
+    });
   writeDependencies(tx, missionId, resolved, creates);
 }
 
@@ -253,7 +248,11 @@ function initialResult(
     mission_id: mission.id,
     mission_version: mission.version,
     assigned_ids: entries
-      .map((item) => ({ filename: item.entry.filename, node_id: item.key }))
+      .map((item) =>
+        isTaskEntry(item.entry)
+          ? { filename: item.entry.filename, task_id: item.key }
+          : { filename: item.entry.filename, node_id: item.key },
+      )
       .sort((a, b) => a.filename.localeCompare(b.filename)),
     changes: {
       mission_version: mission.version,
@@ -266,6 +265,98 @@ function initialResult(
     actor,
     accepted_at: acceptedAt,
   };
+}
+
+function changesMission(resolved: ResolvedImport): boolean {
+  return (
+    resolved.creates.length +
+      resolved.updates.length +
+      resolved.retirements.length >
+    NO_IMPORT_CHANGES
+  );
+}
+
+function writeImport(
+  tx: Transaction,
+  mission: Mission,
+  resolved: ResolvedImport,
+  entries: ResolvedImportEntry[],
+  actor: HumanActor,
+  reason: string,
+  acceptedAt: number,
+  bindings: MissionBindings,
+  workQueue: WorkQueue,
+): Revision[] {
+  const before = claimableMap(tx, mission.id, bindings);
+  const revisions = importRevisions(
+    tx,
+    resolved,
+    entries,
+    actor,
+    reason,
+    acceptedAt,
+  );
+  writeNodes(tx, mission.id, resolved, entries, acceptedAt);
+  for (const revision of revisions) insertRevision(tx, revision);
+  routeMission(tx, mission.id);
+  reconcileMission(
+    tx,
+    workQueue,
+    mission.id,
+    mission.project_id,
+    before,
+    bindings,
+  );
+  const missionVersion = incrementMissionVersion(tx, mission.id);
+  assert.equal(missionVersion, mission.version + VERSION_INCREMENT);
+  return revisions;
+}
+
+export function probeCoverage(
+  tx: Transaction,
+  mission: Mission,
+  { preview, resolved }: PreparedImport,
+  reason: string,
+  actor: HumanActor,
+  dependencies: Pick<Dependencies, "bindings" | "schedulerMatch">,
+): Violation[] {
+  assert.equal(preview.violations.length, NO_VIOLATIONS);
+  assert.ok(resolved, "A valid import has a resolved graph.");
+  if (!changesMission(resolved)) return [];
+  const entries = assignIdentities(resolved);
+  const added = addedPairs(tx, dependencies, mission.project_id, () =>
+    writeImport(
+      tx,
+      mission,
+      resolved,
+      entries,
+      actor,
+      reason,
+      Date.now(),
+      dependencies.bindings,
+      PROBE_QUEUE,
+    ),
+  );
+  return entries.flatMap((item): Violation[] => {
+    const claims = added.filter(({ node_id }) => node_id === item.key);
+    if (claims.length === NO_VIOLATIONS) return [];
+    const nodeId = item.current?.id ?? null;
+    return [
+      {
+        code: MissionErrorCode.RequiresUnmatched,
+        message: UNMATCHED_MESSAGE,
+        filename: item.entry.filename,
+        node_id: nodeId,
+        details: {
+          claims: claims.map(({ revision, claim }) => ({
+            node_id: nodeId,
+            revision,
+            claim,
+          })),
+        },
+      },
+    ];
+  });
 }
 
 export function applyImport(
@@ -299,38 +390,22 @@ export function applyImport(
         .map((edge) => edge.depends_on),
     );
     if ([...item.depends_on].some((target) => !previous.has(target)))
-      requireNoLiveSubtree(tx, item.current, schedulerClaims, acceptedAt);
+      requireNoLiveClaim(tx, item.current.id, schedulerClaims, acceptedAt);
   }
   const result = initialResult(mission, entries, actor, acceptedAt);
-  if (
-    resolved.creates.length +
-      resolved.updates.length +
-      resolved.retirements.length ===
-    NO_IMPORT_CHANGES
-  )
-    return result;
-  const before = claimableMap(tx, missionId, bindings);
-  const revisions = importRevisions(
+  if (!changesMission(resolved)) return result;
+  const revisions = writeImport(
     tx,
+    mission,
     resolved,
     entries,
     actor,
     body.reason,
     acceptedAt,
-  );
-  writeNodes(tx, missionId, resolved, entries, acceptedAt);
-  for (const revision of revisions) insertRevision(tx, revision);
-  routeMission(tx, missionId);
-  reconcileMission(
-    tx,
-    workQueue,
-    missionId,
-    mission.project_id,
-    before,
     bindings,
+    workQueue,
   );
-  const missionVersion = incrementMissionVersion(tx, missionId);
-  assert.equal(missionVersion, mission.version + VERSION_INCREMENT);
+  const missionVersion = mission.version + VERSION_INCREMENT;
   return {
     ...result,
     mission_version: missionVersion,

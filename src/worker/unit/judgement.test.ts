@@ -7,7 +7,7 @@ import {
   taskJudgementSchema,
   evaluationJudgementSchema,
   judgementRationale,
-  reportInstruction,
+  examineInstruction,
   evaluationInstruction,
   JUDGEMENT_MARKER,
   repairInstruction,
@@ -141,16 +141,16 @@ test("failed and unrun rationale names the command and cause", () => {
     evidence: [],
   };
   const instruction = evaluationInstruction(SHIPPED_TEMPLATES, input);
-  const initiative = evaluationInstruction(SHIPPED_TEMPLATES, {
+  const examineEvaluation = evaluationInstruction(SHIPPED_TEMPLATES, {
     ...input,
-    kind: "initiative",
+    examine: true,
   });
   assert.doesNotMatch(instruction, /proposals/);
   assert.match(
-    initiative,
-    /A defect inside a completed objective gets one proposal with objective_id, name, requirement, criterion and one task, and proposals replace criterion-not-met for such defects\./,
+    examineEvaluation,
+    /A defect inside a completed implement dependency gets one proposal with dependency_id, name, requirement, criterion and one task, and proposals replace criterion-not-met for such defects\./,
   );
-  assert.match(initiative, /"proposals": \[\{"objective_id"/);
+  assert.match(examineEvaluation, /"proposals": \[\{"dependency_id"/);
   assert.match(instruction, /distinct criterion/);
   assert.match(
     instruction,
@@ -183,7 +183,7 @@ test("the repair instruction names the marker of the invalid reply", () => {
 
 test("a prior rationale adds the previous judgement to the task judgement instruction", () => {
   const task = {
-    id: "node_01ARZ3NDEKTSV4RRFFQ69G5FAA",
+    id: "task_01ARZ3NDEKTSV4RRFFQ69G5FAA",
     filename: "task.md",
     content: {
       name: "task",
@@ -205,26 +205,37 @@ test("a prior rationale adds the previous judgement to the task judgement instru
   );
 });
 
-test("the report instruction makes the reply the report and forbids a file", () => {
-  const instruction = reportInstruction(SHIPPED_TEMPLATES, [], [], [], null);
+const EXAMINE_EMPTY = {
+  repositories: [],
+  verification: null,
+  dependencies: [],
+  outcomes: [],
+  evidence: [],
+};
+
+test("the examine instruction makes the reply the report and forbids a file", () => {
+  const instruction = examineInstruction(SHIPPED_TEMPLATES, EXAMINE_EMPTY);
   assert.match(instruction, /Your reply is the report/);
   assert.match(instruction, /write no file/);
   assert.match(instruction, /every field including fix: and why:/);
 });
 
-test("the report instruction carries the final-snapshot verification", () => {
-  const instruction = reportInstruction(SHIPPED_TEMPLATES, [], [], [], {
-    tested_input: [
-      { kind: "repository", binding_id: "binding", commit: "d6d4973" },
-    ],
-    results: [
-      {
-        command: "npm run verify",
-        exit_code: 0,
-        signal: null,
-        timed_out: false,
-      },
-    ],
+test("the examine instruction carries the final-snapshot verification", () => {
+  const instruction = examineInstruction(SHIPPED_TEMPLATES, {
+    ...EXAMINE_EMPTY,
+    verification: {
+      tested_input: [
+        { kind: "repository", binding_id: "binding", commit: "d6d4973" },
+      ],
+      results: [
+        {
+          command: "npm run verify",
+          exit_code: 0,
+          signal: null,
+          timed_out: false,
+        },
+      ],
+    },
   });
   assert.match(instruction, /Final-snapshot verification: \{"tested_input"/);
   assert.match(instruction, /"commit":"d6d4973"/);
@@ -284,6 +295,7 @@ test("a failed verification report names a flaky command and carries its output"
 
 test("the requested changes text is null without a change request and stops at 4 KiB", () => {
   const read = (body: string) => ({
+    binding: "repo",
     head_commit: "a".repeat(40),
     change_requests: [
       {
@@ -299,7 +311,7 @@ test("the requested changes text is null without a change request and stops at 4
   assert.equal(requestedChangesText([]), null);
   assert.equal(
     requestedChangesText([
-      { head_commit: "a".repeat(40), change_requests: [] },
+      { binding: "repo", head_commit: "a".repeat(40), change_requests: [] },
     ]),
     null,
   );
@@ -316,5 +328,35 @@ test("the requested changes text is null without a change request and stops at 4
   assert.equal(
     Buffer.byteLength(long.slice(0, long.lastIndexOf("\n")), "utf8"),
     REQUESTED_CHANGES_MAX_BYTES,
+  );
+});
+
+test("each change request names its binding", () => {
+  const request = (reviewer: string, commit: string) => ({
+    review_id: 1,
+    reviewer,
+    body: `${reviewer} body`,
+    submitted_at: null,
+    commit_id: commit,
+    comments: [],
+  });
+  assert.equal(
+    requestedChangesText([
+      {
+        binding: "api",
+        head_commit: "a".repeat(40),
+        change_requests: [request("octo", "a".repeat(40))],
+      },
+      {
+        binding: "web",
+        head_commit: "b".repeat(40),
+        change_requests: [request("hubot", "b".repeat(40))],
+      },
+    ]),
+    [
+      "The pull request reviewers request these changes:",
+      `Reviewer octo requests changes on api at commit ${"a".repeat(40)}: octo body`,
+      `Reviewer hubot requests changes on web at commit ${"b".repeat(40)}: hubot body`,
+    ].join("\n"),
   );
 });

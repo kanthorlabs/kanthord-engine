@@ -331,6 +331,12 @@ components:
                           required:
                             - agent
                           additionalProperties: false
+                      traits:
+                        type: array
+                        items:
+                          type: string
+                          maxLength: 64
+                          pattern: ^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)*$
                     required:
                       - worker
                       - instance_count
@@ -599,6 +605,7 @@ components:
                               required:
                                 - agent
                               additionalProperties: false
+                          traits: {}
                         required:
                           - worker
                           - instance_count

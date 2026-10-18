@@ -7,7 +7,6 @@ import {
   MissionErrorCode,
   NODE_IDENTITY_PREFIX,
   NODE_LIST_LIMIT_DEFAULT,
-  NodeKind,
   NodeState,
   type MissionBindings,
   type Node,
@@ -16,11 +15,11 @@ import {
 import { revisionFromRow } from "./revision.ts";
 import { blockedContextOf } from "./record-read.ts";
 import {
+  claimRevisionOf,
   listNodes,
   listRevisions,
   readCurrentRevision,
   readDependsOnIds,
-  readLastTaskSnapshot,
   readMission,
   readNode,
   readRevision,
@@ -86,59 +85,34 @@ export function requireNode(tx: Transaction, nodeId: string): NodeRow {
   return node;
 }
 
-function ownerId(node: NodeRow): string {
-  if (node.kind !== NodeKind.Task) return node.id;
-  assert.ok(node.parent_id, "Task must have an objective parent.");
-  return node.parent_id;
-}
-
 export function nodeRecord(
   tx: Transaction,
   node: NodeRow,
   bindings: MissionBindings,
 ): Node {
-  const owner = ownerId(node);
-  const current = readCurrentRevision(tx, owner);
-  assert.ok(current, "Content owner must have a revision.");
+  const current = readCurrentRevision(tx, node.id);
+  assert.ok(current, "Node must have a revision.");
   const revision = revisionFromRow(tx, current);
-  const base = {
+  const claim = revisionFromRow(tx, claimRevisionOf(tx, node.id));
+  return {
     id: node.id,
     filename: node.filename,
     mission_id: node.mission_id,
-    parent_id: node.parent_id,
     visible_revision: revision.revision,
     retired_at: node.retired_at,
     pinned_by_attempts: revision.pinned_by_attempts,
+    work: claim.content.work,
+    requires: claim.content.requires,
+    content: revision.content,
+    tasks: claim.tasks,
+    state: node.state,
+    attempt: node.attempt,
+    priority: node.priority ?? 0,
+    depends_on: readDependsOnIds(tx, node.id),
+    ...(node.state === NodeState.Blocked
+      ? { blocked_context: blockedContextOf(tx, bindings, node) }
+      : {}),
   };
-  if (node.kind !== NodeKind.Task) {
-    assert.ok(node.state, "Runnable node must have a state.");
-    return {
-      ...base,
-      kind: node.kind,
-      content: revision.content,
-      state: node.state,
-      attempt: node.attempt ?? 0,
-      priority: node.priority ?? 0,
-      depends_on: readDependsOnIds(tx, node.id),
-      ...(node.state === NodeState.Blocked
-        ? { blocked_context: blockedContextOf(tx, bindings, node) }
-        : {}),
-    };
-  }
-  const snapshot = revision.tasks?.find((task) => task.id === node.id);
-  const historical =
-    snapshot === undefined && node.retired_at !== null
-      ? readLastTaskSnapshot(tx, owner, node.id)
-      : null;
-  const task =
-    snapshot ??
-    (historical === null
-      ? undefined
-      : revisionFromRow(tx, historical).tasks?.find(
-          (item) => item.id === node.id,
-        ));
-  assert.ok(task, "Task content must exist in current or retired snapshot.");
-  return { ...base, kind: NodeKind.Task, content: task.content };
 }
 
 export function getNode(
@@ -154,7 +128,7 @@ export function getRevision(
   nodeId: string,
   revision: number,
 ): Revision {
-  const row = readRevision(tx, ownerId(requireNode(tx, nodeId)), revision);
+  const row = readRevision(tx, requireNode(tx, nodeId).id, revision);
   if (!row) notFound(MissionErrorCode.NodeNotFound);
   return revisionFromRow(tx, row);
 }
@@ -186,7 +160,7 @@ export function revisionPage(
 ) {
   const rows = listRevisions(
     tx,
-    ownerId(requireNode(tx, nodeId)),
+    requireNode(tx, nodeId).id,
     after,
     limit + EXTRA_ROW,
     upperBound,

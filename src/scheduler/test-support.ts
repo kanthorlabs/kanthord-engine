@@ -10,6 +10,7 @@ import {
 } from "./config.ts";
 import {
   AgentChoiceKind,
+  ClaimWork,
   SCHEDULER_SERVICE_NAME,
   schedulerOperations,
   type ExecutionRow,
@@ -104,6 +105,20 @@ export function schedulerHarness(
       workerBindingOf: (...args) => {
         record("workerBindingOf", args);
         return null;
+      },
+      workerBindingsOf: (...args) => {
+        record("workerBindingsOf", args);
+        return [];
+      },
+    },
+    facts: {
+      claimFacts: (...args) => {
+        record("claimFacts", args);
+        return { work: ClaimWork.Implement, requires: [] };
+      },
+      claimFactsOf: (...args) => {
+        record("claimFactsOf", args);
+        return [];
       },
     },
     projects: {

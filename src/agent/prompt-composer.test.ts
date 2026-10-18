@@ -18,3 +18,30 @@ test("work prompts retain commands and exact text with no tag", () => {
   assert.ok(work.text.startsWith("# unit\n"));
   assert.match(work.digest, /^[a-f0-9]{64}$/);
 });
+
+test("work prompts list the repositories only for two or more entries", () => {
+  const unit = {
+    node_id: "node",
+    revision: 1,
+    content: {
+      name: "unit",
+      requirement: "examine",
+      criterion: "passes",
+      verifications: ["first"],
+    },
+  };
+  const first = { name: "first", directory: "first", base_branch: "main" };
+  const second = { name: "second", directory: "second", base_branch: "dev" };
+  for (const repositories of [[], [first]])
+    assert.match(
+      renderWorkPrompt(SHIPPED_TEMPLATES, { ...unit, repositories }).text,
+      /1\. first$/,
+    );
+  assert.match(
+    renderWorkPrompt(SHIPPED_TEMPLATES, {
+      ...unit,
+      repositories: [first, second],
+    }).text,
+    /## Repositories\n\nRepository first: directory `first`, base branch `main`\nRepository second: directory `second`, base branch `dev`$/,
+  );
+});

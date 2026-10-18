@@ -11,11 +11,7 @@ import { repositoryOperations } from "../../repository/contract.ts";
 import { projectOperations } from "../../project/contract.ts";
 import { workerOperations } from "../../worker/contract.ts";
 import { agentOperations } from "../../agent/contract.ts";
-import {
-  missionOperations,
-  NodeState,
-  NodeKind,
-} from "../../mission/contract.ts";
+import { missionOperations, NodeState, Work } from "../../mission/contract.ts";
 import {
   schedulerOperations,
   ClaimState,
@@ -238,35 +234,50 @@ async function setup(t: TestContext, adapter: Adapter, path?: string) {
       body: null,
     }),
   );
-  const initiative = completed(
+  const examine = completed(
     await call(missionOperations["node.create"], {
       params: { mission_id: mission.id },
       query: {},
       body: {
-        filename: "initiative-1.md",
-        kind: NodeKind.Initiative,
-        content: CONTENT,
+        filename: "examine-1.md",
+        content: { ...CONTENT, work: Work.Examine },
+        tasks: [],
         reason: "plan",
         expected_mission_version: 1,
       },
     }),
   );
-  const objective = completed(
+  const implement = completed(
     await call(missionOperations["node.create"], {
       params: { mission_id: mission.id },
       query: {},
       body: {
-        filename: "objective-1.md",
-        kind: NodeKind.Objective,
-        content: { ...CONTENT, bindings: [bindingSet.bindings.repo!.id] },
+        filename: "implement-1.md",
+        content: {
+          ...CONTENT,
+          work: Work.Implement,
+          bindings: [bindingSet.bindings.repo!.id],
+        },
+        tasks: [],
         reason: "plan",
         expected_mission_version: 2,
-        parent_id: initiative.revisions[0]!.node_id,
-        expected_parent_revision: 1,
       },
     }),
   );
-  const nodeId = objective.revisions[0]!.node_id;
+  const nodeId = implement.revisions[0]!.node_id;
+  completed(
+    await call(missionOperations["dependency.add"], {
+      params: {
+        node_id: examine.revisions[0]!.node_id,
+        depends_on_id: nodeId,
+      },
+      query: {},
+      body: {
+        reason: "plan",
+        expected_mission_version: implement.mission_version,
+      },
+    }),
+  );
   const generalToken = await f.machineToken(projectId, "general", "general-a");
   const otherToken = await f.machineToken(projectId, "general", "general-b");
   const reviewerToken = await f.machineToken(projectId, "reviewer", "reviewer");
@@ -468,7 +479,6 @@ test("two proved releases race at the transaction, for equal and different paylo
   }
   assert.equal(routing.mock.calls.length, EXPECTED_PAIR_COUNT);
   const node = await h.node();
-  assert.ok(node.kind !== NodeKind.Task);
   assert.equal(node.state, NodeState.Available);
 });
 
@@ -534,7 +544,6 @@ test("pull, registration resume and human pause settle an expired row before adm
     "worker.instance.no_live_execution",
   );
   const node = await h.node();
-  assert.ok(node.kind !== NodeKind.Task);
   assert.equal(node.state, NodeState.Executing);
   h.f.scheduler.sweep();
   now += stopHold(h, LOST_FAILURE);
@@ -560,13 +569,12 @@ test("pull, registration resume and human pause settle an expired row before adm
       query: {},
       body: {
         reason: "hold",
-        expected_mission_version: 3,
+        expected_mission_version: 4,
         expected_state: NodeState.Available,
         expected_attempt: 1,
       },
     }),
   );
-  assert.ok(pause.node.kind !== NodeKind.Task);
   assert.equal(pause.node.state, NodeState.Paused);
   assert.equal(
     h.f.scheduler.executionOf(fourth.execution.execution_id)?.ended_at,
@@ -653,7 +661,7 @@ test("real Mission sweeps steps and evaluation claims below and at the loss limi
             query: {},
             body: {
               reason: "review",
-              expected_mission_version: 3,
+              expected_mission_version: 4,
               expected_state: NodeState.Available,
               expected_attempt: 1,
             },
@@ -677,7 +685,6 @@ test("real Mission sweeps steps and evaluation claims below and at the loss limi
         assert.equal(routing.mock.calls.length, loss);
         assert.equal(routing.mock.calls.at(-1)!.arguments[2], loss);
         const node = await h.node();
-        assert.ok(node.kind !== NodeKind.Task);
         assert.equal(
           node.state,
           loss === limit
@@ -716,7 +723,7 @@ async function prepareEvaluation(h: Awaited<ReturnType<typeof setup>>) {
       query: {},
       body: {
         reason: "review",
-        expected_mission_version: 3,
+        expected_mission_version: 4,
         expected_state: NodeState.Available,
         expected_attempt: 1,
       },
@@ -748,7 +755,6 @@ test("real Mission routes stopped and lost claims below and at the failure limit
         assert.equal(routing.mock.calls.length, failure);
         assert.equal(routing.mock.calls.at(-1)!.arguments[2], failure);
         const node = await h.node();
-        assert.ok(node.kind !== NodeKind.Task);
         assert.equal(
           node.state,
           failure === limit
@@ -819,7 +825,6 @@ test("a release with no stop ends the failure count", async (t) => {
   completed(await h.stop(claim.execution.execution_id));
   assert.equal(routing.mock.calls.at(-1)!.arguments[2], NO_FAILURE_COUNT_RESET);
   const node = await h.node();
-  assert.ok(node.kind !== NodeKind.Task);
   assert.equal(node.state, NodeState.Available);
 });
 
@@ -860,7 +865,7 @@ test("sweep and human revocation defeat an already proved release with one termi
               query: {},
               body: {
                 reason: "hold",
-                expected_mission_version: 3,
+                expected_mission_version: 4,
                 expected_state: NodeState.Executing,
                 expected_attempt: 1,
               },

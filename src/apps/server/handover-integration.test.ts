@@ -24,7 +24,7 @@ import { repositoryOperations } from "../../repository/contract.ts";
 import { projectOperations } from "../../project/contract.ts";
 import { workerOperations } from "../../worker/contract.ts";
 import { agentOperations } from "../../agent/contract.ts";
-import { missionOperations, NodeKind } from "../../mission/contract.ts";
+import { missionOperations, Work } from "../../mission/contract.ts";
 import { schedulerOperations, WorkPullKind } from "../../scheduler/contract.ts";
 import {
   OperationResultType,
@@ -48,6 +48,8 @@ import {
   HANDOVER_TAG_BYTES,
 } from "../../kernel/handover.ts";
 import {
+  COVERING_WORKER_BINDINGS,
+  enableCoveringAgents,
   FAKE_SSH_CREDENTIAL_BODY,
   FAKE_SSH_IDENTITY,
   gatewayFixture,
@@ -466,18 +468,9 @@ async function setup(
       },
     }),
   );
-  completed(
-    await call(agentOperations["enablement.put"], {
-      params: { agent_name: "swe@1" },
-      query: {},
-      body: {
-        agent_providers: [
-          { name: "default", provider: platform, credential: "anthro-1" },
-        ],
-        default_configuration: configuration,
-        fallback_configurations: [],
-      },
-    }),
+  await enableCoveringAgents(
+    { KANTHORD_ENDPOINT: f.endpoint, KANTHORD_TOKEN: f.token },
+    { platform, credential: "anthro-1", configuration },
   );
   const projectId = completed(
     await call(projectOperations.create, {
@@ -493,6 +486,7 @@ async function setup(
       body: {
         version: 1,
         bindings: {
+          ...COVERING_WORKER_BINDINGS,
           repo: {
             kind: "repository",
             config: {
@@ -531,31 +525,46 @@ async function setup(
       body: null,
     }),
   );
-  const initiative = completed(
+  const examine = completed(
     await call(missionOperations["node.create"], {
       params: { mission_id: mission.id },
       query: {},
       body: {
-        filename: "initiative-1.md",
-        kind: NodeKind.Initiative,
-        content: CONTENT,
+        filename: "examine-1.md",
+        content: { ...CONTENT, work: Work.Examine },
+        tasks: [],
         reason: "plan",
         expected_mission_version: 1,
       },
     }),
   );
-  completed(
+  const implement = completed(
     await call(missionOperations["node.create"], {
       params: { mission_id: mission.id },
       query: {},
       body: {
-        filename: "objective-1.md",
-        kind: NodeKind.Objective,
-        content: { ...CONTENT, bindings: [bindingSet.bindings.repo!.id] },
+        filename: "implement-1.md",
+        content: {
+          ...CONTENT,
+          work: Work.Implement,
+          bindings: [bindingSet.bindings.repo!.id],
+        },
+        tasks: [],
         reason: "plan",
         expected_mission_version: 2,
-        parent_id: initiative.revisions[0]!.node_id,
-        expected_parent_revision: 1,
+      },
+    }),
+  );
+  completed(
+    await call(missionOperations["dependency.add"], {
+      params: {
+        node_id: examine.revisions[0]!.node_id,
+        depends_on_id: implement.revisions[0]!.node_id,
+      },
+      query: {},
+      body: {
+        reason: "plan",
+        expected_mission_version: implement.mission_version,
       },
     }),
   );

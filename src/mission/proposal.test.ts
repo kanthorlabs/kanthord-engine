@@ -7,8 +7,9 @@ import { testHumanIdentity } from "../kernel/test-identity.ts";
 import {
   AssessmentResult,
   AssetKind,
+  ClaimableState,
   MissionErrorCode,
-  NodeKind,
+  Work,
   NodeState,
   StartPoint,
   type ProposalContent,
@@ -21,8 +22,9 @@ import {
   insertOutcome,
   readOutcomesOfAttempt,
 } from "./record-store.ts";
-import { claimableMap } from "./routing.ts";
+import { claimableMap, routeMission } from "./routing.ts";
 import {
+  insertDependency,
   insertNode,
   insertRevision,
   readCurrentRevision,
@@ -30,7 +32,7 @@ import {
   readNode,
   setNodeState,
 } from "./store.ts";
-import { executionHarness } from "./test-support.ts";
+import { databaseSnapshot, executionHarness } from "./test-support.ts";
 
 const IDENTITY = testHumanIdentity("ulrich", "Ulrich", "token");
 const FIRST_REVISION = 1;
@@ -41,6 +43,7 @@ const NO_PROPOSALS = 0;
 const SINGLE_PROPOSAL = 1;
 const TWO_PROPOSALS = 2;
 const NOW = 100;
+const DEPENDENCY_TRAIT = "platform.linux";
 const VALIDATION = "gateway.request.validation_failed";
 const RESOURCE_IDENTITY = "repository:github:owner/repo";
 
@@ -48,13 +51,7 @@ async function fixture(t: TestContext) {
   const h = executionHarness(t, IDENTITY);
   const repositoryId = createIdentity("binding");
   const childId = createIdentity("node");
-  const input = [
-    {
-      kind: AssetKind.Repository,
-      binding_id: repositoryId,
-      commit: "a".repeat(40),
-    },
-  ] as const;
+  const input = { kind: AssetKind.Produced, sha256: "a".repeat(64) } as const;
   h.dependencies.bindings.getBindingRevision = (_tx, id) =>
     id === repositoryId
       ? {
@@ -71,21 +68,25 @@ async function fixture(t: TestContext) {
     projectId === h.project_id && id === repositoryId
       ? { binding_id: repositoryId, resource_identity: RESOURCE_IDENTITY }
       : null;
-  const childOutcomeId = h.store.transaction((tx) => {
+  const dependencyOutcomeId = h.store.transaction((tx) => {
     const base = getRevision(tx, h.node_id, FIRST_REVISION);
     insertNode(tx, {
       id: childId,
       mission_id: h.mission_id,
-      kind: NodeKind.Objective,
       filename: "child.md",
-      parent_id: h.node_id,
       created_at: NOW,
     });
+    insertDependency(tx, h.mission_id, h.node_id, childId);
     insertRevision(tx, {
       ...base,
       node_id: childId,
       filename: "child.md",
-      content: { ...base.content, bindings: [repositoryId] },
+      content: {
+        ...base.content,
+        work: Work.Implement,
+        requires: [DEPENDENCY_TRAIT],
+        bindings: [repositoryId],
+      },
       tasks: [],
     });
     const assessmentId = createIdentity("assessment");
@@ -96,7 +97,7 @@ async function fixture(t: TestContext) {
       result: AssessmentResult.Success,
       rationale: "Override",
       evidence_ids: "[]",
-      child_outcome_ids: "[]",
+      dependency_outcome_ids: "[]",
       tested_input: null,
       execution_id: null,
       actor: canonicalJSON(h.actor),
@@ -139,8 +140,8 @@ async function fixture(t: TestContext) {
       },
     },
   });
-  const proposal = (objectiveId = childId, name = "Fix"): ProposalContent => ({
-    objective_id: objectiveId,
+  const proposal = (dependencyId = childId, name = "Fix"): ProposalContent => ({
+    dependency_id: dependencyId,
     name,
     requirement: "Repair the defect",
     criterion: "The defect is gone",
@@ -157,7 +158,7 @@ async function fixture(t: TestContext) {
   ) => ({
     ...h.context,
     evidence_ids: [evidence.evidence.id],
-    child_outcome_ids: [childOutcomeId],
+    dependency_outcome_ids: [dependencyOutcomeId],
     result,
     rationale: "Defect found",
     tested_input: input,
@@ -194,7 +195,7 @@ function refusal(promise: Promise<unknown>, code: string, field?: string) {
   });
 }
 
-test("proposals are refused on a success result and an unknown objective", async (t) => {
+test("proposals are refused on a success result and an unknown dependency", async (t) => {
   const h = await fixture(t);
   await refusal(
     h.submit([h.proposal()], AssessmentResult.Success),
@@ -209,11 +210,11 @@ test("proposals are refused on a success result and an unknown objective", async
   assert.equal((await h.list()).items.length, NO_PROPOSALS);
 });
 
-test("an undetermined initiative assessment records one row per proposal", async (t) => {
+test("an undetermined proposer assessment records one row per proposal", async (t) => {
   const h = await fixture(t);
   const result = await h.submit([h.proposal(), h.proposal(h.childId, "Other")]);
   assert.equal(result.outcome?.result, AssessmentResult.Undetermined);
-  assert.equal(result.node.kind, NodeKind.Initiative);
+  assert.equal(result.node.work, Work.Examine);
   assert.equal(h.node().state, NodeState.Blocked);
   const page = await h.list();
   assert.equal(page.items.length, TWO_PROPOSALS);
@@ -222,7 +223,7 @@ test("an undetermined initiative assessment records one row per proposal", async
     assert.equal(item.node_id, h.node_id);
     assert.equal(item.attempt, FIRST_ATTEMPT);
     assert.equal(item.assessment_id, result.assessment.id);
-    assert.equal(item.objective_node_id, null);
+    assert.equal(item.created_node_id, null);
     assert.equal(item.approved_at, null);
   }
   assert.deepEqual(page.items.map((item) => item.content.name).sort(), [
@@ -232,45 +233,47 @@ test("an undetermined initiative assessment records one row per proposal", async
   assert.equal((await h.list(SECOND_ATTEMPT)).items.length, NO_PROPOSALS);
 });
 
-test("approving a proposal creates the objective with its task and unblocks the initiative", async (t) => {
+test("approval adds a dependency of the proposer on the created node and routes the proposer to Pending", async (t) => {
   const h = await fixture(t);
   await h.submit([h.proposal()]);
   const proposalId = (await h.list()).items[0]!.id;
   const result = await h.approve(proposalId);
-  const objectiveId = result.objective.revisions[0]!.node_id;
-  const objective = h.store.transaction((tx) => ({
-    node: readNode(tx, objectiveId)!,
-    revision: readCurrentRevision(tx, objectiveId)!,
+  const createdId = result.created.revisions[0]!.node_id;
+  const created = h.store.transaction((tx) => ({
+    node: readNode(tx, createdId)!,
+    revision: readCurrentRevision(tx, createdId)!,
   }));
-  assert.equal(objective.node.kind, NodeKind.Objective);
-  assert.equal(objective.node.parent_id, h.node_id);
-  assert.equal(objective.node.state, NodeState.Available);
-  assert.deepEqual(JSON.parse(objective.revision.bindings), [h.repositoryId]);
-  assert.deepEqual(JSON.parse(objective.revision.verifications), ["pnpm test"]);
-  const tasks = h.store.transaction((tx) =>
-    readMissionNodes(tx, h.mission_id).filter(
-      (node) => node.kind === NodeKind.Task && node.parent_id === objectiveId,
-    ),
-  );
+  assert.equal(created.revision.work, Work.Implement);
+  assert.deepEqual(JSON.parse(created.revision.requires), [DEPENDENCY_TRAIT]);
+  assert.equal(created.node.state, NodeState.Available);
+  assert.deepEqual(JSON.parse(created.revision.bindings), [h.repositoryId]);
+  assert.deepEqual(JSON.parse(created.revision.verifications), ["pnpm test"]);
+  const tasks = JSON.parse(created.revision.tasks) as { id: string }[];
   assert.equal(tasks.length, SINGLE_PROPOSAL);
-  assert.equal(result.objective.revisions.at(-1)?.tasks?.[0]?.id, tasks[0]!.id);
-  assert.equal(result.initiative.node.id, h.node_id);
-  assert.equal(result.initiative.attempt?.attempt, SECOND_ATTEMPT);
-  assert.equal(result.initiative.attempt?.start_point, StartPoint.NodeBranch);
+  assert.match(tasks[0]!.id, /^task_/);
+  assert.equal(result.created.revisions.at(-1)?.tasks[0]?.id, tasks[0]!.id);
+  assert.equal(result.proposer.node.id, h.node_id);
+  assert.equal(result.proposer.attempt?.attempt, SECOND_ATTEMPT);
+  assert.equal(result.proposer.attempt?.start_point, StartPoint.NodeBranch);
   assert.equal(h.node().attempt, SECOND_ATTEMPT);
-  assert.equal(h.node().state, NodeState.Available);
+  assert.equal(h.node().state, NodeState.Pending);
+  assert.deepEqual(result.created.added_edges.at(-1), {
+    dependent_id: h.node_id,
+    depends_on_id: createdId,
+  });
   const approved = (await h.list()).items[0]!;
-  assert.equal(approved.objective_node_id, objectiveId);
+  assert.equal(approved.created_node_id, createdId);
   assert.notEqual(approved.approved_at, null);
   const claimable = () =>
     h.store.transaction((tx) =>
       claimableMap(tx, h.mission_id, h.dependencies.bindings),
     );
   assert.equal(claimable().get(h.node_id), false);
-  assert.equal(claimable().get(objectiveId), true);
-  h.store.transaction((tx) =>
-    setNodeState(tx, objectiveId, NodeState.Completed),
-  );
+  assert.equal(claimable().get(createdId), true);
+  h.store.transaction((tx) => {
+    setNodeState(tx, createdId, NodeState.Completed);
+    routeMission(tx, h.mission_id);
+  });
   assert.equal(claimable().get(h.node_id), true);
   h.store.transaction((tx) => {
     assert.ok(readOpenAttempt(tx, h.node_id));
@@ -281,18 +284,63 @@ test("approving a proposal creates the objective with its task and unblocks the 
   });
 });
 
+test("an approval that adds an unmatched pair is refused and writes nothing", async (t) => {
+  const h = await fixture(t);
+  await h.submit([h.proposal()]);
+  const proposalId = (await h.list()).items[0]!.id;
+  h.dependencies.bindings.repositoryPolicyOf = (_tx, bindingId) => ({
+    binding_id: bindingId,
+    project_id: h.project_id,
+    name: "repo",
+    address: "git@github.com:owner/repo.git",
+    platform: "github",
+    ssh_credential: "github-ssh",
+    credential: "github",
+    base_branch: "main",
+    action: null,
+    landing: "human",
+    project_prompt: null,
+  });
+  h.dependencies.schedulerMatch = {
+    unmatchedClaims: (tx, projectId) =>
+      h.service
+        .claimFactsOf(tx, projectId)
+        .filter(({ requires }) => requires.includes(DEPENDENCY_TRAIT))
+        .flatMap(({ node_id, revision, claims }) =>
+          claims.map((claim) => ({ node_id, revision, claim })),
+        ),
+  };
+  const before = databaseSnapshot(h.store);
+  await assert.rejects(h.approve(proposalId), (error) => {
+    assert.ok(error instanceof OperationError);
+    assert.equal(error.code, MissionErrorCode.RequiresUnmatched);
+    const details = error.details as unknown as {
+      claims: { revision: number; claim: string }[];
+    };
+    assert.deepEqual(
+      details.claims.map(({ revision, claim }) => ({ revision, claim })),
+      [
+        { revision: FIRST_REVISION, claim: ClaimableState.Available },
+        { revision: FIRST_REVISION, claim: ClaimableState.Waiting },
+      ],
+    );
+    return true;
+  });
+  assert.deepEqual(databaseSnapshot(h.store), before);
+});
+
 test("approving twice refuses with already_approved", async (t) => {
   const h = await fixture(t);
   await h.submit([h.proposal()]);
   const proposalId = (await h.list()).items[0]!.id;
   const result = await h.approve(proposalId);
   await refusal(
-    h.approve(proposalId, result.objective.mission_version),
+    h.approve(proposalId, result.created.mission_version),
     MissionErrorCode.ProposalAlreadyApproved,
   );
 });
 
-test("approving refuses an unknown proposal, a stale version and a changed initiative state", async (t) => {
+test("approving refuses an unknown proposal, a stale version and a changed proposer state", async (t) => {
   const h = await fixture(t);
   await h.submit([h.proposal()]);
   const proposalId = (await h.list()).items[0]!.id;

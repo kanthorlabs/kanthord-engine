@@ -8,7 +8,12 @@ import {
   type Context,
   type CancellationContext,
 } from "../../kernel/context.ts";
-import type { AgentSetup, ExecutionSetup, HostTools } from "../contract.ts";
+import type {
+  AgentSetup,
+  ExecutionSetup,
+  ExecutionWork,
+  HostTools,
+} from "../contract.ts";
 import type { ExecutionBudget } from "./budget.ts";
 import type {
   CompositionRecord,
@@ -29,11 +34,6 @@ import { providerFailureOf } from "../../llm/provider-failure.ts";
 import { traceAgent } from "./agent-telemetry.ts";
 import type { SpanRecorder } from "./telemetry.ts";
 
-export const NodeKind = {
-  Objective: "objective",
-  Initiative: "initiative",
-} as const;
-export type NodeKind = (typeof NodeKind)[keyof typeof NodeKind];
 export interface NativeAgentInput {
   setup: ExecutionSetup;
   claim: {
@@ -42,12 +42,13 @@ export interface NativeAgentInput {
     created_at: number;
     expired_at: number;
   };
-  nodeKind: NodeKind;
+  work: ExecutionWork;
   agent: AgentSetup;
   credential: ExecutionCredential;
   budget: ExecutionBudget;
   workspaceAgentFiles: boolean;
   workspace: string;
+  checkouts: readonly string[];
   hostHome: string;
   env: NodeJS.ProcessEnv;
   modelRuntimeFactory: ModelRuntimeFactory;
@@ -169,24 +170,22 @@ export async function openNativeAgent(
   const bridge = abortSignal(context);
   let session: AgentSession | undefined;
   try {
-    const repository =
-      input.nodeKind === NodeKind.Objective
-        ? (input.setup.repositories[0] ?? null)
-        : null;
-    const layers = repository
-      ? [
-          await resolveRepositoryLayer({
-            repository: {
-              name: repository.name,
-              project_prompt: repository.project_prompt,
-              working_layer: repository.working_layer,
-            },
-            workspace: input.workspaceAgentFiles ? input.workspace : null,
-            hostHome: input.hostHome,
-            context,
-          }),
-        ]
-      : [];
+    const layers = [];
+    for (const [index, repository] of input.setup.repositories.entries())
+      layers.push(
+        await resolveRepositoryLayer({
+          repository: {
+            name: repository.name,
+            project_prompt: repository.project_prompt,
+            working_layer: repository.working_layer,
+          },
+          workspace: input.workspaceAgentFiles
+            ? (input.checkouts[index] ?? null)
+            : null,
+          hostHome: input.hostHome,
+          context,
+        }),
+      );
     const { runtime, model } = await withDeadline(
       input.modelRuntimeFactory({
         credential: input.credential,

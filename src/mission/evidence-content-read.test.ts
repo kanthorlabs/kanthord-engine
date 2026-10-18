@@ -29,7 +29,7 @@ const Change = {
   Claim: "claim",
 } as const;
 
-test("initiative content bound includes only evidence of current child outcomes", async (t) => {
+test("examine content bound includes only evidence of current dependency outcomes", async (t) => {
   const h = evidenceHarness(t, IDENTITY);
   const submit = () =>
     h.invoke("evidence.submit", {
@@ -61,7 +61,7 @@ test("initiative content bound includes only evidence of current child outcomes"
       result: AssessmentResult.Undetermined,
       rationale: "Blocked",
       evidence_ids: canonicalJSON([named.evidence.id]),
-      child_outcome_ids: "[]",
+      dependency_outcome_ids: "[]",
       tested_input: null,
       execution_id: null,
       actor: canonicalJSON(h.actor),
@@ -77,7 +77,7 @@ test("initiative content bound includes only evidence of current child outcomes"
       created_at: FIRST_ATTEMPT,
     });
   });
-  h.claim.nodeId = h.node().parent_id!;
+  h.claim.nodeId = h.examine_id;
   const read = (assetId: string) =>
     h.invoke("execution.evidence.asset.content.get", {
       params: { asset_id: assetId, execution_id: h.claim.executionId },
@@ -367,7 +367,7 @@ test("external addresses answer typed conflicts only after the execution bound a
         error instanceof OperationError &&
         error.code === MissionErrorCode.RecordNotFound,
     );
-    const parentId = h.node().parent_id!;
+    const parentId = h.examine_id;
     h.store.transaction((tx) =>
       tx.database
         .prepare(
@@ -401,4 +401,57 @@ test("external addresses answer typed conflicts only after the execution bound a
         error.code === MissionErrorCode.RecordNotFound,
     );
   }
+});
+
+test("a read uses the pinned binding", async (t) => {
+  const h = evidenceHarness(t, IDENTITY);
+  const pinned = createIdentity("binding");
+  const id = createIdentity("evidence");
+  const objectId = createIdentity("evidence_asset");
+  h.store.transaction((tx) =>
+    insertEvidence(
+      tx,
+      {
+        id,
+        node_id: h.node_id,
+        attempt: FIRST_ATTEMPT,
+        subject: "Object",
+        requirement_key: null,
+        end_state: null,
+        verification: null,
+        provenance: canonicalJSON(h.executionActor),
+        created_at: FIRST_ATTEMPT,
+      },
+      [
+        {
+          id: objectId,
+          evidence_id: id,
+          kind: AssetKind.Object,
+          content: canonicalJSON({
+            location: "s3://bucket/key",
+            size: FIRST_ATTEMPT,
+            media_type: "text/plain",
+            storage_binding_id: pinned,
+          }),
+          published_at: FIRST_ATTEMPT,
+          expired_at: null,
+        },
+      ],
+    ),
+  );
+  const authorized: string[] = [];
+  h.dependencies.bindings.storageBindingOf = (_tx, bindingId) => {
+    authorized.push(bindingId);
+    return { ...h.storage, binding_id: bindingId };
+  };
+  h.dependencies.intakeStorage.get = async () => ({
+    get_url: "https://storage.example/get",
+    expires_at: FIRST_ATTEMPT,
+  });
+  await h.invoke("evidence.asset.content.get", {
+    params: { asset_id: objectId },
+    query: {},
+    body: null,
+  });
+  assert.deepEqual([...new Set(authorized)], [pinned]);
 });

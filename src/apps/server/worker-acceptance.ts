@@ -6,7 +6,12 @@ import { configuration, CONFIG_VERSION } from "../../config/index.ts";
 import { writePrivate } from "../../kernel/files.ts";
 import { temporary } from "../../kernel/test-support.ts";
 import { environment, kanthord, kanthordTerminal } from "./cli-support.ts";
-import { fakeS3, gatewayFixture } from "./test-support.ts";
+import {
+  fakeS3,
+  gatewayFixture,
+  COVERING_WORKER_BINDINGS,
+  enableCoveringAgents,
+} from "./test-support.ts";
 
 const SUCCESS = 0;
 const NO_STDERR = "";
@@ -15,7 +20,7 @@ export const WORKER_DEFAULTS = {
   agent_provider: "default",
   model_identifier: "claude-sonnet-4-5",
   reasoning_effort: "off",
-};
+} as const;
 
 export async function workerAcceptance(
   t: TestContext,
@@ -76,12 +81,10 @@ export async function workerAcceptance(
     },
     secret: {},
   });
-  await write(["agent", "enablement", "put", "swe@1"], {
-    agent_providers: [
-      { name: "default", provider: "anthropic", credential: "anthro-1" },
-    ],
-    default_configuration: WORKER_DEFAULTS,
-    fallback_configurations: [],
+  await enableCoveringAgents(human, {
+    platform: "anthropic",
+    credential: "anthro-1",
+    configuration: WORKER_DEFAULTS,
   });
   const storage = s3 && {
     endpoint: s3.endpoint,
@@ -109,6 +112,7 @@ export async function workerAcceptance(
   }>(["project", "binding", "apply", project.id], {
     version: 1,
     bindings: {
+      ...COVERING_WORKER_BINDINGS,
       ...(storage
         ? {
             store: {

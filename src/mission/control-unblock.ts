@@ -5,22 +5,20 @@ import { canonicalJSON } from "../kernel/json.ts";
 import type { Transaction } from "../kernel/store.ts";
 import {
   MissionErrorCode,
-  NodeKind,
   NodeState,
   RevisionWrite,
   StartPoint,
-  TaskChange,
   type Content,
   type HumanActor,
   type Revision,
-  type TaskContent,
   type Unblock,
   type UnblockChange,
 } from "./contract.ts";
 import type { Dependencies } from "./service.ts";
 import { ContentField, TASKS_FIELD, validateText } from "./content.ts";
 import { requireNode } from "./node-read.ts";
-import { resolveContent } from "./node-create.ts";
+import { resolveContent, resolveTasks } from "./node-create.ts";
+import { requireWorkUnlocked } from "./node-update.ts";
 import {
   requireRunnable,
   requireControlState,
@@ -33,109 +31,30 @@ import { revisionFromRow } from "./revision.ts";
 import { requireActive, requireMission, requireNonterminal } from "./write.ts";
 import {
   readCurrentRevision,
-  readMissionNodes,
   insertRevision,
   incrementMissionVersion,
-  updateNodeFilename,
-  filenameConflict,
   type NodeRow,
 } from "./store.ts";
 
-const NO_TASK_BINDINGS = 0;
 const NO_CHANGED_FIELDS = 0;
 const NO_ATTEMPT = 0;
 const REVISION_INCREMENT = 1;
 const REASON = "reason";
-const TEMPORARY_FILENAME_PREFIX = "unblock:";
 
-function renameTasks(
-  tx: Transaction,
-  node: NodeRow,
-  tasks: TaskContent[],
-): void {
-  assert.equal(new Set(tasks.map((task) => task.id)).size, tasks.length);
-  assert.ok(tx.database.isTransaction);
-  const replacing = new Set(tasks.map((task) => task.id));
-  const names = new Set(
-    readMissionNodes(tx, node.mission_id)
-      .filter((item) => item.retired_at === null && !replacing.has(item.id))
-      .map((item) => item.filename),
-  );
-  for (const task of tasks) {
-    if (names.has(task.filename)) throw filenameConflict(task.filename);
-    names.add(task.filename);
-  }
-  const changed = tasks.filter(
-    (task) => requireNode(tx, task.id).filename !== task.filename,
-  );
-  for (const task of changed)
-    updateNodeFilename(tx, task.id, `${TEMPORARY_FILENAME_PREFIX}${task.id}`);
-  for (const task of changed) updateNodeFilename(tx, task.id, task.filename);
-}
 const CONTENT_KEYS = [
   ContentField.Name,
   ContentField.Requirement,
   ContentField.Criterion,
   ContentField.Verifications,
   ContentField.Bindings,
+  ContentField.Work,
+  ContentField.Requires,
 ] as const;
-
-function invalidTasks(): never {
-  throw new OperationError(
-    HttpStatus.BadRequest,
-    MissionErrorCode.ContentInvalid,
-    "Unblock tasks must match the current task set.",
-    { field: TASKS_FIELD },
-  );
-}
 
 function contentChanges(current: Content, previous: Content): string[] {
   return CONTENT_KEYS.filter(
     (key) => canonicalJSON(current[key]) !== canonicalJSON(previous[key]),
   );
-}
-
-function tasksOfChange(
-  tx: Transaction,
-  dependencies: Dependencies,
-  node: NodeRow,
-  projectId: string,
-  change: UnblockChange,
-): TaskContent[] | undefined {
-  if (node.kind === NodeKind.Initiative) {
-    if (change.tasks !== undefined) invalidTasks();
-    return undefined;
-  }
-  const current = readMissionNodes(tx, node.mission_id).filter(
-    (child) =>
-      child.kind === NodeKind.Task &&
-      child.parent_id === node.id &&
-      child.retired_at === null,
-  );
-  const tasks = change.tasks;
-  if (
-    tasks === undefined ||
-    tasks.length !== current.length ||
-    new Set(tasks.map((task) => task.id)).size !== tasks.length ||
-    tasks.some(
-      (task) =>
-        !current.some((child) => child.id === task.id) ||
-        task.content.bindings.length > NO_TASK_BINDINGS,
-    )
-  )
-    invalidTasks();
-  return [...tasks]
-    .sort((left, right) => left.id.localeCompare(right.id))
-    .map((task) => ({
-      ...task,
-      content: resolveContent(
-        tx,
-        dependencies.bindings,
-        projectId,
-        { ...task, kind: NodeKind.Task, reason: change.reason },
-        dependencies.config.text_max_bytes,
-      ),
-    }));
 }
 
 function changeRevision(
@@ -155,33 +74,30 @@ function changeRevision(
     projectId,
     {
       filename: node.filename,
-      kind: node.kind,
       content: change.content,
       reason: change.reason,
     },
     dependencies.config.text_max_bytes,
   );
-  const tasks = tasksOfChange(tx, dependencies, node, projectId, change);
+  requireWorkUnlocked(node, previous.content.work, content.work);
+  const tasks = resolveTasks(
+    tx,
+    { ...node, work: content.work },
+    node.filename,
+    change.tasks,
+    previous.tasks,
+    dependencies.config.text_max_bytes,
+  );
   const changedFields = contentChanges(content, previous.content);
-  const taskChanges = (tasks ?? []).flatMap((task) => {
-    const old = previous.tasks?.find((item) => item.id === task.id);
-    assert.ok(old);
-    const fields = contentChanges(task.content, old.content);
-    if (task.filename !== old.filename) fields.unshift(ContentField.Filename);
-    return fields.length === NO_CHANGED_FIELDS
-      ? []
-      : [{ id: task.id, change: TaskChange.Updated, changed_fields: fields }];
-  });
-  if (taskChanges.length > NO_CHANGED_FIELDS) changedFields.push(TASKS_FIELD);
+  if (tasks.changes.length > NO_CHANGED_FIELDS) changedFields.push(TASKS_FIELD);
   if (changedFields.length === NO_CHANGED_FIELDS) return previous.revision;
-  renameTasks(tx, node, tasks ?? []);
   const revision = previous.revision + REVISION_INCREMENT;
   assert.ok(Number.isSafeInteger(revision));
   insertRevision(tx, {
     ...previous,
     revision,
     content,
-    ...(tasks === undefined ? {} : { tasks }),
+    tasks: tasks.tasks,
     reason: change.reason,
     actor,
     created_at: now,
@@ -190,7 +106,7 @@ function changeRevision(
       write: RevisionWrite.Unblock,
       previous_revision: previous.revision,
       changed_fields: changedFields,
-      ...(tasks === undefined ? {} : { tasks: taskChanges }),
+      tasks: tasks.changes,
     },
   });
   incrementMissionVersion(tx, node.mission_id);

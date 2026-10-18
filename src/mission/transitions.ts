@@ -5,12 +5,11 @@ import { HttpStatus } from "../kernel/http.ts";
 import type { Transaction } from "../kernel/store.ts";
 import {
   ClaimKind,
-  NodeKind,
   NodeState,
   AssetKind,
   AssessmentResult,
   ReleaseObligation,
-  MissionBindingKind,
+  Work,
   type ExecutionActor,
   type ClaimAdmission,
 } from "./contract.ts";
@@ -37,9 +36,12 @@ import { transition } from "./control.ts";
 import { currentAssessmentOf } from "./currency.ts";
 import { actionStatesOf, eligibleUnrequested } from "./frozen-action.ts";
 import { foldExternalState, scheduleDeferredCheck } from "./node-check.ts";
+import {
+  repositoryBindingIdsOf,
+  repositorySetMismatch,
+} from "./evidence-content.ts";
 
 const NO_ATTEMPT = 0;
-const RESOURCE_KIND_SEGMENT = 0;
 const NO_ELIGIBLE_ACTIONS = 0;
 const NO_CONSECUTIVE_FAILURES = 0;
 const NO_FURTHER_WORK_LIMIT = 0;
@@ -57,7 +59,6 @@ export function claim(
   if (
     node === null ||
     node.retired_at !== null ||
-    node.kind === NodeKind.Task ||
     node.state === null ||
     !declaredStates.includes(node.state)
   )
@@ -111,29 +112,30 @@ function hasEvidence(
   assert.ok(attempt);
   const revision = readRevision(tx, node.id, attempt.node_revision);
   assert.ok(revision);
-  const repositoryIds = z
-    .array(z.string())
-    .parse(JSON.parse(revision.bindings))
-    .filter(
-      (id) =>
-        dependencies.bindings
-          .getBindingRevision(tx, id)
-          ?.resource_identity.split(":")[RESOURCE_KIND_SEGMENT] ===
-        MissionBindingKind.Repository,
-    );
+  const repositoryIds = repositoryBindingIdsOf(
+    tx,
+    dependencies.bindings,
+    node.id,
+    attempt.node_revision,
+  );
   return readReleaseEvidence(tx, node.id, attempt.attempt, executionId).some(
     (row) => {
       const assets = readAssets(tx, row.id);
       if (!assets.every((asset) => asset.published_at !== null)) return false;
-      return assets.some((asset) =>
-        node.kind === NodeKind.Initiative
-          ? asset.kind === AssetKind.Produced
-          : asset.kind === AssetKind.Repository &&
-            repositoryIds.includes(
-              z
-                .object({ binding_id: z.string() })
-                .parse(JSON.parse(asset.content)).binding_id,
+      if (revision.work === Work.Examine)
+        return assets.some((asset) => asset.kind === AssetKind.Produced);
+      return (
+        repositorySetMismatch(
+          repositoryIds,
+          assets
+            .filter((asset) => asset.kind === AssetKind.Repository)
+            .map(
+              (asset) =>
+                z
+                  .object({ binding_id: z.string() })
+                  .parse(JSON.parse(asset.content)).binding_id,
             ),
+        ) === null
       );
     },
   );

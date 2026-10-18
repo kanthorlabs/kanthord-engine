@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { test } from "node:test";
+import { test, type TestContext } from "node:test";
 import { createIdentity } from "../kernel/identity.ts";
 import { OperationError } from "../kernel/errors.ts";
 import { testHumanIdentity } from "../kernel/test-identity.ts";
@@ -8,11 +8,12 @@ import {
   AssetKind,
   INLINE_BYTES_MAX,
   MissionErrorCode,
-  NodeKind,
+  Work,
   NodeState,
   repositoryAddressSchema,
   type Revision,
   type StorageBinding,
+  type TestedInput,
   type Verification,
 } from "./contract.ts";
 import {
@@ -20,12 +21,11 @@ import {
   objectKey,
   objectLocation,
   producedContent,
-  repositoryBindingOf,
   repositoryBindingIdsOf,
   requiredVerifications,
   requireRepositoryAddress,
   requireTestedInput,
-  storageBindingIdOf,
+  storageBindingIdsOf,
   verificationPasses,
 } from "./evidence-content.ts";
 import { getRevision } from "./node-read.ts";
@@ -39,7 +39,7 @@ const FIRST_REVISION = 1;
 const BYTE_OVERFLOW = 1;
 const FAILURE_EXIT_CODE = 1;
 const SUCCESS_EXIT_CODE = 0;
-const CHILD_COUNT = 3;
+const IMPLEMENT_COUNT = 3;
 const RESOURCE = "repository:github:owner/repository";
 const OTHER_RESOURCE = "repository:github:owner/other";
 const VALIDATION = "gateway.request.validation_failed";
@@ -58,7 +58,7 @@ test("repository commits require complete lowercase SHA-1 or SHA-256 values", ()
     );
 });
 
-test("content checks pinned objective bindings and distinct current initiative resources including discarded objectives", (t) => {
+test("the tested input of an examine node with two repository bindings is a list in binding order, and an implement node checks its pinned bindings", (t) => {
   const h = executionHarness(t, IDENTITY);
   const bindingId = createIdentity("binding");
   const laterId = createIdentity("binding");
@@ -80,7 +80,7 @@ test("content checks pinned objective bindings and distinct current initiative r
   });
   h.store.transaction((tx) => {
     const revision = getRevision(tx, h.node_id, FIRST_REVISION);
-    const initiative = readNode(tx, h.node_id)!;
+    const examine = readNode(tx, h.node_id)!;
     assert.deepEqual(
       h.service.repositoryBindingIdsOf(tx, h.node_id, FIRST_REVISION),
       [],
@@ -90,40 +90,42 @@ test("content checks pinned objective bindings and distinct current initiative r
       binding_id: bindingId,
       commit: COMMIT,
     } as const;
-    requireTestedInput(tx, h.dependencies.bindings, initiative, revision, {
+    requireTestedInput(tx, h.dependencies.bindings, examine, revision, {
       kind: AssetKind.Produced,
       sha256: "a".repeat(64),
     });
     assert.throws(
       () =>
-        requireTestedInput(tx, h.dependencies.bindings, initiative, revision, [
+        requireTestedInput(tx, h.dependencies.bindings, examine, revision, [
           address,
         ]),
       (error) => error instanceof OperationError && error.code === VALIDATION,
     );
-    const childBindingIds = [bindingId, laterId, otherId];
-    const childNodeIds = childBindingIds
+    const implementBindingIds = [bindingId, laterId, otherId];
+    const implementNodeIds = implementBindingIds
       .map(() => createIdentity("node"))
       .sort();
-    const children: string[] = [];
-    for (const [index, id] of childBindingIds.entries()) {
-      const nodeId = childNodeIds[index]!;
-      children.push(nodeId);
+    const implementNodes: string[] = [];
+    for (const [index, id] of implementBindingIds.entries()) {
+      const nodeId = implementNodeIds[index]!;
+      implementNodes.push(nodeId);
       insertNode(tx, {
         id: nodeId,
         mission_id: h.mission_id,
-        kind: NodeKind.Objective,
         filename: `${nodeId}.md`,
-        parent_id: h.node_id,
         created_at: NOW,
       });
-      const childRevision: Revision = {
+      const implementRevision: Revision = {
         ...revision,
         node_id: nodeId,
-        content: { ...revision.content, bindings: [id, storageId] },
+        content: {
+          ...revision.content,
+          work: Work.Implement,
+          bindings: [id, storageId],
+        },
         tasks: [],
       };
-      insertRevision(tx, childRevision);
+      insertRevision(tx, implementRevision);
       setNodeState(tx, nodeId, NodeState.Discarded);
       assert.deepEqual(
         repositoryBindingIdsOf(
@@ -134,21 +136,16 @@ test("content checks pinned objective bindings and distinct current initiative r
         ),
         [id],
       );
-      const child = readNode(tx, nodeId)!;
-      assert.equal(
-        repositoryBindingOf(tx, h.dependencies.bindings, childRevision)
-          ?.binding_id,
-        id,
-      );
-      assert.equal(
-        storageBindingIdOf(tx, h.dependencies.bindings, childRevision),
-        storageId,
+      const implement = readNode(tx, nodeId)!;
+      assert.deepEqual(
+        storageBindingIdsOf(tx, h.dependencies.bindings, implementRevision),
+        [storageId],
       );
       requireRepositoryAddress(
         tx,
         h.dependencies.bindings,
-        child,
-        childRevision,
+        implement,
+        implementRevision,
         { ...address, binding_id: id },
       );
       assert.throws(
@@ -156,8 +153,8 @@ test("content checks pinned objective bindings and distinct current initiative r
           requireRepositoryAddress(
             tx,
             h.dependencies.bindings,
-            child,
-            childRevision,
+            implement,
+            implementRevision,
             { ...address, binding_id: storageId },
           ),
         (error) =>
@@ -169,8 +166,8 @@ test("content checks pinned objective bindings and distinct current initiative r
           requireTestedInput(
             tx,
             h.dependencies.bindings,
-            child,
-            childRevision,
+            implement,
+            implementRevision,
             [address],
           ),
         (error) => error instanceof OperationError && error.code === VALIDATION,
@@ -178,24 +175,53 @@ test("content checks pinned objective bindings and distinct current initiative r
     }
     assert.deepEqual(
       h.service.repositoryBindingIdsOf(tx, h.node_id, FIRST_REVISION),
-      [laterId, otherId],
+      [],
     );
-    requireTestedInput(tx, h.dependencies.bindings, initiative, revision, [
-      address,
-      { ...address, binding_id: otherId },
-    ]);
+    const single: Revision = {
+      ...revision,
+      revision: FIRST_REVISION + FIRST_REVISION,
+      content: { ...revision.content, bindings: [bindingId] },
+    };
+    insertRevision(tx, single);
+    requireTestedInput(tx, h.dependencies.bindings, examine, single, address);
     assert.throws(
       () =>
-        requireTestedInput(tx, h.dependencies.bindings, initiative, revision, [
+        requireTestedInput(tx, h.dependencies.bindings, examine, single, [
           address,
         ]),
       (error) => error instanceof OperationError && error.code === VALIDATION,
     );
+    const pair: Revision = {
+      ...revision,
+      revision: FIRST_REVISION + FIRST_REVISION + FIRST_REVISION,
+      content: {
+        ...revision.content,
+        bindings: [otherId, storageId, bindingId],
+      },
+    };
+    insertRevision(tx, pair);
+    assert.deepEqual(
+      h.service.repositoryBindingIdsOf(tx, h.node_id, pair.revision),
+      [otherId, bindingId],
+    );
+    requireTestedInput(tx, h.dependencies.bindings, examine, pair, [
+      { ...address, binding_id: otherId },
+      address,
+    ]);
     assert.throws(
       () =>
-        requireTestedInput(tx, h.dependencies.bindings, initiative, revision, [
+        requireTestedInput(tx, h.dependencies.bindings, examine, pair, [
           address,
+        ]),
+      (error) =>
+        error instanceof OperationError &&
+        error.code === MissionErrorCode.EvidenceBindingMismatch,
+    );
+    assert.throws(
+      () =>
+        requireTestedInput(tx, h.dependencies.bindings, examine, pair, [
           address,
+          { ...address, binding_id: otherId },
         ]),
       (error) =>
         error instanceof OperationError &&
@@ -207,7 +233,7 @@ test("content checks pinned objective bindings and distinct current initiative r
         requireRepositoryAddress(
           tx,
           h.dependencies.bindings,
-          initiative,
+          examine,
           revision,
           address,
         ),
@@ -215,8 +241,82 @@ test("content checks pinned objective bindings and distinct current initiative r
         error instanceof OperationError &&
         error.code === MissionErrorCode.EvidenceBindingMismatch,
     );
-    assert.equal(children.length, CHILD_COUNT);
+    assert.equal(implementNodes.length, IMPLEMENT_COUNT);
   });
+});
+
+function implementPair(t: TestContext) {
+  const h = executionHarness(t, IDENTITY);
+  const firstId = createIdentity("binding");
+  const secondId = createIdentity("binding");
+  h.dependencies.bindings.getBindingRevision = (_tx, id) => ({
+    binding_id: id,
+    project_id: h.project_id,
+    name: id,
+    resource_identity: id === secondId ? OTHER_RESOURCE : RESOURCE,
+    revision: FIRST_REVISION,
+    tombstone: false,
+    disabled: false,
+  });
+  const address = (bindingId: string) =>
+    ({
+      kind: AssetKind.Repository,
+      binding_id: bindingId,
+      commit: COMMIT,
+    }) as const;
+  const check = (testedInput: TestedInput) =>
+    h.store.transaction((tx) => {
+      const prior = getRevision(tx, h.node_id, FIRST_REVISION);
+      const revision: Revision = {
+        ...prior,
+        content: {
+          ...prior.content,
+          work: Work.Implement,
+          bindings: [firstId, secondId],
+        },
+        tasks: [],
+      };
+      requireTestedInput(
+        tx,
+        h.dependencies.bindings,
+        readNode(tx, h.node_id)!,
+        revision,
+        testedInput,
+      );
+    });
+  const mismatch = (bindingId: string) => (error: unknown) =>
+    error instanceof OperationError &&
+    error.code === MissionErrorCode.EvidenceBindingMismatch &&
+    JSON.stringify(error.details) === JSON.stringify({ binding_id: bindingId });
+  return { firstId, secondId, address, check, mismatch };
+}
+
+test("a node with two bindings writes a tested input list in binding order", (t) => {
+  const h = implementPair(t);
+  h.check([h.address(h.firstId), h.address(h.secondId)]);
+  assert.throws(
+    () => h.check(h.address(h.firstId)),
+    (error) => error instanceof OperationError && error.code === VALIDATION,
+  );
+});
+
+test("a list out of binding order answers mission.evidence.binding_mismatch", (t) => {
+  const h = implementPair(t);
+  const foreignId = createIdentity("binding");
+  assert.throws(
+    () => h.check([h.address(h.secondId), h.address(h.firstId)]),
+    h.mismatch(h.secondId),
+  );
+  assert.throws(() => h.check([h.address(h.firstId)]), h.mismatch(h.secondId));
+  assert.throws(
+    () =>
+      h.check([
+        h.address(h.firstId),
+        h.address(h.secondId),
+        h.address(foreignId),
+      ]),
+    h.mismatch(foreignId),
+  );
 });
 
 test("produced bytes have canonical base64, an exact decoded limit and the decoded digest", () => {
@@ -282,7 +382,8 @@ test("verification coverage compares command multisets including pinned tasks", 
   const h = executionHarness(t, IDENTITY);
   h.store.transaction((tx) => {
     const revision = getRevision(tx, h.node_id, FIRST_REVISION);
-    const node = { ...readNode(tx, h.node_id)!, kind: NodeKind.Objective };
+    const node = readNode(tx, h.node_id)!;
+    revision.content.work = Work.Implement;
     revision.tasks = [
       {
         id: createIdentity("node"),

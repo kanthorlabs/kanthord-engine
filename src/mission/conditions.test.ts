@@ -6,7 +6,6 @@ import { testHumanIdentity } from "../kernel/test-identity.ts";
 import {
   ActorKind,
   EndState,
-  NodeKind,
   NodeState,
   RepositoryAction,
 } from "./contract.ts";
@@ -37,18 +36,13 @@ function fixture(t: TestContext) {
   const missionId = h.store.transaction((tx) =>
     insertMission(tx, projectId, NOW),
   );
-  function node(
-    kind: NodeKind = NodeKind.Objective,
-    parentId: string | null = null,
-  ) {
+  function node() {
     return h.store.transaction((tx) => {
       const id = createIdentity("node");
       insertNode(tx, {
         id,
         mission_id: missionId,
-        kind,
         filename: `${id}.md`,
-        parent_id: parentId,
         created_at: NOW,
       });
       return id;
@@ -57,42 +51,42 @@ function fixture(t: TestContext) {
   return { ...h, project_id: projectId, mission_id: missionId, node };
 }
 
-test("readiness at attempt zero reads current children and ignores retired objectives and tasks", (t) => {
+test("readiness at attempt zero holds when the closure holds", (t) => {
   const h = fixture(t);
-  const initiative = h.node(NodeKind.Initiative);
-  const objective = h.node(NodeKind.Objective, initiative);
-  h.node(NodeKind.Task, objective);
+  const examine = h.node();
+  const dependency = h.node();
   h.store.transaction((tx) => {
-    const parent = readNode(tx, initiative)!;
-    assert.deepEqual(readinessOf(tx, parent), {
-      holds: false,
-      objectives_not_terminal: [objective],
+    const dependent = readNode(tx, examine)!;
+    assert.deepEqual(readinessOf(tx, dependent), {
+      holds: true,
+      unsatisfied_ids: [],
     });
-    assert.equal(readinessOf(tx, readNode(tx, objective)!).holds, true);
-    setNodeState(tx, objective, NodeState.Discarded);
-    assert.equal(readinessOf(tx, parent).holds, true);
-    setNodeState(tx, objective, NodeState.Waiting);
-    tx.database
-      .prepare("UPDATE mission_node SET retired_at = ? WHERE id = ?")
-      .run(NOW, objective);
-    assert.equal(readinessOf(tx, parent).holds, true);
-    assert.equal(continuationHolds(tx, h.dependencies.bindings, parent), false);
+    insertDependency(tx, h.mission_id, examine, dependency);
+    assert.deepEqual(readinessOf(tx, dependent), {
+      holds: false,
+      unsatisfied_ids: [dependency],
+    });
+    setNodeState(tx, dependency, NodeState.Completed);
+    assert.equal(readinessOf(tx, dependent).holds, true);
+    assert.equal(
+      continuationHolds(tx, h.dependencies.bindings, dependent),
+      false,
+    );
   });
 });
 
-test("dependency closure includes ancestor dependencies and requires Completed, not Discarded", (t) => {
+test("the dependency closure holds the direct dependencies alone and requires Completed, not Discarded", (t) => {
   const h = fixture(t);
-  const initiative = h.node(NodeKind.Initiative);
-  const objective = h.node(NodeKind.Objective, initiative);
-  const dependency = h.node();
+  const first = h.node();
+  const second = h.node();
+  const third = h.node();
   h.store.transaction((tx) => {
-    insertDependency(tx, h.mission_id, initiative, dependency);
-    setNodeState(tx, dependency, NodeState.Discarded);
-    assert.deepEqual(closureUnsatisfied(tx, readNode(tx, objective)!), [
-      dependency,
-    ]);
-    setNodeState(tx, dependency, NodeState.Completed);
-    assert.deepEqual(closureUnsatisfied(tx, readNode(tx, objective)!), []);
+    insertDependency(tx, h.mission_id, first, second);
+    insertDependency(tx, h.mission_id, second, third);
+    setNodeState(tx, second, NodeState.Discarded);
+    assert.deepEqual(closureUnsatisfied(tx, readNode(tx, first)!), [second]);
+    setNodeState(tx, second, NodeState.Completed);
+    assert.deepEqual(closureUnsatisfied(tx, readNode(tx, first)!), []);
   });
 });
 
@@ -151,7 +145,7 @@ test("open-attempt unresolved actions do not block readiness but stop continuati
   h.store.transaction((tx) => {
     tx.database
       .prepare(
-        "INSERT INTO mission_node_revision (node_id, revision, filename, name, requirement, criterion, verifications, bindings, change, reason, actor, created_at) VALUES (?, 1, 'objective.md', 'name', 'requirement', 'criterion', '[]', ?, '{}', 'reason', ?, ?)",
+        "INSERT INTO mission_node_revision (node_id, revision, filename, name, requirement, criterion, verifications, bindings, work, requires, tasks, change, reason, actor, created_at) VALUES (?, 1, 'implement.md', 'name', 'requirement', 'criterion', '[]', ?, 'implement', '[]', '[]', '{}', 'reason', ?, ?)",
       )
       .run(nodeId, canonicalJSON([bindingId]), canonicalJSON(ACTOR), NOW);
     openAttempt(tx, nodeId, FIRST_ATTEMPT, ACTOR, NOW);
@@ -177,7 +171,7 @@ test("open-attempt unresolved actions do not block readiness but stop continuati
     );
     assert.deepEqual(readinessOf(tx, node), {
       holds: true,
-      objectives_not_terminal: [],
+      unsatisfied_ids: [],
     });
     assert.equal(continuationHolds(tx, bindings, node), false);
     assert.equal(claimableMap(tx, h.mission_id, bindings).get(nodeId), false);

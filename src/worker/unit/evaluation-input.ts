@@ -1,6 +1,7 @@
 import { addedFiles } from "./local-git.ts";
 import { writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { join, relative } from "node:path";
+import { ensureDirectory } from "../../kernel/files.ts";
 import { abortSignal, CancellationContext } from "../../kernel/context.ts";
 import { identitySchema } from "../../kernel/identity.ts";
 import {
@@ -10,10 +11,16 @@ import {
   type Revision,
 } from "../../mission/contract.ts";
 import { EndReason, type ExecutionRun } from "./execution-run.ts";
-import { NodeKind } from "./native-agent.ts";
-import { WorkspaceKind } from "./workspace.ts";
-import type { StepsInput } from "./steps-objective.ts";
+import {
+  EVIDENCE_DIRECTORY,
+  WorkspaceKind,
+  type ExamineCheckout,
+} from "./workspace.ts";
+import type { StepsInput } from "./steps-implement.ts";
 import type { TestedInput } from "./verification.ts";
+import { ExecutionWork } from "../contract.ts";
+
+const NO_SNAPSHOTS = 0;
 
 export function snapshotOf(evidence: readonly Evidence[], bindingId: string) {
   const candidates = evidence
@@ -97,10 +104,9 @@ async function placeAsset(
 async function prepareWorkspace(
   input: StepsInput,
   run: ExecutionRun,
-  kind: NodeKind,
+  work: ExecutionWork,
   evidence: readonly Evidence[],
 ) {
-  const repository = input.setup.repositories[0];
   const deadline = Math.min(
     input.claim.created_at + input.setup.resource_budget.wall_time_ms,
     input.claim.expired_at,
@@ -111,49 +117,81 @@ async function prepareWorkspace(
     context: run.operationContext,
     deadlineMs: deadline - Date.now(),
   };
-  if (kind === NodeKind.Objective && repository) {
-    const snapshot = snapshotOf(evidence, repository.binding_id);
-    if (snapshot) {
-      const workspace = await input.workspaces.prepareSnapshot({
+  if (work === ExecutionWork.Implement) {
+    const snapshots = input.setup.repositories.map((repository) => ({
+      repository,
+      snapshot: snapshotOf(evidence, repository.binding_id),
+    }));
+    const found = snapshots.flatMap(({ repository, snapshot }) =>
+      snapshot ? [{ repository, ...snapshot }] : [],
+    );
+    if (found.length > NO_SNAPSHOTS) {
+      if (found.length < snapshots.length)
+        return run.stop(EndReason.OperationFailed);
+      const workspace = await input.workspaces.prepareSnapshots({
         ...common,
-        repository,
-        commit: snapshot.commit,
+        snapshots: found,
       });
-      return {
-        directory: workspace.directory,
-        tested_input: {
-          kind: AssetKind.Repository,
-          binding_id: repository.binding_id,
-          commit: snapshot.commit,
-        },
-        evidenceIds: [snapshot.evidenceId],
-        addedFiles: await addedFiles(
-          input.env,
-          workspace.directory,
-          `origin/${repository.strategy.base_branch}`,
-          run.operationContext,
-          deadline - Date.now(),
-        ),
-      };
+      try {
+        return {
+          ...workspace,
+          evidenceIds: [...new Set(found.map((item) => item.evidenceId))],
+          addedFiles: await addedFilesOf(input, run, workspace, deadline),
+        };
+      } catch (error) {
+        input.workspaces.release(workspace.key, WorkspaceKind.Execution);
+        throw error;
+      }
     }
   }
-  const workspace =
-    kind === NodeKind.Initiative
-      ? await input.workspaces.prepareInitiative({
-          ...common,
-          repositories: input.setup.repositories,
-        })
-      : { ...input.workspaces.prepareExecution(common), tested_input: null };
-  return { ...workspace, evidenceIds: [] as string[], addedFiles: [] };
+  if (work === ExecutionWork.Examine)
+    return {
+      ...(await input.workspaces.prepareExamine({
+        ...common,
+        repositories: input.setup.repositories,
+      })),
+      evidenceIds: [] as string[],
+      addedFiles: [],
+    };
+  const { directory } = input.workspaces.prepareExecution(common);
+  return {
+    key: directory,
+    directory,
+    checkouts: [] as ExamineCheckout[],
+    tested_input: null,
+    evidenceIds: [] as string[],
+    addedFiles: [],
+  };
+}
+
+async function addedFilesOf(
+  input: StepsInput,
+  run: ExecutionRun,
+  workspace: { directory: string; checkouts: readonly ExamineCheckout[] },
+  deadline: number,
+): Promise<string[]> {
+  const files: string[] = [];
+  for (const checkout of workspace.checkouts) {
+    const prefix = relative(workspace.directory, checkout.directory);
+    for (const file of await addedFiles(
+      input.env,
+      checkout.directory,
+      `origin/${checkout.base_branch}`,
+      run.operationContext,
+      deadline - Date.now(),
+    ))
+      files.push(prefix ? join(prefix, file) : file);
+  }
+  return files;
 }
 
 export async function prepareEvaluation(
   input: StepsInput,
   run: ExecutionRun,
-  kind: NodeKind,
+  work: ExecutionWork,
   evidence: readonly Evidence[],
 ) {
-  const workspace = await prepareWorkspace(input, run, kind, evidence);
+  const workspace = await prepareWorkspace(input, run, work, evidence);
   try {
     const testedInput: TestedInput | undefined =
       workspace.tested_input ?? placedOf(evidence)?.asset.address;
@@ -177,13 +215,21 @@ export async function prepareEvaluation(
       input.claim.created_at + input.setup.resource_budget.wall_time_ms,
       input.claim.expired_at,
     );
+    const placement =
+      workspace.key === workspace.directory
+        ? workspace.directory
+        : join(workspace.key, EVIDENCE_DIRECTORY);
+    ensureDirectory(placement);
     for (const { evidenceId, asset } of selected) {
-      const path = await placeAsset(workspace.directory, run, asset, deadline);
+      const name = await placeAsset(placement, run, asset, deadline);
+      const path = relative(workspace.directory, join(placement, name));
       evidenceIds.add(evidenceId);
       assets.push({ evidence_id: evidenceId, asset_id: asset.id, path });
     }
     return {
+      key: workspace.key,
       directory: workspace.directory,
+      checkouts: workspace.checkouts,
       tested_input: testedInput,
       evidenceIds: [...evidenceIds],
       reviewBundle: {
@@ -193,7 +239,7 @@ export async function prepareEvaluation(
       },
     };
   } catch (error) {
-    input.workspaces.release(workspace.directory, WorkspaceKind.Execution);
+    input.workspaces.release(workspace.key, WorkspaceKind.Execution);
     throw error;
   }
 }
@@ -203,6 +249,6 @@ export function verificationCommands(
 ): string[] {
   return [
     ...revision.content.verifications,
-    ...(revision.tasks ?? []).flatMap((task) => task.content.verifications),
+    ...revision.tasks.flatMap((task) => task.content.verifications),
   ];
 }

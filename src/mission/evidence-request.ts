@@ -54,8 +54,12 @@ export function requestEvidence(
     action.action === RepositoryAction.PullRequest
       ? PlatformAddressKind.PullRequest
       : PlatformAddressKind.BranchPush;
+  const containedLanding =
+    action.action === RepositoryAction.PullRequest &&
+    body.address.kind === PlatformAddressKind.BranchPush &&
+    body.address.branch === action.configuration.base_branch;
   if (
-    body.address.kind !== kind ||
+    (body.address.kind !== kind && !containedLanding) ||
     body.address.resource_identity !== binding.resource_identity
   )
     throw new OperationError(

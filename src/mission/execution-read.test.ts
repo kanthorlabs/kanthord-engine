@@ -3,12 +3,7 @@ import { test } from "node:test";
 import { OperationError } from "../kernel/errors.ts";
 import { createIdentity } from "../kernel/identity.ts";
 import { testHumanIdentity } from "../kernel/test-identity.ts";
-import {
-  MissionErrorCode,
-  AssessmentResult,
-  NodeKind,
-  NodeState,
-} from "./contract.ts";
+import { MissionErrorCode, AssessmentResult, NodeState } from "./contract.ts";
 import { canonicalJSON } from "../kernel/json.ts";
 import {
   closeAttempt,
@@ -18,7 +13,12 @@ import {
   insertOutcome,
 } from "./record-store.ts";
 import { getRevision } from "./node-read.ts";
-import { insertRevision, insertNode, setNodeState } from "./store.ts";
+import {
+  insertDependency,
+  insertRevision,
+  insertNode,
+  setNodeState,
+} from "./store.ts";
 import { evidenceHarness, executionHarness } from "./test-support.ts";
 
 const IDENTITY = testHumanIdentity("ulrich", "Ulrich", "token");
@@ -35,9 +35,9 @@ const SECOND_ATTEMPT = 2;
 const LATER_TS = 3;
 const THIRD_REVISION = 3;
 const PINNED = "Pinned";
-const PINNED_FILENAME = "initiative.md";
+const PINNED_FILENAME = "examine.md";
 
-test("initiative reads use outcome revisions, include discarded children, minimize new children and exclude retired children", async (t) => {
+test("examine reads use outcome revisions, include discarded dependencies, minimize new dependencies and exclude retired dependencies", async (t) => {
   const h = executionHarness(t, IDENTITY);
   const childId = createIdentity("node");
   const freshId = createIdentity("node");
@@ -49,9 +49,7 @@ test("initiative reads use outcome revisions, include discarded children, minimi
       insertNode(tx, {
         id,
         mission_id: h.mission_id,
-        kind: NodeKind.Objective,
         filename: `${id.toLowerCase()}.md`,
-        parent_id: h.node_id,
         created_at: CREATED_AT,
       });
       insertRevision(tx, {
@@ -60,6 +58,7 @@ test("initiative reads use outcome revisions, include discarded children, minimi
         content: { ...base.content, name: PINNED },
         tasks: [],
       });
+      insertDependency(tx, h.mission_id, h.node_id, id);
     }
     setNodeState(tx, childId, NodeState.Discarded);
     insertEvidence(
@@ -85,7 +84,7 @@ test("initiative reads use outcome revisions, include discarded children, minimi
       result: AssessmentResult.Undetermined,
       rationale: "Discard",
       evidence_ids: canonicalJSON([evidenceId]),
-      child_outcome_ids: "[]",
+      dependency_outcome_ids: "[]",
       tested_input: null,
       execution_id: null,
       actor: canonicalJSON(h.actor),
@@ -117,7 +116,7 @@ test("initiative reads use outcome revisions, include discarded children, minimi
     query: {},
     body: null,
   };
-  const page = await h.invoke("execution.objective.list", input);
+  const page = await h.invoke("execution.dependency.list", input);
   const child = page.items.find((item) => item.id === childId)!;
   assert.ok("content" in child);
   assert.equal(child.content.name, PINNED);
@@ -128,13 +127,13 @@ test("initiative reads use outcome revisions, include discarded children, minimi
     { id: freshId, state: NodeState.Pending },
   );
   assert.deepEqual(
-    (await h.invoke("execution.objective.outcome.list", input)).items.map(
+    (await h.invoke("execution.dependency.outcome.list", input)).items.map(
       (item) => item.id,
     ),
     [outcomeId],
   );
   assert.deepEqual(
-    (await h.invoke("execution.objective.evidence.list", input)).items.map(
+    (await h.invoke("execution.dependency.evidence.list", input)).items.map(
       (item) => item.id,
     ),
     [evidenceId],
@@ -145,26 +144,26 @@ test("initiative reads use outcome revisions, include discarded children, minimi
       .run(LATER_TS, childId),
   );
   assert.equal(
-    (await h.invoke("execution.objective.list", input)).items.length,
+    (await h.invoke("execution.dependency.list", input)).items.length,
     SINGLE_ITEM,
   );
   assert.equal(
-    (await h.invoke("execution.objective.outcome.list", input)).items.length,
+    (await h.invoke("execution.dependency.outcome.list", input)).items.length,
     NO_ITEMS,
   );
   assert.equal(
-    (await h.invoke("execution.objective.evidence.list", input)).items.length,
+    (await h.invoke("execution.dependency.evidence.list", input)).items.length,
     NO_ITEMS,
   );
-  const objective = evidenceHarness(t, IDENTITY);
+  const implement = evidenceHarness(t, IDENTITY);
   for (const operation of [
-    "execution.objective.list",
-    "execution.objective.outcome.list",
-    "execution.objective.evidence.list",
+    "execution.dependency.list",
+    "execution.dependency.outcome.list",
+    "execution.dependency.evidence.list",
   ] as const)
     assert.deepEqual(
-      await objective.invoke(operation, {
-        params: { execution_id: objective.claim.executionId },
+      await implement.invoke(operation, {
+        params: { execution_id: implement.claim.executionId },
         query: {},
         body: null,
       }),
@@ -197,7 +196,7 @@ test("execution evidence is attempt-bound and cleared outcome appears only after
       result: AssessmentResult.Undetermined,
       rationale: "Blocked",
       evidence_ids: "[]",
-      child_outcome_ids: "[]",
+      dependency_outcome_ids: "[]",
       tested_input: null,
       execution_id: null,
       actor: canonicalJSON(h.actor),
@@ -255,9 +254,15 @@ test("execution revision reads carry the pinned tasks and exclude later human re
       content: { ...revision.content, name: PINNED },
       tasks: [
         {
-          id: createIdentity("node"),
+          id: createIdentity("task"),
           filename: "task.md",
-          content: { ...revision.content, bindings: [] },
+          content: {
+            name: revision.content.name,
+            requirement: revision.content.requirement,
+            criterion: revision.content.criterion,
+            verifications: revision.content.verifications,
+            bindings: [],
+          },
         },
       ],
     });

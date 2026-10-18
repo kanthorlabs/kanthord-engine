@@ -8,7 +8,7 @@ import { repositoryOperations } from "../../repository/contract.ts";
 import { projectOperations } from "../../project/contract.ts";
 import {
   missionOperations,
-  NodeKind,
+  Work,
   AssetKind,
   AssessmentResult,
   NodeState,
@@ -88,6 +88,10 @@ async function setup(t: TestContext, adapter: typeof HTTP | typeof DIRECT) {
       resolveSshIdentity: async () => FAKE_SSH_IDENTITY,
     },
     github: { baseUrl: gitHub.endpoint },
+  });
+  fixture.gitWriter.landedOn = async () => ({
+    landed: false,
+    first_parent: null,
   });
   const creates = () =>
     gitHub.calls.filter((item) => item.method === HttpMethod.Post).length;
@@ -196,35 +200,46 @@ async function setup(t: TestContext, adapter: typeof HTTP | typeof DIRECT) {
       body: null,
     }),
   );
-  const initiative = completed(
+  const examine = completed(
     await call(missionOperations["node.create"], {
       params: { mission_id: mission.id },
       query: {},
       body: {
-        filename: "initiative-1.md",
-        kind: NodeKind.Initiative,
-        content: CONTENT,
+        filename: "examine-1.md",
+        content: { ...CONTENT, work: Work.Examine },
+        tasks: [],
         reason: "plan",
         expected_mission_version: FIRST_REVISION,
       },
     }),
   );
-  const objective = completed(
+  const implement = completed(
     await call(missionOperations["node.create"], {
       params: { mission_id: mission.id },
       query: {},
       body: {
-        filename: "objective-1.md",
-        kind: NodeKind.Objective,
-        content: { ...CONTENT, bindings: [binding.id] },
+        filename: "implement-1.md",
+        content: { ...CONTENT, work: Work.Implement, bindings: [binding.id] },
+        tasks: [],
         reason: "plan",
         expected_mission_version: SECOND_REVISION,
-        parent_id: initiative.revisions[0]!.node_id,
-        expected_parent_revision: FIRST_REVISION,
       },
     }),
   );
-  const nodeId = objective.revisions[0]!.node_id;
+  const nodeId = implement.revisions[0]!.node_id;
+  completed(
+    await call(missionOperations["dependency.add"], {
+      params: {
+        node_id: examine.revisions[0]!.node_id,
+        depends_on_id: nodeId,
+      },
+      query: {},
+      body: {
+        reason: "plan",
+        expected_mission_version: implement.mission_version,
+      },
+    }),
+  );
   const token = await fixture.machineToken(projectId, "harness", "first");
   const runtimeIdentity = completed(
     await call(workerOperations.register, NO_INPUT, token),
@@ -332,7 +347,7 @@ async function setup(t: TestContext, adapter: typeof HTTP | typeof DIRECT) {
         body: {
           ...context,
           evidence_ids: [work.evidence.id, run.evidence.id],
-          child_outcome_ids: [],
+          dependency_outcome_ids: [],
           result: AssessmentResult.Success,
           rationale: "met",
           tested_input: snapshot,

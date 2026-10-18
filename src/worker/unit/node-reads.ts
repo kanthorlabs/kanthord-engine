@@ -7,22 +7,14 @@ import {
 import {
   ClosingEvent,
   MissionErrorCode,
-  NodeState,
-  type Revision,
   type Assessment,
-  type ExecutionObjective,
   type Outcome,
 } from "../../mission/contract.ts";
 import { requestedChangesText } from "./judgement.ts";
 import { EndReason, ExecutionRun } from "./execution-run.ts";
-import { NodeKind } from "./native-agent.ts";
 
 export const READ_PAGE_LIMIT = 1000;
 const FIRST_ATTEMPT = 1;
-export const TERMINAL_STATES: readonly NodeState[] = [
-  NodeState.Completed,
-  NodeState.Discarded,
-];
 
 export async function readAllPages<T>(
   run: ExecutionRun,
@@ -55,12 +47,6 @@ export function readPinnedRevision(run: ExecutionRun) {
   );
 }
 
-export function nodeKindOf(revision: Pick<Revision, "tasks">): NodeKind {
-  return revision.tasks === undefined
-    ? NodeKind.Initiative
-    : NodeKind.Objective;
-}
-
 export function readAttemptEvidence(run: ExecutionRun) {
   return readAllPages(run, (cursor, options) =>
     run.clients.mission["execution.evidence.list"](
@@ -74,28 +60,28 @@ export function readAttemptEvidence(run: ExecutionRun) {
   );
 }
 
-export async function readObjectives(run: ExecutionRun) {
+export async function readDependencies(run: ExecutionRun) {
   const input = (cursor: string | null) => ({
     params: { execution_id: run.claim.execution_id },
     query: cursor === null ? {} : { cursor },
     body: null,
   });
-  const objectives = await readAllPages(run, (cursor, options) =>
-    run.clients.mission["execution.objective.list"](input(cursor), options),
+  const dependencies = await readAllPages(run, (cursor, options) =>
+    run.clients.mission["execution.dependency.list"](input(cursor), options),
   );
   const outcomes = await readAllPages(run, (cursor, options) =>
-    run.clients.mission["execution.objective.outcome.list"](
+    run.clients.mission["execution.dependency.outcome.list"](
       input(cursor),
       options,
     ),
   );
   const evidence = await readAllPages(run, (cursor, options) =>
-    run.clients.mission["execution.objective.evidence.list"](
+    run.clients.mission["execution.dependency.evidence.list"](
       input(cursor),
       options,
     ),
   );
-  return { objectives, outcomes, evidence };
+  return { dependencies, outcomes, evidence };
 }
 
 function nullOnRecordNotFound<T extends Assessment | Outcome>(
@@ -161,7 +147,10 @@ export async function readClearedOutcome(run: ExecutionRun) {
   );
 }
 
-export async function readRequestedChanges(run: ExecutionRun) {
+export async function readRequestedChanges(
+  run: ExecutionRun,
+  repositories: readonly RepositoryName[],
+) {
   const outcome = await readClearedOutcome(run);
   if (outcome?.closing_event !== ClosingEvent.ExternalFailed) return null;
   const read = await run.call((options) =>
@@ -174,7 +163,20 @@ export async function readRequestedChanges(run: ExecutionRun) {
       options,
     ),
   );
-  return requestedChangesText(read.items);
+  return requestedChangesText(
+    read.items.map((item) => ({
+      ...item,
+      binding:
+        repositories.find(
+          (repository) => repository.binding_id === item.binding_id,
+        )?.name ?? item.binding_id,
+    })),
+  );
+}
+
+interface RepositoryName {
+  binding_id: string;
+  name: string;
 }
 
 export interface PriorRationale {
@@ -184,21 +186,14 @@ export interface PriorRationale {
 
 export async function readPriorRationale(
   run: ExecutionRun,
+  repositories: readonly RepositoryName[],
 ): Promise<PriorRationale> {
   const rework = await readReworkAssessment(run);
   if (rework) return { rationale: rework.rationale, rework: true };
-  const requested = await readRequestedChanges(run);
+  const requested = await readRequestedChanges(run, repositories);
   if (requested !== null) return { rationale: requested, rework: false };
   return {
     rationale: (await readClearedAssessment(run))?.rationale ?? null,
     rework: false,
   };
-}
-
-export function allTerminal(
-  objectives: readonly ExecutionObjective[],
-): boolean {
-  return objectives.every((objective) =>
-    TERMINAL_STATES.includes(objective.state),
-  );
 }

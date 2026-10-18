@@ -11,7 +11,7 @@ import {
   NodeState,
   RepositoryAction,
   PlatformAddressKind,
-  NodeKind,
+  Work,
   MissionErrorCode,
   type AssessmentSubmit,
 } from "./contract.ts";
@@ -46,7 +46,7 @@ const SECOND_ATTEMPT = 2;
 const FIRST_REWORK = 1;
 const HUMAN_REASON = "Hold";
 
-test("initiative currency follows real child outcomes and only current closure releases dependent work", async (t) => {
+test("examine currency follows real dependency outcomes and only current closure releases dependent work", async (t) => {
   const h = executionHarness(t, IDENTITY);
   const childId = createIdentity("node");
   const dependentId = createIdentity("node");
@@ -55,23 +55,21 @@ test("initiative currency follows real child outcomes and only current closure r
     insertNode(tx, {
       id: childId,
       mission_id: h.mission_id,
-      kind: NodeKind.Objective,
       filename: "child.md",
-      parent_id: h.node_id,
       created_at: FIRST_REVISION,
     });
+    insertDependency(tx, h.mission_id, h.node_id, childId);
     insertRevision(tx, {
       ...base,
       node_id: childId,
       filename: "child.md",
+      content: { ...base.content, work: Work.Implement },
       tasks: [],
     });
     insertNode(tx, {
       id: dependentId,
       mission_id: h.mission_id,
-      kind: NodeKind.Initiative,
       filename: "dependent.md",
-      parent_id: null,
       created_at: FIRST_REVISION,
     });
     insertRevision(tx, {
@@ -115,7 +113,7 @@ test("initiative currency follows real child outcomes and only current closure r
   const body = {
     ...h.context,
     evidence_ids: [evidence.evidence.id],
-    child_outcome_ids: [] as string[],
+    dependency_outcome_ids: [] as string[],
     result: AssessmentResult.Success,
     rationale: "Passed",
     tested_input: input,
@@ -143,7 +141,7 @@ test("initiative currency follows real child outcomes and only current closure r
       result: AssessmentResult.Success,
       rationale: "Override",
       evidence_ids: "[]",
-      child_outcome_ids: "[]",
+      dependency_outcome_ids: "[]",
       tested_input: null,
       execution_id: null,
       actor: canonicalJSON(h.actor),
@@ -164,7 +162,7 @@ test("initiative currency follows real child outcomes and only current closure r
     submit(),
     (error) => error instanceof OperationError && error.code === VALIDATION,
   );
-  body.child_outcome_ids = [outcomeId];
+  body.dependency_outcome_ids = [outcomeId];
   const final = await submit();
   assert.equal(final.assessment.currency?.current, true);
   assert.equal(final.outcome?.result, AssessmentResult.Success);
@@ -228,7 +226,7 @@ async function fixture(t: TestContext, action: RepositoryAction | null = null) {
   const body: AssessmentSubmit = {
     ...h.context,
     evidence_ids: [evidence.evidence.id],
-    child_outcome_ids: [],
+    dependency_outcome_ids: [],
     result: AssessmentResult.Success,
     rationale: "Passed",
     tested_input: address,

@@ -5,8 +5,7 @@ import { ulid } from "ulid";
 import { temporary } from "../../kernel/test-support.ts";
 import { writePrivate } from "../../kernel/files.ts";
 import {
-  NodeKind,
-  EdgeKind,
+  Work,
   NodeState,
   ActorKind,
   AssessmentResult,
@@ -25,7 +24,12 @@ import {
   type Outcome,
 } from "../../mission/contract.ts";
 import { kanthord, environment } from "./cli-support.ts";
-import { FAKE_SSH_IDENTITY, gatewayFixture } from "./test-support.ts";
+import {
+  FAKE_SSH_IDENTITY,
+  gatewayFixture,
+  COVERING_WORKER_BINDINGS,
+  enableCoveringAgents,
+} from "./test-support.ts";
 
 const SUCCESS = 0;
 const NO_OUTPUT = "";
@@ -37,10 +41,10 @@ const FIRST_REVISION = 1;
 const FIRST_ATTEMPT = 1;
 const SINGLE_ITEM = 1;
 const SECOND_REVISION = 2;
+const COVERED_BINDING_SET_VERSION = 4;
 const SECOND_ATTEMPT = 2;
 const THIRD_MISSION_VERSION = 3;
 const FOURTH_MISSION_VERSION = 4;
-const VERSION = 5;
 const NUMBER_TYPE = "number";
 const BAD_REQUEST = 400;
 const VALIDATION_FAILED = "gateway.request.validation_failed";
@@ -115,12 +119,14 @@ async function setup(t: TestContext) {
     },
     secret: {},
   });
+  await enableCoveringAgents(env);
   const binding = await write<{
     binding_set_version: number;
     bindings: Record<string, { id: string }>;
   }>(["project", "binding", "apply", project.id], {
     version: FIRST_REVISION,
     bindings: {
+      ...COVERING_WORKER_BINDINGS,
       repo: {
         kind: "repository",
         config: {
@@ -140,46 +146,39 @@ async function setup(t: TestContext) {
       },
     },
   });
-  assert.equal(binding.binding_set_version, SECOND_REVISION);
+  assert.equal(binding.binding_set_version, COVERED_BINDING_SET_VERSION);
   const create = (body: unknown) =>
     write<NodeChange>(["mission", "node", "create", mission.id], body);
-  const initiative = await create({
-    filename: "initiative-1.md",
-    kind: NodeKind.Initiative,
-    content: CONTENT,
+  const examine = await create({
+    filename: "examine-1.md",
+    content: { ...CONTENT, work: Work.Examine },
+    tasks: [],
     reason: "plan",
     expected_mission_version: FIRST_REVISION,
   });
-  const initiativeId = initiative.revisions[FIRST_INDEX]!.node_id;
-  const objectiveBody = {
-    filename: "objective-1.md",
-    kind: NodeKind.Objective,
-    content: { ...CONTENT, bindings: [binding.bindings.repo!.id] },
+  const examineId = examine.revisions[FIRST_INDEX]!.node_id;
+  const implementBody = {
+    filename: "implement-1.md",
+    content: {
+      ...CONTENT,
+      work: Work.Implement,
+      bindings: [binding.bindings.repo!.id],
+    },
+    tasks: [],
     reason: "plan",
-    parent_id: initiativeId,
-    expected_parent_revision: FIRST_REVISION,
     expected_mission_version: SECOND_REVISION,
   };
-  const objective = await create(objectiveBody);
-  const objectiveId = objective.revisions[FIRST_INDEX]!.node_id;
-  const task = await create({
-    filename: "task-1.md",
-    kind: NodeKind.Task,
-    content: CONTENT,
-    reason: "plan",
-    parent_id: objectiveId,
-    expected_parent_revision: FIRST_REVISION,
+  const implement = await create({
+    ...implementBody,
+    tasks: [{ filename: "task-1.md", content: CONTENT }],
+  });
+  const implementId = implement.revisions[FIRST_INDEX]!.node_id;
+  const secondImplement = await create({
+    ...implementBody,
+    filename: "implement-2.md",
     expected_mission_version: THIRD_MISSION_VERSION,
   });
-  const taskId = task.added_edges.find(
-    (edge) => edge.kind === EdgeKind.Containment,
-  )!.child_id;
-  const secondObjective = await create({
-    ...objectiveBody,
-    filename: "objective-2.md",
-    expected_mission_version: FOURTH_MISSION_VERSION,
-  });
-  const node = await read<Node>(["mission", "node", "get", objectiveId]);
+  const node = await read<Node>(["mission", "node", "get", implementId]);
   return {
     read,
     write,
@@ -189,10 +188,9 @@ async function setup(t: TestContext) {
     token: fixture.token,
     project_id: project.id,
     mission_id: mission.id,
-    initiativeId,
-    objectiveId,
-    taskId,
-    secondObjectiveId: secondObjective.revisions[FIRST_INDEX]!.node_id,
+    examineId,
+    implementId,
+    secondImplementId: secondImplement.revisions[FIRST_INDEX]!.node_id,
     binding_id: node.content.bindings[FIRST_INDEX]!,
     revision: node.visible_revision,
   };
@@ -205,7 +203,7 @@ test(
     const h = await setup(t);
     const act = (state: NodeState, attempt: number) => ({
       reason: "hold",
-      expected_mission_version: VERSION,
+      expected_mission_version: FOURTH_MISSION_VERSION,
       expected_state: state,
       expected_attempt: attempt,
     });
@@ -231,7 +229,6 @@ test(
       options: string[] = [],
     ) => h.refuses(["mission", "node", name, id, ...options], body, code);
     const state = (answer: ControlResult, expected: NodeState) => {
-      assert.notEqual(answer.node.kind, NodeKind.Task);
       assert.ok("state" in answer.node);
       assert.equal(answer.node.state, expected);
     };
@@ -240,37 +237,25 @@ test(
     let blockedOutcome = "";
     let assessmentId = "";
     await scenario(
-      "E01.1 initiative ready refuses nonterminal children",
-      async () => {
-        await refuse(
-          "ready",
-          h.initiativeId,
-          act(NodeState.Available, INITIAL_ATTEMPT),
-          "mission.node.not_ready",
-        );
-      },
-    );
-    await scenario(
       "E01.2 ready opens and pins an attempt and queues evaluation",
       async () => {
         const answer = await control(
           "ready",
-          h.objectiveId,
+          h.implementId,
           act(NodeState.Available, INITIAL_ATTEMPT),
         );
         state(answer, NodeState.Waiting);
-        assert.ok(answer.node.kind !== NodeKind.Task);
         assert.equal(answer.node.attempt, FIRST_ATTEMPT);
         assert.equal(answer.attempt?.attempt, FIRST_ATTEMPT);
         assert.equal(answer.attempt?.node_revision, h.revision);
         assert.equal(answer.attempt?.opened_by.kind, ActorKind.Human);
         assert.equal(answer.outcome, null);
         assert.ok(
-          (await queue()).items.some((item) => item.node_id === h.objectiveId),
+          (await queue()).items.some((item) => item.node_id === h.implementId),
         );
         assert.equal(
           (await h.read<Mission>(["mission", "get", h.project_id])).version,
-          VERSION,
+          FOURTH_MISSION_VERSION,
         );
       },
     );
@@ -279,26 +264,26 @@ test(
       async () => {
         const answer = await control(
           "pause",
-          h.objectiveId,
+          h.implementId,
           act(NodeState.Waiting, FIRST_ATTEMPT),
         );
         state(answer, NodeState.Paused);
         assert.equal(answer.attempt?.closed_at, null);
         assert.ok(
-          !(await queue()).items.some((item) => item.node_id === h.objectiveId),
+          !(await queue()).items.some((item) => item.node_id === h.implementId),
         );
       },
     );
     await scenario("E01.4 resume requeues Waiting", async () => {
       state(
-        await control("resume", h.objectiveId, {
+        await control("resume", h.implementId, {
           ...act(NodeState.Paused, FIRST_ATTEMPT),
           target: NodeState.Waiting,
         }),
         NodeState.Waiting,
       );
       assert.ok(
-        (await queue()).items.some((item) => item.node_id === h.objectiveId),
+        (await queue()).items.some((item) => item.node_id === h.implementId),
       );
     });
     await scenario(
@@ -306,12 +291,12 @@ test(
       async () => {
         await control(
           "pause",
-          h.objectiveId,
+          h.implementId,
           act(NodeState.Waiting, FIRST_ATTEMPT),
         );
         const answer = await control(
           "block",
-          h.objectiveId,
+          h.implementId,
           act(NodeState.Paused, FIRST_ATTEMPT),
         );
         state(answer, NodeState.Blocked);
@@ -324,9 +309,8 @@ test(
           "mission",
           "node",
           "get",
-          h.objectiveId,
+          h.implementId,
         ]);
-        assert.ok(node.kind !== NodeKind.Task);
         assert.equal(node.blocked_context?.outcome.id, blockedOutcome);
         assert.deepEqual(node.blocked_context?.requests, []);
       },
@@ -335,10 +319,10 @@ test(
       const unblock = {
         blocked_attempt: FIRST_ATTEMPT,
         expected_revision: h.revision,
-        expected_mission_version: VERSION,
+        expected_mission_version: FOURTH_MISSION_VERSION,
       };
       const refused = await fetch(
-        `${h.endpoint}/api/mission/node/${h.objectiveId}/unblock`,
+        `${h.endpoint}/api/mission/node/${h.implementId}/unblock`,
         {
           method: "POST",
           headers: {
@@ -358,12 +342,11 @@ test(
         "mission",
         "node",
         "get",
-        h.objectiveId,
+        h.implementId,
       ]);
-      assert.ok(blocked.kind !== NodeKind.Task);
       assert.equal(blocked.state, NodeState.Blocked);
       assert.equal(blocked.attempt, FIRST_ATTEMPT);
-      const answer = await control("unblock", h.objectiveId, unblock);
+      const answer = await control("unblock", h.implementId, unblock);
       state(answer, NodeState.Available);
       assert.equal(answer.attempt?.attempt, SECOND_ATTEMPT);
       assert.equal(answer.attempt?.start_point, StartPoint.NodeBranch);
@@ -375,7 +358,7 @@ test(
         "mission",
         "attempt",
         "list",
-        h.objectiveId,
+        h.implementId,
       ]);
       assert.deepEqual(
         list.items.map((item) => item.attempt),
@@ -386,7 +369,7 @@ test(
         "mission",
         "attempt",
         "get",
-        h.objectiveId,
+        h.implementId,
         String(FIRST_ATTEMPT),
       ]);
       assert.equal(typeof closed.closed_at, NUMBER_TYPE);
@@ -404,7 +387,7 @@ test(
           "mission",
           "attempt",
           "get",
-          h.objectiveId,
+          h.implementId,
           String(SECOND_ATTEMPT),
         ]);
         assert.deepEqual(attempt.required_external_actions, [
@@ -425,7 +408,7 @@ test(
         "mission",
         "external-action",
         "list",
-        h.objectiveId,
+        h.implementId,
         "--attempt",
         String(SECOND_ATTEMPT),
       ]);
@@ -437,7 +420,7 @@ test(
         "mission",
         "external-action",
         "get",
-        h.objectiveId,
+        h.implementId,
         String(SECOND_ATTEMPT),
         ACTION_KEY,
       ]);
@@ -450,7 +433,7 @@ test(
           "mission",
           "assessment",
           "list",
-          h.objectiveId,
+          h.implementId,
         ]);
         assert.equal(page.items.length, SINGLE_ITEM);
         const assessment = page.items[FIRST_INDEX]!;
@@ -480,7 +463,7 @@ test(
         "mission",
         "outcome",
         "list",
-        h.objectiveId,
+        h.implementId,
         "--attempt",
         String(FIRST_ATTEMPT),
       ]);
@@ -502,7 +485,7 @@ test(
       async () => {
         const answer = await control(
           "override",
-          h.objectiveId,
+          h.implementId,
           {
             ...act(NodeState.Available, SECOND_ATTEMPT),
             landed_commit: {
@@ -526,7 +509,7 @@ test(
     await scenario("E01.13 discard preserves attempt zero", async () => {
       const answer = await control(
         "discard",
-        h.secondObjectiveId,
+        h.secondImplementId,
         act(NodeState.Available, INITIAL_ATTEMPT),
       );
       state(answer, NodeState.Discarded);
@@ -535,14 +518,14 @@ test(
       assert.equal(answer.outcome?.closing_event, ClosingEvent.HumanDiscard);
     });
     await scenario(
-      "E01.14 terminal objectives admit initiative readiness",
+      "E01.14 an examine node with no dependency admits readiness",
       async () => {
         assert.ok(
-          (await queue()).items.some((item) => item.node_id === h.initiativeId),
+          (await queue()).items.some((item) => item.node_id === h.examineId),
         );
         const answer = await control(
           "ready",
-          h.initiativeId,
+          h.examineId,
           act(NodeState.Available, INITIAL_ATTEMPT),
         );
         state(answer, NodeState.Waiting);
@@ -552,23 +535,15 @@ test(
     await scenario("E01.15 block requires pause", async () => {
       await refuse(
         "block",
-        h.initiativeId,
+        h.examineId,
         act(NodeState.Waiting, FIRST_ATTEMPT),
         "mission.node.control_refused",
-      );
-    });
-    await scenario("E01.16 tasks have no controls", async () => {
-      await refuse(
-        "pause",
-        h.taskId,
-        act(NodeState.Waiting, FIRST_ATTEMPT),
-        "mission.node.control_task",
       );
     });
     await scenario("E01.17 terminal nodes refuse controls", async () => {
       await refuse(
         "pause",
-        h.objectiveId,
+        h.implementId,
         act(NodeState.Completed, SECOND_ATTEMPT),
         "mission.node.terminal",
       );
@@ -576,7 +551,7 @@ test(
     await scenario("E01.18 attempt precondition is enforced", async () => {
       await refuse(
         "pause",
-        h.initiativeId,
+        h.examineId,
         act(NodeState.Waiting, INITIAL_ATTEMPT),
         "mission.node.state_conflict",
       );
@@ -586,10 +561,10 @@ test(
       async () => {
         await refuse(
           "pause",
-          h.initiativeId,
+          h.examineId,
           {
             ...act(NodeState.Waiting, FIRST_ATTEMPT),
-            expected_mission_version: FOURTH_MISSION_VERSION,
+            expected_mission_version: THIRD_MISSION_VERSION,
           },
           "mission.version.conflict",
         );
@@ -600,7 +575,7 @@ test(
       async () => {
         await refuse(
           "override",
-          h.initiativeId,
+          h.examineId,
           {
             ...act(NodeState.Waiting, FIRST_ATTEMPT),
             landed_commit: {
@@ -625,14 +600,14 @@ test(
         );
         await refuse(
           "override",
-          h.initiativeId,
+          h.examineId,
           act(NodeState.Waiting, FIRST_ATTEMPT),
           "cli.mission.node.override.invalid_result",
           ["--result", "failure"],
         );
         await refuse(
           "override",
-          h.initiativeId,
+          h.examineId,
           { ...act(NodeState.Waiting, FIRST_ATTEMPT), result: "success" },
           "cli.file.schema_invalid",
           ["--result", "success"],
@@ -648,14 +623,14 @@ test(
       "E01.22 record CLI validates attempt and action key",
       async () => {
         await readRefusal(
-          ["attempt", "get", h.objectiveId, String(INITIAL_ATTEMPT)],
+          ["attempt", "get", h.implementId, String(INITIAL_ATTEMPT)],
           "cli.mission.attempt.get.invalid_attempt",
         );
         await readRefusal(
           [
             "external-action",
             "get",
-            h.objectiveId,
+            h.implementId,
             String(SECOND_ATTEMPT),
             "repo.push",
           ],
@@ -665,7 +640,7 @@ test(
     );
     await scenario("E01.23 absent attempt answers not found", async () => {
       await readRefusal(
-        ["attempt", "get", h.objectiveId, "9"],
+        ["attempt", "get", h.implementId, "9"],
         "mission.record.not_found",
       );
     });

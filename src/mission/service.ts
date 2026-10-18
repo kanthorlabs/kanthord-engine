@@ -29,13 +29,13 @@ import {
   ActorKind,
   MISSION_SERVICE_NAME,
   MissionErrorCode,
-  NodeKind,
   missionOperations,
   type HumanActor,
   type MissionBindings,
   type MissionCollaborations,
   type WorkQueue,
   type SchedulerClaims,
+  type SchedulerMatch,
   type SchedulerWakeup,
   type ExecutionAttribution,
   type MissionTransitions,
@@ -43,6 +43,8 @@ import {
   type IntakeStorage,
   type IntakeCheck,
   type EventDecoder,
+  type Work,
+  type ImportPreview,
 } from "./contract.ts";
 import { addDependency, removeDependency } from "./dependency.ts";
 import { pauseNode, readyNode, resumeNode } from "./control-hold.ts";
@@ -70,12 +72,14 @@ import {
   clearedOutcome,
   clearedAssessment,
   reworkAssessment,
-  executionObjectives,
-  executionObjectiveOutcomes,
-  executionObjectiveEvidence,
+  executionDependencies,
+  executionDependencyOutcomes,
+  executionDependencyEvidence,
 } from "./execution-read.ts";
 import { claim, release, failure } from "./transitions.ts";
 import { actionContextOf } from "./action-context.ts";
+import { claimFacts, claimFactsOf } from "./claim-facts.ts";
+import { guardCoverage } from "./coverage.ts";
 import {
   authorizeAction,
   authorizeEvidenceAsset,
@@ -99,10 +103,9 @@ import {
 } from "./record-list.ts";
 import { edgeCursor, edgePage } from "./edge-read.ts";
 import { exportMission } from "./export.ts";
-import { previewImport } from "./import.ts";
-import { applyImport } from "./import-apply.ts";
+import { prepareImport } from "./import.ts";
+import { applyImport, probeCoverage } from "./import-apply.ts";
 import { createNode } from "./node-create.ts";
-import { moveNode } from "./node-move.ts";
 import { rebindNodes } from "./node-rebind.ts";
 import { planRetirement, retireNode } from "./node-retire.ts";
 import { setCriterion, updateNode } from "./node-update.ts";
@@ -125,6 +128,9 @@ import {
 import { requireActive, requireMission, requireNonterminal } from "./write.ts";
 
 const MISSION_STOPPED_CODE = "mission.lifecycle.stopped";
+const NO_VIOLATIONS = 0;
+
+class ProbeRollback extends Error {}
 const QUERY_TRUE = "true";
 
 export function humanActor(caller: CallerContext): HumanActor {
@@ -140,6 +146,20 @@ export function humanActor(caller: CallerContext): HumanActor {
   };
 }
 
+type WriteScope =
+  { mission_id: string } | { node_id: string } | { proposal_id: string };
+
+function projectOf(tx: Transaction, scope: WriteScope): string {
+  const missionId =
+    "mission_id" in scope
+      ? scope.mission_id
+      : "node_id" in scope
+        ? requireNode(tx, scope.node_id).mission_id
+        : requireNode(tx, requireProposal(tx, scope.proposal_id).node_id)
+            .mission_id;
+  return requireMission(tx, missionId).project_id;
+}
+
 export interface Dependencies {
   store: Store;
   intakeStorage: IntakeStorage;
@@ -150,6 +170,7 @@ export interface Dependencies {
   bindings: MissionBindings;
   workQueue: WorkQueue;
   schedulerClaims: SchedulerClaims;
+  schedulerMatch: SchedulerMatch;
   wakeup: SchedulerWakeup;
   executionAttribution: ExecutionAttribution;
   logger: Logger;
@@ -189,32 +210,32 @@ export class MissionService
 
   declare(registry: OperationRegistry): void {
     registry.register(
-      missionOperations["execution.objective.list"],
+      missionOperations["execution.dependency.list"],
       ({ query }, caller) => {
         assert.ok(caller.execution);
         const claim = caller.execution;
         return caller.commit((tx) =>
-          executionObjectives(tx, this.dependencies, claim, query),
+          executionDependencies(tx, this.dependencies, claim, query),
         );
       },
     );
     registry.register(
-      missionOperations["execution.objective.outcome.list"],
+      missionOperations["execution.dependency.outcome.list"],
       ({ query }, caller) => {
         assert.ok(caller.execution);
         const claim = caller.execution;
         return caller.commit((tx) =>
-          executionObjectiveOutcomes(tx, this.dependencies, claim, query),
+          executionDependencyOutcomes(tx, this.dependencies, claim, query),
         );
       },
     );
     registry.register(
-      missionOperations["execution.objective.evidence.list"],
+      missionOperations["execution.dependency.evidence.list"],
       ({ query }, caller) => {
         assert.ok(caller.execution);
         const claim = caller.execution;
         return caller.commit((tx) =>
-          executionObjectiveEvidence(tx, this.dependencies, claim, query),
+          executionDependencyEvidence(tx, this.dependencies, claim, query),
         );
       },
     );
@@ -470,13 +491,15 @@ export class MissionService
       missionOperations["proposal.approve"],
       ({ params, body }, caller) =>
         this.commitGraph(caller, { proposal_id: params.proposal_id }, (tx) =>
-          approveProposal(
-            tx,
-            this.dependencies,
-            params.proposal_id,
-            body,
-            humanActor(caller),
-            Date.now(),
+          this.covered(tx, { proposal_id: params.proposal_id }, (tx) =>
+            approveProposal(
+              tx,
+              this.dependencies,
+              params.proposal_id,
+              body,
+              humanActor(caller),
+              Date.now(),
+            ),
           ),
         ),
     );
@@ -484,13 +507,15 @@ export class MissionService
       missionOperations["node.unblock"],
       ({ params, body }, caller) =>
         this.commitGraph(caller, { node_id: params.node_id }, (tx) =>
-          unblockNode(
-            tx,
-            this.dependencies,
-            params.node_id,
-            body,
-            humanActor(caller),
-            Date.now(),
+          this.covered(tx, { node_id: params.node_id }, (tx) =>
+            unblockNode(
+              tx,
+              this.dependencies,
+              params.node_id,
+              body,
+              humanActor(caller),
+              Date.now(),
+            ),
           ),
         ),
     );
@@ -592,31 +617,60 @@ export class MissionService
       missionOperations["import.apply"],
       ({ params, body }, caller) =>
         this.commitGraph(caller, { mission_id: params.mission_id }, (tx) =>
-          applyImport(
-            tx,
-            params.mission_id,
-            body,
-            humanActor(caller),
-            this.dependencies.bindings,
-            this.dependencies.workQueue,
-            this.dependencies.config.text_max_bytes,
-            this.dependencies.schedulerClaims,
+          this.covered(tx, { mission_id: params.mission_id }, (tx) =>
+            applyImport(
+              tx,
+              params.mission_id,
+              body,
+              humanActor(caller),
+              this.dependencies.bindings,
+              this.dependencies.workQueue,
+              this.dependencies.config.text_max_bytes,
+              this.dependencies.schedulerClaims,
+            ),
           ),
         ),
     );
     registry.register(
       missionOperations["import.preview"],
-      ({ params, body }, caller) =>
-        caller.commit((tx) =>
-          previewImport(
-            tx,
-            requireMission(tx, params.mission_id, body.mission_version),
-            body,
-            params.mission_id,
-            this.dependencies.bindings,
-            this.dependencies.config.text_max_bytes,
-          ),
-        ),
+      ({ params, body }, caller) => {
+        let probed: ImportPreview | null = null;
+        try {
+          return caller.commit((tx) => {
+            const mission = requireMission(
+              tx,
+              params.mission_id,
+              body.mission_version,
+            );
+            const prepared = prepareImport(
+              tx,
+              mission,
+              body,
+              params.mission_id,
+              this.dependencies.bindings,
+              this.dependencies.config.text_max_bytes,
+            );
+            if (prepared.preview.violations.length > NO_VIOLATIONS)
+              return prepared.preview;
+            probed = {
+              ...prepared.preview,
+              violations: probeCoverage(
+                tx,
+                mission,
+                prepared,
+                body.reason,
+                humanActor(caller),
+                this.dependencies,
+              ),
+            };
+            throw new ProbeRollback();
+          });
+        } catch (error) {
+          if (!(error instanceof ProbeRollback)) throw error;
+          assert.ok(probed);
+          return probed;
+        }
+      },
     );
     registry.register(
       missionOperations["edge.list"],
@@ -626,7 +680,6 @@ export class MissionService
             tx,
             params.mission_id,
             {
-              kind: query.kind,
               node_id: query.node_id,
               after:
                 query.cursor === undefined
@@ -679,9 +732,8 @@ export class MissionService
             this.dependencies.bindings,
             params.mission_id,
             {
-              kind: query.kind,
+              work: query.work,
               state: query.state,
-              parent_id: query.parent_id,
               include_retired: query.include_retired === QUERY_TRUE,
               after,
             },
@@ -714,13 +766,15 @@ export class MissionService
       missionOperations["node.rebind"],
       ({ params, body }, caller) =>
         caller.commit((tx) =>
-          rebindNodes(
-            tx,
-            params.mission_id,
-            body,
-            humanActor(caller),
-            this.dependencies.bindings,
-            this.dependencies.config.text_max_bytes,
+          this.covered(tx, { mission_id: params.mission_id }, (tx) =>
+            rebindNodes(
+              tx,
+              params.mission_id,
+              body,
+              humanActor(caller),
+              this.dependencies.bindings,
+              this.dependencies.config.text_max_bytes,
+            ),
           ),
         ),
     );
@@ -757,13 +811,6 @@ export class MissionService
           const node = requireNode(tx, params.node_id);
           requireActive(node);
           requireMission(tx, node.mission_id, body.expected_mission_version);
-          if (node.kind === NodeKind.Task)
-            throw new OperationError(
-              HttpStatus.BadRequest,
-              MissionErrorCode.PriorityTask,
-              "Tasks have no priority.",
-              { node_id: node.id },
-            );
           requireNonterminal(node);
           const now = Date.now();
           const live = this.dependencies.schedulerClaims.liveExecutionOf(
@@ -788,21 +835,6 @@ export class MissionService
         }),
     );
     registry.register(
-      missionOperations["node.move"],
-      ({ params, body }, caller) =>
-        this.commitGraph(caller, { node_id: params.node_id }, (tx) =>
-          moveNode(
-            tx,
-            params.node_id,
-            body,
-            humanActor(caller),
-            this.dependencies.workQueue,
-            this.dependencies.config.text_max_bytes,
-            this.dependencies.bindings,
-          ),
-        ),
-    );
-    registry.register(
       missionOperations["criterion.set"],
       ({ params, body }, caller) =>
         caller.commit((tx) =>
@@ -819,13 +851,15 @@ export class MissionService
       missionOperations["node.update"],
       ({ params, body }, caller) =>
         caller.commit((tx) =>
-          updateNode(
-            tx,
-            params.node_id,
-            body,
-            humanActor(caller),
-            this.dependencies.bindings,
-            this.dependencies.config.text_max_bytes,
+          this.covered(tx, { node_id: params.node_id }, (tx) =>
+            updateNode(
+              tx,
+              params.node_id,
+              body,
+              humanActor(caller),
+              this.dependencies.bindings,
+              this.dependencies.config.text_max_bytes,
+            ),
           ),
         ),
     );
@@ -833,14 +867,16 @@ export class MissionService
       missionOperations["node.create"],
       ({ params, body }, caller) =>
         this.commitGraph(caller, { mission_id: params.mission_id }, (tx) =>
-          createNode(
-            tx,
-            params.mission_id,
-            body,
-            humanActor(caller),
-            this.dependencies.bindings,
-            this.dependencies.workQueue,
-            this.dependencies.config.text_max_bytes,
+          this.covered(tx, { mission_id: params.mission_id }, (tx) =>
+            createNode(
+              tx,
+              params.mission_id,
+              body,
+              humanActor(caller),
+              this.dependencies.bindings,
+              this.dependencies.workQueue,
+              this.dependencies.config.text_max_bytes,
+            ),
           ),
         ),
     );
@@ -858,23 +894,23 @@ export class MissionService
     );
   }
 
+  private covered<T>(
+    tx: Transaction,
+    scope: WriteScope,
+    write: (tx: Transaction) => T,
+  ): T {
+    return guardCoverage(tx, this.dependencies, projectOf(tx, scope), write);
+  }
+
   private commitGraph<T>(
     caller: CallerContext,
-    scope:
-      { mission_id: string } | { node_id: string } | { proposal_id: string },
+    scope: WriteScope,
     write: (tx: Transaction) => T,
   ): T {
     let projectId: string | null = null;
     const result = caller.commit((tx) => {
       const result = write(tx);
-      const missionId =
-        "mission_id" in scope
-          ? scope.mission_id
-          : "node_id" in scope
-            ? requireNode(tx, scope.node_id).mission_id
-            : requireNode(tx, requireProposal(tx, scope.proposal_id).node_id)
-                .mission_id;
-      projectId = requireMission(tx, missionId).project_id;
+      projectId = projectOf(tx, scope);
       return result;
     });
     assert.ok(projectId);
@@ -889,6 +925,14 @@ export class MissionService
 
   liveNodesPinning(tx: Transaction, bindingId: string): string[] {
     return readLiveNodesPinning(tx, bindingId);
+  }
+
+  claimFacts(tx: Transaction, nodeId: string) {
+    return claimFacts(tx, nodeId);
+  }
+
+  claimFactsOf(tx: Transaction, projectId: string) {
+    return claimFactsOf(tx, this.dependencies.bindings, projectId);
   }
 
   actionContextOf(tx: Transaction, nodeId: string, attempt: number) {
@@ -971,6 +1015,10 @@ export class MissionService
       nodeId,
       nodeRevision,
     );
+  }
+
+  workOf(tx: Transaction, nodeId: string, nodeRevision: number): Work {
+    return getRevision(tx, nodeId, nodeRevision).content.work;
   }
 
   start(): Promise<Error | null> {

@@ -208,12 +208,26 @@ components:
                     type: array
                     items:
                       type: string
+                  work:
+                    type: string
+                    enum:
+                      - implement
+                      - examine
+                  requires:
+                    default: []
+                    type: array
+                    items:
+                      type: string
+                      maxLength: 64
+                      pattern: ^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)*$
                 required:
                   - name
                   - requirement
                   - criterion
                   - verifications
                   - bindings
+                  - work
+                  - requires
                 additionalProperties: false
               tasks:
                 type: array
@@ -224,8 +238,8 @@ components:
                       type: string
                       minLength: 31
                       maxLength: 31
-                      pattern: ^node_[0-7][0-9A-HJKMNP-TV-Z]{25}$
-                      description: node_ followed by a canonical 26-character uppercase ULID.
+                      pattern: ^task_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                      description: task_ followed by a canonical 26-character uppercase ULID.
                     filename:
                       type: string
                       pattern: ^[a-z][a-z0-9_-]*\.md$
@@ -248,6 +262,7 @@ components:
                             type: string
                             minLength: 1
                         bindings:
+                          maxItems: 0
                           type: array
                           items:
                             type: string
@@ -272,8 +287,6 @@ components:
                       - import
                       - node.create
                       - node.update
-                      - node.move
-                      - node.retire
                       - node.rebind
                       - criterion.set
                       - unblock
@@ -296,8 +309,8 @@ components:
                           type: string
                           minLength: 31
                           maxLength: 31
-                          pattern: ^node_[0-7][0-9A-HJKMNP-TV-Z]{25}$
-                          description: node_ followed by a canonical 26-character uppercase ULID.
+                          pattern: ^task_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                          description: task_ followed by a canonical 26-character uppercase ULID.
                         change:
                           type: string
                           enum:
@@ -334,6 +347,7 @@ components:
               - actor
               - created_at
               - content
+              - tasks
               - change
               - pinned_by_attempts
             additionalProperties: false

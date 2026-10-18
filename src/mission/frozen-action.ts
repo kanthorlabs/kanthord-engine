@@ -5,15 +5,15 @@ import {
   EndState,
   ExpectedEndState,
   MissionBindingKind,
-  NodeKind,
   RepositoryAction,
   Resolution,
+  Work,
   frozenActionSchema,
   type FrozenAction,
   type MissionBindings,
 } from "./contract.ts";
 import { readAttempt, readRequests, type EvidenceRow } from "./record-store.ts";
-import { readNode, readRevision } from "./store.ts";
+import { readRevision, type RevisionRow } from "./store.ts";
 
 const bindingIdsSchema = z.array(z.string());
 const RESOURCE_KIND_SEPARATOR = ":";
@@ -24,11 +24,17 @@ export function requiredActionsOf(
   nodeId: string,
   nodeRevision: number,
 ): FrozenAction[] {
-  const node = readNode(tx, nodeId);
-  assert.ok(node && node.kind !== NodeKind.Task);
   const revision = readRevision(tx, nodeId, nodeRevision);
   assert.ok(revision);
-  if (node.kind === NodeKind.Initiative) return [];
+  return actionsOfRevision(tx, bindings, revision);
+}
+
+export function actionsOfRevision(
+  tx: Transaction,
+  bindings: MissionBindings,
+  revision: RevisionRow,
+): FrozenAction[] {
+  if (revision.work === Work.Examine) return [];
   const actions: FrozenAction[] = [];
   for (const bindingId of bindingIdsSchema.parse(
     JSON.parse(revision.bindings),

@@ -1,6 +1,7 @@
 import { ExecutionBudget } from "./budget.ts";
 import assert from "node:assert/strict";
-import { unusedHostTools } from "./test-support.ts";
+import { implementFixture, task, unusedHostTools } from "./test-support.ts";
+import { taskWork } from "./steps-implement.ts";
 import {
   existsSync,
   mkdirSync,
@@ -17,7 +18,8 @@ import { background, CancellationContext } from "../../kernel/context.ts";
 import { Diagnostic } from "../../kernel/errors.ts";
 import { createIdentity } from "../../kernel/identity.ts";
 import { temporary, hostEnvironment } from "../../kernel/test-support.ts";
-import { NodeKind, openNativeAgent } from "./native-agent.ts";
+import { openNativeAgent } from "./native-agent.ts";
+import { ExecutionWork } from "../contract.ts";
 import {
   WorkerMethod,
   type ExecutionSetup,
@@ -72,6 +74,8 @@ async function fixture(
     method?: WorkerMethod;
     prepare?: (workspace: string, hostHome: string) => void;
     turnCheck?: (context: CancellationContext) => Promise<void>;
+    work?: ExecutionWork;
+    checkouts?: (workspace: string) => string[];
   } = {},
 ) {
   const setup = anthropicSetup(overrides);
@@ -95,7 +99,7 @@ async function fixture(
       created_at: Date.now(),
       expired_at: Date.now() + 60000,
     },
-    nodeKind: NodeKind.Objective,
+    work: options.work ?? ExecutionWork.Implement,
     agent: setup.agents[0]!,
     credential: {
       credential_id: setup.agents[0]!.credential_id,
@@ -110,6 +114,7 @@ async function fixture(
     workspaceAgentFiles:
       (options.method ?? WorkerMethod.Steps) !== WorkerMethod.Evaluation,
     workspace,
+    checkouts: options.checkouts?.(workspace) ?? [workspace],
     hostHome,
     env: hostEnvironment(),
     modelRuntimeFactory: scriptedModelRuntime(provider),
@@ -213,6 +218,71 @@ test("native agent composes only the switched-on workspace files and the project
     h.agent.composition.selected.every(({ digest }) =>
       /^[a-f0-9]{64}$/.test(digest),
     ),
+  );
+});
+
+async function composesOnePartPerBinding(t: TestContext, work: ExecutionWork) {
+  const names = ["first", "second"];
+  const checkoutsOf = (workspace: string) =>
+    names.map((name) => join(workspace, "checkouts", name));
+  const h = await fixture(
+    t,
+    [fauxAssistantMessage("done")],
+    {
+      repositories: names.map((name) => ({
+        ...repositoryOf({}, `${name} project prompt`),
+        name,
+      })),
+    },
+    unusedHostTools,
+    {
+      work,
+      checkouts: checkoutsOf,
+      prepare: (workspace) => {
+        for (const [index, directory] of checkoutsOf(workspace).entries()) {
+          mkdirSync(directory, { recursive: true });
+          writeFileSync(join(directory, "AGENTS.md"), `${names[index]} agents`);
+        }
+      },
+    },
+  );
+  await h.agent.prompt(WORK);
+  const text = callText(h);
+  for (const name of names) {
+    assert.ok(text.includes(`${name} agents`));
+    assert.ok(text.includes(`${name} project prompt`));
+  }
+  assert.deepEqual(
+    h.agent.composition.selected.map(({ owner, source }) => [owner, source]),
+    checkoutsOf(h.workspace).flatMap((directory, index) => [
+      [
+        `repository binding ${names[index]}`,
+        `file ${join(directory, "AGENTS.md")}`,
+      ],
+      [`repository binding ${names[index]}`, "database project prompt"],
+    ]),
+  );
+}
+
+test("an examine node composes one project prompt part for each repository binding in binding order", (t) =>
+  composesOnePartPerBinding(t, ExecutionWork.Examine));
+
+test("two bindings compose two parts in binding order from their checkouts", (t) =>
+  composesOnePartPerBinding(t, ExecutionWork.Implement));
+
+test("the work prompt lists both repositories", async (t) => {
+  const current = task("both", "true");
+  const h = await implementFixture(t, [current], [], undefined, ["api", "web"]);
+  const text = taskWork(h, current).text;
+  assert.ok(
+    text.includes(
+      "## Repositories\n\nRepository api: directory `api`, base branch `main`\nRepository web: directory `web`, base branch `main`",
+    ),
+  );
+  const single = await implementFixture(t, [current], []);
+  assert.equal(
+    taskWork(single, current).text.includes("## Repositories"),
+    false,
   );
 });
 

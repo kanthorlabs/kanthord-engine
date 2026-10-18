@@ -47,8 +47,11 @@ import {
   type WorkerDeclarations,
   type ProjectPauses,
   type WorkerBindings,
+  type MissionClaimFacts,
   type TraceIdentity,
+  type UnmatchedClaim,
 } from "./contract.ts";
+import { unmatchedClaims } from "./match.ts";
 
 const SCHEDULER_STOPPED_CODE = "scheduler.lifecycle.stopped";
 const CURSOR_INVALID_CODE = "system.pagination.cursor_invalid";
@@ -130,6 +133,7 @@ export interface Dependencies {
   registrations: InstanceRegistrations;
   declarations: WorkerDeclarations;
   bindings: WorkerBindings;
+  facts: MissionClaimFacts;
   projects: ProjectPauses;
   agentChains: AgentChains;
   traceIdentity: TraceIdentity;
@@ -222,6 +226,9 @@ export class SchedulerService implements Service, WorkQueue {
   }
   agentSelectionsOf(tx: Transaction, executionId: string): AgentSelection[] {
     return readExecution(tx, executionId)?.agent_selections ?? [];
+  }
+  unmatchedClaims(tx: Transaction, projectId: string): UnmatchedClaim[] {
+    return unmatchedClaims(tx, this.dependencies, projectId);
   }
 
   insert(

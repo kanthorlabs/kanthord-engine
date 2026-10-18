@@ -37,65 +37,17 @@ export function detectCycle(edges: DepEdge[]): boolean {
   return processed < graph.order;
 }
 
-export function buildDependencyClosureOf(
+export function directDependenciesOf(
   nodeId: string,
-  allEdges: DepEdge[],
-  parentMap: Map<string, string>,
-): Set<string> {
-  const chain = new Set<string>();
-  const bound = parentMap.size + 1;
-  let current: string | undefined = nodeId;
-  for (let steps = 0; current !== undefined; steps++) {
-    if (steps >= bound) throw new Error("Parent map contains a loop");
-    chain.add(current);
-    current = parentMap.get(current);
+  deps: readonly DepEdge[],
+): string[] {
+  const direct = new Set<string>();
+  for (const { dependent, depends_on: dependsOn } of deps) {
+    if (dependent === nodeId) direct.add(dependsOn);
   }
-
-  const closure = new Set<string>();
-  for (const { dependent, depends_on: dependsOn } of allEdges) {
-    if (chain.has(dependent)) closure.add(dependsOn);
-  }
-  return closure;
+  return [...direct];
 }
 
-export function waitEdges(
-  nodeIds: readonly string[],
-  parentMap: Map<string, string>,
-): DepEdge[] {
-  const edges: DepEdge[] = [];
-  for (const child of nodeIds) {
-    const parent = parentMap.get(child);
-    if (parent !== undefined)
-      edges.push({ dependent: parent, depends_on: child });
-  }
-  return edges;
-}
-
-export function hasDependencyCycle(
-  nodeIds: readonly string[],
-  edges: DepEdge[],
-  parentMap: Map<string, string>,
-): boolean {
-  return detectCycle([
-    ...closureEdges(nodeIds, edges, parentMap),
-    ...waitEdges(nodeIds, parentMap),
-  ]);
-}
-
-export function closureEdges(
-  nodeIds: Iterable<string>,
-  allEdges: DepEdge[],
-  parentMap: Map<string, string>,
-): DepEdge[] {
-  const edges: DepEdge[] = [];
-  for (const dependent of nodeIds) {
-    for (const dependsOn of buildDependencyClosureOf(
-      dependent,
-      allEdges,
-      parentMap,
-    )) {
-      edges.push({ dependent, depends_on: dependsOn });
-    }
-  }
-  return edges;
+export function hasDependencyCycle(edges: DepEdge[]): boolean {
+  return detectCycle(edges);
 }

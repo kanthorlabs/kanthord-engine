@@ -84,10 +84,13 @@ components:
               type: array
               items:
                 type: string
-            required_node_format:
+            declared_works:
               type: array
               items:
                 type: string
+                enum:
+                  - implement
+                  - examine
             method:
               type: string
               enum:
@@ -117,7 +120,7 @@ components:
             - name
             - host
             - declared_node_states
-            - required_node_format
+            - declared_works
             - method
             - agent_names
             - resource_budget
@@ -134,10 +137,13 @@ components:
               type: array
               items:
                 type: string
-            required_node_format:
+            declared_works:
               type: array
               items:
                 type: string
+                enum:
+                  - implement
+                  - examine
             harness:
               type: string
               minLength: 1
@@ -159,7 +165,7 @@ components:
             - name
             - host
             - declared_node_states
-            - required_node_format
+            - declared_works
             - harness
             - resource_budget
           additionalProperties: false

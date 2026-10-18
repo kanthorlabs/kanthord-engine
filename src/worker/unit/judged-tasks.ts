@@ -1,10 +1,13 @@
+import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
 import { readPrivate, writePrivate } from "../../kernel/files.ts";
+import type { WorkspaceCheckout } from "./workspace.ts";
 
 const JUDGED_TASKS_FILE = "judged-tasks.json";
 const judgedTasksSchema = z.record(z.string(), z.string());
+const SINGLE_CHECKOUT = 1;
 
 export interface JudgedTask {
   readonly attempt: number;
@@ -12,12 +15,20 @@ export interface JudgedTask {
   readonly taskId: string;
 }
 
+export function headSetOf(checkouts: readonly WorkspaceCheckout[]): string {
+  assert.ok(checkouts.length >= SINGLE_CHECKOUT);
+  if (checkouts.length === SINGLE_CHECKOUT) return checkouts[0]!.head;
+  return checkouts
+    .map((checkout) => `${checkout.name}=${checkout.head}`)
+    .join(",");
+}
+
 function keyOf(task: JudgedTask): string {
   return `${task.attempt}/${task.revision}/${task.taskId}`;
 }
 
-function read(objectiveDirectory: string): Record<string, string> {
-  const path = join(objectiveDirectory, JUDGED_TASKS_FILE);
+function read(nodeDirectory: string): Record<string, string> {
+  const path = join(nodeDirectory, JUDGED_TASKS_FILE);
   if (!existsSync(path)) return {};
   const parsed = judgedTasksSchema.safeParse(
     JSON.parse(readPrivate(path) || "{}"),
@@ -26,20 +37,20 @@ function read(objectiveDirectory: string): Record<string, string> {
 }
 
 export function judgedAt(
-  objectiveDirectory: string,
+  nodeDirectory: string,
   task: JudgedTask,
 ): string | null {
-  return read(objectiveDirectory)[keyOf(task)] ?? null;
+  return read(nodeDirectory)[keyOf(task)] ?? null;
 }
 
 export function recordJudged(
-  objectiveDirectory: string,
+  nodeDirectory: string,
   task: JudgedTask,
-  commit: string,
+  headSet: string,
 ): void {
-  const judged = { ...read(objectiveDirectory), [keyOf(task)]: commit };
+  const judged = { ...read(nodeDirectory), [keyOf(task)]: headSet };
   writePrivate(
-    join(objectiveDirectory, JUDGED_TASKS_FILE),
+    join(nodeDirectory, JUDGED_TASKS_FILE),
     JSON.stringify(judged),
     true,
   );

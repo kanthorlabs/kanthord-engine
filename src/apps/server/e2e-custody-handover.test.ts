@@ -8,6 +8,7 @@ import {
   handoverPayloadSchema,
   type CredentialAnswer,
 } from "../../custody/contract.ts";
+import { Work } from "../../mission/contract.ts";
 import { httpClient } from "../../gateway/client.ts";
 import { writePrivate } from "../../kernel/files.ts";
 import {
@@ -32,14 +33,19 @@ import {
 } from "../../scheduler/contract.ts";
 import { workerOperations } from "../../worker/contract.ts";
 import { environment, kanthord, kanthordTerminal } from "./cli-support.ts";
-import { FAKE_SSH_IDENTITY, gatewayFixture } from "./test-support.ts";
+import {
+  FAKE_SSH_IDENTITY,
+  gatewayFixture,
+  COVERING_WORKER_BINDINGS,
+  enableCoveringAgents,
+} from "./test-support.ts";
 
 const SUCCESS = 0;
 const FAILURE = 1;
 const FIRST_REVISION = 1;
 const SINGLE_INSTANCE = 1;
 const SECOND_REVISION = 2;
-const FULL_BINDING_SET_VERSION = 3;
+const FULL_BINDING_SET_VERSION = 5;
 const THIRD_CREDENTIAL_REVISION = 3;
 const INVALID_REPORT_COUNT = 4;
 const STRING_TYPE = "string";
@@ -64,7 +70,7 @@ const CONFIGURATION = {
   agent_provider: "default",
   model_identifier: "claude-sonnet-4-5",
   reasoning_effort: "off",
-};
+} as const;
 const CONTENT = {
   name: "Recover accounts",
   requirement: "Recover accounts",
@@ -122,7 +128,7 @@ function cli(directory: string, env: NodeJS.ProcessEnv) {
     assert.equal(result.stdout, NO_OUTPUT);
     noSecrets(result.stderr);
   };
-  return { read, write, refuses };
+  return { read, write, refuses, env };
 }
 
 async function machine(
@@ -179,17 +185,11 @@ async function resources(c: ReturnType<typeof cli>) {
     },
     secret: {},
   });
-  const enabled = await c.write<{ revision: number }>(
-    ["agent", "enablement", "put", "swe@1"],
-    {
-      agent_providers: [
-        { name: "default", provider: PROVIDER, credential: NAME },
-      ],
-      default_configuration: CONFIGURATION,
-      fallback_configurations: [],
-    },
-  );
-  assert.equal(enabled.revision, FIRST_REVISION);
+  await enableCoveringAgents(c.env, {
+    platform: PROVIDER,
+    credential: NAME,
+    configuration: CONFIGURATION,
+  });
   const project = await c.read<{ id: string }>([
     "project",
     "create",
@@ -202,6 +202,7 @@ async function resources(c: ReturnType<typeof cli>) {
   }>(["project", "binding", "apply", project.id], {
     version: FIRST_REVISION,
     bindings: {
+      ...COVERING_WORKER_BINDINGS,
       repo: {
         kind: "repository",
         config: {
@@ -233,30 +234,17 @@ async function graph(
   bindingId: string,
 ): Promise<void> {
   const mission = await c.read<{ id: string }>(["mission", "get", projectId]);
-  const initiative = await c.write<Change>(
+  const implement = await c.write<Change>(
     ["mission", "node", "create", mission.id],
     {
-      filename: "initiative-1.md",
-      kind: "initiative",
-      content: CONTENT,
+      filename: "implement-1.md",
+      content: { ...CONTENT, work: Work.Implement, bindings: [bindingId] },
+      tasks: [],
       reason: "plan",
       expected_mission_version: FIRST_REVISION,
     },
   );
-  assert.ok(initiative.revisions[0]);
-  const objective = await c.write<Change>(
-    ["mission", "node", "create", mission.id],
-    {
-      filename: "objective-1.md",
-      kind: "objective",
-      content: { ...CONTENT, bindings: [bindingId] },
-      reason: "plan",
-      parent_id: initiative.revisions[0].node_id,
-      expected_parent_revision: FIRST_REVISION,
-      expected_mission_version: SECOND_REVISION,
-    },
-  );
-  assert.ok(objective.revisions[0]);
+  assert.ok(implement.revisions[0]);
 }
 
 async function setup(t: TestContext) {

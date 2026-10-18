@@ -37,6 +37,8 @@ import {
   validateText,
 } from "../agent/prompt-source.ts";
 import { RepositoryFileState } from "../repository/contract.ts";
+import { traitKeySchema } from "../kernel/trait.ts";
+import { isString } from "../kernel/values.ts";
 import {
   assertPinned,
   sshPinSchema,
@@ -66,17 +68,21 @@ import {
   WorkerField,
   WorkerPlacement,
   bindingEditSchema,
+  bindingSchema,
   bindingSetWriteInputSchema,
   projectOperations,
   repositoryConfigSchema,
   storageConfigSchema,
   workerConfigSchema,
+  workerConfigWriteSchema,
+  workerTraitsSchema,
   type ProjectBindings,
   type AgentDependentBinding,
   type BindingNaming,
   type BindingRevisionResult,
   type CreateMission,
   type LiveNodesPinning,
+  type UnmatchedClaims,
   type ValidateEntry,
   type CustodySuitability,
   type CredentialMetadataOf,
@@ -161,6 +167,52 @@ function refuseRepositoryAction(
       "The pull_request action requires a credential.",
     );
 }
+function unmatchedKey(pair: { node_id: string; claim: string }): string {
+  return JSON.stringify([pair.node_id, pair.claim]);
+}
+
+function refuseAddedUnmatched(
+  before: ReadonlySet<string>,
+  after: ReturnType<UnmatchedClaims>,
+): void {
+  const nodeIds = new Set(
+    after
+      .filter((pair) => !before.has(unmatchedKey(pair)))
+      .map(({ node_id }) => node_id),
+  );
+  if (nodeIds.size === EMPTY_LENGTH) return;
+  throw new OperationError(
+    HttpStatus.Conflict,
+    ProjectErrorCode.WorkerNodeUnmatched,
+    "The binding set leaves a node and claimable state pair that no worker binding covers.",
+    { node_ids: [...nodeIds].sort() },
+  );
+}
+
+function refuseInvalidTraits(name: string, traits: unknown): void {
+  if (traits === undefined) return;
+  if (!Array.isArray(traits))
+    throw new OperationError(
+      HttpStatus.BadRequest,
+      ProjectErrorCode.WorkerTraitsInvalid,
+      "Worker traits must be a list of unique trait keys.",
+      { binding: name, trait: null },
+    );
+  const seen = new Set<unknown>();
+  for (const trait of traits) {
+    if (traitKeySchema.safeParse(trait).success && !seen.has(trait)) {
+      seen.add(trait);
+      continue;
+    }
+    throw new OperationError(
+      HttpStatus.BadRequest,
+      ProjectErrorCode.WorkerTraitsInvalid,
+      "Worker traits must be a list of unique trait keys.",
+      { binding: name, trait: isString(trait) ? trait : null },
+    );
+  }
+  assert.ok(workerTraitsSchema.safeParse(traits).success);
+}
 const UTF8_ENCODING = "utf8";
 const CURSOR_ENCODING = "base64url";
 const PAGE_EXTRA = 1;
@@ -189,6 +241,30 @@ function requireBinding(tx: Transaction, projectId: string, bindingId: string) {
       "Binding not found.",
     );
   return binding;
+}
+
+function workerRowOf(
+  tx: Transaction,
+  row: StoredBinding,
+  projectName: string,
+): WorkerBindingRow {
+  const config = workerConfigSchema.parse(row.config);
+  return {
+    binding_id: row.id,
+    name: row.name,
+    project_name: projectName,
+    revision: row.revision,
+    worker_name: config.worker,
+    instance_count: config.instance_count,
+    placement: config.placement ?? WorkerPlacement.Worker,
+    generation:
+      readGeneration(tx, row.project_id, row.resource_identity) ??
+      NO_GENERATION,
+    resource_budget: config.resource_budget ?? null,
+    entries: config.entries ?? [],
+    traits: config.traits ?? [],
+    tombstone: row.removed_at !== null,
+  };
 }
 
 function requireWorkerBinding(
@@ -301,6 +377,7 @@ export interface Dependencies {
   hostHome?: string;
   createMission: CreateMission;
   liveNodesPinning: LiveNodesPinning;
+  unmatchedClaims: UnmatchedClaims;
   validateEntry: ValidateEntry;
   custodySuitability: CustodySuitability;
   repositoryConnector: RepositoryConnector;
@@ -322,6 +399,7 @@ export class ProjectService implements Service, ProjectBindings {
   private readonly hostHome?: string;
   private readonly createMission: CreateMission;
   private readonly liveNodesPinning: LiveNodesPinning;
+  private readonly unmatchedClaims: UnmatchedClaims;
   private readonly validateEntry: ValidateEntry;
   private readonly custodySuitability: CustodySuitability;
   private readonly repositoryConnector: RepositoryConnector;
@@ -344,6 +422,7 @@ export class ProjectService implements Service, ProjectBindings {
     this.hostHome = dependencies.hostHome;
     this.createMission = dependencies.createMission;
     this.liveNodesPinning = dependencies.liveNodesPinning;
+    this.unmatchedClaims = dependencies.unmatchedClaims;
     this.validateEntry = dependencies.validateEntry;
     this.custodySuitability = dependencies.custodySuitability;
     this.repositoryConnector = dependencies.repositoryConnector;
@@ -434,7 +513,7 @@ export class ProjectService implements Service, ProjectBindings {
               readCurrentBindingSet(tx, project.id),
               ([name, binding]) => [
                 name,
-                bindingEditSchema.parse({
+                bindingSchema.parse({
                   kind: kindOf(binding.resource_identity),
                   config: binding.config,
                 }),
@@ -773,8 +852,12 @@ export class ProjectService implements Service, ProjectBindings {
       assert.equal(submission.size, Object.keys(body.bindings).length);
       for (const [name, binding] of submission)
         this.validateBinding(tx, name, binding);
+      const before = new Set(
+        this.unmatchedClaims(tx, projectId).map(unmatchedKey),
+      );
       const result = writeBindingSet(tx, projectId, body.version, submission);
       this.endUnavailableRegistrations(tx, result.changes, Date.now());
+      refuseAddedUnmatched(before, this.unmatchedClaims(tx, projectId));
       const bindings = Object.fromEntries(
         Array.from(readCurrentBindingSet(tx, projectId), ([name, binding]) => [
           name,
@@ -954,7 +1037,7 @@ export class ProjectService implements Service, ProjectBindings {
   private validateWorker(
     tx: Transaction,
     name: string,
-    config: typeof workerConfigSchema._output,
+    config: typeof workerConfigWriteSchema._output,
   ): void {
     if (
       config.instance_count < INSTANCE_COUNT_MIN ||
@@ -965,6 +1048,7 @@ export class ProjectService implements Service, ProjectBindings {
         ProjectErrorCode.WorkerInstanceCountRange,
         "Worker instance count is out of range.",
       );
+    refuseInvalidTraits(name, config.traits);
     const agents = this.workerAgentsOf(config.worker);
     if (agents.length === EMPTY_LENGTH) {
       this.validateEntry(tx, config.worker, null);
@@ -1081,7 +1165,7 @@ export class ProjectService implements Service, ProjectBindings {
     );
     assert.ok(latest, "A retained binding must have a latest revision.");
     assert.ok(latest.revision >= binding.revision);
-    const current = bindingEditSchema.parse({
+    const current = bindingSchema.parse({
       kind: kindOf(latest.resource_identity),
       config: latest.config,
     });
@@ -1182,21 +1266,7 @@ export class ProjectService implements Service, ProjectBindings {
     if (!row || kindOf(row.resource_identity) !== BindingKind.Worker)
       return null;
     assert.equal(row.project_id, projectId);
-    const config = workerConfigSchema.parse(row.config);
-    return {
-      binding_id: row.id,
-      name: row.name,
-      project_name: requireProject(tx, projectId).name,
-      revision: row.revision,
-      worker_name: config.worker,
-      instance_count: config.instance_count,
-      placement: config.placement ?? WorkerPlacement.Worker,
-      generation:
-        readGeneration(tx, projectId, resourceIdentity) ?? NO_GENERATION,
-      resource_budget: config.resource_budget ?? null,
-      entries: config.entries ?? [],
-      tombstone: row.removed_at !== null,
-    };
+    return workerRowOf(tx, row, requireProject(tx, projectId).name);
   }
   workerBindingsOf(
     tx: Transaction,
@@ -1205,18 +1275,20 @@ export class ProjectService implements Service, ProjectBindings {
     WorkerBindingRow & { project_id: string; resource_identity: string }
   > {
     assert.ok(tx.database.isTransaction);
-    return readCurrentBindings(tx).flatMap((row) => {
+    const rows =
+      projectId === null
+        ? readCurrentBindings(tx)
+        : Array.from(readCurrentBindingSet(tx, projectId).values());
+    const projectNames = new Map<string, string>();
+    return rows.flatMap((row) => {
       if (kindOf(row.resource_identity) !== BindingKind.Worker) return [];
-      if (projectId !== null && row.project_id !== projectId) return [];
-      const binding = this.workerBindingOf(
-        tx,
-        row.project_id,
-        row.resource_identity,
-      );
-      assert.ok(binding);
+      const projectName =
+        projectNames.get(row.project_id) ??
+        requireProject(tx, row.project_id).name;
+      projectNames.set(row.project_id, projectName);
       return [
         {
-          ...binding,
+          ...workerRowOf(tx, row, projectName),
           project_id: row.project_id,
           resource_identity: row.resource_identity,
         },

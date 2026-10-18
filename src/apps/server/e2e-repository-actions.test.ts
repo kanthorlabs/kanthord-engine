@@ -13,6 +13,7 @@ import {
   Resolution,
   type Evidence,
   type Revision,
+  Work,
 } from "../../mission/contract.ts";
 import { type ExecutionRecord } from "../../scheduler/contract.ts";
 import {
@@ -128,31 +129,35 @@ async function setup(t: TestContext) {
     bindings.items.find((item) => item.name === name)!;
   const create = async (
     filename: string,
-    kind: string,
+    work: Work,
     names: string[],
-    parentId?: string,
+    dependentId?: string,
   ) => {
     const result = await write<{ revisions: Revision[] }>(
       ["mission", "node", "create", mission.id],
       {
         filename,
-        kind,
         content: {
           ...CONTENT,
+          work,
           bindings: names.map((name) => binding(name).id),
         },
+        tasks: [],
         reason: "plan",
         expected_mission_version: await missionVersion(),
-        ...(parentId
-          ? { parent_id: parentId, expected_parent_revision: FIRST_REVISION }
-          : {}),
       },
     );
-    return result.revisions[FIRST_INDEX]!.node_id;
+    const nodeId = result.revisions[FIRST_INDEX]!.node_id;
+    if (dependentId)
+      await write(["mission", "dependency", "add", dependentId, nodeId], {
+        reason: "plan",
+        expected_mission_version: await missionVersion(),
+      });
+    return nodeId;
   };
-  const I = await create("initiative-1.md", "initiative", []);
-  const P = await create("objective-p.md", "objective", [GATED], I);
-  const p = await pushNodeBranch(t, gatedBare.bare, P, "objective p\n");
+  const I = await create("examine-1.md", Work.Examine, []);
+  const P = await create("implement-p.md", Work.Implement, [GATED], I);
+  const p = await pushNodeBranch(t, gatedBare.bare, P, "implement p\n");
   const machine = await cliMachine(session, {
     masterKey: fixture.config.master_key,
     projectId: project.id,
@@ -295,8 +300,8 @@ test("E03 repository actions CLI journey", { timeout: TIMEOUT }, async (t) => {
     assert.equal(asset.address.commit, MERGED_COMMIT);
     assert.equal((await h.node(h.P)).state, NodeState.Completed);
   });
-  const Q = await h.create("objective-q.md", "objective", [MERGE], h.I);
-  const q = await pushNodeBranch(h.t, h.mergeBare.bare, Q, "objective q\n");
+  const Q = await h.create("implement-q.md", Work.Implement, [MERGE], h.I);
+  const q = await pushNodeBranch(h.t, h.mergeBare.bare, Q, "implement q\n");
   const e4 = await h.passingEvaluation(Q, h.merge.id, q);
   await t.test("E03.7 a merge push lands Q on main", async () => {
     const result = await h.request(e4);

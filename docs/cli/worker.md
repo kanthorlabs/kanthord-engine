@@ -130,6 +130,13 @@ Each item of `repositories` holds `{ binding_id, name, address, ssh_identity, st
 The worker application appends the working layer of each workspace. It reads the agent files whose switch is on and the project prompt when `project_prompt` is on.
 [Project](./project.md#binding-resource-and-complete-set-edits) rules the switches.
 
+The steps method of an `implement` node keeps its workspace in `workspaces/<node identity>/` of the state directory.
+Each repository binding of the pinned revision has one checkout in `workspaces/<node identity>/checkouts/<binding name>/`.
+With one repository binding, the agent works from that checkout.
+With two or more, the agent works from `checkouts/`, and each binding is one directory under it.
+The execution commits each checkout that holds a change and pushes the node branch of every checkout.
+It then submits one evidence with one `repository` asset for each binding in binding order.
+
 The four human reads follow [inspection operations](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/worker-service.impl.md#inspection-operations).
 Each is `unary`, has `mutation: false` and a default timeout of 30 s, and reads
 no table of another service. Every authenticated human has the
@@ -242,21 +249,22 @@ shared types, requiredness, defaults and validation. HTTP `200` returns
 one page of released worker summaries in ascending alphabetical order by exact name,
 under the shared [pagination rule](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/architecture.impl.md#pagination). Each item contains
 `name: WorkerName`, `host: "kanthord" | "external-harness"`,
-`declared_node_states: string[]` and `required_node_format: string[]`.
+`declared_node_states: string[]` and `declared_works: ("implement" | "examine")[]`.
+The Scheduler admits a node only when the declared works hold the work of the node.
 
 The catalog describes supplied static templates. It is not a
 runtime plugin store, and registration does not add entries. The declared workers
 and their capabilities are:
 
-| Worker          | Host                           | Method / agent      | Declared node states                         |
-| --------------- | ------------------------------ | ------------------- | -------------------------------------------- |
-| `coder@1`       | kanthord                       | steps / `swe@1`     | `Available`                                  |
-| `reviewer@1`    | kanthord                       | evaluation / `re@1` | `Waiting`, `External.Requested`              |
-| `claude-code@1` | external harness `claude-code` | Harness-owned       | `Available`, `Waiting`, `External.Requested` |
+| Worker          | Host                           | Method / agent      | Declared node states                         | Declared works         |
+| --------------- | ------------------------------ | ------------------- | -------------------------------------------- | ---------------------- |
+| `coder@1`       | kanthord                       | steps / `swe@1`     | `Available`                                  | `implement`, `examine` |
+| `reviewer@1`    | kanthord                       | evaluation / `re@1` | `Waiting`, `External.Requested`              | `implement`, `examine` |
+| `claude-code@1` | external harness `claude-code` | Harness-owned       | `Available`, `Waiting`, `External.Requested` | `implement`, `examine` |
 
 All three declarations are in the current catalog; external-harness integration
 remains later work. `list` returns only the released native workers `coder@1`
-and `reviewer@1`. `get` and binding validation accept all three declarations. All three require a name, a requirement, a criterion, verifications and bindings. No worker named `tdd@1`
+and `reviewer@1`. `get` and binding validation accept all three declarations. No worker named `tdd@1`
 is promised by this specification.
 
 ### `get <worker-name>`
@@ -291,12 +299,12 @@ HTTP `200` returns the summary fields plus:
   judgement, the evaluation judgement and the review reply. A second invalid
   judgement stops the execution with `judgement_invalid`, and a second invalid
   review reply ends the review of that task.
-  An evaluation judgement of an initiative may carry `proposals`: one
-  fix-objective proposal for each defect inside a completed objective. Each
-  proposal holds `objective_id`, `name`, `requirement`, `criterion` and one
-  `task`. When `proposals` is not empty, the reviewer submits the result
+  An evaluation judgement of an `examine` node carries `proposals`: one
+  fix-node proposal for each defect inside a completed `implement` dependency.
+  Each proposal holds `dependency_id`, `name`, `requirement`, `criterion` and
+  one `task`. When `proposals` is not empty, the reviewer submits the result
   `undetermined` with the proposals. The reviewer drops `proposals` for an
-  objective. See `mission proposal approve` in the [Mission CLI](mission.md).
+  `implement` node. See `mission proposal approve` in the [Mission CLI](mission.md).
   A steps execution reads the assessment that caused the latest rework of its
   attempt. When the attempt holds no such assessment, the execution reads the
   assessment that the cleared outcome names. The task judgement at the start
@@ -452,7 +460,12 @@ that calls a tool. Tools are reached through the MCP server.
 
 `worker.action.request` is an API-only `client` mutation at `POST /api/worker/execution/:execution_id/action/request`, with `unary` lifetime, no body and a 900 s timeout. It requires a live execution and the admission of the action performer. The evaluation method of `reviewer@1` calls it, and it answers 200 with the action result below. It calls the action performer and not the MCP server.
 
-`worker.execution.change_request.get` is an API-only `client` read at `GET /api/worker/execution/:execution_id/change-request`, with `unary` lifetime, no body and a 60 s timeout. It requires a live execution. The steps method of `coder@1` calls it at the start of an attempt after an unblock when the cleared outcome has the closing event `external-failed`. It reads the external actions of the cleared attempt. For each `pull_request` action with the resolution `other-end`, it calls `intake.action.read` with the method `github-pull-request-change-request-get` and the request evidence of that action. It answers 200 with `{ items }`. Each item holds `evidence_id`, `head_commit` and `change_requests`. Each change request holds `review_id`, `reviewer`, `body`, `submitted_at`, `commit_id` and `comments`, and each comment holds `path`, `line` and `body`. A claim of attempt 1 answers `{ items: [] }`. A platform failure answers 502 with the code `repository.platform.github.<class>`.
+`worker.execution.change_request.get` is an API-only `client` read at `GET /api/worker/execution/:execution_id/change-request`, with `unary` lifetime, no body and a 60 s timeout. It requires a live execution. The steps method of `coder@1` calls it at the start of an attempt after an unblock when the cleared outcome has the closing event `external-failed`. It reads the external actions of the cleared attempt. For each `pull_request` action with the resolution `other-end`, it calls `intake.action.read` with the method `github-pull-request-change-request-get` and the request evidence of that action. It answers 200 with `{ items }`. Each item holds `evidence_id`, `binding_id`, `head_commit` and `change_requests`. `binding_id` names the repository binding of the `pull_request` action. Each change request holds `review_id`, `reviewer`, `body`, `submitted_at`, `commit_id` and `comments`, and each comment holds `path`, `line` and `body`. A claim of attempt 1 answers `{ items: [] }`. A platform failure answers 502 with the code `repository.platform.github.<class>`.
+
+The steps method writes the change requests into one requested-changes text that stops at 4 KiB.
+Each change request has the line `Reviewer <reviewer> requests changes on <binding name> at commit <commit>: <body>`.
+The binding name is the name of the repository binding that `binding_id` of the item names.
+When the pinned revision names no such binding, the line names `binding_id`.
 
 ### Action performer results
 
@@ -554,7 +567,7 @@ Every remote command can also answer the shared codes of [other.md](other.md#err
 | local | `worker.stop.deregistration_indeterminate`                | The deregistration at a stop answers an indeterminate result.                                                                                                                                                                     | serve worker                                                                                                                  |
 | local | `worker.handover.decryption_failed`                       | The handover envelope does not open under the handover key of the client_secret.                                                                                                                                                  | serve worker                                                                                                                  |
 | local | `worker.evidence_upload.path_refused`                     | The path of `evidence-upload` is absolute, leaves the workspace, is a symbolic link, is not a regular file or is replaced during the open; `details.reason` is `outside_workspace`, `symbolic_link`, `not_regular` or `replaced`. | serve worker                                                                                                                  |
-| local | `worker.evidence_upload.transfer_failed`                  | The PUT to the presigned destination fails or answers a status outside 2xx.                                                                                                                                                       | serve worker                                                                                                                  |
+| local | `worker.evidence_upload.transfer_failed`                  | The file of `evidence-upload` is above the 5 GiB single-object limit. A failed PUT gives no answer of its own: the helper calls `mission.evidence.asset.complete`, whose check records the storage binding as failed.             | serve worker                                                                                                                  |
 | 409   | `worker.execution.no_native_agent`                        | The setup read names an execution of an externally hosted worker.                                                                                                                                                                 | worker.execution.setup.get (API only)                                                                                         |
 | 409   | `worker.execution.credential_not_pinned`                  | The execution pins no revision of the credential name of its effective configuration.                                                                                                                                             | worker.execution.setup.get (API only)                                                                                         |
 | local | `cli.worker.instance.list.invalid_project_id`             | The `--project` value is not a canonical `project_<ulid>` identity.                                                                                                                                                               | instance list                                                                                                                 |

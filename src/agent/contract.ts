@@ -111,7 +111,7 @@ export const PromptTemplate = {
   TaskRevision: "task-revision",
   CriterionRevision: "criterion-revision",
   Evaluation: "evaluation",
-  Report: "report",
+  Examine: "examine",
   Repair: "repair",
   Conflict: "conflict",
 } as const;

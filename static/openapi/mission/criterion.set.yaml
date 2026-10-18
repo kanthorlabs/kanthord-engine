@@ -228,12 +228,26 @@ components:
                     type: array
                     items:
                       type: string
+                  work:
+                    type: string
+                    enum:
+                      - implement
+                      - examine
+                  requires:
+                    default: []
+                    type: array
+                    items:
+                      type: string
+                      maxLength: 64
+                      pattern: ^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)*$
                 required:
                   - name
                   - requirement
                   - criterion
                   - verifications
                   - bindings
+                  - work
+                  - requires
                 additionalProperties: false
               tasks:
                 type: array
@@ -244,8 +258,8 @@ components:
                       type: string
                       minLength: 31
                       maxLength: 31
-                      pattern: ^node_[0-7][0-9A-HJKMNP-TV-Z]{25}$
-                      description: node_ followed by a canonical 26-character uppercase ULID.
+                      pattern: ^task_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                      description: task_ followed by a canonical 26-character uppercase ULID.
                     filename:
                       type: string
                       pattern: ^[a-z][a-z0-9_-]*\.md$
@@ -268,6 +282,7 @@ components:
                             type: string
                             minLength: 1
                         bindings:
+                          maxItems: 0
                           type: array
                           items:
                             type: string
@@ -292,8 +307,6 @@ components:
                       - import
                       - node.create
                       - node.update
-                      - node.move
-                      - node.retire
                       - node.rebind
                       - criterion.set
                       - unblock
@@ -316,8 +329,8 @@ components:
                           type: string
                           minLength: 31
                           maxLength: 31
-                          pattern: ^node_[0-7][0-9A-HJKMNP-TV-Z]{25}$
-                          description: node_ followed by a canonical 26-character uppercase ULID.
+                          pattern: ^task_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                          description: task_ followed by a canonical 26-character uppercase ULID.
                         change:
                           type: string
                           enum:
@@ -354,6 +367,7 @@ components:
               - actor
               - created_at
               - content
+              - tasks
               - change
               - pinned_by_attempts
             additionalProperties: false
@@ -368,99 +382,45 @@ components:
         added_edges:
           type: array
           items:
-            oneOf:
-              - type: object
-                properties:
-                  kind:
-                    type: string
-                    const: containment
-                  parent_id:
-                    type: string
-                    minLength: 31
-                    maxLength: 31
-                    pattern: ^node_[0-7][0-9A-HJKMNP-TV-Z]{25}$
-                    description: node_ followed by a canonical 26-character uppercase ULID.
-                  child_id:
-                    type: string
-                    minLength: 31
-                    maxLength: 31
-                    pattern: ^node_[0-7][0-9A-HJKMNP-TV-Z]{25}$
-                    description: node_ followed by a canonical 26-character uppercase ULID.
-                required:
-                  - kind
-                  - parent_id
-                  - child_id
-                additionalProperties: false
-              - type: object
-                properties:
-                  kind:
-                    type: string
-                    const: dependency
-                  dependent_id:
-                    type: string
-                    minLength: 31
-                    maxLength: 31
-                    pattern: ^node_[0-7][0-9A-HJKMNP-TV-Z]{25}$
-                    description: node_ followed by a canonical 26-character uppercase ULID.
-                  depends_on_id:
-                    type: string
-                    minLength: 31
-                    maxLength: 31
-                    pattern: ^node_[0-7][0-9A-HJKMNP-TV-Z]{25}$
-                    description: node_ followed by a canonical 26-character uppercase ULID.
-                required:
-                  - kind
-                  - dependent_id
-                  - depends_on_id
-                additionalProperties: false
+            type: object
+            properties:
+              dependent_id:
+                type: string
+                minLength: 31
+                maxLength: 31
+                pattern: ^node_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                description: node_ followed by a canonical 26-character uppercase ULID.
+              depends_on_id:
+                type: string
+                minLength: 31
+                maxLength: 31
+                pattern: ^node_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                description: node_ followed by a canonical 26-character uppercase ULID.
+            required:
+              - dependent_id
+              - depends_on_id
+            additionalProperties: false
         removed_edges:
           type: array
           items:
-            oneOf:
-              - type: object
-                properties:
-                  kind:
-                    type: string
-                    const: containment
-                  parent_id:
-                    type: string
-                    minLength: 31
-                    maxLength: 31
-                    pattern: ^node_[0-7][0-9A-HJKMNP-TV-Z]{25}$
-                    description: node_ followed by a canonical 26-character uppercase ULID.
-                  child_id:
-                    type: string
-                    minLength: 31
-                    maxLength: 31
-                    pattern: ^node_[0-7][0-9A-HJKMNP-TV-Z]{25}$
-                    description: node_ followed by a canonical 26-character uppercase ULID.
-                required:
-                  - kind
-                  - parent_id
-                  - child_id
-                additionalProperties: false
-              - type: object
-                properties:
-                  kind:
-                    type: string
-                    const: dependency
-                  dependent_id:
-                    type: string
-                    minLength: 31
-                    maxLength: 31
-                    pattern: ^node_[0-7][0-9A-HJKMNP-TV-Z]{25}$
-                    description: node_ followed by a canonical 26-character uppercase ULID.
-                  depends_on_id:
-                    type: string
-                    minLength: 31
-                    maxLength: 31
-                    pattern: ^node_[0-7][0-9A-HJKMNP-TV-Z]{25}$
-                    description: node_ followed by a canonical 26-character uppercase ULID.
-                required:
-                  - kind
-                  - dependent_id
-                  - depends_on_id
-                additionalProperties: false
+            type: object
+            properties:
+              dependent_id:
+                type: string
+                minLength: 31
+                maxLength: 31
+                pattern: ^node_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                description: node_ followed by a canonical 26-character uppercase ULID.
+              depends_on_id:
+                type: string
+                minLength: 31
+                maxLength: 31
+                pattern: ^node_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                description: node_ followed by a canonical 26-character uppercase ULID.
+            required:
+              - dependent_id
+              - depends_on_id
+            additionalProperties: false
         open_attempts_unchanged:
           type: array
           items:

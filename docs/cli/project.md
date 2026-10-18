@@ -132,7 +132,7 @@ results. The current [Gateway replay implementation](../../src/gateway/idempoten
 is in memory and bounded by its configured TTL; restart loses it. The shared
 [same-key retry rules](./other.md#idempotency-and-retries) apply, but that page's
 SQLite implementation note predates the in-memory implementation.
-This specification promises no exactly-once behavior across restart. A project name is the natural key of project creation: a retry after a restart that names an existing project returns 409 with `project.name.conflict`, and the CLI prints the code and the HTTP status, not the holder identity. A rename targets a project ID and commits in one transaction; the last write wins under the unique name. A retry after a restart checks the name holder again. A binding-set edit has a version precondition,
+This specification promises no exactly-once behavior across restart. A project name is the natural key of project creation: a retry after a restart that names an existing project returns 409 with `project.name.conflict`, and the CLI prints the code, the HTTP status and the `details` line with the holder identity. A rename targets a project ID and commits in one transaction; the last write wins under the unique name. A retry after a restart checks the name holder again. A binding-set edit has a version precondition,
 but a retry after a committed edit and restart can encounter a stale version
 instead of replaying the old answer.
 
@@ -193,7 +193,7 @@ Inputs:
 Creation allocates a project identity and an empty binding set at version `1`.
 The server returns that version. A mission belongs intrinsically to its project; it is
 not a binding. Creation calls the Mission collaboration `createMission` in the same transaction. The mission starts empty at mission version 1. No operation creates or deletes a mission.
-A project name is unique on the server and is the natural key of creation. Creation or rename to a name that another project holds returns 409 with code `project.name.conflict` and the holder identity in `error.details`. A retry of creation after a restart returns 409 when the name exists, and the CLI prints the code and the HTTP status. Rename commits in one transaction; the last write wins under the unique name. Rename keeps the same project identity and bindings.
+A project name is unique on the server and is the natural key of creation. Creation or rename to a name that another project holds returns 409 with code `project.name.conflict` and the holder identity in `error.details`. A retry of creation after a restart returns 409 when the name exists, and the CLI prints the code, the HTTP status and the `details` line with the holder identity. Rename commits in one transaction; the last write wins under the unique name. Rename keeps the same project identity and bindings.
 
 A paused project admits no claim, under the [project pause](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/project-service.md#project-pause).
 A new project is active. `pause` sets `paused_at` to the time of the pause. `resume` sets it to `null` and wakes the waiting work pulls of the project.
@@ -300,6 +300,7 @@ This example uses the proposed kind-specific fields below:
       "config": {
         "worker": "coder@1",
         "instance_count": 1,
+        "traits": ["platform.linux"],
         "resource_budget": { "turns": 50, "wall_time_ms": 1800000 },
         "entries": [{ "agent": "swe@1", "reasoning_effort": "high" }]
       }
@@ -373,6 +374,7 @@ A worker binding's `config` adds:
   `reviewer@1`; examples involving `tdd@1` do not make that worker available.
 - `instance_count`: **required**, integer from 0 to 64; no default. The value 0 makes the binding unavailable. An invalid value refuses the write with `project.bindings.worker.instance_count_range`.
 - `placement`: **optional** for a native worker, one of `server`, `worker`. Absence means `worker`. An external-harness worker forbids this field with `project.bindings.worker.field_forbidden`. An edit of an existing binding cannot change the effective placement and is refused with `project.bindings.worker.placement_changed`. The server stores the field as written.
+- `traits`: **optional** for every worker, a list of unique trait keys. Absence reads as `[]`. Each key matches `^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)*$` and holds at most 64 bytes. A nonlist value, a repeated key or a malformed key refuses the write with `project.bindings.worker.traits_invalid` and `details: { binding, trait }`. `trait` is `null` for a nonlist value or a nontext item. A change of `traits` creates the next revision of the binding.
 - `resource_budget`: **optional** for a native worker, `{ turns, wall_time_ms }`.
   Both fields are required positive safe integers. Absence uses the template
   budget; presence overrides it. [Stop and budget](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/worker-service.impl.md#stop-and-budget)
@@ -415,6 +417,12 @@ The Project Service holds entries and asks the Worker Service for effective
 configuration; it resolves none itself. A later disablement refuses resolution
 and leaves the worker binding in place.
 Two bindings of one worker can have equal configuration and independent counts.
+
+The [Scheduler match](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/scheduler-service.md#match) compares the traits of each worker binding with the requires list of each node.
+A binding-set write reads the unmatched pairs of the project before and after its change, in its transaction.
+A pair that the after read holds and the before read lacks refuses the write with `409 project.bindings.worker.node_unmatched` and `details: { node_ids }`.
+The refusal writes no row. An unmatched pair that exists before the write refuses no write.
+Configure the worker bindings of a project before the first import, because a node write also refuses an unmatched pair.
 
 ### Storage configuration
 
@@ -668,6 +676,8 @@ Every remote command can also answer the shared codes of [other.md](other.md#err
 | 400   | `project.bindings.worker.instance_count_range`             | The instance count is outside the worker limits.                                                                                                                                                               | binding apply                                                                                                                                         |
 | 409   | `project.bindings.worker.placement_changed`                | An edit changes the placement of a binding.                                                                                                                                                                    | binding apply                                                                                                                                         |
 | 409   | `project.bindings.worker.resource_changed`                 | An edit changes the worker resource of a binding.                                                                                                                                                              | binding apply                                                                                                                                         |
+| 400   | `project.bindings.worker.traits_invalid`                   | A worker `traits` value is no list, repeats a key or holds a malformed key; details `{ binding, trait }`.                                                                                                      | binding apply                                                                                                                                         |
+| 409   | `project.bindings.worker.node_unmatched`                   | The write adds a pair of a node and a claimable state that no current worker binding covers; details `{ node_ids }`.                                                                                           | binding apply                                                                                                                                         |
 | 409   | `credential.credential.archived`                           | The credential of the binding is archived.                                                                                                                                                                     | binding verify, binding check                                                                                                                         |
 | 404   | `credential.credential.not_found`                          | The credential of the binding has no live revision, or it is not a credential of the Repository component.                                                                                                     | binding verify, binding check                                                                                                                         |
 | 400   | `credential.check.unsupported`                             | The platform of the credential has `verifiable: false`.                                                                                                                                                        | binding verify, binding check                                                                                                                         |

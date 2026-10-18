@@ -1,10 +1,10 @@
 # Generated from the operation registry by kanthord gateway openapi.
 pathItem:
   get:
-    operationId: mission.execution.objective.outcome.list
+    operationId: mission.execution.dependency.outcome.list
     tags:
       - mission
-    description: List current outcomes of current objectives.
+    description: List the current outcomes of the direct dependencies of an examine node.
     x-access-policy: client
     x-timeout-ms: 30000
     x-mutation: false
@@ -16,27 +16,27 @@ pathItem:
         in: path
         required: true
         schema:
-          $ref: "#/components/schemas/mission.execution.objective.outcome.list.Input/prop\
-            erties/params/properties/execution_id"
+          $ref: "#/components/schemas/mission.execution.dependency.outcome.list.Input/pro\
+            perties/params/properties/execution_id"
       - name: limit
         in: query
         required: false
         schema:
-          $ref: "#/components/schemas/mission.execution.objective.outcome.list.Input/prop\
-            erties/query/properties/limit"
+          $ref: "#/components/schemas/mission.execution.dependency.outcome.list.Input/pro\
+            perties/query/properties/limit"
       - name: cursor
         in: query
         required: false
         schema:
-          $ref: "#/components/schemas/mission.execution.objective.outcome.list.Input/prop\
-            erties/query/properties/cursor"
+          $ref: "#/components/schemas/mission.execution.dependency.outcome.list.Input/pro\
+            perties/query/properties/cursor"
     responses:
       "200":
         description: Completed result
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/mission.execution.objective.outcome.list.Output"
+              $ref: "#/components/schemas/mission.execution.dependency.outcome.list.Output"
       "400":
         $ref: ../shared/components.yaml#/components/responses/Error
       "401":
@@ -59,7 +59,7 @@ pathItem:
         $ref: ../shared/components.yaml#/components/responses/Error
 components:
   schemas:
-    mission.execution.objective.outcome.list.Input:
+    mission.execution.dependency.outcome.list.Input:
       type: object
       properties:
         params:
@@ -92,7 +92,7 @@ components:
         - query
         - body
       additionalProperties: false
-    mission.execution.objective.outcome.list.Output:
+    mission.execution.dependency.outcome.list.Output:
       type: object
       properties:
         items:

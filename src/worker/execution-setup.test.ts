@@ -28,6 +28,7 @@ import {
 } from "./test-support.ts";
 import { WorkerErrorCode } from "./contract.ts";
 import { SHIPPED_TEMPLATES } from "../agent/prompt-templates.ts";
+import { ExecutionWork } from "./contract.ts";
 
 const SSH_CREDENTIAL = "kanthorlabs-ssh";
 const SYSTEM_TEXT = "system layer text";
@@ -125,6 +126,7 @@ test("setup answers the system and agent prompt after its single snapshot and su
       metadata: null,
     }),
     repositoryBindingIdsOf: () => [],
+    workOf: () => ExecutionWork.Implement,
     repositoryPolicyOf: () => null,
     credentialMetadata: () => null,
     schedulerClaims: { agentSelectionsOf: () => [] },
@@ -202,6 +204,7 @@ test("setup answers the system and agent prompt after its single snapshot and su
     {
       ...dependencies,
       repositoryBindingIdsOf: () => [bindingId],
+      workOf: () => ExecutionWork.Implement,
       repositoryPolicyOf: () => ({
         binding_id: bindingId,
         name: "repo",
@@ -278,6 +281,7 @@ test("setup answers one entry per agent of a two-agent worker with its own promp
         metadata: null,
       }),
       repositoryBindingIdsOf: () => [],
+      workOf: () => ExecutionWork.Implement,
       repositoryPolicyOf: () => null,
       credentialMetadata: () => null,
       schedulerClaims: { agentSelectionsOf: () => [] },

@@ -20,6 +20,7 @@ import {
   NodeState,
   type Evidence,
   type Revision,
+  Work,
 } from "../../mission/contract.ts";
 import { type ExecutionRecord } from "../../scheduler/contract.ts";
 import { ActionResultKind, workerOperations } from "../../worker/contract.ts";
@@ -143,24 +144,28 @@ async function setup(t: TestContext) {
   ]);
   const binding = (name: string) =>
     bindings.items.find((item) => item.name === name)!;
-  const create = async (filename: string, parentId?: string) => {
+  const create = async (filename: string, dependentId?: string) => {
     const result = await write<{ revisions: Revision[] }>(
       ["mission", "node", "create", mission.id],
       {
         filename,
-        kind: parentId ? "objective" : "initiative",
         content: {
           ...CONTENT,
-          bindings: parentId ? [binding(GATED).id] : [],
+          work: dependentId ? Work.Implement : Work.Examine,
+          bindings: dependentId ? [binding(GATED).id] : [],
         },
+        tasks: [],
         reason: "plan",
         expected_mission_version: await missionVersion(),
-        ...(parentId
-          ? { parent_id: parentId, expected_parent_revision: FIRST_REVISION }
-          : {}),
       },
     );
-    return result.revisions[FIRST_INDEX]!.node_id;
+    const nodeId = result.revisions[FIRST_INDEX]!.node_id;
+    if (dependentId)
+      await write(["mission", "dependency", "add", dependentId, nodeId], {
+        reason: "plan",
+        expected_mission_version: await missionVersion(),
+      });
+    return nodeId;
   };
   const machine = await cliMachine(session, {
     masterKey: fixture.config.master_key,
@@ -172,8 +177,8 @@ async function setup(t: TestContext) {
     fixture.endpoint,
     machine.token,
   );
-  const requested = async (filename: string, parentId: string) => {
-    const nodeId = await create(filename, parentId);
+  const requested = async (filename: string, dependentId: string) => {
+    const nodeId = await create(filename, dependentId);
     const head = await pushNodeBranch(t, gatedBare.bare, nodeId, filename);
     const x2: ExecutionRecord = await passingEvaluation(session, machine, {
       nodeId,
@@ -194,9 +199,9 @@ async function setup(t: TestContext) {
     );
     return nodeId;
   };
-  const I = await create("initiative-1.md");
-  const P = await requested("objective-p.md", I);
-  const P2 = await requested("objective-p2.md", I);
+  const I = await create("examine-1.md");
+  const P = await requested("implement-p.md", I);
+  const P2 = await requested("implement-p2.md", I);
   const hook = join(temporary(t), "hook.json");
   writePrivate(
     hook,

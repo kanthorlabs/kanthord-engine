@@ -16,7 +16,7 @@ import {
   MISSION_SERVICE_NAME,
   missionOperations,
   ActorKind,
-  NodeKind,
+  Work,
   NodeState,
   RevisionWrite,
   type HumanAct,
@@ -27,11 +27,13 @@ import {
   type PlatformAddress,
 } from "./contract.ts";
 import {
+  insertDependency,
   insertMission,
   insertNode,
   insertRevision,
   readNode,
   setNodeState,
+  workOf,
 } from "./store.ts";
 import { missionMigrations } from "./migrations.ts";
 import { MissionService, type Dependencies } from "./service.ts";
@@ -49,6 +51,20 @@ const TEXT_MAX_BYTES = 32768;
 const FIXTURE_TIME = 100;
 const FIRST_REVISION = 1;
 const UNEXPECTED_COLLABORATION = "unexpected collaboration call";
+
+export function databaseSnapshot(store: Store): Record<string, unknown[]> {
+  const tables = store.database
+    .prepare(
+      "SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name",
+    )
+    .all() as { name: string }[];
+  return Object.fromEntries(
+    tables.map(({ name }) => [
+      name,
+      store.database.prepare(`SELECT * FROM "${name}" ORDER BY rowid`).all(),
+    ]),
+  );
+}
 
 export function unexpectedCollaboration(): never {
   throw new Error(UNEXPECTED_COLLABORATION);
@@ -130,27 +146,41 @@ export function evidenceHarness(t: TestContext, identity: CallerIdentity) {
     insertNode(tx, {
       id: nodeId,
       mission_id: h.mission_id,
-      kind: NodeKind.Objective,
-      filename: "objective.md",
-      parent_id: h.node_id,
+      filename: "implement.md",
       created_at: FIXTURE_TIME,
     });
     const revision = getRevision(tx, h.node_id, FIRST_REVISION);
     insertRevision(tx, {
       ...revision,
       node_id: nodeId,
-      filename: "objective.md",
-      content: { ...revision.content, bindings: [repositoryId, storageId] },
+      filename: "implement.md",
+      content: {
+        ...revision.content,
+        work: Work.Implement,
+        bindings: [repositoryId, storageId],
+      },
       tasks: [],
     });
+    insertDependency(tx, h.mission_id, h.node_id, nodeId);
     openAttempt(tx, nodeId, FIRST_REVISION, h.executionActor, FIXTURE_TIME);
     setNodeState(tx, nodeId, NodeState.Executing);
   });
   h.claim.nodeId = nodeId;
   const node = () => h.store.transaction((tx) => readNode(tx, nodeId)!);
-  assert.equal(node().kind, NodeKind.Objective);
+  assert.equal(
+    h.store.transaction((tx) => workOf(tx, nodeId)),
+    Work.Implement,
+  );
   assert.equal(node().attempt, h.claim.attempt);
-  return { ...h, node_id: nodeId, node, repositoryId, storageId, storage };
+  return {
+    ...h,
+    examine_id: h.node_id,
+    node_id: nodeId,
+    node,
+    repositoryId,
+    storageId,
+    storage,
+  };
 }
 
 export function controlHarness(
@@ -167,15 +197,13 @@ export function controlHarness(
     insertNode(tx, {
       id: nodeId,
       mission_id: missionId,
-      kind: NodeKind.Initiative,
-      filename: "initiative.md",
-      parent_id: null,
+      filename: "examine.md",
       created_at: FIXTURE_TIME,
     });
     insertRevision(tx, {
       node_id: nodeId,
       revision: FIRST_REVISION,
-      filename: "initiative.md",
+      filename: "examine.md",
       reason: "plan",
       actor,
       created_at: FIXTURE_TIME,
@@ -185,7 +213,10 @@ export function controlHarness(
         criterion: "Criterion",
         verifications: ["true"],
         bindings: [],
+        work: Work.Examine,
+        requires: [],
       },
+      tasks: [],
       change: {
         write: RevisionWrite.NodeCreate,
         previous_revision: null,
@@ -283,6 +314,7 @@ export function missionHarness(
         return null;
       },
     },
+    schedulerMatch: { unmatchedClaims: () => [] },
     wakeup: { wake: (...args) => record("wakeup.wake", args) },
     executionAttribution: {
       of: (...args) => {
@@ -367,7 +399,7 @@ export function authorizationHarness(t: TestContext, identity: CallerIdentity) {
         result,
         rationale: "Reviewed",
         evidence_ids: "[]",
-        child_outcome_ids: "[]",
+        dependency_outcome_ids: "[]",
         tested_input: canonicalJSON({
           kind: AssetKind.Repository,
           binding_id: h.repositoryId,
@@ -505,7 +537,7 @@ export async function externalRequestHarness(
     body: {
       ...h.context,
       evidence_ids: [evidence.evidence.id],
-      child_outcome_ids: [],
+      dependency_outcome_ids: [],
       result: AssessmentResult.Success,
       rationale: "Passed",
       tested_input: testedInput,

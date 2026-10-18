@@ -8,7 +8,6 @@ import {
   ActorService,
   AssessmentResult,
   AssetKind,
-  NodeKind,
 } from "./contract.ts";
 import { insertMission, insertNode, readNode } from "./store.ts";
 import { missionHarness } from "./test-support.ts";
@@ -34,6 +33,8 @@ import {
   readRequests,
   readReleaseEvidence,
   readLandedCommitEvidence,
+  insertUploadFailure,
+  failedBindingsOf,
   type AssessmentRow,
   type EvidenceRow,
   type AssetRow,
@@ -61,9 +62,7 @@ function fixture(t: TestContext) {
     insertNode(tx, {
       id: nodeId,
       mission_id: id,
-      kind: NodeKind.Objective,
-      filename: "objective.md",
-      parent_id: null,
+      filename: "implement.md",
       created_at: NOW,
     });
     return id;
@@ -77,7 +76,7 @@ function fixture(t: TestContext) {
     result: AssessmentResult.Undetermined,
     rationale: RATIONALE,
     evidence_ids: EMPTY_SET,
-    child_outcome_ids: EMPTY_SET,
+    dependency_outcome_ids: EMPTY_SET,
     tested_input: null,
     execution_id: null,
     actor: canonicalJSON(ACTOR),
@@ -216,7 +215,7 @@ test("JSON sets canonicalize order, reject duplicates and preserve sequence on r
     assert.throws(() =>
       insertAssessment(tx, {
         ...h.assessment(),
-        child_outcome_ids: '["a","a"]',
+        dependency_outcome_ids: '["a","a"]',
       }),
     );
     assert.equal(insertAssessment(tx, h.assessment()).sequence, SECOND_ATTEMPT);
@@ -320,4 +319,33 @@ test("mission harness parses operation contracts and records the one caller tran
     }),
   );
   assert.equal(h.commits(), FIRST_ATTEMPT);
+});
+
+test("an upload failure records each binding once for its attempt", (t) => {
+  const h = fixture(t);
+  const primary = createIdentity("binding");
+  const secondary = createIdentity("binding");
+  const failure = (attempt: number, bindingId: string, failedAt: number) => ({
+    node_id: h.node_id,
+    attempt,
+    storage_binding_id: bindingId,
+    asset_id: createIdentity("evidence_asset"),
+    failed_at: failedAt,
+  });
+  h.store.transaction((tx) => {
+    insertUploadFailure(tx, failure(FIRST_ATTEMPT, secondary, LATER));
+    insertUploadFailure(tx, failure(FIRST_ATTEMPT, primary, NOW));
+    insertUploadFailure(tx, failure(FIRST_ATTEMPT, primary, LATER));
+    insertUploadFailure(tx, failure(SECOND_ATTEMPT, secondary, NOW));
+  });
+  h.store.transaction((tx) => {
+    assert.deepEqual(failedBindingsOf(tx, h.node_id, FIRST_ATTEMPT), [
+      primary,
+      secondary,
+    ]);
+    assert.deepEqual(failedBindingsOf(tx, h.node_id, SECOND_ATTEMPT), [
+      secondary,
+    ]);
+    assert.deepEqual(failedBindingsOf(tx, h.node_id, THIRD_ATTEMPT), []);
+  });
 });

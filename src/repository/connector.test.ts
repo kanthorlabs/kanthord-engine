@@ -699,8 +699,17 @@ test("foldBranchPush folds a landing against base_branch_pushed", () => {
     foldBranchPush(false, commit, ExpectedEndState.BaseBranchPushed),
     { end_state: CheckEndState.Other, landed_commits: [] },
   );
-  assert.throws(() =>
+});
+
+test("the check folds that address to pull_request_merged with the landed commit", () => {
+  const commit = "a".repeat(40);
+  assert.deepEqual(
     foldBranchPush(true, commit, ExpectedEndState.PullRequestMerged),
+    { end_state: CheckEndState.Expected, landed_commits: [commit] },
+  );
+  assert.deepEqual(
+    foldBranchPush(false, commit, ExpectedEndState.PullRequestMerged),
+    { end_state: CheckEndState.Other, landed_commits: [] },
   );
 });
 

@@ -22,6 +22,7 @@ import { httpTransport } from "./transport.ts";
 import { testClaim } from "./test-support.ts";
 import { hostExecution } from "./execution.ts";
 import { SHIPPED_TEMPLATES } from "../../agent/prompt-templates.ts";
+import { ExecutionWork } from "../../worker/contract.ts";
 
 const SECRET = Buffer.alloc(32, 7).toString("base64");
 test("host takes handover before setup and method, discards on every method end", async (t) => {
@@ -53,6 +54,7 @@ test("host takes handover before setup and method, discards on every method end"
     ],
     templates: SHIPPED_TEMPLATES,
     resource_budget: { turns: 200, wall_time_ms: 7200000 },
+    work: ExecutionWork.Implement,
     repositories: [],
   };
   t.mock.method(api.worker, "handover", async () => {
@@ -168,7 +170,16 @@ test("host takes handover before setup and method, discards on every method end"
         type: OperationResultType.Completed,
         status: 200,
         data: {
-          evidence: { id: "evidence_01ARZ3NDEKTSV4RRFFQ69G5FAA" },
+          evidence: {
+            id: "evidence_01ARZ3NDEKTSV4RRFFQ69G5FAA",
+            assets: [
+              {
+                id: "evidence_asset_01ARZ3NDEKTSV4RRFFQ69G5FAA",
+                kind: "object",
+                storage_binding_id: "binding_01ARZ3NDEKTSV4RRFFQ69G5FAA",
+              },
+            ],
+          },
           uploads: [
             {
               asset_id: "evidence_asset_01ARZ3NDEKTSV4RRFFQ69G5FAA",
