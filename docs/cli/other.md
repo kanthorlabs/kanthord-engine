@@ -556,13 +556,16 @@ The command runs in this order:
    `tracking.db` stays missing. A running server makes this fail with
    `system.database.initialization_failed` (`database is locked`). A database
    of another migration text fails with `system.database.migration.schema_mismatch`.
-   The command checks both files before it writes a backup or a change.
+   A `master_key` that differs from the one in `kanthord.db` fails with
+   `system.config.master_key_mismatch`. The command checks both files and the
+   master key before it writes a backup or a change.
 3. If nothing changes, print `up_to_date: <path>` and write nothing.
 4. Write the backups with one UTC timestamp: the original configuration to
-   `<path>.bak-<timestamp>`, and each database with a pending migration with
-   `VACUUM INTO` to `kanthord.db.bak-<timestamp>` or
-   `tracking.db.bak-<timestamp>` in the data directory. Print `backup: <path>`
-   for each. An existing backup path fails the command.
+   `<path>.bak-<timestamp>` when a configuration step applies, and each
+   database with a pending migration with `VACUUM INTO` to
+   `kanthord.db.bak-<timestamp>` or `tracking.db.bak-<timestamp>` in the data
+   directory. Print `backup: <path>` for each. An existing backup path fails the
+   command.
 5. Apply the pending migrations of `kanthord.db` and then of `tracking.db`,
    one transaction each. Print `migrated: <service> <a> -> <b>` for each
    service.
@@ -574,8 +577,9 @@ The command prints each row when its step happens. A later failure or a stop
 keeps the earlier rows, for example the backup paths, on stdout. Every value
 starts in column 17, after the longest row name `config_version:` and one space.
 
-A rerun after a failure resumes from the recorded state. Steps 1 to 4 write
-nothing to the configuration or the database.
+A rerun after a failure resumes from the recorded state. Steps 1 to 3 write
+nothing. Step 4 writes only the backup files. The command changes the
+configuration and the databases from step 5.
 
 ## Application startup
 
