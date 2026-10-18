@@ -55,7 +55,7 @@ export const missionExamples = {
     expected_revision: REVISION,
     expected_mission_version: MISSION_VERSION,
   },
-  override: { ...HUMAN_ACT, expected_state: "Evaluating" },
+  override: { ...HUMAN_ACT, expected_state: "Paused" },
   nodeCreate: NODE_WRITE,
   nodeUpdate: { ...NODE_WRITE, expected_revision: REVISION },
   rebind: GRAPH_EDIT,

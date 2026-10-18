@@ -14,6 +14,7 @@ import { missionExamples } from "./mission-examples.ts";
 import { addMutationOptions, mutate } from "./mission-support.ts";
 
 const PAUSE_INVALID_NODE = "cli.mission.node.pause.invalid_node_id";
+const OVERRIDE_FILE_SCHEMA = overrideSchema.omit({ result: true });
 
 export function addControlCommands(node: Command): void {
   addMutationOptions(
@@ -144,7 +145,7 @@ function addOverrideCommand(node: Command): void {
       .argument("<node-id>", "Node ID")
       .requiredOption("--result <result>", "success", singleUse("--result")),
     {
-      schema: overrideSchema.omit({ result: true }),
+      schema: OVERRIDE_FILE_SCHEMA,
       example: missionExamples.override,
     },
   ).action(async (nodeId: string, _options, command: Command) => {
@@ -161,7 +162,7 @@ function addOverrideCommand(node: Command): void {
     await mutate(
       command,
       "node.override",
-      overrideSchema.omit({ result: true }),
+      OVERRIDE_FILE_SCHEMA,
       (api, body, key) =>
         api["node.override"](
           {

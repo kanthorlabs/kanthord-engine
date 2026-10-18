@@ -454,7 +454,7 @@ master key, validate it in memory, and then publish it. Each repeatable
 `--gateway-allowed-host` value is lowercased and appended to the default
 `gateway.allowed_hosts` without duplicates. A value that is not exactly
 `<name>` or `<name>:<port>` fails with `cli.config.invalid_allowed_host` before
-any file is written. `--gateway-bind` writes its value to `gateway.bind`. A value that
+any file is written. `--gateway-bind` writes its value to `gateway.bind`. The default is `127.0.0.1`. The container image uses `::`. A value that
 is not an IP address fails with `system.config.invalid_field` before any file
 is written. `--gateway-base-path` writes its value to `gateway.base_path`. A
 value that is neither `/` nor a path without a trailing slash fails with

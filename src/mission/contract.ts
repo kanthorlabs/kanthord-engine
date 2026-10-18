@@ -342,6 +342,16 @@ export const ClaimableState = {
 } as const;
 export type ClaimableState =
   (typeof ClaimableState)[keyof typeof ClaimableState];
+export const OVERRIDE_STATES = [
+  NodeState.Pending,
+  NodeState.Available,
+  NodeState.Executing,
+  NodeState.Waiting,
+  NodeState.Blocked,
+  NodeState.Paused,
+  NodeState.ExternalSuccess,
+  NodeState.ExternalFailed,
+];
 export const RevisionWrite = {
   Import: "import",
   NodeCreate: "node.create",

@@ -185,6 +185,8 @@ UTF-8 JSON file. The owning command makes it required or optional; it has no
 default path, and an omitted optional file supplies no payload unless the
 command explicitly declares a default. A relative path resolves against the
 CLI working directory. The command reads the file without modifying it.
+The help of each command with a `--file` option ends with a block that names the
+body type (`JSON` or `UTF-8 text`), gives a note and prints one example.
 
 The input must be a nonempty named filesystem path, not `-`, implicit stdin,
 a directory, a special input device, terminal input, inline JSON, or an implicit

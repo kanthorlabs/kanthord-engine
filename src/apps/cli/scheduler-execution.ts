@@ -8,6 +8,7 @@ import {
   schedulerOperations,
   workPullSchema,
   executionReleaseSchema,
+  ExecutionStopReason,
   QUEUE_LIST_LIMIT_DEFAULT,
   QUEUE_LIST_LIMIT_MIN,
   QUEUE_LIST_LIMIT_MAX,
@@ -32,6 +33,7 @@ const EXECUTION = "execution";
 const RELEASE = "release";
 const RELEASE_INDETERMINATE = "cli.scheduler.execution.release.indeterminate";
 const CLAIM = "claim";
+const STOP_NOTE = `Add stop as { "reason": <reason>, "code": <code or null> } only with further_work true. Reasons: ${Object.values(ExecutionStopReason).join(", ")}.`;
 const RELEASE_EXAMPLE = { further_work: true, stop: null };
 const WORK_PULL_EXAMPLE = {
   resource_identity: "worker:general-main",
@@ -245,7 +247,7 @@ export function addExecutionCommands(scheduler: Command): void {
     {
       schema: executionReleaseSchema,
       example: RELEASE_EXAMPLE,
-      note: 'Add stop as { "reason": <reason>, "code": <code or null> } only with further_work true.',
+      note: STOP_NOTE,
     },
   ).action((executionId: string, _options, command: Command) =>
     release(executionId, command),

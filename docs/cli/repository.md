@@ -121,7 +121,7 @@ fields have no default:
 - `secret`: a closed object of the secret shape of the platform. For `api_key`, `{ key }`, with a required nonempty
   string whose exact value is preserved. For `none`, `{}`.
 
-A complete `ssh` body. `port` is an integer, not a string:
+The file below is a complete `ssh` body. `port` is an integer, not a string:
 
 ```json
 {
