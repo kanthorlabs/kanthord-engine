@@ -43,11 +43,6 @@ const createMissionTables: Migration = (database) => {
       mission_id TEXT NOT NULL REFERENCES mission_mission(id),
       PRIMARY KEY (dependent_id, depends_on_id)
     );
-  `);
-};
-
-const createExecutionRecordTables: Migration = (database) => {
-  database.exec(`
     CREATE TABLE mission_attempt (
       node_id TEXT NOT NULL REFERENCES mission_node(id),
       attempt INTEGER NOT NULL,
@@ -55,6 +50,7 @@ const createExecutionRecordTables: Migration = (database) => {
       opened_by TEXT NOT NULL,
       opened_at INTEGER NOT NULL,
       closed_at INTEGER,
+      start_point TEXT NOT NULL DEFAULT 'node_branch',
       PRIMARY KEY (node_id, attempt)
     );
     CREATE UNIQUE INDEX mission_attempt_open ON mission_attempt (node_id) WHERE closed_at IS NULL;
@@ -112,11 +108,6 @@ const createExecutionRecordTables: Migration = (database) => {
       failed_at INTEGER NOT NULL,
       PRIMARY KEY (node_id, attempt, storage_binding_id)
     );
-  `);
-};
-
-const createProposalTable: Migration = (database) => {
-  database.exec(`
     CREATE TABLE mission_proposal (
       id TEXT NOT NULL PRIMARY KEY,
       node_id TEXT NOT NULL REFERENCES mission_node(id),
@@ -127,28 +118,10 @@ const createProposalTable: Migration = (database) => {
       approved_at INTEGER,
       created_at INTEGER NOT NULL
     );
-  `);
-};
-
-const addAttemptStartPoint: Migration = (database) => {
-  database.exec(`
-    ALTER TABLE mission_attempt ADD COLUMN start_point TEXT NOT NULL DEFAULT 'node_branch';
-    UPDATE mission_attempt SET start_point = 'base_branch' WHERE attempt = 1;
-  `);
-};
-
-const addLookupIndexes: Migration = (database) => {
-  database.exec(`
     CREATE UNIQUE INDEX mission_node_mission ON mission_node (mission_id, id);
     CREATE UNIQUE INDEX mission_evidence_node ON mission_evidence (node_id, attempt, id);
     CREATE UNIQUE INDEX mission_evidence_asset_evidence ON mission_evidence_asset (evidence_id, id);
   `);
 };
 
-export const missionMigrations: readonly Migration[] = [
-  createMissionTables,
-  createExecutionRecordTables,
-  createProposalTable,
-  addAttemptStartPoint,
-  addLookupIndexes,
-];
+export const missionMigrations: readonly Migration[] = [createMissionTables];

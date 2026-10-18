@@ -22,6 +22,7 @@ import { workbenchMigrations } from "../../workbench/index.ts";
 import { WORKBENCH_SERVICE_NAME } from "../../workbench/contract.ts";
 import { INTAKE_SERVICE_NAME } from "../../intake/contract.ts";
 import { intakeMigrations } from "../../intake/index.ts";
+import { serverMigrations, trackingDatabaseMigrations } from "./index.ts";
 
 const PROJECT_SERVICE_NAME = "project";
 const GATEWAY_SERVICE_NAME = "gateway";
@@ -37,6 +38,7 @@ const services: Migrations = [
   { service: WORKBENCH_SERVICE_NAME, migrations: workbenchMigrations },
   { service: INTAKE_SERVICE_NAME, migrations: intakeMigrations },
 ];
+const MAXIMUM_MIGRATIONS_PER_SERVICE = 1;
 const HISTORY_TABLE = "migration";
 const CREDENTIAL_TABLE = "credential";
 const CUSTODY_MASTER_KEY_TABLE = "custody_master_key";
@@ -142,6 +144,17 @@ const ALL_INDEXES = [
   "scheduler_job_node_id",
   "worker_instance_live_client",
 ];
+
+test("each service holds at most one migration", () => {
+  for (const { service, migrations } of [
+    ...serverMigrations,
+    ...trackingDatabaseMigrations,
+  ])
+    assert.ok(
+      migrations.length <= MAXIMUM_MIGRATIONS_PER_SERVICE,
+      `${service} holds ${migrations.length} migrations`,
+    );
+});
 
 function tables(store: Store): string[] {
   return store.database
@@ -565,58 +578,6 @@ test("Scheduler executions have exactly the ruled columns and partial unique ind
         .get(SCHEDULER_EXECUTION_TABLE)?.sql,
     ),
     /\bCHECK\s*\(/i,
-  );
-});
-
-test("the start point and node branch migrations backfill the behavior of every earlier execution", (t) => {
-  const store = new Store(IN_MEMORY_DATABASE);
-  t.after(() => store.close());
-  const nodeId = "node_01ARZ3NDEKTSV4RRFFQ69G5FAA";
-  const startPointMigration = missionMigrations.length - 2;
-  const nodeBranchMigration = schedulerMigrations.length - 3;
-  store.migrate([
-    {
-      service: SCHEDULER_SERVICE_NAME,
-      migrations: schedulerMigrations.slice(0, nodeBranchMigration),
-    },
-    {
-      service: MISSION_SERVICE_NAME,
-      migrations: missionMigrations.slice(0, startPointMigration),
-    },
-  ]);
-  store.database.exec(`
-    INSERT INTO mission_mission VALUES ('mission_01ARZ3NDEKTSV4RRFFQ69G5FAA', 'project_01ARZ3NDEKTSV4RRFFQ69G5FAA', 1, 1);
-    INSERT INTO mission_node (id, mission_id, filename, state, attempt, created_at) VALUES ('${nodeId}', 'mission_01ARZ3NDEKTSV4RRFFQ69G5FAA', 'a.md', 'available', 2, 1);
-    INSERT INTO mission_attempt VALUES ('${nodeId}', 1, 1, '{}', 1, 2);
-    INSERT INTO mission_attempt VALUES ('${nodeId}', 2, 1, '{}', 2, NULL);
-    INSERT INTO scheduler_execution VALUES ('execution_01ARZ3NDEKTSV4RRFFQ69G5FAA', 'project_01ARZ3NDEKTSV4RRFFQ69G5FAA', '${nodeId}', 'binding_01ARZ3NDEKTSV4RRFFQ69G5FAA', 'worker:kanthord:general', 'worker_instance_01ARZ3NDEKTSV4RRFFQ69G5FAA', 2, 1, '[]', 2, '${"1".repeat(32)}', '${"2".repeat(16)}', 1, NULL, NULL);
-  `);
-  store.migrate([
-    { service: SCHEDULER_SERVICE_NAME, migrations: schedulerMigrations },
-    { service: MISSION_SERVICE_NAME, migrations: missionMigrations },
-  ]);
-  assert.deepEqual(
-    store.database
-      .prepare(
-        "SELECT attempt, start_point FROM mission_attempt ORDER BY attempt",
-      )
-      .all()
-      .map((row) => [row.attempt, row.start_point]),
-    [
-      [1, "base_branch"],
-      [2, "node_branch"],
-    ],
-  );
-  assert.equal(
-    store.database.prepare("SELECT node_branch FROM scheduler_execution").get()
-      ?.node_branch,
-    `kanthord/${nodeId}`,
-  );
-  assert.equal(
-    store.database
-      .prepare("SELECT agent_selections FROM scheduler_execution")
-      .get()?.agent_selections,
-    null,
   );
 });
 

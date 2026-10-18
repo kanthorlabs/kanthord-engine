@@ -422,18 +422,21 @@ A change of the instance count reconciles the pool. A removed slot drains
 through `deregister` after its execution. A crashed thread restarts with
 a backoff from 1 s to 30 s. The server stops the pool before it quiesces.
 
-## Add a migration
+## Change the schema
 
-1. Append a migration to the owning service's `migrations.ts`. Never edit a
-   published migration.
-2. Prefix each table with `<service>_`. Export the migration list from the
-   service's `index.ts` and include it in the server's migration assembly.
-3. Include the list in both ownership checks in
+1. Before the first tag, each service holds exactly one migration, version 1.
+   Edit its `CREATE TABLE` or `CREATE UNIQUE INDEX` text in place. Add no
+   `ALTER TABLE`, no `UPDATE` and no second migration.
+2. Prefix each table with `<service>_`. A new service exports its list from
+   `index.ts`, and the server migration assembly includes it.
+3. Include a new list in both ownership checks in
    `src/apps/server/migrations.test.ts`: distinct table prefixes in a shared
    store, and successful application of each service's migrations alone.
 4. Run the ownership tests and `pnpm run verify`.
-5. Expect `serve` to refuse an existing database with
-   `system.database.migration.pending`. Run `kanthord upgrade` on it.
+5. Expect `serve` and `kanthord upgrade` to refuse an existing database with
+   `system.database.migration.schema_mismatch`. Stop the server. Delete
+   `kanthord.db` and `tracking.db` with their `-wal` and `-shm` files. Start
+   again.
 
 ## Add a configuration breaking change
 
