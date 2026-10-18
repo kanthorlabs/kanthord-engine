@@ -68,7 +68,7 @@ function heldJobWait(
     (tx) =>
       tx.database
         .prepare(
-          "SELECT min(not_before) AS until FROM scheduler_job WHERE project_id = ? AND not_before > ?",
+          "SELECT min(available_at) AS until FROM scheduler_job WHERE project_id = ? AND available_at > ?",
         )
         .get(projectId, now) as { until: number | null },
   );

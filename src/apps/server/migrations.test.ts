@@ -581,6 +581,27 @@ test("Scheduler executions have exactly the ruled columns and partial unique ind
   );
 });
 
+test("Scheduler jobs hold available_at", (t) => {
+  const store = new Store(IN_MEMORY_DATABASE);
+  t.after(() => store.close());
+  store.migrate([
+    { service: SCHEDULER_SERVICE_NAME, migrations: schedulerMigrations },
+  ]);
+  const columns = store.database
+    .prepare(`PRAGMA table_info('${SCHEDULER_JOB_TABLE}')`)
+    .all();
+  assert.deepEqual(
+    columns.map((row) => [row.name, row.type, row.notnull, row.pk]),
+    [
+      ["id", "TEXT", 1, 1],
+      ["project_id", "TEXT", 1, 0],
+      ["node_id", "TEXT", 1, 0],
+      ["priority", "INTEGER", 1, 0],
+      ["available_at", "INTEGER", 0, 0],
+    ],
+  );
+});
+
 test("Mission execution records have exactly six unique indexes with the ruled predicates", () => {
   const store = new Store(IN_MEMORY_DATABASE);
   try {
