@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import type { SQLInputValue } from "node:sqlite";
 import {
   Store,
   IN_MEMORY_DATABASE,
@@ -64,6 +65,8 @@ const MISSION_ATTEMPT_OPEN_INDEX = "mission_attempt_open";
 const MISSION_EVIDENCE_REQUEST_INDEX = "mission_evidence_request";
 const MISSION_ASSESSMENT_SEQUENCE_INDEX = "mission_assessment_sequence";
 const MISSION_OUTCOME_SEQUENCE_INDEX = "mission_outcome_sequence";
+const MISSION_EVIDENCE_NODE_INDEX = "mission_evidence_node";
+const MISSION_EVIDENCE_ASSET_EVIDENCE_INDEX = "mission_evidence_asset_evidence";
 const ERD2_MISSION_TABLES = [
   MISSION_ATTEMPT_TABLE,
   MISSION_EVIDENCE_TABLE,
@@ -126,8 +129,11 @@ const ALL_INDEXES = [
   "intake_outbound_request_operation_key",
   MISSION_ASSESSMENT_SEQUENCE_INDEX,
   MISSION_ATTEMPT_OPEN_INDEX,
+  MISSION_EVIDENCE_ASSET_EVIDENCE_INDEX,
+  MISSION_EVIDENCE_NODE_INDEX,
   MISSION_EVIDENCE_REQUEST_INDEX,
   "mission_node_filename_active",
+  "mission_node_mission",
   MISSION_OUTCOME_SEQUENCE_INDEX,
   "project_binding_revision",
   "project_project_name",
@@ -566,7 +572,7 @@ test("the start point and node branch migrations backfill the behavior of every 
   const store = new Store(IN_MEMORY_DATABASE);
   t.after(() => store.close());
   const nodeId = "node_01ARZ3NDEKTSV4RRFFQ69G5FAA";
-  const startPointMigration = missionMigrations.length - 1;
+  const startPointMigration = missionMigrations.length - 2;
   const nodeBranchMigration = schedulerMigrations.length - 3;
   store.migrate([
     {
@@ -614,7 +620,7 @@ test("the start point and node branch migrations backfill the behavior of every 
   );
 });
 
-test("Mission execution records have exactly four unique indexes with the ruled predicates", () => {
+test("Mission execution records have exactly six unique indexes with the ruled predicates", () => {
   const store = new Store(IN_MEMORY_DATABASE);
   try {
     store.migrate([
@@ -629,6 +635,8 @@ test("Mission execution records have exactly four unique indexes with the ruled 
     assert.deepEqual(indexes.map((row) => row.name).sort(), [
       MISSION_ASSESSMENT_SEQUENCE_INDEX,
       MISSION_ATTEMPT_OPEN_INDEX,
+      MISSION_EVIDENCE_ASSET_EVIDENCE_INDEX,
+      MISSION_EVIDENCE_NODE_INDEX,
       MISSION_EVIDENCE_REQUEST_INDEX,
       MISSION_OUTCOME_SEQUENCE_INDEX,
     ]);
@@ -659,6 +667,42 @@ test("Mission execution records have exactly four unique indexes with the ruled 
   } finally {
     store.close();
   }
+});
+
+test("Mission lookups search the lookup indexes", (t) => {
+  const store = new Store(IN_MEMORY_DATABASE);
+  t.after(() => store.close());
+  store.migrate([
+    { service: MISSION_SERVICE_NAME, migrations: missionMigrations },
+  ]);
+  const plan = (sql: string, ...values: SQLInputValue[]) =>
+    store.database
+      .prepare(`EXPLAIN QUERY PLAN ${sql}`)
+      .all(...values)
+      .map((row) => String(row.detail))
+      .join("; ");
+  assert.match(
+    plan(
+      `SELECT * FROM ${MISSION_NODE_TABLE} WHERE mission_id = ? ORDER BY id`,
+      "mission",
+    ),
+    /SEARCH mission_node USING INDEX mission_node_mission \(mission_id=\?\)/,
+  );
+  assert.match(
+    plan(
+      `SELECT * FROM ${MISSION_EVIDENCE_TABLE} WHERE node_id = ? AND attempt = ?`,
+      "node",
+      1,
+    ),
+    /SEARCH mission_evidence USING INDEX mission_evidence_node \(node_id=\? AND attempt=\?\)/,
+  );
+  assert.match(
+    plan(
+      `SELECT * FROM ${MISSION_EVIDENCE_ASSET_TABLE} WHERE evidence_id = ? ORDER BY id`,
+      "evidence",
+    ),
+    /SEARCH mission_evidence_asset USING INDEX mission_evidence_asset_evidence \(evidence_id=\?\)/,
+  );
 });
 
 test("the upload failure table keys a failed check by node, attempt and storage binding", () => {

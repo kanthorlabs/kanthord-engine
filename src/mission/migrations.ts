@@ -137,9 +137,18 @@ const addAttemptStartPoint: Migration = (database) => {
   `);
 };
 
+const addLookupIndexes: Migration = (database) => {
+  database.exec(`
+    CREATE UNIQUE INDEX mission_node_mission ON mission_node (mission_id, id);
+    CREATE UNIQUE INDEX mission_evidence_node ON mission_evidence (node_id, attempt, id);
+    CREATE UNIQUE INDEX mission_evidence_asset_evidence ON mission_evidence_asset (evidence_id, id);
+  `);
+};
+
 export const missionMigrations: readonly Migration[] = [
   createMissionTables,
   createExecutionRecordTables,
   createProposalTable,
   addAttemptStartPoint,
+  addLookupIndexes,
 ];
