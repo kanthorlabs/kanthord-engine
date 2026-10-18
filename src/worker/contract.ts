@@ -421,16 +421,17 @@ export type RepositoryBindingIdsOf = (
   nodeRevision: number,
 ) => string[];
 
-export const ExecutionWork = {
+export const ExecutionIntent = {
   Implement: "implement",
   Examine: "examine",
 } as const;
-export type ExecutionWork = (typeof ExecutionWork)[keyof typeof ExecutionWork];
-export type WorkOf = (
+export type ExecutionIntent =
+  (typeof ExecutionIntent)[keyof typeof ExecutionIntent];
+export type IntentOf = (
   tx: Transaction,
   nodeId: string,
   nodeRevision: number,
-) => ExecutionWork;
+) => ExecutionIntent;
 
 export const InstanceActivity = {
   Idle: "idle",
@@ -704,7 +705,7 @@ export const catalogItemSchema = z.strictObject({
   name: z.string().min(1),
   host: z.enum(WorkerHost),
   declared_node_states: z.array(z.string()),
-  declared_works: z.array(z.enum(ExecutionWork)),
+  declared_intents: z.array(z.enum(ExecutionIntent)),
 });
 const resourceBudgetSchema = z.strictObject({
   wall_time_ms: z.number().int().positive(),
@@ -743,7 +744,7 @@ export const executionSetupSchema = z.strictObject({
   agents: z.array(agentSetupSchema).min(1),
   templates: promptTemplatesSchema,
   resource_budget: resourceBudgetSchema,
-  work: z.enum(ExecutionWork),
+  intent: z.enum(ExecutionIntent),
   repositories: z.array(
     z.strictObject({
       binding_id: identitySchema("binding"),

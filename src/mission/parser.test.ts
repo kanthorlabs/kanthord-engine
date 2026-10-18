@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
-import { MissionErrorCode, Work } from "./contract.ts";
+import { MissionErrorCode, Intent } from "./contract.ts";
 import { parsePlanFile, type ParsedNodeFile } from "./parser.ts";
 
 const FILENAME = "add-password-reset.md";
@@ -15,9 +15,9 @@ const CRITERION =
   "A valid token permits one reset and an expired token permits none.";
 const EXAMPLE = `---
 id: node_01ARZ3NDEKTSV4RRFFQ69G5FAV
-work: implement
+intent: implement
 depends_on: []
-requires: []
+tags: []
 bindings:
   - api-repo
 verifications:
@@ -55,7 +55,7 @@ Accept a reset request for an account and send one reset token.
 A valid token permits one reset.
 `;
 const FOUNDATION = `---
-work: implement
+intent: implement
 depends_on: []
 bindings:
   - todoapp-repo
@@ -115,7 +115,7 @@ Organize \`src/config\`, \`src/http\` and \`src/db\`. Create a directory only wh
 - \`test/foundation-runtime.test.js\` contains behavioral assertions and closes every resource it opens.
 `;
 const TODO_API = `---
-work: examine
+intent: examine
 depends_on:
   - foundation.md
   - persistence.md
@@ -174,8 +174,8 @@ test("parses the canonical node file and preserves every field", () => {
   assert.deepEqual(parsePlanFile(FILENAME, EXAMPLE), {
     filename: FILENAME,
     id: "node_01ARZ3NDEKTSV4RRFFQ69G5FAV",
-    work: Work.Implement,
-    requires: [],
+    intent: Intent.Implement,
+    tags: [],
     depends_on: [],
     bindings: ["api-repo"],
     verifications: ["npm run e2e", "npm run test:reset"],
@@ -202,8 +202,8 @@ test("parses the canonical task file and preserves every field", () => {
 test("parses the todoapp implement node foundation.md", () => {
   const result = parsePlanFile("foundation.md", FOUNDATION) as ParsedNodeFile;
   assert.equal(result.id, undefined);
-  assert.equal(result.work, Work.Implement);
-  assert.deepEqual(result.requires, []);
+  assert.equal(result.intent, Intent.Implement);
+  assert.deepEqual(result.tags, []);
   assert.deepEqual(result.depends_on, []);
   assert.deepEqual(result.bindings, ["todoapp-repo"]);
   assert.deepEqual(result.verifications, [
@@ -227,15 +227,15 @@ test("parses the todoapp task foundation-runtime.md", () => {
     "npm run lint && npm run format:check",
   ]);
   assert.equal(result.name, FOUNDATION_RUNTIME_NAME);
-  assert.equal("work" in result, false);
+  assert.equal("intent" in result, false);
   assert.equal("depends_on" in result, false);
-  assert.equal("requires" in result, false);
+  assert.equal("tags" in result, false);
 });
 
 test("parses the todoapp examine node todo-api.md", () => {
   const result = parsePlanFile("todo-api.md", TODO_API) as ParsedNodeFile;
-  assert.equal(result.work, Work.Examine);
-  assert.deepEqual(result.requires, []);
+  assert.equal(result.intent, Intent.Examine);
+  assert.deepEqual(result.tags, []);
   assert.deepEqual(result.depends_on, [
     "foundation.md",
     "persistence.md",
@@ -254,44 +254,44 @@ test("a new node file defaults lists and omits identity", () => {
   const result = parsePlanFile(
     FILENAME,
     EXAMPLE.replace(/id:.*\n/, "")
-      .replace("work: implement", "work: examine")
+      .replace("intent: implement", "intent: examine")
       .replace(/depends_on: \[\]\n/, "")
-      .replace(/requires: \[\]\n/, "")
+      .replace(/tags: \[\]\n/, "")
       .replace(/bindings:\n  - api-repo\n/, "")
       .replace(/verifications:\n  - npm run e2e\n  - npm run test:reset\n/, ""),
   ) as ParsedNodeFile;
-  assert.equal(result.work, Work.Examine);
+  assert.equal(result.intent, Intent.Examine);
   assert.equal(result.id, undefined);
   assert.deepEqual(
-    [result.requires, result.depends_on, result.bindings, result.verifications],
+    [result.tags, result.depends_on, result.bindings, result.verifications],
     [[], [], [], []],
   );
 });
 
-test("a node file keeps its requires list in order", () => {
+test("a node file keeps its tags list in order", () => {
   const result = parsePlanFile(
     FILENAME,
     EXAMPLE.replace(
-      "requires: []",
-      "requires:\n  - toolchain.xcode_16\n  - platform.macos",
+      "tags: []",
+      "tags:\n  - toolchain.xcode_16\n  - platform.macos",
     ),
   ) as ParsedNodeFile;
-  assert.deepEqual(result.requires, ["toolchain.xcode_16", "platform.macos"]);
+  assert.deepEqual(result.tags, ["toolchain.xcode_16", "platform.macos"]);
 });
 
-test("the parser passes an unknown work value to the content rules", () => {
+test("the parser passes an unknown intent value to the content rules", () => {
   const result = parsePlanFile(
     FILENAME,
-    EXAMPLE.replace("work: implement", `work: ${UNKNOWN_WORK}`),
+    EXAMPLE.replace("intent: implement", `intent: ${UNKNOWN_WORK}`),
   ) as ParsedNodeFile;
-  assert.equal(result.work, UNKNOWN_WORK);
+  assert.equal(result.intent, UNKNOWN_WORK);
 });
 
-test("the parser passes a nontext work and a nonlist or nontext requires as read", () => {
+test("the parser passes a nontext intent and a nonlist or nontext tags field as read", () => {
   for (const [from, to, field, value] of [
-    ["work: implement", "work: [implement]", "work", ["implement"]],
-    ["requires: []", "requires: platform.macos", "requires", "platform.macos"],
-    ["requires: []", "requires: [7]", "requires", [7]],
+    ["intent: implement", "intent: [implement]", "intent", ["implement"]],
+    ["tags: []", "tags: platform.macos", "tags", "platform.macos"],
+    ["tags: []", "tags: [7]", "tags", [7]],
   ] as const) {
     const result = parsePlanFile(
       FILENAME,
@@ -304,7 +304,10 @@ test("the parser passes a nontext work and a nonlist or nontext requires as read
 for (const key of ["name", "requirement", "criterion", "extra", "kind"]) {
   test(`refuses unknown front matter key ${key}`, () => {
     rejected(
-      EXAMPLE.replace("work: implement", `${key}: unexpected\nwork: implement`),
+      EXAMPLE.replace(
+        "intent: implement",
+        `${key}: unexpected\nintent: implement`,
+      ),
       "unknown_key",
     );
   });
@@ -365,15 +368,15 @@ for (const [label, content, reason] of [
     "front_matter_unterminated",
   ],
   [
-    "a file with neither work nor node",
-    EXAMPLE.replace("work: implement\n", ""),
+    "a file with neither intent nor node",
+    EXAMPLE.replace("intent: implement\n", ""),
     "form_invalid",
   ],
   [
-    "a file with both work and node",
+    "a file with both intent and node",
     EXAMPLE.replace(
-      "work: implement",
-      "work: implement\nnode: account-recovery.md",
+      "intent: implement",
+      "intent: implement\nnode: account-recovery.md",
     ),
     "form_invalid",
   ],
@@ -397,12 +400,15 @@ for (const [label, content, reason] of [
   ],
   [
     "duplicate YAML key",
-    EXAMPLE.replace("work: implement", "work: implement\nwork: implement"),
+    EXAMPLE.replace(
+      "intent: implement",
+      "intent: implement\nintent: implement",
+    ),
     "front_matter_invalid",
   ],
   [
     "non-string YAML key",
-    EXAMPLE.replace("work: implement", "7: value\nwork: implement"),
+    EXAMPLE.replace("intent: implement", "7: value\nintent: implement"),
     "unknown_key",
   ],
   [
@@ -448,13 +454,13 @@ for (const [label, content, reason] of [
     "depends_on_forbidden",
   ],
   [
-    "a task file with requires",
-    TASK_EXAMPLE.replace("bindings: []", "requires: []\nbindings: []"),
-    "requires_forbidden",
+    "a task file with tags",
+    TASK_EXAMPLE.replace("bindings: []", "tags: []\nbindings: []"),
+    "tags_forbidden",
   ],
   [
-    "a task file with work",
-    TASK_EXAMPLE.replace("bindings: []", "work: implement\nbindings: []"),
+    "a task file with intent",
+    TASK_EXAMPLE.replace("bindings: []", "intent: implement\nbindings: []"),
     "form_invalid",
   ],
   [

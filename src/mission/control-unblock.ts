@@ -18,7 +18,7 @@ import type { Dependencies } from "./service.ts";
 import { ContentField, TASKS_FIELD, validateText } from "./content.ts";
 import { requireNode } from "./node-read.ts";
 import { resolveContent, resolveTasks } from "./node-create.ts";
-import { requireWorkUnlocked } from "./node-update.ts";
+import { requireIntentUnlocked } from "./node-update.ts";
 import {
   requireRunnable,
   requireControlState,
@@ -47,8 +47,8 @@ const CONTENT_KEYS = [
   ContentField.Criterion,
   ContentField.Verifications,
   ContentField.Bindings,
-  ContentField.Work,
-  ContentField.Requires,
+  ContentField.Intent,
+  ContentField.Tags,
 ] as const;
 
 function contentChanges(current: Content, previous: Content): string[] {
@@ -79,10 +79,10 @@ function changeRevision(
     },
     dependencies.config.text_max_bytes,
   );
-  requireWorkUnlocked(node, previous.content.work, content.work);
+  requireIntentUnlocked(node, previous.content.intent, content.intent);
   const tasks = resolveTasks(
     tx,
-    { ...node, work: content.work },
+    { ...node, intent: content.intent },
     node.filename,
     change.tasks,
     previous.tasks,

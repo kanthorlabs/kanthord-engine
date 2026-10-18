@@ -85,7 +85,7 @@ function fixture(t: TestContext, action: RepositoryAction | null = null) {
     });
     tx.database
       .prepare(
-        "INSERT INTO mission_node_revision (node_id, revision, filename, name, requirement, criterion, verifications, bindings, work, requires, tasks, change, reason, actor, created_at) VALUES (?, 1, 'implement.md', 'name', 'requirement', 'criterion', '[\"true\"]', ?, 'implement', '[]', '[]', ?, 'reason', ?, ?)",
+        "INSERT INTO mission_node_revision (node_id, revision, filename, name, requirement, criterion, verifications, bindings, intent, tags, tasks, change, reason, actor, created_at) VALUES (?, 1, 'implement.md', 'name', 'requirement', 'criterion', '[\"true\"]', ?, 'implement', '[]', '[]', ?, 'reason', ?, ?)",
       )
       .run(
         nodeId,

@@ -8,10 +8,10 @@ import {
   MISSION_INITIAL_VERSION,
   MissionErrorCode,
   NodeState,
-  workSchema,
+  intentSchema,
   type Mission,
   type Revision,
-  type Work,
+  type Intent,
 } from "./contract.ts";
 import type { DepEdge } from "./graph.ts";
 
@@ -41,8 +41,8 @@ export interface RevisionRow {
   criterion: string;
   verifications: string;
   bindings: string;
-  work: Work;
-  requires: string;
+  intent: Intent;
+  tags: string;
   tasks: string;
   change: string;
   reason: string;
@@ -235,7 +235,7 @@ export function readMissionNodes(
 }
 
 export interface NodeListFilter {
-  work?: Work;
+  intent?: Intent;
   state?: NodeState;
   include_retired: boolean;
   after?: string;
@@ -252,7 +252,7 @@ export function listNodes(
       `SELECT n.* FROM mission_node n WHERE n.mission_id = ?
      AND (? = 1 OR n.retired_at IS NULL)
      AND (? IS NULL OR (
-       SELECT r.work FROM mission_node_revision r
+       SELECT r.intent FROM mission_node_revision r
        WHERE r.node_id = n.id AND r.revision = COALESCE(
          (SELECT a.node_revision FROM mission_attempt a
           WHERE a.node_id = n.id AND a.closed_at IS NULL),
@@ -267,8 +267,8 @@ export function listNodes(
     .all(
       missionId,
       Number(filter.include_retired),
-      filter.work ?? null,
-      filter.work ?? null,
+      filter.intent ?? null,
+      filter.intent ?? null,
       filter.state ?? null,
       filter.state ?? null,
       filter.after ?? null,
@@ -333,7 +333,7 @@ export function insertRevision(tx: Transaction, revision: Revision): void {
     .prepare(
       `INSERT INTO mission_node_revision
     (node_id, revision, filename, name, requirement, criterion, verifications,
-     bindings, work, requires, tasks, change, reason, actor, created_at)
+     bindings, intent, tags, tasks, change, reason, actor, created_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
@@ -345,8 +345,8 @@ export function insertRevision(tx: Transaction, revision: Revision): void {
       revision.content.criterion,
       JSON.stringify(revision.content.verifications),
       JSON.stringify(revision.content.bindings),
-      revision.content.work,
-      JSON.stringify(revision.content.requires),
+      revision.content.intent,
+      JSON.stringify(revision.content.tags),
       JSON.stringify(revision.tasks),
       JSON.stringify(revision.change),
       revision.reason,
@@ -405,8 +405,8 @@ export function claimRevisionOf(tx: Transaction, nodeId: string): RevisionRow {
   return row;
 }
 
-export function workOf(tx: Transaction, nodeId: string): Work {
-  return workSchema.parse(claimRevisionOf(tx, nodeId).work);
+export function intentOf(tx: Transaction, nodeId: string): Intent {
+  return intentSchema.parse(claimRevisionOf(tx, nodeId).intent);
 }
 
 export function readRevision(

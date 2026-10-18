@@ -14,7 +14,7 @@ import {
   AssessmentResult,
   AssetKind,
   MissionErrorCode,
-  Work,
+  Intent,
   NodeState,
   TASK_IDENTITY_PREFIX,
   missionOperations,
@@ -134,7 +134,7 @@ async function setup(t: TestContext) {
     (await read<Mission>(["mission", "get", project.id])).version;
   const create = async (
     filename: string,
-    work: Work,
+    intent: Intent,
     names: string[],
     dependentId?: string,
   ) => {
@@ -144,7 +144,7 @@ async function setup(t: TestContext) {
         filename,
         content: {
           ...CONTENT,
-          work,
+          intent,
           bindings: names.map((name) => binding(name).id),
         },
         tasks: [],
@@ -160,10 +160,10 @@ async function setup(t: TestContext) {
       });
     return nodeId;
   };
-  const examineId = await create("examine.md", Work.Examine, [REPOSITORY]);
+  const examineId = await create("examine.md", Intent.Examine, [REPOSITORY]);
   const implementId = await create(
     "implement.md",
-    Work.Implement,
+    Intent.Implement,
     [REPOSITORY],
     examineId,
   );
@@ -412,8 +412,8 @@ test(
           "get",
           implementId,
         ]);
-        assert.equal(implement.work, Work.Implement);
-        assert.deepEqual(implement.requires, []);
+        assert.equal(implement.intent, Intent.Implement);
+        assert.deepEqual(implement.tags, []);
         assert.deepEqual(implement.content.bindings, [h.repositoryId]);
         assert.deepEqual(
           implement.tasks.map((task) => task.id),
@@ -437,7 +437,7 @@ test(
 
     await t.test("the proposer reopens in a new attempt", async () => {
       const { node } = approved.proposer;
-      assert.equal(node.work, Work.Examine);
+      assert.equal(node.intent, Intent.Examine);
       assert.equal(node.state, NodeState.Pending);
       assert.equal(node.attempt, SECOND_ATTEMPT);
       const queue = await read<Page<{ node_id: string }>>([

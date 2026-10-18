@@ -28,7 +28,7 @@ import {
   modelConnectorInput,
   type ModelRuntimeFactory,
 } from "./model-runtime.ts";
-import { ExecutionWork } from "../contract.ts";
+import { ExecutionIntent } from "../contract.ts";
 import { ExecutionBudget } from "./budget.ts";
 import { openNativeAgent } from "./native-agent.ts";
 import { ExecutionRun } from "./execution-run.ts";
@@ -188,7 +188,7 @@ export async function implementFixture(
     hostTools: unusedHostTools,
     setup,
     claim,
-    work: ExecutionWork.Implement,
+    intent: ExecutionIntent.Implement,
     agent: setup.agents[0]!,
     credential: {
       credential_id: setup.agents[0]!.credential_id,

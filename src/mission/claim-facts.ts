@@ -3,8 +3,8 @@ import type { Transaction } from "../kernel/store.ts";
 import { isTerminal } from "./admission.ts";
 import {
   ClaimableState,
-  requiresSchema,
-  workSchema,
+  tagsSchema,
+  intentSchema,
   type ClaimFacts,
   type ClaimFactsRow,
   type MissionBindings,
@@ -27,8 +27,8 @@ function claimable(node: NodeRow | null): node is NodeRow {
 
 function factsOf(revision: RevisionRow): ClaimFacts {
   return {
-    work: workSchema.parse(revision.work),
-    requires: requiresSchema.parse(JSON.parse(revision.requires)),
+    intent: intentSchema.parse(revision.intent),
+    tags: tagsSchema.parse(JSON.parse(revision.tags)),
   };
 }
 

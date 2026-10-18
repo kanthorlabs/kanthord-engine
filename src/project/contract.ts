@@ -11,7 +11,7 @@ import {
 import type { Transaction } from "../kernel/store.ts";
 import { isString } from "../kernel/values.ts";
 import { ResourceStatus } from "../kernel/health.ts";
-import { traitKeySchema } from "../kernel/trait.ts";
+import { tagSchema } from "../kernel/tag.ts";
 import { fallbackConfigurationsSchema } from "../agent/contract.ts";
 
 export const BINDING_CHECK_TIMEOUT_MS = 10000;
@@ -112,7 +112,7 @@ export const ProjectErrorCode = {
   WorkerInstanceCountRange: "project.bindings.worker.instance_count_range",
   WorkerResourceChanged: "project.bindings.worker.resource_changed",
   WorkerPlacementChanged: "project.bindings.worker.placement_changed",
-  WorkerTraitsInvalid: "project.bindings.worker.traits_invalid",
+  WorkerTagsInvalid: "project.bindings.worker.tags_invalid",
   WorkerNodeUnmatched: "project.bindings.worker.node_unmatched",
 } as const;
 
@@ -201,8 +201,8 @@ export const repositoryConfigSchema = z.strictObject({
 export const WorkerPlacement = { Server: "server", Worker: "worker" } as const;
 export type WorkerPlacement =
   (typeof WorkerPlacement)[keyof typeof WorkerPlacement];
-export const workerTraitsSchema = z
-  .array(traitKeySchema)
+export const workerTagsSchema = z
+  .array(tagSchema)
   .refine((keys) => new Set(keys).size === keys.length);
 const workerConfigFields = {
   worker: z.string().min(1),
@@ -228,11 +228,11 @@ const workerConfigFields = {
 };
 export const workerConfigWriteSchema = z.strictObject({
   ...workerConfigFields,
-  traits: z.unknown().optional(),
+  tags: z.unknown().optional(),
 });
 export const workerConfigSchema = z.strictObject({
   ...workerConfigFields,
-  traits: workerTraitsSchema.optional(),
+  tags: workerTagsSchema.optional(),
 });
 export const storageConfigSchema = z.strictObject({
   available: z.boolean(),
@@ -873,7 +873,7 @@ export interface WorkerBindingRow {
   generation: number;
   resource_budget: { turns: number; wall_time_ms: number } | null;
   entries: NonNullable<z.infer<typeof workerConfigSchema>["entries"]>;
-  traits: string[];
+  tags: string[];
   tombstone: boolean;
 }
 

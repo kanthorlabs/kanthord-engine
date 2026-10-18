@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
 import { createIdentity } from "../kernel/identity.ts";
 import { testMachineIdentity } from "../kernel/test-identity.ts";
-import { AgentChoiceKind, ClaimNodeState, ClaimWork } from "./contract.ts";
+import { AgentChoiceKind, ClaimNodeState, ClaimIntent } from "./contract.ts";
 import { claimOnce, ClaimOutcome } from "./claim.ts";
 import { insertExecution, readExecution } from "./execution-store.ts";
 import {
@@ -46,14 +46,14 @@ export function claimHarness(
     binding_id: row.worker_binding_id,
     worker_name: "coder@1",
     instance_count: 1,
-    traits: [] as string[],
+    tags: [] as string[],
     tombstone: false,
     resource_budget: null as { wall_time_ms: number } | null,
   };
   h.dependencies.bindings.workerBindingOf = () => binding;
   h.dependencies.declarations.declarationOf = () => ({
     declared_node_states: states,
-    declared_works: Object.values(ClaimWork),
+    declared_intents: Object.values(ClaimIntent),
     resource_budget: { wall_time_ms: WALL_TIME },
   });
   h.dependencies.transitions.claim = (
@@ -196,9 +196,9 @@ test("the claim walk skips a job that the claimant does not admit and claims the
     h.service.insert(tx, plain, h.row.project_id, 1);
   });
   const facts = new Map([
-    [macos, { work: ClaimWork.Implement, requires: ["platform.macos"] }],
-    [examine, { work: ClaimWork.Examine, requires: [] }],
-    [plain, { work: ClaimWork.Implement, requires: [] }],
+    [macos, { intent: ClaimIntent.Implement, tags: ["platform.macos"] }],
+    [examine, { intent: ClaimIntent.Examine, tags: [] }],
+    [plain, { intent: ClaimIntent.Implement, tags: [] }],
   ]);
   const read: string[] = [];
   h.dependencies.facts.claimFacts = (_tx, nodeId) => {
@@ -207,7 +207,7 @@ test("the claim walk skips a job that the claimant does not admit and claims the
   };
   h.dependencies.declarations.declarationOf = () => ({
     declared_node_states: [ClaimNodeState.Available],
-    declared_works: [ClaimWork.Implement],
+    declared_intents: [ClaimIntent.Implement],
     resource_budget: { wall_time_ms: WALL_TIME },
   });
   const first = h.claim();
@@ -220,7 +220,7 @@ test("the claim walk skips a job that the claimant does not admit and claims the
     [plain],
   );
   h.store.transaction((tx) => h.service.revoke(tx, plain, FIXTURE_NOW));
-  h.binding.traits = ["platform.macos"];
+  h.binding.tags = ["platform.macos"];
   assert.equal(h.claim().row!.node_id, macos);
 });
 

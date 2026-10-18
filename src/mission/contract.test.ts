@@ -30,7 +30,7 @@ import {
   deliveryAdmitSchema,
   NODE_IDENTITY_PREFIX,
   TASK_IDENTITY_PREFIX,
-  Work,
+  Intent,
   contentSchema,
   edgeSchema,
   nodeCreateSchema,
@@ -206,7 +206,7 @@ const CONTENT = {
   verifications: ["true"],
   bindings: [],
 };
-const NODE_CONTENT = { ...CONTENT, work: Work.Implement };
+const NODE_CONTENT = { ...CONTENT, intent: Intent.Implement };
 const INPUTS = [
   { schema: humanActSchema, input: ACT },
   { schema: resumeSchema, input: { ...ACT, target: ResumeTarget.Waiting } },
@@ -389,29 +389,29 @@ test("a node create requires the task list", () => {
   );
 });
 
-test("node content holds work and a requires list that reads [] when absent", () => {
-  assert.deepEqual(contentSchema.parse(NODE_CONTENT).requires, []);
+test("node content holds intent and a tags list that reads [] when absent", () => {
+  assert.deepEqual(contentSchema.parse(NODE_CONTENT).tags, []);
   assert.equal(
-    contentSchema.safeParse({ ...NODE_CONTENT, work: "task" }).success,
+    contentSchema.safeParse({ ...NODE_CONTENT, intent: "task" }).success,
     false,
   );
-  const { work, ...noWork } = NODE_CONTENT;
-  assert.equal(work, Work.Implement);
-  assert.equal(contentSchema.safeParse(noWork).success, false);
+  const { intent, ...noIntent } = NODE_CONTENT;
+  assert.equal(intent, Intent.Implement);
+  assert.equal(contentSchema.safeParse(noIntent).success, false);
   assert.equal(
     contentSchema.safeParse({
       ...NODE_CONTENT,
-      requires: ["platform.macos", "toolchain.xcode_16"],
+      tags: ["platform.macos", "toolchain.xcode_16"],
     }).success,
     true,
   );
   assert.equal(
-    contentSchema.safeParse({ ...NODE_CONTENT, requires: ["platform.macOS"] })
+    contentSchema.safeParse({ ...NODE_CONTENT, tags: ["platform.macOS"] })
       .success,
     false,
   );
   assert.equal(
-    taskBodySchema.safeParse({ ...CONTENT, work: Work.Implement }).success,
+    taskBodySchema.safeParse({ ...CONTENT, intent: Intent.Implement }).success,
     false,
   );
 });
@@ -420,13 +420,13 @@ test("a repeated key fails", () => {
   assert.equal(
     contentSchema.safeParse({
       ...NODE_CONTENT,
-      requires: ["platform.macos", "platform.macos"],
+      tags: ["platform.macos", "platform.macos"],
     }).success,
     false,
   );
 });
 
-test("a node create takes no parent and the node read holds work and requires", () => {
+test("a node create takes no parent and the node read holds intent and tags", () => {
   const create = {
     filename: "recover.md",
     content: NODE_CONTENT,
@@ -449,15 +449,15 @@ test("a node create takes no parent and the node read holds work and requires", 
     "depends_on",
     "filename",
     "id",
+    "intent",
     "mission_id",
     "pinned_by_attempts",
     "priority",
-    "requires",
     "retired_at",
     "state",
+    "tags",
     "tasks",
     "visible_revision",
-    "work",
   ]);
 });
 

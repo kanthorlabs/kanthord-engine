@@ -4,7 +4,7 @@ import { testHumanIdentity } from "../kernel/test-identity.ts";
 import { createIdentity } from "../kernel/identity.ts";
 import { OperationError } from "../kernel/errors.ts";
 import {
-  Work,
+  Intent,
   NodeState,
   ActorKind,
   ClaimKind,
@@ -44,7 +44,7 @@ const INSERT = "workQueue.insert";
 const UNMET = "mission.release.obligation_unmet";
 function fixture(
   t: TestContext,
-  work: Work = Work.Implement,
+  intent: Intent = Intent.Implement,
   overrides: Partial<Dependencies> = {},
 ) {
   const h = controlHarness(t, IDENTITY, overrides);
@@ -80,14 +80,14 @@ function fixture(
   });
   h.store.transaction((tx) => {
     tx.database
-      .prepare("UPDATE mission_node_revision SET work = ? WHERE node_id = ?")
-      .run(work, h.node_id);
+      .prepare("UPDATE mission_node_revision SET intent = ? WHERE node_id = ?")
+      .run(intent, h.node_id);
     tx.database
       .prepare(
         "UPDATE mission_node_revision SET bindings = ? WHERE node_id = ?",
       )
       .run(
-        JSON.stringify(work === Work.Implement ? [bindingId] : []),
+        JSON.stringify(intent === Intent.Implement ? [bindingId] : []),
         h.node_id,
       );
   });
@@ -240,7 +240,7 @@ test("further-work releases without progress pause the node at the further-work 
 });
 
 test("examine claim ignores a nonterminal implement child", (t) => {
-  const h = fixture(t, Work.Examine);
+  const h = fixture(t, Intent.Examine);
   h.store.transaction((tx) =>
     insertNode(tx, {
       id: createIdentity("node"),
@@ -270,7 +270,7 @@ test("implement steps release requires published evidence from the execution and
 });
 
 test("examine steps release admits produced evidence", (t) => {
-  const h = fixture(t, Work.Examine);
+  const h = fixture(t, Intent.Examine);
   h.claim();
   h.evidence(AssetKind.Produced, true);
   h.release();
@@ -566,7 +566,7 @@ function deferredFixture(
   check: Awaited<ReturnType<Dependencies["intakeCheck"]["check"]>>,
 ) {
   let checkCalls = 0;
-  const h = fixture(t, Work.Implement, {
+  const h = fixture(t, Intent.Implement, {
     intakeCheck: {
       check: async () => {
         checkCalls++;
@@ -673,7 +673,7 @@ function deferredBranchPushFixture(
   t: TestContext,
   check: Awaited<ReturnType<Dependencies["intakeCheck"]["check"]>>,
 ) {
-  const h = fixture(t, Work.Implement, {
+  const h = fixture(t, Intent.Implement, {
     intakeCheck: { check: async () => check },
   });
   h.dependencies.bindings.repositoryPolicyOf = () => ({
@@ -756,7 +756,7 @@ test("deferred check resolves a branch_push request and completes the node", asy
 
 test("a failing deferred check leaves the node unchanged", async (t) => {
   let checkCalls = 0;
-  const h = fixture(t, Work.Implement, {
+  const h = fixture(t, Intent.Implement, {
     intakeCheck: {
       check: async () => {
         checkCalls++;

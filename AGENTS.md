@@ -36,7 +36,7 @@ engine/
 │   │   ├── json.ts             # Canonical JSON, digests, key derivation, and timestamps
 │   │   ├── handover.ts         # Handover keys, additional authenticated data and envelope codec
 │   │   ├── identity.ts         # Prefixed entity identities and ULID schemas
-│   │   ├── trait.ts            # Trait key form and byte bound
+│   │   ├── tag.ts              # Tag form and byte bound
 │   │   ├── values.ts           # JavaScript value predicates
 │   │   ├── version.ts          # Cached package version
 │   │   ├── xdg.ts              # Configuration, data, state, and cache directories
@@ -158,7 +158,7 @@ engine/
 │   │   ├── control-close.ts    # Block, discard, and success override
 │   │   ├── control-unblock.ts  # Atomic direction change and next attempt
 │   │   ├── transitions.ts     # Scheduler claim, release admission, and failure
-│   │   ├── claim-facts.ts     # Work, requires and claimable states of a node at its claim revisions
+│   │   ├── claim-facts.ts     # Intent, tags and claimable states of a node at its claim revisions
 │   │   ├── coverage.ts        # Unmatched pairs that a node write adds, and the refusal of that write
 │   │   ├── execution.ts       # Live claim and execution context admission
 │   │   ├── execution-read.ts  # Pinned revisions, attempts and current dependency outcomes

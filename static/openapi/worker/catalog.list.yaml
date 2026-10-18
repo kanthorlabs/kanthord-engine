@@ -100,7 +100,7 @@ components:
                 type: array
                 items:
                   type: string
-              declared_works:
+              declared_intents:
                 type: array
                 items:
                   type: string
@@ -111,7 +111,7 @@ components:
               - name
               - host
               - declared_node_states
-              - declared_works
+              - declared_intents
             additionalProperties: false
         next_cursor:
           anyOf:

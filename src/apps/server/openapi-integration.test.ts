@@ -24,7 +24,7 @@ import { projectOperations } from "../../project/contract.ts";
 import {
   MISSION_INITIAL_VERSION,
   AssetKind,
-  Work,
+  Intent,
   missionOperations,
   missionSchema,
 } from "../../mission/contract.ts";
@@ -896,7 +896,10 @@ test("the operation inventory agrees with contracts, OpenAPI and live registry",
 function assertBlockedNode(schema: unknown): void {
   assert.ok(isObject(schema) && !("oneOf" in schema));
   const node = schema as ResolvedSchema;
-  assert.deepEqual(node.properties.work?.enum, [Work.Implement, Work.Examine]);
+  assert.deepEqual(node.properties.intent?.enum, [
+    Intent.Implement,
+    Intent.Examine,
+  ]);
   const context = node.properties.blocked_context;
   assert.ok(context);
   assert.deepEqual(context.required, ["outcome", "requests"]);
@@ -1052,8 +1055,8 @@ test("dependency list exception preserves full dependency and identity-only vari
     "attempt",
     "priority",
     "depends_on",
-    "work",
-    "requires",
+    "intent",
+    "tags",
   ]);
   assert.deepEqual(full.properties.blocked_context.required, [
     "outcome",

@@ -22,7 +22,7 @@ import {
   missionOperations,
   evidenceSubmitResultSchema,
   assessmentSubmitResultSchema,
-  Work,
+  Intent,
   type Evidence,
   type Node,
   type Outcome,
@@ -228,7 +228,7 @@ async function setup(t: TestContext) {
   };
   const create = async (
     filename: string,
-    work: Work,
+    intent: Intent,
     names: string[],
     version: number,
   ) => {
@@ -238,7 +238,7 @@ async function setup(t: TestContext) {
         filename,
         content: {
           ...CONTENT,
-          work,
+          intent,
           bindings: names.map((name) => binding(name).id),
         },
         tasks: [],
@@ -250,19 +250,19 @@ async function setup(t: TestContext) {
   };
   const examine = await create(
     "examine-1.md",
-    Work.Examine,
+    Intent.Examine,
     [],
     FIRST_REVISION,
   );
   const implementA = await create(
     "implement-a.md",
-    Work.Implement,
+    Intent.Implement,
     ["repo", "store"],
     SECOND_MISSION_VERSION,
   );
   const implementB = await create(
     "implement-b.md",
-    Work.Implement,
+    Intent.Implement,
     ["gated"],
     THIRD_MISSION_VERSION,
   );

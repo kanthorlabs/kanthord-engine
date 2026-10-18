@@ -25,7 +25,7 @@ import {
   WORKING_LAYER_ALL_ON,
 } from "./test-support.ts";
 import { EndReason, ExecutionRun, ExecutionStop } from "./execution-run.ts";
-import { ExecutionWork } from "../contract.ts";
+import { ExecutionIntent } from "../contract.ts";
 import {
   CHECKOUTS_DIRECTORY,
   EVIDENCE_DIRECTORY,
@@ -159,7 +159,7 @@ test("B3 review bundle places all supporting assets in the evidence directory ou
       const pending = prepareEvaluation(
         { setup, claim, workspaces, transport, env: hostEnvironment() },
         run,
-        ExecutionWork.Examine,
+        ExecutionIntent.Examine,
         evidence,
       );
       if (mode !== SUCCESS) {
@@ -256,7 +256,7 @@ test("an examine node with no binding places the produced evidence privately and
       env: hostEnvironment(),
     },
     run,
-    ExecutionWork.Examine,
+    ExecutionIntent.Examine,
     evidence,
   );
   assert.deepEqual(prepared.tested_input, address);
@@ -278,7 +278,7 @@ test("an examine node with no binding places the produced evidence privately and
   };
   assert.deepEqual(
     verificationCommands({
-      content: { ...content, work: ExecutionWork.Implement, requires: [] },
+      content: { ...content, intent: ExecutionIntent.Implement, tags: [] },
       tasks: [
         {
           id: "task",
@@ -347,7 +347,7 @@ test("an examine node with one binding places the produced evidence outside its 
       env: hostEnvironment(),
     },
     run,
-    ExecutionWork.Examine,
+    ExecutionIntent.Examine,
     evidence,
   );
   assert.equal(
@@ -393,7 +393,7 @@ test("an implement snapshot evaluation places the produced evidence outside its 
   await git.raw(["checkout", "main"]);
   const repository = { ...repositorySetup(), address: origin };
   const setup = anthropicSetup({
-    work: ExecutionWork.Implement,
+    intent: ExecutionIntent.Implement,
     repositories: [repository],
   });
   const claim = {
@@ -461,7 +461,7 @@ test("an implement snapshot evaluation places the produced evidence outside its 
       env: hostEnvironment(),
     },
     run,
-    ExecutionWork.Implement,
+    ExecutionIntent.Implement,
     evidence,
   );
   assert.equal(
@@ -526,7 +526,7 @@ async function twoBindingEvaluation(t: test.TestContext, names: string[]) {
   const api = await snapshotOrigin(state, "api");
   const web = await snapshotOrigin(state, "web");
   const setup = anthropicSetup({
-    work: ExecutionWork.Implement,
+    intent: ExecutionIntent.Implement,
     repositories: [api.repository, web.repository],
   });
   const claim = {
@@ -576,7 +576,7 @@ async function twoBindingEvaluation(t: test.TestContext, names: string[]) {
       env: hostEnvironment(),
     },
     run,
-    ExecutionWork.Implement,
+    ExecutionIntent.Implement,
     evidence,
   );
   return { pending, workspaces, claim, checkouts: [api, web] };

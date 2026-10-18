@@ -8,7 +8,7 @@ import {
   actorSchema,
   AssessmentResult,
   MissionErrorCode,
-  Work,
+  Intent,
   NODE_LIST_LIMIT_DEFAULT,
   type ExecutionDependency,
 } from "./contract.ts";
@@ -93,7 +93,7 @@ export function executionDependencies(
 ) {
   const { node, revision: pinned } = executionRead(tx, dependencies, claim);
   const page = identityPage(
-    pinned.content.work === Work.Implement
+    pinned.content.intent === Intent.Implement
       ? []
       : currentDependenciesOf(tx, node.id).map((item) => ({
           ...item,
@@ -112,8 +112,8 @@ export function executionDependencies(
         ...nodeRecord(tx, dependency, dependencies.bindings),
         filename: revision.filename,
         content: revision.content,
-        work: revision.content.work,
-        requires: revision.content.requires,
+        intent: revision.content.intent,
+        tags: revision.content.tags,
         tasks: revision.tasks,
         visible_revision: revision.revision,
         pinned_by_attempts: revision.pinned_by_attempts,
@@ -131,7 +131,7 @@ export function executionDependencyOutcomes(
 ) {
   const { node, revision } = executionRead(tx, dependencies, claim);
   const items =
-    revision.content.work === Work.Implement
+    revision.content.intent === Intent.Implement
       ? []
       : currentDependenciesOf(tx, node.id).flatMap(({ outcome }) =>
           outcome ? [outcome] : [],
@@ -153,7 +153,7 @@ export function executionDependencyEvidence(
 ) {
   const { node, revision } = executionRead(tx, dependencies, claim);
   const ids =
-    revision.content.work === Work.Implement
+    revision.content.intent === Intent.Implement
       ? []
       : currentDependenciesOf(tx, node.id).flatMap(({ outcome }) =>
           outcome

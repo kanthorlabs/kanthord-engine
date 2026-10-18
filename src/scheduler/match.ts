@@ -10,8 +10,8 @@ import type { Dependencies } from "./service.ts";
 
 export function admits(claimant: Claimant, facts: ClaimFacts): boolean {
   return (
-    claimant.declared_works.includes(facts.work) &&
-    facts.requires.every((trait) => claimant.traits.includes(trait))
+    claimant.declared_intents.includes(facts.intent) &&
+    facts.tags.every((tag) => claimant.tags.includes(tag))
   );
 }
 
@@ -41,8 +41,8 @@ function claimantsOf(
       return [
         {
           declared_node_states: declaration.declared_node_states,
-          declared_works: declaration.declared_works,
-          traits: binding.traits,
+          declared_intents: declaration.declared_intents,
+          tags: binding.tags,
         },
       ];
     });

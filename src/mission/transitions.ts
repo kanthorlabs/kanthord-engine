@@ -9,7 +9,7 @@ import {
   AssetKind,
   AssessmentResult,
   ReleaseObligation,
-  Work,
+  Intent,
   type ExecutionActor,
   type ClaimAdmission,
 } from "./contract.ts";
@@ -122,7 +122,7 @@ function hasEvidence(
     (row) => {
       const assets = readAssets(tx, row.id);
       if (!assets.every((asset) => asset.published_at !== null)) return false;
-      if (revision.work === Work.Examine)
+      if (revision.intent === Intent.Examine)
         return assets.some((asset) => asset.kind === AssetKind.Produced);
       return (
         repositorySetMismatch(

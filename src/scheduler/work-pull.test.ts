@@ -7,7 +7,7 @@ import { testMachineIdentity } from "../kernel/test-identity.ts";
 import type { CallerContext } from "../kernel/operation.ts";
 import {
   ClaimNodeState,
-  ClaimWork,
+  ClaimIntent,
   WorkPullKind,
   WORK_PULL_WAIT_MS,
 } from "./contract.ts";
@@ -45,12 +45,12 @@ function harness(t: TestContext) {
     binding_id: row.worker_binding_id,
     worker_name: "coder@1",
     instance_count: 2,
-    traits: [],
+    tags: [],
     tombstone: false,
   });
   h.dependencies.declarations.declarationOf = () => ({
     declared_node_states: [ClaimNodeState.Available],
-    declared_works: Object.values(ClaimWork),
+    declared_intents: Object.values(ClaimIntent),
     resource_budget: { wall_time_ms: 7200000 },
   });
   h.dependencies.transitions.claim = (tx, nodeId) => {

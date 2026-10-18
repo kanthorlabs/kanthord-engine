@@ -64,7 +64,7 @@ import {
   projectOperations,
 } from "./contract.ts";
 import { RepositoryFileState } from "../repository/contract.ts";
-import { TRAIT_KEY_MAX_BYTES } from "../kernel/trait.ts";
+import { TAG_MAX_BYTES } from "../kernel/tag.ts";
 import { projectMigrations } from "./migrations.ts";
 import { SshErrorCode, type SshIdentity } from "../repository/ssh-identity.ts";
 import {
@@ -837,7 +837,7 @@ test("workerBindingOf reads current configuration, disablement and tombstone in 
     generation: revisionOf(f, first),
     resource_budget: null,
     entries: [],
-    traits: [],
+    tags: [],
     tombstone: false,
   });
   const next = f.write(TWO_INSTANCES);
@@ -1500,15 +1500,15 @@ test("an external worker refuses the placement field", async (t) => {
   assert.deepEqual(f.snapshot(), before);
 });
 
-const TRAIT_PREFIX = "platform.";
-const TRAIT_KEY_MAX = `${TRAIT_PREFIX}${"a".repeat(TRAIT_KEY_MAX_BYTES - TRAIT_PREFIX.length)}`;
+const TAG_PREFIX = "platform.";
+const TAG_MAX = `${TAG_PREFIX}${"a".repeat(TAG_MAX_BYTES - TAG_PREFIX.length)}`;
 
-function tracedWorker(traits: unknown, worker = NATIVE_WORKER) {
+function tracedWorker(tags: unknown, worker = NATIVE_WORKER) {
   const binding = workerBinding(worker);
-  return { ...binding, config: { ...binding.config, traits } };
+  return { ...binding, config: { ...binding.config, tags } };
 }
 
-test("worker traits accept a key of 64 bytes and read an absent field as an empty list", async (t) => {
+test("worker tags accept a tag of 64 bytes and read an absent field as an empty list", async (t) => {
   const f = writeFixture(t);
   const read = () =>
     f.store.transaction((tx) =>
@@ -1518,51 +1518,51 @@ test("worker traits accept a key of 64 bytes and read an absent field as an empt
     f.store.transaction((tx) =>
       f.project.workerBindingsOf(tx, f.params.project_id),
     );
-  assert.equal(Buffer.byteLength(TRAIT_KEY_MAX), TRAIT_KEY_MAX_BYTES);
+  assert.equal(Buffer.byteLength(TAG_MAX), TAG_MAX_BYTES);
   const first = await f.write({ [WORKER_NAME]: workerBinding() });
-  assert.deepEqual(read()?.traits, []);
+  assert.deepEqual(read()?.tags, []);
   await f.write(
-    { [WORKER_NAME]: tracedWorker([TRAIT_KEY_MAX, "toolchain.xcode_16"]) },
+    { [WORKER_NAME]: tracedWorker([TAG_MAX, "toolchain.xcode_16"]) },
     first.binding_set_version,
   );
-  assert.deepEqual(read()?.traits, [TRAIT_KEY_MAX, "toolchain.xcode_16"]);
+  assert.deepEqual(read()?.tags, [TAG_MAX, "toolchain.xcode_16"]);
   assert.deepEqual(
-    list().map(({ traits }) => traits),
-    [[TRAIT_KEY_MAX, "toolchain.xcode_16"]],
+    list().map(({ tags }) => tags),
+    [[TAG_MAX, "toolchain.xcode_16"]],
   );
 });
 
-test("worker traits refuse a longer key, an upper-case key, an empty segment, a repeated key and a nonlist value", async (t) => {
+test("worker tags refuse a longer tag, an upper-case tag, an empty segment, a repeated tag and a nonlist value", async (t) => {
   const f = writeFixture(t);
   const before = f.snapshot();
-  const cases: Array<{ traits: unknown; trait: string | null }> = [
-    { traits: [`${TRAIT_KEY_MAX}a`], trait: `${TRAIT_KEY_MAX}a` },
-    { traits: ["platform.macOS"], trait: "platform.macOS" },
-    { traits: ["platform..macos"], trait: "platform..macos" },
+  const cases: Array<{ tags: unknown; tag: string | null }> = [
+    { tags: [`${TAG_MAX}a`], tag: `${TAG_MAX}a` },
+    { tags: ["platform.macOS"], tag: "platform.macOS" },
+    { tags: ["platform..macos"], tag: "platform..macos" },
     {
-      traits: ["platform.macos", "platform.macos"],
-      trait: "platform.macos",
+      tags: ["platform.macos", "platform.macos"],
+      tag: "platform.macos",
     },
-    { traits: "platform.macos", trait: null },
-    { traits: [7], trait: null },
+    { tags: "platform.macos", tag: null },
+    { tags: [7], tag: null },
   ];
-  for (const { traits, trait } of cases)
+  for (const { tags, tag } of cases)
     await rejectsWrite(
-      f.write({ [WORKER_NAME]: tracedWorker(traits) }),
+      f.write({ [WORKER_NAME]: tracedWorker(tags) }),
       HttpStatus.BadRequest,
-      ProjectErrorCode.WorkerTraitsInvalid,
-      { binding: WORKER_NAME, trait },
+      ProjectErrorCode.WorkerTagsInvalid,
+      { binding: WORKER_NAME, tag },
     );
   await rejectsWrite(
     f.write({ [WORKER_NAME]: tracedWorker(["Platform"], EXTERNAL_WORKER) }),
     HttpStatus.BadRequest,
-    ProjectErrorCode.WorkerTraitsInvalid,
-    { binding: WORKER_NAME, trait: "Platform" },
+    ProjectErrorCode.WorkerTagsInvalid,
+    { binding: WORKER_NAME, tag: "Platform" },
   );
   assert.deepEqual(f.snapshot(), before);
 });
 
-test("a change of worker traits creates the next revision of the binding", async (t) => {
+test("a change of worker tags creates the next revision of the binding", async (t) => {
   const f = writeFixture(t);
   const read = () =>
     f.store.transaction((tx) =>
@@ -1586,7 +1586,7 @@ test("a change of worker traits creates the next revision of the binding", async
     [ChangeKind.Revised],
   );
   assert.equal(read()?.revision, REVISION_TWO);
-  assert.deepEqual(read()?.traits, ["platform.macos"]);
+  assert.deepEqual(read()?.tags, ["platform.macos"]);
 });
 
 const MACOS_NODE = "node_01ARZ3NDEKTSV4RRFFQ69G5FAA";
@@ -1598,7 +1598,7 @@ function macosCoverage(project: () => ProjectService) {
     assert.ok(tx.database.isTransaction);
     const covered = project()
       .workerBindingsOf(tx, projectId)
-      .some(({ traits }) => traits.includes("platform.macos"));
+      .some(({ tags }) => tags.includes("platform.macos"));
     reads.push(covered ? 0 : 1);
     return covered
       ? []

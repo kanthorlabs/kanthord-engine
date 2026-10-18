@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { gatewayOperations } from "../../gateway/contract.ts";
 import {
   NodeState,
-  Work,
+  Intent,
   type Evidence,
   type Assessment,
   type Outcome,
@@ -123,14 +123,14 @@ test(
       cli,
       project.id,
       "examine-1.md",
-      Work.Examine,
+      Intent.Examine,
       [bindings.bindings.repo!.id],
     );
     const implement = await createJourneyNode(
       cli,
       project.id,
       "implement-a.md",
-      Work.Implement,
+      Intent.Implement,
       [bindings.bindings.repo!.id],
     );
     await addDependency(cli, project.id, examine, implement);

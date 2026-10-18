@@ -28,14 +28,14 @@ import {
   type OperationResult,
 } from "../../kernel/operation.ts";
 import { temporary, hostEnvironment } from "../../kernel/test-support.ts";
-import { missionOperations, Work } from "../../mission/contract.ts";
+import { missionOperations, Intent } from "../../mission/contract.ts";
 import { RepositoryComponent } from "../../repository/index.ts";
 import {
   WorkPullKind,
   type ExecutionRecord,
 } from "../../scheduler/contract.ts";
 import {
-  ExecutionWork,
+  ExecutionIntent,
   workerOperations,
   type RepositoryTransport,
 } from "../../worker/contract.ts";
@@ -212,7 +212,7 @@ test(
       ["mission", "node", "create", mission.id],
       {
         filename: "examine.md",
-        content: { ...CONTENT, work: Work.Examine, bindings: [] },
+        content: { ...CONTENT, intent: Intent.Examine, bindings: [] },
         tasks: [],
         reason: "runtime acceptance",
         expected_mission_version: FIRST_REVISION,
@@ -231,7 +231,7 @@ test(
         filename: `${name}.md`,
         content: {
           ...CONTENT,
-          work: Work.Implement,
+          intent: Intent.Implement,
           bindings: [bindingSet.bindings.repo!.id],
         },
         tasks: [],
@@ -510,7 +510,7 @@ test(
       hostTools: unusedHostTools,
       setup: runtimeX.setup,
       claim: x.execution,
-      work: ExecutionWork.Implement,
+      intent: ExecutionIntent.Implement,
       agent: runtimeX.setup.agents[0]!,
       credential: {
         credential_id: runtimeX.item.credential_id,
@@ -697,7 +697,7 @@ test(
         hostTools: unusedHostTools,
         setup: runtimeY.setup,
         claim: y.execution,
-        work: ExecutionWork.Implement,
+        intent: ExecutionIntent.Implement,
         agent: runtimeY.setup.agents[0]!,
         credential: {
           credential_id: runtimeY.item.credential_id,

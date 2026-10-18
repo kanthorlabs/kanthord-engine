@@ -137,12 +137,12 @@ components:
               type: array
               items:
                 type: string
-            work:
+            intent:
               type: string
               enum:
                 - implement
                 - examine
-            requires:
+            tags:
               default: []
               type: array
               items:
@@ -155,8 +155,8 @@ components:
             - criterion
             - verifications
             - bindings
-            - work
-            - requires
+            - intent
+            - tags
           additionalProperties: false
         tasks:
           type: array
@@ -790,12 +790,12 @@ components:
             maxLength: 31
             pattern: ^node_[0-7][0-9A-HJKMNP-TV-Z]{25}$
             description: node_ followed by a canonical 26-character uppercase ULID.
-        work:
+        intent:
           type: string
           enum:
             - implement
             - examine
-        requires:
+        tags:
           type: array
           items:
             type: string
@@ -814,6 +814,6 @@ components:
         - attempt
         - priority
         - depends_on
-        - work
-        - requires
+        - intent
+        - tags
       additionalProperties: false

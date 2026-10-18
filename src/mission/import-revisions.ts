@@ -15,7 +15,7 @@ import {
   type Revision,
   type RevisionChange,
   type TaskContent,
-  type Work,
+  type Intent,
 } from "./contract.ts";
 import {
   isTaskEntry,
@@ -62,8 +62,8 @@ function importNodeContent(item: ResolvedImportEntry): Owned<Content> {
     filename,
     content: {
       ...content,
-      work: entry.work as Work,
-      requires: entry.requires,
+      intent: entry.intent as Intent,
+      tags: entry.tags,
     },
   };
 }

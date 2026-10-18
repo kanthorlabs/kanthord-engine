@@ -21,7 +21,7 @@ import {
   AssetKind,
   MissionErrorCode,
   missionOperations,
-  Work,
+  Intent,
   type EvidenceAsset,
   type Revision,
 } from "../../mission/contract.ts";
@@ -218,7 +218,7 @@ async function setup(t: TestContext) {
   };
   const create = async (
     filename: string,
-    work: Work,
+    intent: Intent,
     names: string[],
     dependentId?: string,
   ) => {
@@ -228,7 +228,7 @@ async function setup(t: TestContext) {
         filename,
         content: {
           ...CONTENT,
-          work,
+          intent,
           bindings: names.map((name) => binding(name).id),
         },
         tasks: [],
@@ -244,10 +244,10 @@ async function setup(t: TestContext) {
       });
     return nodeId;
   };
-  const E = await create("examine-1.md", Work.Examine, []);
+  const E = await create("examine-1.md", Intent.Examine, []);
   const A = await create(
     "implement-a.md",
-    Work.Implement,
+    Intent.Implement,
     ["repo", "store", "store-b"],
     E,
   );
@@ -613,7 +613,7 @@ async function failoverSetup(t: TestContext) {
       filename: "implement-a.md",
       content: {
         ...CONTENT,
-        work: Work.Implement,
+        intent: Intent.Implement,
         bindings: ["repo", "primary", "secondary"].map(
           (name) => binding(name).id,
         ),

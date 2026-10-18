@@ -261,7 +261,7 @@ components:
           required:
             - wall_time_ms
           additionalProperties: false
-        work:
+        intent:
           type: string
           enum:
             - implement
@@ -350,6 +350,6 @@ components:
         - agents
         - templates
         - resource_budget
-        - work
+        - intent
         - repositories
       additionalProperties: false

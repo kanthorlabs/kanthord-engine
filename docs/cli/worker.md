@@ -249,14 +249,14 @@ shared types, requiredness, defaults and validation. HTTP `200` returns
 one page of released worker summaries in ascending alphabetical order by exact name,
 under the shared [pagination rule](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/architecture.impl.md#pagination). Each item contains
 `name: WorkerName`, `host: "kanthord" | "external-harness"`,
-`declared_node_states: string[]` and `declared_works: ("implement" | "examine")[]`.
-The Scheduler admits a node only when the declared works hold the work of the node.
+`declared_node_states: string[]` and `declared_intents: ("implement" | "examine")[]`.
+The Scheduler admits a node only when the declared intents hold the intent of the node.
 
 The catalog describes supplied static templates. It is not a
 runtime plugin store, and registration does not add entries. The declared workers
 and their capabilities are:
 
-| Worker          | Host                           | Method / agent      | Declared node states                         | Declared works         |
+| Worker          | Host                           | Method / agent      | Declared node states                         | Declared intents       |
 | --------------- | ------------------------------ | ------------------- | -------------------------------------------- | ---------------------- |
 | `coder@1`       | kanthord                       | steps / `swe@1`     | `Available`                                  | `implement`, `examine` |
 | `reviewer@1`    | kanthord                       | evaluation / `re@1` | `Waiting`, `External.Requested`              | `implement`, `examine` |

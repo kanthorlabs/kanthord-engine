@@ -9,7 +9,7 @@ import {
   AssetKind,
   NodeState,
   MissionErrorCode,
-  Work,
+  Intent,
   type evidenceDeleteSchema,
 } from "./contract.ts";
 import { isTerminal } from "./admission.ts";
@@ -29,7 +29,7 @@ import { endLiveClaim, transition } from "./control.ts";
 import {
   readDependencies,
   readMissionNodes,
-  workOf,
+  intentOf,
   type NodeRow,
 } from "./store.ts";
 import type { Dependencies } from "./service.ts";
@@ -64,7 +64,9 @@ export function admitDelete(
   const dependents = readDependencies(tx, node.mission_id)
     .filter((edge) => edge.depends_on === node.id)
     .map((edge) => nodes.get(edge.dependent))
-    .filter((row) => row !== undefined && workOf(tx, row.id) === Work.Examine);
+    .filter(
+      (row) => row !== undefined && intentOf(tx, row.id) === Intent.Examine,
+    );
   if (![node, ...dependents].every((row) => isTerminal(row?.state ?? null)))
     throw new OperationError(
       HttpStatus.Conflict,

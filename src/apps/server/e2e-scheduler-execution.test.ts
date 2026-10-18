@@ -8,7 +8,7 @@ import { configuration, CONFIG_VERSION } from "../../config/index.ts";
 import { writePrivate } from "../../kernel/files.ts";
 import { ulidSchema } from "../../kernel/identity.ts";
 import { temporary } from "../../kernel/test-support.ts";
-import { NodeState, Work } from "../../mission/contract.ts";
+import { NodeState, Intent } from "../../mission/contract.ts";
 import {
   ClaimState,
   WorkPullKind,
@@ -219,7 +219,7 @@ async function setup(t: TestContext, short = false) {
     ["mission", "node", "create", mission.id],
     {
       filename: "examine-1.md",
-      content: { ...CONTENT, work: Work.Examine },
+      content: { ...CONTENT, intent: Intent.Examine },
       tasks: [],
       reason: "plan",
       expected_mission_version: 1,
@@ -231,7 +231,7 @@ async function setup(t: TestContext, short = false) {
       filename: "implement-1.md",
       content: {
         ...CONTENT,
-        work: Work.Implement,
+        intent: Intent.Implement,
         bindings: [applied.bindings.repo!.id],
       },
       tasks: [],

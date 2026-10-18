@@ -298,7 +298,7 @@ settlement can also produce an earlier empty answer.
 
 The authenticated binding determines the project. The file accepts no project
 override, node/mission selector, priority, claim kind, worker-name override,
-declared-state override, health assertion, trait, attempt or revision.
+declared-state override, health assertion, tag, attempt or revision.
 An external harness's orchestrator uses the same pull as any other instance;
 it cannot acquire a chosen node or authorize its own claim.
 
@@ -310,8 +310,8 @@ it cannot acquire a chosen node or authorize its own claim.
 2. Scheduler selects the first job that the claimant admits
    in the project's queue order. Compatibility includes exact worker name,
    declared node state and the [match](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/scheduler-service.md#match).
-   A claimant admits a node when its worker declares the `work` of the node
-   and the `traits` of its worker binding hold every trait of the `requires` list of the node.
+   A claimant admits a node when its worker declares the `intent` of the node
+   and the `tags` of its worker binding include every tag of the node.
    The match reads the pinned revision of an open attempt or the current revision before the first claim.
    The claim walk skips each job that the claimant does not admit.
    A worker name with no worker declaration gives no claimant, and its pull answers `no-work`.

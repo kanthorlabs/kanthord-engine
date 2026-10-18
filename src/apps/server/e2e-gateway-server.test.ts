@@ -30,7 +30,11 @@ import {
 } from "../../kernel/health.ts";
 import { HttpStatus } from "../../kernel/http.ts";
 import { temporary } from "../../kernel/test-support.ts";
-import { type Mission, type NodeChange, Work } from "../../mission/contract.ts";
+import {
+  type Mission,
+  type NodeChange,
+  Intent,
+} from "../../mission/contract.ts";
 import { BindingKind, projectOperations } from "../../project/contract.ts";
 import type { Job } from "../../scheduler/contract.ts";
 import type { AgentEnablement } from "../../agent/contract.ts";
@@ -444,7 +448,7 @@ test("E07.5 mission examine node creation queues the created node", async (t) =>
   const path = file(fixture.directory, "node.json", {
     filename: "examine.md",
     content: {
-      work: Work.Examine,
+      intent: Intent.Examine,
       name: "Plan",
       requirement: "Do the work",
       criterion: "Work is done",

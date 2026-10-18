@@ -8,7 +8,7 @@ import {
   handoverPayloadSchema,
   type CredentialAnswer,
 } from "../../custody/contract.ts";
-import { Work } from "../../mission/contract.ts";
+import { Intent } from "../../mission/contract.ts";
 import { httpClient } from "../../gateway/client.ts";
 import { writePrivate } from "../../kernel/files.ts";
 import {
@@ -238,7 +238,7 @@ async function graph(
     ["mission", "node", "create", mission.id],
     {
       filename: "implement-1.md",
-      content: { ...CONTENT, work: Work.Implement, bindings: [bindingId] },
+      content: { ...CONTENT, intent: Intent.Implement, bindings: [bindingId] },
       tasks: [],
       reason: "plan",
       expected_mission_version: FIRST_REVISION,

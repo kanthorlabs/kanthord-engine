@@ -8,7 +8,7 @@ import {
   AssetKind,
   INLINE_BYTES_MAX,
   MissionErrorCode,
-  Work,
+  Intent,
   NodeState,
   repositoryAddressSchema,
   type Revision,
@@ -120,7 +120,7 @@ test("the tested input of an examine node with two repository bindings is a list
         node_id: nodeId,
         content: {
           ...revision.content,
-          work: Work.Implement,
+          intent: Intent.Implement,
           bindings: [id, storageId],
         },
         tasks: [],
@@ -271,7 +271,7 @@ function implementPair(t: TestContext) {
         ...prior,
         content: {
           ...prior.content,
-          work: Work.Implement,
+          intent: Intent.Implement,
           bindings: [firstId, secondId],
         },
         tasks: [],
@@ -383,7 +383,7 @@ test("verification coverage compares command multisets including pinned tasks", 
   h.store.transaction((tx) => {
     const revision = getRevision(tx, h.node_id, FIRST_REVISION);
     const node = readNode(tx, h.node_id)!;
-    revision.content.work = Work.Implement;
+    revision.content.intent = Intent.Implement;
     revision.tasks = [
       {
         id: createIdentity("node"),

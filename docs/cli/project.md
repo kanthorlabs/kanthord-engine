@@ -300,7 +300,7 @@ This example uses the proposed kind-specific fields below:
       "config": {
         "worker": "coder@1",
         "instance_count": 1,
-        "traits": ["platform.linux"],
+        "tags": ["platform.linux"],
         "resource_budget": { "turns": 50, "wall_time_ms": 1800000 },
         "entries": [{ "agent": "swe@1", "reasoning_effort": "high" }]
       }
@@ -374,7 +374,7 @@ A worker binding's `config` adds:
   `reviewer@1`; examples involving `tdd@1` do not make that worker available.
 - `instance_count`: **required**, integer from 0 to 64; no default. The value 0 makes the binding unavailable. An invalid value refuses the write with `project.bindings.worker.instance_count_range`.
 - `placement`: **optional** for a native worker, one of `server`, `worker`. Absence means `worker`. An external-harness worker forbids this field with `project.bindings.worker.field_forbidden`. An edit of an existing binding cannot change the effective placement and is refused with `project.bindings.worker.placement_changed`. The server stores the field as written.
-- `traits`: **optional** for every worker, a list of unique trait keys. Absence reads as `[]`. Each key matches `^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)*$` and holds at most 64 bytes. A nonlist value, a repeated key or a malformed key refuses the write with `project.bindings.worker.traits_invalid` and `details: { binding, trait }`. `trait` is `null` for a nonlist value or a nontext item. A change of `traits` creates the next revision of the binding.
+- `tags`: **optional** for every worker, a list of unique tags. Absence reads as `[]`. Each tag matches `^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)*$` and holds at most 64 bytes. A nonlist value, a repeated tag or a malformed tag refuses the write with `project.bindings.worker.tags_invalid` and `details: { binding, tag }`. `tag` is `null` for a nonlist value or a nontext item. A change of `tags` creates the next revision of the binding.
 - `resource_budget`: **optional** for a native worker, `{ turns, wall_time_ms }`.
   Both fields are required positive safe integers. Absence uses the template
   budget; presence overrides it. [Stop and budget](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/worker-service.impl.md#stop-and-budget)
@@ -418,7 +418,7 @@ configuration; it resolves none itself. A later disablement refuses resolution
 and leaves the worker binding in place.
 Two bindings of one worker can have equal configuration and independent counts.
 
-The [Scheduler match](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/scheduler-service.md#match) compares the traits of each worker binding with the requires list of each node.
+The [Scheduler match](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/scheduler-service.md#match) compares the tags of each worker binding with the tags of each node.
 A binding-set write reads the unmatched pairs of the project before and after its change, in its transaction.
 A pair that the after read holds and the before read lacks refuses the write with `409 project.bindings.worker.node_unmatched` and `details: { node_ids }`.
 The refusal writes no row. An unmatched pair that exists before the write refuses no write.
@@ -676,7 +676,7 @@ Every remote command can also answer the shared codes of [other.md](other.md#err
 | 400   | `project.bindings.worker.instance_count_range`             | The instance count is outside the worker limits.                                                                                                                                                               | binding apply                                                                                                                                         |
 | 409   | `project.bindings.worker.placement_changed`                | An edit changes the placement of a binding.                                                                                                                                                                    | binding apply                                                                                                                                         |
 | 409   | `project.bindings.worker.resource_changed`                 | An edit changes the worker resource of a binding.                                                                                                                                                              | binding apply                                                                                                                                         |
-| 400   | `project.bindings.worker.traits_invalid`                   | A worker `traits` value is no list, repeats a key or holds a malformed key; details `{ binding, trait }`.                                                                                                      | binding apply                                                                                                                                         |
+| 400   | `project.bindings.worker.tags_invalid`                     | A worker `tags` value is no list, repeats a tag or holds a malformed tag; details `{ binding, tag }`.                                                                                                          | binding apply                                                                                                                                         |
 | 409   | `project.bindings.worker.node_unmatched`                   | The write adds a pair of a node and a claimable state that no current worker binding covers; details `{ node_ids }`.                                                                                           | binding apply                                                                                                                                         |
 | 409   | `credential.credential.archived`                           | The credential of the binding is archived.                                                                                                                                                                     | binding verify, binding check                                                                                                                         |
 | 404   | `credential.credential.not_found`                          | The credential of the binding has no live revision, or it is not a credential of the Repository component.                                                                                                     | binding verify, binding check                                                                                                                         |

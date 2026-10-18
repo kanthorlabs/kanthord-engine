@@ -7,7 +7,7 @@ import {
   MissionBindingKind,
   RepositoryAction,
   Resolution,
-  Work,
+  Intent,
   frozenActionSchema,
   type FrozenAction,
   type MissionBindings,
@@ -34,7 +34,7 @@ export function actionsOfRevision(
   bindings: MissionBindings,
   revision: RevisionRow,
 ): FrozenAction[] {
-  if (revision.work === Work.Examine) return [];
+  if (revision.intent === Intent.Examine) return [];
   const actions: FrozenAction[] = [];
   for (const bindingId of bindingIdsSchema.parse(
     JSON.parse(revision.bindings),

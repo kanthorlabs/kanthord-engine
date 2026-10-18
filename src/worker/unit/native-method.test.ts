@@ -32,7 +32,7 @@ import {
 } from "./test-support.ts";
 import { WorkspaceRoot } from "./workspace.ts";
 import { noTranscript } from "./transcript.ts";
-import { ExecutionWork, type RepositoryTransport } from "../contract.ts";
+import { ExecutionIntent, type RepositoryTransport } from "../contract.ts";
 import type { MethodClients } from "./method-clients.ts";
 import { openNativeAgent, type NativeAgent } from "./native-agent.ts";
 import { renderWorkPrompt } from "../../agent/prompt-composer.ts";
@@ -77,7 +77,7 @@ test("S1 refusal aborts an active native session and records its stopped transcr
     hostTools: unusedHostTools,
     setup,
     claim,
-    work: ExecutionWork.Implement,
+    intent: ExecutionIntent.Implement,
     agent: setup.agents[0]!,
     credential: {
       credential_id: setup.agents[0]!.credential_id,
@@ -254,7 +254,7 @@ test("S1 native reviewer evaluates even when the attempt already contains an exp
 });
 test("native entry runs an examine report with the scripted provider", async (t) => {
   const setup = anthropicSetup({
-    work: ExecutionWork.Examine,
+    intent: ExecutionIntent.Examine,
     repositories: [],
   });
   const claim = {

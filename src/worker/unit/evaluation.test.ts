@@ -12,7 +12,7 @@ import {
 import { ExecutionBudget } from "./budget.ts";
 import { EndReason, ExecutionRun, ExecutionStop } from "./execution-run.ts";
 import { executionBoundary } from "./native-method.ts";
-import { ExecutionWork } from "../contract.ts";
+import { ExecutionIntent } from "../contract.ts";
 import { anthropicSetup, repositorySetup } from "./test-support.ts";
 import { WorkspaceRoot } from "./workspace.ts";
 import type { MethodClients } from "./method-clients.ts";
@@ -197,7 +197,9 @@ test("evaluation writes failed-verification assessments without inference and ga
   ]) {
     const repository = repositorySetup();
     const setup = anthropicSetup({
-      work: scenario.examine ? ExecutionWork.Examine : ExecutionWork.Implement,
+      intent: scenario.examine
+        ? ExecutionIntent.Examine
+        : ExecutionIntent.Implement,
       repositories: scenario.examine ? [] : [repository],
     });
     const claim = {

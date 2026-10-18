@@ -3,7 +3,7 @@ import { test, type TestContext } from "node:test";
 import { createIdentity } from "../kernel/identity.ts";
 import { canonicalJSON } from "../kernel/json.ts";
 import { testHumanIdentity } from "../kernel/test-identity.ts";
-import { ActorKind, AssessmentResult, Work, NodeState } from "./contract.ts";
+import { ActorKind, AssessmentResult, Intent, NodeState } from "./contract.ts";
 import { currencyOf, currentAssessmentOf, CurrencyReason } from "./currency.ts";
 import { assessmentRecord } from "./record-read.ts";
 import {
@@ -29,7 +29,7 @@ const NOW = 100;
 const ACTOR = { kind: ActorKind.Human, account: "ulrich", name: "Ulrich" };
 const WORKER = "coder@1";
 
-function fixture(t: TestContext, work: Work = Work.Implement) {
+function fixture(t: TestContext, intent: Intent = Intent.Implement) {
   const h = missionHarness(t, testHumanIdentity("ulrich", "Ulrich", "token"), {
     executionAttribution: {
       of: () => ({ client_id: null, name: null, worker_name: WORKER }),
@@ -46,9 +46,9 @@ function fixture(t: TestContext, work: Work = Work.Implement) {
     });
     tx.database
       .prepare(
-        "INSERT INTO mission_node_revision (node_id, revision, filename, name, requirement, criterion, verifications, bindings, work, requires, tasks, change, reason, actor, created_at) VALUES (?, ?, 'node.md', 'name', 'requirement', 'criterion', '[]', '[]', ?, '[]', '[]', '{}', 'reason', ?, ?)",
+        "INSERT INTO mission_node_revision (node_id, revision, filename, name, requirement, criterion, verifications, bindings, intent, tags, tasks, change, reason, actor, created_at) VALUES (?, ?, 'node.md', 'name', 'requirement', 'criterion', '[]', '[]', ?, '[]', '[]', '{}', 'reason', ?, ?)",
       )
-      .run(nodeId, FIRST_ATTEMPT, work, canonicalJSON(ACTOR), NOW);
+      .run(nodeId, FIRST_ATTEMPT, intent, canonicalJSON(ACTOR), NOW);
     openAttempt(tx, nodeId, FIRST_ATTEMPT, ACTOR, NOW);
     return missionId;
   });
@@ -88,7 +88,7 @@ test("a later human revision and unrelated evidence preserve the pinned assessme
   h.store.transaction((tx) => {
     tx.database
       .prepare(
-        "INSERT INTO mission_node_revision (node_id, revision, filename, name, requirement, criterion, verifications, bindings, work, requires, tasks, change, reason, actor, created_at) VALUES (?, ?, 'node.md', 'changed', 'requirement', 'criterion', '[]', '[]', 'implement', '[]', '[]', '{}', 'reason', ?, ?)",
+        "INSERT INTO mission_node_revision (node_id, revision, filename, name, requirement, criterion, verifications, bindings, intent, tags, tasks, change, reason, actor, created_at) VALUES (?, ?, 'node.md', 'changed', 'requirement', 'criterion', '[]', '[]', 'implement', '[]', '[]', '{}', 'reason', ?, ?)",
       )
       .run(h.node_id, SECOND_ATTEMPT, canonicalJSON(ACTOR), NOW);
     insertEvidence(
@@ -176,7 +176,7 @@ test("closure whose outcome names the assessment preserves its currency", (t) =>
 });
 
 test("a new dependency outcome makes an assessment not current", (t) => {
-  const h = fixture(t, Work.Examine);
+  const h = fixture(t, Intent.Examine);
   const childId = createIdentity("node");
   h.store.transaction((tx) => {
     insertNode(tx, {
@@ -226,7 +226,7 @@ test("a new dependency outcome makes an assessment not current", (t) => {
 });
 
 test("a removed dependency makes an assessment not current", (t) => {
-  const h = fixture(t, Work.Examine);
+  const h = fixture(t, Intent.Examine);
   const childId = createIdentity("node");
   h.store.transaction((tx) => {
     insertNode(tx, {

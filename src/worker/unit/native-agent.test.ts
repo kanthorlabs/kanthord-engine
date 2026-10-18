@@ -19,7 +19,7 @@ import { Diagnostic } from "../../kernel/errors.ts";
 import { createIdentity } from "../../kernel/identity.ts";
 import { temporary, hostEnvironment } from "../../kernel/test-support.ts";
 import { openNativeAgent } from "./native-agent.ts";
-import { ExecutionWork } from "../contract.ts";
+import { ExecutionIntent } from "../contract.ts";
 import {
   WorkerMethod,
   type ExecutionSetup,
@@ -74,7 +74,7 @@ async function fixture(
     method?: WorkerMethod;
     prepare?: (workspace: string, hostHome: string) => void;
     turnCheck?: (context: CancellationContext) => Promise<void>;
-    work?: ExecutionWork;
+    intent?: ExecutionIntent;
     checkouts?: (workspace: string) => string[];
   } = {},
 ) {
@@ -99,7 +99,7 @@ async function fixture(
       created_at: Date.now(),
       expired_at: Date.now() + 60000,
     },
-    work: options.work ?? ExecutionWork.Implement,
+    intent: options.intent ?? ExecutionIntent.Implement,
     agent: setup.agents[0]!,
     credential: {
       credential_id: setup.agents[0]!.credential_id,
@@ -221,7 +221,10 @@ test("native agent composes only the switched-on workspace files and the project
   );
 });
 
-async function composesOnePartPerBinding(t: TestContext, work: ExecutionWork) {
+async function composesOnePartPerBinding(
+  t: TestContext,
+  intent: ExecutionIntent,
+) {
   const names = ["first", "second"];
   const checkoutsOf = (workspace: string) =>
     names.map((name) => join(workspace, "checkouts", name));
@@ -236,7 +239,7 @@ async function composesOnePartPerBinding(t: TestContext, work: ExecutionWork) {
     },
     unusedHostTools,
     {
-      work,
+      intent,
       checkouts: checkoutsOf,
       prepare: (workspace) => {
         for (const [index, directory] of checkoutsOf(workspace).entries()) {
@@ -265,10 +268,10 @@ async function composesOnePartPerBinding(t: TestContext, work: ExecutionWork) {
 }
 
 test("an examine node composes one project prompt part for each repository binding in binding order", (t) =>
-  composesOnePartPerBinding(t, ExecutionWork.Examine));
+  composesOnePartPerBinding(t, ExecutionIntent.Examine));
 
 test("two bindings compose two parts in binding order from their checkouts", (t) =>
-  composesOnePartPerBinding(t, ExecutionWork.Implement));
+  composesOnePartPerBinding(t, ExecutionIntent.Implement));
 
 test("the work prompt lists both repositories", async (t) => {
   const current = task("both", "true");

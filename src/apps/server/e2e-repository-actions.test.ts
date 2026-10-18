@@ -13,7 +13,7 @@ import {
   Resolution,
   type Evidence,
   type Revision,
-  Work,
+  Intent,
 } from "../../mission/contract.ts";
 import { type ExecutionRecord } from "../../scheduler/contract.ts";
 import {
@@ -129,7 +129,7 @@ async function setup(t: TestContext) {
     bindings.items.find((item) => item.name === name)!;
   const create = async (
     filename: string,
-    work: Work,
+    intent: Intent,
     names: string[],
     dependentId?: string,
   ) => {
@@ -139,7 +139,7 @@ async function setup(t: TestContext) {
         filename,
         content: {
           ...CONTENT,
-          work,
+          intent,
           bindings: names.map((name) => binding(name).id),
         },
         tasks: [],
@@ -155,8 +155,8 @@ async function setup(t: TestContext) {
       });
     return nodeId;
   };
-  const I = await create("examine-1.md", Work.Examine, []);
-  const P = await create("implement-p.md", Work.Implement, [GATED], I);
+  const I = await create("examine-1.md", Intent.Examine, []);
+  const P = await create("implement-p.md", Intent.Implement, [GATED], I);
   const p = await pushNodeBranch(t, gatedBare.bare, P, "implement p\n");
   const machine = await cliMachine(session, {
     masterKey: fixture.config.master_key,
@@ -300,7 +300,7 @@ test("E03 repository actions CLI journey", { timeout: TIMEOUT }, async (t) => {
     assert.equal(asset.address.commit, MERGED_COMMIT);
     assert.equal((await h.node(h.P)).state, NodeState.Completed);
   });
-  const Q = await h.create("implement-q.md", Work.Implement, [MERGE], h.I);
+  const Q = await h.create("implement-q.md", Intent.Implement, [MERGE], h.I);
   const q = await pushNodeBranch(h.t, h.mergeBare.bare, Q, "implement q\n");
   const e4 = await h.passingEvaluation(Q, h.merge.id, q);
   await t.test("E03.7 a merge push lands Q on main", async () => {

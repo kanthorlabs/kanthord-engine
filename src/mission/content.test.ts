@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import type { Transaction } from "../kernel/store.ts";
-import { MissionBindingKind, MissionErrorCode, Work } from "./contract.ts";
+import { MissionBindingKind, MissionErrorCode, Intent } from "./contract.ts";
 import {
   bindingKind,
   checkBindingRuleTable,
@@ -33,7 +33,7 @@ const base = () => ({
   criterion: "Check",
   verifications: ["true"],
   bindings: [],
-  work: Work.Implement,
+  intent: Intent.Implement,
 });
 
 function expectError(
@@ -99,32 +99,38 @@ test("verifications requires a nonempty list of nonblank strings", () => {
   }
 });
 
-test("bindings must be a list of text names for every work", () => {
-  for (const work of Object.values(Work)) {
-    assert.equal(validateNodeContent({ ...base(), work }, DEFAULT_MAX), work);
+test("bindings must be a list of text names for every intent", () => {
+  for (const intent of Object.values(Intent)) {
+    assert.equal(
+      validateNodeContent({ ...base(), intent }, DEFAULT_MAX),
+      intent,
+    );
     for (const value of [undefined, null, "binding", [12], [null]]) {
       bindingsError(() =>
-        validateNodeContent({ ...base(), work, bindings: value }, DEFAULT_MAX),
+        validateNodeContent(
+          { ...base(), intent, bindings: value },
+          DEFAULT_MAX,
+        ),
       );
     }
   }
 });
 
-test("an absent or unknown work answers mission.node.content_invalid", () => {
-  for (const work of [undefined, "task", "", 1, null])
+test("an absent or unknown intent answers mission.node.content_invalid", () => {
+  for (const intent of [undefined, "task", "", 1, null])
     contentError(
-      () => validateNodeContent({ ...base(), work }, DEFAULT_MAX),
-      "work",
+      () => validateNodeContent({ ...base(), intent }, DEFAULT_MAX),
+      "intent",
     );
 });
 
-test("requires holds unique trait keys and reads [] when absent", () => {
+test("tags holds unique tags and reads [] when absent", () => {
   validateNodeContent(base(), DEFAULT_MAX);
   validateNodeContent(
-    { ...base(), requires: ["platform.macos", "toolchain.xcode_16"] },
+    { ...base(), tags: ["platform.macos", "toolchain.xcode_16"] },
     DEFAULT_MAX,
   );
-  for (const requires of [
+  for (const tags of [
     "platform.macos",
     null,
     [1],
@@ -133,22 +139,22 @@ test("requires holds unique trait keys and reads [] when absent", () => {
     ["platform.macos", "platform.macos"],
   ])
     contentError(
-      () => validateNodeContent({ ...base(), requires }, DEFAULT_MAX),
-      "requires",
+      () => validateNodeContent({ ...base(), tags }, DEFAULT_MAX),
+      "tags",
     );
 });
 
 test("a task body holds the five plan content fields alone", () => {
-  const { work, ...task } = base();
-  assert.equal(work, Work.Implement);
+  const { intent, ...task } = base();
+  assert.equal(intent, Intent.Implement);
   validatePlanContent(task, DEFAULT_MAX);
 });
 
 test("an examine node with a task answers mission.node.content_invalid", () => {
-  validateTaskCount(Work.Implement, 0);
-  validateTaskCount(Work.Implement, 2);
-  validateTaskCount(Work.Examine, 0);
-  contentError(() => validateTaskCount(Work.Examine, 1), "tasks");
+  validateTaskCount(Intent.Implement, 0);
+  validateTaskCount(Intent.Implement, 2);
+  validateTaskCount(Intent.Examine, 0);
+  contentError(() => validateTaskCount(Intent.Examine, 1), "tasks");
 });
 
 test("each Text field uses its configured UTF-8 byte limit", () => {
@@ -193,37 +199,37 @@ const TWO_BINDINGS = 2;
 
 const rules = [
   {
-    work: Work.Implement,
+    intent: Intent.Implement,
     binding: MissionBindingKind.Repository,
     allowed: [SINGLE_BINDING, TWO_BINDINGS],
     forbidden: [NO_BINDINGS],
   },
   {
-    work: Work.Implement,
+    intent: Intent.Implement,
     binding: MissionBindingKind.Worker,
     allowed: [NO_BINDINGS],
     forbidden: [SINGLE_BINDING],
   },
   {
-    work: Work.Implement,
+    intent: Intent.Implement,
     binding: MissionBindingKind.Storage,
     allowed: [NO_BINDINGS, SINGLE_BINDING, TWO_BINDINGS],
     forbidden: [],
   },
   {
-    work: Work.Examine,
+    intent: Intent.Examine,
     binding: MissionBindingKind.Repository,
     allowed: [NO_BINDINGS, SINGLE_BINDING, TWO_BINDINGS],
     forbidden: [],
   },
   {
-    work: Work.Examine,
+    intent: Intent.Examine,
     binding: MissionBindingKind.Worker,
     allowed: [NO_BINDINGS],
     forbidden: [SINGLE_BINDING],
   },
   {
-    work: Work.Examine,
+    intent: Intent.Examine,
     binding: MissionBindingKind.Storage,
     allowed: [NO_BINDINGS, SINGLE_BINDING, TWO_BINDINGS],
     forbidden: [],
@@ -231,29 +237,29 @@ const rules = [
 ] as const;
 
 for (const rule of rules) {
-  test(`${rule.work} ${rule.binding} binding count`, () => {
+  test(`${rule.intent} ${rule.binding} binding count`, () => {
     assert.equal(
       bindingKind(resolved(rule.binding, NO_BINDINGS)),
       rule.binding,
     );
     const requiredRepository =
-      rule.work === Work.Implement &&
+      rule.intent === Intent.Implement &&
       rule.binding !== MissionBindingKind.Repository
         ? [resolved(MissionBindingKind.Repository, NO_BINDINGS)]
         : [];
     for (const count of rule.allowed)
-      checkBindingRuleTable(rule.work, [
+      checkBindingRuleTable(rule.intent, [
         ...requiredRepository,
         ...make(rule.binding, count),
       ]);
     for (const count of rule.forbidden)
       bindingsError(
         () =>
-          checkBindingRuleTable(rule.work, [
+          checkBindingRuleTable(rule.intent, [
             ...requiredRepository,
             ...make(rule.binding, count),
           ]),
-        { work: rule.work, binding_kind: rule.binding, count },
+        { intent: rule.intent, binding_kind: rule.binding, count },
       );
   });
 }
@@ -261,7 +267,7 @@ for (const rule of rules) {
 test("unknown resource kind is rejected", () => {
   bindingsError(() => bindingKind(resolved("other", NO_BINDINGS)));
   bindingsError(() =>
-    checkBindingRuleTable(Work.Examine, [resolved("other", NO_BINDINGS)]),
+    checkBindingRuleTable(Intent.Examine, [resolved("other", NO_BINDINGS)]),
   );
 });
 
@@ -279,17 +285,17 @@ const resolve = (_tx: Transaction, projectId: string, named: string) => {
   lookups.push(named);
   return catalog.get(named) ?? null;
 };
-const resolveNamed = (work: Work, named: unknown) =>
-  resolveNodeBindings(tx, resolve, PROJECT_ID, work, named);
+const resolveNamed = (intent: Intent, named: unknown) =>
+  resolveNodeBindings(tx, resolve, PROJECT_ID, intent, named);
 
 test("an implement node that names no repository binding answers mission.node.bindings_invalid", () => {
-  bindingsError(() => resolveNamed(Work.Implement, []), {
-    work: Work.Implement,
+  bindingsError(() => resolveNamed(Intent.Implement, []), {
+    intent: Intent.Implement,
     binding_kind: MissionBindingKind.Repository,
     count: NO_BINDINGS,
   });
-  bindingsError(() => resolveNamed(Work.Implement, ["archive"]), {
-    work: Work.Implement,
+  bindingsError(() => resolveNamed(Intent.Implement, ["archive"]), {
+    intent: Intent.Implement,
     binding_kind: MissionBindingKind.Repository,
     count: NO_BINDINGS,
   });
@@ -301,7 +307,9 @@ test("an implement node accepts two repository bindings in binding order", () =>
     ["web-repo", "api-repo"],
   ])
     assert.deepEqual(
-      resolveNamed(Work.Implement, named).map((binding) => binding.binding_id),
+      resolveNamed(Intent.Implement, named).map(
+        (binding) => binding.binding_id,
+      ),
       named.map((name) => catalog.get(name)!.binding_id),
     );
 });
@@ -309,7 +317,7 @@ test("an implement node accepts two repository bindings in binding order", () =>
 test("an examine node accepts zero, one and two repository bindings", () => {
   for (const named of [[], ["api-repo"], ["api-repo", "web-repo"]])
     assert.deepEqual(
-      resolveNamed(Work.Examine, named).map((binding) => binding.binding_id),
+      resolveNamed(Intent.Examine, named).map((binding) => binding.binding_id),
       named.map((name) => catalog.get(name)!.binding_id),
     );
 });
@@ -320,17 +328,19 @@ test("two storage bindings keep their write order", () => {
     ["archive", "api-repo", "reports"],
   ])
     assert.deepEqual(
-      resolveNamed(Work.Implement, named).map((binding) => binding.binding_id),
+      resolveNamed(Intent.Implement, named).map(
+        (binding) => binding.binding_id,
+      ),
       named.map((name) => catalog.get(name)!.binding_id),
     );
 });
 
 test("a write takes no binding from the project", () => {
   lookups.length = 0;
-  assert.deepEqual(resolveNamed(Work.Examine, []), []);
+  assert.deepEqual(resolveNamed(Intent.Examine, []), []);
   assert.deepEqual(lookups, []);
   assert.deepEqual(
-    resolveNamed(Work.Examine, ["archive"]).map(
+    resolveNamed(Intent.Examine, ["archive"]).map(
       (binding) => binding.binding_id,
     ),
     [catalog.get("archive")!.binding_id],
@@ -339,10 +349,10 @@ test("a write takes no binding from the project", () => {
 });
 
 test("a repeated, unresolved or nonlist binding answers mission.node.bindings_invalid", () => {
-  bindingsError(() => resolveNamed(Work.Examine, ["archive", "archive"]));
-  bindingsError(() => resolveNamed(Work.Examine, ["missing"]), {
+  bindingsError(() => resolveNamed(Intent.Examine, ["archive", "archive"]));
+  bindingsError(() => resolveNamed(Intent.Examine, ["missing"]), {
     binding: "missing",
   });
-  bindingsError(() => resolveNamed(Work.Examine, undefined));
-  bindingsError(() => resolveNamed(Work.Examine, [1]));
+  bindingsError(() => resolveNamed(Intent.Examine, undefined));
+  bindingsError(() => resolveNamed(Intent.Examine, [1]));
 });

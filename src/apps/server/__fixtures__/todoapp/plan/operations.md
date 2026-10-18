@@ -1,5 +1,5 @@
 ---
-work: implement
+intent: implement
 depends_on:
   - foundation.md
 bindings:

@@ -31,7 +31,7 @@ import {
   type Revision,
   type RebindResult,
   type Edge,
-  Work,
+  Intent,
   NodeState,
   type NodeChange,
   type ExportAnswer,
@@ -128,9 +128,9 @@ const NEW_TASK_FILE = "new-task.md";
 const TASK_FILE = "task-1.md";
 const NEW_NODE_CONTENT = [
   "---",
-  "work: implement",
+  "intent: implement",
   "depends_on: []",
-  "requires: []",
+  "tags: []",
   "bindings: [repo]",
   "verifications: [Check result]",
   "---",
@@ -173,7 +173,7 @@ const EXPORT = "export";
 const HELP = "--help";
 const ENDPOINT = "--endpoint";
 const TOKEN = "--token";
-const WORK = "--work";
+const INTENT_OPTION = "--intent";
 const STATE = "--state";
 const NODE_OPTION = "--node";
 const SPACE = " ";
@@ -215,7 +215,7 @@ const LIMIT_OUT_OF_RANGE = "cli.pagination.limit_out_of_range";
 const INVALID_PROJECT_ID_CODE = "cli.mission.get.invalid_project_id";
 const INVALID_MISSION_ID_CODE = "cli.mission.node.list.invalid_mission_id";
 const INVALID_NODE_ID_CODE = "cli.mission.node.get.invalid_node_id";
-const INVALID_WORK_CODE = "cli.mission.node.list.invalid_work";
+const INVALID_INTENT_CODE = "cli.mission.node.list.invalid_intent";
 const INVALID_STATE_CODE = "cli.mission.node.list.invalid_state";
 const INVALID_EDGE_NODE_CODE = "cli.mission.edge.list.invalid_node_id";
 const INVALID_RETIRE_NODE_CODE =
@@ -287,7 +287,10 @@ const INVALID_CASES = [
   { args: [GET, INVALID], code: INVALID_PROJECT_ID_CODE },
   { args: [NODE, LIST, INVALID], code: INVALID_MISSION_ID_CODE },
   { args: [NODE, GET, INVALID], code: INVALID_NODE_ID_CODE },
-  { args: [NODE, LIST, MISSION_ID, WORK, INVALID], code: INVALID_WORK_CODE },
+  {
+    args: [NODE, LIST, MISSION_ID, INTENT_OPTION, INVALID],
+    code: INVALID_INTENT_CODE,
+  },
   { args: [NODE, LIST, MISSION_ID, STATE, INVALID], code: INVALID_STATE_CODE },
   {
     args: [EDGE, LIST, MISSION_ID, NODE_OPTION, INVALID],
@@ -301,7 +304,15 @@ const INVALID_CASES = [
   },
   { args: [EDGE, LIST, MISSION_ID, LIMIT, ZERO_LIMIT], code: LIMIT_INVALID },
   {
-    args: [NODE, LIST, MISSION_ID, WORK, Work.Implement, WORK, Work.Implement],
+    args: [
+      NODE,
+      LIST,
+      MISSION_ID,
+      INTENT_OPTION,
+      Intent.Implement,
+      INTENT_OPTION,
+      Intent.Implement,
+    ],
     code: DUPLICATE_OPTION,
   },
 ];
@@ -385,7 +396,7 @@ function jsonFile(fixture: Fixture, name: string, body: unknown): string {
 async function createNode(
   fixture: Fixture,
   missionId: string,
-  work: Work,
+  intent: Intent,
   version: number,
   bindings: string[] = [],
   tasks: string[] = [],
@@ -393,13 +404,13 @@ async function createNode(
   assert.ok(missionId);
   assert.ok(Number.isSafeInteger(version));
   const body = {
-    filename: `${work}-${version}.md`,
-    content: { ...CONTENT, work, bindings },
+    filename: `${intent}-${version}.md`,
+    content: { ...CONTENT, intent, bindings },
     tasks: tasks.map((filename) => ({ filename, content: CONTENT })),
     reason: REASON,
     expected_mission_version: version,
   };
-  const path = jsonFile(fixture, `${work}-${version}.json`, body);
+  const path = jsonFile(fixture, `${intent}-${version}.json`, body);
   return success<Mutation>(
     await kanthord([MISSION, NODE, CREATE, missionId, FILE, path], fixture.env),
   );
@@ -418,7 +429,7 @@ test("mission read help works offline and exposes positional IDs and filters", a
   assert.ok(get.stdout.includes(PROJECT_ID_ARGUMENT));
   const list = await kanthord([MISSION, NODE, LIST, HELP], env);
   assert.equal(list.code, SUCCESS, list.stderr);
-  for (const flag of [WORK, STATE, INCLUDE_RETIRED])
+  for (const flag of [INTENT_OPTION, STATE, INCLUDE_RETIRED])
     assert.ok(list.stdout.includes(flag));
 });
 
@@ -462,7 +473,7 @@ test("mission node create help and local file and identity validation", async (t
   const args = [MISSION, NODE, CREATE, MISSION_ID, FILE, missing];
   refusal(await kanthord([...args, ...LOCAL_FLAGS], env), FILE_NOT_FOUND);
   const invalid = join(directory, "invalid.json");
-  writePrivate(invalid, JSON.stringify({ work: Work.Examine }));
+  writePrivate(invalid, JSON.stringify({ intent: Intent.Examine }));
   refusal(
     await kanthord(
       [MISSION, NODE, CREATE, MISSION_ID, FILE, invalid, ...LOCAL_FLAGS],
@@ -533,7 +544,7 @@ test(
     const key = ulid();
     const examineFile = jsonFile(fixture, "examine.json", {
       filename: "examine.md",
-      content: { ...CONTENT, work: Work.Examine },
+      content: { ...CONTENT, intent: Intent.Examine },
       tasks: [],
       reason: REASON,
       expected_mission_version: mission.version,
@@ -565,7 +576,11 @@ test(
           FILE,
           jsonFile(fixture, "update.json", {
             filename: "examine.md",
-            content: { ...CONTENT, work: Work.Examine, name: "Updated plan" },
+            content: {
+              ...CONTENT,
+              intent: Intent.Examine,
+              name: "Updated plan",
+            },
             tasks: [],
             reason: REASON,
             expected_revision: FIRST_REVISION,
@@ -646,7 +661,7 @@ test(
     const first = await createNode(
       fixture,
       mission.id,
-      Work.Implement,
+      Intent.Implement,
       updated.mission_version,
       [bindingId],
       [TASK_FILE],
@@ -654,7 +669,7 @@ test(
     const second = await createNode(
       fixture,
       mission.id,
-      Work.Implement,
+      Intent.Implement,
       first.mission_version,
       [bindingId],
     );
@@ -665,8 +680,8 @@ test(
     const read = success<Node>(
       await kanthord([MISSION, NODE, GET, firstId], fixture.env),
     );
-    assert.equal(read.work, Work.Implement);
-    assert.deepEqual(read.requires, []);
+    assert.equal(read.intent, Intent.Implement);
+    assert.deepEqual(read.tags, []);
     assert.deepEqual(
       read.tasks.map((task) => task.id),
       [taskId],
@@ -1017,13 +1032,13 @@ test(
     const examine = await createNode(
       fixture,
       mission.id,
-      Work.Examine,
+      Intent.Examine,
       mission.version,
     );
     const implement = await createNode(
       fixture,
       mission.id,
-      Work.Implement,
+      Intent.Implement,
       examine.mission_version,
       [bindingId],
       [TASK_FILE],
@@ -1118,7 +1133,7 @@ test(
             filename: "implement-tasks.md",
             content: {
               ...CONTENT,
-              work: Work.Implement,
+              intent: Intent.Implement,
               bindings: [bindingId],
             },
             tasks: [
@@ -1216,7 +1231,7 @@ test(
             filename: "implement-empty.md",
             content: {
               ...CONTENT,
-              work: Work.Implement,
+              intent: Intent.Implement,
               bindings: [bindingId],
             },
             tasks: [],
@@ -1285,13 +1300,13 @@ test("mission node retire force previews and removes dependent edges", async (t)
   const first = await createNode(
     fixture,
     mission.id,
-    Work.Examine,
+    Intent.Examine,
     mission.version,
   );
   const second = await createNode(
     fixture,
     mission.id,
-    Work.Examine,
+    Intent.Examine,
     first.mission_version,
   );
   const nodeId = first.revisions[0]!.node_id;
@@ -1393,7 +1408,7 @@ test("mission export writes into a shared directory and never overwrites a file"
   const examine = await createNode(
     fixture,
     mission.id,
-    Work.Examine,
+    Intent.Examine,
     mission.version,
   );
   const summary = {
@@ -1536,7 +1551,7 @@ async function scenarioExamine(fixture: Fixture): Promise<Scenario> {
   const mission = await scenarioProject(fixture);
   const path = jsonFile(fixture, EXAMINE_FILE, {
     filename: EXAMINE_PLAN,
-    content: { ...CONTENT, work: Work.Examine },
+    content: { ...CONTENT, intent: Intent.Examine },
     tasks: [],
     reason: REASON,
     expected_mission_version: mission.version,
@@ -1575,7 +1590,7 @@ async function scenarioExamine(fixture: Fixture): Promise<Scenario> {
   );
   assert.equal(peek.job?.node_id, examineId);
   const examine = await readNode(fixture, examineId);
-  assert.equal(examine.work, Work.Examine);
+  assert.equal(examine.intent, Intent.Examine);
   assert.equal(examine.state, NodeState.Available);
   return scenario;
 }
@@ -1600,7 +1615,7 @@ async function scenarioImplement(scenario: Scenario): Promise<void> {
   const implement = await createNode(
     fixture,
     mission.id,
-    Work.Implement,
+    Intent.Implement,
     scenario.version,
     [scenario.bindingId],
     [TASK_FILE],
@@ -1661,7 +1676,7 @@ async function scenarioTaskTransfer(scenario: Scenario): Promise<void> {
   const second = await createNode(
     fixture,
     mission.id,
-    Work.Implement,
+    Intent.Implement,
     scenario.version,
     [scenario.bindingId],
   );
@@ -1776,7 +1791,7 @@ async function scenarioImport(scenario: Scenario): Promise<void> {
       {
         ...CONTENT,
         filename: NEW_NODE_FILE,
-        work: Work.Implement,
+        intent: Intent.Implement,
         bindings: [REPOSITORY_NAME],
         depends_on: [],
       },
@@ -1947,7 +1962,7 @@ test(
       assert.equal(Buffer.byteLength(content.name, UTF8), LARGE_TEXT_BYTES);
       const path = jsonFile(fixture, SCENARIO_FILE, {
         filename: REFUSED_PLAN,
-        content: { ...content, work: Work.Examine },
+        content: { ...content, intent: Intent.Examine },
         tasks: [],
         reason: REASON,
         expected_mission_version: scenario.version,
@@ -2054,7 +2069,7 @@ test(
         const other = await createNode(
           fixture,
           mission.id,
-          Work.Implement,
+          Intent.Implement,
           scenario.version,
           [scenario.bindingId],
         );
@@ -2103,7 +2118,7 @@ test(
         const created = await createNode(
           fixture,
           mission.id,
-          Work.Examine,
+          Intent.Examine,
           scenario.version,
           order,
         );
@@ -2176,10 +2191,10 @@ const RESET_EMAIL_FILE = "add-password-reset-email.md";
 const SEND_EMAIL_FILE = "send-reset-email.md";
 const RESET_VERIFICATIONS = ["npm run e2e", "npm run test:reset"];
 const IMPORT_SET_DIRECTORY = "import-set";
-const WORK_KEY = "work:";
-const REQUIRES_KEY = "requires:";
+const INTENT_KEY = "intent:";
+const TAGS_KEY = "tags:";
 const NODE_KEY = "node:";
-const INVALID_WORK = "task";
+const INVALID_INTENT = "task";
 
 function planFile(
   frontMatter: string[],
@@ -2210,7 +2225,7 @@ function list(items: string[]): string {
 }
 
 function nodeFile(
-  work: Work,
+  intent: Intent,
   dependsOn: string[],
   bindings: string[],
   verifications: string[],
@@ -2220,9 +2235,9 @@ function nodeFile(
 ): string {
   return planFile(
     [
-      `work: ${work}`,
+      `intent: ${intent}`,
       `depends_on: ${list(dependsOn)}`,
-      "requires: []",
+      "tags: []",
       `bindings: ${list(bindings)}`,
       `verifications: ${list(verifications)}`,
     ],
@@ -2250,14 +2265,14 @@ function taskFile(
 function importSet(taskNode = RESET_FILE): Record<string, string> {
   return {
     [RECOVERY_FILE]: nodeFile(
-      Work.Examine,
+      Intent.Examine,
       [RESET_FILE, RESET_EMAIL_FILE],
       [],
       RESET_VERIFICATIONS,
       "Account recovery",
     ),
     [RESET_FILE]: nodeFile(
-      Work.Implement,
+      Intent.Implement,
       [],
       [REPOSITORY_NAME],
       RESET_VERIFICATIONS,
@@ -2278,7 +2293,7 @@ function importSet(taskNode = RESET_FILE): Record<string, string> {
       "Add the reset token expiry",
     ),
     [RESET_EMAIL_FILE]: nodeFile(
-      Work.Implement,
+      Intent.Implement,
       [RESET_FILE],
       [REPOSITORY_NAME],
       ["npm run e2e"],
@@ -2351,14 +2366,14 @@ function nodeNamed(page: Page<Node>, filename: string): Node {
 
 async function createRefused(
   scenario: Scenario,
-  work: Work,
+  intent: Intent,
   bindings: string[],
   code: string,
 ) {
   const { fixture, mission } = scenario;
   const path = jsonFile(fixture, SCENARIO_FILE, {
     filename: REFUSED_PLAN,
-    content: { ...CONTENT, work, bindings },
+    content: { ...CONTENT, intent, bindings },
     tasks: [],
     reason: REASON,
     expected_mission_version: scenario.version,
@@ -2373,7 +2388,7 @@ async function createRefused(
 }
 
 test(
-  "EF03.1-EF03.8 flat nodes carry their work through the CLI",
+  "EF03.1-EF03.8 flat nodes carry their intent through the CLI",
   { timeout: IMPORT_LIFECYCLE_TIMEOUT_MS },
   async (t) => {
     const fixture = await setup(t);
@@ -2425,11 +2440,14 @@ test(
         scenario.examineId = recovery.id;
       },
     );
-    await t.test("EF03.2 the node list filters by work examine", async () => {
-      const examine = await listNodes(scenario, [WORK, Work.Examine]);
+    await t.test("EF03.2 the node list filters by intent examine", async () => {
+      const examine = await listNodes(scenario, [
+        INTENT_OPTION,
+        Intent.Examine,
+      ]);
       assert.equal(examine.items.length, SINGLE_ITEM);
-      assert.equal(examine.items[0]!.work, Work.Examine);
-      assert.deepEqual(examine.items[0]!.requires, []);
+      assert.equal(examine.items[0]!.intent, Intent.Examine);
+      assert.deepEqual(examine.items[0]!.tags, []);
     });
     await t.test(
       "EF03.3 a task file that names an examine node is refused",
@@ -2489,13 +2507,13 @@ test(
       },
     );
     await t.test(
-      "EF03.4 a work change after the first attempt is locked",
+      "EF03.4 an intent change after the first attempt is locked",
       async () => {
         await readyAct(scenario, scenario.implementId);
         const node = await readNode(fixture, scenario.implementId);
         const path = jsonFile(fixture, SCENARIO_FILE, {
           filename: node.filename,
-          content: { ...node.content, work: Work.Examine },
+          content: { ...node.content, intent: Intent.Examine },
           tasks: node.tasks,
           reason: REASON,
           expected_revision: node.visible_revision,
@@ -2506,21 +2524,21 @@ test(
             [MISSION, NODE, UPDATE, node.id, FILE, path],
             fixture.env,
           ),
-          MissionErrorCode.WorkLocked,
+          MissionErrorCode.IntentLocked,
         );
       },
     );
-    await t.test("EF03.5 an unknown work filter is refused", async () => {
+    await t.test("EF03.5 an unknown intent filter is refused", async () => {
       refusal(
         await kanthord(
-          [MISSION, NODE, LIST, mission.id, WORK, INVALID_WORK],
+          [MISSION, NODE, LIST, mission.id, INTENT_OPTION, INVALID_INTENT],
           fixture.env,
         ),
-        INVALID_WORK_CODE,
+        INVALID_INTENT_CODE,
       );
     });
     await t.test(
-      "EF03.6 the Markdown export writes work, requires and node",
+      "EF03.6 the Markdown export writes intent, tags and node",
       async () => {
         const out = join(fixture.directory, OUTPUT_DIRECTORY);
         success(
@@ -2536,8 +2554,8 @@ test(
           ]),
         );
         for (const filename of [RECOVERY_FILE, RESET_FILE, RESET_EMAIL_FILE]) {
-          assert.ok(files[filename]?.includes(WORK_KEY), filename);
-          assert.ok(files[filename]?.includes(REQUIRES_KEY), filename);
+          assert.ok(files[filename]?.includes(INTENT_KEY), filename);
+          assert.ok(files[filename]?.includes(TAGS_KEY), filename);
         }
         for (const filename of [
           RESET_REQUEST_FILE,
@@ -2553,7 +2571,7 @@ test(
         const created = await createNode(
           fixture,
           mission.id,
-          Work.Examine,
+          Intent.Examine,
           scenario.version,
         );
         scenario.version = created.mission_version;
@@ -2580,7 +2598,7 @@ test(
       async () => {
         await createRefused(
           scenario,
-          Work.Implement,
+          Intent.Implement,
           [],
           MissionErrorCode.BindingsInvalid,
         );
@@ -2601,7 +2619,7 @@ test(
         const created = await createNode(
           fixture,
           mission.id,
-          Work.Implement,
+          Intent.Implement,
           scenario.version,
           pinned,
         );

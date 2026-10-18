@@ -19,7 +19,7 @@ import {
   type Evidence,
   type Revision,
   type ExternalAction,
-  Work,
+  Intent,
   missionOperations,
 } from "../../mission/contract.ts";
 import {
@@ -257,7 +257,7 @@ async function setup(t: TestContext) {
         filename,
         content: {
           ...CONTENT,
-          work: Work.Implement,
+          intent: Intent.Implement,
           bindings: names.map(
             (name) => bindings.items.find((item) => item.name === name)!.id,
           ),

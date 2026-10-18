@@ -10,7 +10,7 @@ import {
   MISSION_INITIAL_VERSION,
   MissionErrorCode,
   NodeState,
-  Work,
+  Intent,
   type ControlResult,
   type Edge,
   type ImportPreview,
@@ -489,11 +489,13 @@ todoapp(
     const all = await h.nodes(project);
     assert.equal(all.length, NODE_COUNT);
     assert.deepEqual(
-      all.filter((item) => item.work === Work.Examine).map((i) => i.filename),
+      all
+        .filter((item) => item.intent === Intent.Examine)
+        .map((i) => i.filename),
       [TODO_API],
     );
     assert.equal(
-      all.filter((item) => item.work === Work.Implement).length,
+      all.filter((item) => item.intent === Intent.Implement).length,
       NODE_COUNT - SINGLE_ITEM,
     );
     assert.equal(
@@ -568,8 +570,8 @@ todoapp(
         replaced(
           files,
           TODOS,
-          "work: implement\n",
-          "work: implement\nowner: x\n",
+          "intent: implement\n",
+          "intent: implement\nowner: x\n",
         ),
       (files: Record<string, string>) => {
         files[TODOS] += "\n## Notes\n\nAn unknown section.\n";
@@ -605,26 +607,23 @@ todoapp("EF06.8 a repeated file name is refused", async (h) => {
   );
 });
 
-todoapp(
-  "EF06.9 a task file refuses depends_on, requires and work",
-  async (h) => {
-    const project = await h.todoappProject();
-    for (const key of ["depends_on: []", "requires: []", "work: implement"])
-      await h.refusedImport(
-        project,
-        h.planFiles((files) =>
-          replaced(
-            files,
-            TODOS_CRUD,
-            "node: todos.md\n",
-            `node: todos.md\n${key}\n`,
-          ),
+todoapp("EF06.9 a task file refuses depends_on, tags and intent", async (h) => {
+  const project = await h.todoappProject();
+  for (const key of ["depends_on: []", "tags: []", "intent: implement"])
+    await h.refusedImport(
+      project,
+      h.planFiles((files) =>
+        replaced(
+          files,
+          TODOS_CRUD,
+          "node: todos.md\n",
+          `node: todos.md\n${key}\n`,
         ),
-        MissionErrorCode.PlanInvalid,
-        TODOS_CRUD,
-      );
-  },
-);
+      ),
+      MissionErrorCode.PlanInvalid,
+      TODOS_CRUD,
+    );
+});
 
 todoapp("EF06.10 a task file on an examine node is refused", async (h) => {
   const project = await h.todoappProject();
@@ -707,13 +706,13 @@ todoapp(
         files,
         FOUNDATION,
         "depends_on: []",
-        "depends_on: []\nrequires: [platform.macos]",
+        "depends_on: []\ntags: [platform.macos]",
       ),
     );
     const found = await h.refusedImport(
       project,
       paths,
-      MissionErrorCode.RequiresUnmatched,
+      MissionErrorCode.TagsUnmatched,
       FOUNDATION,
     );
     assert.equal(found.length, SINGLE_ITEM);
@@ -723,7 +722,7 @@ todoapp(
     const stderr = await h.refuses(
       h.applyArgs(project, paths),
       await h.applyBody(project, previewed, []),
-      MissionErrorCode.RequiresUnmatched,
+      MissionErrorCode.TagsUnmatched,
     );
     assert.deepEqual(claimsOf(refusalDetails(stderr)), EXPECTED_CLAIMS);
   },
@@ -944,7 +943,7 @@ todoapp(
 );
 
 todoapp(
-  "EF06.22 the work of a node with an open attempt is locked",
+  "EF06.22 the intent of a node with an open attempt is locked",
   async (h) => {
     const { project } = await h.baseline();
     const foundation = byFilename(await h.nodes(project))[FOUNDATION]!;
@@ -957,18 +956,18 @@ todoapp(
       ["mission", "node", "update", foundation.id],
       {
         filename: current.filename,
-        content: { ...current.content, work: Work.Examine },
+        content: { ...current.content, intent: Intent.Examine },
         tasks: current.tasks,
         reason: REASON,
         expected_revision: current.visible_revision,
         expected_mission_version: await h.missionVersion(project),
       },
-      MissionErrorCode.WorkLocked,
+      MissionErrorCode.IntentLocked,
     );
     const after = await h.node(foundation.id);
     assert.equal(after.visible_revision, current.visible_revision);
-    assert.equal(after.content.work, Work.Implement);
-    assert.equal(after.work, Work.Implement);
+    assert.equal(after.content.intent, Intent.Implement);
+    assert.equal(after.intent, Intent.Implement);
   },
 );
 

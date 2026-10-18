@@ -5,10 +5,10 @@ import { isObject, isString } from "../kernel/values.ts";
 import {
   MissionBindingKind,
   MissionErrorCode,
-  Work,
+  Intent,
   planFileNameSchema,
-  requiresSchema,
-  workSchema,
+  tagsSchema,
+  intentSchema,
 } from "./contract.ts";
 
 export const ContentField = {
@@ -18,8 +18,8 @@ export const ContentField = {
   Criterion: "criterion",
   Verifications: "verifications",
   Bindings: "bindings",
-  Work: "work",
-  Requires: "requires",
+  Intent: "intent",
+  Tags: "tags",
 } as const;
 export const CONTENT_FIELDS = Object.values(ContentField);
 export const TASK_CONTENT_FIELDS = [
@@ -48,8 +48,8 @@ const SPLIT_FIRST_PART_LIMIT = 1;
 type BindingKind = (typeof MissionBindingKind)[keyof typeof MissionBindingKind];
 type Range = { min: number; max: number };
 
-const bindingRules: Record<Work, Record<BindingKind, Range>> = {
-  [Work.Implement]: {
+const bindingRules: Record<Intent, Record<BindingKind, Range>> = {
+  [Intent.Implement]: {
     [MissionBindingKind.Repository]: {
       min: SINGLE_BINDING,
       max: UNBOUNDED_BINDINGS,
@@ -60,7 +60,7 @@ const bindingRules: Record<Work, Record<BindingKind, Range>> = {
       max: UNBOUNDED_BINDINGS,
     },
   },
-  [Work.Examine]: {
+  [Intent.Examine]: {
     [MissionBindingKind.Repository]: {
       min: NO_BINDINGS,
       max: UNBOUNDED_BINDINGS,
@@ -102,8 +102,8 @@ export function validateText(
   if (Buffer.byteLength(value, UTF8) > textMaxBytes) invalidContent(field);
 }
 
-export function validateTaskCount(work: Work, taskCount: number): void {
-  if (work === Work.Examine && taskCount > NO_TASKS)
+export function validateTaskCount(intent: Intent, taskCount: number): void {
+  if (intent === Intent.Examine && taskCount > NO_TASKS)
     invalidContent(TASKS_FIELD);
 }
 
@@ -116,15 +116,15 @@ function recordOf(content: unknown): Record<string, unknown> {
 export function validateNodeContent(
   content: unknown,
   textMaxBytes: number,
-): Work {
+): Intent {
   validatePlanContent(content, textMaxBytes);
   const input = recordOf(content);
-  const work = input[Field.Work];
-  if (!workSchema.safeParse(work).success) invalidContent(Field.Work);
-  const requires = input[Field.Requires];
-  if (requires !== undefined && !requiresSchema.safeParse(requires).success)
-    invalidContent(Field.Requires);
-  return work as Work;
+  const intent = input[Field.Intent];
+  if (!intentSchema.safeParse(intent).success) invalidContent(Field.Intent);
+  const tags = input[Field.Tags];
+  if (tags !== undefined && !tagsSchema.safeParse(tags).success)
+    invalidContent(Field.Tags);
+  return intent as Intent;
 }
 
 export function validatePlanContent(
@@ -199,7 +199,7 @@ export function resolveNodeBindings(
   tx: Transaction,
   resolve: BindingResolver,
   projectId: string,
-  work: Work,
+  intent: Intent,
   named: unknown,
 ): ResolvedBinding[] {
   if (!Array.isArray(named)) invalidBindings();
@@ -211,12 +211,12 @@ export function resolveNodeBindings(
   });
   const ids = resolved.map((binding) => binding.binding_id);
   if (new Set(ids).size !== ids.length) invalidBindings();
-  checkBindingRuleTable(work, resolved);
+  checkBindingRuleTable(intent, resolved);
   return resolved;
 }
 
 export function checkBindingRuleTable(
-  work: Work,
+  intent: Intent,
   resolved: ResolvedBinding[],
 ): void {
   const counts: Record<BindingKind, number> = {
@@ -235,8 +235,8 @@ export function checkBindingRuleTable(
   }
   for (const binding of Object.values(MissionBindingKind)) {
     const count = counts[binding];
-    const range = bindingRules[work][binding];
+    const range = bindingRules[intent][binding];
     if (count < range.min || count > range.max)
-      invalidBindings({ work, binding_kind: binding, count });
+      invalidBindings({ intent, binding_kind: binding, count });
   }
 }

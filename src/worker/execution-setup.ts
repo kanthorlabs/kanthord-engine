@@ -30,7 +30,7 @@ export async function executionSetup(
     | "pinnedCredentialMetadata"
     | "credentialMetadata"
     | "repositoryBindingIdsOf"
-    | "workOf"
+    | "intentOf"
     | "repositoryPolicyOf"
   > & { schedulerClaims: Pick<SchedulerClaims, "agentSelectionsOf"> },
   worker: Pick<WorkerService, "declarationOf" | "workerAgentView">,
@@ -152,7 +152,7 @@ export async function executionSetup(
       agents,
       templates,
       resource_budget: row.resource_budget ?? declaration.resource_budget,
-      work: dependencies.workOf(tx, claim.nodeId, claim.pinnedRevision),
+      intent: dependencies.intentOf(tx, claim.nodeId, claim.pinnedRevision),
       repositories,
     });
   });

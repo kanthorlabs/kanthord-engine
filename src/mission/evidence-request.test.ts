@@ -7,7 +7,7 @@ import { testHumanIdentity } from "../kernel/test-identity.ts";
 import {
   AssetKind,
   MissionErrorCode,
-  Work,
+  Intent,
   NodeState,
   PlatformAddressKind,
   RepositoryAction,
@@ -67,7 +67,7 @@ function fixture(t: TestContext) {
       filename: "implement.md",
       content: {
         ...revision.content,
-        work: Work.Implement,
+        intent: Intent.Implement,
         bindings: [bindingId],
       },
       tasks: [],

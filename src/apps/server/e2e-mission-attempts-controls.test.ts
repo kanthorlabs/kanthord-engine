@@ -5,7 +5,7 @@ import { ulid } from "ulid";
 import { temporary } from "../../kernel/test-support.ts";
 import { writePrivate } from "../../kernel/files.ts";
 import {
-  Work,
+  Intent,
   NodeState,
   ActorKind,
   AssessmentResult,
@@ -151,7 +151,7 @@ async function setup(t: TestContext) {
     write<NodeChange>(["mission", "node", "create", mission.id], body);
   const examine = await create({
     filename: "examine-1.md",
-    content: { ...CONTENT, work: Work.Examine },
+    content: { ...CONTENT, intent: Intent.Examine },
     tasks: [],
     reason: "plan",
     expected_mission_version: FIRST_REVISION,
@@ -161,7 +161,7 @@ async function setup(t: TestContext) {
     filename: "implement-1.md",
     content: {
       ...CONTENT,
-      work: Work.Implement,
+      intent: Intent.Implement,
       bindings: [binding.bindings.repo!.id],
     },
     tasks: [],
