@@ -164,7 +164,10 @@ test("positive integer parser accepts decimal safe integers only", () => {
 test("single-use option rejects repeats", () => {
   assert.throws(
     () => singleUse("--endpoint")("a", "b"),
-    diagnosticCode(DUPLICATE_OPTION),
+    (error) =>
+      error instanceof Diagnostic &&
+      error.code === DUPLICATE_OPTION &&
+      isDeepStrictEqual(error.fields, [["option", "--endpoint"]]),
   );
   assert.equal(singleUse("--endpoint")(FIRST_VALUE, undefined), FIRST_VALUE);
 });

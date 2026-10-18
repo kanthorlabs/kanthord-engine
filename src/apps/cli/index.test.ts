@@ -34,6 +34,8 @@ import { runKanthord } from "./test-support.ts";
 
 const EMPTY_OUTPUT = "";
 const TOKEN_ROW = "token: ";
+const HANDOVER_LOST =
+  "cli.worker.handover.indeterminate: worker handover: the result is unknown; retry with a new idempotency key\n";
 const MACHINE_TOKEN_ROW = "token:         ";
 const JWT_OUTPUT = /eyJ[A-Za-z0-9_-]*\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/;
 const PROJECT_GET = "get";
@@ -354,6 +356,12 @@ test("worker handover validates locally and prints receipt metadata without the 
     "--idempotency-key",
     key,
   ];
+  const lost = await invocation(
+    [...args, "--endpoint", "http://127.0.0.1:1"],
+    env,
+  );
+  assert.equal(lost.status, ExitCode.Failure);
+  assert.equal(lost.stderr, HANDOVER_LOST);
   const result = spawnSync(
     process.execPath,
     [

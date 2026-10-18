@@ -96,7 +96,6 @@ async function handover(executionId: string, command: Command): Promise<void> {
     throw new Diagnostic(
       "cli.worker.handover.indeterminate",
       "worker handover: the result is unknown; retry with a new idempotency key",
-      { fields: [["idempotency_key", key]] },
     );
   if (result.type === OperationResultType.Failure)
     throw new Diagnostic(
@@ -255,7 +254,7 @@ function instanceListQuery(options: Record<string, string | undefined>) {
   )
     throw new Diagnostic(
       "cli.worker.instance.list.invalid_binding_name",
-      "Expected a worker binding name.",
+      "invalid worker binding name",
     );
   if (options.binding !== undefined && options.project === undefined)
     throw new Diagnostic(

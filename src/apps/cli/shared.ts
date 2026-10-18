@@ -207,7 +207,9 @@ export function singleUse(
 ): (value: string, previous: string | undefined) => string {
   return (value, previous) => {
     if (previous !== undefined)
-      throw new Diagnostic(DUPLICATE_OPTION, name + " may not be repeated");
+      throw new Diagnostic(DUPLICATE_OPTION, "option may not be repeated", {
+        fields: [["option", name]],
+      });
     return value;
   };
 }
