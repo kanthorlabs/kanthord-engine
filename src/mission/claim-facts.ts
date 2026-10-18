@@ -68,7 +68,7 @@ export function claimFactsOf(
   const mission = readMissionByProject(tx, projectId);
   if (!mission) return [];
   const actions = new Map<string, FrozenAction | null>();
-  return readClaimRevisions(tx, mission.id)
-    .filter(({ node_state }) => !isTerminal(node_state))
-    .map((revision) => rowOf(tx, bindings, revision, actions));
+  return readClaimRevisions(tx, mission.id).map((revision) =>
+    rowOf(tx, bindings, revision, actions),
+  );
 }
