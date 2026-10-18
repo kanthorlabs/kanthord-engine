@@ -372,21 +372,23 @@ export function readCurrentRevision(
 export function readClaimRevisions(
   tx: Transaction,
   missionId: string,
-): Array<RevisionRow & { node_state: NodeState }> {
+): RevisionRow[] {
   return tx.database
     .prepare(
-      `SELECT r.*, n.state AS node_state FROM mission_node n
+      `SELECT r.* FROM mission_node n
     JOIN mission_node_revision r ON r.node_id = n.id
-    WHERE n.mission_id = ? AND n.retired_at IS NULL AND (
+    WHERE n.mission_id = ? AND n.retired_at IS NULL AND n.state NOT IN (?, ?) AND (
       r.revision = (SELECT MAX(latest.revision) FROM mission_node_revision latest
         WHERE latest.node_id = n.id)
       OR r.revision = (SELECT a.node_revision FROM mission_attempt a
         WHERE a.node_id = n.id AND a.closed_at IS NULL))
     ORDER BY n.id, r.revision DESC`,
     )
-    .all(missionId) as unknown as Array<
-    RevisionRow & { node_state: NodeState }
-  >;
+    .all(
+      missionId,
+      NodeState.Completed,
+      NodeState.Discarded,
+    ) as unknown as RevisionRow[];
 }
 
 export function claimRevisionOf(tx: Transaction, nodeId: string): RevisionRow {

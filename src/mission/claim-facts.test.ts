@@ -12,6 +12,7 @@ import {
   Intent,
   type MissionBindings,
 } from "./contract.ts";
+import { isTerminal } from "./admission.ts";
 import { actionsOfRevision } from "./frozen-action.ts";
 import { openAttempt } from "./record-store.ts";
 import {
@@ -290,5 +291,47 @@ test("claimFactsOf answers the same rows with the binding map", (t) => {
         claims.includes(ClaimableState.ExternalRequested),
       ]),
     expected,
+  );
+});
+
+test("readClaimRevisions answers no revision of a terminal node", (t) => {
+  const h = factsHarness(t);
+  const states = Object.values(NodeState);
+  const nodes = states.map((state) => ({ state, id: h.node({}) }));
+  h.store.transaction((tx) => {
+    for (const { id, state } of nodes) setNodeState(tx, id, state);
+  });
+  const answered = h.store.transaction((tx) =>
+    readClaimRevisions(tx, h.missionId).map(({ node_id }) => node_id),
+  );
+  assert.deepEqual(
+    [...answered].sort(),
+    nodes
+      .filter(({ state }) => !isTerminal(state))
+      .map(({ id }) => id)
+      .sort(),
+  );
+});
+
+test("claimFactsOf answers each live node and no terminal or retired node", (t) => {
+  const h = factsHarness(t);
+  const states = Object.values(NodeState);
+  const nodes = states.map((state) => ({ state, id: h.node({}) }));
+  const retired = h.node({});
+  h.store.transaction((tx) => {
+    for (const { id, state } of nodes) setNodeState(tx, id, state);
+    tx.database
+      .prepare("UPDATE mission_node SET retired_at = ? WHERE id = ?")
+      .run(NOW, retired);
+  });
+  assert.deepEqual(
+    h
+      .factsOf()
+      .map(({ node_id }) => node_id)
+      .sort(),
+    nodes
+      .filter(({ state }) => !isTerminal(state))
+      .map(({ id }) => id)
+      .sort(),
   );
 });
