@@ -384,7 +384,12 @@ export interface AgentChains {
     executionId: string,
     now: number,
   ): void;
-  success(tx: Transaction, selections: readonly AgentSelection[]): void;
+  success(
+    tx: Transaction,
+    selections: readonly AgentSelection[],
+    executionId: string,
+  ): void;
+  selected(selections: readonly AgentSelection[], executionId: string): void;
 }
 export interface TraceIdentity {
   mint(): { trace_id: string; root_span_id: string };

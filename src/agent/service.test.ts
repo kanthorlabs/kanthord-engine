@@ -8,6 +8,7 @@ import {
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test, type TestContext } from "node:test";
+import pino from "pino";
 import { temporary } from "../kernel/test-support.ts";
 import { AgentComponent, SelectionKind, type Dependencies } from "./service.ts";
 import {
@@ -104,6 +105,7 @@ const fakeCollaborations: Omit<Dependencies, "store" | "credentialHolds"> = {
   providerHealthCheck: () => async () => ResourceStatus.Unknown,
   providerCapability: () => PROVIDER_CAPABILITY,
   toolDeclarations: async () => TOOLS,
+  logger: pino({ enabled: false }),
 };
 
 type OperationKey = keyof typeof agentOperations;
@@ -2346,10 +2348,35 @@ const FIRST_STRIKE = 1;
 const SECOND_STRIKE = 2;
 const CLOCK_START = 1_000_000;
 const DOUBLING_STRIKES = 12;
+const EXECUTION_ID = "execution";
+const OTHER_EXECUTION_ID = "other-execution";
+const REDACTED_FIELD = "credential";
+const ONE_LOG = 1;
+const TWO_LOGS = 2;
 
-function holdFixture(t: TestContext) {
+const FallbackLog = {
+  CooldownStarted: "agent.fallback.cooldown_started",
+  CooldownCleared: "agent.fallback.cooldown_cleared",
+  Selected: "agent.fallback.selected",
+} as const;
+
+type CapturedLog = { level: number; msg: string } & Record<string, unknown>;
+
+function capturedLogger() {
+  const logs: CapturedLog[] = [];
+  const logger = pino(
+    { level: "info", base: null, timestamp: false },
+    { write: (line: string) => logs.push(JSON.parse(line) as CapturedLog) },
+  );
+  return { logger, logs };
+}
+
+function holdFixture(
+  t: TestContext,
+  collaborations: Partial<Dependencies> = {},
+) {
   let now = CLOCK_START;
-  const f = enablementFixture(t, { clock: () => now });
+  const f = enablementFixture(t, { clock: () => now, ...collaborations });
   f.invoke("enablement.put", chainBody);
   const select = () =>
     f.store.transaction((tx) => f.agent.selectAgent(tx, AGENT, null));
@@ -2367,10 +2394,12 @@ function holdFixture(t: TestContext) {
   };
   const fail = (selection: AgentSelection, code: AdvancingFailure) =>
     f.store.transaction((tx) =>
-      f.agent.recordProviderFailure(tx, [selection], code, now),
+      f.agent.recordProviderFailure(tx, [selection], code, EXECUTION_ID, now),
     );
   const succeed = (selection: AgentSelection) =>
-    f.store.transaction((tx) => f.agent.recordSuccess(tx, [selection]));
+    f.store.transaction((tx) =>
+      f.agent.recordSuccess(tx, [selection], EXECUTION_ID),
+    );
   return {
     ...f,
     select,
@@ -2484,6 +2513,120 @@ test("a repeated failure doubles the hold up to the maximum and an expired hold 
   );
 });
 
+test("a provider failure logs agent.fallback.cooldown_started once per credential with its strikes and end", (t) => {
+  const { logger, logs } = capturedLogger();
+  const f = holdFixture(t, { logger });
+  const head = f.selected();
+  const sameCredentialOtherModel = f.view().chain[2];
+  assert.ok(sameCredentialOtherModel);
+  assert.equal(sameCredentialOtherModel.credential, head.credential);
+  f.store.transaction((tx) =>
+    f.agent.recordProviderFailure(
+      tx,
+      [
+        head,
+        {
+          ...head,
+          position: sameCredentialOtherModel.position,
+          model_identifier: sameCredentialOtherModel.model_identifier,
+        },
+      ],
+      AdvancingFailure.RateLimited,
+      EXECUTION_ID,
+      f.now(),
+    ),
+  );
+  const availableAt = f.now() + COOLDOWN_DEFAULTS.rate_limited_ms;
+  assert.deepEqual(logs, [
+    {
+      level: pino.levels.values.info,
+      msg: FallbackLog.CooldownStarted,
+      execution_id: EXECUTION_ID,
+      credential_name: head.credential,
+      code: AdvancingFailure.RateLimited,
+      strikes: FIRST_STRIKE,
+      available_at: availableAt,
+    },
+  ]);
+  f.advance(COOLDOWN_DEFAULTS.rate_limited_ms);
+  f.fail(head, AdvancingFailure.RateLimited);
+  assert.deepEqual(logs[1], {
+    level: pino.levels.values.info,
+    msg: FallbackLog.CooldownStarted,
+    execution_id: EXECUTION_ID,
+    credential_name: head.credential,
+    code: AdvancingFailure.RateLimited,
+    strikes: SECOND_STRIKE,
+    available_at: f.now() + 2 * COOLDOWN_DEFAULTS.rate_limited_ms,
+  });
+  assert.equal(logs.length, TWO_LOGS);
+  assert.ok(logs.every((record) => !(REDACTED_FIELD in record)));
+});
+
+test("a release of a hold logs agent.fallback.cooldown_cleared and a release without a hold logs nothing", (t) => {
+  const { logger, logs } = capturedLogger();
+  const f = holdFixture(t, { logger });
+  const head = f.selected();
+  const sameCredentialOtherModel = f.view().chain[2];
+  assert.ok(sameCredentialOtherModel);
+  assert.equal(sameCredentialOtherModel.credential, head.credential);
+  const sameCredential = {
+    ...head,
+    position: sameCredentialOtherModel.position,
+    model_identifier: sameCredentialOtherModel.model_identifier,
+  };
+  f.succeed(head);
+  assert.deepEqual(logs, []);
+  f.fail(head, AdvancingFailure.RateLimited);
+  logs.length = 0;
+  f.store.transaction((tx) =>
+    f.agent.recordSuccess(tx, [head, sameCredential], EXECUTION_ID),
+  );
+  assert.deepEqual(logs, [
+    {
+      level: pino.levels.values.info,
+      msg: FallbackLog.CooldownCleared,
+      execution_id: EXECUTION_ID,
+      credential_name: head.credential,
+    },
+  ]);
+  f.succeed(head);
+  assert.equal(logs.length, ONE_LOG);
+});
+
+test("recordSelection logs agent.fallback.selected for each selection", (t) => {
+  const { logger, logs } = capturedLogger();
+  const f = holdFixture(t, { logger });
+  const head = f.selected();
+  const second = {
+    ...head,
+    position: SECOND_POSITION,
+    level: ChainLevel.Binding,
+    agent_provider: spare.name,
+    credential: spare.credential,
+    model_identifier: HAIKU,
+  };
+  f.agent.recordSelection([head, second], OTHER_EXECUTION_ID);
+  assert.deepEqual(
+    logs,
+    [head, second].map((selection) => ({
+      level: pino.levels.values.info,
+      msg: FallbackLog.Selected,
+      execution_id: OTHER_EXECUTION_ID,
+      agent_name: AGENT,
+      chain_position: selection.position,
+      chain_level: selection.level,
+      agent_provider: selection.agent_provider,
+      provider: selection.provider,
+      model_identifier: selection.model_identifier,
+      credential_name: selection.credential,
+    })),
+  );
+  assert.ok(logs.every((record) => !(REDACTED_FIELD in record)));
+  f.agent.recordSelection([], OTHER_EXECUTION_ID);
+  assert.equal(logs.length, TWO_LOGS);
+});
+
 const CHAIN_ENTRIES: ReadonlyArray<{
   entry: AgentEntry | null;
   length: number;
@@ -2526,6 +2669,7 @@ test("selectionAt answers the claim selection of every chain position", (t) => {
           tx,
           [chosen.selection],
           AdvancingFailure.RateLimited,
+          EXECUTION_ID,
           Date.now(),
         ),
       );
@@ -2579,6 +2723,7 @@ test("a hold is shared by every agent that names the credential, and an invalid 
       tx,
       [selected.selection],
       AdvancingFailure.RateLimited,
+      EXECUTION_ID,
       Date.now(),
     ),
   );
@@ -2609,6 +2754,7 @@ test("a human lists the holds and clears one by credential name, and a clear of 
       tx,
       [selected.selection],
       AdvancingFailure.QuotaExhausted,
+      EXECUTION_ID,
       now,
     ),
   );
@@ -2632,4 +2778,27 @@ test("a human lists the holds and clears one by credential name, and a clear of 
     HttpStatus.NotFound,
     { credential: provider.credential },
   );
+});
+
+test("a human clear of a cooldown logs agent.fallback.cooldown_cleared", (t) => {
+  const { logger, logs } = capturedLogger();
+  const f = holdFixture(t, { logger });
+  const head = f.selected();
+  f.fail(head, AdvancingFailure.RateLimited);
+  logs.length = 0;
+  f.invoke("cooldown.clear", null, { credential: head.credential });
+  assert.deepEqual(logs, [
+    {
+      level: pino.levels.values.info,
+      msg: FallbackLog.CooldownCleared,
+      credential_name: head.credential,
+    },
+  ]);
+  refuses(
+    () => f.invoke("cooldown.clear", null, { credential: head.credential }),
+    AgentErrorCode.CooldownNotFound,
+    HttpStatus.NotFound,
+    { credential: head.credential },
+  );
+  assert.equal(logs.length, ONE_LOG);
 });

@@ -98,6 +98,7 @@ export function schedulerHarness(
       resolve: () => [],
       providerFailure: () => {},
       success: () => {},
+      selected: () => {},
     },
     declarations: {
       declarationOf: (...args) => {
