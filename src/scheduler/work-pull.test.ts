@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
 import { setImmediate as turn } from "node:timers/promises";
+import { ChainLevel } from "../agent/contract.ts";
 import { background, CancellationContext } from "../kernel/context.ts";
 import { createIdentity } from "../kernel/identity.ts";
 import { testMachineIdentity } from "../kernel/test-identity.ts";
@@ -21,6 +22,7 @@ import { DEFAULT_STOP_BACKOFF_SECONDS } from "./config.ts";
 const NO_COMMITS = 0;
 const NO_CLAIMS = 0;
 const ONE_COMMIT = 1;
+const ONE_REPORT = 1;
 const TWO_CHECKS = 2;
 const FIRST_ATTEMPT = 1;
 const CLAIMANT_MISMATCH = "scheduler.work.claimant_mismatch";
@@ -135,10 +137,11 @@ test("pull rolls back its probe, rechecks health, and commits exactly one claim"
     TWO_CHECKS,
   );
 });
+
 const SELECTION: AgentSelection = {
   agent_name: "swe@1",
   position: 1,
-  level: "binding",
+  level: ChainLevel.Binding,
   agent_provider: "qwen",
   provider: "openai-compatible",
   credential: "qwen-key",
@@ -205,7 +208,7 @@ test("a re-pull that answers the running execution reports no selection", async 
   const claim = await h.pull();
   assert.equal(claim.kind, WorkPullKind.Claimed);
   assert.deepEqual(await h.pull(), claim);
-  assert.equal(h.reported.length, ONE_COMMIT);
+  assert.equal(h.reported.length, ONE_REPORT);
 });
 
 const HEALTHCHECK = "instanceHealthcheck";
