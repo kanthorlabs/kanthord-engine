@@ -48,6 +48,18 @@ export function directDependenciesOf(
   return [...direct];
 }
 
+export function directDependencyMap(
+  deps: readonly DepEdge[],
+): Map<string, string[]> {
+  const map = new Map<string, string[]>();
+  for (const { dependent, depends_on: dependsOn } of deps) {
+    const direct = map.get(dependent);
+    if (direct) direct.push(dependsOn);
+    else map.set(dependent, [dependsOn]);
+  }
+  return map;
+}
+
 export function hasDependencyCycle(edges: DepEdge[]): boolean {
   return detectCycle(edges);
 }

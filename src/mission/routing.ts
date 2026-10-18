@@ -3,7 +3,7 @@ import type { Transaction } from "../kernel/store.ts";
 import { reconcileJob } from "./admission.ts";
 import { NodeState, type WorkQueue, type MissionBindings } from "./contract.ts";
 import { readinessOf, continuationHolds } from "./conditions.ts";
-import { directDependenciesOf } from "./graph.ts";
+import { directDependencyMap } from "./graph.ts";
 import { readDependencies, readMissionNodes, setNodeState } from "./store.ts";
 
 export function claimableMap(
@@ -30,18 +30,15 @@ export function routeMission(tx: Transaction, missionId: string): void {
     (node) => node.retired_at === null,
   );
   const states = new Map(nodes.map((node) => [node.id, node.state]));
-  const dependencies = readDependencies(tx, missionId);
+  const dependencies = directDependencyMap(readDependencies(tx, missionId));
   for (const node of nodes) {
     if (node.state !== NodeState.Pending && node.state !== NodeState.Available)
       continue;
-    const available = directDependenciesOf(node.id, dependencies).every(
+    const available = (dependencies.get(node.id) ?? []).every(
       (id) => states.get(id) === NodeState.Completed,
     );
-    setNodeState(
-      tx,
-      node.id,
-      available ? NodeState.Available : NodeState.Pending,
-    );
+    const state = available ? NodeState.Available : NodeState.Pending;
+    if (state !== node.state) setNodeState(tx, node.id, state);
   }
 }
 
