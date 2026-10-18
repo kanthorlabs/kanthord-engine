@@ -55,7 +55,10 @@ export function agentChoice(
       entryOf(row?.entries ?? [], agentName),
     );
     if (result.kind === AgentChoiceKind.Cooling)
-      return { kind: AgentChoiceKind.Cooling, until_at: result.until_at };
+      return {
+        kind: AgentChoiceKind.Cooling,
+        available_at: result.available_at,
+      };
     if (result.kind === AgentChoiceKind.Selected) {
       selections.push(result.selection);
       pins.push({

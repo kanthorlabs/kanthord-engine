@@ -463,9 +463,11 @@ No query fields are accepted. The required file supplies the following fields.
   the lost rows and the stopped rows of the attempt after its latest finished
   row with no `stop`, itself included. A `provider_failed` stop with the code
   `rate_limited`, `quota_exhausted` or `unavailable` advances the fallback chain:
-  the release writes a cooldown for the pinned agent selections, and the stop
-  neither counts nor ends the count. A release with no `provider_failed` stop
-  deletes the cooldown of its pinned agent selections. Below `mission.consecutive_failure_limit`,
+  the release holds each credential of the pinned agent selections until its
+  `available_at` and adds one strike to it, and the stop neither counts nor ends
+  the count. A hold cools every model of the credential. A release with no
+  `provider_failed` stop releases the hold of each credential of its pinned agent
+  selections and resets its strikes. Below `mission.consecutive_failure_limit`,
   Mission returns `Executing` to `Available` and `Evaluating` to `Waiting`, and
   it inserts the job when the node is claimable. At the limit, Mission moves the
   node to `Paused`, the attempt stays open, and no job exists. A release with a

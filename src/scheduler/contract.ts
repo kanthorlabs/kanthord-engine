@@ -369,7 +369,7 @@ export type AgentChoice =
       selections: AgentSelection[];
       pins: AgentPin[];
     }
-  | { kind: typeof AgentChoiceKind.Cooling; until_at: number };
+  | { kind: typeof AgentChoiceKind.Cooling; available_at: number };
 export interface AgentChains {
   select(tx: Transaction, workerBindingId: string): AgentChoice;
   resolve(

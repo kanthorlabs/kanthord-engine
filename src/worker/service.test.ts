@@ -24,6 +24,7 @@ import {
   agentMigrations,
   type Dependencies as AgentDependencies,
 } from "../agent/index.ts";
+import { memoryCredentialHolds } from "../agent/test-support.ts";
 import {
   agentOperations,
   AgentErrorCode,
@@ -157,6 +158,7 @@ const fakeAgentCollaborations: Omit<AgentDependencies, "store"> = {
   hostHome: "/nonexistent/home",
   workbenchDirectory: (agentName) => `/nonexistent/workbench/${agentName}`,
   custodySuitability: () => {},
+  credentialHolds: memoryCredentialHolds(),
   approvedModels: () => null,
   entriesOfAgent: () => [],
   repositoryWorkingOf: () => null,

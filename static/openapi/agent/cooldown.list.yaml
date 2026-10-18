@@ -4,8 +4,8 @@ pathItem:
     operationId: agent.cooldown.list
     tags:
       - agent
-    description: List the cooldowns of the fallback chain entries, live and expired,
-      by credential and model.
+    description: List the credentials that hold a cooldown, live and expired,
+      ordered by credential name.
     x-access-policy: human
     x-timeout-ms: 30000
     x-mutation: false
@@ -68,45 +68,21 @@ components:
           items:
             type: object
             properties:
-              cooldown_id:
-                type: string
-                minLength: 1
               credential:
                 type: string
                 minLength: 1
-              model_identifier:
-                type: string
-                minLength: 1
-              code:
-                type: string
-                enum:
-                  - rate_limited
-                  - quota_exhausted
-                  - unavailable
               strikes:
                 type: integer
                 exclusiveMinimum: 0
                 maximum: 9007199254740991
-              started_at:
+              available_at:
                 type: integer
                 minimum: 0
                 maximum: 9007199254740991
-              until_at:
-                type: integer
-                minimum: 0
-                maximum: 9007199254740991
-              execution_id:
-                type: string
-                minLength: 1
             required:
-              - cooldown_id
               - credential
-              - model_identifier
-              - code
               - strikes
-              - started_at
-              - until_at
-              - execution_id
+              - available_at
             additionalProperties: false
       required:
         - items

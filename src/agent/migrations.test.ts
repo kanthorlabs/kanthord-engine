@@ -104,3 +104,22 @@ test("agent migration creates the prompt settings schema", () => {
     store.close();
   }
 });
+
+test("agent migration creates no cooldown table and no cooldown index", () => {
+  const store = new Store(IN_MEMORY_DATABASE);
+  try {
+    store.migrate([
+      { service: AGENT_COMPONENT_NAME, migrations: agentMigrations },
+    ]);
+    assert.deepEqual(
+      store.database
+        .prepare(
+          "SELECT name FROM sqlite_master WHERE name LIKE 'agent_cooldown%'",
+        )
+        .all(),
+      [],
+    );
+  } finally {
+    store.close();
+  }
+});

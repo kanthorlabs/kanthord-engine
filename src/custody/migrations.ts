@@ -11,7 +11,9 @@ const createCustodyTables: Migration = (database) => {
       ciphertext BLOB NOT NULL,
       metadata TEXT,
       created_at INTEGER NOT NULL,
-      ended_at INTEGER
+      ended_at INTEGER,
+      available_at INTEGER,
+      strikes INTEGER NOT NULL DEFAULT 0
     );
     CREATE UNIQUE INDEX credential_name_revision ON credential (name, revision);
     CREATE TABLE custody_master_key (

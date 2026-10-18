@@ -575,6 +575,22 @@ export function credentialPlatformList(
   };
 }
 
+export type CredentialHold = { available_at: number; strikes: number };
+
+export type CredentialHoldItem = CredentialHold & { credential: string };
+
+export interface CredentialHolds {
+  holdOf(tx: Transaction, name: string): CredentialHold | null;
+  hold(
+    tx: Transaction,
+    name: string,
+    availableAt: number,
+    strikes: number,
+  ): void;
+  release(tx: Transaction, name: string): boolean;
+  listHolds(tx: Transaction): CredentialHoldItem[];
+}
+
 export interface CredentialRecords {
   create(
     tx: Transaction,

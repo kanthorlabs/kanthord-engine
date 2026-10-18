@@ -399,6 +399,95 @@ test("create validates platforms, schema, conflicts and encrypts each first revi
   }
 });
 
+const HOLD_AVAILABLE_AT = 5000;
+const HOLD_STRIKES = 2;
+const OTHER_HOLD_AVAILABLE_AT = 9000;
+
+test("a hold lives on revision 1 and survives a rotation", () => {
+  const f = fixture();
+  try {
+    f.create(inputs[0]);
+    f.create(inputs[1]);
+    const { holds } = f.component;
+    const inTransaction = <T>(read: (tx: Transaction) => T): T =>
+      f.store.transaction(read);
+    assert.equal(
+      inTransaction((tx) => holds.holdOf(tx, "github")),
+      null,
+    );
+    assert.equal(
+      inTransaction((tx) => holds.release(tx, "github")),
+      false,
+    );
+    inTransaction((tx) => {
+      holds.hold(tx, "github", HOLD_AVAILABLE_AT, HOLD_STRIKES);
+      holds.hold(tx, "anthropic", OTHER_HOLD_AVAILABLE_AT, FIRST_REVISION);
+    });
+    f.rotate("github", {
+      expected_revision: FIRST_REVISION,
+      secret: apiSecret,
+    });
+    assert.deepEqual(
+      inTransaction((tx) => holds.holdOf(tx, "github")),
+      { available_at: HOLD_AVAILABLE_AT, strikes: HOLD_STRIKES },
+    );
+    assert.deepEqual(
+      f.store.database
+        .prepare(
+          "SELECT revision, available_at, strikes FROM credential WHERE name = ? ORDER BY revision",
+        )
+        .all("github")
+        .map((row) => ({ ...row })),
+      [
+        {
+          revision: FIRST_REVISION,
+          available_at: HOLD_AVAILABLE_AT,
+          strikes: HOLD_STRIKES,
+        },
+        { revision: NEXT_REVISION, available_at: null, strikes: 0 },
+      ],
+    );
+    assert.deepEqual(
+      inTransaction((tx) => holds.listHolds(tx)),
+      [
+        {
+          credential: "anthropic",
+          strikes: FIRST_REVISION,
+          available_at: OTHER_HOLD_AVAILABLE_AT,
+        },
+        {
+          credential: "github",
+          strikes: HOLD_STRIKES,
+          available_at: HOLD_AVAILABLE_AT,
+        },
+      ],
+    );
+    assert.equal(
+      inTransaction((tx) => holds.release(tx, "github")),
+      true,
+    );
+    assert.equal(
+      inTransaction((tx) => holds.release(tx, "github")),
+      false,
+    );
+    assert.equal(
+      inTransaction((tx) => holds.holdOf(tx, "github")),
+      null,
+    );
+    assert.deepEqual(
+      inTransaction((tx) => holds.listHolds(tx)).map(
+        ({ credential }) => credential,
+      ),
+      ["anthropic"],
+    );
+    assert.throws(() =>
+      inTransaction((tx) => holds.hold(tx, "missing", HOLD_AVAILABLE_AT, 1)),
+    );
+  } finally {
+    f.store.close();
+  }
+});
+
 test("get orders revisions and list paginates sorted names with filters", () => {
   const f = fixture();
   try {
@@ -406,7 +495,7 @@ test("get orders revisions and list paginates sorted names with filters", () => 
     const first = f.get("github") as { revisions: { id: string }[] };
     f.store.database
       .prepare(
-        "INSERT INTO credential SELECT ?, name, platform, ?, nonce, ciphertext, metadata, created_at + ?, ended_at FROM credential WHERE id = ?",
+        "INSERT INTO credential (id, name, platform, revision, nonce, ciphertext, metadata, created_at, ended_at) SELECT ?, name, platform, ?, nonce, ciphertext, metadata, created_at + ?, ended_at FROM credential WHERE id = ?",
       )
       .run("credential_second", 2, 1, first.revisions[0]!.id);
     const got = f.get("github") as { revisions: { id: string }[] };

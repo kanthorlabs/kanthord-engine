@@ -282,8 +282,8 @@ export function composeServices(options: {
       select: (tx, workerBindingId) => worker.agentChoice(tx, workerBindingId),
       resolve: (tx, workerBindingId, pins) =>
         worker.agentSelectionsAt(tx, workerBindingId, pins),
-      providerFailure: (...args) => {
-        agent.recordProviderFailure(...args);
+      providerFailure: (tx, selections, code, _executionId, now) => {
+        agent.recordProviderFailure(tx, selections, code, now);
       },
       success: (tx, selections) => {
         agent.recordSuccess(tx, selections);
@@ -375,6 +375,13 @@ export function composeServices(options: {
     workbenchDirectory: (name) =>
       workbenchDirectory(options.stateDirectory, name),
     custodySuitability: (tx, req) => custody.custodySuitability(tx, req),
+    credentialHolds: {
+      holdOf: (tx, name) => custody.holds.holdOf(tx, name),
+      hold: (tx, name, availableAt, strikes) =>
+        custody.holds.hold(tx, name, availableAt, strikes),
+      release: (tx, name) => custody.holds.release(tx, name),
+      listHolds: (tx) => custody.holds.listHolds(tx),
+    },
     approvedModels: (tx, name) => llm.approvedModels(tx, name),
     providerHealthCheck: (tx, name) => llm.providerHealthCheck(tx, name),
     providerCapability: (tx, name) => llm.providerCapability(tx, name),

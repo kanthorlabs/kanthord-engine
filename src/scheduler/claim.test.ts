@@ -319,7 +319,7 @@ test("the claim pins the chain positions and answers no work when a chain cools 
   );
   h.dependencies.agentChains.select = () => ({
     kind: AgentChoiceKind.Cooling,
-    until_at: FIXTURE_NOW + 1,
+    available_at: FIXTURE_NOW + 1,
   });
   const cooling = h.claim();
   assert.equal(cooling.outcome, ClaimOutcome.None);

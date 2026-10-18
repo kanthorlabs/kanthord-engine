@@ -188,27 +188,13 @@ export const AdvancingFailure = AdvancingProviderFailure;
 export type AdvancingFailure = AdvancingProviderFailure;
 export const isAdvancingFailure = isAdvancingProviderFailure;
 
-export type AgentCooldown = {
-  cooldown_id: string;
-  credential: string;
-  model_identifier: string;
-  code: string;
-  strikes: number;
-  started_at: number;
-  until_at: number;
-  execution_id: string;
-};
-
 export type AgentSelection = SchedulerAgentSelection;
 
 export type ChainEntry = Omit<AgentSelection, "agent_name"> & {
-  cooldown: Pick<
-    AgentCooldown,
-    "cooldown_id" | "code" | "strikes" | "until_at"
-  > | null;
+  cooldown: { strikes: number; available_at: number } | null;
 };
 
-export type ChainCooling = { code: string; until_at: number };
+export type ChainCooling = { code: string; available_at: number };
 
 export type AgentProviderDependent = {
   agent_name: string;
@@ -379,14 +365,9 @@ export const agentEnablementSchema = z.strictObject({
 });
 
 export const agentCooldownSchema = z.strictObject({
-  cooldown_id: z.string().min(1),
   credential: z.string().min(1),
-  model_identifier: z.string().min(1),
-  code: z.enum(AdvancingProviderFailure),
   strikes: z.number().int().positive(),
-  started_at: z.number().int().nonnegative(),
-  until_at: z.number().int().nonnegative(),
-  execution_id: z.string().min(1),
+  available_at: z.number().int().nonnegative(),
 });
 
 export const CONFIGURATION_DESCRIPTION =
@@ -733,24 +714,24 @@ export const agentOperations = {
     }),
     output: z.strictObject({ items: z.array(agentCooldownSchema) }),
     description:
-      "List the cooldowns of the fallback chain entries, live and expired, by credential and model.",
+      "List the credentials that hold a cooldown, live and expired, ordered by credential name.",
   },
   "cooldown.clear": {
     ...enablementOperation,
     id: "agent.cooldown.clear",
     method: HttpMethod.Delete,
-    path: "/api/agent/cooldown/:cooldown_id",
+    path: "/api/agent/cooldown/:credential",
     mutation: true,
     body: false,
     status: HttpStatus.NoContent,
     input: z.strictObject({
-      params: z.strictObject({ cooldown_id: z.string().min(1) }),
+      params: z.strictObject({ credential: z.string().min(1) }),
       query: emptyFields,
       body: z.null(),
     }),
     output: z.null(),
     description:
-      "Clear one cooldown so that the next claim can select its chain entry again.",
+      "Clear the cooldown of one credential so that the next claim can select its chain entries again.",
   },
   "prompt.put": {
     ...enablementMutation,

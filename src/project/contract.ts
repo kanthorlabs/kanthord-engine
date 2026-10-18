@@ -486,15 +486,10 @@ export type WorkerAgentView = {
     credential: string;
     model_identifier: string;
     reasoning_effort: string;
-    cooldown: {
-      cooldown_id: string;
-      code: string;
-      strikes: number;
-      until_at: number;
-    } | null;
+    cooldown: { strikes: number; available_at: number } | null;
   }>;
   active_position: number | null;
-  cooling: { code: string; until_at: number } | null;
+  cooling: { code: string; available_at: number } | null;
   valid: boolean;
   issues: Array<{ path: string[]; code: string }>;
 };
