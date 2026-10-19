@@ -7,6 +7,7 @@ import {
 import type { Context } from "../kernel/context.ts";
 import { OperationError } from "../kernel/errors.ts";
 import {
+  ResourceFailureReason,
   ResourceStatus,
   type ResourceObserver,
   type ResourceStatusValue,
@@ -46,7 +47,10 @@ async function probeSsh(
     );
     return ResourceStatus.Healthy;
   } catch (error) {
-    observe?.(error instanceof OperationError ? error.code : "ssh -G failed");
+    observe?.(
+      error instanceof OperationError ? error.code : "ssh -G failed",
+      ResourceFailureReason.Unclassified,
+    );
     return context.err() ? ResourceStatus.Unknown : ResourceStatus.Unhealthy;
   }
 }

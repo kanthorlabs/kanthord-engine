@@ -18,7 +18,10 @@ import { openaiCodexProvider } from "@earendil-works/pi-ai/providers/openai-code
 import { opencodeGoProvider } from "@earendil-works/pi-ai/providers/opencode-go";
 import { z } from "zod";
 import { abortSignal, type Context } from "../kernel/context.ts";
-import type { ResourceObserver } from "../kernel/health.ts";
+import {
+  ResourceFailureReason,
+  type ResourceObserver,
+} from "../kernel/health.ts";
 import { HttpMethod, HttpStatus } from "../kernel/http.ts";
 import {
   ANTHROPIC_SUBSCRIPTION_PLATFORM,
@@ -122,7 +125,10 @@ async function httpCheck(
         await response.body?.cancel();
         if (signal.aborted) return UNREACHABLE;
         if (response.ok) return OK_WITHOUT_MODELS;
-        observe?.(`status=${response.status}`);
+        observe?.(
+          `status=${response.status}`,
+          ResourceFailureReason.Unclassified,
+        );
         return {
           connection: connectionOfStatus(response.status),
           models: null,
@@ -132,7 +138,7 @@ async function httpCheck(
       if (signal.aborted) return UNREACHABLE;
       const list = openAIModelListSchema.safeParse(body);
       if (!list.success) {
-        observe?.("model list malformed");
+        observe?.("model list malformed", ResourceFailureReason.Unclassified);
         return INVALID_RESPONSE;
       }
       return {
@@ -147,7 +153,10 @@ async function httpCheck(
       dispose();
     }
   } catch (error) {
-    observe?.(thrownReason(error, headerSecrets(headers)));
+    observe?.(
+      thrownReason(error, headerSecrets(headers)),
+      ResourceFailureReason.Unclassified,
+    );
     return UNREACHABLE;
   }
 }
@@ -159,7 +168,7 @@ export async function checkGitHubCopilot(
   observe?: ResourceObserver,
 ): Promise<ProviderCheckAnswer> {
   if (expires <= Date.now()) {
-    observe?.("access token expired");
+    observe?.("access token expired", ResourceFailureReason.Unclassified);
     return UNREACHABLE;
   }
   return httpCheck(
@@ -284,7 +293,7 @@ async function modelCallCheck(
         ({ id }) => id === modelId,
       );
       if (!model) {
-        observe?.("check model not found");
+        observe?.("check model not found", ResourceFailureReason.Unclassified);
         return INVALID_RESPONSE;
       }
       const credentials = new InMemoryCredentialStore();
@@ -306,7 +315,10 @@ async function modelCallCheck(
       if (signal.aborted) return UNREACHABLE;
       if (!MODEL_CALL_FAILURES.includes(reply.stopReason))
         return OK_WITHOUT_MODELS;
-      observe?.(failureReason(reply, secrets));
+      observe?.(
+        failureReason(reply, secrets),
+        ResourceFailureReason.Unclassified,
+      );
       const status = statusOfErrorMessage(reply.errorMessage);
       if (status === null) return UNREACHABLE;
       return { connection: connectionOfStatus(status), models: null };
@@ -314,7 +326,7 @@ async function modelCallCheck(
       dispose();
     }
   } catch (error) {
-    observe?.(thrownReason(error, secrets));
+    observe?.(thrownReason(error, secrets), ResourceFailureReason.Unclassified);
     return UNREACHABLE;
   }
 }
@@ -333,7 +345,7 @@ export async function checkOpenAICodex(
 ): Promise<ProviderCheckAnswer> {
   const { refresh, access, expires } = credential;
   if (expires <= Date.now()) {
-    observe?.("access token expired");
+    observe?.("access token expired", ResourceFailureReason.Unclassified);
     return UNREACHABLE;
   }
   return modelCallCheck(
@@ -358,7 +370,7 @@ export async function checkAnthropicSubscription(
 ): Promise<ProviderCheckAnswer> {
   const { refresh, access, expires } = credential;
   if (expires <= Date.now()) {
-    observe?.("access token expired");
+    observe?.("access token expired", ResourceFailureReason.Unclassified);
     return UNREACHABLE;
   }
   return modelCallCheck(

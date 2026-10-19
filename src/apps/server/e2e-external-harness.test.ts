@@ -184,6 +184,7 @@ test(
         [`harness/${runtime}`]: {
           status: HEALTHY,
           capability: "liveness of a registration",
+          failure_reason: null,
         },
       });
       assert.deepEqual(report.services.worker.global, {});

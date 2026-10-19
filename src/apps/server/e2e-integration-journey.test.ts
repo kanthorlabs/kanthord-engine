@@ -10,7 +10,7 @@ import {
   InboundPlatform,
   OutboundRequestState,
 } from "../../intake/contract.ts";
-import { ResourceStatus } from "../../kernel/health.ts";
+import { ResourceFailureReason, ResourceStatus } from "../../kernel/health.ts";
 import { HttpMethod, HttpStatus } from "../../kernel/http.ts";
 import { isString } from "../../kernel/values.ts";
 import {
@@ -428,11 +428,13 @@ test("E10 integration journey", { timeout: JOURNEY_TIMEOUT }, async (t) => {
     [h.W]: {
       status: ResourceStatus.Unknown,
       capability: WEBHOOK_CAPABILITY,
+      failure_reason: ResourceFailureReason.Unclassified,
     },
-    [h.L]: { status: poll, capability: POLL_CAPABILITY },
+    [h.L]: { status: poll, capability: POLL_CAPABILITY, failure_reason: null },
     [h.V]: {
       status: ResourceStatus.Unknown,
       capability: WEBHOOK_CAPABILITY,
+      failure_reason: ResourceFailureReason.Unclassified,
     },
   });
   let stored!: Stored;

@@ -24,6 +24,7 @@ import {
 } from "../../kernel/files.ts";
 import {
   HealthScope,
+  ResourceFailureReason,
   ResourceStatus,
   type ResourceCheck,
   type ResourceEntry,
@@ -662,7 +663,11 @@ test("E07.11 healthcheck deduplicates targets but reports both resource names", 
     await response.json(),
   );
   assert.equal(checks, SINGLE_HEALTH_CHECK);
-  const expected = { status: ResourceStatus.Healthy, capability: CAPABILITY };
+  const expected = {
+    status: ResourceStatus.Healthy,
+    capability: CAPABILITY,
+    failure_reason: null,
+  };
   assert.deepEqual(body.shared.llm.global, {
     [FIRST_RESOURCE]: expected,
     [SECOND_RESOURCE]: expected,
@@ -715,6 +720,7 @@ test("E07.13 a resource check past its deadline reports unknown", async (t) => {
   assert.deepEqual(body.shared.llm.global[FIRST_RESOURCE], {
     status: ResourceStatus.Unknown,
     capability: CAPABILITY,
+    failure_reason: ResourceFailureReason.Unclassified,
   });
 });
 
@@ -739,5 +745,6 @@ test("E07.14 a throwing resource check reports unknown", async (t) => {
   assert.deepEqual(body.shared.llm.global[FIRST_RESOURCE], {
     status: ResourceStatus.Unknown,
     capability: CAPABILITY,
+    failure_reason: ResourceFailureReason.Unclassified,
   });
 });

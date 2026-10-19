@@ -13,6 +13,7 @@ import {
 } from "../kernel/caller.ts";
 import {
   componentHealthSchema,
+  resourceFailureReasonSchema,
   ResourceStatus,
   type ResourceEntry,
 } from "../kernel/health.ts";
@@ -60,6 +61,7 @@ export const resourceEntrySchema = z.strictObject({
     ResourceStatus.Unknown,
   ]),
   capability: z.string().min(1),
+  failure_reason: resourceFailureReasonSchema,
 });
 const resourceMapSchema = z.record(z.string().min(1), resourceEntrySchema);
 const ownerSchema = z

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { background, CancellationContext } from "../kernel/context.ts";
-import { ResourceStatus } from "../kernel/health.ts";
+import { ResourceFailureReason, ResourceStatus } from "../kernel/health.ts";
 import { HttpMethod, HttpStatus } from "../kernel/http.ts";
 import { AUTHORIZATION_HEADER } from "../kernel/probe.ts";
 import { Connection, type ProviderCheckAnswer } from "./contract.ts";
@@ -56,6 +56,7 @@ const ANTHROPIC_MESSAGES_URL = "https://api.anthropic.com/v1/messages";
 const NO_CALLS = 0;
 const ONE_CALL = 1;
 const TWO_CALLS = 2;
+const MALFORMED_LIST_REASON = "model list malformed";
 const CREATED = 1700000000;
 const BEARER_HEADERS = { [AUTHORIZATION_HEADER]: `Bearer ${SECRET}` };
 const REFRESH_SECRET = "test_private-copilot-refresh";
@@ -401,7 +402,11 @@ test("openai-codex check sends one model call to its constant model and maps the
 
 test("openai-codex check reports a reason without token material", async () => {
   const reasons: string[] = [];
-  const observe = (reason: string) => reasons.push(reason);
+  const failureReasons: string[] = [];
+  const observe = (reason: string, failureReason: string) => {
+    reasons.push(reason);
+    failureReasons.push(failureReason);
+  };
   const future = Date.now() + FUTURE_MS;
   const long = "A".repeat(500);
   await checkOpenAICodex(
@@ -419,6 +424,10 @@ test("openai-codex check reports a reason without token material", async () => {
     observe,
   );
   assert.equal(reasons.length, REASON_COUNT);
+  assert.deepEqual(failureReasons, [
+    ResourceFailureReason.Unclassified,
+    ResourceFailureReason.Unclassified,
+  ]);
   assert.match(reasons[0]!, /^stopReason=error errorMessage=401: denied/);
   assert.match(reasons[1]!, /^Error: failed with/);
   for (const reason of reasons) {
@@ -428,6 +437,35 @@ test("openai-codex check reports a reason without token material", async () => {
     assert.ok(!reason.includes("abc.def"));
     assert.ok(!reason.includes(long));
   }
+});
+
+test("a model-list check observes an HTTP refusal, a malformed list and a network error as unclassified", async (t) => {
+  const observed: Array<[string, string]> = [];
+  const observe = (reason: string, failureReason: string) =>
+    void observed.push([reason, failureReason]);
+  const fetch = t.mock.method(
+    globalThis,
+    "fetch",
+    async () => new Response(null, { status: HttpStatus.Unauthorized }),
+  );
+  await checkOpenAI(SECRET, background, observe);
+  fetch.mock.mockImplementation(async () => Response.json({ data: SECRET }));
+  await checkOpenAI(SECRET, background, observe);
+  fetch.mock.mockImplementation(async () => {
+    throw new Error(SECRET);
+  });
+  await checkOpenAI(SECRET, background, observe);
+  assert.deepEqual(
+    observed.map(([, failureReason]) => failureReason),
+    [
+      ResourceFailureReason.Unclassified,
+      ResourceFailureReason.Unclassified,
+      ResourceFailureReason.Unclassified,
+    ],
+  );
+  assert.equal(observed[0]![0], `status=${HttpStatus.Unauthorized}`);
+  assert.equal(observed[1]![0], MALFORMED_LIST_REASON);
+  assert.ok(observed.every(([reason]) => !reason.includes(SECRET)));
 });
 
 test("openai-codex check answers unreachable without a call for an expired token or a cancelled context", async (t) => {

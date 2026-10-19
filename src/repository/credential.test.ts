@@ -9,7 +9,11 @@ import {
 } from "../custody/contract.ts";
 import { background } from "../kernel/context.ts";
 import { OperationError } from "../kernel/errors.ts";
-import { HealthScope, ResourceStatus } from "../kernel/health.ts";
+import {
+  HealthScope,
+  ResourceFailureReason,
+  ResourceStatus,
+} from "../kernel/health.ts";
 import { HttpMethod, HttpStatus } from "../kernel/http.ts";
 import {
   AccessPolicy,
@@ -315,9 +319,17 @@ test("check answers healthy, unhealthy and unknown for github without a row, a l
     pino({ level: "info" }, { write: (line: string) => lines.push(line) }),
   );
   const statuses = [
-    [HttpStatus.OK, ResourceStatus.Healthy],
-    [HttpStatus.Unauthorized, ResourceStatus.Unhealthy],
-    [HttpStatus.Forbidden, ResourceStatus.Unknown],
+    [HttpStatus.OK, ResourceStatus.Healthy, null],
+    [
+      HttpStatus.Unauthorized,
+      ResourceStatus.Unhealthy,
+      ResourceFailureReason.Unclassified,
+    ],
+    [
+      HttpStatus.Forbidden,
+      ResourceStatus.Unknown,
+      ResourceFailureReason.Unclassified,
+    ],
   ] as const;
   const requests: unknown[] = [];
   let next = 0;
@@ -329,7 +341,7 @@ test("check answers healthy, unhealthy and unknown for github without a row, a l
       return new Response(null, { status: statuses[next++]![0] });
     },
   );
-  for (const [, expected] of statuses) {
+  for (const [, expected, failureReason] of statuses) {
     const answer = await f.invoke(repositoryOperations.check, {
       params: {},
       query: {},
@@ -338,6 +350,7 @@ test("check answers healthy, unhealthy and unknown for github without a row, a l
     assert.deepEqual(answer, {
       status: expected,
       capability: CAPABILITY_RATE_LIMIT_READ,
+      failure_reason: failureReason,
     });
   }
   assert.equal(requests.length, statuses.length);
@@ -361,7 +374,11 @@ test("check answers unknown when the request fails", async (t) => {
       query: {},
       body: { platform: "github", secret: { key: SECRET }, metadata: null },
     }),
-    { status: ResourceStatus.Unknown, capability: CAPABILITY_RATE_LIMIT_READ },
+    {
+      status: ResourceStatus.Unknown,
+      capability: CAPABILITY_RATE_LIMIT_READ,
+      failure_reason: ResourceFailureReason.Unclassified,
+    },
   );
 });
 
@@ -465,9 +482,17 @@ test("verify answers healthy, unhealthy and unknown like the health report witho
   );
   createGithub(f);
   const statuses = [
-    [HttpStatus.OK, ResourceStatus.Healthy],
-    [HttpStatus.Unauthorized, ResourceStatus.Unhealthy],
-    [HttpStatus.Forbidden, ResourceStatus.Unknown],
+    [HttpStatus.OK, ResourceStatus.Healthy, null],
+    [
+      HttpStatus.Unauthorized,
+      ResourceStatus.Unhealthy,
+      ResourceFailureReason.Unclassified,
+    ],
+    [
+      HttpStatus.Forbidden,
+      ResourceStatus.Unknown,
+      ResourceFailureReason.Unclassified,
+    ],
   ] as const;
   const requests: unknown[] = [];
   let next = 0;
@@ -482,7 +507,7 @@ test("verify answers healthy, unhealthy and unknown like the health report witho
     },
   );
   const before = credentialRows(f);
-  for (const [, expected] of statuses) {
+  for (const [, expected, failureReason] of statuses) {
     const answer = await f.invoke(
       repositoryOperations.verify,
       verifyInput(REPOSITORY_NAME),
@@ -493,6 +518,7 @@ test("verify answers healthy, unhealthy and unknown like the health report witho
     assert.deepEqual(answer, {
       status: expected,
       capability: CAPABILITY_RATE_LIMIT_READ,
+      failure_reason: failureReason,
     });
     assert.equal(await entry!.check(background), expected);
     assert.ok(!JSON.stringify(answer).includes(SECRET));
@@ -519,7 +545,11 @@ test("verify answers unknown when the request fails and logs no token", async (t
   });
   assert.deepEqual(
     await f.invoke(repositoryOperations.verify, verifyInput(REPOSITORY_NAME)),
-    { status: ResourceStatus.Unknown, capability: CAPABILITY_RATE_LIMIT_READ },
+    {
+      status: ResourceStatus.Unknown,
+      capability: CAPABILITY_RATE_LIMIT_READ,
+      failure_reason: ResourceFailureReason.Unclassified,
+    },
   );
   assert.ok(!lines.join("").includes(SECRET));
 });
@@ -671,6 +701,19 @@ test("an ssh record pins the resolved identity and refuses an ambiguous or drift
     HttpStatus.BadRequest,
     SshErrorCode.Drift,
   );
+});
+
+test("the ssh probe observes a pin that does not parse as unclassified", async () => {
+  const observed: Array<[string, string]> = [];
+  const status = await REPOSITORY_PLATFORMS[Platform.Ssh].probe!(
+    {},
+    { host: "-kanthord-failure-reason" },
+    background,
+    (reason, failureReason) => void observed.push([reason, failureReason]),
+  );
+  assert.equal(status, ResourceStatus.Unhealthy);
+  assert.equal(observed.length, ONE_CALL);
+  assert.equal(observed[0]![1], ResourceFailureReason.Unclassified);
 });
 
 test("an ssh record takes an empty secret and the name ssh is reserved", async (t) => {

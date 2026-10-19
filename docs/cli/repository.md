@@ -179,10 +179,11 @@ The `github` check reads the rate limit with the typed token.
 The platform check runs on the typed secret with a 10 s deadline. A check that exceeds its deadline answers `unknown`.
 The component drops the secret after the call and logs no material.
 
-HTTP `200` answers `{ status, capability }`, the health entry of the [health report](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/gateway-service.impl.md#the-resource-healthcheck-report):
+HTTP `200` answers `{ status, capability, failure_reason }`, the health entry of the [health report](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/gateway-service.impl.md#the-resource-healthcheck-report):
 
 - `status` is `healthy`, `unhealthy` or `unknown`.
 - `capability` is the capability of the platform check, the same value that the health report shows.
+- `failure_reason` is null for a `healthy` answer only. Every other answer carries `unclassified`, a check that exceeds its deadline included.
 
 A platform with `verifiable: false` or with the secret shape `oauth` answers `400 credential.check.unsupported`.
 A platform of another component answers `400 credential.platform.unsupported`.
@@ -200,10 +201,11 @@ The `github` check reads the rate limit with the stored token.
 The component releases the newest live revision of the record, runs the same platform check as the health report with a 10 s deadline, and drops the material after the call. A check that exceeds its deadline answers `unknown`.
 The release outside an execution pins no revision, drains no revision and writes no row.
 
-HTTP `200` answers `{ status, capability }`, the health entry of the [health report](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/gateway-service.impl.md#the-resource-healthcheck-report):
+HTTP `200` answers `{ status, capability, failure_reason }`, the health entry of the [health report](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/gateway-service.impl.md#the-resource-healthcheck-report):
 
 - `status` is `healthy`, `unhealthy` or `unknown`.
 - `capability` is the capability of the platform check, the same value that the health report shows.
+- `failure_reason` is null for a `healthy` answer only. Every other answer carries `unclassified`, a check that exceeds its deadline included.
 
 An archived record answers `409 credential.credential.archived`.
 A platform with `verifiable: false` answers `400 credential.check.unsupported`.

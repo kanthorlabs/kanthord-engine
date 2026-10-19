@@ -50,7 +50,7 @@ import {
 } from "../../kernel/operation.ts";
 import { testMachineIdentity } from "../../kernel/test-identity.ts";
 import { directClient } from "../../gateway/index.ts";
-import { ResourceStatus } from "../../kernel/health.ts";
+import { ResourceFailureReason, ResourceStatus } from "../../kernel/health.ts";
 import { HealthStatus } from "../../kernel/service.ts";
 import { isObject, isString } from "../../kernel/values.ts";
 const OPENAPI_FRAGMENT_SOFT_LIMIT_LINES = 500;
@@ -1244,8 +1244,20 @@ test("published OpenAPI validates, matches the registry exactly, and describes r
     assert.ok(entry && isObject(entry));
     assert.deepEqual(Object.keys(entry.properties).sort(), [
       "capability",
+      "failure_reason",
       "status",
     ]);
+    assert.deepEqual(entry.required, [
+      "status",
+      "capability",
+      "failure_reason",
+    ]);
+    assert.deepEqual(
+      entry.properties.failure_reason?.anyOf?.map(
+        (variant) => variant.enum ?? variant.type,
+      ),
+      [Object.values(ResourceFailureReason), "null"],
+    );
     assert.deepEqual(entry.properties.status!.enum, [
       ResourceStatus.Healthy,
       ResourceStatus.Unhealthy,

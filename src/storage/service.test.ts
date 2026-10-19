@@ -10,7 +10,11 @@ import {
 } from "../custody/contract.ts";
 import { background } from "../kernel/context.ts";
 import { OperationError } from "../kernel/errors.ts";
-import { HealthScope, ResourceStatus } from "../kernel/health.ts";
+import {
+  HealthScope,
+  ResourceFailureReason,
+  ResourceStatus,
+} from "../kernel/health.ts";
 import { HttpMethod, HttpStatus } from "../kernel/http.ts";
 import {
   AccessPolicy,
@@ -266,9 +270,17 @@ test("check answers healthy, unhealthy and unknown for s3 without a row, a log o
     pino({ level: "info" }, { write: (line: string) => lines.push(line) }),
   );
   const statuses = [
-    [HttpStatus.OK, ResourceStatus.Healthy],
-    [HttpStatus.NotFound, ResourceStatus.Unhealthy],
-    [HttpStatus.InternalServerError, ResourceStatus.Unknown],
+    [HttpStatus.OK, ResourceStatus.Healthy, null],
+    [
+      HttpStatus.NotFound,
+      ResourceStatus.Unhealthy,
+      ResourceFailureReason.Unclassified,
+    ],
+    [
+      HttpStatus.InternalServerError,
+      ResourceStatus.Unknown,
+      ResourceFailureReason.Unclassified,
+    ],
   ] as const;
   let next = 0;
   const send = t.mock.method(
@@ -280,7 +292,7 @@ test("check answers healthy, unhealthy and unknown for s3 without a row, a log o
     },
   );
   t.mock.method(S3Client.prototype, "destroy", () => {});
-  for (const [, expected] of statuses) {
+  for (const [, expected, failureReason] of statuses) {
     const answer = await f.invoke(storageOperations.check, {
       params: {},
       query: {},
@@ -289,6 +301,7 @@ test("check answers healthy, unhealthy and unknown for s3 without a row, a log o
     assert.deepEqual(answer, {
       status: expected,
       capability: CAPABILITY_BUCKET_HEAD,
+      failure_reason: failureReason,
     });
     assert.ok(!JSON.stringify(answer).includes(SECRET));
   }
@@ -310,7 +323,11 @@ test("check answers unknown when the request throws", async (t) => {
       query: {},
       body: CHECK_BODY,
     }),
-    { status: ResourceStatus.Unknown, capability: CAPABILITY_BUCKET_HEAD },
+    {
+      status: ResourceStatus.Unknown,
+      capability: CAPABILITY_BUCKET_HEAD,
+      failure_reason: ResourceFailureReason.Unclassified,
+    },
   );
 });
 
@@ -394,9 +411,17 @@ test("verify answers healthy, unhealthy and unknown like the health report witho
     body: S3_BODY,
   });
   const statuses = [
-    [HttpStatus.OK, ResourceStatus.Healthy],
-    [HttpStatus.NotFound, ResourceStatus.Unhealthy],
-    [HttpStatus.InternalServerError, ResourceStatus.Unknown],
+    [HttpStatus.OK, ResourceStatus.Healthy, null],
+    [
+      HttpStatus.NotFound,
+      ResourceStatus.Unhealthy,
+      ResourceFailureReason.Unclassified,
+    ],
+    [
+      HttpStatus.InternalServerError,
+      ResourceStatus.Unknown,
+      ResourceFailureReason.Unclassified,
+    ],
   ] as const;
   let next = 0;
   const send = t.mock.method(
@@ -411,7 +436,7 @@ test("verify answers healthy, unhealthy and unknown like the health report witho
   );
   t.mock.method(S3Client.prototype, "destroy", () => {});
   const before = credentialRows(f);
-  for (const [, expected] of statuses) {
+  for (const [, expected, failureReason] of statuses) {
     const answer = await f.invoke(
       storageOperations.verify,
       verifyInput(S3_BODY.name),
@@ -422,6 +447,7 @@ test("verify answers healthy, unhealthy and unknown like the health report witho
     assert.deepEqual(answer, {
       status: expected,
       capability: CAPABILITY_BUCKET_HEAD,
+      failure_reason: failureReason,
     });
     assert.equal(await entry!.check(background), expected);
     assert.ok(!JSON.stringify(answer).includes(SECRET));
@@ -449,7 +475,11 @@ test("verify answers unknown when the request throws and logs no secret", async 
   t.mock.method(S3Client.prototype, "destroy", () => {});
   assert.deepEqual(
     await f.invoke(storageOperations.verify, verifyInput(S3_BODY.name)),
-    { status: ResourceStatus.Unknown, capability: CAPABILITY_BUCKET_HEAD },
+    {
+      status: ResourceStatus.Unknown,
+      capability: CAPABILITY_BUCKET_HEAD,
+      failure_reason: ResourceFailureReason.Unclassified,
+    },
   );
   assert.ok(!lines.join("").includes(SECRET));
 });

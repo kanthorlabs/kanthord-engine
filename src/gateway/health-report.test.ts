@@ -9,6 +9,7 @@ import { mintHumanIdentity } from "../kernel/caller-mint.ts";
 import { CancellationContext, type Context } from "../kernel/context.ts";
 import {
   HealthScope,
+  ResourceFailureReason,
   ResourceStatus,
   type ResourceEntry,
   type ResourceStatusValue,
@@ -41,6 +42,7 @@ const ACCOUNT = "health-reader";
 const SICK_REASON = "status=500";
 const SICK_TARGET = "sick";
 const FINE_TARGET = "fine";
+const SILENT_TARGET = "silent";
 const LOG_MESSAGE = "resource.health.check";
 const CAPABILITY = "reachability";
 const CHECK_ERROR = new Error("secret credential or private endpoint");
@@ -203,6 +205,10 @@ test("report places every owner and scope with exact capabilities, encoded names
         [`${owner}%2Fglobal%25`]: {
           status: STATUSES[index % STATUSES.length],
           capability: CAPABILITY,
+          failure_reason:
+            STATUSES[index % STATUSES.length] === ResourceStatus.Healthy
+              ? null
+              : ResourceFailureReason.Unclassified,
         },
       },
       projects: {
@@ -210,6 +216,7 @@ test("report places every owner and scope with exact capabilities, encoded names
           [`${owner}%2Fproject`]: {
             status: ResourceStatus.Healthy,
             capability: CAPABILITY,
+            failure_reason: null,
           },
         },
       },
@@ -225,6 +232,7 @@ test("an empty intake inventory answers fresh empty maps", async (t) => {
   report.services.intake.global.changed = {
     status: ResourceStatus.Unknown,
     capability: CAPABILITY,
+    failure_reason: ResourceFailureReason.Unclassified,
   };
   assert.deepEqual((await f.report()).services.intake, {
     global: {},
@@ -247,6 +255,7 @@ test("an intake entry lands under services.intake.projects by project and inboun
         "inbound%2Fone": {
           status: ResourceStatus.Healthy,
           capability: CAPABILITY,
+          failure_reason: null,
         },
       },
     },
@@ -311,7 +320,11 @@ test("shared targets use the first check once across owners and projects and log
     { owner: OWNER_PROJECT, entry: second },
   ]);
   const report = await f.report();
-  const expected = { status: ResourceStatus.Unhealthy, capability: CAPABILITY };
+  const expected = {
+    status: ResourceStatus.Unhealthy,
+    capability: CAPABILITY,
+    failure_reason: ResourceFailureReason.Unclassified,
+  };
   assert.equal(checks, SINGLE_CHECK);
   assert.deepEqual(report.shared.llm.projects.one?.first, expected);
   assert.deepEqual(report.services.project.projects.two?.second, expected);
@@ -337,7 +350,7 @@ test("a non-healthy check logs its observed reason and a healthy check logs none
       owner: OWNER_LLM,
       entry: entry(SICK_TARGET, {
         check: async (_context, observe) => {
-          observe?.(SICK_REASON);
+          observe?.(SICK_REASON, ResourceFailureReason.Unclassified);
           return ResourceStatus.Unknown;
         },
       }),
@@ -346,7 +359,7 @@ test("a non-healthy check logs its observed reason and a healthy check logs none
       owner: OWNER_WORKER,
       entry: entry(FINE_TARGET, {
         check: async (_context, observe) => {
-          observe?.("status=200");
+          observe?.("status=200", ResourceFailureReason.Unclassified);
           return ResourceStatus.Healthy;
         },
       }),
@@ -363,6 +376,54 @@ test("a non-healthy check logs its observed reason and a healthy check logs none
     ),
     false,
   );
+});
+
+test("a report entry carries the observed failure reason, unclassified without a code and null when healthy", async (t) => {
+  const f = fixture(t, [
+    {
+      owner: OWNER_REPOSITORY,
+      entry: entry(SICK_TARGET, {
+        check: async (_context, observe) => {
+          observe?.(SICK_REASON, ResourceFailureReason.KeyRefused);
+          return ResourceStatus.Unhealthy;
+        },
+      }),
+    },
+    {
+      owner: OWNER_REPOSITORY,
+      entry: entry(FINE_TARGET, {
+        check: async (_context, observe) => {
+          observe?.("status=200", ResourceFailureReason.Unclassified);
+          return ResourceStatus.Healthy;
+        },
+      }),
+    },
+    {
+      owner: OWNER_REPOSITORY,
+      entry: entry(SILENT_TARGET, {
+        check: async () => ResourceStatus.Unhealthy,
+      }),
+    },
+  ]);
+  const report = await f.report();
+  assert.deepEqual(gatewayOperations.healthcheck.output.parse(report), report);
+  assert.deepEqual(report.shared.repository.global, {
+    [SICK_TARGET]: {
+      status: ResourceStatus.Unhealthy,
+      capability: CAPABILITY,
+      failure_reason: ResourceFailureReason.KeyRefused,
+    },
+    [FINE_TARGET]: {
+      status: ResourceStatus.Healthy,
+      capability: CAPABILITY,
+      failure_reason: null,
+    },
+    [SILENT_TARGET]: {
+      status: ResourceStatus.Unhealthy,
+      capability: CAPABILITY,
+      failure_reason: ResourceFailureReason.Unclassified,
+    },
+  });
 });
 
 test("a never-settling check expires, releases its slot and retains its unknown entry", async (t) => {
@@ -387,6 +448,7 @@ test("a never-settling check expires, releases its slot and retains its unknown 
   assert.deepEqual(report.shared.llm.global.hung, {
     status: ResourceStatus.Unknown,
     capability: CAPABILITY,
+    failure_reason: ResourceFailureReason.Unclassified,
   });
   assert.equal(
     report.services.worker.global.next?.status,
@@ -430,6 +492,7 @@ test("synchronous throws, rejections and invalid statuses become unknown without
     assert.deepEqual(value, {
       status: ResourceStatus.Unknown,
       capability: CAPABILITY,
+      failure_reason: ResourceFailureReason.Unclassified,
     });
   assert.doesNotMatch(JSON.stringify(report), /secret|endpoint/);
 });

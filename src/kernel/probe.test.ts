@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { background, CancellationContext, type Context } from "./context.ts";
-import { ResourceStatus } from "./health.ts";
+import { ResourceFailureReason, ResourceStatus } from "./health.ts";
 import { HttpMethod, HttpStatus } from "./http.ts";
 import {
   AUTHORIZATION_HEADER,
@@ -16,6 +16,7 @@ const URL = "https://probe.example/v1/check";
 const HEADERS = { [AUTHORIZATION_HEADER]: `Bearer ${SECRET}` };
 const NO_CALLS = 0;
 const ONE_CALL = 1;
+const TWO_CALLS = 2;
 const REASON_LIMIT = 300;
 
 const check = (context: Context) => probeHttp(URL, HEADERS, context);
@@ -105,6 +106,35 @@ const check = (context: Context) => probeHttp(URL, HEADERS, context);
     assert.equal(dispose.mock.callCount(), ONE_CALL);
   });
 }
+
+test("probeHttp observes an HTTP failure and a network error as unclassified", async (t) => {
+  const observed: Array<[string, string]> = [];
+  const observe = (reason: string, failureReason: string) =>
+    void observed.push([reason, failureReason]);
+  const fetch = t.mock.method(
+    globalThis,
+    "fetch",
+    async () => new Response(null, { status: HttpStatus.Unauthorized }),
+  );
+  assert.equal(
+    await probeHttp(URL, HEADERS, background, observe),
+    ResourceStatus.Unhealthy,
+  );
+  fetch.mock.mockImplementation(async () => {
+    throw new Error(SECRET);
+  });
+  assert.equal(
+    await probeHttp(URL, HEADERS, background, observe),
+    ResourceStatus.Unknown,
+  );
+  assert.equal(observed.length, TWO_CALLS);
+  assert.deepEqual(observed[0], [
+    `status=${HttpStatus.Unauthorized}`,
+    ResourceFailureReason.Unclassified,
+  ]);
+  assert.equal(observed[1]![1], ResourceFailureReason.Unclassified);
+  assert.ok(!observed[1]![0].includes(SECRET));
+});
 
 test("redactReason removes secrets, bearer values, JWTs and long tokens and bounds the length", () => {
   const jwt = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.signature";

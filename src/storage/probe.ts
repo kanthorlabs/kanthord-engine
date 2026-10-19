@@ -5,6 +5,7 @@ import {
 } from "@aws-sdk/client-s3";
 import { abortSignal, type Context } from "../kernel/context.ts";
 import {
+  ResourceFailureReason,
   ResourceStatus,
   type ResourceObserver,
   type ResourceStatusValue,
@@ -28,16 +29,19 @@ function bucketStatus(
   observe?: ResourceObserver,
 ): ResourceStatusValue {
   if (!isObject(value) || !("$metadata" in value)) {
-    observe?.(thrownReason(value, secrets));
+    observe?.(thrownReason(value, secrets), ResourceFailureReason.Unclassified);
     return ResourceStatus.Unknown;
   }
   const metadata = value.$metadata;
   if (!isObject(metadata) || !("httpStatusCode" in metadata)) {
-    observe?.(thrownReason(value, secrets));
+    observe?.(thrownReason(value, secrets), ResourceFailureReason.Unclassified);
     return ResourceStatus.Unknown;
   }
   if (metadata.httpStatusCode === HttpStatus.OK) return ResourceStatus.Healthy;
-  observe?.(`status=${String(metadata.httpStatusCode)}`);
+  observe?.(
+    `status=${String(metadata.httpStatusCode)}`,
+    ResourceFailureReason.Unclassified,
+  );
   if (metadata.httpStatusCode === HttpStatus.NotFound)
     return ResourceStatus.Unhealthy;
   return ResourceStatus.Unknown;
@@ -100,7 +104,10 @@ export async function probeS3(
       dispose();
     }
   } catch (error) {
-    observe?.(thrownReason(error, [accessKeyId, secretAccessKey]));
+    observe?.(
+      thrownReason(error, [accessKeyId, secretAccessKey]),
+      ResourceFailureReason.Unclassified,
+    );
     return ResourceStatus.Unknown;
   }
 }

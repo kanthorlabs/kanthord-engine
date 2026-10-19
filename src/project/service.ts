@@ -18,6 +18,7 @@ import {
 } from "../kernel/service.ts";
 import {
   HealthScope,
+  ResourceFailureReason,
   ResourceStatus,
   type HealthRegistry,
   type ResourceCheck,
@@ -37,6 +38,7 @@ import {
   validateText,
 } from "../agent/prompt-source.ts";
 import { RepositoryFileState } from "../repository/contract.ts";
+import { gitFailureReason } from "../repository/git-failure.ts";
 import { tagSchema } from "../kernel/tag.ts";
 import { isString } from "../kernel/values.ts";
 import {
@@ -145,6 +147,13 @@ function refuseSshHost(address: string, pin: SshPin): void {
       ProjectErrorCode.RepositorySshHostMismatch,
       "The repository address host differs from the host of the SSH credential.",
     );
+}
+
+function repositoryFailureReason(error: unknown): ResourceFailureReason {
+  return error instanceof OperationError &&
+    error.code === ProjectErrorCode.RepositoryAddressInvalid
+    ? ResourceFailureReason.AddressInvalid
+    : gitFailureReason(error);
 }
 
 function refuseRepositoryAction(
@@ -642,12 +651,13 @@ export class ProjectService implements Service, ProjectBindings {
   ): Promise<T> {
     try {
       return await read();
-    } catch {
+    } catch (error) {
       throwIfCancelled(context);
       throw new OperationError(
         SSH_UNREACHABLE_STATUS,
         ProjectErrorCode.RepositorySshUnreachable,
         "Repository SSH read failed.",
+        { failure_reason: repositoryFailureReason(error) },
       );
     }
   }
@@ -704,9 +714,13 @@ export class ProjectService implements Service, ProjectBindings {
       context,
       Date.now() + BINDING_CHECK_TIMEOUT_MS,
     );
-    const entry = (status: ResourceStatusValue) => ({
+    const entry = (
+      status: ResourceStatusValue,
+      failureReason: ResourceFailureReason | null,
+    ) => ({
       status,
       capability: RESOURCE_CAPABILITY_NETWORK_GIT_READ,
+      failure_reason: failureReason,
     });
     try {
       const end = Date.now() + BINDING_CHECK_TIMEOUT_MS;
@@ -721,10 +735,11 @@ export class ProjectService implements Service, ProjectBindings {
         deadline,
         end - Date.now(),
       );
-      return entry(ResourceStatus.Healthy);
-    } catch {
+      return entry(ResourceStatus.Healthy, null);
+    } catch (error) {
       return entry(
         deadline.err() ? ResourceStatus.Unknown : ResourceStatus.Unhealthy,
+        repositoryFailureReason(error),
       );
     } finally {
       deadline.cancel();
@@ -957,12 +972,13 @@ export class ProjectService implements Service, ProjectBindings {
         context,
         end - Date.now(),
       );
-    } catch {
+    } catch (error) {
       throwIfCancelled(context);
       throw new OperationError(
         SSH_UNREACHABLE_STATUS,
         ProjectErrorCode.RepositorySshUnreachable,
         "Repository SSH read failed.",
+        { failure_reason: gitFailureReason(error) },
       );
     }
     throwIfCancelled(context);
@@ -1384,7 +1400,8 @@ export class ProjectService implements Service, ProjectBindings {
                 deadline - Date.now(),
               );
             } catch (error) {
-              if (error instanceof OperationError) observe?.(error.code);
+              if (error instanceof OperationError)
+                observe?.(error.code, ResourceFailureReason.AddressInvalid);
               throw error;
             }
             try {
@@ -1394,7 +1411,10 @@ export class ProjectService implements Service, ProjectBindings {
                 deadline - Date.now(),
               );
             } catch (error) {
-              observe?.(ProjectErrorCode.RepositorySshUnreachable);
+              observe?.(
+                ProjectErrorCode.RepositorySshUnreachable,
+                gitFailureReason(error),
+              );
               throw error;
             }
             return ResourceStatus.Healthy;
