@@ -79,6 +79,8 @@ interface Hold {
 
 export interface SshRelease {
   credential: string;
+  binding_id: string | null;
+  address: string;
   access: SshAccess;
 }
 
@@ -129,6 +131,8 @@ export function releaseSshAccess(
   const material = custody.release(tx, grant, now);
   return {
     credential: granted.credential,
+    binding_id: granted.facts.binding_id,
+    address: granted.facts.address,
     access: dependencies.gitWriter.sshAccessOf(tx, granted, material),
   };
 }
@@ -156,14 +160,17 @@ function authorizeCheck(
     return facts;
   }
   custody.consume(grant);
-  hold.ssh = releaseSshAccess(dependencies, tx, now, {
+  const ssh = releaseSshAccess(dependencies, tx, now, {
     identity,
     claim: null,
     subject: {
       kind: SshIdentitySubjectKind.RequestEvidence,
       evidence_id: evidenceId,
     },
-  }).access;
+  });
+  assert.equal(ssh.binding_id, facts.repository.binding_id);
+  assert.equal(ssh.address, facts.repository.address);
+  hold.ssh = ssh.access;
   return facts;
 }
 

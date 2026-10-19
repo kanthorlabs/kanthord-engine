@@ -182,6 +182,7 @@ export interface SshCustodyScript {
   execution: GrantExecution | null;
   secret: unknown;
   refusal: Error | null;
+  sshFacts?: { binding_id: string; address: string };
 }
 
 export function sshCustody(script: SshCustodyScript): {
@@ -202,10 +203,12 @@ export function sshCustody(script: SshCustodyScript): {
         platform: SSH_PLATFORM,
         project_id: script.project_id,
         execution: request.claim === null ? null : script.execution,
-        facts: Object.freeze({
-          binding_id: bindingIdOf(request.subject, script.facts),
-          address: addressOf(script.facts),
-        }),
+        facts: Object.freeze(
+          script.sshFacts ?? {
+            binding_id: bindingIdOf(request.subject, script.facts),
+            address: addressOf(script.facts),
+          },
+        ),
       });
     }
     return Object.freeze({

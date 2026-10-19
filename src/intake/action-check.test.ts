@@ -29,8 +29,10 @@ import { SSH_HOST, sshAccessOf, sshCustody, sshStore } from "./test-support.ts";
 
 const PROJECT_ID = "project_01ARZ3NDEKTSV4RRFFQ69G5FAV";
 const BINDING_ID = "binding_01ARZ3NDEKTSV4RRFFQ69G5FAV";
+const OTHER_BINDING_ID = "binding_01ARZ3NDEKTSV4RRFFQ69G5FAW";
 const EVIDENCE_ID = "evidence_01ARZ3NDEKTSV4RRFFQ69G5FAV";
 const ADDRESS = `git@${SSH_HOST}:owner/pushed.git`;
+const OTHER_ADDRESS = `git@${SSH_HOST}:owner/other.git`;
 const RESOURCE_IDENTITY = "repository:github:owner/pushed";
 const PUSHED = "0123456789abcdef0123456789abcdef01234567";
 const PULL_NUMBER = 7;
@@ -82,6 +84,7 @@ function harness(
     credential?: string;
     pinned?: boolean;
     landingFailure?: Error;
+    sshFacts?: { binding_id: string; address: string };
   },
 ) {
   const { store, pin } = sshStore(t);
@@ -94,6 +97,7 @@ function harness(
     execution: null,
     secret: { key: "api-key" },
     refusal: null,
+    sshFacts: options.sshFacts,
   });
   const landings: (SshAccess | undefined)[] = [];
   const gitWriter: GitWriter = {
@@ -201,4 +205,16 @@ test("a branch push check answers 502 with ssh_agent_failed when the SSH agent f
       error.code === SshAgentErrorCode.Failed,
   );
   assert.equal(h.landings.length, ONE_LANDING);
+});
+
+test("a branch push check fails closed before git when the SSH key names another binding or address than the evidence", async (t) => {
+  for (const sshFacts of [
+    { binding_id: OTHER_BINDING_ID, address: ADDRESS },
+    { binding_id: BINDING_ID, address: OTHER_ADDRESS },
+  ]) {
+    const h = harness(t, { facts: requestFacts(branchPush), sshFacts });
+    await assert.rejects(h.check(), assert.AssertionError);
+    assert.deepEqual(h.landings, []);
+    assert.ok(h.materials.every((material) => material.dropped));
+  }
 });
