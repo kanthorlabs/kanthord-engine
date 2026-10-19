@@ -48,6 +48,9 @@ const META_READ_PER_HOST = 2;
 const ONE_ROW_PER_HOST = 1;
 const NO_PINS = 0;
 const PIN_LOG = "host key pinned";
+const NON_BASE64_SUFFIX = "!";
+const GITHUB_MIXED_CASE = "GitHub.COM";
+const GITLAB_MIXED_CASE = "GitLab.COM";
 
 function ed25519Key(): string {
   const { publicKey } = generateKeyPairSync("ed25519");
@@ -160,6 +163,10 @@ test("the meta parse takes the ed25519 entry of ssh_keys", () => {
   assert.equal(parseGitHubMeta({ ssh_keys: "x" }), null);
   assert.equal(parseGitHubMeta(null), null);
   assert.equal(parseGitHubMeta({ ssh_keys: ["ssh-ed25519 AAAA"] }), null);
+  assert.equal(
+    parseGitHubMeta({ ssh_keys: [`${GITHUB_KEY}${NON_BASE64_SUFFIX}`] }),
+    null,
+  );
 });
 
 test("the keyscan parse skips the comment line and takes the ed25519 line of the host", () => {
@@ -171,6 +178,10 @@ test("the keyscan parse skips the comment line and takes the ed25519 line of the
   assert.equal(parseKeyscan(GITLAB, KEYSCAN_PREFIX), null);
   assert.equal(parseKeyscan(GITLAB, `other.com ${key}\n`), null);
   assert.equal(parseKeyscan(GITLAB, `${GITLAB} ssh-rsa AAAAB3Nza\n`), null);
+  assert.equal(
+    parseKeyscan(GITLAB, `${GITLAB} ${key}${NON_BASE64_SUFFIX}\n`),
+    null,
+  );
 });
 
 test("the fingerprint equals the output of ssh-keygen -l", () => {
@@ -314,6 +325,25 @@ test("a pin replaces the row of its host and keeps one row", async (t) => {
   assert.equal(rows[0]!.host, GITLAB);
   assert.equal(rows[0]!.public_key, next);
   assert.match(String(rows[0]!.id), /^host_key_[0-9A-HJKMNP-TV-Z]{26}$/);
+});
+
+test("a host in another case scans, pins and reads under its lower-case name", async (t) => {
+  const f = fixture(t);
+  assert.equal((await f.scan(GITHUB_MIXED_CASE)).host, GITHUB);
+  await f.pin(GITLAB_MIXED_CASE, (await f.scan(GITLAB)).fingerprint);
+  await f.pin(GITLAB, (await f.scan(GITLAB)).fingerprint);
+  const rows = f.store.database
+    .prepare("SELECT host FROM repository_host_key")
+    .all();
+  assert.deepEqual(
+    rows.map((row) => row.host),
+    [GITLAB],
+  );
+  assert.ok(
+    f.store
+      .transaction((tx) => f.hostKeys.knownHostsLine(tx, GITLAB_MIXED_CASE))
+      .startsWith(`${GITLAB} `),
+  );
 });
 
 test("an unpinned host refuses its known-hosts line with unpinned", (t) => {
