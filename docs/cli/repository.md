@@ -4,8 +4,8 @@
 
 ## Scope
 
-This specification covers the implemented `kanthord repository credential` group, with
-**11 command leaves**. The Repository component is a shared component, not a service.
+This specification covers the implemented `kanthord repository credential` and `kanthord repository host-key` groups, with
+**14 command leaves**. The Repository component is a shared component, not a service.
 It owns the credential routes of its platforms. A credential belongs to no project.
 Custody declares no route and keeps the record functions that these routes call.
 
@@ -14,7 +14,7 @@ own the platform rules. The [credential route group](https://github.com/kanthorl
 rules the routes and operations. This page details their CLI surface and introduces no design rule.
 The [command surface](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/architecture.impl.md#the-command-surface)
 declares `repository` as a shared component group. The [operation contracts](../../src/repository/contract.ts), [CLI](../../src/apps/cli/repository.ts) and generated OpenAPI publish the wire names, paths, filters, output shapes and error codes.
-The operation IDs have the form `repository.credential.<operation>`.
+The operation IDs have the form `repository.credential.<operation>` and `repository.host_key.<operation>`.
 `repository.credential.update_metadata` is the operation ID for a metadata edit, and `repository.credential.revoke` for a revoke.
 
 ## Common calling convention
@@ -77,6 +77,15 @@ All paths below are implemented routes under the ruled `/api/repository/credenti
 
 The static `/api/repository/credential/platform`, `/api/repository/credential/check` and `/api/repository/credential/ssh/discover` paths take precedence over `/:credential_name`, so custody refuses the names `login`, `platform`, `check` and `ssh`.
 These routes have no project identity.
+
+The `host-key` group reads and pins the SSH host keys of the [host keys](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/repository.impl.md#host-keys).
+Each synopsis follows `kanthord repository host-key`. All three commands have `[R]` and `human` access. `pin` is a mutation with `[M]`.
+
+| #   | Synopsis after `kanthord repository host-key`   | HTTP route                           | Operation ID               | Access/status        |
+| --- | ----------------------------------------------- | ------------------------------------ | -------------------------- | -------------------- |
+| 1   | `list [R]`                                      | `GET /api/repository/host-key`       | `repository.host_key.list` | `human`; implemented |
+| 2   | `scan <host> [R]`                               | `POST /api/repository/host-key/scan` | `repository.host_key.scan` | `human`; implemented |
+| 3   | `pin <host> --fingerprint <SHA256:...> [M] [R]` | `PUT /api/repository/host-key/:host` | `repository.host_key.pin`  | `human`; implemented |
 
 A name whose platform belongs to another component answers `404 credential.credential.not_found` on every command that takes a name.
 A `create` with a platform of another component answers `400 credential.platform.unsupported`.
@@ -273,6 +282,34 @@ HTTP `200` answers `{ items }`. Each item holds `host`, `hostname`, `port`, `ide
 The command writes nothing. A human creates each record with `create`.
 An unreadable `~/.ssh/config` answers `422 repository.credential.ssh_config_unreadable`.
 
+## `host-key list`
+
+The command takes no positional argument and no body.
+HTTP `200` answers `{ items, next_cursor }`. The items are in ascending `host` order.
+Each item holds `host`, `public_key`, `fingerprint`, `source` and `created_at`.
+`public_key` is `ssh-ed25519 <base64>`. `fingerprint` is the `SHA256:` form of `ssh-keygen -l`.
+`source` is `github_meta` for `github.com` and `ssh.github.com`, and `keyscan` for every other host.
+The server derives `fingerprint` and `source` on read.
+
+## `host-key scan <host>`
+
+The required `<host>` maps to `body.host`. The command writes nothing and takes no mutation key.
+The host must be a member of an SSH host set of a platform.
+For `github.com` and `ssh.github.com`, the server reads the `ssh-ed25519` entry of `ssh_keys` from `GET https://api.github.com/meta`.
+For every other host, the server runs `ssh-keyscan -T 5 -t ed25519 -p 22 -- <host>`.
+The read has a 10 s deadline. HTTP `200` answers `{ host, public_key, fingerprint, source }`.
+
+## `host-key pin <host>`
+
+The required `<host>` maps to `params.host`. The required `--fingerprint` maps to `body.fingerprint`.
+The CLI refuses a value that is not `SHA256:` and 43 base64 characters before a request.
+Compare the fingerprint of `scan` with the fingerprint that the provider publishes, then pin it.
+The server reads the source again with a 10 s deadline. It pins only when the fingerprint is equal.
+A pin replaces the row of its host in one transaction. No command deletes a pin.
+HTTP `200` answers the item of the host, as `list` shows it.
+The server logs the human identity, the host, the fingerprint and the source of a pin.
+The workbench agent has no tool for this operation, so only a human pins a host key.
+
 ## Error codes
 
 Every remote command can also answer the shared codes of [other.md](other.md#error-codes).
@@ -297,6 +334,10 @@ Every remote command can also answer the shared codes of [other.md](other.md#err
 | 400   | `repository.credential.ssh_drift`                   | `ssh -G` resolves values that differ from the metadata; details name each differing key.        | create, rotate, update-metadata, binding apply                         |
 | 422   | `repository.credential.ssh_config_unreadable`       | The server cannot read `~/.ssh/config`.                                                         | ssh-discover                                                           |
 | 422   | `repository.credential.ssh_resolve_failed`          | `ssh -G` fails for the host or exceeds its deadline; details hold the `host`.                   | create, rotate, update-metadata                                        |
+| 400   | `repository.host_key.host_unsupported`              | The host is in no SSH host set.                                                                 | host-key scan, host-key pin                                            |
+| 422   | `repository.host_key.scan_failed`                   | The GitHub meta read or `ssh-keyscan` fails or reaches its deadline; details hold the `host`.   | host-key scan, host-key pin                                            |
+| 409   | `repository.host_key.changed`                       | The second read answers another fingerprint; details hold the `host` and the `fingerprint`.     | host-key pin                                                           |
+| local | `cli.repository.host_key.pin.fingerprint_invalid`   | The `--fingerprint` value is not `SHA256:` and 43 base64 characters.                            | host-key pin                                                           |
 
 Errors contain no secret. Dependency refusals list dependents in `error.details`.
 

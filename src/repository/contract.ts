@@ -2,6 +2,7 @@ import { z } from "zod";
 import {
   CREATE_MAX_BODY_BYTES,
   CREDENTIAL_TIMEOUT_MS,
+  LIST_LIMIT_MAX,
   credentialAnswerSchema,
   credentialCheckAnswerSchema,
   credentialCheckBodySchema,
@@ -26,6 +27,21 @@ import {
 export const REPOSITORY_COMPONENT_NAME = "repository";
 export const SSH_RESOLVE_FAILED_STATUS = 422;
 export const SSH_CONFIG_UNREADABLE_STATUS = 422;
+export const HOST_KEY_SCAN_FAILED_STATUS = 422;
+export const HOST_KEY_FINGERPRINT_PATTERN = /^SHA256:[A-Za-z0-9+/]{43}$/;
+
+export const HostKeySource = {
+  GitHubMeta: "github_meta",
+  Keyscan: "keyscan",
+} as const;
+export type HostKeySource = (typeof HostKeySource)[keyof typeof HostKeySource];
+
+export const HostKeyErrorCode = {
+  HostUnsupported: "repository.host_key.host_unsupported",
+  ScanFailed: "repository.host_key.scan_failed",
+  Changed: "repository.host_key.changed",
+  Unpinned: "repository.host_key.unpinned",
+} as const;
 
 export const RepositoryFileState = {
   Present: "present",
@@ -82,6 +98,34 @@ export const sshDiscoverAnswerSchema = z.strictObject({
   ),
 });
 export type SshDiscoverAnswer = z.infer<typeof sshDiscoverAnswerSchema>;
+
+export const hostKeyScanAnswerSchema = z.strictObject({
+  host: z.string(),
+  public_key: z.string(),
+  fingerprint: z.string(),
+  source: z.enum(HostKeySource),
+});
+export type HostKeyScanAnswer = z.infer<typeof hostKeyScanAnswerSchema>;
+export const hostKeyItemSchema = hostKeyScanAnswerSchema.extend({
+  created_at: z.number().int(),
+});
+export type HostKeyItem = z.infer<typeof hostKeyItemSchema>;
+export const hostKeyListQuerySchema = z.strictObject({
+  limit: z.coerce.number().int().positive().max(LIST_LIMIT_MAX).optional(),
+  cursor: z.string().min(1).optional(),
+});
+export type HostKeyListQuery = z.infer<typeof hostKeyListQuerySchema>;
+export const hostKeyListAnswerSchema = z.strictObject({
+  items: z.array(hostKeyItemSchema),
+  next_cursor: z.string().nullable(),
+});
+export type HostKeyListAnswer = z.infer<typeof hostKeyListAnswerSchema>;
+const hostKeyParamsSchema = z.strictObject({ host: z.string().min(1) });
+const hostKeyScanBodySchema = z.strictObject({ host: z.string().min(1) });
+const hostKeyPinBodySchema = z.strictObject({
+  fingerprint: z.string().regex(HOST_KEY_FINGERPRINT_PATTERN),
+});
+const HOST_KEY_MAX_BODY_BYTES = 1024;
 
 export const repositoryOperations = {
   platform_list: {
@@ -315,5 +359,70 @@ export const repositoryOperations = {
     output: sshDiscoverAnswerSchema,
     description:
       "List the SSH aliases of ~/.ssh/config that resolve to a git platform host.",
+  },
+  host_key_list: {
+    id: "repository.host_key.list",
+    service: REPOSITORY_COMPONENT_NAME,
+    method: HttpMethod.Get,
+    path: "/api/repository/host-key",
+    access: AccessPolicy.Human,
+    store: StoreName.Operational,
+    lifetime: OperationLifetime.Unary,
+    timeoutMs: CREDENTIAL_TIMEOUT_MS,
+    mutation: false,
+    body: false,
+    status: HttpStatus.OK,
+    input: z.strictObject({
+      params: emptyParams,
+      query: hostKeyListQuerySchema,
+      body: z.null(),
+    }),
+    output: hostKeyListAnswerSchema,
+    description: "List the pinned SSH host keys by host.",
+  },
+  host_key_scan: {
+    id: "repository.host_key.scan",
+    service: REPOSITORY_COMPONENT_NAME,
+    method: HttpMethod.Post,
+    path: "/api/repository/host-key/scan",
+    access: AccessPolicy.Human,
+    store: StoreName.Operational,
+    lifetime: OperationLifetime.Unary,
+    timeoutMs: CREDENTIAL_TIMEOUT_MS,
+    mutation: false,
+    body: true,
+    maxBodyBytes: HOST_KEY_MAX_BODY_BYTES,
+    status: HttpStatus.OK,
+    errors: [HOST_KEY_SCAN_FAILED_STATUS],
+    input: z.strictObject({
+      params: emptyParams,
+      query: emptyQuery,
+      body: hostKeyScanBodySchema,
+    }),
+    output: hostKeyScanAnswerSchema,
+    description: "Read the ed25519 host key of an SSH host without a write.",
+  },
+  host_key_pin: {
+    id: "repository.host_key.pin",
+    service: REPOSITORY_COMPONENT_NAME,
+    method: HttpMethod.Put,
+    path: "/api/repository/host-key/:host",
+    access: AccessPolicy.Human,
+    store: StoreName.Operational,
+    lifetime: OperationLifetime.Unary,
+    timeoutMs: CREDENTIAL_TIMEOUT_MS,
+    mutation: true,
+    body: true,
+    maxBodyBytes: HOST_KEY_MAX_BODY_BYTES,
+    status: HttpStatus.OK,
+    errors: [HOST_KEY_SCAN_FAILED_STATUS],
+    input: z.strictObject({
+      params: hostKeyParamsSchema,
+      query: emptyQuery,
+      body: hostKeyPinBodySchema,
+    }),
+    output: hostKeyItemSchema,
+    description:
+      "Pin the host key of an SSH host when a second read confirms the fingerprint.",
   },
 } as const satisfies Record<string, Operation>;

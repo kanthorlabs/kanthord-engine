@@ -238,6 +238,12 @@ paths:
     $ref: ./openapi/repository/credential.update_metadata.yaml#/pathItem
   /api/repository/credential/{credential_name}/verify:
     $ref: ./openapi/repository/credential.verify.yaml#/pathItem
+  /api/repository/host-key:
+    $ref: ./openapi/repository/host_key.list.yaml#/pathItem
+  /api/repository/host-key/{host}:
+    $ref: ./openapi/repository/host_key.pin.yaml#/pathItem
+  /api/repository/host-key/scan:
+    $ref: ./openapi/repository/host_key.scan.yaml#/pathItem
   /api/scheduler/claim/{execution_id}:
     $ref: ./openapi/scheduler/claim.get.yaml#/pathItem
   /api/scheduler/execution/{execution_id}:
