@@ -393,6 +393,9 @@ export function composeServices(options: {
       custodySuitability: (tx, req) => custody.custodySuitability(tx, req),
       repositoryBindingIdsOf: (tx, nodeId, revision) =>
         mission.repositoryBindingIdsOf(tx, nodeId, revision),
+      requestEvidenceBindingOf: (tx, identity, evidenceId) =>
+        mission.authorizeRequestEvidence(tx, identity, evidenceId, null).facts
+          .repository.binding_id,
     }),
     sshAccessOf: (tx, granted, material) =>
       repositoryComponent.sshAccessOf(tx, granted, material),

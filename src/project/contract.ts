@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { z } from "zod";
+import type { ServiceIdentity } from "../kernel/caller.ts";
 import type { Context } from "../kernel/context.ts";
 import { HttpMethod, HttpStatus } from "../kernel/http.ts";
 import {
@@ -440,6 +441,11 @@ export type RepositoryBindingIdsOf = (
   nodeId: string,
   nodeRevision: number,
 ) => string[];
+export type RequestEvidenceBindingOf = (
+  tx: Transaction,
+  identity: ServiceIdentity,
+  evidenceId: string,
+) => string;
 export type WorkerAgentsOfFn = (workerName: string) => string[];
 export type WorkerAgentViewFn = (
   tx: Transaction,

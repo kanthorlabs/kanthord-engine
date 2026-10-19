@@ -1438,6 +1438,7 @@ export function mappedTransport(
       ),
     landedOn: (input, ...args) =>
       connector.landedOn({ ...input, address: mapped(input.address) }, ...args),
+    sshAccessOf: (...args) => connector.sshAccessOf(...args),
   };
 }
 

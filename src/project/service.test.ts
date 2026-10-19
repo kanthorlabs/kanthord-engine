@@ -203,6 +203,7 @@ function fakeCustody(
         facts: { binding_id: null, address: subject.address },
       };
     }
+    assert.equal(subject.kind, SshIdentitySubjectKind.Binding);
     const binding = readBindingRevision(tx, subject.binding_id);
     assert.ok(binding);
     const config = repositoryConfigSchema.parse(binding.config);

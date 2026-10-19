@@ -14,6 +14,7 @@ import {
   testHumanIdentity,
   testMachineIdentity,
 } from "../kernel/test-identity.ts";
+import { MISSION_SERVICE_NAME } from "../mission/contract.ts";
 import {
   BindingKind,
   PROJECT_ID_PREFIX,
@@ -96,6 +97,8 @@ function setup(t: TestContext) {
   });
   const suitability: Array<{ credential: string; platform: string }> = [];
   const pinned = new Map<string, string[]>();
+  const evidenceBindings = new Map<string, string>();
+  const evidenceReads: string[] = [];
   const port = projectSshIdentityAuthorization({
     custodySuitability: (tx, request) => {
       assert.ok(tx.database.isTransaction);
@@ -105,7 +108,17 @@ function setup(t: TestContext) {
       assert.ok(tx.database.isTransaction);
       return pinned.get(revisionKey(nodeId, revision)) ?? [];
     },
+    requestEvidenceBindingOf: (tx, identity, evidenceId) => {
+      assert.ok(tx.database.isTransaction);
+      assert.equal(identity.kind, IdentityKind.Service);
+      evidenceReads.push(evidenceId);
+      const bindingId = evidenceBindings.get(evidenceId);
+      assert.ok(bindingId, "The fake Mission names the frozen binding.");
+      return bindingId;
+    },
   });
+  const evidenceId = createIdentity("evidence");
+  evidenceBindings.set(evidenceId, saved.binding_id);
   const nodeId = createIdentity("node");
   pinned.set(revisionKey(nodeId, NODE_REVISION), [saved.binding_id]);
   const claim: ExecutionClaim = {
@@ -148,6 +161,11 @@ function setup(t: TestContext) {
       kind: SshIdentitySubjectKind.Binding,
       binding_id: saved.binding_id,
     } as const,
+    evidence: {
+      kind: SshIdentitySubjectKind.RequestEvidence,
+      evidence_id: evidenceId,
+    } as const,
+    evidenceReads,
   };
 }
 
@@ -310,4 +328,25 @@ test("an absent binding, a worker binding and a removed binding refuse every ide
     () => f.authorize(human(), f.binding),
     refused("binding_not_found"),
   );
+});
+
+test("a request evidence refuses a human, a machine and a service identity without provenance before the Mission read", (t) => {
+  const f = setup(t);
+  assert.throws(
+    () => f.authorize(human(), f.evidence),
+    refused("identity_refused"),
+  );
+  assert.throws(
+    () => f.authorize(f.machine, f.evidence, f.claim),
+    refused("identity_refused"),
+  );
+  assert.throws(
+    () =>
+      f.authorize(
+        { kind: IdentityKind.Service, service: MISSION_SERVICE_NAME },
+        f.evidence,
+      ),
+    refused("identity_refused"),
+  );
+  assert.deepEqual(f.evidenceReads, []);
 });
