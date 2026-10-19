@@ -10,6 +10,7 @@ import {
   type GrantRequest,
   type Material,
   type RequestFacts,
+  type SshIdentitySubject,
 } from "../custody/contract.ts";
 import type { CallerIdentity } from "../kernel/caller.ts";
 import { abortSignal, type Context } from "../kernel/context.ts";
@@ -108,20 +109,17 @@ export function releaseSshAccess(
   request: {
     identity: CallerIdentity;
     claim: ExecutionClaim | null;
-    binding_id: string;
+    subject: SshIdentitySubject;
   },
 ): SshRelease {
-  assert.ok(request.binding_id.length, "A repository names its binding.");
+  assert.notEqual(request.subject.kind, SshIdentitySubjectKind.Draft);
   const custody = dependencies.custody;
   const grant = custody.authorizeOperation(
     tx,
     {
       kind: GrantKind.SshIdentity,
       identity: request.identity,
-      subject: {
-        kind: SshIdentitySubjectKind.Binding,
-        binding_id: request.binding_id,
-      },
+      subject: request.subject,
       claim: request.claim,
     },
     now,
@@ -161,7 +159,10 @@ function authorizeCheck(
   hold.ssh = releaseSshAccess(dependencies, tx, now, {
     identity,
     claim: null,
-    binding_id: facts.repository.binding_id,
+    subject: {
+      kind: SshIdentitySubjectKind.RequestEvidence,
+      evidence_id: evidenceId,
+    },
   }).access;
   return facts;
 }

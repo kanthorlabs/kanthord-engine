@@ -11,14 +11,19 @@ import { OperationError } from "../../kernel/errors.ts";
 import { ResourceStatus } from "../../kernel/health.ts";
 import { HttpStatus } from "../../kernel/http.ts";
 import { mintServiceIdentity } from "../../kernel/service-mint.ts";
-import { MISSION_SERVICE_NAME } from "../../mission/contract.ts";
+import {
+  MISSION_SERVICE_NAME,
+  MissionErrorCode,
+} from "../../mission/contract.ts";
 import { gatewayOperations } from "../../gateway/contract.ts";
 import {
   PROJECT_SERVICE_NAME,
   ProjectErrorCode,
   RESOURCE_CAPABILITY_NETWORK_GIT_READ,
+  SSH_CREDENTIAL_PLATFORM,
   projectOperations,
 } from "../../project/contract.ts";
+import { projectSshIdentityAuthorization } from "../../project/index.ts";
 import type { SshAccess } from "../../repository/index.ts";
 import {
   FAKE_GITHUB_HOST_KEY,
@@ -36,6 +41,7 @@ const SSH_CREDENTIAL = "github-ssh";
 const FIRST_BINDING_SET_VERSION = 1;
 const SINGLE_READ = 1;
 const FACILITY_REFUSAL = { name: "FacilityError" };
+const EVIDENCE_ID = "evidence_01ARZ3NDEKTSV4RRFFQ69G5FAV";
 const OPENSSH_ARMOR = "-----BEGIN OPENSSH PRIVATE KEY-----";
 
 async function setup(t: TestContext) {
@@ -160,6 +166,72 @@ test("the service identity of another service refuses the key of a repository bi
   assert.throws(
     () => f.release(mintServiceIdentity(MISSION_SERVICE_NAME), f.subject),
     projectRefusal("identity_refused"),
+  );
+});
+
+function evidencePort(bindingId: string) {
+  const reads: string[] = [];
+  const port = projectSshIdentityAuthorization({
+    custodySuitability: () => assert.fail("A request evidence names no draft."),
+    repositoryBindingIdsOf: () => [],
+    requestEvidenceBindingOf: (tx, identity, evidenceId) => {
+      assert.ok(tx.database.isTransaction);
+      assert.equal(identity.service, MISSION_SERVICE_NAME);
+      reads.push(evidenceId);
+      return bindingId;
+    },
+  });
+  return { port, reads };
+}
+
+test("the service identity of the Mission Service passes for a request evidence through the binding of its frozen action", async (t) => {
+  const f = await setup(t);
+  const { port, reads } = evidencePort(f.binding.id);
+  const evidence = {
+    kind: SshIdentitySubjectKind.RequestEvidence,
+    evidence_id: EVIDENCE_ID,
+  } as const;
+  const authorize = (identity: CallerIdentity) =>
+    f.fixture.store.transaction((tx) =>
+      port.sshIdentity(tx, identity, evidence, null),
+    );
+  assert.deepEqual(authorize(mintServiceIdentity(MISSION_SERVICE_NAME)), {
+    credential: SSH_CREDENTIAL,
+    platform: SSH_CREDENTIAL_PLATFORM,
+    project_id: f.project.id,
+    facts: { binding_id: f.binding.id, address: ADDRESS },
+  });
+  assert.deepEqual(reads, [EVIDENCE_ID]);
+  assert.throws(
+    () => authorize(mintServiceIdentity(PROJECT_SERVICE_NAME)),
+    projectRefusal("identity_refused"),
+  );
+  assert.deepEqual(reads, [EVIDENCE_ID]);
+  await humanCaller(f.fixture)(projectOperations["bindingSet.write"], {
+    params: { project_id: f.project.id },
+    query: {},
+    body: { version: f.written.binding_set_version, bindings: {} },
+  });
+  assert.throws(
+    () => authorize(mintServiceIdentity(MISSION_SERVICE_NAME)),
+    projectRefusal("binding_not_found"),
+  );
+});
+
+test("the service identity of the Mission Service refuses the key of an absent request evidence", async (t) => {
+  const f = await setup(t);
+  assert.throws(
+    () =>
+      f.release(mintServiceIdentity(MISSION_SERVICE_NAME), {
+        kind: SshIdentitySubjectKind.RequestEvidence,
+        evidence_id: EVIDENCE_ID,
+      }),
+    (error) => {
+      assert.ok(error instanceof OperationError);
+      assert.equal(error.code, MissionErrorCode.AuthorizationRefused);
+      assert.deepEqual(error.details, { reason: "node_mismatch" });
+      return true;
+    },
   );
 });
 

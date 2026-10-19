@@ -4,6 +4,7 @@ import {
   type Authorized,
   type SshIdentityAuthorization,
   type SshIdentityFacts,
+  type SshIdentitySubject,
 } from "../custody/contract.ts";
 import {
   isHumanIdentity,
@@ -15,6 +16,7 @@ import { OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import type { ExecutionClaim } from "../kernel/operation.ts";
 import type { Transaction } from "../kernel/store.ts";
+import { MISSION_SERVICE_NAME } from "../mission/contract.ts";
 import {
   BindingKind,
   PROJECT_SERVICE_NAME,
@@ -23,6 +25,7 @@ import {
   repositoryConfigSchema,
   type CustodySuitability,
   type RepositoryBindingIdsOf,
+  type RequestEvidenceBindingOf,
 } from "./contract.ts";
 import {
   hasBindingTombstone,
@@ -43,6 +46,7 @@ type SshAuthorizationRefusal =
 export interface SshAuthorizationDependencies {
   custodySuitability: CustodySuitability;
   repositoryBindingIdsOf: RepositoryBindingIdsOf;
+  requestEvidenceBindingOf: RequestEvidenceBindingOf;
 }
 
 function refused(reason: SshAuthorizationRefusal): never {
@@ -90,6 +94,48 @@ function refuseBindingCaller(
     refused(SshAuthorizationRefusal.NodeMismatch);
 }
 
+function requestEvidenceBinding(
+  tx: Transaction,
+  dependencies: SshAuthorizationDependencies,
+  identity: CallerIdentity,
+  claim: ExecutionClaim | null,
+  evidenceId: string,
+): StoredBinding {
+  if (
+    !isServiceIdentity(identity) ||
+    identity.service !== MISSION_SERVICE_NAME ||
+    claim !== null
+  )
+    refused(SshAuthorizationRefusal.IdentityRefused);
+  return liveRepositoryBinding(
+    tx,
+    dependencies.requestEvidenceBindingOf(tx, identity, evidenceId),
+  );
+}
+
+function subjectBinding(
+  tx: Transaction,
+  dependencies: SshAuthorizationDependencies,
+  identity: CallerIdentity,
+  claim: ExecutionClaim | null,
+  subject: Exclude<
+    SshIdentitySubject,
+    { kind: typeof SshIdentitySubjectKind.Draft }
+  >,
+): StoredBinding {
+  if (subject.kind === SshIdentitySubjectKind.RequestEvidence)
+    return requestEvidenceBinding(
+      tx,
+      dependencies,
+      identity,
+      claim,
+      subject.evidence_id,
+    );
+  const binding = liveRepositoryBinding(tx, subject.binding_id);
+  refuseBindingCaller(tx, dependencies, identity, claim, binding);
+  return binding;
+}
+
 export function projectSshIdentityAuthorization(
   dependencies: SshAuthorizationDependencies,
 ): SshIdentityAuthorization {
@@ -111,8 +157,13 @@ export function projectSshIdentityAuthorization(
           facts: { binding_id: null, address: subject.address },
         };
       }
-      const binding = liveRepositoryBinding(tx, subject.binding_id);
-      refuseBindingCaller(tx, dependencies, identity, claim, binding);
+      const binding = subjectBinding(
+        tx,
+        dependencies,
+        identity,
+        claim,
+        subject,
+      );
       const config = repositoryConfigSchema.parse(binding.config);
       return {
         credential: config.ssh_credential,

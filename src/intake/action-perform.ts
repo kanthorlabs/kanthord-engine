@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import {
   apiKeySecretSchema,
   GrantKind,
+  SshIdentitySubjectKind,
   type ActionFacts,
   type Material,
 } from "../custody/contract.ts";
@@ -188,7 +189,10 @@ function sshReleaseOf(
   return releaseSshAccess(dependencies, tx, now, {
     identity: request.performer.identity,
     claim: request.performer.claim,
-    binding_id: request.binding_id,
+    subject: {
+      kind: SshIdentitySubjectKind.Binding,
+      binding_id: request.binding_id,
+    },
   });
 }
 

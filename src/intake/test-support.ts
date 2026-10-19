@@ -9,6 +9,7 @@ import {
   type GrantExecution,
   type GrantRequest,
   type Material,
+  type SshIdentitySubject,
 } from "../custody/contract.ts";
 import {
   OperationResultType,
@@ -194,7 +195,7 @@ export function sshCustody(script: SshCustodyScript): {
   const { private_key: privateKey } = generateSshKey(SSH_CREDENTIAL);
   const grantOf = (request: GrantRequest): Grant => {
     if (request.kind === GrantKind.SshIdentity) {
-      assert.equal(request.subject.kind, SshIdentitySubjectKind.Binding);
+      assert.notEqual(request.subject.kind, SshIdentitySubjectKind.Draft);
       return Object.freeze({
         kind: GrantKind.SshIdentity,
         credential: SSH_CREDENTIAL,
@@ -202,7 +203,7 @@ export function sshCustody(script: SshCustodyScript): {
         project_id: script.project_id,
         execution: request.claim === null ? null : script.execution,
         facts: Object.freeze({
-          binding_id: request.subject.binding_id,
+          binding_id: bindingIdOf(request.subject, script.facts),
           address: addressOf(script.facts),
         }),
       });
@@ -245,6 +246,15 @@ export function sshCustody(script: SshCustodyScript): {
     custodySuitability: unexpectedCollaboration,
   };
   return { custody, requests, materials, privateKey };
+}
+
+function bindingIdOf(subject: SshIdentitySubject, facts: unknown): string {
+  if (subject.kind === SshIdentitySubjectKind.Binding)
+    return subject.binding_id;
+  const repository = (facts as { repository: { binding_id: string } })
+    .repository;
+  assert.ok(repository.binding_id.length);
+  return repository.binding_id;
 }
 
 function addressOf(facts: unknown): string {

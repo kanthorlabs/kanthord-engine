@@ -132,7 +132,7 @@ function harness(
   return { ...fake, knownHosts, landings, check, sshRequests };
 }
 
-test("a branch push check reads the landing with an SSH release of the binding under the Mission identity and no claim", async (t) => {
+test("a branch push check reads the landing with an SSH release of the request evidence under the Mission identity and no claim", async (t) => {
   const h = harness(t, { facts: requestFacts(branchPush) });
   const fold = await h.check();
   assert.equal(fold.end_state, CheckEndState.Expected);
@@ -140,7 +140,10 @@ test("a branch push check reads the landing with an SSH release of the binding u
     {
       kind: GrantKind.SshIdentity,
       identity: mission,
-      subject: { kind: SshIdentitySubjectKind.Binding, binding_id: BINDING_ID },
+      subject: {
+        kind: SshIdentitySubjectKind.RequestEvidence,
+        evidence_id: EVIDENCE_ID,
+      },
       claim: null,
     },
   ]);

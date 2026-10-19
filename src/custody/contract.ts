@@ -278,9 +278,14 @@ export type InboundFacts = {
 export const SshIdentitySubjectKind = {
   Binding: "binding",
   Draft: "draft",
+  RequestEvidence: "request_evidence",
 } as const;
 export type SshIdentitySubject =
   | { kind: typeof SshIdentitySubjectKind.Binding; binding_id: string }
+  | {
+      kind: typeof SshIdentitySubjectKind.RequestEvidence;
+      evidence_id: string;
+    }
   | {
       kind: typeof SshIdentitySubjectKind.Draft;
       project_id: string;
