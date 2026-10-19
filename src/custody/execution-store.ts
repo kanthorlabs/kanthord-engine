@@ -2,9 +2,9 @@ import assert from "node:assert/strict";
 import type { Credential, CredentialStore } from "@earendil-works/pi-ai";
 import { digest } from "../kernel/json.ts";
 import {
-  handoverPayloadSchema,
+  handoverItemsSchema,
   piCredentialSchema,
-  type HandoverPayload,
+  type HandoverItems,
   type RefreshReport,
 } from "./contract.ts";
 import { normalizeCredential } from "./payload.ts";
@@ -33,10 +33,10 @@ class ExecutionCredentialView implements ExecutionCredentials {
   readonly #report: (report: RefreshReport) => Promise<void>;
 
   constructor(
-    payload: HandoverPayload,
+    payload: HandoverItems,
     report: (report: RefreshReport) => Promise<void>,
   ) {
-    const parsed = handoverPayloadSchema.parse(payload);
+    const parsed = handoverItemsSchema.parse(payload);
     assert.equal(parsed.items.length, EXECUTION_CREDENTIAL_COUNT);
     const item = parsed.items[0];
     assert(item);
@@ -122,7 +122,7 @@ class ExecutionCredentialView implements ExecutionCredentials {
 }
 
 export function executionCredentialStore(
-  payload: HandoverPayload,
+  payload: HandoverItems,
   report: (report: RefreshReport) => Promise<void>,
 ): ExecutionCredentials {
   return new ExecutionCredentialView(payload, report);

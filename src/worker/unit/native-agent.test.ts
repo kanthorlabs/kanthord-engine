@@ -34,6 +34,7 @@ import {
   scriptedModelRuntime,
   scriptedProvider,
   SETUP_PROMPT,
+  TEST_SSH_HOST_KEY,
   WORKING_LAYER_ALL_ON,
 } from "./test-support.ts";
 import { SHIPPED_TEMPLATES } from "../../agent/prompt-templates.ts";
@@ -152,12 +153,7 @@ function repositoryOf(
     binding_id: createIdentity("binding"),
     name: "repo",
     address: "git@github.com:owner/repo.git",
-    ssh_identity: {
-      host: "github.com",
-      hostname: "github.com",
-      port: 22,
-      identity_file: "~/.ssh/id_test",
-    },
+    ssh_host_key: TEST_SSH_HOST_KEY,
     strategy: { base_branch: "main" },
     project_prompt: projectPrompt,
     working_layer: { ...WORKING_LAYER_ALL_ON, ...workingLayer },

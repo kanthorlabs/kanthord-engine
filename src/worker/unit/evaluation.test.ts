@@ -13,7 +13,11 @@ import { ExecutionBudget } from "./budget.ts";
 import { EndReason, ExecutionRun, ExecutionStop } from "./execution-run.ts";
 import { executionBoundary } from "./native-method.ts";
 import { ExecutionIntent } from "../contract.ts";
-import { anthropicSetup, repositorySetup } from "./test-support.ts";
+import {
+  anthropicSetup,
+  everyBindingSshAccess,
+  repositorySetup,
+} from "./test-support.ts";
 import { WorkspaceRoot } from "./workspace.ts";
 import type { MethodClients } from "./method-clients.ts";
 import type { RepositoryTransport } from "../contract.ts";
@@ -375,6 +379,7 @@ test("evaluation writes failed-verification assessments without inference and ga
         claim,
         workspaces,
         transport: {} as RepositoryTransport,
+        sshAccess: everyBindingSshAccess,
         env: hostEnvironment(),
       },
       run,
@@ -514,6 +519,7 @@ test("an evaluation that its agent deadline cuts ends with no assessment and no 
         claim,
         workspaces,
         transport: {} as RepositoryTransport,
+        sshAccess: everyBindingSshAccess,
         env: hostEnvironment(),
       },
       run,

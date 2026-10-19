@@ -36,6 +36,7 @@ export async function runStepsExamine(
   const workspace = await input.workspaces.prepareExamine({
     executionId: input.claim.execution_id,
     transport: input.transport,
+    sshAccess: input.sshAccess,
     context: run.operationContext,
     deadlineMs: deadline - Date.now(),
     repositories: input.setup.repositories,

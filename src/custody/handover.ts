@@ -16,6 +16,8 @@ import {
   refreshReportSchema,
   type CredentialPlatforms,
   type CustodyExecution,
+  type HandoverPayload,
+  type HandoverSshIdentity,
   type Material,
 } from "./contract.ts";
 import {
@@ -42,12 +44,13 @@ export function sealMaterial(
   secret: string,
   execution: CustodyExecution,
   materials: readonly Material[],
+  sshIdentities: readonly HandoverSshIdentity[],
   platforms: CredentialPlatforms,
 ): HandoverEnvelope {
   const keys = deriveHandoverKeys(secret);
   try {
     assert(materials.length > NO_MATERIALS);
-    const payload = {
+    const payload: HandoverPayload = {
       items: materials.map((material) => {
         assert(Object.hasOwn(platforms, material.platform));
         const shape = platforms[material.platform]!.secret_shape;
@@ -58,6 +61,7 @@ export function sealMaterial(
           credential: credentialOfSecret(shape, material.value()),
         };
       }),
+      ssh_identities: [...sshIdentities],
     };
     return sealEnvelope(
       keys.handover,

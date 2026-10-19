@@ -38,8 +38,9 @@ import {
 } from "../../worker/contract.ts";
 import { ReviewState } from "../../repository/github.ts";
 import {
-  FAKE_SSH_IDENTITY,
+  FAKE_SSH_CREDENTIAL,
   FakePullState,
+  createFakeSshCredential,
   gatewayFixture,
   fakeGitHub,
   bareRepository,
@@ -166,7 +167,6 @@ async function setup(t: TestContext) {
   const fixture = await gatewayFixture(t, {
     repositoryConnector: {
       gitLsRemote: async () => {},
-      resolveSshIdentity: async () => FAKE_SSH_IDENTITY,
     },
     github: { baseUrl: gitHub.endpoint },
     repositoryTransport: mappedTransport({
@@ -209,24 +209,14 @@ async function setup(t: TestContext) {
     metadata: null,
     secret: { key: "test-secret" },
   });
-  await write(["repository", "credential", "create"], {
-    name: "github-ssh",
-    platform: "ssh",
-    metadata: {
-      host: "github.com",
-      hostname: "github.com",
-      port: 22,
-      identity_file: "~/.ssh/id_rsa",
-    },
-    secret: {},
-  });
+  await createFakeSshCredential(read);
   const repository = (name: string, action: string) => ({
     kind: "repository",
     config: {
       available: true,
       platform: "github",
       address: `git@github.com:owner/${name}.git`,
-      ssh_credential: "github-ssh",
+      ssh_credential: FAKE_SSH_CREDENTIAL,
       credential: "github",
       strategy: {
         base_branch: "main",

@@ -331,6 +331,7 @@ export function readCurrentBindings(tx: Transaction): StoredBinding[] {
 
 export function readCurrentRepositories(tx: Transaction): Array<{
   project_name: string;
+  binding_id: string;
   name: string;
   address: string;
   platform: string;
@@ -351,6 +352,7 @@ export function readCurrentRepositories(tx: Transaction): Array<{
     const config = repositoryConfigSchema.parse(JSON.parse(row.config));
     return {
       project_name: row.project_name,
+      binding_id: row.id,
       name: row.name,
       address: config.address,
       platform: config.platform,

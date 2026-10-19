@@ -40,7 +40,10 @@ test("handover retries a lost answer with a fresh key and reports refresh and re
         : {
             type: OperationResultType.Completed,
             status: 200,
-            data: sealEnvelope(keys.handover, aad, { items: [ITEM] }),
+            data: sealEnvelope(keys.handover, aad, {
+              items: [ITEM],
+              ssh_identities: [],
+            }),
           };
     },
   );
@@ -99,7 +102,7 @@ test("another client secret refuses handover without exposing material", async (
     data: sealEnvelope(
       deriveHandoverKeys(SECRET).handover,
       handoverAad(claim.execution_id, claim.claimant.runtime_identity),
-      { items: [ITEM] },
+      { items: [ITEM], ssh_identities: [] },
     ),
   }));
   await assert.rejects(
@@ -129,7 +132,10 @@ test("handover builds one store per item and reports a refresh of the second ite
   t.mock.method(api.worker, "handover", async () => ({
     type: OperationResultType.Completed,
     status: 200,
-    data: sealEnvelope(keys.handover, aad, { items: [ITEM, second] }),
+    data: sealEnvelope(keys.handover, aad, {
+      items: [ITEM, second],
+      ssh_identities: [],
+    }),
   }));
   const reports: { credential_id: string }[] = [];
   t.mock.method(

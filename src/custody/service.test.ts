@@ -24,7 +24,7 @@ import {
   type InboundsNamingFn,
   type CredentialAnswer,
 } from "./contract.ts";
-import { decrypt } from "./envelope.ts";
+import { decrypt, encrypt } from "./envelope.ts";
 import { custodyMigrations } from "./migrations.ts";
 import { CustodyComponent, type Dependencies } from "./service.ts";
 import {
@@ -52,6 +52,7 @@ const TestPlatform = {
   Metadata: "metadata-platform",
   OAuth: "oauth-platform",
   AccessKey: "access-key-platform",
+  Generated: "generated-platform",
 } as const;
 const FOREIGN_PLATFORM = "foreign-platform";
 const NO_CAPABILITY = "none";
@@ -88,6 +89,10 @@ const TEST_SET: CredentialPlatformSet = {
         bucket: z.string().min(1),
         region: z.string().min(1),
       }),
+    ),
+    [TestPlatform.Generated]: testPlatform(
+      SecretShape.SshKey,
+      z.strictObject({ public_key: z.string().min(1) }),
     ),
   },
 };
@@ -1956,4 +1961,245 @@ test("check answers unknown when the probe throws", async (t) => {
     capability: NO_CAPABILITY,
     failure_reason: ResourceFailureReason.Unclassified,
   });
+});
+
+const OPENSSH_LABEL = "OPENSSH PRIVATE KEY";
+const GENERATED_NAME = "deploy";
+const UNSUPPORTED_ENTRY_CODE = "credential.entry.unsupported";
+const GENERATED_BODY = "Z2VuZXJhdGVkLWtleS1ib2R5";
+
+function generatedSecret(body: string) {
+  return {
+    private_key: [
+      `-----BEGIN ${OPENSSH_LABEL}-----`,
+      body,
+      `-----END ${OPENSSH_LABEL}-----`,
+      "",
+    ].join("\n"),
+  };
+}
+
+function generator(calls: string[], body = GENERATED_BODY) {
+  return (name: string) => {
+    calls.push(name);
+    return {
+      secret: generatedSecret(body),
+      metadata: { public_key: `public-of-${name}` },
+    };
+  };
+}
+
+function storedSecret(f: ReturnType<typeof fixture>, name: string): unknown {
+  const row = f.store.database
+    .prepare(
+      "SELECT id, platform, nonce, ciphertext FROM credential WHERE name = ? AND ended_at IS NULL ORDER BY revision DESC LIMIT 1",
+    )
+    .get(name) as {
+    id: string;
+    platform: string;
+    nonce: Buffer;
+    ciphertext: Buffer;
+  };
+  return decrypt(key, row.id, row.platform, row.nonce, row.ciphertext);
+}
+
+test("a generated secret refuses the generic create, rotate, metadata edit and check", async (t) => {
+  const f = fixture();
+  t.after(() => f.store.close());
+  fails(
+    () =>
+      f.create({
+        name: GENERATED_NAME,
+        platform: TestPlatform.Generated,
+        secret: generatedSecret(GENERATED_BODY),
+        metadata: { public_key: "public" },
+      }),
+    HttpStatus.BadRequest,
+    UNSUPPORTED_ENTRY_CODE,
+  );
+  assert.equal(credentialCount(f), NO_CREDENTIALS);
+  f.store.transaction((tx) =>
+    f.component.createGenerated(
+      tx,
+      TEST_SET,
+      {
+        name: GENERATED_NAME,
+        platform: TestPlatform.Generated,
+        generate: generator([]),
+      },
+      HUMAN_ACCOUNT_ID,
+    ),
+  );
+  fails(
+    () =>
+      f.rotate(GENERATED_NAME, {
+        expected_revision: FIRST_REVISION,
+        secret: generatedSecret(GENERATED_BODY),
+      }),
+    HttpStatus.BadRequest,
+    UNSUPPORTED_ENTRY_CODE,
+  );
+  fails(
+    () =>
+      f.updateMetadata(GENERATED_NAME, {
+        expected_revision: FIRST_REVISION,
+        metadata: { public_key: "other" },
+      }),
+    HttpStatus.BadRequest,
+    UNSUPPORTED_ENTRY_CODE,
+  );
+  await assert.rejects(
+    f.component.check(
+      TEST_SET,
+      {
+        platform: TestPlatform.Generated,
+        secret: generatedSecret(GENERATED_BODY),
+        metadata: { public_key: "public" },
+      },
+      new CancellationContext(),
+    ),
+    (error) =>
+      error instanceof OperationError &&
+      error.status === HttpStatus.BadRequest &&
+      error.code === CHECK_UNSUPPORTED_CODE,
+  );
+  assert.equal(credentialCount(f), FIRST_REVISION);
+});
+
+test("a generated create checks the name before the generator and logs no secret", (t) => {
+  const f = fixture();
+  t.after(() => f.store.close());
+  const calls: string[] = [];
+  const created = f.store.transaction((tx) =>
+    f.component.createGenerated(
+      tx,
+      TEST_SET,
+      {
+        name: GENERATED_NAME,
+        platform: TestPlatform.Generated,
+        generate: generator(calls),
+      },
+      HUMAN_ACCOUNT_ID,
+    ),
+  );
+  assert.deepEqual(calls, [GENERATED_NAME]);
+  assert.equal(created.name, GENERATED_NAME);
+  assert.equal(created.platform, TestPlatform.Generated);
+  assert.deepEqual(created.revisions[0]?.metadata, {
+    public_key: `public-of-${GENERATED_NAME}`,
+  });
+  assert.deepEqual(
+    storedSecret(f, GENERATED_NAME),
+    generatedSecret(GENERATED_BODY),
+  );
+  assert.deepEqual(f.logs, [
+    {
+      credential_id: created.revisions[0]!.id,
+      human_identity: HUMAN_ACCOUNT_ID,
+    },
+  ]);
+  assert.ok(!JSON.stringify(f.logs).includes(GENERATED_BODY));
+  fails(
+    () =>
+      f.store.transaction((tx) =>
+        f.component.createGenerated(
+          tx,
+          TEST_SET,
+          {
+            name: GENERATED_NAME,
+            platform: TestPlatform.Generated,
+            generate: generator(calls),
+          },
+          HUMAN_ACCOUNT_ID,
+        ),
+      ),
+    HttpStatus.Conflict,
+    NAME_CONFLICT_CODE,
+  );
+  fails(
+    () =>
+      f.store.transaction((tx) =>
+        f.component.createGenerated(
+          tx,
+          TEST_SET,
+          {
+            name: "ssh",
+            platform: TestPlatform.Generated,
+            generate: generator(calls),
+          },
+          HUMAN_ACCOUNT_ID,
+        ),
+      ),
+    HttpStatus.BadRequest,
+    INVALID_INPUT_CODE,
+  );
+  assert.deepEqual(calls, [GENERATED_NAME]);
+});
+
+test("a generated rotate refuses a stale revision, replaces a legacy secret and drains the older revision", (t) => {
+  const pins = new Map<string, string[]>();
+  const f = fixture({ pins });
+  t.after(() => f.store.close());
+  const id = createIdentity("credential");
+  const legacy = encrypt(key, id, TestPlatform.Generated, {});
+  f.store.database
+    .prepare(
+      "INSERT INTO credential (id, name, platform, revision, nonce, ciphertext, metadata, created_at, ended_at) VALUES (?, ?, ?, 1, ?, ?, ?, ?, NULL)",
+    )
+    .run(
+      id,
+      GENERATED_NAME,
+      TestPlatform.Generated,
+      legacy.nonce,
+      legacy.ciphertext,
+      canonicalJSON({ host: "github" }),
+      Date.now(),
+    );
+  const calls: string[] = [];
+  const rotate = (expected_revision: number, body = GENERATED_BODY) =>
+    f.store.transaction((tx) =>
+      f.component.rotateGenerated(
+        tx,
+        TEST_SET,
+        GENERATED_NAME,
+        { expected_revision, generate: generator(calls, body) },
+        HUMAN_ACCOUNT_ID,
+      ),
+    );
+  fails(
+    () => rotate(NEXT_REVISION),
+    HttpStatus.Conflict,
+    REVISION_CONFLICT_CODE,
+  );
+  assert.deepEqual(calls, []);
+  const rotated = rotate(FIRST_REVISION);
+  assert.deepEqual(calls, [GENERATED_NAME]);
+  assert.equal(rotated.revisions[0]?.revision, NEXT_REVISION);
+  assert.deepEqual(rotated.revisions[0]?.metadata, {
+    public_key: `public-of-${GENERATED_NAME}`,
+  });
+  assert.notEqual(rotated.revisions[1]?.ended_at, null);
+  assert.deepEqual(
+    storedSecret(f, GENERATED_NAME),
+    generatedSecret(GENERATED_BODY),
+  );
+  pins.set(rotated.revisions[0]!.id, ["execution"]);
+  const next = rotate(NEXT_REVISION, "bmV4dC1rZXktYm9keQ==");
+  assert.equal(next.revisions[0]?.revision, THIRD_REVISION);
+  assert.equal(next.revisions[1]?.ended_at, null);
+  assert.ok(!JSON.stringify(f.logs).includes(GENERATED_BODY));
+  fails(
+    () =>
+      f.store.transaction((tx) =>
+        f.component.rotateGenerated(
+          tx,
+          TEST_SET,
+          "github",
+          { expected_revision: FIRST_REVISION, generate: generator(calls) },
+          HUMAN_ACCOUNT_ID,
+        ),
+      ),
+    HttpStatus.NotFound,
+    CREDENTIAL_NOT_FOUND_CODE,
+  );
 });

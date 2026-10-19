@@ -23,8 +23,14 @@ import {
   WorkspaceRoot,
   WORKSPACE_RETENTION_MS,
 } from "./workspace.ts";
-
-const transport = { ...connector, proveSshIdentity: async () => {} };
+import {
+  everyBindingSshAccess,
+  LOCAL_GIT_SSH_ACCESS,
+  testSshAccess,
+  transport,
+} from "./test-support.ts";
+import type { RepositoryTransport } from "../contract.ts";
+import type { SshAccess } from "../../repository/contract.ts";
 
 type ImplementInput = Parameters<WorkspaceRoot["prepareImplement"]>[0];
 async function prepareOne(
@@ -46,6 +52,7 @@ async function prepareOne(
   return { ...checkout, nodeBranch: input.nodeBranch };
 }
 const FIRST_ATTEMPT = 1;
+const PREPARATION_KINDS = 3;
 const ORIGIN_NAME = "origin";
 const SEED_NAME = "seed";
 
@@ -125,15 +132,14 @@ test("workspace preparation refreshes implement branches and creates disposable 
     binding_id: createIdentity("binding"),
     name: "todoapp-repo",
     address: origin,
-    ssh_identity: {
-      host: "github.com",
-      hostname: "github.com",
-      port: 22,
-      identity_file: "~/.ssh/id_test",
-    },
     strategy: { base_branch: "main" },
   };
-  const common = { transport, context: background, deadlineMs: 10000 };
+  const common = {
+    transport,
+    sshAccess: everyBindingSshAccess,
+    context: background,
+    deadlineMs: 10000,
+  };
   const first = await prepareOne(workspace, {
     ...common,
     nodeId,
@@ -143,11 +149,12 @@ test("workspace preparation refreshes implement branches and creates disposable 
   });
   assert.equal(first.head, base);
   const pushed = await commit(first.directory, "pushed");
-  await transport.pushNodeBranch(
+  await connector.pushNodeBranch(
     first.directory,
     first.nodeBranch,
     background,
     10000,
+    LOCAL_GIT_SSH_ACCESS,
   );
   await commit(first.directory, "unpushed");
   workspace.release(workspace.nodeKey(nodeId), WorkspaceKind.Node);
@@ -262,64 +269,68 @@ test("workspace preparation refreshes implement branches and creates disposable 
   workspace.release(workspace.nodeKey(failedId), WorkspaceKind.Node);
 });
 
-test("a drifted SSH identity stops every workspace preparation before its git operation", async (t) => {
+test("every workspace git operation takes the SSH identity of its binding, and a binding without one runs no git", async (t) => {
   const workspace = WorkspaceRoot.open(temporary(t));
-  const drift = new Error("repository.credential.ssh_drift");
-  const proved: string[] = [];
-  const refusing = {
-    ...connector,
-    proveSshIdentity: async (pin: { host: string }) => {
-      proved.push(pin.host);
-      throw drift;
+  const stop = new Error("test_stop_after_git");
+  const used: { operation: string; ssh: SshAccess }[] = [];
+  const recording: RepositoryTransport = {
+    clone: async (_address, _directory, _context, _deadlineMs, ssh) => {
+      used.push({ operation: "clone", ssh });
+      throw stop;
     },
-    clone: async () => assert.fail("The clone must not run."),
-    cloneSnapshot: async () => assert.fail("The clone must not run."),
+    cloneSnapshot: async (_a, _r, _d, _context, _deadlineMs, ssh) => {
+      used.push({ operation: "clone_snapshot", ssh });
+      throw stop;
+    },
     fetchAndCheckout: async () => assert.fail("The fetch must not run."),
+    fetchBase: async () => assert.fail("The fetch must not run."),
+    pushNodeBranch: async () => assert.fail("The push must not run."),
   };
   const repository = {
     binding_id: createIdentity("binding"),
     name: "todoapp-repo",
-    address: "git@kanthorlabs.github.com:kanthorlabs/kanthord.git",
-    ssh_identity: {
-      host: "kanthorlabs.github.com",
-      hostname: "ssh.github.com",
-      port: 443,
-      identity_file: "~/.ssh/id_kanthorlabs",
-    },
+    address: "git@github.com:kanthorlabs/kanthord.git",
     strategy: { base_branch: "main" },
   };
-  const common = {
-    transport: refusing,
-    context: background,
-    deadlineMs: 10000,
+  const sshAccess = testSshAccess([repository]);
+  const access = sshAccess.get(repository.binding_id)!;
+  const prepare = (held: ReadonlyMap<string, SshAccess>) => {
+    const common = {
+      transport: recording,
+      sshAccess: held,
+      context: background,
+      deadlineMs: 10000,
+    };
+    return [
+      prepareOne(workspace, {
+        ...common,
+        nodeId: createIdentity("node"),
+        nodeBranch: "kanthord/node_01ARZ3NDEKTSV4RRFFQ69G5FAA",
+        pushed: false,
+        repository,
+      }),
+      workspace.prepareSnapshots({
+        ...common,
+        executionId: createIdentity("execution"),
+        snapshots: [{ repository, commit: "head" }],
+      }),
+      workspace.prepareExamine({
+        ...common,
+        executionId: createIdentity("execution"),
+        repositories: [repository],
+      }),
+    ];
   };
-  await assert.rejects(
-    prepareOne(workspace, {
-      ...common,
-      nodeId: createIdentity("node"),
-      nodeBranch: "kanthord/node_01ARZ3NDEKTSV4RRFFQ69G5FAA",
-      pushed: false,
-      repository,
-    }),
-    (error) => error === drift,
-  );
-  await assert.rejects(
-    workspace.prepareSnapshots({
-      ...common,
-      executionId: createIdentity("execution"),
-      snapshots: [{ repository, commit: "head" }],
-    }),
-    (error) => error === drift,
-  );
-  await assert.rejects(
-    workspace.prepareExamine({
-      ...common,
-      executionId: createIdentity("execution"),
-      repositories: [repository],
-    }),
-    (error) => error === drift,
-  );
-  assert.deepEqual(proved, Array(3).fill(repository.ssh_identity.host));
+  for (const pending of prepare(sshAccess))
+    await assert.rejects(pending, (error) => error === stop);
+  assert.deepEqual(used, [
+    { operation: "clone", ssh: access },
+    { operation: "clone_snapshot", ssh: access },
+    { operation: "clone_snapshot", ssh: access },
+  ]);
+  for (const pending of prepare(new Map()))
+    await assert.rejects(pending, assert.AssertionError);
+  assert.equal(used.length, PREPARATION_KINDS);
 });
 
 const SCRATCH_ENTRIES = 1;
@@ -347,6 +358,7 @@ test("an implement workspace excludes the scratch directory from git once", asyn
   const nodeId = createIdentity("node");
   const input = {
     transport,
+    sshAccess: everyBindingSshAccess,
     context: background,
     deadlineMs: 10000,
     nodeId,
@@ -356,12 +368,6 @@ test("an implement workspace excludes the scratch directory from git once", asyn
       binding_id: createIdentity("binding"),
       name: "todoapp-repo",
       address: origin,
-      ssh_identity: {
-        host: "github.com",
-        hostname: "github.com",
-        port: 22,
-        identity_file: "~/.ssh/id_test",
-      },
       strategy: { base_branch: "main" },
     },
   };
@@ -427,17 +433,12 @@ async function restartFixture(t: test.TestContext) {
     binding_id: createIdentity("binding"),
     name: "todoapp-repo",
     address: origin,
-    ssh_identity: {
-      host: "github.com",
-      hostname: "github.com",
-      port: 22,
-      identity_file: "~/.ssh/id_test",
-    },
     strategy: { base_branch: "main" },
   };
   const prepare = async (startAttempt: number, pushed = false) => {
     const prepared = await prepareOne(workspace, {
       transport,
+      sshAccess: everyBindingSshAccess,
       context: background,
       deadlineMs: 10000,
       nodeId,
@@ -461,11 +462,12 @@ test("a continued attempt whose pushed node branch is gone stops and keeps its c
   const h = await restartFixture(t);
   const first = await h.prepare(FIRST_ATTEMPT);
   const pushed = await h.commit(first.directory, "work", "pushed");
-  await transport.pushNodeBranch(
+  await connector.pushNodeBranch(
     first.directory,
     first.nodeBranch,
     background,
     10000,
+    LOCAL_GIT_SSH_ACCESS,
   );
   await h.deleteRemote(first.nodeBranch);
   await assert.rejects(h.prepare(FIRST_ATTEMPT), missing);
@@ -474,11 +476,12 @@ test("a continued attempt whose pushed node branch is gone stops and keeps its c
     (await simpleGit(first.directory).revparse(["HEAD"])).trim(),
     pushed,
   );
-  await transport.pushNodeBranch(
+  await connector.pushNodeBranch(
     first.directory,
     first.nodeBranch,
     background,
     10000,
+    LOCAL_GIT_SSH_ACCESS,
   );
   assert.equal((await h.prepare(FIRST_ATTEMPT)).head, pushed);
 });
@@ -493,11 +496,12 @@ test("a restart from the base branch starts from the base after the earlier node
   const h = await restartFixture(t);
   const first = await h.prepare(FIRST_ATTEMPT);
   await h.commit(first.directory, "work", "rejected");
-  await transport.pushNodeBranch(
+  await connector.pushNodeBranch(
     first.directory,
     first.nodeBranch,
     background,
     10000,
+    LOCAL_GIT_SSH_ACCESS,
   );
   await h.deleteRemote(first.nodeBranch);
   const restart = await h.prepare(RESTART_ATTEMPT);
@@ -510,22 +514,24 @@ test("a restart from the base branch checks out the base, pushes a new node bran
   const first = await h.prepare(FIRST_ATTEMPT);
   assert.equal(first.head, h.base);
   const earlier = await h.commit(first.directory, "work", "rejected");
-  await transport.pushNodeBranch(
+  await connector.pushNodeBranch(
     first.directory,
     first.nodeBranch,
     background,
     10000,
+    LOCAL_GIT_SSH_ACCESS,
   );
   const restart = await h.prepare(RESTART_ATTEMPT);
   assert.equal(restart.directory, first.directory);
   assert.equal(restart.nodeBranch, `${first.nodeBranch}-a2`);
   assert.equal(restart.head, h.base);
   const fresh = await h.commit(restart.directory, "work", "fresh");
-  await transport.pushNodeBranch(
+  await connector.pushNodeBranch(
     restart.directory,
     restart.nodeBranch,
     background,
     10000,
+    LOCAL_GIT_SSH_ACCESS,
   );
   assert.equal(await h.remoteHead(restart.nodeBranch), fresh);
   assert.equal(await h.remoteHead(first.nodeBranch), earlier);
@@ -579,12 +585,6 @@ async function bindingsFixture(t: test.TestContext, names = BINDING_NAMES) {
       binding_id: createIdentity("binding"),
       name,
       address: join(root, ORIGIN_NAME),
-      ssh_identity: {
-        host: "github.com",
-        hostname: "github.com",
-        port: 22,
-        identity_file: "~/.ssh/id_test",
-      },
       strategy: { base_branch: "main" },
     });
   }
@@ -592,6 +592,7 @@ async function bindingsFixture(t: test.TestContext, names = BINDING_NAMES) {
   const prepare = (pushed: ReadonlySet<string> = new Set()) =>
     workspace.prepareImplement({
       transport,
+      sshAccess: everyBindingSshAccess,
       context: background,
       deadlineMs: 10000,
       nodeId,
@@ -655,11 +656,12 @@ test("a missing remote node branch in one checkout stops with repository.node_br
   const key = h.workspace.nodeKey(h.nodeId);
   const prepared = await h.prepare();
   for (const checkout of prepared.checkouts)
-    await transport.pushNodeBranch(
+    await connector.pushNodeBranch(
       checkout.directory,
       h.nodeBranch,
       background,
       10000,
+      LOCAL_GIT_SSH_ACCESS,
     );
   h.workspace.release(key, WorkspaceKind.Node);
   await simpleGit(h.repositories[1]!.address).raw([

@@ -1,5 +1,11 @@
 import assert from "node:assert/strict";
-import { createHash, generateKeyPairSync, randomBytes } from "node:crypto";
+import {
+  createHash,
+  createPrivateKey,
+  createPublicKey,
+  generateKeyPairSync,
+  randomBytes,
+} from "node:crypto";
 
 export interface SshKey {
   private_key: string;
@@ -25,8 +31,13 @@ const BASE64_TEXT = /^[A-Za-z0-9+/]+={0,2}$/;
 const PRIVATE_KEY_BYTES_MAX = 4096;
 const PUBLIC_KEY_BYTES = 32;
 const SEED_BYTES = 32;
+const SEED_OFFSET = 0;
 const SECRET_KEY_BYTES = SEED_BYTES + PUBLIC_KEY_BYTES;
 const PKCS8_SEED_OFFSET = 16;
+const PKCS8_ED25519_PREFIX = Buffer.from(
+  "302e020100300506032b657004220420",
+  "hex",
+);
 const SPKI_PUBLIC_KEY_OFFSET = 12;
 const CHECK_BYTES = 4;
 const LENGTH_BYTES = 4;
@@ -223,6 +234,22 @@ function readPublicBlob(blob: Buffer): Buffer {
   return publicKey;
 }
 
+function publicKeyOfSeed(seed: Buffer): Buffer {
+  const pkcs8 = Buffer.concat([PKCS8_ED25519_PREFIX, seed]);
+  try {
+    const privateKey = createPrivateKey({
+      key: pkcs8,
+      format: "der",
+      type: "pkcs8",
+    });
+    return createPublicKey(privateKey)
+      .export({ format: "der", type: "spki" })
+      .subarray(SPKI_PUBLIC_KEY_OFFSET);
+  } finally {
+    pkcs8.fill(0);
+  }
+}
+
 function readPrivateSection(section: Buffer, publicKey: Buffer): string {
   if (section.length % BLOCK_BYTES !== ALIGNED)
     throw new Error("The SSH private section is malformed.");
@@ -239,6 +266,10 @@ function readPrivateSection(section: Buffer, publicKey: Buffer): string {
     !secret.subarray(SEED_BYTES).equals(publicKey)
   )
     throw new Error("The SSH key pair is inconsistent.");
+  if (
+    !publicKeyOfSeed(secret.subarray(SEED_OFFSET, SEED_BYTES)).equals(publicKey)
+  )
+    throw new Error("The SSH public key does not derive from the seed.");
   const comment = reader.text();
   const padding = reader.rest();
   for (let index = 0; index < padding.length; index += 1)

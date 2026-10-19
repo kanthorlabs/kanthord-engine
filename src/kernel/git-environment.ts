@@ -20,6 +20,12 @@ const INTERACTIVE_HELPERS = [
   "GIT_EXTERNAL_DIFF",
   "GIT_PROXY_COMMAND",
 ];
+const HOST_SSH = [
+  "SSH_AUTH_SOCK",
+  "SSH_AGENT_PID",
+  "GIT_SSH",
+  "GIT_SSH_COMMAND",
+];
 const ISOLATION = {
   GIT_CONFIG_GLOBAL: EMPTY_CONFIG_PATH,
   GIT_CONFIG_NOSYSTEM: "1",
@@ -42,7 +48,7 @@ export function isolatedGitEnvironment(
 ): NodeJS.ProcessEnv {
   assert.ok(env);
   const output: NodeJS.ProcessEnv = { ...env };
-  for (const name of INTERACTIVE_HELPERS) delete output[name];
+  for (const name of [...INTERACTIVE_HELPERS, ...HOST_SSH]) delete output[name];
   for (const [name, value] of Object.entries(DEFAULT_IDENTITY))
     if (!output[name]) output[name] = value;
   return { ...output, ...ISOLATION };

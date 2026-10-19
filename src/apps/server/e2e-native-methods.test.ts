@@ -44,6 +44,7 @@ import {
   WorkspaceRoot,
   runNativeExecution,
   noTranscript,
+  handedSshAccess,
 } from "../../worker/unit/index.ts";
 import {
   fauxAssistantMessage,
@@ -53,7 +54,7 @@ import {
 } from "../../worker/unit/test-support.ts";
 import { environment, kanthord, kanthordTerminal } from "./cli-support.ts";
 import {
-  FAKE_SSH_IDENTITY,
+  createFakeSshCredential,
   fakeGitHub,
   gatewayFixture,
 } from "./test-support.ts";
@@ -108,7 +109,6 @@ async function methodsFixture(t: TestContext) {
   const f = await gatewayFixture(t, {
     repositoryConnector: {
       gitLsRemote: async () => {},
-      resolveSshIdentity: async () => FAKE_SSH_IDENTITY,
     },
     github: { baseUrl: gitHub.endpoint },
   });
@@ -147,17 +147,7 @@ async function methodsFixture(t: TestContext) {
     metadata: null,
     secret: { key: "test_methods_github" },
   });
-  await write(["repository", "credential", "create"], {
-    name: "github-ssh",
-    platform: "ssh",
-    metadata: {
-      host: "github.com",
-      hostname: "github.com",
-      port: 22,
-      identity_file: "~/.ssh/id_rsa",
-    },
-    secret: {},
-  });
+  await createFakeSshCredential(read);
   for (const agent of ["swe@1", "re@1"])
     await write(["agent", "enablement", "put", agent], {
       agent_providers: [
@@ -344,7 +334,6 @@ async function methodsFixture(t: TestContext) {
   }
   const connector = new RepositoryComponent();
   const transport: RepositoryTransport = {
-    proveSshIdentity: async () => {},
     clone: async (address, ...args) => {
       await connector.clone(barePaths.get(address)!, ...args);
       await simpleGit(args[0]).addConfig("user.name", "Methods Test");
@@ -393,18 +382,21 @@ async function methodsFixture(t: TestContext) {
     const payload = handoverPayloadSchema.parse(
       openEnvelope(keys.handover, aad, envelope),
     );
-    const credentials = executionCredentialStore(payload, async (report) => {
-      completed(
-        await workerClient.credential({
-          params: {},
-          query: {},
-          body: {
-            execution_id: execution.execution_id,
-            ...sealEnvelope(keys.report, aad, report),
-          },
-        }),
-      );
-    });
+    const credentials = executionCredentialStore(
+      { items: payload.items },
+      async (report) => {
+        completed(
+          await workerClient.credential({
+            params: {},
+            query: {},
+            body: {
+              execution_id: execution.execution_id,
+              ...sealEnvelope(keys.report, aad, report),
+            },
+          }),
+        );
+      },
+    );
     const setup = completed(
       await workerClient["execution.setup.get"]({
         params: { execution_id: execution.execution_id },
@@ -434,6 +426,7 @@ async function methodsFixture(t: TestContext) {
           release: () => credentials.release(),
         },
         transport,
+        sshAccess: handedSshAccess(payload.ssh_identities, setup.repositories),
         workspaces,
         hostHome: temporary(t),
         env: hostEnvironment(),

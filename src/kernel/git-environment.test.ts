@@ -76,3 +76,18 @@ test("isolatedGitEnvironment removes the helpers that the simple-git unsafe chec
     [],
   );
 });
+
+test("isolatedGitEnvironment removes the SSH agent and the SSH command of the host", () => {
+  const output = isolatedGitEnvironment({
+    SSH_AUTH_SOCK: "/tmp/agent.sock",
+    SSH_AGENT_PID: "42",
+    GIT_SSH: "ssh",
+    GIT_SSH_COMMAND: "ssh -i key",
+    PATH: PATH_VALUE,
+  });
+  assert.deepEqual(
+    Object.keys(output).filter((name) => /SSH/.test(name)),
+    [],
+  );
+  assert.deepEqual(output.PATH, PATH_VALUE);
+});

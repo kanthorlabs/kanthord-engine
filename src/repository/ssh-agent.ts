@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { execFile, spawn, type ChildProcess } from "node:child_process";
 import { lstat, mkdtemp, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { connect } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
@@ -8,12 +9,9 @@ import { promisify } from "node:util";
 import { throwIfCancelled, type Context } from "../kernel/context.ts";
 import { Diagnostic } from "../kernel/errors.ts";
 import { isolatedGitEnvironment } from "../kernel/git-environment.ts";
+import type { SshAccess } from "./contract.ts";
 
-export interface SshAccess {
-  private_key: string;
-  public_key: string;
-  known_hosts: string;
-}
+export type { SshAccess } from "./contract.ts";
 
 export const SshAgentErrorCode = {
   Failed: "repository.connector.ssh_agent_failed",
@@ -46,6 +44,7 @@ const SINGLE_QUOTE = "'";
 const SOCKET_WAIT_MS_MAX = 5000;
 const SOCKET_POLL_MS = 10;
 const CLEANUP_TIMEOUT_MS = 5000;
+const SOCKET_PROBE_TIMEOUT_MS = 1000;
 const MS_PER_SECOND = 1000;
 const KEY_LIFETIME_SECONDS_MIN = 1;
 const EXIT_SUCCESS = 0;
@@ -110,6 +109,19 @@ export function sshAgentEnvironment(directory: string): NodeJS.ProcessEnv {
   };
 }
 
+function socketAccepts(socket: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    const client = connect(socket);
+    const settle = (accepted: boolean) => {
+      client.destroy();
+      resolve(accepted);
+    };
+    client.setTimeout(SOCKET_PROBE_TIMEOUT_MS, () => settle(false));
+    client.once("connect", () => settle(true));
+    client.once("error", () => settle(false));
+  });
+}
+
 export async function sweepSshAgentDirectories(now: number): Promise<void> {
   const root = tmpdir();
   const uid = process.getuid?.();
@@ -123,6 +135,7 @@ export async function sweepSshAgentDirectories(now: number): Promise<void> {
     const path = join(root, name);
     const info = await lstat(path).catch(() => null);
     if (!info?.isDirectory() || info.uid !== uid) continue;
+    if (await socketAccepts(join(path, SSH_AGENT_SOCKET))) continue;
     await rm(path, { recursive: true, force: true }).catch(() => {});
   }
 }

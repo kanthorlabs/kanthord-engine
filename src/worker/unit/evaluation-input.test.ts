@@ -13,7 +13,6 @@ import { once } from "node:events";
 import type { AddressInfo } from "node:net";
 import { join } from "node:path";
 import { simpleGit } from "simple-git";
-import * as connector from "../../repository/connector.ts";
 import { background } from "../../kernel/context.ts";
 import { temporary, hostEnvironment } from "../../kernel/test-support.ts";
 import { createIdentity } from "../../kernel/identity.ts";
@@ -22,6 +21,9 @@ import type { MethodClients } from "./method-clients.ts";
 import {
   anthropicSetup,
   repositorySetup,
+  TEST_SSH_HOST_KEY,
+  everyBindingSshAccess,
+  transport as localTransport,
   WORKING_LAYER_ALL_ON,
 } from "./test-support.ts";
 import { EndReason, ExecutionRun, ExecutionStop } from "./execution-run.ts";
@@ -66,12 +68,7 @@ test("B3 review bundle places all supporting assets in the evidence directory ou
       binding_id: createIdentity("binding"),
       name: "repo",
       address: "git@github.com:owner/repo.git",
-      ssh_identity: {
-        host: "github.com",
-        hostname: "github.com",
-        port: 22,
-        identity_file: "~/.ssh/id_test",
-      },
+      ssh_host_key: TEST_SSH_HOST_KEY,
       strategy: { base_branch: "main" },
       project_prompt: null,
       working_layer: WORKING_LAYER_ALL_ON,
@@ -152,12 +149,18 @@ test("B3 review bundle places all supporting assets in the evidence directory ou
     });
     const workspaces = WorkspaceRoot.open(temporary(t));
     const transport = {
-      proveSshIdentity: async () => {},
       cloneSnapshot: async () => "a".repeat(40),
     } as unknown as RepositoryTransport;
     try {
       const pending = prepareEvaluation(
-        { setup, claim, workspaces, transport, env: hostEnvironment() },
+        {
+          setup,
+          claim,
+          workspaces,
+          transport,
+          sshAccess: everyBindingSshAccess,
+          env: hostEnvironment(),
+        },
         run,
         ExecutionIntent.Examine,
         evidence,
@@ -253,6 +256,7 @@ test("an examine node with no binding places the produced evidence privately and
       claim,
       workspaces,
       transport: {} as RepositoryTransport,
+      sshAccess: everyBindingSshAccess,
       env: hostEnvironment(),
     },
     run,
@@ -341,9 +345,9 @@ test("an examine node with one binding places the produced evidence outside its 
       claim,
       workspaces,
       transport: {
-        proveSshIdentity: async () => {},
         cloneSnapshot: async () => "a".repeat(40),
       } as unknown as RepositoryTransport,
+      sshAccess: everyBindingSshAccess,
       env: hostEnvironment(),
     },
     run,
@@ -454,10 +458,8 @@ test("an implement snapshot evaluation places the produced evidence outside its 
       setup,
       claim,
       workspaces,
-      transport: {
-        ...connector,
-        proveSshIdentity: async () => {},
-      } as unknown as RepositoryTransport,
+      transport: localTransport,
+      sshAccess: everyBindingSshAccess,
       env: hostEnvironment(),
     },
     run,
@@ -569,10 +571,8 @@ async function twoBindingEvaluation(t: test.TestContext, names: string[]) {
       setup,
       claim,
       workspaces,
-      transport: {
-        ...connector,
-        proveSshIdentity: async () => {},
-      } as unknown as RepositoryTransport,
+      transport: localTransport,
+      sshAccess: everyBindingSshAccess,
       env: hostEnvironment(),
     },
     run,

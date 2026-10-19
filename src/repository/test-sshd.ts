@@ -10,10 +10,18 @@ import { setTimeout as delay } from "node:timers/promises";
 import { promisify } from "node:util";
 import { isolatedGitEnvironment } from "../kernel/git-environment.ts";
 import { temporary } from "../kernel/test-support.ts";
+import type { SshAccess } from "./ssh-agent.ts";
+import { generateSshKey } from "./ssh-key.ts";
 
 export const TEST_SSHD_HOST = "127.0.0.1";
 export const TEST_REPOSITORY_FILE = "README.md";
 export const TEST_REPOSITORY_TEXT = "kanthord ssh test\n";
+const LOCAL_GIT_KEY = generateSshKey("local-git");
+export const LOCAL_GIT_SSH_ACCESS: SshAccess = {
+  private_key: LOCAL_GIT_KEY.private_key,
+  public_key: LOCAL_GIT_KEY.public_key,
+  known_hosts: "",
+};
 
 const SSHD_PATHS = [
   "/usr/sbin/sshd",

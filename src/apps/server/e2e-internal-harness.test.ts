@@ -19,7 +19,7 @@ import {
 import { generateMachineToken } from "./cli-support.ts";
 import {
   gatewayFixture,
-  FAKE_SSH_IDENTITY,
+  createFakeSshCredential,
   fakeGitHub,
   fakeS3,
   inProcessWorker,
@@ -32,6 +32,7 @@ import {
   fauxToolCall,
   scriptedModelRuntime,
   scriptedProvider,
+  TEST_SSH_ACCESS,
 } from "../../worker/unit/test-support.ts";
 import {
   AssetKind,
@@ -132,7 +133,6 @@ async function setupInternal(t: TestContext) {
   const fixture = await gatewayFixture(t, {
     repositoryConnector: {
       gitLsRemote: async () => {},
-      resolveSshIdentity: async () => FAKE_SSH_IDENTITY,
     },
     github: { baseUrl: gitHub.endpoint },
   });
@@ -151,17 +151,7 @@ async function setupInternal(t: TestContext) {
       metadata: null,
       secret: { key },
     });
-  await cli.write(["repository", "credential", "create"], {
-    name: "github-ssh",
-    platform: "ssh",
-    metadata: {
-      host: "github.com",
-      hostname: "github.com",
-      port: 22,
-      identity_file: "~/.ssh/id_rsa",
-    },
-    secret: {},
-  });
+  await createFakeSshCredential(cli.read);
   const storage = {
     endpoint: s3.endpoint,
     bucket: s3.bucket,
@@ -787,6 +777,7 @@ test("local mapped repository clones main and publishes only the node branch", a
     checkout,
     background,
     GIT_TIMEOUT_MS,
+    TEST_SSH_ACCESS,
   );
   assert.equal(
     (await simpleGit(checkout).revparse(["HEAD"])).trim(),
@@ -800,12 +791,14 @@ test("local mapped repository clones main and publishes only the node branch", a
     false,
     background,
     GIT_TIMEOUT_MS,
+    TEST_SSH_ACCESS,
   );
   await transport.pushNodeBranch(
     checkout,
     TEST_BRANCH,
     background,
     GIT_TIMEOUT_MS,
+    TEST_SSH_ACCESS,
   );
   assert.equal(
     await remoteHead(repo.bare, `refs/heads/${TEST_BRANCH}`),
@@ -814,7 +807,13 @@ test("local mapped repository clones main and publishes only the node branch", a
   assert.equal(await remoteHead(repo.bare, MAIN_REF), repo.head);
   assert.throws(
     () =>
-      transport.clone("test_unmapped", checkout, background, GIT_TIMEOUT_MS),
+      transport.clone(
+        "test_unmapped",
+        checkout,
+        background,
+        GIT_TIMEOUT_MS,
+        TEST_SSH_ACCESS,
+      ),
     assert.AssertionError,
   );
 });

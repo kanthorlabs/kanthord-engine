@@ -7,7 +7,6 @@ import { approvedModels } from "../llm/platforms.ts";
 import type { ApprovedModelsFn } from "../agent/contract.ts";
 import {
   executionSetupSchema,
-  sshIdentitySchema,
   WorkerErrorCode,
   type CredentialMetadataRecord,
   type ExecutionSetup,
@@ -27,7 +26,7 @@ export async function executionSetup(
     | "store"
     | "workerBindingRowOf"
     | "pinnedCredentialMetadata"
-    | "credentialMetadata"
+    | "sshHostKeysOf"
     | "repositoryBindingIdsOf"
     | "intentOf"
     | "repositoryPolicyOf"
@@ -139,10 +138,13 @@ export async function executionSetup(
           binding_id: repository.binding_id,
           name: repository.name,
           address: repository.address,
-          ssh_identity: sshIdentitySchema.parse(
-            dependencies.credentialMetadata(tx, repository.ssh_credential)
-              ?.metadata,
-          ),
+          ssh_host_key: {
+            known_hosts: dependencies.sshHostKeysOf(
+              tx,
+              repository.platform,
+              repository.address,
+            ),
+          },
           strategy: { base_branch: repository.base_branch },
           project_prompt: repository.project_prompt,
           working_layer: repository.working_layer,

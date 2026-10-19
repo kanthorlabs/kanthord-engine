@@ -32,8 +32,8 @@ import {
   type ExecutionRecord,
 } from "../../scheduler/contract.ts";
 import {
-  FAKE_SSH_CREDENTIAL_BODY,
-  FAKE_SSH_IDENTITY,
+  createFakeSshCredential,
+  FAKE_SSH_CREDENTIAL,
   fakeS3,
   gatewayFixture,
 } from "./test-support.ts";
@@ -129,7 +129,6 @@ async function setup(t: TestContext) {
   const fixture = await gatewayFixture(t, {
     repositoryConnector: {
       gitLsRemote: async () => {},
-      resolveSshIdentity: async () => FAKE_SSH_IDENTITY,
     },
   });
   const { H, secrets, read, write } = await cli(
@@ -152,7 +151,7 @@ async function setup(t: TestContext) {
     metadata: null,
     secret: { key: GITHUB_SECRET },
   });
-  await write(["repository", "credential", "create"], FAKE_SSH_CREDENTIAL_BODY);
+  await createFakeSshCredential(read);
   const project = await read<{ id: string }>([
     "project",
     "create",
@@ -172,7 +171,7 @@ async function setup(t: TestContext) {
           platform: "github",
           address: "git@github.com:owner/repo.git",
           strategy: { base_branch: "main" },
-          ssh_credential: FAKE_SSH_CREDENTIAL_BODY.name,
+          ssh_credential: FAKE_SSH_CREDENTIAL,
           credential: "github",
         },
       },
@@ -526,7 +525,7 @@ function failoverBindings(
         platform: "github",
         address: "git@github.com:owner/repo.git",
         strategy: { base_branch: "main" },
-        ssh_credential: FAKE_SSH_CREDENTIAL_BODY.name,
+        ssh_credential: FAKE_SSH_CREDENTIAL,
         credential: "github",
       },
     },
@@ -548,7 +547,6 @@ async function failoverSetup(t: TestContext) {
   const fixture = await gatewayFixture(t, {
     repositoryConnector: {
       gitLsRemote: async () => {},
-      resolveSshIdentity: async () => FAKE_SSH_IDENTITY,
     },
   });
   const { H, read, write } = await cli(t, fixture.endpoint, fixture.token);
@@ -571,7 +569,7 @@ async function failoverSetup(t: TestContext) {
     metadata: null,
     secret: { key: GITHUB_SECRET },
   });
-  await write(["repository", "credential", "create"], FAKE_SSH_CREDENTIAL_BODY);
+  await createFakeSshCredential(read);
   const project = await read<{ id: string }>([
     "project",
     "create",

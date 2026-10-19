@@ -28,9 +28,12 @@ import {
 } from "../../kernel/operation.ts";
 import { HttpMethod, HttpStatus } from "../../kernel/http.ts";
 import { OperationError } from "../../kernel/errors.ts";
+import { GrantKind } from "../../custody/contract.ts";
 import { until } from "./cli-support.ts";
 import {
-  FAKE_SSH_IDENTITY,
+  FAKE_GITHUB_HOST_KEY_FINGERPRINT,
+  FAKE_SSH_CREDENTIAL,
+  FAKE_SSH_HOST,
   fakeGitHub,
   gatewayFixture,
 } from "./test-support.ts";
@@ -85,7 +88,6 @@ async function setup(t: TestContext, adapter: typeof HTTP | typeof DIRECT) {
   const fixture = await gatewayFixture(t, {
     repositoryConnector: {
       gitLsRemote: async () => {},
-      resolveSshIdentity: async () => FAKE_SSH_IDENTITY,
     },
     github: { baseUrl: gitHub.endpoint },
   });
@@ -128,20 +130,17 @@ async function setup(t: TestContext, adapter: typeof HTTP | typeof DIRECT) {
     }),
   );
   completed(
-    await call(repositoryOperations.create, {
+    await call(repositoryOperations.ssh_key_create, {
       params: {},
       query: {},
-      body: {
-        name: "github-ssh",
-        platform: "ssh",
-        metadata: {
-          host: "github.com",
-          hostname: "github.com",
-          port: 22,
-          identity_file: "~/.ssh/id_rsa",
-        },
-        secret: {},
-      },
+      body: { name: FAKE_SSH_CREDENTIAL },
+    }),
+  );
+  completed(
+    await call(repositoryOperations.host_key_pin, {
+      params: { host: FAKE_SSH_HOST },
+      query: {},
+      body: { fingerprint: FAKE_GITHUB_HOST_KEY_FINGERPRINT },
     }),
   );
   const projectId = completed(
@@ -164,7 +163,7 @@ async function setup(t: TestContext, adapter: typeof HTTP | typeof DIRECT) {
               available: true,
               platform: "github",
               address: "git@github.com:owner/repo.git",
-              ssh_credential: "github-ssh",
+              ssh_credential: FAKE_SSH_CREDENTIAL,
               credential: "github",
               strategy: {
                 base_branch: "main",
@@ -456,7 +455,10 @@ test("a revoked credential refusal removes the reservation and a repeat reaches 
   assert.equal(h.creates(), NO_CALLS);
   const [item] = completed(await h.request()).items;
   assert.equal(item?.kind, ActionResultKind.Submitted);
-  assert.equal(authorize.mock.callCount(), TWO_REQUESTS);
+  assert.deepEqual(
+    authorize.mock.calls.map((call) => call.arguments[1].kind),
+    [GrantKind.FrozenAction, GrantKind.FrozenAction, GrantKind.SshIdentity],
+  );
   assert.equal(h.creates(), SINGLE_CALL);
 });
 

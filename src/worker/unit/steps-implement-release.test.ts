@@ -320,7 +320,7 @@ test("the finish writes one git span for each git step and the cause of a failed
       ? record.attributes?.["kanthord.git.step"]
       : undefined,
   );
-  assert.deepEqual(steps, [GitStep.SshProof, GitStep.FetchBase, GitStep.Push]);
+  assert.deepEqual(steps, [GitStep.FetchBase, GitStep.Push]);
   const push = gitStarts.at(-1)!;
   assert.ok(push.kind === RecordKind.Span);
   const end = records.find(

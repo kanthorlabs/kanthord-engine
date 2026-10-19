@@ -14,7 +14,6 @@ import { workerOperations } from "../../worker/contract.ts";
 import { httpTransport, type WorkerTransport } from "../worker/transport.ts";
 import { until } from "./cli-support.ts";
 import {
-  FAKE_SSH_IDENTITY,
   gatewayFixture,
   provisionNativeAgent,
   provisionNativeServerProject,
@@ -512,7 +511,6 @@ test("the port transport and the HTTP transport answer the same through the Gate
   const fixture = await gatewayFixture(t, {
     repositoryConnector: {
       gitLsRemote: async () => {},
-      resolveSshIdentity: async () => FAKE_SSH_IDENTITY,
     },
   });
   await provisionRepositoryCredentials(fixture);

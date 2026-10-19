@@ -13,7 +13,10 @@ import { ensureDirectory } from "../../kernel/files.ts";
 import { identitySchema } from "../../kernel/identity.ts";
 import { bindingNameSchema } from "../../project/contract.ts";
 import type { Context } from "../../kernel/context.ts";
-import type { RepositoryTransport, SshIdentityPin } from "../contract.ts";
+import type { ExecutionSetup, RepositoryTransport } from "../contract.ts";
+import type { SshAccess } from "../../repository/contract.ts";
+import { RepositoryComponent } from "../../repository/index.ts";
+import type { HandoverSshIdentity } from "../../custody/contract.ts";
 
 export const WORKSPACES_DIRECTORY = "workspaces";
 export const SCRATCH_DIRECTORY = ".kanthord-scratch/";
@@ -32,6 +35,7 @@ export const WorkspaceKind = {
 export type WorkspaceKind = (typeof WorkspaceKind)[keyof typeof WorkspaceKind];
 interface Preparation {
   transport: RepositoryTransport;
+  sshAccess: ReadonlyMap<string, SshAccess>;
   context: Context;
   deadlineMs: number;
 }
@@ -55,8 +59,37 @@ interface WorkspaceRepository {
   binding_id: string;
   name: string;
   address: string;
-  ssh_identity: SshIdentityPin;
   strategy: { base_branch: string };
+}
+
+export function handedSshAccess(
+  identities: readonly HandoverSshIdentity[],
+  repositories: ExecutionSetup["repositories"],
+): Map<string, SshAccess> {
+  const access = new Map<string, SshAccess>();
+  for (const repository of repositories) {
+    const identity = identities.find(
+      (entry) => entry.binding_id === repository.binding_id,
+    );
+    assert.ok(identity, "A repository binding must hold a handed SSH identity");
+    access.set(
+      repository.binding_id,
+      RepositoryComponent.handedSshAccess(
+        identity.private_key,
+        repository.ssh_host_key.known_hosts,
+      ),
+    );
+  }
+  return access;
+}
+
+export function sshAccessOf(
+  sshAccess: ReadonlyMap<string, SshAccess>,
+  bindingId: string,
+): SshAccess {
+  const access = sshAccess.get(bindingId);
+  assert.ok(access, "A repository binding must hold an SSH identity");
+  return access;
 }
 
 export class WorkspaceRoot {
@@ -109,26 +142,18 @@ export class WorkspaceRoot {
           !checkouts.some((checkout) => checkout.directory === directory),
           "Duplicate repository binding",
         );
+        const ssh = sshAccessOf(input.sshAccess, repository.binding_id);
         if (!existsSync(directory)) {
           created.push(directory);
           ensureDirectory(directory);
-          await input.transport.proveSshIdentity(
-            repository.ssh_identity,
-            input.context,
-            end - performance.now(),
-          );
           await input.transport.clone(
             repository.address,
             directory,
             input.context,
             end - performance.now(),
+            ssh,
           );
         }
-        await input.transport.proveSshIdentity(
-          repository.ssh_identity,
-          input.context,
-          end - performance.now(),
-        );
         const head = await input.transport.fetchAndCheckout(
           directory,
           input.nodeBranch,
@@ -136,6 +161,7 @@ export class WorkspaceRoot {
           input.pushed.has(repository.binding_id),
           input.context,
           end - performance.now(),
+          ssh,
         );
         excludeScratch(directory);
         checkouts.push({
@@ -221,17 +247,13 @@ export class WorkspaceRoot {
         const target = join(key, CHECKOUTS_DIRECTORY, name);
         assert.ok(!existsSync(target), "Duplicate repository binding");
         ensureDirectory(target);
-        await input.transport.proveSshIdentity(
-          repository.ssh_identity,
-          input.context,
-          end - performance.now(),
-        );
         const commit = await input.transport.cloneSnapshot(
           repository.address,
           ref,
           target,
           input.context,
           end - performance.now(),
+          sshAccessOf(input.sshAccess, repository.binding_id),
         );
         checkouts.push({
           name,

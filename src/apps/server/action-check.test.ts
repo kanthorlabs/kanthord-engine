@@ -33,8 +33,9 @@ import {
 import type { ExecutionRecord } from "../../scheduler/contract.ts";
 import { environment, kanthord } from "./cli-support.ts";
 import {
-  FAKE_SSH_IDENTITY,
+  FAKE_SSH_CREDENTIAL,
   bareRepository,
+  createFakeSshCredential,
   fakeGitHub,
   gatewayFixture,
   mappedTransport,
@@ -49,6 +50,7 @@ const FIRST_INDEX = 0;
 const SINGLE_INSTANCE = 1;
 const NO_ROWS = 0;
 const CHECK_COUNT = 3;
+const TWO_SSH_RELEASES = 2;
 const BAD_GATEWAY_STATUS = 502;
 const UNAUTHORIZED_STATUS = 401;
 const TIMEOUT = 180000;
@@ -120,7 +122,6 @@ async function setup(t: TestContext) {
   const fixture = await gatewayFixture(t, {
     repositoryConnector: {
       gitLsRemote: async () => {},
-      resolveSshIdentity: async () => FAKE_SSH_IDENTITY,
     },
     github: { baseUrl: gitHub.endpoint },
     repositoryTransport: mappedTransport({ [PUSHED_ADDRESS]: pushed.bare }),
@@ -149,17 +150,7 @@ async function setup(t: TestContext) {
     metadata: null,
     secret: { key: GITHUB_KEY },
   });
-  await write(["repository", "credential", "create"], {
-    name: "github-ssh",
-    platform: "ssh",
-    metadata: {
-      host: "github.com",
-      hostname: "github.com",
-      port: 22,
-      identity_file: "~/.ssh/id_rsa",
-    },
-    secret: {},
-  });
+  await createFakeSshCredential(read);
   const project = await read<{ id: string }>([
     "project",
     "create",
@@ -173,7 +164,7 @@ async function setup(t: TestContext) {
       available: true,
       platform: "github",
       address,
-      ssh_credential: "github-ssh",
+      ssh_credential: FAKE_SSH_CREDENTIAL,
       credential: "github",
       strategy: {
         base_branch: "main",
@@ -497,7 +488,8 @@ test(
           end_state: CheckEndState.Other,
           landed_commits: [],
         });
-        assert.equal(h.materials.length, before);
+        assert.equal(h.materials.length, before + TWO_SSH_RELEASES);
+        dropped(h.materials, h.materials.length);
       },
     );
 

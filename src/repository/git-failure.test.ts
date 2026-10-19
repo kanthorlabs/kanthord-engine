@@ -1,21 +1,22 @@
 import assert from "node:assert/strict";
-import { writeFileSync } from "node:fs";
-import { join } from "node:path";
 import test from "node:test";
 import { background } from "../kernel/context.ts";
-import { Diagnostic } from "../kernel/errors.ts";
+import { Diagnostic, OperationError } from "../kernel/errors.ts";
 import { ResourceFailureReason } from "../kernel/health.ts";
-import { overrideEnvironment, temporary } from "../kernel/test-support.ts";
+import { HttpStatus } from "../kernel/http.ts";
 import { gitLsRemote } from "./connector.ts";
+import { HostKeyErrorCode, RepositoryErrorCode } from "./contract.ts";
 import { classifyGitFailure, gitFailureReason } from "./git-failure.ts";
+import { SshAgentErrorCode } from "./ssh-agent.ts";
+import { generateSshKey } from "./ssh-key.ts";
+import {
+  createBareRepository,
+  LOCAL_GIT_SSH_ACCESS,
+  startTestSshd,
+} from "./test-sshd.ts";
 
 const GIT_FAILED = "repository.connector.git_failed";
 const DEADLINE_MS = 5000;
-const HOST_KEY_FAILED = "Host key verification failed.";
-const SSH_FAILURE_EXIT = 255;
-const EXECUTABLE_MODE = 0o700;
-const UNREACHABLE_SSH_ADDRESS =
-  "git@kanthord-failure-reason.invalid:owner/repository.git";
 const MISSING_REPOSITORY = "file:////nonexistent_kanthord_git_failure_test";
 const READ_FAILED =
   "fatal: Could not read from remote repository.\n\nPlease make sure you have the correct access rights\nand the repository exists.";
@@ -80,14 +81,49 @@ test("classifyGitFailure names each git failure reason from its OpenSSH or remot
     assert.equal(classifyGitFailure(lsRemoteFailure(stderr)), reason);
 });
 
-test("classifyGitFailure answers unclassified for a changed host key before the host key line", () => {
+test("classifyGitFailure answers host_key_changed for a changed host key before the host key line", () => {
   assert.equal(
     classifyGitFailure(
       lsRemoteFailure(
         `@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@\n@    WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED!     @\n@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@\nHost key verification failed.\n${READ_FAILED}`,
       ),
     ),
-    ResourceFailureReason.Unclassified,
+    ResourceFailureReason.HostKeyChanged,
+  );
+});
+
+test("gitFailureReason answers identity_unavailable for an SSH agent failure and a legacy SSH record", () => {
+  assert.equal(
+    gitFailureReason(
+      new Diagnostic(SshAgentErrorCode.Failed, "load: SSH agent failed.", {
+        cause: new Error("load: Error loading key"),
+      }),
+    ),
+    ResourceFailureReason.IdentityUnavailable,
+  );
+  assert.equal(
+    gitFailureReason(
+      new OperationError(
+        HttpStatus.Conflict,
+        RepositoryErrorCode.SshKeyLegacy,
+        "Rotate SSH key.",
+      ),
+    ),
+    ResourceFailureReason.IdentityUnavailable,
+  );
+});
+
+test("gitFailureReason answers host_key_unknown for an unpinned host before git", () => {
+  assert.equal(
+    gitFailureReason(
+      new OperationError(
+        HttpStatus.Conflict,
+        HostKeyErrorCode.Unpinned,
+        "The SSH host holds no pinned host key.",
+        { host: "github.com" },
+      ),
+    ),
+    ResourceFailureReason.HostKeyUnknown,
   );
 });
 
@@ -140,21 +176,17 @@ test("gitFailureReason reads the stderr in the cause of a connector diagnostic",
   assert.equal(gitFailureReason(null), ResourceFailureReason.Unclassified);
 });
 
-test("gitFailureReason classifies the ssh stderr of a real ls-remote", async (t) => {
-  const directory = temporary(t);
-  const ssh = join(directory, "ssh");
-  writeFileSync(
-    ssh,
-    `#!/bin/sh\necho "${HOST_KEY_FAILED}" >&2\nexit ${SSH_FAILURE_EXIT}\n`,
-    { mode: EXECUTABLE_MODE },
-  );
-  overrideEnvironment(t, { GIT_SSH_COMMAND: ssh, GIT_SSH: undefined });
-  const error = await gitLsRemote(
-    UNREACHABLE_SSH_ADDRESS,
-    background,
-    DEADLINE_MS,
-  ).then(
-    () => assert.fail("The read through a failing ssh must fail."),
+test("gitFailureReason classifies the ssh stderr of a real ls-remote through the SSH agent", async (t) => {
+  const sshd = await startTestSshd(t);
+  const key = generateSshKey("failure");
+  await sshd.authorize(key.public_key);
+  const bare = await createBareRepository(t);
+  const error = await gitLsRemote(sshd.url(bare), background, DEADLINE_MS, {
+    private_key: key.private_key,
+    public_key: key.public_key,
+    known_hosts: "",
+  }).then(
+    () => assert.fail("The read without a pinned host key must fail."),
     (failure: unknown) => failure,
   );
   assert.ok(error instanceof Diagnostic);
@@ -166,6 +198,7 @@ test("gitFailureReason classifies a real failed ls-remote as unclassified", asyn
     MISSING_REPOSITORY,
     background,
     DEADLINE_MS,
+    LOCAL_GIT_SSH_ACCESS,
   ).then(
     () => assert.fail("The read of a missing repository must fail."),
     (failure: unknown) => failure,

@@ -25,7 +25,7 @@ import {
 } from "../../mission/contract.ts";
 import { kanthord, environment } from "./cli-support.ts";
 import {
-  FAKE_SSH_IDENTITY,
+  createFakeSshCredential,
   gatewayFixture,
   COVERING_WORKER_BINDINGS,
   enableCoveringAgents,
@@ -67,7 +67,6 @@ async function setup(t: TestContext) {
   const fixture = await gatewayFixture(t, {
     repositoryConnector: {
       gitLsRemote: async () => {},
-      resolveSshIdentity: async () => FAKE_SSH_IDENTITY,
     },
   });
   const env = {
@@ -108,17 +107,7 @@ async function setup(t: TestContext) {
     metadata: null,
     secret: { key: "test-secret" },
   });
-  await write(["repository", "credential", "create"], {
-    name: "github-ssh",
-    platform: "ssh",
-    metadata: {
-      host: "github.com",
-      hostname: "github.com",
-      port: 22,
-      identity_file: "~/.ssh/id_rsa",
-    },
-    secret: {},
-  });
+  await createFakeSshCredential(read);
   await enableCoveringAgents(env);
   const binding = await write<{
     binding_set_version: number;

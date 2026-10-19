@@ -12,7 +12,7 @@ import { ClaimState, type ExecutionRecord } from "../../scheduler/contract.ts";
 import { InstanceActivity } from "../../worker/contract.ts";
 import { generateMachineToken } from "./cli-support.ts";
 import {
-  FAKE_SSH_IDENTITY,
+  createFakeSshCredential,
   gatewayFixture,
   outboundHosts,
 } from "./test-support.ts";
@@ -69,7 +69,6 @@ test(
     const fixture = await gatewayFixture(t, {
       repositoryConnector: {
         gitLsRemote: async () => {},
-        resolveSshIdentity: async () => FAKE_SSH_IDENTITY,
       },
       inventoryOverrides: { llm: () => [], repository: () => [] },
     });
@@ -80,17 +79,7 @@ test(
       metadata: null,
       secret: { key: GITHUB_KEY },
     });
-    await cli.write(["repository", "credential", "create"], {
-      name: "github-ssh",
-      platform: "ssh",
-      metadata: {
-        host: "github.com",
-        hostname: "github.com",
-        port: 22,
-        identity_file: "~/.ssh/id_rsa",
-      },
-      secret: {},
-    });
+    await createFakeSshCredential(cli.read);
     const project = await cli.read<{ id: string }>([
       "project",
       "create",

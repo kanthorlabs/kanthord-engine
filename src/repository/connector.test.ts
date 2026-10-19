@@ -14,11 +14,9 @@ import { dirname, join } from "node:path";
 import test, { type TestContext } from "node:test";
 import { simpleGit } from "simple-git";
 import { background, CancellationContext } from "../kernel/context.ts";
-import { OperationError } from "../kernel/errors.ts";
 import { RepositoryFileState } from "./contract.ts";
 import {
   gitLsRemote,
-  resolveSshHostname,
   clone,
   cloneSnapshot,
   fetchAndCheckout,
@@ -40,52 +38,33 @@ import {
   temporary,
   UNSET_GIT_ENVIRONMENT,
 } from "../kernel/test-support.ts";
+import { SshAgentErrorCode } from "./ssh-agent.ts";
+import { LOCAL_GIT_SSH_ACCESS } from "./test-sshd.ts";
 
 const DEADLINE_MS = 5000;
 const ORIGIN_NAME = "origin";
 const SEED_NAME = "seed";
 const SIBLING_ORIGIN = `../${ORIGIN_NAME}`;
 const EXPIRED_DEADLINE_MS = 1;
-const LOCAL_HOST = "localhost";
-const SSH_RESOLVE_FAILED_STATUS = 422;
-const SSH_RESOLVE_FAILED_CODE = "repository.credential.ssh_resolve_failed";
 const MISSING_REPOSITORY = "file:////nonexistent_kanthord_plan04_test";
-
-test("resolveSshHostname reads the hostname line of ssh -G", async () => {
-  assert.equal(
-    await resolveSshHostname(LOCAL_HOST, background, DEADLINE_MS),
-    LOCAL_HOST,
-  );
-});
-
-test("resolveSshHostname rejects when the deadline elapses or the context was cancelled", async () => {
-  await assert.rejects(
-    resolveSshHostname(LOCAL_HOST, background, EXPIRED_DEADLINE_MS - 1),
-    (error) =>
-      error instanceof OperationError &&
-      error.status === SSH_RESOLVE_FAILED_STATUS &&
-      error.code === SSH_RESOLVE_FAILED_CODE,
-  );
-  const context = new CancellationContext();
-  context.cancel();
-  await assert.rejects(
-    resolveSshHostname(LOCAL_HOST, context, DEADLINE_MS),
-    (error) => error === context.err(),
-  );
-});
 
 test("gitLsRemote resolves for a local git repository", async (t) => {
   const dir = mkdtempSync(join(tmpdir(), "kanthord-repository-"));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   await simpleGit(dir).init();
   await assert.doesNotReject(
-    gitLsRemote("file://" + dir, background, DEADLINE_MS),
+    gitLsRemote("file://" + dir, background, DEADLINE_MS, LOCAL_GIT_SSH_ACCESS),
   );
 });
 
 test("gitLsRemote rejects for a nonexistent repository", async () => {
   await assert.rejects(
-    gitLsRemote(MISSING_REPOSITORY, background, DEADLINE_MS),
+    gitLsRemote(
+      MISSING_REPOSITORY,
+      background,
+      DEADLINE_MS,
+      LOCAL_GIT_SSH_ACCESS,
+    ),
   );
 });
 
@@ -94,7 +73,12 @@ test("gitLsRemote rejects when the deadline elapses", async (t) => {
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   await simpleGit(dir).init();
   await assert.rejects(
-    gitLsRemote("file://" + dir, background, EXPIRED_DEADLINE_MS),
+    gitLsRemote(
+      "file://" + dir,
+      background,
+      EXPIRED_DEADLINE_MS,
+      LOCAL_GIT_SSH_ACCESS,
+    ),
   );
 });
 
@@ -104,7 +88,9 @@ test("gitLsRemote rejects when the context was already cancelled", async (t) => 
   await simpleGit(dir).init();
   const context = new CancellationContext();
   context.cancel();
-  await assert.rejects(gitLsRemote("file://" + dir, context, DEADLINE_MS));
+  await assert.rejects(
+    gitLsRemote("file://" + dir, context, DEADLINE_MS, LOCAL_GIT_SSH_ACCESS),
+  );
 });
 
 test("connector clones, resumes and pushes only fast-forward node branches and immutable snapshots", async (t) => {
@@ -139,7 +125,7 @@ test("connector clones, resumes and pushes only fast-forward node branches and i
   await git.addRemote("origin", origin);
   await git.push("origin", "main");
   const branch = "kanthord/node_01ARZ3NDEKTSV4RRFFQ69G5FAA";
-  await clone(origin, first, background, DEADLINE_MS);
+  await clone(origin, first, background, DEADLINE_MS, LOCAL_GIT_SSH_ACCESS);
   assert.equal(
     await fetchAndCheckout(
       first,
@@ -148,12 +134,19 @@ test("connector clones, resumes and pushes only fast-forward node branches and i
       false,
       background,
       DEADLINE_MS,
+      LOCAL_GIT_SSH_ACCESS,
     ),
     base,
   );
   const pushed = await commit(first, "pushed");
-  await pushNodeBranch(first, branch, background, DEADLINE_MS);
-  await clone(origin, second, background, DEADLINE_MS);
+  await pushNodeBranch(
+    first,
+    branch,
+    background,
+    DEADLINE_MS,
+    LOCAL_GIT_SSH_ACCESS,
+  );
+  await clone(origin, second, background, DEADLINE_MS, LOCAL_GIT_SSH_ACCESS);
   assert.equal(
     await fetchAndCheckout(
       second,
@@ -162,13 +155,20 @@ test("connector clones, resumes and pushes only fast-forward node branches and i
       false,
       background,
       DEADLINE_MS,
+      LOCAL_GIT_SSH_ACCESS,
     ),
     pushed,
   );
   await simpleGit(second).reset(["--hard", base]);
   await commit(second, "conflict");
   await assert.rejects(
-    pushNodeBranch(second, branch, background, DEADLINE_MS),
+    pushNodeBranch(
+      second,
+      branch,
+      background,
+      DEADLINE_MS,
+      LOCAL_GIT_SSH_ACCESS,
+    ),
     { code: "repository.connector.git_failed" },
   );
   assert.equal(
@@ -176,7 +176,14 @@ test("connector clones, resumes and pushes only fast-forward node branches and i
     pushed,
   );
   assert.equal(
-    await cloneSnapshot(origin, pushed, snapshot, background, DEADLINE_MS),
+    await cloneSnapshot(
+      origin,
+      pushed,
+      snapshot,
+      background,
+      DEADLINE_MS,
+      LOCAL_GIT_SSH_ACCESS,
+    ),
     pushed,
   );
   assert.equal(
@@ -186,6 +193,7 @@ test("connector clones, resumes and pushes only fast-forward node branches and i
       baseSnapshot,
       background,
       DEADLINE_MS,
+      LOCAL_GIT_SSH_ACCESS,
     ),
     base,
   );
@@ -220,7 +228,7 @@ test("fetchAndCheckout keeps the unpushed commits of the local node branch when 
   await simpleGit(seed).addRemote("origin", origin);
   await simpleGit(seed).push("origin", "main");
   const branch = "kanthord/node_01ARZ3NDEKTSV4RRFFQ69G5FAA";
-  await clone(origin, workspace, background, DEADLINE_MS);
+  await clone(origin, workspace, background, DEADLINE_MS, LOCAL_GIT_SSH_ACCESS);
   assert.equal(
     await fetchAndCheckout(
       workspace,
@@ -229,6 +237,7 @@ test("fetchAndCheckout keeps the unpushed commits of the local node branch when 
       false,
       background,
       DEADLINE_MS,
+      LOCAL_GIT_SSH_ACCESS,
     ),
     base,
   );
@@ -243,6 +252,7 @@ test("fetchAndCheckout keeps the unpushed commits of the local node branch when 
       false,
       background,
       DEADLINE_MS,
+      LOCAL_GIT_SSH_ACCESS,
     ),
     unpushed,
   );
@@ -251,6 +261,7 @@ test("fetchAndCheckout keeps the unpushed commits of the local node branch when 
 });
 
 const GIT_FAILED = "repository.connector.git_failed";
+const SHORT_TEMPORARY_ROOT = "/tmp";
 const NODE_BRANCH = "kanthord/node_01ARZ3NDEKTSV4RRFFQ69G5FAA";
 const BASE_BRANCH = "main";
 const MERGE_SIGNATURE =
@@ -271,14 +282,14 @@ function deadlineAt(): number {
   return Date.now() + DEADLINE_MS;
 }
 
-function isolateTemporary(t: test.TestContext, root: string): string {
-  const scratch = join(root, "scratch");
-  mkdirSync(scratch);
+function isolateTemporary(t: test.TestContext): string {
+  const scratch = mkdtempSync(join(SHORT_TEMPORARY_ROOT, "kd-scratch-"));
   const previous = process.env.TMPDIR;
   process.env.TMPDIR = scratch;
   t.after(() => {
     if (previous === undefined) delete process.env.TMPDIR;
     else process.env.TMPDIR = previous;
+    rmSync(scratch, { recursive: true, force: true });
   });
   return scratch;
 }
@@ -321,7 +332,7 @@ async function remote(t: test.TestContext): Promise<Remote> {
   const seed = join(root, SEED_NAME);
   const head = async (branch: string) =>
     (await simpleGit(origin).revparse([`refs/heads/${branch}`])).trim();
-  const scratch = isolateTemporary(t, root);
+  const scratch = isolateTemporary(t);
   return {
     origin,
     seed,
@@ -347,9 +358,12 @@ test("every git caller rejects a nonzero exit with an empty stderr", async (t) =
   });
   const failed = { code: GIT_FAILED };
   const address = "file:///silent";
-  await assert.rejects(gitLsRemote(address, background, DEADLINE_MS), failed);
   await assert.rejects(
-    clone(address, temporary(t), background, DEADLINE_MS),
+    gitLsRemote(address, background, DEADLINE_MS, LOCAL_GIT_SSH_ACCESS),
+    failed,
+  );
+  await assert.rejects(
+    clone(address, temporary(t), background, DEADLINE_MS, LOCAL_GIT_SSH_ACCESS),
     failed,
   );
   await assert.rejects(
@@ -360,19 +374,39 @@ test("every git caller rejects a nonzero exit with an empty stderr", async (t) =
       false,
       background,
       DEADLINE_MS,
+      LOCAL_GIT_SSH_ACCESS,
     ),
     failed,
   );
   await assert.rejects(
-    pushNodeBranch(temporary(t), NODE_BRANCH, background, DEADLINE_MS),
+    pushNodeBranch(
+      temporary(t),
+      NODE_BRANCH,
+      background,
+      DEADLINE_MS,
+      LOCAL_GIT_SSH_ACCESS,
+    ),
     failed,
   );
   await assert.rejects(
-    cloneSnapshot(address, "HEAD", temporary(t), background, DEADLINE_MS),
+    cloneSnapshot(
+      address,
+      "HEAD",
+      temporary(t),
+      background,
+      DEADLINE_MS,
+      LOCAL_GIT_SSH_ACCESS,
+    ),
     failed,
   );
   await assert.rejects(
-    resolveBranchCommit(address, BASE_BRANCH, background, DEADLINE_MS),
+    resolveBranchCommit(
+      address,
+      BASE_BRANCH,
+      background,
+      DEADLINE_MS,
+      LOCAL_GIT_SSH_ACCESS,
+    ),
     failed,
   );
 });
@@ -404,11 +438,23 @@ test("a git failure keeps the operation and the stderr without credentials in it
     return true;
   };
   await assert.rejects(
-    clone("file:///remote", temporary(t), background, DEADLINE_MS),
+    clone(
+      "file:///remote",
+      temporary(t),
+      background,
+      DEADLINE_MS,
+      LOCAL_GIT_SSH_ACCESS,
+    ),
     keepsCause("clone"),
   );
   await assert.rejects(
-    pushNodeBranch(temporary(t), NODE_BRANCH, background, DEADLINE_MS),
+    pushNodeBranch(
+      temporary(t),
+      NODE_BRANCH,
+      background,
+      DEADLINE_MS,
+      LOCAL_GIT_SSH_ACCESS,
+    ),
     keepsCause("push node branch"),
   );
 });
@@ -427,12 +473,25 @@ test("every git caller ignores the global git configuration of the host", async 
   });
   const directory = temporary(t);
   assert.equal(
-    await cloneSnapshot(origin, snapshot, directory, background, DEADLINE_MS),
+    await cloneSnapshot(
+      origin,
+      snapshot,
+      directory,
+      background,
+      DEADLINE_MS,
+      LOCAL_GIT_SSH_ACCESS,
+    ),
     snapshot,
   );
-  await gitLsRemote(origin, background, DEADLINE_MS);
+  await gitLsRemote(origin, background, DEADLINE_MS, LOCAL_GIT_SSH_ACCESS);
   assert.equal(
-    await resolveBranchCommit(origin, NODE_BRANCH, background, DEADLINE_MS),
+    await resolveBranchCommit(
+      origin,
+      NODE_BRANCH,
+      background,
+      DEADLINE_MS,
+      LOCAL_GIT_SSH_ACCESS,
+    ),
     snapshot,
   );
 });
@@ -443,6 +502,7 @@ test("mergePushFresh lands a merge commit whose second parent is the snapshot", 
     { address: origin, base_branch: BASE_BRANCH, commit: snapshot },
     background,
     deadlineAt(),
+    LOCAL_GIT_SSH_ACCESS,
   );
   assert.equal(await head(BASE_BRANCH), commit);
   const parents = await simpleGit(origin).raw(["rev-parse", `${commit}^@`]);
@@ -471,6 +531,7 @@ test("mergePushFresh throws before_push on a conflict and leaves the base unchan
       { address: origin, base_branch: BASE_BRANCH, commit: conflicting },
       background,
       deadlineAt(),
+      LOCAL_GIT_SSH_ACCESS,
     ),
     (error) =>
       error instanceof GitWriteError &&
@@ -491,6 +552,7 @@ test("mergePushFresh throws push when the remote rejects the push", async (t) =>
       { address: origin, base_branch: BASE_BRANCH, commit: snapshot },
       background,
       deadlineAt(),
+      LOCAL_GIT_SSH_ACCESS,
     ),
     (error) =>
       error instanceof GitWriteError &&
@@ -509,6 +571,7 @@ test("pushSnapshotFresh pushes the snapshot without force", async (t) => {
     { address: origin, branch, commit: snapshot },
     background,
     deadlineAt(),
+    LOCAL_GIT_SSH_ACCESS,
   );
   assert.equal(await head(branch), snapshot);
   await simpleGit(seed).raw(["checkout", "--detach", base]);
@@ -519,6 +582,7 @@ test("pushSnapshotFresh pushes the snapshot without force", async (t) => {
       { address: origin, branch, commit: diverged },
       background,
       deadlineAt(),
+      LOCAL_GIT_SSH_ACCESS,
     ),
     (error) => error instanceof GitWriteError && error.stage === GitStage.Push,
   );
@@ -535,6 +599,7 @@ test("pushSnapshotFresh throws before_push for a commit that the remote lacks", 
       { address: origin, branch: NODE_BRANCH, commit: local },
       background,
       deadlineAt(),
+      LOCAL_GIT_SSH_ACCESS,
     ),
     (error) =>
       error instanceof GitWriteError && error.stage === GitStage.BeforePush,
@@ -548,12 +613,13 @@ test("a missing temporary directory throws before_push for both git writes", asy
   const beforePush = (error: unknown) =>
     error instanceof GitWriteError &&
     error.stage === GitStage.BeforePush &&
-    error.code === GIT_FAILED;
+    error.code === SshAgentErrorCode.Failed;
   await assert.rejects(
     mergePushFresh(
       { address: origin, base_branch: BASE_BRANCH, commit: snapshot },
       background,
       deadlineAt(),
+      LOCAL_GIT_SSH_ACCESS,
     ),
     beforePush,
   );
@@ -562,6 +628,7 @@ test("a missing temporary directory throws before_push for both git writes", asy
       { address: origin, branch: NODE_BRANCH, commit: snapshot },
       background,
       deadlineAt(),
+      LOCAL_GIT_SSH_ACCESS,
     ),
     beforePush,
   );
@@ -574,6 +641,7 @@ test("landedOn answers the oldest first-parent commit that contains the snapshot
     { address: origin, base_branch: BASE_BRANCH, commit: snapshot },
     background,
     deadlineAt(),
+    LOCAL_GIT_SSH_ACCESS,
   );
   await simpleGit(seed).raw(["pull", "--ff-only", "origin", BASE_BRANCH]);
   await commit("later", "later");
@@ -583,6 +651,7 @@ test("landedOn answers the oldest first-parent commit that contains the snapshot
       { address: origin, branch: BASE_BRANCH, commit: snapshot },
       background,
       deadlineAt(),
+      LOCAL_GIT_SSH_ACCESS,
     ),
     { landed: true, first_parent: merge },
   );
@@ -591,6 +660,7 @@ test("landedOn answers the oldest first-parent commit that contains the snapshot
       { address: origin, branch: NODE_BRANCH, commit: snapshot },
       background,
       deadlineAt(),
+      LOCAL_GIT_SSH_ACCESS,
     ),
     { landed: true, first_parent: snapshot },
   );
@@ -603,6 +673,7 @@ test("landedOn answers landed false for a rewritten branch", async (t) => {
     { address: origin, base_branch: BASE_BRANCH, commit: snapshot },
     background,
     deadlineAt(),
+    LOCAL_GIT_SSH_ACCESS,
   );
   await simpleGit(origin).raw([
     "update-ref",
@@ -614,6 +685,7 @@ test("landedOn answers landed false for a rewritten branch", async (t) => {
       { address: origin, branch: BASE_BRANCH, commit: snapshot },
       background,
       deadlineAt(),
+      LOCAL_GIT_SSH_ACCESS,
     ),
     { landed: false, first_parent: null },
   );
@@ -628,6 +700,7 @@ test("landedOn throws for an unreachable commit and a missing repository", async
       { address: origin, branch: BASE_BRANCH, commit: unreachable },
       background,
       deadlineAt(),
+      LOCAL_GIT_SSH_ACCESS,
     ),
     { code: GIT_FAILED },
   );
@@ -640,6 +713,7 @@ test("landedOn throws for an unreachable commit and a missing repository", async
       },
       background,
       deadlineAt(),
+      LOCAL_GIT_SSH_ACCESS,
     ),
     { code: GIT_FAILED },
   );
@@ -655,32 +729,34 @@ test("an abort ends every git write and the landing read", async (t) => {
       { address: origin, base_branch: BASE_BRANCH, commit: snapshot },
       context,
       deadlineAt(),
+      LOCAL_GIT_SSH_ACCESS,
     ),
-    (error) =>
-      error instanceof GitWriteError && error.stage === GitStage.BeforePush,
+    (error) => error === context.err(),
   );
   await assert.rejects(
     pushSnapshotFresh(
       { address: origin, branch: NODE_BRANCH, commit: snapshot },
       context,
       deadlineAt(),
+      LOCAL_GIT_SSH_ACCESS,
     ),
-    (error) =>
-      error instanceof GitWriteError && error.stage === GitStage.BeforePush,
+    (error) => error === context.err(),
   );
   await assert.rejects(
     landedOn(
       { address: origin, branch: BASE_BRANCH, commit: snapshot },
       context,
       deadlineAt(),
+      LOCAL_GIT_SSH_ACCESS,
     ),
-    { code: GIT_FAILED },
+    (error) => error === context.err(),
   );
   await assert.rejects(
     mergePushFresh(
       { address: origin, base_branch: BASE_BRANCH, commit: snapshot },
       background,
       Date.now(),
+      LOCAL_GIT_SSH_ACCESS,
     ),
     (error) =>
       error instanceof GitWriteError && error.stage === GitStage.BeforePush,
@@ -793,22 +869,46 @@ test("resolveBranchCommit answers the commit of a branch and null for an absent 
   const { address, commit } = await instructionOrigin(t);
   const head = await commit({ "AGENTS.md": "first\n" });
   assert.equal(
-    await resolveBranchCommit(address, "main", background, DEADLINE_MS),
+    await resolveBranchCommit(
+      address,
+      "main",
+      background,
+      DEADLINE_MS,
+      LOCAL_GIT_SSH_ACCESS,
+    ),
     head,
   );
   assert.equal(
-    await resolveBranchCommit(address, "absent", background, DEADLINE_MS),
+    await resolveBranchCommit(
+      address,
+      "absent",
+      background,
+      DEADLINE_MS,
+      LOCAL_GIT_SSH_ACCESS,
+    ),
     null,
   );
   assert.equal(
-    await resolveBranchCommit(address, "ain", background, DEADLINE_MS),
+    await resolveBranchCommit(
+      address,
+      "ain",
+      background,
+      DEADLINE_MS,
+      LOCAL_GIT_SSH_ACCESS,
+    ),
     null,
   );
 });
 
 test("resolveBranchCommit rejects for a nonexistent repository", async () => {
   await assert.rejects(
-    resolveBranchCommit(MISSING_REPOSITORY, "main", background, DEADLINE_MS),
+    resolveBranchCommit(
+      MISSING_REPOSITORY,
+      "main",
+      background,
+      DEADLINE_MS,
+      LOCAL_GIT_SSH_ACCESS,
+    ),
     { code: "repository.connector.git_failed" },
   );
 });
@@ -828,6 +928,7 @@ test("readFilesAtCommit reads the present files of a commit and answers null for
     MAX_BYTES,
     background,
     DEADLINE_MS,
+    LOCAL_GIT_SSH_ACCESS,
     scratch,
   );
   assert.deepEqual(files, [
@@ -853,6 +954,7 @@ async function readStates(t: TestContext, files: Record<string, SeedEntry>) {
     MAX_BYTES,
     background,
     DEADLINE_MS,
+    LOCAL_GIT_SSH_ACCESS,
     scratch,
   );
   return read.map(({ state, text }) => [state, text]);
@@ -980,6 +1082,7 @@ async function tracedRead(t: TestContext, files: Record<string, SeedEntry>) {
       MAX_BYTES,
       background,
       DEADLINE_MS,
+      LOCAL_GIT_SSH_ACCESS,
       scratch,
     );
     const starts = readFileSync(events, "utf8")
@@ -1126,6 +1229,7 @@ test("readFilesAtCommit reads the named commit after the branch moved", async (t
     MAX_BYTES,
     background,
     DEADLINE_MS,
+    LOCAL_GIT_SSH_ACCESS,
     scratch,
   );
   assert.equal(files[FIRST_INDEX]?.text, FIRST_TEXT);
@@ -1143,6 +1247,7 @@ test("readFilesAtCommit deletes its directory when the read fails", async (t) =>
       MAX_BYTES,
       background,
       DEADLINE_MS,
+      LOCAL_GIT_SSH_ACCESS,
       scratch,
     ),
     { code: "repository.connector.git_failed" },
@@ -1155,6 +1260,7 @@ test("readFilesAtCommit deletes its directory when the read fails", async (t) =>
       MAX_BYTES,
       background,
       DEADLINE_MS,
+      LOCAL_GIT_SSH_ACCESS,
       scratch,
     ),
     { code: "repository.connector.git_failed" },
@@ -1173,9 +1279,10 @@ test("readFilesAtCommit rejects when the deadline elapsed and deletes its direct
       MAX_BYTES,
       background,
       EXPIRED_DEADLINE_MS - 1,
+      LOCAL_GIT_SSH_ACCESS,
       scratch,
     ),
-    { code: "repository.connector.git_failed" },
+    { code: SshAgentErrorCode.Failed },
   );
   assert.equal(readdirSync(scratch).length, NO_ENTRIES);
 });

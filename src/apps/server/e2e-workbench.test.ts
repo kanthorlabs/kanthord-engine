@@ -911,6 +911,8 @@ test("the tool table holds the built-in tools of the agent and one tool per huma
     "repository.credential.rotate",
     "repository.credential.check",
     "repository.host_key.pin",
+    "repository.credential.ssh_key_create",
+    "repository.credential.ssh_key_rotate",
     "storage.credential.create",
     "storage.credential.rotate",
     "storage.credential.check",

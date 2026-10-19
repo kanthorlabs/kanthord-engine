@@ -139,6 +139,8 @@ export const ResourceFailureReason = {
   RateLimited: "rate_limited",
   Unreachable: "unreachable",
   InvalidResponse: "invalid_response",
+  HostKeyChanged: "host_key_changed",
+  IdentityUnavailable: "identity_unavailable",
   Unclassified: "unclassified",
 } as const;
 export type ResourceFailureReason =

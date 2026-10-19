@@ -8,23 +8,19 @@ import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { promisify } from "node:util";
 import { throwIfCancelled, type Context } from "../kernel/context.ts";
-import { Diagnostic, OperationError } from "../kernel/errors.ts";
+import { Diagnostic } from "../kernel/errors.ts";
 import {
   GIT_UNSAFE_OPTIONS,
   isolatedGitEnvironment,
 } from "../kernel/git-environment.ts";
-import {
-  RepositoryFileState,
-  SSH_RESOLVE_FAILED_STATUS,
-  type RepositoryFile,
-} from "./contract.ts";
+import { RepositoryFileState, type RepositoryFile } from "./contract.ts";
 import { CheckEndState, ExpectedEndState, type CheckFold } from "./github.ts";
 import { NODE_BRANCH_PATTERN } from "./node-branch.ts";
 import {
-  parseSshIdentity,
-  SshErrorCode,
-  type SshIdentity,
-} from "./ssh-identity.ts";
+  SshAgentErrorCode,
+  withSshAgent,
+  type SshAccess,
+} from "./ssh-agent.ts";
 
 const GIT_FAILED = "repository.connector.git_failed";
 export const NODE_BRANCH_MISSING = "repository.node_branch.missing";
@@ -82,7 +78,9 @@ export class GitWriteError extends Diagnostic {
 
   constructor(stage: GitStage, cause: Diagnostic) {
     super(cause.code, cause.message, { cause });
-    assert.equal(cause.code, GIT_FAILED);
+    assert.ok(
+      cause.code === GIT_FAILED || cause.code === SshAgentErrorCode.Failed,
+    );
     assert.ok(Object.values(GitStage).includes(stage));
     this.stage = stage;
   }
@@ -107,7 +105,41 @@ export interface Landing {
 
 interface GitOptions {
   environment?: NodeJS.ProcessEnv;
+  agent?: AgentVariables;
   errors?: SimpleGitOptions["errors"];
+}
+
+type AgentVariables = Partial<
+  Pick<NodeJS.ProcessEnv, "GIT_SSH_VARIANT" | "GIT_SSH_COMMAND">
+>;
+
+async function withAccess<T>(
+  ssh: SshAccess,
+  context: Context,
+  deadlineMs: number,
+  work: (agent: AgentVariables, remainingMs: number) => Promise<T>,
+): Promise<T> {
+  const start = performance.now();
+  const remaining = () => deadlineMs - (performance.now() - start);
+  return withSshAgent(ssh, context, deadlineMs, (environment) =>
+    work(
+      {
+        GIT_SSH_VARIANT: environment.GIT_SSH_VARIANT,
+        GIT_SSH_COMMAND: environment.GIT_SSH_COMMAND,
+      },
+      remaining(),
+    ),
+  );
+}
+
+async function beforePush<T>(work: () => Promise<T>): Promise<T> {
+  try {
+    return await work();
+  } catch (error) {
+    if (error instanceof Diagnostic && error.code === SshAgentErrorCode.Failed)
+      throw new GitWriteError(GitStage.BeforePush, error);
+    throw error;
+  }
 }
 
 const URL_USERINFO = /([a-z][a-z0-9+.-]*:\/\/)[^/@\s]+@/gi;
@@ -131,8 +163,11 @@ export function gitFailureText(operation: string, error: unknown): string {
 const failNonzeroExit: SimpleGitOptions["errors"] = (error, result) =>
   result.exitCode === EXIT_SUCCESS ? error : (error ?? exitError(result));
 
-function gitEnvironment(environment?: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
-  return isolatedGitEnvironment(environment ?? process.env);
+function gitEnvironment(
+  environment: NodeJS.ProcessEnv | undefined,
+  agent: AgentVariables = {},
+): NodeJS.ProcessEnv {
+  return { ...isolatedGitEnvironment(environment ?? process.env), ...agent };
 }
 
 async function runGit(
@@ -180,7 +215,7 @@ async function runGitTask<T>(
       unsafe: GIT_UNSAFE_OPTIONS,
     });
     const output = await task(
-      git.env(gitEnvironment(options.environment)),
+      git.env(gitEnvironment(options.environment, options.agent)),
       controller.signal,
     );
     if (controller.signal.aborted) throw new Error("Git aborted");
@@ -195,59 +230,16 @@ async function runGitTask<T>(
   }
 }
 
-export async function resolveSshHostname(
-  host: string,
-  context: Context,
-  deadlineMs: number,
-): Promise<string> {
-  return (await resolveSshIdentity(host, context, deadlineMs)).hostname;
-}
-
-export async function resolveSshIdentity(
-  host: string,
-  context: Context,
-  deadlineMs: number,
-): Promise<SshIdentity> {
-  assert.ok(host !== EMPTY_STRING);
-  assert.ok(!host.startsWith("-"));
-  const controller = new AbortController();
-  const unsubscribe = context.onCancel(() => controller.abort());
-  const timer = setTimeout(
-    () => controller.abort(),
-    Math.max(EXPIRED, deadlineMs),
-  );
-  try {
-    throwIfCancelled(context);
-    if (deadlineMs <= EXPIRED) throw new Error("SSH deadline exceeded");
-    const { stdout } = await execFileAsync("ssh", ["-G", "--", host], {
-      signal: controller.signal,
-    });
-    return parseSshIdentity(stdout);
-  } catch {
-    throwIfCancelled(context);
-    throw new OperationError(
-      SSH_RESOLVE_FAILED_STATUS,
-      SshErrorCode.ResolveFailed,
-      "The SSH host does not resolve through ssh -G.",
-      { host },
-    );
-  } finally {
-    clearTimeout(timer);
-    unsubscribe();
-  }
-}
-
 export async function gitLsRemote(
   sshUrl: string,
   context: Context,
   deadlineMs: number,
+  ssh: SshAccess,
 ): Promise<void> {
-  await runGit(
-    undefined,
-    ["ls-remote", sshUrl],
-    context,
-    deadlineMs,
-    "ls-remote",
+  await withAccess(ssh, context, deadlineMs, (agent, remaining) =>
+    runGit(undefined, ["ls-remote", sshUrl], context, remaining, "ls-remote", {
+      agent,
+    }),
   );
 }
 
@@ -256,6 +248,19 @@ export async function clone(
   directory: string,
   context: Context,
   deadlineMs: number,
+  ssh: SshAccess,
+): Promise<void> {
+  await withAccess(ssh, context, deadlineMs, (agent, remaining) =>
+    cloneWith(address, directory, context, remaining, agent),
+  );
+}
+
+async function cloneWith(
+  address: string,
+  directory: string,
+  context: Context,
+  deadlineMs: number,
+  agent: AgentVariables,
 ): Promise<void> {
   assert.ok(address);
   assert.ok(directory);
@@ -265,6 +270,7 @@ export async function clone(
     context,
     deadlineMs,
     "clone",
+    { agent },
   );
 }
 
@@ -275,6 +281,29 @@ export async function fetchAndCheckout(
   pushed: boolean,
   context: Context,
   deadlineMs: number,
+  ssh: SshAccess,
+): Promise<string> {
+  return withAccess(ssh, context, deadlineMs, (agent, remaining) =>
+    fetchAndCheckoutWith(
+      directory,
+      branch,
+      baseBranch,
+      pushed,
+      context,
+      remaining,
+      agent,
+    ),
+  );
+}
+
+async function fetchAndCheckoutWith(
+  directory: string,
+  branch: string,
+  baseBranch: string,
+  pushed: boolean,
+  context: Context,
+  deadlineMs: number,
+  agent: AgentVariables,
 ): Promise<string> {
   assert.ok(branch);
   assert.ok(baseBranch);
@@ -286,6 +315,7 @@ export async function fetchAndCheckout(
       context,
       end - performance.now(),
       "fetch and checkout",
+      { agent },
     );
   const missing = () =>
     new Diagnostic(
@@ -320,6 +350,7 @@ export async function fetchAndCheckout(
     end - performance.now(),
     "fetch and checkout",
     [EXIT_SUCCESS, EXIT_DETACHED_HEAD],
+    { agent },
   );
   if (!found && (await listed(localRef)))
     await run(["checkout", "--force", branch, "--"]);
@@ -334,14 +365,19 @@ export async function fetchBase(
   baseBranch: string,
   context: Context,
   deadlineMs: number,
+  ssh: SshAccess,
 ): Promise<string> {
   assert.ok(baseBranch);
-  const end = performance.now() + deadlineMs;
-  const run = (args: string[]) =>
-    runGit(directory, args, context, end - performance.now(), "fetch base");
-  await run(["check-ref-format", "--branch", baseBranch]);
-  await run(["fetch", "--prune", "origin"]);
-  return (await run(["rev-parse", `origin/${baseBranch}`])).trim();
+  return withAccess(ssh, context, deadlineMs, async (agent, remaining) => {
+    const end = performance.now() + remaining;
+    const run = (args: string[]) =>
+      runGit(directory, args, context, end - performance.now(), "fetch base", {
+        agent,
+      });
+    await run(["check-ref-format", "--branch", baseBranch]);
+    await run(["fetch", "--prune", "origin"]);
+    return (await run(["rev-parse", `origin/${baseBranch}`])).trim();
+  });
 }
 
 export async function pushNodeBranch(
@@ -349,15 +385,19 @@ export async function pushNodeBranch(
   branch: string,
   context: Context,
   deadlineMs: number,
+  ssh: SshAccess,
 ): Promise<void> {
   assert.match(branch, NODE_BRANCH_PATTERN);
   assert.ok(directory !== EMPTY_STRING);
-  await runGit(
-    directory,
-    ["push", "origin", `refs/heads/${branch}:refs/heads/${branch}`],
-    context,
-    deadlineMs,
-    "push node branch",
+  await withAccess(ssh, context, deadlineMs, (agent, remaining) =>
+    runGit(
+      directory,
+      ["push", "origin", `refs/heads/${branch}:refs/heads/${branch}`],
+      context,
+      remaining,
+      "push node branch",
+      { agent },
+    ),
   );
 }
 
@@ -367,27 +407,30 @@ export async function cloneSnapshot(
   directory: string,
   context: Context,
   deadlineMs: number,
+  ssh: SshAccess,
 ): Promise<string> {
   assert.ok(revision);
   assert.ok(!revision.startsWith("-"));
-  const end = performance.now() + deadlineMs;
-  await clone(address, directory, context, deadlineMs);
-  await runGit(
-    directory,
-    ["checkout", "--detach", revision, "--"],
-    context,
-    end - performance.now(),
-    "clone snapshot",
-  );
-  return (
+  return withAccess(ssh, context, deadlineMs, async (agent, remaining) => {
+    const end = performance.now() + remaining;
+    await cloneWith(address, directory, context, remaining, agent);
     await runGit(
       directory,
-      ["rev-parse", "HEAD"],
+      ["checkout", "--detach", revision, "--"],
       context,
       end - performance.now(),
       "clone snapshot",
-    )
-  ).trim();
+    );
+    return (
+      await runGit(
+        directory,
+        ["rev-parse", "HEAD"],
+        context,
+        end - performance.now(),
+        "clone snapshot",
+      )
+    ).trim();
+  });
 }
 
 async function runGitExit(
@@ -397,7 +440,7 @@ async function runGitExit(
   deadlineMs: number,
   operation: string,
   accepted: readonly number[],
-  environment?: NodeJS.ProcessEnv,
+  options: Omit<GitOptions, "errors"> = {},
 ): Promise<{ exitCode: number; output: string }> {
   assert.ok(accepted.includes(EXIT_SUCCESS));
   assert.ok(directory !== EMPTY_STRING);
@@ -409,8 +452,8 @@ async function runGitExit(
     return error ?? exitError(result);
   };
   const output = await runGit(directory, args, context, deadlineMs, operation, {
+    ...options,
     errors,
-    ...(environment === undefined ? {} : { environment }),
   });
   assert.ok(accepted.includes(observed.exitCode));
   return { exitCode: observed.exitCode, output };
@@ -470,6 +513,7 @@ function gitIn(
   context: Context,
   deadlineAt: number,
   operation: string,
+  agent: AgentVariables,
 ): (args: string[], environment?: NodeJS.ProcessEnv) => Promise<string> {
   assert.ok(directory !== EMPTY_STRING);
   assert.ok(operation !== EMPTY_STRING);
@@ -482,7 +526,7 @@ function gitIn(
         remainingMs(deadlineAt),
         operation,
         [EXIT_SUCCESS],
-        environment,
+        { agent, ...(environment === undefined ? {} : { environment }) },
       )
     ).output;
 }
@@ -491,13 +535,33 @@ export async function mergePushFresh(
   input: MergePushInput,
   context: Context,
   deadlineAt: number,
+  ssh: SshAccess,
 ): Promise<{ commit: string }> {
   assert.match(input.commit, COMMIT_PATTERN);
   assert.ok(!input.base_branch.startsWith("-"));
+  return beforePush(() =>
+    withAccess(ssh, context, remainingMs(deadlineAt), (agent) =>
+      mergePushWith(input, context, deadlineAt, agent),
+    ),
+  );
+}
+
+async function mergePushWith(
+  input: MergePushInput,
+  context: Context,
+  deadlineAt: number,
+  agent: AgentVariables,
+): Promise<{ commit: string }> {
   return inFreshDirectory(freshWriteDirectory, async (directory) => {
-    const git = gitIn(directory, context, deadlineAt, "merge push");
+    const git = gitIn(directory, context, deadlineAt, "merge push", agent);
     await atStage(GitStage.BeforePush, async () => {
-      await clone(input.address, directory, context, remainingMs(deadlineAt));
+      await cloneWith(
+        input.address,
+        directory,
+        context,
+        remainingMs(deadlineAt),
+        agent,
+      );
       await git(["check-ref-format", "--branch", input.base_branch]);
       await git(["fetch", "origin", input.commit]);
       await git([
@@ -524,13 +588,33 @@ export async function pushSnapshotFresh(
   input: BranchCommitInput,
   context: Context,
   deadlineAt: number,
+  ssh: SshAccess,
 ): Promise<void> {
   assert.match(input.commit, COMMIT_PATTERN);
   assert.ok(!input.branch.startsWith("-"));
+  await beforePush(() =>
+    withAccess(ssh, context, remainingMs(deadlineAt), (agent) =>
+      pushSnapshotWith(input, context, deadlineAt, agent),
+    ),
+  );
+}
+
+async function pushSnapshotWith(
+  input: BranchCommitInput,
+  context: Context,
+  deadlineAt: number,
+  agent: AgentVariables,
+): Promise<void> {
   await inFreshDirectory(freshWriteDirectory, async (directory) => {
-    const git = gitIn(directory, context, deadlineAt, "push snapshot");
+    const git = gitIn(directory, context, deadlineAt, "push snapshot", agent);
     await atStage(GitStage.BeforePush, async () => {
-      await clone(input.address, directory, context, remainingMs(deadlineAt));
+      await cloneWith(
+        input.address,
+        directory,
+        context,
+        remainingMs(deadlineAt),
+        agent,
+      );
       await git(["check-ref-format", "--branch", input.branch]);
       await git(["fetch", "origin", input.commit]);
     });
@@ -544,13 +628,31 @@ export async function landedOn(
   input: BranchCommitInput,
   context: Context,
   deadlineAt: number,
+  ssh: SshAccess,
 ): Promise<Landing> {
   assert.match(input.commit, COMMIT_PATTERN);
   assert.ok(!input.branch.startsWith("-"));
+  return withAccess(ssh, context, remainingMs(deadlineAt), (agent) =>
+    landedOnWith(input, context, deadlineAt, agent),
+  );
+}
+
+async function landedOnWith(
+  input: BranchCommitInput,
+  context: Context,
+  deadlineAt: number,
+  agent: AgentVariables,
+): Promise<Landing> {
   return inFreshDirectory(freshDirectory, async (directory) => {
     const operation = "landed on";
-    const git = gitIn(directory, context, deadlineAt, operation);
-    await clone(input.address, directory, context, remainingMs(deadlineAt));
+    const git = gitIn(directory, context, deadlineAt, operation, agent);
+    await cloneWith(
+      input.address,
+      directory,
+      context,
+      remainingMs(deadlineAt),
+      agent,
+    );
     await git(["check-ref-format", "--branch", input.branch]);
     const ref = `refs/remotes/origin/${input.branch}`;
     const { exitCode } = await runGitExit(
@@ -609,16 +711,24 @@ export async function resolveBranchCommit(
   branch: string,
   context: Context,
   deadlineMs: number,
+  ssh: SshAccess,
 ): Promise<string | null> {
   assert.ok(address !== EMPTY_STRING);
   assert.ok(branch !== EMPTY_STRING);
   const ref = `refs/heads/${branch}`;
-  const listing = await runGit(
-    undefined,
-    ["ls-remote", "--heads", "--", address, ref],
+  const listing = await withAccess(
+    ssh,
     context,
     deadlineMs,
-    "resolve branch commit",
+    (agent, remaining) =>
+      runGit(
+        undefined,
+        ["ls-remote", "--heads", "--", address, ref],
+        context,
+        remaining,
+        "resolve branch commit",
+        { agent },
+      ),
   );
   for (const line of listing.split("\n")) {
     const fields = line.split(LS_REMOTE_FIELD_SEPARATOR);
@@ -975,13 +1085,37 @@ export async function readFilesAtCommit(
   maxBytes: number,
   context: Context,
   deadlineMs: number,
+  ssh: SshAccess,
   parent: string = tmpdir(),
 ): Promise<RepositoryFile[]> {
   assert.ok(address !== EMPTY_STRING);
   assert.match(commit, OBJECT_ID_PATTERN);
   assert.ok(paths.length);
   assert.ok(Number.isSafeInteger(maxBytes) && maxBytes > EMPTY_BYTES);
-  const end = performance.now() + deadlineMs;
+  return withAccess(ssh, context, deadlineMs, (agent, remaining) =>
+    readFilesWith(
+      address,
+      commit,
+      paths,
+      maxBytes,
+      context,
+      performance.now() + remaining,
+      parent,
+      agent,
+    ),
+  );
+}
+
+async function readFilesWith(
+  address: string,
+  commit: string,
+  paths: readonly string[],
+  maxBytes: number,
+  context: Context,
+  end: number,
+  parent: string,
+  agent: AgentVariables,
+): Promise<RepositoryFile[]> {
   const directory = await mkdtemp(
     join(parent, REPOSITORY_FILES_DIRECTORY_PREFIX),
   );
@@ -992,6 +1126,7 @@ export async function readFilesAtCommit(
       context,
       end - performance.now(),
       "read repository files",
+      { agent },
     );
   const readBlob: GitBlobRun = (object) =>
     runGitTask(
@@ -1000,6 +1135,7 @@ export async function readFilesAtCommit(
       end - performance.now(),
       "read repository files",
       async (git) => Buffer.from(await git.binaryCatFile(["blob", object])),
+      { agent },
     );
   const runInput: GitInputRun = (args, input, maxBytes) =>
     runGitTask(
@@ -1010,7 +1146,7 @@ export async function readFilesAtCommit(
       async (_git, signal) => {
         const child = execFileAsync("git", args, {
           cwd: directory,
-          env: gitEnvironment(),
+          env: gitEnvironment(undefined, agent),
           signal,
           encoding: "buffer",
           maxBuffer: maxBytes,

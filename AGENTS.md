@@ -137,7 +137,7 @@ engine/
 │   │   ├── storage.ts          # Presigned PUT and GET and the object check: authorization, release and Storage call
 │   │   ├── storage-delete.ts   # Object delete: s3.delete_object, its read-back and its stored status
 │   │   ├── webhook-secret.ts   # Verification secret of a webhook inbound, derived from the master key
-│   │   ├── test-support.ts     # Unused action collaborations and a master key for Intake unit tests
+│   │   ├── test-support.ts     # Unused action collaborations, a master key, a pinned host store and an SSH custody fake for Intake unit tests
 │   │   └── service.ts          # Lifecycle, health probe, resource inventory, the `inboundsNaming` collaboration, the inbound removal notice and the event wake notice
 │   ├── mission/                # Mission Service: mission graph, criteria, evidence, and outcomes
 │   │   ├── contract.ts         # Mission schemas, operations, and collaboration types

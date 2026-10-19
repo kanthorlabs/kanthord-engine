@@ -7,8 +7,10 @@ import {
   type TaskContent,
 } from "../../mission/contract.ts";
 import type { ExecutionSetup, RepositoryTransport } from "../contract.ts";
+import type { SshAccess } from "../../repository/contract.ts";
 import {
   SCRATCH_DIRECTORY,
+  sshAccessOf,
   WorkspaceKind,
   workRepositoriesOf,
   type WorkspaceCheckout,
@@ -131,9 +133,6 @@ async function settleImplement(
         ),
       );
     }
-    await withinGit(state.run.spans, GitStep.SshProof, () =>
-      proveIdentities(state, cleanup, remaining),
-    );
     if (
       !furtherWork &&
       !(await refreshBeforeRelease(state, () => allTasksPass(state)))
@@ -194,19 +193,6 @@ async function commitCheckouts(
   return changed;
 }
 
-async function proveIdentities(
-  state: StepsState,
-  context: Context,
-  remaining: () => number,
-): Promise<void> {
-  for (const checkout of state.checkouts)
-    await state.input.transport.proveSshIdentity(
-      repositoryOf(state, checkout).ssh_identity,
-      context,
-      remaining(),
-    );
-}
-
 async function pushNodeBranches(
   state: StepsState,
   context: Context,
@@ -218,6 +204,7 @@ async function pushNodeBranches(
       state.nodeBranch,
       context,
       remaining(),
+      sshAccessOf(state.input.sshAccess, checkout.binding_id),
     );
 }
 
@@ -244,7 +231,6 @@ async function checkpointOnStop(state: StepsState): Promise<void> {
         cleanup,
         remaining,
       );
-    await proveIdentities(state, cleanup, remaining);
     await pushNodeBranches(state, cleanup, remaining);
   } catch (error) {
     if (!(error instanceof Error)) throw error;
@@ -469,6 +455,7 @@ export interface StepsInput {
   setup: ExecutionSetup;
   workspaces: WorkspaceRoot;
   transport: RepositoryTransport;
+  sshAccess: ReadonlyMap<string, SshAccess>;
   env: NodeJS.ProcessEnv;
 }
 export interface StepsState {
@@ -503,6 +490,7 @@ export async function prepareStepsWorkspace(
     pushed,
     repositories: input.setup.repositories,
     transport: input.transport,
+    sshAccess: input.sshAccess,
     context: run.operationContext,
     deadlineMs:
       Math.min(

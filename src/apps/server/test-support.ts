@@ -70,8 +70,10 @@ import {
   RepositoryComponent,
   repositoryMigrations,
   type GitWriter,
+  type HostKeySources,
 } from "../../repository/index.ts";
 import { GITHUB_API_VERSION } from "../../repository/github.ts";
+import { LOCAL_GIT_SSH_ACCESS } from "../../repository/test-sshd.ts";
 import {
   InstancePlacement,
   type RepositoryTransport,
@@ -267,22 +269,17 @@ export async function inProcessWorker(
 
 export const TEST_WORKER_BINDING = "binding";
 export const TEST_PROJECT_ID = "project_01ARZ3NDEKTSV4RRFFQ69G5FAV";
-export const FAKE_SSH_IDENTITY = {
-  hostname: "github.com",
-  port: 22,
-  identityFiles: ["~/.ssh/id_rsa"],
-  identitiesOnly: true,
-};
-export const FAKE_SSH_CREDENTIAL_BODY = {
-  name: "github-ssh",
-  platform: "ssh" as const,
-  metadata: {
-    host: "github.com",
-    hostname: "github.com",
-    port: 22,
-    identity_file: "~/.ssh/id_rsa",
+export const FAKE_SSH_CREDENTIAL = "github-ssh";
+export const FAKE_SSH_HOST = "github.com";
+export const FAKE_GITHUB_HOST_KEY =
+  "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl";
+export const FAKE_GITHUB_HOST_KEY_FINGERPRINT =
+  "SHA256:+DiY3wvvV6TuJJhbpZisF/zLDA0zPMSvHdkr4UvCOqU";
+export const FAKE_HOST_KEY_SOURCES: HostKeySources = {
+  githubMeta: async () => ({ ssh_keys: [FAKE_GITHUB_HOST_KEY] }),
+  keyscan: async (host) => {
+    throw new Error(`The test host key sources read no key of ${host}.`);
   },
-  secret: {},
 };
 const SINGLE_INSTANCE = 1;
 const NO_INSTANCES = 0;
@@ -496,7 +493,7 @@ export async function gatewayFixture(
     repositoryConnector: options.repositoryConnector,
     github: options.github,
     repositoryTransport: options.repositoryTransport,
-    hostKeySources: options.hostKeySources,
+    hostKeySources: options.hostKeySources ?? FAKE_HOST_KEY_SOURCES,
     oauthProviders: options.oauthProviders,
     loadModelRuntime: options.loadModelRuntime,
     bindings: options.machines?.project,
@@ -1390,13 +1387,49 @@ export function mappedTransport(
     return addresses[address]!;
   }
   return {
-    proveSshIdentity: async () => {},
-    clone: (address, ...args) => connector.clone(mapped(address), ...args),
-    cloneSnapshot: (address, ...args) =>
-      connector.cloneSnapshot(mapped(address), ...args),
-    fetchAndCheckout: (...args) => connector.fetchAndCheckout(...args),
-    fetchBase: (...args) => connector.fetchBase(...args),
-    pushNodeBranch: (...args) => connector.pushNodeBranch(...args),
+    clone: (address, directory, context, deadlineMs) =>
+      connector.clone(
+        mapped(address),
+        directory,
+        context,
+        deadlineMs,
+        LOCAL_GIT_SSH_ACCESS,
+      ),
+    cloneSnapshot: (address, revision, directory, context, deadlineMs) =>
+      connector.cloneSnapshot(
+        mapped(address),
+        revision,
+        directory,
+        context,
+        deadlineMs,
+        LOCAL_GIT_SSH_ACCESS,
+      ),
+    fetchAndCheckout: (directory, branch, base, pushed, context, deadlineMs) =>
+      connector.fetchAndCheckout(
+        directory,
+        branch,
+        base,
+        pushed,
+        context,
+        deadlineMs,
+        LOCAL_GIT_SSH_ACCESS,
+      ),
+    fetchBase: (directory, base, context, deadlineMs) =>
+      connector.fetchBase(
+        directory,
+        base,
+        context,
+        deadlineMs,
+        LOCAL_GIT_SSH_ACCESS,
+      ),
+    pushNodeBranch: (directory, branch, context, deadlineMs) =>
+      connector.pushNodeBranch(
+        directory,
+        branch,
+        context,
+        deadlineMs,
+        LOCAL_GIT_SSH_ACCESS,
+      ),
     mergePushFresh: (input, ...args) =>
       connector.mergePushFresh(
         { ...input, address: mapped(input.address) },
@@ -1409,6 +1442,7 @@ export function mappedTransport(
       ),
     landedOn: (input, ...args) =>
       connector.landedOn({ ...input, address: mapped(input.address) }, ...args),
+    sshAccessOf: (...args) => connector.sshAccessOf(...args),
   };
 }
 
@@ -1730,10 +1764,7 @@ async function storageCredentials(cli: StorageCli, endpoint: string) {
     metadata: null,
     secret: { key: "test-secret" },
   });
-  await cli.write(
-    ["repository", "credential", "create"],
-    FAKE_SSH_CREDENTIAL_BODY,
-  );
+  await createFakeSshCredential(cli.read);
   await cli.write(["storage", "credential", "create"], {
     name: STORAGE_CREDENTIAL,
     platform: "s3",
@@ -1754,7 +1785,7 @@ function storageBindings(endpoint: string, available: boolean) {
         available: true,
         platform: "github",
         address: "git@github.com:owner/repo.git",
-        ssh_credential: FAKE_SSH_CREDENTIAL_BODY.name,
+        ssh_credential: FAKE_SSH_CREDENTIAL,
         credential: "github",
         strategy: { base_branch: "main" },
       },
@@ -1845,7 +1876,6 @@ export async function storageProject(t: TestContext) {
     github: { baseUrl: gitHub.endpoint },
     repositoryConnector: {
       gitLsRemote: async () => {},
-      resolveSshIdentity: async () => FAKE_SSH_IDENTITY,
     },
   });
   const cli = storageCli(t, fixture.endpoint, fixture.token);
@@ -1926,6 +1956,25 @@ const FIRST_BINDING_SET_VERSION = 1;
 const FIRST_MISSION_VERSION = 1;
 const SECOND_MISSION_VERSION = 2;
 
+export async function createFakeSshCredential(
+  read: <T>(args: string[]) => Promise<T>,
+): Promise<void> {
+  await read([
+    "repository",
+    "credential",
+    "ssh-key-create",
+    FAKE_SSH_CREDENTIAL,
+  ]);
+  await read([
+    "repository",
+    "host-key",
+    "pin",
+    FAKE_SSH_HOST,
+    "--fingerprint",
+    FAKE_GITHUB_HOST_KEY_FINGERPRINT,
+  ]);
+}
+
 export function humanCaller(
   fixture: Pick<
     Awaited<ReturnType<typeof gatewayFixture>>,
@@ -1964,14 +2013,14 @@ export async function provisionRepositoryCredentials(
       [SECRET_FIELD]: { key: "worker-project-token" },
     },
   });
-  await call(repositoryOperations.create, {
+  await call(repositoryOperations.ssh_key_create, {
     ...empty,
-    body: {
-      name: WORKER_PROJECT_SSH_CREDENTIAL,
-      platform: "ssh",
-      metadata: FAKE_SSH_CREDENTIAL_BODY.metadata,
-      [SECRET_FIELD]: {},
-    },
+    body: { name: WORKER_PROJECT_SSH_CREDENTIAL },
+  });
+  await call(repositoryOperations.host_key_pin, {
+    params: { host: FAKE_SSH_HOST },
+    query: {},
+    body: { fingerprint: FAKE_GITHUB_HOST_KEY_FINGERPRINT },
   });
 }
 

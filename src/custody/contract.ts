@@ -24,7 +24,7 @@ export const SecretShape = {
   ApiKey: "api_key",
   OAuth: "oauth",
   S3AccessKey: "s3_access_key",
-  None: "none",
+  SshKey: "ssh_key",
 } as const;
 export type SecretShape = (typeof SecretShape)[keyof typeof SecretShape];
 export const LoginSessionMode = {
@@ -63,7 +63,7 @@ export const piCredentialSchema = z
       EXECUTION_CREDENTIAL_MAX_BYTES
     );
   }, "The normalized credential must contain well-formed Unicode and fit the serialized byte budget.");
-export const handoverPayloadSchema = z.strictObject({
+export const handoverItemsSchema = z.strictObject({
   items: z.array(
     z.strictObject({
       credential_id: identitySchema("credential"),
@@ -77,7 +77,7 @@ export const refreshReportSchema = z.strictObject({
   digest: z.string().regex(SHA256_HEX_PATTERN),
   credential: piCredentialSchema,
 });
-export type HandoverPayload = z.infer<typeof handoverPayloadSchema>;
+export type HandoverItems = z.infer<typeof handoverItemsSchema>;
 export type RefreshReport = z.infer<typeof refreshReportSchema>;
 
 export type CustodyExecution = {
@@ -258,6 +258,7 @@ export const GrantKind = {
   EvidenceAsset: "evidence_asset",
   ObjectPut: "object_put",
   Inbound: "inbound",
+  SshIdentity: "ssh_identity",
 } as const;
 export type GrantKind = (typeof GrantKind)[keyof typeof GrantKind];
 export const InboundOperation = { Poll: "poll" } as const;
@@ -274,6 +275,40 @@ export type InboundFacts = {
   inbound_id: string;
   resource: string;
 };
+export const SshIdentitySubjectKind = {
+  Binding: "binding",
+  Draft: "draft",
+  RequestEvidence: "request_evidence",
+} as const;
+export type SshIdentitySubject =
+  | { kind: typeof SshIdentitySubjectKind.Binding; binding_id: string }
+  | {
+      kind: typeof SshIdentitySubjectKind.RequestEvidence;
+      evidence_id: string;
+    }
+  | {
+      kind: typeof SshIdentitySubjectKind.Draft;
+      project_id: string;
+      credential: string;
+      address: string;
+    };
+export type SshIdentityFacts = {
+  binding_id: string | null;
+  address: string;
+};
+export type SshAccessOf = (
+  tx: Transaction,
+  granted: GrantFacts<GrantOf<typeof GrantKind.SshIdentity>>,
+  material: Material,
+) => { private_key: string };
+export interface SshIdentityAuthorization {
+  sshIdentity(
+    tx: Transaction,
+    identity: CallerIdentity,
+    subject: SshIdentitySubject,
+    claim: ExecutionClaim | null,
+  ): Authorized<SshIdentityFacts>;
+}
 export type GrantRequest =
   | {
       kind: typeof GrantKind.FrozenAction;
@@ -307,6 +342,12 @@ export type GrantRequest =
       identity: ServiceIdentity;
       inbound: InboundGrantInput;
       operation: InboundOperation;
+    }
+  | {
+      kind: typeof GrantKind.SshIdentity;
+      identity: CallerIdentity;
+      subject: SshIdentitySubject;
+      claim: ExecutionClaim | null;
     };
 export type ModelInferenceFacts = {
   provider_id: string;
@@ -319,6 +360,7 @@ type GrantFactsOfKind = {
   [GrantKind.EvidenceAsset]: AssetFacts;
   [GrantKind.ObjectPut]: AssetFacts;
   [GrantKind.Inbound]: InboundFacts;
+  [GrantKind.SshIdentity]: SshIdentityFacts;
 };
 export type GrantExecution = Readonly<
   Omit<CustodyExecution, "credentials"> & { credentials: readonly string[] }
@@ -398,6 +440,7 @@ export type InboundsNamingFn = (
 
 const EMPTY_STRING_LENGTH = 0;
 const STRING_FIELD_TYPE = "string";
+const ARMOR_LINES_MIN = 2;
 
 export function isNonblank(s: string): boolean {
   return s.trim().length > EMPTY_STRING_LENGTH;
@@ -427,12 +470,39 @@ export const s3AccessKeySecretSchema = z.strictObject({
   access_key_id: z.string().min(1).refine(isNonblank),
   secret_access_key: z.string().min(1).refine(isNonblank),
 });
-export const noneSecretSchema = z.strictObject({});
+const OPENSSH_ARMOR_LABEL = "OPENSSH PRIVATE KEY";
+const OPENSSH_ARMOR_BEGIN = `-----BEGIN ${OPENSSH_ARMOR_LABEL}-----`;
+const OPENSSH_ARMOR_END = `-----END ${OPENSSH_ARMOR_LABEL}-----`;
+export const SSH_KEY_TEXT_BYTES_MAX = 4096;
+export const sshKeySecretSchema = z.strictObject({
+  private_key: z
+    .string()
+    .refine((text) => Buffer.byteLength(text, "utf8") <= SSH_KEY_TEXT_BYTES_MAX)
+    .refine((text) => {
+      const lines = text.trim().split("\n");
+      return (
+        lines.length > ARMOR_LINES_MIN &&
+        lines[0] === OPENSSH_ARMOR_BEGIN &&
+        lines.at(-1) === OPENSSH_ARMOR_END
+      );
+    }),
+});
+export const handoverPayloadSchema = handoverItemsSchema.extend({
+  ssh_identities: z.array(
+    z.strictObject({
+      binding_id: identitySchema("binding"),
+      credential_id: identitySchema("credential"),
+      private_key: sshKeySecretSchema.shape.private_key,
+    }),
+  ),
+});
+export type HandoverPayload = z.infer<typeof handoverPayloadSchema>;
+export type HandoverSshIdentity = HandoverPayload["ssh_identities"][number];
 export const secretSchemas: Readonly<Record<SecretShape, z.ZodType>> = {
   [SecretShape.ApiKey]: apiKeySecretSchema,
   [SecretShape.OAuth]: oauthSecretSchema,
   [SecretShape.S3AccessKey]: s3AccessKeySecretSchema,
-  [SecretShape.None]: noneSecretSchema,
+  [SecretShape.SshKey]: sshKeySecretSchema,
 };
 
 export type PlatformProbe = (
@@ -577,6 +647,20 @@ export function credentialPlatformList(
   };
 }
 
+export type GeneratedRevision = {
+  secret: unknown;
+  metadata: Record<string, unknown>;
+};
+export type GeneratedCreate = {
+  name: string;
+  platform: string;
+  generate: (name: string) => GeneratedRevision;
+};
+export type GeneratedRotate = {
+  expected_revision: number;
+  generate: (name: string) => GeneratedRevision;
+};
+
 export type CredentialHold = { available_at: number; strikes: number };
 
 export type CredentialHoldItem = CredentialHold & { credential: string };
@@ -644,6 +728,19 @@ export interface CredentialRecords {
     secret: unknown,
     now: number,
   ): string;
+  createGenerated(
+    tx: Transaction,
+    set: CredentialPlatformSet,
+    body: GeneratedCreate,
+    humanIdentity: string | undefined,
+  ): CredentialAnswer;
+  rotateGenerated(
+    tx: Transaction,
+    set: CredentialPlatformSet,
+    credentialName: string,
+    body: GeneratedRotate,
+    humanIdentity: string | undefined,
+  ): CredentialAnswer;
   resourceInventory(
     tx: Transaction,
     set: CredentialPlatformSet,

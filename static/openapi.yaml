@@ -232,8 +232,10 @@ paths:
     $ref: ./openapi/repository/credential.revoke.yaml#/pathItem
   /api/repository/credential/{credential_name}/revision:
     $ref: ./openapi/repository/credential.rotate.yaml#/pathItem
-  /api/repository/credential/ssh/discover:
-    $ref: ./openapi/repository/credential.ssh_discover.yaml#/pathItem
+  /api/repository/credential/ssh/key:
+    $ref: ./openapi/repository/credential.ssh_key_create.yaml#/pathItem
+  /api/repository/credential/{credential_name}/ssh/key:
+    $ref: ./openapi/repository/credential.ssh_key_rotate.yaml#/pathItem
   /api/repository/credential/{credential_name}/metadata:
     $ref: ./openapi/repository/credential.update_metadata.yaml#/pathItem
   /api/repository/credential/{credential_name}/verify:

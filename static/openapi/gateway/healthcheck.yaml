@@ -142,6 +142,8 @@ components:
                           - rate_limited
                           - unreachable
                           - invalid_response
+                          - host_key_changed
+                          - identity_unavailable
                           - unclassified
                       - type: "null"
                 required:
@@ -185,6 +187,8 @@ components:
                             - rate_limited
                             - unreachable
                             - invalid_response
+                            - host_key_changed
+                            - identity_unavailable
                             - unclassified
                         - type: "null"
                   required:

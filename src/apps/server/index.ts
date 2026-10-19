@@ -42,6 +42,7 @@ import {
   missionOperations,
 } from "../../mission/contract.ts";
 import {
+  PROJECT_SERVICE_NAME,
   RepositoryPlatform,
   projectOperations,
   type ProjectBindings,
@@ -83,7 +84,11 @@ import {
   createInvocation,
   collectInventories,
 } from "../../gateway/index.ts";
-import { ProjectService, projectMigrations } from "../../project/index.ts";
+import {
+  ProjectService,
+  projectMigrations,
+  projectSshIdentityAuthorization,
+} from "../../project/index.ts";
 import { IntakeService, intakeMigrations } from "../../intake/index.ts";
 import {
   Consumer,
@@ -110,6 +115,7 @@ import { AGENT_COMPONENT_NAME } from "../../agent/contract.ts";
 import { loadPi } from "../../agent/pi.ts";
 import {
   RepositoryComponent,
+  checkServerRepositoryTools,
   RepositoryCredentials,
   RepositoryHostKeys,
   REPOSITORY_PLATFORMS,
@@ -140,7 +146,6 @@ import {
   type Context,
 } from "../../kernel/context.ts";
 
-export type { RepositoryConnector } from "../../project/contract.ts";
 export { enforceMasterKey, verifyMasterKey } from "../../custody/index.ts";
 
 function resultOf<T>(result: OperationResult<T>): T {
@@ -203,14 +208,18 @@ export function composeServices(options: {
 }) {
   const repoConnector =
     options.repositoryConnector ??
-    new RepositoryComponent({ health: options.health });
+    new RepositoryComponent({
+      health: options.health,
+      checkTools: checkServerRepositoryTools,
+    });
   const github = new platformImplementations.github(options.github);
   const s3 = new storageImplementations.s3();
-  const gitWriter: GitWriter =
-    options.repositoryTransport ??
-    (repoConnector instanceof RepositoryComponent
+  const repositoryComponent =
+    repoConnector instanceof RepositoryComponent
       ? repoConnector
-      : new RepositoryComponent());
+      : new RepositoryComponent();
+  const gitWriter: GitWriter =
+    options.repositoryTransport ?? repositoryComponent;
   const envelopeKey = deriveEnvelopeKey(options.config.master_key);
   const registry = options.registry ?? new OperationRegistry();
   const invocation = createInvocation({
@@ -372,6 +381,16 @@ export function composeServices(options: {
     bindingsNaming: (tx, name) => project.bindingsNaming(tx, name),
     inboundsNaming: (tx, name) => intake.inboundsNaming(tx, name),
     intakeServiceName: INTAKE_SERVICE_NAME,
+    sshIdentityAuthorization: projectSshIdentityAuthorization({
+      custodySuitability: (tx, req) => custody.custodySuitability(tx, req),
+      repositoryBindingIdsOf: (tx, nodeId, revision) =>
+        mission.repositoryBindingIdsOf(tx, nodeId, revision),
+      requestEvidenceBindingOf: (tx, identity, evidenceId) =>
+        mission.authorizeRequestEvidence(tx, identity, evidenceId, null).facts
+          .repository.binding_id,
+    }),
+    sshAccessOf: (tx, granted, material) =>
+      repositoryComponent.sshAccessOf(tx, granted, material),
   });
   const llm = new LlmComponent({
     records: custody,
@@ -410,8 +429,6 @@ export function composeServices(options: {
     store: options.store,
     records: custody,
     bindingsNaming: (tx, name) => project.bindingsNaming(tx, name),
-    resolveSshIdentity: (host, context, deadlineMs) =>
-      repoConnector.resolveSshIdentity(host, context, deadlineMs),
   });
   const repositoryHostKeys = new RepositoryHostKeys({
     logger: options.logger,
@@ -488,6 +505,8 @@ export function composeServices(options: {
     pinnedCredentialMetadata: (tx, execution, name, now) =>
       custody.pinnedCredentialMetadata(tx, execution, name, now),
     credentialMetadata: (tx, name) => custody.credentialMetadata(tx, name),
+    sshHostKeysOf: (tx, platform, address) =>
+      repositoryComponent.sshHostKeysOf(tx, platform, address),
     schedulerClaims: {
       requireRunning: (...args) => scheduler.requireRunning(...args),
       runningExecutionOfRuntime: (...args) =>
@@ -647,7 +666,14 @@ export function composeServices(options: {
     repositoryFiles,
     verifyRepositoryCredential: (name, context) =>
       repositoryCredentials.verifyCredential(name, context),
-    credentialMetadata: (tx, name) => custody.credentialMetadata(tx, name),
+    identity: mintServiceIdentity(PROJECT_SERVICE_NAME),
+    custody: {
+      authorizeOperation: (...args) => custody.authorizeOperation(...args),
+      release: (...args) => custody.release(...args),
+      grantFacts,
+    },
+    sshAccessOf: (tx, granted, material) =>
+      repositoryComponent.sshAccessOf(tx, granted, material),
     workerAgentsOf: (name) => worker.workerAgentsOf(name),
     workerAgentView: (tx, w, a, entry) =>
       worker.workerAgentView(tx, w, a, entry),

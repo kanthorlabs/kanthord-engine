@@ -1,11 +1,11 @@
+import { z } from "zod";
 import {
   apiKeySecretSchema,
-  CREDENTIAL_CHECK_TIMEOUT_MS,
   SecretShape,
+  sshKeySecretSchema,
   type CredentialPlatform,
 } from "../custody/contract.ts";
 import type { Context } from "../kernel/context.ts";
-import { OperationError } from "../kernel/errors.ts";
 import {
   ResourceFailureReason,
   ResourceStatus,
@@ -13,8 +13,8 @@ import {
   type ResourceStatusValue,
 } from "../kernel/health.ts";
 import { AUTHORIZATION_HEADER, probeHttp } from "../kernel/probe.ts";
-import { resolveSshIdentity } from "./connector.ts";
-import { assertPinned, sshPinSchema, type SshPin } from "./ssh-identity.ts";
+import { HOST_KEY_FINGERPRINT_PATTERN } from "./contract.ts";
+import { sshFingerprintOf, sshPublicKeyOf } from "./ssh-key.ts";
 
 export const Platform = {
   GitHub: "github",
@@ -26,32 +26,33 @@ export const CAPABILITY_RATE_LIMIT_READ = "rate-limit read";
 export const GITHUB_RATE_LIMIT_URL = "https://api.github.com/rate_limit";
 export const CAPABILITY_SSH_IDENTITY = "ssh identity";
 
-export async function proveSshPin(
-  pin: SshPin,
-  context: Context,
-  deadlineMs: number,
-): Promise<void> {
-  assertPinned(pin, await resolveSshIdentity(pin.host, context, deadlineMs));
-}
+export const sshKeyMetadataSchema = z.strictObject({
+  public_key: z.string().min(1),
+  fingerprint: z.string().regex(HOST_KEY_FINGERPRINT_PATTERN),
+});
+export type SshKeyMetadata = z.infer<typeof sshKeyMetadataSchema>;
 
-async function probeSsh(
+export function probeSshKey(
+  secret: unknown,
   metadata: unknown,
-  context: Context,
   observe?: ResourceObserver,
-): Promise<ResourceStatusValue> {
+): ResourceStatusValue {
   try {
-    await proveSshPin(
-      sshPinSchema.parse(metadata),
-      context,
-      CREDENTIAL_CHECK_TIMEOUT_MS,
-    );
+    const { private_key } = sshKeySecretSchema.parse(secret);
+    const stored = sshKeyMetadataSchema.parse(metadata);
+    const derived = sshPublicKeyOf(private_key);
+    if (
+      derived !== stored.public_key ||
+      sshFingerprintOf(derived) !== stored.fingerprint
+    )
+      throw new Error("The SSH key differs from the stored public key.");
     return ResourceStatus.Healthy;
-  } catch (error) {
+  } catch {
     observe?.(
-      error instanceof OperationError ? error.code : "ssh -G failed",
-      ResourceFailureReason.Unclassified,
+      "the SSH key does not load",
+      ResourceFailureReason.IdentityUnavailable,
     );
-    return context.err() ? ResourceStatus.Unknown : ResourceStatus.Unhealthy;
+    return ResourceStatus.Unhealthy;
   }
 }
 
@@ -80,11 +81,11 @@ export const REPOSITORY_PLATFORMS: Readonly<
       probeGitHub(apiKeySecretSchema.parse(secret).key, context, observe),
   },
   [Platform.Ssh]: {
-    secret_shape: SecretShape.None,
+    secret_shape: SecretShape.SshKey,
     login_modes: [],
-    metadata_schema: sshPinSchema,
+    metadata_schema: sshKeyMetadataSchema,
     capability: CAPABILITY_SSH_IDENTITY,
-    probe: (_secret, metadata, context, observe) =>
-      probeSsh(metadata, context, observe),
+    probe: async (secret, metadata, _context, observe) =>
+      probeSshKey(secret, metadata, observe),
   },
 };

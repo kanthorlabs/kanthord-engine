@@ -17,7 +17,7 @@ import {
   implementRepositoriesOf,
   type StepsState,
 } from "./steps-implement.ts";
-import type { WorkspaceCheckout } from "./workspace.ts";
+import { sshAccessOf, type WorkspaceCheckout } from "./workspace.ts";
 import { GitStep, withinGit } from "./method-telemetry.ts";
 
 const NO_FILES = 0;
@@ -185,6 +185,7 @@ export async function refreshBeforeRelease(
           base,
           context,
           remaining(),
+          sshAccessOf(state.input.sshAccess, checkout.binding_id),
         ),
       );
       const ref = `origin/${base}`;

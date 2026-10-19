@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { z } from "zod";
+import type { ServiceIdentity } from "../kernel/caller.ts";
 import type { Context } from "../kernel/context.ts";
 import { HttpMethod, HttpStatus } from "../kernel/http.ts";
 import {
@@ -16,6 +17,7 @@ import {
 } from "../kernel/health.ts";
 import { tagSchema } from "../kernel/tag.ts";
 import { fallbackConfigurationsSchema } from "../agent/contract.ts";
+import type { SshAccess } from "../repository/contract.ts";
 
 export const BINDING_CHECK_TIMEOUT_MS = 10000;
 export const BINDING_VERIFY_TIMEOUT_MS = 30000;
@@ -48,12 +50,6 @@ export const RepositoryPlatform = {
 } as const;
 export type RepositoryPlatform =
   (typeof RepositoryPlatform)[keyof typeof RepositoryPlatform];
-export type SshIdentity = {
-  hostname: string;
-  port: number;
-  identityFiles: string[];
-  identitiesOnly: boolean;
-};
 export const RESOURCE_CAPABILITY_NETWORK_GIT_READ = "network git read";
 export const RESOURCE_TARGET_KIND_REPOSITORY = "repository";
 export const WORKER_PLATFORM = "kanthord";
@@ -107,7 +103,6 @@ export const ProjectErrorCode = {
   RepositoryPromptTooLarge:
     "project.bindings.repository.project_prompt_too_large",
   RepositorySshUnreachable: "project.bindings.repository.ssh_unreachable",
-  RepositorySshHostMismatch: "project.bindings.repository.ssh_host_mismatch",
   RepositoryCredentialRequired:
     "project.bindings.repository.credential_required",
   RepositoryActionUnsupported: "project.bindings.repository.action_unsupported",
@@ -409,15 +404,11 @@ export type UnmatchedClaims = (
   projectId: string,
 ) => { node_id: string; revision: number; claim: string }[];
 export type RepositoryConnector = {
-  resolveSshIdentity(
-    host: string,
-    context: Context,
-    deadlineMs: number,
-  ): Promise<SshIdentity>;
   gitLsRemote(
     sshUrl: string,
     context: Context,
     deadlineMs: number,
+    ssh: SshAccess,
   ): Promise<void>;
 };
 export type RepositoryFiles = {
@@ -426,6 +417,7 @@ export type RepositoryFiles = {
     branch: string,
     context: Context,
     deadlineMs: number,
+    ssh: SshAccess,
   ): Promise<string | null>;
   readFilesAtCommit(
     address: string,
@@ -434,8 +426,19 @@ export type RepositoryFiles = {
     maxBytes: number,
     context: Context,
     deadlineMs: number,
+    ssh: SshAccess,
   ): Promise<Array<{ path: string; state: string; text: string | null }>>;
 };
+export type RepositoryBindingIdsOf = (
+  tx: Transaction,
+  nodeId: string,
+  nodeRevision: number,
+) => string[];
+export type RequestEvidenceBindingOf = (
+  tx: Transaction,
+  identity: ServiceIdentity,
+  evidenceId: string,
+) => string;
 export type WorkerAgentsOfFn = (workerName: string) => string[];
 export type WorkerAgentViewFn = (
   tx: Transaction,

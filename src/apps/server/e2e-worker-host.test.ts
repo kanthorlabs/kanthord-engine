@@ -11,7 +11,10 @@ import {
   Intent,
   type Evidence,
 } from "../../mission/contract.ts";
+import type { CredentialAnswer } from "../../custody/contract.ts";
+import type { SshAccess } from "../../repository/contract.ts";
 import { RepositoryComponent } from "../../repository/index.ts";
+import { startTestSshd } from "../../repository/test-sshd.ts";
 import { ClaimState, type ExecutionRecord } from "../../scheduler/contract.ts";
 import {
   SpanStatus,
@@ -25,14 +28,18 @@ import {
   scriptedModelRuntime,
   scriptedProvider,
 } from "../../worker/unit/test-support.ts";
-import { inProcessWorker } from "./test-support.ts";
+import {
+  FAKE_GITHUB_HOST_KEY,
+  FAKE_SSH_CREDENTIAL,
+  inProcessWorker,
+} from "./test-support.ts";
 import { workerAcceptance, WORKER_TEST_KEY } from "./worker-acceptance.ts";
 
 const FIRST_REVISION = 1;
 const SINGLE_ITEM = 1;
 const SECOND_REVISION = 2;
 const TWO_RESULTS = 2;
-const PROVIDER_AND_STORE_PINS = 2;
+const PROVIDER_STORE_AND_SSH_PINS = 3;
 const FIRST_INDEX = 0;
 const EXECUTION_WAIT_MS = 30000;
 const POLL_INTERVAL_MS = 100;
@@ -116,20 +123,76 @@ async function fixture(t: TestContext) {
   await git.add("README.md");
   await git.commit("initial");
   await git.clone(seed, bare, ["--bare"]);
+  const sshKey = await setup.read<CredentialAnswer>([
+    "repository",
+    "credential",
+    "get",
+    FAKE_SSH_CREDENTIAL,
+  ]);
+  const publicKey = String(sshKey.revisions[0]?.metadata?.public_key);
+  const sshd = await startTestSshd(t);
+  await sshd.authorize(publicKey);
+  const handed: SshAccess[] = [];
+  const routed = (ssh: SshAccess): SshAccess => {
+    handed.push(ssh);
+    return { ...ssh, known_hosts: sshd.known_hosts };
+  };
+  const origin = sshd.url(bare);
   const connector = new RepositoryComponent();
   const transport: RepositoryTransport = {
-    proveSshIdentity: async () => {},
-    clone: (_address, ...args) => connector.clone(bare, ...args),
-    cloneSnapshot: (_address, ...args) =>
-      connector.cloneSnapshot(bare, ...args),
-    fetchAndCheckout: (...args) => connector.fetchAndCheckout(...args),
-    fetchBase: (...args) => connector.fetchBase(...args),
-    pushNodeBranch: (...args) => connector.pushNodeBranch(...args),
+    clone: (_address, directory, context, deadline, ssh) =>
+      connector.clone(origin, directory, context, deadline, routed(ssh)),
+    cloneSnapshot: (_address, revision, directory, context, deadline, ssh) =>
+      connector.cloneSnapshot(
+        origin,
+        revision,
+        directory,
+        context,
+        deadline,
+        routed(ssh),
+      ),
+    fetchAndCheckout: (
+      directory,
+      branch,
+      base,
+      pushed,
+      context,
+      deadline,
+      ssh,
+    ) =>
+      connector.fetchAndCheckout(
+        directory,
+        branch,
+        base,
+        pushed,
+        context,
+        deadline,
+        routed(ssh),
+      ),
+    fetchBase: (directory, base, context, deadline, ssh) =>
+      connector.fetchBase(directory, base, context, deadline, routed(ssh)),
+    pushNodeBranch: (directory, branch, context, deadline, ssh) =>
+      connector.pushNodeBranch(
+        directory,
+        branch,
+        context,
+        deadline,
+        routed(ssh),
+      ),
   };
   const auth = await setup.machine("general-a");
   assert.ok(nodeId);
   assert.ok(auth.client_secret);
-  return { ...setup, node_id: nodeId, bare, git, auth, transport };
+  return {
+    ...setup,
+    node_id: nodeId,
+    bare,
+    git,
+    auth,
+    transport,
+    handed,
+    publicKey,
+  };
 }
 
 async function assertSpanTree(
@@ -217,7 +280,7 @@ async function finished(setup: Awaited<ReturnType<typeof fixture>>) {
     );
     if (record) {
       assert.equal(page.items.length, SINGLE_ITEM);
-      assert.equal(record.credentials.length, PROVIDER_AND_STORE_PINS);
+      assert.equal(record.credentials.length, PROVIDER_STORE_AND_SSH_PINS);
       return record;
     }
     await delay(POLL_INTERVAL_MS);
@@ -258,6 +321,11 @@ test(
           repositoryTransport: executionSetup.transport,
         });
         const record = await finished(executionSetup);
+        assert.ok(executionSetup.handed.length);
+        for (const ssh of executionSetup.handed) {
+          assert.equal(ssh.public_key.trim(), executionSetup.publicKey.trim());
+          assert.ok(ssh.known_hosts.includes(FAKE_GITHUB_HOST_KEY));
+        }
         await assertSpanTree(executionSetup, record.trace_id);
         assert.ok(provider.calls.length);
         assert.ok(

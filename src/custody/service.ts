@@ -8,6 +8,7 @@ import {
 import { Diagnostic, OperationError } from "../kernel/errors.ts";
 import {
   isHumanIdentity,
+  isMachineIdentity,
   isServiceIdentity,
   type MachineIdentity,
 } from "../kernel/caller.ts";
@@ -52,6 +53,13 @@ import {
   type CredentialRecords,
   type CredentialRotateBody,
   type CredentialUpdateMetadataBody,
+  type GeneratedCreate,
+  type GeneratedRevision,
+  type GeneratedRotate,
+  SshIdentitySubjectKind,
+  type HandoverSshIdentity,
+  type SshAccessOf,
+  type SshIdentityAuthorization,
   type AgentProviderDependent,
   type BindingRevision,
   type AgentProvidersDependentOnFn,
@@ -77,6 +85,7 @@ import {
   consumeGrant,
   consumeWorkbenchGrant,
   FacilityError,
+  grantFacts,
   mintGrant,
   mintWorkbenchGrant,
   MaterialBuffer,
@@ -108,6 +117,8 @@ export interface Dependencies {
   bindingsNaming: BindingsNamingFn;
   inboundsNaming: InboundsNamingFn;
   intakeServiceName: string;
+  sshIdentityAuthorization?: SshIdentityAuthorization;
+  sshAccessOf?: SshAccessOf;
 }
 
 const CustodyErrorCode = {
@@ -227,6 +238,18 @@ function validatedMetadata(
   const parsed = schema.safeParse(value);
   if (!parsed.success) throw invalidInput();
   return parsed.data as Record<string, unknown>;
+}
+
+function isGenerated(entry: CredentialPlatform): boolean {
+  return entry.secret_shape === SecretShape.SshKey;
+}
+
+function unsupportedEntry(): OperationError {
+  return new OperationError(
+    HttpStatus.BadRequest,
+    CustodyErrorCode.UnsupportedEntry,
+    "Unsupported credential entry.",
+  );
 }
 
 function notFound(): OperationError {
@@ -370,6 +393,9 @@ export class CustodyComponent implements Service, CredentialRecords {
   private readonly missionAuthorization: MissionAuthorization;
   private readonly clientSecret: (clientId: string) => string;
   private readonly intakeServiceName: string;
+  private readonly sshIdentityAuthorization:
+    SshIdentityAuthorization | undefined;
+  private readonly sshAccessOf: SshAccessOf | undefined;
 
   constructor(dependencies: Dependencies) {
     this.executions = dependencies.executions;
@@ -384,6 +410,8 @@ export class CustodyComponent implements Service, CredentialRecords {
     this.bindingsNaming = dependencies.bindingsNaming;
     this.inboundsNaming = dependencies.inboundsNaming;
     this.intakeServiceName = dependencies.intakeServiceName;
+    this.sshIdentityAuthorization = dependencies.sshIdentityAuthorization;
+    this.sshAccessOf = dependencies.sshAccessOf;
     dependencies.health?.register(CUSTODY_HEALTH_NAME, () =>
       this.healthcheck(),
     );
@@ -428,7 +456,40 @@ export class CustodyComponent implements Service, CredentialRecords {
       request.claim === null
         ? null
         : this.claimedExecution(tx, request.claim, now);
+    if (request.kind === GrantKind.SshIdentity)
+      return this.sshIdentityGrant(tx, request, execution);
     return this.missionGrant(tx, request, execution);
+  }
+
+  private sshIdentityGrant(
+    tx: Transaction,
+    request: Extract<GrantRequest, { kind: typeof GrantKind.SshIdentity }>,
+    execution: CustodyExecution | null,
+  ): GrantOf<typeof GrantKind.SshIdentity> {
+    assert(tx.database.isTransaction);
+    assert(execution === null || request.claim !== null);
+    const { identity, subject, claim } = request;
+    if (
+      this.sshIdentityAuthorization === undefined ||
+      isMachineIdentity(identity) !== (claim !== null) ||
+      (subject.kind === SshIdentitySubjectKind.Draft &&
+        !isHumanIdentity(identity))
+    )
+      throw new FacilityError();
+    const authorized = this.sshIdentityAuthorization.sshIdentity(
+      tx,
+      identity,
+      subject,
+      claim,
+    );
+    const entry =
+      authorized.credential === null
+        ? undefined
+        : Object.hasOwn(this.platforms, authorized.platform)
+          ? this.platforms[authorized.platform]
+          : undefined;
+    if (entry === undefined || !isGenerated(entry)) throw new FacilityError();
+    return mintGrant({ kind: request.kind, execution, ...authorized });
   }
 
   private inboundGrant(
@@ -458,7 +519,10 @@ export class CustodyComponent implements Service, CredentialRecords {
 
   private missionGrant(
     tx: Transaction,
-    request: Exclude<GrantRequest, { kind: typeof GrantKind.Inbound }>,
+    request: Exclude<
+      GrantRequest,
+      { kind: typeof GrantKind.Inbound | typeof GrantKind.SshIdentity }
+    >,
     execution: CustodyExecution | null,
   ): Grant {
     assert(tx.database.isTransaction);
@@ -684,23 +748,28 @@ export class CustodyComponent implements Service, CredentialRecords {
   handover(
     tx: Transaction,
     identity: MachineIdentity,
-    execution: { executionId: string; runtimeIdentity: string },
+    claim: ExecutionClaim,
+    repositoryBindingIds: readonly string[],
     now: number,
   ): HandoverEnvelope {
     const row = this.executions.requireRunning(
       tx,
-      execution.executionId,
-      execution.runtimeIdentity,
+      claim.executionId,
+      claim.runtimeIdentity,
       now,
     );
     const materials: Material[] = [];
     try {
       for (const grant of this.authorize(tx, identity, row))
         materials.push(this.release(tx, grant, now));
+      const sshIdentities = repositoryBindingIds.map((bindingId) =>
+        this.sshIdentityOf(tx, identity, claim, bindingId, now),
+      );
       const envelope = sealMaterial(
         this.clientSecret(identity.clientId),
         row,
         materials,
+        sshIdentities,
         this.platforms,
       );
       for (const material of materials)
@@ -712,10 +781,53 @@ export class CustodyComponent implements Service, CredentialRecords {
           },
           "credential handover",
         );
+      for (const { binding_id, credential_id } of sshIdentities)
+        this.logger.info(
+          {
+            execution_id: row.execution_id,
+            worker_binding_id: row.worker_binding_id,
+            binding_id,
+            credential_id,
+          },
+          "ssh identity handover",
+        );
       return envelope;
     } finally {
       for (const material of materials) material.drop();
     }
+  }
+
+  private sshIdentityOf(
+    tx: Transaction,
+    identity: MachineIdentity,
+    claim: ExecutionClaim,
+    bindingId: string,
+    now: number,
+  ): HandoverSshIdentity {
+    if (this.sshAccessOf === undefined) throw new FacilityError();
+    const grant = this.authorizeOperation(
+      tx,
+      {
+        kind: GrantKind.SshIdentity,
+        identity,
+        subject: {
+          kind: SshIdentitySubjectKind.Binding,
+          binding_id: bindingId,
+        },
+        claim,
+      },
+      now,
+    );
+    const granted = grantFacts(grant);
+    assert.equal(granted.facts.binding_id, bindingId);
+    const material = this.release(tx, grant, now);
+    const credentialId = material.credential_id;
+    const { private_key } = this.sshAccessOf(tx, granted, material);
+    return {
+      binding_id: bindingId,
+      credential_id: credentialId,
+      private_key,
+    };
   }
 
   report(
@@ -926,7 +1038,11 @@ export class CustodyComponent implements Service, CredentialRecords {
         "Unsupported platform.",
       );
     const { probe } = entry;
-    if (probe === null || entry.secret_shape === SecretShape.OAuth)
+    if (
+      probe === null ||
+      entry.secret_shape === SecretShape.OAuth ||
+      isGenerated(entry)
+    )
       throw new OperationError(
         HttpStatus.BadRequest,
         CustodyErrorCode.CheckUnsupported,
@@ -998,12 +1114,8 @@ export class CustodyComponent implements Service, CredentialRecords {
         CustodyErrorCode.UnsupportedPlatform,
         "Unsupported platform.",
       );
-    if (entry.secret_shape === SecretShape.OAuth)
-      throw new OperationError(
-        HttpStatus.BadRequest,
-        CustodyErrorCode.UnsupportedEntry,
-        "Unsupported credential entry.",
-      );
+    if (entry.secret_shape === SecretShape.OAuth || isGenerated(entry))
+      throw unsupportedEntry();
     this.requireAvailableName(tx, name);
     const parsedSecret = secretSchemas[entry.secret_shape].safeParse(secret);
     if (!parsedSecret.success) throw invalidInput();
@@ -1144,6 +1256,7 @@ export class CustodyComponent implements Service, CredentialRecords {
     refuseForeign(tx, set, credentialName);
     const row = requireLive(tx, credentialName, body.expected_revision);
     const entry = ownedPlatform(set, row.platform)!;
+    if (isGenerated(entry)) throw unsupportedEntry();
     const secret = secretSchemas[entry.secret_shape].safeParse(body.secret);
     if (!secret.success) throw invalidInput();
     const current = parsedMetadata(row);
@@ -1179,6 +1292,7 @@ export class CustodyComponent implements Service, CredentialRecords {
     refuseForeign(tx, set, credentialName);
     const row = requireLive(tx, credentialName, body.expected_revision);
     const entry = ownedPlatform(set, row.platform)!;
+    if (isGenerated(entry)) throw unsupportedEntry();
     const metadata = validatedMetadata(entry, body.metadata);
     set.check_metadata?.(tx, {
       name: row.name,
@@ -1314,6 +1428,85 @@ export class CustodyComponent implements Service, CredentialRecords {
       )
       .run(id, name, platform, FIRST_REVISION, nonce, ciphertext, now);
     return id;
+  }
+
+  createGenerated(
+    tx: Transaction,
+    set: CredentialPlatformSet,
+    body: GeneratedCreate,
+    humanIdentity: string | undefined,
+  ): CredentialAnswer {
+    const { name, platform } = body;
+    const entry = ownedPlatform(set, platform);
+    assert(entry !== undefined && isGenerated(entry));
+    this.requireAvailableName(tx, name);
+    const { secret, metadata } = this.generatedRevision(
+      entry,
+      body.generate(name),
+    );
+    const id = createIdentity(CREDENTIAL_PREFIX);
+    const { nonce, ciphertext } = encrypt(
+      this.envelopeKey,
+      id,
+      platform,
+      secret,
+    );
+    tx.database
+      .prepare(
+        "INSERT INTO credential (id, name, platform, revision, nonce, ciphertext, metadata, created_at, ended_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL)",
+      )
+      .run(
+        id,
+        name,
+        platform,
+        FIRST_REVISION,
+        nonce,
+        ciphertext,
+        canonicalJSON(metadata),
+        Date.now(),
+      );
+    this.logger.info(
+      { credential_id: id, human_identity: humanIdentity },
+      "credential created",
+    );
+    return answerForName(tx, name)!;
+  }
+
+  rotateGenerated(
+    tx: Transaction,
+    set: CredentialPlatformSet,
+    credentialName: string,
+    body: GeneratedRotate,
+    humanIdentity: string | undefined,
+  ): CredentialAnswer {
+    refuseForeign(tx, set, credentialName);
+    const row = requireLive(tx, credentialName, body.expected_revision);
+    const entry = ownedPlatform(set, row.platform)!;
+    if (!isGenerated(entry)) throw unsupportedEntry();
+    const { secret, metadata } = this.generatedRevision(
+      entry,
+      body.generate(row.name),
+    );
+    const id = createIdentity(CREDENTIAL_PREFIX);
+    const now = Date.now();
+    this.insertRevision(tx, row, id, secret, metadata, now);
+    this.drainRevisions(tx, row.name, now);
+    this.logger.info(
+      { credential_id: id, human_identity: humanIdentity },
+      "credential rotated",
+    );
+    return answerForName(tx, row.name)!;
+  }
+
+  private generatedRevision(
+    entry: CredentialPlatform,
+    generated: GeneratedRevision,
+  ): { secret: unknown; metadata: Record<string, unknown> } {
+    assert(isGenerated(entry));
+    const secret = secretSchemas[entry.secret_shape].parse(generated.secret);
+    const metadata = validatedMetadata(entry, generated.metadata);
+    assert(metadata !== null);
+    return { secret, metadata };
   }
 
   start(): Promise<Error | null> {

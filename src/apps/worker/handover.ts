@@ -106,7 +106,9 @@ export async function takeHandover(input: {
       view: executionCredentialStore({ items: [item] }, report),
     }));
     keys.handover.fill(0);
+    const sshIdentities = payload.ssh_identities;
     return {
+      sshIdentities,
       credentials: {
         items: views.map(({ item, view }) => ({
           credential_id: item.credential_id,
@@ -118,6 +120,7 @@ export async function takeHandover(input: {
         },
         discard() {
           for (const { view } of views) view.discard();
+          sshIdentities.length = 0;
           keys.report.fill(0);
           context.cancel();
         },

@@ -1,11 +1,13 @@
-import { Diagnostic } from "../kernel/errors.ts";
+import { Diagnostic, OperationError } from "../kernel/errors.ts";
 import { ResourceFailureReason } from "../kernel/health.ts";
+import { HostKeyErrorCode, RepositoryErrorCode } from "./contract.ts";
+import { SshAgentErrorCode } from "./ssh-agent.ts";
 
 const GIT_FAILURE_LINES: readonly (readonly [RegExp, ResourceFailureReason])[] =
   [
     [
       /REMOTE HOST IDENTIFICATION HAS CHANGED/,
-      ResourceFailureReason.Unclassified,
+      ResourceFailureReason.HostKeyChanged,
     ],
     [/Host key verification failed/, ResourceFailureReason.HostKeyUnknown],
     [/Permission denied \(publickey/, ResourceFailureReason.KeyRefused],
@@ -28,7 +30,18 @@ export function classifyGitFailure(stderr: string): ResourceFailureReason {
   return ResourceFailureReason.Unclassified;
 }
 
+const REFUSAL_REASONS: ReadonlyMap<string, ResourceFailureReason> = new Map([
+  [SshAgentErrorCode.Failed, ResourceFailureReason.IdentityUnavailable],
+  [RepositoryErrorCode.SshKeyLegacy, ResourceFailureReason.IdentityUnavailable],
+  [HostKeyErrorCode.Unpinned, ResourceFailureReason.HostKeyUnknown],
+]);
+
 export function gitFailureReason(error: unknown): ResourceFailureReason {
+  const refusal =
+    error instanceof Diagnostic || error instanceof OperationError
+      ? REFUSAL_REASONS.get(error.code)
+      : undefined;
+  if (refusal !== undefined) return refusal;
   if (!(error instanceof Diagnostic) || !(error.cause instanceof Error))
     return ResourceFailureReason.Unclassified;
   return classifyGitFailure(error.cause.message);

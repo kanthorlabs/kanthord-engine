@@ -15,7 +15,6 @@ import { workerOperations } from "../../worker/contract.ts";
 import { threadDataSchema } from "../worker/thread-data.ts";
 import { until } from "./cli-support.ts";
 import {
-  FAKE_SSH_IDENTITY,
   gatewayFixture,
   humanCaller,
   provisionRepositoryCredentials,
@@ -93,7 +92,6 @@ test("a worker thread registers its worker unit through the port and the invocat
   const fixture = await gatewayFixture(t, {
     repositoryConnector: {
       gitLsRemote: async () => {},
-      resolveSshIdentity: async () => FAKE_SSH_IDENTITY,
     },
   });
   await provisionRepositoryCredentials(fixture);

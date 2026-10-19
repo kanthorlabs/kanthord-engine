@@ -23,27 +23,24 @@ import {
 import { AUTHORIZATION_HEADER } from "../kernel/probe.ts";
 import { IN_MEMORY_DATABASE, Store } from "../kernel/store.ts";
 import { LLM_PLATFORMS } from "../llm/index.ts";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import {
-  repositoryOperations,
-  SshDiscoverState,
-  type SshDiscoverAnswer,
-} from "./contract.ts";
-import { SshErrorCode } from "./ssh-identity.ts";
+import { repositoryOperations } from "./contract.ts";
 import {
   CAPABILITY_RATE_LIMIT_READ,
+  CAPABILITY_SSH_IDENTITY,
   GITHUB_RATE_LIMIT_URL,
   Platform,
   probeGitHub,
   REPOSITORY_PLATFORMS,
 } from "./credential-platform.ts";
-import {
-  RepositoryCredentials,
-  type CredentialDependencies,
-} from "./credential.ts";
+import { RepositoryCredentials } from "./credential.ts";
 import { INTAKE_SERVICE_NAME } from "../intake/contract.ts";
+import { decrypt, encrypt } from "../custody/envelope.ts";
+import { createIdentity } from "../kernel/identity.ts";
+import { temporary } from "../kernel/test-support.ts";
+import { canonicalJSON } from "../kernel/json.ts";
+import { generateSshKey, sshFingerprintOf, sshPublicKeyOf } from "./ssh-key.ts";
 
 const SECRET = "test_private-github-token";
 const FIRST_REVISION = 1;
@@ -70,12 +67,9 @@ const BINDINGS_ANSWER = [
 function fixture(
   t: TestContext,
   logger: Logger = pino({ enabled: false }),
-  ssh: Pick<
-    CredentialDependencies,
-    "resolveSshIdentity" | "sshConfigPath"
-  > = {},
+  database = IN_MEMORY_DATABASE,
 ) {
-  const store = new Store(IN_MEMORY_DATABASE);
+  const store = new Store(database);
   t.after(() => store.close());
   store.migrate([
     { service: CUSTODY_SERVICE_NAME, migrations: custodyMigrations },
@@ -115,7 +109,6 @@ function fixture(
       namings.push(name);
       return BINDINGS;
     },
-    ...ssh,
   });
   const registry = new OperationRegistry();
   component.declare(registry);
@@ -181,9 +174,9 @@ test("platform list answers github and ssh", (t) => {
         },
         {
           platform: "ssh",
-          secret_shape: SecretShape.None,
+          secret_shape: SecretShape.SshKey,
           login_modes: [],
-          metadata_fields: ["host", "hostname", "identity_file"],
+          metadata_fields: ["public_key", "fingerprint"],
           verifiable: true,
         },
       ],
@@ -602,28 +595,6 @@ test("verify takes no body and no mutation key", () => {
   );
 });
 
-const ALIAS = "kanthorlabs.github.com";
-const PIN = {
-  host: ALIAS,
-  hostname: "ssh.github.com",
-  port: 443,
-  identity_file: "~/.ssh/id_kanthorlabs",
-};
-const PINNED_IDENTITY = {
-  hostname: PIN.hostname,
-  port: PIN.port,
-  identityFiles: [PIN.identity_file],
-  identitiesOnly: true,
-};
-
-function sshCreate(name: string, metadata: unknown = PIN) {
-  return {
-    params: {},
-    query: {},
-    body: { name, platform: "ssh", metadata, secret: {} },
-  };
-}
-
 async function rejectsWith(
   promise: unknown,
   status: number,
@@ -639,189 +610,293 @@ async function rejectsWith(
   });
 }
 
-test("an ssh record pins the resolved identity and refuses an ambiguous or drifted resolution", async (t) => {
-  let identity = PINNED_IDENTITY;
-  const hosts: string[] = [];
-  const f = fixture(t, undefined, {
-    resolveSshIdentity: async (host) => {
-      hosts.push(host);
-      return identity;
-    },
-  });
-  const created = (await f.invoke(
-    repositoryOperations.create,
-    sshCreate("kanthorlabs-ssh"),
-  )) as CredentialAnswer;
-  assert.equal(created.platform, Platform.Ssh);
-  assert.deepEqual(created.revisions[0]?.metadata, PIN);
-  assert.deepEqual(hosts, [ALIAS]);
-  identity = { ...PINNED_IDENTITY, identitiesOnly: false };
-  await rejectsWith(
-    f.invoke(repositoryOperations.create, sshCreate("ambiguous")),
-    HttpStatus.BadRequest,
-    SshErrorCode.IdentityAmbiguous,
-    { host: ALIAS, key: "identitiesonly" },
-  );
-  identity = {
-    ...PINNED_IDENTITY,
-    identityFiles: [PIN.identity_file, "~/.ssh/id_rsa"],
-  };
-  await rejectsWith(
-    f.invoke(repositoryOperations.create, sshCreate("ambiguous")),
-    HttpStatus.BadRequest,
-    SshErrorCode.IdentityAmbiguous,
-    { host: ALIAS, key: "identityfile" },
-  );
-  identity = { ...PINNED_IDENTITY, port: 22, hostname: "github.com" };
-  await rejectsWith(
-    f.invoke(repositoryOperations.create, sshCreate("drifted")),
-    HttpStatus.BadRequest,
-    SshErrorCode.Drift,
-    { host: ALIAS, keys: ["hostname", "port"] },
-  );
-  const repinned = (await f.invoke(repositoryOperations.update_metadata, {
-    params: { credential_name: "kanthorlabs-ssh" },
+const SSH_NAME = "deploy";
+const OPENSSH_LABEL = "OPENSSH PRIVATE KEY";
+const UNSUPPORTED_ENTRY_CODE = "credential.entry.unsupported";
+const CHECK_UNSUPPORTED_CODE = "credential.check.unsupported";
+const NAME_CONFLICT_CODE = "credential.name.conflict";
+const REVISION_CONFLICT_CODE = "credential.revision.conflict";
+const SSH_PUBLIC_KEY_PATTERN = /^ssh-ed25519 [A-Za-z0-9+/]+=* kanthord-deploy$/;
+const ARMOR_LINES = 2;
+const NEXT_REVISION = FIRST_REVISION + 1;
+const NO_LINES = 0;
+const ONE_FILE = 1;
+const SSH_KEY_CREATE_PATH = "/api/repository/credential/ssh/key";
+const SSH_KEY_ROTATE_PATH =
+  "/api/repository/credential/:credential_name/ssh/key";
+
+function sshKeyCreate(name = SSH_NAME) {
+  return { params: {}, query: {}, body: { name } };
+}
+
+function sshKeyRotate(expected_revision: number, name = SSH_NAME) {
+  return {
+    params: { credential_name: name },
     query: {},
-    body: {
-      expected_revision: FIRST_REVISION,
-      metadata: { ...PIN, hostname: "github.com", port: 22 },
-    },
-  })) as CredentialAnswer;
-  assert.equal(repinned.revisions[0]?.revision, FIRST_REVISION + ONE_CALL);
-  await rejectsWith(
-    f.invoke(repositoryOperations.rotate, {
-      params: { credential_name: "kanthorlabs-ssh" },
-      query: {},
-      body: {
-        expected_revision: FIRST_REVISION + ONE_CALL,
-        secret: {},
-        metadata: PIN,
-      },
-    }),
-    HttpStatus.BadRequest,
-    SshErrorCode.Drift,
-  );
-});
+    body: { expected_revision },
+  };
+}
 
-test("the ssh probe observes a pin that does not parse as unclassified", async () => {
-  const observed: Array<[string, string]> = [];
-  const status = await REPOSITORY_PLATFORMS[Platform.Ssh].probe!(
-    {},
-    { host: "-kanthord-failure-reason" },
-    background,
-    (reason, failureReason) => void observed.push([reason, failureReason]),
-  );
-  assert.equal(status, ResourceStatus.Unhealthy);
-  assert.equal(observed.length, ONE_CALL);
-  assert.equal(observed[0]![1], ResourceFailureReason.Unclassified);
-});
+function storedPrivateKey(store: Store, name = SSH_NAME): string {
+  const row = store.database
+    .prepare(
+      "SELECT id, platform, nonce, ciphertext FROM credential WHERE name = ? AND ended_at IS NULL ORDER BY revision DESC LIMIT 1",
+    )
+    .get(name) as {
+    id: string;
+    platform: string;
+    nonce: Buffer;
+    ciphertext: Buffer;
+  };
+  const secret = decrypt(
+    Buffer.alloc(32, 7),
+    row.id,
+    row.platform,
+    row.nonce,
+    row.ciphertext,
+  ) as { private_key: string };
+  return secret.private_key;
+}
 
-test("an ssh record takes an empty secret and the name ssh is reserved", async (t) => {
-  const f = fixture(t, undefined, {
-    resolveSshIdentity: async () => PINNED_IDENTITY,
-  });
-  for (const input of [
-    {
-      ...sshCreate("secret"),
-      body: { ...sshCreate("secret").body, secret: { key: SECRET } },
-    },
-    sshCreate("ssh"),
-  ])
-    await rejectsWith(
-      f.invoke(repositoryOperations.create, input),
-      HttpStatus.BadRequest,
-      "credential.input.invalid",
+function keyBodyLines(privateKey: string): string[] {
+  return privateKey.trim().split("\n").slice(1, -1);
+}
+
+const LEGACY_SSH_METADATA = {
+  host: "kanthorlabs.github.com",
+  hostname: "ssh.github.com",
+  port: 443,
+  identity_file: "~/.ssh/id_kanthorlabs",
+};
+
+function insertLegacy(store: Store, name = SSH_NAME): void {
+  const id = createIdentity("credential");
+  const { nonce, ciphertext } = encrypt(Buffer.alloc(32, 7), id, "ssh", {});
+  store.database
+    .prepare(
+      "INSERT INTO credential (id, name, platform, revision, nonce, ciphertext, metadata, created_at, ended_at) VALUES (?, ?, 'ssh', 1, ?, ?, ?, ?, NULL)",
+    )
+    .run(
+      id,
+      name,
+      nonce,
+      ciphertext,
+      canonicalJSON(LEGACY_SSH_METADATA),
+      Date.now(),
     );
-});
+}
 
-test("ssh discover lists the concrete aliases of a git platform with their state", async (t) => {
-  const directory = mkdtempSync(join(tmpdir(), "kanthord-ssh-"));
-  t.after(() => rmSync(directory, { recursive: true, force: true }));
-  const sshConfigPath = join(directory, "config");
-  writeFileSync(
-    sshConfigPath,
-    [
-      "Host *",
-      "  ServerAliveInterval 30",
-      "Host github.com",
-      "  IdentityFile ~/.ssh/id_ed25519",
-      `Host ${ALIAS} pinned.github.com # work`,
-      "Host acme.gitlab.com",
-      "Host internal !skip",
-      "Host broken.github.com",
-    ].join("\n"),
-  );
-  const identities: Record<string, typeof PINNED_IDENTITY> = {
-    "github.com": {
-      hostname: "github.com",
-      port: 22,
-      identityFiles: ["~/.ssh/id_ed25519"],
-      identitiesOnly: false,
-    },
-    [ALIAS]: PINNED_IDENTITY,
-    "pinned.github.com": PINNED_IDENTITY,
-    "acme.gitlab.com": { ...PINNED_IDENTITY, hostname: "gitlab.com", port: 22 },
-    internal: { ...PINNED_IDENTITY, hostname: "10.0.0.1" },
+function capturedLogger(lines: string[]): Logger {
+  return pino({ level: "info" }, { write: (line: string) => lines.push(line) });
+}
+
+test("ssh_key_create answers the record with the derived public key and fingerprint and no private key", async (t) => {
+  const lines: string[] = [];
+  const f = fixture(t, capturedLogger(lines));
+  const created = (await f.invoke(
+    repositoryOperations.ssh_key_create,
+    sshKeyCreate(),
+  )) as CredentialAnswer;
+  assert.equal(created.name, SSH_NAME);
+  assert.equal(created.platform, Platform.Ssh);
+  assert.equal(created.revisions.length, FIRST_REVISION);
+  const metadata = created.revisions[0]!.metadata as {
+    public_key: string;
+    fingerprint: string;
   };
-  const f = fixture(t, undefined, {
-    sshConfigPath,
-    resolveSshIdentity: async (host) => {
-      const identity = identities[host];
-      if (!identity) throw new Error("ssh -G failed");
-      return identity;
-    },
-  });
-  await f.invoke(repositoryOperations.create, {
-    ...sshCreate("pinned"),
-    body: {
-      ...sshCreate("pinned").body,
-      metadata: { ...PIN, host: "pinned.github.com" },
-    },
-  });
-  const answer = (await f.invoke(repositoryOperations.ssh_discover, {
-    params: {},
-    query: {},
-    body: null,
-  })) as SshDiscoverAnswer;
-  assert.deepEqual(answer.items, [
-    {
-      host: "github.com",
-      hostname: "github.com",
-      port: 22,
-      identity_file: null,
-      state: SshDiscoverState.Refused,
-      reason: SshErrorCode.IdentityAmbiguous,
-    },
-    { ...PIN, state: SshDiscoverState.Ready, reason: null },
-    {
-      ...PIN,
-      host: "pinned.github.com",
-      state: SshDiscoverState.Present,
-      reason: null,
-    },
-    {
-      host: "acme.gitlab.com",
-      hostname: "gitlab.com",
-      port: 22,
-      identity_file: PIN.identity_file,
-      state: SshDiscoverState.Ready,
-      reason: null,
-    },
-  ]);
+  assert.deepEqual(Object.keys(metadata).sort(), ["fingerprint", "public_key"]);
+  assert.match(metadata.public_key, SSH_PUBLIC_KEY_PATTERN);
+  assert.equal(metadata.fingerprint, sshFingerprintOf(metadata.public_key));
+  const privateKey = storedPrivateKey(f.store);
+  assert.equal(sshPublicKeyOf(privateKey), metadata.public_key);
+  const answer = JSON.stringify(created);
+  const logged = lines.join("");
+  assert.ok(lines.length > NO_LINES);
+  for (const text of [answer, logged]) {
+    assert.ok(!text.includes(OPENSSH_LABEL));
+    for (const line of keyBodyLines(privateKey))
+      assert.ok(!text.includes(line));
+  }
 });
 
-test("ssh discover refuses an unreadable configuration", async (t) => {
-  const f = fixture(t, undefined, {
-    sshConfigPath: join(tmpdir(), "kanthord-absent-ssh-config"),
-    resolveSshIdentity: async () => PINNED_IDENTITY,
-  });
-  await rejectsWith(
-    f.invoke(repositoryOperations.ssh_discover, {
-      params: {},
+test("ssh_key_create refuses a taken name and the reserved name ssh, and is a mutation", async (t) => {
+  const f = fixture(t);
+  await f.invoke(repositoryOperations.ssh_key_create, sshKeyCreate());
+  fails(
+    () => f.invoke(repositoryOperations.ssh_key_create, sshKeyCreate()),
+    HttpStatus.Conflict,
+    NAME_CONFLICT_CODE,
+  );
+  fails(
+    () => f.invoke(repositoryOperations.ssh_key_create, sshKeyCreate("ssh")),
+    HttpStatus.BadRequest,
+    "credential.input.invalid",
+  );
+  assert.equal(repositoryOperations.ssh_key_create.mutation, true);
+  assert.equal(repositoryOperations.ssh_key_rotate.mutation, true);
+  assert.equal(repositoryOperations.ssh_key_create.path, SSH_KEY_CREATE_PATH);
+  assert.equal(repositoryOperations.ssh_key_rotate.path, SSH_KEY_ROTATE_PATH);
+});
+
+test("ssh_key_rotate refuses a stale revision, inserts a new key and drains the older revision", async (t) => {
+  const f = fixture(t);
+  const created = (await f.invoke(
+    repositoryOperations.ssh_key_create,
+    sshKeyCreate(),
+  )) as CredentialAnswer;
+  const first = storedPrivateKey(f.store);
+  fails(
+    () =>
+      f.invoke(
+        repositoryOperations.ssh_key_rotate,
+        sshKeyRotate(NEXT_REVISION),
+      ),
+    HttpStatus.Conflict,
+    REVISION_CONFLICT_CODE,
+  );
+  const rotated = (await f.invoke(
+    repositoryOperations.ssh_key_rotate,
+    sshKeyRotate(FIRST_REVISION),
+  )) as CredentialAnswer;
+  assert.equal(rotated.revisions[0]!.revision, NEXT_REVISION);
+  assert.notDeepEqual(
+    rotated.revisions[0]!.metadata,
+    created.revisions[0]!.metadata,
+  );
+  assert.notEqual(rotated.revisions[1]!.ended_at, null);
+  assert.notEqual(storedPrivateKey(f.store), first);
+  assert.equal(
+    sshPublicKeyOf(storedPrivateKey(f.store)),
+    (rotated.revisions[0]!.metadata as { public_key: string }).public_key,
+  );
+});
+
+test("a legacy ssh record verifies identity_unavailable and rotates to a generated key", async (t) => {
+  const f = fixture(t);
+  insertLegacy(f.store);
+  const verify = () =>
+    f.invoke(repositoryOperations.verify, {
+      params: { credential_name: SSH_NAME },
       query: {},
       body: null,
-    }),
-    422,
-    SshErrorCode.ConfigUnreadable,
+    });
+  assert.deepEqual(await verify(), {
+    status: ResourceStatus.Unhealthy,
+    capability: CAPABILITY_SSH_IDENTITY,
+    failure_reason: ResourceFailureReason.IdentityUnavailable,
+  });
+  const rotated = (await f.invoke(
+    repositoryOperations.ssh_key_rotate,
+    sshKeyRotate(FIRST_REVISION),
+  )) as CredentialAnswer;
+  assert.match(
+    (rotated.revisions[0]!.metadata as { public_key: string }).public_key,
+    SSH_PUBLIC_KEY_PATTERN,
   );
+  assert.notEqual(rotated.revisions[1]!.ended_at, null);
+  assert.deepEqual(await verify(), {
+    status: ResourceStatus.Healthy,
+    capability: CAPABILITY_SSH_IDENTITY,
+    failure_reason: null,
+  });
+});
+
+test("the ssh probe answers identity_unavailable for a public key that differs from the stored one", async () => {
+  const key = generateSshKey(SSH_NAME);
+  const other = generateSshKey("other");
+  const observed: Array<[string, string]> = [];
+  const probe = REPOSITORY_PLATFORMS[Platform.Ssh].probe!;
+  assert.equal(
+    await probe(
+      { private_key: key.private_key },
+      { public_key: key.public_key, fingerprint: key.fingerprint },
+      background,
+    ),
+    ResourceStatus.Healthy,
+  );
+  assert.equal(
+    await probe(
+      { private_key: key.private_key },
+      { public_key: other.public_key, fingerprint: other.fingerprint },
+      background,
+      (reason, failureReason) => void observed.push([reason, failureReason]),
+    ),
+    ResourceStatus.Unhealthy,
+  );
+  assert.equal(observed.length, ONE_CALL);
+  assert.equal(observed[0]![1], ResourceFailureReason.IdentityUnavailable);
+  for (const line of keyBodyLines(key.private_key))
+    assert.ok(!observed[0]![0].includes(line));
+});
+
+test("the generic create, rotate, metadata edit and check refuse the platform ssh", async (t) => {
+  const f = fixture(t);
+  const key = generateSshKey(SSH_NAME);
+  const secret = { private_key: key.private_key };
+  const metadata = { public_key: key.public_key, fingerprint: key.fingerprint };
+  fails(
+    () =>
+      f.invoke(repositoryOperations.create, {
+        params: {},
+        query: {},
+        body: { name: SSH_NAME, platform: "ssh", metadata, secret },
+      }),
+    HttpStatus.BadRequest,
+    UNSUPPORTED_ENTRY_CODE,
+  );
+  await f.invoke(repositoryOperations.ssh_key_create, sshKeyCreate());
+  fails(
+    () =>
+      f.invoke(repositoryOperations.rotate, {
+        params: { credential_name: SSH_NAME },
+        query: {},
+        body: { expected_revision: FIRST_REVISION, secret },
+      }),
+    HttpStatus.BadRequest,
+    UNSUPPORTED_ENTRY_CODE,
+  );
+  fails(
+    () =>
+      f.invoke(repositoryOperations.update_metadata, {
+        params: { credential_name: SSH_NAME },
+        query: {},
+        body: { expected_revision: FIRST_REVISION, metadata },
+      }),
+    HttpStatus.BadRequest,
+    UNSUPPORTED_ENTRY_CODE,
+  );
+  await rejectsWith(
+    f.invoke(repositoryOperations.check, {
+      params: {},
+      query: {},
+      body: { platform: "ssh", metadata, secret },
+    }),
+    HttpStatus.BadRequest,
+    CHECK_UNSUPPORTED_CODE,
+  );
+});
+
+test("the raw database file holds no text of a generated SSH key", async (t) => {
+  const directory = temporary(t);
+  const path = join(directory, "kanthord.db");
+  const f = fixture(t, undefined, path);
+  await f.invoke(repositoryOperations.ssh_key_create, sshKeyCreate());
+  const first = storedPrivateKey(f.store);
+  await f.invoke(
+    repositoryOperations.ssh_key_rotate,
+    sshKeyRotate(FIRST_REVISION),
+  );
+  const second = storedPrivateKey(f.store);
+  const files = readdirSync(directory).map((name) =>
+    readFileSync(join(directory, name)).toString("latin1"),
+  );
+  assert.ok(files.length >= ONE_FILE);
+  for (const privateKey of [first, second]) {
+    const body = keyBodyLines(privateKey);
+    assert.ok(body.length >= ARMOR_LINES);
+    for (const raw of files) {
+      assert.ok(!raw.includes(OPENSSH_LABEL));
+      for (const line of body) assert.ok(!raw.includes(line));
+    }
+  }
 });

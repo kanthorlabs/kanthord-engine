@@ -50,8 +50,10 @@ import {
 import {
   COVERING_WORKER_BINDINGS,
   enableCoveringAgents,
-  FAKE_SSH_CREDENTIAL_BODY,
-  FAKE_SSH_IDENTITY,
+  FAKE_GITHUB_HOST_KEY,
+  FAKE_GITHUB_HOST_KEY_FINGERPRINT,
+  FAKE_SSH_CREDENTIAL,
+  FAKE_SSH_HOST,
   gatewayFixture,
 } from "./test-support.ts";
 import { SHIPPED_TEMPLATES } from "../../agent/prompt-templates.ts";
@@ -150,7 +152,9 @@ for (const adapter of ["direct", "http"] as const) {
       binding_id: answer.repositories[0]!.binding_id,
       name: "repo",
       address: "git@github.com:owner/repo.git",
-      ssh_identity: FAKE_SSH_CREDENTIAL_BODY.metadata,
+      ssh_host_key: {
+        known_hosts: `${FAKE_SSH_HOST} ${FAKE_GITHUB_HOST_KEY}\n`,
+      },
       strategy: { base_branch: "main" },
       project_prompt: "Follow repository conventions.",
       working_layer: WORKING_LAYER_ALL_ON,
@@ -378,7 +382,6 @@ async function setup(
   const f = await gatewayFixture(t, {
     repositoryConnector: {
       gitLsRemote: async () => {},
-      resolveSshIdentity: async () => FAKE_SSH_IDENTITY,
     },
     oauthProviders: oauth ? () => [offlineProvider(oauth)] : undefined,
   });
@@ -455,20 +458,17 @@ async function setup(
     }),
   );
   completed(
-    await call(repositoryOperations.create, {
+    await call(repositoryOperations.ssh_key_create, {
       params: {},
       query: {},
-      body: {
-        name: "github-ssh",
-        platform: "ssh",
-        metadata: {
-          host: "github.com",
-          hostname: "github.com",
-          port: 22,
-          identity_file: "~/.ssh/id_rsa",
-        },
-        secret: {},
-      },
+      body: { name: FAKE_SSH_CREDENTIAL },
+    }),
+  );
+  completed(
+    await call(repositoryOperations.host_key_pin, {
+      params: { host: FAKE_SSH_HOST },
+      query: {},
+      body: { fingerprint: FAKE_GITHUB_HOST_KEY_FINGERPRINT },
     }),
   );
   await enableCoveringAgents(
@@ -496,7 +496,7 @@ async function setup(
               available: true,
               platform: "github",
               address: "git@github.com:owner/repo.git",
-              ssh_credential: "github-ssh",
+              ssh_credential: FAKE_SSH_CREDENTIAL,
               strategy: { base_branch: "main" },
               credential: "github",
               project_prompt: "Follow repository conventions.",

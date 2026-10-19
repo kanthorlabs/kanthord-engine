@@ -7,6 +7,7 @@ import { writePrivate } from "../../kernel/files.ts";
 import { temporary } from "../../kernel/test-support.ts";
 import { environment, kanthord, kanthordTerminal } from "./cli-support.ts";
 import {
+  createFakeSshCredential,
   fakeS3,
   gatewayFixture,
   COVERING_WORKER_BINDINGS,
@@ -33,12 +34,6 @@ export async function workerAcceptance(
     serverSlotLimit: options.slotLimit,
     repositoryConnector: {
       gitLsRemote: async () => {},
-      resolveSshIdentity: async () => ({
-        hostname: "github.com",
-        port: 22,
-        identityFiles: ["~/.ssh/id_acceptance"],
-        identitiesOnly: true,
-      }),
     },
   });
   const directory = temporary(t);
@@ -70,17 +65,7 @@ export async function workerAcceptance(
       metadata: null,
       secret: { key },
     });
-  await write(["repository", "credential", "create"], {
-    name: "github-ssh",
-    platform: "ssh",
-    metadata: {
-      host: "github.com",
-      hostname: "github.com",
-      port: 22,
-      identity_file: "~/.ssh/id_acceptance",
-    },
-    secret: {},
-  });
+  await createFakeSshCredential(read);
   await enableCoveringAgents(human, {
     platform: "anthropic",
     credential: "anthro-1",

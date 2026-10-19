@@ -18,7 +18,7 @@ import {
   workerOperations,
 } from "../../worker/contract.ts";
 import { environment, kanthord, kanthordTerminal } from "./cli-support.ts";
-import { FAKE_SSH_IDENTITY, gatewayFixture } from "./test-support.ts";
+import { gatewayFixture } from "./test-support.ts";
 
 const SUCCESS = 0;
 const FAILURE = 1;
@@ -140,7 +140,6 @@ async function setup(t: TestContext) {
   const fixture = await gatewayFixture(t, {
     repositoryConnector: {
       gitLsRemote: async () => {},
-      resolveSshIdentity: async () => FAKE_SSH_IDENTITY,
     },
   });
   const directory = temporary(t);

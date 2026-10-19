@@ -25,8 +25,6 @@ import {
 } from "../kernel/operation.ts";
 
 export const REPOSITORY_COMPONENT_NAME = "repository";
-export const SSH_RESOLVE_FAILED_STATUS = 422;
-export const SSH_CONFIG_UNREADABLE_STATUS = 422;
 export const HOST_KEY_SCAN_FAILED_STATUS = 422;
 export const HOST_KEY_FINGERPRINT_PATTERN = /^SHA256:[A-Za-z0-9+/]{43}$/;
 
@@ -36,12 +34,22 @@ export const HostKeySource = {
 } as const;
 export type HostKeySource = (typeof HostKeySource)[keyof typeof HostKeySource];
 
+export const RepositoryErrorCode = {
+  SshKeyLegacy: "repository.credential.ssh_key_legacy",
+} as const;
+
 export const HostKeyErrorCode = {
   HostUnsupported: "repository.host_key.host_unsupported",
   ScanFailed: "repository.host_key.scan_failed",
   Changed: "repository.host_key.changed",
   Unpinned: "repository.host_key.unpinned",
 } as const;
+
+export interface SshAccess {
+  private_key: string;
+  public_key: string;
+  known_hosts: string;
+}
 
 export const RepositoryFileState = {
   Present: "present",
@@ -77,28 +85,6 @@ export type RepositoryCredentialAnswer = z.infer<
   typeof repositoryCredentialAnswerSchema
 >;
 
-export const SshDiscoverState = {
-  Ready: "ready",
-  Refused: "refused",
-  Present: "present",
-} as const;
-export type SshDiscoverState =
-  (typeof SshDiscoverState)[keyof typeof SshDiscoverState];
-
-export const sshDiscoverAnswerSchema = z.strictObject({
-  items: z.array(
-    z.strictObject({
-      host: z.string(),
-      hostname: z.string(),
-      port: z.number().int(),
-      identity_file: z.string().nullable(),
-      state: z.enum(SshDiscoverState),
-      reason: z.string().nullable(),
-    }),
-  ),
-});
-export type SshDiscoverAnswer = z.infer<typeof sshDiscoverAnswerSchema>;
-
 export const hostKeyScanAnswerSchema = z.strictObject({
   host: z.string(),
   public_key: z.string(),
@@ -126,6 +112,11 @@ const hostKeyPinBodySchema = z.strictObject({
   fingerprint: z.string().regex(HOST_KEY_FINGERPRINT_PATTERN),
 });
 const HOST_KEY_MAX_BODY_BYTES = 1024;
+const SSH_KEY_MAX_BODY_BYTES = 1024;
+const sshKeyCreateBodySchema = z.strictObject({ name: z.string() });
+const sshKeyRotateBodySchema = z.strictObject({
+  expected_revision: z.number().int().positive(),
+});
 
 export const repositoryOperations = {
   platform_list: {
@@ -167,7 +158,6 @@ export const repositoryOperations = {
       body: credentialCreateSchema,
     }),
     output: credentialAnswerSchema,
-    errors: [SSH_RESOLVE_FAILED_STATUS],
     description: "Create a repository credential with its first revision.",
   },
   list: {
@@ -231,7 +221,6 @@ export const repositoryOperations = {
       body: credentialRotateBodySchema,
     }),
     output: credentialAnswerSchema,
-    errors: [SSH_RESOLVE_FAILED_STATUS],
     description: "Rotate a repository credential secret into a new revision.",
   },
   update_metadata: {
@@ -253,7 +242,6 @@ export const repositoryOperations = {
       body: credentialUpdateMetadataBodySchema,
     }),
     output: credentialAnswerSchema,
-    errors: [SSH_RESOLVE_FAILED_STATUS],
     description: "Update repository credential metadata in a new revision.",
   },
   revoke: {
@@ -338,27 +326,49 @@ export const repositoryOperations = {
     output: credentialCheckAnswerSchema,
     description: "Verify one stored repository credential record.",
   },
-  ssh_discover: {
-    id: "repository.credential.ssh_discover",
+  ssh_key_create: {
+    id: "repository.credential.ssh_key_create",
     service: REPOSITORY_COMPONENT_NAME,
-    method: HttpMethod.Get,
-    path: "/api/repository/credential/ssh/discover",
+    method: HttpMethod.Post,
+    path: "/api/repository/credential/ssh/key",
     access: AccessPolicy.Human,
     store: StoreName.Operational,
     lifetime: OperationLifetime.Unary,
     timeoutMs: CREDENTIAL_TIMEOUT_MS,
-    mutation: false,
-    body: false,
+    mutation: true,
+    body: true,
+    maxBodyBytes: SSH_KEY_MAX_BODY_BYTES,
     status: HttpStatus.OK,
-    errors: [SSH_CONFIG_UNREADABLE_STATUS],
     input: z.strictObject({
       params: emptyParams,
       query: emptyQuery,
-      body: z.null(),
+      body: sshKeyCreateBodySchema,
     }),
-    output: sshDiscoverAnswerSchema,
+    output: credentialAnswerSchema,
     description:
-      "List the SSH aliases of ~/.ssh/config that resolve to a git platform host.",
+      "Generate an ed25519 SSH key on the server and store it as a new ssh credential.",
+  },
+  ssh_key_rotate: {
+    id: "repository.credential.ssh_key_rotate",
+    service: REPOSITORY_COMPONENT_NAME,
+    method: HttpMethod.Post,
+    path: "/api/repository/credential/:credential_name/ssh/key",
+    access: AccessPolicy.Human,
+    store: StoreName.Operational,
+    lifetime: OperationLifetime.Unary,
+    timeoutMs: CREDENTIAL_TIMEOUT_MS,
+    mutation: true,
+    body: true,
+    maxBodyBytes: SSH_KEY_MAX_BODY_BYTES,
+    status: HttpStatus.OK,
+    input: z.strictObject({
+      params: credentialParamsSchema,
+      query: emptyQuery,
+      body: sshKeyRotateBodySchema,
+    }),
+    output: credentialAnswerSchema,
+    description:
+      "Generate a new SSH key on the server and store it as the next revision of an ssh credential.",
   },
   host_key_list: {
     id: "repository.host_key.list",
