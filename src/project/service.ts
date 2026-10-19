@@ -669,7 +669,7 @@ export class ProjectService implements Service, ProjectBindings {
     );
     const end = Date.now() + BINDING_CHECK_TIMEOUT_MS;
     try {
-      const { address, ssh } = this.sshAccess(config.platform, config.address, {
+      const { address, ssh } = this.sshAccess(config.platform, {
         identity: this.identity,
         subject: { kind: SshIdentitySubjectKind.Binding, binding_id: id },
       });
@@ -770,7 +770,6 @@ export class ProjectService implements Service, ProjectBindings {
   ) {
     const addressEntry = await this.checkBindingAddress(
       config.platform,
-      config.address,
       release,
       context,
     );
@@ -791,7 +790,6 @@ export class ProjectService implements Service, ProjectBindings {
   }
   private async checkBindingAddress(
     platform: string,
-    address: string,
     release: SshRelease,
     context: Context,
   ) {
@@ -808,7 +806,7 @@ export class ProjectService implements Service, ProjectBindings {
       failure_reason: failureReason,
     });
     try {
-      const access = this.sshAccess(platform, address, release);
+      const access = this.sshAccess(platform, release);
       await this.repositoryConnector.gitLsRemote(
         access.address,
         deadline,
@@ -979,12 +977,7 @@ export class ProjectService implements Service, ProjectBindings {
         : new Map(),
     );
   }
-  private sshAccess(
-    platform: string,
-    address: string,
-    release: SshRelease,
-  ): ReleasedAccess {
-    refuseForeignHost(platform, address);
+  private sshAccess(platform: string, release: SshRelease): ReleasedAccess {
     return this.operationalStore.transaction((tx) => {
       const now = Date.now();
       const grant = this.custody.authorizeOperation(
@@ -993,6 +986,7 @@ export class ProjectService implements Service, ProjectBindings {
         now,
       );
       const granted = this.custody.grantFacts(grant);
+      refuseForeignHost(platform, granted.facts.address);
       const material = this.custody.release(tx, grant, now);
       const ssh = this.sshAccessOf(tx, granted, material);
       return { address: granted.facts.address, ssh };
@@ -1005,7 +999,7 @@ export class ProjectService implements Service, ProjectBindings {
   ): Promise<void> {
     const { context } = caller;
     throwIfCancelled(context);
-    const { address, ssh } = this.sshAccess(config.platform, config.address, {
+    const { address, ssh } = this.sshAccess(config.platform, {
       identity: callerIdentity(caller),
       subject: draftSubject(projectId, config),
     });
@@ -1445,7 +1439,7 @@ export class ProjectService implements Service, ProjectBindings {
             throwIfCancelled(context);
             let access: ReleasedAccess;
             try {
-              access = this.sshAccess(platform, address, {
+              access = this.sshAccess(platform, {
                 identity: this.identity,
                 subject: {
                   kind: SshIdentitySubjectKind.Binding,

@@ -183,6 +183,11 @@ function fakeCustody(
 ) {
   const releases: Release[] = [];
   const dropped: string[] = [];
+  const grantAddress: { value?: string } = {};
+  const requests = new WeakMap<
+    object,
+    { identity: CallerIdentity; subject: SshIdentitySubject }
+  >();
   const authorized = (tx: Transaction, subject: SshIdentitySubject) => {
     if (subject.kind === SshIdentitySubjectKind.Draft) {
       dependencies().custodySuitability(tx, {
@@ -210,19 +215,19 @@ function fakeCustody(
       assert.equal(request.kind, GrantKind.SshIdentity);
       assert.equal(request.claim, null);
       const granted = authorized(tx, request.subject);
-      releases.push({
-        identity: request.identity,
-        subject: request.subject,
-        credential: granted.credential,
-        address: granted.facts.address,
-        transaction: store.database.isTransaction,
-      });
-      return Object.freeze({
+      const address = grantAddress.value ?? granted.facts.address;
+      const grant = Object.freeze({
         kind: GrantKind.SshIdentity,
         platform: SSH_CREDENTIAL_PLATFORM,
         execution: null,
         ...granted,
-      }) as never;
+        facts: { ...granted.facts, address },
+      });
+      requests.set(grant, {
+        identity: request.identity,
+        subject: request.subject,
+      });
+      return grant as never;
     },
     grantFacts: <G extends Grant>(grant: G): GrantFacts<G> => ({
       project_id: grant.project_id,
@@ -232,7 +237,16 @@ function fakeCustody(
     release: (tx, grant): Material => {
       assert.ok(tx.database.isTransaction);
       assert.ok(grant.credential !== null);
+      assert.equal(grant.kind, GrantKind.SshIdentity);
+      const request = requests.get(grant);
+      assert.ok(request);
       const name = grant.credential;
+      releases.push({
+        ...request,
+        credential: name,
+        address: grant.facts.address,
+        transaction: store.database.isTransaction,
+      });
       return {
         credential_id: createIdentity("credential"),
         platform: SSH_CREDENTIAL_PLATFORM,
@@ -244,7 +258,7 @@ function fakeCustody(
       };
     },
   };
-  return { custody, releases, dropped };
+  return { custody, releases, dropped, grantAddress };
 }
 
 function fixture(t: TestContext, overrides: Partial<Dependencies> = {}) {
@@ -372,6 +386,7 @@ function fixture(t: TestContext, overrides: Partial<Dependencies> = {}) {
     secrets,
     releases: ssh.releases,
     dropped: ssh.dropped,
+    grantAddress: ssh.grantAddress,
   };
 }
 
@@ -4248,6 +4263,31 @@ test("binding.verify names each failure reason of the address and releases the k
           ],
     );
   }
+});
+
+test("binding.verify checks the host set on the granted address, not on the address of the config read", async (t) => {
+  const { f, sshCalls } = verifyFixture(t, "healthy", "healthy");
+  const project = f.store.transaction((tx) => {
+    const p = insertProject(tx, PROJECT_NAME);
+    persistBindings(tx, p.id, { [REPOSITORY_NAME]: repositoryBinding() });
+    return p;
+  });
+  const [binding] = f.store.transaction((tx) =>
+    Array.from(readCurrentBindingSet(tx, project.id).values()),
+  );
+  assert.ok(binding);
+  f.grantAddress.value = ALIAS_ADDRESS;
+  const result = await f.invokeAsync("binding.verify", {
+    project_id: project.id,
+    binding_id: binding.id,
+  });
+  assert.deepEqual(result.address, {
+    status: ResourceStatus.Unhealthy,
+    capability: RESOURCE_CAPABILITY_NETWORK_GIT_READ,
+    failure_reason: ResourceFailureReason.AddressInvalid,
+  });
+  assert.deepEqual(f.releases, []);
+  assert.deepEqual(sshCalls, []);
 });
 
 test("binding.verify propagates a credential record-verify refusal unchanged", async (t) => {
