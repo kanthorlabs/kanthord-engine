@@ -148,6 +148,9 @@ function unexpected(): never {
   throw new Error("Unexpected peer collaboration call.");
 }
 
+delete process.env.SSH_AUTH_SOCK;
+delete process.env.SSH_AGENT_PID;
+
 const SSH_KEY = generateSshKey("project");
 const PINNED_HOSTS = ["github.com", "gitlab.com"];
 const HOST_KEY =
@@ -1910,8 +1913,6 @@ test("a new binding releases the key of its SSH credential under the human draft
 });
 
 test("a write with a pinned host passes through the private agent of the released key to a local sshd", async (t) => {
-  delete process.env.SSH_AUTH_SOCK;
-  delete process.env.SSH_AGENT_PID;
   const sshd = await startTestSshd(t);
   const bare = await createBareRepository(t);
   await sshd.authorize(SSH_KEY.public_key);
