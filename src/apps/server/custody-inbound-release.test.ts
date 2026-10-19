@@ -17,8 +17,9 @@ import type { ServiceIdentity } from "../../kernel/caller.ts";
 import { mintServiceIdentity } from "../../kernel/service-mint.ts";
 import { MISSION_SERVICE_NAME } from "../../mission/contract.ts";
 import { REPOSITORY_PLATFORMS } from "../../repository/credential-platform.ts";
+import { sshKeyRevision } from "../../repository/credential.ts";
 import {
-  FAKE_SSH_CREDENTIAL_BODY,
+  FAKE_SSH_CREDENTIAL,
   TEST_PROJECT_ID,
   gatewayFixture,
 } from "./test-support.ts";
@@ -59,7 +60,16 @@ async function releaseFixture(t: TestContext) {
       { expected_revision: FIRST_REVISION, secret: { key: SECOND_KEY } },
       HUMAN,
     );
-    custody.create(tx, SET, FAKE_SSH_CREDENTIAL_BODY, HUMAN);
+    custody.createGenerated(
+      tx,
+      SET,
+      {
+        name: FAKE_SSH_CREDENTIAL,
+        platform: "ssh",
+        generate: sshKeyRevision,
+      },
+      HUMAN,
+    );
   });
   const authorize = (
     identity: ServiceIdentity,
@@ -139,7 +149,7 @@ test("a credential of another platform refuses the inbound grant", async (t) => 
   assert.throws(
     () =>
       h.authorize(mintServiceIdentity(INTAKE_SERVICE_NAME), {
-        credential: FAKE_SSH_CREDENTIAL_BODY.name,
+        credential: FAKE_SSH_CREDENTIAL,
       }),
     { status: 400, code: "credential.platform.mismatch" },
   );

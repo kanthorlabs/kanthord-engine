@@ -70,6 +70,7 @@ import {
   RepositoryComponent,
   repositoryMigrations,
   type GitWriter,
+  type HostKeySources,
 } from "../../repository/index.ts";
 import { GITHUB_API_VERSION } from "../../repository/github.ts";
 import {
@@ -272,6 +273,18 @@ export const FAKE_SSH_IDENTITY = {
   port: 22,
   identityFiles: ["~/.ssh/id_rsa"],
   identitiesOnly: true,
+};
+export const FAKE_SSH_CREDENTIAL = "github-ssh";
+export const FAKE_SSH_HOST = "github.com";
+export const FAKE_GITHUB_HOST_KEY =
+  "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl";
+export const FAKE_GITHUB_HOST_KEY_FINGERPRINT =
+  "SHA256:+DiY3wvvV6TuJJhbpZisF/zLDA0zPMSvHdkr4UvCOqU";
+export const FAKE_HOST_KEY_SOURCES: HostKeySources = {
+  githubMeta: async () => ({ ssh_keys: [FAKE_GITHUB_HOST_KEY] }),
+  keyscan: async (host) => {
+    throw new Error(`The test host key sources read no key of ${host}.`);
+  },
 };
 export const FAKE_SSH_CREDENTIAL_BODY = {
   name: "github-ssh",
@@ -496,7 +509,7 @@ export async function gatewayFixture(
     repositoryConnector: options.repositoryConnector,
     github: options.github,
     repositoryTransport: options.repositoryTransport,
-    hostKeySources: options.hostKeySources,
+    hostKeySources: options.hostKeySources ?? FAKE_HOST_KEY_SOURCES,
     oauthProviders: options.oauthProviders,
     loadModelRuntime: options.loadModelRuntime,
     bindings: options.machines?.project,
@@ -1730,10 +1743,7 @@ async function storageCredentials(cli: StorageCli, endpoint: string) {
     metadata: null,
     secret: { key: "test-secret" },
   });
-  await cli.write(
-    ["repository", "credential", "create"],
-    FAKE_SSH_CREDENTIAL_BODY,
-  );
+  await createFakeSshCredential(cli.read);
   await cli.write(["storage", "credential", "create"], {
     name: STORAGE_CREDENTIAL,
     platform: "s3",
@@ -1754,7 +1764,7 @@ function storageBindings(endpoint: string, available: boolean) {
         available: true,
         platform: "github",
         address: "git@github.com:owner/repo.git",
-        ssh_credential: FAKE_SSH_CREDENTIAL_BODY.name,
+        ssh_credential: FAKE_SSH_CREDENTIAL,
         credential: "github",
         strategy: { base_branch: "main" },
       },
@@ -1926,6 +1936,25 @@ const FIRST_BINDING_SET_VERSION = 1;
 const FIRST_MISSION_VERSION = 1;
 const SECOND_MISSION_VERSION = 2;
 
+export async function createFakeSshCredential(
+  read: <T>(args: string[]) => Promise<T>,
+): Promise<void> {
+  await read([
+    "repository",
+    "credential",
+    "ssh-key-create",
+    FAKE_SSH_CREDENTIAL,
+  ]);
+  await read([
+    "repository",
+    "host-key",
+    "pin",
+    FAKE_SSH_HOST,
+    "--fingerprint",
+    FAKE_GITHUB_HOST_KEY_FINGERPRINT,
+  ]);
+}
+
 export function humanCaller(
   fixture: Pick<
     Awaited<ReturnType<typeof gatewayFixture>>,
@@ -1964,14 +1993,14 @@ export async function provisionRepositoryCredentials(
       [SECRET_FIELD]: { key: "worker-project-token" },
     },
   });
-  await call(repositoryOperations.create, {
+  await call(repositoryOperations.ssh_key_create, {
     ...empty,
-    body: {
-      name: WORKER_PROJECT_SSH_CREDENTIAL,
-      platform: "ssh",
-      metadata: FAKE_SSH_CREDENTIAL_BODY.metadata,
-      [SECRET_FIELD]: {},
-    },
+    body: { name: WORKER_PROJECT_SSH_CREDENTIAL },
+  });
+  await call(repositoryOperations.host_key_pin, {
+    params: { host: FAKE_SSH_HOST },
+    query: {},
+    body: { fingerprint: FAKE_GITHUB_HOST_KEY_FINGERPRINT },
   });
 }
 

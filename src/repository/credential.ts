@@ -8,6 +8,7 @@ import {
   type CredentialCheckAnswer,
   type CredentialPlatformSet,
   type CredentialRecords,
+  type GeneratedRevision,
 } from "../custody/contract.ts";
 import { IdentityKind } from "../kernel/caller.ts";
 import { throwIfCancelled, type Context } from "../kernel/context.ts";
@@ -24,9 +25,9 @@ import {
   type SshDiscoverAnswer,
 } from "./contract.ts";
 import { Platform, REPOSITORY_PLATFORMS } from "./credential-platform.ts";
+import { generateSshKey } from "./ssh-key.ts";
 import {
   ambiguityOf,
-  assertPinned,
   configHosts,
   SshErrorCode,
   sshPinSchema,
@@ -58,6 +59,11 @@ const UTF8_ENCODING = "utf8";
 
 const PLATFORM_SET: CredentialPlatformSet = { platforms: REPOSITORY_PLATFORMS };
 
+export function sshKeyRevision(name: string): GeneratedRevision {
+  const { private_key, public_key, fingerprint } = generateSshKey(name);
+  return { secret: { private_key }, metadata: { public_key, fingerprint } };
+}
+
 function humanIdentity(caller: CallerContext): string | undefined {
   return caller.identity?.kind === IdentityKind.Human
     ? caller.identity.accountId
@@ -84,61 +90,72 @@ export class RepositoryCredentials {
     registry.register(repositoryOperations.platform_list, () =>
       credentialPlatformList(REPOSITORY_PLATFORMS),
     );
-    registry.register(repositoryOperations.create, (input, caller) => {
-      const commit = () =>
-        caller.commit((tx) =>
-          this.records.create(
-            tx,
-            PLATFORM_SET,
-            input.body,
-            humanIdentity(caller),
-          ),
-        );
-      return input.body.platform === Platform.Ssh
-        ? this.afterSshProof(input.body.metadata, caller.context, commit)
-        : commit();
-    });
+    registry.register(repositoryOperations.create, (input, caller) =>
+      caller.commit((tx) =>
+        this.records.create(
+          tx,
+          PLATFORM_SET,
+          input.body,
+          humanIdentity(caller),
+        ),
+      ),
+    );
     registry.register(repositoryOperations.list, (input, caller) =>
       caller.commit((tx) => this.records.list(tx, PLATFORM_SET, input.query)),
     );
     registry.register(repositoryOperations.get, (input, caller) =>
       caller.commit((tx) => this.get(tx, input.params.credential_name)),
     );
-    registry.register(repositoryOperations.rotate, (input, caller) => {
-      const commit = () =>
-        caller.commit((tx) =>
-          this.records.rotate(
-            tx,
-            PLATFORM_SET,
-            input.params.credential_name,
-            input.body,
-            humanIdentity(caller),
-          ),
-        );
-      const current = this.sshMetadataOf(input.params.credential_name);
-      return current === null
-        ? commit()
-        : this.afterSshProof(
-            input.body.metadata ?? current.metadata,
-            caller.context,
-            commit,
-          );
-    });
-    registry.register(repositoryOperations.update_metadata, (input, caller) => {
-      const commit = () =>
-        caller.commit((tx) =>
-          this.records.updateMetadata(
-            tx,
-            PLATFORM_SET,
-            input.params.credential_name,
-            input.body,
-            humanIdentity(caller),
-          ),
-        );
-      return this.sshMetadataOf(input.params.credential_name) === null
-        ? commit()
-        : this.afterSshProof(input.body.metadata, caller.context, commit);
-    });
+    registry.register(repositoryOperations.rotate, (input, caller) =>
+      caller.commit((tx) =>
+        this.records.rotate(
+          tx,
+          PLATFORM_SET,
+          input.params.credential_name,
+          input.body,
+          humanIdentity(caller),
+        ),
+      ),
+    );
+    registry.register(repositoryOperations.update_metadata, (input, caller) =>
+      caller.commit((tx) =>
+        this.records.updateMetadata(
+          tx,
+          PLATFORM_SET,
+          input.params.credential_name,
+          input.body,
+          humanIdentity(caller),
+        ),
+      ),
+    );
+    registry.register(repositoryOperations.ssh_key_create, (input, caller) =>
+      caller.commit((tx) =>
+        this.records.createGenerated(
+          tx,
+          PLATFORM_SET,
+          {
+            name: input.body.name,
+            platform: Platform.Ssh,
+            generate: sshKeyRevision,
+          },
+          humanIdentity(caller),
+        ),
+      ),
+    );
+    registry.register(repositoryOperations.ssh_key_rotate, (input, caller) =>
+      caller.commit((tx) =>
+        this.records.rotateGenerated(
+          tx,
+          PLATFORM_SET,
+          input.params.credential_name,
+          {
+            expected_revision: input.body.expected_revision,
+            generate: sshKeyRevision,
+          },
+          humanIdentity(caller),
+        ),
+      ),
+    );
     registry.register(repositoryOperations.ssh_discover, (_input, caller) =>
       this.discover(caller),
     );
@@ -186,34 +203,6 @@ export class RepositoryCredentials {
     context: Context,
   ): Promise<CredentialCheckAnswer> {
     return this.records.verify(PLATFORM_SET, credentialName, context);
-  }
-
-  private async afterSshProof<T>(
-    metadata: unknown,
-    context: Context,
-    commit: () => T,
-  ): Promise<T> {
-    const pin = sshPinSchema.safeParse(metadata);
-    if (pin.success)
-      assertPinned(
-        pin.data,
-        await this.resolveSshIdentity(
-          pin.data.host,
-          context,
-          CREDENTIAL_CHECK_TIMEOUT_MS,
-        ),
-      );
-    throwIfCancelled(context);
-    return commit();
-  }
-
-  private sshMetadataOf(credentialName: string): { metadata: unknown } | null {
-    const record = this.store.transaction((tx) =>
-      this.records.credentialMetadata(tx, credentialName),
-    );
-    return record?.platform === Platform.Ssh
-      ? { metadata: record.metadata }
-      : null;
   }
 
   private async discover(caller: CallerContext): Promise<SshDiscoverAnswer> {

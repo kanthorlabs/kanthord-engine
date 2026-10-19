@@ -10,6 +10,7 @@ import { addCredentialCommand, IDEMPOTENCY_KEY_OPTION } from "./credential.ts";
 import {
   handleMutationResult,
   handleReadResult,
+  parsePositiveInt,
   requireToken,
   resolveKey,
   singleUse,
@@ -17,6 +18,12 @@ import {
 
 const SSH_DISCOVER = "ssh-discover";
 const SSH_DISCOVER_CODE = "cli.repository.credential.ssh_discover";
+const SSH_KEY_CREATE = "ssh-key-create";
+const SSH_KEY_ROTATE = "ssh-key-rotate";
+const CREDENTIAL_CODE = "cli.repository.credential";
+const SSH_KEY_CREATE_CODE = "ssh_key_create";
+const SSH_KEY_ROTATE_CODE = "ssh_key_rotate";
+const INVALID_REVISION = "invalid_revision";
 const HOST_KEY_GROUP = "host-key";
 const HOST_KEY_CODE = "cli.repository.host_key";
 const LIST = "list";
@@ -28,6 +35,64 @@ const FINGERPRINT_INVALID = "fingerprint_invalid";
 
 function hostKeyCode(command: string, reason: string): string {
   return `${HOST_KEY_CODE}.${command}.${reason}`;
+}
+
+function credentialCode(command: string, reason: string): string {
+  return `${CREDENTIAL_CODE}.${command}.${reason}`;
+}
+
+async function sshKeyCreate(name: string, command: Command): Promise<void> {
+  const options = command.optsWithGlobals();
+  const { endpoint, token } = resolveClient(options);
+  requireToken(token, credentialCode(SSH_KEY_CREATE_CODE, TOKEN_REQUIRED));
+  const key = resolveKey(options);
+  const result = await httpClient(
+    repositoryOperations,
+    endpoint,
+    token,
+  ).ssh_key_create(
+    { params: {}, query: {}, body: { name } },
+    { idempotencyKey: key },
+  );
+  const data = handleMutationResult(
+    result,
+    credentialCode(SSH_KEY_CREATE_CODE, INDETERMINATE),
+    key,
+  );
+  process.stdout.write(
+    `${JSON.stringify({ ...data, idempotency_key: key })}\n`,
+  );
+}
+
+async function sshKeyRotate(name: string, command: Command): Promise<void> {
+  const options = command.optsWithGlobals();
+  const expected_revision = parsePositiveInt(
+    options.expectedRevision,
+    credentialCode(SSH_KEY_ROTATE_CODE, INVALID_REVISION),
+  );
+  const { endpoint, token } = resolveClient(options);
+  requireToken(token, credentialCode(SSH_KEY_ROTATE_CODE, TOKEN_REQUIRED));
+  const key = resolveKey(options);
+  const result = await httpClient(
+    repositoryOperations,
+    endpoint,
+    token,
+  ).ssh_key_rotate(
+    {
+      params: { credential_name: name },
+      query: {},
+      body: { expected_revision },
+    },
+    { idempotencyKey: key },
+  );
+  const data = handleMutationResult(
+    result,
+    credentialCode(SSH_KEY_ROTATE_CODE, INDETERMINATE),
+    key,
+  );
+  process.stdout.write(
+    `${JSON.stringify({ ...data, idempotency_key: key })}\n`,
+  );
 }
 
 async function sshDiscover(command: Command): Promise<void> {
@@ -107,16 +172,44 @@ export function addRepositoryCommand(program: Command): void {
     description: "Repository component commands",
     operations: repositoryOperations,
     example: {
-      platform: "ssh",
-      metadata: {
-        host: "github.com",
-        hostname: "github.com",
-        port: 22,
-        identity_file: "/home/user/.ssh/id_ed25519",
-      },
-      secret: {},
+      platform: "github",
+      metadata: null,
+      secret: { key: "<token>" },
     },
   });
+  credential
+    .command(SSH_KEY_CREATE)
+    .description(
+      "Generate an SSH key on the server and print the record as JSON",
+    )
+    .argument("<name>", "Credential name")
+    .option(
+      "--idempotency-key <key>",
+      "Mutation key",
+      singleUse(IDEMPOTENCY_KEY_OPTION),
+    )
+    .action((name: string, _options, command: Command) =>
+      sshKeyCreate(name, command),
+    );
+  credential
+    .command(SSH_KEY_ROTATE)
+    .description(
+      "Generate a new SSH key for a credential and print the record as JSON",
+    )
+    .argument("<name>", "Credential name")
+    .requiredOption(
+      "--expected-revision <n>",
+      "Newest live revision that the human read",
+      singleUse("--expected-revision"),
+    )
+    .option(
+      "--idempotency-key <key>",
+      "Mutation key",
+      singleUse(IDEMPOTENCY_KEY_OPTION),
+    )
+    .action((name: string, _options, command: Command) =>
+      sshKeyRotate(name, command),
+    );
   credential
     .command(SSH_DISCOVER)
     .description("List the SSH aliases of ~/.ssh/config as JSON")

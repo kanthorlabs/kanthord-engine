@@ -17,6 +17,9 @@ const TRUNCATED_LINES = 2;
 const EXIT_SUCCESS = 0;
 const LINE_END = "\n";
 const FIELD_SEPARATOR = " ";
+const SEED_CHECK_PUBLIC_KEY_BYTES = 32;
+const SEED_CHECK_LINE_LENGTH = 70;
+const NOT_FOUND_INDEX = -1;
 const PUBLIC_KEY_PATTERN = /^ssh-ed25519 [A-Za-z0-9+/]+=* kanthord-alpha$/;
 const FINGERPRINT_PATTERN = /^SHA256:[A-Za-z0-9+/]{43}$/;
 const ARMOR_BEGIN = "-----BEGIN OPENSSH PRIVATE KEY-----";
@@ -153,4 +156,38 @@ test("sshPublicKeyOf refuses a truncated text", () => {
 
 test("sshFingerprintOf refuses a key of another type", () => {
   assert.throws(() => sshFingerprintOf("ssh-rsa AAAAB3NzaC1yc2E="));
+});
+
+function publicKeyBytes(public_key: string): Buffer {
+  return Buffer.from(public_key.split(FIELD_SEPARATOR)[1]!, "base64").subarray(
+    -SEED_CHECK_PUBLIC_KEY_BYTES,
+  );
+}
+
+function withPublicKey(private_key: string, from: Buffer, to: Buffer): string {
+  const lines = private_key.trim().split(LINE_END);
+  const body = Buffer.from(lines.slice(1, -1).join(""), "base64");
+  for (
+    let index = body.indexOf(from);
+    index !== NOT_FOUND_INDEX;
+    index = body.indexOf(from, index + to.length)
+  )
+    to.copy(body, index);
+  const text = body.toString("base64");
+  const armored: string[] = [];
+  for (let index = 0; index < text.length; index += SEED_CHECK_LINE_LENGTH)
+    armored.push(text.slice(index, index + SEED_CHECK_LINE_LENGTH));
+  return [lines[0]!, ...armored, lines.at(-1)!].join(LINE_END) + LINE_END;
+}
+
+test("sshPublicKeyOf refuses a key whose public key does not derive from its seed", () => {
+  const key = generateSshKey("alpha");
+  const other = generateSshKey("beta");
+  const tampered = withPublicKey(
+    key.private_key,
+    publicKeyBytes(key.public_key),
+    publicKeyBytes(other.public_key),
+  );
+  assert.notEqual(tampered, key.private_key);
+  assert.throws(() => sshPublicKeyOf(tampered), /seed/);
 });

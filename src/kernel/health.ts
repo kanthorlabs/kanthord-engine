@@ -134,6 +134,8 @@ export const ResourceFailureReason = {
   RepositoryNotFound: "repository_not_found",
   HostUnreachable: "host_unreachable",
   AddressInvalid: "address_invalid",
+  HostKeyChanged: "host_key_changed",
+  IdentityUnavailable: "identity_unavailable",
   Unclassified: "unclassified",
 } as const;
 export type ResourceFailureReason =

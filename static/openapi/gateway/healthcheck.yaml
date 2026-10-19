@@ -137,6 +137,8 @@ components:
                           - repository_not_found
                           - host_unreachable
                           - address_invalid
+                          - host_key_changed
+                          - identity_unavailable
                           - unclassified
                       - type: "null"
                 required:
@@ -175,6 +177,8 @@ components:
                             - repository_not_found
                             - host_unreachable
                             - address_invalid
+                            - host_key_changed
+                            - identity_unavailable
                             - unclassified
                         - type: "null"
                   required:
