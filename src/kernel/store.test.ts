@@ -351,6 +351,38 @@ test("a failed commit clears the statement cache and leaves the store usable", (
   }
 });
 
+test("a transaction that SQLite ended keeps the error of the work", () => {
+  const store = new Store(":memory:");
+  try {
+    store.database.exec("CREATE TABLE t (id INTEGER PRIMARY KEY)");
+    const sql = "SELECT 1 AS value";
+    let ended: unknown;
+    assert.throws(
+      () =>
+        store.transaction(({ database }) => {
+          ended = database.prepare(sql);
+          const insert = database.prepare(
+            "INSERT OR ROLLBACK INTO t VALUES (?)",
+          );
+          insert.run(FIRST_KEY);
+          insert.run(FIRST_KEY);
+        }),
+      /UNIQUE|PRIMARY/,
+    );
+    assert.equal(store.database.isTransaction, false);
+    store.transaction(({ database }) => {
+      assert.notEqual(database.prepare(sql), ended);
+      database.prepare("INSERT INTO t VALUES (?)").run(FIRST_KEY);
+    });
+    assert.equal(
+      store.database.prepare("SELECT COUNT(*) AS count FROM t").get()?.count,
+      FIRST_KEY,
+    );
+  } finally {
+    store.close();
+  }
+});
+
 test("prepare with options answers a new statement", () => {
   const store = new Store(":memory:");
   try {

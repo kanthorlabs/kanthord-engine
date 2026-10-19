@@ -150,6 +150,10 @@ class StatementCache extends DatabaseSync {
     }
   }
 
+  clearStatements(): void {
+    this.statements.clear();
+  }
+
   override close(): void {
     super.close();
     this.statements.clear();
@@ -165,6 +169,7 @@ function sqliteReason(error: unknown): string {
 export class Store {
   readonly database: DatabaseSync;
   readonly path: string;
+  private readonly connection: StatementCache;
   private active = false;
   private closed = false;
 
@@ -174,9 +179,10 @@ export class Store {
       for (const suffix of ["", "-wal", "-shm"])
         audit(path + suffix, "file", true);
     try {
-      this.database = new StatementCache(path, {
+      this.connection = new StatementCache(path, {
         enableForeignKeyConstraints: true,
       });
+      this.database = this.connection;
     } catch {
       throw new Diagnostic(
         "system.database.open_failed",
@@ -224,7 +230,9 @@ export class Store {
       this.database.exec(TransactionControl.Commit);
       return result;
     } catch (error) {
-      this.database.exec(TransactionControl.Rollback);
+      if (this.database.isTransaction)
+        this.database.exec(TransactionControl.Rollback);
+      else this.connection.clearStatements();
       throw error;
     } finally {
       this.active = false;
