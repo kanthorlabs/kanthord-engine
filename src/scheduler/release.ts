@@ -4,6 +4,7 @@ import {
   ExecutionStopReason,
   isAdvancingProviderFailure,
   isAdvancingStop,
+  type CooldownChange,
   type ExecutionRelease,
   type ExecutionRow,
 } from "./contract.ts";
@@ -30,6 +31,7 @@ export function release(
   assert.ok(proof, "release requires an execution proof");
   assert.equal(proof.executionId, executionId);
   let released: ExecutionRow | undefined;
+  let cooldowns: CooldownChange[] = [];
   const result = caller.commit((tx) => {
     const now = Date.now();
     const row = requireRunning(tx, executionId, proof.runtimeIdentity, now);
@@ -44,7 +46,7 @@ export function release(
       body.stop?.reason === ExecutionStopReason.ProviderFailed &&
       isAdvancingProviderFailure(code)
     )
-      dependencies.agentChains.providerFailure(
+      cooldowns = dependencies.agentChains.providerFailure(
         tx,
         selections,
         code,
@@ -52,7 +54,7 @@ export function release(
         now,
       );
     else if (body.stop?.reason !== ExecutionStopReason.ProviderFailed)
-      dependencies.agentChains.success(tx, selections, executionId);
+      cooldowns = dependencies.agentChains.success(tx, selections, executionId);
     if (
       body.stop !== null &&
       body.stop.reason !== ExecutionStopReason.BudgetEnd
@@ -80,6 +82,7 @@ export function release(
     return { execution_id: executionId, ended_at: now };
   });
   assert.ok(released, "a committed release read its execution");
+  dependencies.agentChains.cooldownsChanged(cooldowns);
   dependencies.telemetry.executionEnded({
     trace: executionTrace(released),
     ended_at: result.ended_at,
