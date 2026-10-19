@@ -46,6 +46,11 @@ import { resolveRequestId } from "./request-id.ts";
 
 const SERVER_NOT_RUNNING = "ERR_SERVER_NOT_RUNNING";
 const SINGLE_QUERY_VALUE_COUNT = 1;
+import { GATEWAY_STARTED_MESSAGE } from "./constants.ts";
+import { dashboardResponse, type DashboardLoader } from "./dashboard.ts";
+import { ROOT_BASE_PATH, baseHref, stripBasePath } from "./base-path.ts";
+import { dashboardAsset } from "../kernel/assets.ts";
+
 const HOST_DETAIL_LIMIT = 255;
 const ALLOWED_HOSTS_FIELD = "gateway.allowed_hosts";
 const LOOPBACK_BIND_SENTENCE =
@@ -66,10 +71,6 @@ function startedMessage(bind: string): string {
     ? `${GATEWAY_STARTED_MESSAGE}. ${LOOPBACK_BIND_SENTENCE}`
     : GATEWAY_STARTED_MESSAGE;
 }
-import { GATEWAY_STARTED_MESSAGE } from "./constants.ts";
-import { dashboardResponse, type DashboardLoader } from "./dashboard.ts";
-import { ROOT_BASE_PATH, baseHref, stripBasePath } from "./base-path.ts";
-import { dashboardAsset } from "../kernel/assets.ts";
 
 export interface GatewayDependencies {
   config: GatewayConfig;
