@@ -9,10 +9,7 @@ import SwaggerParser from "@apidevtools/swagger-parser";
 import { gatewayFixture } from "./test-support.ts";
 import { gatewayOperations, HEALTHCHECK_OK } from "../../gateway/contract.ts";
 import { llmOperations } from "../../llm/contract.ts";
-import {
-  repositoryOperations,
-  SSH_RESOLVE_FAILED_STATUS,
-} from "../../repository/contract.ts";
+import { repositoryOperations } from "../../repository/contract.ts";
 import { storageOperations } from "../../storage/contract.ts";
 import { ActionResultKind, workerOperations } from "../../worker/contract.ts";
 import {
@@ -210,27 +207,6 @@ test("published asset delete names its operation with a bodyless 204 response", 
     fragment.pathItem.delete.responses[HttpStatus.NoContent].content,
     undefined,
   );
-});
-
-test("published generic credential writes declare no ssh -G resolution failure status", () => {
-  for (const [file, method] of [
-    ["credential.create", "post"],
-    ["credential.rotate", "post"],
-    ["credential.update_metadata", "put"],
-  ] as const) {
-    const fragment = parse(
-      readFileSync(
-        join(dirname(openapiPath()), `openapi/repository/${file}.yaml`),
-        "utf8",
-      ),
-    );
-    assert.ok(
-      !(
-        String(SSH_RESOLVE_FAILED_STATUS) in fragment.pathItem[method].responses
-      ),
-      file,
-    );
-  }
 });
 
 test("published node check names its operation", () => {
@@ -612,7 +588,6 @@ const OPERATION_INVENTORY: readonly (readonly [string, AccessPolicy])[] = [
   ["repository.credential.list", AccessPolicy.Human],
   ["repository.credential.get", AccessPolicy.Human],
   ["repository.credential.rotate", AccessPolicy.Human],
-  ["repository.credential.ssh_discover", AccessPolicy.Human],
   ["repository.credential.ssh_key_create", AccessPolicy.Human],
   ["repository.credential.ssh_key_rotate", AccessPolicy.Human],
   ["repository.credential.update_metadata", AccessPolicy.Human],
@@ -779,8 +754,8 @@ const OPERATION_INVENTORY: readonly (readonly [string, AccessPolicy])[] = [
   ["tracking.span.list", AccessPolicy.Human],
   ["tracking.text.get", AccessPolicy.Human],
 ];
-const OPERATION_COUNT = 190;
-const ROUTED_OPERATION_COUNT = 180;
+const OPERATION_COUNT = 189;
+const ROUTED_OPERATION_COUNT = 179;
 const INTAKE_OPERATION_COUNT = 22;
 const INTAKE_ROUTED_OPERATION_COUNT = 14;
 const SERVICE_OPERATION_IDS = [

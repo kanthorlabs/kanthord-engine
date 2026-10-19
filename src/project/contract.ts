@@ -50,12 +50,6 @@ export const RepositoryPlatform = {
 } as const;
 export type RepositoryPlatform =
   (typeof RepositoryPlatform)[keyof typeof RepositoryPlatform];
-export type SshIdentity = {
-  hostname: string;
-  port: number;
-  identityFiles: string[];
-  identitiesOnly: boolean;
-};
 export const RESOURCE_CAPABILITY_NETWORK_GIT_READ = "network git read";
 export const RESOURCE_TARGET_KIND_REPOSITORY = "repository";
 export const WORKER_PLATFORM = "kanthord";
@@ -109,7 +103,6 @@ export const ProjectErrorCode = {
   RepositoryPromptTooLarge:
     "project.bindings.repository.project_prompt_too_large",
   RepositorySshUnreachable: "project.bindings.repository.ssh_unreachable",
-  RepositorySshHostMismatch: "project.bindings.repository.ssh_host_mismatch",
   RepositoryCredentialRequired:
     "project.bindings.repository.credential_required",
   RepositoryActionUnsupported: "project.bindings.repository.action_unsupported",

@@ -31,7 +31,6 @@ import {
   workerOperations,
 } from "../../worker/contract.ts";
 import {
-  FAKE_SSH_IDENTITY,
   bareRepository,
   deliver,
   fakeGitHub,
@@ -119,7 +118,6 @@ async function setup(t: TestContext) {
   const fixture = await gatewayFixture(t, {
     repositoryConnector: {
       gitLsRemote: async () => {},
-      resolveSshIdentity: async () => FAKE_SSH_IDENTITY,
     },
     github: { baseUrl: gitHub.endpoint },
     repositoryTransport: mappedTransport({

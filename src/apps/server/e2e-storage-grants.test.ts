@@ -34,7 +34,6 @@ import {
 import {
   createFakeSshCredential,
   FAKE_SSH_CREDENTIAL,
-  FAKE_SSH_IDENTITY,
   fakeS3,
   gatewayFixture,
 } from "./test-support.ts";
@@ -130,7 +129,6 @@ async function setup(t: TestContext) {
   const fixture = await gatewayFixture(t, {
     repositoryConnector: {
       gitLsRemote: async () => {},
-      resolveSshIdentity: async () => FAKE_SSH_IDENTITY,
     },
   });
   const { H, secrets, read, write } = await cli(
@@ -549,7 +547,6 @@ async function failoverSetup(t: TestContext) {
   const fixture = await gatewayFixture(t, {
     repositoryConnector: {
       gitLsRemote: async () => {},
-      resolveSshIdentity: async () => FAKE_SSH_IDENTITY,
     },
   });
   const { H, read, write } = await cli(t, fixture.endpoint, fixture.token);

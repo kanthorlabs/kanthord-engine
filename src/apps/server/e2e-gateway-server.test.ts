@@ -44,7 +44,6 @@ import {
   applyCoveringBindings,
   createFakeSshCredential,
   enableCoveringAgents,
-  FAKE_SSH_IDENTITY,
   gatewayFixture,
 } from "./test-support.ts";
 
@@ -106,7 +105,6 @@ const RESOURCE_TARGET = "credential:e2e-target";
 const CAPABILITY = "model-inference";
 const FAKE_REPOSITORY = {
   gitLsRemote: async () => {},
-  resolveSshIdentity: async () => FAKE_SSH_IDENTITY,
 };
 
 type Result = Awaited<ReturnType<typeof kanthord>>;

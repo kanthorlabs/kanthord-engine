@@ -9,6 +9,7 @@ import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { simpleGit } from "simple-git";
 import { temporary } from "../../kernel/test-support.ts";
+import { LOCAL_GIT_SSH_ACCESS } from "../../repository/test-sshd.ts";
 import {
   GitHubPlatform,
   GitHubTargetKind,
@@ -435,14 +436,23 @@ test("mapped transport maps the address of the fresh git writes and the landing 
   const commit = await pushNodeCommit(t, repo.bare);
   const deadline = () => Date.now() + GIT_DEADLINE_MS;
   const before = { address: ADDRESS, branch: "main", commit };
-  assert.deepEqual(await transport.landedOn(before, background, deadline()), {
-    landed: false,
-    first_parent: null,
-  });
+  assert.deepEqual(
+    await transport.landedOn(
+      before,
+      background,
+      deadline(),
+      LOCAL_GIT_SSH_ACCESS,
+    ),
+    {
+      landed: false,
+      first_parent: null,
+    },
+  );
   const merged = await transport.mergePushFresh(
     { address: ADDRESS, base_branch: "main", commit },
     background,
     deadline(),
+    LOCAL_GIT_SSH_ACCESS,
   );
   assert.equal(await remoteHead(repo.bare, MAIN_REF), merged.commit);
   const parents = await simpleGit(repo.bare).raw([
@@ -453,14 +463,23 @@ test("mapped transport maps the address of the fresh git writes and the landing 
     merged.commit,
   ]);
   assert.deepEqual(parents.trim().split(" ").slice(1), [repo.head, commit]);
-  assert.deepEqual(await transport.landedOn(before, background, deadline()), {
-    landed: true,
-    first_parent: merged.commit,
-  });
+  assert.deepEqual(
+    await transport.landedOn(
+      before,
+      background,
+      deadline(),
+      LOCAL_GIT_SSH_ACCESS,
+    ),
+    {
+      landed: true,
+      first_parent: merged.commit,
+    },
+  );
   await transport.pushSnapshotFresh(
     { address: ADDRESS, branch: "snapshot", commit },
     background,
     deadline(),
+    LOCAL_GIT_SSH_ACCESS,
   );
   assert.equal(await remoteHead(repo.bare, "refs/heads/snapshot"), commit);
   assert.throws(
@@ -469,6 +488,7 @@ test("mapped transport maps the address of the fresh git writes and the landing 
         { ...before, address: "git@github.com:owner/unmapped.git" },
         background,
         deadline(),
+        LOCAL_GIT_SSH_ACCESS,
       ),
     assert.AssertionError,
   );

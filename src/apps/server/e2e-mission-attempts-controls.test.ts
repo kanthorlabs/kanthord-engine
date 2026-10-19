@@ -26,7 +26,6 @@ import {
 import { kanthord, environment } from "./cli-support.ts";
 import {
   createFakeSshCredential,
-  FAKE_SSH_IDENTITY,
   gatewayFixture,
   COVERING_WORKER_BINDINGS,
   enableCoveringAgents,
@@ -68,7 +67,6 @@ async function setup(t: TestContext) {
   const fixture = await gatewayFixture(t, {
     repositoryConnector: {
       gitLsRemote: async () => {},
-      resolveSshIdentity: async () => FAKE_SSH_IDENTITY,
     },
   });
   const env = {

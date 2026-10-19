@@ -39,7 +39,6 @@ import {
 import { ReviewState } from "../../repository/github.ts";
 import {
   FAKE_SSH_CREDENTIAL,
-  FAKE_SSH_IDENTITY,
   FakePullState,
   createFakeSshCredential,
   gatewayFixture,
@@ -168,7 +167,6 @@ async function setup(t: TestContext) {
   const fixture = await gatewayFixture(t, {
     repositoryConnector: {
       gitLsRemote: async () => {},
-      resolveSshIdentity: async () => FAKE_SSH_IDENTITY,
     },
     github: { baseUrl: gitHub.endpoint },
     repositoryTransport: mappedTransport({

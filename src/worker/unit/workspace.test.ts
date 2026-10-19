@@ -25,6 +25,7 @@ import {
 } from "./workspace.ts";
 import {
   everyBindingSshAccess,
+  LOCAL_GIT_SSH_ACCESS,
   testSshAccess,
   transport,
 } from "./test-support.ts";
@@ -153,6 +154,7 @@ test("workspace preparation refreshes implement branches and creates disposable 
     first.nodeBranch,
     background,
     10000,
+    LOCAL_GIT_SSH_ACCESS,
   );
   await commit(first.directory, "unpushed");
   workspace.release(workspace.nodeKey(nodeId), WorkspaceKind.Node);
@@ -465,6 +467,7 @@ test("a continued attempt whose pushed node branch is gone stops and keeps its c
     first.nodeBranch,
     background,
     10000,
+    LOCAL_GIT_SSH_ACCESS,
   );
   await h.deleteRemote(first.nodeBranch);
   await assert.rejects(h.prepare(FIRST_ATTEMPT), missing);
@@ -478,6 +481,7 @@ test("a continued attempt whose pushed node branch is gone stops and keeps its c
     first.nodeBranch,
     background,
     10000,
+    LOCAL_GIT_SSH_ACCESS,
   );
   assert.equal((await h.prepare(FIRST_ATTEMPT)).head, pushed);
 });
@@ -497,6 +501,7 @@ test("a restart from the base branch starts from the base after the earlier node
     first.nodeBranch,
     background,
     10000,
+    LOCAL_GIT_SSH_ACCESS,
   );
   await h.deleteRemote(first.nodeBranch);
   const restart = await h.prepare(RESTART_ATTEMPT);
@@ -514,6 +519,7 @@ test("a restart from the base branch checks out the base, pushes a new node bran
     first.nodeBranch,
     background,
     10000,
+    LOCAL_GIT_SSH_ACCESS,
   );
   const restart = await h.prepare(RESTART_ATTEMPT);
   assert.equal(restart.directory, first.directory);
@@ -525,6 +531,7 @@ test("a restart from the base branch checks out the base, pushes a new node bran
     restart.nodeBranch,
     background,
     10000,
+    LOCAL_GIT_SSH_ACCESS,
   );
   assert.equal(await h.remoteHead(restart.nodeBranch), fresh);
   assert.equal(await h.remoteHead(first.nodeBranch), earlier);
@@ -654,6 +661,7 @@ test("a missing remote node branch in one checkout stops with repository.node_br
       h.nodeBranch,
       background,
       10000,
+      LOCAL_GIT_SSH_ACCESS,
     );
   h.workspace.release(key, WorkspaceKind.Node);
   await simpleGit(h.repositories[1]!.address).raw([

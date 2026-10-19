@@ -66,7 +66,6 @@ import {
   FAKE_GITHUB_HOST_KEY,
   FAKE_SSH_HOST,
   createFakeSshCredential,
-  FAKE_SSH_IDENTITY,
   gatewayFixture,
   COVERING_WORKER_BINDINGS,
   enableCoveringAgents,
@@ -122,7 +121,6 @@ test(
     const f = await gatewayFixture(t, {
       repositoryConnector: {
         gitLsRemote: async () => {},
-        resolveSshIdentity: async () => FAKE_SSH_IDENTITY,
       },
     });
     const directory = temporary(t);

@@ -40,7 +40,6 @@ import type { ExecutionRecord } from "../../scheduler/contract.ts";
 import { environment, kanthord } from "./cli-support.ts";
 import {
   FAKE_SSH_CREDENTIAL,
-  FAKE_SSH_IDENTITY,
   bareRepository,
   createFakeSshCredential,
   fakeGitHub,
@@ -187,7 +186,6 @@ async function setup(t: TestContext, landing = "human") {
   const fixture = await gatewayFixture(t, {
     repositoryConnector: {
       gitLsRemote: async () => {},
-      resolveSshIdentity: async () => FAKE_SSH_IDENTITY,
     },
     github: { baseUrl: gitHub.endpoint },
     repositoryTransport: mappedTransport({

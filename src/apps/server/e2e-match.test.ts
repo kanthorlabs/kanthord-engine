@@ -18,7 +18,6 @@ import { environment, kanthord, until } from "./cli-support.ts";
 import {
   createFakeSshCredential,
   enableCoveringAgents,
-  FAKE_SSH_IDENTITY,
   gatewayFixture,
 } from "./test-support.ts";
 
@@ -76,7 +75,6 @@ async function setup(t: TestContext) {
   const fixture = await gatewayFixture(t, {
     repositoryConnector: {
       gitLsRemote: async () => {},
-      resolveSshIdentity: async () => FAKE_SSH_IDENTITY,
     },
   });
   const directory = temporary(t);

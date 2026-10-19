@@ -55,7 +55,6 @@ import {
 import { environment, kanthord, kanthordTerminal } from "./cli-support.ts";
 import {
   createFakeSshCredential,
-  FAKE_SSH_IDENTITY,
   fakeGitHub,
   gatewayFixture,
 } from "./test-support.ts";
@@ -110,7 +109,6 @@ async function methodsFixture(t: TestContext) {
   const f = await gatewayFixture(t, {
     repositoryConnector: {
       gitLsRemote: async () => {},
-      resolveSshIdentity: async () => FAKE_SSH_IDENTITY,
     },
     github: { baseUrl: gitHub.endpoint },
   });

@@ -16,7 +16,6 @@ import {
 } from "../../scheduler/contract.ts";
 import {
   createFakeSshCredential,
-  FAKE_SSH_IDENTITY,
   gatewayFixture,
   COVERING_WORKER_BINDINGS,
   enableCoveringAgents,
@@ -110,7 +109,6 @@ async function setup(t: TestContext, short = false) {
     scheduler: short ? { release_reserve: 1, stop_backoff: 1 } : {},
     repositoryConnector: {
       gitLsRemote: async () => {},
-      resolveSshIdentity: async () => FAKE_SSH_IDENTITY,
     },
   });
   const directory = temporary(t);

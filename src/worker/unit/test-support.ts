@@ -18,6 +18,7 @@ import {
 } from "../../kernel/test-support.ts";
 import { createIdentity } from "../../kernel/identity.ts";
 import * as connector from "../../repository/connector.ts";
+import { generateSshKey } from "../../repository/ssh-key.ts";
 import type { Revision, TaskContent } from "../../mission/contract.ts";
 import {
   anthropicSetup,
@@ -66,9 +67,22 @@ export function scriptedModelRuntime(
   };
 }
 
+const LOCAL_GIT_KEY = generateSshKey("local-git");
+export const LOCAL_GIT_SSH_ACCESS: SshAccess = {
+  private_key: LOCAL_GIT_KEY.private_key,
+  public_key: LOCAL_GIT_KEY.public_key,
+  known_hosts: "",
+};
+
 export const transport: RepositoryTransport = {
   clone: (address, directory, context, deadlineMs) =>
-    connector.clone(address, directory, context, deadlineMs),
+    connector.clone(
+      address,
+      directory,
+      context,
+      deadlineMs,
+      LOCAL_GIT_SSH_ACCESS,
+    ),
   fetchAndCheckout: (directory, branch, base, pushed, context, deadlineMs) =>
     connector.fetchAndCheckout(
       directory,
@@ -77,13 +91,33 @@ export const transport: RepositoryTransport = {
       pushed,
       context,
       deadlineMs,
+      LOCAL_GIT_SSH_ACCESS,
     ),
   fetchBase: (directory, base, context, deadlineMs) =>
-    connector.fetchBase(directory, base, context, deadlineMs),
+    connector.fetchBase(
+      directory,
+      base,
+      context,
+      deadlineMs,
+      LOCAL_GIT_SSH_ACCESS,
+    ),
   pushNodeBranch: (directory, branch, context, deadlineMs) =>
-    connector.pushNodeBranch(directory, branch, context, deadlineMs),
+    connector.pushNodeBranch(
+      directory,
+      branch,
+      context,
+      deadlineMs,
+      LOCAL_GIT_SSH_ACCESS,
+    ),
   cloneSnapshot: (address, revision, directory, context, deadlineMs) =>
-    connector.cloneSnapshot(address, revision, directory, context, deadlineMs),
+    connector.cloneSnapshot(
+      address,
+      revision,
+      directory,
+      context,
+      deadlineMs,
+      LOCAL_GIT_SSH_ACCESS,
+    ),
 };
 
 export const TEST_SSH_ACCESS: SshAccess = {

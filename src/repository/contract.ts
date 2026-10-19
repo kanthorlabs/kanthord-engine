@@ -25,8 +25,6 @@ import {
 } from "../kernel/operation.ts";
 
 export const REPOSITORY_COMPONENT_NAME = "repository";
-export const SSH_RESOLVE_FAILED_STATUS = 422;
-export const SSH_CONFIG_UNREADABLE_STATUS = 422;
 export const HOST_KEY_SCAN_FAILED_STATUS = 422;
 export const HOST_KEY_FINGERPRINT_PATTERN = /^SHA256:[A-Za-z0-9+/]{43}$/;
 
@@ -86,28 +84,6 @@ export const repositoryCredentialAnswerSchema = credentialAnswerSchema.extend({
 export type RepositoryCredentialAnswer = z.infer<
   typeof repositoryCredentialAnswerSchema
 >;
-
-export const SshDiscoverState = {
-  Ready: "ready",
-  Refused: "refused",
-  Present: "present",
-} as const;
-export type SshDiscoverState =
-  (typeof SshDiscoverState)[keyof typeof SshDiscoverState];
-
-export const sshDiscoverAnswerSchema = z.strictObject({
-  items: z.array(
-    z.strictObject({
-      host: z.string(),
-      hostname: z.string(),
-      port: z.number().int(),
-      identity_file: z.string().nullable(),
-      state: z.enum(SshDiscoverState),
-      reason: z.string().nullable(),
-    }),
-  ),
-});
-export type SshDiscoverAnswer = z.infer<typeof sshDiscoverAnswerSchema>;
 
 export const hostKeyScanAnswerSchema = z.strictObject({
   host: z.string(),
@@ -393,28 +369,6 @@ export const repositoryOperations = {
     output: credentialAnswerSchema,
     description:
       "Generate a new SSH key on the server and store it as the next revision of an ssh credential.",
-  },
-  ssh_discover: {
-    id: "repository.credential.ssh_discover",
-    service: REPOSITORY_COMPONENT_NAME,
-    method: HttpMethod.Get,
-    path: "/api/repository/credential/ssh/discover",
-    access: AccessPolicy.Human,
-    store: StoreName.Operational,
-    lifetime: OperationLifetime.Unary,
-    timeoutMs: CREDENTIAL_TIMEOUT_MS,
-    mutation: false,
-    body: false,
-    status: HttpStatus.OK,
-    errors: [SSH_CONFIG_UNREADABLE_STATUS],
-    input: z.strictObject({
-      params: emptyParams,
-      query: emptyQuery,
-      body: z.null(),
-    }),
-    output: sshDiscoverAnswerSchema,
-    description:
-      "List the SSH aliases of ~/.ssh/config that resolve to a git platform host.",
   },
   host_key_list: {
     id: "repository.host_key.list",

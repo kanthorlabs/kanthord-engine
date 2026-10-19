@@ -28,7 +28,6 @@ import type { SshAccess } from "../../repository/index.ts";
 import {
   FAKE_GITHUB_HOST_KEY,
   FAKE_SSH_HOST,
-  FAKE_SSH_IDENTITY,
   gatewayFixture,
   humanCaller,
   provisionRepositoryCredentials,
@@ -50,7 +49,6 @@ async function setup(t: TestContext) {
     repositoryConnector: {
       gitLsRemote: async (address, _context, _deadlineMs, ssh) =>
         void reads.push({ address, ssh }),
-      resolveSshIdentity: async () => FAKE_SSH_IDENTITY,
     },
   });
   await provisionRepositoryCredentials(fixture);

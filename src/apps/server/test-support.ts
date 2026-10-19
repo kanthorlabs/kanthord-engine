@@ -73,6 +73,7 @@ import {
   type HostKeySources,
 } from "../../repository/index.ts";
 import { GITHUB_API_VERSION } from "../../repository/github.ts";
+import { LOCAL_GIT_SSH_ACCESS } from "../../repository/test-sshd.ts";
 import {
   InstancePlacement,
   type RepositoryTransport,
@@ -268,12 +269,6 @@ export async function inProcessWorker(
 
 export const TEST_WORKER_BINDING = "binding";
 export const TEST_PROJECT_ID = "project_01ARZ3NDEKTSV4RRFFQ69G5FAV";
-export const FAKE_SSH_IDENTITY = {
-  hostname: "github.com",
-  port: 22,
-  identityFiles: ["~/.ssh/id_rsa"],
-  identitiesOnly: true,
-};
 export const FAKE_SSH_CREDENTIAL = "github-ssh";
 export const FAKE_SSH_HOST = "github.com";
 export const FAKE_GITHUB_HOST_KEY =
@@ -1393,7 +1388,13 @@ export function mappedTransport(
   }
   return {
     clone: (address, directory, context, deadlineMs) =>
-      connector.clone(mapped(address), directory, context, deadlineMs),
+      connector.clone(
+        mapped(address),
+        directory,
+        context,
+        deadlineMs,
+        LOCAL_GIT_SSH_ACCESS,
+      ),
     cloneSnapshot: (address, revision, directory, context, deadlineMs) =>
       connector.cloneSnapshot(
         mapped(address),
@@ -1401,6 +1402,7 @@ export function mappedTransport(
         directory,
         context,
         deadlineMs,
+        LOCAL_GIT_SSH_ACCESS,
       ),
     fetchAndCheckout: (directory, branch, base, pushed, context, deadlineMs) =>
       connector.fetchAndCheckout(
@@ -1410,11 +1412,24 @@ export function mappedTransport(
         pushed,
         context,
         deadlineMs,
+        LOCAL_GIT_SSH_ACCESS,
       ),
     fetchBase: (directory, base, context, deadlineMs) =>
-      connector.fetchBase(directory, base, context, deadlineMs),
+      connector.fetchBase(
+        directory,
+        base,
+        context,
+        deadlineMs,
+        LOCAL_GIT_SSH_ACCESS,
+      ),
     pushNodeBranch: (directory, branch, context, deadlineMs) =>
-      connector.pushNodeBranch(directory, branch, context, deadlineMs),
+      connector.pushNodeBranch(
+        directory,
+        branch,
+        context,
+        deadlineMs,
+        LOCAL_GIT_SSH_ACCESS,
+      ),
     mergePushFresh: (input, ...args) =>
       connector.mergePushFresh(
         { ...input, address: mapped(input.address) },
@@ -1861,7 +1876,6 @@ export async function storageProject(t: TestContext) {
     github: { baseUrl: gitHub.endpoint },
     repositoryConnector: {
       gitLsRemote: async () => {},
-      resolveSshIdentity: async () => FAKE_SSH_IDENTITY,
     },
   });
   const cli = storageCli(t, fixture.endpoint, fixture.token);

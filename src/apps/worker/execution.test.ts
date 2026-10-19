@@ -83,7 +83,7 @@ test("host logs the stop of a released or ended execution in the execution ended
   };
   const stop = {
     reason: EndReason.OperationFailed,
-    code: "repository.credential.ssh_identity_ambiguous",
+    code: "repository.host_key.unpinned",
   };
   await hostExecution(input, async () => ({
     kind: "released",

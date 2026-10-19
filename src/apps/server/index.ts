@@ -47,7 +47,6 @@ import {
   projectOperations,
   type ProjectBindings,
   type RepositoryConnector,
-  type SshIdentity,
 } from "../../project/contract.ts";
 import type { WorkerRegistrations } from "../../worker/contract.ts";
 import { audit, ensureDirectory } from "../../kernel/files.ts";
@@ -147,13 +146,6 @@ import {
   type Context,
 } from "../../kernel/context.ts";
 
-export type ServerRepositoryConnector = RepositoryConnector & {
-  resolveSshIdentity(
-    host: string,
-    context: Context,
-    deadlineMs: number,
-  ): Promise<SshIdentity>;
-};
 export { enforceMasterKey, verifyMasterKey } from "../../custody/index.ts";
 
 function resultOf<T>(result: OperationResult<T>): T {
@@ -197,7 +189,7 @@ export function composeServices(options: {
   stateDirectory: string;
   logger: Logger;
   health: HealthRegistry;
-  repositoryConnector?: ServerRepositoryConnector;
+  repositoryConnector?: RepositoryConnector;
   github?: { baseUrl: string; mergeabilityRetryDelayMs?: number };
   repositoryTransport?: GitWriter;
   hostKeySources?: HostKeySources;
@@ -437,8 +429,6 @@ export function composeServices(options: {
     store: options.store,
     records: custody,
     bindingsNaming: (tx, name) => project.bindingsNaming(tx, name),
-    resolveSshIdentity: (host, context, deadlineMs) =>
-      repoConnector.resolveSshIdentity(host, context, deadlineMs),
   });
   const repositoryHostKeys = new RepositoryHostKeys({
     logger: options.logger,

@@ -37,12 +37,7 @@ import { testHumanIdentity } from "../../kernel/test-identity.ts";
 import type { Material } from "../../custody/contract.ts";
 import pino from "pino";
 import { ulid } from "ulid";
-import {
-  domainHealth,
-  FAKE_SSH_IDENTITY,
-  fakeGitHub,
-  gatewayFixture,
-} from "./test-support.ts";
+import { domainHealth, fakeGitHub, gatewayFixture } from "./test-support.ts";
 import { llmOperations } from "../../llm/contract.ts";
 import { agentOperations } from "../../agent/contract.ts";
 import { gatewayOperations, OWNER_INTAKE } from "../../gateway/contract.ts";
@@ -405,7 +400,6 @@ test("injected repository connector skips the tool gate and probe", async (t) =>
   const health = new HealthRegistry();
   const repositoryConnector = {
     gitLsRemote: async () => {},
-    resolveSshIdentity: async () => FAKE_SSH_IDENTITY,
   };
   const fixture = await gatewayFixture(t, { health, repositoryConnector });
   const checks = await health.check();

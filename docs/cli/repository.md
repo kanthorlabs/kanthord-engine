@@ -57,7 +57,7 @@ non-secret diagnostic. A supplied identity never proves authorization.
 
 ## Command inventory
 
-Each synopsis follows `kanthord repository credential`. All thirteen commands have `[R]` and
+Each synopsis follows `kanthord repository credential`. All twelve commands have `[R]` and
 `human` access; seven mutations have `[M]`, and one list has `[L]`.
 All paths below are implemented routes under the ruled `/api/repository/credential` prefix.
 
@@ -73,11 +73,10 @@ All paths below are implemented routes under the ruled `/api/repository/credenti
 | 8   | `platforms [R]`                                           | `GET /api/repository/credential/platform`                                    | `repository.credential.platform_list`   | `human`; implemented |
 | 9   | `check --file <path> [R]`                                 | `POST /api/repository/credential/check`                                      | `repository.credential.check`           | `human`; implemented |
 | 10  | `verify <credential-name> [R]`                            | `POST /api/repository/credential/:credential_name/verify`                    | `repository.credential.verify`          | `human`; implemented |
-| 11  | `ssh-discover [R]`                                        | `GET /api/repository/credential/ssh/discover`                                | `repository.credential.ssh_discover`    | `human`; implemented |
-| 12  | `ssh-key-create <name> [M] [R]`                           | `POST /api/repository/credential/ssh/key`                                    | `repository.credential.ssh_key_create`  | `human`; implemented |
-| 13  | `ssh-key-rotate <name> --expected-revision <n> [M] [R]`   | `POST /api/repository/credential/:credential_name/ssh/key`                   | `repository.credential.ssh_key_rotate`  | `human`; implemented |
+| 11  | `ssh-key-create <name> [M] [R]`                           | `POST /api/repository/credential/ssh/key`                                    | `repository.credential.ssh_key_create`  | `human`; implemented |
+| 12  | `ssh-key-rotate <name> --expected-revision <n> [M] [R]`   | `POST /api/repository/credential/:credential_name/ssh/key`                   | `repository.credential.ssh_key_rotate`  | `human`; implemented |
 
-The static `/api/repository/credential/platform`, `/api/repository/credential/check`, `/api/repository/credential/ssh/discover` and `/api/repository/credential/ssh/key` paths take precedence over `/:credential_name`, so custody refuses the names `login`, `platform`, `check` and `ssh`.
+The static `/api/repository/credential/platform`, `/api/repository/credential/check` and `/api/repository/credential/ssh/key` paths take precedence over `/:credential_name`, so custody refuses the names `login`, `platform`, `check` and `ssh`.
 These routes have no project identity.
 
 The `host-key` group reads and pins the SSH host keys of the [host keys](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/repository.impl.md#host-keys).
@@ -277,20 +276,6 @@ at its next use of the credential. A revoke of the newest live revision answers
 `409 credential.revision.newest_live`. A revoke of an ended revision answers
 `409 credential.revision.ended`. HTTP `200` returns the credential answer after draining other unpinned older live revisions in the same transaction.
 
-## `ssh-discover`
-
-The command takes no params, no query and no body.
-It reads the `Host` lines of the top-level `~/.ssh/config` of the server host and follows no `Include`. It skips each pattern that holds `*`, `?` or `!`.
-It runs `ssh -G -- <host>` for each alias and keeps an alias whose resolved `hostname` contains `github`, `gitlab` or `bitbucket`.
-HTTP `200` answers `{ items }`. Each item holds `host`, `hostname`, `port`, `identity_file`, `state` and `reason`:
-
-- `state` is `ready`, `refused` or `present`.
-- `present` means that a live `ssh` record holds the host.
-- `reason` holds the refusal code of a `refused` alias, and null otherwise.
-
-The command writes nothing. A human creates each record with `create`.
-An unreadable `~/.ssh/config` answers `422 repository.credential.ssh_config_unreadable`.
-
 ## `ssh-key-create <name>`
 
 ```text
@@ -351,31 +336,29 @@ The workbench agent has no tool for this operation, so only a human pins a host 
 
 Every remote command can also answer the shared codes of [other.md](other.md#error-codes).
 
-| HTTP  | Code                                                        | Condition                                                                                       | Commands                                                               |
-| ----- | ----------------------------------------------------------- | ----------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
-| 404   | `credential.credential.not_found`                           | The credential does not exist, or its platform is not a platform of the Repository component.   | get, rotate, update-metadata, revoke, archive, verify, worker handover |
-| local | `cli.repository.credential.revoke.invalid_revision`         | The `<revision>` argument is not a positive safe integer.                                       | revoke                                                                 |
-| 400   | `credential.input.invalid`                                  | Secret or metadata validation fails, including the byte budget, or the name is reserved.        | create, rotate, update-metadata, check                                 |
-| 409   | `credential.name.conflict`                                  | A credential already has this name; details identify the holder.                                | create, ssh-key-create                                                 |
-| 400   | `credential.platform.mismatch`                              | The requested platform differs from the stored platform.                                        | binding apply (custody collaboration), worker handover                 |
-| 400   | `credential.platform.unsupported`                           | The platform is not a platform of the Repository component.                                     | create, check                                                          |
-| 400   | `credential.check.unsupported`                              | The platform has `verifiable: false` or the secret shape `oauth` or `ssh_key`.                  | check, verify                                                          |
-| 400   | `credential.entry.unsupported`                              | A generic entry names the platform `ssh`, or `ssh-key-rotate` names a record of another shape.  | create, rotate, update-metadata, ssh-key-rotate                        |
-| 409   | `credential.revision.conflict`                              | The expected revision is stale.                                                                 | rotate, update-metadata, ssh-key-rotate                                |
-| local | `cli.repository.credential.ssh_key_rotate.invalid_revision` | The `--expected-revision` value is not a positive safe integer.                                 | ssh-key-rotate                                                         |
-| 409   | `credential.revision.ended`                                 | The revision is already ended, by a revoke or by a drain.                                       | revoke                                                                 |
-| 409   | `credential.revision.newest_live`                           | The revoke names the newest live revision.                                                      | revoke                                                                 |
-| 409   | `credential.credential.in_use`                              | A dependent names the credential; `details` holds `agent_providers`, `bindings` and `inbounds`. | archive                                                                |
-| 409   | `credential.credential.archived`                            | The credential is archived; an archive is final.                                                | rotate, update-metadata, archive, verify                               |
-| 404   | `credential.revision.not_found`                             | The revision does not exist, or the credential name is unknown.                                 | revoke                                                                 |
-| 409   | `credential.revision.revoked`                               | A pinned use names a revoked revision.                                                          | worker handover, worker credential (API only)                          |
-| 400   | `repository.credential.ssh_identity_ambiguous`              | The SSH host resolves without `identitiesonly yes` or without exactly one `identityfile`.       | binding apply, ssh-discover (reason)                                   |
-| 400   | `repository.credential.ssh_drift`                           | `ssh -G` resolves values that differ from the metadata; details name each differing key.        | binding apply                                                          |
-| 422   | `repository.credential.ssh_config_unreadable`               | The server cannot read `~/.ssh/config`.                                                         | ssh-discover                                                           |
-| 400   | `repository.host_key.host_unsupported`                      | The host is in no SSH host set.                                                                 | host-key scan, host-key pin                                            |
-| 422   | `repository.host_key.scan_failed`                           | The GitHub meta read or `ssh-keyscan` fails or reaches its deadline; details hold the `host`.   | host-key scan, host-key pin                                            |
-| 409   | `repository.host_key.changed`                               | The second read answers another fingerprint; details hold the `host` and the `fingerprint`.     | host-key pin                                                           |
-| local | `cli.repository.host_key.pin.fingerprint_invalid`           | The `--fingerprint` value is not `SHA256:` and 43 base64 characters.                            | host-key pin                                                           |
+| HTTP  | Code                                                        | Condition                                                                                              | Commands                                                               |
+| ----- | ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------- |
+| 404   | `credential.credential.not_found`                           | The credential does not exist, or its platform is not a platform of the Repository component.          | get, rotate, update-metadata, revoke, archive, verify, worker handover |
+| local | `cli.repository.credential.revoke.invalid_revision`         | The `<revision>` argument is not a positive safe integer.                                              | revoke                                                                 |
+| 400   | `credential.input.invalid`                                  | Secret or metadata validation fails, including the byte budget, or the name is reserved.               | create, rotate, update-metadata, check                                 |
+| 409   | `credential.name.conflict`                                  | A credential already has this name; details identify the holder.                                       | create, ssh-key-create                                                 |
+| 400   | `credential.platform.mismatch`                              | The requested platform differs from the stored platform.                                               | binding apply (custody collaboration), worker handover                 |
+| 400   | `credential.platform.unsupported`                           | The platform is not a platform of the Repository component.                                            | create, check                                                          |
+| 400   | `credential.check.unsupported`                              | The platform has `verifiable: false` or the secret shape `oauth` or `ssh_key`.                         | check, verify                                                          |
+| 400   | `credential.entry.unsupported`                              | A generic entry names the platform `ssh`, or `ssh-key-rotate` names a record of another shape.         | create, rotate, update-metadata, ssh-key-rotate                        |
+| 409   | `credential.revision.conflict`                              | The expected revision is stale.                                                                        | rotate, update-metadata, ssh-key-rotate                                |
+| local | `cli.repository.credential.ssh_key_rotate.invalid_revision` | The `--expected-revision` value is not a positive safe integer.                                        | ssh-key-rotate                                                         |
+| 409   | `credential.revision.ended`                                 | The revision is already ended, by a revoke or by a drain.                                              | revoke                                                                 |
+| 409   | `credential.revision.newest_live`                           | The revoke names the newest live revision.                                                             | revoke                                                                 |
+| 409   | `credential.credential.in_use`                              | A dependent names the credential; `details` holds `agent_providers`, `bindings` and `inbounds`.        | archive                                                                |
+| 409   | `credential.credential.archived`                            | The credential is archived; an archive is final.                                                       | rotate, update-metadata, archive, verify                               |
+| 404   | `credential.revision.not_found`                             | The revision does not exist, or the credential name is unknown.                                        | revoke                                                                 |
+| 409   | `credential.revision.revoked`                               | A pinned use names a revoked revision.                                                                 | worker handover, worker credential (API only)                          |
+| 409   | `repository.host_key.unpinned`                              | The address host of a repository binding holds no pin; details hold the `host`. No git process starts. | binding apply, every network git operation of a binding                |
+| 400   | `repository.host_key.host_unsupported`                      | The host is in no SSH host set.                                                                        | host-key scan, host-key pin                                            |
+| 422   | `repository.host_key.scan_failed`                           | The GitHub meta read or `ssh-keyscan` fails or reaches its deadline; details hold the `host`.          | host-key scan, host-key pin                                            |
+| 409   | `repository.host_key.changed`                               | The second read answers another fingerprint; details hold the `host` and the `fingerprint`.            | host-key pin                                                           |
+| local | `cli.repository.host_key.pin.fingerprint_invalid`           | The `--fingerprint` value is not `SHA256:` and 43 base64 characters.                                   | host-key pin                                                           |
 
 Errors contain no secret. Dependency refusals list dependents in `error.details`.
 

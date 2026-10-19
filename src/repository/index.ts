@@ -15,8 +15,6 @@ import type { Transaction } from "../kernel/store.ts";
 import { checkRepositoryTools, probeRepositoryTools } from "./check.ts";
 import {
   gitLsRemote,
-  resolveSshHostname,
-  resolveSshIdentity,
   clone,
   cloneSnapshot,
   fetchAndCheckout,
@@ -28,8 +26,6 @@ import {
   resolveBranchCommit,
   readFilesAtCommit,
 } from "./connector.ts";
-import type { SshIdentity, SshPin } from "./ssh-identity.ts";
-import { proveSshPin } from "./credential-platform.ts";
 import { RepositoryErrorCode } from "./contract.ts";
 import { GitHubPlatform } from "./github.ts";
 import { knownHostsLine } from "./host-key.ts";
@@ -179,35 +175,12 @@ export class RepositoryComponent implements GitWriter {
     };
   }
 
-  resolveSshHostname(
-    host: string,
-    context: Context,
-    deadlineMs: number,
-  ): Promise<string> {
-    return resolveSshHostname(host, context, deadlineMs);
-  }
-
-  proveSshIdentity(
-    pin: SshPin,
-    context: Context,
-    deadlineMs: number,
-  ): Promise<void> {
-    return proveSshPin(pin, context, deadlineMs);
-  }
-
-  resolveSshIdentity(
-    host: string,
-    context: Context,
-    deadlineMs: number,
-  ): Promise<SshIdentity> {
-    return resolveSshIdentity(host, context, deadlineMs);
-  }
-
   gitLsRemote(
     sshUrl: string,
     context: Context,
     deadlineMs: number,
+    ssh: SshAccess,
   ): Promise<void> {
-    return gitLsRemote(sshUrl, context, deadlineMs);
+    return gitLsRemote(sshUrl, context, deadlineMs, ssh);
   }
 }

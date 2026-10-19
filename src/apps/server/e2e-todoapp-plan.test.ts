@@ -30,7 +30,6 @@ import {
 import {
   COVERING_WORKER_BINDINGS,
   enableCoveringAgents,
-  FAKE_SSH_IDENTITY,
   gatewayFixture,
 } from "./test-support.ts";
 
@@ -193,7 +192,6 @@ async function setup(t: TestContext) {
   const fixture = await gatewayFixture(t, {
     repositoryConnector: {
       gitLsRemote: async () => {},
-      resolveSshIdentity: async () => FAKE_SSH_IDENTITY,
     },
   });
   const session = cliSession(t, fixture.endpoint, fixture.token, MASK);

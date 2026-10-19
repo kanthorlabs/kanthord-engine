@@ -34,7 +34,6 @@ import {
   FAKE_GITHUB_HOST_KEY_FINGERPRINT,
   FAKE_SSH_CREDENTIAL,
   FAKE_SSH_HOST,
-  FAKE_SSH_IDENTITY,
   fakeGitHub,
   gatewayFixture,
 } from "./test-support.ts";
@@ -89,7 +88,6 @@ async function setup(t: TestContext, adapter: typeof HTTP | typeof DIRECT) {
   const fixture = await gatewayFixture(t, {
     repositoryConnector: {
       gitLsRemote: async () => {},
-      resolveSshIdentity: async () => FAKE_SSH_IDENTITY,
     },
     github: { baseUrl: gitHub.endpoint },
   });

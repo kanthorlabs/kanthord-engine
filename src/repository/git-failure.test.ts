@@ -9,7 +9,11 @@ import { HostKeyErrorCode, RepositoryErrorCode } from "./contract.ts";
 import { classifyGitFailure, gitFailureReason } from "./git-failure.ts";
 import { SshAgentErrorCode } from "./ssh-agent.ts";
 import { generateSshKey } from "./ssh-key.ts";
-import { createBareRepository, startTestSshd } from "./test-sshd.ts";
+import {
+  createBareRepository,
+  LOCAL_GIT_SSH_ACCESS,
+  startTestSshd,
+} from "./test-sshd.ts";
 
 const GIT_FAILED = "repository.connector.git_failed";
 const DEADLINE_MS = 5000;
@@ -194,6 +198,7 @@ test("gitFailureReason classifies a real failed ls-remote as unclassified", asyn
     MISSING_REPOSITORY,
     background,
     DEADLINE_MS,
+    LOCAL_GIT_SSH_ACCESS,
   ).then(
     () => assert.fail("The read of a missing repository must fail."),
     (failure: unknown) => failure,

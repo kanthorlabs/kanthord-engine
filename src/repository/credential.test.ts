@@ -23,21 +23,9 @@ import {
 import { AUTHORIZATION_HEADER } from "../kernel/probe.ts";
 import { IN_MEMORY_DATABASE, Store } from "../kernel/store.ts";
 import { LLM_PLATFORMS } from "../llm/index.ts";
-import {
-  mkdtempSync,
-  readdirSync,
-  readFileSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
-import { tmpdir } from "node:os";
+import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import {
-  repositoryOperations,
-  SshDiscoverState,
-  type SshDiscoverAnswer,
-} from "./contract.ts";
-import { SshErrorCode } from "./ssh-identity.ts";
+import { repositoryOperations } from "./contract.ts";
 import {
   CAPABILITY_RATE_LIMIT_READ,
   CAPABILITY_SSH_IDENTITY,
@@ -46,10 +34,7 @@ import {
   probeGitHub,
   REPOSITORY_PLATFORMS,
 } from "./credential-platform.ts";
-import {
-  RepositoryCredentials,
-  type CredentialDependencies,
-} from "./credential.ts";
+import { RepositoryCredentials } from "./credential.ts";
 import { INTAKE_SERVICE_NAME } from "../intake/contract.ts";
 import { decrypt, encrypt } from "../custody/envelope.ts";
 import { createIdentity } from "../kernel/identity.ts";
@@ -82,10 +67,6 @@ const BINDINGS_ANSWER = [
 function fixture(
   t: TestContext,
   logger: Logger = pino({ enabled: false }),
-  ssh: Pick<
-    CredentialDependencies,
-    "resolveSshIdentity" | "sshConfigPath"
-  > = {},
   database = IN_MEMORY_DATABASE,
 ) {
   const store = new Store(database);
@@ -128,7 +109,6 @@ function fixture(
       namings.push(name);
       return BINDINGS;
     },
-    ...ssh,
   });
   const registry = new OperationRegistry();
   component.declare(registry);
@@ -615,20 +595,6 @@ test("verify takes no body and no mutation key", () => {
   );
 });
 
-const ALIAS = "kanthorlabs.github.com";
-const PIN = {
-  host: ALIAS,
-  hostname: "ssh.github.com",
-  port: 443,
-  identity_file: "~/.ssh/id_kanthorlabs",
-};
-const PINNED_IDENTITY = {
-  hostname: PIN.hostname,
-  port: PIN.port,
-  identityFiles: [PIN.identity_file],
-  identitiesOnly: true,
-};
-
 async function rejectsWith(
   promise: unknown,
   status: number,
@@ -643,91 +609,6 @@ async function rejectsWith(
     return true;
   });
 }
-
-test("ssh discover lists the concrete aliases of a git platform with their state", async (t) => {
-  const directory = mkdtempSync(join(tmpdir(), "kanthord-ssh-"));
-  t.after(() => rmSync(directory, { recursive: true, force: true }));
-  const sshConfigPath = join(directory, "config");
-  writeFileSync(
-    sshConfigPath,
-    [
-      "Host *",
-      "  ServerAliveInterval 30",
-      "Host github.com",
-      "  IdentityFile ~/.ssh/id_ed25519",
-      `Host ${ALIAS} pinned.github.com # work`,
-      "Host acme.gitlab.com",
-      "Host internal !skip",
-      "Host broken.github.com",
-    ].join("\n"),
-  );
-  const identities: Record<string, typeof PINNED_IDENTITY> = {
-    "github.com": {
-      hostname: "github.com",
-      port: 22,
-      identityFiles: ["~/.ssh/id_ed25519"],
-      identitiesOnly: false,
-    },
-    [ALIAS]: PINNED_IDENTITY,
-    "pinned.github.com": PINNED_IDENTITY,
-    "acme.gitlab.com": { ...PINNED_IDENTITY, hostname: "gitlab.com", port: 22 },
-    internal: { ...PINNED_IDENTITY, hostname: "10.0.0.1" },
-  };
-  const f = fixture(t, undefined, {
-    sshConfigPath,
-    resolveSshIdentity: async (host) => {
-      const identity = identities[host];
-      if (!identity) throw new Error("ssh -G failed");
-      return identity;
-    },
-  });
-  const answer = (await f.invoke(repositoryOperations.ssh_discover, {
-    params: {},
-    query: {},
-    body: null,
-  })) as SshDiscoverAnswer;
-  assert.deepEqual(answer.items, [
-    {
-      host: "github.com",
-      hostname: "github.com",
-      port: 22,
-      identity_file: null,
-      state: SshDiscoverState.Refused,
-      reason: SshErrorCode.IdentityAmbiguous,
-    },
-    { ...PIN, state: SshDiscoverState.Ready, reason: null },
-    {
-      ...PIN,
-      host: "pinned.github.com",
-      state: SshDiscoverState.Ready,
-      reason: null,
-    },
-    {
-      host: "acme.gitlab.com",
-      hostname: "gitlab.com",
-      port: 22,
-      identity_file: PIN.identity_file,
-      state: SshDiscoverState.Ready,
-      reason: null,
-    },
-  ]);
-});
-
-test("ssh discover refuses an unreadable configuration", async (t) => {
-  const f = fixture(t, undefined, {
-    sshConfigPath: join(tmpdir(), "kanthord-absent-ssh-config"),
-    resolveSshIdentity: async () => PINNED_IDENTITY,
-  });
-  await rejectsWith(
-    f.invoke(repositoryOperations.ssh_discover, {
-      params: {},
-      query: {},
-      body: null,
-    }),
-    422,
-    SshErrorCode.ConfigUnreadable,
-  );
-});
 
 const SSH_NAME = "deploy";
 const OPENSSH_LABEL = "OPENSSH PRIVATE KEY";
@@ -781,6 +662,13 @@ function keyBodyLines(privateKey: string): string[] {
   return privateKey.trim().split("\n").slice(1, -1);
 }
 
+const LEGACY_SSH_METADATA = {
+  host: "kanthorlabs.github.com",
+  hostname: "ssh.github.com",
+  port: 443,
+  identity_file: "~/.ssh/id_kanthorlabs",
+};
+
 function insertLegacy(store: Store, name = SSH_NAME): void {
   const id = createIdentity("credential");
   const { nonce, ciphertext } = encrypt(Buffer.alloc(32, 7), id, "ssh", {});
@@ -788,7 +676,14 @@ function insertLegacy(store: Store, name = SSH_NAME): void {
     .prepare(
       "INSERT INTO credential (id, name, platform, revision, nonce, ciphertext, metadata, created_at, ended_at) VALUES (?, ?, 'ssh', 1, ?, ?, ?, ?, NULL)",
     )
-    .run(id, name, nonce, ciphertext, canonicalJSON(PIN), Date.now());
+    .run(
+      id,
+      name,
+      nonce,
+      ciphertext,
+      canonicalJSON(LEGACY_SSH_METADATA),
+      Date.now(),
+    );
 }
 
 function capturedLogger(lines: string[]): Logger {
@@ -984,7 +879,7 @@ test("the generic create, rotate, metadata edit and check refuse the platform ss
 test("the raw database file holds no text of a generated SSH key", async (t) => {
   const directory = temporary(t);
   const path = join(directory, "kanthord.db");
-  const f = fixture(t, undefined, {}, path);
+  const f = fixture(t, undefined, path);
   await f.invoke(repositoryOperations.ssh_key_create, sshKeyCreate());
   const first = storedPrivateKey(f.store);
   await f.invoke(

@@ -13,10 +13,8 @@ import {
   type ResourceStatusValue,
 } from "../kernel/health.ts";
 import { AUTHORIZATION_HEADER, probeHttp } from "../kernel/probe.ts";
-import { resolveSshIdentity } from "./connector.ts";
 import { HOST_KEY_FINGERPRINT_PATTERN } from "./contract.ts";
 import { sshFingerprintOf, sshPublicKeyOf } from "./ssh-key.ts";
-import { assertPinned, type SshPin } from "./ssh-identity.ts";
 
 export const Platform = {
   GitHub: "github",
@@ -27,14 +25,6 @@ export type Platform = (typeof Platform)[keyof typeof Platform];
 export const CAPABILITY_RATE_LIMIT_READ = "rate-limit read";
 export const GITHUB_RATE_LIMIT_URL = "https://api.github.com/rate_limit";
 export const CAPABILITY_SSH_IDENTITY = "ssh identity";
-
-export async function proveSshPin(
-  pin: SshPin,
-  context: Context,
-  deadlineMs: number,
-): Promise<void> {
-  assertPinned(pin, await resolveSshIdentity(pin.host, context, deadlineMs));
-}
 
 export const sshKeyMetadataSchema = z.strictObject({
   public_key: z.string().min(1),

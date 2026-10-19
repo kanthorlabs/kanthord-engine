@@ -13,7 +13,6 @@ import { InstanceActivity } from "../../worker/contract.ts";
 import { generateMachineToken } from "./cli-support.ts";
 import {
   createFakeSshCredential,
-  FAKE_SSH_IDENTITY,
   gatewayFixture,
   outboundHosts,
 } from "./test-support.ts";
@@ -70,7 +69,6 @@ test(
     const fixture = await gatewayFixture(t, {
       repositoryConnector: {
         gitLsRemote: async () => {},
-        resolveSshIdentity: async () => FAKE_SSH_IDENTITY,
       },
       inventoryOverrides: { llm: () => [], repository: () => [] },
     });

@@ -34,12 +34,6 @@ export async function workerAcceptance(
     serverSlotLimit: options.slotLimit,
     repositoryConnector: {
       gitLsRemote: async () => {},
-      resolveSshIdentity: async () => ({
-        hostname: "github.com",
-        port: 22,
-        identityFiles: ["~/.ssh/id_acceptance"],
-        identitiesOnly: true,
-      }),
     },
   });
   const directory = temporary(t);

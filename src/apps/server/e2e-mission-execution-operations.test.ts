@@ -36,7 +36,6 @@ import {
 } from "../../scheduler/contract.ts";
 import {
   createFakeSshCredential,
-  FAKE_SSH_IDENTITY,
   gatewayFixture,
   fakeGitHub,
   fakeS3,
@@ -109,7 +108,6 @@ async function setup(t: TestContext) {
   const fixture = await gatewayFixture(t, {
     repositoryConnector: {
       gitLsRemote: async () => {},
-      resolveSshIdentity: async () => FAKE_SSH_IDENTITY,
     },
     github: { baseUrl: gitHub.endpoint },
   });

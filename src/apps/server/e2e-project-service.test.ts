@@ -24,7 +24,6 @@ import {
   FAKE_GITHUB_HOST_KEY,
   FAKE_SSH_CREDENTIAL,
   FAKE_SSH_HOST,
-  FAKE_SSH_IDENTITY,
   gatewayFixture,
 } from "./test-support.ts";
 
@@ -176,7 +175,6 @@ async function setup(
     repositoryConnector: {
       gitLsRemote: async (address, _context, _deadlineMs, ssh) =>
         void reads.push({ address, ssh }),
-      resolveSshIdentity: async () => FAKE_SSH_IDENTITY,
     },
   });
   const directory = temporary(t);

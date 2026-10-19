@@ -185,6 +185,19 @@ test("the known_hosts seam lets a test reach a local sshd on another port", asyn
   assert.equal(stdout, TEST_REPOSITORY_TEXT);
 });
 
+test("gitLsRemote of the component reaches a local sshd with the custody key", async (t) => {
+  const sshd = await startTestSshd(t);
+  const bare = await createBareRepository(t);
+  const key = generateSshKey(CREDENTIAL_NAME);
+  await sshd.authorize(key.public_key);
+  const component = new RepositoryComponent();
+  await component.gitLsRemote(sshd.url(bare), background, DEADLINE_MS, {
+    private_key: key.private_key,
+    public_key: key.public_key,
+    known_hosts: sshd.known_hosts,
+  });
+});
+
 test("the component runs the tool check of its dependencies once at construction", () => {
   const checks: string[] = [];
   new RepositoryComponent({ checkTools: () => void checks.push(CHECK_CALL) });

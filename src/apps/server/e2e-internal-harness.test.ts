@@ -20,7 +20,6 @@ import { generateMachineToken } from "./cli-support.ts";
 import {
   gatewayFixture,
   createFakeSshCredential,
-  FAKE_SSH_IDENTITY,
   fakeGitHub,
   fakeS3,
   inProcessWorker,
@@ -134,7 +133,6 @@ async function setupInternal(t: TestContext) {
   const fixture = await gatewayFixture(t, {
     repositoryConnector: {
       gitLsRemote: async () => {},
-      resolveSshIdentity: async () => FAKE_SSH_IDENTITY,
     },
     github: { baseUrl: gitHub.endpoint },
   });

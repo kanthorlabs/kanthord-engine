@@ -8,16 +8,12 @@ import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { promisify } from "node:util";
 import { throwIfCancelled, type Context } from "../kernel/context.ts";
-import { Diagnostic, OperationError } from "../kernel/errors.ts";
+import { Diagnostic } from "../kernel/errors.ts";
 import {
   GIT_UNSAFE_OPTIONS,
   isolatedGitEnvironment,
 } from "../kernel/git-environment.ts";
-import {
-  RepositoryFileState,
-  SSH_RESOLVE_FAILED_STATUS,
-  type RepositoryFile,
-} from "./contract.ts";
+import { RepositoryFileState, type RepositoryFile } from "./contract.ts";
 import { CheckEndState, ExpectedEndState, type CheckFold } from "./github.ts";
 import { NODE_BRANCH_PATTERN } from "./node-branch.ts";
 import {
@@ -25,11 +21,6 @@ import {
   withSshAgent,
   type SshAccess,
 } from "./ssh-agent.ts";
-import {
-  parseSshIdentity,
-  SshErrorCode,
-  type SshIdentity,
-} from "./ssh-identity.ts";
 
 const GIT_FAILED = "repository.connector.git_failed";
 export const NODE_BRANCH_MISSING = "repository.node_branch.missing";
@@ -123,14 +114,13 @@ type AgentVariables = Partial<
 >;
 
 async function withAccess<T>(
-  ssh: SshAccess | undefined,
+  ssh: SshAccess,
   context: Context,
   deadlineMs: number,
   work: (agent: AgentVariables, remainingMs: number) => Promise<T>,
 ): Promise<T> {
   const start = performance.now();
   const remaining = () => deadlineMs - (performance.now() - start);
-  if (ssh === undefined) return work({}, remaining());
   return withSshAgent(ssh, context, deadlineMs, (environment) =>
     work(
       {
@@ -240,53 +230,11 @@ async function runGitTask<T>(
   }
 }
 
-export async function resolveSshHostname(
-  host: string,
-  context: Context,
-  deadlineMs: number,
-): Promise<string> {
-  return (await resolveSshIdentity(host, context, deadlineMs)).hostname;
-}
-
-export async function resolveSshIdentity(
-  host: string,
-  context: Context,
-  deadlineMs: number,
-): Promise<SshIdentity> {
-  assert.ok(host !== EMPTY_STRING);
-  assert.ok(!host.startsWith("-"));
-  const controller = new AbortController();
-  const unsubscribe = context.onCancel(() => controller.abort());
-  const timer = setTimeout(
-    () => controller.abort(),
-    Math.max(EXPIRED, deadlineMs),
-  );
-  try {
-    throwIfCancelled(context);
-    if (deadlineMs <= EXPIRED) throw new Error("SSH deadline exceeded");
-    const { stdout } = await execFileAsync("ssh", ["-G", "--", host], {
-      signal: controller.signal,
-    });
-    return parseSshIdentity(stdout);
-  } catch {
-    throwIfCancelled(context);
-    throw new OperationError(
-      SSH_RESOLVE_FAILED_STATUS,
-      SshErrorCode.ResolveFailed,
-      "The SSH host does not resolve through ssh -G.",
-      { host },
-    );
-  } finally {
-    clearTimeout(timer);
-    unsubscribe();
-  }
-}
-
 export async function gitLsRemote(
   sshUrl: string,
   context: Context,
   deadlineMs: number,
-  ssh?: SshAccess,
+  ssh: SshAccess,
 ): Promise<void> {
   await withAccess(ssh, context, deadlineMs, (agent, remaining) =>
     runGit(undefined, ["ls-remote", sshUrl], context, remaining, "ls-remote", {
@@ -300,7 +248,7 @@ export async function clone(
   directory: string,
   context: Context,
   deadlineMs: number,
-  ssh?: SshAccess,
+  ssh: SshAccess,
 ): Promise<void> {
   await withAccess(ssh, context, deadlineMs, (agent, remaining) =>
     cloneWith(address, directory, context, remaining, agent),
@@ -333,7 +281,7 @@ export async function fetchAndCheckout(
   pushed: boolean,
   context: Context,
   deadlineMs: number,
-  ssh?: SshAccess,
+  ssh: SshAccess,
 ): Promise<string> {
   return withAccess(ssh, context, deadlineMs, (agent, remaining) =>
     fetchAndCheckoutWith(
@@ -417,7 +365,7 @@ export async function fetchBase(
   baseBranch: string,
   context: Context,
   deadlineMs: number,
-  ssh?: SshAccess,
+  ssh: SshAccess,
 ): Promise<string> {
   assert.ok(baseBranch);
   return withAccess(ssh, context, deadlineMs, async (agent, remaining) => {
@@ -437,7 +385,7 @@ export async function pushNodeBranch(
   branch: string,
   context: Context,
   deadlineMs: number,
-  ssh?: SshAccess,
+  ssh: SshAccess,
 ): Promise<void> {
   assert.match(branch, NODE_BRANCH_PATTERN);
   assert.ok(directory !== EMPTY_STRING);
@@ -459,7 +407,7 @@ export async function cloneSnapshot(
   directory: string,
   context: Context,
   deadlineMs: number,
-  ssh?: SshAccess,
+  ssh: SshAccess,
 ): Promise<string> {
   assert.ok(revision);
   assert.ok(!revision.startsWith("-"));
@@ -587,7 +535,7 @@ export async function mergePushFresh(
   input: MergePushInput,
   context: Context,
   deadlineAt: number,
-  ssh?: SshAccess,
+  ssh: SshAccess,
 ): Promise<{ commit: string }> {
   assert.match(input.commit, COMMIT_PATTERN);
   assert.ok(!input.base_branch.startsWith("-"));
@@ -640,7 +588,7 @@ export async function pushSnapshotFresh(
   input: BranchCommitInput,
   context: Context,
   deadlineAt: number,
-  ssh?: SshAccess,
+  ssh: SshAccess,
 ): Promise<void> {
   assert.match(input.commit, COMMIT_PATTERN);
   assert.ok(!input.branch.startsWith("-"));
@@ -680,7 +628,7 @@ export async function landedOn(
   input: BranchCommitInput,
   context: Context,
   deadlineAt: number,
-  ssh?: SshAccess,
+  ssh: SshAccess,
 ): Promise<Landing> {
   assert.match(input.commit, COMMIT_PATTERN);
   assert.ok(!input.branch.startsWith("-"));
@@ -763,7 +711,7 @@ export async function resolveBranchCommit(
   branch: string,
   context: Context,
   deadlineMs: number,
-  ssh?: SshAccess,
+  ssh: SshAccess,
 ): Promise<string | null> {
   assert.ok(address !== EMPTY_STRING);
   assert.ok(branch !== EMPTY_STRING);
@@ -1137,7 +1085,7 @@ export async function readFilesAtCommit(
   maxBytes: number,
   context: Context,
   deadlineMs: number,
-  ssh?: SshAccess,
+  ssh: SshAccess,
   parent: string = tmpdir(),
 ): Promise<RepositoryFile[]> {
   assert.ok(address !== EMPTY_STRING);

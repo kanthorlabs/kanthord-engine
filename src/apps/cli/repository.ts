@@ -16,8 +16,6 @@ import {
   singleUse,
 } from "./shared.ts";
 
-const SSH_DISCOVER = "ssh-discover";
-const SSH_DISCOVER_CODE = "cli.repository.credential.ssh_discover";
 const SSH_KEY_CREATE = "ssh-key-create";
 const SSH_KEY_ROTATE = "ssh-key-rotate";
 const CREDENTIAL_CODE = "cli.repository.credential";
@@ -92,19 +90,6 @@ async function sshKeyRotate(name: string, command: Command): Promise<void> {
   );
   process.stdout.write(
     `${JSON.stringify({ ...data, idempotency_key: key })}\n`,
-  );
-}
-
-async function sshDiscover(command: Command): Promise<void> {
-  const { endpoint, token } = resolveClient(command.optsWithGlobals());
-  requireToken(token, `${SSH_DISCOVER_CODE}.token_required`);
-  const result = await httpClient(
-    repositoryOperations,
-    endpoint,
-    token,
-  ).ssh_discover({ params: {}, query: {}, body: null });
-  process.stdout.write(
-    `${JSON.stringify(handleReadResult(result, `${SSH_DISCOVER_CODE}.indeterminate`))}\n`,
   );
 }
 
@@ -210,10 +195,6 @@ export function addRepositoryCommand(program: Command): void {
     .action((name: string, _options, command: Command) =>
       sshKeyRotate(name, command),
     );
-  credential
-    .command(SSH_DISCOVER)
-    .description("List the SSH aliases of ~/.ssh/config as JSON")
-    .action((_options, command: Command) => sshDiscover(command));
   const hostKey = credential
     .parent!.command(HOST_KEY_GROUP)
     .description("SSH host key commands");

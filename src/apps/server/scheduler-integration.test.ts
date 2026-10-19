@@ -41,7 +41,6 @@ import {
   FAKE_GITHUB_HOST_KEY_FINGERPRINT,
   FAKE_SSH_CREDENTIAL,
   FAKE_SSH_HOST,
-  FAKE_SSH_IDENTITY,
   gatewayFixture,
 } from "./test-support.ts";
 
@@ -115,7 +114,6 @@ async function setup(t: TestContext, adapter: Adapter, path?: string) {
     path,
     repositoryConnector: {
       gitLsRemote: async () => {},
-      resolveSshIdentity: async () => FAKE_SSH_IDENTITY,
     },
   });
   async function call<T extends Operation>(

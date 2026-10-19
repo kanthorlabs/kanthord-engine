@@ -54,7 +54,6 @@ import {
   FAKE_GITHUB_HOST_KEY_FINGERPRINT,
   FAKE_SSH_CREDENTIAL,
   FAKE_SSH_HOST,
-  FAKE_SSH_IDENTITY,
   gatewayFixture,
 } from "./test-support.ts";
 import { SHIPPED_TEMPLATES } from "../../agent/prompt-templates.ts";
@@ -383,7 +382,6 @@ async function setup(
   const f = await gatewayFixture(t, {
     repositoryConnector: {
       gitLsRemote: async () => {},
-      resolveSshIdentity: async () => FAKE_SSH_IDENTITY,
     },
     oauthProviders: oauth ? () => [offlineProvider(oauth)] : undefined,
   });
