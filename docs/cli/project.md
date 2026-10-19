@@ -516,16 +516,16 @@ HTTP `200` answers `{ address, ssh_credential, credential }`. `credential` is nu
 
 The failure reasons of the `address` entry:
 
-| Value                  | Cause                                                                                                         |
-| ---------------------- | ------------------------------------------------------------------------------------------------------------- |
-| `address_invalid`      | The address is invalid, or `ssh -G` resolves its host outside the SSH host set of the platform. No read runs. |
-| `host_key_unknown`     | ssh writes "Host key verification failed".                                                                    |
-| `key_refused`          | ssh writes "Permission denied (publickey)".                                                                   |
-| `repository_not_found` | The remote writes "Repository not found". A deploy key of another repository also gives this value.           |
-| `host_unreachable`     | ssh writes "Could not resolve hostname", "Connection timed out" or "Connection refused".                      |
-| `unclassified`         | Any other failure, a check that exceeds its deadline included.                                                |
+| Value                  | Cause                                                                                                                                                                       |
+| ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `address_invalid`      | The address is invalid, `ssh -G` fails, or `ssh -G` resolves its host outside the SSH host set of the platform. No read runs.                                               |
+| `host_key_unknown`     | ssh writes "Host key verification failed".                                                                                                                                  |
+| `key_refused`          | ssh writes "Permission denied (publickey)".                                                                                                                                 |
+| `repository_not_found` | The remote writes "Repository not found", or GitLab writes "The project you were looking for could not be found". A deploy key of another repository also gives this value. |
+| `host_unreachable`     | ssh writes "Could not resolve hostname", "Connection timed out", "Connection refused", "Operation timed out", "No route to host" or "Network is unreachable".               |
+| `unclassified`         | Any other failure, a check that exceeds its deadline included. ssh "REMOTE HOST IDENTIFICATION HAS CHANGED" also gives this value.                                          |
 
-The server reads only the lines of ssh and of the remote, because git translates its own lines. No remote text reaches the client. The server log keeps the redacted text.
+The server reads only the lines of ssh and of the remote, because git translates its own lines. No remote text reaches the client.
 
 A refusal of the record verify refuses the request with its own code.
 A binding that is absent, belongs to another project, is removed or is no repository binding answers `404 project.binding.not_found`.
@@ -552,7 +552,7 @@ HTTP `200` answers `{ commit, read_at, files }`. `commit` is the commit of the b
 - `reason` is the invalid reason of the working layer text validation, else null.
 - `text` is the text of a `present` file, else null.
 
-A failed or timed-out read answers `422 project.bindings.repository.ssh_unreachable` with `details: { failure_reason }`. `failure_reason` is a git value of the [failure reason list](#binding-verify).
+A failed or timed-out read answers `422 project.bindings.repository.ssh_unreachable` with `details: { failure_reason }`. `failure_reason` is a value of the [failure reason list](#binding-verify).
 A base branch that the remote does not hold answers `422 project.bindings.repository.base_branch_absent`.
 A binding that is absent, belongs to another project, is removed or is no repository binding answers `404 project.binding.not_found`.
 An absent project answers `404 project.project.not_found`.
@@ -699,7 +699,7 @@ Every remote command can also answer the shared codes of [other.md](other.md#err
 | 404   | `project.binding.not_found`                                | The binding is absent or belongs to another project. For agent list and agent get, it is not a worker binding. For binding verify and binding instruction-files, it is removed or is not a repository binding. | binding get, binding revision list, binding verify, binding instruction-files, agent list, agent get                                                  |
 | 409   | `project.binding_set.version_conflict`                     | The submitted binding-set version differs from the current version.                                                                                                                                            | binding apply                                                                                                                                         |
 | 400   | `project.bindings.duplicate_resource`                      | Two bindings use the same resource.                                                                                                                                                                            | binding apply                                                                                                                                         |
-| 400   | `project.bindings.repository.address_invalid`              | The repository address is invalid, or `ssh -G` resolves its host outside the SSH host set of the platform. Binding verify answers it as `failure_reason: address_invalid` in the `address` entry.              | binding apply, binding check                                                                                                                          |
+| 400   | `project.bindings.repository.address_invalid`              | The repository address is invalid, or `ssh -G` resolves its host outside the SSH host set of the platform. Binding check and binding verify answer it as `failure_reason: address_invalid`.                    | binding apply, binding check                                                                                                                          |
 | 400   | `project.bindings.repository.action_unsupported`           | A binding of the git-only platform `gitlab` or `bitbucket` names a `credential` or the action `pull_request`.                                                                                                  | binding apply, binding check                                                                                                                          |
 | 400   | `project.bindings.repository.credential_required`          | The action `pull_request` names no `credential`.                                                                                                                                                               | binding apply, binding check                                                                                                                          |
 | 400   | `project.bindings.repository.ssh_host_mismatch`            | The host of the address differs from the `host` of the `ssh_credential`.                                                                                                                                       | binding apply, binding check                                                                                                                          |

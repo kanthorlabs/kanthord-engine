@@ -3,12 +3,23 @@ import { ResourceFailureReason } from "../kernel/health.ts";
 
 const GIT_FAILURE_LINES: readonly (readonly [RegExp, ResourceFailureReason])[] =
   [
+    [
+      /REMOTE HOST IDENTIFICATION HAS CHANGED/,
+      ResourceFailureReason.Unclassified,
+    ],
     [/Host key verification failed/, ResourceFailureReason.HostKeyUnknown],
     [/Permission denied \(publickey/, ResourceFailureReason.KeyRefused],
     [/Repository not found/, ResourceFailureReason.RepositoryNotFound],
+    [
+      /The project you were looking for could not be found/,
+      ResourceFailureReason.RepositoryNotFound,
+    ],
     [/Could not resolve hostname/, ResourceFailureReason.HostUnreachable],
     [/Connection timed out/, ResourceFailureReason.HostUnreachable],
     [/Connection refused/, ResourceFailureReason.HostUnreachable],
+    [/Operation timed out/, ResourceFailureReason.HostUnreachable],
+    [/No route to host/, ResourceFailureReason.HostUnreachable],
+    [/Network is unreachable/, ResourceFailureReason.HostUnreachable],
   ];
 
 export function classifyGitFailure(stderr: string): ResourceFailureReason {

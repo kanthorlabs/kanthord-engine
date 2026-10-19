@@ -4095,6 +4095,7 @@ function instructionFixture(
     states?: string[];
     resolveFails?: boolean;
     resolveFailure?: Error;
+    resolvedHost?: string;
     readFails?: boolean;
     hang?: boolean;
   } = {},
@@ -4116,7 +4117,7 @@ function instructionFixture(
   const f = fixture(t, {
     repositoryConnector: {
       async resolveSshIdentity(host: string) {
-        return sshIdentity(host);
+        return sshIdentity(behavior.resolvedHost ?? host);
       },
       gitLsRemote: unexpected,
     },
@@ -4346,6 +4347,16 @@ test("binding.instruction_files.get refuses a failed commit resolution", async (
     SSH_FAILURE_STATUS,
     ProjectErrorCode.RepositorySshUnreachable,
     { failure_reason: ResourceFailureReason.Unclassified },
+  );
+});
+
+test("binding.instruction_files.get names an address outside the platform hosts", async (t) => {
+  const { f, saved } = instructionFixture(t, { resolvedHost: "example.com" });
+  await refusesInstructionFiles(
+    f.invokeAsync("binding.instruction_files.get", saved),
+    SSH_FAILURE_STATUS,
+    ProjectErrorCode.RepositorySshUnreachable,
+    { failure_reason: ResourceFailureReason.AddressInvalid },
   );
 });
 

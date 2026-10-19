@@ -149,6 +149,13 @@ function refuseSshHost(address: string, pin: SshPin): void {
     );
 }
 
+function repositoryFailureReason(error: unknown): ResourceFailureReason {
+  return error instanceof OperationError &&
+    error.code === ProjectErrorCode.RepositoryAddressInvalid
+    ? ResourceFailureReason.AddressInvalid
+    : gitFailureReason(error);
+}
+
 function refuseRepositoryAction(
   config: typeof repositoryConfigSchema._output,
 ): void {
@@ -650,7 +657,7 @@ export class ProjectService implements Service, ProjectBindings {
         SSH_UNREACHABLE_STATUS,
         ProjectErrorCode.RepositorySshUnreachable,
         "Repository SSH read failed.",
-        { failure_reason: gitFailureReason(error) },
+        { failure_reason: repositoryFailureReason(error) },
       );
     }
   }
@@ -732,10 +739,7 @@ export class ProjectService implements Service, ProjectBindings {
     } catch (error) {
       return entry(
         deadline.err() ? ResourceStatus.Unknown : ResourceStatus.Unhealthy,
-        error instanceof OperationError &&
-          error.code === ProjectErrorCode.RepositoryAddressInvalid
-          ? ResourceFailureReason.AddressInvalid
-          : gitFailureReason(error),
+        repositoryFailureReason(error),
       );
     } finally {
       deadline.cancel();
