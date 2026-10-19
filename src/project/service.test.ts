@@ -64,12 +64,36 @@ import {
   ProjectErrorCode,
   projectOperations,
 } from "./contract.ts";
-import { RepositoryFileState } from "../repository/contract.ts";
+import {
+  HostKeyErrorCode,
+  RepositoryErrorCode,
+  RepositoryFileState,
+} from "../repository/contract.ts";
 import { TAG_MAX_BYTES } from "../kernel/tag.ts";
 import { projectMigrations } from "./migrations.ts";
-import { SshErrorCode, type SshIdentity } from "../repository/ssh-identity.ts";
+import {
+  GrantKind,
+  SshIdentitySubjectKind,
+  type Grant,
+  type GrantFacts,
+  type Material,
+  type SshIdentitySubject,
+} from "../custody/contract.ts";
+import type { CallerIdentity, ServiceIdentity } from "../kernel/caller.ts";
+import {
+  RepositoryComponent,
+  repositoryMigrations,
+} from "../repository/index.ts";
+import { generateSshKey } from "../repository/ssh-key.ts";
+import { gitLsRemote } from "../repository/connector.ts";
+import {
+  createBareRepository,
+  startTestSshd,
+} from "../repository/test-sshd.ts";
+import type { SshAccess } from "../repository/index.ts";
 import {
   insertProject,
+  readBindingRevision,
   readCurrentBindingSet,
   requireProject,
   writeBindingSet,
@@ -124,12 +148,132 @@ function unexpected(): never {
   throw new Error("Unexpected peer collaboration call.");
 }
 
+delete process.env.SSH_AUTH_SOCK;
+delete process.env.SSH_AGENT_PID;
+
+const SSH_KEY = generateSshKey("project");
+const PINNED_HOSTS = ["github.com", "gitlab.com"];
+const HOST_KEY =
+  "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl";
+const PROJECT_IDENTITY: ServiceIdentity = {
+  kind: IdentityKind.Service,
+  service: PROJECT_SERVICE_NAME,
+};
+const HOST_KEY_UNPINNED = HostKeyErrorCode.Unpinned;
+const SSH_KEY_LEGACY = RepositoryErrorCode.SshKeyLegacy;
+
+type Release = {
+  identity: CallerIdentity;
+  subject: SshIdentitySubject;
+  credential: string;
+  address: string;
+  transaction: boolean;
+};
+
+function pinHosts(store: Store, hosts: readonly string[]): void {
+  for (const host of hosts)
+    store.database
+      .prepare(
+        "INSERT INTO repository_host_key (id, host, public_key, created_at) VALUES (?, ?, ?, 1)",
+      )
+      .run(createIdentity("host_key"), host, HOST_KEY);
+}
+
+function fakeCustody(
+  store: Store,
+  dependencies: () => Dependencies,
+  secrets: Map<string, unknown>,
+) {
+  const releases: Release[] = [];
+  const dropped: string[] = [];
+  const grantAddress: { value?: string } = {};
+  const requests = new WeakMap<
+    object,
+    { identity: CallerIdentity; subject: SshIdentitySubject }
+  >();
+  const authorized = (tx: Transaction, subject: SshIdentitySubject) => {
+    if (subject.kind === SshIdentitySubjectKind.Draft) {
+      dependencies().custodySuitability(tx, {
+        credential: subject.credential,
+        platform: SSH_CREDENTIAL_PLATFORM,
+      });
+      return {
+        credential: subject.credential,
+        project_id: subject.project_id,
+        facts: { binding_id: null, address: subject.address },
+      };
+    }
+    const binding = readBindingRevision(tx, subject.binding_id);
+    assert.ok(binding);
+    const config = repositoryConfigSchema.parse(binding.config);
+    return {
+      credential: config.ssh_credential,
+      project_id: binding.project_id,
+      facts: { binding_id: binding.id, address: config.address },
+    };
+  };
+  const custody: Dependencies["custody"] = {
+    authorizeOperation: (tx, request) => {
+      assert.ok(tx.database.isTransaction);
+      assert.equal(request.kind, GrantKind.SshIdentity);
+      assert.equal(request.claim, null);
+      const granted = authorized(tx, request.subject);
+      const address = grantAddress.value ?? granted.facts.address;
+      const grant = Object.freeze({
+        kind: GrantKind.SshIdentity,
+        platform: SSH_CREDENTIAL_PLATFORM,
+        execution: null,
+        ...granted,
+        facts: { ...granted.facts, address },
+      });
+      requests.set(grant, {
+        identity: request.identity,
+        subject: request.subject,
+      });
+      return grant as never;
+    },
+    grantFacts: <G extends Grant>(grant: G): GrantFacts<G> => ({
+      project_id: grant.project_id,
+      credential: grant.credential,
+      facts: grant.facts,
+    }),
+    release: (tx, grant): Material => {
+      assert.ok(tx.database.isTransaction);
+      assert.ok(grant.credential !== null);
+      assert.equal(grant.kind, GrantKind.SshIdentity);
+      const request = requests.get(grant);
+      assert.ok(request);
+      const name = grant.credential;
+      releases.push({
+        ...request,
+        credential: name,
+        address: grant.facts.address,
+        transaction: store.database.isTransaction,
+      });
+      return {
+        credential_id: createIdentity("credential"),
+        platform: SSH_CREDENTIAL_PLATFORM,
+        value: () =>
+          secrets.has(name)
+            ? secrets.get(name)
+            : { private_key: SSH_KEY.private_key },
+        drop: () => void dropped.push(name),
+      };
+    },
+  };
+  return { custody, releases, dropped, grantAddress };
+}
+
 function fixture(t: TestContext, overrides: Partial<Dependencies> = {}) {
   const store = new Store(IN_MEMORY_DATABASE);
   t.after(() => store.close());
   store.migrate([
     { service: PROJECT_SERVICE_NAME, migrations: projectMigrations },
+    { service: "repository", migrations: repositoryMigrations },
   ]);
+  pinHosts(store, PINNED_HOSTS);
+  const secrets = new Map<string, unknown>();
+  const repository = new RepositoryComponent({ checkTools: () => {} });
   const health = new HealthRegistry();
   const stateDirectory = temporary(t);
   const wakes: string[] = [];
@@ -139,7 +283,16 @@ function fixture(t: TestContext, overrides: Partial<Dependencies> = {}) {
     now: number;
   }> = [];
   const bindingChanges: string[] = [];
-  const project = new ProjectService({
+  const held: { dependencies?: Dependencies } = {};
+  const ssh = fakeCustody(
+    store,
+    () => {
+      assert.ok(held.dependencies);
+      return held.dependencies;
+    },
+    secrets,
+  );
+  const dependencies: Dependencies = {
     config: {},
     operationalStore: store,
     stateDirectory,
@@ -155,16 +308,16 @@ function fixture(t: TestContext, overrides: Partial<Dependencies> = {}) {
     unmatchedClaims: () => [],
     validateEntry: unexpected,
     custodySuitability: unexpected,
-    repositoryConnector: {
-      gitLsRemote: unexpected,
-      resolveSshIdentity: unexpected,
-    },
+    repositoryConnector: { gitLsRemote: unexpected },
     repositoryFiles: {
       resolveBranchCommit: unexpected,
       readFilesAtCommit: unexpected,
     },
     verifyRepositoryCredential: unexpected,
-    credentialMetadata: (_tx, name) => sshPinMetadata(name),
+    identity: PROJECT_IDENTITY,
+    custody: ssh.custody,
+    sshAccessOf: (tx, granted, material) =>
+      repository.sshAccessOf(tx, granted, material),
     workerAgentsOf: unexpected,
     workerAgentView: unexpected,
     endRegistrations: (tx, projectId, resourceIdentity, now) => {
@@ -181,7 +334,9 @@ function fixture(t: TestContext, overrides: Partial<Dependencies> = {}) {
       bindingChanges.push(projectId);
     },
     ...overrides,
-  });
+  };
+  held.dependencies = dependencies;
+  const project = new ProjectService(dependencies);
   t.after(() => project.stop());
   const registry = new OperationRegistry();
   project.declare(registry);
@@ -231,6 +386,10 @@ function fixture(t: TestContext, overrides: Partial<Dependencies> = {}) {
     registrationEnds,
     bindingChanges,
     wakes,
+    secrets,
+    releases: ssh.releases,
+    dropped: ssh.dropped,
+    grantAddress: ssh.grantAddress,
   };
 }
 
@@ -1009,47 +1168,23 @@ const UNKNOWN_AGENT = "undeclared";
 const MODEL = "model";
 const REPOSITORY_ADDRESS = "git@github.com:owner/repo.git";
 const HEALTH_DEADLINE_MS = 1000;
-const ALIAS_HOST = "kanthorlabs.github.com";
-const ALIAS_ADDRESS = `git@${ALIAS_HOST}:owner/repo.git`;
+const ALIAS_ADDRESS = "git@github:owner/alias.git";
+const UNPINNED_ADDRESS = "git@ssh.github.com:owner/unpinned.git";
 const SECOND_REPOSITORY_ADDRESS = "git@github.com:owner/other.git";
 const REPOSITORY_CREDENTIAL = "github-key";
 const SSH_CREDENTIAL_PREFIX = "ssh-";
-const IDENTITY_FILE = "~/.ssh/id_test";
-const SSH_PORT = 22;
-const PIN_HOSTNAMES: Readonly<Record<string, string>> = {
-  [ALIAS_HOST]: "ssh.github.com",
-};
-
-function sshIdentity(hostname: string): SshIdentity {
-  return {
-    hostname,
-    port: SSH_PORT,
-    identityFiles: [IDENTITY_FILE],
-    identitiesOnly: true,
-  };
-}
 
 function sshCredentialOf(address: string): string {
   return `${SSH_CREDENTIAL_PREFIX}${/^git@([^:]+):/.exec(address)?.[1] ?? ""}`;
 }
 
-function sshPinMetadata(credentialName: string) {
-  const host = credentialName.slice(SSH_CREDENTIAL_PREFIX.length);
-  return {
-    platform: SSH_CREDENTIAL_PLATFORM,
-    metadata: {
-      host,
-      hostname: PIN_HOSTNAMES[host] ?? host,
-      port: SSH_PORT,
-      identity_file: IDENTITY_FILE,
-    },
-  };
-}
 const STORAGE_CREDENTIAL = "s3-key";
 const SSH_FAILURE_STATUS = 422;
 const GIT_FAILED = "repository.connector.git_failed";
 const KEY_REFUSED_STDERR =
   "git@github.com: Permission denied (publickey).\nfatal: Could not read from remote repository.";
+const HOST_KEY_CHANGED_STDERR =
+  "@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@\n@    WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED!     @\nHost key verification failed.";
 const REPOSITORY_NOT_FOUND_STDERR =
   "ERROR: Repository not found.\nfatal: Could not read from remote repository.";
 
@@ -1131,9 +1266,6 @@ function writeFixture(t: TestContext, overrides: Partial<Dependencies> = {}) {
   const f = fixture(t, {
     createMission: allowMission,
     repositoryConnector: {
-      async resolveSshIdentity(host) {
-        return sshIdentity(host);
-      },
       async gitLsRemote(address, context, timeout) {
         ssh.push({
           address,
@@ -1373,7 +1505,7 @@ test("binding write probes every repository outside and before commit, validates
     bindings,
   });
   const repeated = await f.write(exported.bindings, exported.version);
-  assert.equal(f.ssh.length, TWO_CALLS + TWO_CALLS);
+  assert.equal(f.ssh.length, TWO_CALLS);
   assert.deepEqual(repeated.bindings, result.bindings);
   assert.equal(repeated.binding_set_version, result.binding_set_version);
   assert.ok(
@@ -1680,9 +1812,6 @@ test("concurrent writes probe before committing and only one expected version wi
   let calls = NO_CALLS;
   const f = writeFixture(t, {
     repositoryConnector: {
-      async resolveSshIdentity() {
-        return sshIdentity("github.com");
-      },
       async gitLsRemote() {
         calls++;
         assert.equal(f.store.database.isTransaction, false);
@@ -1744,160 +1873,187 @@ test("invalid repository addresses and duplicate resources are refused before an
   assert.deepEqual(f.snapshot(), before);
 });
 
-test("an SSH alias that resolves to a GitHub SSH host is accepted and probed with the alias address", async (t) => {
-  const hosts: string[] = [];
+test("a new binding releases the key of its SSH credential under the human draft subject and reads with that key", async (t) => {
+  const reads: Array<{ address: string; ssh: SshAccess }> = [];
   const f = writeFixture(t, {
     repositoryConnector: {
-      async resolveSshIdentity(host, context, deadlineMs) {
-        hosts.push(host);
+      async gitLsRemote(address, _context, _timeout, ssh) {
         assert.equal(f.store.database.isTransaction, false);
-        assert.equal(context, f.caller.context);
-        assert.ok(deadlineMs <= LS_REMOTE_TIMEOUT_MS);
-        return sshIdentity("ssh.github.com");
-      },
-      async gitLsRemote(address, _context, remaining) {
-        f.ssh.push({
-          address,
-          context: null,
-          timeout: remaining,
-          transaction: false,
-          commits: f.commits(),
-        });
-        assert.ok(remaining <= LS_REMOTE_TIMEOUT_MS);
+        reads.push({ address, ssh });
       },
     },
   });
-  const result = await f.write({
-    [REPOSITORY_NAME]: repositoryBinding(ALIAS_ADDRESS),
+  await f.write({ [REPOSITORY_NAME]: repositoryBinding() });
+  const credential = sshCredentialOf(REPOSITORY_ADDRESS);
+  assert.deepEqual(f.releases, [
+    {
+      identity: f.caller.identity,
+      subject: {
+        kind: SshIdentitySubjectKind.Draft,
+        project_id: f.params.project_id,
+        credential,
+        address: REPOSITORY_ADDRESS,
+      },
+      credential,
+      address: REPOSITORY_ADDRESS,
+      transaction: true,
+    },
+  ]);
+  assert.deepEqual(f.dropped, [credential]);
+  assert.deepEqual(reads, [
+    {
+      address: REPOSITORY_ADDRESS,
+      ssh: {
+        private_key: SSH_KEY.private_key,
+        public_key: SSH_KEY.public_key,
+        known_hosts: `github.com ${HOST_KEY}\n`,
+      },
+    },
+  ]);
+});
+
+test("a write with a pinned host passes through the private agent of the released key to a local sshd", async (t) => {
+  const sshd = await startTestSshd(t);
+  const bare = await createBareRepository(t);
+  await sshd.authorize(SSH_KEY.public_key);
+  const repository = new RepositoryComponent({
+    checkTools: () => {},
+    knownHostsOf: () => sshd.known_hosts,
   });
+  const reads: string[] = [];
+  const f = writeFixture(t, {
+    sshAccessOf: (tx, granted, material) =>
+      repository.sshAccessOf(tx, granted, material),
+    repositoryConnector: {
+      async gitLsRemote(address, context, timeout, ssh) {
+        reads.push(address);
+        await gitLsRemote(sshd.url(bare), context, timeout, ssh);
+      },
+    },
+  });
+  const result = await f.write({ [REPOSITORY_NAME]: repositoryBinding() });
   assert.ok(result.bindings[REPOSITORY_NAME]);
-  assert.deepEqual(hosts, [ALIAS_HOST]);
+  assert.deepEqual(reads, [REPOSITORY_ADDRESS]);
+  await sshd.authorize(generateSshKey("other").public_key);
+  f.secrets.set(sshCredentialOf(SECOND_REPOSITORY_ADDRESS), {
+    private_key: generateSshKey("refused").private_key,
+  });
+  await rejectsWrite(
+    f.write(
+      {
+        [REPOSITORY_NAME]: repositoryBinding(),
+        [SECOND_REPOSITORY_NAME]: repositoryBinding(SECOND_REPOSITORY_ADDRESS),
+      },
+      result.binding_set_version,
+    ),
+    SSH_FAILURE_STATUS,
+    ProjectErrorCode.RepositorySshUnreachable,
+    { failure_reason: ResourceFailureReason.KeyRefused },
+  );
+});
+
+test("a new or changed binding with an unpinned host refuses 409 before the read and the commit", async (t) => {
+  const f = writeFixture(t, {
+    repositoryConnector: {
+      async gitLsRemote() {
+        assert.fail("The read must not run.");
+      },
+    },
+  });
+  const before = f.snapshot();
+  const commits = f.commits();
+  await rejectsWrite(
+    f.write({ [REPOSITORY_NAME]: repositoryBinding(UNPINNED_ADDRESS) }),
+    HttpStatus.Conflict,
+    HOST_KEY_UNPINNED,
+    { host: "ssh.github.com" },
+  );
+  assert.deepEqual(f.dropped, [sshCredentialOf(UNPINNED_ADDRESS)]);
+  assert.equal(f.commits(), commits);
+  assert.deepEqual(f.snapshot(), before);
+});
+
+test("a host outside the SSH host set of the platform refuses address_invalid before any release", async (t) => {
+  const f = writeFixture(t, {
+    repositoryConnector: {
+      async gitLsRemote() {
+        assert.fail("The read must not run.");
+      },
+    },
+  });
+  for (const address of [
+    ALIAS_ADDRESS,
+    "git@gitlab.com:owner/repo.git",
+    "git@-oProxyCommand:owner/repo.git",
+  ])
+    await rejectsWrite(
+      f.write({ [REPOSITORY_NAME]: repositoryBinding(address) }),
+      HttpStatus.BadRequest,
+      ProjectErrorCode.RepositoryAddressInvalid,
+    );
+  assert.deepEqual(f.releases, []);
+});
+
+test("a legacy SSH credential refuses the write with ssh_key_legacy before the read", async (t) => {
+  const f = writeFixture(t, {
+    repositoryConnector: {
+      async gitLsRemote() {
+        assert.fail("The read must not run.");
+      },
+    },
+  });
+  const credential = sshCredentialOf(REPOSITORY_ADDRESS);
+  f.secrets.set(credential, {});
+  await rejectsWrite(
+    f.write({ [REPOSITORY_NAME]: repositoryBinding() }),
+    HttpStatus.Conflict,
+    SSH_KEY_LEGACY,
+    { credential },
+  );
+  assert.deepEqual(f.dropped, [credential]);
+});
+
+test("an unchanged alias-model binding does not block a worker save and its check answers address_invalid", async (t) => {
+  const f = writeFixture(t, {
+    repositoryConnector: {
+      async gitLsRemote() {
+        assert.fail("The read must not run.");
+      },
+    },
+    verifyRepositoryCredential: async () => CREDENTIAL_HEALTHY,
+  });
+  const version = f.store.transaction(
+    (tx) =>
+      writeBindingSet(
+        tx,
+        f.params.project_id,
+        BINDING_SET_INITIAL_VERSION,
+        new Map([[REPOSITORY_NAME, repositoryBinding(ALIAS_ADDRESS)]]),
+      ).newVersion,
+  );
+  const result = await f.write(
+    {
+      [REPOSITORY_NAME]: repositoryBinding(ALIAS_ADDRESS),
+      [WORKER_NAME]: workerBinding(),
+    },
+    version,
+  );
   assert.deepEqual(
-    f.ssh.map((call) => call.address),
-    [ALIAS_ADDRESS],
+    result.changes.map(({ kind }) => kind),
+    [ChangeKind.Unchanged, ChangeKind.Created],
   );
-});
-
-test("an alias that resolves outside the GitHub SSH host set is refused before the read and the commit", async (t) => {
-  const f = writeFixture(t, {
-    repositoryConnector: {
-      async resolveSshIdentity() {
-        return sshIdentity("gitlab.com");
-      },
-      async gitLsRemote() {
-        assert.fail("The read must not run.");
-      },
-    },
-    credentialMetadata: (_tx, name) => {
-      const record = sshPinMetadata(name);
-      return {
-        ...record,
-        metadata: { ...record.metadata, hostname: "gitlab.com" },
-      };
-    },
+  assert.deepEqual(f.releases, []);
+  const health = await checkBinding(
+    f,
+    f.params.project_id,
+    repositoryBinding(ALIAS_ADDRESS).config,
+  );
+  assert.deepEqual(health.address, {
+    status: ResourceStatus.Unhealthy,
+    capability: RESOURCE_CAPABILITY_NETWORK_GIT_READ,
+    failure_reason: ResourceFailureReason.AddressInvalid,
   });
-  const before = f.snapshot();
-  const commits = f.commits();
-  await rejectsWrite(
-    f.write({ [REPOSITORY_NAME]: repositoryBinding(ALIAS_ADDRESS) }),
-    HttpStatus.BadRequest,
-    ProjectErrorCode.RepositoryAddressInvalid,
-  );
-  assert.equal(f.commits(), commits);
-  assert.deepEqual(f.snapshot(), before);
-});
-
-test("a failed host resolution is refused with address_invalid before the read and the commit", async (t) => {
-  const f = writeFixture(t, {
-    repositoryConnector: {
-      async resolveSshIdentity() {
-        throw new Error("ssh -G failed");
-      },
-      async gitLsRemote() {
-        assert.fail("The read must not run.");
-      },
-    },
-  });
-  const before = f.snapshot();
-  const commits = f.commits();
-  await rejectsWrite(
-    f.write({ [REPOSITORY_NAME]: repositoryBinding() }),
-    HttpStatus.BadRequest,
-    ProjectErrorCode.RepositoryAddressInvalid,
-  );
-  assert.equal(f.commits(), commits);
-  assert.deepEqual(f.snapshot(), before);
-});
-
-test("a host that starts with a hyphen is refused without a resolution", async (t) => {
-  const f = writeFixture(t, {
-    repositoryConnector: {
-      async resolveSshIdentity() {
-        assert.fail("The resolution must not run.");
-      },
-      async gitLsRemote() {
-        assert.fail("The read must not run.");
-      },
-    },
-  });
-  await rejectsWrite(
-    f.write({
-      [REPOSITORY_NAME]: repositoryBinding("git@-oProxyCommand:owner/repo.git"),
-    }),
-    HttpStatus.BadRequest,
-    ProjectErrorCode.RepositoryAddressInvalid,
-  );
-});
-
-test("an SSH credential whose resolution drifts from its pin is refused before the read and the commit", async (t) => {
-  const f = writeFixture(t, {
-    repositoryConnector: {
-      async resolveSshIdentity() {
-        return {
-          ...sshIdentity("github.com"),
-          identityFiles: ["~/.ssh/id_other"],
-        };
-      },
-      async gitLsRemote() {
-        assert.fail("The read must not run.");
-      },
-    },
-  });
-  const before = f.snapshot();
-  await rejectsWrite(
-    f.write({ [REPOSITORY_NAME]: repositoryBinding() }),
-    HttpStatus.BadRequest,
-    SshErrorCode.Drift,
-    { host: "github.com", keys: ["identity_file"] },
-  );
-  assert.deepEqual(f.snapshot(), before);
-});
-
-test("an SSH credential of another host is refused with ssh_host_mismatch before the resolution", async (t) => {
-  const f = writeFixture(t, {
-    repositoryConnector: {
-      async resolveSshIdentity() {
-        assert.fail("The resolution must not run.");
-      },
-      async gitLsRemote() {
-        assert.fail("The read must not run.");
-      },
-    },
-  });
-  const binding = repositoryBinding();
-  await rejectsWrite(
-    f.write({
-      [REPOSITORY_NAME]: {
-        ...binding,
-        config: {
-          ...binding.config,
-          ssh_credential: sshCredentialOf(ALIAS_ADDRESS),
-        },
-      },
-    }),
-    HttpStatus.BadRequest,
-    ProjectErrorCode.RepositorySshHostMismatch,
-  );
+  assert.deepEqual(f.releases, []);
 });
 
 const GITLAB_IDENTITY = "repository:gitlab:acme/api";
@@ -2042,38 +2198,58 @@ test("a git-only platform accepts merge_push and refuses a credential or pull_re
   );
 });
 
-test("the resource check reports an unresolved host as unhealthy and skips the read", async (t) => {
-  const reasons: string[] = [];
+test("the resource check reports an alias-model host, an unpinned host and a legacy key, and skips the read", async (t) => {
   const f = fixture(t, {
     repositoryConnector: {
-      async resolveSshIdentity() {
-        throw new Error("ssh -G failed");
-      },
       async gitLsRemote() {
         assert.fail("The read must not run.");
       },
     },
   });
-  const entry = f.store.transaction((tx) => {
+  const entries = f.store.transaction((tx) => {
     const project = insertProject(tx, PROJECT_NAME);
-    persistBindings(tx, project.id, { [REPOSITORY_NAME]: repositoryBinding() });
-    return f.project.resourceInventory(tx)[NO_ITEMS];
+    persistBindings(tx, project.id, {
+      [REPOSITORY_NAME]: repositoryBinding(ALIAS_ADDRESS),
+      [SECOND_REPOSITORY_NAME]: repositoryBinding(UNPINNED_ADDRESS),
+      legacy: repositoryBinding(SECOND_REPOSITORY_ADDRESS),
+    });
+    return new Map(
+      f.project
+        .resourceInventory(tx)
+        .map((entry) => [decodeURIComponent(entry.name), entry]),
+    );
   });
-  assert.ok(entry);
+  f.secrets.set(sshCredentialOf(SECOND_REPOSITORY_ADDRESS), {});
   const context = new CancellationContext(
     background,
     Date.now() + HEALTH_DEADLINE_MS,
   );
   t.after(() => context.cancel());
-  assert.equal(
-    await entry.check(context, (reason, failureReason) =>
-      reasons.push(`${reason}:${failureReason}`),
-    ),
-    ResourceStatus.Unhealthy,
-  );
-  assert.deepEqual(reasons, [
-    `${ProjectErrorCode.RepositoryAddressInvalid}:${ResourceFailureReason.AddressInvalid}`,
-  ]);
+  const expected = [
+    [
+      REPOSITORY_NAME,
+      ProjectErrorCode.RepositoryAddressInvalid,
+      ResourceFailureReason.AddressInvalid,
+    ],
+    [
+      SECOND_REPOSITORY_NAME,
+      HOST_KEY_UNPINNED,
+      ResourceFailureReason.HostKeyUnknown,
+    ],
+    ["legacy", SSH_KEY_LEGACY, ResourceFailureReason.IdentityUnavailable],
+  ] as const;
+  for (const [name, code, failureReason] of expected) {
+    const reasons: string[] = [];
+    const entry = entries.get(name);
+    assert.ok(entry);
+    assert.equal(
+      await entry.check(context, (reason, observed) =>
+        reasons.push(`${reason}:${observed}`),
+      ),
+      ResourceStatus.Unhealthy,
+    );
+    assert.deepEqual(reasons, [`${code}:${failureReason}`]);
+  }
 });
 
 test("SSH failure leaves all rows and the version unchanged without entering commit", async (t) => {
@@ -2082,9 +2258,6 @@ test("SSH failure leaves all rows and the version unchanged without entering com
   const addresses: string[] = [];
   const f = writeFixture(t, {
     repositoryConnector: {
-      async resolveSshIdentity() {
-        return sshIdentity("github.com");
-      },
       async gitLsRemote(address, context, timeout) {
         addresses.push(address);
         assert.equal(f.store.database.isTransaction, false);
@@ -2102,6 +2275,7 @@ test("SSH failure leaves all rows and the version unchanged without entering com
     f.write(
       {
         [REPOSITORY_NAME]: repositoryBinding(),
+        [SECOND_REPOSITORY_NAME]: repositoryBinding(SECOND_REPOSITORY_ADDRESS),
         [WORKER_NAME]: workerBinding(),
       },
       first.binding_set_version,
@@ -2110,17 +2284,127 @@ test("SSH failure leaves all rows and the version unchanged without entering com
     ProjectErrorCode.RepositorySshUnreachable,
     { failure_reason: ResourceFailureReason.Unclassified },
   );
-  assert.deepEqual(addresses, [REPOSITORY_ADDRESS, REPOSITORY_ADDRESS]);
+  assert.deepEqual(addresses, [REPOSITORY_ADDRESS, SECOND_REPOSITORY_ADDRESS]);
   assert.equal(f.commits(), commits);
   assert.deepEqual(f.snapshot(), before);
+});
+
+function unreachableAfterSave(t: TestContext) {
+  const state = { fail: false, reads: [] as string[] };
+  const f = writeFixture(t, {
+    repositoryConnector: {
+      async gitLsRemote(address) {
+        state.reads.push(address);
+        if (state.fail) throw gitFailure(REPOSITORY_NOT_FOUND_STDERR);
+      },
+    },
+  });
+  return { f, state };
+}
+
+async function rejectsUnreachable(
+  f: ReturnType<typeof writeFixture>,
+  bindings: Bindings,
+  version: number,
+) {
+  const before = f.snapshot();
+  await rejectsWrite(
+    f.write(bindings, version),
+    SSH_FAILURE_STATUS,
+    ProjectErrorCode.RepositorySshUnreachable,
+    { failure_reason: ResourceFailureReason.RepositoryNotFound },
+  );
+  assert.deepEqual(f.snapshot(), before);
+}
+
+test("an unchanged repository binding with an unreachable address does not block a worker save", async (t) => {
+  const { f, state } = unreachableAfterSave(t);
+  const first = await f.write({ [REPOSITORY_NAME]: repositoryBinding() });
+  state.fail = true;
+  const result = await f.write(
+    { [REPOSITORY_NAME]: repositoryBinding(), [WORKER_NAME]: workerBinding() },
+    first.binding_set_version,
+  );
+  assert.deepEqual(state.reads, [REPOSITORY_ADDRESS]);
+  assert.deepEqual(
+    result.changes.map(({ kind }) => kind),
+    [ChangeKind.Unchanged, ChangeKind.Created],
+  );
+});
+
+test("a changed repository address is read and refused when unreachable", async (t) => {
+  const { f, state } = unreachableAfterSave(t);
+  const first = await f.write({ [REPOSITORY_NAME]: repositoryBinding() });
+  state.fail = true;
+  await rejectsUnreachable(
+    f,
+    { [REPOSITORY_NAME]: repositoryBinding(SECOND_REPOSITORY_ADDRESS) },
+    first.binding_set_version,
+  );
+  assert.deepEqual(state.reads, [
+    REPOSITORY_ADDRESS,
+    SECOND_REPOSITORY_ADDRESS,
+  ]);
+});
+
+test("a new repository binding is read and refused when unreachable", async (t) => {
+  const { f, state } = unreachableAfterSave(t);
+  const first = await f.write({ [REPOSITORY_NAME]: repositoryBinding() });
+  state.fail = true;
+  await rejectsUnreachable(
+    f,
+    {
+      [REPOSITORY_NAME]: repositoryBinding(),
+      [SECOND_REPOSITORY_NAME]: repositoryBinding(SECOND_REPOSITORY_ADDRESS),
+    },
+    first.binding_set_version,
+  );
+  assert.deepEqual(state.reads, [
+    REPOSITORY_ADDRESS,
+    SECOND_REPOSITORY_ADDRESS,
+  ]);
+});
+
+test("a repository binding with a changed ssh_credential is read and refused when unreachable", async (t) => {
+  const { f, state } = unreachableAfterSave(t);
+  const first = await f.write({ [REPOSITORY_NAME]: repositoryBinding() });
+  state.fail = true;
+  const binding = repositoryBinding();
+  await rejectsUnreachable(
+    f,
+    {
+      [REPOSITORY_NAME]: {
+        ...binding,
+        config: { ...binding.config, ssh_credential: "ssh-other" },
+      },
+    },
+    first.binding_set_version,
+  );
+  assert.deepEqual(state.reads, [REPOSITORY_ADDRESS, REPOSITORY_ADDRESS]);
+});
+
+test("a save at a stale version reads every repository binding and answers a version conflict", async (t) => {
+  const { f, state } = unreachableAfterSave(t);
+  const first = await f.write({ [REPOSITORY_NAME]: repositoryBinding() });
+  const second = await f.write(
+    { [REPOSITORY_NAME]: repositoryBinding(), [WORKER_NAME]: workerBinding() },
+    first.binding_set_version,
+  );
+  await rejectsWrite(
+    f.write(
+      { [REPOSITORY_NAME]: repositoryBinding() },
+      first.binding_set_version,
+    ),
+    HttpStatus.Conflict,
+    ProjectErrorCode.VersionConflict,
+    { binding_set_version: second.binding_set_version },
+  );
+  assert.deepEqual(state.reads, [REPOSITORY_ADDRESS, REPOSITORY_ADDRESS]);
 });
 
 test("a refused binding write names the git failure reason in its details", async (t) => {
   const f = writeFixture(t, {
     repositoryConnector: {
-      async resolveSshIdentity() {
-        return sshIdentity("github.com");
-      },
       async gitLsRemote() {
         throw gitFailure(KEY_REFUSED_STDERR);
       },
@@ -2140,9 +2424,6 @@ test("cancellation during gitLsRemote propagates the context error, whether the 
     let calls = NO_CALLS;
     const f = writeFixture(t, {
       repositoryConnector: {
-        async resolveSshIdentity() {
-          return sshIdentity("github.com");
-        },
         async gitLsRemote(_address, received) {
           calls++;
           assert.equal(received, context);
@@ -2855,9 +3136,6 @@ test("resource inventory reads current repository revisions and excludes removed
   let calls = NO_CALLS;
   const f = fixture(t, {
     repositoryConnector: {
-      async resolveSshIdentity() {
-        return sshIdentity("github.com");
-      },
       async gitLsRemote() {
         calls++;
       },
@@ -2920,9 +3198,6 @@ test("resource checks pass the caller deadline and distinguish success, failure 
   let failure: Error | null = null;
   const f = fixture(t, {
     repositoryConnector: {
-      async resolveSshIdentity() {
-        return sshIdentity("github.com");
-      },
       async gitLsRemote(address, context, remaining) {
         calls++;
         assert.equal(address, REPOSITORY_ADDRESS);
@@ -2936,10 +3211,13 @@ test("resource checks pass the caller deadline and distinguish success, failure 
       },
     },
   });
-  const entry = f.store.transaction((tx) => {
+  const { entry, bindingId } = f.store.transaction((tx) => {
     const project = insertProject(tx, PROJECT_NAME);
     persistBindings(tx, project.id, { [REPOSITORY_NAME]: repositoryBinding() });
-    return f.project.resourceInventory(tx)[NO_ITEMS];
+    return {
+      entry: f.project.resourceInventory(tx)[NO_ITEMS],
+      bindingId: readCurrentBindingSet(tx, project.id).get(REPOSITORY_NAME)?.id,
+    };
   });
   assert.ok(entry);
   assert.equal(calls, NO_CALLS);
@@ -2971,15 +3249,19 @@ test("resource checks pass the caller deadline and distinguish success, failure 
   beforeCall = Date.now();
   assert.equal(await entry.check(cancelled), ResourceStatus.Unknown);
   assert.equal(calls, TWO_CALLS);
+  assert.deepEqual(
+    f.releases.map(({ identity, subject }) => ({ identity, subject })),
+    [TWO_CALLS, TWO_CALLS].map(() => ({
+      identity: PROJECT_IDENTITY,
+      subject: { kind: SshIdentitySubjectKind.Binding, binding_id: bindingId },
+    })),
+  );
 });
 
 test("resource inventory keeps separate checks for the same repository address across projects", async (t) => {
   let calls = NO_CALLS;
   const f = fixture(t, {
     repositoryConnector: {
-      async resolveSshIdentity() {
-        return sshIdentity("github.com");
-      },
       async gitLsRemote(address, context, remaining) {
         calls++;
         assert.equal(address, REPOSITORY_ADDRESS);
@@ -3780,9 +4062,6 @@ function verifyFixture(
   const credentialAnswer: BindingCheckEntry = CREDENTIAL_HEALTHY;
   const f = fixture(t, {
     repositoryConnector: {
-      async resolveSshIdentity(host: string) {
-        return sshIdentity(host);
-      },
       async gitLsRemote(address: string, context: Context, timeout: number) {
         sshCalls.push({ address, timeout });
         sshStarted.resolve();
@@ -3915,33 +4194,46 @@ test("binding.verify returns unknown for address when the SSH read exceeds its d
   ]);
 });
 
-test("binding.verify names the git failure reason and an address outside the platform hosts", async (t) => {
-  for (const [resolve, failure, expected] of [
+test("binding.verify names each failure reason of the address and releases the key under the human identity", async (t) => {
+  const cases: ReadonlyArray<
+    readonly [string, Diagnostic | null, boolean, ResourceFailureReason]
+  > = [
     [
-      "github.com",
+      REPOSITORY_ADDRESS,
       gitFailure(KEY_REFUSED_STDERR),
+      false,
       ResourceFailureReason.KeyRefused,
     ],
     [
-      "github.com",
+      REPOSITORY_ADDRESS,
       gitFailure(REPOSITORY_NOT_FOUND_STDERR),
+      false,
       ResourceFailureReason.RepositoryNotFound,
     ],
-    ["example.com", null, ResourceFailureReason.AddressInvalid],
-  ] as const) {
+    [
+      REPOSITORY_ADDRESS,
+      gitFailure(HOST_KEY_CHANGED_STDERR),
+      false,
+      ResourceFailureReason.HostKeyChanged,
+    ],
+    [REPOSITORY_ADDRESS, null, true, ResourceFailureReason.IdentityUnavailable],
+    [UNPINNED_ADDRESS, null, false, ResourceFailureReason.HostKeyUnknown],
+    [ALIAS_ADDRESS, null, false, ResourceFailureReason.AddressInvalid],
+  ];
+  for (const [address, failure, legacy, expected] of cases) {
     const { f } = verifyFixture(t, "healthy", "healthy", {
       repositoryConnector: {
-        async resolveSshIdentity() {
-          return sshIdentity(resolve);
-        },
         async gitLsRemote() {
           if (failure) throw failure;
         },
       },
     });
+    if (legacy) f.secrets.set(sshCredentialOf(address), {});
     const project = f.store.transaction((tx) => {
       const p = insertProject(tx, PROJECT_NAME);
-      persistBindings(tx, p.id, { [REPOSITORY_NAME]: repositoryBinding() });
+      persistBindings(tx, p.id, {
+        [REPOSITORY_NAME]: repositoryBinding(address),
+      });
       return p;
     });
     const [binding] = f.store.transaction((tx) =>
@@ -3957,7 +4249,46 @@ test("binding.verify names the git failure reason and an address outside the pla
       capability: RESOURCE_CAPABILITY_NETWORK_GIT_READ,
       failure_reason: expected,
     });
+    assert.deepEqual(
+      f.releases.map(({ identity, subject }) => ({ identity, subject })),
+      address === ALIAS_ADDRESS
+        ? []
+        : [
+            {
+              identity: f.caller.identity,
+              subject: {
+                kind: SshIdentitySubjectKind.Binding,
+                binding_id: binding.id,
+              },
+            },
+          ],
+    );
   }
+});
+
+test("binding.verify checks the host set on the granted address, not on the address of the config read", async (t) => {
+  const { f, sshCalls } = verifyFixture(t, "healthy", "healthy");
+  const project = f.store.transaction((tx) => {
+    const p = insertProject(tx, PROJECT_NAME);
+    persistBindings(tx, p.id, { [REPOSITORY_NAME]: repositoryBinding() });
+    return p;
+  });
+  const [binding] = f.store.transaction((tx) =>
+    Array.from(readCurrentBindingSet(tx, project.id).values()),
+  );
+  assert.ok(binding);
+  f.grantAddress.value = ALIAS_ADDRESS;
+  const result = await f.invokeAsync("binding.verify", {
+    project_id: project.id,
+    binding_id: binding.id,
+  });
+  assert.deepEqual(result.address, {
+    status: ResourceStatus.Unhealthy,
+    capability: RESOURCE_CAPABILITY_NETWORK_GIT_READ,
+    failure_reason: ResourceFailureReason.AddressInvalid,
+  });
+  assert.deepEqual(f.releases, []);
+  assert.deepEqual(sshCalls, []);
 });
 
 test("binding.verify propagates a credential record-verify refusal unchanged", async (t) => {
@@ -4095,7 +4426,7 @@ function instructionFixture(
     states?: string[];
     resolveFails?: boolean;
     resolveFailure?: Error;
-    resolvedHost?: string;
+    address?: string;
     readFails?: boolean;
     hang?: boolean;
   } = {},
@@ -4105,6 +4436,7 @@ function instructionFixture(
     address: string;
     branch: string;
     timeout: number;
+    ssh: SshAccess;
   }> = [];
   const readCalls: Array<{
     address: string;
@@ -4112,18 +4444,16 @@ function instructionFixture(
     paths: readonly string[];
     maxBytes: number;
     timeout: number;
+    ssh: SshAccess;
   }> = [];
   const started = Promise.withResolvers<void>();
   const f = fixture(t, {
     repositoryConnector: {
-      async resolveSshIdentity(host: string) {
-        return sshIdentity(behavior.resolvedHost ?? host);
-      },
       gitLsRemote: unexpected,
     },
     repositoryFiles: {
-      async resolveBranchCommit(address, branch, context, timeout) {
-        resolveCalls.push({ address, branch, timeout });
+      async resolveBranchCommit(address, branch, context, timeout, ssh) {
+        resolveCalls.push({ address, branch, timeout, ssh });
         started.resolve();
         if (behavior.hang) {
           await context.done();
@@ -4142,8 +4472,9 @@ function instructionFixture(
         maxBytes,
         _context,
         timeout,
+        ssh,
       ) {
-        readCalls.push({ address, commit, paths, maxBytes, timeout });
+        readCalls.push({ address, commit, paths, maxBytes, timeout, ssh });
         if (behavior.readFails) throw new Error("fetch failed");
         return paths.map((path, index) => {
           const text = behavior.texts?.[index] ?? null;
@@ -4166,7 +4497,7 @@ function instructionFixture(
       tx,
       p.id,
       p.binding_set_version,
-      new Map([[REPOSITORY_NAME, repositoryBinding()]]),
+      new Map([[REPOSITORY_NAME, repositoryBinding(behavior.address)]]),
     );
     const bindingId = result.changes[NO_ITEMS]?.binding_id;
     assert.ok(bindingId);
@@ -4244,6 +4575,30 @@ test("binding.instruction_files.get answers the four files with their states", a
   assert.equal(readCalls[NO_ITEMS]?.commit, INSTRUCTION_COMMIT);
   assert.deepEqual(readCalls[NO_ITEMS]?.paths, INSTRUCTION_PATHS);
   assert.equal(readCalls[NO_ITEMS]?.maxBytes, PROMPT_SOURCE_MAX_BYTES);
+});
+
+test("binding.instruction_files.get releases the key under the Project identity and reads with it", async (t) => {
+  const { f, saved, resolveCalls, readCalls } = instructionFixture(t);
+  await f.invokeAsync("binding.instruction_files.get", saved);
+  assert.deepEqual(
+    f.releases.map(({ identity, subject }) => ({ identity, subject })),
+    [
+      {
+        identity: PROJECT_IDENTITY,
+        subject: {
+          kind: SshIdentitySubjectKind.Binding,
+          binding_id: saved.binding_id,
+        },
+      },
+    ],
+  );
+  const ssh = {
+    private_key: SSH_KEY.private_key,
+    public_key: SSH_KEY.public_key,
+    known_hosts: `github.com ${HOST_KEY}\n`,
+  };
+  assert.deepEqual(resolveCalls[NO_ITEMS]?.ssh, ssh);
+  assert.deepEqual(readCalls[NO_ITEMS]?.ssh, ssh);
 });
 
 test("binding.instruction_files.get maps the connector reasons of unreadable files to the invalid reasons of the working layer", async (t) => {
@@ -4350,14 +4705,30 @@ test("binding.instruction_files.get refuses a failed commit resolution", async (
   );
 });
 
-test("binding.instruction_files.get names an address outside the platform hosts", async (t) => {
-  const { f, saved } = instructionFixture(t, { resolvedHost: "example.com" });
-  await refusesInstructionFiles(
-    f.invokeAsync("binding.instruction_files.get", saved),
-    SSH_FAILURE_STATUS,
-    ProjectErrorCode.RepositorySshUnreachable,
-    { failure_reason: ResourceFailureReason.AddressInvalid },
-  );
+test("binding.instruction_files.get refuses an alias-model binding and an unpinned host before any read", async (t) => {
+  for (const [address, status, code, details] of [
+    [
+      ALIAS_ADDRESS,
+      HttpStatus.BadRequest,
+      ProjectErrorCode.RepositoryAddressInvalid,
+      null,
+    ],
+    [
+      UNPINNED_ADDRESS,
+      HttpStatus.Conflict,
+      HOST_KEY_UNPINNED,
+      { host: "ssh.github.com" },
+    ],
+  ] as const) {
+    const { f, saved, resolveCalls } = instructionFixture(t, { address });
+    await refusesInstructionFiles(
+      f.invokeAsync("binding.instruction_files.get", saved),
+      status,
+      code,
+      details,
+    );
+    assert.deepEqual(resolveCalls, []);
+  }
 });
 
 test("binding.instruction_files.get names the git failure reason of a failed read", async (t) => {
@@ -4513,13 +4884,29 @@ test("binding.check answers the verify badges of an unsaved configuration and wr
     sshCredentialOf(REPOSITORY_ADDRESS),
     REPOSITORY_CREDENTIAL,
   ]);
+  const sshSuitability = {
+    credential: sshCredentialOf(REPOSITORY_ADDRESS),
+    platform: SSH_CREDENTIAL_PLATFORM,
+  };
   assert.deepEqual(suitability, [
     { credential: REPOSITORY_CREDENTIAL, platform: REPOSITORY_PLATFORM },
-    {
-      credential: sshCredentialOf(REPOSITORY_ADDRESS),
-      platform: SSH_CREDENTIAL_PLATFORM,
-    },
+    sshSuitability,
+    sshSuitability,
   ]);
+  assert.deepEqual(
+    f.releases.map(({ identity, subject }) => ({ identity, subject })),
+    [
+      {
+        identity: f.caller.identity,
+        subject: {
+          kind: SshIdentitySubjectKind.Draft,
+          project_id: project.id,
+          credential: sshCredentialOf(REPOSITORY_ADDRESS),
+          address: REPOSITORY_ADDRESS,
+        },
+      },
+    ],
+  );
   assert.equal(f.commits(), commits + ONE_CALL);
   assert.equal(
     f.store.database.prepare("SELECT id FROM project_binding").all().length,
@@ -4569,10 +4956,10 @@ test("binding.check refuses a static violation with the write code before any SS
   await rejectsWrite(
     checkBinding(f, project.id, {
       ...config,
-      ssh_credential: sshCredentialOf(ALIAS_ADDRESS),
+      address: "git@-oProxyCommand:owner/repo.git",
     }),
     HttpStatus.BadRequest,
-    ProjectErrorCode.RepositorySshHostMismatch,
+    ProjectErrorCode.RepositoryAddressInvalid,
   );
   await assert.rejects(
     checkBinding(f, "project_01ARZ3NDEKTSV4RRFFQ69G5FAV", config),

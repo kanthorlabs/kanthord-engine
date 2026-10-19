@@ -187,7 +187,19 @@ HTTP `200` answers `{ status, capability, failure_reason }`, the health entry of
 
 - `status` is `healthy`, `unhealthy` or `unknown`.
 - `capability` is the capability of the platform check, the same value that the health report shows.
-- `failure_reason` is null for a `healthy` answer only. Every other answer carries `unclassified`, a check that exceeds its deadline included.
+- `failure_reason` is null for a `healthy` answer only. Every other answer carries a value of the list below.
+
+The failure reasons of the answer:
+
+| Value                  | Cause                                                                                                                                                                        |
+| ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `unauthorized`         | The `github` check gets HTTP `401`.                                                                                                                                          |
+| `forbidden`            | The `github` check gets HTTP `403`.                                                                                                                                          |
+| `rate_limited`         | The `github` check gets HTTP `429`.                                                                                                                                          |
+| `invalid_response`     | The `github` check gets another HTTP status.                                                                                                                                 |
+| `unreachable`          | The `github` request fails before an HTTP answer.                                                                                                                            |
+| `identity_unavailable` | The `ssh` check of `verify` refuses the record: the key does not decrypt or parse, the record holds no generated key, or the derived public key differs from the stored one. |
+| `unclassified`         | Any other failure, a check that exceeds its deadline included.                                                                                                               |
 
 A platform with `verifiable: false`, with the secret shape `oauth` or with the secret shape `ssh_key` answers `400 credential.check.unsupported`.
 A platform of another component answers `400 credential.platform.unsupported`.
@@ -211,7 +223,7 @@ HTTP `200` answers `{ status, capability, failure_reason }`, the health entry of
 
 - `status` is `healthy`, `unhealthy` or `unknown`.
 - `capability` is the capability of the platform check, the same value that the health report shows.
-- `failure_reason` is null for a `healthy` answer only. Every other answer carries `unclassified`, a check that exceeds its deadline included.
+- `failure_reason` is null for a `healthy` answer only. Every other answer carries a value of the [failure reason list](#check).
 
 An archived record answers `409 credential.credential.archived`.
 A platform with `verifiable: false` answers `400 credential.check.unsupported`.
