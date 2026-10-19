@@ -51,7 +51,11 @@ import { CodedError, OperationError } from "../kernel/errors.ts";
 import { ProjectErrorCode } from "../project/contract.ts";
 import { framing, PromptConsumer } from "./prompt-render.ts";
 import { SHIPPED_TEMPLATES } from "./prompt-templates.ts";
-import { memoryCredentialHolds } from "./test-support.ts";
+import {
+  capturedLogger,
+  FallbackLog,
+  memoryCredentialHolds,
+} from "./test-support.ts";
 
 const PROVIDER_CAPABILITY = "model-list read";
 const DEFAULT_REASONING = "off";
@@ -2405,23 +2409,6 @@ const OTHER_EXECUTION_ID = "other-execution";
 const REDACTED_FIELD = "credential";
 const ONE_LOG = 1;
 const TWO_LOGS = 2;
-
-const FallbackLog = {
-  CooldownStarted: "agent.fallback.cooldown_started",
-  CooldownCleared: "agent.fallback.cooldown_cleared",
-  Selected: "agent.fallback.selected",
-} as const;
-
-type CapturedLog = { level: number; msg: string } & Record<string, unknown>;
-
-function capturedLogger() {
-  const logs: CapturedLog[] = [];
-  const logger = pino(
-    { level: "info", base: null, timestamp: false },
-    { write: (line: string) => logs.push(JSON.parse(line) as CapturedLog) },
-  );
-  return { logger, logs };
-}
 
 function holdFixture(
   t: TestContext,

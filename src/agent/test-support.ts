@@ -10,6 +10,7 @@ import {
   type StreamFunction,
   type Context as ModelContext,
 } from "@earendil-works/pi-ai";
+import pino from "pino";
 import type { CredentialHold, CredentialHolds } from "../custody/contract.ts";
 
 export function scriptedProvider(
@@ -80,4 +81,21 @@ export function memoryCredentialHolds(): CredentialHolds {
         .map(([credential, hold]) => ({ credential, ...hold }))
         .sort((left, right) => left.credential.localeCompare(right.credential)),
   };
+}
+
+export const FallbackLog = {
+  CooldownStarted: "agent.fallback.cooldown_started",
+  CooldownCleared: "agent.fallback.cooldown_cleared",
+  Selected: "agent.fallback.selected",
+} as const;
+
+type CapturedLog = { level: number; msg: string } & Record<string, unknown>;
+
+export function capturedLogger() {
+  const logs: CapturedLog[] = [];
+  const logger = pino(
+    { level: "info", base: null, timestamp: false },
+    { write: (line: string) => logs.push(JSON.parse(line) as CapturedLog) },
+  );
+  return { logger, logs };
 }

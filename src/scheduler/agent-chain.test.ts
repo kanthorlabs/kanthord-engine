@@ -2,7 +2,11 @@ import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
 import pino from "pino";
 import { COOLDOWN_DEFAULTS } from "../agent/config.ts";
-import { memoryCredentialHolds } from "../agent/test-support.ts";
+import {
+  capturedLogger,
+  FallbackLog,
+  memoryCredentialHolds,
+} from "../agent/test-support.ts";
 import {
   AdvancingFailure,
   type AgentEntry,
@@ -67,22 +71,6 @@ const NO_FAILURES = 0;
 const ONE_FAILURE = 1;
 const TWO_FAILURES = 2;
 const FIRST_STRIKE = 1;
-
-const FallbackLog = {
-  CooldownStarted: "agent.fallback.cooldown_started",
-  CooldownCleared: "agent.fallback.cooldown_cleared",
-} as const;
-
-type CapturedLog = { level: number; msg: string } & Record<string, unknown>;
-
-function capturedLogger() {
-  const logs: CapturedLog[] = [];
-  const logger = pino(
-    { level: "info", base: null, timestamp: false },
-    { write: (line: string) => logs.push(JSON.parse(line) as CapturedLog) },
-  );
-  return { logger, logs };
-}
 
 function stopOf(reason: ReleaseStop["reason"], code: string | null) {
   return { reason, code };
