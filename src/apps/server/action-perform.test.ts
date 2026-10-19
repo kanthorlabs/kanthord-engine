@@ -58,6 +58,7 @@ const GATED_PRIORITY = 3;
 const FIRST_INDEX = 0;
 const SINGLE_INSTANCE = 1;
 const NO_ROWS = 0;
+const NO_PUSHES = 0;
 const ONE_CREATE = 1;
 const ONE_SSH_RELEASE = 1;
 const TWO_SSH_RELEASES = 2;
@@ -861,7 +862,7 @@ test(
         } finally {
           writer.mergePushFresh = mergePushFresh;
         }
-        assert.equal(pushes, NO_ROWS);
+        assert.equal(pushes, NO_PUSHES);
         assert.equal(h.row("revoked"), undefined);
         assert.deepEqual(h.pins(merged), [h.sshRevision(FIRST_REVISION)]);
       },
