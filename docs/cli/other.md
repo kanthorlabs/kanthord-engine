@@ -195,33 +195,33 @@ in the alignment. The row names are `path`, `key`, `option`, `field`, `config`,
 also holds its rows as `fields`, an object of row name to value. The record
 holds no `fields` when the diagnostic has no rows.
 
-A declared remote failure of a mutation prints `<code>: request failed`, then the
-rows `status: <status>` and `idempotency_key: <key>`. A declared remote failure of
-a read prints `<code>: request failed`, then the row `status: <status>`.
-`gateway verify`, `worker register` and `worker handover` put the command name
-before `request failed`. When the error body holds non-null `details`, the CLI
-writes the last row `details: <compact JSON of details>`. With `details` null,
-the CLI writes no `details` row. An indeterminate mutation prints
+A declared remote failure of a mutation prints `<code>: request failed`, then
+the rows `status: <status>` and `idempotency_key: <key>`. A declared remote
+failure of a read prints `<code>: request failed`, then the row
+`status: <status>`. `gateway verify`, `gateway liveness`, `worker register` and
+`worker handover` put the command name before `request failed`. When the error
+body holds non-null `details`, the CLI writes the last row
+`details: <compact JSON of details>`. With `details` null, the CLI writes no
+`details` row. An indeterminate mutation prints
 `<code>: the result is unknown; retry with the same idempotency key`, then the
 row `idempotency_key: <key>`. An indeterminate read prints
 `<code>: the result is unknown; retry the command`. The CLI does not print the
-remote message or the request ID. A file diagnostic puts the file
-path in the `path` row. Coded diagnostics use the owning
-`cli`, `system`, or service namespace; Commander syntax diagnostics are not a
-uniform JSON envelope. The launcher rejects unsupported Node.js versions with
-one stderr line and a nonzero exit before loading the application. The supported
-range is `>=24.15.0 <25`.
+remote message or the request ID. A file diagnostic puts the file path in the
+`path` row. Coded diagnostics use the owning `cli`, `system`, or service
+namespace; Commander syntax diagnostics are not a uniform JSON envelope. The
+launcher rejects unsupported Node.js versions with one stderr line and a nonzero
+exit before loading the application. The supported range is `>=24.15.0 <25`.
 
-Current domain results (`gateway verify`, `worker register`) are one JSON value
-followed by a newline on stdout. `worker register` includes its idempotency key.
-Local output has explicit exceptions: help is text, `config init`,
-`config validate`, `upgrade` and `gateway openapi` print `name: value` rows,
-`config show` prints masked YAML, and `auth jwt generate` without `--output`
-prints the `token` row or a machine client fragment only to terminal stdout.
-With `--output`, it prints the `created` row with the file path to any stdout.
-`auth jwt inspect` prints the claim list to any stdout. `llm credential login`
-prints rows and an address block. `serve` is long-running and produces
-operational logs, not a domain-result JSON object.
+Current domain results (`gateway verify`, `gateway liveness`, `worker register`)
+are one JSON value followed by a newline on stdout. `worker register` includes
+its idempotency key. Local output has explicit exceptions: help is text,
+`config init`, `config validate`, `upgrade` and `gateway openapi` print
+`name: value` rows, `config show` prints masked YAML, and `auth jwt generate`
+without `--output` prints the `token` row or a machine client fragment only to
+terminal stdout. With `--output`, it prints the `created` row with the file path
+to any stdout. `auth jwt inspect` prints the claim list to any stdout.
+`llm credential login` prints rows and an address block. `serve` is long-running
+and produces operational logs, not a domain-result JSON object.
 
 Human output that is not JSON is a list of `name: value` rows. A name is lower
 snake_case. The rows of one block align: each value starts in the same column.
@@ -1054,6 +1054,7 @@ implement them. Help is not an extra root name or a reason to load secrets.
 | 400             | `system.pagination.cursor_invalid`               | The `--cursor` value is malformed or belongs to another listing.                                                                           | paginated list commands                                                    |
 | local           | `cli.<group>.<command>.token_required`           | No nonblank JWT is available for the command. The message names `--token`, `KANTHORD_TOKEN`, `cli.yaml` and `kanthord auth jwt generate`.  | remote commands                                                            |
 | local           | `cli.<group>.<command>.indeterminate`            | The client cannot determine whether the request completed.                                                                                 | remote commands                                                            |
+| local           | `cli.gateway.liveness.indeterminate`             | No usable answer: a refused connection, a transport failure, a deadline, invalid JSON, a redirect, or a non-200 answer with no envelope.   | gateway liveness                                                           |
 | local           | `repository.connector.tool_missing`              | Bash, git or ssh cannot run, exits with an error or has unrecognized version output.                                                       | serve server, serve worker                                                 |
 | local           | `repository.connector.tool_version`              | Git is older than 2.40 or OpenSSH is older than 9.0.                                                                                       | serve server, serve worker                                                 |
 | local           | `repository.connector.git_failed`                | A git operation of the repository connector fails, is aborted or reaches its deadline; the message names the operation.                    | serve worker, binding apply                                                |
