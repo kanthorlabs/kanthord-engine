@@ -1,9 +1,12 @@
 import assert from "node:assert/strict";
+import { chmodSync, readFileSync, writeFileSync } from "node:fs";
+import { delimiter, join } from "node:path";
 import test from "node:test";
 import { background, CancellationContext } from "../kernel/context.ts";
 import { Diagnostic } from "../kernel/errors.ts";
 import { HealthRegistry } from "../kernel/health.ts";
 import { HealthStatus } from "../kernel/service.ts";
+import { temporary } from "../kernel/test-support.ts";
 import {
   CheckErrorCode,
   checkRepositoryTools,
@@ -98,6 +101,28 @@ test("requireTool accepts a present SSH agent tool", () => {
   assert.doesNotThrow(() => requireTool("ssh-agent"));
   assert.doesNotThrow(() => requireTool("ssh-add"));
   assert.doesNotThrow(() => requireTool("ssh-keyscan"));
+});
+
+test("requireTool runs the tool without the agent of the host", (t) => {
+  const root = temporary(t);
+  const tool = "kanthord-fake-ssh-add";
+  const record = join(root, "environment");
+  writeFileSync(join(root, tool), `#!/bin/sh\nenv > '${record}'\n`);
+  chmodSync(join(root, tool), 0o700);
+  const path = process.env.PATH;
+  const socket = process.env.SSH_AUTH_SOCK;
+  process.env.PATH = `${root}${delimiter}${path ?? ""}`;
+  process.env.SSH_AUTH_SOCK = join(root, "host-agent");
+  try {
+    requireTool(tool);
+  } finally {
+    process.env.PATH = path;
+    if (socket === undefined) delete process.env.SSH_AUTH_SOCK;
+    else process.env.SSH_AUTH_SOCK = socket;
+  }
+  const environment = readFileSync(record, "utf8");
+  assert.doesNotMatch(environment, /^SSH_AUTH_SOCK=/m);
+  assert.doesNotMatch(environment, /^SSH_AGENT_PID=/m);
 });
 
 test("requireTool refuses a missing tool", () => {

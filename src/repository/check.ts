@@ -10,6 +10,7 @@ const SSH_MIN_MINOR = 0;
 const ENOENT_CODE = "ENOENT";
 const EXIT_SUCCESS = 0;
 const USAGE_OPTION = "-?";
+const PRESENCE_TIMEOUT_MS = 5000;
 const execFileAsync = promisify(execFile);
 
 export const CheckErrorCode = {
@@ -108,7 +109,11 @@ export function parseSshVersion(output: string): [number, number] {
 }
 
 export function requireTool(cmd: string): void {
-  const result = spawnSync(cmd, [USAGE_OPTION], { stdio: "ignore" });
+  const result = spawnSync(cmd, [USAGE_OPTION], {
+    env: process.env.PATH === undefined ? {} : { PATH: process.env.PATH },
+    stdio: "ignore",
+    timeout: PRESENCE_TIMEOUT_MS,
+  });
   if (!result.error) return;
   if ((result.error as NodeJS.ErrnoException).code === ENOENT_CODE)
     throw new Diagnostic(CheckErrorCode.ToolMissing, "tool not found", {
