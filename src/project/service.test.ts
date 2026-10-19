@@ -1373,7 +1373,7 @@ test("binding write probes every repository outside and before commit, validates
     bindings,
   });
   const repeated = await f.write(exported.bindings, exported.version);
-  assert.equal(f.ssh.length, TWO_CALLS + TWO_CALLS);
+  assert.equal(f.ssh.length, TWO_CALLS);
   assert.deepEqual(repeated.bindings, result.bindings);
   assert.equal(repeated.binding_set_version, result.binding_set_version);
   assert.ok(
@@ -2102,6 +2102,7 @@ test("SSH failure leaves all rows and the version unchanged without entering com
     f.write(
       {
         [REPOSITORY_NAME]: repositoryBinding(),
+        [SECOND_REPOSITORY_NAME]: repositoryBinding(SECOND_REPOSITORY_ADDRESS),
         [WORKER_NAME]: workerBinding(),
       },
       first.binding_set_version,
@@ -2110,9 +2111,108 @@ test("SSH failure leaves all rows and the version unchanged without entering com
     ProjectErrorCode.RepositorySshUnreachable,
     { failure_reason: ResourceFailureReason.Unclassified },
   );
-  assert.deepEqual(addresses, [REPOSITORY_ADDRESS, REPOSITORY_ADDRESS]);
+  assert.deepEqual(addresses, [REPOSITORY_ADDRESS, SECOND_REPOSITORY_ADDRESS]);
   assert.equal(f.commits(), commits);
   assert.deepEqual(f.snapshot(), before);
+});
+
+function unreachableAfterSave(t: TestContext) {
+  const state = { fail: false, reads: [] as string[] };
+  const f = writeFixture(t, {
+    repositoryConnector: {
+      async resolveSshIdentity() {
+        return sshIdentity("github.com");
+      },
+      async gitLsRemote(address) {
+        state.reads.push(address);
+        if (state.fail) throw gitFailure(REPOSITORY_NOT_FOUND_STDERR);
+      },
+    },
+    credentialMetadata: () =>
+      sshPinMetadata(sshCredentialOf(REPOSITORY_ADDRESS)),
+  });
+  return { f, state };
+}
+
+async function rejectsUnreachable(
+  f: ReturnType<typeof writeFixture>,
+  bindings: Bindings,
+  version: number,
+) {
+  const before = f.snapshot();
+  await rejectsWrite(
+    f.write(bindings, version),
+    SSH_FAILURE_STATUS,
+    ProjectErrorCode.RepositorySshUnreachable,
+    { failure_reason: ResourceFailureReason.RepositoryNotFound },
+  );
+  assert.deepEqual(f.snapshot(), before);
+}
+
+test("an unchanged repository binding with an unreachable address does not block a worker save", async (t) => {
+  const { f, state } = unreachableAfterSave(t);
+  const first = await f.write({ [REPOSITORY_NAME]: repositoryBinding() });
+  state.fail = true;
+  const result = await f.write(
+    { [REPOSITORY_NAME]: repositoryBinding(), [WORKER_NAME]: workerBinding() },
+    first.binding_set_version,
+  );
+  assert.deepEqual(state.reads, [REPOSITORY_ADDRESS]);
+  assert.deepEqual(
+    result.changes.map(({ kind }) => kind),
+    [ChangeKind.Unchanged, ChangeKind.Created],
+  );
+});
+
+test("a changed repository address is read and refused when unreachable", async (t) => {
+  const { f, state } = unreachableAfterSave(t);
+  const first = await f.write({ [REPOSITORY_NAME]: repositoryBinding() });
+  state.fail = true;
+  await rejectsUnreachable(
+    f,
+    { [REPOSITORY_NAME]: repositoryBinding(SECOND_REPOSITORY_ADDRESS) },
+    first.binding_set_version,
+  );
+  assert.deepEqual(state.reads, [
+    REPOSITORY_ADDRESS,
+    SECOND_REPOSITORY_ADDRESS,
+  ]);
+});
+
+test("a new repository binding is read and refused when unreachable", async (t) => {
+  const { f, state } = unreachableAfterSave(t);
+  const first = await f.write({ [REPOSITORY_NAME]: repositoryBinding() });
+  state.fail = true;
+  await rejectsUnreachable(
+    f,
+    {
+      [REPOSITORY_NAME]: repositoryBinding(),
+      [SECOND_REPOSITORY_NAME]: repositoryBinding(SECOND_REPOSITORY_ADDRESS),
+    },
+    first.binding_set_version,
+  );
+  assert.deepEqual(state.reads, [
+    REPOSITORY_ADDRESS,
+    SECOND_REPOSITORY_ADDRESS,
+  ]);
+});
+
+test("a repository binding with a changed ssh_credential is read and refused when unreachable", async (t) => {
+  const { f, state } = unreachableAfterSave(t);
+  const first = await f.write({ [REPOSITORY_NAME]: repositoryBinding() });
+  state.fail = true;
+  const binding = repositoryBinding();
+  await rejectsUnreachable(
+    f,
+    {
+      [REPOSITORY_NAME]: {
+        ...binding,
+        config: { ...binding.config, ssh_credential: "ssh-other" },
+      },
+    },
+    first.binding_set_version,
+  );
+  assert.deepEqual(state.reads, [REPOSITORY_ADDRESS, REPOSITORY_ADDRESS]);
 });
 
 test("a refused binding write names the git failure reason in its details", async (t) => {
