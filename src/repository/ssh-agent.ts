@@ -37,6 +37,7 @@ export const SWEEP_GRACE_MS = 60_000;
 export const DEADLINE_RADIX = 36;
 
 const SWEEP_PATTERN = /^kd-ssh-([0-9a-z]+)-/;
+const SAFE_PATH = /^[A-Za-z0-9/._-]+$/;
 const DIRECTORY_MODE = 0o700;
 const FILE_MODE = 0o600;
 const PERMISSION_BITS = 0o777;
@@ -144,10 +145,10 @@ async function assertPrivate(directory: string): Promise<void> {
 function assertSocketPath(socket: string): void {
   if (Buffer.byteLength(socket, "utf8") > SOCKET_PATH_BYTES_MAX)
     throw agentFailure(SshAgentStep.SocketPath, "The socket path is too long.");
-  if (socket.includes(SINGLE_QUOTE))
+  if (!SAFE_PATH.test(socket))
     throw agentFailure(
       SshAgentStep.SocketPath,
-      "The socket path holds a quote.",
+      "The socket path holds an unsafe character.",
     );
 }
 

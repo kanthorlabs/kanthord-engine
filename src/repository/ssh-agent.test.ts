@@ -231,6 +231,32 @@ test("withSshAgent refuses a socket path above the limit", async () => {
   }
 });
 
+for (const [label, name] of [
+  ["whitespace", "with space"],
+  ["a percent token", "with%d"],
+] as const)
+  test(`withSshAgent refuses a directory path with ${label}`, async () => {
+    const unsafe = join(scratch, name);
+    mkdirSync(unsafe);
+    process.env.TMPDIR = unsafe;
+    try {
+      await assert.rejects(
+        withSshAgent(access("unsafe"), background, DEADLINE_MS, async () => {
+          assert.fail("work must not run");
+        }),
+        (error: unknown) => {
+          assert.ok(error instanceof Diagnostic);
+          assert.equal(error.code, SshAgentErrorCode.Failed);
+          assert.deepEqual(error.fields, [["step", SshAgentStep.SocketPath]]);
+          return true;
+        },
+      );
+      assert.deepEqual(await readdir(unsafe), []);
+    } finally {
+      process.env.TMPDIR = scratch;
+    }
+  });
+
 test("withSshAgent reports an ssh-add refusal with no key material", async () => {
   const key = access("refused");
   const lines = key.private_key.trim().split(LINE_END);
