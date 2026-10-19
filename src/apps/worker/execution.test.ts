@@ -33,6 +33,7 @@ import type { SshAccess } from "../../repository/contract.ts";
 const SECRET = Buffer.alloc(32, 7).toString("base64");
 const ENDED_RECORD = "execution ended";
 const NO_ENTRIES = 0;
+const ONE_ENTRY = 1;
 const UNKNOWN_FAILURE = "system.operation.unknown";
 test("host logs the stop of a released or ended execution in the execution ended record", async (t) => {
   const api = httpTransport("http://127.0.0.1:1");
@@ -126,6 +127,9 @@ test("host takes handover before setup and method, discards on every method end"
     provider_id: "anthropic",
     credential: { type: "api_key", key: "test_host_key" },
   };
+  const key = generateSshKey("deploy");
+  const bindingId = "binding_01ARZ3NDEKTSV4RRFFQ69G5FAB";
+  let held: ReadonlyMap<string, SshAccess> | undefined;
   const setup: ExecutionSetup = {
     execution_id: claim.execution_id,
     worker_name: "coder@1",
@@ -149,7 +153,17 @@ test("host takes handover before setup and method, discards on every method end"
     templates: SHIPPED_TEMPLATES,
     resource_budget: { turns: 200, wall_time_ms: 7200000 },
     intent: ExecutionIntent.Implement,
-    repositories: [],
+    repositories: [
+      {
+        binding_id: bindingId,
+        name: "repo",
+        address: "git@github.com:owner/repo.git",
+        ssh_host_key: { known_hosts: KNOWN_HOSTS },
+        strategy: { base_branch: "main" },
+        project_prompt: null,
+        working_layer: WORKING_LAYER_ALL_ON,
+      },
+    ],
   };
   t.mock.method(api.worker, "handover", async () => {
     events.push("handover");
@@ -159,7 +173,16 @@ test("host takes handover before setup and method, discards on every method end"
       data: sealEnvelope(
         deriveHandoverKeys(SECRET).handover,
         handoverAad(claim.execution_id, claim.claimant.runtime_identity),
-        { items: [credential], ssh_identities: [] },
+        {
+          items: [credential],
+          ssh_identities: [
+            {
+              binding_id: bindingId,
+              credential_id: "credential_01ARZ3NDEKTSV4RRFFQ69G5FAB",
+              private_key: key.private_key,
+            },
+          ],
+        },
       ),
     };
   });
@@ -228,11 +251,14 @@ test("host takes handover before setup and method, discards on every method end"
     (
       await hostExecution(input, async (native) => {
         stored = native.credentials;
+        held = native.sshAccess;
+        assert.equal(held.size, ONE_ENTRY);
         throw new Error("test_private_material");
       })
     )?.code,
     expected,
   );
+  assert.equal(held?.size, NO_ENTRIES);
   assert.equal(
     await stored!.items[0]!.store.read(credential.provider_id),
     undefined,
@@ -288,6 +314,8 @@ test("host takes handover before setup and method, discards on every method end"
       assert.equal(
         await hostExecution(input, async (native) => {
           let aborted = false;
+          held = native.sshAccess;
+          assert.equal(held.size, ONE_ENTRY);
           const unsubscribe = native.context.onCancel(() => {
             aborted = true;
           });
@@ -305,6 +333,7 @@ test("host takes handover before setup and method, discards on every method end"
         }),
         null,
       );
+      assert.equal(held?.size, NO_ENTRIES);
     }
   }
   t.mock.method(api.worker, "execution.setup.get", async () => ({
