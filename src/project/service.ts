@@ -11,6 +11,7 @@ import {
 import { Diagnostic, OperationError } from "../kernel/errors.ts";
 import { ensureDirectory } from "../kernel/files.ts";
 import { homeRelative } from "../kernel/xdg.ts";
+import { canonicalJSON } from "../kernel/json.ts";
 import {
   HealthStatus,
   type Healthcheck,
@@ -175,6 +176,18 @@ function refuseRepositoryAction(
       ProjectErrorCode.RepositoryCredentialRequired,
       "The pull_request action requires a credential.",
     );
+}
+function bindingUnchanged(
+  name: string,
+  binding: BindingEdit,
+  saved: StoredBinding | undefined,
+): boolean {
+  return (
+    saved !== undefined &&
+    saved.resource_identity ===
+      deriveResourceIdentity(binding.kind, name, binding.config) &&
+    canonicalJSON(saved.config) === canonicalJSON(binding.config)
+  );
 }
 function unmatchedKey(pair: { node_id: string; claim: string }): string {
   return JSON.stringify([pair.node_id, pair.claim]);
@@ -853,9 +866,11 @@ export class ProjectService implements Service, ProjectBindings {
     caller: CallerContext,
   ) {
     const submission = uniqueSubmission(body.bindings);
-    for (const binding of submission.values()) {
+    const saved = this.savedBindingSet(projectId, body.version);
+    for (const [name, binding] of submission) {
       if (binding.kind !== BindingKind.Repository) continue;
       refuseRepositoryAction(binding.config);
+      if (bindingUnchanged(name, binding, saved.get(name))) continue;
       const pin = this.operationalStore.transaction((tx) =>
         this.sshPinOf(tx, binding.config.ssh_credential),
       );
@@ -889,6 +904,16 @@ export class ProjectService implements Service, ProjectBindings {
     this.bindingsChanged(projectId);
     this.wakeup.wake(projectId);
     return answer;
+  }
+  private savedBindingSet(
+    projectId: string,
+    version: number,
+  ): Map<string, StoredBinding> {
+    return this.operationalStore.transaction((tx) =>
+      requireProject(tx, projectId).binding_set_version === version
+        ? readCurrentBindingSet(tx, projectId)
+        : new Map(),
+    );
   }
   private sshPinOf(tx: Transaction, credentialName: string): SshPin {
     this.custodySuitability(tx, {
