@@ -134,8 +134,8 @@ export function approvedModels(
 export const LLM_PROVIDERS: Readonly<Partial<Record<Platform, LlmProvider>>> = {
   [Platform.GitHubCopilot]: {
     check: (secret, _metadata, context, observe) => {
-      const { refresh, expires } = oauthSecretSchema.parse(secret);
-      return checkGitHubCopilot(refresh, expires, context, observe);
+      const { refresh } = oauthSecretSchema.parse(secret);
+      return checkGitHubCopilot(refresh, context, observe);
     },
   },
   [Platform.OpenAICodex]: {

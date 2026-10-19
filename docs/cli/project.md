@@ -464,7 +464,9 @@ transaction. The target rules are:
 
 - One binding per repository and per storage bucket; any number per worker.
 - Resource identity derives from configuration. A repository identity derives from the platform and from the owner and the repository of its SSH address, never from the host. A worker identity derives from its binding name, and a storage identity derives from its endpoint host and its bucket.
-- Every repository binding write runs the `ssh` validation of its `ssh_credential` and performs one `git ls-remote` with a 30 s deadline before the transaction.
+- A save checks only a new or a changed repository binding. A binding is new when the saved set at the submitted version has no binding of its name. A binding is changed when its kind or a field of its configuration differs from the saved binding.
+- For each new or changed repository binding, the save runs the `ssh` validation of its `ssh_credential` and performs one `git ls-remote` with a 30 s deadline before the transaction.
+- An unchanged repository binding gets no SSH read. An unreachable unchanged binding does not block the save.
 - A drift of the `ssh` record refuses the write with `repository.credential.ssh_drift`.
 - A failed or timed-out read refuses the write with `project.bindings.repository.ssh_unreachable` and `details: { failure_reason }`. `failure_reason` is a git value of the [failure reason list](#binding-verify).
 - A strategy with more than one action refuses the write.
