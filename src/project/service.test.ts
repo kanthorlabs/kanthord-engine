@@ -2215,6 +2215,25 @@ test("a repository binding with a changed ssh_credential is read and refused whe
   assert.deepEqual(state.reads, [REPOSITORY_ADDRESS, REPOSITORY_ADDRESS]);
 });
 
+test("a save at a stale version reads every repository binding and answers a version conflict", async (t) => {
+  const { f, state } = unreachableAfterSave(t);
+  const first = await f.write({ [REPOSITORY_NAME]: repositoryBinding() });
+  const second = await f.write(
+    { [REPOSITORY_NAME]: repositoryBinding(), [WORKER_NAME]: workerBinding() },
+    first.binding_set_version,
+  );
+  await rejectsWrite(
+    f.write(
+      { [REPOSITORY_NAME]: repositoryBinding() },
+      first.binding_set_version,
+    ),
+    HttpStatus.Conflict,
+    ProjectErrorCode.VersionConflict,
+    { binding_set_version: second.binding_set_version },
+  );
+  assert.deepEqual(state.reads, [REPOSITORY_ADDRESS, REPOSITORY_ADDRESS]);
+});
+
 test("a refused binding write names the git failure reason in its details", async (t) => {
   const f = writeFixture(t, {
     repositoryConnector: {
