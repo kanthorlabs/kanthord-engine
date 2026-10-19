@@ -237,7 +237,7 @@ The command prints only `{ "received": true, "idempotency_key": "<key>" }` and n
 The [credential handover](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/worker-service.impl.md#the-credential-handover) rules the application call after a claim and before inference.
 The [Custody handover](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/custody.impl.md#the-credential-handover) rules the envelope and credential report.
 The envelope holds `ssh_identities: [{ binding_id, credential_id, private_key }]` beside `items`, one entry for each repository binding of the pinned node revision. An execution with no repository binding holds `[]`. The handover pins each SSH key revision to the execution.
-The worker application takes the handover before the setup read. It builds the SSH access of each repository in memory from the handover entry and `ssh_host_key`, and it writes no key to a file.
+The worker application takes the handover before the setup read. It builds the SSH access of each repository in memory from the handover entry and `ssh_host_key`, and it writes no private key to a file.
 
 ## Catalog inspection
 
