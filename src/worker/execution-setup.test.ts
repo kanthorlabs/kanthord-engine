@@ -478,6 +478,16 @@ test("setup refuses an unpinned host and an alias host before any answer", async
       error.code === ProjectErrorCode.RepositoryAddressInvalid,
   );
   await assert.rejects(
+    repositorySetup(
+      t,
+      "git@kanthorlabs.github.com:kanthorlabs/kanthord.git",
+      true,
+    ),
+    (error) =>
+      error instanceof OperationError &&
+      error.code === ProjectErrorCode.RepositoryAddressInvalid,
+  );
+  await assert.rejects(
     repositorySetup(t, "git@gitlab.com:kanthorlabs/kanthord.git", true),
     (error) =>
       error instanceof OperationError &&
