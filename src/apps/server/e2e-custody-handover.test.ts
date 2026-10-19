@@ -10,6 +10,7 @@ import {
 } from "../../custody/contract.ts";
 import { Intent } from "../../mission/contract.ts";
 import { httpClient } from "../../gateway/client.ts";
+import { background } from "../../kernel/context.ts";
 import { writePrivate } from "../../kernel/files.ts";
 import {
   deriveHandoverKeys,
@@ -31,9 +32,17 @@ import {
   type ExecutionRecord,
   WorkPullKind,
 } from "../../scheduler/contract.ts";
+import { RepositoryComponent } from "../../repository/index.ts";
+import { gitLsRemote } from "../../repository/connector.ts";
+import {
+  createBareRepository,
+  startTestSshd,
+} from "../../repository/test-sshd.ts";
 import { workerOperations } from "../../worker/contract.ts";
 import { environment, kanthord, kanthordTerminal } from "./cli-support.ts";
 import {
+  createFakeSshCredential,
+  FAKE_SSH_CREDENTIAL,
   FAKE_SSH_IDENTITY,
   gatewayFixture,
   COVERING_WORKER_BINDINGS,
@@ -54,6 +63,7 @@ const HANDOVER_LOG_MESSAGE = "credential handover";
 const NO_OUTPUT = "";
 const MISSING_TOKEN = "";
 const JOURNEY_TIMEOUT = 180000;
+const SSH_TIMEOUT = 30000;
 const UNKNOWN_EXECUTION = "execution_01ARZ3NDEKTSV4RRFFQ69G5FAA";
 const NAME = "anthro-1";
 const PROVIDER = "anthropic";
@@ -174,17 +184,7 @@ async function resources(c: ReturnType<typeof cli>) {
     metadata: null,
     secret: { key: "test-secret" },
   });
-  await c.write(["repository", "credential", "create"], {
-    name: "github-ssh",
-    platform: "ssh",
-    metadata: {
-      host: "github.com",
-      hostname: "github.com",
-      port: 22,
-      identity_file: "~/.ssh/id_rsa",
-    },
-    secret: {},
-  });
+  await createFakeSshCredential(c.read);
   await enableCoveringAgents(c.env, {
     platform: PROVIDER,
     credential: NAME,
@@ -209,7 +209,7 @@ async function resources(c: ReturnType<typeof cli>) {
           available: true,
           platform: "github",
           address: "git@github.com:owner/repo.git",
-          ssh_credential: "github-ssh",
+          ssh_credential: FAKE_SSH_CREDENTIAL,
           strategy: { base_branch: "main" },
           credential: "github",
         },
@@ -297,6 +297,13 @@ async function setup(t: TestContext) {
     NAME,
   ]);
   assert.ok(stored.revisions[0]);
+  const ssh = await c.read<CredentialAnswer>([
+    "repository",
+    "credential",
+    "get",
+    FAKE_SSH_CREDENTIAL,
+  ]);
+  assert.ok(ssh.revisions[0]);
   const keys = deriveHandoverKeys(general.client_secret);
   t.after(() => {
     keys.handover.fill(0);
@@ -340,6 +347,9 @@ async function setup(t: TestContext) {
     pull,
     execution_id: claim.execution.execution_id,
     credentialId: stored.revisions[0].id,
+    bindingId,
+    sshCredentialId: ssh.revisions[0].id,
+    sshPublicKey: String(ssh.revisions[0].metadata?.public_key),
   };
 }
 
@@ -351,6 +361,9 @@ test(
     const X = h.execution_id;
     const C1 = h.credentialId;
     const K1 = ulid();
+    const S = h.sshCredentialId;
+    let S2: string;
+    let pinnedKey: string;
     let C2: string;
     let X2: string;
     const R1 = {
@@ -383,22 +396,28 @@ test(
           "get",
           X,
         ]);
-        assert.deepEqual(execution.credentials, [C1]);
+        assert.deepEqual(execution.credentials.toSorted(), [C1, S].toSorted());
       },
     );
     await t.test(
       "E05.2 only the handover key and execution AAD open the envelope",
       async () => {
         const envelope = completed(await h.handover(X, K1));
-        assert.deepEqual(h.open(X, envelope), {
-          items: [
-            {
-              credential_id: C1,
-              provider_id: PROVIDER,
-              credential: credential(FIRST),
-            },
-          ],
-        });
+        const payload = h.open(X, envelope);
+        assert.deepEqual(payload.items, [
+          {
+            credential_id: C1,
+            provider_id: PROVIDER,
+            credential: credential(FIRST),
+          },
+        ]);
+        assert.deepEqual(
+          payload.ssh_identities.map(({ binding_id, credential_id }) => ({
+            binding_id,
+            credential_id,
+          })),
+          [{ binding_id: h.bindingId, credential_id: S }],
+        );
         assert.throws(
           () =>
             openEnvelope(h.keys.handover, h.aad(UNKNOWN_EXECUTION), envelope),
@@ -419,6 +438,32 @@ test(
             ),
         );
         noSecrets(JSON.stringify(h.fixture.logs));
+      },
+    );
+    await t.test(
+      "E05.2a the handed SSH key authenticates to an sshd that pins its public key",
+      async (tt) => {
+        const [identity] = h.open(
+          X,
+          completed(await h.handover(X)),
+        ).ssh_identities;
+        assert.ok(identity);
+        pinnedKey = identity.private_key;
+        const sshd = await startTestSshd(tt);
+        const bare = await createBareRepository(tt);
+        const access = RepositoryComponent.handedSshAccess(
+          identity.private_key,
+          sshd.known_hosts,
+        );
+        assert.equal(access.public_key.trim(), h.sshPublicKey.trim());
+        await assert.rejects(
+          gitLsRemote(sshd.url(bare), background, SSH_TIMEOUT, access),
+        );
+        await sshd.authorize(access.public_key);
+        await gitLsRemote(sshd.url(bare), background, SSH_TIMEOUT, access);
+        assert.ok(
+          !JSON.stringify(h.fixture.logs).includes(identity.private_key),
+        );
       },
     );
     await t.test(
@@ -461,6 +506,39 @@ test(
           provider_id: PROVIDER,
           credential: credential(FIRST),
         });
+      },
+    );
+    await t.test(
+      "E05.4a SSH key rotation keeps the pinned key of the running execution",
+      async () => {
+        await h.read([
+          "repository",
+          "credential",
+          "ssh-key-rotate",
+          FAKE_SSH_CREDENTIAL,
+          "--expected-revision",
+          String(FIRST_REVISION),
+        ]);
+        const stored = await h.read<CredentialAnswer>([
+          "repository",
+          "credential",
+          "get",
+          FAKE_SSH_CREDENTIAL,
+        ]);
+        assert.deepEqual(
+          stored.revisions.map((row) => [row.revision, row.ended_at]),
+          [
+            [SECOND_REVISION, null],
+            [FIRST_REVISION, null],
+          ],
+        );
+        S2 = stored.revisions[0]!.id;
+        const [identity] = h.open(
+          X,
+          completed(await h.handover(X)),
+        ).ssh_identities;
+        assert.equal(identity?.credential_id, S);
+        assert.equal(identity?.private_key, pinnedKey);
       },
     );
     await t.test(
@@ -624,7 +702,13 @@ test(
           "get",
           X2,
         ]);
-        assert.deepEqual(execution.credentials, [C2]);
+        assert.deepEqual(execution.credentials.toSorted(), [C2, S2].toSorted());
+        const [identity] = h.open(
+          X2,
+          completed(await h.handover(X2)),
+        ).ssh_identities;
+        assert.equal(identity?.credential_id, S2);
+        assert.notEqual(identity?.private_key, pinnedKey);
         await h.write(["llm", "credential", "rotate", NAME], {
           expected_revision: SECOND_REVISION,
           secret: { key: THIRD },

@@ -65,6 +65,7 @@ import { environment, kanthord, kanthordTerminal } from "./cli-support.ts";
 import {
   FAKE_GITHUB_HOST_KEY,
   FAKE_SSH_HOST,
+  createFakeSshCredential,
   FAKE_SSH_IDENTITY,
   gatewayFixture,
   COVERING_WORKER_BINDINGS,
@@ -155,17 +156,7 @@ test(
       metadata: null,
       secret: { key: "test-secret" },
     });
-    await write(["repository", "credential", "create"], {
-      name: "github-ssh",
-      platform: "ssh",
-      metadata: {
-        host: "github.com",
-        hostname: "github.com",
-        port: 22,
-        identity_file: "~/.ssh/id_rsa",
-      },
-      secret: {},
-    });
+    await createFakeSshCredential(read);
     await enableCoveringAgents(human, {
       platform: "anthropic",
       credential: "anthro-1",
@@ -346,9 +337,12 @@ test(
       );
       keys.handover.fill(ZERO_BYTE);
       keys.report.fill(ZERO_BYTE);
-      const credentials = executionCredentialStore(payload, async () => {
-        throw new Error("Unexpected refresh");
-      });
+      const credentials = executionCredentialStore(
+        { items: payload.items },
+        async () => {
+          throw new Error("Unexpected refresh");
+        },
+      );
       t.after(() => credentials.discard());
       const setup = completed(
         await holder.client["execution.setup.get"]({

@@ -19,6 +19,7 @@ import {
 import { generateMachineToken } from "./cli-support.ts";
 import {
   gatewayFixture,
+  createFakeSshCredential,
   FAKE_SSH_IDENTITY,
   fakeGitHub,
   fakeS3,
@@ -152,17 +153,7 @@ async function setupInternal(t: TestContext) {
       metadata: null,
       secret: { key },
     });
-  await cli.write(["repository", "credential", "create"], {
-    name: "github-ssh",
-    platform: "ssh",
-    metadata: {
-      host: "github.com",
-      hostname: "github.com",
-      port: 22,
-      identity_file: "~/.ssh/id_rsa",
-    },
-    secret: {},
-  });
+  await createFakeSshCredential(cli.read);
   const storage = {
     endpoint: s3.endpoint,
     bucket: s3.bucket,
