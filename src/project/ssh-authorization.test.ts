@@ -36,6 +36,7 @@ const OTHER_CREDENTIAL = "other";
 const REPOSITORY_NAME = "repo";
 const WORKER_NAME = "worker";
 const NODE_REVISION = 3;
+const OTHER_NODE_REVISION = 4;
 const RUNTIME_IDENTITY = "runtime";
 
 function repository() {
@@ -56,6 +57,10 @@ function worker() {
     kind: BindingKind.Worker,
     config: { worker: "coder@1", instance_count: 1 },
   };
+}
+
+function revisionKey(nodeId: string, revision: number): string {
+  return JSON.stringify([nodeId, revision]);
 }
 
 function setup(t: TestContext) {
@@ -98,12 +103,11 @@ function setup(t: TestContext) {
     },
     repositoryBindingIdsOf: (tx, nodeId, revision) => {
       assert.ok(tx.database.isTransaction);
-      assert.equal(revision, NODE_REVISION);
-      return pinned.get(nodeId) ?? [];
+      return pinned.get(revisionKey(nodeId, revision)) ?? [];
     },
   });
   const nodeId = createIdentity("node");
-  pinned.set(nodeId, [saved.binding_id]);
+  pinned.set(revisionKey(nodeId, NODE_REVISION), [saved.binding_id]);
   const claim: ExecutionClaim = {
     executionId: createIdentity("execution"),
     projectId: saved.project_id,
@@ -240,6 +244,37 @@ test("a machine with a proven claim passes only for a repository binding of the 
       }),
     refused("node_mismatch"),
   );
+  assert.throws(
+    () =>
+      f.authorize(f.machine, f.binding, {
+        ...f.claim,
+        pinnedRevision: OTHER_NODE_REVISION,
+      }),
+    refused("node_mismatch"),
+  );
+});
+
+test("a draft configuration refuses a machine and a service identity before the custody suitability", (t) => {
+  const f = setup(t);
+  const draft = {
+    kind: SshIdentitySubjectKind.Draft,
+    project_id: f.saved.project_id,
+    credential: SSH_CREDENTIAL,
+    address: ADDRESS,
+  } as const;
+  assert.throws(
+    () => f.authorize(f.machine, draft, f.claim),
+    refused("identity_refused"),
+  );
+  assert.throws(
+    () =>
+      f.authorize(
+        { kind: IdentityKind.Service, service: PROJECT_SERVICE_NAME },
+        draft,
+      ),
+    refused("identity_refused"),
+  );
+  assert.deepEqual(f.suitability, []);
 });
 
 test("a machine without a claim refuses a binding", (t) => {
