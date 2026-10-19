@@ -104,7 +104,11 @@ test("sshAccessOf builds the access from the key and the pin of the address host
 
 test("sshAccessOf takes the port of an alternative SSH host from the fixed table and pins the bracket form", (t) => {
   const store = pinnedStore(t);
-  for (const host of ["altssh.gitlab.com", "altssh.bitbucket.org"]) {
+  for (const host of [
+    "ssh.github.com",
+    "altssh.gitlab.com",
+    "altssh.bitbucket.org",
+  ]) {
     store.database
       .prepare(
         "INSERT INTO repository_host_key (id, host, public_key, created_at) VALUES (?, ?, ?, 1)",

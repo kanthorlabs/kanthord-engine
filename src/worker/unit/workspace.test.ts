@@ -687,6 +687,7 @@ test("a missing remote node branch in one checkout stops with repository.node_br
 test("a handed SSH access takes the port of the address host from the fixed table", () => {
   const ports = {
     "git@github.com:owner/repo.git": 22,
+    "git@ssh.github.com:owner/repo.git": 443,
     "git@altssh.gitlab.com:owner/repo.git": 443,
     "git@altssh.bitbucket.org:owner/repo.git": 443,
   };
