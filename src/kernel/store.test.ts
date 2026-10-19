@@ -26,6 +26,9 @@ const COMMITTED_PREFIX_LENGTH = 1;
 const COMPLETE_HISTORY_LENGTH = 2;
 const PRIVATE_FILE_MODE = 0o600;
 const SELECT_ALL_SQL = "SELECT * FROM t";
+const TRANSACTION_COUNT = 1000;
+const DISTINCT_SQL_COUNT = 3;
+const ROLLBACK_MESSAGE = "rolled back";
 const FILLER_RESERVED_COUNT = 2;
 const B_VALUE = "b";
 const X_VALUE = "x";
@@ -244,7 +247,7 @@ test("plan reads the history without a write and backup copies a consistent priv
   }
 });
 
-test("prepare answers one statement for one SQL text in one transaction", () => {
+test("prepare answers one statement for one SQL text across transactions", () => {
   const store = new Store(":memory:");
   try {
     const sql = "SELECT 1 AS value";
@@ -254,8 +257,65 @@ test("prepare answers one statement for one SQL text in one transaction", () => 
       return statement;
     });
     store.transaction(({ database }) => {
-      assert.notEqual(database.prepare(sql), first);
+      assert.equal(database.prepare(sql), first);
     });
+  } finally {
+    store.close();
+  }
+});
+
+test("the connection prepares one statement for each SQL text over many transactions", () => {
+  const store = new Store(":memory:");
+  try {
+    const statements = new Set<unknown>();
+    for (let index = 0; index < TRANSACTION_COUNT; index++)
+      store.transaction(({ database }) => {
+        for (let value = 1; value <= DISTINCT_SQL_COUNT; value++)
+          statements.add(database.prepare(`SELECT ${value} AS value`));
+      });
+    assert.equal(statements.size, DISTINCT_SQL_COUNT);
+  } finally {
+    store.close();
+  }
+});
+
+test("a rollback clears the statement cache", () => {
+  const store = new Store(":memory:");
+  try {
+    const sql = "SELECT 1 AS value";
+    let rolledBack: unknown;
+    assert.throws(
+      () =>
+        store.transaction(({ database }) => {
+          rolledBack = database.prepare(sql);
+          throw new Error(ROLLBACK_MESSAGE);
+        }),
+      { message: ROLLBACK_MESSAGE },
+    );
+    store.transaction(({ database }) => {
+      assert.notEqual(database.prepare(sql), rolledBack);
+    });
+  } finally {
+    store.close();
+  }
+});
+
+test("a rollback after a schema change answers the old columns", () => {
+  const store = new Store(":memory:");
+  try {
+    store.database.exec("CREATE TABLE t (a TEXT); INSERT INTO t VALUES ('x')");
+    assert.throws(
+      () =>
+        store.transaction(({ database }) => {
+          database.exec("ALTER TABLE t ADD COLUMN w TEXT");
+          const inside = database.prepare(SELECT_ALL_SQL).all();
+          assert.deepEqual(Object.keys(inside[0]!), ["a", "w"]);
+          throw new Error(ROLLBACK_MESSAGE);
+        }),
+      { message: ROLLBACK_MESSAGE },
+    );
+    const after = store.database.prepare(SELECT_ALL_SQL).all();
+    assert.deepEqual(Object.keys(after[0]!), ["a"]);
   } finally {
     store.close();
   }

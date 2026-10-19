@@ -9,6 +9,15 @@ import { isObject, isString } from "./values.ts";
 
 export const IN_MEMORY_DATABASE = ":memory:";
 export const STATEMENT_CACHE_LIMIT = 256;
+const TransactionControl = {
+  Begin: "BEGIN IMMEDIATE",
+  Commit: "COMMIT",
+  Rollback: "ROLLBACK",
+} as const;
+const STATEMENT_KEEPING_CONTROLS: ReadonlySet<string> = new Set([
+  TransactionControl.Begin,
+  TransactionControl.Commit,
+]);
 const DATABASE_PROBE_OK = 1;
 const NO_RECORDED_MIGRATION = 0;
 const SCHEMA_KEY_SEPARATOR = "\u0000";
@@ -137,7 +146,7 @@ class StatementCache extends DatabaseSync {
     try {
       super.exec(sql);
     } finally {
-      this.statements.clear();
+      if (!STATEMENT_KEEPING_CONTROLS.has(sql)) this.statements.clear();
     }
   }
 
@@ -205,17 +214,17 @@ export class Store {
 
   transaction<T>(work: (transaction: Transaction) => T): T {
     if (this.active) throw new Error("Nested transactions are forbidden.");
-    this.database.exec("BEGIN IMMEDIATE");
+    this.database.exec(TransactionControl.Begin);
     this.active = true;
     try {
       this.audit();
       const result = work({ database: this.database });
       if (isObject(result) && "then" in result)
         throw new Error("Transactions must be synchronous.");
-      this.database.exec("COMMIT");
+      this.database.exec(TransactionControl.Commit);
       return result;
     } catch (error) {
-      this.database.exec("ROLLBACK");
+      this.database.exec(TransactionControl.Rollback);
       throw error;
     } finally {
       this.active = false;
