@@ -29,6 +29,10 @@ const SELECT_ALL_SQL = "SELECT * FROM t";
 const TRANSACTION_COUNT = 1000;
 const DISTINCT_SQL_COUNT = 3;
 const ROLLBACK_MESSAGE = "rolled back";
+const ORPHAN_KEY = 99;
+const NO_ROWS = 0;
+const DEFERRED_FOREIGN_KEY_SQL =
+  "CREATE TABLE parent (id INTEGER PRIMARY KEY); CREATE TABLE child (parent_id INTEGER REFERENCES parent(id) DEFERRABLE INITIALLY DEFERRED)";
 const FILLER_RESERVED_COUNT = 2;
 const B_VALUE = "b";
 const X_VALUE = "x";
@@ -316,6 +320,32 @@ test("a rollback after a schema change answers the old columns", () => {
     );
     const after = store.database.prepare(SELECT_ALL_SQL).all();
     assert.deepEqual(Object.keys(after[0]!), ["a"]);
+  } finally {
+    store.close();
+  }
+});
+
+test("a failed commit clears the statement cache and leaves the store usable", () => {
+  const store = new Store(":memory:");
+  try {
+    store.database.exec(DEFERRED_FOREIGN_KEY_SQL);
+    const sql = "SELECT 1 AS value";
+    let failed: unknown;
+    assert.throws(
+      () =>
+        store.transaction(({ database }) => {
+          failed = database.prepare(sql);
+          database.prepare("INSERT INTO child VALUES (?)").run(ORPHAN_KEY);
+        }),
+      /FOREIGN KEY/,
+    );
+    store.transaction(({ database }) => {
+      assert.notEqual(database.prepare(sql), failed);
+      assert.equal(
+        database.prepare("SELECT COUNT(*) AS count FROM child").get()?.count,
+        NO_ROWS,
+      );
+    });
   } finally {
     store.close();
   }
