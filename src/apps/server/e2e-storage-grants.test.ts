@@ -32,7 +32,8 @@ import {
   type ExecutionRecord,
 } from "../../scheduler/contract.ts";
 import {
-  FAKE_SSH_CREDENTIAL_BODY,
+  createFakeSshCredential,
+  FAKE_SSH_CREDENTIAL,
   FAKE_SSH_IDENTITY,
   fakeS3,
   gatewayFixture,
@@ -152,7 +153,7 @@ async function setup(t: TestContext) {
     metadata: null,
     secret: { key: GITHUB_SECRET },
   });
-  await write(["repository", "credential", "create"], FAKE_SSH_CREDENTIAL_BODY);
+  await createFakeSshCredential(read);
   const project = await read<{ id: string }>([
     "project",
     "create",
@@ -172,7 +173,7 @@ async function setup(t: TestContext) {
           platform: "github",
           address: "git@github.com:owner/repo.git",
           strategy: { base_branch: "main" },
-          ssh_credential: FAKE_SSH_CREDENTIAL_BODY.name,
+          ssh_credential: FAKE_SSH_CREDENTIAL,
           credential: "github",
         },
       },
@@ -526,7 +527,7 @@ function failoverBindings(
         platform: "github",
         address: "git@github.com:owner/repo.git",
         strategy: { base_branch: "main" },
-        ssh_credential: FAKE_SSH_CREDENTIAL_BODY.name,
+        ssh_credential: FAKE_SSH_CREDENTIAL,
         credential: "github",
       },
     },
@@ -571,7 +572,7 @@ async function failoverSetup(t: TestContext) {
     metadata: null,
     secret: { key: GITHUB_SECRET },
   });
-  await write(["repository", "credential", "create"], FAKE_SSH_CREDENTIAL_BODY);
+  await createFakeSshCredential(read);
   const project = await read<{ id: string }>([
     "project",
     "create",

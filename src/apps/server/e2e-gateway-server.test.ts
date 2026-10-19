@@ -42,6 +42,7 @@ import type { AgentEnablement } from "../../agent/contract.ts";
 import { environment, kanthord } from "./cli-support.ts";
 import {
   applyCoveringBindings,
+  createFakeSshCredential,
   enableCoveringAgents,
   FAKE_SSH_IDENTITY,
   gatewayFixture,
@@ -391,22 +392,8 @@ test("E07.4 github repository binding advances the binding set to version two", 
   const fixture = await setup(t);
   const project = await createProject(fixture);
   await createCredential(fixture, GITHUB, GITHUB);
-  const sshPath = file(fixture.directory, "github-ssh.json", {
-    name: "github-ssh",
-    platform: "ssh",
-    metadata: {
-      host: "github.com",
-      hostname: "github.com",
-      port: 22,
-      identity_file: "~/.ssh/id_rsa",
-    },
-    secret: {},
-  });
-  success<CredentialAnswer>(
-    await kanthord(
-      ["repository", "credential", "create", "--file", sshPath],
-      fixture.env,
-    ),
+  await createFakeSshCredential(async <T>(args: string[]) =>
+    success<T>(await kanthord(args, fixture.env)),
   );
   const path = file(fixture.directory, "bindings.json", {
     version: project.binding_set_version,

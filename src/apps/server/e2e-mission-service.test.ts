@@ -46,6 +46,7 @@ import { environment, kanthord } from "./cli-support.ts";
 import {
   applyCoveringBindings,
   COVERING_WORKER_BINDINGS,
+  createFakeSshCredential,
   enableCoveringAgents,
   FAKE_SSH_IDENTITY,
   gatewayFixture,
@@ -608,27 +609,8 @@ test(
         fixture.env,
       ),
     );
-    success(
-      await kanthord(
-        [
-          REPOSITORY,
-          CREDENTIAL,
-          CREATE,
-          FILE,
-          jsonFile(fixture, "ssh-credential.json", {
-            name: "github-ssh",
-            platform: "ssh",
-            metadata: {
-              host: "github.com",
-              hostname: "github.com",
-              port: 22,
-              identity_file: "~/.ssh/id_rsa",
-            },
-            secret: {},
-          }),
-        ],
-        fixture.env,
-      ),
+    await createFakeSshCredential(async <T>(args: string[]) =>
+      success<T>(await kanthord(args, fixture.env)),
     );
     const bindingFile = jsonFile(fixture, "binding.json", {
       version: COVERED_BINDING_VERSION,
@@ -918,27 +900,8 @@ async function configureRepository(
       fixture.env,
     ),
   );
-  success(
-    await kanthord(
-      [
-        REPOSITORY,
-        CREDENTIAL,
-        CREATE,
-        FILE,
-        jsonFile(fixture, "import-ssh-credential.json", {
-          name: "github-ssh",
-          platform: "ssh",
-          metadata: {
-            host: "github.com",
-            hostname: "github.com",
-            port: 22,
-            identity_file: "~/.ssh/id_rsa",
-          },
-          secret: {},
-        }),
-      ],
-      fixture.env,
-    ),
+  await createFakeSshCredential(async <T>(args: string[]) =>
+    success<T>(await kanthord(args, fixture.env)),
   );
   const bindingFile = jsonFile(fixture, "import-binding.json", {
     version: COVERED_BINDING_VERSION,

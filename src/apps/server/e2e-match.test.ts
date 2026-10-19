@@ -16,6 +16,7 @@ import {
 } from "../../scheduler/contract.ts";
 import { environment, kanthord, until } from "./cli-support.ts";
 import {
+  createFakeSshCredential,
   enableCoveringAgents,
   FAKE_SSH_IDENTITY,
   gatewayFixture,
@@ -116,17 +117,7 @@ async function setup(t: TestContext) {
     metadata: null,
     secret: { key: "test-secret" },
   });
-  await write(["repository", "credential", "create"], {
-    name: "github-ssh",
-    platform: "ssh",
-    metadata: {
-      host: "github.com",
-      hostname: "github.com",
-      port: 22,
-      identity_file: "~/.ssh/id_rsa",
-    },
-    secret: {},
-  });
+  await createFakeSshCredential(read);
   await enableCoveringAgents(H, {
     platform: "anthropic",
     credential: "anthro-1",

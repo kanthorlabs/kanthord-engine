@@ -286,17 +286,6 @@ export const FAKE_HOST_KEY_SOURCES: HostKeySources = {
     throw new Error(`The test host key sources read no key of ${host}.`);
   },
 };
-export const FAKE_SSH_CREDENTIAL_BODY = {
-  name: "github-ssh",
-  platform: "ssh" as const,
-  metadata: {
-    host: "github.com",
-    hostname: "github.com",
-    port: 22,
-    identity_file: "~/.ssh/id_rsa",
-  },
-  secret: {},
-};
 const SINGLE_INSTANCE = 1;
 const NO_INSTANCES = 0;
 const CHECKSUM_HEADER = "x-amz-checksum-sha256";

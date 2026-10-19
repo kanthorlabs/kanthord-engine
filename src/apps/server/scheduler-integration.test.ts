@@ -37,7 +37,13 @@ import { CancellationContext } from "../../kernel/context.ts";
 import { HttpStatus } from "../../kernel/http.ts";
 import { temporary } from "../../kernel/test-support.ts";
 import { createIdentity } from "../../kernel/identity.ts";
-import { FAKE_SSH_IDENTITY, gatewayFixture } from "./test-support.ts";
+import {
+  FAKE_GITHUB_HOST_KEY_FINGERPRINT,
+  FAKE_SSH_CREDENTIAL,
+  FAKE_SSH_HOST,
+  FAKE_SSH_IDENTITY,
+  gatewayFixture,
+} from "./test-support.ts";
 
 const FIRST_ATTEMPT = 1;
 const FIRST_CONCURRENT_RELEASE = 1;
@@ -156,20 +162,17 @@ async function setup(t: TestContext, adapter: Adapter, path?: string) {
     }),
   );
   completed(
-    await call(repositoryOperations.create, {
+    await call(repositoryOperations.ssh_key_create, {
       params: {},
       query: {},
-      body: {
-        name: "github-ssh",
-        platform: "ssh",
-        metadata: {
-          host: "github.com",
-          hostname: "github.com",
-          port: 22,
-          identity_file: "~/.ssh/id_rsa",
-        },
-        secret: {},
-      },
+      body: { name: FAKE_SSH_CREDENTIAL },
+    }),
+  );
+  completed(
+    await call(repositoryOperations.host_key_pin, {
+      params: { host: FAKE_SSH_HOST },
+      query: {},
+      body: { fingerprint: FAKE_GITHUB_HOST_KEY_FINGERPRINT },
     }),
   );
   for (const agentName of ["swe@1", "re@1"])

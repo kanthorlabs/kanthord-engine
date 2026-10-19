@@ -15,6 +15,7 @@ import {
   type ExecutionRecord,
 } from "../../scheduler/contract.ts";
 import {
+  createFakeSshCredential,
   FAKE_SSH_IDENTITY,
   gatewayFixture,
   COVERING_WORKER_BINDINGS,
@@ -150,17 +151,7 @@ async function setup(t: TestContext, short = false) {
     metadata: null,
     secret: { key: "test-secret" },
   });
-  await write(["repository", "credential", "create"], {
-    name: "github-ssh",
-    platform: "ssh",
-    metadata: {
-      host: "github.com",
-      hostname: "github.com",
-      port: 22,
-      identity_file: "~/.ssh/id_rsa",
-    },
-    secret: {},
-  });
+  await createFakeSshCredential(read);
   await enableCoveringAgents(H, {
     platform: "anthropic",
     credential: "anthro-1",
