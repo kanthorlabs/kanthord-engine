@@ -7,6 +7,7 @@ import { basename, join } from "node:path";
 import test from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 import { promisify } from "node:util";
+import { createServer } from "node:net";
 import { Worker } from "node:worker_threads";
 import { background, CancellationContext } from "../kernel/context.ts";
 import { Diagnostic } from "../kernel/errors.ts";
@@ -365,4 +366,24 @@ test("the sweep spares a directory whose deadline is not past", async () => {
   assert.equal(await exists(recent), true);
   assert.equal(await exists(foreign), true);
   assert.equal(await exists(expired), false);
+});
+
+test("the sweep keeps an expired directory whose agent socket accepts a connection", async (t) => {
+  const deadlineAt = Date.now() - SWEEP_GRACE_MS - DEADLINE_MS;
+  const named = (suffix: string) =>
+    join(
+      scratch,
+      `${SSH_AGENT_DIRECTORY_PREFIX}${deadlineAt.toString(DEADLINE_RADIX)}-${suffix}`,
+    );
+  const live = named("live");
+  const dead = named("dead");
+  for (const path of [live, dead]) await mkdir(path);
+  const server = createServer((socket) => socket.end());
+  await new Promise<void>((resolve) =>
+    server.listen(join(live, SSH_AGENT_SOCKET), resolve),
+  );
+  t.after(() => new Promise<void>((resolve) => server.close(() => resolve())));
+  await sweepSshAgentDirectories(Date.now());
+  assert.equal(await exists(live), true);
+  assert.equal(await exists(dead), false);
 });
