@@ -46,7 +46,11 @@ import {
 import { llmOperations } from "../../llm/contract.ts";
 import { agentOperations } from "../../agent/contract.ts";
 import { gatewayOperations, OWNER_INTAKE } from "../../gateway/contract.ts";
-import { HealthRegistry, ResourceStatus } from "../../kernel/health.ts";
+import {
+  HealthRegistry,
+  ResourceFailureReason,
+  ResourceStatus,
+} from "../../kernel/health.ts";
 import { HealthStatus } from "../../kernel/service.ts";
 import { IntakeService } from "../../intake/index.ts";
 import {
@@ -196,7 +200,7 @@ test("the composition root reports an Intake entry under the name of its project
         [INBOUND_NAME]: {
           status: ResourceStatus.Unknown,
           capability: WEBHOOK_CAPABILITY,
-          failure_reason: null,
+          failure_reason: ResourceFailureReason.Unclassified,
         },
       },
     },
@@ -301,7 +305,7 @@ test("a malformed poll inbound answers unknown for its own entry and the report 
         [encodeURIComponent(malformed)]: {
           status: ResourceStatus.Unknown,
           capability: POLL_CAPABILITY,
-          failure_reason: null,
+          failure_reason: ResourceFailureReason.Unclassified,
         },
       },
     },
@@ -379,7 +383,7 @@ test("the check deadline of a poll inbound answers unknown through the report, d
         [encodeURIComponent(id)]: {
           status: ResourceStatus.Unknown,
           capability: POLL_CAPABILITY,
-          failure_reason: null,
+          failure_reason: ResourceFailureReason.Unclassified,
         },
       },
     },

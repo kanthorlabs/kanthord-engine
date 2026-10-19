@@ -12,6 +12,7 @@ import {
   type MachineIdentity,
 } from "../kernel/caller.ts";
 import {
+  entryFailureReason,
   HealthScope,
   ResourceFailureReason,
   ResourceStatus,
@@ -904,8 +905,7 @@ export class CustodyComponent implements Service, CredentialRecords {
       return {
         status,
         capability: entry.capability,
-        failure_reason:
-          status === ResourceStatus.Healthy ? null : failureReason,
+        failure_reason: entryFailureReason(status, failureReason),
       };
     } finally {
       deadline.cancel();
@@ -950,7 +950,6 @@ export class CustodyComponent implements Service, CredentialRecords {
           this.logger.info({ platform, reason }, "credential check failed");
         },
       ).catch(() => {
-        failureReason = ResourceFailureReason.Unclassified;
         this.logger.info(
           { platform, reason: "check failed before the remote call" },
           "credential check failed",
@@ -960,8 +959,7 @@ export class CustodyComponent implements Service, CredentialRecords {
       return {
         status,
         capability: entry.capability,
-        failure_reason:
-          status === ResourceStatus.Healthy ? null : failureReason,
+        failure_reason: entryFailureReason(status, failureReason),
       };
     } finally {
       deadline.cancel();

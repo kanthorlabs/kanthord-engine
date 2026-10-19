@@ -205,7 +205,10 @@ test("report places every owner and scope with exact capabilities, encoded names
         [`${owner}%2Fglobal%25`]: {
           status: STATUSES[index % STATUSES.length],
           capability: CAPABILITY,
-          failure_reason: null,
+          failure_reason:
+            STATUSES[index % STATUSES.length] === ResourceStatus.Healthy
+              ? null
+              : ResourceFailureReason.Unclassified,
         },
       },
       projects: {
@@ -229,7 +232,7 @@ test("an empty intake inventory answers fresh empty maps", async (t) => {
   report.services.intake.global.changed = {
     status: ResourceStatus.Unknown,
     capability: CAPABILITY,
-    failure_reason: null,
+    failure_reason: ResourceFailureReason.Unclassified,
   };
   assert.deepEqual((await f.report()).services.intake, {
     global: {},
@@ -320,7 +323,7 @@ test("shared targets use the first check once across owners and projects and log
   const expected = {
     status: ResourceStatus.Unhealthy,
     capability: CAPABILITY,
-    failure_reason: null,
+    failure_reason: ResourceFailureReason.Unclassified,
   };
   assert.equal(checks, SINGLE_CHECK);
   assert.deepEqual(report.shared.llm.projects.one?.first, expected);
@@ -375,7 +378,7 @@ test("a non-healthy check logs its observed reason and a healthy check logs none
   );
 });
 
-test("a report entry carries the observed failure reason and a healthy entry carries null", async (t) => {
+test("a report entry carries the observed failure reason, unclassified without a code and null when healthy", async (t) => {
   const f = fixture(t, [
     {
       owner: OWNER_REPOSITORY,
@@ -418,7 +421,7 @@ test("a report entry carries the observed failure reason and a healthy entry car
     [SILENT_TARGET]: {
       status: ResourceStatus.Unhealthy,
       capability: CAPABILITY,
-      failure_reason: null,
+      failure_reason: ResourceFailureReason.Unclassified,
     },
   });
 });
@@ -445,7 +448,7 @@ test("a never-settling check expires, releases its slot and retains its unknown 
   assert.deepEqual(report.shared.llm.global.hung, {
     status: ResourceStatus.Unknown,
     capability: CAPABILITY,
-    failure_reason: null,
+    failure_reason: ResourceFailureReason.Unclassified,
   });
   assert.equal(
     report.services.worker.global.next?.status,
@@ -489,7 +492,7 @@ test("synchronous throws, rejections and invalid statuses become unknown without
     assert.deepEqual(value, {
       status: ResourceStatus.Unknown,
       capability: CAPABILITY,
-      failure_reason: null,
+      failure_reason: ResourceFailureReason.Unclassified,
     });
   assert.doesNotMatch(JSON.stringify(report), /secret|endpoint/);
 });

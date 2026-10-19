@@ -383,7 +383,7 @@ test("verify answers unknown on corrupted ciphertext and on a cancelled caller w
   assert.deepEqual(await component.verify(set, "probed", cancelled), {
     status: ResourceStatus.Unknown,
     capability: PROBED_CAPABILITY,
-    failure_reason: null,
+    failure_reason: ResourceFailureReason.Unclassified,
   });
   store.database
     .prepare("UPDATE credential SET ciphertext = ?")
@@ -413,6 +413,6 @@ test("verify answers unknown when the probe exceeds the 10 s deadline", async (t
   assert.deepEqual(await pending, {
     status: ResourceStatus.Unknown,
     capability: PROBED_CAPABILITY,
-    failure_reason: null,
+    failure_reason: ResourceFailureReason.Unclassified,
   });
 });

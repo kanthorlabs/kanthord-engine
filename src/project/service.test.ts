@@ -4527,6 +4527,22 @@ test("binding.check answers the verify badges of an unsaved configuration and wr
   );
 });
 
+test("binding.check answers unclassified for an address read that exceeds its deadline", async (t) => {
+  const { f, sshStarted } = verifyFixture(t, ADDRESS_SSH_HANG, "healthy", {
+    custodySuitability: () => {},
+  });
+  const project = f.store.transaction((tx) => insertProject(tx, PROJECT_NAME));
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"], now: Date.now() });
+  const pending = checkBinding(f, project.id, repositoryBinding().config);
+  await sshStarted.promise;
+  t.mock.timers.tick(BINDING_CHECK_TIMEOUT_MS);
+  assert.deepEqual((await pending).address, {
+    status: ResourceStatus.Unknown,
+    capability: RESOURCE_CAPABILITY_NETWORK_GIT_READ,
+    failure_reason: ResourceFailureReason.Unclassified,
+  });
+});
+
 test("binding.check refuses a static violation with the write code before any SSH call", async (t) => {
   const { f, sshCalls, credentialCalls } = verifyFixture(
     t,

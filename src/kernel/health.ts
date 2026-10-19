@@ -142,6 +142,14 @@ export const resourceFailureReasonSchema = z
   .enum(ResourceFailureReason)
   .nullable();
 
+export function entryFailureReason(
+  status: ResourceStatusValue,
+  observed: ResourceFailureReason | null | undefined,
+): ResourceFailureReason | null {
+  if (status === ResourceStatus.Healthy) return null;
+  return observed ?? ResourceFailureReason.Unclassified;
+}
+
 export type ResourceObserver = (
   reason: string,
   failure_reason: ResourceFailureReason,

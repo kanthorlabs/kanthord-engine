@@ -183,7 +183,7 @@ HTTP `200` answers `{ status, capability, failure_reason }`, the health entry of
 
 - `status` is `healthy`, `unhealthy` or `unknown`.
 - `capability` is the capability of the platform check, the same value that the health report shows.
-- `failure_reason` is null for a `healthy` answer and for a check that records no failure, for example a check that exceeds its deadline. Otherwise it is `unclassified`.
+- `failure_reason` is null for a `healthy` answer only. Every other answer carries `unclassified`, a check that exceeds its deadline included.
 
 A platform with `verifiable: false` or with the secret shape `oauth` answers `400 credential.check.unsupported`.
 A platform of another component answers `400 credential.platform.unsupported`.
@@ -205,7 +205,7 @@ HTTP `200` answers `{ status, capability, failure_reason }`, the health entry of
 
 - `status` is `healthy`, `unhealthy` or `unknown`.
 - `capability` is the capability of the platform check, the same value that the health report shows.
-- `failure_reason` is null for a `healthy` answer and for a check that records no failure, for example a check that exceeds its deadline. Otherwise it is `unclassified`.
+- `failure_reason` is null for a `healthy` answer only. Every other answer carries `unclassified`, a check that exceeds its deadline included.
 
 An archived record answers `409 credential.credential.archived`.
 A platform with `verifiable: false` answers `400 credential.check.unsupported`.

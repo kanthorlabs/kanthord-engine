@@ -511,7 +511,7 @@ HTTP `200` answers `{ address, ssh_credential, credential }`. `credential` is nu
 
 - `status` is `healthy`, `unhealthy` or `unknown`.
 - The `address` entry has the capability `network git read`. A failed resolution or a failed read answers `unhealthy`. A check that exceeds its deadline answers `unknown`.
-- `failure_reason` of the `address` entry is null for a `healthy` entry. Otherwise it is a value of the list below.
+- `failure_reason` is null for a `healthy` entry only. Every other `address` entry carries a value of the list below, a check that exceeds its deadline included.
 - The `ssh_credential` and `credential` entries are the answers of the record verify.
 
 The failure reasons of the `address` entry:

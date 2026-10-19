@@ -8,6 +8,7 @@ import {
   type Context,
 } from "../kernel/context.ts";
 import {
+  entryFailureReason,
   HealthScope,
   ResourceStatus,
   type ResourceFailureReason,
@@ -250,10 +251,10 @@ function assembleReport(
   for (const { owner, entry } of entries) {
     const status = statuses.get(entry.target);
     assert.ok(status !== undefined);
-    const failureReason =
-      status === ResourceStatus.Healthy
-        ? null
-        : (failureReasons.get(entry.target) ?? null);
+    const failureReason = entryFailureReason(
+      status,
+      failureReasons.get(entry.target),
+    );
     const report = owners[owner];
     let resources = report.global;
     if (entry.scope === HealthScope.Project) {
