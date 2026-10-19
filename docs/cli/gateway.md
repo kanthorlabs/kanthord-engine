@@ -150,20 +150,26 @@ kanthord gateway [--endpoint <url>] liveness [-h|--help]
 The inherited `--endpoint` option also works after `liveness`. The command
 resolves the endpoint through the client configuration precedence: `--endpoint`,
 then `KANTHORD_ENDPOINT`, then `cli.yaml`, then `http://127.0.0.1:31415`. The
-command reads no token. It rejects `--token`, and it ignores `KANTHORD_TOKEN`
-and the `token` field of `cli.yaml`. The request carries no `Authorization`
-header.
+command checks the optional [`cli.yaml`](./other.md#cliyaml-and-its-effects)
+before the request, also when `--endpoint` or `KANTHORD_ENDPOINT` supplies the
+endpoint. The check covers the file location, the mode `0600` and the schema,
+the `token` field included. The command rejects `--token`, and it sends no
+token from `KANTHORD_TOKEN` or `cli.yaml`. The request carries no
+`Authorization` header.
 
 The CLI sends `GET /api/liveness` with no path parameters, query parameters or
 body. The operation access is `public` and the operation timeout is 30 seconds.
-The shared host and readiness checks apply.
+The HTTP adapter sets its deadline one second later (31 seconds). There is no
+CLI timeout override or automatic retry. The shared host and readiness checks
+apply.
 
-| Result                                                                | Stdout                     | Stderr                                                                                           | Exit |
-| --------------------------------------------------------------------- | -------------------------- | ------------------------------------------------------------------------------------------------ | ---- |
-| HTTP `200`                                                            | The answer as compact JSON | Empty                                                                                            | `0`  |
-| A declared API failure, for example `503 gateway.liveness.unhealthy`  | Empty                      | `<code>: gateway liveness: request failed`, the row `status: <status>` and the `details` row     | `1`  |
-| A refused connection, a transport failure, a deadline or invalid JSON | Empty                      | `cli.gateway.liveness.indeterminate: gateway liveness: the result is unknown; retry the command` | `1`  |
-| A `200` answer that fails the response schema                         | Empty                      | `gateway.client.answer_invalid: gateway liveness: request failed` and the row `status: 200`      | `1`  |
+| Result                                                                                                                                  | Stdout                     | Stderr                                                                                                                                      | Exit |
+| --------------------------------------------------------------------------------------------------------------------------------------- | -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- | ---- |
+| HTTP `200`                                                                                                                              | The answer as compact JSON | Empty                                                                                                                                       | `0`  |
+| A declared API failure, for example `503 gateway.liveness.unhealthy`                                                                    | Empty                      | `<code>: gateway liveness: request failed`, the row `status: <status>` and the `details` row                                                | `1`  |
+| A refused connection, a transport failure, a deadline, invalid JSON, a redirect, or an answer other than 200 without the error envelope | Empty                      | `cli.gateway.liveness.indeterminate: gateway liveness: the result is unknown; retry the command`                                            | `1`  |
+| A `200` answer that fails the response schema                                                                                           | Empty                      | `gateway.client.answer_invalid: gateway liveness: request failed`, the row `status: 200` and the `details` row with the failed schema paths | `1`  |
+| Invalid `cli.yaml` or endpoint value                                                                                                    | Empty                      | The local diagnostic, for example `cli.config.invalid` with the row `path`                                                                  | `1`  |
 
 An example of the HTTP `200` answer, with only the `server` and `project`
 services:
@@ -309,9 +315,11 @@ logout, and rotation commands are not part of this specification.
 
 Every remote command can also answer the shared codes of [other.md](other.md#error-codes).
 
-| HTTP | Code | Condition                | Commands          |
-| ---- | ---- | ------------------------ | ----------------- |
-| —    | —    | No code is declared yet. | proposed commands |
+| HTTP  | Code                                 | Condition                                                                                                                                                                          | Commands         |
+| ----- | ------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------- |
+| 503   | `gateway.liveness.unhealthy`         | A service is unavailable or no healthchecks are registered. `details` hold the complete service map.                                                                               | gateway liveness |
+| local | `cli.gateway.liveness.indeterminate` | The liveness request gets no HTTP answer: a refused connection, a transport failure, a deadline, invalid JSON, a redirect, or an answer other than 200 without the error envelope. | gateway liveness |
+| local | `cli.gateway.verify.indeterminate`   | The client cannot determine whether the verification request completed.                                                                                                            | gateway verify   |
 
 ## Implementation references
 
