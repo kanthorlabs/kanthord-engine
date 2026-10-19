@@ -39,6 +39,7 @@ const HANDSHAKE_HEADER = "x-test-kind";
 const EMPTY_RESPONSE_BODY = "";
 const DELIVERY_SIGNATURE = "exact";
 const DELIVERY_BODY_LIMIT_BYTES = 50 * 1024 * 1024;
+const HOST_LIMIT = 255;
 const ExpectedErrorCode = {
   RouteNotFound: "gateway.routing.not_found",
   HostNotAllowed: "gateway.http.host_not_allowed",
@@ -872,6 +873,28 @@ test("HTTP validation failure names each unrecognized key of the body", async (t
     { path: ["body", "first"], code: "unrecognized_keys" },
     { path: ["body", "second"], code: "unrecognized_keys" },
   ]);
+});
+
+test("the host refusal names the refused host and the allowlist field, never the allowlist", async (t) => {
+  const fixture = await gatewayFixture(t);
+  const refusals: [Record<string, string>, string | null][] = [
+    [{ Host: "Foo.Example:1" }, "foo.example:1"],
+    [{ Host: "a".repeat(HOST_LIMIT + 1) }, "a".repeat(HOST_LIMIT)],
+    [{}, null],
+  ];
+  for (const [headers, host] of refusals) {
+    const response = await fixture.gateway.app.request("/api/liveness", {
+      headers,
+    });
+    assert.equal(response.status, HttpStatus.Forbidden);
+    const body = errorSchema.parse(await response.json());
+    assert.deepEqual(body.error, {
+      code: ExpectedErrorCode.HostNotAllowed,
+      message: "Host is not allowed. Add it to gateway.allowed_hosts.",
+      details: { host, field: "gateway.allowed_hosts" },
+    });
+    assert.doesNotMatch(JSON.stringify(body), /localhost|127\.0\.0\.1/);
+  }
 });
 
 test("a static path segment registers before a parameter segment at the same position", () => {

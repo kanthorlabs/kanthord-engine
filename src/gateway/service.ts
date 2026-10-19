@@ -46,6 +46,8 @@ import { resolveRequestId } from "./request-id.ts";
 
 const SERVER_NOT_RUNNING = "ERR_SERVER_NOT_RUNNING";
 const SINGLE_QUERY_VALUE_COUNT = 1;
+const HOST_DETAIL_LIMIT = 255;
+const ALLOWED_HOSTS_FIELD = "gateway.allowed_hosts";
 import { GATEWAY_STARTED_MESSAGE } from "./constants.ts";
 import { dashboardResponse, type DashboardLoader } from "./dashboard.ts";
 import { ROOT_BASE_PATH, baseHref, stripBasePath } from "./base-path.ts";
@@ -313,16 +315,17 @@ export class GatewayService implements Service {
       }
     });
     app.use("*", async (context, next) => {
-      const host = context.req.header("host");
-      if (
-        !host ||
-        !this.options.config.allowed_hosts.includes(host.toLowerCase())
-      )
+      const host = context.req.header("host")?.toLowerCase();
+      if (!host || !this.options.config.allowed_hosts.includes(host))
         return respondError(
           new GatewayError(
             403,
             "gateway.http.host_not_allowed",
-            "Host is not allowed.",
+            "Host is not allowed. Add it to gateway.allowed_hosts.",
+            {
+              host: host ? host.slice(0, HOST_DETAIL_LIMIT) : null,
+              field: ALLOWED_HOSTS_FIELD,
+            },
           ),
           context.get("requestId"),
         );
