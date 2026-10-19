@@ -607,4 +607,28 @@ test("a refresh report that carries an SSH key answers report_invalid", (t) => {
       return true;
     },
   );
+  const pinned = liveRevisionId(f.store, "deploy");
+  assert.ok(f.row.credentials.includes(pinned));
+  assert.throws(
+    () =>
+      f.report(
+        sealEnvelope(f.keys.report, f.aad, {
+          ...f.refresh,
+          credential_id: pinned,
+        }),
+      ),
+    (error) => {
+      assert(error instanceof OperationError);
+      assert.equal(error.status, HttpStatus.BadRequest);
+      assert.equal(error.code, CUSTODY_REPORT_INVALID);
+      assert.equal(JSON.stringify(error).includes(OPENSSH_LABEL), false);
+      return true;
+    },
+  );
+  assert.equal(
+    handoverPayloadSchema.parse(
+      openEnvelope(f.keys.handover, f.aad, f.handover()),
+    ).ssh_identities[0]?.private_key,
+    f.sshKeys.get("deploy"),
+  );
 });
