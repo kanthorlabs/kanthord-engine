@@ -131,7 +131,7 @@ export class RepositoryComponent implements GitWriter {
   constructor(dependencies: Dependencies = {}) {
     (dependencies.checkTools ?? checkRepositoryTools)();
     this.knownHostsOf = dependencies.knownHostsOf ?? pinnedKnownHosts;
-    this.portOf = dependencies.portOf ?? RepositoryComponent.addressPort;
+    this.portOf = dependencies.portOf ?? RepositoryComponent.sshPortOfAddress;
     dependencies.health?.register("repository", (context) =>
       this.healthcheck(context),
     );
@@ -175,13 +175,12 @@ export class RepositoryComponent implements GitWriter {
     };
   }
 
-  static addressPort(address: string): number {
+  static sshPortOfAddress(address: string): number {
     return sshPortOf(addressHost(address));
   }
 
   sshHostKeysOf(tx: Transaction, platform: string, address: string): string {
-    const host = ADDRESS_HOST_PATTERN.exec(address)?.[1];
-    if (host === undefined || !isPlatformSshHost(platform, host))
+    if (!isPlatformSshHost(platform, addressHost(address)))
       throw addressInvalid();
     return this.knownHostsOf(tx, address);
   }
