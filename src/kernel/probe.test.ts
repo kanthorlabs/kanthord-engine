@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
 import { test } from "node:test";
 import { background, CancellationContext, type Context } from "./context.ts";
 import { ResourceFailureReason, ResourceStatus } from "./health.ts";
@@ -17,6 +19,7 @@ const HEADERS = { [AUTHORIZATION_HEADER]: `Bearer ${SECRET}` };
 const NO_CALLS = 0;
 const ONE_CALL = 1;
 const REASON_LIMIT = 300;
+const DEADLINE_MS = 50;
 
 const check = (context: Context) => probeHttp(URL, HEADERS, context);
 
@@ -156,6 +159,25 @@ test("probeHttp observes a network error as unreachable without the secret", asy
   assert.equal(observed.length, ONE_CALL);
   assert.equal(observed[0]![1], ResourceFailureReason.Unreachable);
   assert.ok(!observed[0]![0].includes(SECRET));
+});
+
+test("probeHttp past its deadline observes unclassified, not unreachable", async (t) => {
+  const server = createServer(() => {});
+  t.after(() => server.closeAllConnections());
+  t.after(() => server.close());
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const { port } = server.address() as AddressInfo;
+  const observed: string[] = [];
+  assert.equal(
+    await probeHttp(
+      `http://127.0.0.1:${port}/`,
+      HEADERS,
+      new CancellationContext(background, Date.now() + DEADLINE_MS),
+      (_reason, failureReason) => void observed.push(failureReason),
+    ),
+    ResourceStatus.Unknown,
+  );
+  assert.ok(!observed.includes(ResourceFailureReason.Unreachable));
 });
 
 test("redactReason removes secrets, bearer values, JWTs and long tokens and bounds the length", () => {

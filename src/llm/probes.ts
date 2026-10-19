@@ -32,6 +32,7 @@ import {
   failureReasonOfStatus,
   headerSecrets,
   redactReason,
+  thrownFailureReason,
   thrownReason,
 } from "../kernel/probe.ts";
 import { Connection, type ProviderCheckAnswer } from "./contract.ts";
@@ -83,6 +84,10 @@ const UNREACHABLE: ProviderCheckAnswer = {
   connection: Connection.Unreachable,
   models: null,
 };
+const UNAUTHORIZED: ProviderCheckAnswer = {
+  connection: Connection.Unauthorized,
+  models: null,
+};
 const INVALID_RESPONSE: ProviderCheckAnswer = {
   connection: Connection.InvalidResponse,
   models: null,
@@ -96,6 +101,15 @@ export function connectionOfStatus(status: number): Connection {
   return UNAUTHORIZED_STATUSES.includes(status)
     ? Connection.Unauthorized
     : Connection.InvalidResponse;
+}
+
+function refusedStatus(
+  responseStatus: number | null,
+  errorMessage: string | undefined,
+): number | null {
+  if (responseStatus === null || responseStatus === HttpStatus.OK)
+    return statusOfErrorMessage(errorMessage);
+  return responseStatus;
 }
 
 export function statusOfErrorMessage(
@@ -159,7 +173,7 @@ async function httpCheck(
   } catch (error) {
     observe?.(
       thrownReason(error, headerSecrets(headers)),
-      ResourceFailureReason.Unreachable,
+      thrownFailureReason(context),
     );
     return UNREACHABLE;
   }
@@ -167,14 +181,9 @@ async function httpCheck(
 
 export async function checkGitHubCopilot(
   refresh: string,
-  expires: number,
   context: Context,
   observe?: ResourceObserver,
 ): Promise<ProviderCheckAnswer> {
-  if (expires <= Date.now()) {
-    observe?.("access token expired", ResourceFailureReason.Unclassified);
-    return UNREACHABLE;
-  }
   return httpCheck(
     GITHUB_COPILOT_TOKEN_URL,
     {
@@ -302,6 +311,7 @@ async function modelCallCheck(
       }
       const credentials = new InMemoryCredentialStore();
       await credentials.modify(providerId, async () => credential);
+      let responseStatus: number | null = null;
       const reply = await call(
         model,
         {
@@ -313,13 +323,19 @@ async function modelCallCheck(
             },
           ],
         },
-        { ...options, signal },
+        {
+          ...options,
+          signal,
+          onResponse: ({ status }) => {
+            responseStatus = status;
+          },
+        },
         credentials,
       );
       if (signal.aborted) return UNREACHABLE;
       if (!MODEL_CALL_FAILURES.includes(reply.stopReason))
         return OK_WITHOUT_MODELS;
-      const status = statusOfErrorMessage(reply.errorMessage);
+      const status = refusedStatus(responseStatus, reply.errorMessage);
       observe?.(
         failureReason(reply, secrets),
         status === null
@@ -332,7 +348,7 @@ async function modelCallCheck(
       dispose();
     }
   } catch (error) {
-    observe?.(thrownReason(error, secrets), ResourceFailureReason.Unreachable);
+    observe?.(thrownReason(error, secrets), thrownFailureReason(context));
     return UNREACHABLE;
   }
 }
@@ -351,8 +367,8 @@ export async function checkOpenAICodex(
 ): Promise<ProviderCheckAnswer> {
   const { refresh, access, expires } = credential;
   if (expires <= Date.now()) {
-    observe?.("access token expired", ResourceFailureReason.Unclassified);
-    return UNREACHABLE;
+    observe?.("access token expired", ResourceFailureReason.Unauthorized);
+    return UNAUTHORIZED;
   }
   return modelCallCheck(
     {
@@ -376,8 +392,8 @@ export async function checkAnthropicSubscription(
 ): Promise<ProviderCheckAnswer> {
   const { refresh, access, expires } = credential;
   if (expires <= Date.now()) {
-    observe?.("access token expired", ResourceFailureReason.Unclassified);
-    return UNREACHABLE;
+    observe?.("access token expired", ResourceFailureReason.Unauthorized);
+    return UNAUTHORIZED;
   }
   return modelCallCheck(
     {

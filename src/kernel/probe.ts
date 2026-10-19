@@ -63,6 +63,12 @@ export function failureReasonOfStatus(status: number): ResourceFailureReason {
   );
 }
 
+export function thrownFailureReason(context: Context): ResourceFailureReason {
+  return context.err()
+    ? ResourceFailureReason.Unclassified
+    : ResourceFailureReason.Unreachable;
+}
+
 export async function probeHttp(
   url: string,
   headers: Record<string, string>,
@@ -95,7 +101,7 @@ export async function probeHttp(
   } catch (error) {
     observe?.(
       thrownReason(error, headerSecrets(headers)),
-      ResourceFailureReason.Unreachable,
+      thrownFailureReason(context),
     );
     return ResourceStatus.Unknown;
   }

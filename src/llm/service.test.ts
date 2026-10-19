@@ -1810,13 +1810,16 @@ test("inventory lists only LLM records with their capability and dispatches each
   assert.deepEqual(results, [
     "healthy",
     "healthy",
-    "unknown",
+    "healthy",
     "unknown",
     "healthy",
   ]);
   assert.deepEqual(
-    urls,
-    healthCredentials.flatMap(({ url }) => (url === null ? [] : [url])),
+    urls.toSorted(),
+    [
+      ...healthCredentials.flatMap(({ url }) => (url === null ? [] : [url])),
+      GITHUB_COPILOT_TOKEN_URL,
+    ].toSorted(),
   );
   assert.ok(!JSON.stringify(entries).includes(HEALTH_SECRET));
 });

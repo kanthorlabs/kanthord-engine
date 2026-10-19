@@ -207,14 +207,14 @@ HTTP `200` answers `{ status, capability, failure_reason }`, the health entry of
 
 The failure reasons of the answer:
 
-| Value              | Cause                                                                                                               |
-| ------------------ | ------------------------------------------------------------------------------------------------------------------- |
-| `unauthorized`     | The provider answers HTTP `401`.                                                                                    |
-| `forbidden`        | The provider answers HTTP `403`.                                                                                    |
-| `rate_limited`     | The provider answers HTTP `429`.                                                                                    |
-| `invalid_response` | The provider answers another HTTP status, or a model list that the check cannot read.                               |
-| `unreachable`      | The request fails before an HTTP answer, or a failed model call carries no HTTP status.                             |
-| `unclassified`     | Any other failure, a check that exceeds its deadline included. An expired OAuth access token also gives this value. |
+| Value              | Cause                                                                                                       |
+| ------------------ | ----------------------------------------------------------------------------------------------------------- |
+| `unauthorized`     | The provider answers HTTP `401`, or the `openai-codex` or `anthropic-subscription` access token is expired. |
+| `forbidden`        | The provider answers HTTP `403`.                                                                            |
+| `rate_limited`     | The provider answers HTTP `429`.                                                                            |
+| `invalid_response` | The provider answers another HTTP status, or a model list that the check cannot read.                       |
+| `unreachable`      | The request fails before an HTTP answer, or a failed model call carries no HTTP status.                     |
+| `unclassified`     | Any other failure, a check that exceeds its deadline included.                                              |
 
 A platform with `verifiable: false` or with the secret shape `oauth` answers `400 credential.check.unsupported`.
 A platform of another component answers `400 credential.platform.unsupported`.
@@ -388,7 +388,7 @@ Each call has a 10 s deadline.
 HTTP `200` answers `{ connection, models }`:
 
 - `connection` is `ok`, `unauthorized`, `unreachable` or `invalid_response`.
-- `ok`: the remote answers. `unauthorized`: the remote answers 401 or 403.
+- `ok`: the remote answers. `unauthorized`: the remote answers 401 or 403, or the `openai-codex` or `anthropic-subscription` access token is expired.
 - `unreachable`: a network failure or the deadline prevents the answer.
 - `invalid_response`: every other answer.
 - `models` is an array of `{ id, owned_by, created }` for `openai-compatible` and `openai`, which read the OpenAI list shape of `GET /models`. `owned_by` and `created` are `null` when the remote leaves them out. Every other platform answers `models: null`.
@@ -477,7 +477,7 @@ validates a record on demand through the health report. Create and rotate make
 no remote call. The platforms with an LLM provider are exactly the `verifiable` platforms.
 The `anthropic-subscription` check makes one model call to `claude-haiku-5-5`.
 The `opencode-go` check makes one model call to `deepseek-v4-flash`.
-No check refreshes OAuth; expired access reports `unknown`.
+No check refreshes OAuth. An expired `openai-codex` or `anthropic-subscription` access token reports `unhealthy` with `failure_reason: unauthorized` and no remote call. The `github-copilot` check sends the stored GitHub token and ignores the stored expiry.
 
 No command here exports a credential, refreshes
 OAuth or rotates the master key. Dependents, including agent providers, prevent
