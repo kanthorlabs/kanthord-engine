@@ -2,7 +2,11 @@ import assert from "node:assert/strict";
 import type { ServiceIdentity } from "../kernel/caller.ts";
 import { throwIfCancelled, type Context } from "../kernel/context.ts";
 import { OperationError } from "../kernel/errors.ts";
-import { ResourceStatus, type ResourceCheck } from "../kernel/health.ts";
+import {
+  ResourceFailureReason,
+  ResourceStatus,
+  type ResourceCheck,
+} from "../kernel/health.ts";
 import type { Store, Transaction } from "../kernel/store.ts";
 import type { IntakeCustody } from "./action-check.ts";
 import { InboundKind, type IntakeInventoryEntry } from "./contract.ts";
@@ -109,7 +113,7 @@ function pollCheck(
     for (const read of POLL_READS) {
       const failure = await readFailure(dependencies, target, read, context);
       if (failure === null) continue;
-      observe?.(failure);
+      observe?.(failure, ResourceFailureReason.Unclassified);
       return ResourceStatus.Unhealthy;
     }
     return ResourceStatus.Healthy;

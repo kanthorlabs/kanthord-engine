@@ -14,7 +14,7 @@ import {
   DeadlineExceeded,
 } from "../kernel/context.ts";
 import { OperationError } from "../kernel/errors.ts";
-import { ResourceStatus } from "../kernel/health.ts";
+import { ResourceFailureReason, ResourceStatus } from "../kernel/health.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import { IN_MEMORY_DATABASE, Store } from "../kernel/store.ts";
 import type {
@@ -333,12 +333,17 @@ test("a poll check answers unhealthy for a failed events read, observes its code
     message: "Bad credentials",
   });
   const reasons: string[] = [];
+  const failureReasons: string[] = [];
   const before = h.stored();
   assert.equal(
-    await entry.check(checkContext(t), (reason) => reasons.push(reason)),
+    await entry.check(checkContext(t), (reason, failureReason) => {
+      reasons.push(reason);
+      failureReasons.push(failureReason);
+    }),
     ResourceStatus.Unhealthy,
   );
   assert.deepEqual(reasons, [FINAL_REFUSAL_CODE]);
+  assert.deepEqual(failureReasons, [ResourceFailureReason.Unclassified]);
   assert.deepEqual(h.drops, [CREDENTIAL]);
   assert.equal(h.pullCalls.length, UNCALLED_PLATFORM_COUNT);
   assert.deepEqual(h.stored(), before);

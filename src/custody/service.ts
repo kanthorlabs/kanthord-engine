@@ -13,6 +13,7 @@ import {
 } from "../kernel/caller.ts";
 import {
   HealthScope,
+  ResourceFailureReason,
   ResourceStatus,
   type HealthRegistry,
   type ResourceCheck,
@@ -167,7 +168,10 @@ function capturedResourceCheck(
       const secret = decrypt(key, id, platform, nonce, ciphertext);
       return await probe(secret, metadata, context, observe);
     } catch {
-      observe?.("probe failed before the remote call");
+      observe?.(
+        "probe failed before the remote call",
+        ResourceFailureReason.Unclassified,
+      );
       return ResourceStatus.Unknown;
     }
   };
@@ -876,13 +880,15 @@ export class CustodyComponent implements Service, CredentialRecords {
       context,
       Date.now() + CREDENTIAL_CHECK_TIMEOUT_MS,
     );
+    let failureReason: ResourceFailureReason | null = null;
     try {
-      const status = await Promise.race([
+      const checked = await Promise.race([
         capturedResourceCheck(
           row,
           this.envelopeKey,
           entry,
-        )(deadline, (reason) =>
+        )(deadline, (reason, observed) => {
+          failureReason = observed;
           this.logger.info(
             {
               credential_name: credentialName,
@@ -890,13 +896,16 @@ export class CustodyComponent implements Service, CredentialRecords {
               reason,
             },
             "credential verify failed",
-          ),
-        ),
+          );
+        }),
         deadline.done().then(() => ResourceStatus.Unknown),
       ]);
+      const status = deadline.err() ? ResourceStatus.Unknown : checked;
       return {
-        status: deadline.err() ? ResourceStatus.Unknown : status,
+        status,
         capability: entry.capability,
+        failure_reason:
+          status === ResourceStatus.Healthy ? null : failureReason,
       };
     } finally {
       deadline.cancel();
@@ -930,21 +939,30 @@ export class CustodyComponent implements Service, CredentialRecords {
       context,
       Date.now() + CREDENTIAL_CHECK_TIMEOUT_MS,
     );
+    let failureReason: ResourceFailureReason | null = null;
     try {
       const status = await probe(
         parsedSecret.data,
         parsedMetadata,
         deadline,
-        (reason) =>
-          this.logger.info({ platform, reason }, "credential check failed"),
+        (reason, observed) => {
+          failureReason = observed;
+          this.logger.info({ platform, reason }, "credential check failed");
+        },
       ).catch(() => {
+        failureReason = ResourceFailureReason.Unclassified;
         this.logger.info(
           { platform, reason: "check failed before the remote call" },
           "credential check failed",
         );
         return ResourceStatus.Unknown;
       });
-      return { status, capability: entry.capability };
+      return {
+        status,
+        capability: entry.capability,
+        failure_reason:
+          status === ResourceStatus.Healthy ? null : failureReason,
+      };
     } finally {
       deadline.cancel();
     }

@@ -11,6 +11,7 @@ import {
 import {
   HealthRegistry,
   HealthScope,
+  ResourceFailureReason,
   ResourceStatus,
 } from "../kernel/health.ts";
 import { HealthStatus } from "../kernel/service.ts";
@@ -24,7 +25,7 @@ import { createIdentity, identitySchema } from "../kernel/identity.ts";
 import { testHumanIdentity } from "../kernel/test-identity.ts";
 import { temporary } from "../kernel/test-support.ts";
 import { IdentityKind } from "../kernel/caller.ts";
-import { OperationError } from "../kernel/errors.ts";
+import { Diagnostic, OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import { AgentErrorCode } from "../agent/contract.ts";
 import {
@@ -1046,6 +1047,17 @@ function sshPinMetadata(credentialName: string) {
 }
 const STORAGE_CREDENTIAL = "s3-key";
 const SSH_FAILURE_STATUS = 422;
+const GIT_FAILED = "repository.connector.git_failed";
+const KEY_REFUSED_STDERR =
+  "git@github.com: Permission denied (publickey).\nfatal: Could not read from remote repository.";
+const REPOSITORY_NOT_FOUND_STDERR =
+  "ERROR: Repository not found.\nfatal: Could not read from remote repository.";
+
+function gitFailure(stderr: string): Diagnostic {
+  return new Diagnostic(GIT_FAILED, "ls-remote: git failed.", {
+    cause: new Error(`ls-remote: git exited with 128: ${stderr}`),
+  });
+}
 const VERSION_INCREMENT = 1;
 const REVISION_ONE = 1;
 const REVISION_TWO = 2;
@@ -2054,10 +2066,14 @@ test("the resource check reports an unresolved host as unhealthy and skips the r
   );
   t.after(() => context.cancel());
   assert.equal(
-    await entry.check(context, (reason) => reasons.push(reason)),
+    await entry.check(context, (reason, failureReason) =>
+      reasons.push(`${reason}:${failureReason}`),
+    ),
     ResourceStatus.Unhealthy,
   );
-  assert.deepEqual(reasons, [ProjectErrorCode.RepositoryAddressInvalid]);
+  assert.deepEqual(reasons, [
+    `${ProjectErrorCode.RepositoryAddressInvalid}:${ResourceFailureReason.AddressInvalid}`,
+  ]);
 });
 
 test("SSH failure leaves all rows and the version unchanged without entering commit", async (t) => {
@@ -2092,10 +2108,30 @@ test("SSH failure leaves all rows and the version unchanged without entering com
     ),
     SSH_FAILURE_STATUS,
     ProjectErrorCode.RepositorySshUnreachable,
+    { failure_reason: ResourceFailureReason.Unclassified },
   );
   assert.deepEqual(addresses, [REPOSITORY_ADDRESS, REPOSITORY_ADDRESS]);
   assert.equal(f.commits(), commits);
   assert.deepEqual(f.snapshot(), before);
+});
+
+test("a refused binding write names the git failure reason in its details", async (t) => {
+  const f = writeFixture(t, {
+    repositoryConnector: {
+      async resolveSshIdentity() {
+        return sshIdentity("github.com");
+      },
+      async gitLsRemote() {
+        throw gitFailure(KEY_REFUSED_STDERR);
+      },
+    },
+  });
+  await rejectsWrite(
+    f.write({ [REPOSITORY_NAME]: repositoryBinding() }),
+    SSH_FAILURE_STATUS,
+    ProjectErrorCode.RepositorySshUnreachable,
+    { failure_reason: ResourceFailureReason.KeyRefused },
+  );
 });
 
 test("cancellation during gitLsRemote propagates the context error, whether the connector rejects or resolves", async (t) => {
@@ -2914,9 +2950,18 @@ test("resource checks pass the caller deadline and distinguish success, failure 
   );
   t.after(() => context.cancel());
   assert.equal(await entry.check(context), ResourceStatus.Healthy);
-  failure = new Error("SSH failed");
+  failure = gitFailure(REPOSITORY_NOT_FOUND_STDERR);
   beforeCall = Date.now();
-  assert.equal(await entry.check(context), ResourceStatus.Unhealthy);
+  const observed: string[] = [];
+  assert.equal(
+    await entry.check(context, (reason, failureReason) =>
+      observed.push(`${reason}:${failureReason}`),
+    ),
+    ResourceStatus.Unhealthy,
+  );
+  assert.deepEqual(observed, [
+    `${ProjectErrorCode.RepositorySshUnreachable}:${ResourceFailureReason.RepositoryNotFound}`,
+  ]);
   const cancelled = new CancellationContext(
     background,
     Date.now() + HEALTH_DEADLINE_MS,
@@ -3719,6 +3764,7 @@ const ADDRESS_SSH_HANG = "ssh_hang";
 const CREDENTIAL_HEALTHY: BindingCheckEntry = {
   status: ResourceStatus.Healthy,
   capability: PLATFORM_ACTION_CAPABILITY,
+  failure_reason: null,
 };
 
 function verifyFixture(
@@ -3785,6 +3831,7 @@ test("binding.verify returns healthy for a valid repository binding", async (t) 
   assert.deepEqual(result.address, {
     status: ResourceStatus.Healthy,
     capability: RESOURCE_CAPABILITY_NETWORK_GIT_READ,
+    failure_reason: null,
   });
   assert.deepEqual(result.ssh_credential, credentialAnswer);
   assert.deepEqual(result.credential, credentialAnswer);
@@ -3822,6 +3869,10 @@ test("binding.verify returns unhealthy for address when SSH read fails", async (
   });
   assert.equal(result.address.status, ResourceStatus.Unhealthy);
   assert.equal(result.address.capability, RESOURCE_CAPABILITY_NETWORK_GIT_READ);
+  assert.equal(
+    result.address.failure_reason,
+    ResourceFailureReason.Unclassified,
+  );
   assert.equal(sshCalls.length, ONE_CALL);
   assert.deepEqual(credentialCalls, [
     sshCredentialOf(REPOSITORY_ADDRESS),
@@ -3856,11 +3907,57 @@ test("binding.verify returns unknown for address when the SSH read exceeds its d
   assert.deepEqual(result.address, {
     status: ResourceStatus.Unknown,
     capability: RESOURCE_CAPABILITY_NETWORK_GIT_READ,
+    failure_reason: ResourceFailureReason.Unclassified,
   });
   assert.deepEqual(credentialCalls, [
     sshCredentialOf(REPOSITORY_ADDRESS),
     REPOSITORY_CREDENTIAL,
   ]);
+});
+
+test("binding.verify names the git failure reason and an address outside the platform hosts", async (t) => {
+  for (const [resolve, failure, expected] of [
+    [
+      "github.com",
+      gitFailure(KEY_REFUSED_STDERR),
+      ResourceFailureReason.KeyRefused,
+    ],
+    [
+      "github.com",
+      gitFailure(REPOSITORY_NOT_FOUND_STDERR),
+      ResourceFailureReason.RepositoryNotFound,
+    ],
+    ["example.com", null, ResourceFailureReason.AddressInvalid],
+  ] as const) {
+    const { f } = verifyFixture(t, "healthy", "healthy", {
+      repositoryConnector: {
+        async resolveSshIdentity() {
+          return sshIdentity(resolve);
+        },
+        async gitLsRemote() {
+          if (failure) throw failure;
+        },
+      },
+    });
+    const project = f.store.transaction((tx) => {
+      const p = insertProject(tx, PROJECT_NAME);
+      persistBindings(tx, p.id, { [REPOSITORY_NAME]: repositoryBinding() });
+      return p;
+    });
+    const [binding] = f.store.transaction((tx) =>
+      Array.from(readCurrentBindingSet(tx, project.id).values()),
+    );
+    assert.ok(binding);
+    const result = await f.invokeAsync("binding.verify", {
+      project_id: project.id,
+      binding_id: binding.id,
+    });
+    assert.deepEqual(result.address, {
+      status: ResourceStatus.Unhealthy,
+      capability: RESOURCE_CAPABILITY_NETWORK_GIT_READ,
+      failure_reason: expected,
+    });
+  }
 });
 
 test("binding.verify propagates a credential record-verify refusal unchanged", async (t) => {
@@ -3997,6 +4094,7 @@ function instructionFixture(
     texts?: InstructionTexts;
     states?: string[];
     resolveFails?: boolean;
+    resolveFailure?: Error;
     readFails?: boolean;
     hang?: boolean;
   } = {},
@@ -4030,6 +4128,7 @@ function instructionFixture(
           await context.done();
           throw context.err();
         }
+        if (behavior.resolveFailure) throw behavior.resolveFailure;
         if (behavior.resolveFails) throw new Error("ls-remote failed");
         return commits.length > ONE_CALL
           ? commits.shift()!
@@ -4079,11 +4178,13 @@ function refusesInstructionFiles(
   promise: Promise<unknown>,
   status: number,
   code: string,
+  details?: OperationError["details"],
 ) {
   return assert.rejects(promise, (error) => {
     assert.ok(error instanceof OperationError);
     assert.equal(error.status, status);
     assert.equal(error.code, code);
+    if (details !== undefined) assert.deepEqual(error.details, details);
     return true;
   });
 }
@@ -4244,6 +4345,19 @@ test("binding.instruction_files.get refuses a failed commit resolution", async (
     f.invokeAsync("binding.instruction_files.get", saved),
     SSH_FAILURE_STATUS,
     ProjectErrorCode.RepositorySshUnreachable,
+    { failure_reason: ResourceFailureReason.Unclassified },
+  );
+});
+
+test("binding.instruction_files.get names the git failure reason of a failed read", async (t) => {
+  const { f, saved } = instructionFixture(t, {
+    resolveFailure: gitFailure(REPOSITORY_NOT_FOUND_STDERR),
+  });
+  await refusesInstructionFiles(
+    f.invokeAsync("binding.instruction_files.get", saved),
+    SSH_FAILURE_STATUS,
+    ProjectErrorCode.RepositorySshUnreachable,
+    { failure_reason: ResourceFailureReason.RepositoryNotFound },
   );
 });
 
@@ -4375,6 +4489,7 @@ test("binding.check answers the verify badges of an unsaved configuration and wr
     address: {
       status: ResourceStatus.Healthy,
       capability: RESOURCE_CAPABILITY_NETWORK_GIT_READ,
+      failure_reason: null,
     },
     ssh_credential: credentialAnswer,
     credential: credentialAnswer,

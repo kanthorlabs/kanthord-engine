@@ -128,7 +128,24 @@ export const HealthScope = {
 } as const;
 export type HealthScopeValue = (typeof HealthScope)[keyof typeof HealthScope];
 
-export type ResourceObserver = (reason: string) => void;
+export const ResourceFailureReason = {
+  HostKeyUnknown: "host_key_unknown",
+  KeyRefused: "key_refused",
+  RepositoryNotFound: "repository_not_found",
+  HostUnreachable: "host_unreachable",
+  AddressInvalid: "address_invalid",
+  Unclassified: "unclassified",
+} as const;
+export type ResourceFailureReason =
+  (typeof ResourceFailureReason)[keyof typeof ResourceFailureReason];
+export const resourceFailureReasonSchema = z
+  .enum(ResourceFailureReason)
+  .nullable();
+
+export type ResourceObserver = (
+  reason: string,
+  failure_reason: ResourceFailureReason,
+) => void;
 
 export type ResourceCheck = (
   context: Context,

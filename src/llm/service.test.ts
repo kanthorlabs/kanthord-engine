@@ -25,6 +25,7 @@ import {
 import { decrypt } from "../custody/envelope.ts";
 import { background, CancellationContext } from "../kernel/context.ts";
 import { OperationError } from "../kernel/errors.ts";
+import { ResourceFailureReason } from "../kernel/health.ts";
 import { HttpMethod, HttpStatus } from "../kernel/http.ts";
 import { canonicalJSON } from "../kernel/json.ts";
 import {
@@ -2202,9 +2203,13 @@ test("check answers healthy, unhealthy and unknown through the LLM provider with
   const f = fixture();
   t.after(() => f.store.close());
   const statuses = [
-    [HttpStatus.OK, "healthy"],
-    [HttpStatus.Forbidden, "unhealthy"],
-    [HttpStatus.InternalServerError, "unknown"],
+    [HttpStatus.OK, "healthy", null],
+    [HttpStatus.Forbidden, "unhealthy", ResourceFailureReason.Unclassified],
+    [
+      HttpStatus.InternalServerError,
+      "unknown",
+      ResourceFailureReason.Unclassified,
+    ],
   ] as const;
   const requests: unknown[] = [];
   let next = 0;
@@ -2216,7 +2221,7 @@ test("check answers healthy, unhealthy and unknown through the LLM provider with
       return new Response(null, { status: statuses[next++]![0] });
     },
   );
-  for (const [, expected] of statuses) {
+  for (const [, expected, failureReason] of statuses) {
     const answer = await f.credentialCheck({
       platform: Platform.Anthropic,
       secret: { key: HEALTH_SECRET },
@@ -2225,6 +2230,7 @@ test("check answers healthy, unhealthy and unknown through the LLM provider with
     assert.deepEqual(answer, {
       status: expected,
       capability: CAPABILITY_MODEL_LIST_READ,
+      failure_reason: failureReason,
     });
     assert.ok(!JSON.stringify(answer).includes(HEALTH_SECRET));
   }
@@ -2244,7 +2250,11 @@ test("check answers healthy, unhealthy and unknown through the LLM provider with
       secret: { key: HEALTH_SECRET },
       metadata: { base_url: HEALTH_BASE_URL, models: [] },
     }),
-    { status: "unknown", capability: CAPABILITY_MODEL_LIST_READ },
+    {
+      status: "unknown",
+      capability: CAPABILITY_MODEL_LIST_READ,
+      failure_reason: ResourceFailureReason.Unclassified,
+    },
   );
   assert.equal(requests.at(-1), `${HEALTH_BASE_URL}/models`);
   assert.equal(rowCount(f), NO_ROWS);
@@ -2336,9 +2346,13 @@ test("verify answers healthy, unhealthy and unknown like the health report witho
     metadata: null,
   });
   const statuses = [
-    [HttpStatus.OK, "healthy"],
-    [HttpStatus.Forbidden, "unhealthy"],
-    [HttpStatus.InternalServerError, "unknown"],
+    [HttpStatus.OK, "healthy", null],
+    [HttpStatus.Forbidden, "unhealthy", ResourceFailureReason.Unclassified],
+    [
+      HttpStatus.InternalServerError,
+      "unknown",
+      ResourceFailureReason.Unclassified,
+    ],
   ] as const;
   const requests: unknown[] = [];
   let next = 0;
@@ -2349,7 +2363,7 @@ test("verify answers healthy, unhealthy and unknown like the health report witho
     });
   });
   const before = credentialRows(f);
-  for (const [, expected] of statuses) {
+  for (const [, expected, failureReason] of statuses) {
     const answer = await credentialVerify(f, "anthropic");
     const [entry] = f.store.transaction((tx) =>
       f.component.resourceInventory(tx),
@@ -2357,6 +2371,7 @@ test("verify answers healthy, unhealthy and unknown like the health report witho
     assert.deepEqual(answer, {
       status: expected,
       capability: CAPABILITY_MODEL_LIST_READ,
+      failure_reason: failureReason,
     });
     assert.equal(await entry!.check(background), expected);
     assert.ok(!JSON.stringify(answer).includes(HEALTH_SECRET));
@@ -2381,6 +2396,7 @@ test("verify answers unknown when the request throws", async (t) => {
   assert.deepEqual(await credentialVerify(f, "compatible"), {
     status: "unknown",
     capability: CAPABILITY_MODEL_LIST_READ,
+    failure_reason: ResourceFailureReason.Unclassified,
   });
   assert.ok(!JSON.stringify(f.logs).includes(HEALTH_SECRET));
 });

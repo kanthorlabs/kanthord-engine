@@ -10,6 +10,7 @@ import {
 import {
   HealthScope,
   ResourceStatus,
+  type ResourceFailureReason,
   type ResourceObserver,
   type ResourceStatusValue,
 } from "../kernel/health.ts";
@@ -59,6 +60,10 @@ interface ReportLimits {
 type Report = z.output<typeof gatewayOperations.healthcheck.output>;
 type OwnerReport = Report["shared"]["llm"];
 type InventoryEntry = InventorySnapshot["entries"][number];
+interface CheckResults {
+  statuses: Map<string, ResourceStatusValue>;
+  failureReasons: Map<string, ResourceFailureReason>;
+}
 
 export function collectInventories(
   tx: Transaction,
@@ -108,7 +113,7 @@ export async function resourceHealthReport(
   const unique = new Map<string, InventoryEntry>();
   for (const item of snapshot.entries)
     if (!unique.has(item.entry.target)) unique.set(item.entry.target, item);
-  const statuses = await runChecks(
+  const results = await runChecks(
     [...unique.values()],
     caller,
     logger,
@@ -116,7 +121,7 @@ export async function resourceHealthReport(
     reportAt,
   );
   throwIfCancelled(caller.context);
-  const report = assembleReport(snapshot.entries, statuses);
+  const report = assembleReport(snapshot.entries, results);
   return caller.commit(() => report);
 }
 
@@ -159,12 +164,13 @@ async function runChecks(
   logger: Logger,
   limits: ReportLimits,
   reportAt: number,
-): Promise<Map<string, ResourceStatusValue>> {
+): Promise<CheckResults> {
   assert.ok(isHumanIdentity(caller.identity));
   const statuses = new Map<string, ResourceStatusValue>(
     entries.map(({ entry }) => [entry.target, ResourceStatus.Unknown]),
   );
   const reasons = new Map<string, string>();
+  const failureReasons = new Map<string, ResourceFailureReason>();
   const reportContext = new CancellationContext(caller.context);
   const timer = setTimeout(
     () => reportContext.cancel(),
@@ -186,7 +192,10 @@ async function runChecks(
         reportContext,
         limits.checkDeadlineMs,
         reportAt,
-        (reason) => reasons.set(item.entry.target, reason),
+        (reason, failureReason) => {
+          reasons.set(item.entry.target, reason);
+          failureReasons.set(item.entry.target, failureReason);
+        },
       );
       statuses.set(item.entry.target, status);
     }
@@ -198,7 +207,7 @@ async function runChecks(
         work,
       ),
     );
-    return statuses;
+    return { statuses, failureReasons };
   } finally {
     clearTimeout(timer);
     reportContext.cancel();
@@ -227,7 +236,7 @@ function emptyOwner(): OwnerReport {
 
 function assembleReport(
   entries: InventoryEntry[],
-  statuses: Map<string, ResourceStatusValue>,
+  { statuses, failureReasons }: CheckResults,
 ): Report {
   const owners = {
     [OWNER_LLM]: emptyOwner(),
@@ -241,6 +250,10 @@ function assembleReport(
   for (const { owner, entry } of entries) {
     const status = statuses.get(entry.target);
     assert.ok(status !== undefined);
+    const failureReason =
+      status === ResourceStatus.Healthy
+        ? null
+        : (failureReasons.get(entry.target) ?? null);
     const report = owners[owner];
     let resources = report.global;
     if (entry.scope === HealthScope.Project) {
@@ -255,7 +268,11 @@ function assembleReport(
       resources = report.projects[entry.project]!;
     }
     Object.defineProperty(resources, entry.name, {
-      value: { status, capability: entry.capability },
+      value: {
+        status,
+        capability: entry.capability,
+        failure_reason: failureReason,
+      },
       enumerable: true,
       configurable: true,
       writable: true,

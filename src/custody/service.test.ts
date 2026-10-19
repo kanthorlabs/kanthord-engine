@@ -4,7 +4,7 @@ import type { Logger } from "pino";
 import { z } from "zod";
 import { CancellationContext } from "../kernel/context.ts";
 import { OperationError } from "../kernel/errors.ts";
-import { HealthRegistry } from "../kernel/health.ts";
+import { HealthRegistry, ResourceFailureReason } from "../kernel/health.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import { HealthStatus } from "../kernel/service.ts";
 import {
@@ -1831,13 +1831,14 @@ test("check runs the probe of the platform on the parsed secret and metadata and
       [TestPlatform.Metadata]: {
         ...TEST_SET.platforms[TestPlatform.Metadata]!,
         capability: CHECK_CAPABILITY,
-        probe: async (secret, metadata, context) => {
+        probe: async (secret, metadata, context, observe) => {
           calls.push({
             secret,
             metadata,
             deadline: context.deadline(),
             context: context as CancellationContext,
           });
+          observe?.("status=401", ResourceFailureReason.Unclassified);
           return "unhealthy";
         },
       },
@@ -1857,6 +1858,7 @@ test("check runs the probe of the platform on the parsed secret and metadata and
   assert.deepEqual(answer, {
     status: "unhealthy",
     capability: CHECK_CAPABILITY,
+    failure_reason: ResourceFailureReason.Unclassified,
   });
   assert.equal(calls.length, ONE_CALL);
   assert.deepEqual(calls[0]!.secret, apiSecret);
@@ -1921,5 +1923,9 @@ test("check answers unknown when the probe throws", async (t) => {
     { platform: TestPlatform.Key, secret: apiSecret, metadata: null },
     new CancellationContext(),
   );
-  assert.deepEqual(answer, { status: "unknown", capability: NO_CAPABILITY });
+  assert.deepEqual(answer, {
+    status: "unknown",
+    capability: NO_CAPABILITY,
+    failure_reason: ResourceFailureReason.Unclassified,
+  });
 });

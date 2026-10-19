@@ -4,7 +4,11 @@ import pino from "pino";
 import { z } from "zod";
 import { background, CancellationContext } from "../kernel/context.ts";
 import { OperationError } from "../kernel/errors.ts";
-import { HealthScope, ResourceStatus } from "../kernel/health.ts";
+import {
+  HealthScope,
+  ResourceFailureReason,
+  ResourceStatus,
+} from "../kernel/health.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import { IN_MEMORY_DATABASE, Store } from "../kernel/store.ts";
 import { redactingLogger } from "../kernel/test-support.ts";
@@ -36,6 +40,7 @@ const METADATA = { endpoint: "https://probe.example" };
 const FAILURE_REASON = "status=500";
 const PROBED_NAME = "probed";
 const VERIFY_FAILED_MESSAGE = "credential verify failed";
+const BEFORE_REMOTE_CALL = "probe failed before the remote call";
 
 type ProbeCall = { secret: unknown; metadata: unknown };
 
@@ -217,9 +222,16 @@ test("inventory and resource checks return unknown on corrupted ciphertext witho
     component.resourceCheck(tx, set, "probed"),
   );
   store.close();
-  assert.equal(await entry.check(background), ResourceStatus.Unknown);
-  assert.equal(await check(background), ResourceStatus.Unknown);
+  const observed: string[] = [];
+  const observe = (reason: string, failureReason: string) =>
+    observed.push(`${reason}:${failureReason}`);
+  assert.equal(await entry.check(background, observe), ResourceStatus.Unknown);
+  assert.equal(await check(background, observe), ResourceStatus.Unknown);
   assert.equal(calls.length, NO_CALLS);
+  assert.deepEqual(observed, [
+    `${BEFORE_REMOTE_CALL}:${ResourceFailureReason.Unclassified}`,
+    `${BEFORE_REMOTE_CALL}:${ResourceFailureReason.Unclassified}`,
+  ]);
   assert.ok(!JSON.stringify(entry).includes(SECRET));
 });
 
@@ -288,6 +300,7 @@ test("verify probes the newest live revision, writes no row and agrees with the 
   assert.deepEqual(answer, {
     status: ResourceStatus.Healthy,
     capability: PROBED_CAPABILITY,
+    failure_reason: null,
   });
   assert.equal(await check(background), answer.status);
   assert.deepEqual(calls, [
@@ -306,7 +319,7 @@ test("verify logs the credential name as credential_name without redaction when 
       [PROBED_PLATFORM]: {
         ...platformSet([]).platforms[PROBED_PLATFORM]!,
         probe: async (_secret, _metadata, _context, observe) => {
-          observe?.(FAILURE_REASON);
+          observe?.(FAILURE_REASON, ResourceFailureReason.Unclassified);
           return ResourceStatus.Unknown;
         },
       },
@@ -318,6 +331,27 @@ test("verify logs the credential name as credential_name without redaction when 
   assert.equal(record.credential_name, PROBED_NAME);
   assert.equal(record.reason, FAILURE_REASON);
   assert.ok(!lines.join("").includes("[Redacted]"));
+});
+
+test("verify answers the failure reason that the probe observes", async (t) => {
+  const { store, component, set } = fixture(t);
+  insert(store, PROBED_PLATFORM, PROBED_NAME);
+  const observing: CredentialPlatformSet = {
+    platforms: {
+      [PROBED_PLATFORM]: {
+        ...set.platforms[PROBED_PLATFORM]!,
+        probe: async (_secret, _metadata, _context, observe) => {
+          observe?.(FAILURE_REASON, ResourceFailureReason.KeyRefused);
+          return ResourceStatus.Unhealthy;
+        },
+      },
+    },
+  };
+  assert.deepEqual(await component.verify(observing, PROBED_NAME, background), {
+    status: ResourceStatus.Unhealthy,
+    capability: PROBED_CAPABILITY,
+    failure_reason: ResourceFailureReason.KeyRefused,
+  });
 });
 
 test("verify refuses an archived record, a platform without a probe, a foreign name and an unknown name before any probe call", async (t) => {
@@ -349,6 +383,7 @@ test("verify answers unknown on corrupted ciphertext and on a cancelled caller w
   assert.deepEqual(await component.verify(set, "probed", cancelled), {
     status: ResourceStatus.Unknown,
     capability: PROBED_CAPABILITY,
+    failure_reason: null,
   });
   store.database
     .prepare("UPDATE credential SET ciphertext = ?")
@@ -356,6 +391,7 @@ test("verify answers unknown on corrupted ciphertext and on a cancelled caller w
   assert.deepEqual(await component.verify(set, "probed", background), {
     status: ResourceStatus.Unknown,
     capability: PROBED_CAPABILITY,
+    failure_reason: ResourceFailureReason.Unclassified,
   });
   assert.equal(calls.length, NO_CALLS);
 });
@@ -377,5 +413,6 @@ test("verify answers unknown when the probe exceeds the 10 s deadline", async (t
   assert.deepEqual(await pending, {
     status: ResourceStatus.Unknown,
     capability: PROBED_CAPABILITY,
+    failure_reason: null,
   });
 });

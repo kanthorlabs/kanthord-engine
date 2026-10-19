@@ -196,6 +196,7 @@ test("the composition root reports an Intake entry under the name of its project
         [INBOUND_NAME]: {
           status: ResourceStatus.Unknown,
           capability: WEBHOOK_CAPABILITY,
+          failure_reason: null,
         },
       },
     },
@@ -295,10 +296,12 @@ test("a malformed poll inbound answers unknown for its own entry and the report 
         [encodeURIComponent(good)]: {
           status: ResourceStatus.Healthy,
           capability: POLL_CAPABILITY,
+          failure_reason: null,
         },
         [encodeURIComponent(malformed)]: {
           status: ResourceStatus.Unknown,
           capability: POLL_CAPABILITY,
+          failure_reason: null,
         },
       },
     },
@@ -376,6 +379,7 @@ test("the check deadline of a poll inbound answers unknown through the report, d
         [encodeURIComponent(id)]: {
           status: ResourceStatus.Unknown,
           capability: POLL_CAPABILITY,
+          failure_reason: null,
         },
       },
     },

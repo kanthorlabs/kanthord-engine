@@ -1,5 +1,6 @@
 import { abortSignal, type Context } from "./context.ts";
 import {
+  ResourceFailureReason,
   ResourceStatus,
   type ResourceObserver,
   type ResourceStatusValue,
@@ -67,7 +68,10 @@ export async function probeHttp(
       await response.body?.cancel();
       if (signal.aborted) return ResourceStatus.Unknown;
       if (response.status === HttpStatus.OK) return ResourceStatus.Healthy;
-      observe?.(`status=${response.status}`);
+      observe?.(
+        `status=${response.status}`,
+        ResourceFailureReason.Unclassified,
+      );
       if (response.status === HttpStatus.Forbidden)
         return ResourceStatus.Unknown;
       return ResourceStatus.Unhealthy;
@@ -75,7 +79,10 @@ export async function probeHttp(
       dispose();
     }
   } catch (error) {
-    observe?.(thrownReason(error, headerSecrets(headers)));
+    observe?.(
+      thrownReason(error, headerSecrets(headers)),
+      ResourceFailureReason.Unclassified,
+    );
     return ResourceStatus.Unknown;
   }
 }

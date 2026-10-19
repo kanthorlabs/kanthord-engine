@@ -11,6 +11,7 @@ import type {
 import type { Context } from "../kernel/context.ts";
 import type { ExecutionClaim } from "../kernel/operation.ts";
 import {
+  resourceFailureReasonSchema,
   ResourceStatus,
   type ResourceCheck,
   type ResourceEntry,
@@ -534,6 +535,7 @@ export const credentialCheckAnswerSchema = z.strictObject({
     ResourceStatus.Unknown,
   ]),
   capability: z.string().min(1),
+  failure_reason: resourceFailureReasonSchema,
 });
 export type CredentialCheckAnswer = z.infer<typeof credentialCheckAnswerSchema>;
 export const credentialPlatformListAnswerSchema = z.strictObject({

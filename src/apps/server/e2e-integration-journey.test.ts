@@ -428,11 +428,13 @@ test("E10 integration journey", { timeout: JOURNEY_TIMEOUT }, async (t) => {
     [h.W]: {
       status: ResourceStatus.Unknown,
       capability: WEBHOOK_CAPABILITY,
+      failure_reason: null,
     },
-    [h.L]: { status: poll, capability: POLL_CAPABILITY },
+    [h.L]: { status: poll, capability: POLL_CAPABILITY, failure_reason: null },
     [h.V]: {
       status: ResourceStatus.Unknown,
       capability: WEBHOOK_CAPABILITY,
+      failure_reason: null,
     },
   });
   let stored!: Stored;

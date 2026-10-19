@@ -10,7 +10,10 @@ import {
 } from "../kernel/operation.ts";
 import type { Transaction } from "../kernel/store.ts";
 import { isString } from "../kernel/values.ts";
-import { ResourceStatus } from "../kernel/health.ts";
+import {
+  resourceFailureReasonSchema,
+  ResourceStatus,
+} from "../kernel/health.ts";
 import { tagSchema } from "../kernel/tag.ts";
 import { fallbackConfigurationsSchema } from "../agent/contract.ts";
 
@@ -23,6 +26,7 @@ export const bindingVerifyAnswerEntrySchema = z.strictObject({
     ResourceStatus.Unknown,
   ]),
   capability: z.string().min(1),
+  failure_reason: resourceFailureReasonSchema,
 });
 export type BindingCheckEntry = z.infer<typeof bindingVerifyAnswerEntrySchema>;
 

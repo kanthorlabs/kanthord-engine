@@ -6,7 +6,7 @@ import {
   CancellationContext,
   type Context,
 } from "../kernel/context.ts";
-import { ResourceStatus } from "../kernel/health.ts";
+import { ResourceFailureReason, ResourceStatus } from "../kernel/health.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import { probeS3 } from "./probe.ts";
 
@@ -16,6 +16,7 @@ const ENDPOINT = "https://storage.example";
 const BUCKET = "test-bucket";
 const REGION = "us-east-1";
 const ONE_CALL = 1;
+const TWO_CALLS = 2;
 const BUCKET_PATH = `/${BUCKET}/`;
 
 const s3Check = (
@@ -72,6 +73,43 @@ for (const throws of [false, true]) {
     });
   }
 }
+
+test("S3 observes a status failure and a network error as unclassified", async (t) => {
+  const observed: Array<[string, string]> = [];
+  const observe = (reason: string, failureReason: string) =>
+    void observed.push([reason, failureReason]);
+  const destroy = t.mock.fn();
+  const probe = (send: () => Promise<unknown>) =>
+    probeS3(
+      ACCESS_KEY_ID,
+      SECRET,
+      ENDPOINT,
+      BUCKET,
+      REGION,
+      background,
+      () => ({ send, destroy }),
+      observe,
+    );
+  assert.equal(
+    await probe(async () => ({
+      $metadata: { httpStatusCode: HttpStatus.NotFound },
+    })),
+    ResourceStatus.Unhealthy,
+  );
+  assert.equal(
+    await probe(async () => {
+      throw new Error(SECRET);
+    }),
+    ResourceStatus.Unknown,
+  );
+  assert.equal(observed.length, TWO_CALLS);
+  assert.deepEqual(observed[0], [
+    `status=${HttpStatus.NotFound}`,
+    ResourceFailureReason.Unclassified,
+  ]);
+  assert.equal(observed[1]![1], ResourceFailureReason.Unclassified);
+  assert.ok(!observed[1]![0].includes(SECRET));
+});
 
 test("S3 network, construction and cleanup errors remain unknown without leaking secrets", async (t) => {
   const destroy = t.mock.fn();
