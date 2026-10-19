@@ -176,6 +176,7 @@ export async function gatewayFixture(
     dashboard?: DashboardLoader;
     path?: string;
     basePath?: string;
+    bind?: string;
   } = {},
 ) {
   process.umask(0o077);
@@ -184,6 +185,7 @@ export async function gatewayFixture(
     gateway: {
       port: 0,
       allowed_hosts: ["localhost"],
+      ...(options.bind ? { bind: options.bind } : {}),
       ...(options.basePath ? { base_path: options.basePath } : {}),
     },
   }).getProperties();

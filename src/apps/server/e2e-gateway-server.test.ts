@@ -285,7 +285,7 @@ async function servePort(
         if (!line.startsWith("{")) return;
         try {
           const record = JSON.parse(line);
-          if (record.msg !== GATEWAY_STARTED_MESSAGE) return;
+          if (!record.msg.startsWith(GATEWAY_STARTED_MESSAGE)) return;
           assert.ok(Number.isSafeInteger(record.port));
           assert.ok(record.port > UNSET_PORT);
           resolve(record.port);

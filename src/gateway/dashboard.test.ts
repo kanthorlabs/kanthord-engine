@@ -16,6 +16,11 @@ const ALLOWED_ORIGIN = "http://localhost:27182";
 const SCRIPT = "export const ready = true;";
 const ROUTE_NOT_FOUND = "gateway.routing.not_found";
 const HOST_NOT_ALLOWED = "gateway.http.host_not_allowed";
+const REFUSED_HOST = "evil.example";
+const REFUSED_HOST_DETAILS = {
+  host: REFUSED_HOST,
+  field: "gateway.allowed_hosts",
+};
 const HTML_MEDIA_TYPE = "text/html; charset=utf-8";
 const SCRIPT_MEDIA_TYPE = "text/javascript; charset=utf-8";
 const JSON_MEDIA_TYPE = "application/json";
@@ -33,6 +38,11 @@ function loadEmbedded(path: string): ArrayBuffer | undefined {
   return text === undefined
     ? undefined
     : (encoder.encode(text).buffer.slice(0) as ArrayBuffer);
+}
+
+async function errorDetails(response: Response): Promise<unknown> {
+  const body = (await response.json()) as { error: { details: unknown } };
+  return body.error.details;
 }
 
 async function errorCode(response: Response): Promise<string> {
@@ -92,10 +102,11 @@ test("a dashboard path answers no write method", async (t) => {
 test("the dashboard refuses a host outside the allowlist", async (t) => {
   const { gateway } = await gatewayFixture(t, { dashboard: loadEmbedded });
   const response = await gateway.app.request("/", {
-    headers: { Host: "evil.example" },
+    headers: { Host: REFUSED_HOST },
   });
   assert.equal(response.status, HttpStatus.Forbidden);
-  assert.equal(await errorCode(response), HOST_NOT_ALLOWED);
+  assert.equal(await errorCode(response.clone()), HOST_NOT_ALLOWED);
+  assert.deepEqual(await errorDetails(response), REFUSED_HOST_DETAILS);
 });
 
 test("outside the single binary the dashboard paths answer the route error", async (t) => {
@@ -229,8 +240,9 @@ test("a prefixed gateway checks the host before the prefix", async (t) => {
     basePath: BASE_PATH,
   });
   const response = await gateway.app.request("/api/liveness", {
-    headers: { Host: "evil.example" },
+    headers: { Host: REFUSED_HOST },
   });
   assert.equal(response.status, HttpStatus.Forbidden);
-  assert.equal(await errorCode(response), HOST_NOT_ALLOWED);
+  assert.equal(await errorCode(response.clone()), HOST_NOT_ALLOWED);
+  assert.deepEqual(await errorDetails(response), REFUSED_HOST_DETAILS);
 });

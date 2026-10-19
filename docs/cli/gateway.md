@@ -88,7 +88,9 @@ not by a caller-supplied identity field.
 The operation timeout is 10 seconds; the HTTP adapter sets its deadline one
 second later (11 seconds). There is no CLI timeout override or automatic retry.
 The shared host check can return `403 gateway.http.host_not_allowed` before
-authentication; readiness can return `503 gateway.lifecycle.not_ready`.
+authentication. Its `details` name the refused `host` and the `field`
+`gateway.allowed_hosts`; the answer never lists the allowlist. Readiness can
+return `503 gateway.lifecycle.not_ready`.
 The route body limit can return `413 gateway.request.body_too_large` before
 authentication. On a route that requires a credential, authentication and the
 access policy run before request validation. A missing or invalid credential

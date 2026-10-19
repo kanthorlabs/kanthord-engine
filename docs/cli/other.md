@@ -384,7 +384,8 @@ The implemented fields are:
 - `gateway.port`: optional Convict `port`, default `31415`.
 - `gateway.allowed_hosts`: optional array of nonempty strings, default
   `["127.0.0.1:31415", "localhost:31415"]`.
-- `gateway.allowed_origins`: optional array of nonempty strings, default `[]`.
+- `gateway.allowed_origins`: optional array of nonempty strings, default
+  `["http://127.0.0.1:27182", "http://localhost:27182"]`.
 - `gateway.base_path`: optional string, default `/`. A value other than `/`
   matches `^(/[A-Za-z0-9._~-]+)+$` and has no trailing slash, for example
   `/s/kanthord`. The listener serves the API and the embedded dashboard only
@@ -454,7 +455,7 @@ master key, validate it in memory, and then publish it. Each repeatable
 `--gateway-allowed-host` value is lowercased and appended to the default
 `gateway.allowed_hosts` without duplicates. A value that is not exactly
 `<name>` or `<name>:<port>` fails with `cli.config.invalid_allowed_host` before
-any file is written. `--gateway-bind` writes its value to `gateway.bind`. The default is `127.0.0.1`. The container image uses `::`. A value that
+any file is written. `--gateway-bind` writes its value to `gateway.bind`. The default is `127.0.0.1`. A container runs `config init --gateway-bind ::` once, before the first start. A value that
 is not an IP address fails with `system.config.invalid_field` before any file
 is written. `--gateway-base-path` writes its value to `gateway.base_path`. A
 value that is neither `/` nor a path without a trailing slash fails with
@@ -510,7 +511,8 @@ On success stdout is exactly `valid: <absolute-path>\n` and exit
 is `0`. On failure stderr reports the safe parse/permission diagnostic or the
 collected invalid fields and exit is `1`. No file is created, repaired, or
 modified. An absent file prints `system.config.not_found: configuration is absent`,
-then the rows `config: <path>` and `command: kanthord config init --config "<path>"`.
+then the rows `config: <path>`, `command: kanthord config init --config "<path>"`
+and `container: podman run --rm -v <volume>:/var/lib/kanthord docker.io/kanthorlabs/kanthord:<version> config init --gateway-bind :: --gateway-allowed-host localhost:<port> --gateway-allowed-host 127.0.0.1:<port>`.
 
 ### `config show`
 
@@ -617,7 +619,9 @@ neither its configuration nor `cli.yaml` and issues no JWT. Future file owners,
 including Tracking storage, need their own implemented lifecycle.
 
 Output: operational JSON log records go to stderr by default or the configured
-log file. Startup prints no token and requires no terminal. A successfully
+log file. The `info` record `Gateway Service started` carries the fields `bind`
+and `port`. For a loopback bind, its message adds "A loopback bind accepts
+connections from this host only." Startup prints no token and requires no terminal. A successfully
 running process remains alive rather than exiting after readiness. A missing
 or invalid configuration, permissions failure, database lock contention,
 pending migration on a database with a recorded migration, migration failure, or listener failure stops startup and exits `1`; startup
@@ -996,7 +1000,7 @@ implement them. Help is not an extra root name or a reason to load secrets.
 | 401             | `gateway.authentication.unauthorized`            | A required JWT is absent, invalid, expired or has the wrong caller kind.                                                                   | authenticated remote commands                                              |
 | 503             | `gateway.healthcheck.inventory_failed`           | A resource owner did not supply its health inventory.                                                                                      | GET /api/healthcheck                                                       |
 | upstream status | `gateway.http.failed`                            | HTTP middleware raises an HTTP exception other than a timeout.                                                                             | HTTP routes                                                                |
-| 403             | `gateway.http.host_not_allowed`                  | The request Host header is absent or not on `allowed_hosts`.                                                                               | HTTP routes                                                                |
+| 403             | `gateway.http.host_not_allowed`                  | The Host header is absent or not on `allowed_hosts`. `details`: `host` (lower-case, at most 255 characters, or `null`) and `field`.        | HTTP routes                                                                |
 | 409             | `gateway.idempotency.conflict`                   | The same caller reuses a key for a different operation or input.                                                                           | remote mutations                                                           |
 | 400             | `gateway.idempotency.invalid_key`                | The Idempotency-Key header is not a canonical ULID.                                                                                        | remote mutations                                                           |
 | 403             | `gateway.invocation.execution_proof_failed`      | The execution identity of the input is no live claim of the registration of the machine identity.                                          | machine operations that require a live execution                           |

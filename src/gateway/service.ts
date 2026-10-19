@@ -13,7 +13,7 @@ import {
   type HttpBindings,
 } from "@hono/node-server";
 import { performance } from "node:perf_hooks";
-import type { AddressInfo } from "node:net";
+import { BlockList, isIPv6, type AddressInfo } from "node:net";
 import type { Logger } from "pino";
 import {
   HealthStatus,
@@ -50,6 +50,27 @@ import { GATEWAY_STARTED_MESSAGE } from "./constants.ts";
 import { dashboardResponse, type DashboardLoader } from "./dashboard.ts";
 import { ROOT_BASE_PATH, baseHref, stripBasePath } from "./base-path.ts";
 import { dashboardAsset } from "../kernel/assets.ts";
+
+const HOST_DETAIL_LIMIT = 255;
+const ALLOWED_HOSTS_FIELD = "gateway.allowed_hosts";
+const LOOPBACK_BIND_SENTENCE =
+  "A loopback bind accepts connections from this host only.";
+const IPV4_LOOPBACK_NETWORK = "127.0.0.0";
+const IPV4_LOOPBACK_PREFIX_LENGTH = 8;
+const IPV6_LOOPBACK_ADDRESS = "::1";
+const loopbackAddresses = new BlockList();
+loopbackAddresses.addSubnet(
+  IPV4_LOOPBACK_NETWORK,
+  IPV4_LOOPBACK_PREFIX_LENGTH,
+  "ipv4",
+);
+loopbackAddresses.addAddress(IPV6_LOOPBACK_ADDRESS, "ipv6");
+
+function startedMessage(bind: string): string {
+  return loopbackAddresses.check(bind, isIPv6(bind) ? "ipv6" : "ipv4")
+    ? `${GATEWAY_STARTED_MESSAGE}. ${LOOPBACK_BIND_SENTENCE}`
+    : GATEWAY_STARTED_MESSAGE;
+}
 
 export interface GatewayDependencies {
   config: GatewayConfig;
@@ -174,10 +195,10 @@ export class GatewayService implements Service {
       this.started = true;
       this.options.logger.info(
         {
-          address: this.options.config.bind,
+          bind: this.options.config.bind,
           port: this.address()?.port,
         },
-        GATEWAY_STARTED_MESSAGE,
+        startedMessage(this.options.config.bind),
       );
     } catch (error) {
       this.ready = false;
@@ -313,16 +334,17 @@ export class GatewayService implements Service {
       }
     });
     app.use("*", async (context, next) => {
-      const host = context.req.header("host");
-      if (
-        !host ||
-        !this.options.config.allowed_hosts.includes(host.toLowerCase())
-      )
+      const host = context.req.header("host")?.toLowerCase();
+      if (!host || !this.options.config.allowed_hosts.includes(host))
         return respondError(
           new GatewayError(
             403,
             "gateway.http.host_not_allowed",
-            "Host is not allowed.",
+            "Host is not allowed. Add it to gateway.allowed_hosts.",
+            {
+              host: host ? host.slice(0, HOST_DETAIL_LIMIT) : null,
+              field: ALLOWED_HOSTS_FIELD,
+            },
           ),
           context.get("requestId"),
         );
