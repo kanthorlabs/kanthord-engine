@@ -703,16 +703,11 @@ test("an ssh record pins the resolved identity and refuses an ambiguous or drift
   );
 });
 
-test("the ssh probe observes a refused pin as unclassified", async () => {
+test("the ssh probe observes a pin that does not parse as unclassified", async () => {
   const observed: Array<[string, string]> = [];
   const status = await REPOSITORY_PLATFORMS[Platform.Ssh].probe!(
     {},
-    {
-      host: "kanthord-failure-reason.invalid",
-      hostname: "kanthord-failure-reason.invalid",
-      port: 2222,
-      identity_file: "/nonexistent/kanthord-failure-reason",
-    },
+    { host: "-kanthord-failure-reason" },
     background,
     (reason, failureReason) => void observed.push([reason, failureReason]),
   );
