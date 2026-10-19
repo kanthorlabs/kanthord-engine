@@ -386,6 +386,13 @@ test("an ssh_identity grant refuses a machine without a claim, a claim without a
   assert.deepEqual(f.row.credentials, []);
 });
 
+test("an ssh_identity grant refuses a draft subject of a machine before the port", (t) => {
+  const f = sshFixture(t);
+  assert.throws(() => f.grant(f.machine, f.draft, f.claim), FacilityError);
+  assert.deepEqual(f.calls, []);
+  assert.deepEqual(f.row.credentials, []);
+});
+
 test("an ssh_identity release refuses a fabricated grant and a consumed grant", (t) => {
   const f = sshFixture(t);
   const granted = f.grant(f.human, f.draft, null);

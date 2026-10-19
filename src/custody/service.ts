@@ -56,6 +56,7 @@ import {
   type GeneratedCreate,
   type GeneratedRevision,
   type GeneratedRotate,
+  SshIdentitySubjectKind,
   type SshIdentityAuthorization,
   type AgentProviderDependent,
   type BindingRevision,
@@ -464,7 +465,9 @@ export class CustodyComponent implements Service, CredentialRecords {
     const { identity, subject, claim } = request;
     if (
       this.sshIdentityAuthorization === undefined ||
-      isMachineIdentity(identity) !== (claim !== null)
+      isMachineIdentity(identity) !== (claim !== null) ||
+      (subject.kind === SshIdentitySubjectKind.Draft &&
+        !isHumanIdentity(identity))
     )
       throw new FacilityError();
     const authorized = this.sshIdentityAuthorization.sshIdentity(
