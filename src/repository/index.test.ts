@@ -12,7 +12,11 @@ import { HttpStatus } from "../kernel/http.ts";
 import { IN_MEMORY_DATABASE, Store } from "../kernel/store.ts";
 import { temporary } from "../kernel/test-support.ts";
 import { HostKeyErrorCode, RepositoryErrorCode } from "./contract.ts";
-import { RepositoryComponent, repositoryMigrations } from "./index.ts";
+import {
+  RepositoryComponent,
+  repositoryMigrations,
+  type SshGrantFacts,
+} from "./index.ts";
 import { generateSshKey } from "./ssh-key.ts";
 import {
   createBareRepository,
@@ -32,6 +36,15 @@ const DEADLINE_MS = 30_000;
 const execFileAsync = promisify(execFile);
 const ADDRESS_INVALID = "project.bindings.repository.address_invalid";
 const CHECK_CALL = "check";
+const PROJECT_ID = "project_01ARZ3NDEKTSV4RRFFQ69G5FAV";
+
+function granted(address: string): SshGrantFacts {
+  return {
+    project_id: PROJECT_ID,
+    credential: CREDENTIAL_NAME,
+    facts: { binding_id: null, address },
+  };
+}
 
 delete process.env.SSH_AUTH_SOCK;
 delete process.env.SSH_AGENT_PID;
@@ -76,7 +89,7 @@ test("sshAccessOf builds the access from the key and the pin of the address host
   const key = generateSshKey(CREDENTIAL_NAME);
   const held = material({ private_key: key.private_key });
   const access = store.transaction((tx) =>
-    new RepositoryComponent().sshAccessOf(tx, held, GITHUB_ADDRESS),
+    new RepositoryComponent().sshAccessOf(tx, granted(GITHUB_ADDRESS), held),
   );
   assert.deepEqual(access, {
     private_key: key.private_key,
@@ -86,7 +99,7 @@ test("sshAccessOf builds the access from the key and the pin of the address host
   assert.ok(held.dropped());
 });
 
-test("sshAccessOf refuses an unpinned host, an alias address and a legacy key and drops the material", (t) => {
+test("sshAccessOf refuses an unpinned host, an alias address and a legacy key by name and drops the material", (t) => {
   const store = pinnedStore(t);
   const key = generateSshKey(CREDENTIAL_NAME);
   const component = new RepositoryComponent();
@@ -114,21 +127,24 @@ test("sshAccessOf refuses an unpinned host, an alias address and a legacy key an
       {},
       GITHUB_ADDRESS,
       refusal(HttpStatus.Conflict, RepositoryErrorCode.SshKeyLegacy, {
-        credential: CREDENTIAL_ID,
+        credential: CREDENTIAL_NAME,
       }),
     ],
     [
       { private_key: "not an SSH key\n" },
       GITHUB_ADDRESS,
       refusal(HttpStatus.Conflict, RepositoryErrorCode.SshKeyLegacy, {
-        credential: CREDENTIAL_ID,
+        credential: CREDENTIAL_NAME,
       }),
     ],
   ];
   for (const [secret, address, matches] of cases) {
     const held = material(secret);
     assert.throws(
-      () => store.transaction((tx) => component.sshAccessOf(tx, held, address)),
+      () =>
+        store.transaction((tx) =>
+          component.sshAccessOf(tx, granted(address), held),
+        ),
       matches,
     );
     assert.ok(held.dropped());
@@ -153,8 +169,8 @@ test("the known_hosts seam lets a test reach a local sshd on another port", asyn
   const access = store.transaction((tx) =>
     component.sshAccessOf(
       tx,
+      granted(address),
       material({ private_key: key.private_key }),
-      address,
     ),
   );
   assert.deepEqual(addresses, [address]);

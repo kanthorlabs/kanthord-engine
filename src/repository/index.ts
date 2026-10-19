@@ -1,4 +1,11 @@
-import { sshKeySecretSchema, type Material } from "../custody/contract.ts";
+import assert from "node:assert/strict";
+import {
+  sshKeySecretSchema,
+  type GrantFacts,
+  type GrantKind,
+  type GrantOf,
+  type Material,
+} from "../custody/contract.ts";
 import { background, type Context } from "../kernel/context.ts";
 import { OperationError } from "../kernel/errors.ts";
 import type { HealthRegistry } from "../kernel/health.ts";
@@ -87,12 +94,14 @@ export function pinnedKnownHosts(tx: Transaction, address: string): string {
   return `${knownHostsLine(tx, host)}${LINE_END}`;
 }
 
-function legacyKey(credentialId: string): OperationError {
+export type SshGrantFacts = GrantFacts<GrantOf<typeof GrantKind.SshIdentity>>;
+
+function legacyKey(credential: string): OperationError {
   return new OperationError(
     HttpStatus.Conflict,
     RepositoryErrorCode.SshKeyLegacy,
     "The SSH credential holds no generated key. Use Rotate SSH key.",
-    { credential: credentialId },
+    { credential },
   );
 }
 
@@ -115,17 +124,23 @@ export class RepositoryComponent implements GitWriter {
     );
   }
 
-  sshAccessOf(tx: Transaction, material: Material, address: string): SshAccess {
+  sshAccessOf(
+    tx: Transaction,
+    granted: SshGrantFacts,
+    material: Material,
+  ): SshAccess {
     try {
-      const known_hosts = this.knownHostsOf(tx, address);
+      const { credential } = granted;
+      assert(credential !== null);
+      const known_hosts = this.knownHostsOf(tx, granted.facts.address);
       const secret = sshKeySecretSchema.safeParse(material.value());
-      if (!secret.success) throw legacyKey(material.credential_id);
+      if (!secret.success) throw legacyKey(credential);
       const { private_key } = secret.data;
       let public_key: string;
       try {
         public_key = sshPublicKeyOf(private_key);
       } catch {
-        throw legacyKey(material.credential_id);
+        throw legacyKey(credential);
       }
       return { private_key, public_key, known_hosts };
     } finally {
