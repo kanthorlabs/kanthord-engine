@@ -2865,7 +2865,7 @@ test("a human lists the holds and clears one by credential name, and a clear of 
   );
 });
 
-test("a human clear of a cooldown logs agent.fallback.cooldown_cleared after the commit", (t) => {
+test("a committed human clear of a cooldown logs agent.fallback.cooldown_cleared", (t) => {
   const { logger, logs } = capturedLogger();
   const f = holdFixture(t, { logger });
   const head = f.selected();
