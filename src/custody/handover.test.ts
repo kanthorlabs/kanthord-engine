@@ -45,6 +45,7 @@ const SSH_ADDRESS = "git@github.com:owner/repository.git";
 const KNOWN_HOSTS = "github.com ssh-ed25519 AAAAhost\n";
 const OPENSSH_LABEL = "OPENSSH PRIVATE KEY";
 const SSH_HANDOVER_RECORD = "ssh identity handover";
+const FIRST_SSH_REVISION = 1;
 const TEST_SET: CredentialPlatformSet = {
   platforms: {
     [TEST_PLATFORM]: {
@@ -520,6 +521,35 @@ test("a pinned execution keeps its SSH key after a rotation and an unpinned exec
   assert.notEqual(next.credential_id, first.credential_id);
   assert.equal(next.private_key, f.sshKeys.get("deploy"));
   assert.notEqual(next.private_key, firstKey);
+});
+
+test("a handover of a revoked pinned SSH revision answers revision_revoked and seals no envelope", (t) => {
+  const f = fixture(t, ["anthro-1"], ["deploy"]);
+  f.handover();
+  const pinned = liveRevisionId(f.store, "deploy");
+  f.rotateSsh("deploy");
+  f.store.transaction((tx) =>
+    f.component.revoke(tx, TEST_SET, "deploy", FIRST_SSH_REVISION),
+  );
+  const handed = () =>
+    f.logs.filter((line) => JSON.parse(line).msg === SSH_HANDOVER_RECORD)
+      .length;
+  const before = handed();
+  let envelope: ReturnType<typeof f.handover> | undefined;
+  assert.throws(
+    () => {
+      envelope = f.handover();
+    },
+    (error) => {
+      assert(error instanceof OperationError);
+      assert.equal(error.status, HttpStatus.Conflict);
+      assert.equal(error.code, REVISION_REVOKED);
+      return true;
+    },
+  );
+  assert.equal(envelope, undefined);
+  assert.equal(handed(), before);
+  assert.ok(f.row.credentials.includes(pinned));
 });
 
 test("an SSH identity refusal seals no envelope and a legacy key answers ssh_key_legacy", (t) => {
