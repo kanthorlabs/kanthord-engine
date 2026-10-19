@@ -18,7 +18,7 @@ import {
 } from "../../kernel/test-support.ts";
 import { createIdentity } from "../../kernel/identity.ts";
 import * as connector from "../../repository/connector.ts";
-import { generateSshKey } from "../../repository/ssh-key.ts";
+import { LOCAL_GIT_SSH_ACCESS } from "../../repository/test-sshd.ts";
 import type { Revision, TaskContent } from "../../mission/contract.ts";
 import {
   anthropicSetup,
@@ -38,6 +38,7 @@ import { ExecutionRun } from "./execution-run.ts";
 import type { MethodClients } from "./method-clients.ts";
 import { WorkspaceRoot } from "./workspace.ts";
 import { prepareStepsWorkspace } from "./steps-implement.ts";
+export { LOCAL_GIT_SSH_ACCESS } from "../../repository/test-sshd.ts";
 export {
   scriptedProvider,
   type ScriptedProvider,
@@ -66,13 +67,6 @@ export function scriptedModelRuntime(
     };
   };
 }
-
-const LOCAL_GIT_KEY = generateSshKey("local-git");
-export const LOCAL_GIT_SSH_ACCESS: SshAccess = {
-  private_key: LOCAL_GIT_KEY.private_key,
-  public_key: LOCAL_GIT_KEY.public_key,
-  known_hosts: "",
-};
 
 export const transport: RepositoryTransport = {
   clone: (address, directory, context, deadlineMs) =>
