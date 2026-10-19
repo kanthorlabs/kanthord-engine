@@ -327,6 +327,31 @@ function addGatewayCommand(program: Command): void {
       process.stdout.write(`${JSON.stringify(result.data)}\n`);
     });
   gateway
+    .command("liveness")
+    .description("Read the server liveness without a token; exit 1 unless 200")
+    .action(async (_options, command: Command) => {
+      const config = resolveClient(command.optsWithGlobals());
+      const result = await httpClient(
+        gatewayOperations,
+        config.endpoint,
+      ).liveness({ params: {}, query: {}, body: null });
+      if (result.type === OperationResultType.Indeterminate)
+        throw new Diagnostic(
+          "cli.gateway.liveness.indeterminate",
+          "gateway liveness: the result is unknown; retry the command",
+        );
+      if (result.type === OperationResultType.Failure)
+        throw new Diagnostic(
+          result.error.error.code,
+          "gateway liveness: request failed",
+          {
+            fields: [["status", result.status]],
+            details: result.error.error.details,
+          },
+        );
+      process.stdout.write(`${JSON.stringify(result.data)}\n`);
+    });
+  gateway
     .command("openapi")
     .description("Emit the package OpenAPI contract locally")
     .action(writePackageOpenAPI);

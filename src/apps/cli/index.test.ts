@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
-import { test } from "node:test";
+import { test, type TestContext } from "node:test";
 import { spawnSync } from "node:child_process";
+import { createServer, type IncomingHttpHeaders } from "node:http";
+import type { AddressInfo } from "node:net";
 import { randomBytes } from "node:crypto";
 import {
   existsSync,
@@ -1763,4 +1765,101 @@ test("intake event mutations print the generated key when the result is indeterm
     );
     assert.match(result.stderr, /^idempotency_key: [0-9A-HJKMNP-TV-Z]{26}$/m);
   }
+});
+
+const LIVENESS_PATH = "/api/liveness";
+const ONE_REQUEST = 1;
+const LIVENESS_HEALTHY = {
+  status: "ok",
+  services: { server: { store: 200, log: 200 } },
+};
+const LIVENESS_UNHEALTHY = {
+  error: {
+    code: "gateway.liveness.unhealthy",
+    message: "A service is unavailable.",
+    details: { server: { store: 503, log: 200 } },
+  },
+  request_id: "request_01ARZ3NDEKTSV4RRFFQ69G5FAV",
+};
+
+async function livenessServer(
+  t: TestContext,
+  status: number,
+  body: unknown,
+  headers: IncomingHttpHeaders[],
+): Promise<string> {
+  const server = createServer((request, response) => {
+    assert.equal(request.url, LIVENESS_PATH);
+    headers.push(request.headers);
+    request.resume();
+    response.writeHead(status, { "Content-Type": "application/json" });
+    response.end(JSON.stringify(body));
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  t.after(() => server.close());
+  return `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+}
+
+test("gateway liveness prints the answer and exits 0 on 200", async (t) => {
+  const env = environment(temporary(t));
+  const headers: IncomingHttpHeaders[] = [];
+  const endpoint = await livenessServer(t, 200, LIVENESS_HEALTHY, headers);
+  const result = await invocation(
+    ["gateway", "liveness", "--endpoint", endpoint],
+    env,
+  );
+  assert.equal(result.status, ExitCode.Success, result.stderr);
+  assert.equal(result.stderr, EMPTY_OUTPUT);
+  assert.equal(result.stdout, `${JSON.stringify(LIVENESS_HEALTHY)}\n`);
+  assert.equal(headers.length, ONE_REQUEST);
+});
+
+test("gateway liveness exits 1 on 503 and prints the code and details", async (t) => {
+  const env = environment(temporary(t));
+  const headers: IncomingHttpHeaders[] = [];
+  const endpoint = await livenessServer(t, 503, LIVENESS_UNHEALTHY, headers);
+  const result = await invocation(
+    ["gateway", "--endpoint", endpoint, "liveness"],
+    env,
+  );
+  assert.equal(result.status, ExitCode.Failure);
+  assert.equal(result.stdout, EMPTY_OUTPUT);
+  assert.equal(
+    result.stderr,
+    `gateway.liveness.unhealthy: gateway liveness: request failed\nstatus:  503\ndetails: ${JSON.stringify(LIVENESS_UNHEALTHY.error.details)}\n`,
+  );
+});
+
+test("gateway liveness exits 1 with the indeterminate code on a refused connection", async (t) => {
+  const env = environment(temporary(t));
+  const result = await invocation(
+    ["gateway", "liveness", "--endpoint", "http://127.0.0.1:1"],
+    env,
+  );
+  assert.equal(result.status, ExitCode.Failure);
+  assert.equal(result.stdout, EMPTY_OUTPUT);
+  assert.match(
+    result.stderr,
+    /^cli\.gateway\.liveness\.indeterminate: gateway liveness: the result is unknown; retry the command\n/,
+  );
+});
+
+test("gateway liveness reads no token and sends no Authorization header", async (t) => {
+  const directory = temporary(t);
+  const env = { ...environment(directory), KANTHORD_TOKEN: "secret-marker" };
+  const headers: IncomingHttpHeaders[] = [];
+  const endpoint = await livenessServer(t, 200, LIVENESS_HEALTHY, headers);
+  const result = await invocation(
+    ["gateway", "liveness", "--endpoint", endpoint],
+    env,
+  );
+  assert.equal(result.status, ExitCode.Success, result.stderr);
+  assert.equal(headers.length, ONE_REQUEST);
+  assert.equal(headers[0]!.authorization, undefined);
+  const rejected = await invocation(
+    ["gateway", "liveness", "--endpoint", endpoint, "--token", "x"],
+    env,
+  );
+  assert.equal(rejected.status, ExitCode.Failure);
+  assert.equal(headers.length, ONE_REQUEST);
 });

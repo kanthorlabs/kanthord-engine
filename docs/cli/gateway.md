@@ -1,9 +1,9 @@
 # Gateway CLI specification
 
 Gateway owns HTTP transport, authentication, identity forwarding, and OpenAPI
-publication. Its command group contains **two implemented commands**: remote
-human identity verification and local contract generation. No additional
-Gateway command is proposed here.
+publication. Its command group contains **three implemented commands**: remote
+human identity verification, the remote liveness read and local contract
+generation. No additional Gateway command is proposed here.
 
 This is an internal target specification with an implementation snapshot of
 2026-09-23, not a released-package guarantee. See the [CLI index](./README.md)
@@ -17,16 +17,17 @@ the signing and verification mechanism.
 | Command                                                      | Status      | Execution / operation                            | Access                                         | Effect and result                                                                            |
 | ------------------------------------------------------------ | ----------- | ------------------------------------------------ | ---------------------------------------------- | -------------------------------------------------------------------------------------------- |
 | `kanthord gateway verify [--endpoint <url>] [--token <jwt>]` | Implemented | Remote: `GET /api/auth/verify`, `gateway.verify` | `human`                                        | Read-only verification; prints the authenticated human identity as one JSON line.            |
+| `kanthord gateway liveness [--endpoint <url>]`               | Implemented | Remote: `GET /api/liveness`, `gateway.liveness`  | `public`; sends no token                       | Read-only liveness; prints the liveness answer as one JSON line. Exits 1 unless HTTP 200.    |
 | `kanthord gateway openapi`                                   | Implemented | Local generator; calls no route                  | Local package filesystem access; no API policy | Writes the package's OpenAPI index and service-scoped files; prints the absolute index path. |
 
-Both commands accept `-h, --help`, take no positional arguments, and run
+All three commands accept `-h, --help`, take no positional arguments, and run
 non-interactively. `kanthord gateway` and `kanthord gateway --help` print group
 help and exit successfully. Command help needs no server or configuration
 file. Unknown commands, excess arguments, unknown options, and missing option
 values fail before the action runs. `--config` is rejected by the group and
-both commands.
+all three commands.
 
-Neither command is a remote mutation or a list.
+No command is a remote mutation or a list.
 [`--idempotency-key`](./common-flags.md#--idempotency-key),
 [`--limit`](./common-flags.md#--limit), and
 [`--cursor`](./common-flags.md#--cursor) therefore do not apply and are not
@@ -140,6 +141,43 @@ Failure exits `1`, produces no success JSON, and prints a diagnostic on stderr:
 Request IDs are opaque `request_`-prefixed canonical uppercase ULIDs, as
 declared by the kernel. They are not accepted as CLI operands here.
 
+## `gateway liveness`
+
+```text
+kanthord gateway [--endpoint <url>] liveness [-h|--help]
+```
+
+The inherited `--endpoint` option also works after `liveness`. The command
+resolves the endpoint through the client configuration precedence: `--endpoint`,
+then `KANTHORD_ENDPOINT`, then `cli.yaml`, then `http://127.0.0.1:31415`. The
+command reads no token. It rejects `--token`, and it ignores `KANTHORD_TOKEN`
+and the `token` field of `cli.yaml`. The request carries no `Authorization`
+header.
+
+The CLI sends `GET /api/liveness` with no path parameters, query parameters or
+body. The operation access is `public` and the operation timeout is 30 seconds.
+The shared host and readiness checks apply.
+
+| Result                                                                | Stdout                     | Stderr                                                                                           | Exit |
+| --------------------------------------------------------------------- | -------------------------- | ------------------------------------------------------------------------------------------------ | ---- |
+| HTTP `200`                                                            | The answer as compact JSON | Empty                                                                                            | `0`  |
+| A declared API failure, for example `503 gateway.liveness.unhealthy`  | Empty                      | `<code>: gateway liveness: request failed`, the row `status: <status>` and the `details` row     | `1`  |
+| A refused connection, a transport failure, a deadline or invalid JSON | Empty                      | `cli.gateway.liveness.indeterminate: gateway liveness: the result is unknown; retry the command` | `1`  |
+| A `200` answer that fails the response schema                         | Empty                      | `gateway.client.answer_invalid: gateway liveness: request failed` and the row `status: 200`      | `1`  |
+
+An example of the HTTP `200` answer, with only the `server` and `project`
+services:
+
+```text
+{"status":"ok","services":{"server":{"gateway":200,"store":200,"log":200},"project":{"bindings":200}}}
+```
+
+The answer holds one map for each registered service.
+
+Each component status is `200` (healthy) or `503` (unavailable). The `details`
+of `gateway.liveness.unhealthy` hold the complete service map. Use the command
+as a container healthcheck: exit `0` means that the server answers HTTP `200`.
+
 ## `gateway openapi`
 
 ```text
@@ -229,14 +267,15 @@ errors currently become `system.operation.unknown: Operation failed.`
 ## Published routes and command coverage
 
 These are Gateway operation contracts; the current-source difference is noted
-under Command scope. The last four rows are HTTP capabilities, not additional
-CLI commands. All are non-mutating `GET` operations with success status `200`.
+under Command scope. The `gateway.healthcheck`, `gateway.openapi` and
+`gateway.openapiFile` rows are HTTP capabilities, not additional CLI commands.
+All are non-mutating `GET` operations with success status `200`.
 
 | Route                         | Operation             | Access / timeout | Parameters and result                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    | CLI coverage                                                    |
 | ----------------------------- | --------------------- | ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------- |
 | `/api/auth/verify`            | `gateway.verify`      | `human`, 10 s    | No parameters or body; JSON human identity described above.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              | `gateway verify`                                                |
 | `/api/healthcheck`            | `gateway.healthcheck` | `human`, 120 s   | No parameters or body; [grouped health report](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/gateway-service.impl.md#the-resource-healthcheck-report) with entries at `services.<service>.global.<resource>` and `services.<service>.projects.<project>.<resource>`, plus `shared.<component>.global.<resource>` and `shared.<component>.projects.<project>.<resource>` for the components `llm`, `repository` and `storage`, each `{status, capability, failure_reason}`. `failure_reason` is null for a `healthy` entry only. A repository binding entry carries a value of the [failure reason list](./project.md#binding-verify); every other entry that is not healthy carries `unclassified`, a check that exceeds its deadline included. HTTP 200 when every owner supplies its inventory; 503 with missing owners otherwise. | API only; no health command is declared or proposed.            |
-| `/api/liveness`               | `gateway.liveness`    | `public`, 30 s   | No parameters or body; [component healthchecks](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/gateway-service.impl.md#component-healthchecks) return the server and gateway maps. HTTP 200 when healthy; unavailable components produce `503 gateway.liveness.unhealthy` with the complete map in `error.details`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   | API only; no liveness command is declared or proposed.          |
+| `/api/liveness`               | `gateway.liveness`    | `public`, 30 s   | No parameters or body; [component healthchecks](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/gateway-service.impl.md#component-healthchecks) return the server and gateway maps. HTTP 200 when healthy; unavailable components produce `503 gateway.liveness.unhealthy` with the complete map in `error.details`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   | `gateway liveness`                                              |
 | `/api/openapi.yaml`           | `gateway.openapi`     | `public`, 30 s   | No parameters or body; `application/yaml` root index read from package `static/openapi.yaml`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            | API only; local `gateway openapi` does not call this operation. |
 | `/api/openapi/:service/:file` | `gateway.openapiFile` | `public`, 30 s   | Required path strings `service` and `file`; `application/yaml` scoped/shared artifact read from package `static/openapi/<service>/<file>`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               | API only; no download command.                                  |
 
@@ -252,8 +291,8 @@ readiness, validation, and timeout checks.
 
 ## Command scope
 
-The target Gateway command table remains the two commands above. The health
-endpoint alone does not justify adding a CLI command. Worker registration and
+The target Gateway command table holds the three commands above.
+`/api/healthcheck` has no CLI command. Worker registration and
 other services' operations retain their owning command groups. Removed login,
 logout, and rotation commands are not part of this specification.
 
