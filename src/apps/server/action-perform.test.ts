@@ -39,8 +39,10 @@ import { GitStage, GitWriteError } from "../../repository/index.ts";
 import type { ExecutionRecord } from "../../scheduler/contract.ts";
 import { environment, kanthord } from "./cli-support.ts";
 import {
+  FAKE_SSH_CREDENTIAL,
   FAKE_SSH_IDENTITY,
   bareRepository,
+  createFakeSshCredential,
   fakeGitHub,
   gatewayFixture,
   mappedTransport,
@@ -57,6 +59,11 @@ const FIRST_INDEX = 0;
 const SINGLE_INSTANCE = 1;
 const NO_ROWS = 0;
 const ONE_CREATE = 1;
+const ONE_SSH_RELEASE = 1;
+const TWO_SSH_RELEASES = 2;
+const CREATE_RELEASES = 2;
+const CREATE_PINS = 2;
+const SSH_REVISION_REVOKED = "credential.revision.revoked";
 const WAIT_ATTEMPTS = 400;
 const WAIT_STEP_MS = 25;
 const UNPROCESSABLE_STATUS = 422;
@@ -211,17 +218,7 @@ async function setup(t: TestContext, landing = "human") {
     metadata: null,
     secret: { key: GITHUB_KEY },
   });
-  await write(["repository", "credential", "create"], {
-    name: "github-ssh",
-    platform: "ssh",
-    metadata: {
-      host: "github.com",
-      hostname: "github.com",
-      port: 22,
-      identity_file: "~/.ssh/id_rsa",
-    },
-    secret: {},
-  });
+  await createFakeSshCredential(read);
   const project = await read<{ id: string }>([
     "project",
     "create",
@@ -239,7 +236,7 @@ async function setup(t: TestContext, landing = "human") {
       available: true,
       platform: "github",
       address,
-      ssh_credential: "github-ssh",
+      ssh_credential: FAKE_SSH_CREDENTIAL,
       credential: "github",
       strategy: {
         base_branch: "main",
@@ -481,6 +478,14 @@ async function setup(t: TestContext, landing = "human") {
         .get(execution.execution_id) as { credentials: string };
       return JSON.parse(found.credentials) as string[];
     });
+  const sshRevision = (revision: number) =>
+    fixture.store.transaction((tx) => {
+      const found = tx.database
+        .prepare("SELECT id FROM credential WHERE name = ? AND revision = ?")
+        .get(FAKE_SSH_CREDENTIAL, revision) as { id: string } | undefined;
+      assert.ok(found);
+      return found.id;
+    });
   return {
     fixture,
     gitHub,
@@ -501,6 +506,8 @@ async function setup(t: TestContext, landing = "human") {
     rows,
     row,
     pins,
+    sshRevision,
+    read,
   };
 }
 
@@ -694,10 +701,11 @@ test(
         } finally {
           h.fixture.github.createPullRequest = create;
         }
-        assert.equal(h.materials.length, before + ONE_CREATE);
+        assert.equal(h.materials.length, before + CREATE_RELEASES);
         dropped(h.materials);
         assert.equal(h.row("thrown")?.state, OutboundRequestState.Pending);
-        assert.equal(h.pins(gated).length, ONE_CREATE);
+        assert.equal(h.pins(gated).length, CREATE_PINS);
+        assert.ok(h.pins(gated).includes(h.sshRevision(FIRST_REVISION)));
       },
     );
 
@@ -761,7 +769,7 @@ test(
         });
         const stored = h.row("merge");
         assert.equal(stored?.operation, OutboundOperation.GitMergePush);
-        assert.equal(stored?.credential, null);
+        assert.equal(stored?.credential, FAKE_SSH_CREDENTIAL);
         assert.equal(stored?.state, OutboundRequestState.Succeeded);
         assert.deepEqual(JSON.parse(stored!.result!), answer);
         assert.deepEqual(
@@ -769,7 +777,9 @@ test(
           answer,
         );
         assert.equal(await remoteHead(h.pushed.bare, MAIN_REF), head);
-        assert.equal(h.materials.length, before);
+        assert.equal(h.materials.length, before + TWO_SSH_RELEASES);
+        dropped(h.materials);
+        assert.deepEqual(h.pins(merged), [h.sshRevision(FIRST_REVISION)]);
       },
     );
 
@@ -813,6 +823,46 @@ test(
         assert.equal(repeat.class, ResultClass.ConfirmedFailure);
         assert.equal(repeat.code, GIT_FAILED_CODE);
         assert.equal(h.row("lost")?.state, OutboundRequestState.Failed);
+      },
+    );
+
+    await t.test(
+      "a revoked pinned SSH revision refuses before any git call and records no request",
+      async () => {
+        await h.read([
+          "repository",
+          "credential",
+          "ssh-key-rotate",
+          FAKE_SSH_CREDENTIAL,
+          "--expected-revision",
+          String(FIRST_REVISION),
+        ]);
+        await h.read([
+          "repository",
+          "credential",
+          "revoke",
+          FAKE_SSH_CREDENTIAL,
+          String(FIRST_REVISION),
+        ]);
+        const writer = h.fixture.gitWriter;
+        const mergePushFresh = writer.mergePushFresh;
+        let pushes = 0;
+        writer.mergePushFresh = (...args) => {
+          pushes += ONE_PUSH;
+          return mergePushFresh(...args);
+        };
+        try {
+          failed(
+            await h.perform(merged, mergeBody("revoked")),
+            HttpStatus.Conflict,
+            SSH_REVISION_REVOKED,
+          );
+        } finally {
+          writer.mergePushFresh = mergePushFresh;
+        }
+        assert.equal(pushes, NO_ROWS);
+        assert.equal(h.row("revoked"), undefined);
+        assert.deepEqual(h.pins(merged), [h.sshRevision(FIRST_REVISION)]);
       },
     );
   },
@@ -916,7 +966,7 @@ test(
         assert.equal(stored?.credential, null);
         assert.deepEqual(JSON.parse(stored!.result!), answer);
         assert.equal(h.gitHub.calls.length, calls);
-        assert.equal(h.materials.length, released);
+        assert.equal(h.materials.length, released + ONE_SSH_RELEASE);
         dropped(h.materials);
       },
     );

@@ -63,6 +63,11 @@ export interface GitWriter {
   mergePushFresh: typeof mergePushFresh;
   pushSnapshotFresh: typeof pushSnapshotFresh;
   landedOn: typeof landedOn;
+  sshAccessOf(
+    tx: Transaction,
+    granted: SshGrantFacts,
+    material: Material,
+  ): SshAccess;
 }
 
 export const platformImplementations = {
