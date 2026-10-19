@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { test } from "node:test";
+import { test, type TestContext } from "node:test";
 import { background } from "../kernel/context.ts";
 import { createIdentity } from "../kernel/identity.ts";
 import { Store } from "../kernel/store.ts";
@@ -31,8 +31,16 @@ import { WorkerErrorCode } from "./contract.ts";
 import { SHIPPED_TEMPLATES } from "../agent/prompt-templates.ts";
 import { ExecutionIntent } from "./contract.ts";
 import type { AgentSelection } from "../scheduler/contract.ts";
+import {
+  RepositoryComponent,
+  repositoryMigrations,
+} from "../repository/index.ts";
+import { HostKeyErrorCode } from "../repository/contract.ts";
+import { ProjectErrorCode, RepositoryPlatform } from "../project/contract.ts";
 
 const SSH_CREDENTIAL = "kanthorlabs-ssh";
+const HOST_KEY =
+  "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl";
 const NO_REQUESTS = 0;
 const SYSTEM_TEXT = "system layer text";
 const AGENT_TEXT = "agent layer text";
@@ -148,7 +156,9 @@ test("setup answers the system and agent prompt after its single snapshot and su
     repositoryBindingIdsOf: () => [],
     intentOf: () => ExecutionIntent.Implement,
     repositoryPolicyOf: () => null,
-    credentialMetadata: () => null,
+    sshHostKeysOf: () => {
+      throw new Error("UNEXPECTED_COLLABORATION");
+    },
     schedulerClaims: { agentSelectionsOf: () => [selection] },
   };
   const worker = {
@@ -217,12 +227,8 @@ test("setup answers the system and agent prompt after its single snapshot and su
   );
   const bindingId = createIdentity("binding");
   const workingLayer = { ...WORKING_LAYER_ALL_ON, claude_md: false };
-  const sshIdentity = {
-    host: "kanthorlabs.github.com",
-    hostname: "ssh.github.com",
-    port: 443,
-    identity_file: "~/.ssh/id_kanthorlabs",
-  };
+  const address = "git@github.com:kanthorlabs/kanthord.git";
+  const knownHosts = `github.com ${HOST_KEY}\n`;
   const pinned = await executionSetup(
     {
       ...dependencies,
@@ -231,21 +237,25 @@ test("setup answers the system and agent prompt after its single snapshot and su
       repositoryPolicyOf: () => ({
         binding_id: bindingId,
         name: "repo",
-        address: "git@kanthorlabs.github.com:kanthorlabs/kanthord.git",
+        address,
+        platform: RepositoryPlatform.GitHub,
         ssh_credential: SSH_CREDENTIAL,
         base_branch: "main",
         project_prompt: null,
         working_layer: workingLayer,
       }),
-      credentialMetadata: (_tx, name) =>
-        name === SSH_CREDENTIAL
-          ? { platform: "ssh", metadata: sshIdentity }
-          : null,
+      sshHostKeysOf: (_tx, platform, received) => {
+        assert.equal(platform, RepositoryPlatform.GitHub);
+        assert.equal(received, address);
+        return knownHosts;
+      },
     },
     worker,
     caller,
   );
-  assert.deepEqual(pinned.repositories[0]?.ssh_identity, sshIdentity);
+  assert.deepEqual(pinned.repositories[0]?.ssh_host_key, {
+    known_hosts: knownHosts,
+  });
   assert.deepEqual(pinned.repositories[0]?.working_layer, workingLayer);
 });
 
@@ -306,7 +316,9 @@ test("setup answers one entry per agent of a two-agent worker with its own promp
       repositoryBindingIdsOf: () => [],
       intentOf: () => ExecutionIntent.Implement,
       repositoryPolicyOf: () => null,
-      credentialMetadata: () => null,
+      sshHostKeysOf: () => {
+        throw new Error("UNEXPECTED_COLLABORATION");
+      },
       schedulerClaims: {
         agentSelectionsOf: () =>
           Object.entries(credentials).map(([agent, credential]) => ({
@@ -345,4 +357,140 @@ test("setup answers one entry per agent of a two-agent worker with its own promp
   assert.ok(answer.agents[0]!.prompt.final.includes("swe@1"));
   assert.ok(answer.agents[1]!.prompt.final.includes("re@1"));
   assert.ok(!answer.agents[1]!.prompt.final.includes("swe@1"));
+});
+
+async function repositorySetup(t: TestContext, address: string, pin: boolean) {
+  const store = new Store(":memory:");
+  t.after(() => store.close());
+  store.migrate([{ service: "repository", migrations: repositoryMigrations }]);
+  if (pin)
+    store.database
+      .prepare(
+        "INSERT INTO repository_host_key (id, host, public_key, created_at) VALUES (?, ?, ?, ?)",
+      )
+      .run(createIdentity("host_key"), "github.com", HOST_KEY, Date.now());
+  const repository = new RepositoryComponent({ checkTools: () => {} });
+  const setup = anthropicSetup();
+  const agent = setup.agents[0]!;
+  const bindingId = createIdentity("binding");
+  const claim = {
+    executionId: setup.execution_id,
+    runtimeIdentity: createIdentity("worker_instance"),
+    workerBindingId: createIdentity("binding"),
+    nodeId: createIdentity("node"),
+    pinnedRevision: 1,
+    nodeBranch: "kanthord/node_01ARZ3NDEKTSV4RRFFQ69G5FAA",
+    attempt: 1,
+    projectId: createIdentity("project"),
+  };
+  const selection: AgentSelection = {
+    agent_name: agent.agent_name,
+    position: 0,
+    level: ChainLevel.Enablement,
+    agent_provider: "default",
+    provider: agent.effective_configuration.provider,
+    credential: agent.effective_configuration.credential,
+    model_identifier: agent.effective_configuration.model_identifier,
+    reasoning_effort: agent.effective_configuration.reasoning_effort,
+  };
+  return executionSetup(
+    {
+      store,
+      agentPrompt: {
+        templates: async () => SHIPPED_TEMPLATES,
+        compose: async () => promptLayers,
+      },
+      workerBindingRowOf: () => ({
+        binding_id: claim.workerBindingId,
+        project_id: claim.projectId,
+        resource_identity: "worker:coder@1",
+        tombstone: false,
+        disabled: false,
+        worker_name: setup.worker_name,
+        entries: [],
+        resource_budget: null,
+      }),
+      pinnedCredentialMetadata: (_tx, _claim, name) => ({
+        id: agent.credential_id,
+        name,
+        platform: agent.effective_configuration.provider,
+        metadata: null,
+      }),
+      repositoryBindingIdsOf: () => [bindingId],
+      intentOf: () => ExecutionIntent.Implement,
+      repositoryPolicyOf: () => ({
+        binding_id: bindingId,
+        name: "repo",
+        address,
+        platform: RepositoryPlatform.GitHub,
+        ssh_credential: SSH_CREDENTIAL,
+        base_branch: "main",
+        project_prompt: null,
+        working_layer: WORKING_LAYER_ALL_ON,
+      }),
+      sshHostKeysOf: (tx, platform, received) =>
+        repository.sshHostKeysOf(tx, platform, received),
+      schedulerClaims: { agentSelectionsOf: () => [selection] },
+    },
+    {
+      declarationOf: (name: string) => getWorkerDeclaration(name) ?? null,
+      pinnedAgentView: () => ({
+        effective: agent.effective_configuration,
+        valid: true,
+        issues: [],
+      }),
+    },
+    {
+      identity: testHumanIdentity("ulrich", "Ulrich", "jti"),
+      context: background,
+      requestId: "request",
+      execution: claim,
+      commit: (fn) => store.transaction(fn),
+    },
+  );
+}
+
+test("setup answers the pinned host key line of each repository and no secret", async (t) => {
+  const answer = await repositorySetup(
+    t,
+    "git@github.com:kanthorlabs/kanthord.git",
+    true,
+  );
+  assert.deepEqual(answer.repositories[0]?.ssh_host_key, {
+    known_hosts: `github.com ${HOST_KEY}\n`,
+  });
+  const text = JSON.stringify(answer);
+  assert.equal(text.includes("PRIVATE KEY"), false);
+  assert.equal(text.includes(SSH_CREDENTIAL), false);
+});
+
+test("setup refuses an unpinned host and an alias host before any answer", async (t) => {
+  await assert.rejects(
+    repositorySetup(t, "git@github.com:kanthorlabs/kanthord.git", false),
+    (error) =>
+      error instanceof OperationError &&
+      error.code === HostKeyErrorCode.Unpinned,
+  );
+  await assert.rejects(
+    repositorySetup(t, "git@github:kanthorlabs/kanthord.git", true),
+    (error) =>
+      error instanceof OperationError &&
+      error.code === ProjectErrorCode.RepositoryAddressInvalid,
+  );
+  await assert.rejects(
+    repositorySetup(
+      t,
+      "git@kanthorlabs.github.com:kanthorlabs/kanthord.git",
+      true,
+    ),
+    (error) =>
+      error instanceof OperationError &&
+      error.code === ProjectErrorCode.RepositoryAddressInvalid,
+  );
+  await assert.rejects(
+    repositorySetup(t, "git@gitlab.com:kanthorlabs/kanthord.git", true),
+    (error) =>
+      error instanceof OperationError &&
+      error.code === ProjectErrorCode.RepositoryAddressInvalid,
+  );
 });

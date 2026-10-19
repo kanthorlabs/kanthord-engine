@@ -19,6 +19,8 @@ import {
   fauxToolCall,
   implementFixture,
 } from "./test-support.ts";
+import { sshAccessOf } from "./workspace.ts";
+import type { SshAccess } from "../../repository/contract.ts";
 
 const BINDINGS = ["api", "web"];
 const DEADLINE_MS = 20000;
@@ -59,6 +61,7 @@ test("a claim merges the base branch of each binding", async (t) => {
       "main",
       background,
       DEADLINE_MS,
+      sshAccessOf(h.input.sshAccess, checkout.binding_id),
     );
   assert.equal(await refreshAtClaim(h), RefreshResult.Merged);
   assert.equal(
@@ -97,6 +100,7 @@ test("the conflict instruction names the binding and the directory", async (t) =
     "main",
     background,
     DEADLINE_MS,
+    sshAccessOf(h.input.sshAccess, web.binding_id),
   );
   assert.equal(await refreshAtClaim(h), RefreshResult.Merged);
   assert.ok(
@@ -143,4 +147,25 @@ test("a failed verification on the merged heads resets every checkout", async (t
   assert.deepEqual([api.head, web.head], before);
   for (const checkout of h.checkouts)
     assert.equal(await headOf(checkout.directory), checkout.head);
+});
+
+test("the refresh fetches the base of each checkout with the SSH identity of its binding", async (t) => {
+  const { h } = await fixture(t);
+  const fetched: { directory: string; ssh: SshAccess }[] = [];
+  const fetchBase = h.input.transport.fetchBase;
+  h.input.transport = {
+    ...h.input.transport,
+    fetchBase: (directory, base, context, deadlineMs, ssh) => {
+      fetched.push({ directory, ssh });
+      return fetchBase(directory, base, context, deadlineMs, ssh);
+    },
+  };
+  assert.equal(await refreshBeforeRelease(h, async () => true), true);
+  assert.deepEqual(
+    fetched,
+    h.checkouts.map((checkout) => ({
+      directory: checkout.directory,
+      ssh: h.input.sshAccess.get(checkout.binding_id),
+    })),
+  );
 });

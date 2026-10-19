@@ -6,6 +6,7 @@ import {
 } from "../../kernel/context.ts";
 import { CodedError, Diagnostic } from "../../kernel/errors.ts";
 import type { ExecutionRecord } from "../../scheduler/contract.ts";
+import type { SshAccess } from "../../repository/contract.ts";
 import {
   runNativeExecution,
   type TranscriptSink,
@@ -15,6 +16,7 @@ import {
   type WorkspaceRoot,
   type RepositoryTransport,
   type ModelRuntimeFactory,
+  handedSshAccess,
 } from "../../worker/unit/index.ts";
 import { completed, HandoverRefused, takeHandover } from "./handover.ts";
 import { retryIndeterminate } from "./api.ts";
@@ -43,6 +45,7 @@ export async function hostExecution(
   assert.ok(input.claim.execution_id);
   assert.ok(input.clientSecret);
   let handover: Awaited<ReturnType<typeof takeHandover>> | undefined;
+  let sshAccess: Map<string, SshAccess> | undefined;
   let revoked = false;
   const context = new CancellationContext(
     input.context,
@@ -79,11 +82,13 @@ export async function hostExecution(
         context,
       ),
     );
+    sshAccess = handedSshAccess(handover.sshIdentities, setup.repositories);
     const result = await execute({
       ...input,
       setup,
       clients: input.api,
-      ...handover,
+      credentials: handover.credentials,
+      sshAccess,
       context,
       telemetry,
       hostTools: (workspace) => ({
@@ -153,6 +158,7 @@ export async function hostExecution(
       "worker: execution cannot progress.",
     );
   } finally {
+    sshAccess?.clear();
     handover?.credentials.discard();
     telemetry.close();
     context.cancel();

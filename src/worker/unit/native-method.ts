@@ -19,6 +19,7 @@ import {
   type RepositoryTransport,
   type HostTools,
 } from "../contract.ts";
+import type { SshAccess } from "../../repository/contract.ts";
 import { getWorkerDeclaration } from "../catalog.ts";
 import { WorkspaceKind, type WorkspaceRoot } from "./workspace.ts";
 import type {
@@ -43,6 +44,7 @@ export interface NativeExecutionInput {
     release(): Promise<void>;
   };
   transport: RepositoryTransport;
+  sshAccess: ReadonlyMap<string, SshAccess>;
   workspaces: WorkspaceRoot;
   hostHome: string;
   env: NodeJS.ProcessEnv;

@@ -12,6 +12,7 @@ import {
   fauxAssistantMessage,
   fauxToolCall,
   scriptedProvider,
+  TEST_SSH_ACCESS,
 } from "./test-support.ts";
 import { EndReason, ExecutionRun, ExecutionStop } from "./execution-run.ts";
 import {
@@ -370,7 +371,13 @@ const NODE_CONTENT = {
 test("the claim refresh merges a moved base branch without a conflict", async (t) => {
   const h = await fixture(t, [], []);
   await advanceBase(h, t, MAIN_ADDITION, "other");
-  await h.input.transport.fetchBase(h.root, "main", background, DEADLINE_MS);
+  await h.input.transport.fetchBase(
+    h.root,
+    "main",
+    background,
+    DEADLINE_MS,
+    TEST_SSH_ACCESS,
+  );
   assert.equal(await refreshAtClaim(h), RefreshResult.Merged);
   assert.equal(readFileSync(join(h.root, "other"), "utf8"), MAIN_ADDITION);
   const parents = await simpleGit(h.root).raw([
@@ -446,6 +453,7 @@ test("an attempt that continues a restart branch checks out that branch and merg
     restartBranch,
     background,
     DEADLINE_MS,
+    TEST_SSH_ACCESS,
   );
   await advanceBase(h, t, MAIN_ADDITION, "other");
   h.input.workspaces.release(
@@ -458,6 +466,7 @@ test("an attempt that continues a restart branch checks out that branch and merg
     pushed: new Set(),
     repositories: h.input.setup.repositories,
     transport: h.input.transport,
+    sshAccess: h.input.sshAccess,
     context: background,
     deadlineMs: DEADLINE_MS,
   });
@@ -492,7 +501,13 @@ test("the claim refresh lets the agent resolve a merge conflict and commits the 
   h.revision = { content: NODE_CONTENT, tasks: [] } as unknown as Revision;
   await commitOnNode(h.root, "node side");
   await advanceBase(h, t, "main side");
-  await h.input.transport.fetchBase(h.root, "main", background, DEADLINE_MS);
+  await h.input.transport.fetchBase(
+    h.root,
+    "main",
+    background,
+    DEADLINE_MS,
+    TEST_SSH_ACCESS,
+  );
   assert.equal(await refreshAtClaim(h), RefreshResult.Merged);
   assert.equal(readFileSync(join(h.root, "file"), "utf8"), RESOLVED);
   assert.ok(JSON.stringify(h.provider.calls[0]).includes("conflicts"));
@@ -509,7 +524,13 @@ test("the claim refresh aborts the merge and stops when a conflict marker remain
   await commitOnNode(h.root, "node side");
   const before = await simpleGit(h.root).revparse(["HEAD"]);
   await advanceBase(h, t, "main side");
-  await h.input.transport.fetchBase(h.root, "main", background, DEADLINE_MS);
+  await h.input.transport.fetchBase(
+    h.root,
+    "main",
+    background,
+    DEADLINE_MS,
+    TEST_SSH_ACCESS,
+  );
   await assert.rejects(refreshAtClaim(h), ExecutionStop);
   assert.equal(await simpleGit(h.root).revparse(["HEAD"]), before);
   assert.equal((await simpleGit(h.root).status()).isClean(), true);

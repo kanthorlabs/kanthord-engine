@@ -37,7 +37,6 @@ export function phaseSpan(phase: Phase): SpanStart {
 
 export const GitStep = {
   Commit: "commit",
-  SshProof: "ssh_proof",
   FetchBase: "fetch_base",
   MergeBase: "merge_base",
   Push: "push",

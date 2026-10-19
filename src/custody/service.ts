@@ -57,6 +57,8 @@ import {
   type GeneratedRevision,
   type GeneratedRotate,
   SshIdentitySubjectKind,
+  type HandoverSshIdentity,
+  type SshAccessOf,
   type SshIdentityAuthorization,
   type AgentProviderDependent,
   type BindingRevision,
@@ -83,6 +85,7 @@ import {
   consumeGrant,
   consumeWorkbenchGrant,
   FacilityError,
+  grantFacts,
   mintGrant,
   mintWorkbenchGrant,
   MaterialBuffer,
@@ -115,6 +118,7 @@ export interface Dependencies {
   inboundsNaming: InboundsNamingFn;
   intakeServiceName: string;
   sshIdentityAuthorization?: SshIdentityAuthorization;
+  sshAccessOf?: SshAccessOf;
 }
 
 const CustodyErrorCode = {
@@ -391,6 +395,7 @@ export class CustodyComponent implements Service, CredentialRecords {
   private readonly intakeServiceName: string;
   private readonly sshIdentityAuthorization:
     SshIdentityAuthorization | undefined;
+  private readonly sshAccessOf: SshAccessOf | undefined;
 
   constructor(dependencies: Dependencies) {
     this.executions = dependencies.executions;
@@ -406,6 +411,7 @@ export class CustodyComponent implements Service, CredentialRecords {
     this.inboundsNaming = dependencies.inboundsNaming;
     this.intakeServiceName = dependencies.intakeServiceName;
     this.sshIdentityAuthorization = dependencies.sshIdentityAuthorization;
+    this.sshAccessOf = dependencies.sshAccessOf;
     dependencies.health?.register(CUSTODY_HEALTH_NAME, () =>
       this.healthcheck(),
     );
@@ -742,23 +748,28 @@ export class CustodyComponent implements Service, CredentialRecords {
   handover(
     tx: Transaction,
     identity: MachineIdentity,
-    execution: { executionId: string; runtimeIdentity: string },
+    claim: ExecutionClaim,
+    repositoryBindingIds: readonly string[],
     now: number,
   ): HandoverEnvelope {
     const row = this.executions.requireRunning(
       tx,
-      execution.executionId,
-      execution.runtimeIdentity,
+      claim.executionId,
+      claim.runtimeIdentity,
       now,
     );
     const materials: Material[] = [];
     try {
       for (const grant of this.authorize(tx, identity, row))
         materials.push(this.release(tx, grant, now));
+      const sshIdentities = repositoryBindingIds.map((bindingId) =>
+        this.sshIdentityOf(tx, identity, claim, bindingId, now),
+      );
       const envelope = sealMaterial(
         this.clientSecret(identity.clientId),
         row,
         materials,
+        sshIdentities,
         this.platforms,
       );
       for (const material of materials)
@@ -770,10 +781,53 @@ export class CustodyComponent implements Service, CredentialRecords {
           },
           "credential handover",
         );
+      for (const { binding_id, credential_id } of sshIdentities)
+        this.logger.info(
+          {
+            execution_id: row.execution_id,
+            worker_binding_id: row.worker_binding_id,
+            binding_id,
+            credential_id,
+          },
+          "ssh identity handover",
+        );
       return envelope;
     } finally {
       for (const material of materials) material.drop();
     }
+  }
+
+  private sshIdentityOf(
+    tx: Transaction,
+    identity: MachineIdentity,
+    claim: ExecutionClaim,
+    bindingId: string,
+    now: number,
+  ): HandoverSshIdentity {
+    if (this.sshAccessOf === undefined) throw new FacilityError();
+    const grant = this.authorizeOperation(
+      tx,
+      {
+        kind: GrantKind.SshIdentity,
+        identity,
+        subject: {
+          kind: SshIdentitySubjectKind.Binding,
+          binding_id: bindingId,
+        },
+        claim,
+      },
+      now,
+    );
+    const granted = grantFacts(grant);
+    assert.equal(granted.facts.binding_id, bindingId);
+    const material = this.release(tx, grant, now);
+    const credentialId = material.credential_id;
+    const { private_key } = this.sshAccessOf(tx, granted, material);
+    return {
+      binding_id: bindingId,
+      credential_id: credentialId,
+      private_key,
+    };
   }
 
   report(

@@ -28,6 +28,10 @@ export function twoAgentDeclarationOf(name: string): WorkerDeclaration | null {
 }
 
 export const SETUP_PROMPT = "setup prompt";
+export const TEST_SSH_HOST_KEY = {
+  known_hosts:
+    "github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl\n",
+};
 export const WORKING_LAYER_ALL_ON = {
   agents_md: true,
   agents_local_md: true,

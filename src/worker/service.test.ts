@@ -89,6 +89,9 @@ const fakeCollaborations = {
   credentialMetadata: () => {
     throw new Error("UNEXPECTED_COLLABORATION");
   },
+  sshHostKeysOf: () => {
+    throw new Error("UNEXPECTED_COLLABORATION");
+  },
   missionActions: {
     authorizeRequest: () => {
       throw new Error("UNEXPECTED_COLLABORATION");
@@ -1274,12 +1277,26 @@ test("handover handlers pass the proven execution and one transactional clock re
   const envelope = { nonce: "nonce", ciphertext: "ciphertext" };
   const now = 1000;
   t.mock.method(Date, "now", () => now);
+  const repositoryBindingIds = [createIdentity("binding")];
   const f = enablementFixture(t, {
+    repositoryBindingIdsOf: (tx, nodeId, revision) => {
+      assert(tx.database.isTransaction);
+      assert.equal(nodeId, execution.nodeId);
+      assert.equal(revision, execution.pinnedRevision);
+      return repositoryBindingIds;
+    },
     custodyHandover: {
-      handover: (tx, actualIdentity, actualExecution, actualNow) => {
+      handover: (
+        tx,
+        actualIdentity,
+        actualExecution,
+        actualBindingIds,
+        actualNow,
+      ) => {
         assert(tx.database.isTransaction);
         assert.equal(actualIdentity, identity);
         assert.equal(actualExecution, execution);
+        assert.equal(actualBindingIds, repositoryBindingIds);
         assert.equal(actualNow, now);
         return envelope;
       },

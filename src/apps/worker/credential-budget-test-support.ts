@@ -43,19 +43,22 @@ try {
     EXECUTION_CREDENTIAL_MAX_BYTES,
   );
   let reportBytes: number | undefined;
-  const view = executionCredentialStore(payload, async (report) => {
-    const body = {
-      execution_id: options.executionId,
-      ...sealEnvelope(keys.report, aad, report),
-    };
-    reportBytes = Buffer.byteLength(JSON.stringify(body));
-    const result = await client.credential(
-      { params: {}, query: {}, body },
-      { idempotencyKey: ulid() },
-    );
-    assert.ok(result.type === OperationResultType.Completed);
-    assert.equal(result.data, null);
-  });
+  const view = executionCredentialStore(
+    { items: payload.items },
+    async (report) => {
+      const body = {
+        execution_id: options.executionId,
+        ...sealEnvelope(keys.report, aad, report),
+      };
+      reportBytes = Buffer.byteLength(JSON.stringify(body));
+      const result = await client.credential(
+        { params: {}, query: {}, body },
+        { idempotencyKey: ulid() },
+      );
+      assert.ok(result.type === OperationResultType.Completed);
+      assert.equal(result.data, null);
+    },
+  );
   try {
     await view.release();
     process.stdout.write(

@@ -7,7 +7,11 @@ import { createIdentity } from "../../kernel/identity.ts";
 import { background } from "../../kernel/context.ts";
 import type { Revision } from "../../mission/contract.ts";
 import { ExecutionRun, ExecutionStop } from "./execution-run.ts";
-import { anthropicSetup, repositorySetup } from "./test-support.ts";
+import {
+  anthropicSetup,
+  everyBindingSshAccess,
+  repositorySetup,
+} from "./test-support.ts";
 import { CHECKOUTS_DIRECTORY, WorkspaceRoot } from "./workspace.ts";
 import type { MethodClients } from "./method-clients.ts";
 import type { RepositoryTransport } from "../contract.ts";
@@ -118,6 +122,7 @@ test("examine reports its dependencies once and removes its workspace", async (t
         claim,
         workspaces,
         transport: {} as RepositoryTransport,
+        sshAccess: everyBindingSshAccess,
         env: hostEnvironment(),
       },
       run,
@@ -209,6 +214,7 @@ test("B4 examine releases when reads or agent opening consume the wall budget", 
           claim,
           workspaces,
           transport: {} as RepositoryTransport,
+          sshAccess: everyBindingSshAccess,
           env: hostEnvironment(),
         },
         run,
@@ -288,6 +294,7 @@ test("an examine node that its agent deadline cuts releases with further work an
         claim,
         workspaces,
         transport: {} as RepositoryTransport,
+        sshAccess: everyBindingSshAccess,
         env: hostEnvironment(),
       },
       run,
@@ -352,7 +359,6 @@ test("an examine node with two repository bindings runs from checkouts/ and list
   const key = workspaces.executionKey(claim.execution_id);
   const root = join(key, CHECKOUTS_DIRECTORY);
   const transport = {
-    proveSshIdentity: async () => {},
     cloneSnapshot: async () => "a".repeat(40),
   } as unknown as RepositoryTransport;
   const opened: { directory: string; checkouts: readonly string[] }[] = [];
@@ -374,6 +380,7 @@ test("an examine node with two repository bindings runs from checkouts/ and list
         claim,
         workspaces,
         transport,
+        sshAccess: everyBindingSshAccess,
         env: hostEnvironment(),
       },
       run,

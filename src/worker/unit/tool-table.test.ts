@@ -18,10 +18,7 @@ test("child environment removes provider keys and bash timeout stays below the b
     PATH: "/bin",
     SSH_AUTH_SOCK: "socket",
   };
-  assert.deepEqual(childEnvironment(env), {
-    PATH: "/bin",
-    SSH_AUTH_SOCK: "socket",
-  });
+  assert.deepEqual(childEnvironment(env), { PATH: "/bin" });
   const pi = await loadPi();
   let captured: BashToolOptions | undefined;
   let timeout: number | undefined;
@@ -65,7 +62,6 @@ test("child environment removes provider keys and bash timeout stays below the b
   assert.ok(timeout! <= maximumSeconds);
   assert.deepEqual(captured!.spawnHook!({ command: "true", cwd, env }).env, {
     PATH: "/bin",
-    SSH_AUTH_SOCK: "socket",
   });
   assert.equal(captured!.exposeSessionEnvironment, false);
   const ended = new ExecutionBudget({

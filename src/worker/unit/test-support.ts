@@ -21,14 +21,16 @@ import * as connector from "../../repository/connector.ts";
 import type { Revision, TaskContent } from "../../mission/contract.ts";
 import {
   anthropicSetup,
+  TEST_SSH_HOST_KEY,
   unusedHostTools,
   WORKING_LAYER_ALL_ON,
 } from "../test-support.ts";
+import type { SshAccess } from "../../repository/contract.ts";
 import {
   modelConnectorInput,
   type ModelRuntimeFactory,
 } from "./model-runtime.ts";
-import { ExecutionIntent } from "../contract.ts";
+import { ExecutionIntent, type RepositoryTransport } from "../contract.ts";
 import { ExecutionBudget } from "./budget.ts";
 import { openNativeAgent } from "./native-agent.ts";
 import { ExecutionRun } from "./execution-run.ts";
@@ -64,7 +66,55 @@ export function scriptedModelRuntime(
   };
 }
 
-export const transport = { ...connector, proveSshIdentity: async () => {} };
+export const transport: RepositoryTransport = {
+  clone: (address, directory, context, deadlineMs) =>
+    connector.clone(address, directory, context, deadlineMs),
+  fetchAndCheckout: (directory, branch, base, pushed, context, deadlineMs) =>
+    connector.fetchAndCheckout(
+      directory,
+      branch,
+      base,
+      pushed,
+      context,
+      deadlineMs,
+    ),
+  fetchBase: (directory, base, context, deadlineMs) =>
+    connector.fetchBase(directory, base, context, deadlineMs),
+  pushNodeBranch: (directory, branch, context, deadlineMs) =>
+    connector.pushNodeBranch(directory, branch, context, deadlineMs),
+  cloneSnapshot: (address, revision, directory, context, deadlineMs) =>
+    connector.cloneSnapshot(address, revision, directory, context, deadlineMs),
+};
+
+export const TEST_SSH_ACCESS: SshAccess = {
+  private_key: "test_private_key",
+  public_key: "ssh-ed25519 test_public_key",
+  known_hosts: TEST_SSH_HOST_KEY.known_hosts,
+};
+
+class EveryBindingSshAccess extends Map<string, SshAccess> {
+  override get(): SshAccess {
+    return TEST_SSH_ACCESS;
+  }
+}
+
+export const everyBindingSshAccess: ReadonlyMap<string, SshAccess> =
+  new EveryBindingSshAccess();
+
+export function testSshAccess(
+  repositories: readonly { binding_id: string }[],
+): Map<string, SshAccess> {
+  return new Map(
+    repositories.map(({ binding_id }) => [
+      binding_id,
+      {
+        private_key: `test_private_key_${binding_id}`,
+        public_key: `ssh-ed25519 test_${binding_id}`,
+        known_hosts: TEST_SSH_HOST_KEY.known_hosts,
+      },
+    ]),
+  );
+}
 
 const SECRET = "test_steps_key";
 export const NO_PROVIDER_CALLS = 0;
@@ -92,12 +142,7 @@ export const repositorySetup = () => ({
   binding_id: createIdentity("binding"),
   name: "repo",
   address: "git@github.com:owner/repo.git",
-  ssh_identity: {
-    host: "github.com",
-    hostname: "github.com",
-    port: 22,
-    identity_file: "~/.ssh/id_test",
-  },
+  ssh_host_key: TEST_SSH_HOST_KEY,
   strategy: { base_branch: "main" },
   project_prompt: null,
   working_layer: WORKING_LAYER_ALL_ON,
@@ -132,12 +177,7 @@ export async function implementFixture(
     binding_id: createIdentity("binding"),
     name,
     address: bares[index]!,
-    ssh_identity: {
-      host: "github.com",
-      hostname: "github.com",
-      port: 22,
-      identity_file: "~/.ssh/id_test",
-    },
+    ssh_host_key: TEST_SSH_HOST_KEY,
     strategy: { base_branch: "main" },
     project_prompt: null,
     working_layer: WORKING_LAYER_ALL_ON,
@@ -158,6 +198,7 @@ export async function implementFixture(
     setup,
     workspaces: WorkspaceRoot.open(state),
     transport,
+    sshAccess: testSshAccess(setup.repositories),
     env: hostEnvironment(),
   };
   const run = new ExecutionRun({
