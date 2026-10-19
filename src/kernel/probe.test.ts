@@ -161,7 +161,7 @@ test("probeHttp observes a network error as unreachable without the secret", asy
   assert.ok(!observed[0]![0].includes(SECRET));
 });
 
-test("probeHttp past its deadline observes unclassified, not unreachable", async (t) => {
+test("probeHttp past its deadline observes unclassified", async (t) => {
   const server = createServer(() => {});
   t.after(() => server.closeAllConnections());
   t.after(() => server.close());
@@ -177,7 +177,7 @@ test("probeHttp past its deadline observes unclassified, not unreachable", async
     ),
     ResourceStatus.Unknown,
   );
-  assert.ok(!observed.includes(ResourceFailureReason.Unreachable));
+  assert.deepEqual(observed, [ResourceFailureReason.Unclassified]);
 });
 
 test("redactReason removes secrets, bearer values, JWTs and long tokens and bounds the length", () => {

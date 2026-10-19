@@ -135,7 +135,7 @@ test("S3 names the failure reason of a status failure and a network error", asyn
   assert.ok(observed.every(([reason]) => !reason.includes(SECRET)));
 });
 
-test("S3 past its deadline observes no unreachable reason", async (t) => {
+test("S3 past its deadline observes no reason", async (t) => {
   const server = createServer(() => {});
   t.after(() => server.closeAllConnections());
   t.after(() => server.close());
@@ -155,7 +155,7 @@ test("S3 past its deadline observes no unreachable reason", async (t) => {
     ),
     ResourceStatus.Unknown,
   );
-  assert.ok(!observed.includes(ResourceFailureReason.Unreachable));
+  assert.deepEqual(observed, []);
 });
 
 test("S3 network, construction and cleanup errors remain unknown without leaking secrets", async (t) => {

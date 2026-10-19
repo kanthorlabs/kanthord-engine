@@ -525,7 +525,7 @@ async function silentServer(t: TestContext): Promise<string> {
   return `http://127.0.0.1:${port}`;
 }
 
-test("a model-list check past its deadline observes no unreachable reason", async (t) => {
+test("a model-list check past its deadline observes unclassified", async (t) => {
   const baseUrl = await silentServer(t);
   const observed: string[] = [];
   const answer = await checkOpenAICompatible(
@@ -535,10 +535,10 @@ test("a model-list check past its deadline observes no unreachable reason", asyn
     (_reason, failureReason) => void observed.push(failureReason),
   );
   assert.deepEqual(answer, UNREACHABLE);
-  assert.ok(!observed.includes(ResourceFailureReason.Unreachable));
+  assert.deepEqual(observed, [ResourceFailureReason.Unclassified]);
 });
 
-test("a model-call check past its deadline observes no unreachable reason", async () => {
+test("a model-call check past its deadline observes unclassified", async () => {
   const observed: string[] = [];
   const waiting: ModelCall = (_model, _context, options) =>
     new Promise((_resolve, reject) =>
@@ -553,7 +553,7 @@ test("a model-call check past its deadline observes no unreachable reason", asyn
     (_reason, failureReason) => void observed.push(failureReason),
   );
   assert.deepEqual(answer, UNREACHABLE);
-  assert.ok(!observed.includes(ResourceFailureReason.Unreachable));
+  assert.deepEqual(observed, [ResourceFailureReason.Unclassified]);
 });
 
 test("an expired OAuth access token answers unauthorized and observes unauthorized without a call", async () => {
