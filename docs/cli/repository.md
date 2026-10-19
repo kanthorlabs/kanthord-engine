@@ -317,7 +317,7 @@ The server derives `fingerprint` and `source` on read.
 
 The required `<host>` maps to `body.host`. The command writes nothing and takes no mutation key.
 The host must be a member of an SSH host set of a platform.
-For `github.com` and `ssh.github.com`, the server reads the `ssh-ed25519` entry of `ssh_keys` from `GET https://api.github.com/meta`.
+For `github.com` and `ssh.github.com`, the server reads the `ssh-ed25519` entry of `ssh_keys` from `GET https://api.github.com/meta`. Git operations reach `ssh.github.com` on port 443 and `github.com` on port 22.
 For every other host, the server runs `ssh-keyscan -T 5 -t ed25519 -p <port> -- <host>`. The port is 443 for `altssh.gitlab.com` and `altssh.bitbucket.org`, and 22 for every other host.
 The read has a 10 s deadline. HTTP `200` answers `{ host, public_key, fingerprint, source }`.
 

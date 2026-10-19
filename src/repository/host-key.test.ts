@@ -44,6 +44,7 @@ const GITHUB_META = {
 };
 const GITLAB = "gitlab.com";
 const GITHUB = "github.com";
+const SSH_GITHUB = "ssh.github.com";
 const ALTSSH_GITLAB = "altssh.gitlab.com";
 const ALTSSH_BITBUCKET = "altssh.bitbucket.org";
 const KEYSCAN_PREFIX = `# ${GITLAB}:22 SSH-2.0-OpenSSH_9.6\n`;
@@ -223,6 +224,10 @@ test("the keyscan arguments carry the port of the host", () => {
   assert.deepEqual(
     keyscanArguments(ALTSSH_BITBUCKET),
     argumentsOf("443", ALTSSH_BITBUCKET),
+  );
+  assert.deepEqual(
+    keyscanArguments(SSH_GITHUB),
+    argumentsOf("443", SSH_GITHUB),
   );
 });
 
@@ -407,6 +412,26 @@ test("an alternative SSH host pins under its name and reads its known-hosts line
   assert.deepEqual(
     (await f.list()).items.map((item) => item.host),
     [ALTSSH_BITBUCKET, ALTSSH_GITLAB, GITLAB],
+  );
+});
+
+test("ssh.github.com pins the GitHub meta key and reads its known-hosts line in the bracket form of port 443", async (t) => {
+  const f = fixture(t);
+  await f.pin(SSH_GITHUB, GITHUB_FINGERPRINT);
+  await f.pin(GITHUB, GITHUB_FINGERPRINT);
+  assert.equal(f.reads.meta, META_READ_PER_HOST * READ_PER_PIN);
+  assert.deepEqual(f.reads.keyscan, []);
+  assert.equal(
+    f.store.transaction((tx) => f.hostKeys.knownHostsLine(tx, SSH_GITHUB)),
+    `[${SSH_GITHUB}]:443 ${GITHUB_KEY}`,
+  );
+  assert.equal(
+    f.store.transaction((tx) => f.hostKeys.knownHostsLine(tx, GITHUB)),
+    `${GITHUB} ${GITHUB_KEY}`,
+  );
+  assert.deepEqual(
+    (await f.list()).items.map((item) => item.host),
+    [GITHUB, SSH_GITHUB],
   );
 });
 

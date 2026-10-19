@@ -11,6 +11,7 @@ const SSH_HOST_SETS: ReadonlyMap<string, ReadonlySet<string>> = new Map([
 const SSH_DEFAULT_PORT = 22;
 const SSH_ALTERNATIVE_PORT = 443;
 const SSH_HOST_PORTS: ReadonlyMap<string, number> = new Map([
+  ["ssh.github.com", SSH_ALTERNATIVE_PORT],
   ["altssh.gitlab.com", SSH_ALTERNATIVE_PORT],
   ["altssh.bitbucket.org", SSH_ALTERNATIVE_PORT],
 ]);
