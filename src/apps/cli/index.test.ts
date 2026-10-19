@@ -1768,7 +1768,7 @@ test("intake event mutations print the generated key when the result is indeterm
 });
 
 const LIVENESS_PATH = "/api/liveness";
-const ONE_REQUEST = 1;
+const LIVENESS_REQUESTS_PER_RUN = 1;
 const LIVENESS_HEALTHY = {
   status: "ok",
   services: { server: { store: 200, log: 200 } },
@@ -1787,9 +1787,10 @@ async function livenessServer(
   status: number,
   body: unknown,
   headers: IncomingHttpHeaders[],
+  path = LIVENESS_PATH,
 ): Promise<string> {
   const server = createServer((request, response) => {
-    assert.equal(request.url, LIVENESS_PATH);
+    assert.equal(request.url, path);
     headers.push(request.headers);
     request.resume();
     response.writeHead(status, { "Content-Type": "application/json" });
@@ -1811,7 +1812,7 @@ test("gateway liveness prints the answer and exits 0 on 200", async (t) => {
   assert.equal(result.status, ExitCode.Success, result.stderr);
   assert.equal(result.stderr, EMPTY_OUTPUT);
   assert.equal(result.stdout, `${JSON.stringify(LIVENESS_HEALTHY)}\n`);
-  assert.equal(headers.length, ONE_REQUEST);
+  assert.equal(headers.length, LIVENESS_REQUESTS_PER_RUN);
 });
 
 test("gateway liveness exits 1 on 503 and prints the code and details", async (t) => {
@@ -1846,20 +1847,28 @@ test("gateway liveness exits 1 with the indeterminate code on a refused connecti
 
 test("gateway liveness reads no token and sends no Authorization header", async (t) => {
   const directory = temporary(t);
-  const env = { ...environment(directory), KANTHORD_TOKEN: "secret-marker" };
   const headers: IncomingHttpHeaders[] = [];
-  const endpoint = await livenessServer(t, 200, LIVENESS_HEALTHY, headers);
-  const result = await invocation(
-    ["gateway", "liveness", "--endpoint", endpoint],
-    env,
+  const endpoint = await livenessServer(
+    t,
+    200,
+    LIVENESS_HEALTHY,
+    headers,
+    `${PREFIX_BASE_PATH}${LIVENESS_PATH}`,
   );
+  const env = {
+    ...environment(directory),
+    KANTHORD_ENDPOINT: `${endpoint}${PREFIX_BASE_PATH}`,
+    KANTHORD_TOKEN: "secret-marker",
+  };
+  writePrivate(clientConfigPath(env), stringify({ token: "secret-marker" }));
+  const result = await invocation(["gateway", "liveness"], env);
   assert.equal(result.status, ExitCode.Success, result.stderr);
-  assert.equal(headers.length, ONE_REQUEST);
+  assert.equal(headers.length, LIVENESS_REQUESTS_PER_RUN);
   assert.equal(headers[0]!.authorization, undefined);
   const rejected = await invocation(
     ["gateway", "liveness", "--endpoint", endpoint, "--token", "x"],
     env,
   );
   assert.equal(rejected.status, ExitCode.Failure);
-  assert.equal(headers.length, ONE_REQUEST);
+  assert.equal(headers.length, LIVENESS_REQUESTS_PER_RUN);
 });
