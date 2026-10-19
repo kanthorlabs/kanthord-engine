@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { createHash } from "node:crypto";
 import { promisify } from "node:util";
 import type { Logger } from "pino";
 import { ulid } from "ulid";
@@ -24,6 +23,7 @@ import {
   type HostKeyScanAnswer,
 } from "./contract.ts";
 import { isGitHubSshHost, isSshHost } from "./platform.ts";
+import { sshFingerprintOf } from "./ssh-key.ts";
 
 export interface HostKeySources {
   githubMeta(context: Context, deadlineMs: number): Promise<unknown>;
@@ -41,8 +41,6 @@ const LENGTH_BYTES = 4;
 const TYPE_LENGTH_OFFSET = 0;
 const ED25519_BLOB_BYTES =
   LENGTH_BYTES + ED25519_TYPE.length + LENGTH_BYTES + ED25519_KEY_BYTES;
-const BASE64_PADDING = /=+$/;
-const FINGERPRINT_PREFIX = "SHA256:";
 const HOST_KEY_PREFIX = "host_key";
 const HOST_KEY_READ_TIMEOUT_MS = 10_000;
 const KEYSCAN_TIMEOUT_SECONDS = "5";
@@ -154,15 +152,6 @@ export function parseKeyscan(host: string, stdout: string): string | null {
   return null;
 }
 
-export function fingerprintOf(publicKey: string): string {
-  const body = publicKey.split(" ")[1];
-  assert.ok(body);
-  const digest = createHash("sha256")
-    .update(Buffer.from(body, "base64"))
-    .digest("base64");
-  return `${FINGERPRINT_PREFIX}${digest.replace(BASE64_PADDING, "")}`;
-}
-
 function sourceOf(host: string): HostKeySource {
   return isGitHubSshHost(host)
     ? HostKeySource.GitHubMeta
@@ -201,7 +190,7 @@ function itemOf(row: HostKeyRow): HostKeyItem {
   return {
     host: row.host,
     public_key: row.public_key,
-    fingerprint: fingerprintOf(row.public_key),
+    fingerprint: sshFingerprintOf(row.public_key),
     source: sourceOf(row.host),
     created_at: row.created_at,
   };
@@ -211,6 +200,21 @@ function humanIdentity(caller: CallerContext): string | undefined {
   return caller.identity?.kind === IdentityKind.Human
     ? caller.identity.accountId
     : undefined;
+}
+
+export function knownHostsLine(tx: Transaction, host: string): string {
+  const name = host.toLowerCase();
+  const row = tx.database
+    .prepare("SELECT public_key FROM repository_host_key WHERE host = ?")
+    .get(name) as { public_key: string } | undefined;
+  if (row === undefined)
+    throw new OperationError(
+      HttpStatus.Conflict,
+      HostKeyErrorCode.Unpinned,
+      "The SSH host holds no pinned host key.",
+      { host: name },
+    );
+  return `${name} ${row.public_key}`;
 }
 
 export class RepositoryHostKeys {
@@ -286,7 +290,7 @@ export class RepositoryHostKeys {
     return {
       host: name,
       public_key: key,
-      fingerprint: fingerprintOf(key),
+      fingerprint: sshFingerprintOf(key),
       source,
     };
   }
@@ -310,18 +314,7 @@ export class RepositoryHostKeys {
   }
 
   knownHostsLine(tx: Transaction, host: string): string {
-    const name = host.toLowerCase();
-    const row = tx.database
-      .prepare("SELECT public_key FROM repository_host_key WHERE host = ?")
-      .get(name) as { public_key: string } | undefined;
-    if (row === undefined)
-      throw new OperationError(
-        HttpStatus.Conflict,
-        HostKeyErrorCode.Unpinned,
-        "The SSH host holds no pinned host key.",
-        { host: name },
-      );
-    return `${name} ${row.public_key}`;
+    return knownHostsLine(tx, host);
   }
 
   private replace(

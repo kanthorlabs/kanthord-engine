@@ -110,6 +110,7 @@ import { AGENT_COMPONENT_NAME } from "../../agent/contract.ts";
 import { loadPi } from "../../agent/pi.ts";
 import {
   RepositoryComponent,
+  checkServerRepositoryTools,
   RepositoryCredentials,
   RepositoryHostKeys,
   REPOSITORY_PLATFORMS,
@@ -203,7 +204,10 @@ export function composeServices(options: {
 }) {
   const repoConnector =
     options.repositoryConnector ??
-    new RepositoryComponent({ health: options.health });
+    new RepositoryComponent({
+      health: options.health,
+      checkTools: checkServerRepositoryTools,
+    });
   const github = new platformImplementations.github(options.github);
   const s3 = new storageImplementations.s3();
   const gitWriter: GitWriter =

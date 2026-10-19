@@ -15,7 +15,6 @@ import {
   repositoryOperations,
 } from "./contract.ts";
 import {
-  fingerprintOf,
   parseGitHubMeta,
   parseKeyscan,
   RepositoryHostKeys,
@@ -23,6 +22,7 @@ import {
 } from "./host-key.ts";
 import { repositoryMigrations } from "./migrations.ts";
 import { isGitHubSshHost, isSshHost } from "./platform.ts";
+import { sshFingerprintOf } from "./ssh-key.ts";
 
 const REPOSITORY_SERVICE = "repository";
 const GITHUB_KEY_BODY =
@@ -185,7 +185,7 @@ test("the keyscan parse skips the comment line and takes the ed25519 line of the
 });
 
 test("the fingerprint equals the output of ssh-keygen -l", () => {
-  assert.equal(fingerprintOf(GITHUB_KEY), GITHUB_FINGERPRINT);
+  assert.equal(sshFingerprintOf(GITHUB_KEY), GITHUB_FINGERPRINT);
   for (let index = 0; index < GENERATED_KEYS; index++) {
     const key = ed25519Key();
     const result = spawnSync("ssh-keygen", ["-l", "-f", "-"], {
@@ -193,7 +193,7 @@ test("the fingerprint equals the output of ssh-keygen -l", () => {
       encoding: "utf8",
     });
     assert.equal(result.status, EXIT_SUCCESS, result.stderr);
-    assert.equal(result.stdout.split(" ")[1], fingerprintOf(key));
+    assert.equal(result.stdout.split(" ")[1], sshFingerprintOf(key));
   }
 });
 
@@ -216,7 +216,7 @@ test("a scan of another host runs the keyscan seam with source keyscan", async (
   assert.deepEqual(answer, {
     host: GITLAB,
     public_key: f.keys.get(GITLAB),
-    fingerprint: fingerprintOf(f.keys.get(GITLAB)!),
+    fingerprint: sshFingerprintOf(f.keys.get(GITLAB)!),
     source: HostKeySource.Keyscan,
   });
   assert.deepEqual(f.reads.keyscan, [GITLAB]);
@@ -305,7 +305,7 @@ test("a pin whose second read answers another fingerprint answers changed", asyn
     assert.ok(fails(error, HttpStatus.Conflict, HostKeyErrorCode.Changed));
     assert.deepEqual((error as OperationError).details, {
       host: GITLAB,
-      fingerprint: fingerprintOf(rotated),
+      fingerprint: sshFingerprintOf(rotated),
     });
     return true;
   });
@@ -317,7 +317,7 @@ test("a pin replaces the row of its host and keeps one row", async (t) => {
   await f.pin(GITLAB, (await f.scan(GITLAB)).fingerprint);
   const next = ed25519Key();
   f.keys.set(GITLAB, next);
-  await f.pin(GITLAB, fingerprintOf(next));
+  await f.pin(GITLAB, sshFingerprintOf(next));
   const rows = f.store.database
     .prepare("SELECT id, host, public_key FROM repository_host_key")
     .all();

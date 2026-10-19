@@ -23,7 +23,11 @@ import {
   WorkPullKind,
   type ExecutionRecord,
 } from "../../scheduler/contract.ts";
-import { FAKE_SSH_CREDENTIAL_BODY, remoteHead } from "./test-support.ts";
+import {
+  createFakeSshCredential,
+  FAKE_SSH_CREDENTIAL,
+  remoteHead,
+} from "./test-support.ts";
 
 const EMPTY_ARGUMENT_COUNT = 0;
 const SUCCESS_EXIT_CODE = 0;
@@ -226,10 +230,7 @@ export async function createCredentials(
     metadata: null,
     secret: { key: secret },
   });
-  await session.write(
-    ["repository", "credential", "create"],
-    FAKE_SSH_CREDENTIAL_BODY,
-  );
+  await createFakeSshCredential(session.read);
 }
 
 export function repositoryBinding(
@@ -252,7 +253,7 @@ export function repositoryBinding(
           ...(landing ? { landing } : {}),
         },
       },
-      ssh_credential: FAKE_SSH_CREDENTIAL_BODY.name,
+      ssh_credential: FAKE_SSH_CREDENTIAL,
       credential: CREDENTIAL_NAME,
     },
   };

@@ -828,6 +828,7 @@ test("readFilesAtCommit reads the present files of a commit and answers null for
     MAX_BYTES,
     background,
     DEADLINE_MS,
+    undefined,
     scratch,
   );
   assert.deepEqual(files, [
@@ -853,6 +854,7 @@ async function readStates(t: TestContext, files: Record<string, SeedEntry>) {
     MAX_BYTES,
     background,
     DEADLINE_MS,
+    undefined,
     scratch,
   );
   return read.map(({ state, text }) => [state, text]);
@@ -980,6 +982,7 @@ async function tracedRead(t: TestContext, files: Record<string, SeedEntry>) {
       MAX_BYTES,
       background,
       DEADLINE_MS,
+      undefined,
       scratch,
     );
     const starts = readFileSync(events, "utf8")
@@ -1126,6 +1129,7 @@ test("readFilesAtCommit reads the named commit after the branch moved", async (t
     MAX_BYTES,
     background,
     DEADLINE_MS,
+    undefined,
     scratch,
   );
   assert.equal(files[FIRST_INDEX]?.text, FIRST_TEXT);
@@ -1143,6 +1147,7 @@ test("readFilesAtCommit deletes its directory when the read fails", async (t) =>
       MAX_BYTES,
       background,
       DEADLINE_MS,
+      undefined,
       scratch,
     ),
     { code: "repository.connector.git_failed" },
@@ -1155,6 +1160,7 @@ test("readFilesAtCommit deletes its directory when the read fails", async (t) =>
       MAX_BYTES,
       background,
       DEADLINE_MS,
+      undefined,
       scratch,
     ),
     { code: "repository.connector.git_failed" },
@@ -1173,6 +1179,7 @@ test("readFilesAtCommit rejects when the deadline elapsed and deletes its direct
       MAX_BYTES,
       background,
       EXPIRED_DEADLINE_MS - 1,
+      undefined,
       scratch,
     ),
     { code: "repository.connector.git_failed" },

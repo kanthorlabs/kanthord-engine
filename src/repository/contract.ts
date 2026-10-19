@@ -36,6 +36,10 @@ export const HostKeySource = {
 } as const;
 export type HostKeySource = (typeof HostKeySource)[keyof typeof HostKeySource];
 
+export const RepositoryErrorCode = {
+  SshKeyLegacy: "repository.credential.ssh_key_legacy",
+} as const;
+
 export const HostKeyErrorCode = {
   HostUnsupported: "repository.host_key.host_unsupported",
   ScanFailed: "repository.host_key.scan_failed",
@@ -126,6 +130,11 @@ const hostKeyPinBodySchema = z.strictObject({
   fingerprint: z.string().regex(HOST_KEY_FINGERPRINT_PATTERN),
 });
 const HOST_KEY_MAX_BODY_BYTES = 1024;
+const SSH_KEY_MAX_BODY_BYTES = 1024;
+const sshKeyCreateBodySchema = z.strictObject({ name: z.string() });
+const sshKeyRotateBodySchema = z.strictObject({
+  expected_revision: z.number().int().positive(),
+});
 
 export const repositoryOperations = {
   platform_list: {
@@ -167,7 +176,6 @@ export const repositoryOperations = {
       body: credentialCreateSchema,
     }),
     output: credentialAnswerSchema,
-    errors: [SSH_RESOLVE_FAILED_STATUS],
     description: "Create a repository credential with its first revision.",
   },
   list: {
@@ -231,7 +239,6 @@ export const repositoryOperations = {
       body: credentialRotateBodySchema,
     }),
     output: credentialAnswerSchema,
-    errors: [SSH_RESOLVE_FAILED_STATUS],
     description: "Rotate a repository credential secret into a new revision.",
   },
   update_metadata: {
@@ -253,7 +260,6 @@ export const repositoryOperations = {
       body: credentialUpdateMetadataBodySchema,
     }),
     output: credentialAnswerSchema,
-    errors: [SSH_RESOLVE_FAILED_STATUS],
     description: "Update repository credential metadata in a new revision.",
   },
   revoke: {
@@ -337,6 +343,50 @@ export const repositoryOperations = {
     }),
     output: credentialCheckAnswerSchema,
     description: "Verify one stored repository credential record.",
+  },
+  ssh_key_create: {
+    id: "repository.credential.ssh_key_create",
+    service: REPOSITORY_COMPONENT_NAME,
+    method: HttpMethod.Post,
+    path: "/api/repository/credential/ssh/key",
+    access: AccessPolicy.Human,
+    store: StoreName.Operational,
+    lifetime: OperationLifetime.Unary,
+    timeoutMs: CREDENTIAL_TIMEOUT_MS,
+    mutation: true,
+    body: true,
+    maxBodyBytes: SSH_KEY_MAX_BODY_BYTES,
+    status: HttpStatus.OK,
+    input: z.strictObject({
+      params: emptyParams,
+      query: emptyQuery,
+      body: sshKeyCreateBodySchema,
+    }),
+    output: credentialAnswerSchema,
+    description:
+      "Generate an ed25519 SSH key on the server and store it as a new ssh credential.",
+  },
+  ssh_key_rotate: {
+    id: "repository.credential.ssh_key_rotate",
+    service: REPOSITORY_COMPONENT_NAME,
+    method: HttpMethod.Post,
+    path: "/api/repository/credential/:credential_name/ssh/key",
+    access: AccessPolicy.Human,
+    store: StoreName.Operational,
+    lifetime: OperationLifetime.Unary,
+    timeoutMs: CREDENTIAL_TIMEOUT_MS,
+    mutation: true,
+    body: true,
+    maxBodyBytes: SSH_KEY_MAX_BODY_BYTES,
+    status: HttpStatus.OK,
+    input: z.strictObject({
+      params: credentialParamsSchema,
+      query: emptyQuery,
+      body: sshKeyRotateBodySchema,
+    }),
+    output: credentialAnswerSchema,
+    description:
+      "Generate a new SSH key on the server and store it as the next revision of an ssh credential.",
   },
   ssh_discover: {
     id: "repository.credential.ssh_discover",
