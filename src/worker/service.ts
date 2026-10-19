@@ -42,6 +42,7 @@ import {
   type IntentOf,
   type PinnedCredentialMetadataFn,
   type CredentialMetadataOf,
+  type SshHostKeysOf,
   type SchedulerClaims,
   type CustodyHandover,
   type MissionActions,
@@ -117,6 +118,7 @@ export interface Dependencies {
   intentOf: IntentOf;
   pinnedCredentialMetadata: PinnedCredentialMetadataFn;
   credentialMetadata: CredentialMetadataOf;
+  sshHostKeysOf: SshHostKeysOf;
   monotonicNow?: () => number;
   schedulerClaims: SchedulerClaims;
   agentConfiguration: AgentConfiguration;
@@ -629,6 +631,11 @@ export class WorkerService implements Service {
           tx,
           identity,
           execution,
+          this.dependencies.repositoryBindingIdsOf(
+            tx,
+            execution.nodeId,
+            execution.pinnedRevision,
+          ),
           Date.now(),
         ),
       );

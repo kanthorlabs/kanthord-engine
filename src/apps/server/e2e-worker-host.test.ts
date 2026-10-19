@@ -118,7 +118,6 @@ async function fixture(t: TestContext) {
   await git.clone(seed, bare, ["--bare"]);
   const connector = new RepositoryComponent();
   const transport: RepositoryTransport = {
-    proveSshIdentity: async () => {},
     clone: (_address, ...args) => connector.clone(bare, ...args),
     cloneSnapshot: (_address, ...args) =>
       connector.cloneSnapshot(bare, ...args),

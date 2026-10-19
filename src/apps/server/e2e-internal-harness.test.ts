@@ -32,6 +32,7 @@ import {
   fauxToolCall,
   scriptedModelRuntime,
   scriptedProvider,
+  TEST_SSH_ACCESS,
 } from "../../worker/unit/test-support.ts";
 import {
   AssetKind,
@@ -787,6 +788,7 @@ test("local mapped repository clones main and publishes only the node branch", a
     checkout,
     background,
     GIT_TIMEOUT_MS,
+    TEST_SSH_ACCESS,
   );
   assert.equal(
     (await simpleGit(checkout).revparse(["HEAD"])).trim(),
@@ -800,12 +802,14 @@ test("local mapped repository clones main and publishes only the node branch", a
     false,
     background,
     GIT_TIMEOUT_MS,
+    TEST_SSH_ACCESS,
   );
   await transport.pushNodeBranch(
     checkout,
     TEST_BRANCH,
     background,
     GIT_TIMEOUT_MS,
+    TEST_SSH_ACCESS,
   );
   assert.equal(
     await remoteHead(repo.bare, `refs/heads/${TEST_BRANCH}`),
@@ -814,7 +818,13 @@ test("local mapped repository clones main and publishes only the node branch", a
   assert.equal(await remoteHead(repo.bare, MAIN_REF), repo.head);
   assert.throws(
     () =>
-      transport.clone("test_unmapped", checkout, background, GIT_TIMEOUT_MS),
+      transport.clone(
+        "test_unmapped",
+        checkout,
+        background,
+        GIT_TIMEOUT_MS,
+        TEST_SSH_ACCESS,
+      ),
     assert.AssertionError,
   );
 });

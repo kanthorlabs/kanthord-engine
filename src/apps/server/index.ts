@@ -394,6 +394,8 @@ export function composeServices(options: {
       repositoryBindingIdsOf: (tx, nodeId, revision) =>
         mission.repositoryBindingIdsOf(tx, nodeId, revision),
     }),
+    sshAccessOf: (tx, granted, material) =>
+      repositoryComponent.sshAccessOf(tx, granted, material),
   });
   const llm = new LlmComponent({
     records: custody,
@@ -510,6 +512,8 @@ export function composeServices(options: {
     pinnedCredentialMetadata: (tx, execution, name, now) =>
       custody.pinnedCredentialMetadata(tx, execution, name, now),
     credentialMetadata: (tx, name) => custody.credentialMetadata(tx, name),
+    sshHostKeysOf: (tx, platform, address) =>
+      repositoryComponent.sshHostKeysOf(tx, platform, address),
     schedulerClaims: {
       requireRunning: (...args) => scheduler.requireRunning(...args),
       runningExecutionOfRuntime: (...args) =>

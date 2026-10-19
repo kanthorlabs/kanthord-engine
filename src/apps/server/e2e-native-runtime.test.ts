@@ -53,6 +53,7 @@ import {
   verificationPassed,
   discardChanges,
   headCommit,
+  handedSshAccess,
 } from "../../worker/unit/index.ts";
 import {
   fauxAssistantMessage,
@@ -62,7 +63,8 @@ import {
 } from "../../worker/unit/test-support.ts";
 import { environment, kanthord, kanthordTerminal } from "./cli-support.ts";
 import {
-  FAKE_SSH_CREDENTIAL_BODY,
+  FAKE_GITHUB_HOST_KEY,
+  FAKE_SSH_HOST,
   FAKE_SSH_IDENTITY,
   gatewayFixture,
   COVERING_WORKER_BINDINGS,
@@ -319,7 +321,6 @@ test(
     await git.clone(seed, bare, ["--bare"]);
     const connector = new RepositoryComponent();
     const transport: RepositoryTransport = {
-      proveSshIdentity: async () => {},
       clone: (_address, ...args) => connector.clone(bare, ...args),
       cloneSnapshot: (_address, ...args) =>
         connector.cloneSnapshot(bare, ...args),
@@ -365,7 +366,13 @@ test(
           body: null,
         }),
       );
-      return { setup, revision, credentials, item: payload.items[0]! };
+      return {
+        setup,
+        revision,
+        credentials,
+        item: payload.items[0]!,
+        sshAccess: handedSshAccess(payload.ssh_identities, setup.repositories),
+      };
     }
     const runtimeX = await handover(x);
     const runtimeY = await handover(y);
@@ -447,7 +454,9 @@ test(
         binding_id: repository.binding_id,
         name: "repo",
         address: ADDRESS,
-        ssh_identity: FAKE_SSH_CREDENTIAL_BODY.metadata,
+        ssh_host_key: {
+          known_hosts: `${FAKE_SSH_HOST} ${FAKE_GITHUB_HOST_KEY}\n`,
+        },
         strategy: { base_branch: "main" },
         project_prompt: PROJECT,
         working_layer: WORKING_LAYER_ALL_ON,
@@ -481,6 +490,7 @@ test(
         pushed: new Set(),
         repositories: [repository],
         transport,
+        sshAccess: runtimeX.sshAccess,
         context: background,
         deadlineMs: 10000,
       })
@@ -662,6 +672,7 @@ test(
         x.execution.node_branch,
         background,
         10000,
+        runtimeX.sshAccess.get(repository.binding_id)!,
       );
       assert.equal(
         (
@@ -686,6 +697,7 @@ test(
           pushed: new Set(),
           repositories: runtimeY.setup.repositories,
           transport,
+          sshAccess: runtimeY.sshAccess,
           context: background,
           deadlineMs: 10000,
         })

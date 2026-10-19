@@ -29,6 +29,7 @@ import {
   scriptedProvider,
   scriptedModelRuntime,
   repositorySetup,
+  everyBindingSshAccess,
 } from "./test-support.ts";
 import { WorkspaceRoot } from "./workspace.ts";
 import { noTranscript } from "./transcript.ts";
@@ -240,6 +241,7 @@ test("S1 native reviewer evaluates even when the attempt already contains an exp
       release: async () => {},
     },
     transport: {} as RepositoryTransport,
+    sshAccess: everyBindingSshAccess,
     workspaces: WorkspaceRoot.open(temporary(t)),
     hostHome: temporary(t),
     env: hostEnvironment(),
@@ -316,6 +318,7 @@ test("native entry runs an examine report with the scripted provider", async (t)
       release: async () => {},
     },
     transport: {} as RepositoryTransport,
+    sshAccess: everyBindingSshAccess,
     workspaces: WorkspaceRoot.open(temporary(t)),
     hostHome: temporary(t),
     env: hostEnvironment(),

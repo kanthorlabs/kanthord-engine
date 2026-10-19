@@ -114,6 +114,7 @@ async function prepareWorkspace(
   const common = {
     executionId: input.claim.execution_id,
     transport: input.transport,
+    sshAccess: input.sshAccess,
     context: run.operationContext,
     deadlineMs: deadline - Date.now(),
   };

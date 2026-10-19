@@ -33,6 +33,7 @@ import { proveSshPin } from "./credential-platform.ts";
 import { RepositoryErrorCode } from "./contract.ts";
 import { GitHubPlatform } from "./github.ts";
 import { knownHostsLine } from "./host-key.ts";
+import { isPlatformSshHost } from "./platform.ts";
 import type { SshAccess } from "./ssh-agent.ts";
 import { sshPublicKeyOf } from "./ssh-key.ts";
 import { ProjectErrorCode, RepositoryPlatform } from "../project/contract.ts";
@@ -83,14 +84,17 @@ const ADDRESS_HOST_PATTERN =
   /^git@([A-Za-z0-9][A-Za-z0-9.-]*):[^/\s:]+\/[^/\s:]+\.git$/;
 const LINE_END = "\n";
 
+function addressInvalid(): OperationError {
+  return new OperationError(
+    HttpStatus.BadRequest,
+    ProjectErrorCode.RepositoryAddressInvalid,
+    "Repository address must have the form git@<host>:<owner>/<repository>.git with an SSH host of its platform.",
+  );
+}
+
 export function pinnedKnownHosts(tx: Transaction, address: string): string {
   const host = ADDRESS_HOST_PATTERN.exec(address)?.[1];
-  if (host === undefined)
-    throw new OperationError(
-      HttpStatus.BadRequest,
-      ProjectErrorCode.RepositoryAddressInvalid,
-      "Repository address must have the form git@<host>:<owner>/<repository>.git.",
-    );
+  if (host === undefined) throw addressInvalid();
   return `${knownHostsLine(tx, host)}${LINE_END}`;
 }
 
@@ -146,6 +150,21 @@ export class RepositoryComponent implements GitWriter {
     } finally {
       material.drop();
     }
+  }
+
+  static handedSshAccess(private_key: string, known_hosts: string): SshAccess {
+    return {
+      private_key,
+      public_key: sshPublicKeyOf(private_key),
+      known_hosts,
+    };
+  }
+
+  sshHostKeysOf(tx: Transaction, platform: string, address: string): string {
+    const host = ADDRESS_HOST_PATTERN.exec(address)?.[1];
+    if (host === undefined || !isPlatformSshHost(platform, host))
+      throw addressInvalid();
+    return this.knownHostsOf(tx, address);
   }
 
   async healthcheck(context: Context = background): Promise<Healthcheck> {

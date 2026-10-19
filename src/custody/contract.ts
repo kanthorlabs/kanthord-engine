@@ -63,7 +63,7 @@ export const piCredentialSchema = z
       EXECUTION_CREDENTIAL_MAX_BYTES
     );
   }, "The normalized credential must contain well-formed Unicode and fit the serialized byte budget.");
-export const handoverPayloadSchema = z.strictObject({
+export const handoverItemsSchema = z.strictObject({
   items: z.array(
     z.strictObject({
       credential_id: identitySchema("credential"),
@@ -77,7 +77,7 @@ export const refreshReportSchema = z.strictObject({
   digest: z.string().regex(SHA256_HEX_PATTERN),
   credential: piCredentialSchema,
 });
-export type HandoverPayload = z.infer<typeof handoverPayloadSchema>;
+export type HandoverItems = z.infer<typeof handoverItemsSchema>;
 export type RefreshReport = z.infer<typeof refreshReportSchema>;
 
 export type CustodyExecution = {
@@ -291,6 +291,11 @@ export type SshIdentityFacts = {
   binding_id: string | null;
   address: string;
 };
+export type SshAccessOf = (
+  tx: Transaction,
+  granted: GrantFacts<GrantOf<typeof GrantKind.SshIdentity>>,
+  material: Material,
+) => { private_key: string };
 export interface SshIdentityAuthorization {
   sshIdentity(
     tx: Transaction,
@@ -477,6 +482,17 @@ export const sshKeySecretSchema = z.strictObject({
       );
     }),
 });
+export const handoverPayloadSchema = handoverItemsSchema.extend({
+  ssh_identities: z.array(
+    z.strictObject({
+      binding_id: identitySchema("binding"),
+      credential_id: identitySchema("credential"),
+      private_key: sshKeySecretSchema.shape.private_key,
+    }),
+  ),
+});
+export type HandoverPayload = z.infer<typeof handoverPayloadSchema>;
+export type HandoverSshIdentity = HandoverPayload["ssh_identities"][number];
 export const secretSchemas: Readonly<Record<SecretShape, z.ZodType>> = {
   [SecretShape.ApiKey]: apiKeySecretSchema,
   [SecretShape.OAuth]: oauthSecretSchema,

@@ -44,6 +44,7 @@ import {
   WorkspaceRoot,
   runNativeExecution,
   noTranscript,
+  handedSshAccess,
 } from "../../worker/unit/index.ts";
 import {
   fauxAssistantMessage,
@@ -344,7 +345,6 @@ async function methodsFixture(t: TestContext) {
   }
   const connector = new RepositoryComponent();
   const transport: RepositoryTransport = {
-    proveSshIdentity: async () => {},
     clone: async (address, ...args) => {
       await connector.clone(barePaths.get(address)!, ...args);
       await simpleGit(args[0]).addConfig("user.name", "Methods Test");
@@ -434,6 +434,7 @@ async function methodsFixture(t: TestContext) {
           release: () => credentials.release(),
         },
         transport,
+        sshAccess: handedSshAccess(payload.ssh_identities, setup.repositories),
         workspaces,
         hostHome: temporary(t),
         env: hostEnvironment(),

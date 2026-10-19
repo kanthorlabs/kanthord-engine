@@ -11,10 +11,12 @@ import {
   StoreName,
   OperationLifetime,
   emptyInput,
+  type ExecutionClaim,
   type Operation,
   type ClientOptions,
   type OperationResult,
 } from "../kernel/operation.ts";
+import type { SshAccess } from "../repository/contract.ts";
 import type { Transaction } from "../kernel/store.ts";
 import { HttpMethod, HttpStatus } from "../kernel/http.ts";
 import {
@@ -337,7 +339,8 @@ export interface CustodyHandover {
   handover(
     tx: Transaction,
     identity: MachineIdentity,
-    execution: { executionId: string; runtimeIdentity: string },
+    claim: ExecutionClaim,
+    repositoryBindingIds: readonly string[],
     now: number,
   ): HandoverEnvelope;
   report(
@@ -410,6 +413,7 @@ export type RepositoryPolicyOf = (
   binding_id: string;
   name: string;
   address: string;
+  platform: string;
   ssh_credential: string;
   base_branch: string;
   project_prompt: string | null;
@@ -674,16 +678,12 @@ export const SetupRefusal = {
   CredentialRevisionMismatch: "credential_revision_mismatch",
 } as const;
 export interface RepositoryTransport {
-  proveSshIdentity(
-    pin: SshIdentityPin,
-    context: Context,
-    deadlineMs: number,
-  ): Promise<void>;
   clone(
     address: string,
     directory: string,
     context: Context,
     deadlineMs: number,
+    ssh: SshAccess,
   ): Promise<void>;
   fetchAndCheckout(
     directory: string,
@@ -692,18 +692,21 @@ export interface RepositoryTransport {
     pushed: boolean,
     context: Context,
     deadlineMs: number,
+    ssh: SshAccess,
   ): Promise<string>;
   fetchBase(
     directory: string,
     baseBranch: string,
     context: Context,
     deadlineMs: number,
+    ssh: SshAccess,
   ): Promise<string>;
   pushNodeBranch(
     directory: string,
     branch: string,
     context: Context,
     deadlineMs: number,
+    ssh: SshAccess,
   ): Promise<void>;
   cloneSnapshot(
     address: string,
@@ -711,6 +714,7 @@ export interface RepositoryTransport {
     directory: string,
     context: Context,
     deadlineMs: number,
+    ssh: SshAccess,
   ): Promise<string>;
 }
 export type ExecutionSetup = z.infer<typeof executionSetupSchema>;
@@ -732,13 +736,14 @@ export const workingLayerSchema = z.strictObject({
   project_prompt: z.boolean(),
 });
 export type WorkingLayer = z.infer<typeof workingLayerSchema>;
-export const sshIdentitySchema = z.strictObject({
-  host: z.string().min(1),
-  hostname: z.string().min(1),
-  port: z.number().int().positive(),
-  identity_file: z.string().min(1),
+export const sshHostKeySchema = z.strictObject({
+  known_hosts: z.string().min(1),
 });
-export type SshIdentityPin = z.infer<typeof sshIdentitySchema>;
+export type SshHostKeysOf = (
+  tx: Transaction,
+  platform: string,
+  address: string,
+) => string;
 export type CredentialMetadataOf = (
   tx: Transaction,
   credentialName: string,
@@ -765,7 +770,7 @@ export const executionSetupSchema = z.strictObject({
       binding_id: identitySchema("binding"),
       name: z.string(),
       address: z.string(),
-      ssh_identity: sshIdentitySchema,
+      ssh_host_key: sshHostKeySchema,
       strategy: z.strictObject({ base_branch: z.string() }),
       project_prompt: z.string().nullable(),
       working_layer: workingLayerSchema,

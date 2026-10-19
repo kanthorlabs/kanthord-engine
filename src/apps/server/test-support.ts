@@ -1403,13 +1403,29 @@ export function mappedTransport(
     return addresses[address]!;
   }
   return {
-    proveSshIdentity: async () => {},
-    clone: (address, ...args) => connector.clone(mapped(address), ...args),
-    cloneSnapshot: (address, ...args) =>
-      connector.cloneSnapshot(mapped(address), ...args),
-    fetchAndCheckout: (...args) => connector.fetchAndCheckout(...args),
-    fetchBase: (...args) => connector.fetchBase(...args),
-    pushNodeBranch: (...args) => connector.pushNodeBranch(...args),
+    clone: (address, directory, context, deadlineMs) =>
+      connector.clone(mapped(address), directory, context, deadlineMs),
+    cloneSnapshot: (address, revision, directory, context, deadlineMs) =>
+      connector.cloneSnapshot(
+        mapped(address),
+        revision,
+        directory,
+        context,
+        deadlineMs,
+      ),
+    fetchAndCheckout: (directory, branch, base, pushed, context, deadlineMs) =>
+      connector.fetchAndCheckout(
+        directory,
+        branch,
+        base,
+        pushed,
+        context,
+        deadlineMs,
+      ),
+    fetchBase: (directory, base, context, deadlineMs) =>
+      connector.fetchBase(directory, base, context, deadlineMs),
+    pushNodeBranch: (directory, branch, context, deadlineMs) =>
+      connector.pushNodeBranch(directory, branch, context, deadlineMs),
     mergePushFresh: (input, ...args) =>
       connector.mergePushFresh(
         { ...input, address: mapped(input.address) },
