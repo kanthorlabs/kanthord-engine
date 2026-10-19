@@ -1,9 +1,12 @@
 import assert from "node:assert/strict";
-import { test } from "node:test";
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
+import { test, type TestContext } from "node:test";
 import { background, CancellationContext } from "../kernel/context.ts";
 import { ResourceFailureReason, ResourceStatus } from "../kernel/health.ts";
 import { HttpMethod, HttpStatus } from "../kernel/http.ts";
 import { AUTHORIZATION_HEADER } from "../kernel/probe.ts";
+import { ValueType } from "../kernel/values.ts";
 import { Connection, type ProviderCheckAnswer } from "./contract.ts";
 import {
   CAPABILITY_COPILOT_TOKEN_READ,
@@ -84,6 +87,7 @@ const PROVIDER_MODELS = [
   { id: "beta", owned_by: null, created: null },
 ];
 const UNREACHABLE = { connection: Connection.Unreachable, models: null };
+const UNAUTHORIZED = { connection: Connection.Unauthorized, models: null };
 
 const httpChecks: {
   name: string;
@@ -99,8 +103,7 @@ const httpChecks: {
     url: GITHUB_COPILOT_TOKEN_URL,
     headers: COPILOT_HEADERS,
     readsModels: false,
-    check: (context) =>
-      checkGitHubCopilot(REFRESH_SECRET, Date.now() + FUTURE_MS, context),
+    check: (context) => checkGitHubCopilot(REFRESH_SECRET, context),
   },
   {
     name: Platform.Anthropic,
@@ -366,7 +369,7 @@ test("openai-codex check sends one model call to its constant model and maps the
   assert.equal(options.reasoning, OPENAI_CODEX_CHECK_REASONING);
   assert.equal(Object.hasOwn(options, "apiKey"), false);
   assert.equal(Object.hasOwn(options, "transport"), false);
-  assert.equal(Object.hasOwn(options, "onResponse"), false);
+  assert.equal(typeof options.onResponse, ValueType.Function);
   assert.deepEqual(stored, {
     type: "oauth",
     refresh: REFRESH,
@@ -425,8 +428,8 @@ test("openai-codex check reports a reason without token material", async () => {
   );
   assert.equal(reasons.length, REASON_COUNT);
   assert.deepEqual(failureReasons, [
-    ResourceFailureReason.Unclassified,
-    ResourceFailureReason.Unclassified,
+    ResourceFailureReason.Unauthorized,
+    ResourceFailureReason.Unreachable,
   ]);
   assert.match(reasons[0]!, /^stopReason=error errorMessage=401: denied/);
   assert.match(reasons[1]!, /^Error: failed with/);
@@ -439,16 +442,19 @@ test("openai-codex check reports a reason without token material", async () => {
   }
 });
 
-test("a model-list check observes an HTTP refusal, a malformed list and a network error as unclassified", async (t) => {
+test("a model-list check names the failure reason of a refusal, a malformed list and a network error", async (t) => {
   const observed: Array<[string, string]> = [];
   const observe = (reason: string, failureReason: string) =>
     void observed.push([reason, failureReason]);
-  const fetch = t.mock.method(
-    globalThis,
-    "fetch",
-    async () => new Response(null, { status: HttpStatus.Unauthorized }),
-  );
-  await checkOpenAI(SECRET, background, observe);
+  const fetch = t.mock.method(globalThis, "fetch", async () => new Response());
+  for (const status of [
+    HttpStatus.Unauthorized,
+    HttpStatus.Forbidden,
+    HttpStatus.TooManyRequests,
+  ]) {
+    fetch.mock.mockImplementation(async () => new Response(null, { status }));
+    await checkOpenAI(SECRET, background, observe);
+  }
   fetch.mock.mockImplementation(async () => Response.json({ data: SECRET }));
   await checkOpenAI(SECRET, background, observe);
   fetch.mock.mockImplementation(async () => {
@@ -458,17 +464,128 @@ test("a model-list check observes an HTTP refusal, a malformed list and a networ
   assert.deepEqual(
     observed.map(([, failureReason]) => failureReason),
     [
-      ResourceFailureReason.Unclassified,
-      ResourceFailureReason.Unclassified,
-      ResourceFailureReason.Unclassified,
+      ResourceFailureReason.Unauthorized,
+      ResourceFailureReason.Forbidden,
+      ResourceFailureReason.RateLimited,
+      ResourceFailureReason.InvalidResponse,
+      ResourceFailureReason.Unreachable,
     ],
   );
   assert.equal(observed[0]![0], `status=${HttpStatus.Unauthorized}`);
-  assert.equal(observed[1]![0], MALFORMED_LIST_REASON);
+  assert.equal(observed[3]![0], MALFORMED_LIST_REASON);
   assert.ok(observed.every(([reason]) => !reason.includes(SECRET)));
 });
 
-test("openai-codex check answers unreachable without a call for an expired token or a cancelled context", async (t) => {
+const answered =
+  (status: number, errorMessage: string): ModelCall =>
+  async (model, modelContext, options, store) => {
+    await options.onResponse?.({ status, headers: {} }, model);
+    return reply("error", errorMessage)(model, modelContext, options, store);
+  };
+
+test("a model-call check names the failure reason of the response status before the error message", async () => {
+  const observed: string[] = [];
+  const observe = (_reason: string, failureReason: string) =>
+    void observed.push(failureReason);
+  const future = Date.now() + FUTURE_MS;
+  const calls: ModelCall[] = [
+    answered(
+      HttpStatus.Unauthorized,
+      "Your authentication token has been invalidated.",
+    ),
+    answered(
+      HttpStatus.TooManyRequests,
+      "You have hit your ChatGPT usage limit.",
+    ),
+    answered(HttpStatus.OK, "stream ended before completion"),
+    reply("error", '403: {"error":"denied"}'),
+    reply("error", "connect ECONNREFUSED 127.0.0.1:443 "),
+    reply("error", "no status"),
+  ];
+  for (const call of calls)
+    await checkOpenAICodex(credentialOf(future), background, call, observe);
+  assert.deepEqual(observed, [
+    ResourceFailureReason.Unauthorized,
+    ResourceFailureReason.RateLimited,
+    ResourceFailureReason.Unreachable,
+    ResourceFailureReason.Forbidden,
+    ResourceFailureReason.Unreachable,
+    ResourceFailureReason.Unreachable,
+  ]);
+});
+
+const DEADLINE_MS = 50;
+
+async function silentServer(t: TestContext): Promise<string> {
+  const server = createServer(() => {});
+  t.after(() => server.closeAllConnections());
+  t.after(() => server.close());
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const { port } = server.address() as AddressInfo;
+  return `http://127.0.0.1:${port}`;
+}
+
+test("a model-list check past its deadline observes unclassified", async (t) => {
+  const baseUrl = await silentServer(t);
+  const observed: string[] = [];
+  const answer = await checkOpenAICompatible(
+    SECRET,
+    baseUrl,
+    new CancellationContext(background, Date.now() + DEADLINE_MS),
+    (_reason, failureReason) => void observed.push(failureReason),
+  );
+  assert.deepEqual(answer, UNREACHABLE);
+  assert.deepEqual(observed, [ResourceFailureReason.Unclassified]);
+});
+
+test("a model-call check past its deadline observes unclassified", async () => {
+  const observed: string[] = [];
+  const waiting: ModelCall = (_model, _context, options) =>
+    new Promise((_resolve, reject) =>
+      options.signal?.addEventListener("abort", () =>
+        reject(new DOMException("aborted", "AbortError")),
+      ),
+    );
+  const answer = await checkOpenAICodex(
+    credentialOf(Date.now() + FUTURE_MS),
+    new CancellationContext(background, Date.now() + DEADLINE_MS),
+    waiting,
+    (_reason, failureReason) => void observed.push(failureReason),
+  );
+  assert.deepEqual(answer, UNREACHABLE);
+  assert.deepEqual(observed, [ResourceFailureReason.Unclassified]);
+});
+
+test("an expired OAuth access token answers unauthorized and observes unauthorized without a call", async () => {
+  const observed: string[] = [];
+  const observe = (_reason: string, failureReason: string) =>
+    void observed.push(failureReason);
+  const expired = credentialOf(Date.now() - FUTURE_MS);
+  assert.deepEqual(
+    await checkOpenAICodex(expired, background, reply("stop"), observe),
+    UNAUTHORIZED,
+  );
+  assert.deepEqual(
+    await checkAnthropicSubscription(
+      expired,
+      background,
+      reply("stop"),
+      observe,
+    ),
+    UNAUTHORIZED,
+  );
+  for (const platform of [Platform.OpenAICodex, Platform.AnthropicSubscription])
+    assert.equal(
+      await LLM_PLATFORMS[platform].probe?.(expired, null, background),
+      ResourceStatus.Unhealthy,
+    );
+  assert.deepEqual(observed, [
+    ResourceFailureReason.Unauthorized,
+    ResourceFailureReason.Unauthorized,
+  ]);
+});
+
+test("openai-codex check answers unauthorized for an expired token and unreachable for a cancelled context without a call", async (t) => {
   const fetch = t.mock.method(globalThis, "fetch", async () => {
     throw new Error("unexpected request");
   });
@@ -483,7 +600,7 @@ test("openai-codex check answers unreachable without a call for an expired token
       background,
       counting,
     ),
-    UNREACHABLE,
+    UNAUTHORIZED,
   );
   const cancelled = new CancellationContext();
   cancelled.cancel();
@@ -573,7 +690,7 @@ test("anthropic-subscription check sends one model call to its constant model un
   assert.equal(fetch.mock.callCount(), NO_CALLS);
 });
 
-test("anthropic-subscription check answers unreachable without a call for an expired token or a cancelled context", async (t) => {
+test("anthropic-subscription check answers unauthorized for an expired token and unreachable for a cancelled context without a call", async (t) => {
   const fetch = t.mock.method(globalThis, "fetch", async () => {
     throw new Error("unexpected request");
   });
@@ -588,7 +705,7 @@ test("anthropic-subscription check answers unreachable without a call for an exp
       background,
       counting,
     ),
-    UNREACHABLE,
+    UNAUTHORIZED,
   );
   const cancelled = new CancellationContext();
   cancelled.cancel();
@@ -614,7 +731,7 @@ test("the anthropic-subscription provider check routes the stored OAuth credenti
       null,
       background,
     ),
-    UNREACHABLE,
+    UNAUTHORIZED,
   );
   assert.equal(fetch.mock.callCount(), NO_CALLS);
 });
@@ -716,19 +833,19 @@ test("the opencode-go provider check routes the stored API key", async (t) => {
   assert.equal(fetch.mock.callCount(), NO_CALLS);
 });
 
-test("Copilot tokens at or before expiry answer unreachable without a request", async (t) => {
-  const now = Date.now();
-  t.mock.method(Date, "now", () => now);
-  const fetch = t.mock.method(globalThis, "fetch", async () => {
-    throw new Error("unexpected request");
+test("a Copilot check sends the request whatever the stored expiry", async (t) => {
+  const fetch = t.mock.method(globalThis, "fetch", async () => new Response());
+  assert.deepEqual(await checkGitHubCopilot(SECRET, background), {
+    connection: Connection.Ok,
+    models: null,
   });
   assert.deepEqual(
-    await checkGitHubCopilot(SECRET, now, background),
-    UNREACHABLE,
+    await LLM_PROVIDERS[Platform.GitHubCopilot]!.check(
+      { refresh: SECRET, access: SECRET, expires: Date.now() - FUTURE_MS },
+      null,
+      background,
+    ),
+    { connection: Connection.Ok, models: null },
   );
-  assert.deepEqual(
-    await checkGitHubCopilot(SECRET, now - FUTURE_MS, background),
-    UNREACHABLE,
-  );
-  assert.equal(fetch.mock.callCount(), NO_CALLS);
+  assert.equal(fetch.mock.callCount(), TWO_CALLS);
 });

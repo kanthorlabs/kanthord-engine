@@ -323,12 +323,12 @@ test("check answers healthy, unhealthy and unknown for github without a row, a l
     [
       HttpStatus.Unauthorized,
       ResourceStatus.Unhealthy,
-      ResourceFailureReason.Unclassified,
+      ResourceFailureReason.Unauthorized,
     ],
     [
       HttpStatus.Forbidden,
       ResourceStatus.Unknown,
-      ResourceFailureReason.Unclassified,
+      ResourceFailureReason.Forbidden,
     ],
   ] as const;
   const requests: unknown[] = [];
@@ -377,7 +377,7 @@ test("check answers unknown when the request fails", async (t) => {
     {
       status: ResourceStatus.Unknown,
       capability: CAPABILITY_RATE_LIMIT_READ,
-      failure_reason: ResourceFailureReason.Unclassified,
+      failure_reason: ResourceFailureReason.Unreachable,
     },
   );
 });
@@ -486,12 +486,12 @@ test("verify answers healthy, unhealthy and unknown like the health report witho
     [
       HttpStatus.Unauthorized,
       ResourceStatus.Unhealthy,
-      ResourceFailureReason.Unclassified,
+      ResourceFailureReason.Unauthorized,
     ],
     [
       HttpStatus.Forbidden,
       ResourceStatus.Unknown,
-      ResourceFailureReason.Unclassified,
+      ResourceFailureReason.Forbidden,
     ],
   ] as const;
   const requests: unknown[] = [];
@@ -548,7 +548,7 @@ test("verify answers unknown when the request fails and logs no token", async (t
     {
       status: ResourceStatus.Unknown,
       capability: CAPABILITY_RATE_LIMIT_READ,
-      failure_reason: ResourceFailureReason.Unclassified,
+      failure_reason: ResourceFailureReason.Unreachable,
     },
   );
   assert.ok(!lines.join("").includes(SECRET));

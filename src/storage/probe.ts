@@ -11,8 +11,8 @@ import {
   type ResourceStatusValue,
 } from "../kernel/health.ts";
 import { HttpStatus } from "../kernel/http.ts";
-import { thrownReason } from "../kernel/probe.ts";
-import { isObject } from "../kernel/values.ts";
+import { failureReasonOfStatus, thrownReason } from "../kernel/probe.ts";
+import { isNumber, isObject } from "../kernel/values.ts";
 
 type BucketClient = {
   send(
@@ -29,18 +29,20 @@ function bucketStatus(
   observe?: ResourceObserver,
 ): ResourceStatusValue {
   if (!isObject(value) || !("$metadata" in value)) {
-    observe?.(thrownReason(value, secrets), ResourceFailureReason.Unclassified);
+    observe?.(thrownReason(value, secrets), ResourceFailureReason.Unreachable);
     return ResourceStatus.Unknown;
   }
   const metadata = value.$metadata;
   if (!isObject(metadata) || !("httpStatusCode" in metadata)) {
-    observe?.(thrownReason(value, secrets), ResourceFailureReason.Unclassified);
+    observe?.(thrownReason(value, secrets), ResourceFailureReason.Unreachable);
     return ResourceStatus.Unknown;
   }
   if (metadata.httpStatusCode === HttpStatus.OK) return ResourceStatus.Healthy;
   observe?.(
     `status=${String(metadata.httpStatusCode)}`,
-    ResourceFailureReason.Unclassified,
+    isNumber(metadata.httpStatusCode)
+      ? failureReasonOfStatus(metadata.httpStatusCode)
+      : ResourceFailureReason.Unreachable,
   );
   if (metadata.httpStatusCode === HttpStatus.NotFound)
     return ResourceStatus.Unhealthy;

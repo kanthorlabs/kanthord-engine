@@ -1810,13 +1810,16 @@ test("inventory lists only LLM records with their capability and dispatches each
   assert.deepEqual(results, [
     "healthy",
     "healthy",
-    "unknown",
+    "healthy",
     "unknown",
     "healthy",
   ]);
   assert.deepEqual(
-    urls,
-    healthCredentials.flatMap(({ url }) => (url === null ? [] : [url])),
+    urls.toSorted(),
+    [
+      ...healthCredentials.flatMap(({ url }) => (url === null ? [] : [url])),
+      GITHUB_COPILOT_TOKEN_URL,
+    ].toSorted(),
   );
   assert.ok(!JSON.stringify(entries).includes(HEALTH_SECRET));
 });
@@ -2204,11 +2207,11 @@ test("check answers healthy, unhealthy and unknown through the LLM provider with
   t.after(() => f.store.close());
   const statuses = [
     [HttpStatus.OK, "healthy", null],
-    [HttpStatus.Forbidden, "unhealthy", ResourceFailureReason.Unclassified],
+    [HttpStatus.Forbidden, "unhealthy", ResourceFailureReason.Forbidden],
     [
       HttpStatus.InternalServerError,
       "unknown",
-      ResourceFailureReason.Unclassified,
+      ResourceFailureReason.InvalidResponse,
     ],
   ] as const;
   const requests: unknown[] = [];
@@ -2253,7 +2256,7 @@ test("check answers healthy, unhealthy and unknown through the LLM provider with
     {
       status: "unknown",
       capability: CAPABILITY_MODEL_LIST_READ,
-      failure_reason: ResourceFailureReason.Unclassified,
+      failure_reason: ResourceFailureReason.Unreachable,
     },
   );
   assert.equal(requests.at(-1), `${HEALTH_BASE_URL}/models`);
@@ -2347,11 +2350,11 @@ test("verify answers healthy, unhealthy and unknown like the health report witho
   });
   const statuses = [
     [HttpStatus.OK, "healthy", null],
-    [HttpStatus.Forbidden, "unhealthy", ResourceFailureReason.Unclassified],
+    [HttpStatus.Forbidden, "unhealthy", ResourceFailureReason.Forbidden],
     [
       HttpStatus.InternalServerError,
       "unknown",
-      ResourceFailureReason.Unclassified,
+      ResourceFailureReason.InvalidResponse,
     ],
   ] as const;
   const requests: unknown[] = [];
@@ -2396,7 +2399,7 @@ test("verify answers unknown when the request throws", async (t) => {
   assert.deepEqual(await credentialVerify(f, "compatible"), {
     status: "unknown",
     capability: CAPABILITY_MODEL_LIST_READ,
-    failure_reason: ResourceFailureReason.Unclassified,
+    failure_reason: ResourceFailureReason.Unreachable,
   });
   assert.ok(!JSON.stringify(f.logs).includes(HEALTH_SECRET));
 });
