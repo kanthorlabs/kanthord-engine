@@ -512,7 +512,7 @@ is `0`. On failure stderr reports the safe parse/permission diagnostic or the
 collected invalid fields and exit is `1`. No file is created, repaired, or
 modified. An absent file prints `system.config.not_found: configuration is absent`,
 then the rows `config: <path>`, `command: kanthord config init --config "<path>"`
-and `container: podman run --rm -v <volume>:/var/lib/kanthord docker.io/kanthorlabs/kanthord:<version> config init --gateway-bind :: --gateway-allowed-host localhost:<port>`.
+and `container: podman run --rm -v <volume>:/var/lib/kanthord docker.io/kanthorlabs/kanthord:<version> config init --gateway-bind :: --gateway-allowed-host localhost:<port> --gateway-allowed-host 127.0.0.1:<port>`.
 
 ### `config show`
 

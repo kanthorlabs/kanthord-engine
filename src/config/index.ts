@@ -39,7 +39,7 @@ import {
 } from "../scheduler/config.ts";
 const EMPTY_SCHEMA_FIELD_COUNT = 0;
 const CONTAINER_INIT_COMMAND =
-  "podman run --rm -v <volume>:/var/lib/kanthord docker.io/kanthorlabs/kanthord:<version> config init --gateway-bind :: --gateway-allowed-host localhost:<port>";
+  "podman run --rm -v <volume>:/var/lib/kanthord docker.io/kanthorlabs/kanthord:<version> config init --gateway-bind :: --gateway-allowed-host localhost:<port> --gateway-allowed-host 127.0.0.1:<port>";
 export interface ServerConfig extends GlobalConfig {
   version: number;
   gateway: GatewayConfig;

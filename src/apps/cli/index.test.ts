@@ -55,7 +55,7 @@ const WORKER_UNREACHABLE_ARGS = [
 const CLIENT_CONFIG_ENTRIES = ["kanthord", join("kanthord", "cli.yaml")];
 const TOKEN_LIFETIME_SECONDS = 600;
 const CONTAINER_INIT_HINT =
-  "container: podman run --rm -v <volume>:/var/lib/kanthord docker.io/kanthorlabs/kanthord:<version> config init --gateway-bind :: --gateway-allowed-host localhost:<port>\n";
+  "container: podman run --rm -v <volume>:/var/lib/kanthord docker.io/kanthorlabs/kanthord:<version> config init --gateway-bind :: --gateway-allowed-host localhost:<port> --gateway-allowed-host 127.0.0.1:<port>\n";
 const entry = new URL("../../main.ts", import.meta.url).href;
 async function invocation(
   args: string[],

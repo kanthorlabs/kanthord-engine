@@ -170,7 +170,7 @@ test("the real process exits with the failure code of a failed command", async (
   assert.equal(result.stdout, NO_OUTPUT);
   assert.equal(
     result.stderr,
-    `system.config.not_found: configuration is absent\nconfig:    ${env.KANTHORD_CONFIG!}\ncommand:   kanthord config init --config ${JSON.stringify(env.KANTHORD_CONFIG!)}\ncontainer: podman run --rm -v <volume>:/var/lib/kanthord docker.io/kanthorlabs/kanthord:<version> config init --gateway-bind :: --gateway-allowed-host localhost:<port>\n`,
+    `system.config.not_found: configuration is absent\nconfig:    ${env.KANTHORD_CONFIG!}\ncommand:   kanthord config init --config ${JSON.stringify(env.KANTHORD_CONFIG!)}\ncontainer: podman run --rm -v <volume>:/var/lib/kanthord docker.io/kanthorlabs/kanthord:<version> config init --gateway-bind :: --gateway-allowed-host localhost:<port> --gateway-allowed-host 127.0.0.1:<port>\n`,
   );
 });
 

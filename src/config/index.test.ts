@@ -620,7 +620,7 @@ test("private configuration rejects modes, symlinks and wrong kinds, and creates
         ["command", `kanthord config init --config ${JSON.stringify(path)}`],
         [
           "container",
-          "podman run --rm -v <volume>:/var/lib/kanthord docker.io/kanthorlabs/kanthord:<version> config init --gateway-bind :: --gateway-allowed-host localhost:<port>",
+          "podman run --rm -v <volume>:/var/lib/kanthord docker.io/kanthorlabs/kanthord:<version> config init --gateway-bind :: --gateway-allowed-host localhost:<port> --gateway-allowed-host 127.0.0.1:<port>",
         ],
       ]),
   );
