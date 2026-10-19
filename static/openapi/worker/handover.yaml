@@ -4,7 +4,8 @@ pathItem:
     operationId: worker.handover
     tags:
       - worker
-    description: Seal the live execution's pinned provider credential. A repeated
+    description: Seal the live execution's pinned provider credential and the pinned
+      SSH identity of each repository binding of its node. A repeated
       idempotency key returns a redacted conflict; recovery uses a new key.
     x-access-policy: client
     x-timeout-ms: 30000
