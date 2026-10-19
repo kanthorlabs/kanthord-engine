@@ -29,6 +29,7 @@ import { ExecutionIntent } from "../../worker/contract.ts";
 import { WORKING_LAYER_ALL_ON } from "../../worker/test-support.ts";
 import { generateSshKey } from "../../repository/ssh-key.ts";
 import type { SshAccess } from "../../repository/contract.ts";
+import { DEFAULT_SSH_PORT } from "../../repository/test-sshd.ts";
 
 const SECRET = Buffer.alloc(32, 7).toString("base64");
 const ENDED_RECORD = "execution ended";
@@ -459,7 +460,7 @@ test("host builds the SSH access of each repository from the handover and leaves
         private_key: key.private_key,
         public_key: key.public_key,
         known_hosts: KNOWN_HOSTS,
-        port: 22,
+        port: DEFAULT_SSH_PORT,
       });
       const checkout = join(workspaces.root, "checkout");
       mkdirSync(checkout);

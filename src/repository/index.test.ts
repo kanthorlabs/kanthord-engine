@@ -20,6 +20,7 @@ import {
 import { generateSshKey } from "./ssh-key.ts";
 import {
   createBareRepository,
+  DEFAULT_SSH_PORT,
   startTestSshd,
   TEST_REPOSITORY_FILE,
   TEST_REPOSITORY_TEXT,
@@ -96,7 +97,7 @@ test("sshAccessOf builds the access from the key and the pin of the address host
     private_key: key.private_key,
     public_key: key.public_key,
     known_hosts: `github.com ${HOST_KEY}\n`,
-    port: 22,
+    port: DEFAULT_SSH_PORT,
   });
   assert.ok(held.dropped());
 });

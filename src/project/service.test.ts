@@ -88,6 +88,7 @@ import { generateSshKey } from "../repository/ssh-key.ts";
 import { gitLsRemote } from "../repository/connector.ts";
 import {
   createBareRepository,
+  DEFAULT_SSH_PORT,
   startTestSshd,
 } from "../repository/test-sshd.ts";
 import type { SshAccess } from "../repository/index.ts";
@@ -1909,7 +1910,7 @@ test("a new binding releases the key of its SSH credential under the human draft
         private_key: SSH_KEY.private_key,
         public_key: SSH_KEY.public_key,
         known_hosts: `github.com ${HOST_KEY}\n`,
-        port: 22,
+        port: DEFAULT_SSH_PORT,
       },
     },
   ]);
@@ -4600,7 +4601,7 @@ test("binding.instruction_files.get releases the key under the Project identity 
     private_key: SSH_KEY.private_key,
     public_key: SSH_KEY.public_key,
     known_hosts: `github.com ${HOST_KEY}\n`,
-    port: 22,
+    port: DEFAULT_SSH_PORT,
   };
   assert.deepEqual(resolveCalls[NO_ITEMS]?.ssh, ssh);
   assert.deepEqual(readCalls[NO_ITEMS]?.ssh, ssh);

@@ -14,6 +14,7 @@ import type { SshAccess } from "./ssh-agent.ts";
 import { generateSshKey } from "./ssh-key.ts";
 
 export const TEST_SSHD_HOST = "127.0.0.1";
+export const DEFAULT_SSH_PORT = 22;
 export const TEST_REPOSITORY_FILE = "README.md";
 export const TEST_REPOSITORY_TEXT = "kanthord ssh test\n";
 const LOCAL_GIT_KEY = generateSshKey("local-git");
@@ -21,7 +22,7 @@ export const LOCAL_GIT_SSH_ACCESS: SshAccess = {
   private_key: LOCAL_GIT_KEY.private_key,
   public_key: LOCAL_GIT_KEY.public_key,
   known_hosts: "",
-  port: 22,
+  port: DEFAULT_SSH_PORT,
 };
 
 const SSHD_PATHS = [

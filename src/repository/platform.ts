@@ -37,18 +37,12 @@ export function isGitHubSshHost(hostname: string): boolean {
   return isPlatformSshHost(RepositoryPlatform.GitHub, hostname);
 }
 
-export function sshPortOf(
-  hostname: string,
-  ports: ReadonlyMap<string, number> = SSH_HOST_PORTS,
-): number {
-  return ports.get(hostname.toLowerCase()) ?? SSH_DEFAULT_PORT;
+export function sshPortOf(hostname: string): number {
+  return SSH_HOST_PORTS.get(hostname.toLowerCase()) ?? SSH_DEFAULT_PORT;
 }
 
-export function sshKnownHostsName(
-  hostname: string,
-  ports: ReadonlyMap<string, number> = SSH_HOST_PORTS,
-): string {
+export function sshKnownHostsName(hostname: string): string {
+  const port = sshPortOf(hostname);
   const name = hostname.toLowerCase();
-  const port = sshPortOf(name, ports);
   return port === SSH_DEFAULT_PORT ? name : `[${name}]:${port}`;
 }

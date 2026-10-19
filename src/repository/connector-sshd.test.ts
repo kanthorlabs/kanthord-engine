@@ -26,7 +26,6 @@ import {
 } from "./connector.ts";
 import { RepositoryFileState } from "./contract.ts";
 import { gitFailureReason } from "./git-failure.ts";
-import { sshPortOf } from "./platform.ts";
 import { SshAgentErrorCode, type SshAccess } from "./ssh-agent.ts";
 import { generateSshKey } from "./ssh-key.ts";
 import {
@@ -34,7 +33,6 @@ import {
   startTestSshd,
   TEST_REPOSITORY_FILE,
   TEST_REPOSITORY_TEXT,
-  TEST_SSHD_HOST,
 } from "./test-sshd.ts";
 
 const execFileAsync = promisify(execFile);
@@ -125,15 +123,11 @@ test("the connector reads, clones, fetches and pushes a node branch through the 
   assert.equal(await readFile(join(snapshot, NODE_FILE), "utf8"), NODE_TEXT);
 });
 
-test("the connector reads, clones and pushes an scp address on the port of the port table", async (t) => {
+test("the connector reads, clones, fetches and pushes an scp address on the port of the SSH access", async (t) => {
   const { bare, ssh, sshd } = await sshRemote(t);
   const address = sshd.scpUrl(bare);
-  const table: SshAccess = {
-    ...ssh,
-    port: sshPortOf(TEST_SSHD_HOST, new Map([[TEST_SSHD_HOST, sshd.port]])),
-  };
-  await gitLsRemote(address, background, DEADLINE_MS, table);
-  const { commit } = await nodeCommit(t, address, table);
+  await gitLsRemote(address, background, DEADLINE_MS, ssh);
+  const { commit } = await nodeCommit(t, address, ssh);
   assert.equal(await git(bare, ["rev-parse", NODE_BRANCH]), commit);
 });
 

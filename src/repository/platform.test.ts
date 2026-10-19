@@ -4,8 +4,6 @@ import { sshKnownHostsName, sshPortOf } from "./platform.ts";
 
 const DEFAULT_PORT = 22;
 const ALTERNATIVE_PORT = 443;
-const TEST_HOST = "127.0.0.1";
-const TEST_PORT = 2222;
 const GITLAB = "gitlab.com";
 const GITHUB = "github.com";
 const ALTSSH_GITLAB = "altssh.gitlab.com";
@@ -34,14 +32,4 @@ test("the known_hosts name of a host keeps the bare name on port 22 and takes th
   };
   for (const [host, name] of Object.entries(names))
     assert.equal(sshKnownHostsName(host), name, host);
-});
-
-test("a port table given as a parameter replaces the fixed table", () => {
-  const ports = new Map([[TEST_HOST, TEST_PORT]]);
-  assert.equal(sshPortOf(TEST_HOST, ports), TEST_PORT);
-  assert.equal(sshPortOf(ALTSSH_GITLAB, ports), DEFAULT_PORT);
-  assert.equal(
-    sshKnownHostsName(TEST_HOST, ports),
-    `[${TEST_HOST}]:${TEST_PORT}`,
-  );
 });
