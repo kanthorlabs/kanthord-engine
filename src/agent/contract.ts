@@ -13,8 +13,10 @@ import type { Transaction } from "../kernel/store.ts";
 import {
   AdvancingProviderFailure,
   ChainLevelName,
+  CooldownChangeKind as SchedulerCooldownChangeKind,
   isAdvancingProviderFailure,
   type AgentSelection as SchedulerAgentSelection,
+  type CooldownChange as SchedulerCooldownChange,
 } from "../scheduler/contract.ts";
 
 export const AGENT_COMPONENT_NAME = "agent";
@@ -189,6 +191,9 @@ export type AdvancingFailure = AdvancingProviderFailure;
 export const isAdvancingFailure = isAdvancingProviderFailure;
 
 export type AgentSelection = SchedulerAgentSelection;
+
+export const CooldownChangeKind = SchedulerCooldownChangeKind;
+export type CooldownChange = SchedulerCooldownChange;
 
 export type ChainEntry = Omit<AgentSelection, "agent_name"> & {
   cooldown: { strikes: number; available_at: number } | null;

@@ -39,6 +39,7 @@ import {
   type PromptLayerAnswer,
   type PromptTemplates,
   AgentErrorCode,
+  CooldownChangeKind,
   AGENT_PROVIDER_TARGET_KIND,
   LIST_LIMIT_DEFAULT,
   type AgentDependentBinding,
@@ -49,6 +50,7 @@ import {
   type AgentProviderItem,
   type AgentView,
   type ApprovedModelsFn,
+  type CooldownChange,
   type CustodySuitability,
   type DefaultConfiguration,
   type EntriesOfAgent,
@@ -909,8 +911,9 @@ export class AgentComponent {
     code: AdvancingFailure,
     executionId: string,
     now: number,
-  ): void {
+  ): CooldownChange[] {
     const { credentialHolds, config } = this.dependencies;
+    const changes: CooldownChange[] = [];
     for (const credential of uniqueCredentials(selections)) {
       const strikes =
         (credentialHolds.holdOf(tx, credential)?.strikes ?? NO_STRIKES) +
@@ -918,28 +921,53 @@ export class AgentComponent {
       const availableAt =
         now + cooldownDuration(config.cooldown, code, strikes);
       credentialHolds.hold(tx, credential, availableAt, strikes);
-      this.logger.info(
-        {
-          execution_id: executionId,
-          credential_name: credential,
-          code,
-          strikes,
-          available_at: availableAt,
-        },
-        "agent.fallback.cooldown_started",
-      );
+      changes.push({
+        kind: CooldownChangeKind.Started,
+        execution_id: executionId,
+        credential,
+        code,
+        strikes,
+        available_at: availableAt,
+      });
     }
+    return changes;
   }
 
   recordSuccess(
     tx: Transaction,
     selections: readonly AgentSelection[],
     executionId: string,
-  ): void {
+  ): CooldownChange[] {
+    const changes: CooldownChange[] = [];
     for (const credential of uniqueCredentials(selections))
       if (this.dependencies.credentialHolds.release(tx, credential))
+        changes.push({
+          kind: CooldownChangeKind.Cleared,
+          execution_id: executionId,
+          credential,
+        });
+    return changes;
+  }
+
+  recordCooldowns(changes: readonly CooldownChange[]): void {
+    for (const change of changes)
+      if (change.kind === CooldownChangeKind.Started)
         this.logger.info(
-          { execution_id: executionId, credential_name: credential },
+          {
+            execution_id: change.execution_id,
+            credential_name: change.credential,
+            code: change.code,
+            strikes: change.strikes,
+            available_at: change.available_at,
+          },
+          "agent.fallback.cooldown_started",
+        );
+      else
+        this.logger.info(
+          {
+            execution_id: change.execution_id,
+            credential_name: change.credential,
+          },
           "agent.fallback.cooldown_cleared",
         );
   }
@@ -1116,21 +1144,25 @@ export class AgentComponent {
           .map((row) => agentCooldownSchema.parse(row)),
       })),
     );
-    registry.register(agentOperations["cooldown.clear"], ({ params }, caller) =>
-      caller.commit((tx) => {
-        if (!this.dependencies.credentialHolds.release(tx, params.credential))
-          throw new OperationError(
-            HttpStatus.NotFound,
-            AgentErrorCode.CooldownNotFound,
-            "Agent cooldown not found.",
-            { credential: params.credential },
-          );
+    registry.register(
+      agentOperations["cooldown.clear"],
+      ({ params }, caller) => {
+        const answer = caller.commit((tx) => {
+          if (!this.dependencies.credentialHolds.release(tx, params.credential))
+            throw new OperationError(
+              HttpStatus.NotFound,
+              AgentErrorCode.CooldownNotFound,
+              "Agent cooldown not found.",
+              { credential: params.credential },
+            );
+          return null;
+        });
         this.logger.info(
           { credential_name: params.credential },
           "agent.fallback.cooldown_cleared",
         );
-        return null;
-      }),
+        return answer;
+      },
     );
     registry.register(agentOperations["model.list"], ({ query }, caller) =>
       caller.commit((tx) => this.listCredentialModels(tx, query)),

@@ -96,9 +96,10 @@ export function schedulerHarness(
         pins: [],
       }),
       resolve: () => [],
-      providerFailure: () => {},
-      success: () => {},
+      providerFailure: () => [],
+      success: () => [],
       selected: () => {},
+      cooldownsChanged: () => {},
     },
     declarations: {
       declarationOf: (...args) => {

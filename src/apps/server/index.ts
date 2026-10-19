@@ -289,14 +289,15 @@ export function composeServices(options: {
       select: (tx, workerBindingId) => worker.agentChoice(tx, workerBindingId),
       resolve: (tx, workerBindingId, pins) =>
         worker.agentSelectionsAt(tx, workerBindingId, pins),
-      providerFailure: (tx, selections, code, executionId, now) => {
-        agent.recordProviderFailure(tx, selections, code, executionId, now);
-      },
-      success: (tx, selections, executionId) => {
-        agent.recordSuccess(tx, selections, executionId);
-      },
+      providerFailure: (tx, selections, code, executionId, now) =>
+        agent.recordProviderFailure(tx, selections, code, executionId, now),
+      success: (tx, selections, executionId) =>
+        agent.recordSuccess(tx, selections, executionId),
       selected: (selections, executionId) => {
         agent.recordSelection(selections, executionId);
+      },
+      cooldownsChanged: (changes) => {
+        agent.recordCooldowns(changes);
       },
     },
     traceIdentity: {

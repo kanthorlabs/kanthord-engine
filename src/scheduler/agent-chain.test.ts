@@ -2,7 +2,11 @@ import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
 import pino from "pino";
 import { COOLDOWN_DEFAULTS } from "../agent/config.ts";
-import { memoryCredentialHolds } from "../agent/test-support.ts";
+import {
+  capturedLogger,
+  FallbackLog,
+  memoryCredentialHolds,
+} from "../agent/test-support.ts";
 import {
   AdvancingFailure,
   type AgentEntry,
@@ -13,7 +17,11 @@ import {
   insertEnablementRevision,
 } from "../agent/enablements.ts";
 import { agentMigrations } from "../agent/migrations.ts";
-import { AgentComponent, SelectionKind } from "../agent/service.ts";
+import {
+  AgentComponent,
+  SelectionKind,
+  type Dependencies as AgentDependencies,
+} from "../agent/service.ts";
 import { background } from "../kernel/context.ts";
 import { ResourceStatus } from "../kernel/health.ts";
 import { createIdentity } from "../kernel/identity.ts";
@@ -23,10 +31,12 @@ import {
   AgentChoiceKind,
   ClaimIntent,
   ClaimNodeState,
+  CooldownChangeKind,
   ExecutionStopReason,
   ProviderFailure,
   type AgentPin,
   type AgentSelection,
+  type CooldownChange,
   type ReleaseStop,
 } from "./contract.ts";
 import { claimOnce, ClaimOutcome } from "./claim.ts";
@@ -60,6 +70,7 @@ const FAILURE_METHOD = "failure";
 const NO_FAILURES = 0;
 const ONE_FAILURE = 1;
 const TWO_FAILURES = 2;
+const FIRST_STRIKE = 1;
 
 function stopOf(reason: ReleaseStop["reason"], code: string | null) {
   return { reason, code };
@@ -68,6 +79,25 @@ function stopOf(reason: ReleaseStop["reason"], code: string | null) {
 function releaseHarness(t: TestContext) {
   const h = schedulerHarness(t);
   const chainCalls: Array<{ method: string; arguments: unknown[] }> = [];
+  const reported: Array<{
+    changes: readonly CooldownChange[];
+    ended: boolean;
+  }> = [];
+  const row = executionFixture({ agent_pins: [pin] });
+  h.store.transaction((tx) => insertExecution(tx, row));
+  const started: CooldownChange = {
+    kind: CooldownChangeKind.Started,
+    execution_id: row.execution_id,
+    credential: selection.credential,
+    code: ProviderFailure.RateLimited,
+    strikes: FIRST_STRIKE,
+    available_at: FIXTURE_NOW,
+  };
+  const cleared: CooldownChange = {
+    kind: CooldownChangeKind.Cleared,
+    execution_id: row.execution_id,
+    credential: selection.credential,
+  };
   h.dependencies.agentChains = {
     select: () => ({
       kind: AgentChoiceKind.Selected,
@@ -75,14 +105,22 @@ function releaseHarness(t: TestContext) {
       pins: [],
     }),
     resolve: () => [selection],
-    providerFailure: (_tx, ...args) =>
-      chainCalls.push({ method: "providerFailure", arguments: args }),
-    success: (_tx, ...args) =>
-      chainCalls.push({ method: "success", arguments: args }),
+    providerFailure: (_tx, ...args) => {
+      chainCalls.push({ method: "providerFailure", arguments: args });
+      return [started];
+    },
+    success: (_tx, ...args) => {
+      chainCalls.push({ method: "success", arguments: args });
+      return [cleared];
+    },
     selected: () => {},
+    cooldownsChanged: (changes) => {
+      const stored = h.store.transaction((tx) =>
+        readExecution(tx, row.execution_id),
+      );
+      reported.push({ changes, ended: stored?.ended_at !== null });
+    },
   };
-  const row = executionFixture({ agent_pins: [pin] });
-  h.store.transaction((tx) => insertExecution(tx, row));
   const caller: CallerContext = {
     context: background,
     requestId: createIdentity("request"),
@@ -123,7 +161,17 @@ function releaseHarness(t: TestContext) {
     );
   const failureCount = () =>
     h.calls.find((call) => call.method === FAILURE_METHOD)?.arguments[2];
-  return { ...h, row, chainCalls, prior, release, failureCount };
+  return {
+    ...h,
+    row,
+    chainCalls,
+    reported,
+    started,
+    cleared,
+    prior,
+    release,
+    failureCount,
+  };
 }
 
 test("an advancing provider stop writes the hold of the pin and is neutral for the failure count", async (t) => {
@@ -194,6 +242,86 @@ test("a release without a provider stop releases the hold of the pin", async (t)
   );
 });
 
+test("a release reports the cooldown changes of its write once, after the commit", async (t) => {
+  const failing = releaseHarness(t);
+  t.mock.method(failing.service, "wake", () => {});
+  t.mock.method(Date, "now", () => FIXTURE_NOW);
+  await failing.release(
+    stopOf(ExecutionStopReason.ProviderFailed, ProviderFailure.RateLimited),
+  );
+  assert.deepEqual(failing.reported, [
+    { changes: [failing.started], ended: true },
+  ]);
+  const succeeding = releaseHarness(t);
+  t.mock.method(succeeding.service, "wake", () => {});
+  await succeeding.release(null);
+  assert.deepEqual(succeeding.reported, [
+    { changes: [succeeding.cleared], ended: true },
+  ]);
+});
+
+test("a non-advancing provider stop reports no cooldown change", async (t) => {
+  const h = releaseHarness(t);
+  t.mock.method(h.service, "wake", () => {});
+  t.mock.method(Date, "now", () => FIXTURE_NOW);
+  await h.release(
+    stopOf(ExecutionStopReason.ProviderFailed, ProviderFailure.Unauthorized),
+  );
+  assert.deepEqual(h.reported, [{ changes: [], ended: true }]);
+});
+
+test("a rolled-back release reports no cooldown change", async (t) => {
+  const rollback = new Error("rolled back");
+  const refused = releaseHarness(t);
+  t.mock.method(refused.service, "wake", () => {});
+  t.mock.method(Date, "now", () => FIXTURE_NOW);
+  refused.dependencies.transitions.release = () => {
+    throw rollback;
+  };
+  await assert.rejects(refused.release(null), rollback);
+  assert.deepEqual(refused.chainCalls, [
+    {
+      method: "success",
+      arguments: [[selection], refused.row.execution_id],
+    },
+  ]);
+  assert.deepEqual(refused.reported, []);
+  assert.equal(
+    refused.store.transaction((tx) =>
+      readExecution(tx, refused.row.execution_id),
+    )?.ended_at,
+    null,
+  );
+  const failed = releaseHarness(t);
+  t.mock.method(failed.service, "wake", () => {});
+  failed.dependencies.transitions.failure = () => {
+    throw rollback;
+  };
+  await assert.rejects(
+    failed.release(
+      stopOf(ExecutionStopReason.ProviderFailed, ProviderFailure.RateLimited),
+    ),
+    rollback,
+  );
+  assert.deepEqual(failed.chainCalls, [
+    {
+      method: "providerFailure",
+      arguments: [
+        [selection],
+        ProviderFailure.RateLimited,
+        failed.row.execution_id,
+        FIXTURE_NOW,
+      ],
+    },
+  ]);
+  assert.deepEqual(failed.reported, []);
+  assert.equal(
+    failed.store.transaction((tx) => readExecution(tx, failed.row.execution_id))
+      ?.ended_at,
+    null,
+  );
+});
+
 const PIN_AGENT = "swe@1";
 const PIN_WORKER = "coder@1";
 const PRIMARY = {
@@ -219,7 +347,10 @@ const other: DefaultConfiguration = {
   reasoning_effort: "off",
 };
 
-function pinHarness(t: TestContext) {
+function pinHarness(
+  t: TestContext,
+  logger: AgentDependencies["logger"] = pino({ enabled: false }),
+) {
   const h = schedulerHarness(t);
   h.store.transaction(({ database }) => {
     for (const migration of agentMigrations) migration(database);
@@ -241,7 +372,7 @@ function pinHarness(t: TestContext) {
     providerHealthCheck: () => async () => ResourceStatus.Unknown,
     providerCapability: () => "model-list read",
     toolDeclarations: async () => [],
-    logger: pino({ enabled: false }),
+    logger,
     clock: () => FIXTURE_NOW,
   });
   const bindings = new Map<string, AgentEntry | null>();
@@ -282,15 +413,17 @@ function pinHarness(t: TestContext) {
           pin.position,
         ),
       ),
-    providerFailure: (tx, selections, code, executionId, now) => {
-      agent.recordProviderFailure(tx, selections, code, executionId, now);
-    },
+    providerFailure: (tx, selections, code, executionId, now) =>
+      agent.recordProviderFailure(tx, selections, code, executionId, now),
     success: (tx, selections, executionId) => {
       chainCalls.push({ method: "success", arguments: [selections] });
-      agent.recordSuccess(tx, selections, executionId);
+      return agent.recordSuccess(tx, selections, executionId);
     },
     selected: (selections, executionId) => {
       agent.recordSelection(selections, executionId);
+    },
+    cooldownsChanged: (changes) => {
+      agent.recordCooldowns(changes);
     },
   };
   const row = executionFixture();
@@ -447,5 +580,113 @@ test("an enablement edit, a binding edit and a hold during a live execution keep
   );
   assert.deepEqual(h.chainCalls, [
     { method: "success", arguments: [[selection]] },
+  ]);
+});
+
+function claimedPin(t: TestContext, logger: AgentDependencies["logger"]) {
+  const h = pinHarness(t, logger);
+  t.mock.method(h.service, "wake", () => {});
+  t.mock.method(Date, "now", () => FIXTURE_NOW);
+  h.enable(head, [other]);
+  h.store.transaction((tx) =>
+    h.service.insert(tx, h.row.node_id, h.row.project_id, 0),
+  );
+  const claimed = h.claim();
+  assert.equal(claimed.outcome, ClaimOutcome.Claimed);
+  const execution = claimed.row!;
+  const [pinned] = h.store.transaction((tx) =>
+    h.dependencies.agentChains.resolve(
+      tx,
+      execution.worker_binding_id,
+      execution.agent_pins,
+    ),
+  );
+  assert.ok(pinned);
+  assert.equal(pinned.credential, PRIMARY.credential);
+  const seedHold = () =>
+    h.store.transaction((tx) =>
+      h.agent.recordProviderFailure(
+        tx,
+        [pinned],
+        AdvancingFailure.RateLimited,
+        createIdentity("execution"),
+        FIXTURE_NOW,
+      ),
+    );
+  const release = (stop: ReleaseStop | null, caller = h.caller(execution)) =>
+    h.invoke(
+      "executionRelease",
+      {
+        params: { execution_id: execution.execution_id },
+        query: {},
+        body: { further_work: true, ...(stop && { stop }) },
+      },
+      caller,
+    );
+  return { ...h, execution, seedHold, release };
+}
+
+test("a rolled-back release of a pinned execution writes no cooldown log", async (t) => {
+  const { logger, logs } = capturedLogger();
+  const h = claimedPin(t, logger);
+  h.seedHold();
+  logs.length = 0;
+  const rollback = new Error("rolled back");
+  const rollbackCaller = {
+    ...h.caller(h.execution),
+    commit: (write) =>
+      h.store.transaction((tx) => {
+        write(tx);
+        throw rollback;
+      }),
+  } satisfies CallerContext;
+  await assert.rejects(h.release(null, rollbackCaller), rollback);
+  assert.deepEqual(
+    logs.filter(({ msg }) => msg === FallbackLog.CooldownCleared),
+    [],
+  );
+  await assert.rejects(
+    h.release(
+      stopOf(ExecutionStopReason.ProviderFailed, ProviderFailure.RateLimited),
+      rollbackCaller,
+    ),
+    rollback,
+  );
+  assert.deepEqual(
+    logs.filter(({ msg }) => msg === FallbackLog.CooldownStarted),
+    [],
+  );
+});
+
+test("a committed release of a pinned execution writes the cooldown records of today", async (t) => {
+  const failing = capturedLogger();
+  const h = claimedPin(t, failing.logger);
+  failing.logs.length = 0;
+  await h.release(
+    stopOf(ExecutionStopReason.ProviderFailed, ProviderFailure.RateLimited),
+  );
+  assert.deepEqual(failing.logs, [
+    {
+      level: pino.levels.values.info,
+      msg: FallbackLog.CooldownStarted,
+      execution_id: h.execution.execution_id,
+      credential_name: PRIMARY.credential,
+      code: ProviderFailure.RateLimited,
+      strikes: FIRST_STRIKE,
+      available_at: FIXTURE_NOW + COOLDOWN_DEFAULTS.rate_limited_ms,
+    },
+  ]);
+  const succeeding = capturedLogger();
+  const cooling = claimedPin(t, succeeding.logger);
+  cooling.seedHold();
+  succeeding.logs.length = 0;
+  await cooling.release(null);
+  assert.deepEqual(succeeding.logs, [
+    {
+      level: pino.levels.values.info,
+      msg: FallbackLog.CooldownCleared,
+      execution_id: cooling.execution.execution_id,
+      credential_name: PRIMARY.credential,
+    },
   ]);
 });

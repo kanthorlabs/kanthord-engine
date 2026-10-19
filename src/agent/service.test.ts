@@ -17,6 +17,7 @@ import {
   ChainLevel,
   FALLBACK_CONFIGURATIONS_MAX,
   AdvancingFailure,
+  CooldownChangeKind,
   type AgentSelection,
   PromptOrigin,
   PromptLayerKind,
@@ -50,7 +51,11 @@ import { CodedError, OperationError } from "../kernel/errors.ts";
 import { ProjectErrorCode } from "../project/contract.ts";
 import { framing, PromptConsumer } from "./prompt-render.ts";
 import { SHIPPED_TEMPLATES } from "./prompt-templates.ts";
-import { memoryCredentialHolds } from "./test-support.ts";
+import {
+  capturedLogger,
+  FallbackLog,
+  memoryCredentialHolds,
+} from "./test-support.ts";
 
 const PROVIDER_CAPABILITY = "model-list read";
 const DEFAULT_REASONING = "off";
@@ -2405,23 +2410,6 @@ const REDACTED_FIELD = "credential";
 const ONE_LOG = 1;
 const TWO_LOGS = 2;
 
-const FallbackLog = {
-  CooldownStarted: "agent.fallback.cooldown_started",
-  CooldownCleared: "agent.fallback.cooldown_cleared",
-  Selected: "agent.fallback.selected",
-} as const;
-
-type CapturedLog = { level: number; msg: string } & Record<string, unknown>;
-
-function capturedLogger() {
-  const logs: CapturedLog[] = [];
-  const logger = pino(
-    { level: "info", base: null, timestamp: false },
-    { write: (line: string) => logs.push(JSON.parse(line) as CapturedLog) },
-  );
-  return { logger, logs };
-}
-
 function holdFixture(
   t: TestContext,
   collaborations: Partial<Dependencies> = {},
@@ -2443,14 +2431,20 @@ function holdFixture(
     assert.ok(answer);
     return answer;
   };
-  const fail = (selection: AgentSelection, code: AdvancingFailure) =>
-    f.store.transaction((tx) =>
+  const fail = (selection: AgentSelection, code: AdvancingFailure) => {
+    const changes = f.store.transaction((tx) =>
       f.agent.recordProviderFailure(tx, [selection], code, EXECUTION_ID, now),
     );
-  const succeed = (selection: AgentSelection) =>
-    f.store.transaction((tx) =>
+    f.agent.recordCooldowns(changes);
+    return changes;
+  };
+  const succeed = (selection: AgentSelection) => {
+    const changes = f.store.transaction((tx) =>
       f.agent.recordSuccess(tx, [selection], EXECUTION_ID),
     );
+    f.agent.recordCooldowns(changes);
+    return changes;
+  };
   return {
     ...f,
     select,
@@ -2564,15 +2558,16 @@ test("a repeated failure doubles the hold up to the maximum and an expired hold 
   );
 });
 
-test("a provider failure logs agent.fallback.cooldown_started once per credential with its strikes and end", (t) => {
+test("a provider failure returns one cooldown change per credential, logs nothing in its transaction, and recordCooldowns logs agent.fallback.cooldown_started with its strikes and end", (t) => {
   const { logger, logs } = capturedLogger();
   const f = holdFixture(t, { logger });
   const head = f.selected();
   const sameCredentialOtherModel = f.view().chain[2];
   assert.ok(sameCredentialOtherModel);
   assert.equal(sameCredentialOtherModel.credential, head.credential);
-  f.store.transaction((tx) =>
-    f.agent.recordProviderFailure(
+  const availableAt = f.now() + COOLDOWN_DEFAULTS.rate_limited_ms;
+  const changes = f.store.transaction((tx) => {
+    const made = f.agent.recordProviderFailure(
       tx,
       [
         head,
@@ -2585,9 +2580,21 @@ test("a provider failure logs agent.fallback.cooldown_started once per credentia
       AdvancingFailure.RateLimited,
       EXECUTION_ID,
       f.now(),
-    ),
-  );
-  const availableAt = f.now() + COOLDOWN_DEFAULTS.rate_limited_ms;
+    );
+    assert.deepEqual(logs, []);
+    return made;
+  });
+  assert.deepEqual(changes, [
+    {
+      kind: CooldownChangeKind.Started,
+      execution_id: EXECUTION_ID,
+      credential: head.credential,
+      code: AdvancingFailure.RateLimited,
+      strikes: FIRST_STRIKE,
+      available_at: availableAt,
+    },
+  ]);
+  f.agent.recordCooldowns(changes);
   assert.deepEqual(logs, [
     {
       level: pino.levels.values.info,
@@ -2614,7 +2621,7 @@ test("a provider failure logs agent.fallback.cooldown_started once per credentia
   assert.ok(logs.every((record) => !(REDACTED_FIELD in record)));
 });
 
-test("a release of a hold logs agent.fallback.cooldown_cleared and a release without a hold logs nothing", (t) => {
+test("a release of a hold returns one cleared change, and recordCooldowns logs agent.fallback.cooldown_cleared; a release without a hold returns none", (t) => {
   const { logger, logs } = capturedLogger();
   const f = holdFixture(t, { logger });
   const head = f.selected();
@@ -2626,13 +2633,27 @@ test("a release of a hold logs agent.fallback.cooldown_cleared and a release wit
     position: sameCredentialOtherModel.position,
     model_identifier: sameCredentialOtherModel.model_identifier,
   };
-  f.succeed(head);
+  assert.deepEqual(f.succeed(head), []);
   assert.deepEqual(logs, []);
   f.fail(head, AdvancingFailure.RateLimited);
   logs.length = 0;
-  f.store.transaction((tx) =>
-    f.agent.recordSuccess(tx, [head, sameCredential], EXECUTION_ID),
-  );
+  const changes = f.store.transaction((tx) => {
+    const made = f.agent.recordSuccess(
+      tx,
+      [head, sameCredential],
+      EXECUTION_ID,
+    );
+    assert.deepEqual(logs, []);
+    return made;
+  });
+  assert.deepEqual(changes, [
+    {
+      kind: CooldownChangeKind.Cleared,
+      execution_id: EXECUTION_ID,
+      credential: head.credential,
+    },
+  ]);
+  f.agent.recordCooldowns(changes);
   assert.deepEqual(logs, [
     {
       level: pino.levels.values.info,
@@ -2641,7 +2662,7 @@ test("a release of a hold logs agent.fallback.cooldown_cleared and a release wit
       credential_name: head.credential,
     },
   ]);
-  f.succeed(head);
+  assert.deepEqual(f.succeed(head), []);
   assert.equal(logs.length, ONE_LOG);
 });
 
@@ -2831,7 +2852,7 @@ test("a human lists the holds and clears one by credential name, and a clear of 
   );
 });
 
-test("a human clear of a cooldown logs agent.fallback.cooldown_cleared", (t) => {
+test("a committed human clear of a cooldown logs agent.fallback.cooldown_cleared", (t) => {
   const { logger, logs } = capturedLogger();
   const f = holdFixture(t, { logger });
   const head = f.selected();
@@ -2852,4 +2873,34 @@ test("a human clear of a cooldown logs agent.fallback.cooldown_cleared", (t) => 
     { credential: head.credential },
   );
   assert.equal(logs.length, ONE_LOG);
+});
+
+test("a rolled-back clear of a cooldown writes no log", (t) => {
+  const { logger, logs } = capturedLogger();
+  const f = holdFixture(t, { logger });
+  const head = f.selected();
+  f.fail(head, AdvancingFailure.RateLimited);
+  logs.length = 0;
+  const rollback = new Error("rolled back");
+  const operation = agentOperations["cooldown.clear"];
+  assert.throws(
+    () =>
+      f.registry.get(operation.id).handler(
+        operation.input.parse({
+          params: { credential: head.credential },
+          query: {},
+          body: null,
+        }),
+        {
+          ...f.caller,
+          commit: (write) =>
+            f.store.transaction((tx) => {
+              write(tx);
+              throw rollback;
+            }),
+        },
+      ),
+    rollback,
+  );
+  assert.deepEqual(logs, []);
 });

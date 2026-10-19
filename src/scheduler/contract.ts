@@ -370,6 +370,24 @@ export type AgentChoice =
       pins: AgentPin[];
     }
   | { kind: typeof AgentChoiceKind.Cooling; available_at: number };
+export const CooldownChangeKind = {
+  Started: "started",
+  Cleared: "cleared",
+} as const;
+export type CooldownChange =
+  | {
+      kind: typeof CooldownChangeKind.Started;
+      execution_id: string;
+      credential: string;
+      code: AdvancingProviderFailure;
+      strikes: number;
+      available_at: number;
+    }
+  | {
+      kind: typeof CooldownChangeKind.Cleared;
+      execution_id: string;
+      credential: string;
+    };
 export interface AgentChains {
   select(tx: Transaction, workerBindingId: string): AgentChoice;
   resolve(
@@ -383,13 +401,14 @@ export interface AgentChains {
     code: AdvancingProviderFailure,
     executionId: string,
     now: number,
-  ): void;
+  ): CooldownChange[];
   success(
     tx: Transaction,
     selections: readonly AgentSelection[],
     executionId: string,
-  ): void;
+  ): CooldownChange[];
   selected(selections: readonly AgentSelection[], executionId: string): void;
+  cooldownsChanged(changes: readonly CooldownChange[]): void;
 }
 export interface TraceIdentity {
   mint(): { trace_id: string; root_span_id: string };
