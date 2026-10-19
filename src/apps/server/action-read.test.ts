@@ -29,8 +29,10 @@ import {
 import type { ExecutionRecord } from "../../scheduler/contract.ts";
 import { environment, kanthord } from "./cli-support.ts";
 import {
+  FAKE_SSH_CREDENTIAL,
   FAKE_SSH_IDENTITY,
   bareRepository,
+  createFakeSshCredential,
   fakeGitHub,
   gatewayFixture,
   mappedTransport,
@@ -124,17 +126,7 @@ async function setup(t: TestContext) {
     metadata: null,
     secret: { key: GITHUB_KEY },
   });
-  await write(["repository", "credential", "create"], {
-    name: "github-ssh",
-    platform: "ssh",
-    metadata: {
-      host: "github.com",
-      hostname: "github.com",
-      port: 22,
-      identity_file: "~/.ssh/id_rsa",
-    },
-    secret: {},
-  });
+  await createFakeSshCredential(read);
   const project = await read<{ id: string }>([
     "project",
     "create",
@@ -148,7 +140,7 @@ async function setup(t: TestContext) {
       available: true,
       platform: "github",
       address,
-      ssh_credential: "github-ssh",
+      ssh_credential: FAKE_SSH_CREDENTIAL,
       credential: "github",
       strategy: {
         base_branch: "main",

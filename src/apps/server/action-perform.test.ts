@@ -739,7 +739,8 @@ test(
       "git.merge_push merges the snapshot and leaves no clone",
       async () => {
         const before = h.materials.length;
-        const scratch = mkdtempSync(join(temporary(t), "tmp-"));
+        const scratch = mkdtempSync(join(tmpdir(), "kd-perform-"));
+        t.after(() => rmSync(scratch, { recursive: true, force: true }));
         const previous = process.env.TMPDIR;
         process.env.TMPDIR = scratch;
         const writer = h.fixture.gitWriter;
