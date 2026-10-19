@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import test, { type TestContext } from "node:test";
 import { promisify } from "node:util";
@@ -43,6 +43,7 @@ const SNAPSHOT_BRANCH = "kanthord/snapshot";
 const NODE_FILE = "node.md";
 const NODE_TEXT = "node\n";
 const ABSENT_FILE = "absent.md";
+const LINK_FILE = "link.md";
 const UNPARSABLE_KEY = "not an SSH key\n";
 const MAX_BYTES = 1024;
 
@@ -86,7 +87,8 @@ async function nodeCommit(
     ssh,
   );
   await writeFile(join(work, NODE_FILE), NODE_TEXT);
-  await git(work, ["add", NODE_FILE]);
+  await symlink(NODE_FILE, join(work, LINK_FILE));
+  await git(work, ["add", NODE_FILE, LINK_FILE]);
   await git(work, ["commit", "-q", "-m", "node"]);
   await pushNodeBranch(work, NODE_BRANCH, background, DEADLINE_MS, ssh);
   return { work, commit: await git(work, ["rev-parse", "HEAD"]) };
@@ -146,7 +148,7 @@ test("the connector merges, pushes a snapshot and reads the landing through the 
   );
 });
 
-test("readFilesAtCommit reads a blob outside the first fetch through the SSH agent", async (t) => {
+test("readFilesAtCommit reads a blob and a symlink outside the first fetch through the SSH agent", async (t) => {
   const { address, ssh } = await sshRemote(t);
   const { commit } = await nodeCommit(t, address, ssh);
   assert.equal(
@@ -162,7 +164,7 @@ test("readFilesAtCommit reads a blob outside the first fetch through the SSH age
   const files = await readFilesAtCommit(
     address,
     commit,
-    [NODE_FILE, TEST_REPOSITORY_FILE, ABSENT_FILE],
+    [NODE_FILE, LINK_FILE, TEST_REPOSITORY_FILE, ABSENT_FILE],
     MAX_BYTES,
     background,
     DEADLINE_MS,
@@ -170,6 +172,7 @@ test("readFilesAtCommit reads a blob outside the first fetch through the SSH age
   );
   assert.deepEqual(files, [
     { path: NODE_FILE, state: RepositoryFileState.Present, text: NODE_TEXT },
+    { path: LINK_FILE, state: RepositoryFileState.Present, text: NODE_TEXT },
     {
       path: TEST_REPOSITORY_FILE,
       state: RepositoryFileState.Present,
