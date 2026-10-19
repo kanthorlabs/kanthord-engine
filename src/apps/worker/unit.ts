@@ -1,3 +1,4 @@
+import { registerBunOAuthFlows as registerOAuthFlows } from "@earendil-works/pi-ai/bun-oauth";
 import {
   background,
   CancellationContext,
@@ -81,6 +82,7 @@ export class WorkerUnit {
   private pullStarted = false;
 
   constructor(options: WorkerUnitOptions) {
+    registerOAuthFlows();
     this.options = options;
   }
 
