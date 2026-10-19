@@ -29,6 +29,7 @@ import {
 } from "../kernel/pi-provider.ts";
 import {
   AUTHORIZATION_HEADER,
+  failureReasonOfStatus,
   headerSecrets,
   redactReason,
   thrownReason,
@@ -127,7 +128,7 @@ async function httpCheck(
         if (response.ok) return OK_WITHOUT_MODELS;
         observe?.(
           `status=${response.status}`,
-          ResourceFailureReason.Unclassified,
+          failureReasonOfStatus(response.status),
         );
         return {
           connection: connectionOfStatus(response.status),
@@ -138,7 +139,10 @@ async function httpCheck(
       if (signal.aborted) return UNREACHABLE;
       const list = openAIModelListSchema.safeParse(body);
       if (!list.success) {
-        observe?.("model list malformed", ResourceFailureReason.Unclassified);
+        observe?.(
+          "model list malformed",
+          ResourceFailureReason.InvalidResponse,
+        );
         return INVALID_RESPONSE;
       }
       return {
@@ -155,7 +159,7 @@ async function httpCheck(
   } catch (error) {
     observe?.(
       thrownReason(error, headerSecrets(headers)),
-      ResourceFailureReason.Unclassified,
+      ResourceFailureReason.Unreachable,
     );
     return UNREACHABLE;
   }
@@ -315,18 +319,20 @@ async function modelCallCheck(
       if (signal.aborted) return UNREACHABLE;
       if (!MODEL_CALL_FAILURES.includes(reply.stopReason))
         return OK_WITHOUT_MODELS;
+      const status = statusOfErrorMessage(reply.errorMessage);
       observe?.(
         failureReason(reply, secrets),
-        ResourceFailureReason.Unclassified,
+        status === null
+          ? ResourceFailureReason.Unreachable
+          : failureReasonOfStatus(status),
       );
-      const status = statusOfErrorMessage(reply.errorMessage);
       if (status === null) return UNREACHABLE;
       return { connection: connectionOfStatus(status), models: null };
     } finally {
       dispose();
     }
   } catch (error) {
-    observe?.(thrownReason(error, secrets), ResourceFailureReason.Unclassified);
+    observe?.(thrownReason(error, secrets), ResourceFailureReason.Unreachable);
     return UNREACHABLE;
   }
 }

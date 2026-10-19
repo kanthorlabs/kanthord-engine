@@ -16,7 +16,6 @@ const ENDPOINT = "https://storage.example";
 const BUCKET = "test-bucket";
 const REGION = "us-east-1";
 const ONE_CALL = 1;
-const TWO_CALLS = 2;
 const BUCKET_PATH = `/${BUCKET}/`;
 
 const s3Check = (
@@ -74,7 +73,7 @@ for (const throws of [false, true]) {
   }
 }
 
-test("S3 observes a status failure and a network error as unclassified", async (t) => {
+test("S3 names the failure reason of a status failure and a network error", async (t) => {
   const observed: Array<[string, string]> = [];
   const observe = (reason: string, failureReason: string) =>
     void observed.push([reason, failureReason]);
@@ -90,25 +89,42 @@ test("S3 observes a status failure and a network error as unclassified", async (
       () => ({ send, destroy }),
       observe,
     );
-  assert.equal(
-    await probe(async () => ({
-      $metadata: { httpStatusCode: HttpStatus.NotFound },
-    })),
-    ResourceStatus.Unhealthy,
-  );
+  for (const status of [
+    HttpStatus.Unauthorized,
+    HttpStatus.Forbidden,
+    HttpStatus.TooManyRequests,
+    HttpStatus.NotFound,
+  ])
+    await probe(async () => {
+      throw Object.assign(new Error(SECRET), {
+        $metadata: { httpStatusCode: status },
+      });
+    });
   assert.equal(
     await probe(async () => {
       throw new Error(SECRET);
     }),
     ResourceStatus.Unknown,
   );
-  assert.equal(observed.length, TWO_CALLS);
-  assert.deepEqual(observed[0], [
-    `status=${HttpStatus.NotFound}`,
-    ResourceFailureReason.Unclassified,
-  ]);
-  assert.equal(observed[1]![1], ResourceFailureReason.Unclassified);
-  assert.ok(!observed[1]![0].includes(SECRET));
+  assert.equal(
+    await probe(async () => {
+      throw Object.assign(new Error(SECRET), { $metadata: {} });
+    }),
+    ResourceStatus.Unknown,
+  );
+  assert.deepEqual(
+    observed.map(([, failureReason]) => failureReason),
+    [
+      ResourceFailureReason.Unauthorized,
+      ResourceFailureReason.Forbidden,
+      ResourceFailureReason.RateLimited,
+      ResourceFailureReason.InvalidResponse,
+      ResourceFailureReason.Unreachable,
+      ResourceFailureReason.Unreachable,
+    ],
+  );
+  assert.equal(observed[3]![0], `status=${HttpStatus.NotFound}`);
+  assert.ok(observed.every(([reason]) => !reason.includes(SECRET)));
 });
 
 test("S3 network, construction and cleanup errors remain unknown without leaking secrets", async (t) => {

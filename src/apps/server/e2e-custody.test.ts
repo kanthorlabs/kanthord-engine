@@ -1,10 +1,15 @@
 import assert from "node:assert/strict";
 import { writeFileSync } from "node:fs";
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
 import { join } from "node:path";
 import { test, type TestContext } from "node:test";
 import { ulid } from "ulid";
 import type { CredentialAnswer } from "../../custody/contract.ts";
 import { writePrivate } from "../../kernel/files.ts";
+import { ResourceFailureReason, ResourceStatus } from "../../kernel/health.ts";
+import { HttpStatus } from "../../kernel/http.ts";
+import { CAPABILITY_MODEL_LIST_READ } from "../../llm/platforms.ts";
 import { temporary } from "../../kernel/test-support.ts";
 import { environment, kanthord } from "./cli-support.ts";
 import { gatewayFixture } from "./test-support.ts";
@@ -478,6 +483,38 @@ test("check refuses a file with a name without a server", async (t) => {
       env,
     ),
     "cli.file.schema_invalid",
+  );
+});
+
+test("check of a key that the provider refuses answers unhealthy with the failure reason unauthorized", async (t) => {
+  const { directory, env } = await setup(t);
+  const provider = createServer((_request, response) => {
+    response.writeHead(HttpStatus.Unauthorized).end();
+  });
+  t.after(() => provider.close());
+  await new Promise<void>((resolve) =>
+    provider.listen(0, "127.0.0.1", resolve),
+  );
+  const { port } = provider.address() as AddressInfo;
+  const path = join(directory, "check-refused.json");
+  writePrivate(
+    path,
+    JSON.stringify({
+      platform: OPENAI_COMPATIBLE,
+      metadata: {
+        base_url: `http://127.0.0.1:${port}/v1`,
+        models: [{ id: MODEL_ID }],
+      },
+      secret: SECRET,
+    }),
+  );
+  assert.deepEqual(
+    success(await kanthord([...LLM, "check", "--file", path], env)),
+    {
+      status: ResourceStatus.Unhealthy,
+      capability: CAPABILITY_MODEL_LIST_READ,
+      failure_reason: ResourceFailureReason.Unauthorized,
+    },
   );
 });
 

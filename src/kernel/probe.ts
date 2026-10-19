@@ -49,6 +49,20 @@ export function thrownReason(
   return redactReason(`${name}: ${message}`, secrets);
 }
 
+const FAILURE_REASON_OF_STATUS: Readonly<
+  Partial<Record<number, ResourceFailureReason>>
+> = {
+  [HttpStatus.Unauthorized]: ResourceFailureReason.Unauthorized,
+  [HttpStatus.Forbidden]: ResourceFailureReason.Forbidden,
+  [HttpStatus.TooManyRequests]: ResourceFailureReason.RateLimited,
+};
+
+export function failureReasonOfStatus(status: number): ResourceFailureReason {
+  return (
+    FAILURE_REASON_OF_STATUS[status] ?? ResourceFailureReason.InvalidResponse
+  );
+}
+
 export async function probeHttp(
   url: string,
   headers: Record<string, string>,
@@ -70,7 +84,7 @@ export async function probeHttp(
       if (response.status === HttpStatus.OK) return ResourceStatus.Healthy;
       observe?.(
         `status=${response.status}`,
-        ResourceFailureReason.Unclassified,
+        failureReasonOfStatus(response.status),
       );
       if (response.status === HttpStatus.Forbidden)
         return ResourceStatus.Unknown;
@@ -81,7 +95,7 @@ export async function probeHttp(
   } catch (error) {
     observe?.(
       thrownReason(error, headerSecrets(headers)),
-      ResourceFailureReason.Unclassified,
+      ResourceFailureReason.Unreachable,
     );
     return ResourceStatus.Unknown;
   }

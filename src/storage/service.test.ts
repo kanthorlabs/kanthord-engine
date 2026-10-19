@@ -274,12 +274,12 @@ test("check answers healthy, unhealthy and unknown for s3 without a row, a log o
     [
       HttpStatus.NotFound,
       ResourceStatus.Unhealthy,
-      ResourceFailureReason.Unclassified,
+      ResourceFailureReason.InvalidResponse,
     ],
     [
       HttpStatus.InternalServerError,
       ResourceStatus.Unknown,
-      ResourceFailureReason.Unclassified,
+      ResourceFailureReason.InvalidResponse,
     ],
   ] as const;
   let next = 0;
@@ -326,7 +326,7 @@ test("check answers unknown when the request throws", async (t) => {
     {
       status: ResourceStatus.Unknown,
       capability: CAPABILITY_BUCKET_HEAD,
-      failure_reason: ResourceFailureReason.Unclassified,
+      failure_reason: ResourceFailureReason.Unreachable,
     },
   );
 });
@@ -415,12 +415,12 @@ test("verify answers healthy, unhealthy and unknown like the health report witho
     [
       HttpStatus.NotFound,
       ResourceStatus.Unhealthy,
-      ResourceFailureReason.Unclassified,
+      ResourceFailureReason.InvalidResponse,
     ],
     [
       HttpStatus.InternalServerError,
       ResourceStatus.Unknown,
-      ResourceFailureReason.Unclassified,
+      ResourceFailureReason.InvalidResponse,
     ],
   ] as const;
   let next = 0;
@@ -478,7 +478,7 @@ test("verify answers unknown when the request throws and logs no secret", async 
     {
       status: ResourceStatus.Unknown,
       capability: CAPABILITY_BUCKET_HEAD,
-      failure_reason: ResourceFailureReason.Unclassified,
+      failure_reason: ResourceFailureReason.Unreachable,
     },
   );
   assert.ok(!lines.join("").includes(SECRET));

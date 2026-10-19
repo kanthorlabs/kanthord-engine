@@ -425,8 +425,8 @@ test("openai-codex check reports a reason without token material", async () => {
   );
   assert.equal(reasons.length, REASON_COUNT);
   assert.deepEqual(failureReasons, [
-    ResourceFailureReason.Unclassified,
-    ResourceFailureReason.Unclassified,
+    ResourceFailureReason.Unauthorized,
+    ResourceFailureReason.Unreachable,
   ]);
   assert.match(reasons[0]!, /^stopReason=error errorMessage=401: denied/);
   assert.match(reasons[1]!, /^Error: failed with/);
@@ -439,16 +439,19 @@ test("openai-codex check reports a reason without token material", async () => {
   }
 });
 
-test("a model-list check observes an HTTP refusal, a malformed list and a network error as unclassified", async (t) => {
+test("a model-list check names the failure reason of a refusal, a malformed list and a network error", async (t) => {
   const observed: Array<[string, string]> = [];
   const observe = (reason: string, failureReason: string) =>
     void observed.push([reason, failureReason]);
-  const fetch = t.mock.method(
-    globalThis,
-    "fetch",
-    async () => new Response(null, { status: HttpStatus.Unauthorized }),
-  );
-  await checkOpenAI(SECRET, background, observe);
+  const fetch = t.mock.method(globalThis, "fetch", async () => new Response());
+  for (const status of [
+    HttpStatus.Unauthorized,
+    HttpStatus.Forbidden,
+    HttpStatus.TooManyRequests,
+  ]) {
+    fetch.mock.mockImplementation(async () => new Response(null, { status }));
+    await checkOpenAI(SECRET, background, observe);
+  }
   fetch.mock.mockImplementation(async () => Response.json({ data: SECRET }));
   await checkOpenAI(SECRET, background, observe);
   fetch.mock.mockImplementation(async () => {
@@ -458,14 +461,35 @@ test("a model-list check observes an HTTP refusal, a malformed list and a networ
   assert.deepEqual(
     observed.map(([, failureReason]) => failureReason),
     [
-      ResourceFailureReason.Unclassified,
-      ResourceFailureReason.Unclassified,
-      ResourceFailureReason.Unclassified,
+      ResourceFailureReason.Unauthorized,
+      ResourceFailureReason.Forbidden,
+      ResourceFailureReason.RateLimited,
+      ResourceFailureReason.InvalidResponse,
+      ResourceFailureReason.Unreachable,
     ],
   );
   assert.equal(observed[0]![0], `status=${HttpStatus.Unauthorized}`);
-  assert.equal(observed[1]![0], MALFORMED_LIST_REASON);
+  assert.equal(observed[3]![0], MALFORMED_LIST_REASON);
   assert.ok(observed.every(([reason]) => !reason.includes(SECRET)));
+});
+
+test("a model-call check names the failure reason of the status in the error message", async () => {
+  const observed: string[] = [];
+  const observe = (_reason: string, failureReason: string) =>
+    void observed.push(failureReason);
+  const future = Date.now() + FUTURE_MS;
+  for (const message of ["403: denied", "429: slow down", "no status"])
+    await checkOpenAICodex(
+      credentialOf(future),
+      background,
+      reply("error", message),
+      observe,
+    );
+  assert.deepEqual(observed, [
+    ResourceFailureReason.Forbidden,
+    ResourceFailureReason.RateLimited,
+    ResourceFailureReason.Unreachable,
+  ]);
 });
 
 test("openai-codex check answers unreachable without a call for an expired token or a cancelled context", async (t) => {
