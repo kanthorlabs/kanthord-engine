@@ -26,6 +26,13 @@ const COMMITTED_PREFIX_LENGTH = 1;
 const COMPLETE_HISTORY_LENGTH = 2;
 const PRIVATE_FILE_MODE = 0o600;
 const SELECT_ALL_SQL = "SELECT * FROM t";
+const TRANSACTION_COUNT = 1000;
+const DISTINCT_SQL_COUNT = 3;
+const ROLLBACK_MESSAGE = "rolled back";
+const ORPHAN_KEY = 99;
+const NO_ROWS = 0;
+const DEFERRED_FOREIGN_KEY_SQL =
+  "CREATE TABLE parent (id INTEGER PRIMARY KEY); CREATE TABLE child (parent_id INTEGER REFERENCES parent(id) DEFERRABLE INITIALLY DEFERRED)";
 const FILLER_RESERVED_COUNT = 2;
 const B_VALUE = "b";
 const X_VALUE = "x";
@@ -244,7 +251,7 @@ test("plan reads the history without a write and backup copies a consistent priv
   }
 });
 
-test("prepare answers one statement for one SQL text in one transaction", () => {
+test("prepare answers one statement for one SQL text across transactions", () => {
   const store = new Store(":memory:");
   try {
     const sql = "SELECT 1 AS value";
@@ -254,8 +261,123 @@ test("prepare answers one statement for one SQL text in one transaction", () => 
       return statement;
     });
     store.transaction(({ database }) => {
-      assert.notEqual(database.prepare(sql), first);
+      assert.equal(database.prepare(sql), first);
     });
+  } finally {
+    store.close();
+  }
+});
+
+test("the connection prepares one statement for each SQL text over many transactions", () => {
+  const store = new Store(":memory:");
+  try {
+    const statements = new Set<unknown>();
+    for (let index = 0; index < TRANSACTION_COUNT; index++)
+      store.transaction(({ database }) => {
+        for (let value = 1; value <= DISTINCT_SQL_COUNT; value++)
+          statements.add(database.prepare(`SELECT ${value} AS value`));
+      });
+    assert.equal(statements.size, DISTINCT_SQL_COUNT);
+  } finally {
+    store.close();
+  }
+});
+
+test("a rollback clears the statement cache", () => {
+  const store = new Store(":memory:");
+  try {
+    const sql = "SELECT 1 AS value";
+    let rolledBack: unknown;
+    assert.throws(
+      () =>
+        store.transaction(({ database }) => {
+          rolledBack = database.prepare(sql);
+          throw new Error(ROLLBACK_MESSAGE);
+        }),
+      { message: ROLLBACK_MESSAGE },
+    );
+    store.transaction(({ database }) => {
+      assert.notEqual(database.prepare(sql), rolledBack);
+    });
+  } finally {
+    store.close();
+  }
+});
+
+test("a rollback after a schema change answers the old columns", () => {
+  const store = new Store(":memory:");
+  try {
+    store.database.exec("CREATE TABLE t (a TEXT); INSERT INTO t VALUES ('x')");
+    assert.throws(
+      () =>
+        store.transaction(({ database }) => {
+          database.exec("ALTER TABLE t ADD COLUMN w TEXT");
+          const inside = database.prepare(SELECT_ALL_SQL).all();
+          assert.deepEqual(Object.keys(inside[0]!), ["a", "w"]);
+          throw new Error(ROLLBACK_MESSAGE);
+        }),
+      { message: ROLLBACK_MESSAGE },
+    );
+    const after = store.database.prepare(SELECT_ALL_SQL).all();
+    assert.deepEqual(Object.keys(after[0]!), ["a"]);
+  } finally {
+    store.close();
+  }
+});
+
+test("a failed commit clears the statement cache and leaves the store usable", () => {
+  const store = new Store(":memory:");
+  try {
+    store.database.exec(DEFERRED_FOREIGN_KEY_SQL);
+    const sql = "SELECT 1 AS value";
+    let failed: unknown;
+    assert.throws(
+      () =>
+        store.transaction(({ database }) => {
+          failed = database.prepare(sql);
+          database.prepare("INSERT INTO child VALUES (?)").run(ORPHAN_KEY);
+        }),
+      /FOREIGN KEY/,
+    );
+    store.transaction(({ database }) => {
+      assert.notEqual(database.prepare(sql), failed);
+      assert.equal(
+        database.prepare("SELECT COUNT(*) AS count FROM child").get()?.count,
+        NO_ROWS,
+      );
+    });
+  } finally {
+    store.close();
+  }
+});
+
+test("a transaction that SQLite ended keeps the error of the work", () => {
+  const store = new Store(":memory:");
+  try {
+    store.database.exec("CREATE TABLE t (id INTEGER PRIMARY KEY)");
+    const sql = "SELECT 1 AS value";
+    let ended: unknown;
+    assert.throws(
+      () =>
+        store.transaction(({ database }) => {
+          ended = database.prepare(sql);
+          const insert = database.prepare(
+            "INSERT OR ROLLBACK INTO t VALUES (?)",
+          );
+          insert.run(FIRST_KEY);
+          insert.run(FIRST_KEY);
+        }),
+      /UNIQUE|PRIMARY/,
+    );
+    assert.equal(store.database.isTransaction, false);
+    store.transaction(({ database }) => {
+      assert.notEqual(database.prepare(sql), ended);
+      database.prepare("INSERT INTO t VALUES (?)").run(FIRST_KEY);
+    });
+    assert.equal(
+      store.database.prepare("SELECT COUNT(*) AS count FROM t").get()?.count,
+      FIRST_KEY,
+    );
   } finally {
     store.close();
   }
