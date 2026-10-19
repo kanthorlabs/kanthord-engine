@@ -904,6 +904,11 @@ test("the host refusal names the refused host and the allowlist field, never the
 test("the start record states the bind and the port, and a loopback bind states its reach", async (t) => {
   for (const [bind, message] of [
     ["127.0.0.1", `${GATEWAY_STARTED_MESSAGE}. ${LOOPBACK_BIND_SENTENCE}`],
+    ["::1", `${GATEWAY_STARTED_MESSAGE}. ${LOOPBACK_BIND_SENTENCE}`],
+    [
+      "::ffff:127.0.0.1",
+      `${GATEWAY_STARTED_MESSAGE}. ${LOOPBACK_BIND_SENTENCE}`,
+    ],
     ["::", GATEWAY_STARTED_MESSAGE],
   ] as const) {
     const fixture = await gatewayFixture(t, { bind });
