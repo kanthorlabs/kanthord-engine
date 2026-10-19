@@ -384,7 +384,8 @@ The implemented fields are:
 - `gateway.port`: optional Convict `port`, default `31415`.
 - `gateway.allowed_hosts`: optional array of nonempty strings, default
   `["127.0.0.1:31415", "localhost:31415"]`.
-- `gateway.allowed_origins`: optional array of nonempty strings, default `[]`.
+- `gateway.allowed_origins`: optional array of nonempty strings, default
+  `["http://127.0.0.1:27182", "http://localhost:27182"]`.
 - `gateway.base_path`: optional string, default `/`. A value other than `/`
   matches `^(/[A-Za-z0-9._~-]+)+$` and has no trailing slash, for example
   `/s/kanthord`. The listener serves the API and the embedded dashboard only
@@ -454,7 +455,7 @@ master key, validate it in memory, and then publish it. Each repeatable
 `--gateway-allowed-host` value is lowercased and appended to the default
 `gateway.allowed_hosts` without duplicates. A value that is not exactly
 `<name>` or `<name>:<port>` fails with `cli.config.invalid_allowed_host` before
-any file is written. `--gateway-bind` writes its value to `gateway.bind`. The default is `127.0.0.1`. The container image uses `::`. A value that
+any file is written. `--gateway-bind` writes its value to `gateway.bind`. The default is `127.0.0.1`. A container runs `config init --gateway-bind ::` once, before the first start. A value that
 is not an IP address fails with `system.config.invalid_field` before any file
 is written. `--gateway-base-path` writes its value to `gateway.base_path`. A
 value that is neither `/` nor a path without a trailing slash fails with
@@ -510,7 +511,8 @@ On success stdout is exactly `valid: <absolute-path>\n` and exit
 is `0`. On failure stderr reports the safe parse/permission diagnostic or the
 collected invalid fields and exit is `1`. No file is created, repaired, or
 modified. An absent file prints `system.config.not_found: configuration is absent`,
-then the rows `config: <path>` and `command: kanthord config init --config "<path>"`.
+then the rows `config: <path>`, `command: kanthord config init --config "<path>"`
+and `container: podman run --rm -v <volume>:/var/lib/kanthord docker.io/kanthorlabs/kanthord:<version> config init --gateway-bind :: --gateway-allowed-host localhost:<port>`.
 
 ### `config show`
 

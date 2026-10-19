@@ -618,6 +618,10 @@ test("private configuration rejects modes, symlinks and wrong kinds, and creates
       isDeepStrictEqual(error.fields, [
         ["config", path],
         ["command", `kanthord config init --config ${JSON.stringify(path)}`],
+        [
+          "container",
+          "podman run --rm -v <volume>:/var/lib/kanthord docker.io/kanthorlabs/kanthord:<version> config init --gateway-bind :: --gateway-allowed-host localhost:<port>",
+        ],
       ]),
   );
   assert.deepEqual(readdirSync(directory), []);

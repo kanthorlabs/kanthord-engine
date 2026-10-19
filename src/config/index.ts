@@ -38,6 +38,8 @@ import {
   type SchedulerConfig,
 } from "../scheduler/config.ts";
 const EMPTY_SCHEMA_FIELD_COUNT = 0;
+const CONTAINER_INIT_COMMAND =
+  "podman run --rm -v <volume>:/var/lib/kanthord docker.io/kanthorlabs/kanthord:<version> config init --gateway-bind :: --gateway-allowed-host localhost:<port>";
 export interface ServerConfig extends GlobalConfig {
   version: number;
   gateway: GatewayConfig;
@@ -226,6 +228,7 @@ export function readConfig(path: string): string {
       fields: [
         ["config", path],
         ["command", `kanthord config init --config ${JSON.stringify(path)}`],
+        ["container", CONTAINER_INIT_COMMAND],
       ],
     });
   audit(dirname(path), "directory");
