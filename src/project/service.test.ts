@@ -932,9 +932,10 @@ test("worker binding resolution retains pinned configuration and reports later d
 
 test("worker group resolution uses the latest tombstone and accepts equality at its creation", async (t) => {
   const f = bindingFixture(t);
-  t.mock.method(Date, "now", () => GROUP_ISSUED_AT);
+  let now = GROUP_ISSUED_AT;
+  t.mock.method(Date, "now", () => now);
   f.write(SINGLE_INSTANCE);
-  t.mock.method(Date, "now", () => TOMBSTONE_AT);
+  now = TOMBSTONE_AT;
   f.write(null);
   f.write(SINGLE_INSTANCE);
   assert.equal(
@@ -956,7 +957,7 @@ test("worker group resolution uses the latest tombstone and accepts equality at 
     { project_id: f.project_id, resource_identity: WORKER_GROUP },
   );
   const secondTombstoneAt = TOMBSTONE_AT + GROUP_ISSUED_AT;
-  t.mock.method(Date, "now", () => secondTombstoneAt);
+  now = secondTombstoneAt;
   f.write(null);
   f.write(SINGLE_INSTANCE);
   assert.equal(
