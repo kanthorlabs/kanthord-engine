@@ -191,14 +191,15 @@ HTTP `200` answers `{ status, capability, failure_reason }`, the health entry of
 
 The failure reasons of the answer:
 
-| Value              | Cause                                                                                                      |
-| ------------------ | ---------------------------------------------------------------------------------------------------------- |
-| `unauthorized`     | The `github` check gets HTTP `401`.                                                                        |
-| `forbidden`        | The `github` check gets HTTP `403`.                                                                        |
-| `rate_limited`     | The `github` check gets HTTP `429`.                                                                        |
-| `invalid_response` | The `github` check gets another HTTP status.                                                               |
-| `unreachable`      | The `github` request fails before an HTTP answer.                                                          |
-| `unclassified`     | Any other failure, a check that exceeds its deadline included. A failed `ssh` check also gives this value. |
+| Value                  | Cause                                                                                                                                                                        |
+| ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `unauthorized`         | The `github` check gets HTTP `401`.                                                                                                                                          |
+| `forbidden`            | The `github` check gets HTTP `403`.                                                                                                                                          |
+| `rate_limited`         | The `github` check gets HTTP `429`.                                                                                                                                          |
+| `invalid_response`     | The `github` check gets another HTTP status.                                                                                                                                 |
+| `unreachable`          | The `github` request fails before an HTTP answer.                                                                                                                            |
+| `identity_unavailable` | The `ssh` check of `verify` refuses the record: the key does not decrypt or parse, the record holds no generated key, or the derived public key differs from the stored one. |
+| `unclassified`         | Any other failure, a check that exceeds its deadline included.                                                                                                               |
 
 A platform with `verifiable: false`, with the secret shape `oauth` or with the secret shape `ssh_key` answers `400 credential.check.unsupported`.
 A platform of another component answers `400 credential.platform.unsupported`.
