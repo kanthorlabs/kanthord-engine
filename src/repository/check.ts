@@ -9,6 +9,7 @@ const SSH_MIN_MAJOR = 9;
 const SSH_MIN_MINOR = 0;
 const ENOENT_CODE = "ENOENT";
 const EXIT_SUCCESS = 0;
+const USAGE_OPTION = "-?";
 const execFileAsync = promisify(execFile);
 
 export const CheckErrorCode = {
@@ -106,10 +107,29 @@ export function parseSshVersion(output: string): [number, number] {
   return [major, minor];
 }
 
+export function requireTool(cmd: string): void {
+  const result = spawnSync(cmd, [USAGE_OPTION], { stdio: "ignore" });
+  if (!result.error) return;
+  if ((result.error as NodeJS.ErrnoException).code === ENOENT_CODE)
+    throw new Diagnostic(CheckErrorCode.ToolMissing, "tool not found", {
+      fields: [["tool", cmd]],
+    });
+  throw new Diagnostic(CheckErrorCode.ToolMissing, "tool spawn failed", {
+    fields: [["tool", cmd]],
+  });
+}
+
 export function checkRepositoryTools(): void {
   runTool("bash", ["--version"]);
   parseGitVersion(runTool("git", ["--version"]).stdout);
   parseSshVersion(runTool("ssh", ["-V"]).stderr);
+  requireTool("ssh-agent");
+  requireTool("ssh-add");
+}
+
+export function checkServerRepositoryTools(): void {
+  checkRepositoryTools();
+  requireTool("ssh-keyscan");
 }
 
 export async function probeRepositoryTools(context: Context): Promise<boolean> {

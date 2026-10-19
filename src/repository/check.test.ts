@@ -7,9 +7,11 @@ import { HealthStatus } from "../kernel/service.ts";
 import {
   CheckErrorCode,
   checkRepositoryTools,
+  checkServerRepositoryTools,
   parseGitVersion,
   parseSshVersion,
   probeRepositoryTools,
+  requireTool,
 } from "./check.ts";
 import { RepositoryComponent } from "./index.ts";
 
@@ -86,6 +88,23 @@ test("parseSshVersion rejects malformed output", () => {
 
 test("checkRepositoryTools accepts the installed tools", () => {
   assert.doesNotThrow(() => checkRepositoryTools());
+});
+
+test("checkServerRepositoryTools accepts the installed tools", () => {
+  assert.doesNotThrow(() => checkServerRepositoryTools());
+});
+
+test("requireTool accepts a present SSH agent tool", () => {
+  assert.doesNotThrow(() => requireTool("ssh-agent"));
+  assert.doesNotThrow(() => requireTool("ssh-add"));
+  assert.doesNotThrow(() => requireTool("ssh-keyscan"));
+});
+
+test("requireTool refuses a missing tool", () => {
+  assertDiagnosticCode(
+    () => requireTool("kanthord-missing-ssh-agent"),
+    CheckErrorCode.ToolMissing,
+  );
 });
 
 test("probeRepositoryTools accepts the installed tools", async () => {
