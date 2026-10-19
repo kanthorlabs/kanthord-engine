@@ -10,7 +10,7 @@ const SSH_GITHUB = "ssh.github.com";
 const ALTSSH_GITLAB = "altssh.gitlab.com";
 const ALTSSH_BITBUCKET = "altssh.bitbucket.org";
 
-test("the port table maps ssh.github.com and each alternative SSH host to port 443 and every other host to port 22", () => {
+test("the port table maps each alternative SSH host to port 443 and every other host to port 22", () => {
   const ports = {
     "github.com": DEFAULT_PORT,
     "ssh.github.com": ALTERNATIVE_PORT,

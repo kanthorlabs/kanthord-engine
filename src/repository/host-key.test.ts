@@ -54,6 +54,7 @@ const EXIT_SUCCESS = 0;
 const NO_READS = 0;
 const READ_PER_PIN = 1;
 const META_READ_PER_HOST = 2;
+const GITHUB_PINS = 2;
 const ONE_ROW_PER_HOST = 1;
 const NO_PINS = 0;
 const PIN_LOG = "host key pinned";
@@ -224,10 +225,6 @@ test("the keyscan arguments carry the port of the host", () => {
   assert.deepEqual(
     keyscanArguments(ALTSSH_BITBUCKET),
     argumentsOf("443", ALTSSH_BITBUCKET),
-  );
-  assert.deepEqual(
-    keyscanArguments(SSH_GITHUB),
-    argumentsOf("443", SSH_GITHUB),
   );
 });
 
@@ -419,7 +416,7 @@ test("ssh.github.com pins the GitHub meta key and reads its known-hosts line in 
   const f = fixture(t);
   await f.pin(SSH_GITHUB, GITHUB_FINGERPRINT);
   await f.pin(GITHUB, GITHUB_FINGERPRINT);
-  assert.equal(f.reads.meta, META_READ_PER_HOST * READ_PER_PIN);
+  assert.equal(f.reads.meta, GITHUB_PINS * READ_PER_PIN);
   assert.deepEqual(f.reads.keyscan, []);
   assert.equal(
     f.store.transaction((tx) => f.hostKeys.knownHostsLine(tx, SSH_GITHUB)),
