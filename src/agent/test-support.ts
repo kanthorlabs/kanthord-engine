@@ -11,7 +11,12 @@ import {
   type Context as ModelContext,
 } from "@earendil-works/pi-ai";
 import pino from "pino";
-import type { CredentialHold, CredentialHolds } from "../custody/contract.ts";
+import type {
+  CredentialHold,
+  CredentialHoldItem,
+  CredentialHolds,
+} from "../custody/contract.ts";
+import type { Transaction } from "../kernel/store.ts";
 
 export function scriptedProvider(
   script: FauxResponseStep[],
@@ -68,18 +73,46 @@ export function scriptedProvider(
 }
 export type ScriptedProvider = ReturnType<typeof scriptedProvider>;
 
+const NO_STRIKES = 0;
+const NO_ROWS = 0;
+
+function holdTable(tx: Transaction) {
+  tx.database.exec(
+    "CREATE TABLE IF NOT EXISTS memory_credential_hold (credential TEXT PRIMARY KEY, available_at INTEGER NOT NULL, strikes INTEGER NOT NULL)",
+  );
+  return tx.database;
+}
+
 export function memoryCredentialHolds(): CredentialHolds {
-  const holds = new Map<string, CredentialHold>();
   return {
-    holdOf: (_tx, name) => holds.get(name) ?? null,
-    hold: (_tx, name, availableAt, strikes) => {
-      holds.set(name, { available_at: availableAt, strikes });
+    holdOf: (tx, name) => {
+      const row = holdTable(tx)
+        .prepare(
+          "SELECT available_at, strikes FROM memory_credential_hold WHERE credential = ?",
+        )
+        .get(name) as CredentialHold | undefined;
+      return row === undefined ? null : { ...row };
     },
-    release: (_tx, name) => holds.delete(name),
-    listHolds: () =>
-      [...holds]
-        .map(([credential, hold]) => ({ credential, ...hold }))
-        .sort((left, right) => left.credential.localeCompare(right.credential)),
+    hold: (tx, name, availableAt, strikes) => {
+      holdTable(tx)
+        .prepare(
+          "INSERT OR REPLACE INTO memory_credential_hold (credential, available_at, strikes) VALUES (?, ?, ?)",
+        )
+        .run(name, availableAt, strikes);
+    },
+    release: (tx, name) =>
+      holdTable(tx)
+        .prepare(
+          "DELETE FROM memory_credential_hold WHERE credential = ? AND strikes > ?",
+        )
+        .run(name, NO_STRIKES).changes > NO_ROWS,
+    listHolds: (tx) =>
+      holdTable(tx)
+        .prepare(
+          "SELECT credential, available_at, strikes FROM memory_credential_hold WHERE strikes > ? ORDER BY credential",
+        )
+        .all(NO_STRIKES)
+        .map((row) => ({ ...row }) as CredentialHoldItem),
   };
 }
 

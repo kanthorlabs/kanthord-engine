@@ -78,6 +78,9 @@ function stopOf(reason: ReleaseStop["reason"], code: string | null) {
 
 function releaseHarness(t: TestContext) {
   const h = schedulerHarness(t);
+  const holds = memoryCredentialHolds();
+  const heldOf = () =>
+    h.store.transaction((tx) => holds.holdOf(tx, selection.credential));
   const chainCalls: Array<{ method: string; arguments: unknown[] }> = [];
   const reported: Array<{
     changes: readonly CooldownChange[];
@@ -105,12 +108,14 @@ function releaseHarness(t: TestContext) {
       pins: [],
     }),
     resolve: () => [selection],
-    providerFailure: (_tx, ...args) => {
+    providerFailure: (tx, ...args) => {
       chainCalls.push({ method: "providerFailure", arguments: args });
+      holds.hold(tx, selection.credential, started.available_at, FIRST_STRIKE);
       return [started];
     },
-    success: (_tx, ...args) => {
+    success: (tx, ...args) => {
       chainCalls.push({ method: "success", arguments: args });
+      holds.release(tx, selection.credential);
       return [cleared];
     },
     selected: () => {},
@@ -164,6 +169,8 @@ function releaseHarness(t: TestContext) {
   return {
     ...h,
     row,
+    holds,
+    heldOf,
     chainCalls,
     reported,
     started,
@@ -278,6 +285,15 @@ test("a rolled-back release reports no cooldown change", async (t) => {
   refused.dependencies.transitions.release = () => {
     throw rollback;
   };
+  const held = { available_at: FIXTURE_NOW, strikes: FIRST_STRIKE };
+  refused.store.transaction((tx) =>
+    refused.holds.hold(
+      tx,
+      selection.credential,
+      held.available_at,
+      held.strikes,
+    ),
+  );
   await assert.rejects(refused.release(null), rollback);
   assert.deepEqual(refused.chainCalls, [
     {
@@ -286,6 +302,7 @@ test("a rolled-back release reports no cooldown change", async (t) => {
     },
   ]);
   assert.deepEqual(refused.reported, []);
+  assert.deepEqual(refused.heldOf(), held);
   assert.equal(
     refused.store.transaction((tx) =>
       readExecution(tx, refused.row.execution_id),
@@ -315,6 +332,7 @@ test("a rolled-back release reports no cooldown change", async (t) => {
     },
   ]);
   assert.deepEqual(failed.reported, []);
+  assert.equal(failed.heldOf(), null);
   assert.equal(
     failed.store.transaction((tx) => readExecution(tx, failed.row.execution_id))
       ?.ended_at,
@@ -355,6 +373,7 @@ function pinHarness(
   h.store.transaction(({ database }) => {
     for (const migration of agentMigrations) migration(database);
   });
+  const holds = memoryCredentialHolds();
   const agent = new AgentComponent({
     store: h.store,
     config: {
@@ -365,7 +384,7 @@ function pinHarness(
     hostHome: "/nonexistent/home",
     workbenchDirectory: (agentName) => `/nonexistent/workbench/${agentName}`,
     custodySuitability: () => {},
-    credentialHolds: memoryCredentialHolds(),
+    credentialHolds: holds,
     approvedModels: () => null,
     entriesOfAgent: () => [],
     repositoryWorkingOf: () => null,
@@ -508,6 +527,7 @@ function pinHarness(
   return {
     ...h,
     agent,
+    holds,
     bindings,
     bindingId,
     row,
@@ -631,6 +651,10 @@ test("a rolled-back release of a pinned execution writes no cooldown log", async
   const h = claimedPin(t, logger);
   h.seedHold();
   logs.length = 0;
+  const heldOf = () =>
+    h.store.transaction((tx) => h.holds.holdOf(tx, PRIMARY.credential));
+  const held = heldOf();
+  assert.notEqual(held, null);
   const rollback = new Error("rolled back");
   const rollbackCaller = {
     ...h.caller(h.execution),
@@ -645,6 +669,7 @@ test("a rolled-back release of a pinned execution writes no cooldown log", async
     logs.filter(({ msg }) => msg === FallbackLog.CooldownCleared),
     [],
   );
+  assert.deepEqual(heldOf(), held);
   await assert.rejects(
     h.release(
       stopOf(ExecutionStopReason.ProviderFailed, ProviderFailure.RateLimited),
@@ -656,6 +681,7 @@ test("a rolled-back release of a pinned execution writes no cooldown log", async
     logs.filter(({ msg }) => msg === FallbackLog.CooldownStarted),
     [],
   );
+  assert.deepEqual(heldOf(), held);
 });
 
 test("a committed release of a pinned execution writes the cooldown records of today", async (t) => {

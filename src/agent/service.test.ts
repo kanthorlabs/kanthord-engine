@@ -2881,6 +2881,8 @@ test("a rolled-back clear of a cooldown writes no log", (t) => {
   const head = f.selected();
   f.fail(head, AdvancingFailure.RateLimited);
   logs.length = 0;
+  const held = f.invoke("cooldown.list", null, {});
+  assert.notDeepEqual(held, { items: [] });
   const rollback = new Error("rolled back");
   const operation = agentOperations["cooldown.clear"];
   assert.throws(
@@ -2903,4 +2905,5 @@ test("a rolled-back clear of a cooldown writes no log", (t) => {
     rollback,
   );
   assert.deepEqual(logs, []);
+  assert.deepEqual(f.invoke("cooldown.list", null, {}), held);
 });
