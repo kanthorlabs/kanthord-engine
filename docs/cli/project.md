@@ -361,7 +361,7 @@ The key of the action is `<binding name>.<name>`, which the Mission Service free
 Coverage and suitability follow [Repository configuration and policy](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/project-service.md#repository-configuration-and-policy).
 
 - Every repository binding requires one `ssh` record. A binding without `credential` permits no platform action.
-- Git operations use the SSH configuration of the host, pinned by the `ssh` record.
+- Git operations use the private key of the `ssh` record and the pinned host key of the address host. The server reads no host SSH configuration, key or agent.
 - Custody checks that the credential has platform `github`, under [suitability](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/custody.impl.md#suitability).
 - These checks read no secret material and assert no narrower upstream scope.
 
