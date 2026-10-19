@@ -1909,6 +1909,7 @@ test("a new binding releases the key of its SSH credential under the human draft
         private_key: SSH_KEY.private_key,
         public_key: SSH_KEY.public_key,
         known_hosts: `github.com ${HOST_KEY}\n`,
+        port: 22,
       },
     },
   ]);
@@ -1921,6 +1922,7 @@ test("a write with a pinned host passes through the private agent of the release
   const repository = new RepositoryComponent({
     checkTools: () => {},
     knownHostsOf: () => sshd.known_hosts,
+    portOf: () => sshd.port,
   });
   const reads: string[] = [];
   const f = writeFixture(t, {
@@ -4598,6 +4600,7 @@ test("binding.instruction_files.get releases the key under the Project identity 
     private_key: SSH_KEY.private_key,
     public_key: SSH_KEY.public_key,
     known_hosts: `github.com ${HOST_KEY}\n`,
+    port: 22,
   };
   assert.deepEqual(resolveCalls[NO_ITEMS]?.ssh, ssh);
   assert.deepEqual(readCalls[NO_ITEMS]?.ssh, ssh);

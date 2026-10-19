@@ -39,7 +39,8 @@ const PRIVATE_KEY_MARK = "PRIVATE KEY";
 const LINE_END = "\n";
 const SSH_VARIANT = "ssh";
 const DIRECTORY_FILES = ["a", "id.pub", "known_hosts"];
-const KNOWN_HOSTS = "[127.0.0.1]:2222 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIA\n";
+const PORT = 2222;
+const KNOWN_HOSTS = `[127.0.0.1]:${PORT} ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIA\n`;
 const PROC = "/proc";
 const LINUX = "linux";
 const AGENT_PATTERN = /IdentityAgent='([^']+)'/;
@@ -56,7 +57,7 @@ process.env.TMPDIR = scratch;
 process.on("exit", () => rmSync(scratch, { recursive: true, force: true }));
 
 function access(name: string): SshAccess {
-  return { ...generateSshKey(name), known_hosts: KNOWN_HOSTS };
+  return { ...generateSshKey(name), known_hosts: KNOWN_HOSTS, port: PORT };
 }
 
 function bodyLines(privateKey: string): string[] {
@@ -168,7 +169,7 @@ test("withSshAgent prepares a private directory and an isolated SSH command", as
     assert.equal(env.GIT_SSH_VARIANT, SSH_VARIANT);
     assert.equal(
       env.GIT_SSH_COMMAND,
-      `ssh -F none -o IdentitiesOnly=yes -o IdentityFile='${directory}/id.pub' -o IdentityAgent='${directory}/a' -o UserKnownHostsFile='${directory}/known_hosts' -o GlobalKnownHostsFile=/dev/null -o StrictHostKeyChecking=yes -o UpdateHostKeys=no -o BatchMode=yes -o ForwardAgent=no -o ControlMaster=no -o ControlPath=none -o PreferredAuthentications=publickey`,
+      `ssh -F none -o Port=${PORT} -o IdentitiesOnly=yes -o IdentityFile='${directory}/id.pub' -o IdentityAgent='${directory}/a' -o UserKnownHostsFile='${directory}/known_hosts' -o GlobalKnownHostsFile=/dev/null -o StrictHostKeyChecking=yes -o UpdateHostKeys=no -o BatchMode=yes -o ForwardAgent=no -o ControlMaster=no -o ControlPath=none -o PreferredAuthentications=publickey`,
     );
   });
 });
@@ -289,7 +290,7 @@ test("a killed process leaves no agent, and a later sweep removes its directory"
     const { generateSshKey } = await import(${JSON.stringify(MODULE_URLS.key)});
     const { background } = await import(${JSON.stringify(MODULE_URLS.context)});
     setInterval(() => {}, 1000);
-    await withSshAgent({ ...generateSshKey("crash"), known_hosts: "" }, background, 60000, async (env) => {
+    await withSshAgent({ ...generateSshKey("crash"), known_hosts: "", port: 22 }, background, 60000, async (env) => {
       process.stdout.write(env.GIT_SSH_COMMAND + "\\n");
       await new Promise(() => {});
     });
@@ -329,7 +330,7 @@ test("a terminated worker thread leaves no agent", async () => {
       const { withSshAgent } = await import(${JSON.stringify(MODULE_URLS.agent)});
       const { generateSshKey } = await import(${JSON.stringify(MODULE_URLS.key)});
       const { background } = await import(${JSON.stringify(MODULE_URLS.context)});
-      await withSshAgent({ ...generateSshKey("thread"), known_hosts: "" }, background, 60000, async (env) => {
+      await withSshAgent({ ...generateSshKey("thread"), known_hosts: "", port: 22 }, background, 60000, async (env) => {
         parentPort.postMessage(env.GIT_SSH_COMMAND);
         await new Promise(() => {});
       });

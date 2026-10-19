@@ -8,6 +8,12 @@ const SSH_HOST_SETS: ReadonlyMap<string, ReadonlySet<string>> = new Map([
     new Set(["bitbucket.org", "altssh.bitbucket.org"]),
   ],
 ]);
+const SSH_DEFAULT_PORT = 22;
+const SSH_ALTERNATIVE_PORT = 443;
+const SSH_HOST_PORTS: ReadonlyMap<string, number> = new Map([
+  ["altssh.gitlab.com", SSH_ALTERNATIVE_PORT],
+  ["altssh.bitbucket.org", SSH_ALTERNATIVE_PORT],
+]);
 const GIT_ONLY_PLATFORMS: ReadonlySet<string> = new Set([
   RepositoryPlatform.GitLab,
   RepositoryPlatform.Bitbucket,
@@ -29,4 +35,20 @@ export function isSshHost(hostname: string): boolean {
 
 export function isGitHubSshHost(hostname: string): boolean {
   return isPlatformSshHost(RepositoryPlatform.GitHub, hostname);
+}
+
+export function sshPortOf(
+  hostname: string,
+  ports: ReadonlyMap<string, number> = SSH_HOST_PORTS,
+): number {
+  return ports.get(hostname.toLowerCase()) ?? SSH_DEFAULT_PORT;
+}
+
+export function sshKnownHostsName(
+  hostname: string,
+  ports: ReadonlyMap<string, number> = SSH_HOST_PORTS,
+): string {
+  const name = hostname.toLowerCase();
+  const port = sshPortOf(name, ports);
+  return port === SSH_DEFAULT_PORT ? name : `[${name}]:${port}`;
 }

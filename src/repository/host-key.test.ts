@@ -15,13 +15,19 @@ import {
   repositoryOperations,
 } from "./contract.ts";
 import {
+  keyscanArguments,
   parseGitHubMeta,
   parseKeyscan,
   RepositoryHostKeys,
   type HostKeySources,
 } from "./host-key.ts";
 import { repositoryMigrations } from "./migrations.ts";
-import { isGitHubSshHost, isSshHost } from "./platform.ts";
+import {
+  isGitHubSshHost,
+  isSshHost,
+  sshKnownHostsName,
+  sshPortOf,
+} from "./platform.ts";
 import { sshFingerprintOf } from "./ssh-key.ts";
 
 const REPOSITORY_SERVICE = "repository";
@@ -38,6 +44,8 @@ const GITHUB_META = {
 };
 const GITLAB = "gitlab.com";
 const GITHUB = "github.com";
+const ALTSSH_GITLAB = "altssh.gitlab.com";
+const ALTSSH_BITBUCKET = "altssh.bitbucket.org";
 const KEYSCAN_PREFIX = `# ${GITLAB}:22 SSH-2.0-OpenSSH_9.6\n`;
 const LAST_PAGE_ITEMS = 1;
 const GENERATED_KEYS = 3;
@@ -68,7 +76,7 @@ function ed25519Key(): string {
 }
 
 function keyscanOutput(host: string, key: string): string {
-  return `# ${host}:22 SSH-2.0-OpenSSH_9.6\n${host} ${key}\n`;
+  return `# ${host}:${sshPortOf(host)} SSH-2.0-OpenSSH_9.6\n${sshKnownHostsName(host)} ${key}\n`;
 }
 
 function fails(error: unknown, status: number, code: string): boolean {
@@ -181,6 +189,40 @@ test("the keyscan parse skips the comment line and takes the ed25519 line of the
   assert.equal(
     parseKeyscan(GITLAB, `${GITLAB} ${key}${NON_BASE64_SUFFIX}\n`),
     null,
+  );
+});
+
+test("the keyscan parse of an alternative SSH host takes the line of the bracket form", () => {
+  const key = ed25519Key();
+  assert.equal(
+    parseKeyscan(
+      ALTSSH_GITLAB,
+      `# ${ALTSSH_GITLAB}:443 SSH-2.0-GitLab-SSHD\n[${ALTSSH_GITLAB}]:443 ${key}\n`,
+    ),
+    key,
+  );
+  assert.equal(parseKeyscan(ALTSSH_GITLAB, `${ALTSSH_GITLAB} ${key}\n`), null);
+});
+
+test("the keyscan arguments carry the port of the host", () => {
+  const argumentsOf = (port: string, host: string) => [
+    "-T",
+    "5",
+    "-t",
+    "ed25519",
+    "-p",
+    port,
+    "--",
+    host,
+  ];
+  assert.deepEqual(keyscanArguments(GITLAB), argumentsOf("22", GITLAB));
+  assert.deepEqual(
+    keyscanArguments(ALTSSH_GITLAB),
+    argumentsOf("443", ALTSSH_GITLAB),
+  );
+  assert.deepEqual(
+    keyscanArguments(ALTSSH_BITBUCKET),
+    argumentsOf("443", ALTSSH_BITBUCKET),
   );
 });
 
@@ -343,6 +385,28 @@ test("a host in another case scans, pins and reads under its lower-case name", a
     f.store
       .transaction((tx) => f.hostKeys.knownHostsLine(tx, GITLAB_MIXED_CASE))
       .startsWith(`${GITLAB} `),
+  );
+});
+
+test("an alternative SSH host pins under its name and reads its known-hosts line in the bracket form", async (t) => {
+  const f = fixture(t);
+  for (const host of [ALTSSH_GITLAB, ALTSSH_BITBUCKET]) {
+    const read = await f.scan(host);
+    assert.equal(read.host, host);
+    await f.pin(host, read.fingerprint);
+    assert.equal(
+      f.store.transaction((tx) => f.hostKeys.knownHostsLine(tx, host)),
+      `[${host}]:443 ${f.keys.get(host)}`,
+    );
+  }
+  await f.pin(GITLAB, (await f.scan(GITLAB)).fingerprint);
+  assert.equal(
+    f.store.transaction((tx) => f.hostKeys.knownHostsLine(tx, GITLAB)),
+    `${GITLAB} ${f.keys.get(GITLAB)}`,
+  );
+  assert.deepEqual(
+    (await f.list()).items.map((item) => item.host),
+    [ALTSSH_BITBUCKET, ALTSSH_GITLAB, GITLAB],
   );
 });
 

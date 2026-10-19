@@ -22,7 +22,12 @@ import {
   type HostKeyListQuery,
   type HostKeyScanAnswer,
 } from "./contract.ts";
-import { isGitHubSshHost, isSshHost } from "./platform.ts";
+import {
+  isGitHubSshHost,
+  isSshHost,
+  sshKnownHostsName,
+  sshPortOf,
+} from "./platform.ts";
 import { sshFingerprintOf } from "./ssh-key.ts";
 
 export interface HostKeySources {
@@ -44,7 +49,6 @@ const ED25519_BLOB_BYTES =
 const HOST_KEY_PREFIX = "host_key";
 const HOST_KEY_READ_TIMEOUT_MS = 10_000;
 const KEYSCAN_TIMEOUT_SECONDS = "5";
-const SSH_PORT = "22";
 const GITHUB_META_URL = "https://api.github.com/meta";
 const GITHUB_API_VERSION = "2022-11-28";
 const USER_AGENT = "kanthord";
@@ -74,6 +78,19 @@ function withDeadline<T>(
   });
 }
 
+export function keyscanArguments(host: string): string[] {
+  return [
+    "-T",
+    KEYSCAN_TIMEOUT_SECONDS,
+    "-t",
+    "ed25519",
+    "-p",
+    String(sshPortOf(host)),
+    "--",
+    host,
+  ];
+}
+
 export const liveHostKeySources: HostKeySources = {
   githubMeta: (context, deadlineMs) =>
     withDeadline(context, deadlineMs, async (signal) => {
@@ -94,16 +111,7 @@ export const liveHostKeySources: HostKeySources = {
       assert.ok(isSshHost(host));
       const { stdout } = await execFileAsync(
         "ssh-keyscan",
-        [
-          "-T",
-          KEYSCAN_TIMEOUT_SECONDS,
-          "-t",
-          "ed25519",
-          "-p",
-          SSH_PORT,
-          "--",
-          host,
-        ],
+        keyscanArguments(host),
         { signal, env: { PATH: process.env.PATH } },
       );
       return stdout;
@@ -142,10 +150,11 @@ export function parseGitHubMeta(body: unknown): string | null {
 }
 
 export function parseKeyscan(host: string, stdout: string): string | null {
+  const known = sshKnownHostsName(host);
   for (const line of stdout.split("\n")) {
     if (line.startsWith(COMMENT_PREFIX)) continue;
     const [name, type, body] = line.trim().split(/\s+/);
-    if (name !== host) continue;
+    if (name !== known) continue;
     const key = ed25519PublicKey(type, body);
     if (key !== null) return key;
   }
@@ -214,7 +223,7 @@ export function knownHostsLine(tx: Transaction, host: string): string {
       "The SSH host holds no pinned host key.",
       { host: name },
     );
-  return `${name} ${row.public_key}`;
+  return `${sshKnownHostsName(name)} ${row.public_key}`;
 }
 
 export class RepositoryHostKeys {

@@ -118,6 +118,7 @@ export const TEST_SSH_ACCESS: SshAccess = {
   private_key: "test_private_key",
   public_key: "ssh-ed25519 test_public_key",
   known_hosts: TEST_SSH_HOST_KEY.known_hosts,
+  port: 22,
 };
 
 class EveryBindingSshAccess extends Map<string, SshAccess> {
@@ -139,6 +140,7 @@ export function testSshAccess(
         private_key: `test_private_key_${binding_id}`,
         public_key: `ssh-ed25519 test_${binding_id}`,
         known_hosts: TEST_SSH_HOST_KEY.known_hosts,
+        port: 22,
       },
     ]),
   );

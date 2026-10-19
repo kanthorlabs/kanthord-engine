@@ -49,7 +49,7 @@ test("withSshAgent clones from a local sshd with a pinned host key", async (t) =
   await sshd.authorize(key.public_key);
   const target = join(temporary(t), "clone");
   const stderr = await cloneThrough(
-    { ...key, known_hosts: sshd.known_hosts },
+    { ...key, known_hosts: sshd.known_hosts, port: sshd.port },
     sshd.url(bare),
     target,
   );
@@ -68,7 +68,7 @@ test("withSshAgent refuses a host whose key differs from the pin", async (t) => 
   const other = generateSshKey("other").public_key.split(" ");
   const wrong = `[${TEST_SSHD_HOST}]:${sshd.port} ${other[0]} ${other[1]}\n`;
   const stderr = await cloneThrough(
-    { ...key, known_hosts: wrong },
+    { ...key, known_hosts: wrong, port: sshd.port },
     sshd.url(bare),
     join(temporary(t), "clone"),
   );
@@ -81,7 +81,7 @@ test("withSshAgent refuses a host with no pin", async (t) => {
   const key = generateSshKey("sshd");
   await sshd.authorize(key.public_key);
   const stderr = await cloneThrough(
-    { ...key, known_hosts: "" },
+    { ...key, known_hosts: "", port: sshd.port },
     sshd.url(bare),
     join(temporary(t), "clone"),
   );
@@ -94,7 +94,11 @@ test("withSshAgent offers only its own key", async (t) => {
   const bare = await createBareRepository(t);
   await sshd.authorize(generateSshKey("authorized").public_key);
   const stderr = await cloneThrough(
-    { ...generateSshKey("other"), known_hosts: sshd.known_hosts },
+    {
+      ...generateSshKey("other"),
+      known_hosts: sshd.known_hosts,
+      port: sshd.port,
+    },
     sshd.url(bare),
     join(temporary(t), "clone"),
   );
@@ -107,7 +111,7 @@ test("the SSH command reads no path under the home directory", async (t) => {
   await sshd.authorize(key.public_key);
   const home = userInfo().homedir;
   const output = await withSshAgent(
-    { ...key, known_hosts: sshd.known_hosts },
+    { ...key, known_hosts: sshd.known_hosts, port: sshd.port },
     background,
     DEADLINE_MS,
     async (env) => {

@@ -459,6 +459,7 @@ test("host builds the SSH access of each repository from the handover and leaves
         private_key: key.private_key,
         public_key: key.public_key,
         known_hosts: KNOWN_HOSTS,
+        port: 22,
       });
       const checkout = join(workspaces.root, "checkout");
       mkdirSync(checkout);

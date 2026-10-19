@@ -21,6 +21,7 @@ export const LOCAL_GIT_SSH_ACCESS: SshAccess = {
   private_key: LOCAL_GIT_KEY.private_key,
   public_key: LOCAL_GIT_KEY.public_key,
   known_hosts: "",
+  port: 22,
 };
 
 const SSHD_PATHS = [
@@ -44,6 +45,7 @@ export interface TestSshd {
   known_hosts: string;
   authorize(public_key: string): Promise<void>;
   url(repository: string): string;
+  scpUrl(repository: string): string;
 }
 
 function sshdPath(): string {
@@ -159,6 +161,7 @@ export async function startTestSshd(t: TestContext): Promise<TestSshd> {
     authorize: (public_key) =>
       appendFile(authorizedKeys, `${public_key.trim()}${LINE_END}`),
     url: (repository) => `ssh://${user}@${TEST_SSHD_HOST}:${port}${repository}`,
+    scpUrl: (repository) => `${user}@${TEST_SSHD_HOST}:${repository}`,
   };
 }
 

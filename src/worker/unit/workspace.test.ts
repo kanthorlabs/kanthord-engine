@@ -16,8 +16,10 @@ import * as connector from "../../repository/connector.ts";
 import { fixtureTemplate, temporary } from "../../kernel/test-support.ts";
 import { createIdentity } from "../../kernel/identity.ts";
 import { nodeBranchOf } from "../../repository/node-branch.ts";
+import { generateSshKey } from "../../repository/ssh-key.ts";
 import {
   CHECKOUTS_DIRECTORY,
+  handedSshAccess,
   SCRATCH_DIRECTORY,
   WorkspaceKind,
   WorkspaceRoot,
@@ -26,6 +28,7 @@ import {
 import {
   everyBindingSshAccess,
   LOCAL_GIT_SSH_ACCESS,
+  repositorySetup,
   testSshAccess,
   transport,
 } from "./test-support.ts";
@@ -679,4 +682,29 @@ test("a missing remote node branch in one checkout stops with repository.node_br
   );
   h.workspace.hold(key);
   h.workspace.release(key, WorkspaceKind.Node);
+});
+
+test("a handed SSH access takes the port of the address host from the fixed table", () => {
+  const ports = {
+    "git@github.com:owner/repo.git": 22,
+    "git@altssh.gitlab.com:owner/repo.git": 443,
+    "git@altssh.bitbucket.org:owner/repo.git": 443,
+  };
+  const repositories = Object.keys(ports).map((address) => ({
+    ...repositorySetup(),
+    address,
+  }));
+  const { private_key } = generateSshKey("handed");
+  const access = handedSshAccess(
+    repositories.map(({ binding_id }) => ({
+      binding_id,
+      credential_id: createIdentity("credential"),
+      private_key,
+    })),
+    repositories,
+  );
+  assert.deepEqual(
+    repositories.map(({ binding_id }) => access.get(binding_id)?.port),
+    Object.values(ports),
+  );
 });

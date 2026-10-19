@@ -135,7 +135,7 @@ async function fixture(t: TestContext) {
   const handed: SshAccess[] = [];
   const routed = (ssh: SshAccess): SshAccess => {
     handed.push(ssh);
-    return { ...ssh, known_hosts: sshd.known_hosts };
+    return { ...ssh, known_hosts: sshd.known_hosts, port: sshd.port };
   };
   const origin = sshd.url(bare);
   const connector = new RepositoryComponent();

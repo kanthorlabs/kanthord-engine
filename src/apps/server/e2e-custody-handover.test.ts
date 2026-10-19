@@ -452,6 +452,7 @@ test(
         const access = RepositoryComponent.handedSshAccess(
           identity.private_key,
           sshd.known_hosts,
+          sshd.port,
         );
         assert.equal(access.public_key.trim(), h.sshPublicKey.trim());
         await assert.rejects(

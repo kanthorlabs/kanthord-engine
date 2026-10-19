@@ -77,6 +77,7 @@ export function handedSshAccess(
       RepositoryComponent.handedSshAccess(
         identity.private_key,
         repository.ssh_host_key.known_hosts,
+        RepositoryComponent.addressPort(repository.address),
       ),
     );
   }

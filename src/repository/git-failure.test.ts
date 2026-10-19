@@ -185,6 +185,7 @@ test("gitFailureReason classifies the ssh stderr of a real ls-remote through the
     private_key: key.private_key,
     public_key: key.public_key,
     known_hosts: "",
+    port: sshd.port,
   }).then(
     () => assert.fail("The read without a pinned host key must fail."),
     (failure: unknown) => failure,
