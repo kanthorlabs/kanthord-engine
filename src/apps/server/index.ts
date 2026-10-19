@@ -42,10 +42,12 @@ import {
   missionOperations,
 } from "../../mission/contract.ts";
 import {
+  PROJECT_SERVICE_NAME,
   RepositoryPlatform,
   projectOperations,
   type ProjectBindings,
   type RepositoryConnector,
+  type SshIdentity,
 } from "../../project/contract.ts";
 import type { WorkerRegistrations } from "../../worker/contract.ts";
 import { audit, ensureDirectory } from "../../kernel/files.ts";
@@ -83,7 +85,11 @@ import {
   createInvocation,
   collectInventories,
 } from "../../gateway/index.ts";
-import { ProjectService, projectMigrations } from "../../project/index.ts";
+import {
+  ProjectService,
+  projectMigrations,
+  projectSshIdentityAuthorization,
+} from "../../project/index.ts";
 import { IntakeService, intakeMigrations } from "../../intake/index.ts";
 import {
   Consumer,
@@ -141,7 +147,13 @@ import {
   type Context,
 } from "../../kernel/context.ts";
 
-export type { RepositoryConnector } from "../../project/contract.ts";
+export type ServerRepositoryConnector = RepositoryConnector & {
+  resolveSshIdentity(
+    host: string,
+    context: Context,
+    deadlineMs: number,
+  ): Promise<SshIdentity>;
+};
 export { enforceMasterKey, verifyMasterKey } from "../../custody/index.ts";
 
 function resultOf<T>(result: OperationResult<T>): T {
@@ -185,7 +197,7 @@ export function composeServices(options: {
   stateDirectory: string;
   logger: Logger;
   health: HealthRegistry;
-  repositoryConnector?: RepositoryConnector;
+  repositoryConnector?: ServerRepositoryConnector;
   github?: { baseUrl: string; mergeabilityRetryDelayMs?: number };
   repositoryTransport?: GitWriter;
   hostKeySources?: HostKeySources;
@@ -210,11 +222,12 @@ export function composeServices(options: {
     });
   const github = new platformImplementations.github(options.github);
   const s3 = new storageImplementations.s3();
-  const gitWriter: GitWriter =
-    options.repositoryTransport ??
-    (repoConnector instanceof RepositoryComponent
+  const repositoryComponent =
+    repoConnector instanceof RepositoryComponent
       ? repoConnector
-      : new RepositoryComponent());
+      : new RepositoryComponent();
+  const gitWriter: GitWriter =
+    options.repositoryTransport ?? repositoryComponent;
   const envelopeKey = deriveEnvelopeKey(options.config.master_key);
   const registry = options.registry ?? new OperationRegistry();
   const invocation = createInvocation({
@@ -376,6 +389,11 @@ export function composeServices(options: {
     bindingsNaming: (tx, name) => project.bindingsNaming(tx, name),
     inboundsNaming: (tx, name) => intake.inboundsNaming(tx, name),
     intakeServiceName: INTAKE_SERVICE_NAME,
+    sshIdentityAuthorization: projectSshIdentityAuthorization({
+      custodySuitability: (tx, req) => custody.custodySuitability(tx, req),
+      repositoryBindingIdsOf: (tx, nodeId, revision) =>
+        mission.repositoryBindingIdsOf(tx, nodeId, revision),
+    }),
   });
   const llm = new LlmComponent({
     records: custody,
@@ -651,7 +669,14 @@ export function composeServices(options: {
     repositoryFiles,
     verifyRepositoryCredential: (name, context) =>
       repositoryCredentials.verifyCredential(name, context),
-    credentialMetadata: (tx, name) => custody.credentialMetadata(tx, name),
+    identity: mintServiceIdentity(PROJECT_SERVICE_NAME),
+    custody: {
+      authorizeOperation: (...args) => custody.authorizeOperation(...args),
+      release: (...args) => custody.release(...args),
+      grantFacts,
+    },
+    sshAccessOf: (tx, granted, material) =>
+      repositoryComponent.sshAccessOf(tx, granted, material),
     workerAgentsOf: (name) => worker.workerAgentsOf(name),
     workerAgentView: (tx, w, a, entry) =>
       worker.workerAgentView(tx, w, a, entry),

@@ -16,6 +16,7 @@ import {
 } from "../kernel/health.ts";
 import { tagSchema } from "../kernel/tag.ts";
 import { fallbackConfigurationsSchema } from "../agent/contract.ts";
+import type { SshAccess } from "../repository/contract.ts";
 
 export const BINDING_CHECK_TIMEOUT_MS = 10000;
 export const BINDING_VERIFY_TIMEOUT_MS = 30000;
@@ -409,15 +410,11 @@ export type UnmatchedClaims = (
   projectId: string,
 ) => { node_id: string; revision: number; claim: string }[];
 export type RepositoryConnector = {
-  resolveSshIdentity(
-    host: string,
-    context: Context,
-    deadlineMs: number,
-  ): Promise<SshIdentity>;
   gitLsRemote(
     sshUrl: string,
     context: Context,
     deadlineMs: number,
+    ssh: SshAccess,
   ): Promise<void>;
 };
 export type RepositoryFiles = {
@@ -426,6 +423,7 @@ export type RepositoryFiles = {
     branch: string,
     context: Context,
     deadlineMs: number,
+    ssh: SshAccess,
   ): Promise<string | null>;
   readFilesAtCommit(
     address: string,
@@ -434,8 +432,14 @@ export type RepositoryFiles = {
     maxBytes: number,
     context: Context,
     deadlineMs: number,
+    ssh: SshAccess,
   ): Promise<Array<{ path: string; state: string; text: string | null }>>;
 };
+export type RepositoryBindingIdsOf = (
+  tx: Transaction,
+  nodeId: string,
+  nodeRevision: number,
+) => string[];
 export type WorkerAgentsOfFn = (workerName: string) => string[];
 export type WorkerAgentViewFn = (
   tx: Transaction,

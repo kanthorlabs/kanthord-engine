@@ -47,6 +47,12 @@ export const HostKeyErrorCode = {
   Unpinned: "repository.host_key.unpinned",
 } as const;
 
+export interface SshAccess {
+  private_key: string;
+  public_key: string;
+  known_hosts: string;
+}
+
 export const RepositoryFileState = {
   Present: "present",
   Absent: "absent",

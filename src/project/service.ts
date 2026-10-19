@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import { join } from "node:path";
-import { isHumanIdentity, IdentityKind } from "../kernel/caller.ts";
+import {
+  isHumanIdentity,
+  IdentityKind,
+  type CallerIdentity,
+  type ServiceIdentity,
+} from "../kernel/caller.ts";
 import type { Store, Transaction } from "../kernel/store.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import {
@@ -43,10 +48,16 @@ import { gitFailureReason } from "../repository/git-failure.ts";
 import { tagSchema } from "../kernel/tag.ts";
 import { isString } from "../kernel/values.ts";
 import {
-  assertPinned,
-  sshPinSchema,
-  type SshPin,
-} from "../repository/ssh-identity.ts";
+  GrantKind,
+  SshIdentitySubjectKind,
+  type Grant,
+  type GrantFacts,
+  type GrantOf,
+  type GrantRequest,
+  type Material,
+  type SshIdentitySubject,
+} from "../custody/contract.ts";
+import type { SshAccess, SshGrantFacts } from "../repository/index.ts";
 import {
   BINDING_SET_INITIAL_VERSION,
   BindingKind,
@@ -88,7 +99,6 @@ import {
   type UnmatchedClaims,
   type ValidateEntry,
   type CustodySuitability,
-  type CredentialMetadataOf,
   type RepositoryConnector,
   type RepositoryFiles,
   type RepositoryPolicy,
@@ -134,21 +144,27 @@ const SSH_UNREACHABLE_STATUS = 422;
 const PROJECTS_DIRECTORY = "projects";
 const NO_GENERATION = 0;
 
-function refuseSshHost(address: string, pin: SshPin): void {
-  const parsed = parseRepositoryAddress(address);
-  if (!parsed)
+function refuseAddressForm(address: string): void {
+  if (parseRepositoryAddress(address) === null)
     throw new OperationError(
       HttpStatus.BadRequest,
       ProjectErrorCode.RepositoryAddressInvalid,
       "Repository address must have the form git@<host>:<owner>/<repository>.git.",
     );
-  if (parsed.host !== pin.host)
+}
+
+function refuseForeignHost(platform: string, address: string): void {
+  const parsed = parseRepositoryAddress(address);
+  if (parsed === null || !isPlatformSshHost(platform, parsed.host))
     throw new OperationError(
       HttpStatus.BadRequest,
-      ProjectErrorCode.RepositorySshHostMismatch,
-      "The repository address host differs from the host of the SSH credential.",
+      ProjectErrorCode.RepositoryAddressInvalid,
+      "Repository address must name an SSH host of its platform.",
     );
 }
+
+type SshRelease = { identity: CallerIdentity; subject: SshIdentitySubject };
+type ReleasedAccess = { address: string; ssh: SshAccess };
 
 function repositoryFailureReason(error: unknown): ResourceFailureReason {
   return error instanceof OperationError &&
@@ -188,6 +204,21 @@ function bindingUnchanged(
       deriveResourceIdentity(binding.kind, name, binding.config) &&
     canonicalJSON(saved.config) === canonicalJSON(binding.config)
   );
+}
+function callerIdentity(caller: CallerContext): CallerIdentity {
+  assert.ok(caller.identity !== undefined);
+  return caller.identity;
+}
+function draftSubject(
+  projectId: string,
+  config: typeof repositoryConfigSchema._output,
+): SshIdentitySubject {
+  return {
+    kind: SshIdentitySubjectKind.Draft,
+    project_id: projectId,
+    credential: config.ssh_credential,
+    address: config.address,
+  };
 }
 function unmatchedKey(pair: { node_id: string; claim: string }): string {
   return JSON.stringify([pair.node_id, pair.claim]);
@@ -392,6 +423,21 @@ function uniqueSubmission(bindings: BindingSetWrite["bindings"]) {
   return submission;
 }
 
+export interface ProjectCustody {
+  authorizeOperation<R extends GrantRequest>(
+    tx: Transaction,
+    request: R,
+    now: number,
+  ): GrantOf<R["kind"]>;
+  release(tx: Transaction, grant: Grant, now: number): Material;
+  grantFacts<G extends Grant>(grant: G): GrantFacts<G>;
+}
+export type SshAccessOf = (
+  tx: Transaction,
+  granted: SshGrantFacts,
+  material: Material,
+) => SshAccess;
+
 export interface Dependencies {
   config: Record<string, never>;
   operationalStore: Store;
@@ -405,7 +451,9 @@ export interface Dependencies {
   repositoryConnector: RepositoryConnector;
   repositoryFiles: RepositoryFiles;
   verifyRepositoryCredential: VerifyRepositoryCredential;
-  credentialMetadata: CredentialMetadataOf;
+  identity: ServiceIdentity;
+  custody: ProjectCustody;
+  sshAccessOf: SshAccessOf;
   workerAgentsOf: WorkerAgentsOfFn;
   workerAgentView: WorkerAgentViewFn;
   endRegistrations: EndRegistrations;
@@ -431,7 +479,9 @@ export class ProjectService implements Service, ProjectBindings {
     { commit: string; answer: InstructionFilesAnswer }
   >();
   private readonly verifyRepositoryCredential: VerifyRepositoryCredential;
-  private readonly credentialMetadata: CredentialMetadataOf;
+  private readonly identity: ServiceIdentity;
+  private readonly custody: ProjectCustody;
+  private readonly sshAccessOf: SshAccessOf;
   private readonly workerAgentsOf: WorkerAgentsOfFn;
   private readonly workerAgentView: WorkerAgentViewFn;
   private readonly endRegistrations: EndRegistrations;
@@ -450,7 +500,9 @@ export class ProjectService implements Service, ProjectBindings {
     this.repositoryConnector = dependencies.repositoryConnector;
     this.repositoryFiles = dependencies.repositoryFiles;
     this.verifyRepositoryCredential = dependencies.verifyRepositoryCredential;
-    this.credentialMetadata = dependencies.credentialMetadata;
+    this.identity = dependencies.identity;
+    this.custody = dependencies.custody;
+    this.sshAccessOf = dependencies.sshAccessOf;
     this.workerAgentsOf = dependencies.workerAgentsOf;
     this.workerAgentView = dependencies.workerAgentView;
     this.endRegistrations = dependencies.endRegistrations;
@@ -589,11 +641,18 @@ export class ProjectService implements Service, ProjectBindings {
     params: { project_id: string; binding_id: string },
     caller: CallerContext,
   ) {
-    const { config } = this.operationalStore.transaction((tx) =>
+    const { id, config } = this.operationalStore.transaction((tx) =>
       requireRepositoryBinding(tx, params),
     );
     throwIfCancelled(caller.context);
-    const health = await this.bindingHealth(config, caller.context);
+    const health = await this.bindingHealth(
+      config,
+      {
+        identity: callerIdentity(caller),
+        subject: { kind: SshIdentitySubjectKind.Binding, binding_id: id },
+      },
+      caller.context,
+    );
     return caller.commit(() => health);
   }
   private async readInstructionFiles(
@@ -610,20 +669,19 @@ export class ProjectService implements Service, ProjectBindings {
     );
     const end = Date.now() + BINDING_CHECK_TIMEOUT_MS;
     try {
-      const commit = await this.refuseUnreadable(caller.context, async () => {
-        await this.proveRepositoryHost(
-          config.platform,
-          config.address,
-          deadline,
-          BINDING_CHECK_TIMEOUT_MS,
-        );
-        return this.repositoryFiles.resolveBranchCommit(
-          config.address,
+      const { address, ssh } = this.sshAccess(config.platform, config.address, {
+        identity: this.identity,
+        subject: { kind: SshIdentitySubjectKind.Binding, binding_id: id },
+      });
+      const commit = await this.refuseUnreadable(caller.context, () =>
+        this.repositoryFiles.resolveBranchCommit(
+          address,
           config.strategy.base_branch,
           deadline,
           end - Date.now(),
-        );
-      });
+          ssh,
+        ),
+      );
       if (commit === null)
         throw new OperationError(
           SSH_UNREACHABLE_STATUS,
@@ -634,12 +692,13 @@ export class ProjectService implements Service, ProjectBindings {
       if (cached?.commit === commit) return caller.commit(() => cached.answer);
       const files = await this.refuseUnreadable(caller.context, () =>
         this.repositoryFiles.readFilesAtCommit(
-          config.address,
+          address,
           commit,
           WORKING_FILES.map(([, path]) => path),
           PROMPT_SOURCE_MAX_BYTES,
           deadline,
           end - Date.now(),
+          ssh,
         ),
       );
       throwIfCancelled(caller.context);
@@ -680,27 +739,39 @@ export class ProjectService implements Service, ProjectBindings {
     caller: CallerContext,
   ) {
     refuseRepositoryAction(config);
-    const pin = this.operationalStore.transaction((tx) => {
+    refuseAddressForm(config.address);
+    this.operationalStore.transaction((tx) => {
       requireProject(tx, params.project_id);
       if (config.credential !== undefined)
         this.custodySuitability(tx, {
           credential: config.credential,
           platform: REPOSITORY_PLATFORM,
         });
-      return this.sshPinOf(tx, config.ssh_credential);
+      this.custodySuitability(tx, {
+        credential: config.ssh_credential,
+        platform: SSH_CREDENTIAL_PLATFORM,
+      });
     });
-    refuseSshHost(config.address, pin);
     throwIfCancelled(caller.context);
-    const health = await this.bindingHealth(config, caller.context);
+    const health = await this.bindingHealth(
+      config,
+      {
+        identity: callerIdentity(caller),
+        subject: draftSubject(params.project_id, config),
+      },
+      caller.context,
+    );
     return caller.commit(() => health);
   }
   private async bindingHealth(
     config: typeof repositoryConfigSchema._output,
+    release: SshRelease,
     context: Context,
   ) {
     const addressEntry = await this.checkBindingAddress(
       config.platform,
       config.address,
+      release,
       context,
     );
     const sshCredentialEntry = await this.verifyRepositoryCredential(
@@ -721,6 +792,7 @@ export class ProjectService implements Service, ProjectBindings {
   private async checkBindingAddress(
     platform: string,
     address: string,
+    release: SshRelease,
     context: Context,
   ) {
     const deadline = new CancellationContext(
@@ -736,17 +808,12 @@ export class ProjectService implements Service, ProjectBindings {
       failure_reason: failureReason,
     });
     try {
-      const end = Date.now() + BINDING_CHECK_TIMEOUT_MS;
-      await this.proveRepositoryHost(
-        platform,
-        address,
+      const access = this.sshAccess(platform, address, release);
+      await this.repositoryConnector.gitLsRemote(
+        access.address,
         deadline,
         BINDING_CHECK_TIMEOUT_MS,
-      );
-      await this.repositoryConnector.gitLsRemote(
-        address,
-        deadline,
-        end - Date.now(),
+        access.ssh,
       );
       return entry(ResourceStatus.Healthy, null);
     } catch (error) {
@@ -871,10 +938,7 @@ export class ProjectService implements Service, ProjectBindings {
       if (binding.kind !== BindingKind.Repository) continue;
       refuseRepositoryAction(binding.config);
       if (bindingUnchanged(name, binding, saved.get(name))) continue;
-      const pin = this.operationalStore.transaction((tx) =>
-        this.sshPinOf(tx, binding.config.ssh_credential),
-      );
-      await this.checkRepository(binding.config, pin, caller.context);
+      await this.checkRepository(projectId, binding.config, caller);
     }
     throwIfCancelled(caller.context);
     const answer = caller.commit((tx) => {
@@ -915,87 +979,42 @@ export class ProjectService implements Service, ProjectBindings {
         : new Map(),
     );
   }
-  private sshPinOf(tx: Transaction, credentialName: string): SshPin {
-    this.custodySuitability(tx, {
-      credential: credentialName,
-      platform: SSH_CREDENTIAL_PLATFORM,
-    });
-    const record = this.credentialMetadata(tx, credentialName);
-    assert.ok(record && record.platform === SSH_CREDENTIAL_PLATFORM);
-    return sshPinSchema.parse(record.metadata);
-  }
-  private async proveRepositoryHost(
+  private sshAccess(
     platform: string,
     address: string,
-    context: Context,
-    deadlineMs: number,
-  ): Promise<void> {
-    const parsed = parseRepositoryAddress(address);
-    let hostname: string | null = null;
-    if (parsed)
-      try {
-        hostname = (
-          await this.repositoryConnector.resolveSshIdentity(
-            parsed.host,
-            context,
-            deadlineMs,
-          )
-        ).hostname;
-      } catch {
-        throwIfCancelled(context);
-      }
-    throwIfCancelled(context);
-    if (hostname === null || !isPlatformSshHost(platform, hostname))
-      throw new OperationError(
-        HttpStatus.BadRequest,
-        ProjectErrorCode.RepositoryAddressInvalid,
-        "Repository address must resolve to an SSH host of its platform.",
+    release: SshRelease,
+  ): ReleasedAccess {
+    refuseForeignHost(platform, address);
+    return this.operationalStore.transaction((tx) => {
+      const now = Date.now();
+      const grant = this.custody.authorizeOperation(
+        tx,
+        { kind: GrantKind.SshIdentity, ...release, claim: null },
+        now,
       );
-  }
-  private async proveSshPin(
-    pin: SshPin,
-    context: Context,
-    deadlineMs: number,
-  ): Promise<void> {
-    let identity;
-    try {
-      identity = await this.repositoryConnector.resolveSshIdentity(
-        pin.host,
-        context,
-        deadlineMs,
-      );
-    } catch {
-      throwIfCancelled(context);
-      throw new OperationError(
-        HttpStatus.BadRequest,
-        ProjectErrorCode.RepositoryAddressInvalid,
-        "Repository address must resolve to an SSH host of its platform.",
-      );
-    }
-    throwIfCancelled(context);
-    assertPinned(pin, identity);
+      const granted = this.custody.grantFacts(grant);
+      const material = this.custody.release(tx, grant, now);
+      const ssh = this.sshAccessOf(tx, granted, material);
+      return { address: granted.facts.address, ssh };
+    });
   }
   private async checkRepository(
+    projectId: string,
     config: typeof repositoryConfigSchema._output,
-    pin: SshPin,
-    context: Context,
+    caller: CallerContext,
   ): Promise<void> {
+    const { context } = caller;
     throwIfCancelled(context);
-    const { address, platform } = config;
-    refuseSshHost(address, pin);
-    const end = Date.now() + LS_REMOTE_TIMEOUT_MS;
-    await this.proveSshPin(pin, context, LS_REMOTE_TIMEOUT_MS);
-    if (!isPlatformSshHost(platform, pin.hostname))
-      throw new OperationError(
-        HttpStatus.BadRequest,
-        ProjectErrorCode.RepositoryAddressInvalid,
-        "Repository address must resolve to an SSH host of its platform.",
-      );
+    const { address, ssh } = this.sshAccess(config.platform, config.address, {
+      identity: callerIdentity(caller),
+      subject: draftSubject(projectId, config),
+    });
     try {
       await this.repositoryConnector.gitLsRemote(
         address,
         context,
-        end - Date.now(),
+        LS_REMOTE_TIMEOUT_MS,
+        ssh,
       );
     } catch (error) {
       throwIfCancelled(context);
@@ -1412,28 +1431,38 @@ export class ProjectService implements Service, ProjectBindings {
   }
   resourceInventory(tx: Transaction): ResourceEntry[] {
     return readCurrentRepositories(tx).map(
-      ({ project_name: projectName, name, address, platform }) => {
+      ({
+        project_name: projectName,
+        binding_id: bindingId,
+        name,
+        address,
+        platform,
+      }) => {
         const check: ResourceCheck = async (context, observe) => {
           try {
             const deadline = context.deadline();
             assert.ok(deadline !== null);
+            throwIfCancelled(context);
+            let access: ReleasedAccess;
             try {
-              await this.proveRepositoryHost(
-                platform,
-                address,
-                context,
-                deadline - Date.now(),
-              );
+              access = this.sshAccess(platform, address, {
+                identity: this.identity,
+                subject: {
+                  kind: SshIdentitySubjectKind.Binding,
+                  binding_id: bindingId,
+                },
+              });
             } catch (error) {
               if (error instanceof OperationError)
-                observe?.(error.code, ResourceFailureReason.AddressInvalid);
+                observe?.(error.code, repositoryFailureReason(error));
               throw error;
             }
             try {
               await this.repositoryConnector.gitLsRemote(
-                address,
+                access.address,
                 context,
                 deadline - Date.now(),
+                access.ssh,
               );
             } catch (error) {
               observe?.(

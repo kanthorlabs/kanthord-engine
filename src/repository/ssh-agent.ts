@@ -8,12 +8,9 @@ import { promisify } from "node:util";
 import { throwIfCancelled, type Context } from "../kernel/context.ts";
 import { Diagnostic } from "../kernel/errors.ts";
 import { isolatedGitEnvironment } from "../kernel/git-environment.ts";
+import type { SshAccess } from "./contract.ts";
 
-export interface SshAccess {
-  private_key: string;
-  public_key: string;
-  known_hosts: string;
-}
+export type { SshAccess } from "./contract.ts";
 
 export const SshAgentErrorCode = {
   Failed: "repository.connector.ssh_agent_failed",

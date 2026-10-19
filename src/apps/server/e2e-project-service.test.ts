@@ -18,7 +18,15 @@ import {
 } from "../../project/contract.ts";
 import { type AgentEnablement, AgentErrorCode } from "../../agent/contract.ts";
 import { environment, kanthord } from "./cli-support.ts";
-import { FAKE_SSH_IDENTITY, gatewayFixture } from "./test-support.ts";
+import type { SshAccess } from "../../repository/index.ts";
+import {
+  createFakeSshCredential,
+  FAKE_GITHUB_HOST_KEY,
+  FAKE_SSH_CREDENTIAL,
+  FAKE_SSH_HOST,
+  FAKE_SSH_IDENTITY,
+  gatewayFixture,
+} from "./test-support.ts";
 
 const SUCCESS = 0;
 const FAILURE = 1;
@@ -56,6 +64,8 @@ const WORKER_NAME = "general";
 const ADDRESS = "git@github.com:owner/repo.git";
 const RESOURCE_IDENTITY = `${BindingKind.Repository}:${REPOSITORY_PLATFORM}:owner/repo`;
 const BASE_BRANCH = "main";
+const VERIFIED_READS = 2;
+const OPENSSH_ARMOR = "-----BEGIN OPENSSH PRIVATE KEY-----";
 const ENABLEMENT_COMMAND = ["agent", "enablement"];
 const CONFIGURATION = {
   agent_provider: DEFAULT,
@@ -71,7 +81,7 @@ const REPOSITORY: BindingSet["bindings"][string] = {
     available: true,
     platform: REPOSITORY_PLATFORM,
     address: ADDRESS,
-    ssh_credential: "github-ssh",
+    ssh_credential: FAKE_SSH_CREDENTIAL,
     strategy: { base_branch: BASE_BRANCH },
     credential: REPOSITORY_PLATFORM,
     working_layer: {
@@ -101,7 +111,7 @@ test("binding apply refuses action-end-state follows through CLI validation", as
       available: true,
       platform: "github",
       address: ADDRESS,
-      ssh_credential: "github-ssh",
+      ssh_credential: FAKE_SSH_CREDENTIAL,
       credential: "github",
       strategy: {
         base_branch: BASE_BRANCH,
@@ -158,10 +168,14 @@ type Applied = z.infer<
 type Mutation = Project & { idempotency_key: string };
 type Page<T> = { items: T[]; next_cursor: string | null };
 
-async function setup(t: TestContext): Promise<Fixture> {
+async function setup(
+  t: TestContext,
+  reads: Array<{ address: string; ssh: SshAccess }> = [],
+): Promise<Fixture> {
   const fixture = await gatewayFixture(t, {
     repositoryConnector: {
-      gitLsRemote: async () => {},
+      gitLsRemote: async (address, _context, _deadlineMs, ssh) =>
+        void reads.push({ address, ssh }),
       resolveSshIdentity: async () => FAKE_SSH_IDENTITY,
     },
   });
@@ -274,22 +288,8 @@ async function bindRepository(
   key = ulid(),
 ): Promise<Applied> {
   await createCredential(fixture, REPOSITORY_PLATFORM, REPOSITORY_PLATFORM);
-  const sshPath = file(fixture.directory, "github-ssh-cred.json", {
-    name: "github-ssh",
-    platform: "ssh",
-    metadata: {
-      host: "github.com",
-      hostname: "github.com",
-      port: 22,
-      identity_file: "~/.ssh/id_rsa",
-    },
-    secret: {},
-  });
-  success<CredentialAnswer>(
-    await kanthord(
-      ["repository", "credential", "create", "--file", sshPath],
-      fixture.env,
-    ),
+  await createFakeSshCredential(async <T>(args: string[]) =>
+    success<T>(await kanthord(args, fixture.env)),
   );
   const answer = await apply(
     fixture,
@@ -481,6 +481,42 @@ test(
     assert.ok(binding);
     assert.ok(binding.id.startsWith(`${BINDING_ID_PREFIX}_`));
     await repositoryReads(fixture, project.id, binding.id);
+  },
+);
+
+test(
+  "E05.20 a binding apply and a binding verify read with the custody SSH key and the pinned host key",
+  { timeout: BINDING_LIFECYCLE_TIMEOUT_MS },
+  async (t) => {
+    const reads: Array<{ address: string; ssh: SshAccess }> = [];
+    const fixture = await setup(t, reads);
+    const project = await createProject(fixture);
+    const applied = await bindRepository(fixture, project.id);
+    const binding = applied.bindings[REPOSITORY_NAME];
+    assert.ok(binding);
+    const credential = success<CredentialAnswer>(
+      await kanthord(
+        ["repository", "credential", "get", FAKE_SSH_CREDENTIAL],
+        fixture.env,
+      ),
+    );
+    const publicKey = credential.revisions?.[0]?.metadata?.public_key;
+    success<unknown>(
+      await kanthord(
+        ["project", "binding", "verify", project.id, binding.id],
+        fixture.env,
+      ),
+    );
+    assert.equal(reads.length, VERIFIED_READS);
+    for (const { address, ssh } of reads) {
+      assert.equal(address, ADDRESS);
+      assert.ok(ssh.private_key.startsWith(OPENSSH_ARMOR));
+      assert.equal(ssh.public_key, publicKey);
+      assert.equal(
+        ssh.known_hosts,
+        `${FAKE_SSH_HOST} ${FAKE_GITHUB_HOST_KEY}\n`,
+      );
+    }
   },
 );
 
