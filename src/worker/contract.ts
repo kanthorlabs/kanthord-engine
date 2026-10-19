@@ -891,7 +891,7 @@ export const workerOperations = {
     }),
     output: handoverEnvelopeSchema,
     description:
-      "Seal the live execution's pinned provider credential. A repeated idempotency key returns a redacted conflict; recovery uses a new key.",
+      "Seal the live execution's pinned provider credential and the pinned SSH identity of each repository binding of its node. A repeated idempotency key returns a redacted conflict; recovery uses a new key.",
   },
   credential: {
     service: WORKER_SERVICE_NAME,
