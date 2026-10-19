@@ -26,6 +26,12 @@ export {
   type CredentialDependencies,
 } from "./credential.ts";
 export { REPOSITORY_PLATFORMS } from "./credential-platform.ts";
+export {
+  RepositoryHostKeys,
+  type HostKeyDependencies,
+  type HostKeySources,
+} from "./host-key.ts";
+export { repositoryMigrations } from "./migrations.ts";
 export { decodeGitHubEvent } from "./github.ts";
 export {
   foldBranchPush,

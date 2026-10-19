@@ -897,6 +897,8 @@ test("the tool table holds the built-in tools of the agent and one tool per huma
     "project.create",
     "llm.credential.list",
     "llm.credential.update_metadata",
+    "repository.host_key.list",
+    "repository.host_key.scan",
     "workbench.session.get",
   ])
     assert.ok(tools.includes(toolName(name)), name);
@@ -908,6 +910,7 @@ test("the tool table holds the built-in tools of the agent and one tool per huma
     "repository.credential.create",
     "repository.credential.rotate",
     "repository.credential.check",
+    "repository.host_key.pin",
     "storage.credential.create",
     "storage.credential.rotate",
     "storage.credential.check",

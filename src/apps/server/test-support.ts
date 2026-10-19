@@ -8,7 +8,10 @@ import { Worker, type WorkerOptions } from "../worker/index.ts";
 import { temporary } from "../../kernel/test-support.ts";
 import { writePrivate } from "../../kernel/files.ts";
 import { clientConfigPath, httpClient } from "../../gateway/client.ts";
-import { repositoryOperations } from "../../repository/contract.ts";
+import {
+  REPOSITORY_COMPONENT_NAME,
+  repositoryOperations,
+} from "../../repository/contract.ts";
 import { projectOperations } from "../../project/contract.ts";
 import { llmOperations } from "../../llm/contract.ts";
 import { agentOperations } from "../../agent/contract.ts";
@@ -63,7 +66,11 @@ import { WORKBENCH_SERVICE_NAME } from "../../workbench/contract.ts";
 import { AGENT_COMPONENT_NAME } from "../../agent/contract.ts";
 import { environment, kanthord } from "./cli-support.ts";
 import { composeServices, trackingDatabaseMigrations } from "./index.ts";
-import { RepositoryComponent, type GitWriter } from "../../repository/index.ts";
+import {
+  RepositoryComponent,
+  repositoryMigrations,
+  type GitWriter,
+} from "../../repository/index.ts";
 import { GITHUB_API_VERSION } from "../../repository/github.ts";
 import {
   InstancePlacement,
@@ -416,6 +423,7 @@ export async function gatewayFixture(
     repositoryTransport?: Parameters<
       typeof composeServices
     >[0]["repositoryTransport"];
+    hostKeySources?: Parameters<typeof composeServices>[0]["hostKeySources"];
     machines?: MachineDependencies;
     inventoryOverrides?: Parameters<
       typeof composeServices
@@ -456,6 +464,7 @@ export async function gatewayFixture(
     { service: "project", migrations: projectMigrations },
     { service: INTAKE_SERVICE_NAME, migrations: intakeMigrations },
     { service: WORKBENCH_SERVICE_NAME, migrations: workbenchMigrations },
+    { service: REPOSITORY_COMPONENT_NAME, migrations: repositoryMigrations },
   ]);
   const trackingStore = new Store(":memory:");
   trackingStore.migrate(trackingDatabaseMigrations);
@@ -487,6 +496,7 @@ export async function gatewayFixture(
     repositoryConnector: options.repositoryConnector,
     github: options.github,
     repositoryTransport: options.repositoryTransport,
+    hostKeySources: options.hostKeySources,
     oauthProviders: options.oauthProviders,
     loadModelRuntime: options.loadModelRuntime,
     bindings: options.machines?.project,

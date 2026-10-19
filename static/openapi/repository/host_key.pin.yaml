@@ -1,0 +1,114 @@
+# Generated from the operation registry by kanthord gateway openapi.
+pathItem:
+  put:
+    operationId: repository.host_key.pin
+    tags:
+      - repository
+    description: Pin the host key of an SSH host when a second read confirms the
+      fingerprint.
+    x-access-policy: human
+    x-timeout-ms: 30000
+    x-mutation: true
+    x-kanthord-lifetime: unary
+    security:
+      - bearerAuth: []
+    parameters:
+      - name: host
+        in: path
+        required: true
+        schema:
+          $ref: "#/components/schemas/repository.host_key.pin.Input/properties/params/pro\
+            perties/host"
+      - $ref: ../shared/components.yaml#/components/parameters/IdempotencyKey
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/repository.host_key.pin.Input/properties/body"
+    responses:
+      "200":
+        description: Completed result
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/repository.host_key.pin.Output"
+      "400":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "401":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "403":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "404":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "409":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "413":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "415":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "422":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "500":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "503":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "504":
+        $ref: ../shared/components.yaml#/components/responses/Error
+components:
+  schemas:
+    repository.host_key.pin.Input:
+      type: object
+      properties:
+        params:
+          type: object
+          properties:
+            host:
+              type: string
+              minLength: 1
+          required:
+            - host
+          additionalProperties: false
+        query:
+          type: object
+          properties: {}
+          additionalProperties: false
+        body:
+          type: object
+          properties:
+            fingerprint:
+              type: string
+              pattern: ^SHA256:[A-Za-z0-9+/]{43}$
+          required:
+            - fingerprint
+          additionalProperties: false
+      required:
+        - params
+        - query
+        - body
+      additionalProperties: false
+    repository.host_key.pin.Output:
+      type: object
+      properties:
+        host:
+          type: string
+        public_key:
+          type: string
+        fingerprint:
+          type: string
+        source:
+          type: string
+          enum:
+            - github_meta
+            - keyscan
+        created_at:
+          type: integer
+          minimum: -9007199254740991
+          maximum: 9007199254740991
+      required:
+        - host
+        - public_key
+        - fingerprint
+        - source
+        - created_at
+      additionalProperties: false

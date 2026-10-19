@@ -20,3 +20,13 @@ export function isPlatformSshHost(platform: string, hostname: string): boolean {
 export function isGitOnlyPlatform(platform: string): boolean {
   return GIT_ONLY_PLATFORMS.has(platform);
 }
+
+export function isSshHost(hostname: string): boolean {
+  return [...SSH_HOST_SETS.keys()].some((platform) =>
+    isPlatformSshHost(platform, hostname),
+  );
+}
+
+export function isGitHubSshHost(hostname: string): boolean {
+  return isPlatformSshHost(RepositoryPlatform.GitHub, hostname);
+}

@@ -617,6 +617,9 @@ const OPERATION_INVENTORY: readonly (readonly [string, AccessPolicy])[] = [
   ["repository.credential.platform_list", AccessPolicy.Human],
   ["repository.credential.check", AccessPolicy.Human],
   ["repository.credential.verify", AccessPolicy.Human],
+  ["repository.host_key.list", AccessPolicy.Human],
+  ["repository.host_key.scan", AccessPolicy.Human],
+  ["repository.host_key.pin", AccessPolicy.Human],
   ["storage.credential.create", AccessPolicy.Human],
   ["storage.credential.list", AccessPolicy.Human],
   ["storage.credential.get", AccessPolicy.Human],
@@ -772,8 +775,8 @@ const OPERATION_INVENTORY: readonly (readonly [string, AccessPolicy])[] = [
   ["tracking.span.list", AccessPolicy.Human],
   ["tracking.text.get", AccessPolicy.Human],
 ];
-const OPERATION_COUNT = 185;
-const ROUTED_OPERATION_COUNT = 175;
+const OPERATION_COUNT = 188;
+const ROUTED_OPERATION_COUNT = 178;
 const INTAKE_OPERATION_COUNT = 22;
 const INTAKE_ROUTED_OPERATION_COUNT = 14;
 const SERVICE_OPERATION_IDS = [

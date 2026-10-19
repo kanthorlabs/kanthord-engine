@@ -22,6 +22,8 @@ import { workbenchMigrations } from "../../workbench/index.ts";
 import { WORKBENCH_SERVICE_NAME } from "../../workbench/contract.ts";
 import { INTAKE_SERVICE_NAME } from "../../intake/contract.ts";
 import { intakeMigrations } from "../../intake/index.ts";
+import { REPOSITORY_COMPONENT_NAME } from "../../repository/contract.ts";
+import { repositoryMigrations } from "../../repository/migrations.ts";
 import { serverMigrations, trackingDatabaseMigrations } from "./index.ts";
 
 const PROJECT_SERVICE_NAME = "project";
@@ -37,6 +39,7 @@ const services: Migrations = [
   { service: MISSION_SERVICE_NAME, migrations: missionMigrations },
   { service: WORKBENCH_SERVICE_NAME, migrations: workbenchMigrations },
   { service: INTAKE_SERVICE_NAME, migrations: intakeMigrations },
+  { service: REPOSITORY_COMPONENT_NAME, migrations: repositoryMigrations },
 ];
 const MAXIMUM_MIGRATIONS_PER_SERVICE = 1;
 const HISTORY_TABLE = "migration";
@@ -90,6 +93,7 @@ const INTAKE_TABLES = [
   INTAKE_INBOUND_EVENT_TABLE,
   INTAKE_OUTBOUND_REQUEST_TABLE,
 ];
+const REPOSITORY_HOST_KEY_TABLE = "repository_host_key";
 const INTEGRITY_OK = "ok";
 const NO_PREFIX_MATCHES = 0;
 const SINGLE_PREFIX_MATCH = 1;
@@ -113,6 +117,7 @@ const ALL_TABLES = [
   MISSION_PROPOSAL_TABLE,
   PROJECT_BINDING_TABLE,
   PROJECT_PROJECT_TABLE,
+  REPOSITORY_HOST_KEY_TABLE,
   SCHEDULER_EXECUTION_TABLE,
   SCHEDULER_JOB_TABLE,
   WORKER_INSTANCE_TABLE,
@@ -133,6 +138,7 @@ const ALL_INDEXES = [
   MISSION_OUTCOME_SEQUENCE_INDEX,
   "project_binding_revision",
   "project_project_name",
+  "repository_host_key_host",
   "scheduler_execution_node_live",
   "scheduler_execution_runtime_live",
   "scheduler_job_node_id",
@@ -148,6 +154,13 @@ test("each service holds at most one migration", () => {
       migrations.length <= MAXIMUM_MIGRATIONS_PER_SERVICE,
       `${service} holds ${migrations.length} migrations`,
     );
+});
+
+test("the server migration assembly holds every service of the ownership checks", () => {
+  assert.deepEqual(
+    serverMigrations.map(({ service }) => service).sort(),
+    services.map(({ service }) => service).sort(),
+  );
 });
 
 function tables(store: Store): string[] {
@@ -193,6 +206,7 @@ test("service migrations own distinct prefixes and create only tables in their n
       ...SCHEDULER_TABLES,
       ...MISSION_TABLES,
       ...INTAKE_TABLES,
+      REPOSITORY_HOST_KEY_TABLE,
     ]);
   } finally {
     store.close();
@@ -330,6 +344,32 @@ test("each service migration set applies alone to an empty store", () => {
           );
         }
       }
+      if (service.service === REPOSITORY_COMPONENT_NAME) {
+        assert.deepEqual(tables(store), [REPOSITORY_HOST_KEY_TABLE]);
+        assert.deepEqual(
+          store.database
+            .prepare(
+              `SELECT name, type, "notnull", pk FROM pragma_table_info('${REPOSITORY_HOST_KEY_TABLE}')`,
+            )
+            .all()
+            .map((row) => ({ ...row })),
+          [
+            { name: "id", type: "TEXT", notnull: 1, pk: 1 },
+            { name: "host", type: "TEXT", notnull: 1, pk: 0 },
+            { name: "public_key", type: "TEXT", notnull: 1, pk: 0 },
+            { name: "created_at", type: "INTEGER", notnull: 1, pk: 0 },
+          ],
+        );
+        assert.deepEqual(
+          store.database
+            .prepare(
+              `SELECT name, "unique" FROM pragma_index_list('${REPOSITORY_HOST_KEY_TABLE}') WHERE name NOT LIKE 'sqlite_autoindex%'`,
+            )
+            .all()
+            .map((row) => ({ ...row })),
+          [{ name: "repository_host_key_host", unique: 1 }],
+        );
+      }
       if (service.service === CUSTODY_SERVICE_NAME) {
         assert.deepEqual(
           store.database
@@ -393,7 +433,7 @@ test("each service migration set applies alone to an empty store", () => {
   }
 });
 
-test("all ERD 1, ERD 2 and ERD 3 migrations produce exactly the twenty-two tables", () => {
+test("all ERD 1, ERD 2 and ERD 3 migrations produce exactly the twenty-three tables", () => {
   const allServices: Migrations = [
     { service: CUSTODY_SERVICE_NAME, migrations: custodyMigrations },
     { service: SCHEDULER_SERVICE_NAME, migrations: schedulerMigrations },
@@ -404,6 +444,7 @@ test("all ERD 1, ERD 2 and ERD 3 migrations produce exactly the twenty-two table
     { service: PROJECT_SERVICE_NAME, migrations: projectMigrations },
     { service: WORKBENCH_SERVICE_NAME, migrations: workbenchMigrations },
     { service: INTAKE_SERVICE_NAME, migrations: intakeMigrations },
+    { service: REPOSITORY_COMPONENT_NAME, migrations: repositoryMigrations },
   ];
   const prefixes = allServices.map(({ service }) => `${service}_`);
   assert.equal(new Set(prefixes).size, allServices.length);

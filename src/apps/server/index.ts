@@ -111,12 +111,16 @@ import { loadPi } from "../../agent/pi.ts";
 import {
   RepositoryComponent,
   RepositoryCredentials,
+  RepositoryHostKeys,
   REPOSITORY_PLATFORMS,
   decodeGitHubEvent,
   platformImplementations,
   repositoryFiles,
+  repositoryMigrations,
   type GitWriter,
+  type HostKeySources,
 } from "../../repository/index.ts";
+import { REPOSITORY_COMPONENT_NAME } from "../../repository/contract.ts";
 import { LlmComponent, LLM_PLATFORMS } from "../../llm/index.ts";
 import {
   StorageComponent,
@@ -183,6 +187,7 @@ export function composeServices(options: {
   repositoryConnector?: RepositoryConnector;
   github?: { baseUrl: string; mergeabilityRetryDelayMs?: number };
   repositoryTransport?: GitWriter;
+  hostKeySources?: HostKeySources;
   oauthProviders?: ConstructorParameters<
     typeof LlmComponent
   >[0]["oauthProviders"];
@@ -407,6 +412,10 @@ export function composeServices(options: {
     bindingsNaming: (tx, name) => project.bindingsNaming(tx, name),
     resolveSshIdentity: (host, context, deadlineMs) =>
       repoConnector.resolveSshIdentity(host, context, deadlineMs),
+  });
+  const repositoryHostKeys = new RepositoryHostKeys({
+    logger: options.logger,
+    sources: options.hostKeySources,
   });
   const storage = new StorageComponent({
     records: custody,
@@ -704,6 +713,7 @@ export function composeServices(options: {
   llm.declare(registry);
   agent.declare(registry);
   repositoryCredentials.declare(registry);
+  repositoryHostKeys.declare(registry);
   storage.declare(registry);
   worker.declare(registry);
   mission.declare(registry);
@@ -759,6 +769,7 @@ export function composeServices(options: {
     llm,
     agent,
     repositoryCredentials,
+    repositoryHostKeys,
     storage,
     mission,
     project,
@@ -786,6 +797,7 @@ export const serverMigrations: Migrations = [
   { service: "project", migrations: projectMigrations },
   { service: INTAKE_SERVICE_NAME, migrations: intakeMigrations },
   { service: WORKBENCH_SERVICE_NAME, migrations: workbenchMigrations },
+  { service: REPOSITORY_COMPONENT_NAME, migrations: repositoryMigrations },
 ];
 
 export const DATABASE_FILE = "kanthord.db";

@@ -29,6 +29,7 @@ export const SECRET_OPERATION_IDS: ReadonlySet<string> = new Set([
   repositoryOperations.create.id,
   repositoryOperations.rotate.id,
   repositoryOperations.check.id,
+  repositoryOperations.host_key_pin.id,
   storageOperations.create.id,
   storageOperations.rotate.id,
   storageOperations.check.id,
