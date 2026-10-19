@@ -369,7 +369,8 @@ export default tseslint.config(
                 {
                   to: element("component", {
                     captured: { name: "repository" },
-                    fileInternalPath: "{connector,node-branch,ssh-key}.ts",
+                    fileInternalPath:
+                      "{connector,node-branch,ssh-key,test-sshd}.ts",
                   }),
                 },
                 {
