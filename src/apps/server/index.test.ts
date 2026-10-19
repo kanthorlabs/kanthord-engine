@@ -679,7 +679,8 @@ test("serve starts with redirected stdout without issuing a JWT; SIGTERM drains 
       for (const line of stderr.split("\n")) {
         try {
           const record = JSON.parse(line);
-          if (record.msg === GATEWAY_STARTED_MESSAGE) resolve(record.port);
+          if (record.msg.startsWith(GATEWAY_STARTED_MESSAGE))
+            resolve(record.port);
         } catch {
           /* Wait for a complete JSON log record. */
         }

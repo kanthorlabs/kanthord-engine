@@ -617,7 +617,9 @@ neither its configuration nor `cli.yaml` and issues no JWT. Future file owners,
 including Tracking storage, need their own implemented lifecycle.
 
 Output: operational JSON log records go to stderr by default or the configured
-log file. Startup prints no token and requires no terminal. A successfully
+log file. The `info` record `Gateway Service started` carries the fields `bind`
+and `port`. For a loopback bind, its message adds "A loopback bind accepts
+connections from this host only." Startup prints no token and requires no terminal. A successfully
 running process remains alive rather than exiting after readiness. A missing
 or invalid configuration, permissions failure, database lock contention,
 pending migration on a database with a recorded migration, migration failure, or listener failure stops startup and exits `1`; startup

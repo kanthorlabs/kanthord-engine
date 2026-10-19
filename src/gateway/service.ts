@@ -13,7 +13,7 @@ import {
   type HttpBindings,
 } from "@hono/node-server";
 import { performance } from "node:perf_hooks";
-import type { AddressInfo } from "node:net";
+import { BlockList, isIPv6, type AddressInfo } from "node:net";
 import type { Logger } from "pino";
 import {
   HealthStatus,
@@ -48,6 +48,24 @@ const SERVER_NOT_RUNNING = "ERR_SERVER_NOT_RUNNING";
 const SINGLE_QUERY_VALUE_COUNT = 1;
 const HOST_DETAIL_LIMIT = 255;
 const ALLOWED_HOSTS_FIELD = "gateway.allowed_hosts";
+const LOOPBACK_BIND_SENTENCE =
+  "A loopback bind accepts connections from this host only.";
+const IPV4_LOOPBACK_NETWORK = "127.0.0.0";
+const IPV4_LOOPBACK_PREFIX_LENGTH = 8;
+const IPV6_LOOPBACK_ADDRESS = "::1";
+const loopbackAddresses = new BlockList();
+loopbackAddresses.addSubnet(
+  IPV4_LOOPBACK_NETWORK,
+  IPV4_LOOPBACK_PREFIX_LENGTH,
+  "ipv4",
+);
+loopbackAddresses.addAddress(IPV6_LOOPBACK_ADDRESS, "ipv6");
+
+function startedMessage(bind: string): string {
+  return loopbackAddresses.check(bind, isIPv6(bind) ? "ipv6" : "ipv4")
+    ? `${GATEWAY_STARTED_MESSAGE}. ${LOOPBACK_BIND_SENTENCE}`
+    : GATEWAY_STARTED_MESSAGE;
+}
 import { GATEWAY_STARTED_MESSAGE } from "./constants.ts";
 import { dashboardResponse, type DashboardLoader } from "./dashboard.ts";
 import { ROOT_BASE_PATH, baseHref, stripBasePath } from "./base-path.ts";
@@ -176,10 +194,10 @@ export class GatewayService implements Service {
       this.started = true;
       this.options.logger.info(
         {
-          address: this.options.config.bind,
+          bind: this.options.config.bind,
           port: this.address()?.port,
         },
-        GATEWAY_STARTED_MESSAGE,
+        startedMessage(this.options.config.bind),
       );
     } catch (error) {
       this.ready = false;
