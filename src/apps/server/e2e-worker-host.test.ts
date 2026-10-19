@@ -14,7 +14,7 @@ import {
 import type { CredentialAnswer } from "../../custody/contract.ts";
 import type { SshAccess } from "../../repository/contract.ts";
 import { RepositoryComponent } from "../../repository/index.ts";
-import { startTestSshd } from "../../repository/test-sshd.ts";
+import { DEFAULT_SSH_PORT, startTestSshd } from "../../repository/test-sshd.ts";
 import { ClaimState, type ExecutionRecord } from "../../scheduler/contract.ts";
 import {
   SpanStatus,
@@ -135,7 +135,7 @@ async function fixture(t: TestContext) {
   const handed: SshAccess[] = [];
   const routed = (ssh: SshAccess): SshAccess => {
     handed.push(ssh);
-    return { ...ssh, known_hosts: sshd.known_hosts };
+    return { ...ssh, known_hosts: sshd.known_hosts, port: sshd.port };
   };
   const origin = sshd.url(bare);
   const connector = new RepositoryComponent();
@@ -325,6 +325,7 @@ test(
         for (const ssh of executionSetup.handed) {
           assert.equal(ssh.public_key.trim(), executionSetup.publicKey.trim());
           assert.ok(ssh.known_hosts.includes(FAKE_GITHUB_HOST_KEY));
+          assert.equal(ssh.port, DEFAULT_SSH_PORT);
         }
         await assertSpanTree(executionSetup, record.trace_id);
         assert.ok(provider.calls.length);

@@ -18,7 +18,10 @@ import {
 } from "../../kernel/test-support.ts";
 import { createIdentity } from "../../kernel/identity.ts";
 import * as connector from "../../repository/connector.ts";
-import { LOCAL_GIT_SSH_ACCESS } from "../../repository/test-sshd.ts";
+import {
+  DEFAULT_SSH_PORT,
+  LOCAL_GIT_SSH_ACCESS,
+} from "../../repository/test-sshd.ts";
 import type { Revision, TaskContent } from "../../mission/contract.ts";
 import {
   anthropicSetup,
@@ -118,6 +121,7 @@ export const TEST_SSH_ACCESS: SshAccess = {
   private_key: "test_private_key",
   public_key: "ssh-ed25519 test_public_key",
   known_hosts: TEST_SSH_HOST_KEY.known_hosts,
+  port: DEFAULT_SSH_PORT,
 };
 
 class EveryBindingSshAccess extends Map<string, SshAccess> {
@@ -139,6 +143,7 @@ export function testSshAccess(
         private_key: `test_private_key_${binding_id}`,
         public_key: `ssh-ed25519 test_${binding_id}`,
         known_hosts: TEST_SSH_HOST_KEY.known_hosts,
+        port: DEFAULT_SSH_PORT,
       },
     ]),
   );

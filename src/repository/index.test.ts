@@ -20,6 +20,7 @@ import {
 import { generateSshKey } from "./ssh-key.ts";
 import {
   createBareRepository,
+  DEFAULT_SSH_PORT,
   startTestSshd,
   TEST_REPOSITORY_FILE,
   TEST_REPOSITORY_TEXT,
@@ -33,6 +34,7 @@ const ALIAS_ADDRESS = "git@github:owner/repository.git";
 const HOST_KEY =
   "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl";
 const DEADLINE_MS = 30_000;
+const ALTERNATIVE_PORT = 443;
 const execFileAsync = promisify(execFile);
 const ADDRESS_INVALID = "project.bindings.repository.address_invalid";
 const CHECK_CALL = "check";
@@ -95,8 +97,33 @@ test("sshAccessOf builds the access from the key and the pin of the address host
     private_key: key.private_key,
     public_key: key.public_key,
     known_hosts: `github.com ${HOST_KEY}\n`,
+    port: DEFAULT_SSH_PORT,
   });
   assert.ok(held.dropped());
+});
+
+test("sshAccessOf takes the port of an alternative SSH host from the fixed table and pins the bracket form", (t) => {
+  const store = pinnedStore(t);
+  for (const host of ["altssh.gitlab.com", "altssh.bitbucket.org"]) {
+    store.database
+      .prepare(
+        "INSERT INTO repository_host_key (id, host, public_key, created_at) VALUES (?, ?, ?, 1)",
+      )
+      .run(`host_key_${host}`, host, HOST_KEY);
+    const key = generateSshKey(CREDENTIAL_NAME);
+    const access = store.transaction((tx) =>
+      new RepositoryComponent().sshAccessOf(
+        tx,
+        granted(`git@${host}:owner/repository.git`),
+        material({ private_key: key.private_key }),
+      ),
+    );
+    assert.equal(
+      access.known_hosts,
+      `[${host}]:${ALTERNATIVE_PORT} ${HOST_KEY}\n`,
+    );
+    assert.equal(access.port, ALTERNATIVE_PORT);
+  }
 });
 
 test("sshAccessOf refuses an unpinned host, an alias address and a legacy key by name and drops the material", (t) => {
@@ -162,6 +189,7 @@ test("the known_hosts seam lets a test reach a local sshd on another port", asyn
       addresses.push(address);
       return sshd.known_hosts;
     },
+    portOf: () => sshd.port,
   });
   const store = new Store(IN_MEMORY_DATABASE);
   t.after(() => store.close());
@@ -195,6 +223,7 @@ test("gitLsRemote of the component reaches a local sshd with the custody key", a
     private_key: key.private_key,
     public_key: key.public_key,
     known_hosts: sshd.known_hosts,
+    port: sshd.port,
   });
 });
 

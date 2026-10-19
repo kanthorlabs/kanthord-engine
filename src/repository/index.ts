@@ -29,7 +29,7 @@ import {
 import { RepositoryErrorCode } from "./contract.ts";
 import { GitHubPlatform } from "./github.ts";
 import { knownHostsLine } from "./host-key.ts";
-import { isPlatformSshHost } from "./platform.ts";
+import { isPlatformSshHost, sshPortOf } from "./platform.ts";
 import type { SshAccess } from "./ssh-agent.ts";
 import { sshPublicKeyOf } from "./ssh-key.ts";
 import { ProjectErrorCode, RepositoryPlatform } from "../project/contract.ts";
@@ -74,11 +74,13 @@ export const platformImplementations = {
 export const repositoryFiles = { resolveBranchCommit, readFilesAtCommit };
 
 export type KnownHostsOf = (tx: Transaction, address: string) => string;
+export type PortOf = (address: string) => number;
 
 export interface Dependencies {
   health?: HealthRegistry;
   checkTools?: () => void;
   knownHostsOf?: KnownHostsOf;
+  portOf?: PortOf;
 }
 
 const ADDRESS_HOST_PATTERN =
@@ -93,10 +95,14 @@ function addressInvalid(): OperationError {
   );
 }
 
-export function pinnedKnownHosts(tx: Transaction, address: string): string {
+function addressHost(address: string): string {
   const host = ADDRESS_HOST_PATTERN.exec(address)?.[1];
   if (host === undefined) throw addressInvalid();
-  return `${knownHostsLine(tx, host)}${LINE_END}`;
+  return host;
+}
+
+export function pinnedKnownHosts(tx: Transaction, address: string): string {
+  return `${knownHostsLine(tx, addressHost(address))}${LINE_END}`;
 }
 
 export type SshGrantFacts = GrantFacts<GrantOf<typeof GrantKind.SshIdentity>>;
@@ -120,10 +126,12 @@ export class RepositoryComponent implements GitWriter {
   pushSnapshotFresh = pushSnapshotFresh;
   landedOn = landedOn;
   private readonly knownHostsOf: KnownHostsOf;
+  private readonly portOf: PortOf;
 
   constructor(dependencies: Dependencies = {}) {
     (dependencies.checkTools ?? checkRepositoryTools)();
     this.knownHostsOf = dependencies.knownHostsOf ?? pinnedKnownHosts;
+    this.portOf = dependencies.portOf ?? RepositoryComponent.sshPortOfAddress;
     dependencies.health?.register("repository", (context) =>
       this.healthcheck(context),
     );
@@ -138,6 +146,7 @@ export class RepositoryComponent implements GitWriter {
       const { credential } = granted;
       assert(credential !== null);
       const known_hosts = this.knownHostsOf(tx, granted.facts.address);
+      const port = this.portOf(granted.facts.address);
       const secret = sshKeySecretSchema.safeParse(material.value());
       if (!secret.success) throw legacyKey(credential);
       const { private_key } = secret.data;
@@ -147,23 +156,31 @@ export class RepositoryComponent implements GitWriter {
       } catch {
         throw legacyKey(credential);
       }
-      return { private_key, public_key, known_hosts };
+      return { private_key, public_key, known_hosts, port };
     } finally {
       material.drop();
     }
   }
 
-  static handedSshAccess(private_key: string, known_hosts: string): SshAccess {
+  static handedSshAccess(
+    private_key: string,
+    known_hosts: string,
+    port: number,
+  ): SshAccess {
     return {
       private_key,
       public_key: sshPublicKeyOf(private_key),
       known_hosts,
+      port,
     };
   }
 
+  static sshPortOfAddress(address: string): number {
+    return sshPortOf(addressHost(address));
+  }
+
   sshHostKeysOf(tx: Transaction, platform: string, address: string): string {
-    const host = ADDRESS_HOST_PATTERN.exec(address)?.[1];
-    if (host === undefined || !isPlatformSshHost(platform, host))
+    if (!isPlatformSshHost(platform, addressHost(address)))
       throw addressInvalid();
     return this.knownHostsOf(tx, address);
   }

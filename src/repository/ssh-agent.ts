@@ -48,6 +48,8 @@ const SOCKET_PROBE_TIMEOUT_MS = 1000;
 const MS_PER_SECOND = 1000;
 const KEY_LIFETIME_SECONDS_MIN = 1;
 const EXIT_SUCCESS = 0;
+const PORT_MIN = 1;
+const PORT_MAX = 65_535;
 const execFileAsync = promisify(execFile);
 
 interface Agent {
@@ -82,10 +84,12 @@ function toolEnvironment(socket?: string): NodeJS.ProcessEnv {
   };
 }
 
-export function sshCommand(directory: string): string {
+export function sshCommand(directory: string, port: number): string {
   assert.ok(directory);
+  assert.ok(Number.isInteger(port) && port >= PORT_MIN && port <= PORT_MAX);
   return [
     "ssh -F none",
+    `-o Port=${port}`,
     "-o IdentitiesOnly=yes",
     `-o IdentityFile=${quoted(join(directory, SSH_PUBLIC_KEY_FILE))}`,
     `-o IdentityAgent=${quoted(join(directory, SSH_AGENT_SOCKET))}`,
@@ -101,11 +105,14 @@ export function sshCommand(directory: string): string {
   ].join(" ");
 }
 
-export function sshAgentEnvironment(directory: string): NodeJS.ProcessEnv {
+export function sshAgentEnvironment(
+  directory: string,
+  port: number,
+): NodeJS.ProcessEnv {
   return {
     ...isolatedGitEnvironment(process.env),
     GIT_SSH_VARIANT: "ssh",
-    GIT_SSH_COMMAND: sshCommand(directory),
+    GIT_SSH_COMMAND: sshCommand(directory, port),
   };
 }
 
@@ -303,7 +310,7 @@ export async function withSshAgent<T>(
     throwIfCancelled(context);
     await loadKey(socket, access.private_key, deadlineAt);
     throwIfCancelled(context);
-    return await work(sshAgentEnvironment(directory));
+    return await work(sshAgentEnvironment(directory, access.port));
   } finally {
     if (agent) await stopAgent(agent, socket);
     await rm(directory, { recursive: true, force: true });

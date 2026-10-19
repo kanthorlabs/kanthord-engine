@@ -49,6 +49,7 @@ export interface SshAccess {
   private_key: string;
   public_key: string;
   known_hosts: string;
+  port: number;
 }
 
 export const RepositoryFileState = {
