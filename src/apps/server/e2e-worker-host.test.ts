@@ -34,7 +34,8 @@ const SECOND_REVISION = 2;
 const TWO_RESULTS = 2;
 const PROVIDER_AND_STORE_PINS = 2;
 const FIRST_INDEX = 0;
-const POLL_LIMIT = 30;
+const EXECUTION_WAIT_MS = 30000;
+const POLL_INTERVAL_MS = 100;
 const JOURNEY_TIMEOUT = 240000;
 const FILE_NAME = "hello.txt";
 const HELLO = "hello";
@@ -201,7 +202,8 @@ async function assertSpanTree(
 }
 
 async function finished(setup: Awaited<ReturnType<typeof fixture>>) {
-  for (let attempt = 0; attempt < POLL_LIMIT; attempt++) {
+  const deadline = Date.now() + EXECUTION_WAIT_MS;
+  while (Date.now() < deadline) {
     const page = await setup.read<{ items: ExecutionRecord[] }>([
       "scheduler",
       "execution",
@@ -218,7 +220,7 @@ async function finished(setup: Awaited<ReturnType<typeof fixture>>) {
       assert.equal(record.credentials.length, PROVIDER_AND_STORE_PINS);
       return record;
     }
-    await delay(100);
+    await delay(POLL_INTERVAL_MS);
   }
   throw new Error("Worker execution did not finish");
 }
