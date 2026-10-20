@@ -29,6 +29,7 @@ const INDETERMINATE = "indeterminate";
 const INVALID_MODE = "invalid_mode";
 const NAME_OPTION = "--name";
 const MODE_OPTION = "--mode";
+const HOLDER_OPTION = "--holder";
 const LOGIN_MODE_BROWSER = "browser";
 const LOGIN_MODE_DEVICE = "device";
 const LOGIN_MODE_COPY_CODE = "copy_code";
@@ -90,7 +91,12 @@ async function login(platform: string, command: Command): Promise<void> {
     {
       params: {},
       query: {},
-      body: { platform, name: options.name, ...(mode ? { mode } : {}) },
+      body: {
+        platform,
+        name: options.name,
+        ...(mode ? { mode } : {}),
+        ...(options.holder === undefined ? {} : { holder: options.holder }),
+      },
     },
     { idempotencyKey: key },
   );
@@ -238,6 +244,11 @@ export function addLlmCommand(program: Command): void {
       "--mode <mode>",
       "Browser, device or copy_code",
       singleUse(MODE_OPTION),
+    )
+    .option(
+      "--holder <name>",
+      "Holder: server or a worker instance name",
+      singleUse(HOLDER_OPTION),
     )
     .option(
       "--idempotency-key <key>",

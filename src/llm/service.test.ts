@@ -1808,7 +1808,10 @@ test("inventory lists only LLM records with their capability and dispatches each
       { platforms: LLM_PLATFORMS },
       "copilot",
       Platform.GitHubCopilot,
-      { refresh: "refresh", access: "access", expires: 0 },
+      {
+        holder: SERVER_HOLDER,
+        secret: { refresh: "refresh", access: "access", expires: 0 },
+      },
       CLOCK_START,
     );
   });
@@ -1900,9 +1903,12 @@ test("provider healthchecks call the LLM provider check of every LLM platform wi
       "copilot",
       Platform.GitHubCopilot,
       {
-        refresh: "refresh",
-        access: "access",
-        expires: Date.now() + SESSION_EXPIRY_MS,
+        holder: SERVER_HOLDER,
+        secret: {
+          refresh: "refresh",
+          access: "access",
+          expires: Date.now() + SESSION_EXPIRY_MS,
+        },
       },
       CLOCK_START,
     );

@@ -47,6 +47,8 @@ const LOOPBACK_NAMES: readonly string[] = ["localhost", "[::1]"];
 const INVALID_INPUT = "credential.input.invalid";
 export const LOGIN_NOT_FOUND = "credential.login.not_found";
 export const LOGIN_VALUE_NOT_AWAITED = "credential.login.value_not_awaited";
+export const LOGIN_INSTANCE_UNAVAILABLE =
+  "credential.login.instance_unavailable";
 export type OAuthSecret = { refresh: string; access: string; expires: number };
 
 export function isLoopbackHost(host: string): boolean {
@@ -103,7 +105,7 @@ export function loginNotFound(): OperationError {
   );
 }
 
-function loginFailed(): OperationError {
+export function loginFailed(): OperationError {
   return new OperationError(
     HttpStatus.ServiceUnavailable,
     LOGIN_FAILED_CODE,
@@ -220,7 +222,9 @@ export class OAuthLogin {
       this.sessions.updateLastMessage(this.session.id, event.message);
   }
 
-  private credentials(persist: (secret: OAuthSecret) => void): CredentialStore {
+  private credentials(
+    persist: (secret: OAuthSecret) => void | Promise<void>,
+  ): CredentialStore {
     return {
       read: async () => undefined,
       list: async () => [],
@@ -242,7 +246,7 @@ export class OAuthLogin {
         options?.signal?.throwIfAborted();
         this.requirePending();
         if (this.session.address === null) throw new Error(LOGIN_FAILED);
-        persist(parsed.data);
+        await persist(parsed.data);
         return credential;
       },
     };
@@ -250,7 +254,7 @@ export class OAuthLogin {
 
   async run(
     providers: () => readonly Provider[],
-    persist: (secret: OAuthSecret) => void,
+    persist: (secret: OAuthSecret) => void | Promise<void>,
   ): Promise<void> {
     this.timer = setTimeout(
       () => this.expire(),

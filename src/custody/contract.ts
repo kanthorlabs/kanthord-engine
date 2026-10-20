@@ -878,13 +878,13 @@ export interface CredentialRecords {
     credentialName: string,
     holder?: string,
   ): CredentialAnswer;
-  requireAvailableName(tx: Transaction, name: string): void;
+  requireAvailableName(tx: Transaction, name: string, holder?: string): void;
   createLoginRevision(
     tx: Transaction,
     set: CredentialPlatformSet,
     name: string,
     platform: string,
-    secret: unknown,
+    copy: CredentialCopy,
     now: number,
   ): string;
   createGenerated(

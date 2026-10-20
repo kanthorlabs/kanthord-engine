@@ -106,6 +106,7 @@ import {
   endGroup,
   readRow,
 } from "./registration-rows.ts";
+import type { LoginSessionEntry } from "../llm/contract.ts";
 import { WorkerInstances } from "./instances.ts";
 import { readInstanceById, readLiveInstance } from "./instance-rows.ts";
 import { declareInstances } from "./instance-operations.ts";
@@ -149,6 +150,7 @@ export interface Dependencies {
     archiveHeld(tx: Transaction, holder: string, now: number): void;
     heldCopies(tx: Transaction, holder: string): HeldCopy[];
   };
+  loginSessionsOf?: (holder: string) => LoginSessionEntry[];
   health?: HealthRegistry;
   registrations?: WorkerRegistrations;
   pool?: {
@@ -228,6 +230,9 @@ export class WorkerService implements Service {
         }
       : null;
   }
+  instanceConnected(name: string): boolean {
+    return this.instances.connected(name);
+  }
   instanceNameOf(tx: Transaction, instanceId: string): string | null {
     const instance = readInstanceById(tx, instanceId);
     return instance?.ended_at === null ? instance.name : null;
@@ -283,6 +288,7 @@ export class WorkerService implements Service {
         dependencies.instanceCopies?.archiveHeld(tx, holder, now),
       holderMismatch: (tx, instanceName, bindings) =>
         this.holderMismatch(tx, instanceName, bindings),
+      loginSessionsOf: (holder) => dependencies.loginSessionsOf?.(holder) ?? [],
     });
     if (dependencies.pool) this.pool = new Pool(dependencies.pool.host);
     this.performer = new ActionPerformer({

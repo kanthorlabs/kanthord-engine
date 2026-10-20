@@ -1,4 +1,5 @@
 import { hostname } from "node:os";
+import type { Provider } from "@earendil-works/pi-ai";
 import { join } from "node:path";
 import { PI_DIRECTORY_NAME } from "../../agent/pi.ts";
 import { installPiTools } from "../../agent/pi-tools.ts";
@@ -31,6 +32,7 @@ import { validateClientEndpoint } from "../../gateway/client.ts";
 import {
   BindingEntryState,
   INSTANCE_HEARTBEAT_INTERVAL_MS,
+  INSTANCE_LOGIN_HEARTBEAT_INTERVAL_MS,
   INSTANCE_RENEWAL_INTERVAL_MS,
   INSTANCE_SUPERSEDED_CODE,
   WorkerErrorCode,
@@ -53,6 +55,7 @@ import {
   type ConnectionEntry,
 } from "./instance-exchange.ts";
 import { instanceCopyKey } from "./instance-credential.ts";
+import { InstanceLogins } from "./instance-login.ts";
 
 const WORKER_STOP_WATCHDOG_MS = 10000;
 const WORKER_STOP_EXIT_FAILURE = 1;
@@ -84,6 +87,7 @@ export interface WorkerOptions {
   heartbeatIntervalMs?: number;
   renewalIntervalMs?: number;
   addressLookup?: AddressLookup;
+  oauthProviders?: () => readonly Provider[];
 }
 
 interface Hosted {
@@ -127,6 +131,7 @@ export class Worker implements Service {
   private exchange?: InstanceExchange;
   private endpoint?: string;
   private connection?: Connection;
+  private logins?: InstanceLogins;
   private connectionName = "";
   private operationalLog?: OperationalLog;
   private heartbeatTimer?: NodeJS.Timeout;
@@ -168,7 +173,16 @@ export class Worker implements Service {
       });
       throwIfCancelled(this.shutdown);
       this.endpoint = endpoint;
-      this.exchange = new InstanceExchange(configuration, endpoint);
+      const exchange = new InstanceExchange(configuration, endpoint);
+      this.exchange = exchange;
+      const instanceKey = instanceCopyKey(configuration);
+      this.logins = new InstanceLogins({
+        key: instanceKey,
+        providers: this.options.oauthProviders,
+        report: (sessionId, body) =>
+          exchange.loginReport(sessionId, body, this.shutdown),
+        log: (record) => this.logRecord(record),
+      });
       const token = await this.takeToken();
       throwIfCancelled(this.shutdown);
       this.connectionName = this.options.connectionName ?? hostname();
@@ -194,7 +208,7 @@ export class Worker implements Service {
         repository_transport: this.options.repositoryTransport,
         watchdog: armWatchdog,
         refused: (binding) => this.bindingRefused(binding),
-        instance_key: instanceCopyKey(configuration),
+        instance_key: instanceKey,
       });
       const error = await this.unit.start();
       if (error) throw error;
@@ -205,8 +219,9 @@ export class Worker implements Service {
   quiesce(): Promise<Error | null> {
     this.quiesceTask ??= lifecycle(async () => {
       this.shutdown.cancel();
-      clearInterval(this.heartbeatTimer);
+      clearTimeout(this.heartbeatTimer);
       clearTimeout(this.renewalTimer);
+      this.logins?.stop();
       const error = await this.unit?.quiesce();
       if (error) throw error;
     });
@@ -255,8 +270,9 @@ export class Worker implements Service {
       if (outcome.ended) return await this.end(outcome.ended, running);
       return (await this.exchangeVerdict(outcome.result)) ?? outcome.result;
     } finally {
-      clearInterval(this.heartbeatTimer);
+      clearTimeout(this.heartbeatTimer);
       clearTimeout(this.renewalTimer);
+      this.logins?.stop();
       unsubscribe();
       process.off("SIGINT", stop);
       process.off("SIGTERM", stop);
@@ -276,8 +292,9 @@ export class Worker implements Service {
     reason: Diagnostic,
     running: Promise<Error | null>,
   ): Promise<Error | null> {
-    clearInterval(this.heartbeatTimer);
+    clearTimeout(this.heartbeatTimer);
     clearTimeout(this.renewalTimer);
+    this.logins?.stop();
     if (reason.code === VERSION_MISMATCH_CODE) await this.unit!.stop();
     else await this.unit!.abandon();
     await running;
@@ -348,11 +365,21 @@ export class Worker implements Service {
   }
 
   private startExchangeLoops(): void {
-    this.heartbeatTimer = setInterval(
-      () => void this.check(),
-      this.options.heartbeatIntervalMs ?? INSTANCE_HEARTBEAT_INTERVAL_MS,
-    );
+    this.armHeartbeat();
     this.armRenewal();
+  }
+
+  private armHeartbeat(): void {
+    clearTimeout(this.heartbeatTimer);
+    if (this.shutdown.err()) return;
+    const interval =
+      this.options.heartbeatIntervalMs ?? INSTANCE_HEARTBEAT_INTERVAL_MS;
+    this.heartbeatTimer = setTimeout(
+      () => void this.check().finally(() => this.armHeartbeat()),
+      this.logins?.pending()
+        ? Math.min(interval, INSTANCE_LOGIN_HEARTBEAT_INTERVAL_MS)
+        : interval,
+    );
   }
 
   private armRenewal(): void {
@@ -384,6 +411,7 @@ export class Worker implements Service {
       );
       if (answer.server_version !== packageVersion())
         return this.finish(versionMismatch(answer.server_version));
+      this.logins!.sync(answer.login_sessions);
       if (answer.binding_version !== this.connection.binding_version)
         await this.reconnect();
     } catch (error) {

@@ -11,10 +11,12 @@ import {
 } from "../kernel/hpke.ts";
 import type { Store, Transaction } from "../kernel/store.ts";
 import { packageVersion } from "../kernel/version.ts";
+import type { LoginSessionEntry } from "../llm/contract.ts";
 import { getWorkerDeclaration } from "./catalog.ts";
 import {
   BindingEntryState,
   CONNECTION_ID_PREFIX,
+  INSTANCE_CONNECTED_WINDOW_MS,
   INSTANCE_CONNECTION_INFO,
   InstancePlacement,
   NO_CREDENTIAL_VERSION,
@@ -76,6 +78,7 @@ export interface InstanceDependencies {
     instanceName: string,
     bindings: readonly ListedBinding[],
   ) => boolean;
+  loginSessionsOf: (holder: string) => LoginSessionEntry[];
 }
 
 interface CurrentConnection {
@@ -250,6 +253,17 @@ export class WorkerInstances implements WorkerInstanceLookups {
       connected_at: current.connected_at,
       last_heartbeat_at: current.last_heartbeat_at,
     };
+  }
+
+  connected(name: string): boolean {
+    const instance = this.dependencies.store.transaction((tx) =>
+      readLiveInstance(tx, name),
+    );
+    const current = instance ? this.connections.get(instance.id) : undefined;
+    return (
+      current !== undefined &&
+      Date.now() - current.last_heartbeat_at <= INSTANCE_CONNECTED_WINDOW_MS
+    );
   }
 
   dropConnection(instanceId: string): void {
@@ -489,7 +503,7 @@ export class WorkerInstances implements WorkerInstanceLookups {
     server_version: string;
     binding_version: number;
     credential_version: number;
-    login_sessions: Record<string, unknown>[];
+    login_sessions: LoginSessionEntry[];
   } {
     if (!this.holdConnection(instanceId, connectionId, connectionName))
       throw superseded(this.connections.get(instanceId));
@@ -498,7 +512,7 @@ export class WorkerInstances implements WorkerInstanceLookups {
       server_version: packageVersion(),
       binding_version: this.bindingVersionOf(name),
       credential_version: NO_CREDENTIAL_VERSION,
-      login_sessions: [],
+      login_sessions: this.dependencies.loginSessionsOf(name),
     };
   }
 

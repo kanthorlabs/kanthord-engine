@@ -11,8 +11,10 @@ import {
   credentialPlatformListAnswerSchema,
   credentialRevisionParamsSchema,
   credentialUpdateMetadataBodySchema,
+  LoginSessionMode,
   METADATA_MAX_BODY_BYTES,
 } from "../custody/contract.ts";
+import { sealedObjectSchema } from "../kernel/hpke.ts";
 import { HttpMethod, HttpStatus } from "../kernel/http.ts";
 import {
   AccessPolicy,
@@ -73,6 +75,35 @@ export const llmCredentialRotateSchema = z.strictObject({
   sealed: z.unknown().optional(),
   sealed_to: z.string().optional(),
 });
+export const InstanceLoginState = {
+  Pending: "pending",
+  Completed: "completed",
+  Failed: "failed",
+} as const;
+export type InstanceLoginState =
+  (typeof InstanceLoginState)[keyof typeof InstanceLoginState];
+export const INSTANCE_LOGIN_MODES = [
+  LoginSessionMode.CopyCode,
+  LoginSessionMode.Device,
+] as const;
+export const loginSessionEntrySchema = z.strictObject({
+  session_id: z.string().min(1),
+  name: z.string().min(1),
+  platform: z.string().min(1),
+  mode: z.enum(INSTANCE_LOGIN_MODES),
+  code: z.string().nullable(),
+});
+export type LoginSessionEntry = z.infer<typeof loginSessionEntrySchema>;
+export const loginReportBodySchema = z.strictObject({
+  state: z.enum(InstanceLoginState),
+  address: z.string().nullable(),
+  code: z.string().nullable(),
+  message: z.string().nullable(),
+  failure_reason: z.string().nullable(),
+  sealed: sealedObjectSchema.optional(),
+  sealed_to: z.string().optional(),
+});
+export type LoginReportBody = z.infer<typeof loginReportBodySchema>;
 export type LlmCredentialCreate = z.infer<typeof llmCredentialCreateSchema>;
 export type LlmCredentialRotate = z.infer<typeof llmCredentialRotateSchema>;
 
@@ -369,10 +400,12 @@ export const llmOperations = {
         platform: z.string(),
         name: z.string(),
         mode: z.string().optional(),
+        holder: holderSchema.optional(),
       }),
     }),
     output: loginAnswerSchema,
-    description: "Start an OAuth credential login session.",
+    description:
+      "Start an OAuth credential login session. The holder defaults to server. A login of a worker instance runs on that instance in copy_code or device mode.",
   },
   login_code: {
     id: "llm.credential.login_code",
@@ -414,6 +447,28 @@ export const llmOperations = {
     }),
     output: loginStatusAnswerSchema,
     description: "Read the state of an OAuth login session.",
+  },
+  login_report: {
+    id: "llm.credential.login_report",
+    service: LLM_COMPONENT_NAME,
+    method: HttpMethod.Post,
+    path: "/api/llm/credential/login/:session_id/report",
+    access: AccessPolicy.Worker,
+    store: StoreName.Operational,
+    lifetime: OperationLifetime.Unary,
+    timeoutMs: CREDENTIAL_TIMEOUT_MS,
+    mutation: true,
+    body: true,
+    maxBodyBytes: CREATE_MAX_BODY_BYTES,
+    status: HttpStatus.NoContent,
+    input: z.strictObject({
+      params: sessionParams,
+      query: emptyQuery,
+      body: loginReportBodySchema,
+    }),
+    output: z.null(),
+    description:
+      "Report the state of an OAuth login session that runs on the worker instance of the token. The completed report carries the credential sealed to the instance key, and the server stores revision 1 of the copy of that instance.",
   },
   provider_check: {
     id: "llm.provider.check",

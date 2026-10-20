@@ -329,7 +329,7 @@ export default tseslint.config(
                   to: element("component", {
                     captured: { name: "llm" },
                     fileInternalPath:
-                      "{model-connector,platforms,provider-failure}.ts",
+                      "{model-connector,platforms,provider-failure,login,sessions}.ts",
                   }),
                 },
                 {

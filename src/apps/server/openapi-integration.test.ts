@@ -582,6 +582,7 @@ const OPERATION_INVENTORY: readonly (readonly [string, AccessPolicy])[] = [
   ["llm.credential.login", AccessPolicy.Human],
   ["llm.credential.login_code", AccessPolicy.Human],
   ["llm.credential.login_status", AccessPolicy.Human],
+  ["llm.credential.login_report", AccessPolicy.Worker],
   ["llm.credential.platform_list", AccessPolicy.Human],
   ["llm.credential.check", AccessPolicy.Human],
   ["llm.credential.verify", AccessPolicy.Human],
@@ -767,8 +768,8 @@ const OPERATION_INVENTORY: readonly (readonly [string, AccessPolicy])[] = [
   ["tracking.span.list", AccessPolicy.Human],
   ["tracking.text.get", AccessPolicy.Human],
 ];
-const OPERATION_COUNT = 199;
-const ROUTED_OPERATION_COUNT = 189;
+const OPERATION_COUNT = 200;
+const ROUTED_OPERATION_COUNT = 190;
 const INTAKE_OPERATION_COUNT = 22;
 const INTAKE_ROUTED_OPERATION_COUNT = 14;
 const SERVICE_OPERATION_IDS = [
