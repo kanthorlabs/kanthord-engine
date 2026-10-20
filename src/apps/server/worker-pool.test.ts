@@ -13,7 +13,8 @@ import {
 } from "../../worker/contract.ts";
 import { until } from "./cli-support.ts";
 import { humanCaller } from "./test-support.ts";
-import { POOL_BACKOFF_INITIAL_MS, threadEnvironment } from "./worker-pool.ts";
+import { threadEnvironment } from "./thread-driver.ts";
+import { POOL_BACKOFF_INITIAL_MS } from "./worker-pool.ts";
 import { workerAcceptance, WORKER_DEFAULTS } from "./worker-acceptance.ts";
 
 const BINDING = "general";
@@ -86,13 +87,13 @@ async function serverPool(t: TestContext, count: number, slotLimit?: number) {
   const settled = async (ended = slots()) => {
     for (const slot of ended)
       await until(
-        () => setup.fixture.workerPool.threadOf(slot.client_id),
+        () => setup.fixture.threadDriver.threadOf(slot.client_id),
         (thread) => thread === undefined,
       );
     await delay(POOL_BACKOFF_INITIAL_MS);
     for (const slot of ended)
       assert.equal(
-        setup.fixture.workerPool.threadOf(slot.client_id),
+        setup.fixture.threadDriver.threadOf(slot.client_id),
         undefined,
       );
     assert.ok(
@@ -218,7 +219,7 @@ test(
     const f = await serverPool(t, ONE_INSTANCE);
     f.fixture.worker.startPool();
     const [first] = await f.waitFor(ONE_INSTANCE);
-    const thread = f.fixture.workerPool.threadOf(first!.client_id!);
+    const thread = f.fixture.threadDriver.threadOf(first!.client_id!);
     assert.ok(thread);
     await thread.terminate();
     await until(
@@ -226,7 +227,7 @@ test(
       (lines) => lines.some((line) => line.includes(FAILED_MESSAGE)),
     );
     await until(
-      () => f.fixture.workerPool.threadOf(first!.client_id!),
+      () => f.fixture.threadDriver.threadOf(first!.client_id!),
       (restarted) => restarted !== undefined && restarted !== thread,
     );
     await delay(0);
@@ -278,7 +279,7 @@ test(
     await f.waitFor(ONE_INSTANCE);
     const [first, second] = f.slots();
     assert.ok(first && second);
-    assert.equal(f.fixture.workerPool.threadOf(second.client_id), undefined);
+    assert.equal(f.fixture.threadDriver.threadOf(second.client_id), undefined);
     f.fixture.workerPool.drain({ ...first, draining: true });
     const [next] = await until(
       () => f.instances(),

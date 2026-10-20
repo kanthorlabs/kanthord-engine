@@ -263,7 +263,9 @@ engine/
 │   │   └── service.ts          # Private listener lifecycle and HTTP wiring
 │   └── apps/                   # Application entries and composition roots
 │       ├── server/             # Service construction, startup, shutdown, and integration tests
-│       │   ├── worker-pool.ts  # Pool host: one worker thread for each slot, slot root, backoff and stop
+│       │   ├── worker-pool.ts  # Pool host: driver-neutral cap, slot root, backoff, drain, resume and stop
+│       │   ├── slot-driver.ts  # Slot driver interface and its launch, instance and exit types
+│       │   ├── thread-driver.ts # The thread driver: one worker thread for each slot and its environment
 │       │   ├── slot-identity.ts # Deterministic client identity of a pool slot
 │       │   └── index.ts        # Compose configuration, log, store, registry, and services
 │       ├── cli/                # Non-interactive commands and client configuration
@@ -286,6 +288,7 @@ engine/
 │           ├── api.ts          # Bounded backoff and indeterminate retry
 │           ├── transport.ts    # Worker transport interface, the HTTP transport and the port transport
 │           ├── thread.ts       # Worker thread entry: parses workerData and runs the worker unit
+│           ├── thread-start.ts # Worker thread start from the SEA bundle or the TypeScript entry
 │           ├── thread-data.ts  # Schema of the workerData and of the control messages of the worker thread
 │           ├── unit.ts         # Worker unit: registration, heartbeat, work pulls and drain
 │           └── index.ts        # The worker wrapper: client resolution, signals, watchdog and exit

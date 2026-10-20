@@ -19,13 +19,15 @@ const workerTestFiles = [
 ];
 const workerWrapperEntry = "src/apps/worker/index.ts";
 const workerThreadEntry = "src/apps/worker/thread.ts";
+const workerThreadStart = "src/apps/worker/thread-start.ts";
 const workerPaths = (threads) => [
   { name: "node:sqlite", message: "A worker unit reaches no database." },
   ...(threads
     ? ["node:worker_threads", "worker_threads"].map((name) => ({
         name,
         allowTypeImports: true,
-        message: "Only src/apps/worker/thread.ts uses worker threads.",
+        message:
+          "Only src/apps/worker/thread.ts and thread-start.ts use worker threads.",
       }))
     : []),
   ...["node:process", "process"].map((name) => ({
@@ -210,6 +212,11 @@ export default tseslint.config(
                   to: element("service", {
                     captured: { name: "gateway" },
                     fileInternalPath: "{client.ts,local.ts,auth/jwt.ts}",
+                  }),
+                },
+                {
+                  to: element("apps-worker", {
+                    fileInternalPath: "{thread-data,thread-start}.ts",
                   }),
                 },
               ],
@@ -536,7 +543,7 @@ export default tseslint.config(
   },
   {
     files: workerFiles,
-    ignores: [workerThreadEntry, ...workerTestFiles],
+    ignores: [workerThreadEntry, workerThreadStart, ...workerTestFiles],
     rules: {
       "@typescript-eslint/no-restricted-imports": workerImportRule({
         threads: true,
@@ -545,7 +552,7 @@ export default tseslint.config(
     },
   },
   {
-    files: [workerThreadEntry],
+    files: [workerThreadEntry, workerThreadStart],
     rules: {
       "@typescript-eslint/no-restricted-imports": workerImportRule({
         threads: false,
