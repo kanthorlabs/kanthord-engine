@@ -17,6 +17,7 @@ import { fixtureTemplate, temporary } from "../../kernel/test-support.ts";
 import { createIdentity } from "../../kernel/identity.ts";
 import { nodeBranchOf } from "../../repository/node-branch.ts";
 import { generateSshKey } from "../../repository/ssh-key.ts";
+import { DEFAULT_SSH_PORT } from "../../repository/test-sshd.ts";
 import {
   CHECKOUTS_DIRECTORY,
   handedSshAccess,
@@ -708,4 +709,36 @@ test("a handed SSH access takes the port of the address host from the fixed tabl
     repositories.map(({ binding_id }) => access.get(binding_id)?.port),
     Object.values(ports),
   );
+});
+
+test("a repository binding without a handed SSH identity takes the relay with the setup public key", () => {
+  const [handed, relayed] = [repositorySetup(), repositorySetup()];
+  const { private_key } = generateSshKey("handed");
+  const signer = async () => Buffer.alloc(0);
+  const bindings: string[] = [];
+  const access = handedSshAccess(
+    [
+      {
+        binding_id: handed.binding_id,
+        credential_id: createIdentity("credential"),
+        private_key,
+      },
+    ],
+    [handed, relayed],
+    (bindingId) => {
+      bindings.push(bindingId);
+      return signer;
+    },
+  );
+  const keyAccess = access.get(handed.binding_id);
+  assert.ok(keyAccess && "private_key" in keyAccess);
+  assert.equal(keyAccess.private_key, private_key);
+  const relayAccess = access.get(relayed.binding_id);
+  assert.ok(relayAccess && "relay" in relayAccess);
+  assert.equal(relayAccess.relay, signer);
+  assert.equal(relayAccess.public_key, relayed.ssh_public_key);
+  assert.equal(relayAccess.known_hosts, relayed.ssh_host_key.known_hosts);
+  assert.equal(relayAccess.port, DEFAULT_SSH_PORT);
+  assert.deepEqual(bindings, [relayed.binding_id]);
+  assert.throws(() => handedSshAccess([], [relayed]));
 });

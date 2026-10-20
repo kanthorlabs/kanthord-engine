@@ -14,7 +14,7 @@ import { identitySchema } from "../../kernel/identity.ts";
 import { bindingNameSchema } from "../../project/contract.ts";
 import type { Context } from "../../kernel/context.ts";
 import type { ExecutionSetup, RepositoryTransport } from "../contract.ts";
-import type { SshAccess } from "../../repository/contract.ts";
+import type { SshAccess, SshSigner } from "../../repository/contract.ts";
 import { RepositoryComponent } from "../../repository/index.ts";
 import type { HandoverSshIdentity } from "../../custody/contract.ts";
 
@@ -65,21 +65,33 @@ interface WorkspaceRepository {
 export function handedSshAccess(
   identities: readonly HandoverSshIdentity[],
   repositories: ExecutionSetup["repositories"],
+  relay?: (bindingId: string) => SshSigner,
 ): Map<string, SshAccess> {
   const access = new Map<string, SshAccess>();
   for (const repository of repositories) {
     const identity = identities.find(
       (entry) => entry.binding_id === repository.binding_id,
     );
-    assert.ok(identity, "A repository binding must hold a handed SSH identity");
-    access.set(
-      repository.binding_id,
-      RepositoryComponent.handedSshAccess(
-        identity.private_key,
-        repository.ssh_host_key.known_hosts,
-        RepositoryComponent.sshPortOfAddress(repository.address),
-      ),
-    );
+    const known_hosts = repository.ssh_host_key.known_hosts;
+    const port = RepositoryComponent.sshPortOfAddress(repository.address);
+    if (identity) {
+      access.set(
+        repository.binding_id,
+        RepositoryComponent.handedSshAccess(
+          identity.private_key,
+          known_hosts,
+          port,
+        ),
+      );
+      continue;
+    }
+    assert.ok(relay, "A repository binding must hold a handed SSH identity");
+    access.set(repository.binding_id, {
+      relay: relay(repository.binding_id),
+      public_key: repository.ssh_public_key,
+      known_hosts,
+      port,
+    });
   }
   return access;
 }

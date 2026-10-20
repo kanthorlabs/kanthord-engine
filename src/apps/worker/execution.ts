@@ -23,6 +23,7 @@ import { completed, HandoverRefused, takeHandover } from "./handover.ts";
 import { retryIndeterminate } from "./api.ts";
 import type { WorkerTransport } from "./transport.ts";
 import { uploadEvidence } from "./evidence-upload.ts";
+import { relaySigner } from "./ssh-relay.ts";
 import { HttpTelemetrySink } from "./telemetry-sink.ts";
 
 export interface HostExecutionInput {
@@ -89,7 +90,11 @@ export async function hostExecution(
         context,
       ),
     );
-    sshAccess = handedSshAccess(handover.sshIdentities, setup.repositories);
+    sshAccess = handedSshAccess(
+      handover.sshIdentities,
+      setup.repositories,
+      (bindingId) => relaySigner({ ...input, bindingId }),
+    );
     const result = await execute({
       ...input,
       setup,
