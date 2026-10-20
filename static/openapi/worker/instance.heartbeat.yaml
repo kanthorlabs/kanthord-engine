@@ -100,9 +100,32 @@ components:
           type: array
           items:
             type: object
-            propertyNames:
-              type: string
-            additionalProperties: {}
+            properties:
+              session_id:
+                type: string
+                minLength: 1
+              name:
+                type: string
+                minLength: 1
+              platform:
+                type: string
+                minLength: 1
+              mode:
+                type: string
+                enum:
+                  - copy_code
+                  - device
+              code:
+                anyOf:
+                  - type: string
+                  - type: "null"
+            required:
+              - session_id
+              - name
+              - platform
+              - mode
+              - code
+            additionalProperties: false
       required:
         - server_version
         - binding_version
