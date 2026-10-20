@@ -31,7 +31,8 @@ import type {
 } from "./model-runtime.ts";
 import { EndReason, ExecutionStop } from "./execution-run.ts";
 import { providerFailureOf } from "../../llm/provider-failure.ts";
-import { redactReason } from "../../kernel/probe.ts";
+import { redactReason, thrownReason } from "../../kernel/probe.ts";
+import { CodedError } from "../../kernel/errors.ts";
 import { SecretShape } from "../../custody/contract.ts";
 import { traceAgent } from "./agent-telemetry.ts";
 import type { SpanRecorder } from "./telemetry.ts";
@@ -82,6 +83,18 @@ async function credentialSecrets(
   return stored.key === undefined ? [] : [stored.key];
 }
 
+export async function promptStop(
+  error: unknown,
+  credential: ExecutionCredential,
+): Promise<unknown> {
+  if (error instanceof ExecutionStop) return error;
+  return new ExecutionStop(
+    EndReason.OperationFailed,
+    error instanceof CodedError ? error.code : null,
+    thrownReason(error, await credentialSecrets(credential)),
+  );
+}
+
 async function providerFailure(
   messages: readonly AgentMessage[],
   credential: ExecutionCredential,
@@ -126,7 +139,12 @@ function nativeAgent(
   };
   const settle = async (text: string) => {
     assert.ok(session);
-    await session.prompt(text, { expandPromptTemplates: false });
+    try {
+      await session.prompt(text, { expandPromptTemplates: false });
+    } catch (error) {
+      if (context.err()) throw error;
+      throw await promptStop(error, credential);
+    }
     await session.waitForIdle();
     if (context.err()) return;
     const failed = await providerFailure(session.messages, credential);

@@ -131,6 +131,7 @@ export async function hostExecution(
     });
     if (revoked) return null;
     if (context.err()) throw context.err();
+    const detail = detailOf(result);
     input.log({
       msg: "execution ended",
       execution_id: input.claim.execution_id,
@@ -141,7 +142,7 @@ export async function hostExecution(
       ...(result.kind === ExecutionEndKind.Released && result.stop
         ? { reason: result.stop.reason, code: result.stop.code }
         : {}),
-      ...(detailOf(result) === undefined ? {} : { detail: detailOf(result) }),
+      ...(detail === undefined ? {} : { detail }),
     });
     if (
       result.kind !== ExecutionEndKind.Ended ||

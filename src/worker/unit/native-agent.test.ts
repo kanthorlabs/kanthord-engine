@@ -18,7 +18,9 @@ import { background, CancellationContext } from "../../kernel/context.ts";
 import { Diagnostic } from "../../kernel/errors.ts";
 import { createIdentity } from "../../kernel/identity.ts";
 import { temporary, hostEnvironment } from "../../kernel/test-support.ts";
-import { openNativeAgent } from "./native-agent.ts";
+import { openNativeAgent, promptStop } from "./native-agent.ts";
+import { EndReason, ExecutionStop } from "./execution-run.ts";
+import { CodedError } from "../../kernel/errors.ts";
 import { ExecutionIntent } from "../contract.ts";
 import {
   WorkerMethod,
@@ -525,4 +527,34 @@ test("a failed turn check ends the prompt before the next model call", async (t)
   assert.ok(existsSync(join(h.workspace, "first.txt")));
   assert.equal(existsSync(join(h.workspace, "second.txt")), false);
   assert.equal(h.provider.calls.length, CALLS_BEFORE_FAILED_CHECK);
+});
+
+const AUTH_FAILED = "llm.auth.failed";
+const AUTH_FAILED_DETAIL = "Error: Authentication failed [redacted] [redacted]";
+
+test("a thrown prompt error stops the run with its cause text and the OAuth tokens removed", async () => {
+  const access = "short_access_1";
+  const refresh = "short_refresh_1";
+  const store = new InMemoryCredentialStore();
+  await store.modify("anthropic", async () => ({
+    type: "oauth",
+    access,
+    refresh,
+    expires: Date.now() + 60000,
+  }));
+  const credential = {
+    credential_id: "credential_01ARZ3NDEKTSV4RRFFQ69G5FAA",
+    provider_id: "anthropic",
+    store,
+  };
+  const stopped = await promptStop(
+    new CodedError(AUTH_FAILED, `Authentication failed ${access} ${refresh}`),
+    credential,
+  );
+  assert.ok(stopped instanceof ExecutionStop);
+  assert.equal(stopped.reason, EndReason.OperationFailed);
+  assert.equal(stopped.code, AUTH_FAILED);
+  assert.equal(stopped.detail, AUTH_FAILED_DETAIL);
+  const earlier = new ExecutionStop(EndReason.Revoked, null);
+  assert.equal(await promptStop(earlier, credential), earlier);
 });

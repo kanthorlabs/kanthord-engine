@@ -695,7 +695,9 @@ newest 50 execution transcripts.
 When an execution ends, the application logs one record `execution ended`
 with `execution_id` and `kind`. The `kind` is `released`, `closed` or `ended`.
 For `ended`, the record adds `reason` and `code`. For `released` with a `stop`,
-the record adds the `reason` and the `code` of that `stop`.
+the record adds the `reason` and the `code` of that `stop`. When the stop has a
+cause text, the record also adds `detail`. The `detail` holds the provider error
+text or the thrown error text, with secrets removed and cut to 300 characters.
 
 An execution that ends with a release or a closure leaves the instance
 registered, and the application pulls again. A release with a `stop` is a

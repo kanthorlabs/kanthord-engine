@@ -15,6 +15,19 @@ const REDACTED = "[redacted]";
 const BEARER_PATTERN = /Bearer\s+\S+/gi;
 const JWT_PATTERN = /\beyJ[\w-]+\.[\w-]+\.[\w-]*/g;
 const TOKEN_PATTERN = /[A-Za-z0-9_\-+/=.]{32,}/g;
+const PATH_SEPARATOR = "/";
+const PATH_MIN_SEPARATORS = 3;
+const TOKEN_MIN_LENGTH = 32;
+const TOKEN_ONLY_TEXT = /[+=]/;
+
+function tokenOrPath(match: string): string {
+  const segments = match.split(PATH_SEPARATOR);
+  const path =
+    !TOKEN_ONLY_TEXT.test(match) &&
+    segments.length > PATH_MIN_SEPARATORS &&
+    segments.every((segment) => segment.length < TOKEN_MIN_LENGTH);
+  return path ? match : REDACTED;
+}
 
 export function redactReason(
   text: string,
@@ -27,7 +40,7 @@ export function redactReason(
   return result
     .replace(BEARER_PATTERN, REDACTED)
     .replace(JWT_PATTERN, REDACTED)
-    .replace(TOKEN_PATTERN, REDACTED)
+    .replace(TOKEN_PATTERN, tokenOrPath)
     .slice(0, REASON_MAX_LENGTH);
 }
 

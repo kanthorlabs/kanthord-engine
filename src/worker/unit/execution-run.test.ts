@@ -316,6 +316,37 @@ test("a stop release sends the cause detail of a provider failure", async (t) =>
   assert.deepEqual(bodies, [{ further_work: true, stop }]);
 });
 
+test("a stop release keeps the cause detail when it reconciles a lost answer or falls back to an end", async (t) => {
+  const stop = {
+    reason: EndReason.ProviderFailed,
+    code: ProviderFailure.Unavailable,
+    detail: "OAuth auth derivation failed for anthropic",
+  };
+  for (const recorded of [stop, null]) {
+    const run = fixture();
+    t.after(() => run.dispose());
+    const stopped = run.stopOf(
+      new ExecutionStop(stop.reason, stop.code, stop.detail),
+    );
+    run.clients.scheduler = {
+      executionRelease: async () => ({
+        type: OperationResultType.Indeterminate,
+      }),
+      claimGet: async () => ({
+        type: OperationResultType.Completed,
+        status: 200,
+        data: { claim_state: "finished", stop: recorded },
+      }),
+    } as unknown as MethodClients["scheduler"];
+    assert.deepEqual(
+      await run.releaseStop(stopped),
+      recorded
+        ? { kind: "released", furtherWork: true, stop }
+        : { kind: "ended", ...stop },
+    );
+  }
+});
+
 test("a stop release that the scheduler refuses as ended ends the run as revoked", async (t) => {
   for (const [status, code] of [
     [409, EXECUTION_NOT_RUNNING],
