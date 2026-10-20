@@ -38,6 +38,7 @@ import {
   isPlatformSshHost,
 } from "../repository/platform.ts";
 import { WORKING_FILES } from "../agent/prompt-layers.ts";
+import { AgentErrorCode } from "../agent/contract.ts";
 import {
   InvalidReason,
   PROMPT_SOURCE_MAX_BYTES,
@@ -904,6 +905,7 @@ export class ProjectService implements Service, ProjectBindings {
       : null;
     const view = this.workerAgentView(tx, config.worker, agent, entry);
     assert.ok(view, "Declared agents must have a worker view.");
+    const holderRefused = config.placement === WorkerPlacement.Worker;
     assert.ok(project.binding_set_version >= BINDING_SET_INITIAL_VERSION);
     return {
       agent,
@@ -916,8 +918,16 @@ export class ProjectService implements Service, ProjectBindings {
       chain: view.chain,
       active_position: view.active_position,
       cooling: view.cooling,
-      valid: view.valid,
-      issues: view.issues,
+      valid: view.valid && !holderRefused,
+      issues: holderRefused
+        ? [
+            ...view.issues,
+            {
+              path: [WorkerField.Placement],
+              code: AgentErrorCode.CredentialHolderMismatch,
+            },
+          ]
+        : view.issues,
     };
   }
   private declareAgentReads(registry: OperationRegistry): void {

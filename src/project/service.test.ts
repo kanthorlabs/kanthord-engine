@@ -1791,6 +1791,41 @@ test("a worker placement binding stores its instances and answers their count", 
   assert.deepEqual(row?.worker_instances, ["coder-a", "coder-b"]);
 });
 
+test("the agent view of a native worker at the worker placement is invalid until instances hold credentials", async (t) => {
+  const view = {
+    defaults: null,
+    effective: null,
+    chain: [],
+    active_position: null,
+    cooling: null,
+    valid: true,
+    issues: [],
+  };
+  const f = writeFixture(t, {
+    instanceOf: (_tx, name) => {
+      const worker = LIVE_INSTANCES[name];
+      return worker === undefined ? null : { name, worker };
+    },
+    workerAgentsOf: () => [AGENT],
+    workerAgentView: () => view,
+  });
+  const written = await f.write({
+    [WORKER_NAME]: instanceBinding({ worker_instances: ["coder-a"] }),
+  });
+  const params = {
+    ...f.params,
+    binding_id: written.bindings[WORKER_NAME]!.id,
+  };
+  const [item] = f.invoke("agentConfiguration.list", null, params).items;
+  assert.equal(item?.valid, false);
+  assert.deepEqual(item?.issues, [
+    {
+      path: ["placement"],
+      code: AgentErrorCode.CredentialHolderMismatch,
+    },
+  ]);
+});
+
 const INSTANCE_REFUSALS: Array<
   [string, Record<string, unknown>, string, OperationError["details"]]
 > = [
