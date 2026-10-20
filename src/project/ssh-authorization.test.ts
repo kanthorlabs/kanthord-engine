@@ -56,7 +56,7 @@ function repository() {
 function worker() {
   return {
     kind: BindingKind.Worker,
-    config: { worker: "coder@1", instance_count: 1 },
+    config: { worker: "coder@1", placement: "worker", instance_count: 1 },
   };
 }
 

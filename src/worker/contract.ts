@@ -366,7 +366,7 @@ export type WorkerBindingOf = (
   revision: number;
   worker_name: string;
   instance_count: number;
-  placement: InstancePlacement;
+  placement: InstancePlacement | null;
   generation: number;
   resource_budget: { turns: number; wall_time_ms: number } | null;
   entries: Array<WorkerEntry & { agent: string }>;
@@ -451,6 +451,12 @@ export const InstancePlacement = {
 } as const;
 export type InstancePlacement =
   (typeof InstancePlacement)[keyof typeof InstancePlacement];
+export const POOL_PLACEMENTS: readonly InstancePlacement[] = [
+  InstancePlacement.Server,
+];
+export function hostsPoolSlot(placement: InstancePlacement | null): boolean {
+  return placement !== null && POOL_PLACEMENTS.includes(placement);
+}
 export const workerResourceIdentitySchema = z
   .string()
   .regex(/^worker:kanthord:[a-z][a-z0-9-]{0,62}$/);

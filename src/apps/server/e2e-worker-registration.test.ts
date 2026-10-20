@@ -129,6 +129,7 @@ function bindings(instanceCount: number) {
       kind: "worker",
       config: {
         worker: NATIVE,
+        placement: "worker",
         instance_count: instanceCount,
         entries: [{ agent: AGENT, ...CONFIGURATION }],
       },

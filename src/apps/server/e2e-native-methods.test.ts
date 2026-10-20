@@ -164,6 +164,7 @@ async function methodsFixture(t: TestContext) {
   ]);
   const worker = {
     worker: "coder@1",
+    placement: "worker",
     instance_count: SINGLE_INSTANCE,
     entries: [{ agent: "swe@1", ...DEFAULTS }],
   };
@@ -209,6 +210,7 @@ async function methodsFixture(t: TestContext) {
         kind: "worker",
         config: {
           worker: "reviewer@1",
+          placement: "worker",
           instance_count: SINGLE_INSTANCE,
           entries: [{ agent: "re@1", ...DEFAULTS }],
         },

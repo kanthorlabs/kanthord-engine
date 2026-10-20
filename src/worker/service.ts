@@ -31,7 +31,7 @@ import {
   REGISTRATION_TARGET_KIND,
   WorkerHost,
   InstanceActivity,
-  InstancePlacement,
+  hostsPoolSlot,
   type WorkerRegistrations,
   type WorkerBindingOf,
   type WorkerBindingsOf,
@@ -283,7 +283,7 @@ export class WorkerService implements Service {
       const now = Date.now();
       const targets = this.dependencies
         .pool!.workerBindingsOf(tx, projectId)
-        .filter(({ placement }) => placement === InstancePlacement.Server)
+        .filter(({ placement }) => hostsPoolSlot(placement))
         .map((binding) => ({
           project_id: binding.project_id,
           resource_identity: binding.resource_identity,
@@ -513,7 +513,7 @@ export class WorkerService implements Service {
     if (
       !binding ||
       binding.tombstone ||
-      binding.placement !== InstancePlacement.Server ||
+      !hostsPoolSlot(binding.placement) ||
       this.pool?.isSlot(
         identity.projectId,
         identity.resourceIdentity,
