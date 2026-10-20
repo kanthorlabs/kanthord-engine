@@ -85,6 +85,8 @@ export class FakePoolHost implements PoolHost {
   readonly started: PoolSlot[] = [];
   readonly drained: PoolSlot[] = [];
   prepared = 0;
+  readonly removed: PoolSlot[] = [];
+  readonly swept: Array<ReadonlySet<string>> = [];
   private listener: (clientId: string) => void = () => {};
   clientIdentity(
     projectId: string,
@@ -102,6 +104,14 @@ export class FakePoolHost implements PoolHost {
   }
   prepare(): void {
     this.prepared++;
+  }
+  remove(slot: PoolSlot): Promise<void> {
+    this.removed.push({ ...slot });
+    return Promise.resolve();
+  }
+  sweep(live: ReadonlySet<string>): Promise<void> {
+    this.swept.push(live);
+    return Promise.resolve();
   }
   start(slot: PoolSlot): void {
     this.started.push({ ...slot });

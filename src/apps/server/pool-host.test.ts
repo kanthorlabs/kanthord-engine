@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { randomBytes } from "node:crypto";
-import { statSync } from "node:fs";
+import { existsSync, mkdirSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test, type TestContext } from "node:test";
 import { Writable } from "node:stream";
@@ -48,6 +48,7 @@ const ONE_TERMINATE = 1;
 const LAUNCH_FAILURE = "launch refused";
 const LIMIT_MESSAGE = "worker.pool.slot_limit";
 const FAILED_MESSAGE = "worker.pool.instance_failed";
+const CLEANUP_MESSAGE = "worker.pool.cleanup_failed";
 const RUNTIME_IDENTITY = "runtime_identity";
 const LOWEST_SLOT = 0;
 const MIDDLE_SLOT = 1;
@@ -91,6 +92,9 @@ class FakeDriver implements SlotDriver {
   readonly placement: PoolPlacement;
   readonly launches: SlotLaunch[] = [];
   prepares = 0;
+  readonly volumeRemovals: string[] = [];
+  readonly volumeSweeps: Array<ReadonlySet<string>> = [];
+  volumeError: Error | null = null;
   readonly instances: FakeInstance[] = [];
   launchError: Error | null = null;
 
@@ -116,6 +120,20 @@ class FakeDriver implements SlotDriver {
   }
 
   prepareError: Error | null = null;
+
+  removeVolume(clientId: string): Promise<void> {
+    this.volumeRemovals.push(clientId);
+    return this.volumeError
+      ? Promise.reject(this.volumeError)
+      : Promise.resolve();
+  }
+
+  sweepVolumes(live: ReadonlySet<string>): Promise<void> {
+    this.volumeSweeps.push(live);
+    return this.volumeError
+      ? Promise.reject(this.volumeError)
+      : Promise.resolve();
+  }
 
   unavailable: PlacementStatus | null = null;
 
@@ -419,5 +437,62 @@ test("the pool host answers the placement status from the check of the driver of
   assert.equal(
     (await f.pool.placementStatus(PoolPlacement.Server)).available,
     true,
+  );
+});
+
+function plantRoot(stateDirectory: string, name: string): string {
+  const root = join(stateDirectory, "workers", name);
+  mkdirSync(join(root, "state"), { recursive: true });
+  writeFileSync(join(root, "stderr.log"), "log");
+  return root;
+}
+
+test("remove deletes the slot root and asks the driver of the placement to remove the volume", async (t) => {
+  const f = fixture(t);
+  const thread = f.slotOf(LOWEST_SLOT);
+  const container = f.slotOf(MIDDLE_SLOT, false, PoolPlacement.Container);
+  const threadRoot = plantRoot(f.stateDirectory, thread.client_id);
+  const containerRoot = plantRoot(f.stateDirectory, container.client_id);
+  await Promise.all([f.pool.remove(thread), f.pool.remove(container)]);
+  assert.equal(existsSync(threadRoot), false);
+  assert.equal(existsSync(containerRoot), false);
+  assert.deepEqual(f.driver.volumeRemovals, [thread.client_id]);
+  assert.deepEqual(f.containerDriver.volumeRemovals, [container.client_id]);
+});
+
+test("a failed volume removal is logged and does not throw", async (t) => {
+  const f = fixture(t);
+  f.containerDriver.volumeError = new Error("volume busy");
+  const container = f.slotOf(LOWEST_SLOT, false, PoolPlacement.Container);
+  const root = plantRoot(f.stateDirectory, container.client_id);
+  await f.pool.remove(container);
+  assert.equal(existsSync(root), false);
+  assert.deepEqual(
+    f.records.map((entry) => [entry.message, entry.fields.client_id]),
+    [[CLEANUP_MESSAGE, container.client_id]],
+  );
+});
+
+test("the sweep removes each slot root of no live identity and keeps the live roots", async (t) => {
+  const f = fixture(t);
+  const live = plantRoot(f.stateDirectory, "client_identity_live");
+  const orphan = plantRoot(f.stateDirectory, "client_identity_orphan");
+  await f.pool.sweep(new Set(["client_identity_live"]));
+  assert.equal(existsSync(live), true);
+  assert.equal(existsSync(orphan), false);
+  assert.deepEqual(f.driver.volumeSweeps, [new Set(["client_identity_live"])]);
+  assert.deepEqual(f.containerDriver.volumeSweeps, [
+    new Set(["client_identity_live"]),
+  ]);
+  assert.deepEqual(f.records, []);
+});
+
+test("the sweep of a state directory with no workers directory does nothing and a failed volume sweep is logged", async (t) => {
+  const f = fixture(t);
+  f.containerDriver.volumeError = new Error("volume ls failed");
+  await f.pool.sweep(new Set());
+  assert.deepEqual(
+    f.records.map((entry) => entry.message),
+    [CLEANUP_MESSAGE],
   );
 });

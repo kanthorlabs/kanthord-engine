@@ -172,3 +172,75 @@ test("a launch waits for the running prepare before it removes or creates anythi
   assert.equal(exit.code, FAILED_CODE);
   assert.equal(f.verbs(Verb.Volume).length, NO_CALLS);
 });
+
+const VolumeAction = { List: "ls", Remove: "rm" } as const;
+const VOLUME_PREFIX = "kanthord_slot_";
+const LIVE_ID = "client_identity_live";
+const ORPHAN_ID = "client_identity_orphan";
+const OTHER_VOLUME = "unrelated_volume";
+
+function volumeCalls(f: ReturnType<typeof hostWith>, action: string) {
+  return f.verbs(Verb.Volume).filter((call) => call.args[1] === action);
+}
+
+test("removeVolume removes the volume of the slot and tolerates an absent volume", async () => {
+  const f = hostWith(true, () =>
+    Promise.resolve({
+      code: FAILED_CODE,
+      stdout: "",
+      stderr: "Error: no such volume kanthord_slot_x",
+    }),
+  );
+  await f.driver.removeVolume(LIVE_ID);
+  assert.deepEqual(volumeCalls(f, VolumeAction.Remove)[0]?.args, [
+    "volume",
+    "rm",
+    `${VOLUME_PREFIX}${LIVE_ID}`,
+  ]);
+});
+
+test("removeVolume rejects when the runtime refuses the removal", async () => {
+  const f = hostWith(true, () => refused());
+  await assert.rejects(f.driver.removeVolume(LIVE_ID), /volume rm/);
+});
+
+test("removeVolume and sweepVolumes with no runtime do nothing and log nothing", async (t) => {
+  const writes: string[] = [];
+  for (const stream of [process.stdout, process.stderr])
+    t.mock.method(stream, "write", (chunk: unknown) => {
+      writes.push(String(chunk));
+      return true;
+    });
+  const f = hostWith(false, () => ok());
+  await f.driver.removeVolume(LIVE_ID);
+  await f.driver.sweepVolumes(new Set());
+  assert.deepEqual(f.calls, []);
+  assert.deepEqual(writes, []);
+});
+
+test("sweepVolumes removes each owner volume of no live identity and only that volume", async () => {
+  const names = [
+    `${VOLUME_PREFIX}${LIVE_ID}`,
+    `${VOLUME_PREFIX}${ORPHAN_ID}`,
+    OTHER_VOLUME,
+  ].join("\n");
+  const f = hostWith(true, (call) =>
+    call.args[1] === VolumeAction.List ? ok(names) : ok(),
+  );
+  await f.driver.sweepVolumes(new Set([LIVE_ID]));
+  assert.equal(volumeCalls(f, VolumeAction.List).length, ONE_CALL);
+  assert.ok(
+    volumeCalls(f, VolumeAction.List)[0]?.args.some((arg) =>
+      arg.startsWith("label=io.kanthord.owner="),
+    ),
+  );
+  assert.deepEqual(
+    volumeCalls(f, VolumeAction.Remove).map((call) => call.args[2]),
+    [`${VOLUME_PREFIX}${ORPHAN_ID}`],
+  );
+});
+
+test("sweepVolumes rejects when the listing fails", async () => {
+  const f = hostWith(true, () => refused());
+  await assert.rejects(f.driver.sweepVolumes(new Set()), /volume ls/);
+});

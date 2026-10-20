@@ -202,3 +202,31 @@ test("an unstarted slot that the host ends leaves the pool state", () => {
   f.run(null, [target(1)]);
   assert.equal(f.host.started.length, TWO_SLOTS);
 });
+
+test("the host removes every slot of a removed binding after its last slot ends", () => {
+  const f = fixture();
+  f.run(null, [target(THREE_SLOTS)]);
+  f.run(null, []);
+  f.host.end(f.slotId(2));
+  f.host.end(f.slotId(0));
+  assert.deepEqual(f.host.removed, []);
+  f.host.end(f.slotId(1));
+  assert.deepEqual(f.host.removed.map(({ slot }) => slot).sort(), [0, 1, 2]);
+});
+
+test("a lowered count to zero keeps the slots of a live binding", () => {
+  const f = fixture();
+  f.run(null, [target(TWO_SLOTS)]);
+  f.run(null, [target(0)]);
+  f.host.end(f.slotId(1));
+  f.host.end(f.slotId(0));
+  assert.deepEqual(f.host.removed, []);
+});
+
+test("a slot that ends while its binding stays live is not removed", () => {
+  const f = fixture();
+  f.run(null, [target(TWO_SLOTS)]);
+  f.run(null, [target(1)]);
+  f.host.end(f.slotId(1));
+  assert.deepEqual(f.host.removed, []);
+});
