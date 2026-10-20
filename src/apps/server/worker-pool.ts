@@ -1,4 +1,5 @@
 import { constants, createWriteStream, type WriteStream } from "node:fs";
+import { readdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { MessageChannel, type MessagePort } from "node:worker_threads";
 import type { Logger } from "pino";
@@ -23,6 +24,7 @@ const WORKERS_DIRECTORY = "workers";
 const STDERR_LOG = "stderr.log";
 const BINDING_NAME_INDEX = 2;
 const IDENTITY_SEPARATOR = ":";
+const MISSING_ENTRY = "ENOENT";
 export interface WorkerPoolOptions {
   invocation: ReturnType<typeof createInvocation>;
   masterKey: string;
@@ -81,6 +83,30 @@ export class WorkerPool implements PoolHost {
 
   placementStatus(placement: PoolPlacement): Promise<PlacementStatus> {
     return this.driver(placement).check();
+  }
+
+  prepare(): void {
+    for (const driver of this.options.drivers.values())
+      driver.prepare().catch(() => {});
+  }
+
+  async remove(slot: PoolSlot): Promise<void> {
+    const { client_id: clientId } = slot;
+    await Promise.all([
+      this.guarded(clientId, () => this.removeRoot(clientId)),
+      this.guarded(clientId, () =>
+        this.driver(slot.placement).removeVolume(clientId),
+      ),
+    ]);
+  }
+
+  async sweep(live: ReadonlySet<string>): Promise<void> {
+    await Promise.all([
+      this.guarded(null, () => this.sweepRoots(live)),
+      ...Array.from(this.options.drivers.values(), (driver) =>
+        this.guarded(null, () => driver.sweepVolumes(live)),
+      ),
+    ]);
   }
 
   start(slot: PoolSlot): void {
@@ -181,8 +207,46 @@ export class WorkerPool implements PoolHost {
     }
   }
 
+  private workersDirectory(): string {
+    return join(this.options.stateDirectory, WORKERS_DIRECTORY);
+  }
+
   private root(slot: PoolSlot): string {
-    return join(this.options.stateDirectory, WORKERS_DIRECTORY, slot.client_id);
+    return join(this.workersDirectory(), slot.client_id);
+  }
+
+  private removeRoot(clientId: string): Promise<void> {
+    return rm(join(this.workersDirectory(), clientId), {
+      recursive: true,
+      force: true,
+    });
+  }
+
+  private async sweepRoots(live: ReadonlySet<string>): Promise<void> {
+    const names = await readdir(this.workersDirectory()).catch(
+      (error: NodeJS.ErrnoException) => {
+        if (error.code === MISSING_ENTRY) return [];
+        throw error;
+      },
+    );
+    for (const name of names) if (!live.has(name)) await this.removeRoot(name);
+  }
+
+  private async guarded(
+    clientId: string | null,
+    action: () => Promise<void>,
+  ): Promise<void> {
+    try {
+      await action();
+    } catch (error) {
+      this.options.logger.error(
+        {
+          err: error instanceof Error ? error : new Error(String(error)),
+          client_id: clientId ?? undefined,
+        },
+        "worker.pool.cleanup_failed",
+      );
+    }
   }
 
   private token(slot: PoolSlot): Promise<string> {

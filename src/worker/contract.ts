@@ -676,8 +676,11 @@ export interface PoolHost {
     generation: number,
     slot: number,
   ): string;
+  prepare(): void;
   start(slot: PoolSlot): void;
   drain(slot: PoolSlot): void;
+  remove(slot: PoolSlot): Promise<void>;
+  sweep(live: ReadonlySet<string>): Promise<void>;
   stop(): Promise<void>;
   onEnded(listener: (clientId: string) => void): void;
   placementStatus(placement: PoolPlacement): Promise<PlacementStatus>;

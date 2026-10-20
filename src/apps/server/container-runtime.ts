@@ -42,6 +42,7 @@ const ROOTLESS_OPTION = "name=rootless";
 const DOCKER_DESKTOP = "Docker Desktop";
 const NO_SUCH_CONTAINER = /no such container/i;
 const VOLUME_EXISTS = /already exists/i;
+const NO_SUCH_VOLUME = /no such volume/i;
 const SLOT_COMMAND = "exec 3>&1 1>&2; exec /usr/local/bin/kanthord serve slot";
 const TMP_MOUNT = "/tmp:rw,nosuid,nodev,size=64m";
 const SLOT_DIRECTORIES = {
@@ -109,6 +110,27 @@ export function ownedArguments(owner: string): string[] {
 
 export function removeArguments(name: string): string[] {
   return ["rm", "--force", name];
+}
+
+export function ownedVolumeArguments(owner: string): string[] {
+  return [
+    "volume",
+    "ls",
+    "--filter",
+    `label=${OWNER_LABEL}=${owner}`,
+    "--format",
+    "{{.Name}}",
+  ];
+}
+
+export function removeVolumeArguments(clientId: string): string[] {
+  return ["volume", "rm", slotName(clientId)];
+}
+
+export function slotClientId(volumeName: string): string | null {
+  return volumeName.startsWith(SLOT_NAME_PREFIX)
+    ? volumeName.slice(SLOT_NAME_PREFIX.length)
+    : null;
 }
 
 export function killArguments(name: string): string[] {
@@ -186,6 +208,10 @@ export function runArguments(command: RunCommand): string[] {
 
 export function absentContainer(answer: RuntimeAnswer): boolean {
   return answer.code === SUCCESS_CODE || NO_SUCH_CONTAINER.test(answer.stderr);
+}
+
+export function absentVolume(answer: RuntimeAnswer): boolean {
+  return answer.code === SUCCESS_CODE || NO_SUCH_VOLUME.test(answer.stderr);
 }
 
 export function presentVolume(answer: RuntimeAnswer): boolean {

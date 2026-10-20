@@ -32,6 +32,7 @@ import {
   WorkerHost,
   InstanceActivity,
   hostsPoolSlot,
+  POOL_SLOT_COUNT,
   alwaysAvailable,
   InstancePlacement,
   type PlacementStatus,
@@ -257,6 +258,9 @@ export class WorkerService implements Service {
   startPool(): void {
     if (!this.pool || this.poolStarted) return;
     this.poolStarted = true;
+    const host = this.dependencies.pool!.host;
+    host.prepare();
+    void host.sweep(this.liveSlotIdentities());
     this.reconcile(null, true);
     void this.logUnavailableContainerDriver();
   }
@@ -268,6 +272,27 @@ export class WorkerService implements Service {
     if (!host || placement !== InstancePlacement.Container)
       return alwaysAvailable(placement);
     return host.placementStatus(placement);
+  }
+
+  private liveSlotIdentities(): Set<string> {
+    const pool = this.dependencies.pool!;
+    const identities = new Set<string>();
+    const bindings = this.dependencies.store.transaction((tx) =>
+      pool.workerBindingsOf(tx, null),
+    );
+    for (const binding of bindings) {
+      if (!hostsPoolSlot(binding.placement)) continue;
+      for (let slot = NO_ITEMS; slot < POOL_SLOT_COUNT; slot++)
+        identities.add(
+          pool.host.clientIdentity(
+            binding.project_id,
+            binding.resource_identity,
+            binding.generation,
+            slot,
+          ),
+        );
+    }
+    return identities;
   }
 
   private async logUnavailableContainerDriver(): Promise<void> {

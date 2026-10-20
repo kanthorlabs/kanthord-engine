@@ -14,6 +14,7 @@ import {
   InstanceActivity,
   InstancePlacement,
   PlacementIssue,
+  POOL_SLOT_COUNT,
   PoolPlacement,
   ContainerRuntime,
   alwaysAvailable,
@@ -1755,6 +1756,7 @@ const POOL_GENERATION = 11;
 const POOL_ONE_START = 1;
 const POOL_TWO_STARTS = 2;
 const POOL_FOUR_STARTS = 4;
+const NO_SWEPT = 0;
 
 const POOL_EXECUTION = "execution_01ARZ3NDEKTSV4RRFFQ69G5FAV";
 
@@ -1838,6 +1840,31 @@ test("the pool starts at startPool and a change notice before it does nothing", 
   );
   f.worker.startPool();
   assert.equal(f.host.started.length, POOL_TWO_STARTS);
+});
+
+test("startPool prepares the pool host once when no container binding is live", (t) => {
+  const f = poolFixture(t, 0);
+  f.worker.startPool();
+  f.worker.startPool();
+  assert.equal(f.host.prepared, POOL_ONE_START);
+  assert.deepEqual(f.host.started, []);
+});
+
+test("startPool sweeps with the identity of the binding at every slot number", (t) => {
+  const f = poolFixture(t, 1);
+  f.worker.startPool();
+  assert.equal(f.host.swept.length, POOL_ONE_START);
+  const live = f.host.swept[0]!;
+  assert.equal(live.size, POOL_SLOT_COUNT);
+  for (let slot = 0; slot < POOL_SLOT_COUNT; slot++)
+    assert.ok(live.has(f.slotId(slot)));
+});
+
+test("startPool sweeps with no identity for a binding at the worker placement", (t) => {
+  const f = poolFixture(t, 1);
+  f.state.placement = InstancePlacement.Worker;
+  f.worker.startPool();
+  assert.equal(f.host.swept[0]!.size, NO_SWEPT);
 });
 
 test("a change notice reconciles the pool with the instance count of the binding", async (t) => {
