@@ -367,7 +367,7 @@ export interface CustodyHandover {
     execution: { executionId: string; runtimeIdentity: string },
     credentialName: string,
     now: number,
-  ): string;
+  ): string | null;
 }
 export interface Registration extends VerifiedClient {
   runtime_identity: string;

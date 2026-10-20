@@ -855,4 +855,8 @@ test("sshPublicKeyOf answers the pinned revision, else the newest live revision,
     f.publicKeyOf("deploy"),
     sshPublicKeyOf(f.sshKeys.get("deploy")!),
   );
+  f.store.database
+    .prepare("UPDATE credential SET metadata = NULL WHERE name = ?")
+    .run("deploy");
+  assert.equal(f.publicKeyOf("deploy"), null);
 });

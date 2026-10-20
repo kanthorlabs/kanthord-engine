@@ -15,6 +15,7 @@ import {
 import { PromptConsumer, systemPrompt } from "../agent/prompt-render.ts";
 import type { ResolvedLayer } from "../agent/prompt-layers.ts";
 import type { Dependencies, WorkerService } from "./service.ts";
+import { RepositoryErrorCode } from "../repository/contract.ts";
 
 const FIRST_ISSUE_INDEX = 0;
 const NO_AGENTS = 0;
@@ -130,6 +131,22 @@ export async function executionSetup(
         },
       };
     });
+    const sshPublicKeyOf = (credential: string): string => {
+      const publicKey = dependencies.custodyHandover.sshPublicKeyOf(
+        tx,
+        claim,
+        credential,
+        now,
+      );
+      if (publicKey === null)
+        throw new OperationError(
+          HttpStatus.Conflict,
+          RepositoryErrorCode.SshKeyLegacy,
+          "The SSH credential holds no generated key. Use Rotate SSH key.",
+          { credential },
+        );
+      return publicKey;
+    };
     const repositories = dependencies
       .repositoryBindingIdsOf(tx, claim.nodeId, claim.pinnedRevision)
       .map((id) => {
@@ -146,12 +163,7 @@ export async function executionSetup(
               repository.address,
             ),
           },
-          ssh_public_key: dependencies.custodyHandover.sshPublicKeyOf(
-            tx,
-            claim,
-            repository.ssh_credential,
-            now,
-          ),
+          ssh_public_key: sshPublicKeyOf(repository.ssh_credential),
           strategy: { base_branch: repository.base_branch },
           project_prompt: repository.project_prompt,
           working_layer: repository.working_layer,

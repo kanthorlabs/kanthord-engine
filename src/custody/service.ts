@@ -915,7 +915,7 @@ export class CustodyComponent implements Service, CredentialRecords {
     execution: { executionId: string; runtimeIdentity: string },
     credentialName: string,
     now: number,
-  ): string {
+  ): string | null {
     const claim = this.executions.requireRunning(
       tx,
       execution.executionId,
@@ -937,8 +937,10 @@ export class CustodyComponent implements Service, CredentialRecords {
         CustodyErrorCode.NotFound,
         "Credential not found.",
       );
-    return sshPublicKeyMetadataSchema.parse(JSON.parse(row.metadata ?? "null"))
-      .public_key;
+    const metadata = sshPublicKeyMetadataSchema.safeParse(
+      row.metadata === null ? null : JSON.parse(row.metadata),
+    );
+    return metadata.success ? metadata.data.public_key : null;
   }
 
   report(

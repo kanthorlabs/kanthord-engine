@@ -36,7 +36,11 @@ import {
   RepositoryComponent,
   repositoryMigrations,
 } from "../repository/index.ts";
-import { HostKeyErrorCode } from "../repository/contract.ts";
+import {
+  HostKeyErrorCode,
+  RepositoryErrorCode,
+} from "../repository/contract.ts";
+import { HttpStatus } from "../kernel/http.ts";
 import { ProjectErrorCode, RepositoryPlatform } from "../project/contract.ts";
 
 const SSH_CREDENTIAL = "kanthorlabs-ssh";
@@ -275,6 +279,32 @@ test("setup answers the system and agent prompt after its single snapshot and su
     known_hosts: knownHosts,
   });
   assert.equal(pinned.repositories[0]?.ssh_public_key, TEST_SSH_PUBLIC_KEY);
+  await assert.rejects(
+    executionSetup(
+      {
+        ...dependencies,
+        repositoryBindingIdsOf: () => [bindingId],
+        repositoryPolicyOf: () => ({
+          binding_id: bindingId,
+          name: "repo",
+          address,
+          platform: RepositoryPlatform.GitHub,
+          ssh_credential: SSH_CREDENTIAL,
+          base_branch: "main",
+          project_prompt: null,
+          working_layer: workingLayer,
+        }),
+        sshHostKeysOf: () => knownHosts,
+        custodyHandover: { ...publicKeyCustody, sshPublicKeyOf: () => null },
+      },
+      worker,
+      caller,
+    ),
+    (error) =>
+      error instanceof OperationError &&
+      error.code === RepositoryErrorCode.SshKeyLegacy &&
+      error.status === HttpStatus.Conflict,
+  );
   assert.deepEqual(pinned.repositories[0]?.working_layer, workingLayer);
 });
 
