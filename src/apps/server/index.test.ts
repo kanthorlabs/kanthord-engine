@@ -59,6 +59,7 @@ import {
 } from "../../intake/contract.ts";
 import { repositoryOperations } from "../../repository/contract.ts";
 import {
+  BINDING_ID_PREFIX,
   PROJECT_ID_PREFIX,
   projectOperations,
 } from "../../project/contract.ts";
@@ -649,6 +650,40 @@ test("serve refuses a tracking.db that another migration text created", (t) => {
   assert.equal(refused.status, ExitCode.Failure);
   assert.match(refused.stderr, SCHEMA_MISMATCH);
   assert.match(refused.stderr, /tracking\.db/);
+  assert.match(refused.stderr, RESET_INSTRUCTION);
+});
+
+test("serve refuses a stored hosted worker binding with no placement and names the binding", (t) => {
+  const paths = layout(temporary(t));
+  createDatabase(paths.database, serverMigrations);
+  const store = new Store(paths.database);
+  store.transaction(({ database }) => {
+    const projectId = createIdentity(PROJECT_ID_PREFIX);
+    database
+      .prepare(
+        "INSERT INTO project_project (id, name, created_at) VALUES (?, ?, ?)",
+      )
+      .run(projectId, "planted", Date.now());
+    database
+      .prepare(
+        "INSERT INTO project_binding (id, project_id, name, resource_identity, revision, config, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+      )
+      .run(
+        createIdentity(BINDING_ID_PREFIX),
+        projectId,
+        "general",
+        "worker:kanthord:general",
+        1,
+        JSON.stringify({ worker: "coder@1", instance_count: 1 }),
+        Date.now(),
+      );
+  });
+  store.close();
+  const refused = serveOnce(paths.env);
+  assert.equal(refused.status, ExitCode.Failure);
+  assert.match(refused.stderr, /system\.database\.binding_placement_missing/);
+  assert.match(refused.stderr, /general/);
+  assert.match(refused.stderr, /docs\/reference\/upgrade\.md/);
   assert.match(refused.stderr, RESET_INSTRUCTION);
 });
 

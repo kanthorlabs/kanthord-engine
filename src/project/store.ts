@@ -20,7 +20,6 @@ import {
   repositoryConfigSchema,
   STORAGE_PLATFORM,
   workerResourceIdentity,
-  WorkerPlacement,
   type BindingChange,
 } from "./contract.ts";
 
@@ -444,10 +443,7 @@ function classify(
         ProjectErrorCode.WorkerResourceChanged,
         "A binding cannot change its worker.",
       );
-    if (
-      (stored.placement ?? WorkerPlacement.Worker) !==
-      (submitted.placement ?? WorkerPlacement.Worker)
-    )
+    if (stored.placement !== submitted.placement)
       throw new OperationError(
         HttpStatus.Conflict,
         ProjectErrorCode.WorkerPlacementChanged,

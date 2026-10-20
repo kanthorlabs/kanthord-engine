@@ -128,11 +128,21 @@ export const servicePing = {
 export const COVERING_WORKER_BINDINGS = {
   coder: {
     kind: "worker",
-    config: { worker: "coder@1", instance_count: 0, tags: [] },
+    config: {
+      worker: "coder@1",
+      placement: "worker",
+      instance_count: 0,
+      tags: [],
+    },
   },
   reviewer: {
     kind: "worker",
-    config: { worker: "reviewer@1", instance_count: 0, tags: [] },
+    config: {
+      worker: "reviewer@1",
+      placement: "worker",
+      instance_count: 0,
+      tags: [],
+    },
   },
 } as const;
 export const COVERING_AGENTS = ["swe@1", "re@1"] as const;

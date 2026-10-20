@@ -111,6 +111,7 @@ export const ProjectErrorCode = {
   WorkerInstanceCountRange: "project.bindings.worker.instance_count_range",
   WorkerResourceChanged: "project.bindings.worker.resource_changed",
   WorkerPlacementChanged: "project.bindings.worker.placement_changed",
+  WorkerPlacementRequired: "project.bindings.worker.placement_required",
   WorkerTagsInvalid: "project.bindings.worker.tags_invalid",
   WorkerNodeUnmatched: "project.bindings.worker.node_unmatched",
 } as const;
@@ -871,7 +872,7 @@ export interface WorkerBindingRow {
   revision: number;
   worker_name: string;
   instance_count: number;
-  placement: WorkerPlacement;
+  placement: WorkerPlacement | null;
   generation: number;
   resource_budget: { turns: number; wall_time_ms: number } | null;
   entries: NonNullable<z.infer<typeof workerConfigSchema>["entries"]>;

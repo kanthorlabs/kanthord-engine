@@ -104,6 +104,7 @@ async function serverPool(t: TestContext, count: number, slotLimit?: number) {
     ...setup,
     stateDirectory,
     instances,
+    rewrite,
     setCount,
     remove,
     slots,
@@ -140,6 +141,29 @@ test(
     }
     assert.ok(!f.fixture.logs.some((line) => line.includes(READY_MESSAGE)));
     assert.ok(f.fixture.logs.some((line) => line.includes("Request finished")));
+  },
+);
+
+test(
+  "a binding of an external harness starts no slot",
+  { timeout: POOL_TEST_TIMEOUT },
+  async (t) => {
+    const f = await serverPool(t, ONE_INSTANCE);
+    await f.rewrite((bindings) => ({
+      ...bindings,
+      harness: {
+        kind: "worker",
+        config: { worker: "claude-code@1", instance_count: TWO_INSTANCES },
+      },
+    }));
+    f.fixture.worker.startPool();
+    const items = await f.waitFor(ONE_INSTANCE);
+    await delay(POOL_BACKOFF_INITIAL_MS);
+    assert.deepEqual(
+      (await f.instances()).map((item) => item.resource_identity),
+      [RESOURCE_IDENTITY],
+    );
+    assert.equal(f.slots().length, items.length);
   },
 );
 

@@ -206,6 +206,7 @@ async function setupInternal(t: TestContext) {
     kind: "worker",
     config: {
       worker: name,
+      placement: "worker",
       instance_count: SINGLE_INSTANCE,
       entries: [{ agent, ...DEFAULTS }],
     },

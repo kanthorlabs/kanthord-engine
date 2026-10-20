@@ -996,7 +996,7 @@ test("workerBindingOf reads current configuration, disablement and tombstone in 
     revision: REVISION_ONE,
     worker_name: GROUP_WORKER_NAME,
     instance_count: SINGLE_INSTANCE,
-    placement: WorkerPlacement.Worker,
+    placement: null,
     generation: revisionOf(f, first),
     resource_budget: null,
     entries: [],
@@ -1235,9 +1235,14 @@ function repositoryBinding(
 }
 
 function workerBinding(worker = NATIVE_WORKER) {
+  const hosted = worker === NATIVE_WORKER || worker === OTHER_WORKER;
   return {
     kind: BindingKind.Worker,
-    config: { worker, instance_count: SINGLE_INSTANCE },
+    config: {
+      worker,
+      instance_count: SINGLE_INSTANCE,
+      ...(hosted ? { placement: WorkerPlacement.Worker } : {}),
+    },
   };
 }
 
@@ -1524,7 +1529,11 @@ test("equal and reordered configurations keep the version without inserting revi
   const rows = f.snapshot().bindings;
   const reordered = {
     kind: BindingKind.Worker,
-    config: { instance_count: SINGLE_INSTANCE, worker: NATIVE_WORKER },
+    config: {
+      instance_count: SINGLE_INSTANCE,
+      worker: NATIVE_WORKER,
+      placement: WorkerPlacement.Worker,
+    },
   };
   for (const binding of [reordered, original]) {
     const version = f.invoke("bindingSet.get", null, f.params).version;
@@ -1562,38 +1571,57 @@ test("stale versions and changed worker names refuse the entire edit", async (t)
   assert.deepEqual(f.snapshot(), before);
 });
 
-test("a worker binding holds each placement and reads an absent placement as the worker placement", async (t) => {
+test("a worker binding stores each placement as written", async (t) => {
   const f = writeFixture(t);
   const read = () =>
     f.store.transaction((tx) =>
       f.project.workerBindingOf(tx, f.params.project_id, WORKER_GROUP),
     );
-  const bare = workerBinding();
-  const first = await f.write({ [WORKER_NAME]: bare });
+  const worker = workerBinding();
+  const first = await f.write({ [WORKER_NAME]: worker });
   assert.equal(read()?.placement, WorkerPlacement.Worker);
-  assert.equal(storedPlacement(first), undefined);
+  assert.equal(storedPlacement(first), WorkerPlacement.Worker);
   const unchanged = await f.write(
-    { [WORKER_NAME]: bare },
+    { [WORKER_NAME]: worker },
     first.binding_set_version,
   );
   assert.equal(unchanged.binding_set_version, first.binding_set_version);
-  const explicit = {
-    kind: BindingKind.Worker,
-    config: { ...bare.config, placement: WorkerPlacement.Worker },
-  };
-  const second = await f.write(
-    { [WORKER_NAME]: explicit },
-    first.binding_set_version,
-  );
-  assert.equal(read()?.placement, WorkerPlacement.Worker);
-  await f.write({}, second.binding_set_version);
+  const removed = await f.write({}, first.binding_set_version);
   const server = {
     kind: BindingKind.Worker,
-    config: { ...bare.config, placement: WorkerPlacement.Server },
+    config: { ...worker.config, placement: WorkerPlacement.Server },
   };
-  const third = await f.write({ [WORKER_NAME]: server }, 4);
+  const second = await f.write(
+    { [WORKER_NAME]: server },
+    removed.binding_set_version,
+  );
   assert.equal(read()?.placement, WorkerPlacement.Server);
-  assert.equal(storedPlacement(third), WorkerPlacement.Server);
+  assert.equal(storedPlacement(second), WorkerPlacement.Server);
+});
+
+test("a hosted worker binding refuses a write without a placement", async (t) => {
+  const f = writeFixture(t);
+  const config = { worker: NATIVE_WORKER, instance_count: SINGLE_INSTANCE };
+  const before = f.snapshot();
+  await rejectsWrite(
+    f.write({ [WORKER_NAME]: { kind: BindingKind.Worker, config } }),
+    HttpStatus.BadRequest,
+    ProjectErrorCode.WorkerPlacementRequired,
+    { binding: WORKER_NAME },
+  );
+  assert.deepEqual(f.snapshot(), before);
+});
+
+test("an external worker binding reads a null placement", async (t) => {
+  const f = writeFixture(t);
+  const written = await f.write({
+    [WORKER_NAME]: workerBinding(EXTERNAL_WORKER),
+  });
+  assert.equal(storedPlacement(written), undefined);
+  const row = f.store.transaction((tx) =>
+    f.project.workerBindingOf(tx, f.params.project_id, WORKER_GROUP),
+  );
+  assert.equal(row?.placement, null);
 });
 
 test("a placement change of a worker binding refuses the entire edit and a removal frees the name", async (t) => {
@@ -1624,7 +1652,7 @@ test("a placement change of a worker binding refuses the entire edit and a remov
     { [WORKER_NAME]: workerBinding() },
     removed.binding_set_version,
   );
-  assert.equal(storedPlacement(again), undefined);
+  assert.equal(storedPlacement(again), WorkerPlacement.Worker);
 });
 
 test("an external worker refuses the placement field", async (t) => {
@@ -2998,6 +3026,7 @@ test("agent views page sorted declarations and copy worker views with stripped e
       config: {
         worker: NATIVE_WORKER,
         instance_count: SINGLE_INSTANCE,
+        placement: WorkerPlacement.Worker,
         entries: [{ agent: SECOND_AGENT, model_identifier: MODEL }],
       },
     },

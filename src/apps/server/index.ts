@@ -86,6 +86,7 @@ import {
 } from "../../gateway/index.ts";
 import {
   ProjectService,
+  enforceBindingPlacements,
   projectMigrations,
   projectSshIdentityAuthorization,
 } from "../../project/index.ts";
@@ -98,6 +99,7 @@ import {
 import { mintServiceIdentity } from "../../kernel/service-mint.ts";
 import {
   WorkerService,
+  isHostedWorker,
   workerMigrations,
   toolDeclarations,
 } from "../../worker/index.ts";
@@ -920,6 +922,7 @@ export class Server implements Service {
         trackingDatabaseMigrations,
       );
       this.releases.push(() => trackingStore.close());
+      enforceBindingPlacements(this.store, isHostedWorker);
       enforceMasterKey(this.store, config.master_key, this.path);
       throwIfCancelled(this.shutdown);
       const {

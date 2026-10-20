@@ -6,6 +6,7 @@ import type { Transaction } from "../kernel/store.ts";
 import { getWorkerDeclaration } from "./catalog.ts";
 import {
   InstanceActivity,
+  type InstancePlacement,
   WorkerHost,
   WorkerErrorCode,
   instanceRecordSchema,
@@ -20,6 +21,11 @@ interface Dependencies {
   workerBindingOf: WorkerBindingOf;
   schedulerClaims: SchedulerClaims;
   draining?: (clientId: string) => boolean;
+}
+
+function hostedPlacement(placement: InstancePlacement | null) {
+  assert.ok(placement);
+  return placement;
 }
 
 export function instanceRecord(
@@ -52,7 +58,7 @@ export function instanceRecord(
     worker_name: binding.worker_name,
     host: declaration.host,
     ...(declaration.host === WorkerHost.Kanthord
-      ? { placement: binding.placement }
+      ? { placement: hostedPlacement(binding.placement) }
       : {}),
     client_id: registration.client_id,
     name: registration.name,
