@@ -13,6 +13,7 @@ import {
   isExecutionEnd,
   EndReason,
   ExecutionEndKind,
+  type ExecutionEnd,
   type WorkspaceRoot,
   type RepositoryTransport,
   type ModelRuntimeFactory,
@@ -36,6 +37,12 @@ export interface HostExecutionInput {
   context: Context;
   transcript: TranscriptSink;
   log(record: Record<string, unknown>): void;
+}
+
+function detailOf(result: ExecutionEnd): string | undefined {
+  if (result.kind === ExecutionEndKind.Ended) return result.detail;
+  if (result.kind === ExecutionEndKind.Released) return result.stop?.detail;
+  return undefined;
 }
 
 export async function hostExecution(
@@ -124,6 +131,7 @@ export async function hostExecution(
     });
     if (revoked) return null;
     if (context.err()) throw context.err();
+    const detail = detailOf(result);
     input.log({
       msg: "execution ended",
       execution_id: input.claim.execution_id,
@@ -134,6 +142,7 @@ export async function hostExecution(
       ...(result.kind === ExecutionEndKind.Released && result.stop
         ? { reason: result.stop.reason, code: result.stop.code }
         : {}),
+      ...(detail === undefined ? {} : { detail }),
     });
     if (
       result.kind !== ExecutionEndKind.Ended ||

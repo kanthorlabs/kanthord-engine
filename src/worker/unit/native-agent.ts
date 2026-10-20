@@ -31,6 +31,9 @@ import type {
 } from "./model-runtime.ts";
 import { EndReason, ExecutionStop } from "./execution-run.ts";
 import { providerFailureOf } from "../../llm/provider-failure.ts";
+import { redactReason, thrownReason } from "../../kernel/probe.ts";
+import { CodedError } from "../../kernel/errors.ts";
+import { SecretShape } from "../../custody/contract.ts";
 import { traceAgent } from "./agent-telemetry.ts";
 import type { SpanRecorder } from "./telemetry.ts";
 
@@ -71,16 +74,53 @@ export interface NativeAgent {
 const ASSISTANT_ROLE = "assistant";
 const PROVIDER_ERROR = "error";
 
-function providerFailure(
+async function credentialSecrets(
+  credential: ExecutionCredential,
+): Promise<string[]> {
+  const stored = await credential.store.read(credential.provider_id);
+  if (stored === undefined) return [];
+  if (stored.type === SecretShape.OAuth) return [stored.access, stored.refresh];
+  return stored.key === undefined ? [] : [stored.key];
+}
+
+export type CredentialRedaction = () => Promise<readonly string[]>;
+
+export function credentialRedaction(
+  credential: ExecutionCredential,
+): CredentialRedaction {
+  const seen = new Set<string>();
+  return async () => {
+    for (const secret of await credentialSecrets(credential)) seen.add(secret);
+    return [...seen];
+  };
+}
+
+export async function promptStop(
+  error: unknown,
+  secrets: CredentialRedaction,
+): Promise<unknown> {
+  if (error instanceof ExecutionStop) return error;
+  return new ExecutionStop(
+    EndReason.OperationFailed,
+    error instanceof CodedError ? error.code : null,
+    thrownReason(error, await secrets()),
+  );
+}
+
+async function providerFailure(
   messages: readonly AgentMessage[],
-): ExecutionStop | null {
+  secrets: CredentialRedaction,
+): Promise<ExecutionStop | null> {
   const last = messages.findLast(
     (message): message is AssistantMessage => message.role === ASSISTANT_ROLE,
   );
   if (last?.stopReason !== PROVIDER_ERROR) return null;
+  const errorMessage = last.errorMessage ?? "";
+  const detail = redactReason(errorMessage, await secrets());
   return new ExecutionStop(
     EndReason.ProviderFailed,
-    providerFailureOf(last.errorMessage ?? ""),
+    providerFailureOf(errorMessage),
+    detail || null,
   );
 }
 
@@ -93,6 +133,7 @@ function nativeAgent(
   disposeSignal: () => void,
   turnCheck: () => Promise<void>,
   unsubscribeTrace: () => void,
+  secrets: CredentialRedaction,
 ): NativeAgent {
   let session: AgentSession | null = opened;
   const finishTurn = opened.agent.finishTurn;
@@ -107,10 +148,15 @@ function nativeAgent(
   };
   const settle = async (text: string) => {
     assert.ok(session);
-    await session.prompt(text, { expandPromptTemplates: false });
+    try {
+      await session.prompt(text, { expandPromptTemplates: false });
+    } catch (error) {
+      if (context.err()) throw error;
+      throw await promptStop(error, secrets);
+    }
     await session.waitForIdle();
     if (context.err()) return;
-    const failed = providerFailure(session.messages);
+    const failed = await providerFailure(session.messages, secrets);
     if (failed) throw failed;
   };
   let unsubscribeTurns: (() => void) | null = countTurns(opened, () => {
@@ -169,7 +215,9 @@ export async function openNativeAgent(
   const context = budget.agentContext(input.context);
   const bridge = abortSignal(context);
   let session: AgentSession | undefined;
+  const secrets = credentialRedaction(input.credential);
   try {
+    await secrets();
     const layers = [];
     for (const [index, repository] of input.setup.repositories.entries())
       layers.push(
@@ -227,6 +275,7 @@ export async function openNativeAgent(
       bridge.dispose,
       input.turnCheck ?? (async () => {}),
       unsubscribeTrace,
+      secrets,
     );
   } catch (error) {
     session?.dispose();

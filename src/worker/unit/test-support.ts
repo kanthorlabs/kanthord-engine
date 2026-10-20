@@ -149,7 +149,7 @@ export function testSshAccess(
   );
 }
 
-const SECRET = "test_steps_key";
+export const STEPS_KEY = "test_steps_key";
 export const NO_PROVIDER_CALLS = 0;
 const IDENTITY = [
   "-c",
@@ -256,7 +256,7 @@ export async function implementFixture(
   const credentials = new InMemoryCredentialStore();
   await credentials.modify("anthropic", async () => ({
     type: "api_key",
-    key: SECRET,
+    key: STEPS_KEY,
   }));
   const agent = await openNativeAgent({
     hostTools: unusedHostTools,

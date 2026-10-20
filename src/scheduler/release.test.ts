@@ -254,6 +254,27 @@ test("a release with a stop stores the stop and routes the failure count", async
   assert.equal(wake.mock.callCount(), WAKE_CALL_COUNT);
 });
 
+test("a release stores the cause detail of its stop and hands it to telemetry", async (t) => {
+  const h = harness(t);
+  t.mock.method(Date, "now", () => FIXTURE_NOW);
+  const stop: ReleaseStop = { ...STOP, detail: "Cannot find module" };
+  await h.release(true, stop);
+  assert.deepEqual(h.read().stop, stop);
+  assert.deepEqual(h.telemetry, [
+    {
+      method: "executionEnded",
+      arguments: [
+        {
+          trace: executionTrace(h.row),
+          ended_at: FIXTURE_NOW,
+          end: ExecutionEnd.Finished,
+          stop,
+        },
+      ],
+    },
+  ]);
+});
+
 test("a release without a stop field stores no stop", async (t) => {
   const h = harness(t);
   t.mock.method(Date, "now", () => FIXTURE_NOW);

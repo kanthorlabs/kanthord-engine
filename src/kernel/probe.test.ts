@@ -145,6 +145,7 @@ for (const [status, expected, failureReason] of [
   });
 }
 
+const REDACTED_TOKEN = "token [redacted]";
 test("probeHttp observes a network error as unreachable without the secret", async (t) => {
   const observed: Array<[string, string]> = [];
   const observe = (reason: string, failureReason: string) =>
@@ -190,6 +191,22 @@ test("redactReason removes secrets, bearer values, JWTs and long tokens and boun
   assert.ok(!reason.includes("abc.def"));
   assert.ok(!reason.includes(jwt));
   assert.ok(reason.length <= REASON_LIMIT);
+});
+
+test("redactReason keeps an absolute file path that names the cause", () => {
+  const path =
+    "/home/kanthord/.local/share/kanthord/node_modules/@earendil-works/pi-ai/dist/auth/oauth/anthropic.js";
+  const reason = redactReason(
+    `OAuth auth derivation failed for anthropic: Cannot find module '${path}' imported from /home/kanthord/.local/share/kanthord/node_modules/@earendil-works/pi-ai/dist/auth/resolve.js`,
+  );
+  assert.ok(reason.includes(`'${path}'`));
+  assert.ok(reason.includes("/pi-ai/dist/auth/resolve.js"));
+  for (const token of [
+    `${"A".repeat(40)}/${"B".repeat(8)}`,
+    "abcdefgh/ijklmnop/qrstuvwx+yz012345/6789",
+    "abcdefgh/ijklmnop/qrstuvwxyz012345678",
+  ])
+    assert.equal(redactReason(`token ${token}`), REDACTED_TOKEN);
 });
 
 test("thrownReason removes a short bare secret of a header value", () => {

@@ -36,6 +36,7 @@ const ENDED_RECORD = "execution ended";
 const NO_ENTRIES = 0;
 const ONE_ENTRY = 1;
 const UNKNOWN_FAILURE = "system.operation.unknown";
+const PROVIDER_CAUSE = "OAuth auth derivation failed for anthropic";
 test("host logs the stop of a released or ended execution in the execution ended record", async (t) => {
   const api = httpTransport("http://127.0.0.1:1");
   const claim = testClaim();
@@ -86,6 +87,10 @@ test("host logs the stop of a released or ended execution in the execution ended
     reason: EndReason.OperationFailed,
     code: "repository.host_key.unpinned",
   };
+  const providerStop = {
+    reason: EndReason.ProviderFailed,
+    code: "unavailable",
+  };
   await hostExecution(input, async () => ({
     kind: "released",
     furtherWork: true,
@@ -96,6 +101,16 @@ test("host logs the stop of a released or ended execution in the execution ended
     furtherWork: false,
   }));
   await hostExecution(input, async () => ({ kind: "ended", ...stop }));
+  await hostExecution(input, async () => ({
+    kind: "released",
+    furtherWork: true,
+    stop: { ...providerStop, detail: PROVIDER_CAUSE },
+  }));
+  await hostExecution(input, async () => ({
+    kind: "ended",
+    ...providerStop,
+    detail: PROVIDER_CAUSE,
+  }));
   const ended = records.filter((record) => record.msg === ENDED_RECORD);
   assert.deepEqual(ended, [
     {
@@ -116,6 +131,22 @@ test("host logs the stop of a released or ended execution in the execution ended
       kind: "ended",
       reason: stop.reason,
       code: stop.code,
+    },
+    {
+      msg: ENDED_RECORD,
+      execution_id: claim.execution_id,
+      kind: "released",
+      reason: providerStop.reason,
+      code: providerStop.code,
+      detail: PROVIDER_CAUSE,
+    },
+    {
+      msg: ENDED_RECORD,
+      execution_id: claim.execution_id,
+      kind: "ended",
+      reason: providerStop.reason,
+      code: providerStop.code,
+      detail: PROVIDER_CAUSE,
     },
   ]);
 });

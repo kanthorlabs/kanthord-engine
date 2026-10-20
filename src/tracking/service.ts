@@ -323,7 +323,11 @@ export class TrackingService implements Service, ExecutionTelemetry {
 function stopAttributes(stop: RootSpanEnd["stop"]): Attributes {
   if (stop === null) return {};
   assert.ok(stop.reason);
-  return stop.code === null
-    ? { "kanthord.stop.reason": stop.reason }
-    : { "kanthord.stop.reason": stop.reason, "kanthord.stop.code": stop.code };
+  return {
+    "kanthord.stop.reason": stop.reason,
+    ...(stop.code === null ? {} : { "kanthord.stop.code": stop.code }),
+    ...(stop.detail === undefined
+      ? {}
+      : { "kanthord.stop.detail": stop.detail }),
+  };
 }

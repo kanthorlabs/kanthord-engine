@@ -46,6 +46,7 @@ export type ExecutionEnd =
       kind: typeof ExecutionEndKind.Ended;
       reason: EndReason;
       code: string | null;
+      detail?: string;
     };
 export const EXECUTION_PROOF_FAILED =
   "gateway.invocation.execution_proof_failed";
@@ -81,10 +82,16 @@ export function isExecutionEnd(result: OperationResult<unknown>): boolean {
 export class ExecutionStop extends Error {
   readonly reason: EndReason;
   readonly code: string | null;
-  constructor(reason: EndReason, code: string | null) {
+  readonly detail: string | null;
+  constructor(
+    reason: EndReason,
+    code: string | null,
+    detail: string | null = null,
+  ) {
     super(`Execution stopped: ${reason}`);
     this.reason = reason;
     this.code = code;
+    this.detail = detail;
   }
 }
 
@@ -154,7 +161,7 @@ export class ExecutionRun {
 
   stopOf(error: unknown): ExecutionStop {
     if (error instanceof ExecutionStop)
-      return this.halt(error.reason, error.code);
+      return this.halt(error.reason, error.code, error.detail);
     return this.halt(
       EndReason.OperationFailed,
       error instanceof CodedError ? error.code : null,
@@ -165,8 +172,12 @@ export class ExecutionRun {
     return new CancellationContext(this.parent, this.claim.expired_at);
   }
 
-  private halt(reason: EndReason, code: string | null): ExecutionStop {
-    this.stopped ??= new ExecutionStop(reason, code);
+  private halt(
+    reason: EndReason,
+    code: string | null,
+    detail: string | null = null,
+  ): ExecutionStop {
+    this.stopped ??= new ExecutionStop(reason, code, detail);
     this.operationContext.cancel(this.stopped);
     return this.stopped;
   }
@@ -339,7 +350,11 @@ export class ExecutionRun {
   async releaseStop(stopped: ExecutionStop): Promise<ExecutionEnd> {
     const reason = stopped.reason;
     assert.ok(reason !== EndReason.Revoked);
-    const stop: ReleaseStop = { reason, code: stopped.code };
+    const stop: ReleaseStop = {
+      reason,
+      code: stopped.code,
+      ...(stopped.detail === null ? {} : { detail: stopped.detail }),
+    };
     const context = this.cleanupContext();
     try {
       this.settlement ??= this.credentials.release();
@@ -382,6 +397,7 @@ export class ExecutionRun {
       kind: ExecutionEndKind.Ended,
       reason: stopped.reason,
       code: stopped.code,
+      ...(stopped.detail === null ? {} : { detail: stopped.detail }),
     };
   }
 }

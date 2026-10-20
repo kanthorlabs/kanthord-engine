@@ -4,6 +4,7 @@ import { existsSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { simpleGit } from "simple-git";
 import { DeadlineExceeded } from "../../kernel/context.ts";
+import { REASON_MAX_LENGTH } from "../../kernel/probe.ts";
 import { fauxAssistantMessage, fauxToolCall } from "./test-support.ts";
 import { EndReason, ExecutionStop } from "./execution-run.ts";
 import { executionBoundary } from "./native-method.ts";
@@ -29,6 +30,7 @@ import {
   implementFixture as fixture,
   NO_PROVIDER_CALLS,
   recordReleases,
+  STEPS_KEY,
   task,
 } from "./test-support.ts";
 
@@ -412,6 +414,31 @@ test("a provider error reply stops the task with provider_failed and its code", 
   const stopped = await stopOf(runTask(h, current));
   assert.equal(stopped.reason, EndReason.ProviderFailed);
   assert.equal(stopped.code, ProviderFailure.Unauthorized);
+});
+
+test("a provider error reply carries its cause text with secrets removed and cut to 300 characters", async (t) => {
+  const current = task("provider", "false");
+  const cause = `OAuth auth derivation failed for anthropic: Cannot find module 'x' key ${STEPS_KEY} Bearer opaque`;
+  const h = await fixture(
+    t,
+    [current],
+    [
+      fauxAssistantMessage("", {
+        stopReason: "error",
+        errorMessage: `${cause} ${"word ".repeat(100)}`,
+      }),
+    ],
+  );
+  const stopped = await stopOf(runTask(h, current));
+  assert.equal(stopped.reason, EndReason.ProviderFailed);
+  assert.equal(stopped.code, ProviderFailure.Unavailable);
+  assert.ok(
+    stopped.detail?.startsWith(
+      "OAuth auth derivation failed for anthropic: Cannot find module 'x' key [redacted] [redacted]",
+    ),
+  );
+  assert.equal(stopped.detail?.includes(STEPS_KEY), false);
+  assert.equal(stopped.detail?.length, REASON_MAX_LENGTH);
 });
 
 test("an implement node with no task commits its change with the node identity in the message before it releases", async (t) => {
