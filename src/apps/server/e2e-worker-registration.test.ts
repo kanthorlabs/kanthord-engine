@@ -55,7 +55,7 @@ const ErrorCode = {
   Catalog: "worker.catalog.not_found",
   Unauthorized: "gateway.authentication.unauthorized",
   Required: "gateway.registration.required",
-  Slot: "worker.instance.slot_unavailable",
+  Placement: "worker.instance.placement_mismatch",
   BindingProject: "cli.worker.instance.list.binding_without_project",
   Binding: "worker.instance.binding_unknown",
   Runtime: "cli.worker.instance.get.invalid_runtime_identity",
@@ -129,7 +129,7 @@ function bindings(instanceCount: number) {
       kind: "worker",
       config: {
         worker: NATIVE,
-        placement: "worker",
+        placement: "server",
         instance_count: instanceCount,
         entries: [{ agent: AGENT, ...CONFIGURATION }],
       },
@@ -139,6 +139,7 @@ function bindings(instanceCount: number) {
 
 async function setup(t: TestContext) {
   const fixture = await gatewayFixture(t, {
+    fakeSlots: true,
     repositoryConnector: {
       gitLsRemote: async () => {},
     },
@@ -197,7 +198,7 @@ async function setup(t: TestContext) {
   );
   const A = {
     ...H,
-    KANTHORD_TOKEN: await machineToken(directory, project.id, "worker-a", H),
+    KANTHORD_TOKEN: (await fixture.slotClient(project.id, BINDING)).token,
   };
   const B = {
     ...H,
@@ -328,8 +329,8 @@ test(
         ridA,
       ),
     );
-    await t.test("E02.9 full slot refuses B", async () =>
-      refusal(await kanthord(["worker", "register"], f.B), ErrorCode.Slot),
+    await t.test("E02.9 an identity that is no pool slot refuses B", async () =>
+      refusal(await kanthord(["worker", "register"], f.B), ErrorCode.Placement),
     );
     await t.test("E02.10 heartbeat prints null", async () =>
       assert.equal(success(await kanthord(["worker", "heartbeat"], f.A)), null),
@@ -350,9 +351,9 @@ test(
         resource_identity: RESOURCE,
         worker_name: NATIVE,
         host: HOST,
-        placement: "worker",
+        placement: "server",
         client_id: record.client_id,
-        name: "worker-a",
+        name: "server slot 0",
         activity: InstanceActivity.Idle,
         draining: false,
         registered: true,
@@ -427,12 +428,12 @@ test(
         ErrorCode.Execution,
       ),
     );
-    await t.test("E02.18 freed slot admits B and refuses A", async () => {
+    await t.test("E02.18 freed slot admits A again and refuses B", async () => {
       ridB = success<Registration>(
-        await kanthord(["worker", "register"], f.B),
+        await kanthord(["worker", "register"], f.A),
       ).runtime_identity;
       assert.notEqual(ridB, ridA);
-      refusal(await kanthord(["worker", "register"], f.A), ErrorCode.Slot);
+      refusal(await kanthord(["worker", "register"], f.B), ErrorCode.Placement);
     });
     await t.test("E02.19 disabling binding ends registration", async () => {
       assert.equal(
@@ -444,7 +445,7 @@ test(
         next_cursor: null,
       });
       refusal(
-        await kanthord(["worker", "heartbeat"], f.B),
+        await kanthord(["worker", "heartbeat"], f.A),
         ErrorCode.Unauthorized,
       );
     });
@@ -454,7 +455,7 @@ test(
         FOURTH_BINDING_VERSION,
       );
       ridB2 = success<Registration>(
-        await kanthord(["worker", "register"], f.B),
+        await kanthord(["worker", "register"], f.A),
       ).runtime_identity;
       assert.notEqual(ridB2, ridB);
     });
@@ -538,18 +539,14 @@ test(
         SIXTH_BINDING_VERSION,
       );
       refusal(
-        await kanthord(["worker", "heartbeat"], f.B),
+        await kanthord(["worker", "heartbeat"], f.A),
         ErrorCode.Unauthorized,
       );
       await delay(TOKEN_DELAY);
       const C = {
         ...f.H,
-        KANTHORD_TOKEN: await machineToken(
-          f.directory,
-          f.project_id,
-          "worker-c",
-          f.H,
-        ),
+        KANTHORD_TOKEN: (await f.fixture.slotClient(f.project_id, BINDING))
+          .token,
       };
       const item = success<Registration>(
         await kanthord(["worker", "register"], C),

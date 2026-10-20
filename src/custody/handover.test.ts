@@ -18,10 +18,16 @@ import {
 import { redactionPaths } from "../kernel/log.ts";
 import { custodyMigrations } from "./migrations.ts";
 import { CustodyComponent } from "./service.ts";
-import { CUSTODY_REPORT_INVALID, REVISION_REVOKED } from "./handover.ts";
+import {
+  CUSTODY_HOLDER_REFUSED,
+  CUSTODY_REPORT_INVALID,
+  REVISION_REVOKED,
+} from "./handover.ts";
 import {
   CUSTODY_SERVICE_NAME,
   handoverPayloadSchema,
+  HandoverPlacement,
+  HolderRefusal,
   SecretShape,
   SshIdentitySubjectKind,
   type CredentialPlatformSet,
@@ -273,9 +279,12 @@ function fixture(
     ).revision;
   const keys = deriveHandoverKeys(SECRET);
   const aad = handoverAad(row.execution_id, row.runtime_identity);
-  const handover = (bindingIds: readonly string[] = [...bindings.keys()]) =>
+  const handover = (
+    bindingIds: readonly string[] = [...bindings.keys()],
+    placement: HandoverPlacement = HandoverPlacement.Server,
+  ) =>
     store.transaction((tx) =>
-      component.handover(tx, identity, claim, bindingIds, NOW),
+      component.handover(tx, identity, claim, placement, bindingIds, NOW),
     );
   const report = (envelope: ReturnType<typeof sealEnvelope>) =>
     store.transaction((tx) =>
@@ -291,6 +300,7 @@ function fixture(
     component,
     logs,
     row,
+    identity,
     credentialId,
     credentialIds,
     keys,
@@ -361,6 +371,8 @@ test("handover and refresh reports preserve a single pinned revision and sanitiz
       .find((line) => line.msg === message);
     assert.equal(record.execution_id, f.row.execution_id);
     assert.equal(record.credential_id, f.credentialId);
+    assert.equal(record.client_id, f.identity.clientId);
+    assert.equal(record.runtime_identity, f.row.runtime_identity);
   }
   for (const value of [FIRST.key, SECOND.key])
     assert.equal(f.logs.join("").includes(value), false);
@@ -459,6 +471,49 @@ function liveRevisionId(store: Store, credential: string): string {
       .get(credential) as { id: string }
   ).id;
 }
+
+test("a worker placement handover refuses a server-held item with holder_refused and releases nothing", (t) => {
+  const f = fixture(t, ["anthro-1"], ["deploy"]);
+  f.store.database
+    .prepare("UPDATE credential SET ciphertext = ?")
+    .run(Buffer.from("corrupt"));
+  assert.throws(
+    () => f.handover(undefined, HandoverPlacement.Worker),
+    (error) => {
+      assert(error instanceof OperationError);
+      assert.equal(error.status, HttpStatus.Forbidden);
+      assert.equal(error.code, CUSTODY_HOLDER_REFUSED);
+      assert.deepEqual(error.details, { reason: HolderRefusal.ServerHeld });
+      return true;
+    },
+  );
+  assert.deepEqual(f.row.credentials, []);
+  assert.deepEqual(
+    f.logs
+      .map((line) => JSON.parse(line).msg)
+      .filter((msg) => msg.endsWith("handover")),
+    [],
+  );
+});
+
+for (const placement of [HandoverPlacement.Server, HandoverPlacement.Container])
+  test(`a ${placement} placement handover carries the server-held item and the SSH identities`, (t) => {
+    const f = fixture(t, ["anthro-1"], ["deploy"]);
+    const payload = handoverPayloadSchema.parse(
+      openEnvelope(f.keys.handover, f.aad, f.handover(undefined, placement)),
+    );
+    assert.deepEqual(payload.items, [
+      {
+        credential_id: f.credentialId,
+        provider_id: TEST_PLATFORM,
+        credential: FIRST,
+      },
+    ]);
+    assert.deepEqual(
+      payload.ssh_identities.map(({ binding_id }) => binding_id),
+      [...f.bindings.keys()],
+    );
+  });
 
 test("handover carries one SSH identity per repository binding and pins each revision", (t) => {
   const f = fixture(t, ["anthro-1"], ["deploy-a", "deploy-b"]);

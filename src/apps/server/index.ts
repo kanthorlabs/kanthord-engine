@@ -215,6 +215,7 @@ export function composeServices(options: {
   workbenchModelRuntimeFactory?: WorkbenchModelRuntimeFactory;
   inventoryOverrides?: Partial<ResourceInventories>;
   intake?: { pendingEventLimit?: number; pollIntervalMs?: number };
+  serverSlotDriver?: SlotDriver;
 }) {
   const repoConnector =
     options.repositoryConnector ??
@@ -267,9 +268,10 @@ export function composeServices(options: {
     image: `${options.config.worker.container_image}:${packageVersion()}`,
     host: systemRuntimeHost(process.env),
   });
+  const serverSlotDriver = options.serverSlotDriver ?? threadDriver;
   const workerPool = new WorkerPool({
     drivers: new Map<PoolPlacement, SlotDriver>([
-      [threadDriver.placement, threadDriver],
+      [serverSlotDriver.placement, serverSlotDriver],
       [containerDriver.placement, containerDriver],
     ]),
     invocation,

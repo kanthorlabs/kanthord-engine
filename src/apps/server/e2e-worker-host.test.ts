@@ -70,7 +70,7 @@ const tool = (name: string, args: Parameters<typeof fauxToolCall>[1]) =>
   fauxAssistantMessage(fauxToolCall(name, args), { stopReason: "toolUse" });
 
 async function fixture(t: TestContext) {
-  const setup = await workerAcceptance(t, true);
+  const setup = await workerAcceptance(t, true, { fakeSlots: true });
   const mission = await setup.read<{ id: string }>([
     "mission",
     "get",
@@ -180,7 +180,7 @@ async function fixture(t: TestContext) {
         routed(ssh),
       ),
   };
-  const auth = await setup.machine("general-a");
+  const auth = await setup.fixture.slotClient(setup.project_id, "general");
   assert.ok(nodeId);
   assert.ok(auth.client_secret);
   return {

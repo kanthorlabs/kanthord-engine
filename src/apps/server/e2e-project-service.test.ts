@@ -97,7 +97,7 @@ const WORKER_BINDING = {
   kind: BindingKind.Worker,
   config: {
     worker: WORKER,
-    placement: WorkerPlacement.Worker,
+    placement: WorkerPlacement.Server,
     instance_count: SINGLE_INSTANCE,
     entries: [{ agent: AGENT, ...CONFIGURATION }],
   },
@@ -591,7 +591,7 @@ test("E05.16 tuning entry without an enablement is refused", async (t) => {
         kind: BindingKind.Worker,
         config: {
           worker: WORKER,
-          placement: "worker",
+          placement: "server",
           instance_count: SINGLE_INSTANCE,
           entries: [{ agent: AGENT, model_identifier: SONNET }],
         },
@@ -681,7 +681,7 @@ test("E05.19 changing defaults that invalidate a tuning entry is refused atomica
         kind: BindingKind.Worker,
         config: {
           worker: WORKER,
-          placement: "worker",
+          placement: "server",
           instance_count: SINGLE_INSTANCE,
           entries: [{ agent: AGENT, ...entry }],
         },

@@ -106,6 +106,7 @@ async function machineToken(
 
 async function setup(t: TestContext, short = false) {
   const fixture = await gatewayFixture(t, {
+    fakeSlots: true,
     scheduler: short ? { release_reserve: 1, stop_backoff: 1 } : {},
     repositoryConnector: {
       gitLsRemote: async () => {},
@@ -177,7 +178,7 @@ async function setup(t: TestContext, short = false) {
       kind: "worker",
       config: {
         worker: "coder@1",
-        placement: "worker",
+        placement: "server",
         instance_count: 1,
         entries: [{ agent: "swe@1", ...CONFIGURATION }],
         ...(short ? { resource_budget: { turns: 1, wall_time_ms: 1 } } : {}),
@@ -189,7 +190,7 @@ async function setup(t: TestContext, short = false) {
             kind: "worker",
             config: {
               worker: "reviewer@1",
-              placement: "worker",
+              placement: "server",
               instance_count: 1,
               entries: [{ agent: "re@1", ...CONFIGURATION }],
             },
@@ -254,25 +255,14 @@ async function setup(t: TestContext, short = false) {
   );
   const G = {
     ...H,
-    KANTHORD_TOKEN: await machineToken(
-      directory,
-      project.id,
-      "general",
-      "general-a",
-      H,
-    ),
+    KANTHORD_TOKEN: (await fixture.slotClient(project.id, "general")).token,
   };
   const R = short
     ? H
     : {
         ...H,
-        KANTHORD_TOKEN: await machineToken(
-          directory,
-          project.id,
-          "reviewer",
-          "reviewer-a",
-          H,
-        ),
+        KANTHORD_TOKEN: (await fixture.slotClient(project.id, "reviewer"))
+          .token,
       };
   const spare = short
     ? H

@@ -67,12 +67,13 @@ type Violation = {
 function worker(name: string, tags: string[]) {
   return {
     kind: "worker",
-    config: { worker: name, placement: "worker", instance_count: 1, tags },
+    config: { worker: name, placement: "server", instance_count: 1, tags },
   };
 }
 
 async function setup(t: TestContext) {
   const fixture = await gatewayFixture(t, {
+    fakeSlots: true,
     repositoryConnector: {
       gitLsRemote: async () => {},
     },
@@ -181,7 +182,7 @@ async function setup(t: TestContext) {
   const instance = async (binding: string) => {
     const env = {
       ...H,
-      KANTHORD_TOKEN: await fixture.machineToken(project.id, binding),
+      KANTHORD_TOKEN: (await fixture.slotClient(project.id, binding)).token,
     };
     const { runtime_identity } = await read<{ runtime_identity: string }>(
       ["worker", "register"],

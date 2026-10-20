@@ -137,7 +137,7 @@ const fakeCollaborations = {
     revision: 1,
     worker_name: "claude-code@1",
     instance_count: 1,
-    placement: InstancePlacement.Worker,
+    placement: null,
     generation: 1,
     resource_budget: null,
     entries: [],
@@ -1295,17 +1295,34 @@ test("handover handlers pass the proven execution and one transactional clock re
       assert.equal(revision, execution.pinnedRevision);
       return repositoryBindingIds;
     },
+    workerBindingRowOf: (tx, bindingId) => {
+      assert(tx.database.isTransaction);
+      assert.equal(bindingId, execution.workerBindingId);
+      return {
+        binding_id: bindingId,
+        project_id: execution.projectId,
+        resource_identity: "worker:kanthord:general",
+        worker_name: "coder@1",
+        entries: [],
+        resource_budget: null,
+        tombstone: false,
+        disabled: false,
+        placement: InstancePlacement.Container,
+      };
+    },
     custodyHandover: {
       handover: (
         tx,
         actualIdentity,
         actualExecution,
+        actualPlacement,
         actualBindingIds,
         actualNow,
       ) => {
         assert(tx.database.isTransaction);
         assert.equal(actualIdentity, identity);
         assert.equal(actualExecution, execution);
+        assert.equal(actualPlacement, InstancePlacement.Container);
         assert.equal(actualBindingIds, repositoryBindingIds);
         assert.equal(actualNow, now);
         return envelope;
@@ -1613,6 +1630,7 @@ function authorizationFixture(t: TestContext) {
         resource_budget: null,
         tombstone: false,
         disabled: false,
+        placement: InstancePlacement.Server,
       }),
       schedulerClaims: {
         ...fakeCollaborations.schedulerClaims,
@@ -1767,7 +1785,7 @@ function poolFixture(t: TestContext, initialCount: number) {
   const logs: string[] = [];
   const state = {
     count: initialCount,
-    placement: InstancePlacement.Server as InstancePlacement,
+    placement: InstancePlacement.Server as InstancePlacement | null,
     generation: POOL_GENERATION,
     failure: null as Error | null,
     executing: new Set<string>(),
@@ -1924,18 +1942,21 @@ test("a binding at the server placement accepts a registration only from a curre
   );
 });
 
-test("a binding at the worker placement accepts any client identity", (t) => {
+test("a binding at the worker placement refuses every client identity", (t) => {
   const f = poolFixture(t, 2);
   f.state.placement = InstancePlacement.Worker;
   f.worker.startPool();
-  workerOperations.register.output.parse(
-    f.register(createIdentity("client_identity")),
-  );
+  for (const clientId of [createIdentity("client_identity"), f.slotId(0)])
+    refuses(
+      () => f.register(clientId),
+      WorkerErrorCode.PlacementMismatch,
+      HttpStatus.Conflict,
+    );
 });
 
 test("the start of the pool starts a slot above the target with a live registration in drain mode", (t) => {
   const f = poolFixture(t, 1);
-  f.state.placement = InstancePlacement.Worker;
+  f.state.placement = null;
   f.register(f.slotId(2));
   f.state.placement = InstancePlacement.Server;
   f.worker.startPool();
@@ -1999,7 +2020,7 @@ test("a draining slot gets no claim while its running execution stays answerable
 
 test("a restart of the pool host starts a busy slot above the target in drain mode", (t) => {
   const f = poolFixture(t, POOL_FOUR_STARTS);
-  f.state.placement = InstancePlacement.Worker;
+  f.state.placement = null;
   const busy = f.register(f.slotId(2)).runtime_identity;
   f.register(f.slotId(3));
   f.state.executing.add(busy);

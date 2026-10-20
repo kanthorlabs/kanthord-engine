@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { cpSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { simpleGit } from "simple-git";
+import { ulid } from "ulid";
+import { IdentityKind } from "../../kernel/caller.ts";
 import { join } from "node:path";
 import { stringify } from "yaml";
 import { Worker, type WorkerOptions } from "../worker/index.ts";
@@ -75,7 +77,10 @@ import {
 import { GITHUB_API_VERSION } from "../../repository/github.ts";
 import { LOCAL_GIT_SSH_ACCESS } from "../../repository/test-sshd.ts";
 import {
+  alwaysAvailable,
   InstancePlacement,
+  PoolPlacement,
+  type PlacementStatus,
   type RepositoryTransport,
 } from "../../worker/contract.ts";
 import {
@@ -105,7 +110,14 @@ import { KANTHORD_AUTH_USERNAME } from "../../gateway/auth/jwt.ts";
 import {
   generateHumanJWT,
   generateMachineJWT,
+  signingKey,
 } from "../../gateway/auth/jwt.ts";
+import type {
+  SlotDriver,
+  SlotExit,
+  SlotInstance,
+  SlotLaunch,
+} from "./slot-driver.ts";
 import { HealthRegistry } from "../../kernel/health.ts";
 import { HealthStatus } from "../../kernel/service.ts";
 
@@ -130,7 +142,7 @@ export const COVERING_WORKER_BINDINGS = {
     kind: "worker",
     config: {
       worker: "coder@1",
-      placement: "worker",
+      placement: "server",
       instance_count: 0,
       tags: [],
     },
@@ -139,13 +151,74 @@ export const COVERING_WORKER_BINDINGS = {
     kind: "worker",
     config: {
       worker: "reviewer@1",
-      placement: "worker",
+      placement: "server",
       instance_count: 0,
       tags: [],
     },
   },
 } as const;
 export const COVERING_AGENTS = ["swe@1", "re@1"] as const;
+const FIRST_SLOT = 0;
+const MILLISECONDS_PER_SECOND = 1000;
+const SLOT_EXIT: SlotExit = { code: 0, error: null };
+
+class FakeSlotInstance implements SlotInstance {
+  private readonly exit = Promise.withResolvers<SlotExit>();
+  readonly exited = this.exit.promise;
+
+  control(): void {
+    this.exit.resolve(SLOT_EXIT);
+  }
+
+  terminate(): void {
+    this.exit.resolve(SLOT_EXIT);
+  }
+}
+
+export class FakeSlotDriver implements SlotDriver {
+  readonly placement = PoolPlacement.Server;
+  private readonly launches: SlotLaunch[] = [];
+  private readonly waiters: Array<() => void> = [];
+
+  check(): Promise<PlacementStatus> {
+    return Promise.resolve(alwaysAvailable(this.placement));
+  }
+
+  prepare(): Promise<void> {
+    return Promise.resolve();
+  }
+
+  removeVolume(): Promise<void> {
+    return Promise.resolve();
+  }
+
+  sweepVolumes(): Promise<void> {
+    return Promise.resolve();
+  }
+
+  launch(launch: SlotLaunch): SlotInstance {
+    this.launches.push(launch);
+    for (const wake of this.waiters.splice(0)) wake();
+    return new FakeSlotInstance();
+  }
+
+  async launched(
+    projectId: string,
+    resourceIdentity: string,
+    slot: number,
+  ): Promise<SlotLaunch> {
+    for (;;) {
+      const found = this.launches.findLast(
+        (launch) =>
+          launch.slot.project_id === projectId &&
+          launch.slot.resource_identity === resourceIdentity &&
+          launch.slot.slot === slot,
+      );
+      if (found) return found;
+      await new Promise<void>((resolve) => this.waiters.push(resolve));
+    }
+  }
+}
 
 type EnablementBody = z.input<
   (typeof agentOperations)["enablement.put"]["input"]
@@ -448,9 +521,11 @@ export async function gatewayFixture(
     serverSlotLimit?: number;
     containerImage?: string;
     intake?: { pendingEventLimit?: number; pollIntervalMs?: number };
+    fakeSlots?: boolean;
   } = {},
 ) {
   process.umask(0o077);
+  const slotDriver = options.fakeSlots ? new FakeSlotDriver() : undefined;
   const config = configuration({
     version: CONFIG_VERSION,
     master_key: randomBytes(32).toString("base64"),
@@ -517,6 +592,7 @@ export async function gatewayFixture(
     registrations: options.machines?.worker,
     inventoryOverrides: options.inventoryOverrides,
     intake: options.intake,
+    serverSlotDriver: slotDriver,
     logger: pino(
       { level: "info" },
       {
@@ -581,6 +657,7 @@ export async function gatewayFixture(
     const error = await service.start();
     if (error) throw error;
   }
+  if (slotDriver) worker.startPool();
   const port = gateway.address()!.port;
   config.gateway.allowed_hosts.push(`127.0.0.1:${port}`, `localhost:${port}`);
   const endpoint = `http://127.0.0.1:${port}`;
@@ -631,6 +708,39 @@ export async function gatewayFixture(
           name,
         )
       ).token,
+    slotClient: async (
+      projectId: string,
+      bindingName: string,
+      slot = FIRST_SLOT,
+    ) => {
+      assert.ok(slotDriver);
+      const launch = await slotDriver.launched(
+        projectId,
+        workerResourceIdentity(bindingName),
+        slot,
+      );
+      const { sign } = await import("hono/jwt");
+      const iat = Math.floor(Date.now() / MILLISECONDS_PER_SECOND);
+      const token = await sign(
+        {
+          sub: launch.slot.client_id,
+          name: `server slot ${slot}`,
+          kind: IdentityKind.Client,
+          project_id: projectId,
+          resource_identity: launch.slot.resource_identity,
+          iat,
+          exp: iat + config.gateway.auth.token_lifetime,
+          jti: ulid(),
+        },
+        await signingKey(config.master_key, config.gateway.auth.version),
+        "HS256",
+      );
+      return {
+        client_id: launch.slot.client_id,
+        token,
+        client_secret: launch.client_secret,
+      };
+    },
     config,
     accountId: KANTHORD_AUTH_USERNAME,
     logs,

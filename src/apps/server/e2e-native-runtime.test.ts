@@ -10,8 +10,6 @@ import {
 import { join } from "node:path";
 import { test } from "node:test";
 import { simpleGit } from "simple-git";
-import { parse, stringify } from "yaml";
-import { configuration, CONFIG_VERSION } from "../../config/index.ts";
 import { httpClient } from "../../gateway/client.ts";
 import { handoverPayloadSchema } from "../../custody/contract.ts";
 import { executionCredentialStore } from "../../custody/index.ts";
@@ -61,7 +59,7 @@ import {
   scriptedModelRuntime,
   scriptedProvider,
 } from "../../worker/unit/test-support.ts";
-import { environment, kanthord, kanthordTerminal } from "./cli-support.ts";
+import { environment, kanthord } from "./cli-support.ts";
 import {
   FAKE_GITHUB_HOST_KEY,
   FAKE_SSH_HOST,
@@ -119,6 +117,7 @@ test(
   { timeout: 180000 },
   async (t) => {
     const f = await gatewayFixture(t, {
+      fakeSlots: true,
       repositoryConnector: {
         gitLsRemote: async () => {},
       },
@@ -168,7 +167,7 @@ test(
     ]);
     const worker = {
       worker: "coder@1",
-      placement: "worker",
+      placement: "server",
       instance_count: SINGLE_INSTANCE,
       entries: [{ agent: "swe@1", ...DEFAULTS }],
     };
@@ -245,35 +244,8 @@ test(
         },
       );
     }
-    writePrivate(
-      join(directory, "server.yaml"),
-      stringify(
-        configuration({
-          version: CONFIG_VERSION,
-          master_key: f.config.master_key,
-        }).getProperties(),
-      ),
-    );
-    async function machine(binding: string) {
-      const args = [
-        "auth",
-        "jwt",
-        "generate",
-        "--project",
-        project.id,
-        "--binding",
-        binding,
-        "--name",
-        `${binding}-a`,
-        "--config",
-        join(directory, "server.yaml"),
-      ];
-      const result = await kanthordTerminal(args, human);
-      assert.equal(result.code, SUCCESSFUL_EXIT, result.stderr);
-      return parse(result.stdout) as { token: string; client_secret: string };
-    }
     async function claim(binding: string) {
-      const auth = await machine(binding);
+      const auth = await f.slotClient(project.id, binding);
       const env = { ...human, KANTHORD_TOKEN: auth.token };
       const registration = await read<{ runtime_identity: string }>(
         ["worker", "register"],

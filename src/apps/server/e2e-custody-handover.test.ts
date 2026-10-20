@@ -217,7 +217,7 @@ async function resources(c: ReturnType<typeof cli>) {
         kind: "worker",
         config: {
           worker: "coder@1",
-          placement: "worker",
+          placement: "server",
           instance_count: SINGLE_INSTANCE,
           entries: [{ agent: "swe@1", ...CONFIGURATION }],
         },
@@ -249,6 +249,7 @@ async function graph(
 
 async function setup(t: TestContext) {
   const fixture = await gatewayFixture(t, {
+    fakeSlots: true,
     repositoryConnector: {
       gitLsRemote: async () => {},
     },
@@ -271,7 +272,7 @@ async function setup(t: TestContext) {
       }).getProperties(),
     ),
   );
-  const general = await machine(directory, projectId, "general-a", human);
+  const general = await fixture.slotClient(projectId, "general");
   const spare = await machine(directory, projectId, "general-b", human);
   const env = { ...human, KANTHORD_TOKEN: general.token };
   const registration = await c.read<{ runtime_identity: string }>(

@@ -109,6 +109,7 @@ import {
   type BindingsChanged,
   type PlacementStatusOf,
   StablePlacementIssue,
+  WorkerPlacementIssue,
   WorkerPlacement,
   type EndRegistrations,
   type BindingChange,
@@ -937,7 +938,7 @@ export class ProjectService implements Service, ProjectBindings {
   ) {
     const submission = uniqueSubmission(body.bindings);
     const saved = this.savedBindingSet(projectId, body.version);
-    const unavailable = await this.unavailableContainer(projectId, submission);
+    const unavailable = await this.unavailablePlacement(projectId, submission);
     for (const [name, binding] of submission) {
       if (binding.kind !== BindingKind.Repository) continue;
       refuseRepositoryAction(binding.config);
@@ -974,21 +975,36 @@ export class ProjectService implements Service, ProjectBindings {
     this.wakeup.wake(projectId);
     return answer;
   }
-  private async unavailableContainer(
+  private async unavailablePlacement(
     projectId: string,
     submission: ReturnType<typeof uniqueSubmission>,
   ): Promise<OperationError | null> {
     const live = this.operationalStore.transaction((tx) =>
       readCurrentBindingSet(tx, projectId),
     );
-    const added = Array.from(submission).flatMap(([name, binding]) =>
-      binding.kind === BindingKind.Worker &&
-      binding.config.placement === WorkerPlacement.Container &&
-      !live.has(name)
-        ? [name]
-        : [],
-    );
-    const first = added.at(FIRST_INDEX);
+    const firstAdded = (placement: WorkerPlacement) =>
+      Array.from(submission)
+        .flatMap(([name, binding]) =>
+          binding.kind === BindingKind.Worker &&
+          binding.config.placement === placement &&
+          !live.has(name)
+            ? [name]
+            : [],
+        )
+        .at(FIRST_INDEX);
+    const worker = firstAdded(WorkerPlacement.Worker);
+    if (worker !== undefined)
+      return new OperationError(
+        HttpStatus.Conflict,
+        ProjectErrorCode.WorkerPlacementUnavailable,
+        "The server has no worker instance for the worker placement.",
+        {
+          binding: worker,
+          placement: WorkerPlacement.Worker,
+          reason: WorkerPlacementIssue.InstancesAbsent,
+        },
+      );
+    const first = firstAdded(WorkerPlacement.Container);
     if (first === undefined) return null;
     const { available, reason } = await this.placementStatus(
       WorkerPlacement.Container,
@@ -1294,6 +1310,7 @@ export class ProjectService implements Service, ProjectBindings {
       resource_identity: binding.resource_identity,
       tombstone: resolution.tombstone,
       disabled: resolution.disabled,
+      placement: config.placement ?? null,
       entries: config.entries ?? [],
       resource_budget: config.resource_budget ?? null,
     };

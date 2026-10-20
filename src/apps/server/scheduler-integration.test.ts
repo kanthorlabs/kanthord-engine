@@ -45,6 +45,7 @@ import {
 } from "./test-support.ts";
 
 const FIRST_ATTEMPT = 1;
+const SECOND_SLOT = 1;
 const FIRST_CONCURRENT_RELEASE = 1;
 const SECOND_CONCURRENT_RELEASE = 2;
 const EXPECTED_PAIR_COUNT = 2;
@@ -112,6 +113,7 @@ function refused<T>(
 async function setup(t: TestContext, adapter: Adapter, path?: string) {
   const f = await gatewayFixture(t, {
     path,
+    fakeSlots: true,
     repositoryConnector: {
       gitLsRemote: async () => {},
     },
@@ -216,7 +218,7 @@ async function setup(t: TestContext, adapter: Adapter, path?: string) {
             kind: "worker",
             config: {
               worker: "coder@1",
-              placement: "worker",
+              placement: "server",
               instance_count: 2,
               entries: [{ agent: "swe@1", ...CONFIGURATION }],
             },
@@ -225,7 +227,7 @@ async function setup(t: TestContext, adapter: Adapter, path?: string) {
             kind: "worker",
             config: {
               worker: "reviewer@1",
-              placement: "worker",
+              placement: "server",
               instance_count: 1,
               entries: [{ agent: "re@1", ...CONFIGURATION }],
             },
@@ -285,9 +287,10 @@ async function setup(t: TestContext, adapter: Adapter, path?: string) {
       },
     }),
   );
-  const generalToken = await f.machineToken(projectId, "general", "general-a");
-  const otherToken = await f.machineToken(projectId, "general", "general-b");
-  const reviewerToken = await f.machineToken(projectId, "reviewer", "reviewer");
+  const generalToken = (await f.slotClient(projectId, "general")).token;
+  const otherToken = (await f.slotClient(projectId, "general", SECOND_SLOT))
+    .token;
+  const reviewerToken = (await f.slotClient(projectId, "reviewer")).token;
   const general = completed(
     await call(workerOperations.register, NO_INPUT, generalToken),
   ).runtime_identity;

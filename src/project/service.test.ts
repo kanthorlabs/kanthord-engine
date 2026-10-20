@@ -55,6 +55,7 @@ import {
   RESOURCE_TARGET_KIND_REPOSITORY,
   STORAGE_PLATFORM,
   StablePlacementIssue,
+  WorkerPlacementIssue,
   WorkerField,
   WorkerPlacement,
   bindingSetWriteInputSchema,
@@ -1246,7 +1247,7 @@ function workerBinding(worker = NATIVE_WORKER) {
     config: {
       worker,
       instance_count: SINGLE_INSTANCE,
-      ...(hosted ? { placement: WorkerPlacement.Worker } : {}),
+      ...(hosted ? { placement: WorkerPlacement.Server } : {}),
     },
   };
 }
@@ -1537,7 +1538,7 @@ test("equal and reordered configurations keep the version without inserting revi
     config: {
       instance_count: SINGLE_INSTANCE,
       worker: NATIVE_WORKER,
-      placement: WorkerPlacement.Worker,
+      placement: WorkerPlacement.Server,
     },
   };
   for (const binding of [reordered, original]) {
@@ -1577,31 +1578,31 @@ test("stale versions and changed worker names refuse the entire edit", async (t)
 });
 
 test("a worker binding stores each placement as written", async (t) => {
-  const f = writeFixture(t);
+  const f = probedFixture(t, null);
   const read = () =>
     f.store.transaction((tx) =>
       f.project.workerBindingOf(tx, f.params.project_id, WORKER_GROUP),
     );
   const worker = workerBinding();
   const first = await f.write({ [WORKER_NAME]: worker });
-  assert.equal(read()?.placement, WorkerPlacement.Worker);
-  assert.equal(storedPlacement(first), WorkerPlacement.Worker);
+  assert.equal(read()?.placement, WorkerPlacement.Server);
+  assert.equal(storedPlacement(first), WorkerPlacement.Server);
   const unchanged = await f.write(
     { [WORKER_NAME]: worker },
     first.binding_set_version,
   );
   assert.equal(unchanged.binding_set_version, first.binding_set_version);
   const removed = await f.write({}, first.binding_set_version);
-  const server = {
+  const container = {
     kind: BindingKind.Worker,
-    config: { ...worker.config, placement: WorkerPlacement.Server },
+    config: { ...worker.config, placement: WorkerPlacement.Container },
   };
   const second = await f.write(
-    { [WORKER_NAME]: server },
+    { [WORKER_NAME]: container },
     removed.binding_set_version,
   );
-  assert.equal(read()?.placement, WorkerPlacement.Server);
-  assert.equal(storedPlacement(second), WorkerPlacement.Server);
+  assert.equal(read()?.placement, WorkerPlacement.Container);
+  assert.equal(storedPlacement(second), WorkerPlacement.Container);
 });
 
 test("a hosted worker binding refuses a write without a placement", async (t) => {
@@ -1640,7 +1641,7 @@ test("a placement change of a worker binding refuses the entire edit and a remov
   const changes = f.bindingChanges.length;
   for (const config of [
     { ...workerBinding().config, placement: WorkerPlacement.Worker },
-    workerBinding().config,
+    { ...workerBinding().config, placement: WorkerPlacement.Container },
   ])
     await rejectsWrite(
       f.write(
@@ -1657,7 +1658,7 @@ test("a placement change of a worker binding refuses the entire edit and a remov
     { [WORKER_NAME]: workerBinding() },
     removed.binding_set_version,
   );
-  assert.equal(storedPlacement(again), WorkerPlacement.Worker);
+  assert.equal(storedPlacement(again), WorkerPlacement.Server);
 });
 
 test("an external worker refuses the placement field", async (t) => {
@@ -1722,6 +1723,33 @@ for (const reason of Object.values(StablePlacementIssue))
     assert.deepEqual(f.snapshot(), before);
     assert.equal(f.bindingChanges.length, NO_BINDING_CHANGES);
   });
+
+test("an added worker placement binding refuses the write on instances_absent", async (t) => {
+  const f = probedFixture(t, null);
+  const before = f.snapshot();
+  await rejectsWrite(
+    f.write({
+      [WORKER_NAME]: {
+        kind: BindingKind.Worker,
+        config: {
+          worker: NATIVE_WORKER,
+          instance_count: SINGLE_INSTANCE,
+          placement: WorkerPlacement.Worker,
+        },
+      },
+    }),
+    HttpStatus.Conflict,
+    ProjectErrorCode.WorkerPlacementUnavailable,
+    {
+      binding: WORKER_NAME,
+      placement: WorkerPlacement.Worker,
+      reason: WorkerPlacementIssue.InstancesAbsent,
+    },
+  );
+  assert.deepEqual(f.probes, []);
+  assert.deepEqual(f.snapshot(), before);
+  assert.equal(f.bindingChanges.length, NO_BINDING_CHANGES);
+});
 
 test("an added container binding passes on a transient runtime failure", async (t) => {
   const f = probedFixture(t, PlacementIssue.RuntimeFailed);
@@ -3137,7 +3165,7 @@ test("agent views page sorted declarations and copy worker views with stripped e
       config: {
         worker: NATIVE_WORKER,
         instance_count: SINGLE_INSTANCE,
-        placement: WorkerPlacement.Worker,
+        placement: WorkerPlacement.Server,
         entries: [{ agent: SECOND_AGENT, model_identifier: MODEL }],
       },
     },
@@ -3881,6 +3909,7 @@ test("workerBindingRowOf retains the pinned configuration in the caller transact
         resource_identity: pinned[WORKER_NAME]!.resource_identity,
         tombstone: false,
         disabled: false,
+        placement: WorkerPlacement.Server,
         entries: [],
         resource_budget: null,
       },

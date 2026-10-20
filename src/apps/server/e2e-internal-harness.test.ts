@@ -16,7 +16,6 @@ import {
   createJourneyNode,
   createJourneyTask,
 } from "./journey-support.ts";
-import { generateMachineToken } from "./cli-support.ts";
 import {
   gatewayFixture,
   createFakeSshCredential,
@@ -131,6 +130,7 @@ async function setupInternal(t: TestContext) {
   const s3 = await fakeS3(t);
   const gitHub = await fakeGitHub(t);
   const fixture = await gatewayFixture(t, {
+    fakeSlots: true,
     repositoryConnector: {
       gitLsRemote: async () => {},
     },
@@ -206,7 +206,7 @@ async function setupInternal(t: TestContext) {
     kind: "worker",
     config: {
       worker: name,
-      placement: "worker",
+      placement: "server",
       instance_count: SINGLE_INSTANCE,
       entries: [{ agent, ...DEFAULTS }],
     },
@@ -270,16 +270,8 @@ async function setupInternal(t: TestContext) {
       expected_mission_version: mission.version,
     });
   }
-  const issue = (bindingName: string) =>
-    generateMachineToken({
-      env: cli.human,
-      masterKey: fixture.config.master_key,
-      projectId: project.id,
-      bindingName,
-      name: `test_${bindingName}`,
-    });
-  const generalAuth = await issue("general");
-  const reviewAuth = await issue("review");
+  const generalAuth = await fixture.slotClient(project.id, "general");
+  const reviewAuth = await fixture.slotClient(project.id, "review");
   cli.secrets.push(
     generalAuth.token,
     generalAuth.client_secret,

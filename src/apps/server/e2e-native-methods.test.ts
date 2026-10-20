@@ -4,8 +4,6 @@ import { mkdirSync, writeFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { test, type TestContext } from "node:test";
 import { simpleGit } from "simple-git";
-import { parse, stringify } from "yaml";
-import { configuration, CONFIG_VERSION } from "../../config/index.ts";
 import { httpClient } from "../../gateway/client.ts";
 import { handoverPayloadSchema } from "../../custody/contract.ts";
 import { executionCredentialStore } from "../../custody/index.ts";
@@ -52,7 +50,7 @@ import {
   scriptedModelRuntime,
   scriptedProvider,
 } from "../../worker/unit/test-support.ts";
-import { environment, kanthord, kanthordTerminal } from "./cli-support.ts";
+import { environment, kanthord } from "./cli-support.ts";
 import {
   createFakeSshCredential,
   fakeGitHub,
@@ -107,6 +105,7 @@ function completed<T>(result: OperationResult<T>): T {
 async function methodsFixture(t: TestContext) {
   const gitHub = await fakeGitHub(t);
   const f = await gatewayFixture(t, {
+    fakeSlots: true,
     repositoryConnector: {
       gitLsRemote: async () => {},
     },
@@ -164,7 +163,7 @@ async function methodsFixture(t: TestContext) {
   ]);
   const worker = {
     worker: "coder@1",
-    placement: "worker",
+    placement: "server",
     instance_count: SINGLE_INSTANCE,
     entries: [{ agent: "swe@1", ...DEFAULTS }],
   };
@@ -210,7 +209,7 @@ async function methodsFixture(t: TestContext) {
         kind: "worker",
         config: {
           worker: "reviewer@1",
-          placement: "worker",
+          placement: "server",
           instance_count: SINGLE_INSTANCE,
           entries: [{ agent: "re@1", ...DEFAULTS }],
         },
@@ -275,35 +274,8 @@ async function methodsFixture(t: TestContext) {
       expected_mission_version: version,
     });
   }
-  writePrivate(
-    join(directory, "server.yaml"),
-    stringify(
-      configuration({
-        version: CONFIG_VERSION,
-        master_key: f.config.master_key,
-      }).getProperties(),
-    ),
-  );
-  async function machine(binding: string) {
-    const args = [
-      "auth",
-      "jwt",
-      "generate",
-      "--project",
-      project.id,
-      "--binding",
-      binding,
-      "--name",
-      `${binding}-a`,
-      "--config",
-      join(directory, "server.yaml"),
-    ];
-    const result = await kanthordTerminal(args, human);
-    assert.equal(result.code, SUCCESSFUL_EXIT, result.stderr);
-    return parse(result.stdout) as { token: string; client_secret: string };
-  }
   async function register(binding: string) {
-    const auth = await machine(binding);
+    const auth = await f.slotClient(project.id, binding);
     const env = { ...human, KANTHORD_TOKEN: auth.token };
     const registration = await read<{ runtime_identity: string }>(
       ["worker", "register"],

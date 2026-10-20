@@ -497,6 +497,15 @@ export const handoverPayloadSchema = handoverItemsSchema.extend({
   ),
 });
 export type HandoverPayload = z.infer<typeof handoverPayloadSchema>;
+export const HandoverPlacement = {
+  Server: "server",
+  Container: "container",
+  Worker: "worker",
+} as const;
+export type HandoverPlacement =
+  (typeof HandoverPlacement)[keyof typeof HandoverPlacement];
+export const HolderRefusal = { ServerHeld: "server_held" } as const;
+export type HolderRefusal = (typeof HolderRefusal)[keyof typeof HolderRefusal];
 export type HandoverSshIdentity = HandoverPayload["ssh_identities"][number];
 export const secretSchemas: Readonly<Record<SecretShape, z.ZodType>> = {
   [SecretShape.ApiKey]: apiKeySecretSchema,
