@@ -8,7 +8,11 @@ import { background } from "../kernel/context.ts";
 import { isolatedGitEnvironment } from "../kernel/git-environment.ts";
 import { temporary } from "../kernel/test-support.ts";
 import { clone, fetchBase, gitLsRemote, pushNodeBranch } from "./connector.ts";
-import type { SshKeyAccess, SshRelayAccess } from "./contract.ts";
+import {
+  SSH_SIGN_USER,
+  type SshKeyAccess,
+  type SshRelayAccess,
+} from "./contract.ts";
 import { withSshAgent } from "./ssh-agent.ts";
 import { generateSshKey } from "./ssh-key.ts";
 import { relayedSignature, SshAuthenticationMethod } from "./ssh-sign.ts";
@@ -46,6 +50,7 @@ interface RelayHarness {
 async function relayHarness(
   t: TestContext,
   serverKnownHosts?: string,
+  user?: string,
 ): Promise<RelayHarness> {
   const sshd = await startTestSshd(t);
   const bare = await createBareRepository(t);
@@ -64,7 +69,7 @@ async function relayHarness(
           ? SshAuthenticationMethod.HostBound
           : SshAuthenticationMethod.PublicKey,
       );
-      return relayedSignature(held, data, sshd.user);
+      return relayedSignature(held, data, user ?? sshd.user);
     },
     public_key: key.public_key,
     known_hosts: sshd.known_hosts,
@@ -179,4 +184,54 @@ test("a server refusal of the relayed payload fails the git operation", async (t
   );
   assert.match(failure, KEY_REFUSED);
   assert.ok(h.methods.length > NO_SIGNATURES);
+});
+
+test("plain git pushes and fetches through the relay with an unbound publickey signature", async (t) => {
+  const h = await relayHarness(t);
+  const url = h.sshd.url(h.bare);
+  const work = join(temporary(t), "work");
+  await withSshAgent(h.access, background, DEADLINE_MS, async (agentEnv) => {
+    const env = {
+      ...agentEnv,
+      GIT_SSH_COMMAND: `${agentEnv.GIT_SSH_COMMAND} -o PubkeyAuthentication=unbound`,
+    };
+    await execFileAsync("git", ["clone", "-q", url, work], { env });
+    await writeFile(join(work, NODE_FILE), NODE_TEXT);
+    await git(work, ["add", NODE_FILE]);
+    await git(work, ["commit", "-q", "-m", "node"]);
+    await execFileAsync(
+      "git",
+      ["push", "-q", "origin", `HEAD:refs/heads/${PLAIN_BRANCH}`],
+      { cwd: work, env },
+    );
+    await execFileAsync("git", ["fetch", "-q", "origin"], { cwd: work, env });
+  });
+  assert.equal(
+    await git(h.bare, ["rev-parse", PLAIN_BRANCH]),
+    await git(work, ["rev-parse", `origin/${PLAIN_BRANCH}`]),
+  );
+  assert.ok(h.methods.length > NO_SIGNATURES);
+  assert.ok(
+    h.methods.every((method) => method === SshAuthenticationMethod.PublicKey),
+  );
+});
+
+test("the production user name git refuses a login as another user", async (t) => {
+  const h = await relayHarness(t, undefined, SSH_SIGN_USER);
+  assert.notEqual(h.sshd.user, SSH_SIGN_USER);
+  const failure = await withSshAgent(
+    h.access,
+    background,
+    DEADLINE_MS,
+    async (env) =>
+      execFileAsync(
+        "git",
+        ["clone", "-q", h.sshd.url(h.bare), join(temporary(t), "clone")],
+        { env },
+      ).then(
+        () => "",
+        (error: { stderr?: string }) => error.stderr ?? "",
+      ),
+  );
+  assert.match(failure, KEY_REFUSED);
 });
