@@ -887,7 +887,7 @@ test("the host refusal names the refused host and the allowlist field, never the
     [{}, null],
   ];
   for (const [headers, host] of refusals) {
-    const response = await fixture.gateway.app.request("/api/liveness", {
+    const response = await fixture.gateway.app.request("/api/healthcheck", {
       headers,
     });
     assert.equal(response.status, HttpStatus.Forbidden);
