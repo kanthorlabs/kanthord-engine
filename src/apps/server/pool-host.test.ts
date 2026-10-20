@@ -9,10 +9,13 @@ import type { Logger } from "pino";
 import { deriveClientSecret } from "../../gateway/auth/jwt.ts";
 import type { createInvocation } from "../../gateway/index.ts";
 import { temporary } from "../../kernel/test-support.ts";
-import { InstancePlacement, type PoolSlot } from "../../worker/contract.ts";
+import {
+  PoolPlacement,
+  type PlacementStatus,
+  type PoolSlot,
+} from "../../worker/contract.ts";
 import { SlotControl } from "../worker/thread-data.ts";
 import type {
-  PlacementStatus,
   SlotDriver,
   SlotExit,
   SlotInstance,
@@ -83,13 +86,23 @@ class FakeInstance implements SlotInstance {
 }
 
 class FakeDriver implements SlotDriver {
-  readonly placement = InstancePlacement.Server;
+  readonly placement: PoolPlacement;
   readonly launches: SlotLaunch[] = [];
   readonly instances: FakeInstance[] = [];
   launchError: Error | null = null;
 
+  constructor(placement: PoolPlacement = PoolPlacement.Server) {
+    this.placement = placement;
+  }
+
   check(): Promise<PlacementStatus> {
-    return Promise.resolve({ placement: this.placement, available: true });
+    return Promise.resolve({
+      placement: this.placement,
+      available: true,
+      reason: null,
+      detail: null,
+      container_runtime: null,
+    });
   }
 
   prepare(): Promise<void> {
@@ -115,6 +128,7 @@ function fixture(
   options: { slotLimit?: number; registered?: boolean } = {},
 ) {
   const driver = new FakeDriver();
+  const containerDriver = new FakeDriver(PoolPlacement.Container);
   const records: LogRecord[] = [];
   const record = (fields: Record<string, unknown>, message: string) =>
     records.push({ fields, message });
@@ -123,7 +137,10 @@ function fixture(
   const stateDirectory = temporary(t);
   const registered = options.registered ?? true;
   const pool = new WorkerPool({
-    drivers: new Map([[driver.placement, driver]]),
+    drivers: new Map([
+      [driver.placement, driver],
+      [containerDriver.placement, containerDriver],
+    ]),
     invocation: {} as ReturnType<typeof createInvocation>,
     masterKey,
     authVersion: AUTH_VERSION,
@@ -135,17 +152,32 @@ function fixture(
   const ended: string[] = [];
   pool.onEnded((clientId) => ended.push(clientId));
   t.after(() => {
-    for (const launch of driver.launches) launch.channel.close();
+    for (const launch of [...driver.launches, ...containerDriver.launches])
+      launch.channel.close();
   });
-  const slotOf = (slot: number, draining = false): PoolSlot => ({
+  const slotOf = (
+    slot: number,
+    draining = false,
+    placement: PoolPlacement = PoolPlacement.Server,
+  ): PoolSlot => ({
     project_id: PROJECT,
     resource_identity: RESOURCE,
     generation: GENERATION,
+    placement,
     slot,
     client_id: pool.clientIdentity(PROJECT, RESOURCE, GENERATION, slot),
     draining,
   });
-  return { driver, records, pool, ended, slotOf, masterKey, stateDirectory };
+  return {
+    driver,
+    containerDriver,
+    records,
+    pool,
+    ended,
+    slotOf,
+    masterKey,
+    stateDirectory,
+  };
 }
 
 function flush(): Promise<void> {
@@ -175,6 +207,22 @@ test("the pool host starts a slot through the driver with exactly the documented
   assert.ok(launch.channel instanceof MessagePort);
   assert.ok(!JSON.stringify(Object.keys(launch)).includes("master_key"));
   assert.ok(!Object.values(launch).includes(f.masterKey));
+});
+
+test("the pool host launches each slot through the driver of its placement", (t) => {
+  const f = fixture(t);
+  const server = f.slotOf(LOWEST_SLOT);
+  const container = f.slotOf(MIDDLE_SLOT, false, PoolPlacement.Container);
+  f.pool.start(server);
+  f.pool.start(container);
+  assert.deepEqual(
+    f.driver.launches.map(({ slot }) => slot),
+    [server],
+  );
+  assert.deepEqual(
+    f.containerDriver.launches.map(({ slot }) => slot),
+    [container],
+  );
 });
 
 test("a slot above the limit stays pending and the lowest pending slot starts when a started slot ends", async (t) => {

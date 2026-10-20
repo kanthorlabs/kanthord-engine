@@ -1,11 +1,10 @@
 import { join } from "node:path";
 import type { Worker } from "node:worker_threads";
 import { LogDestination } from "../../kernel/log.ts";
-import { InstancePlacement } from "../../worker/contract.ts";
+import { PoolPlacement, type PlacementStatus } from "../../worker/contract.ts";
 import { startThread } from "../worker/thread-start.ts";
 import type { SlotControl } from "../worker/thread-data.ts";
 import type {
-  PlacementStatus,
   SlotDriver,
   SlotExit,
   SlotInstance,
@@ -75,11 +74,17 @@ class ThreadInstance implements SlotInstance {
 }
 
 export class ThreadDriver implements SlotDriver {
-  readonly placement = InstancePlacement.Server;
+  readonly placement = PoolPlacement.Server;
   private readonly threads = new Map<string, Worker>();
 
   check(): Promise<PlacementStatus> {
-    return Promise.resolve({ placement: this.placement, available: true });
+    return Promise.resolve({
+      placement: this.placement,
+      available: true,
+      reason: null,
+      detail: null,
+      container_runtime: null,
+    });
   }
 
   prepare(): Promise<void> {

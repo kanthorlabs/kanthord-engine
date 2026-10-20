@@ -283,13 +283,19 @@ export class WorkerService implements Service {
       const now = Date.now();
       const targets = this.dependencies
         .pool!.workerBindingsOf(tx, projectId)
-        .filter(({ placement }) => hostsPoolSlot(placement))
-        .map((binding) => ({
-          project_id: binding.project_id,
-          resource_identity: binding.resource_identity,
-          generation: binding.generation,
-          count: binding.instance_count,
-        }));
+        .flatMap((binding) =>
+          hostsPoolSlot(binding.placement)
+            ? [
+                {
+                  project_id: binding.project_id,
+                  resource_identity: binding.resource_identity,
+                  generation: binding.generation,
+                  placement: binding.placement,
+                  count: binding.instance_count,
+                },
+              ]
+            : [],
+        );
       return pool.reconcile(
         projectId,
         targets,

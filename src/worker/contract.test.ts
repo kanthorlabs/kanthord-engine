@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { WorkerPlacement } from "../project/contract.ts";
 import {
   ACTION_REQUEST_TOOL_NAME,
+  InstancePlacement,
+  POOL_PLACEMENTS,
   ActionResultKind,
   PlatformAddressKind,
   RefusalClass,
@@ -13,6 +16,27 @@ import {
 } from "./contract.ts";
 
 const ID = "01ARZ3NDEKTSV4RRFFQ69G5FAV";
+
+type Same<Left, Right> = [Left] extends [Right]
+  ? [Right] extends [Left]
+    ? true
+    : false
+  : false;
+
+test("the instance placement and the binding placement hold the same values", () => {
+  const same: Same<InstancePlacement, WorkerPlacement> = true;
+  assert.ok(same);
+  assert.deepEqual(Object.values(InstancePlacement), [
+    "server",
+    "container",
+    "worker",
+  ]);
+  assert.deepEqual(
+    Object.values(WorkerPlacement),
+    Object.values(InstancePlacement),
+  );
+  assert.deepEqual(POOL_PLACEMENTS, ["server", "container"]);
+});
 const action = { key: "gated.pull_request", binding_id: `binding_${ID}` };
 const refusal = {
   class: RefusalClass.FinalRefusal,
