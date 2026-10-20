@@ -156,6 +156,11 @@ components:
                     type: string
                     minLength: 1
                     maxLength: 64
+                  instance:
+                    anyOf:
+                      - type: string
+                        minLength: 1
+                      - type: "null"
                   activity:
                     type: string
                     enum:
@@ -178,6 +183,7 @@ components:
                   - resource_identity
                   - worker_name
                   - host
+                  - instance
                   - activity
                   - draining
                   - registered

@@ -355,6 +355,7 @@ test(
         placement: "server",
         client_id: record.client_id,
         name: "server slot 0",
+        instance: null,
         activity: RegistrationActivity.Idle,
         draining: false,
         registered: true,

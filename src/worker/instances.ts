@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import { OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import { createIdentity } from "../kernel/identity.ts";
-import { canonicalJSON } from "../kernel/json.ts";
 import {
   decodeX25519Key,
   generateX25519KeyPair,
@@ -23,6 +22,7 @@ import {
   WorkerErrorCode,
   WorkerHost,
   instanceNameSchema,
+  instanceConfigurationValue,
   type ConnectionBinding,
   type InstanceConnection,
   type InstanceIssuer,
@@ -102,21 +102,13 @@ function notFound(): OperationError {
   );
 }
 
-function superseded(): OperationError {
+function superseded(current: CurrentConnection | undefined): OperationError {
   return new OperationError(
     HttpStatus.Conflict,
     WorkerErrorCode.InstanceConnectionSuperseded,
     "Another connection of the worker instance is current.",
+    { connection_name: current?.connection_name ?? null },
   );
-}
-
-export function instanceConfigurationValue(configuration: {
-  name: string;
-  endpoint: string;
-  instance_id: string;
-  private_key: string;
-}): string {
-  return Buffer.from(canonicalJSON(configuration), UTF8).toString(BASE64URL);
 }
 
 function refuseName(name: string): void {
@@ -482,7 +474,8 @@ export class WorkerInstances implements WorkerInstanceLookups {
     credential_version: number;
     login_sessions: Record<string, unknown>[];
   } {
-    if (!this.holdConnection(instanceId, connectionId)) throw superseded();
+    if (!this.holdConnection(instanceId, connectionId))
+      throw superseded(this.connections.get(instanceId));
     this.connections.get(instanceId)!.last_heartbeat_at = Date.now();
     return {
       server_version: packageVersion(),
@@ -508,7 +501,8 @@ export class WorkerInstances implements WorkerInstanceLookups {
       });
       return created;
     }
-    if (!this.holdConnection(instanceId, connectionId)) throw superseded();
+    if (!this.holdConnection(instanceId, connectionId))
+      throw superseded(this.connections.get(instanceId));
     const current = this.connections.get(instanceId)!;
     current.connection_name = connectionName;
     current.last_heartbeat_at = now;

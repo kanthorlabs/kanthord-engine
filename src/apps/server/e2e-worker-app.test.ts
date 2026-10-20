@@ -1,54 +1,45 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { randomBytes } from "node:crypto";
 import { createServer } from "node:http";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { test, type TestContext } from "node:test";
-import { parse, stringify } from "yaml";
-import {
-  configuration,
-  directories,
-  CONFIG_VERSION,
-} from "../../config/index.ts";
+import { directories } from "../../config/index.ts";
 import { writePrivate } from "../../kernel/files.ts";
+import { generateX25519KeyPair } from "../../kernel/hpke.ts";
 import { temporary } from "../../kernel/test-support.ts";
-import { packageVersion } from "../../kernel/version.ts";
-import { environment, kanthord, kanthordTerminal } from "./cli-support.ts";
-import { workerAcceptance } from "./worker-acceptance.ts";
-import {
-  fakeMachines,
-  gatewayFixture,
-  TEST_WORKER_BINDING,
-  TEST_PROJECT_ID,
-} from "./test-support.ts";
+import { instanceConfigurationValue } from "../../worker/contract.ts";
+import { environment, kanthord } from "./cli-support.ts";
+import { enableCoveringAgents, gatewayFixture } from "./test-support.ts";
 
 const SPAWN_LINE_TIMEOUT_MS = 15000;
 const CLEANUP_WAIT_MS = 5000;
 const SIGHUP_WAIT_MS = 200;
+const POLL_MS = 50;
 const EXIT_SUCCESS = 0;
 const EXIT_FAILURE = 1;
-const KEY_BYTES = 32;
-const INVALID_KEY_BYTES = 16;
-const FAKE_VERSION = "0.0.0";
+const EXIT_SUPERSEDED = 3;
 const UNREACHABLE_ENDPOINT = "http://127.0.0.1:1";
 const LOOPBACK = "127.0.0.1";
 const EPHEMERAL_PORT = 0;
-const NOT_FOUND_STATUS = 404;
-const OPENAPI_PATH = "/api/openapi.yaml";
-const GET = "GET";
-const STARTED = "Worker application ready";
-const READY = "Worker application ready";
+const READY = "Worker instance ready";
 const EXIT_TIMEOUT = "Worker exit timed out";
 const INITIAL_BUFFER = "";
 const NO_OUTPUT = "";
 const NEWLINE = "\n";
 const NEWLINE_LEN = 1;
 const SINGLE_RECORD = 1;
+const NO_REGISTRATIONS = 0;
 const WORKER_ARGS = ["serve", "worker"];
-const GENERAL_RESOURCE = "worker:kanthord:general";
-const GENERAL_WORKER = "coder@1";
+const INSTANCE_CONFIG_VARIABLE = "KANTHORD_WORKER_CONFIG";
+const INSTANCE_NAME = "laptop";
+const INSTANCE_WORKER = "coder@1";
+const INSTANCE_BINDING = "laptop-coder";
+const PROJECT_NAMES = ["instance-a", "instance-b"];
+const FIXTURE_INSTANCE_ID = "worker_instance_01ARZ3NDEKTSV4RRFFQ69G5FAA";
+const BASE64URL = "base64url";
+const FILE_SOURCE = "file";
 
 type Exit = {
   code: number | null;
@@ -77,15 +68,6 @@ function workerEnvironment(t: TestContext): NodeJS.ProcessEnv {
   assert.notEqual(env.XDG_CONFIG_HOME, env.XDG_DATA_HOME);
   assert.notEqual(env.XDG_DATA_HOME, env.XDG_STATE_HOME);
   return env;
-}
-
-function clientFile(env: NodeJS.ProcessEnv, clientSecret: string): void {
-  assert.ok(env.XDG_CONFIG_HOME);
-  assert.ok(clientSecret);
-  writePrivate(
-    join(directories(env).config, "cli.yaml"),
-    stringify({ client_secret: clientSecret }),
-  );
 }
 
 function spawnWorker(args: string[], env: NodeJS.ProcessEnv): WorkerProcess {
@@ -243,199 +225,132 @@ async function failure(proc: WorkerProcess, code: string): Promise<void> {
   );
 }
 
-async function fakeEndpoint(t: TestContext): Promise<string> {
-  const server = createServer((request, response) => {
-    if (request.method !== GET || request.url !== OPENAPI_PATH) {
-      response.writeHead(NOT_FOUND_STATUS).end();
-      return;
-    }
-    response.setHeader("content-type", "application/json");
-    response.end(JSON.stringify({ info: { version: FAKE_VERSION } }));
+async function instanceValue(endpoint: string): Promise<string> {
+  const pair = await generateX25519KeyPair();
+  return instanceConfigurationValue({
+    name: INSTANCE_NAME,
+    endpoint,
+    instance_id: FIXTURE_INSTANCE_ID,
+    private_key: pair.private_key.toString(BASE64URL),
   });
-  t.after(
-    () =>
-      new Promise<void>((resolve, reject) => {
-        server.close((error) => (error ? reject(error) : resolve()));
-      }),
-  );
-  await new Promise<void>((resolve, reject) => {
-    server.once("error", reject);
-    server.listen(EPHEMERAL_PORT, LOOPBACK, resolve);
-  });
-  const address = server.address();
-  if (!address || !(address instanceof Object))
-    throw new Error("Fake server has no TCP address");
-  assert.ok(address.port > EPHEMERAL_PORT);
-  return `http://${LOOPBACK}:${address.port}`;
 }
 
-function insertProject(fixture: Awaited<ReturnType<typeof gatewayFixture>>) {
-  fixture.store.transaction((tx) =>
-    tx.database
-      .prepare(
-        "INSERT INTO project_project (id, name, created_at) VALUES (?, ?, ?)",
-      )
-      .run(TEST_PROJECT_ID, "worker-app", Date.now()),
-  );
-}
-
-async function liveEnvironment(
-  t: TestContext,
-): Promise<{ env: NodeJS.ProcessEnv; token: string }> {
-  const fixture = await gatewayFixture(t, { machines: fakeMachines() });
-  insertProject(fixture);
-  const token = await fixture.machineToken(
-    TEST_PROJECT_ID,
-    TEST_WORKER_BINDING,
-  );
-  const env = {
-    ...workerEnvironment(t),
-    KANTHORD_ENDPOINT: fixture.endpoint,
-    KANTHORD_TOKEN: token,
-  };
-  clientFile(env, randomBytes(KEY_BYTES).toString("base64"));
-  assert.ok(token);
-  assert.ok(env.KANTHORD_ENDPOINT);
-  return { env, token };
-}
-
-test("worker starts from the machine JWT fragment pasted below endpoint without exposing secrets", async (t) => {
-  const fixture = await gatewayFixture(t, { machines: fakeMachines() });
-  insertProject(fixture);
+async function liveInstance(t: TestContext) {
+  const fixture = await gatewayFixture(t);
   const env = workerEnvironment(t);
   env.KANTHORD_ENDPOINT = undefined;
-  env.KANTHORD_TOKEN = undefined;
-  const configPath = join(env.XDG_CONFIG_HOME!, "issuance.yaml");
-  writePrivate(
-    configPath,
-    stringify(
-      configuration({
-        version: CONFIG_VERSION,
-        master_key: fixture.config.master_key,
-      }).getProperties(),
-    ),
+  const human = {
+    ...environment(temporary(t)),
+    KANTHORD_ENDPOINT: fixture.endpoint,
+    KANTHORD_TOKEN: fixture.token,
+  };
+  await enableCoveringAgents(human);
+  const run = async <T>(
+    args: string[],
+    runEnv: NodeJS.ProcessEnv = human,
+  ): Promise<T> => {
+    const result = await kanthord(args, runEnv);
+    assert.equal(result.code, EXIT_SUCCESS, result.stderr);
+    return JSON.parse(result.stdout) as T;
+  };
+  const created = await run<{ id: string; created: string }>(
+    [
+      "worker",
+      "instance",
+      "create",
+      INSTANCE_NAME,
+      "--worker",
+      INSTANCE_WORKER,
+      "--output",
+    ],
+    { ...human, XDG_CONFIG_HOME: env.XDG_CONFIG_HOME },
   );
-  const args = [
-    "auth",
-    "jwt",
-    "generate",
-    "--project",
-    TEST_PROJECT_ID,
-    "--binding",
-    TEST_WORKER_BINDING,
-    "--config",
-    configPath,
-  ];
-  const generated = await kanthordTerminal(args, env);
-  assert.equal(generated.code, EXIT_SUCCESS, generated.stderr);
-  assert.equal(generated.stderr, NO_OUTPUT);
-  writePrivate(
-    join(directories(env).config, "cli.yaml"),
-    `endpoint: ${fixture.endpoint}\n${generated.stdout}`,
-  );
-  const { token, client_secret: clientSecret } = parse(generated.stdout);
-  assert.ok(token);
-  assert.ok(clientSecret);
-  const proc = spawnWorker(WORKER_ARGS, env);
-  try {
-    await proc.waitForLine((line) => line.includes(STARTED));
-    proc.kill("SIGTERM");
-    const result = await within(proc.exited, CLEANUP_WAIT_MS);
-    assert.equal(result.code, EXIT_SUCCESS);
-    assert.equal(result.stdout, NO_OUTPUT);
-    assert.ok(!result.stderr.join(NEWLINE).includes(token));
-    assert.ok(!result.stderr.join(NEWLINE).includes(clientSecret));
-  } finally {
-    await stopWorker(proc);
+  const projects: string[] = [];
+  for (const name of PROJECT_NAMES) {
+    const project = await run<{ id: string }>([
+      "project",
+      "create",
+      "--name",
+      name,
+    ]);
+    const path = join(temporary(t), "bindings.json");
+    writePrivate(
+      path,
+      JSON.stringify({
+        version: 1,
+        bindings: {
+          [INSTANCE_BINDING]: {
+            kind: "worker",
+            config: {
+              worker: INSTANCE_WORKER,
+              placement: "worker",
+              worker_instances: [INSTANCE_NAME],
+              tags: [],
+            },
+          },
+        },
+      }),
+    );
+    await run(["project", "binding", "apply", project.id, "--file", path]);
+    const paused = await run<{ paused_at: number | null }>([
+      "project",
+      "pause",
+      project.id,
+    ]);
+    assert.notEqual(paused.paused_at, null);
+    projects.push(project.id);
   }
-});
+  const registered = async (projectId: string) =>
+    (
+      await run<{ items: { registered: boolean }[] }>([
+        "worker",
+        "registration",
+        "list",
+        "--project",
+        projectId,
+      ])
+    ).items.filter((item) => item.registered).length;
+  return { fixture, env, human, created, projects, registered };
+}
 
-test("E09.1 worker refuses --config", async (t) => {
+async function eventually(check: () => Promise<boolean>): Promise<void> {
+  const deadline = Date.now() + SPAWN_LINE_TIMEOUT_MS;
+  while (!(await check())) {
+    assert.ok(Date.now() < deadline, "Timed out waiting for the condition");
+    await delay(POLL_MS);
+  }
+}
+
+test("E09.1 worker refuses --config and --token", async (t) => {
   const env = workerEnvironment(t);
-  const result = await kanthord(
+  const config = await kanthord(
     [...WORKER_ARGS, "--config", join(env.XDG_CONFIG_HOME!, "config.yaml")],
     env,
   );
-  assert.equal(result.code, EXIT_FAILURE);
-  assert.ok(result.stderr.startsWith("cli.serve.worker_config:"));
+  assert.equal(config.code, EXIT_FAILURE);
+  assert.ok(config.stderr.startsWith("cli.serve.worker_config:"));
+  const token = await kanthord([...WORKER_ARGS, "--token", "x"], env);
+  assert.equal(token.code, EXIT_FAILURE);
+  assert.ok(token.stderr.startsWith("cli.serve.worker_token:"));
 });
 
-test("E09.2 absent client_secret refuses before network", async (t) => {
+test("E09.2 an absent instance configuration refuses before network", async (t) => {
   const env = workerEnvironment(t);
-  const proc = spawnWorker(WORKER_ARGS, env);
+  const proc = spawnWorker([...WORKER_ARGS, "--instance", INSTANCE_NAME], env);
   try {
-    await failure(proc, "worker.start.client_secret_absent");
+    await failure(proc, "worker.start.instance_config_absent");
   } finally {
     await stopWorker(proc);
   }
 });
 
-test("E09.3 invalid client_secret refuses before network", async (t) => {
+test("E09.3 an invalid instance configuration refuses before network", async (t) => {
   const env = workerEnvironment(t);
-  clientFile(env, randomBytes(INVALID_KEY_BYTES).toString("base64"));
+  env[INSTANCE_CONFIG_VARIABLE] =
+    `${await instanceValue(UNREACHABLE_ENDPOINT)}=`;
   const proc = spawnWorker(WORKER_ARGS, env);
   try {
-    await failure(proc, "worker.start.client_secret_invalid");
-  } finally {
-    await stopWorker(proc);
-  }
-});
-
-test("E09.5 version mismatch reports both versions", async (t) => {
-  const env = workerEnvironment(t);
-  env.KANTHORD_ENDPOINT = await fakeEndpoint(t);
-  clientFile(env, randomBytes(KEY_BYTES).toString("base64"));
-  const proc = spawnWorker(WORKER_ARGS, env);
-  try {
-    const result = await within(proc.exited, SPAWN_LINE_TIMEOUT_MS);
-    assert.equal(result.code, EXIT_FAILURE);
-    const stderr = result.stderr.join(NEWLINE);
-    assert.ok(stderr.startsWith("worker.version.mismatch:"), stderr);
-    assert.ok(stderr.includes(packageVersion()));
-    assert.ok(stderr.includes(FAKE_VERSION));
-  } finally {
-    await stopWorker(proc);
-  }
-});
-
-test("worker startup emits one ready record without secrets", async (t) => {
-  const { env, token } = await liveEnvironment(t);
-  const proc = spawnWorker(WORKER_ARGS, env);
-  try {
-    const line = await proc.waitForLine((entry) => entry.includes(STARTED));
-    assert.equal(JSON.parse(line).msg, STARTED);
-    proc.kill("SIGTERM");
-    const result = await within(proc.exited, CLEANUP_WAIT_MS);
-    const records = result.stderr
-      .filter(Boolean)
-      .map((entry) => JSON.parse(entry));
-    assert.equal(
-      records.filter((record) => record.msg === STARTED).length,
-      SINGLE_RECORD,
-    );
-    assert.ok(records.every((record) => record.msg === READY));
-    assert.equal(result.stdout, NO_OUTPUT);
-    assert.ok(result.stderr.every((entry) => !entry.includes(token)));
-    assert.equal(result.signal, null);
-    assert.equal(result.code, EXIT_SUCCESS);
-  } finally {
-    await stopWorker(proc);
-  }
-});
-
-test("worker SIGHUP leaves the worker alive until SIGTERM", async (t) => {
-  const { env } = await liveEnvironment(t);
-  const proc = spawnWorker(WORKER_ARGS, env);
-  try {
-    const line = await proc.waitForLine((entry) => entry.includes(STARTED));
-    assert.equal(JSON.parse(line).msg, STARTED);
-    proc.kill("SIGHUP");
-    await delay(SIGHUP_WAIT_MS);
-    assert.ok(proc.alive());
-    proc.kill("SIGTERM");
-    const result = await within(proc.exited, CLEANUP_WAIT_MS);
-    assert.equal(result.signal, null);
-    assert.equal(result.code, EXIT_SUCCESS);
+    await failure(proc, "worker.instance.config_invalid");
   } finally {
     await stopWorker(proc);
   }
@@ -454,11 +369,19 @@ test("E09.4 tools that cannot be installed refuse before any network request", a
   const address = server.address();
   assert.ok(address && address instanceof Object);
   const env = workerEnvironment(t);
-  const binDirectory = join(directories(env).state, "pi", "bin");
+  env.KANTHORD_ENDPOINT = undefined;
+  const binDirectory = join(
+    directories(env).data,
+    "workers",
+    INSTANCE_NAME,
+    "pi",
+    "bin",
+  );
   mkdirSync(dirname(binDirectory), { recursive: true });
   writeFileSync(binDirectory, "");
-  env.KANTHORD_ENDPOINT = `http://${LOOPBACK}:${address.port}`;
-  clientFile(env, randomBytes(KEY_BYTES).toString("base64"));
+  env[INSTANCE_CONFIG_VARIABLE] = await instanceValue(
+    `http://${LOOPBACK}:${address.port}`,
+  );
   const proc = spawnWorker(WORKER_ARGS, env);
   try {
     await failure(proc, "worker.start.tool_missing");
@@ -468,118 +391,53 @@ test("E09.4 tools that cannot be installed refuse before any network request", a
   }
 });
 
-test("E09.4 the client configuration check runs before the tool install", async (t) => {
-  const env = workerEnvironment(t);
-  const binDirectory = join(directories(env).state, "pi", "bin");
-  mkdirSync(dirname(binDirectory), { recursive: true });
-  writeFileSync(binDirectory, "");
-  const proc = spawnWorker(WORKER_ARGS, env);
-  try {
-    await failure(proc, "worker.start.client_secret_absent");
-  } finally {
-    await stopWorker(proc);
-  }
-});
-
 test(
-  "E09.6–10 real registration, idle signals, placement refusal and reregistration",
+  "a live instance on 127.0.0.1 registers two bindings of two paused projects and a second process supersedes it",
   { timeout: 180000 },
   async (t) => {
-    const setup = await workerAcceptance(t, false, { fakeSlots: true });
-    const auth = await setup.fixture.slotClient(setup.project_id, "general");
-    const env = {
-      ...workerEnvironment(t),
-      KANTHORD_ENDPOINT: setup.fixture.endpoint,
-      KANTHORD_TOKEN: auth.token,
-    };
-    clientFile(env, auth.client_secret);
-    const ready = async (proc: WorkerProcess, previous?: string) => {
-      const line = await proc.waitForLine(
-        (entry) =>
-          entry.includes(READY) && (!previous || !entry.includes(previous)),
-      );
-      const record = JSON.parse(line);
-      assert.match(record.runtime_identity, /^worker_registration_/);
-      assert.equal(record.resource_identity, GENERAL_RESOURCE);
-      assert.equal(record.worker_name, GENERAL_WORKER);
-      return record.runtime_identity as string;
-    };
-    const first = spawnWorker(WORKER_ARGS, env);
+    const live = await liveInstance(t);
+    const args = [...WORKER_ARGS, "--instance", INSTANCE_NAME];
+    const first = spawnWorker(args, live.env);
     try {
-      const identity = await ready(first);
-      const list = await setup.read<{
-        items: { runtime_identity: string; registered: boolean }[];
-      }>(["worker", "registration", "list", "--project", setup.project_id]);
-      assert.ok(
-        list.items.some(
-          (item) => item.runtime_identity === identity && item.registered,
-        ),
-      );
-      first.kill("SIGTERM");
-      const result = await within(first.exited, CLEANUP_WAIT_MS);
-      assert.equal(result.code, EXIT_SUCCESS);
-      assert.equal(result.signal, null);
-      assert.equal(result.stdout, NO_OUTPUT);
-      for (const line of result.stderr.filter(Boolean)) {
-        JSON.parse(line);
-        assert.ok(!line.includes(auth.token));
-        assert.ok(!line.includes(auth.client_secret));
+      const line = await first
+        .waitForLine((entry) => entry.includes(READY))
+        .catch(async (error) => {
+          throw new Error((await first.exited).stderr.join(NEWLINE), {
+            cause: error,
+          });
+        });
+      const record = JSON.parse(line);
+      assert.equal(record.instance, INSTANCE_NAME);
+      assert.equal(record.config_source, FILE_SOURCE);
+      await eventually(async () => {
+        const counts = await Promise.all(live.projects.map(live.registered));
+        return counts.every((count) => count === SINGLE_RECORD);
+      });
+      first.kill("SIGHUP");
+      await delay(SIGHUP_WAIT_MS);
+      assert.ok(first.alive());
+      const second = spawnWorker(args, live.env);
+      try {
+        await second.waitForLine((entry) => entry.includes(READY));
+        const superseded = await within(first.exited, SPAWN_LINE_TIMEOUT_MS);
+        assert.equal(superseded.code, EXIT_SUPERSEDED);
+        assert.equal(superseded.stdout, NO_OUTPUT);
+        const stderr = superseded.stderr.join(NEWLINE);
+        assert.ok(stderr.includes("worker.instance.superseded"), stderr);
+        for (const projectId of live.projects)
+          assert.equal(await live.registered(projectId), SINGLE_RECORD);
+        second.kill("SIGTERM");
+        const stopped = await within(second.exited, CLEANUP_WAIT_MS);
+        assert.equal(stopped.code, EXIT_SUCCESS);
+        assert.equal(stopped.signal, null);
+        for (const entry of stopped.stderr.filter(Boolean)) JSON.parse(entry);
+        for (const projectId of live.projects)
+          assert.equal(await live.registered(projectId), NO_REGISTRATIONS);
+      } finally {
+        await stopWorker(second);
       }
-      const missing = await kanthord(
-        ["worker", "registration", "get", identity],
-        setup.human,
-      );
-      assert.equal(missing.code, EXIT_FAILURE);
-      assert.ok(
-        missing.stderr.startsWith("worker.registration.not_found:"),
-        missing.stderr,
-      );
     } finally {
       await stopWorker(first);
-    }
-    const second = spawnWorker(WORKER_ARGS, env);
-    try {
-      await ready(second);
-      second.kill("SIGHUP");
-      await delay(SIGHUP_WAIT_MS);
-      assert.ok(second.alive());
-      const other = await setup.machine("general-b");
-      const otherEnv = {
-        ...workerEnvironment(t),
-        KANTHORD_ENDPOINT: setup.fixture.endpoint,
-        KANTHORD_TOKEN: other.token,
-      };
-      clientFile(otherEnv, other.client_secret);
-      const refused = spawnWorker(WORKER_ARGS, otherEnv);
-      try {
-        await failure(refused, "worker.registration.placement_mismatch");
-      } finally {
-        await stopWorker(refused);
-      }
-      second.kill("SIGTERM");
-      assert.equal(
-        (await within(second.exited, CLEANUP_WAIT_MS)).code,
-        EXIT_SUCCESS,
-      );
-    } finally {
-      await stopWorker(second);
-    }
-    const third = spawnWorker(WORKER_ARGS, env);
-    try {
-      const identity = await ready(third);
-      await setup.read(["worker", "registration", "deregister", identity], {
-        ...setup.human,
-        KANTHORD_TOKEN: auth.token,
-      });
-      const replacement = await ready(third, identity);
-      assert.notEqual(replacement, identity);
-      third.kill("SIGTERM");
-      assert.equal(
-        (await within(third.exited, CLEANUP_WAIT_MS)).code,
-        EXIT_SUCCESS,
-      );
-    } finally {
-      await stopWorker(third);
     }
   },
 );

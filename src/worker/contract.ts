@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { identitySchema } from "../kernel/identity.ts";
-import { timestamp } from "../kernel/json.ts";
+import { canonicalJSON, timestamp } from "../kernel/json.ts";
 import { base64urlSchema, sealedObjectSchema } from "../kernel/hpke.ts";
 import {
   handoverEnvelopeSchema,
@@ -780,6 +780,7 @@ export const INSTANCE_HEARTBEAT_INTERVAL_MS = 15000;
 export const INSTANCE_CONNECTED_WINDOW_MS = 60000;
 export const INSTANCE_RENEWAL_INTERVAL_MS = 1800000;
 export const NO_CREDENTIAL_VERSION = 0;
+export const INSTANCE_SUPERSEDED_CODE = "worker.instance.superseded";
 export const BindingEntryState = {
   Serving: "serving",
   Draining: "draining",
@@ -820,6 +821,13 @@ export const instanceConfigurationSchema = z.strictObject({
   private_key: base64urlSchema,
 });
 export type InstanceConfiguration = z.infer<typeof instanceConfigurationSchema>;
+export function instanceConfigurationValue(
+  configuration: InstanceConfiguration,
+): string {
+  return Buffer.from(canonicalJSON(configuration), "utf8").toString(
+    "base64url",
+  );
+}
 export const workerTokenPayloadSchema = z.strictObject({
   token: z.string().min(1),
   expired_at: timestamp,
@@ -1022,6 +1030,7 @@ export const instanceOperations = {
   "instance.create": {
     ...humanOperation,
     id: "worker.instance.create",
+    body: true,
     method: HttpMethod.Post,
     path: "/api/worker/instance",
     mutation: true,
@@ -1108,6 +1117,7 @@ export const instanceOperations = {
   "instance.rotate": {
     ...humanOperation,
     id: "worker.instance.rotate",
+    body: true,
     method: HttpMethod.Post,
     path: "/api/worker/instance/:instance_name/revision",
     mutation: true,
@@ -1127,6 +1137,7 @@ export const instanceOperations = {
   "instance.archive": {
     ...humanOperation,
     id: "worker.instance.archive",
+    body: true,
     method: HttpMethod.Post,
     path: "/api/worker/instance/:instance_name/archive",
     mutation: true,
@@ -1164,6 +1175,7 @@ export const instanceOperations = {
     ...instanceOperation,
     access: AccessPolicy.Worker,
     id: "worker.instance.connect",
+    body: true,
     method: HttpMethod.Post,
     path: "/api/worker/instance/connect",
     mutation: true,
@@ -1188,6 +1200,7 @@ export const instanceOperations = {
     ...instanceOperation,
     access: AccessPolicy.Worker,
     id: "worker.instance.heartbeat",
+    body: true,
     method: HttpMethod.Post,
     path: "/api/worker/instance/heartbeat",
     mutation: true,

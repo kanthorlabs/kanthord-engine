@@ -316,6 +316,20 @@ paths:
     $ref: ./openapi/worker/handover.yaml#/pathItem
   /api/worker/heartbeat:
     $ref: ./openapi/worker/heartbeat.yaml#/pathItem
+  /api/worker/instance/{instance_name}/archive:
+    $ref: ./openapi/worker/instance.archive.yaml#/pathItem
+  /api/worker/instance/connect:
+    $ref: ./openapi/worker/instance.connect.yaml#/pathItem
+  /api/worker/instance:
+    $ref: ./openapi/worker/instance.create.yaml#/pathItem
+  /api/worker/instance/{instance_name}:
+    $ref: ./openapi/worker/instance.get.yaml#/pathItem
+  /api/worker/instance/heartbeat:
+    $ref: ./openapi/worker/instance.heartbeat.yaml#/pathItem
+  /api/worker/instance/{instance_name}/revision:
+    $ref: ./openapi/worker/instance.rotate.yaml#/pathItem
+  /api/worker/instance/token:
+    $ref: ./openapi/worker/instance.token.yaml#/pathItem
   /api/worker/placement:
     $ref: ./openapi/worker/placement.list.yaml#/pathItem
   /api/worker/register:

@@ -332,6 +332,11 @@ components:
                           required:
                             - agent
                           additionalProperties: false
+                      worker_instances:
+                        maxItems: 64
+                        type: array
+                        items:
+                          type: string
                       tags:
                         type: array
                         items:
@@ -340,7 +345,6 @@ components:
                           pattern: ^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)*$
                     required:
                       - worker
-                      - instance_count
                     additionalProperties: false
                 required:
                   - kind
@@ -607,10 +611,10 @@ components:
                               required:
                                 - agent
                               additionalProperties: false
+                          worker_instances: {}
                           tags: {}
                         required:
                           - worker
-                          - instance_count
                         additionalProperties: false
                     required:
                       - kind

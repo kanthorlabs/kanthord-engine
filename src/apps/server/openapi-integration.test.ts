@@ -430,6 +430,7 @@ function assertRegistrationOutput(schema: ResolvedSchema): void {
     "resource_identity",
     "worker_name",
     "host",
+    "instance",
     "activity",
     "draining",
     "registered",
@@ -634,6 +635,14 @@ const OPERATION_INVENTORY: readonly (readonly [string, AccessPolicy])[] = [
   ["worker.register", AccessPolicy.Client],
   ["worker.heartbeat", AccessPolicy.Client],
   ["worker.handover", AccessPolicy.Client],
+  ["worker.instance.create", AccessPolicy.Human],
+  ["worker.instance.list", AccessPolicy.Human],
+  ["worker.instance.get", AccessPolicy.Human],
+  ["worker.instance.rotate", AccessPolicy.Human],
+  ["worker.instance.archive", AccessPolicy.Human],
+  ["worker.instance.token", AccessPolicy.Public],
+  ["worker.instance.connect", AccessPolicy.Worker],
+  ["worker.instance.heartbeat", AccessPolicy.Worker],
   ["worker.credential", AccessPolicy.Client],
   ["worker.registration.deregister", AccessPolicy.Client],
   ["worker.action.request", AccessPolicy.Client],
@@ -755,8 +764,8 @@ const OPERATION_INVENTORY: readonly (readonly [string, AccessPolicy])[] = [
   ["tracking.span.list", AccessPolicy.Human],
   ["tracking.text.get", AccessPolicy.Human],
 ];
-const OPERATION_COUNT = 190;
-const ROUTED_OPERATION_COUNT = 180;
+const OPERATION_COUNT = 198;
+const ROUTED_OPERATION_COUNT = 188;
 const INTAKE_OPERATION_COUNT = 22;
 const INTAKE_ROUTED_OPERATION_COUNT = 14;
 const SERVICE_OPERATION_IDS = [

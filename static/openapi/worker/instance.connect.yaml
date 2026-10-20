@@ -1,0 +1,119 @@
+# Generated from the operation registry by kanthord gateway openapi.
+pathItem:
+  post:
+    operationId: worker.instance.connect
+    tags:
+      - worker
+    description: Open or renew the current connection of the instance and answer the
+      sealed client token and client secret of each binding that lists it.
+    x-access-policy: worker
+    x-timeout-ms: 30000
+    x-mutation: true
+    x-kanthord-lifetime: unary
+    security: []
+    parameters:
+      - $ref: ../shared/components.yaml#/components/parameters/IdempotencyKey
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/worker.instance.connect.Input/properties/body"
+    responses:
+      "200":
+        description: Completed result
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/worker.instance.connect.Output"
+      "400":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "401":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "403":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "404":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "409":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "413":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "415":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "500":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "503":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "504":
+        $ref: ../shared/components.yaml#/components/responses/Error
+components:
+  schemas:
+    worker.instance.connect.Input:
+      type: object
+      properties:
+        params:
+          type: object
+          properties: {}
+          additionalProperties: false
+        query:
+          type: object
+          properties: {}
+          additionalProperties: false
+        body:
+          type: object
+          properties:
+            connection_id:
+              type: string
+              minLength: 37
+              maxLength: 37
+              pattern: ^connection_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+              description: connection_ followed by a canonical 26-character uppercase ULID.
+            connection_name:
+              type: string
+              minLength: 1
+              maxLength: 255
+          required:
+            - connection_name
+          additionalProperties: false
+      required:
+        - params
+        - query
+        - body
+      additionalProperties: false
+    worker.instance.connect.Output:
+      type: object
+      properties:
+        connection_id:
+          type: string
+          minLength: 37
+          maxLength: 37
+          pattern: ^connection_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+          description: connection_ followed by a canonical 26-character uppercase ULID.
+        binding_version:
+          type: integer
+          minimum: 0
+          maximum: 9007199254740991
+        sealed:
+          type: object
+          properties:
+            alg:
+              type: string
+              const: hpke-x25519-sha256-aes128gcm
+            enc:
+              type: string
+              minLength: 1
+              pattern: ^[A-Za-z0-9_-]+$
+            ciphertext:
+              type: string
+              minLength: 1
+              pattern: ^[A-Za-z0-9_-]+$
+          required:
+            - alg
+            - enc
+            - ciphertext
+          additionalProperties: false
+      required:
+        - connection_id
+        - binding_version
+        - sealed
+      additionalProperties: false
