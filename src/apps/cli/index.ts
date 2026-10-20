@@ -1,4 +1,7 @@
-import { workerOperations } from "../../worker/contract.ts";
+import {
+  INSTANCE_SUPERSEDED_CODE,
+  workerOperations,
+} from "../../worker/contract.ts";
 import { agentOperations } from "../../agent/contract.ts";
 import { llmOperations } from "../../llm/contract.ts";
 import { repositoryOperations } from "../../repository/contract.ts";
@@ -9,7 +12,7 @@ import { missionOperations } from "../../mission/contract.ts";
 import { workbenchOperations } from "../../workbench/contract.ts";
 import { intakeOperations } from "../../intake/contract.ts";
 import assert from "node:assert/strict";
-import { Command, CommanderError } from "commander";
+import { Command, CommanderError, Option } from "commander";
 import { dirname } from "node:path";
 import { writePrivate } from "../../kernel/files.ts";
 import { Diagnostic, diagnostic, diagnosticRows } from "../../kernel/errors.ts";
@@ -180,10 +183,18 @@ async function serveWorker(command: Command): Promise<void> {
   if (options.config !== undefined)
     throw new Diagnostic(
       "cli.serve.worker_config",
-      "serve worker: --config is not supported; use client options or cli.yaml.",
+      "serve worker: --config is not supported; use --instance or KANTHORD_WORKER_CONFIG.",
+    );
+  if (options.token !== undefined)
+    throw new Diagnostic(
+      "cli.serve.worker_token",
+      "serve worker: --token is not supported; the instance key is the only credential.",
     );
   const { runWorker } = await import("../worker/index.ts");
-  const error = await runWorker(options);
+  const error = await runWorker({
+    instance: options.instance,
+    endpoint: options.endpoint,
+  });
   if (error) throw error;
 }
 
@@ -211,13 +222,14 @@ function addServeCommand(
   serve
     .command(CommandName.Worker)
     .description(
-      "Start the worker application: register, pull and execute work",
+      "Start a worker instance: connect, register each binding, pull and execute work",
     )
-    .option("--endpoint <url>", "Server endpoint")
     .option(
-      "--token <jwt>",
-      "Machine JWT (otherwise KANTHORD_TOKEN or cli.yaml)",
+      "--instance <name>",
+      "Instance name (reads workers/<name>.yaml unless KANTHORD_WORKER_CONFIG is set)",
     )
+    .option("--endpoint <url>", "Server endpoint (overrides the configuration)")
+    .addOption(new Option("--token <jwt>").hideHelp())
     .action((_options, command: Command) => serveWorker(command));
   serve
     .command(SLOT_APPLICATION, { hidden: true })
@@ -387,7 +399,10 @@ export async function runCLI(
   } catch (error) {
     if (error instanceof CommanderError) return error.exitCode;
     process.stderr.write(`${diagnostic(error)}\n${diagnosticRows(error)}`);
-    return ExitCode.Failure;
+    return error instanceof Diagnostic &&
+      error.code === INSTANCE_SUPERSEDED_CODE
+      ? ExitCode.Superseded
+      : ExitCode.Failure;
   }
 }
 

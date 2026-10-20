@@ -230,9 +230,6 @@ export function addAuthCommand(program: Command): void {
               ? {}
               : { endpoint: options.endpoint }),
             token,
-            ...(clientSecret === undefined
-              ? {}
-              : { client_secret: clientSecret }),
           });
           const { stringify } = await import("yaml");
           publishClientConfig(
