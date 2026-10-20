@@ -215,6 +215,7 @@ components:
                     - invalid_response
                     - host_key_changed
                     - identity_unavailable
+                    - held_by_instance
                     - unclassified
                 - type: "null"
           required:
@@ -250,6 +251,7 @@ components:
                     - invalid_response
                     - host_key_changed
                     - identity_unavailable
+                    - held_by_instance
                     - unclassified
                 - type: "null"
           required:
@@ -286,6 +288,7 @@ components:
                         - invalid_response
                         - host_key_changed
                         - identity_unavailable
+                        - held_by_instance
                         - unclassified
                     - type: "null"
               required:
