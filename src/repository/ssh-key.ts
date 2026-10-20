@@ -5,6 +5,7 @@ import {
   createPublicKey,
   generateKeyPairSync,
   randomBytes,
+  sign,
 } from "node:crypto";
 
 export interface SshKey {
@@ -13,7 +14,7 @@ export interface SshKey {
   fingerprint: string;
 }
 
-const KEY_TYPE = "ssh-ed25519";
+export const SSH_KEY_TYPE = "ssh-ed25519";
 const KEY_MAGIC = "openssh-key-v1\0";
 const NO_CIPHER = "none";
 const NO_KDF = "none";
@@ -33,6 +34,7 @@ const PUBLIC_KEY_BYTES = 32;
 const SEED_BYTES = 32;
 const SEED_OFFSET = 0;
 const SECRET_KEY_BYTES = SEED_BYTES + PUBLIC_KEY_BYTES;
+const SIGNATURE_BYTES = 64;
 const PKCS8_SEED_OFFSET = 16;
 const PKCS8_ED25519_PREFIX = Buffer.from(
   "302e020100300506032b657004220420",
@@ -46,7 +48,7 @@ const FIRST_PADDING_BYTE = 1;
 const ALIGNED = 0;
 const PUBLIC_KEY_FIELDS_MIN = 2;
 
-class SshWriter {
+export class SshWriter {
   private readonly parts: Buffer[] = [];
 
   bytes(value: Buffer): this {
@@ -67,6 +69,11 @@ class SshWriter {
     return this;
   }
 
+  byte(value: number): this {
+    this.parts.push(Buffer.from([value]));
+    return this;
+  }
+
   raw(value: Buffer): this {
     this.parts.push(value);
     return this;
@@ -77,7 +84,7 @@ class SshWriter {
   }
 }
 
-class SshReader {
+export class SshReader {
   private offset = 0;
   private readonly buffer: Buffer;
 
@@ -106,6 +113,14 @@ class SshReader {
     return this.bytes().toString("utf8");
   }
 
+  byte(): number {
+    if (this.offset >= this.buffer.length)
+      throw new Error("The SSH key ends early.");
+    const value = this.buffer.readUInt8(this.offset);
+    this.offset += 1;
+    return value;
+  }
+
   magic(value: string): boolean {
     const end = this.offset + value.length;
     if (end > this.buffer.length) return false;
@@ -123,12 +138,12 @@ class SshReader {
 }
 
 function publicBlob(publicKey: Buffer): Buffer {
-  return new SshWriter().text(KEY_TYPE).bytes(publicKey).build();
+  return new SshWriter().text(SSH_KEY_TYPE).bytes(publicKey).build();
 }
 
 function publicKeyLine(publicKey: Buffer, comment: string): string {
   const blob = publicBlob(publicKey).toString("base64");
-  return [KEY_TYPE, blob, comment].join(FIELD_SEPARATOR);
+  return [SSH_KEY_TYPE, blob, comment].join(FIELD_SEPARATOR);
 }
 
 function armor(body: Buffer): string {
@@ -150,7 +165,7 @@ function privateSection(
   const writer = new SshWriter()
     .raw(check)
     .raw(Buffer.from(check))
-    .text(KEY_TYPE)
+    .text(SSH_KEY_TYPE)
     .bytes(publicKey)
     .bytes(secret)
     .text(comment);
@@ -226,7 +241,7 @@ function armorBody(text: string): Buffer {
 
 function readPublicBlob(blob: Buffer): Buffer {
   const reader = new SshReader(blob);
-  if (reader.text() !== KEY_TYPE)
+  if (reader.text() !== SSH_KEY_TYPE)
     throw new Error("The SSH key is not ed25519.");
   const publicKey = reader.bytes();
   if (publicKey.length !== PUBLIC_KEY_BYTES || reader.rest().length)
@@ -250,13 +265,17 @@ function publicKeyOfSeed(seed: Buffer): Buffer {
   }
 }
 
-function readPrivateSection(section: Buffer, publicKey: Buffer): string {
+function readPrivateSection(
+  section: Buffer,
+  publicKey: Buffer,
+  seedOut?: Buffer,
+): string {
   if (section.length % BLOCK_BYTES !== ALIGNED)
     throw new Error("The SSH private section is malformed.");
   const reader = new SshReader(section);
   if (reader.uint32() !== reader.uint32())
     throw new Error("The SSH check integers differ.");
-  if (reader.text() !== KEY_TYPE)
+  if (reader.text() !== SSH_KEY_TYPE)
     throw new Error("The SSH key is not ed25519.");
   const sectionPublicKey = reader.bytes();
   const secret = reader.bytes();
@@ -270,6 +289,7 @@ function readPrivateSection(section: Buffer, publicKey: Buffer): string {
     !publicKeyOfSeed(secret.subarray(SEED_OFFSET, SEED_BYTES)).equals(publicKey)
   )
     throw new Error("The SSH public key does not derive from the seed.");
+  seedOut?.set(secret.subarray(SEED_OFFSET, SEED_BYTES));
   const comment = reader.text();
   const padding = reader.rest();
   for (let index = 0; index < padding.length; index += 1)
@@ -278,7 +298,10 @@ function readPrivateSection(section: Buffer, publicKey: Buffer): string {
   return comment;
 }
 
-export function sshPublicKeyOf(private_key: string): string {
+function readOpenSshKey(
+  private_key: string,
+  seedOut?: Buffer,
+): { publicKey: Buffer; comment: string } {
   const body = armorBody(private_key);
   try {
     const reader = new SshReader(body);
@@ -294,22 +317,52 @@ export function sshPublicKeyOf(private_key: string): string {
     const section = reader.bytes();
     if (reader.rest().length)
       throw new Error("The SSH key holds trailing data.");
-    return publicKeyLine(publicKey, readPrivateSection(section, publicKey));
+    return {
+      publicKey: Buffer.from(publicKey),
+      comment: readPrivateSection(section, publicKey, seedOut),
+    };
   } finally {
     body.fill(0);
   }
 }
 
-export function sshFingerprintOf(public_key: string): string {
+export function sshPublicKeyOf(private_key: string): string {
+  const { publicKey, comment } = readOpenSshKey(private_key);
+  return publicKeyLine(publicKey, comment);
+}
+
+export function sshSignatureOf(private_key: string, data: Buffer): Buffer {
+  const seed = Buffer.alloc(SEED_BYTES);
+  const pkcs8 = Buffer.alloc(PKCS8_ED25519_PREFIX.length + SEED_BYTES);
+  try {
+    readOpenSshKey(private_key, seed);
+    PKCS8_ED25519_PREFIX.copy(pkcs8);
+    seed.copy(pkcs8, PKCS8_ED25519_PREFIX.length);
+    const key = createPrivateKey({ key: pkcs8, format: "der", type: "pkcs8" });
+    const signature = sign(null, data, key);
+    assert.equal(signature.length, SIGNATURE_BYTES);
+    return new SshWriter().text(SSH_KEY_TYPE).bytes(signature).build();
+  } finally {
+    seed.fill(0);
+    pkcs8.fill(0);
+  }
+}
+
+export function sshPublicKeyBlob(public_key: string): Buffer {
   const fields = public_key.trim().split(FIELD_SEPARATOR);
   if (
     fields.length < PUBLIC_KEY_FIELDS_MIN ||
-    fields[0] !== KEY_TYPE ||
+    fields[0] !== SSH_KEY_TYPE ||
     !BASE64_TEXT.test(fields[1] ?? "")
   )
     throw new Error("The SSH public key is malformed.");
   const blob = Buffer.from(fields[1]!, "base64");
   readPublicBlob(blob);
+  return blob;
+}
+
+export function sshFingerprintOf(public_key: string): string {
+  const blob = sshPublicKeyBlob(public_key);
   const digest = createHash("sha256").update(blob).digest("base64");
   return `${FINGERPRINT_PREFIX}${digest.replace(BASE64_PADDING, "")}`;
 }

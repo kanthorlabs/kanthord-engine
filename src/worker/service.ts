@@ -835,6 +835,23 @@ export class WorkerService implements Service {
         return null;
       });
     });
+    registry.register(workerOperations["ssh.sign"], ({ body }, caller) => {
+      const identity = caller.identity;
+      assert(isMachineIdentity(identity));
+      const execution = caller.execution;
+      assert(execution);
+      return caller.commit((tx) =>
+        this.dependencies.custodyHandover.sshSign(
+          tx,
+          identity,
+          execution,
+          this.dependencies.workerBindingRowOf(tx, execution.workerBindingId)
+            ?.placement ?? null,
+          { nonce: body.nonce, ciphertext: body.ciphertext },
+          Date.now(),
+        ),
+      );
+    });
   }
 
   declare(registry: OperationRegistry): void {

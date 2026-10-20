@@ -21,7 +21,7 @@ import {
   SWEEP_GRACE_MS,
   sweepSshAgentDirectories,
   withSshAgent,
-  type SshAccess,
+  type SshKeyAccess,
 } from "./ssh-agent.ts";
 import { generateSshKey } from "./ssh-key.ts";
 
@@ -58,7 +58,7 @@ const scratch = mkdtempSync(join(tmpdir(), "kdt-"));
 process.env.TMPDIR = scratch;
 process.on("exit", () => rmSync(scratch, { recursive: true, force: true }));
 
-function access(name: string): SshAccess {
+function access(name: string): SshKeyAccess {
   return { ...generateSshKey(name), known_hosts: KNOWN_HOSTS, port: PORT };
 }
 

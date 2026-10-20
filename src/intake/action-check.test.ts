@@ -153,7 +153,7 @@ test("a branch push check reads the landing with an SSH release of the request e
   ]);
   assert.equal(h.landings.length, ONE_LANDING);
   const ssh = h.landings[0];
-  assert.ok(ssh);
+  assert.ok(ssh && "private_key" in ssh);
   assert.equal(ssh.private_key, h.privateKey);
   assert.match(ssh.public_key, /^ssh-ed25519 /);
   assert.equal(ssh.known_hosts, `${h.knownHosts}\n`);

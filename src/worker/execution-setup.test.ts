@@ -23,6 +23,7 @@ import {
 } from "../agent/prompt-render.ts";
 import {
   anthropicSetup,
+  TEST_SSH_PUBLIC_KEY,
   TWO_AGENT_WORKER,
   twoAgentDeclarationOf,
   WORKING_LAYER_ALL_ON,
@@ -35,13 +36,32 @@ import {
   RepositoryComponent,
   repositoryMigrations,
 } from "../repository/index.ts";
-import { HostKeyErrorCode } from "../repository/contract.ts";
+import {
+  HostKeyErrorCode,
+  RepositoryErrorCode,
+} from "../repository/contract.ts";
+import { HttpStatus } from "../kernel/http.ts";
 import { ProjectErrorCode, RepositoryPlatform } from "../project/contract.ts";
 
 const SSH_CREDENTIAL = "kanthorlabs-ssh";
 const HOST_KEY =
   "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl";
 const NO_REQUESTS = 0;
+const publicKeyCustody = {
+  handover: () => {
+    throw new Error("UNEXPECTED_COLLABORATION");
+  },
+  report: () => {
+    throw new Error("UNEXPECTED_COLLABORATION");
+  },
+  sshSign: () => {
+    throw new Error("UNEXPECTED_COLLABORATION");
+  },
+  sshPublicKeyOf: (_tx: unknown, _claim: unknown, name: string) => {
+    assert.equal(name, SSH_CREDENTIAL);
+    return TEST_SSH_PUBLIC_KEY;
+  },
+};
 const SYSTEM_TEXT = "system layer text";
 const AGENT_TEXT = "agent layer text";
 const WORKING_TEXT = "working layer text";
@@ -160,6 +180,7 @@ test("setup answers the system and agent prompt after its single snapshot and su
     sshHostKeysOf: () => {
       throw new Error("UNEXPECTED_COLLABORATION");
     },
+    custodyHandover: publicKeyCustody,
     schedulerClaims: { agentSelectionsOf: () => [selection] },
   };
   const worker = {
@@ -257,6 +278,33 @@ test("setup answers the system and agent prompt after its single snapshot and su
   assert.deepEqual(pinned.repositories[0]?.ssh_host_key, {
     known_hosts: knownHosts,
   });
+  assert.equal(pinned.repositories[0]?.ssh_public_key, TEST_SSH_PUBLIC_KEY);
+  await assert.rejects(
+    executionSetup(
+      {
+        ...dependencies,
+        repositoryBindingIdsOf: () => [bindingId],
+        repositoryPolicyOf: () => ({
+          binding_id: bindingId,
+          name: "repo",
+          address,
+          platform: RepositoryPlatform.GitHub,
+          ssh_credential: SSH_CREDENTIAL,
+          base_branch: "main",
+          project_prompt: null,
+          working_layer: workingLayer,
+        }),
+        sshHostKeysOf: () => knownHosts,
+        custodyHandover: { ...publicKeyCustody, sshPublicKeyOf: () => null },
+      },
+      worker,
+      caller,
+    ),
+    (error) =>
+      error instanceof OperationError &&
+      error.code === RepositoryErrorCode.SshKeyLegacy &&
+      error.status === HttpStatus.Conflict,
+  );
   assert.deepEqual(pinned.repositories[0]?.working_layer, workingLayer);
 });
 
@@ -321,6 +369,7 @@ test("setup answers one entry per agent of a two-agent worker with its own promp
       sshHostKeysOf: () => {
         throw new Error("UNEXPECTED_COLLABORATION");
       },
+      custodyHandover: publicKeyCustody,
       schedulerClaims: {
         agentSelectionsOf: () =>
           Object.entries(credentials).map(([agent, credential]) => ({
@@ -433,6 +482,7 @@ async function repositorySetup(t: TestContext, address: string, pin: boolean) {
       }),
       sshHostKeysOf: (tx, platform, received) =>
         repository.sshHostKeysOf(tx, platform, received),
+      custodyHandover: publicKeyCustody,
       schedulerClaims: { agentSelectionsOf: () => [selection] },
     },
     {

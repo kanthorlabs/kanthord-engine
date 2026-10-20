@@ -421,6 +421,8 @@ export function composeServices(options: {
     }),
     sshAccessOf: (tx, granted, material) =>
       repositoryComponent.sshAccessOf(tx, granted, material),
+    sshSignatureOf: (tx, granted, material, data) =>
+      repositoryComponent.sshSignatureOf(tx, granted, material, data),
   });
   const llm = new LlmComponent({
     records: custody,
@@ -518,6 +520,8 @@ export function composeServices(options: {
     custodyHandover: {
       handover: (...args) => custody.handover(...args),
       report: (...args) => custody.report(...args),
+      sshSign: (...args) => custody.sshSign(...args),
+      sshPublicKeyOf: (...args) => custody.sshPublicKeyOf(...args),
     },
     config: options.config.worker,
     agentPrompt: {

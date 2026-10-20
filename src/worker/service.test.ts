@@ -129,6 +129,12 @@ const fakeCollaborations = {
     report: () => {
       throw new Error("UNEXPECTED_COLLABORATION");
     },
+    sshSign: () => {
+      throw new Error("UNEXPECTED_COLLABORATION");
+    },
+    sshPublicKeyOf: () => {
+      throw new Error("UNEXPECTED_COLLABORATION");
+    },
   },
   workerBindingOf: () => ({
     binding_id: "binding",
@@ -1307,6 +1313,7 @@ test("handover handlers pass the proven execution and one transactional clock re
     execution.runtimeIdentity,
   );
   const envelope = { nonce: "nonce", ciphertext: "ciphertext" };
+  const signed = { nonce: "signed-nonce", ciphertext: "signed-ciphertext" };
   const now = 1000;
   t.mock.method(Date, "now", () => now);
   const repositoryBindingIds = [createIdentity("binding")];
@@ -1362,6 +1369,25 @@ test("handover handlers pass the proven execution and one transactional clock re
         assert.deepEqual(actualEnvelope, envelope);
         assert.equal(actualNow, now);
       },
+      sshSign: (
+        tx,
+        actualIdentity,
+        actualClaim,
+        actualPlacement,
+        actualEnvelope,
+        actualNow,
+      ) => {
+        assert(tx.database.isTransaction);
+        assert.equal(actualIdentity, identity);
+        assert.equal(actualClaim, execution);
+        assert.equal(actualPlacement, InstancePlacement.Container);
+        assert.deepEqual(actualEnvelope, envelope);
+        assert.equal(actualNow, now);
+        return signed;
+      },
+      sshPublicKeyOf: () => {
+        throw new Error("UNEXPECTED_COLLABORATION");
+      },
     },
   });
   const caller = { ...f.caller, identity, execution };
@@ -1378,7 +1404,13 @@ test("handover handlers pass the proven execution and one transactional clock re
       .handler({ params: {}, query: {}, body }, caller),
     null,
   );
-  const expectedCommits = 2;
+  assert.deepEqual(
+    f.registry
+      .get(workerOperations["ssh.sign"].id)
+      .handler({ params: {}, query: {}, body }, caller),
+    signed,
+  );
+  const expectedCommits = 3;
   assert.equal(f.commits(), expectedCommits);
 });
 

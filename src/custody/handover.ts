@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import {
   deriveHandoverKeys,
+  deriveSshSignKeys,
   handoverAad,
   HandoverOpenError,
   openEnvelope,
@@ -14,11 +15,14 @@ import { piProviderId } from "../kernel/pi-provider.ts";
 import type { Transaction } from "../kernel/store.ts";
 import {
   refreshReportSchema,
+  sshSignRequestSchema,
   type CredentialPlatforms,
   type CustodyExecution,
   type HandoverPayload,
   type HandoverSshIdentity,
   type Material,
+  type SshSignAnswer,
+  type SshSignRequest,
 } from "./contract.ts";
 import {
   credentialOfSecret,
@@ -30,6 +34,8 @@ import { decrypt, encrypt } from "./envelope.ts";
 export const CUSTODY_REPORT_INVALID = "custody.handover.report_invalid";
 export const CUSTODY_HOLDER_REFUSED = "custody.handover.holder_refused";
 export const REVISION_REVOKED = "credential.revision.revoked";
+export const SSH_SIGN_INVALID = "worker.ssh.sign_invalid";
+export const SSH_SIGN_PLACEMENT_REFUSED = "worker.ssh.placement_refused";
 const ONE_ROW = 1;
 const NO_MATERIALS = 0;
 
@@ -102,6 +108,53 @@ export function openReport(
   )
     throw invalidReport();
   return parsed.data;
+}
+
+export function openSignRequest(
+  secret: string,
+  execution: CustodyExecution,
+  envelope: HandoverEnvelope,
+): SshSignRequest {
+  const keys = deriveSshSignKeys(secret);
+  let value: unknown;
+  try {
+    value = openEnvelope(
+      keys.request,
+      handoverAad(execution.execution_id, execution.runtime_identity),
+      envelope,
+    );
+  } catch (error) {
+    if (!(error instanceof HandoverOpenError)) throw error;
+  } finally {
+    keys.request.fill(0);
+    keys.answer.fill(0);
+  }
+  const parsed = sshSignRequestSchema.safeParse(value);
+  if (!parsed.success)
+    throw new OperationError(
+      HttpStatus.BadRequest,
+      SSH_SIGN_INVALID,
+      "The SSH sign request is invalid.",
+    );
+  return parsed.data;
+}
+
+export function sealSignAnswer(
+  secret: string,
+  execution: CustodyExecution,
+  answer: SshSignAnswer,
+): HandoverEnvelope {
+  const keys = deriveSshSignKeys(secret);
+  try {
+    return sealEnvelope(
+      keys.answer,
+      handoverAad(execution.execution_id, execution.runtime_identity),
+      answer,
+    );
+  } finally {
+    keys.request.fill(0);
+    keys.answer.fill(0);
+  }
 }
 
 export function applyReport(

@@ -26,6 +26,7 @@ import type { Revision, TaskContent } from "../../mission/contract.ts";
 import {
   anthropicSetup,
   TEST_SSH_HOST_KEY,
+  TEST_SSH_PUBLIC_KEY,
   unusedHostTools,
   WORKING_LAYER_ALL_ON,
 } from "../test-support.ts";
@@ -176,6 +177,7 @@ export const repositorySetup = () => ({
   name: "repo",
   address: "git@github.com:owner/repo.git",
   ssh_host_key: TEST_SSH_HOST_KEY,
+  ssh_public_key: TEST_SSH_PUBLIC_KEY,
   strategy: { base_branch: "main" },
   project_prompt: null,
   working_layer: WORKING_LAYER_ALL_ON,
@@ -211,6 +213,7 @@ export async function implementFixture(
     name,
     address: bares[index]!,
     ssh_host_key: TEST_SSH_HOST_KEY,
+    ssh_public_key: TEST_SSH_PUBLIC_KEY,
     strategy: { base_branch: "main" },
     project_prompt: null,
     working_layer: WORKING_LAYER_ALL_ON,

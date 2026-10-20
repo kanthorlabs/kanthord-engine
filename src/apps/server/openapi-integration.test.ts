@@ -646,6 +646,7 @@ const OPERATION_INVENTORY: readonly (readonly [string, AccessPolicy])[] = [
   ["worker.instance.connect", AccessPolicy.Worker],
   ["worker.instance.heartbeat", AccessPolicy.Worker],
   ["worker.credential", AccessPolicy.Client],
+  ["worker.ssh.sign", AccessPolicy.Client],
   ["worker.registration.deregister", AccessPolicy.Client],
   ["worker.action.request", AccessPolicy.Client],
   ["worker.execution.setup.get", AccessPolicy.Client],
@@ -766,8 +767,8 @@ const OPERATION_INVENTORY: readonly (readonly [string, AccessPolicy])[] = [
   ["tracking.span.list", AccessPolicy.Human],
   ["tracking.text.get", AccessPolicy.Human],
 ];
-const OPERATION_COUNT = 198;
-const ROUTED_OPERATION_COUNT = 188;
+const OPERATION_COUNT = 199;
+const ROUTED_OPERATION_COUNT = 189;
 const INTAKE_OPERATION_COUNT = 22;
 const INTAKE_ROUTED_OPERATION_COUNT = 14;
 const SERVICE_OPERATION_IDS = [

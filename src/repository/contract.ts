@@ -16,6 +16,7 @@ import {
   credentialUpdateMetadataBodySchema,
   METADATA_MAX_BODY_BYTES,
 } from "../custody/contract.ts";
+import type { Context } from "../kernel/context.ts";
 import { HttpMethod, HttpStatus } from "../kernel/http.ts";
 import {
   AccessPolicy,
@@ -38,6 +39,18 @@ export const RepositoryErrorCode = {
   SshKeyLegacy: "repository.credential.ssh_key_legacy",
 } as const;
 
+export const SSH_SIGN_USER = "git";
+export const SshSignErrorCode = {
+  Refused: "worker.ssh.sign_refused",
+} as const;
+export const SshSignRefusal = {
+  NotUserAuthentication: "not_user_authentication",
+  KeyMismatch: "key_mismatch",
+  HostKeyMismatch: "host_key_mismatch",
+} as const;
+export type SshSignRefusal =
+  (typeof SshSignRefusal)[keyof typeof SshSignRefusal];
+
 export const HostKeyErrorCode = {
   HostUnsupported: "repository.host_key.host_unsupported",
   ScanFailed: "repository.host_key.scan_failed",
@@ -45,12 +58,27 @@ export const HostKeyErrorCode = {
   Unpinned: "repository.host_key.unpinned",
 } as const;
 
-export interface SshAccess {
+export interface SshKeyAccess {
   private_key: string;
   public_key: string;
   known_hosts: string;
   port: number;
 }
+
+export type SshSigner = (
+  data: Buffer,
+  flags: number,
+  context: Context,
+) => Promise<Buffer>;
+
+export interface SshRelayAccess {
+  relay: SshSigner;
+  public_key: string;
+  known_hosts: string;
+  port: number;
+}
+
+export type SshAccess = SshKeyAccess | SshRelayAccess;
 
 export const RepositoryFileState = {
   Present: "present",

@@ -60,6 +60,8 @@ import {
   type HandoverSshIdentity,
   type SshAccessOf,
   type SshIdentityAuthorization,
+  type SshSignatureOf,
+  sshPublicKeyMetadataSchema,
   type AgentProviderDependent,
   type BindingRevision,
   type AgentProvidersDependentOnFn,
@@ -98,8 +100,11 @@ import { workbenchCredentialStore } from "./workbench-store.ts";
 import {
   sealMaterial,
   openReport,
+  openSignRequest,
+  sealSignAnswer,
   applyReport,
   CUSTODY_HOLDER_REFUSED,
+  SSH_SIGN_PLACEMENT_REFUSED,
   REVISION_REVOKED,
 } from "./handover.ts";
 import type { HandoverEnvelope } from "../kernel/handover.ts";
@@ -122,6 +127,7 @@ export interface Dependencies {
   intakeServiceName: string;
   sshIdentityAuthorization?: SshIdentityAuthorization;
   sshAccessOf?: SshAccessOf;
+  sshSignatureOf?: SshSignatureOf;
 }
 
 const CustodyErrorCode = {
@@ -399,6 +405,7 @@ export class CustodyComponent implements Service, CredentialRecords {
   private readonly sshIdentityAuthorization:
     SshIdentityAuthorization | undefined;
   private readonly sshAccessOf: SshAccessOf | undefined;
+  private readonly sshSignatureOf: SshSignatureOf | undefined;
 
   constructor(dependencies: Dependencies) {
     this.executions = dependencies.executions;
@@ -415,6 +422,7 @@ export class CustodyComponent implements Service, CredentialRecords {
     this.intakeServiceName = dependencies.intakeServiceName;
     this.sshIdentityAuthorization = dependencies.sshIdentityAuthorization;
     this.sshAccessOf = dependencies.sshAccessOf;
+    this.sshSignatureOf = dependencies.sshSignatureOf;
     dependencies.health?.register(CUSTODY_HEALTH_NAME, () =>
       this.healthcheck(),
     );
@@ -846,6 +854,102 @@ export class CustodyComponent implements Service, CredentialRecords {
       credential_id: credentialId,
       private_key,
     };
+  }
+
+  sshSign(
+    tx: Transaction,
+    identity: MachineIdentity,
+    claim: ExecutionClaim,
+    placement: HandoverPlacement | null,
+    envelope: HandoverEnvelope,
+    now: number,
+  ): HandoverEnvelope {
+    if (this.sshSignatureOf === undefined) throw new FacilityError();
+    const row = this.executions.requireRunning(
+      tx,
+      claim.executionId,
+      claim.runtimeIdentity,
+      now,
+    );
+    if (placement !== HandoverPlacement.Worker)
+      throw new OperationError(
+        HttpStatus.Forbidden,
+        SSH_SIGN_PLACEMENT_REFUSED,
+        "The SSH signature relay serves only the worker placement.",
+        { placement },
+      );
+    const secret = this.clientSecret(identity.clientId);
+    const request = openSignRequest(secret, row, envelope);
+    const grant = this.authorizeOperation(
+      tx,
+      {
+        kind: GrantKind.SshIdentity,
+        identity,
+        subject: {
+          kind: SshIdentitySubjectKind.Binding,
+          binding_id: request.binding_id,
+        },
+        claim,
+      },
+      now,
+    );
+    const granted = grantFacts(grant);
+    assert.equal(granted.facts.binding_id, request.binding_id);
+    const material = this.release(tx, grant, now);
+    const credentialId = material.credential_id;
+    const signature = this.sshSignatureOf(
+      tx,
+      granted,
+      material,
+      Buffer.from(request.data, "base64"),
+    );
+    this.logger.info(
+      {
+        execution_id: row.execution_id,
+        binding_id: request.binding_id,
+        credential_id: credentialId,
+        client_id: identity.clientId,
+        instance_id: identity.instanceId ?? null,
+        runtime_identity: row.runtime_identity,
+      },
+      "ssh signature relay",
+    );
+    return sealSignAnswer(secret, row, {
+      signature: signature.toString("base64"),
+    });
+  }
+
+  sshPublicKeyOf(
+    tx: Transaction,
+    execution: { executionId: string; runtimeIdentity: string },
+    credentialName: string,
+    now: number,
+  ): string | null {
+    const claim = this.executions.requireRunning(
+      tx,
+      execution.executionId,
+      execution.runtimeIdentity,
+      now,
+    );
+    const rows = rowsForName(tx, credentialName);
+    const pinned = rows.find(({ id }) => claim.credentials.includes(id));
+    if (pinned && pinned.ended_at !== null)
+      throw new OperationError(
+        HttpStatus.Conflict,
+        CustodyErrorCode.RevisionRevoked,
+        "Pinned credential revision is revoked.",
+      );
+    const row = pinned ?? newestLive(tx, credentialName);
+    if (!row)
+      throw new OperationError(
+        HttpStatus.NotFound,
+        CustodyErrorCode.NotFound,
+        "Credential not found.",
+      );
+    const metadata = sshPublicKeyMetadataSchema.safeParse(
+      row.metadata === null ? null : JSON.parse(row.metadata),
+    );
+    return metadata.success ? metadata.data.public_key : null;
   }
 
   report(

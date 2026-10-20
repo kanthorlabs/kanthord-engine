@@ -119,7 +119,12 @@ function instanceFixture(t: TestContext) {
     },
     intakeActions: { perform: unexpected, read: unexpected },
     evidenceRequests: { request: unexpected },
-    custodyHandover: { handover: unexpected, report: unexpected },
+    custodyHandover: {
+      handover: unexpected,
+      report: unexpected,
+      sshSign: unexpected,
+      sshPublicKeyOf: unexpected,
+    },
     agentPrompt: { compose: unexpected, templates: unexpected },
     workerBindingOf: (_tx, projectId, resourceIdentity) =>
       bindings.find(

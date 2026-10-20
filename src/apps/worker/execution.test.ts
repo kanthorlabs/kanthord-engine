@@ -8,7 +8,9 @@ import { background } from "../../kernel/context.ts";
 import { temporary, hostEnvironment } from "../../kernel/test-support.ts";
 import {
   deriveHandoverKeys,
+  deriveSshSignKeys,
   handoverAad,
+  openEnvelope,
   sealEnvelope,
 } from "../../kernel/handover.ts";
 import { OperationResultType } from "../../kernel/operation.ts";
@@ -26,7 +28,10 @@ import { hostExecution } from "./execution.ts";
 import { ChainLevel } from "../../agent/contract.ts";
 import { SHIPPED_TEMPLATES } from "../../agent/prompt-templates.ts";
 import { ExecutionIntent } from "../../worker/contract.ts";
-import { WORKING_LAYER_ALL_ON } from "../../worker/test-support.ts";
+import {
+  TEST_SSH_PUBLIC_KEY,
+  WORKING_LAYER_ALL_ON,
+} from "../../worker/test-support.ts";
 import { generateSshKey } from "../../repository/ssh-key.ts";
 import type { SshAccess } from "../../repository/contract.ts";
 import { DEFAULT_SSH_PORT } from "../../repository/test-sshd.ts";
@@ -35,7 +40,6 @@ const SECRET = Buffer.alloc(32, 7).toString("base64");
 const ENDED_RECORD = "execution ended";
 const NO_ENTRIES = 0;
 const ONE_ENTRY = 1;
-const UNKNOWN_FAILURE = "system.operation.unknown";
 const PROVIDER_CAUSE = "OAuth auth derivation failed for anthropic";
 test("host logs the stop of a released or ended execution in the execution ended record", async (t) => {
   const api = httpTransport("http://127.0.0.1:1");
@@ -191,6 +195,7 @@ test("host takes handover before setup and method, discards on every method end"
         name: "repo",
         address: "git@github.com:owner/repo.git",
         ssh_host_key: { known_hosts: KNOWN_HOSTS },
+        ssh_public_key: TEST_SSH_PUBLIC_KEY,
         strategy: { base_branch: "main" },
         project_prompt: null,
         working_layer: WORKING_LAYER_ALL_ON,
@@ -392,6 +397,10 @@ const OPENSSH_ARMOR = "OPENSSH PRIVATE KEY";
 const KNOWN_HOSTS =
   "github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl\n";
 const CLONE_DEADLINE_MS = 20000;
+const RELAY_BINDING = "binding_01ARZ3NDEKTSV4RRFFQ69G5FAB";
+const RELAY_DATA = Buffer.from("user authentication request");
+const RELAY_SIGNATURE = Buffer.from("relayed signature");
+const RELAY_FLAGS = 4;
 
 function filesUnder(directory: string): string[] {
   return readdirSync(directory, { recursive: true, withFileTypes: true })
@@ -457,6 +466,7 @@ test("host builds the SSH access of each repository from the handover and leaves
           name: "repo",
           address: "git@github.com:owner/repo.git",
           ssh_host_key: { known_hosts: KNOWN_HOSTS },
+          ssh_public_key: TEST_SSH_PUBLIC_KEY,
           strategy: { base_branch: "main" },
           project_prompt: null,
           working_layer: WORKING_LAYER_ALL_ON,
@@ -516,7 +526,7 @@ test("host builds the SSH access of each repository from the handover and leaves
   }
 });
 
-test("host stops an execution whose repository holds no handed SSH identity before the method", async (t) => {
+test("host builds a relay SSH access for a repository whose handover holds no SSH identity", async (t) => {
   const api = httpTransport("http://127.0.0.1:1");
   const claim = testClaim();
   t.mock.method(api.worker, "handover", async () => ({
@@ -549,10 +559,11 @@ test("host stops an execution whose repository holds no handed SSH identity befo
       intent: ExecutionIntent.Implement,
       repositories: [
         {
-          binding_id: "binding_01ARZ3NDEKTSV4RRFFQ69G5FAB",
+          binding_id: RELAY_BINDING,
           name: "repo",
           address: "git@github.com:owner/repo.git",
           ssh_host_key: { known_hosts: KNOWN_HOSTS },
+          ssh_public_key: TEST_SSH_PUBLIC_KEY,
           strategy: { base_branch: "main" },
           project_prompt: null,
           working_layer: WORKING_LAYER_ALL_ON,
@@ -560,6 +571,31 @@ test("host stops an execution whose repository holds no handed SSH identity befo
       ],
     },
   }));
+  const signKeys = deriveSshSignKeys(SECRET);
+  const aad = handoverAad(claim.execution_id, claim.claimant.runtime_identity);
+  const signed: unknown[] = [];
+  t.mock.method(
+    api.worker,
+    "ssh.sign",
+    async (input: {
+      body: { execution_id: string; nonce: string; ciphertext: string };
+    }) => {
+      assert.equal(input.body.execution_id, claim.execution_id);
+      signed.push(
+        openEnvelope(signKeys.request, aad, {
+          nonce: input.body.nonce,
+          ciphertext: input.body.ciphertext,
+        }),
+      );
+      return {
+        type: OperationResultType.Completed,
+        status: 200,
+        data: sealEnvelope(signKeys.answer, aad, {
+          signature: RELAY_SIGNATURE.toString("base64"),
+        }),
+      };
+    },
+  );
   const result = await hostExecution(
     {
       api,
@@ -576,7 +612,26 @@ test("host stops an execution whose repository holds no handed SSH identity befo
       transcript: noTranscript,
       log: () => {},
     },
-    async () => assert.fail("The method must not run."),
+    async (native) => {
+      const access = native.sshAccess.get(RELAY_BINDING);
+      assert.ok(access && "relay" in access);
+      assert.equal(access.public_key, TEST_SSH_PUBLIC_KEY);
+      assert.equal(access.known_hosts, KNOWN_HOSTS);
+      assert.equal(access.port, DEFAULT_SSH_PORT);
+      assert.ok(
+        (await access.relay(RELAY_DATA, RELAY_FLAGS, native.context)).equals(
+          RELAY_SIGNATURE,
+        ),
+      );
+      return { kind: "released", furtherWork: false };
+    },
   );
-  assert.equal(result?.code, UNKNOWN_FAILURE);
+  assert.equal(result, null);
+  assert.deepEqual(signed, [
+    {
+      binding_id: RELAY_BINDING,
+      data: RELAY_DATA.toString("base64"),
+      flags: RELAY_FLAGS,
+    },
+  ]);
 });

@@ -337,6 +337,7 @@ export interface EvidenceRequests {
   ): Promise<OperationResult<unknown>>;
 }
 export const HANDOVER_MAX_BODY_BYTES = 1024;
+export const SSH_SIGN_MAX_BODY_BYTES = 16384;
 export const CREDENTIAL_REPORT_MAX_BODY_BYTES = 64 * 1024;
 export interface CustodyHandover {
   handover(
@@ -354,6 +355,20 @@ export interface CustodyHandover {
     envelope: HandoverEnvelope,
     now: number,
   ): void;
+  sshSign(
+    tx: Transaction,
+    identity: MachineIdentity,
+    claim: ExecutionClaim,
+    placement: InstancePlacement | null,
+    envelope: HandoverEnvelope,
+    now: number,
+  ): HandoverEnvelope;
+  sshPublicKeyOf(
+    tx: Transaction,
+    execution: { executionId: string; runtimeIdentity: string },
+    credentialName: string,
+    now: number,
+  ): string | null;
 }
 export interface Registration extends VerifiedClient {
   runtime_identity: string;
@@ -966,6 +981,7 @@ export const executionSetupSchema = z.strictObject({
       name: z.string(),
       address: z.string(),
       ssh_host_key: sshHostKeySchema,
+      ssh_public_key: z.string().min(1),
       strategy: z.strictObject({ base_branch: z.string() }),
       project_prompt: z.string().nullable(),
       working_layer: workingLayerSchema,
@@ -1338,6 +1354,32 @@ export const workerOperations = {
     output: z.null(),
     description:
       "Apply an authenticated refresh report to the live execution's pinned revision when the replaced credential digest still matches.",
+  },
+  "ssh.sign": {
+    service: WORKER_SERVICE_NAME,
+    store: StoreName.Operational,
+    lifetime: OperationLifetime.Unary,
+    id: "worker.ssh.sign",
+    method: HttpMethod.Post,
+    path: "/api/worker/ssh/sign",
+    access: AccessPolicy.Client,
+    requiresExecution: true,
+    timeoutMs: HANDOVER_TIMEOUT_MS,
+    mutation: true,
+    secret: true,
+    body: true,
+    maxBodyBytes: SSH_SIGN_MAX_BODY_BYTES,
+    status: HttpStatus.OK,
+    input: z.strictObject({
+      params: emptyFields,
+      query: emptyFields,
+      body: handoverEnvelopeSchema.extend({
+        execution_id: identitySchema("execution"),
+      }),
+    }),
+    output: handoverEnvelopeSchema,
+    description:
+      "Sign one sealed SSH user authentication request with the SSH key of a repository binding of the live execution's node. A repeated idempotency key returns a redacted conflict; recovery uses a new key.",
   },
   "registration.list": {
     ...humanOperation,

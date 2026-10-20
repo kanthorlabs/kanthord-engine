@@ -30,7 +30,8 @@ import { RepositoryErrorCode } from "./contract.ts";
 import { GitHubPlatform } from "./github.ts";
 import { knownHostsLine } from "./host-key.ts";
 import { isPlatformSshHost, sshPortOf } from "./platform.ts";
-import type { SshAccess } from "./ssh-agent.ts";
+import type { SshAccess, SshKeyAccess } from "./ssh-agent.ts";
+import { relayedSignature } from "./ssh-sign.ts";
 import { sshPublicKeyOf } from "./ssh-key.ts";
 import { ProjectErrorCode, RepositoryPlatform } from "../project/contract.ts";
 export {
@@ -45,7 +46,12 @@ export {
 } from "./host-key.ts";
 export { repositoryMigrations } from "./migrations.ts";
 export { checkServerRepositoryTools } from "./check.ts";
-export type { SshAccess } from "./ssh-agent.ts";
+export type {
+  SshAccess,
+  SshKeyAccess,
+  SshRelayAccess,
+  SshSigner,
+} from "./ssh-agent.ts";
 export { decodeGitHubEvent } from "./github.ts";
 export {
   foldBranchPush,
@@ -64,7 +70,7 @@ export interface GitWriter {
     tx: Transaction,
     granted: SshGrantFacts,
     material: Material,
-  ): SshAccess;
+  ): SshKeyAccess;
 }
 
 export const platformImplementations = {
@@ -141,7 +147,7 @@ export class RepositoryComponent implements GitWriter {
     tx: Transaction,
     granted: SshGrantFacts,
     material: Material,
-  ): SshAccess {
+  ): SshKeyAccess {
     try {
       const { credential } = granted;
       assert(credential !== null);
@@ -162,11 +168,20 @@ export class RepositoryComponent implements GitWriter {
     }
   }
 
+  sshSignatureOf(
+    tx: Transaction,
+    granted: SshGrantFacts,
+    material: Material,
+    data: Buffer,
+  ): Buffer {
+    return relayedSignature(this.sshAccessOf(tx, granted, material), data);
+  }
+
   static handedSshAccess(
     private_key: string,
     known_hosts: string,
     port: number,
-  ): SshAccess {
+  ): SshKeyAccess {
     return {
       private_key,
       public_key: sshPublicKeyOf(private_key),

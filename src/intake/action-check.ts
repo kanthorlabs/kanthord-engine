@@ -30,6 +30,7 @@ import {
   foldBranchPush,
   type GitWriter,
   type SshAccess,
+  type SshKeyAccess,
 } from "../repository/index.ts";
 import { SshAgentErrorCode } from "../repository/ssh-agent.ts";
 import { PLATFORM_CALL_DEADLINE_MS, ResultClass } from "./contract.ts";
@@ -81,7 +82,7 @@ export interface SshRelease {
   credential: string;
   binding_id: string | null;
   address: string;
-  access: SshAccess;
+  access: SshKeyAccess;
 }
 
 export async function checkAction(

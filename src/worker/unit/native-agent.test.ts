@@ -41,6 +41,7 @@ import {
   scriptedProvider,
   SETUP_PROMPT,
   TEST_SSH_HOST_KEY,
+  TEST_SSH_PUBLIC_KEY,
   WORKING_LAYER_ALL_ON,
 } from "./test-support.ts";
 import { SHIPPED_TEMPLATES } from "../../agent/prompt-templates.ts";
@@ -160,6 +161,7 @@ function repositoryOf(
     name: "repo",
     address: "git@github.com:owner/repo.git",
     ssh_host_key: TEST_SSH_HOST_KEY,
+    ssh_public_key: TEST_SSH_PUBLIC_KEY,
     strategy: { base_branch: "main" },
     project_prompt: projectPrompt,
     working_layer: { ...WORKING_LAYER_ALL_ON, ...workingLayer },

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { execFile, spawn } from "node:child_process";
 import { accessSync, constants } from "node:fs";
+import { createPublicKey, randomBytes, verify } from "node:crypto";
 import { appendFile, readFile, writeFile } from "node:fs/promises";
 import { connect, createServer, type AddressInfo } from "node:net";
 import { userInfo } from "node:os";
@@ -11,7 +12,22 @@ import { promisify } from "node:util";
 import { isolatedGitEnvironment } from "../kernel/git-environment.ts";
 import { temporary } from "../kernel/test-support.ts";
 import type { SshAccess } from "./ssh-agent.ts";
-import { generateSshKey } from "./ssh-key.ts";
+import { SSH_SIGN_USER } from "./contract.ts";
+import {
+  generateSshKey,
+  SSH_KEY_TYPE,
+  SshReader,
+  SshWriter,
+  sshPublicKeyBlob,
+} from "./ssh-key.ts";
+import {
+  relayedSignature,
+  SSH_CONNECTION_SERVICE,
+  SSH_USERAUTH_REQUEST,
+  SshAuthenticationMethod,
+} from "./ssh-sign.ts";
+
+export { relayedSignature };
 
 export const TEST_SSHD_HOST = "127.0.0.1";
 export const DEFAULT_SSH_PORT = 22;
@@ -39,6 +55,9 @@ const FIELD_SEPARATOR = " ";
 const PUBLIC_KEY_FIELDS = 2;
 const STRING_TYPE = "string";
 const execFileAsync = promisify(execFile);
+const SESSION_ID_BYTES = 32;
+const HAS_SIGNATURE = 1;
+const ED25519_SPKI_PREFIX = Buffer.from("302a300506032b6570032100", "hex");
 
 export interface TestSshd {
   user: string;
@@ -180,4 +199,59 @@ export async function createBareRepository(t: TestContext): Promise<string> {
   });
   await execFileAsync("git", ["clone", "-q", "--bare", work, bare], { env });
   return bare;
+}
+
+export interface UserAuthenticationInput {
+  key: Buffer;
+  hostKey?: Buffer | null;
+  user?: string;
+  service?: string;
+  method?: string;
+  algorithm?: string;
+  signature?: number;
+  trailing?: Buffer;
+}
+
+export function userAuthenticationData(input: UserAuthenticationInput): Buffer {
+  const hostKey = input.hostKey ?? null;
+  const writer = new SshWriter()
+    .bytes(randomBytes(SESSION_ID_BYTES))
+    .byte(SSH_USERAUTH_REQUEST)
+    .text(input.user ?? SSH_SIGN_USER)
+    .text(input.service ?? SSH_CONNECTION_SERVICE)
+    .text(
+      input.method ??
+        (hostKey === null
+          ? SshAuthenticationMethod.PublicKey
+          : SshAuthenticationMethod.HostBound),
+    )
+    .byte(input.signature ?? HAS_SIGNATURE)
+    .text(input.algorithm ?? SSH_KEY_TYPE)
+    .bytes(input.key);
+  if (hostKey !== null) writer.bytes(hostKey);
+  if (input.trailing) writer.raw(input.trailing);
+  return writer.build();
+}
+
+export function knownHostsKeyBlob(knownHosts: string): Buffer {
+  const fields = knownHosts.trim().split(FIELD_SEPARATOR);
+  return Buffer.from(fields.at(-1)!, "base64");
+}
+
+export function sshSignatureVerifies(
+  public_key: string,
+  data: Buffer,
+  signature: Buffer,
+): boolean {
+  const reader = new SshReader(signature);
+  if (reader.text() !== SSH_KEY_TYPE) return false;
+  const raw = reader.bytes();
+  const blob = new SshReader(sshPublicKeyBlob(public_key));
+  blob.text();
+  const key = createPublicKey({
+    key: Buffer.concat([ED25519_SPKI_PREFIX, blob.bytes()]),
+    format: "der",
+    type: "spki",
+  });
+  return verify(null, data, key, raw);
 }
