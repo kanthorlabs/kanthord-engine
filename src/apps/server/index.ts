@@ -471,6 +471,7 @@ export function composeServices(options: {
       keyOf: (tx, name) => worker.instanceKeyOf(tx, name),
       nameOf: (tx, instanceId) => worker.instanceNameOf(tx, instanceId),
     },
+    instanceConnected: (holder) => worker.instanceConnected(holder),
   });
   const agent: AgentComponent = new AgentComponent({
     store: options.store,
@@ -607,6 +608,7 @@ export function composeServices(options: {
       },
       heldCopies: (tx, holder) => custody.heldCopies(tx, holder),
     },
+    loginSessionsOf: (holder) => llm.loginSessionsOf(holder),
     agentConfiguration: {
       validateEntry: (tx, name, entry, holders) =>
         agent.validateEntry(tx, name, entry, holders),

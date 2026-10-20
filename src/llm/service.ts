@@ -49,17 +49,20 @@ import {
   type LlmCredentialAnswer,
   type LlmCredentialCreate,
   type LlmCredentialRotate,
+  type LoginSessionEntry,
   type ModelCheckAnswer,
   type ProviderCheckAnswer,
 } from "./contract.ts";
 import {
   isLoopbackHost,
+  LOGIN_INSTANCE_UNAVAILABLE,
   loginMode,
   loginNotFound,
   LOGIN_VALUE_NOT_AWAITED,
   OAuthLogin,
   type OAuthSecret,
 } from "./login.ts";
+import { InstanceLogin } from "./instance-login.ts";
 import { checkModel } from "./model-check.ts";
 import type { ModelRuntimeModule } from "./model-connector.ts";
 import {
@@ -88,6 +91,7 @@ export interface Dependencies {
   enablementsDependentOnModel: EnablementsDependentOnModelFn;
   loadModelRuntime: () => Promise<ModelRuntimeModule>;
   instanceKeys?: InstanceKeys;
+  instanceConnected?: (holder: string) => boolean;
 }
 
 const NO_INSTANCE_KEYS: InstanceKeys = {
@@ -102,6 +106,7 @@ const CredentialErrorCode = {
   SealedInvalid: "credential.sealed.invalid",
 } as const;
 const NO_ROWS = 0;
+const LOGIN_FAILED_REASON = "login failed";
 
 function invalidInput(): OperationError {
   return new OperationError(
@@ -152,6 +157,7 @@ export class LlmComponent implements Service {
   private readonly logger: Logger;
   private readonly sessions = new LoginSessionStore();
   private readonly logins = new Map<string, OAuthLogin>();
+  private readonly instanceLogins = new Map<string, InstanceLogin>();
   private readonly oauthProviders: () => readonly Provider[];
   private readonly now: () => number;
   private acceptingLogins = true;
@@ -160,6 +166,7 @@ export class LlmComponent implements Service {
   private readonly loadModelRuntime: () => Promise<ModelRuntimeModule>;
   private readonly platformSet: CredentialPlatformSet;
   private readonly instanceKeys: InstanceKeys;
+  private readonly instanceConnected: (holder: string) => boolean;
 
   constructor(dependencies: Dependencies) {
     registerOAuthFlows();
@@ -178,6 +185,7 @@ export class LlmComponent implements Service {
     this.enablementsDependentOnModel = dependencies.enablementsDependentOnModel;
     this.loadModelRuntime = dependencies.loadModelRuntime;
     this.instanceKeys = dependencies.instanceKeys ?? NO_INSTANCE_KEYS;
+    this.instanceConnected = dependencies.instanceConnected ?? (() => false);
     this.platformSet = {
       platforms: LLM_PLATFORMS,
       instance_copies: true,
@@ -276,6 +284,9 @@ export class LlmComponent implements Service {
     );
     registry.register(llmOperations.login_status, (input, caller) =>
       this.loginStatus(input, caller),
+    );
+    registry.register(llmOperations.login_report, (input, caller) =>
+      this.loginReport(input, caller),
     );
     registry.register(llmOperations.provider_check, (input, caller) =>
       this.providerCheck(input, caller),
@@ -697,7 +708,7 @@ export class LlmComponent implements Service {
         this.platformSet,
         session.credential_name,
         session.platform,
-        secret,
+        { holder: SERVER_HOLDER, secret },
         this.now(),
       );
     });
@@ -719,6 +730,7 @@ export class LlmComponent implements Service {
         "The LLM component is stopped.",
       );
     const { platform, name, mode: requested } = input.body;
+    const holder = input.body.holder ?? SERVER_HOLDER;
     if (!isLlmPlatform(platform))
       throw new OperationError(
         HttpStatus.BadRequest,
@@ -731,6 +743,8 @@ export class LlmComponent implements Service {
         CredentialErrorCode.UnsupportedEntry,
         "Unsupported credential entry.",
       );
+    if (holder !== SERVER_HOLDER)
+      return this.loginInstance(input, caller, platform, holder);
     this.store.transaction((tx) => this.records.requireAvailableName(tx, name));
     const mode = loginMode(
       platform,
@@ -774,10 +788,109 @@ export class LlmComponent implements Service {
     }
   }
 
+  private async loginInstance(
+    input: typeof llmOperations.login.input._output,
+    caller: CallerContext,
+    platform: Platform,
+    holder: string,
+  ): Promise<typeof llmOperations.login.output._output> {
+    const { name, mode: requested } = input.body;
+    this.store.transaction((tx) => {
+      this.instanceKey(tx, holder);
+      this.records.requireAvailableName(tx, name, holder);
+    });
+    const mode = loginMode(platform, requested, false);
+    if (caller.identity?.kind !== IdentityKind.Human) throw invalidInput();
+    if (!this.instanceConnected(holder))
+      throw new OperationError(
+        HttpStatus.Conflict,
+        LOGIN_INSTANCE_UNAVAILABLE,
+        "The worker instance holds no current connection.",
+        { holder },
+      );
+    const session = this.sessions.start(
+      platform,
+      mode,
+      caller.identity.accountId,
+      name,
+      this.now(),
+      holder,
+    );
+    const flow = new InstanceLogin(session, this.sessions, this.now, () =>
+      this.instanceLogins.delete(session.id),
+    );
+    this.instanceLogins.set(session.id, flow);
+    flow.arm();
+    const unsubscribe = caller.context.onCancel(() =>
+      flow.fail(LOGIN_FAILED_REASON),
+    );
+    try {
+      await flow.ready.promise;
+      const cancelled = caller.context.err();
+      if (cancelled) throw cancelled;
+      if (!flow.pending() || session.address === null) throw flow.failure;
+      return caller.commit(() => ({
+        session_id: session.id,
+        address: session.address!,
+        code: session.code,
+        expires_at: session.expires_at,
+      }));
+    } finally {
+      unsubscribe();
+    }
+  }
+
+  loginSessionsOf(holder: string): LoginSessionEntry[] {
+    const entries: LoginSessionEntry[] = [];
+    for (const [id, flow] of this.instanceLogins) {
+      if (!flow.pending()) this.instanceLogins.delete(id);
+      else if (flow.session.holder === holder) entries.push(flow.entry());
+    }
+    return entries;
+  }
+
+  private loginReport(
+    input: typeof llmOperations.login_report.input._output,
+    caller: CallerContext,
+  ): null {
+    const identity = caller.identity;
+    if (!isWorkerIdentity(identity)) throw instanceForbidden();
+    let apply = () => {};
+    let flow: InstanceLogin | undefined;
+    caller.commit((tx) => {
+      const holder = this.workerHolder(tx, identity);
+      flow = this.instanceLogins.get(input.params.session_id);
+      if (!flow || flow.session.holder !== holder) throw loginNotFound();
+      const { session } = flow;
+      apply = flow.report(input.body, (copy) =>
+        this.records.createLoginRevision(
+          tx,
+          this.platformSet,
+          session.credential_name,
+          session.platform,
+          copy,
+          this.now(),
+        ),
+      );
+      return null;
+    });
+    apply();
+    const { session } = flow!;
+    if (session.state === LoginSessionState.Completed)
+      this.logger.info(
+        { holder: session.holder, human_identity: session.human_identity },
+        "credential login completed",
+      );
+    return null;
+  }
+
   private loginSession(id: string): LoginSession {
     const session = this.sessions.get(id);
     if (!session) throw loginNotFound();
-    if (session.expires_at <= this.now()) this.logins.get(id)?.expire();
+    if (session.expires_at <= this.now()) {
+      this.logins.get(id)?.expire();
+      this.instanceLogins.get(id)?.expire();
+    }
     return session;
   }
 
@@ -787,6 +900,11 @@ export class LlmComponent implements Service {
   ): typeof llmOperations.login_code.output._output {
     const session = this.loginSession(input.params.session_id);
     return caller.commit(() => {
+      const instance = this.instanceLogins.get(session.id);
+      if (instance) {
+        instance.supply(input.body.value);
+        return { session_id: session.id };
+      }
       const flow = this.logins.get(session.id);
       if (!flow)
         throw new OperationError(
@@ -816,6 +934,9 @@ export class LlmComponent implements Service {
     this.acceptingLogins = false;
     for (const flow of this.logins.values()) flow.abort();
     this.logins.clear();
+    for (const flow of this.instanceLogins.values())
+      flow.fail(LOGIN_FAILED_REASON);
+    this.instanceLogins.clear();
   }
 
   start(): Promise<Error | null> {

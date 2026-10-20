@@ -7,6 +7,7 @@ import {
   type OperationResult,
 } from "../../kernel/operation.ts";
 import { httpClient } from "../../gateway/client.ts";
+import { llmOperations, type LoginReportBody } from "../../llm/contract.ts";
 import {
   INSTANCE_CONNECTION_INFO,
   WORKER_TOKEN_INFO,
@@ -68,6 +69,7 @@ export class InstanceExchange {
   private readonly client: ReturnType<
     typeof httpClient<typeof workerOperations>
   >;
+  private readonly llm: ReturnType<typeof httpClient<typeof llmOperations>>;
   private workerToken?: string;
 
   constructor(configuration: InstanceConfiguration, endpoint: string) {
@@ -77,6 +79,7 @@ export class InstanceExchange {
       endpoint,
       () => this.workerToken,
     );
+    this.llm = httpClient(llmOperations, endpoint, () => this.workerToken);
   }
 
   private privateKey(): Buffer {
@@ -153,6 +156,21 @@ export class InstanceExchange {
     } finally {
       key.fill(0);
     }
+  }
+
+  async loginReport(
+    sessionId: string,
+    body: LoginReportBody,
+    idempotencyKey: string,
+    context: Context = background,
+  ): Promise<void> {
+    settled(
+      await this.llm.login_report(
+        { params: { session_id: sessionId }, query: {}, body },
+        { context, idempotencyKey },
+      ),
+      "login report",
+    );
   }
 
   async heartbeat(

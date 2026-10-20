@@ -2079,31 +2079,32 @@ export class CustodyComponent implements Service, CredentialRecords {
     set: CredentialPlatformSet,
     name: string,
     platform: string,
-    secret: unknown,
+    copy: CredentialCopy,
     now: number,
   ): string {
     const entry = ownedPlatform(set, platform);
-    assert.equal(entry?.secret_shape, SecretShape.OAuth);
-    this.requireAvailableName(tx, name);
+    assert.ok(entry);
+    assert.equal(entry.secret_shape, SecretShape.OAuth);
+    this.requireAvailableName(tx, name, copy.holder);
     this.refusePlatformConflict(tx, name, platform);
-    const parsedSecret = secretSchemas[entry.secret_shape].safeParse(secret);
-    if (!parsedSecret.success) throw invalidInput();
+    const stored = this.storedCopy(tx, set, entry, copy);
     const id = createIdentity(CREDENTIAL_PREFIX);
     const { nonce, ciphertext } = encrypt(
       this.envelopeKey,
       id,
       platform,
-      parsedSecret.data,
+      stored.value,
     );
     tx.database
       .prepare(
-        "INSERT INTO credential (id, name, platform, holder, sealed_to, revision, nonce, ciphertext, metadata, created_at, ended_at) VALUES (?, ?, ?, ?, NULL, ?, ?, ?, NULL, ?, NULL)",
+        "INSERT INTO credential (id, name, platform, holder, sealed_to, revision, nonce, ciphertext, metadata, created_at, ended_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, NULL)",
       )
       .run(
         id,
         name,
         platform,
-        SERVER_HOLDER,
+        copy.holder,
+        stored.sealed_to,
         FIRST_REVISION,
         nonce,
         ciphertext,

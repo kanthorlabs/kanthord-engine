@@ -63,21 +63,21 @@ Each synopsis follows `kanthord llm credential`. All thirteen commands have `[R]
 `human` access; seven mutations have `[M]`, and one list has `[L]`.
 All paths below are implemented routes under the ruled `/api/llm/credential` prefix.
 
-| #   | Synopsis after `kanthord llm credential`                                     | HTTP route                                                            | Operation ID                     | Access/status                  |
-| --- | ---------------------------------------------------------------------------- | --------------------------------------------------------------------- | -------------------------------- | ------------------------------ |
-| 1   | `create --file <path> [--holder <name>] [M] [R]`                             | `POST /api/llm/credential`                                            | `llm.credential.create`          | `human_or_worker`; implemented |
-| 2   | `list [--platform <platform>] [--holder <name>] [L] [R]`                     | `GET /api/llm/credential`                                             | `llm.credential.list`            | `human_or_worker`; implemented |
-| 3   | `get <credential-name> [--holder <name>] [R]`                                | `GET /api/llm/credential/:credential_name`                            | `llm.credential.get`             | `human_or_worker`; implemented |
-| 4   | `rotate <credential-name> --file <path> [--holder <name>] [M] [R]`           | `POST /api/llm/credential/:credential_name/revision`                  | `llm.credential.rotate`          | `human_or_worker`; implemented |
-| 5   | `update-metadata <credential-name> --file <path> [--holder <name>] [M] [R]`  | `PUT /api/llm/credential/:credential_name/metadata`                   | `llm.credential.update_metadata` | `human`; implemented           |
-| 6   | `login <platform> [--mode browser\|device\|copy_code] --name <name> [M] [R]` | `POST /api/llm/credential/login`                                      | `llm.credential.login`           | `human`; implemented           |
-| 7   | `login-code <session> <value> [M] [R]`                                       | `POST /api/llm/credential/login/:session_id/code`                     | `llm.credential.login_code`      | `human`; implemented           |
-| 8   | `login-status <session> [R]`                                                 | `GET /api/llm/credential/login/:session_id`                           | `llm.credential.login_status`    | `human`; implemented           |
-| 9   | `revoke <credential-name> <revision> [--holder <name>] [M] [R]`              | `POST /api/llm/credential/:credential_name/revision/:revision/revoke` | `llm.credential.revoke`          | `human`; implemented           |
-| 10  | `archive <credential-name> [--holder <name>] [M] [R]`                        | `POST /api/llm/credential/:credential_name/archive`                   | `llm.credential.archive`         | `human`; implemented           |
-| 11  | `platforms [R]`                                                              | `GET /api/llm/credential/platform`                                    | `llm.credential.platform_list`   | `human`; implemented           |
-| 12  | `check --file <path> [R]`                                                    | `POST /api/llm/credential/check`                                      | `llm.credential.check`           | `human`; implemented           |
-| 13  | `verify <credential-name> [R]`                                               | `POST /api/llm/credential/:credential_name/verify`                    | `llm.credential.verify`          | `human`; implemented           |
+| #   | Synopsis after `kanthord llm credential`                                                       | HTTP route                                                            | Operation ID                     | Access/status                  |
+| --- | ---------------------------------------------------------------------------------------------- | --------------------------------------------------------------------- | -------------------------------- | ------------------------------ |
+| 1   | `create --file <path> [--holder <name>] [M] [R]`                                               | `POST /api/llm/credential`                                            | `llm.credential.create`          | `human_or_worker`; implemented |
+| 2   | `list [--platform <platform>] [--holder <name>] [L] [R]`                                       | `GET /api/llm/credential`                                             | `llm.credential.list`            | `human_or_worker`; implemented |
+| 3   | `get <credential-name> [--holder <name>] [R]`                                                  | `GET /api/llm/credential/:credential_name`                            | `llm.credential.get`             | `human_or_worker`; implemented |
+| 4   | `rotate <credential-name> --file <path> [--holder <name>] [M] [R]`                             | `POST /api/llm/credential/:credential_name/revision`                  | `llm.credential.rotate`          | `human_or_worker`; implemented |
+| 5   | `update-metadata <credential-name> --file <path> [--holder <name>] [M] [R]`                    | `PUT /api/llm/credential/:credential_name/metadata`                   | `llm.credential.update_metadata` | `human`; implemented           |
+| 6   | `login <platform> [--mode browser\|device\|copy_code] --name <name> [--holder <name>] [M] [R]` | `POST /api/llm/credential/login`                                      | `llm.credential.login`           | `human`; implemented           |
+| 7   | `login-code <session> <value> [M] [R]`                                                         | `POST /api/llm/credential/login/:session_id/code`                     | `llm.credential.login_code`      | `human`; implemented           |
+| 8   | `login-status <session> [R]`                                                                   | `GET /api/llm/credential/login/:session_id`                           | `llm.credential.login_status`    | `human`; implemented           |
+| 9   | `revoke <credential-name> <revision> [--holder <name>] [M] [R]`                                | `POST /api/llm/credential/:credential_name/revision/:revision/revoke` | `llm.credential.revoke`          | `human`; implemented           |
+| 10  | `archive <credential-name> [--holder <name>] [M] [R]`                                          | `POST /api/llm/credential/:credential_name/archive`                   | `llm.credential.archive`         | `human`; implemented           |
+| 11  | `platforms [R]`                                                                                | `GET /api/llm/credential/platform`                                    | `llm.credential.platform_list`   | `human`; implemented           |
+| 12  | `check --file <path> [R]`                                                                      | `POST /api/llm/credential/check`                                      | `llm.credential.check`           | `human`; implemented           |
+| 13  | `verify <credential-name> [R]`                                                                 | `POST /api/llm/credential/:credential_name/verify`                    | `llm.credential.verify`          | `human`; implemented           |
 
 The static `/api/llm/credential/login`, `/api/llm/credential/platform` and `/api/llm/credential/check` paths take precedence over `/:credential_name`, so custody refuses the names `login`, `platform` and `check`. Custody also reserves `ssh`.
 These routes have no project identity.
@@ -317,7 +317,7 @@ requires a platform that accepts `oauth`; the implemented platform set permits
 `github-copilot`, `openai-codex` and `anthropic-subscription`. The positional platform is required with no default.
 `--name` is required `CredentialName` with no default.
 
-The body is `{ platform, mode?, name }`, with empty
+The body is `{ platform, mode?, name, holder? }`, with empty
 params and query. Optional `--mode` is `browser`, `device` or `copy_code`, without a CLI
 default; absence leaves selection to the platform's supported flow. Custody
 maps `device` to pi-ai interaction value `device_code`. A platform with one
@@ -362,6 +362,19 @@ needs no listener. Completion stores an OAuth record with `metadata: null`.
 A failed or expired session stores nothing. The session holds no token; no
 answer exposes one. The login flow proves the OAuth record without an extra
 validation call.
+
+Optional `--holder` names the holder of the new copy: `server` or a live worker
+instance. It defaults to `server`. With an instance name, the
+[login of an instance](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/llm.impl.md#the-login-of-an-instance)
+runs the flow on that instance. The instance receives the session in its next
+heartbeat answer, reports the address and the code, and seals the result to its own
+key. The server stores only the sealed copy. An instance session uses
+`copy_code` mode for `anthropic-subscription` and `device` mode for
+`openai-codex` and `github-copilot`. `--mode browser` answers
+`400 credential.login.browser_unavailable`. An unknown instance answers
+`400 llm.credential.instance_unknown`. An instance with no current connection
+answers `409 credential.login.instance_unavailable`. The instance reports
+through `llm.credential.login_report`, a `worker` operation with no command.
 
 ## `login-code <session> <value>`
 
@@ -452,6 +465,7 @@ Every remote command can also answer the shared codes of [other.md](other.md#err
 | ----- | -------------------------------------------- | ----------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
 | 409   | `credential.login.value_not_awaited`         | The session does not await a code.                                                              | login-code                                                             |
 | 409   | `credential.login.pending`                   | Another login is pending for this platform and human.                                           | login                                                                  |
+| 409   | `credential.login.instance_unavailable`      | The `--holder` instance holds no current connection.                                            | login                                                                  |
 | 404   | `credential.login.not_found`                 | The login session does not exist.                                                               | login-code, login-status                                               |
 | 400   | `credential.login.mode_unsupported`          | The platform does not support the selected login mode.                                          | login                                                                  |
 | 400   | `credential.login.browser_unavailable`       | Browser mode is requested through a `Host` that is not a loopback name.                         | login                                                                  |
@@ -485,7 +499,7 @@ Every remote command can also answer the shared codes of [other.md](other.md#err
 | 409   | `credential.name.platform_conflict`          | Another copy of the name holds another platform. Details: `{ platform }`.                       | create, login                                                          |
 | 400   | `credential.sealed.invalid`                  | The sealed object fails its form or its budget, or `sealed_to` is not the current fingerprint.  | create, rotate                                                         |
 | 409   | `credential.credential.held_by_instance`     | The command needs the copy of `server`, and only an instance holds the name.                    | verify, provider check, model check                                    |
-| 400   | `llm.credential.instance_unknown`            | A holder names no live worker instance.                                                         | create, rotate                                                         |
+| 400   | `llm.credential.instance_unknown`            | A holder names no live worker instance.                                                         | create, rotate, login                                                  |
 | 403   | `llm.credential.instance_forbidden`          | A worker token names a copy of another holder.                                                  | create, rotate, list, get                                              |
 | local | `cli.llm.credential.secret_invalid`          | The local seal takes no `api_key` secret within 32,768 bytes.                                   | create, rotate                                                         |
 

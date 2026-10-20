@@ -1,6 +1,7 @@
 import { OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import { createIdentity } from "../kernel/identity.ts";
+import { SERVER_HOLDER } from "../custody/contract.ts";
 
 export const LoginSessionState = {
   Pending: "pending",
@@ -22,11 +23,13 @@ export interface LoginSession {
   mode: string;
   human_identity: string;
   credential_name: string;
+  holder: string;
   state: LoginSessionState;
   address: string | null;
   code: string | null;
   last_message: string | null;
   failure_reason: string | null;
+  submitted: string | null;
   expires_at: number;
 }
 
@@ -39,6 +42,7 @@ export class LoginSessionStore {
     humanIdentity: string,
     credentialName: string,
     now: number,
+    holder: string = SERVER_HOLDER,
   ): LoginSession {
     if (this.pendingForPlatformAndHuman(platform, humanIdentity, now)) {
       throw new OperationError(
@@ -54,15 +58,41 @@ export class LoginSessionStore {
       mode,
       human_identity: humanIdentity,
       credential_name: credentialName,
+      holder,
       state: LoginSessionState.Pending,
       address: null,
       code: null,
       last_message: null,
       failure_reason: null,
+      submitted: null,
       expires_at: now + SESSION_EXPIRY_MS,
     };
     this.sessions.set(session.id, session);
     return session;
+  }
+
+  adopt(session: LoginSession): void {
+    this.sessions.set(session.id, session);
+  }
+
+  remove(id: string): void {
+    this.sessions.delete(id);
+  }
+
+  pendingOfHolder(holder: string, now: number): LoginSession[] {
+    return [...this.sessions.values()].filter(
+      (session) =>
+        session.holder === holder &&
+        session.state === LoginSessionState.Pending &&
+        session.expires_at > now,
+    );
+  }
+
+  submit(id: string, value: string): void {
+    const session = this.sessions.get(id);
+    if (session) {
+      session.submitted = value;
+    }
   }
 
   get(id: string): LoginSession | undefined {

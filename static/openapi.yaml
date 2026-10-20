@@ -76,6 +76,8 @@ paths:
     $ref: ./openapi/llm/credential.login.yaml#/pathItem
   /api/llm/credential/login/{session_id}/code:
     $ref: ./openapi/llm/credential.login_code.yaml#/pathItem
+  /api/llm/credential/login/{session_id}/report:
+    $ref: ./openapi/llm/credential.login_report.yaml#/pathItem
   /api/llm/credential/login/{session_id}:
     $ref: ./openapi/llm/credential.login_status.yaml#/pathItem
   /api/llm/credential/platform:

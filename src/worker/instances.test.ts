@@ -5,6 +5,7 @@ import { WorkerService, type Dependencies } from "./service.ts";
 import { workerMigrations } from "./migrations.ts";
 import {
   BindingEntryState,
+  INSTANCE_CONNECTED_WINDOW_MS,
   INSTANCE_CONNECTION_INFO,
   InstancePlacement,
   WORKER_SERVICE_NAME,
@@ -811,4 +812,16 @@ test("the registrations of an instance are empty for a registration with no inst
     ),
     [],
   );
+});
+
+test("an instance counts as connected only while its last heartbeat is inside the connected window", async (t) => {
+  const f = instanceFixture(t);
+  const { record } = await f.created();
+  assert.equal(f.worker().instanceConnected(INSTANCE), false);
+  f.asWorker(record.id);
+  await f.invoke("instance.connect", { connection_name: CONNECTION_NAME });
+  assert.equal(f.worker().instanceConnected(INSTANCE), true);
+  const start = Date.now();
+  t.mock.method(Date, "now", () => start + INSTANCE_CONNECTED_WINDOW_MS + 1);
+  assert.equal(f.worker().instanceConnected(INSTANCE), false);
 });

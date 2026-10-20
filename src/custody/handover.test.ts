@@ -32,6 +32,9 @@ import {
   plainHandoverPayloadSchema,
   HandoverPlacement,
   HolderRefusal,
+  LoginSessionMode,
+  CREDENTIAL_SEAL_INFO,
+  credentialSealAad,
   SecretShape,
   SshIdentitySubjectKind,
   sshSignAnswerSchema,
@@ -46,7 +49,11 @@ import {
   sealedCopyReporter,
   type InstanceCopyKey,
 } from "./instance-copy.ts";
-import { generateX25519KeyPair, keyFingerprint } from "../kernel/hpke.ts";
+import {
+  generateX25519KeyPair,
+  keyFingerprint,
+  sealJSON,
+} from "../kernel/hpke.ts";
 import { INTAKE_SERVICE_NAME } from "../intake/contract.ts";
 import type { ExecutionClaim } from "../kernel/operation.ts";
 import { RepositoryComponent } from "../repository/index.ts";
@@ -69,6 +76,7 @@ const SECOND = { type: SecretShape.ApiKey, key: "private-second" };
 const NOW = 1000;
 const REVISION_COUNT = 1;
 const TEST_PLATFORM = "key-platform";
+const OAUTH_PLATFORM = "oauth-platform";
 const SSH_PLATFORM = "ssh-platform";
 const SSH_ADDRESS = "git@github.com:owner/repository.git";
 const KNOWN_HOSTS = "github.com ssh-ed25519 AAAAhost\n";
@@ -82,6 +90,13 @@ const TEST_SET: CredentialPlatformSet = {
     [TEST_PLATFORM]: {
       secret_shape: SecretShape.ApiKey,
       login_modes: [],
+      metadata_schema: null,
+      capability: "none",
+      probe: null,
+    },
+    [OAUTH_PLATFORM]: {
+      secret_shape: SecretShape.OAuth,
+      login_modes: [LoginSessionMode.CopyCode],
       metadata_schema: null,
       capability: "none",
       probe: null,
@@ -136,6 +151,7 @@ function fixture(
   names: readonly string[] = ["anthro-1"],
   repositories: readonly string[] = [],
   instances: ReadonlyMap<string, InstancePair> = new Map(),
+  oauthNames: readonly string[] = [],
 ) {
   const store = new Store(IN_MEMORY_DATABASE);
   t.after(() => store.close());
@@ -247,12 +263,20 @@ function fixture(
             "worker.authorization.refused",
             "Refused.",
           );
-        return names.map((credential) => ({
-          credential,
-          platform: TEST_PLATFORM,
-          provider_id: TEST_PLATFORM,
-          agent_provider: "default",
-        }));
+        return [
+          ...names.map((credential) => ({
+            credential,
+            platform: TEST_PLATFORM,
+            provider_id: TEST_PLATFORM,
+            agent_provider: "default",
+          })),
+          ...oauthNames.map((credential) => ({
+            credential,
+            platform: OAUTH_PLATFORM,
+            provider_id: OAUTH_PLATFORM,
+            agent_provider: "default",
+          })),
+        ];
       },
     },
     missionAuthorization: {
@@ -676,6 +700,79 @@ test("a worker placement handover answers the copy sealed to the instance key, p
       error instanceof OperationError && error.code === CUSTODY_REPORT_INVALID,
   );
   assert.equal(f.logs.join("").includes(FIRST.key), false);
+});
+
+test("an OAuth copy that a login seals to the instance key passes the worker placement handover and takes a sealed refresh report in place", async (t) => {
+  const relay = await instancePair("relay-a");
+  const f = fixture(t, [], [], new Map([["relay-a", relay]]), ["claude"]);
+  const first = {
+    refresh: "private-refresh-1",
+    access: "private-access-1",
+    expires: NOW,
+  };
+  const second = {
+    refresh: "private-refresh-2",
+    access: "private-access-2",
+    expires: NOW + NOW,
+  };
+  const aad = credentialSealAad({
+    name: "claude",
+    platform: OAUTH_PLATFORM,
+    holder: relay.key.name,
+    sealed_to: relay.key.fingerprint,
+  });
+  const sealed = await sealJSON(
+    relay.public_key,
+    CREDENTIAL_SEAL_INFO,
+    aad,
+    first,
+  );
+  const copyId = f.store.transaction((tx) =>
+    f.component.createLoginRevision(
+      tx,
+      SEALED_SET,
+      "claude",
+      OAUTH_PLATFORM,
+      { holder: relay.key.name, sealed, sealed_to: relay.key.fingerprint },
+      NOW,
+    ),
+  );
+  const handed = () =>
+    handoverPayloadSchema.parse(
+      openEnvelope(
+        f.keys.handover,
+        f.aad,
+        f.handover([], HandoverPlacement.Worker),
+      ),
+    ).items;
+  const [item] = handed();
+  assert.ok(item && "sealed" in item);
+  assert.equal(item.credential_id, copyId);
+  const key = copyKeyOf(relay);
+  const opened = await openSealedCopy(item, SecretShape.OAuth, key);
+  assert.deepEqual(opened?.credential, { type: SecretShape.OAuth, ...first });
+  const reports: unknown[] = [];
+  await sealedCopyReporter(item, opened!, key, async (report) => {
+    reports.push(report);
+  })({ credential: { type: SecretShape.OAuth, ...second } });
+  f.report(sealEnvelope(f.keys.report, f.aad, reports[0]));
+  const [next] = handed();
+  assert.ok(next && "sealed" in next);
+  assert.equal(next.credential_id, copyId);
+  assert.deepEqual(
+    (await openSealedCopy(next, SecretShape.OAuth, key))?.credential,
+    { type: SecretShape.OAuth, ...second },
+  );
+  const rows = f.store.database
+    .prepare("SELECT revision FROM credential WHERE name = ?")
+    .all("claude") as { revision: number }[];
+  assert.deepEqual(
+    rows.map(({ revision }) => revision),
+    [REVISION_COUNT],
+  );
+  const text = JSON.stringify([reports, f.logs]);
+  assert.equal(text.includes(second.access), false);
+  assert.equal(text.includes(second.refresh), false);
 });
 
 test("a worker placement handover refuses a copy of another instance as held_elsewhere and a copy sealed to an ended key", async (t) => {

@@ -19,6 +19,7 @@ import {
   type OperationResult,
 } from "../kernel/operation.ts";
 import type { SshAccess } from "../repository/contract.ts";
+import { loginSessionEntrySchema } from "../llm/contract.ts";
 import type { Transaction } from "../kernel/store.ts";
 import { HttpMethod, HttpStatus } from "../kernel/http.ts";
 import {
@@ -798,6 +799,7 @@ export const WORKER_TOKEN_INFO = "kanthord/worker-token/v1";
 export const INSTANCE_CONNECTION_INFO = "kanthord/instance-connection/v1";
 export const INSTANCE_HEARTBEAT_INTERVAL_MS = 15000;
 export const INSTANCE_CONNECTED_WINDOW_MS = 60000;
+export const INSTANCE_LOGIN_HEARTBEAT_INTERVAL_MS = 2000;
 export const INSTANCE_RENEWAL_INTERVAL_MS = 1800000;
 export const NO_CREDENTIAL_VERSION = 0;
 export const INSTANCE_SUPERSEDED_CODE = "worker.instance.superseded";
@@ -1237,7 +1239,7 @@ export const instanceOperations = {
       server_version: z.string().min(1),
       binding_version: z.number().int().min(0),
       credential_version: z.number().int().min(0),
-      login_sessions: z.array(z.record(z.string(), z.unknown())),
+      login_sessions: z.array(loginSessionEntrySchema),
     }),
     description:
       "Renew the current connection of the instance and answer the server version, the binding version, the credential version and the open login sessions.",
