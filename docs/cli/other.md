@@ -723,6 +723,12 @@ binding ends the process with `worker.instance.secret_changed`. A different
 server version ends it with `worker.version.mismatch`. A rotated or archived
 instance answers `404 worker.instance.not_found` and ends the process.
 
+The heartbeat answer lists the pending OAuth login sessions of the instance in
+`login_sessions`. The instance runs each session with pi-ai in `copy_code` or
+`device` mode, reports its address and code through
+`llm.credential.login_report`, and seals the result to its own key. While a
+session is pending, the heartbeat runs every 2 s.
+
 One connection of an instance is current. A second process of the same
 instance takes the connection. The first process then gets
 `worker.instance.connection_superseded`, ends with
