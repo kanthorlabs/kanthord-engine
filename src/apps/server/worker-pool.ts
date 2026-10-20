@@ -1,14 +1,17 @@
 import { constants, createWriteStream, type WriteStream } from "node:fs";
-import { extname, join } from "node:path";
-import { fileURLToPath } from "node:url";
-import { MessageChannel, Worker, type MessagePort } from "node:worker_threads";
+import { join } from "node:path";
+import { MessageChannel, type MessagePort } from "node:worker_threads";
 import type { Logger } from "pino";
 import { generateSlotJWT, deriveClientSecret } from "../../gateway/auth/jwt.ts";
 import { servePort, type createInvocation } from "../../gateway/index.ts";
-import { workerThreadAsset } from "../../kernel/assets.ts";
 import { ensureDirectory, openPrivate } from "../../kernel/files.ts";
-import { LogDestination } from "../../kernel/log.ts";
-import type { PoolHost, PoolSlot } from "../../worker/contract.ts";
+import {
+  InstancePlacement,
+  type PoolHost,
+  type PoolSlot,
+} from "../../worker/contract.ts";
+import { ThreadControl } from "../worker/thread-data.ts";
+import type { SlotDriver, SlotInstance } from "./slot-driver.ts";
 import { slotClientIdentity } from "./slot-identity.ts";
 
 export const POOL_BACKOFF_INITIAL_MS = 1000;
@@ -19,30 +22,6 @@ const WORKERS_DIRECTORY = "workers";
 const STDERR_LOG = "stderr.log";
 const BINDING_NAME_INDEX = 2;
 const IDENTITY_SEPARATOR = ":";
-const ThreadMessage = { Drain: "drain", Stop: "stop" } as const;
-const INHERITED_VARIABLES = [
-  "PATH",
-  "HOME",
-  "USER",
-  "LOGNAME",
-  "SHELL",
-  "LANG",
-  "LC_ALL",
-  "LC_CTYPE",
-  "TZ",
-  "TMPDIR",
-  "GIT_AUTHOR_NAME",
-  "GIT_AUTHOR_EMAIL",
-  "GIT_COMMITTER_NAME",
-  "GIT_COMMITTER_EMAIL",
-];
-const SLOT_DIRECTORIES = {
-  XDG_CONFIG_HOME: "config",
-  XDG_STATE_HOME: "state",
-  XDG_DATA_HOME: "data",
-  XDG_CACHE_HOME: "cache",
-};
-
 export interface WorkerPoolOptions {
   invocation: ReturnType<typeof createInvocation>;
   masterKey: string;
@@ -51,41 +30,23 @@ export interface WorkerPoolOptions {
   stateDirectory: string;
   logger: Logger;
   runtimeIdentity: (clientId: string) => string | undefined;
+  drivers: ReadonlyMap<InstancePlacement, SlotDriver>;
   environment?: NodeJS.ProcessEnv;
 }
 
 interface Entry {
   slot: PoolSlot;
   pending: boolean;
-  worker?: Worker;
+  instance?: SlotInstance;
   port?: MessagePort;
   log?: WriteStream;
-  requested: (typeof ThreadMessage)[keyof typeof ThreadMessage] | null;
+  requested: ThreadControl["kind"] | null;
   resume: boolean;
   failure: Error | null;
   delay: number;
   startedAt: number;
   timer?: NodeJS.Timeout;
   exit: PromiseWithResolvers<void>;
-}
-
-export function threadEnvironment(
-  source: NodeJS.ProcessEnv,
-  root: string,
-): NodeJS.ProcessEnv {
-  const env: NodeJS.ProcessEnv = {};
-  for (const name of INHERITED_VARIABLES)
-    if (source[name] !== undefined) env[name] = source[name];
-  for (const [name, directory] of Object.entries(SLOT_DIRECTORIES))
-    env[name] = join(root, directory);
-  return env;
-}
-
-function threadEntry(): URL {
-  return new URL(
-    `../worker/thread${extname(import.meta.url)}`,
-    import.meta.url,
-  );
 }
 
 export class WorkerPool implements PoolHost {
@@ -113,10 +74,6 @@ export class WorkerPool implements PoolHost {
     );
   }
 
-  threadOf(clientId: string): Worker | undefined {
-    return this.entries.get(clientId)?.worker;
-  }
-
   onEnded(listener: (clientId: string) => void): void {
     this.listeners.push(listener);
   }
@@ -126,7 +83,7 @@ export class WorkerPool implements PoolHost {
     const existing = this.entries.get(slot.client_id);
     if (existing) {
       existing.slot = slot;
-      if (existing.requested === ThreadMessage.Drain && !slot.draining)
+      if (existing.requested === ThreadControl.Drain && !slot.draining)
         existing.resume = true;
       return;
     }
@@ -170,9 +127,9 @@ export class WorkerPool implements PoolHost {
       this.ended(slot.client_id);
       return;
     }
-    if (entry.worker && entry.requested !== ThreadMessage.Drain) {
-      entry.requested = ThreadMessage.Drain;
-      entry.worker.postMessage({ kind: ThreadMessage.Drain });
+    if (entry.instance && entry.requested !== ThreadControl.Drain) {
+      entry.requested = ThreadControl.Drain;
+      entry.instance.control(ThreadControl.Drain);
     }
   }
 
@@ -202,15 +159,15 @@ export class WorkerPool implements PoolHost {
 
   private async halt(entry: Entry): Promise<void> {
     clearTimeout(entry.timer);
-    const worker = entry.worker;
-    if (!worker) {
+    const instance = entry.instance;
+    if (!instance) {
       this.entries.delete(entry.slot.client_id);
       return;
     }
-    entry.requested = ThreadMessage.Stop;
-    worker.postMessage({ kind: ThreadMessage.Stop });
+    entry.requested = ThreadControl.Stop;
+    instance.control(ThreadControl.Stop);
     const deadline = setTimeout(() => {
-      void worker.terminate();
+      instance.terminate();
     }, POOL_STOP_DEADLINE_MS);
     try {
       await entry.exit.promise;
@@ -231,6 +188,13 @@ export class WorkerPool implements PoolHost {
         slot.resource_identity.split(IDENTITY_SEPARATOR)[BINDING_NAME_INDEX]!,
       slot: slot.slot,
     }).then(({ token }) => token);
+  }
+
+  private driver(): SlotDriver {
+    const driver = this.options.drivers.get(InstancePlacement.Server);
+    if (!driver)
+      throw new Error("worker pool: no slot driver for the placement");
+    return driver;
   }
 
   private launch(entry: Entry): void {
@@ -255,42 +219,30 @@ export class WorkerPool implements PoolHost {
         () => this.token(slot),
         this.options.logger,
       );
-      const data = {
-        port: port2,
+      const instance = this.driver().launch({
+        slot,
+        channel: port2,
         client_secret: deriveClientSecret(
           this.options.masterKey,
           this.options.authVersion,
           slot.client_id,
         ),
-        log: LogDestination.File,
-      };
-      const workerOptions = {
-        workerData: data,
-        transferList: [port2],
-        env: threadEnvironment(this.options.environment ?? process.env, root),
-        stdout: true,
-        stderr: true,
-      };
-      const bundle = workerThreadAsset();
-      const worker =
-        bundle === undefined
-          ? new Worker(fileURLToPath(threadEntry()), workerOptions)
-          : new Worker(bundle, { ...workerOptions, eval: true });
-      worker.stdout.pipe(log, { end: false });
-      worker.stderr.pipe(log, { end: false });
-      entry.worker = worker;
+        root,
+        output: log,
+        environment: this.options.environment ?? process.env,
+      });
+      entry.instance = instance;
       entry.failure = null;
       entry.requested = null;
       entry.startedAt = Date.now();
       entry.exit = Promise.withResolvers<void>();
-      worker.on("error", (error: unknown) => {
-        entry.failure =
-          error instanceof Error ? error : new Error(String(error));
+      void instance.exited.then(({ code, error }) => {
+        if (error) entry.failure = error;
+        this.exited(entry, code);
       });
-      worker.once("exit", (code) => this.exited(entry, code));
       if (slot.draining) {
-        entry.requested = ThreadMessage.Drain;
-        worker.postMessage({ kind: ThreadMessage.Drain });
+        entry.requested = ThreadControl.Drain;
+        instance.control(ThreadControl.Drain);
       }
     } catch (error) {
       entry.failure = error instanceof Error ? error : new Error(String(error));
@@ -303,11 +255,11 @@ export class WorkerPool implements PoolHost {
     entry.port = undefined;
     entry.log?.end();
     entry.log = undefined;
-    entry.worker = undefined;
+    entry.instance = undefined;
     const requested = entry.requested;
     entry.requested = null;
     entry.exit.resolve();
-    if (this.stopping || requested === ThreadMessage.Stop) {
+    if (this.stopping || requested === ThreadControl.Stop) {
       this.entries.delete(entry.slot.client_id);
       return;
     }
@@ -318,7 +270,7 @@ export class WorkerPool implements PoolHost {
       return;
     }
     const drained =
-      requested === ThreadMessage.Drain && !entry.failure && !code;
+      requested === ThreadControl.Drain && !entry.failure && !code;
     const unregistered =
       entry.slot.draining &&
       this.options.runtimeIdentity(entry.slot.client_id) === undefined;

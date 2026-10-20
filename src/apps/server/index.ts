@@ -102,6 +102,7 @@ import {
   toolDeclarations,
 } from "../../worker/index.ts";
 import { installPiTools } from "../../agent/pi-tools.ts";
+import { ThreadDriver } from "./thread-driver.ts";
 import { WorkerPool } from "./worker-pool.ts";
 import { AgentComponent, agentMigrations } from "../../agent/index.ts";
 import {
@@ -251,7 +252,9 @@ export function composeServices(options: {
       },
     },
   });
+  const threadDriver = new ThreadDriver();
   const workerPool = new WorkerPool({
+    drivers: new Map([[threadDriver.placement, threadDriver]]),
     invocation,
     masterKey: options.config.master_key,
     authVersion: options.config.gateway.auth.version,
@@ -806,6 +809,7 @@ export function composeServices(options: {
     invocation,
     registry,
     workerPool,
+    threadDriver,
     repoConnector,
     github,
     gitWriter,
