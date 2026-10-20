@@ -1,3 +1,5 @@
+import { decode } from "hono/jwt";
+import { deriveClientSecret } from "../../gateway/auth/jwt.ts";
 import assert from "node:assert/strict";
 import { existsSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -114,13 +116,22 @@ export async function generateMachineToken(input: {
   );
   assert.equal(generated.code, SUCCESS_EXIT_CODE);
   assert.equal(generated.stderr, EMPTY_OUTPUT);
-  const fragment = parse(generated.stdout) as {
-    token: string;
-    client_secret: string;
-  };
+  const fragment = parse(generated.stdout) as { token: string };
   assert.ok(isString(fragment.token) && fragment.token.length);
-  assert.ok(isString(fragment.client_secret) && fragment.client_secret.length);
-  return { token: fragment.token, client_secret: fragment.client_secret };
+  const { sub } = decode(fragment.token).payload;
+  assert.ok(isString(sub));
+  const issued = configuration({
+    version: CONFIG_VERSION,
+    master_key: input.masterKey,
+  }).getProperties();
+  return {
+    token: fragment.token,
+    client_secret: deriveClientSecret(
+      issued.master_key,
+      issued.gateway.auth.version,
+      sub,
+    ),
+  };
 }
 
 export async function kanthord(
