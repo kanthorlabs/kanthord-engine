@@ -215,7 +215,7 @@ export interface RootSpanEnd {
   trace: ExecutionTrace;
   ended_at: number;
   end: ExecutionEnd;
-  stop: { reason: string; code: string | null } | null;
+  stop: { reason: string; code: string | null; detail?: string } | null;
 }
 export interface ExecutionTelemetry {
   executionOpened(trace: ExecutionTrace, createdAt: number): void;

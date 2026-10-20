@@ -31,6 +31,8 @@ import type {
 } from "./model-runtime.ts";
 import { EndReason, ExecutionStop } from "./execution-run.ts";
 import { providerFailureOf } from "../../llm/provider-failure.ts";
+import { redactReason } from "../../kernel/probe.ts";
+import { SecretShape } from "../../custody/contract.ts";
 import { traceAgent } from "./agent-telemetry.ts";
 import type { SpanRecorder } from "./telemetry.ts";
 
@@ -71,16 +73,32 @@ export interface NativeAgent {
 const ASSISTANT_ROLE = "assistant";
 const PROVIDER_ERROR = "error";
 
-function providerFailure(
+async function credentialSecrets(
+  credential: ExecutionCredential,
+): Promise<string[]> {
+  const stored = await credential.store.read(credential.provider_id);
+  if (stored === undefined) return [];
+  if (stored.type === SecretShape.OAuth) return [stored.access, stored.refresh];
+  return stored.key === undefined ? [] : [stored.key];
+}
+
+async function providerFailure(
   messages: readonly AgentMessage[],
-): ExecutionStop | null {
+  credential: ExecutionCredential,
+): Promise<ExecutionStop | null> {
   const last = messages.findLast(
     (message): message is AssistantMessage => message.role === ASSISTANT_ROLE,
   );
   if (last?.stopReason !== PROVIDER_ERROR) return null;
+  const errorMessage = last.errorMessage ?? "";
+  const detail = redactReason(
+    errorMessage,
+    await credentialSecrets(credential),
+  );
   return new ExecutionStop(
     EndReason.ProviderFailed,
-    providerFailureOf(last.errorMessage ?? ""),
+    providerFailureOf(errorMessage),
+    detail || null,
   );
 }
 
@@ -93,6 +111,7 @@ function nativeAgent(
   disposeSignal: () => void,
   turnCheck: () => Promise<void>,
   unsubscribeTrace: () => void,
+  credential: ExecutionCredential,
 ): NativeAgent {
   let session: AgentSession | null = opened;
   const finishTurn = opened.agent.finishTurn;
@@ -110,7 +129,7 @@ function nativeAgent(
     await session.prompt(text, { expandPromptTemplates: false });
     await session.waitForIdle();
     if (context.err()) return;
-    const failed = providerFailure(session.messages);
+    const failed = await providerFailure(session.messages, credential);
     if (failed) throw failed;
   };
   let unsubscribeTurns: (() => void) | null = countTurns(opened, () => {
@@ -227,6 +246,7 @@ export async function openNativeAgent(
       bridge.dispose,
       input.turnCheck ?? (async () => {}),
       unsubscribeTrace,
+      input.credential,
     );
   } catch (error) {
     session?.dispose();

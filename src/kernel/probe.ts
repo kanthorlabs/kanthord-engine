@@ -9,7 +9,7 @@ import { HttpMethod, HttpStatus } from "./http.ts";
 
 export const AUTHORIZATION_HEADER = "Authorization";
 
-const REASON_MAX_LENGTH = 300;
+export const REASON_MAX_LENGTH = 300;
 const EMPTY_LENGTH = 0;
 const REDACTED = "[redacted]";
 const BEARER_PATTERN = /Bearer\s+\S+/gi;

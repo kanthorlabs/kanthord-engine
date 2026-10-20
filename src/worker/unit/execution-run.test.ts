@@ -13,6 +13,7 @@ import {
   EXECUTION_PROOF_FAILED,
 } from "./execution-run.ts";
 import type { MethodClients } from "./method-clients.ts";
+import { ProviderFailure } from "../../scheduler/contract.ts";
 
 const SETTLE_CALL_COUNT = 1;
 const CALLS = 2;
@@ -283,6 +284,36 @@ test("a stop release settles credentials under a fresh context and reconciles a 
     );
     assert.equal(reports, SETTLE_CALL_COUNT);
   }
+});
+
+test("a stop release sends the cause detail of a provider failure", async (t) => {
+  const run = fixture();
+  t.after(() => run.dispose());
+  const stop = {
+    reason: EndReason.ProviderFailed,
+    code: ProviderFailure.Unavailable,
+    detail: "OAuth auth derivation failed for anthropic",
+  };
+  const stopped = run.stopOf(
+    new ExecutionStop(stop.reason, stop.code, stop.detail),
+  );
+  const bodies: unknown[] = [];
+  run.clients.scheduler = {
+    executionRelease: async (input: { body: unknown }) => {
+      bodies.push(input.body);
+      return {
+        type: OperationResultType.Completed,
+        status: 200,
+        data: { execution_id: "execution", ended_at: 1 },
+      };
+    },
+  } as unknown as MethodClients["scheduler"];
+  assert.deepEqual(await run.releaseStop(stopped), {
+    kind: "released",
+    furtherWork: true,
+    stop,
+  });
+  assert.deepEqual(bodies, [{ further_work: true, stop }]);
 });
 
 test("a stop release that the scheduler refuses as ended ends the run as revoked", async (t) => {

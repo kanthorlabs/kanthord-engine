@@ -111,6 +111,21 @@ test("Trace protocol identities refuse all-zero, uppercase and wrong lengths", (
   }
 });
 
+test("a release stop carries an optional cause detail of at most 300 characters", () => {
+  const stop = { reason: "provider_failed", code: "unavailable" };
+  const parse = (detail: unknown) =>
+    releaseStopSchema.safeParse({ ...stop, detail });
+  assert.deepEqual(releaseStopSchema.parse(stop), stop);
+  assert.deepEqual(parse("Cannot find module").data, {
+    ...stop,
+    detail: "Cannot find module",
+  });
+  assert.equal(parse("x".repeat(300)).success, true);
+  assert.equal(parse("x".repeat(301)).success, false);
+  assert.equal(parse("").success, false);
+  assert.equal(parse(null).success, false);
+});
+
 test("a release stop code fits its reason", () => {
   const fits = (reason: string, code: string | null) =>
     releaseStopSchema.safeParse({ reason, code }).success;

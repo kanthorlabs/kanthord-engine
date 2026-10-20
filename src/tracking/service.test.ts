@@ -36,6 +36,7 @@ const NO_DROP = 0;
 const NO_ROWS = 0;
 const ONE_DROP = 1;
 const PAGE_OF_ONE = 1;
+const STOP_DETAIL = "Cannot find module";
 const SPAN_PAGE = 10;
 const RATE_LIMITED = "rate_limited";
 const INPUT_TEXT = "npm test";
@@ -106,6 +107,27 @@ test("the root span opens at the claim and ends at the release", (t) => {
   assert.equal(root?.status, SpanStatus.Error);
   assert.equal(root?.attributes["kanthord.stop.code"], RATE_LIMITED);
   assert.equal(service.droppedRecords(), NO_DROP);
+});
+
+test("the root span end carries the stop detail", (t) => {
+  const { store, service } = harness(t);
+  service.executionOpened(TRACE, CREATED);
+  service.executionEnded({
+    trace: TRACE,
+    ended_at: ENDED,
+    end: ExecutionEnd.Finished,
+    stop: {
+      reason: "provider_failed",
+      code: "unavailable",
+      detail: STOP_DETAIL,
+    },
+  });
+  const root = service.spanList(
+    TRACE.trace_id,
+    { limit: PAGE_OF_ONE },
+    caller(store),
+  ).items[0];
+  assert.equal(root?.attributes["kanthord.stop.detail"], STOP_DETAIL);
 });
 
 test("a repeated root open changes nothing", (t) => {
