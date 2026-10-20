@@ -858,8 +858,7 @@ terminal requirement and token output stay unchanged. With `--output`, no
 terminal check applies. Validate the document with the client configuration
 schema, then serialize it as YAML. A human token file holds only `token`, or
 `endpoint` then `token` when `--endpoint` is given. A machine token file holds
-the same fields and no `client_secret`. With `--output`, the command prints neither the
-token nor the client secret.
+the same fields. With `--output`, the command does not print the token.
 
 Create an absent destination directory at `0700`. Write a same-directory
 `0600` temporary file, flush and close it, then link it to the destination
@@ -906,20 +905,11 @@ the named binding exists or is available; Gateway checks it on later use, and
 a token for an absent/unavailable binding fails verification. Registration is
 a separate Worker operation.
 
-Without `--output` or `--verbose`, machine mode prints these two rows:
-
-```text
-token:         <jwt>
-client_secret: <secret>
-```
-
-Each line ends with a newline. Only the `token` row belongs in private
-`cli.yaml`; the file refuses `client_secret`. The command derives the client secret from the server `master_key`
-and the new token's `sub`. It uses HKDF-SHA256 with an empty salt, the label
-`"worker/client-secret/v" + auth_version + "/" + sub`, and 32 output bytes in
-canonical base64. See the [client-secret ruling](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/gateway-service.impl.md#the-client-secret).
-The server stores no client secret. Each new machine token has a different
-client secret. Human mode issues no client secret.
+Without `--output` or `--verbose`, machine mode prints exactly `token: <JWT>\n`.
+The command prints no client secret. The server derives the client secret of a
+machine token from its `master_key` and the token `sub`, under the
+[client-secret ruling](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/gateway-service.impl.md#the-client-secret).
+The server stores no client secret.
 
 ### Token inspection
 
@@ -948,9 +938,8 @@ jti: 01K6...
 ---
 ```
 
-`auth jwt generate --verbose` prints this same claim list after the human `token` row,
-the two machine rows, or the `created: <absolute path>` row with
-`--output`.
+`auth jwt generate --verbose` prints this same claim list after the `token` row,
+or after the `created: <absolute path>` row with `--output`.
 
 ### Signing, output, errors, and persistence
 
@@ -971,18 +960,16 @@ token signing. The message tells the user to pass `--output <path>`, or to run
 the container command with `-t`. Stdin need not be a terminal and is never read.
 
 Without `--output` or `--verbose`, human mode prints exactly `token: <JWT>\n`.
-Without `--output`, machine mode prints the aligned rows `token` and `client_secret`, as shown
-above. Exit is `0`. With `--verbose`, the same claim list follows the human `token`
-row or the machine rows. It adds no client secret to the claims.
+Without `--output`, machine mode prints the same `token` row. Exit is `0`.
+With `--verbose`, the claim list follows the `token` row. It adds no client secret to the claims.
 No secret is printed to stderr. Invalid inputs, an absent or invalid
 configuration, failed terminal check, or signing failure exits nonzero without
 a successful token result.
 
-`--output` saves a human or a machine token, and no `client_secret`, in
+`--output` saves a human or a machine token in
 an absent private client configuration file under the [human-token
 rules](#human-token). It prints only `created: <absolute path>\n`, followed by
-claims when `--verbose` is given. It never prints the token or the client
-secret, including on a failed publication. Readers use only
+claims when `--verbose` is given. It never prints the token, including on a failed publication. Readers use only
 the default client path. Without `--output`, issuance saves no client
 configuration. Terminal-only output does not detect a terminal recorder.
 

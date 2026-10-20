@@ -40,14 +40,13 @@ const EMPTY_OUTPUT = "";
 const TOKEN_ROW = "token: ";
 const HANDOVER_LOST =
   "cli.worker.handover.indeterminate: worker handover: the result is unknown; retry with a new idempotency key\n";
-const MACHINE_TOKEN_ROW = "token:         ";
+const MACHINE_TOKEN_ROW = "token: ";
 const JWT_OUTPUT = /eyJ[A-Za-z0-9_-]*\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/;
 const PROJECT_GET = "get";
 const PROJECT_ID = "project_01ARZ3NDEKTSV4RRFFQ69G5FAV";
 const PREFIX_BASE_PATH = "/s/kanthord";
 const BINDING_ID = "binding_01ARZ3NDEKTSV4RRFFQ69G5FAV";
 const SINGLE_DIAGNOSTIC_LINE = 1;
-const CLIENT_SECRET_BYTES = 32;
 const DATA_DIRECTORY = "data";
 const WORKER_UNREACHABLE_ENDPOINT = "http://127.0.0.1:1";
 const WORKER_UNREACHABLE_ARGS = [
@@ -1296,8 +1295,6 @@ test("jwt accepts display names and issues fresh machine identities without open
   assert.equal(decode(parse(human.stdout).token).payload.name, name);
   const subjects = new Set<string>();
   const sessions = new Set<string>();
-  const secrets = new Set<string>();
-  const config = loadConfig(env.KANTHORD_CONFIG!);
   const ISSUANCES = 2;
   for (let index = 0; index < ISSUANCES; index++) {
     const result = await invocation(
@@ -1315,30 +1312,10 @@ test("jwt accepts display names and issues fresh machine identities without open
       true,
     );
     assert.equal(result.status, ExitCode.Success, result.stderr);
-    const { token, client_secret: clientSecret } = parse(result.stdout);
-    assert.equal(
-      result.stdout,
-      `${MACHINE_TOKEN_ROW}${token}\nclient_secret: ${clientSecret}\n`,
-    );
+    const { token } = parse(result.stdout);
+    assert.equal(result.stdout, `${MACHINE_TOKEN_ROW}${token}\n`);
     assert.equal(result.stderr, EMPTY_OUTPUT);
     const claims = decode(token).payload;
-    assert.equal(
-      clientSecret,
-      deriveClientSecret(
-        config.master_key,
-        config.gateway.auth.version,
-        String(claims.sub),
-      ),
-    );
-    assert.equal(
-      Buffer.from(clientSecret, "base64").length,
-      CLIENT_SECRET_BYTES,
-    );
-    assert.equal(
-      Buffer.from(clientSecret, "base64").toString("base64"),
-      clientSecret,
-    );
-    secrets.add(clientSecret);
     assert.equal(claims.kind, IdentityKind.Client);
     assert.equal(claims.project_id, PROJECT_ID);
     assert.equal(claims.resource_identity, `worker:kanthord:${binding}`);
@@ -1352,7 +1329,6 @@ test("jwt accepts display names and issues fresh machine identities without open
   }
   assert.equal(subjects.size, ISSUANCES);
   assert.equal(sessions.size, ISSUANCES);
-  assert.equal(secrets.size, ISSUANCES);
   const conflict = await invocation(
     ["auth", "jwt", "generate", "ulrich", "--binding", binding],
     env,
@@ -1450,16 +1426,10 @@ test("auth jwt group, verbose generation, inspection and token precedence", asyn
     true,
   );
   assert.equal(machine.status, ExitCode.Success, machine.stderr);
-  const [machineTokenLine, secretLine, ...machineClaims] =
-    machine.stdout.split("\n");
+  const [machineTokenLine, ...machineClaims] = machine.stdout.split("\n");
   const machineToken = machineTokenLine!.slice(MACHINE_TOKEN_ROW.length);
-  const machineSecret = deriveClientSecret(
-    loadConfig(env.KANTHORD_CONFIG!).master_key,
-    loadConfig(env.KANTHORD_CONFIG!).gateway.auth.version,
-    String(decode(machineToken).payload.sub),
-  );
   assert.equal(machineTokenLine, `${MACHINE_TOKEN_ROW}${machineToken}`);
-  assert.equal(secretLine, `client_secret: ${machineSecret}`);
+  assert.doesNotMatch(machine.stdout, /client_secret/);
   const machineInspect = await invocation(
     ["auth", "jwt", "inspect", machineToken],
     env,
