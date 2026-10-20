@@ -415,6 +415,7 @@ test(
         turns: 200,
         wall_time_ms: 7200000,
       });
+      assert.match(repository.ssh_public_key, /^ssh-ed25519 /);
       assert.deepEqual(repository, {
         binding_id: repository.binding_id,
         name: "repo",
@@ -422,6 +423,7 @@ test(
         ssh_host_key: {
           known_hosts: `${FAKE_SSH_HOST} ${FAKE_GITHUB_HOST_KEY}\n`,
         },
+        ssh_public_key: repository.ssh_public_key,
         strategy: { base_branch: "main" },
         project_prompt: PROJECT,
         working_layer: WORKING_LAYER_ALL_ON,
