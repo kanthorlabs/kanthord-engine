@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { MessageChannel, Worker } from "node:worker_threads";
+import { PassThrough } from "node:stream";
+import { MessageChannel, Worker, type MessagePort } from "node:worker_threads";
 import { test, type TestContext } from "node:test";
 import pino from "pino";
 import { servePort } from "../../gateway/index.ts";
@@ -11,6 +12,11 @@ import { HttpStatus } from "../../kernel/http.ts";
 import { missionOperations } from "../../mission/contract.ts";
 import { schedulerOperations } from "../../scheduler/contract.ts";
 import { workerOperations } from "../../worker/contract.ts";
+import {
+  bridgePort,
+  instanceFrameSchema,
+  serverFrameSchema,
+} from "../worker/frames.ts";
 import { httpTransport, type WorkerTransport } from "../worker/transport.ts";
 import { until } from "./cli-support.ts";
 import {
@@ -24,6 +30,8 @@ import {
 type Fixture = Awaited<ReturnType<typeof gatewayFixture>>;
 type Provision = Awaited<ReturnType<typeof provisionWorkerProject>>;
 type ServiceName = keyof WorkerTransport;
+type Closable = { close(): void };
+type Link = (port: MessagePort, opened: Closable[]) => MessagePort;
 
 interface Wire {
   params?: Record<string, string>;
@@ -203,11 +211,40 @@ async function httpSide(fixture: Fixture, tokens: Scenario["tokens"]) {
   } satisfies Side;
 }
 
+const directLink: Link = (port) => port;
+
+function failOnInvalid(error: Error): never {
+  throw error;
+}
+
+const bridgeLink: Link = (port, opened) => {
+  const toServer = new PassThrough();
+  const toInstance = new PassThrough();
+  const { port1, port2 } = new MessageChannel();
+  opened.push(port1, port2);
+  opened.push({ close: () => toServer.destroy() });
+  opened.push({ close: () => toInstance.destroy() });
+  bridgePort(port, toServer, toInstance, {
+    frames: instanceFrameSchema,
+    onFrame: () => {},
+    onInvalid: failOnInvalid,
+    onEnd: () => {},
+  });
+  bridgePort(port1, toInstance, toServer, {
+    frames: serverFrameSchema,
+    onFrame: () => {},
+    onInvalid: failOnInvalid,
+    onEnd: () => {},
+  });
+  return port2;
+};
+
 async function portSide(
   t: TestContext,
   fixture: Fixture,
   tokens: Scenario["tokens"],
   records: Record<string, unknown>[],
+  link: Link,
 ) {
   const logger = pino(
     { level: "info" },
@@ -220,7 +257,7 @@ async function portSide(
       contextUrl: new URL("../../kernel/context.ts", import.meta.url).href,
     },
   });
-  const opened: { close(): void }[] = [];
+  const opened: Closable[] = [];
   t.after(async () => {
     await thread.terminate();
     for (const port of opened) port.close();
@@ -245,7 +282,7 @@ async function portSide(
     const { port1, port2 } = new MessageChannel();
     opened.push(port1, port2);
     servePort(port1, fixture.invocation, () => tokens[actor]!, logger);
-    return port2;
+    return link(port2, opened);
   };
   return {
     logs: () => records,
@@ -507,7 +544,7 @@ function requestRecords(lines: Record<string, unknown>[]) {
     .map((line) => ({ route: line.route, status: line.status }));
 }
 
-test("the port transport and the HTTP transport answer the same through the Gateway", async (t) => {
+test("the port transport, the bridged port transport and the HTTP transport answer the same through the Gateway", async (t) => {
   const fixture = await gatewayFixture(t, {
     repositoryConnector: {
       gitLsRemote: async () => {},
@@ -516,7 +553,6 @@ test("the port transport and the HTTP transport answer the same through the Gate
   await provisionRepositoryCredentials(fixture);
   await provisionNativeAgent(fixture);
   const httpScenario = await scenarioOf(fixture, "http");
-  const portScenario = await scenarioOf(fixture, "port");
   const httpMark = fixture.logs.length;
   const http = await run(
     await httpSide(fixture, httpScenario.tokens),
@@ -525,24 +561,38 @@ test("the port transport and the HTTP transport answer the same through the Gate
   const httpRecords = requestRecords(
     fixture.logs.slice(httpMark).map((line) => JSON.parse(line)),
   );
-  const portLines: Record<string, unknown>[] = [];
-  const port = await run(
-    await portSide(t, fixture, portScenario.tokens, portLines),
-    portScenario,
-  );
   const normalizedHttp = placeholders(http) as [string, unknown][];
-  const normalizedPort = placeholders(port) as [string, unknown][];
-  for (const [index, [name, outcome]] of normalizedHttp.entries())
-    assert.deepEqual(normalizedPort[index], [name, outcome], name);
-  assert.deepEqual(requestRecords(portLines), httpRecords);
-  const answered = new Map(normalizedPort);
-  for (const [name, status, code] of EXPECTED_FAILURES) {
-    const outcome = answered.get(name) as {
-      status: number;
-      error?: { error: { code: string } };
-      body?: { error: { code: string } };
-    };
-    assert.equal(outcome.status, status, name);
-    assert.equal((outcome.error ?? outcome.body)?.error.code, code, name);
+  for (const [suffix, link] of [
+    ["port", directLink],
+    ["bridge", bridgeLink],
+  ] as const) {
+    const portScenario = await scenarioOf(fixture, suffix);
+    const portLines: Record<string, unknown>[] = [];
+    const port = await run(
+      await portSide(t, fixture, portScenario.tokens, portLines, link),
+      portScenario,
+    );
+    const normalizedPort = placeholders(port) as [string, unknown][];
+    for (const [index, [name, outcome]] of normalizedHttp.entries())
+      assert.deepEqual(
+        normalizedPort[index],
+        [name, outcome],
+        `${suffix} ${name}`,
+      );
+    assert.deepEqual(requestRecords(portLines), httpRecords, suffix);
+    const answered = new Map(normalizedPort);
+    for (const [name, status, code] of EXPECTED_FAILURES) {
+      const outcome = answered.get(name) as {
+        status: number;
+        error?: { error: { code: string } };
+        body?: { error: { code: string } };
+      };
+      assert.equal(outcome.status, status, `${suffix} ${name}`);
+      assert.equal(
+        (outcome.error ?? outcome.body)?.error.code,
+        code,
+        `${suffix} ${name}`,
+      );
+    }
   }
 });
