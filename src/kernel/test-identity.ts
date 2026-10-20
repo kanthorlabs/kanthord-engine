@@ -1,5 +1,13 @@
-import { mintHumanIdentity, mintMachineIdentity } from "./caller-mint.ts";
-import type { HumanIdentity, MachineIdentity } from "./caller.ts";
+import {
+  mintHumanIdentity,
+  mintMachineIdentity,
+  mintWorkerIdentity,
+} from "./caller-mint.ts";
+import type {
+  HumanIdentity,
+  MachineIdentity,
+  WorkerIdentity,
+} from "./caller.ts";
 
 export function testHumanIdentity(
   accountId: string,
@@ -15,4 +23,12 @@ export function testMachineIdentity(
   runtimeIdentity?: string,
 ): MachineIdentity {
   return mintMachineIdentity(client, jti, runtimeIdentity);
+}
+
+export function testWorkerIdentity(
+  instanceId: string,
+  name: string,
+  jti: string,
+): WorkerIdentity {
+  return mintWorkerIdentity(instanceId, name, jti);
 }
