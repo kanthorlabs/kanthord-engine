@@ -17,13 +17,17 @@ import {
 import type { SlotControl } from "../worker/thread-data.ts";
 import {
   absentContainer,
+  absentVolume,
   containerOwner,
   killArguments,
   ownedArguments,
+  ownedVolumeArguments,
   presentVolume,
   removeArguments,
+  removeVolumeArguments,
   runArguments,
   RUNTIME_CHECK_TIMEOUT_MS,
+  slotClientId,
   slotName,
   SUCCESS_CODE,
   volumeArguments,
@@ -76,6 +80,13 @@ function unavailable(status: PlacementStatus): Diagnostic {
 
 function commandFailure(action: string, stderr: string): Error {
   return new Error(`container: ${action} failed: ${stderr.trim()}`);
+}
+
+function linesOf(text: string): string[] {
+  return text
+    .split(LINE_BREAK)
+    .map((line) => line.trim())
+    .filter(Boolean);
 }
 
 function exitError(code: number): Error | null {
@@ -300,17 +311,46 @@ export class ContainerDriver implements SlotDriver {
       );
   }
 
-  private async removeOwned(): Promise<boolean> {
+  async removeVolume(clientId: string): Promise<void> {
+    const runtime = await this.answeringRuntime();
+    if (runtime === null) return;
+    await this.removeVolumeOf(runtime, clientId);
+  }
+
+  async sweepVolumes(live: ReadonlySet<string>): Promise<void> {
+    const runtime = await this.answeringRuntime();
+    if (runtime === null) return;
+    const answer = await this.command(
+      runtime,
+      ownedVolumeArguments(this.owner),
+    );
+    if (answer.code !== SUCCESS_CODE)
+      throw commandFailure("volume ls", answer.stderr);
+    for (const name of linesOf(answer.stdout)) {
+      const clientId = slotClientId(name);
+      if (clientId !== null && !live.has(clientId))
+        await this.removeVolumeOf(runtime, clientId);
+    }
+  }
+
+  private async answeringRuntime(): Promise<ContainerRuntime | null> {
     const status = await this.check();
-    if (!status.available || status.container_runtime === null) return false;
-    const runtime = status.container_runtime;
+    return status.available ? status.container_runtime : null;
+  }
+
+  private async removeVolumeOf(runtime: ContainerRuntime, clientId: string) {
+    const answer = await this.command(runtime, removeVolumeArguments(clientId));
+    if (!absentVolume(answer))
+      throw commandFailure(`volume rm ${slotName(clientId)}`, answer.stderr);
+  }
+
+  private async removeOwned(): Promise<boolean> {
+    const runtime = await this.answeringRuntime();
+    if (runtime === null) return false;
     const answer = await this.command(runtime, ownedArguments(this.owner));
     if (answer.code !== SUCCESS_CODE) throw commandFailure("ps", answer.stderr);
-    const names = answer.stdout
-      .split(LINE_BREAK)
-      .map((line) => line.trim())
-      .filter(Boolean);
-    for (const name of names) await this.removeContainer(runtime, name);
+    for (const name of linesOf(answer.stdout))
+      await this.removeContainer(runtime, name);
     return true;
   }
 }

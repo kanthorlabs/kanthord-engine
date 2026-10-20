@@ -91,6 +91,14 @@ export class ThreadDriver implements SlotDriver {
     return Promise.resolve();
   }
 
+  removeVolume(): Promise<void> {
+    return Promise.resolve();
+  }
+
+  sweepVolumes(): Promise<void> {
+    return Promise.resolve();
+  }
+
   launch(launch: SlotLaunch): SlotInstance {
     const clientId = launch.slot.client_id;
     const worker = startThread(

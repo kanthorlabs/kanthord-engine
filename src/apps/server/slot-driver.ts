@@ -31,5 +31,7 @@ export interface SlotDriver {
   readonly placement: PoolPlacement;
   check(): Promise<PlacementStatus>;
   prepare(): Promise<void>;
+  removeVolume(clientId: string): Promise<void>;
+  sweepVolumes(live: ReadonlySet<string>): Promise<void>;
   launch(launch: SlotLaunch): SlotInstance;
 }

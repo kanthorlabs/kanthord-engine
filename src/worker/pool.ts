@@ -46,6 +46,8 @@ interface Group {
   generation: number;
   placement: PoolPlacement;
   slots: Map<number, PoolSlot>;
+  departed: Map<number, PoolSlot>;
+  removed: boolean;
 }
 
 function descendingBySlot(left: SlotLoad, right: SlotLoad): number {
@@ -144,9 +146,12 @@ export class Pool {
           generation: target.generation,
           placement: target.placement,
           slots: new Map(),
+          departed: new Map(),
+          removed: false,
         });
     for (const [key, group] of this.groups) {
       if (scope !== null && group.project_id !== scope) continue;
+      group.removed = !wanted.has(key);
       const count = wanted.get(key)?.count ?? NO_SLOTS;
       this.apply(group, count, probes, effects);
       if (restore) this.restore(group, count, probes, effects);
@@ -243,7 +248,12 @@ export class Pool {
       for (const [number, slot] of group.slots)
         if (slot.client_id === clientId) {
           group.slots.delete(number);
-          if (!group.slots.size) this.groups.delete(key);
+          group.departed.set(number, slot);
+          if (group.slots.size) return;
+          this.groups.delete(key);
+          if (group.removed)
+            for (const gone of group.departed.values())
+              void this.host.remove(gone);
           return;
         }
   }
