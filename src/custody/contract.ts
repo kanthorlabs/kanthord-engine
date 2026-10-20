@@ -830,6 +830,12 @@ export interface CredentialRecords {
     set: CredentialPlatformSet,
     query: CredentialListQuery & { holder?: string },
   ): CredentialListAnswer;
+  copyPlatform(
+    tx: Transaction,
+    set: CredentialPlatformSet,
+    credentialName: string,
+    holder: string,
+  ): string;
   get(
     tx: Transaction,
     set: CredentialPlatformSet,

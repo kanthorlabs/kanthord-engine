@@ -46,6 +46,7 @@ test("Worker authorizes the pinned inference configuration and refuses each brok
     tombstone: false,
     disabled: false,
     placement: InstancePlacement.Server,
+    worker_instances: [],
   };
   const identity = testMachineIdentity(
     {
@@ -175,6 +176,7 @@ test("Worker authorizes one credential per distinct credential of the agents of 
     tombstone: false,
     disabled: false,
     placement: InstancePlacement.Server,
+    worker_instances: [],
   };
   const identity = testMachineIdentity(
     {

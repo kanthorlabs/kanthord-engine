@@ -2714,3 +2714,59 @@ test("a worker writes and rotates only the sealed copy of its own instance", asy
     f.store.close();
   }
 });
+
+test("a key rotation between the server seal and the commit refuses the create and the rotate with credential.sealed.invalid", async () => {
+  const pair = await generateX25519KeyPair();
+  const current: InstanceKey = {
+    name: RELAY_A,
+    public_key: pair.public_key.toString("base64url"),
+    fingerprint: keyFingerprint(pair.public_key),
+  };
+  const rotated: InstanceKey = {
+    ...current,
+    fingerprint: keyFingerprint((await generateX25519KeyPair()).public_key),
+  };
+  let reads = 0;
+  let rotateAfter = Number.POSITIVE_INFINITY;
+  const f = fixture({
+    instanceKeys: {
+      keyOf: (_tx, name) => {
+        if (name !== RELAY_A) return null;
+        reads += 1;
+        return reads > rotateAfter ? rotated : current;
+      },
+      nameOf: () => null,
+    },
+  });
+  try {
+    const body = {
+      name: "raced",
+      platform: Platform.Anthropic,
+      metadata: null,
+      secret: apiSecret,
+      holders: [RELAY_A],
+    };
+    rotateAfter = reads + 1;
+    await failsAsync(
+      async () => f.create(body),
+      HttpStatus.BadRequest,
+      SEALED_INVALID_CODE,
+    );
+    assert.equal(credentialCount(f), NO_CREDENTIALS);
+    rotateAfter = Number.POSITIVE_INFINITY;
+    await f.create(body);
+    rotateAfter = reads + 1;
+    await failsAsync(
+      async () =>
+        f.invoke(llmOperations.rotate, {
+          params: { credential_name: "raced" },
+          query: { holder: RELAY_A },
+          body: { expected_revision: 1, secret: apiSecret },
+        }),
+      HttpStatus.BadRequest,
+      SEALED_INVALID_CODE,
+    );
+  } finally {
+    f.store.close();
+  }
+});

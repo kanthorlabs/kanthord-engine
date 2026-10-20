@@ -1342,6 +1342,7 @@ test("handover handlers pass the proven execution and one transactional clock re
         tombstone: false,
         disabled: false,
         placement: InstancePlacement.Container,
+        worker_instances: [],
       };
     },
     custodyHandover: {
@@ -1694,6 +1695,7 @@ function authorizationFixture(t: TestContext) {
         tombstone: false,
         disabled: false,
         placement: InstancePlacement.Server,
+        worker_instances: [],
       }),
       schedulerClaims: {
         ...fakeCollaborations.schedulerClaims,
@@ -1858,6 +1860,7 @@ function poolFixture(t: TestContext, initialCount: number) {
     worker_name: WORKER,
     instance_count: state.count,
     placement: state.placement,
+    worker_instances: [],
     generation: state.generation,
   });
   const f = enablementFixture(t, {

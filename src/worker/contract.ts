@@ -457,6 +457,7 @@ export type WorkerBindingRowOf = (
   disabled: boolean;
   worker_name: string;
   placement: InstancePlacement | null;
+  worker_instances: string[];
   entries: Array<WorkerEntry & { agent: string }>;
   resource_budget: { turns: number; wall_time_ms: number } | null;
 } | null;

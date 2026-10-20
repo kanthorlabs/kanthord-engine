@@ -14,7 +14,7 @@ import type { repositoryOperations } from "../../repository/contract.ts";
 import type { storageOperations } from "../../storage/contract.ts";
 import { httpClient, resolveClient } from "../../gateway/client.ts";
 import { Diagnostic } from "../../kernel/errors.ts";
-import { instanceCredentialAccess } from "../worker/index.ts";
+import { instanceCredentialAccess, instanceSecret } from "../worker/index.ts";
 import { readNamedInstance } from "../worker/instance-config.ts";
 import { PROGRAM_NAME } from "./constants.ts";
 import { addFileBodyHelp } from "./file-body.ts";
@@ -93,6 +93,7 @@ async function createLocal(
 ): Promise<boolean> {
   const configuration = readNamedInstance(process.env, holder);
   if (configuration === null) return false;
+  instanceSecret(body.secret);
   const access = await instanceCredentialAccess(configuration);
   const sealed = await access.seal(body.name, body.platform, body.secret);
   const result = await httpClient(
@@ -132,6 +133,7 @@ async function rotateLocal(
 ): Promise<boolean> {
   const configuration = readNamedInstance(process.env, holder);
   if (configuration === null) return false;
+  instanceSecret(body.secret);
   const access = await instanceCredentialAccess(configuration);
   const client = httpClient(
     llmOperationsOf(group),

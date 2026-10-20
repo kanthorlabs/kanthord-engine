@@ -532,5 +532,6 @@ export function runWorker(options: WorkerOptions = {}): Promise<Error | null> {
 
 export {
   instanceCredentialAccess,
+  instanceSecret,
   type InstanceCredentialAccess,
 } from "./instance-credential.ts";

@@ -1715,6 +1715,18 @@ export class CustodyComponent implements Service, CredentialRecords {
       );
   }
 
+  copyPlatform(
+    tx: Transaction,
+    set: CredentialPlatformSet,
+    credentialName: string,
+    holder: string,
+  ): string {
+    refuseForeign(tx, set, credentialName);
+    const [row] = rowsForName(tx, credentialName, holder);
+    if (!row) throw notFound();
+    return row.platform;
+  }
+
   get(
     tx: Transaction,
     set: CredentialPlatformSet,

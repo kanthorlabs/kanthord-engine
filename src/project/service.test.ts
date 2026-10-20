@@ -4079,6 +4079,7 @@ test("workerBindingRowOf retains the pinned configuration in the caller transact
         tombstone: false,
         disabled: false,
         placement: WorkerPlacement.Server,
+        worker_instances: [],
         entries: [],
         resource_budget: null,
       },

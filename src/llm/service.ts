@@ -494,8 +494,12 @@ export class LlmComponent implements Service {
     caller: CallerContext,
   ): Promise<typeof llmOperations.rotate.output._output> {
     const { key, platform } = this.store.transaction((tx) => ({
-      platform: this.records.get(tx, this.platformSet, credentialName, holder)
-        .platform,
+      platform: this.records.copyPlatform(
+        tx,
+        this.platformSet,
+        credentialName,
+        holder,
+      ),
       key: this.instanceKey(tx, holder),
     }));
     const [copy] = await this.records.sealCopies(this.platformSet, {

@@ -1401,6 +1401,7 @@ export class ProjectService implements Service, ProjectBindings {
       tombstone: resolution.tombstone,
       disabled: resolution.disabled,
       placement: config.placement ?? null,
+      worker_instances: config.worker_instances ?? [],
       entries: config.entries ?? [],
       resource_budget: config.resource_budget ?? null,
     };

@@ -39,6 +39,20 @@ export interface InstanceCredentialAccess {
   ): Promise<InstanceSealedCopy>;
 }
 
+export function instanceSecret(secret: unknown): { key: string } {
+  const parsed = apiKeySecretSchema.safeParse(secret);
+  if (
+    !parsed.success ||
+    Buffer.byteLength(canonicalJSON(parsed.data), UTF8) >
+      SEALED_PLAINTEXT_MAX_BYTES
+  )
+    throw new Diagnostic(
+      INSTANCE_SECRET_INVALID,
+      "llm credential: the secret is no API key object within the sealed plaintext limit.",
+    );
+  return parsed.data;
+}
+
 export function instanceCopyKey(
   configuration: InstanceConfiguration,
 ): InstanceCopyKey {
@@ -73,16 +87,7 @@ export async function instanceCredentialAccess(
     endpoint,
     token: payload.token,
     seal: async (name, platform, secret) => {
-      const parsed = apiKeySecretSchema.safeParse(secret);
-      if (
-        !parsed.success ||
-        Buffer.byteLength(canonicalJSON(parsed.data), UTF8) >
-          SEALED_PLAINTEXT_MAX_BYTES
-      )
-        throw new Diagnostic(
-          INSTANCE_SECRET_INVALID,
-          "llm credential: the secret is no API key object within the sealed plaintext limit.",
-        );
+      const parsed = instanceSecret(secret);
       return {
         holder: key.holder,
         sealed_to: key.sealed_to,
@@ -95,7 +100,7 @@ export async function instanceCredentialAccess(
             holder: key.holder,
             sealed_to: key.sealed_to,
           }),
-          parsed.data,
+          parsed,
         ),
       };
     },

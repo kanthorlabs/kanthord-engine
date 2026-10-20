@@ -34,6 +34,7 @@ import {
   type AgentDependentBinding,
   type AgentEntry,
   type ApprovedModel,
+  type HolderScope,
 } from "./contract.ts";
 import { agentMigrations } from "./migrations.ts";
 import { promptSettings } from "./prompts.ts";
@@ -3033,4 +3034,30 @@ test("the holder rule refuses a holder without a live copy at the entry write, t
       },
     ],
   );
+});
+
+test("a view without a claimant shows the hold with the latest available_at over the holders of the binding", (t) => {
+  const RELAY_A = "relay-a";
+  const RELAY_B = "relay-b";
+  const EARLY = 1000;
+  const LATE = 9000;
+  const holds = memoryCredentialHolds();
+  const f = enablementFixture(t, { credentialHolds: holds });
+  f.invoke("enablement.put", putBody);
+  f.store.transaction((tx) => {
+    holds.hold(tx, provider.credential, RELAY_A, EARLY, FIRST_STRIKE);
+    holds.hold(tx, provider.credential, RELAY_B, LATE, SECOND_STRIKE);
+  });
+  const cooldownOf = (scope: HolderScope) =>
+    f.store.transaction((tx) => f.agent.agentView(tx, AGENT, null, scope))
+      ?.chain[0]?.cooldown;
+  assert.deepEqual(
+    cooldownOf({ holders: [RELAY_A, RELAY_B], claimant: null }),
+    { available_at: LATE, strikes: SECOND_STRIKE },
+  );
+  assert.deepEqual(
+    cooldownOf({ holders: [RELAY_A, RELAY_B], claimant: RELAY_A }),
+    { available_at: EARLY, strikes: FIRST_STRIKE },
+  );
+  assert.equal(cooldownOf(SERVER_SCOPE), null);
 });

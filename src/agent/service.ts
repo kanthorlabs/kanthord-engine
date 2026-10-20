@@ -73,7 +73,7 @@ import {
 } from "./enablements.ts";
 import { promptSettings, savePromptSettings } from "./prompts.ts";
 import { cooldownDuration } from "./cooldowns.ts";
-import type { CredentialHolds } from "../custody/contract.ts";
+import type { CredentialHold, CredentialHolds } from "../custody/contract.ts";
 import { applyLocks, lockedSwitches, withLocks } from "./prompt-locks.ts";
 import {
   ProjectErrorCode,
@@ -763,14 +763,7 @@ export class AgentComponent {
         ({ name }) => name === item.agent_provider,
       );
       assert.ok(provider, "Validated configuration must resolve a provider.");
-      const cooldown =
-        scope.claimant === null
-          ? null
-          : this.dependencies.credentialHolds.holdOf(
-              tx,
-              provider.credential,
-              scope.claimant,
-            );
+      const cooldown = this.cooldownOf(tx, provider.credential, scope);
       return {
         position,
         level,
@@ -805,6 +798,26 @@ export class AgentComponent {
       valid: true,
       issues,
     };
+  }
+
+  private cooldownOf(
+    tx: Transaction,
+    credential: string,
+    scope: HolderScope,
+  ): CredentialHold | null {
+    const { credentialHolds } = this.dependencies;
+    if (scope.claimant !== null)
+      return credentialHolds.holdOf(tx, credential, scope.claimant);
+    return scope.holders
+      .map((holder) => credentialHolds.holdOf(tx, credential, holder))
+      .reduce<CredentialHold | null>(
+        (latest, hold) =>
+          hold !== null &&
+          (latest === null || hold.available_at > latest.available_at)
+            ? hold
+            : latest,
+        null,
+      );
   }
 
   selectAgent(

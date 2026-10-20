@@ -488,6 +488,30 @@ test("llm credential create and rotate with --holder seal locally with the insta
       secret: { key: "local-provider-key" },
     }),
   );
+  const invalid = join(temporary(t), "invalid.json");
+  writePrivate(
+    invalid,
+    JSON.stringify({
+      name: "invalid-llm",
+      platform: "anthropic",
+      metadata: null,
+      secret: { token: "not-an-api-key" },
+    }),
+  );
+  const refused = await kanthord(
+    [
+      "llm",
+      "credential",
+      "create",
+      "--file",
+      invalid,
+      "--holder",
+      INSTANCE_NAME,
+    ],
+    local,
+  );
+  assert.notEqual(refused.code, EXIT_SUCCESS);
+  assert.ok(refused.stderr.includes("cli.llm.credential.secret_invalid"));
   const created = await run(
     ["llm", "credential", "create", "--file", file, "--holder", INSTANCE_NAME],
     local,
