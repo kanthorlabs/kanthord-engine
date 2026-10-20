@@ -3,6 +3,7 @@ import { z } from "zod";
 import { ulid } from "ulid";
 import { executionCredentialStore } from "../../custody/client.ts";
 import {
+  handoverItemsSchema,
   handoverPayloadSchema,
   EXECUTION_CREDENTIAL_MAX_BYTES,
 } from "../../custody/contract.ts";
@@ -35,9 +36,11 @@ try {
     { idempotencyKey: ulid() },
   );
   assert.ok(handover.type === OperationResultType.Completed);
-  const payload = handoverPayloadSchema.parse(
-    openEnvelope(keys.handover, aad, handover.data),
-  );
+  const payload = handoverItemsSchema.parse({
+    items: handoverPayloadSchema.parse(
+      openEnvelope(keys.handover, aad, handover.data),
+    ).items,
+  });
   assert.equal(
     Buffer.byteLength(canonicalJSON(payload.items[0]!.credential)),
     EXECUTION_CREDENTIAL_MAX_BYTES,

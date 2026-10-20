@@ -7,6 +7,7 @@ import {
   type AgentSelection,
 } from "../scheduler/contract.ts";
 import type { WorkerEntry } from "./contract.ts";
+import { bindingHolders } from "../project/contract.ts";
 import type { Dependencies, WorkerService } from "./service.ts";
 
 const NO_PINS = 0;
@@ -26,8 +27,13 @@ export function agentChoice(
   worker: Pick<WorkerService, "declarationOf">,
   tx: Transaction,
   workerBindingId: string,
+  claimant: string,
 ): AgentChoice {
   const row = dependencies.workerBindingRowOf(tx, workerBindingId);
+  const scope = {
+    holders: row ? bindingHolders(row) : [],
+    claimant,
+  };
   const agents = row
     ? (worker.declarationOf(row.worker_name)?.agent_names ?? [])
     : [];
@@ -38,6 +44,7 @@ export function agentChoice(
       tx,
       agentName,
       entryOf(row?.entries ?? [], agentName),
+      scope,
     );
     if (result.kind === AgentChoiceKind.Cooling)
       return {

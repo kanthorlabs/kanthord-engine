@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { isWorkerIdentity } from "../kernel/caller.ts";
 import type { OperationRegistry } from "../kernel/operation.ts";
 import type { Transaction } from "../kernel/store.ts";
+import type { HeldCopy } from "../custody/contract.ts";
 import {
   instanceOperations,
   type registrationRecordSchema,
@@ -17,6 +18,7 @@ export interface InstanceOperationDependencies {
     tx: Transaction,
     row: RegistrationRow,
   ) => typeof registrationRecordSchema._output;
+  heldCopies: (tx: Transaction, holder: string) => HeldCopy[];
 }
 
 function dropEnded(clock: HeartbeatClock, ended: readonly string[]): void {
@@ -25,7 +27,11 @@ function dropEnded(clock: HeartbeatClock, ended: readonly string[]): void {
 
 function declareHumanReads(
   registry: OperationRegistry,
-  { instances, registrationRecordOf }: InstanceOperationDependencies,
+  {
+    instances,
+    registrationRecordOf,
+    heldCopies,
+  }: InstanceOperationDependencies,
 ): void {
   registry.register(instanceOperations["instance.list"], ({ query }, caller) =>
     caller.commit((tx) => instances.list(tx, query)),
@@ -43,7 +49,7 @@ function declareHumanReads(
         registrations: instances
           .liveRegistrationsOf(tx, record.name)
           .map((row) => registrationRecordOf(tx, row)),
-        credentials: [],
+        credentials: heldCopies(tx, record.name),
       };
     }),
   );

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { COOLDOWN_DEFAULTS } from "../agent/config.ts";
+import { SERVER_HOLDER } from "../custody/contract.ts";
 import { test, type TestContext } from "node:test";
 import pino from "pino";
 import { WorkerService, type Dependencies } from "./service.ts";
@@ -195,6 +196,7 @@ const fakeCollaborations = {
   },
 };
 const PROVIDER_CAPABILITY = "model-list read";
+const SERVER_SCOPE = { holders: [SERVER_HOLDER], claimant: SERVER_HOLDER };
 const fakeAgentCollaborations: Omit<AgentDependencies, "store"> = {
   config: {
     prompt: { system_file: "", agent_directory: "", host_file: true },
@@ -204,6 +206,7 @@ const fakeAgentCollaborations: Omit<AgentDependencies, "store"> = {
   hostHome: "/nonexistent/home",
   workbenchDirectory: (agentName) => `/nonexistent/workbench/${agentName}`,
   custodySuitability: () => {},
+  copyHeld: () => true,
   credentialHolds: memoryCredentialHolds(),
   approvedModels: () => null,
   entriesOfAgent: () => [],
@@ -1216,10 +1219,12 @@ function enablementFixture(
     store,
     ...fakeCollaborations,
     agentConfiguration: {
-      validateEntry: (tx, name, entry) => agent.validateEntry(tx, name, entry),
-      agentView: (tx, name, entry, models) =>
-        agent.agentView(tx, name, entry, models),
-      selectAgent: (tx, name, entry) => agent.selectAgent(tx, name, entry),
+      validateEntry: (tx, name, entry, holders) =>
+        agent.validateEntry(tx, name, entry, holders),
+      agentView: (tx, name, entry, scope, models) =>
+        agent.agentView(tx, name, entry, scope, models),
+      selectAgent: (tx, name, entry, scope) =>
+        agent.selectAgent(tx, name, entry, scope),
       selectionAt: (tx, name, enablementId, entry, position) =>
         agent.selectionAt(tx, name, enablementId, entry, position),
       selectionView: (tx, selection, models) =>
@@ -1568,7 +1573,9 @@ test("registration inventory fails closed when its binding is missing or removed
 test("validateEntry refuses unknown workers and external entries and validates each native agent", (t) => {
   const f = enablementFixture(t);
   const validate = (entry: WorkerEntry | null, workerName = WORKER) =>
-    f.store.transaction((tx) => f.worker.validateEntry(tx, workerName, entry));
+    f.store.transaction((tx) =>
+      f.worker.validateEntry(tx, workerName, entry, [SERVER_HOLDER]),
+    );
   refuses(
     () => validate(null),
     AgentErrorCode.Unavailable,
@@ -1604,7 +1611,7 @@ test("workerAgentView answers null outside the agents of the worker and delegate
     agentName = AGENT,
   ) =>
     f.store.transaction((tx) =>
-      f.worker.workerAgentView(tx, workerName, agentName, entry),
+      f.worker.workerAgentView(tx, workerName, agentName, entry, SERVER_SCOPE),
     );
   assert.equal(view(null, UNKNOWN), null);
   assert.equal(view(null, WORKER, UNKNOWN), null);
@@ -1623,7 +1630,9 @@ test("workerAgentView answers null outside the agents of the worker and delegate
   const entry = { model_identifier: MISSING_MODEL };
   assert.deepEqual(
     view(entry),
-    f.store.transaction((tx) => f.agent.agentView(tx, AGENT, entry)),
+    f.store.transaction((tx) =>
+      f.agent.agentView(tx, AGENT, entry, SERVER_SCOPE),
+    ),
   );
   assert.equal(view()?.valid, true);
 });
@@ -1709,7 +1718,7 @@ function authorizationFixture(t: TestContext) {
   );
   const pin = () => {
     const chosen = f.store.transaction((tx) =>
-      f.agent.selectAgent(tx, AGENT, null),
+      f.agent.selectAgent(tx, AGENT, null, SERVER_SCOPE),
     );
     assert.ok(chosen.kind === AgentChoiceKind.Selected);
     selectionOf = (tx) => [

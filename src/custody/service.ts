@@ -1,3 +1,4 @@
+import { z } from "zod";
 import assert from "node:assert/strict";
 import type { Logger } from "pino";
 import {
@@ -23,6 +24,7 @@ import {
 } from "../kernel/health.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import { createIdentity } from "../kernel/identity.ts";
+import { sealJSON, sealedObjectSchema } from "../kernel/hpke.ts";
 import { canonicalJSON, digest } from "../kernel/json.ts";
 import { piProviderId } from "../kernel/pi-provider.ts";
 import {
@@ -42,6 +44,8 @@ import {
   type CredentialCheckAnswer,
   type CredentialCheckBody,
   type CredentialCreate,
+  type CredentialCopy,
+  type CredentialEntry,
   type CredentialListAnswer,
   type CredentialListQuery,
   type CredentialMetadata,
@@ -52,6 +56,19 @@ import {
   type CredentialHolds,
   type CredentialRecords,
   type CredentialRotateBody,
+  type SealedCopy,
+  type SealedRotateBody,
+  type HeldCopy,
+  type InstanceKey,
+  type InstanceKeys,
+  type BindingsListingInstanceFn,
+  SERVER_HOLDER,
+  CREDENTIAL_SEAL_INFO,
+  SEALED_CIPHERTEXT_MAX_BYTES,
+  SEALED_PLAINTEXT_MAX_BYTES,
+  credentialSealAad,
+  credentialSealedToSchema,
+  type SealedHandoverItem,
   type CredentialUpdateMetadataBody,
   type GeneratedCreate,
   type GeneratedRevision,
@@ -99,6 +116,7 @@ import { ExecutionStoreError } from "./execution-store.ts";
 import { workbenchCredentialStore } from "./workbench-store.ts";
 import {
   sealMaterial,
+  plainItem,
   openReport,
   openSignRequest,
   sealSignAnswer,
@@ -108,7 +126,8 @@ import {
   REVISION_REVOKED,
 } from "./handover.ts";
 import type { HandoverEnvelope } from "../kernel/handover.ts";
-import { decrypt, encrypt } from "./envelope.ts";
+import { encrypt } from "./envelope.ts";
+import { heldByInstance, openSecret, storedSealed } from "./secret.ts";
 import { isReservedName, validateNameForm } from "./names.ts";
 
 export interface Dependencies {
@@ -128,6 +147,8 @@ export interface Dependencies {
   sshIdentityAuthorization?: SshIdentityAuthorization;
   sshAccessOf?: SshAccessOf;
   sshSignatureOf?: SshSignatureOf;
+  instanceKeys?: InstanceKeys;
+  bindingsListingInstance?: BindingsListingInstanceFn;
 }
 
 const CustodyErrorCode = {
@@ -136,6 +157,8 @@ const CustodyErrorCode = {
   UnsupportedPlatform: "credential.platform.unsupported",
   UnsupportedEntry: "credential.entry.unsupported",
   Conflict: "credential.name.conflict",
+  PlatformConflict: "credential.name.platform_conflict",
+  SealedInvalid: "credential.sealed.invalid",
   NotFound: "credential.credential.not_found",
   PlatformMismatch: "credential.platform.mismatch",
   RevisionConflict: "credential.revision.conflict",
@@ -158,11 +181,21 @@ const CREDENTIAL_PREFIX = "credential";
 const CUSTODY_HEALTH_NAME = "custody";
 const CURSOR_PATTERN = /^[A-Za-z0-9_-]+$/;
 const TARGET_KIND_CREDENTIAL = "credential";
+const BASE64URL = "base64url";
+const UTF8 = "utf8";
+const ROW_COLUMNS =
+  "id, name, platform, holder, sealed_to, revision, metadata, created_at, ended_at";
+const NO_INSTANCE_KEYS: InstanceKeys = {
+  keyOf: () => null,
+  nameOf: () => null,
+};
 
 type CredentialRow = {
   id: string;
   name: string;
   platform: string;
+  holder: string;
+  sealed_to: string | null;
   revision: number;
   metadata: string | null;
   created_at: number;
@@ -176,7 +209,7 @@ function capturedResourceCheck(
   key: Buffer,
   entry: CredentialPlatform,
 ): ResourceCheck {
-  const { id, platform } = row;
+  const { id, platform, holder } = row;
   const { probe } = entry;
   const nonce = Buffer.from(row.nonce);
   const ciphertext = Buffer.from(row.ciphertext);
@@ -186,7 +219,13 @@ function capturedResourceCheck(
     if (context.err()) return ResourceStatus.Unknown;
     try {
       if (probe === null) return ResourceStatus.Unknown;
-      const secret = decrypt(key, id, platform, nonce, ciphertext);
+      const secret = openSecret(key, {
+        id,
+        platform,
+        holder,
+        nonce,
+        ciphertext,
+      });
       return await probe(secret, metadata, context, observe);
     } catch {
       observe?.(
@@ -198,16 +237,64 @@ function capturedResourceCheck(
   };
 }
 
-function newestLive(tx: Transaction, name: string): LiveRow | undefined {
-  return tx.database
-    .prepare(
-      "SELECT id, name, platform, revision, nonce, ciphertext, metadata, created_at, ended_at FROM credential WHERE name = ? AND ended_at IS NULL ORDER BY revision DESC LIMIT 1",
-    )
-    .get(name) as LiveRow | undefined;
+function heldByInstanceCheck(): ResourceCheck {
+  return async (_context, observe) => {
+    observe?.(
+      "a worker instance holds the credential copy",
+      ResourceFailureReason.HeldByInstance,
+    );
+    return ResourceStatus.Unknown;
+  };
 }
 
-function refuseArchived(tx: Transaction, name: string): void {
-  const rows = rowsForName(tx, name);
+function newestLive(
+  tx: Transaction,
+  name: string,
+  holder: string,
+): LiveRow | undefined {
+  return tx.database
+    .prepare(
+      `SELECT ${ROW_COLUMNS}, nonce, ciphertext FROM credential WHERE name = ? AND holder = ? AND ended_at IS NULL ORDER BY revision DESC LIMIT 1`,
+    )
+    .get(name, holder) as LiveRow | undefined;
+}
+
+function liveHoldersOf(tx: Transaction, name: string): string[] {
+  return (
+    tx.database
+      .prepare(
+        "SELECT DISTINCT holder FROM credential WHERE name = ? AND ended_at IS NULL ORDER BY holder <> ?, holder",
+      )
+      .all(name, SERVER_HOLDER) as { holder: string }[]
+  ).map(({ holder }) => holder);
+}
+
+function serverLive(tx: Transaction, name: string): LiveRow | undefined {
+  const row = newestLive(tx, name, SERVER_HOLDER);
+  if (row) return row;
+  if (liveHoldersOf(tx, name).length !== NO_ROWS) throw heldByInstance();
+  return undefined;
+}
+
+function firstRowOfName(
+  tx: Transaction,
+  name: string,
+): CredentialRow | undefined {
+  return tx.database
+    .prepare(`SELECT ${ROW_COLUMNS} FROM credential WHERE name = ? LIMIT 1`)
+    .get(name) as CredentialRow | undefined;
+}
+
+function sealedInvalid(): OperationError {
+  return new OperationError(
+    HttpStatus.BadRequest,
+    CustodyErrorCode.SealedInvalid,
+    "The sealed credential copy is invalid.",
+  );
+}
+
+function refuseArchived(tx: Transaction, name: string, holder: string): void {
+  const rows = rowsForName(tx, name, holder);
   if (rows.length !== NO_ROWS && rows.every((row) => row.ended_at !== null))
     throw new OperationError(
       HttpStatus.Conflict,
@@ -216,9 +303,14 @@ function refuseArchived(tx: Transaction, name: string): void {
     );
 }
 
-function requireLive(tx: Transaction, name: string, expected: number): LiveRow {
-  refuseArchived(tx, name);
-  const row = newestLive(tx, name);
+function requireLive(
+  tx: Transaction,
+  name: string,
+  holder: string,
+  expected: number,
+): LiveRow {
+  refuseArchived(tx, name, holder);
+  const row = newestLive(tx, name, holder);
   if (!row)
     throw new OperationError(
       HttpStatus.NotFound,
@@ -283,7 +375,7 @@ function refuseForeign(
   set: CredentialPlatformSet,
   name: string,
 ): void {
-  const row = rowsForName(tx, name)[0];
+  const row = firstRowOfName(tx, name);
   if (row && !ownedPlatform(set, row.platform)) throw notFound();
 }
 
@@ -299,48 +391,50 @@ function invalidInput(): OperationError {
   );
 }
 
-function rowsForName(tx: Transaction, name: string): CredentialRow[] {
+function rowsForName(
+  tx: Transaction,
+  name: string,
+  holder: string,
+): CredentialRow[] {
   return tx.database
     .prepare(
-      "SELECT id, name, platform, revision, metadata, created_at, ended_at FROM credential WHERE name = ? ORDER BY revision DESC",
+      `SELECT ${ROW_COLUMNS} FROM credential WHERE name = ? AND holder = ? ORDER BY revision DESC`,
     )
-    .all(name) as CredentialRow[];
+    .all(name, holder) as CredentialRow[];
 }
 
-function answerForName(tx: Transaction, name: string): CredentialAnswer | null {
-  const rows = rowsForName(tx, name);
-  if (rows.length === NO_ROWS) return null;
-  return {
-    name,
-    platform: rows[0]!.platform,
-    revisions: rows.map((row) => ({
-      id: row.id,
-      revision: row.revision,
-      metadata: row.metadata === null ? null : JSON.parse(row.metadata),
-      created_at: row.created_at,
-      ended_at: row.ended_at,
-    })),
-  };
+function invalidCursor(): OperationError {
+  return new OperationError(
+    HttpStatus.BadRequest,
+    CustodyErrorCode.InvalidCursor,
+    "Invalid cursor.",
+  );
 }
 
-function decodeCursor(cursor: string): string {
-  if (!CURSOR_PATTERN.test(cursor))
-    throw new OperationError(
-      HttpStatus.BadRequest,
-      CustodyErrorCode.InvalidCursor,
-      "Invalid cursor.",
-    );
-  const name = Buffer.from(cursor, "base64url").toString("utf8");
+function encodeCursor(name: string, holder: string): string {
+  return Buffer.from(JSON.stringify([name, holder]), UTF8).toString(BASE64URL);
+}
+
+const cursorSchema = z.tuple([z.string(), z.string()]);
+
+function decodeCursor(cursor: string): { name: string; holder: string } {
+  if (!CURSOR_PATTERN.test(cursor)) throw invalidCursor();
+  let value: unknown;
+  try {
+    value = JSON.parse(Buffer.from(cursor, BASE64URL).toString(UTF8));
+  } catch {
+    throw invalidCursor();
+  }
+  const parsed = cursorSchema.safeParse(value);
   if (
-    !validateNameForm(name) ||
-    Buffer.from(name, "utf8").toString("base64url") !== cursor
+    !parsed.success ||
+    !validateNameForm(parsed.data[0]) ||
+    !validateNameForm(parsed.data[1]) ||
+    encodeCursor(...parsed.data) !== cursor
   )
-    throw new OperationError(
-      HttpStatus.BadRequest,
-      CustodyErrorCode.InvalidCursor,
-      "Invalid cursor.",
-    );
-  return name;
+    throw invalidCursor();
+  const [name, holder] = parsed.data;
+  return { name, holder };
 }
 
 const NO_STRIKES = 0;
@@ -348,39 +442,66 @@ const ONE_ROW = 1;
 
 function credentialHolds(): CredentialHolds {
   return {
-    holdOf: (tx, name) => {
+    holdOf: (tx, name, holder) => {
       const row = tx.database
         .prepare(
-          "SELECT available_at, strikes FROM credential WHERE name = ? AND revision = ?",
+          "SELECT available_at, strikes FROM credential WHERE name = ? AND holder = ? AND revision = ?",
         )
-        .get(name, FIRST_REVISION) as
+        .get(name, holder, FIRST_REVISION) as
         { available_at: number | null; strikes: number } | undefined;
       return row === undefined || row.available_at === null
         ? null
         : { available_at: row.available_at, strikes: row.strikes };
     },
-    hold: (tx, name, availableAt, strikes) => {
+    hold: (tx, name, holder, availableAt, strikes) => {
       const { changes } = tx.database
         .prepare(
-          "UPDATE credential SET available_at = ?, strikes = ? WHERE name = ? AND revision = ?",
+          "UPDATE credential SET available_at = ?, strikes = ? WHERE name = ? AND holder = ? AND revision = ?",
         )
-        .run(availableAt, strikes, name, FIRST_REVISION);
+        .run(availableAt, strikes, name, holder, FIRST_REVISION);
       assert.equal(changes, ONE_ROW);
     },
-    release: (tx, name) =>
+    release: (tx, name, holder) =>
       tx.database
         .prepare(
-          "UPDATE credential SET available_at = NULL, strikes = ? WHERE name = ? AND revision = ? AND strikes > ?",
+          "UPDATE credential SET available_at = NULL, strikes = ? WHERE name = ? AND holder = ? AND revision = ? AND strikes > ?",
         )
-        .run(NO_STRIKES, name, FIRST_REVISION, NO_STRIKES).changes > NO_ROWS,
+        .run(NO_STRIKES, name, holder, FIRST_REVISION, NO_STRIKES).changes >
+      NO_ROWS,
     listHolds: (tx) =>
       tx.database
         .prepare(
-          "SELECT name AS credential, strikes, available_at FROM credential WHERE revision = ? AND strikes > ? ORDER BY name",
+          "SELECT name AS credential, holder, strikes, available_at FROM credential WHERE revision = ? AND strikes > ? ORDER BY name, holder",
         )
         .all(FIRST_REVISION, NO_STRIKES)
         .map((row) => ({ ...row }) as CredentialHoldItem),
   };
+}
+
+function metadataOf(
+  tx: Transaction,
+  credentialName: string,
+  holder: string,
+): CredentialMetadata | null {
+  const row = newestLive(tx, credentialName, holder);
+  if (!row) return null;
+  return {
+    id: row.id,
+    name: row.name,
+    platform: row.platform,
+    metadata: row.metadata === null ? null : JSON.parse(row.metadata),
+  };
+}
+
+function copiesMetadataOf(
+  tx: Transaction,
+  credentialName: string,
+): CredentialMetadata[] {
+  return liveHoldersOf(tx, credentialName).map((holder) => {
+    const metadata = metadataOf(tx, credentialName, holder);
+    assert(metadata);
+    return metadata;
+  });
 }
 
 export class CustodyComponent implements Service, CredentialRecords {
@@ -406,6 +527,8 @@ export class CustodyComponent implements Service, CredentialRecords {
     SshIdentityAuthorization | undefined;
   private readonly sshAccessOf: SshAccessOf | undefined;
   private readonly sshSignatureOf: SshSignatureOf | undefined;
+  private readonly instanceKeys: InstanceKeys;
+  private readonly bindingsListingInstance: BindingsListingInstanceFn;
 
   constructor(dependencies: Dependencies) {
     this.executions = dependencies.executions;
@@ -423,6 +546,9 @@ export class CustodyComponent implements Service, CredentialRecords {
     this.sshIdentityAuthorization = dependencies.sshIdentityAuthorization;
     this.sshAccessOf = dependencies.sshAccessOf;
     this.sshSignatureOf = dependencies.sshSignatureOf;
+    this.instanceKeys = dependencies.instanceKeys ?? NO_INSTANCE_KEYS;
+    this.bindingsListingInstance =
+      dependencies.bindingsListingInstance ?? (() => []);
     dependencies.health?.register(CUSTODY_HEALTH_NAME, () =>
       this.healthcheck(),
     );
@@ -609,29 +735,94 @@ export class CustodyComponent implements Service, CredentialRecords {
     assert.equal(tx.database, this.store.database);
     if (grant.credential === null) throw new FacilityError();
     consumeGrant(grant);
-    const row = this.releasedRow(tx, grant.credential, grant.execution);
-    this.drainRevisions(tx, row.name, now);
+    const row = this.releasedRow(
+      tx,
+      grant.credential,
+      SERVER_HOLDER,
+      grant.execution,
+    );
+    this.drainRevisions(tx, row.name, row.holder, now);
     if (row.platform !== grant.platform)
       throw new OperationError(
         HttpStatus.BadRequest,
         CustodyErrorCode.PlatformMismatch,
         "Credential platform mismatch.",
       );
-    const encrypted = tx.database
-      .prepare("SELECT nonce, ciphertext FROM credential WHERE id = ?")
-      .get(row.id) as { nonce: Buffer; ciphertext: Buffer };
-    assert(encrypted);
     return new MaterialBuffer(
       row.id,
       row.platform,
-      decrypt(
-        this.envelopeKey,
-        row.id,
-        row.platform,
-        encrypted.nonce,
-        encrypted.ciphertext,
-      ),
+      openSecret(this.envelopeKey, this.storedRowOf(tx, row)),
     );
+  }
+
+  private storedRowOf(tx: Transaction, row: CredentialRow) {
+    const encrypted = tx.database
+      .prepare("SELECT nonce, ciphertext FROM credential WHERE id = ?")
+      .get(row.id) as { nonce: Buffer; ciphertext: Buffer } | undefined;
+    assert(encrypted);
+    return {
+      id: row.id,
+      platform: row.platform,
+      holder: row.holder,
+      nonce: encrypted.nonce,
+      ciphertext: encrypted.ciphertext,
+    };
+  }
+
+  private sealedItem(
+    tx: Transaction,
+    grant: Grant,
+    holder: string | null,
+    now: number,
+  ): SealedHandoverItem {
+    assert(tx.database.isTransaction);
+    if (grant.credential === null) throw new FacilityError();
+    consumeGrant(grant);
+    const credential = grant.credential;
+    const key = holder === null ? null : this.instanceKeys.keyOf(tx, holder);
+    const rows =
+      holder === null || key === null
+        ? []
+        : rowsForName(tx, credential, holder);
+    const pinned = rows.find(({ id }) =>
+      grant.execution?.credentials.includes(id),
+    );
+    if (pinned && pinned.ended_at !== null)
+      throw new OperationError(
+        HttpStatus.Conflict,
+        CustodyErrorCode.RevisionRevoked,
+        "The pinned credential revision is revoked.",
+      );
+    const row = pinned ?? rows.find(({ ended_at }) => ended_at === null);
+    if (!row || row.sealed_to !== key?.fingerprint)
+      throw new OperationError(
+        HttpStatus.Forbidden,
+        CUSTODY_HOLDER_REFUSED,
+        "The worker placement receives only a copy sealed to the current key of its instance.",
+        {
+          reason:
+            row === undefined &&
+            newestLive(tx, credential, SERVER_HOLDER) !== undefined
+              ? HolderRefusal.ServerHeld
+              : HolderRefusal.HeldElsewhere,
+        },
+      );
+    if (row.platform !== grant.platform)
+      throw new OperationError(
+        HttpStatus.BadRequest,
+        CustodyErrorCode.PlatformMismatch,
+        "Credential platform mismatch.",
+      );
+    if (!pinned && grant.execution)
+      this.executions.pinCredential(tx, grant.execution.execution_id, row.id);
+    this.drainRevisions(tx, row.name, row.holder, now);
+    return {
+      credential_id: row.id,
+      provider_id: piProviderId(row.platform),
+      name: row.name,
+      platform: row.platform,
+      sealed: storedSealed(this.envelopeKey, this.storedRowOf(tx, row)),
+    };
   }
 
   consume(grant: Grant): void {
@@ -642,10 +833,11 @@ export class CustodyComponent implements Service, CredentialRecords {
   private releasedRow(
     tx: Transaction,
     credential: string,
+    holder: string,
     execution: Grant["execution"],
   ) {
     assert(credential.length);
-    const rows = rowsForName(tx, credential);
+    const rows = rowsForName(tx, credential, holder);
     const pinned = execution
       ? rows.find((candidate) => execution.credentials.includes(candidate.id))
       : undefined;
@@ -657,12 +849,15 @@ export class CustodyComponent implements Service, CredentialRecords {
       );
     if (pinned) return pinned;
     const live = rows.find((candidate) => candidate.ended_at === null);
-    if (!live)
+    if (!live) {
+      if (liveHoldersOf(tx, credential).length !== NO_ROWS)
+        throw heldByInstance();
       throw new OperationError(
         HttpStatus.NotFound,
         CustodyErrorCode.NotFound,
         "Credential not found.",
       );
+    }
     if (execution)
       this.executions.pinCredential(tx, execution.execution_id, live.id);
     assert.equal(live.name, credential);
@@ -673,7 +868,7 @@ export class CustodyComponent implements Service, CredentialRecords {
     assert(tx.database.isTransaction);
     assert.equal(tx.database, this.store.database);
     consumeWorkbenchGrant(grant);
-    const row = newestLive(tx, grant.credential);
+    const row = serverLive(tx, grant.credential);
     if (!row)
       throw new OperationError(
         HttpStatus.NotFound,
@@ -694,13 +889,7 @@ export class CustodyComponent implements Service, CredentialRecords {
     return new MaterialBuffer(
       row.id,
       row.platform,
-      decrypt(
-        this.envelopeKey,
-        row.id,
-        row.platform,
-        row.nonce,
-        row.ciphertext,
-      ),
+      openSecret(this.envelopeKey, row),
     );
   }
 
@@ -751,6 +940,7 @@ export class CustodyComponent implements Service, CredentialRecords {
               credential: piCredentialSchema.parse(next),
             },
             this.platforms,
+            this.instanceKeys,
           );
         }),
     });
@@ -771,28 +961,19 @@ export class CustodyComponent implements Service, CredentialRecords {
       now,
     );
     const grants = this.authorize(tx, identity, row);
-    if (placement === HandoverPlacement.Worker && grants.length)
-      throw new OperationError(
-        HttpStatus.Forbidden,
-        CUSTODY_HOLDER_REFUSED,
-        "The worker placement receives no server-held credential.",
-        { reason: HolderRefusal.ServerHeld },
-      );
+    if (placement === HandoverPlacement.Worker)
+      return this.sealedHandover(tx, identity, row, grants, now);
     const materials: Material[] = [];
     try {
       for (const grant of grants) materials.push(this.release(tx, grant, now));
-      const sshIdentities =
-        placement === HandoverPlacement.Worker
-          ? []
-          : repositoryBindingIds.map((bindingId) =>
-              this.sshIdentityOf(tx, identity, claim, bindingId, now),
-            );
+      const sshIdentities = repositoryBindingIds.map((bindingId) =>
+        this.sshIdentityOf(tx, identity, claim, bindingId, now),
+      );
       const envelope = sealMaterial(
         this.clientSecret(identity.clientId),
         row,
-        materials,
+        materials.map((material) => plainItem(material, this.platforms)),
         sshIdentities,
-        this.platforms,
       );
       for (const material of materials)
         this.logger.info(
@@ -821,6 +1002,41 @@ export class CustodyComponent implements Service, CredentialRecords {
     } finally {
       for (const material of materials) material.drop();
     }
+  }
+
+  private sealedHandover(
+    tx: Transaction,
+    identity: MachineIdentity,
+    row: CustodyExecution,
+    grants: readonly Grant[],
+    now: number,
+  ): HandoverEnvelope {
+    const holder =
+      identity.instanceId === undefined
+        ? null
+        : this.instanceKeys.nameOf(tx, identity.instanceId);
+    const items = grants.map((grant) =>
+      this.sealedItem(tx, grant, holder, now),
+    );
+    const envelope = sealMaterial(
+      this.clientSecret(identity.clientId),
+      row,
+      items,
+      [],
+    );
+    for (const item of items)
+      this.logger.info(
+        {
+          execution_id: row.execution_id,
+          worker_binding_id: row.worker_binding_id,
+          credential_id: item.credential_id,
+          client_id: identity.clientId,
+          instance_id: identity.instanceId ?? null,
+          runtime_identity: row.runtime_identity,
+        },
+        "credential handover",
+      );
+    return envelope;
   }
 
   private sshIdentityOf(
@@ -931,7 +1147,7 @@ export class CustodyComponent implements Service, CredentialRecords {
       execution.runtimeIdentity,
       now,
     );
-    const rows = rowsForName(tx, credentialName);
+    const rows = rowsForName(tx, credentialName, SERVER_HOLDER);
     const pinned = rows.find(({ id }) => claim.credentials.includes(id));
     if (pinned && pinned.ended_at !== null)
       throw new OperationError(
@@ -939,7 +1155,7 @@ export class CustodyComponent implements Service, CredentialRecords {
         CustodyErrorCode.RevisionRevoked,
         "Pinned credential revision is revoked.",
       );
-    const row = pinned ?? newestLive(tx, credentialName);
+    const row = pinned ?? newestLive(tx, credentialName, SERVER_HOLDER);
     if (!row)
       throw new OperationError(
         HttpStatus.NotFound,
@@ -970,7 +1186,13 @@ export class CustodyComponent implements Service, CredentialRecords {
       row,
       envelope,
     );
-    const written = applyReport(tx, this.envelopeKey, report, this.platforms);
+    const written = applyReport(
+      tx,
+      this.envelopeKey,
+      report,
+      this.platforms,
+      this.instanceKeys,
+    );
     this.logger.info(
       {
         execution_id: row.execution_id,
@@ -986,7 +1208,9 @@ export class CustodyComponent implements Service, CredentialRecords {
     tx: Transaction,
     req: { credential: string; platform: string },
   ): void {
-    const row = newestLive(tx, req.credential);
+    const holder = liveHoldersOf(tx, req.credential)[0];
+    const row =
+      holder === undefined ? undefined : newestLive(tx, req.credential, holder);
     if (!row)
       throw new OperationError(
         HttpStatus.NotFound,
@@ -1013,9 +1237,13 @@ export class CustodyComponent implements Service, CredentialRecords {
       execution.runtimeIdentity,
       now,
     );
-    const row = rowsForName(tx, credentialName).find(({ id }) =>
-      claim.credentials.includes(id),
-    );
+    const row = (
+      tx.database
+        .prepare(
+          `SELECT ${ROW_COLUMNS} FROM credential WHERE name = ? ORDER BY holder, revision DESC`,
+        )
+        .all(credentialName) as CredentialRow[]
+    ).find(({ id }) => claim.credentials.includes(id));
     if (!row) return null;
     if (row.ended_at !== null)
       throw new OperationError(
@@ -1023,7 +1251,7 @@ export class CustodyComponent implements Service, CredentialRecords {
         CustodyErrorCode.RevisionRevoked,
         "Pinned credential revision is revoked.",
       );
-    this.drainRevisions(tx, credentialName, now);
+    this.drainRevisions(tx, credentialName, row.holder, now);
     return {
       id: row.id,
       name: row.name,
@@ -1035,14 +1263,86 @@ export class CustodyComponent implements Service, CredentialRecords {
   credentialMetadata(
     tx: Transaction,
     credentialName: string,
+    holder?: string,
   ): CredentialMetadata | null {
-    const row = newestLive(tx, credentialName);
-    if (!row) return null;
-    return {
-      id: row.id,
+    if (holder === undefined)
+      return copiesMetadataOf(tx, credentialName)[0] ?? null;
+    return metadataOf(tx, credentialName, holder);
+  }
+
+  copiesMetadata(
+    tx: Transaction,
+    credentialName: string,
+  ): CredentialMetadata[] {
+    return copiesMetadataOf(tx, credentialName);
+  }
+
+  copyHeld(tx: Transaction, credentialName: string, holder: string): boolean {
+    const row = newestLive(tx, credentialName, holder);
+    return row !== undefined && this.sealedCurrent(tx, holder, row.sealed_to);
+  }
+
+  heldCopies(tx: Transaction, holder: string): HeldCopy[] {
+    assert.notEqual(holder, SERVER_HOLDER);
+    return (
+      tx.database
+        .prepare(
+          `SELECT ${ROW_COLUMNS} FROM credential AS current WHERE holder = ? AND ended_at IS NULL AND revision = (SELECT MAX(revision) FROM credential WHERE name = current.name AND holder = current.holder AND ended_at IS NULL) ORDER BY name`,
+        )
+        .all(holder) as CredentialRow[]
+    ).map((row) => ({
       name: row.name,
+      revision: row.revision,
       platform: row.platform,
-      metadata: row.metadata === null ? null : JSON.parse(row.metadata),
+      sealed_current: this.sealedCurrent(tx, holder, row.sealed_to),
+    }));
+  }
+
+  archiveHeld(tx: Transaction, holder: string, now: number): number {
+    assert(tx.database.isTransaction);
+    assert.notEqual(holder, SERVER_HOLDER);
+    return tx.database
+      .prepare(
+        "UPDATE credential SET ended_at = ? WHERE holder = ? AND ended_at IS NULL",
+      )
+      .run(now, holder).changes as number;
+  }
+
+  private sealedCurrent(
+    tx: Transaction,
+    holder: string,
+    sealedTo: string | null,
+  ): boolean {
+    if (holder === SERVER_HOLDER) return true;
+    return (
+      sealedTo !== null &&
+      this.instanceKeys.keyOf(tx, holder)?.fingerprint === sealedTo
+    );
+  }
+
+  private answerOf(
+    tx: Transaction,
+    name: string,
+    holder: string,
+  ): CredentialAnswer | null {
+    const rows = rowsForName(tx, name, holder);
+    if (rows.length === NO_ROWS) return null;
+    const live = rows.find(({ ended_at }) => ended_at === null);
+    return {
+      name,
+      platform: rows[0]!.platform,
+      holder,
+      sealed_to: (live ?? rows[0]!).sealed_to,
+      sealed_current:
+        holder === SERVER_HOLDER ||
+        (live !== undefined && this.sealedCurrent(tx, holder, live.sealed_to)),
+      revisions: rows.map((row) => ({
+        id: row.id,
+        revision: row.revision,
+        metadata: row.metadata === null ? null : JSON.parse(row.metadata),
+        created_at: row.created_at,
+        ended_at: row.ended_at,
+      })),
     };
   }
 
@@ -1052,9 +1352,12 @@ export class CustodyComponent implements Service, CredentialRecords {
   ): ResourceEntry[] {
     const rows = tx.database
       .prepare(
-        "SELECT id, name, platform, revision, nonce, ciphertext, metadata, created_at, ended_at FROM credential AS current WHERE ended_at IS NULL AND revision = (SELECT MAX(revision) FROM credential WHERE name = current.name AND ended_at IS NULL) AND platform IN (SELECT value FROM json_each(?)) ORDER BY name",
+        `SELECT ${ROW_COLUMNS}, nonce, ciphertext FROM credential AS current WHERE holder = ? AND ended_at IS NULL AND revision = (SELECT MAX(revision) FROM credential WHERE name = current.name AND holder = current.holder AND ended_at IS NULL) AND platform IN (SELECT value FROM json_each(?)) ORDER BY name`,
       )
-      .all(JSON.stringify(Object.keys(set.platforms))) as LiveRow[];
+      .all(
+        SERVER_HOLDER,
+        JSON.stringify(Object.keys(set.platforms)),
+      ) as LiveRow[];
     return rows.map((row) => {
       const entry = ownedPlatform(set, row.platform)!;
       return {
@@ -1073,8 +1376,10 @@ export class CustodyComponent implements Service, CredentialRecords {
     set: CredentialPlatformSet,
     credentialName: string,
   ): ResourceCheck {
-    const row = newestLive(tx, credentialName);
+    const row = newestLive(tx, credentialName, SERVER_HOLDER);
     const entry = row && ownedPlatform(set, row.platform);
+    if (!row && liveHoldersOf(tx, credentialName).length !== NO_ROWS)
+      return heldByInstanceCheck();
     if (!row || !entry) return async () => ResourceStatus.Unknown;
     return capturedResourceCheck(row, this.envelopeKey, entry);
   }
@@ -1084,16 +1389,19 @@ export class CustodyComponent implements Service, CredentialRecords {
     set: CredentialPlatformSet,
     credentialName: string,
   ): CheckMaterial | null {
-    const row = newestLive(tx, credentialName);
-    if (!row || !ownedPlatform(set, row.platform)) return null;
-    const { id, platform } = row;
+    const owner = firstRowOfName(tx, credentialName);
+    if (!owner || !ownedPlatform(set, owner.platform)) return null;
+    const row = serverLive(tx, credentialName);
+    if (!row) return null;
+    const { id, platform, holder } = row;
     const key = this.envelopeKey;
     const nonce = Buffer.from(row.nonce);
     const ciphertext = Buffer.from(row.ciphertext);
     return {
       platform,
       metadata: row.metadata === null ? null : JSON.parse(row.metadata),
-      secret: () => decrypt(key, id, platform, nonce, ciphertext),
+      secret: () =>
+        openSecret(key, { id, platform, holder, nonce, ciphertext }),
     };
   }
 
@@ -1104,8 +1412,8 @@ export class CustodyComponent implements Service, CredentialRecords {
   ): Promise<CredentialCheckAnswer> {
     const { row, entry } = this.store.transaction((tx) => {
       refuseForeign(tx, set, credentialName);
-      refuseArchived(tx, credentialName);
-      const live = newestLive(tx, credentialName);
+      refuseArchived(tx, credentialName, SERVER_HOLDER);
+      const live = serverLive(tx, credentialName);
       if (!live) throw notFound();
       const owned = ownedPlatform(set, live.platform)!;
       if (owned.probe === null)
@@ -1233,7 +1541,119 @@ export class CustodyComponent implements Service, CredentialRecords {
     humanIdentity: string | undefined,
   ): CredentialAnswer {
     const { name, platform, secret, metadata } = body;
+    const [answer] = this.createCopies(
+      tx,
+      set,
+      { name, platform, metadata, copies: [{ holder: SERVER_HOLDER, secret }] },
+      humanIdentity,
+    );
+    assert(answer);
+    return answer;
+  }
+
+  createCopies(
+    tx: Transaction,
+    set: CredentialPlatformSet,
+    entry: CredentialEntry,
+    humanIdentity: string | undefined,
+  ): CredentialAnswer[] {
+    const { name, platform, metadata, copies } = entry;
+    assert(copies.length > NO_ROWS);
     if (!validateNameForm(name) || isReservedName(name)) throw invalidInput();
+    const platformEntry = this.entryForCreate(set, platform);
+    const holders = copies.map(({ holder }) => holder);
+    if (new Set(holders).size !== holders.length) throw invalidInput();
+    for (const holder of holders) this.requireAvailableName(tx, name, holder);
+    this.refusePlatformConflict(tx, name, platform);
+    const next = validatedMetadata(platformEntry, metadata);
+    const now = Date.now();
+    for (const copy of copies) {
+      set.check_metadata?.(tx, {
+        name,
+        platform,
+        holder: copy.holder,
+        change: RevisionChange.Create,
+        current: null,
+        next,
+      });
+      const stored = this.storedCopy(tx, set, platformEntry, copy);
+      const id = createIdentity(CREDENTIAL_PREFIX);
+      const { nonce, ciphertext } = encrypt(
+        this.envelopeKey,
+        id,
+        platform,
+        stored.value,
+      );
+      tx.database
+        .prepare(
+          "INSERT INTO credential (id, name, platform, holder, sealed_to, revision, nonce, ciphertext, metadata, created_at, ended_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)",
+        )
+        .run(
+          id,
+          name,
+          platform,
+          copy.holder,
+          stored.sealed_to,
+          FIRST_REVISION,
+          nonce,
+          ciphertext,
+          next === null ? null : canonicalJSON(next),
+          now,
+        );
+      this.logger.info(
+        {
+          credential_id: id,
+          holder: copy.holder,
+          human_identity: humanIdentity,
+        },
+        "credential created",
+      );
+    }
+    return holders.map((holder) => this.answerOf(tx, name, holder)!);
+  }
+
+  async sealCopies(
+    set: CredentialPlatformSet,
+    input: {
+      name: string;
+      platform: string;
+      secret: unknown;
+      keys: readonly InstanceKey[];
+    },
+  ): Promise<SealedCopy[]> {
+    const { name, platform, keys } = input;
+    if (!set.instance_copies) throw sealedInvalid();
+    const entry = this.entryForCreate(set, platform);
+    const parsed = secretSchemas[entry.secret_shape].safeParse(input.secret);
+    if (!parsed.success) throw invalidInput();
+    if (
+      Buffer.byteLength(canonicalJSON(parsed.data), UTF8) >
+      SEALED_PLAINTEXT_MAX_BYTES
+    )
+      throw invalidInput();
+    const copies: SealedCopy[] = [];
+    for (const key of keys) {
+      assert.notEqual(key.name, SERVER_HOLDER);
+      const sealed = await sealJSON(
+        Buffer.from(key.public_key, BASE64URL),
+        CREDENTIAL_SEAL_INFO,
+        credentialSealAad({
+          name,
+          platform,
+          holder: key.name,
+          sealed_to: key.fingerprint,
+        }),
+        parsed.data,
+      );
+      copies.push({ holder: key.name, sealed, sealed_to: key.fingerprint });
+    }
+    return copies;
+  }
+
+  private entryForCreate(
+    set: CredentialPlatformSet,
+    platform: string,
+  ): CredentialPlatform {
     const entry = ownedPlatform(set, platform);
     if (!entry)
       throw new OperationError(
@@ -1243,53 +1663,67 @@ export class CustodyComponent implements Service, CredentialRecords {
       );
     if (entry.secret_shape === SecretShape.OAuth || isGenerated(entry))
       throw unsupportedEntry();
-    this.requireAvailableName(tx, name);
-    const parsedSecret = secretSchemas[entry.secret_shape].safeParse(secret);
-    if (!parsedSecret.success) throw invalidInput();
-    const next = validatedMetadata(entry, metadata);
-    set.check_metadata?.(tx, {
-      name,
-      platform,
-      change: RevisionChange.Create,
-      current: null,
-      next,
-    });
-    const id = createIdentity(CREDENTIAL_PREFIX);
-    const { nonce, ciphertext } = encrypt(
-      this.envelopeKey,
-      id,
-      platform,
-      parsedSecret.data,
-    );
-    tx.database
-      .prepare(
-        "INSERT INTO credential (id, name, platform, revision, nonce, ciphertext, metadata, created_at, ended_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL)",
-      )
-      .run(
-        id,
-        name,
-        platform,
-        FIRST_REVISION,
-        nonce,
-        ciphertext,
-        next === null ? null : canonicalJSON(next),
-        Date.now(),
+    return entry;
+  }
+
+  private storedCopy(
+    tx: Transaction,
+    set: CredentialPlatformSet,
+    entry: CredentialPlatform,
+    copy: CredentialCopy,
+  ): { value: unknown; sealed_to: string | null } {
+    if ("secret" in copy) {
+      if (copy.holder !== SERVER_HOLDER) throw sealedInvalid();
+      const parsed = secretSchemas[entry.secret_shape].safeParse(copy.secret);
+      if (!parsed.success) throw invalidInput();
+      return { value: parsed.data, sealed_to: null };
+    }
+    this.refuseSealedCopy(tx, set, copy);
+    return { value: copy.sealed, sealed_to: copy.sealed_to };
+  }
+
+  private refuseSealedCopy(
+    tx: Transaction,
+    set: CredentialPlatformSet,
+    copy: SealedCopy,
+  ): void {
+    if (!set.instance_copies || copy.holder === SERVER_HOLDER)
+      throw sealedInvalid();
+    const sealed = sealedObjectSchema.safeParse(copy.sealed);
+    if (
+      !sealed.success ||
+      Buffer.from(sealed.data.ciphertext, BASE64URL).length >
+        SEALED_CIPHERTEXT_MAX_BYTES ||
+      !credentialSealedToSchema.safeParse(copy.sealed_to).success ||
+      this.instanceKeys.keyOf(tx, copy.holder)?.fingerprint !== copy.sealed_to
+    )
+      throw sealedInvalid();
+  }
+
+  private refusePlatformConflict(
+    tx: Transaction,
+    name: string,
+    platform: string,
+  ): void {
+    const row = firstRowOfName(tx, name);
+    if (row && row.platform !== platform)
+      throw new OperationError(
+        HttpStatus.Conflict,
+        CustodyErrorCode.PlatformConflict,
+        "The credential name holds another platform.",
+        { platform: row.platform },
       );
-    this.logger.info(
-      { credential_id: id, human_identity: humanIdentity },
-      "credential created",
-    );
-    return answerForName(tx, name)!;
   }
 
   get(
     tx: Transaction,
     set: CredentialPlatformSet,
     credentialName: string,
+    holder: string = SERVER_HOLDER,
   ): CredentialAnswer {
     refuseForeign(tx, set, credentialName);
-    this.drainRevisions(tx, credentialName, Date.now());
-    const answer = answerForName(tx, credentialName);
+    this.drainRevisions(tx, credentialName, holder, Date.now());
+    const answer = this.answerOf(tx, credentialName, holder);
     if (answer === null) throw notFound();
     return answer;
   }
@@ -1297,37 +1731,45 @@ export class CustodyComponent implements Service, CredentialRecords {
   list(
     tx: Transaction,
     set: CredentialPlatformSet,
-    query: CredentialListQuery,
+    query: CredentialListQuery & { holder?: string },
   ): CredentialListAnswer {
     const {
       platform,
+      holder,
       include_archived: includeArchived,
       limit: requestedLimit,
       cursor,
     } = query;
-    const after = cursor === undefined ? "" : decodeCursor(cursor);
+    const after =
+      cursor === undefined ? { name: "", holder: "" } : decodeCursor(cursor);
     const limit = requestedLimit ?? LIST_LIMIT_DEFAULT;
-    const names = tx.database
+    const groups = tx.database
       .prepare(
-        "SELECT name FROM credential WHERE name > ? AND (? IS NULL OR platform = ?) AND platform IN (SELECT value FROM json_each(?)) GROUP BY name HAVING (? = 1 OR MAX(ended_at IS NULL) = 1) ORDER BY name ASC LIMIT ?",
+        "SELECT name, holder FROM credential WHERE (name > ? OR (name = ? AND holder > ?)) AND (? IS NULL OR platform = ?) AND (? IS NULL OR holder = ?) AND platform IN (SELECT value FROM json_each(?)) GROUP BY name, holder HAVING (? = 1 OR MAX(ended_at IS NULL) = 1) ORDER BY name ASC, holder ASC LIMIT ?",
       )
       .all(
-        after,
+        after.name,
+        after.name,
+        after.holder,
         platform ?? null,
         platform ?? null,
+        holder ?? null,
+        holder ?? null,
         JSON.stringify(Object.keys(set.platforms)),
         includeArchived === QUERY_TRUE ? INCLUDE : EXCLUDE,
         limit + EXTRA_ROW,
-      ) as {
-      name: string;
-    }[];
-    const page = names.slice(NO_ROWS, limit);
+      ) as { name: string; holder: string }[];
+    const page = groups.slice(NO_ROWS, limit);
     const now = Date.now();
-    for (const { name } of page) this.drainRevisions(tx, name, now);
-    const items = page.map(({ name }) => answerForName(tx, name)!);
+    for (const group of page)
+      this.drainRevisions(tx, group.name, group.holder, now);
+    const items = page.map((group) =>
+      this.answerOf(tx, group.name, group.holder)!,
+    );
+    const last = page.at(-1);
     const nextCursor =
-      names.length > limit
-        ? Buffer.from(page.at(-1)!.name, "utf8").toString("base64url")
+      groups.length > limit && last
+        ? encodeCursor(last.name, last.holder)
         : null;
     return { items, next_cursor: nextCursor };
   }
@@ -1336,7 +1778,8 @@ export class CustodyComponent implements Service, CredentialRecords {
     tx: Transaction,
     row: LiveRow,
     id: string,
-    secret: unknown,
+    value: unknown,
+    sealedTo: string | null,
     metadata: Record<string, unknown> | null,
     now: number,
   ): void {
@@ -1344,17 +1787,20 @@ export class CustodyComponent implements Service, CredentialRecords {
       this.envelopeKey,
       id,
       row.platform,
-      secret,
+      value,
     );
     tx.database
       .prepare(
-        "INSERT INTO credential (id, name, platform, revision, nonce, ciphertext, metadata, created_at, ended_at) VALUES (?, ?, ?, (SELECT MAX(revision) + 1 FROM credential WHERE name = ?), ?, ?, ?, ?, NULL)",
+        "INSERT INTO credential (id, name, platform, holder, sealed_to, revision, nonce, ciphertext, metadata, created_at, ended_at) VALUES (?, ?, ?, ?, ?, (SELECT MAX(revision) + 1 FROM credential WHERE name = ? AND holder = ?), ?, ?, ?, ?, NULL)",
       )
       .run(
         id,
         row.name,
         row.platform,
+        row.holder,
+        sealedTo,
         row.name,
+        row.holder,
         nonce,
         ciphertext,
         metadata === null ? null : canonicalJSON(metadata),
@@ -1362,8 +1808,15 @@ export class CustodyComponent implements Service, CredentialRecords {
       );
   }
 
-  private drainRevisions(tx: Transaction, name: string, now: number): void {
-    const rows = rowsForName(tx, name).filter((row) => row.ended_at === null);
+  private drainRevisions(
+    tx: Transaction,
+    name: string,
+    holder: string,
+    now: number,
+  ): void {
+    const rows = rowsForName(tx, name, holder).filter(
+      (row) => row.ended_at === null,
+    );
     for (const row of rows.slice(FIRST_REVISION)) {
       if (this.executions.liveExecutionsPinning(tx, row.id).length !== NO_ROWS)
         continue;
@@ -1381,32 +1834,91 @@ export class CustodyComponent implements Service, CredentialRecords {
     humanIdentity: string | undefined,
   ): CredentialAnswer {
     refuseForeign(tx, set, credentialName);
-    const row = requireLive(tx, credentialName, body.expected_revision);
+    const row = requireLive(
+      tx,
+      credentialName,
+      SERVER_HOLDER,
+      body.expected_revision,
+    );
     const entry = ownedPlatform(set, row.platform)!;
     if (isGenerated(entry)) throw unsupportedEntry();
     const secret = secretSchemas[entry.secret_shape].safeParse(body.secret);
     if (!secret.success) throw invalidInput();
+    return this.insertRotation(
+      tx,
+      set,
+      entry,
+      row,
+      { value: secret.data, sealed_to: null },
+      body.metadata,
+      humanIdentity,
+    );
+  }
+
+  rotateSealed(
+    tx: Transaction,
+    set: CredentialPlatformSet,
+    credentialName: string,
+    holder: string,
+    body: SealedRotateBody,
+    humanIdentity: string | undefined,
+  ): CredentialAnswer {
+    refuseForeign(tx, set, credentialName);
+    const row = requireLive(tx, credentialName, holder, body.expected_revision);
+    const entry = ownedPlatform(set, row.platform)!;
+    if (isGenerated(entry)) throw unsupportedEntry();
+    const copy = { holder, sealed: body.sealed, sealed_to: body.sealed_to };
+    this.refuseSealedCopy(tx, set, copy);
+    return this.insertRotation(
+      tx,
+      set,
+      entry,
+      row,
+      { value: copy.sealed, sealed_to: copy.sealed_to },
+      body.metadata,
+      humanIdentity,
+    );
+  }
+
+  private insertRotation(
+    tx: Transaction,
+    set: CredentialPlatformSet,
+    entry: CredentialPlatform,
+    row: LiveRow,
+    stored: { value: unknown; sealed_to: string | null },
+    replacement: unknown,
+    humanIdentity: string | undefined,
+  ): CredentialAnswer {
     const current = parsedMetadata(row);
     const metadata = validatedMetadata(
       entry,
-      body.metadata === undefined ? current : body.metadata,
+      replacement === undefined ? current : replacement,
     );
     set.check_metadata?.(tx, {
       name: row.name,
       platform: row.platform,
+      holder: row.holder,
       change: RevisionChange.Rotate,
       current,
       next: metadata,
     });
     const id = createIdentity(CREDENTIAL_PREFIX);
     const now = Date.now();
-    this.insertRevision(tx, row, id, secret.data, metadata, now);
-    this.drainRevisions(tx, row.name, now);
+    this.insertRevision(
+      tx,
+      row,
+      id,
+      stored.value,
+      stored.sealed_to,
+      metadata,
+      now,
+    );
+    this.drainRevisions(tx, row.name, row.holder, now);
     this.logger.info(
-      { credential_id: id, human_identity: humanIdentity },
+      { credential_id: id, holder: row.holder, human_identity: humanIdentity },
       "credential rotated",
     );
-    return answerForName(tx, row.name)!;
+    return this.answerOf(tx, row.name, row.holder)!;
   }
 
   updateMetadata(
@@ -1415,33 +1927,40 @@ export class CustodyComponent implements Service, CredentialRecords {
     credentialName: string,
     body: CredentialUpdateMetadataBody,
     humanIdentity: string | undefined,
+    holder: string = SERVER_HOLDER,
   ): CredentialAnswer {
     refuseForeign(tx, set, credentialName);
-    const row = requireLive(tx, credentialName, body.expected_revision);
+    const row = requireLive(tx, credentialName, holder, body.expected_revision);
     const entry = ownedPlatform(set, row.platform)!;
     if (isGenerated(entry)) throw unsupportedEntry();
     const metadata = validatedMetadata(entry, body.metadata);
     set.check_metadata?.(tx, {
       name: row.name,
       platform: row.platform,
+      holder: row.holder,
       change: RevisionChange.Metadata,
       current: parsedMetadata(row),
       next: metadata,
     });
     const id = createIdentity(CREDENTIAL_PREFIX);
-    const secret = decrypt(
-      this.envelopeKey,
-      row.id,
-      row.platform,
-      row.nonce,
-      row.ciphertext,
+    const value =
+      row.holder === SERVER_HOLDER
+        ? openSecret(this.envelopeKey, row)
+        : storedSealed(this.envelopeKey, row);
+    this.insertRevision(
+      tx,
+      row,
+      id,
+      value,
+      row.sealed_to,
+      metadata,
+      Date.now(),
     );
-    this.insertRevision(tx, row, id, secret, metadata, Date.now());
     this.logger.info(
-      { credential_id: id, human_identity: humanIdentity },
+      { credential_id: id, holder: row.holder, human_identity: humanIdentity },
       "credential metadata updated",
     );
-    return answerForName(tx, row.name)!;
+    return this.answerOf(tx, row.name, row.holder)!;
   }
 
   revoke(
@@ -1449,14 +1968,15 @@ export class CustodyComponent implements Service, CredentialRecords {
     set: CredentialPlatformSet,
     credentialName: string,
     revision: number,
+    holder: string = SERVER_HOLDER,
   ): CredentialAnswer {
     refuseForeign(tx, set, credentialName);
     const now = Date.now();
     const row = tx.database
       .prepare(
-        "SELECT id, ended_at FROM credential WHERE name = ? AND revision = ?",
+        "SELECT id, ended_at FROM credential WHERE name = ? AND holder = ? AND revision = ?",
       )
-      .get(credentialName, revision) as
+      .get(credentialName, holder, revision) as
       { id: string; ended_at: number | null } | undefined;
     if (!row)
       throw new OperationError(
@@ -1472,9 +1992,9 @@ export class CustodyComponent implements Service, CredentialRecords {
       );
     const later = tx.database
       .prepare(
-        "SELECT id FROM credential WHERE name = ? AND revision > ? AND ended_at IS NULL LIMIT 1",
+        "SELECT id FROM credential WHERE name = ? AND holder = ? AND revision > ? AND ended_at IS NULL LIMIT 1",
       )
-      .get(credentialName, revision);
+      .get(credentialName, holder, revision);
     if (!later)
       throw new OperationError(
         HttpStatus.Conflict,
@@ -1484,19 +2004,28 @@ export class CustodyComponent implements Service, CredentialRecords {
     tx.database
       .prepare("UPDATE credential SET ended_at = ? WHERE id = ?")
       .run(now, row.id);
-    this.drainRevisions(tx, credentialName, now);
-    return answerForName(tx, credentialName)!;
+    this.drainRevisions(tx, credentialName, holder, now);
+    return this.answerOf(tx, credentialName, holder)!;
   }
 
   archive(
     tx: Transaction,
     set: CredentialPlatformSet,
     credentialName: string,
+    holder: string = SERVER_HOLDER,
   ): CredentialAnswer {
     refuseForeign(tx, set, credentialName);
-    refuseArchived(tx, credentialName);
-    if (rowsForName(tx, credentialName).length === NO_ROWS) throw notFound();
-    const dependents = this.credentialDependents(tx, credentialName);
+    refuseArchived(tx, credentialName, holder);
+    if (rowsForName(tx, credentialName, holder).length === NO_ROWS)
+      throw notFound();
+    const dependents =
+      holder === SERVER_HOLDER
+        ? this.credentialDependents(tx, credentialName)
+        : {
+            agent_providers: [],
+            bindings: this.bindingsListingInstance(tx, holder, credentialName),
+            inbounds: [],
+          };
     if (
       dependents.agent_providers.length +
         dependents.bindings.length +
@@ -1511,15 +2040,19 @@ export class CustodyComponent implements Service, CredentialRecords {
       );
     tx.database
       .prepare(
-        "UPDATE credential SET ended_at = ? WHERE name = ? AND ended_at IS NULL",
+        "UPDATE credential SET ended_at = ? WHERE name = ? AND holder = ? AND ended_at IS NULL",
       )
-      .run(Date.now(), credentialName);
-    return answerForName(tx, credentialName)!;
+      .run(Date.now(), credentialName, holder);
+    return this.answerOf(tx, credentialName, holder)!;
   }
 
-  requireAvailableName(tx: Transaction, name: string): void {
+  requireAvailableName(
+    tx: Transaction,
+    name: string,
+    holder: string = SERVER_HOLDER,
+  ): void {
     if (!validateNameForm(name) || isReservedName(name)) throw invalidInput();
-    const existing = rowsForName(tx, name);
+    const existing = rowsForName(tx, name, holder);
     if (existing.length !== NO_ROWS)
       throw new OperationError(
         HttpStatus.Conflict,
@@ -1540,6 +2073,7 @@ export class CustodyComponent implements Service, CredentialRecords {
     const entry = ownedPlatform(set, platform);
     assert.equal(entry?.secret_shape, SecretShape.OAuth);
     this.requireAvailableName(tx, name);
+    this.refusePlatformConflict(tx, name, platform);
     const parsedSecret = secretSchemas[entry.secret_shape].safeParse(secret);
     if (!parsedSecret.success) throw invalidInput();
     const id = createIdentity(CREDENTIAL_PREFIX);
@@ -1551,9 +2085,18 @@ export class CustodyComponent implements Service, CredentialRecords {
     );
     tx.database
       .prepare(
-        "INSERT INTO credential (id, name, platform, revision, nonce, ciphertext, metadata, created_at, ended_at) VALUES (?, ?, ?, ?, ?, ?, NULL, ?, NULL)",
+        "INSERT INTO credential (id, name, platform, holder, sealed_to, revision, nonce, ciphertext, metadata, created_at, ended_at) VALUES (?, ?, ?, ?, NULL, ?, ?, ?, NULL, ?, NULL)",
       )
-      .run(id, name, platform, FIRST_REVISION, nonce, ciphertext, now);
+      .run(
+        id,
+        name,
+        platform,
+        SERVER_HOLDER,
+        FIRST_REVISION,
+        nonce,
+        ciphertext,
+        now,
+      );
     return id;
   }
 
@@ -1567,6 +2110,7 @@ export class CustodyComponent implements Service, CredentialRecords {
     const entry = ownedPlatform(set, platform);
     assert(entry !== undefined && isGenerated(entry));
     this.requireAvailableName(tx, name);
+    this.refusePlatformConflict(tx, name, platform);
     const { secret, metadata } = this.generatedRevision(
       entry,
       body.generate(name),
@@ -1580,12 +2124,13 @@ export class CustodyComponent implements Service, CredentialRecords {
     );
     tx.database
       .prepare(
-        "INSERT INTO credential (id, name, platform, revision, nonce, ciphertext, metadata, created_at, ended_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL)",
+        "INSERT INTO credential (id, name, platform, holder, sealed_to, revision, nonce, ciphertext, metadata, created_at, ended_at) VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, NULL)",
       )
       .run(
         id,
         name,
         platform,
+        SERVER_HOLDER,
         FIRST_REVISION,
         nonce,
         ciphertext,
@@ -1596,7 +2141,7 @@ export class CustodyComponent implements Service, CredentialRecords {
       { credential_id: id, human_identity: humanIdentity },
       "credential created",
     );
-    return answerForName(tx, name)!;
+    return this.answerOf(tx, name, SERVER_HOLDER)!;
   }
 
   rotateGenerated(
@@ -1607,7 +2152,12 @@ export class CustodyComponent implements Service, CredentialRecords {
     humanIdentity: string | undefined,
   ): CredentialAnswer {
     refuseForeign(tx, set, credentialName);
-    const row = requireLive(tx, credentialName, body.expected_revision);
+    const row = requireLive(
+      tx,
+      credentialName,
+      SERVER_HOLDER,
+      body.expected_revision,
+    );
     const entry = ownedPlatform(set, row.platform)!;
     if (!isGenerated(entry)) throw unsupportedEntry();
     const { secret, metadata } = this.generatedRevision(
@@ -1616,13 +2166,13 @@ export class CustodyComponent implements Service, CredentialRecords {
     );
     const id = createIdentity(CREDENTIAL_PREFIX);
     const now = Date.now();
-    this.insertRevision(tx, row, id, secret, metadata, now);
-    this.drainRevisions(tx, row.name, now);
+    this.insertRevision(tx, row, id, secret, null, metadata, now);
+    this.drainRevisions(tx, row.name, row.holder, now);
     this.logger.info(
       { credential_id: id, human_identity: humanIdentity },
       "credential rotated",
     );
-    return answerForName(tx, row.name)!;
+    return this.answerOf(tx, row.name, row.holder)!;
   }
 
   private generatedRevision(

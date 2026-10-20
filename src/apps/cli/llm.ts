@@ -51,6 +51,7 @@ const LLM_GROUP: CredentialGroup = {
     },
     secret: { key: "<api-key>" },
   },
+  instanceCopies: true,
 };
 
 async function loginStatus(session: string, command: Command): Promise<void> {

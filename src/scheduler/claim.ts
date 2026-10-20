@@ -193,7 +193,11 @@ export function claimOnce(
     ) > NO_INSTANCES
   )
     return { outcome: ClaimOutcome.None, row: null, settled };
-  const choice = dependencies.agentChains.select(tx, binding.binding_id);
+  const choice = dependencies.agentChains.select(
+    tx,
+    binding.binding_id,
+    pull.runtime_identity,
+  );
   if (choice.kind === AgentChoiceKind.Cooling)
     return { outcome: ClaimOutcome.None, row: null, settled };
   const result = acquire(

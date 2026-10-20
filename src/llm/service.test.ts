@@ -19,8 +19,13 @@ import {
 import {
   CUSTODY_SERVICE_NAME,
   EXECUTION_CREDENTIAL_MAX_BYTES,
+  CREDENTIAL_SEAL_INFO,
+  credentialSealAad,
   SecretShape,
+  SERVER_HOLDER,
   type CredentialAnswer,
+  type InstanceKey,
+  type InstanceKeys,
 } from "../custody/contract.ts";
 import { decrypt } from "../custody/envelope.ts";
 import { background, CancellationContext } from "../kernel/context.ts";
@@ -28,6 +33,15 @@ import { OperationError } from "../kernel/errors.ts";
 import { ResourceFailureReason } from "../kernel/health.ts";
 import { HttpMethod, HttpStatus } from "../kernel/http.ts";
 import { canonicalJSON } from "../kernel/json.ts";
+import {
+  generateX25519KeyPair,
+  keyFingerprint,
+  openJSON,
+  sealedObjectSchema,
+  sealJSON,
+} from "../kernel/hpke.ts";
+import { testWorkerIdentity } from "../kernel/test-identity.ts";
+import { createIdentity } from "../kernel/identity.ts";
 import {
   AccessPolicy,
   OperationRegistry,
@@ -116,6 +130,7 @@ function fixture(
     enablementsDependentOnModel?: EnablementsDependentOnModelFn;
     loadModelRuntime?: () => Promise<ModelRuntimeModule>;
     logger?: Logger;
+    instanceKeys?: InstanceKeys;
   } = {},
 ) {
   const store = new Store(IN_MEMORY_DATABASE);
@@ -157,6 +172,7 @@ function fixture(
     bindingsNaming: () => [],
     inboundsNaming: () => [],
     intakeServiceName: INTAKE_SERVICE_NAME,
+    instanceKeys: collaborations.instanceKeys,
   });
   const component = new LlmComponent({
     records: custody,
@@ -170,6 +186,7 @@ function fixture(
     loadModelRuntime:
       collaborations.loadModelRuntime ??
       (() => Promise.reject(new Error("UNEXPECTED_COLLABORATION"))),
+    instanceKeys: collaborations.instanceKeys,
   });
   const registry = new OperationRegistry();
   component.declare(registry);
@@ -190,6 +207,14 @@ function fixture(
   ): unknown {
     const parsed = operation.input.parse(input);
     return registry.get(operation.id).handler(parsed, caller);
+  }
+  function invokeAs(
+    identity: CallerContext["identity"],
+    operation: (typeof llmOperations)[keyof typeof llmOperations],
+    input: unknown,
+  ): unknown {
+    const parsed = operation.input.parse(input);
+    return registry.get(operation.id).handler(parsed, { ...caller, identity });
   }
   const create = (body: unknown) =>
     invoke(llmOperations.create, { params: {}, query: {}, body });
@@ -273,6 +298,7 @@ function fixture(
     component,
     caller,
     invoke,
+    invokeAs,
     login,
     loginCode,
     loginStatus,
@@ -2467,4 +2493,224 @@ test("verify takes no body and no mutation key", () => {
       body: {},
     }),
   );
+});
+
+const RELAY_A = "relay-a";
+const ROTATED_REVISIONS = 2;
+const HUMAN_ROTATED_REVISIONS = 3;
+const SEALED_INVALID_CODE = "credential.sealed.invalid";
+const INSTANCE_UNKNOWN_CODE = "llm.credential.instance_unknown";
+const INSTANCE_FORBIDDEN_CODE = "llm.credential.instance_forbidden";
+
+async function instanceFixture() {
+  const pairs = new Map<
+    string,
+    { id: string; key: InstanceKey; private_key: Buffer }
+  >();
+  for (const name of ["relay-a", "relay-b"]) {
+    const pair = await generateX25519KeyPair();
+    pairs.set(name, {
+      id: createIdentity("worker_instance"),
+      key: {
+        name,
+        public_key: pair.public_key.toString("base64url"),
+        fingerprint: keyFingerprint(pair.public_key),
+      },
+      private_key: pair.private_key,
+    });
+  }
+  const f = fixture({
+    instanceKeys: {
+      keyOf: (_tx, name) => pairs.get(name)?.key ?? null,
+      nameOf: (_tx, instanceId) =>
+        [...pairs.values()].find(({ id }) => id === instanceId)?.key.name ??
+        null,
+    },
+  });
+  const worker = (name: string) =>
+    testWorkerIdentity(pairs.get(name)!.id, name, "jti");
+  const stored = (name: string, holder: string) => {
+    const row = f.store.database
+      .prepare(
+        "SELECT id, platform, nonce, ciphertext FROM credential WHERE name = ? AND holder = ? ORDER BY revision DESC LIMIT 1",
+      )
+      .get(name, holder) as {
+      id: string;
+      platform: string;
+      nonce: Buffer;
+      ciphertext: Buffer;
+    };
+    return decrypt(key, row.id, row.platform, row.nonce, row.ciphertext);
+  };
+  const opened = (name: string, holder: string) =>
+    openJSON(
+      pairs.get(holder)!.private_key,
+      CREDENTIAL_SEAL_INFO,
+      credentialSealAad({
+        name,
+        platform: Platform.Anthropic,
+        holder,
+        sealed_to: pairs.get(holder)!.key.fingerprint,
+      }),
+      sealedObjectSchema.parse(stored(name, holder)),
+    );
+  const sealFor = async (name: string, holder: string, secret: unknown) => {
+    const pair = pairs.get(holder)!;
+    return {
+      sealed: await sealJSON(
+        Buffer.from(pair.key.public_key, "base64url"),
+        CREDENTIAL_SEAL_INFO,
+        credentialSealAad({
+          name,
+          platform: Platform.Anthropic,
+          holder,
+          sealed_to: pair.key.fingerprint,
+        }),
+        secret,
+      ),
+      sealed_to: pair.key.fingerprint,
+    };
+  };
+  return { f, pairs, worker, stored, opened, sealFor };
+}
+
+test("a human create seals one copy per instance holder on the server and stores no plaintext of an instance copy", async () => {
+  const { f, opened, stored } = await instanceFixture();
+  try {
+    const answer = (await f.create({
+      name: "shared",
+      platform: Platform.Anthropic,
+      metadata: null,
+      secret: apiSecret,
+      holders: ["server", "relay-a"],
+    })) as CredentialAnswer;
+    assert.equal(answer.holder, SERVER_HOLDER);
+    assert.deepEqual(await opened("shared", "relay-a"), apiSecret);
+    assert.equal(
+      JSON.stringify(stored("shared", "relay-a")).includes(secretValue),
+      false,
+    );
+    const copy = f.invokeAs(f.caller.identity, llmOperations.get, {
+      params: { credential_name: "shared" },
+      query: { holder: "relay-a" },
+      body: null,
+    }) as CredentialAnswer;
+    assert.equal(copy.holder, RELAY_A);
+    assert.equal(copy.sealed_current, true);
+    await failsAsync(
+      async () =>
+        f.create({
+          name: "unknown-holder",
+          platform: Platform.Anthropic,
+          metadata: null,
+          secret: apiSecret,
+          holders: ["relay-z"],
+        }),
+      HttpStatus.BadRequest,
+      INSTANCE_UNKNOWN_CODE,
+    );
+    fails(
+      () =>
+        f.create({
+          name: "shared",
+          platform: Platform.Anthropic,
+          metadata: null,
+          secret: apiSecret,
+          holder: "relay-a",
+        }),
+      HttpStatus.BadRequest,
+      INVALID_INPUT_CODE,
+    );
+    assert.equal(
+      f.store.database
+        .prepare("SELECT COUNT(*) AS count FROM credential WHERE name = ?")
+        .get("unknown-holder")!.count,
+      NO_CREDENTIALS,
+    );
+  } finally {
+    f.store.close();
+  }
+});
+
+test("a worker writes and rotates only the sealed copy of its own instance", async () => {
+  const { f, worker, opened, sealFor } = await instanceFixture();
+  try {
+    const relayA = worker("relay-a");
+    const create = (body: object) =>
+      f.invokeAs(relayA, llmOperations.create, {
+        params: {},
+        query: {},
+        body: {
+          name: "local",
+          platform: Platform.Anthropic,
+          metadata: null,
+          ...body,
+        },
+      });
+    const forOther = await sealFor("local", "relay-b", apiSecret);
+    fails(
+      () => create({ holder: "relay-b", ...forOther }),
+      HttpStatus.Forbidden,
+      INSTANCE_FORBIDDEN_CODE,
+    );
+    fails(
+      () => create({ holder: "relay-a", ...forOther }),
+      HttpStatus.BadRequest,
+      SEALED_INVALID_CODE,
+    );
+    fails(
+      () => create({ holder: "relay-a", secret: apiSecret }),
+      HttpStatus.BadRequest,
+      INVALID_INPUT_CODE,
+    );
+    const answer = create({
+      holder: "relay-a",
+      ...(await sealFor("local", "relay-a", apiSecret)),
+    }) as CredentialAnswer;
+    assert.equal(answer.holder, RELAY_A);
+    assert.deepEqual(await opened("local", "relay-a"), apiSecret);
+    const rotated = { key: "rotated-credential-value" };
+    const rotate = (holder: string, sealed: object) =>
+      f.invokeAs(relayA, llmOperations.rotate, {
+        params: { credential_name: "local" },
+        query: {},
+        body: { expected_revision: 1, holder, ...sealed },
+      });
+    fails(
+      () => rotate("relay-b", forOther),
+      HttpStatus.Forbidden,
+      INSTANCE_FORBIDDEN_CODE,
+    );
+    const next = rotate(
+      "relay-a",
+      await sealFor("local", "relay-a", rotated),
+    ) as CredentialAnswer;
+    assert.equal(next.revisions.length, ROTATED_REVISIONS);
+    assert.deepEqual(await opened("local", "relay-a"), rotated);
+    fails(
+      () =>
+        f.invokeAs(worker("relay-b"), llmOperations.get, {
+          params: { credential_name: "local" },
+          query: { holder: "relay-a" },
+          body: null,
+        }),
+      HttpStatus.Forbidden,
+      INSTANCE_FORBIDDEN_CODE,
+    );
+    const listed = f.invokeAs(worker("relay-b"), llmOperations.list, {
+      params: {},
+      query: {},
+      body: null,
+    }) as { items: CredentialAnswer[] };
+    assert.deepEqual(listed.items, []);
+    const human = (await f.invoke(llmOperations.rotate, {
+      params: { credential_name: "local" },
+      query: { holder: "relay-a" },
+      body: { expected_revision: 2, secret: apiSecret },
+    })) as CredentialAnswer;
+    assert.equal(human.revisions.length, HUMAN_ROTATED_REVISIONS);
+    assert.deepEqual(await opened("local", "relay-a"), apiSecret);
+  } finally {
+    f.store.close();
+  }
 });

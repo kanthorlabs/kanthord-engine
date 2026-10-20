@@ -11,6 +11,7 @@ import {
   type AgentProviderItem,
   type ApprovedModel,
   type ApprovedModelsFn,
+  type CopyHeldFn,
   type CustodySuitability,
   ChainLevel,
   type DefaultConfiguration,
@@ -22,6 +23,7 @@ import { AgentProviderKind } from "./enablements.ts";
 const issueFields: Readonly<Record<string, string>> = {
   [AgentErrorCode.ProviderNotFound]: "agent_provider",
   [AgentErrorCode.CredentialUnsuitable]: "agent_provider",
+  [AgentErrorCode.CredentialHolderMismatch]: "agent_provider",
   [AgentErrorCode.ModelUnknown]: "model_identifier",
   [AgentErrorCode.ReasoningUnsupported]: "reasoning_effort",
 };
@@ -29,6 +31,7 @@ const issueFields: Readonly<Record<string, string>> = {
 export type ConfigurationDependencies = {
   custodySuitability: CustodySuitability;
   approvedModels: ApprovedModelsFn;
+  copyHeld: CopyHeldFn;
 };
 
 export function configurationError(
@@ -144,6 +147,29 @@ export function validateProvider(
   }
 }
 
+export function validateHolders(
+  dependencies: ConfigurationDependencies,
+  tx: Transaction,
+  agentName: string,
+  item: AgentProviderItem,
+  holders: readonly string[],
+): void {
+  for (const holder of holders) {
+    if (dependencies.copyHeld(tx, item.credential, holder)) continue;
+    throw new OperationError(
+      HttpStatus.BadRequest,
+      AgentErrorCode.CredentialHolderMismatch,
+      "A holder of the consumer holds no live copy of the credential sealed to its current key.",
+      {
+        agent: agentName,
+        agent_provider: item.name,
+        credential: item.credential,
+        holder,
+      },
+    );
+  }
+}
+
 export function providerModels(
   dependencies: ConfigurationDependencies,
   tx: Transaction,
@@ -180,6 +206,7 @@ export function validateEffectiveConfig(
   agentName: string,
   agentProviders: AgentProviderItem[],
   config: DefaultConfiguration,
+  holders: readonly string[],
 ): void {
   const item = agentProviders.find(
     ({ name }) => name === config.agent_provider,
@@ -187,6 +214,7 @@ export function validateEffectiveConfig(
   if (!item)
     throw configurationError(agentName, AgentErrorCode.ProviderNotFound);
   validateProvider(dependencies, tx, agentName, item);
+  validateHolders(dependencies, tx, agentName, item, holders);
   const levels = modelLevels(
     dependencies,
     tx,
@@ -207,6 +235,7 @@ export function configurationIssues(
   agentName: string,
   agentProviders: AgentProviderItem[],
   config: DefaultConfiguration,
+  holders: readonly string[],
   prefix: readonly string[] = [],
 ): AgentView["issues"] {
   try {
@@ -216,6 +245,7 @@ export function configurationIssues(
       agentName,
       agentProviders,
       config,
+      holders,
     );
     return [];
   } catch (error) {
@@ -235,14 +265,27 @@ export function chainIssues(
   agentProviders: AgentProviderItem[],
   head: DefaultConfiguration,
   tail: readonly DefaultConfiguration[],
+  holders: readonly string[],
 ): AgentView["issues"] {
   return [
-    ...configurationIssues(dependencies, tx, agentName, agentProviders, head),
+    ...configurationIssues(
+      dependencies,
+      tx,
+      agentName,
+      agentProviders,
+      head,
+      holders,
+    ),
     ...tail.flatMap((config, index) =>
-      configurationIssues(dependencies, tx, agentName, agentProviders, config, [
-        FALLBACK_FIELD,
-        String(index),
-      ]),
+      configurationIssues(
+        dependencies,
+        tx,
+        agentName,
+        agentProviders,
+        config,
+        holders,
+        [FALLBACK_FIELD, String(index)],
+      ),
     ),
   ];
 }

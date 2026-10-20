@@ -17,7 +17,7 @@ import {
   enforceMasterKey,
   grantFacts,
 } from "../../custody/index.ts";
-import { CUSTODY_SERVICE_NAME } from "../../custody/contract.ts";
+import { CUSTODY_SERVICE_NAME, SERVER_HOLDER } from "../../custody/contract.ts";
 import {
   executionTrace,
   SchedulerService,
@@ -330,13 +330,34 @@ export function composeServices(options: {
       projectPaused: (tx, projectId) => project.projectPaused(tx, projectId),
     },
     agentChains: {
-      select: (tx, workerBindingId) => worker.agentChoice(tx, workerBindingId),
+      select: (tx, workerBindingId, runtimeIdentity) =>
+        worker.agentChoice(tx, workerBindingId, runtimeIdentity),
       resolve: (tx, workerBindingId, pins) =>
         worker.agentSelectionsAt(tx, workerBindingId, pins),
-      providerFailure: (tx, selections, code, executionId, now) =>
-        agent.recordProviderFailure(tx, selections, code, executionId, now),
-      success: (tx, selections, executionId) =>
-        agent.recordSuccess(tx, selections, executionId),
+      providerFailure: (tx, claimant, selections, code, executionId, now) =>
+        agent.recordProviderFailure(
+          tx,
+          selections,
+          worker.claimantHolder(
+            tx,
+            claimant.worker_binding_id,
+            claimant.runtime_identity,
+          ),
+          code,
+          executionId,
+          now,
+        ),
+      success: (tx, claimant, selections, executionId) =>
+        agent.recordSuccess(
+          tx,
+          selections,
+          worker.claimantHolder(
+            tx,
+            claimant.worker_binding_id,
+            claimant.runtime_identity,
+          ),
+          executionId,
+        ),
       selected: (selections, executionId) => {
         agent.recordSelection(selections, executionId);
       },
@@ -410,6 +431,18 @@ export function composeServices(options: {
       agent.agentProvidersDependentOn(tx, name),
     bindingsNaming: (tx, name) => project.bindingsNaming(tx, name),
     inboundsNaming: (tx, name) => intake.inboundsNaming(tx, name),
+    bindingsListingInstance: (tx, instance, name) =>
+      worker.bindingsListingInstance(
+        tx,
+        instance,
+        agent
+          .agentProvidersDependentOn(tx, name)
+          .map(({ agent_name }) => agent_name),
+      ),
+    instanceKeys: {
+      keyOf: (tx, name) => worker.instanceKeyOf(tx, name),
+      nameOf: (tx, instanceId) => worker.instanceNameOf(tx, instanceId),
+    },
     intakeServiceName: INTAKE_SERVICE_NAME,
     sshIdentityAuthorization: projectSshIdentityAuthorization({
       custodySuitability: (tx, req) => custody.custodySuitability(tx, req),
@@ -434,6 +467,10 @@ export function composeServices(options: {
     enablementsDependentOnModel: (tx, name, model) =>
       agent.enablementsDependentOnModel(tx, name, model),
     loadModelRuntime: options.loadModelRuntime ?? loadPi,
+    instanceKeys: {
+      keyOf: (tx, name) => worker.instanceKeyOf(tx, name),
+      nameOf: (tx, instanceId) => worker.instanceNameOf(tx, instanceId),
+    },
   });
   const agent: AgentComponent = new AgentComponent({
     store: options.store,
@@ -442,11 +479,12 @@ export function composeServices(options: {
     workbenchDirectory: (name) =>
       workbenchDirectory(options.stateDirectory, name),
     custodySuitability: (tx, req) => custody.custodySuitability(tx, req),
+    copyHeld: (tx, name, holder) => custody.copyHeld(tx, name, holder),
     credentialHolds: {
-      holdOf: (tx, name) => custody.holds.holdOf(tx, name),
-      hold: (tx, name, availableAt, strikes) =>
-        custody.holds.hold(tx, name, availableAt, strikes),
-      release: (tx, name) => custody.holds.release(tx, name),
+      holdOf: (tx, name, holder) => custody.holds.holdOf(tx, name, holder),
+      hold: (tx, name, holder, availableAt, strikes) =>
+        custody.holds.hold(tx, name, holder, availableAt, strikes),
+      release: (tx, name, holder) => custody.holds.release(tx, name, holder),
       listHolds: (tx) => custody.holds.listHolds(tx),
     },
     approvedModels: (tx, name) => llm.approvedModels(tx, name),
@@ -563,11 +601,19 @@ export function composeServices(options: {
         project.workerBindingsOf(tx, projectId),
       logger: options.logger,
     },
+    instanceCopies: {
+      archiveHeld: (tx, holder, now) => {
+        custody.archiveHeld(tx, holder, now);
+      },
+      heldCopies: (tx, holder) => custody.heldCopies(tx, holder),
+    },
     agentConfiguration: {
-      validateEntry: (tx, name, entry) => agent.validateEntry(tx, name, entry),
-      agentView: (tx, name, entry, models) =>
-        agent.agentView(tx, name, entry, models),
-      selectAgent: (tx, name, entry) => agent.selectAgent(tx, name, entry),
+      validateEntry: (tx, name, entry, holders) =>
+        agent.validateEntry(tx, name, entry, holders),
+      agentView: (tx, name, entry, scope, models) =>
+        agent.agentView(tx, name, entry, scope, models),
+      selectAgent: (tx, name, entry, scope) =>
+        agent.selectAgent(tx, name, entry, scope),
       selectionAt: (tx, name, enablementId, entry, position) =>
         agent.selectionAt(tx, name, enablementId, entry, position),
       selectionView: (tx, selection, models) =>
@@ -703,7 +749,8 @@ export function composeServices(options: {
     liveNodesPinning: (tx, bid) => mission.liveNodesPinning(tx, bid),
     unmatchedClaims: (tx, projectId) =>
       scheduler.unmatchedClaims(tx, projectId),
-    validateEntry: (tx, name, entry) => worker.validateEntry(tx, name, entry),
+    validateEntry: (tx, name, entry, holders) =>
+      worker.validateEntry(tx, name, entry, holders),
     custodySuitability: (tx, req) => custody.custodySuitability(tx, req),
     repositoryConnector: repoConnector,
     repositoryFiles,
@@ -718,8 +765,8 @@ export function composeServices(options: {
     sshAccessOf: (tx, granted, material) =>
       repositoryComponent.sshAccessOf(tx, granted, material),
     workerAgentsOf: (name) => worker.workerAgentsOf(name),
-    workerAgentView: (tx, w, a, entry) =>
-      worker.workerAgentView(tx, w, a, entry),
+    workerAgentView: (tx, w, a, entry, scope) =>
+      worker.workerAgentView(tx, w, a, entry, scope),
     health: options.health,
     bindings: options.bindings,
   });
@@ -764,10 +811,16 @@ export function composeServices(options: {
       templates: (context) => agent.promptTemplates(context),
     },
     agentConfiguration: {
-      validateEntry: (tx, name, entry) => agent.validateEntry(tx, name, entry),
-      agentView: (tx, name, entry) => agent.agentView(tx, name, entry),
+      validateEntry: (tx, name, entry) =>
+        agent.validateEntry(tx, name, entry, [SERVER_HOLDER]),
+      agentView: (tx, name, entry) =>
+        agent.agentView(tx, name, entry, {
+          holders: [SERVER_HOLDER],
+          claimant: SERVER_HOLDER,
+        }),
     },
-    credentialMetadata: (tx, name) => custody.credentialMetadata(tx, name),
+    credentialMetadata: (tx, name) =>
+      custody.credentialMetadata(tx, name, SERVER_HOLDER),
     workbenchCredentials: (input) => custody.workbenchCredentials(input),
     modelRuntimeFactory: options.workbenchModelRuntimeFactory,
     operations: () => registry.all().map(({ operation }) => operation),

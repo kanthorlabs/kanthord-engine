@@ -48,13 +48,19 @@ export function release(
     )
       cooldowns = dependencies.agentChains.providerFailure(
         tx,
+        row,
         selections,
         code,
         executionId,
         now,
       );
     else if (body.stop?.reason !== ExecutionStopReason.ProviderFailed)
-      cooldowns = dependencies.agentChains.success(tx, selections, executionId);
+      cooldowns = dependencies.agentChains.success(
+        tx,
+        row,
+        selections,
+        executionId,
+      );
     if (
       body.stop !== null &&
       body.stop.reason !== ExecutionStopReason.BudgetEnd

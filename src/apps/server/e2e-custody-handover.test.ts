@@ -5,7 +5,7 @@ import { parse, stringify } from "yaml";
 import { ulid } from "ulid";
 import { configuration, CONFIG_VERSION } from "../../config/index.ts";
 import {
-  handoverPayloadSchema,
+  plainHandoverPayloadSchema,
   type CredentialAnswer,
 } from "../../custody/contract.ts";
 import { Intent } from "../../mission/contract.ts";
@@ -325,7 +325,7 @@ async function setup(t: TestContext) {
   const aad = (executionId: string) =>
     handoverAad(executionId, registration.runtime_identity);
   const open = (executionId: string, envelope: HandoverEnvelope) =>
-    handoverPayloadSchema.parse(
+    plainHandoverPayloadSchema.parse(
       openEnvelope(keys.handover, aad(executionId), envelope),
     );
   const seal = (executionId: string, value: unknown) =>

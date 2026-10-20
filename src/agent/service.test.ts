@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { SERVER_HOLDER } from "../custody/contract.ts";
 import { COOLDOWN_DEFAULTS } from "./config.ts";
 import { getSupportedThinkingLevels } from "@earendil-works/pi-ai";
 import {
@@ -94,7 +95,13 @@ const putBody = {
   default_configuration: defaults,
   fallback_configurations: [],
 };
-const binding = { binding_id: "binding", worker_name: WORKER, entry: null };
+const binding = {
+  binding_id: "binding",
+  worker_name: WORKER,
+  entry: null,
+  holders: [SERVER_HOLDER],
+};
+const SERVER_SCOPE = { holders: [SERVER_HOLDER], claimant: SERVER_HOLDER };
 const fakeCollaborations: Omit<Dependencies, "store" | "credentialHolds"> = {
   config: {
     prompt: { system_file: "", agent_directory: "", host_file: true },
@@ -104,6 +111,7 @@ const fakeCollaborations: Omit<Dependencies, "store" | "credentialHolds"> = {
   hostHome: "/nonexistent/home",
   workbenchDirectory: (agentName) => `/nonexistent/workbench/${agentName}`,
   custodySuitability: () => {},
+  copyHeld: () => true,
   approvedModels: () => null,
   entriesOfAgent: () => [],
   repositoryWorkingOf: () => null,
@@ -1161,7 +1169,10 @@ test("null credential records permit no model; malformed metadata propagates in 
   broken = true;
   for (const action of [
     () => f.invoke("enablement.put", { ...customBody, expected_revision: 1 }),
-    () => f.store.transaction((tx) => f.agent.agentView(tx, AGENT, null)),
+    () =>
+      f.store.transaction((tx) =>
+        f.agent.agentView(tx, AGENT, null, SERVER_SCOPE),
+      ),
   ])
     assert.throws(action, (error) => error === malformed);
 });
@@ -1192,7 +1203,9 @@ test("Custody refusals map to credential_unsuitable, while unexpected failures p
     AgentErrorCode.CredentialUnsuitable,
   );
   const view = () =>
-    f.store.transaction((tx) => f.agent.agentView(tx, AGENT, null));
+    f.store.transaction((tx) =>
+      f.agent.agentView(tx, AGENT, null, SERVER_SCOPE),
+    );
   assert.deepEqual(view()?.issues, [
     { path: ["agent_provider"], code: AgentErrorCode.CredentialUnsuitable },
   ]);
@@ -1236,7 +1249,9 @@ test("put refuses an unsuitable credential on a non-default provider before any 
 test("validateEntry enforces availability, allowlist and entry forms", (t) => {
   const f = enablementFixture(t);
   const validate = (entry: AgentEntry | null) =>
-    f.store.transaction((tx) => f.agent.validateEntry(tx, AGENT, entry));
+    f.store.transaction((tx) =>
+      f.agent.validateEntry(tx, AGENT, entry, [SERVER_HOLDER]),
+    );
   refuses(
     () => validate(null),
     AgentErrorCode.Unavailable,
@@ -1364,7 +1379,9 @@ test("model dependency lookup enumerates all live pages, deduplicates, and exclu
 test("agentView resolves valid configurations and returns precise issues without hiding unexpected errors", (t) => {
   const f = enablementFixture(t);
   const view = (entry: AgentEntry | null = null, agentName = AGENT) =>
-    f.store.transaction((tx) => f.agent.agentView(tx, agentName, entry));
+    f.store.transaction((tx) =>
+      f.agent.agentView(tx, agentName, entry, SERVER_SCOPE),
+    );
   assert.deepEqual(view(), {
     defaults: null,
     effective: null,
@@ -1440,7 +1457,7 @@ test("selectionView validates the pinned selection and answers unavailable for a
   const f = enablementFixture(t);
   f.invoke("enablement.put", putBody);
   const chosen = f.store.transaction((tx) =>
-    f.agent.selectAgent(tx, AGENT, null),
+    f.agent.selectAgent(tx, AGENT, null, SERVER_SCOPE),
   );
   assert.ok(chosen.kind === SelectionKind.Selected);
   const { selection } = chosen;
@@ -1682,11 +1699,16 @@ test("every listed model and reasoning effort passes the configuration validatio
       for (const reasoningEffort of reasoning_efforts)
         f.store.transaction((tx) =>
           assert.doesNotThrow(() =>
-            f.agent.validateEntry(tx, AGENT, {
-              agent_provider: item.name,
-              model_identifier,
-              reasoning_effort: reasoningEffort,
-            }),
+            f.agent.validateEntry(
+              tx,
+              AGENT,
+              {
+                agent_provider: item.name,
+                model_identifier,
+                reasoning_effort: reasoningEffort,
+              },
+              [SERVER_HOLDER],
+            ),
           ),
         );
   }
@@ -2143,7 +2165,7 @@ function chainOf(
   entry: AgentEntry | null,
 ) {
   return f.store
-    .transaction((tx) => f.agent.agentView(tx, AGENT, entry))
+    .transaction((tx) => f.agent.agentView(tx, AGENT, entry, SERVER_SCOPE))
     ?.chain.map(({ position, level, agent_provider, model_identifier }) => ({
       position,
       level,
@@ -2184,7 +2206,9 @@ test("put stores the fallback chain and the agent view resolves an inherited, a 
       model_identifier: OPUS,
     },
   ]);
-  const view = f.store.transaction((tx) => f.agent.agentView(tx, AGENT, null));
+  const view = f.store.transaction((tx) =>
+    f.agent.agentView(tx, AGENT, null, SERVER_SCOPE),
+  );
   assert.equal(view?.chain[1]?.credential, spare.credential);
   assert.deepEqual(chainOf(f, { fallback_configurations: [primaryOpus] }), [
     {
@@ -2334,7 +2358,9 @@ test("a binding entry takes a tail alone and refuses a duplicate or an invalid t
   const f = enablementFixture(t);
   f.invoke("enablement.put", chainBody);
   const validate = (entry: AgentEntry) =>
-    f.store.transaction((tx) => f.agent.validateEntry(tx, AGENT, entry));
+    f.store.transaction((tx) =>
+      f.agent.validateEntry(tx, AGENT, entry, [SERVER_HOLDER]),
+    );
   for (const entry of [
     { fallback_configurations: [] },
     { fallback_configurations: [spareHaiku] },
@@ -2358,11 +2384,16 @@ test("a binding entry takes a tail alone and refuses a duplicate or an invalid t
   );
   assert.deepEqual(
     f.store.transaction((tx) =>
-      f.agent.agentView(tx, AGENT, {
-        fallback_configurations: [
-          { ...spareHaiku, model_identifier: MISSING_MODEL },
-        ],
-      }),
+      f.agent.agentView(
+        tx,
+        AGENT,
+        {
+          fallback_configurations: [
+            { ...spareHaiku, model_identifier: MISSING_MODEL },
+          ],
+        },
+        SERVER_SCOPE,
+      ),
     ),
     {
       defaults,
@@ -2418,7 +2449,9 @@ function holdFixture(
   const f = enablementFixture(t, { clock: () => now, ...collaborations });
   f.invoke("enablement.put", chainBody);
   const select = () =>
-    f.store.transaction((tx) => f.agent.selectAgent(tx, AGENT, null));
+    f.store.transaction((tx) =>
+      f.agent.selectAgent(tx, AGENT, null, SERVER_SCOPE),
+    );
   const selected = () => {
     const chosen = select();
     assert.ok(chosen.kind === SelectionKind.Selected);
@@ -2426,21 +2459,28 @@ function holdFixture(
   };
   const view = () => {
     const answer = f.store.transaction((tx) =>
-      f.agent.agentView(tx, AGENT, null),
+      f.agent.agentView(tx, AGENT, null, SERVER_SCOPE),
     );
     assert.ok(answer);
     return answer;
   };
   const fail = (selection: AgentSelection, code: AdvancingFailure) => {
     const changes = f.store.transaction((tx) =>
-      f.agent.recordProviderFailure(tx, [selection], code, EXECUTION_ID, now),
+      f.agent.recordProviderFailure(
+        tx,
+        [selection],
+        SERVER_HOLDER,
+        code,
+        EXECUTION_ID,
+        now,
+      ),
     );
     f.agent.recordCooldowns(changes);
     return changes;
   };
   const succeed = (selection: AgentSelection) => {
     const changes = f.store.transaction((tx) =>
-      f.agent.recordSuccess(tx, [selection], EXECUTION_ID),
+      f.agent.recordSuccess(tx, [selection], SERVER_HOLDER, EXECUTION_ID),
     );
     f.agent.recordCooldowns(changes);
     return changes;
@@ -2577,6 +2617,7 @@ test("a provider failure returns one cooldown change per credential, logs nothin
           model_identifier: sameCredentialOtherModel.model_identifier,
         },
       ],
+      SERVER_HOLDER,
       AdvancingFailure.RateLimited,
       EXECUTION_ID,
       f.now(),
@@ -2589,6 +2630,7 @@ test("a provider failure returns one cooldown change per credential, logs nothin
       kind: CooldownChangeKind.Started,
       execution_id: EXECUTION_ID,
       credential: head.credential,
+      holder: SERVER_HOLDER,
       code: AdvancingFailure.RateLimited,
       strikes: FIRST_STRIKE,
       available_at: availableAt,
@@ -2601,6 +2643,7 @@ test("a provider failure returns one cooldown change per credential, logs nothin
       msg: FallbackLog.CooldownStarted,
       execution_id: EXECUTION_ID,
       credential_name: head.credential,
+      holder: SERVER_HOLDER,
       code: AdvancingFailure.RateLimited,
       strikes: FIRST_STRIKE,
       available_at: availableAt,
@@ -2613,6 +2656,7 @@ test("a provider failure returns one cooldown change per credential, logs nothin
     msg: FallbackLog.CooldownStarted,
     execution_id: EXECUTION_ID,
     credential_name: head.credential,
+    holder: SERVER_HOLDER,
     code: AdvancingFailure.RateLimited,
     strikes: SECOND_STRIKE,
     available_at: f.now() + 2 * COOLDOWN_DEFAULTS.rate_limited_ms,
@@ -2641,6 +2685,7 @@ test("a release of a hold returns one cleared change, and recordCooldowns logs a
     const made = f.agent.recordSuccess(
       tx,
       [head, sameCredential],
+      SERVER_HOLDER,
       EXECUTION_ID,
     );
     assert.deepEqual(logs, []);
@@ -2651,6 +2696,7 @@ test("a release of a hold returns one cleared change, and recordCooldowns logs a
       kind: CooldownChangeKind.Cleared,
       execution_id: EXECUTION_ID,
       credential: head.credential,
+      holder: SERVER_HOLDER,
     },
   ]);
   f.agent.recordCooldowns(changes);
@@ -2660,6 +2706,7 @@ test("a release of a hold returns one cleared change, and recordCooldowns logs a
       msg: FallbackLog.CooldownCleared,
       execution_id: EXECUTION_ID,
       credential_name: head.credential,
+      holder: SERVER_HOLDER,
     },
   ]);
   assert.deepEqual(f.succeed(head), []);
@@ -2719,7 +2766,7 @@ test("selectionAt answers the claim selection of every chain position", (t) => {
     const positions: number[] = [];
     for (;;) {
       const chosen = f.store.transaction((tx) =>
-        f.agent.selectAgent(tx, AGENT, entry),
+        f.agent.selectAgent(tx, AGENT, entry, SERVER_SCOPE),
       );
       if (chosen.kind === SelectionKind.Cooling) break;
       assert.ok(chosen.kind === SelectionKind.Selected);
@@ -2740,6 +2787,7 @@ test("selectionAt answers the claim selection of every chain position", (t) => {
         f.agent.recordProviderFailure(
           tx,
           [chosen.selection],
+          SERVER_HOLDER,
           AdvancingFailure.RateLimited,
           EXECUTION_ID,
           Date.now(),
@@ -2755,7 +2803,7 @@ test("selectionAt keeps the pinned enablement revision after a newer revision", 
   const f = enablementFixture(t);
   f.invoke("enablement.put", chainBody);
   const chosen = f.store.transaction((tx) =>
-    f.agent.selectAgent(tx, AGENT, null),
+    f.agent.selectAgent(tx, AGENT, null, SERVER_SCOPE),
   );
   assert.ok(chosen.kind === SelectionKind.Selected);
   f.invoke("enablement.put", {
@@ -2787,27 +2835,33 @@ test("a hold is shared by every agent that names the credential, and an invalid 
   f.invoke("enablement.put", chainBody);
   f.invoke("enablement.put", chainBody, { agent_name: OTHER_AGENT });
   const selected = f.store.transaction((tx) =>
-    f.agent.selectAgent(tx, AGENT, null),
+    f.agent.selectAgent(tx, AGENT, null, SERVER_SCOPE),
   );
   assert.ok(selected.kind === SelectionKind.Selected);
   f.store.transaction((tx) =>
     f.agent.recordProviderFailure(
       tx,
       [selected.selection],
+      SERVER_HOLDER,
       AdvancingFailure.RateLimited,
       EXECUTION_ID,
       Date.now(),
     ),
   );
   const other = f.store.transaction((tx) =>
-    f.agent.selectAgent(tx, OTHER_AGENT, null),
+    f.agent.selectAgent(tx, OTHER_AGENT, null, SERVER_SCOPE),
   );
   assert.ok(other.kind === SelectionKind.Selected);
   assert.equal(other.selection.position, SECOND_POSITION);
   assert.equal(other.selection.agent_name, OTHER_AGENT);
   assert.deepEqual(
     f.store.transaction((tx) =>
-      f.agent.selectAgent(tx, AGENT, { model_identifier: MISSING_MODEL }),
+      f.agent.selectAgent(
+        tx,
+        AGENT,
+        { model_identifier: MISSING_MODEL },
+        SERVER_SCOPE,
+      ),
     ),
     { kind: SelectionKind.Invalid },
   );
@@ -2818,13 +2872,14 @@ test("a human lists the holds and clears one by credential name, and a clear of 
   const f = enablementFixture(t, { clock: () => now });
   f.invoke("enablement.put", chainBody);
   const selected = f.store.transaction((tx) =>
-    f.agent.selectAgent(tx, AGENT, null),
+    f.agent.selectAgent(tx, AGENT, null, SERVER_SCOPE),
   );
   assert.ok(selected.kind === SelectionKind.Selected);
   f.store.transaction((tx) =>
     f.agent.recordProviderFailure(
       tx,
       [selected.selection],
+      SERVER_HOLDER,
       AdvancingFailure.QuotaExhausted,
       EXECUTION_ID,
       now,
@@ -2834,6 +2889,7 @@ test("a human lists the holds and clears one by credential name, and a clear of 
     items: [
       {
         credential: provider.credential,
+        holder: SERVER_HOLDER,
         strikes: FIRST_STRIKE,
         available_at: now + COOLDOWN_DEFAULTS.quota_exhausted_ms,
       },
@@ -2848,7 +2904,7 @@ test("a human lists the holds and clears one by credential name, and a clear of 
     () => f.invoke("cooldown.clear", null, { credential: provider.credential }),
     AgentErrorCode.CooldownNotFound,
     HttpStatus.NotFound,
-    { credential: provider.credential },
+    { credential: provider.credential, holder: SERVER_HOLDER },
   );
 });
 
@@ -2864,13 +2920,14 @@ test("a committed human clear of a cooldown logs agent.fallback.cooldown_cleared
       level: pino.levels.values.info,
       msg: FallbackLog.CooldownCleared,
       credential_name: head.credential,
+      holder: SERVER_HOLDER,
     },
   ]);
   refuses(
     () => f.invoke("cooldown.clear", null, { credential: head.credential }),
     AgentErrorCode.CooldownNotFound,
     HttpStatus.NotFound,
-    { credential: head.credential },
+    { credential: head.credential, holder: SERVER_HOLDER },
   );
   assert.equal(logs.length, ONE_LOG);
 });
@@ -2906,4 +2963,74 @@ test("a rolled-back clear of a cooldown writes no log", (t) => {
   );
   assert.deepEqual(logs, []);
   assert.deepEqual(f.invoke("cooldown.list", null, {}), held);
+});
+
+test("the holder rule refuses a holder without a live copy at the entry write, the enablement write and the resolution, the fallback entry included", (t) => {
+  const RELAY_A = "relay-a";
+  const RELAY_B = "relay-b";
+  const held = new Set([`${provider.credential}/${RELAY_A}`]);
+  let entries: AgentDependentBinding[] = [];
+  const f = enablementFixture(t, {
+    copyHeld: (_tx, credential, holder) =>
+      holder === SERVER_HOLDER || held.has(`${credential}/${holder}`),
+    entriesOfAgent: () => entries,
+  });
+  f.invoke("enablement.put", putBody);
+  const validate = (holders: string[]) =>
+    f.store.transaction((tx) =>
+      f.agent.validateEntry(tx, AGENT, null, holders),
+    );
+  validate([RELAY_A]);
+  refuses(
+    () => validate([RELAY_A, RELAY_B]),
+    AgentErrorCode.CredentialHolderMismatch,
+    HttpStatus.BadRequest,
+    {
+      agent: AGENT,
+      agent_provider: provider.name,
+      credential: provider.credential,
+      holder: RELAY_B,
+    },
+  );
+  const scope = { holders: [RELAY_A], claimant: RELAY_A };
+  const select = () =>
+    f.store.transaction((tx) => f.agent.selectAgent(tx, AGENT, null, scope));
+  assert.equal(select().kind, SelectionKind.Selected);
+  entries = [{ ...binding, holders: [RELAY_A] }];
+  refuses(
+    () => f.invoke("enablement.put", { ...chainBody, expected_revision: 1 }),
+    AgentErrorCode.InvalidatesBindings,
+    HttpStatus.Conflict,
+    {
+      agent_name: AGENT,
+      bindings: [
+        {
+          binding_id: binding.binding_id,
+          worker_name: WORKER,
+          code: AgentErrorCode.CredentialHolderMismatch,
+        },
+      ],
+    },
+  );
+  entries = [];
+  f.invoke("enablement.put", { ...chainBody, expected_revision: 1 });
+  assert.equal(select().kind, SelectionKind.Invalid);
+  held.add(`${spare.credential}/${RELAY_A}`);
+  assert.equal(select().kind, SelectionKind.Selected);
+  held.delete(`${provider.credential}/${RELAY_A}`);
+  assert.equal(select().kind, SelectionKind.Invalid);
+  assert.deepEqual(
+    f.store.transaction((tx) => f.agent.agentView(tx, AGENT, null, scope))
+      ?.issues,
+    [
+      {
+        path: ["agent_provider"],
+        code: AgentErrorCode.CredentialHolderMismatch,
+      },
+      {
+        path: ["fallback_configurations", "1", "agent_provider"],
+        code: AgentErrorCode.CredentialHolderMismatch,
+      },
+    ],
+  );
 });

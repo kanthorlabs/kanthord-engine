@@ -11,7 +11,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { simpleGit } from "simple-git";
 import { httpClient } from "../../gateway/client.ts";
-import { handoverPayloadSchema } from "../../custody/contract.ts";
+import { plainHandoverPayloadSchema } from "../../custody/contract.ts";
 import { executionCredentialStore } from "../../custody/index.ts";
 import { background } from "../../kernel/context.ts";
 import { writePrivate } from "../../kernel/files.ts";
@@ -299,7 +299,7 @@ test(
         }),
       );
       const keys = deriveHandoverKeys(holder.client_secret);
-      const payload = handoverPayloadSchema.parse(
+      const payload = plainHandoverPayloadSchema.parse(
         openEnvelope(
           keys.handover,
           handoverAad(holder.execution.execution_id, holder.runtime_identity),

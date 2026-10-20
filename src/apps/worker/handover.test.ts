@@ -8,6 +8,18 @@ import {
   sealEnvelope,
   openEnvelope,
 } from "../../kernel/handover.ts";
+import {
+  generateX25519KeyPair,
+  keyFingerprint,
+  openJSON,
+  sealedObjectSchema,
+  sealJSON,
+} from "../../kernel/hpke.ts";
+import { digest } from "../../kernel/json.ts";
+import {
+  CREDENTIAL_SEAL_INFO,
+  credentialSealAad,
+} from "../../custody/contract.ts";
 import { httpTransport } from "./transport.ts";
 import { takeHandover } from "./handover.ts";
 import { testClaim } from "./test-support.ts";
@@ -176,5 +188,93 @@ test("handover builds one store per item and reports a refresh of the second ite
     reports.map((report) => report.credential_id),
     [second.credential_id],
   );
+  result.credentials.discard();
+});
+
+test("a unit opens a sealed handover item with the instance key, reports a sealed refresh and refuses the item without the key", async (t) => {
+  const api = httpTransport("http://127.0.0.1:1");
+  const claim = testClaim();
+  const keys = deriveHandoverKeys(SECRET);
+  const aad = handoverAad(claim.execution_id, claim.claimant.runtime_identity);
+  const pair = await generateX25519KeyPair();
+  const instanceKey = {
+    holder: "relay-a",
+    sealed_to: keyFingerprint(pair.public_key),
+    public_key: pair.public_key,
+    private_key: () => Buffer.from(pair.private_key),
+  };
+  const sealAad = credentialSealAad({
+    name: "anthro-1",
+    platform: "anthropic",
+    holder: instanceKey.holder,
+    sealed_to: instanceKey.sealed_to,
+  });
+  const sealed = await sealJSON(
+    pair.public_key,
+    CREDENTIAL_SEAL_INFO,
+    sealAad,
+    { key: CREDENTIAL.key },
+  );
+  const item = {
+    credential_id: ITEM.credential_id,
+    provider_id: ITEM.provider_id,
+    name: "anthro-1",
+    platform: "anthropic",
+    sealed,
+  };
+  t.mock.method(api.worker, "handover", async () => ({
+    type: OperationResultType.Completed,
+    status: 200,
+    data: sealEnvelope(keys.handover, aad, {
+      items: [item],
+      ssh_identities: [],
+    }),
+  }));
+  const reports: { digest: string; sealed: unknown }[] = [];
+  t.mock.method(
+    api.worker,
+    "credential",
+    async (input: Parameters<typeof api.worker.credential>[0]) => {
+      reports.push(
+        openEnvelope(keys.report, aad, {
+          nonce: input.body.nonce,
+          ciphertext: input.body.ciphertext,
+        }) as { digest: string; sealed: unknown },
+      );
+      return { type: OperationResultType.Completed, status: 204, data: null };
+    },
+  );
+  await assert.rejects(
+    takeHandover({ api, claim, clientSecret: SECRET, context: background }),
+    { code: "worker.handover.sealed_unopened" },
+  );
+  const result = await takeHandover({
+    api,
+    claim,
+    clientSecret: SECRET,
+    instanceKey,
+    context: background,
+  });
+  assert.deepEqual(
+    await result.credentials.items[0]!.store.read(ITEM.provider_id),
+    CREDENTIAL,
+  );
+  const refreshed = { type: "api_key" as const, key: "test_refreshed_key" };
+  await result.credentials.items[0]!.store.modify(
+    ITEM.provider_id,
+    async () => refreshed,
+  );
+  assert.equal(reports.length, ONCE);
+  assert.equal(reports[0]!.digest, digest(sealed));
+  assert.deepEqual(
+    await openJSON(
+      pair.private_key,
+      CREDENTIAL_SEAL_INFO,
+      sealAad,
+      sealedObjectSchema.parse(reports[0]!.sealed),
+    ),
+    { key: refreshed.key },
+  );
+  assert.equal(JSON.stringify(reports).includes(refreshed.key), false);
   result.credentials.discard();
 });

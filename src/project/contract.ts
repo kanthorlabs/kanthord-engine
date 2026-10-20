@@ -16,7 +16,11 @@ import {
   ResourceStatus,
 } from "../kernel/health.ts";
 import { tagSchema } from "../kernel/tag.ts";
-import { fallbackConfigurationsSchema } from "../agent/contract.ts";
+import { SERVER_HOLDER } from "../kernel/holder.ts";
+import {
+  fallbackConfigurationsSchema,
+  type HolderScope,
+} from "../agent/contract.ts";
 import type { SshAccess } from "../repository/contract.ts";
 
 export const BINDING_CHECK_TIMEOUT_MS = 10000;
@@ -257,6 +261,24 @@ export const workerConfigSchema = z.strictObject({
   worker_instances: workerInstancesSchema.optional(),
   tags: workerTagsSchema.optional(),
 });
+export function bindingHolders(config: {
+  placement?: WorkerPlacement | null;
+  worker_instances?: readonly string[];
+}): string[] {
+  return config.placement === WorkerPlacement.Worker
+    ? [...(config.worker_instances ?? [])]
+    : [SERVER_HOLDER];
+}
+export function bindingScope(config: {
+  placement?: WorkerPlacement | null;
+  worker_instances?: readonly string[];
+}): HolderScope {
+  return {
+    holders: bindingHolders(config),
+    claimant:
+      config.placement === WorkerPlacement.Worker ? null : SERVER_HOLDER,
+  };
+}
 export function effectiveInstanceCount(config: {
   instance_count?: number;
   placement?: WorkerPlacement;
@@ -427,6 +449,7 @@ export type ValidateEntry = (
   tx: Transaction,
   workerName: string,
   entry: WorkerEntry | null,
+  holders: readonly string[],
 ) => void;
 export type CreateMission = (
   tx: Transaction,
@@ -480,6 +503,7 @@ export type WorkerAgentViewFn = (
   workerName: string,
   agentName: string,
   entry: WorkerEntry | null,
+  scope: HolderScope,
 ) => WorkerAgentView | null;
 export type HumanActor = { kind: "human"; account: string; name: string };
 export type WorkerEntry = {
@@ -496,6 +520,7 @@ export type AgentDependentBinding = {
   binding_id: string;
   worker_name: string;
   entry: WorkerEntry | null;
+  holders: readonly string[];
 };
 export type BindingNaming = {
   binding_id: string;

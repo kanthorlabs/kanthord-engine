@@ -29,6 +29,7 @@ import {
 import {
   CUSTODY_SERVICE_NAME,
   handoverPayloadSchema,
+  plainHandoverPayloadSchema,
   HandoverPlacement,
   HolderRefusal,
   SecretShape,
@@ -36,8 +37,16 @@ import {
   sshSignAnswerSchema,
   type CredentialPlatformSet,
   type CustodyExecution,
+  type InstanceKey,
   type SshIdentityAuthorization,
 } from "./contract.ts";
+import { CREDENTIAL_HELD_BY_INSTANCE } from "./secret.ts";
+import {
+  openSealedCopy,
+  sealedCopyReporter,
+  type InstanceCopyKey,
+} from "./instance-copy.ts";
+import { generateX25519KeyPair, keyFingerprint } from "../kernel/hpke.ts";
 import { INTAKE_SERVICE_NAME } from "../intake/contract.ts";
 import type { ExecutionClaim } from "../kernel/operation.ts";
 import { RepositoryComponent } from "../repository/index.ts";
@@ -87,10 +96,46 @@ const TEST_SET: CredentialPlatformSet = {
   },
 };
 
+type InstancePair = {
+  id: string;
+  key: InstanceKey;
+  private_key: Buffer;
+  public_key: Buffer;
+};
+
+async function instancePair(name: string): Promise<InstancePair> {
+  const pair = await generateX25519KeyPair();
+  return {
+    id: createIdentity("worker_instance"),
+    key: {
+      name,
+      public_key: pair.public_key.toString("base64url"),
+      fingerprint: keyFingerprint(pair.public_key),
+    },
+    private_key: pair.private_key,
+    public_key: pair.public_key,
+  };
+}
+
+function copyKeyOf(pair: InstancePair): InstanceCopyKey {
+  return {
+    holder: pair.key.name,
+    sealed_to: pair.key.fingerprint,
+    public_key: pair.public_key,
+    private_key: () => Buffer.from(pair.private_key),
+  };
+}
+
+const SEALED_SET: CredentialPlatformSet = {
+  ...TEST_SET,
+  instance_copies: true,
+};
+
 function fixture(
   t: TestContext,
   names: readonly string[] = ["anthro-1"],
   repositories: readonly string[] = [],
+  instances: ReadonlyMap<string, InstancePair> = new Map(),
 ) {
   const store = new Store(IN_MEMORY_DATABASE);
   t.after(() => store.close());
@@ -121,6 +166,7 @@ function fixture(
       resourceIdentity: row.resource_identity,
       name: "machine",
       issuedAt: 0,
+      instanceId: [...instances.values()][0]?.id,
     },
     "jti",
     row.runtime_identity,
@@ -228,6 +274,12 @@ function fixture(
       repository.sshAccessOf(tx, granted, material),
     sshSignatureOf: (tx, granted, material, data) =>
       repository.sshSignatureOf(tx, granted, material, data),
+    instanceKeys: {
+      keyOf: (_tx, name) => instances.get(name)?.key ?? null,
+      nameOf: (_tx, instanceId) =>
+        [...instances.values()].find(({ id }) => id === instanceId)?.key.name ??
+        null,
+    },
   });
   const credentialIds = names.map(
     (name) =>
@@ -332,10 +384,32 @@ function fixture(
     digest: digest(FIRST),
     credential: SECOND,
   };
+  const holdCopies = async (credential: string, holders: string[]) => {
+    const sealed = await component.sealCopies(SEALED_SET, {
+      name: credential,
+      platform: TEST_PLATFORM,
+      secret: { key: FIRST.key },
+      keys: holders.map((holder) => instances.get(holder)!.key),
+    });
+    return store.transaction((tx) =>
+      component.createCopies(
+        tx,
+        SEALED_SET,
+        {
+          name: credential,
+          platform: TEST_PLATFORM,
+          metadata: null,
+          copies: sealed,
+        },
+        undefined,
+      ),
+    );
+  };
   return {
     store,
     component,
     logs,
+    holdCopies,
     row,
     identity,
     credentialId,
@@ -365,7 +439,9 @@ test("handover and refresh reports preserve a single pinned revision and sanitiz
   const f = fixture(t);
   const first = f.handover();
   assert.deepEqual(
-    handoverPayloadSchema.parse(openEnvelope(f.keys.handover, f.aad, first)),
+    plainHandoverPayloadSchema.parse(
+      openEnvelope(f.keys.handover, f.aad, first),
+    ),
     {
       items: [
         {
@@ -392,7 +468,7 @@ test("handover and refresh reports preserve a single pinned revision and sanitiz
   );
   f.report(sealEnvelope(f.keys.report, f.aad, f.refresh));
   f.report(sealEnvelope(f.keys.report, f.aad, f.refresh));
-  const next = handoverPayloadSchema.parse(
+  const next = plainHandoverPayloadSchema.parse(
     openEnvelope(f.keys.handover, f.aad, f.handover()),
   );
   assert.deepEqual(next.items[0]!.credential, SECOND);
@@ -479,7 +555,7 @@ test("authorization refusal reaches no material or pin", (t) => {
 
 test("handover seals and pins one item per credential and accepts a refresh of the second", (t) => {
   const f = fixture(t, ["worker-key", "reviewer-key"]);
-  const payload = handoverPayloadSchema.parse(
+  const payload = plainHandoverPayloadSchema.parse(
     openEnvelope(f.keys.handover, f.aad, f.handover()),
   );
   assert.deepEqual(
@@ -493,7 +569,7 @@ test("handover seals and pins one item per credential and accepts a refresh of t
       credential_id: f.credentialIds[1]!,
     }),
   );
-  const refreshed = handoverPayloadSchema.parse(
+  const refreshed = plainHandoverPayloadSchema.parse(
     openEnvelope(f.keys.handover, f.aad, f.handover()),
   );
   assert.deepEqual(
@@ -536,10 +612,120 @@ test("a worker placement handover refuses a server-held item with holder_refused
   );
 });
 
+function refusedHolder(reason: HolderRefusal) {
+  return (error: unknown) => {
+    assert(error instanceof OperationError);
+    assert.equal(error.status, HttpStatus.Forbidden);
+    assert.equal(error.code, CUSTODY_HOLDER_REFUSED);
+    assert.deepEqual(error.details, { reason });
+    return true;
+  };
+}
+
+test("a worker placement handover answers the copy sealed to the instance key, pins it and takes a sealed refresh report", async (t) => {
+  const relay = await instancePair("relay-a");
+  const f = fixture(t, ["anthro-1"], [], new Map([["relay-a", relay]]));
+  const [copy] = await f.holdCopies("anthro-1", ["relay-a"]);
+  assert.equal(copy!.holder, relay.key.name);
+  assert.equal(copy!.sealed_to, relay.key.fingerprint);
+  assert.equal(copy!.sealed_current, true);
+  const copyId = copy!.revisions[0]!.id;
+  const payload = handoverPayloadSchema.parse(
+    openEnvelope(
+      f.keys.handover,
+      f.aad,
+      f.handover([], HandoverPlacement.Worker),
+    ),
+  );
+  assert.deepEqual(payload.ssh_identities, []);
+  const [item] = payload.items;
+  assert.ok(item && "sealed" in item);
+  assert.equal(item.credential_id, copyId);
+  assert.deepEqual([item.name, item.platform], ["anthro-1", TEST_PLATFORM]);
+  assert.deepEqual(f.row.credentials, [copyId]);
+  const key = copyKeyOf(relay);
+  const opened = await openSealedCopy(item, SecretShape.ApiKey, key);
+  assert.deepEqual(opened?.credential, FIRST);
+  const reports: unknown[] = [];
+  await sealedCopyReporter(item, opened!, key, async (report) => {
+    reports.push(report);
+  })({ credential: SECOND });
+  f.report(sealEnvelope(f.keys.report, f.aad, reports[0]));
+  const [next] = handoverPayloadSchema.parse(
+    openEnvelope(
+      f.keys.handover,
+      f.aad,
+      f.handover([], HandoverPlacement.Worker),
+    ),
+  ).items;
+  assert.ok(next && "sealed" in next);
+  assert.deepEqual(
+    (await openSealedCopy(next, SecretShape.ApiKey, key))?.credential,
+    SECOND,
+  );
+  assert.throws(
+    () =>
+      f.report(
+        sealEnvelope(f.keys.report, f.aad, {
+          credential_id: copyId,
+          digest: digest(FIRST),
+          credential: SECOND,
+        }),
+      ),
+    (error) =>
+      error instanceof OperationError && error.code === CUSTODY_REPORT_INVALID,
+  );
+  assert.equal(f.logs.join("").includes(FIRST.key), false);
+});
+
+test("a worker placement handover refuses a copy of another instance as held_elsewhere and a copy sealed to an ended key", async (t) => {
+  const relayA = await instancePair("relay-a");
+  const relayB = await instancePair("relay-b");
+  const instances = new Map([
+    ["relay-a", relayA],
+    ["relay-b", relayB],
+  ]);
+  const f = fixture(t, ["anthro-1"], [], instances);
+  f.store.database.prepare("DELETE FROM credential").run();
+  await f.holdCopies("anthro-1", ["relay-b"]);
+  assert.throws(
+    () => f.handover([], HandoverPlacement.Worker),
+    refusedHolder(HolderRefusal.HeldElsewhere),
+  );
+  await f.holdCopies("anthro-1", ["relay-a"]);
+  instances.set("relay-a", {
+    ...relayA,
+    key: (await instancePair("relay-a")).key,
+  });
+  assert.throws(
+    () => f.handover([], HandoverPlacement.Worker),
+    refusedHolder(HolderRefusal.HeldElsewhere),
+  );
+  assert.deepEqual(f.row.credentials, []);
+});
+
+test("a server placement handover never releases an instance copy", async (t) => {
+  const relay = await instancePair("relay-a");
+  const f = fixture(t, ["anthro-1"], [], new Map([["relay-a", relay]]));
+  f.store.database.prepare("DELETE FROM credential").run();
+  await f.holdCopies("anthro-1", ["relay-a"]);
+  for (const placement of [
+    HandoverPlacement.Server,
+    HandoverPlacement.Container,
+  ])
+    assert.throws(
+      () => f.handover([], placement),
+      (error) =>
+        error instanceof OperationError &&
+        error.code === CREDENTIAL_HELD_BY_INSTANCE,
+    );
+  assert.deepEqual(f.row.credentials, []);
+});
+
 for (const placement of [HandoverPlacement.Server, HandoverPlacement.Container])
   test(`a ${placement} placement handover carries the server-held item and the SSH identities`, (t) => {
     const f = fixture(t, ["anthro-1"], ["deploy"]);
-    const payload = handoverPayloadSchema.parse(
+    const payload = plainHandoverPayloadSchema.parse(
       openEnvelope(f.keys.handover, f.aad, f.handover(undefined, placement)),
     );
     assert.deepEqual(payload.items, [
@@ -557,7 +743,7 @@ for (const placement of [HandoverPlacement.Server, HandoverPlacement.Container])
 
 test("handover carries one SSH identity per repository binding and pins each revision", (t) => {
   const f = fixture(t, ["anthro-1"], ["deploy-a", "deploy-b"]);
-  const payload = handoverPayloadSchema.parse(
+  const payload = plainHandoverPayloadSchema.parse(
     openEnvelope(f.keys.handover, f.aad, f.handover()),
   );
   const expected = [...f.bindings].map(([binding_id, credential]) => ({
@@ -601,7 +787,7 @@ test("handover carries one SSH identity per repository binding and pins each rev
 test("a pinned execution keeps its SSH key after a rotation and an unpinned execution takes the new key", (t) => {
   const f = fixture(t, ["anthro-1"], ["deploy"]);
   const open = () =>
-    handoverPayloadSchema.parse(
+    plainHandoverPayloadSchema.parse(
       openEnvelope(f.keys.handover, f.aad, f.handover()),
     ).ssh_identities[0]!;
   const first = open();
@@ -721,7 +907,7 @@ test("a refresh report that carries an SSH key answers report_invalid", (t) => {
     },
   );
   assert.equal(
-    handoverPayloadSchema.parse(
+    plainHandoverPayloadSchema.parse(
       openEnvelope(f.keys.handover, f.aad, f.handover()),
     ).ssh_identities[0]?.private_key,
     f.sshKeys.get("deploy"),

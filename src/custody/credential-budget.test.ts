@@ -9,13 +9,13 @@ import {
   s3AccessKeySecretSchema,
   SecretShape,
   type RefreshReport,
-  type HandoverPayload,
+  type HandoverItems,
 } from "./contract.ts";
 import { executionCredentialStore } from "./client.ts";
 import { normalizeCredential, secretOfCredential } from "./payload.ts";
 
 const NEXT_BYTE = EXECUTION_CREDENTIAL_MAX_BYTES + 1;
-type Credential = HandoverPayload["items"][number]["credential"];
+type Credential = HandoverItems["items"][number]["credential"];
 const ID = "credential_01ARZ3NDEKTSV4RRFFQ69G5FAV";
 const PROVIDER = "test-provider";
 const NO_REPORTS = 0;

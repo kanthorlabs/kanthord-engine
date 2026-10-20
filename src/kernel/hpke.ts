@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
+import { createHash, createPrivateKey, createPublicKey } from "node:crypto";
 import {
   Aes128Gcm,
   CipherSuite,
@@ -57,6 +57,24 @@ export function keyFingerprint(publicKey: Uint8Array): string {
   assert.equal(publicKey.length, X25519_KEY_BYTES);
   const hash = createHash("sha256").update(publicKey).digest("base64");
   return `${FINGERPRINT_PREFIX}${hash.replace(/=+$/, "")}`;
+}
+
+const PKCS8_X25519_PREFIX = Buffer.from(
+  "302e020100300506032b656e04220420",
+  "hex",
+);
+
+export function x25519PublicKeyOf(privateKey: Uint8Array): Buffer {
+  assert.equal(privateKey.length, X25519_KEY_BYTES);
+  const der = Buffer.concat([PKCS8_X25519_PREFIX, privateKey]);
+  try {
+    const spki = createPublicKey(
+      createPrivateKey({ key: der, format: "der", type: "pkcs8" }),
+    ).export({ format: "der", type: "spki" });
+    return Buffer.from(spki.subarray(spki.length - X25519_KEY_BYTES));
+  } finally {
+    der.fill(ZERO_BYTE);
+  }
 }
 
 export async function generateX25519KeyPair(): Promise<X25519KeyPair> {

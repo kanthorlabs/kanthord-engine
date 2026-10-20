@@ -13,23 +13,29 @@ import { HttpStatus } from "../kernel/http.ts";
 import { digest } from "../kernel/json.ts";
 import { piProviderId } from "../kernel/pi-provider.ts";
 import type { Transaction } from "../kernel/store.ts";
+import { sealedObjectSchema } from "../kernel/hpke.ts";
 import {
-  refreshReportSchema,
+  SEALED_CIPHERTEXT_MAX_BYTES,
+  SERVER_HOLDER,
   sshSignRequestSchema,
+  wireReportSchema,
   type CredentialPlatforms,
   type CustodyExecution,
   type HandoverPayload,
   type HandoverSshIdentity,
+  type InstanceKeys,
   type Material,
   type SshSignAnswer,
   type SshSignRequest,
+  type WireReport,
 } from "./contract.ts";
 import {
   credentialOfSecret,
   dropExtraOAuthFields,
   secretOfCredential,
 } from "./payload.ts";
-import { decrypt, encrypt } from "./envelope.ts";
+import { encrypt } from "./envelope.ts";
+import { openSecret, storedSealed } from "./secret.ts";
 
 export const CUSTODY_REPORT_INVALID = "custody.handover.report_invalid";
 export const CUSTODY_HOLDER_REFUSED = "custody.handover.holder_refused";
@@ -37,7 +43,8 @@ export const REVISION_REVOKED = "credential.revision.revoked";
 export const SSH_SIGN_INVALID = "worker.ssh.sign_invalid";
 export const SSH_SIGN_PLACEMENT_REFUSED = "worker.ssh.placement_refused";
 const ONE_ROW = 1;
-const NO_MATERIALS = 0;
+const NO_ITEMS = 0;
+const BASE64URL = "base64url";
 
 function invalidReport(): OperationError {
   return new OperationError(
@@ -47,27 +54,31 @@ function invalidReport(): OperationError {
   );
 }
 
+export function plainItem(
+  material: Material,
+  platforms: CredentialPlatforms,
+): HandoverPayload["items"][number] {
+  assert(Object.hasOwn(platforms, material.platform));
+  const shape = platforms[material.platform]!.secret_shape;
+  assert(material.credential_id.length);
+  return {
+    credential_id: material.credential_id,
+    provider_id: piProviderId(material.platform),
+    credential: credentialOfSecret(shape, material.value()),
+  };
+}
+
 export function sealMaterial(
   secret: string,
   execution: CustodyExecution,
-  materials: readonly Material[],
+  items: HandoverPayload["items"],
   sshIdentities: readonly HandoverSshIdentity[],
-  platforms: CredentialPlatforms,
 ): HandoverEnvelope {
   const keys = deriveHandoverKeys(secret);
   try {
-    assert(materials.length > NO_MATERIALS);
+    assert(items.length > NO_ITEMS);
     const payload: HandoverPayload = {
-      items: materials.map((material) => {
-        assert(Object.hasOwn(platforms, material.platform));
-        const shape = platforms[material.platform]!.secret_shape;
-        assert(material.credential_id.length);
-        return {
-          credential_id: material.credential_id,
-          provider_id: piProviderId(material.platform),
-          credential: credentialOfSecret(shape, material.value()),
-        };
-      }),
+      items,
       ssh_identities: [...sshIdentities],
     };
     return sealEnvelope(
@@ -101,7 +112,7 @@ export function openReport(
     keys.handover.fill(0);
     keys.report.fill(0);
   }
-  const parsed = refreshReportSchema.safeParse(dropExtraOAuthFields(value));
+  const parsed = wireReportSchema.safeParse(dropExtraOAuthFields(value));
   if (
     !parsed.success ||
     !execution.credentials.includes(parsed.data.credential_id)
@@ -157,26 +168,63 @@ export function sealSignAnswer(
   }
 }
 
+type ReportedRow = {
+  id: string;
+  platform: string;
+  holder: string;
+  sealed_to: string | null;
+  ended_at: number | null;
+  nonce: Buffer;
+  ciphertext: Buffer;
+};
+
+function writeStored(
+  tx: Transaction,
+  key: Buffer,
+  row: ReportedRow,
+  value: unknown,
+): void {
+  const sealed = encrypt(key, row.id, row.platform, value);
+  const result = tx.database
+    .prepare("UPDATE credential SET nonce = ?, ciphertext = ? WHERE id = ?")
+    .run(sealed.nonce, sealed.ciphertext, row.id);
+  assert.equal(result.changes, ONE_ROW);
+}
+
+function applySealedReport(
+  tx: Transaction,
+  key: Buffer,
+  row: ReportedRow,
+  report: WireReport,
+  instanceKeys: InstanceKeys,
+): boolean {
+  if (!("sealed" in report)) throw invalidReport();
+  const sealed = sealedObjectSchema.safeParse(report.sealed);
+  if (
+    !sealed.success ||
+    Buffer.from(sealed.data.ciphertext, BASE64URL).length >
+      SEALED_CIPHERTEXT_MAX_BYTES ||
+    instanceKeys.keyOf(tx, row.holder)?.fingerprint !== row.sealed_to
+  )
+    throw invalidReport();
+  if (digest(storedSealed(key, row)) !== report.digest) return false;
+  writeStored(tx, key, row, sealed.data);
+  return true;
+}
+
 export function applyReport(
   tx: Transaction,
   key: Buffer,
-  report: ReturnType<typeof openReport>,
+  report: WireReport,
   platforms: CredentialPlatforms,
+  instanceKeys: InstanceKeys,
 ): boolean {
   assert(tx.database.isTransaction);
   const row = tx.database
     .prepare(
-      "SELECT id, platform, ended_at, nonce, ciphertext FROM credential WHERE id = ?",
+      "SELECT id, platform, holder, sealed_to, ended_at, nonce, ciphertext FROM credential WHERE id = ?",
     )
-    .get(report.credential_id) as
-    | {
-        id: string;
-        platform: string;
-        ended_at: number | null;
-        nonce: Buffer;
-        ciphertext: Buffer;
-      }
-    | undefined;
+    .get(report.credential_id) as ReportedRow | undefined;
   if (!row) throw invalidReport();
   if (row.ended_at !== null)
     throw new OperationError(
@@ -184,22 +232,16 @@ export function applyReport(
       REVISION_REVOKED,
       "The pinned credential revision is revoked.",
     );
+  if (row.holder !== SERVER_HOLDER)
+    return applySealedReport(tx, key, row, report, instanceKeys);
+  if (!("credential" in report)) throw invalidReport();
   const shape = Object.hasOwn(platforms, row.platform)
     ? platforms[row.platform]!.secret_shape
     : undefined;
   if (shape === undefined || shape !== report.credential.type)
     throw invalidReport();
-  const stored = decrypt(key, row.id, row.platform, row.nonce, row.ciphertext);
+  const stored = openSecret(key, row);
   if (digest(credentialOfSecret(shape, stored)) !== report.digest) return false;
-  const sealed = encrypt(
-    key,
-    row.id,
-    row.platform,
-    secretOfCredential(report.credential),
-  );
-  const result = tx.database
-    .prepare("UPDATE credential SET nonce = ?, ciphertext = ? WHERE id = ?")
-    .run(sealed.nonce, sealed.ciphertext, row.id);
-  assert.equal(result.changes, ONE_ROW);
+  writeStored(tx, key, row, secretOfCredential(report.credential));
   return true;
 }

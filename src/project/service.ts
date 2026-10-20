@@ -38,7 +38,6 @@ import {
   isPlatformSshHost,
 } from "../repository/platform.ts";
 import { WORKING_FILES } from "../agent/prompt-layers.ts";
-import { AgentErrorCode } from "../agent/contract.ts";
 import {
   InvalidReason,
   PROMPT_SOURCE_MAX_BYTES,
@@ -91,6 +90,8 @@ import {
   workerConfigWriteSchema,
   workerTagsSchema,
   workerInstancesSchema,
+  bindingHolders,
+  bindingScope,
   effectiveInstanceCount,
   type ProjectBindings,
   type AgentDependentBinding,
@@ -903,9 +904,14 @@ export class ProjectService implements Service, ProjectBindings {
           return fields;
         })(selected)
       : null;
-    const view = this.workerAgentView(tx, config.worker, agent, entry);
+    const view = this.workerAgentView(
+      tx,
+      config.worker,
+      agent,
+      entry,
+      bindingScope(config),
+    );
     assert.ok(view, "Declared agents must have a worker view.");
-    const holderRefused = config.placement === WorkerPlacement.Worker;
     assert.ok(project.binding_set_version >= BINDING_SET_INITIAL_VERSION);
     return {
       agent,
@@ -918,16 +924,8 @@ export class ProjectService implements Service, ProjectBindings {
       chain: view.chain,
       active_position: view.active_position,
       cooling: view.cooling,
-      valid: view.valid && !holderRefused,
-      issues: holderRefused
-        ? [
-            ...view.issues,
-            {
-              path: [WorkerField.Placement],
-              code: AgentErrorCode.CredentialHolderMismatch,
-            },
-          ]
-        : view.issues,
+      valid: view.valid,
+      issues: view.issues,
     };
   }
   private declareAgentReads(registry: OperationRegistry): void {
@@ -1192,7 +1190,7 @@ export class ProjectService implements Service, ProjectBindings {
     refuseInvalidTags(name, config.tags);
     const agents = this.workerAgentsOf(config.worker);
     if (agents.length === EMPTY_LENGTH) {
-      this.validateEntry(tx, config.worker, null);
+      this.validateEntry(tx, config.worker, null, []);
       for (const field of [
         WorkerField.Entries,
         WorkerField.ResourceBudget,
@@ -1217,9 +1215,12 @@ export class ProjectService implements Service, ProjectBindings {
         "A hosted worker binding states its placement.",
         { binding: name },
       );
-    if (config.placement === WorkerPlacement.Worker)
-      this.validateWorkerInstances(tx, name, config);
-    else refuseInstanceCount(name, config);
+    const instances =
+      config.placement === WorkerPlacement.Worker
+        ? this.validateWorkerInstances(tx, name, config)
+        : [];
+    if (config.placement !== WorkerPlacement.Worker)
+      refuseInstanceCount(name, config);
     const entries = new Map(
       (config.entries ?? []).map(({ agent, ...entry }) => [agent, entry]),
     );
@@ -1232,13 +1233,21 @@ export class ProjectService implements Service, ProjectBindings {
       );
     }
     for (const agent of agents)
-      this.validateEntry(tx, config.worker, entries.get(agent) ?? null);
+      this.validateEntry(
+        tx,
+        config.worker,
+        entries.get(agent) ?? null,
+        bindingHolders({
+          placement: config.placement,
+          worker_instances: instances,
+        }),
+      );
   }
   private validateWorkerInstances(
     tx: Transaction,
     name: string,
     config: typeof workerConfigWriteSchema._output,
-  ): void {
+  ): string[] {
     if (config.instance_count !== undefined)
       throw new OperationError(
         HttpStatus.BadRequest,
@@ -1253,10 +1262,8 @@ export class ProjectService implements Service, ProjectBindings {
         "A binding at the worker placement lists its worker instances.",
         { binding: name },
       );
-    for (const instance of refuseInvalidInstances(
-      name,
-      config.worker_instances,
-    )) {
+    const instances = refuseInvalidInstances(name, config.worker_instances);
+    for (const instance of instances) {
       const record = this.instanceOf(tx, instance);
       if (!record)
         throw new OperationError(
@@ -1273,6 +1280,7 @@ export class ProjectService implements Service, ProjectBindings {
           { binding: name, instance, worker: record.worker },
         );
     }
+    return instances;
   }
   entriesOfAgent(tx: Transaction, agentName: string): AgentDependentBinding[] {
     assert.ok(tx.database.isTransaction);
@@ -1290,6 +1298,7 @@ export class ProjectService implements Service, ProjectBindings {
             binding_id: binding.id,
             worker_name: config.worker,
             entry: entries.get(agentName) ?? null,
+            holders: bindingHolders(config),
           },
         ];
       },

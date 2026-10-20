@@ -27,7 +27,8 @@ import { temporary } from "../kernel/test-support.ts";
 import { IdentityKind } from "../kernel/caller.ts";
 import { Diagnostic, OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
-import { AgentErrorCode } from "../agent/contract.ts";
+import { AgentErrorCode, type HolderScope } from "../agent/contract.ts";
+import { SERVER_HOLDER } from "../custody/contract.ts";
 import {
   InvalidReason,
   PROMPT_SOURCE_MAX_BYTES,
@@ -1791,7 +1792,7 @@ test("a worker placement binding stores its instances and answers their count", 
   assert.deepEqual(row?.worker_instances, ["coder-a", "coder-b"]);
 });
 
-test("the agent view of a native worker at the worker placement is invalid until instances hold credentials", async (t) => {
+test("the agent view of a native worker at the worker placement checks the holders of its instances and claims no cooldown", async (t) => {
   const view = {
     defaults: null,
     effective: null,
@@ -1801,13 +1802,17 @@ test("the agent view of a native worker at the worker placement is invalid until
     valid: true,
     issues: [],
   };
+  const scopes: HolderScope[] = [];
   const f = writeFixture(t, {
     instanceOf: (_tx, name) => {
       const worker = LIVE_INSTANCES[name];
       return worker === undefined ? null : { name, worker };
     },
     workerAgentsOf: () => [AGENT],
-    workerAgentView: () => view,
+    workerAgentView: (_tx, _worker, _agent, _entry, scope) => {
+      scopes.push(scope);
+      return view;
+    },
   });
   const written = await f.write({
     [WORKER_NAME]: instanceBinding({ worker_instances: ["coder-a"] }),
@@ -1817,13 +1822,8 @@ test("the agent view of a native worker at the worker placement is invalid until
     binding_id: written.bindings[WORKER_NAME]!.id,
   };
   const [item] = f.invoke("agentConfiguration.list", null, params).items;
-  assert.equal(item?.valid, false);
-  assert.deepEqual(item?.issues, [
-    {
-      path: ["placement"],
-      code: AgentErrorCode.CredentialHolderMismatch,
-    },
-  ]);
+  assert.equal(item?.valid, true);
+  assert.deepEqual(scopes, [{ holders: ["coder-a"], claimant: null }]);
 });
 
 const INSTANCE_REFUSALS: Array<
@@ -3673,11 +3673,21 @@ test("entriesOfAgent selects latest workers across projects, strips selectors an
       new Map([
         [
           explicit.id,
-          { binding_id: explicit.id, worker_name: NATIVE_WORKER, entry },
+          {
+            binding_id: explicit.id,
+            worker_name: NATIVE_WORKER,
+            entry,
+            holders: [SERVER_HOLDER],
+          },
         ],
         [
           implicit.id,
-          { binding_id: implicit.id, worker_name: NATIVE_WORKER, entry: null },
+          {
+            binding_id: implicit.id,
+            worker_name: NATIVE_WORKER,
+            entry: null,
+            holders: [SERVER_HOLDER],
+          },
         ],
       ]),
     );

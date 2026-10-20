@@ -54,8 +54,10 @@ function choice(
           _tx: Transaction,
           agentName: string,
           entry: WorkerEntry | null,
+          scope: { holders: readonly string[]; claimant: string | null },
         ) => {
           assert.deepEqual(entry, agentName === SWE ? tuning : null);
+          assert.deepEqual(scope, { holders: ["server"], claimant: "server" });
           return results[agentName]!;
         },
       } as never,
@@ -63,6 +65,7 @@ function choice(
     { declarationOf: twoAgentDeclarationOf },
     tx,
     "binding",
+    "server",
   );
 }
 

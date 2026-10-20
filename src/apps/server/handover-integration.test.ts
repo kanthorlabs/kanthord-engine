@@ -15,7 +15,10 @@ import { directClient } from "../../gateway/index.ts";
 import { httpClient } from "../../gateway/client.ts";
 import { deriveClientSecret } from "../../gateway/auth/jwt.ts";
 import {
+  CREDENTIAL_SEAL_INFO,
+  credentialSealAad,
   handoverPayloadSchema,
+  plainHandoverPayloadSchema,
   SecretShape,
   sshSignAnswerSchema,
   EXECUTION_CREDENTIAL_MAX_BYTES,
@@ -30,7 +33,13 @@ import {
   workerOperations,
   workerTokenPayloadSchema,
 } from "../../worker/contract.ts";
-import { generateX25519KeyPair, openJSON } from "../../kernel/hpke.ts";
+import {
+  generateX25519KeyPair,
+  keyFingerprint,
+  openJSON,
+  sealJSON,
+  type SealedObject,
+} from "../../kernel/hpke.ts";
 import { agentOperations, ChainLevel } from "../../agent/contract.ts";
 import { missionOperations, Intent } from "../../mission/contract.ts";
 import { schedulerOperations, WorkPullKind } from "../../scheduler/contract.ts";
@@ -500,7 +509,10 @@ async function setup(
     { KANTHORD_ENDPOINT: f.endpoint, KANTHORD_TOKEN: f.token },
     { platform, credential: "anthro-1", configuration },
   );
-  const instanceKeys = new Map<string, { id: string; private_key: Buffer }>();
+  const instanceKeys = new Map<
+    string,
+    { id: string; private_key: Buffer; public_key: Buffer }
+  >();
   for (const name of setupOptions.workerInstances ?? []) {
     const pair = await generateX25519KeyPair();
     const record = completed(
@@ -514,8 +526,26 @@ async function setup(
         },
       }),
     );
-    instanceKeys.set(name, { id: record.id, private_key: pair.private_key });
+    instanceKeys.set(name, {
+      id: record.id,
+      private_key: pair.private_key,
+      public_key: pair.public_key,
+    });
   }
+  if (instanceKeys.size)
+    completed(
+      await call(llmOperations.create, {
+        params: {},
+        query: {},
+        body: {
+          name: "anthro-1",
+          platform,
+          metadata: null,
+          holders: [...instanceKeys.keys()],
+          secret: { key: SECRET },
+        },
+      }),
+    );
   const projectId = completed(
     await call(projectOperations.create, {
       params: {},
@@ -672,8 +702,6 @@ async function setup(
     assert.ok(entry);
     instanceTokens.push(entry.token);
   }
-  if (instanceTokens.length)
-    t.mock.method(f.worker, "registrationHealthcheck", () => true);
   const token = setupOptions.workerName
     ? await f.machineToken(projectId, "general", "general-a")
     : instanceTokens.length
@@ -795,18 +823,58 @@ async function setup(
     envelope: ReturnType<typeof sealEnvelope>,
     executionId = execution.execution_id,
   ) =>
-    handoverPayloadSchema.parse(
+    plainHandoverPayloadSchema.parse(
       openEnvelope(
         keys.handover,
         handoverAad(executionId, runtimeIdentity),
         envelope,
       ),
     );
+  const openSealed = (envelope: ReturnType<typeof sealEnvelope>) =>
+    handoverPayloadSchema.parse(
+      openEnvelope(
+        keys.handover,
+        handoverAad(execution.execution_id, runtimeIdentity),
+        envelope,
+      ),
+    );
+  const copyAad = (holder: string) => {
+    const pair = instanceKeys.get(holder);
+    assert.ok(pair);
+    return credentialSealAad({
+      name: "anthro-1",
+      platform,
+      holder,
+      sealed_to: keyFingerprint(pair.public_key),
+    });
+  };
+  const openCopy = async (holder: string, sealed: SealedObject) => {
+    try {
+      return await openJSON(
+        instanceKeys.get(holder)!.private_key,
+        CREDENTIAL_SEAL_INFO,
+        copyAad(holder),
+        sealed,
+      );
+    } catch {
+      return null;
+    }
+  };
+  const sealCopy = (holder: string, secret: unknown) =>
+    sealJSON(
+      instanceKeys.get(holder)!.public_key,
+      CREDENTIAL_SEAL_INFO,
+      copyAad(holder),
+      secret,
+    );
   return {
     f,
     call,
     token,
     keys,
+    openSealed,
+    openCopy,
+    sealCopy,
     runtime_identity: runtimeIdentity,
     execution,
     pull,
@@ -818,6 +886,7 @@ async function setup(
     sign,
     openSigned,
     instanceTokens,
+    instanceKeys,
     bindings: bindingSet.bindings,
     sshPublicKey: String(sshRecord.revisions[0]!.metadata!.public_key),
     sshCredentialId: sshRecord.revisions[0]!.id,
@@ -1189,10 +1258,55 @@ for (const adapter of ["direct", "http"] as const) {
 }
 
 for (const adapter of ["direct", "http"] as const) {
-  test(`${adapter} worker.ssh.sign signs for a node binding at the worker placement, pins at first use, refuses others and answers a replay with 409`, async (t) => {
+  test(`${adapter} a worker placement handover answers a sealed copy that the instance key opens, then worker.ssh.sign signs for a node binding, pins at first use, refuses others and answers a replay with 409`, async (t) => {
     const h = await setup(t, adapter, undefined, {
       extraRepository: true,
       workerInstances: RELAY_INSTANCES,
+    });
+    const setupRead = () =>
+      h.call(
+        workerOperations["execution.setup.get"],
+        {
+          params: { execution_id: h.execution.execution_id },
+          query: {},
+          body: null,
+        },
+        h.token,
+      );
+    refused(
+      await setupRead(),
+      HttpStatus.Conflict,
+      "worker.execution.credential_not_pinned",
+    );
+    const handed = h.openSealed(completed(await h.handover()));
+    assert.deepEqual(handed.ssh_identities, []);
+    const [item] = handed.items;
+    assert.ok(item && "sealed" in item);
+    assert.deepEqual(
+      [item.name, item.platform, item.provider_id],
+      ["anthro-1", "anthropic", "anthropic"],
+    );
+    const [relayA, relayB] = RELAY_INSTANCES as [string, string];
+    assert.deepEqual(await h.openCopy(relayA, item.sealed), { key: SECRET });
+    assert.equal(await h.openCopy(relayB, item.sealed), null);
+    assert.equal(
+      completed(await setupRead()).agents[0]!.credential_id,
+      item.credential_id,
+    );
+    assert.equal(
+      completed(
+        await h.report({
+          credential_id: item.credential_id,
+          digest: digest(item.sealed),
+          sealed: await h.sealCopy(relayA, { key: REFRESHED }),
+        }),
+      ),
+      null,
+    );
+    const [refreshed] = h.openSealed(completed(await h.handover())).items;
+    assert.ok(refreshed && "sealed" in refreshed);
+    assert.deepEqual(await h.openCopy(relayA, refreshed.sealed), {
+      key: REFRESHED,
     });
     const repo = h.bindings.repo!.id;
     const key = sshPublicKeyBlob(h.sshPublicKey);
