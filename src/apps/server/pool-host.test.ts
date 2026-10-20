@@ -43,6 +43,7 @@ const RELAUNCH = 2;
 const SECOND_RELAUNCH = 3;
 const THIRD_RELAUNCH = 4;
 const NO_TERMINATE = 0;
+const NO_LAUNCH = 0;
 const ONE_TERMINATE = 1;
 const LAUNCH_FAILURE = "launch refused";
 const LIMIT_MESSAGE = "worker.pool.slot_limit";
@@ -89,6 +90,7 @@ class FakeInstance implements SlotInstance {
 class FakeDriver implements SlotDriver {
   readonly placement: PoolPlacement;
   readonly launches: SlotLaunch[] = [];
+  prepares = 0;
   readonly instances: FakeInstance[] = [];
   launchError: Error | null = null;
 
@@ -108,8 +110,12 @@ class FakeDriver implements SlotDriver {
   }
 
   prepare(): Promise<void> {
+    this.prepares++;
+    if (this.prepareError) return Promise.reject(this.prepareError);
     return Promise.resolve();
   }
+
+  prepareError: Error | null = null;
 
   unavailable: PlacementStatus | null = null;
 
@@ -192,6 +198,17 @@ async function crash(instance: FakeInstance): Promise<void> {
   instance.end(FAILURE_CODE);
   await flush();
 }
+
+test("the pool host prepares each driver once and a failed prepare raises no unhandled rejection", async (t) => {
+  const f = fixture(t);
+  f.containerDriver.prepareError = new Error("runtime refused");
+  f.pool.prepare();
+  await flush();
+  assert.equal(f.driver.prepares, FIRST_LAUNCH);
+  assert.equal(f.containerDriver.prepares, FIRST_LAUNCH);
+  assert.equal(f.driver.launches.length, NO_LAUNCH);
+  assert.deepEqual(f.records, []);
+});
 
 test("the pool host starts a slot through the driver with exactly the documented launch keys", (t) => {
   const f = fixture(t);

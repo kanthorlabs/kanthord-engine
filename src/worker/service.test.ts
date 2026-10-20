@@ -1840,6 +1840,14 @@ test("the pool starts at startPool and a change notice before it does nothing", 
   assert.equal(f.host.started.length, POOL_TWO_STARTS);
 });
 
+test("startPool prepares the pool host once when no container binding is live", (t) => {
+  const f = poolFixture(t, 0);
+  f.worker.startPool();
+  f.worker.startPool();
+  assert.equal(f.host.prepared, POOL_ONE_START);
+  assert.deepEqual(f.host.started, []);
+});
+
 test("a change notice reconciles the pool with the instance count of the binding", async (t) => {
   const f = poolFixture(t, 1);
   f.worker.startPool();

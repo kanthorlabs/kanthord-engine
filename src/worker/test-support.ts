@@ -84,6 +84,7 @@ export function anthropicSetup(
 export class FakePoolHost implements PoolHost {
   readonly started: PoolSlot[] = [];
   readonly drained: PoolSlot[] = [];
+  prepared = 0;
   private listener: (clientId: string) => void = () => {};
   clientIdentity(
     projectId: string,
@@ -98,6 +99,9 @@ export class FakePoolHost implements PoolHost {
       this.identities.set(key, identity);
     }
     return identity;
+  }
+  prepare(): void {
+    this.prepared++;
   }
   start(slot: PoolSlot): void {
     this.started.push({ ...slot });
