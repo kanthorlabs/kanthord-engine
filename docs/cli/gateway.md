@@ -81,8 +81,11 @@ the human username and display name as nonblank strings of 1–64 characters,
 requires a string `jti` and enforces the `human` access policy. The [Gateway signing key
 ruling](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/gateway-service.impl.md#the-signing-key)
 uses `gateway.auth.version` for revocation. The human token cannot carry `binding`. A missing credential, wrong
-signature, expired token, or machine token fails with HTTP `401` and
-`gateway.authentication.unauthorized`. A username allowlist or
+signature, machine token (`kind: "client"`) or worker token (`kind: "worker"`) fails with HTTP `401` and
+`gateway.authentication.unauthorized`. A token that fails a claim check fails
+with HTTP `401` and a `gateway.jwt.*` code, for example `gateway.jwt.expired`.
+The [shared error codes](./other.md#error-codes) list each `gateway.jwt.*` code.
+The server issues a worker token only through `worker.instance.token`. A username allowlist or
 account database is not involved. The identity is established by Gateway,
 not by a caller-supplied identity field.
 
@@ -160,8 +163,8 @@ token from `KANTHORD_TOKEN` or `cli.yaml`. The request carries no
 The CLI sends `GET /api/liveness` with no path parameters, query parameters or
 body. The operation access is `public` and the operation timeout is 30 seconds.
 The HTTP adapter sets its deadline one second later (31 seconds). There is no
-CLI timeout override or automatic retry. The shared host and readiness checks
-apply.
+CLI timeout override or automatic retry. The shared readiness check applies.
+The host check does not apply, because the route is public.
 
 | Result                                                                                                                                  | Stdout                     | Stderr                                                                                                                                      | Exit |
 | --------------------------------------------------------------------------------------------------------------------------------------- | -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- | ---- |
@@ -292,8 +295,8 @@ operation registry, including `shared/components.yaml`. A schema violation
 returns `400`; an unlisted filename returns `404 gateway.openapi.not_found`.
 Failure to read a published index or allowed fragment returns
 `503 gateway.openapi.unavailable`. Server startup does not regenerate missing
-files. The liveness and OpenAPI routes are public but still subject to host,
-readiness, validation, and timeout checks.
+files. The liveness and OpenAPI routes are public. They skip the host check
+and stay subject to readiness, validation, and timeout checks.
 
 ## Command scope
 

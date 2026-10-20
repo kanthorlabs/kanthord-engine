@@ -286,7 +286,8 @@ engine/
 │       │   ├── intake-inbound.ts # Intake inbound commands
 │       │   ├── intake-event.ts # Intake inbound event commands
 │       │   ├── tracking.ts     # Tracking command group
-│       │   └── worker.ts       # Worker command group
+│       │   ├── worker.ts       # Worker command group
+│       │   └── worker-instance.ts # Worker instance commands and worker join: local key pair and instance file
 │       └── worker/             # Worker application: the placement wrapper and the worker unit
 │           ├── api.ts          # Bounded backoff and indeterminate retry
 │           ├── transport.ts    # Worker transport interface, the HTTP transport and the port transport
@@ -294,6 +295,9 @@ engine/
 │           ├── thread-start.ts # Worker thread start from the SEA bundle or the TypeScript entry
 │           ├── thread-data.ts  # Schema of the workerData and of the control messages of the worker thread
 │           ├── unit.ts         # Worker unit: registration, heartbeat, work pulls and drain
+│           ├── instance-config.ts # Instance configuration from KANTHORD_WORKER_CONFIG or workers/<name>.yaml, and instance directories
+│           ├── endpoint-check.ts # Refusal of an http endpoint that resolves outside loopback and private addresses
+│           ├── instance-exchange.ts # Instance token, connect and heartbeat calls, and the open of their sealed answers
 │           └── index.ts        # The worker wrapper: client resolution, signals, watchdog and exit
 ├── static/                     # Packaged generated OpenAPI assets
 │   ├── pi-tools.json           # Pinned rg and fd releases, archive and binary digests per target
@@ -409,22 +413,23 @@ Verify relative links and documented commands.
 ## Run the worker application
 
 ```sh
-kanthord serve worker --endpoint <url> --token <jwt>
+kanthord worker instance create <name> --worker <worker> --output
+kanthord serve worker --instance <name> [--endpoint <url>]
 ```
 
-The worker resolves its endpoint and token from options, then
-`KANTHORD_ENDPOINT` / `KANTHORD_TOKEN`, then `cli.yaml` in the configuration
-directory. The default endpoint is `http://127.0.0.1:31415`.
-The worker requires `client_secret` in `cli.yaml` as canonical 32-byte base64.
-It has no option or environment variable. `auth jwt generate --project <project id> --binding <binding name>`
-prints the `token` and `client_secret` fragment for this file. A `master_key`
-field fails with `cli.config.invalid`.
-It installs and checks the pinned pi tool binaries `rg` and `fd` into `pi/bin/` of the state directory
-before it resolves the client configuration. It then checks the server package version, opens the state-directory
-workspace root and creates its registration. It logs `Worker application ready`
-with `runtime_identity`, `resource_identity` and `worker_name`.
+The worker starts from an instance configuration. `KANTHORD_WORKER_CONFIG` holds it
+as unpadded base64url JSON, or `workers/<name>.yaml` in the configuration directory
+holds it with `--instance <name>`. `kanthord worker join` writes that file from
+standard input. `--endpoint` and `KANTHORD_ENDPOINT` override its `endpoint`.
+An http endpoint must resolve only to loopback or private addresses.
+The worker installs the pinned pi tools `rg` and `fd` into
+`workers/<name>/pi/bin/` of the data directory before any network request.
+It then takes a worker token, checks the server package version, logs
+`Worker instance ready` and connects. It registers one worker unit for each
+binding that lists the instance, and logs `Worker application ready` for each.
+A second process of the same instance supersedes the first, which exits 3.
 It opens no database and reads no server configuration.
-`--config` is not supported. `kanthord serve` still starts the server.
+`--config` and `--token` are not supported. `kanthord serve` still starts the server.
 
 ## Server placement of a worker
 

@@ -1,6 +1,6 @@
 # Worker CLI specification
 
-This specification for `kanthord worker` contains **10 command leaves, all implemented**.
+This specification for `kanthord worker` contains **16 command leaves, all implemented**.
 Requirements marked
 **target design** describe later runtime behavior and do not establish implementation.
 
@@ -22,6 +22,10 @@ heartbeat, handover, catalog reads, the placement list, and registration inspect
 `worker_registration` rows, one live registration per client identity, and atomic
 binding instance-count admission. Deregistration is both an internal
 collaboration and an owned client operation.
+The [instance implementation](../../src/worker/instances.ts) keeps the worker
+instance records, their key revisions and their connections.
+[`serve worker`](./other.md#serve-worker) starts from an instance configuration
+that `instance create` or `instance rotate` produces.
 
 The [server composition](../../src/apps/server/index.ts) wires the real
 [Project binding resolver](../../src/project/service.ts), including group
@@ -41,12 +45,12 @@ separately from registration healthchecks.
 
 ## Shared input and output contract
 
-Every command below reaches the selected server through a published operation.
+Every command below except `join` reaches the selected server through a published operation.
 It reads no server database. A proposed CLI command ships only together with its
 operation declaration and generated OpenAPI route. All commands accept `--help`,
 which needs no server or token. Unknown arguments/options and invalid local
-inputs fail before a request. No command prompts, reads implicit standard input,
-or accepts `--config`.
+inputs fail before a request. No command prompts or accepts `--config`.
+Only `join` reads standard input.
 
 Shared syntax, types, defaults, and validation are defined by each linked flag.
 Only applicability and Worker-specific requirements are listed here.
@@ -493,6 +497,160 @@ same transaction. The next registration of the client identity answers that
 registration, and its work pull returns the live execution. A resume of a live
 registration changes nothing. A lost execution is never revived.
 
+## Worker instances
+
+A worker instance is one host that serves the bindings at the `worker` placement that list it.
+An instance record holds the instance name, the hosted worker and one X25519 key revision.
+[`serve worker`](./other.md#serve-worker) proves the instance with the private key of the live revision.
+The server keeps only the public key and its fingerprint.
+
+The instance configuration is the canonical JSON object `{ name, endpoint, instance_id, private_key }`.
+Its value is the unpadded base64url encoding of that JSON text.
+`instance_id` names the live revision, and `private_key` is the base64url X25519 private key.
+The instance file `<XDG configuration directory>/kanthord/workers/<name>.yaml` holds the same four fields as YAML.
+The file has mode `0600`.
+
+| Value          | Type and validation                                                                                                                                              |
+| -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `InstanceName` | 1 to 63 characters: a lower-case letter first, then lower-case letters, digits and hyphens. The names `server`, `token`, `connect` and `heartbeat` are reserved. |
+| `InstanceId`   | `worker_instance_<ulid>`. Each key revision has its own identity.                                                                                                |
+| `revision`     | Positive integer. `instance create` writes revision 1. Each `instance rotate` writes the next revision.                                                          |
+
+The instance record contains `id`, `name`, `worker`, `revision`, `public_key`, `fingerprint`, `created_at` and `ended_at`.
+`ended_at` is `null` for the live revision.
+The five operations are `unary`, have the `human` access policy and a 30 s timeout.
+
+### `instance create`
+
+```text
+kanthord worker instance create <name> --worker <worker> [--worker-endpoint <url>] [--output [--force]] [--idempotency-key <ulid>]
+```
+
+| Input                      | Requiredness / type / default                   | Mapping and validation                                                                                           |
+| -------------------------- | ----------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| `<name>`                   | Required `InstanceName`                         | `body.name`. A name outside the form fails locally with `worker.instance.name_invalid`.                          |
+| `--worker <worker>`        | Required `WorkerName`                           | `body.worker`. The server accepts only a worker with the `kanthord` host.                                        |
+| `--worker-endpoint <url>`  | Optional URL; default the resolved `--endpoint` | The `endpoint` of the instance configuration. It is not sent. It follows the `--endpoint` URL validation.        |
+| `--output`                 | Optional flag                                   | Writes the instance file on this host and prints no instance configuration.                                      |
+| `--force`                  | Optional flag; requires `--output`              | Replaces an existing instance file. Without `--output` it fails with `cli.worker.instance.force_without_output`. |
+| `--idempotency-key <ulid>` | Shared mutation key                             | `Idempotency-Key` header.                                                                                        |
+
+The CLI generates the X25519 key pair on this host.
+It sends `{ name, worker, public_key }` and never sends the private key.
+The operation also accepts `endpoint` instead of `public_key`.
+With `endpoint`, the server generates the key pair and answers the instance configuration once.
+The CLI does not use that form.
+
+The CLI checks the name, `--force`, the token, the worker endpoint and the instance file before the request.
+With `--output`, an existing instance file fails with `cli.worker.join.config_exists`, unless `--force` is given.
+Without `--output`, standard output must be a terminal, or the command fails with `cli.output.terminal_required`.
+
+HTTP `200` answers the instance record. The CLI prints one JSON line with the record.
+With `--output`, the line adds `created: <path of the instance file>`.
+Without `--output`, the line adds `instance_configuration`, the configuration value.
+Copy that value to the worker host and run `join` there, or set it as `KANTHORD_WORKER_CONFIG`.
+The printed line holds no idempotency key.
+
+The operation is a secret mutation: a repeat of its key answers 409 with no body.
+An indeterminate result fails with `cli.worker.instance.create.indeterminate` and prints the key.
+Read the instance with `instance get` before a new attempt.
+A taken name answers `409 worker.instance.name_conflict`, also when an archived instance holds the name.
+
+### `instance list`
+
+```text
+kanthord worker instance list [--worker <worker>] [--include-archived] [--limit <count>] [--cursor <opaque>]
+```
+
+| Input                                                                            | Requiredness / type / default | Mapping and validation                             |
+| -------------------------------------------------------------------------------- | ----------------------------- | -------------------------------------------------- |
+| `--worker <worker>`                                                              | Optional `WorkerName`         | `query.worker`; only the instances of that worker. |
+| `--include-archived`                                                             | Optional flag; default false  | `query.include_archived`; adds archived instances. |
+| [`--limit`](./common-flags.md#--limit), [`--cursor`](./common-flags.md#--cursor) | Shared pagination flags       | Shared query mapping.                              |
+
+Required token: human JWT. Empty params, absent body. HTTP `200` returns one page in ascending name order.
+Each item holds the instance record, `connection`, `binding_count` and `holder_mismatch`.
+`connection` is `{ connection_name, connected_at, last_heartbeat_at }` for a current connection, otherwise `null`.
+`binding_count` counts the bindings that list the instance.
+`holder_mismatch` is true when `binding_count` is above zero.
+
+### `instance get`
+
+```text
+kanthord worker instance get <name>
+```
+
+Required `<name>: InstanceName`, mapped to `params.instance_name`. Required token: human JWT.
+Empty query, absent body. HTTP `200` returns the live revision, or the latest revision of an archived instance.
+The answer adds these fields to the instance record:
+
+| Field           | Type and presence                                                                                           |
+| --------------- | ----------------------------------------------------------------------------------------------------------- |
+| `connection`    | The current connection, as in `instance list`, or `null`.                                                   |
+| `bindings`      | Array of `{ project_id, binding }`, one item for each binding that lists the instance.                      |
+| `registrations` | Array of the live registration records of the instance.                                                     |
+| `credentials`   | Array of `{ name, revision, platform, sealed_current }`, one item for each credential copy of the instance. |
+
+An unknown name answers `404 worker.instance.not_found`.
+
+### `instance rotate`
+
+```text
+kanthord worker instance rotate <name> --expected-revision <n> [--worker-endpoint <url>] [--output [--force]] [--idempotency-key <ulid>]
+```
+
+`<name>`, `--worker-endpoint`, `--output`, `--force` and `--idempotency-key` follow [`instance create`](#instance-create).
+`--expected-revision <n>` is required and names the live revision as a positive integer.
+An absent or invalid value fails locally with `cli.worker.instance.revision_invalid`.
+The CLI generates a new key pair and sends `{ public_key, expected_revision }` to `params.instance_name`.
+
+In one transaction, the server writes the next revision with the new key.
+It ends the old revision, its worker tokens and its registrations.
+The answer, the output and the secret-mutation rule follow `instance create`.
+An indeterminate result fails with `cli.worker.instance.rotate.indeterminate`.
+The process that holds the old configuration loses its token.
+Its next token call answers `404 worker.instance.not_found`, and the process exits `1`.
+Write the new configuration on the worker host with `join --force`, then start `serve worker` again.
+
+A stale `--expected-revision` answers `409 worker.instance.revision_conflict` with `details.revision`.
+An archived instance answers `409 worker.instance.archived`.
+
+### `instance archive`
+
+```text
+kanthord worker instance archive <name> --expected-revision <n> [--idempotency-key <ulid>]
+```
+
+Required `<name>: InstanceName` and `--expected-revision <n>`, as in `instance rotate`.
+The request body is `{ expected_revision }`. HTTP `200` returns the archived instance record.
+The CLI prints one JSON line with the record and `idempotency_key`.
+
+The server archives the instance only when no binding lists it.
+It also refuses when a registration of the instance holds a live execution.
+Both refusals answer `409 worker.instance.in_use`.
+`details.bindings` lists the bindings, or `details.executions` lists the executions.
+The archive ends the registrations of the instance.
+An archived name stays taken, and `instance create` cannot use it again.
+An indeterminate result fails with `cli.worker.instance.archive.indeterminate` and prints the key.
+
+### `join`
+
+```text
+kanthord worker join [--force]
+```
+
+`join` is local. It calls no server and needs no token.
+It reads the instance configuration value from standard input, decodes it and validates it.
+An invalid value fails with `worker.instance.config_invalid`.
+It writes the instance file `<XDG configuration directory>/kanthord/workers/<name>.yaml` with mode `0600`.
+An existing file fails with `cli.worker.join.config_exists`, unless `--force` is given.
+On success stdout is exactly `created: <absolute path>\n`.
+
+```sh
+kanthord worker join < instance.txt
+kanthord serve worker --instance <name>
+```
+
 ## MCP and repository actions
 
 The target server owns one MCP v2 server. Every client, native agent or external
@@ -611,14 +769,19 @@ Every remote command can also answer the shared codes of [other.md](other.md#err
 | ----- | ------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
 | local | `worker.version.unavailable`                                  | The server package version is unavailable.                                                                                                                                                                                        | serve worker                                                                                                                  |
 | local | `worker.version.mismatch`                                     | The server package version differs.                                                                                                                                                                                               | serve worker                                                                                                                  |
-| local | `worker.start.client_secret_invalid`                          | The client_secret is not a canonical 32-byte base64 value.                                                                                                                                                                        | serve worker                                                                                                                  |
-| local | `worker.start.client_secret_absent`                           | The worker has no client_secret in cli.yaml.                                                                                                                                                                                      | serve worker                                                                                                                  |
+| local | `worker.start.instance_config_absent`                         | `KANTHORD_WORKER_CONFIG` is unset or blank, and no `--instance` names an existing instance file. The diagnostic names the variable, the file path and `XDG_CONFIG_HOME`.                                                          | serve worker                                                                                                                  |
+| local | `worker.start.instance_config_conflict`                       | `KANTHORD_WORKER_CONFIG` is set and the instance file of the same name exists.                                                                                                                                                    | serve worker                                                                                                                  |
+| local | `worker.instance.config_invalid`                              | The instance configuration is no unpadded base64url JSON object, fails the configuration schema or holds no valid X25519 key. `--instance` differs from its name, or the file name differs from its `name`.                       | serve worker, join                                                                                                            |
+| local | `worker.start.endpoint_insecure`                              | The endpoint uses `http` and its host does not resolve only to loopback or private addresses. Use `https` for any other host.                                                                                                     | serve worker                                                                                                                  |
+| local | `worker.instance.exchange_unavailable`                        | A connect or heartbeat call of the instance gets an indeterminate answer.                                                                                                                                                         | serve worker                                                                                                                  |
+| local | `worker.instance.superseded`                                  | Another process holds the connection of the instance. The process exits `3`; `details` name the other `connection_name`.                                                                                                          | serve worker                                                                                                                  |
+| local | `worker.instance.secret_changed`                              | The client secret of a hosted binding changes. Restart the instance.                                                                                                                                                              | serve worker                                                                                                                  |
 | local | `worker.start.tool_missing`                                   | The server or the worker cannot install or run the pinned `rg` or `fd` in `pi/bin/` of the state directory: a missing source, a host target outside the manifest, a digest mismatch or a failed `--version` run.                  | serve server, serve worker                                                                                                    |
 | local | `worker.runtime.setup_refused`                                | The adapter cannot map the execution setup onto pi; `details.reason` is `model_unknown`, `reasoning_effort_unsupported`, `credential_absent` or `credential_revision_mismatch`.                                                   | serve worker                                                                                                                  |
 | local | `worker.start.registration_indeterminate`                     | The registration at startup answers an indeterminate result.                                                                                                                                                                      | serve worker                                                                                                                  |
 | local | `worker.stop.execution_live`                                  | A stop signal arrives during a live execution; the application aborts the agent, deregisters nothing and exits 1.                                                                                                                 | serve worker                                                                                                                  |
 | local | `worker.stop.deregistration_indeterminate`                    | The deregistration at a stop answers an indeterminate result.                                                                                                                                                                     | serve worker                                                                                                                  |
-| local | `worker.handover.decryption_failed`                           | The handover envelope does not open under the handover key of the client_secret.                                                                                                                                                  | serve worker                                                                                                                  |
+| local | `worker.handover.decryption_failed`                           | The handover envelope does not open under the handover key of the client secret of the binding.                                                                                                                                   | serve worker                                                                                                                  |
 | local | `worker.evidence_upload.path_refused`                         | The path of `evidence-upload` is absolute, leaves the workspace, is a symbolic link, is not a regular file or is replaced during the open; `details.reason` is `outside_workspace`, `symbolic_link`, `not_regular` or `replaced`. | serve worker                                                                                                                  |
 | local | `worker.evidence_upload.transfer_failed`                      | The file of `evidence-upload` is above the 5 GiB single-object limit. A failed PUT gives no answer of its own: the helper calls `mission.evidence.asset.complete`, whose check records the storage binding as failed.             | serve worker                                                                                                                  |
 | 409   | `worker.execution.no_native_agent`                            | The setup read names an execution of an externally hosted worker.                                                                                                                                                                 | worker.execution.setup.get (API only)                                                                                         |
@@ -634,6 +797,21 @@ Every remote command can also answer the shared codes of [other.md](other.md#err
 | local | `cli.worker.handover.indeterminate`                           | The handover result is indeterminate; retry with a new key. The diagnostic prints no key row.                                                                                                                                     | handover                                                                                                                      |
 | local | `cli.worker.placement.list.token_required`                    | No option, environment variable or `cli.yaml` supplies a token.                                                                                                                                                                   | placement list                                                                                                                |
 | local | `cli.worker.placement.list.indeterminate`                     | The read result is indeterminate.                                                                                                                                                                                                 | placement list                                                                                                                |
+| local | `cli.worker.instance.force_without_output`                    | `--force` is given without `--output`.                                                                                                                                                                                            | instance create, instance rotate                                                                                              |
+| local | `cli.worker.instance.revision_invalid`                        | `--expected-revision` is absent or is not a positive integer.                                                                                                                                                                     | instance rotate, instance archive                                                                                             |
+| local | `cli.worker.join.config_exists`                               | The instance file exists and `--force` is not given.                                                                                                                                                                              | instance create, instance rotate, join                                                                                        |
+| local | `cli.worker.instance.<operation>.token_required`              | No option, environment variable or `cli.yaml` supplies a token. `<operation>` is `create`, `list`, `get`, `rotate` or `archive`.                                                                                                  | instance create, instance list, instance get, instance rotate, instance archive                                               |
+| local | `cli.worker.instance.<operation>.indeterminate`               | The result is indeterminate. A mutation prints its key.                                                                                                                                                                           | instance create, instance list, instance get, instance rotate, instance archive                                               |
+| 400   | `worker.instance.name_invalid`                                | The instance name breaks the binding name form or is reserved. The CLI also checks it before the request.                                                                                                                         | instance create, instance get, instance rotate, instance archive                                                              |
+| 400   | `worker.instance.worker_invalid`                              | The worker is unknown or is a worker of an external harness.                                                                                                                                                                      | instance create                                                                                                               |
+| 400   | `worker.instance.key_invalid`                                 | The body holds neither or both of a base64url 32-byte X25519 `public_key` and an `endpoint`.                                                                                                                                      | instance create, instance rotate                                                                                              |
+| 404   | `worker.instance.not_found`                                   | The instance name or the instance revision is unknown, or the revision ended.                                                                                                                                                     | instance get, instance rotate, instance archive, serve worker                                                                 |
+| 409   | `worker.instance.name_conflict`                               | A live or an archived instance holds the name.                                                                                                                                                                                    | instance create                                                                                                               |
+| 409   | `worker.instance.key_conflict`                                | An instance revision holds the same key.                                                                                                                                                                                          | instance create, instance rotate                                                                                              |
+| 409   | `worker.instance.revision_conflict`                           | `expected_revision` is not the live revision; `details.revision` names the live revision.                                                                                                                                         | instance rotate, instance archive                                                                                             |
+| 409   | `worker.instance.archived`                                    | The instance is archived.                                                                                                                                                                                                         | instance rotate, instance archive                                                                                             |
+| 409   | `worker.instance.in_use`                                      | A binding lists the instance, or a registration of the instance holds a live execution; `details` hold `bindings` or `executions`.                                                                                                | instance archive                                                                                                              |
+| 409   | `worker.instance.connection_superseded`                       | Another connection of the instance is current; `details.connection_name` names it. `serve worker` ends with `worker.instance.superseded`.                                                                                         | worker.instance.connect, worker.instance.heartbeat (API only)                                                                 |
 | 403   | `worker.authorization.refused`                                | The chain of the model inference credential breaks; details `{ reason }` with `binding_mismatch`, `binding_removed`, `binding_disabled` or `no_native_agent`.                                                                     | handover                                                                                                                      |
 | 403   | `project.authorization.refused`                               | The SSH identity chain of a repository binding breaks; details `{ reason }` with `binding_not_found` (the binding is removed or is not a repository binding), `identity_refused` or `node_mismatch`.                              | handover                                                                                                                      |
 | 403   | `mission.authorization.refused`                               | Mission refuses the protected facility chain; details `{ reason }` with `claim_not_live`, `node_mismatch`, `attempt_closed`, `binding_disabled` or `binding_removed`.                                                             | worker.action.request (API only), worker.execution.change_request.get (API only)                                              |
