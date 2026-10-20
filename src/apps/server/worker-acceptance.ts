@@ -26,12 +26,17 @@ export const WORKER_DEFAULTS = {
 export async function workerAcceptance(
   t: TestContext,
   host = false,
-  options: { stateDirectory?: string; slotLimit?: number } = {},
+  options: {
+    stateDirectory?: string;
+    slotLimit?: number;
+    containerImage?: string;
+  } = {},
 ) {
   const s3 = host ? await fakeS3(t) : undefined;
   const fixture = await gatewayFixture(t, {
     stateDirectory: options.stateDirectory,
     serverSlotLimit: options.slotLimit,
+    containerImage: options.containerImage,
     repositoryConnector: {
       gitLsRemote: async () => {},
     },

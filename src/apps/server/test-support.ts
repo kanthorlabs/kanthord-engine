@@ -446,6 +446,7 @@ export async function gatewayFixture(
     >[0]["workbenchModelRuntimeFactory"];
     stateDirectory?: string;
     serverSlotLimit?: number;
+    containerImage?: string;
     intake?: { pendingEventLimit?: number; pollIntervalMs?: number };
   } = {},
 ) {
@@ -455,10 +456,14 @@ export async function gatewayFixture(
     master_key: randomBytes(32).toString("base64"),
     gateway: { port: 0, allowed_hosts: ["localhost"] },
     scheduler: options.scheduler ?? {},
-    worker:
-      options.serverSlotLimit === undefined
+    worker: {
+      ...(options.serverSlotLimit === undefined
         ? {}
-        : { server_slot_limit: options.serverSlotLimit },
+        : { server_slot_limit: options.serverSlotLimit }),
+      ...(options.containerImage === undefined
+        ? {}
+        : { container_image: options.containerImage }),
+    },
   }).getProperties();
   const store = new Store(options.path ?? ":memory:");
   store.migrate([
@@ -489,6 +494,7 @@ export async function gatewayFixture(
     invocation,
     workerPool,
     threadDriver,
+    containerDriver,
     repoConnector,
     github,
     gitWriter,
@@ -596,6 +602,9 @@ export async function gatewayFixture(
     invocation,
     workerPool,
     threadDriver,
+    containerDriver,
+    masterKey: config.master_key,
+    authVersion: config.gateway.auth.version,
     store,
     tracking,
     trackingStore,

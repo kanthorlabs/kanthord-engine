@@ -271,6 +271,7 @@ components:
                         type: string
                         enum:
                           - server
+                          - container
                           - worker
                       resource_budget:
                         type: object
@@ -545,6 +546,7 @@ components:
                             type: string
                             enum:
                               - server
+                              - container
                               - worker
                           resource_budget:
                             type: object

@@ -198,7 +198,11 @@ export const repositoryConfigSchema = z.strictObject({
   project_prompt: z.string().optional(),
   working_layer: workingLayerSchema,
 });
-export const WorkerPlacement = { Server: "server", Worker: "worker" } as const;
+export const WorkerPlacement = {
+  Server: "server",
+  Container: "container",
+  Worker: "worker",
+} as const;
 export type WorkerPlacement =
   (typeof WorkerPlacement)[keyof typeof WorkerPlacement];
 export const workerTagsSchema = z

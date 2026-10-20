@@ -43,6 +43,7 @@ const REWORK_OFF = 0;
 const DEFAULT_TEXT_MAX_BYTES = 32768;
 const DEFAULT_HEARTBEAT_WINDOW = 300;
 const DEFAULT_SERVER_SLOT_LIMIT = 16;
+const DEFAULT_CONTAINER_IMAGE = "docker.io/kanthorlabs/kanthord";
 const DEFAULT_RELEASE_RESERVE = 600;
 const DEFAULT_STOP_BACKOFF_SECONDS = 30;
 const ROOT_BASE_PATH = "/";
@@ -67,6 +68,7 @@ test("service fragments preserve the existing YAML field set", () => {
   assert.deepEqual(Object.keys(config.worker), [
     "heartbeat_window",
     "server_slot_limit",
+    "container_image",
   ]);
   assert.deepEqual(Object.keys(config.scheduler), [
     "release_reserve",
@@ -79,6 +81,7 @@ test("service fragments preserve the existing YAML field set", () => {
   assert.deepEqual(initial.worker, {
     heartbeat_window: DEFAULT_HEARTBEAT_WINDOW,
     server_slot_limit: DEFAULT_SERVER_SLOT_LIMIT,
+    container_image: DEFAULT_CONTAINER_IMAGE,
   });
   assert.deepEqual(Object.keys(config.mission).sort(), [
     "consecutive_failure_limit",
@@ -160,8 +163,23 @@ test("worker configuration defaults and strict validation", () => {
     {
       heartbeat_window: DEFAULT_HEARTBEAT_WINDOW,
       server_slot_limit: DEFAULT_SERVER_SLOT_LIMIT,
+      container_image: DEFAULT_CONTAINER_IMAGE,
     },
   );
+  for (const container_image of [
+    "localhost/kanthord-dev",
+    "localhost:5000/kanthord",
+    "registry.example.com:443/team/kanthord-node",
+    "kanthord",
+  ])
+    assert.equal(
+      configuration({
+        version: CONFIG_VERSION,
+        master_key: masterKey,
+        worker: { container_image },
+      }).getProperties().worker.container_image,
+      container_image,
+    );
   for (const worker of [
     { heartbeat_window: 0 },
     { heartbeat_window: -1 },
@@ -171,6 +189,11 @@ test("worker configuration defaults and strict validation", () => {
     { server_slot_limit: -1 },
     { server_slot_limit: 1.5 },
     { server_slot_limit: Number.MAX_SAFE_INTEGER + 1 },
+    { container_image: "" },
+    { container_image: 1 },
+    { container_image: "docker.io/kanthorlabs/kanthord:28.0.1" },
+    { container_image: "localhost:5000/kanthord:latest" },
+    { container_image: "docker.io/kanthorlabs/kanthord@sha256:0123" },
     { globalPrompt: "prompts/global.md" },
     { unknown: true },
   ]) {
@@ -262,6 +285,7 @@ test("config init emits Worker and Scheduler fields", (t) => {
   assert.deepEqual(parseMapping(readFileSync(path, "utf8")).worker, {
     heartbeat_window: DEFAULT_HEARTBEAT_WINDOW,
     server_slot_limit: DEFAULT_SERVER_SLOT_LIMIT,
+    container_image: DEFAULT_CONTAINER_IMAGE,
   });
   assert.deepEqual(parseMapping(readFileSync(path, "utf8")).scheduler, {
     release_reserve: DEFAULT_RELEASE_RESERVE,

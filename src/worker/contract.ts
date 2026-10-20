@@ -447,15 +447,40 @@ export type InstanceActivity =
   (typeof InstanceActivity)[keyof typeof InstanceActivity];
 export const InstancePlacement = {
   Server: "server",
+  Container: "container",
   Worker: "worker",
 } as const;
 export type InstancePlacement =
   (typeof InstancePlacement)[keyof typeof InstancePlacement];
-export const POOL_PLACEMENTS: readonly InstancePlacement[] = [
-  InstancePlacement.Server,
-];
-export function hostsPoolSlot(placement: InstancePlacement | null): boolean {
+export const PoolPlacement = {
+  Server: InstancePlacement.Server,
+  Container: InstancePlacement.Container,
+} as const;
+export type PoolPlacement = (typeof PoolPlacement)[keyof typeof PoolPlacement];
+export const POOL_PLACEMENTS: readonly InstancePlacement[] =
+  Object.values(PoolPlacement);
+export function hostsPoolSlot(
+  placement: InstancePlacement | null,
+): placement is PoolPlacement {
   return placement !== null && POOL_PLACEMENTS.includes(placement);
+}
+export const PlacementIssue = {
+  ServerInContainer: "server_in_container",
+  RuntimeAbsent: "runtime_absent",
+  RuntimeFailed: "runtime_failed",
+  RuntimeRootful: "runtime_rootful",
+} as const;
+export type PlacementIssue =
+  (typeof PlacementIssue)[keyof typeof PlacementIssue];
+export const ContainerRuntime = { Podman: "podman", Docker: "docker" } as const;
+export type ContainerRuntime =
+  (typeof ContainerRuntime)[keyof typeof ContainerRuntime];
+export interface PlacementStatus {
+  placement: InstancePlacement;
+  available: boolean;
+  reason: PlacementIssue | null;
+  detail: string | null;
+  container_runtime: ContainerRuntime | null;
 }
 export const workerResourceIdentitySchema = z
   .string()
@@ -623,6 +648,7 @@ export interface PoolSlot {
   project_id: string;
   resource_identity: string;
   generation: number;
+  placement: PoolPlacement;
   slot: number;
   client_id: string;
   draining: boolean;

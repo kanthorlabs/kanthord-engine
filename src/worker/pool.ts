@@ -1,5 +1,10 @@
 import assert from "node:assert/strict";
-import { POOL_SLOT_COUNT, type PoolHost, type PoolSlot } from "./contract.ts";
+import {
+  POOL_SLOT_COUNT,
+  type PoolHost,
+  type PoolPlacement,
+  type PoolSlot,
+} from "./contract.ts";
 
 const FIRST_SLOT = 0;
 const NO_SLOTS = 0;
@@ -21,6 +26,7 @@ export interface PoolTarget {
   project_id: string;
   resource_identity: string;
   generation: number;
+  placement: PoolPlacement;
   count: number;
 }
 
@@ -38,6 +44,7 @@ interface Group {
   project_id: string;
   resource_identity: string;
   generation: number;
+  placement: PoolPlacement;
   slots: Map<number, PoolSlot>;
 }
 
@@ -135,6 +142,7 @@ export class Pool {
           project_id: target.project_id,
           resource_identity: target.resource_identity,
           generation: target.generation,
+          placement: target.placement,
           slots: new Map(),
         });
     for (const [key, group] of this.groups) {
@@ -223,6 +231,7 @@ export class Pool {
       project_id: group.project_id,
       resource_identity: group.resource_identity,
       generation: group.generation,
+      placement: group.placement,
       slot: number,
       client_id: clientId,
       draining,

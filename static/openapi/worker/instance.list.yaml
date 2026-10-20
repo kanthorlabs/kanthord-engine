@@ -143,6 +143,7 @@ components:
                     type: string
                     enum:
                       - server
+                      - container
                       - worker
                   client_id:
                     type: string
@@ -191,6 +192,7 @@ components:
                         type: string
                         enum:
                           - server
+                          - container
                           - worker
                     required:
                       - host

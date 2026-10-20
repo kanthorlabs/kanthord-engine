@@ -5,10 +5,10 @@ import type { Logger } from "pino";
 import { generateSlotJWT, deriveClientSecret } from "../../gateway/auth/jwt.ts";
 import { servePort, type createInvocation } from "../../gateway/index.ts";
 import { ensureDirectory, openPrivate } from "../../kernel/files.ts";
-import {
-  InstancePlacement,
-  type PoolHost,
-  type PoolSlot,
+import type {
+  PoolHost,
+  PoolPlacement,
+  PoolSlot,
 } from "../../worker/contract.ts";
 import { SlotControl } from "../worker/thread-data.ts";
 import type { SlotDriver, SlotInstance } from "./slot-driver.ts";
@@ -30,7 +30,7 @@ export interface WorkerPoolOptions {
   stateDirectory: string;
   logger: Logger;
   runtimeIdentity: (clientId: string) => string | undefined;
-  drivers: ReadonlyMap<InstancePlacement, SlotDriver>;
+  drivers: ReadonlyMap<PoolPlacement, SlotDriver>;
   environment?: NodeJS.ProcessEnv;
 }
 
@@ -190,8 +190,8 @@ export class WorkerPool implements PoolHost {
     }).then(({ token }) => token);
   }
 
-  private driver(): SlotDriver {
-    const driver = this.options.drivers.get(InstancePlacement.Server);
+  private driver(slot: PoolSlot): SlotDriver {
+    const driver = this.options.drivers.get(slot.placement);
     if (!driver)
       throw new Error("worker pool: no slot driver for the placement");
     return driver;
@@ -219,7 +219,7 @@ export class WorkerPool implements PoolHost {
         () => this.token(slot),
         this.options.logger,
       );
-      const instance = this.driver().launch({
+      const instance = this.driver(slot).launch({
         slot,
         channel: port2,
         client_secret: deriveClientSecret(

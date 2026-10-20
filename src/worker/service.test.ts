@@ -182,7 +182,11 @@ const fakeAgentCollaborations: Omit<AgentDependencies, "store"> = {
   toolDeclarations: async () => [],
   logger: pino({ enabled: false }),
 };
-const WORKER_CONFIG = { heartbeat_window: 300, server_slot_limit: 16 };
+const WORKER_CONFIG = {
+  heartbeat_window: 300,
+  server_slot_limit: 16,
+  container_image: "docker.io/kanthorlabs/kanthord",
+};
 
 test("action handler forwards only the proved claim and caller before its commit", async (t) => {
   const f = enablementFixture(t);

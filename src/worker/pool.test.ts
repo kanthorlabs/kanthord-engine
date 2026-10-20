@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { POOL_SLOT_COUNT } from "./contract.ts";
+import { POOL_SLOT_COUNT, PoolPlacement } from "./contract.ts";
 import { FakePoolHost } from "./test-support.ts";
 import { Pool, planPool, type PoolProbes, type PoolTarget } from "./pool.ts";
 
@@ -68,6 +68,7 @@ const target = (
   project_id: projectId,
   resource_identity: RESOURCE,
   generation,
+  placement: PoolPlacement.Server,
   count,
 });
 const probes = (busy: string[] = [], live: string[] = []): PoolProbes => ({
