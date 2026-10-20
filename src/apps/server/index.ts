@@ -1,4 +1,3 @@
-import { instanceIssuer } from "./instance-issuer.ts";
 import assert from "node:assert/strict";
 import { join, dirname } from "node:path";
 import { randomBytes } from "node:crypto";
@@ -114,6 +113,7 @@ import { ContainerDriver } from "./container-driver.ts";
 import { systemRuntimeHost } from "./container-runtime.ts";
 import { packageVersion } from "../../kernel/version.ts";
 import { WorkerPool } from "./worker-pool.ts";
+import { instanceIssuer } from "./instance-issuer.ts";
 import { AgentComponent, agentMigrations } from "../../agent/index.ts";
 import {
   WorkbenchService,
