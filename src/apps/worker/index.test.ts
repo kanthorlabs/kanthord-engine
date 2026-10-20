@@ -56,6 +56,17 @@ const PROOF_FAILED = {
     request_id: "request_01ARZ3NDEKTSV4RRFFQ69G5FAA",
   },
 };
+const UNAUTHORIZED = {
+  status: HttpStatus.Unauthorized,
+  body: {
+    error: {
+      code: "gateway.authentication.unauthorized",
+      message: "The bearer is not valid.",
+      details: null,
+    },
+    request_id: "request_01ARZ3NDEKTSV4RRFFQ69G5FAA",
+  },
+};
 const CHILD_SCRIPT = `
   import { runWorker } from ${JSON.stringify(new URL("./index.ts", import.meta.url).href)};
   const error = await runWorker({});
@@ -252,6 +263,8 @@ test("an execution passes one token renewal and the next request carries the ren
         body: { kind: WorkPullKind.Claimed, execution: claim },
       };
     }
+    if (request.path === FakePath.Pull)
+      return { status: HttpStatus.OK, body: { kind: WorkPullKind.NoWork } };
     if (request.path === FakePath.Handover) {
       await handover.promise;
       return PROOF_FAILED;
@@ -261,11 +274,18 @@ test("an execution passes one token renewal and the next request carries the ren
   const worker = new Worker(f.options({ renewalIntervalMs: RENEWAL_MS }));
   const running = worker.run();
   const held = await until(() => f.server.requestsTo(FakePath.Handover)[0]);
-  await until(() => f.server.requestsTo(FakePath.Connect).length > SINGLE);
+  await until(() =>
+    f.server.state.requests
+      .slice(f.server.state.requests.indexOf(held))
+      .some((request) => request.path === FakePath.Connect),
+  );
   assert.equal(f.server.requestsTo(FakePath.Token).length > SINGLE, true);
   handover.resolve();
-  const next = await until(() => f.server.requestsTo(FakePath.Pull)[1]);
-  assert.notEqual(next.bearer, held.bearer);
+  const next = await until(() =>
+    f.server
+      .requestsTo(FakePath.Pull)
+      .find((request) => request.bearer !== held.bearer),
+  );
   assert.ok(f.server.state.clientTokens.has(next.bearer!));
   assert.deepEqual(await worker.healthcheck(), {
     client: HealthStatus.Healthy,
@@ -318,6 +338,32 @@ test("an auth-version increment with a changed client secret ends the process, a
   f.server.state.intercept = undefined;
   await restarted.stop();
   await again;
+});
+
+test("a client request refused after an auth-version increment ends the process as secret_changed", async (t) => {
+  const f = await fixture(t, SINGLE);
+  const gate = Promise.withResolvers<void>();
+  let held = false;
+  f.server.state.intercept = async (request) => {
+    if (request.path !== FakePath.Pull) return undefined;
+    if (held) return UNAUTHORIZED;
+    held = true;
+    await gate.promise;
+    return UNAUTHORIZED;
+  };
+  const running = runWorker(f.options());
+  await f.ready();
+  await until(() => held);
+  f.server.state.workerTokens.clear();
+  f.server.state.clientTokens.clear();
+  f.server.state.bindings[0]!.client_secret = Buffer.alloc(32, 7).toString(
+    "base64",
+  );
+  gate.resolve();
+  const error = await running;
+  assert.ok(error instanceof Diagnostic);
+  assert.equal(error.code, SECRET_CHANGED_CODE);
+  assert.deepEqual(f.server.state.deregistered, []);
 });
 
 test("a binding version change adds a new binding and drains a dropped binding", async (t) => {

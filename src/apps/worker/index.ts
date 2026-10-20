@@ -56,6 +56,7 @@ import {
 const WORKER_STOP_WATCHDOG_MS = 10000;
 const WORKER_STOP_EXIT_FAILURE = 1;
 const READY_MESSAGE = "Worker instance ready";
+const GATEWAY_CODE = "gateway.";
 const CONNECTION_SUPERSEDED = "gateway.jwt.connection_superseded";
 const SECRET_CHANGED_CODE = "worker.instance.secret_changed";
 const VERSION_MISMATCH_CODE = "worker.version.mismatch";
@@ -119,6 +120,7 @@ export class Worker implements Service {
   private readonly options: WorkerOptions;
   private readonly shutdown = new CancellationContext();
   private readonly ended = Promise.withResolvers<Diagnostic | null>();
+  private endReason?: Diagnostic;
   private readonly hosted = new Map<string, Hosted>();
   private unit?: WorkerUnit;
   private exchange?: InstanceExchange;
@@ -248,7 +250,7 @@ export class Worker implements Service {
         this.ended.promise.then((ended) => ({ result: null, ended })),
       ]);
       if (outcome.ended) return await this.end(outcome.ended, running);
-      return outcome.result;
+      return (await this.exchangeVerdict(outcome.result)) ?? outcome.result;
     } finally {
       clearInterval(this.heartbeatTimer);
       clearInterval(this.renewalTimer);
@@ -283,7 +285,20 @@ export class Worker implements Service {
   }
 
   private finish(reason: Diagnostic): void {
+    this.endReason ??= reason;
     this.ended.resolve(reason);
+  }
+
+  private async exchangeVerdict(
+    result: Error | null,
+  ): Promise<Diagnostic | undefined> {
+    if (
+      !(result instanceof Diagnostic) ||
+      !result.code.startsWith(GATEWAY_CODE)
+    )
+      return undefined;
+    await this.check();
+    return this.endReason;
   }
 
   private async takeToken() {
