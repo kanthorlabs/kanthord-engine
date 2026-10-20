@@ -17,4 +17,5 @@ export const CommandName = {
   Tracking: "tracking",
 } as const;
 export const SERVER_APPLICATION = "server";
+export const SLOT_APPLICATION = "slot";
 export const ExitCode = { Success: 0, Failure: 1 } as const;

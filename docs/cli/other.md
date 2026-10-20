@@ -24,9 +24,10 @@ syntax separately; it is not a claim that the target surface is implemented.
 
 ## Command inventory
 
-There are nine application/JWT forms below: three configuration commands,
-`upgrade`, two `serve` application forms, two `auth jwt generate` modes, and
-`auth jwt inspect`. Help is a parser facility, not a fifth global command.
+There are ten application/JWT forms below: three configuration commands,
+`upgrade`, two `serve` application forms, the internal `serve slot` mode, two
+`auth jwt generate` modes, and `auth jwt inspect`. Help is a parser facility,
+not a fifth global command.
 
 1. `kanthord config init [--gateway-allowed-host <host>]... [--gateway-bind <address>] [--gateway-base-path <path>] [--config <path>]` — implemented; local, no route.
 2. `kanthord config validate [--config <path>]` — implemented; local, no route.
@@ -41,6 +42,8 @@ There are nine application/JWT forms below: three configuration commands,
 8. `kanthord auth jwt generate --project <project id> --binding <binding name> [--name <display>] [--output [path]] [--endpoint <url>] [--config <path>]` —
    implemented machine issuance; local, no route.
 9. `kanthord auth jwt inspect [token]` — implemented local decoding; no route.
+10. `kanthord serve slot` — implemented internal mode of the `server` application;
+    no route. A human never runs it. Help does not list it.
 
 Service commands, including local `gateway openapi`, are specified by their
 owning pages in the [index](./README.md).
@@ -721,6 +724,37 @@ The [Worker sibling](https://github.com/kanthorlabs/kanthord/blob/main/docs/brai
 Shutdown during a live execution or a registration with no answer, and a stop
 deadline in those cases remain **blocked** under [HANDOFF B9](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/HANDOFF.md#b9-failure-and-recovery).
 
+### `serve slot`
+
+```text
+kanthord serve slot
+```
+
+**Implemented; internal; route/access: none.** The `container` slot driver runs
+this mode as the command of a slot container. A human never runs it, and help
+does not list it. It takes no option.
+
+- It reads the frames of the slot channel from standard input, one JSON object
+  for each line. Its first frame is `init` with the `client_secret` of the slot.
+- It writes frames to file descriptor 3 only. The container command moves the
+  standard output to file descriptor 3 and points file descriptor 1 at standard
+  error, so every other output lands in standard error.
+- It creates the `TMPDIR` directory with mode `0700`, then starts the worker
+  thread with the operational log on standard error.
+- A `control` frame sends `drain` or `stop` to the thread. `SIGTERM` and `SIGINT`
+  send `stop`. A thread that does not exit within 5 s after a signal is
+  terminated.
+- When the thread exits, it flushes file descriptor 3 and exits with the exit
+  code of the thread.
+
+It exits `1` with a diagnostic in these cases:
+
+| Code                         | Condition                                                                                                 |
+| ---------------------------- | --------------------------------------------------------------------------------------------------------- |
+| `worker.slot.init_absent`    | No `init` frame arrives within 10 s.                                                                      |
+| `worker.slot.frame_invalid`  | A line on standard input is no valid frame, or the first frame is not `init`, or a second `init` arrives. |
+| `worker.slot.channel_closed` | Standard input reaches its end, or no frame arrives within 15 s.                                          |
+
 ## Local JWT issuance
 
 JWT generation has two mutually exclusive modes under the `auth jwt` group.
@@ -993,6 +1027,9 @@ implement them. Help is not an extra root name or a reason to load secrets.
 | local           | `cli.pagination.limit_invalid`                   | The `--limit` value is not a positive safe integer.                                                                                        | list commands with `--limit`                                               |
 | local           | `cli.pagination.limit_out_of_range`              | The `--limit` value exceeds 1000.                                                                                                          | list commands with `--limit`                                               |
 | local           | `cli.serve.unsupported_application`              | The named `serve` application is neither `worker` nor the default server.                                                                  | serve                                                                      |
+| local           | `worker.slot.init_absent`                        | No `init` frame arrives within 10 s.                                                                                                       | serve slot                                                                 |
+| local           | `worker.slot.frame_invalid`                      | A line on standard input is no valid frame, or the first frame is not `init`, or a second `init` arrives.                                  | serve slot                                                                 |
+| local           | `worker.slot.channel_closed`                     | Standard input reaches its end, or no frame arrives within 15 s.                                                                           | serve slot                                                                 |
 | local           | `cli.serve.worker_config`                        | `serve worker` was given the unsupported `--config` option.                                                                                | serve worker                                                               |
 | local           | `gateway.authentication.invalid_binding`         | The binding name is not 1 to 63 characters of a lower-case letter, then lower-case letters, digits and hyphens.                            | auth jwt generate                                                          |
 | local           | `gateway.authentication.invalid_lifetime`        | The JWT lifetime is not a nonnegative safe integer.                                                                                        | auth jwt generate                                                          |
