@@ -3,7 +3,9 @@ import type {
   AgentSetup,
   ExecutionSetup,
   HostTools,
+  PlacementStatus,
   PoolHost,
+  PoolPlacement,
   PoolSlot,
 } from "./contract.ts";
 import { getWorkerDeclaration, type WorkerDeclaration } from "./catalog.ts";
@@ -15,7 +17,7 @@ export const unusedHostTools: HostTools = {
 import { createIdentity } from "../kernel/identity.ts";
 import { ChainLevel } from "../agent/contract.ts";
 import { SHIPPED_TEMPLATES } from "../agent/prompt-templates.ts";
-import { ExecutionIntent } from "./contract.ts";
+import { ExecutionIntent, alwaysAvailable } from "./contract.ts";
 
 export const TWO_AGENT_WORKER = "two-agent@1";
 export function twoAgentDeclarationOf(name: string): WorkerDeclaration | null {
@@ -113,5 +115,11 @@ export class FakePoolHost implements PoolHost {
   }
   end(clientId: string): void {
     this.listener(clientId);
+  }
+  statuses = new Map<PoolPlacement, PlacementStatus>();
+  statusReads = 0;
+  async placementStatus(placement: PoolPlacement): Promise<PlacementStatus> {
+    this.statusReads++;
+    return this.statuses.get(placement) ?? alwaysAvailable(placement);
   }
 }

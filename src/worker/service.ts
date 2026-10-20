@@ -32,6 +32,9 @@ import {
   WorkerHost,
   InstanceActivity,
   hostsPoolSlot,
+  alwaysAvailable,
+  InstancePlacement,
+  type PlacementStatus,
   type WorkerRegistrations,
   type WorkerBindingOf,
   type WorkerBindingsOf,
@@ -255,6 +258,35 @@ export class WorkerService implements Service {
     if (!this.pool || this.poolStarted) return;
     this.poolStarted = true;
     this.reconcile(null, true);
+    void this.logUnavailableContainerDriver();
+  }
+
+  async placementStatus(
+    placement: InstancePlacement,
+  ): Promise<PlacementStatus> {
+    const host = this.dependencies.pool?.host;
+    if (!host || placement !== InstancePlacement.Container)
+      return alwaysAvailable(placement);
+    return host.placementStatus(placement);
+  }
+
+  private async logUnavailableContainerDriver(): Promise<void> {
+    const live = this.dependencies.store.transaction((tx) =>
+      this.dependencies
+        .pool!.workerBindingsOf(tx, null)
+        .some((binding) => binding.placement === InstancePlacement.Container),
+    );
+    if (!live) return;
+    const status = await this.placementStatus(InstancePlacement.Container);
+    if (status.available) return;
+    this.dependencies.pool!.logger.error(
+      {
+        placement: status.placement,
+        reason: status.reason,
+        detail: status.detail,
+      },
+      "worker.pool.driver_unavailable",
+    );
   }
 
   async stopPool(): Promise<void> {
@@ -601,6 +633,17 @@ export class WorkerService implements Service {
     );
   }
 
+  private declarePlacementRead(registry: OperationRegistry): void {
+    assert.equal(workerOperations["placement.list"].mutation, false);
+    registry.register(workerOperations["placement.list"], async () => ({
+      items: await Promise.all(
+        Object.values(InstancePlacement).map((placement) =>
+          this.placementStatus(placement),
+        ),
+      ),
+    }));
+  }
+
   private declareInstanceReads(registry: OperationRegistry): void {
     assert.equal(workerOperations["instance.list"].mutation, false);
     assert.equal(workerOperations["instance.get"].access, AccessPolicy.Human);
@@ -701,6 +744,7 @@ export class WorkerService implements Service {
       },
     );
     this.declareHandover(registry);
+    this.declarePlacementRead(registry);
     this.declareInstanceReads(registry);
     this.declareDeregister(registry);
     registry.register(

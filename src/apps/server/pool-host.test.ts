@@ -10,6 +10,7 @@ import { deriveClientSecret } from "../../gateway/auth/jwt.ts";
 import type { createInvocation } from "../../gateway/index.ts";
 import { temporary } from "../../kernel/test-support.ts";
 import {
+  PlacementIssue,
   PoolPlacement,
   type PlacementStatus,
   type PoolSlot,
@@ -96,6 +97,7 @@ class FakeDriver implements SlotDriver {
   }
 
   check(): Promise<PlacementStatus> {
+    if (this.unavailable) return Promise.resolve(this.unavailable);
     return Promise.resolve({
       placement: this.placement,
       available: true,
@@ -108,6 +110,8 @@ class FakeDriver implements SlotDriver {
   prepare(): Promise<void> {
     return Promise.resolve();
   }
+
+  unavailable: PlacementStatus | null = null;
 
   launch(launch: SlotLaunch): SlotInstance {
     this.launches.push(launch);
@@ -379,4 +383,24 @@ test("an exit that carries an error writes the error to the failure record", asy
   const failure = f.records.find((entry) => entry.message === FAILED_MESSAGE);
   assert.equal(failure?.fields.err, error);
   assert.equal(failure?.fields.runtime_identity, RUNTIME_IDENTITY);
+});
+
+test("the pool host answers the placement status from the check of the driver of that placement", async (t) => {
+  const f = fixture(t);
+  const unavailable: PlacementStatus = {
+    placement: PoolPlacement.Container,
+    available: false,
+    reason: PlacementIssue.RuntimeAbsent,
+    detail: null,
+    container_runtime: null,
+  };
+  f.containerDriver.unavailable = unavailable;
+  assert.deepEqual(
+    await f.pool.placementStatus(PoolPlacement.Container),
+    unavailable,
+  );
+  assert.equal(
+    (await f.pool.placementStatus(PoolPlacement.Server)).available,
+    true,
+  );
 });

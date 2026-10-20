@@ -482,6 +482,22 @@ export interface PlacementStatus {
   detail: string | null;
   container_runtime: ContainerRuntime | null;
 }
+export const placementStatusSchema = z.strictObject({
+  placement: z.enum(InstancePlacement),
+  available: z.boolean(),
+  reason: z.enum(PlacementIssue).nullable(),
+  detail: z.string().nullable(),
+  container_runtime: z.enum(ContainerRuntime).nullable(),
+});
+export function alwaysAvailable(placement: InstancePlacement): PlacementStatus {
+  return {
+    placement,
+    available: true,
+    reason: null,
+    detail: null,
+    container_runtime: null,
+  };
+}
 export const workerResourceIdentitySchema = z
   .string()
   .regex(/^worker:kanthord:[a-z][a-z0-9-]{0,62}$/);
@@ -664,6 +680,7 @@ export interface PoolHost {
   drain(slot: PoolSlot): void;
   stop(): Promise<void>;
   onEnded(listener: (clientId: string) => void): void;
+  placementStatus(placement: PoolPlacement): Promise<PlacementStatus>;
 }
 
 export const WORKER_SERVICE_NAME = "worker";
@@ -987,6 +1004,17 @@ export const workerOperations = {
     }),
     description:
       "Page live registrations in descending runtime identity order without changing runtime state.",
+  },
+  "placement.list": {
+    ...humanOperation,
+    id: "worker.placement.list",
+    method: HttpMethod.Get,
+    path: "/api/worker/placement",
+    mutation: false,
+    input: emptyInput,
+    output: z.strictObject({ items: z.array(placementStatusSchema) }),
+    description:
+      "List each worker placement with its availability on this server and the reason when it is unavailable, in the order server, container, worker.",
   },
   "instance.get": {
     ...humanOperation,

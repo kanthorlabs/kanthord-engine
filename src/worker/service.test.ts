@@ -13,6 +13,11 @@ import {
   REGISTRATION_TARGET_KIND,
   InstanceActivity,
   InstancePlacement,
+  PlacementIssue,
+  PoolPlacement,
+  ContainerRuntime,
+  alwaysAvailable,
+  type PlacementStatus,
   WorkerHost,
   WorkerMethod,
   ExecutionIntent,
@@ -1995,4 +2000,95 @@ test("a failed reconciliation in a change notice is logged and does not reach th
   const [line] = f.logs;
   assert.match(line!, /worker\.pool\.reconcile_failed/);
   assert.match(line!, /binding read failed/);
+});
+
+const DRIVER_RECORDS = 1;
+const NO_STATUS_READS = 0;
+const UNAVAILABLE_CONTAINER = {
+  placement: InstancePlacement.Container,
+  available: false,
+  reason: PlacementIssue.RuntimeFailed,
+  detail: "Cannot connect to Podman.",
+  container_runtime: ContainerRuntime.Podman,
+} satisfies PlacementStatus;
+
+async function placementList(f: ReturnType<typeof poolFixture>) {
+  const operation = workerOperations["placement.list"];
+  const input = operation.input.parse({ params: {}, query: {}, body: null });
+  return operation.output.parse(
+    await f.registry.get(operation.id).handler(input, f.caller),
+  );
+}
+
+async function loggedAfterStart(f: ReturnType<typeof poolFixture>) {
+  f.worker.startPool();
+  await changesApplied();
+  return f.logs.filter((line) => /worker\.pool\.driver_unavailable/.test(line));
+}
+
+test("the placement list answers server, container and worker in order", async (t) => {
+  const f = poolFixture(t, 1);
+  assert.deepEqual(await placementList(f), {
+    items: [
+      alwaysAvailable(InstancePlacement.Server),
+      alwaysAvailable(InstancePlacement.Container),
+      alwaysAvailable(InstancePlacement.Worker),
+    ],
+  });
+});
+
+for (const reason of Object.values(PlacementIssue))
+  test(`the placement list reports the container reason ${reason}`, async (t) => {
+    const f = poolFixture(t, 1);
+    const container = { ...UNAVAILABLE_CONTAINER, reason };
+    f.host.statuses.set(PoolPlacement.Container, container);
+    const { items } = await placementList(f);
+    assert.deepEqual(
+      items.map(({ placement }) => placement),
+      [
+        InstancePlacement.Server,
+        InstancePlacement.Container,
+        InstancePlacement.Worker,
+      ],
+    );
+    assert.deepEqual(items[1], container);
+    assert.deepEqual(items[0], alwaysAvailable(InstancePlacement.Server));
+    assert.deepEqual(items[2], alwaysAvailable(InstancePlacement.Worker));
+  });
+
+test("the placement list reports no unavailable server or worker placement", async (t) => {
+  const f = poolFixture(t, 1);
+  f.host.statuses.set(PoolPlacement.Server, {
+    ...UNAVAILABLE_CONTAINER,
+    placement: InstancePlacement.Server,
+  });
+  const { items } = await placementList(f);
+  assert.equal(items[0]!.placement, InstancePlacement.Server);
+  assert.equal(items[2]!.available, true);
+});
+
+test("start with an unavailable runtime and a live container binding logs the driver once and starts the pool", async (t) => {
+  const f = poolFixture(t, 1);
+  f.state.placement = InstancePlacement.Container;
+  f.host.statuses.set(PoolPlacement.Container, UNAVAILABLE_CONTAINER);
+  const lines = await loggedAfterStart(f);
+  assert.equal(lines.length, DRIVER_RECORDS);
+  const record = JSON.parse(lines[0]!);
+  assert.equal(record.placement, InstancePlacement.Container);
+  assert.equal(record.reason, PlacementIssue.RuntimeFailed);
+  assert.equal(record.detail, UNAVAILABLE_CONTAINER.detail);
+  assert.equal(f.host.started.length, POOL_ONE_START);
+});
+
+test("start logs no driver record for an available runtime", async (t) => {
+  const f = poolFixture(t, 1);
+  f.state.placement = InstancePlacement.Container;
+  assert.deepEqual(await loggedAfterStart(f), []);
+});
+
+test("start checks no runtime when no live binding holds the container placement", async (t) => {
+  const f = poolFixture(t, 1);
+  f.host.statuses.set(PoolPlacement.Container, UNAVAILABLE_CONTAINER);
+  assert.deepEqual(await loggedAfterStart(f), []);
+  assert.equal(f.host.statusReads, NO_STATUS_READS);
 });

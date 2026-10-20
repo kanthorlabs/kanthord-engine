@@ -296,6 +296,19 @@ async function instanceList(command: Command): Promise<void> {
   );
 }
 
+async function placementList(command: Command): Promise<void> {
+  assert.equal(workerOperations["placement.list"].access, AccessPolicy.Human);
+  assert.equal(workerOperations["placement.list"].mutation, false);
+  const { endpoint, token } = resolveClient(command.optsWithGlobals());
+  requireToken(token, "cli.worker.placement.list.token_required");
+  const result = await httpClient(workerOperations, endpoint, token)[
+    "placement.list"
+  ]({ params: {}, query: {}, body: null });
+  process.stdout.write(
+    `${JSON.stringify(handleReadResult(result, "cli.worker.placement.list.indeterminate"))}\n`,
+  );
+}
+
 async function instanceGet(
   runtimeIdentity: string,
   command: Command,
@@ -379,6 +392,14 @@ export function addWorkerCommand(program: Command): void {
     .action((runtimeIdentity: string, _options, command: Command) =>
       deregister(runtimeIdentity, command),
     );
+  const placement = worker
+    .command("placement")
+    .description("Worker placement commands");
+  placement.action(() => placement.help());
+  placement
+    .command(LIST)
+    .description("List each placement with its availability")
+    .action((_options, command: Command) => placementList(command));
   worker
     .command("heartbeat")
     .description("Renew a registered instance heartbeat")
