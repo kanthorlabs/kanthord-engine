@@ -77,7 +77,7 @@ test("the worker data of a thread holds a port, a client secret and a log destin
     assert.ok(!threadDataSchema.safeParse({ ...data, port: {} }).success);
     assert.ok(!threadDataSchema.safeParse({ ...data, log: "x" }).success);
     assert.ok(
-      !threadDataSchema.safeParse({
+      threadDataSchema.safeParse({
         ...data,
         log: LogDestination.StandardError,
       }).success,

@@ -10,7 +10,7 @@ import {
   type PoolHost,
   type PoolSlot,
 } from "../../worker/contract.ts";
-import { ThreadControl } from "../worker/thread-data.ts";
+import { SlotControl } from "../worker/thread-data.ts";
 import type { SlotDriver, SlotInstance } from "./slot-driver.ts";
 import { slotClientIdentity } from "./slot-identity.ts";
 
@@ -40,7 +40,7 @@ interface Entry {
   instance?: SlotInstance;
   port?: MessagePort;
   log?: WriteStream;
-  requested: ThreadControl["kind"] | null;
+  requested: SlotControl["kind"] | null;
   resume: boolean;
   failure: Error | null;
   delay: number;
@@ -83,7 +83,7 @@ export class WorkerPool implements PoolHost {
     const existing = this.entries.get(slot.client_id);
     if (existing) {
       existing.slot = slot;
-      if (existing.requested === ThreadControl.Drain && !slot.draining)
+      if (existing.requested === SlotControl.Drain && !slot.draining)
         existing.resume = true;
       return;
     }
@@ -127,9 +127,9 @@ export class WorkerPool implements PoolHost {
       this.ended(slot.client_id);
       return;
     }
-    if (entry.instance && entry.requested !== ThreadControl.Drain) {
-      entry.requested = ThreadControl.Drain;
-      entry.instance.control(ThreadControl.Drain);
+    if (entry.instance && entry.requested !== SlotControl.Drain) {
+      entry.requested = SlotControl.Drain;
+      entry.instance.control(SlotControl.Drain);
     }
   }
 
@@ -164,8 +164,8 @@ export class WorkerPool implements PoolHost {
       this.entries.delete(entry.slot.client_id);
       return;
     }
-    entry.requested = ThreadControl.Stop;
-    instance.control(ThreadControl.Stop);
+    entry.requested = SlotControl.Stop;
+    instance.control(SlotControl.Stop);
     const deadline = setTimeout(() => {
       instance.terminate();
     }, POOL_STOP_DEADLINE_MS);
@@ -241,8 +241,8 @@ export class WorkerPool implements PoolHost {
         this.exited(entry, code);
       });
       if (slot.draining) {
-        entry.requested = ThreadControl.Drain;
-        instance.control(ThreadControl.Drain);
+        entry.requested = SlotControl.Drain;
+        instance.control(SlotControl.Drain);
       }
     } catch (error) {
       entry.failure = error instanceof Error ? error : new Error(String(error));
@@ -259,7 +259,7 @@ export class WorkerPool implements PoolHost {
     const requested = entry.requested;
     entry.requested = null;
     entry.exit.resolve();
-    if (this.stopping || requested === ThreadControl.Stop) {
+    if (this.stopping || requested === SlotControl.Stop) {
       this.entries.delete(entry.slot.client_id);
       return;
     }
@@ -269,8 +269,7 @@ export class WorkerPool implements PoolHost {
       this.launch(entry);
       return;
     }
-    const drained =
-      requested === ThreadControl.Drain && !entry.failure && !code;
+    const drained = requested === SlotControl.Drain && !entry.failure && !code;
     const unregistered =
       entry.slot.draining &&
       this.options.runtimeIdentity(entry.slot.client_id) === undefined;

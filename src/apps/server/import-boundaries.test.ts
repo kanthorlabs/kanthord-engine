@@ -75,6 +75,8 @@ const REFUSED_PROPERTIES = [
   "dlopen",
 ];
 const THREAD_ENTRY = "src/apps/worker/thread.ts";
+const SLOT_ENTRY = "src/apps/worker/slot.ts";
+const THREAD_FILES = [THREAD_ENTRY, SLOT_ENTRY];
 const WORKER_INDEX = "src/apps/worker/index.ts";
 const UNIT_FILE = "src/worker/unit/probe.ts";
 const WORKER_FILE = "src/apps/worker/probe.ts";
@@ -180,10 +182,12 @@ test("a worker thread import is a lint error outside the thread entry", async ()
       EXPECTED_REFUSALS,
       file,
     );
-  assert.equal(
-    await ruleErrors(IMPORT_RULE, THREAD_ENTRY, source),
-    NO_REFUSALS,
-  );
+  for (const file of THREAD_FILES)
+    assert.equal(
+      await ruleErrors(IMPORT_RULE, file, source),
+      NO_REFUSALS,
+      file,
+    );
   assert.equal(
     await ruleErrors(
       IMPORT_RULE,
@@ -203,7 +207,7 @@ test("a refused property of process is a lint error in a worker element except t
         EXPECTED_REFUSALS,
         `${file} ${property}`,
       );
-    for (const file of [WORKER_INDEX, THREAD_ENTRY])
+    for (const file of [WORKER_INDEX, ...THREAD_FILES])
       assert.equal(
         await ruleErrors(PROPERTY_RULE, file, source),
         NO_REFUSALS,
@@ -222,7 +226,7 @@ test("a global of process, globalThis or an alias is a lint error in a worker el
       );
     for (const file of [
       WORKER_INDEX,
-      THREAD_ENTRY,
+      ...THREAD_FILES,
       UNIT_TEST_FILE,
       WORKER_TEST_FILE,
     ])
@@ -245,15 +249,16 @@ test("an import of process, module or a worker thread under any specifier is a l
   for (const source of REFUSED_MODULE_SOURCES.filter(
     (entry) => !entry.includes("worker_threads"),
   ))
-    assert.equal(
-      await ruleErrors(IMPORT_RULE, THREAD_ENTRY, source),
-      EXPECTED_REFUSALS,
-      source,
-    );
+    for (const file of THREAD_FILES)
+      assert.equal(
+        await ruleErrors(IMPORT_RULE, file, source),
+        EXPECTED_REFUSALS,
+        `${file} ${source}`,
+      );
 });
 
 test("a dynamic import is a lint error in a worker element", async () => {
-  for (const file of [UNIT_FILE, WORKER_FILE, WORKER_INDEX, THREAD_ENTRY])
+  for (const file of [UNIT_FILE, WORKER_FILE, WORKER_INDEX, ...THREAD_FILES])
     assert.equal(
       await ruleErrors(SYNTAX_RULE, file, DYNAMIC_IMPORT_SOURCE),
       EXPECTED_REFUSALS,

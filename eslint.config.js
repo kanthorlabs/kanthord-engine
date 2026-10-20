@@ -20,6 +20,7 @@ const workerTestFiles = [
 const workerWrapperEntry = "src/apps/worker/index.ts";
 const workerThreadEntry = "src/apps/worker/thread.ts";
 const workerThreadStart = "src/apps/worker/thread-start.ts";
+const workerSlotEntry = "src/apps/worker/slot.ts";
 const workerPaths = (threads) => [
   { name: "node:sqlite", message: "A worker unit reaches no database." },
   ...(threads
@@ -27,7 +28,7 @@ const workerPaths = (threads) => [
         name,
         allowTypeImports: true,
         message:
-          "Only src/apps/worker/thread.ts and thread-start.ts use worker threads.",
+          "Only src/apps/worker/thread.ts, thread-start.ts and slot.ts use worker threads.",
       }))
     : []),
   ...["node:process", "process"].map((name) => ({
@@ -216,7 +217,7 @@ export default tseslint.config(
                 },
                 {
                   to: element("apps-worker", {
-                    fileInternalPath: "{thread-data,thread-start}.ts",
+                    fileInternalPath: "{thread-data,thread-start,frames}.ts",
                   }),
                 },
               ],
@@ -253,6 +254,9 @@ export default tseslint.config(
                 { to: file("config") },
                 { to: applicationEntry("apps-server") },
                 { to: applicationEntry("apps-worker") },
+                {
+                  to: element("apps-worker", { fileInternalPath: "slot.ts" }),
+                },
                 { to: serviceEntry("contract.ts") },
                 {
                   to: element("component", { fileInternalPath: "contract.ts" }),
@@ -543,7 +547,12 @@ export default tseslint.config(
   },
   {
     files: workerFiles,
-    ignores: [workerThreadEntry, workerThreadStart, ...workerTestFiles],
+    ignores: [
+      workerThreadEntry,
+      workerThreadStart,
+      workerSlotEntry,
+      ...workerTestFiles,
+    ],
     rules: {
       "@typescript-eslint/no-restricted-imports": workerImportRule({
         threads: true,
@@ -552,7 +561,7 @@ export default tseslint.config(
     },
   },
   {
-    files: [workerThreadEntry, workerThreadStart],
+    files: [workerThreadEntry, workerThreadStart, workerSlotEntry],
     rules: {
       "@typescript-eslint/no-restricted-imports": workerImportRule({
         threads: false,
@@ -584,7 +593,7 @@ export default tseslint.config(
   },
   {
     files: workerFiles,
-    ignores: [workerWrapperEntry, workerThreadEntry],
+    ignores: [workerWrapperEntry, workerThreadEntry, workerSlotEntry],
     rules: {
       "no-restricted-properties": [
         "error",
@@ -609,7 +618,12 @@ export default tseslint.config(
   },
   {
     files: workerFiles,
-    ignores: [workerWrapperEntry, workerThreadEntry, ...workerTestFiles],
+    ignores: [
+      workerWrapperEntry,
+      workerThreadEntry,
+      workerSlotEntry,
+      ...workerTestFiles,
+    ],
     rules: {
       "no-restricted-globals": [
         "error",

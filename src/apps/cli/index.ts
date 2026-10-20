@@ -38,6 +38,7 @@ import {
   ExitCode,
   PROGRAM_NAME,
   SERVER_APPLICATION,
+  SLOT_APPLICATION,
 } from "./constants.ts";
 
 const HOST_PROBE_SCHEME = "http://";
@@ -186,6 +187,11 @@ async function serveWorker(command: Command): Promise<void> {
   if (error) throw error;
 }
 
+async function serveSlot(): Promise<void> {
+  const { runSlot } = await import("../worker/slot.ts");
+  await runSlot();
+}
+
 function addServeCommand(
   program: Command,
   onServer: (server: Server) => void,
@@ -213,6 +219,12 @@ function addServeCommand(
       "Machine JWT (otherwise KANTHORD_TOKEN or cli.yaml)",
     )
     .action((_options, command: Command) => serveWorker(command));
+  serve
+    .command(SLOT_APPLICATION, { hidden: true })
+    .description(
+      "Internal: run the instance of one container slot over the slot channel",
+    )
+    .action(() => serveSlot());
 }
 
 export function createProgram(

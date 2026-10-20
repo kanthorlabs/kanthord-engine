@@ -1,7 +1,7 @@
 import type { Writable } from "node:stream";
 import type { MessagePort } from "node:worker_threads";
 import type { InstancePlacement, PoolSlot } from "../../worker/contract.ts";
-import type { ThreadControl } from "../worker/thread-data.ts";
+import type { SlotControl } from "../worker/thread-data.ts";
 
 export interface SlotLaunch {
   readonly slot: PoolSlot;
@@ -18,7 +18,7 @@ export interface SlotExit {
 }
 
 export interface SlotInstance {
-  control(kind: ThreadControl["kind"]): void;
+  control(kind: SlotControl["kind"]): void;
   terminate(): void;
   readonly exited: Promise<SlotExit>;
 }
