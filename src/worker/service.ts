@@ -845,6 +845,8 @@ export class WorkerService implements Service {
           tx,
           identity,
           execution,
+          this.dependencies.workerBindingRowOf(tx, execution.workerBindingId)
+            ?.placement ?? null,
           { nonce: body.nonce, ciphertext: body.ciphertext },
           Date.now(),
         ),

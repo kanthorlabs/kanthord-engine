@@ -359,6 +359,7 @@ export interface CustodyHandover {
     tx: Transaction,
     identity: MachineIdentity,
     claim: ExecutionClaim,
+    placement: InstancePlacement | null,
     envelope: HandoverEnvelope,
     now: number,
   ): HandoverEnvelope;

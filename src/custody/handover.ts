@@ -35,6 +35,7 @@ export const CUSTODY_REPORT_INVALID = "custody.handover.report_invalid";
 export const CUSTODY_HOLDER_REFUSED = "custody.handover.holder_refused";
 export const REVISION_REVOKED = "credential.revision.revoked";
 export const SSH_SIGN_INVALID = "worker.ssh.sign_invalid";
+export const SSH_SIGN_PLACEMENT_REFUSED = "worker.ssh.placement_refused";
 const ONE_ROW = 1;
 const NO_MATERIALS = 0;
 

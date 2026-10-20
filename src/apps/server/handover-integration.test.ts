@@ -23,7 +23,14 @@ import {
 import { llmOperations } from "../../llm/contract.ts";
 import { repositoryOperations } from "../../repository/contract.ts";
 import { projectOperations } from "../../project/contract.ts";
-import { workerOperations } from "../../worker/contract.ts";
+import {
+  INSTANCE_CONNECTION_INFO,
+  WORKER_TOKEN_INFO,
+  connectionPayloadSchema,
+  workerOperations,
+  workerTokenPayloadSchema,
+} from "../../worker/contract.ts";
+import { generateX25519KeyPair, openJSON } from "../../kernel/hpke.ts";
 import { agentOperations, ChainLevel } from "../../agent/contract.ts";
 import { missionOperations, Intent } from "../../mission/contract.ts";
 import { schedulerOperations, WorkPullKind } from "../../scheduler/contract.ts";
@@ -77,6 +84,9 @@ const HTTP = "http";
 const PROOF_FAILED = "gateway.invocation.execution_proof_failed";
 const SIGN_REFUSED = "worker.ssh.sign_refused";
 const SIGN_INVALID = "worker.ssh.sign_invalid";
+const PLACEMENT_REFUSED = "worker.ssh.placement_refused";
+const RELAY_INSTANCES = ["relay-a", "relay-b"];
+const GENERAL_RESOURCE = "worker:kanthord:general";
 const AUTHORIZATION_REFUSED = "project.authorization.refused";
 const RSA_SHA2_256 = 2;
 const INVALID_REPORT = "custody.handover.report_invalid";
@@ -378,6 +388,7 @@ async function setup(
     compatible?: boolean;
     noEntries?: boolean;
     instanceCount?: number;
+    workerInstances?: readonly string[];
     workerName?: string;
     resourceBudget?: { turns: number; wall_time_ms: number };
     extraRepository?: boolean;
@@ -489,6 +500,22 @@ async function setup(
     { KANTHORD_ENDPOINT: f.endpoint, KANTHORD_TOKEN: f.token },
     { platform, credential: "anthro-1", configuration },
   );
+  const instanceKeys = new Map<string, { id: string; private_key: Buffer }>();
+  for (const name of setupOptions.workerInstances ?? []) {
+    const pair = await generateX25519KeyPair();
+    const record = completed(
+      await call(workerOperations["instance.create"], {
+        params: {},
+        query: {},
+        body: {
+          name,
+          worker: "coder@1",
+          public_key: pair.public_key.toString("base64url"),
+        },
+      }),
+    );
+    instanceKeys.set(name, { id: record.id, private_key: pair.private_key });
+  }
   const projectId = completed(
     await call(projectOperations.create, {
       params: {},
@@ -532,8 +559,15 @@ async function setup(
             kind: "worker",
             config: {
               worker: setupOptions.workerName ?? "coder@1",
-              placement: setupOptions.workerName ? undefined : "server",
-              instance_count: setupOptions.instanceCount ?? 1,
+              placement: setupOptions.workerName
+                ? undefined
+                : setupOptions.workerInstances
+                  ? "worker"
+                  : "server",
+              instance_count: setupOptions.workerInstances
+                ? undefined
+                : (setupOptions.instanceCount ?? 1),
+              worker_instances: setupOptions.workerInstances,
               resource_budget: setupOptions.resourceBudget && {
                 turns: setupOptions.resourceBudget.turns,
                 wall_time_ms: setupOptions.resourceBudget.wall_time_ms,
@@ -598,9 +632,53 @@ async function setup(
       },
     }),
   );
+  const instanceTokens: string[] = [];
+  for (const [name, key] of instanceKeys) {
+    const worker = workerTokenPayloadSchema.parse(
+      await openJSON(
+        key.private_key,
+        WORKER_TOKEN_INFO,
+        key.id,
+        completed(
+          await call(workerOperations["instance.token"], {
+            params: {},
+            query: {},
+            body: { instance_id: key.id },
+          }),
+        ).sealed,
+      ),
+    );
+    const connected = completed(
+      await call(
+        workerOperations["instance.connect"],
+        { params: {}, query: {}, body: { connection_name: name } },
+        worker.token,
+        { idempotencyKey: ulid() },
+      ),
+    );
+    const payload = connectionPayloadSchema.parse(
+      await openJSON(
+        key.private_key,
+        INSTANCE_CONNECTION_INFO,
+        `${key.id}${connected.connection_id}`,
+        connected.sealed,
+      ),
+    );
+    const entry = payload.bindings.find(
+      (item) =>
+        item.project_id === projectId &&
+        item.resource_identity === GENERAL_RESOURCE,
+    );
+    assert.ok(entry);
+    instanceTokens.push(entry.token);
+  }
+  if (instanceTokens.length)
+    t.mock.method(f.worker, "registrationHealthcheck", () => true);
   const token = setupOptions.workerName
     ? await f.machineToken(projectId, "general", "general-a")
-    : (await f.slotClient(projectId, "general")).token;
+    : instanceTokens.length
+      ? instanceTokens[0]!
+      : (await f.slotClient(projectId, "general")).token;
   const runtimeIdentity = completed(
     await call(workerOperations.register, NO_INPUT, token),
   ).runtime_identity;
@@ -612,7 +690,7 @@ async function setup(
           params: {},
           query: {},
           body: {
-            resource_identity: "worker:kanthord:general",
+            resource_identity: GENERAL_RESOURCE,
             runtime_identity: runtimeIdentity,
           },
         },
@@ -739,6 +817,7 @@ async function setup(
     open,
     sign,
     openSigned,
+    instanceTokens,
     bindings: bindingSet.bindings,
     sshPublicKey: String(sshRecord.revisions[0]!.metadata!.public_key),
     sshCredentialId: sshRecord.revisions[0]!.id,
@@ -1110,10 +1189,10 @@ for (const adapter of ["direct", "http"] as const) {
 }
 
 for (const adapter of ["direct", "http"] as const) {
-  test(`${adapter} worker.ssh.sign signs for a node binding, pins at first use, refuses others and answers a replay with 409`, async (t) => {
+  test(`${adapter} worker.ssh.sign signs for a node binding at the worker placement, pins at first use, refuses others and answers a replay with 409`, async (t) => {
     const h = await setup(t, adapter, undefined, {
       extraRepository: true,
-      instanceCount: 2,
+      workerInstances: RELAY_INSTANCES,
     });
     const repo = h.bindings.repo!.id;
     const key = sshPublicKeyBlob(h.sshPublicKey);
@@ -1149,19 +1228,6 @@ for (const adapter of ["direct", "http"] as const) {
     assert(replay.type === OperationResultType.Failure);
     assert.equal(replay.status, HttpStatus.Conflict);
     assert.equal(JSON.stringify(replay).includes("ciphertext"), false);
-    completed(await h.handover());
-    const setupAnswer = completed(
-      await h.call(
-        workerOperations["execution.setup.get"],
-        {
-          params: { execution_id: h.execution.execution_id },
-          query: {},
-          body: null,
-        },
-        h.token,
-      ),
-    );
-    assert.equal(setupAnswer.repositories[0]!.ssh_public_key, h.sshPublicKey);
     refused(
       await h.sign({ ...request, binding_id: h.bindings.other!.id }),
       HttpStatus.Forbidden,
@@ -1208,9 +1274,7 @@ for (const adapter of ["direct", "http"] as const) {
       HttpStatus.BadRequest,
       SIGN_INVALID,
     );
-    const other = (
-      await h.f.slotClient(h.execution.project_id, "general", SECOND_SLOT)
-    ).token;
+    const other = h.instanceTokens[1]!;
     completed(await h.call(workerOperations.register, NO_INPUT, other));
     refused(
       await h.sign(request, h.execution.execution_id, ulid(), other),
@@ -1220,6 +1284,25 @@ for (const adapter of ["direct", "http"] as const) {
     completed(await h.release());
     refused(await h.sign(request), HttpStatus.Forbidden, PROOF_FAILED);
     assert.equal(h.f.logs.join("").includes("PRIVATE KEY"), false);
+  });
+
+  test(`${adapter} worker.ssh.sign refuses a server slot with a live claim`, async (t) => {
+    const h = await setup(t, adapter);
+    const request = {
+      binding_id: h.bindings.repo!.id,
+      data: userAuthenticationData({
+        key: sshPublicKeyBlob(h.sshPublicKey),
+      }).toString("base64"),
+      flags: RSA_SHA2_256,
+    };
+    const answer = await h.sign(request);
+    refused(answer, HttpStatus.Forbidden, PLACEMENT_REFUSED);
+    assert(answer.type === OperationResultType.Failure);
+    assert.deepEqual(answer.error.error.details, { placement: "server" });
+    const pins = h.f.store.database
+      .prepare("SELECT credentials FROM scheduler_execution WHERE id = ?")
+      .get(h.execution.execution_id) as { credentials: string };
+    assert.equal(pins.credentials.includes(h.sshCredentialId), false);
   });
 }
 

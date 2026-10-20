@@ -104,6 +104,7 @@ import {
   sealSignAnswer,
   applyReport,
   CUSTODY_HOLDER_REFUSED,
+  SSH_SIGN_PLACEMENT_REFUSED,
   REVISION_REVOKED,
 } from "./handover.ts";
 import type { HandoverEnvelope } from "../kernel/handover.ts";
@@ -859,6 +860,7 @@ export class CustodyComponent implements Service, CredentialRecords {
     tx: Transaction,
     identity: MachineIdentity,
     claim: ExecutionClaim,
+    placement: HandoverPlacement | null,
     envelope: HandoverEnvelope,
     now: number,
   ): HandoverEnvelope {
@@ -869,6 +871,13 @@ export class CustodyComponent implements Service, CredentialRecords {
       claim.runtimeIdentity,
       now,
     );
+    if (placement !== HandoverPlacement.Worker)
+      throw new OperationError(
+        HttpStatus.Forbidden,
+        SSH_SIGN_PLACEMENT_REFUSED,
+        "The SSH signature relay serves only the worker placement.",
+        { placement },
+      );
     const secret = this.clientSecret(identity.clientId);
     const request = openSignRequest(secret, row, envelope);
     const grant = this.authorizeOperation(

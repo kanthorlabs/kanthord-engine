@@ -24,6 +24,7 @@ import {
   CUSTODY_REPORT_INVALID,
   REVISION_REVOKED,
   SSH_SIGN_INVALID,
+  SSH_SIGN_PLACEMENT_REFUSED,
 } from "./handover.ts";
 import {
   CUSTODY_SERVICE_NAME,
@@ -308,12 +309,16 @@ function fixture(
       component.report(tx, identity, claim, envelope, NOW),
     );
   const signKeys = deriveSshSignKeys(SECRET);
-  const sign = (request: unknown) =>
+  const sign = (
+    request: unknown,
+    placement: HandoverPlacement | null = HandoverPlacement.Worker,
+  ) =>
     store.transaction((tx) =>
       component.sshSign(
         tx,
         identity,
         claim,
+        placement,
         sealEnvelope(signKeys.request, aad, request),
         NOW,
       ),
@@ -789,10 +794,25 @@ test("sshSign signs for a binding of the node, pins the revision at first use an
   });
 });
 
-test("sshSign refuses another binding, no live claim, an invalid envelope and a refused payload", (t) => {
+test("sshSign refuses another placement, another binding, no live claim, an invalid envelope and a refused payload", (t) => {
   const f = fixture(t, ["anthro-1"], ["deploy"]);
   const [bindingId] = [...f.bindings.keys()];
   const { request } = signRequest(f, bindingId!, "deploy");
+  for (const placement of [
+    HandoverPlacement.Server,
+    HandoverPlacement.Container,
+    null,
+  ])
+    assert.throws(
+      () => f.sign(request, placement),
+      (error) => {
+        assert(error instanceof OperationError);
+        assert.equal(error.status, HttpStatus.Forbidden);
+        assert.equal(error.code, SSH_SIGN_PLACEMENT_REFUSED);
+        assert.deepEqual(error.details, { placement });
+        return true;
+      },
+    );
   assert.throws(
     () => f.sign({ ...request, binding_id: createIdentity("binding") }),
     { code: "project.authorization.refused" },
@@ -807,6 +827,7 @@ test("sshSign refuses another binding, no live claim, an invalid envelope and a 
           tx,
           f.identity,
           f.claim,
+          HandoverPlacement.Worker,
           sealEnvelope(f.keys.report, f.aad, request),
           NOW,
         ),

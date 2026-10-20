@@ -1369,10 +1369,18 @@ test("handover handlers pass the proven execution and one transactional clock re
         assert.deepEqual(actualEnvelope, envelope);
         assert.equal(actualNow, now);
       },
-      sshSign: (tx, actualIdentity, actualClaim, actualEnvelope, actualNow) => {
+      sshSign: (
+        tx,
+        actualIdentity,
+        actualClaim,
+        actualPlacement,
+        actualEnvelope,
+        actualNow,
+      ) => {
         assert(tx.database.isTransaction);
         assert.equal(actualIdentity, identity);
         assert.equal(actualClaim, execution);
+        assert.equal(actualPlacement, InstancePlacement.Container);
         assert.deepEqual(actualEnvelope, envelope);
         assert.equal(actualNow, now);
         return signed;
