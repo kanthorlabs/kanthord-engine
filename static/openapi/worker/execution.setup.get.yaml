@@ -301,6 +301,9 @@ components:
                 required:
                   - known_hosts
                 additionalProperties: false
+              ssh_public_key:
+                type: string
+                minLength: 1
               strategy:
                 type: object
                 properties:
@@ -338,6 +341,7 @@ components:
               - name
               - address
               - ssh_host_key
+              - ssh_public_key
               - strategy
               - project_prompt
               - working_layer

@@ -17,6 +17,7 @@ import { deriveClientSecret } from "../../gateway/auth/jwt.ts";
 import {
   handoverPayloadSchema,
   SecretShape,
+  sshSignAnswerSchema,
   EXECUTION_CREDENTIAL_MAX_BYTES,
 } from "../../custody/contract.ts";
 import { llmOperations } from "../../llm/contract.ts";
@@ -40,6 +41,7 @@ import { createIdentity } from "../../kernel/identity.ts";
 import { canonicalJSON, digest } from "../../kernel/json.ts";
 import {
   deriveHandoverKeys,
+  deriveSshSignKeys,
   handoverAad,
   openEnvelope,
   sealEnvelope,
@@ -57,6 +59,12 @@ import {
   gatewayFixture,
 } from "./test-support.ts";
 import { SHIPPED_TEMPLATES } from "../../agent/prompt-templates.ts";
+import { generateSshKey, sshPublicKeyBlob } from "../../repository/ssh-key.ts";
+import {
+  knownHostsKeyBlob,
+  sshSignatureVerifies,
+  userAuthenticationData,
+} from "../../repository/test-sshd.ts";
 
 const SECRET = "test_handover-integration-secret-one";
 const REFRESHED = "test_handover-integration-secret-two";
@@ -67,6 +75,10 @@ const HEAD_POSITION = 0;
 const TWO_REVISIONS = 2;
 const HTTP = "http";
 const PROOF_FAILED = "gateway.invocation.execution_proof_failed";
+const SIGN_REFUSED = "worker.ssh.sign_refused";
+const SIGN_INVALID = "worker.ssh.sign_invalid";
+const AUTHORIZATION_REFUSED = "project.authorization.refused";
+const RSA_SHA2_256 = 2;
 const INVALID_REPORT = "custody.handover.report_invalid";
 const BODY_TOO_LARGE = "gateway.request.body_too_large";
 const COPILOT = "github-copilot";
@@ -156,6 +168,7 @@ for (const adapter of ["direct", "http"] as const) {
       ssh_host_key: {
         known_hosts: `${FAKE_SSH_HOST} ${FAKE_GITHUB_HOST_KEY}\n`,
       },
+      ssh_public_key: h.sshPublicKey,
       strategy: { base_branch: "main" },
       project_prompt: "Follow repository conventions.",
       working_layer: WORKING_LAYER_ALL_ON,
@@ -367,6 +380,7 @@ async function setup(
     instanceCount?: number;
     workerName?: string;
     resourceBudget?: { turns: number; wall_time_ms: number };
+    extraRepository?: boolean;
   } = {},
 ) {
   const oauth = boundary?.type === SecretShape.OAuth ? boundary : undefined;
@@ -457,7 +471,7 @@ async function setup(
       },
     }),
   );
-  completed(
+  const sshRecord = completed(
     await call(repositoryOperations.ssh_key_create, {
       params: {},
       query: {},
@@ -482,6 +496,18 @@ async function setup(
       body: { name: "handover" },
     }),
   ).id;
+  const repository = {
+    kind: "repository" as const,
+    config: {
+      available: true,
+      platform: "github" as const,
+      address: "git@github.com:owner/repo.git",
+      ssh_credential: FAKE_SSH_CREDENTIAL,
+      strategy: { base_branch: "main" },
+      credential: "github",
+      project_prompt: "Follow repository conventions.",
+    },
+  };
   const bindingSet = completed(
     await call(projectOperations["bindingSet.write"], {
       params: { project_id: projectId },
@@ -490,18 +516,18 @@ async function setup(
         version: 1,
         bindings: {
           ...COVERING_WORKER_BINDINGS,
-          repo: {
-            kind: "repository",
-            config: {
-              available: true,
-              platform: "github",
-              address: "git@github.com:owner/repo.git",
-              ssh_credential: FAKE_SSH_CREDENTIAL,
-              strategy: { base_branch: "main" },
-              credential: "github",
-              project_prompt: "Follow repository conventions.",
-            },
-          },
+          repo: repository,
+          ...(setupOptions.extraRepository
+            ? {
+                other: {
+                  ...repository,
+                  config: {
+                    ...repository.config,
+                    address: "git@github.com:owner/other.git",
+                  },
+                },
+              }
+            : {}),
           general: {
             kind: "worker",
             config: {
@@ -600,13 +626,44 @@ async function setup(
   const claims = JSON.parse(
     Buffer.from(token.split(".")[1]!, "base64url").toString("utf8"),
   );
-  const keys = deriveHandoverKeys(
-    deriveClientSecret(
-      f.config.master_key,
-      f.config.gateway.auth.version,
-      claims.sub,
-    ),
+  const clientSecret = deriveClientSecret(
+    f.config.master_key,
+    f.config.gateway.auth.version,
+    claims.sub,
   );
+  const keys = deriveHandoverKeys(clientSecret);
+  const signKeys = deriveSshSignKeys(clientSecret);
+  const sign = (
+    request: unknown,
+    executionId = execution.execution_id,
+    idempotencyKey = ulid(),
+    auth = token,
+  ) =>
+    call(
+      workerOperations["ssh.sign"],
+      {
+        params: {},
+        query: {},
+        body: {
+          execution_id: executionId,
+          ...sealEnvelope(
+            signKeys.request,
+            handoverAad(executionId, runtimeIdentity),
+            request,
+          ),
+        },
+      },
+      auth,
+      { idempotencyKey },
+    );
+  const openSigned = (envelope: ReturnType<typeof sealEnvelope>) =>
+    sshSignAnswerSchema.parse(
+      openEnvelope(
+        signKeys.answer,
+        handoverAad(execution.execution_id, runtimeIdentity),
+        envelope,
+      ),
+    );
   const handover = (
     executionId = execution.execution_id,
     idempotencyKey = ulid(),
@@ -680,6 +737,11 @@ async function setup(
     release,
     read,
     open,
+    sign,
+    openSigned,
+    bindings: bindingSet.bindings,
+    sshPublicKey: String(sshRecord.revisions[0]!.metadata!.public_key),
+    sshCredentialId: sshRecord.revisions[0]!.id,
     credentialId: created.revisions[0]!.id,
   };
 }
@@ -1044,6 +1106,120 @@ for (const adapter of ["direct", "http"] as const) {
       HttpStatus.BadRequest,
       "gateway.request.validation_failed",
     );
+  });
+}
+
+for (const adapter of ["direct", "http"] as const) {
+  test(`${adapter} worker.ssh.sign signs for a node binding, pins at first use, refuses others and answers a replay with 409`, async (t) => {
+    const h = await setup(t, adapter, undefined, {
+      extraRepository: true,
+      instanceCount: 2,
+    });
+    const repo = h.bindings.repo!.id;
+    const key = sshPublicKeyBlob(h.sshPublicKey);
+    const hostKey = knownHostsKeyBlob(FAKE_GITHUB_HOST_KEY);
+    const data = userAuthenticationData({ key, hostKey });
+    const request = {
+      binding_id: repo,
+      data: data.toString("base64"),
+      flags: RSA_SHA2_256,
+    };
+    const idempotencyKey = ulid();
+    const signed = h.openSigned(
+      completed(
+        await h.sign(request, h.execution.execution_id, idempotencyKey),
+      ),
+    );
+    assert.ok(
+      sshSignatureVerifies(
+        h.sshPublicKey,
+        data,
+        Buffer.from(signed.signature, "base64"),
+      ),
+    );
+    const pins = h.f.store.database
+      .prepare("SELECT credentials FROM scheduler_execution WHERE id = ?")
+      .get(h.execution.execution_id) as { credentials: string };
+    assert.ok(pins.credentials.includes(h.sshCredentialId));
+    const replay = await h.sign(
+      request,
+      h.execution.execution_id,
+      idempotencyKey,
+    );
+    assert(replay.type === OperationResultType.Failure);
+    assert.equal(replay.status, HttpStatus.Conflict);
+    assert.equal(JSON.stringify(replay).includes("ciphertext"), false);
+    completed(await h.handover());
+    const setupAnswer = completed(
+      await h.call(
+        workerOperations["execution.setup.get"],
+        {
+          params: { execution_id: h.execution.execution_id },
+          query: {},
+          body: null,
+        },
+        h.token,
+      ),
+    );
+    assert.equal(setupAnswer.repositories[0]!.ssh_public_key, h.sshPublicKey);
+    refused(
+      await h.sign({ ...request, binding_id: h.bindings.other!.id }),
+      HttpStatus.Forbidden,
+      AUTHORIZATION_REFUSED,
+    );
+    for (const [payload, reason] of [
+      [
+        userAuthenticationData({ key, user: "root" }),
+        "not_user_authentication",
+      ],
+      [
+        userAuthenticationData({
+          key: sshPublicKeyBlob(generateSshKey("other").public_key),
+        }),
+        "key_mismatch",
+      ],
+      [
+        userAuthenticationData({ key, hostKey: Buffer.from("other") }),
+        "host_key_mismatch",
+      ],
+    ] as const) {
+      const answer = await h.sign({
+        ...request,
+        data: payload.toString("base64"),
+      });
+      refused(answer, HttpStatus.BadRequest, SIGN_REFUSED);
+      assert(answer.type === OperationResultType.Failure);
+      assert.deepEqual(answer.error.error.details, { reason });
+    }
+    refused(
+      await h.call(
+        workerOperations["ssh.sign"],
+        {
+          params: {},
+          query: {},
+          body: {
+            execution_id: h.execution.execution_id,
+            nonce: "AAAA",
+            ciphertext: "AAAA",
+          },
+        },
+        h.token,
+      ),
+      HttpStatus.BadRequest,
+      SIGN_INVALID,
+    );
+    const other = (
+      await h.f.slotClient(h.execution.project_id, "general", SECOND_SLOT)
+    ).token;
+    completed(await h.call(workerOperations.register, NO_INPUT, other));
+    refused(
+      await h.sign(request, h.execution.execution_id, ulid(), other),
+      HttpStatus.Forbidden,
+      PROOF_FAILED,
+    );
+    completed(await h.release());
+    refused(await h.sign(request), HttpStatus.Forbidden, PROOF_FAILED);
+    assert.equal(h.f.logs.join("").includes("PRIVATE KEY"), false);
   });
 }
 

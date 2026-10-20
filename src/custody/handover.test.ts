@@ -10,6 +10,7 @@ import { HttpStatus } from "../kernel/http.ts";
 import { digest } from "../kernel/json.ts";
 import {
   deriveHandoverKeys,
+  deriveSshSignKeys,
   handoverAad,
   openEnvelope,
   sealEnvelope,
@@ -22,6 +23,7 @@ import {
   CUSTODY_HOLDER_REFUSED,
   CUSTODY_REPORT_INVALID,
   REVISION_REVOKED,
+  SSH_SIGN_INVALID,
 } from "./handover.ts";
 import {
   CUSTODY_SERVICE_NAME,
@@ -30,6 +32,7 @@ import {
   HolderRefusal,
   SecretShape,
   SshIdentitySubjectKind,
+  sshSignAnswerSchema,
   type CredentialPlatformSet,
   type CustodyExecution,
   type SshIdentityAuthorization,
@@ -37,8 +40,18 @@ import {
 import { INTAKE_SERVICE_NAME } from "../intake/contract.ts";
 import type { ExecutionClaim } from "../kernel/operation.ts";
 import { RepositoryComponent } from "../repository/index.ts";
-import { generateSshKey } from "../repository/ssh-key.ts";
-import { RepositoryErrorCode } from "../repository/contract.ts";
+import { generateSshKey, sshPublicKeyOf } from "../repository/ssh-key.ts";
+import {
+  RepositoryErrorCode,
+  SshSignErrorCode,
+  SshSignRefusal,
+} from "../repository/contract.ts";
+import {
+  knownHostsKeyBlob,
+  sshSignatureVerifies,
+  userAuthenticationData,
+} from "../repository/test-sshd.ts";
+import { sshPublicKeyBlob } from "../repository/ssh-key.ts";
 
 const SECRET = Buffer.alloc(32, 9).toString("base64");
 const FIRST = { type: SecretShape.ApiKey, key: "private-first" };
@@ -51,6 +64,8 @@ const SSH_ADDRESS = "git@github.com:owner/repository.git";
 const KNOWN_HOSTS = "github.com ssh-ed25519 AAAAhost\n";
 const OPENSSH_LABEL = "OPENSSH PRIVATE KEY";
 const SSH_HANDOVER_RECORD = "ssh identity handover";
+const SSH_SIGN_RECORD = "ssh signature relay";
+const RSA_SHA2_512 = 4;
 const FIRST_SSH_REVISION = 1;
 const TEST_SET: CredentialPlatformSet = {
   platforms: {
@@ -210,6 +225,8 @@ function fixture(
     sshIdentityAuthorization,
     sshAccessOf: (tx, granted, material) =>
       repository.sshAccessOf(tx, granted, material),
+    sshSignatureOf: (tx, granted, material, data) =>
+      repository.sshSignatureOf(tx, granted, material, data),
   });
   const credentialIds = names.map(
     (name) =>
@@ -290,6 +307,21 @@ function fixture(
     store.transaction((tx) =>
       component.report(tx, identity, claim, envelope, NOW),
     );
+  const signKeys = deriveSshSignKeys(SECRET);
+  const sign = (request: unknown) =>
+    store.transaction((tx) =>
+      component.sshSign(
+        tx,
+        identity,
+        claim,
+        sealEnvelope(signKeys.request, aad, request),
+        NOW,
+      ),
+    );
+  const publicKeyOf = (credential: string) =>
+    store.transaction((tx) =>
+      component.sshPublicKeyOf(tx, claim, credential, NOW),
+    );
   const refresh = {
     credential_id: credentialId,
     digest: digest(FIRST),
@@ -307,6 +339,9 @@ function fixture(
     aad,
     handover,
     report,
+    sign,
+    signKeys,
+    publicKeyOf,
     refresh,
     claim,
     bindings,
@@ -685,5 +720,139 @@ test("a refresh report that carries an SSH key answers report_invalid", (t) => {
       openEnvelope(f.keys.handover, f.aad, f.handover()),
     ).ssh_identities[0]?.private_key,
     f.sshKeys.get("deploy"),
+  );
+});
+
+function signRequest(
+  f: ReturnType<typeof fixture>,
+  bindingId: string,
+  credential: string,
+  hostKey: Buffer | null = knownHostsKeyBlob(KNOWN_HOSTS),
+) {
+  const publicKey = sshPublicKeyOf(f.sshKeys.get(credential)!);
+  const data = userAuthenticationData({
+    key: sshPublicKeyBlob(publicKey),
+    hostKey,
+  });
+  return {
+    publicKey,
+    data,
+    request: {
+      binding_id: bindingId,
+      data: data.toString("base64"),
+      flags: RSA_SHA2_512,
+    },
+  };
+}
+
+test("sshSign signs for a binding of the node, pins the revision at first use and logs no key", (t) => {
+  const f = fixture(t, ["anthro-1"], ["deploy"]);
+  const [bindingId] = [...f.bindings.keys()];
+  const { publicKey, data, request } = signRequest(f, bindingId!, "deploy");
+  const answer = sshSignAnswerSchema.parse(
+    openEnvelope(f.signKeys.answer, f.aad, f.sign(request)),
+  );
+  assert.ok(
+    sshSignatureVerifies(
+      publicKey,
+      data,
+      Buffer.from(answer.signature, "base64"),
+    ),
+  );
+  const pinned = liveRevisionId(f.store, "deploy");
+  assert.deepEqual(f.row.credentials, [pinned]);
+  const records = f.logs
+    .map((line) => JSON.parse(line))
+    .filter((line) => line.msg === SSH_SIGN_RECORD);
+  assert.deepEqual(
+    records.map(({ execution_id, binding_id, credential_id, client_id }) => ({
+      execution_id,
+      binding_id,
+      credential_id,
+      client_id,
+    })),
+    [
+      {
+        execution_id: f.row.execution_id,
+        binding_id: bindingId,
+        credential_id: pinned,
+        client_id: f.identity.clientId,
+      },
+    ],
+  );
+  assert.ok(Object.hasOwn(records[0]!, "instance_id"));
+  assert.equal(f.logs.join("").includes(OPENSSH_LABEL), false);
+  f.rotateSsh("deploy");
+  const again = signRequest(f, bindingId!, "deploy");
+  assert.throws(() => f.sign(again.request), {
+    code: SshSignErrorCode.Refused,
+  });
+});
+
+test("sshSign refuses another binding, no live claim, an invalid envelope and a refused payload", (t) => {
+  const f = fixture(t, ["anthro-1"], ["deploy"]);
+  const [bindingId] = [...f.bindings.keys()];
+  const { request } = signRequest(f, bindingId!, "deploy");
+  assert.throws(
+    () => f.sign({ ...request, binding_id: createIdentity("binding") }),
+    { code: "project.authorization.refused" },
+  );
+  assert.throws(() => f.sign({ ...request, flags: -1 }), {
+    code: SSH_SIGN_INVALID,
+  });
+  assert.throws(
+    () =>
+      f.store.transaction((tx) =>
+        f.component.sshSign(
+          tx,
+          f.identity,
+          f.claim,
+          sealEnvelope(f.keys.report, f.aad, request),
+          NOW,
+        ),
+      ),
+    { code: SSH_SIGN_INVALID },
+  );
+  f.setRunning(false);
+  assert.throws(() => f.sign(request), {
+    code: "scheduler.execution.not_running",
+  });
+  assert.deepEqual(f.row.credentials, []);
+  assert.equal(
+    f.logs.some((line) => JSON.parse(line).msg === SSH_SIGN_RECORD),
+    false,
+  );
+  f.setRunning(true);
+  const other = signRequest(f, bindingId!, "deploy", Buffer.from("other"));
+  assert.throws(
+    () => f.sign(other.request),
+    (error) => {
+      assert(error instanceof OperationError);
+      assert.equal(error.code, SshSignErrorCode.Refused);
+      assert.deepEqual(error.details, {
+        reason: SshSignRefusal.HostKeyMismatch,
+      });
+      return true;
+    },
+  );
+});
+
+test("sshPublicKeyOf answers the pinned revision, else the newest live revision, and pins nothing", (t) => {
+  const f = fixture(t, ["anthro-1"], ["deploy"]);
+  const [bindingId] = [...f.bindings.keys()];
+  const first = sshPublicKeyOf(f.sshKeys.get("deploy")!);
+  assert.equal(f.publicKeyOf("deploy"), first);
+  assert.deepEqual(f.row.credentials, []);
+  f.sign(signRequest(f, bindingId!, "deploy").request);
+  f.rotateSsh("deploy");
+  assert.equal(f.publicKeyOf("deploy"), first);
+  f.store.transaction((tx) =>
+    f.component.revoke(tx, TEST_SET, "deploy", FIRST_SSH_REVISION),
+  );
+  assert.throws(() => f.publicKeyOf("deploy"), { code: REVISION_REVOKED });
+  f.row.credentials.length = 0;
+  assert.equal(
+    f.publicKeyOf("deploy"),
+    sshPublicKeyOf(f.sshKeys.get("deploy")!),
   );
 });

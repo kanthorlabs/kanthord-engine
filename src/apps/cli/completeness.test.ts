@@ -46,6 +46,7 @@ const API_ONLY_OPERATIONS = [
   "gateway.openapi",
   "gateway.openapiFile",
   "worker.credential",
+  "worker.ssh.sign",
   "worker.instance.token",
   "worker.instance.connect",
   "worker.instance.heartbeat",
@@ -91,7 +92,7 @@ const TOP_LEVEL_DEPTH = 1;
 const INTAKE_GROUP = "intake";
 const TRACKING_GROUP = "tracking";
 const IMPLEMENTED_COUNT = 177;
-const OPERATION_COUNT = 190;
+const OPERATION_COUNT = 191;
 const INTAKE_LEAVES = [
   "intake event delete",
   "intake event discard",

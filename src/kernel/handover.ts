@@ -5,6 +5,8 @@ import { canonicalJSON, deriveKey } from "./json.ts";
 
 export const HANDOVER_KEY_INFO = "handover/server-to-worker/v1";
 export const REPORT_KEY_INFO = "handover/worker-to-server/v1";
+export const SSH_SIGN_REQUEST_KEY_INFO = "ssh-sign/worker-to-server/v1";
+export const SSH_SIGN_ANSWER_KEY_INFO = "ssh-sign/server-to-worker/v1";
 export const HANDOVER_CIPHER = "aes-256-gcm";
 export const HANDOVER_NONCE_BYTES = 12;
 export const HANDOVER_TAG_BYTES = 16;
@@ -34,6 +36,17 @@ export function deriveHandoverKeys(clientSecret: string): {
   assert.equal(handover.length, KEY_BYTES);
   assert.equal(report.length, KEY_BYTES);
   return { handover, report };
+}
+
+export function deriveSshSignKeys(clientSecret: string): {
+  request: Buffer;
+  answer: Buffer;
+} {
+  const request = deriveKey(clientSecret, SSH_SIGN_REQUEST_KEY_INFO);
+  const answer = deriveKey(clientSecret, SSH_SIGN_ANSWER_KEY_INFO);
+  assert.equal(request.length, KEY_BYTES);
+  assert.equal(answer.length, KEY_BYTES);
+  return { request, answer };
 }
 
 function lengthPrefixed(value: string): Buffer {

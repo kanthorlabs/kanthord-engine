@@ -296,6 +296,12 @@ export type SshIdentityFacts = {
   binding_id: string | null;
   address: string;
 };
+export type SshSignatureOf = (
+  tx: Transaction,
+  granted: GrantFacts<GrantOf<typeof GrantKind.SshIdentity>>,
+  material: Material,
+  data: Buffer,
+) => Buffer;
 export type SshAccessOf = (
   tx: Transaction,
   granted: GrantFacts<GrantOf<typeof GrantKind.SshIdentity>>,
@@ -507,6 +513,22 @@ export type HandoverPlacement =
 export const HolderRefusal = { ServerHeld: "server_held" } as const;
 export type HolderRefusal = (typeof HolderRefusal)[keyof typeof HolderRefusal];
 export type HandoverSshIdentity = HandoverPayload["ssh_identities"][number];
+export const SSH_SIGN_FLAGS_MAX = 0xffffffff;
+export const SSH_SIGN_DATA_BYTES_MAX = 8192;
+const base64Schema = z.base64().min(1);
+export const sshSignRequestSchema = z.strictObject({
+  binding_id: identitySchema("binding"),
+  data: base64Schema.refine(
+    (text) => Buffer.from(text, "base64").length <= SSH_SIGN_DATA_BYTES_MAX,
+  ),
+  flags: z.number().int().min(0).max(SSH_SIGN_FLAGS_MAX),
+});
+export type SshSignRequest = z.infer<typeof sshSignRequestSchema>;
+export const sshSignAnswerSchema = z.strictObject({ signature: base64Schema });
+export type SshSignAnswer = z.infer<typeof sshSignAnswerSchema>;
+export const sshPublicKeyMetadataSchema = z.object({
+  public_key: z.string().min(1),
+});
 export const secretSchemas: Readonly<Record<SecretShape, z.ZodType>> = {
   [SecretShape.ApiKey]: apiKeySecretSchema,
   [SecretShape.OAuth]: oauthSecretSchema,

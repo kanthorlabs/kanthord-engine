@@ -30,6 +30,7 @@ export async function executionSetup(
     | "repositoryBindingIdsOf"
     | "intentOf"
     | "repositoryPolicyOf"
+    | "custodyHandover"
   > & { schedulerClaims: Pick<SchedulerClaims, "agentSelectionsOf"> },
   worker: Pick<WorkerService, "declarationOf" | "pinnedAgentView">,
   caller: CallerContext,
@@ -145,6 +146,12 @@ export async function executionSetup(
               repository.address,
             ),
           },
+          ssh_public_key: dependencies.custodyHandover.sshPublicKeyOf(
+            tx,
+            claim,
+            repository.ssh_credential,
+            now,
+          ),
           strategy: { base_branch: repository.base_branch },
           project_prompt: repository.project_prompt,
           working_layer: repository.working_layer,
