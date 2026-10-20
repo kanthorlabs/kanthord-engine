@@ -19,6 +19,7 @@ const FOREIGN_HOST = "kanthord:31415";
 const HOST_NOT_ALLOWED = "gateway.http.host_not_allowed";
 const INSTANCE_NAME = "laptop";
 const NO_STORE = "no-store";
+const BASE_PATH = "/kanthord";
 
 function read(id: string, path: string, access: AccessPolicy) {
   return {
@@ -45,7 +46,10 @@ const routes = {
   mixed: read("test.mixed", "/api/test/mixed", AccessPolicy.HumanOrWorker),
 };
 
-async function hostFixture(t: Parameters<typeof gatewayFixture>[0]) {
+async function hostFixture(
+  t: Parameters<typeof gatewayFixture>[0],
+  basePath?: string,
+) {
   const registry = new OperationRegistry();
   for (const operation of Object.values(routes))
     registry.register(operation, () => ({ ok: true }));
@@ -60,7 +64,7 @@ async function hostFixture(t: Parameters<typeof gatewayFixture>[0]) {
       holdConnection: () => true,
     },
   };
-  const fixture = await gatewayFixture(t, { registry, lookups });
+  const fixture = await gatewayFixture(t, { registry, lookups, basePath });
   const workerToken = (
     await generateWorkerJWT(
       fixture.config.master_key,
@@ -87,6 +91,15 @@ test("a public, client or worker route skips the host check", async (t) => {
   assert.equal(await hostRefused(await request(routes.client.path)), false);
   const worker = await request(routes.worker.path, workerToken);
   assert.equal(worker.status, HttpStatus.OK);
+});
+
+test("under a base path a prefixed public route skips the host check and an unprefixed path keeps it", async (t) => {
+  const { request, hostRefused } = await hostFixture(t, BASE_PATH);
+  assert.equal(
+    (await request(`${BASE_PATH}/api/liveness`)).status,
+    HttpStatus.OK,
+  );
+  assert.ok(await hostRefused(await request("/api/liveness")));
 });
 
 test("a human route and a request that matches no route keep the host check", async (t) => {
