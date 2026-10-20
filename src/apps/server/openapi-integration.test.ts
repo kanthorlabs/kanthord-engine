@@ -1,4 +1,5 @@
 import { trackingOperations } from "../../tracking/contract.ts";
+import { z } from "zod";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { ulid } from "ulid";
@@ -44,6 +45,7 @@ import {
   hasHttpRoute,
   OperationRegistry,
   OperationResultType,
+  type Operation,
 } from "../../kernel/operation.ts";
 import { testMachineIdentity } from "../../kernel/test-identity.ts";
 import { directClient } from "../../gateway/index.ts";
@@ -1968,4 +1970,24 @@ test("delivery admission has no HTTP route and no OpenAPI operation", async (t) 
   });
   assert.equal(response.status, HttpStatus.NotFound);
   await response.body?.cancel();
+});
+
+test("every routed operation with a JSON body input declares body and every other one does not", () => {
+  const routed: Operation[] = apiOperations.filter(hasHttpRoute);
+  const kinds = routed.map((operation) => {
+    assert.ok(operation.input instanceof z.ZodObject, operation.id);
+    const body = operation.input.shape.body;
+    assert.ok(body, operation.id);
+    return {
+      id: operation.id,
+      json: !(body instanceof z.ZodNull),
+      declared: operation.body === true,
+    };
+  });
+  assert.deepEqual(
+    kinds.filter(({ json, declared }) => json !== declared),
+    [],
+  );
+  assert.ok(kinds.some(({ json }) => json));
+  assert.ok(kinds.some(({ json }) => !json));
 });
