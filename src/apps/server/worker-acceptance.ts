@@ -126,6 +126,7 @@ export async function workerAcceptance(
         kind: "worker",
         config: {
           worker: "coder@1",
+          placement: "worker",
           instance_count: 1,
           entries: [{ agent: "swe@1", ...WORKER_DEFAULTS }],
         },

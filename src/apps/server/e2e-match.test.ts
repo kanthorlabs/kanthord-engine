@@ -67,7 +67,7 @@ type Violation = {
 function worker(name: string, tags: string[]) {
   return {
     kind: "worker",
-    config: { worker: name, instance_count: 1, tags },
+    config: { worker: name, placement: "worker", instance_count: 1, tags },
   };
 }
 

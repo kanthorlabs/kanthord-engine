@@ -80,7 +80,6 @@ import {
   RESOURCE_TARGET_KIND_REPOSITORY,
   STORAGE_PLATFORM,
   WorkerField,
-  WorkerPlacement,
   bindingEditSchema,
   bindingSchema,
   bindingSetWriteInputSchema,
@@ -309,7 +308,7 @@ function workerRowOf(
     revision: row.revision,
     worker_name: config.worker,
     instance_count: config.instance_count,
-    placement: config.placement ?? WorkerPlacement.Worker,
+    placement: config.placement ?? null,
     generation:
       readGeneration(tx, row.project_id, row.resource_identity) ??
       NO_GENERATION,
@@ -1121,6 +1120,13 @@ export class ProjectService implements Service, ProjectBindings {
       }
       return;
     }
+    if (config.placement === undefined)
+      throw new OperationError(
+        HttpStatus.BadRequest,
+        ProjectErrorCode.WorkerPlacementRequired,
+        "A hosted worker binding states its placement.",
+        { binding: name },
+      );
     const entries = new Map(
       (config.entries ?? []).map(({ agent, ...entry }) => [agent, entry]),
     );

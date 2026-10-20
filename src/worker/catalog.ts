@@ -68,6 +68,10 @@ export function getWorkerDeclaration(
   return WORKER_CATALOG[workerName];
 }
 
+export function isHostedWorker(workerName: string): boolean {
+  return getWorkerDeclaration(workerName)?.host === WorkerHost.Kanthord;
+}
+
 export function agentsOfWorker(workerName: string): string[] {
   const declaration = getWorkerDeclaration(workerName);
   if (declaration?.host !== WorkerHost.Kanthord || !declaration.agent_names)

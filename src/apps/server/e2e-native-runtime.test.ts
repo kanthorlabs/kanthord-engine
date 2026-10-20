@@ -168,6 +168,7 @@ test(
     ]);
     const worker = {
       worker: "coder@1",
+      placement: "worker",
       instance_count: SINGLE_INSTANCE,
       entries: [{ agent: "swe@1", ...DEFAULTS }],
     };

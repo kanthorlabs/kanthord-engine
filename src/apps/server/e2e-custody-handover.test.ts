@@ -217,6 +217,7 @@ async function resources(c: ReturnType<typeof cli>) {
         kind: "worker",
         config: {
           worker: "coder@1",
+          placement: "worker",
           instance_count: SINGLE_INSTANCE,
           entries: [{ agent: "swe@1", ...CONFIGURATION }],
         },

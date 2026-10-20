@@ -216,6 +216,7 @@ async function setup(t: TestContext, adapter: Adapter, path?: string) {
             kind: "worker",
             config: {
               worker: "coder@1",
+              placement: "worker",
               instance_count: 2,
               entries: [{ agent: "swe@1", ...CONFIGURATION }],
             },
@@ -224,6 +225,7 @@ async function setup(t: TestContext, adapter: Adapter, path?: string) {
             kind: "worker",
             config: {
               worker: "reviewer@1",
+              placement: "worker",
               instance_count: 1,
               entries: [{ agent: "re@1", ...CONFIGURATION }],
             },
