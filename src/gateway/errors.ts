@@ -34,6 +34,36 @@ export const unauthorized = () =>
     "gateway.authentication.unauthorized",
     "Authentication required.",
   );
+export const JwtCause = {
+  UnknownClaim: "unknown_claim",
+  MissingClaim: "missing_claim",
+  ForbiddenClaim: "forbidden_claim",
+  InvalidType: "invalid_type",
+  Expired: "expired",
+  NotYetIssued: "not_yet_issued",
+  InstanceEnded: "instance_ended",
+  InstanceRequired: "instance_required",
+  ConnectionSuperseded: "connection_superseded",
+  InstanceNotListed: "instance_not_listed",
+} as const;
+export type JwtCause = (typeof JwtCause)[keyof typeof JwtCause];
+const JWT_MESSAGES: Record<JwtCause, string> = {
+  [JwtCause.UnknownClaim]: "The token holds an unknown claim.",
+  [JwtCause.MissingClaim]: "The token lacks a required claim.",
+  [JwtCause.ForbiddenClaim]: "The token holds a claim that its kind forbids.",
+  [JwtCause.InvalidType]: "A claim of the token has an invalid value.",
+  [JwtCause.Expired]: "The token expired.",
+  [JwtCause.NotYetIssued]: "The token is issued after the verification time.",
+  [JwtCause.InstanceEnded]: "The worker instance revision ended.",
+  [JwtCause.InstanceRequired]:
+    "A binding at the worker placement requires instance_id and connection_id.",
+  [JwtCause.ConnectionSuperseded]:
+    "Another connection of the worker instance is current.",
+  [JwtCause.InstanceNotListed]:
+    "The binding does not list the worker instance.",
+};
+export const jwtRefused = (cause: JwtCause) =>
+  new GatewayError(401, `gateway.jwt.${cause}`, JWT_MESSAGES[cause]);
 export const conflict = () =>
   new GatewayError(
     409,

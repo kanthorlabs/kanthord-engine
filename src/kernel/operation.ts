@@ -8,6 +8,8 @@ import type { HttpMethod } from "./http.ts";
 export const AccessPolicy = {
   Human: "human",
   Client: "client",
+  Worker: "worker",
+  HumanOrWorker: "human_or_worker",
   Public: "public",
   Delivery: "delivery",
   Service: "service",

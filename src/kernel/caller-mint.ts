@@ -4,10 +4,12 @@ import {
   callerProvenance,
   IdentityKind,
   CLIENT_IDENTITY_PREFIX,
+  WORKER_INSTANCE_PREFIX,
   MAX_HUMAN_USERNAME_LENGTH,
   MAX_DISPLAY_NAME_LENGTH,
   type HumanIdentity,
   type MachineIdentity,
+  type WorkerIdentity,
 } from "./caller.ts";
 const clientIdentitySchema = identitySchema(CLIENT_IDENTITY_PREFIX);
 export function mintHumanIdentity(
@@ -27,6 +29,25 @@ export function mintHumanIdentity(
   return value;
 }
 
+export function mintWorkerIdentity(
+  instanceId: string,
+  name: string,
+  jti: string,
+): WorkerIdentity {
+  assert.ok(
+    identitySchema(WORKER_INSTANCE_PREFIX).safeParse(instanceId).success,
+  );
+  assert.ok(name.trim() && name.length <= MAX_DISPLAY_NAME_LENGTH);
+  const value = Object.freeze({
+    kind: IdentityKind.Worker,
+    instanceId,
+    name,
+    jti,
+  });
+  callerProvenance.worker(value);
+  return value;
+}
+
 export function mintMachineIdentity(
   client: Omit<MachineIdentity, "kind" | "jti" | "runtimeIdentity">,
   jti: string,
@@ -43,6 +64,12 @@ export function mintMachineIdentity(
     resourceIdentity: client.resourceIdentity,
     issuedAt: client.issuedAt,
     projectId: client.projectId,
+    ...(client.instanceId === undefined
+      ? {}
+      : { instanceId: client.instanceId }),
+    ...(client.connectionId === undefined
+      ? {}
+      : { connectionId: client.connectionId }),
     ...(runtimeIdentity === undefined ? {} : { runtimeIdentity }),
     jti,
   });

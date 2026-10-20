@@ -79,8 +79,12 @@ const productionImportPatterns = [
 ];
 const slotTokenPattern = {
   group: ["**/auth/jwt.ts"],
-  importNames: ["generateSlotJWT"],
-  message: "Only src/apps/server/ mints a slot token.",
+  importNames: [
+    "generateSlotJWT",
+    "generateWorkerJWT",
+    "generateInstanceClientJWT",
+  ],
+  message: "Only src/apps/server/ mints a slot token or an instance token.",
 };
 
 const comparisonLiteral =

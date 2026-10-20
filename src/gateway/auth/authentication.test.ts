@@ -6,6 +6,7 @@ import { background } from "../../kernel/context.ts";
 import { deriveKey } from "../../kernel/json.ts";
 import { identitySchema } from "../../kernel/identity.ts";
 import { HttpStatus } from "../../kernel/http.ts";
+import { OperationError } from "../../kernel/errors.ts";
 import {
   fakeLookups,
   authenticationFixture,
@@ -29,6 +30,10 @@ const NO_REGISTRATIONS = 0;
 const HUMAN_NAME = " Ulrich ";
 const MACHINE_NAME = "Worker display";
 const HUMAN_USERNAME = " ulrich ";
+const refusedWith401 = (error: unknown) =>
+  error instanceof OperationError &&
+  error.status === HttpStatus.Unauthorized &&
+  /^gateway\.(jwt\.|authentication\.unauthorized$)/.test(error.code);
 
 async function tokenKey(masterKey: string) {
   return crypto.subtle.importKey(
@@ -144,17 +149,17 @@ test("both token kinds reject invalid names, timestamps, session identifiers, si
       const invalid = await sign({ ...claims, ...changes }, key, "HS256");
       await assert.rejects(
         fixture.authentication.authenticate(`Bearer ${invalid}`),
-        /Authentication required/,
+        refusedWith401,
       );
     }
     const wrongAlgorithm = await sign(claims, "test-algorithm-key", "HS512");
     await assert.rejects(
       fixture.authentication.authenticate(`Bearer ${wrongAlgorithm}`),
-      /Authentication required/,
+      refusedWith401,
     );
     await assert.rejects(
       fixture.authentication.authenticate(`Bearer ${token.slice(0, -3)}AAA`),
-      /Authentication required/,
+      refusedWith401,
     );
     for (const authorization of [
       undefined,
@@ -164,7 +169,7 @@ test("both token kinds reject invalid names, timestamps, session identifiers, si
     ])
       await assert.rejects(
         fixture.authentication.authenticate(authorization),
-        /Authentication required/,
+        refusedWith401,
       );
   }
   assert.equal(machines.worker.registrations.size, NO_REGISTRATIONS);
@@ -213,7 +218,7 @@ test("human and machine claims enforce distinct subjects and binding rules", asy
       const token = await sign({ ...base, ...changes }, key, "HS256");
       await assert.rejects(
         fixture.authentication.authenticate(`Bearer ${token}`),
-        /Authentication required/,
+        refusedWith401,
       );
     }
     const token = await sign(
