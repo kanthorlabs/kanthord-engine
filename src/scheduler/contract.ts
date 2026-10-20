@@ -307,6 +307,7 @@ export interface Registrations {
     runtimeIdentity: string,
   ): { client_id: string; name: string } | null;
   registrationHealthcheck(tx: Transaction, runtimeIdentity: string): boolean;
+  registrationsOfInstance(tx: Transaction, runtimeIdentity: string): string[];
 }
 export interface ProjectPauses {
   projectPaused(tx: Transaction, projectId: string): boolean;

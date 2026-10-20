@@ -15,6 +15,7 @@ import {
 import type { Dependencies } from "./service.ts";
 import {
   countRunningOfGroup,
+  countRunningOfRuntimes,
   insertExecution,
   readUnendedOfRuntime,
 } from "./execution-store.ts";
@@ -179,6 +180,17 @@ export function claimOnce(
       identity.resourceIdentity,
       now,
     ) >= binding.instance_count
+  )
+    return { outcome: ClaimOutcome.None, row: null, settled };
+  if (
+    countRunningOfRuntimes(
+      tx,
+      dependencies.registrations.registrationsOfInstance(
+        tx,
+        pull.runtime_identity,
+      ),
+      now,
+    ) > NO_INSTANCES
   )
     return { outcome: ClaimOutcome.None, row: null, settled };
   const choice = dependencies.agentChains.select(tx, binding.binding_id);

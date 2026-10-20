@@ -88,6 +88,7 @@ export function schedulerHarness(
         record("registrationHealthcheck", args);
         return true;
       },
+      registrationsOfInstance: () => [],
     },
     agentChains: {
       select: () => ({

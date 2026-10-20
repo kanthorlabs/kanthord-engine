@@ -149,6 +149,23 @@ export function countRunningOfGroup(
     .get(projectId, resourceIdentity, now)!;
   return Number(row.count);
 }
+export function countRunningOfRuntimes(
+  tx: Transaction,
+  runtimeIdentities: readonly string[],
+  now: number,
+): number {
+  let count = NO_ROWS;
+  for (const runtimeIdentity of runtimeIdentities) {
+    assert.ok(runtimeIdentity.length > NO_ROWS);
+    const row = tx.database
+      .prepare(
+        "SELECT count(*) AS count FROM scheduler_execution WHERE runtime_identity = ? AND ended_at IS NULL AND expired_at > ?",
+      )
+      .get(runtimeIdentity, now)!;
+    count += Number(row.count);
+  }
+  return count;
+}
 export function endExecution(
   tx: Transaction,
   executionId: string,
