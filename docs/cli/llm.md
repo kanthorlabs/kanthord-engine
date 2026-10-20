@@ -63,21 +63,21 @@ Each synopsis follows `kanthord llm credential`. All thirteen commands have `[R]
 `human` access; seven mutations have `[M]`, and one list has `[L]`.
 All paths below are implemented routes under the ruled `/api/llm/credential` prefix.
 
-| #   | Synopsis after `kanthord llm credential`                                     | HTTP route                                                            | Operation ID                     | Access/status        |
-| --- | ---------------------------------------------------------------------------- | --------------------------------------------------------------------- | -------------------------------- | -------------------- |
-| 1   | `create --file <path> [M] [R]`                                               | `POST /api/llm/credential`                                            | `llm.credential.create`          | `human`; implemented |
-| 2   | `list [--platform <platform>] [L] [R]`                                       | `GET /api/llm/credential`                                             | `llm.credential.list`            | `human`; implemented |
-| 3   | `get <credential-name> [R]`                                                  | `GET /api/llm/credential/:credential_name`                            | `llm.credential.get`             | `human`; implemented |
-| 4   | `rotate <credential-name> --file <path> [M] [R]`                             | `POST /api/llm/credential/:credential_name/revision`                  | `llm.credential.rotate`          | `human`; implemented |
-| 5   | `update-metadata <credential-name> --file <path> [M] [R]`                    | `PUT /api/llm/credential/:credential_name/metadata`                   | `llm.credential.update_metadata` | `human`; implemented |
-| 6   | `login <platform> [--mode browser\|device\|copy_code] --name <name> [M] [R]` | `POST /api/llm/credential/login`                                      | `llm.credential.login`           | `human`; implemented |
-| 7   | `login-code <session> <value> [M] [R]`                                       | `POST /api/llm/credential/login/:session_id/code`                     | `llm.credential.login_code`      | `human`; implemented |
-| 8   | `login-status <session> [R]`                                                 | `GET /api/llm/credential/login/:session_id`                           | `llm.credential.login_status`    | `human`; implemented |
-| 9   | `revoke <credential-name> <revision> [M] [R]`                                | `POST /api/llm/credential/:credential_name/revision/:revision/revoke` | `llm.credential.revoke`          | `human`; implemented |
-| 10  | `archive <credential-name> [M] [R]`                                          | `POST /api/llm/credential/:credential_name/archive`                   | `llm.credential.archive`         | `human`; implemented |
-| 11  | `platforms [R]`                                                              | `GET /api/llm/credential/platform`                                    | `llm.credential.platform_list`   | `human`; implemented |
-| 12  | `check --file <path> [R]`                                                    | `POST /api/llm/credential/check`                                      | `llm.credential.check`           | `human`; implemented |
-| 13  | `verify <credential-name> [R]`                                               | `POST /api/llm/credential/:credential_name/verify`                    | `llm.credential.verify`          | `human`; implemented |
+| #   | Synopsis after `kanthord llm credential`                                     | HTTP route                                                            | Operation ID                     | Access/status                  |
+| --- | ---------------------------------------------------------------------------- | --------------------------------------------------------------------- | -------------------------------- | ------------------------------ |
+| 1   | `create --file <path> [--holder <name>] [M] [R]`                             | `POST /api/llm/credential`                                            | `llm.credential.create`          | `human_or_worker`; implemented |
+| 2   | `list [--platform <platform>] [--holder <name>] [L] [R]`                     | `GET /api/llm/credential`                                             | `llm.credential.list`            | `human_or_worker`; implemented |
+| 3   | `get <credential-name> [--holder <name>] [R]`                                | `GET /api/llm/credential/:credential_name`                            | `llm.credential.get`             | `human_or_worker`; implemented |
+| 4   | `rotate <credential-name> --file <path> [--holder <name>] [M] [R]`           | `POST /api/llm/credential/:credential_name/revision`                  | `llm.credential.rotate`          | `human_or_worker`; implemented |
+| 5   | `update-metadata <credential-name> --file <path> [--holder <name>] [M] [R]`  | `PUT /api/llm/credential/:credential_name/metadata`                   | `llm.credential.update_metadata` | `human`; implemented           |
+| 6   | `login <platform> [--mode browser\|device\|copy_code] --name <name> [M] [R]` | `POST /api/llm/credential/login`                                      | `llm.credential.login`           | `human`; implemented           |
+| 7   | `login-code <session> <value> [M] [R]`                                       | `POST /api/llm/credential/login/:session_id/code`                     | `llm.credential.login_code`      | `human`; implemented           |
+| 8   | `login-status <session> [R]`                                                 | `GET /api/llm/credential/login/:session_id`                           | `llm.credential.login_status`    | `human`; implemented           |
+| 9   | `revoke <credential-name> <revision> [--holder <name>] [M] [R]`              | `POST /api/llm/credential/:credential_name/revision/:revision/revoke` | `llm.credential.revoke`          | `human`; implemented           |
+| 10  | `archive <credential-name> [--holder <name>] [M] [R]`                        | `POST /api/llm/credential/:credential_name/archive`                   | `llm.credential.archive`         | `human`; implemented           |
+| 11  | `platforms [R]`                                                              | `GET /api/llm/credential/platform`                                    | `llm.credential.platform_list`   | `human`; implemented           |
+| 12  | `check --file <path> [R]`                                                    | `POST /api/llm/credential/check`                                      | `llm.credential.check`           | `human`; implemented           |
+| 13  | `verify <credential-name> [R]`                                               | `POST /api/llm/credential/:credential_name/verify`                    | `llm.credential.verify`          | `human`; implemented           |
 
 The static `/api/llm/credential/login`, `/api/llm/credential/platform` and `/api/llm/credential/check` paths take precedence over `/:credential_name`, so custody refuses the names `login`, `platform` and `check`. Custody also reserves `ssh`.
 These routes have no project identity.
@@ -101,7 +101,8 @@ A `create` with a platform of another component answers `400 credential.platform
 
 ## Record and platform schemas
 
-A credential answer holds `name: CredentialName`, `platform` and `revisions`, an array of revision answers, newest first.
+A credential answer holds `name: CredentialName`, `platform`, `holder`, `sealed_to`, `sealed_current` and `revisions`, an array of revision answers, newest first.
+`holder` is `server` or the name of the worker instance that holds the copy. `sealed_to` is the instance fingerprint that the copy is sealed to, and null for `server`. `sealed_current` is true when `sealed_to` is the current fingerprint of the holder, and always true for `server`.
 A revision answer holds `id: CredentialId`, `revision: Revision`, `metadata`, `created_at: Timestamp`
 and `ended_at: Timestamp | null`. No answer holds `secret`.
 `platform` is the closed enum of the [platform validators](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/llm.impl.md#platform-validators): `openai-compatible`, `anthropic-subscription` and every `KnownProvider` of pi-ai 1.1.0. [`platforms`](#platforms) answers the set.
@@ -165,6 +166,20 @@ Custody validates the local schema and makes no remote call. HTTP
 creation. A taken name answers `409 credential.name.conflict`, with the identity
 of its newest revision in `error.details`, including a retry after restart. The CLI prints
 the code, the HTTP status and the `details` line with that identity. It never prints the submitted secret.
+
+## Instance copies
+
+A credential name holds one copy for each holder: `server` or a [worker instance](worker.md). Every copy of a name holds the same platform. A create of an existing name with another platform answers `409 credential.name.platform_conflict`.
+The server never opens an instance copy. It stores the copy as a sealed object to the X25519 key of the instance, and only the worker unit of that instance opens it.
+
+`--holder <name>` on `create` and `rotate` selects the copy:
+
+- With the instance file `$XDG_CONFIG_HOME/kanthord/workers/<name>.yaml` on this host, the CLI seals locally. It exchanges the instance key for a worker token at the endpoint of the instance file, derives the public key from the private key of the file, and trusts no key that the server supplies. It sends `{ holder, sealed, sealed_to }` in place of `secret` under the worker token. The secret must be an `api_key` object within 32,768 bytes, else the CLI stops with `cli.llm.credential.secret_invalid` before any request. `rotate` first reads the platform of the copy under the worker token.
+- Without that file, the CLI sends the plaintext secret under the human token: `create` adds `holders: [<name>]` to the body, and `rotate` adds the query `holder`. The server seals the copy to the current key of the instance.
+
+`--holder <name>` on `list`, `get`, `update-metadata`, `revoke` and `archive` maps to the query `holder`. Without it, `get`, `update-metadata`, `revoke` and `archive` act on the copy of `server`, and `list` lists every copy.
+A worker token reads and writes only the copies of its own instance; another holder answers `403 llm.credential.instance_forbidden`.
+`verify`, `provider check` and `model check` read only the copy of `server`. A name with no such copy answers `409 credential.credential.held_by_instance`.
 
 ## `list`
 
@@ -467,6 +482,12 @@ Every remote command can also answer the shared codes of [other.md](other.md#err
 | 400   | `llm.model.model_unknown`                    | The model is not in the model list of the credential.                                           | model check                                                            |
 | 400   | `llm.model.reasoning_unsupported`            | The model does not support the reasoning effort.                                                | model check                                                            |
 | 409   | `credential.revision.revoked`                | A pinned use names a revoked revision.                                                          | worker handover, worker credential (API only)                          |
+| 409   | `credential.name.platform_conflict`          | Another copy of the name holds another platform. Details: `{ platform }`.                       | create, login                                                          |
+| 400   | `credential.sealed.invalid`                  | The sealed object fails its form or its budget, or `sealed_to` is not the current fingerprint.  | create, rotate                                                         |
+| 409   | `credential.credential.held_by_instance`     | The command needs the copy of `server`, and only an instance holds the name.                    | verify, provider check, model check                                    |
+| 400   | `llm.credential.instance_unknown`            | A holder names no live worker instance.                                                         | create, rotate                                                         |
+| 403   | `llm.credential.instance_forbidden`          | A worker token names a copy of another holder.                                                  | create, rotate, list, get                                              |
+| local | `cli.llm.credential.secret_invalid`          | The local seal takes no `api_key` secret within 32,768 bytes.                                   | create, rotate                                                         |
 
 Errors contain no secret. Dependency refusals list dependents in `error.details`.
 
