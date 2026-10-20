@@ -266,6 +266,8 @@ engine/
 │       │   ├── worker-pool.ts  # Pool host: driver-neutral cap, slot root, backoff, drain, resume and stop
 │       │   ├── slot-driver.ts  # Slot driver interface and its launch, instance and exit types
 │       │   ├── thread-driver.ts # The thread driver: one worker thread for each slot and its environment
+│       │   ├── container-runtime.ts # Container runtime check and the argv of each runtime command
+│       │   ├── container-driver.ts # The container driver: one container for each slot over its attached stdio
 │       │   ├── slot-identity.ts # Deterministic client identity of a pool slot
 │       │   └── index.ts        # Compose configuration, log, store, registry, and services
 │       ├── cli/                # Non-interactive commands and client configuration
@@ -348,6 +350,16 @@ pnpm run test:e2e:jwt
 
 The runner needs Python 3 with POSIX PTY support and creates disposable server
 state. See [JWT acceptance checks](docs/testing.md).
+
+Run the container driver against a live Podman or Docker runtime with an image
+of this checkout:
+
+```sh
+KANTHORD_TEST_CONTAINER_IMAGE=localhost/kanthord-dev pnpm run test:container
+```
+
+The image name has no tag. The test appends the package version. `make
+test-container` of the root repository builds the image and runs this test.
 
 Check changed Markdown separately:
 
