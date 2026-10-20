@@ -13,7 +13,7 @@ import {
 test("registration returns server facts with a fresh key and translates refusal and uncertainty", async (t) => {
   const api = httpTransport("http://127.0.0.1:1");
   const facts = {
-    runtimeIdentity: "worker_instance_01ARZ3NDEKTSV4RRFFQ69G5FAA",
+    runtimeIdentity: "worker_registration_01ARZ3NDEKTSV4RRFFQ69G5FAA",
     resourceIdentity: "worker:kanthord:test",
     workerName: "coder@1",
   };
@@ -38,7 +38,7 @@ test("registration returns server facts with a fresh key and translates refusal 
   await assert.rejects(register(api), {
     code: "worker.start.registration_indeterminate",
   });
-  const code = "worker.instance.slot_unavailable";
+  const code = "worker.registration.slot_unavailable";
   t.mock.method(api.worker, "register", async () => ({
     type: OperationResultType.Failure,
     status: 409,
@@ -55,9 +55,9 @@ test("registration returns server facts with a fresh key and translates refusal 
 
 test("deregistration accepts only success or owned not-found and never retries", async (t) => {
   const api = httpTransport("http://127.0.0.1:1");
-  const runtimeIdentity = "worker_instance_01ARZ3NDEKTSV4RRFFQ69G5FAA";
+  const runtimeIdentity = "worker_registration_01ARZ3NDEKTSV4RRFFQ69G5FAA";
   const cases = [
-    { status: 404, code: "worker.instance.not_found", expected: null },
+    { status: 404, code: "worker.registration.not_found", expected: null },
     {
       status: 500,
       code: "gateway.invocation.unknown",
@@ -65,14 +65,18 @@ test("deregistration accepts only success or owned not-found and never retries",
     },
   ];
   for (const entry of cases) {
-    const mock = t.mock.method(api.worker, "instance.deregister", async () => ({
-      type: OperationResultType.Failure,
-      status: entry.status,
-      error: {
-        request_id: "request_01ARZ3NDEKTSV4RRFFQ69G5FAA",
-        error: { code: entry.code, message: "test refusal", details: null },
-      },
-    }));
+    const mock = t.mock.method(
+      api.worker,
+      "registration.deregister",
+      async () => ({
+        type: OperationResultType.Failure,
+        status: entry.status,
+        error: {
+          request_id: "request_01ARZ3NDEKTSV4RRFFQ69G5FAA",
+          error: { code: entry.code, message: "test refusal", details: null },
+        },
+      }),
+    );
     assert.equal(
       (await deregister(api, runtimeIdentity))?.code ?? null,
       entry.expected,
@@ -81,7 +85,7 @@ test("deregistration accepts only success or owned not-found and never retries",
     assert.equal(mock.mock.callCount(), once);
     mock.mock.restore();
   }
-  t.mock.method(api.worker, "instance.deregister", async () => ({
+  t.mock.method(api.worker, "registration.deregister", async () => ({
     type: OperationResultType.Indeterminate,
   }));
   const expected = "worker.stop.deregistration_indeterminate";

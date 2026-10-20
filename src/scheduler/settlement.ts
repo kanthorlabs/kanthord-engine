@@ -9,7 +9,7 @@ import {
   ExecutionStopReason,
   type ExecutionRow,
   type MissionTransitions,
-  type InstanceRegistrations,
+  type Registrations,
   type WorkerBindings,
 } from "./contract.ts";
 import {
@@ -101,7 +101,7 @@ export function liveExecutionsPinning(
 export function executionAttribution(
   tx: Transaction,
   dependencies: {
-    registrations: InstanceRegistrations;
+    registrations: Registrations;
     bindings: WorkerBindings;
   },
   executionId: string,

@@ -30,7 +30,7 @@ import {
   REGISTRATION_CAPABILITY,
   REGISTRATION_TARGET_KIND,
   WorkerHost,
-  InstanceActivity,
+  RegistrationActivity,
   hostsPoolSlot,
   POOL_SLOT_COUNT,
   alwaysAvailable,
@@ -77,7 +77,10 @@ import {
 } from "./catalog.ts";
 import { resumeRegistration, TableRegistrations } from "./registrations.ts";
 import { Pool } from "./pool.ts";
-import { instanceRecord, listInstanceRecords } from "./instance-record.ts";
+import {
+  registrationRecord,
+  listRegistrationRecords,
+} from "./registration-record.ts";
 import type { ResolvedLayer } from "../agent/prompt-layers.ts";
 import type { PromptTemplates } from "../agent/contract.ts";
 import type { WorkerConfig } from "./config.ts";
@@ -91,7 +94,7 @@ import {
   endRegistration,
   endGroup,
   readRow,
-} from "./instances.ts";
+} from "./registration-rows.ts";
 
 const NO_ITEMS = 0;
 
@@ -365,7 +368,7 @@ export class WorkerService implements Service {
                 tx,
                 registration.runtime_identity,
                 now,
-              ).activity === InstanceActivity.Executing
+              ).activity === RegistrationActivity.Executing
             );
           },
           live: (clientId) =>
@@ -406,7 +409,7 @@ export class WorkerService implements Service {
     endGroup(tx, projectId, resourceIdentity, now);
   }
 
-  instanceHealthcheck(tx: Transaction, runtimeIdentity: string): boolean {
+  registrationHealthcheck(tx: Transaction, runtimeIdentity: string): boolean {
     assert.ok(tx.database.isTransaction);
     assert.equal(tx.database, this.dependencies.store.database);
     const registration = this.registrations.liveRegistrationOf(
@@ -626,15 +629,15 @@ export class WorkerService implements Service {
 
   private declareDeregister(registry: OperationRegistry): void {
     assert.equal(
-      workerOperations["instance.deregister"].access,
+      workerOperations["registration.deregister"].access,
       AccessPolicy.Client,
     );
     assert.equal(
-      workerOperations["instance.deregister"].requiresRegistration,
+      workerOperations["registration.deregister"].requiresRegistration,
       false,
     );
     registry.register(
-      workerOperations["instance.deregister"],
+      workerOperations["registration.deregister"],
       ({ params }, caller) => {
         const identity = caller.identity;
         assert.ok(isMachineIdentity(identity));
@@ -653,8 +656,8 @@ export class WorkerService implements Service {
           )
             throw new OperationError(
               HttpStatus.NotFound,
-              WorkerErrorCode.InstanceNotFound,
-              "Instance not found.",
+              WorkerErrorCode.RegistrationNotFound,
+              "Registration not found.",
             );
           this.registrations.deregister(tx, runtimeIdentity, now);
           return {
@@ -679,28 +682,45 @@ export class WorkerService implements Service {
     }));
   }
 
-  private declareInstanceReads(registry: OperationRegistry): void {
-    assert.equal(workerOperations["instance.list"].mutation, false);
-    assert.equal(workerOperations["instance.get"].access, AccessPolicy.Human);
-    registry.register(workerOperations["instance.list"], ({ query }, caller) =>
-      caller.commit((tx) =>
-        listInstanceRecords(tx, this.recordDependencies(), query, Date.now()),
-      ),
+  private declareRegistrationReads(registry: OperationRegistry): void {
+    assert.equal(workerOperations["registration.list"].mutation, false);
+    assert.equal(
+      workerOperations["registration.get"].access,
+      AccessPolicy.Human,
     );
-    registry.register(workerOperations["instance.get"], ({ params }, caller) =>
-      caller.commit((tx) => {
-        const row = this.registrations.liveRegistrationOf(
-          tx,
-          params.runtime_identity,
-        );
-        if (!row)
-          throw new OperationError(
-            HttpStatus.NotFound,
-            WorkerErrorCode.InstanceNotFound,
-            "Instance not found.",
+    registry.register(
+      workerOperations["registration.list"],
+      ({ query }, caller) =>
+        caller.commit((tx) =>
+          listRegistrationRecords(
+            tx,
+            this.recordDependencies(),
+            query,
+            Date.now(),
+          ),
+        ),
+    );
+    registry.register(
+      workerOperations["registration.get"],
+      ({ params }, caller) =>
+        caller.commit((tx) => {
+          const row = this.registrations.liveRegistrationOf(
+            tx,
+            params.runtime_identity,
           );
-        return instanceRecord(tx, this.recordDependencies(), row, Date.now());
-      }),
+          if (!row)
+            throw new OperationError(
+              HttpStatus.NotFound,
+              WorkerErrorCode.RegistrationNotFound,
+              "Registration not found.",
+            );
+          return registrationRecord(
+            tx,
+            this.recordDependencies(),
+            row,
+            Date.now(),
+          );
+        }),
     );
   }
 
@@ -782,10 +802,10 @@ export class WorkerService implements Service {
     );
     this.declareHandover(registry);
     this.declarePlacementRead(registry);
-    this.declareInstanceReads(registry);
+    this.declareRegistrationReads(registry);
     this.declareDeregister(registry);
     registry.register(
-      workerOperations["instance.resume"],
+      workerOperations["registration.resume"],
       ({ params }, caller) => {
         const { runtime_identity: runtimeIdentity } = params;
         let reopened = false;

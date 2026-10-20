@@ -192,11 +192,11 @@ engine/
 │   ├── worker/                 # Worker registrations, native executions, and configuration collaborations
 │   │   ├── contract.ts         # Worker operations, schemas, and collaboration types
 │   │   ├── index.ts            # Service, dependencies, configuration fragment, and migrations
-│   │   ├── migrations.ts       # Durable worker_instance rows
-│   │   ├── instances.ts        # Transaction-owned registration rows, retained attribution, and live reads
+│   │   ├── migrations.ts       # Durable worker_registration rows
+│   │   ├── registration-rows.ts # Transaction-owned registration rows, retained attribution, and live reads
 │   │   ├── registrations.ts    # Capacity admission, live-registration lookup, and client attribution
 │   │   ├── heartbeat.ts        # Monotonic readings, renewal, and expiry selection
-│   │   ├── instance-record.ts  # Live runtime projection, activity, placement, draining, filters, and pagination
+│   │   ├── registration-record.ts # Live runtime projection, activity, placement, draining, filters, and pagination
 │   │   ├── pool.ts             # Pool plan and pool state of the slots of a binding at the server placement
 │   │   ├── config.ts           # Heartbeat window configuration fragment
 │   │   ├── catalog.ts          # Static worker declarations
@@ -232,7 +232,7 @@ engine/
 │   │   │   ├── telemetry.ts        # Span recorder, span identities and the telemetry sink seam
 │   │   │   ├── agent-telemetry.ts  # pi session events as turn and tool spans
 │   │   │   └── method-telemetry.ts # Phase, task, verification, judgement and evaluation spans
-│   │   └── service.ts          # Registration lifecycle, instance healthchecks, report-only registration checks, and entry validation
+│   │   └── service.ts          # Registration lifecycle, registration healthchecks, report-only registration checks, and entry validation
 │   ├── workbench/              # Workbench Service: human-driven agent sessions
 │   │   ├── contract.ts         # Workbench operations, schemas, and error codes
 │   │   ├── index.ts            # Service, dependencies, and migrations
@@ -420,7 +420,7 @@ prints the `token` and `client_secret` fragment for this file. A `master_key`
 field fails with `cli.config.invalid`.
 It installs and checks the pinned pi tool binaries `rg` and `fd` into `pi/bin/` of the state directory
 before it resolves the client configuration. It then checks the server package version, opens the state-directory
-workspace root and registers its instance. It logs `Worker application ready`
+workspace root and creates its registration. It logs `Worker application ready`
 with `runtime_identity`, `resource_identity` and `worker_name`.
 It opens no database and reads no server configuration.
 `--config` is not supported. `kanthord serve` still starts the server.

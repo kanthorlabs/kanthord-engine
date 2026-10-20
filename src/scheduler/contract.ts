@@ -15,7 +15,7 @@ export const SCHEDULER_SERVICE_NAME = "scheduler";
 export const JOB_IDENTITY_PREFIX = "job";
 export const SCHEDULER_TIMEOUT_MS = 30000;
 export const EXECUTION_IDENTITY_PREFIX = "execution";
-export const WORKER_INSTANCE_IDENTITY_PREFIX = "worker_instance";
+export const WORKER_REGISTRATION_IDENTITY_PREFIX = "worker_registration";
 export const WORK_PULL_TIMEOUT_MS = 120000;
 export const WORK_PULL_WAIT_MS = 90000;
 export const LOSS_SWEEP_INTERVAL_MS = 30000;
@@ -151,7 +151,7 @@ export type AgentPin = z.infer<typeof agentPinSchema>;
 export const claimantSchema = z.strictObject({
   worker_binding_id: identitySchema("binding"),
   resource_identity: z.string().min(1),
-  runtime_identity: identitySchema(WORKER_INSTANCE_IDENTITY_PREFIX),
+  runtime_identity: identitySchema(WORKER_REGISTRATION_IDENTITY_PREFIX),
   client_id: identitySchema("client_identity").optional(),
   name: z
     .string()
@@ -181,7 +181,7 @@ export const executionRecordSchema = z.strictObject({
 export type ExecutionRecord = z.infer<typeof executionRecordSchema>;
 export const workPullSchema = z.strictObject({
   resource_identity: z.string().min(1),
-  runtime_identity: identitySchema(WORKER_INSTANCE_IDENTITY_PREFIX),
+  runtime_identity: identitySchema(WORKER_REGISTRATION_IDENTITY_PREFIX),
 });
 export type WorkPull = z.infer<typeof workPullSchema>;
 export const workPullResultSchema = z.discriminatedUnion("kind", [
@@ -301,12 +301,12 @@ export interface NodeAttemptKey {
 export interface MissionBranches {
   nodeBranchesOf(tx: Transaction, keys: readonly NodeAttemptKey[]): string[];
 }
-export interface InstanceRegistrations {
+export interface Registrations {
   clientAttributionOf(
     tx: Transaction,
     runtimeIdentity: string,
   ): { client_id: string; name: string } | null;
-  instanceHealthcheck(tx: Transaction, runtimeIdentity: string): boolean;
+  registrationHealthcheck(tx: Transaction, runtimeIdentity: string): boolean;
 }
 export interface ProjectPauses {
   projectPaused(tx: Transaction, projectId: string): boolean;

@@ -299,8 +299,8 @@ export function composeServices(options: {
     registrations: {
       clientAttributionOf: (tx, runtimeIdentity) =>
         worker.registrations.clientAttributionOf(tx, runtimeIdentity),
-      instanceHealthcheck: (tx, runtimeIdentity) =>
-        worker.instanceHealthcheck(tx, runtimeIdentity),
+      registrationHealthcheck: (tx, runtimeIdentity) =>
+        worker.registrationHealthcheck(tx, runtimeIdentity),
     },
     declarations: {
       declarationOf: (workerName) => worker.declarationOf(workerName),

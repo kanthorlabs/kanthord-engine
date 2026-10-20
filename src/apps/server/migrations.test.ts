@@ -47,8 +47,8 @@ const CREDENTIAL_TABLE = "credential";
 const CUSTODY_MASTER_KEY_TABLE = "custody_master_key";
 const AGENT_ENABLEMENT_TABLE = "agent_enablement";
 const AGENT_PROMPT_TABLE = "agent_prompt";
-const WORKER_INSTANCE_TABLE = "worker_instance";
-const ERD2_WORKER_TABLES = [WORKER_INSTANCE_TABLE];
+const WORKER_REGISTRATION_TABLE = "worker_registration";
+const ERD2_WORKER_TABLES = [WORKER_REGISTRATION_TABLE];
 const PROJECT_PROJECT_TABLE = "project_project";
 const PROJECT_BINDING_TABLE = "project_binding";
 const SCHEDULER_JOB_TABLE = "scheduler_job";
@@ -120,7 +120,7 @@ const ALL_TABLES = [
   REPOSITORY_HOST_KEY_TABLE,
   SCHEDULER_EXECUTION_TABLE,
   SCHEDULER_JOB_TABLE,
-  WORKER_INSTANCE_TABLE,
+  WORKER_REGISTRATION_TABLE,
 ];
 const ALL_INDEXES = [
   "agent_enablement_agent_name_revision",
@@ -142,7 +142,7 @@ const ALL_INDEXES = [
   "scheduler_execution_node_live",
   "scheduler_execution_runtime_live",
   "scheduler_job_node_id",
-  "worker_instance_live_client",
+  "worker_registration_live_client",
 ];
 
 test("each service holds at most one migration", () => {
@@ -544,7 +544,7 @@ function assertSchemaRules(store: Store, owners: ReadonlyMap<string, string>) {
       );
     }
     if (
-      table === WORKER_INSTANCE_TABLE ||
+      table === WORKER_REGISTRATION_TABLE ||
       table === SCHEDULER_EXECUTION_TABLE ||
       table === INTAKE_INBOUND_TABLE ||
       table === INTAKE_OUTBOUND_REQUEST_TABLE

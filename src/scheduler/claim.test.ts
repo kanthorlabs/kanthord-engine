@@ -166,9 +166,9 @@ test("health, tombstones, zero counts and occupied binding counts refuse admissi
   h.store.transaction((tx) =>
     h.service.insert(tx, h.row.node_id, h.row.project_id, 0),
   );
-  h.dependencies.registrations.instanceHealthcheck = () => false;
+  h.dependencies.registrations.registrationHealthcheck = () => false;
   assert.equal(h.claim().outcome, ClaimOutcome.Refused);
-  h.dependencies.registrations.instanceHealthcheck = () => true;
+  h.dependencies.registrations.registrationHealthcheck = () => true;
   h.binding.tombstone = true;
   assert.equal(h.claim().outcome, ClaimOutcome.None);
   h.binding.tombstone = false;
@@ -359,7 +359,7 @@ test("a paused project answers no work before the healthcheck, and keeps the job
     assert.equal(projectId, h.row.project_id);
     return paused;
   };
-  h.dependencies.registrations.instanceHealthcheck = () => false;
+  h.dependencies.registrations.registrationHealthcheck = () => false;
   const result = h.claim();
   assert.equal(result.outcome, ClaimOutcome.None);
   assert.equal(result.row, null);
@@ -369,7 +369,7 @@ test("a paused project answers no work before the healthcheck, and keeps the job
     h.calls.filter((call) => call.method === CLAIM_METHOD),
     [],
   );
-  h.dependencies.registrations.instanceHealthcheck = () => true;
+  h.dependencies.registrations.registrationHealthcheck = () => true;
   paused = false;
   assert.equal(h.claim().outcome, ClaimOutcome.Claimed);
 });
@@ -386,7 +386,7 @@ test("a paused project still answers the running execution of the runtime", (t) 
 test("a refused healthcheck still answers the running execution of the runtime", (t) => {
   const h = claimHarness(t);
   h.store.transaction((tx) => insertExecution(tx, h.row));
-  h.dependencies.registrations.instanceHealthcheck = () => false;
+  h.dependencies.registrations.registrationHealthcheck = () => false;
   const result = h.claim();
   assert.equal(result.outcome, ClaimOutcome.Running);
   assert.deepEqual(result.row, h.row);

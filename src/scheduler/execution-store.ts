@@ -13,7 +13,7 @@ import {
   type ReleaseStop,
   type ExecutionRow,
   type ExecutionRecord,
-  type InstanceRegistrations,
+  type Registrations,
   type MissionBranches,
 } from "./contract.ts";
 
@@ -23,7 +23,7 @@ const credentialList = z.array(identitySchema("credential"));
 const pinList = z.array(agentPinSchema);
 const storedStop = releaseStopSchema.nullable();
 interface RecordDependencies {
-  registrations: InstanceRegistrations;
+  registrations: Registrations;
   branches: MissionBranches;
   agentChains: Pick<AgentChains, "resolve">;
 }
@@ -265,7 +265,7 @@ export function executionRecords(
 }
 function recordOf(
   tx: Transaction,
-  registrations: InstanceRegistrations,
+  registrations: Registrations,
   row: ExecutionRow,
   nodeBranch: string,
   selections: AgentSelection[],

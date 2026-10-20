@@ -420,7 +420,7 @@ type ResolvedSchema = {
   not?: unknown;
 };
 
-function assertInstanceOutput(schema: ResolvedSchema): void {
+function assertRegistrationOutput(schema: ResolvedSchema): void {
   assert.ok(schema.allOf);
   const [base, host, registration, activity] = schema.allOf;
   assert.equal(base?.additionalProperties, false);
@@ -466,7 +466,7 @@ test("published Worker lists preserve optional limits, filter dependency and con
   const defaultLimit = 100;
   const minimum = 1;
   const maximum = 1000;
-  for (const path of ["/api/worker/catalog", "/api/worker/instance"]) {
+  for (const path of ["/api/worker/catalog", "/api/worker/registration"]) {
     const operation = api.paths?.[path]?.get as unknown as {
       parameters: {
         name: string;
@@ -499,7 +499,7 @@ test("published Worker lists preserve optional limits, filter dependency and con
   }
   const fragment = parse(
     readFileSync(
-      join(dirname(openapiPath()), "openapi/worker/instance.list.yaml"),
+      join(dirname(openapiPath()), "openapi/worker/registration.list.yaml"),
       "utf8",
     ),
   ) as {
@@ -519,7 +519,7 @@ test("published Worker lists preserve optional limits, filter dependency and con
     };
   };
   const query =
-    fragment.components.schemas["worker.instance.list.Input"]!.properties
+    fragment.components.schemas["worker.registration.list.Input"]!.properties
       .query!;
   assert.deepEqual(query.dependentRequired, {
     resource_identity: ["project_id"],
@@ -528,15 +528,15 @@ test("published Worker lists preserve optional limits, filter dependency and con
     query.properties.resource_identity!.description!,
     /Requires project_id/,
   );
-  const list = api.paths?.["/api/worker/instance"]?.get?.responses[
+  const list = api.paths?.["/api/worker/registration"]?.get?.responses[
     HttpStatus.OK
   ] as unknown as ResolvedJsonResponse;
-  const get = api.paths?.["/api/worker/instance/{runtime_identity}"]?.get
+  const get = api.paths?.["/api/worker/registration/{runtime_identity}"]?.get
     ?.responses[HttpStatus.OK] as unknown as ResolvedJsonResponse;
-  assertInstanceOutput(
+  assertRegistrationOutput(
     list.content["application/json"].schema.properties.items!.items!,
   );
-  assertInstanceOutput(get.content["application/json"].schema);
+  assertRegistrationOutput(get.content["application/json"].schema);
 });
 type ResolvedJsonResponse = {
   content: { "application/json": { schema: ResolvedSchema } };
@@ -628,14 +628,14 @@ const OPERATION_INVENTORY: readonly (readonly [string, AccessPolicy])[] = [
   ["worker.catalog.get", AccessPolicy.Human],
   ["agent.get", AccessPolicy.Human],
   ["worker.placement.list", AccessPolicy.Human],
-  ["worker.instance.list", AccessPolicy.Human],
-  ["worker.instance.get", AccessPolicy.Human],
-  ["worker.instance.resume", AccessPolicy.Human],
+  ["worker.registration.list", AccessPolicy.Human],
+  ["worker.registration.get", AccessPolicy.Human],
+  ["worker.registration.resume", AccessPolicy.Human],
   ["worker.register", AccessPolicy.Client],
   ["worker.heartbeat", AccessPolicy.Client],
   ["worker.handover", AccessPolicy.Client],
   ["worker.credential", AccessPolicy.Client],
-  ["worker.instance.deregister", AccessPolicy.Client],
+  ["worker.registration.deregister", AccessPolicy.Client],
   ["worker.action.request", AccessPolicy.Client],
   ["worker.execution.setup.get", AccessPolicy.Client],
   ["worker.execution.change_request.get", AccessPolicy.Client],
@@ -1156,23 +1156,23 @@ test("published OpenAPI validates, matches the registry exactly, and describes r
   assert.equal(healthcheck?.operationId, gatewayOperations.healthcheck.id);
   assert.equal(healthcheck?.["x-access-policy"], AccessPolicy.Human);
   assert.equal(
-    resolved.paths?.["/api/worker/instance"]?.get?.operationId,
-    workerOperations["instance.list"].id,
+    resolved.paths?.["/api/worker/registration"]?.get?.operationId,
+    workerOperations["registration.list"].id,
   );
   assert.equal(
-    resolved.paths?.["/api/worker/instance/{runtime_identity}"]?.get
+    resolved.paths?.["/api/worker/registration/{runtime_identity}"]?.get
       ?.operationId,
-    workerOperations["instance.get"].id,
+    workerOperations["registration.get"].id,
   );
   assert.equal(
-    resolved.paths?.["/api/worker/instance/{runtime_identity}/resume"]?.post
+    resolved.paths?.["/api/worker/registration/{runtime_identity}/resume"]?.post
       ?.operationId,
-    workerOperations["instance.resume"].id,
+    workerOperations["registration.resume"].id,
   );
   assert.equal(
-    resolved.paths?.["/api/worker/instance/{runtime_identity}"]?.delete
+    resolved.paths?.["/api/worker/registration/{runtime_identity}"]?.delete
       ?.operationId,
-    workerOperations["instance.deregister"].id,
+    workerOperations["registration.deregister"].id,
   );
   for (const operation of [
     workerOperations["catalog.list"],

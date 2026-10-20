@@ -11,7 +11,7 @@ import {
   WORKER_SERVICE_NAME,
   REGISTRATION_CAPABILITY,
   REGISTRATION_TARGET_KIND,
-  InstanceActivity,
+  RegistrationActivity,
   InstancePlacement,
   PlacementIssue,
   POOL_SLOT_COUNT,
@@ -64,7 +64,7 @@ import {
   readAllLive,
   readRow,
   reopenRegistration,
-} from "./instances.ts";
+} from "./registration-rows.ts";
 import { HEARTBEAT_SWEEP_INTERVAL_MS } from "./heartbeat.ts";
 import { FakePoolHost } from "./test-support.ts";
 
@@ -149,7 +149,10 @@ const fakeCollaborations = {
       throw new Error("UNEXPECTED_COLLABORATION");
     },
     runningExecutionOfRuntime: () => null,
-    activityOf: () => ({ activity: InstanceActivity.Idle, execution_id: null }),
+    activityOf: () => ({
+      activity: RegistrationActivity.Idle,
+      execution_id: null,
+    }),
   },
   agentConfiguration: {
     validateEntry: () => {
@@ -203,7 +206,7 @@ test("action handler forwards only the proved claim and caller before its commit
     attempt: 1,
     pinnedRevision: 1,
     nodeBranch: "kanthord/node_01ARZ3NDEKTSV4RRFFQ69G5FAA",
-    runtimeIdentity: createIdentity("worker_instance"),
+    runtimeIdentity: createIdentity("worker_registration"),
     workerBindingId: createIdentity("binding"),
   };
   const identity = testMachineIdentity(
@@ -460,7 +463,7 @@ test("deregistration owns its target, rolls back atomically and preserves a newe
   );
   const register = f.registry.get(workerOperations.register.id).handler;
   const deregister = f.registry.get(
-    workerOperations["instance.deregister"].id,
+    workerOperations["registration.deregister"].id,
   ).handler;
   const empty = { params: {}, query: {}, body: null };
   const first = workerOperations.register.output.parse(
@@ -493,7 +496,7 @@ test("deregistration owns its target, rolls back atomically and preserves a newe
     );
     refuses(
       () => deregister(input, f.caller),
-      WorkerErrorCode.InstanceNotFound,
+      WorkerErrorCode.RegistrationNotFound,
       HttpStatus.NotFound,
     );
   }
@@ -510,7 +513,7 @@ test("deregistration owns its target, rolls back atomically and preserves a newe
   assert.notEqual(next.runtime_identity, first.runtime_identity);
   for (const runtimeIdentity of [
     first.runtime_identity,
-    createIdentity("worker_instance"),
+    createIdentity("worker_registration"),
   ])
     refuses(
       () =>
@@ -518,7 +521,7 @@ test("deregistration owns its target, rolls back atomically and preserves a newe
           { ...empty, params: { runtime_identity: runtimeIdentity } },
           f.caller,
         ),
-      WorkerErrorCode.InstanceNotFound,
+      WorkerErrorCode.RegistrationNotFound,
       HttpStatus.NotFound,
     );
   assert.equal(
@@ -555,7 +558,7 @@ test("resume settles before admission, preserves live readings and reopens the s
   );
   f.worker.heartbeatClock.set(row.runtime_identity);
   const handler = f.registry.get(
-    workerOperations["instance.resume"].id,
+    workerOperations["registration.resume"].id,
   ).handler;
   const input = {
     params: { runtime_identity: row.runtime_identity },
@@ -568,7 +571,7 @@ test("resume settles before admission, preserves live readings and reopens the s
   f.caller.commit = (write) =>
     checkedCommit((tx) => {
       const result = write(tx);
-      workerOperations["instance.resume"].output.parse(result);
+      workerOperations["registration.resume"].output.parse(result);
       return result;
     });
   const age = f.worker.heartbeatClock.ageMs(row.runtime_identity);
@@ -640,7 +643,7 @@ test("resume refuses unknown identities, occupied clients, full slots, tombstone
     },
   });
   const handler = f.registry.get(
-    workerOperations["instance.resume"].id,
+    workerOperations["registration.resume"].id,
   ).handler;
   const row = f.store.transaction((tx) =>
     f.worker.registrations.register(tx, client, Date.now()),
@@ -655,11 +658,11 @@ test("resume refuses unknown identities, occupied clients, full slots, tombstone
       handler(
         {
           ...input,
-          params: { runtime_identity: createIdentity("worker_instance") },
+          params: { runtime_identity: createIdentity("worker_registration") },
         },
         f.caller,
       ),
-    WorkerErrorCode.InstanceNotFound,
+    WorkerErrorCode.RegistrationNotFound,
     HttpStatus.NotFound,
   );
   f.store.transaction((tx) =>
@@ -933,7 +936,7 @@ test("registration collaborations require an active transaction of their owning 
     (tx: Parameters<WorkerBindingOf>[0]) =>
       f.worker.registrations.clientAttributionOf(tx, UNKNOWN),
     (tx: Parameters<WorkerBindingOf>[0]) =>
-      f.worker.instanceHealthcheck(tx, UNKNOWN),
+      f.worker.registrationHealthcheck(tx, UNKNOWN),
     (tx: Parameters<WorkerBindingOf>[0]) => f.worker.registrationChecks(tx),
   ];
   const ended = f.store.transaction((tx) => tx);
@@ -946,7 +949,7 @@ test("registration collaborations require an active transaction of their owning 
   }
 });
 
-test("external instance health reads current binding availability without configuration or provider checks", (t) => {
+test("external registration health reads current binding availability without configuration or provider checks", (t) => {
   let binding: ReturnType<WorkerBindingOf> =
     fakeCollaborations.workerBindingOf();
   const f = enablementFixture(
@@ -964,9 +967,9 @@ test("external instance health reads current binding availability without config
         assert.fail("External health resolves no agent"),
       approvedModels: () => assert.fail("External health reads no credential"),
       providerHealthCheck: () =>
-        assert.fail("Instance health performs no provider check"),
+        assert.fail("Registration health performs no provider check"),
       providerCapability: () =>
-        assert.fail("Instance health reads no provider capability"),
+        assert.fail("Registration health reads no provider capability"),
     },
   );
   const row = f.store.transaction((tx) =>
@@ -974,7 +977,7 @@ test("external instance health reads current binding availability without config
   );
   const check = () =>
     f.store.transaction((tx) =>
-      f.worker.instanceHealthcheck(tx, row.runtime_identity),
+      f.worker.registrationHealthcheck(tx, row.runtime_identity),
     );
   assert.equal(check(), true);
   binding = null;
@@ -990,12 +993,12 @@ test("external instance health reads current binding availability without config
   );
   assert.equal(check(), false);
   assert.equal(
-    f.store.transaction((tx) => f.worker.instanceHealthcheck(tx, UNKNOWN)),
+    f.store.transaction((tx) => f.worker.registrationHealthcheck(tx, UNKNOWN)),
     false,
   );
 });
 
-test("native instance health resolves the latest agent entry and enablement in the caller snapshot", (t) => {
+test("native registration health resolves the latest agent entry and enablement in the caller snapshot", (t) => {
   let entries: NonNullable<ReturnType<WorkerBindingOf>>["entries"] = [];
   let failure: Error | null = null;
   const f = enablementFixture(
@@ -1013,9 +1016,9 @@ test("native instance health resolves the latest agent entry and enablement in t
         if (failure) throw failure;
       },
       providerHealthCheck: () =>
-        assert.fail("Instance health performs no provider check"),
+        assert.fail("Registration health performs no provider check"),
       providerCapability: () =>
-        assert.fail("Instance health reads no provider capability"),
+        assert.fail("Registration health reads no provider capability"),
     },
   );
   const row = f.store.transaction((tx) =>
@@ -1023,7 +1026,7 @@ test("native instance health resolves the latest agent entry and enablement in t
   );
   const check = () =>
     f.store.transaction((tx) =>
-      f.worker.instanceHealthcheck(tx, row.runtime_identity),
+      f.worker.registrationHealthcheck(tx, row.runtime_identity),
     );
   assert.equal(check(), false);
   f.invokeAgent("enablement.put", putBody);
@@ -1041,11 +1044,14 @@ test("native instance health resolves the latest agent entry and enablement in t
   failure = null;
   f.store.transaction((tx) => {
     endRegistration(tx, row.runtime_identity, Date.now());
-    assert.equal(f.worker.instanceHealthcheck(tx, row.runtime_identity), false);
+    assert.equal(
+      f.worker.registrationHealthcheck(tx, row.runtime_identity),
+      false,
+    );
   });
 });
 
-test("registration checks read heartbeat boundaries without renewing, ending or changing instance health", async (t) => {
+test("registration checks read heartbeat boundaries without renewing, ending or changing registration health", async (t) => {
   let now = 0;
   const windowMs = 1000;
   const beyond = 1;
@@ -1103,7 +1109,7 @@ test("registration checks read heartbeat boundaries without renewing, ending or 
     assert.equal(f.worker.heartbeatClock.ageMs(row.runtime_identity), age);
     f.store.transaction((tx) => {
       assert.equal(
-        f.worker.instanceHealthcheck(tx, row.runtime_identity),
+        f.worker.registrationHealthcheck(tx, row.runtime_identity),
         true,
       );
       assert.deepEqual(readRow(tx, row.runtime_identity), before.row);
@@ -1141,7 +1147,7 @@ test("registration liveness stays separate from native configuration and exclude
   t.after(() => f.worker.stop());
   assert.equal(
     f.store.transaction((tx) =>
-      f.worker.instanceHealthcheck(tx, row.runtime_identity),
+      f.worker.registrationHealthcheck(tx, row.runtime_identity),
     ),
     false,
   );
@@ -1150,7 +1156,7 @@ test("registration liveness stays separate from native configuration and exclude
   assert.equal(await item.check(background), ResourceStatus.Healthy);
   assert.equal(
     f.store.transaction((tx) =>
-      f.worker.instanceHealthcheck(tx, row.runtime_identity),
+      f.worker.registrationHealthcheck(tx, row.runtime_identity),
     ),
     false,
   );
@@ -1270,7 +1276,7 @@ test("handover handlers pass the proven execution and one transactional clock re
     attempt: 1,
     pinnedRevision: 1,
     nodeBranch: "kanthord/node_01ARZ3NDEKTSV4RRFFQ69G5FAA",
-    runtimeIdentity: createIdentity("worker_instance"),
+    runtimeIdentity: createIdentity("worker_registration"),
     workerBindingId: createIdentity("binding"),
   };
   const identity = testMachineIdentity(
@@ -1402,7 +1408,7 @@ test("catalog pages released declarations once per commit and registrations add 
   ]);
 });
 
-test("instance reads commit once, retain heartbeat age and refuse ended identities", (t) => {
+test("registration reads commit once, retain heartbeat age and refuse ended identities", (t) => {
   const f = enablementFixture(t, { monotonicNow: () => 100 });
   const row = f.store.transaction((tx) =>
     f.worker.registrations.register(
@@ -1419,10 +1425,10 @@ test("instance reads commit once, retain heartbeat age and refuse ended identiti
   const before = f.store.transaction(readAllLive);
   const age = f.worker.heartbeatClock.ageMs(row.runtime_identity);
   const commits = f.commits();
-  const record = f.invoke("instance.get", null, {
+  const record = f.invoke("registration.get", null, {
     runtime_identity: row.runtime_identity,
   });
-  const page = f.invoke("instance.list", null, {});
+  const page = f.invoke("registration.list", null, {});
   assert.deepEqual(page.items, [record]);
   const twoReads = 2;
   assert.equal(f.commits() - commits, twoReads);
@@ -1433,10 +1439,10 @@ test("instance reads commit once, retain heartbeat age and refuse ended identiti
   );
   refuses(
     () =>
-      f.invoke("instance.get", null, {
+      f.invoke("registration.get", null, {
         runtime_identity: row.runtime_identity,
       }),
-    WorkerErrorCode.InstanceNotFound,
+    WorkerErrorCode.RegistrationNotFound,
     HttpStatus.NotFound,
   );
 });
@@ -1582,7 +1588,7 @@ type CredentialRecord = {
 function authorizationFixture(t: TestContext) {
   const projectId = createIdentity("project");
   const resourceIdentity = "worker:kanthord:general";
-  const runtimeIdentity = createIdentity("worker_instance");
+  const runtimeIdentity = createIdentity("worker_registration");
   const execution = {
     execution_id: createIdentity("execution"),
     project_id: projectId,
@@ -1804,10 +1810,10 @@ function poolFixture(t: TestContext, initialCount: number) {
       activityOf: (_tx, runtimeIdentity) =>
         state.executing.has(runtimeIdentity)
           ? {
-              activity: InstanceActivity.Executing,
+              activity: RegistrationActivity.Executing,
               execution_id: POOL_EXECUTION,
             }
-          : { activity: InstanceActivity.Idle, execution_id: null },
+          : { activity: RegistrationActivity.Idle, execution_id: null },
     },
     pool: {
       host,
@@ -1969,7 +1975,7 @@ test("the start of the pool starts a slot above the target with a live registrat
   );
 });
 
-test("an instance record shows the placement and the drain flag of its slot", async (t) => {
+test("a registration record shows the placement and the drain flag of its slot", async (t) => {
   const f = poolFixture(t, 2);
   f.worker.startPool();
   f.register(f.slotId(0));
@@ -1977,7 +1983,7 @@ test("an instance record shows the placement and the drain flag of its slot", as
   f.state.count = 1;
   f.worker.bindingsChanged(POOL_PROJECT);
   await changesApplied();
-  const items = f.invoke("instance.list", null, {}).items;
+  const items = f.invoke("registration.list", null, {}).items;
   const byClient = new Map(items.map((item) => [item.client_id, item]));
   assert.equal(byClient.get(f.slotId(0))?.placement, InstancePlacement.Server);
   assert.equal(byClient.get(f.slotId(0))?.draining, false);
@@ -2003,7 +2009,7 @@ test("a draining slot gets no claim while its running execution stays answerable
   const draining = f.register(f.slotId(1)).runtime_identity;
   const healthy = (runtimeIdentity: string) =>
     f.store.transaction((tx) =>
-      f.worker.instanceHealthcheck(tx, runtimeIdentity),
+      f.worker.registrationHealthcheck(tx, runtimeIdentity),
     );
   assert.equal(healthy(active), true);
   assert.equal(healthy(draining), true);

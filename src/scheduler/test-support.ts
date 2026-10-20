@@ -33,7 +33,7 @@ export function executionFixture(
     node_id: createIdentity("node"),
     worker_binding_id: createIdentity("binding"),
     resource_identity: "worker:kanthord:general",
-    runtime_identity: createIdentity("worker_instance"),
+    runtime_identity: createIdentity("worker_registration"),
     attempt: 1,
     pinned_revision: 1,
     credentials: [],
@@ -84,8 +84,8 @@ export function schedulerHarness(
         record("clientAttributionOf", args);
         return null;
       },
-      instanceHealthcheck: (...args) => {
-        record("instanceHealthcheck", args);
+      registrationHealthcheck: (...args) => {
+        record("registrationHealthcheck", args);
         return true;
       },
     },

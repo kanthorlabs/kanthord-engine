@@ -29,7 +29,7 @@ const TRACE: ExecutionTrace = {
   attempt: 1,
 };
 const SPAN = "2".repeat(16);
-const RUNTIME = "worker_instance_01JZ8R2B3C4D5E6F7G8H9J0K1M";
+const RUNTIME = "worker_registration_01JZ8R2B3C4D5E6F7G8H9J0K1M";
 const CREATED = 1000;
 const ENDED = 5000;
 const NO_DROP = 0;

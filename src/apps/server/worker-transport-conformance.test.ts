@@ -78,11 +78,11 @@ const ID_PATTERN = /\b([a-z_]+)_[0-9A-HJKMNP-TV-Z]{26}\b/g;
 const VOLATILE_SUFFIX = /(_at|_span_id|^trace_id)$/;
 const VOLATILE_KEYS = new Set(["request_id", "idempotencyKey"]);
 const EXPECTED_FAILURES = [
-  ["registration above the count", 409, "worker.instance.slot_unavailable"],
+  ["registration above the count", 409, "worker.registration.slot_unavailable"],
   [
     "registration of a client that is no pool slot",
     409,
-    "worker.instance.placement_mismatch",
+    "worker.registration.placement_mismatch",
   ],
   [
     "execution of another project",
@@ -99,7 +99,7 @@ const EXPECTED_FAILURES = [
     401,
     "gateway.authentication.unauthorized",
   ],
-  ["deregistration of another client", 404, "worker.instance.not_found"],
+  ["deregistration of another client", 404, "worker.registration.not_found"],
   ["service operation", 404, "gateway.routing.not_found"],
   ["direct operation", 404, "gateway.routing.not_found"],
   ["body above the limit", 413, "gateway.request.body_too_large"],
@@ -474,7 +474,7 @@ async function run(side: Side, scenario: Scenario) {
   );
   await record(
     "deregistration of another client",
-    side.typed("b", "worker", "instance.deregister", {
+    side.typed("b", "worker", "registration.deregister", {
       params: { runtime_identity: registration.data.runtime_identity },
       query: {},
       body: null,

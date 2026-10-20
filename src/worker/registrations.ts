@@ -18,7 +18,7 @@ import {
   readLiveOfClient,
   readRow,
   reopenRegistration,
-} from "./instances.ts";
+} from "./registration-rows.ts";
 import type { HeartbeatClock } from "./heartbeat.ts";
 
 export function resumeRegistration(
@@ -34,15 +34,15 @@ export function resumeRegistration(
   if (!row)
     throw new OperationError(
       HttpStatus.NotFound,
-      WorkerErrorCode.InstanceNotFound,
-      "Instance not found.",
+      WorkerErrorCode.RegistrationNotFound,
+      "Registration not found.",
     );
   if (row.ended_at === null) return false;
   if (!schedulerClaims.runningExecutionOfRuntime(tx, runtimeIdentity, now))
     throw new OperationError(
       HttpStatus.Conflict,
       WorkerErrorCode.NoLiveExecution,
-      "Instance has no running execution.",
+      "Registration has no running execution.",
     );
   if (readLiveOfClient(tx, row.client_id))
     throw new OperationError(

@@ -14,7 +14,7 @@ import {
   readLiveOfClient,
   readRow,
   reopenRegistration,
-} from "./instances.ts";
+} from "./registration-rows.ts";
 
 const NOW = 1000;
 const ENDED = 2000;
@@ -44,8 +44,9 @@ test("registration rows retain attribution, end once, reopen, and roll back atom
     insertRegistration(tx, CLIENT, NOW),
   );
   assert.ok(
-    identitySchema("worker_instance").safeParse(registration.runtime_identity)
-      .success,
+    identitySchema("worker_registration").safeParse(
+      registration.runtime_identity,
+    ).success,
   );
   assert.deepEqual(readLiveByClient(store, CLIENT.client_id), registration);
   store.transaction((tx) => {

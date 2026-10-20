@@ -67,10 +67,10 @@ components:
               minLength: 1
             runtime_identity:
               type: string
-              minLength: 42
-              maxLength: 42
-              pattern: ^worker_instance_[0-7][0-9A-HJKMNP-TV-Z]{25}$
-              description: worker_instance_ followed by a canonical 26-character uppercase
+              minLength: 46
+              maxLength: 46
+              pattern: ^worker_registration_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+              description: worker_registration_ followed by a canonical 26-character uppercase
                 ULID.
           required:
             - resource_identity
@@ -123,10 +123,10 @@ components:
                       minLength: 1
                     runtime_identity:
                       type: string
-                      minLength: 42
-                      maxLength: 42
-                      pattern: ^worker_instance_[0-7][0-9A-HJKMNP-TV-Z]{25}$
-                      description: worker_instance_ followed by a canonical 26-character uppercase
+                      minLength: 46
+                      maxLength: 46
+                      pattern: ^worker_registration_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                      description: worker_registration_ followed by a canonical 26-character uppercase
                         ULID.
                     client_id:
                       type: string

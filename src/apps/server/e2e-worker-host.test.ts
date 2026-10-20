@@ -485,7 +485,7 @@ async function assertLive(
   assert.equal(claim.claim_state, ClaimState.Running);
   const list = await setup.read<{
     items: { runtime_identity: string; registered: boolean }[];
-  }>(["worker", "instance", "list", "--project", setup.project_id]);
+  }>(["worker", "registration", "list", "--project", setup.project_id]);
   const identity = logs.find(
     (record) => record.msg === READY,
   )!.runtime_identity;

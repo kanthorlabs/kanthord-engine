@@ -9,7 +9,7 @@ import {
   type Outcome,
 } from "../../mission/contract.ts";
 import { ClaimState, type ExecutionRecord } from "../../scheduler/contract.ts";
-import { InstanceActivity } from "../../worker/contract.ts";
+import { RegistrationActivity } from "../../worker/contract.ts";
 import { generateMachineToken } from "./cli-support.ts";
 import {
   createFakeSshCredential,
@@ -148,14 +148,14 @@ test(
     const runtime = registration.runtime_identity;
     const resource = bindings.bindings.harness!.resource_identity;
     await t.test("EX10.1 registration and capacity", async () => {
-      assert.match(runtime, /^worker_instance_/);
+      assert.match(runtime, /^worker_registration_/);
       assert.equal(registration.resource_identity, resource);
       assert.equal(registration.worker_name, WORKER);
       assert.match(registration.idempotency_key, /^[0-9A-HJKMNP-TV-Z]{26}$/);
       await cli.refuses(
         ["worker", "register"],
         other.token,
-        "worker.instance.slot_unavailable",
+        "worker.registration.slot_unavailable",
       );
     });
     async function health() {
@@ -210,17 +210,17 @@ test(
         auth.token,
       );
     const first = await pull();
-    await t.test("EX10.3 steps claim and instance activity", async () => {
+    await t.test("EX10.3 steps claim and registration activity", async () => {
       assert.equal(first.kind, CLAIMED);
       assert.equal(first.execution.node_id, implement);
       assert.equal(first.execution.attempt, FIRST_ATTEMPT);
       assert.equal(first.execution.claimant.runtime_identity, runtime);
-      const instance = await cli.read<{
+      const registration = await cli.read<{
         activity: string;
         execution_id: string;
-      }>(["worker", "instance", "get", runtime]);
-      assert.equal(instance.activity, InstanceActivity.Executing);
-      assert.equal(instance.execution_id, first.execution.execution_id);
+      }>(["worker", "registration", "get", runtime]);
+      assert.equal(registration.activity, RegistrationActivity.Executing);
+      assert.equal(registration.execution_id, first.execution.execution_id);
     });
     await t.test(
       "EX10.4 external harness receives no inference credential",
@@ -475,7 +475,7 @@ test(
       "EX10.11 deregistration removes inventory and prevents work",
       async () => {
         const ended = await cli.read<{ registered: boolean }>(
-          ["worker", "instance", "deregister", runtime],
+          ["worker", "registration", "deregister", runtime],
           auth.token,
         );
         assert.equal(ended.registered, false);
@@ -483,7 +483,7 @@ test(
           (
             await cli.read<{ items: unknown[] }>([
               "worker",
-              "instance",
+              "registration",
               "list",
               "--project",
               project.id,

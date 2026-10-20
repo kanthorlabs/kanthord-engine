@@ -786,7 +786,7 @@ test("pinned metadata retains a rotated revision without creating a pin and refu
   const credentials: string[] = [];
   const execution = {
     executionId: "execution-one",
-    runtimeIdentity: createIdentity("worker_instance"),
+    runtimeIdentity: createIdentity("worker_registration"),
   };
   const f = fixture({
     executions: {
@@ -844,7 +844,7 @@ test("protected release pins once, keeps rotation overlap and refuses revoked or
     project_id: createIdentity("project"),
     worker_binding_id: "binding-one",
     resource_identity: "worker:kanthord:general",
-    runtime_identity: createIdentity("worker_instance"),
+    runtime_identity: createIdentity("worker_registration"),
     credentials,
   };
   const identity = testMachineIdentity(
@@ -953,7 +953,7 @@ function missionGrantFixture() {
     project_id: createIdentity("project"),
     worker_binding_id: createIdentity("binding"),
     resource_identity: "worker:kanthord:general",
-    runtime_identity: createIdentity("worker_instance"),
+    runtime_identity: createIdentity("worker_registration"),
     credentials: [],
   };
   const claim: ExecutionClaim = {

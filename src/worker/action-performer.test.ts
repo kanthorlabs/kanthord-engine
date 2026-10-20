@@ -89,7 +89,7 @@ function harness(t: TestContext) {
     attempt: FIRST_ATTEMPT,
     pinnedRevision: FIRST_ATTEMPT,
     nodeBranch: `kanthord/${nodeId}`,
-    runtimeIdentity: createIdentity("worker_instance"),
+    runtimeIdentity: createIdentity("worker_registration"),
     workerBindingId: createIdentity("binding"),
   };
   const identity = testMachineIdentity(

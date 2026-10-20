@@ -17,9 +17,9 @@ Work pull, claims, execution records and release belong to
 
 The [CLI implementation](../../src/apps/cli/worker.ts) and
 [Worker operation contract](../../src/worker/contract.ts) provide registration,
-heartbeat, handover, catalog reads, the placement list, and registration-backed instance inspection and lifecycle. The
+heartbeat, handover, catalog reads, the placement list, and registration inspection and lifecycle. The
 [registration implementation](../../src/worker/registrations.ts) uses durable
-`worker_instance` rows, one live registration per client identity, and atomic
+`worker_registration` rows, one live registration per client identity, and atomic
 binding instance-count admission. Deregistration is both an internal
 collaboration and an owned client operation.
 
@@ -32,12 +32,12 @@ are implemented and wired to Project authorization and Scheduler execution pins.
 The `handover` CLI leaf is implemented with its published validation code.
 
 The [Worker configuration fragment](../../src/worker/config.ts) declares
-`heartbeat_window`, `server_slot_limit` and `container_image`. The catalog, report-only instance
+`heartbeat_window`, `server_slot_limit` and `container_image`. The catalog, report-only registration
 healthcheck collaboration and registration heartbeat lifecycle are implemented.
 The server starts one worker thread for each slot of a binding at the `server`
 placement and one container for each slot of a binding at the `container`
 placement. The service probe reports registration-component availability
-separately from instance healthchecks.
+separately from registration healthchecks.
 
 ## Shared input and output contract
 
@@ -84,13 +84,13 @@ and an idempotency key alone cannot reconcile an uncertain repository write.
 
 ### Names and identities
 
-| Value                      | Type and validation                                                                                                                                                                                                                                                                                         |
-| -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `WorkerName`               | Nonempty exact versioned catalog key, such as `coder@1`. Required version; no implicit latest version or alias. Unknown names fail lookup. This is a natural key, not a ULID.                                                                                                                               |
-| `AgentName`                | Nonempty exact role/version key in the agent catalog, such as `swe@1`; never a worker name. Unknown names fail lookup.                                                                                                                                                                                      |
-| `ProjectId`                | Opaque `project_<ulid>` identity using the declared project prefix.                                                                                                                                                                                                                                         |
-| `RuntimeIdentity`          | `worker_instance_<ulid>` under the [Worker identity ruling](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/worker-service.impl.md#the-identities-of-the-worker-service), validated with `identitySchema("worker_instance")` of the kernel. Consumers retain the returned value exactly.  |
-| `BindingId`, `ExecutionId` | `BindingId` uses `binding_<ulid>`. `ExecutionId` uses `execution_<ulid>` under the [Scheduler identities](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/scheduler-service.impl.md#the-identities-of-the-scheduler-service), validated with `identitySchema("execution")` of the kernel. |
+| Value                      | Type and validation                                                                                                                                                                                                                                                                                                |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `WorkerName`               | Nonempty exact versioned catalog key, such as `coder@1`. Required version; no implicit latest version or alias. Unknown names fail lookup. This is a natural key, not a ULID.                                                                                                                                      |
+| `AgentName`                | Nonempty exact role/version key in the agent catalog, such as `swe@1`; never a worker name. Unknown names fail lookup.                                                                                                                                                                                             |
+| `ProjectId`                | Opaque `project_<ulid>` identity using the declared project prefix.                                                                                                                                                                                                                                                |
+| `RuntimeIdentity`          | `worker_registration_<ulid>` under the [Worker identity ruling](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/worker-service.impl.md#the-identities-of-the-worker-service), validated with `identitySchema("worker_registration")` of the kernel. Consumers retain the returned value exactly. |
+| `BindingId`, `ExecutionId` | `BindingId` uses `binding_<ulid>`. `ExecutionId` uses `execution_<ulid>` under the [Scheduler identities](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/scheduler-service.impl.md#the-identities-of-the-scheduler-service), validated with `identitySchema("execution")` of the kernel.        |
 
 An entity identity follows `<declared-prefix>_<ulid>`, where the ULID is canonical
 uppercase and matches `[0-7][0-9A-HJKMNP-TV-Z]{25}`. Validate the expected entity
@@ -105,18 +105,18 @@ Worker and agent names and MCP session IDs retain their natural-key/protocol for
 Live registration and execution requirements appear per operation; registration
 and deregistration require no live registration.
 
-| Status | Command after `kanthord worker`               | Route                                                | Operation ID                 | Access / registration                                                             |
-| ------ | --------------------------------------------- | ---------------------------------------------------- | ---------------------------- | --------------------------------------------------------------------------------- |
-| I      | `register`                                    | `POST /api/worker/register`                          | `worker.register`            | `client`; no live registration required                                           |
-| I      | `heartbeat [--token <jwt>]`                   | `POST /api/worker/heartbeat`                         | `worker.heartbeat`           | `client`; live registration                                                       |
-| I      | `handover <execution-id> [M] [--token <jwt>]` | `POST /api/worker/handover`                          | `worker.handover`            | `client`; live registration and live execution                                    |
-| I      | `list`                                        | `GET /api/worker/catalog`                            | `worker.catalog.list`        | `human`                                                                           |
-| I      | `get <worker-name>`                           | `GET /api/worker/catalog/:worker_name`               | `worker.catalog.get`         | `human`                                                                           |
-| I      | `placement list`                              | `GET /api/worker/placement`                          | `worker.placement.list`      | `human`                                                                           |
-| I      | `instance list`                               | `GET /api/worker/instance`                           | `worker.instance.list`       | `human`                                                                           |
-| I      | `instance get <runtime-identity>`             | `GET /api/worker/instance/:runtime_identity`         | `worker.instance.get`        | `human`                                                                           |
-| I      | `instance deregister <runtime-identity>`      | `DELETE /api/worker/instance/:runtime_identity`      | `worker.instance.deregister` | `client`; no live registration required; ownership by client, binding and project |
-| I      | `instance resume <runtime-identity>`          | `POST /api/worker/instance/:runtime_identity/resume` | `worker.instance.resume`     | `human`; mutation                                                                 |
+| Status | Command after `kanthord worker`               | Route                                                    | Operation ID                     | Access / registration                                                             |
+| ------ | --------------------------------------------- | -------------------------------------------------------- | -------------------------------- | --------------------------------------------------------------------------------- |
+| I      | `register`                                    | `POST /api/worker/register`                              | `worker.register`                | `client`; no live registration required                                           |
+| I      | `heartbeat [--token <jwt>]`                   | `POST /api/worker/heartbeat`                             | `worker.heartbeat`               | `client`; live registration                                                       |
+| I      | `handover <execution-id> [M] [--token <jwt>]` | `POST /api/worker/handover`                              | `worker.handover`                | `client`; live registration and live execution                                    |
+| I      | `list`                                        | `GET /api/worker/catalog`                                | `worker.catalog.list`            | `human`                                                                           |
+| I      | `get <worker-name>`                           | `GET /api/worker/catalog/:worker_name`                   | `worker.catalog.get`             | `human`                                                                           |
+| I      | `placement list`                              | `GET /api/worker/placement`                              | `worker.placement.list`          | `human`                                                                           |
+| I      | `registration list`                           | `GET /api/worker/registration`                           | `worker.registration.list`       | `human`                                                                           |
+| I      | `registration get <runtime-identity>`         | `GET /api/worker/registration/:runtime_identity`         | `worker.registration.get`        | `human`                                                                           |
+| I      | `registration deregister <runtime-identity>`  | `DELETE /api/worker/registration/:runtime_identity`      | `worker.registration.deregister` | `client`; no live registration required; ownership by client, binding and project |
+| I      | `registration resume <runtime-identity>`      | `POST /api/worker/registration/:runtime_identity/resume` | `worker.registration.resume`     | `human`; mutation                                                                 |
 
 `credential` runs inside the `worker` application alone and is no CLI command.
 Its implemented operation is `worker.credential` at `POST /api/worker/credential`, with `client` access and a live execution requirement. Its body holds `execution_id`, `nonce` and `ciphertext`, the sealed refresh report, and it answers 204 with no HTTP body (`null` through the direct adapter). It is a mutation with a 30-second timeout and a 64 KiB body limit. The worker application caller is later Plan 09 work.
@@ -158,11 +158,11 @@ There are no positional arguments. [`--token`](./common-flags.md#--token),
 [`--idempotency-key`](./common-flags.md#--idempotency-key), and
 [`--help`](./common-flags.md#--help) use the shared definitions. Registration
 requires a machine token; the shared reference records its local preflight.
-The command registers a worker instance under the client identity of its machine JWT.
+The command creates a worker registration under the client identity of its machine JWT.
 `--token` overrides `KANTHORD_TOKEN` and the `token` field of the client configuration file.
 A missing token stops the command without a prompt or a request.
 The worker runtime can call the route directly with its machine JWT.
-The [registration contract](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/gateway-service.impl.md#worker-instance-registration) owns JWT verification, instance-count admission and replay.
+The [registration contract](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/gateway-service.impl.md#worker-registration) owns JWT verification, instance-count admission and replay.
 
 | Request location         | Requiredness / type / default                                             | Validation                                                                                         |
 | ------------------------ | ------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
@@ -173,7 +173,7 @@ The [registration contract](https://github.com/kanthorlabs/kanthord/blob/main/do
 
 The operation is a mutation, declares a `10,000 ms` timeout and a `40 KiB` body
 limit, and returns HTTP `200` with `{ "runtime_identity": "...", "resource_identity": "...", "worker_name": "..." }`. The body limit
-does not permit a registration payload. The runtime identity is `worker_instance_<ulid>`.
+does not permit a registration payload. The runtime identity is `worker_registration_<ulid>`.
 
 The CLI prints one JSON line with `runtime_identity`, `resource_identity`, `worker_name` and `idempotency_key`, saves no configuration and prints no token.
 Success exits with zero; failure exits with a non-zero status. Registration creates no client identity,
@@ -184,15 +184,15 @@ A client identity holds at most one live registration. A registration of a
 client identity that holds a live registration answers that registration with
 any key, so a restarted program keeps its runtime identity. A recorded replay
 whose registration has ended is rejected with `409` `gateway.registration.stale`;
-it does not recreate or transfer the instance. A binding with no free slot, or
-an unavailable binding, answers `409` `worker.instance.slot_unavailable`.
+it does not recreate or transfer the registration. A binding with no free slot, or
+an unavailable binding, answers `409` `worker.registration.slot_unavailable`.
 Cancellation does not deregister an accepted registration. There is no automatic
 CLI retry. Declared failures print the `status` and `idempotency_key` rows;
 indeterminate results print the `idempotency_key` row and instruct explicit reuse of it.
 
 The [Gateway idempotency component](../../src/gateway/idempotency.ts) stores
 completed responses in process memory and sweeps them by TTL every 60 s.
-Registrations are durable `worker_instance` rows, including retained ended
+Registrations are durable `worker_registration` rows, including retained ended
 attribution. A stale stored answer grants no renewed registration.
 
 Registration checks the current binding's instance count in its acceptance
@@ -363,7 +363,7 @@ backoff when the runtime recovers. The other reasons stay until a human changes 
 refuses a new `container` binding for the three stable reasons only.
 The answer has no error code of its own.
 
-## Instance inspection and lifecycle
+## Registration inspection and lifecycle
 
 **Target design:** an instance is runtime-only, hosts at most one execution and
 has at most one outstanding work pull or execution. Pools of the `server` and
@@ -379,10 +379,10 @@ binding at the `server` placement and the slot containers of a binding at the
 resume use the Scheduler collaboration, supplied by the D6/D9 stand-ins in
 tests until Plan 03 wires its implementation.
 
-### `instance list`
+### `registration list`
 
 ```text
-kanthord worker instance list [--project <project-id>] [--binding <binding-name>] [--limit <count>] [--cursor <opaque>]
+kanthord worker registration list [--project <project-id>] [--binding <binding-name>] [--limit <count>] [--cursor <opaque>]
 ```
 
 | Input                                                                            | Requiredness / type / default                                                  | Mapping and validation                                                                                                              |
@@ -392,43 +392,43 @@ kanthord worker instance list [--project <project-id>] [--binding <binding-name>
 | [`--limit`](./common-flags.md#--limit), [`--cursor`](./common-flags.md#--cursor) | Shared pagination flags                                                        | Shared query mapping.                                                                                                               |
 
 Required token: human JWT. Empty params, absent body. HTTP `200` returns
-one page of the instance records defined below in descending runtime-identity
+one page of the registration records defined below in descending runtime-identity
 order under the shared [pagination rule](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/architecture.impl.md#pagination).
 No ULID ordering is a lifecycle chronology. This is a live inventory, not a
 persistent history; subsequent pages reflect pool changes.
 A binding outside the supplied project answers HTTP `400`.
 
-### `instance get <runtime-identity>`
+### `registration get <runtime-identity>`
 
 ```text
-kanthord worker instance get <runtime-identity>
+kanthord worker registration get <runtime-identity>
 ```
 
 Required `runtime-identity: RuntimeIdentity`, no default; maps to
 `params.runtime_identity`. Required token: human JWT. Empty query, absent body.
-HTTP `200` returns one instance record; unknown or ended instances return
-`404 worker.instance.not_found` rather than a historical execution record.
+HTTP `200` returns one registration record; unknown or ended registrations return
+`404 worker.registration.not_found` rather than a historical execution record.
 
-The instance record contains:
+The registration record contains:
 
 | Field                                                                | Type and presence                                                                                                                   |
 | -------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
-| `runtime_identity`, `project_id`, `resource_identity`, `worker_name` | Required identities/natural key of the instance and its owning binding.                                                             |
+| `runtime_identity`, `project_id`, `resource_identity`, `worker_name` | Required identities/natural key of the registration and its owning binding.                                                         |
 | `host`                                                               | Required string, one of `kanthord`, `external-harness`.                                                                             |
-| `placement`                                                          | String, one of `server`, `container`, `worker`, for kanthord-hosted instances; omitted for external harnesses.                      |
-| `client_id`, `name`                                                  | Client identity using the declared `client_identity` prefix and display-name string, present for registered instances only. No JWT. |
+| `placement`                                                          | String, one of `server`, `container`, `worker`, for kanthord-hosted registrations; omitted for external harnesses.                  |
+| `client_id`, `name`                                                  | Client identity using the declared `client_identity` prefix and display-name string, present for live registrations only. No JWT.   |
 | `activity`                                                           | Required string, one of `idle`, `pulling`, `executing`, describing known server activity, not proof that a remote process is alive. |
-| `draining`                                                           | Required boolean; true when a server-hosted instance is scheduled to retire after its current execution.                            |
+| `draining`                                                           | Required boolean; true when a server-hosted registration is scheduled to retire after its current execution.                        |
 | `execution_id`                                                       | Present only while executing, naming the Scheduler execution record.                                                                |
 | `registered`                                                         | Required boolean; registration state, separate from execution claim state and physical process liveness.                            |
 
 Both commands are read-only. Durable execution and trace attribution are queried
 through Scheduler and Tracking. They do not infer a dead process from silence.
 
-### `instance deregister <runtime-identity>`
+### `registration deregister <runtime-identity>`
 
 ```text
-kanthord worker instance deregister <runtime-identity> [--idempotency-key <key>]
+kanthord worker registration deregister <runtime-identity> [--idempotency-key <key>]
 ```
 
 Required `runtime-identity: RuntimeIdentity`, no default, maps to
@@ -437,8 +437,8 @@ JWT. The shared mutation key applies. HTTP `200` returns
 `{ "runtime_identity": "...", "registered": false }`; the CLI adds its key.
 
 The [deregistration contract](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/worker-service.impl.md#deregistration)
-declares `worker.instance.deregister` as a `client` mutation at
-`DELETE /api/worker/instance/:runtime_identity`, with `unary` lifetime,
+declares `worker.registration.deregister` as a `client` mutation at
+`DELETE /api/worker/registration/:runtime_identity`, with `unary` lifetime,
 the default 30 s timeout and the default 10 MiB body limit. The explicit runtime
 identity prevents a delayed retry from ending a newer registration of the same
 client. The handler ends only the live registration whose runtime identity
@@ -451,8 +451,8 @@ Authentication still checks the credential and binding. A retry with the same
 `Idempotency-Key`, caller and target replays the recorded answer after the end,
 within the TTL and one process. The operation declares no replay guard.
 Every target that is no live registration of the caller answers `404`
-`worker.instance.not_found`, including an ended registration, another client's
-instance and a newer registration of the same
+`worker.registration.not_found`, including an ended registration, another client's
+registration and a newer registration of the same
 client identity, which stays intact. A retry after a restart runs the handler
 again: it ends a registration that is still live and answers `404` for one that
 already ended. The caller reads that `404` after its own call as the end of its
@@ -466,10 +466,10 @@ authorize reuse of its workspace. Dead-process cleanup, physical-stop enforcemen
 and capacity reuse stay with B9 SC5 and W5. The same client identity registers
 again with a fresh idempotency key after expiry or deregistration.
 
-### `instance resume <runtime-identity>`
+### `registration resume <runtime-identity>`
 
 ```text
-kanthord worker instance resume <runtime-identity> [--idempotency-key <key>]
+kanthord worker registration resume <runtime-identity> [--idempotency-key <key>]
 ```
 
 Required `runtime-identity: RuntimeIdentity`, no default, maps to
@@ -478,8 +478,8 @@ JWT. The shared mutation key applies. HTTP `200` returns
 `{ "runtime_identity": "...", "registered": true }`; the CLI adds its key.
 
 The [resume contract](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/worker-service.impl.md#resume-of-a-registration)
-declares `worker.instance.resume` as a `human` mutation at
-`POST /api/worker/instance/:runtime_identity/resume`, with `unary` lifetime, the
+declares `worker.registration.resume` as a `human` mutation at
+`POST /api/worker/registration/:runtime_identity/resume`, with `unary` lifetime, the
 default 30 s timeout and the default 10 MiB body limit. It reopens an ended
 registration only while that registration is the claimant of a live execution,
 and it takes the slot through the Project instance-count collaboration in the
@@ -601,53 +601,53 @@ or caller-selected remote destination.
 
 Every remote command can also answer the shared codes of [other.md](other.md#error-codes).
 
-| HTTP  | Code                                                      | Condition                                                                                                                                                                                                                         | Commands                                                                                                                      |
-| ----- | --------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| local | `worker.version.unavailable`                              | The server package version is unavailable.                                                                                                                                                                                        | serve worker                                                                                                                  |
-| local | `worker.version.mismatch`                                 | The server package version differs.                                                                                                                                                                                               | serve worker                                                                                                                  |
-| local | `worker.start.client_secret_invalid`                      | The client_secret is not a canonical 32-byte base64 value.                                                                                                                                                                        | serve worker                                                                                                                  |
-| local | `worker.start.client_secret_absent`                       | The worker has no client_secret in cli.yaml.                                                                                                                                                                                      | serve worker                                                                                                                  |
-| local | `worker.start.tool_missing`                               | The server or the worker cannot install or run the pinned `rg` or `fd` in `pi/bin/` of the state directory: a missing source, a host target outside the manifest, a digest mismatch or a failed `--version` run.                  | serve server, serve worker                                                                                                    |
-| local | `worker.runtime.setup_refused`                            | The adapter cannot map the execution setup onto pi; `details.reason` is `model_unknown`, `reasoning_effort_unsupported`, `credential_absent` or `credential_revision_mismatch`.                                                   | serve worker                                                                                                                  |
-| local | `worker.start.registration_indeterminate`                 | The registration at startup answers an indeterminate result.                                                                                                                                                                      | serve worker                                                                                                                  |
-| local | `worker.stop.execution_live`                              | A stop signal arrives during a live execution; the application aborts the agent, deregisters nothing and exits 1.                                                                                                                 | serve worker                                                                                                                  |
-| local | `worker.stop.deregistration_indeterminate`                | The deregistration at a stop answers an indeterminate result.                                                                                                                                                                     | serve worker                                                                                                                  |
-| local | `worker.handover.decryption_failed`                       | The handover envelope does not open under the handover key of the client_secret.                                                                                                                                                  | serve worker                                                                                                                  |
-| local | `worker.evidence_upload.path_refused`                     | The path of `evidence-upload` is absolute, leaves the workspace, is a symbolic link, is not a regular file or is replaced during the open; `details.reason` is `outside_workspace`, `symbolic_link`, `not_regular` or `replaced`. | serve worker                                                                                                                  |
-| local | `worker.evidence_upload.transfer_failed`                  | The file of `evidence-upload` is above the 5 GiB single-object limit. A failed PUT gives no answer of its own: the helper calls `mission.evidence.asset.complete`, whose check records the storage binding as failed.             | serve worker                                                                                                                  |
-| 409   | `worker.execution.no_native_agent`                        | The setup read names an execution of an externally hosted worker.                                                                                                                                                                 | worker.execution.setup.get (API only)                                                                                         |
-| 409   | `worker.execution.credential_not_pinned`                  | The execution pins no revision of the credential name of its effective configuration.                                                                                                                                             | worker.execution.setup.get (API only)                                                                                         |
-| local | `cli.worker.instance.list.invalid_project_id`             | The `--project` value is not a canonical `project_<ulid>` identity.                                                                                                                                                               | instance list                                                                                                                 |
-| local | `cli.worker.instance.list.invalid_binding_name`           | The `--binding` value is not a binding name.                                                                                                                                                                                      | instance list                                                                                                                 |
-| local | `cli.worker.instance.list.binding_without_project`        | `--binding` is given without `--project`.                                                                                                                                                                                         | instance list                                                                                                                 |
-| local | `cli.worker.instance.get.invalid_runtime_identity`        | The `<runtime-identity>` argument is not a canonical `worker_instance_<ulid>` identity.                                                                                                                                           | instance get                                                                                                                  |
-| local | `cli.worker.instance.deregister.invalid_runtime_identity` | The `<runtime-identity>` argument is not a canonical `worker_instance_<ulid>` identity.                                                                                                                                           | instance deregister                                                                                                           |
-| local | `cli.worker.instance.resume.invalid_runtime_identity`     | The `<runtime-identity>` argument is not a canonical `worker_instance_<ulid>` identity.                                                                                                                                           | instance resume                                                                                                               |
-| local | `cli.worker.handover.invalid_execution_id`                | The `<execution-id>` argument is not a canonical `execution_<ulid>` identity.                                                                                                                                                     | handover                                                                                                                      |
-| local | `cli.worker.handover.token_required`                      | No option, environment variable or `cli.yaml` supplies a token.                                                                                                                                                                   | handover                                                                                                                      |
-| local | `cli.worker.handover.indeterminate`                       | The handover result is indeterminate; retry with a new key. The diagnostic prints no key row.                                                                                                                                     | handover                                                                                                                      |
-| local | `cli.worker.placement.list.token_required`                | No option, environment variable or `cli.yaml` supplies a token.                                                                                                                                                                   | placement list                                                                                                                |
-| local | `cli.worker.placement.list.indeterminate`                 | The read result is indeterminate.                                                                                                                                                                                                 | placement list                                                                                                                |
-| 403   | `worker.authorization.refused`                            | The chain of the model inference credential breaks; details `{ reason }` with `binding_mismatch`, `binding_removed`, `binding_disabled` or `no_native_agent`.                                                                     | handover                                                                                                                      |
-| 403   | `project.authorization.refused`                           | The SSH identity chain of a repository binding breaks; details `{ reason }` with `binding_not_found` (the binding is removed or is not a repository binding), `identity_refused` or `node_mismatch`.                              | handover                                                                                                                      |
-| 403   | `mission.authorization.refused`                           | Mission refuses the protected facility chain; details `{ reason }` with `claim_not_live`, `node_mismatch`, `attempt_closed`, `binding_disabled` or `binding_removed`.                                                             | worker.action.request (API only), worker.execution.change_request.get (API only)                                              |
-| 502   | `repository.platform.github.<class>`                      | The change request read fails at GitHub; `<class>` is `confirmed_failure`, `retryable_refusal`, `final_refusal` or `unknown_outcome`.                                                                                             | worker.execution.change_request.get (API only)                                                                                |
-| 400   | `custody.handover.report_invalid`                         | A refresh report fails its tag, envelope, schema or credential byte budget, names an unpinned revision, or carries a credential type other than the platform's secret shape.                                                      | worker credential (API only)                                                                                                  |
-| 409   | `credential.revision.revoked`                             | A pinned use names a revoked revision.                                                                                                                                                                                            | handover, worker credential (API only), worker.execution.setup.get (API only), worker.execution.change_request.get (API only) |
-| 400   | `project.bindings.repository.address_invalid`             | The address host of a repository binding is outside the SSH host set of its platform.                                                                                                                                             | worker.execution.setup.get (API only)                                                                                         |
-| 409   | `repository.host_key.unpinned`                            | The address host of a repository binding holds no pinned host key; details `{ host }`.                                                                                                                                            | handover, worker.execution.setup.get (API only)                                                                               |
-| 409   | `repository.credential.ssh_key_legacy`                    | The SSH credential of a repository binding holds no generated key; details `{ credential }`.                                                                                                                                      | handover                                                                                                                      |
-| local | `cli.worker.register.invalid_idempotency_key`             | The `--idempotency-key` value is not a canonical ULID.                                                                                                                                                                            | register                                                                                                                      |
-| 409   | `worker.action_performer.claim_not_evaluation`            | The action performer runs under a steps claim.                                                                                                                                                                                    | worker.action.request (API only)                                                                                              |
-| 409   | `worker.action_performer.assessment_not_current`          | The attempt holds no current passing assessment.                                                                                                                                                                                  | worker.action.request (API only)                                                                                              |
-| 409   | `worker.action_performer.snapshot_absent`                 | The current passing assessment names no repository snapshot of the binding of the action.                                                                                                                                         | worker.action.request (API only)                                                                                              |
-| 400   | `worker.instance.binding_unknown`                         | `resource_identity` names no current worker binding of `project_id`.                                                                                                                                                              | instance list                                                                                                                 |
-| 404   | `worker.catalog.not_found`                                | The worker name is absent from the catalog.                                                                                                                                                                                       | get                                                                                                                           |
-| 404   | `worker.instance.not_found`                               | The runtime identity is unknown, ended or not owned.                                                                                                                                                                              | instance get, instance deregister, instance resume                                                                            |
-| 409   | `worker.instance.no_live_execution`                       | The registration is the claimant of no live execution.                                                                                                                                                                            | instance resume                                                                                                               |
-| 409   | `worker.instance.client_live`                             | The client identity holds another live registration.                                                                                                                                                                              | instance resume                                                                                                               |
-| 409   | `worker.instance.placement_mismatch`                      | The binding is at the `server` or the `container` placement and the client identity is not a pool slot of that binding.                                                                                                           | register                                                                                                                      |
-| 409   | `worker.instance.slot_unavailable`                        | The binding has no free slot or is unavailable.                                                                                                                                                                                   | register, instance resume                                                                                                     |
+| HTTP  | Code                                                          | Condition                                                                                                                                                                                                                         | Commands                                                                                                                      |
+| ----- | ------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| local | `worker.version.unavailable`                                  | The server package version is unavailable.                                                                                                                                                                                        | serve worker                                                                                                                  |
+| local | `worker.version.mismatch`                                     | The server package version differs.                                                                                                                                                                                               | serve worker                                                                                                                  |
+| local | `worker.start.client_secret_invalid`                          | The client_secret is not a canonical 32-byte base64 value.                                                                                                                                                                        | serve worker                                                                                                                  |
+| local | `worker.start.client_secret_absent`                           | The worker has no client_secret in cli.yaml.                                                                                                                                                                                      | serve worker                                                                                                                  |
+| local | `worker.start.tool_missing`                                   | The server or the worker cannot install or run the pinned `rg` or `fd` in `pi/bin/` of the state directory: a missing source, a host target outside the manifest, a digest mismatch or a failed `--version` run.                  | serve server, serve worker                                                                                                    |
+| local | `worker.runtime.setup_refused`                                | The adapter cannot map the execution setup onto pi; `details.reason` is `model_unknown`, `reasoning_effort_unsupported`, `credential_absent` or `credential_revision_mismatch`.                                                   | serve worker                                                                                                                  |
+| local | `worker.start.registration_indeterminate`                     | The registration at startup answers an indeterminate result.                                                                                                                                                                      | serve worker                                                                                                                  |
+| local | `worker.stop.execution_live`                                  | A stop signal arrives during a live execution; the application aborts the agent, deregisters nothing and exits 1.                                                                                                                 | serve worker                                                                                                                  |
+| local | `worker.stop.deregistration_indeterminate`                    | The deregistration at a stop answers an indeterminate result.                                                                                                                                                                     | serve worker                                                                                                                  |
+| local | `worker.handover.decryption_failed`                           | The handover envelope does not open under the handover key of the client_secret.                                                                                                                                                  | serve worker                                                                                                                  |
+| local | `worker.evidence_upload.path_refused`                         | The path of `evidence-upload` is absolute, leaves the workspace, is a symbolic link, is not a regular file or is replaced during the open; `details.reason` is `outside_workspace`, `symbolic_link`, `not_regular` or `replaced`. | serve worker                                                                                                                  |
+| local | `worker.evidence_upload.transfer_failed`                      | The file of `evidence-upload` is above the 5 GiB single-object limit. A failed PUT gives no answer of its own: the helper calls `mission.evidence.asset.complete`, whose check records the storage binding as failed.             | serve worker                                                                                                                  |
+| 409   | `worker.execution.no_native_agent`                            | The setup read names an execution of an externally hosted worker.                                                                                                                                                                 | worker.execution.setup.get (API only)                                                                                         |
+| 409   | `worker.execution.credential_not_pinned`                      | The execution pins no revision of the credential name of its effective configuration.                                                                                                                                             | worker.execution.setup.get (API only)                                                                                         |
+| local | `cli.worker.registration.list.invalid_project_id`             | The `--project` value is not a canonical `project_<ulid>` identity.                                                                                                                                                               | registration list                                                                                                             |
+| local | `cli.worker.registration.list.invalid_binding_name`           | The `--binding` value is not a binding name.                                                                                                                                                                                      | registration list                                                                                                             |
+| local | `cli.worker.registration.list.binding_without_project`        | `--binding` is given without `--project`.                                                                                                                                                                                         | registration list                                                                                                             |
+| local | `cli.worker.registration.get.invalid_runtime_identity`        | The `<runtime-identity>` argument is not a canonical `worker_registration_<ulid>` identity.                                                                                                                                       | registration get                                                                                                              |
+| local | `cli.worker.registration.deregister.invalid_runtime_identity` | The `<runtime-identity>` argument is not a canonical `worker_registration_<ulid>` identity.                                                                                                                                       | registration deregister                                                                                                       |
+| local | `cli.worker.registration.resume.invalid_runtime_identity`     | The `<runtime-identity>` argument is not a canonical `worker_registration_<ulid>` identity.                                                                                                                                       | registration resume                                                                                                           |
+| local | `cli.worker.handover.invalid_execution_id`                    | The `<execution-id>` argument is not a canonical `execution_<ulid>` identity.                                                                                                                                                     | handover                                                                                                                      |
+| local | `cli.worker.handover.token_required`                          | No option, environment variable or `cli.yaml` supplies a token.                                                                                                                                                                   | handover                                                                                                                      |
+| local | `cli.worker.handover.indeterminate`                           | The handover result is indeterminate; retry with a new key. The diagnostic prints no key row.                                                                                                                                     | handover                                                                                                                      |
+| local | `cli.worker.placement.list.token_required`                    | No option, environment variable or `cli.yaml` supplies a token.                                                                                                                                                                   | placement list                                                                                                                |
+| local | `cli.worker.placement.list.indeterminate`                     | The read result is indeterminate.                                                                                                                                                                                                 | placement list                                                                                                                |
+| 403   | `worker.authorization.refused`                                | The chain of the model inference credential breaks; details `{ reason }` with `binding_mismatch`, `binding_removed`, `binding_disabled` or `no_native_agent`.                                                                     | handover                                                                                                                      |
+| 403   | `project.authorization.refused`                               | The SSH identity chain of a repository binding breaks; details `{ reason }` with `binding_not_found` (the binding is removed or is not a repository binding), `identity_refused` or `node_mismatch`.                              | handover                                                                                                                      |
+| 403   | `mission.authorization.refused`                               | Mission refuses the protected facility chain; details `{ reason }` with `claim_not_live`, `node_mismatch`, `attempt_closed`, `binding_disabled` or `binding_removed`.                                                             | worker.action.request (API only), worker.execution.change_request.get (API only)                                              |
+| 502   | `repository.platform.github.<class>`                          | The change request read fails at GitHub; `<class>` is `confirmed_failure`, `retryable_refusal`, `final_refusal` or `unknown_outcome`.                                                                                             | worker.execution.change_request.get (API only)                                                                                |
+| 400   | `custody.handover.report_invalid`                             | A refresh report fails its tag, envelope, schema or credential byte budget, names an unpinned revision, or carries a credential type other than the platform's secret shape.                                                      | worker credential (API only)                                                                                                  |
+| 409   | `credential.revision.revoked`                                 | A pinned use names a revoked revision.                                                                                                                                                                                            | handover, worker credential (API only), worker.execution.setup.get (API only), worker.execution.change_request.get (API only) |
+| 400   | `project.bindings.repository.address_invalid`                 | The address host of a repository binding is outside the SSH host set of its platform.                                                                                                                                             | worker.execution.setup.get (API only)                                                                                         |
+| 409   | `repository.host_key.unpinned`                                | The address host of a repository binding holds no pinned host key; details `{ host }`.                                                                                                                                            | handover, worker.execution.setup.get (API only)                                                                               |
+| 409   | `repository.credential.ssh_key_legacy`                        | The SSH credential of a repository binding holds no generated key; details `{ credential }`.                                                                                                                                      | handover                                                                                                                      |
+| local | `cli.worker.register.invalid_idempotency_key`                 | The `--idempotency-key` value is not a canonical ULID.                                                                                                                                                                            | register                                                                                                                      |
+| 409   | `worker.action_performer.claim_not_evaluation`                | The action performer runs under a steps claim.                                                                                                                                                                                    | worker.action.request (API only)                                                                                              |
+| 409   | `worker.action_performer.assessment_not_current`              | The attempt holds no current passing assessment.                                                                                                                                                                                  | worker.action.request (API only)                                                                                              |
+| 409   | `worker.action_performer.snapshot_absent`                     | The current passing assessment names no repository snapshot of the binding of the action.                                                                                                                                         | worker.action.request (API only)                                                                                              |
+| 400   | `worker.registration.binding_unknown`                         | `resource_identity` names no current worker binding of `project_id`.                                                                                                                                                              | registration list                                                                                                             |
+| 404   | `worker.catalog.not_found`                                    | The worker name is absent from the catalog.                                                                                                                                                                                       | get                                                                                                                           |
+| 404   | `worker.registration.not_found`                               | The runtime identity is unknown, ended or not owned.                                                                                                                                                                              | registration get, registration deregister, registration resume                                                                |
+| 409   | `worker.registration.no_live_execution`                       | The registration is the claimant of no live execution.                                                                                                                                                                            | registration resume                                                                                                           |
+| 409   | `worker.registration.client_live`                             | The client identity holds another live registration.                                                                                                                                                                              | registration resume                                                                                                           |
+| 409   | `worker.registration.placement_mismatch`                      | The binding is at the `server` or the `container` placement and the client identity is not a pool slot of that binding.                                                                                                           | register                                                                                                                      |
+| 409   | `worker.registration.slot_unavailable`                        | The binding has no free slot or is unavailable.                                                                                                                                                                                   | register, registration resume                                                                                                 |
 
 `error.details` lists affected bindings or other dependents when applicable. No error holds secret material.
 

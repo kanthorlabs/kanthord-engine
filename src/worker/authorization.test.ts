@@ -56,7 +56,7 @@ test("Worker authorizes the pinned inference configuration and refuses each brok
       issuedAt: 0,
     },
     "jti",
-    createIdentity("worker_instance"),
+    createIdentity("worker_registration"),
   );
   const execution = {
     execution_id: createIdentity("execution"),
@@ -185,7 +185,7 @@ test("Worker authorizes one credential per distinct credential of the agents of 
       issuedAt: 0,
     },
     "jti",
-    createIdentity("worker_instance"),
+    createIdentity("worker_registration"),
   );
   const execution = {
     execution_id: createIdentity("execution"),

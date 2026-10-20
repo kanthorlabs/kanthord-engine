@@ -155,7 +155,10 @@ export function claimOnce(
   if (dependencies.projects.projectPaused(tx, identity.projectId))
     return { outcome: ClaimOutcome.None, row: null, settled };
   if (
-    !dependencies.registrations.instanceHealthcheck(tx, pull.runtime_identity)
+    !dependencies.registrations.registrationHealthcheck(
+      tx,
+      pull.runtime_identity,
+    )
   )
     return { outcome: ClaimOutcome.Refused, row: null, settled };
   const binding = dependencies.bindings.workerBindingOf(

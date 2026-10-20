@@ -82,8 +82,8 @@ export async function deregister(
   runtimeIdentity: string,
 ): Promise<Diagnostic | null> {
   assert.ok(runtimeIdentity);
-  assert.ok(api.worker["instance.deregister"]);
-  const result = await api.worker["instance.deregister"](
+  assert.ok(api.worker["registration.deregister"]);
+  const result = await api.worker["registration.deregister"](
     { params: { runtime_identity: runtimeIdentity }, query: {}, body: null },
     { idempotencyKey: ulid(), context: background },
   );
@@ -96,7 +96,7 @@ export async function deregister(
   const notFound = 404;
   if (
     result.status === notFound &&
-    result.error.error.code === WorkerErrorCode.InstanceNotFound
+    result.error.error.code === WorkerErrorCode.RegistrationNotFound
   )
     return null;
   return new Diagnostic(result.error.error.code, result.error.error.message);

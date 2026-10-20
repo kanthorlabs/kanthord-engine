@@ -106,7 +106,7 @@ test("execution proof precedes reservation and replay and supplies only proven c
     execution_id: createIdentity("execution"),
     project_id: createIdentity("project"),
     node_id: createIdentity("node"),
-    runtime_identity: createIdentity("worker_instance"),
+    runtime_identity: createIdentity("worker_registration"),
     worker_binding_id: createIdentity("binding"),
     attempt: 1,
     pinned_revision: 2,
@@ -195,7 +195,7 @@ test("execution proof precedes reservation and replay and supplies only proven c
   };
   for (const candidate of [
     undefined,
-    { ...row, runtime_identity: createIdentity("worker_instance") },
+    { ...row, runtime_identity: createIdentity("worker_registration") },
     { ...row, ended_at: now },
     { ...row, expired_at: now },
   ]) {

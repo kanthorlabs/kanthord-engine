@@ -13,8 +13,8 @@ import {
 } from "../../kernel/identity.ts";
 import { temporary } from "../../kernel/test-support.ts";
 import {
-  InstanceActivity,
-  instanceRecordSchema,
+  RegistrationActivity,
+  registrationRecordSchema,
   workerOperations,
 } from "../../worker/contract.ts";
 import { environment, kanthord, kanthordTerminal } from "./cli-support.ts";
@@ -55,16 +55,16 @@ const ErrorCode = {
   Catalog: "worker.catalog.not_found",
   Unauthorized: "gateway.authentication.unauthorized",
   Required: "gateway.registration.required",
-  Placement: "worker.instance.placement_mismatch",
-  BindingProject: "cli.worker.instance.list.binding_without_project",
-  Binding: "worker.instance.binding_unknown",
-  Runtime: "cli.worker.instance.get.invalid_runtime_identity",
-  Instance: "worker.instance.not_found",
-  Execution: "worker.instance.no_live_execution",
+  Placement: "worker.registration.placement_mismatch",
+  BindingProject: "cli.worker.registration.list.binding_without_project",
+  Binding: "worker.registration.binding_unknown",
+  Runtime: "cli.worker.registration.get.invalid_runtime_identity",
+  Registration: "worker.registration.not_found",
+  Execution: "worker.registration.no_live_execution",
 } as const;
 type Result = Awaited<ReturnType<typeof kanthord>>;
 type Registration = typeof workerOperations.register.output._output;
-type Instance = typeof instanceRecordSchema._output;
+type RegistrationRecord = typeof registrationRecordSchema._output;
 type CatalogPage =
   (typeof workerOperations)["catalog.list"]["output"]["_output"];
 type Fixture = Awaited<ReturnType<typeof setup>>;
@@ -234,8 +234,8 @@ test(
     let ridA: string;
     let ridB: string;
     let ridB2: string;
-    let record: Instance;
-    const list = ["worker", "instance", "list", "--project", f.project_id];
+    let record: RegistrationRecord;
+    const list = ["worker", "registration", "list", "--project", f.project_id];
     await t.test("E02.1 catalog lists declarations", async () => {
       const page = success<CatalogPage>(
         await kanthord(["worker", "list"], f.H),
@@ -320,7 +320,7 @@ test(
       ridA = success<Registration>(
         await kanthord(["worker", "register"], f.A),
       ).runtime_identity;
-      assert.ok(identitySchema("worker_instance").safeParse(ridA).success);
+      assert.ok(identitySchema("worker_registration").safeParse(ridA).success);
     });
     await t.test("E02.8 fresh registration key keeps identity", async () =>
       assert.equal(
@@ -336,9 +336,10 @@ test(
       assert.equal(success(await kanthord(["worker", "heartbeat"], f.A)), null),
     );
     await t.test("E02.11 filtered inventory", async () => {
-      const page = success<{ items: Instance[]; next_cursor: string | null }>(
-        await kanthord([...list, "--binding", BINDING], f.H),
-      );
+      const page = success<{
+        items: RegistrationRecord[];
+        next_cursor: string | null;
+      }>(await kanthord([...list, "--binding", BINDING], f.H));
       assert.equal(page.items.length, SINGLE_ITEM);
       assert.equal(page.next_cursor, null);
       record = page.items[0]!;
@@ -354,21 +355,21 @@ test(
         placement: "server",
         client_id: record.client_id,
         name: "server slot 0",
-        activity: InstanceActivity.Idle,
+        activity: RegistrationActivity.Idle,
         draining: false,
         registered: true,
       });
     });
     await t.test("E02.12 get equals inventory", async () =>
       assert.deepEqual(
-        success(await kanthord(["worker", "instance", "get", ridA], f.H)),
+        success(await kanthord(["worker", "registration", "get", ridA], f.H)),
         record,
       ),
     );
     await t.test("E02.13 local and server validation", async () => {
       refusal(
         await kanthord(
-          ["worker", "instance", "list", "--binding", BINDING],
+          ["worker", "registration", "list", "--binding", BINDING],
           f.H,
         ),
         ErrorCode.BindingProject,
@@ -378,29 +379,29 @@ test(
         ErrorCode.Binding,
       );
       refusal(
-        await kanthord(["worker", "instance", "get", "invalid"], f.H),
+        await kanthord(["worker", "registration", "get", "invalid"], f.H),
         ErrorCode.Runtime,
       );
     });
     await t.test("E02.14 live resume is idempotent", async () => {
       const result = success<
         Registration & { registered: boolean; idempotency_key: string }
-      >(await kanthord(["worker", "instance", "resume", ridA], f.H));
+      >(await kanthord(["worker", "registration", "resume", ridA], f.H));
       assert.equal(result.runtime_identity, ridA);
       assert.equal(result.registered, true);
       assert.ok(ulidSchema.safeParse(result.idempotency_key).success);
     });
     await t.test("E02.15 foreign client cannot deregister", async () =>
       refusal(
-        await kanthord(["worker", "instance", "deregister", ridA], f.B),
-        ErrorCode.Instance,
+        await kanthord(["worker", "registration", "deregister", ridA], f.B),
+        ErrorCode.Registration,
       ),
     );
     await t.test("E02.16 end replay and live inventory", async () => {
       const key = ulid();
       const args = [
         "worker",
-        "instance",
+        "registration",
         "deregister",
         ridA,
         "--idempotency-key",
@@ -414,8 +415,8 @@ test(
       });
       assert.deepEqual(success(await kanthord(args, f.A)), result);
       refusal(
-        await kanthord(["worker", "instance", "get", ridA], f.H),
-        ErrorCode.Instance,
+        await kanthord(["worker", "registration", "get", ridA], f.H),
+        ErrorCode.Registration,
       );
       assert.deepEqual(success(await kanthord(list, f.H)), {
         items: [],
@@ -424,7 +425,7 @@ test(
     });
     await t.test("E02.17 ended resume needs running execution", async () =>
       refusal(
-        await kanthord(["worker", "instance", "resume", ridA], f.H),
+        await kanthord(["worker", "registration", "resume", ridA], f.H),
         ErrorCode.Execution,
       ),
     );
@@ -461,7 +462,7 @@ test(
     });
     await t.test("E02.21 old identity has no execution", async () =>
       refusal(
-        await kanthord(["worker", "instance", "resume", ridB], f.H),
+        await kanthord(["worker", "registration", "resume", ridB], f.H),
         ErrorCode.Execution,
       ),
     );
@@ -502,13 +503,13 @@ test(
         });
         success(
           await kanthord(
-            ["worker", "instance", "deregister", runtimeIdentity],
+            ["worker", "registration", "deregister", runtimeIdentity],
             second.A,
           ),
         );
         const resumed = success<{ registered: boolean }>(
           await kanthord(
-            ["worker", "instance", "resume", runtimeIdentity],
+            ["worker", "registration", "resume", runtimeIdentity],
             second.H,
           ),
         );
@@ -519,13 +520,13 @@ test(
           ).runtime_identity,
           runtimeIdentity,
         );
-        const item = success<Instance>(
+        const item = success<RegistrationRecord>(
           await kanthord(
-            ["worker", "instance", "get", runtimeIdentity],
+            ["worker", "registration", "get", runtimeIdentity],
             second.H,
           ),
         );
-        assert.equal(item.activity, InstanceActivity.Executing);
+        assert.equal(item.activity, RegistrationActivity.Executing);
         assert.equal(item.execution_id, EXECUTION);
       },
     );
@@ -552,7 +553,7 @@ test(
         await kanthord(["worker", "register"], C),
       );
       assert.ok(
-        identitySchema("worker_instance").safeParse(item.runtime_identity)
+        identitySchema("worker_registration").safeParse(item.runtime_identity)
           .success,
       );
       assert.notEqual(item.runtime_identity, ridB2);

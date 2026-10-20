@@ -538,20 +538,20 @@ test("pull, registration resume and human pause settle an expired row before adm
   assert.notEqual(next.execution.execution_id, first.execution.execution_id);
   completed(
     await h.call(
-      workerOperations["instance.deregister"],
+      workerOperations["registration.deregister"],
       { params: { runtime_identity: h.general }, query: {}, body: null },
       h.generalToken,
     ),
   );
   now = next.execution.expired_at;
   refused(
-    await h.call(workerOperations["instance.resume"], {
+    await h.call(workerOperations["registration.resume"], {
       params: { runtime_identity: h.general },
       query: {},
       body: null,
     }),
     HttpStatus.Conflict,
-    "worker.instance.no_live_execution",
+    "worker.registration.no_live_execution",
   );
   const node = await h.node();
   assert.equal(node.state, NodeState.Executing);
