@@ -299,7 +299,7 @@ This example uses the proposed kind-specific fields below:
       "kind": "worker",
       "config": {
         "worker": "coder@1",
-        "placement": "worker",
+        "placement": "server",
         "instance_count": 1,
         "tags": ["platform.linux"],
         "resource_budget": { "turns": 50, "wall_time_ms": 1800000 },
