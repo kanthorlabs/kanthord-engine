@@ -35,6 +35,7 @@ engine/
 │   │   ├── service-mint.ts     # Service identity factory reserved for the server composition root
 │   │   ├── json.ts             # Canonical JSON, digests, key derivation, and timestamps
 │   │   ├── handover.ts         # Handover keys, additional authenticated data and envelope codec
+│   │   ├── hpke.ts             # HPKE seal and open to an X25519 key, key pairs and fingerprints
 │   │   ├── identity.ts         # Prefixed entity identities and ULID schemas
 │   │   ├── tag.ts              # Tag form and byte bound
 │   │   ├── values.ts           # JavaScript value predicates

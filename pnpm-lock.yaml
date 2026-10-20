@@ -25,6 +25,9 @@ importers:
       "@hono/node-server":
         specifier: 2.1.1
         version: 2.1.1(hono@4.13.3)
+      "@hpke/core":
+        specifier: 1.9.0
+        version: 1.9.0
       commander:
         specifier: 15.0.0
         version: 15.0.0
@@ -682,6 +685,20 @@ packages:
     engines: { node: ">=20" }
     peerDependencies:
       hono: ^4
+
+  "@hpke/common@1.10.1":
+    resolution:
+      {
+        integrity: sha512-moJwhmtLtuxiUzzNp1jpfBfx8yefKoO9D/RCR9dmwrnc7qjJqId1rEtQz+lSlU5cabX8daToMSx/7HayXOiaFw==,
+      }
+    engines: { node: ">=16.0.0" }
+
+  "@hpke/core@1.9.0":
+    resolution:
+      {
+        integrity: sha512-pFxWl1nNJeQCSUFs7+GAblHvXBCjn9EPN65vdKlYQil2aURaRxfGMO6vBKGqm1YHTKwiAxJQNEI70PbSowMP9Q==,
+      }
+    engines: { node: ">=16.0.0" }
 
   "@humanfs/core@0.19.2":
     resolution:
@@ -3525,6 +3542,12 @@ snapshots:
   "@hono/node-server@2.1.1(hono@4.13.3)":
     dependencies:
       hono: 4.13.3
+
+  "@hpke/common@1.10.1": {}
+
+  "@hpke/core@1.9.0":
+    dependencies:
+      "@hpke/common": 1.10.1
 
   "@humanfs/core@0.19.2":
     dependencies:
