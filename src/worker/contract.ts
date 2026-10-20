@@ -676,6 +676,7 @@ export interface PoolHost {
     generation: number,
     slot: number,
   ): string;
+  prepare(): void;
   start(slot: PoolSlot): void;
   drain(slot: PoolSlot): void;
   stop(): Promise<void>;

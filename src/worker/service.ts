@@ -257,6 +257,7 @@ export class WorkerService implements Service {
   startPool(): void {
     if (!this.pool || this.poolStarted) return;
     this.poolStarted = true;
+    this.dependencies.pool!.host.prepare();
     this.reconcile(null, true);
     void this.logUnavailableContainerDriver();
   }

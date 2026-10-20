@@ -83,6 +83,11 @@ export class WorkerPool implements PoolHost {
     return this.driver(placement).check();
   }
 
+  prepare(): void {
+    for (const driver of this.options.drivers.values())
+      driver.prepare().catch(() => {});
+  }
+
   start(slot: PoolSlot): void {
     if (this.stopping) return;
     const existing = this.entries.get(slot.client_id);

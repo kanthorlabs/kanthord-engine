@@ -255,10 +255,15 @@ export class ContainerDriver implements SlotDriver {
   }
 
   prepare(): Promise<void> {
-    this.prepared ??= this.removeOwned().catch((error: unknown) => {
-      this.prepared = null;
-      throw error;
-    });
+    this.prepared ??= this.removeOwned().then(
+      (answered) => {
+        if (!answered) this.prepared = null;
+      },
+      (error: unknown) => {
+        this.prepared = null;
+        throw error;
+      },
+    );
     return this.prepared;
   }
 
@@ -295,8 +300,10 @@ export class ContainerDriver implements SlotDriver {
       );
   }
 
-  private async removeOwned(): Promise<void> {
-    const runtime = await this.runtime();
+  private async removeOwned(): Promise<boolean> {
+    const status = await this.check();
+    if (!status.available || status.container_runtime === null) return false;
+    const runtime = status.container_runtime;
     const answer = await this.command(runtime, ownedArguments(this.owner));
     if (answer.code !== SUCCESS_CODE) throw commandFailure("ps", answer.stderr);
     const names = answer.stdout
@@ -304,5 +311,6 @@ export class ContainerDriver implements SlotDriver {
       .map((line) => line.trim())
       .filter(Boolean);
     for (const name of names) await this.removeContainer(runtime, name);
+    return true;
   }
 }
