@@ -3,7 +3,7 @@ import type { Worker } from "node:worker_threads";
 import { LogDestination } from "../../kernel/log.ts";
 import { InstancePlacement } from "../../worker/contract.ts";
 import { startThread } from "../worker/thread-start.ts";
-import type { ThreadControl } from "../worker/thread-data.ts";
+import type { SlotControl } from "../worker/thread-data.ts";
 import type {
   PlacementStatus,
   SlotDriver,
@@ -65,7 +65,7 @@ class ThreadInstance implements SlotInstance {
     });
   }
 
-  control(kind: ThreadControl["kind"]): void {
+  control(kind: SlotControl["kind"]): void {
     this.worker.postMessage({ kind });
   }
 

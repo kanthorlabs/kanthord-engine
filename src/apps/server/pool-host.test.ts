@@ -10,7 +10,7 @@ import { deriveClientSecret } from "../../gateway/auth/jwt.ts";
 import type { createInvocation } from "../../gateway/index.ts";
 import { temporary } from "../../kernel/test-support.ts";
 import { InstancePlacement, type PoolSlot } from "../../worker/contract.ts";
-import { ThreadControl } from "../worker/thread-data.ts";
+import { SlotControl } from "../worker/thread-data.ts";
 import type {
   PlacementStatus,
   SlotDriver,
@@ -192,7 +192,7 @@ test("a slot above the limit stays pending and the lowest pending slot starts wh
     ],
   );
   f.pool.drain({ ...first, draining: true });
-  assert.deepEqual(f.driver.instances[0]!.controls, [ThreadControl.Drain]);
+  assert.deepEqual(f.driver.instances[0]!.controls, [SlotControl.Drain]);
   f.driver.instances[0]!.end(CLEAN_CODE);
   await flush();
   assert.deepEqual(f.ended, [first.client_id]);
@@ -243,7 +243,7 @@ test("a drain request reaches the driver once and a raise of the slot resumes it
   f.pool.start(slot);
   f.pool.drain({ ...slot, draining: true });
   f.pool.drain({ ...slot, draining: true });
-  assert.deepEqual(f.driver.instances[0]!.controls, [ThreadControl.Drain]);
+  assert.deepEqual(f.driver.instances[0]!.controls, [SlotControl.Drain]);
   f.pool.start({ ...slot, draining: false });
   f.driver.instances[0]!.end(CLEAN_CODE);
   await flush();
@@ -256,7 +256,7 @@ test("a drain request reaches the driver once and a raise of the slot resumes it
 test("a slot that starts in drain mode receives the drain control at once", (t) => {
   const f = fixture(t);
   f.pool.start(f.slotOf(LOWEST_SLOT, true));
-  assert.deepEqual(f.driver.instances[0]!.controls, [ThreadControl.Drain]);
+  assert.deepEqual(f.driver.instances[0]!.controls, [SlotControl.Drain]);
 });
 
 test("a slot that drains with no registration ends when its instance fails", async (t) => {
@@ -292,7 +292,7 @@ test("stop sends the stop control and calls terminate after the stop deadline", 
   f.pool.start(f.slotOf(LOWEST_SLOT));
   const instance = f.driver.instances[0]!;
   const stopped = f.pool.stop();
-  assert.deepEqual(instance.controls, [ThreadControl.Stop]);
+  assert.deepEqual(instance.controls, [SlotControl.Stop]);
   t.mock.timers.tick(POOL_STOP_DEADLINE_MS - 1);
   assert.equal(instance.terminated, NO_TERMINATE);
   t.mock.timers.tick(1);

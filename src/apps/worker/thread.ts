@@ -2,8 +2,8 @@ import { isAbsolute } from "node:path";
 import { parentPort, workerData } from "node:worker_threads";
 import { Diagnostic } from "../../kernel/errors.ts";
 import {
-  ThreadControl,
-  threadControlSchema,
+  SlotControl,
+  slotControlSchema,
   threadDataSchema,
 } from "./thread-data.ts";
 import { portTransport } from "./transport.ts";
@@ -35,9 +35,9 @@ async function main(): Promise<void> {
       log: data.log,
     });
     parentPort?.on("message", (message: unknown) => {
-      const control = threadControlSchema.safeParse(message);
+      const control = slotControlSchema.safeParse(message);
       if (!control.success) return;
-      if (control.data.kind === ThreadControl.Drain) void unit.drain();
+      if (control.data.kind === SlotControl.Drain) void unit.drain();
       else void unit.stop();
     });
     const error = await unit.run();
