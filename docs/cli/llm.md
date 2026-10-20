@@ -366,8 +366,8 @@ validation call.
 Optional `--holder` names the holder of the new copy: `server` or a live worker
 instance. It defaults to `server`. With an instance name, the
 [login of an instance](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/llm.impl.md#the-login-of-an-instance)
-runs the flow on that instance. The instance takes the session at its next
-heartbeat, reports the address and the code, and seals the result to its own
+runs the flow on that instance. The instance receives the session in its next
+heartbeat answer, reports the address and the code, and seals the result to its own
 key. The server stores only the sealed copy. An instance session uses
 `copy_code` mode for `anthropic-subscription` and `device` mode for
 `openai-codex` and `github-copilot`. `--mode browser` answers
