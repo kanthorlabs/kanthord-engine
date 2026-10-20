@@ -421,6 +421,8 @@ export class LlmComponent implements Service {
   ): typeof llmOperations.create.output._output {
     const { name, platform, metadata } = body;
     return caller.commit((tx) => {
+      for (const copy of copies)
+        if (copy.holder !== SERVER_HOLDER) this.instanceKey(tx, copy.holder);
       const [answer] = this.records.createCopies(
         tx,
         this.platformSet,
@@ -509,8 +511,9 @@ export class LlmComponent implements Service {
       keys: [key],
     });
     throwIfCancelled(caller.context);
-    return caller.commit((tx) =>
-      this.records.rotateSealed(
+    return caller.commit((tx) => {
+      this.instanceKey(tx, holder);
+      return this.records.rotateSealed(
         tx,
         this.platformSet,
         credentialName,
@@ -522,8 +525,8 @@ export class LlmComponent implements Service {
           metadata: body.metadata,
         },
         humanIdentity(caller),
-      ),
-    );
+      );
+    });
   }
 
   private async providerCheck(

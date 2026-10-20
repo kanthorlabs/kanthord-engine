@@ -2770,3 +2770,55 @@ test("a key rotation between the server seal and the commit refuses the create a
     f.store.close();
   }
 });
+
+test("an instance archive between the server seal and the commit refuses the create and the rotate with llm.credential.instance_unknown", async () => {
+  const pair = await generateX25519KeyPair();
+  const live: InstanceKey = {
+    name: RELAY_A,
+    public_key: pair.public_key.toString("base64url"),
+    fingerprint: keyFingerprint(pair.public_key),
+  };
+  let reads = 0;
+  let archiveAfter = Number.POSITIVE_INFINITY;
+  const f = fixture({
+    instanceKeys: {
+      keyOf: (_tx, name) => {
+        if (name !== RELAY_A) return null;
+        reads += 1;
+        return reads > archiveAfter ? null : live;
+      },
+      nameOf: () => null,
+    },
+  });
+  try {
+    const body = {
+      name: "archived",
+      platform: Platform.Anthropic,
+      metadata: null,
+      secret: apiSecret,
+      holders: [RELAY_A],
+    };
+    archiveAfter = reads + 1;
+    await failsAsync(
+      async () => f.create(body),
+      HttpStatus.BadRequest,
+      INSTANCE_UNKNOWN_CODE,
+    );
+    assert.equal(credentialCount(f), NO_CREDENTIALS);
+    archiveAfter = Number.POSITIVE_INFINITY;
+    await f.create(body);
+    archiveAfter = reads + 1;
+    await failsAsync(
+      async () =>
+        f.invoke(llmOperations.rotate, {
+          params: { credential_name: "archived" },
+          query: { holder: RELAY_A },
+          body: { expected_revision: 1, secret: apiSecret },
+        }),
+      HttpStatus.BadRequest,
+      INSTANCE_UNKNOWN_CODE,
+    );
+  } finally {
+    f.store.close();
+  }
+});
