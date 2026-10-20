@@ -59,7 +59,7 @@ test("real listener serves unversioned liveness, applies host/origin policy and 
   const forbidden = await new Promise<{ status: number; body: string }>(
     (resolve, reject) => {
       const request = httpRequest(
-        fixture.endpoint + "/api/liveness",
+        fixture.endpoint + "/api/healthcheck",
         { headers: { Host: "evil.example", "X-Forwarded-Host": "localhost" } },
         (response) => {
           let body = "";

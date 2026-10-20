@@ -11,6 +11,7 @@ import {
   isHumanIdentity,
   isMachineIdentity,
   isServiceIdentity,
+  isWorkerIdentity,
   type CallerIdentity,
 } from "../kernel/caller.ts";
 import { GatewayError, failure, unauthorized } from "./errors.ts";
@@ -33,6 +34,16 @@ import type {
   OperationRegistry,
   RegisteredOperation,
 } from "../kernel/operation.ts";
+
+const AUTHENTICATED_POLICIES: Partial<
+  Record<AccessPolicy, (identity: CallerIdentity) => boolean>
+> = {
+  [AccessPolicy.Human]: isHumanIdentity,
+  [AccessPolicy.Client]: isMachineIdentity,
+  [AccessPolicy.Worker]: isWorkerIdentity,
+  [AccessPolicy.HumanOrWorker]: (identity) =>
+    isHumanIdentity(identity) || isWorkerIdentity(identity),
+};
 
 export interface InvocationOptions {
   authorization?: string;
@@ -281,20 +292,13 @@ export class Invocation {
               context,
               operation.requiresRegistration !== false,
             );
-      if (
-        operation.access === AccessPolicy.Human ||
-        operation.access === AccessPolicy.Client
-      ) {
+      const admits = AUTHENTICATED_POLICIES[operation.access];
+      if (admits) {
         identity ??= await this.authentication.authenticate(
           options.authorization,
           context,
         );
-        if (
-          operation.access === AccessPolicy.Human
-            ? !isHumanIdentity(identity)
-            : !isMachineIdentity(identity)
-        )
-          throw unauthorized();
+        if (!admits(identity)) throw unauthorized();
       }
       if (
         operation.access === AccessPolicy.Service &&
@@ -345,9 +349,11 @@ export class Invocation {
           ? identity.accountId
           : isMachineIdentity(identity)
             ? identity.clientId
-            : isServiceIdentity(identity)
-              ? identity.service
-              : undefined;
+            : isWorkerIdentity(identity)
+              ? identity.instanceId
+              : isServiceIdentity(identity)
+                ? identity.service
+                : undefined;
         if (!caller || !identity) throw unauthorized();
         const held = this.idempotency.reserve(
           options.idempotencyKey,

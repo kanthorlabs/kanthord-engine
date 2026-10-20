@@ -54,6 +54,7 @@ test("registration output enforces host, registration and activity field presenc
     registered: true,
     client_id: createIdentity("client_identity"),
     name: "worker-a",
+    instance: null,
     activity: RegistrationActivity.Idle,
     draining: false,
   };
@@ -120,6 +121,7 @@ test("registration records distinguish native/external placement and pure Schedu
             workerBindingOf: () => ({ ...BINDING, worker_name: workerName }),
             schedulerClaims: {
               agentSelectionsOf: () => [],
+              unendedExecutionOf: () => null,
               requireRunning: () => assert.fail("UNEXPECTED_COLLABORATION"),
               runningExecutionOfRuntime: () => {
                 throw new Error("read must not settle");
@@ -162,6 +164,7 @@ test("registration inventory pages live rows descending with both filters and ca
         agentSelectionsOf: () => [],
         requireRunning: () => assert.fail("UNEXPECTED_COLLABORATION"),
         runningExecutionOfRuntime: () => null,
+        unendedExecutionOf: () => null,
         activityOf: () => ({
           activity: RegistrationActivity.Idle,
           execution_id: null,

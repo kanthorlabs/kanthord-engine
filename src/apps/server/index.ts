@@ -113,6 +113,7 @@ import { ContainerDriver } from "./container-driver.ts";
 import { systemRuntimeHost } from "./container-runtime.ts";
 import { packageVersion } from "../../kernel/version.ts";
 import { WorkerPool } from "./worker-pool.ts";
+import { instanceIssuer } from "./instance-issuer.ts";
 import { AgentComponent, agentMigrations } from "../../agent/index.ts";
 import {
   WorkbenchService,
@@ -260,6 +261,11 @@ export function composeServices(options: {
         heartbeat: (runtimeIdentity) =>
           worker.registrations.heartbeat(runtimeIdentity),
       },
+      instances: {
+        liveInstance: (instanceId) => worker.instances.liveInstance(instanceId),
+        holdConnection: (instanceId, connectionId) =>
+          worker.instances.holdConnection(instanceId, connectionId),
+      },
     },
   });
   const threadDriver = new ThreadDriver();
@@ -301,6 +307,8 @@ export function composeServices(options: {
         worker.registrations.clientAttributionOf(tx, runtimeIdentity),
       registrationHealthcheck: (tx, runtimeIdentity) =>
         worker.registrationHealthcheck(tx, runtimeIdentity),
+      registrationsOfInstance: (tx, runtimeIdentity) =>
+        worker.registrationsOfInstance(tx, runtimeIdentity),
     },
     declarations: {
       declarationOf: (workerName) => worker.declarationOf(workerName),
@@ -519,6 +527,12 @@ export function composeServices(options: {
     store: options.store,
     workerBindingOf: (tx, projectId, resourceIdentity) =>
       project.workerBindingOf(tx, projectId, resourceIdentity),
+    workerBindingsOf: (tx, projectId) =>
+      project.workerBindingsOf(tx, projectId),
+    instanceIssuer: instanceIssuer(
+      options.config.master_key,
+      options.config.gateway.auth.version,
+    ),
     workerBindingRowOf: (tx, id) => project.workerBindingRowOf(tx, id),
     repositoryPolicyOf: (tx, id) => project.repositoryPolicyOf(tx, id),
     repositoryBindingIdsOf: (tx, nodeId, revision) =>
@@ -533,6 +547,7 @@ export function composeServices(options: {
       requireRunning: (...args) => scheduler.requireRunning(...args),
       runningExecutionOfRuntime: (...args) =>
         scheduler.runningExecutionOfRuntime(...args),
+      unendedExecutionOf: (...args) => scheduler.unendedExecutionOf(...args),
       activityOf: (...args) => scheduler.activityOf(...args),
       agentSelectionsOf: (...args) => scheduler.agentSelectionsOf(...args),
     },
@@ -679,6 +694,7 @@ export function composeServices(options: {
       worker.endRegistrations(tx, projectId, resourceIdentity, now),
     bindingsChanged: (projectId) => worker.bindingsChanged(projectId),
     placementStatus: (placement) => worker.placementStatus(placement),
+    instanceOf: (tx, name) => worker.instanceOf(tx, name),
     createMission: (tx, pid, actor) => mission.createMission(tx, pid, actor),
     liveNodesPinning: (tx, bid) => mission.liveNodesPinning(tx, bid),
     unmatchedClaims: (tx, projectId) =>

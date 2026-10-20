@@ -7,6 +7,7 @@ import type { Registration, VerifiedClient } from "./contract.ts";
 export const WORKER_REGISTRATION_PREFIX = "worker_registration";
 const NO_ROWS = 0;
 export interface RegistrationRow extends Registration {
+  instance_id: string | null;
   registered_at: number;
   ended_at: number | null;
 }
@@ -16,6 +17,7 @@ interface StoredRow {
   resource_identity: string;
   client_id: string;
   client_name: string;
+  instance_id: string | null;
   registered_at: number;
   ended_at: number | null;
 }
@@ -29,6 +31,7 @@ function row(value: StoredRow): RegistrationRow {
     resource_identity: value.resource_identity,
     client_id: value.client_id,
     name: value.client_name,
+    instance_id: value.instance_id,
     registered_at: value.registered_at,
     ended_at: value.ended_at,
   };
@@ -99,7 +102,7 @@ export function insertRegistration(
   const runtimeIdentity = createIdentity(WORKER_REGISTRATION_PREFIX);
   tx.database
     .prepare(
-      "INSERT INTO worker_registration (id, project_id, resource_identity, client_id, client_name, registered_at, ended_at) VALUES (?, ?, ?, ?, ?, ?, NULL)",
+      "INSERT INTO worker_registration (id, project_id, resource_identity, client_id, client_name, instance_id, registered_at, ended_at) VALUES (?, ?, ?, ?, ?, ?, ?, NULL)",
     )
     .run(
       runtimeIdentity,
@@ -107,10 +110,12 @@ export function insertRegistration(
       client.resource_identity,
       client.client_id,
       client.name,
+      client.instance_id ?? null,
       now,
     );
   return {
     ...client,
+    instance_id: client.instance_id ?? null,
     runtime_identity: runtimeIdentity,
     registered_at: now,
     ended_at: null,
@@ -205,4 +210,52 @@ export function readAllLive(tx: Transaction): RegistrationRow[] {
       .prepare("SELECT * FROM worker_registration WHERE ended_at IS NULL")
       .all() as unknown as StoredRow[]
   ).map(row);
+}
+
+export function endOfInstances(
+  tx: Transaction,
+  instanceIds: readonly string[],
+  now: number,
+): string[] {
+  assert.ok(tx.database.isTransaction);
+  assert.ok(Number.isSafeInteger(now));
+  const ended: string[] = [];
+  for (const instanceId of instanceIds)
+    for (const { id } of tx.database
+      .prepare(
+        "UPDATE worker_registration SET ended_at = ? WHERE instance_id = ? AND ended_at IS NULL RETURNING id",
+      )
+      .all(now, instanceId) as { id: string }[])
+      ended.push(id);
+  return ended;
+}
+
+export function registrationIdsOfInstance(
+  tx: Transaction,
+  instanceId: string,
+): string[] {
+  assert.ok(tx.database.isTransaction);
+  return (
+    tx.database
+      .prepare(
+        "SELECT id FROM worker_registration WHERE instance_id = ? ORDER BY id",
+      )
+      .all(instanceId) as { id: string }[]
+  ).map(({ id }) => id);
+}
+
+export function readLiveOfInstances(
+  tx: Transaction,
+  instanceIds: readonly string[],
+): RegistrationRow[] {
+  assert.ok(tx.database.isTransaction);
+  return instanceIds.flatMap((instanceId) =>
+    (
+      tx.database
+        .prepare(
+          "SELECT * FROM worker_registration WHERE instance_id = ? AND ended_at IS NULL ORDER BY id",
+        )
+        .all(instanceId) as unknown as StoredRow[]
+    ).map(row),
+  );
 }

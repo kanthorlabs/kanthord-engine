@@ -22,7 +22,7 @@ import { openaiCodexProvider } from "@earendil-works/pi-ai/providers/openai-code
 import { WorkerUnit } from "./src/apps/worker/unit.ts";
 
 async function main() {
-  new WorkerUnit({ transport: {}, client_secret: "", env: process.env, log: () => {} });
+  new WorkerUnit({ bindings: [], directories: { data: "", log: "" }, env: process.env, log: () => {} });
   const credential = {
     type: "oauth",
     access: ${JSON.stringify(FAKE_ACCESS)},

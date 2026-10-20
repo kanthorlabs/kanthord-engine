@@ -96,11 +96,9 @@ async function machineToken(
   const result = await kanthordTerminal(args, env);
   assert.equal(result.code, SUCCESS, result.stderr);
   assert.equal(result.stderr, NO_OUTPUT);
-  const fragment = parse(result.stdout) as {
-    token: string;
-    client_secret: string;
-  };
-  assert.ok(fragment.token && fragment.client_secret);
+  const fragment = parse(result.stdout) as { token: string };
+  assert.ok(fragment.token);
+  assert.doesNotMatch(result.stdout, /client_secret/);
   return fragment.token;
 }
 

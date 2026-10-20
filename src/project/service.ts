@@ -38,6 +38,7 @@ import {
   isPlatformSshHost,
 } from "../repository/platform.ts";
 import { WORKING_FILES } from "../agent/prompt-layers.ts";
+import { AgentErrorCode } from "../agent/contract.ts";
 import {
   InvalidReason,
   PROMPT_SOURCE_MAX_BYTES,
@@ -89,6 +90,8 @@ import {
   workerConfigSchema,
   workerConfigWriteSchema,
   workerTagsSchema,
+  workerInstancesSchema,
+  effectiveInstanceCount,
   type ProjectBindings,
   type AgentDependentBinding,
   type BindingNaming,
@@ -108,8 +111,8 @@ import {
   type WorkerBindingRow,
   type BindingsChanged,
   type PlacementStatusOf,
+  type InstanceOf,
   StablePlacementIssue,
-  WorkerPlacementIssue,
   WorkerPlacement,
   type EndRegistrations,
   type BindingChange,
@@ -269,6 +272,47 @@ function refuseInvalidTags(name: string, tags: unknown): void {
   }
   assert.ok(workerTagsSchema.safeParse(tags).success);
 }
+function refuseInstanceCount(
+  name: string,
+  config: { instance_count?: number; worker_instances?: unknown },
+): void {
+  if (config.worker_instances !== undefined)
+    throw new OperationError(
+      HttpStatus.BadRequest,
+      ProjectErrorCode.WorkerFieldForbidden,
+      "Only a binding at the worker placement lists worker instances.",
+      { binding: name, field: WorkerField.WorkerInstances },
+    );
+  if (
+    config.instance_count === undefined ||
+    config.instance_count < INSTANCE_COUNT_MIN ||
+    config.instance_count > INSTANCE_COUNT_MAX
+  )
+    throw new OperationError(
+      HttpStatus.BadRequest,
+      ProjectErrorCode.WorkerInstanceCountRange,
+      "Worker instance count is out of range.",
+    );
+}
+function refuseInvalidInstances(name: string, instances: unknown): string[] {
+  const refuse = (instance: string | null) =>
+    new OperationError(
+      HttpStatus.BadRequest,
+      ProjectErrorCode.WorkerInstancesInvalid,
+      "Worker instances must be a list of at most 64 unique instance names.",
+      { binding: name, instance },
+    );
+  if (!Array.isArray(instances) || instances.length > INSTANCE_COUNT_MAX)
+    throw refuse(null);
+  const seen = new Set<string>();
+  for (const instance of instances) {
+    if (!isString(instance) || seen.has(instance))
+      throw refuse(isString(instance) ? instance : null);
+    seen.add(instance);
+  }
+  assert.ok(workerInstancesSchema.safeParse(instances).success);
+  return [...seen];
+}
 const UTF8_ENCODING = "utf8";
 const CURSOR_ENCODING = "base64url";
 const PAGE_EXTRA = 1;
@@ -311,7 +355,8 @@ function workerRowOf(
     project_name: projectName,
     revision: row.revision,
     worker_name: config.worker,
-    instance_count: config.instance_count,
+    instance_count: effectiveInstanceCount(config),
+    worker_instances: config.worker_instances ?? [],
     placement: config.placement ?? null,
     generation:
       readGeneration(tx, row.project_id, row.resource_identity) ??
@@ -462,6 +507,7 @@ export interface Dependencies {
   endRegistrations: EndRegistrations;
   bindingsChanged: BindingsChanged;
   placementStatus: PlacementStatusOf;
+  instanceOf: InstanceOf;
   wakeup: SchedulerWakeup;
   health?: HealthRegistry;
   bindings?: ProjectBindings;
@@ -491,6 +537,7 @@ export class ProjectService implements Service, ProjectBindings {
   private readonly endRegistrations: EndRegistrations;
   private readonly bindingsChanged: BindingsChanged;
   private readonly placementStatus: PlacementStatusOf;
+  private readonly instanceOf: InstanceOf;
   private readonly wakeup: SchedulerWakeup;
   constructor(dependencies: Dependencies) {
     this.bindings = dependencies.bindings;
@@ -513,6 +560,7 @@ export class ProjectService implements Service, ProjectBindings {
     this.endRegistrations = dependencies.endRegistrations;
     this.bindingsChanged = dependencies.bindingsChanged;
     this.placementStatus = dependencies.placementStatus;
+    this.instanceOf = dependencies.instanceOf;
     this.wakeup = dependencies.wakeup;
     dependencies.health?.register("project", () => this.healthcheck());
   }
@@ -857,6 +905,7 @@ export class ProjectService implements Service, ProjectBindings {
       : null;
     const view = this.workerAgentView(tx, config.worker, agent, entry);
     assert.ok(view, "Declared agents must have a worker view.");
+    const holderRefused = config.placement === WorkerPlacement.Worker;
     assert.ok(project.binding_set_version >= BINDING_SET_INITIAL_VERSION);
     return {
       agent,
@@ -869,8 +918,16 @@ export class ProjectService implements Service, ProjectBindings {
       chain: view.chain,
       active_position: view.active_position,
       cooling: view.cooling,
-      valid: view.valid,
-      issues: view.issues,
+      valid: view.valid && !holderRefused,
+      issues: holderRefused
+        ? [
+            ...view.issues,
+            {
+              path: [WorkerField.Placement],
+              code: AgentErrorCode.CredentialHolderMismatch,
+            },
+          ]
+        : view.issues,
     };
   }
   private declareAgentReads(registry: OperationRegistry): void {
@@ -992,18 +1049,6 @@ export class ProjectService implements Service, ProjectBindings {
             : [],
         )
         .at(FIRST_INDEX);
-    const worker = firstAdded(WorkerPlacement.Worker);
-    if (worker !== undefined)
-      return new OperationError(
-        HttpStatus.Conflict,
-        ProjectErrorCode.WorkerPlacementUnavailable,
-        "The server has no worker instance for the worker placement.",
-        {
-          binding: worker,
-          placement: WorkerPlacement.Worker,
-          reason: WorkerPlacementIssue.InstancesAbsent,
-        },
-      );
     const first = firstAdded(WorkerPlacement.Container);
     if (first === undefined) return null;
     const { available, reason } = await this.placementStatus(
@@ -1097,7 +1142,7 @@ export class ProjectService implements Service, ProjectBindings {
       assert.ok(latest);
       if (
         latest.removed_at !== null ||
-        workerConfigSchema.parse(latest.config).instance_count ===
+        effectiveInstanceCount(workerConfigSchema.parse(latest.config)) ===
           INSTANCE_COUNT_MIN
       )
         this.endRegistrations(tx, row.project_id, row.resource_identity, now);
@@ -1144,15 +1189,6 @@ export class ProjectService implements Service, ProjectBindings {
     name: string,
     config: typeof workerConfigWriteSchema._output,
   ): void {
-    if (
-      config.instance_count < INSTANCE_COUNT_MIN ||
-      config.instance_count > INSTANCE_COUNT_MAX
-    )
-      throw new OperationError(
-        HttpStatus.BadRequest,
-        ProjectErrorCode.WorkerInstanceCountRange,
-        "Worker instance count is out of range.",
-      );
     refuseInvalidTags(name, config.tags);
     const agents = this.workerAgentsOf(config.worker);
     if (agents.length === EMPTY_LENGTH) {
@@ -1161,6 +1197,7 @@ export class ProjectService implements Service, ProjectBindings {
         WorkerField.Entries,
         WorkerField.ResourceBudget,
         WorkerField.Placement,
+        WorkerField.WorkerInstances,
       ]) {
         if (config[field] === undefined) continue;
         throw new OperationError(
@@ -1170,6 +1207,7 @@ export class ProjectService implements Service, ProjectBindings {
           { binding: name, field },
         );
       }
+      refuseInstanceCount(name, config);
       return;
     }
     if (config.placement === undefined)
@@ -1179,6 +1217,9 @@ export class ProjectService implements Service, ProjectBindings {
         "A hosted worker binding states its placement.",
         { binding: name },
       );
+    if (config.placement === WorkerPlacement.Worker)
+      this.validateWorkerInstances(tx, name, config);
+    else refuseInstanceCount(name, config);
     const entries = new Map(
       (config.entries ?? []).map(({ agent, ...entry }) => [agent, entry]),
     );
@@ -1192,6 +1233,46 @@ export class ProjectService implements Service, ProjectBindings {
     }
     for (const agent of agents)
       this.validateEntry(tx, config.worker, entries.get(agent) ?? null);
+  }
+  private validateWorkerInstances(
+    tx: Transaction,
+    name: string,
+    config: typeof workerConfigWriteSchema._output,
+  ): void {
+    if (config.instance_count !== undefined)
+      throw new OperationError(
+        HttpStatus.BadRequest,
+        ProjectErrorCode.WorkerFieldForbidden,
+        "The worker placement holds worker_instances in place of instance_count.",
+        { binding: name, field: WorkerField.InstanceCount },
+      );
+    if (config.worker_instances === undefined)
+      throw new OperationError(
+        HttpStatus.BadRequest,
+        ProjectErrorCode.WorkerInstancesRequired,
+        "A binding at the worker placement lists its worker instances.",
+        { binding: name },
+      );
+    for (const instance of refuseInvalidInstances(
+      name,
+      config.worker_instances,
+    )) {
+      const record = this.instanceOf(tx, instance);
+      if (!record)
+        throw new OperationError(
+          HttpStatus.BadRequest,
+          ProjectErrorCode.WorkerInstanceUnknown,
+          "The binding lists an unknown or archived worker instance.",
+          { binding: name, instance },
+        );
+      if (record.worker !== config.worker)
+        throw new OperationError(
+          HttpStatus.BadRequest,
+          ProjectErrorCode.WorkerInstanceWorkerMismatch,
+          "The binding lists a worker instance of another worker.",
+          { binding: name, instance, worker: record.worker },
+        );
+    }
   }
   entriesOfAgent(tx: Transaction, agentName: string): AgentDependentBinding[] {
     assert.ok(tx.database.isTransaction);
@@ -1283,7 +1364,7 @@ export class ProjectService implements Service, ProjectBindings {
     });
     const disabled =
       current.kind === BindingKind.Worker
-        ? current.config.instance_count === INSTANCE_COUNT_MIN
+        ? effectiveInstanceCount(current.config) === INSTANCE_COUNT_MIN
         : current.config.available === false;
     return {
       project_id: binding.project_id,
@@ -1432,14 +1513,16 @@ export class ProjectService implements Service, ProjectBindings {
         return null;
       assert.equal(row.project_id, projectId);
       assert.equal(row.resource_identity, resourceIdentity);
-      if (
-        workerConfigSchema.parse(row.config).instance_count ===
-        INSTANCE_COUNT_MIN
-      )
-        return null;
+      const config = workerConfigSchema.parse(row.config);
+      if (effectiveInstanceCount(config) === INSTANCE_COUNT_MIN) return null;
       const tombstone = readLatestTombstone(tx, projectId, resourceIdentity);
       if (tombstone && tombstone.created_at > issuedAt) return null;
-      return { project_id: projectId, resource_identity: resourceIdentity };
+      return {
+        project_id: projectId,
+        resource_identity: resourceIdentity,
+        placement: config.placement ?? null,
+        worker_instances: config.worker_instances ?? [],
+      };
     });
   }
   private readonly shutdown = new CancellationContext();

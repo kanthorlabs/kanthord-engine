@@ -79,8 +79,12 @@ const productionImportPatterns = [
 ];
 const slotTokenPattern = {
   group: ["**/auth/jwt.ts"],
-  importNames: ["generateSlotJWT"],
-  message: "Only src/apps/server/ mints a slot token.",
+  importNames: [
+    "generateSlotJWT",
+    "generateWorkerJWT",
+    "generateInstanceClientJWT",
+  ],
+  message: "Only src/apps/server/ mints a slot token or an instance token.",
 };
 
 const comparisonLiteral =
@@ -231,7 +235,7 @@ export default tseslint.config(
                 {
                   to: element("apps-worker", {
                     fileInternalPath:
-                      "{transport,thread-data,evidence-upload}.ts",
+                      "{transport,thread-data,evidence-upload,unit}.ts",
                   }),
                 },
                 {
@@ -255,7 +259,9 @@ export default tseslint.config(
                 { to: applicationEntry("apps-server") },
                 { to: applicationEntry("apps-worker") },
                 {
-                  to: element("apps-worker", { fileInternalPath: "slot.ts" }),
+                  to: element("apps-worker", {
+                    fileInternalPath: "{slot.ts,instance-config.ts}",
+                  }),
                 },
                 { to: serviceEntry("contract.ts") },
                 {

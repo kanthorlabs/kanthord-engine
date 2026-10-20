@@ -3,7 +3,6 @@ import { test, type TestContext } from "node:test";
 import { spawnSync } from "node:child_process";
 import { createServer, type IncomingHttpHeaders } from "node:http";
 import type { AddressInfo } from "node:net";
-import { randomBytes } from "node:crypto";
 import {
   existsSync,
   readFileSync,
@@ -32,29 +31,32 @@ import {
 import { clientConfigPath, resolveClient } from "../../gateway/client.ts";
 
 import { ExitCode } from "./constants.ts";
+import { generateX25519KeyPair } from "../../kernel/hpke.ts";
+import { instanceConfigurationValue } from "../../worker/contract.ts";
+import { INSTANCE_CONFIG_VARIABLE } from "../worker/instance-config.ts";
 import { runKanthord } from "./test-support.ts";
 
 const EMPTY_OUTPUT = "";
 const TOKEN_ROW = "token: ";
 const HANDOVER_LOST =
   "cli.worker.handover.indeterminate: worker handover: the result is unknown; retry with a new idempotency key\n";
-const MACHINE_TOKEN_ROW = "token:         ";
+const MACHINE_TOKEN_ROW = "token: ";
 const JWT_OUTPUT = /eyJ[A-Za-z0-9_-]*\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/;
 const PROJECT_GET = "get";
 const PROJECT_ID = "project_01ARZ3NDEKTSV4RRFFQ69G5FAV";
 const PREFIX_BASE_PATH = "/s/kanthord";
 const BINDING_ID = "binding_01ARZ3NDEKTSV4RRFFQ69G5FAV";
 const SINGLE_DIAGNOSTIC_LINE = 1;
-const CLIENT_SECRET_BYTES = 32;
+const DATA_DIRECTORY = "data";
+const WORKER_UNREACHABLE_ENDPOINT = "http://127.0.0.1:1";
 const WORKER_UNREACHABLE_ARGS = [
   "serve",
   "worker",
+  "--instance",
+  "laptop",
   "--endpoint",
-  "http://127.0.0.1:1",
-  "--token",
-  "x",
+  WORKER_UNREACHABLE_ENDPOINT,
 ];
-const CLIENT_CONFIG_ENTRIES = ["kanthord", join("kanthord", "cli.yaml")];
 const TOKEN_LIFETIME_SECONDS = 600;
 const CONTAINER_INIT_HINT =
   "container: podman run --rm -v <volume>:/var/lib/kanthord docker.io/kanthorlabs/kanthord:<version> config init --gateway-bind :: --gateway-allowed-host localhost:<port> --gateway-allowed-host 127.0.0.1:<port>\n";
@@ -694,7 +696,7 @@ test("agent get and prompt commands expose help and refuse invalid options befor
   assert.match(missing.stderr, /^cli\.file\.not_found:/);
 });
 
-test("serve worker rejects server configuration and requires a client_secret before contacting an unavailable server", async (t) => {
+test("serve worker refuses --config and --token and requires an instance configuration before contacting a server", async (t) => {
   const directory = temporary(t);
   const env = environment(directory);
   env.XDG_STATE_HOME = temporary(t);
@@ -704,26 +706,34 @@ test("serve worker rejects server configuration and requires a client_secret bef
   );
   assert.equal(config.status, ExitCode.Failure);
   assert.match(config.stderr, /^cli\.serve\.worker_config:/);
+  const token = await invocation(["serve", "worker", "--token", "x"], env);
+  assert.equal(token.status, ExitCode.Failure);
+  assert.match(token.stderr, /^cli\.serve\.worker_token:/);
   const absent = await invocation(WORKER_UNREACHABLE_ARGS, env);
   assert.equal(absent.status, ExitCode.Failure);
   assert.equal(absent.stdout, EMPTY_OUTPUT);
-  assert.equal(absent.stderr.trim().split("\n").length, SINGLE_DIAGNOSTIC_LINE);
-  assert.match(absent.stderr, /^worker\.start\.client_secret_absent:/);
+  assert.match(absent.stderr, /^worker\.start\.instance_config_absent:/);
+  assert.match(absent.stderr, /^variable: +KANTHORD_WORKER_CONFIG$/m);
+  assert.ok(
+    absent.stderr.includes(
+      join(env.XDG_CONFIG_HOME!, "kanthord", "workers", "laptop.yaml"),
+    ),
+  );
   assert.deepEqual(readdirSync(directory), []);
 });
 
-test("serve worker with a client_secret reports an unavailable server without changing cli.yaml", async (t) => {
+test("serve worker with an instance configuration reports an unavailable server and writes only the pi tools", async (t) => {
   const directory = temporary(t);
   const env = environment(directory);
   env.XDG_STATE_HOME = temporary(t);
-  const path = clientConfigPath(env);
-  const content = stringify({
-    client_secret: randomBytes(CLIENT_SECRET_BYTES).toString("base64"),
+  const pair = await generateX25519KeyPair();
+  env[INSTANCE_CONFIG_VARIABLE] = instanceConfigurationValue({
+    name: "laptop",
+    endpoint: WORKER_UNREACHABLE_ENDPOINT,
+    instance_id: "worker_instance_01ARZ3NDEKTSV4RRFFQ69G5FAA",
+    private_key: pair.private_key.toString("base64url"),
   });
-  writePrivate(path, content);
-  const filesBefore = readdirSync(directory, { recursive: true });
-  assert.deepEqual(filesBefore, CLIENT_CONFIG_ENTRIES);
-  const unavailable = await invocation(WORKER_UNREACHABLE_ARGS, env);
+  const unavailable = await invocation(["serve", "worker"], env);
   assert.equal(unavailable.status, ExitCode.Failure);
   assert.equal(unavailable.stdout, EMPTY_OUTPUT);
   assert.equal(
@@ -731,8 +741,7 @@ test("serve worker with a client_secret reports an unavailable server without ch
     SINGLE_DIAGNOSTIC_LINE,
   );
   assert.match(unavailable.stderr, /^worker\.version\.unavailable:/);
-  assert.deepEqual(readdirSync(directory, { recursive: true }), filesBefore);
-  assert.equal(readFileSync(path, "utf8"), content);
+  assert.deepEqual(readdirSync(directory), [DATA_DIRECTORY]);
 });
 
 test("--version prints the package version and exits without work", async (t) => {
@@ -1051,7 +1060,7 @@ test("jwt --output creates a private default client file with a verifiable human
   assert.doesNotMatch(result.stdout + result.stderr, JWT_OUTPUT);
 });
 
-test("jwt --output with --binding writes the machine token and client secret to a private file and prints neither", async (t) => {
+test("jwt --output with --binding writes the machine token without the client secret to a private file and prints neither", async (t) => {
   const env = environment(temporary(t));
   writePrivate(env.KANTHORD_CONFIG!, initialConfig());
   const config = loadConfig(env.KANTHORD_CONFIG!);
@@ -1076,18 +1085,15 @@ test("jwt --output with --binding writes the machine token and client secret to 
   assert.equal(result.stdout, `created: ${path}\n`);
   assert.equal(statSync(path).mode & 0o7777, PRIVATE_FILE_MODE);
   const document = parse(readFileSync(path, "utf8"));
-  assert.deepEqual(Object.keys(document), [
-    "endpoint",
-    "token",
-    "client_secret",
-  ]);
+  assert.deepEqual(Object.keys(document), ["endpoint", "token"]);
   const sub = String(decode(document.token).payload.sub);
-  assert.equal(
-    document.client_secret,
-    deriveClientSecret(config.master_key, config.gateway.auth.version, sub),
+  const secret = deriveClientSecret(
+    config.master_key,
+    config.gateway.auth.version,
+    sub,
   );
   assert.ok(!(result.stdout + result.stderr).includes(document.token));
-  assert.ok(!(result.stdout + result.stderr).includes(document.client_secret));
+  assert.ok(!(result.stdout + result.stderr).includes(secret));
 });
 
 test("jwt --output resolves an explicit relative export path and writes the endpoint before the token", async (t) => {
@@ -1289,8 +1295,6 @@ test("jwt accepts display names and issues fresh machine identities without open
   assert.equal(decode(parse(human.stdout).token).payload.name, name);
   const subjects = new Set<string>();
   const sessions = new Set<string>();
-  const secrets = new Set<string>();
-  const config = loadConfig(env.KANTHORD_CONFIG!);
   const ISSUANCES = 2;
   for (let index = 0; index < ISSUANCES; index++) {
     const result = await invocation(
@@ -1308,30 +1312,10 @@ test("jwt accepts display names and issues fresh machine identities without open
       true,
     );
     assert.equal(result.status, ExitCode.Success, result.stderr);
-    const { token, client_secret: clientSecret } = parse(result.stdout);
-    assert.equal(
-      result.stdout,
-      `${MACHINE_TOKEN_ROW}${token}\nclient_secret: ${clientSecret}\n`,
-    );
+    const { token } = parse(result.stdout);
+    assert.equal(result.stdout, `${MACHINE_TOKEN_ROW}${token}\n`);
     assert.equal(result.stderr, EMPTY_OUTPUT);
     const claims = decode(token).payload;
-    assert.equal(
-      clientSecret,
-      deriveClientSecret(
-        config.master_key,
-        config.gateway.auth.version,
-        String(claims.sub),
-      ),
-    );
-    assert.equal(
-      Buffer.from(clientSecret, "base64").length,
-      CLIENT_SECRET_BYTES,
-    );
-    assert.equal(
-      Buffer.from(clientSecret, "base64").toString("base64"),
-      clientSecret,
-    );
-    secrets.add(clientSecret);
     assert.equal(claims.kind, IdentityKind.Client);
     assert.equal(claims.project_id, PROJECT_ID);
     assert.equal(claims.resource_identity, `worker:kanthord:${binding}`);
@@ -1345,7 +1329,6 @@ test("jwt accepts display names and issues fresh machine identities without open
   }
   assert.equal(subjects.size, ISSUANCES);
   assert.equal(sessions.size, ISSUANCES);
-  assert.equal(secrets.size, ISSUANCES);
   const conflict = await invocation(
     ["auth", "jwt", "generate", "ulrich", "--binding", binding],
     env,
@@ -1443,16 +1426,10 @@ test("auth jwt group, verbose generation, inspection and token precedence", asyn
     true,
   );
   assert.equal(machine.status, ExitCode.Success, machine.stderr);
-  const [machineTokenLine, secretLine, ...machineClaims] =
-    machine.stdout.split("\n");
+  const [machineTokenLine, ...machineClaims] = machine.stdout.split("\n");
   const machineToken = machineTokenLine!.slice(MACHINE_TOKEN_ROW.length);
-  const machineSecret = deriveClientSecret(
-    loadConfig(env.KANTHORD_CONFIG!).master_key,
-    loadConfig(env.KANTHORD_CONFIG!).gateway.auth.version,
-    String(decode(machineToken).payload.sub),
-  );
   assert.equal(machineTokenLine, `${MACHINE_TOKEN_ROW}${machineToken}`);
-  assert.equal(secretLine, `client_secret: ${machineSecret}`);
+  assert.doesNotMatch(machine.stdout, /client_secret/);
   const machineInspect = await invocation(
     ["auth", "jwt", "inspect", machineToken],
     env,

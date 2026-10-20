@@ -1,0 +1,107 @@
+# Generated from the operation registry by kanthord gateway openapi.
+pathItem:
+  post:
+    operationId: worker.instance.token
+    tags:
+      - worker
+    description: Answer a worker token sealed to the public key of the live instance
+      revision. The call changes no state.
+    x-access-policy: public
+    x-timeout-ms: 30000
+    x-mutation: false
+    x-kanthord-lifetime: unary
+    security: []
+    parameters: []
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/worker.instance.token.Input/properties/body"
+    responses:
+      "200":
+        description: Completed result
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/worker.instance.token.Output"
+      "400":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "401":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "403":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "404":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "409":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "413":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "415":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "500":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "503":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "504":
+        $ref: ../shared/components.yaml#/components/responses/Error
+components:
+  schemas:
+    worker.instance.token.Input:
+      type: object
+      properties:
+        params:
+          type: object
+          properties: {}
+          additionalProperties: false
+        query:
+          type: object
+          properties: {}
+          additionalProperties: false
+        body:
+          type: object
+          properties:
+            instance_id:
+              type: string
+              minLength: 42
+              maxLength: 42
+              pattern: ^worker_instance_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+              description: worker_instance_ followed by a canonical 26-character uppercase
+                ULID.
+          required:
+            - instance_id
+          additionalProperties: false
+      required:
+        - params
+        - query
+        - body
+      additionalProperties: false
+    worker.instance.token.Output:
+      type: object
+      properties:
+        server_version:
+          type: string
+          minLength: 1
+        sealed:
+          type: object
+          properties:
+            alg:
+              type: string
+              const: hpke-x25519-sha256-aes128gcm
+            enc:
+              type: string
+              minLength: 1
+              pattern: ^[A-Za-z0-9_-]+$
+            ciphertext:
+              type: string
+              minLength: 1
+              pattern: ^[A-Za-z0-9_-]+$
+          required:
+            - alg
+            - enc
+            - ciphertext
+          additionalProperties: false
+      required:
+        - server_version
+        - sealed
+      additionalProperties: false

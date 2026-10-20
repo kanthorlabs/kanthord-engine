@@ -5,11 +5,13 @@ import { simpleGit } from "simple-git";
 import { ulid } from "ulid";
 import { IdentityKind } from "../../kernel/caller.ts";
 import { join } from "node:path";
-import { stringify } from "yaml";
-import { Worker, type WorkerOptions } from "../worker/index.ts";
+import { WorkerUnit } from "../worker/unit.ts";
+import { directories } from "../../kernel/xdg.ts";
+import type { ModelRuntimeFactory } from "../../worker/unit/index.ts";
+import { httpTransport } from "../worker/transport.ts";
 import { temporary } from "../../kernel/test-support.ts";
 import { writePrivate } from "../../kernel/files.ts";
-import { clientConfigPath, httpClient } from "../../gateway/client.ts";
+import { httpClient } from "../../gateway/client.ts";
 import {
   REPOSITORY_COMPONENT_NAME,
   repositoryOperations,
@@ -308,10 +310,13 @@ export const domainHealth = {
 
 export async function inProcessWorker(
   t: TestContext,
-  input: Pick<
-    WorkerOptions,
-    "endpoint" | "token" | "modelRuntimeFactory" | "repositoryTransport"
-  > & { client_secret: string },
+  input: {
+    endpoint: string;
+    token: string;
+    client_secret: string;
+    modelRuntimeFactory?: ModelRuntimeFactory;
+    repositoryTransport?: RepositoryTransport;
+  },
 ) {
   const root = temporary(t);
   const env = {
@@ -320,24 +325,34 @@ export async function inProcessWorker(
     XDG_CONFIG_HOME: join(root, "config"),
     XDG_STATE_HOME: join(root, "state"),
   };
-  writePrivate(
-    clientConfigPath(env),
-    stringify({ client_secret: input.client_secret }),
-  );
+  const state = directories(env).state;
   const logs: Record<string, unknown>[] = [];
   const ready = Promise.withResolvers<void>();
   const readyMessage = "Worker application ready";
-  const worker = new Worker({
-    ...input,
+  const worker = new WorkerUnit({
+    bindings: [
+      {
+        transport: httpTransport(input.endpoint, input.token),
+        client_secret: input.client_secret,
+      },
+    ],
+    directories: { data: state, log: state },
     env,
+    model_runtime_factory: input.modelRuntimeFactory,
+    repository_transport: input.repositoryTransport,
     log: (line) => {
       const record = JSON.parse(line) as Record<string, unknown>;
       logs.push(record);
       if (record.msg === readyMessage) ready.resolve();
     },
   });
+  const stop = () => {
+    void worker.stop();
+  };
+  process.on("SIGTERM", stop);
   const running = worker.run();
   t.after(async () => {
+    process.off("SIGTERM", stop);
     await worker.stop();
     await running;
   });

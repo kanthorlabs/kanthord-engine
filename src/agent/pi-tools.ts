@@ -52,6 +52,7 @@ type PiToolTarget = z.infer<typeof targetSchema>;
 
 export interface PiToolsOptions {
   env?: NodeJS.ProcessEnv;
+  directory?: string;
   target?: string;
   manifest?: PiToolsManifest;
   assets?: BinaryAssetSource;
@@ -153,7 +154,7 @@ export function installPiTools(options: PiToolsOptions = {}): void {
     options.manifest ??
     piToolsManifestSchema.parse(JSON.parse(shippedAsset(PI_TOOLS_MANIFEST)));
   const binDirectory = join(
-    piDirectory(options.env ?? process.env),
+    options.directory ?? piDirectory(options.env ?? process.env),
     BIN_DIRECTORY_NAME,
   );
   for (const [tool, definition] of Object.entries(manifest.tools)) {

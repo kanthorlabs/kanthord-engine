@@ -212,6 +212,9 @@ export class SchedulerService implements Service, WorkQueue {
   liveExecutionOf(tx: Transaction, nodeId: string, now: number) {
     return settlement.liveExecutionOf(tx, nodeId, now);
   }
+  unendedExecutionOf(tx: Transaction, runtimeIdentity: string) {
+    return readUnendedOfRuntime(tx, runtimeIdentity);
+  }
   runningExecutionOfRuntime(
     tx: Transaction,
     runtimeIdentity: string,

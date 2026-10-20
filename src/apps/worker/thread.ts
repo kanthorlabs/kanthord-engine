@@ -1,6 +1,7 @@
 import { isAbsolute } from "node:path";
 import { parentPort, workerData } from "node:worker_threads";
 import { Diagnostic } from "../../kernel/errors.ts";
+import { directories } from "../../kernel/xdg.ts";
 import {
   SlotControl,
   slotControlSchema,
@@ -28,9 +29,15 @@ async function main(): Promise<void> {
         "worker: the directory variables must be absolute paths.",
         { fields: [["variables", refused.join(", ")]] },
       );
+    const state = directories(process.env).state;
     const unit = new WorkerUnit({
-      transport: portTransport(data.port),
-      client_secret: data.client_secret,
+      bindings: [
+        {
+          transport: portTransport(data.port),
+          client_secret: data.client_secret,
+        },
+      ],
+      directories: { data: state, log: state },
       env: process.env,
       log: data.log,
     });

@@ -7,7 +7,6 @@ import { writePrivate } from "../../kernel/files.ts";
 import { formatRows } from "../../kernel/rows.ts";
 import { isNumber, isObject, isString } from "../../kernel/values.ts";
 import {
-  deriveClientSecret,
   generateHumanJWT,
   generateMachineJWT,
   KANTHORD_AUTH_USERNAME,
@@ -134,20 +133,6 @@ function validateGenerateOptions(
   if (options.endpoint !== undefined) validateClientEndpoint(options.endpoint);
 }
 
-async function machineClientSecret(
-  config: { master_key: string; gateway: { auth: { version: number } } },
-  token: string,
-): Promise<string> {
-  const { decode } = await import("hono/jwt");
-  const { sub } = decode(token).payload;
-  assert.ok(isString(sub));
-  return deriveClientSecret(
-    config.master_key,
-    config.gateway.auth.version,
-    sub,
-  );
-}
-
 export function addAuthCommand(program: Command): void {
   assert.equal(program.name(), PROGRAM_NAME);
   assert.ok(
@@ -217,10 +202,6 @@ export function addAuthCommand(program: Command): void {
                 { projectId: options.project!, bindingName: options.binding },
                 options.name,
               );
-        const clientSecret =
-          options.binding === undefined
-            ? undefined
-            : await machineClientSecret(config, token);
         if (options.output !== undefined) {
           const path = isString(options.output)
             ? resolve(options.output)
@@ -230,9 +211,6 @@ export function addAuthCommand(program: Command): void {
               ? {}
               : { endpoint: options.endpoint }),
             token,
-            ...(clientSecret === undefined
-              ? {}
-              : { client_secret: clientSecret }),
           });
           const { stringify } = await import("yaml");
           publishClientConfig(
@@ -241,13 +219,7 @@ export function addAuthCommand(program: Command): void {
             !isString(options.output),
           );
           process.stdout.write(formatRows([["created", path]]));
-        } else
-          process.stdout.write(
-            formatRows([
-              ["token", token],
-              ["client_secret", clientSecret],
-            ]),
-          );
+        } else process.stdout.write(formatRows([["token", token]]));
         if (command.optsWithGlobals().verbose)
           process.stdout.write(await renderClaims(token));
       },

@@ -1,0 +1,356 @@
+# Generated from the operation registry by kanthord gateway openapi.
+pathItem:
+  get:
+    operationId: worker.instance.get
+    tags:
+      - worker
+    description: Read the live or latest revision of a worker instance with the
+      bindings that list it, its connection, its live registrations and its
+      credential copies.
+    x-access-policy: human
+    x-timeout-ms: 30000
+    x-mutation: false
+    x-kanthord-lifetime: unary
+    security:
+      - bearerAuth: []
+    parameters:
+      - name: instance_name
+        in: path
+        required: true
+        schema:
+          $ref: "#/components/schemas/worker.instance.get.Input/properties/params/propert\
+            ies/instance_name"
+    responses:
+      "200":
+        description: Completed result
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/worker.instance.get.Output"
+      "400":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "401":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "403":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "404":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "409":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "413":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "415":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "500":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "503":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "504":
+        $ref: ../shared/components.yaml#/components/responses/Error
+components:
+  schemas:
+    worker.instance.get.Input:
+      type: object
+      properties:
+        params:
+          type: object
+          properties:
+            instance_name:
+              type: string
+              minLength: 1
+          required:
+            - instance_name
+          additionalProperties: false
+        query:
+          type: object
+          properties: {}
+          additionalProperties: false
+        body:
+          type: "null"
+      required:
+        - params
+        - query
+        - body
+      additionalProperties: false
+    worker.instance.get.Output:
+      type: object
+      properties:
+        id:
+          type: string
+          minLength: 42
+          maxLength: 42
+          pattern: ^worker_instance_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+          description: worker_instance_ followed by a canonical 26-character uppercase ULID.
+        name:
+          type: string
+          minLength: 1
+        worker:
+          type: string
+          minLength: 1
+        revision:
+          type: integer
+          exclusiveMinimum: 0
+          maximum: 9007199254740991
+        public_key:
+          type: string
+          minLength: 1
+          pattern: ^[A-Za-z0-9_-]+$
+        fingerprint:
+          type: string
+          minLength: 1
+        created_at:
+          type: integer
+          minimum: 0
+          maximum: 9007199254740991
+          description: Unix timestamp in milliseconds since 1970-01-01T00:00:00Z (UTC).
+        ended_at:
+          anyOf:
+            - type: integer
+              minimum: 0
+              maximum: 9007199254740991
+              description: Unix timestamp in milliseconds since 1970-01-01T00:00:00Z (UTC).
+            - type: "null"
+        connection:
+          anyOf:
+            - type: object
+              properties:
+                connection_name:
+                  type: string
+                connected_at:
+                  type: integer
+                  minimum: 0
+                  maximum: 9007199254740991
+                  description: Unix timestamp in milliseconds since 1970-01-01T00:00:00Z (UTC).
+                last_heartbeat_at:
+                  type: integer
+                  minimum: 0
+                  maximum: 9007199254740991
+                  description: Unix timestamp in milliseconds since 1970-01-01T00:00:00Z (UTC).
+              required:
+                - connection_name
+                - connected_at
+                - last_heartbeat_at
+              additionalProperties: false
+            - type: "null"
+        bindings:
+          type: array
+          items:
+            type: object
+            properties:
+              project_id:
+                type: string
+                minLength: 34
+                maxLength: 34
+                pattern: ^project_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                description: project_ followed by a canonical 26-character uppercase ULID.
+              binding:
+                type: string
+                minLength: 1
+            required:
+              - project_id
+              - binding
+            additionalProperties: false
+        registrations:
+          type: array
+          items:
+            allOf:
+              - type: object
+                properties:
+                  runtime_identity:
+                    type: string
+                    minLength: 46
+                    maxLength: 46
+                    pattern: ^worker_registration_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                    description: worker_registration_ followed by a canonical 26-character uppercase
+                      ULID.
+                  project_id:
+                    type: string
+                    minLength: 34
+                    maxLength: 34
+                    pattern: ^project_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                    description: project_ followed by a canonical 26-character uppercase ULID.
+                  resource_identity:
+                    type: string
+                    pattern: ^worker:kanthord:[a-z][a-z0-9-]{0,62}$
+                  worker_name:
+                    type: string
+                    minLength: 1
+                  host:
+                    type: string
+                    enum:
+                      - kanthord
+                      - external-harness
+                  placement:
+                    type: string
+                    enum:
+                      - server
+                      - container
+                      - worker
+                  client_id:
+                    type: string
+                    minLength: 42
+                    maxLength: 42
+                    pattern: ^client_identity_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                    description: client_identity_ followed by a canonical 26-character uppercase
+                      ULID.
+                  name:
+                    type: string
+                    minLength: 1
+                    maxLength: 64
+                  instance:
+                    anyOf:
+                      - type: string
+                        minLength: 1
+                      - type: "null"
+                  activity:
+                    type: string
+                    enum:
+                      - idle
+                      - pulling
+                      - executing
+                  draining:
+                    type: boolean
+                  execution_id:
+                    type: string
+                    minLength: 36
+                    maxLength: 36
+                    pattern: ^execution_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                    description: execution_ followed by a canonical 26-character uppercase ULID.
+                  registered:
+                    type: boolean
+                required:
+                  - runtime_identity
+                  - project_id
+                  - resource_identity
+                  - worker_name
+                  - host
+                  - instance
+                  - activity
+                  - draining
+                  - registered
+                additionalProperties: false
+              - anyOf:
+                  - type: object
+                    properties:
+                      host:
+                        type: string
+                        const: kanthord
+                      placement:
+                        type: string
+                        enum:
+                          - server
+                          - container
+                          - worker
+                    required:
+                      - host
+                      - placement
+                    additionalProperties: {}
+                  - type: object
+                    properties:
+                      host:
+                        type: string
+                        const: external-harness
+                      placement:
+                        not: {}
+                    required:
+                      - host
+                    additionalProperties: {}
+              - anyOf:
+                  - type: object
+                    properties:
+                      registered:
+                        type: boolean
+                        const: true
+                      client_id:
+                        type: string
+                        minLength: 42
+                        maxLength: 42
+                        pattern: ^client_identity_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                        description: client_identity_ followed by a canonical 26-character uppercase
+                          ULID.
+                      name:
+                        type: string
+                        minLength: 1
+                        maxLength: 64
+                    required:
+                      - registered
+                      - client_id
+                      - name
+                    additionalProperties: {}
+                  - type: object
+                    properties:
+                      registered:
+                        type: boolean
+                        const: false
+                      client_id:
+                        not: {}
+                      name:
+                        not: {}
+                    required:
+                      - registered
+                    additionalProperties: {}
+              - anyOf:
+                  - type: object
+                    properties:
+                      activity:
+                        type: string
+                        const: executing
+                      execution_id:
+                        type: string
+                        minLength: 36
+                        maxLength: 36
+                        pattern: ^execution_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                        description: execution_ followed by a canonical 26-character uppercase ULID.
+                    required:
+                      - activity
+                      - execution_id
+                    additionalProperties: {}
+                  - type: object
+                    properties:
+                      activity:
+                        type: string
+                        enum:
+                          - idle
+                          - pulling
+                      execution_id:
+                        not: {}
+                    required:
+                      - activity
+                    additionalProperties: {}
+        credentials:
+          type: array
+          items:
+            type: object
+            properties:
+              name:
+                type: string
+                minLength: 1
+              revision:
+                type: integer
+                exclusiveMinimum: 0
+                maximum: 9007199254740991
+              platform:
+                type: string
+                minLength: 1
+              sealed_current:
+                type: boolean
+            required:
+              - name
+              - revision
+              - platform
+              - sealed_current
+            additionalProperties: false
+      required:
+        - id
+        - name
+        - worker
+        - revision
+        - public_key
+        - fingerprint
+        - created_at
+        - ended_at
+        - connection
+        - bindings
+        - registrations
+        - credentials
+      additionalProperties: false

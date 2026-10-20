@@ -114,6 +114,11 @@ export const ProjectErrorCode = {
   WorkerPlacementRequired: "project.bindings.worker.placement_required",
   WorkerPlacementUnavailable: "project.bindings.worker.placement_unavailable",
   WorkerTagsInvalid: "project.bindings.worker.tags_invalid",
+  WorkerInstancesRequired: "project.bindings.worker.instances_required",
+  WorkerInstancesInvalid: "project.bindings.worker.instances_invalid",
+  WorkerInstanceUnknown: "project.bindings.worker.instance_unknown",
+  WorkerInstanceWorkerMismatch:
+    "project.bindings.worker.instance_worker_mismatch",
   WorkerNodeUnmatched: "project.bindings.worker.node_unmatched",
 } as const;
 
@@ -213,17 +218,12 @@ export const StablePlacementIssue = {
 } as const;
 export type StablePlacementIssue =
   (typeof StablePlacementIssue)[keyof typeof StablePlacementIssue];
-export const WorkerPlacementIssue = {
-  InstancesAbsent: "instances_absent",
-} as const;
-export type WorkerPlacementIssue =
-  (typeof WorkerPlacementIssue)[keyof typeof WorkerPlacementIssue];
 export const workerTagsSchema = z
   .array(tagSchema)
   .refine((keys) => new Set(keys).size === keys.length);
 const workerConfigFields = {
   worker: z.string().min(1),
-  instance_count: z.number().int(),
+  instance_count: z.number().int().optional(),
   placement: z.enum(WorkerPlacement).optional(),
   resource_budget: z
     .strictObject({
@@ -245,12 +245,27 @@ const workerConfigFields = {
 };
 export const workerConfigWriteSchema = z.strictObject({
   ...workerConfigFields,
+  worker_instances: z.unknown().optional(),
   tags: z.unknown().optional(),
 });
+export const workerInstancesSchema = z
+  .array(z.string())
+  .max(INSTANCE_COUNT_MAX)
+  .refine((names) => new Set(names).size === names.length);
 export const workerConfigSchema = z.strictObject({
   ...workerConfigFields,
+  worker_instances: workerInstancesSchema.optional(),
   tags: workerTagsSchema.optional(),
 });
+export function effectiveInstanceCount(config: {
+  instance_count?: number;
+  placement?: WorkerPlacement;
+  worker_instances?: readonly string[];
+}): number {
+  return config.placement === WorkerPlacement.Worker
+    ? (config.worker_instances?.length ?? INSTANCE_COUNT_MIN)
+    : (config.instance_count ?? INSTANCE_COUNT_MIN);
+}
 export const storageConfigSchema = z.strictObject({
   available: z.boolean(),
   endpoint: z.url(),
@@ -291,6 +306,8 @@ export const WorkerField = {
   Entries: "entries",
   ResourceBudget: "resource_budget",
   Placement: "placement",
+  InstanceCount: "instance_count",
+  WorkerInstances: "worker_instances",
 } as const;
 const CUSTOM_ISSUE = "custom";
 type BindingEdits = Record<string, z.infer<typeof bindingEditSchema>>;
@@ -859,8 +876,18 @@ export interface ProjectBindings {
     resourceIdentity: string,
     issuedAt: number,
     context: Context,
-  ): Promise<{ project_id: string; resource_identity: string } | null>;
+  ): Promise<{
+    project_id: string;
+    resource_identity: string;
+    placement?: WorkerPlacement | null;
+    worker_instances?: string[];
+  } | null>;
 }
+
+export type InstanceOf = (
+  tx: Transaction,
+  instanceName: string,
+) => { name: string; worker: string } | null;
 
 export type BindingsChanged = (projectId: string) => void;
 
@@ -893,6 +920,7 @@ export interface WorkerBindingRow {
   revision: number;
   worker_name: string;
   instance_count: number;
+  worker_instances: string[];
   placement: WorkerPlacement | null;
   generation: number;
   resource_budget: { turns: number; wall_time_ms: number } | null;

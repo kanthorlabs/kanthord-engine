@@ -38,7 +38,13 @@ import { bodyLimitOf } from "./body-limit.ts";
 import { parseJSON } from "./json.ts";
 import { gatewayOperations, type InventoryCollector } from "./contract.ts";
 import { registerGatewayOperations } from "./declarations.ts";
-import { hasHttpRoute, OperationLifetime } from "../kernel/operation.ts";
+import {
+  AccessPolicy,
+  hasHttpRoute,
+  OperationLifetime,
+  type Operation,
+} from "../kernel/operation.ts";
+import { isWorkerIdentity } from "../kernel/caller.ts";
 import { HttpMethod, HttpStatus, MediaType } from "../kernel/http.ts";
 import { isString } from "../kernel/values.ts";
 import type { OperationRegistry } from "../kernel/operation.ts";
@@ -82,6 +88,8 @@ export interface GatewayDependencies {
 }
 
 const PARAMETER_PREFIX = ":";
+const NO_STORE_HEADERS = { "Cache-Control": "no-store" };
+const FIRST_ROUTE = 0;
 
 export function compareRouteSpecificity(left: string, right: string): number {
   const leftParts = left.split("/");
@@ -94,6 +102,25 @@ export function compareRouteSpecificity(left: string, right: string): number {
   }
   return 0;
 }
+
+function routePattern(path: string): RegExp {
+  return new RegExp(
+    `^${path
+      .split("/")
+      .map((part) =>
+        part.startsWith(PARAMETER_PREFIX)
+          ? "[^/]+"
+          : part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"),
+      )
+      .join("/")}$`,
+  );
+}
+
+const HOST_CHECK_FREE_POLICIES: readonly AccessPolicy[] = [
+  AccessPolicy.Client,
+  AccessPolicy.Worker,
+  AccessPolicy.Public,
+];
 
 export class GatewayService implements Service {
   readonly app: Hono<{ Bindings: HttpBindings }>;
@@ -113,6 +140,39 @@ export class GatewayService implements Service {
   private closeTask?: Promise<Error | null>;
   private readonly stopped = Promise.withResolvers<Error | null>();
   private readonly httpPending = new Set<Promise<unknown>>();
+
+  private routeOf(method: string, path: string): Operation | undefined {
+    return this.registry
+      .all()
+      .map(({ operation }) => operation)
+      .filter(
+        (operation) =>
+          hasHttpRoute(operation) &&
+          operation.method === method &&
+          routePattern(operation.path).test(path),
+      )
+      .sort((left, right) => compareRouteSpecificity(left.path, right.path))
+      .at(FIRST_ROUTE);
+  }
+
+  private async skipsHostCheck(
+    method: string,
+    path: string | undefined,
+    authorization: string | undefined,
+  ): Promise<boolean> {
+    if (path === undefined) return false;
+    const operation = this.routeOf(method, path);
+    if (!operation) return false;
+    if (HOST_CHECK_FREE_POLICIES.includes(operation.access)) return true;
+    if (operation.access !== AccessPolicy.HumanOrWorker) return false;
+    try {
+      return isWorkerIdentity(
+        await this.authentication.authenticate(authorization),
+      );
+    } catch {
+      return false;
+    }
+  }
 
   constructor(options: GatewayDependencies) {
     this.options = options;
@@ -335,7 +395,14 @@ export class GatewayService implements Service {
     });
     app.use("*", async (context, next) => {
       const host = context.req.header("host")?.toLowerCase();
-      if (!host || !this.options.config.allowed_hosts.includes(host))
+      if (
+        (!host || !this.options.config.allowed_hosts.includes(host)) &&
+        !(await this.skipsHostCheck(
+          context.req.method,
+          stripBasePath(basePath, getPath(context.req.raw)),
+          context.req.header("authorization"),
+        ))
+      )
         return respondError(
           new GatewayError(
             403,
@@ -382,22 +449,7 @@ export class GatewayService implements Service {
     app.use("*", async (context, next) => {
       if (context.req.method === HttpMethod.Options) {
         const method = context.req.header("access-control-request-method");
-        const found = this.registry.all().some(
-          ({ operation }) =>
-            hasHttpRoute(operation) &&
-            operation.method === method &&
-            new RegExp(
-              `^${operation.path
-                .split("/")
-                .map((part) =>
-                  part.startsWith(":")
-                    ? "[^/]+"
-                    : part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"),
-                )
-                .join("/")}$`,
-            ).test(context.req.path),
-        );
-        if (!found)
+        if (!method || !this.routeOf(method, context.req.path))
           return respondError(
             new GatewayError(
               404,
@@ -585,7 +637,10 @@ export class GatewayService implements Service {
                 headers: { "Content-Type": operation.contentType },
               });
             }
-            return Response.json(result.body, { status: result.status });
+            return Response.json(result.body, {
+              status: result.status,
+              ...(operation.secret ? { headers: NO_STORE_HEADERS } : {}),
+            });
           })();
           this.httpPending.add(work);
           try {

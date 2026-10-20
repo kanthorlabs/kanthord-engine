@@ -148,6 +148,7 @@ export const AgentErrorCode = {
   ModelUnknown: "agent.configuration.model_unknown",
   ReasoningUnsupported: "agent.configuration.reasoning_effort_unsupported",
   CredentialUnsuitable: "agent.configuration.credential_unsuitable",
+  CredentialHolderMismatch: "agent.configuration.credential_holder_mismatch",
   PromptRevisionConflict: "agent.prompt.revision_conflict",
   PromptTooLarge: "agent.prompt.too_large",
   PromptAgentLayerEmpty: "agent.prompt.agent_layer_empty",

@@ -13,6 +13,12 @@ export function piDirectory(env: NodeJS.ProcessEnv): string {
   return join(directories(env).state, PI_DIRECTORY_NAME);
 }
 
+export function usePiDirectory(path: string): void {
+  assert.ok(isAbsolute(path));
+  assert.ok(path.endsWith(PI_DIRECTORY_NAME));
+  directory ??= path;
+}
+
 export function piAgentDirectory(): string {
   directory ??= piDirectory(process.env);
   assert.ok(isAbsolute(directory));

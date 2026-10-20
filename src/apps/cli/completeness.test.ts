@@ -46,6 +46,9 @@ const API_ONLY_OPERATIONS = [
   "gateway.openapi",
   "gateway.openapiFile",
   "worker.credential",
+  "worker.instance.token",
+  "worker.instance.connect",
+  "worker.instance.heartbeat",
   "worker.action.request",
   "worker.execution.setup.get",
   "worker.execution.change_request.get",
@@ -83,12 +86,12 @@ const TOP_LEVEL_NAMES = new Set([
 ]);
 const OTHER_PAGE = "other";
 const NO_ITEMS = 0;
-const DOCUMENTED_COUNT = 176;
+const DOCUMENTED_COUNT = 182;
 const TOP_LEVEL_DEPTH = 1;
 const INTAKE_GROUP = "intake";
 const TRACKING_GROUP = "tracking";
-const IMPLEMENTED_COUNT = 171;
-const OPERATION_COUNT = 182;
+const IMPLEMENTED_COUNT = 177;
+const OPERATION_COUNT = 190;
 const INTAKE_LEAVES = [
   "intake event delete",
   "intake event discard",
@@ -113,7 +116,7 @@ const PAGE_COUNTS = {
   mission: 57,
   intake: 13,
   scheduler: 8,
-  worker: 10,
+  worker: 16,
   gateway: 3,
   other: 9,
   tracking: 3,

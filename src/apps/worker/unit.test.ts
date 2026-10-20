@@ -6,6 +6,7 @@ import { stringify } from "yaml";
 import type { Context } from "../../kernel/context.ts";
 import { HealthStatus } from "../../kernel/service.ts";
 import { temporary } from "../../kernel/test-support.ts";
+import { directories } from "../../kernel/xdg.ts";
 import { OperationResultType } from "../../kernel/operation.ts";
 import { packageVersion } from "../../kernel/version.ts";
 import { HttpStatus } from "../../kernel/http.ts";
@@ -14,10 +15,17 @@ import { installPiTools } from "../../agent/pi-tools.ts";
 import { WorkerUnit } from "./unit.ts";
 import type { WorkerTransport } from "./transport.ts";
 import { testClaim } from "./test-support.ts";
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+import { hostEnvironment } from "../../kernel/test-support.ts";
+import { runVerifications } from "../../worker/unit/index.ts";
+import { spawnSync } from "node:child_process";
 
 const CLIENT_SECRET_BYTES = 32;
 const SETTLE_WAIT_MS = 50;
 const PENDING = "pending";
+const TOOL_DEADLINE_MS = 60000;
+const PS_FOUND = 0;
 const FIRST_PULL = 1;
 const REGISTRATION = {
   runtime_identity: "worker_registration_01ARZ3NDEKTSV4RRFFQ69G5FAA",
@@ -94,11 +102,22 @@ function environmentOf(t: TestContext): NodeJS.ProcessEnv {
   return env;
 }
 
+function directoriesOf(env: NodeJS.ProcessEnv) {
+  const state = directories(env).state;
+  return { data: state, log: state };
+}
+
 function unitOf(t: TestContext, transport: WorkerTransport) {
+  const env = environmentOf(t);
   return new WorkerUnit({
-    transport,
-    client_secret: randomBytes(CLIENT_SECRET_BYTES).toString("base64"),
-    env: environmentOf(t),
+    bindings: [
+      {
+        transport,
+        client_secret: randomBytes(CLIENT_SECRET_BYTES).toString("base64"),
+      },
+    ],
+    directories: directoriesOf(env),
+    env,
     log: () => {},
   });
 }
@@ -200,10 +219,16 @@ test("a unit that drains before its first pull cancels a pull that waits for wor
       return cancelled(context);
     },
   });
+  const env = environmentOf(t);
   const unit = new WorkerUnit({
-    transport,
-    client_secret: randomBytes(CLIENT_SECRET_BYTES).toString("base64"),
-    env: environmentOf(t),
+    bindings: [
+      {
+        transport,
+        client_secret: randomBytes(CLIENT_SECRET_BYTES).toString("base64"),
+      },
+    ],
+    directories: directoriesOf(env),
+    env,
     log: () => {},
     resume_pull_wait_ms: SETTLE_WAIT_MS,
   });
@@ -213,3 +238,149 @@ test("a unit that drains before its first pull cancels a pull that waits for wor
   assert.equal(pulls, FIRST_PULL);
   assert.deepEqual(deregistrations, [REGISTRATION.runtime_identity]);
 });
+
+function multiUnit(t: TestContext, bindings: WorkerTransport[]) {
+  const env = environmentOf(t);
+  return new WorkerUnit({
+    bindings: bindings.map((transport) => ({
+      transport,
+      client_secret: randomBytes(CLIENT_SECRET_BYTES).toString("base64"),
+    })),
+    directories: directoriesOf(env),
+    env,
+    log: () => {},
+  });
+}
+
+test("a claim on one binding aborts the pull of the other binding until the execution ends", async (t) => {
+  const handover = Promise.withResolvers<unknown>();
+  const otherAborted = Promise.withResolvers<void>();
+  let claims = 0;
+  let otherPulls = 0;
+  const claiming = scripted({
+    pull: async (context) => {
+      if (++claims > FIRST_PULL) return cancelled(context);
+      await delay(SETTLE_WAIT_MS);
+      return completed({ kind: WorkPullKind.Claimed, execution: testClaim() });
+    },
+    handover: () => handover.promise,
+  });
+  const other = scripted({
+    pull: (context) => {
+      otherPulls++;
+      context?.onCancel(() => otherAborted.resolve());
+      return cancelled(context);
+    },
+  });
+  const unit = multiUnit(t, [claiming.transport, other.transport]);
+  const running = unit.run();
+  await otherAborted.promise;
+  assert.equal(otherPulls, FIRST_PULL);
+  await delay(SETTLE_WAIT_MS);
+  assert.equal(otherPulls, FIRST_PULL);
+  handover.resolve(PROOF_FAILED);
+  while (otherPulls === FIRST_PULL) await delay(1);
+  assert.equal(await unit.drain(), null);
+  assert.equal(await running, null);
+  assert.deepEqual(claiming.deregistrations, [REGISTRATION.runtime_identity]);
+  assert.deepEqual(other.deregistrations, [REGISTRATION.runtime_identity]);
+});
+
+test("remove ends the pulls of one binding and deregisters it while the unit runs", async (t) => {
+  const first = scripted({ pull: (context) => cancelled(context) });
+  const second = scripted({ pull: (context) => cancelled(context) });
+  const env = environmentOf(t);
+  const kept = {
+    transport: first.transport,
+    client_secret: randomBytes(CLIENT_SECRET_BYTES).toString("base64"),
+  };
+  const dropped = {
+    transport: second.transport,
+    client_secret: randomBytes(CLIENT_SECRET_BYTES).toString("base64"),
+  };
+  const unit = new WorkerUnit({
+    bindings: [kept],
+    directories: directoriesOf(env),
+    env,
+    log: () => {},
+  });
+  const running = unit.run();
+  assert.equal(await unit.start(), null);
+  assert.equal(await unit.add(dropped), null);
+  assert.equal(await unit.remove(dropped), null);
+  assert.deepEqual(second.deregistrations, [REGISTRATION.runtime_identity]);
+  assert.deepEqual(first.deregistrations, []);
+  assert.equal(await unit.drain(), null);
+  assert.equal(await running, null);
+  assert.deepEqual(first.deregistrations, [REGISTRATION.runtime_identity]);
+});
+
+test("abandon cancels the live execution and keeps every registration", async (t) => {
+  const cancelledExecution = Promise.withResolvers<void>();
+  let pulls = 0;
+  const { transport, deregistrations } = scripted({
+    pull: async (context) => {
+      if (++pulls > FIRST_PULL) return cancelled(context);
+      return completed({ kind: WorkPullKind.Claimed, execution: testClaim() });
+    },
+    handover: ((_input: unknown, call?: { context?: Context }) =>
+      cancelled(call?.context)) as () => Promise<unknown>,
+  });
+  const unit = multiUnit(t, [transport]);
+  const running = unit.run();
+  while (!pulls) await delay(1);
+  const execution = (unit as unknown as { execution?: { context: Context } })
+    .execution;
+  execution?.context.onCancel(() => cancelledExecution.resolve());
+  const abandoned = unit.abandon();
+  await cancelledExecution.promise;
+  const error = await abandoned;
+  assert.ok(error);
+  await running;
+  assert.deepEqual(deregistrations, []);
+});
+
+test("abandon kills the tool process group of the live execution", async (t) => {
+  const directory = temporary(t);
+  const pidFile = join(directory, "grandchild.pid");
+  let pulls = 0;
+  const tool = Promise.withResolvers<{ run: Promise<unknown> }>();
+  const { transport, deregistrations } = scripted({
+    pull: async (context) => {
+      if (++pulls > FIRST_PULL) return cancelled(context);
+      return completed({ kind: WorkPullKind.Claimed, execution: testClaim() });
+    },
+    handover: ((_input: unknown, call?: { context?: Context }) => {
+      tool.resolve({
+        run: delay(0).then(() =>
+          runVerifications({
+            directory,
+            commands: [`sleep 30 & echo $! > ${pidFile}; wait`],
+            tested_input: { kind: "produced", sha256: "hash" },
+            deadline: Date.now() + TOOL_DEADLINE_MS,
+            context: (unit as unknown as { execution: { context: Context } })
+              .execution.context,
+            env: hostEnvironment(),
+          }),
+        ),
+      });
+      return cancelled(call?.context);
+    }) as () => Promise<unknown>,
+  });
+  const unit = multiUnit(t, [transport]);
+  const running = unit.run();
+  const verification = (await tool.promise).run;
+  while (!existsSync(pidFile)) await delay(1);
+  const grandchild = Number(readFileSync(pidFile, "utf8"));
+  assert.ok(alive(grandchild));
+  const abandoned = unit.abandon();
+  await verification;
+  assert.ok(await abandoned);
+  await running;
+  assert.equal(alive(grandchild), false);
+  assert.deepEqual(deregistrations, []);
+});
+
+function alive(pid: number): boolean {
+  return spawnSync("ps", ["-p", String(pid)]).status === PS_FOUND;
+}

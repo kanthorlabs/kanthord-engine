@@ -19,6 +19,9 @@ export function childEnvironment(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
     "ANTHROPIC_OAUTH_TOKEN",
     "SSH_AUTH_SOCK",
     "SSH_AGENT_PID",
+    "KANTHORD_WORKER_CONFIG",
+    "KANTHORD_TOKEN",
+    "KANTHORD_ENDPOINT",
   ])
     delete output[name];
   assert.notEqual(output, env);

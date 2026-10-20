@@ -2,6 +2,7 @@ import { join } from "node:path";
 import type { MessagePort } from "node:worker_threads";
 import { ulid } from "ulid";
 import { HttpStatus } from "../kernel/http.ts";
+import { isString } from "../kernel/values.ts";
 import { directories } from "../kernel/xdg.ts";
 import { parseMapping } from "../kernel/yaml.ts";
 import { audit, readPrivate } from "../kernel/files.ts";
@@ -36,12 +37,10 @@ const endpoint = z.url().refine((value) => {
 export const clientSchema = z.strictObject({
   endpoint: endpoint.optional(),
   token: z.string().min(1).optional(),
-  client_secret: z.string().optional(),
 });
 export interface ClientConfiguration {
   endpoint: string;
   token?: string;
-  client_secret?: string;
 }
 export const clientConfigPath = (env = process.env) =>
   join(directories(env).config, "cli.yaml");
@@ -79,7 +78,6 @@ export function resolveClient(
       stored.endpoint ??
       "http://127.0.0.1:31415",
     token: options.token ?? env.KANTHORD_TOKEN ?? stored.token,
-    client_secret: stored.client_secret,
   };
   validateClientEndpoint(resolved.endpoint);
   return resolved;
@@ -93,7 +91,7 @@ function operationUrl(endpoint: string, path: string): URL {
 export function httpClient<T extends Record<string, Operation>>(
   operations: T,
   endpoint: string,
-  token?: string,
+  token?: string | (() => string | undefined),
   transport: typeof fetch = fetch,
 ): ServiceClient<T> {
   return createClient(operations, async (operation, raw, options) => {
@@ -112,7 +110,8 @@ export function httpClient<T extends Record<string, Operation>>(
       for (const entry of Array.isArray(value) ? value : [value])
         if (entry !== undefined) url.searchParams.append(key, String(entry));
     const headers = new Headers();
-    if (token) headers.set("Authorization", `Bearer ${token}`);
+    const bearer = isString(token) ? token : token?.();
+    if (bearer) headers.set("Authorization", `Bearer ${bearer}`);
     if (options.idempotencyKey)
       headers.set("Idempotency-Key", options.idempotencyKey);
     if (options.traceparent) headers.set("traceparent", options.traceparent);

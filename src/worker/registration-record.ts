@@ -21,6 +21,7 @@ interface Dependencies {
   workerBindingOf: WorkerBindingOf;
   schedulerClaims: SchedulerClaims;
   draining?: (clientId: string) => boolean;
+  instanceNameOf?: (tx: Transaction, instanceId: string) => string | null;
 }
 
 function hostedPlacement(placement: InstancePlacement | null) {
@@ -62,6 +63,9 @@ export function registrationRecord(
       : {}),
     client_id: registration.client_id,
     name: registration.name,
+    instance: registration.instance_id
+      ? (dependencies.instanceNameOf?.(tx, registration.instance_id) ?? null)
+      : null,
     activity: activity.activity,
     ...(activity.activity === RegistrationActivity.Executing
       ? { execution_id: activity.execution_id }

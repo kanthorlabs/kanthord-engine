@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import { join } from "node:path";
 import type { TestContext } from "node:test";
+import { decode } from "hono/jwt";
 import { parse, stringify } from "yaml";
+import { deriveClientSecret } from "../../gateway/auth/jwt.ts";
+import { isString } from "../../kernel/values.ts";
 import { configuration, CONFIG_VERSION } from "../../config/index.ts";
 import { writePrivate } from "../../kernel/files.ts";
 import { temporary } from "../../kernel/test-support.ts";
@@ -167,7 +170,17 @@ export async function workerAcceptance(
     const result = await kanthordTerminal(args, human);
     assert.equal(result.code, SUCCESS, result.stderr);
     assert.equal(result.stderr, NO_STDERR);
-    return parse(result.stdout) as { token: string; client_secret: string };
+    const { token } = parse(result.stdout) as { token: string };
+    const { sub } = decode(token).payload;
+    assert.ok(isString(sub));
+    return {
+      token,
+      client_secret: deriveClientSecret(
+        fixture.config.master_key,
+        fixture.config.gateway.auth.version,
+        sub,
+      ),
+    };
   }
   if (!host)
     await read([

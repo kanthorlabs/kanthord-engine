@@ -11,6 +11,8 @@ import { isString } from "../../kernel/values.ts";
 import {
   IdentityKind,
   CLIENT_IDENTITY_PREFIX,
+  CONNECTION_PREFIX,
+  WORKER_INSTANCE_PREFIX,
   MAX_HUMAN_USERNAME_LENGTH,
   MAX_DISPLAY_NAME_LENGTH,
 } from "../../kernel/caller.ts";
@@ -21,6 +23,7 @@ const CLIENT_SECRET_LABEL_PREFIX = "worker/client-secret/v";
 const SIGNING_KEY_LABEL_PREFIX = "gateway/jwt-hs256/v";
 const NO_AUTH_VERSION = 0;
 export const SLOT_TOKEN_LIFETIME = 60;
+export const WORKER_TOKEN_LIFETIME = 3600;
 export interface TokenResponse {
   token: string;
   expiresAt: number;
@@ -112,6 +115,8 @@ async function generateJWT(
     kind: string;
     project_id?: string;
     resource_identity?: string;
+    instance_id?: string;
+    connection_id?: string;
   },
 ): Promise<TokenResponse> {
   if (!Number.isSafeInteger(lifetime) || lifetime < MIN_TOKEN_LIFETIME)
@@ -185,6 +190,43 @@ export async function generateSlotJWT(
     resource_identity: workerResourceIdentity(
       parseBindingName(slot.bindingName),
     ),
+  });
+}
+
+export async function generateWorkerJWT(
+  masterKey: string,
+  authVersion: number,
+  instance: { instanceId: string; name: string },
+): Promise<TokenResponse> {
+  return generateJWT(masterKey, authVersion, WORKER_TOKEN_LIFETIME, {
+    sub: identitySchema(WORKER_INSTANCE_PREFIX).parse(instance.instanceId),
+    name: parseDisplayName(instance.name),
+    kind: IdentityKind.Worker,
+  });
+}
+
+export async function generateInstanceClientJWT(
+  masterKey: string,
+  authVersion: number,
+  client: {
+    clientId: string;
+    projectId: string;
+    resourceIdentity: string;
+    instanceId: string;
+    connectionId: string;
+    name: string;
+  },
+): Promise<TokenResponse> {
+  return generateJWT(masterKey, authVersion, WORKER_TOKEN_LIFETIME, {
+    sub: identitySchema(CLIENT_IDENTITY_PREFIX).parse(client.clientId),
+    name: parseDisplayName(client.name),
+    kind: IdentityKind.Client,
+    project_id: parseProjectId(client.projectId),
+    resource_identity: client.resourceIdentity,
+    instance_id: identitySchema(WORKER_INSTANCE_PREFIX).parse(
+      client.instanceId,
+    ),
+    connection_id: identitySchema(CONNECTION_PREFIX).parse(client.connectionId),
   });
 }
 

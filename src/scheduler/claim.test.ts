@@ -408,3 +408,63 @@ test("selection skips a job until its stop backoff ends", (t) => {
   );
   assert.equal(h.claim(heldAt).outcome, ClaimOutcome.Claimed);
 });
+
+function instanceSibling(h: ReturnType<typeof claimHarness>) {
+  const otherRuntime = createIdentity("worker_registration");
+  const otherResource = "worker:kanthord:review";
+  const otherIdentity = testMachineIdentity(
+    {
+      clientId: createIdentity("client_identity"),
+      name: "worker",
+      projectId: h.row.project_id,
+      resourceIdentity: otherResource,
+      issuedAt: FIXTURE_NOW,
+    },
+    "claim",
+    otherRuntime,
+  );
+  const siblings: Record<string, string[]> = {
+    [h.row.runtime_identity]: [otherRuntime],
+    [otherRuntime]: [h.row.runtime_identity],
+  };
+  h.dependencies.registrations.registrationsOfInstance = (_tx, runtime) =>
+    siblings[runtime] ?? [];
+  const otherNode = createIdentity("node");
+  h.store.transaction((tx) => {
+    h.service.insert(tx, h.row.node_id, h.row.project_id, 0);
+    h.service.insert(tx, otherNode, h.row.project_id, 0);
+  });
+  return (now: number) =>
+    h.store.transaction((tx) =>
+      claimOnce(
+        tx,
+        h.dependencies,
+        otherIdentity,
+        { resource_identity: otherResource, runtime_identity: otherRuntime },
+        now,
+      ),
+    );
+}
+
+test("two pulls of one instance on two bindings commit one claim", (t) => {
+  const h = claimHarness(t);
+  const claimOther = instanceSibling(h);
+  assert.equal(h.claim().outcome, ClaimOutcome.Claimed);
+  assert.equal(claimOther(FIXTURE_NOW).outcome, ClaimOutcome.None);
+  assert.equal(
+    h.calls.filter((call) => call.method === CLAIM_METHOD).length,
+    ONE_CALL,
+  );
+});
+
+test("an expired execution of a sibling registration blocks no claim of its instance", (t) => {
+  const h = claimHarness(t);
+  const claimOther = instanceSibling(h);
+  const first = h.claim();
+  assert.equal(first.outcome, ClaimOutcome.Claimed);
+  assert.equal(
+    claimOther(first.row!.expired_at - 1).outcome,
+    ClaimOutcome.None,
+  );
+  assert.equal(claimOther(first.row!.expired_at).outcome, ClaimOutcome.Claimed);
+});
