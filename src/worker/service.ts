@@ -41,6 +41,7 @@ import {
   type WorkerBindingsOf,
   type WorkerBindingRowOf,
   type PoolHost,
+  type InstanceIssuer,
   type RepositoryPolicyOf,
   type RepositoryBindingIdsOf,
   type IntentOf,
@@ -95,6 +96,9 @@ import {
   endGroup,
   readRow,
 } from "./registration-rows.ts";
+import { WorkerInstances } from "./instances.ts";
+import { readInstanceById, readLiveInstance } from "./instance-rows.ts";
+import { declareInstances } from "./instance-operations.ts";
 
 const NO_ITEMS = 0;
 
@@ -119,6 +123,8 @@ export interface Dependencies {
   };
   store: Store;
   workerBindingOf: WorkerBindingOf;
+  workerBindingsOf: WorkerBindingsOf;
+  instanceIssuer: InstanceIssuer;
   workerBindingRowOf: WorkerBindingRowOf;
   repositoryPolicyOf: RepositoryPolicyOf;
   repositoryBindingIdsOf: RepositoryBindingIdsOf;
@@ -170,8 +176,16 @@ export class WorkerService implements Service {
   private readonly performer: ActionPerformer;
   private readonly pool?: Pool;
   private poolStarted = false;
+  readonly instances: WorkerInstances;
   constructor(dependencies: Dependencies) {
     this.dependencies = dependencies;
+    this.instances = new WorkerInstances({
+      store: dependencies.store,
+      issuer: dependencies.instanceIssuer,
+      workerBindingsOf: dependencies.workerBindingsOf,
+      unendedExecutionOf: (tx, runtimeIdentity) =>
+        dependencies.schedulerClaims.unendedExecutionOf(tx, runtimeIdentity),
+    });
     if (dependencies.pool) this.pool = new Pool(dependencies.pool.host);
     this.performer = new ActionPerformer({
       store: dependencies.store,
@@ -208,6 +222,7 @@ export class WorkerService implements Service {
       const live = this.dependencies.store.transaction(readAllLive);
       for (let index = 0; index < live.length; index++)
         this.heartbeatClock.set(live[index]!.runtime_identity);
+      this.dependencies.store.transaction((tx) => this.instances.start(tx));
       this.startTask = Promise.resolve(null);
     }
     this.started = true;
@@ -323,6 +338,9 @@ export class WorkerService implements Service {
   }
 
   bindingsChanged(projectId: string): void {
+    this.dependencies.store.transaction((tx) =>
+      this.instances.bindingsChanged(tx, projectId),
+    );
     if (!this.poolStarted) return;
     setImmediate(() => {
       if (!this.poolStarted) return;
@@ -428,6 +446,7 @@ export class WorkerService implements Service {
     const declaration = getWorkerDeclaration(binding.worker_name);
     assert.ok(declaration);
     if (declaration.host === WorkerHost.ExternalHarness) return true;
+    if (binding.placement === InstancePlacement.Worker) return false;
     const agents = agentsOfWorker(binding.worker_name);
     assert.ok(agents.length > NO_ITEMS);
     for (let index = 0; index < agents.length; index++) {
@@ -564,12 +583,68 @@ export class WorkerService implements Service {
     return {
       ...this.dependencies,
       draining: (clientId: string) => this.pool?.draining(clientId) ?? false,
+      instanceNameOf: (tx: Transaction, instanceId: string) =>
+        readInstanceById(tx, instanceId)?.name ?? null,
     };
+  }
+
+  instanceOf(
+    tx: Transaction,
+    name: string,
+  ): { name: string; worker: string } | null {
+    assert.ok(tx.database.isTransaction);
+    const instance = readLiveInstance(tx, name);
+    return instance ? { name: instance.name, worker: instance.worker } : null;
+  }
+
+  registrationsOfInstance(tx: Transaction, runtimeIdentity: string): string[] {
+    assert.ok(tx.database.isTransaction);
+    assert.equal(tx.database, this.dependencies.store.database);
+    return this.instances.registrationsOfInstance(tx, runtimeIdentity);
+  }
+
+  private requireListedInstance(
+    tx: Transaction,
+    identity: {
+      clientId: string;
+      projectId: string;
+      resourceIdentity: string;
+      instanceId?: string;
+    },
+    binding: NonNullable<ReturnType<WorkerBindingOf>>,
+  ): void {
+    const instance =
+      identity.instanceId === undefined
+        ? null
+        : readInstanceById(tx, identity.instanceId);
+    if (
+      instance &&
+      instance.ended_at === null &&
+      this.dependencies.instanceIssuer.clientIdentity(
+        instance.id,
+        identity.projectId,
+        identity.resourceIdentity,
+        binding.generation,
+      ) === identity.clientId &&
+      ((binding.worker_instances ?? []).includes(instance.name) ||
+        this.registrations.findByClient(identity.clientId) !== undefined)
+    )
+      return;
+    throw new OperationError(
+      HttpStatus.Conflict,
+      WorkerErrorCode.PlacementMismatch,
+      "Worker binding accepts a registration only from a listed worker instance.",
+    );
   }
 
   private requirePoolSlot(
     tx: Transaction,
-    identity: { clientId: string; projectId: string; resourceIdentity: string },
+    identity: {
+      clientId: string;
+      projectId: string;
+      resourceIdentity: string;
+      instanceId?: string;
+    },
   ): void {
     const binding = this.dependencies.workerBindingOf(
       tx,
@@ -580,12 +655,10 @@ export class WorkerService implements Service {
       binding &&
       !binding.tombstone &&
       binding.placement === InstancePlacement.Worker
-    )
-      throw new OperationError(
-        HttpStatus.Conflict,
-        WorkerErrorCode.PlacementMismatch,
-        "The worker placement accepts no registration.",
-      );
+    ) {
+      this.requireListedInstance(tx, identity, binding);
+      return;
+    }
     if (
       !binding ||
       binding.tombstone ||
@@ -830,6 +903,12 @@ export class WorkerService implements Service {
       caller.commit(() => null),
     );
     this.declareCatalog(registry);
+    declareInstances(registry, {
+      instances: this.instances,
+      heartbeatClock: this.heartbeatClock,
+      registrationRecordOf: (tx, row) =>
+        registrationRecord(tx, this.recordDependencies(), row, Date.now()),
+    });
     const worker = this.registrations;
     assert.equal(workerOperations.register.service, WORKER_SERVICE_NAME);
     assert.equal(workerOperations.register.access, AccessPolicy.Client);
@@ -863,6 +942,7 @@ export class WorkerService implements Service {
               name: identity.name,
               resource_identity: identity.resourceIdentity,
               project_id: identity.projectId,
+              instance_id: identity.instanceId ?? null,
             },
             Date.now(),
           );

@@ -1,5 +1,7 @@
 import { z } from "zod";
 import { identitySchema } from "../kernel/identity.ts";
+import { timestamp } from "../kernel/json.ts";
+import { base64urlSchema, sealedObjectSchema } from "../kernel/hpke.ts";
 import {
   handoverEnvelopeSchema,
   type HandoverEnvelope,
@@ -58,6 +60,7 @@ export interface VerifiedClient {
   name: string;
   resource_identity: string;
   project_id: string;
+  instance_id?: string | null;
 }
 export const HANDOVER_TIMEOUT_MS = 30000;
 export const ACTION_REQUEST_TOOL_NAME = "repository-action-request";
@@ -356,6 +359,39 @@ export interface Registration extends VerifiedClient {
   runtime_identity: string;
   registered_at: number;
 }
+
+export interface LiveInstance {
+  id: string;
+  name: string;
+  worker: string;
+}
+
+export interface WorkerInstanceLookups {
+  liveInstance(instanceId: string): LiveInstance | null;
+  holdConnection(instanceId: string, connectionId: string): boolean;
+}
+
+export interface InstanceIssuer {
+  workerToken(instance: {
+    instanceId: string;
+    name: string;
+  }): Promise<{ token: string; expiresAt: number }>;
+  clientToken(client: {
+    clientId: string;
+    projectId: string;
+    resourceIdentity: string;
+    instanceId: string;
+    connectionId: string;
+    name: string;
+  }): Promise<{ token: string; expiresAt: number }>;
+  clientIdentity(
+    instanceId: string,
+    projectId: string,
+    resourceIdentity: string,
+    generation: number,
+  ): string;
+  clientSecret(clientId: string): string;
+}
 export type WorkerBindingOf = (
   tx: Transaction,
   projectId: string,
@@ -367,6 +403,7 @@ export type WorkerBindingOf = (
   revision: number;
   worker_name: string;
   instance_count: number;
+  worker_instances?: string[];
   placement: InstancePlacement | null;
   generation: number;
   resource_budget: { turns: number; wall_time_ms: number } | null;
@@ -513,6 +550,7 @@ export const registrationRecordSchema = z
     placement: z.enum(InstancePlacement).optional(),
     client_id: identitySchema("client_identity").optional(),
     name: z.string().min(1).max(64).optional(),
+    instance: z.string().min(1).nullable(),
     activity: z.enum(RegistrationActivity),
     draining: z.boolean(),
     execution_id: identitySchema("execution").optional(),
@@ -576,6 +614,10 @@ export interface SchedulerClaims {
     tx: Transaction,
     runtimeIdentity: string,
     now: number,
+  ): { execution_id: string } | null;
+  unendedExecutionOf(
+    tx: Transaction,
+    runtimeIdentity: string,
   ): { execution_id: string } | null;
   activityOf(
     tx: Transaction,
@@ -712,7 +754,95 @@ export const WorkerErrorCode = {
   SlotUnavailable: "worker.registration.slot_unavailable",
   PlacementMismatch: "worker.registration.placement_mismatch",
   CatalogNotFound: "worker.catalog.not_found",
+  InstanceNameConflict: "worker.instance.name_conflict",
+  InstanceNameInvalid: "worker.instance.name_invalid",
+  InstanceWorkerInvalid: "worker.instance.worker_invalid",
+  InstanceKeyInvalid: "worker.instance.key_invalid",
+  InstanceKeyConflict: "worker.instance.key_conflict",
+  InstanceNotFound: "worker.instance.not_found",
+  InstanceRevisionConflict: "worker.instance.revision_conflict",
+  InstanceArchived: "worker.instance.archived",
+  InstanceInUse: "worker.instance.in_use",
+  InstanceConnectionSuperseded: "worker.instance.connection_superseded",
 } as const;
+
+export const WORKER_INSTANCE_ID_PREFIX = "worker_instance";
+export const CONNECTION_ID_PREFIX = "connection";
+export const RESERVED_INSTANCE_NAMES: readonly string[] = [
+  "server",
+  "token",
+  "connect",
+  "heartbeat",
+];
+export const WORKER_TOKEN_INFO = "kanthord/worker-token/v1";
+export const INSTANCE_CONNECTION_INFO = "kanthord/instance-connection/v1";
+export const INSTANCE_HEARTBEAT_INTERVAL_MS = 15000;
+export const INSTANCE_CONNECTED_WINDOW_MS = 60000;
+export const INSTANCE_RENEWAL_INTERVAL_MS = 1800000;
+export const NO_CREDENTIAL_VERSION = 0;
+export const BindingEntryState = {
+  Serving: "serving",
+  Draining: "draining",
+} as const;
+export type BindingEntryState =
+  (typeof BindingEntryState)[keyof typeof BindingEntryState];
+export const instanceIdSchema = identitySchema(WORKER_INSTANCE_ID_PREFIX);
+export const connectionIdSchema = identitySchema(CONNECTION_ID_PREFIX);
+export const instanceNameSchema = z
+  .string()
+  .min(1)
+  .max(63)
+  .regex(/^[a-z][a-z0-9-]*$/)
+  .refine((name) => !RESERVED_INSTANCE_NAMES.includes(name));
+export const instanceRecordSchema = z.strictObject({
+  id: instanceIdSchema,
+  name: z.string().min(1),
+  worker: z.string().min(1),
+  revision: z.number().int().positive(),
+  public_key: base64urlSchema,
+  fingerprint: z.string().min(1),
+  created_at: timestamp,
+  ended_at: timestamp.nullable(),
+});
+export type InstanceRecord = z.infer<typeof instanceRecordSchema>;
+export const instanceConnectionSchema = z
+  .strictObject({
+    connection_name: z.string(),
+    connected_at: timestamp,
+    last_heartbeat_at: timestamp,
+  })
+  .nullable();
+export type InstanceConnection = z.infer<typeof instanceConnectionSchema>;
+export const instanceConfigurationSchema = z.strictObject({
+  name: instanceNameSchema,
+  endpoint: z.url(),
+  instance_id: instanceIdSchema,
+  private_key: base64urlSchema,
+});
+export type InstanceConfiguration = z.infer<typeof instanceConfigurationSchema>;
+export const workerTokenPayloadSchema = z.strictObject({
+  token: z.string().min(1),
+  expired_at: timestamp,
+  name: z.string().min(1),
+  worker: z.string().min(1),
+  fingerprint: z.string().min(1),
+});
+export type WorkerTokenPayload = z.infer<typeof workerTokenPayloadSchema>;
+export const connectionPayloadSchema = z.strictObject({
+  bindings: z.array(
+    z.strictObject({
+      project_id: identitySchema("project"),
+      resource_identity: workerResourceIdentitySchema,
+      client_id: identitySchema("client_identity"),
+      token: z.string().min(1),
+      expired_at: timestamp,
+      client_secret: z.string().min(1),
+      state: z.enum(BindingEntryState),
+    }),
+  ),
+});
+export type ConnectionPayload = z.infer<typeof connectionPayloadSchema>;
+export type ConnectionBinding = ConnectionPayload["bindings"][number];
 
 export const HostTool = { EvidenceUpload: "evidence-upload" } as const;
 export type HostTool = (typeof HostTool)[keyof typeof HostTool];
@@ -860,7 +990,225 @@ const humanOperation = {
   timeoutMs: HUMAN_TIMEOUT_MS,
   status: HttpStatus.OK,
 } as const;
+const instanceParams = z.strictObject({ instance_name: z.string().min(1) });
+const instanceKeyFields = {
+  public_key: z
+    .string()
+    .optional()
+    .describe("base64url X25519 public key; never with endpoint."),
+  endpoint: z
+    .url()
+    .optional()
+    .describe(
+      "Server address of the instance configuration; the server generates the key pair. Never with public_key.",
+    ),
+};
+const instanceWriteAnswer = instanceRecordSchema.extend({
+  instance_configuration: z
+    .string()
+    .optional()
+    .describe(
+      "Instance configuration, answered once when the server generates the key pair.",
+    ),
+});
+const instanceOperation = {
+  service: WORKER_SERVICE_NAME,
+  store: StoreName.Operational,
+  lifetime: OperationLifetime.Unary,
+  timeoutMs: HUMAN_TIMEOUT_MS,
+  status: HttpStatus.OK,
+} as const;
+export const instanceOperations = {
+  "instance.create": {
+    ...humanOperation,
+    id: "worker.instance.create",
+    method: HttpMethod.Post,
+    path: "/api/worker/instance",
+    mutation: true,
+    secret: true,
+    input: z.strictObject({
+      params: emptyFields,
+      query: emptyFields,
+      body: z.strictObject({
+        name: z.string(),
+        worker: z.string(),
+        ...instanceKeyFields,
+      }),
+    }),
+    output: instanceWriteAnswer,
+    description:
+      "Register a worker instance of a hosted worker. With endpoint, the server generates the key pair and answers the instance configuration once.",
+  },
+  "instance.list": {
+    ...humanOperation,
+    id: "worker.instance.list",
+    method: HttpMethod.Get,
+    path: "/api/worker/instance",
+    mutation: false,
+    input: z.strictObject({
+      params: emptyFields,
+      query: z.strictObject({
+        worker: z.string().min(1).optional(),
+        include_archived: z.enum(["true", "false"]).default("false").optional(),
+        limit: z.coerce
+          .number()
+          .int()
+          .min(1)
+          .max(LIST_LIMIT_MAX)
+          .default(LIST_LIMIT_DEFAULT),
+        cursor: z.string().min(1).optional(),
+      }),
+      body: z.null(),
+    }),
+    output: z.strictObject({
+      items: z.array(
+        instanceRecordSchema.extend({
+          connection: instanceConnectionSchema,
+          binding_count: z.number().int().min(0),
+          holder_mismatch: z.boolean(),
+        }),
+      ),
+      next_cursor: z.string().nullable(),
+    }),
+    description:
+      "Page worker instances in ascending name order with their connection, binding count and holder mismatch.",
+  },
+  "instance.get": {
+    ...humanOperation,
+    id: "worker.instance.get",
+    method: HttpMethod.Get,
+    path: "/api/worker/instance/:instance_name",
+    mutation: false,
+    input: z.strictObject({
+      params: instanceParams,
+      query: emptyFields,
+      body: z.null(),
+    }),
+    output: instanceRecordSchema.extend({
+      connection: instanceConnectionSchema,
+      bindings: z.array(
+        z.strictObject({
+          project_id: identitySchema("project"),
+          binding: z.string().min(1),
+        }),
+      ),
+      registrations: z.array(registrationRecordSchema),
+      credentials: z.array(
+        z.strictObject({
+          name: z.string().min(1),
+          revision: z.number().int().positive(),
+          platform: z.string().min(1),
+          sealed_current: z.boolean(),
+        }),
+      ),
+    }),
+    description:
+      "Read the live or latest revision of a worker instance with the bindings that list it, its connection, its live registrations and its credential copies.",
+  },
+  "instance.rotate": {
+    ...humanOperation,
+    id: "worker.instance.rotate",
+    method: HttpMethod.Post,
+    path: "/api/worker/instance/:instance_name/revision",
+    mutation: true,
+    secret: true,
+    input: z.strictObject({
+      params: instanceParams,
+      query: emptyFields,
+      body: z.strictObject({
+        ...instanceKeyFields,
+        expected_revision: z.number().int().positive(),
+      }),
+    }),
+    output: instanceWriteAnswer,
+    description:
+      "Reset the key of a worker instance: insert the next revision and end the old revision, its tokens and its registrations in one transaction.",
+  },
+  "instance.archive": {
+    ...humanOperation,
+    id: "worker.instance.archive",
+    method: HttpMethod.Post,
+    path: "/api/worker/instance/:instance_name/archive",
+    mutation: true,
+    input: z.strictObject({
+      params: instanceParams,
+      query: emptyFields,
+      body: z.strictObject({ expected_revision: z.number().int().positive() }),
+    }),
+    output: instanceRecordSchema,
+    description:
+      "Archive a worker instance that no binding lists and whose registrations hold no live execution, and end its registrations.",
+  },
+  "instance.token": {
+    ...instanceOperation,
+    access: AccessPolicy.Public,
+    id: "worker.instance.token",
+    method: HttpMethod.Post,
+    path: "/api/worker/instance/token",
+    mutation: false,
+    secret: true,
+    body: true,
+    input: z.strictObject({
+      params: emptyFields,
+      query: emptyFields,
+      body: z.strictObject({ instance_id: instanceIdSchema }),
+    }),
+    output: z.strictObject({
+      server_version: z.string().min(1),
+      sealed: sealedObjectSchema,
+    }),
+    description:
+      "Answer a worker token sealed to the public key of the live instance revision. The call changes no state.",
+  },
+  "instance.connect": {
+    ...instanceOperation,
+    access: AccessPolicy.Worker,
+    id: "worker.instance.connect",
+    method: HttpMethod.Post,
+    path: "/api/worker/instance/connect",
+    mutation: true,
+    secret: true,
+    input: z.strictObject({
+      params: emptyFields,
+      query: emptyFields,
+      body: z.strictObject({
+        connection_id: connectionIdSchema.optional(),
+        connection_name: z.string().min(1).max(255),
+      }),
+    }),
+    output: z.strictObject({
+      connection_id: connectionIdSchema,
+      binding_version: z.number().int().min(0),
+      sealed: sealedObjectSchema,
+    }),
+    description:
+      "Open or renew the current connection of the instance and answer the sealed client token and client secret of each binding that lists it.",
+  },
+  "instance.heartbeat": {
+    ...instanceOperation,
+    access: AccessPolicy.Worker,
+    id: "worker.instance.heartbeat",
+    method: HttpMethod.Post,
+    path: "/api/worker/instance/heartbeat",
+    mutation: true,
+    input: z.strictObject({
+      params: emptyFields,
+      query: emptyFields,
+      body: z.strictObject({ connection_id: connectionIdSchema }),
+    }),
+    output: z.strictObject({
+      server_version: z.string().min(1),
+      binding_version: z.number().int().min(0),
+      credential_version: z.number().int().min(0),
+      login_sessions: z.array(z.record(z.string(), z.unknown())),
+    }),
+    description:
+      "Renew the current connection of the instance and answer the server version, the binding version, the credential version and the open login sessions.",
+  },
+} as const satisfies Record<string, Operation>;
+
 export const workerOperations = {
+  ...instanceOperations,
   "execution.setup.get": {
     service: WORKER_SERVICE_NAME,
     store: StoreName.Operational,

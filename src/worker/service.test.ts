@@ -149,10 +149,26 @@ const fakeCollaborations = {
       throw new Error("UNEXPECTED_COLLABORATION");
     },
     runningExecutionOfRuntime: () => null,
+    unendedExecutionOf: () => null,
     activityOf: () => ({
       activity: RegistrationActivity.Idle,
       execution_id: null,
     }),
+  },
+  workerBindingsOf: () => [],
+  instanceIssuer: {
+    workerToken: async () => {
+      throw new Error("UNEXPECTED_COLLABORATION");
+    },
+    clientToken: async () => {
+      throw new Error("UNEXPECTED_COLLABORATION");
+    },
+    clientIdentity: () => {
+      throw new Error("UNEXPECTED_COLLABORATION");
+    },
+    clientSecret: () => {
+      throw new Error("UNEXPECTED_COLLABORATION");
+    },
   },
   agentConfiguration: {
     validateEntry: () => {
