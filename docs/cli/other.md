@@ -426,8 +426,18 @@ The implemented fields are:
 - `worker.heartbeat_window`: optional positive safe integer in seconds, default
   `300`. A 30-second sweep ends expired registrations.
 - `worker.server_slot_limit`: optional positive safe integer, default `16`. It
-  caps the pool slots that the server starts at the `server` placement. A slot
-  above the cap stays unstarted and the server logs `worker.pool.slot_limit`.
+  caps the pool slots that the server starts at the `server` and the `container`
+  placements. A slot above the cap stays unstarted and the server logs
+  `worker.pool.slot_limit`.
+- `worker.container_image`: optional image name, default
+  `docker.io/kanthorlabs/kanthord`. It holds the name with no tag and no digest.
+  The server appends its package version as the tag, so a slot container runs the
+  server version. A value with a tag or a digest fails with
+  `system.config.invalid_field`. A change takes effect at the next start. When a
+  live binding holds the `container` placement and the container runtime is
+  unavailable at the server start, the server logs `worker.pool.driver_unavailable`
+  with `placement`, `reason` and `detail`, and it still starts. The slots start
+  again with a backoff when the runtime recovers.
 
 - `scheduler.release_reserve`: optional positive safe integer in seconds, default
   `600`. A claim adds this reserve after its effective worker wall time.
