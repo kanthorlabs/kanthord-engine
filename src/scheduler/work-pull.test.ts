@@ -211,7 +211,7 @@ test("a re-pull that answers the running execution reports no selection", async 
   assert.equal(h.reported.length, ONE_REPORT);
 });
 
-const HEALTHCHECK = "instanceHealthcheck";
+const HEALTHCHECK = "registrationHealthcheck";
 const MARKER_BRANCH = "kanthord/marker";
 
 test("the work pull answer derives node_branch from the Mission branches", async (t) => {
@@ -236,7 +236,7 @@ test("project wake serves parked pulls in arrival order and another project does
   const h = harness(t);
   const first = h.pull();
   assert.equal(h.service.pulling(h.row.runtime_identity), true);
-  const otherRuntime = createIdentity("worker_instance");
+  const otherRuntime = createIdentity("worker_registration");
   const otherIdentity = testMachineIdentity(
     {
       clientId: createIdentity("client_identity"),
@@ -296,7 +296,7 @@ test("concurrent empty pulls of one runtime retain one waiter and each duplicate
 test("woken health failure and quiescence answer no-work once without claims", async (t) => {
   const h = harness(t);
   const waiting = h.pull();
-  h.dependencies.registrations.instanceHealthcheck = () => false;
+  h.dependencies.registrations.registrationHealthcheck = () => false;
   h.service.wake(h.row.project_id);
   assert.deepEqual(await waiting, { kind: WorkPullKind.NoWork });
   assert.equal(h.commits(), ONE_COMMIT);
@@ -356,14 +356,17 @@ test("a pull of a worker with no declaration answers no-work and claims nothing"
 test("mismatches and unexpected probe errors propagate without a commit", async (t) => {
   const h = harness(t);
   for (const body of [
-    { ...h.input.body, runtime_identity: createIdentity("worker_instance") },
+    {
+      ...h.input.body,
+      runtime_identity: createIdentity("worker_registration"),
+    },
     { ...h.input.body, resource_identity: "another-binding" },
   ])
     await assert.rejects(h.invoke("workPull", { ...h.input, body }, h.caller), {
       code: CLAIMANT_MISMATCH,
     });
   const failure = new Error("health probe failed");
-  h.dependencies.registrations.instanceHealthcheck = () => {
+  h.dependencies.registrations.registrationHealthcheck = () => {
     throw failure;
   };
   await assert.rejects(h.pull(), failure);

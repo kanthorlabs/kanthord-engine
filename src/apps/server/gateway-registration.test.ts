@@ -32,7 +32,7 @@ const DISPLAY_NAME = "test worker";
 const input = { params: {}, query: {}, body: null };
 const ErrorCode = {
   Unauthorized: "gateway.authentication.unauthorized",
-  Capacity: "worker.instance.slot_unavailable",
+  Capacity: "worker.registration.slot_unavailable",
   Stale: "gateway.registration.stale",
   Required: "gateway.registration.required",
 } as const;
@@ -143,7 +143,7 @@ test("deregistration replays after ending while fresh keys refuse ended targets"
   );
   const direct = directClient(workerOperations, f.gateway.invocation);
   const key = ulid();
-  const ended = await f.client["instance.deregister"](target, {
+  const ended = await f.client["registration.deregister"](target, {
     idempotencyKey: key,
   });
   assert.ok(ended.type === OperationResultType.Completed);
@@ -152,45 +152,45 @@ test("deregistration replays after ending while fresh keys refuse ended targets"
     registered: false,
   });
   assert.deepEqual(
-    await f.client["instance.deregister"](target, { idempotencyKey: key }),
+    await f.client["registration.deregister"](target, { idempotencyKey: key }),
     ended,
   );
   assert.deepEqual(
-    await direct["instance.deregister"](target, {
+    await direct["registration.deregister"](target, {
       identity,
       idempotencyKey: key,
     }),
     ended,
   );
   assertFailure(
-    await direct["instance.deregister"](target, { identity }),
+    await direct["registration.deregister"](target, { identity }),
     HttpStatus.NotFound,
-    "worker.instance.not_found",
+    "worker.registration.not_found",
   );
   assertFailure(
-    await f.client["instance.deregister"](target),
+    await f.client["registration.deregister"](target),
     HttpStatus.NotFound,
-    "worker.instance.not_found",
+    "worker.registration.not_found",
   );
   const next = await f.client.register(input);
   assert.ok(next.type === OperationResultType.Completed);
   assert.notEqual(next.data.runtime_identity, registered.data.runtime_identity);
   assert.deepEqual(
-    await direct["instance.deregister"](target, {
+    await direct["registration.deregister"](target, {
       identity,
       idempotencyKey: key,
     }),
     ended,
   );
   assertFailure(
-    await direct["instance.deregister"](target, { identity }),
+    await direct["registration.deregister"](target, { identity }),
     HttpStatus.NotFound,
-    "worker.instance.not_found",
+    "worker.registration.not_found",
   );
   assertFailure(
-    await f.client["instance.deregister"](target),
+    await f.client["registration.deregister"](target),
     HttpStatus.NotFound,
-    "worker.instance.not_found",
+    "worker.registration.not_found",
   );
   assert.equal(f.machines.worker.registrations.size, SINGLE_REGISTRATION);
   const replacement = {
@@ -198,20 +198,20 @@ test("deregistration replays after ending while fresh keys refuse ended targets"
     params: { runtime_identity: next.data.runtime_identity },
   };
   const nextKey = ulid();
-  const directEnd = await direct["instance.deregister"](replacement, {
+  const directEnd = await direct["registration.deregister"](replacement, {
     identity,
     idempotencyKey: nextKey,
   });
   assert.ok(directEnd.type === OperationResultType.Completed);
   assert.deepEqual(
-    await direct["instance.deregister"](replacement, {
+    await direct["registration.deregister"](replacement, {
       identity,
       idempotencyKey: nextKey,
     }),
     directEnd,
   );
   assert.deepEqual(
-    await f.client["instance.deregister"](replacement, {
+    await f.client["registration.deregister"](replacement, {
       idempotencyKey: nextKey,
     }),
     directEnd,
@@ -390,7 +390,7 @@ test("one live registration per client, live replay across adapters, and stale r
   assert.ok(first.type === OperationResultType.Completed);
   assert.match(
     first.data.runtime_identity,
-    /^worker_instance_[0-7][0-9A-HJKMNP-TV-Z]{25}$/,
+    /^worker_registration_[0-7][0-9A-HJKMNP-TV-Z]{25}$/,
   );
   const retry = await fixture.client.register(input);
   assert.ok(retry.type === OperationResultType.Completed);

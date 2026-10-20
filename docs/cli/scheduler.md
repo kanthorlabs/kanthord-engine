@@ -80,7 +80,7 @@ The [Scheduler operation contracts](https://github.com/kanthorlabs/kanthord/blob
   Node IDs, evidence IDs and binding IDs use the prefixes of their owners;
   copy them from the owner's response.
   Binding IDs use `binding_<ulid>` under the [Project identities](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/project-service.impl.md#the-identities-of-the-project-service).
-- `runtime_identity` is the `worker_instance_<ulid>` identity returned by
+- `runtime_identity` is the `worker_registration_<ulid>` identity returned by
   Worker registration. Both the [Worker contract](../../src/worker/contract.ts)
   and the [Scheduler contract](../../src/scheduler/contract.ts) validate the
   canonical prefixed identity under the [Worker identity ruling](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/worker-service.impl.md#the-identities-of-the-worker-service).
@@ -269,8 +269,8 @@ node in `Available` or `Waiting` and when `node-state` fails. `queue-job` passes
 the node. `no-live-claim` passes when no execution of the node is `running`.
 
 The report never answers binding availability and instance count, declared
-node states, claimant count, the instance healthcheck or the compatibility
-match, because each needs a selected claimant. It takes no instance
+node states, claimant count, the registration healthcheck or the compatibility
+match, because each needs a selected claimant. It takes no registration
 healthcheck, reads no registration and names no binding, instance or claimant.
 
 ## Work acquisition
@@ -284,10 +284,10 @@ kanthord scheduler work pull --file <path> [--idempotency-key <key>]
 There are no positional arguments or query fields. The required file supplies
 the following fields. The file forms the HTTP JSON body.
 
-| JSON file field     | Requiredness / type                | Default and validation                                                                    |
-| ------------------- | ---------------------------------- | ----------------------------------------------------------------------------------------- |
-| `resource_identity` | Required nonempty opaque string.   | No default. Must equal the resource identity authenticated from the machine JWT.          |
-| `runtime_identity`  | Required `worker_instance_<ulid>`. | No default. Must equal that client's live Worker registration and belong to that binding. |
+| JSON file field     | Requiredness / type                    | Default and validation                                                                    |
+| ------------------- | -------------------------------------- | ----------------------------------------------------------------------------------------- |
+| `resource_identity` | Required nonempty opaque string.       | No default. Must equal the resource identity authenticated from the machine JWT.          |
+| `runtime_identity`  | Required `worker_registration_<ulid>`. | No default. Must equal that client's live Worker registration and belong to that binding. |
 
 The Scheduler parks a pull that finds no work for at most 90 s and then answers with no work. The client chooses no wait. The route timeout is 120 s.
 
@@ -304,7 +304,7 @@ it cannot acquire a chosen node or authorize its own claim.
 
 **Admission and effect:**
 
-1. Worker vouches for the runtime association, a fresh instance healthcheck
+1. Worker vouches for the runtime association, a fresh registration healthcheck
    and the worker's published compatibility declarations. The instance has
    at most one outstanding pull or one live execution.
 2. Scheduler selects the first job that the claimant admits

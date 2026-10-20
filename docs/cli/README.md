@@ -24,7 +24,7 @@ non-flag conventions and commands outside these groups live in `other.md`.
 | `scheduler`                     | [Scheduler Service](scheduler.md)                 | Work pull, executions, claims, deadlines, and scheduling inspection.                                    |
 | `intake`                        | [Intake Service](intake.md)                       | Inbounds, inbound events, acquisition through a webhook or a poll, and outbound platform operations.    |
 | `agent`                         | [Agent](agent.md)                                 | Agent catalog, agent enablement and agent providers.                                                    |
-| `worker`                        | [Worker Service](worker.md)                       | Workers, instance registration, and execution hosting.                                                  |
+| `worker`                        | [Worker Service](worker.md)                       | Workers, registrations, and execution hosting.                                                          |
 | `workbench`                     | [Workbench Service](workbench.md)                 | Human-driven agent sessions; API only.                                                                  |
 | `tracking`                      | [Tracking Service](tracking.md)                   | Trace, span and telemetry text reads; worker telemetry writes.                                          |
 | `gateway`                       | [Gateway Service](gateway.md)                     | Identity verification and local OpenAPI generation.                                                     |
@@ -53,7 +53,7 @@ The pages distinguish three kinds of information:
 
 Each group page states the status of its commands. The source registers every
 group in the table above except `intake` and `workbench`. The `tracking` group
-reads traces, spans and telemetry texts. `serve worker` registers the worker instance, sends
+reads traces, spans and telemetry texts. `serve worker` creates its worker registration, sends
 heartbeats, pulls work, executes claims and deregisters on shutdown. A CLI
 parser and an operation declaration alone do not establish a working journey.
 

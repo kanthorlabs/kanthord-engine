@@ -10,7 +10,7 @@ import { pullLoop } from "./pull-loop.ts";
 import { testClaim } from "./test-support.ts";
 
 const REGISTRATION = {
-  runtime_identity: "worker_instance_01ARZ3NDEKTSV4RRFFQ69G5FAA",
+  runtime_identity: "worker_registration_01ARZ3NDEKTSV4RRFFQ69G5FAA",
   resource_identity: "worker:kanthord:test",
   worker_name: "coder@1",
 };

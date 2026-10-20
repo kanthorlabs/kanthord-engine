@@ -20,7 +20,7 @@ const PULL_INPUT = {
   query: {},
   body: {
     resource_identity: "worker:kanthord:test",
-    runtime_identity: "worker_instance_01ARZ3NDEKTSV4RRFFQ69G5FAA",
+    runtime_identity: "worker_registration_01ARZ3NDEKTSV4RRFFQ69G5FAA",
   },
 };
 

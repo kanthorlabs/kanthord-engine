@@ -287,7 +287,7 @@ test("transactional proof rejects wrong claimants, ended claims and equality", (
     );
     for (const [id, runtime, now] of [
       [createIdentity("execution"), row.runtime_identity, FIXTURE_NOW],
-      [row.execution_id, createIdentity("worker_instance"), FIXTURE_NOW],
+      [row.execution_id, createIdentity("worker_registration"), FIXTURE_NOW],
       [row.execution_id, row.runtime_identity, FIXTURE_DEADLINE],
     ] as const)
       assert.throws(() => requireRunning(tx, id, runtime, now), {

@@ -40,8 +40,8 @@ test("Scheduler inputs are closed and runtime identities are canonical", () => {
   assert.ok(workPullSchema.safeParse(pull).success);
   assert.ok(!workPullSchema.safeParse({ ...pull, extra: true }).success);
   for (const runtimeIdentity of [
-    row.runtime_identity.slice("worker_instance_".length),
-    row.runtime_identity.replace("worker_instance", "runtime_identity"),
+    row.runtime_identity.slice("worker_registration_".length),
+    row.runtime_identity.replace("worker_registration", "runtime_identity"),
     row.runtime_identity.toLowerCase(),
   ])
     assert.ok(

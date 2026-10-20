@@ -190,7 +190,11 @@ test("claim get isolates runtime, binding and project and distinguishes absent e
     body: null,
   };
   const identities = [
-    testMachineIdentity(h.machine, "other", createIdentity("worker_instance")),
+    testMachineIdentity(
+      h.machine,
+      "other",
+      createIdentity("worker_registration"),
+    ),
     testMachineIdentity(
       { ...h.machine, resourceIdentity: "other" },
       "other",

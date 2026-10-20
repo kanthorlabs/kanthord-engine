@@ -461,13 +461,13 @@ export function fakeMachines(
       if (count >= binding.capacity)
         throw new GatewayError(
           HttpStatus.Conflict,
-          "worker.instance.slot_unavailable",
+          "worker.registration.slot_unavailable",
           "Worker binding is at capacity.",
         );
       const registration = {
         ...client,
         worker_name: "coder@1",
-        runtime_identity: createIdentity("worker_instance"),
+        runtime_identity: createIdentity("worker_registration"),
         registered_at: now,
       };
       registrations.set(client.client_id, registration);

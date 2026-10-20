@@ -1,7 +1,7 @@
 # Generated from the operation registry by kanthord gateway openapi.
 pathItem:
   get:
-    operationId: worker.instance.list
+    operationId: worker.registration.list
     tags:
       - worker
     description: Page live registrations in descending runtime identity order
@@ -17,33 +17,33 @@ pathItem:
         in: query
         required: false
         schema:
-          $ref: "#/components/schemas/worker.instance.list.Input/properties/query/propert\
-            ies/project_id"
+          $ref: "#/components/schemas/worker.registration.list.Input/properties/query/pro\
+            perties/project_id"
       - name: resource_identity
         in: query
         required: false
         schema:
-          $ref: "#/components/schemas/worker.instance.list.Input/properties/query/propert\
-            ies/resource_identity"
+          $ref: "#/components/schemas/worker.registration.list.Input/properties/query/pro\
+            perties/resource_identity"
       - name: limit
         in: query
         required: false
         schema:
-          $ref: "#/components/schemas/worker.instance.list.Input/properties/query/propert\
-            ies/limit"
+          $ref: "#/components/schemas/worker.registration.list.Input/properties/query/pro\
+            perties/limit"
       - name: cursor
         in: query
         required: false
         schema:
-          $ref: "#/components/schemas/worker.instance.list.Input/properties/query/propert\
-            ies/cursor"
+          $ref: "#/components/schemas/worker.registration.list.Input/properties/query/pro\
+            perties/cursor"
     responses:
       "200":
         description: Completed result
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/worker.instance.list.Output"
+              $ref: "#/components/schemas/worker.registration.list.Output"
       "400":
         $ref: ../shared/components.yaml#/components/responses/Error
       "401":
@@ -66,7 +66,7 @@ pathItem:
         $ref: ../shared/components.yaml#/components/responses/Error
 components:
   schemas:
-    worker.instance.list.Input:
+    worker.registration.list.Input:
       type: object
       properties:
         params:
@@ -106,7 +106,7 @@ components:
         - query
         - body
       additionalProperties: false
-    worker.instance.list.Output:
+    worker.registration.list.Output:
       type: object
       properties:
         items:
@@ -117,10 +117,10 @@ components:
                 properties:
                   runtime_identity:
                     type: string
-                    minLength: 42
-                    maxLength: 42
-                    pattern: ^worker_instance_[0-7][0-9A-HJKMNP-TV-Z]{25}$
-                    description: worker_instance_ followed by a canonical 26-character uppercase
+                    minLength: 46
+                    maxLength: 46
+                    pattern: ^worker_registration_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                    description: worker_registration_ followed by a canonical 26-character uppercase
                       ULID.
                   project_id:
                     type: string

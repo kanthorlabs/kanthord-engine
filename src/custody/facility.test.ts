@@ -168,7 +168,7 @@ function sshFixture(t: TestContext) {
     project_id: createIdentity("project"),
     worker_binding_id: createIdentity("binding"),
     resource_identity: "worker:kanthord:general",
-    runtime_identity: createIdentity("worker_instance"),
+    runtime_identity: createIdentity("worker_registration"),
     credentials: [],
   };
   const claim: ExecutionClaim = {

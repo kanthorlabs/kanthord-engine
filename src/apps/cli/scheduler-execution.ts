@@ -37,7 +37,7 @@ const STOP_NOTE = `Add stop as { "reason": <reason>, "code": <code or null> } on
 const RELEASE_EXAMPLE = { further_work: true, stop: null };
 const WORK_PULL_EXAMPLE = {
   resource_identity: "worker:general-main",
-  runtime_identity: "worker_instance_01ARZ3NDEKTSV4RRFFQ69G5FAV",
+  runtime_identity: "worker_registration_01ARZ3NDEKTSV4RRFFQ69G5FAV",
 };
 const GET = "get";
 const LIST = "list";
@@ -190,7 +190,7 @@ export function addExecutionCommands(scheduler: Command): void {
   assert.ok(!scheduler.commands.some((command) => command.name() === WORK));
   const claim = scheduler
     .command(CLAIM)
-    .description("Read this instance's claims");
+    .description("Read this registration's claims");
   claim.action(() => claim.help());
   claim
     .command(GET)
@@ -254,7 +254,7 @@ export function addExecutionCommands(scheduler: Command): void {
   );
   const work = scheduler
     .command(WORK)
-    .description("Acquire work for a registered instance");
+    .description("Acquire work for a registration");
   work.action(() => work.help());
   addFileBodyHelp(
     work

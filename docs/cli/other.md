@@ -688,7 +688,7 @@ of a worker binding need N processes with N machine tokens.
 Output: operational JSON log records go to stderr. Startup prints no token and
 requires no terminal. Startup resolves the client configuration, checks
 `client_secret` for a canonical 32-byte base64 value, checks the server package
-version, registers the instance, and then
+version, creates its registration, and then
 logs one record `Worker application ready` with `runtime_identity`,
 `resource_identity` and `worker_name`. A version mismatch refuses startup with both
 versions in the diagnostic. A startup
@@ -866,7 +866,7 @@ kanthord auth jwt generate --project <project id> --binding <binding name> [--na
 Generate claims `kind: "client"`, `sub: "client_identity_<ulid>"`,
 `project_id: <project id>`, `resource_identity: worker:kanthord:<binding name>`, and `name: <display>`. Every successful invocation uses a
 fresh canonical client-identity ULID and `jti`. It creates no client identity
-row and no worker-instance registration. Local issuance cannot check whether
+row and no worker registration. Local issuance cannot check whether
 the named binding exists or is available; Gateway checks it on later use, and
 a token for an absent/unavailable binding fails verification. Registration is
 a separate Worker operation.

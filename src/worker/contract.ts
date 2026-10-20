@@ -440,13 +440,13 @@ export type IntentOf = (
   nodeRevision: number,
 ) => ExecutionIntent;
 
-export const InstanceActivity = {
+export const RegistrationActivity = {
   Idle: "idle",
   Pulling: "pulling",
   Executing: "executing",
 } as const;
-export type InstanceActivity =
-  (typeof InstanceActivity)[keyof typeof InstanceActivity];
+export type RegistrationActivity =
+  (typeof RegistrationActivity)[keyof typeof RegistrationActivity];
 export const InstancePlacement = {
   Server: "server",
   Container: "container",
@@ -503,9 +503,9 @@ export function alwaysAvailable(placement: InstancePlacement): PlacementStatus {
 export const workerResourceIdentitySchema = z
   .string()
   .regex(/^worker:kanthord:[a-z][a-z0-9-]{0,62}$/);
-export const instanceRecordSchema = z
+export const registrationRecordSchema = z
   .strictObject({
-    runtime_identity: identitySchema("worker_instance"),
+    runtime_identity: identitySchema("worker_registration"),
     project_id: identitySchema("project"),
     resource_identity: workerResourceIdentitySchema,
     worker_name: z.string().min(1),
@@ -513,7 +513,7 @@ export const instanceRecordSchema = z
     placement: z.enum(InstancePlacement).optional(),
     client_id: identitySchema("client_identity").optional(),
     name: z.string().min(1).max(64).optional(),
-    activity: z.enum(InstanceActivity),
+    activity: z.enum(RegistrationActivity),
     draining: z.boolean(),
     execution_id: identitySchema("execution").optional(),
     registered: z.boolean(),
@@ -547,11 +547,14 @@ export const instanceRecordSchema = z
   .and(
     z.union([
       z.looseObject({
-        activity: z.literal(InstanceActivity.Executing),
+        activity: z.literal(RegistrationActivity.Executing),
         execution_id: identitySchema("execution"),
       }),
       z.looseObject({
-        activity: z.enum([InstanceActivity.Idle, InstanceActivity.Pulling]),
+        activity: z.enum([
+          RegistrationActivity.Idle,
+          RegistrationActivity.Pulling,
+        ]),
         execution_id: z.never().optional(),
       }),
     ]),
@@ -578,7 +581,7 @@ export interface SchedulerClaims {
     tx: Transaction,
     runtimeIdentity: string,
     now: number,
-  ): { activity: InstanceActivity; execution_id: string | null };
+  ): { activity: RegistrationActivity; execution_id: string | null };
   agentSelectionsOf(tx: Transaction, executionId: string): AgentSelection[];
 }
 
@@ -702,12 +705,12 @@ export const WorkerErrorCode = {
   ClaimNotEvaluation: "worker.action_performer.claim_not_evaluation",
   AssessmentNotCurrent: "worker.action_performer.assessment_not_current",
   SnapshotAbsent: "worker.action_performer.snapshot_absent",
-  InstanceNotFound: "worker.instance.not_found",
-  NoLiveExecution: "worker.instance.no_live_execution",
-  ClientLive: "worker.instance.client_live",
-  BindingUnknown: "worker.instance.binding_unknown",
-  SlotUnavailable: "worker.instance.slot_unavailable",
-  PlacementMismatch: "worker.instance.placement_mismatch",
+  RegistrationNotFound: "worker.registration.not_found",
+  NoLiveExecution: "worker.registration.no_live_execution",
+  ClientLive: "worker.registration.client_live",
+  BindingUnknown: "worker.registration.binding_unknown",
+  SlotUnavailable: "worker.registration.slot_unavailable",
+  PlacementMismatch: "worker.registration.placement_mismatch",
   CatalogNotFound: "worker.catalog.not_found",
 } as const;
 
@@ -847,7 +850,7 @@ export const catalogEntrySchema = z.discriminatedUnion("host", [
 
 const emptyFields = z.strictObject({});
 const runtimeIdentityParams = z.strictObject({
-  runtime_identity: identitySchema("worker_instance"),
+  runtime_identity: identitySchema("worker_registration"),
 });
 const humanOperation = {
   service: WORKER_SERVICE_NAME,
@@ -972,11 +975,11 @@ export const workerOperations = {
     description:
       "Apply an authenticated refresh report to the live execution's pinned revision when the replaced credential digest still matches.",
   },
-  "instance.list": {
+  "registration.list": {
     ...humanOperation,
-    id: "worker.instance.list",
+    id: "worker.registration.list",
     method: HttpMethod.Get,
-    path: "/api/worker/instance",
+    path: "/api/worker/registration",
     mutation: false,
     input: z.strictObject({
       params: emptyFields,
@@ -1004,7 +1007,7 @@ export const workerOperations = {
       body: z.null(),
     }),
     output: z.strictObject({
-      items: z.array(instanceRecordSchema),
+      items: z.array(registrationRecordSchema),
       next_cursor: z.string().nullable(),
     }),
     description:
@@ -1021,20 +1024,20 @@ export const workerOperations = {
     description:
       "List each worker placement with its availability on this server and the reason when it is unavailable, in the order server, container, worker.",
   },
-  "instance.get": {
+  "registration.get": {
     ...humanOperation,
-    id: "worker.instance.get",
+    id: "worker.registration.get",
     method: HttpMethod.Get,
-    path: "/api/worker/instance/:runtime_identity",
+    path: "/api/worker/registration/:runtime_identity",
     mutation: false,
     input: z.strictObject({
       params: runtimeIdentityParams,
       query: emptyFields,
       body: z.null(),
     }),
-    output: instanceRecordSchema,
+    output: registrationRecordSchema,
     description:
-      "Read a live instance record. Unknown and ended instances answer not found.",
+      "Read a live registration record. Unknown and ended registrations answer not found.",
   },
   "catalog.list": {
     ...humanOperation,
@@ -1093,13 +1096,13 @@ export const workerOperations = {
     description:
       "Renew the live registration heartbeat with an authenticated empty request.",
   },
-  "instance.deregister": {
+  "registration.deregister": {
     service: WORKER_SERVICE_NAME,
     store: StoreName.Operational,
     lifetime: OperationLifetime.Unary,
-    id: "worker.instance.deregister",
+    id: "worker.registration.deregister",
     method: HttpMethod.Delete,
-    path: "/api/worker/instance/:runtime_identity",
+    path: "/api/worker/registration/:runtime_identity",
     access: AccessPolicy.Client,
     requiresRegistration: false,
     timeoutMs: 30000,
@@ -1114,13 +1117,13 @@ export const workerOperations = {
     description:
       "End the caller's named live registration and free its slot atomically. Same-key retries replay the recorded answer after the end.",
   },
-  "instance.resume": {
+  "registration.resume": {
     service: WORKER_SERVICE_NAME,
     store: StoreName.Operational,
     lifetime: OperationLifetime.Unary,
-    id: "worker.instance.resume",
+    id: "worker.registration.resume",
     method: HttpMethod.Post,
-    path: "/api/worker/instance/:runtime_identity/resume",
+    path: "/api/worker/registration/:runtime_identity/resume",
     access: AccessPolicy.Human,
     timeoutMs: 30000,
     mutation: true,
@@ -1149,11 +1152,11 @@ export const workerOperations = {
     status: HttpStatus.OK,
     input: emptyInput,
     output: z.strictObject({
-      runtime_identity: identitySchema("worker_instance"),
+      runtime_identity: identitySchema("worker_registration"),
       resource_identity: workerResourceIdentitySchema,
       worker_name: z.string().min(1),
     }),
     description:
-      "Register a worker instance with a bearer machine JWT and an empty body. A client identity with a live registration receives that runtime identity with any key. A recorded replay after the registration ends answers 409 gateway.registration.stale. Admission and the binding instance count share one transaction.",
+      "Create a worker registration with a bearer machine JWT and an empty body. A client identity with a live registration receives that runtime identity with any key. A recorded replay after the registration ends answers 409 gateway.registration.stale. Admission and the binding instance count share one transaction.",
   },
 } as const satisfies Record<string, Operation>;

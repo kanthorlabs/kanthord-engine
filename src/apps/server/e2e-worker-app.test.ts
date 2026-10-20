@@ -499,7 +499,7 @@ test(
           entry.includes(READY) && (!previous || !entry.includes(previous)),
       );
       const record = JSON.parse(line);
-      assert.match(record.runtime_identity, /^worker_instance_/);
+      assert.match(record.runtime_identity, /^worker_registration_/);
       assert.equal(record.resource_identity, GENERAL_RESOURCE);
       assert.equal(record.worker_name, GENERAL_WORKER);
       return record.runtime_identity as string;
@@ -509,7 +509,7 @@ test(
       const identity = await ready(first);
       const list = await setup.read<{
         items: { runtime_identity: string; registered: boolean }[];
-      }>(["worker", "instance", "list", "--project", setup.project_id]);
+      }>(["worker", "registration", "list", "--project", setup.project_id]);
       assert.ok(
         list.items.some(
           (item) => item.runtime_identity === identity && item.registered,
@@ -526,12 +526,12 @@ test(
         assert.ok(!line.includes(auth.client_secret));
       }
       const missing = await kanthord(
-        ["worker", "instance", "get", identity],
+        ["worker", "registration", "get", identity],
         setup.human,
       );
       assert.equal(missing.code, EXIT_FAILURE);
       assert.ok(
-        missing.stderr.startsWith("worker.instance.not_found:"),
+        missing.stderr.startsWith("worker.registration.not_found:"),
         missing.stderr,
       );
     } finally {
@@ -552,7 +552,7 @@ test(
       clientFile(otherEnv, other.client_secret);
       const refused = spawnWorker(WORKER_ARGS, otherEnv);
       try {
-        await failure(refused, "worker.instance.placement_mismatch");
+        await failure(refused, "worker.registration.placement_mismatch");
       } finally {
         await stopWorker(refused);
       }
@@ -567,7 +567,7 @@ test(
     const third = spawnWorker(WORKER_ARGS, env);
     try {
       const identity = await ready(third);
-      await setup.read(["worker", "instance", "deregister", identity], {
+      await setup.read(["worker", "registration", "deregister", identity], {
         ...setup.human,
         KANTHORD_TOKEN: auth.token,
       });

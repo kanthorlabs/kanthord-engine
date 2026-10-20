@@ -58,7 +58,7 @@ test("deregistration CLI validates identity and token and returns replayable JSO
     ...environment(temporary(t)),
     KANTHORD_ENDPOINT: fixture.endpoint,
   };
-  const leaf = ["worker", "instance", "deregister"];
+  const leaf = ["worker", "registration", "deregister"];
   const help = await command([...leaf, "--help"], env);
   assert.equal(help.code, ExitCode.Success);
   assert.match(help.stdout, /machine JWT/);
@@ -66,7 +66,7 @@ test("deregistration CLI validates identity and token and returns replayable JSO
   const invalid = await command([...leaf, "invalid"], env);
   assert.match(
     invalid.stderr,
-    /^cli.worker.instance.deregister.invalid_runtime_identity:/,
+    /^cli.worker.registration.deregister.invalid_runtime_identity:/,
   );
   const token = await fixture.machineToken(
     TEST_PROJECT_ID,
@@ -81,7 +81,7 @@ test("deregistration CLI validates identity and token and returns replayable JSO
   const absent = await command([...leaf, runtimeIdentity], env);
   assert.match(
     absent.stderr,
-    /^cli.worker.instance.deregister.token_required:/,
+    /^cli.worker.registration.deregister.token_required:/,
   );
   const key = ulid();
   const ended = await command(
@@ -130,7 +130,7 @@ test("resume CLI validates input and token and denies machine access", async (t)
     ...environment(temporary(t)),
     KANTHORD_ENDPOINT: fixture.endpoint,
   };
-  const leaf = ["worker", "instance", "resume"];
+  const leaf = ["worker", "registration", "resume"];
   assert.equal(
     (await command([...leaf, "--help"], env)).code,
     ExitCode.Success,
@@ -139,7 +139,7 @@ test("resume CLI validates input and token and denies machine access", async (t)
   assert.equal(invalid.code, ExitCode.Failure);
   assert.match(
     invalid.stderr,
-    /^cli.worker.instance.resume.invalid_runtime_identity:/,
+    /^cli.worker.registration.resume.invalid_runtime_identity:/,
   );
   const token = await fixture.machineToken(
     TEST_PROJECT_ID,
@@ -153,7 +153,10 @@ test("resume CLI validates input and token and denies machine access", async (t)
   const { runtime_identity: runtimeIdentity } = JSON.parse(registration.stdout);
   const absent = await command([...leaf, runtimeIdentity], env);
   assert.equal(absent.code, ExitCode.Failure);
-  assert.match(absent.stderr, /^cli.worker.instance.resume.token_required:/);
+  assert.match(
+    absent.stderr,
+    /^cli.worker.registration.resume.token_required:/,
+  );
   const refused = await command(
     [...leaf, runtimeIdentity, "--token", token],
     env,
@@ -162,7 +165,7 @@ test("resume CLI validates input and token and denies machine access", async (t)
   assert.match(refused.stderr, /^gateway.authentication.unauthorized:/);
 });
 
-test("instance inspection CLI validates filters and identity and denies machine reads", async (t) => {
+test("registration inspection CLI validates filters and identity and denies machine reads", async (t) => {
   const fixture = await gatewayFixture(t, { machines: fakeMachines() });
   const env = {
     ...environment(temporary(t)),
@@ -170,25 +173,28 @@ test("instance inspection CLI validates filters and identity and denies machine 
     KANTHORD_TOKEN: fixture.token,
   };
   assert.equal(
-    (await command(["worker", "instance", "list", "--help"], env)).code,
+    (await command(["worker", "registration", "list", "--help"], env)).code,
     ExitCode.Success,
   );
   for (const [args, code] of [
     [
       ["list", "--project", "invalid"],
-      "cli.worker.instance.list.invalid_project_id",
+      "cli.worker.registration.list.invalid_project_id",
     ],
     [
       ["list", "--binding", "Invalid"],
-      "cli.worker.instance.list.invalid_binding_name",
+      "cli.worker.registration.list.invalid_binding_name",
     ],
     [
       ["list", "--binding", "general"],
-      "cli.worker.instance.list.binding_without_project",
+      "cli.worker.registration.list.binding_without_project",
     ],
-    [["get", "invalid"], "cli.worker.instance.get.invalid_runtime_identity"],
+    [
+      ["get", "invalid"],
+      "cli.worker.registration.get.invalid_runtime_identity",
+    ],
   ] as const) {
-    const result = await command(["worker", "instance", ...args], env);
+    const result = await command(["worker", "registration", ...args], env);
     assert.equal(result.code, ExitCode.Failure);
     assert.ok(result.stderr.startsWith(`${code}:`));
   }
@@ -197,16 +203,16 @@ test("instance inspection CLI validates filters and identity and denies machine 
     TEST_WORKER_BINDING,
   );
   const denied = await command(
-    ["worker", "instance", "list", "--token", token],
+    ["worker", "registration", "list", "--token", token],
     env,
   );
   assert.equal(denied.code, ExitCode.Failure);
   assert.match(denied.stderr, /^gateway.authentication.unauthorized:/);
-  const page = await command(["worker", "instance", "list"], env);
+  const page = await command(["worker", "registration", "list"], env);
   assert.equal(page.code, ExitCode.Success, page.stderr);
   assert.deepEqual(JSON.parse(page.stdout), { items: [], next_cursor: null });
   const invalidQuery = await fixture.request(
-    "/api/worker/instance?resource_identity=worker:kanthord:general",
+    "/api/worker/registration?resource_identity=worker:kanthord:general",
     { headers: { Authorization: `Bearer ${fixture.token}` } },
   );
   const badRequest = 400;

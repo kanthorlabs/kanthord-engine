@@ -316,16 +316,16 @@ paths:
     $ref: ./openapi/worker/handover.yaml#/pathItem
   /api/worker/heartbeat:
     $ref: ./openapi/worker/heartbeat.yaml#/pathItem
-  /api/worker/instance/{runtime_identity}:
-    $ref: ./openapi/worker/instance.deregister.yaml#/pathItem
-  /api/worker/instance:
-    $ref: ./openapi/worker/instance.list.yaml#/pathItem
-  /api/worker/instance/{runtime_identity}/resume:
-    $ref: ./openapi/worker/instance.resume.yaml#/pathItem
   /api/worker/placement:
     $ref: ./openapi/worker/placement.list.yaml#/pathItem
   /api/worker/register:
     $ref: ./openapi/worker/register.yaml#/pathItem
+  /api/worker/registration/{runtime_identity}:
+    $ref: ./openapi/worker/registration.deregister.yaml#/pathItem
+  /api/worker/registration:
+    $ref: ./openapi/worker/registration.list.yaml#/pathItem
+  /api/worker/registration/{runtime_identity}/resume:
+    $ref: ./openapi/worker/registration.resume.yaml#/pathItem
 components:
   securitySchemes:
     bearerAuth:

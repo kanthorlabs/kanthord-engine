@@ -39,7 +39,7 @@ test("execution admission derives the pin and actor and rejects ended or foreign
   for (const live of [
     null,
     { ...liveRow, execution_id: createIdentity("execution") },
-    { ...liveRow, runtime_identity: createIdentity("worker_instance") },
+    { ...liveRow, runtime_identity: createIdentity("worker_registration") },
   ]) {
     h.dependencies.schedulerClaims.liveExecutionOf = () => live;
     assert.throws(

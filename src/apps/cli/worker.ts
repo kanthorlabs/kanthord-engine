@@ -164,28 +164,28 @@ async function deregister(
   command: Command,
 ): Promise<void> {
   assert.equal(
-    workerOperations["instance.deregister"].access,
+    workerOperations["registration.deregister"].access,
     AccessPolicy.Client,
   );
-  assert.equal(workerOperations["instance.deregister"].mutation, true);
-  if (!identitySchema("worker_instance").safeParse(runtimeIdentity).success)
+  assert.equal(workerOperations["registration.deregister"].mutation, true);
+  if (!identitySchema("worker_registration").safeParse(runtimeIdentity).success)
     throw new Diagnostic(
-      "cli.worker.instance.deregister.invalid_runtime_identity",
-      "invalid worker instance ID",
+      "cli.worker.registration.deregister.invalid_runtime_identity",
+      "invalid worker registration ID",
     );
   const options = command.optsWithGlobals();
   const { endpoint, token } = resolveClient(options);
-  requireToken(token, "cli.worker.instance.deregister.token_required");
+  requireToken(token, "cli.worker.registration.deregister.token_required");
   const key = resolveKey(options);
   const result = await httpClient(workerOperations, endpoint, token)[
-    "instance.deregister"
+    "registration.deregister"
   ](
     { params: { runtime_identity: runtimeIdentity }, query: {}, body: null },
     { idempotencyKey: key },
   );
   const data = handleMutationResult(
     result,
-    "cli.worker.instance.deregister.indeterminate",
+    "cli.worker.registration.deregister.indeterminate",
     key,
   );
   process.stdout.write(
@@ -210,26 +210,29 @@ async function resume(
   runtimeIdentity: string,
   command: Command,
 ): Promise<void> {
-  assert.equal(workerOperations["instance.resume"].access, AccessPolicy.Human);
-  assert.equal(workerOperations["instance.resume"].mutation, true);
-  if (!identitySchema("worker_instance").safeParse(runtimeIdentity).success)
+  assert.equal(
+    workerOperations["registration.resume"].access,
+    AccessPolicy.Human,
+  );
+  assert.equal(workerOperations["registration.resume"].mutation, true);
+  if (!identitySchema("worker_registration").safeParse(runtimeIdentity).success)
     throw new Diagnostic(
-      "cli.worker.instance.resume.invalid_runtime_identity",
-      "invalid worker instance ID",
+      "cli.worker.registration.resume.invalid_runtime_identity",
+      "invalid worker registration ID",
     );
   const options = command.optsWithGlobals();
   const { endpoint, token } = resolveClient(options);
-  requireToken(token, "cli.worker.instance.resume.token_required");
+  requireToken(token, "cli.worker.registration.resume.token_required");
   const key = resolveKey(options);
   const result = await httpClient(workerOperations, endpoint, token)[
-    "instance.resume"
+    "registration.resume"
   ](
     { params: { runtime_identity: runtimeIdentity }, query: {}, body: null },
     { idempotencyKey: key },
   );
   const data = handleMutationResult(
     result,
-    "cli.worker.instance.resume.indeterminate",
+    "cli.worker.registration.resume.indeterminate",
     key,
   );
   process.stdout.write(
@@ -237,15 +240,18 @@ async function resume(
   );
 }
 
-function instanceListQuery(options: Record<string, string | undefined>) {
-  assert.equal(workerOperations["instance.list"].access, AccessPolicy.Human);
-  assert.equal(workerOperations["instance.list"].mutation, false);
+function registrationListQuery(options: Record<string, string | undefined>) {
+  assert.equal(
+    workerOperations["registration.list"].access,
+    AccessPolicy.Human,
+  );
+  assert.equal(workerOperations["registration.list"].mutation, false);
   if (
     options.project !== undefined &&
     !identitySchema("project").safeParse(options.project).success
   )
     throw new Diagnostic(
-      "cli.worker.instance.list.invalid_project_id",
+      "cli.worker.registration.list.invalid_project_id",
       "invalid project ID",
     );
   if (
@@ -253,12 +259,12 @@ function instanceListQuery(options: Record<string, string | undefined>) {
     !bindingNameSchema.safeParse(options.binding).success
   )
     throw new Diagnostic(
-      "cli.worker.instance.list.invalid_binding_name",
+      "cli.worker.registration.list.invalid_binding_name",
       "invalid worker binding name",
     );
   if (options.binding !== undefined && options.project === undefined)
     throw new Diagnostic(
-      "cli.worker.instance.list.binding_without_project",
+      "cli.worker.registration.list.binding_without_project",
       "--binding requires --project.",
     );
   const limit =
@@ -281,18 +287,21 @@ function instanceListQuery(options: Record<string, string | undefined>) {
   };
 }
 
-async function instanceList(command: Command): Promise<void> {
-  assert.equal(workerOperations["instance.list"].access, AccessPolicy.Human);
-  assert.equal(workerOperations["instance.list"].mutation, false);
+async function registrationList(command: Command): Promise<void> {
+  assert.equal(
+    workerOperations["registration.list"].access,
+    AccessPolicy.Human,
+  );
+  assert.equal(workerOperations["registration.list"].mutation, false);
   const options = command.optsWithGlobals();
-  const query = instanceListQuery(options);
+  const query = registrationListQuery(options);
   const { endpoint, token } = resolveClient(options);
-  requireToken(token, "cli.worker.instance.list.token_required");
+  requireToken(token, "cli.worker.registration.list.token_required");
   const result = await httpClient(workerOperations, endpoint, token)[
-    "instance.list"
+    "registration.list"
   ]({ params: {}, query, body: null });
   process.stdout.write(
-    `${JSON.stringify(handleReadResult(result, "cli.worker.instance.list.indeterminate"))}\n`,
+    `${JSON.stringify(handleReadResult(result, "cli.worker.registration.list.indeterminate"))}\n`,
   );
 }
 
@@ -309,24 +318,24 @@ async function placementList(command: Command): Promise<void> {
   );
 }
 
-async function instanceGet(
+async function registrationGet(
   runtimeIdentity: string,
   command: Command,
 ): Promise<void> {
-  assert.equal(workerOperations["instance.get"].access, AccessPolicy.Human);
-  assert.equal(workerOperations["instance.get"].mutation, false);
-  if (!identitySchema("worker_instance").safeParse(runtimeIdentity).success)
+  assert.equal(workerOperations["registration.get"].access, AccessPolicy.Human);
+  assert.equal(workerOperations["registration.get"].mutation, false);
+  if (!identitySchema("worker_registration").safeParse(runtimeIdentity).success)
     throw new Diagnostic(
-      "cli.worker.instance.get.invalid_runtime_identity",
-      "invalid worker instance ID",
+      "cli.worker.registration.get.invalid_runtime_identity",
+      "invalid worker registration ID",
     );
   const { endpoint, token } = resolveClient(command.optsWithGlobals());
-  requireToken(token, "cli.worker.instance.get.token_required");
+  requireToken(token, "cli.worker.registration.get.token_required");
   const result = await httpClient(workerOperations, endpoint, token)[
-    "instance.get"
+    "registration.get"
   ]({ params: { runtime_identity: runtimeIdentity }, query: {}, body: null });
   process.stdout.write(
-    `${JSON.stringify(handleReadResult(result, "cli.worker.instance.get.indeterminate"))}\n`,
+    `${JSON.stringify(handleReadResult(result, "cli.worker.registration.get.indeterminate"))}\n`,
   );
 }
 
@@ -345,13 +354,13 @@ export function addWorkerCommand(program: Command): void {
       singleUse("--token"),
     );
   worker.action(() => worker.help());
-  const instance = worker
-    .command("instance")
-    .description("Worker instance commands");
-  instance.action(() => instance.help());
-  instance
+  const registration = worker
+    .command("registration")
+    .description("Worker registration commands");
+  registration.action(() => registration.help());
+  registration
     .command(LIST)
-    .description("List live worker instances")
+    .description("List live worker registrations")
     .option(
       "--project <project-id>",
       "Project identity",
@@ -368,15 +377,15 @@ export function addWorkerCommand(program: Command): void {
       "Continue from a cursor",
       singleUse("--cursor"),
     )
-    .action((_options, command: Command) => instanceList(command));
-  instance
+    .action((_options, command: Command) => registrationList(command));
+  registration
     .command(GET)
-    .description("Read a live worker instance")
+    .description("Read a live worker registration")
     .argument("<runtime-identity>", "Runtime identity")
     .action((runtimeIdentity: string, _options, command: Command) =>
-      instanceGet(runtimeIdentity, command),
+      registrationGet(runtimeIdentity, command),
     );
-  instance
+  registration
     .command("resume")
     .description("Resume an ended registration with a running execution")
     .argument("<runtime-identity>", "Runtime identity")
@@ -384,7 +393,7 @@ export function addWorkerCommand(program: Command): void {
     .action((runtimeIdentity: string, _options, command: Command) =>
       resume(runtimeIdentity, command),
     );
-  instance
+  registration
     .command("deregister")
     .description("End an owned live registration using a machine JWT")
     .argument("<runtime-identity>", "Runtime identity")
@@ -402,7 +411,7 @@ export function addWorkerCommand(program: Command): void {
     .action((_options, command: Command) => placementList(command));
   worker
     .command("heartbeat")
-    .description("Renew a registered instance heartbeat")
+    .description("Renew a registration heartbeat")
     .option("--token <jwt>", "Machine JWT", singleUse("--token"))
     .action((_options, command: Command) => heartbeat(command));
   worker
@@ -425,7 +434,7 @@ export function addWorkerCommand(program: Command): void {
   worker
     .command("register")
     .description(
-      "Register a worker instance with a machine JWT and print its runtime identity and idempotency key as JSON",
+      "Create a worker registration with a machine JWT and print its runtime identity and idempotency key as JSON",
     )
     .option(
       "--token <jwt>",

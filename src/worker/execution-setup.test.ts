@@ -104,7 +104,7 @@ test("setup answers the system and agent prompt after its single snapshot and su
   let commits = 0;
   const claim = {
     executionId: setup.execution_id,
-    runtimeIdentity: createIdentity("worker_instance"),
+    runtimeIdentity: createIdentity("worker_registration"),
     workerBindingId: createIdentity("binding"),
     nodeId: createIdentity("node"),
     pinnedRevision: 1,
@@ -274,7 +274,7 @@ test("setup answers one entry per agent of a two-agent worker with its own promp
   };
   const claim = {
     executionId: setup.execution_id,
-    runtimeIdentity: createIdentity("worker_instance"),
+    runtimeIdentity: createIdentity("worker_registration"),
     workerBindingId: createIdentity("binding"),
     nodeId: createIdentity("node"),
     pinnedRevision: 1,
@@ -377,7 +377,7 @@ async function repositorySetup(t: TestContext, address: string, pin: boolean) {
   const bindingId = createIdentity("binding");
   const claim = {
     executionId: setup.execution_id,
-    runtimeIdentity: createIdentity("worker_instance"),
+    runtimeIdentity: createIdentity("worker_registration"),
     workerBindingId: createIdentity("binding"),
     nodeId: createIdentity("node"),
     pinnedRevision: 1,

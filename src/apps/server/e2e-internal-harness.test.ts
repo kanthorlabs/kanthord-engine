@@ -383,7 +383,7 @@ test(
         );
         const page = await f.cli.read<
           Page<{ runtime_identity: string; registered: boolean }>
-        >(["worker", "instance", "list", "--project", f.project_id]);
+        >(["worker", "registration", "list", "--project", f.project_id]);
         assert.deepEqual(
           page.items.map((item) => item.runtime_identity).sort(),
           [...runtimes].sort(),
@@ -736,7 +736,7 @@ test(
           (
             await f.cli.read<Page<unknown>>([
               "worker",
-              "instance",
+              "registration",
               "list",
               "--project",
               f.project_id,

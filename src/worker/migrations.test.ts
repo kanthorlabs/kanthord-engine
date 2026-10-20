@@ -5,8 +5,8 @@ import { WORKER_SERVICE_NAME } from "./contract.ts";
 import { workerMigrations } from "./migrations.ts";
 
 const CREATED_INDEX_ORIGIN = "c";
-const WORKER_INSTANCE_TABLE = "worker_instance";
-const WORKER_INSTANCE_INDEX = "worker_instance_live_client";
+const WORKER_REGISTRATION_TABLE = "worker_registration";
+const WORKER_REGISTRATION_INDEX = "worker_registration_live_client";
 const PROJECT_ID = "project_01ARZ3NDEKTSV4RRFFQ69G5FAV";
 const RESOURCE_IDENTITY = "worker:kanthord:general";
 const CLIENT_ID = "client_identity_01ARZ3NDEKTSV4RRFFQ69G5FAV";
@@ -15,7 +15,7 @@ const REGISTERED_AT = 1000;
 const ENDED_AT = 2000;
 const EXPECTED_REGISTRATIONS = 3;
 
-test("worker migrations end with only the worker instance table", () => {
+test("worker migrations end with only the worker registration table", () => {
   const store = new Store(IN_MEMORY_DATABASE);
   try {
     store.migrate([
@@ -28,14 +28,14 @@ test("worker migrations end with only the worker instance table", () => {
         )
         .all()
         .map((row) => row.name),
-      [WORKER_INSTANCE_TABLE],
+      [WORKER_REGISTRATION_TABLE],
     );
   } finally {
     store.close();
   }
 });
 
-test("worker instance schema holds only the live-client partial unique index", () => {
+test("worker registration schema holds only the live-client partial unique index", () => {
   const store = new Store(IN_MEMORY_DATABASE);
   try {
     store.migrate([
@@ -43,7 +43,7 @@ test("worker instance schema holds only the live-client partial unique index", (
     ]);
     assert.deepEqual(
       store.database
-        .prepare(`PRAGMA table_info(${WORKER_INSTANCE_TABLE})`)
+        .prepare(`PRAGMA table_info(${WORKER_REGISTRATION_TABLE})`)
         .all()
         .map(({ name, type, notnull, pk }) => ({ name, type, notnull, pk })),
       [
@@ -58,23 +58,23 @@ test("worker instance schema holds only the live-client partial unique index", (
     );
     assert.deepEqual(
       store.database
-        .prepare(`PRAGMA index_list(${WORKER_INSTANCE_TABLE})`)
+        .prepare(`PRAGMA index_list(${WORKER_REGISTRATION_TABLE})`)
         .all()
         .filter((row) => row.origin === CREATED_INDEX_ORIGIN)
         .map(({ name, unique, partial }) => ({ name, unique, partial })),
-      [{ name: WORKER_INSTANCE_INDEX, unique: 1, partial: 1 }],
+      [{ name: WORKER_REGISTRATION_INDEX, unique: 1, partial: 1 }],
     );
     assert.match(
       String(
         store.database
           .prepare("SELECT sql FROM sqlite_master WHERE name = ?")
-          .get(WORKER_INSTANCE_INDEX)?.sql,
+          .get(WORKER_REGISTRATION_INDEX)?.sql,
       ),
-      /ON worker_instance \(client_id\) WHERE ended_at IS NULL$/,
+      /ON worker_registration \(client_id\) WHERE ended_at IS NULL$/,
     );
     assert.deepEqual(
       store.database
-        .prepare(`PRAGMA foreign_key_list(${WORKER_INSTANCE_TABLE})`)
+        .prepare(`PRAGMA foreign_key_list(${WORKER_REGISTRATION_TABLE})`)
         .all(),
       [],
     );
@@ -82,7 +82,7 @@ test("worker instance schema holds only the live-client partial unique index", (
       String(
         store.database
           .prepare("SELECT sql FROM sqlite_master WHERE name = ?")
-          .get(WORKER_INSTANCE_TABLE)?.sql,
+          .get(WORKER_REGISTRATION_TABLE)?.sql,
       ),
       /\bCHECK\s*\(/i,
     );
@@ -91,14 +91,14 @@ test("worker instance schema holds only the live-client partial unique index", (
   }
 });
 
-test("worker instance uniqueness allows history and releases a client after its end", () => {
+test("worker registration uniqueness allows history and releases a client after its end", () => {
   const store = new Store(IN_MEMORY_DATABASE);
   try {
     store.migrate([
       { service: WORKER_SERVICE_NAME, migrations: workerMigrations },
     ]);
     const insert = store.database.prepare(
-      "INSERT INTO worker_instance VALUES (?, ?, ?, ?, ?, ?, ?)",
+      "INSERT INTO worker_registration VALUES (?, ?, ?, ?, ?, ?, ?)",
     );
     const values = [
       PROJECT_ID,
@@ -110,16 +110,16 @@ test("worker instance uniqueness allows history and releases a client after its 
     insert.run("live", ...values, null);
     assert.throws(
       () => insert.run("second", ...values, null),
-      /UNIQUE constraint failed: worker_instance.client_id/,
+      /UNIQUE constraint failed: worker_registration.client_id/,
     );
     assert.doesNotThrow(() => insert.run("ended", ...values, ENDED_AT));
     store.database
-      .prepare("UPDATE worker_instance SET ended_at = ? WHERE id = ?")
+      .prepare("UPDATE worker_registration SET ended_at = ? WHERE id = ?")
       .run(ENDED_AT, "live");
     assert.doesNotThrow(() => insert.run("second", ...values, null));
     assert.equal(
       store.database
-        .prepare("SELECT count(*) AS count FROM worker_instance")
+        .prepare("SELECT count(*) AS count FROM worker_registration")
         .get()?.count,
       EXPECTED_REGISTRATIONS,
     );

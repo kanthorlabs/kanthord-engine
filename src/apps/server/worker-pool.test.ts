@@ -79,7 +79,7 @@ async function serverPool(t: TestContext, count: number, slotLimit?: number) {
   await rewrite((bindings) => ({ ...bindings, [BINDING]: worker(count) }));
   await delay(TOMBSTONE_SETTLE_MS);
   const instances = () =>
-    call(workerOperations["instance.list"], {
+    call(workerOperations["registration.list"], {
       params: {},
       query: { project_id: setup.project_id },
       body: null,

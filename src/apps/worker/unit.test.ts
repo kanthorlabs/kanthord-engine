@@ -20,7 +20,7 @@ const SETTLE_WAIT_MS = 50;
 const PENDING = "pending";
 const FIRST_PULL = 1;
 const REGISTRATION = {
-  runtime_identity: "worker_instance_01ARZ3NDEKTSV4RRFFQ69G5FAA",
+  runtime_identity: "worker_registration_01ARZ3NDEKTSV4RRFFQ69G5FAA",
   resource_identity: "worker:kanthord:test",
   worker_name: "coder@1",
 };
@@ -62,7 +62,7 @@ function scripted(options: {
       register: async () => completed(REGISTRATION),
       heartbeat: async () => completed(null),
       handover: options.handover,
-      "instance.deregister": async (input: {
+      "registration.deregister": async (input: {
         params: { runtime_identity: string };
       }) => {
         deregistrations.push(input.params.runtime_identity);

@@ -79,7 +79,7 @@ export function executionHarness(t: TestContext, identity: CallerIdentity) {
     attempt: FIRST_REVISION,
     pinnedRevision: FIRST_REVISION,
     nodeBranch: `kanthord/${h.node_id}`,
-    runtimeIdentity: createIdentity("worker_instance"),
+    runtimeIdentity: createIdentity("worker_registration"),
     workerBindingId: createIdentity("binding"),
   };
   const actor = {

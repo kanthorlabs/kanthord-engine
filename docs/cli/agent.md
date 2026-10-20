@@ -108,7 +108,7 @@ pi-ai 1.1.0 or the `models` metadata of the `openai-compatible` credential.
 It also requires effort membership in that model's supported reasoning levels.
 JSON Schema validates neither lookup. The Agent component enforces them at the
 enablement write, at the worker binding write through `validateEntry`, and at
-resolution. The instance healthcheck reports whether the effective configuration resolves.
+resolution. The registration healthcheck reports whether the effective configuration resolves.
 
 This command inspects a catalog declaration and its global enablement, not the
 effective configuration of a bare agent name. Inspect binding entries, effective
@@ -284,7 +284,7 @@ human. It returns the enabled record.
 The required `--expected-revision` names the latest revision of the agent that the human read.
 Uses `[M] [R]`. Sets an existing record to `disabled` and returns it.
 Disablement is the only stop switch; it is allowed with dependent bindings.
-It refuses every later resolution, including a complete entry, so the instance
+It refuses every later resolution, including a complete entry, so the registration
 healthcheck fails and no claim follows. Bindings remain. It recalls no handover
 in flight. An agent provider has no independent disablement.
 
@@ -365,7 +365,7 @@ of the credential again. A credential with no cooldown answers
 Each agent provider has a report-only [resource healthcheck](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/agent.impl.md#agent-provider-healthcheck).
 The check calls the [LLM provider check](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/llm.impl.md#the-llm-provider) of its credential, groups calls by credential and attributes each result.
 A credential whose platform has no LLM provider reports `unknown`.
-This check belongs to neither the liveness answer nor the claim path and changes no instance healthcheck.
+This check belongs to neither the liveness answer nor the claim path and changes no registration healthcheck.
 No check refreshes OAuth. An expired `openai-codex` or `anthropic-subscription` access token reports `unhealthy`.
 The human [provider check](./llm.md#provider-check) belongs to the LLM component.
 

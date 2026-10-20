@@ -7,7 +7,7 @@ export function testClaim(): ExecutionRecord {
     node_id: "node_01ARZ3NDEKTSV4RRFFQ69G5FAA",
     claimant: {
       worker_binding_id: "binding_01ARZ3NDEKTSV4RRFFQ69G5FAA",
-      runtime_identity: "worker_instance_01ARZ3NDEKTSV4RRFFQ69G5FAA",
+      runtime_identity: "worker_registration_01ARZ3NDEKTSV4RRFFQ69G5FAA",
       resource_identity: "worker:kanthord:test",
     },
     attempt: 1,

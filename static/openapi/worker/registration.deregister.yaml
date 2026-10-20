@@ -1,7 +1,7 @@
 # Generated from the operation registry by kanthord gateway openapi.
 pathItem:
   delete:
-    operationId: worker.instance.deregister
+    operationId: worker.registration.deregister
     tags:
       - worker
     description: End the caller's named live registration and free its slot
@@ -17,8 +17,8 @@ pathItem:
         in: path
         required: true
         schema:
-          $ref: "#/components/schemas/worker.instance.deregister.Input/properties/params/\
-            properties/runtime_identity"
+          $ref: "#/components/schemas/worker.registration.deregister.Input/properties/par\
+            ams/properties/runtime_identity"
       - $ref: ../shared/components.yaml#/components/parameters/IdempotencyKey
     responses:
       "200":
@@ -26,7 +26,7 @@ pathItem:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/worker.instance.deregister.Output"
+              $ref: "#/components/schemas/worker.registration.deregister.Output"
       "400":
         $ref: ../shared/components.yaml#/components/responses/Error
       "401":
@@ -48,10 +48,11 @@ pathItem:
       "504":
         $ref: ../shared/components.yaml#/components/responses/Error
   get:
-    operationId: worker.instance.get
+    operationId: worker.registration.get
     tags:
       - worker
-    description: Read a live instance record. Unknown and ended instances answer not found.
+    description: Read a live registration record. Unknown and ended registrations
+      answer not found.
     x-access-policy: human
     x-timeout-ms: 30000
     x-mutation: false
@@ -63,15 +64,15 @@ pathItem:
         in: path
         required: true
         schema:
-          $ref: "#/components/schemas/worker.instance.get.Input/properties/params/propert\
-            ies/runtime_identity"
+          $ref: "#/components/schemas/worker.registration.get.Input/properties/params/pro\
+            perties/runtime_identity"
     responses:
       "200":
         description: Completed result
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/worker.instance.get.Output"
+              $ref: "#/components/schemas/worker.registration.get.Output"
       "400":
         $ref: ../shared/components.yaml#/components/responses/Error
       "401":
@@ -94,7 +95,7 @@ pathItem:
         $ref: ../shared/components.yaml#/components/responses/Error
 components:
   schemas:
-    worker.instance.deregister.Input:
+    worker.registration.deregister.Input:
       type: object
       properties:
         params:
@@ -102,10 +103,10 @@ components:
           properties:
             runtime_identity:
               type: string
-              minLength: 42
-              maxLength: 42
-              pattern: ^worker_instance_[0-7][0-9A-HJKMNP-TV-Z]{25}$
-              description: worker_instance_ followed by a canonical 26-character uppercase
+              minLength: 46
+              maxLength: 46
+              pattern: ^worker_registration_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+              description: worker_registration_ followed by a canonical 26-character uppercase
                 ULID.
           required:
             - runtime_identity
@@ -121,15 +122,16 @@ components:
         - query
         - body
       additionalProperties: false
-    worker.instance.deregister.Output:
+    worker.registration.deregister.Output:
       type: object
       properties:
         runtime_identity:
           type: string
-          minLength: 42
-          maxLength: 42
-          pattern: ^worker_instance_[0-7][0-9A-HJKMNP-TV-Z]{25}$
-          description: worker_instance_ followed by a canonical 26-character uppercase ULID.
+          minLength: 46
+          maxLength: 46
+          pattern: ^worker_registration_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+          description: worker_registration_ followed by a canonical 26-character uppercase
+            ULID.
         registered:
           type: boolean
           const: false
@@ -137,7 +139,7 @@ components:
         - runtime_identity
         - registered
       additionalProperties: false
-    worker.instance.get.Input:
+    worker.registration.get.Input:
       type: object
       properties:
         params:
@@ -145,10 +147,10 @@ components:
           properties:
             runtime_identity:
               type: string
-              minLength: 42
-              maxLength: 42
-              pattern: ^worker_instance_[0-7][0-9A-HJKMNP-TV-Z]{25}$
-              description: worker_instance_ followed by a canonical 26-character uppercase
+              minLength: 46
+              maxLength: 46
+              pattern: ^worker_registration_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+              description: worker_registration_ followed by a canonical 26-character uppercase
                 ULID.
           required:
             - runtime_identity
@@ -164,16 +166,16 @@ components:
         - query
         - body
       additionalProperties: false
-    worker.instance.get.Output:
+    worker.registration.get.Output:
       allOf:
         - type: object
           properties:
             runtime_identity:
               type: string
-              minLength: 42
-              maxLength: 42
-              pattern: ^worker_instance_[0-7][0-9A-HJKMNP-TV-Z]{25}$
-              description: worker_instance_ followed by a canonical 26-character uppercase
+              minLength: 46
+              maxLength: 46
+              pattern: ^worker_registration_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+              description: worker_registration_ followed by a canonical 26-character uppercase
                 ULID.
             project_id:
               type: string

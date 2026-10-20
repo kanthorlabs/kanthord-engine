@@ -119,7 +119,7 @@ test("a worker thread registers its worker unit through the port and the invocat
   const listInstances = humanCaller(fixture);
   const page = await until(
     () =>
-      listInstances(workerOperations["instance.list"], {
+      listInstances(workerOperations["registration.list"], {
         params: {},
         query: { project_id: project.id },
         body: null,

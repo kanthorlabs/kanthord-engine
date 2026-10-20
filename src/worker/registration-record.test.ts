@@ -5,9 +5,9 @@ import { Store, IN_MEMORY_DATABASE } from "../kernel/store.ts";
 import { OperationError } from "../kernel/errors.ts";
 import { workerMigrations } from "./migrations.ts";
 import {
-  InstanceActivity,
+  RegistrationActivity,
   InstancePlacement,
-  instanceRecordSchema,
+  registrationRecordSchema,
   WorkerHost,
   WorkerErrorCode,
   workerOperations,
@@ -17,8 +17,11 @@ import {
   insertRegistration,
   endRegistration,
   readAllLive,
-} from "./instances.ts";
-import { instanceRecord, listInstanceRecords } from "./instance-record.ts";
+} from "./registration-rows.ts";
+import {
+  registrationRecord,
+  listRegistrationRecords,
+} from "./registration-record.ts";
 
 const NOW = 1000;
 const PROJECT = createIdentity("project");
@@ -40,9 +43,9 @@ const BINDING = {
   tombstone: false,
 };
 
-test("instance output enforces host, registration and activity field presence", () => {
+test("registration output enforces host, registration and activity field presence", () => {
   const record = {
-    runtime_identity: createIdentity("worker_instance"),
+    runtime_identity: createIdentity("worker_registration"),
     project_id: PROJECT,
     resource_identity: RESOURCE,
     worker_name: NATIVE,
@@ -51,33 +54,33 @@ test("instance output enforces host, registration and activity field presence", 
     registered: true,
     client_id: createIdentity("client_identity"),
     name: "worker-a",
-    activity: InstanceActivity.Idle,
+    activity: RegistrationActivity.Idle,
     draining: false,
   };
-  assert.equal(instanceRecordSchema.safeParse(record).success, true);
+  assert.equal(registrationRecordSchema.safeParse(record).success, true);
   for (const change of [
     { placement: undefined },
     { host: WorkerHost.ExternalHarness },
     { client_id: undefined },
     { name: undefined },
     { registered: false },
-    { activity: InstanceActivity.Executing },
+    { activity: RegistrationActivity.Executing },
     { execution_id: createIdentity("execution") },
   ])
     assert.equal(
-      instanceRecordSchema.safeParse({ ...record, ...change }).success,
+      registrationRecordSchema.safeParse({ ...record, ...change }).success,
       false,
     );
   const external = {
     ...record,
     host: WorkerHost.ExternalHarness,
     placement: undefined,
-    activity: InstanceActivity.Executing,
+    activity: RegistrationActivity.Executing,
     execution_id: createIdentity("execution"),
   };
-  assert.equal(instanceRecordSchema.safeParse(external).success, true);
+  assert.equal(registrationRecordSchema.safeParse(external).success, true);
   assert.equal(
-    instanceRecordSchema.safeParse({
+    registrationRecordSchema.safeParse({
       ...record,
       registered: false,
       client_id: undefined,
@@ -94,7 +97,7 @@ function fixture(t: TestContext) {
   return store;
 }
 
-test("instance records distinguish native/external placement and pure Scheduler activity", (t) => {
+test("registration records distinguish native/external placement and pure Scheduler activity", (t) => {
   const store = fixture(t);
   store.transaction((tx) => {
     const registration = insertRegistration(
@@ -110,8 +113,8 @@ test("instance records distinguish native/external placement and pure Scheduler 
     const executionId = createIdentity("execution");
     const before = readAllLive(tx);
     for (const workerName of ["coder@1", "claude-code@1"])
-      for (const activity of Object.values(InstanceActivity)) {
-        const record = instanceRecord(
+      for (const activity of Object.values(RegistrationActivity)) {
+        const record = registrationRecord(
           tx,
           {
             workerBindingOf: () => ({ ...BINDING, worker_name: workerName }),
@@ -138,7 +141,7 @@ test("instance records distinguish native/external placement and pure Scheduler 
         assert.equal(record.draining, false);
         assert.equal(
           "execution_id" in record,
-          activity === InstanceActivity.Executing,
+          activity === RegistrationActivity.Executing,
         );
         const native = workerName === NATIVE;
         assert.equal("placement" in record, native);
@@ -149,7 +152,7 @@ test("instance records distinguish native/external placement and pure Scheduler 
   });
 });
 
-test("instance inventory pages live rows descending with both filters and canonical cursors", (t) => {
+test("registration inventory pages live rows descending with both filters and canonical cursors", (t) => {
   const store = fixture(t);
   store.transaction((tx) => {
     let binding: ReturnType<WorkerBindingOf> = BINDING;
@@ -160,7 +163,7 @@ test("instance inventory pages live rows descending with both filters and canoni
         requireRunning: () => assert.fail("UNEXPECTED_COLLABORATION"),
         runningExecutionOfRuntime: () => null,
         activityOf: () => ({
-          activity: InstanceActivity.Idle,
+          activity: RegistrationActivity.Idle,
           execution_id: null,
         }),
       },
@@ -190,7 +193,7 @@ test("instance inventory pages live rows descending with both filters and canoni
     );
     const limit = 1;
     const query = { project_id: PROJECT, resource_identity: RESOURCE, limit };
-    const first = listInstanceRecords(tx, dependencies, query, NOW);
+    const first = listRegistrationRecords(tx, dependencies, query, NOW);
     const expected = rows
       .filter((row) => row.resource_identity === RESOURCE)
       .map((row) => row.runtime_identity)
@@ -201,7 +204,7 @@ test("instance inventory pages live rows descending with both filters and canoni
       expected.slice(0, limit),
     );
     assert.ok(first.next_cursor);
-    const second = listInstanceRecords(
+    const second = listRegistrationRecords(
       tx,
       dependencies,
       { ...query, cursor: first.next_cursor },
@@ -214,7 +217,7 @@ test("instance inventory pages live rows descending with both filters and canoni
     assert.equal(second.next_cursor, null);
     const allLimit = 100;
     assert.equal(
-      listInstanceRecords(
+      listRegistrationRecords(
         tx,
         dependencies,
         { project_id: PROJECT, limit: allLimit },
@@ -224,7 +227,7 @@ test("instance inventory pages live rows descending with both filters and canoni
     );
     endRegistration(tx, otherProject.runtime_identity, NOW);
     assert.equal(
-      listInstanceRecords(tx, dependencies, { limit: allLimit }, NOW).items
+      listRegistrationRecords(tx, dependencies, { limit: allLimit }, NOW).items
         .length,
       rows.length,
     );
@@ -234,21 +237,22 @@ test("instance inventory pages live rows descending with both filters and canoni
       Buffer.from("wrong").toString("base64url"),
     ])
       assert.throws(
-        () => listInstanceRecords(tx, dependencies, { ...query, cursor }, NOW),
+        () =>
+          listRegistrationRecords(tx, dependencies, { ...query, cursor }, NOW),
         (error) =>
           error instanceof OperationError && error.code === CURSOR_INVALID,
       );
     for (const unavailable of [null, { ...BINDING, tombstone: true }]) {
       binding = unavailable;
       assert.throws(
-        () => listInstanceRecords(tx, dependencies, query, NOW),
+        () => listRegistrationRecords(tx, dependencies, query, NOW),
         (error) =>
           error instanceof OperationError &&
           error.code === WorkerErrorCode.BindingUnknown,
       );
     }
     assert.equal(
-      workerOperations["instance.list"].input.safeParse({
+      workerOperations["registration.list"].input.safeParse({
         params: {},
         query: { resource_identity: RESOURCE },
         body: null,

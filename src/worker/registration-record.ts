@@ -5,17 +5,17 @@ import { identitySchema } from "../kernel/identity.ts";
 import type { Transaction } from "../kernel/store.ts";
 import { getWorkerDeclaration } from "./catalog.ts";
 import {
-  InstanceActivity,
+  RegistrationActivity,
   type InstancePlacement,
   WorkerHost,
   WorkerErrorCode,
-  instanceRecordSchema,
+  registrationRecordSchema,
   workerOperations,
   type Registration,
   type WorkerBindingOf,
   type SchedulerClaims,
 } from "./contract.ts";
-import { listLive, WORKER_INSTANCE_PREFIX } from "./instances.ts";
+import { listLive, WORKER_REGISTRATION_PREFIX } from "./registration-rows.ts";
 
 interface Dependencies {
   workerBindingOf: WorkerBindingOf;
@@ -28,12 +28,12 @@ function hostedPlacement(placement: InstancePlacement | null) {
   return placement;
 }
 
-export function instanceRecord(
+export function registrationRecord(
   tx: Transaction,
   dependencies: Dependencies,
   registration: Registration,
   now: number,
-): typeof instanceRecordSchema._output {
+): typeof registrationRecordSchema._output {
   assert.ok(tx.database.isTransaction);
   assert.ok(Number.isSafeInteger(now));
   const binding = dependencies.workerBindingOf(
@@ -49,9 +49,9 @@ export function instanceRecord(
     registration.runtime_identity,
     now,
   );
-  if (activity.activity === InstanceActivity.Executing)
+  if (activity.activity === RegistrationActivity.Executing)
     assert.ok(activity.execution_id);
-  return instanceRecordSchema.parse({
+  return registrationRecordSchema.parse({
     runtime_identity: registration.runtime_identity,
     project_id: registration.project_id,
     resource_identity: registration.resource_identity,
@@ -63,7 +63,7 @@ export function instanceRecord(
     client_id: registration.client_id,
     name: registration.name,
     activity: activity.activity,
-    ...(activity.activity === InstanceActivity.Executing
+    ...(activity.activity === RegistrationActivity.Executing
       ? { execution_id: activity.execution_id }
       : {}),
     draining: dependencies.draining?.(registration.client_id) ?? false,
@@ -74,11 +74,11 @@ export function instanceRecord(
 function decodeCursor(cursor: string): string {
   const stringType = "string";
   assert.equal(typeof cursor, stringType);
-  assert.ok(WORKER_INSTANCE_PREFIX);
+  assert.ok(WORKER_REGISTRATION_PREFIX);
   const decoded = Buffer.from(cursor, "base64url").toString("utf8");
   if (
     Buffer.from(decoded, "utf8").toString("base64url") !== cursor ||
-    !identitySchema(WORKER_INSTANCE_PREFIX).safeParse(decoded).success
+    !identitySchema(WORKER_REGISTRATION_PREFIX).safeParse(decoded).success
   )
     throw new OperationError(
       HttpStatus.BadRequest,
@@ -88,12 +88,12 @@ function decodeCursor(cursor: string): string {
   return decoded;
 }
 
-export function listInstanceRecords(
+export function listRegistrationRecords(
   tx: Transaction,
   dependencies: Dependencies,
-  query: (typeof workerOperations)["instance.list"]["input"]["_output"]["query"],
+  query: (typeof workerOperations)["registration.list"]["input"]["_output"]["query"],
   now: number,
-): (typeof workerOperations)["instance.list"]["output"]["_output"] {
+): (typeof workerOperations)["registration.list"]["output"]["_output"] {
   assert.ok(tx.database.isTransaction);
   assert.ok(Number.isSafeInteger(now));
   if (query.resource_identity !== undefined) {
@@ -117,7 +117,7 @@ export function listInstanceRecords(
   const first = 0;
   const items = rows
     .slice(first, query.limit)
-    .map((row) => instanceRecord(tx, dependencies, row, now));
+    .map((row) => registrationRecord(tx, dependencies, row, now));
   return {
     items,
     next_cursor:

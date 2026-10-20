@@ -235,7 +235,7 @@ async function containerPool(t: TestContext) {
     });
   };
   const instances = () =>
-    call(workerOperations["instance.list"], {
+    call(workerOperations["registration.list"], {
       params: {},
       query: { project_id: setup.project_id },
       body: null,

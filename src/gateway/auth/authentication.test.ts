@@ -348,7 +348,7 @@ test("only successful authentication of a live registration renews its heartbeat
   const identity = await fixture.authentication.authenticate(`Bearer ${token}`);
   assert.ok(isMachineIdentity(identity));
   assert.equal(heartbeat.mock.calls.length, NO_REGISTRATIONS);
-  const runtimeIdentity = "worker_instance_01ARZ3NDEKTSV4RRFFQ69G5FAV";
+  const runtimeIdentity = "worker_registration_01ARZ3NDEKTSV4RRFFQ69G5FAV";
   machines.worker.registrations.set(identity.clientId, {
     client_id: identity.clientId,
     name: identity.name,

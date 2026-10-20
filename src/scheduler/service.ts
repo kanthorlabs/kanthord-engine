@@ -45,7 +45,7 @@ import {
   type MissionBranches,
   type AgentChains,
   type AgentSelection,
-  type InstanceRegistrations,
+  type Registrations,
   type WorkerDeclarations,
   type ProjectPauses,
   type WorkerBindings,
@@ -132,7 +132,7 @@ export interface Dependencies {
   config: SchedulerConfig;
   store: Store;
   transitions: MissionTransitions;
-  registrations: InstanceRegistrations;
+  registrations: Registrations;
   declarations: WorkerDeclarations;
   bindings: WorkerBindings;
   facts: MissionClaimFacts;
