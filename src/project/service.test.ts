@@ -55,7 +55,6 @@ import {
   RESOURCE_TARGET_KIND_REPOSITORY,
   STORAGE_PLATFORM,
   StablePlacementIssue,
-  WorkerPlacementIssue,
   WorkerField,
   WorkerPlacement,
   bindingSetWriteInputSchema,
@@ -328,6 +327,7 @@ function fixture(t: TestContext, overrides: Partial<Dependencies> = {}) {
     workerAgentsOf: unexpected,
     workerAgentView: unexpected,
     placementStatus: unexpected,
+    instanceOf: unexpected,
     endRegistrations: (tx, projectId, resourceIdentity, now) => {
       assert.ok(tx.database.isTransaction);
       assert.equal(tx.database, store.database);
@@ -910,6 +910,8 @@ test("worker group resolution rejects absence, disablement and removal", async (
   assert.deepEqual(await resolve(), {
     project_id: f.project_id,
     resource_identity: WORKER_GROUP,
+    placement: null,
+    worker_instances: [],
   });
   assert.equal(await resolve(MISSING_GROUP), null);
   f.write(INSTANCE_COUNT_MIN);
@@ -961,7 +963,12 @@ test("worker group resolution uses the latest tombstone and accepts equality at 
       TOMBSTONE_AT,
       background,
     ),
-    { project_id: f.project_id, resource_identity: WORKER_GROUP },
+    {
+      project_id: f.project_id,
+      resource_identity: WORKER_GROUP,
+      placement: null,
+      worker_instances: [],
+    },
   );
   const secondTombstoneAt = TOMBSTONE_AT + GROUP_ISSUED_AT;
   now = secondTombstoneAt;
@@ -983,7 +990,12 @@ test("worker group resolution uses the latest tombstone and accepts equality at 
       secondTombstoneAt,
       background,
     ),
-    { project_id: f.project_id, resource_identity: WORKER_GROUP },
+    {
+      project_id: f.project_id,
+      resource_identity: WORKER_GROUP,
+      placement: null,
+      worker_instances: [],
+    },
   );
 });
 
@@ -1002,6 +1014,7 @@ test("workerBindingOf reads current configuration, disablement and tombstone in 
     revision: REVISION_ONE,
     worker_name: GROUP_WORKER_NAME,
     instance_count: SINGLE_INSTANCE,
+    worker_instances: [],
     placement: null,
     generation: revisionOf(f, first),
     resource_budget: null,
@@ -1640,7 +1653,11 @@ test("a placement change of a worker binding refuses the entire edit and a remov
   const before = f.snapshot();
   const changes = f.bindingChanges.length;
   for (const config of [
-    { ...workerBinding().config, placement: WorkerPlacement.Worker },
+    {
+      worker: workerBinding().config.worker,
+      placement: WorkerPlacement.Worker,
+      worker_instances: [],
+    },
     { ...workerBinding().config, placement: WorkerPlacement.Container },
   ])
     await rejectsWrite(
@@ -1724,31 +1741,138 @@ for (const reason of Object.values(StablePlacementIssue))
     assert.equal(f.bindingChanges.length, NO_BINDING_CHANGES);
   });
 
-test("an added worker placement binding refuses the write on instances_absent", async (t) => {
-  const f = probedFixture(t, null);
-  const before = f.snapshot();
+function instanceBinding(config: Record<string, unknown>) {
+  return {
+    kind: BindingKind.Worker,
+    config: {
+      worker: NATIVE_WORKER,
+      placement: WorkerPlacement.Worker,
+      ...config,
+    },
+  };
+}
+
+const LIVE_INSTANCES: Record<string, string> = {
+  "coder-a": NATIVE_WORKER,
+  "coder-b": NATIVE_WORKER,
+  "reviewer-a": OTHER_WORKER,
+};
+
+function instanceFixture(t: TestContext) {
+  return writeFixture(t, {
+    instanceOf: (tx, name) => {
+      assert.ok(tx.database.isTransaction);
+      const worker = LIVE_INSTANCES[name];
+      return worker === undefined ? null : { name, worker };
+    },
+  });
+}
+
+test("a worker placement binding stores its instances and answers their count", async (t) => {
+  const f = instanceFixture(t);
+  const written = await f.write({
+    [WORKER_NAME]: instanceBinding({
+      worker_instances: ["coder-a", "coder-b"],
+    }),
+  });
+  assert.deepEqual(
+    (written.bindings[WORKER_NAME]!.config as { worker_instances: string[] })
+      .worker_instances,
+    ["coder-a", "coder-b"],
+  );
+  const row = f.store.transaction((tx) =>
+    f.project.workerBindingOf(
+      tx,
+      f.params.project_id,
+      `worker:kanthord:${WORKER_NAME}`,
+    ),
+  );
+  assert.equal(row?.instance_count, TWO_INSTANCES);
+  assert.deepEqual(row?.worker_instances, ["coder-a", "coder-b"]);
+});
+
+const INSTANCE_REFUSALS: Array<
+  [string, Record<string, unknown>, string, OperationError["details"]]
+> = [
+  [
+    "instance_count at the worker placement",
+    { instance_count: SINGLE_INSTANCE, worker_instances: ["coder-a"] },
+    ProjectErrorCode.WorkerFieldForbidden,
+    { binding: WORKER_NAME, field: WorkerField.InstanceCount },
+  ],
+  [
+    "an absent list",
+    {},
+    ProjectErrorCode.WorkerInstancesRequired,
+    { binding: WORKER_NAME },
+  ],
+  [
+    "a list of another shape",
+    { worker_instances: "coder-a" },
+    ProjectErrorCode.WorkerInstancesInvalid,
+    { binding: WORKER_NAME, instance: null },
+  ],
+  [
+    "a repeated name",
+    { worker_instances: ["coder-a", "coder-a"] },
+    ProjectErrorCode.WorkerInstancesInvalid,
+    { binding: WORKER_NAME, instance: "coder-a" },
+  ],
+  [
+    "a list above 64 names",
+    {
+      worker_instances: Array.from(
+        { length: 65 },
+        (_value, index) => `coder-${index}`,
+      ),
+    },
+    ProjectErrorCode.WorkerInstancesInvalid,
+    { binding: WORKER_NAME, instance: null },
+  ],
+  [
+    "an unknown or archived name",
+    { worker_instances: ["coder-z"] },
+    ProjectErrorCode.WorkerInstanceUnknown,
+    { binding: WORKER_NAME, instance: "coder-z" },
+  ],
+  [
+    "an instance of another worker",
+    { worker_instances: ["reviewer-a"] },
+    ProjectErrorCode.WorkerInstanceWorkerMismatch,
+    { binding: WORKER_NAME, instance: "reviewer-a", worker: OTHER_WORKER },
+  ],
+];
+
+for (const [label, config, code, details] of INSTANCE_REFUSALS)
+  test(`a worker placement binding refuses ${label}`, async (t) => {
+    const f = instanceFixture(t);
+    const before = f.snapshot();
+    await rejectsWrite(
+      f.write({ [WORKER_NAME]: instanceBinding(config) }),
+      HttpStatus.BadRequest,
+      code,
+      details,
+    );
+    assert.deepEqual(f.snapshot(), before);
+  });
+
+test("a server placement binding refuses worker_instances", async (t) => {
+  const f = instanceFixture(t);
   await rejectsWrite(
     f.write({
       [WORKER_NAME]: {
         kind: BindingKind.Worker,
         config: {
-          worker: NATIVE_WORKER,
-          instance_count: SINGLE_INSTANCE,
-          placement: WorkerPlacement.Worker,
+          ...containerBinding().config,
+          placement: WorkerPlacement.Server,
+          worker_instances: ["coder-a"],
         },
       },
     }),
-    HttpStatus.Conflict,
-    ProjectErrorCode.WorkerPlacementUnavailable,
-    {
-      binding: WORKER_NAME,
-      placement: WorkerPlacement.Worker,
-      reason: WorkerPlacementIssue.InstancesAbsent,
-    },
+    HttpStatus.BadRequest,
+    ProjectErrorCode.WorkerFieldForbidden,
+    { binding: WORKER_NAME, field: WorkerField.WorkerInstances },
   );
-  assert.deepEqual(f.probes, []);
-  assert.deepEqual(f.snapshot(), before);
-  assert.equal(f.bindingChanges.length, NO_BINDING_CHANGES);
 });
 
 test("an added container binding passes on a transient runtime failure", async (t) => {
