@@ -48,7 +48,11 @@ import {
   type ProjectBindings,
   type RepositoryConnector,
 } from "../../project/contract.ts";
-import type { WorkerRegistrations } from "../../worker/contract.ts";
+import type {
+  PoolPlacement,
+  WorkerRegistrations,
+} from "../../worker/contract.ts";
+import type { SlotDriver } from "./slot-driver.ts";
 import { audit, ensureDirectory } from "../../kernel/files.ts";
 import {
   Diagnostic,
@@ -105,6 +109,9 @@ import {
 } from "../../worker/index.ts";
 import { installPiTools } from "../../agent/pi-tools.ts";
 import { ThreadDriver } from "./thread-driver.ts";
+import { ContainerDriver } from "./container-driver.ts";
+import { systemRuntimeHost } from "./container-runtime.ts";
+import { packageVersion } from "../../kernel/version.ts";
 import { WorkerPool } from "./worker-pool.ts";
 import { AgentComponent, agentMigrations } from "../../agent/index.ts";
 import {
@@ -255,8 +262,16 @@ export function composeServices(options: {
     },
   });
   const threadDriver = new ThreadDriver();
+  const containerDriver = new ContainerDriver({
+    masterKey: options.config.master_key,
+    image: `${options.config.worker.container_image}:${packageVersion()}`,
+    host: systemRuntimeHost(process.env),
+  });
   const workerPool = new WorkerPool({
-    drivers: new Map([[threadDriver.placement, threadDriver]]),
+    drivers: new Map<PoolPlacement, SlotDriver>([
+      [threadDriver.placement, threadDriver],
+      [containerDriver.placement, containerDriver],
+    ]),
     invocation,
     masterKey: options.config.master_key,
     authVersion: options.config.gateway.auth.version,
@@ -812,6 +827,7 @@ export function composeServices(options: {
     registry,
     workerPool,
     threadDriver,
+    containerDriver,
     repoConnector,
     github,
     gitWriter,
