@@ -330,3 +330,28 @@ test("withSshAgent serves the relay socket only during its operation and writes 
   await assert.rejects(stat(socket));
   await assert.rejects(stat(join(socket, "..")));
 });
+
+test("closing the relay agent cancels a relay call in flight", async (t) => {
+  const f = relayFixture();
+  const started = Promise.withResolvers<void>();
+  const cancelled = Promise.withResolvers<void>();
+  const access: SshRelayAccess = {
+    ...f.access,
+    relay: async (_data, _flags, context) => {
+      context.onCancel(() => cancelled.resolve());
+      started.resolve();
+      await cancelled.promise;
+      throw new Error("relay cancelled");
+    },
+  };
+  const path = join(temporary(t), SSH_AGENT_SOCKET);
+  const agent = await serveRelayAgent(path, access, background);
+  const client = await AgentClient.open(t, path);
+  void client.request(
+    signRequest(f.blob, userAuthenticationData({ key: f.blob }), NO_FLAGS),
+  );
+  await started.promise;
+  await agent.close();
+  await cancelled.promise;
+  await client.closed;
+});

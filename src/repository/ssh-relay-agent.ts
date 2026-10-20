@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createServer, type Server, type Socket } from "node:net";
-import type { Context } from "../kernel/context.ts";
+import { CancellationContext, type Context } from "../kernel/context.ts";
 import type { SshRelayAccess } from "./contract.ts";
 import { SshReader, SshWriter, sshPublicKeyBlob } from "./ssh-key.ts";
 
@@ -99,15 +99,24 @@ function serveConnection(
         pending.subarray(LENGTH_BYTES, LENGTH_BYTES + length),
       );
       pending = pending.subarray(LENGTH_BYTES + length);
-      queue = queue.then(async () => {
-        const reply = await answer(message);
-        if (!connection.destroyed) connection.write(frame(reply));
-      });
+      queue = queue
+        .then(async () => {
+          const reply = await answer(message);
+          if (!connection.destroyed) connection.write(frame(reply));
+        })
+        .catch(() => {
+          connection.destroy();
+        });
     }
   });
 }
 
-function closeServer(server: Server, connections: Set<Socket>): Promise<void> {
+function closeServer(
+  server: Server,
+  connections: Set<Socket>,
+  relayContext: CancellationContext,
+): Promise<void> {
+  relayContext.cancel();
   for (const connection of connections) connection.destroy();
   return new Promise((resolve) => server.close(() => resolve()));
 }
@@ -120,19 +129,25 @@ export async function serveRelayAgent(
   assert.ok(socket);
   const blob = sshPublicKeyBlob(access.public_key);
   const connections = new Set<Socket>();
+  const relayContext = new CancellationContext(context);
   const server = createServer((connection) => {
     connections.add(connection);
     connection.once("close", () => connections.delete(connection));
     serveConnection(connection, (message) =>
-      answerOf(message, access, blob, context),
+      answerOf(message, access, blob, relayContext),
     );
   });
-  await new Promise<void>((resolve, reject) => {
-    server.once("error", reject);
-    server.listen(socket, () => {
-      server.off("error", reject);
-      resolve();
+  try {
+    await new Promise<void>((resolve, reject) => {
+      server.once("error", reject);
+      server.listen(socket, () => {
+        server.off("error", reject);
+        resolve();
+      });
     });
-  });
-  return { close: () => closeServer(server, connections) };
+  } catch (error) {
+    relayContext.cancel();
+    throw error;
+  }
+  return { close: () => closeServer(server, connections, relayContext) };
 }
