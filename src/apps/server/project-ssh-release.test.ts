@@ -252,7 +252,9 @@ test("the resource healthcheck reads the repository with the key that the Projec
   });
   assert.equal(f.reads.length, SINGLE_READ);
   assert.equal(f.reads[0]?.address, ADDRESS);
-  assert.ok(f.reads[0]?.ssh.private_key.startsWith(OPENSSH_ARMOR));
+  const read = f.reads[0]?.ssh;
+  assert.ok(read && "private_key" in read);
+  assert.ok(read.private_key.startsWith(OPENSSH_ARMOR));
   assert.equal(
     f.reads[0]?.ssh.known_hosts,
     `${FAKE_SSH_HOST} ${FAKE_GITHUB_HOST_KEY}\n`,

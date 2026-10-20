@@ -9,9 +9,15 @@ import { promisify } from "node:util";
 import { throwIfCancelled, type Context } from "../kernel/context.ts";
 import { Diagnostic } from "../kernel/errors.ts";
 import { isolatedGitEnvironment } from "../kernel/git-environment.ts";
-import type { SshAccess } from "./contract.ts";
+import type { SshAccess, SshRelayAccess } from "./contract.ts";
+import { serveRelayAgent, type RelayAgent } from "./ssh-relay-agent.ts";
 
-export type { SshAccess } from "./contract.ts";
+export type {
+  SshAccess,
+  SshKeyAccess,
+  SshRelayAccess,
+  SshSigner,
+} from "./contract.ts";
 
 export const SshAgentErrorCode = {
   Failed: "repository.connector.ssh_agent_failed",
@@ -279,6 +285,18 @@ async function loadKey(
   }
 }
 
+async function startRelayAgent(
+  socket: string,
+  access: SshRelayAccess,
+  context: Context,
+): Promise<RelayAgent> {
+  try {
+    return await serveRelayAgent(socket, access, context);
+  } catch (error) {
+    throw agentFailure(SshAgentStep.Agent, errorText(error));
+  }
+}
+
 async function stopAgent(agent: Agent, socket: string): Promise<void> {
   await execFileAsync("ssh-add", ["-q", "-D"], {
     env: toolEnvironment(socket),
@@ -294,7 +312,7 @@ export async function withSshAgent<T>(
   deadlineMs: number,
   work: (environment: NodeJS.ProcessEnv) => Promise<T>,
 ): Promise<T> {
-  assert.ok(access.private_key);
+  assert.ok("relay" in access || access.private_key);
   assert.ok(access.public_key);
   throwIfCancelled(context);
   const deadlineAt = Date.now() + deadlineMs;
@@ -302,19 +320,25 @@ export async function withSshAgent<T>(
   const directory = await createDirectory(deadlineAt);
   const socket = join(directory, SSH_AGENT_SOCKET);
   let agent: Agent | undefined;
+  let relay: RelayAgent | undefined;
   try {
     await assertPrivate(directory);
     assertSocketPath(socket);
     await writeFiles(directory, access);
     throwIfCancelled(context);
-    agent = spawnAgent(socket);
-    await waitForSocket(agent, socket, deadlineAt);
-    throwIfCancelled(context);
-    await loadKey(socket, access.private_key, deadlineAt);
+    if ("relay" in access)
+      relay = await startRelayAgent(socket, access, context);
+    else {
+      agent = spawnAgent(socket);
+      await waitForSocket(agent, socket, deadlineAt);
+      throwIfCancelled(context);
+      await loadKey(socket, access.private_key, deadlineAt);
+    }
     throwIfCancelled(context);
     return await work(sshAgentEnvironment(directory, access.port));
   } finally {
     if (agent) await stopAgent(agent, socket);
+    await relay?.close();
     await rm(directory, { recursive: true, force: true });
   }
 }

@@ -244,6 +244,7 @@ function assertAccess(
   ssh: SshAccess | undefined,
 ) {
   assert.ok(ssh, "A network git call holds the SSH access.");
+  assert.ok("private_key" in ssh);
   assert.equal(ssh.private_key, h.privateKey);
   assert.match(ssh.public_key, /^ssh-ed25519 /);
   assert.equal(ssh.known_hosts, `${h.knownHosts}\n`);

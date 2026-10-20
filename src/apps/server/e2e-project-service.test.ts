@@ -510,6 +510,7 @@ test(
     assert.equal(reads.length, VERIFIED_READS);
     for (const { address, ssh } of reads) {
       assert.equal(address, ADDRESS);
+      assert.ok("private_key" in ssh);
       assert.ok(ssh.private_key.startsWith(OPENSSH_ARMOR));
       assert.equal(ssh.public_key, publicKey);
       assert.equal(
