@@ -16,7 +16,11 @@ import {
   workerTokenPayloadSchema,
   type WorkerBindingsOf,
 } from "./contract.ts";
-import { readAllLive, readRow } from "./registration-rows.ts";
+import {
+  insertRegistration,
+  readAllLive,
+  readRow,
+} from "./registration-rows.ts";
 import {
   generateX25519KeyPair,
   keyFingerprint,
@@ -710,4 +714,41 @@ test("list pages instances by name with their binding count and holder mismatch"
     [["beta", 0, false]],
   );
   assert.equal(second.next_cursor, null);
+});
+
+test("the registrations of an instance are empty for a registration with no instance", (t) => {
+  const f = instanceFixture(t);
+  const projectId = createIdentity("project");
+  const registration = f.store.transaction((tx) =>
+    insertRegistration(
+      tx,
+      {
+        client_id: createIdentity("client_identity"),
+        name: "server slot 0",
+        project_id: projectId,
+        resource_identity: "worker:kanthord:general",
+        instance_id: null,
+      },
+      Date.now(),
+    ),
+  );
+  f.store.transaction((tx) =>
+    insertRegistration(
+      tx,
+      {
+        client_id: createIdentity("client_identity"),
+        name: "server slot 1",
+        project_id: projectId,
+        resource_identity: "worker:kanthord:general",
+        instance_id: null,
+      },
+      Date.now(),
+    ),
+  );
+  assert.deepEqual(
+    f.store.transaction((tx) =>
+      f.worker().registrationsOfInstance(tx, registration.runtime_identity),
+    ),
+    [],
+  );
 });

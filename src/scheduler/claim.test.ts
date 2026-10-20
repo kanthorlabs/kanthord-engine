@@ -409,8 +409,7 @@ test("selection skips a job until its stop backoff ends", (t) => {
   assert.equal(h.claim(heldAt).outcome, ClaimOutcome.Claimed);
 });
 
-test("two pulls of one instance on two bindings commit one claim", (t) => {
-  const h = claimHarness(t);
+function instanceSibling(h: ReturnType<typeof claimHarness>) {
   const otherRuntime = createIdentity("worker_registration");
   const otherResource = "worker:kanthord:review";
   const otherIdentity = testMachineIdentity(
@@ -435,19 +434,37 @@ test("two pulls of one instance on two bindings commit one claim", (t) => {
     h.service.insert(tx, h.row.node_id, h.row.project_id, 0);
     h.service.insert(tx, otherNode, h.row.project_id, 0);
   });
+  return (now: number) =>
+    h.store.transaction((tx) =>
+      claimOnce(
+        tx,
+        h.dependencies,
+        otherIdentity,
+        { resource_identity: otherResource, runtime_identity: otherRuntime },
+        now,
+      ),
+    );
+}
+
+test("two pulls of one instance on two bindings commit one claim", (t) => {
+  const h = claimHarness(t);
+  const claimOther = instanceSibling(h);
   assert.equal(h.claim().outcome, ClaimOutcome.Claimed);
-  const other = h.store.transaction((tx) =>
-    claimOnce(
-      tx,
-      h.dependencies,
-      otherIdentity,
-      { resource_identity: otherResource, runtime_identity: otherRuntime },
-      FIXTURE_NOW,
-    ),
-  );
-  assert.equal(other.outcome, ClaimOutcome.None);
+  assert.equal(claimOther(FIXTURE_NOW).outcome, ClaimOutcome.None);
   assert.equal(
     h.calls.filter((call) => call.method === CLAIM_METHOD).length,
     ONE_CALL,
   );
+});
+
+test("an expired execution of a sibling registration blocks no claim of its instance", (t) => {
+  const h = claimHarness(t);
+  const claimOther = instanceSibling(h);
+  const first = h.claim();
+  assert.equal(first.outcome, ClaimOutcome.Claimed);
+  assert.equal(
+    claimOther(first.row!.expired_at - 1).outcome,
+    ClaimOutcome.None,
+  );
+  assert.equal(claimOther(first.row!.expired_at).outcome, ClaimOutcome.Claimed);
 });
