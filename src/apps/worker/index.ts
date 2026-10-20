@@ -192,6 +192,7 @@ export class Worker implements Service {
         model_runtime_factory: this.options.modelRuntimeFactory,
         repository_transport: this.options.repositoryTransport,
         watchdog: armWatchdog,
+        refused: (binding) => this.bindingRefused(binding),
       });
       const error = await this.unit.start();
       if (error) throw error;
@@ -461,6 +462,24 @@ export class Worker implements Service {
     }
     for (const hosted of this.hosted.values())
       if (!listed.has(hosted.entry.client_id)) this.removeHosted(hosted);
+  }
+
+  private bindingRefused(binding: UnitBinding): void {
+    void this.check().then(() => this.resumeRefused(binding));
+  }
+
+  private async resumeRefused(binding: UnitBinding): Promise<void> {
+    if (this.shutdown.err() || this.endReason) return;
+    const hosted = [...this.hosted.values()].find(
+      (item) => item.binding === binding,
+    );
+    if (!hosted || hosted.removing) return;
+    const error = await this.unit!.restart(binding);
+    if (error)
+      this.logRecord({
+        msg: "Worker instance binding failed",
+        code: error instanceof Diagnostic ? error.code : null,
+      });
   }
 
   private async added(binding: UnitBinding): Promise<void> {

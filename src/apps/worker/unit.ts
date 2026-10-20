@@ -41,6 +41,8 @@ import { fileTranscript } from "./transcript-file.ts";
 
 const KEEPALIVE_INTERVAL_MS = 60000;
 const READY_MESSAGE = "Worker application ready";
+const GATEWAY_CODE = "gateway.";
+const GATEWAY_CLIENT_CODE = "gateway.client.";
 const ANSWER_INVALID = "gateway.client.answer_invalid";
 const RESUME_PULL_WAIT_MS = 5000;
 
@@ -63,6 +65,7 @@ export interface WorkerUnitOptions {
   repository_transport?: RepositoryTransport;
   watchdog?: () => () => void;
   resume_pull_wait_ms?: number;
+  refused?: (binding: UnitBinding) => void;
 }
 
 interface Entry {
@@ -340,6 +343,7 @@ export class WorkerUnit {
     }).then(
       (failure) => {
         if (failure?.code === ANSWER_INVALID) entry.kept = true;
+        if (this.handsOver(entry, failure)) return null;
         if (failure && !this.failure) {
           this.failure = failure;
           this.pulls.cancel();
@@ -351,6 +355,32 @@ export class WorkerUnit {
         throw error;
       },
     );
+  }
+
+  private handsOver(entry: Entry, failure: Diagnostic | null): boolean {
+    if (
+      !failure?.code.startsWith(GATEWAY_CODE) ||
+      failure.code.startsWith(GATEWAY_CLIENT_CODE) ||
+      !this.options.refused ||
+      this.shutdown.err() ||
+      entry.pulls.err()
+    )
+      return false;
+    entry.kept = true;
+    entry.heartbeat?.stop();
+    this.options.refused(entry.binding);
+    return true;
+  }
+
+  async restart(binding: UnitBinding): Promise<Error | null> {
+    const entry = this.entries.find((item) => item.binding === binding);
+    if (!entry || this.shutdown.err() || entry.pulls.err()) return null;
+    return lifecycle(async () => {
+      await entry.loop;
+      entry.kept = false;
+      await this.registerEntry(entry);
+      if (this.running && !this.pulls.err()) this.runEntry(entry);
+    });
   }
 
   private async waitLoops(): Promise<void> {

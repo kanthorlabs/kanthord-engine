@@ -67,6 +67,17 @@ const UNAUTHORIZED = {
     request_id: "request_01ARZ3NDEKTSV4RRFFQ69G5FAA",
   },
 };
+const NOT_LISTED = {
+  status: HttpStatus.Unauthorized,
+  body: {
+    error: {
+      code: "gateway.jwt.instance_not_listed",
+      message: "The binding does not list the instance.",
+      details: null,
+    },
+    request_id: "request_01ARZ3NDEKTSV4RRFFQ69G5FAA",
+  },
+};
 const CHILD_SCRIPT = `
   import { runWorker } from ${JSON.stringify(new URL("./index.ts", import.meta.url).href)};
   const error = await runWorker({});
@@ -364,6 +375,66 @@ test("a client request refused after an auth-version increment ends the process 
   assert.ok(error instanceof Diagnostic);
   assert.equal(error.code, SECRET_CHANGED_CODE);
   assert.deepEqual(f.server.state.deregistered, []);
+});
+
+test("a removed binding ends only its own entry while another binding completes its execution", async (t) => {
+  const f = await fixture(t);
+  const [removed, kept] = f.server.state.bindings as [
+    (typeof f.server.state.bindings)[number],
+    (typeof f.server.state.bindings)[number],
+  ];
+  const removedPull = (request: { bearer: string | null }) =>
+    request.bearer?.startsWith(`client-${removed.client_id}-`) === true;
+  const handover = Promise.withResolvers<void>();
+  let claimed = false;
+  f.server.state.intercept = async (request) => {
+    if (request.path === FakePath.Handover) {
+      await handover.promise;
+      return PROOF_FAILED;
+    }
+    if (request.path !== FakePath.Pull) return undefined;
+    if (removedPull(request))
+      return f.server.state.bindings.includes(removed) ? undefined : NOT_LISTED;
+    if (claimed) return undefined;
+    claimed = true;
+    return {
+      status: HttpStatus.OK,
+      body: { kind: WorkPullKind.Claimed, execution: testClaim() },
+    };
+  };
+  const worker = new Worker(f.options());
+  let settled = false;
+  const running = worker.run().finally(() => {
+    settled = true;
+  });
+  await f.ready();
+  const held = await until(() => f.server.requestsTo(FakePath.Handover)[0]);
+  const removedRuntime = f.server.state.runtimes.get(removed.client_id);
+  f.server.state.bindings = [kept];
+  f.server.state.bindingVersion++;
+  handover.resolve();
+  await until(() =>
+    f.server.state.requests
+      .slice(f.server.state.requests.indexOf(held))
+      .some((request) => request.path === FakePath.Connect),
+  );
+  await until(
+    () =>
+      f.server
+        .requestsTo(FakePath.Pull)
+        .filter((request) => !removedPull(request)).length > SINGLE,
+  );
+  assert.equal(settled, false);
+  assert.deepEqual(f.server.state.deregistered, []);
+  assert.deepEqual(await worker.healthcheck(), {
+    client: HealthStatus.Healthy,
+  });
+  assert.equal(await worker.stop(), null);
+  assert.equal(await running, null);
+  assert.equal(f.server.state.deregistered.length, SINGLE);
+  assert.ok(
+    !(f.server.state.deregistered as string[]).includes(removedRuntime!),
+  );
 });
 
 test("a binding version change adds a new binding and drains a dropped binding", async (t) => {
