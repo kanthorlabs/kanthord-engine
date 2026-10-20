@@ -28,6 +28,7 @@ import {
 import { decrypt, encrypt } from "./envelope.ts";
 
 export const CUSTODY_REPORT_INVALID = "custody.handover.report_invalid";
+export const CUSTODY_HOLDER_REFUSED = "custody.handover.holder_refused";
 export const REVISION_REVOKED = "credential.revision.revoked";
 const ONE_ROW = 1;
 const NO_MATERIALS = 0;

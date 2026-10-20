@@ -340,6 +340,7 @@ export interface CustodyHandover {
     tx: Transaction,
     identity: MachineIdentity,
     claim: ExecutionClaim,
+    placement: InstancePlacement | null,
     repositoryBindingIds: readonly string[],
     now: number,
   ): HandoverEnvelope;
@@ -402,6 +403,7 @@ export type WorkerBindingRowOf = (
   tombstone: boolean;
   disabled: boolean;
   worker_name: string;
+  placement: InstancePlacement | null;
   entries: Array<WorkerEntry & { agent: string }>;
   resource_budget: { turns: number; wall_time_ms: number } | null;
 } | null;

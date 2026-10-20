@@ -55,6 +55,7 @@ import {
   RESOURCE_TARGET_KIND_REPOSITORY,
   STORAGE_PLATFORM,
   StablePlacementIssue,
+  WorkerPlacementIssue,
   WorkerField,
   WorkerPlacement,
   bindingSetWriteInputSchema,
@@ -1722,6 +1723,33 @@ for (const reason of Object.values(StablePlacementIssue))
     assert.deepEqual(f.snapshot(), before);
     assert.equal(f.bindingChanges.length, NO_BINDING_CHANGES);
   });
+
+test("an added worker placement binding refuses the write on instances_absent", async (t) => {
+  const f = probedFixture(t, null);
+  const before = f.snapshot();
+  await rejectsWrite(
+    f.write({
+      [WORKER_NAME]: {
+        kind: BindingKind.Worker,
+        config: {
+          worker: NATIVE_WORKER,
+          instance_count: SINGLE_INSTANCE,
+          placement: WorkerPlacement.Worker,
+        },
+      },
+    }),
+    HttpStatus.Conflict,
+    ProjectErrorCode.WorkerPlacementUnavailable,
+    {
+      binding: WORKER_NAME,
+      placement: WorkerPlacement.Worker,
+      reason: WorkerPlacementIssue.InstancesAbsent,
+    },
+  );
+  assert.deepEqual(f.probes, []);
+  assert.deepEqual(f.snapshot(), before);
+  assert.equal(f.bindingChanges.length, NO_BINDING_CHANGES);
+});
 
 test("an added container binding passes on a transient runtime failure", async (t) => {
   const f = probedFixture(t, PlacementIssue.RuntimeFailed);

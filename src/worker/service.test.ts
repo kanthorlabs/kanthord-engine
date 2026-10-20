@@ -1613,6 +1613,7 @@ function authorizationFixture(t: TestContext) {
         resource_budget: null,
         tombstone: false,
         disabled: false,
+        placement: InstancePlacement.Server,
       }),
       schedulerClaims: {
         ...fakeCollaborations.schedulerClaims,
@@ -1924,13 +1925,16 @@ test("a binding at the server placement accepts a registration only from a curre
   );
 });
 
-test("a binding at the worker placement accepts any client identity", (t) => {
+test("a binding at the worker placement refuses every client identity", (t) => {
   const f = poolFixture(t, 2);
   f.state.placement = InstancePlacement.Worker;
   f.worker.startPool();
-  workerOperations.register.output.parse(
-    f.register(createIdentity("client_identity")),
-  );
+  for (const clientId of [createIdentity("client_identity"), f.slotId(0)])
+    refuses(
+      () => f.register(clientId),
+      WorkerErrorCode.PlacementMismatch,
+      HttpStatus.Conflict,
+    );
 });
 
 test("the start of the pool starts a slot above the target with a live registration in drain mode", (t) => {

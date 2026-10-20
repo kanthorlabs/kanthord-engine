@@ -574,6 +574,16 @@ export class WorkerService implements Service {
       identity.resourceIdentity,
     );
     if (
+      binding &&
+      !binding.tombstone &&
+      binding.placement === InstancePlacement.Worker
+    )
+      throw new OperationError(
+        HttpStatus.Conflict,
+        WorkerErrorCode.PlacementMismatch,
+        "The worker placement accepts no registration.",
+      );
+    if (
       !binding ||
       binding.tombstone ||
       !hostsPoolSlot(binding.placement) ||
@@ -705,6 +715,8 @@ export class WorkerService implements Service {
           tx,
           identity,
           execution,
+          this.dependencies.workerBindingRowOf(tx, execution.workerBindingId)
+            ?.placement ?? null,
           this.dependencies.repositoryBindingIdsOf(
             tx,
             execution.nodeId,

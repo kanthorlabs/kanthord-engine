@@ -213,6 +213,11 @@ export const StablePlacementIssue = {
 } as const;
 export type StablePlacementIssue =
   (typeof StablePlacementIssue)[keyof typeof StablePlacementIssue];
+export const WorkerPlacementIssue = {
+  InstancesAbsent: "instances_absent",
+} as const;
+export type WorkerPlacementIssue =
+  (typeof WorkerPlacementIssue)[keyof typeof WorkerPlacementIssue];
 export const workerTagsSchema = z
   .array(tagSchema)
   .refine((keys) => new Set(keys).size === keys.length);

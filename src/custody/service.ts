@@ -73,6 +73,8 @@ import {
   GrantKind,
   type GrantOf,
   type GrantRequest,
+  HandoverPlacement,
+  HolderRefusal,
   InboundOperation,
   type MissionAuthorization,
   type Material,
@@ -97,6 +99,7 @@ import {
   sealMaterial,
   openReport,
   applyReport,
+  CUSTODY_HOLDER_REFUSED,
   REVISION_REVOKED,
 } from "./handover.ts";
 import type { HandoverEnvelope } from "../kernel/handover.ts";
@@ -749,6 +752,7 @@ export class CustodyComponent implements Service, CredentialRecords {
     tx: Transaction,
     identity: MachineIdentity,
     claim: ExecutionClaim,
+    placement: HandoverPlacement | null,
     repositoryBindingIds: readonly string[],
     now: number,
   ): HandoverEnvelope {
@@ -758,13 +762,23 @@ export class CustodyComponent implements Service, CredentialRecords {
       claim.runtimeIdentity,
       now,
     );
+    const grants = this.authorize(tx, identity, row);
+    if (placement === HandoverPlacement.Worker && grants.length)
+      throw new OperationError(
+        HttpStatus.Forbidden,
+        CUSTODY_HOLDER_REFUSED,
+        "The worker placement receives no server-held credential.",
+        { reason: HolderRefusal.ServerHeld },
+      );
     const materials: Material[] = [];
     try {
-      for (const grant of this.authorize(tx, identity, row))
-        materials.push(this.release(tx, grant, now));
-      const sshIdentities = repositoryBindingIds.map((bindingId) =>
-        this.sshIdentityOf(tx, identity, claim, bindingId, now),
-      );
+      for (const grant of grants) materials.push(this.release(tx, grant, now));
+      const sshIdentities =
+        placement === HandoverPlacement.Worker
+          ? []
+          : repositoryBindingIds.map((bindingId) =>
+              this.sshIdentityOf(tx, identity, claim, bindingId, now),
+            );
       const envelope = sealMaterial(
         this.clientSecret(identity.clientId),
         row,
@@ -778,6 +792,8 @@ export class CustodyComponent implements Service, CredentialRecords {
             execution_id: row.execution_id,
             worker_binding_id: row.worker_binding_id,
             credential_id: material.credential_id,
+            client_id: identity.clientId,
+            runtime_identity: row.runtime_identity,
           },
           "credential handover",
         );
@@ -788,6 +804,8 @@ export class CustodyComponent implements Service, CredentialRecords {
             worker_binding_id: row.worker_binding_id,
             binding_id,
             credential_id,
+            client_id: identity.clientId,
+            runtime_identity: row.runtime_identity,
           },
           "ssh identity handover",
         );
@@ -850,7 +868,12 @@ export class CustodyComponent implements Service, CredentialRecords {
     );
     const written = applyReport(tx, this.envelopeKey, report, this.platforms);
     this.logger.info(
-      { execution_id: row.execution_id, credential_id: report.credential_id },
+      {
+        execution_id: row.execution_id,
+        credential_id: report.credential_id,
+        client_id: identity.clientId,
+        runtime_identity: row.runtime_identity,
+      },
       written ? "credential report" : "credential report stale",
     );
   }

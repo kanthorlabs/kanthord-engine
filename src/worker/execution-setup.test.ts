@@ -29,7 +29,7 @@ import {
 } from "./test-support.ts";
 import { WorkerErrorCode } from "./contract.ts";
 import { SHIPPED_TEMPLATES } from "../agent/prompt-templates.ts";
-import { ExecutionIntent } from "./contract.ts";
+import { ExecutionIntent, InstancePlacement } from "./contract.ts";
 import type { AgentSelection } from "../scheduler/contract.ts";
 import {
   RepositoryComponent,
@@ -137,6 +137,7 @@ test("setup answers the system and agent prompt after its single snapshot and su
       resource_identity: "worker:coder@1",
       tombstone: false,
       disabled: false,
+      placement: InstancePlacement.Server,
       worker_name: setup.worker_name,
       entries: [entry],
       resource_budget: null,
@@ -303,6 +304,7 @@ test("setup answers one entry per agent of a two-agent worker with its own promp
         resource_identity: `worker:${TWO_AGENT_WORKER}`,
         tombstone: false,
         disabled: false,
+        placement: InstancePlacement.Server,
         worker_name: TWO_AGENT_WORKER,
         entries: [],
         resource_budget: null,
@@ -406,6 +408,7 @@ async function repositorySetup(t: TestContext, address: string, pin: boolean) {
         resource_identity: "worker:coder@1",
         tombstone: false,
         disabled: false,
+        placement: InstancePlacement.Server,
         worker_name: setup.worker_name,
         entries: [],
         resource_budget: null,
