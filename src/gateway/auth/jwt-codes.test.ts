@@ -260,4 +260,5 @@ test("gateway.jwt.instance_not_listed refuses an instance that the binding does 
   const subject = await fixtureOf(t);
   subject.listed.splice(0, subject.listed.length, OTHER_INSTANCE_NAME);
   await subject.refuse(await subject.clientToken(), JwtCause.InstanceNotListed);
+  assert.equal(subject.connections.has(subject.instanceId), false);
 });

@@ -164,16 +164,16 @@ export class Authentication {
       throw jwtRefused(JwtCause.InstanceRequired);
     const instance = this.machines?.instances?.liveInstance(instanceId);
     if (!instance) throw jwtRefused(JwtCause.InstanceEnded);
+    if (!listed.includes(instance.name)) {
+      const registration = this.machines!.worker.findByClient(clientId);
+      if (
+        registration?.project_id !== projectId ||
+        registration.resource_identity !== resourceIdentity
+      )
+        throw jwtRefused(JwtCause.InstanceNotListed);
+    }
     if (!this.machines!.instances!.holdConnection(instanceId, connectionId))
       throw jwtRefused(JwtCause.ConnectionSuperseded);
-    if (listed.includes(instance.name)) return;
-    const registration = this.machines!.worker.findByClient(clientId);
-    if (
-      registration?.project_id === projectId &&
-      registration.resource_identity === resourceIdentity
-    )
-      return;
-    throw jwtRefused(JwtCause.InstanceNotListed);
   }
 
   private async resolveMachine(
