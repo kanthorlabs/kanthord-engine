@@ -23,6 +23,8 @@ import {
 } from "../../llm/contract.ts";
 import { piProviderId, Platform } from "../../llm/platforms.ts";
 import { LoginSessionMode } from "../../llm/sessions.ts";
+import { Diagnostic } from "../../kernel/errors.ts";
+import { EXCHANGE_UNAVAILABLE } from "./instance-exchange.ts";
 import { InstanceLogins } from "./instance-login.ts";
 
 const INSTANCE = "laptop";
@@ -32,8 +34,9 @@ const AUTHORIZATION_URL = "https://claude.ai/oauth/authorize?state=abc";
 const DEVICE_URL = "https://auth.openai.com/codex/device";
 const DEVICE_CODE = "ABCD-EFGH";
 const COPY_CODE_VALUE = "authorization-code#state-value";
-const MAX_TURNS = 50;
+const MAX_TURNS = 5000;
 const NO_REPORTS = 0;
+const RETRY_MS = 1;
 const DEVICE_OPTION = "device_code";
 const OAUTH_SECRET = {
   refresh: "private-refresh-token",
@@ -71,7 +74,10 @@ function fakeProvider(
   });
 }
 
-async function fixture(provider: Provider) {
+async function fixture(
+  provider: Provider,
+  lose: (body: LoginReportBody) => boolean = () => false,
+) {
   const pair = await generateX25519KeyPair();
   const key = {
     holder: INSTANCE,
@@ -80,13 +86,21 @@ async function fixture(provider: Provider) {
     private_key: () => Buffer.from(pair.private_key),
   };
   const reports: LoginReportBody[] = [];
+  const keys: string[] = [];
+  let lost = false;
   const logins = new InstanceLogins({
     key,
     providers: () => [provider],
-    report: async (sessionId, body) => {
+    report: async (sessionId, body, idempotencyKey) => {
       assert.equal(sessionId, SESSION_ID);
+      keys.push(idempotencyKey);
+      if (!lost && lose(body)) {
+        lost = true;
+        throw new Diagnostic(EXCHANGE_UNAVAILABLE, "lost");
+      }
       reports.push(body);
     },
+    retryMs: RETRY_MS,
     log: () => {},
   });
   const until = async (read: () => boolean) => {
@@ -108,7 +122,7 @@ async function fixture(provider: Provider) {
       }),
       body.sealed!,
     );
-  return { key, logins, reports, until, opened };
+  return { key, keys, logins, reports, until, opened };
 }
 
 function entry(
@@ -235,4 +249,79 @@ test("an instance runs a device login, reports only the user code and the addres
     f.reports.some((report) => report.state === InstanceLoginState.Completed),
     false,
   );
+});
+
+function copyCodeProvider() {
+  return fakeProvider(
+    piProviderId(Platform.AnthropicSubscription),
+    async (interaction) => {
+      await interaction.prompt({
+        type: "select",
+        message: "Mode",
+        options: [{ id: LoginSessionMode.CopyCode, label: "Copy code" }],
+      });
+      interaction.notify({ type: "auth_url", url: AUTHORIZATION_URL });
+      await interaction.prompt({
+        type: "manual_code",
+        message: "Paste the code",
+        placeholder: "code#state",
+      });
+      return { type: "oauth", ...OAUTH_SECRET };
+    },
+  );
+}
+
+test("a lost pending report is sent again at the next heartbeat entry", async () => {
+  const f = await fixture(copyCodeProvider(), () => true);
+  const listed = entry(
+    Platform.AnthropicSubscription,
+    LoginSessionMode.CopyCode,
+  );
+  f.logins.sync([listed]);
+  await f.until(() => f.keys.length > NO_REPORTS);
+  assert.equal(f.reports.length, NO_REPORTS);
+  f.logins.sync([listed]);
+  await f.until(() => f.reports.length > NO_REPORTS);
+  assert.equal(f.reports[0]!.address, AUTHORIZATION_URL);
+  f.logins.stop();
+});
+
+test("a lost completed report is retried with one idempotency key", async () => {
+  const f = await fixture(
+    copyCodeProvider(),
+    (body) => body.state === InstanceLoginState.Completed,
+  );
+  f.logins.sync([
+    entry(Platform.AnthropicSubscription, LoginSessionMode.CopyCode),
+  ]);
+  await f.until(() => f.reports.length > NO_REPORTS);
+  const sent = f.keys.length;
+  f.logins.sync([
+    entry(
+      Platform.AnthropicSubscription,
+      LoginSessionMode.CopyCode,
+      COPY_CODE_VALUE,
+    ),
+  ]);
+  await f.until(() => f.reports.at(-1)?.state === InstanceLoginState.Completed);
+  const [lostKey, retriedKey] = f.keys.slice(sent);
+  assert.ok(lostKey);
+  assert.equal(retriedKey, lostKey);
+});
+
+test("a stopped instance starts no login flow", async () => {
+  let started = false;
+  const f = await fixture(
+    fakeProvider(piProviderId(Platform.AnthropicSubscription), async () => {
+      started = true;
+      throw new Error("unexpected login");
+    }),
+  );
+  f.logins.stop();
+  f.logins.sync([
+    entry(Platform.AnthropicSubscription, LoginSessionMode.CopyCode),
+  ]);
+  assert.equal(f.logins.pending(), false);
+  await setImmediate();
+  assert.equal(started, false);
 });

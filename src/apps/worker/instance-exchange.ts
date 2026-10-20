@@ -161,12 +161,13 @@ export class InstanceExchange {
   async loginReport(
     sessionId: string,
     body: LoginReportBody,
+    idempotencyKey: string,
     context: Context = background,
   ): Promise<void> {
     settled(
       await this.llm.login_report(
         { params: { session_id: sessionId }, query: {}, body },
-        { context, idempotencyKey: ulid() },
+        { context, idempotencyKey },
       ),
       "login report",
     );

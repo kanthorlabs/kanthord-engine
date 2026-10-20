@@ -75,6 +75,10 @@ export class LoginSessionStore {
     this.sessions.set(session.id, session);
   }
 
+  remove(id: string): void {
+    this.sessions.delete(id);
+  }
+
   pendingOfHolder(holder: string, now: number): LoginSession[] {
     return [...this.sessions.values()].filter(
       (session) =>

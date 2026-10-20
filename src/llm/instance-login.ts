@@ -35,16 +35,19 @@ export class InstanceLogin {
   readonly session: LoginSession;
   private readonly sessions: LoginSessionStore;
   private readonly now: () => number;
+  private readonly ended: () => void;
   private timer?: NodeJS.Timeout;
 
   constructor(
     session: LoginSession,
     sessions: LoginSessionStore,
     now: () => number,
+    ended: () => void,
   ) {
     this.session = session;
     this.sessions = sessions;
     this.now = now;
+    this.ended = ended;
   }
 
   arm(): void {
@@ -103,7 +106,7 @@ export class InstanceLogin {
     if (!this.pending()) throw loginNotFound();
   }
 
-  report(body: LoginReportBody, write: (copy: SealedCopy) => void): boolean {
+  report(body: LoginReportBody, write: (copy: SealedCopy) => void): () => void {
     this.requirePending();
     const sealed = body.sealed !== undefined || body.sealed_to !== undefined;
     if (body.state === InstanceLoginState.Completed) {
@@ -123,19 +126,25 @@ export class InstanceLogin {
         this.fail(error instanceof OperationError ? error.code : LOGIN_FAILED);
         throw error;
       }
-      return true;
+      return () => this.complete();
     }
     if (sealed) throw invalidReport();
-    if (body.state === InstanceLoginState.Failed) {
-      this.fail(body.failure_reason ?? LOGIN_FAILED);
-      return false;
-    }
-    if (body.address !== null)
-      this.sessions.updateAddress(this.session.id, body.address, body.code);
-    if (body.message !== null)
-      this.sessions.updateLastMessage(this.session.id, body.message);
-    if (this.session.address !== null) this.ready.resolve();
-    return false;
+    if (body.state === InstanceLoginState.Failed)
+      return () => this.fail(body.failure_reason ?? LOGIN_FAILED);
+    if (
+      body.address !== null &&
+      this.session.address !== null &&
+      body.address !== this.session.address
+    )
+      throw invalidReport();
+    return () => {
+      if (!this.pending()) return;
+      if (body.address !== null && this.session.address === null)
+        this.sessions.updateAddress(this.session.id, body.address, body.code);
+      if (body.message !== null)
+        this.sessions.updateLastMessage(this.session.id, body.message);
+      if (this.session.address !== null) this.ready.resolve();
+    };
   }
 
   complete(): void {
@@ -146,5 +155,6 @@ export class InstanceLogin {
   private end(): void {
     clearTimeout(this.timer);
     this.ready.resolve();
+    this.ended();
   }
 }

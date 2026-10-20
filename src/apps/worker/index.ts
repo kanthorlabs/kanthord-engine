@@ -179,8 +179,8 @@ export class Worker implements Service {
       this.logins = new InstanceLogins({
         key: instanceKey,
         providers: this.options.oauthProviders,
-        report: (sessionId, body) =>
-          exchange.loginReport(sessionId, body, this.shutdown),
+        report: (sessionId, body, idempotencyKey) =>
+          exchange.loginReport(sessionId, body, idempotencyKey, this.shutdown),
         log: (record) => this.logRecord(record),
       });
       const token = await this.takeToken();

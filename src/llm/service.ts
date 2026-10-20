@@ -816,7 +816,9 @@ export class LlmComponent implements Service {
       this.now(),
       holder,
     );
-    const flow = new InstanceLogin(session, this.sessions, this.now);
+    const flow = new InstanceLogin(session, this.sessions, this.now, () =>
+      this.instanceLogins.delete(session.id),
+    );
     this.instanceLogins.set(session.id, flow);
     flow.arm();
     const unsubscribe = caller.context.onCancel(() =>
@@ -853,14 +855,14 @@ export class LlmComponent implements Service {
   ): null {
     const identity = caller.identity;
     if (!isWorkerIdentity(identity)) throw instanceForbidden();
-    const flow = this.instanceLogins.get(input.params.session_id);
-    if (!flow) throw loginNotFound();
-    const { session } = flow;
-    let written = false;
+    let apply = () => {};
+    let flow: InstanceLogin | undefined;
     caller.commit((tx) => {
-      if (this.workerHolder(tx, identity) !== session.holder)
-        throw instanceForbidden();
-      written = flow.report(input.body, (copy) =>
+      const holder = this.workerHolder(tx, identity);
+      flow = this.instanceLogins.get(input.params.session_id);
+      if (!flow || flow.session.holder !== holder) throw loginNotFound();
+      const { session } = flow;
+      apply = flow.report(input.body, (copy) =>
         this.records.createLoginRevision(
           tx,
           this.platformSet,
@@ -872,14 +874,13 @@ export class LlmComponent implements Service {
       );
       return null;
     });
-    if (written) {
-      flow.complete();
+    apply();
+    const { session } = flow!;
+    if (session.state === LoginSessionState.Completed)
       this.logger.info(
         { holder: session.holder, human_identity: session.human_identity },
         "credential login completed",
       );
-    }
-    if (!flow.pending()) this.instanceLogins.delete(session.id);
     return null;
   }
 

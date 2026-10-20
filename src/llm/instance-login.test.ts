@@ -59,7 +59,7 @@ const OAUTH_SECRET = {
 const Code = {
   InstanceUnavailable: "credential.login.instance_unavailable",
   InstanceUnknown: "llm.credential.instance_unknown",
-  InstanceForbidden: "llm.credential.instance_forbidden",
+  LoginPending: "credential.login.pending",
   BrowserUnavailable: "credential.login.browser_unavailable",
   NotFound: "credential.login.not_found",
   ValueNotAwaited: "credential.login.value_not_awaited",
@@ -295,7 +295,7 @@ test("an instance login in copy_code mode runs on the instance, takes the code t
         { address: AUTHORIZATION_URL },
         OTHER_INSTANCE,
       ),
-    { code: Code.InstanceForbidden, status: HttpStatus.Forbidden },
+    { code: Code.NotFound, status: HttpStatus.NotFound },
   );
   assert.throws(
     () =>
@@ -471,4 +471,47 @@ test("an instance failure report fails the pending login before an address", asy
   });
   assert.equal(f.loginStatus(entry.session_id).state, LoginSessionState.Failed);
   assert.equal(f.rows().length, NO_CREDENTIALS);
+});
+
+test("an instance report keeps the first address and refuses an address that is no https URL", async (t) => {
+  const f = await fixture(t);
+  const started = f.login({ platform: Platform.AnthropicSubscription });
+  const entry = await f.listed();
+  assert.throws(() =>
+    f.report(entry.session_id, { address: "http://claude.ai/oauth/authorize" }),
+  );
+  f.report(entry.session_id, { address: AUTHORIZATION_URL });
+  await started;
+  assert.throws(() => f.report(entry.session_id, { address: DEVICE_URL }), {
+    code: Code.InvalidInput,
+  });
+  f.report(entry.session_id, {
+    address: AUTHORIZATION_URL,
+    message: DEVICE_MESSAGE,
+  });
+  assert.equal(f.loginStatus(entry.session_id).last_message, DEVICE_MESSAGE);
+});
+
+test("one human holds one pending session for a platform over the server and every instance", async (t) => {
+  const f = await fixture(t);
+  const started = f.login({ platform: Platform.AnthropicSubscription });
+  const entry = await f.listed();
+  f.report(entry.session_id, { address: AUTHORIZATION_URL });
+  await started;
+  await assert.rejects(
+    f.login({
+      platform: Platform.AnthropicSubscription,
+      holder: OTHER_INSTANCE,
+      name: "other",
+    }),
+    { code: Code.LoginPending, status: HttpStatus.Conflict },
+  );
+  await assert.rejects(
+    f.login({
+      platform: Platform.AnthropicSubscription,
+      holder: "server",
+      name: "other",
+    }),
+    { code: Code.LoginPending, status: HttpStatus.Conflict },
+  );
 });

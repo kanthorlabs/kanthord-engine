@@ -94,12 +94,19 @@ export const loginSessionEntrySchema = z.strictObject({
   code: z.string().nullable(),
 });
 export type LoginSessionEntry = z.infer<typeof loginSessionEntrySchema>;
+export const LOGIN_REPORT_ADDRESS_MAX_LENGTH = 2048;
+export const LOGIN_REPORT_TEXT_MAX_LENGTH = 1024;
+const HTTPS_PROTOCOL = "https:";
 export const loginReportBodySchema = z.strictObject({
   state: z.enum(InstanceLoginState),
-  address: z.string().nullable(),
-  code: z.string().nullable(),
-  message: z.string().nullable(),
-  failure_reason: z.string().nullable(),
+  address: z
+    .string()
+    .max(LOGIN_REPORT_ADDRESS_MAX_LENGTH)
+    .refine((value) => URL.parse(value)?.protocol === HTTPS_PROTOCOL)
+    .nullable(),
+  code: z.string().max(LOGIN_REPORT_TEXT_MAX_LENGTH).nullable(),
+  message: z.string().max(LOGIN_REPORT_TEXT_MAX_LENGTH).nullable(),
+  failure_reason: z.string().max(LOGIN_REPORT_TEXT_MAX_LENGTH).nullable(),
   sealed: sealedObjectSchema.optional(),
   sealed_to: z.string().optional(),
 });
