@@ -5,11 +5,13 @@ import { join } from "node:path";
 import test, { type TestContext } from "node:test";
 import { promisify } from "node:util";
 import { background } from "../kernel/context.ts";
+import { Diagnostic, OperationError } from "../kernel/errors.ts";
 import { isolatedGitEnvironment } from "../kernel/git-environment.ts";
 import { temporary } from "../kernel/test-support.ts";
 import { clone, fetchBase, gitLsRemote, pushNodeBranch } from "./connector.ts";
 import {
   SSH_SIGN_USER,
+  SshSignErrorCode,
   type SshKeyAccess,
   type SshRelayAccess,
 } from "./contract.ts";
@@ -36,6 +38,11 @@ const SESSION_BIND_REFUSED = /ssh_agent_bind_hostkey.*agent refused operation/;
 const AUTHENTICATED = /Authenticated to/;
 const KEY_REFUSED = /Permission denied \(publickey\)/;
 const NO_SIGNATURES = 0;
+const GIT_FAILED = "repository.connector.git_failed";
+const OTHER_USER = "not-the-login-user";
+const MISSING_REPOSITORY = "missing";
+const RELAY_LINE = /ssh relay:/;
+const RELAY_REFUSED = /ssh relay: worker\.ssh\.sign_refused/;
 
 delete process.env.SSH_AUTH_SOCK;
 delete process.env.SSH_AGENT_PID;
@@ -184,6 +191,44 @@ test("a server refusal of the relayed payload fails the git operation", async (t
   );
   assert.match(failure, KEY_REFUSED);
   assert.ok(h.methods.length > NO_SIGNATURES);
+});
+
+test("the git failure cause holds the last relay error", async (t) => {
+  const h = await relayHarness(t, undefined, OTHER_USER);
+  await assert.rejects(
+    clone(h.sshd.url(h.bare), temporary(t), background, DEADLINE_MS, h.access),
+    (error) => {
+      assert(error instanceof Diagnostic);
+      assert.equal(error.code, GIT_FAILED);
+      assert(error.cause instanceof Error);
+      assert.match(error.cause.message, KEY_REFUSED);
+      assert.match(error.cause.message, RELAY_REFUSED);
+      assert(error.cause.cause instanceof OperationError);
+      assert.equal(error.cause.cause.code, SshSignErrorCode.Refused);
+      return true;
+    },
+  );
+});
+
+test("a git failure without a relay error keeps its cause", async (t) => {
+  const h = await relayHarness(t);
+  await assert.rejects(
+    clone(
+      h.sshd.url(join(h.bare, MISSING_REPOSITORY)),
+      temporary(t),
+      background,
+      DEADLINE_MS,
+      h.access,
+    ),
+    (error) => {
+      assert(error instanceof Diagnostic);
+      assert.equal(error.code, GIT_FAILED);
+      assert(error.cause instanceof Error);
+      assert.doesNotMatch(error.cause.message, RELAY_LINE);
+      assert.equal(error.cause.cause, undefined);
+      return true;
+    },
+  );
 });
 
 test("plain git pushes and fetches through the relay with an unbound publickey signature", async (t) => {

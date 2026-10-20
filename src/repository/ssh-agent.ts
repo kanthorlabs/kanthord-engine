@@ -310,7 +310,10 @@ export async function withSshAgent<T>(
   access: SshAccess,
   context: Context,
   deadlineMs: number,
-  work: (environment: NodeJS.ProcessEnv) => Promise<T>,
+  work: (
+    environment: NodeJS.ProcessEnv,
+    relayError: () => Error | null,
+  ) => Promise<T>,
 ): Promise<T> {
   assert.ok("relay" in access || access.private_key);
   assert.ok(access.public_key);
@@ -335,7 +338,10 @@ export async function withSshAgent<T>(
       await loadKey(socket, access.private_key, deadlineAt);
     }
     throwIfCancelled(context);
-    return await work(sshAgentEnvironment(directory, access.port));
+    return await work(
+      sshAgentEnvironment(directory, access.port),
+      () => relay?.lastError() ?? null,
+    );
   } finally {
     if (agent) await stopAgent(agent, socket);
     await relay?.close();

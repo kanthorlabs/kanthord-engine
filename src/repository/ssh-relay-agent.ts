@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { createServer, type Server, type Socket } from "node:net";
 import { CancellationContext, type Context } from "../kernel/context.ts";
+import { asError } from "../kernel/errors.ts";
 import type { SshRelayAccess } from "./contract.ts";
 import { SshReader, SshWriter, sshPublicKeyBlob } from "./ssh-key.ts";
 
@@ -23,6 +24,7 @@ const IDENTITY_COMMENT = "";
 
 export interface RelayAgent {
   close(): Promise<void>;
+  lastError(): Error | null;
 }
 
 function frame(message: Buffer): Buffer {
@@ -53,6 +55,7 @@ async function answerOf(
   access: SshRelayAccess,
   blob: Buffer,
   context: Context,
+  record: (error: Error) => void,
 ): Promise<Buffer> {
   const type = message[0];
   if (
@@ -74,7 +77,8 @@ async function answerOf(
       .byte(SshAgentMessage.SignResponse)
       .bytes(signature)
       .build();
-  } catch {
+  } catch (error) {
+    record(asError(error));
     return FAILURE;
   }
 }
@@ -130,11 +134,15 @@ export async function serveRelayAgent(
   const blob = sshPublicKeyBlob(access.public_key);
   const connections = new Set<Socket>();
   const relayContext = new CancellationContext(context);
+  let lastError: Error | null = null;
+  const record = (error: Error) => {
+    lastError = error;
+  };
   const server = createServer((connection) => {
     connections.add(connection);
     connection.once("close", () => connections.delete(connection));
     serveConnection(connection, (message) =>
-      answerOf(message, access, blob, relayContext),
+      answerOf(message, access, blob, relayContext, record),
     );
   });
   try {
@@ -149,5 +157,8 @@ export async function serveRelayAgent(
     relayContext.cancel();
     throw error;
   }
-  return { close: () => closeServer(server, connections, relayContext) };
+  return {
+    close: () => closeServer(server, connections, relayContext),
+    lastError: () => lastError,
+  };
 }

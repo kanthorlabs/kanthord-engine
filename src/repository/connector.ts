@@ -8,7 +8,7 @@ import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { promisify } from "node:util";
 import { throwIfCancelled, type Context } from "../kernel/context.ts";
-import { Diagnostic } from "../kernel/errors.ts";
+import { CodedError, Diagnostic } from "../kernel/errors.ts";
 import {
   GIT_UNSAFE_OPTIONS,
   isolatedGitEnvironment,
@@ -121,15 +121,49 @@ async function withAccess<T>(
 ): Promise<T> {
   const start = performance.now();
   const remaining = () => deadlineMs - (performance.now() - start);
-  return withSshAgent(ssh, context, deadlineMs, (environment) =>
-    work(
-      {
-        GIT_SSH_VARIANT: environment.GIT_SSH_VARIANT,
-        GIT_SSH_COMMAND: environment.GIT_SSH_COMMAND,
-      },
-      remaining(),
-    ),
+  return withSshAgent(
+    ssh,
+    context,
+    deadlineMs,
+    async (environment, relayError) => {
+      try {
+        return await work(
+          {
+            GIT_SSH_VARIANT: environment.GIT_SSH_VARIANT,
+            GIT_SSH_COMMAND: environment.GIT_SSH_COMMAND,
+          },
+          remaining(),
+        );
+      } catch (error) {
+        throw withRelayCause(error, relayError());
+      }
+    },
   );
+}
+
+function relayText(error: Error): string {
+  return error instanceof CodedError
+    ? `${error.code}: ${error.message}`
+    : error.message;
+}
+
+function withRelayCause(error: unknown, relay: Error | null): unknown {
+  if (relay === null || !(error instanceof Diagnostic)) return error;
+  if (error instanceof GitWriteError) {
+    const inner = withRelayCause(error.cause, relay);
+    return inner instanceof Diagnostic
+      ? new GitWriteError(error.stage, inner)
+      : error;
+  }
+  if (error.code !== GIT_FAILED || !(error.cause instanceof Error))
+    return error;
+  return new Diagnostic(GIT_FAILED, error.message, {
+    cause: new Error(`${error.cause.message}\nssh relay: ${relayText(relay)}`, {
+      cause: relay,
+    }),
+    fields: error.fields,
+    details: error.details,
+  });
 }
 
 async function beforePush<T>(work: () => Promise<T>): Promise<T> {

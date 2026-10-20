@@ -44,6 +44,7 @@ const NO_FLAGS = 0;
 const ONE_IDENTITY = 1;
 const DEADLINE_MS = 30_000;
 const NO_RELAYS = 0;
+const RELAY_REFUSED = "relay refused";
 const EMPTY_FRAME = 0;
 const BATCHED_REPLIES = 2;
 const PRIVATE_KEY_MARKER = "PRIVATE";
@@ -68,7 +69,7 @@ function relayFixture(fail = false) {
   const access: SshRelayAccess = {
     relay: async (data, flags) => {
       relayed.push({ data, flags });
-      if (fail) throw new Error("relay refused");
+      if (fail) throw new Error(RELAY_REFUSED);
       return relayedSignature(keyAccess, data);
     },
     public_key: key.public_key,
@@ -201,9 +202,9 @@ test("session-bind answers SSH_AGENT_FAILURE and the connection keeps serving", 
   assert.ok(sshSignatureVerifies(f.key.public_key, data, signature));
 });
 
-test("another key, another message and a relay error answer SSH_AGENT_FAILURE", async (t) => {
+test("another key, another message and a relay error answer SSH_AGENT_FAILURE, and the agent records the relay error", async (t) => {
   const f = relayFixture();
-  const { path } = await served(t, f.access);
+  const { path, agent } = await served(t, f.access);
   const client = await AgentClient.open(t, path);
   const other = sshPublicKeyBlob(generateSshKey("other").public_key);
   const data = userAuthenticationData({ key: other });
@@ -225,9 +226,11 @@ test("another key, another message and a relay error answer SSH_AGENT_FAILURE", 
     ],
     failure,
   );
+  assert.equal(agent.lastError(), null);
   const failing = relayFixture(true);
   const second = await served(t, failing.access);
   const refused = await AgentClient.open(t, second.path);
+  assert.equal(second.agent.lastError(), null);
   assert.deepEqual(
     [
       ...(await refused.request(
@@ -241,6 +244,7 @@ test("another key, another message and a relay error answer SSH_AGENT_FAILURE", 
     failure,
   );
   assert.equal(failing.relayed.length, ONE_IDENTITY);
+  assert.equal(second.agent.lastError()?.message, RELAY_REFUSED);
 });
 
 test("split and batched frames answer in order", async (t) => {
