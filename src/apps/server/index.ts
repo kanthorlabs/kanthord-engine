@@ -676,6 +676,7 @@ export function composeServices(options: {
     endRegistrations: (tx, projectId, resourceIdentity, now) =>
       worker.endRegistrations(tx, projectId, resourceIdentity, now),
     bindingsChanged: (projectId) => worker.bindingsChanged(projectId),
+    placementStatus: (placement) => worker.placementStatus(placement),
     createMission: (tx, pid, actor) => mission.createMission(tx, pid, actor),
     liveNodesPinning: (tx, bid) => mission.liveNodesPinning(tx, bid),
     unmatchedClaims: (tx, projectId) =>

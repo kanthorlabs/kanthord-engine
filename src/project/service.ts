@@ -107,6 +107,9 @@ import {
   type WorkerEntry,
   type WorkerBindingRow,
   type BindingsChanged,
+  type PlacementStatusOf,
+  StablePlacementIssue,
+  WorkerPlacement,
   type EndRegistrations,
   type BindingChange,
   type SchedulerWakeup,
@@ -457,6 +460,7 @@ export interface Dependencies {
   workerAgentView: WorkerAgentViewFn;
   endRegistrations: EndRegistrations;
   bindingsChanged: BindingsChanged;
+  placementStatus: PlacementStatusOf;
   wakeup: SchedulerWakeup;
   health?: HealthRegistry;
   bindings?: ProjectBindings;
@@ -485,6 +489,7 @@ export class ProjectService implements Service, ProjectBindings {
   private readonly workerAgentView: WorkerAgentViewFn;
   private readonly endRegistrations: EndRegistrations;
   private readonly bindingsChanged: BindingsChanged;
+  private readonly placementStatus: PlacementStatusOf;
   private readonly wakeup: SchedulerWakeup;
   constructor(dependencies: Dependencies) {
     this.bindings = dependencies.bindings;
@@ -506,6 +511,7 @@ export class ProjectService implements Service, ProjectBindings {
     this.workerAgentView = dependencies.workerAgentView;
     this.endRegistrations = dependencies.endRegistrations;
     this.bindingsChanged = dependencies.bindingsChanged;
+    this.placementStatus = dependencies.placementStatus;
     this.wakeup = dependencies.wakeup;
     dependencies.health?.register("project", () => this.healthcheck());
   }
@@ -931,6 +937,7 @@ export class ProjectService implements Service, ProjectBindings {
   ) {
     const submission = uniqueSubmission(body.bindings);
     const saved = this.savedBindingSet(projectId, body.version);
+    const unavailable = await this.unavailableContainer(projectId, submission);
     for (const [name, binding] of submission) {
       if (binding.kind !== BindingKind.Repository) continue;
       refuseRepositoryAction(binding.config);
@@ -943,6 +950,7 @@ export class ProjectService implements Service, ProjectBindings {
       assert.equal(submission.size, Object.keys(body.bindings).length);
       for (const [name, binding] of submission)
         this.validateBinding(tx, name, binding);
+      if (unavailable) throw unavailable;
       const before = new Set(
         this.unmatchedClaims(tx, projectId).map(unmatchedKey),
       );
@@ -965,6 +973,34 @@ export class ProjectService implements Service, ProjectBindings {
     this.bindingsChanged(projectId);
     this.wakeup.wake(projectId);
     return answer;
+  }
+  private async unavailableContainer(
+    projectId: string,
+    submission: ReturnType<typeof uniqueSubmission>,
+  ): Promise<OperationError | null> {
+    const live = this.operationalStore.transaction((tx) =>
+      readCurrentBindingSet(tx, projectId),
+    );
+    const added = Array.from(submission).flatMap(([name, binding]) =>
+      binding.kind === BindingKind.Worker &&
+      binding.config.placement === WorkerPlacement.Container &&
+      !live.has(name)
+        ? [name]
+        : [],
+    );
+    const first = added.at(FIRST_INDEX);
+    if (first === undefined) return null;
+    const { available, reason } = await this.placementStatus(
+      WorkerPlacement.Container,
+    );
+    const stable = Object.values<string>(StablePlacementIssue);
+    if (available || reason === null || !stable.includes(reason)) return null;
+    return new OperationError(
+      HttpStatus.Conflict,
+      ProjectErrorCode.WorkerPlacementUnavailable,
+      "The server cannot run the container placement.",
+      { binding: first, placement: WorkerPlacement.Container, reason },
+    );
   }
   private savedBindingSet(
     projectId: string,

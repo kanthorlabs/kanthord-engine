@@ -54,6 +54,7 @@ import {
   RESOURCE_CAPABILITY_NETWORK_GIT_READ,
   RESOURCE_TARGET_KIND_REPOSITORY,
   STORAGE_PLATFORM,
+  StablePlacementIssue,
   WorkerField,
   WorkerPlacement,
   bindingSetWriteInputSchema,
@@ -70,6 +71,7 @@ import {
   RepositoryFileState,
 } from "../repository/contract.ts";
 import { TAG_MAX_BYTES } from "../kernel/tag.ts";
+import { PlacementIssue } from "../worker/contract.ts";
 import { projectMigrations } from "./migrations.ts";
 import {
   GrantKind,
@@ -108,6 +110,8 @@ const PROJECTS_CREATED = 2;
 const RENAMED_NAME = "renamed";
 const FIRST_PAGE_LIMIT = 1;
 const SINGLE_INSTANCE = 1;
+const NO_INSTANCES = 0;
+const NO_BINDING_CHANGES = 0;
 const TWO_INSTANCES = 2;
 const NO_CALLS = 0;
 const ONE_CALL = 1;
@@ -322,6 +326,7 @@ function fixture(t: TestContext, overrides: Partial<Dependencies> = {}) {
       repository.sshAccessOf(tx, granted, material),
     workerAgentsOf: unexpected,
     workerAgentView: unexpected,
+    placementStatus: unexpected,
     endRegistrations: (tx, projectId, resourceIdentity, now) => {
       assert.ok(tx.database.isTransaction);
       assert.equal(tx.database, store.database);
@@ -1673,6 +1678,112 @@ test("an external worker refuses the placement field", async (t) => {
     { binding: WORKER_NAME, field: WorkerField.Placement },
   );
   assert.deepEqual(f.snapshot(), before);
+});
+
+function containerBinding(count = SINGLE_INSTANCE, worker = NATIVE_WORKER) {
+  return {
+    kind: BindingKind.Worker,
+    config: {
+      worker,
+      instance_count: count,
+      placement: WorkerPlacement.Container,
+    },
+  };
+}
+
+function probedFixture(t: TestContext, reason: string | null) {
+  const probes: boolean[] = [];
+  const holder: { store?: Store } = {};
+  const f = writeFixture(t, {
+    placementStatus: async () => {
+      probes.push(holder.store!.database.isTransaction);
+      return { available: reason === null, reason };
+    },
+  });
+  holder.store = f.store;
+  return { ...f, probes };
+}
+
+for (const reason of Object.values(StablePlacementIssue))
+  test(`an added container binding refuses the write on ${reason}`, async (t) => {
+    const f = probedFixture(t, reason);
+    const before = f.snapshot();
+    await rejectsWrite(
+      f.write({ [WORKER_NAME]: containerBinding() }),
+      HttpStatus.Conflict,
+      ProjectErrorCode.WorkerPlacementUnavailable,
+      {
+        binding: WORKER_NAME,
+        placement: WorkerPlacement.Container,
+        reason,
+      },
+    );
+    assert.deepEqual(f.probes, [false]);
+    assert.deepEqual(f.snapshot(), before);
+    assert.equal(f.bindingChanges.length, NO_BINDING_CHANGES);
+  });
+
+test("an added container binding passes on a transient runtime failure", async (t) => {
+  const f = probedFixture(t, PlacementIssue.RuntimeFailed);
+  const written = await f.write({ [WORKER_NAME]: containerBinding() });
+  assert.equal(storedPlacement(written), WorkerPlacement.Container);
+  assert.deepEqual(f.probes, [false]);
+});
+
+test("an added container binding passes when the placement is available", async (t) => {
+  const f = probedFixture(t, null);
+  const written = await f.write({ [WORKER_NAME]: containerBinding() });
+  assert.equal(storedPlacement(written), WorkerPlacement.Container);
+});
+
+test("an edit of a live container binding reads no placement status", async (t) => {
+  let reason: string | null = null;
+  const f = writeFixture(t, {
+    placementStatus: async () => ({ available: reason === null, reason }),
+  });
+  const first = await f.write({ [WORKER_NAME]: containerBinding() });
+  reason = PlacementIssue.RuntimeAbsent;
+  const lowered = await f.write(
+    { [WORKER_NAME]: containerBinding(NO_INSTANCES) },
+    first.binding_set_version,
+  );
+  assert.equal(storedPlacement(lowered), WorkerPlacement.Container);
+  assert.deepEqual(
+    lowered.bindings[WORKER_NAME]!.config,
+    containerBinding(NO_INSTANCES).config,
+  );
+});
+
+test("a container binding name reused after a removal counts as added", async (t) => {
+  let reason: string | null = null;
+  const f = writeFixture(t, {
+    placementStatus: async () => ({ available: reason === null, reason }),
+  });
+  const first = await f.write({ [WORKER_NAME]: containerBinding() });
+  const removed = await f.write({}, first.binding_set_version);
+  reason = PlacementIssue.ServerInContainer;
+  await rejectsWrite(
+    f.write({ [WORKER_NAME]: containerBinding() }, removed.binding_set_version),
+    HttpStatus.Conflict,
+    ProjectErrorCode.WorkerPlacementUnavailable,
+    {
+      binding: WORKER_NAME,
+      placement: WorkerPlacement.Container,
+      reason,
+    },
+  );
+});
+
+test("an external worker with the container placement refuses the field before the placement", async (t) => {
+  const f = probedFixture(t, PlacementIssue.RuntimeAbsent);
+  await rejectsWrite(
+    f.write({
+      [WORKER_NAME]: containerBinding(SINGLE_INSTANCE, EXTERNAL_WORKER),
+    }),
+    HttpStatus.BadRequest,
+    ProjectErrorCode.WorkerFieldForbidden,
+    { binding: WORKER_NAME, field: WorkerField.Placement },
+  );
 });
 
 const TAG_PREFIX = "platform.";
