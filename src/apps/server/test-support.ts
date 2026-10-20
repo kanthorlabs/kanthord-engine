@@ -275,6 +275,28 @@ export async function enableCoveringAgents(
     });
 }
 
+export async function holdCoveringCredential(
+  env: NodeJS.ProcessEnv,
+  holder: string,
+): Promise<void> {
+  assert.ok(env.KANTHORD_ENDPOINT);
+  assert.ok(env.KANTHORD_TOKEN);
+  await humanCaller({
+    endpoint: env.KANTHORD_ENDPOINT,
+    token: env.KANTHORD_TOKEN,
+  })(llmOperations.create, {
+    params: {},
+    query: {},
+    body: {
+      name: "covering-llm",
+      platform: "anthropic",
+      metadata: null,
+      holders: [holder],
+      [SECRET_FIELD]: { key: "covering-provider-key" },
+    },
+  });
+}
+
 const COVERING_APPLY_EXIT = 0;
 
 export async function applyCoveringBindings(

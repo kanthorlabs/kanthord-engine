@@ -58,13 +58,23 @@ import {
   type WorkerAgentView,
   WorkerErrorCode,
 } from "./contract.ts";
-import { AgentErrorCode, type ApprovedModelsFn } from "../agent/contract.ts";
+import {
+  AgentErrorCode,
+  type ApprovedModelsFn,
+  type HolderScope,
+} from "../agent/contract.ts";
+import { bindingHolders } from "../project/contract.ts";
+import {
+  SERVER_HOLDER,
+  type HeldCopy,
+  type InstanceKey,
+} from "../custody/contract.ts";
 import type { Store, Transaction } from "../kernel/store.ts";
 import { ActionPerformer } from "./action-performer.ts";
 import { executionSetup } from "./execution-setup.ts";
 import { clearedChangeRequests } from "./change-request.ts";
 import { authorizeModelInference } from "./authorization.ts";
-import { agentChoice, agentSelectionsAt } from "./agent-selection.ts";
+import { agentChoice, agentSelectionsAt, entryOf } from "./agent-selection.ts";
 import type {
   AgentChoice,
   AgentPin,
@@ -135,6 +145,10 @@ export interface Dependencies {
   monotonicNow?: () => number;
   schedulerClaims: SchedulerClaims;
   agentConfiguration: AgentConfiguration;
+  instanceCopies?: {
+    archiveHeld(tx: Transaction, holder: string, now: number): void;
+    heldCopies(tx: Transaction, holder: string): HeldCopy[];
+  };
   health?: HealthRegistry;
   registrations?: WorkerRegistrations;
   pool?: {
@@ -143,6 +157,18 @@ export interface Dependencies {
     logger: Logger;
   };
 }
+function claimantOf(
+  tx: Transaction,
+  placement: string | null | undefined,
+  runtimeIdentity: string,
+): string {
+  if (placement !== InstancePlacement.Worker) return SERVER_HOLDER;
+  const instanceId = readRow(tx, runtimeIdentity)?.instance_id;
+  const instance = instanceId ? readInstanceById(tx, instanceId) : null;
+  assert.ok(instance, "A worker placement claimant names its instance.");
+  return instance.name;
+}
+
 export class WorkerService implements Service {
   authorizeModelInference(
     tx: Transaction,
@@ -157,8 +183,76 @@ export class WorkerService implements Service {
       execution,
     );
   }
-  agentChoice(tx: Transaction, workerBindingId: string): AgentChoice {
-    return agentChoice(this.dependencies, this, tx, workerBindingId);
+  agentChoice(
+    tx: Transaction,
+    workerBindingId: string,
+    runtimeIdentity: string,
+  ): AgentChoice {
+    return agentChoice(
+      this.dependencies,
+      this,
+      tx,
+      workerBindingId,
+      this.claimantHolder(tx, workerBindingId, runtimeIdentity),
+    );
+  }
+  claimantHolder(
+    tx: Transaction,
+    workerBindingId: string,
+    runtimeIdentity: string,
+  ): string {
+    const binding = this.dependencies.workerBindingRowOf(tx, workerBindingId);
+    return claimantOf(tx, binding?.placement, runtimeIdentity);
+  }
+  bindingsListingInstance(
+    tx: Transaction,
+    instanceName: string,
+    agentNames: readonly string[],
+  ): Array<{ binding_id: string; project_id: string }> {
+    return this.instances
+      .bindingsListing(tx, instanceName)
+      .filter((binding) =>
+        agentsOfWorker(binding.worker_name).some((agent) =>
+          agentNames.includes(agent),
+        ),
+      )
+      .map(({ binding_id, project_id }) => ({ binding_id, project_id }));
+  }
+  instanceKeyOf(tx: Transaction, name: string): InstanceKey | null {
+    const instance = readLiveInstance(tx, name);
+    return instance
+      ? {
+          name: instance.name,
+          public_key: instance.public_key,
+          fingerprint: instance.fingerprint,
+        }
+      : null;
+  }
+  instanceNameOf(tx: Transaction, instanceId: string): string | null {
+    const instance = readInstanceById(tx, instanceId);
+    return instance?.ended_at === null ? instance.name : null;
+  }
+  holderMismatch(
+    tx: Transaction,
+    instanceName: string,
+    bindings: ReadonlyArray<{
+      worker_name: string;
+      entries: Array<WorkerEntry & { agent: string }>;
+    }>,
+  ): boolean {
+    return bindings.some((binding) =>
+      agentsOfWorker(binding.worker_name).some((agent) =>
+        this.workerAgentView(
+          tx,
+          binding.worker_name,
+          agent,
+          entryOf(binding.entries, agent),
+          { holders: [instanceName], claimant: null },
+        )?.issues.some(
+          ({ code }) => code === AgentErrorCode.CredentialHolderMismatch,
+        ),
+      ),
+    );
   }
   agentSelectionsAt(
     tx: Transaction,
@@ -185,6 +279,10 @@ export class WorkerService implements Service {
       workerBindingsOf: dependencies.workerBindingsOf,
       unendedExecutionOf: (tx, runtimeIdentity) =>
         dependencies.schedulerClaims.unendedExecutionOf(tx, runtimeIdentity),
+      archiveHeld: (tx, holder, now) =>
+        dependencies.instanceCopies?.archiveHeld(tx, holder, now),
+      holderMismatch: (tx, instanceName, bindings) =>
+        this.holderMismatch(tx, instanceName, bindings),
     });
     if (dependencies.pool) this.pool = new Pool(dependencies.pool.host);
     this.performer = new ActionPerformer({
@@ -446,7 +544,10 @@ export class WorkerService implements Service {
     const declaration = getWorkerDeclaration(binding.worker_name);
     assert.ok(declaration);
     if (declaration.host === WorkerHost.ExternalHarness) return true;
-    if (binding.placement === InstancePlacement.Worker) return false;
+    const scope = {
+      holders: bindingHolders(binding),
+      claimant: claimantOf(tx, binding.placement, runtimeIdentity),
+    };
     const agents = agentsOfWorker(binding.worker_name);
     assert.ok(agents.length > NO_ITEMS);
     for (let index = 0; index < agents.length; index++) {
@@ -457,6 +558,7 @@ export class WorkerService implements Service {
         binding.worker_name,
         agent,
         entry ?? null,
+        scope,
       );
       assert.ok(view);
       if (!view.valid) return false;
@@ -495,6 +597,7 @@ export class WorkerService implements Service {
     tx: Transaction,
     workerName: string,
     entry: WorkerEntry | null,
+    holders: readonly string[],
   ): void {
     if (!getWorkerDeclaration(workerName))
       throw invalidWorkerConfiguration(workerName);
@@ -502,7 +605,12 @@ export class WorkerService implements Service {
     if (agents.length === NO_ITEMS && entry !== null)
       throw invalidWorkerConfiguration(workerName);
     for (const agentName of agents)
-      this.dependencies.agentConfiguration.validateEntry(tx, agentName, entry);
+      this.dependencies.agentConfiguration.validateEntry(
+        tx,
+        agentName,
+        entry,
+        holders,
+      );
   }
 
   resourceInventory(tx: Transaction): ResourceEntry[] {
@@ -536,6 +644,7 @@ export class WorkerService implements Service {
     workerName: string,
     agentName: string,
     entry: WorkerEntry | null,
+    scope: HolderScope,
     approvedModels?: ApprovedModelsFn,
   ): WorkerAgentView | null {
     if (
@@ -547,6 +656,7 @@ export class WorkerService implements Service {
       tx,
       agentName,
       entry,
+      scope,
       approvedModels,
     );
   }
@@ -925,6 +1035,8 @@ export class WorkerService implements Service {
       heartbeatClock: this.heartbeatClock,
       registrationRecordOf: (tx, row) =>
         registrationRecord(tx, this.recordDependencies(), row, Date.now()),
+      heldCopies: (tx, holder) =>
+        this.dependencies.instanceCopies?.heldCopies(tx, holder) ?? [],
     });
     const worker = this.registrations;
     assert.equal(workerOperations.register.service, WORKER_SERVICE_NAME);

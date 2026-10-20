@@ -51,7 +51,9 @@ import {
   type AgentView,
   type ApprovedModelsFn,
   type CooldownChange,
+  type CopyHeldFn,
   type CustodySuitability,
+  type HolderScope,
   type DefaultConfiguration,
   type EntriesOfAgent,
   type ProviderCapabilityFn,
@@ -71,7 +73,7 @@ import {
 } from "./enablements.ts";
 import { promptSettings, savePromptSettings } from "./prompts.ts";
 import { cooldownDuration } from "./cooldowns.ts";
-import type { CredentialHolds } from "../custody/contract.ts";
+import type { CredentialHold, CredentialHolds } from "../custody/contract.ts";
 import { applyLocks, lockedSwitches, withLocks } from "./prompt-locks.ts";
 import {
   ProjectErrorCode,
@@ -311,6 +313,7 @@ export interface Dependencies {
   hostHome?: string;
   workbenchDirectory: (agentName: string) => string;
   custodySuitability: CustodySuitability;
+  copyHeld: CopyHeldFn;
   credentialHolds: CredentialHolds;
   approvedModels: ApprovedModelsFn;
   entriesOfAgent: EntriesOfAgent;
@@ -363,6 +366,7 @@ export class AgentComponent {
     agentName: string,
     agentProviders: AgentProviderItem[],
     config: DefaultConfiguration,
+    holders: readonly string[],
   ): void {
     validateEffectiveConfig(
       this.dependencies,
@@ -370,6 +374,7 @@ export class AgentComponent {
       agentName,
       agentProviders,
       config,
+      holders,
     );
   }
 
@@ -382,7 +387,7 @@ export class AgentComponent {
   ): void {
     checkFallbackDuplicates(agentName, head, tail);
     for (const config of [head, ...tail])
-      this.validateEffectiveConfig(tx, agentName, agentProviders, config);
+      this.validateEffectiveConfig(tx, agentName, agentProviders, config, []);
   }
 
   private validateBindings(
@@ -401,6 +406,7 @@ export class AgentComponent {
         agentProviders,
         effectiveConfiguration(defaults, binding.entry),
         tailOf(fallbackConfigurations, binding.entry),
+        binding.holders,
       ).map(({ code }) => ({ ...bindingIdentity(binding), code })),
     );
     if (bindings.length > NO_ITEMS)
@@ -615,6 +621,7 @@ export class AgentComponent {
     tx: Transaction,
     agentName: string,
     entry: AgentEntry | null,
+    holders: readonly string[],
   ): void {
     const current = getEnablement(tx, agentName);
     if (!current || current.state === EnablementState.Disabled)
@@ -632,6 +639,7 @@ export class AgentComponent {
         agentName,
         current.agent_providers,
         config,
+        holders,
       );
   }
 
@@ -705,6 +713,7 @@ export class AgentComponent {
     tx: Transaction,
     agentName: string,
     entry: AgentEntry | null,
+    scope: HolderScope,
     approvedModels: ApprovedModelsFn = this.dependencies.approvedModels,
   ): AgentView | null {
     if (!getAgentDeclaration(agentName)) return null;
@@ -724,6 +733,7 @@ export class AgentComponent {
     const issues = chainIssues(
       {
         custodySuitability: this.dependencies.custodySuitability,
+        copyHeld: this.dependencies.copyHeld,
         approvedModels,
       },
       tx,
@@ -731,6 +741,7 @@ export class AgentComponent {
       current.agent_providers,
       config,
       tailOf(current.fallback_configurations, entry),
+      scope.holders,
     );
     if (issues.length > NO_ITEMS)
       return {
@@ -752,10 +763,7 @@ export class AgentComponent {
         ({ name }) => name === item.agent_provider,
       );
       assert.ok(provider, "Validated configuration must resolve a provider.");
-      const cooldown = this.dependencies.credentialHolds.holdOf(
-        tx,
-        provider.credential,
-      );
+      const cooldown = this.cooldownOf(tx, provider.credential, scope);
       return {
         position,
         level,
@@ -792,12 +800,33 @@ export class AgentComponent {
     };
   }
 
+  private cooldownOf(
+    tx: Transaction,
+    credential: string,
+    scope: HolderScope,
+  ): CredentialHold | null {
+    const { credentialHolds } = this.dependencies;
+    if (scope.claimant !== null)
+      return credentialHolds.holdOf(tx, credential, scope.claimant);
+    return scope.holders
+      .map((holder) => credentialHolds.holdOf(tx, credential, holder))
+      .reduce<CredentialHold | null>(
+        (latest, hold) =>
+          hold !== null &&
+          (latest === null || hold.available_at > latest.available_at)
+            ? hold
+            : latest,
+        null,
+      );
+  }
+
   selectAgent(
     tx: Transaction,
     agentName: string,
     entry: AgentEntry | null,
+    scope: HolderScope,
   ): AgentSelectionResult {
-    const view = this.agentView(tx, agentName, entry);
+    const view = this.agentView(tx, agentName, entry, scope);
     if (!view?.valid) return { kind: SelectionKind.Invalid };
     if (view.active_position === null) {
       assert.ok(view.cooling);
@@ -846,6 +875,7 @@ export class AgentComponent {
     const issues = chainIssues(
       {
         custodySuitability: this.dependencies.custodySuitability,
+        copyHeld: this.dependencies.copyHeld,
         approvedModels,
       },
       tx,
@@ -858,6 +888,7 @@ export class AgentComponent {
         },
       ],
       configuration,
+      [],
       [],
     );
     if (issues.length > NO_ITEMS)
@@ -908,6 +939,7 @@ export class AgentComponent {
   recordProviderFailure(
     tx: Transaction,
     selections: readonly AgentSelection[],
+    holder: string,
     code: AdvancingFailure,
     executionId: string,
     now: number,
@@ -916,15 +948,16 @@ export class AgentComponent {
     const changes: CooldownChange[] = [];
     for (const credential of uniqueCredentials(selections)) {
       const strikes =
-        (credentialHolds.holdOf(tx, credential)?.strikes ?? NO_STRIKES) +
-        FIRST_STRIKE;
+        (credentialHolds.holdOf(tx, credential, holder)?.strikes ??
+          NO_STRIKES) + FIRST_STRIKE;
       const availableAt =
         now + cooldownDuration(config.cooldown, code, strikes);
-      credentialHolds.hold(tx, credential, availableAt, strikes);
+      credentialHolds.hold(tx, credential, holder, availableAt, strikes);
       changes.push({
         kind: CooldownChangeKind.Started,
         execution_id: executionId,
         credential,
+        holder,
         code,
         strikes,
         available_at: availableAt,
@@ -936,15 +969,17 @@ export class AgentComponent {
   recordSuccess(
     tx: Transaction,
     selections: readonly AgentSelection[],
+    holder: string,
     executionId: string,
   ): CooldownChange[] {
     const changes: CooldownChange[] = [];
     for (const credential of uniqueCredentials(selections))
-      if (this.dependencies.credentialHolds.release(tx, credential))
+      if (this.dependencies.credentialHolds.release(tx, credential, holder))
         changes.push({
           kind: CooldownChangeKind.Cleared,
           execution_id: executionId,
           credential,
+          holder,
         });
     return changes;
   }
@@ -956,6 +991,7 @@ export class AgentComponent {
           {
             execution_id: change.execution_id,
             credential_name: change.credential,
+            holder: change.holder,
             code: change.code,
             strikes: change.strikes,
             available_at: change.available_at,
@@ -967,6 +1003,7 @@ export class AgentComponent {
           {
             execution_id: change.execution_id,
             credential_name: change.credential,
+            holder: change.holder,
           },
           "agent.fallback.cooldown_cleared",
         );
@@ -1146,19 +1183,25 @@ export class AgentComponent {
     );
     registry.register(
       agentOperations["cooldown.clear"],
-      ({ params }, caller) => {
+      ({ params, query }, caller) => {
         const answer = caller.commit((tx) => {
-          if (!this.dependencies.credentialHolds.release(tx, params.credential))
+          if (
+            !this.dependencies.credentialHolds.release(
+              tx,
+              params.credential,
+              query.holder,
+            )
+          )
             throw new OperationError(
               HttpStatus.NotFound,
               AgentErrorCode.CooldownNotFound,
               "Agent cooldown not found.",
-              { credential: params.credential },
+              { credential: params.credential, holder: query.holder },
             );
           return null;
         });
         this.logger.info(
-          { credential_name: params.credential },
+          { credential_name: params.credential, holder: query.holder },
           "agent.fallback.cooldown_cleared",
         );
         return answer;

@@ -37,6 +37,11 @@ export const SECRET_OPERATION_IDS: ReadonlySet<string> = new Set([
   storageOperations.check.id,
 ]);
 
+const HUMAN_POLICIES: readonly AccessPolicy[] = [
+  AccessPolicy.Human,
+  AccessPolicy.HumanOrWorker,
+];
+
 export type InvokeOperation = (
   operation: Operation,
   input: unknown,
@@ -46,7 +51,7 @@ export type InvokeOperation = (
 export function toolOperations(operations: readonly Operation[]): Operation[] {
   return operations.filter(
     (operation) =>
-      operation.access === AccessPolicy.Human &&
+      HUMAN_POLICIES.includes(operation.access) &&
       operation.lifetime !== OperationLifetime.Stream &&
       !operation.secret &&
       !SECRET_OPERATION_IDS.has(operation.id),
@@ -71,7 +76,7 @@ export function operationTool(
   invoke: InvokeOperation,
   requester: () => HumanIdentity | undefined,
 ): ToolDefinition {
-  assert.equal(operation.access, AccessPolicy.Human);
+  assert.ok(HUMAN_POLICIES.includes(operation.access));
   return {
     name: toolName(operation.id),
     label: operation.id,

@@ -5,13 +5,11 @@ import {
   credentialAnswerSchema,
   credentialCheckAnswerSchema,
   credentialCheckBodySchema,
-  credentialCreateSchema,
   credentialListAnswerSchema,
   credentialListQuerySchema,
   credentialParamsSchema,
   credentialPlatformListAnswerSchema,
   credentialRevisionParamsSchema,
-  credentialRotateBodySchema,
   credentialUpdateMetadataBodySchema,
   METADATA_MAX_BODY_BYTES,
 } from "../custody/contract.ts";
@@ -37,6 +35,8 @@ export const LlmErrorCode = {
   ModelCredentialNotFound: "llm.model.credential_not_found",
   ModelUnknown: "llm.model.model_unknown",
   ModelReasoningUnsupported: "llm.model.reasoning_unsupported",
+  InstanceUnknown: "llm.credential.instance_unknown",
+  InstanceForbidden: "llm.credential.instance_forbidden",
 } as const;
 
 export const PROVIDER_CHECK_TIMEOUT_MS = 10000;
@@ -53,6 +53,28 @@ export type EnablementsDependentOnModelFn = (
 const emptyParams = z.strictObject({});
 const emptyQuery = z.strictObject({});
 const sessionParams = z.strictObject({ session_id: z.string().min(1) });
+const holderSchema = z.string().min(1);
+const holderQuery = z.strictObject({ holder: holderSchema.optional() });
+export const llmCredentialCreateSchema = z.strictObject({
+  name: z.string(),
+  platform: z.string(),
+  metadata: z.unknown(),
+  secret: z.unknown().optional(),
+  holders: z.array(holderSchema).min(1).optional(),
+  holder: holderSchema.optional(),
+  sealed: z.unknown().optional(),
+  sealed_to: z.string().optional(),
+});
+export const llmCredentialRotateSchema = z.strictObject({
+  expected_revision: z.number().int().positive(),
+  secret: z.unknown().optional(),
+  metadata: z.unknown().optional(),
+  holder: holderSchema.optional(),
+  sealed: z.unknown().optional(),
+  sealed_to: z.string().optional(),
+});
+export type LlmCredentialCreate = z.infer<typeof llmCredentialCreateSchema>;
+export type LlmCredentialRotate = z.infer<typeof llmCredentialRotateSchema>;
 
 export const llmCredentialAnswerSchema = credentialAnswerSchema.extend({
   agent_providers: z.array(
@@ -139,7 +161,7 @@ export const llmOperations = {
     service: LLM_COMPONENT_NAME,
     method: HttpMethod.Post,
     path: "/api/llm/credential",
-    access: AccessPolicy.Human,
+    access: AccessPolicy.HumanOrWorker,
     store: StoreName.Operational,
     lifetime: OperationLifetime.Unary,
     timeoutMs: CREDENTIAL_TIMEOUT_MS,
@@ -150,17 +172,18 @@ export const llmOperations = {
     input: z.strictObject({
       params: emptyParams,
       query: emptyQuery,
-      body: credentialCreateSchema,
+      body: llmCredentialCreateSchema,
     }),
     output: credentialAnswerSchema,
-    description: "Create an LLM credential with its first revision.",
+    description:
+      "Create an LLM credential with the first revision of each copy. A human sends the secret and the holders, and the server seals each instance copy to the current key of its instance. A worker instance sends one copy sealed to its own key.",
   },
   list: {
     id: "llm.credential.list",
     service: LLM_COMPONENT_NAME,
     method: HttpMethod.Get,
     path: "/api/llm/credential",
-    access: AccessPolicy.Human,
+    access: AccessPolicy.HumanOrWorker,
     store: StoreName.Operational,
     lifetime: OperationLifetime.Unary,
     timeoutMs: CREDENTIAL_TIMEOUT_MS,
@@ -169,19 +192,21 @@ export const llmOperations = {
     status: HttpStatus.OK,
     input: z.strictObject({
       params: emptyParams,
-      query: credentialListQuerySchema,
+      query: credentialListQuerySchema.extend({
+        holder: holderSchema.optional(),
+      }),
       body: z.null(),
     }),
     output: credentialListAnswerSchema,
     description:
-      "List LLM credentials with optional platform filtering and pagination.",
+      "List the copies of LLM credentials with optional platform and holder filtering and pagination. A worker instance lists only its own copies.",
   },
   get: {
     id: "llm.credential.get",
     service: LLM_COMPONENT_NAME,
     method: HttpMethod.Get,
     path: "/api/llm/credential/:credential_name",
-    access: AccessPolicy.Human,
+    access: AccessPolicy.HumanOrWorker,
     store: StoreName.Operational,
     lifetime: OperationLifetime.Unary,
     timeoutMs: CREDENTIAL_TIMEOUT_MS,
@@ -190,19 +215,19 @@ export const llmOperations = {
     status: HttpStatus.OK,
     input: z.strictObject({
       params: credentialParamsSchema,
-      query: emptyQuery,
+      query: holderQuery,
       body: z.null(),
     }),
     output: llmCredentialAnswerSchema,
     description:
-      "Get an LLM credential, all its revisions and the agent providers that name it.",
+      "Get one copy of an LLM credential, all its revisions and the agent providers that name it. The holder defaults to server for a human and to the instance of a worker token.",
   },
   rotate: {
     id: "llm.credential.rotate",
     service: LLM_COMPONENT_NAME,
     method: HttpMethod.Post,
     path: "/api/llm/credential/:credential_name/revision",
-    access: AccessPolicy.Human,
+    access: AccessPolicy.HumanOrWorker,
     store: StoreName.Operational,
     lifetime: OperationLifetime.Unary,
     timeoutMs: CREDENTIAL_TIMEOUT_MS,
@@ -212,11 +237,12 @@ export const llmOperations = {
     status: HttpStatus.OK,
     input: z.strictObject({
       params: credentialParamsSchema,
-      query: emptyQuery,
-      body: credentialRotateBodySchema,
+      query: holderQuery,
+      body: llmCredentialRotateSchema,
     }),
     output: credentialAnswerSchema,
-    description: "Rotate an LLM credential secret into a new revision.",
+    description:
+      "Rotate one copy of an LLM credential into a new revision. A human sends the secret and names the holder in the query, which defaults to server. A worker instance sends its own copy sealed to its own key.",
   },
   update_metadata: {
     id: "llm.credential.update_metadata",
@@ -233,11 +259,12 @@ export const llmOperations = {
     status: HttpStatus.OK,
     input: z.strictObject({
       params: credentialParamsSchema,
-      query: emptyQuery,
+      query: holderQuery,
       body: credentialUpdateMetadataBodySchema,
     }),
     output: credentialAnswerSchema,
-    description: "Update LLM credential metadata in a new revision.",
+    description:
+      "Update the metadata of one copy of an LLM credential in a new revision. The holder defaults to server.",
   },
   revoke: {
     id: "llm.credential.revoke",
@@ -253,11 +280,12 @@ export const llmOperations = {
     status: HttpStatus.OK,
     input: z.strictObject({
       params: credentialRevisionParamsSchema,
-      query: emptyQuery,
+      query: holderQuery,
       body: z.null(),
     }),
     output: credentialAnswerSchema,
-    description: "End an older LLM credential revision.",
+    description:
+      "End an older revision of one copy of an LLM credential. The holder defaults to server.",
   },
   archive: {
     id: "llm.credential.archive",
@@ -273,11 +301,12 @@ export const llmOperations = {
     status: HttpStatus.OK,
     input: z.strictObject({
       params: credentialParamsSchema,
-      query: emptyQuery,
+      query: holderQuery,
       body: z.null(),
     }),
     output: credentialAnswerSchema,
-    description: "Archive an LLM credential that no dependent names.",
+    description:
+      "Archive one copy of an LLM credential that no dependent names. The holder defaults to server.",
   },
   check: {
     id: "llm.credential.check",

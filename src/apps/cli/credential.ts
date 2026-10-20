@@ -8,11 +8,14 @@ import {
   LIST_LIMIT_DEFAULT,
   LIST_LIMIT_MAX,
 } from "../../custody/contract.ts";
+import type { z } from "zod";
 import type { llmOperations } from "../../llm/contract.ts";
 import type { repositoryOperations } from "../../repository/contract.ts";
 import type { storageOperations } from "../../storage/contract.ts";
 import { httpClient, resolveClient } from "../../gateway/client.ts";
 import { Diagnostic } from "../../kernel/errors.ts";
+import { instanceCredentialAccess, instanceSecret } from "../worker/index.ts";
+import { readNamedInstance } from "../worker/instance-config.ts";
 import { PROGRAM_NAME } from "./constants.ts";
 import { addFileBodyHelp } from "./file-body.ts";
 import {
@@ -50,6 +53,7 @@ export type CredentialGroup = {
   description: string;
   operations: CredentialOperations;
   example: { platform: string; metadata: unknown; secret: unknown };
+  instanceCopies?: boolean;
 };
 
 export function credentialCode(
@@ -64,6 +68,118 @@ const TOKEN_REQUIRED = "token_required";
 const INDETERMINATE = "indeterminate";
 const INVALID_REVISION = "invalid_revision";
 const UPDATE_METADATA_CODE = "update_metadata";
+const HOLDER_OPTION = "--holder";
+
+function holderQuery(
+  group: CredentialGroup,
+  options: { holder?: string },
+): Record<string, never> {
+  if (options.holder === undefined) return {};
+  assert.ok(group.instanceCopies);
+  return { holder: options.holder } as unknown as Record<string, never>;
+}
+
+function writeAnswer(data: unknown, key: string): void {
+  process.stdout.write(
+    `${JSON.stringify({ ...(data as object), idempotency_key: key })}\n`,
+  );
+}
+
+async function createLocal(
+  group: CredentialGroup,
+  holder: string,
+  body: z.infer<typeof credentialCreateSchema>,
+  key: string,
+): Promise<boolean> {
+  const configuration = readNamedInstance(process.env, holder);
+  if (configuration === null) return false;
+  instanceSecret(body.secret);
+  const access = await instanceCredentialAccess(configuration);
+  const sealed = await access.seal(body.name, body.platform, body.secret);
+  const result = await httpClient(
+    llmOperationsOf(group),
+    access.endpoint,
+    access.token,
+  ).create(
+    {
+      params: {},
+      query: {},
+      body: {
+        name: body.name,
+        platform: body.platform,
+        metadata: body.metadata,
+        ...sealed,
+      },
+    },
+    { idempotencyKey: key },
+  );
+  writeAnswer(
+    handleMutationResult(
+      result,
+      credentialCode(group, CREATE, INDETERMINATE),
+      key,
+    ),
+    key,
+  );
+  return true;
+}
+
+async function rotateLocal(
+  group: CredentialGroup,
+  credentialName: string,
+  holder: string,
+  body: z.infer<typeof credentialRotateBodySchema>,
+  key: string,
+): Promise<boolean> {
+  const configuration = readNamedInstance(process.env, holder);
+  if (configuration === null) return false;
+  instanceSecret(body.secret);
+  const access = await instanceCredentialAccess(configuration);
+  const client = httpClient(
+    llmOperationsOf(group),
+    access.endpoint,
+    access.token,
+  );
+  const current = handleReadResult(
+    await client.get({
+      params: { credential_name: credentialName },
+      query: { holder },
+      body: null,
+    }),
+    credentialCode(group, ROTATE, INDETERMINATE),
+  );
+  const sealed = await access.seal(
+    credentialName,
+    current.platform,
+    body.secret,
+  );
+  const result = await client.rotate(
+    {
+      params: { credential_name: credentialName },
+      query: {},
+      body: {
+        expected_revision: body.expected_revision,
+        ...(body.metadata === undefined ? {} : { metadata: body.metadata }),
+        ...sealed,
+      },
+    },
+    { idempotencyKey: key },
+  );
+  writeAnswer(
+    handleMutationResult(
+      result,
+      credentialCode(group, ROTATE, INDETERMINATE),
+      key,
+    ),
+    key,
+  );
+  return true;
+}
+
+function llmOperationsOf(group: CredentialGroup): typeof llmOperations {
+  assert.ok(group.instanceCopies);
+  return group.operations as typeof llmOperations;
+}
 
 async function list(group: CredentialGroup, command: Command): Promise<void> {
   const options = command.optsWithGlobals();
@@ -85,6 +201,7 @@ async function list(group: CredentialGroup, command: Command): Promise<void> {
       include_archived: options.includeArchived ? QUERY_TRUE : QUERY_FALSE,
       limit,
       ...(options.cursor !== undefined ? { cursor: options.cursor } : {}),
+      ...holderQuery(group, options),
     },
     body: null,
   });
@@ -98,11 +215,12 @@ async function get(
   credentialName: string,
   command: Command,
 ): Promise<void> {
-  const { endpoint, token } = resolveClient(command.optsWithGlobals());
+  const options = command.optsWithGlobals();
+  const { endpoint, token } = resolveClient(options);
   requireToken(token, credentialCode(group, GET, TOKEN_REQUIRED));
   const result = await httpClient(group.operations, endpoint, token).get({
     params: { credential_name: credentialName },
-    query: {},
+    query: holderQuery(group, options),
     body: null,
   });
   process.stdout.write(
@@ -149,12 +267,19 @@ async function platforms(
 
 async function create(group: CredentialGroup, command: Command): Promise<void> {
   const options = command.optsWithGlobals();
-  const { endpoint, token } = resolveClient(options);
-  requireToken(token, credentialCode(group, CREATE, TOKEN_REQUIRED));
   const key = resolveKey(options);
   const body = readJsonFileAs(options.file, credentialCreateSchema, true);
+  const holder: string | undefined = options.holder;
+  if (holder !== undefined && (await createLocal(group, holder, body, key)))
+    return;
+  const { endpoint, token } = resolveClient(options);
+  requireToken(token, credentialCode(group, CREATE, TOKEN_REQUIRED));
   const result = await httpClient(group.operations, endpoint, token).create(
-    { params: {}, query: {}, body },
+    {
+      params: {},
+      query: {},
+      body: holder === undefined ? body : { ...body, holders: [holder] },
+    },
     { idempotencyKey: key },
   );
   const data = handleMutationResult(
@@ -173,12 +298,22 @@ async function rotate(
   command: Command,
 ): Promise<void> {
   const options = command.optsWithGlobals();
-  const { endpoint, token } = resolveClient(options);
-  requireToken(token, credentialCode(group, ROTATE, TOKEN_REQUIRED));
   const key = resolveKey(options);
   const body = readJsonFileAs(options.file, credentialRotateBodySchema, true);
+  const holder: string | undefined = options.holder;
+  if (
+    holder !== undefined &&
+    (await rotateLocal(group, credentialName, holder, body, key))
+  )
+    return;
+  const { endpoint, token } = resolveClient(options);
+  requireToken(token, credentialCode(group, ROTATE, TOKEN_REQUIRED));
   const result = await httpClient(group.operations, endpoint, token).rotate(
-    { params: { credential_name: credentialName }, query: {}, body },
+    {
+      params: { credential_name: credentialName },
+      query: holderQuery(group, options),
+      body,
+    },
     { idempotencyKey: key },
   );
   const data = handleMutationResult(
@@ -209,7 +344,11 @@ async function updateMetadata(
     endpoint,
     token,
   ).update_metadata(
-    { params: { credential_name: credentialName }, query: {}, body },
+    {
+      params: { credential_name: credentialName },
+      query: holderQuery(group, options),
+      body,
+    },
     { idempotencyKey: key },
   );
   const data = handleMutationResult(
@@ -239,7 +378,7 @@ async function revoke(
   const result = await httpClient(group.operations, endpoint, token).revoke(
     {
       params: { credential_name: credentialName, revision: rev },
-      query: {},
+      query: holderQuery(group, options),
       body: null,
     },
     { idempotencyKey: key },
@@ -264,7 +403,11 @@ async function archive(
   requireToken(token, credentialCode(group, ARCHIVE, TOKEN_REQUIRED));
   const key = resolveKey(options);
   const result = await httpClient(group.operations, endpoint, token).archive(
-    { params: { credential_name: credentialName }, query: {}, body: null },
+    {
+      params: { credential_name: credentialName },
+      query: holderQuery(group, options),
+      body: null,
+    },
     { idempotencyKey: key },
   );
   const data = handleMutationResult(
@@ -292,6 +435,24 @@ async function check(group: CredentialGroup, command: Command): Promise<void> {
   );
 }
 
+function withHolder(
+  group: CredentialGroup,
+  command: Command,
+  description: string,
+): Command {
+  if (!group.instanceCopies) return command;
+  return command.option(
+    "--holder <name>",
+    description,
+    singleUse(HOLDER_OPTION),
+  );
+}
+
+const HOLDER_READ =
+  "Holder of the credential copy: server or an instance name (default server)";
+const HOLDER_WRITE =
+  "Instance that holds the copy; with its instance file the CLI seals the secret locally";
+
 export function addCredentialCommand(
   program: Command,
   group: CredentialGroup,
@@ -312,9 +473,11 @@ export function addCredentialCommand(
     .command(CREDENTIAL_GROUP)
     .description("Credential commands");
   credential.action(() => credential.help());
-  credential
-    .command(LIST)
-    .description("List credentials as JSON")
+  withHolder(
+    group,
+    credential.command(LIST).description("List credentials as JSON"),
+    "Filter by holder: server or an instance name",
+  )
     .option(
       "--platform <platform>",
       "Filter by platform",
@@ -328,9 +491,11 @@ export function addCredentialCommand(
       singleUse("--cursor"),
     )
     .action((_options, command: Command) => list(group, command));
-  credential
-    .command(GET)
-    .description("Get a credential as JSON")
+  withHolder(
+    group,
+    credential.command(GET).description("Get a credential as JSON"),
+    HOLDER_READ,
+  )
     .argument("<credential-name>", "Credential name")
     .action((name: string, _options, command: Command) =>
       get(group, name, command),
@@ -347,9 +512,11 @@ export function addCredentialCommand(
     .description("List credential platforms as JSON")
     .action((_options, command: Command) => platforms(group, command));
   addFileBodyHelp(
-    credential
-      .command(CREATE)
-      .description("Create a credential as JSON")
+    withHolder(
+      group,
+      credential.command(CREATE).description("Create a credential as JSON"),
+      HOLDER_WRITE,
+    )
       .requiredOption(
         "--file <path>",
         "Private credential JSON file",
@@ -367,9 +534,11 @@ export function addCredentialCommand(
     },
   ).action((_options, command: Command) => create(group, command));
   addFileBodyHelp(
-    credential
-      .command(ROTATE)
-      .description("Rotate a credential as JSON")
+    withHolder(
+      group,
+      credential.command(ROTATE).description("Rotate a credential as JSON"),
+      HOLDER_WRITE,
+    )
       .argument("<credential-name>", "Credential name")
       .requiredOption(
         "--file <path>",
@@ -390,9 +559,13 @@ export function addCredentialCommand(
     rotate(group, name, command),
   );
   addFileBodyHelp(
-    credential
-      .command(UPDATE_METADATA)
-      .description("Update credential metadata as JSON")
+    withHolder(
+      group,
+      credential
+        .command(UPDATE_METADATA)
+        .description("Update credential metadata as JSON"),
+      HOLDER_READ,
+    )
       .argument("<credential-name>", "Credential name")
       .requiredOption(
         "--file <path>",
@@ -411,9 +584,13 @@ export function addCredentialCommand(
   ).action((name: string, _options, command: Command) =>
     updateMetadata(group, name, command),
   );
-  credential
-    .command(REVOKE)
-    .description("Revoke a credential revision as JSON")
+  withHolder(
+    group,
+    credential
+      .command(REVOKE)
+      .description("Revoke a credential revision as JSON"),
+    HOLDER_READ,
+  )
     .argument("<credential-name>", "Credential name")
     .argument("<revision>", "Revision number")
     .option(
@@ -424,9 +601,11 @@ export function addCredentialCommand(
     .action((name: string, revision: string, _options, command: Command) =>
       revoke(group, name, revision, command),
     );
-  credential
-    .command(ARCHIVE)
-    .description("Archive a credential as JSON")
+  withHolder(
+    group,
+    credential.command(ARCHIVE).description("Archive a credential as JSON"),
+    HOLDER_READ,
+  )
     .argument("<credential-name>", "Credential name")
     .option(
       "--idempotency-key <key>",

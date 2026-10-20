@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { identitySchema } from "../kernel/identity.ts";
+import { sealedObjectSchema, type SealedObject } from "../kernel/hpke.ts";
 import { canonicalJSON } from "../kernel/json.ts";
 import type { CredentialStore } from "@earendil-works/pi-ai";
 import type {
@@ -63,22 +64,61 @@ export const piCredentialSchema = z
       EXECUTION_CREDENTIAL_MAX_BYTES
     );
   }, "The normalized credential must contain well-formed Unicode and fit the serialized byte budget.");
+export { SERVER_HOLDER } from "../kernel/holder.ts";
+export const CREDENTIAL_SEAL_INFO = "kanthord/credential/v1";
+export const SEALED_PLAINTEXT_MAX_BYTES = 32768;
+export const SEALED_CIPHERTEXT_MAX_BYTES = 32784;
+export const credentialSealedToSchema = z
+  .string()
+  .regex(/^SHA256:[A-Za-z0-9+/]{43}$/);
+export type CredentialSealAad = {
+  name: string;
+  platform: string;
+  holder: string;
+  sealed_to: string;
+};
+export function credentialSealAad(value: CredentialSealAad): string {
+  return canonicalJSON({
+    name: value.name,
+    platform: value.platform,
+    holder: value.holder,
+    sealed_to: value.sealed_to,
+  });
+}
+const handoverItemSchema = z.strictObject({
+  credential_id: identitySchema("credential"),
+  provider_id: z.string().min(1),
+  credential: piCredentialSchema,
+});
+export const sealedHandoverItemSchema = z.strictObject({
+  credential_id: identitySchema("credential"),
+  provider_id: z.string().min(1),
+  name: z.string().min(1),
+  platform: z.string().min(1),
+  sealed: sealedObjectSchema,
+});
+export type SealedHandoverItem = z.infer<typeof sealedHandoverItemSchema>;
 export const handoverItemsSchema = z.strictObject({
-  items: z.array(
-    z.strictObject({
-      credential_id: identitySchema("credential"),
-      provider_id: z.string().min(1),
-      credential: piCredentialSchema,
-    }),
-  ),
+  items: z.array(handoverItemSchema),
 });
 export const refreshReportSchema = z.strictObject({
   credential_id: identitySchema("credential"),
   digest: z.string().regex(SHA256_HEX_PATTERN),
   credential: piCredentialSchema,
 });
+export const sealedRefreshReportSchema = z.strictObject({
+  credential_id: identitySchema("credential"),
+  digest: z.string().regex(SHA256_HEX_PATTERN),
+  sealed: sealedObjectSchema,
+});
+export const wireReportSchema = z.union([
+  refreshReportSchema,
+  sealedRefreshReportSchema,
+]);
 export type HandoverItems = z.infer<typeof handoverItemsSchema>;
 export type RefreshReport = z.infer<typeof refreshReportSchema>;
+export type SealedRefreshReport = z.infer<typeof sealedRefreshReportSchema>;
+export type WireReport = z.infer<typeof wireReportSchema>;
 
 export type CustodyExecution = {
   execution_id: string;
@@ -439,6 +479,11 @@ export type BindingsNamingFn = (
   tx: Transaction,
   credentialName: string,
 ) => BindingNaming[];
+export type BindingsListingInstanceFn = (
+  tx: Transaction,
+  instanceName: string,
+  credentialName: string,
+) => BindingRevision[];
 export type InboundsNamingFn = (
   tx: Transaction,
   credentialName: string,
@@ -493,7 +538,8 @@ export const sshKeySecretSchema = z.strictObject({
       );
     }),
 });
-export const handoverPayloadSchema = handoverItemsSchema.extend({
+export const handoverPayloadSchema = z.strictObject({
+  items: z.array(z.union([handoverItemSchema, sealedHandoverItemSchema])),
   ssh_identities: z.array(
     z.strictObject({
       binding_id: identitySchema("binding"),
@@ -503,6 +549,9 @@ export const handoverPayloadSchema = handoverItemsSchema.extend({
   ),
 });
 export type HandoverPayload = z.infer<typeof handoverPayloadSchema>;
+export const plainHandoverPayloadSchema = handoverItemsSchema.extend({
+  ssh_identities: handoverPayloadSchema.shape.ssh_identities,
+});
 export const HandoverPlacement = {
   Server: "server",
   Container: "container",
@@ -510,7 +559,10 @@ export const HandoverPlacement = {
 } as const;
 export type HandoverPlacement =
   (typeof HandoverPlacement)[keyof typeof HandoverPlacement];
-export const HolderRefusal = { ServerHeld: "server_held" } as const;
+export const HolderRefusal = {
+  ServerHeld: "server_held",
+  HeldElsewhere: "held_elsewhere",
+} as const;
 export type HolderRefusal = (typeof HolderRefusal)[keyof typeof HolderRefusal];
 export type HandoverSshIdentity = HandoverPayload["ssh_identities"][number];
 export const SSH_SIGN_FLAGS_MAX = 0xffffffff;
@@ -565,12 +617,14 @@ export type RevisionChange =
 export type MetadataRevision = {
   name: string;
   platform: string;
+  holder: string;
   change: RevisionChange;
   current: Record<string, unknown> | null;
   next: Record<string, unknown> | null;
 };
 export type CredentialPlatformSet = {
   platforms: CredentialPlatforms;
+  instance_copies?: boolean;
   check_metadata?: (tx: Transaction, revision: MetadataRevision) => void;
 };
 
@@ -623,6 +677,9 @@ export const credentialRevisionAnswerSchema = z.strictObject({
 export const credentialAnswerSchema = z.strictObject({
   name: z.string(),
   platform: z.string(),
+  holder: z.string(),
+  sealed_to: z.string().nullable(),
+  sealed_current: z.boolean(),
   revisions: z.array(credentialRevisionAnswerSchema),
 });
 export const credentialListAnswerSchema = z.strictObject({
@@ -694,19 +751,57 @@ export type GeneratedRotate = {
 
 export type CredentialHold = { available_at: number; strikes: number };
 
-export type CredentialHoldItem = CredentialHold & { credential: string };
+export type CredentialHoldItem = CredentialHold & {
+  credential: string;
+  holder: string;
+};
 
 export interface CredentialHolds {
-  holdOf(tx: Transaction, name: string): CredentialHold | null;
+  holdOf(tx: Transaction, name: string, holder: string): CredentialHold | null;
   hold(
     tx: Transaction,
     name: string,
+    holder: string,
     availableAt: number,
     strikes: number,
   ): void;
-  release(tx: Transaction, name: string): boolean;
+  release(tx: Transaction, name: string, holder: string): boolean;
   listHolds(tx: Transaction): CredentialHoldItem[];
 }
+
+export type InstanceKey = {
+  name: string;
+  public_key: string;
+  fingerprint: string;
+};
+export interface InstanceKeys {
+  keyOf(tx: Transaction, name: string): InstanceKey | null;
+  nameOf(tx: Transaction, instanceId: string): string | null;
+}
+export type SealedCopy = {
+  holder: string;
+  sealed: SealedObject;
+  sealed_to: string;
+};
+export type CredentialCopy = { holder: string; secret: unknown } | SealedCopy;
+export type CredentialEntry = {
+  name: string;
+  platform: string;
+  metadata: unknown;
+  copies: CredentialCopy[];
+};
+export type SealedRotateBody = {
+  expected_revision: number;
+  sealed: SealedObject;
+  sealed_to: string;
+  metadata?: unknown;
+};
+export type HeldCopy = {
+  name: string;
+  revision: number;
+  platform: string;
+  sealed_current: boolean;
+};
 
 export interface CredentialRecords {
   create(
@@ -715,15 +810,37 @@ export interface CredentialRecords {
     body: CredentialCreate,
     humanIdentity: string | undefined,
   ): CredentialAnswer;
+  createCopies(
+    tx: Transaction,
+    set: CredentialPlatformSet,
+    entry: CredentialEntry,
+    humanIdentity: string | undefined,
+  ): CredentialAnswer[];
+  sealCopies(
+    set: CredentialPlatformSet,
+    input: {
+      name: string;
+      platform: string;
+      secret: unknown;
+      keys: readonly InstanceKey[];
+    },
+  ): Promise<SealedCopy[]>;
   list(
     tx: Transaction,
     set: CredentialPlatformSet,
-    query: CredentialListQuery,
+    query: CredentialListQuery & { holder?: string },
   ): CredentialListAnswer;
+  copyPlatform(
+    tx: Transaction,
+    set: CredentialPlatformSet,
+    credentialName: string,
+    holder: string,
+  ): string;
   get(
     tx: Transaction,
     set: CredentialPlatformSet,
     credentialName: string,
+    holder?: string,
   ): CredentialAnswer;
   rotate(
     tx: Transaction,
@@ -732,23 +849,34 @@ export interface CredentialRecords {
     body: CredentialRotateBody,
     humanIdentity: string | undefined,
   ): CredentialAnswer;
+  rotateSealed(
+    tx: Transaction,
+    set: CredentialPlatformSet,
+    credentialName: string,
+    holder: string,
+    body: SealedRotateBody,
+    humanIdentity: string | undefined,
+  ): CredentialAnswer;
   updateMetadata(
     tx: Transaction,
     set: CredentialPlatformSet,
     credentialName: string,
     body: CredentialUpdateMetadataBody,
     humanIdentity: string | undefined,
+    holder?: string,
   ): CredentialAnswer;
   revoke(
     tx: Transaction,
     set: CredentialPlatformSet,
     credentialName: string,
     revision: number,
+    holder?: string,
   ): CredentialAnswer;
   archive(
     tx: Transaction,
     set: CredentialPlatformSet,
     credentialName: string,
+    holder?: string,
   ): CredentialAnswer;
   requireAvailableName(tx: Transaction, name: string): void;
   createLoginRevision(
@@ -799,5 +927,8 @@ export interface CredentialRecords {
   credentialMetadata(
     tx: Transaction,
     credentialName: string,
+    holder?: string,
   ): CredentialMetadata | null;
+  copiesMetadata(tx: Transaction, credentialName: string): CredentialMetadata[];
+  copyHeld(tx: Transaction, credentialName: string, holder: string): boolean;
 }

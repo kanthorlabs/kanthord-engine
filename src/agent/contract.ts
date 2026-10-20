@@ -10,6 +10,7 @@ import {
   type Operation,
 } from "../kernel/operation.ts";
 import type { Transaction } from "../kernel/store.ts";
+import { SERVER_HOLDER } from "../custody/contract.ts";
 import {
   AdvancingProviderFailure,
   ChainLevelName,
@@ -211,7 +212,19 @@ export type AgentDependentBinding = {
   binding_id: string;
   worker_name: string;
   entry: AgentEntry | null;
+  holders: readonly string[];
 };
+
+export type HolderScope = {
+  holders: readonly string[];
+  claimant: string | null;
+};
+
+export type CopyHeldFn = (
+  tx: Transaction,
+  credentialName: string,
+  holder: string,
+) => boolean;
 
 export type AgentView = {
   defaults: DefaultConfiguration | null;
@@ -372,6 +385,7 @@ export const agentEnablementSchema = z.strictObject({
 
 export const agentCooldownSchema = z.strictObject({
   credential: z.string().min(1),
+  holder: z.string().min(1),
   strikes: z.number().int().positive(),
   available_at: z.number().int().nonnegative(),
 });
@@ -720,7 +734,7 @@ export const agentOperations = {
     }),
     output: z.strictObject({ items: z.array(agentCooldownSchema) }),
     description:
-      "List the credentials that hold a cooldown, live and expired, ordered by credential name.",
+      "List the credential copies that hold a cooldown, live and expired, ordered by credential name and holder.",
   },
   "cooldown.clear": {
     ...enablementOperation,
@@ -732,12 +746,14 @@ export const agentOperations = {
     status: HttpStatus.NoContent,
     input: z.strictObject({
       params: z.strictObject({ credential: z.string().min(1) }),
-      query: emptyFields,
+      query: z.strictObject({
+        holder: z.string().min(1).default(SERVER_HOLDER),
+      }),
       body: z.null(),
     }),
     output: z.null(),
     description:
-      "Clear the cooldown of one credential so that the next claim can select its chain entries again.",
+      "Clear the cooldown of one credential copy so that the next claim can select its chain entries again. The holder defaults to server.",
   },
   "prompt.put": {
     ...enablementMutation,

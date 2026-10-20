@@ -4,8 +4,8 @@ pathItem:
     operationId: agent.cooldown.list
     tags:
       - agent
-    description: List the credentials that hold a cooldown, live and expired,
-      ordered by credential name.
+    description: List the credential copies that hold a cooldown, live and expired,
+      ordered by credential name and holder.
     x-access-policy: human
     x-timeout-ms: 30000
     x-mutation: false
@@ -71,6 +71,9 @@ components:
               credential:
                 type: string
                 minLength: 1
+              holder:
+                type: string
+                minLength: 1
               strikes:
                 type: integer
                 exclusiveMinimum: 0
@@ -81,6 +84,7 @@ components:
                 maximum: 9007199254740991
             required:
               - credential
+              - holder
               - strikes
               - available_at
             additionalProperties: false

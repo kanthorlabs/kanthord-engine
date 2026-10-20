@@ -53,7 +53,6 @@ const BASE64URL = "base64url";
 const UTF8 = "utf8";
 const ZERO_BYTE = 0;
 const NO_VERSION = 0;
-const NO_BINDINGS = 0;
 const FIRST_ITEM = 0;
 const QUERY_TRUE = "true";
 const CURSOR_PATTERN = /^[A-Za-z0-9_-]+$/;
@@ -71,6 +70,12 @@ export interface InstanceDependencies {
     tx: Transaction,
     runtimeIdentity: string,
   ) => { execution_id: string } | null;
+  archiveHeld: (tx: Transaction, holder: string, now: number) => void;
+  holderMismatch: (
+    tx: Transaction,
+    instanceName: string,
+    bindings: readonly ListedBinding[],
+  ) => boolean;
 }
 
 interface CurrentConnection {
@@ -346,6 +351,7 @@ export class WorkerInstances implements WorkerInstanceLookups {
     const now = Date.now();
     endInstance(tx, live.id, now);
     const ended = endOfInstances(tx, revisions, now);
+    this.dependencies.archiveHeld(tx, name, now);
     const record = readInstanceById(tx, live.id);
     assert.ok(record);
     return { record, ended };
@@ -373,7 +379,11 @@ export class WorkerInstances implements WorkerInstanceLookups {
         ...record,
         connection: this.connectionOf(record.id),
         binding_count: bindings.length,
-        holder_mismatch: bindings.length > NO_BINDINGS,
+        holder_mismatch: this.dependencies.holderMismatch(
+          tx,
+          record.name,
+          bindings,
+        ),
       };
     });
     return {

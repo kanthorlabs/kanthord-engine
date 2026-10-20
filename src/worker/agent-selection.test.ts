@@ -54,8 +54,10 @@ function choice(
           _tx: Transaction,
           agentName: string,
           entry: WorkerEntry | null,
+          scope: { holders: readonly string[]; claimant: string | null },
         ) => {
           assert.deepEqual(entry, agentName === SWE ? tuning : null);
+          assert.deepEqual(scope, { holders: ["server"], claimant: "server" });
           return results[agentName]!;
         },
       } as never,
@@ -63,6 +65,7 @@ function choice(
     { declarationOf: twoAgentDeclarationOf },
     tx,
     "binding",
+    "server",
   );
 }
 
@@ -112,4 +115,43 @@ test("agentSelectionsAt resolves each pin against the entry of its agent in the 
     [RE, ENABLEMENT, null, 0],
   ]);
   assert.deepEqual(agentSelectionsAt(dependencies, tx, BINDING, []), []);
+});
+
+test("the agent choice of a worker placement binding checks every listed instance and reads the copy of the claimant", () => {
+  const RELAY_A = "relay-a";
+  const scopes: unknown[] = [];
+  const answer = agentChoice(
+    {
+      workerBindingRowOf: () =>
+        ({
+          worker_name: "coder@1",
+          placement: "worker",
+          worker_instances: [RELAY_A, "relay-b"],
+          entries: [],
+        }) as never,
+      agentConfiguration: {
+        selectAgent: (
+          _tx: Transaction,
+          _agentName: string,
+          _entry: WorkerEntry | null,
+          scope: { holders: readonly string[]; claimant: string | null },
+        ) => {
+          scopes.push(scope);
+          return { kind: "invalid" };
+        },
+      } as never,
+    },
+    { declarationOf: twoAgentDeclarationOf },
+    tx,
+    BINDING,
+    RELAY_A,
+  );
+  assert.deepEqual(scopes, [
+    { holders: [RELAY_A, "relay-b"], claimant: RELAY_A },
+  ]);
+  assert.deepEqual(answer, {
+    kind: AgentChoiceKind.Selected,
+    selections: [],
+    pins: [],
+  });
 });

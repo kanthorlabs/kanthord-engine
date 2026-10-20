@@ -15,6 +15,7 @@ import {
 import {
   CUSTODY_SERVICE_NAME,
   SecretShape,
+  SERVER_HOLDER,
   type CredentialMetadataFn,
   type CredentialPlatform,
   type CredentialPlatformSet,
@@ -43,7 +44,11 @@ import {
   type Grant,
 } from "./contract.ts";
 import type { ExecutionClaim } from "../kernel/operation.ts";
-import { EXECUTION_CREDENTIAL_MAX_BYTES } from "./contract.ts";
+import {
+  EXECUTION_CREDENTIAL_MAX_BYTES,
+  type InstanceKey,
+} from "./contract.ts";
+import { generateX25519KeyPair, keyFingerprint } from "../kernel/hpke.ts";
 import { INTAKE_SERVICE_NAME } from "../intake/contract.ts";
 
 const TestPlatform = {
@@ -212,6 +217,7 @@ function fixture(
     authorization?: Dependencies["authorization"];
     missionAuthorization?: Dependencies["missionAuthorization"];
     executions?: Dependencies["executions"];
+    instanceKeys?: Dependencies["instanceKeys"];
   } = {},
 ) {
   const store = new Store(IN_MEMORY_DATABASE);
@@ -249,6 +255,7 @@ function fixture(
     bindingsNaming: collaborations.bindingsNaming ?? (() => []),
     inboundsNaming: collaborations.inboundsNaming ?? (() => []),
     intakeServiceName: INTAKE_SERVICE_NAME,
+    instanceKeys: collaborations.instanceKeys,
   });
   let lastTransaction: Transaction | undefined;
   const commit = <T>(write: (tx: Transaction) => T): T =>
@@ -417,23 +424,29 @@ test("a hold lives on revision 1 and survives a rotation", () => {
     const inTransaction = <T>(read: (tx: Transaction) => T): T =>
       f.store.transaction(read);
     assert.equal(
-      inTransaction((tx) => holds.holdOf(tx, "github")),
+      inTransaction((tx) => holds.holdOf(tx, "github", SERVER_HOLDER)),
       null,
     );
     assert.equal(
-      inTransaction((tx) => holds.release(tx, "github")),
+      inTransaction((tx) => holds.release(tx, "github", SERVER_HOLDER)),
       false,
     );
     inTransaction((tx) => {
-      holds.hold(tx, "github", HOLD_AVAILABLE_AT, HOLD_STRIKES);
-      holds.hold(tx, "anthropic", OTHER_HOLD_AVAILABLE_AT, FIRST_REVISION);
+      holds.hold(tx, "github", SERVER_HOLDER, HOLD_AVAILABLE_AT, HOLD_STRIKES);
+      holds.hold(
+        tx,
+        "anthropic",
+        SERVER_HOLDER,
+        OTHER_HOLD_AVAILABLE_AT,
+        FIRST_REVISION,
+      );
     });
     f.rotate("github", {
       expected_revision: FIRST_REVISION,
       secret: apiSecret,
     });
     assert.deepEqual(
-      inTransaction((tx) => holds.holdOf(tx, "github")),
+      inTransaction((tx) => holds.holdOf(tx, "github", SERVER_HOLDER)),
       { available_at: HOLD_AVAILABLE_AT, strikes: HOLD_STRIKES },
     );
     assert.deepEqual(
@@ -457,26 +470,28 @@ test("a hold lives on revision 1 and survives a rotation", () => {
       [
         {
           credential: "anthropic",
+          holder: SERVER_HOLDER,
           strikes: FIRST_REVISION,
           available_at: OTHER_HOLD_AVAILABLE_AT,
         },
         {
           credential: "github",
+          holder: SERVER_HOLDER,
           strikes: HOLD_STRIKES,
           available_at: HOLD_AVAILABLE_AT,
         },
       ],
     );
     assert.equal(
-      inTransaction((tx) => holds.release(tx, "github")),
+      inTransaction((tx) => holds.release(tx, "github", SERVER_HOLDER)),
       true,
     );
     assert.equal(
-      inTransaction((tx) => holds.release(tx, "github")),
+      inTransaction((tx) => holds.release(tx, "github", SERVER_HOLDER)),
       false,
     );
     assert.equal(
-      inTransaction((tx) => holds.holdOf(tx, "github")),
+      inTransaction((tx) => holds.holdOf(tx, "github", SERVER_HOLDER)),
       null,
     );
     assert.deepEqual(
@@ -486,7 +501,9 @@ test("a hold lives on revision 1 and survives a rotation", () => {
       ["anthropic"],
     );
     assert.throws(() =>
-      inTransaction((tx) => holds.hold(tx, "missing", HOLD_AVAILABLE_AT, 1)),
+      inTransaction((tx) =>
+        holds.hold(tx, "missing", SERVER_HOLDER, HOLD_AVAILABLE_AT, 1),
+      ),
     );
   } finally {
     f.store.close();
@@ -500,7 +517,7 @@ test("get orders revisions and list paginates sorted names with filters", () => 
     const first = f.get("github") as { revisions: { id: string }[] };
     f.store.database
       .prepare(
-        "INSERT INTO credential (id, name, platform, revision, nonce, ciphertext, metadata, created_at, ended_at) SELECT ?, name, platform, ?, nonce, ciphertext, metadata, created_at + ?, ended_at FROM credential WHERE id = ?",
+        "INSERT INTO credential (id, name, platform, holder, revision, nonce, ciphertext, metadata, created_at, ended_at) SELECT ?, name, platform, holder, ?, nonce, ciphertext, metadata, created_at + ?, ended_at FROM credential WHERE id = ?",
       )
       .run("credential_second", 2, 1, first.revisions[0]!.id);
     const got = f.get("github") as { revisions: { id: string }[] };
@@ -2144,7 +2161,7 @@ test("a generated rotate refuses a stale revision, replaces a legacy secret and 
   const legacy = encrypt(key, id, TestPlatform.Generated, {});
   f.store.database
     .prepare(
-      "INSERT INTO credential (id, name, platform, revision, nonce, ciphertext, metadata, created_at, ended_at) VALUES (?, ?, ?, 1, ?, ?, ?, ?, NULL)",
+      "INSERT INTO credential (id, name, platform, holder, revision, nonce, ciphertext, metadata, created_at, ended_at) VALUES (?, ?, ?, 'server', 1, ?, ?, ?, ?, NULL)",
     )
     .run(
       id,
@@ -2202,4 +2219,162 @@ test("a generated rotate refuses a stale revision, replaces a legacy secret and 
     HttpStatus.NotFound,
     CREDENTIAL_NOT_FOUND_CODE,
   );
+});
+
+const ARCHIVED_COPIES = 1;
+
+test("instance copies share a name and a platform, keep separate holds and archiveHeld ends only the copies of one holder", async () => {
+  const keys = new Map<string, InstanceKey>();
+  for (const name of ["relay-a", "relay-b"]) {
+    const pair = await generateX25519KeyPair();
+    keys.set(name, {
+      name,
+      public_key: pair.public_key.toString("base64url"),
+      fingerprint: keyFingerprint(pair.public_key),
+    });
+  }
+  const f = fixture({
+    instanceKeys: {
+      keyOf: (_tx, name) => keys.get(name) ?? null,
+      nameOf: () => null,
+    },
+  });
+  const SEALED_SET = { ...TEST_SET, instance_copies: true };
+  try {
+    const sealed = await f.component.sealCopies(SEALED_SET, {
+      name: "github",
+      platform: TestPlatform.Key,
+      secret: { key: "copy-secret" },
+      keys: [...keys.values()],
+    });
+    const copies = f.store.transaction((tx) =>
+      f.component.createCopies(
+        tx,
+        SEALED_SET,
+        {
+          name: "github",
+          platform: TestPlatform.Key,
+          metadata: null,
+          copies: sealed,
+        },
+        HUMAN_ACCOUNT_ID,
+      ),
+    );
+    assert.deepEqual(
+      copies.map(({ holder, sealed_current }) => [holder, sealed_current]),
+      [
+        ["relay-a", true],
+        ["relay-b", true],
+      ],
+    );
+    fails(
+      () =>
+        f.store.transaction((tx) =>
+          f.component.createCopies(
+            tx,
+            TEST_SET,
+            {
+              name: "other",
+              platform: TestPlatform.Key,
+              metadata: null,
+              copies: [sealed[0]!],
+            },
+            HUMAN_ACCOUNT_ID,
+          ),
+        ),
+      HttpStatus.BadRequest,
+      "credential.sealed.invalid",
+    );
+    fails(
+      () =>
+        f.create({
+          name: "github",
+          platform: TestPlatform.OtherKey,
+          metadata: null,
+          secret: { key: "other" },
+        }),
+      HttpStatus.Conflict,
+      "credential.name.platform_conflict",
+    );
+    assert.equal(
+      (
+        f.create({
+          name: "github",
+          platform: TestPlatform.Key,
+          metadata: null,
+          secret: { key: "server" },
+        }) as CredentialAnswer
+      ).holder,
+      SERVER_HOLDER,
+    );
+    const { holds } = f.component;
+    f.store.transaction((tx) =>
+      holds.hold(tx, "github", "relay-a", HOLD_AVAILABLE_AT, HOLD_STRIKES),
+    );
+    assert.equal(
+      f.store.transaction((tx) => holds.holdOf(tx, "github", SERVER_HOLDER)),
+      null,
+    );
+    assert.equal(
+      f.store.transaction((tx) => holds.holdOf(tx, "github", "relay-a"))
+        ?.strikes,
+      HOLD_STRIKES,
+    );
+    const page = f.list({ limit: 1 }) as {
+      items: CredentialAnswer[];
+      next_cursor: string | null;
+    };
+    assert.deepEqual(
+      page.items.map(({ holder }) => holder),
+      ["relay-a"],
+    );
+    const rest = f.list({ cursor: page.next_cursor }) as {
+      items: CredentialAnswer[];
+    };
+    assert.deepEqual(
+      rest.items.map(({ holder }) => holder),
+      ["relay-b", SERVER_HOLDER],
+    );
+    assert.equal(
+      f.store.transaction((tx) =>
+        f.component.archiveHeld(tx, "relay-a", HOLD_AVAILABLE_AT),
+      ),
+      ARCHIVED_COPIES,
+    );
+    assert.equal(
+      f.store.transaction((tx) =>
+        f.component.copyHeld(tx, "github", "relay-a"),
+      ),
+      false,
+    );
+    assert.equal(
+      f.store.transaction((tx) =>
+        f.component.copyHeld(tx, "github", "relay-b"),
+      ),
+      true,
+    );
+    keys.set("relay-b", {
+      ...keys.get("relay-b")!,
+      fingerprint: "SHA256:" + "A".repeat(43),
+    });
+    assert.equal(
+      f.store.transaction((tx) =>
+        f.component.copyHeld(tx, "github", "relay-b"),
+      ),
+      false,
+    );
+    assert.deepEqual(
+      f.store.transaction((tx) => f.component.heldCopies(tx, "relay-b")),
+      [
+        {
+          name: "github",
+          revision: 1,
+          platform: TestPlatform.Key,
+          sealed_current: false,
+        },
+      ],
+    );
+  } finally {
+    f.store.close();
+  }
 });

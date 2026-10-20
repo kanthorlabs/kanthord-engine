@@ -145,6 +145,15 @@ export function resolveInstanceConfiguration(
   };
 }
 
+export function readNamedInstance(
+  env: NodeJS.ProcessEnv,
+  name: string,
+): InstanceConfiguration | null {
+  if (!instanceNameSchema.safeParse(name).success) return null;
+  const path = instanceFilePath(env, name);
+  return fileExists(path) ? readInstanceFile(path, name) : null;
+}
+
 export function writeInstanceFile(
   env: NodeJS.ProcessEnv,
   configuration: InstanceConfiguration,

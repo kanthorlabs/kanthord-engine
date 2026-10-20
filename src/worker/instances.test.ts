@@ -14,8 +14,10 @@ import {
   instanceConfigurationSchema,
   workerOperations,
   workerTokenPayloadSchema,
+  type WorkerAgentView,
   type WorkerBindingsOf,
 } from "./contract.ts";
+import { AgentErrorCode, type HolderScope } from "../agent/contract.ts";
 import {
   insertRegistration,
   readAllLive,
@@ -65,6 +67,18 @@ const WORKER_CONFIG = {
 
 type Binding = ReturnType<WorkerBindingsOf>[number];
 
+const HOLDER_MISMATCH_VIEW: WorkerAgentView = {
+  defaults: null,
+  effective: null,
+  chain: [],
+  active_position: null,
+  cooling: null,
+  valid: false,
+  issues: [
+    { path: ["placement"], code: AgentErrorCode.CredentialHolderMismatch },
+  ],
+};
+
 function unexpected(): never {
   throw new Error("UNEXPECTED_COLLABORATION");
 }
@@ -108,6 +122,7 @@ function instanceFixture(t: TestContext) {
     { service: WORKER_SERVICE_NAME, migrations: workerMigrations },
   ]);
   const bindings: Binding[] = [];
+  const scopes: HolderScope[] = [];
   const unended = new Map<string, string>();
   const dependencies: Dependencies = {
     config: WORKER_CONFIG,
@@ -171,7 +186,10 @@ function instanceFixture(t: TestContext) {
       selectAgent: unexpected,
       selectionAt: unexpected,
       selectionView: unexpected,
-      agentView: unexpected,
+      agentView: (_tx, _agent, _entry, scope) => {
+        scopes.push(scope);
+        return HOLDER_MISMATCH_VIEW;
+      },
     },
   };
   const service = (): WorkerService => {
@@ -268,6 +286,7 @@ function instanceFixture(t: TestContext) {
   return {
     store,
     bindings,
+    scopes,
     unended,
     invoke,
     refuses,
@@ -738,6 +757,7 @@ test("list pages instances by name with their binding count and holder mismatch"
     ]),
     [["alpha", 1, true]],
   );
+  assert.deepEqual(f.scopes, [{ holders: ["alpha"], claimant: null }]);
   assert.ok(first.next_cursor);
   const second = await f.invoke(
     "instance.list",

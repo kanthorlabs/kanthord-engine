@@ -11,6 +11,7 @@ import {
   sealJSON,
   SealedOpenError,
   SEALED_ALGORITHM,
+  x25519PublicKeyOf,
 } from "./hpke.ts";
 
 const hex = (value: string) => Buffer.from(value, "hex");
@@ -48,6 +49,13 @@ test("the suite derives the RFC 9180 A.1.1 key pairs", async () => {
     Buffer.from(await hpkeSuite.kem.serializePrivateKey(ephemeral.privateKey)),
     A1.skEm,
   );
+});
+
+test("x25519PublicKeyOf derives the RFC 9180 A.1.1 public keys and the key of a generated pair", async () => {
+  assert.deepEqual(x25519PublicKeyOf(A1.skRm), A1.pkRm);
+  assert.deepEqual(x25519PublicKeyOf(A1.skEm), A1.pkEm);
+  const pair = await generateX25519KeyPair();
+  assert.deepEqual(x25519PublicKeyOf(pair.private_key), pair.public_key);
 });
 
 test("the suite seals the RFC 9180 A.1.1 encryption of sequence 0", async () => {

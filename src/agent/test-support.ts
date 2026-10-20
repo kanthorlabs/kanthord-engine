@@ -78,38 +78,38 @@ const NO_ROWS = 0;
 
 function holdTable(tx: Transaction) {
   tx.database.exec(
-    "CREATE TABLE IF NOT EXISTS memory_credential_hold (credential TEXT PRIMARY KEY, available_at INTEGER NOT NULL, strikes INTEGER NOT NULL)",
+    "CREATE TABLE IF NOT EXISTS memory_credential_hold (credential TEXT NOT NULL, holder TEXT NOT NULL, available_at INTEGER NOT NULL, strikes INTEGER NOT NULL, PRIMARY KEY (credential, holder))",
   );
   return tx.database;
 }
 
 export function memoryCredentialHolds(): CredentialHolds {
   return {
-    holdOf: (tx, name) => {
+    holdOf: (tx, name, holder) => {
       const row = holdTable(tx)
         .prepare(
-          "SELECT available_at, strikes FROM memory_credential_hold WHERE credential = ?",
+          "SELECT available_at, strikes FROM memory_credential_hold WHERE credential = ? AND holder = ?",
         )
-        .get(name) as CredentialHold | undefined;
+        .get(name, holder) as CredentialHold | undefined;
       return row === undefined ? null : { ...row };
     },
-    hold: (tx, name, availableAt, strikes) => {
+    hold: (tx, name, holder, availableAt, strikes) => {
       holdTable(tx)
         .prepare(
-          "INSERT OR REPLACE INTO memory_credential_hold (credential, available_at, strikes) VALUES (?, ?, ?)",
+          "INSERT OR REPLACE INTO memory_credential_hold (credential, holder, available_at, strikes) VALUES (?, ?, ?, ?)",
         )
-        .run(name, availableAt, strikes);
+        .run(name, holder, availableAt, strikes);
     },
-    release: (tx, name) =>
+    release: (tx, name, holder) =>
       holdTable(tx)
         .prepare(
-          "DELETE FROM memory_credential_hold WHERE credential = ? AND strikes > ?",
+          "DELETE FROM memory_credential_hold WHERE credential = ? AND holder = ? AND strikes > ?",
         )
-        .run(name, NO_STRIKES).changes > NO_ROWS,
+        .run(name, holder, NO_STRIKES).changes > NO_ROWS,
     listHolds: (tx) =>
       holdTable(tx)
         .prepare(
-          "SELECT credential, available_at, strikes FROM memory_credential_hold WHERE strikes > ? ORDER BY credential",
+          "SELECT credential, holder, available_at, strikes FROM memory_credential_hold WHERE strikes > ? ORDER BY credential, holder",
         )
         .all(NO_STRIKES)
         .map((row) => ({ ...row }) as CredentialHoldItem),

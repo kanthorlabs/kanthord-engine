@@ -52,6 +52,7 @@ import {
   type Connection,
   type ConnectionEntry,
 } from "./instance-exchange.ts";
+import { instanceCopyKey } from "./instance-credential.ts";
 
 const WORKER_STOP_WATCHDOG_MS = 10000;
 const WORKER_STOP_EXIT_FAILURE = 1;
@@ -193,6 +194,7 @@ export class Worker implements Service {
         repository_transport: this.options.repositoryTransport,
         watchdog: armWatchdog,
         refused: (binding) => this.bindingRefused(binding),
+        instance_key: instanceCopyKey(configuration),
       });
       const error = await this.unit.start();
       if (error) throw error;
@@ -527,3 +529,9 @@ export class Worker implements Service {
 export function runWorker(options: WorkerOptions = {}): Promise<Error | null> {
   return new Worker(options).run();
 }
+
+export {
+  instanceCredentialAccess,
+  instanceSecret,
+  type InstanceCredentialAccess,
+} from "./instance-credential.ts";

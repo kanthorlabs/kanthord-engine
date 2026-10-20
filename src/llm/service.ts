@@ -8,12 +8,21 @@ import {
   credentialPlatformList,
   RevisionChange,
   SecretShape,
+  SERVER_HOLDER,
   type AgentProvidersDependentOnFn,
+  type CredentialCopy,
   type CredentialPlatformSet,
   type CredentialRecords,
+  type InstanceKey,
+  type InstanceKeys,
   type MetadataRevision,
 } from "../custody/contract.ts";
-import { IdentityKind } from "../kernel/caller.ts";
+import { sealedObjectSchema, type SealedObject } from "../kernel/hpke.ts";
+import {
+  IdentityKind,
+  isWorkerIdentity,
+  type WorkerIdentity,
+} from "../kernel/caller.ts";
 import {
   background,
   CancellationContext,
@@ -38,6 +47,8 @@ import {
   providerCheckBodySchema,
   type EnablementsDependentOnModelFn,
   type LlmCredentialAnswer,
+  type LlmCredentialCreate,
+  type LlmCredentialRotate,
   type ModelCheckAnswer,
   type ProviderCheckAnswer,
 } from "./contract.ts";
@@ -76,12 +87,19 @@ export interface Dependencies {
   agentProvidersDependentOn: AgentProvidersDependentOnFn;
   enablementsDependentOnModel: EnablementsDependentOnModelFn;
   loadModelRuntime: () => Promise<ModelRuntimeModule>;
+  instanceKeys?: InstanceKeys;
 }
+
+const NO_INSTANCE_KEYS: InstanceKeys = {
+  keyOf: () => null,
+  nameOf: () => null,
+};
 
 const CredentialErrorCode = {
   Invalid: "credential.input.invalid",
   UnsupportedPlatform: "credential.platform.unsupported",
   UnsupportedEntry: "credential.entry.unsupported",
+  SealedInvalid: "credential.sealed.invalid",
 } as const;
 const NO_ROWS = 0;
 
@@ -91,6 +109,30 @@ function invalidInput(): OperationError {
     CredentialErrorCode.Invalid,
     "Invalid input.",
   );
+}
+
+function instanceForbidden(): OperationError {
+  return new OperationError(
+    HttpStatus.Forbidden,
+    LlmErrorCode.InstanceForbidden,
+    "A worker instance acts only on the copies of its own instance.",
+  );
+}
+
+function sealedBody(body: { sealed?: unknown; sealed_to?: string }): {
+  sealed: SealedObject;
+  sealed_to: string;
+} {
+  if (body.sealed === undefined || body.sealed_to === undefined)
+    throw invalidInput();
+  const sealed = sealedObjectSchema.safeParse(body.sealed);
+  if (!sealed.success)
+    throw new OperationError(
+      HttpStatus.BadRequest,
+      CredentialErrorCode.SealedInvalid,
+      "The sealed credential copy is invalid.",
+    );
+  return { sealed: sealed.data, sealed_to: body.sealed_to };
 }
 
 function humanIdentity(caller: CallerContext): string | undefined {
@@ -117,6 +159,7 @@ export class LlmComponent implements Service {
   private readonly enablementsDependentOnModel: EnablementsDependentOnModelFn;
   private readonly loadModelRuntime: () => Promise<ModelRuntimeModule>;
   private readonly platformSet: CredentialPlatformSet;
+  private readonly instanceKeys: InstanceKeys;
 
   constructor(dependencies: Dependencies) {
     registerOAuthFlows();
@@ -134,8 +177,10 @@ export class LlmComponent implements Service {
     this.agentProvidersDependentOn = dependencies.agentProvidersDependentOn;
     this.enablementsDependentOnModel = dependencies.enablementsDependentOnModel;
     this.loadModelRuntime = dependencies.loadModelRuntime;
+    this.instanceKeys = dependencies.instanceKeys ?? NO_INSTANCE_KEYS;
     this.platformSet = {
       platforms: LLM_PLATFORMS,
+      instance_copies: true,
       check_metadata: (tx, revision) => this.checkMetadata(tx, revision),
     };
   }
@@ -145,32 +190,31 @@ export class LlmComponent implements Service {
       credentialPlatformList(LLM_PLATFORMS),
     );
     registry.register(llmOperations.create, (input, caller) =>
-      caller.commit((tx) =>
-        this.records.create(
-          tx,
-          this.platformSet,
-          input.body,
-          humanIdentity(caller),
-        ),
-      ),
+      this.create(input.body, caller),
     );
     registry.register(llmOperations.list, (input, caller) =>
       caller.commit((tx) =>
-        this.records.list(tx, this.platformSet, input.query),
+        this.records.list(tx, this.platformSet, {
+          ...input.query,
+          holder: this.readHolder(tx, caller, input.query.holder),
+        }),
       ),
     );
     registry.register(llmOperations.get, (input, caller) =>
-      caller.commit((tx) => this.get(tx, input.params.credential_name)),
+      caller.commit((tx) =>
+        this.get(
+          tx,
+          input.params.credential_name,
+          this.readHolder(tx, caller, input.query.holder) ?? SERVER_HOLDER,
+        ),
+      ),
     );
     registry.register(llmOperations.rotate, (input, caller) =>
-      caller.commit((tx) =>
-        this.records.rotate(
-          tx,
-          this.platformSet,
-          input.params.credential_name,
-          input.body,
-          humanIdentity(caller),
-        ),
+      this.rotate(
+        input.params.credential_name,
+        input.query,
+        input.body,
+        caller,
       ),
     );
     registry.register(llmOperations.update_metadata, (input, caller) =>
@@ -181,6 +225,7 @@ export class LlmComponent implements Service {
           input.params.credential_name,
           input.body,
           humanIdentity(caller),
+          input.query.holder ?? SERVER_HOLDER,
         ),
       ),
     );
@@ -191,6 +236,7 @@ export class LlmComponent implements Service {
           this.platformSet,
           input.params.credential_name,
           input.params.revision,
+          input.query.holder ?? SERVER_HOLDER,
         ),
       ),
     );
@@ -200,6 +246,7 @@ export class LlmComponent implements Service {
           tx,
           this.platformSet,
           input.params.credential_name,
+          input.query.holder ?? SERVER_HOLDER,
         ),
       ),
     );
@@ -256,8 +303,230 @@ export class LlmComponent implements Service {
     tx: Transaction,
     credentialName: string,
   ): ApprovedModel[] | null {
-    const record = this.records.credentialMetadata(tx, credentialName);
-    return record && approvedModels(record.platform, record.metadata);
+    const lists = this.records
+      .copiesMetadata(tx, credentialName)
+      .map((record) => approvedModels(record.platform, record.metadata));
+    const [first, ...others] = lists;
+    if (!first || others.some((list) => list === null)) return null;
+    return first.filter((model) =>
+      others.every((list) => list!.some(({ id }) => id === model.id)),
+    );
+  }
+
+  private workerHolder(tx: Transaction, identity: WorkerIdentity): string {
+    const holder = this.instanceKeys.nameOf(tx, identity.instanceId);
+    if (holder === null) throw instanceForbidden();
+    return holder;
+  }
+
+  private readHolder(
+    tx: Transaction,
+    caller: CallerContext,
+    requested: string | undefined,
+  ): string | undefined {
+    if (!isWorkerIdentity(caller.identity)) return requested;
+    const own = this.workerHolder(tx, caller.identity);
+    if (requested !== undefined && requested !== own) throw instanceForbidden();
+    return own;
+  }
+
+  private instanceKey(tx: Transaction, holder: string): InstanceKey {
+    const key = this.instanceKeys.keyOf(tx, holder);
+    if (key === null)
+      throw new OperationError(
+        HttpStatus.BadRequest,
+        LlmErrorCode.InstanceUnknown,
+        "The holder names no live worker instance.",
+        { holder },
+      );
+    return key;
+  }
+
+  private create(
+    body: LlmCredentialCreate,
+    caller: CallerContext,
+  ):
+    | typeof llmOperations.create.output._output
+    | Promise<typeof llmOperations.create.output._output> {
+    const { name, platform, metadata } = body;
+    const identity = caller.identity;
+    if (isWorkerIdentity(identity)) {
+      if (
+        body.secret !== undefined ||
+        body.holders !== undefined ||
+        body.holder === undefined
+      )
+        throw invalidInput();
+      const holder = body.holder;
+      const copy = { holder, ...sealedBody(body) };
+      return caller.commit((tx) => {
+        if (this.workerHolder(tx, identity) !== holder)
+          throw instanceForbidden();
+        const [answer] = this.records.createCopies(
+          tx,
+          this.platformSet,
+          { name, platform, metadata, copies: [copy] },
+          undefined,
+        );
+        return answer!;
+      });
+    }
+    if (
+      body.secret === undefined ||
+      body.holder !== undefined ||
+      body.sealed !== undefined ||
+      body.sealed_to !== undefined
+    )
+      throw invalidInput();
+    const holders = body.holders ?? [SERVER_HOLDER];
+    if (new Set(holders).size !== holders.length) throw invalidInput();
+    if (holders.every((holder) => holder === SERVER_HOLDER))
+      return this.commitCopies(
+        body,
+        holders.map((holder) => ({ holder, secret: body.secret })),
+        caller,
+      );
+    return this.createSealed(body, body.secret, holders, caller);
+  }
+
+  private async createSealed(
+    body: LlmCredentialCreate,
+    secret: unknown,
+    holders: string[],
+    caller: CallerContext,
+  ): Promise<typeof llmOperations.create.output._output> {
+    const { name, platform } = body;
+    const instances = holders.filter((holder) => holder !== SERVER_HOLDER);
+    const keys = this.store.transaction((tx) =>
+      instances.map((holder) => this.instanceKey(tx, holder)),
+    );
+    const sealed = await this.records.sealCopies(this.platformSet, {
+      name,
+      platform,
+      secret,
+      keys,
+    });
+    throwIfCancelled(caller.context);
+    const copies: CredentialCopy[] = holders.map(
+      (holder) =>
+        sealed.find((copy) => copy.holder === holder) ?? { holder, secret },
+    );
+    return this.commitCopies(body, copies, caller);
+  }
+
+  private commitCopies(
+    body: LlmCredentialCreate,
+    copies: CredentialCopy[],
+    caller: CallerContext,
+  ): typeof llmOperations.create.output._output {
+    const { name, platform, metadata } = body;
+    return caller.commit((tx) => {
+      for (const copy of copies)
+        if (copy.holder !== SERVER_HOLDER) this.instanceKey(tx, copy.holder);
+      const [answer] = this.records.createCopies(
+        tx,
+        this.platformSet,
+        { name, platform, metadata, copies },
+        humanIdentity(caller),
+      );
+      return answer!;
+    });
+  }
+
+  private rotate(
+    credentialName: string,
+    query: { holder?: string },
+    body: LlmCredentialRotate,
+    caller: CallerContext,
+  ):
+    | typeof llmOperations.rotate.output._output
+    | Promise<typeof llmOperations.rotate.output._output> {
+    const { expected_revision: expectedRevision, metadata } = body;
+    const identity = caller.identity;
+    if (isWorkerIdentity(identity)) {
+      if (body.secret !== undefined || body.holder === undefined)
+        throw invalidInput();
+      const holder = body.holder;
+      const copy = sealedBody(body);
+      return caller.commit((tx) => {
+        if (
+          this.workerHolder(tx, identity) !== holder ||
+          (query.holder !== undefined && query.holder !== holder)
+        )
+          throw instanceForbidden();
+        return this.records.rotateSealed(
+          tx,
+          this.platformSet,
+          credentialName,
+          holder,
+          { expected_revision: expectedRevision, ...copy, metadata },
+          undefined,
+        );
+      });
+    }
+    if (
+      body.secret === undefined ||
+      body.holder !== undefined ||
+      body.sealed !== undefined ||
+      body.sealed_to !== undefined
+    )
+      throw invalidInput();
+    const holder = query.holder ?? SERVER_HOLDER;
+    if (holder === SERVER_HOLDER)
+      return caller.commit((tx) =>
+        this.records.rotate(
+          tx,
+          this.platformSet,
+          credentialName,
+          {
+            expected_revision: expectedRevision,
+            secret: body.secret,
+            metadata,
+          },
+          humanIdentity(caller),
+        ),
+      );
+    return this.rotateInstanceCopy(credentialName, holder, body, caller);
+  }
+
+  private async rotateInstanceCopy(
+    credentialName: string,
+    holder: string,
+    body: LlmCredentialRotate,
+    caller: CallerContext,
+  ): Promise<typeof llmOperations.rotate.output._output> {
+    const { key, platform } = this.store.transaction((tx) => ({
+      platform: this.records.copyPlatform(
+        tx,
+        this.platformSet,
+        credentialName,
+        holder,
+      ),
+      key: this.instanceKey(tx, holder),
+    }));
+    const [copy] = await this.records.sealCopies(this.platformSet, {
+      name: credentialName,
+      platform,
+      secret: body.secret,
+      keys: [key],
+    });
+    throwIfCancelled(caller.context);
+    return caller.commit((tx) => {
+      this.instanceKey(tx, holder);
+      return this.records.rotateSealed(
+        tx,
+        this.platformSet,
+        credentialName,
+        holder,
+        {
+          expected_revision: body.expected_revision,
+          sealed: copy!.sealed,
+          sealed_to: copy!.sealed_to,
+          metadata: body.metadata,
+        },
+        humanIdentity(caller),
+      );
+    });
   }
 
   private async providerCheck(
@@ -357,8 +626,17 @@ export class LlmComponent implements Service {
     }
   }
 
-  private get(tx: Transaction, credentialName: string): LlmCredentialAnswer {
-    const answer = this.records.get(tx, this.platformSet, credentialName);
+  private get(
+    tx: Transaction,
+    credentialName: string,
+    holder: string,
+  ): LlmCredentialAnswer {
+    const answer = this.records.get(
+      tx,
+      this.platformSet,
+      credentialName,
+      holder,
+    );
     return {
       ...answer,
       agent_providers: this.agentProvidersDependentOn(tx, credentialName).map(
@@ -374,7 +652,8 @@ export class LlmComponent implements Service {
     if (revision.platform !== Platform.OpenAICompatible) return;
     const next = openaiCompatibleMetadataSchema.parse(revision.next);
     if (revision.change === RevisionChange.Create) {
-      if (next.models.length !== NO_ROWS) throw invalidInput();
+      if (revision.holder === SERVER_HOLDER && next.models.length !== NO_ROWS)
+        throw invalidInput();
       return;
     }
     const current = openaiCompatibleMetadataSchema.parse(revision.current);

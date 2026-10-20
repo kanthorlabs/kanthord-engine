@@ -4,8 +4,8 @@ pathItem:
     operationId: agent.cooldown.clear
     tags:
       - agent
-    description: Clear the cooldown of one credential so that the next claim can
-      select its chain entries again.
+    description: Clear the cooldown of one credential copy so that the next claim
+      can select its chain entries again. The holder defaults to server.
     x-access-policy: human
     x-timeout-ms: 30000
     x-mutation: true
@@ -19,6 +19,12 @@ pathItem:
         schema:
           $ref: "#/components/schemas/agent.cooldown.clear.Input/properties/params/proper\
             ties/credential"
+      - name: holder
+        in: query
+        required: false
+        schema:
+          $ref: "#/components/schemas/agent.cooldown.clear.Input/properties/query/propert\
+            ies/holder"
       - $ref: ../shared/components.yaml#/components/parameters/IdempotencyKey
     responses:
       "204":
@@ -59,7 +65,12 @@ components:
           additionalProperties: false
         query:
           type: object
-          properties: {}
+          properties:
+            holder:
+              default: server
+              type: string
+              minLength: 1
+          required: []
           additionalProperties: false
         body:
           type: "null"

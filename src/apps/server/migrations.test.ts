@@ -127,7 +127,7 @@ const ALL_TABLES = [
 const ALL_INDEXES = [
   "agent_enablement_agent_name_revision",
   "agent_prompt_scope_agent_name",
-  "credential_name_revision",
+  "credential_name_holder_revision",
   "intake_inbound_event_inbound_event",
   "intake_outbound_request_operation_key",
   MISSION_ASSESSMENT_SEQUENCE_INDEX,
@@ -386,6 +386,8 @@ test("each service migration set applies alone to an empty store", () => {
             { name: "id", type: "TEXT", notnull: 1, pk: 1 },
             { name: "name", type: "TEXT", notnull: 1, pk: 0 },
             { name: "platform", type: "TEXT", notnull: 1, pk: 0 },
+            { name: "holder", type: "TEXT", notnull: 1, pk: 0 },
+            { name: "sealed_to", type: "TEXT", notnull: 0, pk: 0 },
             { name: "revision", type: "INTEGER", notnull: 1, pk: 0 },
             { name: "nonce", type: "BLOB", notnull: 1, pk: 0 },
             { name: "ciphertext", type: "BLOB", notnull: 1, pk: 0 },
@@ -428,7 +430,7 @@ test("each service migration set applies alone to an empty store", () => {
             )
             .all()
             .map((row) => ({ ...row })),
-          [{ name: "credential_name_revision" }],
+          [{ name: "credential_name_holder_revision" }],
         );
       }
     } finally {

@@ -33,6 +33,7 @@ import {
   type RepositoryTransport,
 } from "../../worker/unit/index.ts";
 import { hostExecution } from "./execution.ts";
+import type { InstanceCopyKey } from "../../custody/client.ts";
 import { readServerVersion } from "../../gateway/client.ts";
 import { homedir } from "node:os";
 import { pullLoop } from "./pull-loop.ts";
@@ -66,6 +67,7 @@ export interface WorkerUnitOptions {
   watchdog?: () => () => void;
   resume_pull_wait_ms?: number;
   refused?: (binding: UnitBinding) => void;
+  instance_key?: InstanceCopyKey;
 }
 
 interface Entry {
@@ -489,6 +491,7 @@ export class WorkerUnit {
       claim,
       api: entry.binding.transport,
       clientSecret: entry.secret.toString("base64"),
+      instanceKey: this.options.instance_key,
       workspaces: this.workspaces!,
       transport: this.repository!,
       modelRuntimeFactory:

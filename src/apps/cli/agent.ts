@@ -578,7 +578,14 @@ async function cooldownClear(
   const key = resolveKey(options);
   const result = await httpClient(agentOperations, endpoint, token)[
     "cooldown.clear"
-  ]({ params: { credential }, query: {}, body: null }, { idempotencyKey: key });
+  ](
+    {
+      params: { credential },
+      query: options.holder === undefined ? {} : { holder: options.holder },
+      body: null,
+    },
+    { idempotencyKey: key },
+  );
   handleMutationResult(result, COOLDOWN_CLEAR_INDETERMINATE, key);
   process.stdout.write(`${JSON.stringify({ idempotency_key: key })}\n`);
 }
@@ -646,6 +653,11 @@ export function addAgentCommand(program: Command): void {
     .command(CLEAR)
     .description("Clear the cooldown of one credential")
     .argument("<credential>", "Credential name")
+    .option(
+      "--holder <name>",
+      "Holder of the cooldown: server or an instance name (default server)",
+      singleUse("--holder"),
+    )
     .option("--idempotency-key <key>", "Mutation key", singleUse(KEY_OPTION))
     .action((credential: string, _options, command: Command) =>
       cooldownClear(credential, command),

@@ -11,7 +11,11 @@ import { generateX25519KeyPair } from "../../kernel/hpke.ts";
 import { temporary } from "../../kernel/test-support.ts";
 import { instanceConfigurationValue } from "../../worker/contract.ts";
 import { environment, kanthord } from "./cli-support.ts";
-import { enableCoveringAgents, gatewayFixture } from "./test-support.ts";
+import {
+  enableCoveringAgents,
+  gatewayFixture,
+  holdCoveringCredential,
+} from "./test-support.ts";
 
 const SPAWN_LINE_TIMEOUT_MS = 15000;
 const CLEANUP_WAIT_MS = 5000;
@@ -35,6 +39,7 @@ const WORKER_ARGS = ["serve", "worker"];
 const INSTANCE_CONFIG_VARIABLE = "KANTHORD_WORKER_CONFIG";
 const INSTANCE_NAME = "laptop";
 const INSTANCE_WORKER = "coder@1";
+const ROTATED_REVISIONS = 2;
 const INSTANCE_BINDING = "laptop-coder";
 const PROJECT_NAMES = ["instance-a", "instance-b"];
 const FIXTURE_INSTANCE_ID = "worker_instance_01ARZ3NDEKTSV4RRFFQ69G5FAA";
@@ -265,6 +270,7 @@ async function liveInstance(t: TestContext) {
     ],
     { ...human, XDG_CONFIG_HOME: env.XDG_CONFIG_HOME },
   );
+  await holdCoveringCredential(human, INSTANCE_NAME);
   const projects: string[] = [];
   for (const name of PROJECT_NAMES) {
     const project = await run<{ id: string }>([
@@ -441,3 +447,135 @@ test(
     }
   },
 );
+
+test("llm credential create and rotate with --holder seal locally with the instance file, and without the file send the secret to the server", async (t) => {
+  const fixture = await gatewayFixture(t);
+  const env = workerEnvironment(t);
+  const human = {
+    ...environment(temporary(t)),
+    KANTHORD_ENDPOINT: fixture.endpoint,
+    KANTHORD_TOKEN: fixture.token,
+  };
+  const run = async (args: string[], runEnv: NodeJS.ProcessEnv = human) => {
+    const result = await kanthord(args, runEnv);
+    assert.equal(result.code, EXIT_SUCCESS, result.stderr);
+    return JSON.parse(result.stdout);
+  };
+  await run(
+    [
+      "worker",
+      "instance",
+      "create",
+      INSTANCE_NAME,
+      "--worker",
+      INSTANCE_WORKER,
+      "--output",
+    ],
+    { ...human, XDG_CONFIG_HOME: env.XDG_CONFIG_HOME },
+  );
+  const local = {
+    ...env,
+    KANTHORD_ENDPOINT: undefined,
+    KANTHORD_TOKEN: undefined,
+  };
+  const file = join(temporary(t), "credential.json");
+  writePrivate(
+    file,
+    JSON.stringify({
+      name: "local-llm",
+      platform: "anthropic",
+      metadata: null,
+      secret: { key: "local-provider-key" },
+    }),
+  );
+  const invalid = join(temporary(t), "invalid.json");
+  writePrivate(
+    invalid,
+    JSON.stringify({
+      name: "invalid-llm",
+      platform: "anthropic",
+      metadata: null,
+      secret: { token: "not-an-api-key" },
+    }),
+  );
+  const refused = await kanthord(
+    [
+      "llm",
+      "credential",
+      "create",
+      "--file",
+      invalid,
+      "--holder",
+      INSTANCE_NAME,
+    ],
+    local,
+  );
+  assert.notEqual(refused.code, EXIT_SUCCESS);
+  assert.ok(refused.stderr.includes("cli.llm.credential.secret_invalid"));
+  const created = await run(
+    ["llm", "credential", "create", "--file", file, "--holder", INSTANCE_NAME],
+    local,
+  );
+  assert.equal(created.holder, INSTANCE_NAME);
+  assert.equal(created.sealed_current, true);
+  const rotation = join(temporary(t), "rotation.json");
+  writePrivate(
+    rotation,
+    JSON.stringify({ expected_revision: 1, secret: { key: "rotated-key" } }),
+  );
+  const rotated = await run(
+    [
+      "llm",
+      "credential",
+      "rotate",
+      "local-llm",
+      "--file",
+      rotation,
+      "--holder",
+      INSTANCE_NAME,
+    ],
+    local,
+  );
+  assert.equal(rotated.revisions.length, ROTATED_REVISIONS);
+  const viaServer = join(temporary(t), "server.json");
+  writePrivate(
+    viaServer,
+    JSON.stringify({
+      name: "server-sealed",
+      platform: "anthropic",
+      metadata: null,
+      secret: { key: "server-sealed-key" },
+    }),
+  );
+  const sealedByServer = await run([
+    "llm",
+    "credential",
+    "create",
+    "--file",
+    viaServer,
+    "--holder",
+    INSTANCE_NAME,
+  ]);
+  assert.equal(sealedByServer.holder, INSTANCE_NAME);
+  const listed = await run([
+    "llm",
+    "credential",
+    "list",
+    "--holder",
+    INSTANCE_NAME,
+  ]);
+  assert.deepEqual(
+    listed.items.map((item: { name: string }) => item.name),
+    ["local-llm", "server-sealed"],
+  );
+  const got = await run([
+    "llm",
+    "credential",
+    "get",
+    "local-llm",
+    "--holder",
+    INSTANCE_NAME,
+  ]);
+  assert.equal(got.revisions.length, ROTATED_REVISIONS);
+  assert.equal(JSON.stringify(got).includes("rotated-key"), false);
+});

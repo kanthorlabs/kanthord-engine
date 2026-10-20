@@ -382,6 +382,7 @@ export type CooldownChange =
       kind: typeof CooldownChangeKind.Started;
       execution_id: string;
       credential: string;
+      holder: string;
       code: AdvancingProviderFailure;
       strikes: number;
       available_at: number;
@@ -390,9 +391,18 @@ export type CooldownChange =
       kind: typeof CooldownChangeKind.Cleared;
       execution_id: string;
       credential: string;
+      holder: string;
     };
+export type ChainClaimant = {
+  worker_binding_id: string;
+  runtime_identity: string;
+};
 export interface AgentChains {
-  select(tx: Transaction, workerBindingId: string): AgentChoice;
+  select(
+    tx: Transaction,
+    workerBindingId: string,
+    runtimeIdentity: string,
+  ): AgentChoice;
   resolve(
     tx: Transaction,
     workerBindingId: string,
@@ -400,6 +410,7 @@ export interface AgentChains {
   ): AgentSelection[];
   providerFailure(
     tx: Transaction,
+    claimant: ChainClaimant,
     selections: readonly AgentSelection[],
     code: AdvancingProviderFailure,
     executionId: string,
@@ -407,6 +418,7 @@ export interface AgentChains {
   ): CooldownChange[];
   success(
     tx: Transaction,
+    claimant: ChainClaimant,
     selections: readonly AgentSelection[],
     executionId: string,
   ): CooldownChange[];

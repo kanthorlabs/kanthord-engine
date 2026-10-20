@@ -674,7 +674,7 @@ function insertLegacy(store: Store, name = SSH_NAME): void {
   const { nonce, ciphertext } = encrypt(Buffer.alloc(32, 7), id, "ssh", {});
   store.database
     .prepare(
-      "INSERT INTO credential (id, name, platform, revision, nonce, ciphertext, metadata, created_at, ended_at) VALUES (?, ?, 'ssh', 1, ?, ?, ?, ?, NULL)",
+      "INSERT INTO credential (id, name, platform, holder, revision, nonce, ciphertext, metadata, created_at, ended_at) VALUES (?, ?, 'ssh', 'server', 1, ?, ?, ?, ?, NULL)",
     )
     .run(
       id,

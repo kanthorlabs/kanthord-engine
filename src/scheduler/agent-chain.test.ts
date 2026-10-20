@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
 import pino from "pino";
+import { SERVER_HOLDER } from "../custody/contract.ts";
 import { COOLDOWN_DEFAULTS } from "../agent/config.ts";
 import {
   capturedLogger,
@@ -80,7 +81,9 @@ function releaseHarness(t: TestContext) {
   const h = schedulerHarness(t);
   const holds = memoryCredentialHolds();
   const heldOf = () =>
-    h.store.transaction((tx) => holds.holdOf(tx, selection.credential));
+    h.store.transaction((tx) =>
+      holds.holdOf(tx, selection.credential, SERVER_HOLDER),
+    );
   const chainCalls: Array<{ method: string; arguments: unknown[] }> = [];
   const reported: Array<{
     changes: readonly CooldownChange[];
@@ -92,6 +95,7 @@ function releaseHarness(t: TestContext) {
     kind: CooldownChangeKind.Started,
     execution_id: row.execution_id,
     credential: selection.credential,
+    holder: SERVER_HOLDER,
     code: ProviderFailure.RateLimited,
     strikes: FIRST_STRIKE,
     available_at: FIXTURE_NOW,
@@ -100,6 +104,7 @@ function releaseHarness(t: TestContext) {
     kind: CooldownChangeKind.Cleared,
     execution_id: row.execution_id,
     credential: selection.credential,
+    holder: SERVER_HOLDER,
   };
   h.dependencies.agentChains = {
     select: () => ({
@@ -108,14 +113,20 @@ function releaseHarness(t: TestContext) {
       pins: [],
     }),
     resolve: () => [selection],
-    providerFailure: (tx, ...args) => {
+    providerFailure: (tx, _claimant, ...args) => {
       chainCalls.push({ method: "providerFailure", arguments: args });
-      holds.hold(tx, selection.credential, started.available_at, FIRST_STRIKE);
+      holds.hold(
+        tx,
+        selection.credential,
+        SERVER_HOLDER,
+        started.available_at,
+        FIRST_STRIKE,
+      );
       return [started];
     },
-    success: (tx, ...args) => {
+    success: (tx, _claimant, ...args) => {
       chainCalls.push({ method: "success", arguments: args });
-      holds.release(tx, selection.credential);
+      holds.release(tx, selection.credential, SERVER_HOLDER);
       return [cleared];
     },
     selected: () => {},
@@ -290,6 +301,7 @@ test("a rolled-back release reports no cooldown change", async (t) => {
     refused.holds.hold(
       tx,
       selection.credential,
+      SERVER_HOLDER,
       held.available_at,
       held.strikes,
     ),
@@ -384,6 +396,7 @@ function pinHarness(
     hostHome: "/nonexistent/home",
     workbenchDirectory: (agentName) => `/nonexistent/workbench/${agentName}`,
     custodySuitability: () => {},
+    copyHeld: () => true,
     credentialHolds: holds,
     approvedModels: () => null,
     entriesOfAgent: () => [],
@@ -403,7 +416,10 @@ function pinHarness(
   const chainCalls: Array<{ method: string; arguments: unknown[] }> = [];
   h.dependencies.agentChains = {
     select: (tx, bindingId) => {
-      const chosen = agent.selectAgent(tx, PIN_AGENT, entryOf(bindingId));
+      const chosen = agent.selectAgent(tx, PIN_AGENT, entryOf(bindingId), {
+        holders: [SERVER_HOLDER],
+        claimant: SERVER_HOLDER,
+      });
       if (chosen.kind === SelectionKind.Cooling)
         return {
           kind: AgentChoiceKind.Cooling,
@@ -432,11 +448,18 @@ function pinHarness(
           pin.position,
         ),
       ),
-    providerFailure: (tx, selections, code, executionId, now) =>
-      agent.recordProviderFailure(tx, selections, code, executionId, now),
-    success: (tx, selections, executionId) => {
+    providerFailure: (tx, _claimant, selections, code, executionId, now) =>
+      agent.recordProviderFailure(
+        tx,
+        selections,
+        SERVER_HOLDER,
+        code,
+        executionId,
+        now,
+      ),
+    success: (tx, _claimant, selections, executionId) => {
       chainCalls.push({ method: "success", arguments: [selections] });
-      return agent.recordSuccess(tx, selections, executionId);
+      return agent.recordSuccess(tx, selections, SERVER_HOLDER, executionId);
     },
     selected: (selections, executionId) => {
       agent.recordSelection(selections, executionId);
@@ -569,13 +592,14 @@ test("an enablement edit, a binding edit and a hold during a live execution keep
     h.agent.recordProviderFailure(
       tx,
       [selection],
+      SERVER_HOLDER,
       AdvancingFailure.RateLimited,
       createIdentity("execution"),
       FIXTURE_NOW,
     ),
   );
   const fresh = h.store.transaction((tx) =>
-    h.dependencies.agentChains.select(tx, bindingEdit),
+    h.dependencies.agentChains.select(tx, bindingEdit, "runtime"),
   );
   assert.ok(fresh.kind === AgentChoiceKind.Selected);
   assert.notDeepEqual(fresh.selections, [selection]);
@@ -628,6 +652,7 @@ function claimedPin(t: TestContext, logger: AgentDependencies["logger"]) {
       h.agent.recordProviderFailure(
         tx,
         [pinned],
+        SERVER_HOLDER,
         AdvancingFailure.RateLimited,
         createIdentity("execution"),
         FIXTURE_NOW,
@@ -652,7 +677,9 @@ test("a rolled-back release of a pinned execution writes no cooldown log", async
   h.seedHold();
   logs.length = 0;
   const heldOf = () =>
-    h.store.transaction((tx) => h.holds.holdOf(tx, PRIMARY.credential));
+    h.store.transaction((tx) =>
+      h.holds.holdOf(tx, PRIMARY.credential, SERVER_HOLDER),
+    );
   const held = heldOf();
   assert.notEqual(held, null);
   const rollback = new Error("rolled back");
@@ -697,6 +724,7 @@ test("a committed release of a pinned execution writes the cooldown records of t
       msg: FallbackLog.CooldownStarted,
       execution_id: h.execution.execution_id,
       credential_name: PRIMARY.credential,
+      holder: SERVER_HOLDER,
       code: ProviderFailure.RateLimited,
       strikes: FIRST_STRIKE,
       available_at: FIXTURE_NOW + COOLDOWN_DEFAULTS.rate_limited_ms,
@@ -713,6 +741,7 @@ test("a committed release of a pinned execution writes the cooldown records of t
       msg: FallbackLog.CooldownCleared,
       execution_id: cooling.execution.execution_id,
       credential_name: PRIMARY.credential,
+      holder: SERVER_HOLDER,
     },
   ]);
 });

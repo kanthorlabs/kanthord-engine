@@ -141,6 +141,7 @@ export const ResourceFailureReason = {
   InvalidResponse: "invalid_response",
   HostKeyChanged: "host_key_changed",
   IdentityUnavailable: "identity_unavailable",
+  HeldByInstance: "held_by_instance",
   Unclassified: "unclassified",
 } as const;
 export type ResourceFailureReason =

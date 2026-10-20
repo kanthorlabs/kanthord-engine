@@ -137,7 +137,7 @@ function insert(
   store.transaction(({ database }) =>
     database
       .prepare(
-        "INSERT INTO credential (id, name, platform, revision, nonce, ciphertext, metadata, created_at, ended_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO credential (id, name, platform, holder, revision, nonce, ciphertext, metadata, created_at, ended_at) VALUES (?, ?, ?, 'server', ?, ?, ?, ?, ?, ?)",
       )
       .run(
         id,
