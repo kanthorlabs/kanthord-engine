@@ -62,6 +62,7 @@ const SECRET = "test_handover-integration-secret-one";
 const REFRESHED = "test_handover-integration-secret-two";
 const ROTATED = "test_handover-integration-secret-three";
 const FIRST_REVISION = 1;
+const SECOND_SLOT = 1;
 const HEAD_POSITION = 0;
 const TWO_REVISIONS = 2;
 const HTTP = "http";
@@ -168,11 +169,9 @@ for (const adapter of ["direct", "http"] as const) {
     const human = await read(h.f.token);
     assert.ok(human.type === OperationResultType.Failure);
     assert.equal(human.status, HttpStatus.Unauthorized);
-    const other = await h.f.machineToken(
-      h.execution.project_id,
-      "general",
-      "other-instance",
-    );
+    const other = (
+      await h.f.slotClient(h.execution.project_id, "general", SECOND_SLOT)
+    ).token;
     completed(await h.call(workerOperations.register, NO_INPUT, other));
     refused(await read(other), HttpStatus.Forbidden, PROOF_FAILED);
     completed(
@@ -380,6 +379,7 @@ async function setup(
     ? { ...CONFIGURATION, model_identifier: "claude-sonnet-4.6" }
     : CONFIGURATION;
   const f = await gatewayFixture(t, {
+    fakeSlots: true,
     repositoryConnector: {
       gitLsRemote: async () => {},
     },
@@ -506,7 +506,7 @@ async function setup(
             kind: "worker",
             config: {
               worker: setupOptions.workerName ?? "coder@1",
-              placement: setupOptions.workerName ? undefined : "worker",
+              placement: setupOptions.workerName ? undefined : "server",
               instance_count: setupOptions.instanceCount ?? 1,
               resource_budget: setupOptions.resourceBudget && {
                 turns: setupOptions.resourceBudget.turns,
@@ -572,7 +572,9 @@ async function setup(
       },
     }),
   );
-  const token = await f.machineToken(projectId, "general", "general-a");
+  const token = setupOptions.workerName
+    ? await f.machineToken(projectId, "general", "general-a")
+    : (await f.slotClient(projectId, "general")).token;
   const runtimeIdentity = completed(
     await call(workerOperations.register, NO_INPUT, token),
   ).runtime_identity;

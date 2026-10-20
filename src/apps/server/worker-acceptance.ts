@@ -30,6 +30,7 @@ export async function workerAcceptance(
     stateDirectory?: string;
     slotLimit?: number;
     containerImage?: string;
+    fakeSlots?: boolean;
   } = {},
 ) {
   const s3 = host ? await fakeS3(t) : undefined;
@@ -37,6 +38,7 @@ export async function workerAcceptance(
     stateDirectory: options.stateDirectory,
     serverSlotLimit: options.slotLimit,
     containerImage: options.containerImage,
+    fakeSlots: options.fakeSlots,
     repositoryConnector: {
       gitLsRemote: async () => {},
     },
@@ -131,7 +133,7 @@ export async function workerAcceptance(
         kind: "worker",
         config: {
           worker: "coder@1",
-          placement: "worker",
+          placement: "server",
           instance_count: 1,
           entries: [{ agent: "swe@1", ...WORKER_DEFAULTS }],
         },

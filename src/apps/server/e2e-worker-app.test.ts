@@ -482,11 +482,11 @@ test("E09.4 the client configuration check runs before the tool install", async 
 });
 
 test(
-  "E09.6–10 real registration, idle signals, slot refusal and reregistration",
+  "E09.6–10 real registration, idle signals, placement refusal and reregistration",
   { timeout: 180000 },
   async (t) => {
-    const setup = await workerAcceptance(t);
-    const auth = await setup.machine("general-a");
+    const setup = await workerAcceptance(t, false, { fakeSlots: true });
+    const auth = await setup.fixture.slotClient(setup.project_id, "general");
     const env = {
       ...workerEnvironment(t),
       KANTHORD_ENDPOINT: setup.fixture.endpoint,
@@ -552,7 +552,7 @@ test(
       clientFile(otherEnv, other.client_secret);
       const refused = spawnWorker(WORKER_ARGS, otherEnv);
       try {
-        await failure(refused, "worker.instance.slot_unavailable");
+        await failure(refused, "worker.instance.placement_mismatch");
       } finally {
         await stopWorker(refused);
       }
