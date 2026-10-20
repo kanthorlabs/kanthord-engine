@@ -27,11 +27,13 @@ import { generateSshKey } from "./ssh-key.ts";
 
 const execFileAsync = promisify(execFile);
 const DEADLINE_MS = 30_000;
-const AGENT_EXIT_WAIT_MS = 11_000;
+const AGENT_EXIT_POLLS = 100;
+const AGENT_EXIT_POLL_MS = 20;
 const PRIVATE_MODE = 0o700;
 const PERMISSION_BITS = 0o777;
 const SAMPLES = 5;
 const LIFECYCLE_RUNS = 3;
+const PARALLEL_RUNS = 8;
 const SAMPLE_INTERVAL_MS = 20;
 const NO_IDENTITY_EXIT = 1;
 const NO_AGENT_EXIT = 2;
@@ -95,6 +97,14 @@ async function agentLives(socket: string): Promise<boolean> {
   return (await commandLines()).some(
     (line) => line.includes("ssh-agent") && line.includes(socket),
   );
+}
+
+async function agentEnds(socket: string): Promise<boolean> {
+  for (let poll = 0; poll < AGENT_EXIT_POLLS; poll += 1) {
+    if (!(await agentLives(socket))) return true;
+    await delay(AGENT_EXIT_POLL_MS);
+  }
+  return !(await agentLives(socket));
 }
 
 async function identityExit(socket: string): Promise<number> {
@@ -207,8 +217,27 @@ test("withSshAgent ends the agent after a success, a failure and a cancel", asyn
     );
     assert.equal(await exists(directoryOf(socket)), false);
   }
-  await delay(AGENT_EXIT_WAIT_MS);
   for (const socket of sockets) assert.equal(await agentLives(socket), false);
+});
+
+test("parallel withSshAgent calls each load their own key", async () => {
+  const keys = Array.from({ length: PARALLEL_RUNS }, (_, index) =>
+    access(`parallel-${index}`),
+  );
+  const loaded = await Promise.all(
+    keys.map((key) =>
+      withSshAgent(key, background, DEADLINE_MS, async (env) => {
+        const { stdout } = await execFileAsync("ssh-add", ["-L"], {
+          env: { PATH: process.env.PATH, SSH_AUTH_SOCK: socketOf(env) },
+        });
+        return stdout.trim();
+      }),
+    ),
+  );
+  assert.deepEqual(
+    loaded,
+    keys.map((key) => key.public_key),
+  );
 });
 
 test("withSshAgent refuses a socket path above the limit", async () => {
@@ -315,8 +344,7 @@ test("a killed process leaves no agent, and a later sweep removes its directory"
   assert.equal(await agentLives(socket), true);
   child.kill("SIGKILL");
   await closed;
-  await delay(AGENT_EXIT_WAIT_MS);
-  assert.equal(await agentLives(socket), false);
+  assert.equal(await agentEnds(socket), true);
   const directory = directoryOf(socket);
   assert.equal(await exists(directory), true);
   await sweepSshAgentDirectories(deadlineOf(directory) + SWEEP_GRACE_MS + 1);
@@ -343,8 +371,7 @@ test("a terminated worker thread leaves no agent", async () => {
   const socket = socketOf({ GIT_SSH_COMMAND: command });
   assert.equal(await agentLives(socket), true);
   await worker.terminate();
-  await delay(AGENT_EXIT_WAIT_MS);
-  assert.equal(await agentLives(socket), false);
+  assert.equal(await agentEnds(socket), true);
   const directory = directoryOf(socket);
   await sweepSshAgentDirectories(deadlineOf(directory) + SWEEP_GRACE_MS + 1);
   assert.equal(await exists(directory), false);

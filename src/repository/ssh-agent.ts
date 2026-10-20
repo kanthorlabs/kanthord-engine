@@ -41,6 +41,8 @@ const FILE_MODE = 0o600;
 const PERMISSION_BITS = 0o777;
 const CREATE_EXCLUSIVE = "wx";
 const SINGLE_QUOTE = "'";
+const AGENT_SCRIPT =
+  'ssh-agent -D -a "$1" & agent=$!; cat; kill "$agent"; wait "$agent"';
 const SOCKET_WAIT_MS_MAX = 5000;
 const SOCKET_POLL_MS = 10;
 const CLEANUP_TIMEOUT_MS = 5000;
@@ -188,7 +190,7 @@ async function writeFiles(directory: string, access: SshAccess): Promise<void> {
 }
 
 function spawnAgent(socket: string): Agent {
-  const child = spawn("ssh-agent", ["-a", socket, "cat"], {
+  const child = spawn("sh", ["-c", AGENT_SCRIPT, "sh", socket], {
     env: toolEnvironment(),
     stdio: ["pipe", "ignore", "pipe"],
   });
