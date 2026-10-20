@@ -230,6 +230,20 @@ export function endOfInstances(
   return ended;
 }
 
+export function registrationIdsOfInstance(
+  tx: Transaction,
+  instanceId: string,
+): string[] {
+  assert.ok(tx.database.isTransaction);
+  return (
+    tx.database
+      .prepare(
+        "SELECT id FROM worker_registration WHERE instance_id = ? ORDER BY id",
+      )
+      .all(instanceId) as { id: string }[]
+  ).map(({ id }) => id);
+}
+
 export function readLiveOfInstances(
   tx: Transaction,
   instanceIds: readonly string[],

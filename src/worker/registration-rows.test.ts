@@ -13,6 +13,7 @@ import {
   readLiveByClient,
   readLiveOfClient,
   readRow,
+  registrationIdsOfInstance,
   reopenRegistration,
 } from "./registration-rows.ts";
 
@@ -144,4 +145,32 @@ test("counts, group endings and descending cursor pages respect both group keys"
     assert.equal(readRow(tx, a.runtime_identity)!.ended_at, ENDED);
     assert.equal(readRow(tx, "absent"), null);
   });
+});
+
+test("the registration ids of an instance hold its ended rows and no row of another instance", (t) => {
+  const store = fixture(t);
+  const ids = store.transaction((tx) => {
+    const live = insertRegistration(
+      tx,
+      { ...CLIENT, instance_id: "instance-a" },
+      NOW,
+    );
+    const ended = insertRegistration(
+      tx,
+      { ...CLIENT, client_id: "client-b", instance_id: "instance-a" },
+      NOW,
+    );
+    endRegistration(tx, ended.runtime_identity, ENDED);
+    insertRegistration(
+      tx,
+      { ...CLIENT, client_id: "client-c", instance_id: "instance-b" },
+      NOW,
+    );
+    insertRegistration(tx, { ...CLIENT, client_id: "client-d" }, NOW);
+    return [live.runtime_identity, ended.runtime_identity].sort();
+  });
+  assert.deepEqual(
+    store.transaction((tx) => registrationIdsOfInstance(tx, "instance-a")),
+    ids,
+  );
 });

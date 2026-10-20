@@ -46,12 +46,14 @@ import {
   endOfInstances,
   readLiveOfInstances,
   readRow,
+  registrationIdsOfInstance,
 } from "./registration-rows.ts";
 
 const BASE64URL = "base64url";
 const UTF8 = "utf8";
 const ZERO_BYTE = 0;
 const NO_VERSION = 0;
+const NO_BINDINGS = 0;
 const FIRST_ITEM = 0;
 const QUERY_TRUE = "true";
 const CURSOR_PATTERN = /^[A-Za-z0-9_-]+$/;
@@ -329,11 +331,7 @@ export class WorkerInstances implements WorkerInstanceLookups {
       );
     const revisions = revisionIdsOf(tx, name);
     const executions = revisions.flatMap((instanceId) =>
-      (
-        tx.database
-          .prepare("SELECT id FROM worker_registration WHERE instance_id = ?")
-          .all(instanceId) as { id: string }[]
-      ).flatMap(({ id }) => {
+      registrationIdsOfInstance(tx, instanceId).flatMap((id) => {
         const execution = this.dependencies.unendedExecutionOf(tx, id);
         return execution ? [execution.execution_id] : [];
       }),
@@ -375,7 +373,7 @@ export class WorkerInstances implements WorkerInstanceLookups {
         ...record,
         connection: this.connectionOf(record.id),
         binding_count: bindings.length,
-        holder_mismatch: bindings.length > NO_VERSION,
+        holder_mismatch: bindings.length > NO_BINDINGS,
       };
     });
     return {
