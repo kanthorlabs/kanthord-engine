@@ -1,0 +1,108 @@
+# Generated from the operation registry by kanthord gateway openapi.
+pathItem:
+  get:
+    operationId: worker.placement.list
+    tags:
+      - worker
+    description: List each worker placement with its availability on this server and
+      the reason when it is unavailable, in the order server, container, worker.
+    x-access-policy: human
+    x-timeout-ms: 30000
+    x-mutation: false
+    x-kanthord-lifetime: unary
+    security:
+      - bearerAuth: []
+    parameters: []
+    responses:
+      "200":
+        description: Completed result
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/worker.placement.list.Output"
+      "400":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "401":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "403":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "404":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "409":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "413":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "415":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "500":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "503":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "504":
+        $ref: ../shared/components.yaml#/components/responses/Error
+components:
+  schemas:
+    worker.placement.list.Input:
+      type: object
+      properties:
+        params:
+          type: object
+          properties: {}
+          additionalProperties: false
+        query:
+          type: object
+          properties: {}
+          additionalProperties: false
+        body:
+          type: "null"
+      required:
+        - params
+        - query
+        - body
+      additionalProperties: false
+    worker.placement.list.Output:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            type: object
+            properties:
+              placement:
+                type: string
+                enum:
+                  - server
+                  - container
+                  - worker
+              available:
+                type: boolean
+              reason:
+                anyOf:
+                  - type: string
+                    enum:
+                      - server_in_container
+                      - runtime_absent
+                      - runtime_failed
+                      - runtime_rootful
+                  - type: "null"
+              detail:
+                anyOf:
+                  - type: string
+                  - type: "null"
+              container_runtime:
+                anyOf:
+                  - type: string
+                    enum:
+                      - podman
+                      - docker
+                  - type: "null"
+            required:
+              - placement
+              - available
+              - reason
+              - detail
+              - container_runtime
+            additionalProperties: false
+      required:
+        - items
+      additionalProperties: false

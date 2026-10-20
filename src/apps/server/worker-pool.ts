@@ -6,6 +6,7 @@ import { generateSlotJWT, deriveClientSecret } from "../../gateway/auth/jwt.ts";
 import { servePort, type createInvocation } from "../../gateway/index.ts";
 import { ensureDirectory, openPrivate } from "../../kernel/files.ts";
 import type {
+  PlacementStatus,
   PoolHost,
   PoolPlacement,
   PoolSlot,
@@ -76,6 +77,10 @@ export class WorkerPool implements PoolHost {
 
   onEnded(listener: (clientId: string) => void): void {
     this.listeners.push(listener);
+  }
+
+  placementStatus(placement: PoolPlacement): Promise<PlacementStatus> {
+    return this.driver(placement).check();
   }
 
   start(slot: PoolSlot): void {
@@ -190,8 +195,8 @@ export class WorkerPool implements PoolHost {
     }).then(({ token }) => token);
   }
 
-  private driver(slot: PoolSlot): SlotDriver {
-    const driver = this.options.drivers.get(slot.placement);
+  private driver(placement: PoolPlacement): SlotDriver {
+    const driver = this.options.drivers.get(placement);
     if (!driver)
       throw new Error("worker pool: no slot driver for the placement");
     return driver;
@@ -219,7 +224,7 @@ export class WorkerPool implements PoolHost {
         () => this.token(slot),
         this.options.logger,
       );
-      const instance = this.driver(slot).launch({
+      const instance = this.driver(slot.placement).launch({
         slot,
         channel: port2,
         client_secret: deriveClientSecret(

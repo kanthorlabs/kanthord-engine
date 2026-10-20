@@ -627,6 +627,7 @@ const OPERATION_INVENTORY: readonly (readonly [string, AccessPolicy])[] = [
   ["worker.catalog.list", AccessPolicy.Human],
   ["worker.catalog.get", AccessPolicy.Human],
   ["agent.get", AccessPolicy.Human],
+  ["worker.placement.list", AccessPolicy.Human],
   ["worker.instance.list", AccessPolicy.Human],
   ["worker.instance.get", AccessPolicy.Human],
   ["worker.instance.resume", AccessPolicy.Human],
@@ -754,8 +755,8 @@ const OPERATION_INVENTORY: readonly (readonly [string, AccessPolicy])[] = [
   ["tracking.span.list", AccessPolicy.Human],
   ["tracking.text.get", AccessPolicy.Human],
 ];
-const OPERATION_COUNT = 189;
-const ROUTED_OPERATION_COUNT = 179;
+const OPERATION_COUNT = 190;
+const ROUTED_OPERATION_COUNT = 180;
 const INTAKE_OPERATION_COUNT = 22;
 const INTAKE_ROUTED_OPERATION_COUNT = 14;
 const SERVICE_OPERATION_IDS = [

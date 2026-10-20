@@ -112,6 +112,7 @@ export const ProjectErrorCode = {
   WorkerResourceChanged: "project.bindings.worker.resource_changed",
   WorkerPlacementChanged: "project.bindings.worker.placement_changed",
   WorkerPlacementRequired: "project.bindings.worker.placement_required",
+  WorkerPlacementUnavailable: "project.bindings.worker.placement_unavailable",
   WorkerTagsInvalid: "project.bindings.worker.tags_invalid",
   WorkerNodeUnmatched: "project.bindings.worker.node_unmatched",
 } as const;
@@ -205,6 +206,13 @@ export const WorkerPlacement = {
 } as const;
 export type WorkerPlacement =
   (typeof WorkerPlacement)[keyof typeof WorkerPlacement];
+export const StablePlacementIssue = {
+  ServerInContainer: "server_in_container",
+  RuntimeAbsent: "runtime_absent",
+  RuntimeRootful: "runtime_rootful",
+} as const;
+export type StablePlacementIssue =
+  (typeof StablePlacementIssue)[keyof typeof StablePlacementIssue];
 export const workerTagsSchema = z
   .array(tagSchema)
   .refine((keys) => new Set(keys).size === keys.length);
@@ -850,6 +858,10 @@ export interface ProjectBindings {
 }
 
 export type BindingsChanged = (projectId: string) => void;
+
+export type PlacementStatusOf = (
+  placement: WorkerPlacement,
+) => Promise<{ available: boolean; reason: string | null }>;
 
 export type EndRegistrations = (
   tx: Transaction,

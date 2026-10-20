@@ -322,6 +322,8 @@ paths:
     $ref: ./openapi/worker/instance.list.yaml#/pathItem
   /api/worker/instance/{runtime_identity}/resume:
     $ref: ./openapi/worker/instance.resume.yaml#/pathItem
+  /api/worker/placement:
+    $ref: ./openapi/worker/placement.list.yaml#/pathItem
   /api/worker/register:
     $ref: ./openapi/worker/register.yaml#/pathItem
 components:

@@ -1,10 +1,14 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { WorkerPlacement } from "../project/contract.ts";
+import { StablePlacementIssue, WorkerPlacement } from "../project/contract.ts";
 import {
   ACTION_REQUEST_TOOL_NAME,
+  ContainerRuntime,
   InstancePlacement,
+  PlacementIssue,
   POOL_PLACEMENTS,
+  alwaysAvailable,
+  placementStatusSchema,
   ActionResultKind,
   PlatformAddressKind,
   RefusalClass,
@@ -37,6 +41,35 @@ test("the instance placement and the binding placement hold the same values", ()
   );
   assert.deepEqual(POOL_PLACEMENTS, ["server", "container"]);
 });
+test("the stable placement reasons of the binding write are placement issues", () => {
+  const issues: readonly string[] = Object.values(PlacementIssue);
+  for (const reason of Object.values(StablePlacementIssue))
+    assert.ok(issues.includes(reason));
+  assert.ok(
+    !(Object.values(StablePlacementIssue) as string[]).includes(
+      PlacementIssue.RuntimeFailed,
+    ),
+  );
+});
+
+test("the placement status schema accepts an available and an unavailable answer", () => {
+  assert.deepEqual(
+    placementStatusSchema.parse(alwaysAvailable(InstancePlacement.Worker)),
+    alwaysAvailable(InstancePlacement.Worker),
+  );
+  const unavailable = {
+    placement: InstancePlacement.Container,
+    available: false,
+    reason: PlacementIssue.RuntimeRootful,
+    detail: null,
+    container_runtime: ContainerRuntime.Docker,
+  };
+  assert.deepEqual(placementStatusSchema.parse(unavailable), unavailable);
+  assert.throws(() =>
+    placementStatusSchema.parse({ ...unavailable, reason: "other" }),
+  );
+});
+
 const action = { key: "gated.pull_request", binding_id: `binding_${ID}` };
 const refusal = {
   class: RefusalClass.FinalRefusal,

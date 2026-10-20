@@ -1,6 +1,6 @@
 # Worker CLI specification
 
-This specification for `kanthord worker` contains **9 command leaves, all implemented**.
+This specification for `kanthord worker` contains **10 command leaves, all implemented**.
 Requirements marked
 **target design** describe later runtime behavior and do not establish implementation.
 
@@ -17,7 +17,7 @@ Work pull, claims, execution records and release belong to
 
 The [CLI implementation](../../src/apps/cli/worker.ts) and
 [Worker operation contract](../../src/worker/contract.ts) provide registration,
-heartbeat, handover, catalog reads, and registration-backed instance inspection and lifecycle. The
+heartbeat, handover, catalog reads, the placement list, and registration-backed instance inspection and lifecycle. The
 [registration implementation](../../src/worker/registrations.ts) uses durable
 `worker_instance` rows, one live registration per client identity, and atomic
 binding instance-count admission. Deregistration is both an internal
@@ -32,12 +32,12 @@ are implemented and wired to Project authorization and Scheduler execution pins.
 The `handover` CLI leaf is implemented with its published validation code.
 
 The [Worker configuration fragment](../../src/worker/config.ts) declares
-`heartbeat_window` and `server_slot_limit`. The catalog, report-only instance
+`heartbeat_window`, `server_slot_limit` and `container_image`. The catalog, report-only instance
 healthcheck collaboration and registration heartbeat lifecycle are implemented.
-Native agent loops, prompt consumption, repository actions and MCP remain
-later runtime work. The server starts one worker thread for each slot of a
-binding at the `server` placement. The service probe reports
-registration-component availability separately from instance healthchecks.
+The server starts one worker thread for each slot of a binding at the `server`
+placement and one container for each slot of a binding at the `container`
+placement. The service probe reports registration-component availability
+separately from instance healthchecks.
 
 ## Shared input and output contract
 
@@ -112,6 +112,7 @@ and deregistration require no live registration.
 | I      | `handover <execution-id> [M] [--token <jwt>]` | `POST /api/worker/handover`                          | `worker.handover`            | `client`; live registration and live execution                                    |
 | I      | `list`                                        | `GET /api/worker/catalog`                            | `worker.catalog.list`        | `human`                                                                           |
 | I      | `get <worker-name>`                           | `GET /api/worker/catalog/:worker_name`               | `worker.catalog.get`         | `human`                                                                           |
+| I      | `placement list`                              | `GET /api/worker/placement`                          | `worker.placement.list`      | `human`                                                                           |
 | I      | `instance list`                               | `GET /api/worker/instance`                           | `worker.instance.list`       | `human`                                                                           |
 | I      | `instance get <runtime-identity>`             | `GET /api/worker/instance/:runtime_identity`         | `worker.instance.get`        | `human`                                                                           |
 | I      | `instance deregister <runtime-identity>`      | `DELETE /api/worker/instance/:runtime_identity`      | `worker.instance.deregister` | `client`; no live registration required; ownership by client, binding and project |
@@ -139,7 +140,7 @@ With two or more, the agent works from `checkouts/`, and each binding is one dir
 The execution commits each checkout that holds a change and pushes the node branch of every checkout.
 It then submits one evidence with one `repository` asset for each binding in binding order.
 
-The four human reads follow [inspection operations](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/worker-service.impl.md#inspection-operations).
+The five human reads follow [inspection operations](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/worker-service.impl.md#inspection-operations).
 Each is `unary`, has `mutation: false` and a default timeout of 30 s, and reads
 no table of another service. Every authenticated human has the
 server-owner authority of the target design; this table introduces no project
@@ -324,18 +325,57 @@ externally hosted workers. The result changes no registration, pool, project
 configuration or scheduling state.
 An unknown exact worker name returns `404 worker.catalog.not_found`.
 
+## Placement inspection
+
+### `placement list`
+
+```text
+kanthord worker placement list
+```
+
+The command takes no input. Required token: human JWT. Empty params, empty
+query, absent body. HTTP `200` returns `{ items }` with one item for each
+placement, in the order `server`, `container`, `worker`. The read starts no
+container and writes no state.
+
+| Field               | Type and presence                                                                                                                |
+| ------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| `placement`         | Required string, one of `server`, `container`, `worker`.                                                                         |
+| `available`         | Required boolean. True when the server can host an instance at that placement.                                                   |
+| `reason`            | One of `server_in_container`, `runtime_absent`, `runtime_failed`, `runtime_rootful` when `available` is false; otherwise `null`. |
+| `detail`            | First line of the answer of the container runtime, at most 200 bytes, when the runtime states one; otherwise `null`.             |
+| `container_runtime` | One of `podman`, `docker` when the server found a container runtime; otherwise `null`.                                           |
+
+`server` and `worker` always answer `available: true` with `null` in the three
+other fields. `container` answers the runtime check of the server:
+
+| `reason`              | Condition                                                                                                          |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| `server_in_container` | The server runs inside a container, so it cannot start a container for each instance.                              |
+| `runtime_absent`      | Neither `podman` nor `docker` resolves on the `PATH` of the server.                                                |
+| `runtime_failed`      | The runtime does not answer, or it fails a check. `detail` states why. A stopped Podman machine gives this reason. |
+| `runtime_rootful`     | The host is Linux, the runtime is rootful and the server user is not root. Docker Desktop is exempt.               |
+
+The server reuses the newest runtime answer for 10 s.
+`runtime_failed` is transient: the slots of a `container` binding start again with a
+backoff when the runtime recovers. The other reasons stay until a human changes the host.
+[`project binding apply`](./project.md#binding-resource-and-complete-set-edits)
+refuses a new `container` binding for the three stable reasons only.
+The answer has no error code of its own.
+
 ## Instance inspection and lifecycle
 
 **Target design:** an instance is runtime-only, hosts at most one execution and
-has at most one outstanding work pull or execution. Server-placement pools are
-created from Project bindings. Configuration revisions replace no instance;
+has at most one outstanding work pull or execution. Pools of the `server` and
+the `container` placement are created from Project bindings. Configuration revisions replace no instance;
 count reductions retire idle server instances first and drain busy ones. External
 harnesses host their own instances and have no kanthord placement. Starting a
 remote application belongs to `serve worker` in [other commands](./other.md).
 
 The registration-backed list, get, deregister and resume leaves below are
 implemented. The server pool starts, drains and restarts the slot threads of a
-binding at the `server` placement. Inspection and ended
+binding at the `server` placement and the slot containers of a binding at the
+`container` placement. Inspection and ended
 resume use the Scheduler collaboration, supplied by the D6/D9 stand-ins in
 tests until Plan 03 wires its implementation.
 
@@ -375,7 +415,7 @@ The instance record contains:
 | -------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
 | `runtime_identity`, `project_id`, `resource_identity`, `worker_name` | Required identities/natural key of the instance and its owning binding.                                                             |
 | `host`                                                               | Required string, one of `kanthord`, `external-harness`.                                                                             |
-| `placement`                                                          | String, one of `server`, `worker`, for kanthord-hosted instances; omitted for external harnesses.                                   |
+| `placement`                                                          | String, one of `server`, `container`, `worker`, for kanthord-hosted instances; omitted for external harnesses.                      |
 | `client_id`, `name`                                                  | Client identity using the declared `client_identity` prefix and display-name string, present for registered instances only. No JWT. |
 | `activity`                                                           | Required string, one of `idle`, `pulling`, `executing`, describing known server activity, not proof that a remote process is alive. |
 | `draining`                                                           | Required boolean; true when a server-hosted instance is scheduled to retire after its current execution.                            |
@@ -532,9 +572,12 @@ returns `isError: true`. The action tool refuses a steps claim with
 `worker.action_performer.claim_not_evaluation` and an evaluation claim without a
 current passing assessment with `worker.action_performer.assessment_not_current`.
 
-A native agent at the `server` placement reaches MCP in-process under its hosted
-execution; its proof skips the registration comparison. Native agents at the
-`worker` placement and external harnesses use HTTP and their machine JWT.
+A native agent at the `server` or the `container` placement reaches MCP through
+the slot channel under the machine identity of its slot. The port transport of the
+slot channel carries no `stream` operation yet, so a slot of either placement reaches
+no MCP path until the [HANDOFF](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/HANDOFF.md#worker-service)
+item that carries it closes. Native agents at the `worker` placement and external
+harnesses use HTTP and their machine JWT.
 A tool runs under a session context; disconnect ends the response stream only.
 The Gateway cancels session contexts in shutdown phase 1.
 The action performer derives the request key of its write, and the Intake outbound request holds the idempotency of that key.
@@ -583,6 +626,8 @@ Every remote command can also answer the shared codes of [other.md](other.md#err
 | local | `cli.worker.handover.invalid_execution_id`                | The `<execution-id>` argument is not a canonical `execution_<ulid>` identity.                                                                                                                                                     | handover                                                                                                                      |
 | local | `cli.worker.handover.token_required`                      | No option, environment variable or `cli.yaml` supplies a token.                                                                                                                                                                   | handover                                                                                                                      |
 | local | `cli.worker.handover.indeterminate`                       | The handover result is indeterminate; retry with a new key. The diagnostic prints no key row.                                                                                                                                     | handover                                                                                                                      |
+| local | `cli.worker.placement.list.token_required`                | No option, environment variable or `cli.yaml` supplies a token.                                                                                                                                                                   | placement list                                                                                                                |
+| local | `cli.worker.placement.list.indeterminate`                 | The read result is indeterminate.                                                                                                                                                                                                 | placement list                                                                                                                |
 | 403   | `worker.authorization.refused`                            | The chain of the model inference credential breaks; details `{ reason }` with `binding_mismatch`, `binding_removed`, `binding_disabled` or `no_native_agent`.                                                                     | handover                                                                                                                      |
 | 403   | `project.authorization.refused`                           | The SSH identity chain of a repository binding breaks; details `{ reason }` with `binding_not_found` (the binding is removed or is not a repository binding), `identity_refused` or `node_mismatch`.                              | handover                                                                                                                      |
 | 403   | `mission.authorization.refused`                           | Mission refuses the protected facility chain; details `{ reason }` with `claim_not_live`, `node_mismatch`, `attempt_closed`, `binding_disabled` or `binding_removed`.                                                             | worker.action.request (API only), worker.execution.change_request.get (API only)                                              |
@@ -601,7 +646,7 @@ Every remote command can also answer the shared codes of [other.md](other.md#err
 | 404   | `worker.instance.not_found`                               | The runtime identity is unknown, ended or not owned.                                                                                                                                                                              | instance get, instance deregister, instance resume                                                                            |
 | 409   | `worker.instance.no_live_execution`                       | The registration is the claimant of no live execution.                                                                                                                                                                            | instance resume                                                                                                               |
 | 409   | `worker.instance.client_live`                             | The client identity holds another live registration.                                                                                                                                                                              | instance resume                                                                                                               |
-| 409   | `worker.instance.placement_mismatch`                      | The binding is at the `server` placement and the client identity is not a pool slot of that binding.                                                                                                                              | register                                                                                                                      |
+| 409   | `worker.instance.placement_mismatch`                      | The binding is at the `server` or the `container` placement and the client identity is not a pool slot of that binding.                                                                                                           | register                                                                                                                      |
 | 409   | `worker.instance.slot_unavailable`                        | The binding has no free slot or is unavailable.                                                                                                                                                                                   | register, instance resume                                                                                                     |
 
 `error.details` lists affected bindings or other dependents when applicable. No error holds secret material.

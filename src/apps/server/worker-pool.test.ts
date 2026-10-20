@@ -3,14 +3,19 @@ import { existsSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { test, type TestContext } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
-import { projectOperations } from "../../project/contract.ts";
+import { ProjectErrorCode, projectOperations } from "../../project/contract.ts";
 import { temporary } from "../../kernel/test-support.ts";
 import { HttpStatus } from "../../kernel/http.ts";
 import {
   InstancePlacement,
+  PlacementIssue,
   WorkerErrorCode,
+  alwaysAvailable,
   workerOperations,
+  type PlacementStatus,
 } from "../../worker/contract.ts";
+import { httpClient } from "../../gateway/client.ts";
+import { OperationResultType } from "../../kernel/operation.ts";
 import { until } from "./cli-support.ts";
 import { humanCaller } from "./test-support.ts";
 import { threadEnvironment } from "./thread-driver.ts";
@@ -344,3 +349,73 @@ test("the thread environment holds the allowlist and the slot directories only",
   assert.equal(env.XDG_CACHE_HOME, `${SLOT_ROOT}/cache`);
   assert.equal(threadEnvironment({}, SLOT_ROOT).PATH, undefined);
 });
+
+test(
+  "the placement list and the binding write read the placement status of the pool host",
+  { timeout: POOL_TEST_TIMEOUT },
+  async (t) => {
+    const setup = await workerAcceptance(t, true, {
+      stateDirectory: temporary(t),
+    });
+    const unavailable: PlacementStatus = {
+      placement: InstancePlacement.Container,
+      available: false,
+      reason: PlacementIssue.RuntimeAbsent,
+      detail: null,
+      container_runtime: null,
+    };
+    t.mock.method(setup.fixture.workerPool, "placementStatus", async () => ({
+      ...unavailable,
+    }));
+    const listed = await setup.read<{ items: PlacementStatus[] }>([
+      "worker",
+      "placement",
+      "list",
+    ]);
+    assert.deepEqual(listed.items, [
+      alwaysAvailable(InstancePlacement.Server),
+      unavailable,
+      alwaysAvailable(InstancePlacement.Worker),
+    ]);
+    const params = { project_id: setup.project_id };
+    const call = humanCaller(setup.fixture);
+    const current = await call(projectOperations["bindingSet.get"], {
+      params,
+      query: {},
+      body: null,
+    });
+    const container = {
+      kind: "worker",
+      config: {
+        worker: "coder@1",
+        instance_count: ONE_INSTANCE,
+        placement: InstancePlacement.Container,
+        entries: [{ agent: "swe@1", ...WORKER_DEFAULTS }],
+      },
+    };
+    const refused = await httpClient(
+      { operation: projectOperations["bindingSet.write"] },
+      setup.fixture.endpoint,
+      setup.fixture.token,
+    ).operation({
+      params,
+      query: {},
+      body: {
+        version: current.version,
+        bindings: { ...current.bindings, container } as never,
+      },
+    });
+    assert.equal(refused.type, OperationResultType.Failure);
+    assert.ok(refused.type === OperationResultType.Failure);
+    assert.equal(refused.status, HttpStatus.Conflict);
+    assert.equal(
+      refused.error.error.code,
+      ProjectErrorCode.WorkerPlacementUnavailable,
+    );
+    assert.deepEqual(refused.error.error.details, {
+      binding: "container",
+      placement: InstancePlacement.Container,
+      reason: PlacementIssue.RuntimeAbsent,
+    });
+  },
+);
