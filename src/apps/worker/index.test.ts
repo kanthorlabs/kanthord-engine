@@ -37,6 +37,8 @@ const PUBLIC_ADDRESS = "203.0.113.7";
 const FAST_HEARTBEAT_MS = 50;
 const SLOW_INTERVAL_MS = 3600000;
 const RENEWAL_MS = 150;
+const REARM_RENEWAL_MS = 400;
+const REARM_WINDOWS = 4;
 const WAIT_MS = 10000;
 const POLL_MS = 10;
 const NO_WORK_DELAY_MS = 20;
@@ -303,6 +305,35 @@ test("an execution passes one token renewal and the next request carries the ren
   });
   assert.equal(await worker.stop(), null);
   assert.equal(await running, null);
+});
+
+test("each connect answer re-arms the renewal timer", async (t) => {
+  const f = await fixture(t, SINGLE);
+  const worker = new Worker(
+    f.options({
+      heartbeatIntervalMs: FAST_HEARTBEAT_MS,
+      renewalIntervalMs: REARM_RENEWAL_MS,
+    }),
+  );
+  const running = worker.run();
+  try {
+    await f.ready();
+    const tokens = f.server.requestsTo(FakePath.Token).length;
+    const deadline = Date.now() + REARM_RENEWAL_MS * REARM_WINDOWS;
+    while (Date.now() < deadline) {
+      const connects = f.server.requestsTo(FakePath.Connect).length;
+      f.server.state.bindingVersion++;
+      while (f.server.requestsTo(FakePath.Connect).length === connects)
+        await delay(POLL_MS);
+      await delay(REARM_RENEWAL_MS / REARM_WINDOWS);
+    }
+    assert.equal(f.server.requestsTo(FakePath.Token).length, tokens);
+    while (f.server.requestsTo(FakePath.Token).length === tokens)
+      await delay(POLL_MS);
+  } finally {
+    assert.equal(await worker.stop(), null);
+    assert.equal(await running, null);
+  }
 });
 
 test("an auth-version increment with a changed client secret ends the process, and the restart resumes the running execution", async (t) => {

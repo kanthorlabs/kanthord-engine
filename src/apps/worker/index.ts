@@ -204,7 +204,7 @@ export class Worker implements Service {
     this.quiesceTask ??= lifecycle(async () => {
       this.shutdown.cancel();
       clearInterval(this.heartbeatTimer);
-      clearInterval(this.renewalTimer);
+      clearTimeout(this.renewalTimer);
       const error = await this.unit?.quiesce();
       if (error) throw error;
     });
@@ -254,7 +254,7 @@ export class Worker implements Service {
       return (await this.exchangeVerdict(outcome.result)) ?? outcome.result;
     } finally {
       clearInterval(this.heartbeatTimer);
-      clearInterval(this.renewalTimer);
+      clearTimeout(this.renewalTimer);
       unsubscribe();
       process.off("SIGINT", stop);
       process.off("SIGTERM", stop);
@@ -275,7 +275,7 @@ export class Worker implements Service {
     running: Promise<Error | null>,
   ): Promise<Error | null> {
     clearInterval(this.heartbeatTimer);
-    clearInterval(this.renewalTimer);
+    clearTimeout(this.renewalTimer);
     if (reason.code === VERSION_MISMATCH_CODE) await this.unit!.stop();
     else await this.unit!.abandon();
     await running;
@@ -350,7 +350,13 @@ export class Worker implements Service {
       () => void this.check(),
       this.options.heartbeatIntervalMs ?? INSTANCE_HEARTBEAT_INTERVAL_MS,
     );
-    this.renewalTimer = setInterval(
+    this.armRenewal();
+  }
+
+  private armRenewal(): void {
+    clearTimeout(this.renewalTimer);
+    if (this.shutdown.err()) return;
+    this.renewalTimer = setTimeout(
       () => void this.serialize(() => this.renew()),
       this.options.renewalIntervalMs ?? INSTANCE_RENEWAL_INTERVAL_MS,
     );
@@ -448,6 +454,7 @@ export class Worker implements Service {
         );
     }
     this.connection = connection;
+    this.armRenewal();
     const listed = new Set(connection.bindings.map((entry) => entry.client_id));
     for (const entry of connection.bindings) {
       const hosted = this.hosted.get(entry.client_id);
