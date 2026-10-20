@@ -1207,7 +1207,10 @@ export const instanceOperations = {
     input: z.strictObject({
       params: emptyFields,
       query: emptyFields,
-      body: z.strictObject({ connection_id: connectionIdSchema }),
+      body: z.strictObject({
+        connection_id: connectionIdSchema,
+        connection_name: z.string().min(1).max(255),
+      }),
     }),
     output: z.strictObject({
       server_version: z.string().min(1),

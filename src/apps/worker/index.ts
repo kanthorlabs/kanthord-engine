@@ -371,6 +371,7 @@ export class Worker implements Service {
     try {
       const answer = await this.exchange!.heartbeat(
         this.connection.connection_id,
+        this.connectionName,
         this.shutdown,
       );
       if (answer.server_version !== packageVersion())

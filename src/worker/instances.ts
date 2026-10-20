@@ -214,13 +214,21 @@ export class WorkerInstances implements WorkerInstanceLookups {
       : null;
   }
 
-  holdConnection(instanceId: string, connectionId: string): boolean {
+  holdConnection(
+    instanceId: string,
+    connectionId: string,
+    connectionName: string | null = null,
+  ): boolean {
     const current = this.connections.get(instanceId);
-    if (current) return current.connection_id === connectionId;
+    if (current) {
+      if (current.connection_id !== connectionId) return false;
+      current.connection_name ??= connectionName;
+      return true;
+    }
     const now = Date.now();
     this.connections.set(instanceId, {
       connection_id: connectionId,
-      connection_name: null,
+      connection_name: connectionName,
       connected_at: now,
       last_heartbeat_at: now,
     });
@@ -468,13 +476,14 @@ export class WorkerInstances implements WorkerInstanceLookups {
     instanceId: string,
     name: string,
     connectionId: string,
+    connectionName: string,
   ): {
     server_version: string;
     binding_version: number;
     credential_version: number;
     login_sessions: Record<string, unknown>[];
   } {
-    if (!this.holdConnection(instanceId, connectionId))
+    if (!this.holdConnection(instanceId, connectionId, connectionName))
       throw superseded(this.connections.get(instanceId));
     this.connections.get(instanceId)!.last_heartbeat_at = Date.now();
     return {

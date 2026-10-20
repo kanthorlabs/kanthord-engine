@@ -120,6 +120,7 @@ function declareExchange(
         identity.instanceId,
         identity.name,
         body.connection_id,
+        body.connection_name,
       );
     },
   );

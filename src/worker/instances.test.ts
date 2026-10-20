@@ -437,6 +437,7 @@ test("connect answers one sealed entry for each listing binding, and a second pr
   }
   const heartbeat = await f.invoke("instance.heartbeat", {
     connection_id: first.connection_id,
+    connection_name: CONNECTION_NAME,
   });
   assert.equal(heartbeat.server_version, packageVersion());
   assert.equal(heartbeat.credential_version, NO_VERSION);
@@ -447,7 +448,10 @@ test("connect answers one sealed entry for each listing binding, and a second pr
   assert.notEqual(second.connection_id, first.connection_id);
   await f.refuses(
     () =>
-      f.invoke("instance.heartbeat", { connection_id: first.connection_id }),
+      f.invoke("instance.heartbeat", {
+        connection_id: first.connection_id,
+        connection_name: CONNECTION_NAME,
+      }),
     HttpStatus.Conflict,
     WorkerErrorCode.InstanceConnectionSuperseded,
   );
@@ -489,12 +493,14 @@ test("a binding change bumps the binding version of each listed instance", async
   f.worker().bindingsChanged(projectId);
   const listed = await f.invoke("instance.heartbeat", {
     connection_id: connection.connection_id,
+    connection_name: CONNECTION_NAME,
   });
   assert.equal(listed.binding_version, FIRST_VERSION);
   f.bindings[0]!.worker_instances = [];
   f.worker().bindingsChanged(projectId);
   const dropped = await f.invoke("instance.heartbeat", {
     connection_id: connection.connection_id,
+    connection_name: CONNECTION_NAME,
   });
   assert.equal(dropped.binding_version, SECOND_VERSION);
 });
@@ -674,6 +680,7 @@ test("a server restart keeps the registrations of a live instance and adopts the
   f.asWorker(record.id);
   const heartbeat = await f.invoke("instance.heartbeat", {
     connection_id: connection.connection_id,
+    connection_name: CONNECTION_NAME,
   });
   assert.equal(heartbeat.server_version, packageVersion());
   assert.equal(
@@ -681,6 +688,34 @@ test("a server restart keeps the registrations of a live instance and adopts the
       .worker()
       .instances.holdConnection(record.id, createIdentity("connection")),
     false,
+  );
+  assert.equal(
+    f.worker().instances.connectionOf(record.id)?.connection_name,
+    CONNECTION_NAME,
+  );
+});
+
+test("a client request after a restart adopts the connection and the next heartbeat names it", async (t) => {
+  const f = instanceFixture(t);
+  const { record } = await f.created();
+  await f.worker().start();
+  f.asWorker(record.id);
+  const connection = await f.invoke("instance.connect", {
+    connection_name: CONNECTION_NAME,
+  });
+  await f.restart();
+  assert.equal(
+    f.worker().instances.holdConnection(record.id, connection.connection_id),
+    true,
+  );
+  f.asWorker(record.id);
+  await f.invoke("instance.heartbeat", {
+    connection_id: connection.connection_id,
+    connection_name: CONNECTION_NAME,
+  });
+  assert.equal(
+    f.worker().instances.connectionOf(record.id)?.connection_name,
+    CONNECTION_NAME,
   );
 });
 

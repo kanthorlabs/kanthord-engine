@@ -157,11 +157,19 @@ export class InstanceExchange {
 
   async heartbeat(
     connectionId: string,
+    connectionName: string,
     context: Context = background,
   ): Promise<HeartbeatAnswer> {
     return settled(
       await this.client["instance.heartbeat"](
-        { params: {}, query: {}, body: { connection_id: connectionId } },
+        {
+          params: {},
+          query: {},
+          body: {
+            connection_id: connectionId,
+            connection_name: connectionName,
+          },
+        },
         { context, idempotencyKey: ulid() },
       ),
       "heartbeat",
