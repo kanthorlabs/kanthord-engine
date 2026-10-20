@@ -18,7 +18,11 @@ import { background, CancellationContext } from "../../kernel/context.ts";
 import { Diagnostic } from "../../kernel/errors.ts";
 import { createIdentity } from "../../kernel/identity.ts";
 import { temporary, hostEnvironment } from "../../kernel/test-support.ts";
-import { openNativeAgent, promptStop } from "./native-agent.ts";
+import {
+  credentialRedaction,
+  openNativeAgent,
+  promptStop,
+} from "./native-agent.ts";
 import { EndReason, ExecutionStop } from "./execution-run.ts";
 import { CodedError } from "../../kernel/errors.ts";
 import { ExecutionIntent } from "../contract.ts";
@@ -530,6 +534,8 @@ test("a failed turn check ends the prompt before the next model call", async (t)
 });
 
 const AUTH_FAILED = "llm.auth.failed";
+const REFRESHED_DETAIL =
+  "Error: Authentication failed [redacted] [redacted] [redacted]";
 const AUTH_FAILED_DETAIL = "Error: Authentication failed [redacted] [redacted]";
 
 test("a thrown prompt error stops the run with its cause text and the OAuth tokens removed", async () => {
@@ -549,12 +555,42 @@ test("a thrown prompt error stops the run with its cause text and the OAuth toke
   };
   const stopped = await promptStop(
     new CodedError(AUTH_FAILED, `Authentication failed ${access} ${refresh}`),
-    credential,
+    credentialRedaction(credential),
   );
   assert.ok(stopped instanceof ExecutionStop);
   assert.equal(stopped.reason, EndReason.OperationFailed);
   assert.equal(stopped.code, AUTH_FAILED);
   assert.equal(stopped.detail, AUTH_FAILED_DETAIL);
   const earlier = new ExecutionStop(EndReason.Revoked, null);
-  assert.equal(await promptStop(earlier, credential), earlier);
+  assert.equal(
+    await promptStop(earlier, credentialRedaction(credential)),
+    earlier,
+  );
+});
+
+test("the stop detail removes the OAuth tokens from before and after a refresh", async () => {
+  const store = new InMemoryCredentialStore();
+  const tokens = (access: string, refresh: string) => async () => ({
+    type: "oauth" as const,
+    access,
+    refresh,
+    expires: Date.now() + 60000,
+  });
+  await store.modify("anthropic", tokens("old_access_1", "old_refresh_1"));
+  const secrets = credentialRedaction({
+    credential_id: "credential_01ARZ3NDEKTSV4RRFFQ69G5FAA",
+    provider_id: "anthropic",
+    store,
+  });
+  await secrets();
+  await store.modify("anthropic", tokens("new_access_1", "new_refresh_1"));
+  const stopped = await promptStop(
+    new CodedError(
+      AUTH_FAILED,
+      "Authentication failed old_access_1 new_access_1 new_refresh_1",
+    ),
+    secrets,
+  );
+  assert.ok(stopped instanceof ExecutionStop);
+  assert.equal(stopped.detail, REFRESHED_DETAIL);
 });

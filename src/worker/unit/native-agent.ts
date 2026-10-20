@@ -83,31 +83,40 @@ async function credentialSecrets(
   return stored.key === undefined ? [] : [stored.key];
 }
 
+export type CredentialRedaction = () => Promise<readonly string[]>;
+
+export function credentialRedaction(
+  credential: ExecutionCredential,
+): CredentialRedaction {
+  const seen = new Set<string>();
+  return async () => {
+    for (const secret of await credentialSecrets(credential)) seen.add(secret);
+    return [...seen];
+  };
+}
+
 export async function promptStop(
   error: unknown,
-  credential: ExecutionCredential,
+  secrets: CredentialRedaction,
 ): Promise<unknown> {
   if (error instanceof ExecutionStop) return error;
   return new ExecutionStop(
     EndReason.OperationFailed,
     error instanceof CodedError ? error.code : null,
-    thrownReason(error, await credentialSecrets(credential)),
+    thrownReason(error, await secrets()),
   );
 }
 
 async function providerFailure(
   messages: readonly AgentMessage[],
-  credential: ExecutionCredential,
+  secrets: CredentialRedaction,
 ): Promise<ExecutionStop | null> {
   const last = messages.findLast(
     (message): message is AssistantMessage => message.role === ASSISTANT_ROLE,
   );
   if (last?.stopReason !== PROVIDER_ERROR) return null;
   const errorMessage = last.errorMessage ?? "";
-  const detail = redactReason(
-    errorMessage,
-    await credentialSecrets(credential),
-  );
+  const detail = redactReason(errorMessage, await secrets());
   return new ExecutionStop(
     EndReason.ProviderFailed,
     providerFailureOf(errorMessage),
@@ -124,7 +133,7 @@ function nativeAgent(
   disposeSignal: () => void,
   turnCheck: () => Promise<void>,
   unsubscribeTrace: () => void,
-  credential: ExecutionCredential,
+  secrets: CredentialRedaction,
 ): NativeAgent {
   let session: AgentSession | null = opened;
   const finishTurn = opened.agent.finishTurn;
@@ -143,11 +152,11 @@ function nativeAgent(
       await session.prompt(text, { expandPromptTemplates: false });
     } catch (error) {
       if (context.err()) throw error;
-      throw await promptStop(error, credential);
+      throw await promptStop(error, secrets);
     }
     await session.waitForIdle();
     if (context.err()) return;
-    const failed = await providerFailure(session.messages, credential);
+    const failed = await providerFailure(session.messages, secrets);
     if (failed) throw failed;
   };
   let unsubscribeTurns: (() => void) | null = countTurns(opened, () => {
@@ -206,7 +215,9 @@ export async function openNativeAgent(
   const context = budget.agentContext(input.context);
   const bridge = abortSignal(context);
   let session: AgentSession | undefined;
+  const secrets = credentialRedaction(input.credential);
   try {
+    await secrets();
     const layers = [];
     for (const [index, repository] of input.setup.repositories.entries())
       layers.push(
@@ -264,7 +275,7 @@ export async function openNativeAgent(
       bridge.dispose,
       input.turnCheck ?? (async () => {}),
       unsubscribeTrace,
-      input.credential,
+      secrets,
     );
   } catch (error) {
     session?.dispose();
