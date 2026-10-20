@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { ulid } from "ulid";
-import type { Context } from "../../kernel/context.ts";
+import { CancellationContext, type Context } from "../../kernel/context.ts";
 import { Diagnostic } from "../../kernel/errors.ts";
 import { OperationResultType } from "../../kernel/operation.ts";
 import {
@@ -13,6 +13,7 @@ import type { Registration } from "./registration.ts";
 
 const SERVER_ERROR = 500;
 const REGISTRATION_REQUIRED = "gateway.registration.required";
+const CONNECTION_SUPERSEDED = "gateway.jwt.connection_superseded";
 export interface PullLoopInput {
   api: WorkerTransport;
   registration: Registration;
@@ -22,6 +23,8 @@ export interface PullLoopInput {
   register(): Promise<Registration>;
   pulling(task: Promise<unknown>): void;
   claimed(execution: ExecutionRecord): void;
+  idle?(): Promise<void>;
+  round?(): Context;
 }
 
 export async function pullLoop(
@@ -31,6 +34,13 @@ export async function pullLoop(
   assert.ok(input.api.scheduler.workPull);
   let registration = input.registration;
   while (!input.shutdown.err()) {
+    if (input.idle) {
+      await input.idle();
+      if (input.shutdown.err()) break;
+    }
+    const round = input.round?.();
+    const context = new CancellationContext(input.shutdown);
+    const preempted = round?.onCancel(() => context.cancel());
     const task = input.api.scheduler
       .workPull(
         {
@@ -41,7 +51,7 @@ export async function pullLoop(
             runtime_identity: registration.runtime_identity,
           },
         },
-        { idempotencyKey: ulid(), context: input.shutdown },
+        { idempotencyKey: ulid(), context },
       )
       .then((result) => {
         if (
@@ -53,6 +63,8 @@ export async function pullLoop(
       });
     input.pulling(task);
     const result = await task;
+    preempted?.();
+    context.cancel();
     if (
       result.type === OperationResultType.Completed &&
       result.data.kind === WorkPullKind.Claimed
@@ -63,9 +75,11 @@ export async function pullLoop(
       continue;
     }
     if (input.shutdown.err()) return null;
+    if (round?.err()) continue;
     if (
       result.type === OperationResultType.Failure &&
-      result.status < SERVER_ERROR
+      result.status < SERVER_ERROR &&
+      result.error.error.code !== CONNECTION_SUPERSEDED
     ) {
       if (result.error.error.code !== REGISTRATION_REQUIRED)
         return new Diagnostic(
