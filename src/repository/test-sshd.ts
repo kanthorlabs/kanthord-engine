@@ -20,12 +20,14 @@ import {
   SshWriter,
   sshPublicKeyBlob,
 } from "./ssh-key.ts";
-export { relayedSignature } from "./ssh-sign.ts";
 import {
+  relayedSignature,
   SSH_CONNECTION_SERVICE,
   SSH_USERAUTH_REQUEST,
   SshAuthenticationMethod,
 } from "./ssh-sign.ts";
+
+export { relayedSignature };
 
 export const TEST_SSHD_HOST = "127.0.0.1";
 export const DEFAULT_SSH_PORT = 22;

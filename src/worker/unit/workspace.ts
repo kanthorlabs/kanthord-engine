@@ -85,7 +85,10 @@ export function handedSshAccess(
       );
       continue;
     }
-    assert.ok(relay, "A repository binding must hold a handed SSH identity");
+    assert.ok(
+      relay,
+      "A repository binding must hold a handed SSH identity or a relay",
+    );
     access.set(repository.binding_id, {
       relay: relay(repository.binding_id),
       public_key: repository.ssh_public_key,
