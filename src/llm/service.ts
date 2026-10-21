@@ -923,7 +923,7 @@ export class LlmComponent implements Service {
     const { name, mode: requested } = input.body;
     this.store.transaction((tx) => {
       this.instanceKey(tx, holder);
-      this.records.requireAvailableName(tx, name, holder);
+      this.records.requireLoginTarget(tx, name, holder);
     });
     const mode = loginMode(platform, requested, false);
     if (caller.identity?.kind !== IdentityKind.Human) throw invalidInput();

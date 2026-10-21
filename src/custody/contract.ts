@@ -887,6 +887,7 @@ export interface CredentialRecords {
     holder?: string,
   ): CredentialAnswer;
   requireAvailableName(tx: Transaction, name: string, holder?: string): void;
+  requireLoginTarget(tx: Transaction, name: string, holder: string): void;
   createLoginRevision(
     tx: Transaction,
     set: CredentialPlatformSet,

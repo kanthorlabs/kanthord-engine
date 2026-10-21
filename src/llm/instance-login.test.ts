@@ -50,6 +50,8 @@ const DEVICE_MESSAGE = "Waiting for authorization";
 const COPY_CODE_VALUE = "authorization-code#state-value";
 const FIRST_REVISION = 1;
 const NO_CREDENTIALS = 0;
+const ONE_ROW = 1;
+const KEPT_METADATA = { note: "kept" };
 const MAX_TURNS = 20;
 const VERSION_STEP = 1;
 const OAUTH_SECRET = {
@@ -66,6 +68,8 @@ const Code = {
   ValueNotAwaited: "credential.login.value_not_awaited",
   SealedInvalid: "credential.sealed.invalid",
   InvalidInput: "credential.input.invalid",
+  NameConflict: "credential.name.conflict",
+  Archived: "credential.credential.archived",
 } as const;
 const envelopeKey = Buffer.alloc(32, 7);
 
@@ -97,6 +101,7 @@ async function fixture(t: TestContext) {
       [...pairs.values()].find(({ id }) => id === instanceId)?.key.name ?? null,
   };
   const connected = new Set([INSTANCE, OTHER_INSTANCE]);
+  const pinned = new Set<string>();
   let now = CLOCK_START;
   const store = new Store(IN_MEMORY_DATABASE);
   store.migrate([
@@ -110,7 +115,8 @@ async function fixture(t: TestContext) {
     executions: {
       requireRunning: unexpectedCollaboration,
       pinCredential: unexpectedCollaboration,
-      liveExecutionsPinning: () => [],
+      liveExecutionsPinning: (_tx: unknown, id: string) =>
+        pinned.has(id) ? ["execution"] : [],
     },
     authorization: { authorizeModelInference: unexpectedCollaboration },
     missionAuthorization: {
@@ -230,7 +236,7 @@ async function fixture(t: TestContext) {
   const rows = () =>
     store.database
       .prepare(
-        "SELECT id, platform, holder, sealed_to, revision, nonce, ciphertext FROM credential",
+        "SELECT id, platform, holder, sealed_to, revision, nonce, ciphertext, ended_at FROM credential ORDER BY revision",
       )
       .all() as {
       id: string;
@@ -240,9 +246,43 @@ async function fixture(t: TestContext) {
       revision: number;
       nonce: Buffer;
       ciphertext: Buffer;
+      ended_at: number | null;
     }[];
+  const rotateKey = async (name: string) => {
+    const pair = await generateX25519KeyPair();
+    const current = pairs.get(name)!;
+    pairs.set(name, {
+      id: current.id,
+      key: {
+        name,
+        public_key: pair.public_key.toString("base64url"),
+        fingerprint: keyFingerprint(pair.public_key),
+      },
+      private_key: pair.private_key,
+      public_key: pair.public_key,
+    });
+  };
+  const signIn = async () => {
+    const started = login({ platform: Platform.AnthropicSubscription });
+    const entry = await listed();
+    report(entry.session_id, { address: AUTHORIZATION_URL });
+    await started;
+    report(entry.session_id, {
+      state: InstanceLoginState.Completed,
+      address: AUTHORIZATION_URL,
+      ...(await sealFor(Platform.AnthropicSubscription)),
+    });
+    return entry.session_id;
+  };
+  const copyOf = () =>
+    invoke(human, llmOperations.get, {
+      params: { credential_name: CREDENTIAL_NAME },
+      query: { holder: INSTANCE },
+      body: null,
+    }) as typeof llmOperations.get.output._output;
   return {
     component,
+    store,
     pairs,
     connected,
     logs,
@@ -255,6 +295,10 @@ async function fixture(t: TestContext) {
     listed,
     sealFor,
     rows,
+    pinned,
+    rotateKey,
+    signIn,
+    copyOf,
     advance: (ms: number) => {
       now += ms;
     },
@@ -520,4 +564,97 @@ test("one human holds one pending session for a platform over the server and eve
     }),
     { code: Code.LoginPending, status: HttpStatus.Conflict },
   );
+});
+
+test("a sign-in after a key rotation adds revision 2 sealed to the current key with the metadata of revision 1 and ends revision 1", async (t) => {
+  const f = await fixture(t);
+  await f.signIn();
+  f.store.database
+    .prepare("UPDATE credential SET metadata = ?")
+    .run(JSON.stringify(KEPT_METADATA));
+  await f.rotateKey(INSTANCE);
+  assert.equal(f.copyOf().sealed_current, false);
+  const session = await f.signIn();
+  assert.equal(f.loginStatus(session).state, LoginSessionState.Completed);
+  const [first, second] = f.rows();
+  assert.deepEqual(
+    [first?.revision, first?.ended_at === null],
+    [FIRST_REVISION, false],
+  );
+  assert.deepEqual(
+    [second?.revision, second?.ended_at, second?.sealed_to],
+    [FIRST_REVISION + 1, null, f.pairs.get(INSTANCE)!.key.fingerprint],
+  );
+  const copy = f.copyOf();
+  assert.equal(copy.sealed_current, true);
+  assert.equal(copy.revisions[0]?.revision, FIRST_REVISION + 1);
+  assert.deepEqual(copy.revisions[0]?.metadata, KEPT_METADATA);
+});
+
+test("a sign-in after a revoked revision adds the next revision past it", async (t) => {
+  const f = await fixture(t);
+  await f.signIn();
+  f.pinned.add(f.rows()[0]!.id);
+  await f.rotateKey(INSTANCE);
+  await f.signIn();
+  await f.rotateKey(INSTANCE);
+  f.invoke(f.human, llmOperations.revoke, {
+    params: { credential_name: CREDENTIAL_NAME, revision: FIRST_REVISION },
+    query: { holder: INSTANCE },
+    body: null,
+  });
+  await f.signIn();
+  assert.deepEqual(
+    f.rows().map(({ revision, ended_at }) => [revision, ended_at === null]),
+    [
+      [FIRST_REVISION, false],
+      [FIRST_REVISION + 1, false],
+      [FIRST_REVISION + 2, true],
+    ],
+  );
+  assert.equal(f.copyOf().sealed_current, true);
+});
+
+test("a sign-in on a live copy sealed to the current key answers a name conflict and an archived copy stays final", async (t) => {
+  const f = await fixture(t);
+  await f.signIn();
+  await assert.rejects(f.login({ platform: Platform.AnthropicSubscription }), {
+    code: Code.NameConflict,
+    status: HttpStatus.Conflict,
+  });
+  f.invoke(f.human, llmOperations.archive, {
+    params: { credential_name: CREDENTIAL_NAME },
+    query: { holder: INSTANCE },
+    body: null,
+  });
+  await f.rotateKey(INSTANCE);
+  await assert.rejects(f.login({ platform: Platform.AnthropicSubscription }), {
+    code: Code.Archived,
+    status: HttpStatus.Conflict,
+  });
+  assert.equal(f.rows().length, ONE_ROW);
+});
+
+test("a completed report fails when the copy turns live and current during the session", async (t) => {
+  const f = await fixture(t);
+  await f.signIn();
+  const sealedKey = f.pairs.get(INSTANCE)!;
+  await f.rotateKey(INSTANCE);
+  const started = f.login({ platform: Platform.AnthropicSubscription });
+  const entry = await f.listed();
+  f.report(entry.session_id, { address: AUTHORIZATION_URL });
+  await started;
+  f.pairs.set(INSTANCE, sealedKey);
+  const sealed = await f.sealFor(Platform.AnthropicSubscription);
+  assert.throws(
+    () =>
+      f.report(entry.session_id, {
+        state: InstanceLoginState.Completed,
+        address: AUTHORIZATION_URL,
+        ...sealed,
+      }),
+    { code: Code.NameConflict },
+  );
+  assert.equal(f.loginStatus(entry.session_id).state, LoginSessionState.Failed);
+  assert.equal(f.rows().length, ONE_ROW);
 });

@@ -392,6 +392,10 @@ function parsedMetadata(row: CredentialRow): Record<string, unknown> | null {
   return row.metadata === null ? null : JSON.parse(row.metadata);
 }
 
+function requireNameForm(name: string): void {
+  if (!validateNameForm(name) || isReservedName(name)) throw invalidInput();
+}
+
 function invalidInput(): OperationError {
   return new OperationError(
     HttpStatus.BadRequest,
@@ -2118,7 +2122,7 @@ export class CustodyComponent implements Service, CredentialRecords {
     name: string,
     holder: string = SERVER_HOLDER,
   ): void {
-    if (!validateNameForm(name) || isReservedName(name)) throw invalidInput();
+    requireNameForm(name);
     const existing = rowsForName(tx, name, holder);
     if (existing.length !== NO_ROWS)
       throw new OperationError(
@@ -2126,6 +2130,23 @@ export class CustodyComponent implements Service, CredentialRecords {
         CustodyErrorCode.Conflict,
         "Credential name already exists.",
         { id: existing[0]!.id },
+      );
+  }
+
+  requireLoginTarget(tx: Transaction, name: string, holder: string): void {
+    if (holder === SERVER_HOLDER) {
+      this.requireAvailableName(tx, name);
+      return;
+    }
+    requireNameForm(name);
+    refuseArchived(tx, name, holder);
+    const row = newestLive(tx, name, holder);
+    if (row && this.sealedCurrent(tx, holder, row.sealed_to))
+      throw new OperationError(
+        HttpStatus.Conflict,
+        CustodyErrorCode.Conflict,
+        "Credential name already exists.",
+        { id: row.id },
       );
   }
 
@@ -2140,10 +2161,24 @@ export class CustodyComponent implements Service, CredentialRecords {
     const entry = ownedPlatform(set, platform);
     assert.ok(entry);
     assert.equal(entry.secret_shape, SecretShape.OAuth);
-    this.requireAvailableName(tx, name, copy.holder);
+    this.requireLoginTarget(tx, name, copy.holder);
     this.refusePlatformConflict(tx, name, platform);
     const stored = this.storedCopy(tx, set, entry, copy);
     const id = createIdentity(CREDENTIAL_PREFIX);
+    const stale = newestLive(tx, name, copy.holder);
+    if (stale) {
+      this.insertRevision(
+        tx,
+        stale,
+        id,
+        stored.value,
+        stored.sealed_to,
+        parsedMetadata(stale),
+        now,
+      );
+      this.drainRevisions(tx, name, copy.holder, now);
+      return id;
+    }
     const { nonce, ciphertext } = encrypt(
       this.envelopeKey,
       id,
