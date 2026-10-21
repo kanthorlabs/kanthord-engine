@@ -63,6 +63,8 @@ const NO_ITEMS = 0;
 const ONE_ITEM = 1;
 const FAILED_CODE = 1;
 const RUNNING_STATE = "true";
+const ALL_CONTAINERS = ["--all"];
+const RUNNING_CONTAINERS: string[] = [];
 
 interface CommandAnswer {
   code: number;
@@ -100,10 +102,11 @@ async function waitUntil<T>(
 async function containerNames(
   runtime: ContainerRuntime,
   filter: string,
+  scope = ALL_CONTAINERS,
 ): Promise<string[]> {
   const answer = await runtimeCall(runtime, [
     "ps",
-    "--all",
+    ...scope,
     "--filter",
     filter,
     "--format",
@@ -440,10 +443,10 @@ test(
 );
 
 test(
-  "a launcher that dies by SIGKILL leaves no container after 20 s",
+  "a launcher that dies by SIGKILL leaves no running slot after 20 s, and the next start removes its container",
   { skip: SKIP, timeout: LIVE_TIMEOUT_MS },
   async (t) => {
-    const { runtime, masterKey } = await liveDriver(t);
+    const { driver, runtime, masterKey } = await liveDriver(t);
     const slot = poolSlot(masterKey, 1);
     const root = temporary(t);
     const driverPath = join(import.meta.dirname, "container-driver.ts");
@@ -474,14 +477,16 @@ test(
     launcher.kill("SIGKILL");
     const killed = performance.now();
     await waitUntil(
-      () => containerNames(runtime, `name=${name}`),
+      () => containerNames(runtime, `name=${name}`, RUNNING_CONTAINERS),
       (names) => names.length === NO_ITEMS,
       ORPHAN_LIMIT_MS,
-      "criterion 5: the orphan container leaves",
+      "criterion 5: the orphan slot stops",
     );
     t.diagnostic(
-      `criterion 5: container gone ${Math.round(performance.now() - killed)} ms after SIGKILL of the launcher`,
+      `criterion 5: slot stopped ${Math.round(performance.now() - killed)} ms after SIGKILL of the launcher`,
     );
+    await driver.prepare();
+    assert.deepEqual(await containerNames(runtime, `name=${name}`), []);
   },
 );
 
