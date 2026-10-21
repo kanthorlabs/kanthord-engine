@@ -16,7 +16,7 @@ import {
 } from "./test-sshd.ts";
 
 const GIT_FAILED = "repository.connector.git_failed";
-const DEADLINE_MS = 5000;
+const DEADLINE_MS = 60_000;
 const MISSING_REPOSITORY = "file:////nonexistent_kanthord_git_failure_test";
 const READ_FAILED =
   "fatal: Could not read from remote repository.\n\nPlease make sure you have the correct access rights\nand the repository exists.";

@@ -11,7 +11,6 @@ import { generateSshKey, sshFingerprintOf, sshPublicKeyOf } from "./ssh-key.ts";
 
 const execFileAsync = promisify(execFile);
 const FINGERPRINT_FIELD = 1;
-const SOCKET_WAIT_MS = 5000;
 const SOCKET_POLL_MS = 10;
 const TRUNCATED_LINES = 2;
 const EXIT_SUCCESS = 0;
@@ -69,13 +68,18 @@ async function scratchAgent(t: TestContext): Promise<string> {
     env: toolEnvironment(),
     stdio: "ignore",
   });
-  const closed = new Promise((resolve) => agent.once("close", resolve));
+  let exited = false;
+  const closed = new Promise((resolve) =>
+    agent.once("close", () => {
+      exited = true;
+      resolve(undefined);
+    }),
+  );
   t.after(async () => {
     agent.kill();
     await closed;
   });
-  const until = Date.now() + SOCKET_WAIT_MS;
-  while (Date.now() < until) {
+  while (!exited) {
     if (await stat(socket).catch(() => null)) return socket;
     await delay(SOCKET_POLL_MS);
   }

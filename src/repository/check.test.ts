@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { chmodSync, readFileSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { chmodSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { delimiter, join } from "node:path";
 import test from "node:test";
 import { background, CancellationContext } from "../kernel/context.ts";
@@ -109,6 +110,8 @@ test("requireTool runs the tool without the agent of the host", (t) => {
   const record = join(root, "environment");
   writeFileSync(join(root, tool), `#!/bin/sh\nenv > '${record}'\n`);
   chmodSync(join(root, tool), 0o700);
+  execFileSync(join(root, tool));
+  rmSync(record);
   const path = process.env.PATH;
   const socket = process.env.SSH_AUTH_SOCK;
   process.env.PATH = `${root}${delimiter}${path ?? ""}`;

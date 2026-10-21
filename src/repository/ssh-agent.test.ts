@@ -1,10 +1,16 @@
 import assert from "node:assert/strict";
 import { execFile, spawn } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import {
+  chmodSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { mkdir, readdir, readFile, stat } from "node:fs/promises";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
-import { basename, join } from "node:path";
+import { basename, delimiter, join } from "node:path";
 import test from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 import { promisify } from "node:util";
@@ -32,6 +38,11 @@ const AGENT_EXIT_POLL_MS = 20;
 const PRIVATE_MODE = 0o700;
 const PERMISSION_BITS = 0o777;
 const SAMPLES = 5;
+const SLOW_AGENT_SECONDS = 6;
+const SCRIPT_MODE = 0o700;
+const CANCEL_AFTER_MS = 100;
+const MS_PER_SECOND = 1000;
+const CANCELLED_CODE = "system.context.cancelled";
 const LIFECYCLE_RUNS = 3;
 const PARALLEL_RUNS = 8;
 const SAMPLE_INTERVAL_MS = 20;
@@ -238,6 +249,63 @@ test("parallel withSshAgent calls each load their own key", async () => {
     loaded,
     keys.map((key) => key.public_key),
   );
+});
+
+async function withSlowAgent(work: (path: string) => Promise<void>) {
+  const { stdout } = await execFileAsync("sh", ["-c", "command -v ssh-agent"]);
+  const bin = mkdtempSync(join(scratch, "bin-"));
+  const script = join(bin, "ssh-agent");
+  writeFileSync(
+    script,
+    `#!/bin/sh\nsleep ${SLOW_AGENT_SECONDS}\nexec '${stdout.trim()}' "$@"\n`,
+  );
+  chmodSync(script, SCRIPT_MODE);
+  const path = process.env.PATH ?? "";
+  process.env.PATH = `${bin}${delimiter}${path}`;
+  try {
+    await work(path);
+  } finally {
+    process.env.PATH = path;
+  }
+}
+
+test("withSshAgent waits for an agent socket that appears after 5 s", async () => {
+  await withSlowAgent(async (path) => {
+    const key = access("slow");
+    const loaded = await withSshAgent(
+      key,
+      background,
+      DEADLINE_MS,
+      async (env) => {
+        const { stdout: listed } = await execFileAsync("ssh-add", ["-L"], {
+          env: { PATH: path, SSH_AUTH_SOCK: socketOf(env) },
+        });
+        return listed.trim();
+      },
+    );
+    assert.equal(loaded, key.public_key);
+  });
+});
+
+test("a cancel ends the wait for a slow agent socket and leaves no agent directory", async () => {
+  await withSlowAgent(async () => {
+    const context = new CancellationContext();
+    const started = Date.now();
+    setTimeout(() => context.cancel(), CANCEL_AFTER_MS);
+    await assert.rejects(
+      withSshAgent(access("cancel-wait"), context, DEADLINE_MS, async () => {
+        assert.fail("The work must not run.");
+      }),
+      { code: CANCELLED_CODE },
+    );
+    assert.ok(Date.now() - started < SLOW_AGENT_SECONDS * MS_PER_SECOND);
+    assert.deepEqual(
+      (await readdir(scratch)).filter((name) =>
+        name.startsWith(SSH_AGENT_DIRECTORY_PREFIX),
+      ),
+      [],
+    );
+  });
 });
 
 test("withSshAgent refuses a socket path above the limit", async () => {
