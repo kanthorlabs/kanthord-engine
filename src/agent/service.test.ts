@@ -20,6 +20,7 @@ import {
   AdvancingFailure,
   CooldownChangeKind,
   type AgentSelection,
+  type ChainEntry,
   PromptOrigin,
   PromptLayerKind,
   PromptScope,
@@ -2596,6 +2597,194 @@ test("a repeated failure doubles the hold up to the maximum and an expired hold 
   assert.equal(
     f.view().chain[HEAD_POSITION]?.cooldown?.available_at,
     f.now() + max_ms,
+  );
+});
+
+const INSTANCE_HOLDER = "instance-holder";
+
+async function readAgent(f: ReturnType<typeof enablementFixture>) {
+  const operation = agentOperations.get;
+  return operation.output.parse(
+    await f.registry.get(operation.id).handler(
+      operation.input.parse({
+        params: { agent_name: AGENT },
+        query: {},
+        body: null,
+      }),
+      f.caller,
+    ),
+  );
+}
+
+function selectionOf(entry: ChainEntry): AgentSelection {
+  return {
+    agent_name: AGENT,
+    position: entry.position,
+    level: entry.level,
+    agent_provider: entry.agent_provider,
+    provider: entry.provider,
+    credential: entry.credential,
+    model_identifier: entry.model_identifier,
+    reasoning_effort: entry.reasoning_effort,
+  };
+}
+
+test("agent read answers the chain of the enablement with no cooldown, with no copy check and without the hold of an instance copy", async (t) => {
+  const holds = memoryCredentialHolds();
+  const f = holdFixture(t, {
+    credentialHolds: holds,
+    copyHeld: () => false,
+  });
+  f.store.transaction((tx) =>
+    holds.hold(
+      tx,
+      provider.credential,
+      INSTANCE_HOLDER,
+      f.now() + COOLDOWN_DEFAULTS.max_ms,
+      FIRST_STRIKE,
+    ),
+  );
+  const answer = await readAgent(f);
+  assert.deepEqual(answer.chain, [
+    {
+      position: HEAD_POSITION,
+      level: ChainLevel.Enablement,
+      agent_provider: provider.name,
+      provider: provider.provider,
+      credential: provider.credential,
+      model_identifier: MODEL,
+      reasoning_effort: defaults.reasoning_effort,
+      cooldown: null,
+    },
+    {
+      position: SECOND_POSITION,
+      level: ChainLevel.Enablement,
+      agent_provider: spare.name,
+      provider: spare.provider,
+      credential: spare.credential,
+      model_identifier: HAIKU,
+      reasoning_effort: spareHaiku.reasoning_effort,
+      cooldown: null,
+    },
+    {
+      position: 2,
+      level: ChainLevel.Enablement,
+      agent_provider: provider.name,
+      provider: provider.provider,
+      credential: provider.credential,
+      model_identifier: OPUS,
+      reasoning_effort: primaryOpus.reasoning_effort,
+      cooldown: null,
+    },
+  ]);
+  assert.equal(answer.active_position, HEAD_POSITION);
+  assert.equal(answer.cooling, null);
+});
+
+test("agent read shows one cooling entry and keeps the head active", async (t) => {
+  const f = holdFixture(t);
+  const second = f.view().chain[SECOND_POSITION];
+  assert.ok(second);
+  f.fail(selectionOf(second), AdvancingFailure.RateLimited);
+  const answer = await readAgent(f);
+  assert.deepEqual(
+    answer.chain.map(({ cooldown }) => cooldown),
+    [
+      null,
+      {
+        strikes: FIRST_STRIKE,
+        available_at: f.now() + COOLDOWN_DEFAULTS.rate_limited_ms,
+      },
+      null,
+    ],
+  );
+  assert.equal(answer.active_position, HEAD_POSITION);
+  assert.equal(answer.cooling, null);
+});
+
+test("agent read answers no active position and the earliest end when every entry cools", async (t) => {
+  const f = holdFixture(t);
+  const head = f.selected();
+  f.fail(head, AdvancingFailure.RateLimited);
+  const afterHead = await readAgent(f);
+  assert.equal(afterHead.active_position, SECOND_POSITION);
+  assert.equal(afterHead.cooling, null);
+  f.fail(f.selected(), AdvancingFailure.QuotaExhausted);
+  const answer = await readAgent(f);
+  const headEnd = f.now() + COOLDOWN_DEFAULTS.rate_limited_ms;
+  assert.deepEqual(
+    answer.chain.map(({ cooldown }) => cooldown?.available_at),
+    [headEnd, f.now() + COOLDOWN_DEFAULTS.quota_exhausted_ms, headEnd],
+  );
+  assert.equal(answer.active_position, null);
+  assert.deepEqual(answer.cooling, {
+    code: AgentErrorCode.ChainCooling,
+    available_at: headEnd,
+  });
+});
+
+test("agent read shows an expired cooldown with its strikes and selects its entry", async (t) => {
+  const f = holdFixture(t);
+  const head = f.selected();
+  f.fail(head, AdvancingFailure.RateLimited);
+  const end = f.now() + COOLDOWN_DEFAULTS.rate_limited_ms;
+  f.advance(COOLDOWN_DEFAULTS.rate_limited_ms);
+  const answer = await readAgent(f);
+  assert.deepEqual(answer.chain[HEAD_POSITION]?.cooldown, {
+    strikes: FIRST_STRIKE,
+    available_at: end,
+  });
+  assert.equal(answer.active_position, HEAD_POSITION);
+  assert.equal(answer.cooling, null);
+});
+
+test("agent read answers an empty chain for an absent, a disabled and an invalid enablement", async (t) => {
+  let failure: OperationError | null = null;
+  const f = enablementFixture(t, {
+    custodySuitability: () => {
+      if (failure) throw failure;
+    },
+  });
+  const empty = { chain: [], active_position: null, cooling: null };
+  const absent = await readAgent(f);
+  assert.equal(absent.enablement, null);
+  assert.deepEqual(
+    {
+      chain: absent.chain,
+      active_position: absent.active_position,
+      cooling: absent.cooling,
+    },
+    empty,
+  );
+  const put = f.invoke("enablement.put", chainBody);
+  const disabled = f.invoke("enablement.disable", {
+    expected_revision: put.revision,
+  });
+  const off = await readAgent(f);
+  assert.equal(off.enablement?.state, EnablementState.Disabled);
+  assert.deepEqual(
+    {
+      chain: off.chain,
+      active_position: off.active_position,
+      cooling: off.cooling,
+    },
+    empty,
+  );
+  f.invoke("enablement.enable", { expected_revision: disabled.revision });
+  failure = new OperationError(
+    HttpStatus.NotFound,
+    "credential.credential.not_found",
+    "Missing credential.",
+  );
+  const invalid = await readAgent(f);
+  assert.ok(invalid.enablement);
+  assert.deepEqual(
+    {
+      chain: invalid.chain,
+      active_position: invalid.active_position,
+      cooling: invalid.cooling,
+    },
+    empty,
   );
 });
 
