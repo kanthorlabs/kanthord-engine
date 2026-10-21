@@ -4,7 +4,12 @@ import { createIdentity } from "../kernel/identity.ts";
 import { testMachineIdentity } from "../kernel/test-identity.ts";
 import { AgentChoiceKind, ClaimNodeState, ClaimIntent } from "./contract.ts";
 import { claimOnce, ClaimOutcome } from "./claim.ts";
-import { insertExecution, readExecution } from "./execution-store.ts";
+import { InstanceQueue } from "./instance-queue.ts";
+import {
+  endExecution,
+  insertExecution,
+  readExecution,
+} from "./execution-store.ts";
 import {
   executionFixture,
   schedulerHarness,
@@ -27,6 +32,11 @@ export function claimHarness(
 ) {
   const row = executionFixture();
   const h = schedulerHarness(t);
+  const woken: string[][] = [];
+  const dependencies = {
+    ...h.dependencies,
+    instances: new InstanceQueue((runtimes) => woken.push(runtimes)),
+  };
   const identity = testMachineIdentity(
     {
       clientId: createIdentity("client_identity"),
@@ -77,9 +87,9 @@ export function claimHarness(
   };
   const claim = (now = FIXTURE_NOW) =>
     h.store.transaction((tx) =>
-      claimOnce(tx, h.dependencies, identity, pull, now),
+      claimOnce(tx, dependencies, identity, pull, now),
     );
-  return { ...h, row, identity, pull, binding, claim };
+  return { ...h, dependencies, woken, row, identity, pull, binding, claim };
 }
 
 test("claim pins binding, attempt, revision, trace and the fixed effective deadline", (t) => {
@@ -450,7 +460,7 @@ test("two pulls of one instance on two bindings commit one claim", (t) => {
   const h = claimHarness(t);
   const claimOther = instanceSibling(h);
   assert.equal(h.claim().outcome, ClaimOutcome.Claimed);
-  assert.equal(claimOther(FIXTURE_NOW).outcome, ClaimOutcome.None);
+  assert.equal(claimOther(FIXTURE_NOW).outcome, ClaimOutcome.Queued);
   assert.equal(
     h.calls.filter((call) => call.method === CLAIM_METHOD).length,
     ONE_CALL,
@@ -464,7 +474,52 @@ test("an expired execution of a sibling registration blocks no claim of its inst
   assert.equal(first.outcome, ClaimOutcome.Claimed);
   assert.equal(
     claimOther(first.row!.expired_at - 1).outcome,
-    ClaimOutcome.None,
+    ClaimOutcome.Queued,
   );
   assert.equal(claimOther(first.row!.expired_at).outcome, ClaimOutcome.Claimed);
+});
+
+test("a free instance goes to the sibling that waited longest and a newer pull is queued", (t) => {
+  const h = claimHarness(t);
+  const claimOther = instanceSibling(h);
+  const first = h.claim();
+  assert.equal(first.outcome, ClaimOutcome.Claimed);
+  assert.equal(claimOther(FIXTURE_NOW).outcome, ClaimOutcome.Queued);
+  h.store.transaction((tx) =>
+    endExecution(tx, first.row!.execution_id, FIXTURE_NOW, null),
+  );
+  assert.equal(h.claim().outcome, ClaimOutcome.Queued);
+  assert.equal(claimOther(FIXTURE_NOW).outcome, ClaimOutcome.Claimed);
+  assert.deepEqual(h.woken, []);
+});
+
+test("a sibling turn without a claim passes the slot and wakes the queued pull", (t) => {
+  const h = claimHarness(t);
+  const claimOther = instanceSibling(h);
+  const first = h.claim();
+  assert.equal(claimOther(FIXTURE_NOW).outcome, ClaimOutcome.Queued);
+  h.store.transaction((tx) =>
+    endExecution(tx, first.row!.execution_id, FIXTURE_NOW, null),
+  );
+  assert.equal(h.claim().outcome, ClaimOutcome.Queued);
+  h.dependencies.registrations.registrationHealthcheck = (_tx, runtime) =>
+    runtime === h.row.runtime_identity;
+  assert.equal(claimOther(FIXTURE_NOW).outcome, ClaimOutcome.Refused);
+  assert.deepEqual(h.woken, [[h.row.runtime_identity]]);
+  assert.equal(h.claim().outcome, ClaimOutcome.Claimed);
+});
+
+test("a pruned registration that is no longer live holds no place in the order", (t) => {
+  const h = claimHarness(t);
+  const claimOther = instanceSibling(h);
+  const first = h.claim();
+  assert.equal(claimOther(FIXTURE_NOW).outcome, ClaimOutcome.Queued);
+  h.store.transaction((tx) =>
+    endExecution(tx, first.row!.execution_id, FIXTURE_NOW, null),
+  );
+  assert.equal(h.claim().outcome, ClaimOutcome.Queued);
+  h.dependencies.instances.prune(
+    (runtime) => runtime === h.row.runtime_identity,
+  );
+  assert.equal(h.claim().outcome, ClaimOutcome.Claimed);
 });

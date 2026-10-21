@@ -473,3 +473,227 @@ test("a waiting pull claims a held job when its stop backoff ends inside the win
   assert.equal(result.kind, WorkPullKind.Claimed);
   assert.ok(performance.now() - started < 10 * heldMs);
 });
+
+function instanceHarness(t: TestContext, siblingListed = true) {
+  const h = harness(t);
+  const projectOf = new Map<string, string>();
+  h.dependencies.transitions.claim = (tx, nodeId) => {
+    h.service.delete(tx, nodeId);
+    return {
+      kind: "steps",
+      project_id: projectOf.get(nodeId)!,
+      attempt: FIRST_ATTEMPT,
+      node_revision: FIRST_ATTEMPT,
+    };
+  };
+  const bindingOf = (runtime: string, projectId: string) => {
+    const identity = testMachineIdentity(
+      {
+        clientId: createIdentity("client_identity"),
+        name: "worker",
+        projectId,
+        resourceIdentity: h.row.resource_identity,
+        issuedAt: Date.now(),
+      },
+      "pull",
+      runtime,
+    );
+    const enqueue = (count: number) =>
+      h.store.transaction((tx) => {
+        for (let index = 0; index < count; index++) {
+          const nodeId = createIdentity("node");
+          projectOf.set(nodeId, projectId);
+          h.service.insert(tx, nodeId, projectId, 0);
+        }
+      });
+    const pull = (
+      context: CancellationContext | typeof background = background,
+    ) =>
+      h.invoke(
+        "workPull",
+        {
+          ...h.input,
+          body: { ...h.input.body, runtime_identity: runtime },
+        },
+        { ...h.caller, identity, context },
+      );
+    const release = (executionId: string) =>
+      h.invoke(
+        "executionRelease",
+        {
+          params: { execution_id: executionId },
+          query: {},
+          body: { further_work: false },
+        },
+        {
+          ...h.caller,
+          identity,
+          execution: {
+            executionId,
+            projectId,
+            nodeId: createIdentity("node"),
+            attempt: FIRST_ATTEMPT,
+            pinnedRevision: FIRST_ATTEMPT,
+            nodeBranch: "kanthord/node",
+            runtimeIdentity: runtime,
+            workerBindingId: h.row.worker_binding_id,
+          },
+        },
+      );
+    return { runtime, projectId, enqueue, pull, release };
+  };
+  const first = bindingOf(h.row.runtime_identity, h.row.project_id);
+  const second = bindingOf(
+    createIdentity("worker_registration"),
+    createIdentity("project"),
+  );
+  const siblings: Record<string, string[]> = siblingListed
+    ? {
+        [first.runtime]: [second.runtime],
+        [second.runtime]: [first.runtime],
+      }
+    : {};
+  h.dependencies.registrations.registrationsOfInstance = (_tx, runtime) =>
+    siblings[runtime] ?? [];
+  return { ...h, first, second };
+}
+
+function claimantOf(result: {
+  kind: string;
+  execution?: { claimant: { runtime_identity: string } };
+}) {
+  assert.equal(result.kind, WorkPullKind.Claimed);
+  return result.execution!.claimant.runtime_identity;
+}
+
+test("two bindings on one instance alternate their claims when the releaser pulls first", async (t) => {
+  const h = instanceHarness(t);
+  const { first, second } = h;
+  first.enqueue(THREE_COMMITS);
+  second.enqueue(THREE_COMMITS);
+  const claimants: string[] = [];
+  let running = await first.pull();
+  claimants.push(claimantOf(running));
+  for (let round = 0; round < THREE_COMMITS; round++) {
+    const [ended, next] =
+      claimants.at(-1) === first.runtime ? [first, second] : [second, first];
+    assert.equal(running.kind, WorkPullKind.Claimed);
+    await ended.release(running.execution.execution_id);
+    const context = new CancellationContext();
+    const refused = ended.pull(context);
+    const cancelled = assert.rejects(refused, { code: CANCELLED });
+    await turn();
+    assert.equal(h.service.pulling(ended.runtime), true);
+    running = await next.pull();
+    claimants.push(claimantOf(running));
+    context.cancel();
+    await cancelled;
+  }
+  assert.deepEqual(claimants, [
+    first.runtime,
+    second.runtime,
+    first.runtime,
+    second.runtime,
+  ]);
+});
+
+test("a parked pull of a sibling takes the slot when the execution of its instance ends", async (t) => {
+  const h = instanceHarness(t);
+  const { first, second } = h;
+  first.enqueue(TWO_CHECKS);
+  second.enqueue(ONE_COMMIT);
+  const running = await first.pull();
+  assert.equal(claimantOf(running), first.runtime);
+  const parked = second.pull();
+  await turn();
+  assert.equal(h.service.pulling(second.runtime), true);
+  assert.equal(running.kind, WorkPullKind.Claimed);
+  await first.release(running.execution.execution_id);
+  assert.equal(claimantOf(await parked), second.runtime);
+  const context = new CancellationContext();
+  const refused = first.pull(context);
+  const cancelled = assert.rejects(refused, { code: CANCELLED });
+  await turn();
+  assert.equal(h.service.pulling(first.runtime), true);
+  context.cancel();
+  await cancelled;
+});
+
+test("a sibling turn that finds no work passes the slot to the parked pull at once", async (t) => {
+  const h = instanceHarness(t);
+  const { first, second } = h;
+  first.enqueue(TWO_CHECKS);
+  const running = await first.pull();
+  assert.equal(running.kind, WorkPullKind.Claimed);
+  await first.release(running.execution.execution_id);
+  const waiting = first.pull();
+  await turn();
+  assert.equal(h.service.pulling(first.runtime), true);
+  const context = new CancellationContext();
+  const idle = second.pull(context);
+  const cancelled = assert.rejects(idle, { code: CANCELLED });
+  assert.equal(claimantOf(await waiting), first.runtime);
+  context.cancel();
+  await cancelled;
+});
+
+test("one binding keeps its speed when no other binding of its instance waits", async (t) => {
+  const h = instanceHarness(t, false);
+  const { first } = h;
+  first.enqueue(THREE_COMMITS);
+  for (let round = 0; round < THREE_COMMITS; round++) {
+    const commits = h.commits();
+    const result = await first.pull();
+    assert.equal(claimantOf(result), first.runtime);
+    assert.equal(h.commits(), commits + ONE_COMMIT);
+    assert.equal(h.service.pulling(first.runtime), false);
+    assert.equal(result.kind, WorkPullKind.Claimed);
+    await first.release(result.execution.execution_id);
+  }
+});
+
+test("one binding keeps its claims when its sibling pulls with no work", async (t) => {
+  const h = instanceHarness(t);
+  const { first, second } = h;
+  first.enqueue(THREE_COMMITS);
+  let running = await first.pull();
+  for (let round = 0; round < THREE_COMMITS - 1; round++) {
+    assert.equal(running.kind, WorkPullKind.Claimed);
+    await first.release(running.execution.execution_id);
+    const waiting = first.pull();
+    await turn();
+    const context = new CancellationContext();
+    const idle = assert.rejects(second.pull(context), { code: CANCELLED });
+    running = await waiting;
+    assert.equal(claimantOf(running), first.runtime);
+    assert.equal(h.service.pulling(first.runtime), false);
+    context.cancel();
+    await idle;
+  }
+});
+
+test("the instance guard still allows one execution per instance", async (t) => {
+  const h = instanceHarness(t);
+  const { first, second } = h;
+  first.enqueue(ONE_COMMIT);
+  second.enqueue(ONE_COMMIT);
+  assert.equal(claimantOf(await first.pull()), first.runtime);
+  const context = new CancellationContext();
+  const refused = second.pull(context);
+  const cancelled = assert.rejects(refused, { code: CANCELLED });
+  h.service.wake(second.projectId);
+  await turn();
+  assert.equal(h.service.pulling(second.runtime), true);
+  context.cancel();
+  await cancelled;
+  assert.equal(
+    Number(
+      h.store.database
+        .prepare(
+          "SELECT count(*) AS count FROM scheduler_execution WHERE ended_at IS NULL",
+        )
+        .get()!.count,
+    ),
+    ONE_COMMIT,
+  );
+});

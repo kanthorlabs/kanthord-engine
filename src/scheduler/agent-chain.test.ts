@@ -41,6 +41,7 @@ import {
   type ReleaseStop,
 } from "./contract.ts";
 import { claimOnce, ClaimOutcome } from "./claim.ts";
+import { InstanceQueue } from "./instance-queue.ts";
 import {
   executionRecord,
   insertExecution,
@@ -522,7 +523,7 @@ function pinHarness(
     h.store.transaction((tx) =>
       claimOnce(
         tx,
-        h.dependencies,
+        { ...h.dependencies, instances: new InstanceQueue(() => {}) },
         identity,
         {
           resource_identity: row.resource_identity,
