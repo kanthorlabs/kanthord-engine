@@ -21,11 +21,13 @@ import {
 } from "./execution-store.ts";
 import { settleNode, settleRuntime } from "./settlement.ts";
 import { admits } from "./match.ts";
+import type { InstanceQueue } from "./instance-queue.ts";
 
 export const ClaimOutcome = {
   Running: "running",
   Claimed: "claimed",
   Refused: "refused",
+  Queued: "queued",
   None: "none",
 } as const;
 export type ClaimOutcome = (typeof ClaimOutcome)[keyof typeof ClaimOutcome];
@@ -33,6 +35,9 @@ export interface ClaimResult {
   outcome: ClaimOutcome;
   row: ExecutionRow | null;
   settled: boolean;
+}
+export interface ClaimDependencies extends Dependencies {
+  instances: InstanceQueue;
 }
 const NO_INSTANCES = 0;
 const MILLISECONDS_PER_SECOND = 1000;
@@ -141,9 +146,9 @@ function acquire(
   return { outcome: ClaimOutcome.Claimed, row, settled: selected.settled };
 }
 
-export function claimOnce(
+function admit(
   tx: Transaction,
-  dependencies: Dependencies,
+  dependencies: ClaimDependencies,
   identity: MachineIdentity,
   pull: WorkPull,
   now: number,
@@ -182,17 +187,15 @@ export function claimOnce(
     ) >= binding.instance_count
   )
     return { outcome: ClaimOutcome.None, row: null, settled };
+  const siblings = dependencies.registrations.registrationsOfInstance(
+    tx,
+    pull.runtime_identity,
+  );
   if (
-    countRunningOfRuntimes(
-      tx,
-      dependencies.registrations.registrationsOfInstance(
-        tx,
-        pull.runtime_identity,
-      ),
-      now,
-    ) > NO_INSTANCES
+    countRunningOfRuntimes(tx, siblings, now) > NO_INSTANCES ||
+    !dependencies.instances.turn(pull.runtime_identity, siblings)
   )
-    return { outcome: ClaimOutcome.None, row: null, settled };
+    return { outcome: ClaimOutcome.Queued, row: null, settled };
   const choice = dependencies.agentChains.select(
     tx,
     binding.binding_id,
@@ -211,4 +214,29 @@ export function claimOnce(
     now,
   );
   return { ...result, settled: result.settled || settled };
+}
+
+export function claimOnce(
+  tx: Transaction,
+  dependencies: ClaimDependencies,
+  identity: MachineIdentity,
+  pull: WorkPull,
+  now: number,
+): ClaimResult {
+  const { instances } = dependencies;
+  const result = admit(tx, dependencies, identity, pull, now);
+  if (result.outcome === ClaimOutcome.Queued)
+    instances.wait(pull.runtime_identity);
+  else if (
+    result.outcome !== ClaimOutcome.Claimed &&
+    instances.waits(pull.runtime_identity)
+  )
+    instances.pass(
+      pull.runtime_identity,
+      dependencies.registrations.registrationsOfInstance(
+        tx,
+        pull.runtime_identity,
+      ),
+    );
+  return result;
 }

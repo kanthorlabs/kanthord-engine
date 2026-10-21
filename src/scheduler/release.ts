@@ -25,17 +25,22 @@ export function release(
   executionId: string,
   body: ExecutionRelease,
   caller: CallerContext,
-  wake: (projectId: string) => void,
+  wake: (projectId: string, runtimeIdentities: string[]) => void,
 ) {
   const proof = caller.execution;
   assert.ok(proof, "release requires an execution proof");
   assert.equal(proof.executionId, executionId);
   let released: ExecutionRow | undefined;
+  let siblings: string[] = [];
   let cooldowns: CooldownChange[] = [];
   const result = caller.commit((tx) => {
     const now = Date.now();
     const row = requireRunning(tx, executionId, proof.runtimeIdentity, now);
     released = row;
+    siblings = dependencies.registrations.registrationsOfInstance(
+      tx,
+      row.runtime_identity,
+    );
     const selections = dependencies.agentChains.resolve(
       tx,
       row.worker_binding_id,
@@ -95,6 +100,6 @@ export function release(
     end: ExecutionEnd.Finished,
     stop: body.stop,
   });
-  wake(proof.projectId);
+  wake(proof.projectId, siblings);
   return result;
 }

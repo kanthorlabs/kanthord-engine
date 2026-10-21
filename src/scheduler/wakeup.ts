@@ -64,6 +64,16 @@ export class WaitingPulls {
     );
   }
 
+  wakeRuntimes(runtimeIdentities: string[]): void {
+    const waiters = [...this.projects.values()].flatMap((project) =>
+      [...project].filter((waiter) =>
+        runtimeIdentities.includes(waiter.runtime_identity),
+      ),
+    );
+    for (let index = 0; index < waiters.length; index++)
+      waiters[index]!.finish();
+  }
+
   wakeAll(): void {
     const waiters = [...this.projects.values()].flatMap((project) => [
       ...project,

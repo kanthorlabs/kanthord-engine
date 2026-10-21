@@ -14,6 +14,7 @@ import type { Registration } from "./registration.ts";
 const SERVER_ERROR = 500;
 const REGISTRATION_REQUIRED = "gateway.registration.required";
 const CONNECTION_SUPERSEDED = "gateway.jwt.connection_superseded";
+const NO_DELAY = 0;
 export interface PullLoopInput {
   api: WorkerTransport;
   registration: Registration;
@@ -39,6 +40,7 @@ export async function pullLoop(
       if (input.shutdown.err()) break;
     }
     const round = input.round?.();
+    const started = performance.now();
     const context = new CancellationContext(input.shutdown);
     const preempted = round?.onCancel(() => context.cancel());
     const task = input.api.scheduler
@@ -76,6 +78,15 @@ export async function pullLoop(
     }
     if (input.shutdown.err()) return null;
     if (round?.err()) continue;
+    if (result.type === OperationResultType.Completed) {
+      const rest = input.backoff.next() - (performance.now() - started);
+      if (rest <= NO_DELAY) {
+        input.backoff.reset();
+        continue;
+      }
+      await sleep(rest, input.shutdown);
+      continue;
+    }
     if (
       result.type === OperationResultType.Failure &&
       result.status < SERVER_ERROR &&
