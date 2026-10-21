@@ -1,10 +1,14 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { setImmediate as turn } from "node:timers/promises";
 import { CancellationContext } from "../../kernel/context.ts";
 import { OperationResultType } from "../../kernel/operation.ts";
 import { httpClient } from "../../gateway/client.ts";
-import { schedulerOperations } from "../../scheduler/contract.ts";
-import { Backoff } from "./api.ts";
+import {
+  schedulerOperations,
+  WORK_PULL_WAIT_MS,
+} from "../../scheduler/contract.ts";
+import { Backoff, BACKOFF_INITIAL_MS } from "./api.ts";
 import { httpTransport } from "./transport.ts";
 import { pullLoop } from "./pull-loop.ts";
 import { testClaim } from "./test-support.ts";
@@ -196,4 +200,48 @@ test("a claim answer that fails its schema ends the loop after one pull", async 
   });
   assert.equal(result?.code, ANSWER_INVALID);
   assert.equal(pulls, ONCE);
+});
+
+test("a no-work answer that the server held pulls again at once, and a quick one backs off", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  let monotonic = 0;
+  t.mock.method(performance, "now", () => monotonic);
+  const api = httpTransport("http://127.0.0.1:1");
+  const shutdown = new CancellationContext();
+  let pulls = 0;
+  t.mock.method(api.scheduler, "workPull", async () => {
+    if (++pulls === ONCE) monotonic += WORK_PULL_WAIT_MS;
+    return {
+      type: OperationResultType.Completed,
+      status: 200,
+      data: { kind: "no-work" },
+    };
+  });
+  const running = pullLoop({
+    api,
+    registration: REGISTRATION,
+    backoff: new Backoff(),
+    shutdown,
+    host: async () => {
+      assert.fail("Unexpected claim");
+    },
+    register: async () => {
+      assert.fail("Unexpected registration");
+    },
+    pulling: () => {},
+    claimed: () => assert.fail("Unexpected claim"),
+  });
+  const twice = 2;
+  const thrice = 3;
+  const turns = 10;
+  for (let index = 0; index < turns; index++) await turn();
+  assert.equal(pulls, twice);
+  t.mock.timers.tick(BACKOFF_INITIAL_MS - 1);
+  await turn();
+  assert.equal(pulls, twice);
+  t.mock.timers.tick(1);
+  for (let index = 0; index < turns; index++) await turn();
+  assert.equal(pulls, thrice);
+  shutdown.cancel();
+  assert.equal(await running, null);
 });

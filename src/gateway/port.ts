@@ -71,6 +71,7 @@ async function invokeCall(
   call: PortCall,
   requestId: string,
   context: CancellationContext,
+  logger: Logger,
 ): Promise<RecordedResponse> {
   if (
     call.body !== null &&
@@ -110,6 +111,7 @@ async function invokeCall(
       rejection,
       traceparent: call.traceparent,
       tracestate: call.tracestate,
+      logger,
     },
   );
   if (result.status === HttpStatus.NoContent)
@@ -174,9 +176,12 @@ export function servePort(
             call,
             requestId,
             context,
+            logger,
           )
         : absentRoute(requestId);
     } catch (error) {
+      if (!(error instanceof GatewayError))
+        logger.error({ err: error, request_id: requestId }, "Request failed");
       response = failure(error, requestId);
     } finally {
       contexts.delete(call.call_id);

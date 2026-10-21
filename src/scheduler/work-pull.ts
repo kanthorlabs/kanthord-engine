@@ -5,15 +5,19 @@ import { HttpStatus } from "../kernel/http.ts";
 import type { CallerContext } from "../kernel/operation.ts";
 import type { Transaction } from "../kernel/store.ts";
 import { WORK_PULL_WAIT_MS, WorkPullKind, type WorkPull } from "./contract.ts";
-import type { Dependencies } from "./service.ts";
 import type { WaitingPulls } from "./wakeup.ts";
-import { claimOnce, ClaimOutcome, type ClaimResult } from "./claim.ts";
+import {
+  claimOnce,
+  ClaimOutcome,
+  type ClaimDependencies,
+  type ClaimResult,
+} from "./claim.ts";
 import { executionRecord } from "./execution-store.ts";
 import { settleRuntime } from "./settlement.ts";
 import { executionTrace } from "./telemetry.ts";
 
 const WINDOW_ENDED = 0;
-export interface PullDependencies extends Dependencies {
+export interface PullDependencies extends ClaimDependencies {
   waiting: WaitingPulls;
   accepting(): boolean;
 }
@@ -94,10 +98,16 @@ function commit(
   cancelled(caller);
   let settled = false;
   let claimed = false;
+  let siblings: string[] = [];
   const answer = caller.commit((tx) => {
     const result = decide(tx, dependencies, identity, pull, now);
     settled = result.settled;
     claimed = result.outcome === ClaimOutcome.Claimed;
+    if (claimed)
+      siblings = dependencies.registrations.registrationsOfInstance(
+        tx,
+        pull.runtime_identity,
+      );
     if (!result.row) return { kind: WorkPullKind.NoWork } as const;
     return {
       kind: WorkPullKind.Claimed,
@@ -105,6 +115,7 @@ function commit(
     } as const;
   });
   if (settled) dependencies.waiting.wake(identity.projectId);
+  if (claimed) dependencies.instances.claimed(pull.runtime_identity, siblings);
   if (answer.kind === WorkPullKind.Claimed) {
     if (claimed)
       dependencies.agentChains.selected(
@@ -145,7 +156,8 @@ export async function workPull(
     const result = probe(dependencies, identity, pull, now);
     const remaining = deadline - performance.now();
     if (
-      result.outcome !== ClaimOutcome.None ||
+      (result.outcome !== ClaimOutcome.None &&
+        result.outcome !== ClaimOutcome.Queued) ||
       result.settled ||
       remaining <= WINDOW_ENDED ||
       dependencies.waiting.pulling(pull.runtime_identity) ||

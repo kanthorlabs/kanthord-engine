@@ -29,6 +29,7 @@ import {
   readUnendedOfRuntime,
 } from "./execution-store.ts";
 import { WaitingPulls } from "./wakeup.ts";
+import { InstanceQueue } from "./instance-queue.ts";
 import { workPull } from "./work-pull.ts";
 import { release } from "./release.ts";
 import { claimGet, executionGet, executionList } from "./execution-read.ts";
@@ -152,6 +153,9 @@ export class SchedulerService implements Service, WorkQueue {
   private started = false;
   private readonly dependencies: Dependencies;
   private readonly waiting = new WaitingPulls();
+  private readonly instances = new InstanceQueue((runtimeIdentities) =>
+    this.waiting.wakeRuntimes(runtimeIdentities),
+  );
   private accepting = true;
   private lossTimer?: NodeJS.Timeout;
   private runError: Error | null = null;
@@ -320,7 +324,10 @@ export class SchedulerService implements Service, WorkQueue {
         input.params.execution_id,
         input.body,
         caller,
-        (projectId) => this.wake(projectId),
+        (projectId, runtimeIdentities) => {
+          this.wake(projectId);
+          this.waiting.wakeRuntimes(runtimeIdentities);
+        },
       ),
     );
     registry.register(schedulerOperations.queuePeek, (input, caller) =>
@@ -331,6 +338,7 @@ export class SchedulerService implements Service, WorkQueue {
         {
           ...this.dependencies,
           waiting: this.waiting,
+          instances: this.instances,
           accepting: () => this.accepting,
         },
         input.body,
@@ -448,6 +456,14 @@ export class SchedulerService implements Service, WorkQueue {
   }
 
   sweep(): void {
+    this.dependencies.store.transaction((tx) =>
+      this.instances.prune((runtimeIdentity) =>
+        this.dependencies.registrations.registrationHealthcheck(
+          tx,
+          runtimeIdentity,
+        ),
+      ),
+    );
     const identities = this.dependencies.store.transaction((tx) =>
       readExpiredUnsettled(tx, Date.now()).map((row) => row.execution_id),
     );

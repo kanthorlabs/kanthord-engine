@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import type { Logger } from "pino";
 import { z } from "zod";
 import type { Store } from "../kernel/store.ts";
 import { digest } from "../kernel/json.ts";
@@ -57,6 +58,7 @@ export interface InvocationOptions {
   rejection?: GatewayError;
   request?: Request;
   host?: string;
+  logger?: Logger;
 }
 
 export interface ExecutionLookup {
@@ -432,7 +434,24 @@ export class Invocation {
       if (reservation)
         this.idempotency.complete(reservation, response, operation.secret);
       return response;
-    } catch (error) {
+    } catch (thrown) {
+      const error =
+        thrown !== null && thrown === context.err()
+          ? new GatewayError(
+              503,
+              "gateway.invocation.cancelled",
+              "Request cancelled.",
+            )
+          : thrown;
+      if (!(error instanceof GatewayError))
+        options.logger?.error(
+          {
+            err: error,
+            request_id: options.requestId,
+            operation: operation.id,
+          },
+          "Request failed",
+        );
       const response = failure(
         error instanceof z.ZodError
           ? new GatewayError(

@@ -42,6 +42,10 @@ const DELIVERY_SIGNATURE = "exact";
 const DELIVERY_BODY_LIMIT_BYTES = 50 * 1024 * 1024;
 const HOST_LIMIT = 255;
 const INFO_LEVEL = 30;
+const ERROR_LEVEL = 50;
+const UNKNOWN_FAILURE = "gateway.invocation.unknown";
+const FAILED_MESSAGE = "Request failed";
+const HANDLER_BUG = "handler bug";
 const LOOPBACK_BIND_SENTENCE =
   "A loopback bind accepts connections from this host only.";
 const ExpectedErrorCode = {
@@ -937,4 +941,29 @@ test("a static path segment registers before a parameter segment at the same pos
     "/api/agent/enablement/:agentName",
     "/api/agent/:agentName",
   ]);
+});
+
+test("an HTTP request that fails with an unknown error answers 500 and logs the error at the error level", async (t) => {
+  const registry = new OperationRegistry();
+  registry.register(protectedRead, () => {
+    throw new Error(HANDLER_BUG);
+  });
+  const fixture = await gatewayFixture(t, { registry });
+  const response = await fixture.request(protectedRead.path, {
+    headers: { Authorization: `Bearer ${fixture.token}` },
+  });
+  assert.equal(response.status, HttpStatus.InternalServerError);
+  const { error, request_id: requestId } = errorSchema.parse(
+    await response.json(),
+  );
+  assert.equal(error.code, UNKNOWN_FAILURE);
+  const failed = fixture.logs
+    .map((line) => JSON.parse(line))
+    .filter((record) => record.msg === FAILED_MESSAGE);
+  assert.equal(failed.length, SINGLE_EXECUTION_COUNT);
+  assert.equal(failed[0].level, ERROR_LEVEL);
+  assert.equal(failed[0].request_id, requestId);
+  assert.equal(failed[0].operation, protectedRead.id);
+  assert.equal(failed[0].err.message, HANDLER_BUG);
+  assert.doesNotMatch(JSON.stringify(failed[0]), new RegExp(fixture.token));
 });

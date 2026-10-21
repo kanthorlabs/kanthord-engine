@@ -32,6 +32,8 @@ const NOT_FOUND = "gateway.routing.not_found";
 const UNAUTHORIZED = "gateway.authentication.unauthorized";
 const BODY_TOO_LARGE = "gateway.request.body_too_large";
 const INVALID_JSON = "gateway.request.invalid_json";
+const UNKNOWN_FAILURE = "gateway.invocation.unknown";
+const FAILED_MESSAGE = "Request failed";
 
 interface Recorded {
   id: string;
@@ -241,4 +243,39 @@ test("an authentication failure wins over a body failure and a body above the li
   const size = await answerOf(answers, "call-2");
   assert.equal(size.status, HttpStatus.PayloadTooLarge);
   assert.equal(errorCode(size), BODY_TOO_LARGE);
+});
+
+test("a port call passes its logger and logs an unknown failure at the error level", async (t) => {
+  const failure = new Error("invocation bug");
+  const { invocation, calls } = fakeInvocation(() => Promise.reject(failure));
+  const records: Record<string, unknown>[] = [];
+  const { port1, port2 } = new MessageChannel();
+  servePort(
+    port1,
+    invocation,
+    () => TOKEN,
+    pino(
+      { level: "info" },
+      { write: (line) => records.push(JSON.parse(line)) },
+    ),
+  );
+  const answers: PortAnswer[] = [];
+  port2.on("message", (answer: PortAnswer) => answers.push(answer));
+  t.after(() => {
+    port1.close();
+    port2.close();
+  });
+  port2.postMessage(callOf(workerOperations.heartbeat, "call-1", null));
+  const answer = await answerOf(answers, "call-1");
+  assert.equal(answer.status, HttpStatus.InternalServerError);
+  assert.equal(errorCode(answer), UNKNOWN_FAILURE);
+  assert.ok(calls[0]?.options.logger);
+  const failed = records.filter((record) => record.msg === FAILED_MESSAGE);
+  assert.equal(failed.length, SINGLE_ANSWER);
+  assert.equal(failed[0]!.level, pino.levels.values.error);
+  assert.equal(failed[0]!.request_id, calls[0]!.options.requestId);
+  assert.equal(
+    (failed[0]!.err as { message: string }).message,
+    failure.message,
+  );
 });
