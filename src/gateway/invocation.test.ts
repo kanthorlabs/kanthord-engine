@@ -1,7 +1,13 @@
 import assert from "node:assert/strict";
 import { randomBytes } from "node:crypto";
 import { test, type TestContext } from "node:test";
+import type { Logger } from "pino";
 import { z } from "zod";
+import {
+  CancellationContext,
+  throwIfCancelled,
+  type Context,
+} from "../kernel/context.ts";
 import { MASTER_KEY_BYTES } from "../config/global.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import {
@@ -341,4 +347,126 @@ test("a validation failure names each unrecognized key", async (t) => {
       { path: ["body", "second"], code: "unrecognized_keys" },
     ],
   );
+});
+
+function machineInvocation(
+  t: TestContext,
+  registry: OperationRegistry,
+  resolveWorkerGroup: (context: Context) => Promise<void>,
+) {
+  const store = new Store(":memory:");
+  t.after(() => store.close());
+  registry.seal({ [StoreName.Operational]: store });
+  const runtime = createIdentity("worker_registration");
+  const identity = testMachineIdentity(
+    {
+      clientId: createIdentity("client_identity"),
+      name: "worker",
+      projectId: createIdentity("project"),
+      resourceIdentity: "worker:kanthord:general",
+      issuedAt: Date.now(),
+    },
+    "machine",
+    runtime,
+  );
+  const invocation = createInvocation({
+    registry,
+    stores: { [StoreName.Operational]: store },
+    masterKey: randomBytes(MASTER_KEY_BYTES).toString("base64"),
+    authVersion: AUTH_VERSION,
+    lookups: {
+      project: {
+        resolveWorkerGroup: async (
+          _projectId,
+          _resource,
+          _issuedAt,
+          context,
+        ) => {
+          await resolveWorkerGroup(context);
+          return {
+            project_id: identity.projectId,
+            resource_identity: identity.resourceIdentity,
+          };
+        },
+      },
+      worker: {
+        findByClient: () => ({
+          runtime_identity: runtime,
+          registered_at: Date.now(),
+          client_id: identity.clientId,
+          name: identity.name,
+          project_id: identity.projectId,
+          resource_identity: identity.resourceIdentity,
+        }),
+        heartbeat: () => {},
+      },
+    },
+  });
+  t.after(() => invocation.stop());
+  const failures: { fields: Record<string, unknown>; message: string }[] = [];
+  const logger = {
+    error: (fields: Record<string, unknown>, message: string) =>
+      failures.push({ fields, message }),
+  } as unknown as Logger;
+  return { invocation, identity, logger, failures };
+}
+
+const clientOperation = {
+  ...operation,
+  id: "test.client.read",
+  access: AccessPolicy.Client,
+} as const;
+const UNKNOWN_FAILURE = "gateway.invocation.unknown";
+const CANCELLED_FAILURE = "gateway.invocation.cancelled";
+
+test("a request abort during the machine recheck answers cancelled and logs no failure", async (t) => {
+  const registry = new OperationRegistry();
+  registry.register(clientOperation, () => assert.fail("Unexpected handler"));
+  const request = new CancellationContext();
+  const h = machineInvocation(t, registry, async (context) => {
+    request.cancel();
+    await Promise.resolve();
+    throwIfCancelled(context);
+  });
+  const response = await h.invocation.invoke(clientOperation.id, input, {
+    identity: h.identity,
+    context: request,
+    logger: h.logger,
+  });
+  assert.equal(response.status, HttpStatus.ServiceUnavailable);
+  assert.equal(
+    (response.body as { error: { code: string } }).error.code,
+    CANCELLED_FAILURE,
+  );
+  assert.deepEqual(h.failures, []);
+});
+
+test("an unknown failure answers 500 and logs the error with the request and the operation", async (t) => {
+  const registry = new OperationRegistry();
+  const failure = new Error("handler bug");
+  registry.register(clientOperation, () => {
+    throw failure;
+  });
+  const h = machineInvocation(t, registry, async () => {});
+  const requestId = createIdentity("request");
+  const response = await h.invocation.invoke(clientOperation.id, input, {
+    identity: h.identity,
+    requestId,
+    logger: h.logger,
+  });
+  assert.equal(response.status, HttpStatus.InternalServerError);
+  assert.equal(
+    (response.body as { error: { code: string } }).error.code,
+    UNKNOWN_FAILURE,
+  );
+  assert.deepEqual(h.failures, [
+    {
+      fields: {
+        err: failure,
+        request_id: requestId,
+        operation: clientOperation.id,
+      },
+      message: "Request failed",
+    },
+  ]);
 });
