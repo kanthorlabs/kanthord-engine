@@ -248,6 +248,8 @@ export class WorkerInstances implements WorkerInstanceLookups {
   connectionOf(instanceId: string): InstanceConnection {
     const current = this.connections.get(instanceId);
     if (!current) return null;
+    if (Date.now() - current.last_heartbeat_at > INSTANCE_CONNECTED_WINDOW_MS)
+      return null;
     return {
       connection_name: current.connection_name ?? "",
       connected_at: current.connected_at,

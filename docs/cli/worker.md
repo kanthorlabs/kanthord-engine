@@ -577,7 +577,7 @@ kanthord worker instance list [--worker <worker>] [--include-archived] [--limit 
 
 Required token: human JWT. Empty params, absent body. HTTP `200` returns one page in ascending name order.
 Each item holds the instance record, `connection`, `binding_count` and `holder_mismatch`.
-`connection` is `{ connection_name, connected_at, last_heartbeat_at }` for a current connection, otherwise `null`.
+`connection` is `{ connection_name, connected_at, last_heartbeat_at }` for a current connection whose last heartbeat is at most 60 seconds old, otherwise `null`.
 `binding_count` counts the bindings that list the instance.
 `holder_mismatch` is true when a binding that lists the instance names a credential with no live copy of the instance sealed to its current key.
 
