@@ -26,16 +26,16 @@ const FIRST_REVISION = 1;
 const NEXT_REVISION = FIRST_REVISION + 1;
 const FAST_HEARTBEAT_MS = 50;
 const SLOW_INTERVAL_MS = 3600000;
-const WAIT_MS = 10000;
 const POLL_MS = 20;
 
-async function until<T>(read: () => Promise<T | undefined | false>) {
-  const deadline = Date.now() + WAIT_MS;
+async function until<T>(
+  read: () => Promise<T | undefined | false>,
+  signal: AbortSignal,
+) {
   for (;;) {
     const value = await read();
     if (value) return value;
-    if (Date.now() > deadline) throw new Error("Timed out waiting");
-    await delay(POLL_MS);
+    await delay(POLL_MS, undefined, { signal });
   }
 }
 
@@ -123,7 +123,7 @@ test("a live worker instance checks its own bad key and the instance page answer
   const unhealthy = await until(async () => {
     const copy = await copyOf();
     return copy?.health.reported_at !== null && copy;
-  });
+  }, t.signal);
   assert.deepEqual(unhealthy!.health, {
     status: ResourceStatus.Unhealthy,
     capability: CAPABILITY,
@@ -146,7 +146,7 @@ test("a live worker instance checks its own bad key and the instance page answer
   const healthy = await until(async () => {
     const copy = await copyOf();
     return copy?.health.status === ResourceStatus.Healthy && copy;
-  });
+  }, t.signal);
   assert.equal(healthy!.revision, NEXT_REVISION);
   assert.deepEqual(healthy!.health.models, [
     { id: MODEL_ID, owned_by: null, created: null },

@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
-import { spawnSync } from "node:child_process";
+import { execFile, spawnSync } from "node:child_process";
 import { createServer, type IncomingHttpHeaders } from "node:http";
 import type { AddressInfo } from "node:net";
+import { promisify } from "node:util";
 import {
   existsSync,
   readFileSync,
@@ -61,6 +62,7 @@ const TOKEN_LIFETIME_SECONDS = 600;
 const CONTAINER_INIT_HINT =
   "container: podman run --rm -v <volume>:/var/lib/kanthord docker.io/kanthorlabs/kanthord:<version> config init --gateway-bind :: --gateway-allowed-host localhost:<port> --gateway-allowed-host 127.0.0.1:<port>\n";
 const entry = new URL("../../main.ts", import.meta.url).href;
+const execFileAsync = promisify(execFile);
 async function invocation(
   args: string[],
   env: NodeJS.ProcessEnv,
@@ -402,7 +404,7 @@ test("worker handover validates locally and prints receipt metadata without the 
   );
   assert.equal(lost.status, ExitCode.Failure);
   assert.equal(lost.stderr, HANDOVER_LOST);
-  const result = spawnSync(
+  const result = await execFileAsync(
     process.execPath,
     [
       "--input-type=module",
@@ -418,9 +420,8 @@ test("worker handover validates locally and prints receipt metadata without the 
     await import(${JSON.stringify(entry)});
   `,
     ],
-    { env, encoding: "utf8", timeout: 10000 },
+    { env, encoding: "utf8", signal: t.signal },
   );
-  assert.equal(result.status, ExitCode.Success, result.stderr);
   assert.equal(result.stderr, EMPTY_OUTPUT);
   assert.deepEqual(JSON.parse(result.stdout), {
     received: true,

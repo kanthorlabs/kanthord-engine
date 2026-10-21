@@ -3,6 +3,7 @@ import { mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test, type TestContext } from "node:test";
+import { setTimeout as delay } from "node:timers/promises";
 import { simpleGit } from "simple-git";
 import { ulid } from "ulid";
 import type { Material } from "../../custody/contract.ts";
@@ -64,7 +65,6 @@ const TWO_SSH_RELEASES = 2;
 const CREATE_RELEASES = 2;
 const CREATE_PINS = 2;
 const SSH_REVISION_REVOKED = "credential.revision.revoked";
-const WAIT_ATTEMPTS = 400;
 const WAIT_STEP_MS = 25;
 const UNPROCESSABLE_STATUS = 422;
 const FIRST_ATTEMPT = 1;
@@ -171,12 +171,8 @@ function readOf(calls: readonly FakeGitHubCall[], number: number) {
   );
 }
 
-async function until(condition: () => boolean) {
-  for (let attempt = FIRST_INDEX; attempt < WAIT_ATTEMPTS; attempt++) {
-    if (condition()) return;
-    await new Promise((resolve) => setTimeout(resolve, WAIT_STEP_MS));
-  }
-  assert.fail("The condition did not hold in time.");
+async function until(condition: () => boolean, signal: AbortSignal) {
+  while (!condition()) await delay(WAIT_STEP_MS, undefined, { signal });
 }
 
 async function setup(t: TestContext, landing = "human") {
@@ -627,7 +623,7 @@ test(
         const before = posts();
         const open = h.gitHub.hold();
         const first = h.perform(gated, gatedBody("concurrent"));
-        await until(() => posts() === before + ONE_CREATE);
+        await until(() => posts() === before + ONE_CREATE, t.signal);
         failed(
           await h.perform(gated, gatedBody("concurrent")),
           HttpStatus.Conflict,
@@ -896,7 +892,7 @@ test(
       "gated.pull_request",
       address(closed),
     );
-    await until(() => readOf(h.gitHub.calls, closed));
+    await until(() => readOf(h.gitHub.calls, closed), t.signal);
     h.gitHub.close(closed);
     await h.write(["mission", "node", "check", G], {
       expected_mission_version: await h.version(),
@@ -1118,7 +1114,7 @@ test(
       "gated.pull_request",
       address(closed),
     );
-    await until(() => readOf(h.gitHub.calls, closed));
+    await until(() => readOf(h.gitHub.calls, closed), t.signal);
     h.gitHub.close(closed);
     await h.write(["mission", "node", "check", G], {
       expected_mission_version: await h.version(),

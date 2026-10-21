@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { execFile, type ExecFileException } from "node:child_process";
 import { test } from "node:test";
+import { promisify } from "node:util";
 const ExitCode = { Success: 0, Failure: 1 } as const;
+const execFileAsync = promisify(execFile);
 import {
   abortSignal,
   background,
@@ -120,9 +122,9 @@ test("Context arms no timer for an inherited deadline and cancels through its pa
   stalled.cancel();
 });
 
-test("A throwing cancellation listener terminates the process on both registration paths", () => {
+test("A throwing cancellation listener terminates the process on both registration paths", async (t) => {
   for (const order of ["listener-first", "cancel-first"]) {
-    const result = spawnSync(
+    const result = await execFileAsync(
       process.execPath,
       [
         "--input-type=module",
@@ -146,9 +148,12 @@ test("A throwing cancellation listener terminates the process on both registrati
     writeSync(1, 'survived\\n');
     `,
       ],
-      { encoding: "utf8", timeout: 10000 },
+      { encoding: "utf8", signal: t.signal },
+    ).then(
+      () => assert.fail(order),
+      (error: ExecFileException & { stdout: string; stderr: string }) => error,
     );
-    assert.equal(result.status, ExitCode.Failure, order);
+    assert.equal(result.code, ExitCode.Failure, order);
     assert.match(result.stderr, /listener failed/, order);
     assert.match(result.stdout, /witness notified/, order);
     assert.doesNotMatch(result.stdout, /survived/, order);

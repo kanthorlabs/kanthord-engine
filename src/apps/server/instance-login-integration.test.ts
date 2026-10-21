@@ -26,7 +26,6 @@ const COMPLETED = "completed";
 const FIRST_REVISION = 1;
 const FAST_HEARTBEAT_MS = 50;
 const SLOW_INTERVAL_MS = 3600000;
-const WAIT_MS = 10000;
 const POLL_MS = 20;
 const OAUTH_SECRET = {
   refresh: "private-refresh-token",
@@ -34,13 +33,14 @@ const OAUTH_SECRET = {
   expires: Date.now() + 3600000,
 };
 
-async function until<T>(read: () => Promise<T | undefined | false>) {
-  const deadline = Date.now() + WAIT_MS;
+async function until<T>(
+  read: () => Promise<T | undefined | false>,
+  signal: AbortSignal,
+) {
   for (;;) {
     const value = await read();
     if (value) return value;
-    if (Date.now() > deadline) throw new Error("Timed out waiting");
-    await delay(POLL_MS);
+    await delay(POLL_MS, undefined, { signal });
   }
 }
 
@@ -129,7 +129,7 @@ test("a live worker instance signs in through a fake pi-ai copy_code flow, and t
       body: null,
     });
     return completed(answer).connection !== null;
-  });
+  }, t.signal);
   const login = completed(
     await llm.login(
       {
@@ -161,7 +161,7 @@ test("a live worker instance signs in through a fake pi-ai copy_code flow, and t
       }),
     );
     return answer.state === COMPLETED && answer;
-  });
+  }, t.signal);
   assert.equal(status.failure_reason, null);
   assert.equal(submitted, COPY_CODE_VALUE);
   const copy = completed(

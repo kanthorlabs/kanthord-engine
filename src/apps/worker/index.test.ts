@@ -87,11 +87,14 @@ const CHILD_SCRIPT = `
   if (error) { process.stderr.write(error.message); process.exitCode = 1; }
 `;
 
-async function until<T>(read: () => T | undefined | false): Promise<T> {
+async function until<T>(
+  read: () => T | undefined | false,
+  signal: AbortSignal,
+): Promise<T> {
   for (;;) {
     const value = read();
     if (value) return value;
-    await delay(POLL_MS);
+    await delay(POLL_MS, undefined, { signal });
   }
 }
 
@@ -125,6 +128,7 @@ async function fixture(t: TestContext, bindings = TWO_BINDINGS) {
       () =>
         records.filter((record) => record.msg === REGISTRATION_READY).length >=
         count,
+      t.signal,
     );
   return { server, env, records, options, ready };
 }
@@ -206,7 +210,7 @@ test("a stop during the start ends the run with no error", async (t) => {
   const worker = new Worker(f.options());
   t.after(() => worker.stop());
   const running = worker.run();
-  await until(() => held);
+  await until(() => held, t.signal);
   const stopped = worker.stop();
   gate.resolve();
   assert.equal(await stopped, null);
@@ -283,9 +287,10 @@ test(
     t.after(() => firstWorker.stop());
     const first = firstWorker.run();
     await f.ready();
-    await until(() => held);
+    await until(() => held, t.signal);
     const heartbeats = await until(
       () => f.server.requestsTo(FakePath.InstanceHeartbeat).length,
+      t.signal,
     );
     const second = new Worker(f.options({ connectionName: CONNECTION_B }));
     t.after(() => second.stop());
@@ -325,18 +330,25 @@ test("an execution passes one token renewal and the next request carries the ren
   const worker = new Worker(f.options({ renewalIntervalMs: RENEWAL_MS }));
   t.after(() => worker.stop());
   const running = worker.run();
-  const held = await until(() => f.server.requestsTo(FakePath.Handover)[0]);
-  await until(() =>
-    f.server.state.requests
-      .slice(f.server.state.requests.indexOf(held))
-      .some((request) => request.path === FakePath.Connect),
+  const held = await until(
+    () => f.server.requestsTo(FakePath.Handover)[0],
+    t.signal,
+  );
+  await until(
+    () =>
+      f.server.state.requests
+        .slice(f.server.state.requests.indexOf(held))
+        .some((request) => request.path === FakePath.Connect),
+    t.signal,
   );
   assert.equal(f.server.requestsTo(FakePath.Token).length > SINGLE, true);
   handover.resolve();
-  const next = await until(() =>
-    f.server
-      .requestsTo(FakePath.Pull)
-      .find((request) => request.bearer !== held.bearer),
+  const next = await until(
+    () =>
+      f.server
+        .requestsTo(FakePath.Pull)
+        .find((request) => request.bearer !== held.bearer),
+    t.signal,
   );
   assert.ok(f.server.state.clientTokens.has(next.bearer!));
   assert.deepEqual(await worker.healthcheck(), {
@@ -413,7 +425,10 @@ test("an auth-version increment with a changed client secret ends the process, a
   const restarted = new Worker(f.options());
   t.after(() => restarted.stop());
   const again = restarted.run();
-  const resumed = await until(() => f.server.requestsTo(FakePath.Handover)[0]);
+  const resumed = await until(
+    () => f.server.requestsTo(FakePath.Handover)[0],
+    t.signal,
+  );
   assert.deepEqual(resumed.body, { execution_id: claim.execution_id });
   const registrations = f.records.filter(
     (record) => record.msg === REGISTRATION_READY,
@@ -439,7 +454,7 @@ test("a client request refused after an auth-version increment ends the process 
   t.after(() => worker.stop());
   const running = worker.run();
   await f.ready();
-  await until(() => held);
+  await until(() => held, t.signal);
   f.server.state.workerTokens.clear();
   f.server.state.clientTokens.clear();
   f.server.state.bindings[0]!.client_secret = Buffer.alloc(32, 7).toString(
@@ -484,21 +499,27 @@ test("a removed binding ends only its own entry while another binding completes 
     settled = true;
   });
   await f.ready();
-  const held = await until(() => f.server.requestsTo(FakePath.Handover)[0]);
+  const held = await until(
+    () => f.server.requestsTo(FakePath.Handover)[0],
+    t.signal,
+  );
   const removedRuntime = f.server.state.runtimes.get(removed.client_id);
   f.server.state.bindings = [kept];
   f.server.state.bindingVersion++;
   handover.resolve();
-  await until(() =>
-    f.server.state.requests
-      .slice(f.server.state.requests.indexOf(held))
-      .some((request) => request.path === FakePath.Connect),
+  await until(
+    () =>
+      f.server.state.requests
+        .slice(f.server.state.requests.indexOf(held))
+        .some((request) => request.path === FakePath.Connect),
+    t.signal,
   );
   await until(
     () =>
       f.server
         .requestsTo(FakePath.Pull)
         .filter((request) => !removedPull(request)).length > SINGLE,
+    t.signal,
   );
   assert.equal(settled, false);
   assert.deepEqual(f.server.state.deregistered, []);
@@ -526,7 +547,7 @@ test("a binding version change adds a new binding and drains a dropped binding",
   dropped.state = "draining";
   f.server.state.bindingVersion++;
   await f.ready(TWO_BINDINGS);
-  await until(() => f.server.state.deregistered.length === SINGLE);
+  await until(() => f.server.state.deregistered.length === SINGLE, t.signal);
   assert.equal(await worker.stop(), null);
   assert.equal(await running, null);
   assert.equal(f.server.state.deregistered.length, TWO_BINDINGS);
@@ -537,7 +558,10 @@ test("stop aborts each outstanding pull and deregisters each registration", asyn
   const worker = new Worker(f.options());
   t.after(() => worker.stop());
   const running = worker.run();
-  await until(() => f.server.requestsTo(FakePath.Pull).length === TWO_BINDINGS);
+  await until(
+    () => f.server.requestsTo(FakePath.Pull).length === TWO_BINDINGS,
+    t.signal,
+  );
   const context = new CancellationContext();
   context.cancel();
   assert.equal(await worker.stop(), null);
