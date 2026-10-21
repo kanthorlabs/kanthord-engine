@@ -354,6 +354,7 @@ test("EF05.1-EF05.8 the match admits a node by intent and tags and refuses an un
       await until(
         () => h.fixture.scheduler.pulling(linuxCoder.runtime_identity),
         Boolean,
+        t.signal,
       );
       assert.equal((await linuxCoder.pull()).kind, WorkPullKind.NoWork);
       const node = await h.read<{ state: string }>([
@@ -414,6 +415,7 @@ test("EF05.1-EF05.8 the match admits a node by intent and tags and refuses an un
       await until(
         () => h.fixture.scheduler.pulling(linuxReviewer.runtime_identity),
         Boolean,
+        t.signal,
       );
       assert.equal((await linuxReviewer.pull()).kind, WorkPullKind.NoWork);
       const macosReviewer = await h.instance("macos-reviewer");

@@ -215,6 +215,7 @@ test("E07 poll acquisition journey", { timeout: TIMEOUT }, async (t) => {
       const later = await until(
         () => eventsCalls().slice(before),
         (calls) => calls.length >= HELD_CALLS,
+        t.signal,
       );
       assert.equal(later.length, HELD_CALLS);
       assert.equal(later[0]?.status, null);
@@ -226,12 +227,15 @@ test("E07 poll acquisition journey", { timeout: TIMEOUT }, async (t) => {
     async () => {
       gitHub.failEvents(SERVER_ERROR);
       release();
-      await until(eventsCalls, (calls) =>
-        calls.some((call) => call.status === SERVER_ERROR),
+      await until(
+        eventsCalls,
+        (calls) => calls.some((call) => call.status === SERVER_ERROR),
+        t.signal,
       );
       const stored = await until(
         async () => (await inboundOf()).checkpoint,
         (checkpoint) => checkpoint !== null,
+        t.signal,
       );
       assert.deepEqual(stored, { etag: null, pulls_etag: etagOf([]) });
       assert.deepEqual(await events(), []);
@@ -247,6 +251,7 @@ test("E07 poll acquisition journey", { timeout: TIMEOUT }, async (t) => {
         (list) =>
           list.length === FIRST_BATCH &&
           list.every((item) => item.state === InboundEventState.Succeeded),
+        t.signal,
       );
       assert.deepEqual(
         items.map((item) => [item.event_id, item.metadata, item.state]),
@@ -277,6 +282,7 @@ test("E07 poll acquisition journey", { timeout: TIMEOUT }, async (t) => {
       () => eventsCalls().slice(before),
       (calls) =>
         calls.filter((call) => call.status !== null).length >= ANSWERED_CALLS,
+      t.signal,
     );
     for (const call of later.filter((item) => item.status !== null)) {
       assert.equal(call.if_none_match, etagOf(first));
@@ -287,6 +293,7 @@ test("E07 poll acquisition journey", { timeout: TIMEOUT }, async (t) => {
       () => pullsCalls().slice(pullsBefore),
       (calls) =>
         calls.filter((call) => call.status !== null).length >= ANSWERED_CALLS,
+      t.signal,
     );
     for (const call of pulls.filter((item) => item.status !== null)) {
       assert.equal(call.if_none_match, etagOf([]));
@@ -304,6 +311,7 @@ test("E07 poll acquisition journey", { timeout: TIMEOUT }, async (t) => {
         (list) =>
           list.length === SECOND_BATCH &&
           list.every((item) => item.state === InboundEventState.Succeeded),
+        t.signal,
       );
       assert.deepEqual(
         items.map((item) => item.event_id),
@@ -343,6 +351,7 @@ test(
     await until(
       async () => (await h.node(P.nodeId)).state,
       (state) => state === NodeState.Completed,
+      t.signal,
     );
     const answered = gatedPullsCalls()
       .slice(pullsBefore + VALIDATION_CALLS)

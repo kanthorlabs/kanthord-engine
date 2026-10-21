@@ -489,6 +489,7 @@ test("E10 integration journey", { timeout: JOURNEY_TIMEOUT }, async (t) => {
             item.event_id === MERGED_DELIVERY &&
             item.state !== InboundEventState.Pending,
         ),
+      t.signal,
     );
     const E1 = items.find((item) => item.event_id === MERGED_DELIVERY)!;
     assert.equal(E1.state, InboundEventState.Succeeded);
@@ -542,6 +543,7 @@ test("E10 integration journey", { timeout: JOURNEY_TIMEOUT }, async (t) => {
       await until(
         () => j.state(Q),
         (state) => state === NodeState.Completed,
+        t.signal,
       );
       assert.equal(await j.state(Q), NodeState.Completed);
     },

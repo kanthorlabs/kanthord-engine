@@ -391,6 +391,7 @@ test("the check deadline of a poll inbound answers unknown through the report, d
   const drops = await until(
     () => released.drops,
     (items) => items.length === HELD_CHECK_RELEASES,
+    t.signal,
   );
   assert.deepEqual(
     drops,
