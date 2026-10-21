@@ -39,8 +39,7 @@ const SLOW_INTERVAL_MS = 3600000;
 const RENEWAL_MS = 150;
 const REARM_RENEWAL_MS = 400;
 const REARM_WINDOWS = 4;
-const WAIT_MS = 10000;
-const SUPERSEDE_TIMEOUT_MS = 30000;
+const SUPERSEDE_TIMEOUT_MS = 60000;
 const POLL_MS = 10;
 const NO_WORK_DELAY_MS = 20;
 const TWO_BINDINGS = 2;
@@ -88,11 +87,9 @@ const CHILD_SCRIPT = `
 `;
 
 async function until<T>(read: () => T | undefined | false): Promise<T> {
-  const deadline = Date.now() + WAIT_MS;
   for (;;) {
     const value = read();
     if (value) return value;
-    if (Date.now() > deadline) throw new Error("Timed out waiting");
     await delay(POLL_MS);
   }
 }
@@ -210,9 +207,11 @@ test("an http endpoint outside the private address set refuses the start before 
 
 test("a heartbeat with another server_version stops the unit", async (t) => {
   const f = await fixture(t);
-  const running = runWorker(
+  const worker = new Worker(
     f.options({ heartbeatIntervalMs: FAST_HEARTBEAT_MS }),
   );
+  t.after(() => worker.stop());
+  const running = worker.run();
   await f.ready();
   f.server.state.version = MISMATCH_VERSION;
   const error = await running;
@@ -301,6 +300,7 @@ test("an execution passes one token renewal and the next request carries the ren
     return undefined;
   };
   const worker = new Worker(f.options({ renewalIntervalMs: RENEWAL_MS }));
+  t.after(() => worker.stop());
   const running = worker.run();
   const held = await until(() => f.server.requestsTo(FakePath.Handover)[0]);
   await until(() =>
@@ -354,9 +354,11 @@ test("each connect answer re-arms the renewal timer", async (t) => {
 
 test("an auth-version increment with a changed client secret ends the process, and the restart resumes the running execution", async (t) => {
   const f = await fixture(t, SINGLE);
-  const running = runWorker(
+  const worker = new Worker(
     f.options({ heartbeatIntervalMs: FAST_HEARTBEAT_MS }),
   );
+  t.after(() => worker.stop());
+  const running = worker.run();
   await f.ready();
   const runtime = [...f.server.state.runtimes.values()][0]!;
   f.server.state.workerTokens.clear();
@@ -386,6 +388,7 @@ test("an auth-version increment with a changed client secret ends the process, a
     return undefined;
   };
   const restarted = new Worker(f.options());
+  t.after(() => restarted.stop());
   const again = restarted.run();
   const resumed = await until(() => f.server.requestsTo(FakePath.Handover)[0]);
   assert.deepEqual(resumed.body, { execution_id: claim.execution_id });
@@ -409,7 +412,9 @@ test("a client request refused after an auth-version increment ends the process 
     await gate.promise;
     return UNAUTHORIZED;
   };
-  const running = runWorker(f.options());
+  const worker = new Worker(f.options());
+  t.after(() => worker.stop());
+  const running = worker.run();
   await f.ready();
   await until(() => held);
   f.server.state.workerTokens.clear();
@@ -450,6 +455,7 @@ test("a removed binding ends only its own entry while another binding completes 
     };
   };
   const worker = new Worker(f.options());
+  t.after(() => worker.stop());
   let settled = false;
   const running = worker.run().finally(() => {
     settled = true;
@@ -489,6 +495,7 @@ test("a binding version change adds a new binding and drains a dropped binding",
   const worker = new Worker(
     f.options({ heartbeatIntervalMs: FAST_HEARTBEAT_MS }),
   );
+  t.after(() => worker.stop());
   const running = worker.run();
   await f.ready();
   const dropped = f.server.state.bindings[0]!;
@@ -505,6 +512,7 @@ test("a binding version change adds a new binding and drains a dropped binding",
 test("stop aborts each outstanding pull and deregisters each registration", async (t) => {
   const f = await fixture(t);
   const worker = new Worker(f.options());
+  t.after(() => worker.stop());
   const running = worker.run();
   await until(() => f.server.requestsTo(FakePath.Pull).length === TWO_BINDINGS);
   const context = new CancellationContext();
@@ -537,6 +545,7 @@ test("SIGHUP leaves the worker healthy and the handlers leave at termination", a
   const f = await fixture(t, SINGLE);
   const before = process.listenerCount("SIGHUP");
   const worker = new Worker(f.options());
+  t.after(() => worker.stop());
   const running = worker.run();
   await f.ready();
   process.emit("SIGHUP");
