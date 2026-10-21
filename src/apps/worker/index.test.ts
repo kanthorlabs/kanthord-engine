@@ -263,7 +263,9 @@ test(
     const first = firstWorker.run();
     await f.ready();
     await until(() => held);
-    const heartbeats = f.server.requestsTo(FakePath.InstanceHeartbeat).length;
+    const heartbeats = await until(
+      () => f.server.requestsTo(FakePath.InstanceHeartbeat).length,
+    );
     const second = new Worker(f.options({ connectionName: CONNECTION_B }));
     t.after(() => second.stop());
     assert.equal(await second.start(), null);
