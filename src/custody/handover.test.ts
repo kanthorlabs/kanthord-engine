@@ -1148,7 +1148,7 @@ test("sshSign refuses another placement, another binding, no live claim, an inva
   );
 });
 
-test("sshSign checks the payload before custody releases the key and releases nothing for a refused payload", (t) => {
+test("sshSign checks the payload before custody releases the key and releases nothing for a refused payload or a legacy key", (t) => {
   const f = fixture(t, ["anthro-1"], ["deploy"]);
   const [bindingId] = [...f.bindings.keys()];
   const release = t.mock.method(f.component, "release");
@@ -1208,6 +1208,15 @@ test("sshSign checks the payload before custody releases the key and releases no
       Buffer.from(answer.signature, "base64"),
     ),
   );
+  assert.equal(release.mock.callCount(), ONE_CALL);
+  for (const metadata of [null, JSON.stringify({ public_key: "legacy" })]) {
+    f.store.database
+      .prepare("UPDATE credential SET metadata = ? WHERE name = ?")
+      .run(metadata, "deploy");
+    assert.throws(() => f.sign(valid.request), {
+      code: RepositoryErrorCode.SshKeyLegacy,
+    });
+  }
   assert.equal(release.mock.callCount(), ONE_CALL);
 });
 
