@@ -715,7 +715,7 @@ requires no terminal. Startup runs these steps in order:
 
 A startup failure prints its diagnostic, releases what it acquired and exits `1`.
 
-After startup, the instance calls `worker.instance.heartbeat` every 15 s. A new
+After startup, the instance calls `worker.instance.heartbeat` at once and then every 15 s. A new
 binding version opens the connection again, so the instance adds and drains
 bindings without a restart. Every 30 minutes, the instance takes a new worker
 token and opens the connection again. A changed client secret of a hosted
@@ -728,6 +728,17 @@ The heartbeat answer lists the pending OAuth login sessions of the instance in
 `device` mode, reports its address and code through
 `llm.credential.login_report`, and seals the result to its own key. While a
 session is pending, the heartbeat runs every 2 s.
+
+The first heartbeat answer and each new `credential_version` start a check of
+the copies of the instance. The instance lists its copies with
+`llm.credential.list` and reads each live copy sealed to its current key with
+`llm.credential.sealed`. It opens the copy with its own key, runs the provider
+check of the platform with a 10-second deadline, and reports the result
+through `llm.credential.report`. A report holds `revision`, `status`,
+`capability`, `failure_reason` and `models`. The server never calls the
+provider with the key of an instance copy. A failed check or report logs
+`Worker instance credential check failed` or `Worker instance credential report
+failed` with the credential name and no secret.
 
 One connection of an instance is current. A second process of the same
 instance takes the connection. The first process then gets

@@ -19,7 +19,7 @@ import {
   type OperationResult,
 } from "../kernel/operation.ts";
 import type { SshAccess } from "../repository/contract.ts";
-import { loginSessionEntrySchema } from "../llm/contract.ts";
+import { copyHealthSchema, loginSessionEntrySchema } from "../llm/contract.ts";
 import type { Transaction } from "../kernel/store.ts";
 import { HttpMethod, HttpStatus } from "../kernel/http.ts";
 import {
@@ -801,7 +801,6 @@ export const INSTANCE_HEARTBEAT_INTERVAL_MS = 15000;
 export const INSTANCE_CONNECTED_WINDOW_MS = 60000;
 export const INSTANCE_LOGIN_HEARTBEAT_INTERVAL_MS = 2000;
 export const INSTANCE_RENEWAL_INTERVAL_MS = 1800000;
-export const NO_CREDENTIAL_VERSION = 0;
 export const INSTANCE_SUPERSEDED_CODE = "worker.instance.superseded";
 export const BindingEntryState = {
   Serving: "serving",
@@ -1131,11 +1130,12 @@ export const instanceOperations = {
           revision: z.number().int().positive(),
           platform: z.string().min(1),
           sealed_current: z.boolean(),
+          health: copyHealthSchema,
         }),
       ),
     }),
     description:
-      "Read the live or latest revision of a worker instance with the bindings that list it, its connection, its live registrations and its credential copies.",
+      "Read the live or latest revision of a worker instance with the bindings that list it, its connection, its live registrations and its credential copies with the last health report of each copy.",
   },
   "instance.rotate": {
     ...humanOperation,

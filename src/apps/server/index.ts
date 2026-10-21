@@ -609,6 +609,8 @@ export function composeServices(options: {
       heldCopies: (tx, holder) => custody.heldCopies(tx, holder),
     },
     loginSessionsOf: (holder) => llm.loginSessionsOf(holder),
+    credentialVersionOf: (holder) => llm.credentialVersionOf(holder),
+    copyHealthOf: (holder, copy) => llm.copyHealthOf(holder, copy),
     agentConfiguration: {
       validateEntry: (tx, name, entry, holders) =>
         agent.validateEntry(tx, name, entry, holders),

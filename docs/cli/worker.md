@@ -591,12 +591,17 @@ Required `<name>: InstanceName`, mapped to `params.instance_name`. Required toke
 Empty query, absent body. HTTP `200` returns the live revision, or the latest revision of an archived instance.
 The answer adds these fields to the instance record:
 
-| Field           | Type and presence                                                                                           |
-| --------------- | ----------------------------------------------------------------------------------------------------------- |
-| `connection`    | The current connection, as in `instance list`, or `null`.                                                   |
-| `bindings`      | Array of `{ project_id, binding }`, one item for each binding that lists the instance.                      |
-| `registrations` | Array of the live registration records of the instance.                                                     |
-| `credentials`   | Array of `{ name, revision, platform, sealed_current }`, one item for each credential copy of the instance. |
+| Field           | Type and presence                                                                                                   |
+| --------------- | ------------------------------------------------------------------------------------------------------------------- |
+| `connection`    | The current connection, as in `instance list`, or `null`.                                                           |
+| `bindings`      | Array of `{ project_id, binding }`, one item for each binding that lists the instance.                              |
+| `registrations` | Array of the live registration records of the instance.                                                             |
+| `credentials`   | Array of `{ name, revision, platform, sealed_current, health }`, one item for each credential copy of the instance. |
+
+`health` is `{ status, capability, failure_reason, models, reported_at }`, the last check that the instance reported for the newest live revision of the copy.
+The server keeps the report in memory. `reported_at` is the Unix time in milliseconds of the report.
+A copy with no report since the server start, a copy of another revision, or a copy sealed to an ended key answers `status: unknown`, `failure_reason: held_by_instance`, `models: null` and `reported_at: null`.
+`models` holds the model list of a check that reads one, else `null`.
 
 An unknown name answers `404 worker.instance.not_found`.
 

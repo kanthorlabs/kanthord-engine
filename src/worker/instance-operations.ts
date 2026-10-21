@@ -3,6 +3,7 @@ import { isWorkerIdentity } from "../kernel/caller.ts";
 import type { OperationRegistry } from "../kernel/operation.ts";
 import type { Transaction } from "../kernel/store.ts";
 import type { HeldCopy } from "../custody/contract.ts";
+import type { CopyHealth } from "../llm/contract.ts";
 import {
   instanceOperations,
   type registrationRecordSchema,
@@ -18,7 +19,10 @@ export interface InstanceOperationDependencies {
     tx: Transaction,
     row: RegistrationRow,
   ) => typeof registrationRecordSchema._output;
-  heldCopies: (tx: Transaction, holder: string) => HeldCopy[];
+  heldCopies: (
+    tx: Transaction,
+    holder: string,
+  ) => (HeldCopy & { health: CopyHealth })[];
 }
 
 function dropEnded(clock: HeartbeatClock, ended: readonly string[]): void {

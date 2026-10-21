@@ -13,6 +13,7 @@ import {
   type CredentialCopy,
   type CredentialPlatformSet,
   type CredentialRecords,
+  type HeldCopy,
   type InstanceKey,
   type InstanceKeys,
   type MetadataRevision,
@@ -30,7 +31,11 @@ import {
   type Context,
 } from "../kernel/context.ts";
 import { Diagnostic, OperationError } from "../kernel/errors.ts";
-import type { ResourceCheck, ResourceEntry } from "../kernel/health.ts";
+import {
+  ResourceStatus,
+  type ResourceCheck,
+  type ResourceEntry,
+} from "../kernel/health.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import type { CallerContext, OperationRegistry } from "../kernel/operation.ts";
 import {
@@ -45,6 +50,8 @@ import {
   MODEL_CHECK_TIMEOUT_MS,
   PROVIDER_CHECK_TIMEOUT_MS,
   providerCheckBodySchema,
+  type CopyHealth,
+  type CopyReportBody,
   type EnablementsDependentOnModelFn,
   type LlmCredentialAnswer,
   type LlmCredentialCreate,
@@ -63,6 +70,7 @@ import {
   type OAuthSecret,
 } from "./login.ts";
 import { InstanceLogin } from "./instance-login.ts";
+import { CopyHealthBook } from "./copy-health.ts";
 import { checkModel } from "./model-check.ts";
 import type { ModelRuntimeModule } from "./model-connector.ts";
 import {
@@ -104,6 +112,8 @@ const CredentialErrorCode = {
   UnsupportedPlatform: "credential.platform.unsupported",
   UnsupportedEntry: "credential.entry.unsupported",
   SealedInvalid: "credential.sealed.invalid",
+  NotFound: "credential.credential.not_found",
+  RevisionConflict: "credential.revision.conflict",
 } as const;
 const NO_ROWS = 0;
 const LOGIN_FAILED_REASON = "login failed";
@@ -140,6 +150,13 @@ function sealedBody(body: { sealed?: unknown; sealed_to?: string }): {
   return { sealed: sealed.data, sealed_to: body.sealed_to };
 }
 
+function reportInvalid(report: CopyReportBody): boolean {
+  return (
+    (report.status === ResourceStatus.Healthy) !==
+    (report.failure_reason === null)
+  );
+}
+
 function humanIdentity(caller: CallerContext): string | undefined {
   return caller.identity?.kind === IdentityKind.Human
     ? caller.identity.accountId
@@ -158,6 +175,7 @@ export class LlmComponent implements Service {
   private readonly sessions = new LoginSessionStore();
   private readonly logins = new Map<string, OAuthLogin>();
   private readonly instanceLogins = new Map<string, InstanceLogin>();
+  private readonly copyHealth = new CopyHealthBook();
   private readonly oauthProviders: () => readonly Provider[];
   private readonly now: () => number;
   private acceptingLogins = true;
@@ -225,39 +243,51 @@ export class LlmComponent implements Service {
         caller,
       ),
     );
-    registry.register(llmOperations.update_metadata, (input, caller) =>
-      caller.commit((tx) =>
-        this.records.updateMetadata(
-          tx,
-          this.platformSet,
-          input.params.credential_name,
-          input.body,
-          humanIdentity(caller),
-          input.query.holder ?? SERVER_HOLDER,
+    registry.register(llmOperations.update_metadata, (input, caller) => {
+      const holder = input.query.holder ?? SERVER_HOLDER;
+      return this.written(
+        [holder],
+        caller.commit((tx) =>
+          this.records.updateMetadata(
+            tx,
+            this.platformSet,
+            input.params.credential_name,
+            input.body,
+            humanIdentity(caller),
+            holder,
+          ),
         ),
-      ),
-    );
-    registry.register(llmOperations.revoke, (input, caller) =>
-      caller.commit((tx) =>
-        this.records.revoke(
-          tx,
-          this.platformSet,
-          input.params.credential_name,
-          input.params.revision,
-          input.query.holder ?? SERVER_HOLDER,
+      );
+    });
+    registry.register(llmOperations.revoke, (input, caller) => {
+      const holder = input.query.holder ?? SERVER_HOLDER;
+      return this.written(
+        [holder],
+        caller.commit((tx) =>
+          this.records.revoke(
+            tx,
+            this.platformSet,
+            input.params.credential_name,
+            input.params.revision,
+            holder,
+          ),
         ),
-      ),
-    );
-    registry.register(llmOperations.archive, (input, caller) =>
-      caller.commit((tx) =>
-        this.records.archive(
-          tx,
-          this.platformSet,
-          input.params.credential_name,
-          input.query.holder ?? SERVER_HOLDER,
+      );
+    });
+    registry.register(llmOperations.archive, (input, caller) => {
+      const holder = input.query.holder ?? SERVER_HOLDER;
+      return this.written(
+        [holder],
+        caller.commit((tx) =>
+          this.records.archive(
+            tx,
+            this.platformSet,
+            input.params.credential_name,
+            holder,
+          ),
         ),
-      ),
-    );
+      );
+    });
     registry.register(llmOperations.verify, async (input, caller) => {
       const answer = await this.records.verify(
         this.platformSet,
@@ -288,12 +318,89 @@ export class LlmComponent implements Service {
     registry.register(llmOperations.login_report, (input, caller) =>
       this.loginReport(input, caller),
     );
+    registry.register(llmOperations.report, (input, caller) =>
+      this.report(input, caller),
+    );
+    registry.register(llmOperations.sealed, (input, caller) =>
+      caller.commit((tx) =>
+        this.records.sealedCopy(
+          tx,
+          this.platformSet,
+          input.params.credential_name,
+          this.callerHolder(tx, caller),
+        ),
+      ),
+    );
     registry.register(llmOperations.provider_check, (input, caller) =>
       this.providerCheck(input, caller),
     );
     registry.register(llmOperations.model_check, (input, caller) =>
       this.modelCheck(input, caller),
     );
+  }
+
+  credentialVersionOf(holder: string): number {
+    return this.copyHealth.versionOf(holder);
+  }
+
+  copyHealthOf(holder: string, copy: HeldCopy): CopyHealth {
+    return this.copyHealth.healthOf(holder, copy);
+  }
+
+  private written<T>(holders: readonly string[], answer: T): T {
+    for (const holder of holders)
+      if (holder !== SERVER_HOLDER) this.copyHealth.raise(holder);
+    return answer;
+  }
+
+  private callerHolder(tx: Transaction, caller: CallerContext): string {
+    if (!isWorkerIdentity(caller.identity)) throw instanceForbidden();
+    return this.workerHolder(tx, caller.identity);
+  }
+
+  private report(
+    input: typeof llmOperations.report.input._output,
+    caller: CallerContext,
+  ): null {
+    const name = input.params.credential_name;
+    const report = input.body;
+    if (reportInvalid(report)) throw invalidInput();
+    let holder = SERVER_HOLDER;
+    caller.commit((tx) => {
+      holder = this.callerHolder(tx, caller);
+      const copy = this.records.heldCopy(tx, this.platformSet, name, holder);
+      if (!copy?.sealed_current)
+        throw new OperationError(
+          HttpStatus.NotFound,
+          CredentialErrorCode.NotFound,
+          "Credential not found.",
+        );
+      if (copy.revision !== report.revision)
+        throw new OperationError(
+          HttpStatus.Conflict,
+          CredentialErrorCode.RevisionConflict,
+          "Credential revision conflict.",
+          { revision: copy.revision },
+        );
+      if (
+        !isLlmPlatform(copy.platform) ||
+        LLM_PLATFORMS[copy.platform].capability !== report.capability
+      )
+        throw invalidInput();
+      return null;
+    });
+    this.copyHealth.record(holder, name, report, this.now());
+    this.logger.info(
+      {
+        credential_name: name,
+        holder,
+        revision: report.revision,
+        status: report.status,
+        failure_reason: report.failure_reason,
+      },
+      "credential health report",
+    );
+    return null;
   }
 
   resourceInventory(tx: Transaction): ResourceEntry[] {
@@ -370,17 +477,20 @@ export class LlmComponent implements Service {
         throw invalidInput();
       const holder = body.holder;
       const copy = { holder, ...sealedBody(body) };
-      return caller.commit((tx) => {
-        if (this.workerHolder(tx, identity) !== holder)
-          throw instanceForbidden();
-        const [answer] = this.records.createCopies(
-          tx,
-          this.platformSet,
-          { name, platform, metadata, copies: [copy] },
-          undefined,
-        );
-        return answer!;
-      });
+      return this.written(
+        [holder],
+        caller.commit((tx) => {
+          if (this.workerHolder(tx, identity) !== holder)
+            throw instanceForbidden();
+          const [answer] = this.records.createCopies(
+            tx,
+            this.platformSet,
+            { name, platform, metadata, copies: [copy] },
+            undefined,
+          );
+          return answer!;
+        }),
+      );
     }
     if (
       body.secret === undefined ||
@@ -431,17 +541,20 @@ export class LlmComponent implements Service {
     caller: CallerContext,
   ): typeof llmOperations.create.output._output {
     const { name, platform, metadata } = body;
-    return caller.commit((tx) => {
-      for (const copy of copies)
-        if (copy.holder !== SERVER_HOLDER) this.instanceKey(tx, copy.holder);
-      const [answer] = this.records.createCopies(
-        tx,
-        this.platformSet,
-        { name, platform, metadata, copies },
-        humanIdentity(caller),
-      );
-      return answer!;
-    });
+    return this.written(
+      copies.map((copy) => copy.holder),
+      caller.commit((tx) => {
+        for (const copy of copies)
+          if (copy.holder !== SERVER_HOLDER) this.instanceKey(tx, copy.holder);
+        const [answer] = this.records.createCopies(
+          tx,
+          this.platformSet,
+          { name, platform, metadata, copies },
+          humanIdentity(caller),
+        );
+        return answer!;
+      }),
+    );
   }
 
   private rotate(
@@ -459,21 +572,24 @@ export class LlmComponent implements Service {
         throw invalidInput();
       const holder = body.holder;
       const copy = sealedBody(body);
-      return caller.commit((tx) => {
-        if (
-          this.workerHolder(tx, identity) !== holder ||
-          (query.holder !== undefined && query.holder !== holder)
-        )
-          throw instanceForbidden();
-        return this.records.rotateSealed(
-          tx,
-          this.platformSet,
-          credentialName,
-          holder,
-          { expected_revision: expectedRevision, ...copy, metadata },
-          undefined,
-        );
-      });
+      return this.written(
+        [holder],
+        caller.commit((tx) => {
+          if (
+            this.workerHolder(tx, identity) !== holder ||
+            (query.holder !== undefined && query.holder !== holder)
+          )
+            throw instanceForbidden();
+          return this.records.rotateSealed(
+            tx,
+            this.platformSet,
+            credentialName,
+            holder,
+            { expected_revision: expectedRevision, ...copy, metadata },
+            undefined,
+          );
+        }),
+      );
     }
     if (
       body.secret === undefined ||
@@ -522,22 +638,25 @@ export class LlmComponent implements Service {
       keys: [key],
     });
     throwIfCancelled(caller.context);
-    return caller.commit((tx) => {
-      this.instanceKey(tx, holder);
-      return this.records.rotateSealed(
-        tx,
-        this.platformSet,
-        credentialName,
-        holder,
-        {
-          expected_revision: body.expected_revision,
-          sealed: copy!.sealed,
-          sealed_to: copy!.sealed_to,
-          metadata: body.metadata,
-        },
-        humanIdentity(caller),
-      );
-    });
+    return this.written(
+      [holder],
+      caller.commit((tx) => {
+        this.instanceKey(tx, holder);
+        return this.records.rotateSealed(
+          tx,
+          this.platformSet,
+          credentialName,
+          holder,
+          {
+            expected_revision: body.expected_revision,
+            sealed: copy!.sealed,
+            sealed_to: copy!.sealed_to,
+            metadata: body.metadata,
+          },
+          humanIdentity(caller),
+        );
+      }),
+    );
   }
 
   private async providerCheck(
@@ -876,11 +995,13 @@ export class LlmComponent implements Service {
     });
     apply();
     const { session } = flow!;
-    if (session.state === LoginSessionState.Completed)
+    if (session.state === LoginSessionState.Completed) {
+      this.copyHealth.raise(session.holder);
       this.logger.info(
         { holder: session.holder, human_identity: session.human_identity },
         "credential login completed",
       );
+    }
     return null;
   }
 

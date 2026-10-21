@@ -59,6 +59,7 @@ import {
   type SealedCopy,
   type SealedRotateBody,
   type HeldCopy,
+  type SealedCopyAnswer,
   type InstanceKey,
   type InstanceKeys,
   type BindingsListingInstanceFn,
@@ -1280,6 +1281,46 @@ export class CustodyComponent implements Service, CredentialRecords {
   copyHeld(tx: Transaction, credentialName: string, holder: string): boolean {
     const row = newestLive(tx, credentialName, holder);
     return row !== undefined && this.sealedCurrent(tx, holder, row.sealed_to);
+  }
+
+  heldCopy(
+    tx: Transaction,
+    set: CredentialPlatformSet,
+    credentialName: string,
+    holder: string,
+  ): HeldCopy | null {
+    assert.notEqual(holder, SERVER_HOLDER);
+    const row = newestLive(tx, credentialName, holder);
+    if (!row || !ownedPlatform(set, row.platform)) return null;
+    return {
+      name: row.name,
+      revision: row.revision,
+      platform: row.platform,
+      sealed_current: this.sealedCurrent(tx, holder, row.sealed_to),
+    };
+  }
+
+  sealedCopy(
+    tx: Transaction,
+    set: CredentialPlatformSet,
+    credentialName: string,
+    holder: string,
+  ): SealedCopyAnswer {
+    assert.notEqual(holder, SERVER_HOLDER);
+    const row = newestLive(tx, credentialName, holder);
+    if (
+      !row ||
+      !ownedPlatform(set, row.platform) ||
+      !this.sealedCurrent(tx, holder, row.sealed_to)
+    )
+      throw notFound();
+    return {
+      name: row.name,
+      platform: row.platform,
+      revision: row.revision,
+      metadata: row.metadata === null ? null : JSON.parse(row.metadata),
+      sealed: storedSealed(this.envelopeKey, row),
+    };
   }
 
   heldCopies(tx: Transaction, holder: string): HeldCopy[] {

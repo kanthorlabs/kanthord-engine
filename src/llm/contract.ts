@@ -11,9 +11,11 @@ import {
   credentialPlatformListAnswerSchema,
   credentialRevisionParamsSchema,
   credentialUpdateMetadataBodySchema,
+  sealedCopyAnswerSchema,
   LoginSessionMode,
   METADATA_MAX_BODY_BYTES,
 } from "../custody/contract.ts";
+import { resourceFailureReasonSchema } from "../kernel/health.ts";
 import { sealedObjectSchema } from "../kernel/hpke.ts";
 import { HttpMethod, HttpStatus } from "../kernel/http.ts";
 import {
@@ -42,6 +44,7 @@ export const LlmErrorCode = {
 } as const;
 
 export const PROVIDER_CHECK_TIMEOUT_MS = 10000;
+export const NO_CREDENTIAL_VERSION = 0;
 export const MODEL_CHECK_OPERATION_TIMEOUT_MS = 60000;
 export const MODEL_CHECK_TIMEOUT_MS = 50000;
 
@@ -149,6 +152,35 @@ export const providerCheckAnswerSchema = z.strictObject({
     .nullable(),
 });
 export type ProviderCheckAnswer = z.infer<typeof providerCheckAnswerSchema>;
+export const COPY_REPORT_MODELS_MAX = 512;
+export const COPY_REPORT_TEXT_MAX_LENGTH = 256;
+const COPY_REPORT_MAX_BODY_BYTES = 256 * 1024;
+const reportedModelsSchema = z
+  .array(
+    z.strictObject({
+      id: z.string().min(1).max(COPY_REPORT_TEXT_MAX_LENGTH),
+      owned_by: z.string().max(COPY_REPORT_TEXT_MAX_LENGTH).nullable(),
+      created: z.number().int().nullable(),
+    }),
+  )
+  .max(COPY_REPORT_MODELS_MAX)
+  .nullable();
+export const copyReportBodySchema = z.strictObject({
+  revision: z.number().int().positive(),
+  status: credentialCheckAnswerSchema.shape.status,
+  capability: z.string().min(1).max(COPY_REPORT_TEXT_MAX_LENGTH),
+  failure_reason: resourceFailureReasonSchema,
+  models: reportedModelsSchema,
+});
+export type CopyReportBody = z.infer<typeof copyReportBodySchema>;
+export const copyHealthSchema = z.strictObject({
+  status: credentialCheckAnswerSchema.shape.status,
+  capability: z.string().min(1),
+  failure_reason: resourceFailureReasonSchema,
+  models: reportedModelsSchema,
+  reported_at: z.number().int().nullable(),
+});
+export type CopyHealth = z.infer<typeof copyHealthSchema>;
 export const modelCheckBodySchema = z.strictObject({
   credential: z.string().min(1),
   model_identifier: z.string().min(1),
@@ -476,6 +508,50 @@ export const llmOperations = {
     output: z.null(),
     description:
       "Report the state of an OAuth login session that runs on the worker instance of the token. The completed report carries the credential sealed to the instance key, and the server stores revision 1 of the copy of that instance.",
+  },
+  report: {
+    id: "llm.credential.report",
+    service: LLM_COMPONENT_NAME,
+    method: HttpMethod.Post,
+    path: "/api/llm/credential/:credential_name/report",
+    access: AccessPolicy.Worker,
+    store: StoreName.Operational,
+    lifetime: OperationLifetime.Unary,
+    timeoutMs: CREDENTIAL_TIMEOUT_MS,
+    mutation: true,
+    body: true,
+    maxBodyBytes: COPY_REPORT_MAX_BODY_BYTES,
+    status: HttpStatus.NoContent,
+    input: z.strictObject({
+      params: credentialParamsSchema,
+      query: emptyQuery,
+      body: copyReportBodySchema,
+    }),
+    output: z.null(),
+    description:
+      "Report the check result of the newest live revision of a copy that the worker instance of the token holds. The server keeps the last report of each copy in memory.",
+  },
+  sealed: {
+    id: "llm.credential.sealed",
+    service: LLM_COMPONENT_NAME,
+    method: HttpMethod.Get,
+    path: "/api/llm/credential/:credential_name/sealed",
+    access: AccessPolicy.Worker,
+    store: StoreName.Operational,
+    lifetime: OperationLifetime.Unary,
+    timeoutMs: CREDENTIAL_TIMEOUT_MS,
+    mutation: false,
+    secret: true,
+    body: false,
+    status: HttpStatus.OK,
+    input: z.strictObject({
+      params: credentialParamsSchema,
+      query: emptyQuery,
+      body: z.null(),
+    }),
+    output: sealedCopyAnswerSchema,
+    description:
+      "Answer the sealed object of the newest live revision of a copy that the worker instance of the token holds, when the copy is sealed to the current key of the instance.",
   },
   provider_check: {
     id: "llm.provider.check",
