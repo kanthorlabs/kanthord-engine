@@ -40,6 +40,7 @@ const RENEWAL_MS = 150;
 const REARM_RENEWAL_MS = 400;
 const REARM_WINDOWS = 4;
 const WAIT_MS = 10000;
+const SUPERSEDE_TIMEOUT_MS = 30000;
 const POLL_MS = 10;
 const NO_WORK_DELAY_MS = 20;
 const TWO_BINDINGS = 2;
@@ -220,49 +221,64 @@ test("a heartbeat with another server_version stops the unit", async (t) => {
   assert.equal(f.server.state.deregistered.length, TWO_BINDINGS);
 });
 
-test("a second process supersedes the first, and the first ends as superseded without a deregistration", async (t) => {
-  const f = await fixture(t);
-  const first = runWorker(
-    f.options({ heartbeatIntervalMs: FAST_HEARTBEAT_MS }),
-  );
-  await f.ready();
-  const second = new Worker(f.options({ connectionName: CONNECTION_B }));
-  const secondRun = second.run();
-  const error = await first;
-  assert.ok(error instanceof Diagnostic);
-  assert.equal(error.code, SUPERSEDED_CODE);
-  assert.deepEqual(error.fields, [["connection_name", CONNECTION_B]]);
-  assert.deepEqual(f.server.state.deregistered, []);
-  assert.equal(await second.stop(), null);
-  assert.equal(await secondRun, null);
-});
+test(
+  "a second process supersedes the first, and the first ends as superseded without a deregistration",
+  { timeout: SUPERSEDE_TIMEOUT_MS },
+  async (t) => {
+    const f = await fixture(t);
+    const firstWorker = new Worker(
+      f.options({ heartbeatIntervalMs: FAST_HEARTBEAT_MS }),
+    );
+    t.after(() => firstWorker.stop());
+    const first = firstWorker.run();
+    await f.ready();
+    const second = new Worker(f.options({ connectionName: CONNECTION_B }));
+    t.after(() => second.stop());
+    const secondRun = second.run();
+    const error = await first;
+    assert.ok(error instanceof Diagnostic);
+    assert.equal(error.code, SUPERSEDED_CODE);
+    assert.deepEqual(error.fields, [["connection_name", CONNECTION_B]]);
+    assert.deepEqual(f.server.state.deregistered, []);
+    assert.equal(await second.start(), null);
+    assert.equal(await second.stop(), null);
+    assert.equal(await secondRun, null);
+  },
+);
 
-test("a client request refused as superseded sends one heartbeat and ends the process", async (t) => {
-  const f = await fixture(t, SINGLE);
-  const gate = Promise.withResolvers<void>();
-  let held = false;
-  f.server.state.intercept = async (request) => {
-    if (request.path !== FakePath.Pull || held) return undefined;
-    held = true;
-    await gate.promise;
-    return undefined;
-  };
-  const first = runWorker(f.options());
-  await f.ready();
-  await until(() => held);
-  const heartbeats = f.server.requestsTo(FakePath.InstanceHeartbeat).length;
-  const second = new Worker(f.options({ connectionName: CONNECTION_B }));
-  assert.equal(await second.start(), null);
-  gate.resolve();
-  const error = await first;
-  assert.ok(error instanceof Diagnostic);
-  assert.equal(error.code, SUPERSEDED_CODE);
-  assert.equal(
-    f.server.requestsTo(FakePath.InstanceHeartbeat).length,
-    heartbeats + SINGLE,
-  );
-  assert.equal(await second.stop(), null);
-});
+test(
+  "a client request refused as superseded sends one heartbeat and ends the process",
+  { timeout: SUPERSEDE_TIMEOUT_MS },
+  async (t) => {
+    const f = await fixture(t, SINGLE);
+    const gate = Promise.withResolvers<void>();
+    let held = false;
+    f.server.state.intercept = async (request) => {
+      if (request.path !== FakePath.Pull || held) return undefined;
+      held = true;
+      await gate.promise;
+      return undefined;
+    };
+    const firstWorker = new Worker(f.options());
+    t.after(() => firstWorker.stop());
+    const first = firstWorker.run();
+    await f.ready();
+    await until(() => held);
+    const heartbeats = f.server.requestsTo(FakePath.InstanceHeartbeat).length;
+    const second = new Worker(f.options({ connectionName: CONNECTION_B }));
+    t.after(() => second.stop());
+    assert.equal(await second.start(), null);
+    gate.resolve();
+    const error = await first;
+    assert.ok(error instanceof Diagnostic);
+    assert.equal(error.code, SUPERSEDED_CODE);
+    assert.equal(
+      f.server.requestsTo(FakePath.InstanceHeartbeat).length,
+      heartbeats + SINGLE,
+    );
+    assert.equal(await second.stop(), null);
+  },
+);
 
 test("an execution passes one token renewal and the next request carries the renewed client token", async (t) => {
   const f = await fixture(t, SINGLE);
