@@ -46,7 +46,6 @@ const SSHD_PATHS = [
   "/usr/local/sbin/sshd",
   "/opt/homebrew/sbin/sshd",
 ];
-const READY_WAIT_MS = 5000;
 const READY_POLL_MS = 50;
 const BANNER_PREFIX = "SSH-";
 const HOST_KEY_FILE = "host_ed25519";
@@ -109,8 +108,7 @@ async function banner(port: number): Promise<boolean> {
 }
 
 async function waitReady(port: number, exited: () => boolean): Promise<void> {
-  const until = Date.now() + READY_WAIT_MS;
-  while (Date.now() < until && !exited()) {
+  while (!exited()) {
     if (await banner(port)) return;
     await delay(READY_POLL_MS);
   }
