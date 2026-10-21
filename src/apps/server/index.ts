@@ -455,8 +455,14 @@ export function composeServices(options: {
     }),
     sshAccessOf: (tx, granted, material) =>
       repositoryComponent.sshAccessOf(tx, granted, material),
-    sshSignatureOf: (tx, granted, material, data) =>
-      repositoryComponent.sshSignatureOf(tx, granted, material, data),
+    sshSignatureOf: (tx, granted, public_key, data, release) =>
+      repositoryComponent.sshSignatureOf(
+        tx,
+        granted,
+        public_key,
+        data,
+        release,
+      ),
   });
   const llm: LlmComponent = new LlmComponent({
     records: custody,

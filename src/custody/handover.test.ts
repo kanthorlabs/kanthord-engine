@@ -85,6 +85,8 @@ const SSH_HANDOVER_RECORD = "ssh identity handover";
 const SSH_SIGN_RECORD = "ssh signature relay";
 const RSA_SHA2_512 = 4;
 const FIRST_SSH_REVISION = 1;
+const NO_CALLS = 0;
+const ONE_CALL = 1;
 const TEST_SET: CredentialPlatformSet = {
   platforms: {
     [TEST_PLATFORM]: {
@@ -298,8 +300,8 @@ function fixture(
     sshIdentityAuthorization,
     sshAccessOf: (tx, granted, material) =>
       repository.sshAccessOf(tx, granted, material),
-    sshSignatureOf: (tx, granted, material, data) =>
-      repository.sshSignatureOf(tx, granted, material, data),
+    sshSignatureOf: (tx, granted, public_key, data, release) =>
+      repository.sshSignatureOf(tx, granted, public_key, data, release),
     instanceKeys: {
       keyOf: (_tx, name) => instances.get(name)?.key ?? null,
       nameOf: (_tx, instanceId) =>
@@ -1144,6 +1146,69 @@ test("sshSign refuses another placement, another binding, no live claim, an inva
       return true;
     },
   );
+});
+
+test("sshSign checks the payload before custody releases the key and releases nothing for a refused payload", (t) => {
+  const f = fixture(t, ["anthro-1"], ["deploy"]);
+  const [bindingId] = [...f.bindings.keys()];
+  const release = t.mock.method(f.component, "release");
+  const valid = signRequest(f, bindingId!, "deploy");
+  const refusedData = (data: Buffer) => ({
+    ...valid.request,
+    data: data.toString("base64"),
+  });
+  const refusals = [
+    {
+      reason: SshSignRefusal.NotUserAuthentication,
+      request: refusedData(
+        userAuthenticationData({
+          key: sshPublicKeyBlob(valid.publicKey),
+          user: "root",
+        }),
+      ),
+    },
+    {
+      reason: SshSignRefusal.KeyMismatch,
+      request: refusedData(
+        userAuthenticationData({
+          key: sshPublicKeyBlob(generateSshKey("other").public_key),
+          hostKey: knownHostsKeyBlob(KNOWN_HOSTS),
+        }),
+      ),
+    },
+    {
+      reason: SshSignRefusal.HostKeyMismatch,
+      request: signRequest(f, bindingId!, "deploy", Buffer.from("other"))
+        .request,
+    },
+  ];
+  for (const { reason, request } of refusals)
+    assert.throws(
+      () => f.sign(request),
+      (error) => {
+        assert(error instanceof OperationError);
+        assert.equal(error.code, SshSignErrorCode.Refused);
+        assert.deepEqual(error.details, { reason });
+        return true;
+      },
+    );
+  assert.equal(release.mock.callCount(), NO_CALLS);
+  assert.deepEqual(f.row.credentials, []);
+  assert.equal(
+    f.logs.some((line) => JSON.parse(line).msg === SSH_SIGN_RECORD),
+    false,
+  );
+  const answer = sshSignAnswerSchema.parse(
+    openEnvelope(f.signKeys.answer, f.aad, f.sign(valid.request)),
+  );
+  assert.ok(
+    sshSignatureVerifies(
+      valid.publicKey,
+      valid.data,
+      Buffer.from(answer.signature, "base64"),
+    ),
+  );
+  assert.equal(release.mock.callCount(), ONE_CALL);
 });
 
 test("sshPublicKeyOf answers the pinned revision, else the newest live revision, and pins nothing", (t) => {
