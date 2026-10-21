@@ -40,6 +40,9 @@ const PERMISSION_BITS = 0o777;
 const SAMPLES = 5;
 const SLOW_AGENT_SECONDS = 6;
 const SCRIPT_MODE = 0o700;
+const CANCEL_AFTER_MS = 100;
+const MS_PER_SECOND = 1000;
+const CANCELLED_CODE = "system.context.cancelled";
 const LIFECYCLE_RUNS = 3;
 const PARALLEL_RUNS = 8;
 const SAMPLE_INTERVAL_MS = 20;
@@ -248,7 +251,7 @@ test("parallel withSshAgent calls each load their own key", async () => {
   );
 });
 
-test("withSshAgent waits for a slow agent socket until the deadline", async () => {
+async function withSlowAgent(work: (path: string) => Promise<void>) {
   const { stdout } = await execFileAsync("sh", ["-c", "command -v ssh-agent"]);
   const bin = mkdtempSync(join(scratch, "bin-"));
   const script = join(bin, "ssh-agent");
@@ -257,9 +260,17 @@ test("withSshAgent waits for a slow agent socket until the deadline", async () =
     `#!/bin/sh\nsleep ${SLOW_AGENT_SECONDS}\nexec '${stdout.trim()}' "$@"\n`,
   );
   chmodSync(script, SCRIPT_MODE);
-  const path = process.env.PATH;
-  process.env.PATH = `${bin}${delimiter}${path ?? ""}`;
+  const path = process.env.PATH ?? "";
+  process.env.PATH = `${bin}${delimiter}${path}`;
   try {
+    await work(path);
+  } finally {
+    process.env.PATH = path;
+  }
+}
+
+test("withSshAgent waits for an agent socket that appears after 5 s", async () => {
+  await withSlowAgent(async (path) => {
     const key = access("slow");
     const loaded = await withSshAgent(
       key,
@@ -273,9 +284,28 @@ test("withSshAgent waits for a slow agent socket until the deadline", async () =
       },
     );
     assert.equal(loaded, key.public_key);
-  } finally {
-    process.env.PATH = path;
-  }
+  });
+});
+
+test("a cancel ends the wait for a slow agent socket and leaves no agent directory", async () => {
+  await withSlowAgent(async () => {
+    const context = new CancellationContext();
+    const started = Date.now();
+    setTimeout(() => context.cancel(), CANCEL_AFTER_MS);
+    await assert.rejects(
+      withSshAgent(access("cancel-wait"), context, DEADLINE_MS, async () => {
+        assert.fail("The work must not run.");
+      }),
+      { code: CANCELLED_CODE },
+    );
+    assert.ok(Date.now() - started < SLOW_AGENT_SECONDS * MS_PER_SECOND);
+    assert.deepEqual(
+      (await readdir(scratch)).filter((name) =>
+        name.startsWith(SSH_AGENT_DIRECTORY_PREFIX),
+      ),
+      [],
+    );
+  });
 });
 
 test("withSshAgent refuses a socket path above the limit", async () => {
