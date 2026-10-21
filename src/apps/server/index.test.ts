@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
-import { spawn, spawnSync } from "node:child_process";
+import { execFile, spawn, spawnSync } from "node:child_process";
 import {
   chmodSync,
   mkdirSync,
@@ -10,6 +10,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { dirname, join } from "node:path";
+import { promisify } from "node:util";
 import { stringify } from "yaml";
 import { configuration, CONFIG_VERSION } from "../../config/index.ts";
 import { temporary } from "../../kernel/test-support.ts";
@@ -99,6 +100,7 @@ const DEADLINE_LIMITS = {
   checkDeadlineMs: 50,
   reportBudgetMs: 5000,
 };
+const execFileAsync = promisify(execFile);
 const EVENTS_PATH = /^\/repos\/owner\/repo\/events(\?|$)/;
 const entry = new URL("../../main.ts", import.meta.url).href;
 function layout(directory: string) {
@@ -885,11 +887,11 @@ test("unsafe SIGHUP replacement initiates shutdown and receives no log record", 
   reopened.close();
 });
 
-test("server lifecycle returns errors, reports owned health and releases every resource even when cleanup fails", (t) => {
+test("server lifecycle returns errors, reports owned health and releases every resource even when cleanup fails", async (t) => {
   const paths = layout(temporary(t));
   paths.config.log.destination = "file";
   writePrivate(paths.env.KANTHORD_CONFIG!, stringify(paths.config), true);
-  const result = spawnSync(
+  const result = await execFileAsync(
     process.execPath,
     [
       "--input-type=module",
@@ -965,9 +967,8 @@ test("server lifecycle returns errors, reports owned health and releases every r
     write('verified\\n');
   `,
     ],
-    { env: paths.env, encoding: "utf8", timeout: 10000 },
+    { env: paths.env, encoding: "utf8", signal: t.signal },
   );
-  assert.equal(result.status, ExitCode.Success, result.stderr);
   assert.equal(result.stdout, LIFECYCLE_VERIFIED_OUTPUT);
   const reopened = new Store(paths.database);
   reopened.close();

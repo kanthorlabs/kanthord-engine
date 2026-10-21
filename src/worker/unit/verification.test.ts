@@ -77,7 +77,6 @@ function childTerminated(pid: number): boolean {
   try {
     const state = execFileSync("ps", ["-o", "stat=", "-p", String(pid)], {
       encoding: "utf8",
-      timeout: 1000,
     }).trim();
     return state.startsWith(ZOMBIE);
   } catch (error) {

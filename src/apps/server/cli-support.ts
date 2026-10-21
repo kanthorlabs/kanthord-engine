@@ -44,13 +44,17 @@ const WAIT_LIMIT_MS = 10000;
 export async function until<T>(
   read: () => Promise<T> | T,
   done: (value: T) => boolean,
+  signal?: AbortSignal,
 ): Promise<T> {
-  const deadline = Date.now() + WAIT_LIMIT_MS;
+  const deadline =
+    signal === undefined
+      ? Date.now() + WAIT_LIMIT_MS
+      : Number.POSITIVE_INFINITY;
   for (;;) {
     const value = await read();
     if (done(value)) return value;
     assert.ok(Date.now() < deadline, "The awaited state did not arrive.");
-    await delay(WAIT_POLL_INTERVAL_MS);
+    await delay(WAIT_POLL_INTERVAL_MS, undefined, { signal });
   }
 }
 

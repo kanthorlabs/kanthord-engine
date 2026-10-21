@@ -26,6 +26,8 @@ const SETTLE_WAIT_MS = 50;
 const PENDING = "pending";
 const TOOL_DEADLINE_MS = 60000;
 const PS_FOUND = 0;
+const ZOMBIE = "Z";
+const LINE_END = "\n";
 const FIRST_PULL = 1;
 const REGISTRATION = {
   runtime_identity: "worker_registration_01ARZ3NDEKTSV4RRFFQ69G5FAA",
@@ -370,8 +372,7 @@ test("abandon kills the tool process group of the live execution", async (t) => 
   const unit = multiUnit(t, [transport]);
   const running = unit.run();
   const verification = (await tool.promise).run;
-  while (!existsSync(pidFile)) await delay(1);
-  const grandchild = Number(readFileSync(pidFile, "utf8"));
+  const grandchild = await pidOf(pidFile, t.signal);
   assert.ok(alive(grandchild));
   const abandoned = unit.abandon();
   await verification;
@@ -382,5 +383,16 @@ test("abandon kills the tool process group of the live execution", async (t) => 
 });
 
 function alive(pid: number): boolean {
-  return spawnSync("ps", ["-p", String(pid)]).status === PS_FOUND;
+  const ps = spawnSync("ps", ["-o", "stat=", "-p", String(pid)], {
+    encoding: "utf8",
+  });
+  return ps.status === PS_FOUND && !ps.stdout.trim().startsWith(ZOMBIE);
+}
+
+async function pidOf(file: string, signal: AbortSignal): Promise<number> {
+  for (;;) {
+    const text = existsSync(file) ? readFileSync(file, "utf8") : "";
+    if (text.endsWith(LINE_END)) return Number(text);
+    await delay(1, undefined, { signal });
+  }
 }

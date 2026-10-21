@@ -87,13 +87,14 @@ async function serverPool(t: TestContext, count: number, slotLimit?: number) {
   const setCount = (instanceCount: number) =>
     rewrite((bindings) => ({ ...bindings, [BINDING]: worker(instanceCount) }));
   const waitFor = (size: number) =>
-    until(instances, (items) => items.length === size);
+    until(instances, (items) => items.length === size, t.signal);
   const slots = () => started.mock.calls.map((call) => call.arguments[0]);
   const settled = async (ended = slots()) => {
     for (const slot of ended)
       await until(
         () => setup.fixture.threadDriver.threadOf(slot.client_id),
         (thread) => thread === undefined,
+        t.signal,
       );
     await delay(POOL_BACKOFF_INITIAL_MS);
     for (const slot of ended)
@@ -254,10 +255,12 @@ test(
     await until(
       () => f.fixture.logs,
       (lines) => lines.some((line) => line.includes(FAILED_MESSAGE)),
+      t.signal,
     );
     await until(
       () => f.fixture.threadDriver.threadOf(first!.client_id!),
       (restarted) => restarted !== undefined && restarted !== thread,
+      t.signal,
     );
     await delay(0);
     const [again] = await f.waitFor(ONE_INSTANCE);
@@ -315,6 +318,7 @@ test(
       (items) =>
         items.length === ONE_INSTANCE &&
         items[0]!.client_id === second.client_id,
+      t.signal,
     );
     assert.equal(next!.draining, false);
   },
