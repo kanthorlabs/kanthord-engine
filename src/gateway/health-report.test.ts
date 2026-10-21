@@ -547,7 +547,8 @@ test("report budget abandons active and unstarted targets, cancels contexts and 
     .finally(() => {
       settled = true;
     });
-  await turn();
+  while (contexts.length < EXPECTED_MAX)
+    await turn(undefined, { signal: t.signal });
   assert.equal(contexts.length, EXPECTED_MAX);
   t.mock.timers.tick(REPORT_BUDGET_MS - ONE_MS);
   await turn();

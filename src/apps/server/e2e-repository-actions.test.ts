@@ -36,6 +36,7 @@ import {
   passingEvaluation,
   pushNodeBranch,
   repositoryBinding,
+  until,
 } from "./cli-support.ts";
 
 const FIRST_INDEX = 0;
@@ -331,9 +332,12 @@ test("E03 repository actions CLI journey", { timeout: TIMEOUT }, async (t) => {
   });
   await t.test(
     "E03.8 the deferred check completes Q after landing",
-    async () => {
-      while ((await h.node(Q)).state !== NodeState.Completed)
-        await new Promise<void>((r) => setTimeout(r, 10));
+    async (t) => {
+      await until(
+        () => h.node(Q),
+        (node) => node.state === NodeState.Completed,
+        t.signal,
+      );
       assert.equal((await h.node(Q)).state, NodeState.Completed);
     },
   );

@@ -64,8 +64,12 @@ function layout(directory: string) {
   return { env, config: env.KANTHORD_CONFIG!, database, tracking };
 }
 
-async function run(env: NodeJS.ProcessEnv, command: string) {
-  const { code, stdout, stderr } = await runKanthord([command], env);
+async function run(
+  env: NodeJS.ProcessEnv,
+  command: string,
+  signal: AbortSignal,
+) {
+  const { code, stdout, stderr } = await runKanthord([command], env, signal);
   return { status: code, stdout, stderr };
 }
 
@@ -91,19 +95,19 @@ test("serve refuses an older configuration and an older database, and upgrade br
   writePrivate(paths.config, legacy);
   olderDatabase(paths.database);
 
-  const behind = await run(paths.env, "serve");
+  const behind = await run(paths.env, "serve", t.signal);
   assert.equal(behind.status, ExitCode.Failure);
   assert.match(behind.stderr, /system\.config\.version_behind/);
   assert.match(behind.stderr, /^command:           kanthord upgrade$/m);
 
   writePrivate(paths.config, currentConfig(), true);
-  const pending = await run(paths.env, "serve");
+  const pending = await run(paths.env, "serve", t.signal);
   assert.equal(pending.status, ExitCode.Failure);
   assert.match(pending.stderr, /system\.database\.migration\.pending/);
   assert.match(pending.stderr, /^path:    .+\ncommand: kanthord upgrade\n$/m);
   writePrivate(paths.config, legacy, true);
 
-  const upgraded = await run(paths.env, "upgrade");
+  const upgraded = await run(paths.env, "upgrade", t.signal);
   assert.equal(upgraded.status, ExitCode.Success, upgraded.stderr);
   const backups = [...upgraded.stdout.matchAll(/^backup: +(.+)$/gm)].map(
     (match) => match[1]!,
@@ -140,7 +144,7 @@ test("serve refuses an older configuration and an older database, and upgrade br
   assert.deepEqual(copy.plan(olderMigrations).pending, []);
   copy.close();
 
-  const again = await run(paths.env, "upgrade");
+  const again = await run(paths.env, "upgrade", t.signal);
   assert.equal(again.status, ExitCode.Success, again.stderr);
   assert.equal(again.stdout, `up_to_date:     ${paths.config}\n`);
 });
@@ -152,7 +156,11 @@ test("upgrade changes nothing while another process holds the database", async (
   olderDatabase(paths.database);
   const holder = new Store(paths.database);
   try {
-    const { code, stderr } = await spawnKanthord(["upgrade"], paths.env);
+    const { code, stderr } = await spawnKanthord(
+      ["upgrade"],
+      paths.env,
+      t.signal,
+    );
     const locked = { status: code, stderr };
     assert.equal(locked.status, ExitCode.Failure);
     assert.match(locked.stderr, /database is locked/);
@@ -172,7 +180,7 @@ test("upgrade refuses a configuration version newer than the binary and writes n
     `version: ${CONFIG_VERSION + 1}\n`,
   );
   writePrivate(paths.config, newer);
-  const result = await run(paths.env, "upgrade");
+  const result = await run(paths.env, "upgrade", t.signal);
   assert.equal(result.status, ExitCode.Failure);
   assert.match(result.stderr, /system\.config\.version_ahead/);
   assert.equal(readFileSync(paths.config, "utf8"), newer);
@@ -202,7 +210,7 @@ test("upgrade refuses another master_key before the backups and the migrations",
   );
   writePrivate(paths.config, foreign);
 
-  const refused = await run(paths.env, "upgrade");
+  const refused = await run(paths.env, "upgrade", t.signal);
   assert.equal(refused.status, ExitCode.Failure);
   assert.match(refused.stderr, /system\.config\.master_key_mismatch/);
   assert.match(refused.stderr, /restore the configuration file/);
@@ -268,7 +276,7 @@ test("upgrade refuses a tracking.db of another migration text before any backup 
   const history = before.database.prepare("SELECT * FROM migration").all();
   before.close();
 
-  const refused = await run(paths.env, "upgrade");
+  const refused = await run(paths.env, "upgrade", t.signal);
   assert.equal(refused.status, ExitCode.Failure);
   assert.match(refused.stderr, SCHEMA_MISMATCH);
   assert.match(refused.stderr, /tracking\.db/);
@@ -317,7 +325,7 @@ test("upgrade refuses a newer migration history before it writes anything", asyn
   const history = before.database.prepare("SELECT * FROM migration").all();
   before.close();
 
-  const refused = await run(paths.env, "upgrade");
+  const refused = await run(paths.env, "upgrade", t.signal);
   assert.equal(refused.status, ExitCode.Failure);
   assert.match(
     refused.stderr,
@@ -350,7 +358,7 @@ test("upgrade applies a pending tracking.db service with a backup", async (t) =>
   empty.migrate([]);
   empty.close();
 
-  const upgraded = await run(paths.env, "upgrade");
+  const upgraded = await run(paths.env, "upgrade", t.signal);
   assert.equal(upgraded.status, ExitCode.Success, upgraded.stderr);
   const backups = [...upgraded.stdout.matchAll(/^backup: +(.+)$/gm)].map(
     (match) => match[1]!,
@@ -372,7 +380,7 @@ test("upgrade applies a pending tracking.db service with a backup", async (t) =>
   );
   copy.close();
 
-  const again = await run(paths.env, "upgrade");
+  const again = await run(paths.env, "upgrade", t.signal);
   assert.equal(again.status, ExitCode.Success, again.stderr);
   assert.equal(again.stdout, `up_to_date:     ${paths.config}\n`);
 });
@@ -384,7 +392,7 @@ test("upgrade keeps a missing tracking.db missing", async (t) => {
   server.migrate(serverMigrations);
   server.close();
 
-  const result = await run(paths.env, "upgrade");
+  const result = await run(paths.env, "upgrade", t.signal);
   assert.equal(result.status, ExitCode.Success, result.stderr);
   assert.equal(result.stdout, `up_to_date:     ${paths.config}\n`);
   assert.deepEqual(readdirSync(join(paths.env.XDG_DATA_HOME!, "kanthord")), [

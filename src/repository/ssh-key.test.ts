@@ -81,7 +81,7 @@ async function scratchAgent(t: TestContext): Promise<string> {
   });
   while (!exited) {
     if (await stat(socket).catch(() => null)) return socket;
-    await delay(SOCKET_POLL_MS);
+    await delay(SOCKET_POLL_MS, undefined, { signal: t.signal });
   }
   assert.fail("The scratch agent did not start.");
 }

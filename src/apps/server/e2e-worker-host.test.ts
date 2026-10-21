@@ -41,7 +41,6 @@ const SECOND_REVISION = 2;
 const TWO_RESULTS = 2;
 const PROVIDER_STORE_AND_SSH_PINS = 3;
 const FIRST_INDEX = 0;
-const EXECUTION_WAIT_MS = 120000;
 const POLL_INTERVAL_MS = 100;
 const JOURNEY_TIMEOUT = 240000;
 const FILE_NAME = "hello.txt";
@@ -264,9 +263,11 @@ async function assertSpanTree(
   );
 }
 
-async function finished(setup: Awaited<ReturnType<typeof fixture>>) {
-  const deadline = Date.now() + EXECUTION_WAIT_MS;
-  while (Date.now() < deadline) {
+async function finished(
+  setup: Awaited<ReturnType<typeof fixture>>,
+  signal: AbortSignal,
+) {
+  for (;;) {
     const page = await setup.read<{ items: ExecutionRecord[] }>([
       "scheduler",
       "execution",
@@ -283,9 +284,8 @@ async function finished(setup: Awaited<ReturnType<typeof fixture>>) {
       assert.equal(record.credentials.length, PROVIDER_STORE_AND_SSH_PINS);
       return record;
     }
-    await delay(POLL_INTERVAL_MS);
+    await delay(POLL_INTERVAL_MS, undefined, { signal });
   }
-  throw new Error("Worker execution did not finish");
 }
 
 test(
@@ -320,7 +320,7 @@ test(
           modelRuntimeFactory: scriptedModelRuntime(provider),
           repositoryTransport: executionSetup.transport,
         });
-        const record = await finished(executionSetup);
+        const record = await finished(executionSetup, t.signal);
         assert.ok(executionSetup.handed.length);
         for (const ssh of executionSetup.handed) {
           assert.equal(ssh.public_key.trim(), executionSetup.publicKey.trim());

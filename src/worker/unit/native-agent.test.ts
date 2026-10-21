@@ -57,7 +57,7 @@ const CONTENT = "written";
 const PROJECT_PROMPT = "project prompt text";
 const HOME_TEXT = "home file text";
 const TOOL_RESULT = "toolResult";
-const START_POLLS = 100;
+const START_POLL_MS = 10;
 const JUDGED = "judged";
 const TRANSCRIPT_MESSAGES = 5;
 const WORK = renderWorkPrompt(SHIPPED_TEMPLATES, {
@@ -470,12 +470,8 @@ test("native parent cancellation aborts an active tool and disposal refuses reus
     fauxAssistantMessage("unexpected"),
   ]);
   const pending = h.agent.prompt(WORK);
-  for (
-    let attempt = 0;
-    attempt < START_POLLS && !existsSync(join(h.workspace, "started"));
-    attempt++
-  )
-    await setTimeout(10);
+  while (!existsSync(join(h.workspace, "started")))
+    await setTimeout(START_POLL_MS, undefined, { signal: t.signal });
   assert.ok(existsSync(join(h.workspace, "started")));
   h.context.cancel();
   await pending;

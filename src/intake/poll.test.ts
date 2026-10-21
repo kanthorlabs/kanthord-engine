@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
+import { setImmediate as turn } from "node:timers/promises";
 import pino from "pino";
 import {
   GrantKind,
@@ -714,6 +715,19 @@ async function settle(): Promise<void> {
     await new Promise((resolve) => setImmediate(resolve));
 }
 
+async function until(done: () => boolean, signal: AbortSignal): Promise<void> {
+  while (!done()) await turn(undefined, { signal });
+}
+
+async function reaches(
+  count: () => number,
+  expected: number,
+  signal: AbortSignal,
+): Promise<void> {
+  await until(() => count() >= expected, signal);
+  assert.equal(count(), expected);
+}
+
 function loopHarness(t: TestContext, options: HarnessOptions = {}) {
   t.mock.timers.enable({ apis: ["setTimeout"] });
   const h = cycleHarness(t, options);
@@ -772,9 +786,9 @@ test("a loop waits one interval before each cycle and re-arms after the cycle en
   assert.equal(h.calls.length, UNSENT_REQUEST_COUNT);
   t.mock.timers.tick(TICK_MS);
   await settle();
-  assert.equal(h.calls.length, REQUESTS_PER_CYCLE);
+  await reaches(() => h.calls.length, REQUESTS_PER_CYCLE, t.signal);
   await h.interval();
-  assert.equal(h.calls.length, REQUESTS_AFTER_REARM);
+  await reaches(() => h.calls.length, REQUESTS_AFTER_REARM, t.signal);
 });
 
 test("startAll spreads the first cycles of the loops across one interval", async (t) => {
@@ -811,6 +825,7 @@ test("startAll spreads the first cycles of the loops across one interval", async
     assert.deepEqual(polled(), ids.slice(0, index));
     t.mock.timers.tick(TICK_MS);
     await settle();
+    await until(() => polled().length >= index + LOOPS_PER_OFFSET, t.signal);
     assert.deepEqual(polled(), ids.slice(0, index + LOOPS_PER_OFFSET));
     elapsedMs = INTERVAL_MS + offsetMs;
   }
@@ -824,13 +839,13 @@ test("a slow request starts no second request of that inbound before it ends", a
   await h.interval();
   await h.interval();
   await h.interval();
-  assert.equal(h.calls.length, REQUESTS_PER_CYCLE);
+  await reaches(() => h.calls.length, REQUESTS_PER_CYCLE, t.signal);
   slow.resolve(modified(ETAG_FIRST, []));
   await settle();
   assert.equal(h.calls.length, REQUESTS_PER_CYCLE);
   h.answers.next = async () => modified(ETAG_FIRST, []);
   await h.interval();
-  assert.equal(h.calls.length, REQUESTS_AFTER_REARM);
+  await reaches(() => h.calls.length, REQUESTS_AFTER_REARM, t.signal);
 });
 
 test("a thrown cycle logs the inbound and the code, and the loop continues", async (t) => {
@@ -840,12 +855,14 @@ test("a thrown cycle logs the inbound and the code, and the loop continues", asy
   };
   h.loops.start(h.inboundId);
   await h.interval();
-  assert.equal(h.warn.mock.callCount(), WARNINGS_PER_FAILURE);
+  await reaches(() => h.warn.mock.callCount(), WARNINGS_PER_FAILURE, t.signal);
   const [fields] = h.warn.mock.calls[0]?.arguments ?? [];
   assert.deepEqual(fields, { inbound_id: h.inboundId, code: UNKNOWN_CODE });
   await h.interval();
-  assert.equal(h.calls.length, REQUESTS_AFTER_REARM);
-  assert.deepEqual(h.drops, [CREDENTIAL, CREDENTIAL]);
+  await reaches(() => h.calls.length, REQUESTS_AFTER_REARM, t.signal);
+  const dropped = [CREDENTIAL, CREDENTIAL];
+  await until(() => h.drops.length >= dropped.length, t.signal);
+  assert.deepEqual(h.drops, dropped);
 });
 
 test("a gone inbound ends its loop", async (t) => {
@@ -854,7 +871,11 @@ test("a gone inbound ends its loop", async (t) => {
   h.store.transaction((tx) => deleteInbound(tx, h.inboundId));
   const transaction = t.mock.method(h.store, "transaction");
   await h.interval();
-  assert.equal(transaction.mock.callCount(), TRANSACTIONS_OF_GONE_LOOP);
+  await reaches(
+    () => transaction.mock.callCount(),
+    TRANSACTIONS_OF_GONE_LOOP,
+    t.signal,
+  );
   await h.interval();
   assert.equal(transaction.mock.callCount(), TRANSACTIONS_OF_GONE_LOOP);
   assert.equal(h.calls.length, UNSENT_REQUEST_COUNT);
@@ -866,7 +887,7 @@ test("a second start adds no loop and a stop clears the timer", async (t) => {
   h.loops.start(h.inboundId);
   h.loops.start(h.inboundId);
   await h.interval();
-  assert.equal(h.calls.length, REQUESTS_PER_CYCLE);
+  await reaches(() => h.calls.length, REQUESTS_PER_CYCLE, t.signal);
   h.loops.stop(h.inboundId);
   await h.interval();
   assert.equal(h.calls.length, REQUESTS_PER_CYCLE);
@@ -878,7 +899,7 @@ test("stopAll cancels the running request, awaits its cycle and commits nothing"
   h.answers.next = () => slow.promise;
   h.loops.start(h.inboundId);
   await h.interval();
-  assert.equal(h.calls.length, REQUESTS_PER_CYCLE);
+  await reaches(() => h.calls.length, REQUESTS_PER_CYCLE, t.signal);
   const stopped = h.loops.stopAll();
   assert.equal(h.calls[0]?.call.signal.aborted, true);
   slow.resolve(modified(ETAG_FIRST, [ev("101", "PushEvent")]));
@@ -895,11 +916,11 @@ test("a refusal that names a wait delays the next request until that wait", asyn
   h.script([limited(5 * INTERVAL_MS)]);
   h.loops.start(h.inboundId);
   await h.interval();
-  assert.equal(h.calls.length, REQUESTS_PER_CYCLE);
+  await reaches(() => h.calls.length, REQUESTS_PER_CYCLE, t.signal);
   await h.elapse(5 * INTERVAL_MS - TICK_MS);
   assert.equal(h.calls.length, REQUESTS_PER_CYCLE);
   await h.elapse(TICK_MS);
-  assert.equal(h.calls.length, REQUESTS_AFTER_REARM);
+  await reaches(() => h.calls.length, REQUESTS_AFTER_REARM, t.signal);
 });
 
 test("a refusal that names a wait below the interval waits one interval", async (t) => {
@@ -908,9 +929,9 @@ test("a refusal that names a wait below the interval waits one interval", async 
   h.loops.start(h.inboundId);
   await h.interval();
   await h.elapse(INTERVAL_MS - TICK_MS);
-  assert.equal(h.calls.length, REQUESTS_PER_CYCLE);
+  await reaches(() => h.calls.length, REQUESTS_PER_CYCLE, t.signal);
   await h.elapse(TICK_MS);
-  assert.equal(h.calls.length, REQUESTS_AFTER_REARM);
+  await reaches(() => h.calls.length, REQUESTS_AFTER_REARM, t.signal);
 });
 
 test("an X-Poll-Interval above the interval delays the next request, and one below it changes nothing", async (t) => {
@@ -919,13 +940,17 @@ test("an X-Poll-Interval above the interval delays the next request, and one bel
   h.loops.start(h.inboundId);
   await h.interval();
   await h.elapse(3 * INTERVAL_MS - TICK_MS);
-  assert.equal(h.calls.length, REQUESTS_PER_CYCLE);
+  await reaches(() => h.calls.length, REQUESTS_PER_CYCLE, t.signal);
   await h.elapse(TICK_MS);
-  assert.equal(h.calls.length, REQUESTS_AFTER_REARM);
+  await reaches(() => h.calls.length, REQUESTS_AFTER_REARM, t.signal);
   await h.elapse(INTERVAL_MS - TICK_MS);
   assert.equal(h.calls.length, REQUESTS_AFTER_REARM);
   await h.elapse(TICK_MS);
-  assert.equal(h.calls.length, REQUESTS_AFTER_REARM + REQUESTS_PER_CYCLE);
+  await reaches(
+    () => h.calls.length,
+    REQUESTS_AFTER_REARM + REQUESTS_PER_CYCLE,
+    t.signal,
+  );
 });
 
 test("secondary rate limit refusals double the wait up to the bound, and the next answer returns to the interval", async (t) => {
@@ -934,7 +959,7 @@ test("secondary rate limit refusals double the wait up to the bound, and the nex
   h.loops.start(h.inboundId);
   await h.interval();
   let requests = REQUESTS_PER_CYCLE;
-  assert.equal(h.calls.length, requests);
+  await reaches(() => h.calls.length, requests, t.signal);
   for (const waitMs of [
     2 * BACKOFF_INTERVAL_MS,
     BACKOFF_MAX_MS,
@@ -945,12 +970,12 @@ test("secondary rate limit refusals double the wait up to the bound, and the nex
     assert.equal(h.calls.length, requests);
     await h.elapse(TICK_MS);
     requests += REQUESTS_PER_CYCLE;
-    assert.equal(h.calls.length, requests);
+    await reaches(() => h.calls.length, requests, t.signal);
   }
   await h.elapse(BACKOFF_INTERVAL_MS - TICK_MS);
   assert.equal(h.calls.length, requests);
   await h.elapse(TICK_MS);
-  assert.equal(h.calls.length, requests + REQUESTS_PER_CYCLE);
+  await reaches(() => h.calls.length, requests + REQUESTS_PER_CYCLE, t.signal);
 });
 
 test("any answer ends the count of secondary rate limit refusals", async (t) => {
@@ -961,11 +986,11 @@ test("any answer ends the count of secondary rate limit refusals", async (t) => 
   await h.elapse(2 * INTERVAL_MS);
   await h.elapse(4 * INTERVAL_MS);
   await h.elapse(INTERVAL_MS);
-  assert.equal(h.calls.length, 4 * REQUESTS_PER_CYCLE);
+  await reaches(() => h.calls.length, 4 * REQUESTS_PER_CYCLE, t.signal);
   await h.elapse(2 * INTERVAL_MS - TICK_MS);
   assert.equal(h.calls.length, 4 * REQUESTS_PER_CYCLE);
   await h.elapse(TICK_MS);
-  assert.equal(h.calls.length, 5 * REQUESTS_PER_CYCLE);
+  await reaches(() => h.calls.length, 5 * REQUESTS_PER_CYCLE, t.signal);
 });
 
 test("a refusal that is no rate limit keeps the interval and ends the count", async (t) => {
@@ -984,7 +1009,7 @@ test("a refusal that is no rate limit keeps the interval and ends the count", as
   await h.interval();
   await h.elapse(2 * INTERVAL_MS);
   await h.elapse(INTERVAL_MS);
-  assert.equal(h.calls.length, 3 * REQUESTS_PER_CYCLE);
+  await reaches(() => h.calls.length, 3 * REQUESTS_PER_CYCLE, t.signal);
 });
 
 test("the wait bound caps a named wait", async (t) => {
@@ -993,9 +1018,9 @@ test("the wait bound caps a named wait", async (t) => {
   h.loops.start(h.inboundId);
   await h.interval();
   await h.elapse(WAIT_MAX_MS - TICK_MS);
-  assert.equal(h.calls.length, REQUESTS_PER_CYCLE);
+  await reaches(() => h.calls.length, REQUESTS_PER_CYCLE, t.signal);
   await h.elapse(TICK_MS);
-  assert.equal(h.calls.length, REQUESTS_AFTER_REARM);
+  await reaches(() => h.calls.length, REQUESTS_AFTER_REARM, t.signal);
 });
 
 test("a cycle asks for the unresolved request count of the project and the resource identity before the release", async (t) => {
@@ -1082,10 +1107,10 @@ test("a loop skips the request while the count is zero, keeps the interval and r
   await h.interval();
   await h.interval();
   assert.equal(h.calls.length, UNSENT_REQUEST_COUNT);
-  assert.equal(h.demands.inputs.length, SKIPPED_CYCLES);
+  await reaches(() => h.demands.inputs.length, SKIPPED_CYCLES, t.signal);
   h.demands.next = async () => counted(UNRESOLVED_REQUESTS);
   await h.interval();
-  assert.equal(h.calls.length, REQUESTS_PER_CYCLE);
+  await reaches(() => h.calls.length, REQUESTS_PER_CYCLE, t.signal);
 });
 
 function failed(status: number): EventsAnswer {
@@ -1207,12 +1232,12 @@ test("a secondary refusal of the closed pull request read after a 200 events rea
   h.scriptPulls([limited(null)]);
   h.loops.start(h.inboundId);
   await h.interval();
-  assert.equal(h.calls.length, REQUESTS_PER_CYCLE);
-  assert.equal(h.pullCalls.length, REQUESTS_PER_CYCLE);
+  await reaches(() => h.calls.length, REQUESTS_PER_CYCLE, t.signal);
+  await reaches(() => h.pullCalls.length, REQUESTS_PER_CYCLE, t.signal);
   await h.elapse(2 * INTERVAL_MS - TICK_MS);
   assert.equal(h.calls.length, REQUESTS_PER_CYCLE);
   await h.elapse(TICK_MS);
-  assert.equal(h.calls.length, REQUESTS_AFTER_REARM);
+  await reaches(() => h.calls.length, REQUESTS_AFTER_REARM, t.signal);
 });
 
 test("one count holds the secondary refusals of both reads", async (t) => {
@@ -1223,12 +1248,16 @@ test("one count holds the secondary refusals of both reads", async (t) => {
   await h.interval();
   assert.equal(h.pullCalls.length, UNSENT_REQUEST_COUNT);
   await h.elapse(2 * INTERVAL_MS);
-  assert.equal(h.calls.length, REQUESTS_AFTER_REARM);
-  assert.equal(h.pullCalls.length, REQUESTS_PER_CYCLE);
+  await reaches(() => h.calls.length, REQUESTS_AFTER_REARM, t.signal);
+  await reaches(() => h.pullCalls.length, REQUESTS_PER_CYCLE, t.signal);
   await h.elapse(4 * INTERVAL_MS - TICK_MS);
   assert.equal(h.calls.length, REQUESTS_AFTER_REARM);
   await h.elapse(TICK_MS);
-  assert.equal(h.calls.length, REQUESTS_AFTER_REARM + REQUESTS_PER_CYCLE);
+  await reaches(
+    () => h.calls.length,
+    REQUESTS_AFTER_REARM + REQUESTS_PER_CYCLE,
+    t.signal,
+  );
 });
 
 test("a refusal that names a wait on the closed pull request read ends the count and delays the next cycle", async (t) => {
@@ -1238,16 +1267,24 @@ test("a refusal that names a wait on the closed pull request read ends the count
   h.loops.start(h.inboundId);
   await h.interval();
   await h.elapse(2 * INTERVAL_MS);
-  assert.equal(h.pullCalls.length, REQUESTS_PER_CYCLE);
+  await reaches(() => h.pullCalls.length, REQUESTS_PER_CYCLE, t.signal);
   await h.elapse(3 * INTERVAL_MS - TICK_MS);
-  assert.equal(h.calls.length, REQUESTS_AFTER_REARM);
+  await reaches(() => h.calls.length, REQUESTS_AFTER_REARM, t.signal);
   await h.elapse(TICK_MS);
-  assert.equal(h.calls.length, REQUESTS_AFTER_REARM + REQUESTS_PER_CYCLE);
-  assert.equal(h.pullCalls.length, REQUESTS_AFTER_REARM);
+  await reaches(
+    () => h.calls.length,
+    REQUESTS_AFTER_REARM + REQUESTS_PER_CYCLE,
+    t.signal,
+  );
+  await reaches(() => h.pullCalls.length, REQUESTS_AFTER_REARM, t.signal);
   await h.elapse(2 * INTERVAL_MS - TICK_MS);
   assert.equal(h.calls.length, REQUESTS_AFTER_REARM + REQUESTS_PER_CYCLE);
   await h.elapse(TICK_MS);
-  assert.equal(h.calls.length, REQUESTS_AFTER_REARM + REQUESTS_AFTER_REARM);
+  await reaches(
+    () => h.calls.length,
+    REQUESTS_AFTER_REARM + REQUESTS_AFTER_REARM,
+    t.signal,
+  );
 });
 
 test("the wait after a cycle is the longest wait of both answers", async (t) => {
@@ -1257,9 +1294,9 @@ test("the wait after a cycle is the longest wait of both answers", async (t) => 
   events.loops.start(events.inboundId);
   await events.interval();
   await events.elapse(5 * INTERVAL_MS - TICK_MS);
-  assert.equal(events.calls.length, REQUESTS_PER_CYCLE);
+  await reaches(() => events.calls.length, REQUESTS_PER_CYCLE, t.signal);
   await events.elapse(TICK_MS);
-  assert.equal(events.calls.length, REQUESTS_AFTER_REARM);
+  await reaches(() => events.calls.length, REQUESTS_AFTER_REARM, t.signal);
 });
 
 test("a longer wait of the closed pull request read delays the next cycle", async (t) => {
@@ -1269,9 +1306,9 @@ test("a longer wait of the closed pull request read delays the next cycle", asyn
   h.loops.start(h.inboundId);
   await h.interval();
   await h.elapse(5 * INTERVAL_MS - TICK_MS);
-  assert.equal(h.calls.length, REQUESTS_PER_CYCLE);
+  await reaches(() => h.calls.length, REQUESTS_PER_CYCLE, t.signal);
   await h.elapse(TICK_MS);
-  assert.equal(h.calls.length, REQUESTS_AFTER_REARM);
+  await reaches(() => h.calls.length, REQUESTS_AFTER_REARM, t.signal);
 });
 
 test("a count of zero makes neither read", async (t) => {

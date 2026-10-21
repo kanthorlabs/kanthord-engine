@@ -6,7 +6,6 @@ import { CommandName, ExitCode, PROGRAM_NAME } from "./constants.ts";
 import { runCLI } from "./index.ts";
 
 const EMPTY_ARGUMENT_COUNT = 0;
-const COMMAND_TIMEOUT_MS = 10000;
 const EMPTY_OUTPUT = "";
 const PRIVATE_UMASK = 0o077;
 const DEFAULT_ENCODING = "utf8";
@@ -126,6 +125,7 @@ export async function runInProcess(
   terminal = false,
 ): Promise<CliResult> {
   assert.ok(env.XDG_CONFIG_HOME);
+  assert.notEqual(args[0], CommandName.Serve);
   const capture: CliCapture = {
     env: definedEnvironment(env),
     terminal,
@@ -150,6 +150,7 @@ export async function runInProcess(
 export function spawnKanthord(
   args: string[],
   env: NodeJS.ProcessEnv,
+  signal: AbortSignal,
 ): Promise<CliResult> {
   assert.ok(args.length > EMPTY_ARGUMENT_COUNT);
   assert.ok(env.XDG_CONFIG_HOME);
@@ -162,7 +163,7 @@ export function spawnKanthord(
         "-e",
         `process.argv=[process.execPath,'kanthord',...${JSON.stringify(args)}];await import(${JSON.stringify(entry)});`,
       ],
-      { env, timeout: COMMAND_TIMEOUT_MS },
+      { env, signal },
       (error, stdout, stderr) => {
         const code = error?.code;
         if (error && !isNumber(code)) return reject(error);
@@ -179,9 +180,10 @@ export function spawnKanthord(
 export function runKanthord(
   args: string[],
   env: NodeJS.ProcessEnv,
+  signal: AbortSignal,
   terminal = false,
 ): Promise<CliResult> {
   return args[0] === CommandName.Serve
-    ? spawnKanthord(args, env)
+    ? spawnKanthord(args, env, signal)
     : runInProcess(args, env, terminal);
 }

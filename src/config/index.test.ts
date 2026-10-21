@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { isDeepStrictEqual } from "node:util";
+import { isDeepStrictEqual, promisify } from "node:util";
 import {
   chmodSync,
   mkdirSync,
@@ -11,9 +11,10 @@ import {
 } from "node:fs";
 import { join, resolve } from "node:path";
 import { randomBytes } from "node:crypto";
-import { spawnSync } from "node:child_process";
+import { execFile, type ExecFileException } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { diagnosticText, temporary } from "../kernel/test-support.ts";
+import { isNumber } from "../kernel/values.ts";
 import {
   configuration,
   CONFIG_VERSION,
@@ -50,7 +51,27 @@ const ROOT_BASE_PATH = "/";
 const INVALID_FIELD_CODE = "system.config.invalid_field";
 const ORIGINAL_CONTENT = "original";
 const REPLACEMENT_CONTENT = "replacement";
-const INVALID_YAML_COMMAND_TIMEOUT_MS = 10000;
+
+const execFileAsync = promisify(execFile);
+const MAIN_PATH = fileURLToPath(new URL("../main.ts", import.meta.url));
+
+async function mainCommand(args: string[], signal: AbortSignal) {
+  try {
+    const { stdout, stderr } = await execFileAsync(
+      process.execPath,
+      [MAIN_PATH, ...args],
+      { encoding: "utf8", signal },
+    );
+    return { status: ExitCode.Success, stdout, stderr };
+  } catch (error) {
+    if (signal.aborted) throw error;
+    const { code, stdout, stderr } = error as ExecFileException & {
+      stdout: string;
+      stderr: string;
+    };
+    return { status: isNumber(code) ? code : null, stdout, stderr };
+  }
+}
 
 test("service fragments preserve the existing YAML field set", () => {
   const initial = parseMapping(initialConfig());
@@ -267,20 +288,12 @@ test("agent prompt configuration defaults the agent directory to agents and acce
     );
 });
 
-test("config init emits Worker and Scheduler fields", (t) => {
+test("config init emits Worker and Scheduler fields", async (t) => {
   const path = join(temporary(t), "kanthord.yaml");
-  const result = spawnSync(
-    process.execPath,
-    [
-      fileURLToPath(new URL("../main.ts", import.meta.url)),
-      "config",
-      "init",
-      "--config",
-      path,
-    ],
-    { encoding: "utf8", timeout: INVALID_YAML_COMMAND_TIMEOUT_MS },
+  const result = await mainCommand(
+    ["config", "init", "--config", path],
+    t.signal,
   );
-  assert.ifError(result.error);
   assert.equal(result.status, ExitCode.Success);
   assert.deepEqual(parseMapping(readFileSync(path, "utf8")).worker, {
     heartbeat_window: DEFAULT_HEARTBEAT_WINDOW,
@@ -426,7 +439,7 @@ test("configuration rejects malformed secrets and accepts its initial document",
   assert.doesNotThrow(() => configuration(parseMapping(initialConfig())));
 });
 
-test("collection keys fail without YAML warnings or configuration excerpts", (t) => {
+test("collection keys fail without YAML warnings or configuration excerpts", async (t) => {
   const path = join(temporary(t), "kanthord.yaml");
   const masterKey = randomBytes(32).toString("base64");
   const sources = [
@@ -436,18 +449,10 @@ test("collection keys fail without YAML warnings or configuration excerpts", (t)
   ];
   for (const source of sources) {
     writePrivate(path, `master_key: ${masterKey}\n${source}\n`, true);
-    const result = spawnSync(
-      process.execPath,
-      [
-        fileURLToPath(new URL("../main.ts", import.meta.url)),
-        "config",
-        "validate",
-        "--config",
-        path,
-      ],
-      { encoding: "utf8", timeout: INVALID_YAML_COMMAND_TIMEOUT_MS },
+    const result = await mainCommand(
+      ["config", "validate", "--config", path],
+      t.signal,
     );
-    assert.ifError(result.error);
     assert.equal(result.status, ExitCode.Failure);
     assert.equal(result.stdout, EMPTY_OUTPUT);
     assert.match(result.stderr, /configuration:/);
@@ -456,7 +461,7 @@ test("collection keys fail without YAML warnings or configuration excerpts", (t)
   }
 });
 
-test("cyclic aliases fail promptly before Convict validation", (t) => {
+test("cyclic aliases fail promptly before Convict validation", async (t) => {
   const path = join(temporary(t), "kanthord.yaml");
   const masterKey = randomBytes(32).toString("base64");
   for (const source of [
@@ -465,18 +470,10 @@ test("cyclic aliases fail promptly before Convict validation", (t) => {
     "gateway:\n  allowed_hosts: &a [*a]",
   ]) {
     writePrivate(path, `master_key: ${masterKey}\n${source}\n`, true);
-    const result = spawnSync(
-      process.execPath,
-      [
-        fileURLToPath(new URL("../main.ts", import.meta.url)),
-        "config",
-        "validate",
-        "--config",
-        path,
-      ],
-      { encoding: "utf8", timeout: INVALID_YAML_COMMAND_TIMEOUT_MS },
+    const result = await mainCommand(
+      ["config", "validate", "--config", path],
+      t.signal,
     );
-    assert.ifError(result.error);
     assert.equal(result.status, ExitCode.Failure);
     assert.equal(result.stdout, EMPTY_OUTPUT);
     assert.match(result.stderr, /configuration:/);

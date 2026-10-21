@@ -62,6 +62,7 @@ async function login(t: TestContext, code: string | null) {
       KANTHORD_ENDPOINT: undefined,
       KANTHORD_TOKEN: undefined,
     },
+    t.signal,
   );
 }
 

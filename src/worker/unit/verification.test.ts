@@ -67,7 +67,6 @@ test("verification runs in order and stops on the first failure or unstarted dea
   );
 });
 
-const POLL_LIMIT = 100;
 const POLL_MS = 20;
 const ZOMBIE = "Z";
 const NO_PROCESS_STATUS = 1;
@@ -92,13 +91,9 @@ function childTerminated(pid: number): boolean {
 
 async function observe(
   predicate: () => boolean,
-  message: string,
+  signal: AbortSignal,
 ): Promise<void> {
-  for (let attempt = 0; attempt < POLL_LIMIT; attempt++) {
-    if (predicate()) return;
-    await delay(POLL_MS);
-  }
-  assert.fail(message);
+  while (!predicate()) await delay(POLL_MS, undefined, { signal });
 }
 
 for (const timedOut of [true, false]) {
@@ -120,7 +115,7 @@ for (const timedOut of [true, false]) {
         () =>
           existsSync(childFile) &&
           readFileSync(childFile, "utf8").trim().length > POSITIVE_PID,
-        "Verification child did not start within the bounded wait.",
+        t.signal,
       );
       const child = Number(readFileSync(childFile, "utf8").trim());
       assert.ok(Number.isSafeInteger(child) && child > POSITIVE_PID);
@@ -134,10 +129,7 @@ for (const timedOut of [true, false]) {
         })),
         [{ signal: "SIGKILL", timedOut }],
       );
-      await observe(
-        () => childTerminated(child),
-        "Verification child survived termination of its shell.",
-      );
+      await observe(() => childTerminated(child), t.signal);
     } finally {
       context.cancel();
       for (const file of [shellFile, childFile]) {

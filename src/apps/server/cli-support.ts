@@ -65,8 +65,9 @@ function cliTestSupport(): Promise<CliTestSupport> {
 export async function spawnKanthord(
   args: string[],
   env: NodeJS.ProcessEnv,
+  signal: AbortSignal,
 ): Promise<CliResult> {
-  return (await cliTestSupport()).spawnKanthord(args, env);
+  return (await cliTestSupport()).spawnKanthord(args, env, signal);
 }
 
 export async function kanthordTerminal(
@@ -138,7 +139,7 @@ export async function kanthord(
 ): Promise<CliResult> {
   assert.ok(args.length > EMPTY_ARGUMENT_COUNT);
   assert.ok(env.XDG_CONFIG_HOME);
-  return (await cliTestSupport()).runKanthord(args, env);
+  return (await cliTestSupport()).runInProcess(args, env);
 }
 
 export function environment(directory: string): NodeJS.ProcessEnv {

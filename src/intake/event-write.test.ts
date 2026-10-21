@@ -59,7 +59,6 @@ const HANDOFFS_AFTER_DISCARD = 0;
 const HANDOFFS_PER_EVENT = 1;
 const RETRY_HANDOFF_INDEX = 1;
 const HANDOFFS_AFTER_RETRY = 2;
-const WAIT_TICKS = 1000;
 
 function completed(): Promise<OperationResult<unknown>> {
   return Promise.resolve({
@@ -182,9 +181,12 @@ function refusal(status: number, code: string) {
     error.code === code;
 }
 
-async function untilCalls(calls: ConsumerCall[], count: number) {
-  for (let step = 0; step < WAIT_TICKS && calls.length < count; step++)
-    await tick();
+async function untilCalls(
+  calls: ConsumerCall[],
+  count: number,
+  signal: AbortSignal,
+) {
+  while (calls.length < count) await tick(undefined, { signal });
   assert.equal(calls.length, count);
 }
 
@@ -270,7 +272,7 @@ test("A discard after the reservation of a handoff answers 409 in_flight, and th
       }),
   );
   h.intake.dispatcher.wake();
-  await untilCalls(h.calls, HANDOFFS_PER_EVENT);
+  await untilCalls(h.calls, HANDOFFS_PER_EVENT, t.signal);
   assert.equal(h.intake.dispatcher.inFlight(id), true);
   await assert.rejects(h.discard(id), refusal(HttpStatus.Conflict, IN_FLIGHT));
   assert.equal(h.stateOf(id), InboundEventState.Pending);

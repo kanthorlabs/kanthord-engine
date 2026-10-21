@@ -131,7 +131,7 @@ test("every command with a --file option prints a body example that its schema a
     const label = path.join(" ");
     const body = fileBodyOf(command);
     assert.ok(body, `${label}: no file body help`);
-    const help = await runKanthord([...path, "--help"], env);
+    const help = await runKanthord([...path, "--help"], env, t.signal);
     assert.equal(help.code, ExitCode.Success, help.stderr);
     const marker = help.stdout.indexOf(`${EXAMPLE_MARKER}\n`);
     assert.notEqual(marker, NOT_FOUND, `${label}: no example in help`);
@@ -159,10 +159,10 @@ test("the node override example names a state that override accepts", () => {
 
 test("config init help names the default and the container value of --gateway-bind", async (t) => {
   const env = environment(temporary(t));
-  const created = await runKanthord(["config", "init"], env);
+  const created = await runKanthord(["config", "init"], env, t.signal);
   assert.equal(created.code, ExitCode.Success, created.stderr);
   const defaultBind = loadConfig(env.KANTHORD_CONFIG!).gateway.bind;
-  const help = await runKanthord(["config", "init", "--help"], env);
+  const help = await runKanthord(["config", "init", "--help"], env, t.signal);
   assert.equal(help.code, ExitCode.Success, help.stderr);
   assert.match(
     help.stdout.replace(WHITESPACE, " "),

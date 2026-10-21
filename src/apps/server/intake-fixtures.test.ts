@@ -53,7 +53,6 @@ const NO_CALLS = 0;
 const GITHUB_DEADLINE_MS = 5000;
 const GIT_DEADLINE_MS = 20000;
 const HOLD_POLL_MS = 10;
-const HOLD_POLL_LIMIT = 500;
 const MERGE_SHA = "e".repeat(40);
 const ADDRESS = "git@github.com:owner/repo.git";
 const NODE_BRANCH = "kanthord/node";
@@ -265,12 +264,8 @@ test("fake GitHub holds every answer until the release", async (t) => {
     .finally(() => {
       settled = true;
     });
-  for (
-    let poll = 0;
-    poll < HOLD_POLL_LIMIT && gitHub.calls.length === NO_CALLS;
-    poll++
-  )
-    await delay(HOLD_POLL_MS);
+  while (gitHub.calls.length === NO_CALLS)
+    await delay(HOLD_POLL_MS, undefined, { signal: t.signal });
   assert.equal(gitHub.calls.length, ONE_CALL);
   await delay(HOLD_POLL_MS);
   assert.equal(settled, false);
@@ -379,12 +374,8 @@ test("fake GitHub scripts the events failures and holds the later events calls",
     .finally(() => {
       settled = true;
     });
-  for (
-    let poll = 0;
-    poll < HOLD_POLL_LIMIT && gitHub.calls.length < LAST_CALLS;
-    poll++
-  )
-    await delay(HOLD_POLL_MS);
+  while (gitHub.calls.length < LAST_CALLS)
+    await delay(HOLD_POLL_MS, undefined, { signal: t.signal });
   assert.equal(gitHub.calls.length, LAST_CALLS);
   await delay(HOLD_POLL_MS);
   assert.equal(settled, false);

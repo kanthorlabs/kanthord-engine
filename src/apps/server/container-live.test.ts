@@ -39,12 +39,9 @@ const SKIP = IMAGE_NAME
   ? false
   : "KANTHORD_TEST_CONTAINER_IMAGE names no image; make test-container sets it";
 const LIVE_TIMEOUT_MS = 600000;
-const REGISTER_LIMIT_MS = 120000;
-const DRAIN_LIMIT_MS = 10000;
 const STOP_LIMIT_MS = 5000;
 const TERMINATE_LIMIT_MS = 5000;
 const ORPHAN_LIMIT_MS = 20000;
-const RUNNING_LIMIT_MS = 60000;
 const POLL_MS = 250;
 const STOP_GRACE_MS = 1000;
 const BINDING = "boxed";
@@ -87,15 +84,12 @@ function runtimeCall(
 async function waitUntil<T>(
   read: () => Promise<T>,
   done: (value: T) => boolean,
-  limitMs: number,
-  what: string,
+  signal: AbortSignal,
 ): Promise<T> {
-  const deadline = performance.now() + limitMs;
   for (;;) {
     const value = await read();
     if (done(value)) return value;
-    assert.ok(performance.now() < deadline, `${what} within ${limitMs} ms`);
-    await delay(POLL_MS);
+    await delay(POLL_MS, undefined, { signal });
   }
 }
 
@@ -259,8 +253,7 @@ test(
     const [item] = await waitUntil(
       f.instances,
       (items) => items.length === ONE_ITEM,
-      REGISTER_LIMIT_MS,
-      "criterion 1: the slot registers",
+      t.signal,
     );
     t.diagnostic(
       `criterion 1: registered in ${Math.round(performance.now() - started)} ms`,
@@ -323,8 +316,7 @@ test(
     await waitUntil(
       () => Promise.resolve(readFileSync(stderrLog, "utf8")),
       (text) => text.includes(READY_MESSAGE),
-      DRAIN_LIMIT_MS,
-      "criterion 8: stderr.log holds the ready record",
+      t.signal,
     );
 
     assert.equal(
@@ -346,8 +338,7 @@ test(
     await waitUntil(
       () => containerNames(f.runtime, `name=${name}`),
       (names) => names.length === NO_ITEMS,
-      DRAIN_LIMIT_MS,
-      "criterion 3: the drained container leaves",
+      t.signal,
     );
     t.diagnostic(
       `criterion 3: container gone ${Math.round(performance.now() - drainStarted)} ms after the drain`,
@@ -362,8 +353,7 @@ test(
     const [again] = await waitUntil(
       f.instances,
       (items) => items.length === ONE_ITEM,
-      REGISTER_LIMIT_MS,
-      "criterion 7: the slot registers again",
+      t.signal,
     );
     assert.equal(again!.client_id, clientId);
     assert.equal(
@@ -383,8 +373,7 @@ test(
     await waitUntil(
       () => containerNames(f.runtime, `name=${name}`),
       (names) => names.length === NO_ITEMS,
-      DRAIN_LIMIT_MS,
-      "criterion 4: the stopped container leaves",
+      t.signal,
     );
     assert.ok(
       !f.fixture.logs.some((line) => line.includes(FAILED_MESSAGE)),
@@ -415,12 +404,7 @@ test(
       environment: process.env,
     });
     const name = slotName(slot.client_id);
-    await waitUntil(
-      () => running(runtime, name),
-      Boolean,
-      RUNNING_LIMIT_MS,
-      "the container runs",
-    );
+    await waitUntil(() => running(runtime, name), Boolean, t.signal);
     await shell(runtime, name, `kill -STOP ${SERVE_SLOT_PID}`);
     instance.control(SlotControl.Stop);
     await delay(STOP_GRACE_MS);
@@ -436,8 +420,7 @@ test(
     await waitUntil(
       () => containerNames(runtime, `name=${name}`),
       (names) => names.length === NO_ITEMS,
-      DRAIN_LIMIT_MS,
-      "the terminated container leaves",
+      t.signal,
     );
   },
 );
@@ -468,22 +451,21 @@ test(
     );
     t.after(() => launcher.kill("SIGKILL"));
     const name = slotName(slot.client_id);
-    await waitUntil(
-      () => running(runtime, name),
-      Boolean,
-      RUNNING_LIMIT_MS,
-      "the launched container runs",
-    );
+    await waitUntil(() => running(runtime, name), Boolean, t.signal);
     launcher.kill("SIGKILL");
     const killed = performance.now();
     await waitUntil(
       () => containerNames(runtime, `name=${name}`, RUNNING_CONTAINERS),
       (names) => names.length === NO_ITEMS,
-      ORPHAN_LIMIT_MS,
-      "criterion 5: the orphan slot stops",
+      t.signal,
     );
+    const orphanMs = performance.now() - killed;
     t.diagnostic(
-      `criterion 5: slot stopped ${Math.round(performance.now() - killed)} ms after SIGKILL of the launcher`,
+      `criterion 5: slot stopped ${Math.round(orphanMs)} ms after SIGKILL of the launcher`,
+    );
+    assert.ok(
+      orphanMs < ORPHAN_LIMIT_MS,
+      `criterion 5: the orphan slot stopped after ${orphanMs} ms`,
     );
     await driver.prepare();
     assert.deepEqual(await containerNames(runtime, `name=${name}`), []);

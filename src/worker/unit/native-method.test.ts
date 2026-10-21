@@ -41,6 +41,7 @@ import { SHIPPED_TEMPLATES } from "../../agent/prompt-templates.ts";
 
 const EXPECTED_CALL_COUNT = 1;
 const NO_RELEASES = 0;
+const START_POLL_MS = 10;
 test("S1 refusal aborts an active native session and records its stopped transcript exactly once", async (t) => {
   const setup = anthropicSetup();
   const claim = {
@@ -111,9 +112,8 @@ test("S1 refusal aborts an active native session and records its stopped transcr
       },
     }),
   );
-  const POLLS = 100;
-  for (let i = 0; i < POLLS && !existsSync(join(workspace, "started")); i++)
-    await setTimeout(10);
+  while (!existsSync(join(workspace, "started")))
+    await setTimeout(START_POLL_MS, undefined, { signal: t.signal });
   assert.ok(existsSync(join(workspace, "started")));
   const result = await executionBoundary(run, async () => {
     await run.call(async () => ({
