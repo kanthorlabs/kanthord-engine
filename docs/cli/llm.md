@@ -184,7 +184,7 @@ A worker token reads and writes only the copies of its own instance; another hol
 The instance checks its own copies, because the server holds no key of an instance copy. Two `worker` operations with no command serve that check:
 
 - `llm.credential.sealed`, `GET /api/llm/credential/:credential_name/sealed`, answers `{ name, platform, revision, metadata, sealed }` of the newest live revision of the copy of the instance of the token. A copy that is absent or sealed to an ended key answers `404 credential.credential.not_found`.
-- `llm.credential.report`, `POST /api/llm/credential/:credential_name/report`, takes `{ revision, status, capability, failure_reason, models }` and answers `204`. `revision` must be the newest live revision of the copy, else `409 credential.revision.conflict`. `failure_reason` is null only for `healthy`, and `capability` is the capability of the platform, else `400 credential.input.invalid`. `models` holds at most 512 entries.
+- `llm.credential.report`, `POST /api/llm/credential/:credential_name/report`, takes `{ revision, status, capability, failure_reason, models }` and answers `204`. `revision` must be the newest live revision of the copy, else `409 credential.revision.conflict`. `failure_reason` is null only for `healthy` and is never `held_by_instance`, and `capability` is the capability of the platform, else `400 credential.input.invalid`. `models` holds at most 512 entries.
 
 `kanthord worker instance get` shows the last report of each copy in `credentials[].health`.
 

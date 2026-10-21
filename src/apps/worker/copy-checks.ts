@@ -7,6 +7,7 @@ import {
   type ResourceStatusValue,
 } from "../../kernel/health.ts";
 import { openJSON } from "../../kernel/hpke.ts";
+import { HttpStatus } from "../../kernel/http.ts";
 import {
   CREDENTIAL_SEAL_INFO,
   credentialSealAad,
@@ -29,6 +30,8 @@ import {
   LLM_PLATFORMS,
   LLM_PROVIDERS,
 } from "../../llm/platforms.ts";
+
+import { ExchangeFailure } from "./instance-exchange.ts";
 
 const ZERO_BYTE = 0;
 const NO_TEXT_LENGTH = 0;
@@ -73,6 +76,14 @@ function reportedModels(answer: ProviderCheckAnswer): CopyReportBody["models"] {
           COPY_REPORT_TEXT_MAX_LENGTH,
     )
     .slice(0, COPY_REPORT_MODELS_MAX);
+}
+
+function retryable(error: unknown): boolean {
+  return (
+    !(error instanceof ExchangeFailure) ||
+    error.status === null ||
+    error.status >= HttpStatus.InternalServerError
+  );
 }
 
 export class CopyChecks {
@@ -213,6 +224,7 @@ export class CopyChecks {
 
   private failed(name: string | null, error: unknown): void {
     if (this.options.context.err()) return;
+    if (retryable(error)) this.seen = undefined;
     this.options.log({
       msg: "Worker instance credential report failed",
       credential_name: name,

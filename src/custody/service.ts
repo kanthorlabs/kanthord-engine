@@ -150,6 +150,7 @@ export interface Dependencies {
   sshSignatureOf?: SshSignatureOf;
   instanceKeys?: InstanceKeys;
   bindingsListingInstance?: BindingsListingInstanceFn;
+  instanceCopyRefreshed?: (holder: string) => void;
 }
 
 const CustodyErrorCode = {
@@ -268,6 +269,13 @@ function liveHoldersOf(tx: Transaction, name: string): string[] {
       )
       .all(name, SERVER_HOLDER) as { holder: string }[]
   ).map(({ holder }) => holder);
+}
+
+function holderOfRow(tx: Transaction, id: string): string | null {
+  const row = tx.database
+    .prepare("SELECT holder FROM credential WHERE id = ?")
+    .get(id) as { holder: string } | undefined;
+  return row?.holder ?? null;
 }
 
 function serverLive(tx: Transaction, name: string): LiveRow | undefined {
@@ -530,6 +538,7 @@ export class CustodyComponent implements Service, CredentialRecords {
   private readonly sshSignatureOf: SshSignatureOf | undefined;
   private readonly instanceKeys: InstanceKeys;
   private readonly bindingsListingInstance: BindingsListingInstanceFn;
+  private readonly instanceCopyRefreshed: (holder: string) => void;
 
   constructor(dependencies: Dependencies) {
     this.executions = dependencies.executions;
@@ -550,6 +559,8 @@ export class CustodyComponent implements Service, CredentialRecords {
     this.instanceKeys = dependencies.instanceKeys ?? NO_INSTANCE_KEYS;
     this.bindingsListingInstance =
       dependencies.bindingsListingInstance ?? (() => []);
+    this.instanceCopyRefreshed =
+      dependencies.instanceCopyRefreshed ?? (() => {});
     dependencies.health?.register(CUSTODY_HEALTH_NAME, () =>
       this.healthcheck(),
     );
@@ -1203,6 +1214,9 @@ export class CustodyComponent implements Service, CredentialRecords {
       },
       written ? "credential report" : "credential report stale",
     );
+    const holder = written ? holderOfRow(tx, report.credential_id) : null;
+    if (holder !== null && holder !== SERVER_HOLDER)
+      this.instanceCopyRefreshed(holder);
   }
 
   custodySuitability(

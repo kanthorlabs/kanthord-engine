@@ -226,7 +226,9 @@ function fixture(
     checkTools: () => {},
     knownHostsOf: () => KNOWN_HOSTS,
   });
+  const refreshed: string[] = [];
   const component = new CustodyComponent({
+    instanceCopyRefreshed: (holder) => refreshed.push(holder),
     store,
     logger,
     envelopeKey: Buffer.alloc(32, 7),
@@ -430,6 +432,7 @@ function fixture(
     );
   };
   return {
+    refreshed,
     store,
     component,
     logs,
@@ -674,7 +677,9 @@ test("a worker placement handover answers the copy sealed to the instance key, p
   await sealedCopyReporter(item, opened!, key, async (report) => {
     reports.push(report);
   })({ credential: SECOND });
+  assert.deepEqual(f.refreshed, []);
   f.report(sealEnvelope(f.keys.report, f.aad, reports[0]));
+  assert.deepEqual(f.refreshed, [relay.key.name]);
   const [next] = handoverPayloadSchema.parse(
     openEnvelope(
       f.keys.handover,

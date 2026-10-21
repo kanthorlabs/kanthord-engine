@@ -32,6 +32,7 @@ import {
 } from "../kernel/context.ts";
 import { Diagnostic, OperationError } from "../kernel/errors.ts";
 import {
+  ResourceFailureReason,
   ResourceStatus,
   type ResourceCheck,
   type ResourceEntry,
@@ -152,8 +153,9 @@ function sealedBody(body: { sealed?: unknown; sealed_to?: string }): {
 
 function reportInvalid(report: CopyReportBody): boolean {
   return (
+    report.failure_reason === ResourceFailureReason.HeldByInstance ||
     (report.status === ResourceStatus.Healthy) !==
-    (report.failure_reason === null)
+      (report.failure_reason === null)
   );
 }
 
@@ -175,7 +177,7 @@ export class LlmComponent implements Service {
   private readonly sessions = new LoginSessionStore();
   private readonly logins = new Map<string, OAuthLogin>();
   private readonly instanceLogins = new Map<string, InstanceLogin>();
-  private readonly copyHealth = new CopyHealthBook();
+  private readonly copyHealth: CopyHealthBook;
   private readonly oauthProviders: () => readonly Provider[];
   private readonly now: () => number;
   private acceptingLogins = true;
@@ -199,6 +201,7 @@ export class LlmComponent implements Service {
         anthropicProvider(),
       ]);
     this.now = dependencies.now ?? Date.now;
+    this.copyHealth = new CopyHealthBook(this.now());
     this.agentProvidersDependentOn = dependencies.agentProvidersDependentOn;
     this.enablementsDependentOnModel = dependencies.enablementsDependentOnModel;
     this.loadModelRuntime = dependencies.loadModelRuntime;
@@ -341,6 +344,10 @@ export class LlmComponent implements Service {
 
   credentialVersionOf(holder: string): number {
     return this.copyHealth.versionOf(holder);
+  }
+
+  raiseCredentialVersion(holder: string): void {
+    this.copyHealth.raise(holder);
   }
 
   copyHealthOf(holder: string, copy: HeldCopy): CopyHealth {

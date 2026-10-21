@@ -25,7 +25,9 @@ import {
   type CopyReportBody,
   type ProviderCheckAnswer,
 } from "../../llm/contract.ts";
+import { HttpStatus } from "../../kernel/http.ts";
 import { CopyChecks } from "./copy-checks.ts";
+import { EXCHANGE_UNAVAILABLE, ExchangeFailure } from "./instance-exchange.ts";
 
 const INSTANCE = "laptop";
 const OPENAI = "openai";
@@ -40,6 +42,9 @@ const NEXT_VERSION = 3;
 const SHORT_TIMEOUT_MS = 20;
 const REPORT_FAILED_CODE = "credential.revision.conflict";
 const RUNS_FOR_ONE_VERSION = 1;
+const RUNS_UNTIL_A_REFUSAL = 3;
+const HEARTBEATS = 5;
+const SERVER_FAILURE_CODE = "gateway.invocation.invalid_response";
 const RUNS_FOR_A_CHANGE_DURING_A_RUN = 2;
 const RUNS_FOR_THREE_VERSIONS = 3;
 
@@ -274,4 +279,37 @@ test("a refused report logs its code and a stopped instance checks nothing more"
   });
   stopped.observe(NO_CREDENTIAL_VERSION);
   await stopped.idle();
+});
+
+test("a run that ends on an indeterminate or server failure runs again at the next heartbeat, and a refusal does not", async () => {
+  const outcomes: (Error | null)[] = [
+    new ExchangeFailure(EXCHANGE_UNAVAILABLE, "indeterminate", null),
+    new ExchangeFailure(
+      SERVER_FAILURE_CODE,
+      "server",
+      HttpStatus.InternalServerError,
+    ),
+    new ExchangeFailure(REPORT_FAILED_CODE, "conflict", HttpStatus.Conflict),
+  ];
+  let lists = 0;
+  const checks = new CopyChecks({
+    key: await instanceKey(),
+    context: background,
+    exchange: {
+      copies: async () => {
+        lists++;
+        const outcome = outcomes.shift();
+        if (outcome) throw outcome;
+        return [];
+      },
+      sealedCopy: () => assert.fail("no copy is listed"),
+      copyReport: () => assert.fail("no copy is listed"),
+    },
+    log: () => {},
+  });
+  for (let heartbeat = 0; heartbeat < HEARTBEATS; heartbeat++) {
+    checks.observe(NEXT_VERSION);
+    await checks.idle();
+  }
+  assert.equal(lists, RUNS_UNTIL_A_REFUSAL);
 });

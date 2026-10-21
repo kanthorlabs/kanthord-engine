@@ -154,7 +154,7 @@ export const providerCheckAnswerSchema = z.strictObject({
 export type ProviderCheckAnswer = z.infer<typeof providerCheckAnswerSchema>;
 export const COPY_REPORT_MODELS_MAX = 512;
 export const COPY_REPORT_TEXT_MAX_LENGTH = 256;
-const COPY_REPORT_MAX_BODY_BYTES = 256 * 1024;
+const COPY_REPORT_MAX_BODY_BYTES = 1024 * 1024;
 const reportedModelsSchema = z
   .array(
     z.strictObject({

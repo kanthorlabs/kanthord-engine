@@ -16,6 +16,7 @@ import {
   generateX25519KeyPair,
   keyFingerprint,
   openJSON,
+  sealJSON,
 } from "../kernel/hpke.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import { createIdentity } from "../kernel/identity.ts";
@@ -25,11 +26,7 @@ import { testWorkerIdentity } from "../kernel/test-identity.ts";
 import { INTAKE_SERVICE_NAME } from "../intake/contract.ts";
 import { REPOSITORY_PLATFORMS } from "../repository/index.ts";
 import { STORAGE_PLATFORMS } from "../storage/index.ts";
-import {
-  llmOperations,
-  NO_CREDENTIAL_VERSION,
-  type CopyReportBody,
-} from "./contract.ts";
+import { llmOperations, type CopyReportBody } from "./contract.ts";
 import {
   CAPABILITY_MODEL_LIST_READ,
   LLM_PLATFORMS,
@@ -47,9 +44,17 @@ const REPORT_DELAY_MS = 5000;
 const FIRST_REVISION = 1;
 const NEXT_REVISION = FIRST_REVISION + 1;
 const VERSION_STEP = 1;
-const AFTER_CREATE = VERSION_STEP;
+const START_VERSION = CLOCK_START;
+const AFTER_CREATE = START_VERSION + VERSION_STEP;
 const AFTER_ROTATE = AFTER_CREATE + VERSION_STEP;
 const AFTER_ARCHIVE = AFTER_ROTATE + VERSION_STEP;
+const AFTER_COMPATIBLE_CREATE = AFTER_ARCHIVE + VERSION_STEP;
+const AFTER_METADATA_EDIT = AFTER_COMPATIBLE_CREATE + VERSION_STEP;
+const AFTER_SEALED_CREATE = AFTER_METADATA_EDIT + VERSION_STEP;
+const RESTART_DELAY_MS = 60000;
+const COMPATIBLE_NAME = "team-router";
+const SEALED_NAME = "local-openai";
+const BASE_URL = "https://llm.example/v1";
 const Code = {
   NotFound: "credential.credential.not_found",
   RevisionConflict: "credential.revision.conflict",
@@ -217,6 +222,7 @@ async function fixture(t: TestContext) {
     pairs,
     logs,
     human,
+    worker,
     invoke,
     create,
     rotate,
@@ -273,13 +279,15 @@ test("a bad key report shows unhealthy with the time of the report of the instan
   });
 });
 
-test("a server restart shows unknown and credential version 0 until the next report", async (t) => {
+test("a server restart answers a new credential version and shows unknown until the next report", async (t) => {
   const f = await fixture(t);
   await f.create([INSTANCE]);
   f.report();
   assert.equal(f.version(), AFTER_CREATE);
+  f.advance(RESTART_DELAY_MS);
   f.restart();
-  assert.equal(f.version(), NO_CREDENTIAL_VERSION);
+  assert.equal(f.version(), f.now());
+  assert.notEqual(f.version(), AFTER_CREATE);
   assert.equal(f.health().status, ResourceStatus.Unknown);
   assert.equal(f.health().reported_at, null);
   f.advance(REPORT_DELAY_MS);
@@ -301,8 +309,8 @@ test("each write of an instance copy raises the credential version of that insta
   const f = await fixture(t);
   await f.create([SERVER_HOLDER, INSTANCE]);
   assert.equal(f.version(), AFTER_CREATE);
-  assert.equal(f.version(OTHER_INSTANCE), NO_CREDENTIAL_VERSION);
-  assert.equal(f.version(SERVER_HOLDER), NO_CREDENTIAL_VERSION);
+  assert.equal(f.version(OTHER_INSTANCE), START_VERSION);
+  assert.equal(f.version(SERVER_HOLDER), START_VERSION);
   await f.rotate(SERVER_HOLDER, FIRST_REVISION);
   assert.equal(f.version(), AFTER_CREATE);
   f.report();
@@ -315,6 +323,52 @@ test("each write of an instance copy raises the credential version of that insta
     body: null,
   });
   assert.equal(f.version(), AFTER_ARCHIVE);
+  await f.invoke(f.human, llmOperations.create, {
+    params: {},
+    query: {},
+    body: {
+      name: COMPATIBLE_NAME,
+      platform: Platform.OpenAICompatible,
+      metadata: { base_url: BASE_URL, models: [] },
+      secret: GOOD_KEY,
+      holders: [INSTANCE],
+    },
+  });
+  assert.equal(f.version(), AFTER_COMPATIBLE_CREATE);
+  f.invoke(f.human, llmOperations.update_metadata, {
+    params: { credential_name: COMPATIBLE_NAME },
+    query: { holder: INSTANCE },
+    body: {
+      expected_revision: FIRST_REVISION,
+      metadata: { base_url: BASE_URL, models: [{ id: "router-large" }] },
+    },
+  });
+  assert.equal(f.version(), AFTER_METADATA_EDIT);
+  const pair = f.pairs.get(INSTANCE)!;
+  await f.invoke(f.worker(INSTANCE), llmOperations.create, {
+    params: {},
+    query: {},
+    body: {
+      name: SEALED_NAME,
+      platform: Platform.OpenAI,
+      metadata: null,
+      holder: INSTANCE,
+      sealed_to: pair.key.fingerprint,
+      sealed: await sealJSON(
+        Buffer.from(pair.key.public_key, "base64url"),
+        CREDENTIAL_SEAL_INFO,
+        credentialSealAad({
+          name: SEALED_NAME,
+          platform: Platform.OpenAI,
+          holder: INSTANCE,
+          sealed_to: pair.key.fingerprint,
+        }),
+        GOOD_KEY,
+      ),
+    },
+  });
+  assert.equal(f.version(), AFTER_SEALED_CREATE);
+  assert.equal(f.version(OTHER_INSTANCE), START_VERSION);
 });
 
 test("a report refuses another revision, an inconsistent failure reason, another capability and a copy of another instance", async (t) => {
@@ -332,6 +386,15 @@ test("a report refuses another revision, an inconsistent failure reason, another
   );
   refuses(
     () => f.report({ failure_reason: null }),
+    HttpStatus.BadRequest,
+    Code.InvalidInput,
+  );
+  refuses(
+    () =>
+      f.report({
+        status: ResourceStatus.Unknown,
+        failure_reason: ResourceFailureReason.HeldByInstance,
+      }),
     HttpStatus.BadRequest,
     Code.InvalidInput,
   );

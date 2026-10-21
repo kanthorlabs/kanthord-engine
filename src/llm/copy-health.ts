@@ -1,10 +1,6 @@
 import type { HeldCopy } from "../custody/contract.ts";
 import { ResourceFailureReason, ResourceStatus } from "../kernel/health.ts";
-import {
-  NO_CREDENTIAL_VERSION,
-  type CopyHealth,
-  type CopyReportBody,
-} from "./contract.ts";
+import type { CopyHealth, CopyReportBody } from "./contract.ts";
 import { CAPABILITY_NONE, isLlmPlatform, LLM_PLATFORMS } from "./platforms.ts";
 
 const VERSION_STEP = 1;
@@ -26,13 +22,18 @@ export function unreportedHealth(platform: string): CopyHealth {
 export class CopyHealthBook {
   private readonly versions = new Map<string, number>();
   private readonly reports = new Map<string, Map<string, CopyReport>>();
+  private readonly startVersion: number;
+
+  constructor(startedAt: number) {
+    this.startVersion = startedAt;
+  }
 
   raise(holder: string): void {
     this.versions.set(holder, this.versionOf(holder) + VERSION_STEP);
   }
 
   versionOf(holder: string): number {
-    return this.versions.get(holder) ?? NO_CREDENTIAL_VERSION;
+    return this.versions.get(holder) ?? this.startVersion;
   }
 
   record(

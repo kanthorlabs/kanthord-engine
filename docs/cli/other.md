@@ -738,7 +738,9 @@ through `llm.credential.report`. A report holds `revision`, `status`,
 `capability`, `failure_reason` and `models`. The server never calls the
 provider with the key of an instance copy. A failed check or report logs
 `Worker instance credential check failed` or `Worker instance credential report
-failed` with the credential name and no secret.
+failed` with no secret. The record holds the credential name, or `null` for a
+failed list. After an indeterminate answer or a server failure, the next
+heartbeat starts the check again.
 
 One connection of an instance is current. A second process of the same
 instance takes the connection. The first process then gets
