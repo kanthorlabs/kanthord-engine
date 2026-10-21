@@ -562,7 +562,8 @@ export class Worker implements Service {
       { level: "info", destination: LogDestination.StandardError },
       "",
     );
-    this.operationalLog.logger.info(record, String(record.msg));
+    const { msg, ...fields } = record;
+    this.operationalLog.logger.info(fields, String(msg));
   }
 }
 

@@ -463,9 +463,10 @@ export class WorkerUnit {
     record: Record<string, unknown>,
     level: "info" | "warn" = "info",
   ): void {
-    if (isString(this.options.log))
-      this.operationalLog!.logger[level](record, String(record.msg));
-    else this.options.log(JSON.stringify(record));
+    if (isString(this.options.log)) {
+      const { msg, ...fields } = record;
+      this.operationalLog!.logger[level](fields, String(msg));
+    } else this.options.log(JSON.stringify(record));
   }
 
   private beginExecution(entry: Entry, claim: ExecutionRecord): void {

@@ -825,3 +825,26 @@ test("an instance counts as connected only while its last heartbeat is inside th
   t.mock.method(Date, "now", () => start + INSTANCE_CONNECTED_WINDOW_MS + 1);
   assert.equal(f.worker().instanceConnected(INSTANCE), false);
 });
+
+test("instance.get and instance.list show no connection once the last heartbeat leaves the connected window", async (t) => {
+  const f = instanceFixture(t);
+  const { record } = await f.created();
+  f.asWorker(record.id);
+  await f.invoke("instance.connect", { connection_name: CONNECTION_NAME });
+  f.asHuman();
+  const live = await f.invoke("instance.get", null, {
+    instance_name: INSTANCE,
+  });
+  assert.equal(live.connection?.connection_name, CONNECTION_NAME);
+  const start = Date.now();
+  t.mock.method(Date, "now", () => start + INSTANCE_CONNECTED_WINDOW_MS + 1);
+  const stale = await f.invoke("instance.get", null, {
+    instance_name: INSTANCE,
+  });
+  assert.equal(stale.connection, null);
+  const listed = await f.invoke("instance.list", null, {}, {});
+  assert.deepEqual(
+    listed.items.map((item) => [item.name, item.connection]),
+    [[INSTANCE, null]],
+  );
+});

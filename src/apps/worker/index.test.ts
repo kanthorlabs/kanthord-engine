@@ -21,6 +21,7 @@ import {
 
 const INSTANCE_READY = "Worker instance ready";
 const REGISTRATION_READY = "Worker application ready";
+const MSG_KEY = '"msg":';
 const MISMATCH_VERSION = "0.0.0-mismatch";
 const MISMATCH_CODE = "worker.version.mismatch";
 const UNAVAILABLE_CODE = "worker.version.unavailable";
@@ -618,6 +619,13 @@ test("the default worker log writes JSON lines on stderr without the instance co
           isObject(record) &&
           (record as { msg?: unknown }).msg === INSTANCE_READY,
       ),
+    );
+    assert.deepEqual(
+      stderr
+        .split("\n")
+        .filter(Boolean)
+        .filter((line) => line.indexOf(MSG_KEY) !== line.lastIndexOf(MSG_KEY)),
+      [],
     );
     assert.ok(!stderr.includes(f.server.configuration.private_key));
     assert.ok(!stderr.includes(f.server.value));
