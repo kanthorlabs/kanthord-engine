@@ -339,8 +339,9 @@ export type SshIdentityFacts = {
 export type SshSignatureOf = (
   tx: Transaction,
   granted: GrantFacts<GrantOf<typeof GrantKind.SshIdentity>>,
-  material: Material,
+  public_key: string | null,
   data: Buffer,
+  release: () => Material,
 ) => Buffer;
 export type SshAccessOf = (
   tx: Transaction,

@@ -404,6 +404,13 @@ function invalidInput(): OperationError {
   );
 }
 
+function sshPublicKeyOfRow(row: CredentialRow): string | null {
+  const metadata = sshPublicKeyMetadataSchema.safeParse(
+    row.metadata === null ? null : JSON.parse(row.metadata),
+  );
+  return metadata.success ? metadata.data.public_key : null;
+}
+
 function rowsForName(
   tx: Transaction,
   name: string,
@@ -852,6 +859,18 @@ export class CustodyComponent implements Service, CredentialRecords {
     holder: string,
     execution: Grant["execution"],
   ) {
+    const row = this.revisionRow(tx, credential, holder, execution);
+    if (execution && !execution.credentials.includes(row.id))
+      this.executions.pinCredential(tx, execution.execution_id, row.id);
+    return row;
+  }
+
+  private revisionRow(
+    tx: Transaction,
+    credential: string,
+    holder: string,
+    execution: Grant["execution"],
+  ) {
     assert(credential.length);
     const rows = rowsForName(tx, credential, holder);
     const pinned = execution
@@ -874,8 +893,6 @@ export class CustodyComponent implements Service, CredentialRecords {
         "Credential not found.",
       );
     }
-    if (execution)
-      this.executions.pinCredential(tx, execution.execution_id, live.id);
     assert.equal(live.name, credential);
     return live;
   }
@@ -1127,19 +1144,25 @@ export class CustodyComponent implements Service, CredentialRecords {
     );
     const granted = grantFacts(grant);
     assert.equal(granted.facts.binding_id, request.binding_id);
-    const material = this.release(tx, grant, now);
-    const credentialId = material.credential_id;
+    if (grant.credential === null) throw new FacilityError();
+    const revision = this.revisionRow(
+      tx,
+      grant.credential,
+      SERVER_HOLDER,
+      grant.execution,
+    );
     const signature = this.sshSignatureOf(
       tx,
       granted,
-      material,
+      sshPublicKeyOfRow(revision),
       Buffer.from(request.data, "base64"),
+      () => this.release(tx, grant, now),
     );
     this.logger.info(
       {
         execution_id: row.execution_id,
         binding_id: request.binding_id,
-        credential_id: credentialId,
+        credential_id: revision.id,
         client_id: identity.clientId,
         instance_id: identity.instanceId ?? null,
         runtime_identity: row.runtime_identity,
@@ -1178,10 +1201,7 @@ export class CustodyComponent implements Service, CredentialRecords {
         CustodyErrorCode.NotFound,
         "Credential not found.",
       );
-    const metadata = sshPublicKeyMetadataSchema.safeParse(
-      row.metadata === null ? null : JSON.parse(row.metadata),
-    );
-    return metadata.success ? metadata.data.public_key : null;
+    return sshPublicKeyOfRow(row);
   }
 
   report(

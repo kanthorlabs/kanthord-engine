@@ -94,11 +94,11 @@ export function signRefusalOf(
   return null;
 }
 
-export function relayedSignature(
-  access: SshKeyAccess,
+export function refuseSignPayload(
+  access: Pick<SshKeyAccess, "public_key" | "known_hosts">,
   data: Buffer,
   user = SSH_SIGN_USER,
-): Buffer {
+): void {
   const reason = signRefusalOf(access, data, user);
   if (reason !== null)
     throw new OperationError(
@@ -107,5 +107,13 @@ export function relayedSignature(
       "The SSH signature relay refuses the payload.",
       { reason },
     );
+}
+
+export function relayedSignature(
+  access: SshKeyAccess,
+  data: Buffer,
+  user = SSH_SIGN_USER,
+): Buffer {
+  refuseSignPayload(access, data, user);
   return sshSignatureOf(access.private_key, data);
 }

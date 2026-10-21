@@ -31,8 +31,8 @@ import { GitHubPlatform } from "./github.ts";
 import { knownHostsLine } from "./host-key.ts";
 import { isPlatformSshHost, sshPortOf } from "./platform.ts";
 import type { SshAccess, SshKeyAccess } from "./ssh-agent.ts";
-import { relayedSignature } from "./ssh-sign.ts";
-import { sshPublicKeyOf } from "./ssh-key.ts";
+import { refuseSignPayload, relayedSignature } from "./ssh-sign.ts";
+import { sshPublicKeyBlob, sshPublicKeyOf } from "./ssh-key.ts";
 import { ProjectErrorCode, RepositoryPlatform } from "../project/contract.ts";
 export {
   RepositoryCredentials,
@@ -171,10 +171,23 @@ export class RepositoryComponent implements GitWriter {
   sshSignatureOf(
     tx: Transaction,
     granted: SshGrantFacts,
-    material: Material,
+    public_key: string | null,
     data: Buffer,
+    release: () => Material,
   ): Buffer {
-    return relayedSignature(this.sshAccessOf(tx, granted, material), data);
+    const { credential } = granted;
+    assert(credential !== null);
+    if (public_key === null) throw legacyKey(credential);
+    try {
+      sshPublicKeyBlob(public_key);
+    } catch {
+      throw legacyKey(credential);
+    }
+    refuseSignPayload(
+      { public_key, known_hosts: this.knownHostsOf(tx, granted.facts.address) },
+      data,
+    );
+    return relayedSignature(this.sshAccessOf(tx, granted, release()), data);
   }
 
   static handedSshAccess(
