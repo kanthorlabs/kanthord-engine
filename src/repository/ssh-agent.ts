@@ -49,7 +49,6 @@ const CREATE_EXCLUSIVE = "wx";
 const SINGLE_QUOTE = "'";
 const AGENT_SCRIPT =
   'ssh-agent -D -a "$1" & agent=$!; cat; kill "$agent"; wait "$agent"';
-const SOCKET_WAIT_MS_MAX = 5000;
 const SOCKET_POLL_MS = 10;
 const CLEANUP_TIMEOUT_MS = 5000;
 const SOCKET_PROBE_TIMEOUT_MS = 1000;
@@ -225,17 +224,18 @@ async function socketExists(socket: string): Promise<boolean> {
 async function waitForSocket(
   agent: Agent,
   socket: string,
+  context: Context,
   deadlineAt: number,
 ): Promise<void> {
-  const until = Math.min(deadlineAt, Date.now() + SOCKET_WAIT_MS_MAX);
   let exited = false;
   void agent.closed.then(() => {
     exited = true;
   });
-  while (Date.now() < until && !exited) {
+  while (Date.now() < deadlineAt && !exited && !context.err()) {
     if (await socketExists(socket)) return;
     await delay(SOCKET_POLL_MS);
   }
+  throwIfCancelled(context);
   if (await socketExists(socket)) return;
   throw agentFailure(
     SshAgentStep.Agent,
@@ -333,7 +333,7 @@ export async function withSshAgent<T>(
       relay = await startRelayAgent(socket, access, context);
     else {
       agent = spawnAgent(socket);
-      await waitForSocket(agent, socket, deadlineAt);
+      await waitForSocket(agent, socket, context, deadlineAt);
       throwIfCancelled(context);
       await loadKey(socket, access.private_key, deadlineAt);
     }

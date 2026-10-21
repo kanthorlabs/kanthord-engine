@@ -1,10 +1,16 @@
 import assert from "node:assert/strict";
 import { execFile, spawn } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import {
+  chmodSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { mkdir, readdir, readFile, stat } from "node:fs/promises";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
-import { basename, join } from "node:path";
+import { basename, delimiter, join } from "node:path";
 import test from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 import { promisify } from "node:util";
@@ -32,6 +38,8 @@ const AGENT_EXIT_POLL_MS = 20;
 const PRIVATE_MODE = 0o700;
 const PERMISSION_BITS = 0o777;
 const SAMPLES = 5;
+const SLOW_AGENT_SECONDS = 6;
+const SCRIPT_MODE = 0o700;
 const LIFECYCLE_RUNS = 3;
 const PARALLEL_RUNS = 8;
 const SAMPLE_INTERVAL_MS = 20;
@@ -238,6 +246,36 @@ test("parallel withSshAgent calls each load their own key", async () => {
     loaded,
     keys.map((key) => key.public_key),
   );
+});
+
+test("withSshAgent waits for a slow agent socket until the deadline", async () => {
+  const { stdout } = await execFileAsync("sh", ["-c", "command -v ssh-agent"]);
+  const bin = mkdtempSync(join(scratch, "bin-"));
+  const script = join(bin, "ssh-agent");
+  writeFileSync(
+    script,
+    `#!/bin/sh\nsleep ${SLOW_AGENT_SECONDS}\nexec '${stdout.trim()}' "$@"\n`,
+  );
+  chmodSync(script, SCRIPT_MODE);
+  const path = process.env.PATH;
+  process.env.PATH = `${bin}${delimiter}${path ?? ""}`;
+  try {
+    const key = access("slow");
+    const loaded = await withSshAgent(
+      key,
+      background,
+      DEADLINE_MS,
+      async (env) => {
+        const { stdout: listed } = await execFileAsync("ssh-add", ["-L"], {
+          env: { PATH: path, SSH_AUTH_SOCK: socketOf(env) },
+        });
+        return listed.trim();
+      },
+    );
+    assert.equal(loaded, key.public_key);
+  } finally {
+    process.env.PATH = path;
+  }
 });
 
 test("withSshAgent refuses a socket path above the limit", async () => {
