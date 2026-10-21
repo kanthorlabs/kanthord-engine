@@ -193,6 +193,26 @@ test("an unavailable server and an absent configuration refuse the start with di
   assert.deepEqual(f.server.state.requests, []);
 });
 
+test("a stop during the start ends the run with no error", async (t) => {
+  const f = await fixture(t);
+  const gate = Promise.withResolvers<void>();
+  let held = false;
+  f.server.state.intercept = async (request) => {
+    if (request.path !== FakePath.Connect || held) return undefined;
+    held = true;
+    await gate.promise;
+    return undefined;
+  };
+  const worker = new Worker(f.options());
+  t.after(() => worker.stop());
+  const running = worker.run();
+  await until(() => held);
+  const stopped = worker.stop();
+  gate.resolve();
+  assert.equal(await stopped, null);
+  assert.equal(await running, null);
+});
+
 test("an http endpoint outside the private address set refuses the start before any request", async (t) => {
   const f = await fixture(t);
   const error = await new Worker(
