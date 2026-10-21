@@ -89,6 +89,8 @@ export interface GatewayDependencies {
 
 const PARAMETER_PREFIX = ":";
 const NO_STORE_HEADERS = { "Cache-Control": "no-store" };
+const CONNECTION_HEADER = "Connection";
+const CONNECTION_CLOSE = "close";
 const FIRST_ROUTE = 0;
 
 export function compareRouteSpecificity(left: string, right: string): number {
@@ -364,6 +366,11 @@ export class GatewayService implements Service {
         const path = getPath(request);
         return stripBasePath(basePath, path) ?? path;
       },
+    });
+    app.use("*", async (context, next) => {
+      await next();
+      if (this.shutdown.err())
+        context.header(CONNECTION_HEADER, CONNECTION_CLOSE);
     });
     app.use(
       "*",

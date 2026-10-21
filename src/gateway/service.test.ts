@@ -35,6 +35,9 @@ const NEXT_VERSION_STEP = 1;
 const HUMAN_USERNAME = "ulrich";
 const SINGLE_EXECUTION_COUNT = 1;
 const DISCONNECT_WAIT_MS = 2000;
+const KEEP_ALIVE_POLL_MS = 20;
+const STOP_LIMIT_MS = 2000;
+const STOP_TIMED_OUT = "stop timed out";
 const HANDSHAKE_SEGMENT = "handshake";
 const HANDSHAKE_HEADER = "x-test-kind";
 const EMPTY_RESPONSE_BODY = "";
@@ -755,6 +758,51 @@ test("quiescence cancels HTTP work, preserves direct calls during drain and rele
     assert.equal(result.error.error.code, ExpectedErrorCode.Stopping);
   assert.equal(executions, SINGLE_EXECUTION_COUNT);
   assert.ok((await fixture.gateway.start()) instanceof Error);
+});
+
+test("a keep-alive client that keeps its connection busy across quiescence does not hold the stop", async (t) => {
+  const registry = new OperationRegistry();
+  const entered = Promise.withResolvers<void>();
+  const release = Promise.withResolvers<void>();
+  const operation = {
+    ...protectedRead,
+    id: "test.held",
+    path: "/api/held",
+  } as const;
+  registry.register(operation, async () => {
+    entered.resolve();
+    await release.promise;
+    return { accountId: "held" };
+  });
+  registry.register(protectedRead, () => ({ accountId: "available" }));
+  const fixture = await gatewayFixture(t, { registry });
+  const headers = { Authorization: `Bearer ${fixture.token}` };
+  const held = fetch(fixture.endpoint + operation.path, { headers });
+  await entered.promise;
+  assert.equal(await fixture.gateway.quiesce(), null);
+  release.resolve();
+  assert.deepEqual(await (await held).json(), { accountId: "held" });
+  let polling = true;
+  const poll = (async () => {
+    while (polling) {
+      await fetch(fixture.endpoint + protectedRead.path, { headers })
+        .then((response) => response.arrayBuffer())
+        .catch(() => null);
+      await delay(KEEP_ALIVE_POLL_MS);
+    }
+  })();
+  try {
+    assert.equal(
+      await Promise.race([
+        fixture.gateway.stop(),
+        delay(STOP_LIMIT_MS, STOP_TIMED_OUT, { ref: false }),
+      ]),
+      null,
+    );
+  } finally {
+    polling = false;
+    await poll;
+  }
 });
 
 test("direct and HTTP client cancellation uses Context", async (t) => {
