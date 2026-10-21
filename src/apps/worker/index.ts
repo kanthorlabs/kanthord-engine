@@ -7,6 +7,7 @@ import { installPiTools } from "../../agent/pi-tools.ts";
 import {
   background,
   CancellationContext,
+  ContextCancelled,
   throwIfCancelled,
   type Context,
 } from "../../kernel/context.ts";
@@ -268,7 +269,13 @@ export class Worker implements Service {
     try {
       if (context.err()) return (await this.stop()) ?? context.err();
       const error = await this.start();
-      if (error) return (await this.stop()) ?? context.err() ?? error;
+      if (error) {
+        const stopRequested =
+          error instanceof ContextCancelled && this.shutdown.err() !== null;
+        return (
+          (await this.stop()) ?? context.err() ?? (stopRequested ? null : error)
+        );
+      }
       this.startExchangeLoops();
       for (const hosted of [...this.hosted.values()])
         if (hosted.entry.state === BindingEntryState.Draining)
