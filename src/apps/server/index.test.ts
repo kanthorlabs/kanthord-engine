@@ -912,8 +912,7 @@ test("server lifecycle returns errors, reports owned health and releases every r
   const paths = layout(temporary(t));
   paths.config.log.destination = "file";
   writePrivate(paths.env.KANTHORD_CONFIG!, stringify(paths.config), true);
-  const result = await execFileAsync(
-    process.execPath,
+  const result = await nodeChild(
     [
       "--input-type=module",
       "-e",
@@ -988,8 +987,9 @@ test("server lifecycle returns errors, reports owned health and releases every r
     write('verified\\n');
   `,
     ],
-    { env: paths.env, encoding: "utf8", signal: t.signal },
+    { env: paths.env, signal: t.signal },
   );
+  assert.equal(result.status, ExitCode.Success, result.stderr);
   assert.equal(result.stdout, LIFECYCLE_VERIFIED_OUTPUT);
   const reopened = new Store(paths.database);
   reopened.close();
