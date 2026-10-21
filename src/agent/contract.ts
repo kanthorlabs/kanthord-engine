@@ -15,6 +15,7 @@ import {
   AdvancingProviderFailure,
   ChainLevelName,
   CooldownChangeKind as SchedulerCooldownChangeKind,
+  agentSelectionSchema,
   isAdvancingProviderFailure,
   type AgentSelection as SchedulerAgentSelection,
   type CooldownChange as SchedulerCooldownChange,
@@ -197,11 +198,9 @@ export type AgentSelection = SchedulerAgentSelection;
 export const CooldownChangeKind = SchedulerCooldownChangeKind;
 export type CooldownChange = SchedulerCooldownChange;
 
-export type ChainEntry = Omit<AgentSelection, "agent_name"> & {
-  cooldown: { strikes: number; available_at: number } | null;
-};
+export type ChainEntry = z.infer<typeof chainEntrySchema>;
 
-export type ChainCooling = { code: string; available_at: number };
+export type ChainCooling = z.infer<typeof chainCoolingSchema>;
 
 export type AgentProviderDependent = {
   agent_name: string;
@@ -430,6 +429,19 @@ export const promptAnswerSchema = z.strictObject({
   final: z.string(),
 });
 
+export const chainEntrySchema = agentSelectionSchema
+  .omit({ agent_name: true })
+  .extend({
+    cooldown: agentCooldownSchema
+      .pick({ strikes: true, available_at: true })
+      .nullable(),
+  });
+
+export const chainCoolingSchema = z.strictObject({
+  code: z.literal(AgentErrorCode.ChainCooling),
+  available_at: z.number().int().nonnegative(),
+});
+
 export const agentDeclarationSchema = z.strictObject({
   agent_name: z.string().min(1),
   configuration_schema: z.record(z.string(), z.unknown()),
@@ -437,6 +449,9 @@ export const agentDeclarationSchema = z.strictObject({
   prompt: promptAnswerSchema,
   tools: z.array(toolDeclarationSchema),
   enablement: agentEnablementSchema.nullable(),
+  chain: z.array(chainEntrySchema),
+  active_position: z.number().int().nonnegative().nullable(),
+  cooling: chainCoolingSchema.nullable(),
 });
 
 export const promptSettingsSchema = z.strictObject({
@@ -589,7 +604,8 @@ export const agentOperations = {
       body: z.null(),
     }),
     output: agentDeclarationSchema,
-    description: "Get an agent declaration and its current enablement.",
+    description:
+      "Get an agent declaration, its current enablement and the chain view of that enablement.",
   },
   "enablement.get": {
     ...enablementOperation,

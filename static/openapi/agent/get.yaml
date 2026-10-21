@@ -4,7 +4,8 @@ pathItem:
     operationId: agent.get
     tags:
       - agent
-    description: Get an agent declaration and its current enablement.
+    description: Get an agent declaration, its current enablement and the chain view
+      of that enablement.
     x-access-policy: human
     x-timeout-ms: 30000
     x-mutation: false
@@ -345,6 +346,84 @@ components:
                 - revision
               additionalProperties: false
             - type: "null"
+        chain:
+          type: array
+          items:
+            type: object
+            properties:
+              position:
+                type: integer
+                minimum: 0
+                maximum: 9007199254740991
+              level:
+                type: string
+                enum:
+                  - enablement
+                  - binding
+              agent_provider:
+                type: string
+                minLength: 1
+              provider:
+                type: string
+                minLength: 1
+              credential:
+                type: string
+                minLength: 1
+              model_identifier:
+                type: string
+                minLength: 1
+              reasoning_effort:
+                type: string
+                minLength: 1
+              cooldown:
+                anyOf:
+                  - type: object
+                    properties:
+                      strikes:
+                        type: integer
+                        exclusiveMinimum: 0
+                        maximum: 9007199254740991
+                      available_at:
+                        type: integer
+                        minimum: 0
+                        maximum: 9007199254740991
+                    required:
+                      - strikes
+                      - available_at
+                    additionalProperties: false
+                  - type: "null"
+            required:
+              - position
+              - level
+              - agent_provider
+              - provider
+              - credential
+              - model_identifier
+              - reasoning_effort
+              - cooldown
+            additionalProperties: false
+        active_position:
+          anyOf:
+            - type: integer
+              minimum: 0
+              maximum: 9007199254740991
+            - type: "null"
+        cooling:
+          anyOf:
+            - type: object
+              properties:
+                code:
+                  type: string
+                  const: agent.configuration.chain_cooling
+                available_at:
+                  type: integer
+                  minimum: 0
+                  maximum: 9007199254740991
+              required:
+                - code
+                - available_at
+              additionalProperties: false
+            - type: "null"
       required:
         - agent_name
         - configuration_schema
@@ -352,4 +431,7 @@ components:
         - prompt
         - tools
         - enablement
+        - chain
+        - active_position
+        - cooling
       additionalProperties: false

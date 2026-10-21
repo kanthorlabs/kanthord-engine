@@ -73,7 +73,11 @@ import {
 } from "./enablements.ts";
 import { promptSettings, savePromptSettings } from "./prompts.ts";
 import { cooldownDuration } from "./cooldowns.ts";
-import type { CredentialHold, CredentialHolds } from "../custody/contract.ts";
+import {
+  SERVER_HOLDER,
+  type CredentialHold,
+  type CredentialHolds,
+} from "../custody/contract.ts";
 import { applyLocks, lockedSwitches, withLocks } from "./prompt-locks.ts";
 import {
   ProjectErrorCode,
@@ -95,6 +99,7 @@ const ABSENT_REVISION = 0;
 const FIRST_POSITION = 0;
 const NO_STRIKES = 0;
 const FIRST_STRIKE = 1;
+const ENABLEMENT_SCOPE: HolderScope = { holders: [], claimant: SERVER_HOLDER };
 
 function wireRecord(row: EnablementRow) {
   return agentEnablementSchema.parse({
@@ -1236,6 +1241,13 @@ export class AgentComponent {
         );
         return caller.commit((tx) => {
           const row = getEnablement(tx, params.agent_name);
+          const view = this.agentView(
+            tx,
+            params.agent_name,
+            null,
+            ENABLEMENT_SCOPE,
+          );
+          assert.ok(view);
           return {
             agent_name: declaration.agent_name,
             configuration_schema: z.toJSONSchema(effectiveConfigurationSchema),
@@ -1246,6 +1258,9 @@ export class AgentComponent {
                 : { layers: layers.map(layerAnswer), final },
             tools,
             enablement: row ? wireRecord(row) : null,
+            chain: view.chain,
+            active_position: view.active_position,
+            cooling: view.cooling,
           };
         });
       },
