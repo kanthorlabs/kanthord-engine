@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import type { Server } from "node:http";
 import { test } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 import { z } from "zod";
@@ -38,6 +39,8 @@ const DISCONNECT_WAIT_MS = 2000;
 const KEEP_ALIVE_POLL_MS = 20;
 const STOP_LIMIT_MS = 2000;
 const STOP_TIMED_OUT = "stop timed out";
+const CONNECTION_HEADER = "connection";
+const KEEP_ALIVE = "keep-alive";
 const HANDSHAKE_SEGMENT = "handshake";
 const HANDSHAKE_HEADER = "x-test-kind";
 const EMPTY_RESPONSE_BODY = "";
@@ -803,6 +806,32 @@ test("a keep-alive client that keeps its connection busy across quiescence does 
     polling = false;
     await poll;
   }
+});
+
+test("a keep-alive response that leaves after quiescence does not hold the stop", async (t) => {
+  const registry = new OperationRegistry();
+  registry.register(protectedRead, () => ({ accountId: "late" }));
+  const fixture = await gatewayFixture(t, { registry });
+  const listener = fixture.gateway["listener"] as Server;
+  listener.prependListener("request", (_request, response) => {
+    const writeHead = response.writeHead.bind(response);
+    response.writeHead = ((...args: Parameters<typeof writeHead>) => {
+      void fixture.gateway.quiesce();
+      return writeHead(...args);
+    }) as typeof writeHead;
+  });
+  const answer = await fetch(fixture.endpoint + protectedRead.path, {
+    headers: { Authorization: `Bearer ${fixture.token}` },
+  });
+  assert.equal(answer.headers.get(CONNECTION_HEADER), KEEP_ALIVE);
+  assert.deepEqual(await answer.json(), { accountId: "late" });
+  assert.equal(
+    await Promise.race([
+      fixture.gateway.stop(),
+      delay(STOP_LIMIT_MS, STOP_TIMED_OUT, { ref: false }),
+    ]),
+    null,
+  );
 });
 
 test("direct and HTTP client cancellation uses Context", async (t) => {

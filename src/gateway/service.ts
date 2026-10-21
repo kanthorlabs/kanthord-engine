@@ -298,6 +298,8 @@ export class GatewayService implements Service {
         const quiesceError = await this.quiesce();
         await this.startTask;
         await this.drain();
+        if (this.listener && "closeIdleConnections" in this.listener)
+          this.listener.closeIdleConnections();
         const error = await this.closeTask;
         if (error || quiesceError) throw error ?? quiesceError;
       } finally {
