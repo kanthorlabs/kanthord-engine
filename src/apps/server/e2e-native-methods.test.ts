@@ -63,6 +63,7 @@ const SINGLE_INSTANCE = 1;
 const INITIAL_BINDING_VERSION = 1;
 const SINGLE_TURN = 1;
 const SINGLE_ITEM = 1;
+const JOURNEY_TIMEOUT_MS = 180000;
 const GATED_BINDING_INDEX = 2;
 const NO_OUTPUT = "";
 const REPOSITORY = "repository";
@@ -449,7 +450,7 @@ async function methodsFixture(t: TestContext) {
 
 test(
   "E08 native methods execute, checkpoint, assess and request actions over HTTP",
-  { timeout: 180000 },
+  { timeout: JOURNEY_TIMEOUT_MS },
   async (t) => {
     const {
       gitHub,
@@ -656,7 +657,7 @@ const BOTH_HELLO = () => [
 
 test(
   "EF09b.1-EF09b.5 an implement node with two repository bindings runs, reviews and lands over HTTP",
-  { timeout: 180000 },
+  { timeout: JOURNEY_TIMEOUT_MS },
   async (t) => {
     const h = await methodsFixture(t);
     const api = h.bindingSet.bindings.api!.id;
@@ -711,6 +712,7 @@ test(
     const heads: string[] = [];
     await t.test(
       "EF09b.2 one steps execution pushes both node branches and submits one evidence",
+      { timeout: JOURNEY_TIMEOUT_MS },
       async () => {
         const answer = await h.execute(
           h.general,
@@ -782,6 +784,7 @@ test(
     );
     await t.test(
       "EF09b.4 one reviewer execution writes one success assessment with a tested input list",
+      { timeout: JOURNEY_TIMEOUT_MS },
       async () => {
         const answer = await h.execute(h.reviewer, checkoutFlow, review());
         assert.deepEqual(answer.result, {

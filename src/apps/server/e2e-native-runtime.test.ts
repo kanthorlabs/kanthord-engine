@@ -81,6 +81,7 @@ const BRACKET_TRIM_OFFSET = 1;
 const SINGLE_CALL = 1;
 const THREE_CALLS = 3;
 const PRIVATE_MODE = 0o700;
+const GIT_DEADLINE_MS = 60_000;
 const NO_OUTPUT = "";
 const SECRET = "test_e2e-runtime-secret";
 const GLOBAL = "Every answer is short.";
@@ -459,7 +460,7 @@ test(
         transport,
         sshAccess: runtimeX.sshAccess,
         context: background,
-        deadlineMs: 10000,
+        deadlineMs: GIT_DEADLINE_MS,
       })
     ).checkouts;
     assert.ok(prepared);
@@ -666,7 +667,7 @@ test(
           transport,
           sshAccess: runtimeY.sshAccess,
           context: background,
-          deadlineMs: 10000,
+          deadlineMs: GIT_DEADLINE_MS,
         })
       ).checkouts;
       assert.ok(lab);

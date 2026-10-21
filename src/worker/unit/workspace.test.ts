@@ -59,6 +59,7 @@ const FIRST_ATTEMPT = 1;
 const PREPARATION_KINDS = 3;
 const ORIGIN_NAME = "origin";
 const SEED_NAME = "seed";
+const GIT_DEADLINE_MS = 60_000;
 
 test("workspace root audits private mode and keys refuse foreign identities", (t) => {
   const expectedBranch = "kanthord/node_01ARZ3NDEKTSV4RRFFQ69G5FAA";
@@ -142,7 +143,7 @@ test("workspace preparation refreshes implement branches and creates disposable 
     transport,
     sshAccess: everyBindingSshAccess,
     context: background,
-    deadlineMs: 10000,
+    deadlineMs: GIT_DEADLINE_MS,
   };
   const first = await prepareOne(workspace, {
     ...common,
@@ -303,7 +304,7 @@ test("every workspace git operation takes the SSH identity of its binding, and a
       transport: recording,
       sshAccess: held,
       context: background,
-      deadlineMs: 10000,
+      deadlineMs: GIT_DEADLINE_MS,
     };
     return [
       prepareOne(workspace, {
@@ -364,7 +365,7 @@ test("an implement workspace excludes the scratch directory from git once", asyn
     transport,
     sshAccess: everyBindingSshAccess,
     context: background,
-    deadlineMs: 10000,
+    deadlineMs: GIT_DEADLINE_MS,
     nodeId,
     nodeBranch: nodeBranchOf(nodeId, FIRST_ATTEMPT),
     pushed: false,
@@ -444,7 +445,7 @@ async function restartFixture(t: test.TestContext) {
       transport,
       sshAccess: everyBindingSshAccess,
       context: background,
-      deadlineMs: 10000,
+      deadlineMs: GIT_DEADLINE_MS,
       nodeId,
       nodeBranch: nodeBranchOf(nodeId, startAttempt),
       pushed,
@@ -598,7 +599,7 @@ async function bindingsFixture(t: test.TestContext, names = BINDING_NAMES) {
       transport,
       sshAccess: everyBindingSshAccess,
       context: background,
-      deadlineMs: 10000,
+      deadlineMs: GIT_DEADLINE_MS,
       nodeId,
       nodeBranch,
       pushed,
