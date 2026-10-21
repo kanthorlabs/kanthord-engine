@@ -444,7 +444,7 @@ export const llmOperations = {
     }),
     output: loginAnswerSchema,
     description:
-      "Start an OAuth credential login session. The holder defaults to server. A login of a worker instance runs on that instance in copy_code or device mode.",
+      "Start an OAuth credential login session. The holder defaults to server. A login of a worker instance runs on that instance in copy_code or device mode. A login of an instance copy that is sealed to an ended key adds the next revision of that copy.",
   },
   login_code: {
     id: "llm.credential.login_code",

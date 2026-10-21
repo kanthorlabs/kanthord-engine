@@ -382,6 +382,10 @@ key. The server stores only the sealed copy. An instance session uses
 `400 llm.credential.instance_unknown`. An instance with no current connection
 answers `409 credential.login.instance_unavailable`. The instance reports
 through `llm.credential.login_report`, a `worker` operation with no command.
+For an instance holder, the name conflict applies only to a copy that holds a
+live revision sealed to the current instance key. A copy sealed to an ended
+key takes the login, and the completion adds the next revision of that copy.
+An archived copy answers `409 credential.credential.archived`.
 
 ## `login-code <session> <value>`
 
