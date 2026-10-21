@@ -179,8 +179,8 @@ function stoppingRunner(reason: EndReason): TaskRunner {
   };
 }
 
-test("a stop with each reason checkpoints, pushes and releases with the stop", async (t) => {
-  for (const reason of STOP_REASONS) {
+for (const reason of STOP_REASONS) {
+  test(`a stop with the reason ${reason} checkpoints, pushes and releases with the stop`, async (t) => {
     const h = await fixture(t, [task("stopped", "false")], []);
     const bodies = recordReleases(h);
     const stop = { reason, code: STOP_CODE };
@@ -200,8 +200,8 @@ test("a stop with each reason checkpoints, pushes and releases with the stop", a
       await simpleGit(h.bare).raw(["show", `${branch}:${PARTIAL_WORK}`]),
       PARTIAL_WORK,
     );
-  }
-});
+  });
+}
 
 test("a failed push still releases with the stop and a failed release ends with no release", async (t) => {
   const pushed = await fixture(t, [task("stopped", "false")], []);
