@@ -474,8 +474,13 @@ export class GatewayService implements Service {
         exposeHeaders: ["X-Request-Id"],
       })(context, next);
     });
-    app.onError((error, context) =>
-      respondError(
+    app.onError((error, context) => {
+      if (!(error instanceof HTTPException) && !(error instanceof GatewayError))
+        this.options.logger.error(
+          { err: error, request_id: context.get("requestId") },
+          "Request failed",
+        );
+      return respondError(
         error instanceof HTTPException
           ? new GatewayError(
               error.status,
@@ -488,8 +493,8 @@ export class GatewayService implements Service {
             )
           : error,
         context.get("requestId"),
-      ),
-    );
+      );
+    });
     app.notFound(
       (context) =>
         dashboardResponse(
@@ -614,6 +619,7 @@ export class GatewayService implements Service {
                 host: context.req.header("host"),
                 traceparent: context.req.header("traceparent"),
                 tracestate: context.req.header("tracestate"),
+                logger: this.options.logger,
               },
             );
             if (result.body instanceof Response) return result.body;
