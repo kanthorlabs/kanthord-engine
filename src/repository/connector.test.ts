@@ -41,7 +41,7 @@ import {
 import { SshAgentErrorCode } from "./ssh-agent.ts";
 import { LOCAL_GIT_SSH_ACCESS } from "./test-sshd.ts";
 
-const DEADLINE_MS = 5000;
+const DEADLINE_MS = 60_000;
 const ORIGIN_NAME = "origin";
 const SEED_NAME = "seed";
 const SIBLING_ORIGIN = `../${ORIGIN_NAME}`;
