@@ -39,6 +39,7 @@ const PRIVATE_MODE = 0o700;
 const PERMISSION_BITS = 0o777;
 const SAMPLES = 5;
 const SLOW_AGENT_SECONDS = 6;
+const FAILED_AGENT_MS_MAX = 5000;
 const SCRIPT_MODE = 0o700;
 const CANCEL_AFTER_MS = 100;
 const MS_PER_SECOND = 1000;
@@ -253,12 +254,19 @@ test("parallel withSshAgent calls each load their own key", async () => {
 
 async function withSlowAgent(work: (path: string) => Promise<void>) {
   const { stdout } = await execFileAsync("sh", ["-c", "command -v ssh-agent"]);
+  await withAgentScript(
+    `#!/bin/sh\nsleep ${SLOW_AGENT_SECONDS}\nexec '${stdout.trim()}' "$@"\n`,
+    work,
+  );
+}
+
+async function withAgentScript(
+  body: string,
+  work: (path: string) => Promise<void>,
+) {
   const bin = mkdtempSync(join(scratch, "bin-"));
   const script = join(bin, "ssh-agent");
-  writeFileSync(
-    script,
-    `#!/bin/sh\nsleep ${SLOW_AGENT_SECONDS}\nexec '${stdout.trim()}' "$@"\n`,
-  );
+  writeFileSync(script, body);
   chmodSync(script, SCRIPT_MODE);
   const path = process.env.PATH ?? "";
   process.env.PATH = `${bin}${delimiter}${path}`;
@@ -306,6 +314,27 @@ test("a cancel ends the wait for a slow agent socket and leaves no agent directo
       [],
     );
   });
+});
+
+test("an agent that exits before its socket appears fails the wait at once", async () => {
+  await withAgentScript(
+    "#!/bin/sh\necho 'bind: No such file or directory' >&2\nexit 1\n",
+    async () => {
+      const started = Date.now();
+      await assert.rejects(
+        withSshAgent(access("failed"), background, DEADLINE_MS, async () => {
+          assert.fail("The work must not run.");
+        }),
+        (error: unknown) => {
+          assert.ok(error instanceof Diagnostic);
+          assert.equal(error.code, SshAgentErrorCode.Failed);
+          assert.deepEqual(error.fields, [["step", SshAgentStep.Agent]]);
+          return true;
+        },
+      );
+      assert.ok(Date.now() - started < FAILED_AGENT_MS_MAX);
+    },
+  );
 });
 
 test("withSshAgent refuses a socket path above the limit", async () => {
