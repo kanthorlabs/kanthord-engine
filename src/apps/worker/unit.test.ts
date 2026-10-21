@@ -372,7 +372,7 @@ test("abandon kills the tool process group of the live execution", async (t) => 
   const unit = multiUnit(t, [transport]);
   const running = unit.run();
   const verification = (await tool.promise).run;
-  const grandchild = await pidOf(pidFile);
+  const grandchild = await pidOf(pidFile, t.signal);
   assert.ok(alive(grandchild));
   const abandoned = unit.abandon();
   await verification;
@@ -389,10 +389,10 @@ function alive(pid: number): boolean {
   return ps.status === PS_FOUND && !ps.stdout.trim().startsWith(ZOMBIE);
 }
 
-async function pidOf(file: string): Promise<number> {
+async function pidOf(file: string, signal: AbortSignal): Promise<number> {
   for (;;) {
     const text = existsSync(file) ? readFileSync(file, "utf8") : "";
     if (text.endsWith(LINE_END)) return Number(text);
-    await delay(1);
+    await delay(1, undefined, { signal });
   }
 }
