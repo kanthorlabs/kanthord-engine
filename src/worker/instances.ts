@@ -19,7 +19,6 @@ import {
   INSTANCE_CONNECTED_WINDOW_MS,
   INSTANCE_CONNECTION_INFO,
   InstancePlacement,
-  NO_CREDENTIAL_VERSION,
   WORKER_TOKEN_INFO,
   WorkerErrorCode,
   WorkerHost,
@@ -79,6 +78,7 @@ export interface InstanceDependencies {
     bindings: readonly ListedBinding[],
   ) => boolean;
   loginSessionsOf: (holder: string) => LoginSessionEntry[];
+  credentialVersionOf: (holder: string) => number;
 }
 
 interface CurrentConnection {
@@ -511,7 +511,7 @@ export class WorkerInstances implements WorkerInstanceLookups {
     return {
       server_version: packageVersion(),
       binding_version: this.bindingVersionOf(name),
-      credential_version: NO_CREDENTIAL_VERSION,
+      credential_version: this.dependencies.credentialVersionOf(name),
       login_sessions: this.dependencies.loginSessionsOf(name),
     };
   }

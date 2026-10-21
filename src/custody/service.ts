@@ -59,6 +59,7 @@ import {
   type SealedCopy,
   type SealedRotateBody,
   type HeldCopy,
+  type SealedCopyAnswer,
   type InstanceKey,
   type InstanceKeys,
   type BindingsListingInstanceFn,
@@ -149,6 +150,7 @@ export interface Dependencies {
   sshSignatureOf?: SshSignatureOf;
   instanceKeys?: InstanceKeys;
   bindingsListingInstance?: BindingsListingInstanceFn;
+  instanceCopyRefreshed?: (holder: string) => void;
 }
 
 const CustodyErrorCode = {
@@ -267,6 +269,13 @@ function liveHoldersOf(tx: Transaction, name: string): string[] {
       )
       .all(name, SERVER_HOLDER) as { holder: string }[]
   ).map(({ holder }) => holder);
+}
+
+function holderOfRow(tx: Transaction, id: string): string | null {
+  const row = tx.database
+    .prepare("SELECT holder FROM credential WHERE id = ?")
+    .get(id) as { holder: string } | undefined;
+  return row?.holder ?? null;
 }
 
 function serverLive(tx: Transaction, name: string): LiveRow | undefined {
@@ -529,6 +538,7 @@ export class CustodyComponent implements Service, CredentialRecords {
   private readonly sshSignatureOf: SshSignatureOf | undefined;
   private readonly instanceKeys: InstanceKeys;
   private readonly bindingsListingInstance: BindingsListingInstanceFn;
+  private readonly instanceCopyRefreshed: (holder: string) => void;
 
   constructor(dependencies: Dependencies) {
     this.executions = dependencies.executions;
@@ -549,6 +559,8 @@ export class CustodyComponent implements Service, CredentialRecords {
     this.instanceKeys = dependencies.instanceKeys ?? NO_INSTANCE_KEYS;
     this.bindingsListingInstance =
       dependencies.bindingsListingInstance ?? (() => []);
+    this.instanceCopyRefreshed =
+      dependencies.instanceCopyRefreshed ?? (() => {});
     dependencies.health?.register(CUSTODY_HEALTH_NAME, () =>
       this.healthcheck(),
     );
@@ -1202,6 +1214,9 @@ export class CustodyComponent implements Service, CredentialRecords {
       },
       written ? "credential report" : "credential report stale",
     );
+    const holder = written ? holderOfRow(tx, report.credential_id) : null;
+    if (holder !== null && holder !== SERVER_HOLDER)
+      this.instanceCopyRefreshed(holder);
   }
 
   custodySuitability(
@@ -1280,6 +1295,46 @@ export class CustodyComponent implements Service, CredentialRecords {
   copyHeld(tx: Transaction, credentialName: string, holder: string): boolean {
     const row = newestLive(tx, credentialName, holder);
     return row !== undefined && this.sealedCurrent(tx, holder, row.sealed_to);
+  }
+
+  heldCopy(
+    tx: Transaction,
+    set: CredentialPlatformSet,
+    credentialName: string,
+    holder: string,
+  ): HeldCopy | null {
+    assert.notEqual(holder, SERVER_HOLDER);
+    const row = newestLive(tx, credentialName, holder);
+    if (!row || !ownedPlatform(set, row.platform)) return null;
+    return {
+      name: row.name,
+      revision: row.revision,
+      platform: row.platform,
+      sealed_current: this.sealedCurrent(tx, holder, row.sealed_to),
+    };
+  }
+
+  sealedCopy(
+    tx: Transaction,
+    set: CredentialPlatformSet,
+    credentialName: string,
+    holder: string,
+  ): SealedCopyAnswer {
+    assert.notEqual(holder, SERVER_HOLDER);
+    const row = newestLive(tx, credentialName, holder);
+    if (
+      !row ||
+      !ownedPlatform(set, row.platform) ||
+      !this.sealedCurrent(tx, holder, row.sealed_to)
+    )
+      throw notFound();
+    return {
+      name: row.name,
+      platform: row.platform,
+      revision: row.revision,
+      metadata: row.metadata === null ? null : JSON.parse(row.metadata),
+      sealed: storedSealed(this.envelopeKey, row),
+    };
   }
 
   heldCopies(tx: Transaction, holder: string): HeldCopy[] {

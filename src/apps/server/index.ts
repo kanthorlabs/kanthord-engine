@@ -396,6 +396,7 @@ export function composeServices(options: {
       scheduler.priorityUpdate(tx, nodeId, priority),
   };
   const custody = new CustodyComponent({
+    instanceCopyRefreshed: (holder) => llm.raiseCredentialVersion(holder),
     platforms: {
       ...LLM_PLATFORMS,
       ...REPOSITORY_PLATFORMS,
@@ -457,7 +458,7 @@ export function composeServices(options: {
     sshSignatureOf: (tx, granted, material, data) =>
       repositoryComponent.sshSignatureOf(tx, granted, material, data),
   });
-  const llm = new LlmComponent({
+  const llm: LlmComponent = new LlmComponent({
     records: custody,
     store: options.store,
     logger: options.logger,
@@ -609,6 +610,8 @@ export function composeServices(options: {
       heldCopies: (tx, holder) => custody.heldCopies(tx, holder),
     },
     loginSessionsOf: (holder) => llm.loginSessionsOf(holder),
+    credentialVersionOf: (holder) => llm.credentialVersionOf(holder),
+    copyHealthOf: (holder, copy) => llm.copyHealthOf(holder, copy),
     agentConfiguration: {
       validateEntry: (tx, name, entry, holders) =>
         agent.validateEntry(tx, name, entry, holders),

@@ -106,7 +106,12 @@ import {
   endGroup,
   readRow,
 } from "./registration-rows.ts";
-import type { LoginSessionEntry } from "../llm/contract.ts";
+import {
+  NO_CREDENTIAL_VERSION,
+  type CopyHealth,
+  type LoginSessionEntry,
+} from "../llm/contract.ts";
+import { unreportedHealth } from "../llm/copy-health.ts";
 import { WorkerInstances } from "./instances.ts";
 import { readInstanceById, readLiveInstance } from "./instance-rows.ts";
 import { declareInstances } from "./instance-operations.ts";
@@ -151,6 +156,8 @@ export interface Dependencies {
     heldCopies(tx: Transaction, holder: string): HeldCopy[];
   };
   loginSessionsOf?: (holder: string) => LoginSessionEntry[];
+  credentialVersionOf?: (holder: string) => number;
+  copyHealthOf?: (holder: string, copy: HeldCopy) => CopyHealth;
   health?: HealthRegistry;
   registrations?: WorkerRegistrations;
   pool?: {
@@ -289,6 +296,8 @@ export class WorkerService implements Service {
       holderMismatch: (tx, instanceName, bindings) =>
         this.holderMismatch(tx, instanceName, bindings),
       loginSessionsOf: (holder) => dependencies.loginSessionsOf?.(holder) ?? [],
+      credentialVersionOf: (holder) =>
+        dependencies.credentialVersionOf?.(holder) ?? NO_CREDENTIAL_VERSION,
     });
     if (dependencies.pool) this.pool = new Pool(dependencies.pool.host);
     this.performer = new ActionPerformer({
@@ -1042,7 +1051,14 @@ export class WorkerService implements Service {
       registrationRecordOf: (tx, row) =>
         registrationRecord(tx, this.recordDependencies(), row, Date.now()),
       heldCopies: (tx, holder) =>
-        this.dependencies.instanceCopies?.heldCopies(tx, holder) ?? [],
+        (this.dependencies.instanceCopies?.heldCopies(tx, holder) ?? []).map(
+          (copy) => ({
+            ...copy,
+            health:
+              this.dependencies.copyHealthOf?.(holder, copy) ??
+              unreportedHealth(copy.platform),
+          }),
+        ),
     });
     const worker = this.registrations;
     assert.equal(workerOperations.register.service, WORKER_SERVICE_NAME);

@@ -7,7 +7,15 @@ import {
   type OperationResult,
 } from "../../kernel/operation.ts";
 import { httpClient } from "../../gateway/client.ts";
-import { llmOperations, type LoginReportBody } from "../../llm/contract.ts";
+import type {
+  CredentialAnswer,
+  SealedCopyAnswer,
+} from "../../custody/contract.ts";
+import {
+  llmOperations,
+  type CopyReportBody,
+  type LoginReportBody,
+} from "../../llm/contract.ts";
 import {
   INSTANCE_CONNECTION_INFO,
   WORKER_TOKEN_INFO,
@@ -170,6 +178,54 @@ export class InstanceExchange {
         { context, idempotencyKey },
       ),
       "login report",
+    );
+  }
+
+  async copies(context: Context = background): Promise<CredentialAnswer[]> {
+    const items: CredentialAnswer[] = [];
+    let cursor: string | undefined;
+    do {
+      const page = settled(
+        await this.llm.list(
+          {
+            params: {},
+            query: cursor === undefined ? {} : { cursor },
+            body: null,
+          },
+          { context },
+        ),
+        "credential list",
+      );
+      items.push(...page.items);
+      cursor = page.next_cursor ?? undefined;
+    } while (cursor !== undefined);
+    return items;
+  }
+
+  async sealedCopy(
+    name: string,
+    context: Context = background,
+  ): Promise<SealedCopyAnswer> {
+    return settled(
+      await this.llm.sealed(
+        { params: { credential_name: name }, query: {}, body: null },
+        { context },
+      ),
+      "sealed copy",
+    );
+  }
+
+  async copyReport(
+    name: string,
+    body: CopyReportBody,
+    context: Context = background,
+  ): Promise<void> {
+    settled(
+      await this.llm.report(
+        { params: { credential_name: name }, query: {}, body },
+        { context, idempotencyKey: ulid() },
+      ),
+      "credential report",
     );
   }
 

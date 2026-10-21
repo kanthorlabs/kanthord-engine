@@ -1,5 +1,6 @@
 import { hostname } from "node:os";
 import type { Provider } from "@earendil-works/pi-ai";
+import type { LlmProvider } from "../../llm/provider.ts";
 import { join } from "node:path";
 import { PI_DIRECTORY_NAME } from "../../agent/pi.ts";
 import { installPiTools } from "../../agent/pi-tools.ts";
@@ -56,6 +57,7 @@ import {
 } from "./instance-exchange.ts";
 import { instanceCopyKey } from "./instance-credential.ts";
 import { InstanceLogins } from "./instance-login.ts";
+import { CopyChecks } from "./copy-checks.ts";
 
 const WORKER_STOP_WATCHDOG_MS = 10000;
 const WORKER_STOP_EXIT_FAILURE = 1;
@@ -88,6 +90,7 @@ export interface WorkerOptions {
   renewalIntervalMs?: number;
   addressLookup?: AddressLookup;
   oauthProviders?: () => readonly Provider[];
+  llmProviders?: Readonly<Partial<Record<string, LlmProvider>>>;
 }
 
 interface Hosted {
@@ -132,6 +135,7 @@ export class Worker implements Service {
   private endpoint?: string;
   private connection?: Connection;
   private logins?: InstanceLogins;
+  private copyChecks?: CopyChecks;
   private connectionName = "";
   private operationalLog?: OperationalLog;
   private heartbeatTimer?: NodeJS.Timeout;
@@ -181,6 +185,13 @@ export class Worker implements Service {
         providers: this.options.oauthProviders,
         report: (sessionId, body, idempotencyKey) =>
           exchange.loginReport(sessionId, body, idempotencyKey, this.shutdown),
+        log: (record) => this.logRecord(record),
+      });
+      this.copyChecks = new CopyChecks({
+        key: instanceKey,
+        exchange,
+        context: this.shutdown,
+        providers: this.options.llmProviders,
         log: (record) => this.logRecord(record),
       });
       const token = await this.takeToken();
@@ -365,7 +376,7 @@ export class Worker implements Service {
   }
 
   private startExchangeLoops(): void {
-    this.armHeartbeat();
+    void this.check().finally(() => this.armHeartbeat());
     this.armRenewal();
   }
 
@@ -412,6 +423,7 @@ export class Worker implements Service {
       if (answer.server_version !== packageVersion())
         return this.finish(versionMismatch(answer.server_version));
       this.logins!.sync(answer.login_sessions);
+      this.copyChecks!.observe(answer.credential_version);
       if (answer.binding_version !== this.connection.binding_version)
         await this.reconnect();
     } catch (error) {

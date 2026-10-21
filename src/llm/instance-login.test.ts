@@ -51,6 +51,7 @@ const COPY_CODE_VALUE = "authorization-code#state-value";
 const FIRST_REVISION = 1;
 const NO_CREDENTIALS = 0;
 const MAX_TURNS = 20;
+const VERSION_STEP = 1;
 const OAUTH_SECRET = {
   refresh: "private-refresh-token",
   access: "private-access-token",
@@ -306,6 +307,7 @@ test("an instance login in copy_code mode runs on the instance, takes the code t
     { code: Code.InvalidInput },
   );
   assert.equal(f.rows().length, NO_CREDENTIALS);
+  assert.equal(f.component.credentialVersionOf(INSTANCE), CLOCK_START);
   const sealed = await f.sealFor(Platform.AnthropicSubscription);
   f.report(entry.session_id, {
     state: InstanceLoginState.Completed,
@@ -317,6 +319,10 @@ test("an instance login in copy_code mode runs on the instance, takes the code t
     LoginSessionState.Completed,
   );
   assert.deepEqual(f.component.loginSessionsOf(INSTANCE), []);
+  assert.equal(
+    f.component.credentialVersionOf(INSTANCE),
+    CLOCK_START + VERSION_STEP,
+  );
   const [row] = f.rows();
   assert.ok(row);
   assert.deepEqual(

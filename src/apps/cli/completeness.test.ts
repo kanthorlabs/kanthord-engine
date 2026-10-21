@@ -51,6 +51,8 @@ const API_ONLY_OPERATIONS = [
   "worker.instance.connect",
   "worker.instance.heartbeat",
   "llm.credential.login_report",
+  "llm.credential.report",
+  "llm.credential.sealed",
   "worker.action.request",
   "worker.execution.setup.get",
   "worker.execution.change_request.get",
@@ -93,7 +95,7 @@ const TOP_LEVEL_DEPTH = 1;
 const INTAKE_GROUP = "intake";
 const TRACKING_GROUP = "tracking";
 const IMPLEMENTED_COUNT = 177;
-const OPERATION_COUNT = 192;
+const OPERATION_COUNT = 194;
 const INTAKE_LEAVES = [
   "intake event delete",
   "intake event discard",

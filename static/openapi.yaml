@@ -82,10 +82,14 @@ paths:
     $ref: ./openapi/llm/credential.login_status.yaml#/pathItem
   /api/llm/credential/platform:
     $ref: ./openapi/llm/credential.platform_list.yaml#/pathItem
+  /api/llm/credential/{credential_name}/report:
+    $ref: ./openapi/llm/credential.report.yaml#/pathItem
   /api/llm/credential/{credential_name}/revision/{revision}/revoke:
     $ref: ./openapi/llm/credential.revoke.yaml#/pathItem
   /api/llm/credential/{credential_name}/revision:
     $ref: ./openapi/llm/credential.rotate.yaml#/pathItem
+  /api/llm/credential/{credential_name}/sealed:
+    $ref: ./openapi/llm/credential.sealed.yaml#/pathItem
   /api/llm/credential/{credential_name}/metadata:
     $ref: ./openapi/llm/credential.update_metadata.yaml#/pathItem
   /api/llm/credential/{credential_name}/verify:
