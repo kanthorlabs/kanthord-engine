@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
-import { execFile, spawn, spawnSync } from "node:child_process";
+import {
+  execFile,
+  spawn,
+  spawnSync,
+  type ExecFileException,
+} from "node:child_process";
 import {
   chmodSync,
   mkdirSync,
@@ -22,7 +27,7 @@ import {
   type Transaction,
 } from "../../kernel/store.ts";
 import { CancellationContext } from "../../kernel/context.ts";
-import { isString } from "../../kernel/values.ts";
+import { isNumber, isString } from "../../kernel/values.ts";
 import {
   collectInventories,
   GATEWAY_STARTED_MESSAGE,
@@ -103,6 +108,25 @@ const DEADLINE_LIMITS = {
 const execFileAsync = promisify(execFile);
 const EVENTS_PATH = /^\/repos\/owner\/repo\/events(\?|$)/;
 const entry = new URL("../../main.ts", import.meta.url).href;
+async function nodeChild(
+  args: string[],
+  options: { env?: NodeJS.ProcessEnv; signal: AbortSignal },
+) {
+  try {
+    const { stdout, stderr } = await execFileAsync(process.execPath, args, {
+      ...options,
+      encoding: "utf8",
+    });
+    return { status: ExitCode.Success, stdout, stderr };
+  } catch (error) {
+    if (options.signal.aborted) throw error;
+    const { code, stdout, stderr } = error as ExecFileException & {
+      stdout: string;
+      stderr: string;
+    };
+    return { status: isNumber(code) ? code : null, stdout, stderr };
+  }
+}
 function layout(directory: string) {
   const env: NodeJS.ProcessEnv = {
     ...process.env,
@@ -391,6 +415,7 @@ test("the check deadline of a poll inbound answers unknown through the report, d
   const drops = await until(
     () => released.drops,
     (items) => items.length === HELD_CHECK_RELEASES,
+    t.signal,
   );
   assert.deepEqual(
     drops,
@@ -504,24 +529,23 @@ test("serve rejects unsafe owned directories/files and releases earlier resource
   paths.config.gateway.port = address.port;
   writePrivate(paths.env.KANTHORD_CONFIG!, stringify(paths.config), true);
   const serve = () =>
-    spawnSync(
-      process.execPath,
+    nodeChild(
       [
         "--input-type=module",
         "-e",
         `process.argv=[process.execPath,'kanthord','serve'];await import(${JSON.stringify(entry)});`,
       ],
-      { env: paths.env, encoding: "utf8", timeout: 10000 },
+      { env: paths.env, signal: t.signal },
     );
   const data = join(paths.env.XDG_DATA_HOME!, "kanthord");
   chmodSync(data, 0o755);
-  assert.match(serve().stderr, /mode 700/);
+  assert.match((await serve()).stderr, /mode 700/);
   chmodSync(data, 0o700);
   writeFileSync(paths.database, "", { mode: 0o600 });
   chmodSync(paths.database, 0o644);
-  assert.match(serve().stderr, /mode 600/);
+  assert.match((await serve()).stderr, /mode 600/);
   chmodSync(paths.database, 0o600);
-  const result = serve();
+  const result = await serve();
   assert.equal(result.status, ExitCode.Failure);
   assert.match(result.stderr, /cannot bind/);
   assert.equal(result.stdout, EMPTY_OUTPUT);
@@ -551,14 +575,13 @@ test("serve refuses another master_key against an existing database and writes n
   assert.ok(address && !isString(address));
   paths.config.gateway.port = address.port;
   const serve = () =>
-    spawnSync(
-      process.execPath,
+    nodeChild(
       [
         "--input-type=module",
         "-e",
         `process.argv=[process.execPath,'kanthord','serve'];await import(${JSON.stringify(entry)});`,
       ],
-      { env: paths.env, encoding: "utf8", timeout: 10000 },
+      { env: paths.env, signal: t.signal },
     );
   const rows = () => {
     const store = new Store(paths.database);
@@ -570,7 +593,7 @@ test("serve refuses another master_key against an existing database and writes n
     return snapshot;
   };
   writePrivate(paths.env.KANTHORD_CONFIG!, stringify(paths.config), true);
-  assert.match(serve().stderr, /cannot bind/);
+  assert.match((await serve()).stderr, /cannot bind/);
   const recorded = rows();
   assert.equal(recorded.keys.length, MASTER_KEY_ROWS);
 
@@ -579,7 +602,7 @@ test("serve refuses another master_key against an existing database and writes n
     master_key: Buffer.alloc(32, 7).toString("base64"),
   };
   writePrivate(paths.env.KANTHORD_CONFIG!, stringify(foreign), true);
-  const refused = serve();
+  const refused = await serve();
   assert.equal(refused.status, ExitCode.Failure);
   assert.match(refused.stderr, /system\.config\.master_key_mismatch/);
   assert.match(refused.stderr, /restore the configuration file/);
@@ -587,7 +610,7 @@ test("serve refuses another master_key against an existing database and writes n
   assert.deepEqual(rows(), recorded);
 
   writePrivate(paths.env.KANTHORD_CONFIG!, stringify(paths.config), true);
-  assert.match(serve().stderr, /cannot bind/);
+  assert.match((await serve()).stderr, /cannot bind/);
   assert.deepEqual(rows(), recorded);
 });
 
@@ -619,43 +642,42 @@ function createDatabase(path: string, migrations: Migrations): void {
   store.close();
 }
 
-function serveOnce(env: NodeJS.ProcessEnv) {
-  return spawnSync(
-    process.execPath,
+function serveOnce(env: NodeJS.ProcessEnv, signal: AbortSignal) {
+  return nodeChild(
     [
       "--input-type=module",
       "-e",
       `process.argv=[process.execPath,'kanthord','serve'];await import(${JSON.stringify(entry)});`,
     ],
-    { env, encoding: "utf8", timeout: 10000 },
+    { env, signal },
   );
 }
 
-test("serve refuses a kanthord.db that another migration text created", (t) => {
+test("serve refuses a kanthord.db that another migration text created", async (t) => {
   const paths = layout(temporary(t));
   createDatabase(paths.database, withExtraText(serverMigrations, "mission"));
-  const refused = serveOnce(paths.env);
+  const refused = await serveOnce(paths.env, t.signal);
   assert.equal(refused.status, ExitCode.Failure);
   assert.match(refused.stderr, SCHEMA_MISMATCH);
   assert.match(refused.stderr, /scratch_extra/);
   assert.match(refused.stderr, RESET_INSTRUCTION);
 });
 
-test("serve refuses a tracking.db that another migration text created", (t) => {
+test("serve refuses a tracking.db that another migration text created", async (t) => {
   const paths = layout(temporary(t));
   createDatabase(paths.database, serverMigrations);
   createDatabase(
     join(dirname(paths.database), "tracking.db"),
     withExtraText(trackingDatabaseMigrations, "tracking"),
   );
-  const refused = serveOnce(paths.env);
+  const refused = await serveOnce(paths.env, t.signal);
   assert.equal(refused.status, ExitCode.Failure);
   assert.match(refused.stderr, SCHEMA_MISMATCH);
   assert.match(refused.stderr, /tracking\.db/);
   assert.match(refused.stderr, RESET_INSTRUCTION);
 });
 
-test("serve refuses a stored hosted worker binding with no placement and names the binding", (t) => {
+test("serve refuses a stored hosted worker binding with no placement and names the binding", async (t) => {
   const paths = layout(temporary(t));
   createDatabase(paths.database, serverMigrations);
   const store = new Store(paths.database);
@@ -681,7 +703,7 @@ test("serve refuses a stored hosted worker binding with no placement and names t
       );
   });
   store.close();
-  const refused = serveOnce(paths.env);
+  const refused = await serveOnce(paths.env, t.signal);
   assert.equal(refused.status, ExitCode.Failure);
   assert.match(refused.stderr, /system\.database\.binding_placement_missing/);
   assert.match(refused.stderr, /general/);
@@ -820,19 +842,18 @@ test("serve installs the pinned pi tools into the state directory before the gat
     );
 });
 
-test("serve refuses to start when the pi tool directory cannot be installed", (t) => {
+test("serve refuses to start when the pi tool directory cannot be installed", async (t) => {
   const paths = layout(temporary(t));
   const piDirectory = join(paths.env.XDG_STATE_HOME!, "kanthord", "pi");
   mkdirSync(piDirectory, { mode: 0o700 });
   writeFileSync(join(piDirectory, "bin"), EMPTY_OUTPUT);
-  const result = spawnSync(
-    process.execPath,
+  const result = await nodeChild(
     [
       "--input-type=module",
       "-e",
       `process.argv=[process.execPath,'kanthord','serve'];await import(${JSON.stringify(entry)});`,
     ],
-    { env: paths.env, encoding: "utf8", timeout: SHUTDOWN_DEADLINE_MS },
+    { env: paths.env, signal: t.signal },
   );
   assert.equal(result.status, ExitCode.Failure);
   assert.match(result.stderr, /^worker\.start\.tool_missing:/m);
@@ -891,8 +912,7 @@ test("server lifecycle returns errors, reports owned health and releases every r
   const paths = layout(temporary(t));
   paths.config.log.destination = "file";
   writePrivate(paths.env.KANTHORD_CONFIG!, stringify(paths.config), true);
-  const result = await execFileAsync(
-    process.execPath,
+  const result = await nodeChild(
     [
       "--input-type=module",
       "-e",
@@ -967,17 +987,17 @@ test("server lifecycle returns errors, reports owned health and releases every r
     write('verified\\n');
   `,
     ],
-    { env: paths.env, encoding: "utf8", signal: t.signal },
+    { env: paths.env, signal: t.signal },
   );
+  assert.equal(result.status, ExitCode.Success, result.stderr);
   assert.equal(result.stdout, LIFECYCLE_VERIFIED_OUTPUT);
   const reopened = new Store(paths.database);
   reopened.close();
 });
 
-test("server quiesces concurrently, drains Intake with direct calls available, joins the chain and releases Intake between Gateway and Project", (t) => {
+test("server quiesces concurrently, drains Intake with direct calls available, joins the chain and releases Intake between Gateway and Project", async (t) => {
   const paths = layout(temporary(t));
-  const result = spawnSync(
-    process.execPath,
+  const result = await nodeChild(
     [
       "--input-type=module",
       "-e",
@@ -1054,17 +1074,16 @@ test("server quiesces concurrently, drains Intake with direct calls available, j
     assert.deepEqual(shutdown.slice(drainEnd), ['stop-gateway', 'stop-intake', 'stop-project', 'stop-mission', 'stop-worker', 'stop-custody', 'stop-scheduler', 'store', 'store', 'log']);
   `,
     ],
-    { env: paths.env, encoding: "utf8", timeout: 15000 },
+    { env: paths.env, signal: t.signal },
   );
   assert.equal(result.status, ExitCode.Success, result.stderr);
 });
 
-test("server starts the worker pool after the Gateway is ready and stops it before it quiesces", (t) => {
+test("server starts the worker pool after the Gateway is ready and stops it before it quiesces", async (t) => {
   const paths = layout(temporary(t));
   paths.config.log.destination = "file";
   writePrivate(paths.env.KANTHORD_CONFIG!, stringify(paths.config), true);
-  const result = spawnSync(
-    process.execPath,
+  const result = await nodeChild(
     [
       "--input-type=module",
       "-e",
@@ -1105,16 +1124,15 @@ test("server starts the worker pool after the Gateway is ready and stops it befo
     process.stdout.write('verified\\n');
   `,
     ],
-    { env: paths.env, encoding: "utf8", timeout: SHUTDOWN_DEADLINE_MS },
+    { env: paths.env, signal: t.signal },
   );
   assert.equal(result.status, ExitCode.Success, result.stderr);
   assert.equal(result.stdout, LIFECYCLE_VERIFIED_OUTPUT);
 });
 
-test("server startup failure releases Mission in reverse construction order and stop is idempotent", (t) => {
+test("server startup failure releases Mission in reverse construction order and stop is idempotent", async (t) => {
   const paths = layout(temporary(t));
-  const result = spawnSync(
-    process.execPath,
+  const result = await nodeChild(
     [
       "--input-type=module",
       "-e",
@@ -1153,16 +1171,15 @@ test("server startup failure releases Mission in reverse construction order and 
     process.stdout.write('verified\\n');
   `,
     ],
-    { env: paths.env, encoding: "utf8", timeout: SHUTDOWN_DEADLINE_MS },
+    { env: paths.env, signal: t.signal },
   );
   assert.equal(result.status, ExitCode.Success, result.stderr);
   assert.equal(result.stdout, LIFECYCLE_VERIFIED_OUTPUT);
 });
 
-test("the shutdown watchdog holds the event loop and exits the process when cleanup never settles", () => {
+test("the shutdown watchdog holds the event loop and exits the process when cleanup never settles", async (t) => {
   const started = Date.now();
-  const result = spawnSync(
-    process.execPath,
+  const result = await nodeChild(
     [
       "--input-type=module",
       "-e",
@@ -1172,7 +1189,7 @@ test("the shutdown watchdog holds the event loop and exits the process when clea
     await new Server().stop();
     `,
     ],
-    { encoding: "utf8", timeout: 20000 },
+    { signal: t.signal },
   );
   assert.equal(result.status, ExitCode.Failure);
   assert.doesNotMatch(result.stderr, /unsettled top-level await/);

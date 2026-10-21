@@ -131,6 +131,7 @@ test("E06 webhook acquisition journey", { timeout: TIMEOUT }, async (t) => {
         (list) =>
           list.length === EVENTS_PER_DELIVERY &&
           list.every((item) => item.state === InboundEventState.Succeeded),
+        t.signal,
       );
       const [first] = items;
       assert.ok(first);

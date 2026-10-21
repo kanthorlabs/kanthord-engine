@@ -125,6 +125,7 @@ test("a worker thread registers its worker unit through the port and the invocat
         body: null,
       }),
     (candidate) => candidate.items.length === SINGLE_INSTANCE,
+    t.signal,
   );
   assert.equal(page.items[0]?.resource_identity, RESOURCE_IDENTITY);
   const registered = records.filter(
@@ -134,7 +135,7 @@ test("a worker thread registers its worker unit through the port and the invocat
   );
   assert.equal(registered.length, SINGLE_INSTANCE);
   const logFile = `${directories(env).state}/kanthord.log`;
-  assert.ok(await until(() => existsSync(logFile), Boolean));
+  assert.ok(await until(() => existsSync(logFile), Boolean, t.signal));
 });
 
 test("a worker thread refuses to start without an absolute directory variable", async (t) => {

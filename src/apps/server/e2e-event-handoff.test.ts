@@ -238,8 +238,10 @@ test("E09 event handoff journey", { timeout: TIMEOUT }, async (t) => {
       .items;
   const ev = async (deliveryId: string) =>
     (
-      await until(events, (items) =>
-        items.some((item) => item.event_id === deliveryId),
+      await until(
+        events,
+        (items) => items.some((item) => item.event_id === deliveryId),
+        t.signal,
       )
     ).find((item) => item.event_id === deliveryId)!.id;
   const get = (id: string) => read<Event>(["intake", "event", "get", id]);
@@ -247,6 +249,7 @@ test("E09 event handoff journey", { timeout: TIMEOUT }, async (t) => {
     until(
       () => get(id),
       (event) => event.state !== InboundEventState.Pending,
+      t.signal,
     );
   const nodeState = async (nodeId: string) => (await h.node(nodeId)).state;
   const landed = async () =>
@@ -322,6 +325,7 @@ test("E09 event handoff journey", { timeout: TIMEOUT }, async (t) => {
             call.method === HttpMethod.Get &&
             call.path === `/repos/${RESOURCE}/pulls/${SECOND_PULL_REQUEST}`,
         ),
+      t.signal,
     );
     const E4 = await ev("d-4");
     refused(

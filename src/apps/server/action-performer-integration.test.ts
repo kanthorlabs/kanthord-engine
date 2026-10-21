@@ -390,7 +390,7 @@ test("both adapters serialize one execution and replay the completed request", a
   const release = h.gitHub.hold();
   const key = ulid();
   const first = h.request(HTTP, key);
-  await until(h.creates, (count) => count !== NO_CALLS);
+  await until(h.creates, (count) => count !== NO_CALLS, t.signal);
   assert.equal(h.creates(), SINGLE_CALL);
   const second = h.request(DIRECT);
   release();

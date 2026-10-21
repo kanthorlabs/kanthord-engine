@@ -367,7 +367,7 @@ async function scenarioOf(fixture: Fixture, suffix: string): Promise<Scenario> {
   return { projects: { general, other, paused, placed }, tokens };
 }
 
-async function run(side: Side, scenario: Scenario) {
+async function run(t: TestContext, side: Side, scenario: Scenario) {
   const outcomes: [string, unknown][] = [];
   const record = async <T>(name: string, outcome: Promise<T>) => {
     const value = await outcome;
@@ -451,6 +451,7 @@ async function run(side: Side, scenario: Scenario) {
           entry.route === schedulerOperations.workPull.path &&
           entry.status === HttpStatus.ServiceUnavailable,
       ),
+    t.signal,
   );
   for (const [name, claim] of [
     ["execution of another project", claimCrossProject],
@@ -555,6 +556,7 @@ test("the port transport, the bridged port transport and the HTTP transport answ
   const httpScenario = await scenarioOf(fixture, "http");
   const httpMark = fixture.logs.length;
   const http = await run(
+    t,
     await httpSide(fixture, httpScenario.tokens),
     httpScenario,
   );
@@ -569,6 +571,7 @@ test("the port transport, the bridged port transport and the HTTP transport answ
     const portScenario = await scenarioOf(fixture, suffix);
     const portLines: Record<string, unknown>[] = [];
     const port = await run(
+      t,
       await portSide(t, fixture, portScenario.tokens, portLines, link),
       portScenario,
     );

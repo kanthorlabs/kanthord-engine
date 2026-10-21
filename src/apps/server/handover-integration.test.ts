@@ -106,7 +106,6 @@ const LOGIN_PENDING = "pending";
 const LOGIN_POLL_LIMIT = 50;
 const MAX_REPORT_BYTES = 65534;
 const OVERSIZED_REPORT_BYTES = 65538;
-const CHILD_TIMEOUT_MS = 10000;
 const MAX_CHILD_BUFFER = 1024;
 const EMPTY_OUTPUT = "";
 const API_KEY_FIELD = "key";
@@ -1000,7 +999,10 @@ for (const adapter of ["direct", "http"] as const) {
   }
 }
 
-async function workerBoundaryRoundTrip(h: Awaited<ReturnType<typeof setup>>) {
+async function workerBoundaryRoundTrip(
+  h: Awaited<ReturnType<typeof setup>>,
+  signal: AbortSignal,
+) {
   const claims = JSON.parse(
     Buffer.from(h.token.split(".")[1]!, "base64url").toString("utf8"),
   );
@@ -1024,7 +1026,7 @@ async function workerBoundaryRoundTrip(h: Awaited<ReturnType<typeof setup>>) {
         runtimeIdentity: h.runtime_identity,
       }),
     ],
-    { timeout: CHILD_TIMEOUT_MS, maxBuffer: MAX_CHILD_BUFFER },
+    { signal, maxBuffer: MAX_CHILD_BUFFER },
   );
   assert.equal(stderr, EMPTY_OUTPUT);
   assert.deepEqual(JSON.parse(stdout), {
@@ -1037,7 +1039,7 @@ for (const type of [SecretShape.ApiKey, SecretShape.OAuth] as const) {
   test(`${type} maximum handover and public worker store release fit HTTP; next byte refuses without writes`, async (t) => {
     const maximum = boundaryCredential(type);
     const h = await setup(t, HTTP, maximum);
-    await workerBoundaryRoundTrip(h);
+    await workerBoundaryRoundTrip(h, t.signal);
     const before = h.f.store.database
       .prepare("SELECT * FROM credential ORDER BY id")
       .all();
