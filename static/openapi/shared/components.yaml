@@ -12,9 +12,10 @@ components:
       required: true
       schema:
         type: string
-        minLength: 26
-        maxLength: 26
-        pattern: ^[0-7][0-9A-HJKMNP-TV-Z]{25}$
+        minLength: 42
+        maxLength: 42
+        pattern: ^idempotency_key_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+        description: idempotency_key_ followed by a canonical 26-character uppercase ULID.
   responses:
     Error:
       description: Declared failure

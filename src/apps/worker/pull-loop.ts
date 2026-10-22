@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { ulid } from "ulid";
 import { CancellationContext, type Context } from "../../kernel/context.ts";
 import { Diagnostic } from "../../kernel/errors.ts";
 import { OperationResultType } from "../../kernel/operation.ts";
@@ -10,6 +9,7 @@ import {
 import { Backoff, sleep } from "./api.ts";
 import type { WorkerTransport } from "./transport.ts";
 import type { Registration } from "./registration.ts";
+import { createIdempotencyKey } from "../../kernel/identity.ts";
 
 const SERVER_ERROR = 500;
 const REGISTRATION_REQUIRED = "gateway.registration.required";
@@ -53,7 +53,7 @@ export async function pullLoop(
             runtime_identity: registration.runtime_identity,
           },
         },
-        { idempotencyKey: ulid(), context },
+        { idempotencyKey: createIdempotencyKey(), context },
       )
       .then((result) => {
         if (

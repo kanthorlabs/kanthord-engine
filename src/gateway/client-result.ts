@@ -1,4 +1,3 @@
-import { ulid } from "ulid";
 import assert from "node:assert/strict";
 import { z } from "zod";
 import { resolveRequestId } from "./request-id.ts";
@@ -16,6 +15,7 @@ import {
   type ServiceClient,
 } from "../kernel/operation.ts";
 import type { RecordedResponse } from "./idempotency.ts";
+import { createIdempotencyKey } from "../kernel/identity.ts";
 export function inputValidationFailure(error: z.ZodError): RecordedResponse {
   assert.ok(error instanceof z.ZodError);
   const none = 0;
@@ -64,7 +64,7 @@ export function createClient<T extends Record<string, Operation>>(
       name,
       async (input: unknown, options: ClientOptions = {}) => {
         const idempotencyKey = operation.mutation
-          ? (options.idempotencyKey ?? ulid())
+          ? (options.idempotencyKey ?? createIdempotencyKey())
           : undefined;
         let result: RecordedResponse;
         try {

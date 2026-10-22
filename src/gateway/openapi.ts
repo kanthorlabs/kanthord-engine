@@ -9,7 +9,7 @@ import {
 import { dirname, join } from "node:path";
 import { stringify } from "yaml";
 import { z } from "zod";
-import { ulidSchema } from "../kernel/identity.ts";
+import { idempotencyKeySchema } from "../kernel/identity.ts";
 import { errorDetailsSchema, errorSchema } from "../kernel/errors.ts";
 import type { Operation } from "../kernel/operation.ts";
 import { AccessPolicy, hasHttpRoute } from "../kernel/operation.ts";
@@ -262,7 +262,7 @@ export function emitOpenAPIFiles(
             name: "Idempotency-Key",
             in: "header",
             required: true,
-            schema: jsonSchema("IdempotencyKey", ulidSchema),
+            schema: jsonSchema("IdempotencyKey", idempotencyKeySchema),
           },
         },
         responses: {

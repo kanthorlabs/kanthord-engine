@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
-import { ulid } from "ulid";
 import { httpClient } from "../../gateway/client.ts";
 import { gatewayOperations } from "../../gateway/contract.ts";
 import {
@@ -52,6 +51,7 @@ import {
   repositorySnapshot,
   until,
 } from "./cli-support.ts";
+import { createIdempotencyKey } from "../../kernel/identity.ts";
 
 const FIRST_INDEX = 0;
 const FIRST_REVISION = 1;
@@ -324,7 +324,7 @@ function journey(h: Harness) {
             ],
           },
         },
-        { idempotencyKey: ulid() },
+        { idempotencyKey: createIdempotencyKey() },
       ),
     );
     const upload = submitted.uploads[FIRST_INDEX];
@@ -349,7 +349,7 @@ function journey(h: Harness) {
           query: {},
           body: executionContext(x),
         },
-        { idempotencyKey: ulid() },
+        { idempotencyKey: createIdempotencyKey() },
       ),
     );
     clean(o);
@@ -360,7 +360,7 @@ function journey(h: Harness) {
     const answer = completed(
       await performer["action.request"](
         { params: { execution_id: e.execution_id }, query: {}, body: null },
-        { idempotencyKey: ulid() },
+        { idempotencyKey: createIdempotencyKey() },
       ),
     );
     clean(answer);

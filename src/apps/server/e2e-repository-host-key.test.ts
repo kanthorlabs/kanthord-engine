@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
-import { ulid } from "ulid";
 import { errorSchema } from "../../kernel/errors.ts";
 import { HttpMethod, HttpStatus } from "../../kernel/http.ts";
 import { temporary } from "../../kernel/test-support.ts";
@@ -13,6 +12,7 @@ import {
 } from "../../repository/contract.ts";
 import { environment, kanthord } from "./cli-support.ts";
 import { gatewayFixture } from "./test-support.ts";
+import { createIdempotencyKey } from "../../kernel/identity.ts";
 
 const GITHUB = "github.com";
 const GITLAB = "gitlab.com";
@@ -76,7 +76,7 @@ test("scan, pin and list a host key through HTTP", async (t) => {
   });
   const pinned = await fixture.request(`${HOST_KEY_PATH}/${GITHUB}`, {
     method: HttpMethod.Put,
-    headers: headers(ulid()),
+    headers: headers(createIdempotencyKey()),
     body: JSON.stringify({ fingerprint: GITHUB_FINGERPRINT }),
   });
   assert.equal(pinned.status, HttpStatus.OK);
@@ -93,7 +93,7 @@ test("scan, pin and list a host key through HTTP", async (t) => {
 
 test("a repeated Idempotency-Key answers the same pinned item without a read", async (t) => {
   const { fixture, reads, keys, headers } = await setup(t);
-  const key = ulid();
+  const key = createIdempotencyKey();
   const pin = () =>
     fixture.request(`${HOST_KEY_PATH}/${GITLAB}`, {
       method: HttpMethod.Put,
@@ -151,7 +151,7 @@ test("the CLI scans, pins and lists a host key", async (t) => {
     fingerprint: GITLAB_FINGERPRINT,
     source: HostKeySource.Keyscan,
   });
-  const key = ulid();
+  const key = createIdempotencyKey();
   const pin = await kanthord(
     [
       ...HOST_KEY,

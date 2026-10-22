@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
-import { ulid } from "ulid";
 import { credentialAnswerSchema } from "../../custody/contract.ts";
 import { errorSchema } from "../../kernel/errors.ts";
 import { HttpMethod, HttpStatus } from "../../kernel/http.ts";
 import { temporary } from "../../kernel/test-support.ts";
 import { environment, kanthord } from "./cli-support.ts";
 import { gatewayFixture } from "./test-support.ts";
+import { createIdempotencyKey } from "../../kernel/identity.ts";
 
 const SSH_KEY_PATH = "/api/repository/credential/ssh/key";
 const NAME = "deploy";
@@ -43,7 +43,7 @@ function publicKeyOf(answer: unknown): string {
 
 test("a repeated Idempotency-Key of ssh_key_create answers the same record without a second key", async (t) => {
   const { fixture, headers } = await setup(t);
-  const key = ulid();
+  const key = createIdempotencyKey();
   const create = () =>
     fixture.request(SSH_KEY_PATH, {
       method: HttpMethod.Post,
@@ -60,7 +60,7 @@ test("a repeated Idempotency-Key of ssh_key_create answers the same record witho
   assert.match(publicKeyOf(JSON.parse(text)), PUBLIC_KEY_PATTERN);
   const conflict = await fixture.request(SSH_KEY_PATH, {
     method: HttpMethod.Post,
-    headers: headers(ulid()),
+    headers: headers(createIdempotencyKey()),
     body: JSON.stringify({ name: NAME }),
   });
   assert.equal(conflict.status, HttpStatus.Conflict);

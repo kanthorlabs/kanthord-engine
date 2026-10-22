@@ -152,11 +152,7 @@ export function addInboundCommands(intake: Command): void {
       .command(CREATE)
       .description("Create an inbound from a JSON file")
       .requiredOption("--file <path>", "Create file", singleUse("--file"))
-      .option(
-        "--idempotency-key <ulid>",
-        "Mutation key",
-        singleUse(KEY_OPTION),
-      ),
+      .option("--idempotency-key <key>", "Mutation key", singleUse(KEY_OPTION)),
     {
       schema: inboundCreateSchema,
       example: CREATE_EXAMPLE,
@@ -189,6 +185,6 @@ export function addInboundCommands(intake: Command): void {
     .command(DELETE)
     .description("Delete an inbound and its events")
     .argument("<inbound-id>", "Inbound identity")
-    .option("--idempotency-key <ulid>", "Mutation key", singleUse(KEY_OPTION))
+    .option("--idempotency-key <key>", "Mutation key", singleUse(KEY_OPTION))
     .action((id: string, _options, command: Command) => remove(id, command));
 }

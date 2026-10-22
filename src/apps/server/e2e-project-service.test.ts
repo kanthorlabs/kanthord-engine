@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import { join } from "node:path";
 import { test, type TestContext } from "node:test";
-import { ulid } from "ulid";
 import type { z } from "zod";
 import type { CredentialAnswer } from "../../custody/contract.ts";
 import { writePrivate } from "../../kernel/files.ts";
@@ -27,6 +26,7 @@ import {
   FAKE_SSH_HOST,
   gatewayFixture,
 } from "./test-support.ts";
+import { createIdempotencyKey } from "../../kernel/identity.ts";
 
 const SUCCESS = 0;
 const FAILURE = 1;
@@ -241,7 +241,7 @@ async function createCredential(
 
 async function createProject(
   fixture: Fixture,
-  key = ulid(),
+  key = createIdempotencyKey(),
 ): Promise<Mutation> {
   const answer = success<Mutation>(
     await kanthord(
@@ -259,7 +259,7 @@ async function apply(
   fixture: Fixture,
   projectId: string,
   body: BindingSet,
-  key = ulid(),
+  key = createIdempotencyKey(),
 ): Promise<Applied> {
   const path = file(fixture.directory, `v${body.version}.json`, body);
   const answer = success<Applied>(
@@ -285,7 +285,7 @@ async function apply(
 async function bindRepository(
   fixture: Fixture,
   projectId: string,
-  key = ulid(),
+  key = createIdempotencyKey(),
 ): Promise<Applied> {
   await createCredential(fixture, REPOSITORY_PLATFORM, REPOSITORY_PLATFORM);
   await createFakeSshCredential(async <T>(args: string[]) =>
@@ -411,7 +411,7 @@ test(
   async (t) => {
     const fixture = await setup(t);
     await createCredential(fixture);
-    const key = ulid();
+    const key = createIdempotencyKey();
     const created = await createProject(fixture, key);
     const replayed = await createProject(fixture, key);
     assert.equal(replayed.id, created.id);
@@ -458,7 +458,7 @@ test(
   async (t) => {
     const fixture = await setup(t);
     const project = await createProject(fixture);
-    const key = ulid();
+    const key = createIdempotencyKey();
     const applied = await bindRepository(fixture, project.id, key);
     const replayed = success<Applied>(
       await kanthord(

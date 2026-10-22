@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import { join } from "node:path";
 import { test, type TestContext } from "node:test";
-import { ulid } from "ulid";
 import { httpClient } from "../../gateway/client.ts";
 import {
   Consumer,
@@ -42,6 +41,7 @@ import {
   repositoryBinding,
   until,
 } from "./cli-support.ts";
+import { createIdempotencyKey } from "../../kernel/identity.ts";
 
 const ExitCode = { Success: 0, Failure: 1 } as const;
 const EMPTY_OUTPUT = "";
@@ -186,7 +186,7 @@ async function setup(t: TestContext) {
     const action = completed(
       await performer["action.request"](
         { params: { execution_id: x2.execution_id }, query: {}, body: null },
-        { idempotencyKey: ulid() },
+        { idempotencyKey: createIdempotencyKey() },
       ),
     );
     assert.equal(action.items[FIRST_INDEX]?.kind, ActionResultKind.Submitted);

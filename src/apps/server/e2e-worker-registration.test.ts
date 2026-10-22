@@ -3,13 +3,13 @@ import { join } from "node:path";
 import { test, type TestContext } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 import { parse, stringify } from "yaml";
-import { ulid } from "ulid";
 import { configuration, CONFIG_VERSION } from "../../config/index.ts";
 import { writePrivate } from "../../kernel/files.ts";
 import {
   createIdentity,
   identitySchema,
-  ulidSchema,
+  createIdempotencyKey,
+  idempotencyKeySchema,
 } from "../../kernel/identity.ts";
 import { temporary } from "../../kernel/test-support.ts";
 import {
@@ -388,7 +388,7 @@ test(
       >(await kanthord(["worker", "registration", "resume", ridA], f.H));
       assert.equal(result.runtime_identity, ridA);
       assert.equal(result.registered, true);
-      assert.ok(ulidSchema.safeParse(result.idempotency_key).success);
+      assert.ok(idempotencyKeySchema.safeParse(result.idempotency_key).success);
     });
     await t.test("E02.15 foreign client cannot deregister", async () =>
       refusal(
@@ -397,7 +397,7 @@ test(
       ),
     );
     await t.test("E02.16 end replay and live inventory", async () => {
-      const key = ulid();
+      const key = createIdempotencyKey();
       const args = [
         "worker",
         "registration",

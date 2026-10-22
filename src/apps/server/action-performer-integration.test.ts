@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
 import type { z } from "zod";
-import { ulid } from "ulid";
 import { directClient } from "../../gateway/index.ts";
 import { httpClient } from "../../gateway/client.ts";
 import { repositoryOperations } from "../../repository/contract.ts";
@@ -37,6 +36,7 @@ import {
   fakeGitHub,
   gatewayFixture,
 } from "./test-support.ts";
+import { createIdempotencyKey } from "../../kernel/identity.ts";
 
 const HTTP = "http";
 const DIRECT = "direct";
@@ -102,7 +102,7 @@ async function setup(t: TestContext, adapter: typeof HTTP | typeof DIRECT) {
     input: z.input<T["input"]>,
     token = fixture.token,
     transport = adapter,
-    idempotencyKey = ulid(),
+    idempotencyKey = createIdempotencyKey(),
   ) {
     if (transport === HTTP)
       return httpClient({ operation }, fixture.endpoint, token).operation(
@@ -361,7 +361,11 @@ async function setup(t: TestContext, adapter: typeof HTTP | typeof DIRECT) {
   );
   assert.ok("state" in assessment.node);
   assert.equal(assessment.node.state, NodeState.Evaluating);
-  const request = (transport = adapter, key = ulid(), auth = token) =>
+  const request = (
+    transport = adapter,
+    key = createIdempotencyKey(),
+    auth = token,
+  ) =>
     call(
       workerOperations["action.request"],
       {
@@ -388,7 +392,7 @@ async function setup(t: TestContext, adapter: typeof HTTP | typeof DIRECT) {
 test("both adapters serialize one execution and replay the completed request", async (t) => {
   const h = await setup(t, DIRECT);
   const release = h.gitHub.hold();
-  const key = ulid();
+  const key = createIdempotencyKey();
   const first = h.request(HTTP, key);
   await until(h.creates, (count) => count !== NO_CALLS, t.signal);
   assert.equal(h.creates(), SINGLE_CALL);
@@ -421,7 +425,7 @@ test("another registration fails the execution proof through both adapters", asy
   completed(await h.call(workerOperations.register, NO_INPUT, other));
   for (const adapter of [DIRECT, HTTP] as const)
     refused(
-      await h.request(adapter, ulid(), other),
+      await h.request(adapter, createIdempotencyKey(), other),
       HttpStatus.Forbidden,
       PROOF_FAILED,
     );

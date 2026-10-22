@@ -3,7 +3,6 @@ import { chmodSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test, type TestContext } from "node:test";
 import { simpleGit } from "simple-git";
-import { ulid } from "ulid";
 import { httpClient } from "../../gateway/client.ts";
 import { writePrivate } from "../../kernel/files.ts";
 import { HttpMethod, HttpStatus } from "../../kernel/http.ts";
@@ -48,6 +47,7 @@ import {
   remoteHead,
 } from "./test-support.ts";
 import { environment, kanthord } from "./cli-support.ts";
+import { createIdempotencyKey } from "../../kernel/identity.ts";
 
 const INITIAL_SEQUENCE = 0;
 const SUCCESSFUL_EXIT = 0;
@@ -299,7 +299,7 @@ async function setup(t: TestContext) {
         query: {},
         body: null,
       },
-      { idempotencyKey: ulid() },
+      { idempotencyKey: createIdempotencyKey() },
     );
   const changeRequest = (execution: ExecutionRecord) =>
     client["execution.change_request.get"]({
@@ -797,7 +797,7 @@ test(
               ],
             },
           },
-          { idempotencyKey: ulid() },
+          { idempotencyKey: createIdempotencyKey() },
         );
         refused(repeated, HttpStatus.BadRequest, BINDING_MISMATCH);
         assert.ok(repeated.type === OperationResultType.Failure);

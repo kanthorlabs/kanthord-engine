@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { ulid } from "ulid";
 import { CancellationContext } from "../../kernel/context.ts";
 import { CodedError } from "../../kernel/errors.ts";
 import {
@@ -14,6 +13,7 @@ import type {
 } from "../../tracking/contract.ts";
 import type { TelemetrySink } from "../../worker/unit/index.ts";
 import { sleep } from "./api.ts";
+import { createIdempotencyKey } from "../../kernel/identity.ts";
 
 export type TelemetryWrite = ServiceClient<
   typeof trackingOperations
@@ -258,7 +258,7 @@ export class HttpTelemetrySink implements TelemetrySink {
           query: {},
           body: { records },
         },
-        { context, idempotencyKey: ulid() },
+        { context, idempotencyKey: createIdempotencyKey() },
       );
     } finally {
       context.cancel();

@@ -69,7 +69,7 @@ import {
   PROJECT_ID_PREFIX,
   projectOperations,
 } from "../../project/contract.ts";
-import { createIdentity } from "../../kernel/identity.ts";
+import { createIdentity, createIdempotencyKey } from "../../kernel/identity.ts";
 import { errorSchema } from "../../kernel/errors.ts";
 
 const ExitCode = { Success: 0, Failure: 1 } as const;
@@ -201,7 +201,7 @@ test("the composition root reports an Intake entry under the name of its project
     headers: {
       Authorization: `Bearer ${fixture.token}`,
       "Content-Type": "application/json",
-      "Idempotency-Key": ulid(),
+      "Idempotency-Key": createIdempotencyKey(),
     },
     body: JSON.stringify({ name: INVENTORY_PROJECT_NAME }),
   });
@@ -254,7 +254,7 @@ async function created(
     headers: {
       Authorization: `Bearer ${fixture.token}`,
       "Content-Type": "application/json",
-      "Idempotency-Key": ulid(),
+      "Idempotency-Key": createIdempotencyKey(),
     },
     body: JSON.stringify(body),
   });
@@ -440,7 +440,7 @@ test("composed Custody and Worker share credential and enablement collaborations
   const headers = {
     Authorization: `Bearer ${fixture.token}`,
     "Content-Type": "application/json",
-    "Idempotency-Key": ulid(),
+    "Idempotency-Key": createIdempotencyKey(),
   };
   const created = await fixture.request(llmOperations.create.path, {
     method: llmOperations.create.method,
@@ -463,7 +463,7 @@ test("composed Custody and Worker share credential and enablement collaborations
     ),
     {
       method: llmOperations.update_metadata.method,
-      headers: { ...headers, "Idempotency-Key": ulid() },
+      headers: { ...headers, "Idempotency-Key": createIdempotencyKey() },
       body: JSON.stringify({
         expected_revision: FIRST_REVISION,
         metadata: {
@@ -478,7 +478,7 @@ test("composed Custody and Worker share credential and enablement collaborations
     agentOperations["enablement.put"].path.replace(":agent_name", AGENT_NAME),
     {
       method: agentOperations["enablement.put"].method,
-      headers: { ...headers, "Idempotency-Key": ulid() },
+      headers: { ...headers, "Idempotency-Key": createIdempotencyKey() },
       body: JSON.stringify({
         agent_providers: [
           {

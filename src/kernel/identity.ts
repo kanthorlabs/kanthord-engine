@@ -8,7 +8,6 @@ export const IDENTITY_SUFFIX_LENGTH = ULID_LENGTH + 1;
 
 const ulidPattern = /^[0-7][0-9A-HJKMNP-TV-Z]{25}$/;
 
-/** Bare ULIDs are reserved for contracts such as client idempotency keys. */
 export const ulidSchema = z.string().length(ULID_LENGTH).regex(ulidPattern);
 
 /** The owning service declares a stable, singular prefix for each entity kind. */
@@ -38,4 +37,12 @@ export function createIdentity(prefix: string): string {
   const value = `${prefix}_${suffix}`;
   assert.ok(schema.safeParse(value).success, "Invalid generated identity.");
   return value;
+}
+
+export const IDEMPOTENCY_KEY_PREFIX = "idempotency_key";
+
+export const idempotencyKeySchema = identitySchema(IDEMPOTENCY_KEY_PREFIX);
+
+export function createIdempotencyKey(): string {
+  return createIdentity(IDEMPOTENCY_KEY_PREFIX);
 }

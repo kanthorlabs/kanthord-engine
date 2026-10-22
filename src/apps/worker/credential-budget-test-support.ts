@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import { z } from "zod";
-import { ulid } from "ulid";
 import { executionCredentialStore } from "../../custody/client.ts";
 import {
   handoverItemsSchema,
@@ -17,6 +16,7 @@ import {
 import { canonicalJSON } from "../../kernel/json.ts";
 import { OperationResultType } from "../../kernel/operation.ts";
 import { workerOperations } from "../../worker/contract.ts";
+import { createIdempotencyKey } from "../../kernel/identity.ts";
 
 const options = z
   .strictObject({
@@ -33,7 +33,7 @@ const aad = handoverAad(options.executionId, options.runtimeIdentity);
 try {
   const handover = await client.handover(
     { params: {}, query: {}, body: { execution_id: options.executionId } },
-    { idempotencyKey: ulid() },
+    { idempotencyKey: createIdempotencyKey() },
   );
   assert.ok(handover.type === OperationResultType.Completed);
   const payload = handoverItemsSchema.parse({
@@ -56,7 +56,7 @@ try {
       reportBytes = Buffer.byteLength(JSON.stringify(body));
       const result = await client.credential(
         { params: {}, query: {}, body },
-        { idempotencyKey: ulid() },
+        { idempotencyKey: createIdempotencyKey() },
       );
       assert.ok(result.type === OperationResultType.Completed);
       assert.equal(result.data, null);

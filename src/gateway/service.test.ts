@@ -29,6 +29,7 @@ import { CancellationContext } from "../kernel/context.ts";
 import { HealthStatus } from "../kernel/service.ts";
 import { compareRouteSpecificity } from "./service.ts";
 import { GATEWAY_STARTED_MESSAGE } from "./constants.ts";
+import { createIdempotencyKey } from "../kernel/identity.ts";
 
 const AUTH_VERSION = 1;
 const NEXT_VERSION_STEP = 1;
@@ -350,7 +351,7 @@ test("direct and HTTP adapters share transactional idempotency, validation, fail
   const direct = directClient({ mutation }, fixture.gateway.invocation);
   const options = {
     identity: caller,
-    idempotencyKey: ulid(),
+    idempotencyKey: createIdempotencyKey(),
     traceparent: "00-12345678901234567890123456789012-1234567890123456-01",
   };
   const result = await http.mutation(
@@ -436,7 +437,7 @@ test("expired replay executes the handler again while an unexpired replay does n
     `Bearer ${fixture.token}`,
   );
   const client = directClient({ operation }, fixture.gateway.invocation);
-  const options = { identity, idempotencyKey: ulid() };
+  const options = { identity, idempotencyKey: createIdempotencyKey() };
   const input = { params: {}, query: {}, body: null };
   const first = await client.operation(input, options);
   assert.deepEqual(await client.operation(input, options), first);
@@ -470,7 +471,7 @@ test("timeout leaves a mutation in progress until its atomic commit, then replay
   const token = fixture.token;
   const headers = {
     Authorization: `Bearer ${token}`,
-    "Idempotency-Key": ulid(),
+    "Idempotency-Key": createIdempotencyKey(),
   };
   const timeout = await fixture.request("/api/slow", {
     method: "POST",

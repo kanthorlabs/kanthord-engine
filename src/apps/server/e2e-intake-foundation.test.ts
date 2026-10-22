@@ -13,6 +13,7 @@ import { mintServiceIdentity } from "../../kernel/service-mint.ts";
 import { testHumanIdentity } from "../../kernel/test-identity.ts";
 import { INTAKE_SERVICE_NAME } from "../../intake/contract.ts";
 import { gatewayFixture, servicePing } from "./test-support.ts";
+import { createIdempotencyKey } from "../../kernel/identity.ts";
 
 const NOT_FOUND = "gateway.routing.not_found";
 const UNAUTHORIZED = "gateway.authentication.unauthorized";
@@ -65,7 +66,7 @@ test("E01.3 a service operation has no route and serves a minted service identit
     headers: {
       authorization: `Bearer ${fixture.token}`,
       "content-type": MediaType.JSON,
-      "idempotency-key": ulid(),
+      "idempotency-key": createIdempotencyKey(),
     },
   });
   assert.equal(routed.status, HttpStatus.NotFound);
@@ -73,14 +74,14 @@ test("E01.3 a service operation has no route and serves a minted service identit
   const client = directClient({ servicePing }, fixture.invocation);
   const completed = await client.servicePing(input, {
     identity: mintServiceIdentity(INTAKE_SERVICE_NAME),
-    idempotencyKey: ulid(),
+    idempotencyKey: createIdempotencyKey(),
   });
   assert.equal(completed.type, OperationResultType.Completed);
   if (completed.type !== OperationResultType.Completed) return;
   assert.deepEqual(completed.data, { pong: true });
   const refused = await client.servicePing(input, {
     identity: testHumanIdentity("ulrich", "Ulrich", ulid()),
-    idempotencyKey: ulid(),
+    idempotencyKey: createIdempotencyKey(),
   });
   assert.equal(refused.type, OperationResultType.Failure);
   if (refused.type !== OperationResultType.Failure) return;

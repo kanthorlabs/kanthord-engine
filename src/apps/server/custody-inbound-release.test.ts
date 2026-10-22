@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
-import { ulid } from "ulid";
 import {
   GrantKind,
   InboundOperation,
@@ -23,6 +22,7 @@ import {
   TEST_PROJECT_ID,
   gatewayFixture,
 } from "./test-support.ts";
+import { createIdempotencyKey } from "../../kernel/identity.ts";
 
 const CREDENTIAL = "github-inbound";
 const PLATFORM = "github";
@@ -191,7 +191,7 @@ test("credential.archive of a credential that a poll inbound names answers 409 w
       method: "POST",
       headers: {
         authorization: `Bearer ${h.token}`,
-        "Idempotency-Key": ulid(),
+        "Idempotency-Key": createIdempotencyKey(),
       },
     },
   );

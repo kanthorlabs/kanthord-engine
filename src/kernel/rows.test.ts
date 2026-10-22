@@ -7,7 +7,7 @@ const NO_OUTPUT = "";
 const FIXED_WIDTH = 16;
 const FIXED_WIDTH_ROW = "backup:         /a\n";
 const ALIGNED_ROWS =
-  "session_id:      lls_1\ncount:           0\nidempotency_key: 01K0000000000000000000000A\n";
+  "session_id:      lls_1\ncount:           0\nidempotency_key: idempotency_key_01K0000000000000000000000A\n";
 const REPEATED_ROWS = "backup: /a\nbackup: /b\n";
 
 test("rows align every value to the longest name and omit empty values", () => {
@@ -18,7 +18,7 @@ test("rows align every value to the longest name and omit empty values", () => {
       ["note", ""],
       ["missing", undefined],
       ["count", 0],
-      ["idempotency_key", "01K0000000000000000000000A"],
+      ["idempotency_key", "idempotency_key_01K0000000000000000000000A"],
     ]),
     ALIGNED_ROWS,
   );

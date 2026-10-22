@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import { join } from "node:path";
 import { test, type TestContext } from "node:test";
-import { ulid } from "ulid";
 import { writeFile } from "node:fs/promises";
 import { httpClient } from "../../gateway/client.ts";
 import { background } from "../../kernel/context.ts";
@@ -40,6 +39,10 @@ import {
 import { environment, generateMachineToken, kanthord } from "./cli-support.ts";
 import { uploadEvidence } from "../worker/evidence-upload.ts";
 import { httpTransport } from "../worker/transport.ts";
+import {
+  createIdempotencyKey,
+  idempotencyKeySchema,
+} from "../../kernel/identity.ts";
 
 const INITIAL_SEQUENCE = 0;
 const SUCCESSFUL_EXIT = 0;
@@ -65,7 +68,6 @@ const GITHUB_SECRET = "test-secret";
 const SIGNATURE_PARAMETER = "X-Amz-Signature";
 const DELETE_OPERATION = "s3.delete_object";
 const ROUTE_NOT_FOUND = "gateway.routing.not_found";
-const ULID_PATTERN = /^[0-9A-HJKMNP-TV-Z]{26}$/;
 const CONTENT = {
   name: "Store evidence",
   requirement: "Store evidence",
@@ -317,12 +319,12 @@ function journey(h: Harness) {
           ],
         },
       },
-      { idempotencyKey: ulid() },
+      { idempotencyKey: createIdempotencyKey() },
     );
   const complete = (assetId: string) =>
     h.api["evidence.asset.complete"](
       { params: { asset_id: assetId }, query: {}, body: ctx() },
-      { idempotencyKey: ulid() },
+      { idempotencyKey: createIdempotencyKey() },
     );
   const prefix = `${PREFIX}/${h.projectId}/${h.missionId}/${h.A}/${FIRST_ATTEMPT}/`;
   const objectUrl = (key: string) =>
@@ -455,7 +457,7 @@ test("E04 storage grants CLI journey", { timeout: TIMEOUT }, async (t) => {
     assert.equal(result.stderr, NO_OUTPUT);
     assert.ok(!result.stdout.includes(SIGNATURE_PARAMETER));
     const answer = JSON.parse(result.stdout) as { idempotency_key: string };
-    assert.match(answer.idempotency_key, ULID_PATTERN);
+    assert.ok(idempotencyKeySchema.safeParse(answer.idempotency_key).success);
     assert.deepEqual(
       h.s3.objects(key).map((item) => item.version),
       [SECOND_VERSION],

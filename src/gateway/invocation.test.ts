@@ -20,7 +20,7 @@ import {
 import { Store } from "../kernel/store.ts";
 import { createInvocation, gatewayMigrations } from "./index.ts";
 import { generateHumanJWT } from "./auth/jwt.ts";
-import { createIdentity } from "../kernel/identity.ts";
+import { createIdentity, createIdempotencyKey } from "../kernel/identity.ts";
 import {
   testMachineIdentity,
   testHumanIdentity,
@@ -193,7 +193,7 @@ test("execution proof precedes reservation and replay and supplies only proven c
     },
   });
   t.after(() => invocation.stop());
-  const key = createIdentity("request").slice("request_".length);
+  const key = createIdempotencyKey();
   const request = {
     params: { execution_id: row.execution_id },
     query: {},
@@ -249,7 +249,7 @@ test("execution proof precedes reservation and replay and supplies only proven c
         { params: {}, query: {}, body: { execution_id: row.execution_id } },
         {
           identity,
-          idempotencyKey: createIdentity("request").slice("request_".length),
+          idempotencyKey: createIdempotencyKey(),
         },
       )
     ).status,

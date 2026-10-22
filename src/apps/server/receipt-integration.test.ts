@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import { createHmac } from "node:crypto";
 import { request as httpRequest } from "node:http";
 import { test, type TestContext } from "node:test";
-import { ulid } from "ulid";
 import {
   IntakeErrorCode,
   intakeOperations,
@@ -12,6 +11,7 @@ import { errorSchema } from "../../kernel/errors.ts";
 import { HttpStatus } from "../../kernel/http.ts";
 import { projectOperations } from "../../project/contract.ts";
 import { deliver, gatewayFixture } from "./test-support.ts";
+import { createIdempotencyKey } from "../../kernel/identity.ts";
 
 const PUSH = '{ "ref" : "refs/heads/main",\r\n"after":"a" }\n';
 const PING = "{}";
@@ -31,7 +31,7 @@ async function webhookInbound(fixture: Fixture) {
       headers: {
         Authorization: authorization,
         "Content-Type": "application/json",
-        "Idempotency-Key": ulid(),
+        "Idempotency-Key": createIdempotencyKey(),
       },
       body: JSON.stringify(body),
     });

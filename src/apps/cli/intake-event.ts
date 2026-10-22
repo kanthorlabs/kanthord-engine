@@ -179,7 +179,7 @@ export function addEventCommands(intake: Command): void {
     .command(RETRY)
     .description("Turn a failed inbound event back to pending")
     .argument("<inbound-event-id>", "Inbound event identity")
-    .option("--idempotency-key <ulid>", "Mutation key", singleUse(KEY_OPTION))
+    .option("--idempotency-key <key>", "Mutation key", singleUse(KEY_OPTION))
     .action((id: string, _options, command: Command) =>
       transition("inbound.event.retry", RETRY, id, command),
     );
@@ -187,7 +187,7 @@ export function addEventCommands(intake: Command): void {
     .command(DISCARD)
     .description("Discard a pending or a failed inbound event")
     .argument("<inbound-event-id>", "Inbound event identity")
-    .option("--idempotency-key <ulid>", "Mutation key", singleUse(KEY_OPTION))
+    .option("--idempotency-key <key>", "Mutation key", singleUse(KEY_OPTION))
     .action((id: string, _options, command: Command) =>
       transition("inbound.event.discard", DISCARD, id, command),
     );
@@ -202,6 +202,6 @@ export function addEventCommands(intake: Command): void {
       "Identity to delete; repeatable",
       (value: string, previous: string[] = []) => [...previous, value],
     )
-    .option("--idempotency-key <ulid>", "Mutation key", singleUse(KEY_OPTION))
+    .option("--idempotency-key <key>", "Mutation key", singleUse(KEY_OPTION))
     .action((_options, command: Command) => remove(command));
 }

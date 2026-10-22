@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
 import { simpleGit } from "simple-git";
-import { ulid } from "ulid";
 import { httpClient } from "../../gateway/client.ts";
 import { HttpMethod } from "../../kernel/http.ts";
 import { OutboundRequestState } from "../../intake/contract.ts";
@@ -38,6 +37,7 @@ import {
   repositoryBinding,
   until,
 } from "./cli-support.ts";
+import { createIdempotencyKey } from "../../kernel/identity.ts";
 
 const FIRST_INDEX = 0;
 const FIRST_REVISION = 1;
@@ -171,7 +171,7 @@ async function setup(t: TestContext) {
           query: {},
           body: null,
         },
-        { idempotencyKey: ulid() },
+        { idempotencyKey: createIdempotencyKey() },
       ),
     );
   const evaluate = (nodeId: string, bindingId: string, commit: string) =>

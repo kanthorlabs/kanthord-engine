@@ -64,7 +64,7 @@ test("a live worker instance checks its own bad key and the instance page answer
           holders: [INSTANCE],
         },
       },
-      { idempotencyKey: "01ARZ3NDEKTSV4RRFFQ69G5FB1" },
+      { idempotencyKey: "idempotency_key_01ARZ3NDEKTSV4RRFFQ69G5FB1" },
     ),
   );
   const checked: string[] = [];
@@ -140,7 +140,7 @@ test("a live worker instance checks its own bad key and the instance page answer
         query: { holder: INSTANCE },
         body: { expected_revision: FIRST_REVISION, secret: { key: GOOD_KEY } },
       },
-      { idempotencyKey: "01ARZ3NDEKTSV4RRFFQ69G5FB2" },
+      { idempotencyKey: "idempotency_key_01ARZ3NDEKTSV4RRFFQ69G5FB2" },
     ),
   );
   const healthy = await until(async () => {

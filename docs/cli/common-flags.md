@@ -215,13 +215,12 @@ tool's schema. These do not authorize implicit discovery of additional files.
 ## `--idempotency-key`
 
 **Implemented by `worker register`; proposed for every new remote mutation:**
-`--idempotency-key <key>` is an optional string. The implemented registration
-help spells the value `<ulid>`; `<key>` is the shared proposed presentation.
-Read-only and local commands do not inherit it.
+`--idempotency-key <key>` is an optional string. Every command help spells the
+value `<key>`. Read-only and local commands do not inherit it.
 
-A supplied key must be a canonical bare uppercase ULID: 26 characters matching
-`[0-7][0-9A-HJKMNP-TV-Z]{25}`. It has no entity prefix. Reject an invalid key
-before sending work. When omitted, generate a fresh key once for this logical
+A supplied key must be `idempotency_key_` followed by a canonical uppercase ULID:
+it matches `idempotency_key_[0-7][0-9A-HJKMNP-TV-Z]{25}`. Reject an invalid key,
+a bare ULID included, before sending work. When omitted, generate a fresh key once for this logical
 invocation. Send it as the `Idempotency-Key` header, not a body identity.
 
 To retry across CLI invocations, explicitly reuse the key, caller identity,
@@ -283,7 +282,7 @@ Every remote command can also answer the shared codes of [other.md](other.md#err
 | local | `cli.file.not_object`                  | The JSON input is null, an array or a scalar, not an object.                                                                              | `--file`            |
 | local | `cli.file.not_regular`                 | The `--file` path names a directory, a device or another non-regular file.                                                                | `--file`            |
 | local | `cli.file.schema_invalid`              | The JSON object does not match the command input schema. An unrecognized key gets one issue with the key at the end of `path`.            | `--file`            |
-| local | `cli.idempotency_key.invalid`          | The key is not a canonical ULID.                                                                                                          | `--idempotency-key` |
+| local | `cli.idempotency_key.invalid`          | The key is not an `idempotency_key_<ulid>` value.                                                                                         | `--idempotency-key` |
 | local | `cli.pagination.limit_invalid`         | The limit is not a positive safe integer.                                                                                                 | `--limit`           |
 | local | `cli.pagination.limit_out_of_range`    | The limit exceeds 1000.                                                                                                                   | `--limit`           |
 | local | `cli.<group>.<command>.token_required` | No nonblank JWT is available for the command. The message names `--token`, `KANTHORD_TOKEN`, `cli.yaml` and `kanthord auth jwt generate`. | `--token`           |

@@ -13,7 +13,7 @@ import {
 import { errorSchema } from "../../kernel/errors.ts";
 import { writePrivate } from "../../kernel/files.ts";
 import { HttpStatus } from "../../kernel/http.ts";
-import { ulidSchema } from "../../kernel/identity.ts";
+import { idempotencyKeySchema } from "../../kernel/identity.ts";
 import { isString } from "../../kernel/values.ts";
 import { temporary } from "../../kernel/test-support.ts";
 import { environment, kanthord, until } from "./cli-support.ts";
@@ -203,7 +203,7 @@ test("E06 webhook acquisition journey", { timeout: TIMEOUT }, async (t) => {
     const deleted = succeeded<{ idempotency_key: string }>(
       await inbound(["delete", W2]),
     );
-    assert.ok(ulidSchema.safeParse(deleted.idempotency_key).success);
+    assert.ok(idempotencyKeySchema.safeParse(deleted.idempotency_key).success);
     refused(await inbound(["get", W2]), NOT_FOUND);
   });
 });

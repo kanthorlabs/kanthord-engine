@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import { join, dirname } from "node:path";
 import { randomBytes } from "node:crypto";
-import { ulid } from "ulid";
 import { deriveClientSecret } from "../../gateway/auth/jwt.ts";
 import {
   directories,
@@ -156,6 +155,7 @@ import {
   throwIfCancelled,
   type Context,
 } from "../../kernel/context.ts";
+import { createIdempotencyKey } from "../../kernel/identity.ts";
 
 export { enforceMasterKey, verifyMasterKey } from "../../custody/index.ts";
 
@@ -544,7 +544,7 @@ export function composeServices(options: {
             {
               identity: call.identity,
               context: call.context,
-              idempotencyKey: ulid(),
+              idempotencyKey: createIdempotencyKey(),
             },
           ),
         ),
@@ -687,7 +687,7 @@ export function composeServices(options: {
             {
               identity: call.identity,
               context: call.context,
-              idempotencyKey: ulid(),
+              idempotencyKey: createIdempotencyKey(),
             },
           ),
         );

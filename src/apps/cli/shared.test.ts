@@ -5,7 +5,10 @@ import { test } from "node:test";
 import { isDeepStrictEqual } from "node:util";
 import { z } from "zod";
 import { Diagnostic } from "../../kernel/errors.ts";
-import { ULID_LENGTH } from "../../kernel/identity.ts";
+import {
+  idempotencyKeySchema,
+  IDEMPOTENCY_KEY_PREFIX,
+} from "../../kernel/identity.ts";
 import {
   OperationResultType,
   type OperationResult,
@@ -43,7 +46,7 @@ const DUPLICATE_OPTION = "cli.option.duplicate";
 const FAILURE_CODE = "cli.test.failure";
 const INDETERMINATE_CODE = "cli.test.indeterminate";
 const TOKEN_CODE = "cli.test.token";
-const KEY = "01ARZ3NDEKTSV4RRFFQ69G5FAA";
+const KEY = "idempotency_key_01ARZ3NDEKTSV4RRFFQ69G5FAA";
 const EXPECTED_DATA_VALUE = 1;
 const FIRST_VALUE = "a";
 const TOKEN = "jwt";
@@ -139,7 +142,14 @@ test("idempotency key resolution", () => {
     diagnosticCode(INVALID_KEY),
   );
   assert.equal(resolveKey({ idempotencyKey: KEY }), KEY);
-  assert.equal(resolveKey({}).length, ULID_LENGTH);
+  assert.throws(
+    () =>
+      resolveKey({
+        idempotencyKey: KEY.slice(IDEMPOTENCY_KEY_PREFIX.length + 1),
+      }),
+    diagnosticCode(INVALID_KEY),
+  );
+  assert.ok(idempotencyKeySchema.safeParse(resolveKey({})).success);
 });
 
 test("positive integer parser accepts decimal safe integers only", () => {

@@ -38,7 +38,7 @@ import {
   serializeOpenAPIFile,
 } from "../../gateway/local.ts";
 import { errorSchema } from "../../kernel/errors.ts";
-import { createIdentity } from "../../kernel/identity.ts";
+import { createIdentity, createIdempotencyKey } from "../../kernel/identity.ts";
 import { HttpStatus } from "../../kernel/http.ts";
 import {
   AccessPolicy,
@@ -1493,7 +1493,7 @@ test("published OpenAPI validates, matches the registry exactly, and describes r
   const headers = {
     Authorization: `Bearer ${fixture.token}`,
     "Content-Type": "application/json",
-    "Idempotency-Key": ulid(),
+    "Idempotency-Key": createIdempotencyKey(),
   };
   const created = await fixture.request(projectOperations.create.path, {
     method: projectOperations.create.method,
@@ -1726,7 +1726,9 @@ test("inbound create answers 201, replays a repeated key, refuses an unknown con
     });
   const project = projectOperations.create.output.parse(
     await (
-      await post(projectOperations.create.path, ulid(), { name: "inbounds" })
+      await post(projectOperations.create.path, createIdempotencyKey(), {
+        name: "inbounds",
+      })
     ).json(),
   );
   const webhook = {
@@ -1737,7 +1739,7 @@ test("inbound create answers 201, replays a repeated key, refuses an unknown con
     configuration: { resource: "owner/repo" },
   } as const;
   const path = intakeOperations["inbound.create"].path;
-  const key = ulid();
+  const key = createIdempotencyKey();
   const first = await post(path, key, webhook);
   assert.equal(first.status, INBOUND_CREATED);
   const inbound = intakeOperations["inbound.create"].output.parse(
@@ -1759,7 +1761,7 @@ test("inbound create answers 201, replays a repeated key, refuses an unknown con
         ).total,
     );
   assert.equal(inboundCount(), INBOUND_ONE_ROW);
-  const consumer = await post(path, ulid(), {
+  const consumer = await post(path, createIdempotencyKey(), {
     ...webhook,
     consumer: "mission.node.check",
   });
@@ -1783,7 +1785,7 @@ test("inbound create answers 201, replays a repeated key, refuses an unknown con
         },
         ulid(),
       ),
-      idempotencyKey: ulid(),
+      idempotencyKey: createIdempotencyKey(),
     },
   );
   assert.equal(machine.type, OperationResultType.Failure);
@@ -1815,7 +1817,7 @@ test("inbound get answers the webhook secret over HTTP, refuses another prefix a
         headers: {
           Authorization: authorization,
           "Content-Type": "application/json",
-          "Idempotency-Key": ulid(),
+          "Idempotency-Key": createIdempotencyKey(),
         },
         body: JSON.stringify({ name: "inbound-reads" }),
       })
@@ -1828,7 +1830,7 @@ test("inbound get answers the webhook secret over HTTP, refuses another prefix a
       headers: {
         Authorization: authorization,
         "Content-Type": "application/json",
-        "Idempotency-Key": ulid(),
+        "Idempotency-Key": createIdempotencyKey(),
       },
       body: JSON.stringify({
         project_id: project.id,
@@ -1902,7 +1904,7 @@ test("inbound delete answers 204 over HTTP and 404 for a repeat", async (t) => {
         headers: {
           Authorization: authorization,
           "Content-Type": "application/json",
-          "Idempotency-Key": ulid(),
+          "Idempotency-Key": createIdempotencyKey(),
         },
         body: JSON.stringify({ name: "inbound-deletes" }),
       })
@@ -1915,7 +1917,7 @@ test("inbound delete answers 204 over HTTP and 404 for a repeat", async (t) => {
         headers: {
           Authorization: authorization,
           "Content-Type": "application/json",
-          "Idempotency-Key": ulid(),
+          "Idempotency-Key": createIdempotencyKey(),
         },
         body: JSON.stringify({
           project_id: project.id,
@@ -1931,7 +1933,10 @@ test("inbound delete answers 204 over HTTP and 404 for a repeat", async (t) => {
   const remove = () =>
     fixture.request(path, {
       method: "DELETE",
-      headers: { Authorization: authorization, "Idempotency-Key": ulid() },
+      headers: {
+        Authorization: authorization,
+        "Idempotency-Key": createIdempotencyKey(),
+      },
     });
   const deleted = await remove();
   assert.equal(deleted.status, HttpStatus.NoContent);
@@ -1968,7 +1973,7 @@ test("delivery admission has no HTTP route and no OpenAPI operation", async (t) 
     headers: {
       Authorization: `Bearer ${fixture.token}`,
       "Content-Type": "application/json",
-      "Idempotency-Key": ulid(),
+      "Idempotency-Key": createIdempotencyKey(),
     },
     body: JSON.stringify({}),
   });

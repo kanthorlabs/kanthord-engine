@@ -11,7 +11,12 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { ulid } from "ulid";
 import { z } from "zod";
-import { createIdentity, ulidSchema } from "../kernel/identity.ts";
+import {
+  createIdentity,
+  createIdempotencyKey,
+  idempotencyKeySchema,
+  IDEMPOTENCY_KEY_PREFIX,
+} from "../kernel/identity.ts";
 import { OperationResultType } from "../kernel/operation.ts";
 import { errorSchema } from "../kernel/errors.ts";
 import { httpClient } from "./client.ts";
@@ -64,10 +69,10 @@ test("clients treat a failure with a bare or wrong-kind request ID as indetermin
   }
 });
 
-test("idempotency records retain full request IDs while their keys remain bare ULIDs", async (t) => {
+test("idempotency records retain full request IDs while their keys carry the idempotency key prefix", async (t) => {
   const idempotency = new Idempotency();
   t.after(() => idempotency.stop());
-  const key = ulid();
+  const key = createIdempotencyKey();
   const { reservation } = idempotency.reserve(
     key,
     "human",
@@ -80,8 +85,13 @@ test("idempotency records retain full request IDs while their keys remain bare U
   assert.deepEqual(replay.replay, response);
   assert.equal(replay.reservation.key, key);
   assert.deepEqual(replay.replay, response);
-  for (const invalid of [requestId, createIdentity("project"), `${key}\n`]) {
-    assert.equal(ulidSchema.safeParse(invalid).success, false);
+  for (const invalid of [
+    requestId,
+    createIdentity("project"),
+    key.slice(IDEMPOTENCY_KEY_PREFIX.length + 1),
+    `${key}\n`,
+  ]) {
+    assert.equal(idempotencyKeySchema.safeParse(invalid).success, false);
     assert.throws(
       () => idempotency.reserve(invalid, "human", "test.write", "digest"),
       /canonical ULID/,
@@ -106,7 +116,8 @@ test("OpenAPI publishes the same request-ID and idempotency-key formats as valid
   const keyPattern = new RegExp(
     shared.components.parameters.IdempotencyKey.schema.pattern,
   );
-  assert.ok(keyPattern.test(ulid()));
+  assert.ok(keyPattern.test(createIdempotencyKey()));
+  assert.equal(keyPattern.test(ulid()), false);
   assert.equal(keyPattern.test(requestId), false);
 });
 

@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { decode, sign } from "hono/jwt";
-import { ulid } from "ulid";
 import { deriveKey } from "../../kernel/json.ts";
 import { HttpStatus } from "../../kernel/http.ts";
 import { isHumanIdentity, IdentityKind } from "../../kernel/caller.ts";
@@ -17,6 +16,7 @@ import {
   TEST_WORKER_BINDING,
   TEST_PROJECT_ID,
 } from "./test-support.ts";
+import { createIdempotencyKey } from "../../kernel/identity.ts";
 const MILLISECONDS_PER_SECOND = 1000;
 const AFTER_REMOVAL_MS = 2000;
 async function tokenKey(masterKey: string) {
@@ -52,7 +52,7 @@ test("expired human and machine JWTs fail HTTP", async (t) => {
       method: operation.method,
       headers: {
         Authorization: `Bearer ${expired}`,
-        "Idempotency-Key": ulid(),
+        "Idempotency-Key": createIdempotencyKey(),
       },
     });
     assert.equal(response.status, HttpStatus.Unauthorized);

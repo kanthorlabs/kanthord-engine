@@ -5,7 +5,6 @@ import { platform } from "node:os";
 import { isAbsolute, relative, resolve, dirname, sep } from "node:path";
 import { Readable } from "node:stream";
 import { createHash } from "node:crypto";
-import { ulid } from "ulid";
 import {
   abortSignal,
   CancellationContext,
@@ -25,6 +24,7 @@ import { S3_RESULT_CODE_PREFIX } from "../../storage/contract.ts";
 import type { UploadResult } from "../../worker/contract.ts";
 import type { WorkerTransport } from "./transport.ts";
 import { completed, HandoverRefused } from "./handover.ts";
+import { createIdempotencyKey } from "../../kernel/identity.ts";
 
 export const WorkerErrorCode = {
   EvidenceUploadPathRefused: "worker.evidence_upload.path_refused",
@@ -286,7 +286,7 @@ async function publish(
   return completed(
     await api.mission["evidence.asset.complete"](
       { params: { asset_id: upload.asset_id }, query: {}, body: execution },
-      { context, idempotencyKey: ulid() },
+      { context, idempotencyKey: createIdempotencyKey() },
     ),
   );
 }
@@ -332,7 +332,7 @@ export async function uploadEvidence(input: {
               ],
             },
           },
-          { context, idempotencyKey: ulid() },
+          { context, idempotencyKey: createIdempotencyKey() },
         ),
       );
       assert.equal(submitted.uploads.length, UPLOADS_PER_SUBMISSION);

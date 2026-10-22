@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import type { Logger } from "pino";
-import { ulid } from "ulid";
 import type { ServiceIdentity } from "../kernel/caller.ts";
 import type { Context } from "../kernel/context.ts";
 import { diagnostic, diagnosticFields } from "../kernel/errors.ts";
@@ -25,6 +24,7 @@ import {
   succeedEvent,
 } from "./event-store.ts";
 import { readInbound } from "./inbound-store.ts";
+import { createIdempotencyKey } from "../kernel/identity.ts";
 
 const EMPTY_TEXT_LENGTH = 0;
 const FIRST_STEP = 0;
@@ -265,7 +265,7 @@ export class Dispatcher {
     try {
       const result = await consumers[handoff.consumer](handoff.input, {
         identity,
-        idempotencyKey: ulid(),
+        idempotencyKey: createIdempotencyKey(),
         context,
       });
       return outcomeOf(result);

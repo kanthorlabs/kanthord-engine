@@ -183,7 +183,7 @@ test(
       method: "POST",
       headers: {
         authorization: `Bearer ${stranger.token}`,
-        "idempotency-key": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "idempotency-key": "idempotency_key_01ARZ3NDEKTSV4RRFFQ69G5FAV",
       },
     });
     assert.equal(response.status, HttpStatus.Conflict);

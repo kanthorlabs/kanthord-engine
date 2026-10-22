@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
 import { join } from "node:path";
-import { ulid } from "ulid";
 import { temporary } from "../../kernel/test-support.ts";
 import { writePrivate } from "../../kernel/files.ts";
 import {
@@ -30,6 +29,7 @@ import {
   COVERING_WORKER_BINDINGS,
   enableCoveringAgents,
 } from "./test-support.ts";
+import { createIdempotencyKey } from "../../kernel/identity.ts";
 
 const SUCCESS = 0;
 const NO_OUTPUT = "";
@@ -317,7 +317,7 @@ test(
           headers: {
             authorization: `Bearer ${h.token}`,
             "content-type": "application/json",
-            "Idempotency-Key": ulid(),
+            "Idempotency-Key": createIdempotencyKey(),
           },
           body: JSON.stringify({ ...unblock, start_point: "fresh" }),
         },
