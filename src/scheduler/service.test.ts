@@ -37,6 +37,7 @@ const PRIORITY_LOW = 0;
 const PRIORITY_HIGH = 1;
 const LIMIT_ONE = 1;
 const LIST_PAGE_LIMIT = 2;
+const LOSS_SWEEP_TIMERS = 1;
 const LIMIT_THREE = 3;
 const LIMIT_EXACT = 7;
 const PRIORITY_TOP = 5;
@@ -392,16 +393,22 @@ test("SchedulerService lifecycle and health registration", async (t) => {
   assert.ok(await scheduler.start());
 });
 
+async function armed(timers: () => number, signal: AbortSignal): Promise<void> {
+  while (timers() < LOSS_SWEEP_TIMERS) await turn(undefined, { signal });
+  assert.equal(timers(), LOSS_SWEEP_TIMERS);
+}
+
 test("run owns the 30-second loss sweep and quiescence stops it permanently", async (t) => {
   const h = schedulerHarness(t);
   t.mock.timers.enable({ apis: ["setInterval"] });
+  const lossTimer = t.mock.method(globalThis, "setInterval");
   t.mock.method(Date, "now", () => FIXTURE_DEADLINE);
   const row = executionFixture();
   h.store.transaction((tx) => insertExecution(tx, row));
   t.mock.timers.tick(LOSS_SWEEP_INTERVAL_MS);
   assert.deepEqual(h.calls, []);
   const running = h.service.run();
-  await turn();
+  await armed(() => lossTimer.mock.callCount(), t.signal);
   t.mock.timers.tick(LOSS_SWEEP_INTERVAL_MS - 1);
   assert.deepEqual(h.calls, []);
   t.mock.timers.tick(1);
@@ -466,6 +473,7 @@ test("sweep hands consecutive loss counts to Mission once per steps and evaluati
 test("a timer sweep failure rolls back, stops the timer and returns the original error", async (t) => {
   const h = schedulerHarness(t);
   t.mock.timers.enable({ apis: ["setInterval"] });
+  const lossTimer = t.mock.method(globalThis, "setInterval");
   t.mock.method(Date, "now", () => FIXTURE_DEADLINE);
   const row = executionFixture();
   h.store.transaction((tx) => insertExecution(tx, row));
@@ -474,7 +482,7 @@ test("a timer sweep failure rolls back, stops the timer and returns the original
     throw failure;
   };
   const running = h.service.run();
-  await turn();
+  await armed(() => lossTimer.mock.callCount(), t.signal);
   t.mock.timers.tick(LOSS_SWEEP_INTERVAL_MS);
   assert.equal(await running, failure);
   assert.equal(
