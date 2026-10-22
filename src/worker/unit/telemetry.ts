@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import {
   RecordKind,
   SpanStatus,
@@ -57,6 +57,7 @@ export interface SpanEnd {
   texts?: Texts;
 }
 
+export const RUN_KEY_BYTES = 4;
 const SPAN_ID_LENGTH = 16;
 const TEXT_PART_CHARACTERS = 15000;
 const TEXT_PARTS_MAX = 8;
@@ -64,6 +65,7 @@ const FIRST_PART = 1;
 const ZERO_SPAN = /^0+$/;
 const NO_FAULTS = 0;
 const SPAN_PATTERN = /^[0-9a-f]{16}$/;
+const RUN_KEY_PATTERN = /^[0-9a-f]{8}$/;
 const HIGH_SURROGATE_FIRST = 0xd800;
 const HIGH_SURROGATE_LAST = 0xdbff;
 const TEXT_NAME = /^[a-z][a-z0-9_]*$/;
@@ -73,11 +75,20 @@ interface OpenSpan {
   parent: string;
 }
 
-export function telemetrySpanId(executionId: string, key: string): string {
+export function mintRunKey(): string {
+  return randomBytes(RUN_KEY_BYTES).toString("hex");
+}
+
+export function telemetrySpanId(
+  executionId: string,
+  runKey: string,
+  key: string,
+): string {
   assert.ok(executionId);
+  assert.ok(runKey);
   assert.ok(key);
   const id = createHash("sha256")
-    .update(`${executionId}:${key}`, "utf8")
+    .update(`${executionId}:${runKey}:${key}`, "utf8")
     .digest("hex")
     .slice(0, SPAN_ID_LENGTH);
   assert.ok(!ZERO_SPAN.test(id), "a span identity is never all zero");
@@ -112,6 +123,7 @@ function textParts(text: string): string[] {
 export class SpanRecorder {
   private readonly claim: SpanClaim;
   private readonly sink: TelemetrySink;
+  private readonly runKey: string;
   private readonly identity: Attributes;
   private readonly open = new Map<string, OpenSpan>();
   private readonly scopes: string[] = [];
@@ -119,10 +131,17 @@ export class SpanRecorder {
   private faults = NO_FAULTS;
   private readonly counters = new Map<string, number>();
 
-  constructor(claim: SpanClaim, workerName: string, sink: TelemetrySink) {
+  constructor(
+    claim: SpanClaim,
+    workerName: string,
+    sink: TelemetrySink,
+    runKey: string = mintRunKey(),
+  ) {
     assert.ok(claim.root_span_id);
     assert.ok(workerName);
+    assert.match(runKey, RUN_KEY_PATTERN);
     this.claim = claim;
+    this.runKey = runKey;
     this.sink = sink;
     this.identity = {
       "kanthord.execution.id": claim.execution_id,
@@ -166,10 +185,14 @@ export class SpanRecorder {
     return `${prefix}:${count}`;
   }
 
+  spanIdOf(key: string): string {
+    return telemetrySpanId(this.claim.execution_id, this.runKey, key);
+  }
+
   start(span: SpanStart): string {
     assert.ok(span.key);
     assert.ok(span.operation);
-    const spanId = telemetrySpanId(this.claim.execution_id, span.key);
+    const spanId = this.spanIdOf(span.key);
     const parent = span.parent ?? this.current();
     this.open.set(spanId, { operation: span.operation, parent });
     const texts = this.textRecords(spanId, span.texts ?? {});
