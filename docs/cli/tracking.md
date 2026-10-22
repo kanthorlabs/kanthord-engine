@@ -9,13 +9,13 @@ operations. Start with [the CLI specification index](./README.md) and
 **Implemented:** the Tracking Service owns `tracking.db`, a database file in the
 data directory beside `kanthord.db`. It holds the tables of
 [ERD 4](https://github.com/kanthorlabs/kanthord/blob/main/docs/reference/erd/04-tracking.md):
-`tracking_trace`, `tracking_span`, `tracking_record` and
-`tracking_telemetry_text`. The server opens and migrates the file at start.
+`tracking_trace`, `tracking_span`, `tracking_record`,
+`tracking_telemetry_text` and `tracking_session_entry`. The server opens and migrates the file at start.
 
 - The Scheduler Service opens the root span of an execution after the claim and
   ends it at the release or at the loss of the claim. A failed root write never
   fails the claim or the release. The Tracking Service counts the drop.
-- A native worker writes its spans and telemetry texts with
+- A native worker writes its spans, telemetry texts and session entries with
   `tracking.telemetry.write` during its live execution. The operation is
   API-only.
 - A human reads a trace, its spans and its telemetry texts with the three CLI
@@ -73,10 +73,11 @@ rejects unknown arguments and options before work.
 - `TraceID` is 32 and `SpanID` is 16 lower-case hexadecimal characters, never
   all zero. The Scheduler mints both at the claim.
 - `RecordID` and `TextID` have the form `<span_id>:<name>`. The name starts with
-  a lower-case letter and holds lower-case letters, digits, `_` and `.`. The
+  a lower-case letter and holds lower-case letters, digits, `_`, `.` and `-`. The
   whole value is at most 128 characters. A span record uses
   `<span_id>:start` and `<span_id>:end`. A text uses
-  `<span_id>:<text name>`, and its record identity equals its text identity.
+  `<span_id>:<text name>`, and its record identity equals its text identity. A session entry record uses
+  `<session_id>:entry.<entry_id>`.
 - `Timestamp` is a JSON integer of Unix milliseconds in UTC.
 - `AttributeValue` is a string, a boolean, a safe integer, a finite number, or
   an array of at most 128 values of one primitive kind. Attribute names reuse
@@ -145,6 +146,23 @@ answer is the acknowledgement below.
 | `text_id`   | Required `TextID`           | A text keeps its first content. Another record for it is refused. |
 | `text`      | Required well-formed string | The encoded record is at most 64 KiB.                             |
 
+### Session entry record fields (`kind: "session_entry"`)
+
+| Field             | Requiredness and type                      | Meaning                                                                            |
+| ----------------- | ------------------------------------------ | ---------------------------------------------------------------------------------- |
+| `record_id`       | Required `RecordID`                        | Equals `<session_id>:entry.<entry_id>`.                                            |
+| `trace_id`        | Required `TraceID`                         | The trace of the proven execution.                                                 |
+| `kind`            | Required `"session_entry"`                 | Selects the session entry variant.                                                 |
+| `session_id`      | Required `SpanID`                          | The span identity of the `agent.session` span of the session.                      |
+| `entry_id`        | Required string of 1 to 64 `[0-9a-z-]`     | The identity of the entry. It starts with a digit or a letter.                     |
+| `parent_entry_id` | Required `entry_id` or `null`              | The parent entry of the entry.                                                     |
+| `sequence`        | Required safe integer of 1 or more         | The position of the entry in its session. A second entry at a sequence is refused. |
+| `entry_type`      | Required string, 1 to 256 bytes            | The type of the entry, for example `message`.                                      |
+| `entry_time`      | Required `Timestamp`                       | The time of the entry.                                                             |
+| `tool_call_id`    | Required string, 1 to 256 bytes, or `null` | The tool call identity of a tool result entry.                                     |
+| `truncated`       | Required boolean                           | Whether the producer cut the entry.                                                |
+| `entry`           | Required JSON object                       | The entry. The encoded record is at most 64 KiB.                                   |
+
 ### Output and failure conventions
 
 The acknowledgement holds one disposition for each submitted record, in order,
@@ -152,15 +170,15 @@ and the counts `submitted`, `stored` and `refused`. A disposition is `Stored`
 after the commit, or `Refused` with a reason. A refusal is structural and
 permanent: retry the record only with a new identity and new content.
 
-| Refusal reason     | Condition                                                                                         |
-| ------------------ | ------------------------------------------------------------------------------------------------- |
-| `trace_mismatch`   | The record names a trace other than the trace of the execution.                                   |
-| `execution_bound`  | The trace already holds 50,000 records.                                                           |
-| `record_too_large` | The canonical JSON of the record is larger than 64 KiB.                                           |
-| `self_parent`      | The span names itself as its parent.                                                              |
-| `foreign_producer` | Another producer created the span.                                                                |
-| `value_replaced`   | The record changes the operation, the parent, a time, a status or an attribute value of the span. |
-| `text_exists`      | The text already holds content.                                                                   |
+| Refusal reason     | Condition                                                                                                                                                        |
+| ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `trace_mismatch`   | The record names a trace other than the trace of the execution.                                                                                                  |
+| `execution_bound`  | The trace already holds 50,000 records.                                                                                                                          |
+| `record_too_large` | The canonical JSON of the record is larger than 64 KiB.                                                                                                          |
+| `self_parent`      | The span names itself as its parent.                                                                                                                             |
+| `foreign_producer` | Another producer created the span.                                                                                                                               |
+| `value_replaced`   | The record changes the operation, the parent, a time, a status or an attribute value of the span, or a new session entry takes a stored sequence of its session. |
+| `text_exists`      | The text already holds content.                                                                                                                                  |
 
 One transaction applies the whole batch. A transport failure or a timeout
 leaves every disposition unknown, and the producer retries the same records

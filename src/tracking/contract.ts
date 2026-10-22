@@ -38,7 +38,11 @@ export const SpanOrigin = {
 export const spanOriginSchema = z.enum(SpanOrigin);
 export type SpanOrigin = z.infer<typeof spanOriginSchema>;
 
-export const RecordKind = { Span: "span", Text: "text" } as const;
+export const RecordKind = {
+  Span: "span",
+  Text: "text",
+  SessionEntry: "session_entry",
+} as const;
 export const recordKindSchema = z.enum(RecordKind);
 export type RecordKind = z.infer<typeof recordKindSchema>;
 
@@ -73,7 +77,10 @@ const boundedName = z
 const recordIdentitySchema = z
   .string()
   .max(RECORD_IDENTITY_MAX)
-  .regex(/^[0-9a-f]{16}:[a-z][a-z0-9_.]*$/);
+  .regex(/^[0-9a-f]{16}:[a-z][a-z0-9_.-]*$/);
+export const entryIdentitySchema = z
+  .string()
+  .regex(/^[0-9a-z][0-9a-z-]{0,63}$/);
 const safeInteger = z
   .int()
   .min(Number.MIN_SAFE_INTEGER)
@@ -139,9 +146,31 @@ export const textRecordSchema = z.strictObject({
   text: z.string().refine((value) => value.isWellFormed()),
 });
 export type TextRecord = z.infer<typeof textRecordSchema>;
+export const sessionEntryRecordSchema = z
+  .strictObject({
+    record_id: recordIdentitySchema,
+    trace_id: traceIdSchema,
+    kind: z.literal(RecordKind.SessionEntry),
+    session_id: spanIdSchema,
+    entry_id: entryIdentitySchema,
+    parent_entry_id: entryIdentitySchema.nullable(),
+    sequence: z.int().min(1).max(Number.MAX_SAFE_INTEGER),
+    entry_type: boundedName,
+    entry_time: timestamp,
+    tool_call_id: boundedName.nullable(),
+    truncated: z.boolean(),
+    entry: z.record(z.string(), z.unknown()),
+  })
+  .refine(
+    (record) =>
+      record.record_id === `${record.session_id}:entry.${record.entry_id}`,
+    { path: ["record_id"] },
+  );
+export type SessionEntryRecord = z.infer<typeof sessionEntryRecordSchema>;
 export const telemetryRecordSchema = z.discriminatedUnion("kind", [
   spanRecordSchema,
   textRecordSchema,
+  sessionEntryRecordSchema,
 ]);
 export type TelemetryRecord = z.infer<typeof telemetryRecordSchema>;
 

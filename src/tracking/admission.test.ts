@@ -9,6 +9,8 @@ import {
   SpanOrigin,
   SpanStatus,
   TRACKING_SERVICE_NAME,
+  telemetryRecordSchema,
+  type SessionEntryRecord,
   type TelemetryRecord,
 } from "./contract.ts";
 import { trackingMigrations } from "./migrations.ts";
@@ -26,6 +28,10 @@ const BOTH_RECORDS = 2;
 const NO_RECORD = 0;
 const ONE_RECORD = 1;
 const TEXT_CONTENT = "Tests: 1 passed";
+const ENTRY = "e1";
+const UUID_ENTRY = "0f8fad5b-d9cb-469f-a165-70867728950e";
+const FIRST_SEQUENCE = 1;
+const ENTRY_TIME = 1500;
 
 function trackingStore(t: TestContext): Store {
   const store = new Store(IN_MEMORY_DATABASE);
@@ -94,6 +100,32 @@ function end(overrides: Partial<TelemetryRecord> = {}): TelemetryRecord {
     text_ids: [`${SPAN}:output`],
     ...overrides,
   } as TelemetryRecord;
+}
+
+function entryRecord(
+  overrides: Partial<SessionEntryRecord> = {},
+): SessionEntryRecord {
+  return {
+    record_id: `${SPAN}:entry.${ENTRY}`,
+    trace_id: TRACE,
+    kind: RecordKind.SessionEntry,
+    session_id: SPAN,
+    entry_id: ENTRY,
+    parent_entry_id: null,
+    sequence: FIRST_SEQUENCE,
+    entry_type: "message",
+    entry_time: ENTRY_TIME,
+    tool_call_id: "call_1",
+    truncated: true,
+    entry: { role: "user", content: [{ text: "hello", type: "text" }] },
+    ...overrides,
+  };
+}
+
+function entryRows(store: Store) {
+  return store.database
+    .prepare("SELECT * FROM tracking_session_entry ORDER BY sequence")
+    .all();
 }
 
 function admit(store: Store, records: TelemetryRecord[], producer = PRODUCER) {
@@ -216,4 +248,90 @@ test("a record larger than the record bound is refused", (t) => {
     },
   ]);
   assert.equal(answer.dispositions[0]?.reason, RefusalReason.RecordTooLarge);
+});
+
+test("a session entry is stored with every field", (t) => {
+  const store = trackingStore(t);
+  const answer = admit(store, [entryRecord()]);
+  assert.equal(answer.dispositions[0]?.disposition, Disposition.Stored);
+  assert.deepEqual(
+    entryRows(store).map((row) => ({ ...row })),
+    [
+      {
+        trace_id: TRACE,
+        session_id: SPAN,
+        entry_id: ENTRY,
+        parent_entry_id: null,
+        sequence: FIRST_SEQUENCE,
+        entry_type: "message",
+        entry_time: ENTRY_TIME,
+        tool_call_id: "call_1",
+        truncated: 1,
+        content: '{"content":[{"text":"hello","type":"text"}],"role":"user"}',
+        created_at: STARTED,
+      },
+    ],
+  );
+  const record = store.database
+    .prepare("SELECT kind, target_id FROM tracking_record")
+    .get();
+  assert.equal(record?.kind, RecordKind.SessionEntry);
+  assert.equal(record?.target_id, `${SPAN}:entry.${ENTRY}`);
+});
+
+test("a repeat of a session entry is stored and adds no row", (t) => {
+  const store = trackingStore(t);
+  admit(store, [entryRecord()]);
+  const answer = admit(store, [entryRecord()]);
+  assert.equal(answer.dispositions[0]?.disposition, Disposition.Stored);
+  assert.equal(entryRows(store).length, ONE_RECORD);
+});
+
+test("a new session entry at a taken sequence is refused", (t) => {
+  const store = trackingStore(t);
+  admit(store, [entryRecord()]);
+  const answer = admit(store, [
+    entryRecord({ record_id: `${SPAN}:entry.e2`, entry_id: "e2" }),
+  ]);
+  assert.equal(answer.dispositions[0]?.disposition, Disposition.Refused);
+  assert.equal(answer.dispositions[0]?.reason, RefusalReason.ValueReplaced);
+  assert.equal(entryRows(store).length, ONE_RECORD);
+});
+
+test("a session entry is stored when its session span is absent", (t) => {
+  const store = trackingStore(t);
+  const answer = admit(store, [entryRecord()]);
+  assert.equal(answer.stored, ONE_RECORD);
+  assert.equal(
+    store.transaction((tx) => readSpan(tx, TRACE, SPAN)),
+    null,
+  );
+});
+
+test("a session entry larger than the record bound is refused", (t) => {
+  const store = trackingStore(t);
+  const answer = admit(store, [
+    entryRecord({ entry: { text: "x".repeat(70000) } }),
+  ]);
+  assert.equal(answer.dispositions[0]?.reason, RefusalReason.RecordTooLarge);
+  assert.equal(entryRows(store).length, NO_RECORD);
+});
+
+test("the record schema refuses a session entry whose record identity differs", () => {
+  const result = telemetryRecordSchema.safeParse(
+    entryRecord({ record_id: `${SPAN}:entry.other` }),
+  );
+  assert.equal(result.success, false);
+  assert.deepEqual(result.error?.issues[0]?.path, ["record_id"]);
+});
+
+test("the record schema admits a UUID entry identity", () => {
+  const result = telemetryRecordSchema.safeParse(
+    entryRecord({
+      record_id: `${SPAN}:entry.${UUID_ENTRY}`,
+      entry_id: UUID_ENTRY,
+      parent_entry_id: UUID_ENTRY,
+    }),
+  );
+  assert.equal(result.success, true);
 });

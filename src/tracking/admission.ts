@@ -13,6 +13,7 @@ import {
   type Attributes,
   type ExecutionTrace,
   type RecordDisposition,
+  type SessionEntryRecord,
   type Span,
   type SpanEvent,
   type SpanLink,
@@ -24,11 +25,13 @@ import {
 import {
   countRecords,
   insertRecord,
+  insertSessionEntry,
   insertSpan,
   insertText,
   readSpan,
   readText,
   recordExists,
+  sessionSequenceTaken,
   updateSpan,
 } from "./trace-store.ts";
 
@@ -182,8 +185,30 @@ function applyText(
   return null;
 }
 
+export function applySessionEntry(
+  tx: Transaction,
+  admission: Admission,
+  record: SessionEntryRecord,
+): RefusalReason | null {
+  assert.ok(record.entry_id);
+  assert.equal(record.trace_id, admission.trace.trace_id);
+  if (
+    sessionSequenceTaken(
+      tx,
+      admission.trace.trace_id,
+      record.session_id,
+      record.sequence,
+    )
+  )
+    return RefusalReason.ValueReplaced;
+  insertSessionEntry(tx, record, admission.now);
+  return null;
+}
+
 function targetOf(record: TelemetryRecord): string {
-  return record.kind === RecordKind.Span ? record.span_id : record.text_id;
+  if (record.kind === RecordKind.Span) return record.span_id;
+  if (record.kind === RecordKind.Text) return record.text_id;
+  return record.record_id;
 }
 
 function apply(
@@ -192,6 +217,8 @@ function apply(
   record: TelemetryRecord,
 ): RefusalReason | null {
   if (record.kind === RecordKind.Text) return applyText(tx, admission, record);
+  if (record.kind === RecordKind.SessionEntry)
+    return applySessionEntry(tx, admission, record);
   assert.equal(record.kind, RecordKind.Span);
   return applySpan(tx, admission, record);
 }

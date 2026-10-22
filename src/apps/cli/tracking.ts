@@ -22,7 +22,7 @@ const SPAN = "span";
 const TEXT = "text";
 const GET = "get";
 const LIST = "list";
-const TEXT_IDENTITY = /^[0-9a-f]{16}:[a-z][a-z0-9_.]*$/;
+const TEXT_IDENTITY = /^[0-9a-f]{16}:[a-z][a-z0-9_.-]*$/;
 
 function requireTraceId(traceId: string, leaf: string): void {
   assert.ok(leaf);
