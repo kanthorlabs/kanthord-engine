@@ -123,7 +123,7 @@ The API filters of `tracking.trace.list` combine with AND:
 | `max_cost_usd`     | `cost_usd` is at most this number.                                                                                                                      |
 
 The CLI exposes `--project`, `--node`, `--state`, `--query` and `--sort`. `--query`
-sets `q`. The other filters are API-only query fields.
+sets `q` and has 1 to 200 characters. The other filters are API-only query fields.
 
 `--sort` is one of `started_at` (the default), `duration_ms`, `total_tokens` and
 `cost_usd`. The order is the sort value in descending order, then the creation
@@ -287,6 +287,7 @@ Every remote command can also answer the shared codes of
 | local | `cli.tracking.trace.list.invalid_node_id`    | `--node` is not a `NodeID`.                                          | trace list            |
 | local | `cli.tracking.trace.list.invalid_state`      | `--state` is not `open`, `ok` or `error`.                            | trace list            |
 | local | `cli.tracking.trace.list.invalid_sort`       | `--sort` is not a sort field.                                        | trace list            |
+| local | `cli.tracking.trace.list.invalid_query`      | `--query` is empty or has more than 200 characters.                  | trace list            |
 | local | `cli.tracking.facet.get.invalid_project_id`  | `--project` is not a `ProjectID`.                                    | facet get             |
 | local | `cli.tracking.trace.list.token_required`     | No token resolves from `--token`, `KANTHORD_TOKEN` or `cli.yaml`.    | trace list            |
 | local | `cli.tracking.facet.get.token_required`      | No token resolves from `--token`, `KANTHORD_TOKEN` or `cli.yaml`.    | facet get             |

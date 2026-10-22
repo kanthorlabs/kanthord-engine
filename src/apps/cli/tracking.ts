@@ -110,7 +110,12 @@ async function traceList(command: Command): Promise<void> {
       code("invalid_state"),
       "state",
     ),
-    q: options.query,
+    q: optionOf(
+      trackingOperations.traceList.input.shape.query.shape.q,
+      options.query,
+      code("invalid_query"),
+      "query text",
+    ),
     sort:
       optionOf(
         traceSortSchema,

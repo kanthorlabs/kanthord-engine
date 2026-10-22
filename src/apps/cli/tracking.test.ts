@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { test, type TestContext } from "node:test";
 import { HttpMethod } from "../../kernel/http.ts";
 import { temporary } from "../../kernel/test-support.ts";
+import { TRACE_QUERY_MAX_CHARACTERS } from "../../tracking/contract.ts";
 import { ExitCode } from "./constants.ts";
 import { runKanthord } from "./test-support.ts";
 
@@ -122,6 +123,11 @@ const INVALID_LIST_OPTIONS: readonly (readonly [string[], string])[] = [
   [["--node", "invalid"], "cli.tracking.trace.list.invalid_node_id"],
   [["--state", "unknown"], "cli.tracking.trace.list.invalid_state"],
   [["--sort", "unknown"], "cli.tracking.trace.list.invalid_sort"],
+  [["--query", ""], "cli.tracking.trace.list.invalid_query"],
+  [
+    ["--query", "x".repeat(TRACE_QUERY_MAX_CHARACTERS + 1)],
+    "cli.tracking.trace.list.invalid_query",
+  ],
   [["--limit", LIMIT_NOT_NUMBER], "cli.pagination.limit_invalid"],
   [["--limit", LIMIT_TOO_LARGE], "cli.pagination.limit_out_of_range"],
 ];
