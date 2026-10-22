@@ -1,13 +1,15 @@
 import assert from "node:assert/strict";
+import { z } from "zod";
 import { canonicalJSON } from "../kernel/json.ts";
 import type { Transaction } from "../kernel/store.ts";
 import {
   spanSchema,
+  traceStateSchema,
   type ExecutionTrace,
   type RecordKind,
   type SessionEntryRecord,
   type Span,
-  type TraceRecord,
+  type TraceSummary,
 } from "./contract.ts";
 
 const ONE_ROW = 1;
@@ -33,7 +35,7 @@ export function insertTrace(
   assert.ok(trace.root_span_id);
   tx.database
     .prepare(
-      "INSERT INTO tracking_trace (trace_id, project_id, execution_id, root_span_id, created_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT (trace_id) DO NOTHING",
+      "INSERT INTO tracking_trace (trace_id, project_id, execution_id, root_span_id, created_at, node_id, attempt) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT (trace_id) DO NOTHING",
     )
     .run(
       trace.trace_id,
@@ -41,27 +43,64 @@ export function insertTrace(
       trace.execution_id,
       trace.root_span_id,
       now,
+      trace.node_id,
+      trace.attempt,
     );
+}
+
+const TRACE_COLUMNS =
+  "trace_id, project_id, execution_id, node_id, attempt, root_span_id, created_at, state, started_at, ended_at, stop_reason, worker_name, agent_names, models, error_types, input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, cost_usd, span_count, turn_count, tool_count, error_count, first_error_span_id";
+const stringList = z.array(z.string());
+
+function textOrNull(value: unknown): string | null {
+  return value === null ? null : String(value);
+}
+
+function numberOrNull(value: unknown): number | null {
+  return value === null ? null : Number(value);
 }
 
 export function readTrace(
   tx: Transaction,
   traceId: string,
-): TraceRecord | null {
+): TraceSummary | null {
   assert.ok(traceId);
   const row = tx.database
-    .prepare(
-      "SELECT trace_id, project_id, execution_id, root_span_id, created_at FROM tracking_trace WHERE trace_id = ?",
-    )
+    .prepare(`SELECT ${TRACE_COLUMNS} FROM tracking_trace WHERE trace_id = ?`)
     .get(traceId);
   if (!row) return null;
   assert.equal(row.trace_id, traceId);
+  const startedAt = numberOrNull(row.started_at);
+  const endedAt = numberOrNull(row.ended_at);
   return {
     trace_id: String(row.trace_id),
-    project_id: row.project_id === null ? null : String(row.project_id),
-    execution_id: row.execution_id === null ? null : String(row.execution_id),
+    project_id: textOrNull(row.project_id),
+    execution_id: textOrNull(row.execution_id),
+    node_id: textOrNull(row.node_id),
+    attempt: numberOrNull(row.attempt),
     root_span_id: String(row.root_span_id),
     created_at: Number(row.created_at),
+    state: traceStateSchema.parse(row.state),
+    started_at: startedAt,
+    ended_at: endedAt,
+    duration_ms:
+      startedAt === null || endedAt === null ? null : endedAt - startedAt,
+    stop_reason: textOrNull(row.stop_reason),
+    worker_name: textOrNull(row.worker_name),
+    agent_names: stringList.parse(JSON.parse(String(row.agent_names))),
+    models: stringList.parse(JSON.parse(String(row.models))),
+    error_types: stringList.parse(JSON.parse(String(row.error_types))),
+    input_tokens: Number(row.input_tokens),
+    output_tokens: Number(row.output_tokens),
+    cache_read_tokens: Number(row.cache_read_tokens),
+    cache_creation_tokens: Number(row.cache_creation_tokens),
+    total_tokens: Number(row.input_tokens) + Number(row.output_tokens),
+    cost_usd: Number(row.cost_usd),
+    span_count: Number(row.span_count),
+    turn_count: Number(row.turn_count),
+    tool_count: Number(row.tool_count),
+    error_count: Number(row.error_count),
+    first_error_span_id: textOrNull(row.first_error_span_id),
   };
 }
 

@@ -15,6 +15,7 @@ import {
   SpanOrigin,
   SpanStatus,
   TRACKING_SERVICE_NAME,
+  traceSummarySchema,
   type ExecutionTrace,
 } from "./contract.ts";
 import { trackingMigrations } from "./migrations.ts";
@@ -39,6 +40,7 @@ const ONE_DROP = 1;
 const PAGE_OF_ONE = 1;
 const STOP_DETAIL = "Cannot find module";
 const SPAN_PAGE = 10;
+const SUMMARY_FIELDS = 27;
 const RATE_LIMITED = "rate_limited";
 const INPUT_TEXT = "npm test";
 const TRACE_NOT_FOUND = "tracking.trace.not_found";
@@ -144,6 +146,22 @@ test("a repeated root open changes nothing", (t) => {
   ).items[0];
   assert.equal(root?.start_time, CREATED);
   assert.equal(service.droppedRecords(), NO_DROP);
+});
+
+test("the trace summary answers exactly the 27 fields with the node and the attempt of the execution", (t) => {
+  const { store, service } = harness(t);
+  service.executionOpened(TRACE, CREATED);
+  const trace = service.traceGet(TRACE.trace_id, caller(store));
+  assert.deepEqual(
+    Object.keys(trace).sort(),
+    Object.keys(traceSummarySchema.shape).sort(),
+  );
+  assert.equal(Object.keys(trace).length, SUMMARY_FIELDS);
+  assert.equal(trace.node_id, TRACE.node_id);
+  assert.equal(trace.attempt, TRACE.attempt);
+  assert.equal(trace.started_at, CREATED);
+  assert.equal(trace.span_count, ONE_ENTRY);
+  assert.doesNotThrow(() => traceSummarySchema.parse(trace));
 });
 
 test("a failed root write is counted and never thrown", (t) => {
