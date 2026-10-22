@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import type { AgentSession } from "@earendil-works/pi-coding-agent";
+import type {
+  AgentSession,
+  SessionEntry,
+} from "@earendil-works/pi-coding-agent";
 import {
   RecordKind,
   SpanStatus,
@@ -13,7 +16,7 @@ import {
   telemetrySpanId,
   type TelemetrySink,
 } from "./telemetry.ts";
-import { traceAgent } from "./agent-telemetry.ts";
+import { AgentErrorType, traceAgent } from "./agent-telemetry.ts";
 import { GitStep, withinGit } from "./method-telemetry.ts";
 import { Diagnostic } from "../../kernel/errors.ts";
 import { ChainLevel } from "../../agent/contract.ts";
@@ -33,13 +36,129 @@ const FAILED = "failed";
 const INPUT_TOKENS = 10;
 const SPLIT_BEFORE_PAIR = 14999;
 const ONE_FAULT = 1;
+const NO_SENT = 0;
+const ONE_ENTRY = 1;
+const TWO_ENTRIES = 2;
+const ONE_UNSUBSCRIBE = 1;
+const TOOL_CALL = "call_1";
+const TWO_REFRESHES = 2;
 const NO_TOOL_SPANS = 0;
 const SECOND_POSITION = 1;
+const SESSION_ID = "2".repeat(16);
+const CREDENTIAL_SECRET = "test_tracer_credential_secret";
+const REFRESHED_SECRET = "test_tracer_refreshed_secret";
+const TRACING = {
+  sessionId: SESSION_ID,
+  secrets: [] as readonly string[],
+  refreshSecrets: async (): Promise<readonly string[]> => [],
+};
+const MODEL = "glm-test-model";
+const OUTCOME_OK = "ok";
+const OUTCOME_ERROR = "error";
+const RATE_LIMITED = "rate_limited";
+const LAST_ASSISTANT_ENTRY = "00000004";
+const EFFECTIVE_CONFIGURATION = {
+  agent_provider: "zai",
+  provider: "zai",
+  credential: "credential_01JZ8R2B3C4D5E6F7G8H9J0K1M",
+  model_identifier: MODEL,
+  reasoning_effort: "off",
+} as const;
 const TRACED_AGENT = {
   agent_name: "swe@1",
   position: 0,
   level: ChainLevel.Enablement,
+  effective_configuration: EFFECTIVE_CONFIGURATION,
 } as const;
+const CACHE_READ = 30;
+const CACHE_WRITE = 5;
+const OUTPUT_TOKENS = 2;
+const COST_USD = 0.25;
+const MESSAGE_DURATION_MS = 1234;
+const TURN_ATTRIBUTES = [
+  "gen_ai.conversation.id",
+  "gen_ai.operation.name",
+  "gen_ai.request.model",
+  "kanthord.agent.chain_level",
+  "kanthord.agent.chain_position",
+  "kanthord.agent.name",
+  "kanthord.turn.index",
+];
+const TURN_END_ATTRIBUTES = [
+  "gen_ai.provider.name",
+  "gen_ai.response.finish_reasons",
+  "gen_ai.response.model",
+  "gen_ai.usage.cache_creation.input_tokens",
+  "gen_ai.usage.cache_read.input_tokens",
+  "gen_ai.usage.input_tokens",
+  "gen_ai.usage.output_tokens",
+  "kanthord.session.entry_id",
+  "kanthord.turn.model_duration_ms",
+  "kanthord.usage.cost_usd",
+];
+const TOOL_END_ATTRIBUTES = [
+  "kanthord.tool.duration_ms",
+  "kanthord.tool.outcome",
+];
+function assistantMessage(fields: Record<string, unknown> = {}) {
+  return {
+    role: "assistant",
+    content: [{ type: "text", text: "done" }],
+    api: "openai-completions",
+    provider: "zai",
+    model: MODEL,
+    stopReason: "stop",
+    usage: {
+      input: INPUT_TOKENS,
+      output: OUTPUT_TOKENS,
+      cacheRead: CACHE_READ,
+      cacheWrite: CACHE_WRITE,
+      totalTokens: 0,
+      cost: {
+        input: 0,
+        output: 0,
+        cacheRead: 0,
+        cacheWrite: 0,
+        total: COST_USD,
+      },
+    },
+    timestamp: 1,
+    ...fields,
+  };
+}
+
+function textRecordsOf(records: TelemetryRecord[]) {
+  return records.filter((record) => record.kind === RecordKind.Text);
+}
+
+function endOf(records: TelemetryRecord[], operation: SpanOperation) {
+  return spanRecords(records).find(
+    (record) => record.operation === operation && record.end_time,
+  );
+}
+
+function startOf(records: TelemetryRecord[], operation: SpanOperation) {
+  return spanRecords(records).find(
+    (record) => record.operation === operation && record.start_time,
+  );
+}
+
+const IDENTITY_NAMES = [
+  "kanthord.execution.id",
+  "kanthord.node.id",
+  "kanthord.attempt",
+  "kanthord.worker.name",
+];
+
+function identityOf(attributes: Record<string, unknown> | undefined) {
+  return Object.fromEntries(
+    IDENTITY_NAMES.map((name) => [name, attributes?.[name]]),
+  );
+}
+
+function names(attributes: object | undefined): string[] {
+  return Object.keys(attributes ?? {}).sort();
+}
 
 function recorder() {
   const records: TelemetryRecord[] = [];
@@ -48,6 +167,46 @@ function recorder() {
     flush: async () => {},
   };
   return { records, spans: new SpanRecorder(CLAIM, WORKER, sink) };
+}
+
+function scriptedSession() {
+  const entries: SessionEntry[] = [];
+  let listener: (event: unknown) => void = () => {};
+  let unsubscribed = 0;
+  const session = {
+    subscribe: (next: (event: unknown) => void) => {
+      listener = next;
+      return () => {
+        unsubscribed += 1;
+      };
+    },
+    sessionManager: {
+      getEntryCount: () => entries.length,
+      getEntries: () => entries,
+    },
+  } as unknown as AgentSession;
+  return {
+    session,
+    emit: (event: unknown) => listener(event),
+    append: (fields: Record<string, unknown> = {}) => {
+      const id = (entries.length + 1).toString(16).padStart(8, "0");
+      entries.push({
+        type: "custom",
+        customType: "x",
+        id,
+        parentId: entries.at(-1)?.id ?? null,
+        timestamp: "2026-01-02T03:04:05.000Z",
+        ...fields,
+      } as SessionEntry);
+    },
+    unsubscribed: () => unsubscribed,
+  };
+}
+
+function entryRecords(records: TelemetryRecord[]) {
+  return records.flatMap((record) =>
+    record.kind === RecordKind.SessionEntry ? [record] : [],
+  );
 }
 
 function spanRecords(records: TelemetryRecord[]) {
@@ -179,72 +338,225 @@ test("a long text splits into numbered parts", () => {
   ]);
 });
 
-test("the agent tracer writes a turn and its tool call", () => {
+test("the agent tracer writes a turn and its tool call without a text", () => {
   const { records, spans } = recorder();
-  let listener: (event: unknown) => void = () => {};
-  const session = {
-    subscribe: (next: (event: unknown) => void) => {
-      listener = next;
-      return () => {};
-    },
-  } as unknown as AgentSession;
-  traceAgent(session, spans, TRACED_AGENT);
-  listener({ type: "turn_start" });
-  listener({
+  const scripted = scriptedSession();
+  traceAgent(scripted.session, spans, TRACED_AGENT, TRACING);
+  scripted.emit({ type: "turn_start" });
+  scripted.emit({
     type: "tool_execution_start",
-    toolCallId: "call_1",
+    toolCallId: TOOL_CALL,
     toolName: "bash",
     args: { command: "npm test" },
   });
-  listener({
+  scripted.emit({
     type: "tool_execution_end",
-    toolCallId: "call_1",
+    toolCallId: TOOL_CALL,
     toolName: "bash",
     result: { content: [{ type: "text", text: "1 passed" }] },
     isError: false,
   });
-  listener({
+  scripted.append({
+    type: "message",
+    message: assistantMessage(),
+  });
+  scripted.emit({
     type: "turn_end",
-    message: {
-      role: "assistant",
-      content: [{ type: "text", text: "done" }],
-      model: "glm",
-      stopReason: "error",
-      errorMessage: "429 rate limit",
-      usage: { input: INPUT_TOKENS, output: 2, cacheRead: 0, cacheWrite: 0 },
-    },
+    message: assistantMessage({
+      responseModel: "glm-served",
+      durationMs: MESSAGE_DURATION_MS,
+    }),
     toolResults: [],
   });
-  const written = spanRecords(records);
-  const turnEnd = written.find(
-    (record) => record.operation === SpanOperation.Turn && record.end_time,
+  const turnStart = startOf(records, SpanOperation.Turn);
+  const turnEnd = endOf(records, SpanOperation.Turn);
+  const toolStart = startOf(records, SpanOperation.Tool);
+  const toolEnd = endOf(records, SpanOperation.Tool);
+  assert.equal(toolStart?.parent_span_id, turnEnd?.span_id);
+  assert.deepEqual(turnStart?.attributes, {
+    "kanthord.agent.name": TRACED_AGENT.agent_name,
+    "kanthord.agent.chain_position": 0,
+    "kanthord.agent.chain_level": ChainLevel.Enablement,
+    "kanthord.turn.index": 1,
+    "gen_ai.operation.name": "chat",
+    "gen_ai.conversation.id": SESSION_ID,
+    "gen_ai.request.model": MODEL,
+    ...identityOf(turnStart?.attributes),
+  });
+  assert.equal(turnEnd?.status, SpanStatus.Ok);
+  assert.deepEqual(turnEnd?.attributes, {
+    "gen_ai.response.model": "glm-served",
+    "gen_ai.provider.name": "zai",
+    "gen_ai.usage.input_tokens": INPUT_TOKENS + CACHE_READ + CACHE_WRITE,
+    "gen_ai.usage.output_tokens": OUTPUT_TOKENS,
+    "gen_ai.usage.cache_read.input_tokens": CACHE_READ,
+    "gen_ai.usage.cache_creation.input_tokens": CACHE_WRITE,
+    "kanthord.usage.cost_usd": COST_USD,
+    "gen_ai.response.finish_reasons": ["stop"],
+    "kanthord.session.entry_id": "00000001",
+    "kanthord.turn.model_duration_ms": MESSAGE_DURATION_MS,
+  });
+  assert.deepEqual(toolStart?.attributes, {
+    "gen_ai.operation.name": "execute_tool",
+    "gen_ai.conversation.id": SESSION_ID,
+    "gen_ai.tool.name": "bash",
+    "gen_ai.tool.call.id": TOOL_CALL,
+    ...identityOf(toolStart?.attributes),
+  });
+  assert.deepEqual(names(toolEnd?.attributes), TOOL_END_ATTRIBUTES);
+  assert.equal(toolEnd?.attributes?.["kanthord.tool.outcome"], OUTCOME_OK);
+  assert.equal(toolEnd?.status, SpanStatus.Ok);
+  assert.deepEqual(textRecordsOf(records), []);
+  for (const span of spanRecords(records))
+    assert.deepEqual(span.text_ids ?? [], []);
+});
+
+test("the turn start and end attributes hold exactly the listed names", () => {
+  const { records, spans } = recorder();
+  const scripted = scriptedSession();
+  traceAgent(scripted.session, spans, TRACED_AGENT, TRACING);
+  scripted.emit({ type: "turn_start" });
+  scripted.append({ type: "message", message: assistantMessage() });
+  scripted.emit({
+    type: "turn_end",
+    message: assistantMessage({ durationMs: MESSAGE_DURATION_MS }),
+    toolResults: [],
+  });
+  assert.deepEqual(
+    names(startOf(records, SpanOperation.Turn)?.attributes),
+    [...TURN_ATTRIBUTES, ...IDENTITY_NAMES].sort(),
   );
-  const tool = written.find(
-    (record) => record.operation === SpanOperation.Tool,
+  assert.deepEqual(
+    names(endOf(records, SpanOperation.Turn)?.attributes),
+    TURN_END_ATTRIBUTES,
   );
-  assert.equal(tool?.parent_span_id, turnEnd?.span_id);
-  assert.equal(turnEnd?.status, SpanStatus.Error);
-  assert.equal(
-    turnEnd?.attributes?.["gen_ai.usage.input_tokens"],
-    INPUT_TOKENS,
+});
+
+test("a turn error ends with the provider failure code and no text", () => {
+  const { records, spans } = recorder();
+  const scripted = scriptedSession();
+  traceAgent(scripted.session, spans, TRACED_AGENT, TRACING);
+  scripted.emit({ type: "turn_start" });
+  scripted.emit({
+    type: "turn_end",
+    message: assistantMessage({
+      stopReason: "error",
+      errorMessage: "429 rate limit",
+    }),
+    toolResults: [],
+  });
+  const end = endOf(records, SpanOperation.Turn);
+  assert.equal(end?.status, SpanStatus.Error);
+  assert.equal(end?.attributes?.["error.type"], RATE_LIMITED);
+  assert.deepEqual(end?.attributes?.["gen_ai.response.finish_reasons"], [
+    "error",
+  ]);
+  assert.deepEqual(textRecordsOf(records), []);
+});
+
+test("the turn omits the entry id, the cost and the duration when it has none", () => {
+  const { records, spans } = recorder();
+  const scripted = scriptedSession();
+  traceAgent(scripted.session, spans, TRACED_AGENT, TRACING);
+  scripted.append({ type: "message", message: assistantMessage() });
+  scripted.emit({ type: "turn_start" });
+  scripted.emit({
+    type: "turn_end",
+    message: assistantMessage({
+      usage: { ...assistantMessage().usage, cost: { total: Number.NaN } },
+    }),
+    toolResults: [],
+  });
+  const attributes = endOf(records, SpanOperation.Turn)?.attributes ?? {};
+  assert.deepEqual(
+    [
+      "kanthord.session.entry_id",
+      "kanthord.usage.cost_usd",
+      "kanthord.turn.model_duration_ms",
+    ].filter((name) => name in attributes),
+    [],
   );
-  assert.ok(turnEnd?.text_ids?.some((id) => id.endsWith(":error")));
+});
+
+test("the turn names the last assistant entry that follows the turn start", () => {
+  const { records, spans } = recorder();
+  const scripted = scriptedSession();
+  traceAgent(scripted.session, spans, TRACED_AGENT, TRACING);
+  scripted.append({ type: "message", message: assistantMessage() });
+  scripted.emit({ type: "turn_start" });
+  scripted.append({ type: "message", message: assistantMessage() });
+  scripted.append({ type: "message", message: { role: "toolResult" } });
+  scripted.append({ type: "message", message: assistantMessage() });
+  scripted.append();
+  scripted.emit({ type: "message_end", message: assistantMessage() });
+  scripted.emit({
+    type: "turn_end",
+    message: assistantMessage(),
+    toolResults: [],
+  });
+  const attributes = endOf(records, SpanOperation.Turn)?.attributes ?? {};
+  assert.equal(attributes["kanthord.session.entry_id"], LAST_ASSISTANT_ENTRY);
+  assert.ok(Number(attributes["kanthord.turn.model_duration_ms"]) >= NO_SENT);
+});
+
+test("a tool error ends with Error and the tool_error type", () => {
+  const { records, spans } = recorder();
+  const scripted = scriptedSession();
+  traceAgent(scripted.session, spans, TRACED_AGENT, TRACING);
+  scripted.emit({ type: "turn_start" });
+  scripted.emit({
+    type: "tool_execution_start",
+    toolCallId: TOOL_CALL,
+    toolName: "bash",
+    args: {},
+  });
+  scripted.emit({
+    type: "tool_execution_end",
+    toolCallId: TOOL_CALL,
+    toolName: "bash",
+    result: { content: [{ type: "text", text: "boom" }] },
+    isError: true,
+  });
+  const end = endOf(records, SpanOperation.Tool);
+  assert.equal(end?.status, SpanStatus.Error);
+  assert.equal(end?.attributes?.["error.type"], AgentErrorType.ToolError);
+  assert.equal(end?.attributes?.["kanthord.tool.outcome"], OUTCOME_ERROR);
+  assert.deepEqual(names(end?.attributes), [
+    "error.type",
+    ...TOOL_END_ATTRIBUTES,
+  ]);
+  assert.deepEqual(textRecordsOf(records), []);
+});
+
+test("a turn under a worker.task span names that span as its parent", async () => {
+  const { records, spans } = recorder();
+  const scripted = scriptedSession();
+  traceAgent(scripted.session, spans, TRACED_AGENT, TRACING);
+  const task = await spans.within(
+    { key: "task:1", operation: SpanOperation.Task },
+    async (taskId) => {
+      scripted.emit({ type: "turn_start" });
+      return taskId;
+    },
+  );
+  assert.equal(startOf(records, SpanOperation.Turn)?.parent_span_id, task);
 });
 
 test("the agent tracer writes the chain position and level of the pinned selection on a turn", () => {
   const { records, spans } = recorder();
-  let listener: (event: unknown) => void = () => {};
-  const session = {
-    subscribe: (next: (event: unknown) => void) => {
-      listener = next;
-      return () => {};
+  const scripted = scriptedSession();
+  const { session } = scripted;
+  const listener = scripted.emit;
+  traceAgent(
+    session,
+    spans,
+    {
+      ...TRACED_AGENT,
+      position: SECOND_POSITION,
+      level: ChainLevel.Binding,
     },
-  } as unknown as AgentSession;
-  traceAgent(session, spans, {
-    agent_name: "swe@1",
-    position: SECOND_POSITION,
-    level: ChainLevel.Binding,
-  });
+    TRACING,
+  );
   listener({ type: "turn_start" });
   const turn = spanRecords(records).find(
     (record) => record.operation === SpanOperation.Turn,
@@ -279,14 +591,10 @@ test("a text split never cuts a surrogate pair", () => {
 
 test("a tracer fault is counted and never thrown", () => {
   const { records, spans } = recorder();
-  let listener: (event: unknown) => void = () => {};
-  const session = {
-    subscribe: (next: (event: unknown) => void) => {
-      listener = next;
-      return () => {};
-    },
-  } as unknown as AgentSession;
-  traceAgent(session, spans, TRACED_AGENT);
+  const scripted = scriptedSession();
+  const { session } = scripted;
+  const listener = scripted.emit;
+  traceAgent(session, spans, TRACED_AGENT, TRACING);
   listener({ type: "turn_start" });
   listener({ type: "tool_execution_start", toolCallId: "", toolName: "bash" });
   assert.doesNotThrow(() =>
@@ -303,4 +611,133 @@ test("a tracer fault is counted and never thrown", () => {
     ).length,
     NO_TOOL_SPANS,
   );
+});
+
+test("the tracer sends each entry once, in order, from sequence 1", () => {
+  const { records, spans } = recorder();
+  const scripted = scriptedSession();
+  traceAgent(scripted.session, spans, TRACED_AGENT, TRACING);
+  scripted.append();
+  scripted.emit({ type: "turn_start" });
+  scripted.append();
+  scripted.append();
+  scripted.emit({ type: "message_end" });
+  scripted.emit({ type: "message_end" });
+  const sent = entryRecords(records);
+  assert.deepEqual(
+    sent.map((record) => record.sequence),
+    [1, 2, 3],
+  );
+  assert.deepEqual(
+    sent.map((record) => record.entry_id),
+    ["00000001", "00000002", "00000003"],
+  );
+  assert.equal(sent[0]?.session_id, SESSION_ID);
+  assert.equal(sent[0]?.trace_id, CLAIM.trace_id);
+  assert.equal(spans.faultCount(), NO_SENT);
+});
+
+test("the returned function sends the entry that pi appended after the last event", () => {
+  const { records, spans } = recorder();
+  const scripted = scriptedSession();
+  const stop = traceAgent(scripted.session, spans, TRACED_AGENT, TRACING);
+  scripted.append();
+  scripted.emit({ type: "message_end" });
+  scripted.append();
+  assert.equal(entryRecords(records).length, ONE_ENTRY);
+  assert.equal(stop(), TWO_ENTRIES);
+  assert.deepEqual(
+    entryRecords(records).map((record) => record.sequence),
+    [1, 2],
+  );
+});
+
+test("the returned function ends the open tool and turn with Error and stopped, once", () => {
+  const { records, spans } = recorder();
+  const scripted = scriptedSession();
+  const stop = traceAgent(scripted.session, spans, TRACED_AGENT, TRACING);
+  scripted.emit({ type: "turn_start" });
+  scripted.emit({
+    type: "tool_execution_start",
+    toolCallId: "call_1",
+    toolName: "bash",
+    args: {},
+  });
+  assert.equal(stop(), NO_SENT);
+  const ends = spanRecords(records).filter((record) => record.end_time);
+  assert.deepEqual(
+    ends.map((record) => record.operation),
+    [SpanOperation.Tool, SpanOperation.Turn],
+  );
+  for (const end of ends) {
+    assert.equal(end.status, SpanStatus.Error);
+    assert.equal(end.attributes?.["error.type"], AgentErrorType.Stopped);
+  }
+  const written = records.length;
+  scripted.append();
+  assert.equal(stop(), NO_SENT);
+  assert.equal(records.length, written);
+  assert.equal(scripted.unsubscribed(), ONE_UNSUBSCRIBE);
+});
+
+test("a credential secret in a tool result reaches the sink as [redacted]", () => {
+  const { records, spans } = recorder();
+  const scripted = scriptedSession();
+  traceAgent(scripted.session, spans, TRACED_AGENT, {
+    ...TRACING,
+    secrets: [CREDENTIAL_SECRET],
+  });
+  scripted.append({
+    type: "message",
+    message: {
+      role: "toolResult",
+      toolCallId: "call_1",
+      toolName: "bash",
+      isError: false,
+      content: [{ type: "text", text: `token ${CREDENTIAL_SECRET}` }],
+    },
+  });
+  scripted.emit({ type: "message_end" });
+  const [record] = entryRecords(records);
+  assert.equal(record?.tool_call_id, TOOL_CALL);
+  assert.ok(!JSON.stringify(records).includes(CREDENTIAL_SECRET));
+  assert.ok(JSON.stringify(record?.entry).includes("token [redacted]"));
+});
+
+test("a turn start refreshes the secrets and a rejection keeps the old list", async () => {
+  const { records, spans } = recorder();
+  const scripted = scriptedSession();
+  const refreshes: (() => Promise<readonly string[]>)[] = [
+    async () => [REFRESHED_SECRET],
+    async () => {
+      throw new Error("refresh failed");
+    },
+  ];
+  let calls = 0;
+  traceAgent(scripted.session, spans, TRACED_AGENT, {
+    ...TRACING,
+    refreshSecrets: () => refreshes[calls++]!(),
+  });
+  scripted.emit({ type: "turn_start" });
+  await new Promise((resolve) => setImmediate(resolve));
+  scripted.emit({ type: "turn_start" });
+  await new Promise((resolve) => setImmediate(resolve));
+  scripted.append({ data: `a ${REFRESHED_SECRET}` });
+  scripted.emit({ type: "message_end" });
+  assert.equal(calls, TWO_REFRESHES);
+  assert.ok(!JSON.stringify(records).includes(REFRESHED_SECRET));
+});
+
+test("an entry with an invalid identity is skipped and counted as a fault", () => {
+  const { records, spans } = recorder();
+  const scripted = scriptedSession();
+  traceAgent(scripted.session, spans, TRACED_AGENT, TRACING);
+  scripted.append({ id: "BAD ID" });
+  scripted.append({ parentId: null });
+  scripted.emit({ type: "message_end" });
+  assert.deepEqual(
+    entryRecords(records).map((record) => record.sequence),
+    [2],
+  );
+  assert.equal(spans.faultCount(), ONE_FAULT);
 });

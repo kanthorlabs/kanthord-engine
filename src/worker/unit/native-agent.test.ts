@@ -53,6 +53,7 @@ import {
   type TelemetryRecord,
 } from "../../tracking/contract.ts";
 import { SessionFormat, SpanOperation, SpanRecorder } from "./telemetry.ts";
+import { PINNED_CONTEXT_TYPE } from "./session-entries.ts";
 
 const SECRET = "test_native-scripted-key";
 const NODE = "node_01ARZ3NDEKTSV4RRFFQ69G5FAA";
@@ -71,6 +72,9 @@ const TRANSCRIPT_MESSAGES = 5;
 const HEADER_LINES = 1;
 const EMPTY_LINE = "";
 const MESSAGE_ENTRY = "message";
+const ASSISTANT_ROLE = "assistant";
+const CHAT_OPERATION = "chat";
+const CUSTOM_ENTRY = "custom";
 const SESSION_HEADER = "session";
 const NO_ENTRIES = 0;
 const SPAN_ID_LENGTH = 16;
@@ -383,6 +387,108 @@ test("native agent composes only the switched-on workspace files and the project
       /^[a-f0-9]{64}$/.test(digest),
     ),
   );
+});
+
+function sessionEntries(h: Harness) {
+  return h.records.flatMap((record) =>
+    record.kind === RecordKind.SessionEntry ? [record] : [],
+  );
+}
+
+test("a prompt writes every pi entry as a session_entry record with the pinned context first", async (t) => {
+  const h = await fixture(
+    t,
+    [fauxAssistantMessage("done")],
+    { repositories: [repositoryOf({})] },
+    unusedHostTools,
+    { prepare: writeFiles },
+  );
+  await h.agent.prompt(WORK);
+  h.agent.closeTrace(SpanStatus.Ok);
+  const [start] = sessionSpans(h);
+  const entries = sessionEntries(h);
+  assert.deepEqual(
+    entries.map(({ sequence }) => sequence),
+    entries.map((_, index) => index + 1),
+  );
+  assert.ok(entries.every(({ session_id }) => session_id === start?.span_id));
+  assert.deepEqual(
+    entries.slice(0, 2).map(({ entry_type }) => entry_type),
+    ["model_change", "thinking_level_change"],
+  );
+  const customs = entries.filter(
+    ({ entry_type }) => entry_type === CUSTOM_ENTRY,
+  );
+  assert.equal(entries[2], customs[0]);
+  assert.ok(
+    customs.every(({ entry }) => entry.customType === PINNED_CONTEXT_TYPE),
+  );
+  const parts = customs.map(
+    ({ entry }) => entry.data as Record<string, unknown>,
+  );
+  assert.deepEqual(parts[0], { part: "system_prompt", text: SETUP_PROMPT });
+  const layers = parts.slice(1);
+  assert.ok(layers.length >= WORKSPACE_FILES.length);
+  assert.deepEqual(
+    layers.map(({ part, index }) => [part, index]),
+    layers.map((_, index) => ["layer", index + 1]),
+  );
+  assert.ok(String(layers.at(-1)?.text).includes(PROJECT_PROMPT));
+  assert.equal(
+    new Set(entries.map(({ entry_id }) => entry_id)).size,
+    entries.length,
+  );
+});
+
+test("a turn end names the assistant session entry of the turn and links the session", async (t) => {
+  const h = await fixture(t, [fauxAssistantMessage("done")]);
+  await h.agent.prompt(WORK);
+  h.agent.closeTrace(SpanStatus.Ok);
+  const [session] = sessionSpans(h);
+  const turns = h.records.flatMap((record) =>
+    record.kind === RecordKind.Span && record.operation === SpanOperation.Turn
+      ? [record]
+      : [],
+  );
+  const start = turns.find((record) => record.start_time);
+  const end = turns.find((record) => record.end_time);
+  assert.equal(start?.attributes?.["gen_ai.conversation.id"], session?.span_id);
+  assert.equal(start?.attributes?.["gen_ai.operation.name"], CHAT_OPERATION);
+  const assistant = sessionEntries(h).find(
+    ({ entry_id }) =>
+      entry_id === end?.attributes?.["kanthord.session.entry_id"],
+  );
+  assert.equal(assistant?.entry_type, MESSAGE_ENTRY);
+  assert.equal(
+    (assistant?.entry.message as { role: string }).role,
+    ASSISTANT_ROLE,
+  );
+  const message = assistant?.entry.message as {
+    usage: { input: number; cacheRead: number; cacheWrite: number };
+  };
+  assert.equal(
+    end?.attributes?.["gen_ai.usage.input_tokens"],
+    message.usage.input + message.usage.cacheRead + message.usage.cacheWrite,
+  );
+});
+
+test("the entry_count of the agent.session end equals the count of sent entries", async (t) => {
+  const h = await fixture(t, [fauxAssistantMessage("done")]);
+  await h.agent.prompt(WORK);
+  h.agent.closeTrace(SpanStatus.Ok);
+  const [end] = sessionEnds(h);
+  const sent = sessionEntries(h).length;
+  assert.ok(sent > NO_ENTRIES);
+  assert.equal(end?.attributes?.["kanthord.session.entry_count"], sent);
+});
+
+test("a session entry record never holds the credential secret", async (t) => {
+  const h = await fixture(t, [fauxAssistantMessage(`key ${SECRET}`)]);
+  await h.agent.prompt(WORK);
+  h.agent.closeTrace(SpanStatus.Ok);
+  assert.ok(sessionEntries(h).length > NO_ENTRIES);
+  assert.ok(!JSON.stringify(sessionEntries(h)).includes(SECRET));
+  assert.ok(JSON.stringify(sessionEntries(h)).includes("key [redacted]"));
 });
 
 async function composesOnePartPerBinding(
