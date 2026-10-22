@@ -1,13 +1,13 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { spawnSync } from "node:child_process";
+import { childRun } from "./test-support.ts";
 
 const ExitCode = { Success: 0, Failure: 1 } as const;
 
 const EMPTY_OUTPUT = "";
 const STANDARD_ERROR_DESCRIPTOR = process.stderr.fd;
 
-test("fatal exceptions and rejections terminate without serializing secrets or running cleanup", () => {
+test("fatal exceptions and rejections terminate without serializing secrets or running cleanup", async (t) => {
   const module = new URL("./fatal.ts", import.meta.url).href;
   for (const event of [
     "throw new Error('secret-marker')",
@@ -15,14 +15,14 @@ test("fatal exceptions and rejections terminate without serializing secrets or r
     "Promise.reject('secret-marker')",
   ]) {
     for (const fd of [STANDARD_ERROR_DESCRIPTOR, 999999]) {
-      const result = spawnSync(
+      const result = await childRun(
         process.execPath,
         [
           "--input-type=module",
           "-e",
           `import { installFatalHandlers } from ${JSON.stringify(module)};installFatalHandlers(()=>${fd});process.on('SIGTERM',()=>console.log('cleanup'));setImmediate(()=>{${event}});`,
         ],
-        { encoding: "utf8" },
+        { signal: t.signal },
       );
       assert.equal(result.status, ExitCode.Failure);
       assert.equal(result.stdout, EMPTY_OUTPUT);

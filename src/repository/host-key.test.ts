@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
 import { generateKeyPairSync } from "node:crypto";
 import { test, type TestContext } from "node:test";
 import pino from "pino";
@@ -8,6 +7,7 @@ import { OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import { OperationRegistry, type CallerContext } from "../kernel/operation.ts";
 import { IN_MEMORY_DATABASE, Store } from "../kernel/store.ts";
+import { childRun } from "../kernel/test-support.ts";
 import {
   HOST_KEY_SCAN_FAILED_STATUS,
   HostKeyErrorCode,
@@ -228,13 +228,13 @@ test("the keyscan arguments carry the port of the host", () => {
   );
 });
 
-test("the fingerprint equals the output of ssh-keygen -l", () => {
+test("the fingerprint equals the output of ssh-keygen -l", async (t) => {
   assert.equal(sshFingerprintOf(GITHUB_KEY), GITHUB_FINGERPRINT);
   for (let index = 0; index < GENERATED_KEYS; index++) {
     const key = ed25519Key();
-    const result = spawnSync("ssh-keygen", ["-l", "-f", "-"], {
+    const result = await childRun("ssh-keygen", ["-l", "-f", "-"], {
       input: `${key}\n`,
-      encoding: "utf8",
+      signal: t.signal,
     });
     assert.equal(result.status, EXIT_SUCCESS, result.stderr);
     assert.equal(result.stdout.split(" ")[1], sshFingerprintOf(key));
