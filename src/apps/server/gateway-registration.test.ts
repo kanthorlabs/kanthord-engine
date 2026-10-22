@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
 import { z } from "zod";
-import { ulid } from "ulid";
 import { decode } from "hono/jwt";
 import {
   fakeMachines,
@@ -24,6 +23,7 @@ import { HttpMethod, HttpStatus } from "../../kernel/http.ts";
 import { errorSchema } from "../../kernel/errors.ts";
 import { workerOperations } from "../../worker/contract.ts";
 import { Store, IN_MEMORY_DATABASE } from "../../kernel/store.ts";
+import { createIdempotencyKey } from "../../kernel/identity.ts";
 
 const NO_REGISTRATIONS = 0;
 const SINGLE_REGISTRATION = 1;
@@ -142,7 +142,7 @@ test("deregistration replays after ending while fresh keys refuse ended targets"
     `Bearer ${f.machineJWT}`,
   );
   const direct = directClient(workerOperations, f.gateway.invocation);
-  const key = ulid();
+  const key = createIdempotencyKey();
   const ended = await f.client["registration.deregister"](target, {
     idempotencyKey: key,
   });
@@ -197,7 +197,7 @@ test("deregistration replays after ending while fresh keys refuse ended targets"
     ...input,
     params: { runtime_identity: next.data.runtime_identity },
   };
-  const nextKey = ulid();
+  const nextKey = createIdempotencyKey();
   const directEnd = await direct["registration.deregister"](replacement, {
     identity,
     idempotencyKey: nextKey,
@@ -384,7 +384,7 @@ test("invalid direct input is captured before caller mutation and never invokes 
 
 test("one live registration per client, live replay across adapters, and stale replay without rewriting the record", async (t) => {
   const fixture = await fixtureForRegistration(t);
-  const key = ulid();
+  const key = createIdempotencyKey();
   const first = await fixture.client.register(input, { idempotencyKey: key });
   assert.equal(first.type, OperationResultType.Completed);
   assert.ok(first.type === OperationResultType.Completed);
@@ -426,7 +426,7 @@ test("one live registration per client, live replay across adapters, and stale r
 
 test("a new invocation loses replay but registration retains its natural-key identity", async (t) => {
   const fixture = await fixtureForRegistration(t);
-  const idempotencyKey = ulid();
+  const idempotencyKey = createIdempotencyKey();
   const first = await fixture.client.register(input, { idempotencyKey });
   assert.ok(first.type === OperationResultType.Completed);
   const invocation = createInvocation({
@@ -552,8 +552,8 @@ test("another client using the same key registers and runs its own mutation inst
     }),
   );
   const fixture = await gatewayFixture(t, { registry, machines });
-  const registrationKey = ulid();
-  const mutationKey = ulid();
+  const registrationKey = createIdempotencyKey();
+  const mutationKey = createIdempotencyKey();
   for (let index = 0; index < TWO_CLIENTS; index++) {
     const token = await fixture.machineToken(
       TEST_PROJECT_ID,
@@ -595,13 +595,13 @@ test("registration accepts only a bearer machine JWT, no nominated identity or b
   const forged = await fixture.gateway.invocation.invoke(
     workerOperations.register.id,
     input,
-    { identity: { ...identity }, idempotencyKey: ulid() },
+    { identity: { ...identity }, idempotencyKey: createIdempotencyKey() },
   );
   assert.equal(forged.status, HttpStatus.Unauthorized);
   const headers = {
     Authorization: `Bearer ${fixture.machineJWT}`,
     "Content-Type": "application/json",
-    "Idempotency-Key": ulid(),
+    "Idempotency-Key": createIdempotencyKey(),
   };
   for (const body of ["{}", JSON.stringify({ binding: TEST_WORKER_BINDING })]) {
     const response = await fixture.request(workerOperations.register.path, {
@@ -636,7 +636,7 @@ test("an operation returning a secret never reruns a repeated idempotency key", 
   );
   const fixture = await gatewayFixture(t, { registry });
   const client = httpClient({ operation }, fixture.endpoint, fixture.token);
-  const idempotencyKey = ulid();
+  const idempotencyKey = createIdempotencyKey();
   assert.ok(
     (await client.operation(input, { idempotencyKey })).type ===
       OperationResultType.Completed,

@@ -4,7 +4,6 @@ import { registerBunOAuthFlows as registerOAuthFlows } from "@earendil-works/pi-
 import { anthropicProvider } from "@earendil-works/pi-ai/providers/anthropic";
 import { githubCopilotProvider } from "@earendil-works/pi-ai/providers/github-copilot";
 import { openaiCodexProvider } from "@earendil-works/pi-ai/providers/openai-codex";
-import { ulid } from "ulid";
 import { Diagnostic, OperationError } from "../../kernel/errors.ts";
 import { sealJSON } from "../../kernel/hpke.ts";
 import {
@@ -25,6 +24,7 @@ import {
   type LoginSession,
 } from "../../llm/sessions.ts";
 import { EXCHANGE_UNAVAILABLE } from "./instance-exchange.ts";
+import { createIdempotencyKey } from "../../kernel/identity.ts";
 
 const LOGIN_FAILED = "login failed";
 const INSTANCE_HUMAN = "";
@@ -191,7 +191,7 @@ export class InstanceLogins {
       sealed,
       sealed_to: key.sealed_to,
     };
-    const idempotencyKey = ulid();
+    const idempotencyKey = createIdempotencyKey();
     for (;;) {
       try {
         await this.options.report(session.id, body, idempotencyKey);
@@ -236,7 +236,11 @@ export class InstanceLogins {
     body: LoginReportBody,
   ): Promise<boolean> {
     try {
-      await this.options.report(running.session.id, body, ulid());
+      await this.options.report(
+        running.session.id,
+        body,
+        createIdempotencyKey(),
+      );
       return true;
     } catch (error) {
       this.options.log({

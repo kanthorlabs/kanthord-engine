@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { ulid } from "ulid";
 import { Idempotency } from "./idempotency.ts";
 import { HttpStatus } from "../kernel/http.ts";
+import { createIdempotencyKey } from "../kernel/identity.ts";
 
 const TTL_SECONDS = 1;
 const TTL_MS = 1000;
@@ -13,7 +13,7 @@ test("memory replay isolates answers, callers, routes and fingerprints and expir
   t.mock.method(Date, "now", () => now);
   const component = new Idempotency(TTL_SECONDS);
   t.after(() => component.stop());
-  const key = ulid();
+  const key = createIdempotencyKey();
   const held = component.reserve(key, "first", "write", "digest");
   assert.throws(
     () => component.reserve(key, "first", "write", "digest"),
@@ -59,7 +59,7 @@ test("memory replay isolates answers, callers, routes and fingerprints and expir
 test("timer sweeps expired records and stop clears its timer", (t) => {
   t.mock.timers.enable({ apis: ["Date", "setInterval"] });
   const component = new Idempotency(TTL_SECONDS);
-  const key = ulid();
+  const key = createIdempotencyKey();
   const first = component.reserve(key, "caller", "write", "digest");
   t.mock.timers.tick(SWEEP_MS);
   t.mock.timers.setTime(0);

@@ -7,7 +7,7 @@ import { temporary } from "../../kernel/test-support.ts";
 import { ExitCode } from "./constants.ts";
 import { runKanthord } from "./test-support.ts";
 
-const KEY = "01ARZ3NDEKTSV4RRFFQ69G5FAV";
+const KEY = "idempotency_key_01ARZ3NDEKTSV4RRFFQ69G5FAV";
 const SESSION_ID = "login_session_01ARZ3NDEKTSV4RRFFQ69G5FAV";
 const ADDRESS = "https://github.com/login/device";
 const EXPIRES_AT = Date.UTC(2026, 9, 17, 22, 33, 40, 960);

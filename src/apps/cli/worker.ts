@@ -1,8 +1,11 @@
 import assert from "node:assert/strict";
 import { Command } from "commander";
-import { ulid } from "ulid";
 import { Diagnostic } from "../../kernel/errors.ts";
-import { identitySchema, ulidSchema } from "../../kernel/identity.ts";
+import {
+  identitySchema,
+  createIdempotencyKey,
+  idempotencyKeySchema,
+} from "../../kernel/identity.ts";
 import { httpClient } from "../../gateway/client.ts";
 import { OperationResultType } from "../../kernel/operation.ts";
 import { AccessPolicy } from "../../kernel/operation.ts";
@@ -43,11 +46,11 @@ async function register(command: Command): Promise<void> {
       "cli.worker.register.token_required",
       "worker register: supply a machine JWT through --token, KANTHORD_TOKEN or cli.yaml.",
     );
-  const key = options.idempotencyKey ?? ulid();
-  if (!ulidSchema.safeParse(key).success)
+  const key = options.idempotencyKey ?? createIdempotencyKey();
+  if (!idempotencyKeySchema.safeParse(key).success)
     throw new Diagnostic(
       "cli.worker.register.invalid_idempotency_key",
-      "worker register: --idempotency-key must be a canonical ULID.",
+      "worker register: --idempotency-key must be idempotency_key_ followed by a canonical ULID.",
     );
   const result = await httpClient(
     workerOperations,
@@ -442,7 +445,7 @@ export function addWorkerCommand(program: Command): void {
       "Machine JWT (otherwise KANTHORD_TOKEN or cli.yaml)",
     )
     .option(
-      "--idempotency-key <ulid>",
+      "--idempotency-key <key>",
       "Reuse this key when retrying the same registration; generated when omitted",
     )
     .action((_options, command: Command) => register(command));
@@ -451,7 +454,7 @@ export function addWorkerCommand(program: Command): void {
     .description("Receive execution credentials and print only receipt status")
     .argument("<execution-id>", "Execution identity")
     .option("--token <jwt>", "Machine JWT", singleUse("--token"))
-    .option("--idempotency-key <ulid>", "Mutation key", singleUse(KEY_OPTION))
+    .option("--idempotency-key <key>", "Mutation key", singleUse(KEY_OPTION))
     .action((executionId: string, _options, command: Command) =>
       handover(executionId, command),
     );

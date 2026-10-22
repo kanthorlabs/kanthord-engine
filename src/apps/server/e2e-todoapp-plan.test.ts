@@ -32,6 +32,7 @@ import {
   enableCoveringAgents,
   gatewayFixture,
 } from "./test-support.ts";
+import { createIdempotencyKey } from "../../kernel/identity.ts";
 
 const FAILURE = 1;
 const NO_OUTPUT = "";
@@ -284,7 +285,7 @@ async function setup(t: TestContext) {
     project.missionId,
     ...paths,
     "--idempotency-key",
-    ulid(),
+    createIdempotencyKey(),
   ];
   const applyBody = async (
     project: Project,

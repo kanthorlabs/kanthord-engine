@@ -14,7 +14,7 @@ import { gatewayFixture } from "./test-support.ts";
 
 const VERSION_UNAVAILABLE = "gateway.client.version_unavailable";
 const ANSWER_INVALID = "gateway.client.answer_invalid";
-const IDEMPOTENCY_KEY = "01ARZ3NDEKTSV4RRFFQ69G5FAA";
+const IDEMPOTENCY_KEY = "idempotency_key_01ARZ3NDEKTSV4RRFFQ69G5FAA";
 const PULL_INPUT = {
   params: {},
   query: {},

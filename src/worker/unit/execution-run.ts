@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { ulid } from "ulid";
 import { CancellationContext, type Context } from "../../kernel/context.ts";
 import { CodedError } from "../../kernel/errors.ts";
 import {
@@ -15,6 +14,7 @@ import {
   type BudgetLimit,
   type ReleaseStop,
 } from "../../scheduler/contract.ts";
+import { createIdempotencyKey } from "../../kernel/identity.ts";
 
 type EvidenceBody = Omit<
   Parameters<MethodClients["mission"]["evidence.submit"]>[0]["body"],
@@ -195,7 +195,7 @@ export class ExecutionRun {
     try {
       result = await invoke({
         context: this.operationContext,
-        idempotencyKey: ulid(),
+        idempotencyKey: createIdempotencyKey(),
       });
     } catch (error) {
       return this.stop(
@@ -223,7 +223,10 @@ export class ExecutionRun {
           query: {},
           body: null,
         },
-        { context: this.operationContext, idempotencyKey: ulid() },
+        {
+          context: this.operationContext,
+          idempotencyKey: createIdempotencyKey(),
+        },
       );
     } catch {
       this.requireActive();
@@ -363,12 +366,12 @@ export class ExecutionRun {
       const params = { execution_id: this.claim.execution_id };
       const result = await this.clients.scheduler.executionRelease(
         { params, query: {}, body: { further_work: true, stop } },
-        { context, idempotencyKey: ulid() },
+        { context, idempotencyKey: createIdempotencyKey() },
       );
       if (result.type === OperationResultType.Indeterminate) {
         const claim = await this.clients.scheduler.claimGet(
           { params, query: {}, body: null },
-          { context, idempotencyKey: ulid() },
+          { context, idempotencyKey: createIdempotencyKey() },
         );
         if (
           claim.type === OperationResultType.Completed &&

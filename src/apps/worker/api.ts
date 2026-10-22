@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
-import { ulid } from "ulid";
 import type { Context } from "../../kernel/context.ts";
 import {
   OperationResultType,
   type OperationResult,
 } from "../../kernel/operation.ts";
+import { createIdempotencyKey } from "../../kernel/identity.ts";
 
 export const BACKOFF_INITIAL_MS = 1000;
 export const BACKOFF_MAX_MS = 30000;
@@ -62,7 +62,7 @@ export async function retryIndeterminate<T>(
     attempt < maximumAttempts && !context.err() && Date.now() < deadline;
     attempt++
   ) {
-    result = await call(ulid());
+    result = await call(createIdempotencyKey());
     if (result.type !== OperationResultType.Indeterminate) return result;
     const delay = backoff.next();
     if (Date.now() + delay >= deadline) return result;

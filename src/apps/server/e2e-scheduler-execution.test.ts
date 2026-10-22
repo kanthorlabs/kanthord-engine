@@ -3,10 +3,12 @@ import { join } from "node:path";
 import { test, type TestContext } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 import { parse, stringify } from "yaml";
-import { ulid } from "ulid";
 import { configuration, CONFIG_VERSION } from "../../config/index.ts";
 import { writePrivate } from "../../kernel/files.ts";
-import { ulidSchema } from "../../kernel/identity.ts";
+import {
+  createIdempotencyKey,
+  idempotencyKeySchema,
+} from "../../kernel/identity.ts";
 import { temporary } from "../../kernel/test-support.ts";
 import { NodeState, Intent } from "../../mission/contract.ts";
 import {
@@ -404,8 +406,12 @@ test(
       "E03.2 repeated pull returns the existing execution",
       async () => {
         assert.equal(
-          (await h.pull(h.G, h.generalPull, ["--idempotency-key", ulid()]))
-            .execution.execution_id,
+          (
+            await h.pull(h.G, h.generalPull, [
+              "--idempotency-key",
+              createIdempotencyKey(),
+            ])
+          ).execution.execution_id,
           X,
         );
         assert.equal(
@@ -488,7 +494,9 @@ test(
         }>(["scheduler", "execution", "release", X, "--file", further], h.G);
         assert.equal(result.execution_id, X);
         assert.ok(Number.isSafeInteger(result.ended_at));
-        assert.ok(ulidSchema.safeParse(result.idempotency_key).success);
+        assert.ok(
+          idempotencyKeySchema.safeParse(result.idempotency_key).success,
+        );
         assert.equal((await h.claim(X)).claim_state, ClaimState.Finished);
         const ended = await h.get(X);
         const root = await h.rootSpan(ended.trace_id);

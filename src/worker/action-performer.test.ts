@@ -260,7 +260,10 @@ test("dispatch forwards identity, derived operands and the returned address to M
   });
   assert.equal(options.identity, h.identity);
   assert.equal(options.context, background);
-  assert.match(options.idempotencyKey!, /^[0-9A-HJKMNP-TV-Z]{26}$/);
+  assert.match(
+    options.idempotencyKey!,
+    /^idempotency_key_[0-7][0-9A-HJKMNP-TV-Z]{25}$/,
+  );
 });
 
 test("merge push records the address and commit returned by Intake", async (t) => {

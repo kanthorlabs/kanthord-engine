@@ -3,7 +3,6 @@ import { join } from "node:path";
 import { test, type TestContext } from "node:test";
 import { setImmediate as turn } from "node:timers/promises";
 import type { z } from "zod";
-import { ulid } from "ulid";
 import { directClient } from "../../gateway/index.ts";
 import { httpClient } from "../../gateway/client.ts";
 import { llmOperations } from "../../llm/contract.ts";
@@ -36,7 +35,7 @@ import {
 import { CancellationContext } from "../../kernel/context.ts";
 import { HttpStatus } from "../../kernel/http.ts";
 import { temporary } from "../../kernel/test-support.ts";
-import { createIdentity } from "../../kernel/identity.ts";
+import { createIdentity, createIdempotencyKey } from "../../kernel/identity.ts";
 import {
   FAKE_GITHUB_HOST_KEY_FINGERPRINT,
   FAKE_SSH_CREDENTIAL,
@@ -385,13 +384,13 @@ async function setup(t: TestContext, adapter: Adapter, path?: string) {
 for (const adapter of ["direct", "http"] as const) {
   test(`${adapter}: pulls are naturally idempotent and release proof precedes replay`, async (t) => {
     const h = await setup(t, adapter);
-    const key = ulid();
+    const key = createIdempotencyKey();
     const first = completed(
       await h.pull(h.general, h.generalToken, { idempotencyKey: key }),
     );
     assert.ok(first.kind === WorkPullKind.Claimed);
     assert.equal(first.execution.node_id, h.node_id);
-    for (const idempotencyKey of [key, ulid()])
+    for (const idempotencyKey of [key, createIdempotencyKey()])
       assert.deepEqual(
         completed(await h.pull(h.general, h.generalToken, { idempotencyKey })),
         first,
@@ -402,7 +401,7 @@ for (const adapter of ["direct", "http"] as const) {
       await turn(undefined, { signal: t.signal });
     context.cancel();
     assert.notEqual((await other).type, OperationResultType.Completed);
-    const releaseKey = ulid();
+    const releaseKey = createIdempotencyKey();
     completed(
       await h.release(first.execution.execution_id, true, {
         idempotencyKey: releaseKey,

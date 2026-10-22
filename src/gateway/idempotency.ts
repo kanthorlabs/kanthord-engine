@@ -1,4 +1,4 @@
-import { ulidSchema } from "../kernel/identity.ts";
+import { idempotencyKeySchema } from "../kernel/identity.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import { conflict, GatewayError } from "./errors.ts";
 
@@ -63,11 +63,11 @@ export class Idempotency {
     fingerprint: string,
   ): { reservation: Reservation; replay?: RecordedResponse } {
     if (this.stopped) throw new Error("Idempotency component is stopped.");
-    if (!ulidSchema.safeParse(key).success)
+    if (!idempotencyKeySchema.safeParse(key).success)
       throw new GatewayError(
         HttpStatus.BadRequest,
         "gateway.idempotency.invalid_key",
-        "Idempotency-Key must be a canonical ULID.",
+        "Idempotency-Key must be idempotency_key_ followed by a canonical ULID.",
       );
     const index = JSON.stringify([caller, key]);
     const now = Date.now();

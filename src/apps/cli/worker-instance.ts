@@ -257,7 +257,7 @@ function keyedOptions(command: Command): Command {
       "Write the instance file workers/<name>.yaml on this host instead of printing the instance configuration",
     )
     .option("--force", "Overwrite an existing instance file (with --output)")
-    .option("--idempotency-key <ulid>", "Mutation key", singleUse(KEY_OPTION));
+    .option("--idempotency-key <key>", "Mutation key", singleUse(KEY_OPTION));
 }
 
 export function addWorkerInstanceCommands(worker: Command): void {
@@ -330,7 +330,7 @@ export function addWorkerInstanceCommands(worker: Command): void {
       "Live revision of the instance",
       singleUse("--expected-revision"),
     )
-    .option("--idempotency-key <ulid>", "Mutation key", singleUse(KEY_OPTION))
+    .option("--idempotency-key <key>", "Mutation key", singleUse(KEY_OPTION))
     .action((name: string, _options, command: Command) =>
       archive(name, command),
     );

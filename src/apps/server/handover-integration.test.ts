@@ -10,7 +10,6 @@ import {
 } from "@earendil-works/pi-ai";
 import { test, type TestContext } from "node:test";
 import type { z } from "zod";
-import { ulid } from "ulid";
 import { directClient } from "../../gateway/index.ts";
 import { httpClient } from "../../gateway/client.ts";
 import { deriveClientSecret } from "../../gateway/auth/jwt.ts";
@@ -53,7 +52,7 @@ import { HttpStatus } from "../../kernel/http.ts";
 import { SWE_AGENT_PROMPT } from "../../agent/prompt-assets.ts";
 import { framing, PromptConsumer } from "../../agent/prompt-render.ts";
 import { WORKING_LAYER_ALL_ON } from "../../worker/test-support.ts";
-import { createIdentity } from "../../kernel/identity.ts";
+import { createIdentity, createIdempotencyKey } from "../../kernel/identity.ts";
 import { canonicalJSON, digest } from "../../kernel/json.ts";
 import {
   deriveHandoverKeys,
@@ -362,7 +361,7 @@ async function loginCredential(
   const pending = completed(
     await client.login(
       { params: {}, query: {}, body: { platform: COPILOT, name: "anthro-1" } },
-      { idempotencyKey: ulid() },
+      { idempotencyKey: createIdempotencyKey() },
     ),
   );
   for (;;) {
@@ -681,7 +680,7 @@ async function setup(
         workerOperations["instance.connect"],
         { params: {}, query: {}, body: { connection_name: name } },
         worker.token,
-        { idempotencyKey: ulid() },
+        { idempotencyKey: createIdempotencyKey() },
       ),
     );
     const payload = connectionPayloadSchema.parse(
@@ -740,7 +739,7 @@ async function setup(
   const sign = (
     request: unknown,
     executionId = execution.execution_id,
-    idempotencyKey = ulid(),
+    idempotencyKey = createIdempotencyKey(),
     auth = token,
   ) =>
     call(
@@ -770,7 +769,7 @@ async function setup(
     );
   const handover = (
     executionId = execution.execution_id,
-    idempotencyKey = ulid(),
+    idempotencyKey = createIdempotencyKey(),
     auth = token,
   ) =>
     call(
@@ -782,7 +781,7 @@ async function setup(
   const report = (
     value: unknown,
     executionId = execution.execution_id,
-    idempotencyKey = ulid(),
+    idempotencyKey = createIdempotencyKey(),
   ) =>
     call(
       workerOperations.credential,
@@ -978,7 +977,7 @@ for (const adapter of ["direct", "http"] as const) {
               body: { execution_id: executionId, ...envelope },
             },
             h.token,
-            { idempotencyKey: ulid() },
+            { idempotencyKey: createIdempotencyKey() },
           ),
           HttpStatus.BadRequest,
           INVALID_REPORT,
@@ -1069,7 +1068,7 @@ for (const type of [SecretShape.ApiKey, SecretShape.OAuth] as const) {
     refused(
       await directClient(workerOperations, h.f.gateway.invocation).credential(
         { params: {}, query: {}, body },
-        { identity, idempotencyKey: ulid() },
+        { identity, idempotencyKey: createIdempotencyKey() },
       ),
       HttpStatus.BadRequest,
       INVALID_REPORT,
@@ -1077,7 +1076,7 @@ for (const type of [SecretShape.ApiKey, SecretShape.OAuth] as const) {
     refused(
       await httpClient(workerOperations, h.f.endpoint, h.token).credential(
         { params: {}, query: {}, body },
-        { idempotencyKey: ulid() },
+        { idempotencyKey: createIdempotencyKey() },
       ),
       HttpStatus.PayloadTooLarge,
       BODY_TOO_LARGE,
@@ -1130,7 +1129,7 @@ for (const type of [SecretShape.ApiKey, SecretShape.OAuth] as const) {
 for (const adapter of ["direct", "http"] as const) {
   test(`${adapter} handover pins, rotates, refreshes, rejects stale proof and drains after release`, async (t) => {
     const h = await setup(t, adapter);
-    const key = ulid();
+    const key = createIdempotencyKey();
     const first = completed(await h.handover(h.execution.execution_id, key));
     assert.deepEqual(h.open(first).items, [
       {
@@ -1186,7 +1185,11 @@ for (const adapter of ["direct", "http"] as const) {
       INVALID_REPORT,
     );
     refused(
-      await h.handover(h.execution.execution_id, ulid(), h.f.token),
+      await h.handover(
+        h.execution.execution_id,
+        createIdempotencyKey(),
+        h.f.token,
+      ),
       HttpStatus.Unauthorized,
       "gateway.authentication.unauthorized",
     );
@@ -1212,7 +1215,7 @@ for (const adapter of ["direct", "http"] as const) {
 
   test(`${adapter} failed execution proof reserves no key and malformed reports expose no secret`, async (t) => {
     const h = await setup(t, adapter);
-    const key = ulid();
+    const key = createIdempotencyKey();
     const clock = t.mock.method(Date, "now", () => h.execution.expired_at);
     refused(
       await h.handover(h.execution.execution_id, key),
@@ -1318,7 +1321,7 @@ for (const adapter of ["direct", "http"] as const) {
       data: data.toString("base64"),
       flags: RSA_SHA2_256,
     };
-    const idempotencyKey = ulid();
+    const idempotencyKey = createIdempotencyKey();
     const signed = h.openSigned(
       completed(
         await h.sign(request, h.execution.execution_id, idempotencyKey),
@@ -1392,7 +1395,12 @@ for (const adapter of ["direct", "http"] as const) {
     const other = h.instanceTokens[1]!;
     completed(await h.call(workerOperations.register, NO_INPUT, other));
     refused(
-      await h.sign(request, h.execution.execution_id, ulid(), other),
+      await h.sign(
+        request,
+        h.execution.execution_id,
+        createIdempotencyKey(),
+        other,
+      ),
       HttpStatus.Forbidden,
       PROOF_FAILED,
     );
@@ -1428,7 +1436,7 @@ test("HTTP handover enforces its byte limit before body parsing", async (t) => {
     headers: {
       authorization: `Bearer ${h.token}`,
       "content-type": "application/json",
-      "idempotency-key": ulid(),
+      "idempotency-key": createIdempotencyKey(),
     },
     body: JSON.stringify({ execution_id: h.execution.execution_id }).padEnd(
       1025,

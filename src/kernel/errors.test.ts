@@ -21,7 +21,7 @@ const LOG_PATH = "/var/lib/kanthord/kanthord.db";
 const ExpectedDiagnostic = {
   MissingConfiguration: "cli.config.not_found: Configuration absent.",
   Unknown: "system.operation.unknown: Operation failed.",
-  Rows: 'status:          409\nidempotency_key: 01K0000000000000000000000A\ndetails:         {"node_ids":["node_a","node_b"],"count":2}\n',
+  Rows: 'status:          409\nidempotency_key: idempotency_key_01K0000000000000000000000A\ndetails:         {"node_ids":["node_a","node_b"],"count":2}\n',
 } as const;
 const ExpectedErrorCode = {
   Unknown: "system.operation.unknown",
@@ -109,7 +109,7 @@ test("diagnostic rows align the fields and print details as compact JSON last", 
     {
       fields: [
         ["status", 409],
-        ["idempotency_key", "01K0000000000000000000000A"],
+        ["idempotency_key", "idempotency_key_01K0000000000000000000000A"],
       ],
       details,
     },

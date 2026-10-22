@@ -6,6 +6,9 @@ import {
   ulidSchema,
   ULID_LENGTH,
   IDENTITY_SUFFIX_LENGTH,
+  createIdempotencyKey,
+  idempotencyKeySchema,
+  IDEMPOTENCY_KEY_PREFIX,
 } from "./identity.ts";
 
 const suffix = "01ARZ3NDEKTSV4RRFFQ69G5FAV";
@@ -83,4 +86,18 @@ test("the separate bare ULID scalar preserves protocol contracts without admitti
     assert.equal(ulidSchema.safeParse(invalid).success, false);
     assert.throws(() => ulidSchema.parse(invalid));
   }
+});
+
+test("idempotency keys carry the idempotency key prefix and refuse a bare ULID", () => {
+  const key = createIdempotencyKey();
+  assert.equal(idempotencyKeySchema.parse(key), key);
+  assert.ok(key.startsWith(`${IDEMPOTENCY_KEY_PREFIX}_`));
+  assert.notEqual(createIdempotencyKey(), key);
+  for (const invalid of [
+    suffix,
+    `request_${suffix}`,
+    `${IDEMPOTENCY_KEY_PREFIX}_${suffix.toLowerCase()}`,
+    `${IDEMPOTENCY_KEY_PREFIX}_${suffix}\n`,
+  ])
+    assert.equal(idempotencyKeySchema.safeParse(invalid).success, false);
 });

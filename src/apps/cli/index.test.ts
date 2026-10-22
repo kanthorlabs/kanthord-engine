@@ -434,7 +434,7 @@ test("worker handover validates locally and prints receipt metadata without the 
   assert.equal(invalid.status, ExitCode.Failure);
   assert.match(invalid.stderr, /^cli\.worker\.handover\.invalid_execution_id:/);
   const executionId = "execution_01ARZ3NDEKTSV4RRFFQ69G5FAV";
-  const key = "01ARZ3NDEKTSV4RRFFQ69G5FAV";
+  const key = "idempotency_key_01ARZ3NDEKTSV4RRFFQ69G5FAV";
   const args = [
     "worker",
     "handover",
@@ -498,7 +498,7 @@ test("scheduler execution release tells the operator to read the execution befor
       "--token",
       "machine",
       "--idempotency-key",
-      "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+      "idempotency_key_01ARZ3NDEKTSV4RRFFQ69G5FAV",
     ],
     env,
     t.signal,
@@ -1887,7 +1887,10 @@ test("intake outbound discard prints the generated key when the result is indete
     result.stderr,
     /^cli\.intake\.outbound\.discard\.indeterminate:/,
   );
-  assert.match(result.stderr, /^idempotency_key: [0-9A-HJKMNP-TV-Z]{26}$/m);
+  assert.match(
+    result.stderr,
+    /^idempotency_key: idempotency_key_[0-7][0-9A-HJKMNP-TV-Z]{25}$/m,
+  );
 });
 
 test("intake event mutations print the generated key when the result is indeterminate", async (t) => {
@@ -1909,7 +1912,10 @@ test("intake event mutations print the generated key when the result is indeterm
       result.stderr,
       new RegExp(`^cli\\.intake\\.event\\.${leaf[0]}\\.indeterminate:`),
     );
-    assert.match(result.stderr, /^idempotency_key: [0-9A-HJKMNP-TV-Z]{26}$/m);
+    assert.match(
+      result.stderr,
+      /^idempotency_key: idempotency_key_[0-7][0-9A-HJKMNP-TV-Z]{25}$/m,
+    );
   }
 });
 

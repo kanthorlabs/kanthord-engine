@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import { type TestContext } from "node:test";
-import { ulid } from "ulid";
 import { directClient } from "../../gateway/index.ts";
 import { httpClient } from "../../gateway/client.ts";
 import { INTAKE_SERVICE_NAME } from "../../intake/contract.ts";
@@ -31,6 +30,7 @@ import {
   pushNodeBranch,
   repositoryBinding,
 } from "./cli-support.ts";
+import { createIdempotencyKey } from "../../kernel/identity.ts";
 
 export const FIRST_INDEX = 0;
 const FIRST_REVISION = 1;
@@ -228,7 +228,7 @@ export async function setup(t: TestContext, options: SetupOptions = {}) {
             },
           },
         },
-        { idempotencyKey: ulid() },
+        { idempotencyKey: createIdempotencyKey() },
       ),
     );
   const requestMergePush = async (x: ExecutionRecord, commit: string) =>
@@ -249,7 +249,7 @@ export async function setup(t: TestContext, options: SetupOptions = {}) {
             },
           },
         },
-        { idempotencyKey: ulid() },
+        { idempotencyKey: createIdempotencyKey() },
       ),
     );
   const performer = httpClient(workerOperations, c.fixture.endpoint, token);
@@ -257,7 +257,7 @@ export async function setup(t: TestContext, options: SetupOptions = {}) {
     completed(
       await performer["action.request"](
         { params: { execution_id: x.execution_id }, query: {}, body: null },
-        { idempotencyKey: ulid() },
+        { idempotencyKey: createIdempotencyKey() },
       ),
     );
   const check = async (nodeId: string) =>
@@ -285,7 +285,10 @@ export async function setup(t: TestContext, options: SetupOptions = {}) {
           metadata: { event: webhook.event },
         },
       },
-      { identity: mintServiceIdentity(service), idempotencyKey: ulid() },
+      {
+        identity: mintServiceIdentity(service),
+        idempotencyKey: createIdempotencyKey(),
+      },
     );
   const rework = (nodeId: string, commit: string) =>
     passingEvaluation(c.session, machine, {

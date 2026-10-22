@@ -8,7 +8,6 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import { test, type TestContext } from "node:test";
-import { ulid } from "ulid";
 import {
   PRIVATE_DIRECTORY_MODE,
   PRIVATE_FILE_MODE,
@@ -50,6 +49,7 @@ import {
   enableCoveringAgents,
   gatewayFixture,
 } from "./test-support.ts";
+import { createIdempotencyKey } from "../../kernel/identity.ts";
 
 const SUCCESS = 0;
 const FAILURE = 1;
@@ -540,7 +540,7 @@ test(
   async (t) => {
     const fixture = await setup(t);
     const mission = await createMission(fixture);
-    const key = ulid();
+    const key = createIdempotencyKey();
     const examineFile = jsonFile(fixture, "examine.json", {
       filename: "examine.md",
       content: { ...CONTENT, intent: Intent.Examine },
@@ -874,7 +874,10 @@ for (const action of [PREVIEW, APPLY] as const) {
         refusal(await kanthord(local, fixture.env), FILE_SCHEMA_INVALID);
       }
       if (action === PREVIEW) {
-        const result = await kanthord([...local, KEY, ulid()], fixture.env);
+        const result = await kanthord(
+          [...local, KEY, createIdempotencyKey()],
+          fixture.env,
+        );
         assert.equal(result.code, FAILURE);
         assert.match(result.stderr, UNKNOWN_OPTION);
       }
@@ -965,7 +968,7 @@ async function applyImport(
     preview_digest: preview.preview_digest,
     confirmed_retirements: [],
   });
-  const key = ulid();
+  const key = createIdempotencyKey();
   const args = [
     MISSION,
     IMPORT,
@@ -1243,7 +1246,7 @@ async function retireImportedNode(
     expected_mission_version: applied.mission_version,
     preview_digest: preview.preview_digest,
   });
-  const key = ulid();
+  const key = createIdempotencyKey();
   const args = [MISSION, NODE, RETIRE, nodeId, FILE, path, KEY, key];
   const retired = success<Mutation>(await kanthord(args, fixture.env));
   assert.ok(retired.retired_node_ids.includes(nodeId));
@@ -1484,7 +1487,14 @@ async function queued(scenario: Scenario, nodeId: string): Promise<void> {
 }
 
 async function scenarioProject(fixture: Fixture): Promise<Mission> {
-  const args = [PROJECT, CREATE, NAME, PROJECT_NAME, KEY, ulid()];
+  const args = [
+    PROJECT,
+    CREATE,
+    NAME,
+    PROJECT_NAME,
+    KEY,
+    createIdempotencyKey(),
+  ];
   const project = success<{ id: string; binding_set_version: number }>(
     await kanthord(args, fixture.env),
   );
@@ -1525,7 +1535,7 @@ async function scenarioExamine(fixture: Fixture): Promise<Scenario> {
     FILE,
     path,
     KEY,
-    ulid(),
+    createIdempotencyKey(),
   ];
   const created = success<Mutation>(await kanthord(createArgs, fixture.env));
   assert.equal(created.mission_version, mission.version + VERSION_INCREMENT);
@@ -2459,7 +2469,7 @@ test(
               path,
               ...paths,
               KEY,
-              ulid(),
+              createIdempotencyKey(),
             ],
             fixture.env,
           ),

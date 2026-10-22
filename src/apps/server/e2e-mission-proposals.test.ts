@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import { join } from "node:path";
 import { test, type TestContext } from "node:test";
-import { ulid } from "ulid";
 import { httpClient } from "../../gateway/client.ts";
 import { writePrivate } from "../../kernel/files.ts";
 import { HttpStatus } from "../../kernel/http.ts";
@@ -37,6 +36,7 @@ import {
   passingEvaluation,
   repositorySnapshot,
 } from "./cli-support.ts";
+import { createIdempotencyKey } from "../../kernel/identity.ts";
 
 const FAILURE_EXIT_CODE = 1;
 const INITIAL_FILE_NUMBER = 0;
@@ -346,7 +346,7 @@ test(
             query: {},
             body: { expected_mission_version: FIRST_REVISION },
           },
-          { idempotencyKey: ulid() },
+          { idempotencyKey: createIdempotencyKey() },
         ),
         HttpStatus.Conflict,
       );
@@ -370,7 +370,7 @@ test(
             query: {},
             body: { expected_mission_version: await h.missionVersion() },
           },
-          { idempotencyKey: ulid() },
+          { idempotencyKey: createIdempotencyKey() },
         ),
         HttpStatus.Unauthorized,
       );
@@ -465,7 +465,7 @@ test(
             query: {},
             body: { expected_mission_version: await h.missionVersion() },
           },
-          { idempotencyKey: ulid() },
+          { idempotencyKey: createIdempotencyKey() },
         ),
         HttpStatus.Conflict,
       );

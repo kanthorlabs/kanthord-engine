@@ -151,7 +151,10 @@ test(
       assert.match(runtime, /^worker_registration_/);
       assert.equal(registration.resource_identity, resource);
       assert.equal(registration.worker_name, WORKER);
-      assert.match(registration.idempotency_key, /^[0-9A-HJKMNP-TV-Z]{26}$/);
+      assert.match(
+        registration.idempotency_key,
+        /^idempotency_key_[0-7][0-9A-HJKMNP-TV-Z]{25}$/,
+      );
       await cli.refuses(
         ["worker", "register"],
         other.token,

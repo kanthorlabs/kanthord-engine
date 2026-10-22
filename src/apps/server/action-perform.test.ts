@@ -49,6 +49,7 @@ import {
   remoteHead,
   type FakeGitHubCall,
 } from "./test-support.ts";
+import { createIdempotencyKey } from "../../kernel/identity.ts";
 
 const SUCCESSFUL_EXIT = 0;
 const NO_OUTPUT = "";
@@ -441,7 +442,7 @@ async function setup(t: TestContext, landing = "human") {
           merge_evidence_id: mergeEvidenceId,
         },
       },
-      { identity, idempotencyKey: ulid() },
+      { identity, idempotencyKey: createIdempotencyKey() },
     ) as Promise<OperationResult<Answer>>;
   const check = (evidenceId: string) =>
     intake["action.check"](

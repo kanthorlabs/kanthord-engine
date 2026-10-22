@@ -4,7 +4,6 @@ import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { join } from "node:path";
 import { test, type TestContext } from "node:test";
-import { ulid } from "ulid";
 import type { CredentialAnswer } from "../../custody/contract.ts";
 import { writePrivate } from "../../kernel/files.ts";
 import { ResourceFailureReason, ResourceStatus } from "../../kernel/health.ts";
@@ -13,6 +12,7 @@ import { CAPABILITY_MODEL_LIST_READ } from "../../llm/platforms.ts";
 import { temporary } from "../../kernel/test-support.ts";
 import { environment, kanthord } from "./cli-support.ts";
 import { gatewayFixture } from "./test-support.ts";
+import { createIdempotencyKey } from "../../kernel/identity.ts";
 
 const ExitCode = { Success: 0, Failure: 1 } as const;
 const EMPTY_OUTPUT = "";
@@ -114,8 +114,8 @@ test("E01.1 create and get an anthropic credential without secrets", async (t) =
 test("E01.2 creating the same name with a different key conflicts", async (t) => {
   const { directory, env } = await setup(t);
   const file = createFile(directory, ANTHROPIC);
-  const firstKey = ulid();
-  const secondKey = ulid();
+  const firstKey = createIdempotencyKey();
+  const secondKey = createIdempotencyKey();
   assert.notEqual(firstKey, secondKey);
   success(
     await kanthord(
@@ -135,7 +135,14 @@ test("E01.2 creating the same name with a different key conflicts", async (t) =>
 test("E01.3 replaying the same create key returns the original JSON", async (t) => {
   const { directory, env } = await setup(t);
   const file = createFile(directory, ANTHROPIC);
-  const args = [...LLM, "create", "--file", file, "--idempotency-key", ulid()];
+  const args = [
+    ...LLM,
+    "create",
+    "--file",
+    file,
+    "--idempotency-key",
+    createIdempotencyKey(),
+  ];
   const created = success(await kanthord(args, env));
   const replayed = success(await kanthord(args, env));
   assert.deepEqual(replayed, created);
@@ -581,7 +588,7 @@ test("verify requires a token and rejects a mutation key without a server", asyn
     "cli.llm.credential.verify.token_required",
   );
   const result = await kanthord(
-    [...LLM, "verify", NAME, "--idempotency-key", ulid()],
+    [...LLM, "verify", NAME, "--idempotency-key", createIdempotencyKey()],
     { ...env, KANTHORD_TOKEN: LOCAL_TOKEN },
   );
   assert.equal(result.code, ExitCode.Failure, result.stderr);

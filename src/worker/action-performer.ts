@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import type { Logger } from "pino";
-import { ulid } from "ulid";
 import type { MachineIdentity } from "../kernel/caller.ts";
 import { Landing } from "../project/contract.ts";
 import type { Context } from "../kernel/context.ts";
@@ -43,6 +42,7 @@ import {
 } from "./action-classify.ts";
 import { fulfils, sameRepository } from "./action-reuse.ts";
 import type { Dependencies } from "./service.ts";
+import { createIdempotencyKey } from "../kernel/identity.ts";
 
 type PerformerDependencies = Pick<
   Dependencies,
@@ -359,7 +359,7 @@ export class ActionPerformer {
             address,
           },
         },
-        { ...caller, idempotencyKey: ulid() },
+        { ...caller, idempotencyKey: createIdempotencyKey() },
       );
     } catch {
       result = { type: OperationResultType.Indeterminate };

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
-import { ulidSchema } from "../../kernel/identity.ts";
+import { idempotencyKeySchema } from "../../kernel/identity.ts";
 import { temporary } from "../../kernel/test-support.ts";
 import { environment, generateMachineToken, kanthord } from "./cli-support.ts";
 import { gatewayFixture } from "./test-support.ts";
@@ -97,7 +97,7 @@ test("E02.5 outbound delete with force and a valid filter counts zero", async (t
   };
   assert.equal(answer.count, UNMATCHED_DELETE_COUNT);
   assert.ok(
-    ulidSchema.safeParse(answer.idempotency_key).success,
+    idempotencyKeySchema.safeParse(answer.idempotency_key).success,
     result.stdout,
   );
   assert.equal(result.stderr, EMPTY_OUTPUT);

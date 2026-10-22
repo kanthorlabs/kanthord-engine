@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { ulid } from "ulid";
 import {
   background,
   CancellationContext,
@@ -9,6 +8,7 @@ import { Diagnostic } from "../../kernel/errors.ts";
 import { OperationResultType } from "../../kernel/operation.ts";
 import type { WorkerTransport } from "./transport.ts";
 import { WorkerErrorCode } from "../../worker/contract.ts";
+import { createIdempotencyKey } from "../../kernel/identity.ts";
 
 export interface Registration {
   runtime_identity: string;
@@ -31,7 +31,7 @@ export function startHeartbeat(
     try {
       const result = await api.worker.heartbeat(
         { params: {}, query: {}, body: null },
-        { context, idempotencyKey: ulid() },
+        { context, idempotencyKey: createIdempotencyKey() },
       );
       if (context.err() || result.type === OperationResultType.Completed)
         return;
@@ -66,7 +66,7 @@ export async function register(
   assert.ok(context);
   const result = await api.worker.register(
     { params: {}, query: {}, body: null },
-    { context, idempotencyKey: ulid() },
+    { context, idempotencyKey: createIdempotencyKey() },
   );
   if (result.type === OperationResultType.Completed) return result.data;
   if (result.type === OperationResultType.Failure)
@@ -85,7 +85,7 @@ export async function deregister(
   assert.ok(api.worker["registration.deregister"]);
   const result = await api.worker["registration.deregister"](
     { params: { runtime_identity: runtimeIdentity }, query: {}, body: null },
-    { idempotencyKey: ulid(), context: background },
+    { idempotencyKey: createIdempotencyKey(), context: background },
   );
   if (result.type === OperationResultType.Completed) return null;
   if (result.type === OperationResultType.Indeterminate)

@@ -48,7 +48,10 @@ test("execution calls return data with fresh canonical keys and settle credentia
   const keys = new Set<string>();
   for (let i = 0; i < CALLS; i++) {
     const value = await run.call(async (options) => {
-      assert.match(options.idempotencyKey!, /^[0-9A-HJKMNP-TV-Z]{26}$/);
+      assert.match(
+        options.idempotencyKey!,
+        /^idempotency_key_[0-7][0-9A-HJKMNP-TV-Z]{25}$/,
+      );
       assert.ok(!keys.has(options.idempotencyKey!));
       keys.add(options.idempotencyKey!);
       return { type: OperationResultType.Completed, status: 200, data: VALUE };

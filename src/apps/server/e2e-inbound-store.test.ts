@@ -8,7 +8,7 @@ import {
   WEBHOOK_ADDRESS_PREFIX,
 } from "../../intake/contract.ts";
 import { writePrivate } from "../../kernel/files.ts";
-import { ulidSchema } from "../../kernel/identity.ts";
+import { idempotencyKeySchema } from "../../kernel/identity.ts";
 import { isString } from "../../kernel/values.ts";
 import { temporary } from "../../kernel/test-support.ts";
 import { environment, kanthord } from "./cli-support.ts";
@@ -87,7 +87,7 @@ test("E05 inbound store CLI journey", { timeout: TIMEOUT }, async (t) => {
     assert.equal(created.credential, null);
     assert.equal(created.checkpoint, null);
     assert.deepEqual(created.configuration, { resource: RESOURCE });
-    assert.ok(ulidSchema.safeParse(created.idempotency_key).success);
+    assert.ok(idempotencyKeySchema.safeParse(created.idempotency_key).success);
     W = created.id;
   });
 
@@ -154,7 +154,7 @@ test("E05 inbound store CLI journey", { timeout: TIMEOUT }, async (t) => {
     const deleted = succeeded<{ idempotency_key: string }>(
       await run(["delete", W2]),
     );
-    assert.ok(ulidSchema.safeParse(deleted.idempotency_key).success);
+    assert.ok(idempotencyKeySchema.safeParse(deleted.idempotency_key).success);
     refused(await run(["get", W2]), NOT_FOUND);
     refused(await run(["delete", W2]), NOT_FOUND);
   });

@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { ulid } from "ulid";
 import { z } from "zod";
 import type { TSchema } from "@earendil-works/pi-ai";
 import type { PiCodingAgent } from "../agent/pi.ts";
@@ -20,6 +19,7 @@ import { childEnvironment } from "../agent/environment.ts";
 import { llmOperations } from "../llm/contract.ts";
 import { repositoryOperations } from "../repository/contract.ts";
 import { storageOperations } from "../storage/contract.ts";
+import { createIdempotencyKey } from "../kernel/identity.ts";
 
 export const SECRET_OPERATION_IDS: ReadonlySet<string> = new Set([
   llmOperations.create.id,
@@ -92,7 +92,9 @@ export function operationTool(
         const result = await invoke(operation, params, {
           identity,
           context,
-          ...(operation.mutation ? { idempotencyKey: ulid() } : {}),
+          ...(operation.mutation
+            ? { idempotencyKey: createIdempotencyKey() }
+            : {}),
         });
         if (result.type === OperationResultType.Completed)
           return {

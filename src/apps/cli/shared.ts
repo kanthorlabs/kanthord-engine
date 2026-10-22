@@ -1,10 +1,12 @@
 import { readFileSync, statSync } from "node:fs";
-import { ulid } from "ulid";
 import { z } from "zod";
 import { Diagnostic, validationIssues } from "../../kernel/errors.ts";
 import { readPrivate } from "../../kernel/files.ts";
 import type { Row } from "../../kernel/rows.ts";
-import { ulidSchema } from "../../kernel/identity.ts";
+import {
+  createIdempotencyKey,
+  idempotencyKeySchema,
+} from "../../kernel/identity.ts";
 import { isNumber, ValueType } from "../../kernel/values.ts";
 import {
   OperationResultType,
@@ -141,8 +143,8 @@ export function readJsonFileAs<S extends z.ZodTypeAny>(
 }
 
 export function resolveKey(options: { idempotencyKey?: string }): string {
-  if (options.idempotencyKey === undefined) return ulid();
-  if (!ulidSchema.safeParse(options.idempotencyKey).success)
+  if (options.idempotencyKey === undefined) return createIdempotencyKey();
+  if (!idempotencyKeySchema.safeParse(options.idempotencyKey).success)
     throw new Diagnostic(INVALID_KEY, "invalid idempotency key");
   return options.idempotencyKey;
 }

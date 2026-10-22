@@ -1,4 +1,3 @@
-import { ulid } from "ulid";
 import { background, type Context } from "../../kernel/context.ts";
 import { Diagnostic, type ErrorDetails } from "../../kernel/errors.ts";
 import { openJSON } from "../../kernel/hpke.ts";
@@ -25,6 +24,7 @@ import {
   type InstanceConfiguration,
   type WorkerTokenPayload,
 } from "../../worker/contract.ts";
+import { createIdempotencyKey } from "../../kernel/identity.ts";
 
 const BASE64URL = "base64url";
 export const EXCHANGE_UNAVAILABLE = "worker.instance.exchange_unavailable";
@@ -142,7 +142,7 @@ export class InstanceExchange {
               : { connection_id: connectionId }),
           },
         },
-        { context, idempotencyKey: ulid() },
+        { context, idempotencyKey: createIdempotencyKey() },
       ),
       "connect",
     );
@@ -223,7 +223,7 @@ export class InstanceExchange {
     settled(
       await this.llm.report(
         { params: { credential_name: name }, query: {}, body },
-        { context, idempotencyKey: ulid() },
+        { context, idempotencyKey: createIdempotencyKey() },
       ),
       "credential report",
     );
@@ -244,7 +244,7 @@ export class InstanceExchange {
             connection_name: connectionName,
           },
         },
-        { context, idempotencyKey: ulid() },
+        { context, idempotencyKey: createIdempotencyKey() },
       ),
       "heartbeat",
     );

@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import { join } from "node:path";
 import { test, type TestContext } from "node:test";
 import { parse, stringify } from "yaml";
-import { ulid } from "ulid";
 import { configuration, CONFIG_VERSION } from "../../config/index.ts";
 import {
   plainHandoverPayloadSchema,
@@ -20,7 +19,10 @@ import {
   type HandoverEnvelope,
 } from "../../kernel/handover.ts";
 import { HttpStatus } from "../../kernel/http.ts";
-import { ulidSchema } from "../../kernel/identity.ts";
+import {
+  createIdempotencyKey,
+  idempotencyKeySchema,
+} from "../../kernel/identity.ts";
 import { digest } from "../../kernel/json.ts";
 import {
   OperationResultType,
@@ -307,7 +309,7 @@ async function setup(t: TestContext) {
     keys.report.fill(0);
   });
   const client = httpClient(workerOperations, fixture.endpoint, general.token);
-  const handover = (executionId: string, key = ulid()) =>
+  const handover = (executionId: string, key = createIdempotencyKey()) =>
     client.handover(
       { params: {}, query: {}, body: { execution_id: executionId } },
       { idempotencyKey: key },
@@ -319,7 +321,7 @@ async function setup(t: TestContext) {
         query: {},
         body: { execution_id: executionId, ...envelope },
       },
-      { idempotencyKey: ulid() },
+      { idempotencyKey: createIdempotencyKey() },
     );
   const aad = (executionId: string) =>
     handoverAad(executionId, registration.runtime_identity);
@@ -357,7 +359,7 @@ test(
     const h = await setup(t);
     const X = h.execution_id;
     const C1 = h.credentialId;
-    const K1 = ulid();
+    const K1 = createIdempotencyKey();
     const S = h.sshCredentialId;
     let S2: string;
     let pinnedKey: string;
@@ -386,7 +388,9 @@ test(
           "received",
         ]);
         assert.equal(receipt.received, true);
-        assert.ok(ulidSchema.safeParse(receipt.idempotency_key).success);
+        assert.ok(
+          idempotencyKeySchema.safeParse(receipt.idempotency_key).success,
+        );
         const execution = await h.read<ExecutionRecord>([
           "scheduler",
           "execution",

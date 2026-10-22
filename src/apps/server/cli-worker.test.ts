@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { join } from "node:path";
 import { existsSync, readFileSync } from "node:fs";
-import { ulid } from "ulid";
 import { stringify } from "yaml";
 import { decode } from "hono/jwt";
 import { temporary } from "../../kernel/test-support.ts";
@@ -17,6 +16,7 @@ import { directories } from "../../config/index.ts";
 import { kanthord as command, environment } from "./cli-support.ts";
 import { WorkerMethod } from "../../worker/contract.ts";
 import { errorSchema } from "../../kernel/errors.ts";
+import { createIdempotencyKey } from "../../kernel/identity.ts";
 
 const ExitCode = { Success: 0, Failure: 1 } as const;
 const clientConfigPath = (env: NodeJS.ProcessEnv) =>
@@ -83,7 +83,7 @@ test("deregistration CLI validates identity and token and returns replayable JSO
     absent.stderr,
     /^cli.worker.registration.deregister.token_required:/,
   );
-  const key = ulid();
+  const key = createIdempotencyKey();
   const ended = await command(
     [...leaf, runtimeIdentity, "--token", token, "--idempotency-key", key],
     env,
@@ -353,7 +353,7 @@ test("worker register prints registration facts and key to redirected stdout and
     KANTHORD_ENDPOINT: fixture.endpoint,
     KANTHORD_TOKEN: token,
   };
-  const key = ulid();
+  const key = createIdempotencyKey();
   const args = ["worker", "register", "--idempotency-key", key];
   let previous: unknown;
   for (let attempt = 0; attempt < REGISTRATION_ATTEMPTS; attempt++) {
@@ -446,7 +446,10 @@ test("worker registration resolves option over environment over file without rew
       machines.worker.findByClient(String(decode(entry.token).payload.sub))
         ?.runtime_identity,
     );
-    assert.match(response.idempotency_key, /^[0-7][0-9A-HJKMNP-TV-Z]{25}$/);
+    assert.match(
+      response.idempotency_key,
+      /^idempotency_key_[0-7][0-9A-HJKMNP-TV-Z]{25}$/,
+    );
     assert.ok(!result.stdout.includes(entry.token));
   }
   assert.equal(machines.worker.registrations.size, TOKEN_SOURCES);
@@ -458,7 +461,7 @@ test("worker register reports declared failures and indeterminate transport with
   const fixture = await gatewayFixture(t, { machines });
   const token = await fixture.machineToken(TEST_PROJECT_ID, "absent");
   const env = { ...environment(temporary(t)), KANTHORD_TOKEN: token };
-  const key = ulid();
+  const key = createIdempotencyKey();
   const args = ["worker", "register", "--idempotency-key", key];
   const refused = await command([...args, "--endpoint", fixture.endpoint], env);
   assert.equal(refused.code, ExitCode.Failure);

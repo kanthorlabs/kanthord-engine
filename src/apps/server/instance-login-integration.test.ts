@@ -137,7 +137,7 @@ test("a live worker instance signs in through a fake pi-ai copy_code flow, and t
         query: {},
         body: { platform: PLATFORM, name: CREDENTIAL_NAME, holder: INSTANCE },
       },
-      { idempotencyKey: "01ARZ3NDEKTSV4RRFFQ69G5FA1" },
+      { idempotencyKey: "idempotency_key_01ARZ3NDEKTSV4RRFFQ69G5FA1" },
     ),
   );
   assert.equal(login.address, AUTHORIZATION_URL);
@@ -149,7 +149,7 @@ test("a live worker instance signs in through a fake pi-ai copy_code flow, and t
         query: {},
         body: { value: COPY_CODE_VALUE },
       },
-      { idempotencyKey: "01ARZ3NDEKTSV4RRFFQ69G5FA2" },
+      { idempotencyKey: "idempotency_key_01ARZ3NDEKTSV4RRFFQ69G5FA2" },
     ),
   );
   const status = await until(async () => {

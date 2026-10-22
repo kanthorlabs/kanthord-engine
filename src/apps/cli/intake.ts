@@ -214,7 +214,7 @@ export function addIntakeCommand(program: Command): void {
     .command(DISCARD)
     .description("Discard a pending outbound request")
     .argument("<outbound-request-id>", "Outbound request identity")
-    .option("--idempotency-key <ulid>", "Mutation key", singleUse(KEY_OPTION))
+    .option("--idempotency-key <key>", "Mutation key", singleUse(KEY_OPTION))
     .action((id: string, _options, command: Command) => discard(id, command));
   outbound
     .command(DELETE)
@@ -228,6 +228,6 @@ export function addIntakeCommand(program: Command): void {
       "Identity to delete; repeatable",
       (value: string, previous: string[] = []) => [...previous, value],
     )
-    .option("--idempotency-key <ulid>", "Mutation key", singleUse(KEY_OPTION))
+    .option("--idempotency-key <key>", "Mutation key", singleUse(KEY_OPTION))
     .action((_options, command: Command) => remove(command));
 }

@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
-import { ulid } from "ulid";
 import {
   fakeMachines,
   gatewayFixture,
@@ -20,6 +19,7 @@ import { testHumanIdentity } from "../../kernel/test-identity.ts";
 import { HttpMethod, HttpStatus, MediaType } from "../../kernel/http.ts";
 import { directClient } from "../../gateway/index.ts";
 import { emitOpenAPIFiles } from "../../gateway/local.ts";
+import { createIdempotencyKey } from "../../kernel/identity.ts";
 
 const SERVICE_NAME = "intake";
 const DIRECT_PATH = "/api/test/direct-ping";
@@ -85,7 +85,7 @@ async function assertNoRoute(
     headers: {
       authorization: `Bearer ${fixture.token}`,
       "content-type": MediaType.JSON,
-      "idempotency-key": ulid(),
+      "idempotency-key": createIdempotencyKey(),
     },
   });
   assert.equal(response.status, HttpStatus.NotFound);
@@ -105,7 +105,7 @@ function emittedPaths(
 test("a minted service identity completes a service operation and replays a repeated key", async (t) => {
   const { client, calls } = await policyFixture(t);
   const identity = mintServiceIdentity(SERVICE_NAME);
-  const idempotencyKey = ulid();
+  const idempotencyKey = createIdempotencyKey();
   const first = await client.servicePing(input, { identity, idempotencyKey });
   const second = await client.servicePing(input, { identity, idempotencyKey });
   for (const result of [first, second]) {
@@ -125,7 +125,10 @@ test("a service operation refuses a human, a machine and a structural copy", asy
   ];
   for (const identity of identities)
     assertUnauthorized(
-      await client.servicePing(input, { identity, idempotencyKey: ulid() }),
+      await client.servicePing(input, {
+        identity,
+        idempotencyKey: createIdempotencyKey(),
+      }),
     );
   assert.equal(calls.count, NO_CALLS);
 });
@@ -135,7 +138,7 @@ test("a human operation refuses a service identity", async (t) => {
   assertUnauthorized(
     await client.humanPing(input, {
       identity: mintServiceIdentity(SERVICE_NAME),
-      idempotencyKey: ulid(),
+      idempotencyKey: createIdempotencyKey(),
     }),
   );
   assert.equal(calls.count, NO_CALLS);
@@ -145,13 +148,13 @@ test("a direct human operation serves a forwarded human and refuses a machine", 
   const { client, machine, calls } = await policyFixture(t);
   const completed = await client.directPing(input, {
     identity: testHumanIdentity("ulrich", "Ulrich", "token"),
-    idempotencyKey: ulid(),
+    idempotencyKey: createIdempotencyKey(),
   });
   assert.equal(completed.type, OperationResultType.Completed);
   assertUnauthorized(
     await client.directPing(input, {
       identity: machine,
-      idempotencyKey: ulid(),
+      idempotencyKey: createIdempotencyKey(),
     }),
   );
   assert.equal(calls.count, SINGLE_CALL);

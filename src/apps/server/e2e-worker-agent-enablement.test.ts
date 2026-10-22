@@ -1,13 +1,13 @@
 import assert from "node:assert/strict";
 import { join } from "node:path";
 import { test, type TestContext } from "node:test";
-import { ulid } from "ulid";
 import type { CredentialAnswer } from "../../custody/contract.ts";
 import { writePrivate } from "../../kernel/files.ts";
 import { temporary } from "../../kernel/test-support.ts";
 import type { AgentEnablement } from "../../agent/contract.ts";
 import { environment, kanthord } from "./cli-support.ts";
 import { gatewayFixture } from "./test-support.ts";
+import { createIdempotencyKey } from "../../kernel/identity.ts";
 
 const SUCCESS = 0;
 const FAILURE = 1;
@@ -436,7 +436,7 @@ test("E03.12 put replays same idempotency key", async (t) => {
   const fixture = await setup(t);
   await createCredential(fixture);
   const path = enablementFile(fixture);
-  const key = ulid();
+  const key = createIdempotencyKey();
   const args = [
     ...COMMAND,
     "put",
@@ -574,7 +574,7 @@ test("E03.20 cooldown list answers no hold and a clear of a credential with no h
         "clear",
         "absent-credential",
         "--idempotency-key",
-        ulid(),
+        createIdempotencyKey(),
       ],
       fixture.env,
     ),
