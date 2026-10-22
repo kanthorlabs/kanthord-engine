@@ -5,6 +5,9 @@ import { httpClient, resolveClient } from "../../gateway/client.ts";
 import { Diagnostic } from "../../kernel/errors.ts";
 import { identitySchema } from "../../kernel/identity.ts";
 import {
+  ENTRY_LIST_LIMIT_DEFAULT,
+  ENTRY_LIST_LIMIT_MAX,
+  ENTRY_LIST_LIMIT_MIN,
   SPAN_LIST_LIMIT_DEFAULT,
   SPAN_LIST_LIMIT_MAX,
   SPAN_LIST_LIMIT_MIN,
@@ -12,6 +15,8 @@ import {
   TRACE_LIST_LIMIT_MAX,
   TRACE_LIST_LIMIT_MIN,
   TraceSort,
+  entryIdentitySchema,
+  spanIdSchema,
   traceIdSchema,
   traceSortSchema,
   traceStateSchema,
@@ -28,6 +33,8 @@ import {
 const TRACE = "trace";
 const SPAN = "span";
 const TEXT = "text";
+const SESSION = "session";
+const ENTRY = "entry";
 const FACET = "facet";
 const PROJECT_IDENTITY_PREFIX = "project";
 const NODE_IDENTITY_PREFIX = "node";
@@ -200,6 +207,69 @@ async function textGet(
   );
 }
 
+function requireSpanId(spanId: string, leaf: string): void {
+  if (!spanIdSchema.safeParse(spanId).success)
+    throw new Diagnostic(
+      `cli.tracking.${leaf}.invalid_session_id`,
+      "invalid session ID",
+    );
+}
+
+function entryListLimit(value: string | undefined): number {
+  if (value === undefined) return ENTRY_LIST_LIMIT_DEFAULT;
+  const limit = parsePositiveInt(value, "cli.pagination.limit_invalid");
+  if (limit < ENTRY_LIST_LIMIT_MIN || limit > ENTRY_LIST_LIMIT_MAX)
+    throw new Diagnostic(
+      "cli.pagination.limit_out_of_range",
+      `limit must be between ${ENTRY_LIST_LIMIT_MIN} and ${ENTRY_LIST_LIMIT_MAX}`,
+    );
+  return limit;
+}
+
+async function sessionEntryList(
+  traceId: string,
+  sessionId: string,
+  command: Command,
+): Promise<void> {
+  const leaf = `${SESSION}.${ENTRY}.${LIST}`;
+  requireTraceId(traceId, leaf);
+  requireSpanId(sessionId, leaf);
+  const options = command.optsWithGlobals();
+  const limit = entryListLimit(options.limit);
+  const result = await client(command, leaf).sessionEntryList({
+    params: { trace_id: traceId, session_id: sessionId },
+    query: { limit, cursor: options.cursor, tool_call_id: options.toolCall },
+    body: null,
+  });
+  process.stdout.write(
+    `${JSON.stringify(handleReadResult(result, `cli.tracking.${leaf}.indeterminate`))}\n`,
+  );
+}
+
+async function sessionEntryGet(
+  traceId: string,
+  sessionId: string,
+  entryId: string,
+  command: Command,
+): Promise<void> {
+  const leaf = `${SESSION}.${ENTRY}.${GET}`;
+  requireTraceId(traceId, leaf);
+  requireSpanId(sessionId, leaf);
+  if (!entryIdentitySchema.safeParse(entryId).success)
+    throw new Diagnostic(
+      `cli.tracking.${leaf}.invalid_entry_id`,
+      "invalid entry ID",
+    );
+  const result = await client(command, leaf).sessionEntryGet({
+    params: { trace_id: traceId, session_id: sessionId, entry_id: entryId },
+    query: {},
+    body: null,
+  });
+  process.stdout.write(
+    `${JSON.stringify(handleReadResult(result, `cli.tracking.${leaf}.indeterminate`))}\n`,
+  );
+}
+
 export function addTrackingCommand(program: Command): void {
   assert.equal(program.name(), PROGRAM_NAME);
   assert.ok(
@@ -267,6 +337,48 @@ export function addTrackingCommand(program: Command): void {
     .argument("<text-id>", "Text ID")
     .action((traceId: string, textId: string, _options, command: Command) =>
       textGet(traceId, textId, command),
+    );
+  const session = tracking
+    .command(SESSION)
+    .description("Read the agent sessions of a trace");
+  session.action(() => session.help());
+  const entry = session
+    .command(ENTRY)
+    .description("Read the entries of an agent session");
+  entry.action(() => entry.help());
+  entry
+    .command(LIST)
+    .description("List the stored entries of an agent session as JSON")
+    .argument("<trace-id>", "Trace ID")
+    .argument("<session-id>", "Session ID")
+    .option(
+      "--tool-call <tool-call-id>",
+      "Tool call ID",
+      singleUse("--tool-call"),
+    )
+    .option("--limit <count>", "Maximum results per page", singleUse("--limit"))
+    .option(
+      "--cursor <opaque>",
+      "Continue from a cursor",
+      singleUse("--cursor"),
+    )
+    .action((traceId: string, sessionId: string, _options, command: Command) =>
+      sessionEntryList(traceId, sessionId, command),
+    );
+  entry
+    .command(GET)
+    .description("Read an agent session entry as JSON")
+    .argument("<trace-id>", "Trace ID")
+    .argument("<session-id>", "Session ID")
+    .argument("<entry-id>", "Entry ID")
+    .action(
+      (
+        traceId: string,
+        sessionId: string,
+        entryId: string,
+        _options,
+        command: Command,
+      ) => sessionEntryGet(traceId, sessionId, entryId, command),
     );
   const facet = tracking
     .command(FACET)

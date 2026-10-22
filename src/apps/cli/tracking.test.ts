@@ -172,3 +172,107 @@ test("facet get with an invalid project exits before any request", async (t) => 
   );
   assert.equal(seen.length, NO_REQUESTS);
 });
+
+const TRACE_ID = "a".repeat(32);
+const SESSION_ID = "2".repeat(16);
+const ENTRY_ID = "e1";
+const ENTRY_LIST_PATH = `/api/tracking/trace/${TRACE_ID}/session/${SESSION_ID}/entry`;
+const ENTRY_GET_PATH = `${ENTRY_LIST_PATH}/${ENTRY_ID}`;
+const ENTRY_ANSWER = {
+  trace_id: TRACE_ID,
+  session_id: SESSION_ID,
+  entry_id: ENTRY_ID,
+  parent_entry_id: null,
+  sequence: 1,
+  entry_type: "message",
+  entry_time: 1000,
+  tool_call_id: null,
+  truncated: false,
+  entry: { role: "user" },
+  created_at: 1000,
+};
+const TOOL_CALL = "call_1";
+const LIMIT_FIVE = "5";
+
+test("session entry list sends its filters as query fields and writes the answer", async (t) => {
+  const { endpoint, seen } = await fakeServer(t, LIST_ANSWER);
+  const result = await run(
+    t,
+    [
+      "session",
+      "entry",
+      "list",
+      TRACE_ID,
+      SESSION_ID,
+      "--tool-call",
+      TOOL_CALL,
+      "--limit",
+      LIMIT_FIVE,
+    ],
+    endpoint,
+  );
+  assert.equal(result.code, ExitCode.Success, result.stderr);
+  assert.equal(seen.length, ONE_REQUEST);
+  assert.equal(seen[0]?.method, HttpMethod.Get);
+  const url = new URL(seen[0]?.url ?? "", endpoint);
+  assert.equal(url.pathname, ENTRY_LIST_PATH);
+  assert.deepEqual(Object.fromEntries(url.searchParams), {
+    tool_call_id: TOOL_CALL,
+    limit: LIMIT_FIVE,
+  });
+  assert.deepEqual(JSON.parse(result.stdout), LIST_ANSWER);
+});
+
+test("session entry get sends the entry path and writes the answer", async (t) => {
+  const { endpoint, seen } = await fakeServer(t, ENTRY_ANSWER);
+  const result = await run(
+    t,
+    ["session", "entry", "get", TRACE_ID, SESSION_ID, ENTRY_ID],
+    endpoint,
+  );
+  assert.equal(result.code, ExitCode.Success, result.stderr);
+  assert.equal(seen.length, ONE_REQUEST);
+  assert.equal(seen[0]?.method, HttpMethod.Get);
+  assert.equal(seen[0]?.url, ENTRY_GET_PATH);
+  assert.deepEqual(JSON.parse(result.stdout), ENTRY_ANSWER);
+});
+
+const INVALID_ENTRY_ARGUMENTS: readonly (readonly [string[], string])[] = [
+  [
+    ["list", "invalid", SESSION_ID],
+    "cli.tracking.session.entry.list.invalid_trace_id",
+  ],
+  [
+    ["list", TRACE_ID, "invalid"],
+    "cli.tracking.session.entry.list.invalid_session_id",
+  ],
+  [
+    ["list", TRACE_ID, SESSION_ID, "--limit", LIMIT_NOT_NUMBER],
+    "cli.pagination.limit_invalid",
+  ],
+  [
+    ["list", TRACE_ID, SESSION_ID, "--limit", LIMIT_TOO_LARGE],
+    "cli.pagination.limit_out_of_range",
+  ],
+  [
+    ["get", "invalid", SESSION_ID, ENTRY_ID],
+    "cli.tracking.session.entry.get.invalid_trace_id",
+  ],
+  [
+    ["get", TRACE_ID, "invalid", ENTRY_ID],
+    "cli.tracking.session.entry.get.invalid_session_id",
+  ],
+  [
+    ["get", TRACE_ID, SESSION_ID, "Invalid_Entry"],
+    "cli.tracking.session.entry.get.invalid_entry_id",
+  ],
+];
+
+for (const [args, code] of INVALID_ENTRY_ARGUMENTS)
+  test(`session entry ${args.join(" ")} exits with ${code} before any request`, async (t) => {
+    const { endpoint, seen } = await fakeServer(t, LIST_ANSWER);
+    const result = await run(t, ["session", "entry", ...args], endpoint);
+    assert.equal(result.code, ExitCode.Failure);
+    assert.ok(result.stderr.includes(code), result.stderr);
+    assert.equal(seen.length, NO_REQUESTS);
+  });
