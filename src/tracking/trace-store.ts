@@ -48,7 +48,7 @@ export function insertTrace(
     );
 }
 
-const TRACE_COLUMNS =
+export const TRACE_COLUMNS =
   "trace_id, project_id, execution_id, node_id, attempt, root_span_id, created_at, state, started_at, ended_at, stop_reason, worker_name, agent_names, models, error_types, input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, cost_usd, span_count, turn_count, tool_count, error_count, first_error_span_id";
 const stringList = z.array(z.string());
 
@@ -60,16 +60,7 @@ function numberOrNull(value: unknown): number | null {
   return value === null ? null : Number(value);
 }
 
-export function readTrace(
-  tx: Transaction,
-  traceId: string,
-): TraceSummary | null {
-  assert.ok(traceId);
-  const row = tx.database
-    .prepare(`SELECT ${TRACE_COLUMNS} FROM tracking_trace WHERE trace_id = ?`)
-    .get(traceId);
-  if (!row) return null;
-  assert.equal(row.trace_id, traceId);
+export function traceSummaryOf(row: Record<string, unknown>): TraceSummary {
   const startedAt = numberOrNull(row.started_at);
   const endedAt = numberOrNull(row.ended_at);
   return {
@@ -102,6 +93,19 @@ export function readTrace(
     error_count: Number(row.error_count),
     first_error_span_id: textOrNull(row.first_error_span_id),
   };
+}
+
+export function readTrace(
+  tx: Transaction,
+  traceId: string,
+): TraceSummary | null {
+  assert.ok(traceId);
+  const row = tx.database
+    .prepare(`SELECT ${TRACE_COLUMNS} FROM tracking_trace WHERE trace_id = ?`)
+    .get(traceId);
+  if (!row) return null;
+  assert.equal(row.trace_id, traceId);
+  return traceSummaryOf(row);
 }
 
 export function countRecords(tx: Transaction, traceId: string): number {
