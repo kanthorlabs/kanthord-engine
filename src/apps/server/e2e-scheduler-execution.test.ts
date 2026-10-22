@@ -41,6 +41,7 @@ const THIRD_MISSION_VERSION = 3;
 const FOURTH_MISSION_VERSION = 4;
 const DEADLINE_DELTA = 7800000;
 const SHORT_DEADLINE_DELTA = 1001;
+const PAST_SHORT_DEADLINE_MS = 1100;
 const JOURNEY_TIMEOUT = 180000;
 const POLL_MS = 10;
 const UNKNOWN_EXECUTION = "execution_01ARZ3NDEKTSV4RRFFQ69G5FAA";
@@ -691,7 +692,7 @@ test(
     await t.test(
       "E03.18 expiry loses authority before settlement",
       async () => {
-        await delay(1100);
+        await delay(PAST_SHORT_DEADLINE_MS);
         const row = await h.get(X);
         assert.equal(row.claim_state, ClaimState.Lost);
         assert.equal(row.ended_at, null);

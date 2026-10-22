@@ -42,6 +42,7 @@ const CALL_DEADLINE_MS = 10_000;
 const SHORT_DEADLINE_MS = 700;
 const HOLD_MS = 5_000;
 const ABORT_AFTER_MS = 100;
+const DISPATCHED_DEADLINE_MS = 1000;
 const NO_REQUEST = 0;
 const SINGLE_REQUEST = 1;
 const RETRIED_REQUESTS = 3;
@@ -506,7 +507,7 @@ test("the deadline of a dispatched write answers unknown_outcome", async (t) => 
   const server = await platform(t, hold);
   const github = new GitHubPlatform({ baseUrl: server.baseUrl });
   const result = await github.send(
-    call({ deadlineAt: Date.now() + ABORT_AFTER_MS }),
+    call({ deadlineAt: Date.now() + DISPATCHED_DEADLINE_MS }),
     TARGET,
     WRITE,
   );
