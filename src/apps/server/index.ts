@@ -381,6 +381,7 @@ export function composeServices(options: {
   });
   const tracking = new TrackingService({
     store: options.trackingStore,
+    retentionDays: options.config.tracking.retention_days,
     executions: {
       traceOf: (executionId) => {
         const row = scheduler.executionOf(executionId);

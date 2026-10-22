@@ -10,6 +10,7 @@ import {
   ExecutionEnd,
   MISSION_PRODUCER,
   RecordKind,
+  RefusalReason,
   ROOT_SPAN_OPERATION,
   SCHEDULER_PRODUCER,
   SpanOrigin,
@@ -35,6 +36,11 @@ const TRACE: ExecutionTrace = {
 const SPAN = "2".repeat(16);
 const RUNTIME = "worker_registration_01JZ8R2B3C4D5E6F7G8H9J0K1M";
 const CREATED = 1000;
+const NOW = 1751566593132;
+const RETENTION_DAYS = 30;
+const EXPIRED_AGE_DAYS = 31;
+const DAY_MS = 86400000;
+const NO_STORED = 0;
 const ENDED = 5000;
 const NO_DROP = 0;
 const NO_ROWS = 0;
@@ -52,7 +58,7 @@ const CURSOR_INVALID = "system.pagination.cursor_invalid";
 const OTHER_EXECUTION = "execution_01JZ8R2B3C4D5E6F7G8H9J0K1N";
 const OTHER_TRACE = "b".repeat(32);
 
-function harness(t: TestContext) {
+function harness(t: TestContext, now: () => number = () => NOW) {
   const store = new Store(IN_MEMORY_DATABASE);
   t.after(() => store.close());
   store.migrate([
@@ -60,6 +66,8 @@ function harness(t: TestContext) {
   ]);
   const service = new TrackingService({
     store,
+    retentionDays: RETENTION_DAYS,
+    now,
     executions: {
       traceOf: (executionId) =>
         executionId === TRACE.execution_id ? TRACE : undefined,
@@ -646,4 +654,77 @@ test("a session entry list refuses an unknown trace and a malformed cursor", (t)
       ),
     cursorInvalid,
   );
+});
+
+const EXPIRED_NOW = NOW + EXPIRED_AGE_DAYS * DAY_MS;
+
+function traceCount(store: Store): number {
+  const row = store.database
+    .prepare("SELECT COUNT(*) AS count FROM tracking_trace")
+    .get() as { count: number };
+  return Number(row.count);
+}
+
+test("start sweeps an expired trace", async (t) => {
+  const { store, service } = harness(t);
+  store.transaction((tx) =>
+    insertTrace(tx, TRACE, NOW - EXPIRED_AGE_DAYS * DAY_MS),
+  );
+  assert.equal(traceCount(store), ONE_ENTRY);
+  t.after(() => service.stop());
+  assert.equal(await service.start(), null);
+  assert.equal(traceCount(store), NO_ROWS);
+  assert.equal(service.sweepFailures(), NO_ROWS);
+});
+
+test("a failed sweep is counted and answers zero", (t) => {
+  const { store, service } = harness(t);
+  store.close();
+  assert.equal(service.sweep(), NO_ROWS);
+  assert.equal(service.sweepFailures(), ONE_DROP);
+});
+
+test("a telemetry write of an expired execution is refused and opens no trace", (t) => {
+  const { store, service } = harness(t, () => EXPIRED_NOW);
+  const records = [
+    {
+      record_id: `${SPAN}:start`,
+      trace_id: TRACE.trace_id,
+      kind: RecordKind.Span,
+      span_id: SPAN,
+      operation: "agent.tool",
+      parent_span_id: TRACE.root_span_id,
+      start_time: CREATED,
+    },
+    {
+      record_id: `${SPAN}:input`,
+      trace_id: TRACE.trace_id,
+      kind: RecordKind.Text,
+      text_id: `${SPAN}:input`,
+      text: INPUT_TEXT,
+    },
+  ];
+  const answer = service.telemetryWrite(
+    TRACE.execution_id,
+    records,
+    caller(store),
+  );
+  assert.equal(answer.submitted, records.length);
+  assert.equal(answer.stored, NO_STORED);
+  assert.equal(answer.refused, records.length);
+  assert.ok(
+    answer.dispositions.every(
+      (entry) =>
+        entry.disposition === Disposition.Refused &&
+        entry.reason === RefusalReason.TraceExpired,
+    ),
+  );
+  assert.equal(traceCount(store), NO_ROWS);
+});
+
+test("a root open of an expired execution is dropped and counted", (t) => {
+  const { store, service } = harness(t, () => EXPIRED_NOW);
+  service.executionOpened(TRACE, CREATED);
+  assert.equal(service.droppedRecords(), ONE_DROP);
+  assert.equal(traceCount(store), NO_ROWS);
 });

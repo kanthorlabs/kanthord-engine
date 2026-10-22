@@ -20,6 +20,7 @@ import {
   type Healthcheck,
   type Service,
 } from "../kernel/service.ts";
+import { identityTime } from "../kernel/identity.ts";
 import type { Store } from "../kernel/store.ts";
 import {
   admitRecords,
@@ -30,7 +31,9 @@ import {
 import {
   ROOT_SPAN_OPERATION,
   SCHEDULER_PRODUCER,
+  Disposition,
   ExecutionEnd,
+  RefusalReason,
   SpanOrigin,
   SpanStatus,
   TRACKING_SERVICE_NAME,
@@ -45,6 +48,11 @@ import {
   type TelemetryRecord,
   type TraceSort,
 } from "./contract.ts";
+import {
+  RETENTION_SWEEP_INTERVAL_MS,
+  retentionCutoff,
+  sweepExpiredTraces,
+} from "./retention.ts";
 import {
   listTraces,
   readFacets,
@@ -73,6 +81,8 @@ export interface Dependencies {
   store: Store;
   executions: ExecutionTraces;
   health?: HealthRegistry;
+  retentionDays: number;
+  now?: () => number;
 }
 
 function traceNotFound(): never {
@@ -173,9 +183,13 @@ export class TrackingService implements Service, ExecutionTelemetry {
   private readonly shutdown = new CancellationContext();
   private started = false;
   private dropped = 0;
+  private failedSweeps = 0;
+  private sweepTimer: NodeJS.Timeout | undefined;
+  private readonly now: () => number;
 
   constructor(dependencies: Dependencies) {
     this.dependencies = dependencies;
+    this.now = dependencies.now ?? Date.now;
     dependencies.health?.register(TRACKING_SERVICE_NAME, () =>
       this.healthcheck(),
     );
@@ -183,6 +197,23 @@ export class TrackingService implements Service, ExecutionTelemetry {
 
   droppedRecords(): number {
     return this.dropped;
+  }
+
+  sweepFailures(): number {
+    return this.failedSweeps;
+  }
+
+  sweep(): number {
+    try {
+      return sweepExpiredTraces(this.dependencies.store, this.cutoff());
+    } catch {
+      this.failedSweeps += 1;
+      return 0;
+    }
+  }
+
+  private cutoff(): number {
+    return retentionCutoff(this.now(), this.dependencies.retentionDays);
   }
 
   executionOpened(trace: ExecutionTrace, createdAt: number): void {
@@ -228,9 +259,13 @@ export class TrackingService implements Service, ExecutionTelemetry {
       contribution.span_id === trace.root_span_id ||
         contribution.parent_span_id === trace.root_span_id,
     );
+    if (identityTime(trace.execution_id) < this.cutoff()) {
+      this.dropped += 1;
+      return;
+    }
     try {
       this.dependencies.store.transaction((tx) => {
-        const now = Date.now();
+        const now = this.now();
         insertTrace(tx, trace, now);
         const reason = admitServerSpan(
           tx,
@@ -262,10 +297,21 @@ export class TrackingService implements Service, ExecutionTelemetry {
     const proof = caller.execution;
     assert.ok(proof, "a telemetry write requires an execution proof");
     assert.equal(proof.executionId, executionId);
+    if (identityTime(executionId) < this.cutoff())
+      return {
+        dispositions: records.map((record) => ({
+          record_id: record.record_id,
+          disposition: Disposition.Refused,
+          reason: RefusalReason.TraceExpired,
+        })),
+        submitted: records.length,
+        stored: 0,
+        refused: records.length,
+      };
     const trace = this.dependencies.executions.traceOf(executionId);
     assert.ok(trace, "a proven execution has a trace");
     return caller.commit((tx) => {
-      const now = Date.now();
+      const now = this.now();
       insertTrace(tx, trace, now);
       const admission: Admission = {
         trace,
@@ -431,6 +477,12 @@ export class TrackingService implements Service, ExecutionTelemetry {
         ),
       );
     this.started = true;
+    this.sweep();
+    this.sweepTimer = setInterval(
+      () => this.sweep(),
+      RETENTION_SWEEP_INTERVAL_MS,
+    );
+    this.sweepTimer.unref();
     return Promise.resolve(null);
   }
   quiesce(): Promise<Error | null> {
@@ -438,6 +490,7 @@ export class TrackingService implements Service, ExecutionTelemetry {
   }
   stop(): Promise<Error | null> {
     this.shutdown.cancel();
+    clearInterval(this.sweepTimer);
     this.started = false;
     return Promise.resolve(null);
   }

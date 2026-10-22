@@ -66,6 +66,7 @@ export const RefusalReason = {
   ForeignProducer: "foreign_producer",
   ValueReplaced: "value_replaced",
   TextExists: "text_exists",
+  TraceExpired: "trace_expired",
 } as const;
 export const refusalReasonSchema = z.enum(RefusalReason);
 export type RefusalReason = z.infer<typeof refusalReasonSchema>;
