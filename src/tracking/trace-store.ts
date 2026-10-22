@@ -3,10 +3,12 @@ import { z } from "zod";
 import { canonicalJSON } from "../kernel/json.ts";
 import type { Transaction } from "../kernel/store.ts";
 import {
+  sessionEntrySchema,
   spanSchema,
   traceStateSchema,
   type ExecutionTrace,
   type RecordKind,
+  type SessionEntry,
   type SessionEntryRecord,
   type Span,
   type TraceSummary,
@@ -14,6 +16,7 @@ import {
 
 const ONE_ROW = 1;
 const EMPTY_PAGE = 0;
+const TRUNCATED_FLAG = 1;
 
 export interface TextRow {
   trace_id: string;
@@ -23,6 +26,10 @@ export interface TextRow {
 }
 export interface SpanPage {
   items: Span[];
+  last: number | null;
+}
+export interface SessionEntryPage {
+  items: SessionEntry[];
   last: number | null;
 }
 
@@ -311,6 +318,78 @@ export function sessionSequenceTaken(
       )
       .get(traceId, sessionId, sequence) !== undefined
   );
+}
+
+const SESSION_ENTRY_COLUMNS =
+  "trace_id, session_id, entry_id, parent_entry_id, sequence, entry_type, entry_time, tool_call_id, truncated, content, created_at";
+
+function sessionEntryOf(row: Record<string, unknown>): SessionEntry {
+  assert.ok(row.trace_id);
+  assert.ok(row.entry_id);
+  return sessionEntrySchema.parse({
+    trace_id: row.trace_id,
+    session_id: row.session_id,
+    entry_id: row.entry_id,
+    parent_entry_id: row.parent_entry_id,
+    sequence: Number(row.sequence),
+    entry_type: row.entry_type,
+    entry_time: Number(row.entry_time),
+    tool_call_id: row.tool_call_id,
+    truncated: Number(row.truncated) === TRUNCATED_FLAG,
+    entry: JSON.parse(String(row.content)),
+    created_at: Number(row.created_at),
+  });
+}
+
+export function listSessionEntries(
+  tx: Transaction,
+  traceId: string,
+  sessionId: string,
+  after: number,
+  limit: number,
+  toolCallId: string | undefined,
+): SessionEntryPage {
+  assert.ok(traceId);
+  assert.ok(sessionId);
+  assert.ok(Number.isSafeInteger(limit) && limit > EMPTY_PAGE);
+  const filter = toolCallId === undefined ? "" : " AND tool_call_id = ?";
+  const rows = tx.database
+    .prepare(
+      `SELECT ${SESSION_ENTRY_COLUMNS} FROM tracking_session_entry WHERE trace_id = ? AND session_id = ? AND sequence > ?${filter} ORDER BY sequence LIMIT ?`,
+    )
+    .all(
+      traceId,
+      sessionId,
+      after,
+      ...(toolCallId === undefined ? [] : [toolCallId]),
+      limit + 1,
+    );
+  const page = rows.slice(0, limit);
+  const lastRow = page.at(-1);
+  return {
+    items: page.map(sessionEntryOf),
+    last:
+      rows.length > limit && lastRow !== undefined
+        ? Number(lastRow.sequence)
+        : null,
+  };
+}
+
+export function readSessionEntry(
+  tx: Transaction,
+  traceId: string,
+  sessionId: string,
+  entryId: string,
+): SessionEntry | null {
+  assert.ok(traceId);
+  assert.ok(sessionId);
+  assert.ok(entryId);
+  const row = tx.database
+    .prepare(
+      `SELECT ${SESSION_ENTRY_COLUMNS} FROM tracking_session_entry WHERE trace_id = ? AND session_id = ? AND entry_id = ?`,
+    )
+    .get(traceId, sessionId, entryId);
+  return row ? sessionEntryOf(row) : null;
 }
 
 export function insertSessionEntry(

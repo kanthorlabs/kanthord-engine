@@ -286,6 +286,10 @@ paths:
     $ref: ./openapi/storage/credential.verify.yaml#/pathItem
   /api/tracking/facet:
     $ref: ./openapi/tracking/facet.get.yaml#/pathItem
+  /api/tracking/trace/{trace_id}/session/{session_id}/entry/{entry_id}:
+    $ref: ./openapi/tracking/session.entry.get.yaml#/pathItem
+  /api/tracking/trace/{trace_id}/session/{session_id}/entry:
+    $ref: ./openapi/tracking/session.entry.list.yaml#/pathItem
   /api/tracking/trace/{trace_id}/span:
     $ref: ./openapi/tracking/span.list.yaml#/pathItem
   /api/tracking/execution/{execution_id}/telemetry:

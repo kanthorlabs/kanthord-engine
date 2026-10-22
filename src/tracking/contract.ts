@@ -29,6 +29,9 @@ export const SPAN_LIST_LIMIT_MAX = 1000;
 export const TRACE_LIST_LIMIT_MIN = 1;
 export const TRACE_LIST_LIMIT_MAX = 1000;
 export const TRACE_LIST_LIMIT_DEFAULT = 100;
+export const ENTRY_LIST_LIMIT_MIN = 1;
+export const ENTRY_LIST_LIMIT_MAX = 1000;
+export const ENTRY_LIST_LIMIT_DEFAULT = 100;
 export const TRACE_QUERY_MAX_CHARACTERS = 200;
 export const FACET_VALUES_MAX = 200;
 
@@ -268,6 +271,21 @@ export const telemetryTextSchema = z.strictObject({
 });
 export type TelemetryText = z.infer<typeof telemetryTextSchema>;
 
+export const sessionEntrySchema = z.strictObject({
+  trace_id: traceIdSchema,
+  session_id: spanIdSchema,
+  entry_id: entryIdentitySchema,
+  parent_entry_id: entryIdentitySchema.nullable(),
+  sequence: z.int().min(1),
+  entry_type: z.string().min(1),
+  entry_time: timestamp,
+  tool_call_id: z.string().nullable(),
+  truncated: z.boolean(),
+  entry: z.record(z.string(), z.unknown()),
+  created_at: timestamp,
+});
+export type SessionEntry = z.infer<typeof sessionEntrySchema>;
+
 export interface ExecutionTrace {
   execution_id: string;
   project_id: string;
@@ -473,5 +491,65 @@ export const trackingOperations = {
       body: z.null(),
     }),
     output: telemetryTextSchema,
+  },
+  sessionEntryList: {
+    id: "tracking.session.entry.list",
+    service: TRACKING_SERVICE_NAME,
+    method: HttpMethod.Get,
+    path: "/api/tracking/trace/:trace_id/session/:session_id/entry",
+    access: AccessPolicy.Human,
+    store: StoreName.Tracking,
+    lifetime: OperationLifetime.Unary,
+    timeoutMs: TRACKING_TIMEOUT_MS,
+    mutation: false,
+    body: false,
+    status: HttpStatus.OK,
+    description:
+      "List one page of the stored entries of an agent session, in session order. The page promises no complete session.",
+    input: z.strictObject({
+      params: z.strictObject({
+        trace_id: traceIdSchema,
+        session_id: spanIdSchema,
+      }),
+      query: z.strictObject({
+        limit: z.coerce
+          .number()
+          .int()
+          .min(ENTRY_LIST_LIMIT_MIN)
+          .max(ENTRY_LIST_LIMIT_MAX)
+          .default(ENTRY_LIST_LIMIT_DEFAULT),
+        cursor: z.string().min(1).optional(),
+        tool_call_id: boundedName.optional(),
+      }),
+      body: z.null(),
+    }),
+    output: z.strictObject({
+      items: z.array(sessionEntrySchema),
+      next_cursor: z.string().nullable(),
+    }),
+  },
+  sessionEntryGet: {
+    id: "tracking.session.entry.get",
+    service: TRACKING_SERVICE_NAME,
+    method: HttpMethod.Get,
+    path: "/api/tracking/trace/:trace_id/session/:session_id/entry/:entry_id",
+    access: AccessPolicy.Human,
+    store: StoreName.Tracking,
+    lifetime: OperationLifetime.Unary,
+    timeoutMs: TRACKING_TIMEOUT_MS,
+    mutation: false,
+    body: false,
+    status: HttpStatus.OK,
+    description: "Read one entry of an agent session.",
+    input: z.strictObject({
+      params: z.strictObject({
+        trace_id: traceIdSchema,
+        session_id: spanIdSchema,
+        entry_id: entryIdentitySchema,
+      }),
+      query: z.strictObject({}),
+      body: z.null(),
+    }),
+    output: sessionEntrySchema,
   },
 } as const satisfies Record<string, Operation>;

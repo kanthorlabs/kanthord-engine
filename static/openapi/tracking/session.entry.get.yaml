@@ -1,0 +1,150 @@
+# Generated from the operation registry by kanthord gateway openapi.
+pathItem:
+  get:
+    operationId: tracking.session.entry.get
+    tags:
+      - tracking
+    description: Read one entry of an agent session.
+    x-access-policy: human
+    x-timeout-ms: 30000
+    x-mutation: false
+    x-kanthord-lifetime: unary
+    security:
+      - bearerAuth: []
+    parameters:
+      - name: trace_id
+        in: path
+        required: true
+        schema:
+          $ref: "#/components/schemas/tracking.session.entry.get.Input/properties/params/\
+            properties/trace_id"
+      - name: session_id
+        in: path
+        required: true
+        schema:
+          $ref: "#/components/schemas/tracking.session.entry.get.Input/properties/params/\
+            properties/session_id"
+      - name: entry_id
+        in: path
+        required: true
+        schema:
+          $ref: "#/components/schemas/tracking.session.entry.get.Input/properties/params/\
+            properties/entry_id"
+    responses:
+      "200":
+        description: Completed result
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/tracking.session.entry.get.Output"
+      "400":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "401":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "403":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "404":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "409":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "413":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "415":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "500":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "503":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "504":
+        $ref: ../shared/components.yaml#/components/responses/Error
+components:
+  schemas:
+    tracking.session.entry.get.Input:
+      type: object
+      properties:
+        params:
+          type: object
+          properties:
+            trace_id:
+              type: string
+              pattern: ^[0-9a-f]{32}$
+            session_id:
+              type: string
+              pattern: ^[0-9a-f]{16}$
+            entry_id:
+              type: string
+              pattern: ^[0-9a-z][0-9a-z-]{0,63}$
+          required:
+            - trace_id
+            - session_id
+            - entry_id
+          additionalProperties: false
+        query:
+          type: object
+          properties: {}
+          additionalProperties: false
+        body:
+          type: "null"
+      required:
+        - params
+        - query
+        - body
+      additionalProperties: false
+    tracking.session.entry.get.Output:
+      type: object
+      properties:
+        trace_id:
+          type: string
+          pattern: ^[0-9a-f]{32}$
+        session_id:
+          type: string
+          pattern: ^[0-9a-f]{16}$
+        entry_id:
+          type: string
+          pattern: ^[0-9a-z][0-9a-z-]{0,63}$
+        parent_entry_id:
+          anyOf:
+            - type: string
+              pattern: ^[0-9a-z][0-9a-z-]{0,63}$
+            - type: "null"
+        sequence:
+          type: integer
+          minimum: 1
+          maximum: 9007199254740991
+        entry_type:
+          type: string
+          minLength: 1
+        entry_time:
+          type: integer
+          minimum: 0
+          maximum: 9007199254740991
+          description: Unix timestamp in milliseconds since 1970-01-01T00:00:00Z (UTC).
+        tool_call_id:
+          anyOf:
+            - type: string
+            - type: "null"
+        truncated:
+          type: boolean
+        entry:
+          type: object
+          propertyNames:
+            type: string
+          additionalProperties: {}
+        created_at:
+          type: integer
+          minimum: 0
+          maximum: 9007199254740991
+          description: Unix timestamp in milliseconds since 1970-01-01T00:00:00Z (UTC).
+      required:
+        - trace_id
+        - session_id
+        - entry_id
+        - parent_entry_id
+        - sequence
+        - entry_type
+        - entry_time
+        - tool_call_id
+        - truncated
+        - entry
+        - created_at
+      additionalProperties: false
