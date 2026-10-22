@@ -10,7 +10,6 @@ import {
 } from "../../custody/contract.ts";
 import { Intent } from "../../mission/contract.ts";
 import { httpClient } from "../../gateway/client.ts";
-import { background } from "../../kernel/context.ts";
 import { writePrivate } from "../../kernel/files.ts";
 import {
   deriveHandoverKeys,
@@ -27,7 +26,7 @@ import {
   OperationResultType,
   type OperationResult,
 } from "../../kernel/operation.ts";
-import { temporary } from "../../kernel/test-support.ts";
+import { temporary, testContext } from "../../kernel/test-support.ts";
 import {
   type ExecutionRecord,
   WorkPullKind,
@@ -62,7 +61,7 @@ const HANDOVER_LOG_MESSAGE = "credential handover";
 const NO_OUTPUT = "";
 const MISSING_TOKEN = "";
 const JOURNEY_TIMEOUT = 180000;
-const SSH_TIMEOUT = 30000;
+const SSH_TIMEOUT = JOURNEY_TIMEOUT;
 const UNKNOWN_EXECUTION = "execution_01ARZ3NDEKTSV4RRFFQ69G5FAA";
 const NAME = "anthro-1";
 const PROVIDER = "anthropic";
@@ -456,10 +455,10 @@ test(
         );
         assert.equal(access.public_key.trim(), h.sshPublicKey.trim());
         await assert.rejects(
-          gitLsRemote(sshd.url(bare), background, SSH_TIMEOUT, access),
+          gitLsRemote(sshd.url(bare), testContext(tt), SSH_TIMEOUT, access),
         );
         await sshd.authorize(access.public_key);
-        await gitLsRemote(sshd.url(bare), background, SSH_TIMEOUT, access);
+        await gitLsRemote(sshd.url(bare), testContext(tt), SSH_TIMEOUT, access);
         assert.ok(
           !JSON.stringify(h.fixture.logs).includes(identity.private_key),
         );

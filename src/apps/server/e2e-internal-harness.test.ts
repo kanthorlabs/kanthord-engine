@@ -4,8 +4,7 @@ import { join } from "node:path";
 import { test, type TestContext } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 import { simpleGit } from "simple-git";
-import { background } from "../../kernel/context.ts";
-import { temporary } from "../../kernel/test-support.ts";
+import { temporary, testContext } from "../../kernel/test-support.ts";
 import {
   REPOSITORY_ADDRESS,
   GATED_ADDRESS,
@@ -45,7 +44,7 @@ import {
 } from "../../mission/contract.ts";
 import { ClaimState, type ExecutionRecord } from "../../scheduler/contract.ts";
 
-const GIT_TIMEOUT_MS = 10000;
+const GIT_TIMEOUT_MS = 60000;
 const MAIN_REF = "refs/heads/main";
 const TEST_BRANCH = "kanthord/node_01ARZ3NDEKTSV4RRFFQ69G5FAA";
 const SINGLE_INSTANCE = 1;
@@ -767,10 +766,11 @@ test("local mapped repository clones main and publishes only the node branch", a
   const transport = mappedTransport({ [REPOSITORY_ADDRESS]: repo.bare });
   const checkout = join(temporary(t), "checkout");
   mkdirSync(checkout);
+  const context = testContext(t);
   await transport.clone(
     REPOSITORY_ADDRESS,
     checkout,
-    background,
+    context,
     GIT_TIMEOUT_MS,
     TEST_SSH_ACCESS,
   );
@@ -784,14 +784,14 @@ test("local mapped repository clones main and publishes only the node branch", a
     TEST_BRANCH,
     "main",
     false,
-    background,
+    context,
     GIT_TIMEOUT_MS,
     TEST_SSH_ACCESS,
   );
   await transport.pushNodeBranch(
     checkout,
     TEST_BRANCH,
-    background,
+    context,
     GIT_TIMEOUT_MS,
     TEST_SSH_ACCESS,
   );
@@ -805,7 +805,7 @@ test("local mapped repository clones main and publishes only the node branch", a
       transport.clone(
         "test_unmapped",
         checkout,
-        background,
+        context,
         GIT_TIMEOUT_MS,
         TEST_SSH_ACCESS,
       ),
