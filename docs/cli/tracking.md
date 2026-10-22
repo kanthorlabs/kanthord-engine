@@ -86,9 +86,45 @@ rejects unknown arguments and options before work.
 
 ## `trace get`
 
-Reads the header of one trace: `trace_id`, `project_id`, `execution_id`,
-`root_span_id` and `created_at`. An unknown trace answers `404`
+Reads the summary of one trace. The summary holds the state and the times of
+the root span and the totals of the stored spans. Each admitted span updates it
+in the same transaction. An unknown trace answers `404`
 `tracking.trace.not_found`.
+
+### Trace summary fields
+
+| Field                   | Type                            | Meaning                                                                                                              |
+| ----------------------- | ------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `trace_id`              | `TraceID`                       | The identity of the trace.                                                                                           |
+| `project_id`            | `ProjectID` or `null`           | The project of the execution.                                                                                        |
+| `execution_id`          | `ExecutionID` or `null`         | The execution of the trace.                                                                                          |
+| `node_id`               | `NodeID` or `null`              | The node of the execution.                                                                                           |
+| `attempt`               | Integer of 1 or more, or `null` | The attempt of the node.                                                                                             |
+| `root_span_id`          | `SpanID`                        | The root span of the trace.                                                                                          |
+| `created_at`            | `Timestamp`                     | The time that Tracking stored the trace.                                                                             |
+| `state`                 | `open`, `ok`, `error`           | `open` while the root span has no end. Then `error` for the root status `Error`, otherwise `ok`.                     |
+| `started_at`            | `Timestamp` or `null`           | The start of the root span.                                                                                          |
+| `ended_at`              | `Timestamp` or `null`           | The end of the root span.                                                                                            |
+| `duration_ms`           | Integer of 0 or more, or `null` | `ended_at - started_at` when both exist, otherwise `null`.                                                           |
+| `stop_reason`           | String or `null`                | The value of `kanthord.stop.reason` of the root span.                                                                |
+| `worker_name`           | String or `null`                | The first value of `kanthord.worker.name` of a stored span.                                                          |
+| `agent_names`           | Array of strings                | The distinct values of `kanthord.agent.name`, in order of first admission. At most 128.                              |
+| `models`                | Array of strings                | The distinct values of `gen_ai.request.model` and `gen_ai.response.model`, in order of first admission. At most 128. |
+| `error_types`           | Array of strings                | The distinct values of `error.type`, in order of first admission. At most 128.                                       |
+| `input_tokens`          | Integer of 0 or more            | The sum of `gen_ai.usage.input_tokens` of the spans.                                                                 |
+| `output_tokens`         | Integer of 0 or more            | The sum of `gen_ai.usage.output_tokens` of the spans.                                                                |
+| `cache_read_tokens`     | Integer of 0 or more            | The sum of `gen_ai.usage.cache_read.input_tokens` of the spans.                                                      |
+| `cache_creation_tokens` | Integer of 0 or more            | The sum of `gen_ai.usage.cache_creation.input_tokens` of the spans.                                                  |
+| `total_tokens`          | Integer of 0 or more            | `input_tokens + output_tokens`.                                                                                      |
+| `cost_usd`              | Finite number of 0 or more      | The sum of `kanthord.usage.cost_usd` of the spans, in US dollars.                                                    |
+| `span_count`            | Integer of 0 or more            | The number of stored spans.                                                                                          |
+| `turn_count`            | Integer of 0 or more            | The number of stored `agent.turn` spans.                                                                             |
+| `tool_count`            | Integer of 0 or more            | The number of stored `agent.tool` spans.                                                                             |
+| `error_count`           | Integer of 0 or more            | The number of stored spans with the status `Error`.                                                                  |
+| `first_error_span_id`   | `SpanID` or `null`              | The first stored span below the root with the status `Error`.                                                        |
+
+The summary counts the stored spans only, so it is as lossy as the spans. The
+field `cost_usd` is an estimate that pi computes from its model price table.
 
 ## `span list`
 

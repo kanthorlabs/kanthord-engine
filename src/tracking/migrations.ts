@@ -7,7 +7,27 @@ const createTraceTables: Migration = (database) => {
       project_id TEXT,
       execution_id TEXT,
       root_span_id TEXT NOT NULL,
-      created_at INTEGER NOT NULL
+      created_at INTEGER NOT NULL,
+      node_id TEXT,
+      attempt INTEGER,
+      state TEXT NOT NULL DEFAULT 'open',
+      started_at INTEGER,
+      ended_at INTEGER,
+      stop_reason TEXT,
+      worker_name TEXT,
+      agent_names TEXT NOT NULL DEFAULT '[]',
+      models TEXT NOT NULL DEFAULT '[]',
+      error_types TEXT NOT NULL DEFAULT '[]',
+      input_tokens INTEGER NOT NULL DEFAULT 0,
+      output_tokens INTEGER NOT NULL DEFAULT 0,
+      cache_read_tokens INTEGER NOT NULL DEFAULT 0,
+      cache_creation_tokens INTEGER NOT NULL DEFAULT 0,
+      cost_usd REAL NOT NULL DEFAULT 0,
+      span_count INTEGER NOT NULL DEFAULT 0,
+      turn_count INTEGER NOT NULL DEFAULT 0,
+      tool_count INTEGER NOT NULL DEFAULT 0,
+      error_count INTEGER NOT NULL DEFAULT 0,
+      first_error_span_id TEXT
     );
     CREATE UNIQUE INDEX tracking_trace_execution ON tracking_trace (execution_id) WHERE execution_id IS NOT NULL;
     CREATE TABLE tracking_span (

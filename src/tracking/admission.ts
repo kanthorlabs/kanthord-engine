@@ -34,6 +34,7 @@ import {
   sessionSequenceTaken,
   updateSpan,
 } from "./trace-store.ts";
+import { updateTraceSummary } from "./trace-summary.ts";
 
 export interface Admission {
   trace: ExecutionTrace;
@@ -153,7 +154,9 @@ export function applySpan(
   if (added.span_id === added.parent_span_id) return RefusalReason.SelfParent;
   const existing = readSpan(tx, admission.trace.trace_id, added.span_id);
   if (!existing) {
-    insertSpan(tx, newSpan(admission, added));
+    const span = newSpan(admission, added);
+    insertSpan(tx, span);
+    updateTraceSummary(tx, admission.trace.root_span_id, null, span);
     return null;
   }
   if (existing.producer !== admission.producer)
@@ -161,6 +164,7 @@ export function applySpan(
   const merged = mergeSpan(existing, added);
   if (!merged) return RefusalReason.ValueReplaced;
   updateSpan(tx, merged);
+  updateTraceSummary(tx, admission.trace.root_span_id, existing, merged);
   return null;
 }
 

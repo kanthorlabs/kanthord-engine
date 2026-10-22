@@ -62,6 +62,10 @@ export const RefusalReason = {
 export const refusalReasonSchema = z.enum(RefusalReason);
 export type RefusalReason = z.infer<typeof refusalReasonSchema>;
 
+export const TraceState = { Open: "open", Ok: "ok", Error: "error" } as const;
+export const traceStateSchema = z.enum(TraceState);
+export type TraceState = z.infer<typeof traceStateSchema>;
+
 export const traceIdSchema = z
   .string()
   .regex(/^[0-9a-f]{32}$/)
@@ -194,14 +198,37 @@ export const acknowledgementSchema = z.strictObject({
 });
 export type Acknowledgement = z.infer<typeof acknowledgementSchema>;
 
-export const traceRecordSchema = z.strictObject({
+const count = z.int().min(0);
+export const traceSummarySchema = z.strictObject({
   trace_id: traceIdSchema,
   project_id: identitySchema("project").nullable(),
   execution_id: identitySchema(EXECUTION_IDENTITY_PREFIX).nullable(),
+  node_id: identitySchema("node").nullable(),
+  attempt: z.int().min(1).nullable(),
   root_span_id: spanIdSchema,
   created_at: timestamp,
+  state: traceStateSchema,
+  started_at: timestamp.nullable(),
+  ended_at: timestamp.nullable(),
+  duration_ms: count.nullable(),
+  stop_reason: z.string().nullable(),
+  worker_name: z.string().nullable(),
+  agent_names: z.array(z.string()),
+  models: z.array(z.string()),
+  error_types: z.array(z.string()),
+  input_tokens: count,
+  output_tokens: count,
+  cache_read_tokens: count,
+  cache_creation_tokens: count,
+  total_tokens: count,
+  cost_usd: z.number().finite().min(0),
+  span_count: count,
+  turn_count: count,
+  tool_count: count,
+  error_count: count,
+  first_error_span_id: spanIdSchema.nullable(),
 });
-export type TraceRecord = z.infer<typeof traceRecordSchema>;
+export type TraceSummary = z.infer<typeof traceSummarySchema>;
 export const spanSchema = z.strictObject({
   trace_id: traceIdSchema,
   span_id: spanIdSchema,
@@ -291,13 +318,13 @@ export const trackingOperations = {
     mutation: false,
     body: false,
     status: HttpStatus.OK,
-    description: "Read the header of one trace.",
+    description: "Read the summary of one trace.",
     input: z.strictObject({
       params: traceParams,
       query: z.strictObject({}),
       body: z.null(),
     }),
-    output: traceRecordSchema,
+    output: traceSummarySchema,
   },
   spanList: {
     id: "tracking.span.list",

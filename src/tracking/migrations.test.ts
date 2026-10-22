@@ -128,3 +128,56 @@ test("the session entry sequence is a unique index on the trace, the session and
     ["trace_id", "session_id", "sequence"],
   );
 });
+
+test("the trace table holds the summary columns with their defaults", (t) => {
+  const store = migratedStore(t);
+  assert.deepEqual(
+    store.database
+      .prepare(`PRAGMA table_info(${TRACE_TABLE})`)
+      .all()
+      .slice(5)
+      .map(({ name, type, notnull, dflt_value }) => ({
+        name,
+        type,
+        notnull,
+        dflt_value,
+      })),
+    [
+      { name: "node_id", type: "TEXT", notnull: 0, dflt_value: null },
+      { name: "attempt", type: "INTEGER", notnull: 0, dflt_value: null },
+      { name: "state", type: "TEXT", notnull: 1, dflt_value: "'open'" },
+      { name: "started_at", type: "INTEGER", notnull: 0, dflt_value: null },
+      { name: "ended_at", type: "INTEGER", notnull: 0, dflt_value: null },
+      { name: "stop_reason", type: "TEXT", notnull: 0, dflt_value: null },
+      { name: "worker_name", type: "TEXT", notnull: 0, dflt_value: null },
+      { name: "agent_names", type: "TEXT", notnull: 1, dflt_value: "'[]'" },
+      { name: "models", type: "TEXT", notnull: 1, dflt_value: "'[]'" },
+      { name: "error_types", type: "TEXT", notnull: 1, dflt_value: "'[]'" },
+      { name: "input_tokens", type: "INTEGER", notnull: 1, dflt_value: "0" },
+      { name: "output_tokens", type: "INTEGER", notnull: 1, dflt_value: "0" },
+      {
+        name: "cache_read_tokens",
+        type: "INTEGER",
+        notnull: 1,
+        dflt_value: "0",
+      },
+      {
+        name: "cache_creation_tokens",
+        type: "INTEGER",
+        notnull: 1,
+        dflt_value: "0",
+      },
+      { name: "cost_usd", type: "REAL", notnull: 1, dflt_value: "0" },
+      { name: "span_count", type: "INTEGER", notnull: 1, dflt_value: "0" },
+      { name: "turn_count", type: "INTEGER", notnull: 1, dflt_value: "0" },
+      { name: "tool_count", type: "INTEGER", notnull: 1, dflt_value: "0" },
+      { name: "error_count", type: "INTEGER", notnull: 1, dflt_value: "0" },
+      {
+        name: "first_error_span_id",
+        type: "TEXT",
+        notnull: 0,
+        dflt_value: null,
+      },
+    ],
+  );
+});
