@@ -892,6 +892,7 @@ export class LlmComponent implements Service {
     using cancellation = addAbortListener(caller.context.signal, () =>
       flow.abort(),
     );
+    if (caller.context.signal.aborted) flow.abort();
     void flow
       .run(this.oauthProviders, (secret) =>
         this.completeLogin(session, flow, secret),
