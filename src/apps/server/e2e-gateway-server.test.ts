@@ -55,12 +55,8 @@ const UNSET_PORT = 0;
 const NO_HEALTH_CHECKS = 0;
 const FIRST_REVISION = 1;
 const SINGLE_HEALTH_CHECK = 1;
-const DOUBLE_TIMEOUT = 2;
 const SECOND_REVISION = 2;
 const MODE_MASK = 0o777;
-const STARTUP_TIMEOUT_MS = 10000;
-const SHUTDOWN_TIMEOUT_MS = 5000;
-const REQUEST_TIMEOUT_MS = 5000;
 const LATE_CHECK_DELAY_MS = RESOURCE_CHECK_DEADLINE_MS + 5000;
 const ANTHROPIC = "anthropic";
 const GITHUB = "github";
@@ -240,33 +236,32 @@ function serveEnvironment(directory: string): NodeJS.ProcessEnv {
   return env;
 }
 
-async function stopServe(child: ChildProcessWithoutNullStreams): Promise<void> {
+async function stopServe(
+  child: ChildProcessWithoutNullStreams,
+  signal: AbortSignal,
+): Promise<void> {
   if (child.exitCode !== null || child.signalCode !== null) return;
-  await new Promise<void>((resolve, reject) => {
-    const killTimer = setTimeout(
-      () => child.kill("SIGKILL"),
-      SHUTDOWN_TIMEOUT_MS,
-    );
-    const deadline = setTimeout(() => {
-      reject(new Error("serve did not exit after SIGTERM and SIGKILL"));
-    }, SHUTDOWN_TIMEOUT_MS * DOUBLE_TIMEOUT);
-    child.once("close", () => {
-      clearTimeout(killTimer);
-      clearTimeout(deadline);
-      resolve();
+  const kill = () => child.kill("SIGKILL");
+  signal.addEventListener("abort", kill, { once: true });
+  try {
+    await new Promise<void>((resolve) => {
+      child.once("close", () => resolve());
+      child.kill(signal.aborted ? "SIGKILL" : "SIGTERM");
     });
-    child.kill("SIGTERM");
-  });
+  } finally {
+    signal.removeEventListener("abort", kill);
+  }
   assert.ok(child.exitCode !== null || child.signalCode !== null);
   assert.ok(child.stdout.destroyed);
 }
 
 async function servePort(
   child: ChildProcessWithoutNullStreams,
+  signal: AbortSignal,
 ): Promise<number> {
   const lines = createInterface({ input: child.stderr });
   let diagnostics = INITIAL_STRING;
-  let timer: NodeJS.Timeout | undefined;
+  let onAbort: () => void;
   let onExit: () => void;
   let onError: (error: Error) => void;
   try {
@@ -276,10 +271,9 @@ async function servePort(
         reject(new Error(`serve exited before readiness: ${diagnostics}`));
       child.once("error", onError);
       child.once("exit", onExit);
-      timer = setTimeout(
-        () => reject(new Error(`serve startup timed out: ${diagnostics}`)),
-        STARTUP_TIMEOUT_MS,
-      );
+      onAbort = () => reject(signal.reason as Error);
+      signal.throwIfAborted();
+      signal.addEventListener("abort", onAbort, { once: true });
       lines.on("line", (line) => {
         diagnostics += `${line}\n`;
         if (!line.startsWith("{")) return;
@@ -295,7 +289,7 @@ async function servePort(
       });
     });
   } finally {
-    clearTimeout(timer);
+    signal.removeEventListener("abort", onAbort!);
     lines.close();
     child.removeListener("exit", onExit!);
     child.removeListener("error", onError!);
@@ -305,13 +299,14 @@ async function servePort(
 
 function serveLiveness(
   port: number,
+  signal: AbortSignal,
 ): Promise<{ status: number; body: string }> {
   assert.ok(Number.isSafeInteger(port));
   assert.ok(port > UNSET_PORT);
   return new Promise((resolve, reject) => {
     const call = request(
       `http://127.0.0.1:${port}${gatewayOperations.liveness.path}`,
-      { headers: { Host: "localhost" } },
+      { headers: { Host: "localhost" }, signal },
       (response) => {
         let body = INITIAL_STRING;
         response.setEncoding("utf8");
@@ -323,9 +318,6 @@ function serveLiveness(
         );
         response.once("error", reject);
       },
-    );
-    call.setTimeout(REQUEST_TIMEOUT_MS, () =>
-      call.destroy(new Error("liveness request timed out")),
     );
     call.once("error", reject);
     call.end();
@@ -544,9 +536,10 @@ test("E07.7 real serve liveness exposes all ten maps (requires local git and ssh
     ],
     { env, stdio: "pipe" },
   );
-  t.after(() => stopServe(child));
   child.stdout.resume();
-  const response = await serveLiveness(await servePort(child));
+  const response = await servePort(child, t.signal)
+    .then((port) => serveLiveness(port, t.signal))
+    .finally(() => stopServe(child, t.signal));
   assert.equal(response.status, HttpStatus.OK);
   const body = gatewayOperations.liveness.output.parse(
     JSON.parse(response.body),

@@ -8,7 +8,7 @@ import { HttpStatus } from "../../kernel/http.ts";
 import { HealthStatus } from "../../kernel/service.ts";
 import { temporary } from "../../kernel/test-support.ts";
 import { CheckErrorCode } from "../../repository/check.ts";
-import { environment, kanthord } from "./cli-support.ts";
+import { environment, kanthord, spawnKanthord } from "./cli-support.ts";
 import { gatewayFixture } from "./test-support.ts";
 
 const EXIT_SUCCESS = 0;
@@ -37,7 +37,11 @@ test("E04.1 serve refuses startup when git is absent from PATH", async (t) => {
     assert.ok(existsSync(toolPath), toolPath);
     symlinkSync(toolPath, join(toolsDir, tool));
   }
-  const result = await kanthord(["serve"], { ...baseEnv, PATH: toolsDir });
+  const result = await spawnKanthord(
+    ["serve"],
+    { ...baseEnv, PATH: toolsDir },
+    t.signal,
+  );
   assert.equal(result.code, EXIT_FAILURE, result.stderr);
   assert.ok(
     result.stderr.startsWith(

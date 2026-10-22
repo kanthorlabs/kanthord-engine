@@ -481,7 +481,7 @@ test("offline OAuth login persists the maximum aggregate credential and sanitize
       access: access + extra,
       expires: CLOCK_START,
     });
-    const status = await terminalStatus(f, pending.session_id);
+    const status = await terminalStatus(f, pending.session_id, t.signal);
     if (extra.length) {
       assert.equal(status.state, LoginSessionState.Failed);
       assert.equal(status.failure_reason, LOGIN_FAILED_MESSAGE);
@@ -755,7 +755,6 @@ const MANUAL_VALUE = "manual-answer";
 const LAST_MESSAGE = "Waiting for authorization";
 const NO_CREDENTIALS = 0;
 const CLOCK_START = 1700000000000;
-const MAX_TURNS = 20;
 const oauthCredential: OAuthCredential = {
   type: "oauth",
   refresh: "private-refresh-token",
@@ -816,13 +815,13 @@ function gatedLogin() {
 async function terminalStatus(
   f: ReturnType<typeof fixture>,
   sessionId: string,
+  signal: AbortSignal,
 ) {
-  for (let turn = 0; turn < MAX_TURNS; turn++) {
+  for (;;) {
     const status = f.loginStatus(sessionId);
     if (status.state !== LoginSessionState.Pending) return status;
-    await setImmediate();
+    await setImmediate(undefined, { signal });
   }
-  assert.fail("Login did not finish within the bounded event-loop turns");
 }
 
 function credentialCount(f: ReturnType<typeof fixture>): number {
@@ -934,7 +933,7 @@ test("OAuth uses real pi-ai modify, defaults Copilot enterprise, and stores only
     rejectsWith(HttpStatus.Conflict, LOGIN_PENDING),
   );
   finish.resolve(oauthCredential);
-  const status = await terminalStatus(f, answer.session_id);
+  const status = await terminalStatus(f, answer.session_id, t.signal);
   assert.equal(status.state, LoginSessionState.Completed);
   assert.equal(status.failure_reason, null);
   assert.equal(credentialCount(f), FIRST_REVISION);
@@ -997,7 +996,7 @@ test("openai-codex login offers both modes and stores only refresh, access and e
     name: "codex",
     mode: "device",
   });
-  const status = await terminalStatus(f, answer.session_id);
+  const status = await terminalStatus(f, answer.session_id, t.signal);
   assert.equal(status.state, LoginSessionState.Completed);
   assert.equal(selected, DEVICE_OPTION);
   const row = f.store.database.prepare("SELECT * FROM credential").get() as {
@@ -1071,7 +1070,7 @@ test("anthropic-subscription login runs in copy_code mode, completes through log
   assert.equal(selected, COPY_CODE_OPTION);
   assert.equal(credentialCount(f), NO_CREDENTIALS);
   f.loginCode(answer.session_id, COPY_CODE_VALUE);
-  const status = await terminalStatus(f, answer.session_id);
+  const status = await terminalStatus(f, answer.session_id, t.signal);
   assert.equal(status.state, LoginSessionState.Completed);
   assert.equal(submitted, COPY_CODE_VALUE);
   const row = f.store.database.prepare("SELECT * FROM credential").get() as {
@@ -1121,7 +1120,7 @@ test("anthropic-subscription login ignores a requested browser mode and refuses 
     name: "claude",
     mode: LoginSessionMode.Browser,
   });
-  const status = await terminalStatus(f, answer.session_id);
+  const status = await terminalStatus(f, answer.session_id, t.signal);
   assert.equal(status.state, LoginSessionState.Completed);
   assert.equal(selected, COPY_CODE_OPTION);
   fails(
@@ -1166,7 +1165,7 @@ test("the built-in anthropic provider completes a copy_code login from the code#
   const state = new URL(answer.address!).searchParams.get("state");
   assert.ok(state);
   f.loginCode(answer.session_id, `${COPY_CODE_AUTHORIZATION}#${state}`);
-  const status = await terminalStatus(f, answer.session_id);
+  const status = await terminalStatus(f, answer.session_id, t.signal);
   assert.equal(status.state, LoginSessionState.Completed);
   assert.equal(exchanged.length, TOKEN_EXCHANGES);
   assert.equal(
@@ -1239,7 +1238,7 @@ test("OAuth commit-time name conflict survives pi-ai's error wrapper without sto
   const answer = await f.login(LOGIN_BODY);
   f.create({ ...inputs[0], name: LOGIN_NAME });
   gate.result.resolve(oauthCredential);
-  const status = await terminalStatus(f, answer.session_id);
+  const status = await terminalStatus(f, answer.session_id, t.signal);
   assert.equal(status.state, LoginSessionState.Failed);
   assert.equal(status.failure_reason, NAME_CONFLICT_CODE);
   assert.equal(credentialCount(f), FIRST_REVISION);
@@ -1277,7 +1276,7 @@ for (const type of ["manual_code", "text", "secret"] as const) {
     });
     assert.equal(await received.promise, MANUAL_VALUE);
     assert.equal(
-      (await terminalStatus(f, answer.session_id)).state,
+      (await terminalStatus(f, answer.session_id, t.signal)).state,
       LoginSessionState.Completed,
     );
     noOAuthSecret([answer, f.loginStatus(answer.session_id), f.logs]);
@@ -1293,7 +1292,7 @@ test("OAuth provider failure records a non-secret reason and no credential", asy
   });
   const answer = await f.login(LOGIN_BODY);
   gate.result.reject(new Error(oauthCredential.access));
-  const status = await terminalStatus(f, answer.session_id);
+  const status = await terminalStatus(f, answer.session_id, t.signal);
   assert.equal(status.state, LoginSessionState.Failed);
   assert.equal(status.failure_reason, LOGIN_FAILED_MESSAGE);
   assert.equal(credentialCount(f), NO_CREDENTIALS);
@@ -1367,8 +1366,10 @@ test("OAuth rechecks expiry on completion before a delayed expiry timer fires", 
   const answer = await f.login(LOGIN_BODY);
   now = answer.expires_at;
   gate.result.resolve(oauthCredential);
+  const interaction = await gate.entered.promise;
+  while (!interaction.signal.aborted)
+    await setImmediate(undefined, { signal: t.signal });
   await setImmediate();
-  assert.ok((await gate.entered.promise).signal.aborted);
   assert.equal(credentialCount(f), NO_CREDENTIALS);
   assert.deepEqual(f.logs, []);
   assert.equal(
@@ -1386,7 +1387,7 @@ test("OAuth rejects an invalid returned secret without logging or storing it", a
   });
   const answer = await f.login(LOGIN_BODY);
   gate.result.resolve({ ...oauthCredential, expires: Number.NaN });
-  const status = await terminalStatus(f, answer.session_id);
+  const status = await terminalStatus(f, answer.session_id, t.signal);
   assert.equal(status.state, LoginSessionState.Failed);
   assert.equal(status.failure_reason, LOGIN_FAILED_MESSAGE);
   assert.equal(credentialCount(f), NO_CREDENTIALS);
@@ -1406,7 +1407,7 @@ test("OAuth a failed insert never completes the session or emits a success log",
   );
   const answer = await f.login(LOGIN_BODY);
   gate.result.resolve(oauthCredential);
-  const status = await terminalStatus(f, answer.session_id);
+  const status = await terminalStatus(f, answer.session_id, t.signal);
   assert.equal(status.state, LoginSessionState.Failed);
   assert.equal(status.failure_reason, LOGIN_FAILED_MESSAGE);
   assert.equal(credentialCount(f), NO_CREDENTIALS);
@@ -1440,7 +1441,7 @@ test("OAuth the enterprise-shaped prompt after an address still requires login_c
   f.loginCode(answer.session_id, MANUAL_VALUE);
   assert.equal(await received.promise, MANUAL_VALUE);
   assert.equal(
-    (await terminalStatus(f, answer.session_id)).state,
+    (await terminalStatus(f, answer.session_id, t.signal)).state,
     LoginSessionState.Completed,
   );
 });
@@ -1457,7 +1458,7 @@ for (const shutdown of ["stop", "quiesce"] as const) {
     await f.component[shutdown]();
     assert.ok((await gate.entered.promise).signal.aborted);
     gate.result.resolve(oauthCredential);
-    const status = await terminalStatus(f, answer.session_id);
+    const status = await terminalStatus(f, answer.session_id, t.signal);
     await setImmediate();
     assert.equal(status.state, LoginSessionState.Failed);
     assert.equal(credentialCount(f), NO_CREDENTIALS);

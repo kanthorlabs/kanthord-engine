@@ -52,7 +52,6 @@ const FIRST_REVISION = 1;
 const NO_CREDENTIALS = 0;
 const ONE_ROW = 1;
 const KEPT_METADATA = { note: "kept" };
-const MAX_TURNS = 20;
 const VERSION_STEP = 1;
 const OAUTH_SECRET = {
   refresh: "private-refresh-token",
@@ -209,12 +208,11 @@ async function fixture(t: TestContext) {
       },
     });
   const listed = async (holder = INSTANCE) => {
-    for (let turn = 0; turn < MAX_TURNS; turn++) {
+    for (;;) {
       const [entry] = component.loginSessionsOf(holder);
       if (entry) return entry;
-      await setImmediate();
+      await setImmediate(undefined, { signal: t.signal });
     }
-    assert.fail("The instance session was not listed");
   };
   const sealFor = async (platform: string, holder = INSTANCE) => {
     const pair = pairs.get(holder)!;

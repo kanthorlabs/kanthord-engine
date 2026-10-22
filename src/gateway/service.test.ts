@@ -35,7 +35,6 @@ const NEXT_VERSION_STEP = 1;
 
 const HUMAN_USERNAME = "ulrich";
 const SINGLE_EXECUTION_COUNT = 1;
-const DISCONNECT_WAIT_MS = 2000;
 const KEEP_ALIVE_POLL_MS = 20;
 const STOP_LIMIT_MS = 2000;
 const STOP_TIMED_OUT = "stop timed out";
@@ -654,12 +653,7 @@ test("client disconnect reaches waiting handlers", async (t) => {
     .catch(() => {});
   await entered.promise;
   abort.abort();
-  await Promise.race([
-    cancelled.promise,
-    delay(DISCONNECT_WAIT_MS, undefined, { ref: false }).then(() => {
-      throw new Error("disconnect was not forwarded");
-    }),
-  ]);
+  await cancelled.promise;
   await request;
 });
 

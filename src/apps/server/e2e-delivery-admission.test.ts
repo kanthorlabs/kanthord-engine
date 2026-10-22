@@ -17,7 +17,7 @@ import {
   type ExternalAction,
 } from "../../mission/contract.ts";
 import { ActionResultKind } from "../../worker/contract.ts";
-import { completed, pushNextNodeBranchCommit } from "./cli-support.ts";
+import { completed, pushNextNodeBranchCommit, until } from "./cli-support.ts";
 import {
   FIRST_INDEX,
   GATED_KEY,
@@ -44,8 +44,6 @@ const CLOSED_AT = "2026-10-15T03:57:51Z";
 const PENDING_THEN_DIRTY_READS = 2;
 const SERVICE_MISMATCH = "service_mismatch";
 const RETRYABLE_REFUSAL = "repository.platform.github.retryable_refusal";
-const DEFERRED_CHECK_POLL_MS = 50;
-const DEFERRED_CHECK_MAX_POLLS = 40;
 
 function issue(): Webhook {
   return {
@@ -413,10 +411,11 @@ test(
     await h.actionRequest(P.x2);
     h.gitHub.merge(FIRST_PULL_REQUEST, MERGED_COMMIT);
     await h.release(P.x2.execution_id);
-    for (let i = 0; i < DEFERRED_CHECK_MAX_POLLS; i++) {
-      await new Promise((r) => setTimeout(r, DEFERRED_CHECK_POLL_MS));
-      if ((await h.node(P.nodeId)).state === NodeState.Completed) break;
-    }
+    await until(
+      () => h.node(P.nodeId),
+      (node) => node.state === NodeState.Completed,
+      t.signal,
+    );
     assert.equal((await h.node(P.nodeId)).state, NodeState.Completed);
   },
 );
@@ -431,10 +430,11 @@ test(
     const action = await h.actionRequest(P.x2);
     assert.equal(action.items[FIRST_INDEX]?.kind, ActionResultKind.Submitted);
     await h.release(P.x2.execution_id);
-    for (let i = 0; i < DEFERRED_CHECK_MAX_POLLS; i++) {
-      await new Promise((r) => setTimeout(r, DEFERRED_CHECK_POLL_MS));
-      if ((await h.node(P.nodeId)).state === NodeState.Completed) break;
-    }
+    await until(
+      () => h.node(P.nodeId),
+      (node) => node.state === NodeState.Completed,
+      t.signal,
+    );
     assert.equal((await h.node(P.nodeId)).state, NodeState.Completed);
   },
 );
@@ -452,10 +452,11 @@ test(
     h.gitHub.refuseMerge(null);
     h.gitHub.mergeability(FIRST_PULL_REQUEST, [DIRTY]);
     await h.release(P.x2.execution_id);
-    for (let i = 0; i < DEFERRED_CHECK_MAX_POLLS; i++) {
-      await new Promise((r) => setTimeout(r, DEFERRED_CHECK_POLL_MS));
-      if ((await h.node(P.nodeId)).state === NodeState.Available) break;
-    }
+    await until(
+      () => h.node(P.nodeId),
+      (node) => node.state === NodeState.Available,
+      t.signal,
+    );
     assert.equal((await h.node(P.nodeId)).state, NodeState.Available);
     const head2 = await pushNextNodeBranchCommit(
       t,
@@ -466,10 +467,11 @@ test(
     const x3 = await h.rework(P.nodeId, head2);
     await h.actionRequest(x3);
     await h.release(x3.execution_id);
-    for (let i = 0; i < DEFERRED_CHECK_MAX_POLLS; i++) {
-      await new Promise((r) => setTimeout(r, DEFERRED_CHECK_POLL_MS));
-      if ((await h.node(P.nodeId)).state === NodeState.Completed) break;
-    }
+    await until(
+      () => h.node(P.nodeId),
+      (node) => node.state === NodeState.Completed,
+      t.signal,
+    );
     assert.equal((await h.node(P.nodeId)).state, NodeState.Completed);
   },
 );

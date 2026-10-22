@@ -7,6 +7,7 @@ import {
 } from "node:http";
 import type { AddressInfo } from "node:net";
 import { test, type TestContext } from "node:test";
+import { setImmediate as turn } from "node:timers/promises";
 import { ResultClass, type ResultClassValue } from "../intake/contract.ts";
 import type { ServiceIdentity } from "../kernel/caller.ts";
 import { OperationError } from "../kernel/errors.ts";
@@ -487,12 +488,15 @@ test("an abort of a dispatched write answers unknown_outcome", async (t) => {
   const server = await platform(t, hold);
   const github = new GitHubPlatform({ baseUrl: server.baseUrl });
   const controller = new AbortController();
-  setTimeout(() => controller.abort(), ABORT_AFTER_MS).unref();
-  const result = await github.send(
+  const sending = github.send(
     call({ signal: controller.signal }),
     TARGET,
     WRITE,
   );
+  while (server.requests.length < SINGLE_REQUEST)
+    await turn(undefined, { signal: t.signal });
+  controller.abort();
+  const result = await sending;
   assert.equal(server.requests.length, SINGLE_REQUEST);
   assert.equal(!result.ok && result.class, ResultClass.UnknownOutcome);
   assert.equal(!result.ok && result.status, null);

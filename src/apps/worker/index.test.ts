@@ -375,12 +375,12 @@ test("each connect answer re-arms the renewal timer", async (t) => {
       const connects = f.server.requestsTo(FakePath.Connect).length;
       f.server.state.bindingVersion++;
       while (f.server.requestsTo(FakePath.Connect).length === connects)
-        await delay(POLL_MS);
+        await delay(POLL_MS, undefined, { signal: t.signal });
       await delay(REARM_RENEWAL_MS / REARM_WINDOWS);
     }
     assert.equal(f.server.requestsTo(FakePath.Token).length, tokens);
     while (f.server.requestsTo(FakePath.Token).length === tokens)
-      await delay(POLL_MS);
+      await delay(POLL_MS, undefined, { signal: t.signal });
   } finally {
     assert.equal(await worker.stop(), null);
     assert.equal(await running, null);

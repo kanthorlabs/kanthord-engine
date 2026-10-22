@@ -42,7 +42,6 @@ const FOURTH_MISSION_VERSION = 4;
 const DEADLINE_DELTA = 7800000;
 const SHORT_DEADLINE_DELTA = 1001;
 const JOURNEY_TIMEOUT = 180000;
-const MAX_WAIT_POLLS = 800;
 const POLL_MS = 10;
 const UNKNOWN_EXECUTION = "execution_01ARZ3NDEKTSV4RRFFQ69G5FAA";
 const CONTENT = {
@@ -514,14 +513,10 @@ test(
         h.G,
       ),
     );
-    await t.test("E03.9 readiness wakes a parked reviewer pull", async () => {
+    await t.test("E03.9 readiness wakes a parked reviewer pull", async (t) => {
       const pending = h.pull(h.R, h.reviewerPull);
-      for (
-        let poll = 0;
-        poll < MAX_WAIT_POLLS && !h.fixture.scheduler.pulling(h.reviewer);
-        poll++
-      )
-        await delay(POLL_MS);
+      while (!h.fixture.scheduler.pulling(h.reviewer))
+        await delay(POLL_MS, undefined, { signal: t.signal });
       assert.equal(h.fixture.scheduler.pulling(h.reviewer), true);
       const ready = await h.write<{ node: Node }>(
         ["mission", "node", "ready", h.implementId],
@@ -782,14 +777,10 @@ test(
         );
       },
     );
-    await t.test("E03.22 a pull claims nothing until the resume", async () => {
+    await t.test("E03.22 a pull claims nothing until the resume", async (t) => {
       const pending = h.pull();
-      for (
-        let poll = 0;
-        poll < MAX_WAIT_POLLS && !h.fixture.scheduler.pulling(h.general);
-        poll++
-      )
-        await delay(POLL_MS);
+      while (!h.fixture.scheduler.pulling(h.general))
+        await delay(POLL_MS, undefined, { signal: t.signal });
       assert.equal(h.fixture.scheduler.pulling(h.general), true);
       const executions = await h.read<Page<ExecutionRecord>>([
         "scheduler",

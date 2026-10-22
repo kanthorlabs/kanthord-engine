@@ -61,7 +61,6 @@ const SINGLE = 1;
 const MESSAGE_ENTRY = "message";
 const QUESTION = "How many objectives are open?";
 const ANSWER = "Two objectives are open.";
-const MAX_POLLS = 50;
 const FIRST_MESSAGE = "List the open objectives.";
 const identity = testHumanIdentity("kanthord", "Ulrich", "workbench-test");
 
@@ -561,12 +560,14 @@ async function message(fixture: Fixture, sessionId: string, text: string) {
 async function untilIdle(
   fixture: Fixture,
   sessionId: string,
+  signal: AbortSignal,
   after?: string,
 ): Promise<Entry[]> {
   const entries: Entry[] = [];
   let cursor = after;
   let version: number | undefined;
-  for (let poll = 0; poll < MAX_POLLS; poll++) {
+  for (;;) {
+    signal.throwIfAborted();
     const answer = completed(
       await fixture.workbench["session.events"](
         {
@@ -585,7 +586,6 @@ async function untilIdle(
     version = answer.version;
     if (!answer.snapshot.run_active) return entries;
   }
-  return assert.fail("The run did not end.");
 }
 
 function texts(entries: readonly Entry[], role: string): string[] {
@@ -652,7 +652,7 @@ test("a message runs the agent while a long poll follows the run to its end", as
   assert.equal(first.snapshot.run_active, true);
   assert.deepEqual(texts(first.entries, "user"), [QUESTION]);
   gate.resolve();
-  const rest = await untilIdle(fixture, sessionId, last);
+  const rest = await untilIdle(fixture, sessionId, t.signal, last);
   assert.deepEqual(texts(rest, "assistant"), [ANSWER]);
   const after = completed(
     await fixture.workbench["session.get"](
@@ -721,7 +721,7 @@ test("a session resumes after a restart with its configuration and its completed
     reasoning_effort: LOW,
   });
   completed(await message(first, session.id, QUESTION));
-  await untilIdle(first, session.id);
+  await untilIdle(first, session.id, t.signal);
   completed(
     await first.workbench["session.abort"](
       { params: { session_id: session.id }, query: {}, body: null },
@@ -756,6 +756,7 @@ test("a session resumes after a restart with its configuration and its completed
   const entries = await untilIdle(
     second,
     session.id,
+    t.signal,
     resumed.entries.at(-1)!.id,
   );
   assert.deepEqual(texts(entries, "assistant"), ["Still two."]);
@@ -807,9 +808,14 @@ const addSpare = {
   },
 };
 
-async function untilApproval(fixture: Fixture, sessionId: string) {
+async function untilApproval(
+  fixture: Fixture,
+  sessionId: string,
+  signal: AbortSignal,
+) {
   let version: number | undefined;
-  for (let poll = 0; poll < MAX_POLLS; poll++) {
+  for (;;) {
+    signal.throwIfAborted();
     const answer = completed(
       await fixture.workbench["session.events"](
         {
@@ -825,7 +831,6 @@ async function untilApproval(fixture: Fixture, sessionId: string) {
     assert.ok(answer.snapshot.run_active);
     version = answer.version;
   }
-  return assert.fail("No call waited for an approval.");
 }
 
 async function providerNames(fixture: Fixture): Promise<string[]> {
@@ -852,7 +857,7 @@ test("a poll answers at once when the snapshot changed after the version that th
     ),
   );
   completed(await message(fixture, sessionId, QUESTION));
-  await untilApproval(fixture, sessionId);
+  await untilApproval(fixture, sessionId, t.signal);
   const all = completed(
     await fixture.workbench["session.events"](
       { params: { session_id: sessionId }, query: {}, body: null },
@@ -881,7 +886,7 @@ test("the tool table holds the built-in tools of the agent and one tool per huma
   const fixture = await workbenchFixture(t, [fauxAssistantMessage(ANSWER)]);
   const session = await createSession(fixture);
   completed(await message(fixture, session.id, QUESTION));
-  await untilIdle(fixture, session.id);
+  await untilIdle(fixture, session.id, t.signal);
   const tools = fixture.provider.tools[0]!;
   for (const name of [
     "read",
@@ -942,7 +947,7 @@ test("a read tool and a built-in tool run at once and a refusal returns the owni
   ]);
   const session = await createSession(fixture);
   completed(await message(fixture, session.id, QUESTION));
-  const entries = await untilIdle(fixture, session.id);
+  const entries = await untilIdle(fixture, session.id, t.signal);
   const results = toolResults(entries);
   assert.deepEqual(
     results.map(({ toolName, isError }) => ({ toolName, isError })),
@@ -965,7 +970,7 @@ test("a mutation tool runs only after the human approves the call", async (t) =>
   const session = await createSession(fixture);
   const sessionId = session.id;
   completed(await message(fixture, sessionId, QUESTION));
-  const pending = await untilApproval(fixture, sessionId);
+  const pending = await untilApproval(fixture, sessionId, t.signal);
   assert.equal(pending.operation_id, PROVIDER_ADD);
   assert.deepEqual(pending.input, addSpare);
   assert.deepEqual(await providerNames(fixture), [DEFAULT, BACKUP]);
@@ -998,7 +1003,7 @@ test("a mutation tool runs only after the human approves the call", async (t) =>
       approved: true,
     },
   );
-  const entries = await untilIdle(fixture, sessionId);
+  const entries = await untilIdle(fixture, sessionId, t.signal);
   assert.deepEqual(
     toolResults(entries).map(({ isError }) => isError),
     [false],
@@ -1024,7 +1029,7 @@ test("the session list names the run and the pending approval of an open session
   const session = await createSession(fixture);
   const sessionId = session.id;
   completed(await message(fixture, sessionId, QUESTION));
-  const pending = await untilApproval(fixture, sessionId);
+  const pending = await untilApproval(fixture, sessionId, t.signal);
   const waiting = await listedSession(fixture, sessionId);
   assert.equal(waiting?.run_active, true);
   assert.deepEqual(waiting?.pending_approval, {
@@ -1041,7 +1046,7 @@ test("the session list names the run and the pending approval of an open session
       fixture.options,
     ),
   );
-  await untilIdle(fixture, sessionId);
+  await untilIdle(fixture, sessionId, t.signal);
   const idle = await listedSession(fixture, sessionId);
   assert.equal(idle?.run_active, false);
   assert.equal(idle?.pending_approval, null);
@@ -1062,7 +1067,7 @@ test("the session list answers the first of two pending approvals of one run, as
   const session = await createSession(fixture);
   const sessionId = session.id;
   completed(await message(fixture, sessionId, QUESTION));
-  const first = await untilApproval(fixture, sessionId);
+  const first = await untilApproval(fixture, sessionId, t.signal);
   const listed = await listedSession(fixture, sessionId);
   assert.deepEqual(listed?.pending_approval, {
     tool_call_id: first.tool_call_id,
@@ -1078,7 +1083,7 @@ test("the session list answers the first of two pending approvals of one run, as
       fixture.options,
     ),
   );
-  const next = await untilApproval(fixture, sessionId);
+  const next = await untilApproval(fixture, sessionId, t.signal);
   assert.notEqual(next.tool_call_id, first.tool_call_id);
   const relisted = await listedSession(fixture, sessionId);
   assert.deepEqual(relisted?.pending_approval, {
@@ -1095,7 +1100,7 @@ test("a rejected call reaches the agent as a blocked call", async (t) => {
   const session = await createSession(fixture);
   const sessionId = session.id;
   completed(await message(fixture, sessionId, QUESTION));
-  const pending = await untilApproval(fixture, sessionId);
+  const pending = await untilApproval(fixture, sessionId, t.signal);
   completed(
     await fixture.workbench["session.approve"](
       {
@@ -1106,7 +1111,7 @@ test("a rejected call reaches the agent as a blocked call", async (t) => {
       fixture.options,
     ),
   );
-  const entries = await untilIdle(fixture, sessionId);
+  const entries = await untilIdle(fixture, sessionId, t.signal);
   assert.deepEqual(toolResults(entries), [
     {
       toolName: toolName(PROVIDER_ADD),
@@ -1125,7 +1130,7 @@ test("an abort rejects every pending approval", async (t) => {
   const session = await createSession(fixture);
   const sessionId = session.id;
   completed(await message(fixture, sessionId, QUESTION));
-  const pending = await untilApproval(fixture, sessionId);
+  const pending = await untilApproval(fixture, sessionId, t.signal);
   completed(
     await fixture.workbench["session.abort"](
       { params: { session_id: sessionId }, query: {}, body: null },

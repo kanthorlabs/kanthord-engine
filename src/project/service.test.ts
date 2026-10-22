@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { existsSync, statSync, writeFileSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
 import { test, type TestContext } from "node:test";
+import { setImmediate as turn } from "node:timers/promises";
 import { ProjectService, type Dependencies } from "./service.ts";
 import {
   background,
@@ -2153,7 +2154,7 @@ test("concurrent writes probe before committing and only one expected version wi
     f.write({ [REPOSITORY_NAME]: repositoryBinding() }),
     f.write({ [REPOSITORY_NAME]: repositoryBinding() }),
   ];
-  await new Promise((resolve) => setImmediate(resolve));
+  while (calls < TWO_CALLS) await turn(undefined, { signal: t.signal });
   assert.equal(calls, TWO_CALLS);
   assert.deepEqual(f.snapshot(), before);
   release();

@@ -283,7 +283,8 @@ test("Repeated wakes during a handoff start no second handoff of the event", asy
   const answer = Promise.withResolvers<OperationResult<unknown>>();
   h.answers.push(() => answer.promise);
   h.dispatcher.wake();
-  await tick();
+  while (h.calls.length < HANDOFFS_PER_EVENT)
+    await tick(undefined, { signal: t.signal });
   h.dispatcher.wake();
   h.dispatcher.wake();
   await tick();
@@ -509,7 +510,8 @@ test("A store failure during a drain raises no unhandled rejection", async (t) =
   const answer = Promise.withResolvers<OperationResult<unknown>>();
   h.answers.push(() => answer.promise);
   h.dispatcher.wake();
-  await tick();
+  while (h.calls.length < HANDOFFS_PER_EVENT)
+    await tick(undefined, { signal: t.signal });
   h.store.database.exec("DROP TABLE intake_inbound_event");
   answer.resolve({
     type: OperationResultType.Completed,

@@ -155,17 +155,17 @@ for (const scenario of cases) {
 
 test("the real process prints help and the package version", async (t) => {
   const env = environment(temporary(t));
-  const help = await spawnKanthord([HELP], env);
+  const help = await spawnKanthord([HELP], env, t.signal);
   assert.equal(help.code, EXIT_SUCCESS, help.stderr);
   assert.ok(commandNames(help.stdout).includes(SERVE));
-  const version = await spawnKanthord([VERSION], env);
+  const version = await spawnKanthord([VERSION], env, t.signal);
   assert.equal(version.code, EXIT_SUCCESS, version.stderr);
   assert.equal(version.stdout, `${packageVersion()}\n`);
 });
 
 test("the real process exits with the failure code of a failed command", async (t) => {
   const env = environment(temporary(t));
-  const result = await spawnKanthord(["config", "validate"], env);
+  const result = await spawnKanthord(["config", "validate"], env, t.signal);
   assert.equal(result.code, EXIT_FAILURE);
   assert.equal(result.stdout, NO_OUTPUT);
   assert.equal(
@@ -181,7 +181,7 @@ test("the real process sends an authenticated request to the server", async (t) 
     KANTHORD_ENDPOINT: fixture.endpoint,
     KANTHORD_TOKEN: fixture.token,
   };
-  const result = await spawnKanthord(["gateway", "verify"], env);
+  const result = await spawnKanthord(["gateway", "verify"], env, t.signal);
   assert.equal(result.code, EXIT_SUCCESS, result.stderr);
   assert.equal(result.stderr, NO_OUTPUT);
   assert.equal(

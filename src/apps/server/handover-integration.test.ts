@@ -103,7 +103,6 @@ const BODY_TOO_LARGE = "gateway.request.body_too_large";
 const COPILOT = "github-copilot";
 const LOGIN_COMPLETED = "completed";
 const LOGIN_PENDING = "pending";
-const LOGIN_POLL_LIMIT = 50;
 const MAX_REPORT_BYTES = 65534;
 const OVERSIZED_REPORT_BYTES = 65538;
 const MAX_CHILD_BUFFER = 1024;
@@ -356,6 +355,7 @@ function offlineProvider(credential: OAuthCredential) {
 async function loginCredential(
   f: Awaited<ReturnType<typeof gatewayFixture>>,
   credential: OAuthCredential,
+  signal: AbortSignal,
 ) {
   assert.equal(credential.type, SecretShape.OAuth);
   const client = httpClient(llmOperations, f.endpoint, f.token);
@@ -365,7 +365,7 @@ async function loginCredential(
       { idempotencyKey: ulid() },
     ),
   );
-  for (let poll = 0; poll < LOGIN_POLL_LIMIT; poll++) {
+  for (;;) {
     const state = completed(
       await client.login_status({
         params: { session_id: pending.session_id },
@@ -383,9 +383,8 @@ async function loginCredential(
         }),
       );
     }
-    await setImmediate();
+    await setImmediate(undefined, { signal });
   }
-  assert.fail("Offline OAuth login exceeded its bounded polls");
 }
 
 async function setup(
@@ -438,7 +437,7 @@ async function setup(
     });
   }
   let created = oauth
-    ? await loginCredential(f, oauth)
+    ? await loginCredential(f, oauth, t.signal)
     : completed(
         await call(llmOperations.create, {
           params: {},

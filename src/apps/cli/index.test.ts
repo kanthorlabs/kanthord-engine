@@ -66,9 +66,15 @@ const execFileAsync = promisify(execFile);
 async function invocation(
   args: string[],
   env: NodeJS.ProcessEnv,
+  signal: AbortSignal,
   terminal = false,
 ) {
-  const { code, stdout, stderr } = await runKanthord(args, env, terminal);
+  const { code, stdout, stderr } = await runKanthord(
+    args,
+    env,
+    signal,
+    terminal,
+  );
   return { status: code, stdout, stderr };
 }
 function environment(directory: string): NodeJS.ProcessEnv {
@@ -85,7 +91,7 @@ function environment(directory: string): NodeJS.ProcessEnv {
 
 test("CLI help works offline, config help resolves its path, and unsupported names/options fail", async (t) => {
   const env = environment(temporary(t));
-  const help = await invocation(["--help"], env);
+  const help = await invocation(["--help"], env, t.signal);
   assert.equal(help.status, ExitCode.Success);
   for (const name of [
     "config",
@@ -99,16 +105,20 @@ test("CLI help works offline, config help resolves its path, and unsupported nam
     "tracking",
   ])
     assert.ok(help.stdout.includes(name));
-  assert.notEqual((await invocation([], env)).status, ExitCode.Success);
   assert.notEqual(
-    (await invocation(["unknown"], env)).status,
+    (await invocation([], env, t.signal)).status,
     ExitCode.Success,
   );
-  const unsupported = await invocation(["serve", "unknown"], env);
+  assert.notEqual(
+    (await invocation(["unknown"], env, t.signal)).status,
+    ExitCode.Success,
+  );
+  const unsupported = await invocation(["serve", "unknown"], env, t.signal);
   assert.notEqual(unsupported.status, ExitCode.Success);
   assert.match(unsupported.stderr, /^cli\.serve\.unsupported_application:/);
   assert.notEqual(
-    (await invocation(["gateway", "--config", "other.yaml"], env)).status,
+    (await invocation(["gateway", "--config", "other.yaml"], env, t.signal))
+      .status,
     ExitCode.Success,
   );
   for (const args of [
@@ -117,33 +127,34 @@ test("CLI help works offline, config help resolves its path, and unsupported nam
     ["config", "validate", "--help"],
     ["config", "show", "--help"],
   ]) {
-    const result = await invocation(args, env);
+    const result = await invocation(args, env, t.signal);
     assert.equal(result.status, ExitCode.Success);
     assert.ok(result.stdout.includes(env.KANTHORD_CONFIG!));
   }
   const option = await invocation(
     ["config", "show", "--config", "relative.yaml", "--help"],
     env,
+    t.signal,
   );
   assert.equal(option.status, ExitCode.Success);
   assert.ok(option.stdout.includes(join(process.cwd(), "relative.yaml")));
   assert.equal(
-    (await invocation(["gateway", "--help"], env)).status,
+    (await invocation(["gateway", "--help"], env, t.signal)).status,
     ExitCode.Success,
   );
   assert.equal(
-    (await invocation(["worker", "--help"], env)).status,
+    (await invocation(["worker", "--help"], env, t.signal)).status,
     ExitCode.Success,
   );
 });
 
 test("project commands expose offline help and validate inputs before I/O", async (t) => {
   const env = environment(temporary(t));
-  const group = await invocation(["project", "--help"], env);
+  const group = await invocation(["project", "--help"], env, t.signal);
   assert.equal(group.status, ExitCode.Success, group.stderr);
   for (const leaf of ["create", "list", "get", "rename"]) {
     assert.match(group.stdout, new RegExp(`\\b${leaf}\\b`));
-    const help = await invocation(["project", leaf, "--help"], env);
+    const help = await invocation(["project", leaf, "--help"], env, t.signal);
     assert.equal(help.status, ExitCode.Success, help.stderr);
   }
   for (const [args, code] of [
@@ -170,7 +181,7 @@ test("project commands expose offline help and validate inputs before I/O", asyn
       "cli.project.rename.token_required",
     ],
   ] as const) {
-    const result = await invocation(["project", ...args], env);
+    const result = await invocation(["project", ...args], env, t.signal);
     assert.equal(result.status, ExitCode.Failure);
     assert.match(result.stderr, new RegExp(`^${code.replaceAll(".", "\\.")}:`));
     assert.equal(result.stdout, EMPTY_OUTPUT);
@@ -183,6 +194,7 @@ test("project commands expose offline help and validate inputs before I/O", asyn
     const result = await invocation(
       ["project", ...args, "--idempotency-key", "key"],
       env,
+      t.signal,
     );
     assert.equal(result.status, ExitCode.Failure);
     assert.match(result.stderr, /unknown option/);
@@ -197,12 +209,12 @@ test("project name diagnostics and help state the name rule", async (t) => {
     ["create", "--name", "Invalid"],
     ["rename", "project_01ARZ3NDEKTSV4RRFFQ69G5FAV", "--name", "Invalid"],
   ]) {
-    const result = await invocation(["project", ...args], env);
+    const result = await invocation(["project", ...args], env, t.signal);
     assert.equal(result.status, ExitCode.Failure);
     assert.ok(result.stderr.includes(rule), result.stderr);
   }
   for (const leaf of ["create", "rename"]) {
-    const help = await invocation(["project", leaf, "--help"], env);
+    const help = await invocation(["project", leaf, "--help"], env, t.signal);
     assert.ok(help.stdout.replace(/\s+/g, " ").includes(rule), help.stdout);
   }
 });
@@ -211,6 +223,7 @@ test("a missing token names every token source", async (t) => {
   const result = await invocation(
     ["project", "list"],
     environment(temporary(t)),
+    t.signal,
   );
   assert.equal(result.status, ExitCode.Failure);
   assert.match(result.stderr, /^cli\.project\.list\.token_required:/);
@@ -225,18 +238,24 @@ test("a missing token names every token source", async (t) => {
 
 test("project binding commands expose help and reject invalid inputs before I/O", async (t) => {
   const env = environment(temporary(t));
-  const group = await invocation(["project", "binding", "--help"], env);
+  const group = await invocation(
+    ["project", "binding", "--help"],
+    env,
+    t.signal,
+  );
   assert.equal(group.status, ExitCode.Success, group.stderr);
   for (const leaf of ["list", "get", "export", "apply", "revision"]) {
     assert.match(group.stdout, new RegExp(`\\b${leaf}\\b`));
     assert.equal(
-      (await invocation(["project", "binding", leaf, "--help"], env)).status,
+      (await invocation(["project", "binding", leaf, "--help"], env, t.signal))
+        .status,
       ExitCode.Success,
     );
   }
   const revision = await invocation(
     ["project", "binding", "revision", "--help"],
     env,
+    t.signal,
   );
   assert.equal(revision.status, ExitCode.Success);
   assert.match(revision.stdout, /list/);
@@ -245,6 +264,7 @@ test("project binding commands expose help and reject invalid inputs before I/O"
       await invocation(
         ["project", "binding", "revision", "list", "--help"],
         env,
+        t.signal,
       )
     ).status,
     ExitCode.Success,
@@ -285,7 +305,11 @@ test("project binding commands expose help and reject invalid inputs before I/O"
       "cli.file.not_found",
     ],
   ] as const) {
-    const result = await invocation(["project", "binding", ...args], env);
+    const result = await invocation(
+      ["project", "binding", ...args],
+      env,
+      t.signal,
+    );
     assert.equal(result.status, ExitCode.Failure, result.stderr);
     assert.match(result.stderr, new RegExp(`^${code.replaceAll(".", "\\.")}:`));
     assert.equal(result.stdout, EMPTY_OUTPUT);
@@ -297,7 +321,11 @@ test("project binding commands expose help and reject invalid inputs before I/O"
     ["apply", PROJECT_ID, "--file", "missing.json"],
     ["revision", "list", PROJECT_ID, BINDING_ID],
   ]) {
-    const result = await invocation(["project", "binding", ...args], env);
+    const result = await invocation(
+      ["project", "binding", ...args],
+      env,
+      t.signal,
+    );
     assert.equal(result.status, ExitCode.Failure);
     assert.match(result.stderr, /\.token_required:/);
   }
@@ -310,6 +338,7 @@ test("project binding commands expose help and reject invalid inputs before I/O"
     const result = await invocation(
       ["project", "binding", ...args, "--idempotency-key", "key"],
       env,
+      t.signal,
     );
     assert.equal(result.status, ExitCode.Failure);
     assert.match(result.stderr, /unknown option/);
@@ -318,11 +347,15 @@ test("project binding commands expose help and reject invalid inputs before I/O"
 
 test("project agent commands expose help and reject invalid inputs before I/O", async (t) => {
   const env = environment(temporary(t));
-  const group = await invocation(["project", "agent", "--help"], env);
+  const group = await invocation(["project", "agent", "--help"], env, t.signal);
   assert.equal(group.status, ExitCode.Success, group.stderr);
   for (const leaf of ["list", "get"]) {
     assert.match(group.stdout, new RegExp(`\\b${leaf}\\b`));
-    const help = await invocation(["project", "agent", leaf, "--help"], env);
+    const help = await invocation(
+      ["project", "agent", leaf, "--help"],
+      env,
+      t.signal,
+    );
     assert.equal(help.status, ExitCode.Success, help.stderr);
     assert.match(help.stdout, /<worker-binding-id>/);
   }
@@ -357,7 +390,11 @@ test("project agent commands expose help and reject invalid inputs before I/O", 
       "cli.project.agent.get.token_required",
     ],
   ] as const) {
-    const result = await invocation(["project", "agent", ...args], env);
+    const result = await invocation(
+      ["project", "agent", ...args],
+      env,
+      t.signal,
+    );
     assert.equal(result.status, ExitCode.Failure, result.stderr);
     assert.match(result.stderr, new RegExp(`^${code.replaceAll(".", "\\.")}:`));
     assert.equal(result.stdout, EMPTY_OUTPUT);
@@ -369,6 +406,7 @@ test("project agent commands expose help and reject invalid inputs before I/O", 
     const result = await invocation(
       ["project", "agent", ...args, "--idempotency-key", "key"],
       env,
+      t.signal,
     );
     assert.equal(result.status, ExitCode.Failure);
     assert.match(result.stderr, /unknown option/);
@@ -377,14 +415,22 @@ test("project agent commands expose help and reject invalid inputs before I/O", 
 
 test("worker handover validates locally and prints receipt metadata without the envelope", async (t) => {
   const env = environment(temporary(t));
-  const help = await invocation(["worker", "handover", "--help"], env);
+  const help = await invocation(
+    ["worker", "handover", "--help"],
+    env,
+    t.signal,
+  );
   assert.equal(help.status, ExitCode.Success);
   assert.match(help.stdout, /<execution-id>/);
   assert.equal(
-    (await invocation(["worker", "handover"], env)).status,
+    (await invocation(["worker", "handover"], env, t.signal)).status,
     ExitCode.Failure,
   );
-  const invalid = await invocation(["worker", "handover", "invalid"], env);
+  const invalid = await invocation(
+    ["worker", "handover", "invalid"],
+    env,
+    t.signal,
+  );
   assert.equal(invalid.status, ExitCode.Failure);
   assert.match(invalid.stderr, /^cli\.worker\.handover\.invalid_execution_id:/);
   const executionId = "execution_01ARZ3NDEKTSV4RRFFQ69G5FAV";
@@ -401,6 +447,7 @@ test("worker handover validates locally and prints receipt metadata without the 
   const lost = await invocation(
     [...args, "--endpoint", "http://127.0.0.1:1"],
     env,
+    t.signal,
   );
   assert.equal(lost.status, ExitCode.Failure);
   assert.equal(lost.stderr, HANDOVER_LOST);
@@ -454,6 +501,7 @@ test("scheduler execution release tells the operator to read the execution befor
       "01ARZ3NDEKTSV4RRFFQ69G5FAV",
     ],
     env,
+    t.signal,
   );
   assert.equal(result.status, ExitCode.Failure);
   assert.equal(result.stdout, EMPTY_OUTPUT);
@@ -482,12 +530,13 @@ test("agent enablement commands expose offline help and validate inputs before I
     const help = await invocation(
       ["agent", "enablement", ...path, "--help"],
       env,
+      t.signal,
     );
     assert.equal(help.status, ExitCode.Success, help.stderr);
     if (fileRequired) assert.match(help.stdout, /--file <path>/);
   }
   assert.equal(
-    (await invocation(["worker", "register", "--help"], env)).status,
+    (await invocation(["worker", "register", "--help"], env, t.signal)).status,
     ExitCode.Success,
   );
   const invalid = await invocation(
@@ -504,6 +553,7 @@ test("agent enablement commands expose offline help and validate inputs before I
       "abc",
     ],
     env,
+    t.signal,
   );
   assert.equal(invalid.status, ExitCode.Failure);
   assert.match(
@@ -522,6 +572,7 @@ test("agent enablement commands expose offline help and validate inputs before I
       "enablement.json",
     ],
     env,
+    t.signal,
   );
   assert.equal(missingToken.status, ExitCode.Failure);
   assert.match(
@@ -541,7 +592,7 @@ test("agent get and prompt commands expose help and refuse invalid options befor
     [["prompt", "put"], /--scope <scope>[\s\S]*--file <path>/],
     [["prompt", "switch"], /--switch <source>[\s\S]*--on[\s\S]*--off/],
   ] as const) {
-    const help = await invocation(["agent", ...path, "--help"], env);
+    const help = await invocation(["agent", ...path, "--help"], env, t.signal);
     assert.equal(help.status, ExitCode.Success, help.stderr);
     assert.match(help.stdout, flags);
   }
@@ -671,6 +722,7 @@ test("agent get and prompt commands expose help and refuse invalid options befor
           : []),
       ],
       env,
+      t.signal,
     );
     assert.equal(result.status, ExitCode.Failure, code);
     assert.equal(result.stdout, EMPTY_OUTPUT, code);
@@ -692,6 +744,7 @@ test("agent get and prompt commands expose help and refuse invalid options befor
       ...remote,
     ],
     env,
+    t.signal,
   );
   assert.equal(missing.status, ExitCode.Failure);
   assert.match(missing.stderr, /^cli\.file\.not_found:/);
@@ -704,13 +757,18 @@ test("serve worker refuses --config and --token and requires an instance configu
   const config = await invocation(
     ["serve", "worker", "--config", "private.yaml"],
     env,
+    t.signal,
   );
   assert.equal(config.status, ExitCode.Failure);
   assert.match(config.stderr, /^cli\.serve\.worker_config:/);
-  const token = await invocation(["serve", "worker", "--token", "x"], env);
+  const token = await invocation(
+    ["serve", "worker", "--token", "x"],
+    env,
+    t.signal,
+  );
   assert.equal(token.status, ExitCode.Failure);
   assert.match(token.stderr, /^cli\.serve\.worker_token:/);
-  const absent = await invocation(WORKER_UNREACHABLE_ARGS, env);
+  const absent = await invocation(WORKER_UNREACHABLE_ARGS, env, t.signal);
   assert.equal(absent.status, ExitCode.Failure);
   assert.equal(absent.stdout, EMPTY_OUTPUT);
   assert.match(absent.stderr, /^worker\.start\.instance_config_absent:/);
@@ -734,7 +792,7 @@ test("serve worker with an instance configuration reports an unavailable server 
     instance_id: "worker_instance_01ARZ3NDEKTSV4RRFFQ69G5FAA",
     private_key: pair.private_key.toString("base64url"),
   });
-  const unavailable = await invocation(["serve", "worker"], env);
+  const unavailable = await invocation(["serve", "worker"], env, t.signal);
   assert.equal(unavailable.status, ExitCode.Failure);
   assert.equal(unavailable.stdout, EMPTY_OUTPUT);
   assert.equal(
@@ -748,7 +806,7 @@ test("serve worker with an instance configuration reports an unavailable server 
 test("--version prints the package version and exits without work", async (t) => {
   const env = environment(temporary(t));
   for (const flag of ["--version", "-V"]) {
-    const result = await invocation([flag], env);
+    const result = await invocation([flag], env, t.signal);
     assert.equal(result.status, ExitCode.Success, result.stderr);
     assert.equal(result.stdout, `${packageVersion()}\n`);
   }
@@ -758,7 +816,7 @@ test("--version prints the package version and exits without work", async (t) =>
 test("config init is non-interactive, writes validated private configuration without displaying secrets and preserves existing files", async (t) => {
   const directory = temporary(t);
   const env = environment(directory);
-  const accepted = await invocation(["config", "init"], env);
+  const accepted = await invocation(["config", "init"], env, t.signal);
   assert.equal(accepted.status, ExitCode.Success, accepted.stderr);
   const content = readFileSync(env.KANTHORD_CONFIG!, "utf8");
   assert.equal(accepted.stdout, `created: ${env.KANTHORD_CONFIG!}\n`);
@@ -766,7 +824,7 @@ test("config init is non-interactive, writes validated private configuration wit
     !accepted.stdout.includes(loadConfig(env.KANTHORD_CONFIG!).master_key),
   );
   assert.equal(statSync(env.KANTHORD_CONFIG!).mode & 0o777, PRIVATE_FILE_MODE);
-  const existing = await invocation(["config", "init"], env);
+  const existing = await invocation(["config", "init"], env, t.signal);
   assert.notEqual(existing.status, ExitCode.Success);
   assert.equal(readFileSync(env.KANTHORD_CONFIG!, "utf8"), content);
   assert.deepEqual(readdirSync(directory), ["kanthord.yaml"]);
@@ -786,6 +844,7 @@ test("config init appends each lowercased allowed host to the default host allow
       "203.0.113.7:8443",
     ],
     env,
+    t.signal,
   );
   assert.equal(result.status, ExitCode.Success, result.stderr);
   assert.deepEqual(loadConfig(env.KANTHORD_CONFIG!).gateway.allowed_hosts, [
@@ -802,6 +861,7 @@ test("config init sets the gateway bind address", async (t) => {
     const result = await invocation(
       ["config", "init", "--gateway-bind", address],
       env,
+      t.signal,
     );
     assert.equal(result.status, ExitCode.Success, result.stderr);
     assert.equal(loadConfig(env.KANTHORD_CONFIG!).gateway.bind, address);
@@ -814,6 +874,7 @@ test("config init refuses a bind value that is not an IP address and writes noth
     const result = await invocation(
       ["config", "init", "--gateway-bind", value],
       env,
+      t.signal,
     );
     assert.equal(result.status, ExitCode.Failure);
     assert.match(result.stderr, /^system\.config\.invalid_field:/);
@@ -826,6 +887,7 @@ test("config init sets the gateway base path", async (t) => {
   const result = await invocation(
     ["config", "init", "--gateway-base-path", PREFIX_BASE_PATH],
     env,
+    t.signal,
   );
   assert.equal(result.status, ExitCode.Success, result.stderr);
   assert.equal(
@@ -840,6 +902,7 @@ test("config init refuses an invalid base path and writes nothing", async (t) =>
     const result = await invocation(
       ["config", "init", "--gateway-base-path", value],
       env,
+      t.signal,
     );
     assert.equal(result.status, ExitCode.Failure);
     assert.match(result.stderr, /^system\.config\.invalid_field:/);
@@ -859,6 +922,7 @@ test("config init refuses an allowed host that is not a name with an optional po
     const result = await invocation(
       ["config", "init", "--gateway-allowed-host", value],
       env,
+      t.signal,
     );
     assert.equal(result.status, ExitCode.Failure);
     assert.match(result.stderr, /^cli\.config\.invalid_allowed_host:/);
@@ -868,7 +932,7 @@ test("config init refuses an allowed host that is not a name with an optional po
 
 test("removed authentication commands and excess arguments fail without prompting or creating files", async (t) => {
   const env = environment(temporary(t));
-  const help = await invocation(["gateway", "--help"], env);
+  const help = await invocation(["gateway", "--help"], env, t.signal);
   assert.equal(help.status, ExitCode.Success);
   assert.doesNotMatch(help.stdout, /login|logout|\bjwt\b/);
   for (const args of [
@@ -894,7 +958,7 @@ test("removed authentication commands and excess arguments fail without promptin
     ["config", "init", "extra"],
     ["gateway", "logout", "extra"],
   ]) {
-    const result = await invocation(args, env);
+    const result = await invocation(args, env, t.signal);
     assert.notEqual(result.status, ExitCode.Success);
     assert.doesNotMatch(
       result.stdout + result.stderr,
@@ -915,7 +979,7 @@ test("an unknown operand names the unknown command and suggests a similar one", 
     [["jwt"], /^error: unknown command 'jwt'/],
     [["project", "binding", "nope"], /^error: unknown command 'nope'/],
   ] as const) {
-    const result = await invocation([...args], env);
+    const result = await invocation([...args], env, t.signal);
     assert.equal(result.status, ExitCode.Failure);
     assert.equal(result.stdout, EMPTY_OUTPUT);
     assert.match(result.stderr, /error: unknown command/);
@@ -925,14 +989,14 @@ test("an unknown operand names the unknown command and suggests a similar one", 
     ["project", "--bogus"],
     ["--bogus", "project"],
   ]) {
-    const result = await invocation(args, env);
+    const result = await invocation(args, env, t.signal);
     assert.equal(result.status, ExitCode.Failure);
     assert.match(result.stderr, /error: unknown option '--bogus'/);
   }
-  const group = await invocation(["project"], env);
+  const group = await invocation(["project"], env, t.signal);
   assert.equal(group.status, ExitCode.Success);
   assert.match(group.stdout, /^Usage: kanthord project/);
-  const bare = await invocation([], env);
+  const bare = await invocation([], env, t.signal);
   assert.equal(bare.status, ExitCode.Failure);
   assert.match(bare.stdout, /^Usage: kanthord/);
 });
@@ -941,7 +1005,7 @@ test("validate/show and serve never create or repair configuration and never dis
   const directory = temporary(t);
   const env = environment(directory);
   for (const args of [["config", "validate"], ["serve"], ["serve", "server"]]) {
-    const result = await invocation(args, env);
+    const result = await invocation(args, env, t.signal);
     assert.notEqual(result.status, ExitCode.Success);
     assert.ok(result.stderr.includes(env.KANTHORD_CONFIG!));
     assert.match(result.stderr, /^system\.config\.not_found:/);
@@ -949,16 +1013,16 @@ test("validate/show and serve never create or repair configuration and never dis
     assert.deepEqual(readdirSync(directory), []);
   }
   writePrivate(env.KANTHORD_CONFIG!, "master_key: [secret-marker");
-  const invalid = await invocation(["config", "validate"], env);
+  const invalid = await invocation(["config", "validate"], env, t.signal);
   assert.notEqual(invalid.status, ExitCode.Success);
   assert.doesNotMatch(invalid.stderr + invalid.stdout, /secret-marker/);
   assert.match(invalid.stderr, /^system\.config\.invalid_yaml:/);
   writePrivate(env.KANTHORD_CONFIG!, initialConfig(), true);
   assert.equal(
-    (await invocation(["config", "validate"], env)).status,
+    (await invocation(["config", "validate"], env, t.signal)).status,
     ExitCode.Success,
   );
-  const show = await invocation(["config", "show"], env);
+  const show = await invocation(["config", "show"], env, t.signal);
   assert.equal(show.status, ExitCode.Success);
   assert.match(show.stdout, /\[Sensitive\]/);
 });
@@ -970,11 +1034,19 @@ test("auth jwt uses its optional username or the constant default, the configure
   const config = loadConfig(env.KANTHORD_CONFIG!);
   config.gateway.auth.token_lifetime = TOKEN_LIFETIME_SECONDS;
   writePrivate(env.KANTHORD_CONFIG!, stringify(config), true);
-  const redirected = await invocation(["auth", "jwt", "generate"], env);
+  const redirected = await invocation(
+    ["auth", "jwt", "generate"],
+    env,
+    t.signal,
+  );
   assert.equal(redirected.status, ExitCode.Failure);
   assert.equal(redirected.stdout, EMPTY_OUTPUT);
   assert.match(redirected.stderr, /terminal/);
-  const help = await invocation(["auth", "jwt", "generate", "--help"], env);
+  const help = await invocation(
+    ["auth", "jwt", "generate", "--help"],
+    env,
+    t.signal,
+  );
   assert.equal(help.status, ExitCode.Success);
   assert.match(help.stdout, /--config <path>/);
   assert.match(help.stdout, /--output \[path\]/);
@@ -999,6 +1071,7 @@ test("auth jwt uses its optional username or the constant default, the configure
         env.KANTHORD_CONFIG!,
       ],
       { ...env, KANTHORD_CONFIG: join(directory, "absent.yaml") },
+      t.signal,
       true,
     );
     assert.equal(result.status, ExitCode.Success, result.stderr);
@@ -1025,6 +1098,7 @@ test("auth jwt uses its optional username or the constant default, the configure
     const invalid = await invocation(
       ["auth", "jwt", "generate", ...args],
       env,
+      t.signal,
       true,
     );
     assert.notEqual(invalid.status, ExitCode.Success);
@@ -1036,7 +1110,11 @@ test("jwt --output creates a private default client file with a verifiable human
   const env = environment(temporary(t));
   writePrivate(env.KANTHORD_CONFIG!, initialConfig());
   const config = loadConfig(env.KANTHORD_CONFIG!);
-  const result = await invocation(["auth", "jwt", "generate", "--output"], env);
+  const result = await invocation(
+    ["auth", "jwt", "generate", "--output"],
+    env,
+    t.signal,
+  );
   const path = clientConfigPath(env);
   assert.equal(result.status, ExitCode.Success, result.stderr);
   assert.equal(result.stdout, `created: ${path}\n`);
@@ -1081,6 +1159,7 @@ test("jwt --output with --binding writes the machine token without the client se
       "http://127.0.0.1:31415",
     ],
     env,
+    t.signal,
   );
   assert.equal(result.status, ExitCode.Success, result.stderr);
   assert.equal(result.stdout, `created: ${path}\n`);
@@ -1118,6 +1197,7 @@ test("jwt --output resolves an explicit relative export path and writes the endp
       endpoint,
     ],
     env,
+    t.signal,
   );
   assert.equal(result.status, ExitCode.Success, result.stderr);
   assert.equal(result.stdout, `created: ${resolve(path)}\n`);
@@ -1146,6 +1226,7 @@ test("jwt --output refuses an existing destination without changing its bytes or
   const result = await invocation(
     ["auth", "jwt", "generate", "--output", "--verbose"],
     env,
+    t.signal,
   );
   assert.equal(result.status, ExitCode.Failure);
   assert.match(result.stderr, /^system\.files\.publish_failed:/);
@@ -1165,12 +1246,14 @@ test("jwt --output hints at a second client file only when it has no path", asyn
   const defaulted = await invocation(
     ["auth", "jwt", "generate", "--output"],
     env,
+    t.signal,
   );
   assert.match(defaulted.stderr, /^system\.files\.publish_failed:/);
   assert.match(defaulted.stderr, hint);
   const explicit = await invocation(
     ["auth", "jwt", "generate", "--output", clientConfigPath(env)],
     env,
+    t.signal,
   );
   assert.match(explicit.stderr, /^system\.files\.publish_failed:/);
   assert.doesNotMatch(explicit.stderr, hint);
@@ -1232,6 +1315,7 @@ test("jwt output validation precedes configuration loading and writes no file or
     const result = await invocation(
       ["auth", "jwt", "generate", ...options],
       env,
+      t.signal,
     );
     assert.equal(result.status, ExitCode.Failure);
     assert.ok(result.stderr.startsWith(`${code}:`), result.stderr);
@@ -1247,12 +1331,17 @@ test("jwt --verbose --output prints creation then the existing claim list withou
   const result = await invocation(
     ["auth", "jwt", "generate", "--verbose", "--output"],
     env,
+    t.signal,
   );
   assert.equal(result.status, ExitCode.Success, result.stderr);
   assert.equal(result.stderr, EMPTY_OUTPUT);
   const path = clientConfigPath(env);
   const { token } = parse(readFileSync(path, "utf8"));
-  const inspected = await invocation(["auth", "jwt", "inspect", token], env);
+  const inspected = await invocation(
+    ["auth", "jwt", "inspect", token],
+    env,
+    t.signal,
+  );
   assert.equal(inspected.status, ExitCode.Success, inspected.stderr);
   assert.equal(result.stdout, `created: ${path}\n${inspected.stdout}`);
   assert.ok(!result.stdout.includes(token));
@@ -1269,6 +1358,7 @@ test("JWT generation requires terminal output before loading configuration in bo
     const result = await invocation(
       ["auth", "jwt", "generate", ...options],
       env,
+      t.signal,
     );
     assert.equal(result.status, ExitCode.Failure);
     assert.equal(result.stdout, EMPTY_OUTPUT);
@@ -1290,6 +1380,7 @@ test("jwt accepts display names and issues fresh machine identities without open
   const human = await invocation(
     ["auth", "jwt", "generate", "ulrich", "--name", name],
     env,
+    t.signal,
     true,
   );
   assert.equal(human.status, ExitCode.Success, human.stderr);
@@ -1310,6 +1401,7 @@ test("jwt accepts display names and issues fresh machine identities without open
         ...(index ? ["--name", name] : []),
       ],
       env,
+      t.signal,
       true,
     );
     assert.equal(result.status, ExitCode.Success, result.stderr);
@@ -1333,6 +1425,7 @@ test("jwt accepts display names and issues fresh machine identities without open
   const conflict = await invocation(
     ["auth", "jwt", "generate", "ulrich", "--binding", binding],
     env,
+    t.signal,
     true,
   );
   assert.equal(conflict.status, ExitCode.Failure);
@@ -1341,6 +1434,7 @@ test("jwt accepts display names and issues fresh machine identities without open
   const redirected = await invocation(
     ["auth", "jwt", "generate", "--project", PROJECT_ID, "--binding", binding],
     env,
+    t.signal,
   );
   assert.equal(redirected.status, ExitCode.Failure);
   assert.equal(redirected.stdout, EMPTY_OUTPUT);
@@ -1354,6 +1448,7 @@ test("jwt accepts display names and issues fresh machine identities without open
     const invalid = await invocation(
       ["auth", "jwt", "generate", ...options],
       env,
+      t.signal,
       true,
     );
     assert.equal(invalid.status, ExitCode.Failure);
@@ -1366,16 +1461,17 @@ test("auth jwt group, verbose generation, inspection and token precedence", asyn
   const directory = temporary(t);
   const env = environment(directory);
   writePrivate(env.KANTHORD_CONFIG!, initialConfig());
-  const auth = await invocation(["auth"], env);
+  const auth = await invocation(["auth"], env, t.signal);
   assert.equal(auth.status, ExitCode.Success);
   assert.match(auth.stdout, /\bjwt\b/);
-  const group = await invocation(["auth", "jwt"], env);
+  const group = await invocation(["auth", "jwt"], env, t.signal);
   assert.equal(group.status, ExitCode.Success);
   assert.match(group.stdout, /generate/);
   assert.match(group.stdout, /inspect/);
   const generated = await invocation(
     ["auth", "jwt", "generate", "ulrich", "--verbose"],
     env,
+    t.signal,
     true,
   );
   assert.equal(generated.status, ExitCode.Success, generated.stderr);
@@ -1402,14 +1498,24 @@ test("auth jwt group, verbose generation, inspection and token precedence", asyn
   const rootVerbose = await invocation(
     ["--verbose", "auth", "jwt", "generate"],
     env,
+    t.signal,
     true,
   );
   assert.equal(rootVerbose.status, ExitCode.Success, rootVerbose.stderr);
   assert.match(rootVerbose.stdout, /^token: \S+\n---\n/);
-  const plain = await invocation(["auth", "jwt", "generate"], env, true);
+  const plain = await invocation(
+    ["auth", "jwt", "generate"],
+    env,
+    t.signal,
+    true,
+  );
   assert.equal(plain.status, ExitCode.Success, plain.stderr);
   assert.match(plain.stdout, /^token: \S+\n$/);
-  const inspect = await invocation(["auth", "jwt", "inspect", token], env);
+  const inspect = await invocation(
+    ["auth", "jwt", "inspect", token],
+    env,
+    t.signal,
+  );
   assert.equal(inspect.status, ExitCode.Success, inspect.stderr);
   assert.equal(inspect.stdout, claimList);
   const machine = await invocation(
@@ -1424,6 +1530,7 @@ test("auth jwt group, verbose generation, inspection and token precedence", asyn
       "--verbose",
     ],
     env,
+    t.signal,
     true,
   );
   assert.equal(machine.status, ExitCode.Success, machine.stderr);
@@ -1434,6 +1541,7 @@ test("auth jwt group, verbose generation, inspection and token precedence", asyn
   const machineInspect = await invocation(
     ["auth", "jwt", "inspect", machineToken],
     env,
+    t.signal,
   );
   assert.equal(machineInspect.status, ExitCode.Success, machineInspect.stderr);
   assert.equal(machineClaims.join("\n"), machineInspect.stdout);
@@ -1447,30 +1555,39 @@ test("auth jwt group, verbose generation, inspection and token precedence", asyn
   const other = plain.stdout.slice(TOKEN_ROW.length).trim();
   writePrivate(clientConfigPath(env), `token: ${other}\n`);
   assert.equal(
-    (await invocation(["auth", "jwt", "inspect"], env)).stdout,
-    (await invocation(["auth", "jwt", "inspect", other], env)).stdout,
+    (await invocation(["auth", "jwt", "inspect"], env, t.signal)).stdout,
+    (await invocation(["auth", "jwt", "inspect", other], env, t.signal)).stdout,
   );
   assert.equal(
     (
-      await invocation(["auth", "jwt", "inspect"], {
-        ...env,
-        KANTHORD_TOKEN: token,
-      })
+      await invocation(
+        ["auth", "jwt", "inspect"],
+        {
+          ...env,
+          KANTHORD_TOKEN: token,
+        },
+        t.signal,
+      )
     ).stdout,
     claimList,
   );
   assert.equal(
     (
-      await invocation(["auth", "jwt", "inspect", other], {
-        ...env,
-        KANTHORD_TOKEN: token,
-      })
+      await invocation(
+        ["auth", "jwt", "inspect", other],
+        {
+          ...env,
+          KANTHORD_TOKEN: token,
+        },
+        t.signal,
+      )
     ).stdout,
-    (await invocation(["auth", "jwt", "inspect", other], env)).stdout,
+    (await invocation(["auth", "jwt", "inspect", other], env, t.signal)).stdout,
   );
   const absent = await invocation(
     ["auth", "jwt", "inspect"],
     environment(temporary(t)),
+    t.signal,
   );
   assert.equal(absent.status, ExitCode.Failure);
   assert.match(absent.stderr, /^cli\.auth\.jwt\.inspect\.token_required:/);
@@ -1478,17 +1595,31 @@ test("auth jwt group, verbose generation, inspection and token precedence", asyn
     "not-a-jwt",
     `${Buffer.from("{}").toString("base64url")}.${Buffer.from("[]").toString("base64url")}.sig`,
   ]) {
-    const result = await invocation(["auth", "jwt", "inspect", invalid], env);
+    const result = await invocation(
+      ["auth", "jwt", "inspect", invalid],
+      env,
+      t.signal,
+    );
     assert.equal(result.status, ExitCode.Failure);
     assert.match(result.stderr, /^cli\.auth\.jwt\.inspect\.malformed_token:/);
     assert.ok(!result.stderr.includes(invalid));
   }
   assert.notEqual(
-    (await invocation(["auth", "jwt", "inspect", "--config", "x"], env)).status,
+    (
+      await invocation(
+        ["auth", "jwt", "inspect", "--config", "x"],
+        env,
+        t.signal,
+      )
+    ).status,
     ExitCode.Success,
   );
-  const baseline = await invocation(["config", "validate"], env);
-  const verbose = await invocation(["config", "validate", "--verbose"], env);
+  const baseline = await invocation(["config", "validate"], env, t.signal);
+  const verbose = await invocation(
+    ["config", "validate", "--verbose"],
+    env,
+    t.signal,
+  );
   assert.equal(verbose.stdout, baseline.stdout);
   assert.equal(verbose.status, baseline.status);
 });
@@ -1526,7 +1657,7 @@ test("intake outbound commands expose offline help, reject --config and validate
     ["intake", "outbound", "discard", "--help"],
     ["intake", "outbound", "delete", "--help"],
   ]) {
-    const help = await invocation(args, env);
+    const help = await invocation(args, env, t.signal);
     assert.equal(help.status, ExitCode.Success, help.stderr);
   }
   for (const leaf of [
@@ -1538,11 +1669,16 @@ test("intake outbound commands expose offline help, reject --config and validate
     const result = await invocation(
       ["intake", "outbound", ...leaf, "--config", "x.yaml"],
       env,
+      t.signal,
     );
     assert.equal(result.status, ExitCode.Failure);
     assert.match(result.stderr, /unknown option/);
   }
-  const invalid = await invocation(["intake", "outbound", "get", "bad"], env);
+  const invalid = await invocation(
+    ["intake", "outbound", "get", "bad"],
+    env,
+    t.signal,
+  );
   assert.equal(invalid.status, ExitCode.Failure);
   assert.match(
     invalid.stderr,
@@ -1551,6 +1687,7 @@ test("intake outbound commands expose offline help, reject --config and validate
   const discard = await invocation(
     ["intake", "outbound", "discard", "bad"],
     env,
+    t.signal,
   );
   assert.match(
     discard.stderr,
@@ -1559,6 +1696,7 @@ test("intake outbound commands expose offline help, reject --config and validate
   const repeated = await invocation(
     ["intake", "outbound", "list", "--state", "failed", "--state", "failed"],
     env,
+    t.signal,
   );
   assert.match(repeated.stderr, /^cli\.option\.duplicate:/);
   const outOfRange = await invocation(
@@ -1574,6 +1712,7 @@ test("intake outbound commands expose offline help, reject --config and validate
       "t",
     ],
     env,
+    t.signal,
   );
   assert.equal(outOfRange.status, ExitCode.Failure);
   assert.match(outOfRange.stderr, /^cli\.pagination\.limit_out_of_range:/);
@@ -1589,7 +1728,7 @@ test("intake inbound commands expose offline help, reject --config and validate 
     ["intake", "inbound", "get", "--help"],
     ["intake", "inbound", "delete", "--help"],
   ]) {
-    const help = await invocation(args, env);
+    const help = await invocation(args, env, t.signal);
     assert.equal(help.status, ExitCode.Success, help.stderr);
   }
   for (const leaf of [
@@ -1601,19 +1740,32 @@ test("intake inbound commands expose offline help, reject --config and validate 
     const result = await invocation(
       ["intake", "inbound", ...leaf, "--config", "x.yaml"],
       env,
+      t.signal,
     );
     assert.equal(result.status, ExitCode.Failure);
     assert.match(result.stderr, /unknown option/);
   }
-  const get = await invocation(["intake", "inbound", "get", "bad"], env);
+  const get = await invocation(
+    ["intake", "inbound", "get", "bad"],
+    env,
+    t.signal,
+  );
   assert.equal(get.status, ExitCode.Failure);
   assert.match(get.stderr, /^cli\.intake\.inbound\.get\.invalid_inbound_id:/);
-  const remove = await invocation(["intake", "inbound", "delete", "bad"], env);
+  const remove = await invocation(
+    ["intake", "inbound", "delete", "bad"],
+    env,
+    t.signal,
+  );
   assert.match(
     remove.stderr,
     /^cli\.intake\.inbound\.delete\.invalid_inbound_id:/,
   );
-  const create = await invocation(["intake", "inbound", "create"], env);
+  const create = await invocation(
+    ["intake", "inbound", "create"],
+    env,
+    t.signal,
+  );
   assert.equal(create.status, ExitCode.Failure);
   assert.match(create.stderr, /--file/);
   const outOfRange = await invocation(
@@ -1629,6 +1781,7 @@ test("intake inbound commands expose offline help, reject --config and validate 
       "t",
     ],
     env,
+    t.signal,
   );
   assert.equal(outOfRange.status, ExitCode.Failure);
   assert.match(outOfRange.stderr, /^cli\.pagination\.limit_out_of_range:/);
@@ -1645,7 +1798,7 @@ test("intake event commands expose offline help, reject --config and validate be
     ["intake", "event", "discard", "--help"],
     ["intake", "event", "delete", "--help"],
   ]) {
-    const help = await invocation(args, env);
+    const help = await invocation(args, env, t.signal);
     assert.equal(help.status, ExitCode.Success, help.stderr);
   }
   for (const leaf of [
@@ -1658,18 +1811,27 @@ test("intake event commands expose offline help, reject --config and validate be
     const result = await invocation(
       ["intake", "event", ...leaf, "--config", "x.yaml"],
       env,
+      t.signal,
     );
     assert.equal(result.status, ExitCode.Failure);
     assert.match(result.stderr, /unknown option/);
   }
-  const get = await invocation(["intake", "event", "get", "bad"], env);
+  const get = await invocation(
+    ["intake", "event", "get", "bad"],
+    env,
+    t.signal,
+  );
   assert.equal(get.status, ExitCode.Failure);
   assert.match(
     get.stderr,
     /^cli\.intake\.event\.get\.invalid_inbound_event_id:/,
   );
   for (const leaf of ["retry", "discard"]) {
-    const bad = await invocation(["intake", "event", leaf, "bad"], env);
+    const bad = await invocation(
+      ["intake", "event", leaf, "bad"],
+      env,
+      t.signal,
+    );
     assert.equal(bad.status, ExitCode.Failure);
     assert.match(
       bad.stderr,
@@ -1677,7 +1839,11 @@ test("intake event commands expose offline help, reject --config and validate be
     );
   }
   for (const leaf of [["retry", eventId], ["discard", eventId], ["delete"]]) {
-    const result = await invocation(["intake", "event", ...leaf], env);
+    const result = await invocation(
+      ["intake", "event", ...leaf],
+      env,
+      t.signal,
+    );
     assert.equal(result.status, ExitCode.Failure);
     assert.match(
       result.stderr,
@@ -1697,6 +1863,7 @@ test("intake event commands expose offline help, reject --config and validate be
       "t",
     ],
     env,
+    t.signal,
   );
   assert.equal(outOfRange.status, ExitCode.Failure);
   assert.match(outOfRange.stderr, /^cli\.pagination\.limit_out_of_range:/);
@@ -1714,7 +1881,7 @@ test("intake outbound discard prints the generated key when the result is indete
     "--token",
     "t",
   ];
-  const result = await invocation(args, env);
+  const result = await invocation(args, env, t.signal);
   assert.equal(result.status, ExitCode.Failure);
   assert.match(
     result.stderr,
@@ -1735,6 +1902,7 @@ test("intake event mutations print the generated key when the result is indeterm
     const result = await invocation(
       ["intake", "event", ...leaf, ...server],
       env,
+      t.signal,
     );
     assert.equal(result.status, ExitCode.Failure);
     assert.match(
@@ -1786,6 +1954,7 @@ test("gateway liveness prints the answer and exits 0 on 200", async (t) => {
   const result = await invocation(
     ["gateway", "liveness", "--endpoint", endpoint],
     env,
+    t.signal,
   );
   assert.equal(result.status, ExitCode.Success, result.stderr);
   assert.equal(result.stderr, EMPTY_OUTPUT);
@@ -1800,6 +1969,7 @@ test("gateway liveness exits 1 on 503 and prints the code and details", async (t
   const result = await invocation(
     ["gateway", "--endpoint", endpoint, "liveness"],
     env,
+    t.signal,
   );
   assert.equal(result.status, ExitCode.Failure);
   assert.equal(result.stdout, EMPTY_OUTPUT);
@@ -1814,6 +1984,7 @@ test("gateway liveness exits 1 with the indeterminate code on a refused connecti
   const result = await invocation(
     ["gateway", "liveness", "--endpoint", "http://127.0.0.1:1"],
     env,
+    t.signal,
   );
   assert.equal(result.status, ExitCode.Failure);
   assert.equal(result.stdout, EMPTY_OUTPUT);
@@ -1839,13 +2010,14 @@ test("gateway liveness reads no token and sends no Authorization header", async 
     KANTHORD_TOKEN: "secret-marker",
   };
   writePrivate(clientConfigPath(env), stringify({ token: "secret-marker" }));
-  const result = await invocation(["gateway", "liveness"], env);
+  const result = await invocation(["gateway", "liveness"], env, t.signal);
   assert.equal(result.status, ExitCode.Success, result.stderr);
   assert.equal(headers.length, LIVENESS_REQUESTS_PER_RUN);
   assert.equal(headers[0]!.authorization, undefined);
   const rejected = await invocation(
     ["gateway", "liveness", "--endpoint", endpoint, "--token", "x"],
     env,
+    t.signal,
   );
   assert.equal(rejected.status, ExitCode.Failure);
   assert.equal(headers.length, LIVENESS_REQUESTS_PER_RUN);

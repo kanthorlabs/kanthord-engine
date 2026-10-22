@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
+import { once } from "node:events";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -7,7 +8,6 @@ import { fileURLToPath } from "node:url";
 import test from "node:test";
 
 const REPORTER = fileURLToPath(new URL("./test-reporter.mjs", import.meta.url));
-const TIMEOUT_MS = 10000;
 const SUCCESS = 0;
 const FAILURE = 1;
 
@@ -18,14 +18,22 @@ async function runFixture(t, source) {
   await writeFile(file, source);
   const env = { ...process.env };
   delete env.NODE_TEST_CONTEXT;
-  const result = spawnSync(
+  const child = spawn(
     process.execPath,
     ["--test", `--test-reporter=${REPORTER}`, file],
-    { encoding: "utf8", timeout: TIMEOUT_MS, env },
+    { env, signal: t.signal },
   );
-  assert.ifError(result.error);
-  assert.equal(result.signal, null);
-  return { ...result, output: result.stdout + result.stderr };
+  let stdout = "";
+  let stderr = "";
+  child.stdout.setEncoding("utf8").on("data", (chunk) => {
+    stdout += chunk;
+  });
+  child.stderr.setEncoding("utf8").on("data", (chunk) => {
+    stderr += chunk;
+  });
+  const [status, signal] = await once(child, "close");
+  assert.equal(signal, null);
+  return { status, stdout, stderr, output: stdout + stderr };
 }
 
 test("reporter prints totals without passing names or successful stdout", async (t) => {

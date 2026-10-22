@@ -10,15 +10,13 @@ import { writePrivate } from "../../kernel/files.ts";
 import { generateX25519KeyPair } from "../../kernel/hpke.ts";
 import { temporary } from "../../kernel/test-support.ts";
 import { instanceConfigurationValue } from "../../worker/contract.ts";
-import { environment, kanthord } from "./cli-support.ts";
+import { environment, kanthord, spawnKanthord } from "./cli-support.ts";
 import {
   enableCoveringAgents,
   gatewayFixture,
   holdCoveringCredential,
 } from "./test-support.ts";
 
-const SPAWN_LINE_TIMEOUT_MS = 15000;
-const CLEANUP_WAIT_MS = 5000;
 const SIGHUP_WAIT_MS = 200;
 const POLL_MS = 50;
 const EXIT_SUCCESS = 0;
@@ -28,7 +26,6 @@ const UNREACHABLE_ENDPOINT = "http://127.0.0.1:1";
 const LOOPBACK = "127.0.0.1";
 const EPHEMERAL_PORT = 0;
 const READY = "Worker instance ready";
-const EXIT_TIMEOUT = "Worker exit timed out";
 const INITIAL_BUFFER = "";
 const NO_OUTPUT = "";
 const NEWLINE = "\n";
@@ -54,7 +51,10 @@ type Exit = {
 };
 
 type WorkerProcess = {
-  waitForLine(predicate: (line: string) => boolean): Promise<string>;
+  waitForLine(
+    predicate: (line: string) => boolean,
+    signal: AbortSignal,
+  ): Promise<string>;
   kill(signal: NodeJS.Signals): void;
   exited: Promise<Exit>;
   alive(): boolean;
@@ -154,8 +154,9 @@ function spawnWorker(args: string[], env: NodeJS.ProcessEnv): WorkerProcess {
     kill: (signal) => {
       if (!settled && !spawnError) child.kill(signal);
     },
-    waitForLine: (predicate) => {
+    waitForLine: (predicate, signal) => {
       try {
+        signal.throwIfAborted();
         const found = lines.find(predicate);
         if (found !== undefined) return Promise.resolve(found);
         if (spawnError || exitSeen || settled)
@@ -166,63 +167,66 @@ function spawnWorker(args: string[], env: NodeJS.ProcessEnv): WorkerProcess {
         return Promise.reject(error);
       }
       return new Promise<string>((resolve, reject) => {
+        const abort = () => waiter.reject(signal.reason as Error);
         const waiter = {
           predicate,
           resolve: (line: string) => {
-            clearTimeout(timer);
+            signal.removeEventListener("abort", abort);
             waiting.delete(waiter);
             resolve(line);
           },
           reject: (error: Error) => {
-            clearTimeout(timer);
+            signal.removeEventListener("abort", abort);
             waiting.delete(waiter);
             reject(error);
           },
         };
         waiting.add(waiter);
-        const timer = setTimeout(() => {
-          waiter.reject(new Error("Timed out waiting for worker stderr line"));
-        }, SPAWN_LINE_TIMEOUT_MS);
+        signal.addEventListener("abort", abort, { once: true });
       });
     },
   };
 }
 
-async function within<T>(
-  promise: Promise<T>,
-  milliseconds: number,
-): Promise<T> {
-  assert.ok(milliseconds > EXIT_SUCCESS);
+async function within<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
   assert.ok(promise);
-  let timer: NodeJS.Timeout | undefined;
+  signal.throwIfAborted();
+  let abort: (() => void) | undefined;
   try {
     return await Promise.race([
       promise,
       new Promise<never>((_, reject) => {
-        timer = setTimeout(() => reject(new Error(EXIT_TIMEOUT)), milliseconds);
+        abort = () => reject(signal.reason as Error);
+        signal.addEventListener("abort", abort, { once: true });
       }),
     ]);
   } finally {
-    clearTimeout(timer);
+    if (abort) signal.removeEventListener("abort", abort);
   }
 }
 
-async function stopWorker(proc: WorkerProcess): Promise<void> {
+async function stopWorker(
+  proc: WorkerProcess,
+  signal: AbortSignal,
+): Promise<void> {
   if (proc.failed()) return;
   proc.kill("SIGTERM");
   try {
-    await within(proc.exited, CLEANUP_WAIT_MS);
+    await within(proc.exited, signal);
     return;
   } catch (error) {
-    if (!(error instanceof Error) || error.message !== EXIT_TIMEOUT)
-      throw error;
+    if (!signal.aborted) throw error;
   }
   proc.kill("SIGKILL");
-  await within(proc.exited, CLEANUP_WAIT_MS);
+  await proc.exited;
 }
 
-async function failure(proc: WorkerProcess, code: string): Promise<void> {
-  const result = await within(proc.exited, SPAWN_LINE_TIMEOUT_MS);
+async function failure(
+  proc: WorkerProcess,
+  code: string,
+  signal: AbortSignal,
+): Promise<void> {
+  const result = await within(proc.exited, signal);
   assert.equal(result.code, EXIT_FAILURE);
   assert.ok(
     result.stderr.join(NEWLINE).startsWith(`${code}:`),
@@ -319,23 +323,27 @@ async function liveInstance(t: TestContext) {
   return { fixture, env, human, created, projects, registered };
 }
 
-async function eventually(check: () => Promise<boolean>): Promise<void> {
-  const deadline = Date.now() + SPAWN_LINE_TIMEOUT_MS;
-  while (!(await check())) {
-    assert.ok(Date.now() < deadline, "Timed out waiting for the condition");
-    await delay(POLL_MS);
-  }
+async function eventually(
+  check: () => Promise<boolean>,
+  signal: AbortSignal,
+): Promise<void> {
+  while (!(await check())) await delay(POLL_MS, undefined, { signal });
 }
 
 test("E09.1 worker refuses --config and --token", async (t) => {
   const env = workerEnvironment(t);
-  const config = await kanthord(
+  const config = await spawnKanthord(
     [...WORKER_ARGS, "--config", join(env.XDG_CONFIG_HOME!, "config.yaml")],
     env,
+    t.signal,
   );
   assert.equal(config.code, EXIT_FAILURE);
   assert.ok(config.stderr.startsWith("cli.serve.worker_config:"));
-  const token = await kanthord([...WORKER_ARGS, "--token", "x"], env);
+  const token = await spawnKanthord(
+    [...WORKER_ARGS, "--token", "x"],
+    env,
+    t.signal,
+  );
   assert.equal(token.code, EXIT_FAILURE);
   assert.ok(token.stderr.startsWith("cli.serve.worker_token:"));
 });
@@ -344,9 +352,9 @@ test("E09.2 an absent instance configuration refuses before network", async (t) 
   const env = workerEnvironment(t);
   const proc = spawnWorker([...WORKER_ARGS, "--instance", INSTANCE_NAME], env);
   try {
-    await failure(proc, "worker.start.instance_config_absent");
+    await failure(proc, "worker.start.instance_config_absent", t.signal);
   } finally {
-    await stopWorker(proc);
+    await stopWorker(proc, t.signal);
   }
 });
 
@@ -356,9 +364,9 @@ test("E09.3 an invalid instance configuration refuses before network", async (t)
     `${await instanceValue(UNREACHABLE_ENDPOINT)}=`;
   const proc = spawnWorker(WORKER_ARGS, env);
   try {
-    await failure(proc, "worker.instance.config_invalid");
+    await failure(proc, "worker.instance.config_invalid", t.signal);
   } finally {
-    await stopWorker(proc);
+    await stopWorker(proc, t.signal);
   }
 });
 
@@ -390,10 +398,10 @@ test("E09.4 tools that cannot be installed refuse before any network request", a
   );
   const proc = spawnWorker(WORKER_ARGS, env);
   try {
-    await failure(proc, "worker.start.tool_missing");
+    await failure(proc, "worker.start.tool_missing", t.signal);
     assert.equal(requests, EXIT_SUCCESS);
   } finally {
-    await stopWorker(proc);
+    await stopWorker(proc, t.signal);
   }
 });
 
@@ -406,11 +414,14 @@ test(
     const first = spawnWorker(args, live.env);
     try {
       const line = await first
-        .waitForLine((entry) => entry.includes(READY))
+        .waitForLine((entry) => entry.includes(READY), t.signal)
         .catch(async (error) => {
-          throw new Error((await first.exited).stderr.join(NEWLINE), {
-            cause: error,
-          });
+          throw new Error(
+            (await within(first.exited, t.signal)).stderr.join(NEWLINE),
+            {
+              cause: error,
+            },
+          );
         });
       const record = JSON.parse(line);
       assert.equal(record.instance, INSTANCE_NAME);
@@ -418,14 +429,14 @@ test(
       await eventually(async () => {
         const counts = await Promise.all(live.projects.map(live.registered));
         return counts.every((count) => count === SINGLE_RECORD);
-      });
+      }, t.signal);
       first.kill("SIGHUP");
       await delay(SIGHUP_WAIT_MS);
       assert.ok(first.alive());
       const second = spawnWorker(args, live.env);
       try {
-        await second.waitForLine((entry) => entry.includes(READY));
-        const superseded = await within(first.exited, SPAWN_LINE_TIMEOUT_MS);
+        await second.waitForLine((entry) => entry.includes(READY), t.signal);
+        const superseded = await within(first.exited, t.signal);
         assert.equal(superseded.code, EXIT_SUPERSEDED);
         assert.equal(superseded.stdout, NO_OUTPUT);
         const stderr = superseded.stderr.join(NEWLINE);
@@ -433,17 +444,17 @@ test(
         for (const projectId of live.projects)
           assert.equal(await live.registered(projectId), SINGLE_RECORD);
         second.kill("SIGTERM");
-        const stopped = await within(second.exited, CLEANUP_WAIT_MS);
+        const stopped = await within(second.exited, t.signal);
         assert.equal(stopped.code, EXIT_SUCCESS);
         assert.equal(stopped.signal, null);
         for (const entry of stopped.stderr.filter(Boolean)) JSON.parse(entry);
         for (const projectId of live.projects)
           assert.equal(await live.registered(projectId), NO_REGISTRATIONS);
       } finally {
-        await stopWorker(second);
+        await stopWorker(second, t.signal);
       }
     } finally {
-      await stopWorker(first);
+      await stopWorker(first, t.signal);
     }
   },
 );

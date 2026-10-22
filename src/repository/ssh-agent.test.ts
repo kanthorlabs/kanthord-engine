@@ -33,7 +33,6 @@ import { generateSshKey } from "./ssh-key.ts";
 
 const execFileAsync = promisify(execFile);
 const DEADLINE_MS = 30_000;
-const AGENT_EXIT_POLLS = 100;
 const AGENT_EXIT_POLL_MS = 20;
 const PRIVATE_MODE = 0o700;
 const PERMISSION_BITS = 0o777;
@@ -111,12 +110,9 @@ async function agentLives(socket: string): Promise<boolean> {
   );
 }
 
-async function agentEnds(socket: string): Promise<boolean> {
-  for (let poll = 0; poll < AGENT_EXIT_POLLS; poll += 1) {
-    if (!(await agentLives(socket))) return true;
-    await delay(AGENT_EXIT_POLL_MS);
-  }
-  return !(await agentLives(socket));
+async function agentEnds(socket: string, signal: AbortSignal): Promise<void> {
+  while (await agentLives(socket))
+    await delay(AGENT_EXIT_POLL_MS, undefined, { signal });
 }
 
 async function identityExit(socket: string): Promise<number> {
@@ -410,7 +406,7 @@ test("withSshAgent reports an ssh-add refusal with no key material", async () =>
   assert.deepEqual(await readdir(scratch), before);
 });
 
-test("a killed process leaves no agent, and a later sweep removes its directory", async () => {
+test("a killed process leaves no agent, and a later sweep removes its directory", async (t) => {
   const script = `
     const { withSshAgent } = await import(${JSON.stringify(MODULE_URLS.agent)});
     const { generateSshKey } = await import(${JSON.stringify(MODULE_URLS.key)});
@@ -441,14 +437,14 @@ test("a killed process leaves no agent, and a later sweep removes its directory"
   assert.equal(await agentLives(socket), true);
   child.kill("SIGKILL");
   await closed;
-  assert.equal(await agentEnds(socket), true);
+  await agentEnds(socket, t.signal);
   const directory = directoryOf(socket);
   assert.equal(await exists(directory), true);
   await sweepSshAgentDirectories(deadlineOf(directory) + SWEEP_GRACE_MS + 1);
   assert.equal(await exists(directory), false);
 });
 
-test("a terminated worker thread leaves no agent", async () => {
+test("a terminated worker thread leaves no agent", async (t) => {
   const script = `
     const { parentPort } = require("node:worker_threads");
     (async () => {
@@ -468,7 +464,7 @@ test("a terminated worker thread leaves no agent", async () => {
   const socket = socketOf({ GIT_SSH_COMMAND: command });
   assert.equal(await agentLives(socket), true);
   await worker.terminate();
-  assert.equal(await agentEnds(socket), true);
+  await agentEnds(socket, t.signal);
   const directory = directoryOf(socket);
   await sweepSshAgentDirectories(deadlineOf(directory) + SWEEP_GRACE_MS + 1);
   assert.equal(await exists(directory), false);

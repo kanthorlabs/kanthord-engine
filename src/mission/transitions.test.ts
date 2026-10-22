@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
+import { setImmediate as turn } from "node:timers/promises";
 import { testHumanIdentity } from "../kernel/test-identity.ts";
 import { createIdentity } from "../kernel/identity.ts";
 import { OperationError } from "../kernel/errors.ts";
@@ -597,6 +598,20 @@ test("nodeBranchesOf answers the branch of every attempt", (t) => {
   assert.deepEqual(branches, [restarted, first, restarted, first, first]);
 });
 
+const WAKEUP_WAKE = "wakeup.wake";
+
+function wakes(calls: { method: string }[]): number {
+  return calls.filter((call) => call.method === WAKEUP_WAKE).length;
+}
+
+async function deferredCheckEnds(
+  calls: { method: string }[],
+  signal: AbortSignal,
+): Promise<void> {
+  const before = wakes(calls);
+  while (wakes(calls) === before) await turn(undefined, { signal });
+}
+
 const PULL_REQUEST_NUMBER = 1;
 const LANDED_COMMIT = "a".repeat(40);
 const GATED_RESOURCE = "repository:github:owner/repo";
@@ -674,7 +689,7 @@ test("deferred check applies expected end state and completes the node", async (
     landed_commits: [LANDED_COMMIT],
   });
   h.release();
-  await new Promise((r) => setImmediate(r));
+  await deferredCheckEnds(h.calls, t.signal);
   assert.equal(h.node().state, NodeState.Completed);
 });
 
@@ -684,7 +699,7 @@ test("deferred check applies other end state and blocks the node", async (t) => 
     landed_commits: [],
   });
   h.release();
-  await new Promise((r) => setImmediate(r));
+  await deferredCheckEnds(h.calls, t.signal);
   assert.equal(h.node().state, NodeState.Blocked);
 });
 
@@ -694,7 +709,7 @@ test("deferred check applies conflict and returns the node to Available", async 
     landed_commits: [],
   });
   h.release();
-  await new Promise((r) => setImmediate(r));
+  await deferredCheckEnds(h.calls, t.signal);
   assert.equal(h.node().state, NodeState.Available);
 });
 
@@ -704,7 +719,7 @@ test("deferred check with none leaves the node in ExternalRequested", async (t) 
     landed_commits: [],
   });
   h.release();
-  await new Promise((r) => setImmediate(r));
+  await deferredCheckEnds(h.calls, t.signal);
   assert.equal(h.node().state, NodeState.ExternalRequested);
   assert.equal(h.checkCalls(), ONE_CALL);
 });
@@ -790,7 +805,7 @@ test("deferred check resolves a branch_push request and completes the node", asy
     landed_commits: [LANDED_COMMIT],
   });
   h.release();
-  await new Promise((r) => setImmediate(r));
+  await deferredCheckEnds(h.calls, t.signal);
   assert.equal(h.node().state, NodeState.Completed);
 });
 
@@ -856,7 +871,7 @@ test("a failing deferred check leaves the node unchanged", async (t) => {
     );
   });
   h.release();
-  await new Promise((r) => setImmediate(r));
+  await deferredCheckEnds(h.calls, t.signal);
   assert.equal(h.node().state, NodeState.ExternalRequested);
   assert.equal(checkCalls, ONE_CALL);
 });
@@ -873,7 +888,7 @@ test("deferred check with a live claim and expected end state writes no end stat
     pinned_revision: FIRST_ATTEMPT,
   });
   h.release();
-  await new Promise((r) => setImmediate(r));
+  await deferredCheckEnds(h.calls, t.signal);
   assert.equal(h.node().state, NodeState.ExternalRequested);
   const row = h.store.transaction((tx) => readEvidence(tx, h.evidenceId));
   assert.equal(row?.end_state, null);

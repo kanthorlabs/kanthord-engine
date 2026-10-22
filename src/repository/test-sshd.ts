@@ -107,10 +107,14 @@ async function banner(port: number): Promise<boolean> {
   });
 }
 
-async function waitReady(port: number, exited: () => boolean): Promise<void> {
+async function waitReady(
+  port: number,
+  exited: () => boolean,
+  signal: AbortSignal,
+): Promise<void> {
   while (!exited()) {
     if (await banner(port)) return;
-    await delay(READY_POLL_MS);
+    await delay(READY_POLL_MS, undefined, { signal });
   }
   assert.fail("The test sshd did not start.");
 }
@@ -170,7 +174,7 @@ export async function startTestSshd(t: TestContext): Promise<TestSshd> {
     sshd.kill();
     await closed;
   });
-  await waitReady(port, () => exited);
+  await waitReady(port, () => exited, t.signal);
   const user = userInfo().username;
   return {
     user,

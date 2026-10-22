@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
+import { setImmediate as turn } from "node:timers/promises";
 import pino from "pino";
 import { ulid } from "ulid";
 import {
@@ -280,6 +281,19 @@ async function settle(): Promise<void> {
     await new Promise((resolve) => setImmediate(resolve));
 }
 
+async function until(done: () => boolean, signal: AbortSignal): Promise<void> {
+  while (!done()) await turn(undefined, { signal });
+}
+
+async function reaches(
+  count: () => number,
+  expected: number,
+  signal: AbortSignal,
+): Promise<void> {
+  await until(() => count() >= expected, signal);
+  assert.equal(count(), expected);
+}
+
 function pollCustody(): IntakeCustody {
   return {
     custodySuitability: () => {},
@@ -460,10 +474,18 @@ test("run starts one poll loop per poll inbound and none for a webhook", async (
   await settle();
   assert.equal(s.listEvents.mock.callCount(), UNSENT_REQUEST_COUNT);
   await s.interval();
-  assert.equal(s.listEvents.mock.callCount(), REQUESTS_PER_LOOP);
+  await reaches(
+    () => s.listEvents.mock.callCount(),
+    REQUESTS_PER_LOOP,
+    t.signal,
+  );
   t.mock.timers.tick(SECOND_LOOP_OFFSET_MS);
   await settle();
-  assert.equal(s.listEvents.mock.callCount(), REQUESTS_AFTER_SECOND_LOOP);
+  await reaches(
+    () => s.listEvents.mock.callCount(),
+    REQUESTS_AFTER_SECOND_LOOP,
+    t.signal,
+  );
   await shutDown(s.intake, running);
 });
 
@@ -493,7 +515,11 @@ test("after drain no poll request runs and no poll timer fires", async (t) => {
   const running = s.intake.run();
   await settle();
   await s.interval();
-  assert.equal(s.listEvents.mock.callCount(), REQUESTS_PER_LOOP);
+  await reaches(
+    () => s.listEvents.mock.callCount(),
+    REQUESTS_PER_LOOP,
+    t.signal,
+  );
   assert.equal(await s.intake.quiesce(), null);
   assert.equal(s.signals()[0]?.aborted, true);
   let drained = false;
@@ -520,6 +546,10 @@ test("a platform answer after quiesce commits nothing", async (t) => {
   const running = s.intake.run();
   await settle();
   await s.interval();
+  await until(
+    () => s.listEvents.mock.callCount() >= REQUESTS_PER_LOOP,
+    t.signal,
+  );
   assert.equal(await s.intake.quiesce(), null);
   slow.resolve(modified(ETAG_FIRST, [ev("101")]));
   await s.intake.drain();
@@ -535,7 +565,11 @@ test("a create that ends after quiesce starts no poll loop", async (t) => {
   s.answers.next = () => held.promise;
   const creating = s.create(POLL);
   await settle();
-  assert.equal(s.listEvents.mock.callCount(), REQUESTS_PER_LOOP);
+  await reaches(
+    () => s.listEvents.mock.callCount(),
+    REQUESTS_PER_LOOP,
+    t.signal,
+  );
   assert.equal(await s.intake.quiesce(), null);
   held.resolve(modified(ETAG_FIRST, []));
   const inbound = await creating;
@@ -558,6 +592,12 @@ test("a restart starts the poll loops again from the stored checkpoint", async (
   const firstRun = first.intake.run();
   await settle();
   await first.interval();
+  await until(
+    () =>
+      first.queries().length >= REQUESTS_PER_LOOP &&
+      first.pullQueries().length >= REQUESTS_PER_LOOP,
+    t.signal,
+  );
   assert.deepEqual(first.queries(), [
     { owner: "acme", repo: "app", etag: ETAG_STORED },
   ]);
@@ -569,6 +609,12 @@ test("a restart starts the poll loops again from the stored checkpoint", async (
   const secondRun = second.intake.run();
   await settle();
   await second.interval();
+  await until(
+    () =>
+      second.queries().length >= REQUESTS_PER_LOOP &&
+      second.pullQueries().length >= REQUESTS_PER_LOOP,
+    t.signal,
+  );
   assert.deepEqual(second.queries(), [
     { owner: "acme", repo: "app", etag: ETAG_FIRST },
   ]);
@@ -615,7 +661,7 @@ test("a wake before the start hands over nothing, and run hands every pending ev
   await h.intake.dispatcher.join();
   assert.equal(calls.length, UNCALLED_CONSUMER_COUNT);
   const running = h.intake.run();
-  await settle();
+  await until(() => calls.length >= pending.length, t.signal);
   await h.intake.dispatcher.join();
   assert.deepEqual(
     calls.map((call) => call.input.inbound_event_id),
@@ -636,7 +682,7 @@ test("quiesce starts no new handoff and drain joins the running handoff", async 
   const [first, second] = [h.addEvent("d-1"), h.addEvent("d-2")].sort();
   assert.ok(first && second);
   const running = h.intake.run();
-  await settle();
+  await until(() => calls.includes(first), t.signal);
   assert.deepEqual(calls, [first]);
   assert.equal(await h.intake.quiesce(), null);
   h.intake.wake();

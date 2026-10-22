@@ -163,7 +163,7 @@ test("a busy unit ends its execution before it deregisters at a drain", async (t
   });
   const unit = unitOf(t, transport);
   const running = unit.run();
-  while (!pulls) await delay(1);
+  while (!pulls) await delay(1, undefined, { signal: t.signal });
   const draining = unit.drain();
   assert.equal(await state(running), PENDING);
   assert.deepEqual(deregistrations, []);
@@ -187,7 +187,7 @@ test("a unit that drains before its first pull resumes its running execution and
   const unit = unitOf(t, transport);
   const running = unit.run();
   const draining = unit.drain();
-  while (!pulls) await delay(1);
+  while (!pulls) await delay(1, undefined, { signal: t.signal });
   assert.equal(await state(running), PENDING);
   assert.deepEqual(deregistrations, []);
   handover.resolve(PROOF_FAILED);
@@ -281,7 +281,8 @@ test("a claim on one binding aborts the pull of the other binding until the exec
   await delay(SETTLE_WAIT_MS);
   assert.equal(otherPulls, FIRST_PULL);
   handover.resolve(PROOF_FAILED);
-  while (otherPulls === FIRST_PULL) await delay(1);
+  while (otherPulls === FIRST_PULL)
+    await delay(1, undefined, { signal: t.signal });
   assert.equal(await unit.drain(), null);
   assert.equal(await running, null);
   assert.deepEqual(claiming.deregistrations, [REGISTRATION.runtime_identity]);
@@ -330,7 +331,7 @@ test("abandon cancels the live execution and keeps every registration", async (t
   });
   const unit = multiUnit(t, [transport]);
   const running = unit.run();
-  while (!pulls) await delay(1);
+  while (!pulls) await delay(1, undefined, { signal: t.signal });
   const execution = (unit as unknown as { execution?: { context: Context } })
     .execution;
   execution?.context.onCancel(() => cancelledExecution.resolve());

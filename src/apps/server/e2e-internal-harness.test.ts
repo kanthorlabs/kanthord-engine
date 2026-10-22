@@ -57,8 +57,6 @@ const EXPECTED_REVIEW_CALLS = 3;
 const EXPECTED_GENERAL_CALLS = 8;
 const FILE_SIZE = 5;
 const POLL_MS = 250;
-const POLL_DEADLINE_MS = 60000;
-const POLL_LIMIT = POLL_DEADLINE_MS / POLL_MS;
 const READY = "Worker application ready";
 const GENERAL = "coder@1";
 const REVIEWER = "reviewer@1";
@@ -103,13 +101,13 @@ async function addDependency(
   });
 }
 
-async function waitForNode(cli: CLI, nodeId: string, state: string) {
-  const deadline = Date.now() + POLL_DEADLINE_MS;
-  for (
-    let attempt = 0;
-    attempt < POLL_LIMIT && Date.now() < deadline;
-    attempt++
-  ) {
+async function waitForNode(
+  cli: CLI,
+  nodeId: string,
+  state: string,
+  signal: AbortSignal,
+) {
+  for (;;) {
     const node = await cli.read<{ state: string }>([
       "mission",
       "node",
@@ -121,9 +119,8 @@ async function waitForNode(cli: CLI, nodeId: string, state: string) {
       assert.equal(node.state, state);
       return;
     }
-    await delay(POLL_MS);
+    await delay(POLL_MS, undefined, { signal });
   }
-  throw new Error(`Node ${nodeId} did not reach ${state}`);
 }
 
 async function setupInternal(t: TestContext) {
@@ -395,8 +392,8 @@ test(
     await t.test(
       "EI10.2 implement node publishes object and checkpoint, reviewer verifies",
       { timeout: JOURNEY_TIMEOUT_MS },
-      async () => {
-        await waitForNode(f.cli, f.implement, NodeState.Completed);
+      async (t) => {
+        await waitForNode(f.cli, f.implement, NodeState.Completed, t.signal);
         await finishedExecutions(f.cli, f.project_id, f.implement, runtimes);
         const evidence = await f.cli.read<Page<Evidence>>([
           "mission",
@@ -479,8 +476,13 @@ test(
     );
     await t.test(
       "EI10.3 gated implement node requests its configured action once",
-      async () => {
-        await waitForNode(f.cli, f.gated, NodeState.ExternalRequested);
+      async (t) => {
+        await waitForNode(
+          f.cli,
+          f.gated,
+          NodeState.ExternalRequested,
+          t.signal,
+        );
         const head = await remoteHead(
           gatedRepo.bare,
           `refs/heads/kanthord/${f.gated}`,
@@ -619,8 +621,8 @@ test(
     await t.test(
       "EI10.5 examine report and assessment reference both current outcomes",
       { timeout: JOURNEY_TIMEOUT_MS },
-      async () => {
-        await waitForNode(f.cli, f.examine, NodeState.Completed);
+      async (t) => {
+        await waitForNode(f.cli, f.examine, NodeState.Completed, t.signal);
         await finishedExecutions(f.cli, f.project_id, f.examine, runtimes);
         const evidence = await f.cli.read<Page<Evidence>>([
           "mission",
