@@ -18,7 +18,6 @@ import { OperationResultType } from "../../kernel/operation.ts";
 import {
   EndReason,
   WorkspaceRoot,
-  noTranscript,
   type NativeExecutionInput,
 } from "../../worker/unit/index.ts";
 import { RepositoryComponent } from "../../repository/index.ts";
@@ -39,6 +38,7 @@ import { DEFAULT_SSH_PORT } from "../../repository/test-sshd.ts";
 
 const SECRET = Buffer.alloc(32, 7).toString("base64");
 const ENDED_RECORD = "execution ended";
+const SESSION_ROOT = "/test/session-root";
 const NO_ENTRIES = 0;
 const ONE_ENTRY = 1;
 const PROVIDER_CAUSE = "OAuth auth derivation failed for anthropic";
@@ -85,7 +85,7 @@ test("host logs the stop of a released or ended execution in the execution ended
     },
     hostHome: temporary(t),
     env: hostEnvironment(),
-    transcript: noTranscript,
+    sessionRoot: SESSION_ROOT,
     log: (record: Record<string, unknown>) => records.push(record),
   };
   const stop = {
@@ -240,7 +240,7 @@ test("host takes handover before setup and method, discards on every method end"
     },
     hostHome: temporary(t),
     env: hostEnvironment(),
-    transcript: noTranscript,
+    sessionRoot: SESSION_ROOT,
     log: () => {},
   };
   let stored: NativeExecutionInput["credentials"] | undefined;
@@ -248,7 +248,7 @@ test("host takes handover before setup and method, discards on every method end"
     await hostExecution(input, async (native) => {
       events.push("method");
       stored = native.credentials;
-      assert.equal(native.transcript, noTranscript);
+      assert.equal(native.sessionRoot, SESSION_ROOT);
       assert.ok(native.hostTools(temporary(t)).evidenceUpload);
       return { kind: "released", furtherWork: false };
     }),
@@ -492,7 +492,7 @@ test("host builds the SSH access of each repository from the handover and leaves
       },
       hostHome: temporary(t),
       env: hostEnvironment(),
-      transcript: noTranscript,
+      sessionRoot: SESSION_ROOT,
       log: () => {},
     },
     async (native) => {
@@ -610,7 +610,7 @@ test("host builds a relay SSH access for a repository whose handover holds no SS
       },
       hostHome: temporary(t),
       env: hostEnvironment(),
-      transcript: noTranscript,
+      sessionRoot: SESSION_ROOT,
       log: () => {},
     },
     async (native) => {

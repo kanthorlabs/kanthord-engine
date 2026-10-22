@@ -754,10 +754,8 @@ verified`), task judgement (`task judged`) and node judgement (`node
 judged`). The start check of a rework also logs the node verification result
 (`node verified`) and the task that the agent chooses for a failed node
 verification (`task chosen`). A record holds the execution, node, attempt and
-task identities, commits, exit codes and results, and no agent content. The
-application appends the transcript of each agent session to
-`<data directory>/transcripts/<execution id>.jsonl` with mode 0600, and it keeps the
-newest 50 execution transcripts.
+task identities, commits, exit codes and results, and no agent content. pi persists each agent session of an execution to
+`<data directory>/pi/sessions/execution/<execution id>/`, a directory of mode 0700. The application keeps the newest 50 execution directories.
 
 When an execution ends, the application logs one record `execution ended`
 with `execution_id` and `kind`. The `kind` is `released`, `closed` or `ended`.

@@ -26,7 +26,7 @@ export {
   type ExecutionEnd,
 } from "./execution-run.ts";
 export type { MethodClients } from "./method-clients.ts";
-export { noTranscript, type TranscriptSink } from "./transcript.ts";
+export { executionSessionRoot } from "./session-store.ts";
 export {
   HostTool,
   uploadResultSchema,

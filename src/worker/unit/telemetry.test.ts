@@ -9,6 +9,7 @@ import {
 import {
   SpanOperation,
   SpanRecorder,
+  mintRunKey,
   telemetrySpanId,
   type TelemetrySink,
 } from "./telemetry.ts";
@@ -55,11 +56,45 @@ function spanRecords(records: TelemetryRecord[]) {
   );
 }
 
-test("a span identity is stable for one execution and one key", () => {
-  const first = telemetrySpanId(CLAIM.execution_id, "phase:start");
+const RUN_KEY = "0a1b2c3d";
+const OTHER_RUN_KEY = "4e5f6a7b";
+const QUIET_SINK: TelemetrySink = { write: () => {}, flush: async () => {} };
+
+test("one recorder gives one identity to one key every time", () => {
+  const { spans } = recorder();
+  const first = spans.spanIdOf("phase:start");
   assert.match(first, SPAN_ID);
-  assert.equal(first, telemetrySpanId(CLAIM.execution_id, "phase:start"));
-  assert.notEqual(first, telemetrySpanId(CLAIM.execution_id, "phase:tasks"));
+  assert.equal(first, spans.spanIdOf("phase:start"));
+  assert.notEqual(first, spans.spanIdOf("phase:tasks"));
+});
+
+test("two recorders with two run keys give two identities to one key", () => {
+  const first = new SpanRecorder(CLAIM, WORKER, QUIET_SINK, RUN_KEY);
+  const second = new SpanRecorder(CLAIM, WORKER, QUIET_SINK, OTHER_RUN_KEY);
+  assert.notEqual(
+    first.spanIdOf("phase:start"),
+    second.spanIdOf("phase:start"),
+  );
+});
+
+test("a recorder with a run key hashes the execution, the run key and the key", () => {
+  const spans = new SpanRecorder(CLAIM, WORKER, QUIET_SINK, RUN_KEY);
+  assert.equal(
+    spans.spanIdOf("turn:1"),
+    telemetrySpanId(CLAIM.execution_id, RUN_KEY, "turn:1"),
+  );
+});
+
+test("a minted run key holds 8 lower-case hexadecimal characters", () => {
+  assert.match(mintRunKey(), /^[0-9a-f]{8}$/);
+  assert.throws(() => new SpanRecorder(CLAIM, WORKER, QUIET_SINK, "NOT-A-KEY"));
+});
+
+test("spanIdOf equals the span_id of the start record of that key", () => {
+  const { records, spans } = recorder();
+  spans.start({ key: "phase:start", operation: SpanOperation.Phase });
+  const started = spanRecords(records).find((record) => record.start_time);
+  assert.equal(spans.spanIdOf("phase:start"), started?.span_id);
 });
 
 test("a nested span names the enclosing span as its parent", async () => {

@@ -5,7 +5,6 @@ import type { ExecutionRecord } from "../../scheduler/contract.ts";
 import type { SshAccess } from "../../repository/contract.ts";
 import {
   runNativeExecution,
-  type TranscriptSink,
   isExecutionEnd,
   EndReason,
   ExecutionEndKind,
@@ -34,7 +33,7 @@ export interface HostExecutionInput {
   hostHome: string;
   env: NodeJS.ProcessEnv;
   context: Context;
-  transcript: TranscriptSink;
+  sessionRoot?: string;
   log(record: Record<string, unknown>): void;
 }
 

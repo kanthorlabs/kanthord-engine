@@ -5,6 +5,7 @@ import { taskWork } from "./steps-implement.ts";
 import {
   existsSync,
   mkdirSync,
+  readdirSync,
   readFileSync,
   rmSync,
   symlinkSync,
@@ -44,7 +45,14 @@ import {
   TEST_SSH_PUBLIC_KEY,
   WORKING_LAYER_ALL_ON,
 } from "./test-support.ts";
+import { loadPi } from "../../agent/pi.ts";
 import { SHIPPED_TEMPLATES } from "../../agent/prompt-templates.ts";
+import {
+  RecordKind,
+  SpanStatus,
+  type TelemetryRecord,
+} from "../../tracking/contract.ts";
+import { SessionFormat, SpanOperation, SpanRecorder } from "./telemetry.ts";
 
 const SECRET = "test_native-scripted-key";
 const NODE = "node_01ARZ3NDEKTSV4RRFFQ69G5FAA";
@@ -60,6 +68,12 @@ const TOOL_RESULT = "toolResult";
 const START_POLL_MS = 10;
 const JUDGED = "judged";
 const TRANSCRIPT_MESSAGES = 5;
+const HEADER_LINES = 1;
+const EMPTY_LINE = "";
+const MESSAGE_ENTRY = "message";
+const SESSION_HEADER = "session";
+const NO_ENTRIES = 0;
+const SPAN_ID_LENGTH = 16;
 const WORK = renderWorkPrompt(SHIPPED_TEMPLATES, {
   node_id: NODE,
   revision: 1,
@@ -84,6 +98,7 @@ async function fixture(
     turnCheck?: (context: CancellationContext) => Promise<void>;
     intent?: ExecutionIntent;
     checkouts?: (workspace: string) => string[];
+    sessionRoot?: false;
   } = {},
 ) {
   const setup = anthropicSetup(overrides);
@@ -98,7 +113,22 @@ async function fixture(
   }));
   const context = new CancellationContext(background);
   t.after(() => context.cancel());
+  const records: TelemetryRecord[] = [];
+  const spans = new SpanRecorder(
+    {
+      execution_id: setup.execution_id,
+      node_id: NODE,
+      attempt: 1,
+      trace_id: "a".repeat(32),
+      root_span_id: "1".repeat(16),
+    },
+    "coder@1",
+    { write: (batch) => records.push(...batch), flush: async () => {} },
+  );
+  const sessionRoot = options.sessionRoot === false ? undefined : temporary(t);
   const agent = await openNativeAgent({
+    spans,
+    sessionRoot,
     hostTools,
     setup,
     claim: {
@@ -130,7 +160,53 @@ async function fixture(
     turnCheck: options.turnCheck && (() => options.turnCheck!(context)),
   });
   t.after(() => agent.dispose());
-  return { agent, provider, workspace, context };
+  return {
+    agent,
+    provider,
+    workspace,
+    context,
+    records,
+    sessionRoot,
+    executionId: setup.execution_id,
+    setupAgent: setup.agents[0]!,
+  };
+}
+
+type Harness = Awaited<ReturnType<typeof fixture>>;
+
+function sessionFiles(h: Harness): string[] {
+  assert.ok(h.sessionRoot);
+  const directory = join(h.sessionRoot, h.executionId);
+  return readdirSync(directory).map((name) => join(directory, name));
+}
+
+function sessionLines(h: Harness): Record<string, unknown>[] {
+  const [file] = sessionFiles(h);
+  assert.ok(file);
+  return readFileSync(file, "utf8")
+    .split("\n")
+    .filter((line) => line !== EMPTY_LINE)
+    .map((line) => JSON.parse(line) as Record<string, unknown>);
+}
+
+function sessionMessages(h: Harness): unknown[] {
+  return sessionLines(h)
+    .slice(HEADER_LINES)
+    .filter((entry) => entry.type === MESSAGE_ENTRY)
+    .map((entry) => entry.message);
+}
+
+function sessionSpans(h: Harness) {
+  return h.records.flatMap((record) =>
+    record.kind === RecordKind.Span &&
+    record.operation === SpanOperation.Session
+      ? [record]
+      : [],
+  );
+}
+
+function sessionEnds(h: Harness) {
+  return sessionSpans(h).filter((record) => record.end_time);
 }
 
 test("native software agent writes and runs bounded bash with execution credentials", async (t) => {
@@ -150,6 +226,90 @@ test("native software agent writes and runs bounded bash with execution credenti
     ),
   );
   assert.deepEqual(h.agent.composition, { selected: [], rejected: [] });
+});
+
+test("the agent.session span starts with the session attributes and its identity", async (t) => {
+  const h = await fixture(t, [fauxAssistantMessage("done")]);
+  const [start] = sessionSpans(h);
+  assert.ok(start?.start_time);
+  assert.equal(start.attributes?.["gen_ai.conversation.id"], start.span_id);
+  assert.equal(start.parent_span_id, "1".repeat(SPAN_ID_LENGTH));
+  const { agent_name, position, level, effective_configuration } = h.setupAgent;
+  const attributes = start.attributes ?? {};
+  const pi = await loadPi();
+  const expected = {
+    "gen_ai.operation.name": "invoke_agent",
+    "gen_ai.conversation.id": start.span_id,
+    "gen_ai.agent.name": agent_name,
+    "kanthord.agent.name": agent_name,
+    "kanthord.agent.chain_position": position,
+    "kanthord.agent.chain_level": level,
+    "gen_ai.request.model": effective_configuration.model_identifier,
+    "kanthord.session.format": SessionFormat.Pi,
+    "kanthord.session.format_version": pi.CURRENT_SESSION_VERSION,
+  };
+  const exact = Object.fromEntries(
+    Object.keys(expected).map((key) => [key, attributes[key]]),
+  );
+  assert.deepEqual(exact, expected);
+});
+
+test("pi persists the session to a file of the execution directory named by the span identity", async (t) => {
+  const h = await fixture(t, [fauxAssistantMessage("done")]);
+  await h.agent.prompt(WORK);
+  const [start] = sessionSpans(h);
+  const files = sessionFiles(h);
+  assert.equal(files.length, SINGLE_CALL_COUNT);
+  assert.ok(files[0]?.endsWith(`_${start?.span_id}.jsonl`));
+  const [header] = sessionLines(h);
+  assert.equal(header?.type, SESSION_HEADER);
+  assert.equal(header?.id, start?.span_id);
+});
+
+test("dispose ends the agent.session span once with the entry count", async (t) => {
+  const h = await fixture(t, [fauxAssistantMessage("done")]);
+  await h.agent.prompt(WORK);
+  h.agent.dispose();
+  const [end] = sessionEnds(h);
+  assert.equal(sessionEnds(h).length, SINGLE_CALL_COUNT);
+  assert.equal(end?.status, SpanStatus.Ok);
+  assert.ok(
+    Number(end?.attributes?.["kanthord.session.entry_count"]) > NO_ENTRIES,
+  );
+  h.agent.dispose();
+  assert.equal(sessionEnds(h).length, SINGLE_CALL_COUNT);
+});
+
+test("closeTrace ends the agent.session span with its status and dispose writes nothing more", async (t) => {
+  const h = await fixture(t, [fauxAssistantMessage("done")]);
+  await h.agent.prompt(WORK);
+  h.agent.closeTrace(SpanStatus.Error);
+  h.agent.closeTrace(SpanStatus.Ok);
+  h.agent.dispose();
+  assert.equal(sessionEnds(h).length, SINGLE_CALL_COUNT);
+  assert.equal(sessionEnds(h)[0]?.status, SpanStatus.Error);
+});
+
+test("without a session root pi writes no session file", async (t) => {
+  const h = await fixture(
+    t,
+    [fauxAssistantMessage("done")],
+    {},
+    unusedHostTools,
+    { sessionRoot: false },
+  );
+  await h.agent.prompt(WORK);
+  assert.equal(h.sessionRoot, undefined);
+  assert.equal(
+    sessionSpans(h)[0]?.attributes?.["kanthord.session.format"],
+    SessionFormat.Pi,
+  );
+  assert.deepEqual(
+    readdirSync(h.workspace, { recursive: true, encoding: "utf8" }).filter(
+      (name) => name.endsWith(".jsonl"),
+    ),
+    [],
+  );
 });
 
 function repositoryOf(
@@ -395,7 +555,7 @@ test("host upload is declared only for the software agent and validates argument
   );
   await h.agent.prompt(WORK);
   assert.deepEqual(paths, ["a.txt"]);
-  const messages = h.agent.transcript() as {
+  const messages = sessionMessages(h) as {
     role: string;
     isError?: boolean;
     details?: unknown;
@@ -442,7 +602,7 @@ test("host upload rejection becomes a tool error without error details", async (
     },
   );
   await h.agent.prompt(WORK);
-  const records = JSON.stringify(h.agent.transcript());
+  const records = JSON.stringify(sessionMessages(h));
   assert.ok(records.includes(message));
   assert.ok(!records.includes("test_private_url"));
   assert.ok(records.includes('"isError":true'));
@@ -481,14 +641,14 @@ test("native parent cancellation aborts an active tool and disposal refuses reus
   await assert.rejects(h.agent.instruct(WORK, "judge"));
 });
 
-test("native instructions preserve pinned work and expose copied transcript and last text", async (t) => {
+test("native instructions preserve pinned work and persist the session and last text", async (t) => {
   const h = await fixture(t, [
     fauxAssistantMessage("work done"),
     fauxAssistantMessage(JUDGED),
   ]);
   assert.equal(h.agent.lastText(), undefined);
   await h.agent.prompt(WORK);
-  const before = h.agent.transcript();
+  const before = sessionMessages(h);
   await h.agent.instruct(WORK, "judge");
   const call = h.provider.calls.at(-1)!;
   const messages = JSON.stringify(call.messages);
@@ -501,9 +661,9 @@ test("native instructions preserve pinned work and expose copied transcript and 
   ]);
   assert.equal(h.agent.lastText(), JUDGED);
   assert.equal(before.length, TRANSCRIPT_LENGTH_BEFORE);
-  assert.equal(h.agent.transcript().length, TRANSCRIPT_MESSAGES);
+  assert.equal(sessionMessages(h).length, TRANSCRIPT_MESSAGES);
   assert.deepEqual(
-    h.agent.transcript().map((message) => (message as { role: string }).role),
+    sessionMessages(h).map((message) => (message as { role: string }).role),
     ["system", "user", "assistant", "user", "assistant"],
   );
 });

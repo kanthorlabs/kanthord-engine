@@ -228,7 +228,7 @@ engine/
 │   │   │   ├── steps-examine.ts    # Dependency outcome report and examine-node release
 │   │   │   ├── evaluation-input.ts # Isolated snapshots and evidence placement
 │   │   │   ├── evaluation.ts       # Verification evidence, assessment and action requests
-│   │   │   ├── transcript.ts       # Execution transcript sink and no-op implementation
+│   │   │   ├── session-store.ts    # Execution session directories of the pi session files and their retention
 │   │   │   ├── native-method.ts    # Injected native method dispatch and resource lifetime
 │   │   │   ├── telemetry.ts        # Span recorder, span identities and the telemetry sink seam
 │   │   │   ├── agent-telemetry.ts  # pi session events as turn and tool spans

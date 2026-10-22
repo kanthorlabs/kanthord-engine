@@ -33,6 +33,7 @@ import {
   WorkspaceRoot,
   type ModelRuntimeFactory,
   type RepositoryTransport,
+  executionSessionRoot,
 } from "../../worker/unit/index.ts";
 import { hostExecution } from "./execution.ts";
 import type { InstanceCopyKey } from "../../custody/client.ts";
@@ -40,7 +41,6 @@ import { readServerVersion } from "../../gateway/client.ts";
 import { homedir } from "node:os";
 import { pullLoop } from "./pull-loop.ts";
 import type { ExecutionRecord } from "../../scheduler/contract.ts";
-import { fileTranscript } from "./transcript-file.ts";
 
 const KEEPALIVE_INTERVAL_MS = 60000;
 const READY_MESSAGE = "Worker application ready";
@@ -501,7 +501,7 @@ export class WorkerUnit {
       hostHome: this.options.env.HOME ?? homedir(),
       env: this.options.env,
       context,
-      transcript: fileTranscript(this.options.directories.data),
+      sessionRoot: executionSessionRoot(this.options.directories.data),
       log: (record) => this.logRecord(record),
     });
   }
