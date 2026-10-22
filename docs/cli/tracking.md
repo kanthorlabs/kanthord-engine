@@ -18,8 +18,8 @@ data directory beside `kanthord.db`. It holds the tables of
 - A native worker writes its spans, telemetry texts and session entries with
   `tracking.telemetry.write` during its live execution. The operation is
   API-only.
-- A human reads a trace, its spans and its telemetry texts with the three CLI
-  leaves below.
+- A human lists traces, reads a trace, its spans and its telemetry texts, and
+  reads the filter values with the five CLI leaves below.
 
 Telemetry is lossy and has no current effect. It is not Mission evidence,
 assessment or outcome. It completes no node, renews no claim and authorizes no
@@ -38,11 +38,13 @@ retention values in the root
 
 The literal service prefix is `/api/tracking`. Read requests have no body.
 
-| Command suffix / synopsis                                    | Operation identifier | HTTP route                                        | Access / effect |
-| ------------------------------------------------------------ | -------------------- | ------------------------------------------------- | --------------- |
-| `trace get <trace-id>`                                       | `tracking.trace.get` | `GET /api/tracking/trace/:trace_id`               | `human`; read   |
-| `span list <trace-id> [--limit <count>] [--cursor <opaque>]` | `tracking.span.list` | `GET /api/tracking/trace/:trace_id/span`          | `human`; read   |
-| `text get <trace-id> <text-id>`                              | `tracking.text.get`  | `GET /api/tracking/trace/:trace_id/text/:text_id` | `human`; read   |
+| Command suffix / synopsis                                                                                                                          | Operation identifier  | HTTP route                                        | Access / effect |
+| -------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------- | ------------------------------------------------- | --------------- |
+| `trace list [--project <project-id>] [--node <node-id>] [--state <state>] [--query <text>] [--sort <field>] [--limit <count>] [--cursor <opaque>]` | `tracking.trace.list` | `GET /api/tracking/trace`                         | `human`; read   |
+| `facet get [--project <project-id>]`                                                                                                               | `tracking.facet.get`  | `GET /api/tracking/facet`                         | `human`; read   |
+| `trace get <trace-id>`                                                                                                                             | `tracking.trace.get`  | `GET /api/tracking/trace/:trace_id`               | `human`; read   |
+| `span list <trace-id> [--limit <count>] [--cursor <opaque>]`                                                                                       | `tracking.span.list`  | `GET /api/tracking/trace/:trace_id/span`          | `human`; read   |
+| `text get <trace-id> <text-id>`                                                                                                                    | `tracking.text.get`   | `GET /api/tracking/trace/:trace_id/text/:text_id` | `human`; read   |
 
 API-only operation:
 
@@ -54,6 +56,14 @@ API-only operation:
 
 ```text
 kanthord tracking [--help]
+
+kanthord tracking trace list [--project <project-id>] [--node <node-id>]
+  [--state <state>] [--query <text>] [--sort <field>] [--limit <count>]
+  [--cursor <opaque>]
+  [--endpoint <url>] [--token <jwt>] [--help]
+
+kanthord tracking facet get [--project <project-id>]
+  [--endpoint <url>] [--token <jwt>] [--help]
 
 kanthord tracking trace get <trace-id>
   [--endpoint <url>] [--token <jwt>] [--help]
@@ -83,6 +93,52 @@ rejects unknown arguments and options before work.
   an array of at most 128 values of one primitive kind. Attribute names reuse
   the OpenTelemetry conventions. Kanthord identity attributes use the
   `kanthord.` prefix.
+
+## `trace list`
+
+Reads one page of trace summaries, newest first by default. Each item is a
+trace summary of [`trace get`](#trace-get). `next_cursor` is `null` on the last
+page.
+
+The API filters of `tracking.trace.list` combine with AND:
+
+| Query field        | Meaning                                                                                                                                                 |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `project_id`       | The trace has this project.                                                                                                                             |
+| `node_id`          | The trace has this node.                                                                                                                                |
+| `execution_id`     | The trace has this execution.                                                                                                                           |
+| `worker_name`      | The trace has this worker name.                                                                                                                         |
+| `agent_name`       | The trace has this value in `agent_names`.                                                                                                              |
+| `model`            | The trace has this value in `models`.                                                                                                                   |
+| `error_type`       | The trace has this value in `error_types`.                                                                                                              |
+| `state`            | The trace has this state: `open`, `ok` or `error`.                                                                                                      |
+| `q`                | A case-insensitive text of 1 to 200 characters. It matches a part of the trace ID, execution, node, worker, stop reason, agents, models or error types. |
+| `started_from`     | The start of the trace, or its creation when it has no start, is at least this `Timestamp`.                                                             |
+| `started_to`       | The same time is at most this `Timestamp`.                                                                                                              |
+| `min_duration_ms`  | The duration is at least this integer. A trace without a duration fails a duration bound.                                                               |
+| `max_duration_ms`  | The duration is at most this integer.                                                                                                                   |
+| `min_total_tokens` | `total_tokens` is at least this integer.                                                                                                                |
+| `max_total_tokens` | `total_tokens` is at most this integer.                                                                                                                 |
+| `min_cost_usd`     | `cost_usd` is at least this number.                                                                                                                     |
+| `max_cost_usd`     | `cost_usd` is at most this number.                                                                                                                      |
+
+The CLI exposes `--project`, `--node`, `--state`, `--query` and `--sort`. `--query`
+sets `q`. The other filters are API-only query fields.
+
+`--sort` is one of `started_at` (the default), `duration_ms`, `total_tokens` and
+`cost_usd`. The order is the sort value in descending order, then the creation
+order of the trace in descending order. A trace without a start sorts by its
+creation time. An open trace sorts last under `duration_ms`.
+
+`--limit` is 1 to 1000 and defaults to 100. The cursor names its sort. A cursor
+of another sort answers `400` `system.pagination.cursor_invalid`.
+
+## `facet get`
+
+Reads the distinct values that a filter form offers. The answer holds the four
+arrays `worker_names`, `agent_names`, `models` and `error_types`. Each array
+holds at most 200 values in ascending order. `--project` limits the values to
+the traces of one project.
 
 ## `trace get`
 
@@ -225,20 +281,29 @@ with the same identities.
 Every remote command can also answer the shared codes of
 [other.md](other.md#error-codes).
 
-| HTTP  | Code                                      | Condition                                                         | Commands  |
-| ----- | ----------------------------------------- | ----------------------------------------------------------------- | --------- |
-| local | `cli.tracking.trace.get.invalid_trace_id` | The `<trace-id>` argument is not a `TraceID`.                     | trace get |
-| local | `cli.tracking.span.list.invalid_trace_id` | The `<trace-id>` argument is not a `TraceID`.                     | span list |
-| local | `cli.tracking.text.get.invalid_trace_id`  | The `<trace-id>` argument is not a `TraceID`.                     | text get  |
-| local | `cli.tracking.text.get.invalid_text_id`   | The `<text-id>` argument is not a `TextID`.                       | text get  |
-| local | `cli.tracking.trace.get.token_required`   | No token resolves from `--token`, `KANTHORD_TOKEN` or `cli.yaml`. | trace get |
-| local | `cli.tracking.span.list.token_required`   | No token resolves from `--token`, `KANTHORD_TOKEN` or `cli.yaml`. | span list |
-| local | `cli.tracking.text.get.token_required`    | No token resolves from `--token`, `KANTHORD_TOKEN` or `cli.yaml`. | text get  |
-| local | `cli.tracking.trace.get.indeterminate`    | The answer is lost. Repeat the read.                              | trace get |
-| local | `cli.tracking.span.list.indeterminate`    | The answer is lost. Repeat the read.                              | span list |
-| local | `cli.tracking.text.get.indeterminate`     | The answer is lost. Repeat the read.                              | text get  |
-| local | `cli.pagination.limit_invalid`            | `--limit` is not a positive integer.                              | span list |
-| local | `cli.pagination.limit_out_of_range`       | `--limit` is outside 1 to 1000.                                   | span list |
-| 400   | `system.pagination.cursor_invalid`        | `--cursor` is not a cursor of this listing.                       | span list |
-| 404   | `tracking.trace.not_found`                | The trace is unknown.                                             | all       |
-| 404   | `tracking.text.not_found`                 | The trace holds no such text.                                     | text get  |
+| HTTP  | Code                                         | Condition                                                            | Commands              |
+| ----- | -------------------------------------------- | -------------------------------------------------------------------- | --------------------- |
+| local | `cli.tracking.trace.list.invalid_project_id` | `--project` is not a `ProjectID`.                                    | trace list            |
+| local | `cli.tracking.trace.list.invalid_node_id`    | `--node` is not a `NodeID`.                                          | trace list            |
+| local | `cli.tracking.trace.list.invalid_state`      | `--state` is not `open`, `ok` or `error`.                            | trace list            |
+| local | `cli.tracking.trace.list.invalid_sort`       | `--sort` is not a sort field.                                        | trace list            |
+| local | `cli.tracking.facet.get.invalid_project_id`  | `--project` is not a `ProjectID`.                                    | facet get             |
+| local | `cli.tracking.trace.list.token_required`     | No token resolves from `--token`, `KANTHORD_TOKEN` or `cli.yaml`.    | trace list            |
+| local | `cli.tracking.facet.get.token_required`      | No token resolves from `--token`, `KANTHORD_TOKEN` or `cli.yaml`.    | facet get             |
+| local | `cli.tracking.trace.list.indeterminate`      | The answer is lost. Repeat the read.                                 | trace list            |
+| local | `cli.tracking.facet.get.indeterminate`       | The answer is lost. Repeat the read.                                 | facet get             |
+| local | `cli.tracking.trace.get.invalid_trace_id`    | The `<trace-id>` argument is not a `TraceID`.                        | trace get             |
+| local | `cli.tracking.span.list.invalid_trace_id`    | The `<trace-id>` argument is not a `TraceID`.                        | span list             |
+| local | `cli.tracking.text.get.invalid_trace_id`     | The `<trace-id>` argument is not a `TraceID`.                        | text get              |
+| local | `cli.tracking.text.get.invalid_text_id`      | The `<text-id>` argument is not a `TextID`.                          | text get              |
+| local | `cli.tracking.trace.get.token_required`      | No token resolves from `--token`, `KANTHORD_TOKEN` or `cli.yaml`.    | trace get             |
+| local | `cli.tracking.span.list.token_required`      | No token resolves from `--token`, `KANTHORD_TOKEN` or `cli.yaml`.    | span list             |
+| local | `cli.tracking.text.get.token_required`       | No token resolves from `--token`, `KANTHORD_TOKEN` or `cli.yaml`.    | text get              |
+| local | `cli.tracking.trace.get.indeterminate`       | The answer is lost. Repeat the read.                                 | trace get             |
+| local | `cli.tracking.span.list.indeterminate`       | The answer is lost. Repeat the read.                                 | span list             |
+| local | `cli.tracking.text.get.indeterminate`        | The answer is lost. Repeat the read.                                 | text get              |
+| local | `cli.pagination.limit_invalid`               | `--limit` is not a positive integer.                                 | span list, trace list |
+| local | `cli.pagination.limit_out_of_range`          | `--limit` is outside 1 to 1000 for `span list` and for `trace list`. | span list, trace list |
+| 400   | `system.pagination.cursor_invalid`           | `--cursor` is not a cursor of this listing.                          | span list, trace list |
+| 404   | `tracking.trace.not_found`                   | The trace is unknown.                                                | all                   |
+| 404   | `tracking.text.not_found`                    | The trace holds no such text.                                        | text get              |
