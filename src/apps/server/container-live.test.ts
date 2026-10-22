@@ -457,7 +457,7 @@ test(
     await waitUntil(
       () => containerNames(runtime, `name=${name}`, RUNNING_CONTAINERS),
       (names) => names.length === NO_ITEMS,
-      t.signal,
+      AbortSignal.any([t.signal, AbortSignal.timeout(ORPHAN_LIMIT_MS)]),
     );
     const orphanMs = performance.now() - killed;
     t.diagnostic(
