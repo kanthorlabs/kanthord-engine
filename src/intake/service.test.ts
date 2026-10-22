@@ -70,6 +70,8 @@ const REQUESTS_PER_LOOP = 1;
 const REQUESTS_AFTER_SECOND_LOOP = 2;
 const INTERVAL_MS = 1000;
 const SECOND_LOOP_OFFSET_MS = 500;
+const ARMS_PER_LOOP = 1;
+const ARMS_OF_TWO_LOOPS = 2;
 const SETTLE_TURNS = 20;
 const POLL_TOKEN = "ghp_poll-token";
 const DEMANDED_REQUESTS = 1;
@@ -402,10 +404,7 @@ function pollService(t: TestContext, store: Store) {
       caller,
     );
   };
-  const interval = async () => {
-    t.mock.timers.tick(INTERVAL_MS);
-    await settle();
-  };
+  const interval = () => t.mock.timers.tick(INTERVAL_MS);
   const queries = () => listEvents.mock.calls.map((call) => call.arguments[1]);
   const pullQueries = () =>
     listPulls.mock.calls.map((call) => call.arguments[1]);
@@ -445,6 +444,11 @@ async function shutDown(
   assert.equal(await running, null);
 }
 
+function timerArms(t: TestContext): () => number {
+  const arms = t.mock.method(globalThis, "setTimeout");
+  return () => arms.mock.callCount();
+}
+
 function checkpointOf(store: Store, inboundId: string): string | null {
   return store.transaction((tx) => {
     const row = readInbound(tx, inboundId);
@@ -469,18 +473,18 @@ test("run starts one poll loop per poll inbound and none for a webhook", async (
   insertNaming(store, InboundKind.Poll, CREDENTIAL);
   insertNaming(store, InboundKind.Poll, CREDENTIAL);
   insertNaming(store, InboundKind.Webhook, null);
+  const arms = timerArms(t);
   const s = pollService(t, store);
   const running = s.intake.run();
-  await settle();
+  await reaches(arms, ARMS_OF_TWO_LOOPS, t.signal);
   assert.equal(s.listEvents.mock.callCount(), UNSENT_REQUEST_COUNT);
-  await s.interval();
+  s.interval();
   await reaches(
     () => s.listEvents.mock.callCount(),
     REQUESTS_PER_LOOP,
     t.signal,
   );
   t.mock.timers.tick(SECOND_LOOP_OFFSET_MS);
-  await settle();
   await reaches(
     () => s.listEvents.mock.callCount(),
     REQUESTS_AFTER_SECOND_LOOP,
@@ -492,16 +496,18 @@ test("run starts one poll loop per poll inbound and none for a webhook", async (
 test("an inbound delete stops its poll loop", async (t) => {
   const store = pollStore(t);
   const id = insertNaming(store, InboundKind.Poll, CREDENTIAL);
+  const arms = timerArms(t);
   const s = pollService(t, store);
   const stop = t.mock.method(s.intake.pollLoops, "stop");
   const running = s.intake.run();
-  await settle();
+  await reaches(arms, ARMS_PER_LOOP, t.signal);
   await s.remove(id);
   assert.deepEqual(
     stop.mock.calls.map((call) => call.arguments),
     [[id]],
   );
-  await s.interval();
+  s.interval();
+  await settle();
   assert.equal(s.listEvents.mock.callCount(), UNSENT_REQUEST_COUNT);
   await shutDown(s.intake, running);
 });
@@ -509,12 +515,13 @@ test("an inbound delete stops its poll loop", async (t) => {
 test("after drain no poll request runs and no poll timer fires", async (t) => {
   const store = pollStore(t);
   insertNaming(store, InboundKind.Poll, CREDENTIAL);
+  const arms = timerArms(t);
   const s = pollService(t, store);
   const slow = Promise.withResolvers<EventsAnswer>();
   s.answers.next = () => slow.promise;
   const running = s.intake.run();
-  await settle();
-  await s.interval();
+  await reaches(arms, ARMS_PER_LOOP, t.signal);
+  s.interval();
   await reaches(
     () => s.listEvents.mock.callCount(),
     REQUESTS_PER_LOOP,
@@ -531,8 +538,10 @@ test("after drain no poll request runs and no poll timer fires", async (t) => {
   slow.resolve(modified(ETAG_FIRST, []));
   await drain;
   s.answers.next = async () => modified(ETAG_FIRST, []);
-  await s.interval();
-  await s.interval();
+  s.interval();
+  await settle();
+  s.interval();
+  await settle();
   assert.equal(s.listEvents.mock.callCount(), REQUESTS_PER_LOOP);
   await shutDown(s.intake, running);
 });
@@ -540,12 +549,13 @@ test("after drain no poll request runs and no poll timer fires", async (t) => {
 test("a platform answer after quiesce commits nothing", async (t) => {
   const store = pollStore(t);
   const id = insertNaming(store, InboundKind.Poll, CREDENTIAL);
+  const arms = timerArms(t);
   const s = pollService(t, store);
   const slow = Promise.withResolvers<EventsAnswer>();
   s.answers.next = () => slow.promise;
   const running = s.intake.run();
-  await settle();
-  await s.interval();
+  await reaches(arms, ARMS_PER_LOOP, t.signal);
+  s.interval();
   await until(
     () => s.listEvents.mock.callCount() >= REQUESTS_PER_LOOP,
     t.signal,
@@ -564,7 +574,6 @@ test("a create that ends after quiesce starts no poll loop", async (t) => {
   const held = Promise.withResolvers<EventsAnswer>();
   s.answers.next = () => held.promise;
   const creating = s.create(POLL);
-  await settle();
   await reaches(
     () => s.listEvents.mock.callCount(),
     REQUESTS_PER_LOOP,
@@ -576,7 +585,8 @@ test("a create that ends after quiesce starts no poll loop", async (t) => {
   assert.equal(inbound.kind, InboundKind.Poll);
   await s.intake.drain();
   s.answers.next = async () => modified(ETAG_FIRST, []);
-  await s.interval();
+  s.interval();
+  await settle();
   assert.equal(s.listEvents.mock.callCount(), REQUESTS_PER_LOOP);
   assert.equal(await s.intake.stop(), null);
 });
@@ -587,11 +597,12 @@ test("a restart starts the poll loops again from the stored checkpoint", async (
     etag: ETAG_STORED,
     pulls_etag: PULLS_ETAG_STORED,
   });
+  const arms = timerArms(t);
   const first = pollService(t, store);
   first.answers.next = async () => modified(ETAG_FIRST, [ev("101")]);
   const firstRun = first.intake.run();
-  await settle();
-  await first.interval();
+  await reaches(arms, ARMS_PER_LOOP, t.signal);
+  first.interval();
   await until(
     () =>
       first.queries().length >= REQUESTS_PER_LOOP &&
@@ -605,10 +616,11 @@ test("a restart starts the poll loops again from the stored checkpoint", async (
     { owner: "acme", repo: "app", etag: PULLS_ETAG_STORED },
   ]);
   await shutDown(first.intake, firstRun);
+  const armsBeforeRestart = arms();
   const second = pollService(t, store);
   const secondRun = second.intake.run();
-  await settle();
-  await second.interval();
+  await reaches(arms, armsBeforeRestart + ARMS_PER_LOOP, t.signal);
+  second.interval();
   await until(
     () =>
       second.queries().length >= REQUESTS_PER_LOOP &&

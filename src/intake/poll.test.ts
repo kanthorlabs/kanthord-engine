@@ -95,6 +95,8 @@ const SPREAD_OFFSETS_MS = [0, 333, 666];
 const HARNESS_LOOP_COUNT = 1;
 const LOOPS_PER_OFFSET = 1;
 const TICK_MS = 1;
+const ARMS_AT_START = 1;
+const REARMS_PER_CYCLE = 1;
 const SETTLE_TURNS = 20;
 const UNKNOWN_CODE = "system.operation.unknown";
 const SERVICE_IDENTITY = {
@@ -730,6 +732,7 @@ async function reaches(
 
 function loopHarness(t: TestContext, options: HarnessOptions = {}) {
   t.mock.timers.enable({ apis: ["setTimeout"] });
+  const arms = t.mock.method(globalThis, "setTimeout");
   const h = cycleHarness(t, options);
   const shutdown = new CancellationContext();
   const intervalMs = options.intervalMs ?? INTERVAL_MS;
@@ -739,11 +742,10 @@ function loopHarness(t: TestContext, options: HarnessOptions = {}) {
     pollIntervalMs: intervalMs,
   });
   t.after(() => loops.stopAll());
-  const elapse = async (ms: number) => {
-    t.mock.timers.tick(ms);
-    await settle();
-  };
+  const elapse = (ms: number) => t.mock.timers.tick(ms);
   const interval = () => elapse(intervalMs);
+  const rearmed = (count: number) =>
+    reaches(() => arms.mock.callCount(), ARMS_AT_START + count, t.signal);
   const script = (answers: EventsAnswer[]) => {
     h.answers.next = async () =>
       answers.shift() ?? { ok: true, value: { notModified: true } };
@@ -752,7 +754,7 @@ function loopHarness(t: TestContext, options: HarnessOptions = {}) {
     h.pullAnswers.next = async () =>
       answers.shift() ?? { ok: true, value: { notModified: true } };
   };
-  return { ...h, loops, interval, elapse, script, scriptPulls };
+  return { ...h, loops, interval, elapse, rearmed, script, scriptPulls };
 }
 
 function limited(waitMs: number | null): EventsAnswer {
@@ -785,9 +787,9 @@ test("a loop waits one interval before each cycle and re-arms after the cycle en
   await settle();
   assert.equal(h.calls.length, UNSENT_REQUEST_COUNT);
   t.mock.timers.tick(TICK_MS);
-  await settle();
   await reaches(() => h.calls.length, REQUESTS_PER_CYCLE, t.signal);
-  await h.interval();
+  await h.rearmed(REARMS_PER_CYCLE);
+  h.interval();
   await reaches(() => h.calls.length, REQUESTS_AFTER_REARM, t.signal);
 });
 
@@ -824,7 +826,6 @@ test("startAll spreads the first cycles of the loops across one interval", async
     await settle();
     assert.deepEqual(polled(), ids.slice(0, index));
     t.mock.timers.tick(TICK_MS);
-    await settle();
     await until(() => polled().length >= index + LOOPS_PER_OFFSET, t.signal);
     assert.deepEqual(polled(), ids.slice(0, index + LOOPS_PER_OFFSET));
     elapsedMs = INTERVAL_MS + offsetMs;
@@ -836,15 +837,19 @@ test("a slow request starts no second request of that inbound before it ends", a
   const slow = Promise.withResolvers<EventsAnswer>();
   h.answers.next = () => slow.promise;
   h.loops.start(h.inboundId);
-  await h.interval();
-  await h.interval();
-  await h.interval();
+  h.interval();
   await reaches(() => h.calls.length, REQUESTS_PER_CYCLE, t.signal);
+  h.interval();
+  await settle();
+  h.interval();
+  await settle();
+  assert.equal(h.calls.length, REQUESTS_PER_CYCLE);
   slow.resolve(modified(ETAG_FIRST, []));
   await settle();
   assert.equal(h.calls.length, REQUESTS_PER_CYCLE);
   h.answers.next = async () => modified(ETAG_FIRST, []);
-  await h.interval();
+  await h.rearmed(REARMS_PER_CYCLE);
+  h.interval();
   await reaches(() => h.calls.length, REQUESTS_AFTER_REARM, t.signal);
 });
 
@@ -854,11 +859,12 @@ test("a thrown cycle logs the inbound and the code, and the loop continues", asy
     throw new Error("transport closed");
   };
   h.loops.start(h.inboundId);
-  await h.interval();
+  h.interval();
   await reaches(() => h.warn.mock.callCount(), WARNINGS_PER_FAILURE, t.signal);
   const [fields] = h.warn.mock.calls[0]?.arguments ?? [];
   assert.deepEqual(fields, { inbound_id: h.inboundId, code: UNKNOWN_CODE });
-  await h.interval();
+  await h.rearmed(REARMS_PER_CYCLE);
+  h.interval();
   await reaches(() => h.calls.length, REQUESTS_AFTER_REARM, t.signal);
   const dropped = [CREDENTIAL, CREDENTIAL];
   await until(() => h.drops.length >= dropped.length, t.signal);
@@ -870,13 +876,15 @@ test("a gone inbound ends its loop", async (t) => {
   h.loops.start(h.inboundId);
   h.store.transaction((tx) => deleteInbound(tx, h.inboundId));
   const transaction = t.mock.method(h.store, "transaction");
-  await h.interval();
+  h.interval();
   await reaches(
     () => transaction.mock.callCount(),
     TRANSACTIONS_OF_GONE_LOOP,
     t.signal,
   );
-  await h.interval();
+  await settle();
+  h.interval();
+  await settle();
   assert.equal(transaction.mock.callCount(), TRANSACTIONS_OF_GONE_LOOP);
   assert.equal(h.calls.length, UNSENT_REQUEST_COUNT);
   assert.deepEqual(h.grants, []);
@@ -886,10 +894,11 @@ test("a second start adds no loop and a stop clears the timer", async (t) => {
   const h = loopHarness(t);
   h.loops.start(h.inboundId);
   h.loops.start(h.inboundId);
-  await h.interval();
+  h.interval();
   await reaches(() => h.calls.length, REQUESTS_PER_CYCLE, t.signal);
   h.loops.stop(h.inboundId);
-  await h.interval();
+  h.interval();
+  await settle();
   assert.equal(h.calls.length, REQUESTS_PER_CYCLE);
 });
 
@@ -898,7 +907,7 @@ test("stopAll cancels the running request, awaits its cycle and commits nothing"
   const slow = Promise.withResolvers<EventsAnswer>();
   h.answers.next = () => slow.promise;
   h.loops.start(h.inboundId);
-  await h.interval();
+  h.interval();
   await reaches(() => h.calls.length, REQUESTS_PER_CYCLE, t.signal);
   const stopped = h.loops.stopAll();
   assert.equal(h.calls[0]?.call.signal.aborted, true);
@@ -907,7 +916,8 @@ test("stopAll cancels the running request, awaits its cycle and commits nothing"
   assert.deepEqual(h.eventIds(), []);
   assert.equal(h.checkpoint(), null);
   assert.deepEqual(h.drops, [CREDENTIAL]);
-  await h.interval();
+  h.interval();
+  await settle();
   assert.equal(h.calls.length, REQUESTS_PER_CYCLE);
 });
 
@@ -915,11 +925,13 @@ test("a refusal that names a wait delays the next request until that wait", asyn
   const h = loopHarness(t);
   h.script([limited(5 * INTERVAL_MS)]);
   h.loops.start(h.inboundId);
-  await h.interval();
+  h.interval();
   await reaches(() => h.calls.length, REQUESTS_PER_CYCLE, t.signal);
-  await h.elapse(5 * INTERVAL_MS - TICK_MS);
+  await h.rearmed(REARMS_PER_CYCLE);
+  h.elapse(5 * INTERVAL_MS - TICK_MS);
+  await settle();
   assert.equal(h.calls.length, REQUESTS_PER_CYCLE);
-  await h.elapse(TICK_MS);
+  h.elapse(TICK_MS);
   await reaches(() => h.calls.length, REQUESTS_AFTER_REARM, t.signal);
 });
 
@@ -927,10 +939,12 @@ test("a refusal that names a wait below the interval waits one interval", async 
   const h = loopHarness(t);
   h.script([limited(0)]);
   h.loops.start(h.inboundId);
-  await h.interval();
-  await h.elapse(INTERVAL_MS - TICK_MS);
+  h.interval();
+  await h.rearmed(REARMS_PER_CYCLE);
+  h.elapse(INTERVAL_MS - TICK_MS);
+  await settle();
   await reaches(() => h.calls.length, REQUESTS_PER_CYCLE, t.signal);
-  await h.elapse(TICK_MS);
+  h.elapse(TICK_MS);
   await reaches(() => h.calls.length, REQUESTS_AFTER_REARM, t.signal);
 });
 
@@ -938,14 +952,18 @@ test("an X-Poll-Interval above the interval delays the next request, and one bel
   const h = loopHarness(t);
   h.script([unchanged(3 * INTERVAL_MS), unchanged(INTERVAL_MS / 2)]);
   h.loops.start(h.inboundId);
-  await h.interval();
-  await h.elapse(3 * INTERVAL_MS - TICK_MS);
+  h.interval();
+  await h.rearmed(REARMS_PER_CYCLE);
+  h.elapse(3 * INTERVAL_MS - TICK_MS);
+  await settle();
   await reaches(() => h.calls.length, REQUESTS_PER_CYCLE, t.signal);
-  await h.elapse(TICK_MS);
+  h.elapse(TICK_MS);
   await reaches(() => h.calls.length, REQUESTS_AFTER_REARM, t.signal);
-  await h.elapse(INTERVAL_MS - TICK_MS);
+  await h.rearmed(2 * REARMS_PER_CYCLE);
+  h.elapse(INTERVAL_MS - TICK_MS);
+  await settle();
   assert.equal(h.calls.length, REQUESTS_AFTER_REARM);
-  await h.elapse(TICK_MS);
+  h.elapse(TICK_MS);
   await reaches(
     () => h.calls.length,
     REQUESTS_AFTER_REARM + REQUESTS_PER_CYCLE,
@@ -957,8 +975,9 @@ test("secondary rate limit refusals double the wait up to the bound, and the nex
   const h = loopHarness(t, { intervalMs: BACKOFF_INTERVAL_MS });
   h.script([limited(null), limited(null), limited(null), unchanged()]);
   h.loops.start(h.inboundId);
-  await h.interval();
+  h.interval();
   let requests = REQUESTS_PER_CYCLE;
+  let rearms = REARMS_PER_CYCLE;
   await reaches(() => h.calls.length, requests, t.signal);
   for (const waitMs of [
     2 * BACKOFF_INTERVAL_MS,
@@ -966,15 +985,20 @@ test("secondary rate limit refusals double the wait up to the bound, and the nex
     BACKOFF_MAX_MS,
     BACKOFF_INTERVAL_MS,
   ]) {
-    await h.elapse(waitMs - TICK_MS);
+    await h.rearmed(rearms);
+    h.elapse(waitMs - TICK_MS);
+    await settle();
     assert.equal(h.calls.length, requests);
-    await h.elapse(TICK_MS);
+    h.elapse(TICK_MS);
     requests += REQUESTS_PER_CYCLE;
+    rearms += REARMS_PER_CYCLE;
     await reaches(() => h.calls.length, requests, t.signal);
   }
-  await h.elapse(BACKOFF_INTERVAL_MS - TICK_MS);
+  await h.rearmed(rearms);
+  h.elapse(BACKOFF_INTERVAL_MS - TICK_MS);
+  await settle();
   assert.equal(h.calls.length, requests);
-  await h.elapse(TICK_MS);
+  h.elapse(TICK_MS);
   await reaches(() => h.calls.length, requests + REQUESTS_PER_CYCLE, t.signal);
 });
 
@@ -982,14 +1006,19 @@ test("any answer ends the count of secondary rate limit refusals", async (t) => 
   const h = loopHarness(t);
   h.script([limited(null), limited(null), unchanged(), limited(null)]);
   h.loops.start(h.inboundId);
-  await h.interval();
-  await h.elapse(2 * INTERVAL_MS);
-  await h.elapse(4 * INTERVAL_MS);
-  await h.elapse(INTERVAL_MS);
+  h.interval();
+  await h.rearmed(REARMS_PER_CYCLE);
+  h.elapse(2 * INTERVAL_MS);
+  await h.rearmed(2 * REARMS_PER_CYCLE);
+  h.elapse(4 * INTERVAL_MS);
+  await h.rearmed(3 * REARMS_PER_CYCLE);
+  h.elapse(INTERVAL_MS);
   await reaches(() => h.calls.length, 4 * REQUESTS_PER_CYCLE, t.signal);
-  await h.elapse(2 * INTERVAL_MS - TICK_MS);
+  await h.rearmed(4 * REARMS_PER_CYCLE);
+  h.elapse(2 * INTERVAL_MS - TICK_MS);
+  await settle();
   assert.equal(h.calls.length, 4 * REQUESTS_PER_CYCLE);
-  await h.elapse(TICK_MS);
+  h.elapse(TICK_MS);
   await reaches(() => h.calls.length, 5 * REQUESTS_PER_CYCLE, t.signal);
 });
 
@@ -1006,9 +1035,11 @@ test("a refusal that is no rate limit keeps the interval and ends the count", as
     },
   ]);
   h.loops.start(h.inboundId);
-  await h.interval();
-  await h.elapse(2 * INTERVAL_MS);
-  await h.elapse(INTERVAL_MS);
+  h.interval();
+  await h.rearmed(REARMS_PER_CYCLE);
+  h.elapse(2 * INTERVAL_MS);
+  await h.rearmed(2 * REARMS_PER_CYCLE);
+  h.elapse(INTERVAL_MS);
   await reaches(() => h.calls.length, 3 * REQUESTS_PER_CYCLE, t.signal);
 });
 
@@ -1016,10 +1047,12 @@ test("the wait bound caps a named wait", async (t) => {
   const h = loopHarness(t);
   h.script([limited(10 * WAIT_MAX_MS)]);
   h.loops.start(h.inboundId);
-  await h.interval();
-  await h.elapse(WAIT_MAX_MS - TICK_MS);
+  h.interval();
+  await h.rearmed(REARMS_PER_CYCLE);
+  h.elapse(WAIT_MAX_MS - TICK_MS);
+  await settle();
   await reaches(() => h.calls.length, REQUESTS_PER_CYCLE, t.signal);
-  await h.elapse(TICK_MS);
+  h.elapse(TICK_MS);
   await reaches(() => h.calls.length, REQUESTS_AFTER_REARM, t.signal);
 });
 
@@ -1104,12 +1137,14 @@ test("a loop skips the request while the count is zero, keeps the interval and r
   const h = loopHarness(t);
   h.demands.next = async () => counted(NO_REQUESTS);
   h.loops.start(h.inboundId);
-  await h.interval();
-  await h.interval();
+  h.interval();
+  await h.rearmed(REARMS_PER_CYCLE);
+  h.interval();
+  await h.rearmed(2 * REARMS_PER_CYCLE);
   assert.equal(h.calls.length, UNSENT_REQUEST_COUNT);
   await reaches(() => h.demands.inputs.length, SKIPPED_CYCLES, t.signal);
   h.demands.next = async () => counted(UNRESOLVED_REQUESTS);
-  await h.interval();
+  h.interval();
   await reaches(() => h.calls.length, REQUESTS_PER_CYCLE, t.signal);
 });
 
@@ -1231,12 +1266,14 @@ test("a secondary refusal of the closed pull request read after a 200 events rea
   h.script([modified(ETAG_FIRST, [])]);
   h.scriptPulls([limited(null)]);
   h.loops.start(h.inboundId);
-  await h.interval();
+  h.interval();
   await reaches(() => h.calls.length, REQUESTS_PER_CYCLE, t.signal);
   await reaches(() => h.pullCalls.length, REQUESTS_PER_CYCLE, t.signal);
-  await h.elapse(2 * INTERVAL_MS - TICK_MS);
+  await h.rearmed(REARMS_PER_CYCLE);
+  h.elapse(2 * INTERVAL_MS - TICK_MS);
+  await settle();
   assert.equal(h.calls.length, REQUESTS_PER_CYCLE);
-  await h.elapse(TICK_MS);
+  h.elapse(TICK_MS);
   await reaches(() => h.calls.length, REQUESTS_AFTER_REARM, t.signal);
 });
 
@@ -1245,14 +1282,17 @@ test("one count holds the secondary refusals of both reads", async (t) => {
   h.script([limited(null)]);
   h.scriptPulls([limited(null)]);
   h.loops.start(h.inboundId);
-  await h.interval();
+  h.interval();
+  await h.rearmed(REARMS_PER_CYCLE);
   assert.equal(h.pullCalls.length, UNSENT_REQUEST_COUNT);
-  await h.elapse(2 * INTERVAL_MS);
+  h.elapse(2 * INTERVAL_MS);
   await reaches(() => h.calls.length, REQUESTS_AFTER_REARM, t.signal);
   await reaches(() => h.pullCalls.length, REQUESTS_PER_CYCLE, t.signal);
-  await h.elapse(4 * INTERVAL_MS - TICK_MS);
+  await h.rearmed(2 * REARMS_PER_CYCLE);
+  h.elapse(4 * INTERVAL_MS - TICK_MS);
+  await settle();
   assert.equal(h.calls.length, REQUESTS_AFTER_REARM);
-  await h.elapse(TICK_MS);
+  h.elapse(TICK_MS);
   await reaches(
     () => h.calls.length,
     REQUESTS_AFTER_REARM + REQUESTS_PER_CYCLE,
@@ -1265,21 +1305,26 @@ test("a refusal that names a wait on the closed pull request read ends the count
   h.script([limited(null)]);
   h.scriptPulls([limited(3 * INTERVAL_MS), limited(null)]);
   h.loops.start(h.inboundId);
-  await h.interval();
-  await h.elapse(2 * INTERVAL_MS);
+  h.interval();
+  await h.rearmed(REARMS_PER_CYCLE);
+  h.elapse(2 * INTERVAL_MS);
   await reaches(() => h.pullCalls.length, REQUESTS_PER_CYCLE, t.signal);
-  await h.elapse(3 * INTERVAL_MS - TICK_MS);
+  await h.rearmed(2 * REARMS_PER_CYCLE);
+  h.elapse(3 * INTERVAL_MS - TICK_MS);
+  await settle();
   await reaches(() => h.calls.length, REQUESTS_AFTER_REARM, t.signal);
-  await h.elapse(TICK_MS);
+  h.elapse(TICK_MS);
   await reaches(
     () => h.calls.length,
     REQUESTS_AFTER_REARM + REQUESTS_PER_CYCLE,
     t.signal,
   );
   await reaches(() => h.pullCalls.length, REQUESTS_AFTER_REARM, t.signal);
-  await h.elapse(2 * INTERVAL_MS - TICK_MS);
+  await h.rearmed(3 * REARMS_PER_CYCLE);
+  h.elapse(2 * INTERVAL_MS - TICK_MS);
+  await settle();
   assert.equal(h.calls.length, REQUESTS_AFTER_REARM + REQUESTS_PER_CYCLE);
-  await h.elapse(TICK_MS);
+  h.elapse(TICK_MS);
   await reaches(
     () => h.calls.length,
     REQUESTS_AFTER_REARM + REQUESTS_AFTER_REARM,
@@ -1292,10 +1337,12 @@ test("the wait after a cycle is the longest wait of both answers", async (t) => 
   events.script([unchanged(5 * INTERVAL_MS)]);
   events.scriptPulls([unchanged(3 * INTERVAL_MS)]);
   events.loops.start(events.inboundId);
-  await events.interval();
-  await events.elapse(5 * INTERVAL_MS - TICK_MS);
+  events.interval();
+  await events.rearmed(REARMS_PER_CYCLE);
+  events.elapse(5 * INTERVAL_MS - TICK_MS);
+  await settle();
   await reaches(() => events.calls.length, REQUESTS_PER_CYCLE, t.signal);
-  await events.elapse(TICK_MS);
+  events.elapse(TICK_MS);
   await reaches(() => events.calls.length, REQUESTS_AFTER_REARM, t.signal);
 });
 
@@ -1304,10 +1351,12 @@ test("a longer wait of the closed pull request read delays the next cycle", asyn
   h.script([unchanged(3 * INTERVAL_MS)]);
   h.scriptPulls([unchanged(5 * INTERVAL_MS)]);
   h.loops.start(h.inboundId);
-  await h.interval();
-  await h.elapse(5 * INTERVAL_MS - TICK_MS);
+  h.interval();
+  await h.rearmed(REARMS_PER_CYCLE);
+  h.elapse(5 * INTERVAL_MS - TICK_MS);
+  await settle();
   await reaches(() => h.calls.length, REQUESTS_PER_CYCLE, t.signal);
-  await h.elapse(TICK_MS);
+  h.elapse(TICK_MS);
   await reaches(() => h.calls.length, REQUESTS_AFTER_REARM, t.signal);
 });
 
