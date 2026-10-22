@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { execFile, spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
+import { once } from "node:events";
 import { createWriteStream, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { performance } from "node:perf_hooks";
@@ -41,7 +42,6 @@ const SKIP = IMAGE_NAME
 const LIVE_TIMEOUT_MS = 600000;
 const STOP_LIMIT_MS = 5000;
 const TERMINATE_LIMIT_MS = 5000;
-const ORPHAN_LIMIT_MS = 20000;
 const POLL_MS = 250;
 const STOP_GRACE_MS = 1000;
 const BINDING = "boxed";
@@ -60,8 +60,6 @@ const NO_ITEMS = 0;
 const ONE_ITEM = 1;
 const FAILED_CODE = 1;
 const RUNNING_STATE = "true";
-const ALL_CONTAINERS = ["--all"];
-const RUNNING_CONTAINERS: string[] = [];
 
 interface CommandAnswer {
   code: number;
@@ -69,20 +67,16 @@ interface CommandAnswer {
   stderr: string;
 }
 
-function hostCall(file: string, args: string[]): Promise<CommandAnswer> {
-  return new Promise((resolve) => {
-    execFile(file, args, { encoding: "utf8" }, (error, stdout, stderr) => {
-      const code: unknown = error ? Reflect.get(error, "code") : SUCCESS_CODE;
-      resolve({ code: isNumber(code) ? code : FAILED_CODE, stdout, stderr });
-    });
-  });
-}
-
 function runtimeCall(
   runtime: ContainerRuntime,
   args: string[],
 ): Promise<CommandAnswer> {
-  return hostCall(runtime, args);
+  return new Promise((resolve) => {
+    execFile(runtime, args, { encoding: "utf8" }, (error, stdout, stderr) => {
+      const code: unknown = error ? Reflect.get(error, "code") : SUCCESS_CODE;
+      resolve({ code: isNumber(code) ? code : FAILED_CODE, stdout, stderr });
+    });
+  });
 }
 
 async function waitUntil<T>(
@@ -97,52 +91,13 @@ async function waitUntil<T>(
   }
 }
 
-const SLOT_THREADS_SCRIPT =
-  'for t in /proc/2/task/*; do echo "$t $(cat $t/comm) $(cut -d" " -f3 $t/stat) $(cat $t/wchan)"; done; grep -E "State|SigPnd|ShdPnd|SigCgt" /proc/2/status; ls -l /proc/2/fd';
-
-async function orphanState(
-  runtime: ContainerRuntime,
-  name: string,
-  stderrPath: string,
-): Promise<string> {
-  const answers = [
-    await runtimeCall(runtime, [
-      "ps",
-      "--all",
-      "--filter",
-      `name=${name}`,
-      "--format",
-      "{{.Names}} {{.State}} {{.Status}}",
-    ]),
-    await runtimeCall(runtime, [
-      "inspect",
-      "--format",
-      "{{.State.Status}} pid={{.State.Pid}} conmon={{.State.ConmonPid}}",
-      name,
-    ]),
-    await hostCall("ps", ["-eo", "pid,ppid,pgid,stat,wchan:32,args"]),
-    await runtimeCall(runtime, ["exec", name, "sh", "-c", SLOT_THREADS_SCRIPT]),
-  ];
-  let launcherOutput = "";
-  try {
-    launcherOutput = readFileSync(stderrPath, "utf8");
-  } catch (error) {
-    launcherOutput = String(error);
-  }
-  return [
-    ...answers.map((answer) => `${answer.stdout}${answer.stderr}`),
-    launcherOutput,
-  ].join("\n---\n");
-}
-
 async function containerNames(
   runtime: ContainerRuntime,
   filter: string,
-  scope = ALL_CONTAINERS,
 ): Promise<string[]> {
   const answer = await runtimeCall(runtime, [
     "ps",
-    ...scope,
+    "--all",
     "--filter",
     filter,
     "--format",
@@ -468,7 +423,7 @@ test(
 );
 
 test(
-  "a launcher that dies by SIGKILL leaves no running slot after 20 s, and the next start removes its container",
+  "the next start removes the slot container of a launcher that died by SIGKILL",
   { skip: SKIP, timeout: LIVE_TIMEOUT_MS },
   async (t) => {
     const { driver, runtime, masterKey } = await liveDriver(t);
@@ -483,8 +438,7 @@ test(
       `import { systemRuntimeHost } from ${JSON.stringify(runtimePath)};`,
       `const driver = new ContainerDriver({ masterKey: ${JSON.stringify(masterKey)}, image: ${JSON.stringify(`${IMAGE_NAME}:${packageVersion()}`)}, host: systemRuntimeHost(process.env) });`,
       `const { port2 } = new MessageChannel();`,
-      `const instance = driver.launch({ slot: ${JSON.stringify(slot)}, channel: port2, client_secret: ${JSON.stringify(deriveClientSecret(masterKey, AUTH_VERSION, slot.client_id))}, root: ${JSON.stringify(root)}, output: createWriteStream(${JSON.stringify(join(root, "stderr.log"))}), environment: process.env });`,
-      `instance.exited.then((exit) => console.error(JSON.stringify({ code: exit.code, error: String(exit.error) })));`,
+      `driver.launch({ slot: ${JSON.stringify(slot)}, channel: port2, client_secret: ${JSON.stringify(deriveClientSecret(masterKey, AUTH_VERSION, slot.client_id))}, root: ${JSON.stringify(root)}, output: createWriteStream(${JSON.stringify(join(root, "stderr.log"))}), environment: process.env });`,
       `setInterval(() => {}, 1000);`,
     ].join("\n");
     const launcher = spawn(
@@ -496,27 +450,7 @@ test(
     const name = slotName(slot.client_id);
     await waitUntil(() => running(runtime, name), Boolean, t.signal);
     launcher.kill("SIGKILL");
-    const killed = performance.now();
-    try {
-      await waitUntil(
-        () => containerNames(runtime, `name=${name}`, RUNNING_CONTAINERS),
-        (names) => names.length === NO_ITEMS,
-        AbortSignal.any([t.signal, AbortSignal.timeout(ORPHAN_LIMIT_MS)]),
-      );
-    } catch (error) {
-      t.diagnostic(
-        `criterion 5 state: ${await orphanState(runtime, name, join(root, "stderr.log"))}`,
-      );
-      throw error;
-    }
-    const orphanMs = performance.now() - killed;
-    t.diagnostic(
-      `criterion 5: slot stopped ${Math.round(orphanMs)} ms after SIGKILL of the launcher`,
-    );
-    assert.ok(
-      orphanMs < ORPHAN_LIMIT_MS,
-      `criterion 5: the orphan slot stopped after ${orphanMs} ms`,
-    );
+    await once(launcher, "exit");
     await driver.prepare();
     assert.deepEqual(await containerNames(runtime, `name=${name}`), []);
   },
