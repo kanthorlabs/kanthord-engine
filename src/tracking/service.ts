@@ -51,7 +51,14 @@ import {
   type TraceCursor,
   type TraceListQuery,
 } from "./trace-list.ts";
-import { insertTrace, listSpans, readText, readTrace } from "./trace-store.ts";
+import {
+  insertTrace,
+  listSessionEntries,
+  listSpans,
+  readSessionEntry,
+  readText,
+  readTrace,
+} from "./trace-store.ts";
 
 const ROOT_START_RECORD = "start";
 const ROOT_END_RECORD = "end";
@@ -321,6 +328,52 @@ export class TrackingService implements Service, ExecutionTelemetry {
     });
   }
 
+  sessionEntryList(
+    params: { trace_id: string; session_id: string },
+    query: { limit: number; cursor?: string; tool_call_id?: string },
+    caller: CallerContext,
+  ) {
+    assert.ok(params.session_id);
+    assert.ok(caller.identity);
+    const after = decodeCursor(query.cursor);
+    return caller.commit((tx) => {
+      if (!readTrace(tx, params.trace_id)) traceNotFound();
+      const page = listSessionEntries(
+        tx,
+        params.trace_id,
+        params.session_id,
+        after,
+        query.limit,
+        query.tool_call_id,
+      );
+      return { items: page.items, next_cursor: encodeCursor(page.last) };
+    });
+  }
+
+  sessionEntryGet(
+    params: { trace_id: string; session_id: string; entry_id: string },
+    caller: CallerContext,
+  ) {
+    assert.ok(params.entry_id);
+    assert.ok(caller.identity);
+    return caller.commit((tx) => {
+      if (!readTrace(tx, params.trace_id)) traceNotFound();
+      const entry = readSessionEntry(
+        tx,
+        params.trace_id,
+        params.session_id,
+        params.entry_id,
+      );
+      if (!entry)
+        throw new OperationError(
+          HttpStatus.NotFound,
+          "tracking.entry.not_found",
+          "The session entry is unknown.",
+        );
+      return entry;
+    });
+  }
+
   declare(registry: OperationRegistry): void {
     const operations = Object.values(trackingOperations);
     if (
@@ -332,7 +385,9 @@ export class TrackingService implements Service, ExecutionTelemetry {
       trackingOperations.traceList.access !== AccessPolicy.Human ||
       trackingOperations.facetGet.access !== AccessPolicy.Human ||
       trackingOperations.spanList.access !== AccessPolicy.Human ||
-      trackingOperations.textGet.access !== AccessPolicy.Human
+      trackingOperations.textGet.access !== AccessPolicy.Human ||
+      trackingOperations.sessionEntryList.access !== AccessPolicy.Human ||
+      trackingOperations.sessionEntryGet.access !== AccessPolicy.Human
     )
       throw new Error(
         "Tracking operations require tracking ownership and their declared access.",
@@ -358,6 +413,12 @@ export class TrackingService implements Service, ExecutionTelemetry {
     );
     registry.register(trackingOperations.textGet, (input, caller) =>
       this.textGet(input.params.trace_id, input.params.text_id, caller),
+    );
+    registry.register(trackingOperations.sessionEntryList, (input, caller) =>
+      this.sessionEntryList(input.params, input.query, caller),
+    );
+    registry.register(trackingOperations.sessionEntryGet, (input, caller) =>
+      this.sessionEntryGet(input.params, caller),
     );
   }
 

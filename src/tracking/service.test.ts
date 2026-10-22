@@ -18,6 +18,7 @@ import {
   TraceSort,
   traceSummarySchema,
   type ExecutionTrace,
+  type SessionEntryRecord,
 } from "./contract.ts";
 import { trackingMigrations } from "./migrations.ts";
 import { TrackingService } from "./service.ts";
@@ -481,4 +482,168 @@ test("the facet read answers the four arrays", (t) => {
     models: [],
     error_types: [],
   });
+});
+
+const SECOND_SESSION = "3".repeat(16);
+const ENTRY_PAGE = 2;
+const ENTRY_COUNT = 5;
+const ENTRY_PAGES = 3;
+const FIRST_SEQUENCE = 1;
+const TRUNCATED_SEQUENCE = 2;
+const TOOL_RESULT_SEQUENCE = 4;
+const TOOL_CALL = "call_1";
+const ENTRY_NOT_FOUND = "tracking.entry.not_found";
+
+function entryRecord(
+  sessionId: string,
+  sequence: number,
+  toolCallId: string | null,
+): SessionEntryRecord {
+  return {
+    record_id: `${sessionId}:entry.e${sequence}`,
+    trace_id: TRACE.trace_id,
+    kind: RecordKind.SessionEntry,
+    session_id: sessionId,
+    entry_id: `e${sequence}`,
+    parent_entry_id: sequence === FIRST_SEQUENCE ? null : `e${sequence - 1}`,
+    sequence,
+    entry_type: toolCallId === null ? "message" : "tool_result",
+    entry_time: CREATED + sequence,
+    tool_call_id: toolCallId,
+    truncated: sequence === TRUNCATED_SEQUENCE,
+    entry: { sequence, nested: { value: [sequence] } },
+  };
+}
+
+function entryHarness(t: TestContext) {
+  const { store, service } = harness(t);
+  const records = [
+    ...Array.from({ length: ENTRY_COUNT }, (_, index) =>
+      entryRecord(
+        SPAN,
+        index + 1,
+        index + 1 === TOOL_RESULT_SEQUENCE ? TOOL_CALL : null,
+      ),
+    ),
+    entryRecord(SECOND_SESSION, 1, null),
+  ];
+  service.telemetryWrite(TRACE.execution_id, records, caller(store));
+  return { store, service, records };
+}
+
+test("a session entry list pages one session in sequence order", (t) => {
+  const { store, service, records } = entryHarness(t);
+  const params = { trace_id: TRACE.trace_id, session_id: SPAN };
+  const sequences: number[] = [];
+  let cursor: string | undefined;
+  let pages = 0;
+  do {
+    const page = service.sessionEntryList(
+      params,
+      { limit: ENTRY_PAGE, cursor },
+      caller(store),
+    );
+    sequences.push(...page.items.map((item) => item.sequence));
+    cursor = page.next_cursor ?? undefined;
+    pages += 1;
+  } while (cursor !== undefined && pages <= ENTRY_COUNT);
+  assert.deepEqual(sequences, [1, 2, 3, 4, 5]);
+  assert.equal(pages, ENTRY_PAGES);
+  const first = service.sessionEntryList(
+    params,
+    { limit: ENTRY_COUNT },
+    caller(store),
+  );
+  assert.equal(first.next_cursor, null);
+  for (const [index, item] of first.items.entries()) {
+    const written = records[index];
+    assert.ok(written?.kind === RecordKind.SessionEntry);
+    assert.deepEqual(item, {
+      trace_id: written.trace_id,
+      session_id: written.session_id,
+      entry_id: written.entry_id,
+      parent_entry_id: written.parent_entry_id,
+      sequence: written.sequence,
+      entry_type: written.entry_type,
+      entry_time: written.entry_time,
+      tool_call_id: written.tool_call_id,
+      truncated: written.truncated,
+      entry: written.entry,
+      created_at: item.created_at,
+    });
+    assert.ok(Number.isSafeInteger(item.created_at));
+  }
+});
+
+test("a tool call identity filters the session entry list", (t) => {
+  const { store, service } = entryHarness(t);
+  const page = service.sessionEntryList(
+    { trace_id: TRACE.trace_id, session_id: SPAN },
+    { limit: ENTRY_PAGE, tool_call_id: TOOL_CALL },
+    caller(store),
+  );
+  assert.deepEqual(
+    page.items.map((item) => item.entry_id),
+    [`e${TOOL_RESULT_SEQUENCE}`],
+  );
+  assert.equal(page.next_cursor, null);
+});
+
+test("a session that the trace does not hold answers an empty page", (t) => {
+  const { store, service } = entryHarness(t);
+  const page = service.sessionEntryList(
+    { trace_id: TRACE.trace_id, session_id: "4".repeat(16) },
+    { limit: ENTRY_PAGE },
+    caller(store),
+  );
+  assert.deepEqual(page, { items: [], next_cursor: null });
+});
+
+test("a session entry read answers one entry or a refusal", (t) => {
+  const { store, service } = entryHarness(t);
+  const params = {
+    trace_id: TRACE.trace_id,
+    session_id: SECOND_SESSION,
+    entry_id: "e1",
+  };
+  const entry = service.sessionEntryGet(params, caller(store));
+  assert.equal(entry.session_id, SECOND_SESSION);
+  assert.deepEqual(entry.entry, { sequence: 1, nested: { value: [1] } });
+  assert.throws(
+    () => service.sessionEntryGet({ ...params, entry_id: "e9" }, caller(store)),
+    (error) =>
+      error instanceof OperationError && error.code === ENTRY_NOT_FOUND,
+  );
+  assert.throws(
+    () =>
+      service.sessionEntryGet(
+        { ...params, trace_id: OTHER_TRACE },
+        caller(store),
+      ),
+    (error) =>
+      error instanceof OperationError && error.code === TRACE_NOT_FOUND,
+  );
+});
+
+test("a session entry list refuses an unknown trace and a malformed cursor", (t) => {
+  const { store, service } = entryHarness(t);
+  assert.throws(
+    () =>
+      service.sessionEntryList(
+        { trace_id: OTHER_TRACE, session_id: SPAN },
+        { limit: ENTRY_PAGE },
+        caller(store),
+      ),
+    (error) =>
+      error instanceof OperationError && error.code === TRACE_NOT_FOUND,
+  );
+  assert.throws(
+    () =>
+      service.sessionEntryList(
+        { trace_id: TRACE.trace_id, session_id: SPAN },
+        { limit: ENTRY_PAGE, cursor: "not-a-cursor" },
+        caller(store),
+      ),
+    cursorInvalid,
+  );
 });
