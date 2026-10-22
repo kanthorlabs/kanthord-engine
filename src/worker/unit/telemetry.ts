@@ -4,6 +4,7 @@ import {
   RecordKind,
   SpanStatus,
   type Attributes,
+  type SessionEntryRecord,
   type TelemetryRecord,
 } from "../../tracking/contract.ts";
 
@@ -68,6 +69,7 @@ const TEXT_PARTS_MAX = 8;
 const FIRST_PART = 1;
 const ZERO_SPAN = /^0+$/;
 const NO_FAULTS = 0;
+const NO_RECORDS = 0;
 const SPAN_PATTERN = /^[0-9a-f]{16}$/;
 const RUN_KEY_PATTERN = /^[0-9a-f]{8}$/;
 const HIGH_SURROGATE_FIRST = 0xd800;
@@ -162,6 +164,10 @@ export class SpanRecorder {
     return spanId;
   }
 
+  traceId(): string {
+    return this.claim.trace_id;
+  }
+
   nextTurn(): number {
     this.turns += 1;
     assert.ok(Number.isSafeInteger(this.turns));
@@ -238,6 +244,11 @@ export class SpanRecorder {
         text_ids: texts.ids,
       },
     ]);
+  }
+
+  sessionEntries(records: readonly SessionEntryRecord[]): void {
+    if (records.length === NO_RECORDS) return;
+    this.sink.write(records);
   }
 
   async within<T>(

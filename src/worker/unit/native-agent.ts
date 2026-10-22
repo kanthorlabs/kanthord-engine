@@ -16,6 +16,7 @@ import type {
 import type { ExecutionBudget } from "./budget.ts";
 import type {
   CompositionRecord,
+  LayerText,
   WorkPrompt,
 } from "../../agent/prompt-composer.ts";
 import { resolveRepositoryLayer } from "../../agent/prompt-layers.ts";
@@ -41,6 +42,7 @@ import {
   type SpanRecorder,
 } from "./telemetry.ts";
 import { executionSessionDirectory } from "./session-store.ts";
+import { PINNED_CONTEXT_TYPE } from "./session-entries.ts";
 
 export interface NativeAgentInput {
   setup: ExecutionSetup;
@@ -131,21 +133,21 @@ async function providerFailure(
 }
 
 interface SessionTrace {
-  watch(unsubscribe: () => void): void;
-  end(status: SpanStatus, entryCount?: number): void;
+  watch(finish: () => number): void;
+  end(status: SpanStatus): void;
 }
 
 function sessionTrace(spans: SpanRecorder, spanId: string): SessionTrace {
   let open = true;
-  let unsubscribe = () => {};
+  let finish: () => number | undefined = () => undefined;
   return {
     watch(next) {
-      unsubscribe = next;
+      finish = next;
     },
-    end(status, entryCount) {
+    end(status) {
       if (!open) return;
       open = false;
-      unsubscribe();
+      const entryCount = finish();
       spans.end(spanId, {
         status,
         attributes:
@@ -221,11 +223,10 @@ function nativeAgent(
       return session.getLastAssistantText();
     },
     closeTrace(status) {
-      if (session) trace?.end(status, session.sessionManager.getEntryCount());
+      if (session) trace?.end(status);
     },
     dispose() {
-      if (session)
-        trace?.end(SpanStatus.Ok, session.sessionManager.getEntryCount());
+      if (session) trace?.end(SpanStatus.Ok);
       unsubscribeTurns?.();
       cancellation?.[Symbol.dispose]();
       unsubscribeTurns = null;
@@ -235,6 +236,25 @@ function nativeAgent(
       session = null;
     },
   };
+}
+
+function appendPinnedContext(
+  session: AgentSession,
+  systemPrompt: string,
+  layers: readonly LayerText[],
+): void {
+  const { sessionManager } = session;
+  sessionManager.appendCustomEntry(PINNED_CONTEXT_TYPE, {
+    part: "system_prompt",
+    text: systemPrompt,
+  });
+  layers.forEach((layer, position) =>
+    sessionManager.appendCustomEntry(PINNED_CONTEXT_TYPE, {
+      part: "layer",
+      index: position + 1,
+      text: layer.message,
+    }),
+  );
 }
 
 export async function openNativeAgent(
@@ -273,7 +293,8 @@ export async function openNativeAgent(
       }),
       context,
     );
-    const pins = pinnedLayers(workingTexts(layers, input.setup.templates));
+    const texts = workingTexts(layers, input.setup.templates);
+    const pins = pinnedLayers(texts);
     const pi = await withDeadline(loadPi(), context);
     let sessionId: string | undefined;
     if (input.spans) {
@@ -328,8 +349,15 @@ export async function openNativeAgent(
       sessionManager,
     });
     pins.pinInference(session, input.agent.prompt.final);
-    if (input.spans)
-      trace?.watch(traceAgent(session, input.spans, input.agent));
+    appendPinnedContext(session, input.agent.prompt.final, texts);
+    if (input.spans && sessionId !== undefined)
+      trace?.watch(
+        traceAgent(session, input.spans, input.agent, {
+          sessionId,
+          secrets: await secrets(),
+          refreshSecrets: secrets,
+        }),
+      );
     return nativeAgent(
       session,
       pins,

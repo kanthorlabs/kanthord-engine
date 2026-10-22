@@ -231,7 +231,8 @@ engine/
 │   │   │   ├── session-store.ts    # Execution session directories of the pi session files and their retention
 │   │   │   ├── native-method.ts    # Injected native method dispatch and resource lifetime
 │   │   │   ├── telemetry.ts        # Span recorder, span identities and the telemetry sink seam
-│   │   │   ├── agent-telemetry.ts  # pi session events as turn and tool spans
+│   │   │   ├── agent-telemetry.ts  # pi session events as turn and tool spans and the session entry sender
+│   │   │   ├── session-entries.ts  # Secret redaction, the byte bound and the record of a pi session entry
 │   │   │   └── method-telemetry.ts # Phase, task, verification, judgement and evaluation spans
 │   │   └── service.ts          # Registration lifecycle, registration healthchecks, report-only registration checks, and entry validation
 │   ├── workbench/              # Workbench Service: human-driven agent sessions

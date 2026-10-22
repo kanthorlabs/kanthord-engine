@@ -1,22 +1,35 @@
 import assert from "node:assert/strict";
-import type { AgentSession } from "@earendil-works/pi-coding-agent";
+import type {
+  AgentSession,
+  SessionEntry,
+} from "@earendil-works/pi-coding-agent";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { AssistantMessage } from "@earendil-works/pi-ai";
 import { SpanStatus, type Attributes } from "../../tracking/contract.ts";
 import type { AgentSetup } from "../contract.ts";
-import { isObject, isString } from "../../kernel/values.ts";
+import { isObject } from "../../kernel/values.ts";
 import { providerFailureOf } from "../../llm/provider-failure.ts";
 import { SpanOperation, type SpanRecorder } from "./telemetry.ts";
+import { sessionEntryRecord } from "./session-entries.ts";
 
 const TURN_START = "turn_start";
 const TURN_END = "turn_end";
+const MESSAGE_END = "message_end";
+const MESSAGE_ENTRY = "message";
+const CHAT_OPERATION = "chat";
+const TOOL_OPERATION = "execute_tool";
 const TOOL_START = "tool_execution_start";
 const TOOL_END = "tool_execution_end";
 const ASSISTANT_ROLE = "assistant";
 const ERROR_STOP = "error";
-const TEXT_PART = "text";
 const TOOLS_OPEN_MAX = 1024;
 const ToolOutcome = { Ok: "ok", Error: "error" } as const;
+export const AgentErrorType = {
+  ToolError: "tool_error",
+  Stopped: "stopped",
+} as const;
+const FIRST_SEQUENCE = 1;
+const NO_ENTRIES = 0;
 
 function isAssistant(message: AgentMessage): message is AssistantMessage {
   return (
@@ -24,49 +37,39 @@ function isAssistant(message: AgentMessage): message is AssistantMessage {
   );
 }
 
-function replyText(message: AssistantMessage): string {
-  assert.ok(Array.isArray(message.content));
-  assert.equal(message.role, ASSISTANT_ROLE);
-  return message.content
-    .flatMap((part) => (part.type === TEXT_PART ? [part.text] : []))
-    .join("\n");
-}
-
-function turnAttributes(message: AssistantMessage): Attributes {
+function turnAttributes(
+  message: AssistantMessage,
+  entryId: string | null,
+  modelDurationMs: number | null,
+): Attributes {
   assert.ok(message.usage);
   assert.equal(message.role, ASSISTANT_ROLE);
+  const { usage } = message;
   const failure =
     message.stopReason === ERROR_STOP
       ? providerFailureOf(message.errorMessage ?? "")
       : null;
+  const duration = Number.isFinite(message.durationMs)
+    ? message.durationMs
+    : modelDurationMs;
   return {
-    "gen_ai.request.model": message.model,
-    "gen_ai.usage.input_tokens": message.usage.input,
-    "gen_ai.usage.output_tokens": message.usage.output,
-    "gen_ai.usage.cache_read_tokens": message.usage.cacheRead,
-    "gen_ai.usage.cache_write_tokens": message.usage.cacheWrite,
+    "gen_ai.response.model": message.responseModel ?? message.model,
+    "gen_ai.provider.name": message.provider,
+    "gen_ai.usage.input_tokens":
+      usage.input + usage.cacheRead + usage.cacheWrite,
+    "gen_ai.usage.output_tokens": usage.output,
+    "gen_ai.usage.cache_read.input_tokens": usage.cacheRead,
+    "gen_ai.usage.cache_creation.input_tokens": usage.cacheWrite,
+    ...(Number.isFinite(usage.cost?.total)
+      ? { "kanthord.usage.cost_usd": usage.cost.total }
+      : {}),
     "gen_ai.response.finish_reasons": [message.stopReason],
     ...(failure === null ? {} : { "error.type": failure }),
+    ...(entryId === null ? {} : { "kanthord.session.entry_id": entryId }),
+    ...(duration === null || duration === undefined
+      ? {}
+      : { "kanthord.turn.model_duration_ms": duration }),
   };
-}
-
-function textOf(value: unknown): string {
-  if (isString(value)) return value;
-  if (value === undefined) return "";
-  return JSON.stringify(value) ?? "";
-}
-
-function resultText(result: unknown): string {
-  if (!isObject(result) || !("content" in result)) return textOf(result);
-  const content = (result as { content: unknown }).content;
-  if (!Array.isArray(content)) return textOf(result);
-  return content
-    .flatMap((part: unknown) =>
-      isObject(part) && "text" in part && isString(part.text)
-        ? [part.text]
-        : [],
-    )
-    .join("\n");
 }
 
 type SessionEvent = Parameters<Parameters<AgentSession["subscribe"]>[0]>[0];
@@ -75,23 +78,52 @@ type EventOf<T extends SessionEvent["type"]> = Extract<
   { type: T }
 >;
 
-type TracedAgent = Pick<AgentSetup, "agent_name" | "position" | "level">;
+type TracedAgent = Pick<
+  AgentSetup,
+  "agent_name" | "position" | "level" | "effective_configuration"
+>;
+
+export interface AgentTracing {
+  sessionId: string;
+  secrets: readonly string[];
+  refreshSecrets: () => Promise<readonly string[]>;
+}
 
 class AgentTracer {
   private readonly spans: SpanRecorder;
   private readonly agentName: string;
   private readonly position: number;
   private readonly level: AgentSetup["level"];
+  private readonly model: string;
   private turn: string | null = null;
+  private turnStartedAt = NO_ENTRIES;
+  private turnEntryCount = NO_ENTRIES;
+  private modelDurationMs: number | null = null;
   private readonly tools = new Map<string, { span: string; started: number }>();
+  private readonly session: AgentSession;
+  private readonly sessionId: string;
+  private readonly refreshSecrets: AgentTracing["refreshSecrets"];
+  private secrets: readonly string[];
+  private sent = NO_ENTRIES;
 
-  constructor(spans: SpanRecorder, agent: TracedAgent) {
+  constructor(
+    session: AgentSession,
+    spans: SpanRecorder,
+    agent: TracedAgent,
+    tracing: AgentTracing,
+  ) {
     assert.ok(spans);
     assert.ok(agent.agent_name);
+    assert.ok(tracing.sessionId);
+    this.session = session;
+    this.sessionId = tracing.sessionId;
+    this.secrets = tracing.secrets;
+    this.refreshSecrets = tracing.refreshSecrets;
     this.spans = spans;
     this.agentName = agent.agent_name;
     this.position = agent.position;
     this.level = agent.level;
+    this.model = agent.effective_configuration.model_identifier;
   }
 
   observe(event: SessionEvent): void {
@@ -101,10 +133,65 @@ class AgentTracer {
     else if (event.type === TOOL_START) this.toolStarted(event);
     else if (event.type === TOOL_END) this.toolEnded(event);
     else if (event.type === TURN_END) this.turnEnded(event);
+    else if (event.type === MESSAGE_END) this.messageEnded(event);
+  }
+
+  sentCount(): number {
+    return this.sent;
+  }
+
+  sendEntries(): void {
+    const count = this.session.sessionManager.getEntryCount();
+    if (count <= this.sent) return;
+    const entries = this.session.sessionManager.getEntries();
+    const first = this.sent;
+    this.sent = count;
+    const records = entries.slice(first, count).flatMap((entry, offset) => {
+      const record = this.entryRecord(entry, first + offset + FIRST_SEQUENCE);
+      if (record === null) this.spans.fault();
+      return record === null ? [] : [record];
+    });
+    this.spans.sessionEntries(records);
+  }
+
+  stop(): void {
+    for (const tool of this.tools.values()) this.endStopped(tool.span);
+    this.tools.clear();
+    if (this.turn === null) return;
+    const open = this.turn;
+    this.turn = null;
+    this.endStopped(open);
+  }
+
+  private endStopped(spanId: string): void {
+    this.spans.end(spanId, {
+      status: SpanStatus.Error,
+      attributes: { "error.type": AgentErrorType.Stopped },
+    });
+  }
+
+  private entryRecord(entry: SessionEntry, sequence: number) {
+    try {
+      return sessionEntryRecord({
+        traceId: this.spans.traceId(),
+        sessionId: this.sessionId,
+        sequence,
+        entry,
+        secrets: this.secrets,
+      });
+    } catch {
+      return null;
+    }
   }
 
   private turnStarted(): void {
     assert.ok(this.agentName);
+    this.refreshSecrets().then(
+      (secrets) => {
+        this.secrets = secrets;
+      },
+      () => {},
+    );
     if (this.turn !== null)
       this.spans.end(this.turn, { status: SpanStatus.Error });
     const index = this.spans.nextTurn();
@@ -116,9 +203,32 @@ class AgentTracer {
         "kanthord.agent.chain_position": this.position,
         "kanthord.agent.chain_level": this.level,
         "kanthord.turn.index": index,
+        "gen_ai.operation.name": CHAT_OPERATION,
+        "gen_ai.conversation.id": this.sessionId,
+        "gen_ai.request.model": this.model,
       },
     });
+    this.turnStartedAt = Date.now();
+    this.turnEntryCount = this.session.sessionManager.getEntryCount();
+    this.modelDurationMs = null;
     assert.ok(this.turn);
+  }
+
+  private messageEnded(event: EventOf<typeof MESSAGE_END>): void {
+    if (this.turn === null || !isAssistant(event.message)) return;
+    this.modelDurationMs = Date.now() - this.turnStartedAt;
+  }
+
+  private assistantEntryId(): string | null {
+    const entries = this.session.sessionManager
+      .getEntries()
+      .slice(this.turnEntryCount);
+    const entry = entries.findLast(
+      (candidate) =>
+        candidate.type === MESSAGE_ENTRY &&
+        candidate.message.role === ASSISTANT_ROLE,
+    );
+    return entry?.id ?? null;
   }
 
   private toolStarted(event: EventOf<typeof TOOL_START>): void {
@@ -132,10 +242,11 @@ class AgentTracer {
         operation: SpanOperation.Tool,
         parent: this.turn,
         attributes: {
+          "gen_ai.operation.name": TOOL_OPERATION,
+          "gen_ai.conversation.id": this.sessionId,
           "gen_ai.tool.name": event.toolName,
           "gen_ai.tool.call.id": event.toolCallId,
         },
-        texts: { input: textOf(event.args) },
       }),
     });
   }
@@ -153,8 +264,8 @@ class AgentTracer {
           ? ToolOutcome.Error
           : ToolOutcome.Ok,
         "kanthord.tool.duration_ms": Date.now() - tool.started,
+        ...(event.isError ? { "error.type": AgentErrorType.ToolError } : {}),
       },
-      texts: { output: resultText(event.result) },
     });
   }
 
@@ -169,13 +280,13 @@ class AgentTracer {
       return;
     }
     const failed = event.message.stopReason === ERROR_STOP;
-    const reply = replyText(event.message);
     this.spans.end(ended, {
       status: failed ? SpanStatus.Error : SpanStatus.Ok,
-      attributes: turnAttributes(event.message),
-      texts: failed
-        ? { reply, error: event.message.errorMessage ?? "" }
-        : { reply },
+      attributes: turnAttributes(
+        event.message,
+        this.assistantEntryId(),
+        this.modelDurationMs,
+      ),
     });
   }
 }
@@ -184,15 +295,29 @@ export function traceAgent(
   session: AgentSession,
   spans: SpanRecorder,
   agent: TracedAgent,
-): () => void {
+  tracing: AgentTracing,
+): () => number {
   assert.ok(session);
   assert.ok(agent.agent_name);
-  const tracer = new AgentTracer(spans, agent);
-  return session.subscribe((event) => {
+  const tracer = new AgentTracer(session, spans, agent, tracing);
+  const guarded = (work: () => void) => {
     try {
-      tracer.observe(event);
+      work();
     } catch {
       spans.fault();
     }
+  };
+  const unsubscribe = session.subscribe((event) => {
+    guarded(() => tracer.observe(event));
+    guarded(() => tracer.sendEntries());
   });
+  let stopped = false;
+  return () => {
+    if (stopped) return tracer.sentCount();
+    stopped = true;
+    guarded(() => tracer.sendEntries());
+    guarded(() => tracer.stop());
+    unsubscribe();
+    return tracer.sentCount();
+  };
 }

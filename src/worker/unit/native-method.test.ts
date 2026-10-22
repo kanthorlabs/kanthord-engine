@@ -9,6 +9,7 @@ import { background } from "../../kernel/context.ts";
 import {
   EndReason,
   ExecutionEndKind,
+  ExecutionStop,
   ExecutionRun,
   EXECUTION_NOT_RUNNING,
   EXECUTION_PROOF_FAILED,
@@ -33,7 +34,12 @@ import {
   everyBindingSshAccess,
 } from "./test-support.ts";
 import { WorkspaceRoot } from "./workspace.ts";
-import { RecordKind, SpanStatus } from "../../tracking/contract.ts";
+import {
+  RecordKind,
+  SpanStatus,
+  type TelemetryRecord,
+} from "../../tracking/contract.ts";
+import { AgentErrorType } from "./agent-telemetry.ts";
 import { SpanOperation } from "./telemetry.ts";
 import { ExecutionIntent, type RepositoryTransport } from "../contract.ts";
 import type { MethodClients } from "./method-clients.ts";
@@ -46,7 +52,9 @@ const NO_RELEASES = 0;
 const START_POLL_MS = 10;
 const RELEASE_CALL = "executionRelease";
 const SESSION_END = "agent.session.end";
-test("S1 refusal aborts an active native session and ends its agent.session span exactly once", async (t) => {
+const SESSION_ENTRY = "session_entry";
+const ONE_RELEASE = 1;
+async function startedSession(t: TestContext, clients: MethodClients) {
   const setup = anthropicSetup();
   const claim = {
     execution_id: setup.execution_id,
@@ -60,13 +68,15 @@ test("S1 refusal aborts an active native session and ends its agent.session span
     root_span_id: "1".repeat(16),
   };
   const ends: string[] = [];
+  const written: TelemetryRecord[] = [];
   const run = new ExecutionRun({
     claim,
-    clients: {} as MethodClients,
+    clients,
     credentials: { release: async () => {} },
     context: background,
     telemetry: {
       write: (records) => {
+        written.push(...records);
         for (const record of records)
           if (
             record.kind === RecordKind.Span &&
@@ -133,6 +143,14 @@ test("S1 refusal aborts an active native session and ends its agent.session span
   while (!existsSync(join(workspace, "started")))
     await setTimeout(START_POLL_MS, undefined, { signal: t.signal });
   assert.ok(existsSync(join(workspace, "started")));
+  return { run, agent, pending, provider, ends, written };
+}
+
+test("S1 refusal aborts an active native session and ends its agent.session span exactly once", async (t) => {
+  const { run, agent, pending, provider, ends } = await startedSession(
+    t,
+    {} as MethodClients,
+  );
   const result = await executionBoundary(run, async () => {
     await run.call(async () => ({
       type: "failure",
@@ -155,6 +173,43 @@ test("S1 refusal aborts an active native session and ends its agent.session span
   run.dispose();
   assert.equal(ends.length, EXPECTED_CALL_COUNT);
   assert.equal(provider.calls.length, EXPECTED_CALL_COUNT);
+});
+
+test("a stop during a turn ends the open tool and turn with stopped and the agent.session span with Error", async (t) => {
+  const executionRelease = async () => ({
+    type: "completed",
+    status: 200,
+    data: {},
+  });
+  const { run, agent, pending, written, ends } = await startedSession(t, {
+    scheduler: { executionRelease },
+  } as unknown as MethodClients);
+  run.onTraceClose((status) => agent.closeTrace(status));
+  const result = await executionBoundary(run, async () => {
+    throw new ExecutionStop(EndReason.OperationFailed, null, null);
+  });
+  await pending.catch(() => {});
+  disposeAgent(agent);
+  run.dispose();
+  assert.equal(result.kind, ExecutionEndKind.Released);
+  assert.equal(ends.length, EXPECTED_CALL_COUNT);
+  const spanEnds = written.flatMap((record) =>
+    record.kind === RecordKind.Span && record.end_time ? [record] : [],
+  );
+  const session = spanEnds.find(
+    (record) => record.operation === SpanOperation.Session,
+  );
+  assert.equal(session?.status, SpanStatus.Error);
+  const turn = spanEnds.find(
+    (record) => record.operation === SpanOperation.Turn,
+  );
+  assert.equal(turn?.status, SpanStatus.Error);
+  assert.equal(turn?.attributes?.["error.type"], AgentErrorType.Stopped);
+  const tool = spanEnds.find(
+    (record) => record.operation === SpanOperation.Tool,
+  );
+  assert.equal(tool?.status, SpanStatus.Error);
+  assert.equal(tool?.attributes?.["error.type"], AgentErrorType.Stopped);
 });
 
 test("S1 native reviewer evaluates even when the attempt already contains an expected request", async (t) => {
@@ -299,6 +354,7 @@ async function examineRun(
   });
   const page = async () => complete({ items: [], next_cursor: null });
   const order: string[] = [];
+  const timeline: string[] = [];
   const clients = {
     mission: {
       "execution.pinnedRevision.get": async () =>
@@ -319,6 +375,7 @@ async function examineRun(
     scheduler: {
       executionRelease: async () => {
         order.push(RELEASE_CALL);
+        timeline.push(RELEASE_CALL);
         return complete({});
       },
     },
@@ -347,18 +404,23 @@ async function examineRun(
     context: background,
     telemetry: {
       write: (records) => {
-        for (const record of records)
+        for (const record of records) {
+          if (record.kind === RecordKind.SessionEntry)
+            timeline.push(SESSION_ENTRY);
           if (
             record.kind === RecordKind.Span &&
             record.operation === SpanOperation.Session &&
             record.end_time
-          )
+          ) {
             order.push(`${SESSION_END}:${record.status}`);
+            timeline.push(`${SESSION_END}:${record.status}`);
+          }
+        }
       },
       flush: async () => {},
     },
   });
-  return { result, provider, order };
+  return { result, provider, order, timeline };
 }
 
 test("native entry runs an examine report and ends the agent.session span before the release", async (t) => {
@@ -368,6 +430,20 @@ test("native entry runs an examine report and ends the agent.session span before
   assert.deepEqual(result, OK_RELEASE);
   assert.equal(provider.calls.length, EXPECTED_CALL_COUNT);
   assert.deepEqual(order, [`${SESSION_END}:${SpanStatus.Ok}`, RELEASE_CALL]);
+});
+
+test("the last session_entry record and the agent.session end reach the sink before the release", async (t) => {
+  const { result, timeline } = await examineRun(t, [
+    fauxAssistantMessage("All dependencies completed."),
+  ]);
+  assert.deepEqual(result, OK_RELEASE);
+  assert.equal(timeline.at(-1), RELEASE_CALL);
+  assert.equal(timeline.at(-2), `${SESSION_END}:${SpanStatus.Ok}`);
+  assert.equal(timeline.at(-3), SESSION_ENTRY);
+  assert.equal(
+    timeline.filter((item) => item === RELEASE_CALL).length,
+    ONE_RELEASE,
+  );
 });
 
 test("a stop ends the agent.session span with Error before the release of the stop", async (t) => {
