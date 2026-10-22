@@ -1,3 +1,4 @@
+import { addAbortListener } from "node:events";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { z } from "zod";
@@ -9,7 +10,7 @@ import {
   OperationResultType,
   StoreName,
 } from "../kernel/operation.ts";
-import { CancellationContext } from "../kernel/context.ts";
+import { CancellationContext, cancelled } from "../kernel/context.ts";
 import { OperationError } from "../kernel/errors.ts";
 import { HttpMethod, HttpStatus } from "../kernel/http.ts";
 import { directClient } from "./direct-client.ts";
@@ -50,7 +51,7 @@ test("stream clients return an open body through direct and HTTP adapters and jo
         new ReadableStream({
           start(controller) {
             controller.enqueue(new TextEncoder().encode("data: ready\n\n"));
-            caller.context.onCancel(() => {
+            addAbortListener(caller.context.signal, () => {
               cancelled++;
             });
           },
@@ -107,7 +108,7 @@ test("wait cancellation ends the answer without undoing an already committed eff
       return "accepted";
     });
     entered.resolve();
-    await caller.context.done();
+    await cancelled(caller.context.signal);
     throw new OperationError(
       HttpStatus.ServiceUnavailable,
       "gateway.invocation.cancelled",

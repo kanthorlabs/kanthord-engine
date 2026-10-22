@@ -5,7 +5,6 @@ import {
   type Material,
 } from "../custody/contract.ts";
 import { isMachineIdentity, type MachineIdentity } from "../kernel/caller.ts";
-import { abortSignal } from "../kernel/context.ts";
 import { OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import type { CallerContext, ExecutionClaim } from "../kernel/operation.ts";
@@ -127,27 +126,23 @@ async function readPlatform(
   request: { reader: Reader; read: ReadTarget; query: ReadQuery },
   material: Material,
 ): Promise<ReadAnswer> {
-  const deadline = caller.context.deadline();
+  const deadline = caller.context.deadline;
   const callDeadlineAt = Date.now() + PLATFORM_CALL_DEADLINE_MS;
-  const { signal, dispose } = abortSignal(caller.context);
-  try {
-    const call: GitHubCall = {
-      token: apiKeySecretSchema.parse(material.value()).key,
-      requester: request.reader.identity,
-      signal,
-      deadlineAt:
-        deadline === null
-          ? callDeadlineAt
-          : Math.min(callDeadlineAt, deadline - READ_ANSWER_MARGIN_MS),
-    };
-    if (request.query.method === ActionReadMethod.PullRequestGet)
-      return await pullRequest(github, call, request.read);
-    if (request.query.method === ActionReadMethod.ChangeRequestGet)
-      return await changeRequests(github, call, request.read);
-    return await reviewComments(github, call, request.read, request.query);
-  } finally {
-    dispose();
-  }
+  const { signal } = caller.context;
+  const call: GitHubCall = {
+    token: apiKeySecretSchema.parse(material.value()).key,
+    requester: request.reader.identity,
+    signal,
+    deadlineAt:
+      deadline === null
+        ? callDeadlineAt
+        : Math.min(callDeadlineAt, deadline - READ_ANSWER_MARGIN_MS),
+  };
+  if (request.query.method === ActionReadMethod.PullRequestGet)
+    return await pullRequest(github, call, request.read);
+  if (request.query.method === ActionReadMethod.ChangeRequestGet)
+    return await changeRequests(github, call, request.read);
+  return await reviewComments(github, call, request.read, request.query);
 }
 
 async function pullRequest(

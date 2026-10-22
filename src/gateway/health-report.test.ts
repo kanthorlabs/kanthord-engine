@@ -454,7 +454,7 @@ test("a never-settling check expires, releases its slot and retains its unknown 
     report.services.worker.global.next?.status,
     ResourceStatus.Healthy,
   );
-  assert.ok(contexts.every((context) => context.err()));
+  assert.ok(contexts.every((context) => context.signal.reason));
 });
 
 test("synchronous throws, rejections and invalid statuses become unknown without losing entries", async (t) => {
@@ -521,7 +521,7 @@ test("scheduler concurrency is bounded across owners and releases every complete
   assert.equal(maximum, EXPECTED_MAX);
   assert.equal(active, EMPTY_COUNT);
   assert.equal(contexts.length, TARGET_COUNT);
-  assert.ok(contexts.every((context) => context.err()));
+  assert.ok(contexts.every((context) => context.signal.reason));
   assert.equal(f.logs.length, TARGET_COUNT);
 });
 
@@ -553,11 +553,11 @@ test("report budget abandons active and unstarted targets, cancels contexts and 
   t.mock.timers.tick(REPORT_BUDGET_MS - ONE_MS);
   await turn();
   assert.equal(settled, false);
-  assert.ok(contexts.every((context) => !context.err()));
+  assert.ok(contexts.every((context) => !context.signal.aborted));
   t.mock.timers.tick(ONE_MS);
   const report = await pending;
   assert.equal(contexts.length, EXPECTED_MAX);
-  assert.ok(contexts.every((context) => context.err()));
+  assert.ok(contexts.every((context) => context.signal.reason));
   assert.equal(Object.keys(report.shared.llm.global).length, TARGET_COUNT);
   assert.ok(
     Object.values(report.shared.llm.global).every(
@@ -652,9 +652,9 @@ test("caller cancellation cancels active checks, stops dispatch and never commit
   const pending = f.report();
   await started.promise;
   f.context.cancel();
-  await assert.rejects(pending, (error) => error === f.context.err());
+  await assert.rejects(pending, (error) => error === f.context.signal.reason);
   assert.equal(contexts.length, EXPECTED_MAX);
-  assert.ok(contexts.every((context) => context.err()));
+  assert.ok(contexts.every((context) => context.signal.reason));
   assert.equal(f.commits(), EMPTY_COUNT);
 });
 

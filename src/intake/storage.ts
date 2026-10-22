@@ -12,7 +12,6 @@ import {
   isMachineIdentity,
   type MachineIdentity,
 } from "../kernel/caller.ts";
-import { abortSignal } from "../kernel/context.ts";
 import { OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import type { CallerContext, ExecutionClaim } from "../kernel/operation.ts";
@@ -216,22 +215,18 @@ async function callStorage<T>(
 ): Promise<T> {
   const secret = s3AccessKeySecretSchema.parse(material.value());
   assert.ok(secret.access_key_id.length);
-  const deadline = caller.context.deadline();
+  const deadline = caller.context.deadline;
   const callDeadlineAt = Date.now() + PLATFORM_CALL_DEADLINE_MS;
-  const { signal, dispose } = abortSignal(caller.context);
-  try {
-    return await run({
-      accessKeyId: secret.access_key_id,
-      secretAccessKey: secret.secret_access_key,
-      signal,
-      deadlineAt:
-        deadline === null
-          ? callDeadlineAt
-          : Math.min(callDeadlineAt, deadline - READ_ANSWER_MARGIN_MS),
-    });
-  } finally {
-    dispose();
-  }
+  const { signal } = caller.context;
+  return await run({
+    accessKeyId: secret.access_key_id,
+    secretAccessKey: secret.secret_access_key,
+    signal,
+    deadlineAt:
+      deadline === null
+        ? callDeadlineAt
+        : Math.min(callDeadlineAt, deadline - READ_ANSWER_MARGIN_MS),
+  });
 }
 
 export function objectTarget(facts: Readonly<AssetFacts>): S3ObjectTarget {

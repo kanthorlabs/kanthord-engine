@@ -7,7 +7,7 @@ import {
   type GeneratedRevision,
 } from "../custody/contract.ts";
 import { IdentityKind } from "../kernel/caller.ts";
-import { throwIfCancelled, type Context } from "../kernel/context.ts";
+import { type Context } from "../kernel/context.ts";
 import type { ResourceEntry } from "../kernel/health.ts";
 import type { CallerContext, OperationRegistry } from "../kernel/operation.ts";
 import type { Store, Transaction } from "../kernel/store.ts";
@@ -139,7 +139,7 @@ export class RepositoryCredentials {
         input.params.credential_name,
         caller.context,
       );
-      throwIfCancelled(caller.context);
+      caller.context.signal.throwIfAborted();
       return caller.commit(() => answer);
     });
     registry.register(repositoryOperations.check, async (input, caller) => {
@@ -148,7 +148,7 @@ export class RepositoryCredentials {
         input.body,
         caller.context,
       );
-      throwIfCancelled(caller.context);
+      caller.context.signal.throwIfAborted();
       return caller.commit(() => answer);
     });
   }

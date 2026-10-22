@@ -18,7 +18,7 @@ import {
   oauthSecretSchema,
   SecretShape,
 } from "../custody/contract.ts";
-import { abortSignal, type Context } from "../kernel/context.ts";
+import type { Context } from "../kernel/context.ts";
 import { OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import { redactReason, thrownReason } from "../kernel/probe.ts";
@@ -218,7 +218,7 @@ export async function checkModel(
     input.platform,
     input.secret,
   );
-  const { signal, dispose } = abortSignal(context);
+  const { signal } = context;
   try {
     const connected = await connectedModel(input, pi, credential, signal);
     if (
@@ -234,7 +234,5 @@ export async function checkModel(
     if (error instanceof OperationError) throw error;
     const message = thrownReason(error, secrets);
     return { result: providerFailureOf(message), message };
-  } finally {
-    dispose();
   }
 }

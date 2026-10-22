@@ -75,18 +75,9 @@ const check = (context: Context) => probeHttp(URL, HEADERS, context);
     assert.equal(fetch.mock.callCount(), NO_CALLS);
   });
 
-  test(`probeHttp aborts an in-flight request and disposes the context bridge`, async (t) => {
+  test(`probeHttp aborts an in-flight request through the context signal`, async (t) => {
     const context = new CancellationContext();
     const entered = Promise.withResolvers<AbortSignal>();
-    const dispose = t.mock.fn();
-    const original = context.onCancel.bind(context);
-    t.mock.method(context, "onCancel", (listener: (error: Error) => void) => {
-      const unsubscribe = original(listener);
-      return () => {
-        unsubscribe();
-        dispose();
-      };
-    });
     t.after(() => context.cancel());
     t.mock.method(
       globalThis,
@@ -104,8 +95,8 @@ const check = (context: Context) => probeHttp(URL, HEADERS, context);
     const signal = await entered.promise;
     context.cancel();
     assert.equal(await pending, ResourceStatus.Unknown);
+    assert.equal(signal, context.signal);
     assert.equal(signal.aborted, true);
-    assert.equal(dispose.mock.callCount(), ONE_CALL);
   });
 }
 

@@ -1,8 +1,11 @@
+import { addAbortListener } from "node:events";
 import assert from "node:assert/strict";
 import {
   background,
   CancellationContext,
+  cancelled,
   type Context,
+  reasonOf,
 } from "../kernel/context.ts";
 import { Diagnostic, OperationError } from "../kernel/errors.ts";
 import type { HealthRegistry } from "../kernel/health.ts";
@@ -278,7 +281,7 @@ export class TrackingService implements Service, ExecutionTelemetry {
   }
 
   start(): Promise<Error | null> {
-    if (this.shutdown.err())
+    if (this.shutdown.signal.aborted)
       return Promise.resolve(
         new Diagnostic(
           TRACKING_STOPPED_CODE,
@@ -297,18 +300,15 @@ export class TrackingService implements Service, ExecutionTelemetry {
     return Promise.resolve(null);
   }
   async run(context: Context = background): Promise<Error | null> {
-    const unsubscribe = context.onCancel(() => {
+    using cancellation = addAbortListener(context.signal, () => {
       void this.stop();
     });
-    try {
-      if (context.err()) return (await this.stop()) ?? context.err();
-      const error = await this.start();
-      if (error) return error;
-      await this.shutdown.done();
-      return (await this.stop()) ?? context.err();
-    } finally {
-      unsubscribe();
-    }
+    if (context.signal.aborted)
+      return (await this.stop()) ?? reasonOf(context.signal);
+    const error = await this.start();
+    if (error) return error;
+    await cancelled(this.shutdown.signal);
+    return (await this.stop()) ?? reasonOf(context.signal);
   }
   async healthcheck(): Promise<Healthcheck> {
     return {

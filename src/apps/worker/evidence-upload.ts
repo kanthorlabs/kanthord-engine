@@ -5,12 +5,7 @@ import { platform } from "node:os";
 import { isAbsolute, relative, resolve, dirname, sep } from "node:path";
 import { Readable } from "node:stream";
 import { createHash } from "node:crypto";
-import {
-  abortSignal,
-  CancellationContext,
-  throwIfCancelled,
-  type Context,
-} from "../../kernel/context.ts";
+import { CancellationContext, type Context } from "../../kernel/context.ts";
 import { Diagnostic } from "../../kernel/errors.ts";
 import { IntakeErrorCode } from "../../intake/contract.ts";
 import type { z } from "zod";
@@ -95,7 +90,7 @@ async function hashEvidence(file: FileHandle, context: Context) {
   const chunk = Buffer.alloc(HASH_CHUNK_BYTES);
   let size = 0;
   while (size < stat.size) {
-    throwIfCancelled(context);
+    context.signal.throwIfAborted();
     const { bytesRead } = await file.read(
       chunk,
       0,
@@ -106,7 +101,7 @@ async function hashEvidence(file: FileHandle, context: Context) {
     hash.update(chunk.subarray(0, bytesRead));
     size += bytesRead;
   }
-  throwIfCancelled(context);
+  context.signal.throwIfAborted();
   const after = await file.stat();
   if (
     after.size !== stat.size ||
@@ -212,14 +207,13 @@ async function transfer(
   context: Context,
 ) {
   const stream = Readable.from(contentOf(file, size));
-  const bridge = abortSignal(context);
   try {
     const options: RequestInit & { duplex: "half" } = {
       method: "PUT",
       headers,
       body: stream as unknown as RequestInit["body"],
       duplex: "half",
-      signal: bridge.signal,
+      signal: context.signal,
       redirect: "error",
     };
     const response = await fetch(putUrl, options);
@@ -239,7 +233,6 @@ async function transfer(
     );
   } finally {
     stream.destroy();
-    bridge.dispose();
   }
 }
 
@@ -279,10 +272,10 @@ async function publish(
     (error: unknown) => {
       const refusal = pathRefusalOf(error);
       if (refusal) throw refusal;
-      throwIfCancelled(context);
+      context.signal.throwIfAborted();
     },
   );
-  throwIfCancelled(context);
+  context.signal.throwIfAborted();
   return completed(
     await api.mission["evidence.asset.complete"](
       { params: { asset_id: upload.asset_id }, query: {}, body: execution },
@@ -302,7 +295,7 @@ export async function uploadEvidence(input: {
   const context = new CancellationContext(input.context, claim.expired_at);
   let file: Awaited<ReturnType<typeof open>> | undefined;
   try {
-    throwIfCancelled(context);
+    context.signal.throwIfAborted();
     file = await openEvidence(input.workspace, input.path);
     const metadata = await hashEvidence(file, context);
     const execution: Execution = {
@@ -313,7 +306,7 @@ export async function uploadEvidence(input: {
     const granted = new Set<string>();
     let failure: unknown = null;
     for (;;) {
-      throwIfCancelled(context);
+      context.signal.throwIfAborted();
       const submitted = completed(
         await api.mission["evidence.submit"](
           {

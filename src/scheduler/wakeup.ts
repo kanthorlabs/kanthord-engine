@@ -1,3 +1,4 @@
+import { addAbortListener } from "node:events";
 import assert from "node:assert/strict";
 import type { Context } from "../kernel/context.ts";
 import { WORK_PULL_WAIT_MS } from "./contract.ts";
@@ -22,19 +23,19 @@ export class WaitingPulls {
       projectId.length > NO_WAITERS && runtimeIdentity.length > NO_WAITERS,
     );
     assert.ok(Number.isFinite(remainingMs) && remainingMs <= WORK_PULL_WAIT_MS);
-    if (context.err() || remainingMs <= NO_WAITERS) return Promise.resolve();
+    if (context.signal.aborted || remainingMs <= NO_WAITERS)
+      return Promise.resolve();
     const completion = Promise.withResolvers<void>();
     const waiters = this.projects.get(projectId) ?? new Set<Waiter>();
     this.projects.set(projectId, waiters);
     let finished = false;
-    let unsubscribe = () => {};
     const waiter: Waiter = {
       runtime_identity: runtimeIdentity,
       finish: () => {
         if (finished) return;
         finished = true;
         clearTimeout(timer);
-        unsubscribe();
+        cancellation[Symbol.dispose]();
         waiters.delete(waiter);
         if (waiters.size === NO_WAITERS) {
           this.projects.delete(projectId);
@@ -46,8 +47,7 @@ export class WaitingPulls {
     };
     waiters.add(waiter);
     const timer = setTimeout(waiter.finish, remainingMs);
-    unsubscribe = context.onCancel(waiter.finish);
-    if (finished) unsubscribe();
+    const cancellation = addAbortListener(context.signal, waiter.finish);
     return completion.promise;
   }
 

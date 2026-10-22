@@ -19,7 +19,6 @@ import type { NativeAgent } from "./native-agent.ts";
 import { runStepsExamine } from "./steps-examine.ts";
 import {
   DeadlineExceeded,
-  throwIfCancelled,
   type CancellationContext,
 } from "../../kernel/context.ts";
 import { ExecutionBudget } from "./budget.ts";
@@ -281,7 +280,7 @@ test("an examine node that its agent deadline cuts releases with further work an
       budget,
       async instruct() {
         context!.cancel(new DeadlineExceeded());
-        throwIfCancelled(context!);
+        context!.signal.throwIfAborted();
       },
       lastText: () => undefined,
     } as unknown as NativeAgent;

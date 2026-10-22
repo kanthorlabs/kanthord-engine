@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import type { ServiceIdentity } from "../kernel/caller.ts";
-import { throwIfCancelled, type Context } from "../kernel/context.ts";
+import { type Context } from "../kernel/context.ts";
 import { OperationError } from "../kernel/errors.ts";
 import {
   ResourceFailureReason,
@@ -79,7 +79,7 @@ async function readFailure(
       repo: target.repo,
       etag: etagOf(target.checkpoint, read),
     });
-    throwIfCancelled(context);
+    context.signal.throwIfAborted();
     return answer.ok ? null : answer.code;
   } finally {
     hold.material?.drop();
@@ -100,7 +100,7 @@ function pollCheck(
     "A poll check names its inbound.",
   );
   return async (context, observe) => {
-    throwIfCancelled(context);
+    context.signal.throwIfAborted();
     const target = pollTargetOf(row);
     assert.ok(
       target.owner.length > EMPTY_IDENTIFIER_LENGTH,

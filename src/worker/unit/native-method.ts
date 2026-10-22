@@ -60,7 +60,7 @@ export async function runNativeExecution(
   input: NativeExecutionInput,
 ): Promise<ExecutionEnd> {
   const run = new Run({ ...input, workerName: input.setup.worker_name });
-  const opened = new Map<NativeAgent, () => void>();
+  const opened = new Map<NativeAgent, Disposable>();
   const budget = new ExecutionBudget({
     ...input.claim,
     resource_budget: input.setup.resource_budget,
@@ -72,7 +72,7 @@ export async function runNativeExecution(
     try {
       disposeAgent(run, agent, input.transcript);
     } finally {
-      unlink();
+      unlink[Symbol.dispose]();
     }
   };
   try {
@@ -171,7 +171,7 @@ export function disposeAgent(
   }
 }
 
-export function stopOnEnd(run: ExecutionRun, agent: NativeAgent): () => void {
+export function stopOnEnd(run: ExecutionRun, agent: NativeAgent): Disposable {
   return run.onStop(() => void agent.abort());
 }
 

@@ -62,7 +62,7 @@ export class HttpTelemetrySink implements TelemetrySink {
     assert.ok(records.length > NO_RECORDS);
     assert.ok(this.queue.length <= TELEMETRY_QUEUE_RECORDS);
     if (
-      this.lifetime.err() ||
+      this.lifetime.signal.aborted ||
       this.queue.length + records.length > TELEMETRY_QUEUE_RECORDS
     ) {
       this.dropped += records.length;
@@ -84,7 +84,7 @@ export class HttpTelemetrySink implements TelemetrySink {
       round < FLUSH_ROUNDS &&
       (this.queue.length > NO_RECORDS || this.inFlight !== null) &&
       Date.now() < deadline &&
-      !this.lifetime.err();
+      !this.lifetime.signal.aborted;
       round++
     ) {
       if (this.inFlight === null) this.kick(deadline);
@@ -127,7 +127,7 @@ export class HttpTelemetrySink implements TelemetrySink {
 
   private schedule(): void {
     assert.ok(this.queue.length > NO_RECORDS);
-    assert.ok(!this.lifetime.err());
+    assert.ok(!this.lifetime.signal.aborted);
     if (this.timer !== null || this.inFlight !== null) return;
     this.timer = setTimeout(() => {
       this.timer = null;
@@ -153,7 +153,7 @@ export class HttpTelemetrySink implements TelemetrySink {
       })
       .finally(() => {
         this.inFlight = null;
-        if (this.queue.length > NO_RECORDS && !this.lifetime.err())
+        if (this.queue.length > NO_RECORDS && !this.lifetime.signal.aborted)
           this.schedule();
       });
     assert.ok(this.inFlight);
@@ -167,7 +167,7 @@ export class HttpTelemetrySink implements TelemetrySink {
       round < TELEMETRY_QUEUE_RECORDS &&
       this.queue.length > NO_RECORDS &&
       Date.now() < deadline &&
-      !this.lifetime.err();
+      !this.lifetime.signal.aborted;
       round++
     )
       await this.guarded(deadline);

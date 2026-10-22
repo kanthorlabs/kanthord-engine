@@ -505,6 +505,10 @@ export default tseslint.config(
         },
       ],
       "no-restricted-syntax": ["error", ...syntaxRules],
+      "@typescript-eslint/no-unused-vars": [
+        "error",
+        { ignoreUsingDeclarations: true },
+      ],
     },
     languageOptions: { ecmaVersion: "latest", sourceType: "module" },
   },

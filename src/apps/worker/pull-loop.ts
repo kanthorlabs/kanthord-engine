@@ -1,5 +1,9 @@
 import assert from "node:assert/strict";
-import { CancellationContext, type Context } from "../../kernel/context.ts";
+import {
+  CancellationContext,
+  type Context,
+  joined,
+} from "../../kernel/context.ts";
 import { Diagnostic } from "../../kernel/errors.ts";
 import { OperationResultType } from "../../kernel/operation.ts";
 import {
@@ -34,15 +38,16 @@ export async function pullLoop(
   assert.ok(input.registration.runtime_identity);
   assert.ok(input.api.scheduler.workPull);
   let registration = input.registration;
-  while (!input.shutdown.err()) {
+  while (!input.shutdown.signal.aborted) {
     if (input.idle) {
       await input.idle();
-      if (input.shutdown.err()) break;
+      if (input.shutdown.signal.aborted) break;
     }
     const round = input.round?.();
     const started = performance.now();
-    const context = new CancellationContext(input.shutdown);
-    const preempted = round?.onCancel(() => context.cancel());
+    const context = new CancellationContext(
+      round ? joined(input.shutdown, round) : input.shutdown,
+    );
     const task = input.api.scheduler
       .workPull(
         {
@@ -65,7 +70,6 @@ export async function pullLoop(
       });
     input.pulling(task);
     const result = await task;
-    preempted?.();
     context.cancel();
     if (
       result.type === OperationResultType.Completed &&
@@ -76,8 +80,8 @@ export async function pullLoop(
       if (failure) return failure;
       continue;
     }
-    if (input.shutdown.err()) return null;
-    if (round?.err()) continue;
+    if (input.shutdown.signal.aborted) return null;
+    if (round?.signal.aborted) continue;
     if (result.type === OperationResultType.Completed) {
       const rest = input.backoff.next() - (performance.now() - started);
       if (rest <= NO_DELAY) {

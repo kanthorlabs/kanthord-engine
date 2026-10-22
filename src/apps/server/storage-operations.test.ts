@@ -405,7 +405,7 @@ test(
             S3_PREFIX + ResultClass.RetryableRefusal,
           );
           assert.deepEqual(error.details, { status: null });
-          assert.equal(context.err(), null);
+          assert.equal(context.signal.aborted, false);
         } finally {
           h.s3.loseNext(NO_LOSSES);
           context.cancel();

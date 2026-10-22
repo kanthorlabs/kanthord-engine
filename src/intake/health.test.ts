@@ -411,7 +411,8 @@ test("the check deadline propagates and drops the material", async (t) => {
   const context = checkContext(t, CHECK_DEADLINE_MS);
   await assert.rejects(
     entry.check(context),
-    (error) => error instanceof DeadlineExceeded && error === context.err(),
+    (error) =>
+      error instanceof DeadlineExceeded && error === context.signal.reason,
   );
   assert.deepEqual(h.drops, [CREDENTIAL]);
 });
@@ -426,7 +427,7 @@ test("a caller cancellation answers no success and drops the material", async (t
   };
   await assert.rejects(
     entry.check(context),
-    (error) => error === context.err(),
+    (error) => error === context.signal.reason,
   );
   assert.deepEqual(h.drops, [CREDENTIAL]);
 });
@@ -438,7 +439,7 @@ test("a cancelled context sends no request and releases nothing", async (t) => {
   context.cancel();
   await assert.rejects(
     entry.check(context),
-    (error) => error === context.err(),
+    (error) => error === context.signal.reason,
   );
   assert.deepEqual(h.grants, []);
   assert.equal(h.calls.length, UNCALLED_PLATFORM_COUNT);

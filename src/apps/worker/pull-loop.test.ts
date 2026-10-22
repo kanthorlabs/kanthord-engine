@@ -1,3 +1,4 @@
+import { addAbortListener } from "node:events";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { setImmediate as turn } from "node:timers/promises";
@@ -60,7 +61,7 @@ test("shutdown aborts the outstanding pull and ends the loop", async (t) => {
     (_input: unknown, options: Parameters<typeof api.scheduler.workPull>[1]) =>
       new Promise((resolve) => {
         pulls++;
-        options!.context!.onCancel(() =>
+        addAbortListener(options!.context!.signal, () =>
           resolve({ type: OperationResultType.Indeterminate }),
         );
       }),

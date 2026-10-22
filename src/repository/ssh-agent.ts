@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { promisify } from "node:util";
-import { throwIfCancelled, type Context } from "../kernel/context.ts";
+import { type Context } from "../kernel/context.ts";
 import { Diagnostic } from "../kernel/errors.ts";
 import { isolatedGitEnvironment } from "../kernel/git-environment.ts";
 import type { SshAccess, SshRelayAccess } from "./contract.ts";
@@ -231,11 +231,11 @@ async function waitForSocket(
   void agent.closed.then(() => {
     exited = true;
   });
-  while (Date.now() < deadlineAt && !exited && !context.err()) {
+  while (Date.now() < deadlineAt && !exited && !context.signal.aborted) {
     if (await socketExists(socket)) return;
     await delay(SOCKET_POLL_MS);
   }
-  throwIfCancelled(context);
+  context.signal.throwIfAborted();
   if (await socketExists(socket)) return;
   throw agentFailure(
     SshAgentStep.Agent,
@@ -317,7 +317,7 @@ export async function withSshAgent<T>(
 ): Promise<T> {
   assert.ok("relay" in access || access.private_key);
   assert.ok(access.public_key);
-  throwIfCancelled(context);
+  context.signal.throwIfAborted();
   const deadlineAt = Date.now() + deadlineMs;
   await sweepSshAgentDirectories(Date.now());
   const directory = await createDirectory(deadlineAt);
@@ -328,16 +328,16 @@ export async function withSshAgent<T>(
     await assertPrivate(directory);
     assertSocketPath(socket);
     await writeFiles(directory, access);
-    throwIfCancelled(context);
+    context.signal.throwIfAborted();
     if ("relay" in access)
       relay = await startRelayAgent(socket, access, context);
     else {
       agent = spawnAgent(socket);
       await waitForSocket(agent, socket, context, deadlineAt);
-      throwIfCancelled(context);
+      context.signal.throwIfAborted();
       await loadKey(socket, access.private_key, deadlineAt);
     }
-    throwIfCancelled(context);
+    context.signal.throwIfAborted();
     return await work(
       sshAgentEnvironment(directory, access.port),
       () => relay?.lastError() ?? null,

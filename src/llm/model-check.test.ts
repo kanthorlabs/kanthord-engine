@@ -247,15 +247,7 @@ test("a cancelled context answers unavailable", async () => {
       return providerError("Request was aborted");
     },
   ]);
-  const context = {
-    ...background,
-    onCancel: (listener: (error: Error) => void) => {
-      controller.signal.addEventListener("abort", () =>
-        listener(new Error("cancelled")),
-      );
-      return () => {};
-    },
-  };
+  const context = { signal: controller.signal, deadline: null };
   const answer = await checkModel(input(), scripted.module, context);
   assert.equal(answer.result, ModelCheckResult.Unavailable);
 });

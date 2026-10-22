@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import type { Logger } from "pino";
 import type { Material } from "../custody/contract.ts";
 import {
-  abortSignal,
   CancellationContext,
+  cancelled,
   type Context,
   DeadlineExceeded,
 } from "../kernel/context.ts";
@@ -408,22 +408,20 @@ async function withDeadline<T>(
 ): Promise<Race<T>> {
   assert.ok(deadlineMs > EXPIRED_DEADLINE_MS);
   const context = new CancellationContext(parent, Date.now() + deadlineMs);
-  const { signal, dispose } = abortSignal(context);
   try {
-    const ended = context.done().then((): Race<T> => {
-      const reason = context.err();
-      assert.ok(reason !== null, "An ended scope holds its reason.");
+    const ended = cancelled(context.signal).then((): Race<T> => {
+      const reason = context.signal.reason;
+      assert.ok(reason instanceof Error, "An ended scope holds its reason.");
       return { kind: RaceKind.Deadline, reason };
     });
     const settled = Promise.resolve()
-      .then(() => work({ context, signal }))
+      .then(() => work({ context, signal: context.signal }))
       .then(
         (value): Race<T> => ({ kind: RaceKind.Settled, value }),
         (error: unknown): Race<T> => ({ kind: RaceKind.Rejected, error }),
       );
     return await Promise.race([settled, ended]);
   } finally {
-    dispose();
     context.cancel();
   }
 }

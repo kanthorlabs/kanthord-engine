@@ -1,3 +1,4 @@
+import { addAbortListener } from "node:events";
 import assert from "node:assert/strict";
 import { join } from "node:path";
 import {
@@ -11,7 +12,9 @@ import { HttpStatus } from "../kernel/http.ts";
 import {
   background,
   CancellationContext,
+  cancelled,
   type Context,
+  reasonOf,
 } from "../kernel/context.ts";
 import { Diagnostic, OperationError } from "../kernel/errors.ts";
 import { ensureDirectory } from "../kernel/files.ts";
@@ -32,7 +35,6 @@ import {
   type ResourceStatusValue,
 } from "../kernel/health.ts";
 import type { CallerContext, OperationRegistry } from "../kernel/operation.ts";
-import { throwIfCancelled } from "../kernel/context.ts";
 import {
   isGitOnlyPlatform,
   isPlatformSshHost,
@@ -699,7 +701,7 @@ export class ProjectService implements Service, ProjectBindings {
     const { id, config } = this.operationalStore.transaction((tx) =>
       requireRepositoryBinding(tx, params),
     );
-    throwIfCancelled(caller.context);
+    caller.context.signal.throwIfAborted();
     const health = await this.bindingHealth(
       config,
       {
@@ -717,7 +719,7 @@ export class ProjectService implements Service, ProjectBindings {
     const { id, config } = this.operationalStore.transaction((tx) =>
       requireRepositoryBinding(tx, params),
     );
-    throwIfCancelled(caller.context);
+    caller.context.signal.throwIfAborted();
     const deadline = new CancellationContext(
       caller.context,
       Date.now() + BINDING_CHECK_TIMEOUT_MS,
@@ -756,7 +758,7 @@ export class ProjectService implements Service, ProjectBindings {
           ssh,
         ),
       );
-      throwIfCancelled(caller.context);
+      caller.context.signal.throwIfAborted();
       assert.equal(files.length, WORKING_FILES.length);
       const answer = {
         commit,
@@ -779,7 +781,7 @@ export class ProjectService implements Service, ProjectBindings {
     try {
       return await read();
     } catch (error) {
-      throwIfCancelled(context);
+      context.signal.throwIfAborted();
       throw new OperationError(
         SSH_UNREACHABLE_STATUS,
         ProjectErrorCode.RepositorySshUnreachable,
@@ -807,7 +809,7 @@ export class ProjectService implements Service, ProjectBindings {
         platform: SSH_CREDENTIAL_PLATFORM,
       });
     });
-    throwIfCancelled(caller.context);
+    caller.context.signal.throwIfAborted();
     const health = await this.bindingHealth(
       config,
       {
@@ -836,7 +838,7 @@ export class ProjectService implements Service, ProjectBindings {
       config.credential === undefined
         ? null
         : await this.verifyRepositoryCredential(config.credential, context);
-    throwIfCancelled(context);
+    context.signal.throwIfAborted();
     return {
       address: addressEntry,
       ssh_credential: sshCredentialEntry,
@@ -871,7 +873,9 @@ export class ProjectService implements Service, ProjectBindings {
       return entry(ResourceStatus.Healthy, null);
     } catch (error) {
       return entry(
-        deadline.err() ? ResourceStatus.Unknown : ResourceStatus.Unhealthy,
+        deadline.signal.aborted
+          ? ResourceStatus.Unknown
+          : ResourceStatus.Unhealthy,
         repositoryFailureReason(error),
       );
     } finally {
@@ -1000,7 +1004,7 @@ export class ProjectService implements Service, ProjectBindings {
       if (bindingUnchanged(name, binding, saved.get(name))) continue;
       await this.checkRepository(projectId, binding.config, caller);
     }
-    throwIfCancelled(caller.context);
+    caller.context.signal.throwIfAborted();
     const answer = caller.commit((tx) => {
       assert.ok(tx.database.isTransaction);
       assert.equal(submission.size, Object.keys(body.bindings).length);
@@ -1092,7 +1096,7 @@ export class ProjectService implements Service, ProjectBindings {
     caller: CallerContext,
   ): Promise<void> {
     const { context } = caller;
-    throwIfCancelled(context);
+    context.signal.throwIfAborted();
     const { address, ssh } = this.sshAccess(config.platform, {
       identity: callerIdentity(caller),
       subject: draftSubject(projectId, config),
@@ -1105,7 +1109,7 @@ export class ProjectService implements Service, ProjectBindings {
         ssh,
       );
     } catch (error) {
-      throwIfCancelled(context);
+      context.signal.throwIfAborted();
       throw new OperationError(
         SSH_UNREACHABLE_STATUS,
         ProjectErrorCode.RepositorySshUnreachable,
@@ -1113,7 +1117,7 @@ export class ProjectService implements Service, ProjectBindings {
         { failure_reason: gitFailureReason(error) },
       );
     }
-    throwIfCancelled(context);
+    context.signal.throwIfAborted();
   }
   private endUnavailableRegistrations(
     tx: Transaction,
@@ -1505,7 +1509,7 @@ export class ProjectService implements Service, ProjectBindings {
     issuedAt: number,
     context: Context,
   ) {
-    throwIfCancelled(context);
+    context.signal.throwIfAborted();
     if (this.bindings)
       return this.bindings.resolveWorkerGroup(
         projectId,
@@ -1541,7 +1545,7 @@ export class ProjectService implements Service, ProjectBindings {
   private readonly quiesceTask = Promise.resolve(null);
   private started = false;
   start(): Promise<Error | null> {
-    if (this.shutdown.err())
+    if (this.shutdown.signal.aborted)
       return Promise.resolve(
         new Diagnostic(
           "project.lifecycle.stopped",
@@ -1562,18 +1566,15 @@ export class ProjectService implements Service, ProjectBindings {
     return this.stopTask;
   }
   async run(context: Context = background): Promise<Error | null> {
-    const unsubscribe = context.onCancel(() => {
+    using cancellation = addAbortListener(context.signal, () => {
       void this.stop();
     });
-    try {
-      if (context.err()) return (await this.stop()) ?? context.err();
-      const error = await this.start();
-      if (error) return error;
-      await this.shutdown.done();
-      return (await this.stop()) ?? context.err();
-    } finally {
-      unsubscribe();
-    }
+    if (context.signal.aborted)
+      return (await this.stop()) ?? reasonOf(context.signal);
+    const error = await this.start();
+    if (error) return error;
+    await cancelled(this.shutdown.signal);
+    return (await this.stop()) ?? reasonOf(context.signal);
   }
   resourceInventory(tx: Transaction): ResourceEntry[] {
     return readCurrentRepositories(tx).map(
@@ -1586,9 +1587,9 @@ export class ProjectService implements Service, ProjectBindings {
       }) => {
         const check: ResourceCheck = async (context, observe) => {
           try {
-            const deadline = context.deadline();
+            const deadline = context.deadline;
             assert.ok(deadline !== null);
-            throwIfCancelled(context);
+            context.signal.throwIfAborted();
             let access: ReleasedAccess;
             try {
               access = this.sshAccess(platform, {
@@ -1619,7 +1620,7 @@ export class ProjectService implements Service, ProjectBindings {
             }
             return ResourceStatus.Healthy;
           } catch {
-            return context.err()
+            return context.signal.aborted
               ? ResourceStatus.Unknown
               : ResourceStatus.Unhealthy;
           }
@@ -1638,7 +1639,7 @@ export class ProjectService implements Service, ProjectBindings {
   async healthcheck(): Promise<Healthcheck> {
     return {
       bindings:
-        this.started && !this.shutdown.err()
+        this.started && !this.shutdown.signal.aborted
           ? HealthStatus.Healthy
           : HealthStatus.Unavailable,
     };

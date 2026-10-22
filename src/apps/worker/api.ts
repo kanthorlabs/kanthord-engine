@@ -1,3 +1,4 @@
+import { addAbortListener } from "node:events";
 import assert from "node:assert/strict";
 import type { Context } from "../../kernel/context.ts";
 import {
@@ -30,14 +31,13 @@ export class Backoff {
 export function sleep(ms: number, context: Context): Promise<void> {
   assert.ok(Number.isFinite(ms));
   assert.ok(ms >= NO_DELAY);
-  if (context.err()) return Promise.resolve();
+  if (context.signal.aborted) return Promise.resolve();
   return new Promise((resolve) => {
-    let unlink = () => {};
     const timer = setTimeout(() => {
-      unlink();
+      cancellation[Symbol.dispose]();
       resolve();
     }, ms);
-    unlink = context.onCancel(() => {
+    const cancellation = addAbortListener(context.signal, () => {
       clearTimeout(timer);
       resolve();
     });
@@ -59,7 +59,9 @@ export async function retryIndeterminate<T>(
   );
   for (
     let attempt = 0;
-    attempt < maximumAttempts && !context.err() && Date.now() < deadline;
+    attempt < maximumAttempts &&
+    !context.signal.aborted &&
+    Date.now() < deadline;
     attempt++
   ) {
     result = await call(createIdempotencyKey());

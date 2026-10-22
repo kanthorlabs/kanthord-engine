@@ -1,3 +1,4 @@
+import { addAbortListener } from "node:events";
 import assert from "node:assert/strict";
 import type { Logger } from "pino";
 import { z } from "zod";
@@ -5,7 +6,11 @@ import type { Store } from "../kernel/store.ts";
 import { digest } from "../kernel/json.ts";
 import { validationIssues } from "../kernel/errors.ts";
 import { isObject, isString } from "../kernel/values.ts";
-import { CancellationContext, type Context } from "../kernel/context.ts";
+import {
+  CancellationContext,
+  type Context,
+  joined,
+} from "../kernel/context.ts";
 import { lifecycle } from "../kernel/service.ts";
 import { Authentication } from "./auth/authentication.ts";
 import {
@@ -214,18 +219,18 @@ export class Invocation {
     const completed = Promise.withResolvers<void>();
     this.streams.add(completed.promise);
     let finished = false;
-    let unsubscribe = () => {};
+    let cancellation: Disposable | undefined;
     const finish = () => {
       if (finished) return;
       finished = true;
-      unsubscribe();
+      cancellation?.[Symbol.dispose]();
       dispose();
       this.streams.delete(completed.promise);
       completed.resolve();
     };
     const body = new ReadableStream<Uint8Array>({
       start: (controller) => {
-        unsubscribe = context.onCancel(() => {
+        cancellation = addAbortListener(context.signal, () => {
           void reader.cancel().then(
             () => {
               if (!finished) controller.close();
@@ -274,16 +279,9 @@ export class Invocation {
     let reservation: Reservation | undefined;
     let committed: RecordedResponse | undefined;
     const context = new CancellationContext(
-      this.shutdown,
-      options.context?.deadline(),
+      options.context ? joined(this.shutdown, options.context) : this.shutdown,
     );
-    const unsubscribe = options.context?.onCancel((error) =>
-      context.cancel(error),
-    );
-    const dispose = () => {
-      unsubscribe?.();
-      context.cancel();
-    };
+    const dispose = () => context.cancel();
     let streaming = false;
     try {
       let identity =
@@ -337,7 +335,7 @@ export class Invocation {
         query: unknown;
         body: unknown;
       };
-      if (context.err())
+      if (context.signal.aborted)
         throw new GatewayError(
           503,
           "gateway.invocation.cancelled",
@@ -436,7 +434,7 @@ export class Invocation {
       return response;
     } catch (thrown) {
       const error =
-        thrown !== null && thrown === context.err()
+        thrown !== null && thrown === context.signal.reason
           ? new GatewayError(
               503,
               "gateway.invocation.cancelled",

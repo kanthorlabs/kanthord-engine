@@ -1,3 +1,4 @@
+import { addAbortListener } from "node:events";
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { readdir, readFile, stat } from "node:fs/promises";
@@ -342,7 +343,7 @@ test("closing the relay agent cancels a relay call in flight", async (t) => {
   const access: SshRelayAccess = {
     ...f.access,
     relay: async (_data, _flags, context) => {
-      context.onCancel(() => cancelled.resolve());
+      addAbortListener(context.signal, () => cancelled.resolve());
       started.resolve();
       await cancelled.promise;
       throw new Error("relay cancelled");

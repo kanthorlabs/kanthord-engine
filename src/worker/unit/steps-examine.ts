@@ -104,7 +104,7 @@ export async function runStepsExamine(
       (error instanceof ContextCancelled ||
         error instanceof DeadlineExceeded) &&
       budget.exhausted() &&
-      !run.operationContext.err()
+      !run.operationContext.signal.aborted
     )
       return await run.release(true);
     throw error;

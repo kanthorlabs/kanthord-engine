@@ -24,7 +24,7 @@ engine/
 │   │   └── upgrade.ts          # Configuration upgrade of a file text to the binary version
 │   ├── kernel/                 # Transport-neutral runtime and shared vocabulary
 │   │   ├── service.ts          # Service lifecycle and component health contracts
-│   │   ├── context.ts          # Cancellation contexts and native signal bridge
+│   │   ├── context.ts          # Cancellation contexts on native abort signals
 │   │   ├── store.ts            # Operational SQLite connection and migration runner
 │   │   ├── health.ts           # Component probe registry and aggregation
 │   │   ├── log.ts              # Operational logging and fatal handlers

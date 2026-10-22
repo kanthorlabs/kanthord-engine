@@ -3,7 +3,7 @@ import { z } from "zod";
 import {
   background,
   CancellationContext,
-  throwIfCancelled,
+  cancelled,
   type Context,
 } from "./context.ts";
 import { HealthStatus, type Healthcheck } from "./service.ts";
@@ -63,7 +63,7 @@ export class HealthRegistry {
   }
 
   async check(context: Context = background): Promise<ServiceHealthchecks> {
-    throwIfCancelled(context);
+    context.signal.throwIfAborted();
     // Snapshot registration once; a failed probe must not skip its siblings.
     const entries = [...this.probes];
     assert.ok(entries.length <= MAX_HEALTH_PROBES);
@@ -73,7 +73,7 @@ export class HealthRegistry {
           [name, await this.probe(probe, context)] as const,
       ),
     );
-    throwIfCancelled(context);
+    context.signal.throwIfAborted();
     const services = Object.fromEntries(results);
     assert.equal(Object.keys(services).length, entries.length);
     return services;
@@ -88,15 +88,15 @@ export class HealthRegistry {
       parent,
       Date.now() + this.timeoutMs,
     );
-    assert.ok(context.deadline() !== null);
+    assert.ok(context.deadline !== null);
     try {
       const result = await Promise.race([
         Promise.resolve().then(() => {
-          throwIfCancelled(context);
+          context.signal.throwIfAborted();
           return probe(context);
         }),
-        context.done().then(() => {
-          throw context.err();
+        cancelled(context.signal).then(() => {
+          throw context.signal.reason;
         }),
       ]);
       const components = componentHealthSchema.parse(result);
@@ -106,7 +106,7 @@ export class HealthRegistry {
     } catch {
       // Diagnostic boundary: rejection, invalid output and timeout are failures,
       // never a healthy fallback. Do not expose probe exceptions on a public API.
-      throwIfCancelled(parent);
+      parent.signal.throwIfAborted();
       return { healthcheck: HealthStatus.Unavailable };
     } finally {
       context.cancel();

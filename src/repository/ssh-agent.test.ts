@@ -15,7 +15,11 @@ import test from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 import { promisify } from "node:util";
 import { Worker } from "node:worker_threads";
-import { background, CancellationContext } from "../kernel/context.ts";
+import {
+  background,
+  CancellationContext,
+  cancelled,
+} from "../kernel/context.ts";
 import { Diagnostic } from "../kernel/errors.ts";
 import {
   DEADLINE_RADIX,
@@ -214,8 +218,8 @@ test("withSshAgent ends the agent after a success, a failure and a cancel", asyn
     withSshAgent(access("cancel"), context, DEADLINE_MS, async (env) => {
       sockets.push(socketOf(env));
       setImmediate(() => context.cancel());
-      await context.done();
-      throw context.err();
+      await cancelled(context.signal);
+      throw context.signal.reason;
     }),
   );
   assert.equal(sockets.length, LIFECYCLE_RUNS);

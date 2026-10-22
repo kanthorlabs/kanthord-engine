@@ -4,8 +4,9 @@ import type { z } from "zod";
 import { isHumanIdentity } from "../kernel/caller.ts";
 import {
   CancellationContext,
-  throwIfCancelled,
+  cancelled,
   type Context,
+  joined,
 } from "../kernel/context.ts";
 import {
   entryFailureReason,
@@ -102,7 +103,7 @@ export async function resourceHealthReport(
     Number.isSafeInteger(limits.reportBudgetMs) &&
       limits.reportBudgetMs >= MIN_LIMIT,
   );
-  throwIfCancelled(caller.context);
+  caller.context.signal.throwIfAborted();
   const snapshot = collect();
   if (snapshot.missing_inventories.length > EMPTY_COUNT)
     throw new GatewayError(
@@ -121,7 +122,7 @@ export async function resourceHealthReport(
     limits,
     reportAt,
   );
-  throwIfCancelled(caller.context);
+  caller.context.signal.throwIfAborted();
   const report = assembleReport(snapshot.entries, results);
   return caller.commit(() => report);
 }
@@ -135,26 +136,31 @@ async function checkResource(
   observe: ResourceObserver,
 ): Promise<ResourceStatusValue> {
   const deadline = Date.now() + checkDeadlineMs;
-  const context = new CancellationContext(parent, deadline);
-  const unlink = reportContext.onCancel(() => context.cancel());
+  const context = new CancellationContext(
+    joined(parent, reportContext),
+    deadline,
+  );
   try {
     const result = await Promise.race([
       Promise.resolve()
         .then(() => {
-          throwIfCancelled(context);
+          context.signal.throwIfAborted();
           if (Date.now() >= reportAt) return ResourceStatus.Unknown;
           return entry.check(context, observe);
         })
         .catch(() => ResourceStatus.Unknown),
-      context.done().then(() => ResourceStatus.Unknown),
+      cancelled(context.signal).then(() => ResourceStatus.Unknown),
     ]);
-    if (context.err() || Date.now() >= deadline || Date.now() >= reportAt)
+    if (
+      context.signal.aborted ||
+      Date.now() >= deadline ||
+      Date.now() >= reportAt
+    )
       return ResourceStatus.Unknown;
     return Object.values(ResourceStatus).includes(result)
       ? result
       : ResourceStatus.Unknown;
   } finally {
-    unlink();
     context.cancel();
   }
 }
@@ -181,7 +187,7 @@ async function runChecks(
   const work = async () => {
     for (let count = 0; count < entries.length; count++) {
       if (
-        reportContext.err() ||
+        reportContext.signal.aborted ||
         Date.now() >= reportAt ||
         next >= entries.length
       )

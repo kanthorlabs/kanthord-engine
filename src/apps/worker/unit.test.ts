@@ -1,3 +1,4 @@
+import { addAbortListener } from "node:events";
 import assert from "node:assert/strict";
 import { randomBytes } from "node:crypto";
 import { test, type TestContext } from "node:test";
@@ -51,11 +52,12 @@ function completed<T>(data: T) {
 }
 
 function cancelled(context: Context | undefined) {
-  return new Promise((resolve) =>
-    context?.onCancel(() =>
-      resolve({ type: OperationResultType.Indeterminate }),
-    ),
-  );
+  return new Promise((resolve) => {
+    if (context)
+      addAbortListener(context.signal, () =>
+        resolve({ type: OperationResultType.Indeterminate }),
+      );
+  });
 }
 
 function scripted(options: {
@@ -270,7 +272,8 @@ test("a claim on one binding aborts the pull of the other binding until the exec
   const other = scripted({
     pull: (context) => {
       otherPulls++;
-      context?.onCancel(() => otherAborted.resolve());
+      if (context)
+        addAbortListener(context.signal, () => otherAborted.resolve());
       return cancelled(context);
     },
   });
@@ -334,7 +337,10 @@ test("abandon cancels the live execution and keeps every registration", async (t
   while (!pulls) await delay(1, undefined, { signal: t.signal });
   const execution = (unit as unknown as { execution?: { context: Context } })
     .execution;
-  execution?.context.onCancel(() => cancelledExecution.resolve());
+  if (execution)
+    addAbortListener(execution.context.signal, () =>
+      cancelledExecution.resolve(),
+    );
   const abandoned = unit.abandon();
   await cancelledExecution.promise;
   const error = await abandoned;

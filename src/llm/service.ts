@@ -1,3 +1,4 @@
+import { addAbortListener } from "node:events";
 import type { Logger } from "pino";
 import type { Provider } from "@earendil-works/pi-ai";
 import { registerBunOAuthFlows as registerOAuthFlows } from "@earendil-works/pi-ai/bun-oauth";
@@ -27,8 +28,9 @@ import {
 import {
   background,
   CancellationContext,
-  throwIfCancelled,
+  cancelled,
   type Context,
+  reasonOf,
 } from "../kernel/context.ts";
 import { Diagnostic, OperationError } from "../kernel/errors.ts";
 import {
@@ -297,7 +299,7 @@ export class LlmComponent implements Service {
         input.params.credential_name,
         caller.context,
       );
-      throwIfCancelled(caller.context);
+      caller.context.signal.throwIfAborted();
       return caller.commit(() => answer);
     });
     registry.register(llmOperations.check, async (input, caller) => {
@@ -306,7 +308,7 @@ export class LlmComponent implements Service {
         input.body,
         caller.context,
       );
-      throwIfCancelled(caller.context);
+      caller.context.signal.throwIfAborted();
       return caller.commit(() => answer);
     });
     registry.register(llmOperations.login, (input, caller) =>
@@ -534,7 +536,7 @@ export class LlmComponent implements Service {
       secret,
       keys,
     });
-    throwIfCancelled(caller.context);
+    caller.context.signal.throwIfAborted();
     const copies: CredentialCopy[] = holders.map(
       (holder) =>
         sealed.find((copy) => copy.holder === holder) ?? { holder, secret },
@@ -644,7 +646,7 @@ export class LlmComponent implements Service {
       secret: body.secret,
       keys: [key],
     });
-    throwIfCancelled(caller.context);
+    caller.context.signal.throwIfAborted();
     return this.written(
       [holder],
       caller.commit((tx) => {
@@ -708,7 +710,7 @@ export class LlmComponent implements Service {
             "provider check failed",
           ),
       );
-      throwIfCancelled(caller.context);
+      caller.context.signal.throwIfAborted();
       return caller.commit(() => answer);
     } finally {
       context.cancel();
@@ -746,7 +748,7 @@ export class LlmComponent implements Service {
         await this.loadModelRuntime(),
         context,
       );
-      throwIfCancelled(caller.context);
+      caller.context.signal.throwIfAborted();
       if (answer.message !== null)
         this.logger.info(
           {
@@ -887,31 +889,29 @@ export class LlmComponent implements Service {
     );
     const flow = new OAuthLogin(session, this.sessions, this.now);
     this.logins.set(session.id, flow);
-    const unsubscribe = caller.context.onCancel(() => flow.abort());
+    using cancellation = addAbortListener(caller.context.signal, () =>
+      flow.abort(),
+    );
+    if (caller.context.signal.aborted) flow.abort();
     void flow
       .run(this.oauthProviders, (secret) =>
         this.completeLogin(session, flow, secret),
       )
       .then(() => this.logins.delete(session.id));
-    try {
-      await flow.ready.promise;
-      const cancelled = caller.context.err();
-      if (cancelled) throw cancelled;
-      if (
-        session.state === LoginSessionState.Failed ||
-        session.state === LoginSessionState.Expired ||
-        session.address === null
-      )
-        throw flow.failure;
-      return caller.commit(() => ({
-        session_id: session.id,
-        address: session.address!,
-        code: session.code,
-        expires_at: session.expires_at,
-      }));
-    } finally {
-      unsubscribe();
-    }
+    await flow.ready.promise;
+    caller.context.signal.throwIfAborted();
+    if (
+      session.state === LoginSessionState.Failed ||
+      session.state === LoginSessionState.Expired ||
+      session.address === null
+    )
+      throw flow.failure;
+    return caller.commit(() => ({
+      session_id: session.id,
+      address: session.address!,
+      code: session.code,
+      expires_at: session.expires_at,
+    }));
   }
 
   private async loginInstance(
@@ -947,23 +947,18 @@ export class LlmComponent implements Service {
     );
     this.instanceLogins.set(session.id, flow);
     flow.arm();
-    const unsubscribe = caller.context.onCancel(() =>
+    using cancellation = addAbortListener(caller.context.signal, () =>
       flow.fail(LOGIN_FAILED_REASON),
     );
-    try {
-      await flow.ready.promise;
-      const cancelled = caller.context.err();
-      if (cancelled) throw cancelled;
-      if (!flow.pending() || session.address === null) throw flow.failure;
-      return caller.commit(() => ({
-        session_id: session.id,
-        address: session.address!,
-        code: session.code,
-        expires_at: session.expires_at,
-      }));
-    } finally {
-      unsubscribe();
-    }
+    await flow.ready.promise;
+    caller.context.signal.throwIfAborted();
+    if (!flow.pending() || session.address === null) throw flow.failure;
+    return caller.commit(() => ({
+      session_id: session.id,
+      address: session.address!,
+      code: session.code,
+      expires_at: session.expires_at,
+    }));
   }
 
   loginSessionsOf(holder: string): LoginSessionEntry[] {
@@ -1068,7 +1063,7 @@ export class LlmComponent implements Service {
   }
 
   start(): Promise<Error | null> {
-    if (this.shutdown.err())
+    if (this.shutdown.signal.aborted)
       return Promise.resolve(
         new Diagnostic(
           LlmErrorCode.Stopped,
@@ -1091,23 +1086,20 @@ export class LlmComponent implements Service {
     return this.stopTask;
   }
   async run(context: Context = background): Promise<Error | null> {
-    const unsubscribe = context.onCancel(() => {
+    using cancellation = addAbortListener(context.signal, () => {
       void this.stop();
     });
-    try {
-      if (context.err()) return (await this.stop()) ?? context.err();
-      const error = await this.start();
-      if (error) return error;
-      await this.shutdown.done();
-      return (await this.stop()) ?? context.err();
-    } finally {
-      unsubscribe();
-    }
+    if (context.signal.aborted)
+      return (await this.stop()) ?? reasonOf(context.signal);
+    const error = await this.start();
+    if (error) return error;
+    await cancelled(this.shutdown.signal);
+    return (await this.stop()) ?? reasonOf(context.signal);
   }
   async healthcheck(): Promise<Healthcheck> {
     return {
       login:
-        this.started && !this.shutdown.err()
+        this.started && !this.shutdown.signal.aborted
           ? HealthStatus.Healthy
           : HealthStatus.Unavailable,
     };

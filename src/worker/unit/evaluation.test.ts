@@ -6,7 +6,6 @@ import { createIdentity } from "../../kernel/identity.ts";
 import {
   background,
   DeadlineExceeded,
-  throwIfCancelled,
   type CancellationContext,
 } from "../../kernel/context.ts";
 import { ExecutionBudget } from "./budget.ts";
@@ -506,7 +505,7 @@ test("an evaluation that its agent deadline cuts ends with no assessment and no 
       budget,
       async instruct() {
         context!.cancel(new DeadlineExceeded());
-        throwIfCancelled(context!);
+        context!.signal.throwIfAborted();
       },
       lastText: () => undefined,
     } as unknown as NativeAgent;

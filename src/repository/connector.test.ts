@@ -731,7 +731,7 @@ test("an abort ends every git write and the landing read", async (t) => {
       deadlineAt(),
       LOCAL_GIT_SSH_ACCESS,
     ),
-    (error) => error === context.err(),
+    (error) => error === context.signal.reason,
   );
   await assert.rejects(
     pushSnapshotFresh(
@@ -740,7 +740,7 @@ test("an abort ends every git write and the landing read", async (t) => {
       deadlineAt(),
       LOCAL_GIT_SSH_ACCESS,
     ),
-    (error) => error === context.err(),
+    (error) => error === context.signal.reason,
   );
   await assert.rejects(
     landedOn(
@@ -749,7 +749,7 @@ test("an abort ends every git write and the landing read", async (t) => {
       deadlineAt(),
       LOCAL_GIT_SSH_ACCESS,
     ),
-    (error) => error === context.err(),
+    (error) => error === context.signal.reason,
   );
   await assert.rejects(
     mergePushFresh(

@@ -232,7 +232,8 @@ function objectUploadsOf(
 }
 
 function signingFailsOver(caller: CallerContext, error: unknown): boolean {
-  if (caller.context.err() || !(error instanceof OperationError)) return false;
+  if (caller.context.signal.aborted || !(error instanceof OperationError))
+    return false;
   if (error.code.startsWith(S3_RESULT_CODE_PREFIX)) return true;
   return (
     error.code === MissionErrorCode.AuthorizationRefused &&

@@ -26,14 +26,17 @@ export function startHeartbeat(
   const context = new CancellationContext();
   let pending = false;
   const tick = async () => {
-    if (pending || context.err()) return;
+    if (pending || context.signal.aborted) return;
     pending = true;
     try {
       const result = await api.worker.heartbeat(
         { params: {}, query: {}, body: null },
         { context, idempotencyKey: createIdempotencyKey() },
       );
-      if (context.err() || result.type === OperationResultType.Completed)
+      if (
+        context.signal.aborted ||
+        result.type === OperationResultType.Completed
+      )
         return;
       log({
         code:

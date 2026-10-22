@@ -195,7 +195,7 @@ async function evaluate(
       (error instanceof ContextCancelled ||
         error instanceof DeadlineExceeded) &&
       budget.exhausted() &&
-      !run.operationContext.err()
+      !run.operationContext.signal.aborted
     )
       return run.stop(EndReason.AssessmentAbsent);
     throw error;

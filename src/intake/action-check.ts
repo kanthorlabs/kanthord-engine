@@ -13,7 +13,7 @@ import {
   type SshIdentitySubject,
 } from "../custody/contract.ts";
 import type { CallerIdentity } from "../kernel/caller.ts";
-import { abortSignal, type Context } from "../kernel/context.ts";
+import type { Context } from "../kernel/context.ts";
 import { Diagnostic, OperationError } from "../kernel/errors.ts";
 import type { CallerContext, ExecutionClaim } from "../kernel/operation.ts";
 import type { Store, Transaction } from "../kernel/store.ts";
@@ -221,30 +221,26 @@ async function inspectPullRequest(
 ): Promise<CheckFold> {
   assert.ok(caller.identity);
   const token = apiKeySecretSchema.parse(material.value()).key;
-  const { signal, dispose } = abortSignal(caller.context);
-  try {
-    const call = {
-      token,
-      requester: caller.identity,
-      signal,
-      deadlineAt: request.deadlineAt,
-    };
-    const target = {
-      kind: GitHubTargetKind.Binding,
-      address: request.facts.repository.address,
-    } as const;
-    const answer = await github.getSettledPullRequest(call, target, {
-      number: request.number,
-    });
-    if (!answer.ok) throw platformFailure(answer);
-    const reviews = await github.listReviews(call, target, {
-      number: request.number,
-    });
-    if (!reviews.ok) throw platformFailure(reviews);
-    return foldBody(github, answer.value, reviews.value, request.expected);
-  } finally {
-    dispose();
-  }
+  const { signal } = caller.context;
+  const call = {
+    token,
+    requester: caller.identity,
+    signal,
+    deadlineAt: request.deadlineAt,
+  };
+  const target = {
+    kind: GitHubTargetKind.Binding,
+    address: request.facts.repository.address,
+  } as const;
+  const answer = await github.getSettledPullRequest(call, target, {
+    number: request.number,
+  });
+  if (!answer.ok) throw platformFailure(answer);
+  const reviews = await github.listReviews(call, target, {
+    number: request.number,
+  });
+  if (!reviews.ok) throw platformFailure(reviews);
+  return foldBody(github, answer.value, reviews.value, request.expected);
 }
 
 function foldBody(

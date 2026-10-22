@@ -1,10 +1,12 @@
+import { addAbortListener } from "node:events";
 import { registerBunOAuthFlows as registerOAuthFlows } from "@earendil-works/pi-ai/bun-oauth";
 import { join } from "node:path";
 import {
   background,
   CancellationContext,
-  throwIfCancelled,
+  cancelled,
   type Context,
+  reasonOf,
 } from "../../kernel/context.ts";
 import { Diagnostic } from "../../kernel/errors.ts";
 import { OperationalLog, type LogConfig } from "../../kernel/log.ts";
@@ -119,7 +121,7 @@ export class WorkerUnit {
   }
 
   start(): Promise<Error | null> {
-    if (this.shutdown.err())
+    if (this.shutdown.signal.aborted)
       return Promise.resolve(
         new Diagnostic(
           "worker.lifecycle.stopped",
@@ -130,20 +132,20 @@ export class WorkerUnit {
       const pi = join(this.options.directories.data, PI_DIRECTORY_NAME);
       installPiTools({ env: this.options.env, directory: pi });
       usePiDirectory(pi);
-      throwIfCancelled(this.shutdown);
+      this.shutdown.signal.throwIfAborted();
       this.repository =
         this.options.repository_transport ?? new RepositoryComponent();
-      throwIfCancelled(this.shutdown);
+      this.shutdown.signal.throwIfAborted();
       const first = this.entries.at(0);
       if (first) await this.checkVersion(first.binding.transport);
       this.workspaces = WorkspaceRoot.open(this.options.directories.data);
-      throwIfCancelled(this.shutdown);
+      this.shutdown.signal.throwIfAborted();
       this.openLog();
       for (const entry of [...this.entries]) {
-        if (this.shutdown.err()) return;
+        if (this.shutdown.signal.aborted) return;
         await this.registerEntry(entry);
       }
-      if (this.shutdown.err()) return;
+      if (this.shutdown.signal.aborted) return;
       this.started = true;
       this.keepalive = setInterval(() => {}, KEEPALIVE_INTERVAL_MS);
     });
@@ -214,14 +216,14 @@ export class WorkerUnit {
   }
 
   async add(binding: UnitBinding): Promise<Error | null> {
-    if (this.shutdown.err() || this.pulls.err()) return null;
+    if (this.shutdown.signal.aborted || this.pulls.signal.aborted) return null;
     const entry = this.entryOf(binding);
     this.entries.push(entry);
     return lifecycle(async () => {
       await this.startTask;
-      if (this.shutdown.err()) return;
+      if (this.shutdown.signal.aborted) return;
       await this.registerEntry(entry);
-      if (this.running && !entry.loop && !this.pulls.err())
+      if (this.running && !entry.loop && !this.pulls.signal.aborted)
         this.runEntry(entry);
     });
   }
@@ -235,7 +237,7 @@ export class WorkerUnit {
     await entry.registering;
     entry.heartbeat?.stop();
     if (failure) return failure;
-    if (this.shutdown.err()) return null;
+    if (this.shutdown.signal.aborted) return null;
     const error = await this.deregisterEntry(entry);
     if (error) return error;
     entry.secret.fill(0);
@@ -256,7 +258,7 @@ export class WorkerUnit {
     const version = await readServerVersion(transport.gateway, {
       context: this.shutdown,
     });
-    throwIfCancelled(this.shutdown);
+    this.shutdown.signal.throwIfAborted();
     if (version instanceof Diagnostic)
       throw new Diagnostic(
         "worker.version.unavailable",
@@ -283,7 +285,7 @@ export class WorkerUnit {
     } finally {
       entry.registering = undefined;
     }
-    if (this.shutdown.err()) return;
+    if (this.shutdown.signal.aborted) return;
     if (this.operationalLog)
       this.operationalLog.logger.info(entry.registration, READY_MESSAGE);
     else this.logRecord({ msg: READY_MESSAGE, ...entry.registration });
@@ -303,7 +305,7 @@ export class WorkerUnit {
   private runEntry(entry: Entry): void {
     this.changed.resolve();
     this.changed = Promise.withResolvers<void>();
-    if (!this.shutdown.err())
+    if (!this.shutdown.signal.aborted)
       entry.heartbeat = startHeartbeat(entry.binding.transport, (record) =>
         this.logRecord(record, "warn"),
       );
@@ -364,8 +366,8 @@ export class WorkerUnit {
       !failure?.code.startsWith(GATEWAY_CODE) ||
       failure.code.startsWith(GATEWAY_CLIENT_CODE) ||
       !this.options.refused ||
-      this.shutdown.err() ||
-      entry.pulls.err()
+      this.shutdown.signal.aborted ||
+      entry.pulls.signal.aborted
     )
       return false;
     entry.kept = true;
@@ -376,12 +378,13 @@ export class WorkerUnit {
 
   async restart(binding: UnitBinding): Promise<Error | null> {
     const entry = this.entries.find((item) => item.binding === binding);
-    if (!entry || this.shutdown.err() || entry.pulls.err()) return null;
+    if (!entry || this.shutdown.signal.aborted || entry.pulls.signal.aborted)
+      return null;
     return lifecycle(async () => {
       await entry.loop;
       entry.kept = false;
       await this.registerEntry(entry);
-      if (this.running && !this.pulls.err()) this.runEntry(entry);
+      if (this.running && !this.pulls.signal.aborted) this.runEntry(entry);
     });
   }
 
@@ -396,8 +399,8 @@ export class WorkerUnit {
         this.entries.some((entry) => entry.loop && !loops.includes(entry.loop))
       )
         continue;
-      if (this.pulls.err() || this.draining) return;
-      await Promise.race([this.pulls.done(), changed]);
+      if (this.pulls.signal.aborted || this.draining) return;
+      await Promise.race([cancelled(this.pulls.signal), changed]);
     }
   }
 
@@ -405,35 +408,32 @@ export class WorkerUnit {
     const stop = () => {
       void this.stop();
     };
-    const unsubscribe = context.onCancel(stop);
-    try {
-      if (context.err()) return (await this.stop()) ?? context.err();
-      const error = await (this.startTask ?? this.start());
-      if (error) return (await this.stop()) ?? context.err() ?? error;
-      const loopError = await lifecycle(async () => {
-        if (!this.shutdown.err()) this.workspaces!.startSweeping();
-        this.running = true;
-        for (const entry of [...this.entries])
-          if (entry.registration && !entry.loop) this.runEntry(entry);
-        if (this.draining && !this.entries.length) this.pulls.cancel();
-        await this.waitLoops();
-        if (this.failure) throw this.failure;
-      });
-      const wasStopping = this.shutdown.err() !== null;
-      const stopError = await this.stop();
-      return (
-        (wasStopping ? (stopError ?? loopError) : (loopError ?? stopError)) ??
-        context.err()
-      );
-    } finally {
-      unsubscribe();
-    }
+    using cancellation = addAbortListener(context.signal, stop);
+    if (context.signal.aborted)
+      return (await this.stop()) ?? reasonOf(context.signal);
+    const error = await (this.startTask ?? this.start());
+    if (error) return (await this.stop()) ?? reasonOf(context.signal) ?? error;
+    const loopError = await lifecycle(async () => {
+      if (!this.shutdown.signal.aborted) this.workspaces!.startSweeping();
+      this.running = true;
+      for (const entry of [...this.entries])
+        if (entry.registration && !entry.loop) this.runEntry(entry);
+      if (this.draining && !this.entries.length) this.pulls.cancel();
+      await this.waitLoops();
+      if (this.failure) throw this.failure;
+    });
+    const wasStopping = this.shutdown.signal.aborted;
+    const stopError = await this.stop();
+    return (
+      (wasStopping ? (stopError ?? loopError) : (loopError ?? stopError)) ??
+      reasonOf(context.signal)
+    );
   }
 
   async healthcheck(): Promise<Healthcheck> {
     return {
       client:
-        this.started && !this.shutdown.err()
+        this.started && !this.shutdown.signal.aborted
           ? HealthStatus.Healthy
           : HealthStatus.Unavailable,
     };
@@ -447,7 +447,8 @@ export class WorkerUnit {
   }
 
   private currentRound(): Context {
-    if (!this.round || this.round.err()) this.round = new CancellationContext();
+    if (!this.round || this.round.signal.aborted)
+      this.round = new CancellationContext();
     return this.round;
   }
 
@@ -473,7 +474,7 @@ export class WorkerUnit {
     this.executionLive = true;
     this.round?.cancel();
     const context = new CancellationContext(background, claim.expired_at);
-    if (this.shutdown.err()) context.cancel();
+    if (this.shutdown.signal.aborted) context.cancel();
     const task = this.execute(entry, claim, context)
       .then((result) => {
         if (result === null) this.executionLive = false;

@@ -6,7 +6,7 @@ import { ulid } from "ulid";
 import { z } from "zod";
 import { LIST_LIMIT_DEFAULT } from "../custody/contract.ts";
 import { IdentityKind } from "../kernel/caller.ts";
-import { throwIfCancelled, type Context } from "../kernel/context.ts";
+import { CancellationContext, type Context } from "../kernel/context.ts";
 import { OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import type { CallerContext, OperationRegistry } from "../kernel/operation.ts";
@@ -66,16 +66,11 @@ function withDeadline<T>(
   deadlineMs: number,
   run: (signal: AbortSignal) => Promise<T>,
 ): Promise<T> {
-  const controller = new AbortController();
-  const unsubscribe = context.onCancel((error) => controller.abort(error));
-  const timer = setTimeout(
-    () => controller.abort(),
-    Math.max(EXPIRED, deadlineMs),
+  const deadline = new CancellationContext(
+    context,
+    Date.now() + Math.ceil(Math.max(EXPIRED, deadlineMs)),
   );
-  return run(controller.signal).finally(() => {
-    clearTimeout(timer);
-    unsubscribe();
-  });
+  return run(deadline.signal).finally(() => deadline.cancel());
 }
 
 export function keyscanArguments(host: string): string[] {
@@ -243,7 +238,7 @@ export class RepositoryHostKeys {
       repositoryOperations.host_key_scan,
       async (input, caller) => {
         const answer = await this.scan(input.body.host, caller.context);
-        throwIfCancelled(caller.context);
+        caller.context.signal.throwIfAborted();
         return caller.commit(() => answer);
       },
     );
@@ -252,7 +247,7 @@ export class RepositoryHostKeys {
       async (input, caller) => {
         const host = supportedHost(input.params.host);
         const read = await this.scan(host, caller.context);
-        throwIfCancelled(caller.context);
+        caller.context.signal.throwIfAborted();
         if (read.fingerprint !== input.body.fingerprint)
           throw new OperationError(
             HttpStatus.Conflict,
@@ -286,7 +281,7 @@ export class RepositoryHostKeys {
               ),
             );
     } catch {
-      throwIfCancelled(context);
+      context.signal.throwIfAborted();
       key = null;
     }
     if (key === null)
