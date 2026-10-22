@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { TestContext } from "node:test";
 import pino from "pino";
+import { CancellationContext } from "./context.ts";
 import { diagnostic, diagnosticRows } from "./errors.ts";
 import { redaction } from "./log.ts";
 
@@ -29,6 +30,17 @@ export async function childRun(
   child.stdin.end(options.input);
   const [status] = (await once(child, "close")) as [number | null];
   return { status, stdout, stderr };
+}
+
+export function testContext(t: TestContext): CancellationContext {
+  const context = new CancellationContext();
+  const cancel = () => context.cancel(t.signal.reason);
+  t.signal.addEventListener("abort", cancel, { once: true });
+  t.after(() => {
+    t.signal.removeEventListener("abort", cancel);
+    context.cancel();
+  });
+  return context;
 }
 
 export function temporaryDirectory(): string {
