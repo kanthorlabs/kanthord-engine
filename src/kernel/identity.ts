@@ -8,7 +8,6 @@ export const IDENTITY_SUFFIX_LENGTH = ULID_LENGTH + 1;
 
 const ulidPattern = /^[0-7][0-9A-HJKMNP-TV-Z]{25}$/;
 
-/** Bare ULIDs are reserved for protocol contracts such as the JWT `jti` claim. */
 export const ulidSchema = z.string().length(ULID_LENGTH).regex(ulidPattern);
 
 /** The owning service declares a stable, singular prefix for each entity kind. */
