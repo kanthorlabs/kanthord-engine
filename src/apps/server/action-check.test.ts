@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test, type TestContext } from "node:test";
+import { setImmediate, setTimeout as delay } from "node:timers/promises";
 import { simpleGit } from "simple-git";
 import type { Material } from "../../custody/contract.ts";
 import { directClient } from "../../gateway/index.ts";
@@ -69,6 +70,7 @@ const RETRYABLE_CODE = "repository.platform.github.retryable_refusal";
 const FINAL_CODE = "repository.platform.github.final_refusal";
 const GIT_FAILED_CODE = "repository.connector.git_failed";
 const UNKNOWN_CODE = "gateway.invocation.unknown";
+const NODE_POLL_MS = 5;
 const CONTENT = {
   name: "Check actions",
   requirement: "Check actions",
@@ -355,14 +357,9 @@ async function setup(t: TestContext) {
       commit: pushed.head,
     },
   );
-  await new Promise<void>((resolve) => {
-    const poll = () => {
-      if (gitHub.calls.length >= DEFERRED_GITHUB_CALLS) resolve();
-      else setImmediate(poll);
-    };
-    setImmediate(poll);
-  });
-  while (true) {
+  while (gitHub.calls.length < DEFERRED_GITHUB_CALLS)
+    await setImmediate(undefined, { signal: t.signal });
+  for (;;) {
     const node = await read<{ state: string }>([
       "mission",
       "node",
@@ -370,7 +367,7 @@ async function setup(t: TestContext) {
       pushedNode,
     ]);
     if (node.state !== NodeState.ExternalRequested) break;
-    await new Promise<void>((r) => setTimeout(r, 5));
+    await delay(NODE_POLL_MS, undefined, { signal: t.signal });
   }
   const intake = directClient(intakeOperations, fixture.invocation);
   const check = (evidenceId: string, service = MISSION_SERVICE_NAME) =>
