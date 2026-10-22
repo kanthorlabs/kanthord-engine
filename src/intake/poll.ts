@@ -8,11 +8,7 @@ import {
   type Material,
 } from "../custody/contract.ts";
 import type { CallerIdentity, ServiceIdentity } from "../kernel/caller.ts";
-import {
-  abortSignal,
-  CancellationContext,
-  type Context,
-} from "../kernel/context.ts";
+import { CancellationContext, type Context } from "../kernel/context.ts";
 import { CodedError } from "../kernel/errors.ts";
 import { OperationResultType } from "../kernel/operation.ts";
 import { canonicalJSON } from "../kernel/json.ts";
@@ -242,25 +238,21 @@ export async function requestPollRead(
     token.length > EMPTY_TEXT_LENGTH,
     "A poll request carries a token.",
   );
-  const { signal, dispose } = abortSignal(request.context);
-  try {
-    const call = {
-      token,
-      requester: request.requester,
-      signal,
-      deadlineAt: Date.now() + PLATFORM_CALL_DEADLINE_MS,
-    };
-    const query = {
-      owner: request.owner,
-      repo: request.repo,
-      etag: request.etag,
-    };
-    return read === PollRead.Events
-      ? await github.listEvents(call, query)
-      : await github.listClosedPullRequests(call, query);
-  } finally {
-    dispose();
-  }
+  const { signal } = request.context;
+  const call = {
+    token,
+    requester: request.requester,
+    signal,
+    deadlineAt: Date.now() + PLATFORM_CALL_DEADLINE_MS,
+  };
+  const query = {
+    owner: request.owner,
+    repo: request.repo,
+    etag: request.etag,
+  };
+  return read === PollRead.Events
+    ? await github.listEvents(call, query)
+    : await github.listClosedPullRequests(call, query);
 }
 
 const SKIPPED_CYCLE: CycleResult = {
@@ -466,7 +458,8 @@ async function pollRead(
       repo: target.repo,
       etag: etagOf(target.checkpoint, read),
     });
-    if (context.err()) return { cycle: SKIPPED_CYCLE, endsCycle: true };
+    if (context.signal.aborted)
+      return { cycle: SKIPPED_CYCLE, endsCycle: true };
     if (!answer.ok) {
       logFailure(dependencies.logger, target.facts.inboundId, answer.code);
       return {

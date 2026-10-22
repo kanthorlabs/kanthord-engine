@@ -1,9 +1,5 @@
 import assert from "node:assert/strict";
-import {
-  CancellationContext,
-  type Context,
-  throwIfCancelled,
-} from "../../kernel/context.ts";
+import { CancellationContext, type Context } from "../../kernel/context.ts";
 import { CodedError, Diagnostic } from "../../kernel/errors.ts";
 import type { ExecutionRecord } from "../../scheduler/contract.ts";
 import type { SshAccess } from "../../repository/contract.ts";
@@ -68,7 +64,7 @@ export async function hostExecution(
     log: input.log,
   });
   try {
-    throwIfCancelled(context);
+    context.signal.throwIfAborted();
     handover = await takeHandover({ ...input, context });
     input.log({
       msg: "credential handover received",
@@ -137,7 +133,7 @@ export async function hostExecution(
       }),
     });
     if (revoked) return null;
-    if (context.err()) throw context.err();
+    context.signal.throwIfAborted();
     const detail = detailOf(result);
     input.log({
       msg: "execution ended",

@@ -1,3 +1,4 @@
+import { addAbortListener } from "node:events";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import type { Context } from "../../kernel/context.ts";
@@ -140,13 +141,13 @@ function runCommand(
       },
       Math.max(SUCCESS, deadline - Date.now()),
     );
-    const unsubscribe = input.context.onCancel(kill);
+    const cancellation = addAbortListener(input.context.signal, kill);
     let finished = false;
     const finish = (exitCode: number | null, signal: string | null) => {
       if (finished) return;
       finished = true;
       clearTimeout(timer);
-      unsubscribe();
+      cancellation[Symbol.dispose]();
       resolve({
         result: { command, exit_code: exitCode, signal, timed_out: timedOut },
         output: outputTail(chunks),
@@ -172,7 +173,7 @@ export async function runVerificationsWithOutput(
   const outputs: string[] = [];
   const flaky: boolean[] = [];
   for (const [index, command] of input.commands.entries()) {
-    if (Date.now() >= input.deadline || input.context.err()) break;
+    if (Date.now() >= input.deadline || input.context.signal.aborted) break;
     const { result, output } = await observedCommand(
       { command, index, run: FIRST_RUN },
       input,
@@ -201,7 +202,8 @@ async function passesOnRerun(
   input: VerificationInput,
 ): Promise<boolean> {
   for (let rerun = 0; rerun < (input.reruns ?? 0); rerun++) {
-    if (Date.now() >= input.deadline || input.context.err()) return false;
+    if (Date.now() >= input.deadline || input.context.signal.aborted)
+      return false;
     const attempt = { command, index, run: FIRST_RERUN + rerun };
     if ((await observedCommand(attempt, input)).result.exit_code === SUCCESS)
       return true;

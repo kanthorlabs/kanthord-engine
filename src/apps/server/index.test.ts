@@ -928,7 +928,7 @@ test("server lifecycle returns errors, reports owned health and releases every r
     const inactive = new Server();
     assert.deepEqual(await inactive.healthcheck(), { gateway: 503, store: 503, log: 503 });
     const cancelled = new CancellationContext(); cancelled.cancel();
-    assert.equal(await inactive.run(cancelled), cancelled.err());
+    assert.equal(await inactive.run(cancelled), cancelled.signal.reason);
     assert.equal(await inactive.stop(), null);
     const failed = new Server(${JSON.stringify(join(paths.env.XDG_CONFIG_HOME!, "absent.yaml"))});
     assert.ok(await failed.start() instanceof Error);
@@ -954,7 +954,7 @@ test("server lifecycle returns errors, reports owned health and releases every r
     assert.deepEqual((await server.health.check()).server, { gateway: 200, store: 200, log: 503 });
     OperationalLog.prototype.healthcheck = logHealth;
     context.cancel();
-    assert.equal(await running, context.err());
+    assert.equal(await running, context.signal.reason);
     assert.equal(await server.stop(), null);
     assert.deepEqual(await server.healthcheck(), { gateway: 503, store: 503, log: 503 });
     assert.equal(process.listenerCount('SIGTERM'), signals);

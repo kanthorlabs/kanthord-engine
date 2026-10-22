@@ -1,3 +1,4 @@
+import { addAbortListener } from "node:events";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { writeFile } from "node:fs/promises";
@@ -353,7 +354,7 @@ test("host takes handover before setup and method, discards on every method end"
           let aborted = false;
           held = native.sshAccess;
           assert.equal(held.size, ONE_ENTRY);
-          const unsubscribe = native.context.onCancel(() => {
+          const cancellation = addAbortListener(native.context.signal, () => {
             aborted = true;
           });
           try {
@@ -362,10 +363,10 @@ test("host takes handover before setup and method, discards on every method end"
               { code },
             );
             assert.ok(aborted);
-            assert.ok(native.context.err());
+            assert.ok(native.context.signal.aborted);
             return { kind: "released", furtherWork: false };
           } finally {
-            unsubscribe();
+            cancellation[Symbol.dispose]();
           }
         }),
         null,

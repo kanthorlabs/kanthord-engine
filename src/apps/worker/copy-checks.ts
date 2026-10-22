@@ -1,4 +1,8 @@
-import { CancellationContext, type Context } from "../../kernel/context.ts";
+import {
+  CancellationContext,
+  cancelled,
+  type Context,
+} from "../../kernel/context.ts";
 import { Diagnostic } from "../../kernel/errors.ts";
 import {
   entryFailureReason,
@@ -124,7 +128,7 @@ export class CopyChecks {
     try {
       const copies = await exchange.copies(context);
       for (const copy of copies.filter(liveCopy)) {
-        if (context.err()) return;
+        if (context.signal.aborted) return;
         await this.checkOne(copy.name);
       }
     } catch (error) {
@@ -137,7 +141,7 @@ export class CopyChecks {
     try {
       const copy = await exchange.sealedCopy(name, context);
       const report = await this.check(copy);
-      if (context.err()) return;
+      if (context.signal.aborted) return;
       await exchange.copyReport(name, report, context);
     } catch (error) {
       this.failed(name, error);
@@ -187,9 +191,9 @@ export class CopyChecks {
       const secret = await this.open(copy);
       const answer = await Promise.race([
         provider.check(secret, copy.metadata, deadline, observe),
-        deadline.done().then(() => unknown.answer),
+        cancelled(deadline.signal).then(() => unknown.answer),
       ]);
-      if (deadline.err()) return unknown;
+      if (deadline.signal.aborted) return unknown;
       return { status: HEALTH_OF_CONNECTION[answer.connection], answer };
     } catch {
       observe(
@@ -223,7 +227,7 @@ export class CopyChecks {
   }
 
   private failed(name: string | null, error: unknown): void {
-    if (this.options.context.err()) return;
+    if (this.options.context.signal.aborted) return;
     if (retryable(error)) this.seen = undefined;
     this.options.log({
       msg: "Worker instance credential report failed",

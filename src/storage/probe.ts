@@ -3,7 +3,7 @@ import {
   S3Client,
   type S3ClientConfig,
 } from "@aws-sdk/client-s3";
-import { abortSignal, type Context } from "../kernel/context.ts";
+import type { Context } from "../kernel/context.ts";
 import {
   ResourceFailureReason,
   ResourceStatus,
@@ -86,25 +86,21 @@ export async function probeS3(
   observe?: ResourceObserver,
 ): Promise<ResourceStatusValue> {
   try {
-    const { signal, dispose } = abortSignal(context);
-    try {
-      if (signal.aborted) return ResourceStatus.Unknown;
-      const client = createClient({
-        endpoint,
-        region,
-        forcePathStyle: true,
-        credentials: { accessKeyId, secretAccessKey },
-      });
-      return await headBucket(
-        client,
-        bucket,
-        signal,
-        [accessKeyId, secretAccessKey],
-        observe,
-      );
-    } finally {
-      dispose();
-    }
+    const { signal } = context;
+    if (signal.aborted) return ResourceStatus.Unknown;
+    const client = createClient({
+      endpoint,
+      region,
+      forcePathStyle: true,
+      credentials: { accessKeyId, secretAccessKey },
+    });
+    return await headBucket(
+      client,
+      bucket,
+      signal,
+      [accessKeyId, secretAccessKey],
+      observe,
+    );
   } catch (error) {
     observe?.(
       thrownReason(error, [accessKeyId, secretAccessKey]),

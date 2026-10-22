@@ -1,14 +1,13 @@
+import assert from "node:assert/strict";
+import { addAbortListener } from "node:events";
 import { CodedError } from "./errors.ts";
 
 const EXPIRED_REMAINING_MS = 0;
+const MAX_TIMER_DELAY_MS = 2 ** 31 - 1;
 
-/** Go-inspired cancellation contract. Only the owner of a child can cancel it. */
 export interface Context {
-  deadline(): number | null;
-  done(): Promise<void>;
-  err(): Error | null;
-  /** Called immediately if already cancelled; returns an unsubscribe function. */
-  onCancel(listener: (error: Error) => void): () => void;
+  readonly signal: AbortSignal;
+  readonly deadline: number | null;
 }
 
 export class ContextCancelled extends CodedError {
@@ -23,102 +22,76 @@ export class DeadlineExceeded extends CodedError {
   }
 }
 
-const never = new Promise<void>(() => {});
 export const background: Context = Object.freeze({
-  deadline: () => null,
-  done: () => never,
-  err: () => null,
-  onCancel: () => () => {},
+  signal: new AbortController().signal,
+  deadline: null,
 });
 
 export class CancellationContext implements Context {
-  private readonly completion = Promise.withResolvers<void>();
-  private readonly listeners = new Set<(error: Error) => void>();
-  private readonly expiresAt: number | null;
-  private reason: Error | null = null;
-  private unlink: () => void = () => {};
+  readonly signal: AbortSignal;
+  readonly deadline: number | null;
+  private readonly controller = new AbortController();
   private timer?: NodeJS.Timeout;
 
   constructor(parent: Context = background, deadline: number | null = null) {
     if (deadline !== null && !Number.isSafeInteger(deadline))
       throw new TypeError("Context deadline must be Unix milliseconds.");
-    const inherited = parent.deadline();
-    this.expiresAt =
-      inherited === null
-        ? deadline
-        : deadline === null
-          ? inherited
-          : Math.min(inherited, deadline);
-    this.unlink = parent.onCancel((error) => this.cancel(error));
-    if (this.reason) this.unlink();
-    else if (deadline !== null && (inherited === null || deadline < inherited))
-      this.scheduleDeadline();
-    else if (this.expiresAt !== null && this.expiresAt <= Date.now())
+    const inherited = parent.deadline;
+    this.deadline = earlier(inherited, deadline);
+    this.signal = AbortSignal.any([parent.signal, this.controller.signal]);
+    if (this.signal.aborted) return;
+    if (deadline !== null && (inherited === null || deadline < inherited))
+      this.armDeadline();
+    else if (this.deadline !== null && this.deadline <= Date.now())
       this.cancel(new DeadlineExceeded());
   }
 
-  deadline(): number | null {
-    return this.expiresAt;
-  }
-  done(): Promise<void> {
-    return this.completion.promise;
-  }
-  err(): Error | null {
-    return this.reason;
+  cancel(reason: Error = new ContextCancelled()): void {
+    this.controller.abort(reason);
   }
 
-  onCancel(listener: (error: Error) => void): () => void {
-    if (this.reason) this.notify(listener, this.reason);
-    else this.listeners.add(listener);
-    return () => {
-      this.listeners.delete(listener);
-    };
-  }
-
-  cancel(error: Error = new ContextCancelled()): void {
-    if (this.reason) return;
-    this.reason = error;
-    clearTimeout(this.timer);
-    this.unlink();
-    this.completion.resolve();
-    for (const listener of this.listeners) this.notify(listener, error);
-    this.listeners.clear();
-  }
-
-  private notify(listener: (error: Error) => void, error: Error): void {
-    try {
-      listener(error);
-    } catch (failure) {
-      queueMicrotask(() => {
-        throw failure;
-      });
-    }
+  private armDeadline(): void {
+    addAbortListener(this.signal, () => clearTimeout(this.timer));
+    this.scheduleDeadline();
   }
 
   private scheduleDeadline(): void {
-    if (this.expiresAt === null || this.reason) return;
-    const remaining = this.expiresAt - Date.now();
+    if (this.deadline === null || this.signal.aborted) return;
+    const remaining = this.deadline - Date.now();
     if (remaining <= EXPIRED_REMAINING_MS)
       return this.cancel(new DeadlineExceeded());
     this.timer = setTimeout(
       () => this.scheduleDeadline(),
-      Math.min(remaining, 2 ** 31 - 1),
+      Math.min(remaining, MAX_TIMER_DELAY_MS),
     );
     this.timer.unref();
   }
 }
 
-export function throwIfCancelled(context: Context): void {
-  const error = context.err();
-  if (error) throw error;
+export function cancelled(signal: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    addAbortListener(signal, () => resolve());
+  });
 }
 
-/** Native transport bridge. Dispose after the response body has been consumed. */
-export function abortSignal(context: Context): {
-  signal: AbortSignal;
-  dispose: () => void;
-} {
-  const controller = new AbortController();
-  const dispose = context.onCancel((error) => controller.abort(error));
-  return { signal: controller.signal, dispose };
+export function reasonOf(signal: AbortSignal): Error | null {
+  if (!signal.aborted) return null;
+  assert.ok(
+    signal.reason instanceof Error,
+    "An aborted signal holds an error.",
+  );
+  return signal.reason;
+}
+
+export function joined(first: Context, second: Context): Context {
+  return {
+    signal: AbortSignal.any([first.signal, second.signal]),
+    deadline: earlier(first.deadline, second.deadline),
+  };
+}
+
+function earlier(first: number | null, second: number | null): number | null {
+  if (first === null) return second;
+  if (second === null) return first;
+  return Math.min(first, second);
 }

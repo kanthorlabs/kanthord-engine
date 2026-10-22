@@ -570,7 +570,7 @@ function gitHubCall(
 }
 
 function deadlineOf(scope: OutboundScope, boundMs: number): number {
-  const deadline = scope.context.deadline();
+  const deadline = scope.context.deadline;
   assert.ok(deadline !== null, "An outbound scope holds a deadline.");
   assert.ok(boundMs > EXPIRED_DEADLINE_MS);
   return Math.min(deadline, Date.now() + boundMs);

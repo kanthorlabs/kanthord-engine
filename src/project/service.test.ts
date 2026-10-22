@@ -7,6 +7,7 @@ import { ProjectService, type Dependencies } from "./service.ts";
 import {
   background,
   CancellationContext,
+  cancelled,
   type Context,
 } from "../kernel/context.ts";
 import {
@@ -477,7 +478,7 @@ test("Project propagates cancellation to binding resolution and joins run", asyn
     if (before) context.cancel();
     const running = project.run(context);
     if (!before) context.cancel();
-    assert.equal(await running, context.err());
+    assert.equal(await running, context.signal.reason);
     await assert.rejects(
       project.resolveWorkerGroup(
         "absent",
@@ -485,7 +486,7 @@ test("Project propagates cancellation to binding resolution and joins run", asyn
         0,
         context,
       ),
-      (error) => error === context.err(),
+      (error) => error === context.signal.reason,
     );
     assert.equal(await project.stop(), null);
   }
@@ -1129,7 +1130,7 @@ test("worker group reads reject a repository group and preserve cancellation", a
       GROUP_ISSUED_AT,
       context,
     ),
-    (error) => error === context.err(),
+    (error) => error === context.signal.reason,
   );
 });
 
@@ -1169,7 +1170,7 @@ test("worker group override receives the exact group, issuance and context witho
       GROUP_ISSUED_AT,
       context,
     ),
-    (error) => error === context.err(),
+    (error) => error === context.signal.reason,
   );
   assert.equal(calls, ONE_CALL);
 });
@@ -2770,7 +2771,7 @@ test("cancellation during gitLsRemote propagates the context error, whether the 
     const commits = f.commits();
     await assert.rejects(
       f.write({ [REPOSITORY_NAME]: repositoryBinding() }),
-      (error) => error === context.err(),
+      (error) => error === context.signal.reason,
     );
     assert.equal(calls, ONE_CALL);
     assert.equal(f.commits(), commits);
@@ -3534,12 +3535,12 @@ test("resource checks pass the caller deadline and distinguish success, failure 
       async gitLsRemote(address, context, remaining) {
         calls++;
         assert.equal(address, REPOSITORY_ADDRESS);
-        const deadline = context.deadline();
+        const deadline = context.deadline;
         assert.ok(deadline !== null);
         assert.ok(remaining > NO_ITEMS);
         assert.ok(remaining <= deadline - beforeCall);
         assert.equal(f.store.database.isTransaction, false);
-        if (context.err()) throw context.err();
+        if (context.signal.aborted) throw context.signal.reason;
         if (failure) throw failure;
       },
     },
@@ -3598,7 +3599,7 @@ test("resource inventory keeps separate checks for the same repository address a
       async gitLsRemote(address, context, remaining) {
         calls++;
         assert.equal(address, REPOSITORY_ADDRESS);
-        assert.ok(context.deadline() !== null);
+        assert.ok(context.deadline !== null);
         assert.ok(remaining > NO_ITEMS);
       },
     },
@@ -4412,8 +4413,8 @@ function verifyFixture(
         sshStarted.resolve();
         if (addressBehavior === ADDRESS_SSH_FAIL) throw new Error("SSH failed");
         if (addressBehavior === ADDRESS_SSH_HANG) {
-          await context.done();
-          throw context.err();
+          await cancelled(context.signal);
+          throw context.signal.reason;
         }
       },
     },
@@ -4801,8 +4802,8 @@ function instructionFixture(
         resolveCalls.push({ address, branch, timeout, ssh });
         started.resolve();
         if (behavior.hang) {
-          await context.done();
-          throw context.err();
+          await cancelled(context.signal);
+          throw context.signal.reason;
         }
         if (behavior.resolveFailure) throw behavior.resolveFailure;
         if (behavior.resolveFails) throw new Error("ls-remote failed");

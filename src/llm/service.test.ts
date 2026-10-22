@@ -1484,7 +1484,10 @@ test("OAuth waiting for an address observes caller cancellation", async (t) => {
   const context = new CancellationContext();
   f.caller.context = context;
   const pending = f.login(LOGIN_BODY);
-  const rejected = assert.rejects(pending, (error) => error === context.err());
+  const rejected = assert.rejects(
+    pending,
+    (error) => error === context.signal.reason,
+  );
   const interaction = await entered.promise;
   context.cancel();
   await rejected;
@@ -1583,7 +1586,7 @@ test("lifecycle aborts logins and joins cancellation", async () => {
     const context = new CancellationContext();
     const running = other.component.run(context);
     context.cancel();
-    assert.equal(await running, context.err());
+    assert.equal(await running, context.signal.reason);
     other.store.close();
   } finally {
     f.store.close();

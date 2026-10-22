@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { Logger } from "pino";
 import { z } from "zod";
-import { CancellationContext } from "../kernel/context.ts";
+import { CancellationContext, cancelled } from "../kernel/context.ts";
 import { OperationError } from "../kernel/errors.ts";
 import { HealthRegistry, ResourceFailureReason } from "../kernel/health.ts";
 import { HttpStatus } from "../kernel/http.ts";
@@ -1826,7 +1826,7 @@ test("lifecycle reports health and joins cancellation", async () => {
     const context = new CancellationContext();
     const running = other.run(context);
     context.cancel();
-    assert.equal(await running, context.err());
+    assert.equal(await running, context.signal.reason);
   } finally {
     f.store.close();
   }
@@ -1857,7 +1857,7 @@ test("check runs the probe of the platform on the parsed secret and metadata and
           calls.push({
             secret,
             metadata,
-            deadline: context.deadline(),
+            deadline: context.deadline,
             context: context as CancellationContext,
           });
           observe?.("status=401", ResourceFailureReason.Unclassified);
@@ -1888,7 +1888,7 @@ test("check runs the probe of the platform on the parsed secret and metadata and
   const remaining = calls[0]!.deadline! - Date.now();
   assert.ok(remaining <= CHECK_DEADLINE_MS);
   assert.ok(remaining > CHECK_DEADLINE_MS - DEADLINE_TOLERANCE_MS);
-  assert.ok(calls[0]!.context.err());
+  assert.ok(calls[0]!.context.signal.reason);
   assert.equal(credentialCount(f), NO_CREDENTIALS);
   noSecret(answer);
   for (const platform of [TestPlatform.OAuth, TestPlatform.Key])
@@ -1936,7 +1936,7 @@ test("check answers unclassified when the probe exceeds the 10 s deadline", asyn
       [TestPlatform.Key]: {
         ...TEST_SET.platforms[TestPlatform.Key]!,
         probe: async (_secret, _metadata, context) => {
-          await context.done();
+          await cancelled(context.signal);
           return "unknown";
         },
       },

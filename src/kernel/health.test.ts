@@ -129,7 +129,7 @@ test("all probes start before waiting; timed-out probes receive cancellation and
     store: { sqlite: 200 },
   });
   assert.equal(contexts.length, expectedProbeCount);
-  assert.ok(contexts.every((context) => context.err() !== null));
+  assert.ok(contexts.every((context) => context.signal.aborted));
 });
 
 test("caller cancellation releases child probes and propagates instead of reporting success", async () => {
@@ -143,10 +143,10 @@ test("caller cancellation releases child probes and propagates instead of report
   const checking = registry.check(parent);
   const child = await entered.promise;
   parent.cancel();
-  await assert.rejects(checking, (error) => error === parent.err());
-  assert.equal(child.err(), parent.err());
+  await assert.rejects(checking, (error) => error === parent.signal.reason);
+  assert.equal(child.signal.reason, parent.signal.reason);
   await assert.rejects(
     registry.check(parent),
-    (error) => error === parent.err(),
+    (error) => error === parent.signal.reason,
   );
 });

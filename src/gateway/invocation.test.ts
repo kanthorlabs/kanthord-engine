@@ -3,11 +3,7 @@ import { randomBytes } from "node:crypto";
 import { test, type TestContext } from "node:test";
 import type { Logger } from "pino";
 import { z } from "zod";
-import {
-  CancellationContext,
-  throwIfCancelled,
-  type Context,
-} from "../kernel/context.ts";
+import { CancellationContext, type Context } from "../kernel/context.ts";
 import { MASTER_KEY_BYTES } from "../config/global.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import {
@@ -426,7 +422,7 @@ test("a request abort during the machine recheck answers cancelled and logs no f
   const h = machineInvocation(t, registry, async (context) => {
     request.cancel();
     await Promise.resolve();
-    throwIfCancelled(context);
+    context.signal.throwIfAborted();
   });
   const response = await h.invocation.invoke(clientOperation.id, input, {
     identity: h.identity,

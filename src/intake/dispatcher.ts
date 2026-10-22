@@ -190,7 +190,7 @@ export class Dispatcher {
   }
 
   private halted(): boolean {
-    return this.quiescent || this.dependencies.context.err() !== null;
+    return this.quiescent || this.dependencies.context.signal.aborted;
   }
 
   private async drain(): Promise<void> {

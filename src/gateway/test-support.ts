@@ -11,7 +11,7 @@ import {
 import { Store } from "../kernel/store.ts";
 import { OperationRegistry, StoreName } from "../kernel/operation.ts";
 import { HealthRegistry } from "../kernel/health.ts";
-import { throwIfCancelled, type Context } from "../kernel/context.ts";
+import { type Context } from "../kernel/context.ts";
 import type { Registration } from "../worker/contract.ts";
 import {
   Authentication,
@@ -59,7 +59,7 @@ export function fakeLookups() {
         _issuedAt: number,
         context: Context,
       ) {
-        throwIfCancelled(context);
+        context.signal.throwIfAborted();
         return projectId === TEST_PROJECT_ID &&
           resourceIdentity === `worker:kanthord:${TEST_WORKER_BINDING}`
           ? { project_id: projectId, resource_identity: resourceIdentity }

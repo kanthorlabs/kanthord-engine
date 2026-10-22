@@ -138,22 +138,19 @@ export function checkServerRepositoryTools(): void {
 }
 
 export async function probeRepositoryTools(context: Context): Promise<boolean> {
-  const controller = new AbortController();
-  const unsubscribe = context.onCancel(() => controller.abort());
+  const { signal } = context;
   try {
-    await execFileAsync("bash", ["--version"], { signal: controller.signal });
+    await execFileAsync("bash", ["--version"], { signal });
     const git = await execFileAsync("git", ["--version"], {
-      signal: controller.signal,
+      signal,
     });
     parseGitVersion(git.stdout);
     const ssh = await execFileAsync("ssh", ["-V"], {
-      signal: controller.signal,
+      signal,
     });
     parseSshVersion(ssh.stderr);
     return true;
   } catch {
     return false;
-  } finally {
-    unsubscribe();
   }
 }

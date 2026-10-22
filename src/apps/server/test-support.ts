@@ -103,7 +103,7 @@ export interface MachineDependencies {
 }
 import type { Registration, VerifiedClient } from "../../worker/contract.ts";
 import type { Transaction } from "../../kernel/store.ts";
-import { throwIfCancelled, type Context } from "../../kernel/context.ts";
+import { type Context } from "../../kernel/context.ts";
 import { createIdentity } from "../../kernel/identity.ts";
 import { HttpMethod, HttpStatus } from "../../kernel/http.ts";
 import { isString } from "../../kernel/values.ts";
@@ -437,7 +437,7 @@ export function fakeMachines(
       _issuedAt: number,
       context: Context,
     ) {
-      throwIfCancelled(context);
+      context.signal.throwIfAborted();
       const match = [...bindings].find(
         ([name, binding]) =>
           workerResourceIdentity(name) === resourceIdentity &&

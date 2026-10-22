@@ -10,7 +10,7 @@ import type {
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import {
   CancellationContext,
-  throwIfCancelled,
+  cancelled,
   type Context,
 } from "../kernel/context.ts";
 import { loadPi, piAgentDirectory } from "./pi.ts";
@@ -31,17 +31,17 @@ export async function withDeadline<T>(
   );
   let abandoned = false;
   const pending = promise.then((value) => {
-    if (abandoned || context.err()) {
+    if (abandoned || context.signal.aborted) {
       disposeLate?.(value);
-      throw context.err();
+      throw context.signal.reason;
     }
     return value;
   });
   try {
     return await Promise.race([
       pending,
-      context.done().then(() => {
-        throw context.err();
+      cancelled(context.signal).then(() => {
+        throw context.signal.reason;
       }),
     ]);
   } finally {
@@ -66,7 +66,7 @@ export async function openSession(input: {
   assert.ok(input.cwd);
   assert.ok(input.hostHome);
   assert.ok(input.systemPrompt);
-  throwIfCancelled(input.context);
+  input.context.signal.throwIfAborted();
   const pi = await withDeadline(loadPi(), input.context);
   const settingsManager = pi.SettingsManager.inMemory({
     enableInstallTelemetry: false,

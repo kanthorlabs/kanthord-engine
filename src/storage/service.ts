@@ -5,7 +5,6 @@ import {
   type CredentialRecords,
 } from "../custody/contract.ts";
 import { IdentityKind } from "../kernel/caller.ts";
-import { throwIfCancelled } from "../kernel/context.ts";
 import type { ResourceEntry } from "../kernel/health.ts";
 import type { CallerContext, OperationRegistry } from "../kernel/operation.ts";
 import type { Transaction } from "../kernel/store.ts";
@@ -97,7 +96,7 @@ export class StorageComponent {
         input.params.credential_name,
         caller.context,
       );
-      throwIfCancelled(caller.context);
+      caller.context.signal.throwIfAborted();
       return caller.commit(() => answer);
     });
     registry.register(storageOperations.check, async (input, caller) => {
@@ -106,7 +105,7 @@ export class StorageComponent {
         input.body,
         caller.context,
       );
-      throwIfCancelled(caller.context);
+      caller.context.signal.throwIfAborted();
       return caller.commit(() => answer);
     });
   }

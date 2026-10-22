@@ -1,10 +1,9 @@
+import { addAbortListener } from "node:events";
 import assert from "node:assert/strict";
 import type { AgentSession } from "@earendil-works/pi-coding-agent";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { AssistantMessage } from "@earendil-works/pi-ai";
 import {
-  abortSignal,
-  throwIfCancelled,
   type Context,
   type CancellationContext,
 } from "../../kernel/context.ts";
@@ -130,7 +129,6 @@ function nativeAgent(
   budget: ExecutionBudget,
   composition: CompositionRecord,
   context: CancellationContext,
-  disposeSignal: () => void,
   turnCheck: () => Promise<void>,
   unsubscribeTrace: () => void,
   secrets: CredentialRedaction,
@@ -151,11 +149,11 @@ function nativeAgent(
     try {
       await session.prompt(text, { expandPromptTemplates: false });
     } catch (error) {
-      if (context.err()) throw error;
+      if (context.signal.aborted) throw error;
       throw await promptStop(error, secrets);
     }
     await session.waitForIdle();
-    if (context.err()) return;
+    if (context.signal.aborted) return;
     const failed = await providerFailure(session.messages, secrets);
     if (failed) throw failed;
   };
@@ -163,7 +161,7 @@ function nativeAgent(
     budget.turnEnded();
     if (budget.exhausted()) void session?.abort();
   });
-  let unsubscribeCancellation: (() => void) | null = context.onCancel(() => {
+  let cancellation: Disposable | null = addAbortListener(context.signal, () => {
     void session?.abort();
   });
   return {
@@ -171,7 +169,7 @@ function nativeAgent(
     composition,
     async prompt(work) {
       assert.ok(session);
-      throwIfCancelled(context);
+      context.signal.throwIfAborted();
       pins.setWork(work);
       await settle(work.text);
     },
@@ -180,7 +178,7 @@ function nativeAgent(
     },
     async instruct(work, text) {
       assert.ok(session);
-      throwIfCancelled(context);
+      context.signal.throwIfAborted();
       pins.setWork(work);
       await settle(text);
     },
@@ -195,10 +193,9 @@ function nativeAgent(
     dispose() {
       unsubscribeTrace();
       unsubscribeTurns?.();
-      unsubscribeCancellation?.();
+      cancellation?.[Symbol.dispose]();
       unsubscribeTurns = null;
-      unsubscribeCancellation = null;
-      disposeSignal();
+      cancellation = null;
       context.cancel();
       session?.dispose();
       session = null;
@@ -213,7 +210,6 @@ export async function openNativeAgent(
   assert.equal(input.credential.credential_id, input.agent.credential_id);
   const budget = input.budget;
   const context = budget.agentContext(input.context);
-  const bridge = abortSignal(context);
   let session: AgentSession | undefined;
   const secrets = credentialRedaction(input.credential);
   try {
@@ -238,7 +234,7 @@ export async function openNativeAgent(
       input.modelRuntimeFactory({
         credential: input.credential,
         agent: input.agent,
-        signal: bridge.signal,
+        signal: context.signal,
       }),
       context,
     );
@@ -272,7 +268,6 @@ export async function openNativeAgent(
       budget,
       compositionRecord(layers),
       context,
-      bridge.dispose,
       input.turnCheck ?? (async () => {}),
       unsubscribeTrace,
       secrets,
@@ -280,7 +275,6 @@ export async function openNativeAgent(
   } catch (error) {
     session?.dispose();
     context.cancel();
-    bridge.dispose();
     throw error;
   }
 }

@@ -1,3 +1,4 @@
+import { addAbortListener } from "node:events";
 import assert from "node:assert/strict";
 import type { Server } from "node:http";
 import { test } from "node:test";
@@ -25,7 +26,10 @@ import { HttpStatus } from "../kernel/http.ts";
 import { gatewayOperations } from "./contract.ts";
 import { AccessPolicy, OperationLifetime } from "../kernel/operation.ts";
 import { KANTHORD_AUTH_USERNAME } from "./auth/jwt.ts";
-import { CancellationContext } from "../kernel/context.ts";
+import {
+  CancellationContext,
+  cancelled as aborted,
+} from "../kernel/context.ts";
 import { HealthStatus } from "../kernel/service.ts";
 import { compareRouteSpecificity } from "./service.ts";
 import { GATEWAY_STARTED_MESSAGE } from "./constants.ts";
@@ -539,7 +543,7 @@ test("a delivery under /hooks forwards exact bytes and headers, refuses a body a
         new ReadableStream({
           start(controller) {
             controller.enqueue(new TextEncoder().encode("data: ready\n\n"));
-            caller.context.onCancel(() => {
+            addAbortListener(caller.context.signal, () => {
               cancelled = true;
               controller.close();
             });
@@ -638,7 +642,7 @@ test("client disconnect reaches waiting handlers", async (t) => {
     { ...protectedRead, id: "test.wait", path: "/api/wait" },
     async (_input, caller) => {
       entered.resolve();
-      await caller.context.done();
+      await aborted(caller.context.signal);
       cancelled.resolve();
       return { accountId: "cancelled" };
     },
@@ -709,7 +713,7 @@ test("quiescence cancels HTTP work, preserves direct calls during drain and rele
   registry.register(operation, async (_input, caller) => {
     executions++;
     entered.resolve();
-    await caller.context.done();
+    await aborted(caller.context.signal);
     cancelled.resolve();
     await release.promise;
     assert.equal(fixture.store.healthcheck(), true);
@@ -840,7 +844,7 @@ test("direct and HTTP client cancellation uses Context", async (t) => {
   } as const;
   registry.register(operation, async (_input, caller) => {
     entered.resolve();
-    await caller.context.done();
+    await aborted(caller.context.signal);
     cancelled.resolve();
     return { accountId: "cancelled" };
   });

@@ -1,3 +1,4 @@
+import { addAbortListener } from "node:events";
 import assert from "node:assert/strict";
 import { randomBytes } from "node:crypto";
 import { MessageChannel } from "node:worker_threads";
@@ -142,18 +143,19 @@ test("a port call passes the authorization and never an identity", async (t) => 
 test("a port close cancels the pending calls", async (t) => {
   const { invocation, calls } = fakeInvocation(
     (options) =>
-      new Promise((resolve) =>
-        options.context?.onCancel(() =>
-          resolve({ status: HttpStatus.OK, body: {} }),
-        ),
-      ),
+      new Promise((resolve) => {
+        if (options.context)
+          addAbortListener(options.context.signal, () =>
+            resolve({ status: HttpStatus.OK, body: {} }),
+          );
+      }),
   );
   const { port } = connect(t, invocation);
   port.postMessage(callOf(workerOperations.heartbeat, "call-1", null));
   const call = await eventually(() => calls[0], t.signal);
-  assert.ok(!call.options.context?.err());
+  assert.ok(!call.options.context?.signal.aborted);
   port.close();
-  await eventually(() => call.options.context?.err() ?? undefined, t.signal);
+  await eventually(() => call.options.context?.signal.reason, t.signal);
 });
 
 test("a malformed message with a readable call id is answered with a validation failure", async (t) => {

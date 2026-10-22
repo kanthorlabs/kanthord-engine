@@ -1,3 +1,4 @@
+import { addAbortListener } from "node:events";
 import assert from "node:assert/strict";
 import {
   CancellationContext,
@@ -83,9 +84,10 @@ export class ExecutionBudget {
     assert.ok(Number.isSafeInteger(this.deadline));
     const context = new CancellationContext(parent, this.deadline);
     this.agents.add(context);
-    context.onCancel((error) => {
+    addAbortListener(context.signal, () => {
       this.agents.delete(context);
-      if (error instanceof DeadlineExceeded) this.deadlineReached = true;
+      if (context.signal.reason instanceof DeadlineExceeded)
+        this.deadlineReached = true;
     });
     if (this.exhausted()) context.cancel();
     return context;

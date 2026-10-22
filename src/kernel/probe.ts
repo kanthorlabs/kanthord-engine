@@ -1,4 +1,4 @@
-import { abortSignal, type Context } from "./context.ts";
+import type { Context } from "./context.ts";
 import {
   ResourceFailureReason,
   ResourceStatus,
@@ -77,7 +77,7 @@ export function failureReasonOfStatus(status: number): ResourceFailureReason {
 }
 
 export function thrownFailureReason(context: Context): ResourceFailureReason {
-  return context.err()
+  return context.signal.aborted
     ? ResourceFailureReason.Unclassified
     : ResourceFailureReason.Unreachable;
 }
@@ -89,28 +89,23 @@ export async function probeHttp(
   observe?: ResourceObserver,
 ): Promise<ResourceStatusValue> {
   try {
-    const { signal, dispose } = abortSignal(context);
-    try {
-      if (signal.aborted) return ResourceStatus.Unknown;
-      const response = await globalThis.fetch(url, {
-        method: HttpMethod.Get,
-        headers,
-        signal,
-        redirect: "manual",
-      });
-      await response.body?.cancel();
-      if (signal.aborted) return ResourceStatus.Unknown;
-      if (response.status === HttpStatus.OK) return ResourceStatus.Healthy;
-      observe?.(
-        `status=${response.status}`,
-        failureReasonOfStatus(response.status),
-      );
-      if (response.status === HttpStatus.Forbidden)
-        return ResourceStatus.Unknown;
-      return ResourceStatus.Unhealthy;
-    } finally {
-      dispose();
-    }
+    const { signal } = context;
+    if (signal.aborted) return ResourceStatus.Unknown;
+    const response = await globalThis.fetch(url, {
+      method: HttpMethod.Get,
+      headers,
+      signal,
+      redirect: "manual",
+    });
+    await response.body?.cancel();
+    if (signal.aborted) return ResourceStatus.Unknown;
+    if (response.status === HttpStatus.OK) return ResourceStatus.Healthy;
+    observe?.(
+      `status=${response.status}`,
+      failureReasonOfStatus(response.status),
+    );
+    if (response.status === HttpStatus.Forbidden) return ResourceStatus.Unknown;
+    return ResourceStatus.Unhealthy;
   } catch (error) {
     observe?.(
       thrownReason(error, headerSecrets(headers)),

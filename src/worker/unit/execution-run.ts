@@ -1,3 +1,4 @@
+import { addAbortListener } from "node:events";
 import assert from "node:assert/strict";
 import { CancellationContext, type Context } from "../../kernel/context.ts";
 import { CodedError } from "../../kernel/errors.ts";
@@ -151,8 +152,8 @@ export class ExecutionRun {
     };
   }
 
-  onStop(listener: () => void): () => void {
-    return this.operationContext.onCancel(listener);
+  onStop(listener: () => void): Disposable {
+    return addAbortListener(this.operationContext.signal, listener);
   }
 
   stop(reason: EndReason, code: string | null = null): never {
@@ -184,7 +185,8 @@ export class ExecutionRun {
 
   private requireActive(): void {
     if (this.stopped) throw this.stopped;
-    if (this.operationContext.err()) this.stop(EndReason.OperationFailed);
+    if (this.operationContext.signal.aborted)
+      this.stop(EndReason.OperationFailed);
   }
 
   async call<T>(

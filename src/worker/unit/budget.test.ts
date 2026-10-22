@@ -22,7 +22,7 @@ test("budget bounds wall time, counts turns and keeps cleanup until execution ex
   assert.equal(budget.exhaustedAfterTurn(), true);
   budget.turnEnded();
   assert.equal(budget.exhausted(), true);
-  assert.ok(agent.err());
+  assert.ok(agent.signal.aborted);
   const uncapped = new ExecutionBudget({
     ...input,
     resource_budget: { wall_time_ms: 5000 },
@@ -32,10 +32,10 @@ test("budget bounds wall time, counts turns and keeps cleanup until execution ex
   assert.equal(uncapped.exhaustedAfterTurn(), false);
   const wallAgent = uncapped.agentContext(background);
   t.mock.timers.tick(5000);
-  assert.ok(wallAgent.err());
-  assert.equal(cleanup.err(), null);
+  assert.ok(wallAgent.signal.aborted);
+  assert.equal(cleanup.signal.aborted, false);
   t.mock.timers.tick(5000);
-  assert.ok(cleanup.err());
+  assert.ok(cleanup.signal.aborted);
   assert.equal(
     new ExecutionBudget({
       ...input,
@@ -78,7 +78,7 @@ test("an agent context that reaches its deadline ends the budget", (t) => {
   const agent = budget.agentContext(background);
   monotonic = 4500;
   t.mock.timers.tick(3500);
-  assert.ok(agent.err() instanceof DeadlineExceeded);
+  assert.ok(agent.signal.reason instanceof DeadlineExceeded);
   assert.equal(budget.exhausted(), true);
   assert.equal(budget.remainingMs(), exhausted);
   assert.equal(budget.limit(), BudgetLimit.WallTime);

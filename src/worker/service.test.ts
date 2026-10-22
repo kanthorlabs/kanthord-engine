@@ -362,7 +362,7 @@ test("Worker run joins cancellation before and after startup", async (t) => {
     if (before) context.cancel();
     const running = worker.run(context);
     if (!before) context.cancel();
-    assert.equal(await running, context.err());
+    assert.equal(await running, context.signal.reason);
     assert.equal(await worker.stop(), null);
   }
 });
@@ -1148,7 +1148,7 @@ test("registration checks read heartbeat boundaries without renewing, ending or 
   cancelled.cancel();
   await assert.rejects(
     item.check(cancelled),
-    (error) => error === cancelled.err(),
+    (error) => error === cancelled.signal.reason,
   );
   f.worker.heartbeatClock.drop(row.runtime_identity);
   assert.equal(await item.check(background), ResourceStatus.Unhealthy);

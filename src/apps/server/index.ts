@@ -1,3 +1,4 @@
+import { addAbortListener } from "node:events";
 import assert from "node:assert/strict";
 import { join, dirname } from "node:path";
 import { randomBytes } from "node:crypto";
@@ -152,8 +153,8 @@ import {
 import {
   background,
   CancellationContext,
-  throwIfCancelled,
   type Context,
+  reasonOf,
 } from "../../kernel/context.ts";
 import { createIdempotencyKey } from "../../kernel/identity.ts";
 
@@ -993,7 +994,7 @@ export class Server implements Service {
   }
 
   start(): Promise<Error | null> {
-    if (this.shutdown.err())
+    if (this.shutdown.signal.aborted)
       return Promise.resolve(
         new Diagnostic(
           "system.lifecycle.stopped",
@@ -1027,7 +1028,7 @@ export class Server implements Service {
       this.releases.push(() => trackingStore.close());
       enforceBindingPlacements(this.store, isHostedWorker);
       enforceMasterKey(this.store, config.master_key, this.path);
-      throwIfCancelled(this.shutdown);
+      this.shutdown.signal.throwIfAborted();
       const {
         scheduler,
         tracking,
@@ -1069,18 +1070,18 @@ export class Server implements Service {
       for (const service of services) {
         const error = await service.start();
         if (error) throw error;
-        throwIfCancelled(this.shutdown);
+        this.shutdown.signal.throwIfAborted();
       }
       this.runs = services.map((service) =>
         service.run(this.serviceContext).then((error) => {
-          if (error && error !== this.serviceContext.err()) {
+          if (error && error !== this.serviceContext.signal.reason) {
             this.runError ??= error;
             void this.stop();
           }
           return error;
         }),
       );
-      throwIfCancelled(this.shutdown);
+      this.shutdown.signal.throwIfAborted();
       worker.startPool();
     } catch (error) {
       const cleanup = await this.release();
@@ -1167,9 +1168,10 @@ export class Server implements Service {
     process.on("SIGINT", stop);
     process.on("SIGTERM", stop);
     process.on("SIGHUP", reopen);
-    const unsubscribe = context.onCancel(stop);
+    using cancellation = addAbortListener(context.signal, stop);
     try {
-      if (context.err()) return (await this.stop()) ?? context.err();
+      if (context.signal.aborted)
+        return (await this.stop()) ?? reasonOf(context.signal);
       const error = await this.start();
       if (error) {
         const cleanup = await this.stop();
@@ -1180,12 +1182,15 @@ export class Server implements Service {
             )
           : error;
       }
-      return (await this.stopped.promise) ?? this.runError ?? context.err();
+      return (
+        (await this.stopped.promise) ??
+        this.runError ??
+        reasonOf(context.signal)
+      );
     } finally {
       process.off("SIGINT", stop);
       process.off("SIGTERM", stop);
       process.off("SIGHUP", reopen);
-      unsubscribe();
     }
   }
 

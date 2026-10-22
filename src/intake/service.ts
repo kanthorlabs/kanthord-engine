@@ -1,10 +1,13 @@
+import { addAbortListener } from "node:events";
 import assert from "node:assert/strict";
 import type { Logger } from "pino";
 import type { ServiceIdentity } from "../kernel/caller.ts";
 import {
   background,
   CancellationContext,
+  cancelled,
   type Context,
+  reasonOf,
 } from "../kernel/context.ts";
 import { Diagnostic } from "../kernel/errors.ts";
 import type { HealthRegistry } from "../kernel/health.ts";
@@ -257,7 +260,7 @@ export class IntakeService implements Service, IntakeCollaborations {
   }
 
   start(): Promise<Error | null> {
-    if (this.shutdown.err())
+    if (this.shutdown.signal.aborted)
       return Promise.resolve(
         new Diagnostic(
           "intake.lifecycle.stopped",
@@ -314,24 +317,21 @@ export class IntakeService implements Service, IntakeCollaborations {
   }
 
   async run(context: Context = background): Promise<Error | null> {
-    const unsubscribe = context.onCancel(() => {
+    using cancellation = addAbortListener(context.signal, () => {
       void this.stop();
     });
-    try {
-      if (context.err()) return (await this.stop()) ?? context.err();
-      const error = await this.start();
-      if (error) return error;
-      this.startPollLoops();
-      this.wake();
-      await this.shutdown.done();
-      return (await this.stop()) ?? context.err();
-    } finally {
-      unsubscribe();
-    }
+    if (context.signal.aborted)
+      return (await this.stop()) ?? reasonOf(context.signal);
+    const error = await this.start();
+    if (error) return error;
+    this.startPollLoops();
+    this.wake();
+    await cancelled(this.shutdown.signal);
+    return (await this.stop()) ?? reasonOf(context.signal);
   }
 
   private startPollLoops(): void {
-    if (this.shutdown.err()) return;
+    if (this.shutdown.signal.aborted) return;
     const ids = this.dependencies.store.transaction((tx) => pollInboundIds(tx));
     this.pollLoops.startAll(ids);
   }
@@ -371,7 +371,7 @@ export class IntakeService implements Service, IntakeCollaborations {
   async healthcheck(): Promise<Healthcheck> {
     return {
       events:
-        this.started && !this.shutdown.err()
+        this.started && !this.shutdown.signal.aborted
           ? HealthStatus.Healthy
           : HealthStatus.Unavailable,
     };

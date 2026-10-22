@@ -263,14 +263,14 @@ test("a stop release settles credentials under a fresh context and reconciles a 
     });
     t.after(() => run.dispose());
     const stopped = run.stopOf(new ExecutionStop(stop.reason, stop.code));
-    assert.ok(run.operationContext.err());
+    assert.ok(run.operationContext.signal.aborted);
     run.clients.scheduler = {
       executionRelease: async (
         input: { body: unknown },
-        options: { context: { err(): unknown } },
+        options: { context: { signal: AbortSignal } },
       ) => {
         assert.deepEqual(input.body, { further_work: true, stop });
-        assert.equal(options.context.err(), null);
+        assert.equal(options.context.signal.aborted, false);
         return { type: OperationResultType.Indeterminate };
       },
       claimGet: async () => ({

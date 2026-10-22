@@ -182,7 +182,7 @@ function objectResult(facts: Readonly<AssetFacts>): ObjectCheck {
 function s3Call(material: Material | null, scope: OutboundScope): S3Call {
   assert.ok(material, "An object delete holds a released material.");
   const secret = s3AccessKeySecretSchema.parse(material.value());
-  const deadline = scope.context.deadline();
+  const deadline = scope.context.deadline;
   assert.ok(deadline !== null, "An outbound scope holds a deadline.");
   assert.ok(PLATFORM_CALL_DEADLINE_MS > EXPIRED_DEADLINE_MS);
   return {

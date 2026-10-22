@@ -1,3 +1,4 @@
+import { addAbortListener } from "node:events";
 import { join } from "node:path";
 import type { MessagePort } from "node:worker_threads";
 import { ulid } from "ulid";
@@ -16,11 +17,7 @@ import {
   type Operation,
   type ServiceClient,
 } from "../kernel/operation.ts";
-import {
-  abortSignal,
-  background,
-  CancellationContext,
-} from "../kernel/context.ts";
+import { background, CancellationContext } from "../kernel/context.ts";
 import { createClient, inputValidationFailure } from "./client-result.ts";
 import type { RecordedResponse } from "./idempotency.ts";
 const endpoint = z.url().refine((value) => {
@@ -121,18 +118,14 @@ export function httpClient<T extends Record<string, Operation>>(
       options.context ?? background,
       Date.now() + operation.timeoutMs + 1000,
     );
-    const native = abortSignal(context);
-    const dispose = () => {
-      native.dispose();
-      context.cancel();
-    };
+    const dispose = () => context.cancel();
     let streaming = false;
     try {
       const response = await transport(url, {
         method: operation.method,
         headers,
         ...(operation.body ? { body: JSON.stringify(input.body) } : {}),
-        signal: native.signal,
+        signal: context.signal,
         redirect: "error",
       });
       if (operation.lifetime === OperationLifetime.Stream && response.ok) {
@@ -298,18 +291,18 @@ export function portCaller(port: MessagePort) {
       options.context ?? background,
       Date.now() + operation.timeoutMs + 1000,
     );
-    if (context.err()) return Promise.reject(context.err());
+    if (context.signal.aborted) return Promise.reject(context.signal.reason);
     return new Promise<RecordedResponse>((resolve, reject) => {
       const settle = () => {
         pending.delete(callId);
-        unsubscribe();
+        cancellation[Symbol.dispose]();
         context.cancel();
       };
-      const unsubscribe = context.onCancel(() => {
+      const cancellation = addAbortListener(context.signal, () => {
         if (!pending.has(callId)) return;
         pending.delete(callId);
         port.postMessage({ call_id: callId, cancel: true });
-        reject(context.err());
+        reject(context.signal.reason);
       });
       pending.set(callId, {
         resolve: (answer) => {

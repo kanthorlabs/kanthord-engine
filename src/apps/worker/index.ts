@@ -1,3 +1,4 @@
+import { addAbortListener } from "node:events";
 import { hostname } from "node:os";
 import type { Provider } from "@earendil-works/pi-ai";
 import type { LlmProvider } from "../../llm/provider.ts";
@@ -7,9 +8,9 @@ import { installPiTools } from "../../agent/pi-tools.ts";
 import {
   background,
   CancellationContext,
-  ContextCancelled,
-  throwIfCancelled,
   type Context,
+  ContextCancelled,
+  reasonOf,
 } from "../../kernel/context.ts";
 import { Diagnostic } from "../../kernel/errors.ts";
 import { HttpStatus } from "../../kernel/http.ts";
@@ -151,7 +152,7 @@ export class Worker implements Service {
   }
 
   start(): Promise<Error | null> {
-    if (this.shutdown.err())
+    if (this.shutdown.signal.aborted)
       return Promise.resolve(
         new Diagnostic(
           "worker.lifecycle.stopped",
@@ -160,7 +161,7 @@ export class Worker implements Service {
       );
     this.startTask ??= lifecycle(async () => {
       const env = this.options.env ?? process.env;
-      throwIfCancelled(this.shutdown);
+      this.shutdown.signal.throwIfAborted();
       const { configuration, source } = resolveInstanceConfiguration(
         { instance: this.options.instance },
         env,
@@ -176,7 +177,7 @@ export class Worker implements Service {
         env,
         directory: join(directories.data, PI_DIRECTORY_NAME),
       });
-      throwIfCancelled(this.shutdown);
+      this.shutdown.signal.throwIfAborted();
       this.endpoint = endpoint;
       const exchange = new InstanceExchange(configuration, endpoint);
       this.exchange = exchange;
@@ -196,7 +197,7 @@ export class Worker implements Service {
         log: (record) => this.logRecord(record),
       });
       const token = await this.takeToken();
-      throwIfCancelled(this.shutdown);
+      this.shutdown.signal.throwIfAborted();
       this.connectionName = this.options.connectionName ?? hostname();
       this.logRecord({
         msg: READY_MESSAGE,
@@ -207,7 +208,7 @@ export class Worker implements Service {
         config_source: source,
       });
       this.connection = await this.exchange.connect(this.connectionName);
-      throwIfCancelled(this.shutdown);
+      this.shutdown.signal.throwIfAborted();
       const bindings = this.connection.bindings.map((entry) =>
         this.host(entry),
       );
@@ -265,15 +266,18 @@ export class Worker implements Service {
     process.on("SIGINT", stop);
     process.on("SIGTERM", stop);
     process.on("SIGHUP", ignoreHangup);
-    const unsubscribe = context.onCancel(stop);
+    using cancellation = addAbortListener(context.signal, stop);
     try {
-      if (context.err()) return (await this.stop()) ?? context.err();
+      if (context.signal.aborted)
+        return (await this.stop()) ?? reasonOf(context.signal);
       const error = await this.start();
       if (error) {
         const stopRequested =
-          error instanceof ContextCancelled && this.shutdown.err() !== null;
+          error instanceof ContextCancelled && this.shutdown.signal.aborted;
         return (
-          (await this.stop()) ?? context.err() ?? (stopRequested ? null : error)
+          (await this.stop()) ??
+          reasonOf(context.signal) ??
+          (stopRequested ? null : error)
         );
       }
       this.startExchangeLoops();
@@ -291,7 +295,6 @@ export class Worker implements Service {
       clearTimeout(this.heartbeatTimer);
       clearTimeout(this.renewalTimer);
       this.logins?.stop();
-      unsubscribe();
       process.off("SIGINT", stop);
       process.off("SIGTERM", stop);
       process.off("SIGHUP", ignoreHangup);
@@ -389,7 +392,7 @@ export class Worker implements Service {
 
   private armHeartbeat(): void {
     clearTimeout(this.heartbeatTimer);
-    if (this.shutdown.err()) return;
+    if (this.shutdown.signal.aborted) return;
     const interval =
       this.options.heartbeatIntervalMs ?? INSTANCE_HEARTBEAT_INTERVAL_MS;
     this.heartbeatTimer = setTimeout(
@@ -402,7 +405,7 @@ export class Worker implements Service {
 
   private armRenewal(): void {
     clearTimeout(this.renewalTimer);
-    if (this.shutdown.err()) return;
+    if (this.shutdown.signal.aborted) return;
     this.renewalTimer = setTimeout(
       () => void this.serialize(() => this.renew()),
       this.options.renewalIntervalMs ?? INSTANCE_RENEWAL_INTERVAL_MS,
@@ -420,7 +423,7 @@ export class Worker implements Service {
   }
 
   private async heartbeat(): Promise<void> {
-    if (this.shutdown.err() || !this.connection) return;
+    if (this.shutdown.signal.aborted || !this.connection) return;
     try {
       const answer = await this.exchange!.heartbeat(
         this.connection.connection_id,
@@ -439,7 +442,7 @@ export class Worker implements Service {
   }
 
   private async renew(): Promise<void> {
-    if (this.shutdown.err() || !this.connection) return;
+    if (this.shutdown.signal.aborted || !this.connection) return;
     try {
       await this.takeToken();
       await this.reconnect();
@@ -449,7 +452,7 @@ export class Worker implements Service {
   }
 
   private async refused(error: unknown): Promise<void> {
-    if (this.shutdown.err()) return;
+    if (this.shutdown.signal.aborted) return;
     if (!(error instanceof Diagnostic)) throw error;
     if (error.code === WorkerErrorCode.InstanceConnectionSuperseded)
       return this.finish(
@@ -526,7 +529,7 @@ export class Worker implements Service {
   }
 
   private async resumeRefused(binding: UnitBinding): Promise<void> {
-    if (this.shutdown.err() || this.endReason) return;
+    if (this.shutdown.signal.aborted || this.endReason) return;
     const hosted = [...this.hosted.values()].find(
       (item) => item.binding === binding,
     );

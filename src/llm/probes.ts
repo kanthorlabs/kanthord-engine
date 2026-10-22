@@ -17,7 +17,7 @@ import { anthropicProvider } from "@earendil-works/pi-ai/providers/anthropic";
 import { openaiCodexProvider } from "@earendil-works/pi-ai/providers/openai-codex";
 import { opencodeGoProvider } from "@earendil-works/pi-ai/providers/opencode-go";
 import { z } from "zod";
-import { abortSignal, type Context } from "../kernel/context.ts";
+import type { Context } from "../kernel/context.ts";
 import {
   ResourceFailureReason,
   type ResourceObserver,
@@ -127,49 +127,42 @@ async function httpCheck(
   observe?: ResourceObserver,
 ): Promise<ProviderCheckAnswer> {
   try {
-    const { signal, dispose } = abortSignal(context);
-    try {
+    const { signal } = context;
+    if (signal.aborted) return UNREACHABLE;
+    const response = await globalThis.fetch(url, {
+      method: HttpMethod.Get,
+      headers,
+      signal,
+      redirect: "manual",
+    });
+    if (!response.ok || !readModels) {
+      await response.body?.cancel();
       if (signal.aborted) return UNREACHABLE;
-      const response = await globalThis.fetch(url, {
-        method: HttpMethod.Get,
-        headers,
-        signal,
-        redirect: "manual",
-      });
-      if (!response.ok || !readModels) {
-        await response.body?.cancel();
-        if (signal.aborted) return UNREACHABLE;
-        if (response.ok) return OK_WITHOUT_MODELS;
-        observe?.(
-          `status=${response.status}`,
-          failureReasonOfStatus(response.status),
-        );
-        return {
-          connection: connectionOfStatus(response.status),
-          models: null,
-        };
-      }
-      const body: unknown = await response.json().catch(() => MALFORMED_BODY);
-      if (signal.aborted) return UNREACHABLE;
-      const list = openAIModelListSchema.safeParse(body);
-      if (!list.success) {
-        observe?.(
-          "model list malformed",
-          ResourceFailureReason.InvalidResponse,
-        );
-        return INVALID_RESPONSE;
-      }
+      if (response.ok) return OK_WITHOUT_MODELS;
+      observe?.(
+        `status=${response.status}`,
+        failureReasonOfStatus(response.status),
+      );
       return {
-        connection: Connection.Ok,
-        models: list.data.data.map((model) => ({
-          id: model.id,
-          owned_by: model.owned_by ?? null,
-          created: model.created ?? null,
-        })),
+        connection: connectionOfStatus(response.status),
+        models: null,
       };
-    } finally {
-      dispose();
     }
+    const body: unknown = await response.json().catch(() => MALFORMED_BODY);
+    if (signal.aborted) return UNREACHABLE;
+    const list = openAIModelListSchema.safeParse(body);
+    if (!list.success) {
+      observe?.("model list malformed", ResourceFailureReason.InvalidResponse);
+      return INVALID_RESPONSE;
+    }
+    return {
+      connection: Connection.Ok,
+      models: list.data.data.map((model) => ({
+        id: model.id,
+        owned_by: model.owned_by ?? null,
+        created: model.created ?? null,
+      })),
+    };
   } catch (error) {
     observe?.(
       thrownReason(error, headerSecrets(headers)),
@@ -299,54 +292,48 @@ async function modelCallCheck(
 ): Promise<ProviderCheckAnswer> {
   const { providerId, modelId, credential, options, secrets, call } = check;
   try {
-    const { signal, dispose } = abortSignal(context);
-    try {
-      if (signal.aborted) return UNREACHABLE;
-      const model = getBuiltinModels(providerId).find(
-        ({ id }) => id === modelId,
-      );
-      if (!model) {
-        observe?.("check model not found", ResourceFailureReason.Unclassified);
-        return INVALID_RESPONSE;
-      }
-      const credentials = new InMemoryCredentialStore();
-      await credentials.modify(providerId, async () => credential);
-      let responseStatus: number | null = null;
-      const reply = await call(
-        model,
-        {
-          messages: [
-            {
-              role: "user",
-              content: MODEL_CALL_CHECK_PROMPT,
-              timestamp: Date.now(),
-            },
-          ],
-        },
-        {
-          ...options,
-          signal,
-          onResponse: ({ status }) => {
-            responseStatus = status;
-          },
-        },
-        credentials,
-      );
-      if (signal.aborted) return UNREACHABLE;
-      if (!MODEL_CALL_FAILURES.includes(reply.stopReason))
-        return OK_WITHOUT_MODELS;
-      const status = refusedStatus(responseStatus, reply.errorMessage);
-      observe?.(
-        failureReason(reply, secrets),
-        status === null
-          ? ResourceFailureReason.Unreachable
-          : failureReasonOfStatus(status),
-      );
-      if (status === null) return UNREACHABLE;
-      return { connection: connectionOfStatus(status), models: null };
-    } finally {
-      dispose();
+    const { signal } = context;
+    if (signal.aborted) return UNREACHABLE;
+    const model = getBuiltinModels(providerId).find(({ id }) => id === modelId);
+    if (!model) {
+      observe?.("check model not found", ResourceFailureReason.Unclassified);
+      return INVALID_RESPONSE;
     }
+    const credentials = new InMemoryCredentialStore();
+    await credentials.modify(providerId, async () => credential);
+    let responseStatus: number | null = null;
+    const reply = await call(
+      model,
+      {
+        messages: [
+          {
+            role: "user",
+            content: MODEL_CALL_CHECK_PROMPT,
+            timestamp: Date.now(),
+          },
+        ],
+      },
+      {
+        ...options,
+        signal,
+        onResponse: ({ status }) => {
+          responseStatus = status;
+        },
+      },
+      credentials,
+    );
+    if (signal.aborted) return UNREACHABLE;
+    if (!MODEL_CALL_FAILURES.includes(reply.stopReason))
+      return OK_WITHOUT_MODELS;
+    const status = refusedStatus(responseStatus, reply.errorMessage);
+    observe?.(
+      failureReason(reply, secrets),
+      status === null
+        ? ResourceFailureReason.Unreachable
+        : failureReasonOfStatus(status),
+    );
+    if (status === null) return UNREACHABLE;
+    return { connection: connectionOfStatus(status), models: null };
   } catch (error) {
     observe?.(thrownReason(error, secrets), thrownFailureReason(context));
     return UNREACHABLE;

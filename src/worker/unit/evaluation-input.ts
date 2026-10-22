@@ -2,7 +2,7 @@ import { addedFiles } from "./local-git.ts";
 import { writeFile } from "node:fs/promises";
 import { join, relative } from "node:path";
 import { ensureDirectory } from "../../kernel/files.ts";
-import { abortSignal, CancellationContext } from "../../kernel/context.ts";
+import { CancellationContext } from "../../kernel/context.ts";
 import { identitySchema } from "../../kernel/identity.ts";
 import {
   AssetKind,
@@ -76,12 +76,11 @@ async function placeAsset(
     ),
   );
   const context = new CancellationContext(run.operationContext, deadline);
-  const bridge = abortSignal(context);
   try {
     let bytes: Buffer;
     if ("data" in content) bytes = Buffer.from(content.data, "base64");
     else {
-      const response = await fetch(content.get_url, { signal: bridge.signal });
+      const response = await fetch(content.get_url, { signal: context.signal });
       if (!response.ok) {
         await response.body?.cancel();
         return run.stop(EndReason.OperationFailed);
@@ -92,11 +91,10 @@ async function placeAsset(
     await writeFile(join(directory, assetId), bytes, {
       mode: 0o600,
       flag: "wx",
-      signal: bridge.signal,
+      signal: context.signal,
     });
     return assetId;
   } finally {
-    bridge.dispose();
     context.cancel();
   }
 }

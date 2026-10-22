@@ -46,7 +46,7 @@ type ProbeCall = { secret: unknown; metadata: unknown };
 
 function platformSet(calls: ProbeCall[]): CredentialPlatformSet {
   const probe: PlatformProbe = async (secret, metadata, context) => {
-    if (context.err()) return ResourceStatus.Unknown;
+    if (context.signal.aborted) return ResourceStatus.Unknown;
     calls.push({ secret, metadata });
     return ResourceStatus.Healthy;
   };

@@ -1,3 +1,4 @@
+import { addAbortListener } from "node:events";
 import assert from "node:assert/strict";
 import { homedir } from "node:os";
 import type { Api, Model } from "@earendil-works/pi-ai";
@@ -9,7 +10,9 @@ import type {
 import {
   background,
   CancellationContext,
+  cancelled,
   type Context,
+  reasonOf,
 } from "../kernel/context.ts";
 import { Diagnostic, OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
@@ -313,10 +316,7 @@ export class WorkbenchService implements Service {
     assert.equal(session.agent, null);
     const declaration = getAgentDeclaration(session.agentName);
     assert.ok(declaration);
-    const controller = new AbortController();
-    const unsubscribe = this.shutdown.onCancel((error) =>
-      controller.abort(error),
-    );
+    const lifetime = new CancellationContext(this.shutdown);
     let agent: AgentSession | undefined;
     try {
       const credentials = this.dependencies.workbenchCredentials({
@@ -342,7 +342,7 @@ export class WorkbenchService implements Service {
               .reasoning_effort as ReasoningLevel,
           },
           metadata: resolved.metadata,
-          signal: controller.signal,
+          signal: lifetime.signal,
         }),
         context,
       ).catch((error: unknown) => {
@@ -423,13 +423,11 @@ export class WorkbenchService implements Service {
       session.disposeAgent = () => {
         unsubscribeEvents();
         opened.dispose();
-        unsubscribe();
-        controller.abort();
+        lifetime.cancel();
       };
     } catch (error) {
       agent?.dispose();
-      unsubscribe();
-      controller.abort();
+      lifetime.cancel();
       throw error;
     }
   }
@@ -598,7 +596,7 @@ export class WorkbenchService implements Service {
     try {
       const current = this.changes(session, after);
       if (current.entries.length || version !== current.version) return current;
-      await window.done();
+      await cancelled(window.signal);
       await new Promise((resolve) => setImmediate(resolve));
       return this.changes(session, after);
     } finally {
@@ -792,7 +790,7 @@ export class WorkbenchService implements Service {
   }
 
   start(): Promise<Error | null> {
-    if (this.shutdown.err())
+    if (this.shutdown.signal.aborted)
       return Promise.resolve(
         new Diagnostic(
           WorkbenchErrorCode.Stopped,
@@ -819,24 +817,21 @@ export class WorkbenchService implements Service {
   }
 
   async run(context: Context = background): Promise<Error | null> {
-    const unsubscribe = context.onCancel(() => {
+    using cancellation = addAbortListener(context.signal, () => {
       void this.stop();
     });
-    try {
-      if (context.err()) return (await this.stop()) ?? context.err();
-      const error = await this.start();
-      if (error) return error;
-      await this.shutdown.done();
-      return (await this.stop()) ?? context.err();
-    } finally {
-      unsubscribe();
-    }
+    if (context.signal.aborted)
+      return (await this.stop()) ?? reasonOf(context.signal);
+    const error = await this.start();
+    if (error) return error;
+    await cancelled(this.shutdown.signal);
+    return (await this.stop()) ?? reasonOf(context.signal);
   }
 
   async healthcheck(): Promise<Healthcheck> {
     return {
       sessions:
-        this.started && !this.shutdown.err()
+        this.started && !this.shutdown.signal.aborted
           ? HealthStatus.Healthy
           : HealthStatus.Unavailable,
     };

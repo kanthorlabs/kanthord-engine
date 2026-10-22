@@ -125,7 +125,7 @@ test("node check passes the context and the request evidence identity to Intake"
   assert.equal(remote.mock.callCount(), SINGLE_CALL);
   const [context, evidenceId] =
     remote.mock.calls[FIRST_RESULT_INDEX]!.arguments;
-  assert.equal(context?.err(), null);
+  assert.equal(context?.signal.aborted, false);
   assert.equal(evidenceId, h.request.id);
 });
 

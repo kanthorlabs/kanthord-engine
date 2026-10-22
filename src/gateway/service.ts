@@ -1,3 +1,4 @@
+import { addAbortListener } from "node:events";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { bodyLimit } from "hono/body-limit";
@@ -25,8 +26,8 @@ import { HealthRegistry } from "../kernel/health.ts";
 import {
   background,
   CancellationContext,
-  throwIfCancelled,
   type Context,
+  reasonOf,
 } from "../kernel/context.ts";
 import type { GatewayConfig } from "./config.ts";
 import { Diagnostic, asError } from "../kernel/errors.ts";
@@ -206,7 +207,7 @@ export class GatewayService implements Service {
   }
 
   start(): Promise<Error | null> {
-    if (this.shutdown.err())
+    if (this.shutdown.signal.aborted)
       return Promise.resolve(
         new Diagnostic(
           "gateway.lifecycle.stopped",
@@ -252,7 +253,7 @@ export class GatewayService implements Service {
       server.on("error", (error) => {
         throw error;
       });
-      throwIfCancelled(this.shutdown);
+      this.shutdown.signal.throwIfAborted();
       this.ready = true;
       this.started = true;
       this.options.logger.info(
@@ -314,29 +315,26 @@ export class GatewayService implements Service {
   }
 
   async run(context: Context = background): Promise<Error | null> {
-    const unsubscribe = context.onCancel(() => {
+    using cancellation = addAbortListener(context.signal, () => {
       void this.stop();
     });
-    try {
-      if (context.err()) return (await this.stop()) ?? context.err();
-      const error = await this.start();
-      if (error) {
-        const cleanup = await this.stop();
-        return cleanup
-          ? new AggregateError(
-              [error, cleanup],
-              "Gateway start and cleanup failed.",
-            )
-          : error;
-      }
-      return (await this.stopped.promise) ?? context.err();
-    } finally {
-      unsubscribe();
+    if (context.signal.aborted)
+      return (await this.stop()) ?? reasonOf(context.signal);
+    const error = await this.start();
+    if (error) {
+      const cleanup = await this.stop();
+      return cleanup
+        ? new AggregateError(
+            [error, cleanup],
+            "Gateway start and cleanup failed.",
+          )
+        : error;
     }
+    return (await this.stopped.promise) ?? reasonOf(context.signal);
   }
 
   async healthcheck(): Promise<Healthcheck> {
-    const ready = this.ready && this.started && !this.shutdown.err();
+    const ready = this.ready && this.started && !this.shutdown.signal.aborted;
     return {
       listener:
         ready && this.listener?.listening
@@ -371,7 +369,7 @@ export class GatewayService implements Service {
     });
     app.use("*", async (context, next) => {
       await next();
-      if (this.shutdown.err())
+      if (this.shutdown.signal.aborted)
         context.header(CONNECTION_HEADER, CONNECTION_CLOSE);
     });
     app.use(

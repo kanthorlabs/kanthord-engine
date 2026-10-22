@@ -4,7 +4,7 @@ import { open, realpath } from "node:fs/promises";
 import { isAbsolute, relative, sep } from "node:path";
 import {
   CancellationContext,
-  throwIfCancelled,
+  cancelled,
   type Context,
 } from "../kernel/context.ts";
 import { InvalidReason, SourceState } from "../worker/contract.ts";
@@ -52,7 +52,7 @@ async function readBounded(
   workspace: string | null,
   context: Context,
 ): Promise<SourceRead> {
-  throwIfCancelled(context);
+  context.signal.throwIfAborted();
   const resolved = await realpath(path);
   if (workspace !== null) {
     const location = relative(await realpath(workspace), resolved);
@@ -63,7 +63,7 @@ async function readBounded(
     )
       return invalid(path, InvalidReason.OutsideWorkspace);
   }
-  throwIfCancelled(context);
+  context.signal.throwIfAborted();
   const file = await open(
     resolved,
     constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
@@ -71,7 +71,7 @@ async function readBounded(
   try {
     if (!(await file.stat()).isFile())
       return invalid(path, InvalidReason.NotRegularFile);
-    throwIfCancelled(context);
+    context.signal.throwIfAborted();
     const bytes = Buffer.alloc(PROMPT_SOURCE_MAX_BYTES + 1);
     const { bytesRead } = await file.read(
       bytes,
@@ -113,10 +113,12 @@ export async function readAgentFile(
   try {
     return await Promise.race([
       readBounded(path, options.workspace, context),
-      context.done().then(() => invalid(path, InvalidReason.Deadline)),
+      cancelled(context.signal).then(() =>
+        invalid(path, InvalidReason.Deadline),
+      ),
     ]);
   } catch (error) {
-    if (context.err()) return invalid(path, InvalidReason.Deadline);
+    if (context.signal.aborted) return invalid(path, InvalidReason.Deadline);
     if (error instanceof Error && "code" in error && error.code === MISSING)
       return { state: SourceState.Absent, path };
     return invalid(path, InvalidReason.Unreadable);

@@ -1,10 +1,6 @@
 import assert from "node:assert/strict";
 import { simpleGit } from "simple-git";
-import {
-  abortSignal,
-  throwIfCancelled,
-  type Context,
-} from "../../kernel/context.ts";
+import type { Context } from "../../kernel/context.ts";
 import {
   GIT_UNSAFE_OPTIONS,
   isolatedGitEnvironment,
@@ -73,20 +69,15 @@ async function run(
 ): Promise<string> {
   assert.ok(directory);
   assert.ok(deadlineMs > EXPIRED);
-  throwIfCancelled(context);
-  const bridge = abortSignal(context);
-  try {
-    return await simpleGit({
-      baseDir: directory,
-      abort: bridge.signal,
-      timeout: { block: deadlineMs },
-      unsafe: GIT_UNSAFE_OPTIONS,
-    })
-      .env(gitEnvironment(env))
-      .raw(args);
-  } finally {
-    bridge.dispose();
-  }
+  context.signal.throwIfAborted();
+  return await simpleGit({
+    baseDir: directory,
+    abort: context.signal,
+    timeout: { block: deadlineMs },
+    unsafe: GIT_UNSAFE_OPTIONS,
+  })
+    .env(gitEnvironment(env))
+    .raw(args);
 }
 
 function gitEnvironment(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {

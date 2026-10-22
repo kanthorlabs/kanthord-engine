@@ -80,7 +80,7 @@ function heldJobWait(
 }
 
 function cancelled(caller: CallerContext): void {
-  if (caller.context.err())
+  if (caller.context.signal.aborted)
     throw new OperationError(
       HttpStatus.ServiceUnavailable,
       "gateway.invocation.cancelled",

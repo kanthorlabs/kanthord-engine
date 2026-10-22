@@ -1,3 +1,4 @@
+import { addAbortListener } from "node:events";
 import { simpleGit, type SimpleGit, type SimpleGitOptions } from "simple-git";
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
@@ -7,7 +8,7 @@ import { join, posix } from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { promisify } from "node:util";
-import { throwIfCancelled, type Context } from "../kernel/context.ts";
+import { type Context } from "../kernel/context.ts";
 import { CodedError, Diagnostic } from "../kernel/errors.ts";
 import {
   GIT_UNSAFE_OPTIONS,
@@ -233,13 +234,15 @@ async function runGitTask<T>(
 ): Promise<T> {
   assert.ok(operation);
   const controller = new AbortController();
-  const unsubscribe = context.onCancel(() => controller.abort());
+  using cancellation = addAbortListener(context.signal, () =>
+    controller.abort(),
+  );
   const timer = setTimeout(
     () => controller.abort(),
     Math.max(EXPIRED, deadlineMs),
   );
   try {
-    throwIfCancelled(context);
+    context.signal.throwIfAborted();
     if (deadlineMs <= EXPIRED) throw new Error("Git deadline exceeded");
     const git = simpleGit({
       ...(directory === undefined ? {} : { baseDir: directory }),
@@ -260,7 +263,6 @@ async function runGitTask<T>(
     });
   } finally {
     clearTimeout(timer);
-    unsubscribe();
   }
 }
 

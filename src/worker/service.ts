@@ -1,8 +1,10 @@
+import { addAbortListener } from "node:events";
 import {
   background,
   CancellationContext,
-  throwIfCancelled,
+  cancelled,
   type Context,
+  reasonOf,
 } from "../kernel/context.ts";
 import { asError, Diagnostic } from "../kernel/errors.ts";
 import {
@@ -324,7 +326,7 @@ export class WorkerService implements Service {
   private readonly quiesceTask = Promise.resolve(null);
   private started = false;
   start(): Promise<Error | null> {
-    if (this.shutdown.err())
+    if (this.shutdown.signal.aborted)
       return Promise.resolve(
         new Diagnostic(
           "worker.lifecycle.stopped",
@@ -355,32 +357,29 @@ export class WorkerService implements Service {
     return this.stopTask;
   }
   async run(context: Context = background): Promise<Error | null> {
-    const unsubscribe = context.onCancel(() => {
+    using cancellation = addAbortListener(context.signal, () => {
       void this.stop();
     });
-    try {
-      if (context.err()) return (await this.stop()) ?? context.err();
-      const error = await this.start();
-      if (error) return error;
-      if (!this.quiesced)
-        this.heartbeatTimer ??= setInterval(() => {
-          try {
-            this.sweepRegistrations();
-          } catch (failure) {
-            this.runError = asError(failure);
-            void this.stop();
-          }
-        }, HEARTBEAT_SWEEP_INTERVAL_MS).unref();
-      await this.shutdown.done();
-      return (await this.stop()) ?? this.runError ?? context.err();
-    } finally {
-      unsubscribe();
-    }
+    if (context.signal.aborted)
+      return (await this.stop()) ?? reasonOf(context.signal);
+    const error = await this.start();
+    if (error) return error;
+    if (!this.quiesced)
+      this.heartbeatTimer ??= setInterval(() => {
+        try {
+          this.sweepRegistrations();
+        } catch (failure) {
+          this.runError = asError(failure);
+          void this.stop();
+        }
+      }, HEARTBEAT_SWEEP_INTERVAL_MS).unref();
+    await cancelled(this.shutdown.signal);
+    return (await this.stop()) ?? this.runError ?? reasonOf(context.signal);
   }
   async healthcheck(): Promise<Healthcheck> {
     return {
       registrations:
-        this.started && !this.shutdown.err()
+        this.started && !this.shutdown.signal.aborted
           ? HealthStatus.Healthy
           : HealthStatus.Unavailable,
     };
@@ -596,7 +595,7 @@ export class WorkerService implements Service {
       runtimeIdentity: row.runtime_identity,
       capability: REGISTRATION_CAPABILITY,
       check: async (context) => {
-        throwIfCancelled(context);
+        context.signal.throwIfAborted();
         const window = this.dependencies.config.heartbeat_window;
         assert.ok(Number.isSafeInteger(window) && window > NO_ITEMS);
         assert.ok(row.runtime_identity);
