@@ -150,8 +150,8 @@ test("S1 refusal aborts an active native session and ends its agent.session span
     reason: EndReason.Revoked,
     code: EXECUTION_NOT_RUNNING,
   });
-  disposeAgent(run, agent);
-  disposeAgent(run, agent);
+  disposeAgent(agent);
+  disposeAgent(agent);
   run.dispose();
   assert.equal(ends.length, EXPECTED_CALL_COUNT);
   assert.equal(provider.calls.length, EXPECTED_CALL_COUNT);

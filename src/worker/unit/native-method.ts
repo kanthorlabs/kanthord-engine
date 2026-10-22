@@ -69,7 +69,7 @@ export async function runNativeExecution(
     if (!unlink) return;
     opened.delete(agent);
     try {
-      disposeAgent(run, agent);
+      disposeAgent(agent);
     } finally {
       unlink[Symbol.dispose]();
     }
@@ -164,10 +164,7 @@ export async function runNativeExecution(
   }
 }
 
-export function disposeAgent(
-  run: ExecutionRun,
-  agent: NativeAgent | null,
-): void {
+export function disposeAgent(agent: NativeAgent | null): void {
   if (!agent) return;
   agent.dispose();
 }
