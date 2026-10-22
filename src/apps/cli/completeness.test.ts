@@ -90,12 +90,12 @@ const TOP_LEVEL_NAMES = new Set([
 ]);
 const OTHER_PAGE = "other";
 const NO_ITEMS = 0;
-const DOCUMENTED_COUNT = 182;
+const DOCUMENTED_COUNT = 184;
 const TOP_LEVEL_DEPTH = 1;
 const INTAKE_GROUP = "intake";
 const TRACKING_GROUP = "tracking";
-const IMPLEMENTED_COUNT = 177;
-const OPERATION_COUNT = 194;
+const IMPLEMENTED_COUNT = 179;
+const OPERATION_COUNT = 196;
 const INTAKE_LEAVES = [
   "intake event delete",
   "intake event discard",
@@ -123,7 +123,7 @@ const PAGE_COUNTS = {
   worker: 16,
   gateway: 3,
   other: 9,
-  tracking: 3,
+  tracking: 5,
 };
 type Documented = { path: string; operations: string[] };
 

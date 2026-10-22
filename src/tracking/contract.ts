@@ -26,6 +26,11 @@ export const RECORD_IDENTITY_MAX = 128;
 export const SPAN_LIST_LIMIT_DEFAULT = 500;
 export const SPAN_LIST_LIMIT_MIN = 1;
 export const SPAN_LIST_LIMIT_MAX = 1000;
+export const TRACE_LIST_LIMIT_MIN = 1;
+export const TRACE_LIST_LIMIT_MAX = 1000;
+export const TRACE_LIST_LIMIT_DEFAULT = 100;
+export const TRACE_QUERY_MAX_CHARACTERS = 200;
+export const FACET_VALUES_MAX = 200;
 
 export const SpanStatus = { Unset: "Unset", Ok: "Ok", Error: "Error" } as const;
 export const spanStatusSchema = z.enum(SpanStatus);
@@ -65,6 +70,15 @@ export type RefusalReason = z.infer<typeof refusalReasonSchema>;
 export const TraceState = { Open: "open", Ok: "ok", Error: "error" } as const;
 export const traceStateSchema = z.enum(TraceState);
 export type TraceState = z.infer<typeof traceStateSchema>;
+
+export const TraceSort = {
+  StartedAt: "started_at",
+  DurationMs: "duration_ms",
+  TotalTokens: "total_tokens",
+  CostUsd: "cost_usd",
+} as const;
+export const traceSortSchema = z.enum(TraceSort);
+export type TraceSort = z.infer<typeof traceSortSchema>;
 
 export const traceIdSchema = z
   .string()
@@ -279,6 +293,8 @@ export interface ExecutionTelemetry {
 }
 
 const traceParams = z.strictObject({ trace_id: traceIdSchema });
+const nonNegativeInteger = z.coerce.number().int().min(0);
+const nonNegativeCost = z.coerce.number().finite().min(0);
 
 export const trackingOperations = {
   telemetryWrite: {
@@ -325,6 +341,83 @@ export const trackingOperations = {
       body: z.null(),
     }),
     output: traceSummarySchema,
+  },
+  traceList: {
+    id: "tracking.trace.list",
+    service: TRACKING_SERVICE_NAME,
+    method: HttpMethod.Get,
+    path: "/api/tracking/trace",
+    access: AccessPolicy.Human,
+    store: StoreName.Tracking,
+    lifetime: OperationLifetime.Unary,
+    timeoutMs: TRACKING_TIMEOUT_MS,
+    mutation: false,
+    body: false,
+    status: HttpStatus.OK,
+    description: "List one page of trace summaries, newest first by default.",
+    input: z.strictObject({
+      params: z.strictObject({}),
+      query: z.strictObject({
+        project_id: identitySchema("project").optional(),
+        node_id: identitySchema("node").optional(),
+        execution_id: identitySchema(EXECUTION_IDENTITY_PREFIX).optional(),
+        worker_name: boundedName.optional(),
+        agent_name: boundedName.optional(),
+        model: boundedName.optional(),
+        error_type: boundedName.optional(),
+        state: traceStateSchema.optional(),
+        q: z.string().min(1).max(TRACE_QUERY_MAX_CHARACTERS).optional(),
+        started_from: nonNegativeInteger.optional(),
+        started_to: nonNegativeInteger.optional(),
+        min_duration_ms: nonNegativeInteger.optional(),
+        max_duration_ms: nonNegativeInteger.optional(),
+        min_total_tokens: nonNegativeInteger.optional(),
+        max_total_tokens: nonNegativeInteger.optional(),
+        min_cost_usd: nonNegativeCost.optional(),
+        max_cost_usd: nonNegativeCost.optional(),
+        sort: traceSortSchema.default(TraceSort.StartedAt),
+        limit: z.coerce
+          .number()
+          .int()
+          .min(TRACE_LIST_LIMIT_MIN)
+          .max(TRACE_LIST_LIMIT_MAX)
+          .default(TRACE_LIST_LIMIT_DEFAULT),
+        cursor: z.string().min(1).optional(),
+      }),
+      body: z.null(),
+    }),
+    output: z.strictObject({
+      items: z.array(traceSummarySchema),
+      next_cursor: z.string().nullable(),
+    }),
+  },
+  facetGet: {
+    id: "tracking.facet.get",
+    service: TRACKING_SERVICE_NAME,
+    method: HttpMethod.Get,
+    path: "/api/tracking/facet",
+    access: AccessPolicy.Human,
+    store: StoreName.Tracking,
+    lifetime: OperationLifetime.Unary,
+    timeoutMs: TRACKING_TIMEOUT_MS,
+    mutation: false,
+    body: false,
+    status: HttpStatus.OK,
+    description:
+      "Read the distinct worker names, agent names, models and error types of the traces.",
+    input: z.strictObject({
+      params: z.strictObject({}),
+      query: z.strictObject({
+        project_id: identitySchema("project").optional(),
+      }),
+      body: z.null(),
+    }),
+    output: z.strictObject({
+      worker_names: z.array(z.string()),
+      agent_names: z.array(z.string()),
+      models: z.array(z.string()),
+      error_types: z.array(z.string()),
+    }),
   },
   spanList: {
     id: "tracking.span.list",

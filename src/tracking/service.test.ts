@@ -15,11 +15,13 @@ import {
   SpanOrigin,
   SpanStatus,
   TRACKING_SERVICE_NAME,
+  TraceSort,
   traceSummarySchema,
   type ExecutionTrace,
 } from "./contract.ts";
 import { trackingMigrations } from "./migrations.ts";
 import { TrackingService } from "./service.ts";
+import { insertTrace } from "./trace-store.ts";
 
 const TRACE: ExecutionTrace = {
   trace_id: "a".repeat(32),
@@ -45,6 +47,9 @@ const RATE_LIMITED = "rate_limited";
 const INPUT_TEXT = "npm test";
 const TRACE_NOT_FOUND = "tracking.trace.not_found";
 const TEXT_NOT_FOUND = "tracking.text.not_found";
+const CURSOR_INVALID = "system.pagination.cursor_invalid";
+const OTHER_EXECUTION = "execution_01JZ8R2B3C4D5E6F7G8H9J0K1N";
+const OTHER_TRACE = "b".repeat(32);
 
 function harness(t: TestContext) {
   const store = new Store(IN_MEMORY_DATABASE);
@@ -408,4 +413,72 @@ test("an unknown trace and an unknown text answer not found", (t) => {
     () => service.textGet(TRACE.trace_id, `${SPAN}:input`, caller(store)),
     (error) => error instanceof OperationError && error.code === TEXT_NOT_FOUND,
   );
+});
+
+function traceListQuery(
+  overrides: Partial<Parameters<TrackingService["traceList"]>[0]> = {},
+) {
+  return { sort: TraceSort.StartedAt, limit: PAGE_OF_ONE, ...overrides };
+}
+
+function cursorOf(parts: unknown): string {
+  return Buffer.from(JSON.stringify(parts), "utf8").toString("base64url");
+}
+
+function cursorInvalid(error: unknown): boolean {
+  return error instanceof OperationError && error.code === CURSOR_INVALID;
+}
+
+test("a trace page continues from its cursor and ends with a null cursor", (t) => {
+  const { store, service } = harness(t);
+  service.executionOpened(TRACE, CREATED);
+  store.transaction((tx) =>
+    insertTrace(
+      tx,
+      {
+        ...TRACE,
+        trace_id: OTHER_TRACE,
+        execution_id: OTHER_EXECUTION,
+        root_span_id: "4".repeat(16),
+      },
+      ENDED,
+    ),
+  );
+  const first = service.traceList(traceListQuery(), caller(store));
+  assert.equal(first.items[0]?.trace_id, OTHER_TRACE);
+  assert.ok(first.next_cursor);
+  const second = service.traceList(
+    traceListQuery({ cursor: first.next_cursor }),
+    caller(store),
+  );
+  assert.equal(second.items[0]?.trace_id, TRACE.trace_id);
+  assert.equal(second.next_cursor, null);
+});
+
+test("a malformed cursor and a cursor of another sort are refused", (t) => {
+  const { store, service } = harness(t);
+  for (const cursor of [
+    "not-a-cursor",
+    cursorOf("text"),
+    cursorOf([TraceSort.StartedAt, 1]),
+    cursorOf([TraceSort.StartedAt, "1", 1]),
+    cursorOf([TraceSort.StartedAt, 1, 0]),
+    cursorOf(["unknown", 1, 1]),
+    cursorOf([TraceSort.CostUsd, 1, 1]),
+  ])
+    assert.throws(
+      () => service.traceList(traceListQuery({ cursor }), caller(store)),
+      cursorInvalid,
+    );
+});
+
+test("the facet read answers the four arrays", (t) => {
+  const { store, service } = harness(t);
+  service.executionOpened(TRACE, CREATED);
+  assert.deepEqual(service.facetGet({}, caller(store)), {
+    worker_names: [],
+    agent_names: [],
+    models: [],
+    error_types: [],
+  });
 });

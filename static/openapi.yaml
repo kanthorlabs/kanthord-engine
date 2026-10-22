@@ -284,6 +284,8 @@ paths:
     $ref: ./openapi/storage/credential.update_metadata.yaml#/pathItem
   /api/storage/credential/{credential_name}/verify:
     $ref: ./openapi/storage/credential.verify.yaml#/pathItem
+  /api/tracking/facet:
+    $ref: ./openapi/tracking/facet.get.yaml#/pathItem
   /api/tracking/trace/{trace_id}/span:
     $ref: ./openapi/tracking/span.list.yaml#/pathItem
   /api/tracking/execution/{execution_id}/telemetry:
@@ -292,6 +294,8 @@ paths:
     $ref: ./openapi/tracking/text.get.yaml#/pathItem
   /api/tracking/trace/{trace_id}:
     $ref: ./openapi/tracking/trace.get.yaml#/pathItem
+  /api/tracking/trace:
+    $ref: ./openapi/tracking/trace.list.yaml#/pathItem
   /api/workbench/session/{session_id}/abort:
     $ref: ./openapi/workbench/session.abort.yaml#/pathItem
   /api/workbench/session/{session_id}/approve:

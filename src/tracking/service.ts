@@ -34,6 +34,7 @@ import {
   SpanOrigin,
   SpanStatus,
   TRACKING_SERVICE_NAME,
+  traceSortSchema,
   trackingOperations,
   type Acknowledgement,
   type Attributes,
@@ -42,7 +43,14 @@ import {
   type ExecutionTraces,
   type RootSpanEnd,
   type TelemetryRecord,
+  type TraceSort,
 } from "./contract.ts";
+import {
+  listTraces,
+  readFacets,
+  type TraceCursor,
+  type TraceListQuery,
+} from "./trace-list.ts";
 import { insertTrace, listSpans, readText, readTrace } from "./trace-store.ts";
 
 const ROOT_START_RECORD = "start";
@@ -52,6 +60,7 @@ const CURSOR_INVALID_CODE = "system.pagination.cursor_invalid";
 const CURSOR_ENCODING = "base64url";
 const TEXT_ENCODING = "utf8";
 const CURSOR_START = 0;
+const TRACE_CURSOR_PARTS = 3;
 
 export interface Dependencies {
   store: Store;
@@ -89,6 +98,56 @@ function encodeCursor(position: number | null): string | null {
   if (position === null) return null;
   assert.ok(Number.isSafeInteger(position));
   return Buffer.from(String(position), TEXT_ENCODING).toString(CURSOR_ENCODING);
+}
+
+function cursorInvalid(): never {
+  throw new OperationError(
+    HttpStatus.BadRequest,
+    CURSOR_INVALID_CODE,
+    "Cursor is invalid.",
+  );
+}
+
+function parsedCursor(decoded: string): unknown {
+  try {
+    return JSON.parse(decoded);
+  } catch {
+    return cursorInvalid();
+  }
+}
+
+function decodeTraceCursor(
+  cursor: string | undefined,
+  sort: TraceSort,
+): TraceCursor | null {
+  if (cursor === undefined) return null;
+  const decoded = Buffer.from(cursor, CURSOR_ENCODING).toString(TEXT_ENCODING);
+  const parts = parsedCursor(decoded);
+  if (
+    !Array.isArray(parts) ||
+    parts.length !== TRACE_CURSOR_PARTS ||
+    !traceSortSchema.safeParse(parts[0]).success ||
+    parts[0] !== sort
+  )
+    return cursorInvalid();
+  const [, value, position] = parts;
+  if (
+    !Number.isFinite(value) ||
+    !Number.isSafeInteger(position) ||
+    position <= CURSOR_START
+  )
+    return cursorInvalid();
+  const traceCursor = { sort, value, position };
+  if (encodeTraceCursor(traceCursor) !== cursor) return cursorInvalid();
+  return traceCursor;
+}
+
+function encodeTraceCursor(cursor: TraceCursor | null): string | null {
+  if (cursor === null) return null;
+  return Buffer.from(
+    JSON.stringify([cursor.sort, cursor.value, cursor.position]),
+    TEXT_ENCODING,
+  ).toString(CURSOR_ENCODING);
 }
 
 function identityAttributes(trace: ExecutionTrace) {
@@ -217,6 +276,20 @@ export class TrackingService implements Service, ExecutionTelemetry {
     return caller.commit((tx) => readTrace(tx, traceId) ?? traceNotFound());
   }
 
+  traceList(query: TraceListQuery, caller: CallerContext) {
+    assert.ok(caller.identity);
+    const after = decodeTraceCursor(query.cursor, query.sort);
+    return caller.commit((tx) => {
+      const page = listTraces(tx, query, after);
+      return { items: page.items, next_cursor: encodeTraceCursor(page.last) };
+    });
+  }
+
+  facetGet(query: { project_id?: string }, caller: CallerContext) {
+    assert.ok(caller.identity);
+    return caller.commit((tx) => readFacets(tx, query.project_id));
+  }
+
   spanList(
     traceId: string,
     query: { limit: number; cursor?: string },
@@ -256,6 +329,8 @@ export class TrackingService implements Service, ExecutionTelemetry {
       ) ||
       trackingOperations.telemetryWrite.access !== AccessPolicy.Client ||
       trackingOperations.traceGet.access !== AccessPolicy.Human ||
+      trackingOperations.traceList.access !== AccessPolicy.Human ||
+      trackingOperations.facetGet.access !== AccessPolicy.Human ||
       trackingOperations.spanList.access !== AccessPolicy.Human ||
       trackingOperations.textGet.access !== AccessPolicy.Human
     )
@@ -271,6 +346,12 @@ export class TrackingService implements Service, ExecutionTelemetry {
     );
     registry.register(trackingOperations.traceGet, (input, caller) =>
       this.traceGet(input.params.trace_id, caller),
+    );
+    registry.register(trackingOperations.traceList, (input, caller) =>
+      this.traceList(input.query, caller),
+    );
+    registry.register(trackingOperations.facetGet, (input, caller) =>
+      this.facetGet(input.query, caller),
     );
     registry.register(trackingOperations.spanList, (input, caller) =>
       this.spanList(input.params.trace_id, input.query, caller),

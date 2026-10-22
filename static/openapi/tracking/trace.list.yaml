@@ -1,0 +1,444 @@
+# Generated from the operation registry by kanthord gateway openapi.
+pathItem:
+  get:
+    operationId: tracking.trace.list
+    tags:
+      - tracking
+    description: List one page of trace summaries, newest first by default.
+    x-access-policy: human
+    x-timeout-ms: 30000
+    x-mutation: false
+    x-kanthord-lifetime: unary
+    security:
+      - bearerAuth: []
+    parameters:
+      - name: project_id
+        in: query
+        required: false
+        schema:
+          $ref: "#/components/schemas/tracking.trace.list.Input/properties/query/properti\
+            es/project_id"
+      - name: node_id
+        in: query
+        required: false
+        schema:
+          $ref: "#/components/schemas/tracking.trace.list.Input/properties/query/properti\
+            es/node_id"
+      - name: execution_id
+        in: query
+        required: false
+        schema:
+          $ref: "#/components/schemas/tracking.trace.list.Input/properties/query/properti\
+            es/execution_id"
+      - name: worker_name
+        in: query
+        required: false
+        schema:
+          $ref: "#/components/schemas/tracking.trace.list.Input/properties/query/properti\
+            es/worker_name"
+      - name: agent_name
+        in: query
+        required: false
+        schema:
+          $ref: "#/components/schemas/tracking.trace.list.Input/properties/query/properti\
+            es/agent_name"
+      - name: model
+        in: query
+        required: false
+        schema:
+          $ref: "#/components/schemas/tracking.trace.list.Input/properties/query/properti\
+            es/model"
+      - name: error_type
+        in: query
+        required: false
+        schema:
+          $ref: "#/components/schemas/tracking.trace.list.Input/properties/query/properti\
+            es/error_type"
+      - name: state
+        in: query
+        required: false
+        schema:
+          $ref: "#/components/schemas/tracking.trace.list.Input/properties/query/properti\
+            es/state"
+      - name: q
+        in: query
+        required: false
+        schema:
+          $ref: "#/components/schemas/tracking.trace.list.Input/properties/query/properti\
+            es/q"
+      - name: started_from
+        in: query
+        required: false
+        schema:
+          $ref: "#/components/schemas/tracking.trace.list.Input/properties/query/properti\
+            es/started_from"
+      - name: started_to
+        in: query
+        required: false
+        schema:
+          $ref: "#/components/schemas/tracking.trace.list.Input/properties/query/properti\
+            es/started_to"
+      - name: min_duration_ms
+        in: query
+        required: false
+        schema:
+          $ref: "#/components/schemas/tracking.trace.list.Input/properties/query/properti\
+            es/min_duration_ms"
+      - name: max_duration_ms
+        in: query
+        required: false
+        schema:
+          $ref: "#/components/schemas/tracking.trace.list.Input/properties/query/properti\
+            es/max_duration_ms"
+      - name: min_total_tokens
+        in: query
+        required: false
+        schema:
+          $ref: "#/components/schemas/tracking.trace.list.Input/properties/query/properti\
+            es/min_total_tokens"
+      - name: max_total_tokens
+        in: query
+        required: false
+        schema:
+          $ref: "#/components/schemas/tracking.trace.list.Input/properties/query/properti\
+            es/max_total_tokens"
+      - name: min_cost_usd
+        in: query
+        required: false
+        schema:
+          $ref: "#/components/schemas/tracking.trace.list.Input/properties/query/properti\
+            es/min_cost_usd"
+      - name: max_cost_usd
+        in: query
+        required: false
+        schema:
+          $ref: "#/components/schemas/tracking.trace.list.Input/properties/query/properti\
+            es/max_cost_usd"
+      - name: sort
+        in: query
+        required: false
+        schema:
+          $ref: "#/components/schemas/tracking.trace.list.Input/properties/query/properti\
+            es/sort"
+      - name: limit
+        in: query
+        required: false
+        schema:
+          $ref: "#/components/schemas/tracking.trace.list.Input/properties/query/properti\
+            es/limit"
+      - name: cursor
+        in: query
+        required: false
+        schema:
+          $ref: "#/components/schemas/tracking.trace.list.Input/properties/query/properti\
+            es/cursor"
+    responses:
+      "200":
+        description: Completed result
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/tracking.trace.list.Output"
+      "400":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "401":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "403":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "404":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "409":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "413":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "415":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "500":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "503":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "504":
+        $ref: ../shared/components.yaml#/components/responses/Error
+components:
+  schemas:
+    tracking.trace.list.Input:
+      type: object
+      properties:
+        params:
+          type: object
+          properties: {}
+          additionalProperties: false
+        query:
+          type: object
+          properties:
+            project_id:
+              type: string
+              minLength: 34
+              maxLength: 34
+              pattern: ^project_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+              description: project_ followed by a canonical 26-character uppercase ULID.
+            node_id:
+              type: string
+              minLength: 31
+              maxLength: 31
+              pattern: ^node_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+              description: node_ followed by a canonical 26-character uppercase ULID.
+            execution_id:
+              type: string
+              minLength: 36
+              maxLength: 36
+              pattern: ^execution_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+              description: execution_ followed by a canonical 26-character uppercase ULID.
+            worker_name:
+              type: string
+              minLength: 1
+            agent_name:
+              type: string
+              minLength: 1
+            model:
+              type: string
+              minLength: 1
+            error_type:
+              type: string
+              minLength: 1
+            state:
+              type: string
+              enum:
+                - open
+                - ok
+                - error
+            q:
+              type: string
+              minLength: 1
+              maxLength: 200
+            started_from:
+              type: integer
+              minimum: 0
+              maximum: 9007199254740991
+            started_to:
+              type: integer
+              minimum: 0
+              maximum: 9007199254740991
+            min_duration_ms:
+              type: integer
+              minimum: 0
+              maximum: 9007199254740991
+            max_duration_ms:
+              type: integer
+              minimum: 0
+              maximum: 9007199254740991
+            min_total_tokens:
+              type: integer
+              minimum: 0
+              maximum: 9007199254740991
+            max_total_tokens:
+              type: integer
+              minimum: 0
+              maximum: 9007199254740991
+            min_cost_usd:
+              type: number
+              minimum: 0
+            max_cost_usd:
+              type: number
+              minimum: 0
+            sort:
+              default: started_at
+              type: string
+              enum:
+                - started_at
+                - duration_ms
+                - total_tokens
+                - cost_usd
+            limit:
+              default: 100
+              type: integer
+              minimum: 1
+              maximum: 1000
+            cursor:
+              type: string
+              minLength: 1
+          required: []
+          additionalProperties: false
+        body:
+          type: "null"
+      required:
+        - params
+        - query
+        - body
+      additionalProperties: false
+    tracking.trace.list.Output:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            type: object
+            properties:
+              trace_id:
+                type: string
+                pattern: ^[0-9a-f]{32}$
+              project_id:
+                anyOf:
+                  - type: string
+                    minLength: 34
+                    maxLength: 34
+                    pattern: ^project_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                    description: project_ followed by a canonical 26-character uppercase ULID.
+                  - type: "null"
+              execution_id:
+                anyOf:
+                  - type: string
+                    minLength: 36
+                    maxLength: 36
+                    pattern: ^execution_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                    description: execution_ followed by a canonical 26-character uppercase ULID.
+                  - type: "null"
+              node_id:
+                anyOf:
+                  - type: string
+                    minLength: 31
+                    maxLength: 31
+                    pattern: ^node_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                    description: node_ followed by a canonical 26-character uppercase ULID.
+                  - type: "null"
+              attempt:
+                anyOf:
+                  - type: integer
+                    minimum: 1
+                    maximum: 9007199254740991
+                  - type: "null"
+              root_span_id:
+                type: string
+                pattern: ^[0-9a-f]{16}$
+              created_at:
+                type: integer
+                minimum: 0
+                maximum: 9007199254740991
+                description: Unix timestamp in milliseconds since 1970-01-01T00:00:00Z (UTC).
+              state:
+                type: string
+                enum:
+                  - open
+                  - ok
+                  - error
+              started_at:
+                anyOf:
+                  - type: integer
+                    minimum: 0
+                    maximum: 9007199254740991
+                    description: Unix timestamp in milliseconds since 1970-01-01T00:00:00Z (UTC).
+                  - type: "null"
+              ended_at:
+                anyOf:
+                  - type: integer
+                    minimum: 0
+                    maximum: 9007199254740991
+                    description: Unix timestamp in milliseconds since 1970-01-01T00:00:00Z (UTC).
+                  - type: "null"
+              duration_ms:
+                anyOf:
+                  - type: integer
+                    minimum: 0
+                    maximum: 9007199254740991
+                  - type: "null"
+              stop_reason:
+                anyOf:
+                  - type: string
+                  - type: "null"
+              worker_name:
+                anyOf:
+                  - type: string
+                  - type: "null"
+              agent_names:
+                type: array
+                items:
+                  type: string
+              models:
+                type: array
+                items:
+                  type: string
+              error_types:
+                type: array
+                items:
+                  type: string
+              input_tokens:
+                type: integer
+                minimum: 0
+                maximum: 9007199254740991
+              output_tokens:
+                type: integer
+                minimum: 0
+                maximum: 9007199254740991
+              cache_read_tokens:
+                type: integer
+                minimum: 0
+                maximum: 9007199254740991
+              cache_creation_tokens:
+                type: integer
+                minimum: 0
+                maximum: 9007199254740991
+              total_tokens:
+                type: integer
+                minimum: 0
+                maximum: 9007199254740991
+              cost_usd:
+                type: number
+                minimum: 0
+              span_count:
+                type: integer
+                minimum: 0
+                maximum: 9007199254740991
+              turn_count:
+                type: integer
+                minimum: 0
+                maximum: 9007199254740991
+              tool_count:
+                type: integer
+                minimum: 0
+                maximum: 9007199254740991
+              error_count:
+                type: integer
+                minimum: 0
+                maximum: 9007199254740991
+              first_error_span_id:
+                anyOf:
+                  - type: string
+                    pattern: ^[0-9a-f]{16}$
+                  - type: "null"
+            required:
+              - trace_id
+              - project_id
+              - execution_id
+              - node_id
+              - attempt
+              - root_span_id
+              - created_at
+              - state
+              - started_at
+              - ended_at
+              - duration_ms
+              - stop_reason
+              - worker_name
+              - agent_names
+              - models
+              - error_types
+              - input_tokens
+              - output_tokens
+              - cache_read_tokens
+              - cache_creation_tokens
+              - total_tokens
+              - cost_usd
+              - span_count
+              - turn_count
+              - tool_count
+              - error_count
+              - first_error_span_id
+            additionalProperties: false
+        next_cursor:
+          anyOf:
+            - type: string
+            - type: "null"
+      required:
+        - items
+        - next_cursor
+      additionalProperties: false
