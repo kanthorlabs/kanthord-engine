@@ -1,11 +1,7 @@
 import assert from "node:assert/strict";
 import { Command } from "commander";
 import { Diagnostic } from "../../kernel/errors.ts";
-import {
-  identitySchema,
-  createIdempotencyKey,
-  idempotencyKeySchema,
-} from "../../kernel/identity.ts";
+import { identitySchema } from "../../kernel/identity.ts";
 import { httpClient } from "../../gateway/client.ts";
 import { OperationResultType } from "../../kernel/operation.ts";
 import { AccessPolicy } from "../../kernel/operation.ts";
@@ -46,12 +42,7 @@ async function register(command: Command): Promise<void> {
       "cli.worker.register.token_required",
       "worker register: supply a machine JWT through --token, KANTHORD_TOKEN or cli.yaml.",
     );
-  const key = options.idempotencyKey ?? createIdempotencyKey();
-  if (!idempotencyKeySchema.safeParse(key).success)
-    throw new Diagnostic(
-      "cli.worker.register.invalid_idempotency_key",
-      "worker register: --idempotency-key must be idempotency_key_ followed by a canonical ULID.",
-    );
+  const key = resolveKey(options);
   const result = await httpClient(
     workerOperations,
     config.endpoint,

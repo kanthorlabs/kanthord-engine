@@ -333,10 +333,7 @@ test("worker register requires a token and validates retry keys before any reque
     env,
   );
   assert.equal(invalid.code, ExitCode.Failure);
-  assert.match(
-    invalid.stderr,
-    /^cli\.worker\.register\.invalid_idempotency_key:/,
-  );
+  assert.match(invalid.stderr, /^cli\.idempotency_key\.invalid:/);
   assert.doesNotMatch(invalid.stderr, /invalid-token|not-a-ulid/);
   assert.equal(existsSync(clientConfigPath(env)), false);
 });
