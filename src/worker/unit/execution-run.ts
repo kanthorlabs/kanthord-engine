@@ -16,6 +16,7 @@ import {
   type ReleaseStop,
 } from "../../scheduler/contract.ts";
 import { createIdempotencyKey } from "../../kernel/identity.ts";
+import { SpanStatus } from "../../tracking/contract.ts";
 
 type EvidenceBody = Omit<
   Parameters<MethodClients["mission"]["evidence.submit"]>[0]["body"],
@@ -106,6 +107,7 @@ export class ExecutionRun {
   private readonly logSink: (record: Record<string, unknown>) => void;
   private stopped: ExecutionStop | null = null;
   private settlement: Promise<void> | null = null;
+  private readonly traceClosers = new Set<(status: SpanStatus) => void>();
 
   constructor(input: {
     claim: MethodClaim;
@@ -154,6 +156,22 @@ export class ExecutionRun {
 
   onStop(listener: () => void): Disposable {
     return addAbortListener(this.operationContext.signal, listener);
+  }
+
+  onTraceClose(close: (status: SpanStatus) => void): Disposable {
+    this.traceClosers.add(close);
+    return { [Symbol.dispose]: () => void this.traceClosers.delete(close) };
+  }
+
+  private closeTraces(status: SpanStatus): void {
+    for (const close of [...this.traceClosers]) {
+      this.traceClosers.delete(close);
+      try {
+        close(status);
+      } catch {
+        this.spans.fault();
+      }
+    }
   }
 
   stop(reason: EndReason, code: string | null = null): never {
@@ -278,6 +296,7 @@ export class ExecutionRun {
 
   async submitAssessment(nodeId: string, body: AssessmentBody) {
     await this.settleCredentials();
+    this.closeTraces(SpanStatus.Ok);
     await this.spans.flush(TELEMETRY_FLUSH_MS);
     return this.call((options) =>
       this.clients.mission["assessment.submit"](
@@ -315,6 +334,7 @@ export class ExecutionRun {
         ? null
         : { reason: ExecutionStopReason.BudgetEnd, code: budgetEnd };
     await this.settleCredentials();
+    this.closeTraces(SpanStatus.Ok);
     await this.spans.flush(TELEMETRY_FLUSH_MS);
     await this.call(async (options) => {
       const result = await this.clients.scheduler.executionRelease(
@@ -364,6 +384,7 @@ export class ExecutionRun {
     try {
       this.settlement ??= this.credentials.release();
       await this.settlement;
+      this.closeTraces(SpanStatus.Error);
       await this.spans.flush(TELEMETRY_FLUSH_MS);
       const params = { execution_id: this.claim.execution_id };
       const result = await this.clients.scheduler.executionRelease(

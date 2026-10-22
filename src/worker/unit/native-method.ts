@@ -7,7 +7,6 @@ import {
   type ExecutionRun,
 } from "./execution-run.ts";
 import { openNativeAgent, type NativeAgent } from "./native-agent.ts";
-import type { TranscriptSink } from "./transcript.ts";
 import { Phase, type TelemetrySink } from "./telemetry.ts";
 import type { Context } from "../../kernel/context.ts";
 import { ExecutionRun as Run, type MethodClaim } from "./execution-run.ts";
@@ -49,7 +48,7 @@ export interface NativeExecutionInput {
   hostHome: string;
   env: NodeJS.ProcessEnv;
   modelRuntimeFactory: ModelRuntimeFactory;
-  transcript: TranscriptSink;
+  sessionRoot?: string;
   hostTools: (workspace: string) => HostTools;
   context: Context;
   log?: (record: Record<string, unknown>) => void;
@@ -70,7 +69,7 @@ export async function runNativeExecution(
     if (!unlink) return;
     opened.delete(agent);
     try {
-      disposeAgent(run, agent, input.transcript);
+      disposeAgent(run, agent);
     } finally {
       unlink[Symbol.dispose]();
     }
@@ -108,8 +107,20 @@ export async function runNativeExecution(
           context: run.operationContext,
           turnCheck: () => run.checkClaim(),
           spans: run.spans,
+          sessionRoot: input.sessionRoot,
         });
-        opened.set(native, stopOnEnd(run, native));
+        const stop = stopOnEnd(run, native);
+        const trace = run.onTraceClose((status) => native.closeTrace(status));
+        const combined: Disposable = {
+          [Symbol.dispose]() {
+            try {
+              stop[Symbol.dispose]();
+            } finally {
+              trace[Symbol.dispose]();
+            }
+          },
+        };
+        opened.set(native, combined);
         return native;
       };
       if (method === WorkerMethod.Evaluation)
@@ -156,19 +167,9 @@ export async function runNativeExecution(
 export function disposeAgent(
   run: ExecutionRun,
   agent: NativeAgent | null,
-  transcript: TranscriptSink,
 ): void {
   if (!agent) return;
-  try {
-    transcript.record({
-      executionId: run.claim.execution_id,
-      attempt: run.claim.attempt,
-      traceId: run.claim.trace_id,
-      messages: agent.transcript(),
-    });
-  } finally {
-    agent.dispose();
-  }
+  agent.dispose();
 }
 
 export function stopOnEnd(run: ExecutionRun, agent: NativeAgent): Disposable {

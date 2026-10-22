@@ -4,10 +4,11 @@ import { unusedHostTools } from "./test-support.ts";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { setTimeout } from "node:timers/promises";
-import { test } from "node:test";
+import { test, type TestContext } from "node:test";
 import { background } from "../../kernel/context.ts";
 import {
   EndReason,
+  ExecutionEndKind,
   ExecutionRun,
   EXECUTION_NOT_RUNNING,
   EXECUTION_PROOF_FAILED,
@@ -32,7 +33,8 @@ import {
   everyBindingSshAccess,
 } from "./test-support.ts";
 import { WorkspaceRoot } from "./workspace.ts";
-import { noTranscript } from "./transcript.ts";
+import { RecordKind, SpanStatus } from "../../tracking/contract.ts";
+import { SpanOperation } from "./telemetry.ts";
 import { ExecutionIntent, type RepositoryTransport } from "../contract.ts";
 import type { MethodClients } from "./method-clients.ts";
 import { openNativeAgent, type NativeAgent } from "./native-agent.ts";
@@ -42,7 +44,9 @@ import { SHIPPED_TEMPLATES } from "../../agent/prompt-templates.ts";
 const EXPECTED_CALL_COUNT = 1;
 const NO_RELEASES = 0;
 const START_POLL_MS = 10;
-test("S1 refusal aborts an active native session and records its stopped transcript exactly once", async (t) => {
+const RELEASE_CALL = "executionRelease";
+const SESSION_END = "agent.session.end";
+test("S1 refusal aborts an active native session and ends its agent.session span exactly once", async (t) => {
   const setup = anthropicSetup();
   const claim = {
     execution_id: setup.execution_id,
@@ -55,11 +59,24 @@ test("S1 refusal aborts an active native session and records its stopped transcr
     trace_id: "trace",
     root_span_id: "1".repeat(16),
   };
+  const ends: string[] = [];
   const run = new ExecutionRun({
     claim,
     clients: {} as MethodClients,
     credentials: { release: async () => {} },
     context: background,
+    telemetry: {
+      write: (records) => {
+        for (const record of records)
+          if (
+            record.kind === RecordKind.Span &&
+            record.operation === SpanOperation.Session &&
+            record.end_time
+          )
+            ends.push(record.span_id);
+      },
+      flush: async () => {},
+    },
   });
   const workspace = temporary(t);
   const store = new InMemoryCredentialStore();
@@ -98,6 +115,7 @@ test("S1 refusal aborts an active native session and records its stopped transcr
     env: hostEnvironment(),
     modelRuntimeFactory: scriptedModelRuntime(provider),
     context: run.operationContext,
+    spans: run.spans,
   });
   stopOnEnd(run, agent);
   const pending = agent.prompt(
@@ -132,17 +150,11 @@ test("S1 refusal aborts an active native session and records its stopped transcr
     reason: EndReason.Revoked,
     code: EXECUTION_NOT_RUNNING,
   });
-  const entries: unknown[] = [];
-  disposeAgent(run, agent, {
-    record: (entry) => {
-      entries.push(entry);
-    },
-  });
+  disposeAgent(run, agent);
+  disposeAgent(run, agent);
   run.dispose();
-  assert.equal(entries.length, EXPECTED_CALL_COUNT);
+  assert.equal(ends.length, EXPECTED_CALL_COUNT);
   assert.equal(provider.calls.length, EXPECTED_CALL_COUNT);
-  assert.equal(JSON.stringify(entries).includes(secret), false);
-  assert.equal(JSON.stringify(entries).includes("ciphertext"), false);
 });
 
 test("S1 native reviewer evaluates even when the attempt already contains an expected request", async (t) => {
@@ -246,7 +258,6 @@ test("S1 native reviewer evaluates even when the attempt already contains an exp
     hostHome: temporary(t),
     env: hostEnvironment(),
     modelRuntimeFactory: scriptedModelRuntime(provider),
-    transcript: noTranscript,
     hostTools: () => unusedHostTools,
     context: background,
   });
@@ -254,7 +265,12 @@ test("S1 native reviewer evaluates even when the attempt already contains an exp
   assert.equal(assessments, EXPECTED_CALL_COUNT);
   assert.equal(provider.calls.length, EXPECTED_CALL_COUNT);
 });
-test("native entry runs an examine report with the scripted provider", async (t) => {
+const OK_RELEASE = { kind: "released", furtherWork: false };
+
+async function examineRun(
+  t: TestContext,
+  script: Parameters<typeof scriptedProvider>[0],
+) {
   const setup = anthropicSetup({
     intent: ExecutionIntent.Examine,
     repositories: [],
@@ -267,12 +283,10 @@ test("native entry runs an examine report with the scripted provider", async (t)
     node_branch: "kanthord/node_01ARZ3NDEKTSV4RRFFQ69G5FAA",
     created_at: Date.now(),
     expired_at: Date.now() + 60000,
-    trace_id: "trace",
+    trace_id: "a".repeat(32),
     root_span_id: "1".repeat(16),
   };
-  const provider = scriptedProvider([
-    fauxAssistantMessage("All dependencies completed."),
-  ]);
+  const provider = scriptedProvider(script);
   const store = new InMemoryCredentialStore();
   await store.modify("anthropic", async () => ({
     type: "api_key",
@@ -284,6 +298,7 @@ test("native entry runs an examine report with the scripted provider", async (t)
     data,
   });
   const page = async () => complete({ items: [], next_cursor: null });
+  const order: string[] = [];
   const clients = {
     mission: {
       "execution.pinnedRevision.get": async () =>
@@ -301,7 +316,12 @@ test("native entry runs an examine report with the scripted provider", async (t)
       "execution.dependency.evidence.list": page,
       "evidence.submit": async () => complete({ evidence: {} }),
     },
-    scheduler: { executionRelease: async () => complete({}) },
+    scheduler: {
+      executionRelease: async () => {
+        order.push(RELEASE_CALL);
+        return complete({});
+      },
+    },
   } as unknown as MethodClients;
   const result = await runNativeExecution({
     claim,
@@ -323,12 +343,42 @@ test("native entry runs an examine report with the scripted provider", async (t)
     hostHome: temporary(t),
     env: hostEnvironment(),
     modelRuntimeFactory: scriptedModelRuntime(provider),
-    transcript: noTranscript,
     hostTools: () => unusedHostTools,
     context: background,
+    telemetry: {
+      write: (records) => {
+        for (const record of records)
+          if (
+            record.kind === RecordKind.Span &&
+            record.operation === SpanOperation.Session &&
+            record.end_time
+          )
+            order.push(`${SESSION_END}:${record.status}`);
+      },
+      flush: async () => {},
+    },
   });
-  assert.deepEqual(result, { kind: "released", furtherWork: false });
+  return { result, provider, order };
+}
+
+test("native entry runs an examine report and ends the agent.session span before the release", async (t) => {
+  const { result, provider, order } = await examineRun(t, [
+    fauxAssistantMessage("All dependencies completed."),
+  ]);
+  assert.deepEqual(result, OK_RELEASE);
   assert.equal(provider.calls.length, EXPECTED_CALL_COUNT);
+  assert.deepEqual(order, [`${SESSION_END}:${SpanStatus.Ok}`, RELEASE_CALL]);
+});
+
+test("a stop ends the agent.session span with Error before the release of the stop", async (t) => {
+  const { result, order } = await examineRun(t, [
+    fauxAssistantMessage("", {
+      stopReason: "error",
+      errorMessage: "terminated",
+    }),
+  ]);
+  assert.equal(result.kind, ExecutionEndKind.Released);
+  assert.deepEqual(order, [`${SESSION_END}:${SpanStatus.Error}`, RELEASE_CALL]);
 });
 test("refused execution evidence aborts the agent and prevents later server operations", async (t) => {
   for (const [status, code] of [

@@ -41,7 +41,6 @@ import {
 import {
   WorkspaceRoot,
   runNativeExecution,
-  noTranscript,
   handedSshAccess,
 } from "../../worker/unit/index.ts";
 import {
@@ -406,7 +405,6 @@ async function methodsFixture(t: TestContext) {
         hostHome: temporary(t),
         env: hostEnvironment(),
         modelRuntimeFactory: scriptedModelRuntime(provider),
-        transcript: noTranscript,
         hostTools: () => unusedHostTools,
         context: background,
       });

@@ -33,8 +33,14 @@ import { providerFailureOf } from "../../llm/provider-failure.ts";
 import { redactReason, thrownReason } from "../../kernel/probe.ts";
 import { CodedError } from "../../kernel/errors.ts";
 import { SecretShape } from "../../custody/contract.ts";
+import { SpanStatus } from "../../tracking/contract.ts";
 import { traceAgent } from "./agent-telemetry.ts";
-import type { SpanRecorder } from "./telemetry.ts";
+import {
+  SessionFormat,
+  SpanOperation,
+  type SpanRecorder,
+} from "./telemetry.ts";
+import { executionSessionDirectory } from "./session-store.ts";
 
 export interface NativeAgentInput {
   setup: ExecutionSetup;
@@ -58,15 +64,16 @@ export interface NativeAgentInput {
   context: Context;
   turnCheck?: () => Promise<void>;
   spans?: SpanRecorder;
+  sessionRoot?: string;
 }
 export interface NativeAgent {
   prompt(work: WorkPrompt): Promise<void>;
   instruct(work: WorkPrompt, text: string): Promise<void>;
   lastText(): string | undefined;
-  transcript(): readonly unknown[];
   abort(): Promise<void>;
   readonly budget: ExecutionBudget;
   readonly composition: CompositionRecord;
+  closeTrace(status: SpanStatus): void;
   dispose(): void;
 }
 
@@ -123,6 +130,33 @@ async function providerFailure(
   );
 }
 
+interface SessionTrace {
+  watch(unsubscribe: () => void): void;
+  end(status: SpanStatus, entryCount?: number): void;
+}
+
+function sessionTrace(spans: SpanRecorder, spanId: string): SessionTrace {
+  let open = true;
+  let unsubscribe = () => {};
+  return {
+    watch(next) {
+      unsubscribe = next;
+    },
+    end(status, entryCount) {
+      if (!open) return;
+      open = false;
+      unsubscribe();
+      spans.end(spanId, {
+        status,
+        attributes:
+          entryCount === undefined
+            ? {}
+            : { "kanthord.session.entry_count": entryCount },
+      });
+    },
+  };
+}
+
 function nativeAgent(
   opened: AgentSession,
   pins: ReturnType<typeof pinnedLayers>,
@@ -130,7 +164,7 @@ function nativeAgent(
   composition: CompositionRecord,
   context: CancellationContext,
   turnCheck: () => Promise<void>,
-  unsubscribeTrace: () => void,
+  trace: SessionTrace | undefined,
   secrets: CredentialRedaction,
 ): NativeAgent {
   let session: AgentSession | null = opened;
@@ -186,12 +220,12 @@ function nativeAgent(
       assert.ok(session);
       return session.getLastAssistantText();
     },
-    transcript() {
-      assert.ok(session);
-      return [...session.messages];
+    closeTrace(status) {
+      if (session) trace?.end(status, session.sessionManager.getEntryCount());
     },
     dispose() {
-      unsubscribeTrace();
+      if (session)
+        trace?.end(SpanStatus.Ok, session.sessionManager.getEntryCount());
       unsubscribeTurns?.();
       cancellation?.[Symbol.dispose]();
       unsubscribeTurns = null;
@@ -211,6 +245,7 @@ export async function openNativeAgent(
   const budget = input.budget;
   const context = budget.agentContext(input.context);
   let session: AgentSession | undefined;
+  let trace: SessionTrace | undefined;
   const secrets = credentialRedaction(input.credential);
   try {
     await secrets();
@@ -240,6 +275,39 @@ export async function openNativeAgent(
     );
     const pins = pinnedLayers(workingTexts(layers, input.setup.templates));
     const pi = await withDeadline(loadPi(), context);
+    let sessionId: string | undefined;
+    if (input.spans) {
+      const key = input.spans.key("session");
+      sessionId = input.spans.spanIdOf(key);
+      input.spans.start({
+        key,
+        operation: SpanOperation.Session,
+        attributes: {
+          "gen_ai.operation.name": "invoke_agent",
+          "gen_ai.conversation.id": sessionId,
+          "gen_ai.agent.name": input.agent.agent_name,
+          "kanthord.agent.name": input.agent.agent_name,
+          "kanthord.agent.chain_position": input.agent.position,
+          "kanthord.agent.chain_level": input.agent.level,
+          "gen_ai.request.model":
+            input.agent.effective_configuration.model_identifier,
+          "kanthord.session.format": SessionFormat.Pi,
+          "kanthord.session.format_version": pi.CURRENT_SESSION_VERSION,
+        },
+      });
+      trace = sessionTrace(input.spans, sessionId);
+    }
+    const options = sessionId === undefined ? {} : { id: sessionId };
+    const sessionManager = input.sessionRoot
+      ? pi.SessionManager.create(
+          input.workspace,
+          executionSessionDirectory(
+            input.sessionRoot,
+            input.claim.execution_id,
+          ),
+          options,
+        )
+      : pi.SessionManager.inMemory(input.workspace, options);
     session = await openSession({
       cwd: input.workspace,
       modelRuntime: runtime,
@@ -257,11 +325,11 @@ export async function openNativeAgent(
       hostHome: input.hostHome,
       hooks: [pins.hook],
       context,
+      sessionManager,
     });
     pins.pinInference(session, input.agent.prompt.final);
-    const unsubscribeTrace = input.spans
-      ? traceAgent(session, input.spans, input.agent)
-      : () => {};
+    if (input.spans)
+      trace?.watch(traceAgent(session, input.spans, input.agent));
     return nativeAgent(
       session,
       pins,
@@ -269,10 +337,11 @@ export async function openNativeAgent(
       compositionRecord(layers),
       context,
       input.turnCheck ?? (async () => {}),
-      unsubscribeTrace,
+      trace,
       secrets,
     );
   } catch (error) {
+    trace?.end(SpanStatus.Error);
     session?.dispose();
     context.cancel();
     throw error;

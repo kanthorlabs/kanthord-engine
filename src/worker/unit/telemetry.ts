@@ -25,8 +25,12 @@ export const SpanOperation = {
   Git: "worker.git",
   Turn: "agent.turn",
   Tool: "agent.tool",
+  Session: "agent.session",
 } as const;
 export type SpanOperation = (typeof SpanOperation)[keyof typeof SpanOperation];
+
+export const SessionFormat = { Pi: "pi", ClaudeCode: "claude_code" } as const;
+export type SessionFormat = (typeof SessionFormat)[keyof typeof SessionFormat];
 
 export const Phase = {
   Prepare: "prepare",
@@ -52,7 +56,7 @@ export interface SpanStart {
   texts?: Texts;
 }
 export interface SpanEnd {
-  status: typeof SpanStatus.Ok | typeof SpanStatus.Error;
+  status: SpanStatus;
   attributes?: Attributes;
   texts?: Texts;
 }
