@@ -34,6 +34,7 @@ const CREATED = 1000;
 const ENDED = 5000;
 const NO_DROP = 0;
 const NO_ROWS = 0;
+const ONE_ENTRY = 1;
 const ONE_DROP = 1;
 const PAGE_OF_ONE = 1;
 const STOP_DETAIL = "Cannot find module";
@@ -220,7 +221,7 @@ test("textGet answers exactly the trace, the text id, the content and the creati
   assert.ok(Number.isSafeInteger(text.created_at));
 });
 
-test("a trace delete removes its spans, records and texts", (t) => {
+test("a trace delete removes its spans, records, texts and session entries", (t) => {
   const { store, service } = harness(t);
   service.executionOpened(TRACE, CREATED);
   service.telemetryWrite(
@@ -243,8 +244,28 @@ test("a trace delete removes its spans, records and texts", (t) => {
         text_id: `${SPAN}:input`,
         text: INPUT_TEXT,
       },
+      {
+        record_id: `${SPAN}:entry.e1`,
+        trace_id: TRACE.trace_id,
+        kind: RecordKind.SessionEntry,
+        session_id: SPAN,
+        entry_id: "e1",
+        parent_entry_id: null,
+        sequence: 1,
+        entry_type: "message",
+        entry_time: CREATED,
+        tool_call_id: null,
+        truncated: false,
+        entry: { role: "user" },
+      },
     ],
     caller(store),
+  );
+  assert.equal(
+    store.database
+      .prepare("SELECT count(*) AS count FROM tracking_session_entry")
+      .get()?.count,
+    ONE_ENTRY,
   );
   store.transaction((tx) =>
     tx.database
@@ -265,6 +286,7 @@ test("a trace delete removes its spans, records and texts", (t) => {
     "tracking_span",
     "tracking_record",
     "tracking_telemetry_text",
+    "tracking_session_entry",
   ])
     assert.equal(
       store.database.prepare(`SELECT count(*) AS count FROM ${table}`).get()

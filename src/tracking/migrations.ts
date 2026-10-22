@@ -42,6 +42,21 @@ const createTraceTables: Migration = (database) => {
       created_at INTEGER NOT NULL,
       PRIMARY KEY (trace_id, text_id)
     );
+    CREATE TABLE tracking_session_entry (
+      trace_id TEXT NOT NULL REFERENCES tracking_trace (trace_id) ON DELETE CASCADE,
+      session_id TEXT NOT NULL,
+      entry_id TEXT NOT NULL,
+      parent_entry_id TEXT,
+      sequence INTEGER NOT NULL,
+      entry_type TEXT NOT NULL,
+      entry_time INTEGER NOT NULL,
+      tool_call_id TEXT,
+      truncated INTEGER NOT NULL,
+      content TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      PRIMARY KEY (trace_id, session_id, entry_id)
+    );
+    CREATE UNIQUE INDEX tracking_session_entry_sequence ON tracking_session_entry (trace_id, session_id, sequence);
   `);
 };
 

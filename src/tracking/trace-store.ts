@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
+import { canonicalJSON } from "../kernel/json.ts";
 import type { Transaction } from "../kernel/store.ts";
 import {
   spanSchema,
   type ExecutionTrace,
   type RecordKind,
+  type SessionEntryRecord,
   type Span,
   type TraceRecord,
 } from "./contract.ts";
@@ -249,4 +251,47 @@ export function insertText(
       "INSERT INTO tracking_telemetry_text (trace_id, text_id, content, created_at) VALUES (?, ?, ?, ?)",
     )
     .run(text.trace_id, text.text_id, text.content, now);
+}
+
+export function sessionSequenceTaken(
+  tx: Transaction,
+  traceId: string,
+  sessionId: string,
+  sequence: number,
+): boolean {
+  assert.ok(traceId);
+  assert.ok(sessionId);
+  return (
+    tx.database
+      .prepare(
+        "SELECT 1 FROM tracking_session_entry WHERE trace_id = ? AND session_id = ? AND sequence = ?",
+      )
+      .get(traceId, sessionId, sequence) !== undefined
+  );
+}
+
+export function insertSessionEntry(
+  tx: Transaction,
+  entry: SessionEntryRecord,
+  now: number,
+): void {
+  assert.ok(entry.session_id);
+  assert.ok(entry.entry_id);
+  tx.database
+    .prepare(
+      "INSERT INTO tracking_session_entry (trace_id, session_id, entry_id, parent_entry_id, sequence, entry_type, entry_time, tool_call_id, truncated, content, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    )
+    .run(
+      entry.trace_id,
+      entry.session_id,
+      entry.entry_id,
+      entry.parent_entry_id,
+      entry.sequence,
+      entry.entry_type,
+      entry.entry_time,
+      entry.tool_call_id,
+      entry.truncated ? 1 : 0,
+      canonicalJSON(entry.entry),
+      now,
+    );
 }
