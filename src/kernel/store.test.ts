@@ -8,8 +8,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
-import { spawnSync } from "node:child_process";
-import { temporary } from "./test-support.ts";
+import { childRun, temporary } from "./test-support.ts";
 import { Diagnostic } from "./errors.ts";
 import {
   type PendingMigration,
@@ -50,7 +49,7 @@ const DATABASE_NOT_OPEN = {
   message: "database is not open",
 };
 
-test("exclusive WAL ownership refuses a second process and releases after close", (t) => {
+test("exclusive WAL ownership refuses a second process and releases after close", async (t) => {
   const path = join(temporary(t), "kanthord.db");
   const store = new Store(path);
   assert.equal(
@@ -62,21 +61,21 @@ test("exclusive WAL ownership refuses a second process and releases after close"
     FULL_SYNCHRONOUS_MODE,
   );
   const attempt = () =>
-    spawnSync(
+    childRun(
       process.execPath,
       [
         "--input-type=module",
         "-e",
         `import { Store } from ${JSON.stringify(new URL("./store.ts", import.meta.url).href)}; new Store(${JSON.stringify(path)}).close();`,
       ],
-      { encoding: "utf8" },
+      { signal: t.signal },
     );
-  const blocked = attempt();
+  const blocked = await attempt();
   assert.notEqual(blocked.status, ExitCode.Success);
   assert.ok(blocked.stderr.includes(path));
   assert.ok(blocked.stderr.includes(LOCKED_REASON), blocked.stderr);
   store.close();
-  assert.equal(attempt().status, ExitCode.Success);
+  assert.equal((await attempt()).status, ExitCode.Success);
 });
 
 test("database and sidecars enforce expected kinds, exact modes and no symlinks", (t) => {

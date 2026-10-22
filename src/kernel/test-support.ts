@@ -1,3 +1,5 @@
+import { spawn } from "node:child_process";
+import { once } from "node:events";
 import { cpSync, mkdtempSync, rmSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -12,6 +14,21 @@ export function diagnosticText(error: unknown): string {
 
 export function redactingLogger(lines: string[]): pino.Logger {
   return pino({ redact: redaction }, { write: (line) => lines.push(line) });
+}
+
+export async function childRun(
+  file: string,
+  args: string[],
+  options: { signal: AbortSignal; input?: string },
+): Promise<{ status: number | null; stdout: string; stderr: string }> {
+  const child = spawn(file, args, { signal: options.signal });
+  let stdout = "";
+  let stderr = "";
+  child.stdout.setEncoding("utf8").on("data", (chunk) => (stdout += chunk));
+  child.stderr.setEncoding("utf8").on("data", (chunk) => (stderr += chunk));
+  child.stdin.end(options.input);
+  const [status] = (await once(child, "close")) as [number | null];
+  return { status, stdout, stderr };
 }
 
 export function temporaryDirectory(): string {
