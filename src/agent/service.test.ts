@@ -663,7 +663,7 @@ test("enablement operations use one commit, page ascending, and project only wir
   );
 });
 
-test("put checks catalog then tombstone-aware expected revision and restarts enabled", (t) => {
+test("put checks catalog then live expected revision and restarts enabled", (t) => {
   const f = enablementFixture(t);
   refuses(
     () =>
@@ -694,20 +694,17 @@ test("put checks catalog then tombstone-aware expected revision and restarts ena
     removed: true,
   });
   refuses(
-    () => f.invoke("enablement.put", putBody),
+    () => f.invoke("enablement.put", { ...putBody, expected_revision: 3 }),
     AgentErrorCode.RevisionConflict,
     HttpStatus.Conflict,
-    { agent_name: AGENT, revision: THIRD_REVISION },
+    { agent_name: AGENT, revision: null },
   );
   refuses(
     () => f.invoke("enablement.get"),
     AgentErrorCode.NotFound,
     HttpStatus.NotFound,
   );
-  const restored = f.invoke("enablement.put", {
-    ...putBody,
-    expected_revision: 3,
-  });
+  const restored = f.invoke("enablement.put", putBody);
   assert.deepEqual(
     { revision: restored.revision, state: restored.state },
     { revision: 4, state: EnablementState.Enabled },
@@ -808,6 +805,32 @@ test("remove refuses bindings and tombstones only when unused", (t) => {
     items: [],
     next_cursor: null,
   });
+});
+
+test("put after remove creates the enablement with no expected revision at the next revision", (t) => {
+  const f = enablementFixture(t);
+  f.invoke("enablement.put", putBody);
+  f.invoke("enablement.remove", { expected_revision: 1 });
+  const created = f.invoke("enablement.put", putBody);
+  assert.equal(created.revision, THIRD_REVISION);
+  assert.equal(created.state, EnablementState.Enabled);
+  assert.deepEqual(f.invoke("enablement.get"), created);
+});
+
+test("put after remove refuses the removal revision", (t) => {
+  const f = enablementFixture(t);
+  f.invoke("enablement.put", putBody);
+  f.invoke("enablement.remove", { expected_revision: 1 });
+  refuses(
+    () =>
+      f.invoke("enablement.put", {
+        ...putBody,
+        expected_revision: SECOND_REVISION,
+      }),
+    AgentErrorCode.RevisionConflict,
+    HttpStatus.Conflict,
+    { agent_name: AGENT, revision: null },
+  );
 });
 
 test("provider add and remove preserve uniqueness, last provider, default and explicit dependents", (t) => {

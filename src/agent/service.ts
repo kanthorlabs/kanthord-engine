@@ -63,7 +63,6 @@ import {
 import {
   EnablementState,
   getEnablement,
-  getLatestRevision,
   insertEnablementRevision,
   listEnablements,
   readEnablementRevision,
@@ -139,7 +138,7 @@ function checkRevision(
   agentName: string,
   expectedRevision: number | undefined,
 ): void {
-  const latest = getLatestRevision(tx, agentName);
+  const latest = getEnablement(tx, agentName);
   if (expectedRevision !== latest?.revision)
     throw new OperationError(
       HttpStatus.Conflict,
