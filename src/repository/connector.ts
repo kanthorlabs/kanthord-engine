@@ -1,4 +1,3 @@
-import { addAbortListener } from "node:events";
 import { simpleGit, type SimpleGit, type SimpleGitOptions } from "simple-git";
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
@@ -8,7 +7,7 @@ import { join, posix } from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { promisify } from "node:util";
-import { type Context } from "../kernel/context.ts";
+import { CancellationContext, type Context } from "../kernel/context.ts";
 import { CodedError, Diagnostic } from "../kernel/errors.ts";
 import {
   GIT_UNSAFE_OPTIONS,
@@ -233,13 +232,9 @@ async function runGitTask<T>(
   options: GitOptions = {},
 ): Promise<T> {
   assert.ok(operation);
-  const controller = new AbortController();
-  using cancellation = addAbortListener(context.signal, () =>
-    controller.abort(),
-  );
-  const timer = setTimeout(
-    () => controller.abort(),
-    Math.max(EXPIRED, deadlineMs),
+  const deadline = new CancellationContext(
+    context,
+    Date.now() + Math.ceil(Math.max(EXPIRED, deadlineMs)),
   );
   try {
     context.signal.throwIfAborted();
@@ -247,22 +242,22 @@ async function runGitTask<T>(
     const git = simpleGit({
       ...(directory === undefined ? {} : { baseDir: directory }),
       errors: options.errors ?? failNonzeroExit,
-      abort: controller.signal,
+      abort: deadline.signal,
       timeout: { block: deadlineMs },
       unsafe: GIT_UNSAFE_OPTIONS,
     });
     const output = await task(
       git.env(gitEnvironment(options.environment, options.agent)),
-      controller.signal,
+      deadline.signal,
     );
-    if (controller.signal.aborted) throw new Error("Git aborted");
+    if (deadline.signal.aborted) throw new Error("Git aborted");
     return output;
   } catch (error) {
     throw new Diagnostic(GIT_FAILED, `${operation}: git failed.`, {
       cause: new Error(gitFailureText(operation, error)),
     });
   } finally {
-    clearTimeout(timer);
+    deadline.cancel();
   }
 }
 

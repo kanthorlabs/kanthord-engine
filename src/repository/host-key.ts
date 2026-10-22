@@ -1,4 +1,3 @@
-import { addAbortListener } from "node:events";
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -7,7 +6,7 @@ import { ulid } from "ulid";
 import { z } from "zod";
 import { LIST_LIMIT_DEFAULT } from "../custody/contract.ts";
 import { IdentityKind } from "../kernel/caller.ts";
-import { type Context } from "../kernel/context.ts";
+import { CancellationContext, type Context } from "../kernel/context.ts";
 import { OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import type { CallerContext, OperationRegistry } from "../kernel/operation.ts";
@@ -67,18 +66,11 @@ function withDeadline<T>(
   deadlineMs: number,
   run: (signal: AbortSignal) => Promise<T>,
 ): Promise<T> {
-  const controller = new AbortController();
-  const cancellation = addAbortListener(context.signal, () =>
-    controller.abort(context.signal.reason),
+  const deadline = new CancellationContext(
+    context,
+    Date.now() + Math.ceil(Math.max(EXPIRED, deadlineMs)),
   );
-  const timer = setTimeout(
-    () => controller.abort(),
-    Math.max(EXPIRED, deadlineMs),
-  );
-  return run(controller.signal).finally(() => {
-    clearTimeout(timer);
-    cancellation[Symbol.dispose]();
-  });
+  return run(deadline.signal).finally(() => deadline.cancel());
 }
 
 export function keyscanArguments(host: string): string[] {
