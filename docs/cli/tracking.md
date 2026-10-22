@@ -20,6 +20,10 @@ data directory beside `kanthord.db`. It holds the tables of
   API-only.
 - A human lists traces, reads a trace, its spans, its telemetry texts and its
   session entries, and reads the filter values with the seven CLI leaves below.
+- The server deletes a trace, with its spans, texts, records and session
+  entries, `tracking.retention_days` after its creation. A sweep runs at the
+  start and then every hour. A record of an older execution is `Refused` with
+  `trace_expired`, and a server span of it is dropped and counted.
 
 Telemetry is lossy and has no current effect. It is not Mission evidence,
 assessment or outcome. It completes no node, renews no claim and authorizes no
@@ -30,9 +34,7 @@ trace.
 `telemetry ingest` follow the root
 [worker contract](https://github.com/kanthorlabs/kanthord/blob/main/docs/explanation/worker-contract.md).
 The ingestion reuses the record schema of `tracking.telemetry.write` and adds
-`execution_id`. The retention sweep and the trace deletion wait for the
-retention values in the root
-[HANDOFF](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/HANDOFF.md#tracking-service).
+`execution_id`.
 
 ## Command inventory and operation mapping
 
@@ -207,7 +209,8 @@ from the store.
 
 Reads one telemetry text. The answer holds `trace_id`, `text_id`, `content` and
 `created_at`. A telemetry text has no state of its own. It expires with its
-trace: one delete of the trace row removes its spans, texts and records. An
+trace: one delete of the trace row removes its spans, texts and records. A
+trace expires `tracking.retention_days` after its creation. An
 unknown text answers `404` `tracking.text.not_found`. An unknown or deleted
 trace answers `404` `tracking.trace.not_found`.
 
@@ -305,6 +308,7 @@ permanent: retry the record only with a new identity and new content.
 | `foreign_producer` | Another producer created the span.                                                                                                                               |
 | `value_replaced`   | The record changes the operation, the parent, a time, a status or an attribute value of the span, or a new session entry takes a stored sequence of its session. |
 | `text_exists`      | The text already holds content.                                                                                                                                  |
+| `trace_expired`    | The execution is older than the retention of the server.                                                                                                         |
 
 One transaction applies the whole batch. A transport failure or a timeout
 leaves every disposition unknown, and the producer retries the same records

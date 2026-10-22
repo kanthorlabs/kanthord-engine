@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { ulid } from "ulid";
+import { decodeTime, ulid } from "ulid";
 import { z } from "zod";
 
 const EMPTY_PREFIX_LENGTH = 0;
@@ -37,6 +37,15 @@ export function createIdentity(prefix: string): string {
   const value = `${prefix}_${suffix}`;
   assert.ok(schema.safeParse(value).success, "Invalid generated identity.");
   return value;
+}
+
+export function identityTime(identity: string): number {
+  const suffix = identity.slice(identity.lastIndexOf("_") + 1);
+  assert.ok(
+    ulidSchema.safeParse(suffix).success,
+    "An identity requires a ULID suffix.",
+  );
+  return decodeTime(suffix);
 }
 
 export const IDEMPOTENCY_KEY_PREFIX = "idempotency_key";

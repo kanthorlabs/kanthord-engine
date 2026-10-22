@@ -8,6 +8,7 @@ import {
   IDENTITY_SUFFIX_LENGTH,
   createIdempotencyKey,
   idempotencyKeySchema,
+  identityTime,
   IDEMPOTENCY_KEY_PREFIX,
 } from "./identity.ts";
 
@@ -100,4 +101,12 @@ test("idempotency keys carry the idempotency key prefix and refuse a bare ULID",
     `${IDEMPOTENCY_KEY_PREFIX}_${suffix}\n`,
   ])
     assert.equal(idempotencyKeySchema.safeParse(invalid).success, false);
+});
+
+test("an identity time lies in the creation window and needs a ULID suffix", () => {
+  const before = Date.now();
+  const time = identityTime(createIdentity("execution"));
+  const after = Date.now();
+  assert.ok(time >= before && time <= after);
+  assert.throws(() => identityTime("execution_invalid"));
 });

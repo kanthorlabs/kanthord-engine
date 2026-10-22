@@ -442,6 +442,11 @@ The implemented fields are:
 - `scheduler.stop_backoff`: optional positive safe integer in seconds, default
   `30`. After a counted failure, the claim skips the node for this wait, doubled
   for each further consecutive failure.
+- `tracking.retention_days`: optional positive safe integer from 1 to 3650,
+  default `30`. The server deletes a trace, with its spans, texts and session
+  entries, when the trace is older than this retention. A sweep runs at the
+  start and then every hour. A record of an execution older than the retention
+  is `Refused` with `trace_expired`.
 
 The current Project fragment is empty and adds no YAML section.
 See [Gateway](./gateway.md) for authentication context.

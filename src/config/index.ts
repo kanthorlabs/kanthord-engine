@@ -37,6 +37,10 @@ import {
   schedulerConfigSchema,
   type SchedulerConfig,
 } from "../scheduler/config.ts";
+import {
+  trackingConfigSchema,
+  type TrackingConfig,
+} from "../tracking/config.ts";
 const EMPTY_SCHEMA_FIELD_COUNT = 0;
 const CONTAINER_INIT_COMMAND =
   "podman run --rm -v <volume>:/var/lib/kanthord docker.io/kanthorlabs/kanthord:<version> config init --gateway-bind :: --gateway-allowed-host localhost:<port> --gateway-allowed-host 127.0.0.1:<port>";
@@ -47,6 +51,7 @@ export interface ServerConfig extends GlobalConfig {
   agent: AgentConfig;
   worker: WorkerConfig;
   scheduler: SchedulerConfig;
+  tracking: TrackingConfig;
 }
 
 convict.addParser({ extension: ["yaml", "yml"], parse: parseMapping });
@@ -59,6 +64,7 @@ const fragments = {
   agent: agentConfigSchema,
   worker: workerConfigSchema,
   scheduler: schedulerConfigSchema,
+  tracking: trackingConfigSchema,
 };
 function isConfigVersion(value: unknown): value is number {
   return (

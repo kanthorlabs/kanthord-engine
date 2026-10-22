@@ -339,6 +339,7 @@ components:
                       - foreign_producer
                       - value_replaced
                       - text_exists
+                      - trace_expired
                   - type: "null"
             required:
               - record_id
