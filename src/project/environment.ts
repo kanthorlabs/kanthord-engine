@@ -5,7 +5,9 @@ import { CancellationContext, type Context } from "../kernel/context.ts";
 import {
   DEVCONTAINER_DIRECTORY,
   DEVCONTAINER_FILE,
+  devcontainerPath,
   environmentRefusal,
+  isLocalFeature,
   parseEnvironmentText,
   type Environment,
 } from "../kernel/devcontainer.ts";
@@ -47,10 +49,25 @@ export const EnvironmentErrorCode = {
 } as const;
 const SSH_UNREACHABLE_STATUS = 422;
 const SINGLE_ENVIRONMENT = 1;
+const DEFAULT_CONTEXT = ".";
+const READ_FAILURES: ReadonlySet<string> = new Set([
+  ProjectErrorCode.RepositorySshUnreachable,
+  ProjectErrorCode.RepositoryBaseBranchAbsent,
+]);
 
 type RepositoryConfig = typeof repositoryConfigSchema._output;
 type BindingSetWrite = typeof bindingSetWriteInputSchema._output;
 type RepositoryFile = { path: string; state: string; text: string | null };
+type RepositoryTree = { path: string; object: string | null };
+type RepositoryBinding = {
+  id: string;
+  resource_identity: string;
+  config: RepositoryConfig;
+};
+interface ResolvedSlot {
+  readonly revisions: string;
+  readonly environment: SlotEnvironment | null;
+}
 type SshRelease = { identity: CallerIdentity; subject: SshIdentitySubject };
 type BindingSetAnswer =
   (typeof projectOperations)["binding.environment.set"]["output"]["_output"];
@@ -90,6 +107,20 @@ function dockerfilePath(document: Environment): string | null {
   return dockerfile === undefined
     ? null
     : posix.normalize(posix.join(DEVCONTAINER_DIRECTORY, dockerfile));
+}
+
+function treePaths(document: Environment): string[] {
+  const paths =
+    document.build?.dockerfile === undefined
+      ? []
+      : [devcontainerPath(document.build.context ?? DEFAULT_CONTEXT)];
+  for (const feature of Object.keys(document.features ?? {}))
+    if (isLocalFeature(feature)) paths.push(devcontainerPath(feature));
+  return paths;
+}
+
+function isReadFailure(error: unknown): boolean {
+  return error instanceof OperationError && READ_FAILURES.has(error.code);
 }
 
 export function refuseEnvironment(environment: Environment | undefined): void {
@@ -135,6 +166,7 @@ function repositoryDocument(file: RepositoryFile): Environment | null {
 
 export class ProjectEnvironments {
   private readonly dependencies: EnvironmentDependencies;
+  private readonly resolved = new Map<string, ResolvedSlot>();
 
   constructor(dependencies: EnvironmentDependencies) {
     this.dependencies = dependencies;
@@ -213,16 +245,53 @@ export class ProjectEnvironments {
     projectId: string,
     context: Context,
   ): Promise<SlotEnvironment | null> {
-    const repositories = this.dependencies.store.transaction((tx) =>
-      Array.from(readCurrentBindingSet(tx, projectId).values()).filter(
-        (binding) =>
-          kindOf(binding.resource_identity) === BindingKind.Repository,
-      ),
+    const repositories: RepositoryBinding[] =
+      this.dependencies.store.transaction((tx) =>
+        Array.from(readCurrentBindingSet(tx, projectId).values())
+          .filter(
+            (binding) =>
+              kindOf(binding.resource_identity) === BindingKind.Repository,
+          )
+          .map((binding) => ({
+            id: binding.id,
+            resource_identity: binding.resource_identity,
+            config: repositoryConfigSchema.parse(binding.config),
+          })),
+      );
+    const revisions = repositories.map((binding) => binding.id).join();
+    try {
+      const environment = await this.slotOf(projectId, repositories, context);
+      this.resolved.set(projectId, { revisions, environment });
+      return environment;
+    } catch (error) {
+      const last = this.resolved.get(projectId);
+      if (isReadFailure(error) && last?.revisions === revisions)
+        return last.environment;
+      throw error;
+    }
+  }
+
+  private async slotOf(
+    projectId: string,
+    repositories: readonly RepositoryBinding[],
+    context: Context,
+  ): Promise<SlotEnvironment | null> {
+    const stored = repositories.filter(
+      (binding) => binding.config.environment !== undefined,
     );
+    if (stored.length > SINGLE_ENVIRONMENT)
+      throw new Diagnostic(
+        EnvironmentErrorCode.Ambiguous,
+        "Two or more repository bindings of the project store an environment.",
+        { fields: [["project_id", projectId]] },
+      );
     const found: SlotEnvironment[] = [];
-    for (const binding of repositories) {
-      const config = repositoryConfigSchema.parse(binding.config);
-      const environment = await this.resolve(binding.id, config, context);
+    for (const binding of stored.length ? stored : repositories) {
+      const environment = await this.resolve(
+        binding.id,
+        binding.config,
+        context,
+      );
       if (environment !== null)
         found.push({
           ...environment,
@@ -232,7 +301,7 @@ export class ProjectEnvironments {
     if (found.length > SINGLE_ENVIRONMENT)
       throw new Diagnostic(
         EnvironmentErrorCode.Ambiguous,
-        "Two or more repository bindings of the project hold an environment.",
+        "Two or more repository bindings of the project hold a devcontainer file, and none stores an environment.",
         { fields: [["project_id", projectId]] },
       );
     return found[0] ?? null;
@@ -281,6 +350,13 @@ export class ProjectEnvironments {
         commit: read.commit,
         document: config.environment,
         files: read.files,
+        trees: await this.readTrees(
+          bindingId,
+          config,
+          read.commit,
+          config.environment,
+          context,
+        ),
       };
     }
     const read = await this.readBase(
@@ -310,7 +386,44 @@ export class ProjectEnvironments {
       commit: read.commit,
       document,
       files: [file, ...extra],
+      trees: await this.readTrees(
+        bindingId,
+        config,
+        read.commit,
+        document,
+        context,
+      ),
     };
+  }
+
+  private async readTrees(
+    bindingId: string,
+    config: RepositoryConfig,
+    commit: string,
+    document: Environment,
+    context: Context,
+  ): Promise<RepositoryTree[]> {
+    const paths = treePaths(document);
+    if (!paths.length) return [];
+    const { address, ssh } = this.access(bindingId, config);
+    let objects: Array<string | null>;
+    try {
+      objects = await this.dependencies.repositoryFiles.readObjectIds(
+        address,
+        commit,
+        paths,
+        context,
+        BINDING_CHECK_TIMEOUT_MS,
+        ssh,
+      );
+    } catch (error) {
+      return refuseUnreadable(context, error);
+    }
+    assert.equal(objects.length, paths.length);
+    return paths.map((path, index) => ({
+      path,
+      object: objects[index] ?? null,
+    }));
   }
 
   private access(bindingId: string, config: RepositoryConfig) {
