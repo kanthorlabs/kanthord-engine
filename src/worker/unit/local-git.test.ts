@@ -1,6 +1,12 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import { simpleGit } from "simple-git";
 import { background } from "../../kernel/context.ts";
@@ -22,6 +28,15 @@ import {
 const env = hostEnvironment();
 const DEFAULT_IDENTITY = "kanthord <kanthord@localhost>";
 const CRLF_CONTENT = "a\r\nb\r\n";
+const HOOK_MARKER = "hook-ran";
+const EXECUTABLE_MODE = 0o755;
+
+function writeRefusingHook(hooks: string, marker: string): void {
+  mkdirSync(hooks, { recursive: true });
+  const hook = join(hooks, "commit-msg");
+  writeFileSync(hook, `#!/bin/sh\ntouch "${marker}"\nexit 1\n`);
+  chmodSync(hook, EXECUTABLE_MODE);
+}
 
 test("verification cleanup discards tracked and untracked edits but keeps ignored files", async (t) => {
   const original = "original";
@@ -233,4 +248,42 @@ test("work commits ignore the default global attributes file of the host", async
     await git.raw(["cat-file", "blob", "HEAD:crlf.txt"]),
     CRLF_CONTENT,
   );
+});
+
+test("work commits run no hook of the configured hooks path of the repository", async (t) => {
+  const directory = temporary(t);
+  const hooks = temporary(t);
+  const marker = join(hooks, HOOK_MARKER);
+  writeRefusingHook(hooks, marker);
+  const git = simpleGit(directory, { unsafe: { allowUnsafeHooksPath: true } });
+  await git.init();
+  await git.addConfig("core.hooksPath", hooks);
+  writeFileSync(join(directory, "tracked"), "original");
+  const head = await commitWork(
+    env,
+    directory,
+    "checkpoint",
+    background,
+    10000,
+  );
+  assert.ok(head);
+  assert.equal(existsSync(marker), false);
+});
+
+test("work commits run no hook of the default hooks directory of the repository", async (t) => {
+  const directory = temporary(t);
+  const marker = join(temporary(t), HOOK_MARKER);
+  const git = simpleGit(directory);
+  await git.init();
+  writeRefusingHook(join(directory, ".git", "hooks"), marker);
+  writeFileSync(join(directory, "tracked"), "original");
+  const head = await commitWork(
+    env,
+    directory,
+    "checkpoint",
+    background,
+    10000,
+  );
+  assert.ok(head);
+  assert.equal(existsSync(marker), false);
 });

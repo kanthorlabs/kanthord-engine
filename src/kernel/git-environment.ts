@@ -29,11 +29,13 @@ const HOST_SSH = [
 const ISOLATION = {
   GIT_CONFIG_GLOBAL: EMPTY_CONFIG_PATH,
   GIT_CONFIG_NOSYSTEM: "1",
-  GIT_CONFIG_COUNT: "2",
+  GIT_CONFIG_COUNT: "3",
   GIT_CONFIG_KEY_0: "core.excludesFile",
   GIT_CONFIG_VALUE_0: EMPTY_CONFIG_PATH,
   GIT_CONFIG_KEY_1: "core.attributesFile",
   GIT_CONFIG_VALUE_1: EMPTY_CONFIG_PATH,
+  GIT_CONFIG_KEY_2: "core.hooksPath",
+  GIT_CONFIG_VALUE_2: EMPTY_CONFIG_PATH,
   GIT_ATTR_NOSYSTEM: "1",
 } as const;
 
@@ -41,6 +43,7 @@ export const GIT_UNSAFE_OPTIONS: NonNullable<SimpleGitOptions["unsafe"]> = {
   allowUnsafeConfigPaths: true,
   allowUnsafeConfigEnvCount: true,
   allowUnsafeSshCommand: true,
+  allowUnsafeHooksPath: true,
 };
 
 export function isolatedGitEnvironment(
