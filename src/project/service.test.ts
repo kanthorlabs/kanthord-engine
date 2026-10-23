@@ -5864,3 +5864,119 @@ test("at a stored environment of one binding, no other binding takes its reposit
     [null, false],
   ]);
 });
+
+const MIXED_FIRST_ENVIRONMENT = {
+  image: "mcr.microsoft.com/devcontainers/python:3.12",
+  postCreateCommand: "pip install -r requirements.txt",
+};
+const MIXED_SECOND_ENVIRONMENT = {
+  image: "mcr.microsoft.com/devcontainers/javascript-node:24",
+  postCreateCommand: "npm ci",
+};
+const ONBOARDING_TABLE = /onboarding/i;
+
+async function environmentFixture(
+  t: TestContext,
+  placement: "container" | "server",
+  environments: [unknown, unknown],
+) {
+  const f = probedFixture(t, null);
+  const [first, second] = environments;
+  const withEnvironment = (
+    binding: ReturnType<typeof repositoryBinding>,
+    environment: unknown,
+  ) =>
+    environment === undefined
+      ? binding
+      : {
+          ...binding,
+          config: {
+            ...binding.config,
+            environment: environment as typeof MIXED_FIRST_ENVIRONMENT,
+          },
+        };
+  await f.write({
+    [REPOSITORY_NAME]: withEnvironment(repositoryBinding(), first),
+    [SECOND_REPOSITORY_NAME]: withEnvironment(
+      repositoryBinding(SECOND_REPOSITORY_ADDRESS),
+      second,
+    ),
+    [WORKER_NAME]:
+      placement === WorkerPlacement.Container
+        ? containerWithEnvironment(REPOSITORY_NAME)
+        : workerBinding(),
+  });
+  const identity = (name: string) => repositoryIdentity(f, name);
+  const mixed = (identities: string[]) =>
+    f.store.transaction((tx) =>
+      f.project.environmentsMixed(tx, f.params.project_id, identities),
+    );
+  return {
+    ...f,
+    identity,
+    mixed,
+    both: () => [identity(REPOSITORY_NAME), identity(SECOND_REPOSITORY_NAME)],
+  };
+}
+
+test("environmentsMixed answers true for different stored environments at the container placement and reads no onboarding record", async (t) => {
+  const f = await environmentFixture(t, WorkerPlacement.Container, [
+    MIXED_FIRST_ENVIRONMENT,
+    MIXED_SECOND_ENVIRONMENT,
+  ]);
+  assert.equal(f.mixed(f.both()), true);
+  const tables = f.store.database
+    .prepare("SELECT name FROM sqlite_master WHERE type = 'table'")
+    .all() as Array<{ name: string }>;
+  assert.deepEqual(
+    tables.filter(({ name }) => ONBOARDING_TABLE.test(name)),
+    [],
+  );
+});
+
+test("environmentsMixed answers false at the server placement", async (t) => {
+  const f = await environmentFixture(t, WorkerPlacement.Server, [
+    MIXED_FIRST_ENVIRONMENT,
+    MIXED_SECOND_ENVIRONMENT,
+  ]);
+  assert.equal(f.mixed(f.both()), false);
+});
+
+test("environmentsMixed answers false for equal documents after key order normalisation", async (t) => {
+  const f = await environmentFixture(t, WorkerPlacement.Container, [
+    {
+      image: MIXED_FIRST_ENVIRONMENT.image,
+      postCreateCommand: MIXED_FIRST_ENVIRONMENT.postCreateCommand,
+    },
+    {
+      postCreateCommand: MIXED_FIRST_ENVIRONMENT.postCreateCommand,
+      image: MIXED_FIRST_ENVIRONMENT.image,
+    },
+  ]);
+  assert.equal(f.mixed(f.both()), false);
+});
+
+test("environmentsMixed answers false when one binding has no stored document", async (t) => {
+  const f = await environmentFixture(t, WorkerPlacement.Container, [
+    MIXED_FIRST_ENVIRONMENT,
+    undefined,
+  ]);
+  assert.equal(f.mixed(f.both()), false);
+});
+
+test("environmentsMixed counts an identity that is no repository binding as no environment", async (t) => {
+  const f = await environmentFixture(t, WorkerPlacement.Container, [
+    MIXED_FIRST_ENVIRONMENT,
+    MIXED_SECOND_ENVIRONMENT,
+  ]);
+  const worker = f.store.transaction(
+    (tx) =>
+      readCurrentBindingSet(tx, f.params.project_id).get(WORKER_NAME)!
+        .resource_identity,
+  );
+  assert.equal(f.mixed([f.identity(REPOSITORY_NAME), worker]), false);
+  assert.equal(
+    f.mixed([f.identity(REPOSITORY_NAME), "repository:github:owner/absent"]),
+    false,
+  );
+});

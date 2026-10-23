@@ -99,6 +99,7 @@ export function approveProposal(
     },
     actor,
     dependencies.bindings,
+    dependencies.environments,
     dependencies.workQueue,
     dependencies.config.text_max_bytes,
   );

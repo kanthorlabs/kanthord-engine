@@ -179,6 +179,15 @@ test("implement unblock refuses a task of another set and writes the changed tas
           resource_identity: "repository:github:owner/repo",
         }
       : null;
+  h.dependencies.bindings.getBindingRevision = () => ({
+    binding_id: bindingId,
+    project_id: h.project_id,
+    name: "repo",
+    resource_identity: "repository:github:owner/repo",
+    revision: FIRST_ATTEMPT,
+    disabled: false,
+    tombstone: false,
+  });
   h.store.transaction((tx) => {
     tx.database
       .prepare("UPDATE mission_node SET state = ? WHERE id = ?")
@@ -469,6 +478,15 @@ test("unblock change adds and removes a task", async (t) => {
           resource_identity: "repository:github:owner/repo",
         }
       : null;
+  h.dependencies.bindings.getBindingRevision = () => ({
+    binding_id: bindingId,
+    project_id: h.project_id,
+    name: "repo",
+    resource_identity: "repository:github:owner/repo",
+    revision: FIRST_ATTEMPT,
+    disabled: false,
+    tombstone: false,
+  });
   h.store.transaction((tx) => {
     tx.database
       .prepare("UPDATE mission_node SET state = ? WHERE id = ?")
@@ -643,4 +661,82 @@ test("unblock refuses an intent change after the first claim with mission.node.i
     h.store.transaction((tx) => readCurrentRevision(tx, h.node_id))?.revision,
     FIRST_ATTEMPT,
   );
+});
+
+test("unblock with a change that names mixed environments refuses and keeps the node blocked", async (t) => {
+  const first = createIdentity("binding");
+  const second = createIdentity("binding");
+  const identities = new Map([
+    [first, "repository:github:owner/first"],
+    [second, "repository:github:owner/second"],
+  ]);
+  const h = controlHarness(t, IDENTITY, {
+    environments: {
+      environmentsMixed: (_tx, _projectId, resourceIdentities) =>
+        resourceIdentities.length === identities.size,
+    },
+  });
+  h.dependencies.bindings.resolveBindingIdentity = (_tx, projectId, id) =>
+    projectId === h.project_id && identities.has(id)
+      ? { binding_id: id, resource_identity: identities.get(id)! }
+      : null;
+  h.dependencies.bindings.getBindingRevision = (_tx, id) => ({
+    binding_id: id,
+    project_id: h.project_id,
+    name: id,
+    resource_identity: identities.get(id)!,
+    revision: FIRST_ATTEMPT,
+    disabled: false,
+    tombstone: false,
+  });
+  h.store.transaction((tx) =>
+    tx.database
+      .prepare("UPDATE mission_node SET state = ? WHERE id = ?")
+      .run(NodeState.Paused, h.node_id),
+  );
+  await h.invoke("node.block", {
+    params: { node_id: h.node_id },
+    query: {},
+    body: h.body(NodeState.Paused),
+  });
+  const revisions = () =>
+    h.store.database.prepare("SELECT * FROM mission_node_revision").all();
+  const before = revisions();
+  await assert.rejects(
+    h.invoke("node.unblock", {
+      params: { node_id: h.node_id },
+      query: {},
+      body: {
+        blocked_attempt: NO_ATTEMPT,
+        expected_revision: FIRST_ATTEMPT,
+        expected_mission_version: FIRST_ATTEMPT,
+        change: {
+          content: {
+            name: "Name",
+            requirement: "Requirement",
+            criterion: "Criterion",
+            verifications: ["true"],
+            bindings: [first, second],
+            intent: Intent.Implement,
+          },
+          tasks: [],
+          reason: "Redirect",
+        },
+      },
+    }),
+    (error) => {
+      assert.ok(error instanceof OperationError);
+      assert.equal(error.status, HttpStatus.BadRequest);
+      assert.equal(error.code, MissionErrorCode.EnvironmentMixed);
+      assert.deepEqual(error.details, { bindings: [first, second] });
+      return true;
+    },
+  );
+  assert.deepEqual(revisions(), before);
+  const node = await h.invoke("node.get", {
+    params: { node_id: h.node_id },
+    query: {},
+    body: null,
+  });
+  assert.equal(node.state, NodeState.Blocked);
 });

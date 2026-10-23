@@ -16,6 +16,7 @@ import {
 } from "./contract.ts";
 import type { Dependencies } from "./service.ts";
 import { ContentField, TASKS_FIELD, validateText } from "./content.ts";
+import { guardEnvironmentMix } from "./environment-mix.ts";
 import { requireNode } from "./node-read.ts";
 import { resolveContent, resolveTasks } from "./node-create.ts";
 import { requireIntentUnlocked } from "./node-update.ts";
@@ -94,6 +95,7 @@ function changeRevision(
   const changedFields = contentChanges(content, previous.content);
   if (tasks.changes.length > NO_CHANGED_FIELDS) changedFields.push(TASKS_FIELD);
   if (changedFields.length === NO_CHANGED_FIELDS) return previous.revision;
+  guardEnvironmentMix(tx, dependencies, projectId, content.bindings);
   const revision = previous.revision + REVISION_INCREMENT;
   assert.ok(Number.isSafeInteger(revision));
   insertRevision(tx, {

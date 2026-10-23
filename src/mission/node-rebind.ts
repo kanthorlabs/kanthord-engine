@@ -11,10 +11,12 @@ import {
   type HumanActor,
   type Mission,
   type MissionBindings,
+  type MissionEnvironments,
   type Rebind,
   type RebindResult,
   type Revision,
 } from "./contract.ts";
+import { guardEnvironmentMix } from "./environment-mix.ts";
 import { nodeRecord, requireNode } from "./node-read.ts";
 import { revisionFromRow } from "./revision.ts";
 import { openAttemptsOf } from "./store.ts";
@@ -163,6 +165,7 @@ export function rebindNodes(
   body: Rebind,
   actor: HumanActor,
   bindings: MissionBindings,
+  environments: MissionEnvironments,
   textMaxBytes: number,
 ): RebindResult {
   const mission = requireMission(tx, missionId, body.expected_mission_version);
@@ -190,6 +193,12 @@ export function rebindNodes(
       skipped.push({ node: nodeRecord(tx, node, bindings), condition });
       continue;
     }
+    guardEnvironmentMix(
+      tx,
+      { bindings, environments },
+      mission.project_id,
+      pins,
+    );
     const revision = reboundRevision(node, previous, pins, body, actor);
     insertRevision(tx, revision);
     revisions.push(revision);
