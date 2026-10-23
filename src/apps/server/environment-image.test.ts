@@ -59,7 +59,8 @@ const HEADER_LINES = 3;
 const ONE_BUILD = 1;
 const WAIT_ROUNDS = 100;
 const WAIT_STEP_MS = 50;
-const SHORT_TIMEOUT_MS = 1000;
+const SHORT_TIMEOUT_MS = 5000;
+const START_WAIT_ROUNDS = 1200;
 
 function environment(
   document: SlotEnvironment["document"] = {
@@ -741,13 +742,14 @@ async function ended(pid: number): Promise<boolean> {
 const HANGING_CLI = (
   pidFile: string,
 ) => `import { spawn } from "node:child_process";
-import { writeFileSync } from "node:fs";
+import { renameSync, writeFileSync } from "node:fs";
 const child = spawn("sleep", ["30"], { stdio: "ignore" });
-writeFileSync(${JSON.stringify(pidFile)}, String(child.pid));
+writeFileSync(${JSON.stringify(`${pidFile}.next`)}, String(child.pid));
+renameSync(${JSON.stringify(`${pidFile}.next`)}, ${JSON.stringify(pidFile)});
 setInterval(() => {}, 1000);`;
 
 async function pidOf(file: string): Promise<number> {
-  for (let round = 0; round < WAIT_ROUNDS; round++) {
+  for (let round = 0; round < START_WAIT_ROUNDS; round++) {
     if (existsSync(file) && readFileSync(file, "utf8"))
       return Number(readFileSync(file, "utf8"));
     await delay(WAIT_STEP_MS);
