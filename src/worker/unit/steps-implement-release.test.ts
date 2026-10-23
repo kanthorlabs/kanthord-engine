@@ -14,8 +14,7 @@ import { executionBoundary } from "./native-method.ts";
 import type { MethodClients } from "./method-clients.ts";
 import type { TaskRunner } from "./steps-implement.ts";
 import { runTask, runStepsImplement } from "./steps-implement.ts";
-import { releaseGate, ReleaseGateKind } from "./release-gate.ts";
-import { headSetOf, recordJudged } from "./judged-tasks.ts";
+import { nodeUnitOf, releaseGate, ReleaseGateKind } from "./release-gate.ts";
 import { Diagnostic } from "../../kernel/errors.ts";
 import { background } from "../../kernel/context.ts";
 import { commitWork } from "./local-git.ts";
@@ -30,6 +29,7 @@ import {
   advanceBase,
   implementFixture as fixture,
   NO_PROVIDER_CALLS,
+  recordDone,
   recordReleases,
   STEPS_KEY,
   task,
@@ -39,21 +39,13 @@ import {
 const NO_PUSHES = 0;
 const LATE_MAIN_CHANGE = "late main change";
 
-function judgeNodeUnit(h: Awaited<ReturnType<typeof fixture>>) {
-  recordJudged(
-    h.input.workspaces.nodeKey(h.input.claim.node_id),
-    {
-      attempt: h.input.claim.attempt,
-      revision: h.input.claim.pinned_revision,
-      taskId: h.input.claim.node_id,
-    },
-    headSetOf(h.checkouts),
-  );
+async function recordNodeDone(h: Awaited<ReturnType<typeof fixture>>) {
+  await recordDone(h, nodeUnitOf(h.input.claim.node_id, h.revision));
 }
 
 test("implement pushes the evidenced head before release and retains its workspace", async (t) => {
   const h = await fixture(t, [], []);
-  judgeNodeUnit(h);
+  await recordNodeDone(h);
   const order: string[] = [];
   h.run.clients.mission = {
     "evidence.submit": async (input: {
@@ -353,7 +345,7 @@ test("the release gate merges a clean base change and verifies the merged head",
 
 test("the finish writes one git span for each git step and the cause of a failed push", async (t) => {
   const h = await fixture(t, [], []);
-  judgeNodeUnit(h);
+  await recordNodeDone(h);
   const records: TelemetryRecord[] = [];
   (h.run as { spans: SpanRecorder }).spans = new SpanRecorder(
     h.run.claim,
@@ -417,7 +409,7 @@ async function twoBindingRelease(t: test.TestContext) {
       await simpleGit(checkout.directory).revparse(["HEAD"])
     ).trim();
   }
-  judgeNodeUnit(h);
+  await recordNodeDone(h);
   const submitted: { binding_id: string; commit: string }[][] = [];
   const order: string[] = [];
   h.run.clients.mission = {

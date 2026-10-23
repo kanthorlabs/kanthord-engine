@@ -8,25 +8,23 @@ import { VERIFICATION_INFRASTRUCTURE_FAILED } from "./verification.ts";
 import {
   runStepsImplement,
   runTask,
-  startCheck,
   TaskResultKind,
 } from "./steps-implement.ts";
 import {
   fauxAssistantMessage,
   fauxToolCall,
   implementFixture as fixture,
-  NO_PROVIDER_CALLS,
+  recordDone,
   recordReleases,
   task,
 } from "./test-support.ts";
 
 const SIGNAL_KILL = "sh -c 'kill -9 $$'";
 const EXIT_KILL = "sh -c 'kill -9 $$'; exit $?";
-const ONE_JUDGEMENT = 1;
 const ONE_TURN = 1;
-const JUDGEMENT_AND_VERDICT_TURN = 3;
+const ONE_TOOL_TURN = 2;
+const THREE_TURNS = 3;
 const WALL_DEADLINE_MS = 300;
-const MET = 'kanthord-judgement: {"criterion_met":true,"rationale":"met"}';
 
 function infrastructureEnd(
   end: ExecutionEnd,
@@ -45,7 +43,7 @@ function infrastructureEnd(
   assert.deepEqual(bodies, [{ further_work: true, stop }]);
 }
 
-test("a persistent kill in a task verification stops with the infrastructure code and sends no turn", async (t) => {
+test("a persistent kill in a task verification stops with the infrastructure code and sends no revision turn", async (t) => {
   for (const command of [SIGNAL_KILL, EXIT_KILL]) {
     const h = await fixture(
       t,
@@ -55,16 +53,16 @@ test("a persistent kill in a task verification stops with the infrastructure cod
     const bodies = recordReleases(h);
     const end = await executionBoundary(h.run, () => runStepsImplement(h));
     infrastructureEnd(end, bodies, command);
-    assert.equal(h.provider.calls.length, NO_PROVIDER_CALLS);
+    assert.equal(h.provider.calls.length, ONE_TURN);
   }
 });
 
 test("a persistent kill in a node verification of the verdict unit stops with the infrastructure code", async (t) => {
+  const passing = task("passing", "true");
   const h = await fixture(
     t,
-    [task("passing", "true")],
+    [passing],
     [
-      fauxAssistantMessage(MET),
       fauxAssistantMessage(
         fauxToolCall("write", { path: "verdict", content: "verdict" }),
         { stopReason: "toolUse" },
@@ -73,6 +71,7 @@ test("a persistent kill in a node verification of the verdict unit stops with th
       fauxAssistantMessage("never"),
     ],
   );
+  await recordDone(h, passing);
   h.verdict = {
     text: "The verdict names no task.",
     judged: [
@@ -86,7 +85,7 @@ test("a persistent kill in a node verification of the verdict unit stops with th
   const bodies = recordReleases(h);
   const end = await executionBoundary(h.run, () => runStepsImplement(h));
   infrastructureEnd(end, bodies, SIGNAL_KILL);
-  assert.equal(h.provider.calls.length, JUDGEMENT_AND_VERDICT_TURN);
+  assert.equal(h.provider.calls.length, ONE_TOOL_TURN);
 });
 
 test("a kill on the first run and a pass on the rerun passes the task verification", async (t) => {
@@ -95,34 +94,31 @@ test("a kill on the first run and a pass on the rerun passes the task verificati
     "rerun",
     `test -f ${marker} || { touch ${marker}; kill -9 $$; }`,
   );
-  const h = await fixture(t, [current], [fauxAssistantMessage(MET)]);
-  const checked = await startCheck(h);
-  assert.deepEqual(checked, { pending: [], node: null, budgetEnd: null });
-  assert.equal(h.provider.calls.length, ONE_JUDGEMENT);
+  const h = await fixture(t, [current], [fauxAssistantMessage("work")]);
+  assert.deepEqual(await runTask(h, current), {
+    kind: TaskResultKind.Complete,
+    recorded: false,
+  });
+  assert.equal(h.provider.calls.length, ONE_TURN);
 });
 
-test("exit 127 in a task verification is a code failure that sends a work turn", async (t) => {
+test("exit 127 in a task verification is a code failure that sends a revision turn", async (t) => {
   const current = task("absent", "command-absent-x");
-  const h = await fixture(t, [current], []);
-  const checked = await startCheck(h);
-  assert.deepEqual(checked, {
-    pending: [{ task: current, instruction: null }],
-    node: null,
-    budgetEnd: null,
-  });
+  const h = await fixture(
+    t,
+    [current],
+    [
+      fauxAssistantMessage("work"),
+      fauxAssistantMessage("revised"),
+      fauxAssistantMessage("revised again"),
+    ],
+  );
+  await assert.rejects(runTask(h, current), { reason: EndReason.NoProgress });
+  assert.equal(h.provider.calls.length, THREE_TURNS);
 });
 
 test("a kill at the wall deadline during a verification is a budget end and not a stop", async (t) => {
   const current = task("slow", "sleep 30");
-  const checked = await fixture(t, [current], []);
-  const checkDeadline = Date.now() + WALL_DEADLINE_MS;
-  checked.agent.budget.wallDeadline = () => checkDeadline;
-  assert.deepEqual(await startCheck(checked), {
-    pending: [],
-    node: null,
-    budgetEnd: { task: current },
-  });
-  assert.equal(checked.agent.budget.exhausted(), true);
   const worked = await fixture(t, [current], [fauxAssistantMessage("work")]);
   const workDeadline = Date.now() + WALL_DEADLINE_MS;
   worked.agent.budget.wallDeadline = () => workDeadline;
@@ -130,4 +126,5 @@ test("a kill at the wall deadline during a verification is a budget end and not 
     kind: TaskResultKind.BudgetEnd,
   });
   assert.equal(worked.provider.calls.length, ONE_TURN);
+  assert.equal(worked.agent.budget.exhausted(), true);
 });

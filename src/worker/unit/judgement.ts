@@ -18,12 +18,6 @@ const AssessmentResult = {
   CriterionNotMet: "criterion-not-met",
   Undetermined: "undetermined",
 } as const;
-export const taskJudgementSchema = z.strictObject({
-  criterion_met: z.boolean(),
-  rationale: z.string().trim().min(1),
-});
-export const JUDGEMENT_CHANGE_RATIONALE =
-  "The judgement turn changed files, and the worker committed them.";
 const unmetItemSchema = z.strictObject({
   id: z.string().trim().min(1),
   reason: z.string().trim().min(1),
@@ -111,19 +105,6 @@ export async function parseRepaired<T extends z.ZodType>(
   return (
     parseJudgement(agent.lastText(), schema, marker) ?? ReplyRepair.Invalid
   );
-}
-
-export function taskJudgementInstruction(
-  templates: PromptTemplates,
-  task: TaskContent,
-): string {
-  assert.ok(task.id);
-  assert.ok(task.content.criterion);
-  return renderTemplate(templates, PromptTemplate.TaskJudgement, {
-    task_id: task.id,
-    criterion: task.content.criterion,
-    marker: JUDGEMENT_MARKER,
-  });
 }
 
 export function requestedChangesText(

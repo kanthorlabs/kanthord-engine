@@ -16,6 +16,7 @@ const EXIT_SUCCESS = 0;
 const EXIT_NO_MATCH = 1;
 const NO_EXIT = -1;
 const NUL = "\0";
+const NO_VALUE = "";
 const NO_PATHS = 0;
 const PATH_BATCH_BYTES = 262144;
 const MODIFIED = "M";
@@ -620,6 +621,46 @@ export async function concludeMerge(
     context,
     remaining(),
   );
+}
+
+export async function amendTrailer(
+  env: NodeJS.ProcessEnv,
+  directory: string,
+  trailer: string,
+  context: Context,
+  deadlineMs: number,
+): Promise<void> {
+  assert.ok(trailer && !trailer.startsWith("-"));
+  await run(
+    env,
+    directory,
+    ["commit", "--amend", "--no-edit", "--trailer", trailer],
+    context,
+    deadlineMs,
+  );
+}
+
+export async function trailerValues(
+  env: NodeJS.ProcessEnv,
+  directory: string,
+  key: string,
+  base: string,
+  context: Context,
+  deadlineMs: number,
+): Promise<string[]> {
+  assert.ok(key && !key.startsWith("-"));
+  assert.ok(base && !base.startsWith("-"));
+  const output = await run(
+    env,
+    directory,
+    ["log", `--format=%(trailers:key=${key},valueonly)`, `${base}..HEAD`, "--"],
+    context,
+    deadlineMs,
+  );
+  return output
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line !== NO_VALUE);
 }
 
 export async function abortMerge(

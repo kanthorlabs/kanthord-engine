@@ -8,7 +8,6 @@ import { EndReason, type ExecutionEnd } from "./execution-run.ts";
 import { executionBoundary } from "./native-method.ts";
 import type { MethodClients } from "./method-clients.ts";
 import { runStepsImplement, startCheck } from "./steps-implement.ts";
-import { headSetOf, recordJudged } from "./judged-tasks.ts";
 import type { WorkspaceCheckout } from "./workspace.ts";
 import {
   advanceBase,
@@ -17,6 +16,7 @@ import {
   fauxToolCall,
   implementFixture as fixture,
   NO_PROVIDER_CALLS,
+  recordDone,
   recordReleases,
   task,
   TEST_SSH_ACCESS,
@@ -24,9 +24,7 @@ import {
 
 const VERDICT = "The edge case of an empty list stays unhandled.";
 const CLEARED = "The verification host lost its network.";
-const MET = 'kanthord-judgement: {"criterion_met":true,"rationale":"met"}';
 const TWO_TURNS = 2;
-const JUDGEMENT_AND_TWO_TURNS = 3;
 const ONE_TURN = 1;
 const TWO_TOOL_TURNS = 4;
 const TWO_BINDINGS = ["api", "web"];
@@ -34,21 +32,8 @@ const BASE_FILE = "other";
 const FETCH_DEADLINE_MS = 20000;
 const SIDE_BRANCH = "side";
 const FIRST_PARENT_FILE = "first-parent";
-const STRAY_FILE = "stray";
 
 type Harness = Awaited<ReturnType<typeof fixture>>;
-
-function judgeAtHead(h: Harness, taskId: string): void {
-  recordJudged(
-    h.input.workspaces.nodeKey(h.input.claim.node_id),
-    {
-      attempt: h.input.claim.attempt,
-      revision: h.input.claim.pinned_revision,
-      taskId,
-    },
-    headSetOf(h.checkouts),
-  );
-}
 
 function verdictAt(text: string, checkouts: readonly WorkspaceCheckout[]) {
   return {
@@ -105,7 +90,7 @@ async function verdictHarness(
 ) {
   const current = task("judged", "true");
   const h = await fixture(t, [current], script, undefined, names);
-  judgeAtHead(h, current.id);
+  await recordDone(h, current);
   return { h, current };
 }
 
@@ -129,7 +114,6 @@ test("a verdict that names no task sends a verdict turn and an unchanged tree st
 
 test("a base move between the review and the rework does not satisfy the verdict rule", async (t) => {
   const { h } = await verdictHarness(t, [
-    fauxAssistantMessage(MET),
     fauxAssistantMessage("nothing"),
     fauxAssistantMessage("nothing again"),
     fauxAssistantMessage("never"),
@@ -145,7 +129,7 @@ test("a base move between the review and the rework does not satisfy the verdict
     TEST_SSH_ACCESS,
   );
   await noProgressEnd(h);
-  assert.equal(h.provider.calls.length, JUDGEMENT_AND_TWO_TURNS);
+  assert.equal(h.provider.calls.length, TWO_TURNS);
   assert.notEqual(h.checkouts[0]!.head, judged);
   const parents = await simpleGit(h.root).raw([
     "rev-list",
@@ -234,11 +218,10 @@ test("a verdict with no judged commit sends its text once and a pass completes t
 });
 
 test("a verdict with a later commit after its judged commit sends no verdict turn", async (t) => {
-  const { h, current } = await verdictHarness(t, []);
+  const { h } = await verdictHarness(t, []);
   h.verdict = verdictAt(VERDICT, h.checkouts);
   await commitOnNode(h.root, "addressed");
   h.checkouts[0]!.head = (await simpleGit(h.root).revparse(["HEAD"])).trim();
-  judgeAtHead(h, current.id);
   recordReleases(h);
   recordEvidence(h);
   assert.deepEqual(await executionBoundary(h.run, () => runStepsImplement(h)), {
@@ -255,7 +238,7 @@ async function headOf(h: Harness): Promise<string> {
 }
 
 test("a rewritten node branch drops the judged commit and sends the verdict", async (t) => {
-  const { h, current } = await verdictHarness(t, []);
+  const { h } = await verdictHarness(t, []);
   const base = h.checkouts[0]!.head;
   await commitOnNode(h.root, "judged");
   await headOf(h);
@@ -263,14 +246,13 @@ test("a rewritten node branch drops the judged commit and sends the verdict", as
   await simpleGit(h.root).raw(["reset", "--hard", base]);
   await commitOnNode(h.root, "rewritten");
   await headOf(h);
-  judgeAtHead(h, current.id);
   const checked = await startCheck(h);
   assert.ok(checked.node?.text.includes(VERDICT));
   assert.deepEqual(checked.node?.judged, []);
 });
 
 test("a judged commit reached only through a second parent does not satisfy the verdict rule", async (t) => {
-  const { h, current } = await verdictHarness(t, []);
+  const { h } = await verdictHarness(t, []);
   const git = simpleGit(h.root);
   await git.raw(["checkout", "-q", "-b", SIDE_BRANCH]);
   await commitOnNode(h.root, "judged");
@@ -286,25 +268,10 @@ test("a judged commit reached only through a second parent does not satisfy the 
     text: VERDICT,
     judged: [{ binding_id: h.checkouts[0]!.binding_id, commit: judged }],
   };
-  judgeAtHead(h, current.id);
   const checked = await startCheck(h);
   assert.ok(checked.node?.text.includes(VERDICT));
   assert.deepEqual(
     checked.node?.judged.map((entry) => entry.commit),
     [judged],
   );
-});
-
-test("a start-check judgement that writes a file does not hide the verdict", async (t) => {
-  const current = task("judged", "true");
-  const h = await fixture(
-    t,
-    [current],
-    [write(STRAY_FILE), fauxAssistantMessage(MET)],
-  );
-  const judged = h.checkouts[0]!.head;
-  h.verdict = verdictAt(VERDICT, h.checkouts);
-  const checked = await startCheck(h);
-  assert.notEqual(h.checkouts[0]!.head, judged);
-  assert.ok(checked.node?.text.includes(VERDICT));
 });

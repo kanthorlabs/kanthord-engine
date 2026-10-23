@@ -67,6 +67,7 @@ interface Violation {
 }
 export interface GatedAgent extends NativeAgent {
   changed(): boolean;
+  commits(): ReadonlySet<string>;
 }
 
 export function isTurnViolation(code: string | null): boolean {
@@ -87,6 +88,7 @@ export function gatedAgent(
     violationEnd: ViolationEnd.Stop,
   };
   let changed = false;
+  const commits = new Set<string>();
   const gated = async (work: () => Promise<void>): Promise<void> => {
     const before = state.checkouts.map((checkout) => checkout.head);
     changed = false;
@@ -98,6 +100,8 @@ export function gatedAgent(
     } finally {
       context.cancel();
     }
+    for (const [index, checkout] of state.checkouts.entries())
+      if (checkout.head !== before[index]) commits.add(checkout.head);
     if (changed) state.unchangedTurns = NO_UNCHANGED_TURNS;
   };
   return {
@@ -107,6 +111,7 @@ export function gatedAgent(
     instruct: (work: WorkPrompt, text: string) =>
       gated(() => agent.instruct(work, text)),
     changed: () => changed,
+    commits: () => commits,
     lastText: () => agent.lastText(),
     abort: () => agent.abort(),
     closeTrace: (status) => agent.closeTrace(status),

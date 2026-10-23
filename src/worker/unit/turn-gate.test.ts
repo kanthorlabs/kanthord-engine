@@ -39,7 +39,6 @@ import {
   TEST_SSH_ACCESS,
 } from "./test-support.ts";
 
-const MET = 'kanthord-judgement: {"criterion_met":true,"rationale":"met"}';
 const FIXED = "fixed";
 const AGENT_SUBJECT = "agent commit";
 const OTHER_BRANCH = "other";
@@ -52,7 +51,7 @@ const MARKER_FILE = "notes";
 const DEADLINE_MS = 20000;
 const MERGE_COMMIT_FIELDS = 3;
 const ONE_RELEASE = 1;
-const COUNTED_TURNS = 5;
+const COUNTED_TURNS = 4;
 const CRLF_FILE = "f.txt";
 const CRLF_CONTENT = "a\r\nb\r\n";
 const HIJACKED_MESSAGE = "hijack";
@@ -131,12 +130,12 @@ test("an agent commit in a turn folds into the template commit and counts as a c
       fauxAssistantMessage("nothing again"),
       bash(`echo ${FIXED} > file && git commit -qam "${AGENT_SUBJECT}"`),
       fauxAssistantMessage("committed"),
-      fauxAssistantMessage(MET),
     ],
   );
   const before = h.checkouts[0]!.head;
   assert.deepEqual(await runTask(h, current), {
     kind: TaskResultKind.Complete,
+    recorded: true,
   });
   const subjects = await simpleGit(h.root).raw([
     "log",
@@ -163,7 +162,6 @@ test("the unchanged-turn counter spans the tasks of one execution", async (t) =>
     [
       fauxAssistantMessage("nothing"),
       fauxAssistantMessage("nothing again"),
-      fauxAssistantMessage(MET),
       fauxAssistantMessage("second nothing"),
       fauxAssistantMessage("second nothing again"),
       fauxAssistantMessage("never"),
@@ -171,6 +169,7 @@ test("the unchanged-turn counter spans the tasks of one execution", async (t) =>
   );
   assert.deepEqual(await runTask(h, first), {
     kind: TaskResultKind.Complete,
+    recorded: false,
   });
   await assert.rejects(runTask(h, second), {
     reason: EndReason.NoProgress,
@@ -215,11 +214,7 @@ test("the prepare restores invariant I from a left rebase and a turn runs", asyn
   const h = await fixture(
     t,
     [current],
-    [
-      write(WORK_FILE, WORK_FILE),
-      fauxAssistantMessage("done"),
-      fauxAssistantMessage(MET),
-    ],
+    [write(WORK_FILE, WORK_FILE), fauxAssistantMessage("done")],
   );
   mkdirSync(gitPath(h, "rebase-merge"));
   h.input.workspaces.release(
@@ -231,6 +226,7 @@ test("the prepare restores invariant I from a left rebase and a turn runs", asyn
   const state = { ...h, ...prepared };
   assert.deepEqual(await runTask(state, current), {
     kind: TaskResultKind.Complete,
+    recorded: true,
   });
   assert.equal(
     (await simpleGit(h.root).raw(["ls-files", WORK_FILE])).trim(),
@@ -332,7 +328,6 @@ test("a CRLF blob under a text attribute keeps invariant I and the gate commits 
       fauxAssistantMessage("nothing"),
       write(WORK_FILE, WORK_FILE),
       fauxAssistantMessage("done"),
-      fauxAssistantMessage(MET),
     ],
   );
   const git = simpleGit(h.root);
@@ -350,6 +345,7 @@ test("a CRLF blob under a text attribute keeps invariant I and the gate commits 
   const state = { ...h, ...prepared };
   assert.deepEqual(await runTask(state, current), {
     kind: TaskResultKind.Complete,
+    recorded: true,
   });
   const subjects = await git.raw(["log", "--format=%s", `${before}..HEAD`]);
   assert.deepEqual(subjects.trim().split("\n"), [
@@ -398,7 +394,6 @@ test("a violation in the checkpoint of a stop restores the checkout and pushes t
     [
       write(WORK_FILE, WORK_FILE),
       fauxAssistantMessage("done"),
-      fauxAssistantMessage(MET),
       bash(`git checkout -q -b ${OTHER_BRANCH}`),
       fauxAssistantMessage("", {
         stopReason: "error",

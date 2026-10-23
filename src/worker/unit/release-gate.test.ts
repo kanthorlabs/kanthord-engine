@@ -32,9 +32,7 @@ import {
 
 type Fixture = Awaited<ReturnType<typeof fixture>>;
 
-const MET = fauxAssistantMessage(
-  'kanthord-judgement: {"criterion_met":true,"rationale":"met"}',
-);
+const NOTHING = fauxAssistantMessage("nothing");
 const REVISION_TEXT = "Revise the task work";
 const REVISED_CONTENT = "base two";
 const SECRET = "secret";
@@ -83,13 +81,11 @@ test("a task that breaks the verification of an earlier task routes a revision t
     t,
     [first, second],
     [
-      MET,
+      NOTHING,
       write("file", "two"),
       fauxAssistantMessage("done"),
-      MET,
       write("file", REVISED_CONTENT),
       fauxAssistantMessage("fixed"),
-      MET,
     ],
   );
   const revisions = recordRevisions(h);
@@ -113,9 +109,8 @@ test("a release failure that no revision changes stops with no_progress and neve
     t,
     [current],
     [
-      MET,
-      fauxAssistantMessage("nothing"),
-      MET,
+      NOTHING,
+      fauxAssistantMessage("nothing again"),
       fauxAssistantMessage("still nothing"),
     ],
   );
@@ -140,7 +135,11 @@ test("a release failure that no revision changes stops with no_progress and neve
 });
 
 test("a wall deadline during a task verification releases further work", async (t) => {
-  const h = await fixture(t, [task("timed", "touch transient; sleep 30")], []);
+  const h = await fixture(
+    t,
+    [task("timed", "touch transient; sleep 30")],
+    [NOTHING],
+  );
   let deadline = Date.now() + 60000;
   h.agent.budget.wallDeadline = () => {
     deadline = Date.now() + 30;
@@ -164,7 +163,7 @@ test("a release failure goes to the owner of the first failed index when the nod
   const h = await fixture(
     t,
     [current],
-    [MET, write("fixed", "fixed"), fauxAssistantMessage("fixed"), MET],
+    [NOTHING, write("fixed", "fixed"), fauxAssistantMessage("fixed")],
   );
   h.revision = {
     ...h.revision,
@@ -182,7 +181,7 @@ test("a release failure goes to the owner of the first failed index when the nod
 
 test("a release verification that writes git state leaves the live checkout unchanged", async (t) => {
   const marker = join(temporary(t), MARKER);
-  const h = await fixture(t, [task("plain", "true")], [MET]);
+  const h = await fixture(t, [task("plain", "true")], [NOTHING]);
   h.revision = {
     ...h.revision,
     content: {

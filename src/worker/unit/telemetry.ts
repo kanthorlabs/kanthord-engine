@@ -21,7 +21,6 @@ export const SpanOperation = {
   Phase: "worker.phase",
   Task: "worker.task",
   Verification: "worker.verification",
-  Judgement: "worker.judgement",
   Evaluation: "worker.evaluation",
   Git: "worker.git",
   Turn: "agent.turn",

@@ -4,7 +4,6 @@ import {
   failedVerificationRationale,
   failedVerificationReport,
   parseJudgement,
-  taskJudgementSchema,
   evaluationJudgementSchema,
   judgementRationale,
   examineInstruction,
@@ -24,19 +23,21 @@ const TWO_GAP_RATIONALE =
 
 test("the final marker is strict and invalid handoffs are refused", () => {
   const text =
-    'kanthord-judgement: {"criterion_met":false,"rationale":"before"}\nkanthord-judgement: {"criterion_met":true,"rationale":" final "}';
-  assert.deepEqual(parseJudgement(text, taskJudgementSchema), {
-    criterion_met: true,
+    'kanthord-judgement: {"result":"undetermined","rationale":"before"}\nkanthord-judgement: {"result":"success","rationale":" final "}';
+  assert.deepEqual(parseJudgement(text, evaluationJudgementSchema), {
+    result: "success",
     rationale: "final",
+    unmet: [],
+    proposals: [],
   });
   for (const invalid of [
     undefined,
     "missing",
     "kanthord-judgement: invalid",
-    'kanthord-judgement: {"criterion_met":true,"rationale":" "}',
-    'kanthord-judgement: {"criterion_met":true,"rationale":"yes","extra":true}',
+    'kanthord-judgement: {"result":"success","rationale":" "}',
+    'kanthord-judgement: {"result":"success","rationale":"yes","extra":true}',
   ])
-    assert.equal(parseJudgement(invalid, taskJudgementSchema), null);
+    assert.equal(parseJudgement(invalid, evaluationJudgementSchema), null);
   assert.deepEqual(
     parseJudgement(
       'kanthord-judgement: {"result":"criterion-not-met","rationale":"task failed","unmet":[{"id":"task","reason":"no test"}]}',

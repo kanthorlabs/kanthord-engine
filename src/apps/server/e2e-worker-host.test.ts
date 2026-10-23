@@ -16,11 +16,7 @@ import type { SshAccess } from "../../repository/contract.ts";
 import { RepositoryComponent } from "../../repository/index.ts";
 import { DEFAULT_SSH_PORT, startTestSshd } from "../../repository/test-sshd.ts";
 import { ClaimState, type ExecutionRecord } from "../../scheduler/contract.ts";
-import {
-  SpanStatus,
-  type Span,
-  type TelemetryText,
-} from "../../tracking/contract.ts";
+import type { Span } from "../../tracking/contract.ts";
 import type { RepositoryTransport } from "../../worker/contract.ts";
 import {
   fauxAssistantMessage,
@@ -54,17 +50,12 @@ const CLAIMED = "credential handover received";
 const LIVE_STOP = "worker.stop.execution_live";
 const DECRYPTION_FAILED = "worker.handover.decryption_failed";
 const PATH_REFUSED = "worker.evidence_upload.path_refused";
-const JUDGEMENT =
-  'kanthord-judgement: {"criterion_met":true,"rationale":"hello.txt holds hello"}';
 const PHASES = ["finish", "prepare", "start", "tasks"];
 const TASK_LOOP_PHASE = "tasks";
-const START_CHECK_PHASE = "start";
 const TASK_COMPLETED = "complete";
 const TURN_OPERATION = "agent.turn";
-const FAILED_EXIT = 1;
 const PASSED_EXIT = 0;
 const UPLOAD_CALLS = 2;
-const JUDGED_RATIONALE = "hello.txt holds hello";
 const tool = (name: string, args: Parameters<typeof fauxToolCall>[1]) =>
   fauxAssistantMessage(fauxToolCall(name, args), { stopReason: "toolUse" });
 
@@ -222,14 +213,6 @@ async function assertSpanTree(
   assert.equal(parentOf(task!)?.attributes["kanthord.phase"], TASK_LOOP_PHASE);
   assert.equal(task!.attributes["kanthord.task.result"], TASK_COMPLETED);
   const verifications = named("worker.verification");
-  const failed = verifications.find(
-    (span) => span.attributes["process.exit.code"] === FAILED_EXIT,
-  );
-  assert.equal(
-    parentOf(failed!)?.attributes["kanthord.phase"],
-    START_CHECK_PHASE,
-  );
-  assert.equal(failed!.status, SpanStatus.Error);
   assert.ok(
     verifications.some(
       (span) =>
@@ -237,21 +220,8 @@ async function assertSpanTree(
         span.parent_span_id === task!.span_id,
     ),
   );
-  const [judgement] = named("worker.judgement");
-  assert.equal(judgement!.parent_span_id, task!.span_id);
-  assert.equal(judgement!.attributes["kanthord.judgement.criterion_met"], true);
-  const rationale = await setup.read<TelemetryText>([
-    "tracking",
-    "text",
-    "get",
-    traceId,
-    `${judgement!.span_id}:rationale`,
-  ]);
-  assert.equal(rationale.content, JUDGED_RATIONALE);
-  assert.equal("state" in rationale, false);
   const turns = named(TURN_OPERATION);
   assert.ok(turns.some((turn) => turn.parent_span_id === task!.span_id));
-  assert.ok(turns.some((turn) => turn.parent_span_id === judgement!.span_id));
   const tools = named("agent.tool");
   assert.ok(
     tools.every((span) => parentOf(span)?.operation === TURN_OPERATION),
@@ -301,7 +271,6 @@ test(
           tool("bash", { command: "printf hello > hello.txt" }),
           tool(UPLOAD, { path: "hello.txt" }),
           tool(UPLOAD, { path: "../outside.txt" }),
-          fauxAssistantMessage("done"),
           async () => {
             await executionSetup.read([
               "agent",
@@ -311,7 +280,7 @@ test(
               "--expected-revision",
               "1",
             ]);
-            return fauxAssistantMessage(JUDGEMENT);
+            return fauxAssistantMessage("done");
           },
         ]);
         const host = await inProcessWorker(t, {

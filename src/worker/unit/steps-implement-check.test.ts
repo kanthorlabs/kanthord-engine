@@ -34,45 +34,39 @@ import {
 } from "./steps-implement.ts";
 import { RefreshResult, refreshAtClaim } from "./base-refresh.ts";
 import { MERGE_MARKERS_LEFT } from "./turn-gate.ts";
-import { headSetOf, judgedAt, recordJudged } from "./judged-tasks.ts";
+import { nodeUnitOf } from "./release-gate.ts";
 import { SHIPPED_TEMPLATES } from "../../agent/prompt-templates.ts";
 import {
   advanceBase,
   commitOnNode,
   implementFixture as fixture,
+  NO_PROVIDER_CALLS,
+  recordDone,
   recordReleases,
   task,
 } from "./test-support.ts";
 
-const PROVIDER_CALL_COUNT = 2;
-const ONE_JUDGEMENT = 1;
 const MERGE_COMMIT_FIELDS = 3;
 const MAIN_ADDITION = "added by main";
 const RESOLVED = "resolved";
 const DEADLINE_MS = 20000;
 const RESTART_ATTEMPT = 2;
 const RESTART_WORK = "restart work";
-const SECOND_JUDGEMENT = 2;
-const TASK_JUDGED = "task judged";
-const THREE_JUDGEMENTS = 3;
 const STRAY_FILE = "stray.txt";
 const ONE_RELEASE = 1;
 
-test("start check judges passing tasks in order and discards verification changes", async (t) => {
+test("the start check plans each task with no done record for its current content", async (t) => {
   const tasks = [
-    task("failed", "touch dirty; false"),
-    task("met", "true"),
-    task("unmet", "true"),
+    task("open", "touch dirty; false"),
+    task("done", "true"),
+    task("revised", "true"),
   ];
-  const h = await fixture(t, tasks, [
-    fauxAssistantMessage(
-      'kanthord-judgement: {"criterion_met":true,"rationale":"met"}',
-    ),
-    fauxAssistantMessage(
-      'kanthord-judgement: {"criterion_met":false,"rationale":"unmet"}',
-    ),
-  ]);
-  const events = t.mock.method(h.run, "log");
+  const h = await fixture(t, tasks, []);
+  await recordDone(h, tasks[1]!);
+  await recordDone(h, {
+    ...tasks[2]!,
+    content: { ...tasks[2]!.content, criterion: "earlier" },
+  });
   assert.deepEqual(
     (await startCheck(h)).pending.map(({ task, instruction }) => [
       task.id,
@@ -83,116 +77,20 @@ test("start check judges passing tasks in order and discards verification change
       [tasks[2]!.id, null],
     ],
   );
-  assert.deepEqual(
-    events.mock.calls
-      .filter((call) => call.arguments[0] === TASK_JUDGED)
-      .map((call) => call.arguments[1]),
-    [
-      {
-        task_id: tasks[1]!.id,
-        commit: h.checkouts[0]!.head,
-        criterion_met: true,
-      },
-      {
-        task_id: tasks[2]!.id,
-        commit: h.checkouts[0]!.head,
-        criterion_met: false,
-      },
-    ],
-  );
-  assert.doesNotMatch(
-    JSON.stringify(h.provider.calls[0]),
-    /Previous judgement/,
-  );
-  assert.equal(h.provider.calls.length, PROVIDER_CALL_COUNT);
+  assert.equal(h.provider.calls.length, NO_PROVIDER_CALLS);
   assert.equal(existsSync(join(h.root, "dirty")), false);
-  assert.ok(JSON.stringify(h.provider.calls[0]).includes(tasks[1]!.id));
-  assert.ok(JSON.stringify(h.provider.calls[1]).includes(tasks[2]!.id));
   h.input.workspaces.release(
     h.input.workspaces.nodeKey(h.input.claim.node_id),
     WorkspaceKind.Node,
   );
 });
 
-test("a start-check judgement that changes files commits them and leaves the task pending", async (t) => {
-  const current = task("judged", "true");
-  const h = await fixture(
-    t,
-    [current],
-    [
-      fauxAssistantMessage(
-        fauxToolCall("write", { path: STRAY_FILE, content: "stray" }),
-        { stopReason: "toolUse" },
-      ),
-      fauxAssistantMessage(
-        'kanthord-judgement: {"criterion_met":true,"rationale":"met"}',
-      ),
-    ],
-  );
-  const base = h.checkouts[0]!.head;
-  assert.deepEqual(
-    (await startCheck(h)).pending.map(({ task, instruction }) => [
-      task.id,
-      instruction,
-    ]),
-    [[current.id, null]],
-  );
-  assert.notEqual(h.checkouts[0]!.head, base);
-  assert.equal(
-    (await simpleGit(h.root).raw(["ls-files", STRAY_FILE])).trim(),
-    STRAY_FILE,
-  );
-  assert.equal(
-    judgedAt(h.input.workspaces.nodeKey(h.input.claim.node_id), {
-      attempt: h.input.claim.attempt,
-      revision: h.input.claim.pinned_revision,
-      taskId: current.id,
-    }),
-    null,
-  );
-});
-
-test("the start check repairs one invalid judgement and stops on two", async (t) => {
-  const repaired = await fixture(
-    t,
-    [task("met", "true")],
-    [
-      fauxAssistantMessage("no judgement"),
-      fauxAssistantMessage(
-        'kanthord-judgement: {"criterion_met":true,"rationale":"met"}',
-      ),
-    ],
-  );
-  assert.deepEqual((await startCheck(repaired)).pending, []);
-  assert.equal(repaired.provider.calls.length, PROVIDER_CALL_COUNT);
-  const invalid = await fixture(
-    t,
-    [task("met", "true")],
-    [
-      fauxAssistantMessage("no judgement"),
-      fauxAssistantMessage("still no judgement"),
-    ],
-  );
-  await assert.rejects(startCheck(invalid), {
-    reason: EndReason.JudgementInvalid,
-  });
-});
-
-test("the start check skips the judgement of a task judged met at the current head", async (t) => {
-  const current = task("judged", "true");
-  const h = await fixture(
-    t,
-    [current],
-    [
-      fauxAssistantMessage(
-        'kanthord-judgement: {"criterion_met":true,"rationale":"met"}',
-      ),
-    ],
-  );
+test("a done record holds across start checks, and a verdict still goes to the node unit", async (t) => {
+  const current = task("done", "true");
+  const h = await fixture(t, [current], []);
+  await recordDone(h, current);
   assert.deepEqual((await startCheck(h)).pending, []);
-  assert.equal(h.provider.calls.length, ONE_JUDGEMENT);
   assert.deepEqual((await startCheck(h)).pending, []);
-  assert.equal(h.provider.calls.length, ONE_JUDGEMENT);
   h.verdict = {
     text: `Unmet:\n- ${current.id}: still open`,
     judged: [],
@@ -200,20 +98,7 @@ test("the start check skips the judgement of a task judged met at the current he
   const reworked = await startCheck(h);
   assert.deepEqual(reworked.pending, []);
   assert.ok(reworked.node?.text.includes(current.id));
-  assert.equal(h.provider.calls.length, ONE_JUDGEMENT);
-});
-
-test("the start check does not reuse a judgement of the previous attempt", async (t) => {
-  const current = task("judged", "true");
-  const met = fauxAssistantMessage(
-    'kanthord-judgement: {"criterion_met":true,"rationale":"met"}',
-  );
-  const h = await fixture(t, [current], [met, met]);
-  assert.deepEqual((await startCheck(h)).pending, []);
-  assert.equal(h.provider.calls.length, ONE_JUDGEMENT);
-  h.input.claim.attempt = RESTART_ATTEMPT;
-  assert.deepEqual((await startCheck(h)).pending, []);
-  assert.equal(h.provider.calls.length, SECOND_JUDGEMENT);
+  assert.equal(h.provider.calls.length, NO_PROVIDER_CALLS);
 });
 
 test("the start check sends the requested changes to the node unit and not to a task judgement", async (t) => {
@@ -235,7 +120,8 @@ test("the start check sends the requested changes to the node unit and not to a 
   ]);
   assert.ok(requested);
   const current = task("review", "true");
-  const h = await fixture(t, [current], [fauxAssistantMessage(MET)]);
+  const h = await fixture(t, [current], []);
+  await recordDone(h, current);
   h.verdict = {
     text: requested,
     judged: [
@@ -243,10 +129,7 @@ test("the start check sends the requested changes to the node unit and not to a 
     ],
   };
   const checked = await startCheck(h);
-  assert.doesNotMatch(
-    JSON.stringify(h.provider.calls[0]),
-    /Reviewer octo requests changes/,
-  );
+  assert.equal(h.provider.calls.length, NO_PROVIDER_CALLS);
   assert.deepEqual(checked.pending, []);
   assert.equal(
     checked.node?.text,
@@ -257,8 +140,6 @@ test("the start check sends the requested changes to the node unit and not to a 
     [h.checkouts[0]!.head],
   );
 });
-
-const MET = 'kanthord-judgement: {"criterion_met":true,"rationale":"met"}';
 
 async function verdictFixture(
   t: TestContext,
@@ -275,6 +156,7 @@ async function verdictFixture(
     tasks,
     content: { ...NODE_CONTENT, verifications: [nodeCommand] },
   } as unknown as Revision;
+  for (const current of tasks) await recordDone(h, current);
   h.verdict = {
     text: "The route stays unhandled.",
     judged: [
@@ -294,7 +176,7 @@ function loggedFields(
 }
 
 test("a budget end in the verdict turn commits its files as a checkpoint", async (t) => {
-  const { h, tasks } = await verdictFixture(
+  const { h } = await verdictFixture(
     t,
     [
       fauxAssistantMessage(
@@ -305,16 +187,6 @@ test("a budget end in the verdict turn commits its files as a checkpoint", async
     ],
     "true",
   );
-  for (const current of tasks)
-    recordJudged(
-      h.input.workspaces.nodeKey(h.input.claim.node_id),
-      {
-        attempt: h.input.claim.attempt,
-        revision: h.input.claim.pinned_revision,
-        taskId: current.id,
-      },
-      headSetOf(h.checkouts),
-    );
   const instruct = h.agent.instruct.bind(h.agent);
   h.agent.instruct = async (...args) => {
     await instruct(...args);
@@ -335,18 +207,10 @@ test("a budget end in the verdict turn commits its files as a checkpoint", async
 
 test("the start check of a verdict runs no node verification", async (t) => {
   const marker = join(temporary(t), "node-ran");
-  const { h } = await verdictFixture(
-    t,
-    [
-      fauxAssistantMessage(MET),
-      fauxAssistantMessage(MET),
-      fauxAssistantMessage(MET),
-    ],
-    `touch ${marker}; false`,
-  );
+  const { h } = await verdictFixture(t, [], `touch ${marker}; false`);
   const events = t.mock.method(h.run, "log");
   assert.deepEqual((await startCheck(h)).pending, []);
-  assert.equal(h.provider.calls.length, THREE_JUDGEMENTS);
+  assert.equal(h.provider.calls.length, NO_PROVIDER_CALLS);
   assert.equal(existsSync(marker), false);
   assert.deepEqual(loggedFields(events, "node verified"), []);
 });
@@ -544,28 +408,20 @@ function nodeUnitRevision(command: string): Revision {
   } as unknown as Revision;
 }
 
-test("an implement node with no task runs the node verifications under the node identity as the judged key", async (t) => {
-  const h = await fixture(t, [], [fauxAssistantMessage(MET)]);
+test("an implement node with no task plans the node unit until a done record matches the node content", async (t) => {
+  const h = await fixture(t, [], []);
   h.revision = nodeUnitRevision("true");
   const nodeId = h.input.claim.node_id;
-  const events = t.mock.method(h.run, "log");
-  assert.deepEqual((await startCheck(h)).pending, []);
-  assert.deepEqual(loggedFields(events, TASK_JUDGED), [
-    { task_id: nodeId, commit: h.checkouts[0]!.head, criterion_met: true },
-  ]);
-  assert.equal(
-    judgedAt(h.input.workspaces.nodeKey(nodeId), {
-      attempt: h.input.claim.attempt,
-      revision: h.input.claim.pinned_revision,
-      taskId: nodeId,
-    }),
-    h.checkouts[0]!.head,
+  assert.deepEqual(
+    (await startCheck(h)).pending.map((pending) => pending.task.id),
+    [nodeId],
   );
-  assert.ok(JSON.stringify(h.provider.calls[0]).includes(nodeId));
+  await recordDone(h, nodeUnitOf(nodeId, h.revision));
+  assert.deepEqual((await startCheck(h)).pending, []);
   h.revision = nodeUnitRevision("false");
   assert.deepEqual(
     (await startCheck(h)).pending.map((pending) => pending.task.id),
     [nodeId],
   );
-  assert.equal(h.provider.calls.length, ONE_JUDGEMENT);
+  assert.equal(h.provider.calls.length, NO_PROVIDER_CALLS);
 });

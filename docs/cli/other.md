@@ -755,10 +755,8 @@ diagnostic names the `connection_name` of the other process.
 
 During an execution, the application logs one info record for each task start
 (`task started`), task commit (`task committed`), verification result (`task
-verified`), task judgement (`task judged`) and node judgement (`node
-judged`). The start check of a rework also logs the node verification result
-(`node verified`) and the task that the agent chooses for a failed node
-verification (`task chosen`). When the checkpoint commit or the push of a stop
+verified`), done record (`done recorded`) and node judgement (`node
+judged`). When the checkpoint commit or the push of a stop
 fails, the application logs `checkpoint failed` with the `reason`, the thrown
 error text with secrets removed. The record has no `reason` when the worker
 cannot read the secrets. A record holds the execution, node, attempt and
