@@ -515,6 +515,14 @@ function currentEnvironmentOf(
   return repositoryConfigSchema.parse(current.config).environment ?? null;
 }
 
+function noStoredEnvironment(tx: Transaction, projectId: string): boolean {
+  return Array.from(readCurrentBindingSet(tx, projectId).values()).every(
+    (entry) =>
+      kindOf(entry.resource_identity) !== BindingKind.Repository ||
+      repositoryConfigSchema.parse(entry.config).environment === undefined,
+  );
+}
+
 export class ProjectService implements Service, ProjectBindings {
   private readonly bindings?: ProjectBindings;
   private readonly operationalStore: Store;
@@ -1468,6 +1476,7 @@ export class ProjectService implements Service, ProjectBindings {
       project_prompt: config.project_prompt ?? null,
       working_layer: config.working_layer,
       environment: currentEnvironmentOf(tx, binding),
+      repository_environment: noStoredEnvironment(tx, binding.project_id),
     };
   }
   slotEnvironment(

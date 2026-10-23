@@ -608,6 +608,7 @@ export type RepositoryPolicy = {
   project_prompt: string | null;
   working_layer: WorkingLayer;
   environment: Environment | null;
+  repository_environment: boolean;
 };
 export type SlotEnvironment = {
   binding_id: string;

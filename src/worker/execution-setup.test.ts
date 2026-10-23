@@ -268,6 +268,7 @@ test("setup answers the system and agent prompt after its single snapshot and su
         project_prompt: null,
         working_layer: workingLayer,
         environment: null,
+        repository_environment: true,
       }),
       sshHostKeysOf: (_tx, platform, received) => {
         assert.equal(platform, RepositoryPlatform.GitHub);
@@ -297,6 +298,7 @@ test("setup answers the system and agent prompt after its single snapshot and su
           project_prompt: null,
           working_layer: workingLayer,
           environment: null,
+          repository_environment: true,
         }),
         sshHostKeysOf: () => knownHosts,
         custodyHandover: { ...publicKeyCustody, sshPublicKeyOf: () => null },
@@ -314,6 +316,7 @@ test("setup answers the system and agent prompt after its single snapshot and su
   const environmentOf = async (
     environment: typeof stored | null,
     placement: InstancePlacement,
+    repositoryEnvironment = true,
   ) =>
     (
       await executionSetup(
@@ -334,6 +337,7 @@ test("setup answers the system and agent prompt after its single snapshot and su
             project_prompt: null,
             working_layer: workingLayer,
             environment,
+            repository_environment: repositoryEnvironment,
           }),
           sshHostKeysOf: () => knownHosts,
         },
@@ -349,6 +353,10 @@ test("setup answers the system and agent prompt after its single snapshot and su
   assert.deepEqual(await environmentOf(null, InstancePlacement.Container), {
     source: EnvironmentSource.Repository,
   });
+  assert.equal(
+    await environmentOf(null, InstancePlacement.Container, false),
+    null,
+  );
   assert.equal(await environmentOf(null, InstancePlacement.Server), null);
   assert.equal(await environmentOf(null, InstancePlacement.Worker), null);
 });
@@ -527,6 +535,7 @@ async function repositorySetup(t: TestContext, address: string, pin: boolean) {
         project_prompt: null,
         working_layer: WORKING_LAYER_ALL_ON,
         environment: null,
+        repository_environment: true,
       }),
       sshHostKeysOf: (tx, platform, received) =>
         repository.sshHostKeysOf(tx, platform, received),

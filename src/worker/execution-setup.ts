@@ -25,11 +25,12 @@ const FIRST_ISSUE_INDEX = 0;
 
 function executionEnvironment(
   stored: Environment | null,
+  repositoryEnvironment: boolean,
   placement: InstancePlacement | null,
 ): ExecutionEnvironment {
   if (stored !== null)
     return { source: EnvironmentSource.Stored, document: stored };
-  return placement === InstancePlacement.Container
+  return placement === InstancePlacement.Container && repositoryEnvironment
     ? { source: EnvironmentSource.Repository }
     : null;
 }
@@ -184,6 +185,7 @@ export async function executionSetup(
           working_layer: repository.working_layer,
           environment: executionEnvironment(
             repository.environment,
+            repository.repository_environment,
             row.placement,
           ),
         };

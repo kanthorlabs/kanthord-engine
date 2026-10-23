@@ -478,6 +478,7 @@ export type RepositoryPolicyOf = (
   project_prompt: string | null;
   working_layer: WorkingLayer;
   environment: Environment | null;
+  repository_environment: boolean;
 } | null;
 
 export type RepositoryBindingIdsOf = (

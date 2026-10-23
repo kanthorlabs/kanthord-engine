@@ -4154,6 +4154,7 @@ test("repositoryPolicyOf preserves the named revision after a strategy change", 
       project_prompt: projectPrompt,
       working_layer: original.config.working_layer,
       environment: null,
+      repository_environment: true,
     });
     const latest = f.project.repositoryPolicyOf(tx, later.id);
     assert.equal(latest?.action, GitHubAction.MergePush);
@@ -5687,5 +5688,27 @@ test("the slot environment carries the tree ids of the build context and of each
   assert.deepEqual(found?.trees, [
     { path: ".", object: `${TREE_PREFIX}0` },
     { path: ".devcontainer/local", object: `${TREE_PREFIX}1` },
+  ]);
+});
+
+test("at a stored environment of one binding, no other binding takes its repository devcontainer", async (t) => {
+  const { f, saved, other } = twoRepositories(t, {
+    texts: [DEVCONTAINER_TEXT],
+  });
+  const policies = () =>
+    f.store.transaction((tx) =>
+      [saved.binding_id, other.binding_id].map((id) => {
+        const policy = f.project.repositoryPolicyOf(tx, id);
+        return [policy?.environment, policy?.repository_environment];
+      }),
+    );
+  assert.deepEqual(policies(), [
+    [null, true],
+    [null, true],
+  ]);
+  await setEnvironment(f, saved, STORED_ENVIRONMENT);
+  assert.deepEqual(policies(), [
+    [STORED_ENVIRONMENT, false],
+    [null, false],
   ]);
 });
