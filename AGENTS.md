@@ -40,6 +40,7 @@ engine/
 │   │   ├── tag.ts              # Tag form and byte bound
 │   │   ├── values.ts           # JavaScript value predicates
 │   │   ├── version.ts          # Cached package version
+│   │   ├── devcontainer.ts     # Environment source vocabulary, devcontainer JSONC parse, and lifecycle scripts
 │   │   ├── xdg.ts              # Configuration, data, state, and cache directories
 │   │   ├── yaml.ts             # Bounded YAML mapping parsing
 │   │   ├── files.ts            # Private filesystem validation and publication
@@ -111,6 +112,7 @@ engine/
 │   │   ├── index.ts            # Service, dependencies, configuration fragment, and migrations
 │   │   ├── migrations.ts       # project_project and project_binding tables
 │   │   ├── store.ts            # Binding-set read, compare-and-swap write, pagination, and resource identity derivation
+│   │   ├── environment.ts      # Environment of a repository binding: show, set, slot environment, and repository export
 │   │   └── service.ts          # Lifecycle, operation handlers, and collaboration implementations
 │   ├── intake/                 # Intake Service: inbound events and outbound requests
 │   │   ├── contract.ts         # Service name, closed sets, bounds, error codes, outbound schemas, action operations, action table, address and result-class schemas, storage operations, inbound schemas, inbound operations, the inbound collaboration type, the inbound event schema, the event operations and the receipt, and operations
@@ -218,6 +220,7 @@ engine/
 │   │   │   ├── budget.ts           # Monotonic wall budget, turns and cleanup deadline
 │   │   │   ├── verification.ts     # Sequential deadline-bounded verification commands
 │   │   │   ├── local-git.ts        # Workspace head and verification cleanup
+│   │   │   ├── environment-setup.ts # Environment setup in each checkout and clone, base-head rerun and cache
 │   │   │   ├── workspace.ts        # Private workspace keys, preparation, holds and retention
 │   │   │   ├── native-agent.ts     # Composed execution-scoped agent lifetime
 │   │   │   ├── method-clients.ts   # Injected execution-scoped operation clients
@@ -270,6 +273,7 @@ engine/
 │       │   ├── thread-driver.ts # The thread driver: one worker thread for each slot and its environment
 │       │   ├── container-runtime.ts # Container runtime check and the argv of each runtime command
 │       │   ├── container-driver.ts # The container driver: one container for each slot over its attached stdio
+│       │   ├── environment-image.ts # Environment image of a container slot: tag, digest, devcontainer build, KanthorD layer and check
 │       │   ├── slot-identity.ts # Deterministic client identity of a pool slot
 │       │   └── index.ts        # Compose configuration, log, store, registry, and services
 │       ├── cli/                # Non-interactive commands and client configuration
