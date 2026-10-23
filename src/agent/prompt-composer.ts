@@ -72,6 +72,11 @@ export interface WorkRepository {
   base_branch: string;
 }
 
+export interface WorkTask {
+  id: string;
+  content: { name: string; criterion: string };
+}
+
 export function renderWorkPrompt(
   templates: PromptTemplates,
   unit: {
@@ -84,12 +89,14 @@ export function renderWorkPrompt(
       verifications: string[];
     };
     repositories?: readonly WorkRepository[];
+    tasks?: readonly WorkTask[];
   },
 ): WorkPrompt {
   assert.ok(unit.node_id);
   assert.ok(Number.isSafeInteger(unit.revision));
   const { name, requirement, criterion, verifications } = unit.content;
   const repositories = unit.repositories ?? [];
+  const tasks = unit.tasks ?? [];
   const text = renderTemplate(templates, PromptTemplate.Work, {
     name,
     requirement,
@@ -97,6 +104,12 @@ export function renderWorkPrompt(
     verifications: verifications.map((command, index) => ({
       number: index + 1,
       command,
+    })),
+    tasks: tasks.map((task, index) => ({
+      number: index + 1,
+      id: task.id,
+      name: task.content.name,
+      criterion: task.content.criterion,
     })),
     repositories:
       repositories.length >= LISTED_REPOSITORIES_MIN ? repositories : [],

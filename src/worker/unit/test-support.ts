@@ -42,6 +42,7 @@ import { ExecutionRun } from "./execution-run.ts";
 import type { MethodClients } from "./method-clients.ts";
 import { WorkspaceRoot } from "./workspace.ts";
 import { prepareStepsWorkspace } from "./steps-implement.ts";
+import type { Verdict } from "./node-reads.ts";
 export { LOCAL_GIT_SSH_ACCESS } from "../../repository/test-sshd.ts";
 export {
   scriptedProvider,
@@ -303,8 +304,8 @@ export async function implementFixture(
       tasks,
     } as unknown as Revision,
     ...workspace,
-    priorRationale: null as string | null,
-    rework: false,
+    verdict: null as Verdict | null,
+    cleared: null as string | null,
     unchangedTurns: 0,
     provider,
     bare: bares[0]!,

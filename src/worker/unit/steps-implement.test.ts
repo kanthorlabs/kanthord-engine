@@ -9,7 +9,6 @@ import { fauxAssistantMessage, fauxToolCall } from "./test-support.ts";
 import { EndReason, ExecutionStop } from "./execution-run.ts";
 import { executionBoundary } from "./native-method.ts";
 import {
-  criterionRevisionInstruction,
   JUDGEMENT_CHANGE_RATIONALE,
   JUDGEMENT_MARKER,
   repairInstruction,
@@ -329,38 +328,6 @@ test("a repair turn that ends the budget releases a checkpoint with the budget e
     await simpleGit(h.bare).raw(["show", `${branch}:${PARTIAL_WORK}`]),
     PARTIAL_WORK,
   );
-});
-
-test("the start check judges a task against the prior rationale and revises it with that rationale", async (t) => {
-  const rationale = "The edge case stays unhandled";
-  const current = task("rework", "true");
-  const h = await fixture(
-    t,
-    [current],
-    [
-      fauxAssistantMessage(
-        'kanthord-judgement: {"criterion_met":false,"rationale":"unmet"}',
-      ),
-      fauxAssistantMessage("revised"),
-      fauxAssistantMessage(
-        'kanthord-judgement: {"criterion_met":true,"rationale":"met"}',
-      ),
-    ],
-  );
-  h.priorRationale = rationale;
-  const checked = await startCheck(h);
-  assert.ok(
-    JSON.stringify(h.provider.calls[0]).includes(
-      `Previous judgement: ${rationale}. Judge whether the task criterion is met now.`,
-    ),
-  );
-  const revision = criterionRevisionInstruction(SHIPPED_TEMPLATES, rationale);
-  assert.deepEqual(checked.pending, [{ task: current, instruction: revision }]);
-  const [pending] = checked.pending;
-  assert.deepEqual(await runTask(h, current, pending!.instruction), {
-    kind: "complete",
-  });
-  assert.ok(JSON.stringify(h.provider.calls[1]).includes(revision));
 });
 
 const VERIFIED_BEFORE_NO_PROGRESS = 2;

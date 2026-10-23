@@ -13,6 +13,14 @@
 {{#each verifications}}
 {{number}}. {{command}}
 {{/each}}
+{{#if tasks}}
+
+## Tasks
+
+{{#each tasks}}
+{{number}}. {{name}} (`{{id}}`). Criterion: {{criterion}}
+{{/each}}
+{{/if}}
 {{#if repositories}}
 
 ## Repositories

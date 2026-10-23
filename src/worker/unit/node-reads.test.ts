@@ -7,7 +7,7 @@ import { ExecutionRun, ExecutionStop } from "./execution-run.ts";
 import {
   readAllPages,
   readClearedAssessment,
-  readPriorRationale,
+  readPrior,
   readRequestedChanges,
   readReworkAssessment,
   READ_PAGE_LIMIT,
@@ -108,7 +108,7 @@ test("the assessment reads answer null only on a record not found", async (t) =>
   }
 });
 
-test("the prior rationale is the rework rationale, else the cleared rationale, else null", async (t) => {
+test("the prior is the rework verdict, else the cleared rationale, else null", async (t) => {
   const notFound = {
     type: OperationResultType.Failure,
     status: 404,
@@ -124,7 +124,7 @@ test("the prior rationale is the rework rationale, else the cleared rationale, e
   const answered = (rationale: string) => ({
     type: OperationResultType.Completed,
     status: 200,
-    data: { id: "assessment", rationale },
+    data: { id: "assessment", rationale, tested_input: null },
   });
   for (const [rework, cleared, expected] of [
     [answered("rework"), answered("cleared"), "rework"],
@@ -139,10 +139,12 @@ test("the prior rationale is the rework rationale, else the cleared rationale, e
       "execution.clearedOutcome.get": async () => notFound,
       "execution.cleared_assessment.get": async () => cleared,
     } as unknown as MethodClients["mission"];
-    assert.deepEqual(await readPriorRationale(run, REPOSITORIES), {
-      rationale: expected,
-      rework: rework !== notFound,
-    });
+    assert.deepEqual(
+      await readPrior(run, REPOSITORIES),
+      rework === notFound
+        ? { verdict: null, cleared: expected }
+        : { verdict: { text: expected, judged: [] }, cleared: null },
+    );
   }
 });
 
@@ -209,8 +211,12 @@ test("the prior rationale of an attempt after a change request holds the request
       };
     },
   } as unknown as MethodClients["worker"];
+  const prior = await readPrior(run, REPOSITORIES);
+  assert.deepEqual(prior.verdict?.judged, [
+    { binding_id: "binding_api", commit: "a".repeat(40) },
+  ]);
   assert.equal(
-    (await readPriorRationale(run, REPOSITORIES)).rationale,
+    prior.verdict?.text,
     [
       "The pull request reviewers request these changes:",
       `Reviewer octo requests changes on api at commit ${"a".repeat(40)}: Rename the route.`,
@@ -240,9 +246,9 @@ test("an attempt not ended by a change request reads no change request", async (
     } as unknown as MethodClients["mission"];
     run.clients.worker = {} as MethodClients["worker"];
     assert.equal(await readRequestedChanges(run, REPOSITORIES), null);
-    assert.deepEqual(await readPriorRationale(run, REPOSITORIES), {
-      rationale: CLEARED_RATIONALE,
-      rework: false,
+    assert.deepEqual(await readPrior(run, REPOSITORIES), {
+      verdict: null,
+      cleared: CLEARED_RATIONALE,
     });
   }
   const first = fixture();
@@ -274,9 +280,9 @@ test("an external failure without a current change request keeps the cleared rat
       },
     }),
   } as unknown as MethodClients["worker"];
-  assert.deepEqual(await readPriorRationale(run, REPOSITORIES), {
-    rationale: CLEARED_RATIONALE,
-    rework: false,
+  assert.deepEqual(await readPrior(run, REPOSITORIES), {
+    verdict: null,
+    cleared: CLEARED_RATIONALE,
   });
 });
 
@@ -314,7 +320,7 @@ test("each change request names its binding", async (t) => {
       },
     }),
   } as unknown as MethodClients["worker"];
-  const text = await readRequestedChanges(run, REPOSITORIES);
+  const text = (await readRequestedChanges(run, REPOSITORIES))?.text;
   assert.ok(text);
   assert.deepEqual(
     text.split("\n").slice(1),
@@ -341,10 +347,105 @@ test("a change request of a binding that the pinned revision does not name names
       data: { items: [{ ...item, binding_id: REMOVED_BINDING }] },
     }),
   } as unknown as MethodClients["worker"];
-  const text = await readRequestedChanges(run, REPOSITORIES);
+  const text = (await readRequestedChanges(run, REPOSITORIES))?.text;
   assert.ok(text);
   assert.equal(
     text.split("\n")[1],
     `Reviewer octo requests changes on ${REMOVED_BINDING} at commit ${"a".repeat(40)}: Rename the route.`,
   );
+});
+
+function reworkRead(testedInput: unknown) {
+  return {
+    type: OperationResultType.Completed,
+    status: 200,
+    data: { id: "assessment", rationale: "rework", tested_input: testedInput },
+  };
+}
+
+test("the judged commits of a rework are the repository commits of its tested input", async (t) => {
+  const api = { kind: "repository", binding_id: "binding_api", commit: "a" };
+  const web = { kind: "repository", binding_id: "binding_web", commit: "b" };
+  const produced = { kind: "produced", sha256: "c".repeat(64) };
+  for (const [testedInput, judged] of [
+    [
+      [api, web],
+      [api, web],
+    ],
+    [api, [api]],
+    [produced, []],
+    [null, []],
+  ] as const) {
+    const run = fixture(SECOND_ATTEMPT);
+    t.after(() => run.dispose());
+    run.clients.mission = {
+      "execution.rework_assessment.get": async () => reworkRead(testedInput),
+    } as unknown as MethodClients["mission"];
+    assert.deepEqual((await readPrior(run, REPOSITORIES)).verdict, {
+      text: "rework",
+      judged: judged.map(({ binding_id, commit }) => ({ binding_id, commit })),
+    });
+  }
+});
+
+test("the judged commit of a binding is the commit of its latest change request", async (t) => {
+  const run = fixture(SECOND_ATTEMPT);
+  t.after(() => run.dispose());
+  const [item] = CHANGE_REQUESTS.items;
+  const [request] = item!.change_requests;
+  const later = {
+    ...request!,
+    review_id: 8,
+    submitted_at: "2026-10-13T00:00:00Z",
+    commit_id: "b".repeat(40),
+  };
+  run.clients.mission = {
+    "execution.rework_assessment.get": async () => NOT_FOUND,
+    "execution.clearedOutcome.get": async () =>
+      clearedOutcome(ClosingEvent.ExternalFailed),
+  } as unknown as MethodClients["mission"];
+  run.clients.worker = {
+    "execution.change_request.get": async () => ({
+      type: OperationResultType.Completed,
+      status: 200,
+      data: {
+        items: [
+          { ...item, change_requests: [later, request] },
+          {
+            ...item,
+            evidence_id: "evidence_web",
+            binding_id: "binding_web",
+            change_requests: [],
+          },
+        ],
+      },
+    }),
+  } as unknown as MethodClients["worker"];
+  assert.deepEqual((await readPrior(run, REPOSITORIES)).verdict?.judged, [
+    { binding_id: "binding_api", commit: "b".repeat(40) },
+  ]);
+});
+
+test("a cleared assessment with the result success is not instruction text", async (t) => {
+  for (const [result, cleared] of [
+    ["success", null],
+    ["undetermined", CLEARED_RATIONALE],
+    ["criterion-not-met", CLEARED_RATIONALE],
+  ] as const) {
+    const run = fixture(SECOND_ATTEMPT);
+    t.after(() => run.dispose());
+    run.clients.mission = {
+      "execution.rework_assessment.get": async () => NOT_FOUND,
+      "execution.clearedOutcome.get": async () => NOT_FOUND,
+      "execution.cleared_assessment.get": async () => ({
+        type: OperationResultType.Completed,
+        status: 200,
+        data: { id: "assessment", rationale: CLEARED_RATIONALE, result },
+      }),
+    } as unknown as MethodClients["mission"];
+    assert.deepEqual(await readPrior(run, REPOSITORIES), {
+      verdict: null,
+      cleared,
+    });
+  }
 });

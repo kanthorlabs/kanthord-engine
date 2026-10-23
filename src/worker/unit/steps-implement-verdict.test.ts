@@ -1,0 +1,244 @@
+import assert from "node:assert/strict";
+import { test, type TestContext } from "node:test";
+import { simpleGit } from "simple-git";
+import { background } from "../../kernel/context.ts";
+import { EndReason, type ExecutionEnd } from "./execution-run.ts";
+import { executionBoundary } from "./native-method.ts";
+import type { MethodClients } from "./method-clients.ts";
+import { runStepsImplement } from "./steps-implement.ts";
+import { headSetOf, recordJudged } from "./judged-tasks.ts";
+import type { WorkspaceCheckout } from "./workspace.ts";
+import {
+  advanceBase,
+  commitOnNode,
+  fauxAssistantMessage,
+  fauxToolCall,
+  implementFixture as fixture,
+  NO_PROVIDER_CALLS,
+  recordReleases,
+  task,
+  TEST_SSH_ACCESS,
+} from "./test-support.ts";
+
+const VERDICT = "The edge case of an empty list stays unhandled.";
+const CLEARED = "The verification host lost its network.";
+const MET = 'kanthord-judgement: {"criterion_met":true,"rationale":"met"}';
+const TWO_TURNS = 2;
+const JUDGEMENT_AND_TWO_TURNS = 3;
+const ONE_TURN = 1;
+const TWO_TOOL_TURNS = 4;
+const TWO_BINDINGS = ["api", "web"];
+const BASE_FILE = "other";
+const FETCH_DEADLINE_MS = 20000;
+
+type Harness = Awaited<ReturnType<typeof fixture>>;
+
+function judgeAtHead(h: Harness, taskId: string): void {
+  recordJudged(
+    h.input.workspaces.nodeKey(h.input.claim.node_id),
+    {
+      attempt: h.input.claim.attempt,
+      revision: h.input.claim.pinned_revision,
+      taskId,
+    },
+    headSetOf(h.checkouts),
+  );
+}
+
+function verdictAt(text: string, checkouts: readonly WorkspaceCheckout[]) {
+  return {
+    text,
+    judged: checkouts.map((checkout) => ({
+      binding_id: checkout.binding_id,
+      commit: checkout.head,
+    })),
+  };
+}
+
+function recordEvidence(h: Harness): string[][] {
+  const commits: string[][] = [];
+  h.run.clients.mission = {
+    ...h.run.clients.mission,
+    "evidence.submit": async (input: {
+      body: { assets: { address: { commit: string } }[] };
+    }) => {
+      commits.push(input.body.assets.map((asset) => asset.address.commit));
+      return { type: "completed", status: 200, data: { evidence: {} } };
+    },
+  } as unknown as MethodClients["mission"];
+  return commits;
+}
+
+function occurrences(call: unknown, text: string): number {
+  return JSON.stringify(call).split(text).length - ONE_TURN;
+}
+
+function write(path: string) {
+  return fauxAssistantMessage(fauxToolCall("write", { path, content: path }), {
+    stopReason: "toolUse",
+  });
+}
+
+async function noProgressEnd(
+  h: Harness,
+): Promise<{ end: ExecutionEnd; bodies: unknown[]; evidence: string[][] }> {
+  const bodies = recordReleases(h);
+  const evidence = recordEvidence(h);
+  const end = await executionBoundary(h.run, () => runStepsImplement(h));
+  assert.ok("stop" in end && end.stop);
+  assert.equal(end.stop.reason, EndReason.NoProgress);
+  assert.equal(bodies.length, ONE_TURN);
+  assert.deepEqual((bodies[0] as { further_work: boolean }).further_work, true);
+  assert.deepEqual(evidence, []);
+  return { end, bodies, evidence };
+}
+
+async function verdictHarness(
+  t: TestContext,
+  script: Parameters<typeof fixture>[2],
+  names?: readonly string[],
+) {
+  const current = task("judged", "true");
+  const h = await fixture(t, [current], script, undefined, names);
+  judgeAtHead(h, current.id);
+  return { h, current };
+}
+
+test("a verdict that names no task sends a verdict turn and an unchanged tree stops with no_progress", async (t) => {
+  const { h, current } = await verdictHarness(t, [
+    fauxAssistantMessage("nothing"),
+    fauxAssistantMessage("nothing again"),
+    fauxAssistantMessage("never"),
+  ]);
+  const judged = h.checkouts[0]!.head;
+  h.verdict = verdictAt(VERDICT, h.checkouts);
+  await noProgressEnd(h);
+  assert.equal(h.provider.calls.length, TWO_TURNS);
+  const first = JSON.stringify(h.provider.calls[0]);
+  assert.ok(first.includes(VERDICT));
+  assert.ok(first.includes(current.id));
+  assert.ok(first.includes("## Tasks"));
+  assert.equal(occurrences(h.provider.calls[1], VERDICT), TWO_TURNS);
+  assert.equal(h.checkouts[0]!.head, judged);
+});
+
+test("a base move between the review and the rework does not satisfy the verdict rule", async (t) => {
+  const { h } = await verdictHarness(t, [
+    fauxAssistantMessage(MET),
+    fauxAssistantMessage("nothing"),
+    fauxAssistantMessage("nothing again"),
+    fauxAssistantMessage("never"),
+  ]);
+  const judged = h.checkouts[0]!.head;
+  h.verdict = verdictAt(VERDICT, h.checkouts);
+  await advanceBase(h, t, "moved base", BASE_FILE);
+  await h.input.transport.fetchBase(
+    h.root,
+    "main",
+    background,
+    FETCH_DEADLINE_MS,
+    TEST_SSH_ACCESS,
+  );
+  await noProgressEnd(h);
+  assert.equal(h.provider.calls.length, JUDGEMENT_AND_TWO_TURNS);
+  assert.notEqual(h.checkouts[0]!.head, judged);
+  const parents = await simpleGit(h.root).raw([
+    "rev-list",
+    "--parents",
+    "-n",
+    "1",
+    "HEAD",
+  ]);
+  assert.ok(parents.includes(judged));
+});
+
+test("an unblock with a cleared assessment and no needed change releases the same code", async (t) => {
+  const { h } = await verdictHarness(t, [fauxAssistantMessage("nothing")]);
+  const head = h.checkouts[0]!.head;
+  h.cleared = CLEARED;
+  recordReleases(h);
+  const evidence = recordEvidence(h);
+  assert.deepEqual(await executionBoundary(h.run, () => runStepsImplement(h)), {
+    kind: "released",
+    furtherWork: false,
+  });
+  assert.deepEqual(evidence, [[head]]);
+  assert.equal(h.provider.calls.length, ONE_TURN);
+  const call = JSON.stringify(h.provider.calls[0]);
+  assert.ok(call.includes(CLEARED));
+  assert.doesNotMatch(call, /Previous judgement/);
+});
+
+test("a verdict compares only the bindings that hold a judged commit", async (t) => {
+  const { h } = await verdictHarness(
+    t,
+    [
+      write("web/notes"),
+      fauxAssistantMessage("web done"),
+      write("api/notes"),
+      fauxAssistantMessage("api done"),
+      fauxAssistantMessage("never"),
+    ],
+    TWO_BINDINGS,
+  );
+  const [api, web] = h.checkouts;
+  assert.ok(api && web);
+  const judged = api.head;
+  h.verdict = verdictAt(VERDICT, [api]);
+  recordReleases(h);
+  const evidence = recordEvidence(h);
+  assert.deepEqual(await executionBoundary(h.run, () => runStepsImplement(h)), {
+    kind: "released",
+    furtherWork: false,
+  });
+  assert.equal(h.provider.calls.length, TWO_TOOL_TURNS);
+  assert.notEqual(api.head, judged);
+  assert.deepEqual(evidence, [[api.head, web.head]]);
+});
+
+test("a verdict turn that changes only a binding with no judged commit counts as unchanged", async (t) => {
+  const { h } = await verdictHarness(
+    t,
+    [
+      write("web/first"),
+      fauxAssistantMessage("web done"),
+      write("web/second"),
+      fauxAssistantMessage("web done again"),
+      fauxAssistantMessage("never"),
+    ],
+    TWO_BINDINGS,
+  );
+  h.verdict = verdictAt(VERDICT, [h.checkouts[0]!]);
+  await noProgressEnd(h);
+  assert.equal(h.provider.calls.length, TWO_TOOL_TURNS);
+});
+
+test("a verdict with no judged commit sends its text once and a pass completes the node unit", async (t) => {
+  const { h } = await verdictHarness(t, [fauxAssistantMessage("nothing")]);
+  const head = h.checkouts[0]!.head;
+  h.verdict = verdictAt(VERDICT, []);
+  recordReleases(h);
+  const evidence = recordEvidence(h);
+  assert.deepEqual(await executionBoundary(h.run, () => runStepsImplement(h)), {
+    kind: "released",
+    furtherWork: false,
+  });
+  assert.equal(h.provider.calls.length, ONE_TURN);
+  assert.ok(JSON.stringify(h.provider.calls[0]).includes(VERDICT));
+  assert.deepEqual(evidence, [[head]]);
+});
+
+test("a verdict with a later commit after its judged commit sends no verdict turn", async (t) => {
+  const { h, current } = await verdictHarness(t, []);
+  h.verdict = verdictAt(VERDICT, h.checkouts);
+  await commitOnNode(h.root, "addressed");
+  h.checkouts[0]!.head = (await simpleGit(h.root).revparse(["HEAD"])).trim();
+  judgeAtHead(h, current.id);
+  recordReleases(h);
+  recordEvidence(h);
+  assert.deepEqual(await executionBoundary(h.run, () => runStepsImplement(h)), {
+    kind: "released",
+    furtherWork: false,
+  });
+  assert.equal(h.provider.calls.length, NO_PROVIDER_CALLS);
+});
