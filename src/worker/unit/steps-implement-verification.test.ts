@@ -2,6 +2,9 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { join } from "node:path";
 import { temporary } from "../../kernel/test-support.ts";
+import { existsSync } from "node:fs";
+import { EnvironmentSource } from "../../kernel/devcontainer.ts";
+import { EnvironmentFailure } from "../../scheduler/contract.ts";
 import { EndReason, type ExecutionEnd } from "./execution-run.ts";
 import { executionBoundary } from "./native-method.ts";
 import { VERIFICATION_INFRASTRUCTURE_FAILED } from "./verification.ts";
@@ -23,7 +26,9 @@ const SIGNAL_KILL = "sh -c 'kill -9 $$'";
 const EXIT_KILL = "sh -c 'kill -9 $$'; exit $?";
 const ONE_TURN = 1;
 const ONE_TOOL_TURN = 2;
-const THREE_TURNS = 3;
+const FOUR_TURNS = 4;
+const SETUP_MARKER = "setup-ran";
+const SETUP_INSTRUCTION = "Fix the setup: test -e fixed failed.";
 const WALL_DEADLINE_MS = 300;
 
 function infrastructureEnd(
@@ -102,19 +107,37 @@ test("a kill on the first run and a pass on the rerun passes the task verificati
   assert.equal(h.provider.calls.length, ONE_TURN);
 });
 
-test("exit 127 in a task verification is a code failure that sends a revision turn", async (t) => {
+test("exit 127 on the node head and on the base head stops with environment_failed and sends no revision turn", async (t) => {
   const current = task("absent", "command-absent-x");
   const h = await fixture(
     t,
     [current],
+    [fauxAssistantMessage("work"), fauxAssistantMessage("revised")],
+  );
+  await assert.rejects(runTask(h, current), {
+    reason: EndReason.EnvironmentFailed,
+    code: EnvironmentFailure.CommandAbsent,
+  });
+  assert.equal(h.provider.calls.length, ONE_TURN);
+});
+
+test("exit 127 on the node head that passes on the base head is a code failure that sends a revision turn", async (t) => {
+  const current = task("absent", "test ! -e written || command-absent-x");
+  const h = await fixture(
+    t,
+    [current],
     [
+      fauxAssistantMessage(
+        fauxToolCall("write", { path: "written", content: "node" }),
+        { stopReason: "toolUse" },
+      ),
       fauxAssistantMessage("work"),
       fauxAssistantMessage("revised"),
       fauxAssistantMessage("revised again"),
     ],
   );
   await assert.rejects(runTask(h, current), { reason: EndReason.NoProgress });
-  assert.equal(h.provider.calls.length, THREE_TURNS);
+  assert.equal(h.provider.calls.length, FOUR_TURNS);
 });
 
 test("a kill at the wall deadline during a verification is a budget end and not a stop", async (t) => {
@@ -127,4 +150,105 @@ test("a kill at the wall deadline during a verification is a budget end and not 
   });
   assert.equal(worked.provider.calls.length, ONE_TURN);
   assert.equal(worked.agent.budget.exhausted(), true);
+});
+
+test("a stored environment runs its setup in the node checkout before the first task verification", async (t) => {
+  const current = task("setup", `test -e ${SETUP_MARKER}`);
+  const h = await fixture(
+    t,
+    [current],
+    [fauxAssistantMessage("work")],
+    undefined,
+    undefined,
+    {
+      source: EnvironmentSource.Stored,
+      document: { postCreateCommand: `touch ${SETUP_MARKER}` },
+    },
+  );
+  assert.equal(existsSync(join(h.checkouts[0]!.directory, SETUP_MARKER)), true);
+  assert.deepEqual(await runTask(h, current), {
+    kind: TaskResultKind.Complete,
+    recorded: false,
+  });
+});
+
+test("a setup failure on the base head stops the prepare with environment_failed", async (t) => {
+  await assert.rejects(
+    fixture(
+      t,
+      [task("setup", "true")],
+      [fauxAssistantMessage("never")],
+      undefined,
+      undefined,
+      {
+        source: EnvironmentSource.Stored,
+        document: { postCreateCommand: "exit 5" },
+      },
+    ),
+    {
+      reason: EndReason.EnvironmentFailed,
+      code: EnvironmentFailure.SetupFailed,
+    },
+  );
+});
+
+test("a pending node-head setup reruns before the next verification and passes once the agent fixes it", async (t) => {
+  const current = task("setup", "true");
+  const h = await fixture(
+    t,
+    [current],
+    [
+      fauxAssistantMessage(
+        fauxToolCall("write", { path: "fixed", content: "node" }),
+        { stopReason: "toolUse" },
+      ),
+      fauxAssistantMessage("work"),
+    ],
+  );
+  h.setup = h.setup.map((entry) => ({
+    ...entry,
+    environment: { postCreateCommand: "test -e fixed" },
+  }));
+  h.setupPending = true;
+  const result = await runTask(h, current, SETUP_INSTRUCTION);
+  assert.equal(result.kind, TaskResultKind.Complete);
+  assert.equal(h.setupPending, false);
+  assert.ok(JSON.stringify(h.provider.calls[0]).includes(SETUP_INSTRUCTION));
+});
+
+test("a pending node-head setup that keeps failing sends its own command in the revision turn", async (t) => {
+  const current = task("setup", "true");
+  const h = await fixture(
+    t,
+    [current],
+    [
+      fauxAssistantMessage("work"),
+      fauxAssistantMessage("revised"),
+      fauxAssistantMessage("revised again"),
+    ],
+  );
+  h.setup = h.setup.map((entry) => ({
+    ...entry,
+    environment: { postCreateCommand: "test -e never-fixed" },
+  }));
+  h.setupPending = true;
+  await assert.rejects(runTask(h, current), { reason: EndReason.NoProgress });
+  assert.equal(h.setupPending, true);
+  assert.ok(
+    JSON.stringify(h.provider.calls.at(-1)).includes("test -e never-fixed"),
+  );
+});
+
+test("the setup instruction of a node-head failure goes to the first pending task", async (t) => {
+  const current = task("setup", "true");
+  const h = await fixture(t, [current], [fauxAssistantMessage("never")]);
+  h.setupInstruction = SETUP_INSTRUCTION;
+  const instructions: Array<string | null> = [];
+  await executionBoundary(h.run, () =>
+    runStepsImplement(h, async (_state, _task, instruction) => {
+      instructions.push(instruction);
+      return { kind: TaskResultKind.BudgetEnd };
+    }),
+  );
+  assert.deepEqual(instructions, [SETUP_INSTRUCTION]);
 });

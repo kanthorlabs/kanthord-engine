@@ -13,6 +13,9 @@ importers:
       "@aws-sdk/s3-request-presigner":
         specifier: 3.1139.0
         version: 3.1139.0
+      "@devcontainers/cli":
+        specifier: 0.89.0
+        version: 0.89.0
       "@earendil-works/pi-agent-core":
         specifier: 1.1.0
         version: 1.1.0(@aws-sdk/credential-provider-node@3.972.84)(@smithy/signature-v4@5.7.3)(supports-color@7.2.0)(undici@8.10.2)(ws@8.21.3)(zod@4.4.3)
@@ -324,6 +327,14 @@ packages:
         integrity: sha512-T53UueJVRIn1B2G5FWo6T3rqAA1aHcuypRweQcbW6Z/leUygsHW54Gezkm/8uxB9Fw8ewE+izfKKmA9XVv7HdQ==,
       }
     engines: { node: ">=18.18" }
+
+  "@devcontainers/cli@0.89.0":
+    resolution:
+      {
+        integrity: sha512-LzaoOGKQ/Zql6PsiZ4hVIYVZagzWkD65aG/1ou5/Kly5Y1PtjLg1yn7qu+LZCzVoAl6DZZ/pbz8qOO4RLNlqMg==,
+      }
+    engines: { node: ">=20.0.0" }
+    hasBin: true
 
   "@earendil-works/chord@1.1.0":
     resolution:
@@ -3381,6 +3392,8 @@ snapshots:
       - eslint-import-resolver-typescript
       - eslint-import-resolver-webpack
       - supports-color
+
+  "@devcontainers/cli@0.89.0": {}
 
   "@earendil-works/chord@1.1.0":
     dependencies:

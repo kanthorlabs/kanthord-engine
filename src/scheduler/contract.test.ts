@@ -138,4 +138,9 @@ test("a release stop code fits its reason", () => {
   assert.equal(fits("operation_failed", "gateway.request.invalid"), true);
   assert.equal(fits("budget_end", "turns"), true);
   assert.equal(fits("budget_end", null), false);
+  assert.equal(fits("environment_failed", "setup_failed"), true);
+  assert.equal(fits("environment_failed", "command_absent"), true);
+  assert.equal(fits("environment_failed", null), false);
+  assert.equal(fits("environment_failed", "turns"), false);
+  assert.equal(fits("operation_failed", "setup_failed"), false);
 });

@@ -74,6 +74,7 @@ test("B3 review bundle places all supporting assets in the evidence directory ou
       strategy: { base_branch: "main" },
       project_prompt: null,
       working_layer: WORKING_LAYER_ALL_ON,
+      environment: null,
     };
     setup.repositories = [
       repository,
@@ -184,7 +185,10 @@ test("B3 review bundle places all supporting assets in the evidence directory ou
         (result.tested_input as unknown[]).length,
         ASSET_REVIEW_COUNT,
       );
-      assert.equal(JSON.stringify(result).includes(url), false);
+      assert.equal(
+        JSON.stringify({ ...result, base: null }).includes(url),
+        false,
+      );
       assert.equal(
         result.directory,
         join(workspaces.executionKey(claim.execution_id), CHECKOUTS_DIRECTORY),

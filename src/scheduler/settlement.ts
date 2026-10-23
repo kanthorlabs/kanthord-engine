@@ -137,7 +137,7 @@ export function consecutiveFailures(
       `SELECT count(*) AS count FROM scheduler_execution
     WHERE node_id = ? AND attempt = ? AND id != ?
     AND (ended_at >= expired_at
-      OR (coalesce(json_extract(stop, '$.reason'), ?) != ?
+      OR (coalesce(json_extract(stop, '$.reason'), ?) NOT IN (?, ?)
         AND NOT (json_extract(stop, '$.reason') = ?
           AND json_extract(stop, '$.code') IN (SELECT value FROM json_each(?)))))
     AND rowid > coalesce((SELECT max(rowid) FROM scheduler_execution
@@ -150,6 +150,7 @@ export function consecutiveFailures(
       ending.execution_id,
       ExecutionStopReason.BudgetEnd,
       ExecutionStopReason.BudgetEnd,
+      ExecutionStopReason.EnvironmentFailed,
       ExecutionStopReason.ProviderFailed,
       canonicalJSON(Object.values(AdvancingProviderFailure)),
       ending.node_id,
@@ -160,6 +161,35 @@ export function consecutiveFailures(
   const count =
     Number(result.count) + (endingCounts ? ENDING_FAILURE : NO_FAILURES);
   assert.ok(Number.isSafeInteger(count) && count >= NO_FAILURES);
+  return count;
+}
+
+export function consecutiveEnvironmentFailures(
+  tx: Transaction,
+  ending: ExecutionRow,
+): number {
+  assert.ok(tx.database.isTransaction);
+  const result = tx.database
+    .prepare(
+      `SELECT count(*) AS count FROM scheduler_execution
+    WHERE node_id = ? AND attempt = ? AND id != ?
+    AND json_extract(stop, '$.reason') = ?
+    AND rowid > coalesce((SELECT max(rowid) FROM scheduler_execution
+      WHERE node_id = ? AND attempt = ? AND id != ? AND ended_at IS NOT NULL
+      AND coalesce(json_extract(stop, '$.reason'), '') != ?), -1)`,
+    )
+    .get(
+      ending.node_id,
+      ending.attempt,
+      ending.execution_id,
+      ExecutionStopReason.EnvironmentFailed,
+      ending.node_id,
+      ending.attempt,
+      ending.execution_id,
+      ExecutionStopReason.EnvironmentFailed,
+    )!;
+  const count = Number(result.count) + ENDING_FAILURE;
+  assert.ok(Number.isSafeInteger(count) && count >= ENDING_FAILURE);
   return count;
 }
 

@@ -5,9 +5,13 @@ import { OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import { approvedModels } from "../llm/platforms.ts";
 import type { ApprovedModelsFn } from "../agent/contract.ts";
+import type { Environment } from "../kernel/devcontainer.ts";
+import { EnvironmentSource } from "../kernel/devcontainer.ts";
 import {
   executionSetupSchema,
+  InstancePlacement,
   WorkerErrorCode,
+  type ExecutionEnvironment,
   type CredentialMetadataRecord,
   type ExecutionSetup,
   type SchedulerClaims,
@@ -18,6 +22,18 @@ import type { Dependencies, WorkerService } from "./service.ts";
 import { RepositoryErrorCode } from "../repository/contract.ts";
 
 const FIRST_ISSUE_INDEX = 0;
+
+function executionEnvironment(
+  stored: Environment | null,
+  repositoryEnvironment: boolean,
+  placement: InstancePlacement | null,
+): ExecutionEnvironment {
+  if (stored !== null)
+    return { source: EnvironmentSource.Stored, document: stored };
+  return placement === InstancePlacement.Container && repositoryEnvironment
+    ? { source: EnvironmentSource.Repository }
+    : null;
+}
 const NO_AGENTS = 0;
 
 export async function executionSetup(
@@ -167,6 +183,11 @@ export async function executionSetup(
           strategy: { base_branch: repository.base_branch },
           project_prompt: repository.project_prompt,
           working_layer: repository.working_layer,
+          environment: executionEnvironment(
+            repository.environment,
+            repository.repository_environment,
+            row.placement,
+          ),
         };
       });
     return executionSetupSchema.parse({

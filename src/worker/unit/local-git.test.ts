@@ -20,6 +20,8 @@ import {
   addedFiles,
   commitWork,
   discardChanges,
+  excludeUntracked,
+  fileAtRevision,
   headCommit,
   isAncestor,
 } from "./local-git.ts";
@@ -32,6 +34,7 @@ const EXECUTABLE_MODE = 0o755;
 const MANY_FILES = 20000;
 const LONG_NAME = "x".repeat(120);
 const CRLF_LINE = "a\r\n";
+const EMPTY_OBJECT = "{}";
 
 function writeRefusingHook(hooks: string, marker: string): void {
   mkdirSync(hooks, { recursive: true });
@@ -369,4 +372,69 @@ test("work commits handle more conversion-only files than one command line holds
     ".gitattributes",
     names[0]!,
   ]);
+});
+
+test("a file at a revision reads a regular blob and refuses an absent path or a directory", async (t) => {
+  const directory = temporary(t);
+  const git = simpleGit(directory);
+  await git.init();
+  mkdirSync(join(directory, "folder"));
+  writeFileSync(join(directory, "folder", "file.json"), EMPTY_OBJECT);
+  await git.add(["folder/file.json"]);
+  await git.raw([
+    "-c",
+    "user.name=Test",
+    "-c",
+    "user.email=test@example.invalid",
+    "commit",
+    "-m",
+    "initial",
+  ]);
+  const read = (path: string) =>
+    fileAtRevision(env, directory, "HEAD", path, background, 10000);
+  assert.equal(await read("folder/file.json"), EMPTY_OBJECT);
+  assert.equal(await read("folder/absent.json"), null);
+  assert.equal(await read("folder"), null);
+});
+
+test("an untracked exclusion keeps the setup output out of a commit and out of the cleanup", async (t) => {
+  const directory = temporary(t);
+  const git = simpleGit(directory);
+  await git.init();
+  writeFileSync(join(directory, "tracked"), "original");
+  writeFileSync(join(directory, ".gitignore"), "ignored\n");
+  await git.add(["tracked", ".gitignore"]);
+  await git.raw([
+    "-c",
+    "user.name=Test",
+    "-c",
+    "user.email=test@example.invalid",
+    "commit",
+    "-m",
+    "initial",
+  ]);
+  mkdirSync(join(directory, "node_modules"));
+  writeFileSync(join(directory, "node_modules", "package"), "setup");
+  writeFileSync(join(directory, "ignored"), "setup");
+  writeFileSync(join(directory, "star*"), "setup");
+  assert.deepEqual(
+    (await excludeUntracked(env, directory, background, 10000)).sort(),
+    ["node_modules/", "star*"],
+  );
+  assert.equal(
+    await commitWork(env, directory, "setup", background, 10000),
+    null,
+  );
+  await discardChanges(env, directory, background, 10000);
+  assert.equal(existsSync(join(directory, "node_modules", "package")), true);
+  assert.equal(existsSync(join(directory, "star*")), true);
+  writeFileSync(join(directory, "star-agent"), "agent");
+  assert.notEqual(
+    await commitWork(env, directory, "agent", background, 10000),
+    null,
+  );
+  assert.deepEqual(
+    await excludeUntracked(env, directory, background, 10000),
+    [],
+  );
 });

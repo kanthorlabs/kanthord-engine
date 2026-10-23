@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import type { SetupFailure } from "./environment-setup.ts";
 import { canonicalJSON } from "../../kernel/json.ts";
 import {
   AssessmentResult,
@@ -21,6 +22,7 @@ import {
 import type { NativeAgent } from "./native-agent.ts";
 import { prepareEvaluation, verificationCommands } from "./evaluation-input.ts";
 import {
+  environmentStop,
   infrastructureStop,
   runVerificationsWithOutput,
   VerificationClass,
@@ -79,14 +81,18 @@ async function judge(
   checkouts: readonly ExamineCheckout[],
   openAgent: OpenAgent,
   dependencies: Awaited<ReturnType<typeof readDependencies>> | null,
+  setupFailure: SetupFailure | null,
 ) {
   const examine = input.setup.intent === ExecutionIntent.Examine;
   const commands = verificationCommands(revision);
   const verification = verificationRun.verification;
   if (verificationRun.outcome === VerificationClass.BudgetEnd)
     return run.stop(EndReason.AssessmentAbsent);
-  const stop = infrastructureStop(verificationRun);
+  const stop =
+    infrastructureStop(verificationRun) ?? environmentStop(verificationRun);
   if (stop) throw stop;
+  const setupAssessment = setupFailureAssessment(setupFailure);
+  if (setupAssessment) return setupAssessment;
   if (!verificationPassed(verification, commands))
     return {
       result: AssessmentResult.CriterionNotMet,
@@ -137,7 +143,25 @@ async function judge(
   };
 }
 
+export function setupFailureAssessment(setupFailure: SetupFailure | null) {
+  if (setupFailure === null) return null;
+  return {
+    result: AssessmentResult.CriterionNotMet,
+    rationale: failedVerificationReport(
+      setupFailure.run,
+      setupFailure.commands,
+    ),
+    proposals: [],
+  };
+}
+
 type PreparedEvaluation = Awaited<ReturnType<typeof prepareEvaluation>>;
+
+function baselineOf(base: PreparedEvaluation["base"]) {
+  return base === null
+    ? {}
+    : { baseline: (command: string) => base.exitOf(command) };
+}
 
 async function evaluate(
   input: StepsInput,
@@ -162,6 +186,7 @@ async function evaluate(
     env: input.env,
     reruns: VERIFICATION_RERUNS,
     exhausted: () => budget.exhausted(),
+    ...baselineOf(prepared.base),
   });
   const verification = verificationRun.verification;
   const recorded = await run.submitEvidence(input.claim.node_id, {
@@ -196,6 +221,7 @@ async function evaluate(
       prepared.checkouts,
       openAgent,
       dependencies,
+      prepared.setupFailure,
     );
   } catch (error) {
     if (

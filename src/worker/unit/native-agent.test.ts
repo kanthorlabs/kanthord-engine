@@ -329,6 +329,7 @@ function repositoryOf(
     strategy: { base_branch: "main" },
     project_prompt: projectPrompt,
     working_layer: { ...WORKING_LAYER_ALL_ON, ...workingLayer },
+    environment: null,
   };
 }
 

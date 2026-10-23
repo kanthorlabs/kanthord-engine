@@ -110,7 +110,8 @@ import {
 import { installPiTools } from "../../agent/pi-tools.ts";
 import { ThreadDriver } from "./thread-driver.ts";
 import { ContainerDriver } from "./container-driver.ts";
-import { systemRuntimeHost } from "./container-runtime.ts";
+import { EnvironmentImages } from "./environment-image.ts";
+import { containerOwner, systemRuntimeHost } from "./container-runtime.ts";
 import { packageVersion } from "../../kernel/version.ts";
 import { WorkerPool } from "./worker-pool.ts";
 import { instanceIssuer } from "./instance-issuer.ts";
@@ -270,10 +271,25 @@ export function composeServices(options: {
     },
   });
   const threadDriver = new ThreadDriver();
+  const containerImage = `${options.config.worker.container_image}:${packageVersion()}`;
+  const containerHost = systemRuntimeHost(process.env);
+  const environmentImages = new EnvironmentImages({
+    host: containerHost,
+    owner: containerOwner(options.config.master_key),
+    kanthordImage: containerImage,
+    version: packageVersion(),
+    stateDirectory: options.stateDirectory,
+    fallbackImage: containerImage,
+    slotEnvironment: (projectId, context) =>
+      project.slotEnvironment(projectId, context),
+    exportRepository: (bindingId, commit, directory, context) =>
+      project.exportRepository(bindingId, commit, directory, context),
+  });
   const containerDriver = new ContainerDriver({
     masterKey: options.config.master_key,
-    image: `${options.config.worker.container_image}:${packageVersion()}`,
-    host: systemRuntimeHost(process.env),
+    image: containerImage,
+    host: containerHost,
+    imageFor: (runtime, slot) => environmentImages.imageFor(runtime, slot),
   });
   const serverSlotDriver = options.serverSlotDriver ?? threadDriver;
   const workerPool = new WorkerPool({
@@ -917,6 +933,7 @@ export function composeServices(options: {
     workerPool,
     threadDriver,
     containerDriver,
+    environmentImages,
     repoConnector,
     github,
     gitWriter,
@@ -978,6 +995,7 @@ export class Server implements Service {
   private services: Service[] = [];
   private runs: Promise<Error | null>[] = [];
   private invocation?: ReturnType<typeof createInvocation>;
+  private environmentImages?: EnvironmentImages;
   private quiesceTask?: Promise<Error | null>;
   private startTask?: Promise<Error | null>;
   private stopTask?: Promise<Error | null>;
@@ -1042,6 +1060,7 @@ export class Server implements Service {
         workbench,
         gateway,
         invocation,
+        environmentImages,
       } = composeServices({
         config,
         store: this.store,
@@ -1053,6 +1072,7 @@ export class Server implements Service {
       this.gateway = gateway;
       this.worker = worker;
       this.invocation = invocation;
+      this.environmentImages = environmentImages;
       this.releases.push(() => invocation.stop());
       const services = [
         tracking,
@@ -1125,6 +1145,7 @@ export class Server implements Service {
   stop(): Promise<Error | null> {
     if (this.stopTask) return this.stopTask;
     this.shutdown.cancel();
+    this.environmentImages?.stop();
     this.stopTask = lifecycle(async () => {
       const watchdog = setTimeout(() => process.exit(1), 10000);
       try {

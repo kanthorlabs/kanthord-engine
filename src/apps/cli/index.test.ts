@@ -345,6 +345,73 @@ test("project binding commands expose help and reject invalid inputs before I/O"
   }
 });
 
+test("project environment commands expose help and reject invalid inputs before I/O", async (t) => {
+  const directory = temporary(t);
+  const env = environment(directory);
+  const group = await invocation(
+    ["project", "environment", "--help"],
+    env,
+    t.signal,
+  );
+  assert.equal(group.status, ExitCode.Success, group.stderr);
+  for (const leaf of ["show", "set"]) {
+    assert.match(group.stdout, new RegExp(`\\b${leaf}\\b`));
+    const help = await invocation(
+      ["project", "environment", leaf, "--help"],
+      env,
+      t.signal,
+    );
+    assert.equal(help.status, ExitCode.Success, help.stderr);
+  }
+  const invalidFile = join(directory, "invalid.json");
+  writeFileSync(invalidFile, '{"postCreateCommand": 1}');
+  const commentedFile = join(directory, "devcontainer.json");
+  writeFileSync(commentedFile, '{\n  // base\n  "image": "debian",\n}');
+  for (const [args, code] of [
+    [
+      ["show", "invalid", BINDING_ID],
+      "cli.project.environment.show.invalid_project_id",
+    ],
+    [
+      ["show", PROJECT_ID, "invalid"],
+      "cli.project.environment.show.invalid_binding_id",
+    ],
+    [
+      ["show", PROJECT_ID, BINDING_ID],
+      "cli.project.environment.show.token_required",
+    ],
+    [
+      ["set", "invalid", BINDING_ID, "--file", commentedFile],
+      "cli.project.environment.set.invalid_project_id",
+    ],
+    [
+      ["set", PROJECT_ID, "invalid", "--file", commentedFile],
+      "cli.project.environment.set.invalid_binding_id",
+    ],
+    [
+      ["set", PROJECT_ID, BINDING_ID, "--file", "missing.json", "--token", "t"],
+      "cli.file.not_found",
+    ],
+    [
+      ["set", PROJECT_ID, BINDING_ID, "--file", invalidFile, "--token", "t"],
+      "cli.project.environment.set.file_invalid",
+    ],
+    [
+      ["set", PROJECT_ID, BINDING_ID, "--file", commentedFile],
+      "cli.project.environment.set.token_required",
+    ],
+  ] as const) {
+    const result = await invocation(
+      ["project", "environment", ...args],
+      env,
+      t.signal,
+    );
+    assert.equal(result.status, ExitCode.Failure, result.stderr);
+    assert.match(result.stderr, new RegExp(`^${code.replaceAll(".", "\\.")}:`));
+    assert.equal(result.stdout, EMPTY_OUTPUT);
+  }
+});
+
 test("project agent commands expose help and reject invalid inputs before I/O", async (t) => {
   const env = environment(temporary(t));
   const group = await invocation(["project", "agent", "--help"], env, t.signal);

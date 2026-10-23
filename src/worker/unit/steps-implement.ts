@@ -6,6 +6,7 @@ import {
 } from "../../mission/contract.ts";
 import type { ExecutionSetup, RepositoryTransport } from "../contract.ts";
 import type { SshAccess } from "../../repository/contract.ts";
+import { join } from "node:path";
 import {
   sshAccessOf,
   WorkspaceKind,
@@ -28,13 +29,14 @@ import {
 import {
   EndReason,
   ExecutionRun,
-  type ExecutionStop,
+  ExecutionStop,
   type MethodClaim,
   type ExecutionEnd,
 } from "./execution-run.ts";
 import { renderWorkPrompt } from "../../agent/prompt-composer.ts";
 import { headCommit } from "./local-git.ts";
 import {
+  environmentStop,
   infrastructureStop,
   runVerificationsWithOutput,
   testedInputOf,
@@ -42,6 +44,17 @@ import {
   verificationPassed,
   type VerificationRun,
 } from "./verification.ts";
+import {
+  BASE_DIRECTORY,
+  BaseHead,
+  runSetup,
+  SetupEnd,
+  setUpHeads,
+  setupEntries,
+  type SetupEntry,
+} from "./environment-setup.ts";
+import { BudgetLimit } from "../../scheduler/contract.ts";
+import { setupScriptsOf } from "../../kernel/devcontainer.ts";
 import {
   taskRevisionInstruction,
   criterionRevisionInstruction,
@@ -245,6 +258,7 @@ export async function runStepsImplement(
       await checkpointOnStop(state, stopped);
     throw stopped;
   } finally {
+    state.base.dispose();
     state.input.workspaces.release(
       state.input.workspaces.nodeKey(state.input.claim.node_id),
       WorkspaceKind.Node,
@@ -270,7 +284,10 @@ async function runUnits(
   taskRunner: TaskRunner,
 ): Promise<UnitsEnd> {
   const completed = new Set<string>();
-  let units: readonly PendingTask[] = checked.pending;
+  let units: readonly PendingTask[] = withSetupInstruction(
+    checked.pending,
+    state.setupInstruction,
+  );
   let nodeInstruction = checked.node;
   while (!state.agent.budget.exhausted()) {
     const ran = await runPending(state, units, nodeInstruction, taskRunner, {
@@ -291,6 +308,16 @@ async function runUnits(
     budgetEnd: true,
     completedTasks: completed.size,
   };
+}
+
+function withSetupInstruction(
+  pending: readonly PendingTask[],
+  instruction: string | null,
+): readonly PendingTask[] {
+  const [first, ...rest] = pending;
+  if (instruction === null || !first || first.instruction !== null)
+    return pending;
+  return [{ ...first, instruction }, ...rest];
 }
 
 interface Completion {
@@ -365,7 +392,8 @@ async function runNodeInstruction(
         continue;
       }
     } else if (revised && !agent.changed()) countUnchangedTurn(state);
-    const { verification, outputs } = await verifyCommands(state, commands);
+    const checked = await verifyCommands(state, commands);
+    const { verification, outputs } = checked;
     const passed = verificationPassed(verification, commands);
     state.run.log("task verified", {
       task_id: unit.id,
@@ -377,7 +405,7 @@ async function runNodeInstruction(
     instruction = taskRevisionInstruction(
       state.input.setup.templates,
       verification,
-      commands,
+      checked.commands,
       outputs.at(-1) ?? "",
     );
     revised = true;
@@ -424,7 +452,8 @@ export async function runTask(
       task_id: task.id,
       commit: headSetOf(state.checkouts),
     });
-    const { verification, outputs } = await verifyTaskRun(state, task);
+    const checked = await verifyTaskRun(state, task);
+    const { verification, outputs } = checked;
     const passed = verificationPassed(verification, task.content.verifications);
     state.run.log("task verified", {
       task_id: task.id,
@@ -436,7 +465,7 @@ export async function runTask(
     instruction = taskRevisionInstruction(
       state.input.setup.templates,
       verification,
-      task.content.verifications,
+      checked.commands,
       outputs.at(-1) ?? "",
     );
   }
@@ -468,6 +497,10 @@ export interface StepsState {
   verdict: Verdict | null;
   cleared: string | null;
   unchangedTurns: number;
+  setup: SetupEntry[];
+  base: BaseHead;
+  setupPending: boolean;
+  setupInstruction: string | null;
   task?: TaskContent;
 }
 
@@ -498,6 +531,13 @@ export async function prepareStepsWorkspace(
     context: run.operationContext,
     deadlineMs: deadline - Date.now(),
   });
+  const key = input.workspaces.nodeKey(input.claim.node_id);
+  const setupInput = {
+    env: input.env,
+    context: run.operationContext,
+    deadline,
+  };
+  let base: BaseHead | null = null;
   try {
     for (const checkout of prepared.checkouts)
       await restoreCheckout(
@@ -508,14 +548,53 @@ export async function prepareStepsWorkspace(
         run.operationContext,
         () => deadline - Date.now(),
       );
-  } catch (error) {
-    input.workspaces.release(
-      input.workspaces.nodeKey(input.claim.node_id),
-      WorkspaceKind.Node,
+    const setup = await setupEntries(
+      setupInput,
+      prepared.checkouts.map((checkout) => ({
+        repository: repositoryOf({ input }, checkout),
+        directory: checkout.directory,
+      })),
     );
+    base = new BaseHead(setupInput, join(key, BASE_DIRECTORY), setup);
+    const result = await setUpHeads(
+      setupInput,
+      setup,
+      base,
+      prepared.checkouts.map((checkout) => checkout.head),
+    );
+    run.log("environment setup", {
+      end: result.end,
+      commands: setupCommandsOf(setup).length,
+    });
+    if (result.end === SetupEnd.BudgetEnd)
+      throw new ExecutionStop(EndReason.BudgetEnd, BudgetLimit.WallTime);
+    const failed = result.end === SetupEnd.Failed;
+    if (failed)
+      run.log("setup failed on the node head", {
+        exit_codes: result.run.verification.results.map(
+          (entry) => entry.exit_code,
+        ),
+      });
+    return {
+      ...prepared,
+      nodeBranch: input.claim.node_branch,
+      setup,
+      base,
+      setupPending: failed,
+      setupInstruction: failed
+        ? taskRevisionInstruction(
+            input.setup.templates,
+            result.run.verification,
+            result.commands,
+            result.run.outputs.at(-1) ?? "",
+          )
+        : null,
+    };
+  } catch (error) {
+    base?.dispose();
+    input.workspaces.release(key, WorkspaceKind.Node);
     throw error;
   }
-  return { ...prepared, nodeBranch: input.claim.node_branch };
 }
 
 export function taskWork(state: StepsState, task: TaskContent) {
@@ -539,17 +618,60 @@ export function implementRepositoriesOf(state: StepsState) {
   );
 }
 
+export interface CheckedRun extends VerificationRun {
+  commands: readonly string[];
+}
+
 export function verifyTaskRun(
   state: StepsState,
   task: TaskContent,
-): Promise<VerificationRun> {
+): Promise<CheckedRun> {
   return verifyCommands(state, task.content.verifications);
+}
+
+async function pendingSetup(state: StepsState): Promise<CheckedRun | null> {
+  if (!state.setupPending) return null;
+  const result = await runSetup(
+    {
+      env: state.input.env,
+      context: state.run.operationContext,
+      deadline: state.agent.budget.wallDeadline(),
+      exhausted: () => state.agent.budget.exhausted(),
+    },
+    state.setup,
+  );
+  if (result.end === SetupEnd.Pass) {
+    state.setupPending = false;
+    return null;
+  }
+  if (result.end === SetupEnd.BudgetEnd) {
+    state.agent.budget.wallDeadlineReached();
+    return {
+      verification: {
+        tested_input: testedInputOf(state.checkouts),
+        results: [],
+      },
+      outputs: [],
+      flaky: [],
+      outcome: VerificationClass.BudgetEnd,
+      commands: setupCommandsOf(state.setup),
+    };
+  }
+  return { ...result.run, commands: result.commands };
+}
+
+function setupCommandsOf(entries: readonly SetupEntry[]): string[] {
+  return entries.flatMap((entry) =>
+    entry.environment === null ? [] : setupScriptsOf(entry.environment),
+  );
 }
 
 async function verifyCommands(
   state: StepsState,
   commands: readonly string[],
-): Promise<VerificationRun> {
+): Promise<CheckedRun> {
+  const setup = await pendingSetup(state);
+  if (setup !== null) return setup;
   const testedInput = testedInputOf(state.checkouts);
   const run = await runVerificationsWithOutput({
     observe: verificationObserver(state.run.spans, testedCommitOf(testedInput)),
@@ -560,6 +682,7 @@ async function verifyCommands(
     context: state.run.operationContext,
     env: state.input.env,
     exhausted: () => state.agent.budget.exhausted(),
+    baseline: (command) => state.base.exitOf(command),
   });
   if (run.outcome === VerificationClass.BudgetEnd)
     state.agent.budget.wallDeadlineReached();
@@ -578,9 +701,9 @@ async function verifyCommands(
   } finally {
     cleanup.cancel();
   }
-  const stop = infrastructureStop(run);
+  const stop = infrastructureStop(run) ?? environmentStop(run);
   if (stop) throw stop;
-  return run;
+  return { ...run, commands };
 }
 
 function headSetOf(checkouts: readonly WorkspaceCheckout[]): string {

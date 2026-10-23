@@ -167,6 +167,102 @@ components:
                       type: boolean
                   required: []
                   additionalProperties: false
+                environment:
+                  type: object
+                  properties:
+                    image:
+                      type: string
+                      minLength: 1
+                    build:
+                      type: object
+                      properties:
+                        dockerfile:
+                          type: string
+                          minLength: 1
+                        context:
+                          type: string
+                          minLength: 1
+                      additionalProperties: {}
+                    features:
+                      type: object
+                      propertyNames:
+                        type: string
+                      additionalProperties: {}
+                    containerEnv:
+                      type: object
+                      propertyNames:
+                        type: string
+                      additionalProperties:
+                        type: string
+                    remoteEnv:
+                      type: object
+                      propertyNames:
+                        type: string
+                      additionalProperties:
+                        anyOf:
+                          - type: string
+                          - type: "null"
+                    onCreateCommand:
+                      anyOf:
+                        - anyOf:
+                            - type: string
+                              minLength: 1
+                            - minItems: 1
+                              type: array
+                              items:
+                                type: string
+                        - type: object
+                          propertyNames:
+                            type: string
+                          additionalProperties:
+                            anyOf:
+                              - type: string
+                                minLength: 1
+                              - minItems: 1
+                                type: array
+                                items:
+                                  type: string
+                    updateContentCommand:
+                      anyOf:
+                        - anyOf:
+                            - type: string
+                              minLength: 1
+                            - minItems: 1
+                              type: array
+                              items:
+                                type: string
+                        - type: object
+                          propertyNames:
+                            type: string
+                          additionalProperties:
+                            anyOf:
+                              - type: string
+                                minLength: 1
+                              - minItems: 1
+                                type: array
+                                items:
+                                  type: string
+                    postCreateCommand:
+                      anyOf:
+                        - anyOf:
+                            - type: string
+                              minLength: 1
+                            - minItems: 1
+                              type: array
+                              items:
+                                type: string
+                        - type: object
+                          propertyNames:
+                            type: string
+                          additionalProperties:
+                            anyOf:
+                              - type: string
+                                minLength: 1
+                              - minItems: 1
+                                type: array
+                                items:
+                                  type: string
+                  additionalProperties: {}
               required:
                 - available
                 - platform

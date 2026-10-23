@@ -243,6 +243,7 @@ components:
                             - budget_end
                             - provider_failed
                             - no_progress
+                            - environment_failed
                         code:
                           anyOf:
                             - type: string

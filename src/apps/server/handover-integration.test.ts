@@ -188,6 +188,7 @@ for (const adapter of ["direct", "http"] as const) {
       strategy: { base_branch: "main" },
       project_prompt: "Follow repository conventions.",
       working_layer: WORKING_LAYER_ALL_ON,
+      environment: null,
     });
     assert.deepEqual(
       h.f.store.database

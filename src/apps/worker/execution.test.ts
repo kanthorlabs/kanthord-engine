@@ -200,6 +200,7 @@ test("host takes handover before setup and method, discards on every method end"
         strategy: { base_branch: "main" },
         project_prompt: null,
         working_layer: WORKING_LAYER_ALL_ON,
+        environment: null,
       },
     ],
   };
@@ -471,6 +472,7 @@ test("host builds the SSH access of each repository from the handover and leaves
           strategy: { base_branch: "main" },
           project_prompt: null,
           working_layer: WORKING_LAYER_ALL_ON,
+          environment: null,
         },
       ],
     },
@@ -568,6 +570,7 @@ test("host builds a relay SSH access for a repository whose handover holds no SS
           strategy: { base_branch: "main" },
           project_prompt: null,
           working_layer: WORKING_LAYER_ALL_ON,
+          environment: null,
         },
       ],
     },

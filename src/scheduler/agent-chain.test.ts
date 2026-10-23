@@ -33,6 +33,7 @@ import {
   ClaimIntent,
   ClaimNodeState,
   CooldownChangeKind,
+  EnvironmentFailure,
   ExecutionStopReason,
   ProviderFailure,
   type AgentPin,
@@ -72,6 +73,8 @@ const FAILURE_METHOD = "failure";
 const NO_FAILURES = 0;
 const ONE_FAILURE = 1;
 const TWO_FAILURES = 2;
+const FOUR_FAILURES = 4;
+const FIVE_FAILURES = 5;
 const FIRST_STRIKE = 1;
 
 function stopOf(reason: ReleaseStop["reason"], code: string | null) {
@@ -226,6 +229,62 @@ test("a first advancing provider stop counts no failure", async (t) => {
     stopOf(ExecutionStopReason.ProviderFailed, ProviderFailure.Unavailable),
   );
   assert.equal(h.failureCount(), NO_FAILURES);
+});
+
+test("an environment stop counts its own streak and not the earlier code failures", async (t) => {
+  const h = releaseHarness(t);
+  t.mock.method(h.service, "wake", () => {});
+  t.mock.method(Date, "now", () => FIXTURE_NOW);
+  h.prior(stopOf(ExecutionStopReason.JudgementInvalid, null));
+  h.prior(
+    stopOf(
+      ExecutionStopReason.EnvironmentFailed,
+      EnvironmentFailure.SetupFailed,
+    ),
+  );
+  await h.release(
+    stopOf(
+      ExecutionStopReason.EnvironmentFailed,
+      EnvironmentFailure.CommandAbsent,
+    ),
+  );
+  assert.equal(h.failureCount(), TWO_FAILURES);
+});
+
+test("five consecutive environment stops count five, so the backoff grows and the limit pauses the node", async (t) => {
+  const h = releaseHarness(t);
+  t.mock.method(h.service, "wake", () => {});
+  t.mock.method(Date, "now", () => FIXTURE_NOW);
+  h.prior(stopOf(ExecutionStopReason.NoProgress, null));
+  for (let index = 0; index < FOUR_FAILURES; index += 1)
+    h.prior(
+      stopOf(
+        ExecutionStopReason.EnvironmentFailed,
+        EnvironmentFailure.CommandAbsent,
+      ),
+    );
+  await h.release(
+    stopOf(
+      ExecutionStopReason.EnvironmentFailed,
+      EnvironmentFailure.SetupFailed,
+    ),
+  );
+  assert.equal(h.failureCount(), FIVE_FAILURES);
+});
+
+test("a code failure after an environment streak does not count the environment stops", async (t) => {
+  const h = releaseHarness(t);
+  t.mock.method(h.service, "wake", () => {});
+  t.mock.method(Date, "now", () => FIXTURE_NOW);
+  h.prior(stopOf(ExecutionStopReason.JudgementInvalid, null));
+  h.prior(
+    stopOf(
+      ExecutionStopReason.EnvironmentFailed,
+      EnvironmentFailure.SetupFailed,
+    ),
+  );
+  await h.release(stopOf(ExecutionStopReason.NoProgress, null));
+  assert.equal(h.failureCount(), TWO_FAILURES);
 });
 
 test("a non-advancing provider stop counts as a failure and keeps the hold", async (t) => {

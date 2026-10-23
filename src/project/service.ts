@@ -1,3 +1,4 @@
+import type { Environment } from "../kernel/devcontainer.ts";
 import { addAbortListener } from "node:events";
 import assert from "node:assert/strict";
 import { join } from "node:path";
@@ -48,7 +49,7 @@ import {
 import { RepositoryFileState } from "../repository/contract.ts";
 import { gitFailureReason } from "../repository/git-failure.ts";
 import { tagSchema } from "../kernel/tag.ts";
-import { isString } from "../kernel/values.ts";
+import { isObject, isString } from "../kernel/values.ts";
 import {
   GrantKind,
   SshIdentitySubjectKind,
@@ -107,6 +108,7 @@ import {
   type RepositoryConnector,
   type RepositoryFiles,
   type RepositoryPolicy,
+  type SlotEnvironment,
   type StorageBinding,
   type WorkerAgentsOfFn,
   type WorkerAgentViewFn,
@@ -144,10 +146,12 @@ import {
   readCurrentBindingByName,
   readCredentialBindings,
   hasBindingTombstone,
+  requireRepositoryBinding,
   writeBindingSet,
   type StoredBinding,
   type StoredProject,
 } from "./store.ts";
+import { ProjectEnvironments, refuseEnvironment } from "./environment.ts";
 
 const SSH_UNREACHABLE_STATUS = 422;
 const PROJECTS_DIRECTORY = "projects";
@@ -202,6 +206,13 @@ function refuseRepositoryAction(
       "The pull_request action requires a credential.",
     );
 }
+const ENVIRONMENT_KEY = "environment";
+function withoutEnvironment(config: unknown): unknown {
+  if (!isObject(config)) return config;
+  return Object.fromEntries(
+    Object.entries(config).filter(([key]) => key !== ENVIRONMENT_KEY),
+  );
+}
 function bindingUnchanged(
   name: string,
   binding: BindingEdit,
@@ -211,7 +222,8 @@ function bindingUnchanged(
     saved !== undefined &&
     saved.resource_identity ===
       deriveResourceIdentity(binding.kind, name, binding.config) &&
-    canonicalJSON(saved.config) === canonicalJSON(binding.config)
+    canonicalJSON(withoutEnvironment(saved.config)) ===
+      canonicalJSON(withoutEnvironment(binding.config))
   );
 }
 function callerIdentity(caller: CallerContext): CallerIdentity {
@@ -387,29 +399,6 @@ function requireWorkerBinding(
   return { project, config: workerConfigSchema.parse(binding.config) };
 }
 
-function requireRepositoryBinding(
-  tx: Transaction,
-  params: { project_id: string; binding_id: string },
-) {
-  requireProject(tx, params.project_id);
-  const binding = readBindingRevision(tx, params.binding_id);
-  if (
-    !binding ||
-    binding.project_id !== params.project_id ||
-    hasBindingTombstone(tx, binding) ||
-    kindOf(binding.resource_identity) !== BindingKind.Repository
-  )
-    throw new OperationError(
-      HttpStatus.NotFound,
-      ProjectErrorCode.BindingNotFound,
-      "Binding not found.",
-    );
-  return {
-    id: binding.id,
-    config: repositoryConfigSchema.parse(binding.config),
-  };
-}
-
 const INVALID_REASON_OF_FILE_STATE: Record<string, InvalidReason> = {
   [RepositoryFileState.NotRegularFile]: InvalidReason.NotRegularFile,
   [RepositoryFileState.OutsideRoot]: InvalidReason.OutsideWorkspace,
@@ -515,6 +504,25 @@ export interface Dependencies {
   health?: HealthRegistry;
   bindings?: ProjectBindings;
 }
+function currentEnvironmentOf(
+  tx: Transaction,
+  binding: { project_id: string; resource_identity: string },
+): Environment | null {
+  const current = Array.from(
+    readCurrentBindingSet(tx, binding.project_id).values(),
+  ).find((entry) => entry.resource_identity === binding.resource_identity);
+  if (!current) return null;
+  return repositoryConfigSchema.parse(current.config).environment ?? null;
+}
+
+function noStoredEnvironment(tx: Transaction, projectId: string): boolean {
+  return Array.from(readCurrentBindingSet(tx, projectId).values()).every(
+    (entry) =>
+      kindOf(entry.resource_identity) !== BindingKind.Repository ||
+      repositoryConfigSchema.parse(entry.config).environment === undefined,
+  );
+}
+
 export class ProjectService implements Service, ProjectBindings {
   private readonly bindings?: ProjectBindings;
   private readonly operationalStore: Store;
@@ -542,6 +550,7 @@ export class ProjectService implements Service, ProjectBindings {
   private readonly placementStatus: PlacementStatusOf;
   private readonly instanceOf: InstanceOf;
   private readonly wakeup: SchedulerWakeup;
+  private readonly environments: ProjectEnvironments;
   constructor(dependencies: Dependencies) {
     this.bindings = dependencies.bindings;
     this.operationalStore = dependencies.operationalStore;
@@ -565,6 +574,14 @@ export class ProjectService implements Service, ProjectBindings {
     this.placementStatus = dependencies.placementStatus;
     this.instanceOf = dependencies.instanceOf;
     this.wakeup = dependencies.wakeup;
+    this.environments = new ProjectEnvironments({
+      store: dependencies.operationalStore,
+      repositoryFiles: dependencies.repositoryFiles,
+      identity: dependencies.identity,
+      sshAccess: (platform, release) => this.sshAccess(platform, release),
+      writeBindings: (projectId, body, caller) =>
+        this.writeBindings(projectId, body, caller),
+    });
     dependencies.health?.register("project", () => this.healthcheck());
   }
   declare(registry: OperationRegistry): void {
@@ -630,6 +647,11 @@ export class ProjectService implements Service, ProjectBindings {
       ({ params, body }, caller) =>
         this.writeBindings(params.project_id, body, caller),
     );
+    registry.register(
+      projectOperations["binding.environment.set"],
+      ({ params, body }, caller) =>
+        this.environments.write(params, body.environment, caller),
+    );
     this.declareBindingReads(registry);
     this.declareAgentReads(registry);
   }
@@ -687,6 +709,10 @@ export class ProjectService implements Service, ProjectBindings {
     registry.register(
       projectOperations["binding.instruction_files.get"],
       ({ params }, caller) => this.readInstructionFiles(params, caller),
+    );
+    registry.register(
+      projectOperations["binding.environment.get"],
+      ({ params }, caller) => this.environments.read(params, caller),
     );
     registry.register(
       projectOperations["binding.check"],
@@ -1001,6 +1027,7 @@ export class ProjectService implements Service, ProjectBindings {
     for (const [name, binding] of submission) {
       if (binding.kind !== BindingKind.Repository) continue;
       refuseRepositoryAction(binding.config);
+      refuseEnvironment(binding.config.environment);
       if (bindingUnchanged(name, binding, saved.get(name))) continue;
       await this.checkRepository(projectId, binding.config, caller);
     }
@@ -1448,7 +1475,28 @@ export class ProjectService implements Service, ProjectBindings {
       landing: config.strategy.action?.landing ?? Landing.Human,
       project_prompt: config.project_prompt ?? null,
       working_layer: config.working_layer,
+      environment: currentEnvironmentOf(tx, binding),
+      repository_environment: noStoredEnvironment(tx, binding.project_id),
     };
+  }
+  slotEnvironment(
+    projectId: string,
+    context: Context,
+  ): Promise<SlotEnvironment | null> {
+    return this.environments.slotEnvironment(projectId, context);
+  }
+  exportRepository(
+    bindingId: string,
+    commit: string,
+    directory: string,
+    context: Context,
+  ): Promise<void> {
+    return this.environments.exportRepository(
+      bindingId,
+      commit,
+      directory,
+      context,
+    );
   }
   projectNameOf(tx: Transaction, projectId: string): string {
     assert.ok(tx.database.isTransaction);

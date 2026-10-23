@@ -19,6 +19,8 @@ import {
   type OperationResult,
 } from "../kernel/operation.ts";
 import type { SshAccess } from "../repository/contract.ts";
+import { environmentSchema, type Environment } from "../kernel/devcontainer.ts";
+import { EnvironmentSource } from "../kernel/devcontainer.ts";
 import { copyHealthSchema, loginSessionEntrySchema } from "../llm/contract.ts";
 import type { Transaction } from "../kernel/store.ts";
 import { HttpMethod, HttpStatus } from "../kernel/http.ts";
@@ -475,6 +477,8 @@ export type RepositoryPolicyOf = (
   base_branch: string;
   project_prompt: string | null;
   working_layer: WorkingLayer;
+  environment: Environment | null;
+  repository_environment: boolean;
 } | null;
 
 export type RepositoryBindingIdsOf = (
@@ -974,6 +978,16 @@ export const agentSetupSchema = z.strictObject({
   prompt: z.strictObject({ final: z.string() }),
 });
 export type AgentSetup = z.infer<typeof agentSetupSchema>;
+export const executionEnvironmentSchema = z
+  .discriminatedUnion("source", [
+    z.strictObject({
+      source: z.literal(EnvironmentSource.Stored),
+      document: environmentSchema,
+    }),
+    z.strictObject({ source: z.literal(EnvironmentSource.Repository) }),
+  ])
+  .nullable();
+export type ExecutionEnvironment = z.infer<typeof executionEnvironmentSchema>;
 export const executionSetupSchema = z.strictObject({
   execution_id: identitySchema("execution"),
   worker_name: z.string().min(1),
@@ -991,6 +1005,7 @@ export const executionSetupSchema = z.strictObject({
       strategy: z.strictObject({ base_branch: z.string() }),
       project_prompt: z.string().nullable(),
       working_layer: workingLayerSchema,
+      environment: executionEnvironmentSchema,
     }),
   ),
 });

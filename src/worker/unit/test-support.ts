@@ -37,6 +37,7 @@ import {
 } from "./model-runtime.ts";
 import {
   ExecutionIntent,
+  type ExecutionEnvironment,
   type ExecutionSetup,
   type RepositoryTransport,
 } from "../contract.ts";
@@ -187,6 +188,7 @@ export const repositorySetup = () => ({
   strategy: { base_branch: "main" },
   project_prompt: null,
   working_layer: WORKING_LAYER_ALL_ON,
+  environment: null,
 });
 
 export const task = (name: string, command: string): TaskContent => ({
@@ -207,6 +209,7 @@ export async function implementFixture(
   script: Parameters<typeof scriptedProvider>[0],
   turns?: number,
   names: readonly string[] = [DEFAULT_BINDING_NAME],
+  environment: ExecutionEnvironment = null,
 ) {
   const bares = await Promise.all(
     names.map(async () => join((await bareTemplate(t)).root, BARE_NAME)),
@@ -222,6 +225,7 @@ export async function implementFixture(
     strategy: { base_branch: "main" },
     project_prompt: null,
     working_layer: WORKING_LAYER_ALL_ON,
+    environment,
   }));
   const claim = {
     execution_id: setup.execution_id,

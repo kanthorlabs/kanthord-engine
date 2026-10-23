@@ -42,6 +42,7 @@ import {
   BindingState,
   ChangeKind,
   BINDING_CHECK_TIMEOUT_MS,
+  EnvironmentSource,
   FollowsType,
   GitHubAction,
   Landing,
@@ -76,6 +77,11 @@ import {
 import { TAG_MAX_BYTES } from "../kernel/tag.ts";
 import { PlacementIssue } from "../worker/contract.ts";
 import { projectMigrations } from "./migrations.ts";
+import { EnvironmentErrorCode } from "./environment.ts";
+import {
+  DEVCONTAINER_FILE,
+  EnvironmentRefusalReason,
+} from "../kernel/devcontainer.ts";
 import {
   GrantKind,
   SshIdentitySubjectKind,
@@ -143,14 +149,19 @@ const CORE_OPERATIONS = [
   "project.agentConfiguration.get",
   "project.binding.verify",
   "project.binding.instruction_files.get",
+  "project.binding.environment.get",
+  "project.binding.environment.set",
   "project.binding.check",
 ];
 const CURSOR_ENCODING = "base64url";
 type OperationKey = Exclude<
   keyof typeof projectOperations,
-  "bindingSet.write" | "binding.check"
+  "bindingSet.write" | "binding.check" | "binding.environment.set"
 >;
-type AsyncOperationKey = "binding.verify" | "binding.instruction_files.get";
+type AsyncOperationKey =
+  | "binding.verify"
+  | "binding.instruction_files.get"
+  | "binding.environment.get";
 
 function unexpected(): never {
   throw new Error("Unexpected peer collaboration call.");
@@ -321,6 +332,8 @@ function fixture(t: TestContext, overrides: Partial<Dependencies> = {}) {
     repositoryFiles: {
       resolveBranchCommit: unexpected,
       readFilesAtCommit: unexpected,
+      readObjectIds: unexpected,
+      cloneSnapshot: unexpected,
     },
     verifyRepositoryCredential: unexpected,
     identity: PROJECT_IDENTITY,
@@ -4140,6 +4153,8 @@ test("repositoryPolicyOf preserves the named revision after a strategy change", 
       landing: Landing.Human,
       project_prompt: projectPrompt,
       working_layer: original.config.working_layer,
+      environment: null,
+      repository_environment: true,
     });
     const latest = f.project.repositoryPolicyOf(tx, later.id);
     assert.equal(latest?.action, GitHubAction.MergePush);
@@ -4744,6 +4759,7 @@ test("binding.verify returns 404 for a non-repository binding", async (t) => {
 
 const BASE_BRANCH = "main";
 const INSTRUCTION_COMMIT = "a".repeat(40);
+const TREE_PREFIX = "tree-";
 const NEXT_INSTRUCTION_COMMIT = "b".repeat(40);
 const INSTRUCTION_PATHS = [
   "AGENTS.md",
@@ -4776,6 +4792,7 @@ function instructionFixture(
     readFails?: boolean;
     hang?: boolean;
   } = {},
+  overrides: Partial<Dependencies> = {},
 ) {
   const commits = [...(behavior.commits ?? [INSTRUCTION_COMMIT])];
   const resolveCalls: Array<{
@@ -4792,6 +4809,7 @@ function instructionFixture(
     timeout: number;
     ssh: SshAccess;
   }> = [];
+  const objectCalls: string[][] = [];
   const started = Promise.withResolvers<void>();
   const f = fixture(t, {
     repositoryConnector: {
@@ -4835,7 +4853,14 @@ function instructionFixture(
           };
         });
       },
+      async readObjectIds(_address, _commit, paths) {
+        objectCalls.push([...paths]);
+        if (behavior.resolveFails) throw new Error("fetch failed");
+        return paths.map((_path, index) => `${TREE_PREFIX}${index}`);
+      },
+      cloneSnapshot: unexpected,
     },
+    ...overrides,
   });
   const saved = f.store.transaction((tx) => {
     const p = insertProject(tx, PROJECT_NAME);
@@ -4849,7 +4874,7 @@ function instructionFixture(
     assert.ok(bindingId);
     return { project_id: p.id, binding_id: bindingId };
   });
-  return { f, saved, resolveCalls, readCalls, started };
+  return { f, saved, resolveCalls, readCalls, objectCalls, started };
 }
 
 function refusesInstructionFiles(
@@ -5338,4 +5363,352 @@ test("a pull request strategy holds a landing choice and other actions refuse on
     false,
   );
   assert.equal(strategy(GitHubAction.PullRequest, "robot").success, false);
+});
+
+const WRITABLE: Partial<Dependencies> = { custodySuitability: () => {} };
+const STORED_ENVIRONMENT = {
+  image: "mcr.microsoft.com/devcontainers/python:3.12",
+  postCreateCommand: "pip install -r requirements.txt",
+};
+const DEVCONTAINER_TEXT = `{
+  // the repository environment
+  "image": "mcr.microsoft.com/devcontainers/javascript-node:24",
+  "postCreateCommand": "npm ci",
+}`;
+
+async function setEnvironment(
+  f: ReturnType<typeof fixture>,
+  params: { project_id: string; binding_id: string },
+  environment: unknown,
+) {
+  const operation = projectOperations["binding.environment.set"];
+  const input = operation.input.parse({
+    params,
+    query: {},
+    body: { environment },
+  });
+  return operation.output.parse(
+    await f.registry.get(operation.id).handler(input, f.caller),
+  );
+}
+
+test("binding.environment.set stores the environment as a new revision with no repository check", async (t) => {
+  const { f, saved, resolveCalls } = instructionFixture(t, {}, WRITABLE);
+  const answer = await setEnvironment(f, saved, STORED_ENVIRONMENT);
+  const stored = answer.bindings[REPOSITORY_NAME];
+  assert.ok(stored);
+  assert.equal(stored.revision, SECOND_REVISION);
+  assert.deepEqual(
+    (stored.config as { environment: unknown }).environment,
+    STORED_ENVIRONMENT,
+  );
+  assert.deepEqual(answer.changes, [
+    { kind: ChangeKind.Revised, binding_id: stored.id },
+  ]);
+  assert.deepEqual(resolveCalls, []);
+  assert.deepEqual(
+    f.store.transaction((tx) => f.project.repositoryPolicyOf(tx, stored.id))
+      ?.environment,
+    STORED_ENVIRONMENT,
+  );
+});
+
+test("a revision pinned before an environment set takes the environment of the current revision", async (t) => {
+  const { f, saved } = instructionFixture(t, {}, WRITABLE);
+  const pinned = f.store.transaction((tx) =>
+    f.project.repositoryPolicyOf(tx, saved.binding_id),
+  );
+  assert.equal(pinned?.environment, null);
+  await setEnvironment(f, saved, STORED_ENVIRONMENT);
+  const policy = f.store.transaction((tx) =>
+    f.project.repositoryPolicyOf(tx, saved.binding_id),
+  );
+  assert.equal(policy?.binding_id, saved.binding_id);
+  assert.deepEqual(policy?.environment, STORED_ENVIRONMENT);
+});
+
+test("binding.environment.get answers the stored environment with no repository read", async (t) => {
+  const { f, saved, resolveCalls, readCalls } = instructionFixture(
+    t,
+    {},
+    WRITABLE,
+  );
+  const answer = await setEnvironment(f, saved, STORED_ENVIRONMENT);
+  const stored = answer.bindings[REPOSITORY_NAME];
+  assert.ok(stored);
+  const read = await f.invokeAsync("binding.environment.get", {
+    project_id: saved.project_id,
+    binding_id: stored.id,
+  });
+  assert.deepEqual(read, {
+    source: EnvironmentSource.Stored,
+    commit: null,
+    environment: STORED_ENVIRONMENT,
+    reason: null,
+  });
+  assert.deepEqual(resolveCalls, []);
+  assert.deepEqual(readCalls, []);
+});
+
+test("binding.environment.get reads the devcontainer file of the repository at the base head", async (t) => {
+  const present = instructionFixture(t, { texts: [DEVCONTAINER_TEXT] });
+  assert.deepEqual(
+    await present.f.invokeAsync("binding.environment.get", present.saved),
+    {
+      source: EnvironmentSource.Repository,
+      commit: INSTRUCTION_COMMIT,
+      environment: {
+        image: "mcr.microsoft.com/devcontainers/javascript-node:24",
+        postCreateCommand: "npm ci",
+      },
+      reason: null,
+    },
+  );
+  assert.deepEqual(present.readCalls[NO_ITEMS]?.paths, [DEVCONTAINER_FILE]);
+  const absent = instructionFixture(t, {}, WRITABLE);
+  assert.deepEqual(
+    await absent.f.invokeAsync("binding.environment.get", absent.saved),
+    {
+      source: EnvironmentSource.None,
+      commit: INSTRUCTION_COMMIT,
+      environment: null,
+      reason: null,
+    },
+  );
+  const invalid = instructionFixture(t, { texts: ["{"] });
+  const answer = await invalid.f.invokeAsync(
+    "binding.environment.get",
+    invalid.saved,
+  );
+  assert.equal(answer.source, EnvironmentSource.Repository);
+  assert.equal(answer.environment, null);
+  assert.match(answer.reason ?? "", /invalid JSON/);
+});
+
+test("binding.environment.get and set refuse a binding that is not a repository binding", async (t) => {
+  const { f, saved } = instructionFixture(t, {}, WRITABLE);
+  const worker = f.store.transaction((tx) => {
+    const written = persistBindings(tx, saved.project_id, {
+      [REPOSITORY_NAME]: repositoryBinding(),
+      general: workerBinding(),
+    }).bindings.general;
+    assert.ok(written);
+    return { project_id: saved.project_id, binding_id: written.id };
+  });
+  await refusesInstructionFiles(
+    f.invokeAsync("binding.environment.get", worker),
+    HttpStatus.NotFound,
+    ProjectErrorCode.BindingNotFound,
+  );
+  await refusesInstructionFiles(
+    setEnvironment(f, worker, STORED_ENVIRONMENT),
+    HttpStatus.NotFound,
+    ProjectErrorCode.BindingNotFound,
+  );
+});
+
+test("the slot environment is the one repository binding with an environment source", async (t) => {
+  const absent = instructionFixture(t, {}, WRITABLE);
+  assert.equal(
+    await absent.f.project.slotEnvironment(absent.saved.project_id, background),
+    null,
+  );
+  const present = instructionFixture(t, { texts: [DEVCONTAINER_TEXT] });
+  const found = await present.f.project.slotEnvironment(
+    present.saved.project_id,
+    background,
+  );
+  assert.equal(found?.source, EnvironmentSource.Repository);
+  assert.equal(found?.binding_id, present.saved.binding_id);
+  assert.equal(found?.commit, INSTRUCTION_COMMIT);
+  assert.deepEqual(
+    found?.files.map((file) => file.path),
+    [DEVCONTAINER_FILE],
+  );
+  const stored = instructionFixture(t, {}, WRITABLE);
+  await setEnvironment(stored.f, stored.saved, {
+    build: { dockerfile: "Dockerfile" },
+  });
+  const built = await stored.f.project.slotEnvironment(
+    stored.saved.project_id,
+    background,
+  );
+  assert.equal(built?.source, EnvironmentSource.Stored);
+  assert.deepEqual(
+    built?.files.map((file) => file.path),
+    [".devcontainer/Dockerfile"],
+  );
+  const invalid = instructionFixture(t, { texts: ["[]"] });
+  await assert.rejects(
+    invalid.f.project.slotEnvironment(invalid.saved.project_id, background),
+    (error) =>
+      error instanceof Diagnostic &&
+      error.code === EnvironmentErrorCode.Invalid,
+  );
+});
+
+test("binding.environment.set refuses a key or a value that the build path does not allow and names the key", async (t) => {
+  const { f, saved } = instructionFixture(t, {}, WRITABLE);
+  await refusesInstructionFiles(
+    setEnvironment(f, saved, {
+      build: { dockerfile: "Dockerfile", options: ["--volume=/:/host"] },
+    }),
+    HttpStatus.BadRequest,
+    EnvironmentErrorCode.KeyRefused,
+    { key: "build.options", reason: EnvironmentRefusalReason.KeyNotAllowed },
+  );
+  await refusesInstructionFiles(
+    setEnvironment(f, saved, {
+      image: STORED_ENVIRONMENT.image,
+      containerEnv: { TOKEN: "${localEnv:GH_TOKEN}" },
+    }),
+    HttpStatus.BadRequest,
+    EnvironmentErrorCode.KeyRefused,
+    {
+      key: "containerEnv.TOKEN",
+      reason: EnvironmentRefusalReason.ServerVariable,
+    },
+  );
+});
+
+const REFUSED_KEY = "runArgs";
+
+test("a repository devcontainer with a refused key stops the slot and names the key in environment show", async (t) => {
+  const refused = instructionFixture(t, {
+    texts: [`{ "image": "base", "runArgs": ["--privileged"] }`],
+  });
+  await assert.rejects(
+    refused.f.project.slotEnvironment(refused.saved.project_id, background),
+    (error) =>
+      error instanceof Diagnostic &&
+      error.code === EnvironmentErrorCode.KeyRefused &&
+      new Map(error.fields).get("key") === REFUSED_KEY,
+  );
+  const answer = await refused.f.invokeAsync(
+    "binding.environment.get",
+    refused.saved,
+  );
+  assert.equal(answer.environment, null);
+  assert.match(answer.reason ?? "", /runArgs: the key is not allowed/);
+});
+
+const OTHER_REPOSITORY_NAME = "other";
+const OTHER_ADDRESS = "git@github.com:owner/other.git";
+
+function twoRepositories(
+  t: TestContext,
+  behavior: Parameters<typeof instructionFixture>[1],
+) {
+  const fixed = instructionFixture(t, behavior, WRITABLE);
+  const other = fixed.f.store.transaction((tx) => {
+    const version = requireProject(
+      tx,
+      fixed.saved.project_id,
+    ).binding_set_version;
+    const result = writeBindingSet(
+      tx,
+      fixed.saved.project_id,
+      version,
+      new Map([
+        [REPOSITORY_NAME, repositoryBinding()],
+        [OTHER_REPOSITORY_NAME, repositoryBinding(OTHER_ADDRESS)],
+      ]),
+    );
+    const added = result.changes.find(
+      (change) => change.binding_id !== fixed.saved.binding_id,
+    );
+    assert.ok(added);
+    return { project_id: fixed.saved.project_id, binding_id: added.binding_id };
+  });
+  return { ...fixed, other };
+}
+
+function ambiguous(error: unknown): boolean {
+  return (
+    error instanceof Diagnostic && error.code === EnvironmentErrorCode.Ambiguous
+  );
+}
+
+test("a stored environment wins over the devcontainer of another binding, and two of one kind are ambiguous", async (t) => {
+  const { f, saved, other } = twoRepositories(t, {
+    texts: [DEVCONTAINER_TEXT],
+  });
+  await assert.rejects(
+    f.project.slotEnvironment(saved.project_id, background),
+    ambiguous,
+  );
+  const answer = await setEnvironment(f, saved, STORED_ENVIRONMENT);
+  const stored = answer.bindings[REPOSITORY_NAME];
+  assert.ok(stored);
+  const found = await f.project.slotEnvironment(saved.project_id, background);
+  assert.equal(found?.source, EnvironmentSource.Stored);
+  assert.equal(found?.binding_id, stored.id);
+  const otherCurrent = answer.bindings[OTHER_REPOSITORY_NAME];
+  assert.ok(otherCurrent);
+  await setEnvironment(
+    f,
+    { ...other, binding_id: otherCurrent.id },
+    STORED_ENVIRONMENT,
+  );
+  await assert.rejects(
+    f.project.slotEnvironment(saved.project_id, background),
+    ambiguous,
+  );
+});
+
+test("a failed remote read reuses the last slot environment of the same binding revisions", async (t) => {
+  const behavior: Parameters<typeof instructionFixture>[1] = {
+    texts: [DEVCONTAINER_TEXT],
+  };
+  const { f, saved } = instructionFixture(t, behavior, WRITABLE);
+  const first = await f.project.slotEnvironment(saved.project_id, background);
+  assert.equal(first?.source, EnvironmentSource.Repository);
+  behavior.resolveFails = true;
+  assert.deepEqual(
+    await f.project.slotEnvironment(saved.project_id, background),
+    first,
+  );
+  await setEnvironment(f, saved, STORED_ENVIRONMENT);
+  await assert.rejects(
+    f.project.slotEnvironment(saved.project_id, background),
+    (error) =>
+      error instanceof OperationError &&
+      error.code === ProjectErrorCode.RepositorySshUnreachable,
+  );
+});
+
+test("the slot environment carries the tree ids of the build context and of each local feature", async (t) => {
+  const { f, saved, objectCalls } = instructionFixture(t, {}, WRITABLE);
+  await setEnvironment(f, saved, {
+    build: { dockerfile: "Dockerfile", context: ".." },
+    features: { "./local": {}, "ghcr.io/devcontainers/features/node:1": {} },
+  });
+  const found = await f.project.slotEnvironment(saved.project_id, background);
+  assert.deepEqual(objectCalls, [[".", ".devcontainer/local"]]);
+  assert.deepEqual(found?.trees, [
+    { path: ".", object: `${TREE_PREFIX}0` },
+    { path: ".devcontainer/local", object: `${TREE_PREFIX}1` },
+  ]);
+});
+
+test("at a stored environment of one binding, no other binding takes its repository devcontainer", async (t) => {
+  const { f, saved, other } = twoRepositories(t, {
+    texts: [DEVCONTAINER_TEXT],
+  });
+  const policies = () =>
+    f.store.transaction((tx) =>
+      [saved.binding_id, other.binding_id].map((id) => {
+        const policy = f.project.repositoryPolicyOf(tx, id);
+        return [policy?.environment, policy?.repository_environment];
+      }),
+    );
+  assert.deepEqual(policies(), [
+    [null, true],
+    [null, true],
+  ]);
+  await setEnvironment(f, saved, STORED_ENVIRONMENT);
+  assert.deepEqual(policies(), [
+    [STORED_ENVIRONMENT, false],
+    [null, false],
+  ]);
 });

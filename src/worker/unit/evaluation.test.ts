@@ -23,7 +23,13 @@ import type { MethodClients } from "./method-clients.ts";
 import type { RepositoryTransport } from "../contract.ts";
 import type { NativeAgent } from "./native-agent.ts";
 import type { WorkPrompt } from "../../agent/prompt-composer.ts";
-import { requestAndRelease, runEvaluation } from "./evaluation.ts";
+import {
+  requestAndRelease,
+  runEvaluation,
+  setupFailureAssessment,
+} from "./evaluation.ts";
+import { SetupEnd } from "./environment-setup.ts";
+import { VerificationClass } from "./verification.ts";
 import { ActionResultKind } from "../contract.ts";
 import { AssessmentResult } from "../../mission/contract.ts";
 import { JUDGEMENT_MARKER, repairInstruction } from "./judgement.ts";
@@ -712,4 +718,32 @@ test("a wall deadline during a review verification ends with no assessment and n
       stop: { reason: EndReason.AssessmentAbsent, code: null },
     },
   ]);
+});
+
+test("a node-head setup failure of a review is criterion-not-met and names the setup command", () => {
+  assert.equal(setupFailureAssessment(null), null);
+  const command = "npm ci";
+  const assessment = setupFailureAssessment({
+    end: SetupEnd.Failed,
+    commands: [command],
+    run: {
+      verification: {
+        tested_input: { kind: "produced", sha256: "a".repeat(64) },
+        results: [
+          {
+            command,
+            exit_code: 1,
+            signal: null,
+            timed_out: false,
+          },
+        ],
+      },
+      outputs: ["npm ERR! missing lockfile"],
+      flaky: [false],
+      outcome: VerificationClass.CodeFailure,
+    },
+  });
+  assert.equal(assessment?.result, AssessmentResult.CriterionNotMet);
+  assert.match(assessment?.rationale ?? "", /Verification 1 `npm ci` failed/);
+  assert.deepEqual(assessment?.proposals, []);
 });

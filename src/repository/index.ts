@@ -25,6 +25,7 @@ import {
   landedOn,
   resolveBranchCommit,
   readFilesAtCommit,
+  readObjectIds,
 } from "./connector.ts";
 import { RepositoryErrorCode } from "./contract.ts";
 import { GitHubPlatform } from "./github.ts";
@@ -77,7 +78,12 @@ export const platformImplementations = {
   [RepositoryPlatform.GitHub]: GitHubPlatform,
 } as const;
 
-export const repositoryFiles = { resolveBranchCommit, readFilesAtCommit };
+export const repositoryFiles = {
+  resolveBranchCommit,
+  readFilesAtCommit,
+  readObjectIds,
+  cloneSnapshot,
+};
 
 export type KnownHostsOf = (tx: Transaction, address: string) => string;
 export type PortOf = (address: string) => number;
