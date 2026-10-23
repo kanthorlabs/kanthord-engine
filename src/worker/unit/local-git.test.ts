@@ -287,3 +287,36 @@ test("work commits run no hook of the default hooks directory of the repository"
   assert.ok(head);
   assert.equal(existsSync(marker), false);
 });
+
+test("work commits run no hook of the hooks path in the host git configuration parameters", async (t) => {
+  const directory = temporary(t);
+  const hooks = temporary(t);
+  const marker = join(hooks, HOOK_MARKER);
+  writeRefusingHook(hooks, marker);
+  await simpleGit(directory).init();
+  writeFileSync(join(directory, "tracked"), "original");
+  const head = await commitWork(
+    { ...env, GIT_CONFIG_PARAMETERS: `'core.hooksPath'='${hooks}'` },
+    directory,
+    "checkpoint",
+    background,
+    10000,
+  );
+  assert.ok(head);
+  assert.equal(existsSync(marker), false);
+});
+
+test("work commits fail when git refuses the commit with no error output", async (t) => {
+  const directory = temporary(t);
+  const nested = join(directory, "nested");
+  mkdirSync(nested);
+  await simpleGit(nested).init();
+  writeFileSync(join(nested, "file"), "original");
+  await commitWork(env, nested, "nested", background, 10000);
+  await simpleGit(directory).init();
+  await commitWork(env, directory, "initial", background, 10000);
+  writeFileSync(join(nested, "file"), "changed");
+  await assert.rejects(
+    commitWork(env, directory, "refused", background, 10000),
+  );
+});

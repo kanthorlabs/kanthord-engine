@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { simpleGit } from "simple-git";
+import { simpleGit, type SimpleGitOptions } from "simple-git";
 import type { Context } from "../../kernel/context.ts";
 import {
   GIT_UNSAFE_OPTIONS,
@@ -10,6 +10,12 @@ const EXPIRED = 0;
 const CLEAN_STATUS = "";
 const FIRST_ATTEMPT = 1;
 const NO_CONFLICTS = 0;
+const EXIT_SUCCESS = 0;
+
+const failNonzeroExit: SimpleGitOptions["errors"] = (error, result) =>
+  result.exitCode === EXIT_SUCCESS
+    ? error
+    : (error ?? new Error(`git exited with ${result.exitCode}`));
 
 export function taskCommitMessage(taskId: string, attempt: number): string {
   assert.ok(taskId);
@@ -75,6 +81,7 @@ async function run(
     abort: context.signal,
     timeout: { block: deadlineMs },
     unsafe: GIT_UNSAFE_OPTIONS,
+    errors: failNonzeroExit,
   })
     .env(gitEnvironment(env))
     .raw(args);

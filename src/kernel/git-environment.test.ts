@@ -93,3 +93,12 @@ test("isolatedGitEnvironment removes the SSH agent and the SSH command of the ho
   );
   assert.deepEqual(output.PATH, PATH_VALUE);
 });
+
+test("isolatedGitEnvironment removes the git configuration parameters of the host", () => {
+  const output = isolatedGitEnvironment({
+    GIT_CONFIG_PARAMETERS: "'core.hooksPath'='/tmp/hooks'",
+    PATH: PATH_VALUE,
+  });
+  assert.equal(output.GIT_CONFIG_PARAMETERS, undefined);
+  assert.deepEqual(output.PATH, PATH_VALUE);
+});
