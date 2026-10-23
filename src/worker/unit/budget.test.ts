@@ -86,3 +86,18 @@ test("an agent context that reaches its deadline ends the budget", (t) => {
   open.agentContext(background).cancel();
   assert.equal(open.exhausted(), false);
 });
+
+const NO_TIME = 0;
+
+test("a kill at the wall deadline exhausts the budget by wall time", () => {
+  const budget = new ExecutionBudget({
+    created_at: Date.now(),
+    expired_at: Date.now() + 60000,
+    resource_budget: { turns: 2, wall_time_ms: 50000 },
+  });
+  assert.equal(budget.exhausted(), false);
+  budget.wallDeadlineReached();
+  assert.equal(budget.exhausted(), true);
+  assert.equal(budget.remainingMs(), NO_TIME);
+  assert.equal(budget.limit(), BudgetLimit.WallTime);
+});

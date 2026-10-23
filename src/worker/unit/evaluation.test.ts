@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
-import { test } from "node:test";
+import { test, type TestContext } from "node:test";
 import { existsSync } from "node:fs";
+import { join } from "node:path";
 import { temporary, hostEnvironment } from "../../kernel/test-support.ts";
 import { createIdentity } from "../../kernel/identity.ts";
 import {
@@ -24,8 +25,10 @@ import type { NativeAgent } from "./native-agent.ts";
 import type { WorkPrompt } from "../../agent/prompt-composer.ts";
 import { requestAndRelease, runEvaluation } from "./evaluation.ts";
 import { ActionResultKind } from "../contract.ts";
+import { AssessmentResult } from "../../mission/contract.ts";
 import { JUDGEMENT_MARKER, repairInstruction } from "./judgement.ts";
 import { SHIPPED_TEMPLATES } from "../../agent/prompt-templates.ts";
+import { VERIFICATION_INFRASTRUCTURE_FAILED } from "./verification.ts";
 
 const NO_RELEASES = 0;
 const SINGLE_RELEASE = 1;
@@ -528,6 +531,182 @@ test("an evaluation that its agent deadline cuts ends with no assessment and no 
   );
   assert.equal(assessments, NO_RELEASES);
   assert.deepEqual(releases, [
+    {
+      further_work: true,
+      stop: { reason: EndReason.AssessmentAbsent, code: null },
+    },
+  ]);
+});
+
+async function reviewOf(t: TestContext, command: string, wallTimeMs?: number) {
+  const repository = repositorySetup();
+  const setup = anthropicSetup({ repositories: [repository] });
+  if (wallTimeMs !== undefined) setup.resource_budget.wall_time_ms = wallTimeMs;
+  const claim = {
+    execution_id: setup.execution_id,
+    node_id: createIdentity("node"),
+    attempt: 1,
+    pinned_revision: 1,
+    node_branch: "kanthord/node_01ARZ3NDEKTSV4RRFFQ69G5FAA",
+    created_at: Date.now(),
+    expired_at: Date.now() + 60000,
+    trace_id: "trace",
+    root_span_id: "1".repeat(16),
+  };
+  const assetId = createIdentity("evidence_asset");
+  const address = { kind: "produced", sha256: "a".repeat(64) };
+  const complete = (data: unknown) => ({
+    type: "completed",
+    status: 200,
+    data,
+  });
+  const assessments: { result: string; rationale: string }[] = [];
+  const verifications: { results: { exit_code: number | null }[] }[] = [];
+  const releases: unknown[] = [];
+  const clients = {
+    mission: {
+      "execution.pinnedRevision.get": async () =>
+        complete({
+          content: {
+            name: "node",
+            requirement: "work",
+            criterion: "met",
+            verifications: [command],
+            bindings: [repository.binding_id],
+          },
+          tasks: [],
+        }),
+      "execution.evidence.list": async () =>
+        complete({
+          items: [
+            {
+              id: "placed",
+              assets: [{ id: assetId, kind: "produced", address }],
+            },
+          ],
+          next_cursor: null,
+        }),
+      "execution.evidence.asset.content.get": async () =>
+        complete({
+          asset_id: assetId,
+          address,
+          data: Buffer.from("report").toString("base64"),
+          encoding: "base64",
+          media_type: "text/markdown",
+        }),
+      "evidence.submit": async (input: {
+        body: { verification: (typeof verifications)[number] };
+      }) => {
+        verifications.push(input.body.verification);
+        return complete({ evidence: { id: "verification" } });
+      },
+      "assessment.submit": async (input: {
+        body: (typeof assessments)[number];
+      }) => {
+        assessments.push(input.body);
+        return complete({ outcome: { id: "outcome" } });
+      },
+    },
+    scheduler: {
+      executionRelease: async (input: { body: unknown }) => {
+        releases.push(input.body);
+        return complete({});
+      },
+    },
+  } as unknown as MethodClients;
+  const run = new ExecutionRun({
+    claim,
+    clients,
+    credentials: { release: async () => {} },
+    context: background,
+  });
+  t.after(() => run.dispose());
+  const budget = new ExecutionBudget({
+    ...claim,
+    resource_budget: setup.resource_budget,
+  });
+  let opens = 0;
+  const open = async () => {
+    opens++;
+    return {
+      budget,
+      instruct: async () => {},
+      lastText: () =>
+        'kanthord-judgement: {"result":"success","rationale":"met"}',
+    } as unknown as NativeAgent;
+  };
+  const end = await executionBoundary(run, () =>
+    runEvaluation(
+      {
+        setup,
+        claim,
+        workspaces: WorkspaceRoot.open(temporary(t)),
+        transport: {} as RepositoryTransport,
+        sshAccess: everyBindingSshAccess,
+        env: hostEnvironment(),
+      },
+      run,
+      budget,
+      open,
+    ),
+  );
+  return { end, assessments, verifications, releases, opens: () => opens };
+}
+
+const SIGNAL_KILL = "sh -c 'kill -9 $$'";
+const EXIT_KILL = "sh -c 'kill -9 $$'; exit $?";
+const PASSED = 0;
+const NO_OPENS = 0;
+const ONE_OPEN = 1;
+const SHORT_WALL_TIME_MS = 2000;
+
+test("a persistent kill in a review verification stops with the infrastructure code and no assessment", async (t) => {
+  for (const command of [SIGNAL_KILL, EXIT_KILL]) {
+    const review = await reviewOf(t, command);
+    assert.deepEqual(review.assessments, []);
+    assert.equal(review.opens(), NO_OPENS);
+    assert.equal(review.releases.length, SINGLE_RELEASE);
+    const [body] = review.releases as {
+      further_work: boolean;
+      stop: { reason: string; code: string; detail: string };
+    }[];
+    assert.equal(body?.further_work, true);
+    assert.equal(body?.stop.reason, EndReason.OperationFailed);
+    assert.equal(body?.stop.code, VERIFICATION_INFRASTRUCTURE_FAILED);
+    assert.ok(body?.stop.detail.includes(command));
+  }
+});
+
+test("a kill on the first review run and a pass on the rerun is a pass and not flaky", async (t) => {
+  const marker = join(temporary(t), "killed");
+  const review = await reviewOf(
+    t,
+    `test -f ${marker} || { touch ${marker}; kill -9 $$; }`,
+  );
+  assert.deepEqual(review.end, { kind: "closed", outcomeId: "outcome" });
+  assert.equal(review.opens(), ONE_OPEN);
+  assert.deepEqual(
+    review.verifications.map((verification) =>
+      verification.results.map((result) => result.exit_code),
+    ),
+    [[PASSED]],
+  );
+  assert.equal(review.assessments.length, SINGLE_RELEASE);
+  assert.equal(review.assessments[0]?.result, AssessmentResult.Success);
+  assert.doesNotMatch(review.assessments[0]?.rationale ?? "", /flaky/);
+});
+
+test("exit 127 in a review verification stays criterion-not-met", async (t) => {
+  const review = await reviewOf(t, "command-absent-x");
+  assert.equal(review.opens(), NO_OPENS);
+  assert.equal(review.assessments[0]?.result, AssessmentResult.CriterionNotMet);
+  assert.deepEqual(review.releases, []);
+});
+
+test("a wall deadline during a review verification ends with no assessment and no infrastructure stop", async (t) => {
+  const review = await reviewOf(t, "sleep 30", SHORT_WALL_TIME_MS);
+  assert.deepEqual(review.assessments, []);
+  assert.deepEqual(review.releases, [
     {
       further_work: true,
       stop: { reason: EndReason.AssessmentAbsent, code: null },

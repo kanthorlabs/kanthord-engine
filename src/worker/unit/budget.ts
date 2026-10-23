@@ -55,6 +55,9 @@ export class ExecutionBudget {
       this.remaining - (performance.now() - this.started),
     );
   }
+  wallDeadlineReached(): void {
+    this.deadlineReached = true;
+  }
   turnEnded(): void {
     assert.ok(Number.isSafeInteger(this.endedTurns));
     assert.ok(this.endedTurns >= BUDGET_FLOOR);

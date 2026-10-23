@@ -16,7 +16,7 @@ import {
   requestedChangesText,
   REQUESTED_CHANGES_MAX_BYTES,
 } from "./judgement.ts";
-import type { Verification } from "./verification.ts";
+import { VerificationClass, type Verification } from "./verification.ts";
 import { SHIPPED_TEMPLATES } from "../../agent/prompt-templates.ts";
 
 const TWO_GAP_RATIONALE =
@@ -279,6 +279,7 @@ test("a failed verification report names a flaky command and carries its output"
     },
     outputs: ["✖ order is created_at DESC"],
     flaky: [true],
+    outcome: VerificationClass.CodeFailure,
   };
   const report = failedVerificationReport(run, ["npm test"]);
   assert.match(report, /^Verification 1 `npm test` failed with exit code 1\./);
