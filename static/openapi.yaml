@@ -204,6 +204,8 @@ paths:
     $ref: ./openapi/project/agentConfiguration.list.yaml#/pathItem
   /api/project/{project_id}/binding/check:
     $ref: ./openapi/project/binding.check.yaml#/pathItem
+  /api/project/{project_id}/binding/{binding_id}/environment:
+    $ref: ./openapi/project/binding.environment.get.yaml#/pathItem
   /api/project/{project_id}/binding/{binding_id}:
     $ref: ./openapi/project/binding.get.yaml#/pathItem
   /api/project/{project_id}/binding/{binding_id}/instruction_files:

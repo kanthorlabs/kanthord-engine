@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { Command } from "commander";
 import { httpClient, resolveClient } from "../../gateway/client.ts";
 import { Diagnostic } from "../../kernel/errors.ts";
+import { parseEnvironmentText } from "../../kernel/devcontainer.ts";
 import { identitySchema } from "../../kernel/identity.ts";
 import {
   BINDING_ID_PREFIX,
@@ -22,6 +23,7 @@ import {
   handleReadResult,
   parsePositiveInt,
   readJsonFileAs,
+  readTextFile,
   requireToken,
   resolveKey,
   singleUse,
@@ -149,6 +151,16 @@ const BINDING_CHECK_INVALID_PROJECT_ID =
   "cli.project.binding.check.invalid_project_id";
 const BINDING_CHECK_TOKEN_REQUIRED = "cli.project.binding.check.token_required";
 const BINDING_CHECK_INDETERMINATE = "cli.project.binding.check.indeterminate";
+
+const ENVIRONMENT = "environment";
+const SHOW = "show";
+const SET = "set";
+const ENVIRONMENT_SET_FILE_INVALID = "cli.project.environment.set.file_invalid";
+const ENVIRONMENT_EXAMPLE = {
+  image: "mcr.microsoft.com/devcontainers/python:3.12",
+  features: { "ghcr.io/devcontainers/features/node:1": { version: "24" } },
+  postCreateCommand: "pip install -r requirements.txt",
+};
 
 const PROJECT_NAME_RULE = `a lowercase letter, then lowercase letters, digits or hyphens, at most ${PROJECT_NAME_MAX_LENGTH} characters`;
 
@@ -513,6 +525,114 @@ async function bindingCheck(
   );
 }
 
+function environmentCode(leaf: string, suffix: string): string {
+  return `cli.project.environment.${leaf}.${suffix}`;
+}
+
+async function environmentShow(
+  projectId: string,
+  bindingId: string,
+  command: Command,
+): Promise<void> {
+  validateProjectId(projectId, environmentCode(SHOW, "invalid_project_id"));
+  validateBindingId(bindingId, environmentCode(SHOW, "invalid_binding_id"));
+  const { endpoint, token } = resolveClient(command.optsWithGlobals());
+  requireToken(token, environmentCode(SHOW, "token_required"));
+  const result = await httpClient(projectOperations, endpoint, token)[
+    "binding.environment.get"
+  ]({
+    params: { project_id: projectId, binding_id: bindingId },
+    query: {},
+    body: null,
+  });
+  process.stdout.write(
+    `${JSON.stringify(handleReadResult(result, environmentCode(SHOW, "indeterminate")))}\n`,
+  );
+}
+
+function readEnvironmentFile(path: string) {
+  const parsed = parseEnvironmentText(readTextFile(path));
+  if (parsed.document === null)
+    throw new Diagnostic(ENVIRONMENT_SET_FILE_INVALID, parsed.error, {
+      fields: [["path", path]],
+    });
+  return parsed.document;
+}
+
+async function environmentSet(
+  projectId: string,
+  bindingId: string,
+  command: Command,
+): Promise<void> {
+  validateProjectId(projectId, environmentCode(SET, "invalid_project_id"));
+  validateBindingId(bindingId, environmentCode(SET, "invalid_binding_id"));
+  const options = command.optsWithGlobals();
+  const { endpoint, token } = resolveClient(options);
+  requireToken(token, environmentCode(SET, "token_required"));
+  const key = resolveKey(options);
+  const environment = readEnvironmentFile(options.file);
+  const result = await httpClient(projectOperations, endpoint, token)[
+    "binding.environment.set"
+  ](
+    {
+      params: { project_id: projectId, binding_id: bindingId },
+      query: {},
+      body: { environment },
+    },
+    { idempotencyKey: key },
+  );
+  const data = handleMutationResult(
+    result,
+    environmentCode(SET, "indeterminate"),
+    key,
+  );
+  process.stdout.write(
+    `${JSON.stringify({ ...data, idempotency_key: key })}\n`,
+  );
+}
+
+function addEnvironmentCommands(project: Command): void {
+  const environment = project
+    .command(ENVIRONMENT)
+    .description("Project environment commands");
+  environment.action(() => environment.help());
+  environment
+    .command(SHOW)
+    .description(
+      "Show the environment of a repository binding as JSON: the stored environment, or the devcontainer file at the base branch",
+    )
+    .argument("<project-id>", "Project ID")
+    .argument("<binding-id>", "Repository binding ID")
+    .action(
+      (projectId: string, bindingId: string, _options, command: Command) =>
+        environmentShow(projectId, bindingId, command),
+    );
+  addFileBodyHelp(
+    environment
+      .command(SET)
+      .description(
+        "Store the environment of a repository binding as a new binding revision as JSON",
+      )
+      .argument("<project-id>", "Project ID")
+      .argument("<binding-id>", "Repository binding ID")
+      .requiredOption(
+        "--file <path>",
+        "devcontainer.json file; comments and trailing commas are accepted",
+        singleUse("--file"),
+      )
+      .option("--idempotency-key <key>", "Mutation key", singleUse(KEY_OPTION)),
+    {
+      schema:
+        projectOperations["binding.environment.set"].input.shape.body.shape
+          .environment,
+      example: ENVIRONMENT_EXAMPLE,
+      note: "The file is a devcontainer.json document. KanthorD never writes it to the repository.",
+    },
+  ).action((projectId: string, bindingId: string, _options, command: Command) =>
+    environmentSet(projectId, bindingId, command),
+  );
+}
+
 export function addProjectCommand(program: Command): void {
   assert.equal(program.name(), PROGRAM_NAME);
   assert.ok(
@@ -586,6 +706,7 @@ export function addProjectCommand(program: Command): void {
     );
   addBindingCommands(project);
   addAgentCommands(project);
+  addEnvironmentCommands(project);
 }
 
 function addAgentCommands(project: Command): void {

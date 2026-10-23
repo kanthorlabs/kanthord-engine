@@ -22,6 +22,7 @@ import {
   type HolderScope,
 } from "../agent/contract.ts";
 import type { SshAccess } from "../repository/contract.ts";
+import { environmentSchema, type Environment } from "../kernel/devcontainer.ts";
 
 export const BINDING_CHECK_TIMEOUT_MS = 10000;
 export const BINDING_VERIFY_TIMEOUT_MS = 30000;
@@ -146,6 +147,15 @@ export function isNonblank(s: string): boolean {
   return s.trim().length > EMPTY_LENGTH;
 }
 
+export const EnvironmentSource = {
+  Stored: "stored",
+  Repository: "repository",
+  None: "none",
+} as const;
+export type EnvironmentSource =
+  (typeof EnvironmentSource)[keyof typeof EnvironmentSource];
+export const ENVIRONMENT_FILE_MAX_BYTES = 65536;
+
 export const InstructionFileState = {
   Present: "present",
   Absent: "absent",
@@ -207,6 +217,7 @@ export const repositoryConfigSchema = z.strictObject({
   credential: z.string().min(1).optional(),
   project_prompt: z.string().optional(),
   working_layer: workingLayerSchema,
+  environment: environmentSchema.optional(),
 });
 export const WorkerPlacement = {
   Server: "server",
@@ -486,6 +497,14 @@ export type RepositoryFiles = {
     deadlineMs: number,
     ssh: SshAccess,
   ): Promise<Array<{ path: string; state: string; text: string | null }>>;
+  cloneSnapshot(
+    address: string,
+    revision: string,
+    directory: string,
+    context: Context,
+    deadlineMs: number,
+    ssh: SshAccess,
+  ): Promise<string>;
 };
 export type RepositoryBindingIdsOf = (
   tx: Transaction,
@@ -582,6 +601,15 @@ export type RepositoryPolicy = {
   landing: Landing;
   project_prompt: string | null;
   working_layer: WorkingLayer;
+  environment: Environment | null;
+};
+export type SlotEnvironment = {
+  binding_id: string;
+  resource_identity: string;
+  source: typeof EnvironmentSource.Stored | typeof EnvironmentSource.Repository;
+  commit: string;
+  document: Environment;
+  files: Array<{ path: string; state: string; text: string | null }>;
 };
 
 const emptyFields = z.strictObject({});
@@ -646,6 +674,20 @@ const agentConfigItem = z.strictObject({
   issues: z.array(
     z.strictObject({ path: z.array(z.string()), code: z.string() }),
   ),
+});
+const bindingSetWriteAnswerSchema = z.strictObject({
+  project_id: z.string(),
+  binding_set_version: z.number().int().positive(),
+  bindings: z.record(z.string(), bindingRecord),
+  changes: z.array(
+    z.strictObject({ kind: z.enum(ChangeKind), binding_id: z.string() }),
+  ),
+});
+const environmentAnswerSchema = z.strictObject({
+  source: z.enum(EnvironmentSource),
+  commit: z.string().min(1).nullable(),
+  environment: environmentSchema.nullable(),
+  reason: z.string().min(1).nullable(),
 });
 const pageOf = <T extends z.ZodType>(item: T) =>
   z.strictObject({ items: z.array(item), next_cursor: z.string().nullable() });
@@ -794,14 +836,7 @@ export const projectOperations = {
       query: emptyFields,
       body: bindingSetWriteInputSchema,
     }),
-    output: z.strictObject({
-      project_id: z.string(),
-      binding_set_version: z.number().int().positive(),
-      bindings: z.record(z.string(), bindingRecord),
-      changes: z.array(
-        z.strictObject({ kind: z.enum(ChangeKind), binding_id: z.string() }),
-      ),
-    }),
+    output: bindingSetWriteAnswerSchema,
     description: "Replace the binding set at its expected version.",
   },
   "bindingRevision.list": {
@@ -865,6 +900,32 @@ export const projectOperations = {
     }),
     description:
       "Read the instruction files of one repository binding at its base branch.",
+  },
+  "binding.environment.get": {
+    ...readOperation,
+    id: "project.binding.environment.get",
+    method: HttpMethod.Get,
+    path: "/api/project/:project_id/binding/:binding_id/environment",
+    timeoutMs: BINDING_VERIFY_TIMEOUT_MS,
+    input: readInput(bindingParams, emptyFields),
+    output: environmentAnswerSchema,
+    description:
+      "Read the environment of one repository binding: the stored environment, or the devcontainer file at the base branch.",
+  },
+  "binding.environment.set": {
+    ...writeOperation,
+    id: "project.binding.environment.set",
+    method: HttpMethod.Put,
+    path: "/api/project/:project_id/binding/:binding_id/environment",
+    timeoutMs: BINDING_VERIFY_TIMEOUT_MS,
+    input: z.strictObject({
+      params: bindingParams,
+      query: emptyFields,
+      body: z.strictObject({ environment: environmentSchema }),
+    }),
+    output: bindingSetWriteAnswerSchema,
+    description:
+      "Store the environment of one repository binding as a new binding revision.",
   },
   "binding.check": {
     ...readOperation,

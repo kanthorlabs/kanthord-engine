@@ -77,7 +77,11 @@ export const platformImplementations = {
   [RepositoryPlatform.GitHub]: GitHubPlatform,
 } as const;
 
-export const repositoryFiles = { resolveBranchCommit, readFilesAtCommit };
+export const repositoryFiles = {
+  resolveBranchCommit,
+  readFilesAtCommit,
+  cloneSnapshot,
+};
 
 export type KnownHostsOf = (tx: Transaction, address: string) => string;
 export type PortOf = (address: string) => number;

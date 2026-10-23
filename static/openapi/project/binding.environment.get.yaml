@@ -1,0 +1,472 @@
+# Generated from the operation registry by kanthord gateway openapi.
+pathItem:
+  get:
+    operationId: project.binding.environment.get
+    tags:
+      - project
+    description: "Read the environment of one repository binding: the stored
+      environment, or the devcontainer file at the base branch."
+    x-access-policy: human
+    x-timeout-ms: 30000
+    x-mutation: false
+    x-kanthord-lifetime: unary
+    security:
+      - bearerAuth: []
+    parameters:
+      - name: project_id
+        in: path
+        required: true
+        schema:
+          $ref: "#/components/schemas/project.binding.environment.get.Input/properties/pa\
+            rams/properties/project_id"
+      - name: binding_id
+        in: path
+        required: true
+        schema:
+          $ref: "#/components/schemas/project.binding.environment.get.Input/properties/pa\
+            rams/properties/binding_id"
+    responses:
+      "200":
+        description: Completed result
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/project.binding.environment.get.Output"
+      "400":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "401":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "403":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "404":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "409":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "413":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "415":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "500":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "503":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "504":
+        $ref: ../shared/components.yaml#/components/responses/Error
+  put:
+    operationId: project.binding.environment.set
+    tags:
+      - project
+    description: Store the environment of one repository binding as a new binding revision.
+    x-access-policy: human
+    x-timeout-ms: 30000
+    x-mutation: true
+    x-kanthord-lifetime: unary
+    security:
+      - bearerAuth: []
+    parameters:
+      - name: project_id
+        in: path
+        required: true
+        schema:
+          $ref: "#/components/schemas/project.binding.environment.set.Input/properties/pa\
+            rams/properties/project_id"
+      - name: binding_id
+        in: path
+        required: true
+        schema:
+          $ref: "#/components/schemas/project.binding.environment.set.Input/properties/pa\
+            rams/properties/binding_id"
+      - $ref: ../shared/components.yaml#/components/parameters/IdempotencyKey
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/project.binding.environment.set.Input/properties/bo\
+              dy"
+    responses:
+      "200":
+        description: Completed result
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/project.binding.environment.set.Output"
+      "400":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "401":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "403":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "404":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "409":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "413":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "415":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "500":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "503":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "504":
+        $ref: ../shared/components.yaml#/components/responses/Error
+components:
+  schemas:
+    project.binding.environment.get.Input:
+      type: object
+      properties:
+        params:
+          type: object
+          properties:
+            project_id:
+              type: string
+              minLength: 1
+            binding_id:
+              type: string
+              minLength: 1
+          required:
+            - project_id
+            - binding_id
+          additionalProperties: false
+        query:
+          type: object
+          properties: {}
+          additionalProperties: false
+        body:
+          type: "null"
+      required:
+        - params
+        - query
+        - body
+      additionalProperties: false
+    project.binding.environment.get.Output:
+      type: object
+      properties:
+        source:
+          type: string
+          enum:
+            - stored
+            - repository
+            - none
+        commit:
+          anyOf:
+            - type: string
+              minLength: 1
+            - type: "null"
+        environment:
+          anyOf:
+            - type: object
+              properties:
+                image:
+                  type: string
+                  minLength: 1
+                build:
+                  type: object
+                  properties:
+                    dockerfile:
+                      type: string
+                      minLength: 1
+                    context:
+                      type: string
+                      minLength: 1
+                  additionalProperties: {}
+                features:
+                  type: object
+                  propertyNames:
+                    type: string
+                  additionalProperties: {}
+                containerEnv:
+                  type: object
+                  propertyNames:
+                    type: string
+                  additionalProperties:
+                    type: string
+                remoteEnv:
+                  type: object
+                  propertyNames:
+                    type: string
+                  additionalProperties:
+                    anyOf:
+                      - type: string
+                      - type: "null"
+                onCreateCommand:
+                  anyOf:
+                    - anyOf:
+                        - type: string
+                          minLength: 1
+                        - minItems: 1
+                          type: array
+                          items:
+                            type: string
+                    - type: object
+                      propertyNames:
+                        type: string
+                      additionalProperties:
+                        anyOf:
+                          - type: string
+                            minLength: 1
+                          - minItems: 1
+                            type: array
+                            items:
+                              type: string
+                updateContentCommand:
+                  anyOf:
+                    - anyOf:
+                        - type: string
+                          minLength: 1
+                        - minItems: 1
+                          type: array
+                          items:
+                            type: string
+                    - type: object
+                      propertyNames:
+                        type: string
+                      additionalProperties:
+                        anyOf:
+                          - type: string
+                            minLength: 1
+                          - minItems: 1
+                            type: array
+                            items:
+                              type: string
+                postCreateCommand:
+                  anyOf:
+                    - anyOf:
+                        - type: string
+                          minLength: 1
+                        - minItems: 1
+                          type: array
+                          items:
+                            type: string
+                    - type: object
+                      propertyNames:
+                        type: string
+                      additionalProperties:
+                        anyOf:
+                          - type: string
+                            minLength: 1
+                          - minItems: 1
+                            type: array
+                            items:
+                              type: string
+              additionalProperties: {}
+            - type: "null"
+        reason:
+          anyOf:
+            - type: string
+              minLength: 1
+            - type: "null"
+      required:
+        - source
+        - commit
+        - environment
+        - reason
+      additionalProperties: false
+    project.binding.environment.set.Input:
+      type: object
+      properties:
+        params:
+          type: object
+          properties:
+            project_id:
+              type: string
+              minLength: 1
+            binding_id:
+              type: string
+              minLength: 1
+          required:
+            - project_id
+            - binding_id
+          additionalProperties: false
+        query:
+          type: object
+          properties: {}
+          additionalProperties: false
+        body:
+          type: object
+          properties:
+            environment:
+              type: object
+              properties:
+                image:
+                  type: string
+                  minLength: 1
+                build:
+                  type: object
+                  properties:
+                    dockerfile:
+                      type: string
+                      minLength: 1
+                    context:
+                      type: string
+                      minLength: 1
+                  additionalProperties: {}
+                features:
+                  type: object
+                  propertyNames:
+                    type: string
+                  additionalProperties: {}
+                containerEnv:
+                  type: object
+                  propertyNames:
+                    type: string
+                  additionalProperties:
+                    type: string
+                remoteEnv:
+                  type: object
+                  propertyNames:
+                    type: string
+                  additionalProperties:
+                    anyOf:
+                      - type: string
+                      - type: "null"
+                onCreateCommand:
+                  anyOf:
+                    - anyOf:
+                        - type: string
+                          minLength: 1
+                        - minItems: 1
+                          type: array
+                          items:
+                            type: string
+                    - type: object
+                      propertyNames:
+                        type: string
+                      additionalProperties:
+                        anyOf:
+                          - type: string
+                            minLength: 1
+                          - minItems: 1
+                            type: array
+                            items:
+                              type: string
+                updateContentCommand:
+                  anyOf:
+                    - anyOf:
+                        - type: string
+                          minLength: 1
+                        - minItems: 1
+                          type: array
+                          items:
+                            type: string
+                    - type: object
+                      propertyNames:
+                        type: string
+                      additionalProperties:
+                        anyOf:
+                          - type: string
+                            minLength: 1
+                          - minItems: 1
+                            type: array
+                            items:
+                              type: string
+                postCreateCommand:
+                  anyOf:
+                    - anyOf:
+                        - type: string
+                          minLength: 1
+                        - minItems: 1
+                          type: array
+                          items:
+                            type: string
+                    - type: object
+                      propertyNames:
+                        type: string
+                      additionalProperties:
+                        anyOf:
+                          - type: string
+                            minLength: 1
+                          - minItems: 1
+                            type: array
+                            items:
+                              type: string
+              additionalProperties: {}
+          required:
+            - environment
+          additionalProperties: false
+      required:
+        - params
+        - query
+        - body
+      additionalProperties: false
+    project.binding.environment.set.Output:
+      type: object
+      properties:
+        project_id:
+          type: string
+        binding_set_version:
+          type: integer
+          exclusiveMinimum: 0
+          maximum: 9007199254740991
+        bindings:
+          type: object
+          propertyNames:
+            type: string
+          additionalProperties:
+            type: object
+            properties:
+              id:
+                type: string
+              project_id:
+                type: string
+              name:
+                type: string
+              kind:
+                type: string
+                enum:
+                  - repository
+                  - worker
+                  - storage
+              resource_identity:
+                type: string
+              revision:
+                type: integer
+                exclusiveMinimum: 0
+                maximum: 9007199254740991
+              config: {}
+              created_at:
+                type: integer
+                minimum: -9007199254740991
+                maximum: 9007199254740991
+              removed_at:
+                anyOf:
+                  - type: integer
+                    minimum: -9007199254740991
+                    maximum: 9007199254740991
+                  - type: "null"
+            required:
+              - id
+              - project_id
+              - name
+              - kind
+              - resource_identity
+              - revision
+              - config
+              - created_at
+              - removed_at
+            additionalProperties: false
+        changes:
+          type: array
+          items:
+            type: object
+            properties:
+              kind:
+                type: string
+                enum:
+                  - created
+                  - revised
+                  - removed
+                  - unchanged
+              binding_id:
+                type: string
+            required:
+              - kind
+              - binding_id
+            additionalProperties: false
+      required:
+        - project_id
+        - binding_set_version
+        - bindings
+        - changes
+      additionalProperties: false

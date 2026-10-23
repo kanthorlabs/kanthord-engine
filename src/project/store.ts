@@ -418,6 +418,30 @@ export function hasBindingTombstone(
   );
 }
 
+export function requireRepositoryBinding(
+  tx: Transaction,
+  params: { project_id: string; binding_id: string },
+) {
+  requireProject(tx, params.project_id);
+  const binding = readBindingRevision(tx, params.binding_id);
+  if (
+    !binding ||
+    binding.project_id !== params.project_id ||
+    hasBindingTombstone(tx, binding) ||
+    kindOf(binding.resource_identity) !== BindingKind.Repository
+  )
+    throw new OperationError(
+      HttpStatus.NotFound,
+      ProjectErrorCode.BindingNotFound,
+      "Binding not found.",
+    );
+  return {
+    id: binding.id,
+    name: binding.name,
+    config: repositoryConfigSchema.parse(binding.config),
+  };
+}
+
 function classify(
   name: string,
   entry: { kind: string; config: unknown },
