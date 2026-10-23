@@ -162,6 +162,7 @@ export async function runNativeExecution(
         ...workspace,
         priorRationale: prior.rationale,
         rework: prior.rework,
+        unchangedTurns: 0,
       };
       return runStepsImplement(state);
     });

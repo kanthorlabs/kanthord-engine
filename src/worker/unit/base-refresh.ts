@@ -1,16 +1,16 @@
 import { relative } from "node:path";
+import type { Context } from "../../kernel/context.ts";
 import { PromptTemplate, type PromptTemplates } from "../../agent/contract.ts";
 import { renderWorkPrompt } from "../../agent/prompt-composer.ts";
 import { renderTemplate } from "../../agent/prompt-templates.ts";
-import { EndReason } from "./execution-run.ts";
 import {
   abortMerge,
-  concludeMerge,
-  conflictMarkerFiles,
+  commitOf,
   headCommit,
   isAncestor,
   mergeRef,
   resetTo,
+  taskCommitMessage,
 } from "./local-git.ts";
 import {
   repositoryOf,
@@ -19,10 +19,10 @@ import {
 } from "./steps-implement.ts";
 import { sshAccessOf, type WorkspaceCheckout } from "./workspace.ts";
 import { GitStep, withinGit } from "./method-telemetry.ts";
+import { gatedAgent } from "./turn-gate.ts";
 
 const NO_FILES = 0;
 const NO_MERGES = 0;
-export const MERGE_MARKERS_LEFT = "worker.merge.markers_left";
 
 export const RefreshResult = {
   Current: "current",
@@ -76,78 +76,47 @@ async function mergeAtClaim(
   state: StepsState,
   checkout: WorkspaceCheckout,
 ): Promise<RefreshResult> {
-  const budget = state.agent.budget;
-  const context = state.run.operationContext;
+  const context = state.agent.budget.cleanupContext(state.run.operationContext);
+  try {
+    return await mergeUnder(state, checkout, context);
+  } finally {
+    context.cancel();
+  }
+}
+
+async function mergeUnder(
+  state: StepsState,
+  checkout: WorkspaceCheckout,
+  context: Context,
+): Promise<RefreshResult> {
+  const env = state.input.env;
+  const directory = checkout.directory;
+  const remaining = () => state.input.claim.expired_at - Date.now();
   const base = baseBranchOf(state, checkout);
   const ref = `origin/${base}`;
-  if (
-    await isAncestor(
-      state.input.env,
-      checkout.directory,
-      ref,
-      context,
-      budget.remainingMs(),
-    )
-  )
+  if (await isAncestor(env, directory, ref, context, remaining()))
     return RefreshResult.Current;
-  const conflicts = await mergeRef(
-    state.input.env,
-    checkout.directory,
-    ref,
-    context,
-    budget.remainingMs(),
-  );
+  const commit = await commitOf(env, directory, ref, context, remaining());
+  const conflicts = await mergeRef(env, directory, ref, context, remaining());
   if (conflicts.length > NO_FILES) {
-    await state.agent.instruct(
+    await gatedAgent(
+      state,
+      taskCommitMessage(state.input.claim.node_id, state.input.claim.attempt),
+      { directory, commit, files: conflicts },
+    ).instruct(
       nodeWork(state),
       conflictInstruction(
         state.input.setup.templates,
         {
           binding: checkout.name,
-          directory: relative(state.root, checkout.directory) || ".",
+          directory: relative(state.root, directory) || ".",
           base_branch: base,
         },
         conflicts,
       ),
     );
-    if (budget.exhausted()) {
-      await abortMerge(
-        state.input.env,
-        checkout.directory,
-        context,
-        budget.remainingMs(),
-      );
-      return RefreshResult.BudgetEnd;
-    }
-    const left = await conflictMarkerFiles(
-      state.input.env,
-      checkout.directory,
-      conflicts,
-      context,
-      budget.remainingMs(),
-    );
-    if (left.length > NO_FILES) {
-      await abortMerge(
-        state.input.env,
-        checkout.directory,
-        context,
-        budget.remainingMs(),
-      );
-      state.run.stop(EndReason.OperationFailed, MERGE_MARKERS_LEFT);
-    }
-    await concludeMerge(
-      state.input.env,
-      checkout.directory,
-      context,
-      budget.remainingMs(),
-    );
-  }
-  checkout.head = await headCommit(
-    state.input.env,
-    checkout.directory,
-    context,
-    budget.remainingMs(),
-  );
+    if (state.agent.budget.exhausted()) return RefreshResult.BudgetEnd;
+  } else checkout.head = await headCommit(env, directory, context, remaining());
   state.run.log("base merged", {
     binding: checkout.name,
     base_branch: base,

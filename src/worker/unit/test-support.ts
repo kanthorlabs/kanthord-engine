@@ -305,6 +305,7 @@ export async function implementFixture(
     ...workspace,
     priorRationale: null as string | null,
     rework: false,
+    unchangedTurns: 0,
     provider,
     bare: bares[0]!,
     bares,

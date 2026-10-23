@@ -178,8 +178,12 @@ export class ExecutionRun {
     }
   }
 
-  stop(reason: EndReason, code: string | null = null): never {
-    throw this.halt(reason, code);
+  stop(
+    reason: EndReason,
+    code: string | null = null,
+    detail: string | null = null,
+  ): never {
+    throw this.halt(reason, code, detail);
   }
 
   async reasonOf(error: unknown): Promise<string | null> {
