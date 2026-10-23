@@ -1,9 +1,6 @@
-import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import {
   cpSync,
-  mkdirSync,
-  mkdtempSync,
   readdirSync,
   realpathSync,
   rmSync,
@@ -11,12 +8,12 @@ import {
   writeFileSync,
 } from "node:fs";
 import { createRequire } from "node:module";
-import { dirname, join, sep } from "node:path";
+import { dirname, join, resolve as resolvePath, sep } from "node:path";
 import { isSea } from "node:sea";
 import { z } from "zod";
 import { background, type Context } from "../../kernel/context.ts";
 import {
-  DEVCONTAINER_FILE,
+  type Environment,
   buildDocument,
   devcontainerPath,
   isLocalFeature,
@@ -27,9 +24,30 @@ import {
 import { Diagnostic } from "../../kernel/errors.ts";
 import { ensureDirectory } from "../../kernel/files.ts";
 import { digest } from "../../kernel/json.ts";
-import { killProcessGroup } from "../../kernel/process-group.ts";
 import type { SlotEnvironment } from "../../project/contract.ts";
-import type { ContainerRuntime, PoolSlot } from "../../worker/contract.ts";
+import {
+  BASE_SUFFIX,
+  ENVIRONMENT_DIRECTORY,
+  ENVIRONMENT_IMAGE_PREFIX,
+  ImageBuildOutcome,
+  PROVED_SUFFIX,
+  UNCHECKED_SUFFIX,
+  environmentTagOf,
+  type EnvironmentFailureClass,
+  type EnvironmentRuntime,
+  type ImageBuildInput,
+  type ImageBuildResult,
+  type CommandResult,
+  type ProofInput,
+} from "../../project/environment-state.ts";
+import { ContainerRuntime, type PoolSlot } from "../../worker/contract.ts";
+import {
+  OUTPUT_TAIL_BYTES,
+  buildEnvironment,
+  endGroup,
+  proveInImage,
+  runCommand,
+} from "./environment-proof.ts";
 import {
   CONTAINER_UID,
   OWNER_LABEL,
@@ -38,12 +56,8 @@ import {
   type RuntimeHost,
 } from "./container-runtime.ts";
 
-export const ENVIRONMENT_IMAGE_PREFIX = "localhost/kanthord-env";
 export const ENVIRONMENT_BUILD_TIMEOUT_MS = 1800000;
-export const BASE_TAG_SUFFIX = "-base";
-export const STAGING_TAG_SUFFIX = "-unchecked";
 export const FAILURE_HOLD_MS = 900000;
-export const IMAGE_NAME_MAX_LENGTH = 255;
 export const EnvironmentImageFailure = {
   BuildFailed: "build_failed",
   ImageInvalid: "image_invalid",
@@ -53,30 +67,21 @@ export type EnvironmentImageFailure =
 export const ENVIRONMENT_IMAGE_FAILED = "worker.pool.environment_image_failed";
 const IMAGE_CHECK_TIMEOUT_MS = 120000;
 export const IMAGE_COMMAND_TIMEOUT_MS = 60000;
-const OUTPUT_TAIL_BYTES = 4096;
-const BUILD_DIRECTORY = "environments";
-const BUILD_DIRECTORY_PREFIX = "build-";
+const RUN_DIRECTORY_PREFIX = "run-";
+const GENERATED_RUN_PREFIX = "slot-";
+const GENERATED_RUN_BYTES = 8;
+const BUILD_DOCUMENT = "devcontainer.json";
+const IMAGE_LIST_FORMAT = "{{.Repository}}:{{.Tag}}";
+const UNTAGGED = "<none>";
+const LINE_BREAK = /\r?\n/;
+const NO_SIGNAL = new AbortController().signal;
+const RUNTIME_ORDER = [ContainerRuntime.Podman, ContainerRuntime.Docker];
 const CHECK_NAME_PREFIX = "kanthord-env-check-";
 const CHECK_NAME_BYTES = 8;
-const NAME_HASH_LENGTH = 16;
-const NAME_TAIL = /[-/]+$/;
-const TAG_SEPARATOR = ":";
-const ABSENT_PROCESS = "ESRCH";
 const LAYER_DIRECTORY = "layer";
 const WORKSPACE_DIRECTORY = "workspace";
-const CONFIG_DIRECTORY = "config";
 const CURRENT_DIRECTORY = ".";
 const CREATE_ONLY = "wx";
-const XDG_PREFIX = "XDG_";
-const BUILD_VARIABLES = new Set([
-  "PATH",
-  "HOME",
-  "TMPDIR",
-  "CONTAINER_HOST",
-  "CONTAINER_CONNECTION",
-  "CONTAINER_SSHKEY",
-  "DOCKER_HOST",
-]);
 const PATH_OUTSIDE = "the path leaves the checkout";
 const PATH_ABSENT = "the path is absent";
 const FEATURE_NOT_DIRECTORY = "the feature is not a directory";
@@ -91,12 +96,6 @@ const TINI_STATIC_PATH = "/usr/bin/tini-static";
 const SHELL = "/bin/sh";
 const ENVIRONMENT_ASSIGNMENT = "=";
 const NOT_FOUND = -1;
-const FAILED_CODE = 1;
-const SINGLE_CHUNK = 1;
-const COMPONENT_INVALID = /[^a-z0-9]+/g;
-const COMPONENT_EDGE = /^-+|-+$/g;
-const IDENTITY_SEPARATORS = /[:/]+/;
-const EMPTY_COMPONENT = "x";
 const VARIABLE_REFERENCE =
   /\$\{(containerEnv|localEnv):([^}:]+)(?::([^}]*))?\}/g;
 const CONTAINER_ENV_SCOPE = "containerEnv";
@@ -169,11 +168,6 @@ interface HeldFailure {
   readonly bindingId: string;
 }
 
-interface CommandOutput {
-  code: number;
-  tail: string;
-}
-
 export interface LayerInput {
   readonly base: string;
   readonly kanthordImage: string;
@@ -182,28 +176,15 @@ export interface LayerInput {
   readonly owner: string;
 }
 
-function component(text: string): string {
-  return (
-    text
-      .toLowerCase()
-      .replace(COMPONENT_INVALID, "-")
-      .replace(COMPONENT_EDGE, "") || EMPTY_COMPONENT
-  );
-}
+class BuildFailure extends Error {
+  readonly failureClass: EnvironmentImageFailure;
+  readonly tail: string;
 
-export function environmentTag(resourceIdentity: string, sum: string): string {
-  const path = resourceIdentity
-    .split(IDENTITY_SEPARATORS)
-    .map(component)
-    .join("/");
-  const name = `${ENVIRONMENT_IMAGE_PREFIX}/${path}`;
-  if (name.length <= IMAGE_NAME_MAX_LENGTH)
-    return `${name}${TAG_SEPARATOR}${sum}`;
-  const hash = digest(resourceIdentity).slice(0, NAME_HASH_LENGTH);
-  const kept = name
-    .slice(0, IMAGE_NAME_MAX_LENGTH - NAME_HASH_LENGTH - 1)
-    .replace(NAME_TAIL, "");
-  return `${kept}-${hash}${TAG_SEPARATOR}${sum}`;
+  constructor(failureClass: EnvironmentImageFailure, tail: string) {
+    super(tail);
+    this.failureClass = failureClass;
+    this.tail = tail;
+  }
 }
 
 export function environmentDigest(
@@ -231,10 +212,9 @@ export function environmentDigest(
 
 export function devcontainerCliPath(): string {
   if (isSea())
-    throw new Diagnostic(
-      ENVIRONMENT_IMAGE_FAILED,
+    throw new BuildFailure(
+      EnvironmentImageFailure.BuildFailed,
       "The environment build needs the npm install of kanthord.",
-      { fields: [["class", EnvironmentImageFailure.BuildFailed]] },
     );
   return join(
     dirname(createRequire(import.meta.url).resolve(DEVCONTAINER_CLI)),
@@ -266,38 +246,23 @@ export function devcontainerBuildArguments(input: {
   ];
 }
 
-export function buildEnvironment(
-  environment: NodeJS.ProcessEnv,
-): NodeJS.ProcessEnv {
-  return Object.fromEntries(
-    Object.entries(environment).filter(
-      ([name, value]) =>
-        value !== undefined &&
-        (BUILD_VARIABLES.has(name) || name.startsWith(XDG_PREFIX)),
-    ),
-  );
-}
-
 function containedPath(
   checkout: string,
   relative: string,
   key: string,
-  tag: string,
 ): string {
   let path: string;
   try {
     path = realpathSync(join(checkout, relative));
   } catch {
-    throw imageFailure(
+    throw new BuildFailure(
       EnvironmentImageFailure.BuildFailed,
-      tag,
       `${key}: ${PATH_ABSENT}`,
     );
   }
   if (path !== checkout && !path.startsWith(`${checkout}${sep}`))
-    throw imageFailure(
+    throw new BuildFailure(
       EnvironmentImageFailure.BuildFailed,
-      tag,
       `${key}: ${PATH_OUTSIDE}`,
     );
   return path;
@@ -306,37 +271,37 @@ function containedPath(
 function copyFeature(
   checkout: string,
   feature: string,
-  root: string,
-  tag: string,
+  directory: string,
 ): void {
   const key = `features.${feature}`;
-  const source = containedPath(checkout, devcontainerPath(feature), key, tag);
-  if (!statSync(source).isDirectory())
-    throw imageFailure(
+  const source = containedPath(checkout, devcontainerPath(feature), key);
+  const target = resolvePath(directory, feature);
+  if (!target.startsWith(`${resolvePath(directory)}${sep}`))
+    throw new BuildFailure(
       EnvironmentImageFailure.BuildFailed,
-      tag,
+      `${key}: ${PATH_OUTSIDE}`,
+    );
+  if (!statSync(source).isDirectory())
+    throw new BuildFailure(
+      EnvironmentImageFailure.BuildFailed,
       `${key}: ${FEATURE_NOT_DIRECTORY}`,
     );
   const entries = readdirSync(source, { recursive: true, withFileTypes: true });
   if (entries.some((entry) => entry.isSymbolicLink()))
-    throw imageFailure(
+    throw new BuildFailure(
       EnvironmentImageFailure.BuildFailed,
-      tag,
       `${key}: ${FEATURE_SYMLINK}`,
     );
-  cpSync(source, join(root, devcontainerPath(feature)), { recursive: true });
+  cpSync(source, target, { recursive: true });
 }
 
 export function serverConfig(
-  environment: SlotEnvironment,
+  environment: Environment,
   directory: string,
-  tag: string,
-): { root: string; config: string } {
+): string {
   const checkout = realpathSync(join(directory, WORKSPACE_DIRECTORY));
-  const root = join(directory, CONFIG_DIRECTORY);
-  const config = join(root, DEVCONTAINER_FILE);
-  mkdirSync(dirname(config), { recursive: true });
-  const document = buildDocument(environment.document);
+  const config = join(directory, BUILD_DOCUMENT);
+  const document = buildDocument(environment);
   const build = document.build;
   if (build?.dockerfile !== undefined)
     document.build = {
@@ -345,19 +310,17 @@ export function serverConfig(
         checkout,
         devcontainerPath(build.dockerfile),
         "build.dockerfile",
-        tag,
       ),
       context: containedPath(
         checkout,
         devcontainerPath(build.context ?? CURRENT_DIRECTORY),
         "build.context",
-        tag,
       ),
     };
   for (const feature of Object.keys(document.features ?? {}))
-    if (isLocalFeature(feature)) copyFeature(checkout, feature, root, tag);
+    if (isLocalFeature(feature)) copyFeature(checkout, feature, directory);
   writeFileSync(config, JSON.stringify(document), { flag: CREATE_ONLY });
-  return { root, config };
+  return config;
 }
 
 function substituted(value: string, current: ReadonlyMap<string, string>) {
@@ -428,65 +391,8 @@ export function layerContainerfile(input: LayerInput): string {
   ].join("\n");
 }
 
-function tailOf(chunks: Buffer[]): string {
-  const text = Buffer.concat(chunks).toString("utf8");
-  return text.slice(-OUTPUT_TAIL_BYTES);
-}
-
-function endGroup(leader: number): void {
-  try {
-    killProcessGroup(leader);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== ABSENT_PROCESS) throw error;
-  }
-}
-
-function runCommand(
-  command: string,
-  args: readonly string[],
-  environment: NodeJS.ProcessEnv,
-  timeoutMs: number,
-  running: Set<number>,
-): Promise<CommandOutput> {
-  return new Promise((resolve) => {
-    const chunks: Buffer[] = [];
-    let size = 0;
-    const keep = (chunk: Buffer) => {
-      chunks.push(chunk);
-      size += chunk.length;
-      while (size > OUTPUT_TAIL_BYTES && chunks.length > SINGLE_CHUNK)
-        size -= chunks.shift()!.length;
-    };
-    const child = spawn(command, args, {
-      env: environment,
-      stdio: ["ignore", "pipe", "pipe"],
-      detached: true,
-    });
-    const leader = child.pid;
-    if (leader !== undefined) running.add(leader);
-    const timer = setTimeout(() => {
-      keep(
-        Buffer.from(`\nThe command passed its time limit of ${timeoutMs} ms.`),
-      );
-      if (leader !== undefined) endGroup(leader);
-    }, timeoutMs);
-    child.stdout.on("data", keep);
-    child.stderr.on("data", keep);
-    child.once("error", (error) => {
-      clearTimeout(timer);
-      keep(Buffer.from(error.message));
-      resolve({ code: FAILED_CODE, tail: tailOf(chunks) });
-    });
-    child.once("close", (code) => {
-      clearTimeout(timer);
-      if (leader !== undefined) running.delete(leader);
-      resolve({ code: code ?? FAILED_CODE, tail: tailOf(chunks) });
-    });
-  });
-}
-
 function imageFailure(
-  failure: EnvironmentImageFailure,
+  failure: EnvironmentFailureClass,
   tag: string,
   detail: string,
 ): Diagnostic {
@@ -503,27 +409,70 @@ function imageFailure(
   );
 }
 
-export class EnvironmentImages {
+export class EnvironmentImages implements Omit<
+  EnvironmentRuntime,
+  "proveOnHost"
+> {
   private readonly options: EnvironmentImageOptions;
   private readonly building = new Map<string, Promise<string>>();
   private readonly failures = new Map<string, HeldFailure>();
   private readonly running = new Set<number>();
+  private resolved: ContainerRuntime | null = null;
 
   constructor(options: EnvironmentImageOptions) {
     this.options = options;
-    const root = join(options.stateDirectory, BUILD_DIRECTORY);
-    ensureDirectory(root);
-    for (const entry of readdirSync(root))
-      if (entry.startsWith(BUILD_DIRECTORY_PREFIX))
-        rmSync(join(root, entry), { recursive: true, force: true });
+    this.removeRuns();
+  }
+
+  get runtimeName(): string {
+    return this.runtime();
   }
 
   stop(): void {
     for (const leader of this.running) endGroup(leader);
   }
 
+  removeStaleRuns(): Promise<void> {
+    this.removeRuns();
+    return Promise.resolve();
+  }
+
+  private runtime(): ContainerRuntime {
+    this.resolved ??=
+      RUNTIME_ORDER.find((candidate) =>
+        this.options.host.resolves(candidate),
+      ) ?? null;
+    if (this.resolved === null)
+      throw new Diagnostic(
+        ENVIRONMENT_IMAGE_FAILED,
+        "No container runtime is available.",
+        { fields: [["class", EnvironmentImageFailure.BuildFailed]] },
+      );
+    return this.resolved;
+  }
+
+  private environmentRoot(): string {
+    return join(this.options.stateDirectory, ENVIRONMENT_DIRECTORY);
+  }
+
+  private removeRuns(): void {
+    const root = this.environmentRoot();
+    ensureDirectory(root);
+    for (const entry of readdirSync(root))
+      if (entry.startsWith(RUN_DIRECTORY_PREFIX))
+        rmSync(join(root, entry), { recursive: true, force: true });
+  }
+
   private now(): number {
     return (this.options.now ?? Date.now)();
+  }
+
+  private answer(args: readonly string[]) {
+    return this.options.host.run(
+      this.runtime(),
+      args,
+      IMAGE_COMMAND_TIMEOUT_MS,
+    );
   }
 
   private heldFailure(tag: string, bindingId: string): Diagnostic | null {
@@ -536,16 +485,17 @@ export class EnvironmentImages {
   }
 
   async imageFor(runtime: ContainerRuntime, slot: PoolSlot): Promise<string> {
+    this.resolved ??= runtime;
     const environment = await this.options.slotEnvironment(
       slot.project_id,
       background,
     );
     if (environment === null) return this.options.fallbackImage;
-    const tag = environmentTag(
+    const tag = environmentTagOf(
       environment.resource_identity,
       environmentDigest(
         environment,
-        await this.kanthordImageId(runtime),
+        await this.kanthordImageId(),
         this.options.version,
       ),
     );
@@ -553,7 +503,7 @@ export class EnvironmentImages {
     if (failure) throw failure;
     let pending = this.building.get(tag);
     if (!pending) {
-      pending = this.ensure(runtime, environment, tag).finally(() => {
+      pending = this.ensure(environment, tag).finally(() => {
         this.building.delete(tag);
       });
       this.building.set(tag, pending);
@@ -562,86 +512,202 @@ export class EnvironmentImages {
   }
 
   private async ensure(
-    runtime: ContainerRuntime,
     environment: SlotEnvironment,
     tag: string,
   ): Promise<string> {
-    const exists = await this.options.host.run(
-      runtime,
-      ["image", "exists", tag],
-      IMAGE_COMMAND_TIMEOUT_MS,
+    if (await this.imageExists(tag)) return tag;
+    const result = await this.build(
+      {
+        run_id: `${GENERATED_RUN_PREFIX}${randomBytes(GENERATED_RUN_BYTES).toString("hex")}`,
+        binding_id: environment.binding_id,
+        resource_identity: environment.resource_identity,
+        commit: environment.commit,
+        tag,
+        document: environment.document,
+      },
+      NO_SIGNAL,
     );
-    if (exists.code === SUCCESS_CODE) return tag;
-    return this.build(runtime, environment, tag);
+    if (result.outcome === ImageBuildOutcome.Built) return tag;
+    const error = imageFailure(result.class, tag, result.tail);
+    this.failures.set(tag, {
+      error,
+      at: this.now(),
+      bindingId: environment.binding_id,
+    });
+    throw error;
   }
 
-  private async kanthordImageId(runtime: ContainerRuntime): Promise<string> {
-    const inspected = await this.options.host.run(
-      runtime,
-      ["image", "inspect", "--format", "{{.Id}}", this.options.kanthordImage],
-      IMAGE_COMMAND_TIMEOUT_MS,
+  private async kanthordImageId(): Promise<string> {
+    return (
+      (await this.imageId(this.options.kanthordImage, NO_SIGNAL)) ??
+      this.options.kanthordImage
     );
+  }
+
+  async imageId(
+    reference: string,
+    signal: AbortSignal,
+  ): Promise<string | null> {
+    signal.throwIfAborted();
+    const inspected = await this.answer([
+      "image",
+      "inspect",
+      "--format",
+      "{{.Id}}",
+      reference,
+    ]);
     const id = inspected.stdout.trim();
-    return inspected.code === SUCCESS_CODE && id
-      ? id
-      : this.options.kanthordImage;
+    return inspected.code === SUCCESS_CODE && id ? id : null;
   }
 
-  private async build(
-    runtime: ContainerRuntime,
-    environment: SlotEnvironment,
-    tag: string,
-  ): Promise<string> {
-    const root = join(this.options.stateDirectory, BUILD_DIRECTORY);
-    ensureDirectory(root);
-    const directory = mkdtempSync(join(root, BUILD_DIRECTORY_PREFIX));
+  async pullImage(reference: string, signal: AbortSignal): Promise<void> {
+    const pulled = await runCommand(
+      this.runtime(),
+      ["pull", reference],
+      buildEnvironment(this.options.host.environment),
+      this.buildTimeoutMs(),
+      this.running,
+      signal,
+    );
+    if (pulled.code !== SUCCESS_CODE)
+      throw imageFailure(
+        EnvironmentImageFailure.BuildFailed,
+        reference,
+        pulled.tail,
+      );
+  }
+
+  async imageExists(tag: string): Promise<boolean> {
+    const exists = await this.answer(["image", "exists", tag]);
+    return exists.code === SUCCESS_CODE;
+  }
+
+  async tagProved(tag: string): Promise<void> {
+    const proved = `${tag}${PROVED_SUFFIX}`;
+    const tagged = await this.answer(["tag", tag, proved]);
+    if (tagged.code !== SUCCESS_CODE)
+      throw imageFailure(
+        EnvironmentImageFailure.BuildFailed,
+        proved,
+        tagged.stderr.slice(-OUTPUT_TAIL_BYTES),
+      );
+  }
+
+  async removeTags(tags: readonly string[]): Promise<void> {
+    for (const tag of tags) await this.answer(["image", "rm", tag]);
+  }
+
+  async collect(
+    identityPath: string,
+    keepDigest: string | null,
+  ): Promise<void> {
+    const name = `${ENVIRONMENT_IMAGE_PREFIX}/${identityPath}`;
+    const listed = await this.answer([
+      "image",
+      "ls",
+      "--filter",
+      `label=${OWNER_LABEL}=${this.options.owner}`,
+      "--filter",
+      `reference=${name}`,
+      "--format",
+      IMAGE_LIST_FORMAT,
+    ]);
+    if (listed.code !== SUCCESS_CODE)
+      throw imageFailure(
+        EnvironmentImageFailure.BuildFailed,
+        name,
+        listed.stderr.slice(-OUTPUT_TAIL_BYTES),
+      );
+    const kept =
+      keepDigest === null
+        ? []
+        : [
+            keepDigest,
+            `${keepDigest}${BASE_SUFFIX}`,
+            `${keepDigest}${PROVED_SUFFIX}`,
+          ];
+    const prefix = `${name}:`;
+    const stale = listed.stdout
+      .split(LINE_BREAK)
+      .map((line) => line.trim())
+      .filter(
+        (line) =>
+          line.startsWith(prefix) &&
+          !line.endsWith(`:${UNTAGGED}`) &&
+          !kept.includes(line.slice(prefix.length)),
+      );
+    await this.removeTags(stale);
+  }
+
+  async build(
+    input: ImageBuildInput,
+    signal: AbortSignal,
+  ): Promise<ImageBuildResult> {
+    const directory = join(
+      this.environmentRoot(),
+      `${RUN_DIRECTORY_PREFIX}${input.run_id}`,
+    );
     try {
-      const base = `${tag}${BASE_TAG_SUFFIX}`;
-      const staging = `${tag}${STAGING_TAG_SUFFIX}`;
-      await this.buildBase(runtime, environment, directory, tag, base);
-      await this.buildLayer(runtime, directory, tag, base, staging);
-      await this.check(runtime, tag, staging);
-      await this.promote(runtime, tag, staging);
-      return tag;
+      const base = `${input.tag}${BASE_SUFFIX}`;
+      const staging = `${input.tag}${UNCHECKED_SUFFIX}`;
+      await this.buildBase(input, directory, base, signal);
+      await this.buildLayer(directory, base, staging, signal);
+      await this.check(staging, signal);
+      await this.promote(input.tag, staging);
+      return { outcome: ImageBuildOutcome.Built };
     } catch (error) {
-      if (
-        error instanceof Diagnostic &&
-        error.code === ENVIRONMENT_IMAGE_FAILED
-      )
-        this.failures.set(tag, {
-          error,
-          at: this.now(),
-          bindingId: environment.binding_id,
-        });
-      throw error;
+      if (!(error instanceof BuildFailure)) throw error;
+      return {
+        outcome: ImageBuildOutcome.Failed,
+        class: error.failureClass,
+        tail: error.tail,
+      };
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }
   }
 
+  prove(
+    input: ProofInput & { tag: string },
+    signal: AbortSignal,
+  ): Promise<CommandResult[]> {
+    return proveInImage(
+      {
+        host: this.options.host,
+        runtime: this.runtime(),
+        owner: this.options.owner,
+        stateDirectory: this.options.stateDirectory,
+        exportRepository: this.options.exportRepository,
+        running: this.running,
+      },
+      input,
+      signal,
+    );
+  }
+
   private async buildBase(
-    runtime: ContainerRuntime,
-    environment: SlotEnvironment,
+    input: ImageBuildInput,
     directory: string,
-    tag: string,
     base: string,
+    signal: AbortSignal,
   ): Promise<void> {
+    signal.throwIfAborted();
     const workspace = join(directory, WORKSPACE_DIRECTORY);
     ensureDirectory(workspace);
     await this.options.exportRepository(
-      environment.binding_id,
-      environment.commit,
+      input.binding_id,
+      input.commit,
       workspace,
       background,
     );
-    const { root, config } = serverConfig(environment, directory, tag);
+    const config = serverConfig(input.document, directory);
     const cli = (this.options.devcontainerCli ?? devcontainerCliPath)();
     const built = await runCommand(
       process.execPath,
       devcontainerBuildArguments({
         cli,
-        runtime,
-        workspace: root,
+        runtime: this.runtime(),
+        workspace: directory,
         config,
         image: base,
         owner: this.options.owner,
@@ -649,9 +715,10 @@ export class EnvironmentImages {
       buildEnvironment(this.options.host.environment),
       this.buildTimeoutMs(),
       this.running,
+      signal,
     );
     if (built.code !== SUCCESS_CODE)
-      throw imageFailure(EnvironmentImageFailure.BuildFailed, tag, built.tail);
+      throw new BuildFailure(EnvironmentImageFailure.BuildFailed, built.tail);
   }
 
   private buildTimeoutMs(): number {
@@ -659,30 +726,23 @@ export class EnvironmentImages {
   }
 
   private async buildLayer(
-    runtime: ContainerRuntime,
     directory: string,
-    tag: string,
     base: string,
     staging: string,
+    signal: AbortSignal,
   ): Promise<void> {
-    const inspected = await this.options.host.run(
-      runtime,
-      ["image", "inspect", base],
-      IMAGE_COMMAND_TIMEOUT_MS,
-    );
+    const inspected = await this.answer(["image", "inspect", base]);
     if (inspected.code !== SUCCESS_CODE)
-      throw imageFailure(
+      throw new BuildFailure(
         EnvironmentImageFailure.BuildFailed,
-        tag,
         inspected.stderr.slice(-OUTPUT_TAIL_BYTES),
       );
     const settings = imageSettings(inspected.stdout);
     for (const [name, value] of settings.environment) {
       const reason = variableRefusal(name, value);
       if (reason !== null)
-        throw imageFailure(
+        throw new BuildFailure(
           EnvironmentImageFailure.BuildFailed,
-          tag,
           `containerEnv.${name}: ${reason}`,
         );
     }
@@ -699,7 +759,7 @@ export class EnvironmentImages {
       }),
     );
     const built = await runCommand(
-      runtime,
+      this.runtime(),
       [
         "build",
         "--file",
@@ -713,19 +773,16 @@ export class EnvironmentImages {
       buildEnvironment(this.options.host.environment),
       this.buildTimeoutMs(),
       this.running,
+      signal,
     );
     if (built.code !== SUCCESS_CODE)
-      throw imageFailure(EnvironmentImageFailure.BuildFailed, tag, built.tail);
+      throw new BuildFailure(EnvironmentImageFailure.BuildFailed, built.tail);
   }
 
-  private async check(
-    runtime: ContainerRuntime,
-    tag: string,
-    staging: string,
-  ): Promise<void> {
+  private async check(staging: string, signal: AbortSignal): Promise<void> {
     const name = `${CHECK_NAME_PREFIX}${randomBytes(CHECK_NAME_BYTES).toString("hex")}`;
     const checked = await runCommand(
-      runtime,
+      this.runtime(),
       [
         "run",
         "--rm",
@@ -749,41 +806,25 @@ export class EnvironmentImages {
       buildEnvironment(this.options.host.environment),
       IMAGE_CHECK_TIMEOUT_MS,
       this.running,
-    );
+      signal,
+    ).catch(async (error: unknown) => {
+      await this.answer(["rm", "--force", name]);
+      await this.removeTags([staging]);
+      throw error;
+    });
     if (checked.code === SUCCESS_CODE) return;
-    await this.options.host.run(
-      runtime,
-      ["rm", "--force", name],
-      IMAGE_COMMAND_TIMEOUT_MS,
-    );
-    await this.options.host.run(
-      runtime,
-      ["image", "rm", staging],
-      IMAGE_COMMAND_TIMEOUT_MS,
-    );
-    throw imageFailure(EnvironmentImageFailure.ImageInvalid, tag, checked.tail);
+    await this.answer(["rm", "--force", name]);
+    await this.removeTags([staging]);
+    throw new BuildFailure(EnvironmentImageFailure.ImageInvalid, checked.tail);
   }
 
-  private async promote(
-    runtime: ContainerRuntime,
-    tag: string,
-    staging: string,
-  ): Promise<void> {
-    const tagged = await this.options.host.run(
-      runtime,
-      ["tag", staging, tag],
-      IMAGE_COMMAND_TIMEOUT_MS,
-    );
+  private async promote(tag: string, staging: string): Promise<void> {
+    const tagged = await this.answer(["tag", staging, tag]);
     if (tagged.code !== SUCCESS_CODE)
-      throw imageFailure(
+      throw new BuildFailure(
         EnvironmentImageFailure.BuildFailed,
-        tag,
         tagged.stderr.slice(-OUTPUT_TAIL_BYTES),
       );
-    await this.options.host.run(
-      runtime,
-      ["untag", staging, staging],
-      IMAGE_COMMAND_TIMEOUT_MS,
-    );
+    await this.answer(["untag", staging, staging]);
   }
 }
