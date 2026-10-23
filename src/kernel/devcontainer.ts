@@ -65,6 +65,9 @@ const DROPPED_KEYS = new Set([
   "postStartCommand",
   "postAttachCommand",
   "workspaceFolder",
+  "init",
+  "appPort",
+  "secrets",
 ]);
 export const EnvironmentRefusalReason = {
   KeyNotAllowed: "the key is not allowed",
