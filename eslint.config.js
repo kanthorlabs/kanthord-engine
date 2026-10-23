@@ -226,6 +226,9 @@ export default tseslint.config(
                   }),
                 },
                 {
+                  to: element("worker-unit", { fileInternalPath: "budget.ts" }),
+                },
+                {
                   to: element("apps-worker", {
                     fileInternalPath: "{thread-data,thread-start,frames}.ts",
                   }),

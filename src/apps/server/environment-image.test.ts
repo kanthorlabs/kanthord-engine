@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import {
   appendFileSync,
   existsSync,
@@ -21,18 +22,27 @@ import {
   PoolPlacement,
   type PoolSlot,
 } from "../../worker/contract.ts";
-import { OWNER_LABEL, type RuntimeHost } from "./container-runtime.ts";
 import {
-  BASE_TAG_SUFFIX,
+  BASE_SUFFIX,
+  UNCHECKED_SUFFIX,
+  EnvironmentFailureClass,
+  ImageBuildOutcome,
+  environmentPath,
+  environmentTagOf,
+  type ImageBuildInput,
+} from "../../project/environment-state.ts";
+import {
+  OWNER_LABEL,
+  type RuntimeAnswer,
+  type RuntimeHost,
+} from "./container-runtime.ts";
+import {
   devcontainerBuildArguments,
   ENVIRONMENT_IMAGE_FAILED,
   FAILURE_HOLD_MS,
-  IMAGE_NAME_MAX_LENGTH,
-  STAGING_TAG_SUFFIX,
   EnvironmentImageFailure,
   EnvironmentImages,
   environmentDigest,
-  environmentTag,
   imageSettings,
   layerContainerfile,
 } from "./environment-image.ts";
@@ -50,7 +60,6 @@ const PODMAN_LINE = "podman";
 const BUILD_COMMAND = "build";
 const RUN_COMMAND = "run";
 const TAG_COMMAND = "tag";
-const SUM = "a".repeat(64);
 const IDENTITY = "repository:github:Acme/.Todo_App";
 const SUCCESS = 0;
 const ABSENT = 1;
@@ -186,17 +195,6 @@ exit 0
   return { PATH: `${bin}:${process.env.PATH}`, HOME: process.env.HOME };
 }
 
-test("an environment tag keeps a valid image path for every resource identity", () => {
-  assert.equal(
-    environmentTag(IDENTITY, SUM),
-    `localhost/kanthord-env/repository/github/acme/todo-app:${SUM}`,
-  );
-  assert.equal(
-    environmentTag("repository:gitlab:Group/Sub/__", SUM),
-    `localhost/kanthord-env/repository/gitlab/group/sub/x:${SUM}`,
-  );
-});
-
 test("the environment digest changes with the document, the files, the kanthord image and the version", () => {
   const first = environmentDigest(environment(), KANTHORD_IMAGE, VERSION);
   assert.match(first, /^[0-9a-f]{64}$/);
@@ -232,7 +230,7 @@ test("the build arguments name the runtime, the server config path, the base tag
       runtime: ContainerRuntime.Podman,
       workspace: "/state/config",
       config: "/state/config/.devcontainer/devcontainer.json",
-      image: `tag${BASE_TAG_SUFFIX}`,
+      image: `tag${BASE_SUFFIX}`,
       owner: OWNER,
     }),
     [
@@ -343,7 +341,7 @@ test("a slot runs on an existing environment image of the current slot image id 
     environment: environment(),
     exists: SUCCESS,
   });
-  const tag = environmentTag(
+  const tag = environmentTagOf(
     IDENTITY,
     environmentDigest(environment(), KANTHORD_IMAGE_ID, VERSION),
   );
@@ -539,11 +537,11 @@ test("a local feature with a symbolic link fails the build and names the feature
   });
 });
 
-const TAG = environmentTag(
+const TAG = environmentTagOf(
   IDENTITY,
   environmentDigest(environment(), KANTHORD_IMAGE_ID, VERSION),
 );
-const STAGING = `${TAG}${STAGING_TAG_SUFFIX}`;
+const STAGING = `${TAG}${UNCHECKED_SUFFIX}`;
 
 function indexOf(
   lines: string[][],
@@ -708,20 +706,6 @@ test("a build failure holds for 15 minutes or until the next binding revision", 
   assert.equal(exports.length, ONE_BUILD + 2);
 });
 
-test("an environment tag of a long identity keeps the name within 255 characters with a hash", () => {
-  const long = `repository:gitlab:${"group/".repeat(60)}app`;
-  const other = `repository:gitlab:${"group/".repeat(60)}api`;
-  const tag = environmentTag(long, SUM);
-  const name = tag.slice(0, tag.lastIndexOf(":"));
-  assert.ok(name.length <= IMAGE_NAME_MAX_LENGTH);
-  assert.match(
-    name,
-    /^localhost\/kanthord-env\/([a-z0-9]+(-+[a-z0-9]+)*\/)*[a-z0-9]+(-+[a-z0-9]+)*$/,
-  );
-  assert.match(name, /-[0-9a-f]{16}$/);
-  assert.notEqual(environmentTag(other, SUM), tag);
-});
-
 function alive(pid: number): boolean {
   try {
     process.kill(pid, 0);
@@ -772,9 +756,9 @@ test("a build past its time limit ends the whole process group", async (t) => {
   assert.equal(await ended(await pidOf(pidFile)), true);
 });
 
-test("a stop ends a running build and a start removes the build directories of an earlier run", async (t) => {
+test("a stop ends a running build and a start removes the run directories of an earlier run", async (t) => {
   const directory = temporary(t);
-  const stale = join(directory, "environments", "build-stale");
+  const stale = join(directory, "environments", "run-stale");
   mkdirSync(stale, { recursive: true });
   const pidFile = join(directory, "pid");
   const { built } = images(directory, {
@@ -788,4 +772,305 @@ test("a stop ends a running build and a start removes the build directories of a
   built.stop();
   await pending;
   assert.equal(await ended(pid), true);
+});
+
+const RUN_ID = "RUN1";
+const TRUE_COMMAND = "true";
+const PATH_OF_IDENTITY = environmentPath(IDENTITY);
+const IMAGE_ROOT = `localhost/kanthord-env/${PATH_OF_IDENTITY}`;
+const DIGEST = "d".repeat(64);
+const REJECTED = 1;
+const RECORDED_TAIL = "recorded";
+const FIRST_TAG = "first";
+const SECOND_TAG = "second";
+const LIST_COMMAND = "ls";
+const RECORDING_CLI = (
+  file: string,
+) => `import { appendFileSync, readFileSync } from "node:fs";
+const value = (flag) => process.argv[process.argv.indexOf(flag) + 1];
+appendFileSync(${JSON.stringify(file)}, JSON.stringify({
+  config: value("--config"),
+  image: value("--image-name"),
+  document: readFileSync(value("--config"), "utf8"),
+}) + "\\n");
+process.stderr.write("recorded");
+process.exit(CODE);`;
+
+function buildInput(): ImageBuildInput {
+  return {
+    run_id: RUN_ID,
+    binding_id: "binding",
+    resource_identity: IDENTITY,
+    commit: "c".repeat(40),
+    tag: TAG,
+    document: environment().document,
+  };
+}
+
+function runDirectory(directory: string): string {
+  return join(directory, "environments", `run-${RUN_ID}`);
+}
+
+const NEVER_ABORTED = new AbortController().signal;
+
+test("a build exports into the run directory, writes the document outside the workspace, builds the three tags and removes the run directory", async (t) => {
+  const directory = temporary(t);
+  const record = join(directory, "record");
+  const { built, exports, lines } = images(directory, {
+    environment: null,
+    exists: ABSENT,
+    cli: RECORDING_CLI(record).replace("CODE", "0"),
+    variables: fakePodman(directory, { build: SUCCESS, run: SUCCESS }),
+  });
+  assert.deepEqual(await built.build(buildInput(), NEVER_ABORTED), {
+    outcome: ImageBuildOutcome.Built,
+  });
+  assert.deepEqual(exports, [join(runDirectory(directory), "workspace")]);
+  assert.deepEqual(JSON.parse(readFileSync(record, "utf8")), {
+    config: join(runDirectory(directory), "devcontainer.json"),
+    image: `${TAG}${BASE_SUFFIX}`,
+    document: JSON.stringify(environment().document),
+  });
+  const log = lines();
+  assert.ok(
+    log.some(
+      (line) =>
+        line[0] === PODMAN_LINE &&
+        line[1] === BUILD_COMMAND &&
+        line.includes(STAGING),
+    ),
+  );
+  assert.ok(
+    log.some((line) => line.join(" ") === `host tag ${STAGING} ${TAG}`),
+  );
+  assert.equal(existsSync(runDirectory(directory)), false);
+});
+
+test("a failed devcontainer build answers build_failed with the tail and removes the run directory", async (t) => {
+  const directory = temporary(t);
+  const { built } = images(directory, {
+    environment: null,
+    exists: ABSENT,
+    cli: RECORDING_CLI(join(directory, "record")).replace("CODE", "3"),
+  });
+  const result = await built.build(buildInput(), NEVER_ABORTED);
+  assert.ok(result.outcome === ImageBuildOutcome.Failed);
+  assert.equal(result.class, EnvironmentFailureClass.BuildFailed);
+  assert.equal(result.tail, RECORDED_TAIL);
+  assert.equal(existsSync(runDirectory(directory)), false);
+});
+
+test("a failed image check answers image_invalid, removes the staging tag and removes the run directory", async (t) => {
+  const directory = temporary(t);
+  const { built, lines } = images(directory, {
+    environment: null,
+    exists: ABSENT,
+    cli: PASSING_CLI,
+    variables: fakePodman(directory, { build: SUCCESS, run: ABSENT }),
+  });
+  const result = await built.build(buildInput(), NEVER_ABORTED);
+  assert.ok(result.outcome === ImageBuildOutcome.Failed);
+  assert.equal(result.class, EnvironmentFailureClass.ImageInvalid);
+  assert.ok(
+    lines().some((line) => line.join(" ") === `host image rm ${STAGING}`),
+  );
+  assert.equal(existsSync(runDirectory(directory)), false);
+});
+
+test("an aborted signal ends the build, kills its process group and removes the run directory", async (t) => {
+  const directory = temporary(t);
+  const pidFile = join(directory, "pid");
+  const { built } = images(directory, {
+    environment: null,
+    exists: ABSENT,
+    cli: HANGING_CLI(pidFile),
+  });
+  const controller = new AbortController();
+  const pending = built.build(buildInput(), controller.signal);
+  const pid = await pidOf(pidFile);
+  controller.abort();
+  await assert.rejects(pending);
+  assert.equal(await ended(pid), true);
+  assert.equal(existsSync(runDirectory(directory)), false);
+});
+
+function runtimeImages(
+  directory: string,
+  answer: (args: readonly string[]) => Partial<RuntimeAnswer>,
+) {
+  const calls: string[][] = [];
+  const host: RuntimeHost = {
+    platform: "linux",
+    uid: 1000,
+    user: "user",
+    environment: process.env,
+    exists: () => false,
+    resolves: () => true,
+    run: (_runtime, args) => {
+      calls.push([...args]);
+      return Promise.resolve({
+        code: SUCCESS,
+        stdout: "",
+        stderr: "",
+        ...answer(args),
+      });
+    },
+  };
+  const built = new EnvironmentImages({
+    host,
+    owner: OWNER,
+    kanthordImage: KANTHORD_IMAGE,
+    version: VERSION,
+    stateDirectory: directory,
+    fallbackImage: KANTHORD_IMAGE,
+    slotEnvironment: () => Promise.resolve(null),
+    exportRepository: () => Promise.resolve(),
+  });
+  return { built, calls };
+}
+
+test("imageId answers the id of the image and null for an absent image, and imageExists answers the runtime", async (t) => {
+  const { built } = runtimeImages(temporary(t), (args) =>
+    args.includes("present")
+      ? { stdout: `${KANTHORD_IMAGE_ID}\n` }
+      : { code: REJECTED },
+  );
+  assert.equal(
+    await built.imageId("present", NEVER_ABORTED),
+    KANTHORD_IMAGE_ID,
+  );
+  assert.equal(await built.imageId("absent", NEVER_ABORTED), null);
+  assert.equal(await built.imageExists("present"), true);
+  const absent = runtimeImages(temporary(t), () => ({ code: REJECTED }));
+  assert.equal(await absent.built.imageExists("absent"), false);
+});
+
+test("tagProved tags the proved suffix and removeTags removes each tag past a failed removal", async (t) => {
+  const { built, calls } = runtimeImages(temporary(t), (args) =>
+    args.at(-1) === FIRST_TAG ? { code: REJECTED } : {},
+  );
+  await built.tagProved(TAG);
+  await built.removeTags([FIRST_TAG, SECOND_TAG]);
+  assert.deepEqual(calls, [
+    ["tag", TAG, `${TAG}-proved`],
+    ["image", "rm", FIRST_TAG],
+    ["image", "rm", SECOND_TAG],
+  ]);
+});
+
+function listing(): string {
+  return [
+    `${IMAGE_ROOT}:old`,
+    `${IMAGE_ROOT}:${DIGEST}`,
+    `${IMAGE_ROOT}:${DIGEST}-base`,
+    `${IMAGE_ROOT}:${DIGEST}-proved`,
+    `${IMAGE_ROOT}:${DIGEST}-unchecked`,
+    `${IMAGE_ROOT}:<none>`,
+    `${IMAGE_ROOT}-other:old`,
+    `${IMAGE_ROOT}/child:old`,
+    "",
+  ].join("\n");
+}
+
+function collection(directory: string) {
+  return runtimeImages(directory, (args) => {
+    if (args[1] === LIST_COMMAND) return { stdout: listing() };
+    return args.at(-1) === `${IMAGE_ROOT}:old` ? { code: REJECTED } : {};
+  });
+}
+
+test("collect removes the owner images of the path other than the current digest, its base and its proved tag", async (t) => {
+  const { built, calls } = collection(temporary(t));
+  await built.collect(PATH_OF_IDENTITY, DIGEST);
+  assert.deepEqual(calls[0]?.slice(0, 6), [
+    "image",
+    "ls",
+    "--filter",
+    `label=${OWNER_LABEL}=${OWNER}`,
+    "--filter",
+    `reference=${IMAGE_ROOT}`,
+  ]);
+  assert.deepEqual(calls.slice(1), [
+    ["image", "rm", `${IMAGE_ROOT}:old`],
+    ["image", "rm", `${IMAGE_ROOT}:${DIGEST}-unchecked`],
+  ]);
+});
+
+test("collect with no digest removes every owner image of the path", async (t) => {
+  const { built, calls } = collection(temporary(t));
+  await built.collect(PATH_OF_IDENTITY, null);
+  assert.deepEqual(
+    calls.slice(1).map((call) => call.at(-1)),
+    [
+      `${IMAGE_ROOT}:old`,
+      `${IMAGE_ROOT}:${DIGEST}`,
+      `${IMAGE_ROOT}:${DIGEST}-base`,
+      `${IMAGE_ROOT}:${DIGEST}-proved`,
+      `${IMAGE_ROOT}:${DIGEST}-unchecked`,
+    ],
+  );
+});
+
+test("removeStaleRuns removes each run directory and nothing else of the environments directory", async (t) => {
+  const directory = temporary(t);
+  const { built } = runtimeImages(directory, () => ({}));
+  const root = join(directory, "environments");
+  mkdirSync(join(root, "run-a", "workspace"), { recursive: true });
+  mkdirSync(join(root, "run-b"));
+  mkdirSync(join(root, "other"));
+  writeFileSync(join(root, "keep.txt"), "x");
+  await built.removeStaleRuns();
+  assert.deepEqual(readdirSync(root).sort(), ["keep.txt", "other"]);
+});
+
+test("prove runs the commands in one container of the image through the proof", async (t) => {
+  const directory = temporary(t);
+  const { built, lines } = images(directory, {
+    environment: null,
+    exists: SUCCESS,
+    variables: fakePodman(directory, { build: SUCCESS, run: SUCCESS }),
+    checkout: (target) => {
+      const git = (...args: string[]) =>
+        execFileSync(
+          "git",
+          [
+            "-C",
+            target,
+            "-c",
+            "user.name=test",
+            "-c",
+            "user.email=test@example.com",
+            ...args,
+          ],
+          { stdio: "ignore" },
+        );
+      git("init", "--quiet");
+      git("commit", "--quiet", "--allow-empty", "-m", "head");
+    },
+  });
+  const results = await built.prove(
+    {
+      run_id: RUN_ID,
+      binding_id: "binding",
+      resource_identity: IDENTITY,
+      commit: "c".repeat(40),
+      setup: [],
+      checks: [TRUE_COMMAND],
+      tag: TAG,
+    },
+    NEVER_ABORTED,
+  );
+  assert.deepEqual(
+    results.map((result) => [result.command, result.exit_code]),
+    [[TRUE_COMMAND, SUCCESS]],
+  );
+  assert.ok(
+    lines().some(
+      (line) =>
+        line[0] === PODMAN_LINE &&
+        line.includes("bash") &&
+        line.at(-1) === TRUE_COMMAND,
+    ),
+  );
+  assert.equal(existsSync(runDirectory(directory)), false);
 });
