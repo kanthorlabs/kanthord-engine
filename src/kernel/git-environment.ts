@@ -26,14 +26,17 @@ const HOST_SSH = [
   "GIT_SSH",
   "GIT_SSH_COMMAND",
 ];
+const HOST_CONFIG = ["GIT_CONFIG_PARAMETERS"];
 const ISOLATION = {
   GIT_CONFIG_GLOBAL: EMPTY_CONFIG_PATH,
   GIT_CONFIG_NOSYSTEM: "1",
-  GIT_CONFIG_COUNT: "2",
+  GIT_CONFIG_COUNT: "3",
   GIT_CONFIG_KEY_0: "core.excludesFile",
   GIT_CONFIG_VALUE_0: EMPTY_CONFIG_PATH,
   GIT_CONFIG_KEY_1: "core.attributesFile",
   GIT_CONFIG_VALUE_1: EMPTY_CONFIG_PATH,
+  GIT_CONFIG_KEY_2: "core.hooksPath",
+  GIT_CONFIG_VALUE_2: EMPTY_CONFIG_PATH,
   GIT_ATTR_NOSYSTEM: "1",
 } as const;
 
@@ -41,6 +44,7 @@ export const GIT_UNSAFE_OPTIONS: NonNullable<SimpleGitOptions["unsafe"]> = {
   allowUnsafeConfigPaths: true,
   allowUnsafeConfigEnvCount: true,
   allowUnsafeSshCommand: true,
+  allowUnsafeHooksPath: true,
 };
 
 export function isolatedGitEnvironment(
@@ -48,7 +52,8 @@ export function isolatedGitEnvironment(
 ): NodeJS.ProcessEnv {
   assert.ok(env);
   const output: NodeJS.ProcessEnv = { ...env };
-  for (const name of [...INTERACTIVE_HELPERS, ...HOST_SSH]) delete output[name];
+  for (const name of [...INTERACTIVE_HELPERS, ...HOST_SSH, ...HOST_CONFIG])
+    delete output[name];
   for (const [name, value] of Object.entries(DEFAULT_IDENTITY))
     if (!output[name]) output[name] = value;
   return { ...output, ...ISOLATION };
