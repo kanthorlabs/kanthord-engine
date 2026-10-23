@@ -477,6 +477,16 @@ No query fields are accepted. The required file supplies the following fields.
 - A steps execution whose conflict turn leaves a conflict marker aborts the
   merge and stops with `operation_failed` and the code
   `worker.merge.markers_left`.
+- After each agent turn of a steps execution, the worker checks each
+  checkout. A turn that leaves a checkout off the node branch, moves its head
+  to a commit that does not contain the head before the turn, or leaves a git
+  operation in progress stops with `operation_failed`. The worker then restores
+  each checkout to its head before the turn, makes no checkpoint commit and
+  pushes the node branch at that head. The codes are
+  `worker.turn.branch_changed`, `worker.turn.history_rewritten` and
+  `worker.turn.git_in_progress`. A conflict turn that ends with no open merge of
+  the base stops with the code `worker.turn.merge_missing`. The stop detail
+  names the checkout and the cause.
 - A worker whose verification command fails because of the infrastructure
   twice in a row stops with `operation_failed` and the code
   `worker.verification.infrastructure_failed`. Such a failure is a signal, an
