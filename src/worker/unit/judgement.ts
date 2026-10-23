@@ -22,6 +22,8 @@ export const taskJudgementSchema = z.strictObject({
   criterion_met: z.boolean(),
   rationale: z.string().trim().min(1),
 });
+export const JUDGEMENT_CHANGE_RATIONALE =
+  "The judgement turn changed files, and the worker committed them.";
 export const taskChoiceSchema = z.strictObject({
   filename: z.string().trim().min(1),
 });

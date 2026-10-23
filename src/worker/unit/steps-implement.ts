@@ -49,6 +49,7 @@ import {
   taskJudgementSchema,
   taskRevisionInstruction,
   criterionRevisionInstruction,
+  JUDGEMENT_CHANGE_RATIONALE,
 } from "./judgement.ts";
 import { headSetOf, judgedAt, recordJudged } from "./judged-tasks.ts";
 import { readAttemptEvidence } from "./node-reads.ts";
@@ -193,6 +194,32 @@ async function commitCheckouts(
   return changed;
 }
 
+function gatedAgent(state: StepsState, message: string): NativeAgent {
+  const agent = state.agent;
+  const gate = async () => {
+    if (agent.budget.exhausted()) return;
+    await commitCheckouts(state, message, state.run.operationContext, () =>
+      agent.budget.remainingMs(),
+    );
+  };
+  return {
+    budget: agent.budget,
+    composition: agent.composition,
+    async prompt(work) {
+      await agent.prompt(work);
+      await gate();
+    },
+    async instruct(work, text) {
+      await agent.instruct(work, text);
+      await gate();
+    },
+    lastText: () => agent.lastText(),
+    abort: () => agent.abort(),
+    closeTrace: (status) => agent.closeTrace(status),
+    dispose: () => agent.dispose(),
+  };
+}
+
 async function pushNodeBranches(
   state: StepsState,
   context: Context,
@@ -332,7 +359,12 @@ async function judgeTask(
       testedCommitOf(testedInputOf(state.checkouts)),
     ),
     async () => {
-      await state.agent.instruct(
+      const agent = gatedAgent(
+        state,
+        taskCommitMessage(task.id, state.input.claim.attempt),
+      );
+      const before = headSetOf(state.checkouts);
+      await agent.instruct(
         taskWork(state, task),
         taskJudgementInstruction(
           state.input.setup.templates,
@@ -340,13 +372,24 @@ async function judgeTask(
           priorRationale,
         ),
       );
-      if (state.agent.budget.exhausted()) return ReplyRepair.BudgetEnd;
-      return await parseRepaired(
+      if (agent.budget.exhausted()) return ReplyRepair.BudgetEnd;
+      const judgement = await parseRepaired(
         state.input.setup.templates,
-        state.agent,
+        agent,
         taskWork(state, task),
         taskJudgementSchema,
       );
+      if (
+        judgement === ReplyRepair.BudgetEnd ||
+        judgement === ReplyRepair.Invalid ||
+        headSetOf(state.checkouts) === before
+      )
+        return judgement;
+      state.run.log("task judgement changed files", {
+        task_id: task.id,
+        commit: headSetOf(state.checkouts),
+      });
+      return { criterion_met: false, rationale: JUDGEMENT_CHANGE_RATIONALE };
     },
     judgementEnd,
   );
@@ -382,18 +425,18 @@ export async function runTask(
   let revisingFailedRun = false;
   let unchangedRevisions = 0;
   state.run.log("task started", { task_id: task.id });
+  const agent = gatedAgent(
+    state,
+    taskCommitMessage(task.id, state.input.claim.attempt),
+  );
   while (!budget.exhausted()) {
     await state.run.checkClaim();
     boundary = TaskBoundary.InProgress;
-    if (instruction === null) await state.agent.prompt(taskWork(state, task));
-    else await state.agent.instruct(taskWork(state, task), instruction);
+    const before = headSetOf(state.checkouts);
+    if (instruction === null) await agent.prompt(taskWork(state, task));
+    else await agent.instruct(taskWork(state, task), instruction);
     if (budget.exhausted()) return ended(TaskBoundary.InProgress);
-    const changed = await commitCheckouts(
-      state,
-      taskCommitMessage(task.id, state.input.claim.attempt),
-      state.run.operationContext,
-      () => budget.remainingMs(),
-    );
+    const changed = headSetOf(state.checkouts) !== before;
     unchangedRevisions =
       revisingFailedRun && !changed ? unchangedRevisions + 1 : 0;
     if (unchangedRevisions >= NO_PROGRESS_LIMIT)
@@ -648,11 +691,17 @@ async function chooseTask(
   const tasks = state.revision.tasks;
   const last = tasks.at(-1);
   assert.ok(last);
-  await state.agent.instruct(
+  await gatedAgent(
+    state,
+    taskCommitMessage(state.input.claim.node_id, state.input.claim.attempt),
+  ).instruct(
     nodeWork(state),
     taskChoiceInstruction(state.input.setup.templates, tasks, failure),
   );
-  if (state.agent.budget.exhausted()) return null;
+  if (state.agent.budget.exhausted()) {
+    await checkpointChoice(state);
+    return null;
+  }
   const reply = parseJudgement(state.agent.lastText(), taskChoiceSchema);
   const chosen = tasks.find((task) => task.filename === reply?.filename);
   state.run.log("task chosen", {
@@ -661,6 +710,23 @@ async function chooseTask(
     fallback: chosen === undefined,
   });
   return chosen ?? last;
+}
+
+async function checkpointChoice(state: StepsState): Promise<void> {
+  const cleanup = state.agent.budget.cleanupContext(state.run.operationContext);
+  try {
+    await commitCheckouts(
+      state,
+      checkpointCommitMessage(
+        state.input.claim.node_id,
+        state.input.claim.attempt,
+      ),
+      cleanup,
+      () => state.input.claim.expired_at - Date.now(),
+    );
+  } finally {
+    cleanup.cancel();
+  }
 }
 
 export async function startCheck(state: StepsState): Promise<StartCheck> {

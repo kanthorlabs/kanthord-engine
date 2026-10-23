@@ -10,6 +10,7 @@ import { EndReason, ExecutionStop } from "./execution-run.ts";
 import { executionBoundary } from "./native-method.ts";
 import {
   criterionRevisionInstruction,
+  JUDGEMENT_CHANGE_RATIONALE,
   JUDGEMENT_MARKER,
   repairInstruction,
   taskJudgementInstruction,
@@ -37,6 +38,8 @@ import {
 const REPAIRED_TASK_CALLS = 3;
 const TASK_VERIFIED = "task verified";
 const PARTIAL_WORK = "partial";
+const STRAY_FILE = "stray.txt";
+const TASK_JUDGED = "task judged";
 
 test("task work commits revisions and cleans verification writes before judgement", async (t) => {
   const current = task("work", "touch transient; grep -q good file");
@@ -195,6 +198,43 @@ test("criterion-negative judgement revises work and a budget-ended judgement kee
     kind: "budget_end",
     boundary: "run_passed",
   });
+});
+
+test("a task judgement that changes files commits them and counts as not met", async (t) => {
+  const current = task("judged", "true");
+  const h = await fixture(
+    t,
+    [current],
+    [
+      fauxAssistantMessage("work"),
+      fauxAssistantMessage(
+        fauxToolCall("write", { path: STRAY_FILE, content: "stray" }),
+        { stopReason: "toolUse" },
+      ),
+      fauxAssistantMessage(
+        'kanthord-judgement: {"criterion_met":true,"rationale":"met"}',
+      ),
+      fauxAssistantMessage("revised"),
+      fauxAssistantMessage(
+        'kanthord-judgement: {"criterion_met":true,"rationale":"met"}',
+      ),
+    ],
+  );
+  const events = t.mock.method(h.run, "log");
+  assert.deepEqual(await runTask(h, current), { kind: "complete" });
+  assert.equal(
+    (await simpleGit(h.root).raw(["ls-files", STRAY_FILE])).trim(),
+    STRAY_FILE,
+  );
+  assert.deepEqual(
+    events.mock.calls
+      .filter((call) => call.arguments[0] === TASK_JUDGED)
+      .map((call) => call.arguments[1].criterion_met),
+    [false, true],
+  );
+  assert.ok(
+    JSON.stringify(h.provider.calls[3]).includes(JUDGEMENT_CHANGE_RATIONALE),
+  );
 });
 
 test("a judgement that its agent deadline cuts ends as a budget end after the passing run", async (t) => {
