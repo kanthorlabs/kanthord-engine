@@ -332,6 +332,7 @@ function fixture(t: TestContext, overrides: Partial<Dependencies> = {}) {
     repositoryFiles: {
       resolveBranchCommit: unexpected,
       readFilesAtCommit: unexpected,
+      listFilesAtCommit: async () => [],
       readObjectIds: unexpected,
       cloneSnapshot: unexpected,
     },
@@ -5005,6 +5006,7 @@ function instructionFixture(
           };
         });
       },
+      listFilesAtCommit: async () => [],
       async readObjectIds(_address, _commit, paths) {
         objectCalls.push([...paths]);
         if (behavior.resolveFails) throw new Error("fetch failed");

@@ -500,6 +500,15 @@ export type RepositoryFiles = {
     deadlineMs: number,
     ssh: SshAccess,
   ): Promise<Array<{ path: string; state: string; text: string | null }>>;
+  listFilesAtCommit(
+    address: string,
+    commit: string,
+    directory: string,
+    limit: number,
+    context: Context,
+    deadlineMs: number,
+    ssh: SshAccess,
+  ): Promise<string[]>;
   readObjectIds(
     address: string,
     commit: string,

@@ -29,6 +29,7 @@ import {
   GitWriteError,
   resolveBranchCommit,
   readFilesAtCommit,
+  listFilesAtCommit,
   readObjectIds,
 } from "./connector.ts";
 import { CheckEndState, ExpectedEndState } from "./github.ts";
@@ -803,7 +804,14 @@ const SECOND_INDEX = 1;
 const FIRST_TEXT = "first\n";
 const UNKNOWN_COMMIT = "0".repeat(40);
 
-type SeedEntry = string | Buffer | { link: string } | { linkBlob: string };
+const GITLINK_MODE = "160000";
+
+type SeedEntry =
+  | string
+  | Buffer
+  | { link: string }
+  | { linkBlob: string }
+  | { gitlink: string };
 
 const instructionTemplate = fixtureTemplate(async (root) => {
   const origin = join(root, ORIGIN_NAME);
@@ -841,6 +849,15 @@ async function instructionOrigin(t: TestContext) {
     for (const [name, entry] of Object.entries(files)) {
       if (isString(entry) || Buffer.isBuffer(entry) || "link" in entry)
         continue;
+      if ("gitlink" in entry) {
+        await git.raw([
+          "update-index",
+          "--add",
+          "--cacheinfo",
+          `${GITLINK_MODE},${entry.gitlink},${name}`,
+        ]);
+        continue;
+      }
       const blob = join(root, "link-blob");
       writeFileSync(blob, entry.linkBlob);
       const object = (await git.raw(["hash-object", "-w", blob])).trim();
@@ -943,6 +960,134 @@ test("readFilesAtCommit reads the present files of a commit and answers null for
     { path: "CLAUDE.local.md", state: RepositoryFileState.Absent, text: null },
   ]);
   assert.equal(readdirSync(scratch).length, NO_ENTRIES);
+});
+
+const WORKFLOWS_DIRECTORY = ".github/workflows";
+const LIST_LIMIT = 20;
+const LIST_LIMIT_ABOVE = 25;
+const LIST_LIMIT_MAX = 1000;
+const GITLINK_OBJECT = "1".repeat(40);
+const UNSAFE_DIRECTORIES = ["..", "/abs", "a/../b", "", "a//b"];
+const REPOSITORY_FILES_PREFIX = "kanthord-repository-files-";
+
+async function listWorkflows(
+  t: TestContext,
+  files: Record<string, SeedEntry>,
+  directory = WORKFLOWS_DIRECTORY,
+  limit = LIST_LIMIT,
+) {
+  const { address, scratch, commit } = await instructionOrigin(t);
+  const head = await commit(files);
+  return listFilesAtCommit(
+    address,
+    head,
+    directory,
+    limit,
+    background,
+    DEADLINE_MS,
+    LOCAL_GIT_SSH_ACCESS,
+    scratch,
+  );
+}
+
+test("listFilesAtCommit answers the regular files of one directory in path order", async (t) => {
+  assert.deepEqual(
+    await listWorkflows(t, {
+      ".github/workflows/release.yaml": "release\n",
+      ".github/workflows/ci.yml": "ci\n",
+      ".github/workflows/nested/deep.yml": "deep\n",
+      ".github/README.md": "readme\n",
+    }),
+    [".github/workflows/ci.yml", ".github/workflows/release.yaml"],
+  );
+});
+
+test("listFilesAtCommit skips a symbolic link and a submodule entry", async (t) => {
+  assert.deepEqual(
+    await listWorkflows(t, {
+      ".github/workflows/ci.yml": "ci\n",
+      ".github/workflows/link.yml": { link: "ci.yml" },
+      ".github/workflows/module": { gitlink: GITLINK_OBJECT },
+    }),
+    [".github/workflows/ci.yml"],
+  );
+});
+
+test("listFilesAtCommit answers an empty list for an absent directory and for a path that is a file", async (t) => {
+  const files = { ".github/workflows/ci.yml": "ci\n" };
+  assert.deepEqual(await listWorkflows(t, files, ".github/absent"), []);
+  assert.deepEqual(
+    await listWorkflows(t, files, ".github/workflows/ci.yml"),
+    [],
+  );
+});
+
+test("listFilesAtCommit answers at most the limit", async (t) => {
+  const files: Record<string, string> = {};
+  for (let index = LIST_LIMIT_ABOVE; index > NO_ENTRIES; index--)
+    files[`${WORKFLOWS_DIRECTORY}/f${String(index).padStart(2, "0")}.yml`] =
+      "x\n";
+  const listed = await listWorkflows(t, files);
+  assert.equal(listed.length, LIST_LIMIT);
+  assert.deepEqual(listed, [...listed].sort());
+  assert.equal(listed[FIRST_INDEX], `${WORKFLOWS_DIRECTORY}/f01.yml`);
+  assert.equal(listed.at(-1), `${WORKFLOWS_DIRECTORY}/f20.yml`);
+});
+
+test("listFilesAtCommit refuses an unsafe directory", async (t) => {
+  const { address, scratch, commit } = await instructionOrigin(t);
+  const head = await commit({ "a/b": "x\n" });
+  for (const directory of UNSAFE_DIRECTORIES)
+    await assert.rejects(
+      listFilesAtCommit(
+        address,
+        head,
+        directory,
+        LIST_LIMIT,
+        background,
+        DEADLINE_MS,
+        LOCAL_GIT_SSH_ACCESS,
+        scratch,
+      ),
+      { name: "AssertionError" },
+      directory,
+    );
+  for (const limit of [NO_ENTRIES, LIST_LIMIT_MAX + 1])
+    await assert.rejects(
+      listFilesAtCommit(
+        address,
+        head,
+        "a",
+        limit,
+        background,
+        DEADLINE_MS,
+        LOCAL_GIT_SSH_ACCESS,
+        scratch,
+      ),
+      { name: "AssertionError" },
+    );
+  assert.equal(readdirSync(scratch).length, NO_ENTRIES);
+});
+
+test("listFilesAtCommit fetches no blob", async (t) => {
+  const { address, scratch, commit } = await instructionOrigin(t);
+  const head = await commit({ ".github/workflows/ci.yml": "ci\n" });
+  await listFilesAtCommit(
+    address,
+    head,
+    WORKFLOWS_DIRECTORY,
+    LIST_LIMIT,
+    background,
+    DEADLINE_MS,
+    LOCAL_GIT_SSH_ACCESS,
+    scratch,
+  );
+  assert.deepEqual(
+    readdirSync(scratch).filter((name) =>
+      name.startsWith(REPOSITORY_FILES_PREFIX),
+    ),
+    [],
+  );
 });
 
 async function readStates(t: TestContext, files: Record<string, SeedEntry>) {
