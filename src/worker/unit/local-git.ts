@@ -622,6 +622,46 @@ export async function concludeMerge(
   );
 }
 
+export async function amendTrailer(
+  env: NodeJS.ProcessEnv,
+  directory: string,
+  trailer: string,
+  context: Context,
+  deadlineMs: number,
+): Promise<void> {
+  assert.ok(trailer && !trailer.startsWith("-"));
+  await run(
+    env,
+    directory,
+    ["commit", "--amend", "--no-edit", "--trailer", trailer],
+    context,
+    deadlineMs,
+  );
+}
+
+export async function trailerValues(
+  env: NodeJS.ProcessEnv,
+  directory: string,
+  key: string,
+  base: string,
+  context: Context,
+  deadlineMs: number,
+): Promise<string[]> {
+  assert.ok(key && !key.startsWith("-"));
+  assert.ok(base && !base.startsWith("-"));
+  const output = await run(
+    env,
+    directory,
+    ["log", `--format=%(trailers:key=${key},valueonly)`, `${base}..HEAD`, "--"],
+    context,
+    deadlineMs,
+  );
+  return output
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line !== CLEAN_STATUS);
+}
+
 export async function abortMerge(
   env: NodeJS.ProcessEnv,
   directory: string,

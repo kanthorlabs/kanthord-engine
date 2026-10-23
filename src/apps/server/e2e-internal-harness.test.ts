@@ -53,7 +53,7 @@ const SINGLE_ITEM = 1;
 const TWO_ITEMS = 2;
 const EXPECTED_EVIDENCE_COUNT = 3;
 const EXPECTED_REVIEW_CALLS = 3;
-const EXPECTED_GENERAL_CALLS = 8;
+const EXPECTED_GENERAL_CALLS = 6;
 const FILE_SIZE = 5;
 const POLL_MS = 250;
 const READY = "Worker application ready";
@@ -74,8 +74,6 @@ const DEFAULTS = {
   model_identifier: "claude-sonnet-4-5",
   reasoning_effort: "off",
 };
-const JUDGED =
-  'kanthord-judgement: {"criterion_met":true,"rationale":"hello.txt holds hello"}';
 const PASSED =
   'kanthord-judgement: {"result":"success","rationale":"hello.txt exists and holds hello; task met."}';
 const tool = (name: string, args: Parameters<typeof fauxToolCall>[1]) =>
@@ -335,10 +333,8 @@ test(
       tool("bash", { command: "printf hello > hello.txt" }),
       tool(UPLOAD, { path: FILE_NAME }),
       fauxAssistantMessage("done"),
-      fauxAssistantMessage(JUDGED),
       tool("bash", { command: "printf hello > hello.txt" }),
       fauxAssistantMessage("done"),
-      fauxAssistantMessage(JUDGED),
       fauxAssistantMessage(REPORT),
     ]);
     const reviewProvider = scriptedProvider([

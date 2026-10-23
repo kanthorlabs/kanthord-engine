@@ -35,14 +35,19 @@ import {
   modelConnectorInput,
   type ModelRuntimeFactory,
 } from "./model-runtime.ts";
-import { ExecutionIntent, type RepositoryTransport } from "../contract.ts";
+import {
+  ExecutionIntent,
+  type ExecutionSetup,
+  type RepositoryTransport,
+} from "../contract.ts";
 import { ExecutionBudget } from "./budget.ts";
 import { openNativeAgent } from "./native-agent.ts";
-import { ExecutionRun } from "./execution-run.ts";
+import { ExecutionRun, type MethodClaim } from "./execution-run.ts";
 import type { MethodClients } from "./method-clients.ts";
 import { WorkspaceRoot } from "./workspace.ts";
 import { prepareStepsWorkspace } from "./steps-implement.ts";
 import type { Verdict } from "./node-reads.ts";
+import { doneTrailerOf } from "./done-record.ts";
 export { LOCAL_GIT_SSH_ACCESS } from "../../repository/test-sshd.ts";
 export {
   scriptedProvider,
@@ -203,7 +208,6 @@ export async function implementFixture(
   turns?: number,
   names: readonly string[] = [DEFAULT_BINDING_NAME],
 ) {
-  const state = temporary(t);
   const bares = await Promise.all(
     names.map(async () => join((await bareTemplate(t)).root, BARE_NAME)),
   );
@@ -230,6 +234,47 @@ export async function implementFixture(
     trace_id: "trace",
     root_span_id: "1".repeat(16),
   };
+  return openExecution(t, { setup, claim, tasks, bares }, script);
+}
+
+export async function nextExecution(
+  t: TestContext,
+  previous: {
+    input: { setup: ExecutionSetup; claim: MethodClaim };
+    revision: Revision;
+    bares: string[];
+  },
+  script: Parameters<typeof scriptedProvider>[0],
+) {
+  const opened = await openExecution(
+    t,
+    {
+      setup: previous.input.setup,
+      claim: {
+        ...previous.input.claim,
+        created_at: Date.now(),
+        expired_at: Date.now() + 60000,
+      },
+      tasks: previous.revision.tasks,
+      bares: previous.bares,
+    },
+    script,
+  );
+  return { ...opened, revision: previous.revision };
+}
+
+async function openExecution(
+  t: TestContext,
+  base: {
+    setup: ExecutionSetup;
+    claim: MethodClaim;
+    tasks: TaskContent[];
+    bares: string[];
+  },
+  script: Parameters<typeof scriptedProvider>[0],
+) {
+  const { setup, claim, tasks, bares } = base;
+  const state = temporary(t);
   const input = {
     claim,
     setup,
@@ -332,6 +377,24 @@ export async function commitOnNode(directory: string, content: string) {
   writeFileSync(join(directory, "file"), content);
   await simpleGit(directory).add("file");
   await simpleGit(directory).commit("node change");
+}
+
+export async function recordDone(
+  h: { checkouts: { directory: string; head: string }[] },
+  unit: TaskContent,
+) {
+  const checkout = h.checkouts[0]!;
+  const git = simpleGit(checkout.directory);
+  await git.raw([
+    "commit",
+    "-q",
+    "--allow-empty",
+    "--message",
+    "done",
+    "--trailer",
+    doneTrailerOf(unit),
+  ]);
+  checkout.head = (await git.revparse(["HEAD"])).trim();
 }
 
 export function recordReleases(

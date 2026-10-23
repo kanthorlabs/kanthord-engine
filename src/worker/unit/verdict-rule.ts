@@ -72,7 +72,7 @@ export async function verdictRuleHolds(
   });
 }
 
-async function withinCleanup<T>(
+export async function withinCleanup<T>(
   state: StepsState,
   work: (context: Context, remaining: () => number) => Promise<T>,
 ): Promise<T> {

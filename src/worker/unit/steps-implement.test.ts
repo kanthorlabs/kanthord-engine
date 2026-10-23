@@ -1,45 +1,31 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { existsSync, readdirSync, writeFileSync } from "node:fs";
+import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { simpleGit } from "simple-git";
-import { DeadlineExceeded } from "../../kernel/context.ts";
 import { REASON_MAX_LENGTH } from "../../kernel/probe.ts";
 import { fauxAssistantMessage, fauxToolCall } from "./test-support.ts";
 import { EndReason, ExecutionStop } from "./execution-run.ts";
-import { executionBoundary } from "./native-method.ts";
-import {
-  JUDGEMENT_CHANGE_RATIONALE,
-  JUDGEMENT_MARKER,
-  repairInstruction,
-  taskJudgementInstruction,
-} from "./judgement.ts";
 import type { MethodClients } from "./method-clients.ts";
 import { CHECKOUTS_DIRECTORY, WorkspaceKind } from "./workspace.ts";
-import { judgedAt } from "./judged-tasks.ts";
+import { DONE_TRAILER, doneRecordOf } from "./done-record.ts";
 import {
   startCheck,
   runTask,
   runStepsImplement,
   verifyTask,
 } from "./steps-implement.ts";
-import { SHIPPED_TEMPLATES } from "../../agent/prompt-templates.ts";
-import { BudgetLimit, ProviderFailure } from "../../scheduler/contract.ts";
+import { ProviderFailure } from "../../scheduler/contract.ts";
 import {
   implementFixture as fixture,
   NO_PROVIDER_CALLS,
-  recordReleases,
   STEPS_KEY,
   task,
 } from "./test-support.ts";
 
-const REPAIRED_TASK_CALLS = 3;
 const TASK_VERIFIED = "task verified";
-const PARTIAL_WORK = "partial";
-const STRAY_FILE = "stray.txt";
-const TASK_JUDGED = "task judged";
 
-test("task work commits revisions and cleans verification writes before judgement", async (t) => {
+test("task work commits revisions, cleans verification writes and records the pass", async (t) => {
   const current = task("work", "touch transient; grep -q good file");
   const write = (content: string) =>
     fauxAssistantMessage(fauxToolCall("write", { path: "file", content }), {
@@ -53,13 +39,13 @@ test("task work commits revisions and cleans verification writes before judgemen
       fauxAssistantMessage("first"),
       write("good"),
       fauxAssistantMessage("second"),
-      fauxAssistantMessage(
-        'kanthord-judgement: {"criterion_met":true,"rationale":"met"}',
-      ),
     ],
   );
   const events = t.mock.method(h.run, "log");
-  assert.deepEqual(await runTask(h, current), { kind: "complete" });
+  assert.deepEqual(await runTask(h, current), {
+    kind: "complete",
+    recorded: true,
+  });
   assert.deepEqual(
     events.mock.calls.map((call) => call.arguments[0]),
     [
@@ -68,7 +54,7 @@ test("task work commits revisions and cleans verification writes before judgemen
       "task verified",
       "task committed",
       "task verified",
-      "task judged",
+      "done recorded",
     ],
   );
   const verified = events.mock.calls
@@ -128,206 +114,27 @@ test("B1 ends the task as a budget end when the budget expires between iteration
   assert.deepEqual(await runTask(h, current), { kind: "budget_end" });
 });
 
-test("B1 start-check timeout ends as a budget end and cleanup runs after the wall deadline", async (t) => {
+test("the start check runs no verification, and a verification timeout cleans its writes", async (t) => {
   const current = task("timeout", "touch transient; sleep 30");
   const h = await fixture(t, [current], []);
+  const checked = await startCheck(h);
+  assert.deepEqual(
+    checked.pending.map(({ task }) => task.id),
+    [current.id],
+  );
+  assert.equal(checked.budgetEnd, null);
+  assert.equal(existsSync(join(h.root, "transient")), false);
+  assert.equal(h.provider.calls.length, NO_PROVIDER_CALLS);
   let deadline = Date.now() + 10000;
   h.agent.budget.wallDeadline = () => {
     deadline = Date.now() + 30;
     return deadline;
   };
   h.agent.budget.exhausted = () => Date.now() >= deadline;
-  const checked = await startCheck(h);
-  assert.deepEqual(checked.budgetEnd, { task: current });
-  assert.equal(existsSync(join(h.root, "transient")), false);
-  assert.ok(Date.now() >= deadline && Date.now() < h.input.claim.expired_at);
-  assert.equal(h.provider.calls.length, NO_PROVIDER_CALLS);
   const verification = await verifyTask(h, current);
   assert.equal(verification.results[0]!.timed_out, true);
-});
-
-test("criterion-negative judgement revises work and a budget-ended judgement ends the task as a budget end", async (t) => {
-  const current = task("criterion", "true");
-  const h = await fixture(
-    t,
-    [current],
-    [
-      fauxAssistantMessage("work"),
-      fauxAssistantMessage(
-        'kanthord-judgement: {"criterion_met":false,"rationale":"revise"}',
-      ),
-      fauxAssistantMessage(
-        fauxToolCall("write", { path: "revision", content: "fixed" }),
-        { stopReason: "toolUse" },
-      ),
-      fauxAssistantMessage("revised"),
-      fauxAssistantMessage(
-        'kanthord-judgement: {"criterion_met":true,"rationale":"met"}',
-      ),
-    ],
-  );
-  assert.deepEqual(await runTask(h, current), { kind: "complete" });
-  assert.ok(existsSync(join(h.root, "revision")));
-  const other = await fixture(
-    t,
-    [current],
-    [
-      fauxAssistantMessage("work"),
-      fauxAssistantMessage(
-        'kanthord-judgement: {"criterion_met":true,"rationale":"met"}',
-      ),
-    ],
-  );
-  const instruct = other.agent.instruct.bind(other.agent);
-  other.agent.instruct = async (...args) => {
-    await instruct(...args);
-    other.agent.budget.exhausted = () => true;
-  };
-  assert.deepEqual(await runTask(other, current), { kind: "budget_end" });
-});
-
-test("a task judgement that changes files commits them and counts as not met", async (t) => {
-  const current = task("judged", "true");
-  const h = await fixture(
-    t,
-    [current],
-    [
-      fauxAssistantMessage("work"),
-      fauxAssistantMessage(
-        fauxToolCall("write", { path: STRAY_FILE, content: "stray" }),
-        { stopReason: "toolUse" },
-      ),
-      fauxAssistantMessage(
-        'kanthord-judgement: {"criterion_met":true,"rationale":"met"}',
-      ),
-      fauxAssistantMessage("revised"),
-      fauxAssistantMessage(
-        'kanthord-judgement: {"criterion_met":true,"rationale":"met"}',
-      ),
-    ],
-  );
-  const events = t.mock.method(h.run, "log");
-  assert.deepEqual(await runTask(h, current), { kind: "complete" });
-  assert.equal(
-    (await simpleGit(h.root).raw(["ls-files", STRAY_FILE])).trim(),
-    STRAY_FILE,
-  );
-  assert.deepEqual(
-    events.mock.calls
-      .filter((call) => call.arguments[0] === TASK_JUDGED)
-      .map((call) => call.arguments[1].criterion_met),
-    [false, true],
-  );
-  assert.ok(
-    JSON.stringify(h.provider.calls[3]).includes(JUDGEMENT_CHANGE_RATIONALE),
-  );
-});
-
-test("a judgement that its agent deadline cuts ends as a budget end after the passing run", async (t) => {
-  const current = task("deadline", "true");
-  const h = await fixture(t, [current], [fauxAssistantMessage("work")]);
-  const judgement = taskJudgementInstruction(SHIPPED_TEMPLATES, current);
-  const instructions: string[] = [];
-  h.agent.instruct = async (_work, instruction) => {
-    instructions.push(instruction);
-    h.agent.budget
-      .agentContext(h.run.operationContext)
-      .cancel(new DeadlineExceeded());
-  };
-  assert.deepEqual(await runTask(h, current), { kind: "budget_end" });
-  assert.deepEqual(instructions, [judgement]);
-  assert.equal(h.agent.budget.limit(), BudgetLimit.WallTime);
-});
-
-test("one invalid task judgement gets a repair turn and a valid second reply completes the task", async (t) => {
-  const current = task("repaired", "true");
-  const h = await fixture(
-    t,
-    [current],
-    [
-      fauxAssistantMessage("work"),
-      fauxAssistantMessage(
-        'канthord-judgement: {"criterion_met":true,"rationale":"met"}',
-      ),
-      fauxAssistantMessage(
-        'kanthord-judgement: {"criterion_met":true,"rationale":"met"}',
-      ),
-    ],
-  );
-  assert.deepEqual(await runTask(h, current), { kind: "complete" });
-  assert.ok(
-    JSON.stringify(h.provider.calls.at(-1)).includes(
-      repairInstruction(SHIPPED_TEMPLATES, JUDGEMENT_MARKER),
-    ),
-  );
-});
-
-test("two invalid task judgements stop the execution with judgement_invalid", async (t) => {
-  const current = task("invalid", "true");
-  const h = await fixture(
-    t,
-    [current],
-    [
-      fauxAssistantMessage("work"),
-      fauxAssistantMessage("no judgement"),
-      fauxAssistantMessage("still no judgement"),
-    ],
-  );
-  await assert.rejects(runTask(h, current), {
-    reason: EndReason.JudgementInvalid,
-  });
-  assert.equal(h.provider.calls.length, REPAIRED_TASK_CALLS);
-});
-
-test("a repair turn that ends the budget releases a checkpoint with the budget end stop", async (t) => {
-  const current = task("repair", "true");
-  const ended = await fixture(
-    t,
-    [current],
-    [
-      fauxAssistantMessage("work"),
-      fauxAssistantMessage("no judgement"),
-      fauxAssistantMessage("partial"),
-    ],
-  );
-  const endOnRepair = (h: Awaited<ReturnType<typeof fixture>>) => {
-    const instruct = h.agent.instruct.bind(h.agent);
-    h.agent.instruct = async (work, instruction) => {
-      await instruct(work, instruction);
-      if (
-        instruction !== repairInstruction(SHIPPED_TEMPLATES, JUDGEMENT_MARKER)
-      )
-        return;
-      writeFileSync(join(h.root, PARTIAL_WORK), PARTIAL_WORK);
-      h.agent.budget.exhausted = () => true;
-    };
-  };
-  endOnRepair(ended);
-  assert.deepEqual(await runTask(ended, current), { kind: "budget_end" });
-  const h = await fixture(
-    t,
-    [current],
-    [fauxAssistantMessage("no judgement"), fauxAssistantMessage("partial")],
-  );
-  endOnRepair(h);
-  const bodies = recordReleases(h);
-  assert.deepEqual(await executionBoundary(h.run, () => runStepsImplement(h)), {
-    kind: "released",
-    furtherWork: true,
-    stop: { reason: "budget_end", code: "wall_time" },
-  });
-  assert.deepEqual(bodies, [
-    { further_work: true, stop: { reason: "budget_end", code: "wall_time" } },
-  ]);
-  const branch = `refs/heads/${h.nodeBranch}`;
-  assert.match(
-    await simpleGit(h.bare).raw(["log", "-1", "--format=%s", branch]),
-    /checkpoint of task/,
-  );
-  assert.equal(
-    await simpleGit(h.bare).raw(["show", `${branch}:${PARTIAL_WORK}`]),
-    PARTIAL_WORK,
-  );
+  assert.equal(existsSync(join(h.root, "transient")), false);
+  assert.ok(Date.now() >= deadline && Date.now() < h.input.claim.expired_at);
 });
 
 const VERIFIED_BEFORE_NO_PROGRESS = 2;
@@ -436,9 +243,6 @@ test("an implement node with no task commits its change with the node identity i
         { stopReason: "toolUse" },
       ),
       fauxAssistantMessage("done"),
-      fauxAssistantMessage(
-        'kanthord-judgement: {"criterion_met":true,"rationale":"met"}',
-      ),
     ],
   );
   h.revision = {
@@ -482,9 +286,6 @@ test("two bindings commit only the checkout with a change", async (t) => {
         { stopReason: "toolUse" },
       ),
       fauxAssistantMessage("done"),
-      fauxAssistantMessage(
-        'kanthord-judgement: {"criterion_met":true,"rationale":"met"}',
-      ),
     ],
     undefined,
     TWO_BINDINGS,
@@ -495,7 +296,10 @@ test("two bindings commit only the checkout with a change", async (t) => {
   assert.ok(api && web);
   const apiBefore = api.head;
   const webBefore = web.head;
-  assert.deepEqual(await runTask(h, current), { kind: "complete" });
+  assert.deepEqual(await runTask(h, current), {
+    kind: "complete",
+    recorded: true,
+  });
   assert.notEqual(api.head, apiBefore);
   assert.equal(await simpleGit(api.directory).revparse(["HEAD"]), api.head);
   assert.ok(
@@ -503,13 +307,10 @@ test("two bindings commit only the checkout with a change", async (t) => {
   );
   assert.equal(web.head, webBefore);
   assert.equal(await simpleGit(web.directory).revparse(["HEAD"]), webBefore);
-  assert.equal(
-    judgedAt(key, {
-      attempt: h.input.claim.attempt,
-      revision: h.input.claim.pinned_revision,
-      taskId: current.id,
-    }),
-    `api=${api.head},web=${web.head}`,
+  assert.ok(
+    (await simpleGit(api.directory).raw(["log", "-1", "--format=%B"])).includes(
+      `${DONE_TRAILER}: ${doneRecordOf(current)}`,
+    ),
   );
   h.input.workspaces.release(key, WorkspaceKind.Node);
 });

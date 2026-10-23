@@ -85,9 +85,6 @@ const tool = (name: string, args: Parameters<typeof fauxToolCall>[1]) =>
 const hello = () => [
   tool("bash", { command: "printf hello > hello.txt" }),
   fauxAssistantMessage("done"),
-  fauxAssistantMessage(
-    'kanthord-judgement: {"criterion_met":true,"rationale":"hello.txt holds hello"}',
-  ),
 ];
 const review = () => [
   fauxAssistantMessage(
@@ -648,9 +645,6 @@ const BOTH_HELLO = () => [
     command: "printf hello > api/hello.txt && printf hello > web/hello.txt",
   }),
   fauxAssistantMessage("done"),
-  fauxAssistantMessage(
-    'kanthord-judgement: {"criterion_met":true,"rationale":"both checkouts hold hello.txt"}',
-  ),
 ];
 
 test(

@@ -18,6 +18,7 @@ import type { NativeAgent } from "./native-agent.ts";
 import {
   checkpointGate,
   gatedAgent,
+  type GatedAgent,
   isTurnViolation,
   removeRootEntries,
   restoreCheckout,
@@ -45,15 +46,10 @@ import {
   type VerificationRun,
 } from "./verification.ts";
 import {
-  parseRepaired,
-  ReplyRepair,
-  taskJudgementInstruction,
-  taskJudgementSchema,
   taskRevisionInstruction,
   criterionRevisionInstruction,
-  JUDGEMENT_CHANGE_RATIONALE,
 } from "./judgement.ts";
-import { headSetOf, judgedAt, recordJudged } from "./judged-tasks.ts";
+import { isDone, readDoneRecords, writeDoneRecord } from "./done-record.ts";
 import { readAttemptEvidence, type Verdict } from "./node-reads.ts";
 import {
   judgedCheckouts,
@@ -64,8 +60,6 @@ import { Phase } from "./telemetry.ts";
 import {
   GitStep,
   withinGit,
-  judgementEnd,
-  judgementSpan,
   phaseSpan,
   taskEnd,
   taskSpan,
@@ -79,6 +73,7 @@ export const HEAD_COMMIT_SUBJECT = "Head commit of the node branch";
 const NO_TASKS = 0;
 const NO_CHECKOUTS = 0;
 const NO_PROGRESS_LIMIT = 2;
+const SINGLE_CHECKOUT = 1;
 
 export function workUnitsOf(
   nodeId: string,
@@ -244,7 +239,7 @@ export async function runStepsImplement(
           completedTasks: NO_TASKS,
         }
       : await spans.within(phaseSpan(Phase.Tasks), () =>
-          runUnits(state, checked.pending, checked.node, taskRunner),
+          runUnits(state, checked, taskRunner),
         );
     return await finishImplement(state, end);
   } catch (error) {
@@ -263,27 +258,28 @@ export async function runStepsImplement(
 async function startImplement(state: StepsState): Promise<StartCheck> {
   assert.ok(state.checkouts.length > NO_CHECKOUTS);
   if ((await refreshAtClaim(state)) === RefreshResult.BudgetEnd)
-    return { pending: [], node: null, budgetEnd: { task: null } };
+    return {
+      pending: [],
+      node: null,
+      done: new Set(),
+      budgetEnd: { task: null },
+    };
   return await startCheck(state);
 }
 
 async function runUnits(
   state: StepsState,
-  pending: readonly PendingTask[],
-  node: NodeInstruction | null,
+  checked: StartCheck,
   taskRunner: TaskRunner,
 ): Promise<UnitsEnd> {
   const completed = new Set<string>();
-  let units = pending;
-  let nodeInstruction = node;
+  let units: readonly PendingTask[] = checked.pending;
+  let nodeInstruction = checked.node;
   while (!state.agent.budget.exhausted()) {
-    const ran = await runPending(
-      state,
-      units,
-      nodeInstruction,
-      taskRunner,
+    const ran = await runPending(state, units, nodeInstruction, taskRunner, {
+      done: checked.done,
       completed,
-    );
+    });
     if (ran.budgetEnd) return ran;
     nodeInstruction = null;
     const gate = await releaseGate(state);
@@ -300,12 +296,17 @@ async function runUnits(
   };
 }
 
+interface Completion {
+  done: ReadonlySet<string>;
+  completed: Set<string>;
+}
+
 async function runPending(
   state: StepsState,
   pending: readonly PendingTask[],
   node: NodeInstruction | null,
   taskRunner: TaskRunner,
-  completed: Set<string>,
+  { done, completed }: Completion,
 ): Promise<UnitsEnd> {
   assert.ok(pending.length <= unitsOf(state).length);
   const units = pending.map(({ task, instruction }) => ({
@@ -328,7 +329,7 @@ async function runPending(
     );
     if (result.kind === TaskResultKind.BudgetEnd)
       return { task, budgetEnd: true, completedTasks: completed.size };
-    completed.add(task.id);
+    if (result.recorded && !isDone(done, task)) completed.add(task.id);
   }
   return { task: null, budgetEnd: false, completedTasks: completed.size };
 }
@@ -375,7 +376,7 @@ async function runNodeInstruction(
       passed,
       exit_codes: verification.results.map((result) => result.exit_code),
     });
-    if (passed) return { kind: TaskResultKind.Complete };
+    if (passed) return await completeUnit(state, unit, agent);
     instruction = taskRevisionInstruction(
       state.input.setup.templates,
       verification,
@@ -387,55 +388,24 @@ async function runNodeInstruction(
   return ended;
 }
 
-async function judgeTask(state: StepsState, task: TaskContent) {
-  assert.ok(state.checkouts.length > NO_CHECKOUTS);
-  assert.ok(task.content.criterion);
-  return state.run.spans.within(
-    judgementSpan(
-      state.run.spans,
-      task,
-      testedCommitOf(testedInputOf(state.checkouts)),
-    ),
-    async () => {
-      const agent = gatedAgent(
-        state,
-        taskCommitMessage(task.id, state.input.claim.attempt),
-      );
-      const before = headSetOf(state.checkouts);
-      await agent.instruct(
-        taskWork(state, task),
-        taskJudgementInstruction(state.input.setup.templates, task),
-      );
-      if (agent.budget.exhausted()) return ReplyRepair.BudgetEnd;
-      const judgement = await parseRepaired(
-        state.input.setup.templates,
-        agent,
-        taskWork(state, task),
-        taskJudgementSchema,
-      );
-      if (
-        judgement === ReplyRepair.BudgetEnd ||
-        judgement === ReplyRepair.Invalid ||
-        headSetOf(state.checkouts) === before
-      )
-        return judgement;
-      state.run.log("task judgement changed files", {
-        task_id: task.id,
-        commit: headSetOf(state.checkouts),
-      });
-      return { criterion_met: false, rationale: JUDGEMENT_CHANGE_RATIONALE };
-    },
-    judgementEnd,
-  );
-}
-
 export const TaskResultKind = {
   Complete: "complete",
   BudgetEnd: "budget_end",
 } as const;
 export type TaskResult =
-  | { kind: typeof TaskResultKind.Complete }
+  | { kind: typeof TaskResultKind.Complete; recorded: boolean }
   | { kind: typeof TaskResultKind.BudgetEnd };
+
+async function completeUnit(
+  state: StepsState,
+  unit: TaskContent,
+  agent: GatedAgent,
+): Promise<TaskResult> {
+  return {
+    kind: TaskResultKind.Complete,
+    recorded: await writeDoneRecord(state, unit, agent.commits()),
+  };
+}
 
 export async function runTask(
   state: StepsState,
@@ -468,36 +438,12 @@ export async function runTask(
       passed,
       exit_codes: verification.results.map((result) => result.exit_code),
     });
-    if (!passed) {
-      instruction = taskRevisionInstruction(
-        state.input.setup.templates,
-        verification,
-        task.content.verifications,
-        outputs.at(-1) ?? "",
-      );
-      continue;
-    }
-    if (budget.exhausted()) return ended;
-    const judgement = await judgeTask(state, task);
-    if (judgement === ReplyRepair.BudgetEnd) return ended;
-    if (judgement === ReplyRepair.Invalid)
-      state.run.stop(EndReason.JudgementInvalid);
-    state.run.log("task judged", {
-      task_id: task.id,
-      commit: headSetOf(state.checkouts),
-      criterion_met: judgement.criterion_met,
-    });
-    if (judgement.criterion_met) {
-      recordJudged(
-        nodeDirectoryOf(state),
-        judgedTaskOf(state, task),
-        headSetOf(state.checkouts),
-      );
-      return { kind: TaskResultKind.Complete };
-    }
-    instruction = criterionRevisionInstruction(
+    if (passed) return await completeUnit(state, task, agent);
+    instruction = taskRevisionInstruction(
       state.input.setup.templates,
-      judgement.rationale,
+      verification,
+      task.content.verifications,
+      outputs.at(-1) ?? "",
     );
   }
   return ended;
@@ -647,16 +593,12 @@ async function verifyCommands(
   return run;
 }
 
-function nodeDirectoryOf(state: StepsState): string {
-  return state.input.workspaces.nodeKey(state.input.claim.node_id);
-}
-
-function judgedTaskOf(state: StepsState, task: TaskContent) {
-  return {
-    attempt: state.input.claim.attempt,
-    revision: state.input.claim.pinned_revision,
-    taskId: task.id,
-  };
+function headSetOf(checkouts: readonly WorkspaceCheckout[]): string {
+  assert.ok(checkouts.length >= SINGLE_CHECKOUT);
+  if (checkouts.length === SINGLE_CHECKOUT) return checkouts[0]!.head;
+  return checkouts
+    .map((checkout) => `${checkout.name}=${checkout.head}`)
+    .join(",");
 }
 
 export interface PendingTask {
@@ -672,6 +614,7 @@ export interface NodeInstruction {
 export interface StartCheck {
   pending: PendingTask[];
   node: NodeInstruction | null;
+  done: ReadonlySet<string>;
   budgetEnd: { task: TaskContent | null } | null;
 }
 
@@ -700,40 +643,14 @@ async function nodeInstructionOf(
 
 export async function startCheck(state: StepsState): Promise<StartCheck> {
   assert.ok(state.checkouts.length > NO_CHECKOUTS);
-  const pending: PendingTask[] = [];
   const node = await nodeInstructionOf(state);
-  for (const task of unitsOf(state)) {
-    state.task = task;
-    const verification = await verifyTask(state, task);
-    const passed = verificationPassed(verification, task.content.verifications);
-    if (state.agent.budget.exhausted())
-      return { pending, node: null, budgetEnd: { task } };
-    if (!passed) {
-      pending.push({ task, instruction: null });
-      continue;
-    }
-    if (
-      judgedAt(nodeDirectoryOf(state), judgedTaskOf(state, task)) ===
-      headSetOf(state.checkouts)
-    )
-      continue;
-    const judgement = await judgeTask(state, task);
-    if (judgement === ReplyRepair.BudgetEnd)
-      return { pending, node: null, budgetEnd: { task } };
-    if (judgement === ReplyRepair.Invalid)
-      state.run.stop(EndReason.JudgementInvalid);
-    state.run.log("task judged", {
-      task_id: task.id,
-      commit: headSetOf(state.checkouts),
-      criterion_met: judgement.criterion_met,
-    });
-    if (judgement.criterion_met)
-      recordJudged(
-        nodeDirectoryOf(state),
-        judgedTaskOf(state, task),
-        headSetOf(state.checkouts),
-      );
-    else pending.push({ task, instruction: null });
-  }
-  return { pending, node, budgetEnd: null };
+  const done = await readDoneRecords(state);
+  const pending = unitsOf(state)
+    .filter((task) => !isDone(done, task))
+    .map((task) => ({ task, instruction: null }));
+  state.run.log("units planned", {
+    commit: headSetOf(state.checkouts),
+    pending: pending.map(({ task }) => task.id),
+  });
+  return { pending, node, done, budgetEnd: null };
 }

@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import type { z } from "zod";
 import { SpanStatus, type Attributes } from "../../tracking/contract.ts";
 import type { TaskContent } from "../../mission/contract.ts";
 import {
@@ -14,15 +13,11 @@ import type {
   CommandRun,
   TestedInput,
 } from "./verification.ts";
-import { isString } from "../../kernel/values.ts";
 import { CodedError, diagnostic, diagnosticRows } from "../../kernel/errors.ts";
-import { ReplyRepair, type taskJudgementSchema } from "./judgement.ts";
 
 const SUCCESS = 0;
 const NO_LENGTH = 0;
-const JUDGEMENT_PARSED = "parsed";
 const COMMIT_INPUT_KIND = "repository";
-type TaskJudgement = z.output<typeof taskJudgementSchema>;
 
 export function phaseSpan(phase: Phase): SpanStart {
   assert.ok(phase);
@@ -129,42 +124,6 @@ export function verificationObserver(
       execute,
       commandEnd,
     );
-}
-
-export function judgementSpan(
-  spans: SpanRecorder,
-  task: TaskContent,
-  commit: string | null,
-): SpanStart {
-  assert.ok(task.id);
-  assert.ok(commit === null || commit.length > NO_LENGTH);
-  return {
-    key: spans.key(SpanOperation.Judgement),
-    operation: SpanOperation.Judgement,
-    attributes: {
-      "kanthord.task.id": task.id,
-      ...(commit === null ? {} : { "kanthord.commit": commit }),
-    },
-  };
-}
-
-export function judgementEnd(judgement: TaskJudgement | ReplyRepair): SpanEnd {
-  assert.ok(judgement);
-  if (isString(judgement))
-    return {
-      status:
-        judgement === ReplyRepair.Invalid ? SpanStatus.Error : SpanStatus.Ok,
-      attributes: { "kanthord.judgement.reply": judgement },
-    };
-  assert.ok(judgement.rationale);
-  return {
-    status: SpanStatus.Ok,
-    attributes: {
-      "kanthord.judgement.reply": JUDGEMENT_PARSED,
-      "kanthord.judgement.criterion_met": judgement.criterion_met,
-    },
-    texts: { rationale: judgement.rationale },
-  };
 }
 
 export function testedCommitOf(tested: TestedInput): string | null {
