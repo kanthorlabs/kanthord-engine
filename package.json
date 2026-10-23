@@ -17,11 +17,11 @@
     "static"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.build.json && ! grep -rlE 'import[(]\"[^\"]+[.]ts\"[)]' dist",
+    "build": "tsrs -p tsconfig.build.json --checkers 2 && ! grep -rlE 'import[(]\"[^\"]+[.]ts\"[)]' dist",
     "prepack": "pnpm run build",
     "pi-tools:fetch": "node scripts/pi-tools.mjs fetch",
     "pi-tools:update": "node scripts/pi-tools.mjs update",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsrs -p . --noEmit --checkers 2",
     "test": "PATH=\"$(node scripts/test-path.mjs)\" NODE_COMPILE_CACHE=node_modules/.cache/node-compile node --test --test-reporter=./scripts/test-reporter.mjs --test-concurrency=8 --test-timeout=60000 'src/**/*.test.ts' scripts/test-reporter.test.mjs scripts/test-path.test.mjs",
     "test:container": "test -n \"$KANTHORD_TEST_CONTAINER_IMAGE\" && PATH=\"$(node scripts/test-path.mjs)\" NODE_COMPILE_CACHE=node_modules/.cache/node-compile node --test --test-reporter=./scripts/test-reporter.mjs --test-concurrency=1 --test-timeout=600000 src/apps/server/container-live.test.ts",
     "test:e2e:jwt": "pnpm run build && python3 scripts/e2e-jwt.py",
@@ -47,6 +47,7 @@
     "lint-staged": "17.0.8",
     "prettier": "3.9.5",
     "supertest": "7.2.2",
+    "tsrs": "0.18.0-ts7.1.0-dev.20260929",
     "typescript": "5.9.3",
     "typescript-eslint": "8.63.0"
   },
