@@ -73,6 +73,7 @@ function environment(
     commit: "c".repeat(40),
     document,
     files: [],
+    trees: [],
   };
 }
 
@@ -209,6 +210,11 @@ test("the environment digest changes with the document, the files, the kanthord 
         ...environment(),
         files: [{ path: "Dockerfile", state: "present", text: "FROM x" }],
       },
+      KANTHORD_IMAGE,
+      VERSION,
+    ),
+    environmentDigest(
+      { ...environment(), trees: [{ path: ".", object: "d".repeat(40) }] },
       KANTHORD_IMAGE,
       VERSION,
     ),

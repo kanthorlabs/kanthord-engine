@@ -1137,6 +1137,90 @@ export async function readFilesAtCommit(
   );
 }
 
+async function fetchTrees(
+  run: GitRun,
+  address: string,
+  commit: string,
+): Promise<void> {
+  await run(["init", "--quiet"]);
+  await run(["remote", "add", "origin", "--", address]);
+  await run([
+    "fetch",
+    "--depth=1",
+    "--filter=blob:none",
+    "--no-tags",
+    "origin",
+    commit,
+  ]);
+}
+
+export async function readObjectIds(
+  address: string,
+  commit: string,
+  paths: readonly string[],
+  context: Context,
+  deadlineMs: number,
+  ssh: SshAccess,
+  parent: string = tmpdir(),
+): Promise<Array<string | null>> {
+  assert.ok(address !== EMPTY_STRING);
+  assert.match(commit, OBJECT_ID_PATTERN);
+  assert.ok(paths.length);
+  return withAccess(ssh, context, deadlineMs, async (agent, remaining) => {
+    const end = performance.now() + remaining;
+    const directory = await mkdtemp(
+      join(parent, REPOSITORY_FILES_DIRECTORY_PREFIX),
+    );
+    const run: GitRun = (args) =>
+      runGit(
+        directory,
+        args,
+        context,
+        end - performance.now(),
+        "read repository object ids",
+        { agent },
+      );
+    try {
+      await fetchTrees(run, address, commit);
+      return await objectIdsOf(run, commit, paths);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+}
+
+async function objectIdsOf(
+  run: GitRun,
+  commit: string,
+  paths: readonly string[],
+): Promise<Array<string | null>> {
+  const tree: RepositoryTree = {
+    entries: new Map(),
+    listedPaths: new Set(),
+    listedDirectories: new Set(),
+    targets: new Map(),
+  };
+  const nested = paths.filter((path) => path !== REPOSITORY_ROOT);
+  if (nested.length)
+    addTreeEntries(
+      tree,
+      await run([
+        "--literal-pathspecs",
+        "ls-tree",
+        "-z",
+        commit,
+        "--",
+        ...nested,
+      ]),
+    );
+  const root = paths.includes(REPOSITORY_ROOT)
+    ? (await run(["rev-parse", `${commit}^{tree}`])).trim()
+    : null;
+  return paths.map((path) =>
+    path === REPOSITORY_ROOT ? root : (tree.entries.get(path)?.object ?? null),
+  );
+}
+
 async function readFilesWith(
   address: string,
   commit: string,
@@ -1190,16 +1274,7 @@ async function readFilesWith(
       },
     );
   try {
-    await run(["init", "--quiet"]);
-    await run(["remote", "add", "origin", "--", address]);
-    await run([
-      "fetch",
-      "--depth=1",
-      "--filter=blob:none",
-      "--no-tags",
-      "origin",
-      commit,
-    ]);
+    await fetchTrees(run, address, commit);
     return await resolveRepositoryFiles(
       run,
       runInput,

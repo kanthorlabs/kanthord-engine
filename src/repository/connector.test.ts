@@ -29,6 +29,7 @@ import {
   GitWriteError,
   resolveBranchCommit,
   readFilesAtCommit,
+  readObjectIds,
 } from "./connector.ts";
 import { CheckEndState, ExpectedEndState } from "./github.ts";
 import { isString } from "../kernel/values.ts";
@@ -1284,5 +1285,31 @@ test("readFilesAtCommit rejects when the deadline elapsed and deletes its direct
     ),
     { code: SshAgentErrorCode.Failed },
   );
+  assert.equal(readdirSync(scratch).length, NO_ENTRIES);
+});
+
+test("readObjectIds answers the tree ids of the root and of a directory, and null for an absent path", async (t) => {
+  const { address, scratch, commit } = await instructionOrigin(t);
+  const first = await commit({
+    ".devcontainer/local/install.sh": "true\n",
+    "README.md": "first\n",
+  });
+  const second = await commit({ "README.md": "second\n" });
+  const read = (head: string) =>
+    readObjectIds(
+      address,
+      head,
+      [".", ".devcontainer/local", ".devcontainer/absent"],
+      background,
+      DEADLINE_MS,
+      LOCAL_GIT_SSH_ACCESS,
+      scratch,
+    );
+  const [before, after] = [await read(first), await read(second)];
+  assert.match(before[0] ?? "", /^[0-9a-f]{40}$/);
+  assert.match(before[1] ?? "", /^[0-9a-f]{40}$/);
+  assert.equal(before[2], null);
+  assert.notEqual(after[0], before[0]);
+  assert.equal(after[1], before[1]);
   assert.equal(readdirSync(scratch).length, NO_ENTRIES);
 });

@@ -220,6 +220,10 @@ export function environmentDigest(
       state: file.state,
       text: file.text,
     })),
+    trees: environment.trees.map((tree) => ({
+      path: tree.path,
+      object: tree.object,
+    })),
     kanthord_image: kanthordImageId,
     version,
   });

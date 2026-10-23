@@ -495,6 +495,14 @@ export type RepositoryFiles = {
     deadlineMs: number,
     ssh: SshAccess,
   ): Promise<Array<{ path: string; state: string; text: string | null }>>;
+  readObjectIds(
+    address: string,
+    commit: string,
+    paths: readonly string[],
+    context: Context,
+    deadlineMs: number,
+    ssh: SshAccess,
+  ): Promise<Array<string | null>>;
   cloneSnapshot(
     address: string,
     revision: string,
@@ -608,6 +616,7 @@ export type SlotEnvironment = {
   commit: string;
   document: Environment;
   files: Array<{ path: string; state: string; text: string | null }>;
+  trees: Array<{ path: string; object: string | null }>;
 };
 
 const emptyFields = z.strictObject({});
