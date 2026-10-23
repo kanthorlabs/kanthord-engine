@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   environmentSchema,
+  jsoncText,
   lifecycleScripts,
   parseEnvironmentText,
   setupScriptsOf,
@@ -56,4 +57,26 @@ test("an environment refuses a lifecycle command of a wrong type", () => {
       environmentSchema.safeParse({ postCreateCommand }).success,
       false,
     );
+});
+
+test("a JSONC text drops comments and trailing commas outside strings only", () => {
+  assert.deepEqual(
+    JSON.parse(
+      jsoncText(`{
+        "url": "http://host/*not*/a//comment", /* block */
+        "quote": "a \\" , ]", // line
+        "list": [1, 2, ],
+        "nested": {"a": [ { }, ], },
+      }`)!,
+    ),
+    {
+      url: "http://host/*not*/a//comment",
+      quote: 'a " , ]',
+      list: [1, 2],
+      nested: { a: [{}] },
+    },
+  );
+  assert.equal(jsoncText('{"a": 1 /* open'), null);
+  assert.match(parseEnvironmentText('{"a": 1 /* open').error ?? "", /comment/);
+  assert.equal(parseEnvironmentText("[1,]").document, null);
 });
