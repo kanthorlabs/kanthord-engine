@@ -33,6 +33,7 @@ import {
   ClaimIntent,
   ClaimNodeState,
   CooldownChangeKind,
+  EnvironmentFailure,
   ExecutionStopReason,
   ProviderFailure,
   type AgentPin,
@@ -226,6 +227,26 @@ test("a first advancing provider stop counts no failure", async (t) => {
     stopOf(ExecutionStopReason.ProviderFailed, ProviderFailure.Unavailable),
   );
   assert.equal(h.failureCount(), NO_FAILURES);
+});
+
+test("an environment stop counts no failure and keeps the earlier count", async (t) => {
+  const h = releaseHarness(t);
+  t.mock.method(h.service, "wake", () => {});
+  t.mock.method(Date, "now", () => FIXTURE_NOW);
+  h.prior(stopOf(ExecutionStopReason.JudgementInvalid, null));
+  h.prior(
+    stopOf(
+      ExecutionStopReason.EnvironmentFailed,
+      EnvironmentFailure.SetupFailed,
+    ),
+  );
+  await h.release(
+    stopOf(
+      ExecutionStopReason.EnvironmentFailed,
+      EnvironmentFailure.CommandAbsent,
+    ),
+  );
+  assert.equal(h.failureCount(), ONE_FAILURE);
 });
 
 test("a non-advancing provider stop counts as a failure and keeps the hold", async (t) => {

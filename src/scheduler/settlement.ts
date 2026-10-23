@@ -137,7 +137,7 @@ export function consecutiveFailures(
       `SELECT count(*) AS count FROM scheduler_execution
     WHERE node_id = ? AND attempt = ? AND id != ?
     AND (ended_at >= expired_at
-      OR (coalesce(json_extract(stop, '$.reason'), ?) != ?
+      OR (coalesce(json_extract(stop, '$.reason'), ?) NOT IN (?, ?)
         AND NOT (json_extract(stop, '$.reason') = ?
           AND json_extract(stop, '$.code') IN (SELECT value FROM json_each(?)))))
     AND rowid > coalesce((SELECT max(rowid) FROM scheduler_execution
@@ -150,6 +150,7 @@ export function consecutiveFailures(
       ending.execution_id,
       ExecutionStopReason.BudgetEnd,
       ExecutionStopReason.BudgetEnd,
+      ExecutionStopReason.EnvironmentFailed,
       ExecutionStopReason.ProviderFailed,
       canonicalJSON(Object.values(AdvancingProviderFailure)),
       ending.node_id,

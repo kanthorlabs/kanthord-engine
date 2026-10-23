@@ -52,6 +52,7 @@ export const ExecutionStopReason = {
   BudgetEnd: "budget_end",
   ProviderFailed: "provider_failed",
   NoProgress: "no_progress",
+  EnvironmentFailed: "environment_failed",
 } as const;
 export const BudgetLimit = {
   Turns: "turns",
@@ -67,6 +68,12 @@ export const ProviderFailure = {
 } as const;
 export type ProviderFailure =
   (typeof ProviderFailure)[keyof typeof ProviderFailure];
+export const EnvironmentFailure = {
+  SetupFailed: "setup_failed",
+  CommandAbsent: "command_absent",
+} as const;
+export type EnvironmentFailure =
+  (typeof EnvironmentFailure)[keyof typeof EnvironmentFailure];
 export const AdvancingProviderFailure = {
   RateLimited: ProviderFailure.RateLimited,
   QuotaExhausted: ProviderFailure.QuotaExhausted,
@@ -100,10 +107,15 @@ function stopCodeFits(stop: {
   const providerCode = Object.values(ProviderFailure).some(
     (failure) => failure === stop.code,
   );
+  const environmentCode = Object.values(EnvironmentFailure).some(
+    (failure) => failure === stop.code,
+  );
   if (stop.reason === ExecutionStopReason.BudgetEnd) return budgetCode;
   if (stop.reason === ExecutionStopReason.ProviderFailed) return providerCode;
+  if (stop.reason === ExecutionStopReason.EnvironmentFailed)
+    return environmentCode;
   if (stop.reason === ExecutionStopReason.NoProgress) return stop.code === null;
-  return !budgetCode && !providerCode;
+  return !budgetCode && !providerCode && !environmentCode;
 }
 
 export const releaseStopSchema = z

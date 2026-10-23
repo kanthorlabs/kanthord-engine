@@ -20,6 +20,13 @@ import {
 
 const NO_STALLS = 0;
 
+function countsFailure(stop: ExecutionRelease["stop"]): boolean {
+  return (
+    !isAdvancingStop(stop) &&
+    stop?.reason !== ExecutionStopReason.EnvironmentFailed
+  );
+}
+
 export function release(
   dependencies: Dependencies,
   executionId: string,
@@ -76,7 +83,7 @@ export function release(
         tx,
         dependencies,
         row.node_id,
-        consecutiveFailures(tx, row, !isAdvancingStop(body.stop)),
+        consecutiveFailures(tx, row, countsFailure(body.stop)),
         now,
       );
       return { execution_id: executionId, ended_at: now };
