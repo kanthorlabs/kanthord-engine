@@ -94,7 +94,9 @@ async function mergeUnder(
   if (await isAncestor(env, directory, ref, context, remaining()))
     return RefreshResult.Current;
   const commit = await commitOf(env, directory, ref, context, remaining());
-  const conflicts = await mergeRef(env, directory, ref, context, remaining());
+  const conflicts = await withinGit(state.run.spans, GitStep.MergeBase, () =>
+    mergeRef(env, directory, ref, context, remaining()),
+  );
   if (conflicts.length > NO_FILES) {
     await gatedAgent(
       state,

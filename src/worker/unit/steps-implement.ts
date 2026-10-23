@@ -72,7 +72,7 @@ import {
   verificationObserver,
 } from "./method-telemetry.ts";
 import { nodeWork, RefreshResult, refreshAtClaim } from "./base-refresh.ts";
-import { releaseGate, ReleaseGateKind } from "./release-gate.ts";
+import { nodeUnitOf, releaseGate, ReleaseGateKind } from "./release-gate.ts";
 
 export const HEAD_COMMIT_SUBJECT = "Head commit of the node branch";
 const NO_TASKS = 0;
@@ -84,9 +84,7 @@ export function workUnitsOf(
   revision: Pick<Revision, "filename" | "content" | "tasks">,
 ): TaskContent[] {
   if (revision.tasks.length > NO_TASKS) return revision.tasks;
-  return [
-    { id: nodeId, filename: revision.filename, content: revision.content },
-  ];
+  return [nodeUnitOf(nodeId, revision)];
 }
 
 function unitsOf(state: StepsState): TaskContent[] {
@@ -273,29 +271,32 @@ async function runUnits(
   pending: readonly PendingTask[],
   taskRunner: TaskRunner,
 ): Promise<UnitsEnd> {
-  let completedTasks = NO_TASKS;
+  const completed = new Set<string>();
   let units = pending;
   while (!state.agent.budget.exhausted()) {
-    const ran = await runPending(state, units, taskRunner);
-    completedTasks += ran.completedTasks;
-    if (ran.budgetEnd) return { ...ran, completedTasks };
+    const ran = await runPending(state, units, taskRunner, completed);
+    if (ran.budgetEnd) return ran;
     const gate = await releaseGate(state);
     if (gate.kind === ReleaseGateKind.Passed)
-      return { task: null, budgetEnd: false, completedTasks };
+      return { task: null, budgetEnd: false, completedTasks: completed.size };
     if (gate.kind === ReleaseGateKind.BudgetEnd) break;
     state.run.log("release failure routed", { task_id: gate.unit.id });
     units = [{ task: gate.unit, instruction: gate.instruction }];
   }
-  return { task: state.task ?? null, budgetEnd: true, completedTasks };
+  return {
+    task: state.task ?? null,
+    budgetEnd: true,
+    completedTasks: completed.size,
+  };
 }
 
 async function runPending(
   state: StepsState,
   pending: readonly PendingTask[],
   taskRunner: TaskRunner,
+  completed: Set<string>,
 ): Promise<UnitsEnd> {
   assert.ok(pending.length <= unitsOf(state).length);
-  let completedTasks = NO_TASKS;
   for (const { task, instruction } of pending) {
     state.task = task;
     const result = await state.run.spans.within(
@@ -304,10 +305,10 @@ async function runPending(
       taskEnd,
     );
     if (result.kind === TaskResultKind.BudgetEnd)
-      return { task, budgetEnd: true, completedTasks };
-    completedTasks++;
+      return { task, budgetEnd: true, completedTasks: completed.size };
+    completed.add(task.id);
   }
-  return { task: null, budgetEnd: false, completedTasks };
+  return { task: null, budgetEnd: false, completedTasks: completed.size };
 }
 
 async function judgeTask(

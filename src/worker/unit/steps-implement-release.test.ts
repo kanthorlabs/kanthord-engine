@@ -319,11 +319,27 @@ test("a revoked stop writes no checkpoint, pushes nothing and releases nothing",
 
 test("the release gate merges a clean base change and verifies the merged head", async (t) => {
   const passing = await fixture(t, [task("pass", "true")], []);
+  const records: TelemetryRecord[] = [];
+  (passing.run as { spans: SpanRecorder }).spans = new SpanRecorder(
+    passing.run.claim,
+    "coder-1",
+    { write: (batch) => records.push(...batch), flush: async () => {} },
+  );
   const before = passing.checkouts[0]!.head;
   await advanceBase(passing, t, LATE_MAIN_CHANGE, "other");
   assert.deepEqual(await releaseGate(passing), {
     kind: ReleaseGateKind.Passed,
   });
+  assert.deepEqual(
+    records.flatMap((record) =>
+      record.kind === RecordKind.Span &&
+      record.operation === SpanOperation.Git &&
+      "start_time" in record
+        ? [record.attributes?.["kanthord.git.step"]]
+        : [],
+    ),
+    [GitStep.FetchBase, GitStep.MergeBase],
+  );
   assert.equal(
     readFileSync(join(passing.root, "other"), "utf8"),
     LATE_MAIN_CHANGE,

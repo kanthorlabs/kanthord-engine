@@ -12,11 +12,7 @@ import {
   refreshAtClaim,
   refreshAtRelease,
 } from "./base-refresh.ts";
-import {
-  releaseGate,
-  ReleaseGateKind,
-  RELEASE_DIRECTORY,
-} from "./release-gate.ts";
+import { releaseGate, ReleaseGateKind } from "./release-gate.ts";
 import {
   advanceBase,
   commitOnNode,
@@ -24,7 +20,7 @@ import {
   fauxToolCall,
   implementFixture,
 } from "./test-support.ts";
-import { sshAccessOf } from "./workspace.ts";
+import { RELEASE_DIRECTORY, sshAccessOf } from "./workspace.ts";
 import type { SshAccess } from "../../repository/contract.ts";
 
 const BINDINGS = ["api", "web"];

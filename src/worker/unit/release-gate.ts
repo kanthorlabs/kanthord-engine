@@ -3,13 +3,13 @@ import { rmSync } from "node:fs";
 import { isAbsolute, join, relative } from "node:path";
 import type { Context } from "../../kernel/context.ts";
 import { ensureDirectory } from "../../kernel/files.ts";
-import type { TaskContent } from "../../mission/contract.ts";
+import type { Revision, TaskContent } from "../../mission/contract.ts";
 import { refreshAtRelease, RefreshResult } from "./base-refresh.ts";
 import { verificationCommands } from "./evaluation-input.ts";
 import { taskRevisionInstruction } from "./judgement.ts";
-import { checkoutDetached, cloneLocal } from "./local-git.ts";
+import { checkoutDetached, cloneLocal, matchRemote } from "./local-git.ts";
 import { testedCommitOf, verificationObserver } from "./method-telemetry.ts";
-import type { StepsState } from "./steps-implement.ts";
+import { repositoryOf, type StepsState } from "./steps-implement.ts";
 import {
   infrastructureStop,
   runVerificationsWithOutput,
@@ -18,9 +18,8 @@ import {
   verificationPassed,
   type VerificationRun,
 } from "./verification.ts";
-import { CHECKOUTS_DIRECTORY } from "./workspace.ts";
+import { CHECKOUTS_DIRECTORY, RELEASE_DIRECTORY } from "./workspace.ts";
 
-export const RELEASE_DIRECTORY = "release";
 const EXIT_SUCCESS = 0;
 const NOT_FOUND = -1;
 const PARENT = "..";
@@ -40,19 +39,17 @@ export type ReleaseGate =
     };
 
 export function nodeUnitOf(
-  state: Pick<StepsState, "input" | "revision">,
+  nodeId: string,
+  revision: Pick<Revision, "filename" | "content">,
 ): TaskContent {
-  return {
-    id: state.input.claim.node_id,
-    filename: state.revision.filename,
-    content: state.revision.content,
-  };
+  assert.ok(nodeId);
+  return { id: nodeId, filename: revision.filename, content: revision.content };
 }
 
 export function commandOwners(
   state: Pick<StepsState, "input" | "revision">,
 ): TaskContent[] {
-  const node = nodeUnitOf(state);
+  const node = nodeUnitOf(state.input.claim.node_id, state.revision);
   return [
     ...state.revision.content.verifications.map(() => node),
     ...state.revision.tasks.flatMap((task) =>
@@ -148,6 +145,14 @@ async function buildReleaseClones(
       state.input.env,
       checkout.directory,
       directory,
+      context,
+      remaining(),
+    );
+    await matchRemote(
+      state.input.env,
+      directory,
+      checkout.directory,
+      repositoryOf(state, checkout).address,
       context,
       remaining(),
     );

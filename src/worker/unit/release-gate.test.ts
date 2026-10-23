@@ -3,6 +3,7 @@ import { test } from "node:test";
 import {
   appendFileSync,
   existsSync,
+  mkdirSync,
   readFileSync,
   writeFileSync,
 } from "node:fs";
@@ -13,8 +14,15 @@ import type { TaskContent } from "../../mission/contract.ts";
 import { EndReason } from "./execution-run.ts";
 import { executionBoundary } from "./native-method.ts";
 import type { MethodClients } from "./method-clients.ts";
-import { runStepsImplement, taskWork } from "./steps-implement.ts";
 import {
+  prepareStepsWorkspace,
+  runStepsImplement,
+  taskWork,
+} from "./steps-implement.ts";
+import { releaseGate, ReleaseGateKind } from "./release-gate.ts";
+import { RELEASE_DIRECTORY, WorkspaceKind } from "./workspace.ts";
+import {
+  advanceBase,
   fauxAssistantMessage,
   fauxToolCall,
   implementFixture as fixture,
@@ -33,6 +41,8 @@ const SECRET = "secret";
 const MARKER = "release-directory";
 const TAG = "x";
 const CONFIG_KEY = "a.b";
+const BASE_CHANGE = "base change";
+const LEFTOVER = "leftover";
 const RUN_ONCE =
   "if [ -e .ran ] && [ ! -e fixed ]; then exit 1; fi; touch .ran";
 
@@ -196,4 +206,38 @@ test("a release verification that writes git state leaves the live checkout unch
     (await simpleGit(h.root).getConfig(CONFIG_KEY, "local")).value,
     null,
   );
+});
+
+test("a release clone holds the remote of the reviewer clone and the fetched base", async (t) => {
+  const markers = temporary(t);
+  const base = join(markers, "base");
+  const url = join(markers, "url");
+  const h = await fixture(t, [], []);
+  h.revision = {
+    ...h.revision,
+    content: {
+      ...h.revision.content,
+      verifications: [
+        `git rev-parse origin/main > ${base} && git remote get-url origin > ${url}`,
+      ],
+    },
+  };
+  await advanceBase(h, t, BASE_CHANGE, "other");
+  assert.deepEqual(await releaseGate(h), { kind: ReleaseGateKind.Passed });
+  const fetched = (await simpleGit(h.bare).revparse(["main"])).trim();
+  assert.equal(readFileSync(base, "utf8").trim(), fetched);
+  assert.equal(
+    readFileSync(url, "utf8").trim(),
+    h.input.setup.repositories[0]!.address,
+  );
+});
+
+test("the next prepare removes release clones that a crash left", async (t) => {
+  const h = await fixture(t, [], []);
+  const key = h.input.workspaces.nodeKey(h.input.claim.node_id);
+  const leftover = join(key, RELEASE_DIRECTORY, LEFTOVER);
+  mkdirSync(leftover, { recursive: true });
+  h.input.workspaces.release(key, WorkspaceKind.Node);
+  await prepareStepsWorkspace(h.input, h.run);
+  assert.equal(existsSync(join(key, RELEASE_DIRECTORY)), false);
 });

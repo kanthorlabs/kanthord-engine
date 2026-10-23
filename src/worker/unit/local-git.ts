@@ -606,6 +606,40 @@ export async function cloneLocal(
   );
 }
 
+export async function matchRemote(
+  env: NodeJS.ProcessEnv,
+  directory: string,
+  source: string,
+  address: string,
+  context: Context,
+  deadlineMs: number,
+): Promise<void> {
+  assert.ok(source && !source.startsWith("-"));
+  assert.ok(address && !address.startsWith("-"));
+  const end = performance.now() + deadlineMs;
+  await run(
+    env,
+    directory,
+    [
+      "fetch",
+      "--prune",
+      "--no-tags",
+      "--",
+      source,
+      "+refs/remotes/origin/*:refs/remotes/origin/*",
+    ],
+    context,
+    deadlineMs,
+  );
+  await run(
+    env,
+    directory,
+    ["remote", "set-url", "origin", "--", address],
+    context,
+    end - performance.now(),
+  );
+}
+
 export async function checkoutDetached(
   env: NodeJS.ProcessEnv,
   directory: string,
