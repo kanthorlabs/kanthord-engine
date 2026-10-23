@@ -836,7 +836,7 @@ export async function restoreTracked(
   await run(
     env,
     directory,
-    ["checkout", "HEAD", "--", ...paths],
+    ["--literal-pathspecs", "checkout", "HEAD", "--", ...paths],
     context,
     deadlineMs,
   );

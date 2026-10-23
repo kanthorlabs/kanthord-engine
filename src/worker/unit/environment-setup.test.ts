@@ -33,6 +33,8 @@ const COMMAND_ABSENT_EXIT = 127;
 const SETUP_OUTPUT = "update\ncreate\n";
 const ONE_RUN = "run\n";
 const TWO_RUNS = "run\nrun\n";
+const MAGIC_PATH = ":lock";
+const MAGIC_TEXT = "{}";
 
 async function commit(directory: string, path: string, content: string) {
   writeFileSync(join(directory, path), content);
@@ -278,4 +280,44 @@ test("a setup that changes a tracked file on the node head and on the base head 
       error.code === EnvironmentFailure.SetupFailed &&
       /package-lock\.json/.test(error.detail ?? ""),
   );
+});
+
+async function stagedAfterSetup(checkout: string): Promise<string[]> {
+  await simpleGit(checkout).raw(["add", "--all"]);
+  return (await simpleGit(checkout).raw(["diff", "--cached", "--name-only"]))
+    .split("\n")
+    .filter(Boolean);
+}
+
+test("a failed setup leaves its untracked output out of the next task commit", async (t) => {
+  const { checkout } = await repository(t, { "package-lock.json": "{}" });
+  for (const command of [
+    "mkdir -p build && touch build/out && exit 3",
+    "mkdir -p build && touch build/out && echo changed > package-lock.json",
+  ]) {
+    const result = await runSetup(
+      input(),
+      await setupEntries(input(), [
+        setupCheckout(checkout, stored({ postCreateCommand: command })),
+      ]),
+    );
+    assert.equal(result.end, SetupEnd.Failed);
+    assert.deepEqual(await stagedAfterSetup(checkout), []);
+  }
+});
+
+test("a tracked change restores a path that reads as pathspec magic", async (t) => {
+  const { checkout } = await repository(t, { file: "base" });
+  writeFileSync(join(checkout, MAGIC_PATH), MAGIC_TEXT);
+  await simpleGit(checkout).raw(["--literal-pathspecs", "add", MAGIC_PATH]);
+  await simpleGit(checkout).raw([...IDENTITY, "commit", "-m", MAGIC_PATH]);
+  const result = await runSetup(
+    input(),
+    await setupEntries(input(), [
+      setupCheckout(checkout, stored({ postCreateCommand: "echo x > :lock" })),
+    ]),
+  );
+  assert.ok(result.end === SetupEnd.Failed);
+  assert.deepEqual(result.changed, [MAGIC_PATH]);
+  assert.equal(readFileSync(join(checkout, MAGIC_PATH), "utf8"), MAGIC_TEXT);
 });

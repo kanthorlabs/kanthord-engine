@@ -230,15 +230,22 @@ export async function runSetup(
     });
     if (run.outcome === VerificationClass.BudgetEnd)
       return { end: SetupEnd.BudgetEnd };
-    if (run.outcome !== VerificationClass.Pass)
+    if (run.outcome !== VerificationClass.Pass) {
+      await excludeUntracked(
+        input.env,
+        entry.directory,
+        input.context,
+        remaining(input),
+      );
       return { end: SetupEnd.Failed, run, commands };
+    }
     const changed = await trackedChanges(
       input.env,
       entry.directory,
       input.context,
       remaining(input),
     );
-    if (changed.length) {
+    if (changed.length)
       await restoreTracked(
         input.env,
         entry.directory,
@@ -246,14 +253,13 @@ export async function runSetup(
         input.context,
         remaining(input),
       );
-      return trackedFailure(run, commands, changed);
-    }
     await excludeUntracked(
       input.env,
       entry.directory,
       input.context,
       remaining(input),
     );
+    if (changed.length) return trackedFailure(run, commands, changed);
   }
   return { end: SetupEnd.Pass };
 }
