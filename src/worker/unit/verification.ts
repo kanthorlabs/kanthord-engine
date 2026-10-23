@@ -5,6 +5,7 @@ import type { Context } from "../../kernel/context.ts";
 import { killProcessGroup } from "../../kernel/process-group.ts";
 import { redactReason } from "../../kernel/probe.ts";
 import { EndReason, ExecutionStop } from "./execution-run.ts";
+import { EnvironmentFailure } from "../../scheduler/contract.ts";
 import { childEnvironment } from "./tool-table.ts";
 import { COMMAND_LIMIT_MS } from "./budget.ts";
 import type { WorkspaceCheckout } from "./workspace.ts";
@@ -39,6 +40,7 @@ export interface Verification {
 export const VerificationClass = {
   BudgetEnd: "budget_end",
   CodeFailure: "code_failure",
+  Environment: "environment",
   Infrastructure: "infrastructure",
   Pass: "pass",
 } as const;
@@ -53,6 +55,7 @@ export interface VerificationRun {
   outcome: VerificationClass;
 }
 const SUCCESS = 0;
+const COMMAND_ABSENT_EXIT = 127;
 const SIGNAL_EXIT_FIRST = 129;
 const SIGNAL_EXIT_LAST = 192;
 const PROCESS_ABSENT = "ESRCH";
@@ -93,6 +96,7 @@ export interface VerificationInput {
   commandLimitMs?: number;
   reruns?: number;
   exhausted?: () => boolean;
+  baseline?: (command: string) => Promise<number | null>;
 }
 
 function outputTail(chunks: Buffer[]): string {
@@ -237,6 +241,18 @@ function unstartedClass(input: VerificationInput): VerificationClass | null {
   return null;
 }
 
+async function absentOutcome(
+  command: string,
+  input: VerificationInput,
+  baseline: NonNullable<VerificationInput["baseline"]>,
+): Promise<VerificationClass> {
+  const unstarted = unstartedClass(input);
+  if (unstarted !== null) return unstarted;
+  return (await baseline(command)) === COMMAND_ABSENT_EXIT
+    ? VerificationClass.Environment
+    : VerificationClass.CodeFailure;
+}
+
 async function classifiedCommand(
   command: string,
   index: number,
@@ -245,6 +261,16 @@ async function classifiedCommand(
   const exhausted = input.exhausted ?? (() => false);
   const ran = await observedCommand({ command, index, run: FIRST_RUN }, input);
   const outcome = classOf(ran, exhausted());
+  if (
+    outcome === VerificationClass.CodeFailure &&
+    ran.result.exit_code === COMMAND_ABSENT_EXIT &&
+    input.baseline
+  )
+    return {
+      ran,
+      outcome: await absentOutcome(command, input, input.baseline),
+      runs: FIRST_RUN,
+    };
   if (outcome !== VerificationClass.Infrastructure)
     return { ran, outcome, runs: FIRST_RUN };
   const unstarted = unstartedClass(input);
@@ -328,6 +354,19 @@ export function infrastructureStop(run: VerificationRun): ExecutionStop | null {
         timed_out: result.timed_out,
         command: result.command,
       }),
+    ),
+  );
+}
+
+export function environmentStop(run: VerificationRun): ExecutionStop | null {
+  if (run.outcome !== VerificationClass.Environment) return null;
+  const result = run.verification.results.at(-1);
+  assert.ok(result);
+  return new ExecutionStop(
+    EndReason.EnvironmentFailed,
+    EnvironmentFailure.CommandAbsent,
+    redactReason(
+      JSON.stringify({ exit_code: result.exit_code, command: result.command }),
     ),
   );
 }

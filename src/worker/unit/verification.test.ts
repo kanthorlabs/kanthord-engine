@@ -11,6 +11,7 @@ import {
   temporary,
 } from "../../kernel/test-support.ts";
 import {
+  environmentStop,
   infrastructureStop,
   runVerifications,
   runVerificationsWithOutput,
@@ -22,6 +23,7 @@ import {
 } from "./verification.ts";
 import { EndReason, ExecutionStop } from "./execution-run.ts";
 import { REASON_MAX_LENGTH } from "../../kernel/probe.ts";
+import { EnvironmentFailure } from "../../scheduler/contract.ts";
 
 test("verification runs in order and stops on the first failure or unstarted deadline", async (t) => {
   const expectedOrder = "first\nsecond\n";
@@ -382,6 +384,55 @@ test("exit 127 is a code failure with no infrastructure rerun", async (t) => {
   assert.equal(run.outcome, VerificationClass.CodeFailure);
   assert.equal(runs.length, SINGLE_RUN);
   assert.equal(run.verification.results[0]?.exit_code, COMMAND_ABSENT_EXIT);
+});
+
+test("exit 127 on the node head and on the base head is an environment failure", async (t) => {
+  const { input, runs } = countedInput(temporary(t), ["command-absent-x"]);
+  const asked: string[] = [];
+  const run = await runVerificationsWithOutput({
+    ...input,
+    baseline: async (command) => {
+      asked.push(command);
+      return COMMAND_ABSENT_EXIT;
+    },
+  });
+  assert.equal(run.outcome, VerificationClass.Environment);
+  assert.deepEqual(asked, ["command-absent-x"]);
+  assert.equal(runs.length, SINGLE_RUN);
+  assert.deepEqual(run.flaky, [false]);
+  const stop = environmentStop(run);
+  assert.ok(stop instanceof ExecutionStop);
+  assert.equal(stop.reason, EndReason.EnvironmentFailed);
+  assert.equal(stop.code, EnvironmentFailure.CommandAbsent);
+  assert.match(stop.detail ?? "", /command-absent-x/);
+  assert.equal(infrastructureStop(run), null);
+});
+
+test("exit 127 only on the node head is a code failure", async (t) => {
+  const { input } = countedInput(temporary(t), ["command-absent-x"]);
+  for (const base of [0, FAILED_EXIT, null]) {
+    const run = await runVerificationsWithOutput({
+      ...input,
+      baseline: async () => base,
+    });
+    assert.equal(run.outcome, VerificationClass.CodeFailure);
+    assert.equal(environmentStop(run), null);
+  }
+});
+
+test("exit 127 with an exhausted budget is a budget end with no base rerun", async (t) => {
+  const { input } = countedInput(temporary(t), ["command-absent-x"]);
+  let asked = false;
+  const run = await runVerificationsWithOutput({
+    ...input,
+    exhausted: () => true,
+    baseline: async () => {
+      asked = true;
+      return COMMAND_ABSENT_EXIT;
+    },
+  });
+  assert.equal(asked, false);
+  assert.equal(run.outcome, VerificationClass.BudgetEnd);
 });
 
 test("an infrastructure failure stops with its code and a detail that names the command", async (t) => {
