@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import type { SetupFailure } from "./environment-setup.ts";
 import { canonicalJSON } from "../../kernel/json.ts";
 import {
   AssessmentResult,
@@ -80,6 +81,7 @@ async function judge(
   checkouts: readonly ExamineCheckout[],
   openAgent: OpenAgent,
   dependencies: Awaited<ReturnType<typeof readDependencies>> | null,
+  setupFailure: SetupFailure | null,
 ) {
   const examine = input.setup.intent === ExecutionIntent.Examine;
   const commands = verificationCommands(revision);
@@ -89,6 +91,8 @@ async function judge(
   const stop =
     infrastructureStop(verificationRun) ?? environmentStop(verificationRun);
   if (stop) throw stop;
+  const setupAssessment = setupFailureAssessment(setupFailure);
+  if (setupAssessment) return setupAssessment;
   if (!verificationPassed(verification, commands))
     return {
       result: AssessmentResult.CriterionNotMet,
@@ -136,6 +140,18 @@ async function judge(
         : judgement.result,
     rationale: judgementRationale(judgement),
     proposals,
+  };
+}
+
+export function setupFailureAssessment(setupFailure: SetupFailure | null) {
+  if (setupFailure === null) return null;
+  return {
+    result: AssessmentResult.CriterionNotMet,
+    rationale: failedVerificationReport(
+      setupFailure.run,
+      setupFailure.commands,
+    ),
+    proposals: [],
   };
 }
 
@@ -205,6 +221,7 @@ async function evaluate(
       prepared.checkouts,
       openAgent,
       dependencies,
+      prepared.setupFailure,
     );
   } catch (error) {
     if (

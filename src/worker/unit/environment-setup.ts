@@ -74,9 +74,12 @@ function remaining(input: SetupInput): number {
   return Math.max(1, input.deadline - Date.now());
 }
 
-export function setupStop(
-  result: Extract<SetupResult, { end: typeof SetupEnd.Failed }>,
-): ExecutionStop {
+export type SetupFailure = Extract<
+  SetupResult,
+  { end: typeof SetupEnd.Failed }
+>;
+
+export function setupStop(result: SetupFailure): ExecutionStop {
   const last = result.run.verification.results.at(-1);
   return new ExecutionStop(
     EndReason.EnvironmentFailed,

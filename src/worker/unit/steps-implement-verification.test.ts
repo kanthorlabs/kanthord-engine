@@ -28,6 +28,7 @@ const ONE_TURN = 1;
 const ONE_TOOL_TURN = 2;
 const FOUR_TURNS = 4;
 const SETUP_MARKER = "setup-ran";
+const SETUP_INSTRUCTION = "Fix the setup: test -e fixed failed.";
 const WALL_DEADLINE_MS = 300;
 
 function infrastructureEnd(
@@ -189,4 +190,65 @@ test("a setup failure on the base head stops the prepare with environment_failed
       code: EnvironmentFailure.SetupFailed,
     },
   );
+});
+
+test("a pending node-head setup reruns before the next verification and passes once the agent fixes it", async (t) => {
+  const current = task("setup", "true");
+  const h = await fixture(
+    t,
+    [current],
+    [
+      fauxAssistantMessage(
+        fauxToolCall("write", { path: "fixed", content: "node" }),
+        { stopReason: "toolUse" },
+      ),
+      fauxAssistantMessage("work"),
+    ],
+  );
+  h.setup = h.setup.map((entry) => ({
+    ...entry,
+    environment: { postCreateCommand: "test -e fixed" },
+  }));
+  h.setupPending = true;
+  const result = await runTask(h, current, SETUP_INSTRUCTION);
+  assert.equal(result.kind, TaskResultKind.Complete);
+  assert.equal(h.setupPending, false);
+  assert.ok(JSON.stringify(h.provider.calls[0]).includes(SETUP_INSTRUCTION));
+});
+
+test("a pending node-head setup that keeps failing sends its own command in the revision turn", async (t) => {
+  const current = task("setup", "true");
+  const h = await fixture(
+    t,
+    [current],
+    [
+      fauxAssistantMessage("work"),
+      fauxAssistantMessage("revised"),
+      fauxAssistantMessage("revised again"),
+    ],
+  );
+  h.setup = h.setup.map((entry) => ({
+    ...entry,
+    environment: { postCreateCommand: "test -e never-fixed" },
+  }));
+  h.setupPending = true;
+  await assert.rejects(runTask(h, current), { reason: EndReason.NoProgress });
+  assert.equal(h.setupPending, true);
+  assert.ok(
+    JSON.stringify(h.provider.calls.at(-1)).includes("test -e never-fixed"),
+  );
+});
+
+test("the setup instruction of a node-head failure goes to the first pending task", async (t) => {
+  const current = task("setup", "true");
+  const h = await fixture(t, [current], [fauxAssistantMessage("never")]);
+  h.setupInstruction = SETUP_INSTRUCTION;
+  const instructions: Array<string | null> = [];
+  await executionBoundary(h.run, () =>
+    runStepsImplement(h, async (_state, _task, instruction) => {
+      instructions.push(instruction);
+      return { kind: TaskResultKind.BudgetEnd };
+    }),
+  );
+  assert.deepEqual(instructions, [SETUP_INSTRUCTION]);
 });

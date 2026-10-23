@@ -25,6 +25,7 @@ import {
   setUpHeads,
   setupEntries,
   namedCheckouts,
+  type SetupFailure,
 } from "./environment-setup.ts";
 import { ExecutionIntent } from "../contract.ts";
 
@@ -205,8 +206,8 @@ async function setUpReview(
   workspace: { key: string; checkouts: readonly ExamineCheckout[] },
   testedInput: TestedInput,
   deadline: number,
-): Promise<BaseHead | null> {
-  if (!workspace.checkouts.length) return null;
+): Promise<{ base: BaseHead | null; setupFailure: SetupFailure | null }> {
+  if (!workspace.checkouts.length) return { base: null, setupFailure: null };
   const setupInput = {
     env: input.env,
     context: run.operationContext,
@@ -235,7 +236,10 @@ async function setUpReview(
         (entry) => entry.exit_code,
       ),
     });
-  return base;
+  return {
+    base,
+    setupFailure: result.end === SetupEnd.Failed ? result : null,
+  };
 }
 
 export async function prepareEvaluation(
@@ -268,7 +272,7 @@ export async function prepareEvaluation(
       input.claim.created_at + input.setup.resource_budget.wall_time_ms,
       input.claim.expired_at,
     );
-    const base = await setUpReview(
+    const { base, setupFailure } = await setUpReview(
       input,
       run,
       workspace,
@@ -292,6 +296,7 @@ export async function prepareEvaluation(
       checkouts: workspace.checkouts,
       tested_input: testedInput,
       base,
+      setupFailure,
       evidenceIds: [...evidenceIds],
       reviewBundle: {
         evidence: evidence.filter((item) => evidenceIds.has(item.id)),
