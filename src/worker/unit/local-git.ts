@@ -359,6 +359,7 @@ export async function hasWorkSince(
     [
       "rev-list",
       "--first-parent",
+      "--ancestry-path",
       "--no-merges",
       "--max-count=1",
       `${commit}..HEAD`,

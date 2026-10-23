@@ -116,14 +116,12 @@ export async function parseRepaired<T extends z.ZodType>(
 export function taskJudgementInstruction(
   templates: PromptTemplates,
   task: TaskContent,
-  priorRationale: string | null = null,
 ): string {
   assert.ok(task.id);
   assert.ok(task.content.criterion);
   return renderTemplate(templates, PromptTemplate.TaskJudgement, {
     task_id: task.id,
     criterion: task.content.criterion,
-    prior_rationale: priorRationale,
     marker: JUDGEMENT_MARKER,
   });
 }

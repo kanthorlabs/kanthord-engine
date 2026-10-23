@@ -226,7 +226,7 @@ test("a task judgement that changes files commits them and counts as not met", a
 test("a judgement that its agent deadline cuts ends as a budget end after the passing run", async (t) => {
   const current = task("deadline", "true");
   const h = await fixture(t, [current], [fauxAssistantMessage("work")]);
-  const judgement = taskJudgementInstruction(SHIPPED_TEMPLATES, current, null);
+  const judgement = taskJudgementInstruction(SHIPPED_TEMPLATES, current);
   const instructions: string[] = [];
   h.agent.instruct = async (_work, instruction) => {
     instructions.push(instruction);

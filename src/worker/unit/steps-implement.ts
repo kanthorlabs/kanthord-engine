@@ -701,6 +701,7 @@ async function nodeInstructionOf(
 export async function startCheck(state: StepsState): Promise<StartCheck> {
   assert.ok(state.checkouts.length > NO_CHECKOUTS);
   const pending: PendingTask[] = [];
+  const node = await nodeInstructionOf(state);
   for (const task of unitsOf(state)) {
     state.task = task;
     const verification = await verifyTask(state, task);
@@ -734,5 +735,5 @@ export async function startCheck(state: StepsState): Promise<StartCheck> {
       );
     else pending.push({ task, instruction: null });
   }
-  return { pending, node: await nodeInstructionOf(state), budgetEnd: null };
+  return { pending, node, budgetEnd: null };
 }

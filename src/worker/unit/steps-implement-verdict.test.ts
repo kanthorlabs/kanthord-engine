@@ -1,11 +1,13 @@
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
+import { writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { simpleGit } from "simple-git";
 import { background } from "../../kernel/context.ts";
 import { EndReason, type ExecutionEnd } from "./execution-run.ts";
 import { executionBoundary } from "./native-method.ts";
 import type { MethodClients } from "./method-clients.ts";
-import { runStepsImplement } from "./steps-implement.ts";
+import { runStepsImplement, startCheck } from "./steps-implement.ts";
 import { headSetOf, recordJudged } from "./judged-tasks.ts";
 import type { WorkspaceCheckout } from "./workspace.ts";
 import {
@@ -30,6 +32,9 @@ const TWO_TOOL_TURNS = 4;
 const TWO_BINDINGS = ["api", "web"];
 const BASE_FILE = "other";
 const FETCH_DEADLINE_MS = 20000;
+const SIDE_BRANCH = "side";
+const FIRST_PARENT_FILE = "first-parent";
+const STRAY_FILE = "stray";
 
 type Harness = Awaited<ReturnType<typeof fixture>>;
 
@@ -241,4 +246,65 @@ test("a verdict with a later commit after its judged commit sends no verdict tur
     furtherWork: false,
   });
   assert.equal(h.provider.calls.length, NO_PROVIDER_CALLS);
+});
+
+async function headOf(h: Harness): Promise<string> {
+  const head = (await simpleGit(h.root).revparse(["HEAD"])).trim();
+  h.checkouts[0]!.head = head;
+  return head;
+}
+
+test("a rewritten node branch drops the judged commit and sends the verdict", async (t) => {
+  const { h, current } = await verdictHarness(t, []);
+  const base = h.checkouts[0]!.head;
+  await commitOnNode(h.root, "judged");
+  await headOf(h);
+  h.verdict = verdictAt(VERDICT, h.checkouts);
+  await simpleGit(h.root).raw(["reset", "--hard", base]);
+  await commitOnNode(h.root, "rewritten");
+  await headOf(h);
+  judgeAtHead(h, current.id);
+  const checked = await startCheck(h);
+  assert.ok(checked.node?.text.includes(VERDICT));
+  assert.deepEqual(checked.node?.judged, []);
+});
+
+test("a judged commit reached only through a second parent does not satisfy the verdict rule", async (t) => {
+  const { h, current } = await verdictHarness(t, []);
+  const git = simpleGit(h.root);
+  await git.raw(["checkout", "-q", "-b", SIDE_BRANCH]);
+  await commitOnNode(h.root, "judged");
+  const judged = (await git.revparse(["HEAD"])).trim();
+  await git.raw(["checkout", "-q", h.nodeBranch]);
+  writeFileSync(join(h.root, FIRST_PARENT_FILE), FIRST_PARENT_FILE);
+  await git.add(FIRST_PARENT_FILE);
+  await git.commit(FIRST_PARENT_FILE);
+  await git.raw(["merge", "--no-ff", "--no-edit", SIDE_BRANCH]);
+  await git.raw(["branch", "-D", SIDE_BRANCH]);
+  await headOf(h);
+  h.verdict = {
+    text: VERDICT,
+    judged: [{ binding_id: h.checkouts[0]!.binding_id, commit: judged }],
+  };
+  judgeAtHead(h, current.id);
+  const checked = await startCheck(h);
+  assert.ok(checked.node?.text.includes(VERDICT));
+  assert.deepEqual(
+    checked.node?.judged.map((entry) => entry.commit),
+    [judged],
+  );
+});
+
+test("a start-check judgement that writes a file does not hide the verdict", async (t) => {
+  const current = task("judged", "true");
+  const h = await fixture(
+    t,
+    [current],
+    [write(STRAY_FILE), fauxAssistantMessage(MET)],
+  );
+  const judged = h.checkouts[0]!.head;
+  h.verdict = verdictAt(VERDICT, h.checkouts);
+  const checked = await startCheck(h);
+  assert.notEqual(h.checkouts[0]!.head, judged);
+  assert.ok(checked.node?.text.includes(VERDICT));
 });
