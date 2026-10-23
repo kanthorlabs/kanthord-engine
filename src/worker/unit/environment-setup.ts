@@ -23,6 +23,7 @@ import {
   excludeUntracked,
   fileAtRevision,
   headCommit,
+  restoreTracked,
   trackedChanges,
 } from "./local-git.ts";
 import {
@@ -36,6 +37,8 @@ export const BASE_DIRECTORY = "base";
 const SINGLE_CHECKOUT = 1;
 const NO_EXIT = -1;
 const NO_DOCUMENT = "none";
+const TRACKED_CHECK = "git status --porcelain --untracked-files=no";
+const TRACKED_CHANGE_EXIT = 1;
 
 export interface SetupRepository {
   binding_id: string;
@@ -68,6 +71,7 @@ export type SetupResult =
       end: typeof SetupEnd.Failed;
       run: VerificationRun;
       commands: readonly string[];
+      changed?: readonly string[];
     };
 
 function remaining(input: SetupInput): number {
@@ -93,6 +97,9 @@ export function setupStop(result: SetupFailure): ExecutionStop {
               signal: last.signal,
               timed_out: last.timed_out,
               command: last.command,
+              ...(result.changed === undefined
+                ? {}
+                : { changed_tracked_files: result.changed }),
             },
       ),
     ),
@@ -161,6 +168,39 @@ export async function setupEntries(
   return entries;
 }
 
+function trackedFailure(
+  run: VerificationRun,
+  commands: readonly string[],
+  changed: readonly string[],
+): SetupFailure {
+  return {
+    end: SetupEnd.Failed,
+    run: {
+      ...run,
+      verification: {
+        ...run.verification,
+        results: [
+          ...run.verification.results,
+          {
+            command: TRACKED_CHECK,
+            exit_code: TRACKED_CHANGE_EXIT,
+            signal: null,
+            timed_out: false,
+          },
+        ],
+      },
+      outputs: [
+        ...run.outputs,
+        `The setup changed these tracked files: ${changed.join(", ")}. KanthorD restored them. Commit a change so that the setup leaves every tracked file unchanged, for example the updated lock file.`,
+      ],
+      flaky: [...run.flaky, false],
+      outcome: VerificationClass.CodeFailure,
+    },
+    commands: [...commands, TRACKED_CHECK],
+    changed,
+  };
+}
+
 export async function runSetup(
   input: SetupInput,
   entries: readonly SetupEntry[],
@@ -198,12 +238,16 @@ export async function runSetup(
       input.context,
       remaining(input),
     );
-    if (changed.length)
-      throw new ExecutionStop(
-        EndReason.EnvironmentFailed,
-        EnvironmentFailure.SetupFailed,
-        redactReason(JSON.stringify({ changed_tracked_files: changed })),
+    if (changed.length) {
+      await restoreTracked(
+        input.env,
+        entry.directory,
+        changed,
+        input.context,
+        remaining(input),
       );
+      return trackedFailure(run, commands, changed);
+    }
     await excludeUntracked(
       input.env,
       entry.directory,

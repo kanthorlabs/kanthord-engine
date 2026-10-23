@@ -239,18 +239,39 @@ test("the base rerun answers no exit when the budget ends in the base setup", as
   assert.equal(await base.exitOf("command-absent-x"), null);
 });
 
-test("a setup that changes a tracked file stops with setup_failed and names the path", async (t) => {
-  const { checkout } = await repository(t, { "package-lock.json": "{}" });
-  await assert.rejects(
-    runSetup(
-      input(),
-      await setupEntries(input(), [
-        setupCheckout(
-          checkout,
-          stored({ postCreateCommand: "echo changed > package-lock.json" }),
-        ),
-      ]),
+test("a setup that changes a tracked file only on the node head is a code failure that names the path", async (t) => {
+  const { root, checkout } = await repository(t, { "package-lock.json": "{}" });
+  await commit(checkout, "dependency", "node");
+  const { entries, base, head } = await prepared(
+    setupCheckout(
+      checkout,
+      stored({
+        postCreateCommand:
+          "if test -e dependency; then echo changed > package-lock.json; fi",
+      }),
     ),
+    root,
+  );
+  const result = await setUpHeads(input(), entries, base, [head]);
+  assert.ok(result.end === SetupEnd.Failed);
+  assert.deepEqual(result.changed, ["package-lock.json"]);
+  assert.equal(result.run.verification.results.at(-1)?.exit_code, FAILED_EXIT);
+  assert.match(result.run.outputs.at(-1) ?? "", /package-lock\.json/);
+  assert.equal(result.commands.length, result.run.verification.results.length);
+});
+
+test("a setup that changes a tracked file on the node head and on the base head stops with setup_failed and names the path", async (t) => {
+  const { root, checkout } = await repository(t, { "package-lock.json": "{}" });
+  await commit(checkout, "node", "node");
+  const { entries, base, head } = await prepared(
+    setupCheckout(
+      checkout,
+      stored({ postCreateCommand: "echo changed > package-lock.json" }),
+    ),
+    root,
+  );
+  await assert.rejects(
+    setUpHeads(input(), entries, base, [head]),
     (error) =>
       error instanceof ExecutionStop &&
       error.reason === EndReason.EnvironmentFailed &&

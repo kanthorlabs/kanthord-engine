@@ -495,11 +495,11 @@ No query fields are accepted. The required file supplies the following fields.
   the command.
 - A worker runs the setup of the environment of each repository binding in
   each checkout and each clone: `updateContentCommand`, then
-  `postCreateCommand`. A setup that changes a tracked file stops with
-  `environment_failed` and the code `setup_failed`, and the detail names the
-  paths. A setup failure on the node head reruns the setup on the base head. A
-  failure on the base head stops with `environment_failed` and the code
-  `setup_failed`. A pass on the base head is a code failure of the node unit.
+  `postCreateCommand`. A setup that changes a tracked file fails, and the
+  worker restores the file. That failure follows the rules for a setup failure
+  below, and its output and the stop detail name the paths. A setup failure on
+  the node head reruns the setup on the base head. A failure on the base head
+  stops with `environment_failed` and the code `setup_failed`. A pass on the base head is a code failure of the node unit.
   The node unit then gets the setup output as its first revision instruction,
   and the setup runs again before the next verification. The reviewer then
   assesses `criterion_not_met` with the setup output. A verification exit code

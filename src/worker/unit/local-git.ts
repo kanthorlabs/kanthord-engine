@@ -825,6 +825,23 @@ export async function excludeUntracked(
   return paths;
 }
 
+export async function restoreTracked(
+  env: NodeJS.ProcessEnv,
+  directory: string,
+  paths: readonly string[],
+  context: Context,
+  deadlineMs: number,
+): Promise<void> {
+  assert.ok(paths.length);
+  await run(
+    env,
+    directory,
+    ["checkout", "HEAD", "--", ...paths],
+    context,
+    deadlineMs,
+  );
+}
+
 export async function trackedChanges(
   env: NodeJS.ProcessEnv,
   directory: string,
