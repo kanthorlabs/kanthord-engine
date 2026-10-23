@@ -1,4 +1,3 @@
-import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import {
   cpSync,
@@ -25,7 +24,6 @@ import {
 import { Diagnostic } from "../../kernel/errors.ts";
 import { ensureDirectory } from "../../kernel/files.ts";
 import { digest } from "../../kernel/json.ts";
-import { killProcessGroup } from "../../kernel/process-group.ts";
 import type { SlotEnvironment } from "../../project/contract.ts";
 import {
   BASE_SUFFIX,
@@ -39,8 +37,17 @@ import {
   type EnvironmentRuntime,
   type ImageBuildInput,
   type ImageBuildResult,
+  type CommandResult,
+  type ProofInput,
 } from "../../project/environment-state.ts";
 import { ContainerRuntime, type PoolSlot } from "../../worker/contract.ts";
+import {
+  OUTPUT_TAIL_BYTES,
+  buildEnvironment,
+  endGroup,
+  proveInImage,
+  runCommand,
+} from "./environment-proof.ts";
 import {
   CONTAINER_UID,
   OWNER_LABEL,
@@ -60,7 +67,6 @@ export type EnvironmentImageFailure =
 export const ENVIRONMENT_IMAGE_FAILED = "worker.pool.environment_image_failed";
 const IMAGE_CHECK_TIMEOUT_MS = 120000;
 export const IMAGE_COMMAND_TIMEOUT_MS = 60000;
-const OUTPUT_TAIL_BYTES = 4096;
 const RUN_DIRECTORY_PREFIX = "run-";
 const GENERATED_RUN_PREFIX = "slot-";
 const GENERATED_RUN_BYTES = 8;
@@ -72,21 +78,10 @@ const NO_SIGNAL = new AbortController().signal;
 const RUNTIME_ORDER = [ContainerRuntime.Podman, ContainerRuntime.Docker];
 const CHECK_NAME_PREFIX = "kanthord-env-check-";
 const CHECK_NAME_BYTES = 8;
-const ABSENT_PROCESS = "ESRCH";
 const LAYER_DIRECTORY = "layer";
 const WORKSPACE_DIRECTORY = "workspace";
 const CURRENT_DIRECTORY = ".";
 const CREATE_ONLY = "wx";
-const XDG_PREFIX = "XDG_";
-const BUILD_VARIABLES = new Set([
-  "PATH",
-  "HOME",
-  "TMPDIR",
-  "CONTAINER_HOST",
-  "CONTAINER_CONNECTION",
-  "CONTAINER_SSHKEY",
-  "DOCKER_HOST",
-]);
 const PATH_OUTSIDE = "the path leaves the checkout";
 const PATH_ABSENT = "the path is absent";
 const FEATURE_NOT_DIRECTORY = "the feature is not a directory";
@@ -101,8 +96,6 @@ const TINI_STATIC_PATH = "/usr/bin/tini-static";
 const SHELL = "/bin/sh";
 const ENVIRONMENT_ASSIGNMENT = "=";
 const NOT_FOUND = -1;
-const FAILED_CODE = 1;
-const SINGLE_CHUNK = 1;
 const VARIABLE_REFERENCE =
   /\$\{(containerEnv|localEnv):([^}:]+)(?::([^}]*))?\}/g;
 const CONTAINER_ENV_SCOPE = "containerEnv";
@@ -173,11 +166,6 @@ interface HeldFailure {
   readonly error: Diagnostic;
   readonly at: number;
   readonly bindingId: string;
-}
-
-interface CommandOutput {
-  code: number;
-  tail: string;
 }
 
 export interface LayerInput {
@@ -256,18 +244,6 @@ export function devcontainerBuildArguments(input: {
     "--label",
     `${OWNER_LABEL}=${input.owner}`,
   ];
-}
-
-export function buildEnvironment(
-  environment: NodeJS.ProcessEnv,
-): NodeJS.ProcessEnv {
-  return Object.fromEntries(
-    Object.entries(environment).filter(
-      ([name, value]) =>
-        value !== undefined &&
-        (BUILD_VARIABLES.has(name) || name.startsWith(XDG_PREFIX)),
-    ),
-  );
 }
 
 function containedPath(
@@ -415,73 +391,6 @@ export function layerContainerfile(input: LayerInput): string {
   ].join("\n");
 }
 
-function tailOf(chunks: Buffer[]): string {
-  const text = Buffer.concat(chunks).toString("utf8");
-  return text.slice(-OUTPUT_TAIL_BYTES);
-}
-
-function endGroup(leader: number): void {
-  try {
-    killProcessGroup(leader);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== ABSENT_PROCESS) throw error;
-  }
-}
-
-function runCommand(
-  command: string,
-  args: readonly string[],
-  environment: NodeJS.ProcessEnv,
-  timeoutMs: number,
-  running: Set<number>,
-  signal: AbortSignal,
-): Promise<CommandOutput> {
-  return new Promise((resolve, reject) => {
-    signal.throwIfAborted();
-    const chunks: Buffer[] = [];
-    let size = 0;
-    const keep = (chunk: Buffer) => {
-      chunks.push(chunk);
-      size += chunk.length;
-      while (size > OUTPUT_TAIL_BYTES && chunks.length > SINGLE_CHUNK)
-        size -= chunks.shift()!.length;
-    };
-    const child = spawn(command, args, {
-      env: environment,
-      stdio: ["ignore", "pipe", "pipe"],
-      detached: true,
-    });
-    const leader = child.pid;
-    if (leader !== undefined) running.add(leader);
-    const abort = () => {
-      if (leader !== undefined) endGroup(leader);
-    };
-    const timer = setTimeout(() => {
-      keep(
-        Buffer.from(`\nThe command passed its time limit of ${timeoutMs} ms.`),
-      );
-      abort();
-    }, timeoutMs);
-    const finish = (code: number) => {
-      clearTimeout(timer);
-      signal.removeEventListener("abort", abort);
-      if (leader !== undefined) running.delete(leader);
-      if (signal.aborted) reject(signal.reason);
-      else resolve({ code, tail: tailOf(chunks) });
-    };
-    signal.addEventListener("abort", abort, { once: true });
-    child.stdout.on("data", keep);
-    child.stderr.on("data", keep);
-    child.once("error", (error) => {
-      keep(Buffer.from(error.message));
-      finish(FAILED_CODE);
-    });
-    child.once("close", (code) => {
-      finish(code ?? FAILED_CODE);
-    });
-  });
-}
-
 function imageFailure(
   failure: EnvironmentFailureClass,
   tag: string,
@@ -502,7 +411,7 @@ function imageFailure(
 
 export class EnvironmentImages implements Omit<
   EnvironmentRuntime,
-  "proveOnHost" | "prove"
+  "proveOnHost"
 > {
   private readonly options: EnvironmentImageOptions;
   private readonly building = new Map<string, Promise<string>>();
@@ -756,6 +665,24 @@ export class EnvironmentImages implements Omit<
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }
+  }
+
+  prove(
+    input: ProofInput & { tag: string },
+    signal: AbortSignal,
+  ): Promise<CommandResult[]> {
+    return proveInImage(
+      {
+        host: this.options.host,
+        runtime: this.runtime(),
+        owner: this.options.owner,
+        stateDirectory: this.options.stateDirectory,
+        exportRepository: this.options.exportRepository,
+        running: this.running,
+      },
+      input,
+      signal,
+    );
   }
 
   private async buildBase(

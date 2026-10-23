@@ -44,7 +44,7 @@ const NO_SUCH_CONTAINER = /no such container/i;
 const VOLUME_EXISTS = /already exists/i;
 const NO_SUCH_VOLUME = /no such volume/i;
 const SLOT_COMMAND = "exec 3>&1 1>&2; exec /usr/local/bin/kanthord serve slot";
-const TMP_MOUNT = "/tmp:rw,nosuid,nodev,size=64m";
+export const TMP_MOUNT = "/tmp:rw,nosuid,nodev,size=64m";
 const SLOT_DIRECTORIES = {
   XDG_CONFIG_HOME: "config",
   XDG_DATA_HOME: "data",

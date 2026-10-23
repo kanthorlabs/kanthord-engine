@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import {
   appendFileSync,
   existsSync,
@@ -774,6 +775,7 @@ test("a stop ends a running build and a start removes the run directories of an 
 });
 
 const RUN_ID = "RUN1";
+const TRUE_COMMAND = "true";
 const PATH_OF_IDENTITY = environmentPath(IDENTITY);
 const IMAGE_ROOT = `localhost/kanthord-env/${PATH_OF_IDENTITY}`;
 const DIGEST = "d".repeat(64);
@@ -1019,4 +1021,56 @@ test("removeStaleRuns removes each run directory and nothing else of the environ
   writeFileSync(join(root, "keep.txt"), "x");
   await built.removeStaleRuns();
   assert.deepEqual(readdirSync(root).sort(), ["keep.txt", "other"]);
+});
+
+test("prove runs the commands in one container of the image through the proof", async (t) => {
+  const directory = temporary(t);
+  const { built, lines } = images(directory, {
+    environment: null,
+    exists: SUCCESS,
+    variables: fakePodman(directory, { build: SUCCESS, run: SUCCESS }),
+    checkout: (target) => {
+      const git = (...args: string[]) =>
+        execFileSync(
+          "git",
+          [
+            "-C",
+            target,
+            "-c",
+            "user.name=test",
+            "-c",
+            "user.email=test@example.com",
+            ...args,
+          ],
+          { stdio: "ignore" },
+        );
+      git("init", "--quiet");
+      git("commit", "--quiet", "--allow-empty", "-m", "head");
+    },
+  });
+  const results = await built.prove(
+    {
+      run_id: RUN_ID,
+      binding_id: "binding",
+      resource_identity: IDENTITY,
+      commit: "c".repeat(40),
+      setup: [],
+      checks: [TRUE_COMMAND],
+      tag: TAG,
+    },
+    NEVER_ABORTED,
+  );
+  assert.deepEqual(
+    results.map((result) => [result.command, result.exit_code]),
+    [[TRUE_COMMAND, SUCCESS]],
+  );
+  assert.ok(
+    lines().some(
+      (line) =>
+        line[0] === PODMAN_LINE &&
+        line.includes("bash") &&
+        line.at(-1) === TRUE_COMMAND,
+    ),
+  );
+  assert.equal(existsSync(runDirectory(directory)), false);
 });
