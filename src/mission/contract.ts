@@ -95,6 +95,14 @@ export interface ClaimFactsRow extends ClaimFacts {
   claims: ClaimableState[];
 }
 
+export interface MissionEnvironments {
+  environmentsMixed(
+    tx: Transaction,
+    projectId: string,
+    resourceIdentities: readonly string[],
+  ): boolean;
+}
+
 export interface MissionCollaborations {
   createMission(tx: Transaction, projectId: string, actor: HumanActor): void;
   liveNodesPinning(tx: Transaction, bindingId: string): string[];
@@ -301,6 +309,7 @@ export const MissionErrorCode = {
   FilenameConflict: "mission.node.filename_conflict",
   IntentLocked: "mission.node.intent_locked",
   TagsUnmatched: "mission.node.tags_unmatched",
+  EnvironmentMixed: "mission.node.environment_mixed",
   Retired: "mission.node.retired",
   Terminal: "mission.node.terminal",
   EndpointInvalid: "mission.dependency.endpoint_invalid",

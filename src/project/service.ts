@@ -156,6 +156,7 @@ import { ProjectEnvironments, refuseEnvironment } from "./environment.ts";
 const SSH_UNREACHABLE_STATUS = 422;
 const PROJECTS_DIRECTORY = "projects";
 const NO_GENERATION = 0;
+const SINGLE_FORM = 1;
 
 function refuseAddressForm(address: string): void {
   if (parseRepositoryAddress(address) === null)
@@ -1581,6 +1582,34 @@ export class ProjectService implements Service, ProjectBindings {
   projectPaused(tx: Transaction, projectId: string): boolean {
     assert.ok(tx.database.isTransaction);
     return requireProject(tx, projectId).paused_at !== null;
+  }
+  environmentsMixed(
+    tx: Transaction,
+    projectId: string,
+    resourceIdentities: readonly string[],
+  ): boolean {
+    assert.ok(tx.database.isTransaction);
+    const current = Array.from(readCurrentBindingSet(tx, projectId).values());
+    const atContainer = current.some(
+      (entry) =>
+        kindOf(entry.resource_identity) === BindingKind.Worker &&
+        workerConfigSchema.parse(entry.config).placement ===
+          WorkerPlacement.Container,
+    );
+    if (!atContainer) return false;
+    const forms = new Set(
+      current
+        .filter(
+          (entry) =>
+            kindOf(entry.resource_identity) === BindingKind.Repository &&
+            resourceIdentities.includes(entry.resource_identity),
+        )
+        .flatMap((entry) => {
+          const { environment } = repositoryConfigSchema.parse(entry.config);
+          return environment === undefined ? [] : [canonicalJSON(environment)];
+        }),
+    );
+    return forms.size > SINGLE_FORM;
   }
   workerBindingOf(
     tx: Transaction,

@@ -220,6 +220,15 @@ export default tseslint.config(
                   }),
                 },
                 {
+                  to: element("service", {
+                    captured: { name: "project" },
+                    fileInternalPath: "environment-state.ts",
+                  }),
+                },
+                {
+                  to: element("worker-unit", { fileInternalPath: "budget.ts" }),
+                },
+                {
                   to: element("apps-worker", {
                     fileInternalPath: "{thread-data,thread-start,frames}.ts",
                   }),

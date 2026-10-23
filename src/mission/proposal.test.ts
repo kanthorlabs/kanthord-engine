@@ -329,6 +329,49 @@ test("an approval that adds an unmatched pair is refused and writes nothing", as
   assert.deepEqual(databaseSnapshot(h.store), before);
 });
 
+test("an approval whose new content names mixed environments is refused and keeps the proposal open", async (t) => {
+  const h = await fixture(t);
+  await h.submit([h.proposal()]);
+  const proposalId = (await h.list()).items[0]!.id;
+  const secondId = createIdentity("binding");
+  const identities = new Map([
+    [h.repositoryId, RESOURCE_IDENTITY],
+    [secondId, "repository:github:owner/other"],
+  ]);
+  h.store.transaction((tx) =>
+    tx.database
+      .prepare(
+        "UPDATE mission_node_revision SET bindings = ? WHERE node_id = ?",
+      )
+      .run(JSON.stringify([h.repositoryId, secondId]), h.childId),
+  );
+  h.dependencies.bindings.getBindingRevision = (_tx, id) => ({
+    binding_id: id,
+    project_id: h.project_id,
+    name: "repo",
+    resource_identity: identities.get(id)!,
+    revision: FIRST_REVISION,
+    tombstone: false,
+    disabled: false,
+  });
+  h.dependencies.bindings.resolveBindingIdentity = (_tx, projectId, id) =>
+    projectId === h.project_id && identities.has(id)
+      ? { binding_id: id, resource_identity: identities.get(id)! }
+      : null;
+  h.dependencies.environments = { environmentsMixed: () => true };
+  const before = databaseSnapshot(h.store);
+  await assert.rejects(h.approve(proposalId), (error) => {
+    assert.ok(error instanceof OperationError);
+    assert.equal(error.code, MissionErrorCode.EnvironmentMixed);
+    assert.deepEqual(error.details, { bindings: [h.repositoryId, secondId] });
+    return true;
+  });
+  assert.deepEqual(databaseSnapshot(h.store), before);
+  const open = (await h.list()).items[0]!;
+  assert.equal(open.created_node_id, null);
+  assert.equal(open.approved_at, null);
+});
+
 test("approving twice refuses with already_approved", async (t) => {
   const h = await fixture(t);
   await h.submit([h.proposal()]);

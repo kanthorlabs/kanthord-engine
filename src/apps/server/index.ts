@@ -763,6 +763,10 @@ export function composeServices(options: {
       repositoryPolicyOf: (tx, bid) => project.repositoryPolicyOf(tx, bid),
       storageBindingOf: (tx, bid) => project.storageBindingOf(tx, bid),
     },
+    environments: {
+      environmentsMixed: (tx, projectId, identities) =>
+        project.environmentsMixed(tx, projectId, identities),
+    },
   });
   const project: ProjectService = new ProjectService({
     config: {},
