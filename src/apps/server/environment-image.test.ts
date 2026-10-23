@@ -440,7 +440,7 @@ test("the build writes the allowlisted document outside the checkout with absolu
   const { built } = images(directory, {
     environment: environment({
       name: "dev",
-      customizations: { vscode: {} },
+      customizations: { kanthord: { checks: ["node --version"] } },
       build: { dockerfile: "Dockerfile", context: ".." },
       features: { "./local": {} },
       postCreateCommand: "npm ci",
