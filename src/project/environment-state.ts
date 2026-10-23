@@ -12,9 +12,8 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
-import type { Environment, EnvironmentSource } from "../kernel/devcontainer.ts";
+import { EnvironmentSource, type Environment } from "../kernel/devcontainer.ts";
 import { digest, timestamp } from "../kernel/json.ts";
-import type { RepositoryFile } from "../repository/contract.ts";
 
 export const EnvironmentStatus = {
   None: "none",
@@ -125,7 +124,11 @@ export interface EnvironmentDigestInput {
   target: EnvironmentTarget;
   source: EnvironmentSource;
   document: Environment | null;
-  files: readonly RepositoryFile[];
+  files: readonly {
+    path: string;
+    state: string;
+    text: string | null;
+  }[];
   base_image: string | null;
   slot_image: string | null;
   version: string;
@@ -169,6 +172,36 @@ export const proofFileSchema = z.strictObject({
   ended_at: timestamp,
 });
 export type ProofFile = z.infer<typeof proofFileSchema>;
+
+export const environmentFailureSchema = z.strictObject({
+  class: environmentFailureClassSchema.nullable(),
+  origin: failureOriginSchema,
+  execution_id: z.string().nullable(),
+  command: z.string().nullable(),
+  exit_code: z.int().nullable(),
+  tail: z.string(),
+  reproduce: z.string().nullable(),
+  ended_at: timestamp,
+});
+
+export const environmentStateSchema = z.strictObject({
+  binding_id: z.string().min(1),
+  binding_name: z.string().min(1),
+  resource_identity: z.string().min(1),
+  target: environmentTargetSchema,
+  source: z.enum(EnvironmentSource).nullable(),
+  status: environmentStatusSchema,
+  digest: z.string().min(1).nullable(),
+  tag: z.string().min(1).nullable(),
+  run_started_at: timestamp.nullable(),
+  step_started_at: timestamp.nullable(),
+  reason: z.string().nullable(),
+  failure: environmentFailureSchema.nullable(),
+  checks: z.array(checkResultSchema).max(MAX_CHECKS),
+  repairs: z.int().min(0),
+  repairing: z.boolean(),
+});
+export type EnvironmentState = z.infer<typeof environmentStateSchema>;
 
 export interface CommandResult {
   phase: ProofPhase;
