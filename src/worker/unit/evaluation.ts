@@ -21,7 +21,9 @@ import {
 import type { NativeAgent } from "./native-agent.ts";
 import { prepareEvaluation, verificationCommands } from "./evaluation-input.ts";
 import {
+  infrastructureStop,
   runVerificationsWithOutput,
+  VerificationClass,
   verificationPassed,
   type VerificationRun,
 } from "./verification.ts";
@@ -81,6 +83,10 @@ async function judge(
   const examine = input.setup.intent === ExecutionIntent.Examine;
   const commands = verificationCommands(revision);
   const verification = verificationRun.verification;
+  if (verificationRun.outcome === VerificationClass.BudgetEnd)
+    return run.stop(EndReason.AssessmentAbsent);
+  const stop = infrastructureStop(verificationRun);
+  if (stop) throw stop;
   if (!verificationPassed(verification, commands))
     return {
       result: AssessmentResult.CriterionNotMet,
@@ -155,6 +161,7 @@ async function evaluate(
     context: run.operationContext,
     env: input.env,
     reruns: VERIFICATION_RERUNS,
+    exhausted: () => budget.exhausted(),
   });
   const verification = verificationRun.verification;
   const recorded = await run.submitEvidence(input.claim.node_id, {

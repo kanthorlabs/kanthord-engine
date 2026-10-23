@@ -33,8 +33,10 @@ import {
   checkpointCommitMessage,
 } from "./local-git.ts";
 import {
+  infrastructureStop,
   runVerificationsWithOutput,
   testedInputOf,
+  VerificationClass,
   verificationPassed,
   type VerificationRun,
 } from "./verification.ts";
@@ -590,7 +592,10 @@ async function verifyCommands(
     deadline: state.agent.budget.wallDeadline(),
     context: state.run.operationContext,
     env: state.input.env,
+    exhausted: () => state.agent.budget.exhausted(),
   });
+  if (run.outcome === VerificationClass.BudgetEnd)
+    state.agent.budget.wallDeadlineReached();
   const cleanup = state.agent.budget.cleanupContext(state.run.operationContext);
   try {
     for (const checkout of state.checkouts)
@@ -604,6 +609,8 @@ async function verifyCommands(
   } finally {
     cleanup.cancel();
   }
+  const stop = infrastructureStop(run);
+  if (stop) throw stop;
   return run;
 }
 

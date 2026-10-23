@@ -11,12 +11,17 @@ import {
   temporary,
 } from "../../kernel/test-support.ts";
 import {
+  infrastructureStop,
   runVerifications,
   runVerificationsWithOutput,
   verificationPassed,
+  VERIFICATION_INFRASTRUCTURE_FAILED,
+  VerificationClass,
   type VerificationInput,
   testedInputOf,
 } from "./verification.ts";
+import { EndReason, ExecutionStop } from "./execution-run.ts";
+import { REASON_MAX_LENGTH } from "../../kernel/probe.ts";
 
 test("verification runs in order and stops on the first failure or unstarted deadline", async (t) => {
   const expectedOrder = "first\nsecond\n";
@@ -262,4 +267,167 @@ test("the tested input is one address for one checkout and the list in binding o
       commit: checkout.head,
     })),
   );
+});
+
+const SIGNAL_KILL = "sh -c 'kill -9 $$'";
+const EXIT_KILL = "sh -c 'kill -9 $$'; exit $?";
+const KILLED_EXIT = 137;
+const KILL_SIGNAL = "SIGKILL";
+const COMMAND_ABSENT_EXIT = 127;
+const SINGLE_RUN = 1;
+const RUN_AND_RERUN = 2;
+
+function countedInput(directory: string, commands: readonly string[]) {
+  const runs: number[] = [];
+  const input: VerificationInput = {
+    observe: (attempt, execute) => {
+      runs.push(attempt.run);
+      return execute();
+    },
+    directory,
+    commands,
+    tested_input: { kind: "produced", sha256: "hash" },
+    deadline: Date.now() + 10000,
+    context: background,
+    env: hostEnvironment(),
+    reruns: 2,
+  };
+  return { input, runs };
+}
+
+test("a kill on the run and on its rerun is an infrastructure failure", async (t) => {
+  for (const command of [SIGNAL_KILL, EXIT_KILL]) {
+    const { input, runs } = countedInput(temporary(t), [command, "true"]);
+    const run = await runVerificationsWithOutput(input);
+    assert.equal(run.outcome, VerificationClass.Infrastructure);
+    assert.equal(runs.length, RUN_AND_RERUN);
+    assert.deepEqual(run.flaky, [false]);
+    assert.equal(run.verification.results.length, SINGLE_RUN);
+    const [result] = run.verification.results;
+    assert.equal(result?.timed_out, false);
+    if (command === SIGNAL_KILL) assert.equal(result?.signal, KILL_SIGNAL);
+    else assert.equal(result?.exit_code, KILLED_EXIT);
+  }
+});
+
+test("a spawn error on the run and on its rerun is an infrastructure failure", async (t) => {
+  const { input, runs } = countedInput(join(temporary(t), "absent"), ["true"]);
+  const run = await runVerificationsWithOutput(input);
+  assert.equal(run.outcome, VerificationClass.Infrastructure);
+  assert.equal(runs.length, RUN_AND_RERUN);
+});
+
+test("a kill on the run and a pass on the rerun is a pass and not flaky", async (t) => {
+  const marker = join(temporary(t), "killed");
+  const command = `test -f ${marker} || { touch ${marker}; kill -9 $$; }`;
+  const { input, runs } = countedInput(temporary(t), [command, "true"]);
+  const run = await runVerificationsWithOutput(input);
+  assert.equal(run.outcome, VerificationClass.Pass);
+  assert.deepEqual(runs, [1, 2, 1]);
+  assert.deepEqual(run.flaky, [false, false]);
+  assert.equal(verificationPassed(run.verification, input.commands), true);
+});
+
+test("a kill on the run and a code failure on the rerun keeps the flaky reruns", async (t) => {
+  const marker = join(temporary(t), "killed");
+  const command = `test -f ${marker} || { touch ${marker}; kill -9 $$; }; exit 1`;
+  const { input, runs } = countedInput(temporary(t), [command]);
+  const run = await runVerificationsWithOutput(input);
+  assert.equal(run.outcome, VerificationClass.CodeFailure);
+  assert.deepEqual(runs, [1, 2, 3, 4]);
+  assert.deepEqual(run.flaky, [false]);
+  assert.equal(run.verification.results[0]?.exit_code, FAILED_EXIT);
+});
+
+test("a command over the command limit is a code failure with no rerun", async (t) => {
+  const { input, runs } = countedInput(temporary(t), ["sleep 30"]);
+  const run = await runVerificationsWithOutput({
+    ...input,
+    commandLimitMs: 500,
+  });
+  assert.equal(run.outcome, VerificationClass.CodeFailure);
+  assert.equal(runs.length, SINGLE_RUN);
+  assert.equal(run.verification.results[0]?.timed_out, true);
+});
+
+test("a kill at the wall deadline and a command after the deadline are a budget end", async (t) => {
+  const { input, runs } = countedInput(temporary(t), ["sleep 30"]);
+  const killed = await runVerificationsWithOutput({
+    ...input,
+    deadline: Date.now() + 500,
+  });
+  assert.equal(killed.outcome, VerificationClass.BudgetEnd);
+  assert.equal(runs.length, SINGLE_RUN);
+  const unstarted = await runVerificationsWithOutput({
+    ...input,
+    deadline: Date.now(),
+  });
+  assert.equal(unstarted.outcome, VerificationClass.BudgetEnd);
+  assert.equal(runs.length, SINGLE_RUN);
+});
+
+test("an exhausted budget makes a killed command a budget end with no rerun", async (t) => {
+  const { input, runs } = countedInput(temporary(t), [SIGNAL_KILL]);
+  const run = await runVerificationsWithOutput({
+    ...input,
+    exhausted: () => true,
+  });
+  assert.equal(run.outcome, VerificationClass.BudgetEnd);
+  assert.equal(runs.length, SINGLE_RUN);
+});
+
+test("exit 127 is a code failure with no infrastructure rerun", async (t) => {
+  const { input, runs } = countedInput(temporary(t), ["command-absent-x"]);
+  const run = await runVerificationsWithOutput({ ...input, reruns: 0 });
+  assert.equal(run.outcome, VerificationClass.CodeFailure);
+  assert.equal(runs.length, SINGLE_RUN);
+  assert.equal(run.verification.results[0]?.exit_code, COMMAND_ABSENT_EXIT);
+});
+
+test("an infrastructure failure stops with its code and a detail that names the command", async (t) => {
+  const { input } = countedInput(temporary(t), [SIGNAL_KILL]);
+  const run = await runVerificationsWithOutput(input);
+  const stop = infrastructureStop(run);
+  assert.ok(stop instanceof ExecutionStop);
+  assert.equal(stop.reason, EndReason.OperationFailed);
+  assert.equal(stop.code, VERIFICATION_INFRASTRUCTURE_FAILED);
+  assert.match(stop.detail ?? "", /kill -9/);
+  assert.match(stop.detail ?? "", /SIGKILL/);
+  const { input: passing } = countedInput(temporary(t), ["true"]);
+  assert.equal(
+    infrastructureStop(await runVerificationsWithOutput(passing)),
+    null,
+  );
+});
+
+const LONG_COMMAND_LENGTH = 400;
+const CANCEL_AFTER_MS = 200;
+
+test("the infrastructure stop detail keeps the result before the cut of a long command", async (t) => {
+  const prefix = `${SIGNAL_KILL} #`;
+  const command = `${prefix}${"x ".repeat(LONG_COMMAND_LENGTH)}`.slice(
+    0,
+    LONG_COMMAND_LENGTH,
+  );
+  const { input } = countedInput(temporary(t), [command]);
+  const stop = infrastructureStop(await runVerificationsWithOutput(input));
+  assert.ok(stop);
+  const detail = stop.detail ?? "";
+  assert.equal(detail.length, REASON_MAX_LENGTH);
+  assert.match(detail, /"signal":"SIGKILL"/);
+  assert.match(detail, /"timed_out":false/);
+  assert.match(detail, /"exit_code":null/);
+  assert.ok(detail.includes(prefix));
+});
+
+test("a cancel in the middle of a command is a code failure with one run", async (t) => {
+  const context = new CancellationContext();
+  const { input, runs } = countedInput(temporary(t), ["sleep 30"]);
+  const cancel = setTimeout(() => context.cancel(), CANCEL_AFTER_MS);
+  t.after(() => clearTimeout(cancel));
+  const run = await runVerificationsWithOutput({ ...input, context });
+  assert.equal(run.outcome, VerificationClass.CodeFailure);
+  assert.equal(runs.length, SINGLE_RUN);
+  assert.equal(run.verification.results[0]?.timed_out, false);
+  assert.equal(run.verification.results[0]?.signal, KILL_SIGNAL);
 });

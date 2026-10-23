@@ -1168,6 +1168,7 @@ implement them. Help is not an extra root name or a reason to load secrets.
 | local           | `repository.connector.git_failed`                | A git operation of the repository connector fails, is aborted or reaches its deadline; the message names the operation.                                                              | serve worker, binding apply                                                |
 | local           | `repository.node_branch.missing`                 | A record shows a push of the node branch and the remote holds no such branch; the steps execution stops.                                                                             | serve worker                                                               |
 | local           | `worker.merge.markers_left`                      | A file of the base merge still holds a conflict marker after the conflict turn; the worker aborts the merge and the steps execution stops.                                           | serve worker                                                               |
+| local           | `worker.verification.infrastructure_failed`      | A verification command fails because of the infrastructure on its run and on its rerun: a signal, an exit code from 129 to 192 with no timeout, or no start; the execution stops.    | serve worker                                                               |
 
 The internal error `system.composition.unwired` means that the composition root's
 stand-in was called before its collaboration was implemented. It throws before
