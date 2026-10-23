@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { simpleGit } from "simple-git";
 import { background } from "../../kernel/context.ts";
@@ -10,8 +10,9 @@ import {
   conflictInstruction,
   RefreshResult,
   refreshAtClaim,
-  refreshBeforeRelease,
+  refreshAtRelease,
 } from "./base-refresh.ts";
+import { releaseGate, ReleaseGateKind } from "./release-gate.ts";
 import {
   advanceBase,
   commitOnNode,
@@ -19,14 +20,13 @@ import {
   fauxToolCall,
   implementFixture,
 } from "./test-support.ts";
-import { sshAccessOf } from "./workspace.ts";
+import { RELEASE_DIRECTORY, sshAccessOf } from "./workspace.ts";
 import type { SshAccess } from "../../repository/contract.ts";
 
 const BINDINGS = ["api", "web"];
 const DEADLINE_MS = 20000;
 const BASE_CHANGE = "base change";
 const RESOLVED = "resolved";
-const ONE_VERIFICATION = 1;
 const NODE_CONTENT = {
   name: "node",
   requirement: "node",
@@ -112,42 +112,56 @@ test("the conflict instruction names the binding and the directory", async (t) =
   assert.equal(readFileSync(join(web.directory, "file"), "utf8"), RESOLVED);
 });
 
-test("one conflict before the release resets every checkout", async (t) => {
-  const { h, api, web, apiBare, webBare } = await fixture(t);
+test("a conflict at the release goes through the conflict turn and concludes the merge", async (t) => {
+  const { h, web, webBare } = await fixture(t, [
+    fauxAssistantMessage(
+      fauxToolCall("write", { path: "web/file", content: RESOLVED }),
+      { stopReason: "toolUse" },
+    ),
+    fauxAssistantMessage("resolved"),
+  ]);
   await commitOnNode(web.directory, "node side");
   web.head = await headOf(web.directory);
-  const before = [api.head, web.head];
-  await advanceBase({ bare: apiBare }, t, BASE_CHANGE, "other");
+  const before = web.head;
   await advanceBase({ bare: webBare }, t, "main side");
-  assert.equal(await refreshBeforeRelease(h, async () => true), false);
-  assert.deepEqual([api.head, web.head], before);
-  for (const checkout of h.checkouts) {
-    assert.equal(await headOf(checkout.directory), checkout.head);
-    assert.equal(
-      (await simpleGit(checkout.directory).status()).isClean(),
-      true,
-    );
-  }
+  assert.equal(await refreshAtRelease(h), RefreshResult.Merged);
+  assert.equal(readFileSync(join(web.directory, "file"), "utf8"), RESOLVED);
+  assert.equal(web.head, await headOf(web.directory));
+  assert.equal(
+    (await simpleGit(web.directory).raw(["rev-parse", `${web.head}^1`])).trim(),
+    before,
+  );
+  assert.equal((await simpleGit(web.directory).status()).isClean(), true);
 });
 
-test("a failed verification on the merged heads resets every checkout", async (t) => {
+test("a failed release verification keeps the merged heads and routes a revision", async (t) => {
   const { h, api, web, apiBare, webBare } = await fixture(t);
+  h.revision = {
+    content: { ...NODE_CONTENT, verifications: ["false"] },
+    tasks: [],
+  } as unknown as Revision;
   const before = [api.head, web.head];
   await advanceBase({ bare: apiBare }, t, BASE_CHANGE, "other");
   await advanceBase({ bare: webBare }, t, BASE_CHANGE, "other");
-  const verified: string[][] = [];
+  const gate = await releaseGate(h);
+  assert.equal(gate.kind, ReleaseGateKind.Routed);
+  assert.notDeepEqual([api.head, web.head], before);
+  for (const checkout of h.checkouts) {
+    assert.equal(await headOf(checkout.directory), checkout.head);
+    assert.equal(
+      readFileSync(join(checkout.directory, "other"), "utf8"),
+      BASE_CHANGE,
+    );
+  }
   assert.equal(
-    await refreshBeforeRelease(h, async () => {
-      verified.push(h.checkouts.map((checkout) => checkout.head));
-      return false;
-    }),
+    existsSync(
+      join(
+        h.input.workspaces.nodeKey(h.input.claim.node_id),
+        RELEASE_DIRECTORY,
+      ),
+    ),
     false,
   );
-  assert.equal(verified.length, ONE_VERIFICATION);
-  assert.notDeepEqual(verified[0], before);
-  assert.deepEqual([api.head, web.head], before);
-  for (const checkout of h.checkouts)
-    assert.equal(await headOf(checkout.directory), checkout.head);
 });
 
 test("the refresh fetches the base of each checkout with the SSH identity of its binding", async (t) => {
@@ -161,7 +175,7 @@ test("the refresh fetches the base of each checkout with the SSH identity of its
       return fetchBase(directory, base, context, deadlineMs, ssh);
     },
   };
-  assert.equal(await refreshBeforeRelease(h, async () => true), true);
+  assert.equal(await refreshAtRelease(h), RefreshResult.Current);
   assert.deepEqual(
     fetched,
     h.checkouts.map((checkout) => ({

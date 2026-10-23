@@ -71,12 +71,8 @@ import {
   testedCommitOf,
   verificationObserver,
 } from "./method-telemetry.ts";
-import {
-  nodeWork,
-  RefreshResult,
-  refreshAtClaim,
-  refreshBeforeRelease,
-} from "./base-refresh.ts";
+import { nodeWork, RefreshResult, refreshAtClaim } from "./base-refresh.ts";
+import { nodeUnitOf, releaseGate, ReleaseGateKind } from "./release-gate.ts";
 
 export const HEAD_COMMIT_SUBJECT = "Head commit of the node branch";
 const NO_TASKS = 0;
@@ -88,29 +84,29 @@ export function workUnitsOf(
   revision: Pick<Revision, "filename" | "content" | "tasks">,
 ): TaskContent[] {
   if (revision.tasks.length > NO_TASKS) return revision.tasks;
-  return [
-    { id: nodeId, filename: revision.filename, content: revision.content },
-  ];
+  return [nodeUnitOf(nodeId, revision)];
 }
 
 function unitsOf(state: StepsState): TaskContent[] {
   return workUnitsOf(state.input.claim.node_id, state.revision);
 }
 
+interface UnitsEnd {
+  task: TaskContent | null;
+  budgetEnd: boolean;
+  completedTasks: number;
+}
+
 async function finishImplement(
   state: StepsState,
-  task: TaskContent | null,
-  boundary: TaskBoundary | null,
-  completedTasks: number,
+  end: UnitsEnd,
 ): Promise<ExecutionEnd> {
-  const budgetEnd = boundary !== null && boundary !== TaskBoundary.RunFailed;
-  const furtherWork = await state.run.spans.within(
-    phaseSpan(Phase.Finish),
-    () => settleImplement(state, task, budgetEnd),
+  await state.run.spans.within(phaseSpan(Phase.Finish), () =>
+    settleImplement(state, end),
   );
   return await state.run.release(
-    furtherWork,
-    budgetEnd && completedTasks === NO_TASKS
+    end.budgetEnd,
+    end.budgetEnd && end.completedTasks === NO_TASKS
       ? state.agent.budget.limit()
       : null,
   );
@@ -118,35 +114,28 @@ async function finishImplement(
 
 async function settleImplement(
   state: StepsState,
-  task: TaskContent | null,
-  budgetEnd: boolean,
-): Promise<boolean> {
+  end: UnitsEnd,
+): Promise<void> {
   assert.ok(state.checkouts.length > NO_CHECKOUTS);
-  assert.ok(task === null || task.id);
-  let furtherWork = budgetEnd;
+  assert.ok(end.task === null || end.task.id);
   const cleanup = state.agent.budget.cleanupContext(state.run.operationContext);
   const remaining = () => state.input.claim.expired_at - Date.now();
   try {
-    if (furtherWork) {
+    if (end.budgetEnd) {
       await state.agent.abort();
       await withinGit(state.run.spans, GitStep.Commit, () =>
         checkpointGate(
           state,
-          checkpointMessage(state, task),
+          checkpointMessage(state, end.task),
           cleanup,
           ViolationEnd.Stop,
         ),
       );
     }
-    if (
-      !furtherWork &&
-      !(await refreshBeforeRelease(state, () => allTasksPass(state)))
-    )
-      furtherWork = true;
     await withinGit(state.run.spans, GitStep.Push, () =>
       pushNodeBranches(state, cleanup, remaining),
     );
-    if (!furtherWork) {
+    if (!end.budgetEnd) {
       for (const checkout of state.checkouts)
         checkout.head = await headCommit(
           state.input.env,
@@ -166,7 +155,6 @@ async function settleImplement(
         })),
       });
     }
-    return furtherWork;
   } finally {
     cleanup.cancel();
   }
@@ -236,7 +224,6 @@ async function checkpointOnStop(
 export type TaskRunner = (
   state: StepsState,
   task: TaskContent,
-  boundary: TaskBoundary,
   instruction: string | null,
 ) => Promise<TaskResult>;
 
@@ -249,22 +236,16 @@ export async function runStepsImplement(
     const checked = await spans.within(phaseSpan(Phase.Start), () =>
       startImplement(state),
     );
-    if (checked.budgetEnd)
-      return await finishImplement(
-        state,
-        checked.budgetEnd.task,
-        checked.budgetEnd.boundary,
-        NO_TASKS,
-      );
-    const ran = await spans.within(phaseSpan(Phase.Tasks), () =>
-      runPending(state, checked.pending, taskRunner),
-    );
-    return await finishImplement(
-      state,
-      ran.task,
-      ran.boundary,
-      ran.completedTasks,
-    );
+    const end = checked.budgetEnd
+      ? {
+          task: checked.budgetEnd.task,
+          budgetEnd: true,
+          completedTasks: NO_TASKS,
+        }
+      : await spans.within(phaseSpan(Phase.Tasks), () =>
+          runUnits(state, checked.pending, taskRunner),
+        );
+    return await finishImplement(state, end);
   } catch (error) {
     const stopped = await state.run.stopOf(error);
     if (stopped.reason !== EndReason.Revoked)
@@ -281,36 +262,53 @@ export async function runStepsImplement(
 async function startImplement(state: StepsState): Promise<StartCheck> {
   assert.ok(state.checkouts.length > NO_CHECKOUTS);
   if ((await refreshAtClaim(state)) === RefreshResult.BudgetEnd)
-    return {
-      pending: [],
-      budgetEnd: { task: null, boundary: TaskBoundary.InProgress },
-    };
+    return { pending: [], budgetEnd: { task: null } };
   return await startCheck(state);
+}
+
+async function runUnits(
+  state: StepsState,
+  pending: readonly PendingTask[],
+  taskRunner: TaskRunner,
+): Promise<UnitsEnd> {
+  const completed = new Set<string>();
+  let units = pending;
+  while (!state.agent.budget.exhausted()) {
+    const ran = await runPending(state, units, taskRunner, completed);
+    if (ran.budgetEnd) return ran;
+    const gate = await releaseGate(state);
+    if (gate.kind === ReleaseGateKind.Passed)
+      return { task: null, budgetEnd: false, completedTasks: completed.size };
+    if (gate.kind === ReleaseGateKind.BudgetEnd) break;
+    state.run.log("release failure routed", { task_id: gate.unit.id });
+    units = [{ task: gate.unit, instruction: gate.instruction }];
+  }
+  return {
+    task: state.task ?? null,
+    budgetEnd: true,
+    completedTasks: completed.size,
+  };
 }
 
 async function runPending(
   state: StepsState,
   pending: readonly PendingTask[],
   taskRunner: TaskRunner,
-): Promise<{
-  task: TaskContent | null;
-  boundary: TaskBoundary | null;
-  completedTasks: number;
-}> {
+  completed: Set<string>,
+): Promise<UnitsEnd> {
   assert.ok(pending.length <= unitsOf(state).length);
-  let completedTasks = NO_TASKS;
-  for (const { task, boundary, instruction } of pending) {
+  for (const { task, instruction } of pending) {
     state.task = task;
     const result = await state.run.spans.within(
       taskSpan(state.run.spans, task),
-      () => taskRunner(state, task, boundary, instruction),
+      () => taskRunner(state, task, instruction),
       taskEnd,
     );
     if (result.kind === TaskResultKind.BudgetEnd)
-      return { task, boundary: result.boundary, completedTasks };
-    completedTasks++;
+      return { task, budgetEnd: true, completedTasks: completed.size };
+    completed.add(task.id);
   }
-  return { task: null, boundary: null, completedTasks };
+  return { task: null, budgetEnd: false, completedTasks: completed.size };
 }
 
 async function judgeTask(
@@ -367,29 +365,18 @@ export const TaskResultKind = {
   Complete: "complete",
   BudgetEnd: "budget_end",
 } as const;
-export const TaskBoundary = {
-  InProgress: "in_progress",
-  RunFailed: "run_failed",
-  RunPassed: "run_passed",
-} as const;
-export type TaskBoundary = (typeof TaskBoundary)[keyof typeof TaskBoundary];
 export type TaskResult =
   | { kind: typeof TaskResultKind.Complete }
-  | { kind: typeof TaskResultKind.BudgetEnd; boundary: TaskBoundary };
+  | { kind: typeof TaskResultKind.BudgetEnd };
 
 export async function runTask(
   state: StepsState,
   task: TaskContent,
-  initialBoundary: TaskBoundary = TaskBoundary.InProgress,
   initialInstruction: string | null = null,
 ): Promise<TaskResult> {
   const budget = state.agent.budget;
   let instruction = initialInstruction;
-  let boundary = initialBoundary;
-  const ended = (boundary: TaskBoundary): TaskResult => ({
-    kind: TaskResultKind.BudgetEnd,
-    boundary,
-  });
+  const ended: TaskResult = { kind: TaskResultKind.BudgetEnd };
   state.run.log("task started", { task_id: task.id });
   const agent = gatedAgent(
     state,
@@ -397,10 +384,9 @@ export async function runTask(
   );
   while (!budget.exhausted()) {
     await state.run.checkClaim();
-    boundary = TaskBoundary.InProgress;
     if (instruction === null) await agent.prompt(taskWork(state, task));
     else await agent.instruct(taskWork(state, task), instruction);
-    if (budget.exhausted()) return ended(TaskBoundary.InProgress);
+    if (budget.exhausted()) return ended;
     if (instruction !== null && !agent.changed()) countUnchangedTurn(state);
     state.run.log("task committed", {
       task_id: task.id,
@@ -415,8 +401,6 @@ export async function runTask(
       exit_codes: verification.results.map((result) => result.exit_code),
     });
     if (!passed) {
-      boundary = TaskBoundary.RunFailed;
-      if (budget.exhausted()) return ended(TaskBoundary.RunFailed);
       instruction = taskRevisionInstruction(
         state.input.setup.templates,
         verification,
@@ -425,11 +409,9 @@ export async function runTask(
       );
       continue;
     }
-    boundary = TaskBoundary.RunPassed;
-    if (budget.exhausted()) return ended(TaskBoundary.RunPassed);
+    if (budget.exhausted()) return ended;
     const judgement = await judgeTask(state, task, null);
-    if (judgement === ReplyRepair.BudgetEnd)
-      return ended(TaskBoundary.RunPassed);
+    if (judgement === ReplyRepair.BudgetEnd) return ended;
     if (judgement === ReplyRepair.Invalid)
       state.run.stop(EndReason.JudgementInvalid);
     state.run.log("task judged", {
@@ -450,7 +432,7 @@ export async function runTask(
       judgement.rationale,
     );
   }
-  return ended(boundary);
+  return ended;
 }
 
 function countUnchangedTurn(state: StepsState): void {
@@ -596,15 +578,6 @@ async function verifyCommands(
   return run;
 }
 
-async function allTasksPass(state: StepsState): Promise<boolean> {
-  for (const task of unitsOf(state)) {
-    const verification = await verifyTask(state, task);
-    if (!verificationPassed(verification, task.content.verifications))
-      return false;
-  }
-  return true;
-}
-
 function nodeDirectoryOf(state: StepsState): string {
   return state.input.workspaces.nodeKey(state.input.claim.node_id);
 }
@@ -619,13 +592,12 @@ function judgedTaskOf(state: StepsState, task: TaskContent) {
 
 export interface PendingTask {
   task: TaskContent;
-  boundary: TaskBoundary;
   instruction: string | null;
 }
 
 export interface StartCheck {
   pending: PendingTask[];
-  budgetEnd: { task: TaskContent | null; boundary: TaskBoundary } | null;
+  budgetEnd: { task: TaskContent | null } | null;
 }
 
 interface NodeCheck {
@@ -692,24 +664,18 @@ export async function startCheck(state: StepsState): Promise<StartCheck> {
   assert.ok(state.checkouts.length > NO_CHECKOUTS);
   const pending: PendingTask[] = [];
   const node = await reworkNodeCheck(state);
-  if (node.budgetEnd)
-    return {
-      pending,
-      budgetEnd: { task: null, boundary: TaskBoundary.InProgress },
-    };
+  if (node.budgetEnd) return { pending, budgetEnd: { task: null } };
   for (const task of unitsOf(state)) {
     state.task = task;
     const verification = await verifyTask(state, task);
     const passed = verificationPassed(verification, task.content.verifications);
-    const boundary = passed ? TaskBoundary.RunPassed : TaskBoundary.RunFailed;
-    if (state.agent.budget.exhausted())
-      return { pending, budgetEnd: { task, boundary } };
+    if (state.agent.budget.exhausted()) return { pending, budgetEnd: { task } };
     if (task.id === node.revised?.task.id) {
-      pending.push({ task, boundary, instruction: node.revised.instruction });
+      pending.push({ task, instruction: node.revised.instruction });
       continue;
     }
     if (!passed) {
-      pending.push({ task, boundary, instruction: null });
+      pending.push({ task, instruction: null });
       continue;
     }
     if (
@@ -721,7 +687,6 @@ export async function startCheck(state: StepsState): Promise<StartCheck> {
     if (state.priorRationale?.includes(task.id)) {
       pending.push({
         task,
-        boundary,
         instruction: criterionRevisionInstruction(
           state.input.setup.templates,
           state.priorRationale,
@@ -731,7 +696,7 @@ export async function startCheck(state: StepsState): Promise<StartCheck> {
     }
     const judgement = await judgeTask(state, task, state.priorRationale);
     if (judgement === ReplyRepair.BudgetEnd)
-      return { pending, budgetEnd: { task, boundary } };
+      return { pending, budgetEnd: { task } };
     if (judgement === ReplyRepair.Invalid)
       state.run.stop(EndReason.JudgementInvalid);
     state.run.log("task judged", {
@@ -748,7 +713,6 @@ export async function startCheck(state: StepsState): Promise<StartCheck> {
     if (!judgement.criterion_met)
       pending.push({
         task,
-        boundary,
         instruction:
           state.priorRationale === null
             ? null

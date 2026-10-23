@@ -24,6 +24,7 @@ const GIT_EXCLUDE = [".git", "info", "exclude"];
 export const WORKSPACE_RETENTION_MS = 7 * 24 * 3600 * 1000;
 export const SWEEP_INTERVAL_MS = 3600000;
 export const CHECKOUTS_DIRECTORY = "checkouts";
+export const RELEASE_DIRECTORY = "release";
 export const EVIDENCE_DIRECTORY = "evidence";
 const NO_CHECKOUTS = 0;
 const SINGLE_CHECKOUT = 1;
@@ -151,6 +152,7 @@ export class WorkspaceRoot {
     try {
       ensureDirectory(key);
       this.touch(key);
+      rmSync(join(key, RELEASE_DIRECTORY), { recursive: true, force: true });
       const checkouts: WorkspaceCheckout[] = [];
       for (const repository of input.repositories) {
         const directory = this.nodeDirectory(input.nodeId, repository.name);
