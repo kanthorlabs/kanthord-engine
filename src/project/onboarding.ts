@@ -1,14 +1,27 @@
 import assert from "node:assert/strict";
 import type { Logger } from "pino";
+import { z } from "zod";
 import { CancellationContext, type Context } from "../kernel/context.ts";
-import { EnvironmentSource } from "../kernel/devcontainer.ts";
-import { WorkerPlacement } from "./contract.ts";
+import {
+  EnvironmentSource,
+  checksOf,
+  setupScriptsOf,
+  type Environment,
+} from "../kernel/devcontainer.ts";
+import { OperationError } from "../kernel/errors.ts";
+import { HttpStatus } from "../kernel/http.ts";
+import { ProjectErrorCode, WorkerPlacement } from "./contract.ts";
 import type { GroupResolution } from "./environment.ts";
 import {
+  BASE_SUFFIX,
+  EnvironmentFailureClass,
   EnvironmentStatus,
   EnvironmentTarget,
+  FailureOrigin,
+  ImageBuildOutcome,
   PROVED_SUFFIX,
   ProofOutcome,
+  classifyProof,
   environmentDigest,
   environmentPath,
   environmentTagOf,
@@ -16,11 +29,21 @@ import {
   type EnvironmentState,
   type ProofFile,
   type ProofFiles,
+  type ProofVerdict,
 } from "./environment-state.ts";
 
 const KEY_SEPARATOR = "\u0000";
 const SINGLE_REPOSITORY = 1;
 const NO_WORKER_BINDING = 0;
+const NO_ITEMS = 0;
+const NOT_QUEUED = -1;
+const RUN_DEADLINE_MS = 1800000;
+const RUN_DEADLINE_TAIL = "the run deadline of 30 minutes passed";
+const RUN_STARTED = "project.onboarding.run_started";
+const RUN_ENDED = "project.onboarding.run_ended";
+const RUN_FAILED = "project.onboarding.run_failed";
+const NO_COMMAND = null;
+const NO_EXIT_CODE = null;
 
 export interface RepositoryGroup {
   binding_id: string;
@@ -60,7 +83,7 @@ export interface OnboardingDependencies {
     projectId: string,
     resourceIdentity: string,
     tag: string,
-  ): void;
+  ): Promise<void>;
   logger: Logger;
   now(): number;
   runId(): string;
@@ -69,6 +92,14 @@ export interface OnboardingDependencies {
 type QueuedStep =
   typeof EnvironmentStatus.Building | typeof EnvironmentStatus.Proving;
 
+export interface EnvironmentFailedInput {
+  project_id: string;
+  execution_id: string;
+  resource_identities: readonly string[];
+  stop: { code: EnvironmentFailureClass; detail: string };
+  digests: Readonly<Record<string, string>>;
+}
+
 export interface GroupRecord {
   project_id: string;
   binding_id: string;
@@ -76,6 +107,8 @@ export interface GroupRecord {
   resource_identity: string;
   target: EnvironmentTarget;
   source: EnvironmentSource | null;
+  commit: string | null;
+  document: Environment | null;
   digest: string | null;
   tag: string | null;
   proof: ProofFile | null;
@@ -146,6 +179,8 @@ function emptyRecord(
     resource_identity: group.resource_identity,
     target,
     source: null,
+    commit: null,
+    document: null,
     digest: null,
     tag: null,
     proof: null,
@@ -181,6 +216,29 @@ function claimable(status: EnvironmentStatus): boolean {
   return (
     status === EnvironmentStatus.None || status === EnvironmentStatus.Ready
   );
+}
+
+const detailSchema = z.looseObject({
+  command: z.string().optional(),
+  exit_code: z.int().optional(),
+});
+
+function detailFacts(detail: string): {
+  command: string | null;
+  exit_code: number | null;
+} {
+  let value: unknown;
+  try {
+    value = JSON.parse(detail);
+  } catch {
+    return { command: NO_COMMAND, exit_code: NO_EXIT_CODE };
+  }
+  const parsed = detailSchema.safeParse(value);
+  if (!parsed.success) return { command: NO_COMMAND, exit_code: NO_EXIT_CODE };
+  return {
+    command: parsed.data.command ?? NO_COMMAND,
+    exit_code: parsed.data.exit_code ?? NO_EXIT_CODE,
+  };
 }
 
 function stateOf(record: GroupRecord): EnvironmentState {
@@ -223,14 +281,18 @@ export class Onboarding {
   private readonly records = new Map<string, GroupRecord>();
   private readonly computing = new Map<string, Promise<void>>();
   private readonly again = new Set<string>();
+  private readonly marked = new Set<string>();
+  private readonly queue: string[] = [];
+  private draining: Promise<void> | null = null;
   private readonly listeners = new Set<() => void>();
 
   constructor(dependencies: OnboardingDependencies) {
     this.dependencies = dependencies;
   }
 
-  close(): void {
+  async stop(): Promise<void> {
     this.context.cancel();
+    await this.draining;
   }
 
   compute(projectId: string, resourceIdentity: string): Promise<void> {
@@ -377,6 +439,10 @@ export class Onboarding {
     }
     const target = targetOf(group, facts);
     const previous = this.records.get(key);
+    if (previous !== undefined && previous.run_started_at !== null) {
+      this.marked.add(key);
+      return;
+    }
     const wasClaimable =
       previous !== undefined && claimable(statusOf(previous));
     let next: GroupRecord;
@@ -388,7 +454,13 @@ export class Onboarding {
         reason: messageOf(error),
       };
     }
+    const current = this.records.get(key);
+    if (current !== undefined && current.run_started_at !== null) {
+      this.marked.add(key);
+      return;
+    }
     this.records.set(key, next);
+    this.schedule(key, next);
     this.notify();
     if (!wasClaimable && claimable(statusOf(next)))
       this.dependencies.wake(projectId);
@@ -429,6 +501,8 @@ export class Onboarding {
       binding_name: group.binding_name,
       target,
       source: resolved.source,
+      commit: resolved.commit,
+      document: resolved.document,
       digest: sum,
       tag,
       proof: proofs.read(environmentPath(group.resource_identity), sum),
@@ -437,12 +511,9 @@ export class Onboarding {
       read_succeeded: true,
       reason: null,
     };
-    if (next.run_started_at === null) {
-      next.step = null;
-      next.step_started_at = null;
-    }
-    if (next.step === null && decidedStatusOf(next) === null)
-      await this.enqueue(next);
+    next.step = null;
+    next.step_started_at = null;
+    if (decidedStatusOf(next) === null) next.step = await this.stepOf(next);
     return next;
   }
 
@@ -458,15 +529,291 @@ export class Onboarding {
     return runtime.imageId(reference, signal);
   }
 
-  private async enqueue(record: GroupRecord): Promise<void> {
-    if (record.target !== EnvironmentTarget.Image) {
-      record.step = EnvironmentStatus.Proving;
-      return;
-    }
+  private async stepOf(record: GroupRecord): Promise<QueuedStep> {
+    if (record.target !== EnvironmentTarget.Image)
+      return EnvironmentStatus.Proving;
     assert.ok(record.tag !== null, "An image group holds a tag.");
-    record.step = (await this.dependencies.runtime.imageExists(record.tag))
+    return (await this.dependencies.runtime.imageExists(record.tag))
       ? EnvironmentStatus.Proving
       : EnvironmentStatus.Building;
+  }
+
+  private schedule(key: string, record: GroupRecord): void {
+    const index = this.queue.indexOf(key);
+    if (record.step === null) {
+      if (index !== NOT_QUEUED) this.queue.splice(index, 1);
+      return;
+    }
+    if (index === NOT_QUEUED) this.queue.push(key);
+    this.drain();
+  }
+
+  private drain(): void {
+    if (this.draining !== null) return;
+    this.draining = this.runQueue().finally(() => {
+      this.draining = null;
+      if (this.queue.length > NO_ITEMS && !this.context.signal.aborted)
+        this.drain();
+    });
+  }
+
+  private async runQueue(): Promise<void> {
+    while (this.queue.length > NO_ITEMS && !this.context.signal.aborted) {
+      const key = this.queue.shift();
+      assert.ok(key !== undefined);
+      await this.runGroup(key);
+    }
+  }
+
+  private async runGroup(key: string): Promise<void> {
+    const record = this.records.get(key);
+    if (
+      record === undefined ||
+      record.step === null ||
+      record.run_started_at !== null
+    )
+      return;
+    assert.ok(record.digest !== null, "A queued group holds a digest.");
+    const now = this.dependencies.now();
+    record.run_started_at = now;
+    record.step_started_at = now;
+    this.notify();
+    this.logRun(RUN_STARTED, record);
+    let completed = false;
+    try {
+      const signal = AbortSignal.any([
+        this.context.signal,
+        AbortSignal.timeout(RUN_DEADLINE_MS),
+      ]);
+      const verdict = await this.execute(
+        record,
+        this.dependencies.runId(),
+        signal,
+      );
+      if (verdict !== null) {
+        await this.finalize(record, verdict);
+        completed = true;
+      }
+    } catch (error) {
+      if (!this.context.signal.aborted) {
+        record.reason = messageOf(error);
+        this.dependencies.logger.error(
+          { err: error, binding: record.binding_name, digest: record.digest },
+          RUN_FAILED,
+        );
+      }
+    } finally {
+      record.run_started_at = null;
+      record.step = null;
+      record.step_started_at = null;
+      this.notify();
+      this.logRun(RUN_ENDED, record);
+    }
+    if (completed && claimable(statusOf(record)))
+      this.dependencies.wake(record.project_id);
+    if (this.marked.delete(key))
+      this.trigger(record.project_id, record.resource_identity);
+  }
+
+  private logRun(event: string, record: GroupRecord): void {
+    this.dependencies.logger.info(
+      {
+        binding: record.binding_name,
+        digest: record.digest,
+        target: record.target,
+        status: statusOf(record),
+        class: record.proof?.class ?? null,
+      },
+      event,
+    );
+  }
+
+  private async execute(
+    record: GroupRecord,
+    runId: string,
+    signal: AbortSignal,
+  ): Promise<ProofVerdict | null> {
+    const { runtime } = this.dependencies;
+    const { document, commit, tag } = record;
+    assert.ok(document !== null && commit !== null, "A run holds its inputs.");
+    const base = {
+      run_id: runId,
+      binding_id: record.binding_id,
+      resource_identity: record.resource_identity,
+      commit,
+    };
+    const proof = {
+      ...base,
+      setup: setupScriptsOf(document),
+      checks: checksOf(document),
+    };
+    if (record.target !== EnvironmentTarget.Image) {
+      const results = await runtime.proveOnHost(proof, signal);
+      return this.context.signal.aborted ? null : classifyProof(results);
+    }
+    assert.ok(tag !== null, "An image group holds a tag.");
+    if (record.step === EnvironmentStatus.Building) {
+      const failure = await this.build({ ...base, tag, document }, signal);
+      if (this.context.signal.aborted) return null;
+      if (failure !== null) return failure;
+      record.step = EnvironmentStatus.Proving;
+      record.step_started_at = this.dependencies.now();
+      this.notify();
+    }
+    const results = await runtime.prove({ ...proof, tag }, signal);
+    return this.context.signal.aborted ? null : classifyProof(results);
+  }
+
+  private async build(
+    input: Parameters<EnvironmentRuntime["build"]>[0],
+    signal: AbortSignal,
+  ): Promise<ProofVerdict | null> {
+    const failed = (
+      failureClass: EnvironmentFailureClass,
+      tail: string,
+    ): ProofVerdict => ({
+      outcome: ProofOutcome.Failed,
+      class: failureClass,
+      command: NO_COMMAND,
+      exit_code: NO_EXIT_CODE,
+      tail,
+      checks: [],
+    });
+    try {
+      const built = await this.dependencies.runtime.build(input, signal);
+      return built.outcome === ImageBuildOutcome.Built
+        ? null
+        : failed(built.class, built.tail);
+    } catch (error) {
+      if (this.context.signal.aborted || !signal.aborted) throw error;
+      return failed(EnvironmentFailureClass.BuildFailed, RUN_DEADLINE_TAIL);
+    }
+  }
+
+  private async finalize(
+    record: GroupRecord,
+    verdict: ProofVerdict,
+  ): Promise<void> {
+    const { runtime, proofs } = this.dependencies;
+    const { digest, tag } = record;
+    assert.ok(digest !== null);
+    const path = environmentPath(record.resource_identity);
+    const file: ProofFile = {
+      digest,
+      outcome: verdict.outcome,
+      class: verdict.class,
+      origin: FailureOrigin.Onboarding,
+      execution_id: null,
+      command: verdict.command,
+      exit_code: verdict.exit_code,
+      tail: verdict.tail,
+      reproduce: this.reproduceOf(tag),
+      checks: verdict.checks,
+      repairs: 0,
+      ended_at: this.dependencies.now(),
+    };
+    proofs.write(path, file);
+    record.proof = file;
+    const proved = verdict.outcome === ProofOutcome.Passed && tag !== null;
+    if (proved) {
+      await runtime.tagProved(tag);
+      record.proved = true;
+    }
+    await runtime.collect(path, digest);
+    for (const other of proofs.digests(path))
+      if (other !== digest) proofs.remove(path, other);
+    if (proved)
+      await this.dependencies.environmentReady(
+        record.project_id,
+        record.resource_identity,
+        tag,
+      );
+  }
+
+  private reproduceOf(tag: string | null): string | null {
+    return tag === null
+      ? null
+      : `${this.dependencies.runtime.runtimeName} run -it --rm ${tag} bash`;
+  }
+
+  environmentFailed(input: EnvironmentFailedInput): void {
+    const { proofs } = this.dependencies;
+    for (const identity of input.resource_identities) {
+      const record = this.records.get(keyOf(input.project_id, identity));
+      if (record === undefined || record.digest === null) continue;
+      const entry = input.digests[identity];
+      if (entry !== undefined && entry !== record.digest) continue;
+      const file: ProofFile = {
+        digest: record.digest,
+        outcome: ProofOutcome.Failed,
+        class: input.stop.code,
+        origin: FailureOrigin.Execution,
+        execution_id: input.execution_id,
+        ...detailFacts(input.stop.detail),
+        tail: input.stop.detail,
+        reproduce: this.reproduceOf(record.tag),
+        checks: record.proof?.checks ?? [],
+        repairs: record.proof?.repairs ?? 0,
+        ended_at: this.dependencies.now(),
+      };
+      proofs.write(environmentPath(identity), file);
+      record.proof = file;
+    }
+    this.notify();
+  }
+
+  async rebuild(
+    projectId: string,
+    bindingId: string,
+  ): Promise<EnvironmentState> {
+    const group = this.dependencies
+      .bindingsOf(projectId)
+      .repositories.find((candidate) => candidate.binding_id === bindingId);
+    if (group === undefined)
+      throw new OperationError(
+        HttpStatus.NotFound,
+        ProjectErrorCode.BindingNotFound,
+        "Binding not found.",
+      );
+    const key = keyOf(projectId, group.resource_identity);
+    if (!this.records.has(key))
+      await this.compute(projectId, group.resource_identity);
+    const record = this.records.get(key);
+    if (record !== undefined) {
+      this.refuseActiveRun(record);
+      await this.discard(record);
+    }
+    await this.compute(projectId, group.resource_identity);
+    const rebuilt = this.records.get(key);
+    assert.ok(rebuilt !== undefined, "A rebuilt group holds a record.");
+    return stateOf(rebuilt);
+  }
+
+  private refuseActiveRun(record: GroupRecord): void {
+    if (record.run_started_at === null) return;
+    throw new OperationError(
+      HttpStatus.Conflict,
+      ProjectErrorCode.EnvironmentRunActive,
+      "A run of the environment is active.",
+    );
+  }
+
+  private async discard(record: GroupRecord): Promise<void> {
+    const { runtime, proofs } = this.dependencies;
+    if (record.digest !== null)
+      proofs.remove(environmentPath(record.resource_identity), record.digest);
+    record.proof = null;
+    record.proved = false;
+    const { tag } = record;
+    if (tag === null) return;
+    await runtime.removeTags([
+      tag,
+      `${tag}${BASE_SUFFIX}`,
+      `${tag}${PROVED_SUFFIX}`,
+    ]);
+    const image = record.document?.image;
+    if (image !== undefined)
+      await runtime.pullImage(image, this.context.signal);
   }
 
   private notify(): void {

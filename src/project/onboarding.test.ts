@@ -3,10 +3,13 @@ import { test, type TestContext } from "node:test";
 import { setImmediate as turn } from "node:timers/promises";
 import pino from "pino";
 import type { Environment } from "../kernel/devcontainer.ts";
+import { OperationError } from "../kernel/errors.ts";
+import { HttpStatus } from "../kernel/http.ts";
 import { temporary } from "../kernel/test-support.ts";
-import { WorkerPlacement } from "./contract.ts";
+import { ProjectErrorCode, WorkerPlacement } from "./contract.ts";
 import type { GroupResolution } from "./environment.ts";
 import {
+  BASE_SUFFIX,
   EnvironmentStatus,
   EnvironmentTarget,
   PROVED_SUFFIX,
@@ -15,14 +18,19 @@ import {
   environmentPath,
   environmentStateSchema,
   environmentTagOf,
+  type CommandResult,
   type EnvironmentRuntime,
+  type ImageBuildInput,
+  type ImageBuildResult,
   type ProofFile,
+  type ProofInput,
 } from "./environment-state.ts";
 import {
   Onboarding,
   statusOf,
   targetOf,
   type BindingFacts,
+  type EnvironmentFailedInput,
   type GroupRecord,
   type RepositoryGroup,
   type WorkerBindingFacts,
@@ -54,9 +62,34 @@ const COMMAND_ABSENT = "command_absent";
 const DOCS_NAME = "docs";
 const DOCS_REPAIRS = 2;
 const ONE_CALL = 1;
+const NO_CALLS = 0;
+const NO_REPAIRS = 0;
+const PASSED = "passed";
+const FAILED = "failed";
+const ONBOARDING = "onboarding";
+const EXECUTION = "execution";
+const BUILD_FAILED = "build_failed";
+const SETUP_FAILED = "setup_failed";
+const NO_SPACE = "no space";
+const BOOM = "boom";
+const MAKE_SETUP = "make setup";
+const MAKE_TEST = "make test";
+const PROVE = "prove";
+const APP_NAME = "app";
+const IMAGE = "image";
+const EXECUTION_ID = "execution_1";
+const DEADLINE_TAIL = "the run deadline of 30 minutes passed";
 const TWO_CALLS = 2;
+const RUNTIME_NAME = "podman";
+const UNTIL_ATTEMPTS = 1000;
+const SETUP_EXIT = 3;
+const COMMAND_ABSENT_EXIT = 127;
+const RUN_DEADLINE_MS = 1800000;
+const RUN_STARTED = "project.onboarding.run_started";
+const RUN_ENDED = "project.onboarding.run_ended";
 const DOCUMENT: Environment = {
   image: BASE,
+  postCreateCommand: "make setup",
   customizations: { kanthord: { checks: ["make test"] } },
 };
 const REPOSITORY: GroupResolution = {
@@ -135,20 +168,29 @@ class Harness {
   resolution: GroupResolution | Error = REPOSITORY;
   resolveCalls: Array<{ bindingId: string; target: EnvironmentTarget }> = [];
   resolveGate: Deferred | null = null;
+  buildGate: Deferred | null = new Deferred();
+  proveGate: Deferred | null = new Deferred();
+  buildResult: ImageBuildResult = { outcome: "built" };
+  proveResults: CommandResult[] = [];
   images = new Map<string, string>([
     [BASE, "sha256:base"],
     [SLOT_IMAGE, "sha256:slot"],
   ]);
   existing = new Set<string>();
   calls: string[] = [];
+  events: string[] = [];
+  buildInputs: ImageBuildInput[] = [];
+  proveInputs: ProofInput[] = [];
   woken: string[] = [];
+  lines: string[] = [];
+  clock = 0;
   readonly proofs: ProofFiles;
   readonly onboarding: Onboarding;
 
   constructor(t: TestContext) {
     this.proofs = new ProofFiles(temporary(t));
     const runtime = {
-      runtimeName: "fake",
+      runtimeName: RUNTIME_NAME,
       imageId: async (reference: string) => {
         this.calls.push(`imageId ${reference}`);
         return this.images.get(reference) ?? null;
@@ -158,9 +200,42 @@ class Harness {
         this.images.set(reference, "sha256:pulled");
       },
       imageExists: async (tag: string) => this.existing.has(tag),
+      build: async (input: ImageBuildInput, signal: AbortSignal) => {
+        this.events.push("build");
+        this.buildInputs.push(input);
+        await hold(this.buildGate, signal);
+        return this.buildResult;
+      },
+      prove: async (
+        input: ProofInput & { tag: string },
+        signal: AbortSignal,
+      ) => {
+        this.events.push("prove");
+        this.proveInputs.push(input);
+        await hold(this.proveGate, signal);
+        return this.proveResults;
+      },
+      proveOnHost: async (input: ProofInput, signal: AbortSignal) => {
+        this.events.push("proveOnHost");
+        this.proveInputs.push(input);
+        await hold(this.proveGate, signal);
+        return this.proveResults;
+      },
+      tagProved: async (tag: string) => {
+        this.events.push(`tagProved ${tag}`);
+        this.existing.add(`${tag}${PROVED_SUFFIX}`);
+      },
+      removeTags: async (tags: readonly string[]) => {
+        this.events.push(`removeTags ${tags.join(",")}`);
+        for (const tag of tags) this.existing.delete(tag);
+      },
+      collect: async (path: string, keep: string | null) => {
+        this.events.push(`collect ${path} ${keep}`);
+      },
     } as unknown as EnvironmentRuntime;
     this.onboarding = new Onboarding({
-      bindingsOf: () => this.bindings,
+      bindingsOf: (projectId) =>
+        projectId === PROJECT ? this.bindings : facts([], []),
       workerEnvironmentOf: () => this.workerEnvironment,
       projectIds: () => [PROJECT],
       resolveGroup: async (bindingId, target) => {
@@ -173,13 +248,56 @@ class Harness {
       proofs: this.proofs,
       slotImage: SLOT_IMAGE,
       version: VERSION,
-      wake: (projectId) => this.woken.push(projectId),
-      environmentReady: () => undefined,
-      logger: pino({ level: "silent" }),
-      now: () => 1,
+      wake: (projectId) => {
+        this.events.push(`wake ${projectId}`);
+        this.woken.push(projectId);
+      },
+      environmentReady: async (projectId, identity, tag) => {
+        this.events.push(`environmentReady ${projectId} ${identity} ${tag}`);
+      },
+      logger: pino(
+        { level: "info" },
+        { write: (line) => this.lines.push(line) },
+      ),
+      now: () => ++this.clock,
       runId: () => "run_1",
     });
-    t.after(() => this.onboarding.close());
+    t.after(() => this.onboarding.stop());
+  }
+
+  openBuild(): void {
+    const gate = this.buildGate;
+    this.buildGate = null;
+    gate?.release();
+  }
+
+  openProve(): void {
+    const gate = this.proveGate;
+    this.proveGate = null;
+    gate?.release();
+  }
+
+  open(): void {
+    this.openBuild();
+    this.openProve();
+  }
+
+  logged(message: string): Array<Record<string, unknown>> {
+    return this.lines
+      .map((line) => JSON.parse(line) as Record<string, unknown>)
+      .filter((entry) => entry.msg === message);
+  }
+
+  async until(condition: () => boolean): Promise<void> {
+    for (let attempt = 0; attempt < UNTIL_ATTEMPTS; attempt++) {
+      if (condition()) return;
+      await turn();
+    }
+    assert.fail("The condition did not hold.");
+  }
+
+  async ended(count = ONE_CALL): Promise<void> {
+    await this.until(() => this.logged(RUN_ENDED).length >= count);
   }
 
   async compute(group: RepositoryGroup = APP): Promise<void> {
@@ -198,19 +316,53 @@ class Harness {
     return environmentTagOf(group.resource_identity, sum);
   }
 
-  writeProof(file: ProofFile, group: RepositoryGroup = APP): void {
-    this.proofs.write(environmentPath(group.resource_identity), file);
+  provedOf(sum: string, group: RepositoryGroup = APP): string {
+    return `${this.tagOf(sum, group)}${PROVED_SUFFIX}`;
   }
 
-  async digestOf(group: RepositoryGroup = APP): Promise<string> {
-    await this.compute(group);
-    const sum = this.onboarding.environmentDigestOf(
-      PROJECT,
-      group.resource_identity,
-    );
-    assert.ok(sum !== null);
-    return sum;
+  pathOf(group: RepositoryGroup = APP): string {
+    return environmentPath(group.resource_identity);
   }
+
+  proofOf(sum: string, group: RepositoryGroup = APP): ProofFile | null {
+    return this.proofs.read(this.pathOf(group), sum);
+  }
+
+  writeProof(file: ProofFile, group: RepositoryGroup = APP): void {
+    this.proofs.write(this.pathOf(group), file);
+  }
+
+  digest(group: RepositoryGroup = APP): string {
+    assert.ok(!(this.resolution instanceof Error));
+    const { document } = this.resolution;
+    const image = targetOf(group, this.bindings) === EnvironmentTarget.Image;
+    return environmentDigest({
+      resource_identity: group.resource_identity,
+      target: targetOf(group, this.bindings),
+      source: this.resolution.source,
+      document,
+      files: this.resolution.files,
+      base_image:
+        image && document?.image !== undefined
+          ? (this.images.get(document.image) ?? null)
+          : null,
+      slot_image: image ? (this.images.get(SLOT_IMAGE) ?? null) : null,
+      version: VERSION,
+    });
+  }
+}
+
+async function hold(gate: Deferred | null, signal: AbortSignal): Promise<void> {
+  signal.throwIfAborted();
+  if (gate === null) return;
+  await Promise.race([
+    gate.promise,
+    new Promise<void>((_, reject) =>
+      signal.addEventListener("abort", () => reject(signal.reason), {
+        once: true,
+      }),
+    ),
+  ]);
 }
 
 function record(override: Partial<GroupRecord> = {}): GroupRecord {
@@ -221,6 +373,8 @@ function record(override: Partial<GroupRecord> = {}): GroupRecord {
     resource_identity: APP.resource_identity,
     target: EnvironmentTarget.Image,
     source: "repository",
+    commit: "c1",
+    document: DOCUMENT,
     digest: "d",
     tag: "t",
     proof: null,
@@ -282,10 +436,31 @@ test("targetOf answers host with no worker binding", () => {
   assert.equal(targetOf(APP, facts([APP], [])), EnvironmentTarget.Host);
 });
 
+function result(
+  phase: CommandResult["phase"],
+  command: string,
+  exit_code: number | null,
+  override: Partial<CommandResult> = {},
+): CommandResult {
+  return {
+    phase,
+    command,
+    exit_code,
+    timed_out: false,
+    output: "",
+    ...override,
+  };
+}
+
+const PASSING_RESULTS = [
+  result("setup", "make setup", 0),
+  result("check", "make test", 0),
+];
+
 test("a stored environment answers stored at every target", async (t) => {
-  const h = new Harness(t);
-  h.resolution = STORED;
   for (const workers of [[container("app")], [], [remoteWorker]]) {
+    const h = new Harness(t);
+    h.resolution = STORED;
     h.bindings = facts([APP], workers);
     await h.compute();
     assert.equal(h.state().source, STORED_SOURCE);
@@ -293,17 +468,18 @@ test("a stored environment answers stored at every target", async (t) => {
 });
 
 test("a repository devcontainer answers repository at image and none at host", async (t) => {
-  const h = new Harness(t);
-  await h.compute();
-  assert.equal(h.state().source, REPOSITORY_SOURCE);
-  assert.deepEqual(h.resolveCalls, [
+  const image = new Harness(t);
+  await image.compute();
+  assert.equal(image.state().source, REPOSITORY_SOURCE);
+  assert.deepEqual(image.resolveCalls, [
     { bindingId: APP.binding_id, target: EnvironmentTarget.Image },
   ]);
-  h.bindings = facts([APP], []);
-  h.resolution = NOTHING;
-  await h.compute();
-  assert.equal(h.state().source, NONE_SOURCE);
-  assert.equal(h.resolveCalls[1]?.target, EnvironmentTarget.Host);
+  const host = new Harness(t);
+  host.bindings = facts([APP], []);
+  host.resolution = NOTHING;
+  await host.compute();
+  assert.equal(host.state().source, NONE_SOURCE);
+  assert.equal(host.resolveCalls[0]?.target, EnvironmentTarget.Host);
 });
 
 test("no document answers none", async (t) => {
@@ -328,6 +504,7 @@ test("the digest of a record equals the environment digest of its inputs at imag
     version: VERSION,
   });
   assert.equal(h.state().digest, expected);
+  assert.equal(h.state().digest, h.digest());
   assert.equal(h.state().tag, h.tagOf(expected));
   assert.deepEqual(h.calls, [`imageId ${BASE}`, `imageId ${SLOT_IMAGE}`]);
 });
@@ -389,8 +566,8 @@ test("status rule 2: a group with no successful read is pending", async (t) => {
 
 test("status rule 3: a failed proof file decides failed before a proved tag", async (t) => {
   const h = new Harness(t);
-  const sum = await h.digestOf();
-  h.existing.add(`${h.tagOf(sum)}${PROVED_SUFFIX}`);
+  const sum = h.digest();
+  h.existing.add(h.provedOf(sum));
   h.writeProof(
     proofFile(sum, {
       outcome: "failed",
@@ -419,8 +596,7 @@ test("status rule 3: a failed proof file decides failed before a proved tag", as
 
 test("status rule 4: a proved tag at image and a passed proof at host decide ready", async (t) => {
   const h = new Harness(t);
-  const sum = await h.digestOf();
-  h.existing.add(`${h.tagOf(sum)}${PROVED_SUFFIX}`);
+  h.existing.add(h.provedOf(h.digest()));
   await h.compute();
   assert.equal(h.state().status, EnvironmentStatus.Ready);
   assert.equal(h.state().failure, null);
@@ -428,9 +604,7 @@ test("status rule 4: a proved tag at image and a passed proof at host decide rea
   const host = new Harness(t);
   host.bindings = facts([APP], []);
   host.resolution = STORED;
-  const hostSum = await host.digestOf();
-  assert.equal(host.state().status, EnvironmentStatus.Proving);
-  host.writeProof(proofFile(hostSum));
+  host.writeProof(proofFile(host.digest()));
   await host.compute();
   assert.equal(host.state().status, EnvironmentStatus.Ready);
   assert.deepEqual(host.state().checks, [
@@ -448,15 +622,15 @@ test("status rule 5: source none decides none", async (t) => {
   }
 });
 
-test("status rule 6: the queued step is building without the tag and proving with it", async (t) => {
+test("status rule 6: the step is building without the tag and proving with it", async (t) => {
   const h = new Harness(t);
-  const sum = await h.digestOf();
-  assert.equal(h.state().status, EnvironmentStatus.Building);
-  assert.equal(h.state().run_started_at, null);
-  assert.equal(h.state().step_started_at, null);
-  h.existing.add(h.tagOf(sum));
   await h.compute();
-  assert.equal(h.state().status, EnvironmentStatus.Proving);
+  assert.equal(h.state().status, EnvironmentStatus.Building);
+
+  const tagged = new Harness(t);
+  tagged.existing.add(tagged.tagOf(tagged.digest()));
+  await tagged.compute();
+  assert.equal(tagged.state().status, EnvironmentStatus.Proving);
 
   const host = new Harness(t);
   host.bindings = facts([APP], []);
@@ -487,7 +661,8 @@ test("at remote the status is failed by a failed proof file, or none", async (t)
   const h = new Harness(t);
   h.bindings = facts([APP], [remoteWorker]);
   h.resolution = STORED;
-  const sum = await h.digestOf();
+  const sum = h.digest();
+  await h.compute();
   assert.equal(h.state().target, EnvironmentTarget.Remote);
   assert.equal(h.state().status, EnvironmentStatus.None);
   assert.deepEqual(h.resolveCalls[0], {
@@ -500,6 +675,7 @@ test("at remote the status is failed by a failed proof file, or none", async (t)
   h.writeProof(proofFile(sum, { outcome: "failed", class: "setup_failed" }));
   await h.compute();
   assert.equal(h.state().status, EnvironmentStatus.Failed);
+  assert.deepEqual(h.events, [`wake ${PROJECT}`]);
 });
 
 test("a failed first read sets the reason and keeps the group pending", async (t) => {
@@ -512,8 +688,8 @@ test("a failed first read sets the reason and keeps the group pending", async (t
 
 test("a failed read after a successful read keeps the status and the digest", async (t) => {
   const h = new Harness(t);
-  const sum = await h.digestOf();
-  h.existing.add(`${h.tagOf(sum)}${PROVED_SUFFIX}`);
+  const sum = h.digest();
+  h.existing.add(h.provedOf(sum));
   await h.compute();
   assert.equal(h.state().status, EnvironmentStatus.Ready);
   h.resolution = new Error(TRANSIENT);
@@ -534,10 +710,8 @@ test("states answers the fields of an environment state in binding name order", 
   const h = new Harness(t);
   h.bindings = facts([DOCS, APP], []);
   h.resolution = STORED;
-  const sum = await h.digestOf(DOCS);
-  await h.compute(APP);
   h.writeProof(
-    proofFile(sum, {
+    proofFile(h.digest(DOCS), {
       outcome: "failed",
       class: COMMAND_ABSENT,
       command: "make test",
@@ -549,6 +723,7 @@ test("states answers the fields of an environment state in binding name order", 
     DOCS,
   );
   await h.compute(DOCS);
+  await h.compute(APP);
   const states = h.onboarding.states(PROJECT);
   assert.deepEqual(
     states.map((state) => state.binding_name),
@@ -568,7 +743,7 @@ test("states answers the fields of an environment state in binding name order", 
   assert.equal(docs.binding_id, DOCS.binding_id);
   assert.equal(docs.resource_identity, DOCS.resource_identity);
   assert.equal(docs.binding_name, DOCS_NAME);
-  assert.equal(docs.digest, sum);
+  assert.equal(docs.digest, h.digest(DOCS));
   assert.equal(docs.reason, null);
   assert.equal(docs.repairing, false);
   assert.deepEqual(h.onboarding.states("project_2"), []);
@@ -576,60 +751,42 @@ test("states answers the fields of an environment state in binding name order", 
 
 test("environmentsClaimable answers true for none and ready only", async (t) => {
   const identities = [APP.resource_identity];
+  const claimableOf = (h: Harness) =>
+    h.onboarding.environmentsClaimable(PROJECT, identities);
+
   const none = new Harness(t);
   none.resolution = NOTHING;
   await none.compute();
-  assert.equal(
-    none.onboarding.environmentsClaimable(PROJECT, identities),
-    true,
-  );
+  assert.equal(claimableOf(none), true);
 
   const ready = new Harness(t);
-  const sum = await ready.digestOf();
-  ready.existing.add(`${ready.tagOf(sum)}${PROVED_SUFFIX}`);
+  ready.existing.add(ready.provedOf(ready.digest()));
   await ready.compute();
-  assert.equal(
-    ready.onboarding.environmentsClaimable(PROJECT, identities),
-    true,
-  );
+  assert.equal(claimableOf(ready), true);
 
   const building = new Harness(t);
   await building.compute();
   assert.equal(building.state().status, EnvironmentStatus.Building);
-  assert.equal(
-    building.onboarding.environmentsClaimable(PROJECT, identities),
-    false,
-  );
+  assert.equal(claimableOf(building), false);
 
   const proving = new Harness(t);
-  const provingSum = await proving.digestOf();
-  proving.existing.add(proving.tagOf(provingSum));
+  proving.existing.add(proving.tagOf(proving.digest()));
   await proving.compute();
   assert.equal(proving.state().status, EnvironmentStatus.Proving);
-  assert.equal(
-    proving.onboarding.environmentsClaimable(PROJECT, identities),
-    false,
-  );
+  assert.equal(claimableOf(proving), false);
 
   const failed = new Harness(t);
-  const failedSum = await failed.digestOf();
   failed.writeProof(
-    proofFile(failedSum, { outcome: "failed", class: "setup_failed" }),
+    proofFile(failed.digest(), { outcome: "failed", class: "setup_failed" }),
   );
   await failed.compute();
   assert.equal(failed.state().status, EnvironmentStatus.Failed);
-  assert.equal(
-    failed.onboarding.environmentsClaimable(PROJECT, identities),
-    false,
-  );
+  assert.equal(claimableOf(failed), false);
 
   const pending = new Harness(t);
   pending.resolution = new Error("down");
   await pending.compute();
-  assert.equal(
-    pending.onboarding.environmentsClaimable(PROJECT, identities),
-    false,
-  );
+  assert.equal(claimableOf(pending), false);
 
   assert.equal(none.onboarding.environmentsClaimable(PROJECT, []), true);
 });
@@ -653,7 +810,7 @@ test(
   },
 );
 
-test("a group that becomes claimable wakes the project once", async (t) => {
+test("a group that becomes claimable by a compute wakes the project once", async (t) => {
   const h = new Harness(t);
   h.resolution = NOTHING;
   await h.compute();
@@ -667,8 +824,13 @@ test("environmentDigestOf answers the digest, keeps it after a failed read and a
     h.onboarding.environmentDigestOf(PROJECT, APP.resource_identity),
     null,
   );
-  const sum = await h.digestOf();
-  assert.equal(h.state().digest, sum);
+  const sum = h.digest();
+  h.existing.add(h.provedOf(sum));
+  await h.compute();
+  assert.equal(
+    h.onboarding.environmentDigestOf(PROJECT, APP.resource_identity),
+    sum,
+  );
   h.resolution = new Error("down");
   await h.compute();
   assert.equal(
@@ -682,6 +844,7 @@ test(
   { timeout: TEST_TIMEOUT_MS },
   async (t) => {
     const h = new Harness(t);
+    h.resolution = NOTHING;
     h.resolveGate = new Deferred();
     const first = h.compute();
     await turn();
@@ -700,8 +863,8 @@ test(
   async (t) => {
     const signal = AbortSignal.timeout(TEST_TIMEOUT_MS);
     const ready = new Harness(t);
-    const sum = await ready.digestOf();
-    ready.existing.add(`${ready.tagOf(sum)}${PROVED_SUFFIX}`);
+    const sum = ready.digest();
+    ready.existing.add(ready.provedOf(sum));
     await ready.compute();
     assert.equal(
       await ready.onboarding.slotImage(PROJECT, WORKER_IDENTITY, signal),
@@ -722,7 +885,7 @@ test(
   { timeout: TEST_TIMEOUT_MS },
   async (t) => {
     const h = new Harness(t);
-    const sum = await h.digestOf();
+    await h.compute();
     assert.equal(h.state().status, EnvironmentStatus.Building);
     let settled = false;
     const answer = h.onboarding
@@ -731,9 +894,9 @@ test(
     await turn();
     await turn();
     assert.equal(settled, false);
-    h.existing.add(`${h.tagOf(sum)}${PROVED_SUFFIX}`);
-    await h.compute();
-    assert.equal(await answer, h.tagOf(sum));
+    h.open();
+    assert.equal(await answer, h.tagOf(h.digest()));
+    assert.equal(h.state().status, EnvironmentStatus.Ready);
   },
 );
 
@@ -755,3 +918,496 @@ test(
     await assert.rejects(answer, reason);
   },
 );
+
+test(
+  "two groups that need a run start in arrival order",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const h = new Harness(t);
+    h.bindings = facts([APP, DOCS], [container("app"), container("docs")]);
+    await h.compute(APP);
+    await h.compute(DOCS);
+    await h.until(() => h.events.length > NO_CALLS);
+    assert.deepEqual(h.events, ["build"]);
+    assert.equal(h.buildInputs[0]?.resource_identity, APP.resource_identity);
+    assert.equal(h.state(DOCS).status, EnvironmentStatus.Building);
+    assert.equal(h.state(DOCS).run_started_at, null);
+    h.open();
+    await h.ended(TWO_CALLS);
+    const builds = h.buildInputs.map((input) => input.resource_identity);
+    assert.deepEqual(builds, [APP.resource_identity, DOCS.resource_identity]);
+    assert.ok(
+      h.events.indexOf(`collect ${h.pathOf(APP)} ${h.digest(APP)}`) <
+        h.events.lastIndexOf("build"),
+    );
+  },
+);
+
+test(
+  "an image run builds, proves, tags, collects, drains the slots and then wakes",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const h = new Harness(t);
+    h.open();
+    h.proveResults = PASSING_RESULTS;
+    await h.compute();
+    await h.ended();
+    const sum = h.digest();
+    const tag = h.tagOf(sum);
+    assert.deepEqual(h.events, [
+      "build",
+      "prove",
+      `tagProved ${tag}`,
+      `collect ${h.pathOf()} ${sum}`,
+      `environmentReady ${PROJECT} ${APP.resource_identity} ${tag}`,
+      `wake ${PROJECT}`,
+    ]);
+    assert.deepEqual(h.buildInputs[0], {
+      run_id: "run_1",
+      binding_id: APP.binding_id,
+      resource_identity: APP.resource_identity,
+      commit: "c1",
+      tag,
+      document: DOCUMENT,
+    });
+    assert.deepEqual(h.proveInputs[0], {
+      run_id: "run_1",
+      binding_id: APP.binding_id,
+      resource_identity: APP.resource_identity,
+      commit: "c1",
+      setup: ["make setup"],
+      checks: ["make test"],
+      tag,
+    });
+    const file = h.proofOf(sum);
+    assert.ok(file);
+    assert.equal(file.outcome, PASSED);
+    assert.equal(file.origin, ONBOARDING);
+    assert.equal(file.class, null);
+    assert.equal(file.repairs, NO_REPAIRS);
+    assert.deepEqual(file.checks, []);
+    assert.equal(file.reproduce, `${RUNTIME_NAME} run -it --rm ${tag} bash`);
+    assert.equal(h.state().status, EnvironmentStatus.Ready);
+  },
+);
+
+test(
+  "an image run with an existing tag skips the build",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const h = new Harness(t);
+    h.open();
+    h.existing.add(h.tagOf(h.digest()));
+    await h.compute();
+    await h.ended();
+    assert.equal(h.events.includes("build"), false);
+    assert.equal(h.events[0], PROVE);
+    assert.equal(h.state().status, EnvironmentStatus.Ready);
+  },
+);
+
+test(
+  "a failed build writes the failure, runs no proof and tags nothing",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const h = new Harness(t);
+    h.open();
+    h.buildResult = {
+      outcome: "failed",
+      class: "build_failed",
+      tail: "no space",
+    };
+    await h.compute();
+    await h.ended();
+    const file = h.proofOf(h.digest());
+    assert.ok(file);
+    assert.equal(file.outcome, FAILED);
+    assert.equal(file.class, BUILD_FAILED);
+    assert.equal(file.tail, NO_SPACE);
+    assert.equal(h.events.includes("prove"), false);
+    assert.equal(
+      h.events.some((event) => event.startsWith("tagProved")),
+      false,
+    );
+    assert.equal(h.state().status, EnvironmentStatus.Failed);
+    assert.equal(h.woken.length, NO_CALLS);
+  },
+);
+
+test(
+  "a proof with a failed setup writes setup_failed and the reproduce command",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const h = new Harness(t);
+    h.open();
+    h.proveResults = [
+      result("setup", "make setup", 3, { output: "boom" }),
+      result("check", "make test", 0),
+    ];
+    await h.compute();
+    await h.ended();
+    const sum = h.digest();
+    const file = h.proofOf(sum);
+    assert.ok(file);
+    assert.equal(file.outcome, FAILED);
+    assert.equal(file.class, SETUP_FAILED);
+    assert.equal(file.command, MAKE_SETUP);
+    assert.equal(file.exit_code, SETUP_EXIT);
+    assert.equal(file.tail, BOOM);
+    assert.equal(file.reproduce, `podman run -it --rm ${h.tagOf(sum)} bash`);
+    const [ended] = h.logged(RUN_ENDED);
+    assert.equal(ended?.class, SETUP_FAILED);
+    assert.equal(ended?.status, EnvironmentStatus.Failed);
+  },
+);
+
+test(
+  "a proof with a red check writes passed with the baseline",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const h = new Harness(t);
+    h.open();
+    h.proveResults = [
+      result("setup", "make setup", 0),
+      result("check", "make test", 2),
+    ];
+    await h.compute();
+    await h.ended();
+    const file = h.proofOf(h.digest());
+    assert.ok(file);
+    assert.equal(file.outcome, PASSED);
+    assert.deepEqual(file.checks, [{ command: "make test", exit_code: 2 }]);
+  },
+);
+
+test(
+  "a timed out proof result is classified",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const h = new Harness(t);
+    h.open();
+    h.proveResults = [result("setup", "make setup", null, { timed_out: true })];
+    await h.compute();
+    await h.ended();
+    assert.equal(h.proofOf(h.digest())?.class, SETUP_FAILED);
+  },
+);
+
+test(
+  "a host run proves on the host, never builds and writes a null reproduce",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const h = new Harness(t);
+    h.open();
+    h.bindings = facts([APP], []);
+    h.resolution = STORED;
+    h.proveResults = PASSING_RESULTS;
+    await h.compute();
+    await h.ended();
+    const sum = h.digest();
+    assert.deepEqual(h.events, [
+      "proveOnHost",
+      `collect ${h.pathOf()} ${sum}`,
+      `wake ${PROJECT}`,
+    ]);
+    const file = h.proofOf(sum);
+    assert.ok(file);
+    assert.equal(file.reproduce, null);
+    assert.equal(h.state().status, EnvironmentStatus.Ready);
+  },
+);
+
+test(
+  "the status goes building, proving and ready with the start times set during the run",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const h = new Harness(t);
+    await h.compute();
+    await h.until(() => h.state().run_started_at !== null);
+    const building = h.state();
+    assert.equal(building.status, EnvironmentStatus.Building);
+    assert.notEqual(building.step_started_at, null);
+    h.openBuild();
+    await h.until(() => h.state().status === EnvironmentStatus.Proving);
+    const proving = h.state();
+    assert.equal(proving.run_started_at, building.run_started_at);
+    assert.ok(
+      proving.step_started_at !== null &&
+        building.step_started_at !== null &&
+        proving.step_started_at > building.step_started_at,
+    );
+    h.openProve();
+    await h.ended();
+    const ready = h.state();
+    assert.equal(ready.status, EnvironmentStatus.Ready);
+    assert.equal(ready.run_started_at, null);
+    assert.equal(ready.step_started_at, null);
+  },
+);
+
+test(
+  "a trigger during a run marks the group and a second compute follows the run",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const h = new Harness(t);
+    await h.compute();
+    await h.until(() => h.state().run_started_at !== null);
+    await h.compute();
+    assert.equal(h.resolveCalls.length, ONE_CALL);
+    h.open();
+    await h.until(() => h.resolveCalls.length === TWO_CALLS);
+    await h.ended();
+    assert.equal(h.state().status, EnvironmentStatus.Ready);
+  },
+);
+
+test(
+  "a stop of the component aborts the run and writes no proof file",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const h = new Harness(t);
+    await h.compute();
+    await h.until(() => h.events.length > NO_CALLS);
+    await h.onboarding.stop();
+    assert.deepEqual(h.proofs.digests(h.pathOf()), []);
+    assert.equal(
+      h.events.some((event) => event.startsWith("tagProved")),
+      false,
+    );
+    assert.equal(h.woken.length, NO_CALLS);
+  },
+);
+
+test(
+  "a deadline in the build writes build_failed with the deadline tail",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const h = new Harness(t);
+    const timeouts: number[] = [];
+    t.mock.method(AbortSignal, "timeout", (milliseconds: number) => {
+      timeouts.push(milliseconds);
+      return AbortSignal.abort(new Error("deadline"));
+    });
+    await h.compute();
+    await h.ended();
+    assert.deepEqual(timeouts, [RUN_DEADLINE_MS]);
+    const file = h.proofOf(h.digest());
+    assert.ok(file);
+    assert.equal(file.class, BUILD_FAILED);
+    assert.equal(file.tail, DEADLINE_TAIL);
+  },
+);
+
+test(
+  "the logger receives the start and the end of a run",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const h = new Harness(t);
+    await h.compute();
+    await h.until(() => h.logged(RUN_STARTED).length > NO_CALLS);
+    h.open();
+    await h.ended();
+    const sum = h.digest();
+    const [started] = h.logged(RUN_STARTED);
+    const [ended] = h.logged(RUN_ENDED);
+    assert.equal(started?.binding, APP_NAME);
+    assert.equal(started?.digest, sum);
+    assert.equal(started?.target, IMAGE);
+    assert.equal(started?.status, EnvironmentStatus.Building);
+    assert.equal(started?.class, null);
+    assert.equal(ended?.status, EnvironmentStatus.Ready);
+    assert.equal(ended?.digest, sum);
+    assert.equal(ended?.target, IMAGE);
+    assert.equal(ended?.binding, APP_NAME);
+    assert.equal(ended?.class, null);
+  },
+);
+
+test(
+  "the collection removes the proof files of other digests of the path",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const h = new Harness(t);
+    h.open();
+    h.writeProof(proofFile("old"));
+    await h.compute();
+    await h.ended();
+    assert.deepEqual(h.proofs.digests(h.pathOf()), [h.digest()]);
+  },
+);
+
+function failureInput(
+  h: Harness,
+  override: Partial<EnvironmentFailedInput> = {},
+): EnvironmentFailedInput {
+  return {
+    project_id: PROJECT,
+    execution_id: "execution_1",
+    resource_identities: [APP.resource_identity],
+    stop: { code: "setup_failed", detail: "boom" },
+    ...override,
+    digests: override.digests ?? { [APP.resource_identity]: h.digest() },
+  };
+}
+
+async function readyHarness(t: TestContext): Promise<Harness> {
+  const h = new Harness(t);
+  h.existing.add(h.provedOf(h.digest()));
+  await h.compute();
+  assert.equal(h.state().status, EnvironmentStatus.Ready);
+  h.woken.length = 0;
+  return h;
+}
+
+test("environmentFailed writes the failed proof file of the current digest", async (t) => {
+  const h = await readyHarness(t);
+  h.onboarding.environmentFailed(
+    failureInput(h, {
+      stop: {
+        code: "command_absent",
+        detail: JSON.stringify({ command: "make test", exit_code: 127 }),
+      },
+    }),
+  );
+  const file = h.proofOf(h.digest());
+  assert.ok(file);
+  assert.equal(file.outcome, FAILED);
+  assert.equal(file.origin, EXECUTION);
+  assert.equal(file.execution_id, EXECUTION_ID);
+  assert.equal(file.class, COMMAND_ABSENT);
+  assert.equal(
+    file.tail,
+    JSON.stringify({ command: "make test", exit_code: 127 }),
+  );
+  assert.equal(file.command, MAKE_TEST);
+  assert.equal(file.exit_code, COMMAND_ABSENT_EXIT);
+  assert.equal(h.state().status, EnvironmentStatus.Failed);
+  assert.equal(h.state().failure?.origin, EXECUTION);
+  assert.equal(h.woken.length, NO_CALLS);
+});
+
+test("environmentFailed keeps a null command and exit code for a text detail", async (t) => {
+  const h = await readyHarness(t);
+  h.onboarding.environmentFailed(failureInput(h));
+  const file = h.proofOf(h.digest());
+  assert.ok(file);
+  assert.equal(file.tail, BOOM);
+  assert.equal(file.command, null);
+  assert.equal(file.exit_code, null);
+});
+
+test("environmentFailed skips a group with no record or no digest", async (t) => {
+  const h = new Harness(t);
+  h.resolution = new Error("down");
+  await h.compute();
+  h.onboarding.environmentFailed({
+    ...failureInput(h, { digests: {} }),
+    resource_identities: [APP.resource_identity, DOCS.resource_identity],
+  });
+  assert.deepEqual(h.proofs.digests(h.pathOf()), []);
+  assert.deepEqual(h.proofs.digests(h.pathOf(DOCS)), []);
+  assert.equal(h.state().status, EnvironmentStatus.Pending);
+});
+
+test("environmentFailed keeps the status of a group with another current digest", async (t) => {
+  const h = await readyHarness(t);
+  h.onboarding.environmentFailed(
+    failureInput(h, { digests: { [APP.resource_identity]: "older" } }),
+  );
+  assert.deepEqual(h.proofs.digests(h.pathOf()), []);
+  assert.equal(h.state().status, EnvironmentStatus.Ready);
+});
+
+test("environmentFailed closes the gate of a group with no digests entry", async (t) => {
+  const h = await readyHarness(t);
+  h.onboarding.environmentFailed(failureInput(h, { digests: {} }));
+  assert.equal(h.state().status, EnvironmentStatus.Failed);
+
+  const none = new Harness(t);
+  none.bindings = facts([APP], []);
+  none.resolution = NOTHING;
+  await none.compute();
+  assert.equal(none.state().status, EnvironmentStatus.None);
+  none.onboarding.environmentFailed(failureInput(none, { digests: {} }));
+  assert.equal(none.state().status, EnvironmentStatus.Failed);
+  assert.equal(none.state().failure?.reproduce, null);
+});
+
+async function readyWithProof(t: TestContext): Promise<Harness> {
+  const h = await readyHarness(t);
+  h.writeProof(proofFile(h.digest()));
+  return h;
+}
+
+test(
+  "rebuild removes the proof file and the tags, pulls the image, starts a run and answers the state",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const h = await readyWithProof(t);
+    const oldSum = h.digest();
+    const oldTag = h.tagOf(oldSum);
+    const state = await h.onboarding.rebuild(PROJECT, APP.binding_id);
+    assert.equal(h.proofOf(oldSum), null);
+    assert.ok(
+      h.events.includes(
+        `removeTags ${oldTag},${oldTag}${BASE_SUFFIX},${oldTag}${PROVED_SUFFIX}`,
+      ),
+    );
+    assert.deepEqual(
+      h.calls.filter((call) => call.startsWith("pull")),
+      [`pullImage ${BASE}`],
+    );
+    await h.until(() => h.events.includes("build"));
+    assert.equal(state.binding_id, APP.binding_id);
+    assert.equal(
+      h.onboarding.states(PROJECT)[0]?.status,
+      EnvironmentStatus.Building,
+    );
+    assert.ok(
+      state.status === EnvironmentStatus.Building ||
+        state.status === EnvironmentStatus.Proving,
+    );
+    environmentStateSchema.parse(state);
+  },
+);
+
+test(
+  "rebuild answers 409 during an active run of the group",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const h = new Harness(t);
+    await h.compute();
+    await h.until(() => h.state().run_started_at !== null);
+    await assert.rejects(
+      h.onboarding.rebuild(PROJECT, APP.binding_id),
+      (error: unknown) =>
+        error instanceof OperationError &&
+        error.status === HttpStatus.Conflict &&
+        error.code === ProjectErrorCode.EnvironmentRunActive,
+    );
+  },
+);
+
+test("rebuild answers 404 for an unknown, a foreign, a removed and a worker binding", async (t) => {
+  const h = new Harness(t);
+  h.resolution = NOTHING;
+  await h.compute();
+  const notFound = (error: unknown) =>
+    error instanceof OperationError &&
+    error.status === HttpStatus.NotFound &&
+    error.code === ProjectErrorCode.BindingNotFound;
+  await assert.rejects(
+    h.onboarding.rebuild(PROJECT, "binding_unknown"),
+    notFound,
+  );
+  await assert.rejects(
+    h.onboarding.rebuild("project_2", APP.binding_id),
+    notFound,
+  );
+  await assert.rejects(
+    h.onboarding.rebuild(PROJECT, "binding_worker"),
+    notFound,
+  );
+  h.bindings = facts([DOCS], []);
+  await assert.rejects(h.onboarding.rebuild(PROJECT, APP.binding_id), notFound);
+});

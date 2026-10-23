@@ -105,6 +105,7 @@ export const ProjectErrorCode = {
   NameConflict: "project.name.conflict",
   ProjectNotFound: "project.project.not_found",
   BindingNotFound: "project.binding.not_found",
+  EnvironmentRunActive: "project.environment.run_active",
   VersionConflict: "project.binding_set.version_conflict",
   DuplicateResource: "project.bindings.duplicate_resource",
   RepositoryAddressInvalid: "project.bindings.repository.address_invalid",
