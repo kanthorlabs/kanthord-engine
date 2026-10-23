@@ -16,7 +16,6 @@ import {
 } from "./judgement.ts";
 import { VerificationClass, type Verification } from "./verification.ts";
 import { SHIPPED_TEMPLATES } from "../../agent/prompt-templates.ts";
-import { PromptTemplate } from "../../agent/contract.ts";
 
 const TWO_GAP_RATIONALE =
   "two gaps\nUnmet:\n- task_a: no route check\n- task_b: no restart test";
@@ -179,13 +178,6 @@ test("the repair instruction names the marker of the invalid reply", () => {
   assert.equal(
     repairInstruction(SHIPPED_TEMPLATES, JUDGEMENT_MARKER),
     JUDGEMENT_REPAIR,
-  );
-});
-
-test("the task judgement instruction carries no previous judgement", () => {
-  assert.doesNotMatch(
-    SHIPPED_TEMPLATES[PromptTemplate.TaskJudgement],
-    /prior_rationale|Previous judgement/,
   );
 });
 

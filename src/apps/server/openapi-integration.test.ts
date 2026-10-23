@@ -16,6 +16,7 @@ import { ActionResultKind, workerOperations } from "../../worker/contract.ts";
 import {
   agentOperations,
   agentProviderKindSchema,
+  promptTemplatesSchema,
 } from "../../agent/contract.ts";
 import { schedulerOperations } from "../../scheduler/contract.ts";
 import { projectOperations } from "../../project/contract.ts";
@@ -74,6 +75,38 @@ test("published native setup is an execution-scoped bodyless read", () => {
   assert.equal(operation.requiresExecution, true);
   const index = parse(readFileSync(openapiPath(), "utf8"));
   assert.ok(index.paths["/api/worker/execution/{execution_id}/setup"]);
+});
+
+const SETUP_TEMPLATE_NAMES = [
+  "work",
+  "layer-message",
+  "framing-worker",
+  "framing-workbench",
+  "task-revision",
+  "criterion-revision",
+  "evaluation",
+  "examine",
+  "repair",
+  "conflict",
+];
+
+test("published native setup templates hold no coder answer template", () => {
+  const fragment = parse(
+    readFileSync(
+      join(dirname(openapiPath()), "openapi/worker/execution.setup.get.yaml"),
+      "utf8",
+    ),
+  );
+  const templates =
+    fragment.components.schemas["worker.execution.setup.get.Output"].properties
+      .templates;
+  assert.deepEqual(templates.required, SETUP_TEMPLATE_NAMES);
+  assert.deepEqual(Object.keys(templates.properties), SETUP_TEMPLATE_NAMES);
+  assert.equal(templates.additionalProperties, false);
+  assert.deepEqual(
+    Object.keys(promptTemplatesSchema.shape),
+    SETUP_TEMPLATE_NAMES,
+  );
 });
 
 test("published action performer preserves its route and discriminated result classes", () => {

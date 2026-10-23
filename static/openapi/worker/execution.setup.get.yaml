@@ -228,10 +228,6 @@ components:
               type: string
             framing-workbench:
               type: string
-            task-judgement:
-              type: string
-            task-choice:
-              type: string
             task-revision:
               type: string
             criterion-revision:
@@ -249,8 +245,6 @@ components:
             - layer-message
             - framing-worker
             - framing-workbench
-            - task-judgement
-            - task-choice
             - task-revision
             - criterion-revision
             - evaluation
