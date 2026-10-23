@@ -78,7 +78,10 @@ import { TAG_MAX_BYTES } from "../kernel/tag.ts";
 import { PlacementIssue } from "../worker/contract.ts";
 import { projectMigrations } from "./migrations.ts";
 import { EnvironmentErrorCode } from "./environment.ts";
-import { DEVCONTAINER_FILE } from "../kernel/devcontainer.ts";
+import {
+  DEVCONTAINER_FILE,
+  EnvironmentRefusalReason,
+} from "../kernel/devcontainer.ts";
 import {
   GrantKind,
   SshIdentitySubjectKind,
@@ -5533,4 +5536,49 @@ test("the slot environment is the one repository binding with an environment sou
       error instanceof Diagnostic &&
       error.code === EnvironmentErrorCode.Invalid,
   );
+});
+
+test("binding.environment.set refuses a key or a value that the build path does not allow and names the key", async (t) => {
+  const { f, saved } = instructionFixture(t, {}, WRITABLE);
+  await refusesInstructionFiles(
+    setEnvironment(f, saved, {
+      build: { dockerfile: "Dockerfile", options: ["--volume=/:/host"] },
+    }),
+    HttpStatus.BadRequest,
+    EnvironmentErrorCode.KeyRefused,
+    { key: "build.options", reason: EnvironmentRefusalReason.KeyNotAllowed },
+  );
+  await refusesInstructionFiles(
+    setEnvironment(f, saved, {
+      image: STORED_ENVIRONMENT.image,
+      containerEnv: { TOKEN: "${localEnv:GH_TOKEN}" },
+    }),
+    HttpStatus.BadRequest,
+    EnvironmentErrorCode.KeyRefused,
+    {
+      key: "containerEnv.TOKEN",
+      reason: EnvironmentRefusalReason.ServerVariable,
+    },
+  );
+});
+
+const REFUSED_KEY = "runArgs";
+
+test("a repository devcontainer with a refused key stops the slot and names the key in environment show", async (t) => {
+  const refused = instructionFixture(t, {
+    texts: [`{ "image": "base", "runArgs": ["--privileged"] }`],
+  });
+  await assert.rejects(
+    refused.f.project.slotEnvironment(refused.saved.project_id, background),
+    (error) =>
+      error instanceof Diagnostic &&
+      error.code === EnvironmentErrorCode.KeyRefused &&
+      new Map(error.fields).get("key") === REFUSED_KEY,
+  );
+  const answer = await refused.f.invokeAsync(
+    "binding.environment.get",
+    refused.saved,
+  );
+  assert.equal(answer.environment, null);
+  assert.match(answer.reason ?? "", /runArgs: the key is not allowed/);
 });

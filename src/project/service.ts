@@ -151,7 +151,7 @@ import {
   type StoredBinding,
   type StoredProject,
 } from "./store.ts";
-import { ProjectEnvironments } from "./environment.ts";
+import { ProjectEnvironments, refuseEnvironment } from "./environment.ts";
 
 const SSH_UNREACHABLE_STATUS = 422;
 const PROJECTS_DIRECTORY = "projects";
@@ -1019,6 +1019,7 @@ export class ProjectService implements Service, ProjectBindings {
     for (const [name, binding] of submission) {
       if (binding.kind !== BindingKind.Repository) continue;
       refuseRepositoryAction(binding.config);
+      refuseEnvironment(binding.config.environment);
       if (bindingUnchanged(name, binding, saved.get(name))) continue;
       await this.checkRepository(projectId, binding.config, caller);
     }

@@ -5,10 +5,12 @@ import { CancellationContext, type Context } from "../kernel/context.ts";
 import {
   DEVCONTAINER_DIRECTORY,
   DEVCONTAINER_FILE,
+  environmentRefusal,
   parseEnvironmentText,
   type Environment,
 } from "../kernel/devcontainer.ts";
 import { Diagnostic, OperationError } from "../kernel/errors.ts";
+import { HttpStatus } from "../kernel/http.ts";
 import type { CallerContext } from "../kernel/operation.ts";
 import type { Store } from "../kernel/store.ts";
 import { SshIdentitySubjectKind } from "../custody/contract.ts";
@@ -41,6 +43,7 @@ export const ENVIRONMENT_CLONE_TIMEOUT_MS = 300000;
 export const EnvironmentErrorCode = {
   Invalid: "project.environment.invalid",
   Ambiguous: "project.environment.ambiguous",
+  KeyRefused: "project.environment.key_refused",
 } as const;
 const SSH_UNREACHABLE_STATUS = 422;
 const SINGLE_ENVIRONMENT = 1;
@@ -89,6 +92,33 @@ function dockerfilePath(document: Environment): string | null {
     : posix.normalize(posix.join(DEVCONTAINER_DIRECTORY, dockerfile));
 }
 
+export function refuseEnvironment(environment: Environment | undefined): void {
+  if (environment === undefined) return;
+  const refusal = environmentRefusal(environment);
+  if (refusal !== null)
+    throw new OperationError(
+      HttpStatus.BadRequest,
+      EnvironmentErrorCode.KeyRefused,
+      `The environment key ${refusal.key} is refused: ${refusal.reason}.`,
+      { key: refusal.key, reason: refusal.reason },
+    );
+}
+
+function refusedDocument(document: Environment, origin: string): Environment {
+  const refusal = environmentRefusal(document);
+  if (refusal === null) return document;
+  throw new Diagnostic(
+    EnvironmentErrorCode.KeyRefused,
+    `${origin}: ${refusal.key}: ${refusal.reason}`,
+    {
+      fields: [
+        ["key", refusal.key],
+        ["reason", refusal.reason],
+      ],
+    },
+  );
+}
+
 function repositoryDocument(file: RepositoryFile): Environment | null {
   if (file.state === RepositoryFileState.Absent) return null;
   const parsed =
@@ -100,7 +130,7 @@ function repositoryDocument(file: RepositoryFile): Environment | null {
       EnvironmentErrorCode.Invalid,
       `${DEVCONTAINER_FILE}: ${parsed.error}`,
     );
-  return parsed.document;
+  return refusedDocument(parsed.document, DEVCONTAINER_FILE);
 }
 
 export class ProjectEnvironments {
@@ -237,6 +267,7 @@ export class ProjectEnvironments {
   ): Promise<Omit<SlotEnvironment, "resource_identity"> | null> {
     const caller = { context };
     if (config.environment !== undefined) {
+      refusedDocument(config.environment, EnvironmentSource.Stored);
       const dockerfile = dockerfilePath(config.environment);
       const read = await this.readBase(
         bindingId,
