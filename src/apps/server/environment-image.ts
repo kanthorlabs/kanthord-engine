@@ -52,7 +52,7 @@ export type EnvironmentImageFailure =
   (typeof EnvironmentImageFailure)[keyof typeof EnvironmentImageFailure];
 export const ENVIRONMENT_IMAGE_FAILED = "worker.pool.environment_image_failed";
 const IMAGE_CHECK_TIMEOUT_MS = 120000;
-const IMAGE_COMMAND_TIMEOUT_MS = 60000;
+export const IMAGE_COMMAND_TIMEOUT_MS = 60000;
 const OUTPUT_TAIL_BYTES = 4096;
 const BUILD_DIRECTORY = "environments";
 const BUILD_DIRECTORY_PREFIX = "build-";
