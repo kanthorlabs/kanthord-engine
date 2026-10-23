@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { temporary } from "../../kernel/test-support.ts";
@@ -94,7 +94,7 @@ function images(
     fallbackImage: KANTHORD_IMAGE,
     slotEnvironment: () => Promise.resolve(options.environment),
     exportRepository: (_binding, _commit, target) => {
-      mkdirSync(target, { recursive: true });
+      assert.equal(existsSync(target), true);
       exports.push(target);
       return Promise.resolve();
     },

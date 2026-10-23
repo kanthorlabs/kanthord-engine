@@ -407,6 +407,7 @@ export class EnvironmentImages {
     base: string,
   ): Promise<void> {
     const workspace = join(directory, WORKSPACE_DIRECTORY);
+    ensureDirectory(workspace);
     await this.options.exportRepository(
       environment.binding_id,
       environment.commit,
