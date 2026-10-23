@@ -3,7 +3,10 @@ import { test } from "node:test";
 import { Writable } from "node:stream";
 import { MessageChannel } from "node:worker_threads";
 import { ContainerRuntime, PoolPlacement } from "../../worker/contract.ts";
-import { ContainerDriver } from "./container-driver.ts";
+import {
+  ContainerDriver,
+  type ContainerDriverOptions,
+} from "./container-driver.ts";
 import {
   SUCCESS_CODE,
   type RuntimeAnswer,
@@ -52,6 +55,7 @@ interface Call {
 function hostWith(
   installed: boolean,
   answerOf: (call: Call) => Promise<RuntimeAnswer>,
+  imageFor?: ContainerDriverOptions["imageFor"],
 ) {
   const calls: Call[] = [];
   const host: RuntimeHost = {
@@ -73,6 +77,7 @@ function hostWith(
     masterKey: MASTER_KEY,
     image: "kanthord:test",
     host,
+    imageFor,
   });
   const verbs = (verb: string) => calls.filter((call) => call.verb === verb);
   return { driver, calls, verbs };
@@ -171,6 +176,24 @@ test("a launch waits for the running prepare before it removes or creates anythi
   const exit = await instance.exited;
   assert.equal(exit.code, FAILED_CODE);
   assert.equal(f.verbs(Verb.Volume).length, NO_CALLS);
+});
+
+test("a launch whose environment image fails starts no container and exits with the image failure", async () => {
+  const slots: string[] = [];
+  const f = hostWith(
+    true,
+    () => ok(),
+    (_runtime, slot) => {
+      slots.push(slot.project_id);
+      return Promise.reject(new Error("environment image refused"));
+    },
+  );
+  const instance = f.driver.launch(launchOf());
+  const exit = await instance.exited;
+  assert.equal(exit.code, FAILED_CODE);
+  assert.match(exit.error?.message ?? "", /environment image refused/);
+  assert.deepEqual(slots, [launchOf().slot.project_id]);
+  assert.equal(f.verbs(Verb.Run).length, NO_CALLS);
 });
 
 const VolumeAction = { List: "ls", Remove: "rm" } as const;

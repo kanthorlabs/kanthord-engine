@@ -110,7 +110,8 @@ import {
 import { installPiTools } from "../../agent/pi-tools.ts";
 import { ThreadDriver } from "./thread-driver.ts";
 import { ContainerDriver } from "./container-driver.ts";
-import { systemRuntimeHost } from "./container-runtime.ts";
+import { EnvironmentImages } from "./environment-image.ts";
+import { containerOwner, systemRuntimeHost } from "./container-runtime.ts";
 import { packageVersion } from "../../kernel/version.ts";
 import { WorkerPool } from "./worker-pool.ts";
 import { instanceIssuer } from "./instance-issuer.ts";
@@ -270,10 +271,25 @@ export function composeServices(options: {
     },
   });
   const threadDriver = new ThreadDriver();
+  const containerImage = `${options.config.worker.container_image}:${packageVersion()}`;
+  const containerHost = systemRuntimeHost(process.env);
+  const environmentImages = new EnvironmentImages({
+    host: containerHost,
+    owner: containerOwner(options.config.master_key),
+    kanthordImage: containerImage,
+    version: packageVersion(),
+    stateDirectory: options.stateDirectory,
+    fallbackImage: containerImage,
+    slotEnvironment: (projectId, context) =>
+      project.slotEnvironment(projectId, context),
+    exportRepository: (bindingId, commit, directory, context) =>
+      project.exportRepository(bindingId, commit, directory, context),
+  });
   const containerDriver = new ContainerDriver({
     masterKey: options.config.master_key,
-    image: `${options.config.worker.container_image}:${packageVersion()}`,
-    host: systemRuntimeHost(process.env),
+    image: containerImage,
+    host: containerHost,
+    imageFor: (runtime, slot) => environmentImages.imageFor(runtime, slot),
   });
   const serverSlotDriver = options.serverSlotDriver ?? threadDriver;
   const workerPool = new WorkerPool({

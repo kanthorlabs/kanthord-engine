@@ -436,6 +436,17 @@ The implemented fields are:
   unavailable at the server start, the server logs `worker.pool.driver_unavailable`
   with `placement`, `reason` and `detail`, and it still starts. The slots start
   again with a backoff when the runtime recovers.
+  A project with an environment on a repository binding runs its container
+  slots on the environment image
+  `localhost/kanthord-env/<resource_identity>:<digest>`. The digest covers the
+  environment file, the files that it names, the slot image and the server
+  version. At a slot start the server builds an absent environment image with
+  `devcontainer build`, then adds the KanthorD layer and checks bash, glibc,
+  git 2.40 or later and OpenSSH 9.0 or later. A failed build logs
+  `worker.pool.instance_failed` with the error
+  `worker.pool.environment_image_failed`, its `class` (`build_failed` or
+  `image_invalid`), `tag` and `detail`. The server does not build that digest
+  again until it restarts.
 
 - `scheduler.release_reserve`: optional positive safe integer in seconds, default
   `600`. A claim adds this reserve after its effective worker wall time.
@@ -1166,6 +1177,9 @@ implement them. Help is not an extra root name or a reason to load secrets.
 | local           | `repository.connector.git_failed`                | A git operation of the repository connector fails, is aborted or reaches its deadline; the message names the operation.                                                              | serve worker, binding apply                                                |
 | local           | `repository.node_branch.missing`                 | A record shows a push of the node branch and the remote holds no such branch; the steps execution stops.                                                                             | serve worker                                                               |
 | local           | `worker.merge.markers_left`                      | A file of the base merge still holds a conflict marker after the conflict turn; the worker aborts the merge and the steps execution stops.                                           | serve worker                                                               |
+| local           | `worker.pool.environment_image_failed`           | The environment image of a container slot fails to build (`build_failed`) or fails the image check (`image_invalid`); the slot does not start.                                       | serve server                                                               |
+| local           | `project.environment.invalid`                    | The `.devcontainer/devcontainer.json` of the base head is not valid JSONC or not a valid environment; the container slot does not start.                                             | serve server                                                               |
+| local           | `project.environment.ambiguous`                  | Two or more repository bindings of the project hold an environment; the container slot does not start.                                                                               | serve server                                                               |
 | local           | `worker.verification.infrastructure_failed`      | A verification command fails because of the infrastructure on its run and on its rerun: a signal, an exit code from 129 to 192 with no timeout, or no start; the execution stops.    | serve worker                                                               |
 | local           | `worker.turn.branch_changed`                     | An agent turn leaves a checkout off the node branch; the worker restores the head before the turn and the steps execution stops.                                                     | serve worker                                                               |
 | local           | `worker.turn.history_rewritten`                  | An agent turn moves the head of a checkout to a commit that does not contain the head before the turn; the worker restores that head and the steps execution stops.                  | serve worker                                                               |

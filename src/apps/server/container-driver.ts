@@ -7,6 +7,7 @@ import {
   ContainerRuntime,
   PoolPlacement,
   type PlacementStatus,
+  type PoolSlot,
 } from "../../worker/contract.ts";
 import {
   bridgePort,
@@ -55,6 +56,7 @@ export interface ContainerDriverOptions {
   readonly masterKey: string;
   readonly image: string;
   readonly host: RuntimeHost;
+  imageFor?(runtime: ContainerRuntime, slot: PoolSlot): Promise<string>;
 }
 
 interface StatusEntry {
@@ -164,15 +166,16 @@ class ContainerInstance implements SlotInstance {
     await this.driver.prepare();
     await this.driver.removeContainer(runtime, this.name);
     await this.driver.createVolume(runtime, this.launch.slot.client_id);
+    const image = await this.driver.imageFor(runtime, this.launch.slot);
     if (this.settled) return;
-    this.spawn(runtime);
+    this.spawn(runtime, image);
   }
 
-  private spawn(runtime: ContainerRuntime): void {
+  private spawn(runtime: ContainerRuntime, image: string): void {
     const client = spawn(
       runtime,
       runArguments({
-        image: this.driver.image,
+        image,
         clientId: this.launch.slot.client_id,
         owner: this.driver.owner,
         environment: this.launch.environment,
@@ -237,6 +240,7 @@ export class ContainerDriver implements SlotDriver {
   readonly image: string;
   readonly owner: string;
   private readonly host: RuntimeHost;
+  private readonly resolveImage: ContainerDriverOptions["imageFor"];
   private latest: StatusEntry | null = null;
   private prepared: Promise<void> | null = null;
 
@@ -244,6 +248,13 @@ export class ContainerDriver implements SlotDriver {
     this.image = options.image;
     this.owner = containerOwner(options.masterKey);
     this.host = options.host;
+    this.resolveImage = options.imageFor;
+  }
+
+  imageFor(runtime: ContainerRuntime, slot: PoolSlot): Promise<string> {
+    return this.resolveImage
+      ? this.resolveImage(runtime, slot)
+      : Promise.resolve(this.image);
   }
 
   check(): Promise<PlacementStatus> {

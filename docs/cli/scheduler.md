@@ -493,6 +493,14 @@ No query fields are accepted. The required file supplies the following fields.
   exit code from 129 to 192 with no command timeout, or a command that does
   not start. The stop detail holds the exit code, the signal, `timed_out` and
   the command.
+- A worker runs the setup of the environment of each repository binding in
+  each checkout and each clone: `updateContentCommand`, then
+  `postCreateCommand`. A setup failure on the node head reruns the setup on the
+  base head. A failure on the base head stops with `environment_failed` and the
+  code `setup_failed`. A pass on the base head is a code failure of the node
+  unit. A verification exit code 127 reruns the command once on the base head.
+  127 on both heads stops with `environment_failed` and the code
+  `command_absent`. The stop detail holds the exit code and the command.
 - Mission checks the release predicate of a release with no `stop` in the
   release transaction, before the terminal write, under [the release admission](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/mission-service.impl.md#the-release-admission).
   A release that fails it answers 409 `mission.release.obligation_unmet` with
