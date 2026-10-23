@@ -6,6 +6,7 @@ import {
 } from "../../mission/contract.ts";
 import type { ExecutionSetup, RepositoryTransport } from "../contract.ts";
 import type { SshAccess } from "../../repository/contract.ts";
+import { join } from "node:path";
 import {
   sshAccessOf,
   WorkspaceKind,
@@ -28,13 +29,14 @@ import {
 import {
   EndReason,
   ExecutionRun,
-  type ExecutionStop,
+  ExecutionStop,
   type MethodClaim,
   type ExecutionEnd,
 } from "./execution-run.ts";
 import { renderWorkPrompt } from "../../agent/prompt-composer.ts";
 import { headCommit } from "./local-git.ts";
 import {
+  environmentStop,
   infrastructureStop,
   runVerificationsWithOutput,
   testedInputOf,
@@ -42,6 +44,15 @@ import {
   verificationPassed,
   type VerificationRun,
 } from "./verification.ts";
+import {
+  BASE_DIRECTORY,
+  BaseHead,
+  SetupEnd,
+  setUpHeads,
+  setupEntries,
+  type SetupEntry,
+} from "./environment-setup.ts";
+import { BudgetLimit } from "../../scheduler/contract.ts";
 import {
   taskRevisionInstruction,
   criterionRevisionInstruction,
@@ -245,6 +256,7 @@ export async function runStepsImplement(
       await checkpointOnStop(state, stopped);
     throw stopped;
   } finally {
+    state.base.dispose();
     state.input.workspaces.release(
       state.input.workspaces.nodeKey(state.input.claim.node_id),
       WorkspaceKind.Node,
@@ -468,6 +480,8 @@ export interface StepsState {
   verdict: Verdict | null;
   cleared: string | null;
   unchangedTurns: number;
+  setup: SetupEntry[];
+  base: BaseHead;
   task?: TaskContent;
 }
 
@@ -498,6 +512,13 @@ export async function prepareStepsWorkspace(
     context: run.operationContext,
     deadlineMs: deadline - Date.now(),
   });
+  const key = input.workspaces.nodeKey(input.claim.node_id);
+  const setupInput = {
+    env: input.env,
+    context: run.operationContext,
+    deadline,
+  };
+  let base: BaseHead | null = null;
   try {
     for (const checkout of prepared.checkouts)
       await restoreCheckout(
@@ -508,14 +529,34 @@ export async function prepareStepsWorkspace(
         run.operationContext,
         () => deadline - Date.now(),
       );
-  } catch (error) {
-    input.workspaces.release(
-      input.workspaces.nodeKey(input.claim.node_id),
-      WorkspaceKind.Node,
+    const setup = await setupEntries(
+      setupInput,
+      prepared.checkouts.map((checkout) => ({
+        repository: repositoryOf({ input }, checkout),
+        directory: checkout.directory,
+      })),
     );
+    base = new BaseHead(setupInput, join(key, BASE_DIRECTORY), setup);
+    const result = await setUpHeads(
+      setupInput,
+      setup,
+      base,
+      prepared.checkouts.map((checkout) => checkout.head),
+    );
+    if (result.end === SetupEnd.BudgetEnd)
+      throw new ExecutionStop(EndReason.BudgetEnd, BudgetLimit.WallTime);
+    if (result.end === SetupEnd.Failed)
+      run.log("setup failed on the node head", {
+        exit_codes: result.run.verification.results.map(
+          (entry) => entry.exit_code,
+        ),
+      });
+    return { ...prepared, nodeBranch: input.claim.node_branch, setup, base };
+  } catch (error) {
+    base?.dispose();
+    input.workspaces.release(key, WorkspaceKind.Node);
     throw error;
   }
-  return { ...prepared, nodeBranch: input.claim.node_branch };
 }
 
 export function taskWork(state: StepsState, task: TaskContent) {
@@ -560,6 +601,7 @@ async function verifyCommands(
     context: state.run.operationContext,
     env: state.input.env,
     exhausted: () => state.agent.budget.exhausted(),
+    baseline: (command) => state.base.exitOf(command),
   });
   if (run.outcome === VerificationClass.BudgetEnd)
     state.agent.budget.wallDeadlineReached();
@@ -578,7 +620,7 @@ async function verifyCommands(
   } finally {
     cleanup.cancel();
   }
-  const stop = infrastructureStop(run);
+  const stop = infrastructureStop(run) ?? environmentStop(run);
   if (stop) throw stop;
   return run;
 }

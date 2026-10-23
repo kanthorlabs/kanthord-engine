@@ -11,6 +11,7 @@ import { checkoutDetached, cloneLocal, matchRemote } from "./local-git.ts";
 import { testedCommitOf, verificationObserver } from "./method-telemetry.ts";
 import { repositoryOf, type StepsState } from "./steps-implement.ts";
 import {
+  environmentStop,
   infrastructureStop,
   runVerificationsWithOutput,
   testedInputOf,
@@ -19,6 +20,7 @@ import {
   type VerificationRun,
 } from "./verification.ts";
 import { CHECKOUTS_DIRECTORY, RELEASE_DIRECTORY } from "./workspace.ts";
+import { SetupEnd, setUpHeads, type SetupEntry } from "./environment-setup.ts";
 
 const EXIT_SUCCESS = 0;
 const NOT_FOUND = -1;
@@ -64,21 +66,26 @@ export async function releaseGate(state: StepsState): Promise<ReleaseGate> {
   const commands = verificationCommands(state.revision);
   const owners = commandOwners(state);
   assert.equal(owners.length, commands.length);
-  const run = await verifyInReleaseClones(state, commands);
+  const checked = await verifyInReleaseClones(state, commands);
+  const run = checked.run;
   if (run.outcome === VerificationClass.BudgetEnd) {
     state.agent.budget.wallDeadlineReached();
     return { kind: ReleaseGateKind.BudgetEnd };
   }
-  const stop = infrastructureStop(run);
+  const stop = infrastructureStop(run) ?? environmentStop(run);
   if (stop) throw stop;
-  const passed = verificationPassed(run.verification, commands);
+  const passed =
+    !checked.setup && verificationPassed(run.verification, commands);
   state.run.log("release verified", {
     commits: state.checkouts.map((checkout) => checkout.head),
     passed,
+    setup: checked.setup,
     exit_codes: run.verification.results.map((result) => result.exit_code),
   });
   if (passed) return { kind: ReleaseGateKind.Passed };
-  const owner = owners[firstFailedIndex(run)];
+  const owner = checked.setup
+    ? nodeUnitOf(state.input.claim.node_id, state.revision)
+    : owners[firstFailedIndex(run)];
   assert.ok(owner);
   return {
     kind: ReleaseGateKind.Routed,
@@ -86,7 +93,7 @@ export async function releaseGate(state: StepsState): Promise<ReleaseGate> {
     instruction: taskRevisionInstruction(
       state.input.setup.templates,
       run.verification,
-      commands,
+      checked.commands,
       run.outputs.at(-1) ?? "",
     ),
   };
@@ -100,18 +107,63 @@ function firstFailedIndex(run: VerificationRun): number {
   return index === NOT_FOUND ? results.length : index;
 }
 
+interface ReleaseCheck {
+  run: VerificationRun;
+  commands: readonly string[];
+  setup: boolean;
+}
+
+function budgetEndRun(state: StepsState): VerificationRun {
+  return {
+    verification: { tested_input: testedInputOf(state.checkouts), results: [] },
+    outputs: [],
+    flaky: [],
+    outcome: VerificationClass.BudgetEnd,
+  };
+}
+
+async function setUpReleaseClones(
+  state: StepsState,
+  key: string,
+  base: string,
+): Promise<ReleaseCheck | null> {
+  const checkouts = join(key, CHECKOUTS_DIRECTORY);
+  const clones: SetupEntry[] = state.setup.map((entry) => ({
+    ...entry,
+    directory: join(base, layoutOf(checkouts, entry.directory)),
+  }));
+  const result = await setUpHeads(
+    {
+      env: state.input.env,
+      context: state.run.operationContext,
+      deadline: state.agent.budget.wallDeadline(),
+      exhausted: () => state.agent.budget.exhausted(),
+    },
+    clones,
+    state.base,
+    state.checkouts.map((checkout) => checkout.head),
+  );
+  if (result.end === SetupEnd.BudgetEnd)
+    return { run: budgetEndRun(state), commands: [], setup: true };
+  if (result.end === SetupEnd.Failed)
+    return { run: result.run, commands: result.commands, setup: true };
+  return null;
+}
+
 async function verifyInReleaseClones(
   state: StepsState,
   commands: readonly string[],
-): Promise<VerificationRun> {
+): Promise<ReleaseCheck> {
   const key = state.input.workspaces.nodeKey(state.input.claim.node_id);
   const base = join(key, RELEASE_DIRECTORY);
   const cleanup = state.agent.budget.cleanupContext(state.run.operationContext);
   try {
     rmSync(base, { recursive: true, force: true });
     const directory = await buildReleaseClones(state, key, base, cleanup);
+    const setup = await setUpReleaseClones(state, key, base);
+    if (setup !== null) return setup;
     const testedInput = testedInputOf(state.checkouts);
-    return await runVerificationsWithOutput({
+    const run = await runVerificationsWithOutput({
       observe: verificationObserver(
         state.run.spans,
         testedCommitOf(testedInput),
@@ -123,7 +175,9 @@ async function verifyInReleaseClones(
       context: state.run.operationContext,
       env: state.input.env,
       exhausted: () => state.agent.budget.exhausted(),
+      baseline: (command) => state.base.exitOf(command),
     });
+    return { run, commands, setup: false };
   } finally {
     rmSync(base, { recursive: true, force: true });
     cleanup.cancel();

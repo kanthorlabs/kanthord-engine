@@ -8,7 +8,19 @@ import {
 import { readDependencies } from "./node-reads.ts";
 import { examineInstruction } from "./judgement.ts";
 import { renderWorkPrompt } from "../../agent/prompt-composer.ts";
-import { WorkspaceKind, workRepositoriesOf } from "./workspace.ts";
+import {
+  WorkspaceKind,
+  workRepositoriesOf,
+  type ExamineCheckout,
+} from "./workspace.ts";
+import {
+  runSetup,
+  SetupEnd,
+  setupEntries,
+  namedCheckouts,
+  setupStop,
+  type SetupResult,
+} from "./environment-setup.ts";
 import type { StepsInput } from "./steps-implement.ts";
 import type { ExecutionBudget } from "./budget.ts";
 import { ContextCancelled, DeadlineExceeded } from "../../kernel/context.ts";
@@ -18,6 +30,27 @@ import { testedCommitOf, verificationObserver } from "./method-telemetry.ts";
 
 export const REPORT_SUBJECT = "Report on current dependency outcomes";
 export const REPORT_MEDIA_TYPE = "text/markdown";
+
+async function setUpExamine(
+  input: StepsInput,
+  run: ExecutionRun,
+  workspace: { key: string; checkouts: readonly ExamineCheckout[] },
+  deadline: number,
+): Promise<SetupResult["end"]> {
+  if (!workspace.checkouts.length) return SetupEnd.Pass;
+  const setupInput = {
+    env: input.env,
+    context: run.operationContext,
+    deadline,
+  };
+  const setup = await setupEntries(
+    setupInput,
+    namedCheckouts(input.setup.repositories, workspace.checkouts),
+  );
+  const result = await runSetup(setupInput, setup);
+  if (result.end === SetupEnd.Failed) throw setupStop(result);
+  return result.end;
+}
 
 export async function runStepsExamine(
   input: StepsInput,
@@ -43,6 +76,11 @@ export async function runStepsExamine(
   });
   const { directory, checkouts } = workspace;
   try {
+    if (
+      (await setUpExamine(input, run, workspace, deadline)) ===
+      SetupEnd.BudgetEnd
+    )
+      return await run.release(true);
     const current = await readDependencies(run);
     if (budget.exhausted()) return await run.release(true);
     const agent = await openAgent(

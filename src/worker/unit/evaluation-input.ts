@@ -18,6 +18,14 @@ import {
 } from "./workspace.ts";
 import type { StepsInput } from "./steps-implement.ts";
 import type { TestedInput } from "./verification.ts";
+import {
+  BASE_DIRECTORY,
+  BaseHead,
+  SetupEnd,
+  setUpHeads,
+  setupEntries,
+  namedCheckouts,
+} from "./environment-setup.ts";
 import { ExecutionIntent } from "../contract.ts";
 
 const NO_SNAPSHOTS = 0;
@@ -184,6 +192,52 @@ async function addedFilesOf(
   return files;
 }
 
+function testedCommits(testedInput: TestedInput): string[] {
+  const addresses = Array.isArray(testedInput) ? testedInput : [testedInput];
+  return addresses.flatMap((address) =>
+    "commit" in address ? [address.commit] : [],
+  );
+}
+
+async function setUpReview(
+  input: StepsInput,
+  run: ExecutionRun,
+  workspace: { key: string; checkouts: readonly ExamineCheckout[] },
+  testedInput: TestedInput,
+  deadline: number,
+): Promise<BaseHead | null> {
+  if (!workspace.checkouts.length) return null;
+  const setupInput = {
+    env: input.env,
+    context: run.operationContext,
+    deadline,
+  };
+  const setup = await setupEntries(
+    setupInput,
+    namedCheckouts(input.setup.repositories, workspace.checkouts),
+  );
+  const base = new BaseHead(
+    setupInput,
+    join(workspace.key, BASE_DIRECTORY),
+    setup,
+  );
+  const result = await setUpHeads(
+    setupInput,
+    setup,
+    base,
+    testedCommits(testedInput),
+  );
+  if (result.end === SetupEnd.BudgetEnd)
+    return run.stop(EndReason.AssessmentAbsent);
+  if (result.end === SetupEnd.Failed)
+    run.log("setup failed on the node head", {
+      exit_codes: result.run.verification.results.map(
+        (entry) => entry.exit_code,
+      ),
+    });
+  return base;
+}
+
 export async function prepareEvaluation(
   input: StepsInput,
   run: ExecutionRun,
@@ -214,6 +268,13 @@ export async function prepareEvaluation(
       input.claim.created_at + input.setup.resource_budget.wall_time_ms,
       input.claim.expired_at,
     );
+    const base = await setUpReview(
+      input,
+      run,
+      workspace,
+      testedInput,
+      deadline,
+    );
     const placement =
       workspace.key === workspace.directory
         ? workspace.directory
@@ -230,6 +291,7 @@ export async function prepareEvaluation(
       directory: workspace.directory,
       checkouts: workspace.checkouts,
       tested_input: testedInput,
+      base,
       evidenceIds: [...evidenceIds],
       reviewBundle: {
         evidence: evidence.filter((item) => evidenceIds.has(item.id)),

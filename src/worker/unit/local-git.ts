@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, readFileSync } from "node:fs";
+import { appendFileSync, existsSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { simpleGit, type SimpleGitOptions } from "simple-git";
 import type { Context } from "../../kernel/context.ts";
@@ -7,6 +7,7 @@ import {
   GIT_UNSAFE_OPTIONS,
   isolatedGitEnvironment,
 } from "../../kernel/git-environment.ts";
+import { ensureDirectory } from "../../kernel/files.ts";
 import { childEnvironment } from "./tool-table.ts";
 const EXPIRED = 0;
 const CLEAN_STATUS = "";
@@ -20,6 +21,8 @@ const NO_PATHS = 0;
 const PATH_BATCH_BYTES = 262144;
 const MODIFIED = "M";
 const REGULAR_MODES = new Set(["100644", "100755"]);
+const NEWLINE = "\n";
+const EXCLUDE_SPECIAL = /[\\*?[\]!#]/g;
 export const MERGE_HEAD = "MERGE_HEAD";
 const GIT_OPERATIONS = [
   { state: "rebase-merge", quit: ["rebase", "--quit"] },
@@ -743,4 +746,80 @@ export async function conflictMarkerFiles(
     deadlineMs,
   );
   return output.split("\n").filter((line) => line.trim() !== CLEAN_STATUS);
+}
+
+export async function fileAtRevision(
+  env: NodeJS.ProcessEnv,
+  directory: string,
+  revision: string,
+  path: string,
+  context: Context,
+  deadlineMs: number,
+): Promise<string | null> {
+  assert.ok(revision && !revision.startsWith("-"));
+  assert.ok(path && !path.startsWith("-"));
+  const end = performance.now() + deadlineMs;
+  const [entry] = (
+    await run(
+      env,
+      directory,
+      ["ls-tree", "-z", revision, "--", path],
+      context,
+      deadlineMs,
+    )
+  )
+    .split(NUL)
+    .filter(Boolean);
+  if (entry === undefined) return null;
+  const [mode, , object] = entry.split(/[ \t]/);
+  if (!REGULAR_MODES.has(mode!) || object === undefined) return null;
+  return await run(
+    env,
+    directory,
+    ["cat-file", "blob", object],
+    context,
+    end - performance.now(),
+  );
+}
+
+export async function excludeUntracked(
+  env: NodeJS.ProcessEnv,
+  directory: string,
+  context: Context,
+  deadlineMs: number,
+): Promise<string[]> {
+  const end = performance.now() + deadlineMs;
+  const paths = (
+    await run(
+      env,
+      directory,
+      ["ls-files", "-z", "--others", "--exclude-standard", "--directory"],
+      context,
+      deadlineMs,
+    )
+  )
+    .split(NUL)
+    .filter(Boolean);
+  if (!paths.length) return paths;
+  const excludeFile = resolve(
+    directory,
+    (
+      await run(
+        env,
+        directory,
+        ["rev-parse", "--git-path", "info/exclude"],
+        context,
+        end - performance.now(),
+      )
+    ).trim(),
+  );
+  ensureDirectory(dirname(excludeFile));
+  appendFileSync(
+    excludeFile,
+    NEWLINE +
+      paths
+        .map((path) => `/${path.replace(EXCLUDE_SPECIAL, "\\$&")}\n`)
+        .join(""),
+  );
+  return paths;
 }

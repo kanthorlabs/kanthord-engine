@@ -22,7 +22,11 @@ import {
   type HolderScope,
 } from "../agent/contract.ts";
 import type { SshAccess } from "../repository/contract.ts";
-import { environmentSchema, type Environment } from "../kernel/devcontainer.ts";
+import {
+  EnvironmentSource,
+  environmentSchema,
+  type Environment,
+} from "../kernel/devcontainer.ts";
 
 export const BINDING_CHECK_TIMEOUT_MS = 10000;
 export const BINDING_VERIFY_TIMEOUT_MS = 30000;
@@ -147,13 +151,7 @@ export function isNonblank(s: string): boolean {
   return s.trim().length > EMPTY_LENGTH;
 }
 
-export const EnvironmentSource = {
-  Stored: "stored",
-  Repository: "repository",
-  None: "none",
-} as const;
-export type EnvironmentSource =
-  (typeof EnvironmentSource)[keyof typeof EnvironmentSource];
+export { EnvironmentSource };
 export const ENVIRONMENT_FILE_MAX_BYTES = 65536;
 
 export const InstructionFileState = {

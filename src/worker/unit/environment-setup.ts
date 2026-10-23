@@ -1,0 +1,333 @@
+import assert from "node:assert/strict";
+import { rmSync } from "node:fs";
+import { join } from "node:path";
+import type { Context } from "../../kernel/context.ts";
+import {
+  DEVCONTAINER_FILE,
+  parseEnvironmentText,
+  setupScriptsOf,
+  type Environment,
+} from "../../kernel/devcontainer.ts";
+import { ensureDirectory } from "../../kernel/files.ts";
+import { canonicalJSON, digest } from "../../kernel/json.ts";
+import { redactReason } from "../../kernel/probe.ts";
+import { EnvironmentSource } from "../../kernel/devcontainer.ts";
+import { EnvironmentFailure } from "../../scheduler/contract.ts";
+import type { ExecutionEnvironment } from "../contract.ts";
+import { COMMAND_LIMIT_MS } from "./budget.ts";
+import { EndReason, ExecutionStop } from "./execution-run.ts";
+import {
+  checkoutDetached,
+  cloneLocal,
+  commitOf,
+  excludeUntracked,
+  fileAtRevision,
+  headCommit,
+} from "./local-git.ts";
+import {
+  runVerificationsWithOutput,
+  VerificationClass,
+  type VerificationRun,
+} from "./verification.ts";
+
+export const SETUP_COMMAND_LIMIT_MS = COMMAND_LIMIT_MS;
+export const BASE_DIRECTORY = "base";
+const BASE_RESULT_LIMIT = 256;
+const SINGLE_CHECKOUT = 1;
+const NO_DOCUMENT = "none";
+const baseResults = new Map<string, number | null>();
+
+export interface SetupRepository {
+  binding_id: string;
+  name: string;
+  strategy: { base_branch: string };
+  environment: ExecutionEnvironment;
+}
+
+export interface SetupCheckout {
+  repository: SetupRepository;
+  directory: string;
+}
+
+export interface SetupInput {
+  env: NodeJS.ProcessEnv;
+  context: Context;
+  deadline: number;
+  exhausted?: () => boolean;
+}
+
+export const SetupEnd = {
+  Pass: "pass",
+  BudgetEnd: "budget_end",
+  Failed: "failed",
+} as const;
+export type SetupResult =
+  | { end: typeof SetupEnd.Pass }
+  | { end: typeof SetupEnd.BudgetEnd }
+  | {
+      end: typeof SetupEnd.Failed;
+      run: VerificationRun;
+      commands: readonly string[];
+    };
+
+function remaining(input: SetupInput): number {
+  return Math.max(1, input.deadline - Date.now());
+}
+
+export function setupStop(
+  result: Extract<SetupResult, { end: typeof SetupEnd.Failed }>,
+): ExecutionStop {
+  const last = result.run.verification.results.at(-1);
+  return new ExecutionStop(
+    EndReason.EnvironmentFailed,
+    EnvironmentFailure.SetupFailed,
+    redactReason(
+      JSON.stringify(
+        last === undefined
+          ? { commands: result.commands }
+          : {
+              exit_code: last.exit_code,
+              signal: last.signal,
+              timed_out: last.timed_out,
+              command: last.command,
+            },
+      ),
+    ),
+  );
+}
+
+function invalidEnvironment(reason: string): ExecutionStop {
+  return new ExecutionStop(
+    EndReason.EnvironmentFailed,
+    EnvironmentFailure.SetupFailed,
+    redactReason(`${DEVCONTAINER_FILE}: ${reason}`),
+  );
+}
+
+export async function environmentOf(
+  input: SetupInput,
+  checkout: SetupCheckout,
+): Promise<Environment | null> {
+  const environment = checkout.repository.environment;
+  if (environment === null) return null;
+  if (environment.source === EnvironmentSource.Stored)
+    return environment.document;
+  const text = await fileAtRevision(
+    input.env,
+    checkout.directory,
+    `origin/${checkout.repository.strategy.base_branch}`,
+    DEVCONTAINER_FILE,
+    input.context,
+    remaining(input),
+  );
+  if (text === null) return null;
+  const parsed = parseEnvironmentText(text);
+  if (parsed.document === null) throw invalidEnvironment(parsed.error);
+  return parsed.document;
+}
+
+export function namedCheckouts(
+  repositories: readonly SetupRepository[],
+  checkouts: readonly { name: string; directory: string }[],
+): SetupCheckout[] {
+  return checkouts.map((checkout) => {
+    const repository = repositories.find(
+      (entry) => entry.name === checkout.name,
+    );
+    assert.ok(repository, "A checkout belongs to a repository of the setup.");
+    return { repository, directory: checkout.directory };
+  });
+}
+
+export interface SetupEntry {
+  repository: SetupRepository;
+  directory: string;
+  environment: Environment | null;
+}
+
+export async function setupEntries(
+  input: SetupInput,
+  checkouts: readonly SetupCheckout[],
+): Promise<SetupEntry[]> {
+  const entries: SetupEntry[] = [];
+  for (const checkout of checkouts)
+    entries.push({
+      ...checkout,
+      environment: await environmentOf(input, checkout),
+    });
+  return entries;
+}
+
+export async function runSetup(
+  input: SetupInput,
+  entries: readonly SetupEntry[],
+): Promise<SetupResult> {
+  for (const entry of entries) {
+    const commands =
+      entry.environment === null ? [] : setupScriptsOf(entry.environment);
+    if (!commands.length) continue;
+    const run = await runVerificationsWithOutput({
+      directory: entry.directory,
+      commands,
+      tested_input: {
+        kind: "repository",
+        binding_id: entry.repository.binding_id,
+        commit: await headCommit(
+          input.env,
+          entry.directory,
+          input.context,
+          remaining(input),
+        ),
+      },
+      deadline: input.deadline,
+      context: input.context,
+      env: input.env,
+      commandLimitMs: SETUP_COMMAND_LIMIT_MS,
+      exhausted: input.exhausted,
+    });
+    if (run.outcome === VerificationClass.BudgetEnd)
+      return { end: SetupEnd.BudgetEnd };
+    if (run.outcome !== VerificationClass.Pass)
+      return { end: SetupEnd.Failed, run, commands };
+    await excludeUntracked(
+      input.env,
+      entry.directory,
+      input.context,
+      remaining(input),
+    );
+  }
+  return { end: SetupEnd.Pass };
+}
+
+export class BaseHead {
+  private readonly input: SetupInput;
+  private readonly directory: string;
+  private readonly checkouts: readonly SetupEntry[];
+  private commitsRead: Promise<string[]> | null = null;
+  private prepared: Promise<SetupResult> | null = null;
+
+  constructor(
+    input: SetupInput,
+    directory: string,
+    checkouts: readonly SetupEntry[],
+  ) {
+    assert.ok(checkouts.length);
+    this.input = input;
+    this.directory = directory;
+    this.checkouts = checkouts;
+  }
+
+  commits(): Promise<string[]> {
+    this.commitsRead ??= Promise.all(
+      this.checkouts.map((checkout) =>
+        commitOf(
+          this.input.env,
+          checkout.directory,
+          `origin/${checkout.repository.strategy.base_branch}`,
+          this.input.context,
+          remaining(this.input),
+        ),
+      ),
+    );
+    return this.commitsRead;
+  }
+
+  async holds(heads: readonly string[]): Promise<boolean> {
+    const commits = await this.commits();
+    return commits.every((commit, index) => commit === heads[index]);
+  }
+
+  setup(): Promise<SetupResult> {
+    this.prepared ??= this.prepare();
+    return this.prepared;
+  }
+
+  async exitOf(command: string): Promise<number | null> {
+    const key = canonicalJSON({
+      commits: await this.commits(),
+      digests: this.digests(),
+      command,
+    });
+    if (baseResults.has(key)) return baseResults.get(key)!;
+    await this.setup();
+    const run = await runVerificationsWithOutput({
+      directory: this.root(),
+      commands: [command],
+      tested_input: { kind: "produced", sha256: digest(key) },
+      deadline: this.input.deadline,
+      context: this.input.context,
+      env: this.input.env,
+      exhausted: this.input.exhausted,
+    });
+    const exit = run.verification.results[0]?.exit_code ?? null;
+    if (run.outcome !== VerificationClass.BudgetEnd) remember(key, exit);
+    return exit;
+  }
+
+  dispose(): void {
+    rmSync(this.directory, { recursive: true, force: true });
+  }
+
+  private root(): string {
+    return this.checkouts.length === SINGLE_CHECKOUT
+      ? join(this.directory, this.checkouts[0]!.repository.name)
+      : this.directory;
+  }
+
+  private digests(): string[] {
+    return this.checkouts.map((checkout) =>
+      checkout.environment === null
+        ? NO_DOCUMENT
+        : digest(checkout.environment),
+    );
+  }
+
+  private async prepare(): Promise<SetupResult> {
+    const commits = await this.commits();
+    rmSync(this.directory, { recursive: true, force: true });
+    ensureDirectory(this.directory);
+    const clones: SetupEntry[] = [];
+    for (const [index, checkout] of this.checkouts.entries()) {
+      const directory = join(this.directory, checkout.repository.name);
+      await cloneLocal(
+        this.input.env,
+        checkout.directory,
+        directory,
+        this.input.context,
+        remaining(this.input),
+      );
+      await checkoutDetached(
+        this.input.env,
+        directory,
+        commits[index]!,
+        this.input.context,
+        remaining(this.input),
+      );
+      clones.push({ ...checkout, directory });
+    }
+    return runSetup(this.input, clones);
+  }
+}
+
+function remember(key: string, exit: number | null): void {
+  if (baseResults.size >= BASE_RESULT_LIMIT) {
+    const oldest = baseResults.keys().next().value;
+    if (oldest !== undefined) baseResults.delete(oldest);
+  }
+  baseResults.set(key, exit);
+}
+
+export async function setUpHeads(
+  input: SetupInput,
+  entries: readonly SetupEntry[],
+  base: BaseHead,
+  heads: readonly string[],
+): Promise<SetupResult> {
+  const result = await runSetup(input, entries);
+  if (result.end !== SetupEnd.Failed) return result;
+  if (await base.holds(heads)) throw setupStop(result);
+  const baseResult = await base.setup();
+  if (baseResult.end === SetupEnd.Failed) throw setupStop(baseResult);
+  if (baseResult.end === SetupEnd.BudgetEnd) return baseResult;
+  return result;
+}

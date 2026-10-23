@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { EnvironmentSource } from "../project/contract.ts";
 import { test, type TestContext } from "node:test";
 import { background } from "../kernel/context.ts";
 import { createIdentity } from "../kernel/identity.ts";
@@ -266,6 +267,7 @@ test("setup answers the system and agent prompt after its single snapshot and su
         base_branch: "main",
         project_prompt: null,
         working_layer: workingLayer,
+        environment: null,
       }),
       sshHostKeysOf: (_tx, platform, received) => {
         assert.equal(platform, RepositoryPlatform.GitHub);
@@ -294,6 +296,7 @@ test("setup answers the system and agent prompt after its single snapshot and su
           base_branch: "main",
           project_prompt: null,
           working_layer: workingLayer,
+          environment: null,
         }),
         sshHostKeysOf: () => knownHosts,
         custodyHandover: { ...publicKeyCustody, sshPublicKeyOf: () => null },
@@ -307,6 +310,47 @@ test("setup answers the system and agent prompt after its single snapshot and su
       error.status === HttpStatus.Conflict,
   );
   assert.deepEqual(pinned.repositories[0]?.working_layer, workingLayer);
+  const stored = { image: "debian", postCreateCommand: "make deps" };
+  const environmentOf = async (
+    environment: typeof stored | null,
+    placement: InstancePlacement,
+  ) =>
+    (
+      await executionSetup(
+        {
+          ...dependencies,
+          workerBindingRowOf: () => ({
+            ...dependencies.workerBindingRowOf(),
+            placement,
+          }),
+          repositoryBindingIdsOf: () => [bindingId],
+          repositoryPolicyOf: () => ({
+            binding_id: bindingId,
+            name: "repo",
+            address,
+            platform: RepositoryPlatform.GitHub,
+            ssh_credential: SSH_CREDENTIAL,
+            base_branch: "main",
+            project_prompt: null,
+            working_layer: workingLayer,
+            environment,
+          }),
+          sshHostKeysOf: () => knownHosts,
+        },
+        worker,
+        caller,
+      )
+    ).repositories[0]?.environment;
+  for (const placement of Object.values(InstancePlacement))
+    assert.deepEqual(await environmentOf(stored, placement), {
+      source: EnvironmentSource.Stored,
+      document: stored,
+    });
+  assert.deepEqual(await environmentOf(null, InstancePlacement.Container), {
+    source: EnvironmentSource.Repository,
+  });
+  assert.equal(await environmentOf(null, InstancePlacement.Server), null);
+  assert.equal(await environmentOf(null, InstancePlacement.Worker), null);
 });
 
 test("setup answers one entry per agent of a two-agent worker with its own prompt and pinned credential", async (t) => {
@@ -482,6 +526,7 @@ async function repositorySetup(t: TestContext, address: string, pin: boolean) {
         base_branch: "main",
         project_prompt: null,
         working_layer: WORKING_LAYER_ALL_ON,
+        environment: null,
       }),
       sshHostKeysOf: (tx, platform, received) =>
         repository.sshHostKeysOf(tx, platform, received),

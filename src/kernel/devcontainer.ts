@@ -4,6 +4,13 @@ import { isObject, isString } from "./values.ts";
 
 export const DEVCONTAINER_FILE = ".devcontainer/devcontainer.json";
 export const DEVCONTAINER_DIRECTORY = ".devcontainer";
+export const EnvironmentSource = {
+  Stored: "stored",
+  Repository: "repository",
+  None: "none",
+} as const;
+export type EnvironmentSource =
+  (typeof EnvironmentSource)[keyof typeof EnvironmentSource];
 const SINGLE_QUOTE = /'/g;
 const QUOTED_SINGLE_QUOTE = "'\\''";
 

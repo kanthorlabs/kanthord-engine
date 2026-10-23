@@ -21,6 +21,7 @@ import {
 import type { NativeAgent } from "./native-agent.ts";
 import { prepareEvaluation, verificationCommands } from "./evaluation-input.ts";
 import {
+  environmentStop,
   infrastructureStop,
   runVerificationsWithOutput,
   VerificationClass,
@@ -85,7 +86,8 @@ async function judge(
   const verification = verificationRun.verification;
   if (verificationRun.outcome === VerificationClass.BudgetEnd)
     return run.stop(EndReason.AssessmentAbsent);
-  const stop = infrastructureStop(verificationRun);
+  const stop =
+    infrastructureStop(verificationRun) ?? environmentStop(verificationRun);
   if (stop) throw stop;
   if (!verificationPassed(verification, commands))
     return {
@@ -139,6 +141,12 @@ async function judge(
 
 type PreparedEvaluation = Awaited<ReturnType<typeof prepareEvaluation>>;
 
+function baselineOf(base: PreparedEvaluation["base"]) {
+  return base === null
+    ? {}
+    : { baseline: (command: string) => base.exitOf(command) };
+}
+
 async function evaluate(
   input: StepsInput,
   run: ExecutionRun,
@@ -162,6 +170,7 @@ async function evaluate(
     env: input.env,
     reruns: VERIFICATION_RERUNS,
     exhausted: () => budget.exhausted(),
+    ...baselineOf(prepared.base),
   });
   const verification = verificationRun.verification;
   const recorded = await run.submitEvidence(input.claim.node_id, {
