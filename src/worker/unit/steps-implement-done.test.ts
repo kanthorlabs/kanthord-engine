@@ -7,7 +7,6 @@ import { temporary } from "../../kernel/test-support.ts";
 import type { Revision } from "../../mission/contract.ts";
 import { executionBoundary } from "./native-method.ts";
 import { JUDGEMENT_MARKER } from "./judgement.ts";
-import { taskCommitMessage } from "./local-git.ts";
 import type { MethodClients } from "./method-clients.ts";
 import { runStepsImplement, startCheck } from "./steps-implement.ts";
 import { nodeUnitOf } from "./release-gate.ts";
@@ -120,10 +119,7 @@ test("a budget end after task 1 leaves its done record, and the next execution r
     `--grep=${DONE_TRAILER}`,
     `refs/heads/${h.nodeBranch}`,
   ]);
-  assert.equal(
-    subjects.trim(),
-    taskCommitMessage(first.id, h.input.claim.attempt),
-  );
+  assert.equal(subjects.trim(), `feat: ${first.content.name}`);
   const next = await nextExecution(t, h, [
     write("second"),
     fauxAssistantMessage("second done"),
@@ -259,7 +255,7 @@ test("a task commit that fails its verification writes no record, and the next e
 });
 
 test("a done trailer in an agent commit message does not survive the gate", async (t) => {
-  const current = task("forged", "test -f good");
+  const current = task("genuine", "test -f good");
   const h = await fixture(
     t,
     [current],

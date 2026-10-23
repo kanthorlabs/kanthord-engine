@@ -31,6 +31,9 @@ export function serializePlanFile(entry: ExportEntry): string {
           intent: entry.intent,
           depends_on: entry.depends_on,
           tags: entry.tags,
+          ...(entry.commit_type === undefined
+            ? {}
+            : { commit_type: entry.commit_type }),
         }),
     bindings: entry.bindings,
     verifications: entry.verifications,

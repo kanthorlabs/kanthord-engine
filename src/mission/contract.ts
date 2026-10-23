@@ -14,6 +14,7 @@ import type { Context } from "../kernel/context.ts";
 import type { CallerIdentity } from "../kernel/caller.ts";
 import { errorSchema } from "../kernel/errors.ts";
 import { tagSchema } from "../kernel/tag.ts";
+import { CommitType } from "../kernel/commit-message.ts";
 
 export const MISSION_SERVICE_NAME = "mission";
 export const MISSION_IDENTITY_PREFIX = "mission";
@@ -510,6 +511,7 @@ export const importFormatSchema = z.enum(ImportFormat);
 export type ImportFormat = z.infer<typeof importFormatSchema>;
 export const actorKindSchema = z.enum(ActorKind);
 export type ActorKind = z.infer<typeof actorKindSchema>;
+export const commitTypeSchema = z.enum(CommitType);
 
 const planContentFields = {
   name: z.string().min(1),
@@ -527,12 +529,14 @@ export const contentSchema = z.strictObject({
   ...planContentFields,
   intent: intentSchema,
   tags: tagsSchema.default([]),
+  commit_type: commitTypeSchema.optional(),
 });
 export type Content = z.infer<typeof contentSchema>;
 export const contentWriteSchema = z.strictObject({
   ...planContentFields,
   intent: z.unknown().optional(),
   tags: z.unknown().optional(),
+  commit_type: z.unknown().optional(),
 });
 export const taskBodySchema = z.strictObject({
   ...planContentFields,
@@ -695,6 +699,7 @@ export const importNodeEntrySchema = z.strictObject({
   intent: z.unknown(),
   ...planEntryFields,
   tags: z.unknown().optional(),
+  commit_type: z.unknown().optional(),
   depends_on: z.array(z.string().min(1)).optional(),
 });
 export type ImportNodeEntry = z.infer<typeof importNodeEntrySchema>;
@@ -717,6 +722,7 @@ export const exportEntrySchema = z.union([
     intent: intentSchema,
     ...planEntryFields,
     tags: z.array(tagSchema),
+    commit_type: commitTypeSchema.optional(),
     depends_on: z.array(planFileNameSchema),
   }),
   z.strictObject({
@@ -906,6 +912,7 @@ export type RepositoryFacts = {
 export type ActionFacts = {
   frozen_action: FrozenAction;
   repository: RepositoryFacts;
+  node: { name: string; commit_type: CommitType };
   snapshot_commit: string;
   reused_address: PullRequestAddress | null;
   merge_address: PullRequestAddress | null;

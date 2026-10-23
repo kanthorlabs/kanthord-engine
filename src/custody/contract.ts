@@ -2,6 +2,7 @@ import { z } from "zod";
 import { identitySchema } from "../kernel/identity.ts";
 import { sealedObjectSchema, type SealedObject } from "../kernel/hpke.ts";
 import { canonicalJSON } from "../kernel/json.ts";
+import type { CommitType } from "../kernel/commit-message.ts";
 import type { CredentialStore } from "@earendil-works/pi-ai";
 import type {
   CallerIdentity,
@@ -216,6 +217,7 @@ export type RepositoryFacts = {
 export type ActionFacts = {
   frozen_action: FrozenActionFacts;
   repository: RepositoryFacts;
+  node: { name: string; commit_type: CommitType };
   snapshot_commit: string;
   reused_address: PullRequestAddressFacts | null;
   merge_address: PullRequestAddressFacts | null;

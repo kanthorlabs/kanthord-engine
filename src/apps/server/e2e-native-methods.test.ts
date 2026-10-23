@@ -488,7 +488,7 @@ test(
           await simpleGit(barePaths.get("git@github.com:owner/repo.git")!).raw([
             "log",
             "-1",
-            "--format=%s",
+            "--format=%b",
             headA,
           ])
         ).includes(tasks[0]!),
@@ -535,7 +535,7 @@ test(
             "--format=%s",
             `refs/heads/kanthord/${B}`,
           ]),
-          /checkpoint of task/,
+          /^feat: say hello\n$/,
         );
         assert.ok(
           (
@@ -615,7 +615,7 @@ test(
               body: {
                 head: `kanthord/${C}`,
                 base: "main",
-                title: `kanthord ${C}`,
+                title: "feat: say hello",
               },
               token: "test_methods_github",
             },

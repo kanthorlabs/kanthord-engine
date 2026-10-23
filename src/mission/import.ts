@@ -4,6 +4,7 @@ import { canonicalJSON, digest } from "../kernel/json.ts";
 import type { Transaction } from "../kernel/store.ts";
 import { importAdmissible, isTerminal } from "./admission.ts";
 import {
+  commitTypeField,
   resolveNodeBindings,
   validateFilename,
   validateNodeContent,
@@ -67,10 +68,11 @@ type Locator = Pick<NormalizedEntry, "filename" | "id">;
 
 export type NormalizedEntry =
   | ParsedTaskFile
-  | (Omit<ParsedNodeFile, "intent" | "tags"> & {
-      intent: Intent;
-      tags: string[];
-    });
+  | (Omit<ParsedNodeFile, "intent" | "tags" | "commit_type"> &
+      Pick<Content, "commit_type"> & {
+        intent: Intent;
+        tags: string[];
+      });
 
 export function isTaskEntry(
   entry: NormalizedEntry | ImportEntry,
@@ -185,6 +187,7 @@ function normalizeEntry(entry: ImportEntry): NormalizedEntry {
     ...shared,
     intent: entry.intent as Intent,
     tags: Array.isArray(entry.tags) ? [...entry.tags] : [],
+    ...commitTypeField(entry.commit_type),
     depends_on: [...(entry.depends_on ?? [])],
   };
 }
@@ -478,6 +481,7 @@ function entryChanged(
     bindings: item.binding_ids,
     intent: entry.intent as Intent,
     tags: entry.tags,
+    ...commitTypeField(entry.commit_type),
   };
   return (
     current.filename !== entry.filename ||

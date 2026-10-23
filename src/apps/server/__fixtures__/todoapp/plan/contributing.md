@@ -1,5 +1,6 @@
 ---
 intent: implement
+commit_type: docs
 depends_on:
   - foundation.md
 bindings:

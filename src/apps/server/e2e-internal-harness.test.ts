@@ -530,7 +530,7 @@ test(
             body: {
               head: `kanthord/${f.gated}`,
               base: "main",
-              title: `kanthord ${f.gated}`,
+              title: "feat: greetings",
             },
             token: GITHUB_KEY,
             if_none_match: null,

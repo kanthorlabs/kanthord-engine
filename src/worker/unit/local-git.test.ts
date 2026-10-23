@@ -18,12 +18,10 @@ import {
 } from "../../kernel/test-support.ts";
 import {
   addedFiles,
-  checkpointCommitMessage,
   commitWork,
   discardChanges,
   headCommit,
   isAncestor,
-  taskCommitMessage,
 } from "./local-git.ts";
 
 const env = hostEnvironment();
@@ -88,7 +86,7 @@ test("work commits include new and tracked files, preserve history and ignore ig
   writeFileSync(join(directory, "tracked"), "changed");
   writeFileSync(join(directory, "new"), "new");
   writeFileSync(join(directory, "ignored"), "ignored");
-  const message = taskCommitMessage("task-1", 2);
+  const message = "feat: add the task";
   const head = await commitWork(env, directory, message, background, 10000);
   assert.notEqual(head, initial);
   assert.equal((await git.raw(["rev-parse", "HEAD^"])).trim(), initial);
@@ -104,7 +102,7 @@ test("work commits include new and tracked files, preserve history and ignore ig
   );
   assert.equal(await headCommit(env, directory, background, 10000), head);
   writeFileSync(join(directory, "tracked"), "checkpoint");
-  const checkpoint = checkpointCommitMessage("task-1", 2);
+  const checkpoint = "feat: keep the task";
   await commitWork(env, directory, checkpoint, background, 10000);
   assert.equal((await git.raw(["rev-parse", "HEAD^"])).trim(), head);
   assert.equal(

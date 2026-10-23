@@ -37,6 +37,8 @@ import {
 } from "./test-support.ts";
 
 const NO_PUSHES = 0;
+const PARTIAL_HEADER = "feat: partial";
+const STOPPED_HEADER = "feat: stopped";
 const LATE_MAIN_CHANGE = "late main change";
 
 async function recordNodeDone(h: Awaited<ReturnType<typeof fixture>>) {
@@ -106,7 +108,7 @@ test("implement checkpoints budget-ended work and refuses release after a failed
     "--format=%s",
     `refs/heads/${h.nodeBranch}`,
   ]);
-  assert.match(log, /checkpoint of task/);
+  assert.equal(log.trim(), PARTIAL_HEADER);
   const other = await fixture(t, [], []);
   other.input.transport = {
     ...transport,
@@ -191,9 +193,11 @@ for (const reason of STOP_REASONS) {
     );
     assert.deepEqual(bodies, [{ further_work: true, stop }]);
     const branch = `refs/heads/${h.nodeBranch}`;
-    assert.match(
-      await simpleGit(h.bare).raw(["log", "-1", "--format=%s", branch]),
-      /checkpoint of task/,
+    assert.equal(
+      (
+        await simpleGit(h.bare).raw(["log", "-1", "--format=%s", branch])
+      ).trim(),
+      STOPPED_HEADER,
     );
     assert.equal(
       await simpleGit(h.bare).raw(["show", `${branch}:${PARTIAL_WORK}`]),

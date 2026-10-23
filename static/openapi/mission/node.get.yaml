@@ -181,6 +181,16 @@ components:
                 type: string
                 maxLength: 64
                 pattern: ^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)*$
+            commit_type:
+              type: string
+              enum:
+                - feat
+                - fix
+                - docs
+                - style
+                - refactor
+                - test
+                - chore
           required:
             - name
             - requirement
@@ -898,6 +908,7 @@ components:
                     type: string
                 intent: {}
                 tags: {}
+                commit_type: {}
               required:
                 - name
                 - requirement
@@ -1108,6 +1119,16 @@ components:
                       type: string
                       maxLength: 64
                       pattern: ^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)*$
+                  commit_type:
+                    type: string
+                    enum:
+                      - feat
+                      - fix
+                      - docs
+                      - style
+                      - refactor
+                      - test
+                      - chore
                 required:
                   - name
                   - requirement

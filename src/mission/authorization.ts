@@ -9,6 +9,7 @@ import {
 } from "../kernel/caller.ts";
 import type { ExecutionClaim } from "../kernel/operation.ts";
 import type { Transaction } from "../kernel/store.ts";
+import { commitTypeOf } from "../kernel/commit-message.ts";
 import {
   AssessmentResult,
   AssetKind,
@@ -290,6 +291,7 @@ export function authorizeFrozenAction(
     dependencies.bindings,
     action,
   );
+  const { content } = getRevision(tx, claim.nodeId, claim.pinnedRevision);
   const reused =
     input.reusedEvidenceId === null
       ? null
@@ -319,6 +321,10 @@ export function authorizeFrozenAction(
     facts: {
       frozen_action: action,
       repository,
+      node: {
+        name: content.name,
+        commit_type: commitTypeOf(content.commit_type),
+      },
       snapshot_commit: commit,
       reused_address: reused,
       merge_address: merge,

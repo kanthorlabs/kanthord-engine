@@ -2,6 +2,12 @@ import assert from "node:assert/strict";
 import { readdirSync, rmSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import type { Context } from "../../kernel/context.ts";
+import {
+  commitMessage,
+  commitTypeOf,
+  isCommitMessage,
+} from "../../kernel/commit-message.ts";
+import type { TaskContent } from "../../mission/contract.ts";
 import type { WorkPrompt } from "../../agent/prompt-composer.ts";
 import { EndReason } from "./execution-run.ts";
 import type { NativeAgent } from "./native-agent.ts";
@@ -49,6 +55,7 @@ const NO_UNCHANGED_TURNS = 0;
 const SINGLE_CHECKOUT = 1;
 const SCRATCH_ENTRY = basename(SCRATCH_DIRECTORY);
 const DETACHED = "a detached HEAD";
+const MERGE_SUBJECT = "merge";
 
 export interface ConflictMerge {
   directory: string;
@@ -70,6 +77,28 @@ export interface GatedAgent extends NativeAgent {
   commits(): ReadonlySet<string>;
 }
 
+export function unitCommitMessage(
+  state: Pick<StepsState, "revision">,
+  unit: TaskContent,
+): string {
+  return commitMessage(
+    commitTypeOf(state.revision.content.commit_type),
+    unit.content.name,
+    unit.id,
+  );
+}
+
+export function mergeCommitMessage(
+  state: Pick<StepsState, "revision" | "input">,
+  base: string,
+): string {
+  return commitMessage(
+    commitTypeOf(state.revision.content.commit_type),
+    `${MERGE_SUBJECT} ${base}`,
+    state.input.claim.node_id,
+  );
+}
+
 export function isTurnViolation(code: string | null): boolean {
   return Object.values<string | null>(TurnViolation).includes(code);
 }
@@ -79,7 +108,7 @@ export function gatedAgent(
   message: string,
   merge: ConflictMerge | null = null,
 ): GatedAgent {
-  assert.ok(message);
+  assert.ok(isCommitMessage(message));
   const agent = state.agent;
   const turn: GateTurn = {
     mode: merge === null ? GateMode.Write : GateMode.Conflict,
@@ -125,6 +154,7 @@ export async function checkpointGate(
   context: Context,
   violationEnd: ViolationEnd,
 ): Promise<boolean> {
+  assert.ok(isCommitMessage(message));
   return runGate(
     state,
     { mode: GateMode.Checkpoint, message, merge: null, violationEnd },

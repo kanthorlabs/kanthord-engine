@@ -200,9 +200,9 @@ test("a budget end in the verdict turn commits its files as a checkpoint", async
     (await simpleGit(h.root).raw(["ls-files", STRAY_FILE])).trim(),
     STRAY_FILE,
   );
-  const latest = (await simpleGit(h.root).log()).latest!.message;
-  assert.ok(latest.includes("checkpoint"));
-  assert.ok(latest.includes(h.input.claim.node_id));
+  const latest = (await simpleGit(h.root).log()).latest!;
+  assert.equal(latest.message, `feat: ${h.revision.content.name}`);
+  assert.equal(latest.body.trim(), h.input.claim.node_id);
 });
 
 test("the start check of a verdict runs no node verification", async (t) => {

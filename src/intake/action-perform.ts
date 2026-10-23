@@ -7,6 +7,7 @@ import {
   type Material,
 } from "../custody/contract.ts";
 import { isMachineIdentity, type MachineIdentity } from "../kernel/caller.ts";
+import { commitHeader } from "../kernel/commit-message.ts";
 import { OperationError } from "../kernel/errors.ts";
 import type { CallerContext, ExecutionClaim } from "../kernel/operation.ts";
 import type { Transaction } from "../kernel/store.ts";
@@ -53,7 +54,6 @@ import {
   type ReadBack,
 } from "./outbound.ts";
 
-const PULL_REQUEST_TITLE_PREFIX = "kanthord ";
 const GIT_FAILED_CODE = "repository.connector.git_failed";
 const ACTION_UNMAPPED_STATUS = 422;
 const MATCHED_PULL_REQUEST_COUNT = 1;
@@ -316,7 +316,7 @@ async function createPullRequest(
     {
       head: performer.claim.nodeBranch,
       base: facts.frozen_action.configuration.base_branch,
-      title: PULL_REQUEST_TITLE_PREFIX + performer.claim.nodeId,
+      title: commitHeader(facts.node.commit_type, facts.node.name),
     },
   );
   if (!answer.ok)

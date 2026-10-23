@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { canonicalJSON } from "../kernel/json.ts";
 import type { Transaction } from "../kernel/store.ts";
 import {
+  commitTypeField,
   CONTENT_FIELDS,
   ContentField,
   TASKS_FIELD,
@@ -64,6 +65,7 @@ function importNodeContent(item: ResolvedImportEntry): Owned<Content> {
       ...content,
       intent: entry.intent as Intent,
       tags: entry.tags,
+      ...commitTypeField(entry.commit_type),
     },
   };
 }
@@ -78,8 +80,8 @@ function changedFields<T extends object>(
   return candidates.filter((field) =>
     field === ContentField.Filename
       ? next.filename !== previous.filename
-      : canonicalJSON(next.content[field as keyof T]) !==
-        canonicalJSON(previous.content[field as keyof T]),
+      : canonicalJSON(next.content[field as keyof T] ?? null) !==
+        canonicalJSON(previous.content[field as keyof T] ?? null),
   );
 }
 

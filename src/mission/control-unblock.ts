@@ -49,11 +49,14 @@ const CONTENT_KEYS = [
   ContentField.Bindings,
   ContentField.Intent,
   ContentField.Tags,
+  ContentField.CommitType,
 ] as const;
 
 function contentChanges(current: Content, previous: Content): string[] {
   return CONTENT_KEYS.filter(
-    (key) => canonicalJSON(current[key]) !== canonicalJSON(previous[key]),
+    (key) =>
+      canonicalJSON(current[key] ?? null) !==
+      canonicalJSON(previous[key] ?? null),
   );
 }
 

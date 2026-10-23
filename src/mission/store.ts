@@ -43,6 +43,7 @@ export interface RevisionRow {
   bindings: string;
   intent: Intent;
   tags: string;
+  commit_type: string | null;
   tasks: string;
   change: string;
   reason: string;
@@ -374,8 +375,9 @@ export function insertRevision(tx: Transaction, revision: Revision): void {
     .prepare(
       `INSERT INTO mission_node_revision
     (node_id, revision, filename, name, requirement, criterion, verifications,
-     bindings, intent, tags, tasks, change, reason, actor, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+     bindings, intent, tags, commit_type, tasks, change, reason, actor,
+     created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
       revision.node_id,
@@ -388,6 +390,7 @@ export function insertRevision(tx: Transaction, revision: Revision): void {
       JSON.stringify(revision.content.bindings),
       revision.content.intent,
       JSON.stringify(revision.content.tags),
+      revision.content.commit_type ?? null,
       JSON.stringify(revision.tasks),
       JSON.stringify(revision.change),
       revision.reason,
