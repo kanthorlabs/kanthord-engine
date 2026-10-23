@@ -8,6 +8,7 @@ import {
   traceStateSchema,
   type ExecutionTrace,
   type RecordKind,
+  type ServerTrace,
   type SessionEntry,
   type SessionEntryRecord,
   type Span,
@@ -33,10 +34,30 @@ export interface SessionEntryPage {
   last: number | null;
 }
 
+export interface TraceRow {
+  trace_id: string;
+  project_id: string;
+  execution_id: string | null;
+  node_id: string | null;
+  attempt: number | null;
+  root_span_id: string;
+}
+
+export function traceRowOf(trace: ExecutionTrace | ServerTrace): TraceRow {
+  return {
+    trace_id: trace.trace_id,
+    project_id: trace.project_id,
+    execution_id: "execution_id" in trace ? trace.execution_id : null,
+    node_id: "node_id" in trace ? trace.node_id : null,
+    attempt: "attempt" in trace ? trace.attempt : null,
+    root_span_id: trace.root_span_id,
+  };
+}
+
 export function insertTrace(
   tx: Transaction,
-  trace: ExecutionTrace,
-  now: number,
+  trace: TraceRow,
+  createdAt: number,
 ): void {
   assert.ok(trace.trace_id);
   assert.ok(trace.root_span_id);
@@ -49,7 +70,7 @@ export function insertTrace(
       trace.project_id,
       trace.execution_id,
       trace.root_span_id,
-      now,
+      createdAt,
       trace.node_id,
       trace.attempt,
     );

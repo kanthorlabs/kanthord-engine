@@ -45,6 +45,7 @@ import {
   type ExecutionTrace,
   type ExecutionTraces,
   type RootSpanEnd,
+  type ServerTrace,
   type TelemetryRecord,
   type TraceSort,
 } from "./contract.ts";
@@ -66,6 +67,8 @@ import {
   readSessionEntry,
   readText,
   readTrace,
+  traceRowOf,
+  type TraceRow,
 } from "./trace-store.ts";
 
 const ROOT_START_RECORD = "start";
@@ -263,20 +266,52 @@ export class TrackingService implements Service, ExecutionTelemetry {
       this.dropped += 1;
       return;
     }
+    this.admitServerSpan(traceRowOf(trace), null, producer, {
+      ...contribution,
+      attributes: {
+        ...identityAttributes(trace),
+        ...contribution.attributes,
+      },
+    });
+  }
+
+  serverTraceSpan(
+    trace: ServerTrace,
+    producer: string,
+    contribution: SpanContribution,
+  ): void {
+    assert.ok(contribution.record_id);
+    assert.ok(producer);
+    assert.ok(
+      contribution.span_id === trace.root_span_id ||
+        contribution.parent_span_id === trace.root_span_id,
+    );
+    if (trace.created_at < this.cutoff()) {
+      this.dropped += 1;
+      return;
+    }
+    this.admitServerSpan(
+      traceRowOf(trace),
+      trace.created_at,
+      producer,
+      contribution,
+    );
+  }
+
+  private admitServerSpan(
+    row: TraceRow,
+    createdAt: number | null,
+    producer: string,
+    contribution: SpanContribution,
+  ): void {
     try {
       this.dependencies.store.transaction((tx) => {
         const now = this.now();
-        insertTrace(tx, trace, now);
+        insertTrace(tx, row, createdAt ?? now);
         const reason = admitServerSpan(
           tx,
-          { trace, producer, origin: SpanOrigin.Observed, now },
-          {
-            ...contribution,
-            attributes: {
-              ...identityAttributes(trace),
-              ...contribution.attributes,
-            },
-          },
+          { trace: row, producer, origin: SpanOrigin.Observed, now },
+          contribution,
         );
         if (reason !== null)
           throw new Diagnostic(
