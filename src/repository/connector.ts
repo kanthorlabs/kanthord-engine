@@ -55,6 +55,10 @@ const BATCH_ENTRY_BYTES_MAX =
   BATCH_HEADER_BYTES_MAX + SYMLINK_TARGET_BYTES_MAX + BATCH_LINE_END.length;
 const REPOSITORY_ROOT = ".";
 const PARENT_DIRECTORY = "..";
+const CURRENT_DIRECTORY = ".";
+const PATH_SEPARATOR = "/";
+const LIST_LIMIT_MIN = 1;
+const LIST_LIMIT_MAX = 1000;
 const COMMIT_FIELD = 0;
 const REF_FIELD = 1;
 const execFileAsync = promisify(execFile);
@@ -1135,6 +1139,74 @@ export async function readFilesAtCommit(
       agent,
     ),
   );
+}
+
+function assertSafeDirectory(directory: string): void {
+  assert.ok(directory !== EMPTY_STRING);
+  for (const segment of directory.split(PATH_SEPARATOR))
+    assert.ok(
+      segment !== EMPTY_STRING &&
+        segment !== CURRENT_DIRECTORY &&
+        segment !== PARENT_DIRECTORY,
+    );
+}
+
+export async function listFilesAtCommit(
+  address: string,
+  commit: string,
+  directory: string,
+  limit: number,
+  context: Context,
+  deadlineMs: number,
+  ssh: SshAccess,
+  parent: string = tmpdir(),
+): Promise<string[]> {
+  assert.ok(address !== EMPTY_STRING);
+  assert.match(commit, OBJECT_ID_PATTERN);
+  assert.ok(
+    Number.isSafeInteger(limit) &&
+      limit >= LIST_LIMIT_MIN &&
+      limit <= LIST_LIMIT_MAX,
+  );
+  assertSafeDirectory(directory);
+  return withAccess(ssh, context, deadlineMs, async (agent, remaining) => {
+    const end = performance.now() + remaining;
+    const repository = await mkdtemp(
+      join(parent, REPOSITORY_FILES_DIRECTORY_PREFIX),
+    );
+    const run: GitRun = (args) =>
+      runGit(
+        repository,
+        args,
+        context,
+        end - performance.now(),
+        "list repository files",
+        { agent },
+      );
+    try {
+      await fetchTrees(run, address, commit);
+      const tree: RepositoryTree = {
+        entries: new Map(),
+        listedPaths: new Set(),
+        listedDirectories: new Set(),
+        targets: new Map(),
+      };
+      await listDirectory(run, commit, tree, directory);
+      return [...tree.entries]
+        .filter(
+          ([path, entry]) =>
+            posix.dirname(path) === directory &&
+            REGULAR_FILE_MODES.includes(entry.mode),
+        )
+        .map(([path]) => path)
+        .sort((left, right) =>
+          Buffer.compare(Buffer.from(left), Buffer.from(right)),
+        )
+        .slice(0, limit);
+    } finally {
+      await rm(repository, { recursive: true, force: true });
+    }
+  });
 }
 
 async function fetchTrees(
