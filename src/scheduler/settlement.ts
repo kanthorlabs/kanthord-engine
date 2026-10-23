@@ -164,6 +164,35 @@ export function consecutiveFailures(
   return count;
 }
 
+export function consecutiveEnvironmentFailures(
+  tx: Transaction,
+  ending: ExecutionRow,
+): number {
+  assert.ok(tx.database.isTransaction);
+  const result = tx.database
+    .prepare(
+      `SELECT count(*) AS count FROM scheduler_execution
+    WHERE node_id = ? AND attempt = ? AND id != ?
+    AND json_extract(stop, '$.reason') = ?
+    AND rowid > coalesce((SELECT max(rowid) FROM scheduler_execution
+      WHERE node_id = ? AND attempt = ? AND id != ? AND ended_at IS NOT NULL
+      AND coalesce(json_extract(stop, '$.reason'), '') != ?), -1)`,
+    )
+    .get(
+      ending.node_id,
+      ending.attempt,
+      ending.execution_id,
+      ExecutionStopReason.EnvironmentFailed,
+      ending.node_id,
+      ending.attempt,
+      ending.execution_id,
+      ExecutionStopReason.EnvironmentFailed,
+    )!;
+  const count = Number(result.count) + ENDING_FAILURE;
+  assert.ok(Number.isSafeInteger(count) && count >= ENDING_FAILURE);
+  return count;
+}
+
 export function declareLoss(
   tx: Transaction,
   dependencies: SettlementDependencies,

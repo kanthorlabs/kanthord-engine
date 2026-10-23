@@ -13,19 +13,13 @@ import { executionTrace } from "./telemetry.ts";
 import type { Dependencies } from "./service.ts";
 import { consecutiveStalls, endExecution } from "./execution-store.ts";
 import {
+  consecutiveEnvironmentFailures,
   consecutiveFailures,
   recordFailure,
   requireRunning,
 } from "./settlement.ts";
 
 const NO_STALLS = 0;
-
-function countsFailure(stop: ExecutionRelease["stop"]): boolean {
-  return (
-    !isAdvancingStop(stop) &&
-    stop?.reason !== ExecutionStopReason.EnvironmentFailed
-  );
-}
 
 export function release(
   dependencies: Dependencies,
@@ -83,7 +77,9 @@ export function release(
         tx,
         dependencies,
         row.node_id,
-        consecutiveFailures(tx, row, countsFailure(body.stop)),
+        body.stop.reason === ExecutionStopReason.EnvironmentFailed
+          ? consecutiveEnvironmentFailures(tx, row)
+          : consecutiveFailures(tx, row, !isAdvancingStop(body.stop)),
         now,
       );
       return { execution_id: executionId, ended_at: now };
