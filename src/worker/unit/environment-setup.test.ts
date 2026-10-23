@@ -197,25 +197,44 @@ test("a setup failure on the node head and on the base head is an environment fa
   );
 });
 
-test("the base rerun runs on the base head after its setup and is cached by commit, digest and command", async (t) => {
+test("the base rerun runs on the base head after its setup and is cached within one execution only", async (t) => {
   const { root, checkout } = await repository(t, { file: "base" });
   await commit(checkout, "node", "node");
   const counter = join(root, "runs");
-  const { base } = await prepared(
-    setupCheckout(
-      checkout,
-      stored({ postCreateCommand: `touch ${SETUP_MARKER}` }),
-    ),
-    root,
-  );
+  const environment = stored({ postCreateCommand: `touch ${SETUP_MARKER}` });
+  const { base } = await prepared(setupCheckout(checkout, environment), root);
   const command = `echo run >> ${counter}; test -e ${SETUP_MARKER} && test ! -e node && command-absent-x`;
   assert.equal(await base.exitOf(command), COMMAND_ABSENT_EXIT);
   assert.equal(await base.exitOf(command), COMMAND_ABSENT_EXIT);
   assert.equal(readFileSync(counter, "utf8"), ONE_RUN);
-  const other = await prepared(
-    setupCheckout(checkout, stored({ postCreateCommand: "true" })),
-    join(root, "other"),
+  const next = await prepared(
+    setupCheckout(checkout, environment),
+    join(root, "next"),
   );
-  assert.equal(await other.base.exitOf(command), FAILED_EXIT);
+  assert.equal(await next.base.exitOf(command), COMMAND_ABSENT_EXIT);
   assert.equal(readFileSync(counter, "utf8"), TWO_RUNS);
+});
+
+test("the base rerun stops with setup_failed when the base setup fails", async (t) => {
+  const { root, checkout } = await repository(t, { file: "base" });
+  const { base } = await prepared(
+    setupCheckout(checkout, stored({ postCreateCommand: "exit 6" })),
+    root,
+  );
+  await assert.rejects(
+    base.exitOf("command-absent-x"),
+    (error) =>
+      error instanceof ExecutionStop &&
+      error.reason === EndReason.EnvironmentFailed &&
+      error.code === EnvironmentFailure.SetupFailed,
+  );
+});
+
+test("the base rerun answers no exit when the budget ends in the base setup", async (t) => {
+  const { root, checkout } = await repository(t, { file: "base" });
+  const entry = setupCheckout(checkout, stored({ postCreateCommand: "true" }));
+  const exhausted = { ...input(), exhausted: () => true };
+  const entries = await setupEntries(exhausted, [entry]);
+  const base = new BaseHead(exhausted, join(root, "base"), entries);
+  assert.equal(await base.exitOf("command-absent-x"), null);
 });

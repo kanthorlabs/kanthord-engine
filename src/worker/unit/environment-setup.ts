@@ -32,10 +32,9 @@ import {
 
 export const SETUP_COMMAND_LIMIT_MS = COMMAND_LIMIT_MS;
 export const BASE_DIRECTORY = "base";
-const BASE_RESULT_LIMIT = 256;
 const SINGLE_CHECKOUT = 1;
+const NO_EXIT = -1;
 const NO_DOCUMENT = "none";
-const baseResults = new Map<string, number | null>();
 
 export interface SetupRepository {
   binding_id: string;
@@ -205,6 +204,7 @@ export class BaseHead {
   private readonly checkouts: readonly SetupEntry[];
   private commitsRead: Promise<string[]> | null = null;
   private prepared: Promise<SetupResult> | null = null;
+  private readonly results = new Map<string, number>();
 
   constructor(
     input: SetupInput,
@@ -248,8 +248,11 @@ export class BaseHead {
       digests: this.digests(),
       command,
     });
-    if (baseResults.has(key)) return baseResults.get(key)!;
-    await this.setup();
+    const known = this.results.get(key);
+    if (known !== undefined) return known;
+    const setup = await this.setup();
+    if (setup.end === SetupEnd.Failed) throw setupStop(setup);
+    if (setup.end === SetupEnd.BudgetEnd) return null;
     const run = await runVerificationsWithOutput({
       directory: this.root(),
       commands: [command],
@@ -259,8 +262,9 @@ export class BaseHead {
       env: this.input.env,
       exhausted: this.input.exhausted,
     });
-    const exit = run.verification.results[0]?.exit_code ?? null;
-    if (run.outcome !== VerificationClass.BudgetEnd) remember(key, exit);
+    if (run.outcome === VerificationClass.BudgetEnd) return null;
+    const exit = run.verification.results[0]?.exit_code ?? NO_EXIT;
+    this.results.set(key, exit);
     return exit;
   }
 
@@ -307,14 +311,6 @@ export class BaseHead {
     }
     return runSetup(this.input, clones);
   }
-}
-
-function remember(key: string, exit: number | null): void {
-  if (baseResults.size >= BASE_RESULT_LIMIT) {
-    const oldest = baseResults.keys().next().value;
-    if (oldest !== undefined) baseResults.delete(oldest);
-  }
-  baseResults.set(key, exit);
 }
 
 export async function setUpHeads(

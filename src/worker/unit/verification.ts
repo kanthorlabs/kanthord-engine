@@ -248,7 +248,9 @@ async function absentOutcome(
 ): Promise<VerificationClass> {
   const unstarted = unstartedClass(input);
   if (unstarted !== null) return unstarted;
-  return (await baseline(command)) === COMMAND_ABSENT_EXIT
+  const exit = await baseline(command);
+  if (exit === null) return VerificationClass.BudgetEnd;
+  return exit === COMMAND_ABSENT_EXIT
     ? VerificationClass.Environment
     : VerificationClass.CodeFailure;
 }

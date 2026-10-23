@@ -213,6 +213,7 @@ test("verification ends a command at its own limit before the execution deadline
 });
 
 const FAILED_EXIT = 1;
+const NO_EXIT = -1;
 
 test("a failed command that passes on a rerun is flaky and still fails", async (t) => {
   const directory = temporary(t);
@@ -410,7 +411,7 @@ test("exit 127 on the node head and on the base head is an environment failure",
 
 test("exit 127 only on the node head is a code failure", async (t) => {
   const { input } = countedInput(temporary(t), ["command-absent-x"]);
-  for (const base of [0, FAILED_EXIT, null]) {
+  for (const base of [0, FAILED_EXIT, NO_EXIT]) {
     const run = await runVerificationsWithOutput({
       ...input,
       baseline: async () => base,
@@ -418,6 +419,16 @@ test("exit 127 only on the node head is a code failure", async (t) => {
     assert.equal(run.outcome, VerificationClass.CodeFailure);
     assert.equal(environmentStop(run), null);
   }
+});
+
+test("exit 127 whose base rerun ends by budget is a budget end and not a code failure", async (t) => {
+  const { input } = countedInput(temporary(t), ["command-absent-x"]);
+  const run = await runVerificationsWithOutput({
+    ...input,
+    baseline: async () => null,
+  });
+  assert.equal(run.outcome, VerificationClass.BudgetEnd);
+  assert.equal(environmentStop(run), null);
 });
 
 test("exit 127 with an exhausted budget is a budget end with no base rerun", async (t) => {
