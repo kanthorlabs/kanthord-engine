@@ -182,8 +182,14 @@ export class ExecutionRun {
     throw this.halt(reason, code);
   }
 
-  async reasonOf(error: unknown): Promise<string> {
-    return thrownReason(error, await this.secrets());
+  async reasonOf(error: unknown): Promise<string | null> {
+    let secrets: readonly string[];
+    try {
+      secrets = await this.secrets();
+    } catch {
+      return null;
+    }
+    return thrownReason(error, secrets);
   }
 
   async stopOf(error: unknown): Promise<ExecutionStop> {

@@ -758,7 +758,10 @@ During an execution, the application logs one info record for each task start
 verified`), task judgement (`task judged`) and node judgement (`node
 judged`). The start check of a rework also logs the node verification result
 (`node verified`) and the task that the agent chooses for a failed node
-verification (`task chosen`). A record holds the execution, node, attempt and
+verification (`task chosen`). When the checkpoint commit or the push of a stop
+fails, the application logs `checkpoint failed` with the `reason`, the thrown
+error text with secrets removed. The record has no `reason` when the worker
+cannot read the secrets. A record holds the execution, node, attempt and
 task identities, commits, exit codes and results, and no agent content. pi persists each agent session of an execution to
 `<data directory>/pi/sessions/execution/<execution id>/`, a directory of mode 0700. The application keeps the newest 50 execution directories.
 
@@ -1164,6 +1167,7 @@ implement them. Help is not an extra root name or a reason to load secrets.
 | local           | `repository.connector.tool_version`              | Git is older than 2.40 or OpenSSH is older than 9.0.                                                                                                                                 | serve server, serve worker                                                 |
 | local           | `repository.connector.git_failed`                | A git operation of the repository connector fails, is aborted or reaches its deadline; the message names the operation.                                                              | serve worker, binding apply                                                |
 | local           | `repository.node_branch.missing`                 | A record shows a push of the node branch and the remote holds no such branch; the steps execution stops.                                                                             | serve worker                                                               |
+| local           | `worker.merge.markers_left`                      | A file of the base merge still holds a conflict marker after the conflict turn; the worker aborts the merge and the steps execution stops.                                           | serve worker                                                               |
 
 The internal error `system.composition.unwired` means that the composition root's
 stand-in was called before its collaboration was implemented. It throws before

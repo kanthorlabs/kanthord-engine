@@ -261,9 +261,8 @@ async function checkpointOnStop(state: StepsState): Promise<void> {
     await pushNodeBranches(state, cleanup, remaining);
   } catch (error) {
     if (!(error instanceof Error)) throw error;
-    state.run.log("checkpoint failed", {
-      reason: await state.run.reasonOf(error),
-    });
+    const reason = await state.run.reasonOf(error);
+    state.run.log("checkpoint failed", reason === null ? {} : { reason });
   } finally {
     cleanup.cancel();
   }

@@ -62,10 +62,11 @@ export interface NativeExecutionInput {
 export async function runNativeExecution(
   input: NativeExecutionInput,
 ): Promise<ExecutionEnd> {
+  const secrets = runSecrets(input.credentials.items);
   const run = new Run({
     ...input,
     workerName: input.setup.worker_name,
-    secrets: runSecrets(input.credentials.items),
+    secrets,
   });
   const opened = new Map<NativeAgent, Disposable>();
   const budget = new ExecutionBudget({
@@ -84,6 +85,7 @@ export async function runNativeExecution(
   };
   try {
     return await executionBoundary(run, async () => {
+      await secrets();
       const method = getWorkerDeclaration(input.setup.worker_name)?.method;
       if (!method) return run.stop(EndReason.OperationFailed);
       const revision = await readPinnedRevision(run);

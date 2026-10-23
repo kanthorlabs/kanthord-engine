@@ -32,13 +32,16 @@ const CLAIM = {
   root_span_id: "1".repeat(16),
 };
 const RUN_SECRET = "short-run-secret";
-function fixture(release = async () => {}) {
+function fixture(
+  release = async () => {},
+  secrets: () => Promise<readonly string[]> = async () => [RUN_SECRET],
+) {
   return new ExecutionRun({
     claim: CLAIM,
     clients: {} as MethodClients,
     credentials: { release },
     context: background,
-    secrets: async () => [RUN_SECRET],
+    secrets,
   });
 }
 
@@ -310,6 +313,38 @@ test("a stop of an uncoded error carries its cause with the run secrets removed"
       detail: "Error: hook refused with [redacted]",
     },
   );
+});
+
+test("a stop of an uncoded error halts and releases with no detail when the secrets read fails", async (t) => {
+  const run = fixture(undefined, async () => {
+    throw new Error("store unreadable");
+  });
+  t.after(() => run.dispose());
+  assert.equal(await run.reasonOf(new Error("hook refused")), null);
+  const stopped = await run.stopOf(new Error("hook refused"));
+  assert.ok(run.operationContext.signal.aborted);
+  const stop = { reason: EndReason.OperationFailed, code: null };
+  assert.deepEqual(
+    { reason: stopped.reason, code: stopped.code, detail: stopped.detail },
+    { ...stop, detail: null },
+  );
+  const bodies: unknown[] = [];
+  run.clients.scheduler = {
+    executionRelease: async (input: { body: unknown }) => {
+      bodies.push(input.body);
+      return {
+        type: OperationResultType.Completed,
+        status: 200,
+        data: { execution_id: "execution", ended_at: 1 },
+      };
+    },
+  } as unknown as MethodClients["scheduler"];
+  assert.deepEqual(await run.releaseStop(stopped), {
+    kind: "released",
+    furtherWork: true,
+    stop,
+  });
+  assert.deepEqual(bodies, [{ further_work: true, stop }]);
 });
 
 test("a stop of a coded error keeps its code and carries no detail", async (t) => {
