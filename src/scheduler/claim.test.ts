@@ -57,6 +57,7 @@ export function claimHarness(
     worker_name: "coder@1",
     instance_count: 1,
     tags: [] as string[],
+    environment: null as string | null,
     tombstone: false,
     resource_budget: null as { wall_time_ms: number } | null,
   };
@@ -206,9 +207,16 @@ test("the claim walk skips a job that the claimant does not admit and claims the
     h.service.insert(tx, plain, h.row.project_id, 1);
   });
   const facts = new Map([
-    [macos, { intent: ClaimIntent.Implement, tags: ["platform.macos"] }],
-    [examine, { intent: ClaimIntent.Examine, tags: [] }],
-    [plain, { intent: ClaimIntent.Implement, tags: [] }],
+    [
+      macos,
+      {
+        intent: ClaimIntent.Implement,
+        tags: ["platform.macos"],
+        repositories: [],
+      },
+    ],
+    [examine, { intent: ClaimIntent.Examine, tags: [], repositories: [] }],
+    [plain, { intent: ClaimIntent.Implement, tags: [], repositories: [] }],
   ]);
   const read: string[] = [];
   h.dependencies.facts.claimFacts = (_tx, nodeId) => {
@@ -232,6 +240,32 @@ test("the claim walk skips a job that the claimant does not admit and claims the
   h.store.transaction((tx) => h.service.revoke(tx, plain, FIXTURE_NOW));
   h.binding.tags = ["platform.macos"];
   assert.equal(h.claim().row!.node_id, macos);
+});
+
+test("the claim walk of a container slot skips a job of another repository and claims the next job of its repository", (t) => {
+  const h = claimHarness(t);
+  const api = "repository:github:acme/api";
+  const web = "repository:github:acme/web";
+  const webNode = createIdentity("node");
+  const apiNode = createIdentity("node");
+  h.store.transaction((tx) => {
+    h.service.insert(tx, webNode, h.row.project_id, 2);
+    h.service.insert(tx, apiNode, h.row.project_id, 1);
+  });
+  const facts = new Map([
+    [webNode, { intent: ClaimIntent.Implement, tags: [], repositories: [web] }],
+    [apiNode, { intent: ClaimIntent.Implement, tags: [], repositories: [api] }],
+  ]);
+  h.dependencies.facts.claimFacts = (_tx, nodeId) => facts.get(nodeId) ?? null;
+  h.binding.environment = api;
+  const result = h.claim();
+  assert.equal(result.row!.node_id, apiNode);
+  assert.deepEqual(
+    h.calls
+      .filter((call) => call.method === CLAIM_METHOD)
+      .map((call) => call.arguments[0]),
+    [apiNode],
+  );
 });
 
 test("a worker name with no declaration answers no work and asserts nothing", (t) => {

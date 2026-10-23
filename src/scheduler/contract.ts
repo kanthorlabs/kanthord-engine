@@ -342,16 +342,23 @@ export interface WorkerBindings {
     instance_count: number;
     resource_budget?: { wall_time_ms: number } | null;
     tags: readonly string[];
+    environment: string | null;
     tombstone: boolean;
   } | null;
   workerBindingsOf(
     tx: Transaction,
     projectId: string,
-  ): { binding_id: string; worker_name: string; tags: readonly string[] }[];
+  ): {
+    binding_id: string;
+    worker_name: string;
+    tags: readonly string[];
+    environment: string | null;
+  }[];
 }
 export interface ClaimFacts {
   intent: ClaimIntent;
   tags: readonly string[];
+  repositories: readonly string[];
 }
 export interface MissionClaimFacts {
   claimFacts(tx: Transaction, nodeId: string): ClaimFacts | null;
@@ -368,6 +375,7 @@ export interface Claimant {
   declared_node_states: readonly string[];
   declared_intents: readonly ClaimIntent[];
   tags: readonly string[];
+  environment: string | null;
 }
 export interface UnmatchedClaim {
   node_id: string;

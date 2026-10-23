@@ -86,6 +86,7 @@ export interface WorkQueue {
 export interface ClaimFacts {
   intent: Intent;
   tags: string[];
+  repositories: string[];
 }
 
 export interface ClaimFactsRow extends ClaimFacts {
