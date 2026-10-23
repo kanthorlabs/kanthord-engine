@@ -933,6 +933,7 @@ export function composeServices(options: {
     workerPool,
     threadDriver,
     containerDriver,
+    environmentImages,
     repoConnector,
     github,
     gitWriter,
@@ -994,6 +995,7 @@ export class Server implements Service {
   private services: Service[] = [];
   private runs: Promise<Error | null>[] = [];
   private invocation?: ReturnType<typeof createInvocation>;
+  private environmentImages?: EnvironmentImages;
   private quiesceTask?: Promise<Error | null>;
   private startTask?: Promise<Error | null>;
   private stopTask?: Promise<Error | null>;
@@ -1058,6 +1060,7 @@ export class Server implements Service {
         workbench,
         gateway,
         invocation,
+        environmentImages,
       } = composeServices({
         config,
         store: this.store,
@@ -1069,6 +1072,7 @@ export class Server implements Service {
       this.gateway = gateway;
       this.worker = worker;
       this.invocation = invocation;
+      this.environmentImages = environmentImages;
       this.releases.push(() => invocation.stop());
       const services = [
         tracking,
@@ -1141,6 +1145,7 @@ export class Server implements Service {
   stop(): Promise<Error | null> {
     if (this.stopTask) return this.stopTask;
     this.shutdown.cancel();
+    this.environmentImages?.stop();
     this.stopTask = lifecycle(async () => {
       const watchdog = setTimeout(() => process.exit(1), 10000);
       try {
