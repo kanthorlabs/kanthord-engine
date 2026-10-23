@@ -315,6 +315,7 @@ export function missionHarness(
       },
     },
     schedulerMatch: { unmatchedClaims: () => [] },
+    environments: { environmentsMixed: () => false },
     wakeup: { wake: (...args) => record("wakeup.wake", args) },
     executionAttribution: {
       of: (...args) => {

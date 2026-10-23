@@ -318,7 +318,11 @@ type Collaborators = Pick<Dependencies, "bindings" | "workQueue"> &
   Partial<
     Pick<
       Dependencies,
-      "schedulerClaims" | "schedulerMatch" | "wakeup" | "executionAttribution"
+      | "schedulerClaims"
+      | "schedulerMatch"
+      | "wakeup"
+      | "executionAttribution"
+      | "environments"
     >
   >;
 
@@ -352,6 +356,7 @@ function makeService(
       liveExecutionOf: () => null,
     },
     schedulerMatch: { unmatchedClaims: () => [] },
+    environments: { environmentsMixed: () => false },
     wakeup: { wake: () => {} },
     executionAttribution: {
       of: () => {
@@ -5521,4 +5526,153 @@ test("MissionService refuses to restart after stop", async (t) => {
   assert.deepEqual(await mission.healthcheck(), {
     operations: HealthStatus.Unavailable,
   });
+});
+
+const MIXED_SECOND_ID = "binding_00000000000000000000000006";
+const MIXED_SECOND_NEXT_ID = "binding_00000000000000000000000007";
+const MIXED_FIRST_IDENTITY = "repository:github:o/api";
+const MIXED_SECOND_IDENTITY = "repository:github:o/web";
+
+function mixedFixture(t: TestContext) {
+  const state = { mixed: true };
+  const table = new Map<string, BindingRevision>(
+    [
+      [BINDING_ID, MIXED_FIRST_IDENTITY, FIRST_REVISION],
+      [MIXED_SECOND_ID, MIXED_SECOND_IDENTITY, FIRST_REVISION],
+      [MIXED_SECOND_NEXT_ID, MIXED_SECOND_IDENTITY, NEXT_REVISION],
+    ].map(([id, identity, revision]) => [
+      id as string,
+      {
+        project_id: PROJECT_ID,
+        binding_id: id as string,
+        name: id as string,
+        resource_identity: identity as string,
+        revision: revision as number,
+        tombstone: false,
+        disabled: false,
+      },
+    ]),
+  );
+  const f = nodeFixture(t, undefined, undefined, {
+    bindings: {
+      ...bindings,
+      resolveBindingIdentity: (_tx, _projectId, id) => table.get(id) ?? null,
+      getBindingRevision: (_tx, id) => table.get(id) ?? null,
+    },
+    environments: {
+      environmentsMixed: (_tx, projectId, identities) => {
+        assert.equal(projectId, PROJECT_ID);
+        return (
+          state.mixed &&
+          identities.includes(MIXED_FIRST_IDENTITY) &&
+          identities.includes(MIXED_SECOND_IDENTITY)
+        );
+      },
+    },
+  });
+  function bodyNaming(ids: string[]): NodeCreate {
+    const body = f.body(Intent.Implement);
+    body.content.bindings = ids;
+    return body;
+  }
+  function updateNaming(nodeId: string, ids: string[]): NodeUpdate {
+    const revision = f.store.transaction((tx) =>
+      readCurrentRevision(tx, nodeId),
+    )!;
+    const body = bodyNaming(ids);
+    return {
+      filename: body.filename,
+      content: body.content,
+      tasks: [],
+      reason: REASON,
+      expected_revision: revision.revision,
+      expected_mission_version: f.version(),
+    };
+  }
+  function rebindTo(nodeId: string) {
+    const operation = missionOperations[RevisionWrite.NodeRebind];
+    const input = operation.input.parse({
+      params: { mission_id: f.mission_id },
+      query: {},
+      body: {
+        binding_id: MIXED_SECOND_NEXT_ID,
+        node_id: nodeId,
+        reason: REASON,
+        expected_mission_version: f.version(),
+      },
+    });
+    return operation.output.parse(
+      f.registry.get(operation.id).handler(input, f.caller),
+    );
+  }
+  function mixedRefusal(error: unknown, ids: string[]) {
+    assert.ok(error instanceof OperationError);
+    assert.equal(error.status, HttpStatus.BadRequest);
+    assert.equal(error.code, MissionErrorCode.EnvironmentMixed);
+    assert.deepEqual(error.details, { bindings: ids });
+    return true;
+  }
+  return { ...f, state, bodyNaming, updateNaming, rebindTo, mixedRefusal };
+}
+
+test("node create of a node with mixed environments refuses and writes nothing", (t) => {
+  const f = mixedFixture(t);
+  f.refuses(
+    f.bodyNaming([BINDING_ID, MIXED_SECOND_ID]),
+    MissionErrorCode.EnvironmentMixed,
+    { bindings: [BINDING_ID, MIXED_SECOND_ID] },
+    HttpStatus.BadRequest,
+  );
+  assert.deepEqual(f.snapshot().nodes, []);
+  assert.deepEqual(f.snapshot().revisions, []);
+});
+
+test("node update that adds a second mixed binding refuses and keeps the earlier revision", (t) => {
+  const f = mixedFixture(t);
+  const nodeId = f.create(f.bodyNaming([BINDING_ID])).revisions[
+    FIRST_ELEMENT_INDEX
+  ]!.node_id;
+  const before = f.snapshot();
+  assert.throws(
+    () =>
+      f.update(nodeId, f.updateNaming(nodeId, [BINDING_ID, MIXED_SECOND_ID])),
+    (error) => f.mixedRefusal(error, [BINDING_ID, MIXED_SECOND_ID]),
+  );
+  assert.deepEqual(f.snapshot(), before);
+  assert.equal(
+    f.store.transaction((tx) => readCurrentRevision(tx, nodeId))?.revision,
+    FIRST_REVISION,
+  );
+});
+
+test("a rebind of a node with mixed environments refuses and writes no revision", (t) => {
+  const f = mixedFixture(t);
+  f.state.mixed = false;
+  const nodeId = f.create(f.bodyNaming([BINDING_ID, MIXED_SECOND_ID]))
+    .revisions[FIRST_ELEMENT_INDEX]!.node_id;
+  f.state.mixed = true;
+  const before = f.snapshot();
+  assert.throws(
+    () => f.rebindTo(nodeId),
+    (error) => f.mixedRefusal(error, [BINDING_ID, MIXED_SECOND_NEXT_ID]),
+  );
+  assert.deepEqual(f.snapshot(), before);
+});
+
+test("node create, node update and a rebind pass when the environments are not mixed", (t) => {
+  const f = mixedFixture(t);
+  f.state.mixed = false;
+  const created = f.create(f.bodyNaming([BINDING_ID]));
+  const nodeId = created.revisions[FIRST_ELEMENT_INDEX]!.node_id;
+  f.create({
+    ...f.bodyNaming([BINDING_ID, MIXED_SECOND_ID]),
+    filename: OTHER_FILENAME,
+  });
+  const updated = f.update(
+    nodeId,
+    f.updateNaming(nodeId, [BINDING_ID, MIXED_SECOND_ID]),
+  );
+  assert.equal(updated.revisions.length, SINGLE_ITEM);
+  const rebound = f.rebindTo(nodeId);
+  assert.equal(rebound.node_change.revisions.length, SINGLE_ITEM);
 });

@@ -163,6 +163,7 @@ engine/
 │   │   ├── transitions.ts     # Scheduler claim, release admission, and failure
 │   │   ├── claim-facts.ts     # Intent, tags and claimable states of a node at its claim revisions
 │   │   ├── coverage.ts        # Unmatched pairs that a node write adds, and the refusal of that write
+│   │   ├── environment-mix.ts # Refusal of a node write that names repository bindings with different stored environments
 │   │   ├── execution.ts       # Live claim and execution context admission
 │   │   ├── execution-read.ts  # Pinned revisions, attempts and current dependency outcomes
 │   │   ├── evidence-content.ts # Binding, byte and verification validation
