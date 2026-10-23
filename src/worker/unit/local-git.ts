@@ -16,6 +16,7 @@ const EXIT_SUCCESS = 0;
 const EXIT_NO_MATCH = 1;
 const NO_EXIT = -1;
 const NUL = "\0";
+const NO_VALUE = "";
 const NO_PATHS = 0;
 const PATH_BATCH_BYTES = 262144;
 const MODIFIED = "M";
@@ -659,7 +660,7 @@ export async function trailerValues(
   return output
     .split("\n")
     .map((line) => line.trim())
-    .filter((line) => line !== CLEAN_STATUS);
+    .filter((line) => line !== NO_VALUE);
 }
 
 export async function abortMerge(

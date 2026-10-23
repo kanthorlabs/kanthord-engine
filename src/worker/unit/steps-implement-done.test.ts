@@ -1,18 +1,25 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 import { simpleGit } from "simple-git";
+import { temporary } from "../../kernel/test-support.ts";
+import type { Revision } from "../../mission/contract.ts";
 import { executionBoundary } from "./native-method.ts";
 import { JUDGEMENT_MARKER } from "./judgement.ts";
 import { taskCommitMessage } from "./local-git.ts";
 import type { MethodClients } from "./method-clients.ts";
-import { runStepsImplement } from "./steps-implement.ts";
+import { runStepsImplement, startCheck } from "./steps-implement.ts";
+import { nodeUnitOf } from "./release-gate.ts";
 import { DONE_TRAILER, doneRecordOf } from "./done-record.ts";
 import {
+  advanceBase,
   fauxAssistantMessage,
   fauxToolCall,
   implementFixture as fixture,
   nextExecution,
   NO_PROVIDER_CALLS,
+  recordDone,
   recordReleases,
   task,
 } from "./test-support.ts";
@@ -274,4 +281,130 @@ test("a done trailer in an agent commit message does not survive the gate", asyn
     `main..refs/heads/${h.nodeBranch}`,
   ]);
   assert.equal(messages.includes("forged"), false);
+});
+
+const VERDICT = "The edge case of an empty list stays unhandled.";
+const REVISED_CRITERION = "The second unit holds a revised criterion.";
+const BASE_FILE = "other";
+const MERGE_COMMIT_FIELDS = 3;
+
+function nodeRevision(h: Harness, command: string): Revision {
+  return {
+    ...h.revision,
+    tasks: [],
+    content: { ...h.revision.content, verifications: [command] },
+  };
+}
+
+function verdictAtHead(h: Harness) {
+  return {
+    text: VERDICT,
+    judged: h.checkouts.map((checkout) => ({
+      binding_id: checkout.binding_id,
+      commit: checkout.head,
+    })),
+  };
+}
+
+test("a verdict unit that passes counts as completed when the budget ends in the release gate", async (t) => {
+  const markers = temporary(t);
+  const live = join(markers, "live");
+  const release = join(markers, "release");
+  const h = await fixture(
+    t,
+    [],
+    [write("addressed"), fauxAssistantMessage("addressed")],
+  );
+  h.revision = nodeRevision(
+    h,
+    `if [ -f ${live} ]; then touch ${release}; else touch ${live}; fi`,
+  );
+  await recordDone(h, nodeUnitOf(h.input.claim.node_id, h.revision));
+  h.verdict = verdictAtHead(h);
+  h.agent.budget.exhausted = () => existsSync(release);
+  const bodies = recordFinish(h);
+  assert.deepEqual(await executionBoundary(h.run, () => runStepsImplement(h)), {
+    kind: "released",
+    furtherWork: true,
+  });
+  assert.deepEqual(bodies, [{ further_work: true, stop: null }]);
+  assert.ok(JSON.stringify(h.provider.calls[0]).includes(VERDICT));
+});
+
+test("a change to one task content reopens only that task in the next execution", async (t) => {
+  const first = task("alpha-unit", "test -f first");
+  const second = task("beta-unit", "test -f second");
+  const h = await fixture(
+    t,
+    [first, second],
+    [
+      write("first"),
+      fauxAssistantMessage("first done"),
+      write("second"),
+      fauxAssistantMessage("second done"),
+    ],
+  );
+  recordFinish(h);
+  assert.deepEqual(
+    await executionBoundary(h.run, () => runStepsImplement(h)),
+    RELEASED,
+  );
+  const revised = {
+    ...second,
+    content: { ...second.content, criterion: REVISED_CRITERION },
+  };
+  const next = await nextExecution(
+    t,
+    { ...h, revision: { ...h.revision, tasks: [first, revised] } },
+    [fauxAssistantMessage("nothing")],
+  );
+  recordFinish(next);
+  assert.deepEqual(
+    await executionBoundary(next.run, () => runStepsImplement(next)),
+    RELEASED,
+  );
+  assert.equal(next.provider.calls.length, ONE_TURN);
+  const call = JSON.stringify(next.provider.calls[0]);
+  assert.ok(call.includes(REVISED_CRITERION));
+  assert.equal(call.includes(first.content.name), false);
+});
+
+test("done records survive a base move and the template merge", async (t) => {
+  const current = task("merged-unit", "test -f merged");
+  const h = await fixture(
+    t,
+    [current],
+    [write("merged"), fauxAssistantMessage("done")],
+  );
+  recordFinish(h);
+  assert.deepEqual(
+    await executionBoundary(h.run, () => runStepsImplement(h)),
+    RELEASED,
+  );
+  await advanceBase(h, t, "moved base", BASE_FILE);
+  const next = await nextExecution(t, h, []);
+  recordFinish(next);
+  assert.deepEqual(
+    await executionBoundary(next.run, () => runStepsImplement(next)),
+    RELEASED,
+  );
+  assert.equal(next.provider.calls.length, NO_PROVIDER_CALLS);
+  const parents = await simpleGit(next.root).raw([
+    "rev-list",
+    "--parents",
+    "-n",
+    "1",
+    "HEAD",
+  ]);
+  assert.equal(parents.trim().split(" ").length, MERGE_COMMIT_FIELDS);
+});
+
+test("a rework of a node that holds a node record still sends the verdict", async (t) => {
+  const h = await fixture(t, [], []);
+  h.revision = nodeRevision(h, "true");
+  await recordDone(h, nodeUnitOf(h.input.claim.node_id, h.revision));
+  h.verdict = verdictAtHead(h);
+  const checked = await startCheck(h);
+  assert.deepEqual(checked.pending, []);
+  assert.ok(checked.node?.text.includes(VERDICT));
 });

@@ -13,7 +13,7 @@ import {
   startCheck,
   runTask,
   runStepsImplement,
-  verifyTask,
+  verifyTaskRun,
 } from "./steps-implement.ts";
 import { ProviderFailure } from "../../scheduler/contract.ts";
 import {
@@ -131,7 +131,7 @@ test("the start check runs no verification, and a verification timeout cleans it
     return deadline;
   };
   h.agent.budget.exhausted = () => Date.now() >= deadline;
-  const verification = await verifyTask(h, current);
+  const { verification } = await verifyTaskRun(h, current);
   assert.equal(verification.results[0]!.timed_out, true);
   assert.equal(existsSync(join(h.root, "transient")), false);
   assert.ok(Date.now() >= deadline && Date.now() < h.input.claim.expired_at);
@@ -343,7 +343,7 @@ test("a verification at the agent root of two bindings leaves only the checkouts
     "touch stray && mkdir -p stray-dir .kanthord-scratch && touch .kanthord-scratch/probe api/transient",
   );
   const h = await fixture(t, [current], [], undefined, TWO_BINDINGS);
-  await verifyTask(h, current);
+  await verifyTaskRun(h, current);
   assert.deepEqual(readdirSync(h.root).sort(), [
     ".kanthord-scratch",
     ...TWO_BINDINGS,

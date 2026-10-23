@@ -311,16 +311,18 @@ async function runPending(
   assert.ok(pending.length <= unitsOf(state).length);
   const units = pending.map(({ task, instruction }) => ({
     task,
+    verdict: false,
     run: () => taskRunner(state, task, instruction),
   }));
   if (node !== null) {
     const unit = nodeUnitOf(state.input.claim.node_id, state.revision);
     units.push({
       task: unit,
+      verdict: true,
       run: () => runNodeInstruction(state, unit, node),
     });
   }
-  for (const { task, run } of units) {
+  for (const { task, verdict, run } of units) {
     state.task = task;
     const result = await state.run.spans.within(
       taskSpan(state.run.spans, task),
@@ -329,7 +331,8 @@ async function runPending(
     );
     if (result.kind === TaskResultKind.BudgetEnd)
       return { task, budgetEnd: true, completedTasks: completed.size };
-    if (result.recorded && !isDone(done, task)) completed.add(task.id);
+    if (verdict || (result.recorded && !isDone(done, task)))
+      completed.add(task.id);
   }
   return { task: null, budgetEnd: false, completedTasks: completed.size };
 }
@@ -545,11 +548,7 @@ export function implementRepositoriesOf(state: StepsState) {
   );
 }
 
-export async function verifyTask(state: StepsState, task: TaskContent) {
-  return (await verifyTaskRun(state, task)).verification;
-}
-
-function verifyTaskRun(
+export function verifyTaskRun(
   state: StepsState,
   task: TaskContent,
 ): Promise<VerificationRun> {
