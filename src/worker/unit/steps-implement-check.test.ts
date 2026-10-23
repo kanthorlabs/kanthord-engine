@@ -23,7 +23,11 @@ import type { MethodClients } from "./method-clients.ts";
 import { WorkspaceKind } from "./workspace.ts";
 import { TaskBoundary } from "./steps-implement.ts";
 import { prepareStepsWorkspace, startCheck } from "./steps-implement.ts";
-import { RefreshResult, refreshAtClaim } from "./base-refresh.ts";
+import {
+  MERGE_MARKERS_LEFT,
+  RefreshResult,
+  refreshAtClaim,
+} from "./base-refresh.ts";
 import { judgedAt } from "./judged-tasks.ts";
 import { SHIPPED_TEMPLATES } from "../../agent/prompt-templates.ts";
 import {
@@ -527,8 +531,9 @@ test("repository evidence of the attempt stops the preparation when the node bra
     () => assert.fail("The preparation must stop."),
     (error: unknown) => error,
   );
+  const stopped = await run.stopOf(error);
   assert.deepEqual(
-    { reason: run.stopOf(error).reason, code: run.stopOf(error).code },
+    { reason: stopped.reason, code: stopped.code },
     {
       reason: EndReason.OperationFailed,
       code: connector.NODE_BRANCH_MISSING,
@@ -626,7 +631,13 @@ test("the claim refresh aborts the merge and stops when a conflict marker remain
     DEADLINE_MS,
     TEST_SSH_ACCESS,
   );
-  await assert.rejects(refreshAtClaim(h), ExecutionStop);
+  await assert.rejects(
+    refreshAtClaim(h),
+    (error: unknown) =>
+      error instanceof ExecutionStop &&
+      error.reason === EndReason.OperationFailed &&
+      error.code === MERGE_MARKERS_LEFT,
+  );
   assert.equal(await simpleGit(h.root).revparse(["HEAD"]), before);
   assert.equal((await simpleGit(h.root).status()).isClean(), true);
 });

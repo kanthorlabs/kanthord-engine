@@ -6,7 +6,11 @@ import {
   type ExecutionEnd,
   type ExecutionRun,
 } from "./execution-run.ts";
-import { openNativeAgent, type NativeAgent } from "./native-agent.ts";
+import {
+  credentialRedaction,
+  openNativeAgent,
+  type NativeAgent,
+} from "./native-agent.ts";
 import { Phase, type TelemetrySink } from "./telemetry.ts";
 import type { Context } from "../../kernel/context.ts";
 import { ExecutionRun as Run, type MethodClaim } from "./execution-run.ts";
@@ -58,7 +62,12 @@ export interface NativeExecutionInput {
 export async function runNativeExecution(
   input: NativeExecutionInput,
 ): Promise<ExecutionEnd> {
-  const run = new Run({ ...input, workerName: input.setup.worker_name });
+  const secrets = runSecrets(input.credentials.items);
+  const run = new Run({
+    ...input,
+    workerName: input.setup.worker_name,
+    secrets,
+  });
   const opened = new Map<NativeAgent, Disposable>();
   const budget = new ExecutionBudget({
     ...input.claim,
@@ -76,6 +85,7 @@ export async function runNativeExecution(
   };
   try {
     return await executionBoundary(run, async () => {
+      await secrets();
       const method = getWorkerDeclaration(input.setup.worker_name)?.method;
       if (!method) return run.stop(EndReason.OperationFailed);
       const revision = await readPinnedRevision(run);
@@ -164,6 +174,14 @@ export async function runNativeExecution(
   }
 }
 
+function runSecrets(
+  items: readonly ExecutionCredential[],
+): () => Promise<readonly string[]> {
+  const redactions = items.map(credentialRedaction);
+  return async () =>
+    (await Promise.all(redactions.map((redaction) => redaction()))).flat();
+}
+
 export function disposeAgent(agent: NativeAgent | null): void {
   if (!agent) return;
   agent.dispose();
@@ -181,7 +199,7 @@ export async function executionBoundary(
   try {
     return await invoke();
   } catch (error) {
-    stopped = run.stopOf(error);
+    stopped = await run.stopOf(error);
   }
   if (stopped.reason !== EndReason.Revoked) return run.releaseStop(stopped);
   return {

@@ -474,6 +474,9 @@ No query fields are accepted. The required file supplies the following fields.
   `stop` writes no outcome and no assessment.
 - A steps execution whose node branch is gone after a recorded push stops with
   `operation_failed` and the code `repository.node_branch.missing`.
+- A steps execution whose conflict turn leaves a conflict marker aborts the
+  merge and stops with `operation_failed` and the code
+  `worker.merge.markers_left`.
 - Mission checks the release predicate of a release with no `stop` in the
   release transaction, before the terminal write, under [the release admission](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/mission-service.impl.md#the-release-admission).
   A release that fails it answers 409 `mission.release.obligation_unmet` with

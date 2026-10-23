@@ -2,6 +2,7 @@ import { addAbortListener } from "node:events";
 import assert from "node:assert/strict";
 import { CancellationContext, type Context } from "../../kernel/context.ts";
 import { CodedError } from "../../kernel/errors.ts";
+import { thrownReason } from "../../kernel/probe.ts";
 import {
   OperationResultType,
   type ClientOptions,
@@ -103,6 +104,7 @@ export class ExecutionRun {
   readonly operationContext: CancellationContext;
   readonly spans: SpanRecorder;
   private readonly credentials: { release(): Promise<void> };
+  private readonly secrets: () => Promise<readonly string[]>;
   private readonly parent: Context;
   private readonly logSink: (record: Record<string, unknown>) => void;
   private stopped: ExecutionStop | null = null;
@@ -117,6 +119,7 @@ export class ExecutionRun {
     log?: (record: Record<string, unknown>) => void;
     telemetry?: TelemetrySink;
     workerName?: string;
+    secrets?: () => Promise<readonly string[]>;
   }) {
     assert.ok(input.claim.execution_id);
     assert.ok(input.claim.node_id);
@@ -128,6 +131,7 @@ export class ExecutionRun {
     );
     this.clients = input.clients;
     this.credentials = input.credentials;
+    this.secrets = input.secrets ?? (async () => []);
     this.parent = input.context;
     this.logSink = input.log ?? (() => {});
     this.operationContext = new CancellationContext(
@@ -178,12 +182,25 @@ export class ExecutionRun {
     throw this.halt(reason, code);
   }
 
-  stopOf(error: unknown): ExecutionStop {
+  async reasonOf(error: unknown): Promise<string | null> {
+    let secrets: readonly string[];
+    try {
+      secrets = await this.secrets();
+    } catch {
+      return null;
+    }
+    return thrownReason(error, secrets);
+  }
+
+  async stopOf(error: unknown): Promise<ExecutionStop> {
     if (error instanceof ExecutionStop)
       return this.halt(error.reason, error.code, error.detail);
+    if (error instanceof CodedError)
+      return this.halt(EndReason.OperationFailed, error.code);
     return this.halt(
       EndReason.OperationFailed,
-      error instanceof CodedError ? error.code : null,
+      null,
+      await this.reasonOf(error),
     );
   }
 

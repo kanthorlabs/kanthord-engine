@@ -14,6 +14,7 @@ import {
 } from "./execution-run.ts";
 import type { MethodClients } from "./method-clients.ts";
 import { ProviderFailure } from "../../scheduler/contract.ts";
+import { CodedError } from "../../kernel/errors.ts";
 
 const SETTLE_CALL_COUNT = 1;
 const CALLS = 2;
@@ -30,12 +31,17 @@ const CLAIM = {
   trace_id: "trace",
   root_span_id: "1".repeat(16),
 };
-function fixture(release = async () => {}) {
+const RUN_SECRET = "short-run-secret";
+function fixture(
+  release = async () => {},
+  secrets: () => Promise<readonly string[]> = async () => [RUN_SECRET],
+) {
   return new ExecutionRun({
     claim: CLAIM,
     clients: {} as MethodClients,
     credentials: { release },
     context: background,
+    secrets,
   });
 }
 
@@ -262,7 +268,7 @@ test("a stop release settles credentials under a fresh context and reconciles a 
       reports++;
     });
     t.after(() => run.dispose());
-    const stopped = run.stopOf(new ExecutionStop(stop.reason, stop.code));
+    const stopped = await run.stopOf(new ExecutionStop(stop.reason, stop.code));
     assert.ok(run.operationContext.signal.aborted);
     run.clients.scheduler = {
       executionRelease: async (
@@ -289,6 +295,68 @@ test("a stop release settles credentials under a fresh context and reconciles a 
   }
 });
 
+test("a stop of an uncoded error carries its cause with the run secrets removed", async (t) => {
+  const run = fixture();
+  t.after(() => run.dispose());
+  const stopped = await run.stopOf(
+    new Error(`hook refused with ${RUN_SECRET}`),
+  );
+  assert.deepEqual(
+    {
+      reason: stopped.reason,
+      code: stopped.code,
+      detail: stopped.detail,
+    },
+    {
+      reason: EndReason.OperationFailed,
+      code: null,
+      detail: "Error: hook refused with [redacted]",
+    },
+  );
+});
+
+test("a stop of an uncoded error halts and releases with no detail when the secrets read fails", async (t) => {
+  const run = fixture(undefined, async () => {
+    throw new Error("store unreadable");
+  });
+  t.after(() => run.dispose());
+  assert.equal(await run.reasonOf(new Error("hook refused")), null);
+  const stopped = await run.stopOf(new Error("hook refused"));
+  assert.ok(run.operationContext.signal.aborted);
+  const stop = { reason: EndReason.OperationFailed, code: null };
+  assert.deepEqual(
+    { reason: stopped.reason, code: stopped.code, detail: stopped.detail },
+    { ...stop, detail: null },
+  );
+  const bodies: unknown[] = [];
+  run.clients.scheduler = {
+    executionRelease: async (input: { body: unknown }) => {
+      bodies.push(input.body);
+      return {
+        type: OperationResultType.Completed,
+        status: 200,
+        data: { execution_id: "execution", ended_at: 1 },
+      };
+    },
+  } as unknown as MethodClients["scheduler"];
+  assert.deepEqual(await run.releaseStop(stopped), {
+    kind: "released",
+    furtherWork: true,
+    stop,
+  });
+  assert.deepEqual(bodies, [{ further_work: true, stop }]);
+});
+
+test("a stop of a coded error keeps its code and carries no detail", async (t) => {
+  const run = fixture();
+  t.after(() => run.dispose());
+  const stopped = await run.stopOf(new CodedError(ERROR, "refused"));
+  assert.deepEqual(
+    { code: stopped.code, detail: stopped.detail },
+    { code: ERROR, detail: null },
+  );
+});
+
 test("a stop release sends the cause detail of a provider failure", async (t) => {
   const run = fixture();
   t.after(() => run.dispose());
@@ -297,7 +365,7 @@ test("a stop release sends the cause detail of a provider failure", async (t) =>
     code: ProviderFailure.Unavailable,
     detail: "OAuth auth derivation failed for anthropic",
   };
-  const stopped = run.stopOf(
+  const stopped = await run.stopOf(
     new ExecutionStop(stop.reason, stop.code, stop.detail),
   );
   const bodies: unknown[] = [];
@@ -328,7 +396,7 @@ test("a stop release keeps the cause detail when it reconciles a lost answer or 
   for (const recorded of [stop, null]) {
     const run = fixture();
     t.after(() => run.dispose());
-    const stopped = run.stopOf(
+    const stopped = await run.stopOf(
       new ExecutionStop(stop.reason, stop.code, stop.detail),
     );
     run.clients.scheduler = {
@@ -357,7 +425,7 @@ test("a stop release that the scheduler refuses as ended ends the run as revoked
   ] as const) {
     const run = fixture();
     t.after(() => run.dispose());
-    const stopped = run.stopOf(
+    const stopped = await run.stopOf(
       new ExecutionStop(EndReason.JudgementInvalid, null),
     );
     run.clients.scheduler = {
