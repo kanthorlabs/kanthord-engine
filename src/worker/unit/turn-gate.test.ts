@@ -18,7 +18,6 @@ import {
   type ExecutionEnd,
 } from "./execution-run.ts";
 import { executionBoundary } from "./native-method.ts";
-import { taskCommitMessage } from "./local-git.ts";
 import { RefreshResult, refreshAtClaim } from "./base-refresh.ts";
 import {
   prepareStepsWorkspace,
@@ -40,6 +39,7 @@ import {
 } from "./test-support.ts";
 
 const FIXED = "fixed";
+const MERGE_HEADER = "feat: merge main";
 const AGENT_SUBJECT = "agent commit";
 const OTHER_BRANCH = "other";
 const STRAY_FILE = "stray.txt";
@@ -143,7 +143,7 @@ test("an agent commit in a turn folds into the template commit and counts as a c
     `${before}..HEAD`,
   ]);
   assert.deepEqual(subjects.trim().split("\n"), [
-    taskCommitMessage(current.id, h.input.claim.attempt),
+    `feat: ${current.content.name}`,
   ]);
   assert.equal(await headOf(h.root, "HEAD^"), before);
   assert.equal(readFileSync(join(h.root, "file"), "utf8").trim(), FIXED);
@@ -349,7 +349,7 @@ test("a CRLF blob under a text attribute keeps invariant I and the gate commits 
   });
   const subjects = await git.raw(["log", "--format=%s", `${before}..HEAD`]);
   assert.deepEqual(subjects.trim().split("\n"), [
-    taskCommitMessage(current.id, h.input.claim.attempt),
+    `feat: ${current.content.name}`,
   ]);
   assert.equal(
     (await git.raw(["show", "--name-only", "--format=", "HEAD"])).trim(),
@@ -409,7 +409,7 @@ test("a violation in the checkpoint of a stop restores the checkout and pushes t
   const local = await headOf(h.root, `refs/heads/${h.nodeBranch}`);
   assert.equal(await remoteHead(h), local);
   assert.ok(
-    (await simpleGit(h.root).raw(["log", "-1", "--format=%s", local])).includes(
+    (await simpleGit(h.root).raw(["log", "-1", "--format=%b", local])).includes(
       first.id,
     ),
   );
@@ -452,6 +452,6 @@ test("the merge commit takes the template message and not the merge message file
   assert.equal(await refreshAtClaim(h), RefreshResult.Merged);
   assert.equal(
     (await simpleGit(h.root).raw(["log", "-1", "--format=%s"])).trim(),
-    taskCommitMessage(h.input.claim.node_id, h.input.claim.attempt),
+    MERGE_HEADER,
   );
 });

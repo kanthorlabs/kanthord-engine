@@ -173,6 +173,7 @@ components:
                             items:
                               type: string
                           tags: {}
+                          commit_type: {}
                           depends_on:
                             type: array
                             items:

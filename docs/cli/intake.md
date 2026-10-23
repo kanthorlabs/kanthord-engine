@@ -448,6 +448,10 @@ for an action without a row in the action table, and a CLI write answers `503`
 `intake.outbound.request.cli_unavailable` when its binary is missing or too
 old.
 
+For a `pull_request` action, the pull request title is `<commit_type>: <node name>`.
+`commit_type` comes from the pinned revision of the node, `feat` when absent.
+The title follows the header rules of the [worker commits](./worker.md).
+
 For a `pull_request` action with the landing `kanthord`, `intake.action.perform`
 merges the pull request after it creates the pull request or pushes the snapshot
 to a reused pull request. The merge sends the tested commit as the head guard.

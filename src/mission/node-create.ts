@@ -5,6 +5,7 @@ import { canonicalJSON } from "../kernel/json.ts";
 import { createIdentity } from "../kernel/identity.ts";
 import type { Transaction } from "../kernel/store.ts";
 import {
+  commitTypeField,
   CONTENT_FIELDS,
   ContentField,
   TASKS_FIELD,
@@ -88,10 +89,12 @@ export function resolveContent(
     intent,
     body.content.bindings,
   );
+  const { commit_type: commitType, ...content } = body.content;
   return {
-    ...body.content,
+    ...content,
     intent,
     tags: (body.content.tags ?? []) as Content["tags"],
+    ...commitTypeField(commitType),
     bindings: resolved.map((binding) => binding.binding_id),
   };
 }

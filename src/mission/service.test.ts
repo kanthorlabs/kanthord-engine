@@ -4,6 +4,7 @@ import pino from "pino";
 import { background } from "../kernel/context.ts";
 import { testHumanIdentity } from "../kernel/test-identity.ts";
 import { OperationError } from "../kernel/errors.ts";
+import { CommitType } from "../kernel/commit-message.ts";
 import { HttpMethod, HttpStatus } from "../kernel/http.ts";
 import { digest } from "../kernel/json.ts";
 import {
@@ -990,6 +991,29 @@ test("node create mints a task identity for each task and writes it in revision 
   assert.deepEqual(result.added_edges, []);
   for (const task of revision.tasks) assert.equal(f.node(task.id), null);
   assert.deepEqual(f.read(revision.node_id).tasks, revision.tasks);
+});
+
+test("node create keeps commit_type only when set and refuses an unknown value", (t) => {
+  const f = nodeFixture(t);
+  const absent = f.examine();
+  assert.equal("commit_type" in f.read(absent).content, false);
+  const implement = f.body(Intent.Implement);
+  const fixed = f.create({
+    ...implement,
+    content: { ...implement.content, commit_type: "fix" },
+  }).revisions[FIRST_ELEMENT_INDEX]!.node_id;
+  assert.equal(f.read(fixed).content.commit_type, CommitType.Fix);
+  const refused = f.body();
+  f.refuses(
+    {
+      ...refused,
+      filename: OTHER_FILENAME,
+      content: { ...refused.content, commit_type: "build" },
+    },
+    MissionErrorCode.ContentInvalid,
+    { field: "commit_type" },
+    HttpStatus.BadRequest,
+  );
 });
 
 test("node create refuses a named task, a task of an examine node and a used task filename", (t) => {
@@ -2495,6 +2519,7 @@ test("node.update of an examine node lists only changed content fields in canoni
     content: {
       ...body.content,
       tags: ["platform.macos"],
+      commit_type: "docs",
       criterion: "new criterion",
       verifications: ["new verification"],
       requirement: "new requirement",

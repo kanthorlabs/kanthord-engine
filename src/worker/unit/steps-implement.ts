@@ -22,6 +22,7 @@ import {
   isTurnViolation,
   removeRootEntries,
   restoreCheckout,
+  unitCommitMessage,
   ViolationEnd,
 } from "./turn-gate.ts";
 import {
@@ -32,11 +33,7 @@ import {
   type ExecutionEnd,
 } from "./execution-run.ts";
 import { renderWorkPrompt } from "../../agent/prompt-composer.ts";
-import {
-  headCommit,
-  taskCommitMessage,
-  checkpointCommitMessage,
-} from "./local-git.ts";
+import { headCommit } from "./local-git.ts";
 import {
   infrastructureStop,
   runVerificationsWithOutput,
@@ -160,9 +157,9 @@ function checkpointMessage(
   state: StepsState,
   task: TaskContent | null,
 ): string {
-  return checkpointCommitMessage(
-    task?.id ?? state.input.claim.node_id,
-    state.input.claim.attempt,
+  return unitCommitMessage(
+    state,
+    task ?? nodeUnitOf(state.input.claim.node_id, state.revision),
   );
 }
 
@@ -345,10 +342,7 @@ async function runNodeInstruction(
   const budget = state.agent.budget;
   const ended: TaskResult = { kind: TaskResultKind.BudgetEnd };
   const commands = state.revision.content.verifications;
-  const agent = gatedAgent(
-    state,
-    taskCommitMessage(unit.id, state.input.claim.attempt),
-  );
+  const agent = gatedAgent(state, unitCommitMessage(state, unit));
   let ruled = node.judged.length > NO_CHECKOUTS;
   let instruction = node.text;
   let revised = false;
@@ -419,10 +413,7 @@ export async function runTask(
   let instruction = initialInstruction;
   const ended: TaskResult = { kind: TaskResultKind.BudgetEnd };
   state.run.log("task started", { task_id: task.id });
-  const agent = gatedAgent(
-    state,
-    taskCommitMessage(task.id, state.input.claim.attempt),
-  );
+  const agent = gatedAgent(state, unitCommitMessage(state, task));
   while (!budget.exhausted()) {
     await state.run.checkClaim();
     if (instruction === null) await agent.prompt(taskWork(state, task));

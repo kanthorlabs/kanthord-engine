@@ -2,6 +2,7 @@ import { revisionSchema, type Revision } from "./contract.ts";
 import type { RevisionRow } from "./store.ts";
 import type { Transaction } from "../kernel/store.ts";
 import { readAttemptPins } from "./record-store.ts";
+import { commitTypeField } from "./content.ts";
 
 export function revisionFromRow(tx: Transaction, row: RevisionRow): Revision {
   return revisionSchema.parse({
@@ -19,6 +20,7 @@ export function revisionFromRow(tx: Transaction, row: RevisionRow): Revision {
       bindings: JSON.parse(row.bindings),
       intent: row.intent,
       tags: JSON.parse(row.tags),
+      ...commitTypeField(row.commit_type),
     },
     tasks: JSON.parse(row.tasks),
     change: JSON.parse(row.change),

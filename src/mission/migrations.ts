@@ -30,6 +30,7 @@ const createMissionTables: Migration = (database) => {
       bindings TEXT NOT NULL,
       intent TEXT NOT NULL,
       tags TEXT NOT NULL,
+      commit_type TEXT,
       tasks TEXT NOT NULL,
       change TEXT NOT NULL,
       reason TEXT NOT NULL,

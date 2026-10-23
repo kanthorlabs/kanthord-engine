@@ -144,6 +144,40 @@ test("tags holds unique tags and reads [] when absent", () => {
     );
 });
 
+test("commit_type takes one value of the closed set and is optional", () => {
+  validateNodeContent(base(), DEFAULT_MAX);
+  for (const commit_type of [
+    "feat",
+    "fix",
+    "docs",
+    "style",
+    "refactor",
+    "test",
+    "chore",
+  ])
+    validateNodeContent({ ...base(), commit_type }, DEFAULT_MAX);
+  for (const commit_type of ["build", "Feat", "", null, ["feat"], 1])
+    contentError(
+      () => validateNodeContent({ ...base(), commit_type }, DEFAULT_MAX),
+      "commit_type",
+    );
+});
+
+test("a name that gives no commit subject answers mission.node.content_invalid", () => {
+  for (const name of [".", "..", ". ."]) {
+    contentError(
+      () => validateNodeContent({ ...base(), name }, DEFAULT_MAX),
+      "name",
+    );
+    const { intent, ...task } = base();
+    assert.equal(intent, Intent.Implement);
+    contentError(
+      () => validatePlanContent({ ...task, name }, DEFAULT_MAX),
+      "name",
+    );
+  }
+});
+
 test("a task body holds the five plan content fields alone", () => {
   const { intent, ...task } = base();
   assert.equal(intent, Intent.Implement);

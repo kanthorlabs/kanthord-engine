@@ -116,6 +116,7 @@ function actionFacts(
       resource_identity: RESOURCE_IDENTITY,
       base_branch: "main",
     },
+    node: { name: "Ship accounts", commit_type: "feat" },
     snapshot_commit: SNAPSHOT,
     reused_address: null,
     merge_address: null,

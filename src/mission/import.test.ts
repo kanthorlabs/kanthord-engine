@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
 import { OperationError } from "../kernel/errors.ts";
+import { CommitType } from "../kernel/commit-message.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import { createIdentity } from "../kernel/identity.ts";
 import { testHumanIdentity } from "../kernel/test-identity.ts";
@@ -577,6 +578,18 @@ for (const [label, line, field, value] of [
   ["an unknown intent", "intent: build", "intent", "build"],
   ["a nonlist tags field", "intent: examine\ntags: x", "tags", "x"],
   ["a nontext tag", "intent: examine\ntags: [7]", "tags", [7]],
+  [
+    "an unknown commit type",
+    "intent: examine\ncommit_type: build",
+    "commit_type",
+    "build",
+  ],
+  [
+    "a nontext commit type",
+    "intent: examine\ncommit_type: [feat]",
+    "commit_type",
+    ["feat"],
+  ],
 ] as const) {
   test(`markdown and JSON imports answer ${label} with mission.node.content_invalid`, () => {
     const file = markdown.replace("intent: examine", line);
@@ -607,6 +620,32 @@ for (const [label, line, field, value] of [
     }
   });
 }
+
+test("a node file keeps commit_type only when the file sets it", () => {
+  const normalizeFile = (content: string) =>
+    normalizeImportSnapshot(
+      importSnapshotSchema.parse({
+        format: ImportFormat.Markdown,
+        mission_id: MISSION_ID,
+        mission_version: VERSION,
+        reason: REASON,
+        files: [{ filename: "a.md", content }],
+      }),
+      MISSION_ID,
+      TEXT_MAX_BYTES,
+    );
+  const absent = normalizeFile(markdown);
+  assert.deepEqual(absent.violations, []);
+  assert.equal("commit_type" in absent.entries[0]!, false);
+  const set = normalizeFile(
+    markdown.replace("intent: examine", "intent: examine\ncommit_type: fix"),
+  );
+  assert.deepEqual(set.violations, []);
+  assert.equal(
+    (set.entries[0] as { commit_type?: string }).commit_type,
+    CommitType.Fix,
+  );
+});
 
 test("oversized reason is an operation failure, not a violation", () => {
   assert.throws(
@@ -873,6 +912,7 @@ for (const [label, filename, patch, owners] of [
     ["a.md"],
   ],
   ["tags", "a.md", { tags: ["platform.macos"] }, ["a.md"]],
+  ["commit_type", "a.md", { commit_type: "fix" }, ["a.md"]],
   ["depends_on", "b.md", { depends_on: ["a.md"] }, ["b.md"]],
   ["task content", "t.md", { name: "Changed task" }, ["o.md"]],
   ["task node", "t.md", { node: "p.md" }, ["o.md", "p.md"]],

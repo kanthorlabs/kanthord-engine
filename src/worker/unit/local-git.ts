@@ -10,7 +10,6 @@ import {
 import { childEnvironment } from "./tool-table.ts";
 const EXPIRED = 0;
 const CLEAN_STATUS = "";
-const FIRST_ATTEMPT = 1;
 const NO_CONFLICTS = 0;
 const EXIT_SUCCESS = 0;
 const EXIT_NO_MATCH = 1;
@@ -38,21 +37,6 @@ const failNonzeroExit: NonNullable<SimpleGitOptions["errors"]> = (
   result.exitCode === EXIT_SUCCESS
     ? error
     : (error ?? new Error(`git exited with ${result.exitCode}`));
-
-export function taskCommitMessage(taskId: string, attempt: number): string {
-  assert.ok(taskId);
-  assert.ok(Number.isSafeInteger(attempt) && attempt >= FIRST_ATTEMPT);
-  return `kanthord: task ${taskId} attempt ${attempt}`;
-}
-
-export function checkpointCommitMessage(
-  taskId: string,
-  attempt: number,
-): string {
-  assert.ok(taskId);
-  assert.ok(Number.isSafeInteger(attempt) && attempt >= FIRST_ATTEMPT);
-  return `kanthord: checkpoint of task ${taskId} attempt ${attempt}`;
-}
 
 export async function commitWork(
   env: NodeJS.ProcessEnv,
@@ -579,15 +563,17 @@ export async function mergeRef(
   env: NodeJS.ProcessEnv,
   directory: string,
   ref: string,
+  message: string,
   context: Context,
   deadlineMs: number,
 ): Promise<string[]> {
+  assert.ok(message);
   const end = performance.now() + deadlineMs;
   let failure: unknown = null;
   await run(
     env,
     directory,
-    ["merge", "--no-edit", "--no-ff", ref],
+    ["merge", "--no-edit", "--no-ff", "--message", message, ref],
     context,
     end - performance.now(),
   ).catch((error: unknown) => {

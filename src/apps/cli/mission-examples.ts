@@ -10,7 +10,7 @@ const PLAN_CONTENT = {
 const PLAN_FILENAME = "add-login.md";
 const NODE_WRITE = {
   filename: PLAN_FILENAME,
-  content: { ...PLAN_CONTENT, intent: "implement" },
+  content: { ...PLAN_CONTENT, intent: "implement", commit_type: "feat" },
   tasks: [],
   reason: "Describe the reason of the change.",
   expected_mission_version: MISSION_VERSION,
@@ -30,7 +30,14 @@ const IMPORT_SNAPSHOT = {
   format: "json",
   mission_version: MISSION_VERSION,
   reason: "Describe the reason of the import.",
-  entries: [{ filename: PLAN_FILENAME, ...PLAN_CONTENT, intent: "implement" }],
+  entries: [
+    {
+      filename: PLAN_FILENAME,
+      ...PLAN_CONTENT,
+      intent: "implement",
+      commit_type: "feat",
+    },
+  ],
 };
 const SHA256 =
   "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";

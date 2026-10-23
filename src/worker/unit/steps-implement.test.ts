@@ -71,7 +71,7 @@ test("task work commits revisions, cleans verification writes and records the pa
   const COMMITS = 3;
   assert.equal(log.total, COMMITS);
   assert.equal(log.all[0]!.message, log.all[1]!.message);
-  assert.ok(log.all[0]!.message.includes(current.id));
+  assert.equal(log.all[0]!.body.split("\n")[0], current.id);
   assert.equal(existsSync(join(h.root, "transient")), false);
   h.input.workspaces.release(
     h.input.workspaces.nodeKey(h.input.claim.node_id),
@@ -269,7 +269,7 @@ test("an implement node with no task commits its change with the node identity i
   });
   assert.deepEqual(order, ["evidence", "release:false"]);
   const log = await simpleGit(h.root).log();
-  assert.ok(log.latest!.message.includes(nodeId));
+  assert.equal(log.latest!.body.split("\n")[0], nodeId);
   assert.ok(existsSync(join(h.root, "node-file")));
 });
 
@@ -303,7 +303,7 @@ test("two bindings commit only the checkout with a change", async (t) => {
   assert.notEqual(api.head, apiBefore);
   assert.equal(await simpleGit(api.directory).revparse(["HEAD"]), api.head);
   assert.ok(
-    (await simpleGit(api.directory).log()).latest!.message.includes(current.id),
+    (await simpleGit(api.directory).log()).latest!.body.includes(current.id),
   );
   assert.equal(web.head, webBefore);
   assert.equal(await simpleGit(web.directory).revparse(["HEAD"]), webBefore);

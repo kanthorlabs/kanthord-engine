@@ -481,7 +481,7 @@ test("E06 action performer CLI journey", { timeout: TIMEOUT }, async (t) => {
         body: {
           head: `kanthord/${h.G}`,
           base: "main",
-          title: `kanthord ${h.G}`,
+          title: "feat: ship accounts",
         },
         token: GITHUB_KEY,
         if_none_match: null,

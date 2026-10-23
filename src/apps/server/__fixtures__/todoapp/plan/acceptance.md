@@ -1,5 +1,6 @@
 ---
 intent: implement
+commit_type: feat
 depends_on:
   - todos.md
   - operations.md

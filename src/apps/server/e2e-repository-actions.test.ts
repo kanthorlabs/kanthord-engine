@@ -59,7 +59,12 @@ const PULL_REQUEST_OPERATION = "github.pull_request";
 const MERGE_PUSH_OPERATION = "git.merge_push";
 const MAIN_REF = "refs/heads/main";
 const MERGED_COMMIT = "e".repeat(40);
+const COMMIT_RULE =
+  /^(feat|fix|docs|style|refactor|test|chore)(\([a-z0-9-]+\))?: \S.*$/;
+const HEADER_MAX_LENGTH = 100;
+const PULL_REQUEST_TITLE = "chore: ship accounts";
 const CONTENT = {
+  commit_type: "chore",
   name: "Ship accounts",
   requirement: "Ship accounts",
   criterion: "Accounts ship",
@@ -235,10 +240,13 @@ test("E03 repository actions CLI journey", { timeout: TIMEOUT }, async (t) => {
     assert.equal(posts.length, PULL_REQUEST_CREATES);
     const [create] = posts;
     assert.equal(create!.path, `/repos/owner/${GATED}/pulls`);
+    const { title } = create!.body as { title: string };
+    assert.match(title, COMMIT_RULE);
+    assert.ok(title.length <= HEADER_MAX_LENGTH);
     assert.deepEqual(create!.body, {
       head: `kanthord/${h.P}`,
       base: "main",
-      title: `kanthord ${h.P}`,
+      title: PULL_REQUEST_TITLE,
     });
     assert.equal(create!.token, SECRET);
   });

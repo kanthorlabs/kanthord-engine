@@ -2,6 +2,7 @@ import { OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import type { Transaction } from "../kernel/store.ts";
 import { isObject, isString } from "../kernel/values.ts";
+import { isCommitSubject } from "../kernel/commit-message.ts";
 import {
   MissionBindingKind,
   MissionErrorCode,
@@ -9,6 +10,8 @@ import {
   planFileNameSchema,
   tagsSchema,
   intentSchema,
+  commitTypeSchema,
+  type Content,
 } from "./contract.ts";
 
 export const ContentField = {
@@ -20,6 +23,7 @@ export const ContentField = {
   Bindings: "bindings",
   Intent: "intent",
   Tags: "tags",
+  CommitType: "commit_type",
 } as const;
 export const CONTENT_FIELDS = Object.values(ContentField);
 export const TASK_CONTENT_FIELDS = [
@@ -124,7 +128,21 @@ export function validateNodeContent(
   const tags = input[Field.Tags];
   if (tags !== undefined && !tagsSchema.safeParse(tags).success)
     invalidContent(Field.Tags);
+  const commitType = input[Field.CommitType];
+  if (
+    commitType !== undefined &&
+    !commitTypeSchema.safeParse(commitType).success
+  )
+    invalidContent(Field.CommitType);
   return intent as Intent;
+}
+
+export function commitTypeField(
+  commitType: unknown,
+): Pick<Content, "commit_type"> {
+  return commitType === undefined || commitType === null
+    ? {}
+    : { commit_type: commitType as Content["commit_type"] };
 }
 
 export function validatePlanContent(
@@ -136,6 +154,7 @@ export function validatePlanContent(
     const value = nonblankText(field, input[field]);
     validateText(field, value, textMaxBytes);
   }
+  if (!isCommitSubject(input[Field.Name] as string)) invalidContent(Field.Name);
   const verifications = input[Field.Verifications];
   if (
     verifications === undefined ||

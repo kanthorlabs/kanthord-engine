@@ -3,13 +3,7 @@ import type { Context } from "../../kernel/context.ts";
 import { PromptTemplate, type PromptTemplates } from "../../agent/contract.ts";
 import { renderWorkPrompt } from "../../agent/prompt-composer.ts";
 import { renderTemplate } from "../../agent/prompt-templates.ts";
-import {
-  commitOf,
-  headCommit,
-  isAncestor,
-  mergeRef,
-  taskCommitMessage,
-} from "./local-git.ts";
+import { commitOf, headCommit, isAncestor, mergeRef } from "./local-git.ts";
 import {
   repositoryOf,
   implementRepositoriesOf,
@@ -17,7 +11,7 @@ import {
 } from "./steps-implement.ts";
 import { sshAccessOf, type WorkspaceCheckout } from "./workspace.ts";
 import { GitStep, withinGit } from "./method-telemetry.ts";
-import { gatedAgent } from "./turn-gate.ts";
+import { gatedAgent, mergeCommitMessage } from "./turn-gate.ts";
 
 const NO_FILES = 0;
 
@@ -95,15 +89,16 @@ async function mergeUnder(
   if (await isAncestor(env, directory, ref, context, remaining()))
     return RefreshResult.Current;
   const commit = await commitOf(env, directory, ref, context, remaining());
+  const message = mergeCommitMessage(state, base);
   const conflicts = await withinGit(state.run.spans, GitStep.MergeBase, () =>
-    mergeRef(env, directory, ref, context, remaining()),
+    mergeRef(env, directory, ref, message, context, remaining()),
   );
   if (conflicts.length > NO_FILES) {
-    await gatedAgent(
-      state,
-      taskCommitMessage(state.input.claim.node_id, state.input.claim.attempt),
-      { directory, commit, files: conflicts },
-    ).instruct(
+    await gatedAgent(state, message, {
+      directory,
+      commit,
+      files: conflicts,
+    }).instruct(
       nodeWork(state),
       conflictInstruction(
         state.input.setup.templates,
