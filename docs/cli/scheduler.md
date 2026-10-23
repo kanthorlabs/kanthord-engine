@@ -477,6 +477,12 @@ No query fields are accepted. The required file supplies the following fields.
 - A steps execution whose conflict turn leaves a conflict marker aborts the
   merge and stops with `operation_failed` and the code
   `worker.merge.markers_left`.
+- A worker whose verification command fails because of the infrastructure
+  twice in a row stops with `operation_failed` and the code
+  `worker.verification.infrastructure_failed`. Such a failure is a signal, an
+  exit code from 129 to 192 with no command timeout, or a command that does
+  not start. The stop detail holds the exit code, the signal, `timed_out` and
+  the command.
 - Mission checks the release predicate of a release with no `stop` in the
   release transaction, before the terminal write, under [the release admission](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/mission-service.impl.md#the-release-admission).
   A release that fails it answers 409 `mission.release.obligation_unmet` with
