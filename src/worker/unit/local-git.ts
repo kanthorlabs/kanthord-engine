@@ -16,6 +16,8 @@ const EXIT_SUCCESS = 0;
 const EXIT_NO_MATCH = 1;
 const NO_EXIT = -1;
 const NUL = "\0";
+const NO_PATHS = 0;
+const PATH_BATCH_BYTES = 262144;
 const MODIFIED = "M";
 const REGULAR_MODES = new Set(["100644", "100755"]);
 export const MERGE_HEAD = "MERGE_HEAD";
@@ -77,6 +79,12 @@ export async function commitWork(
   return headCommit(env, directory, context, remaining());
 }
 
+interface IndexEntry {
+  mode: string;
+  blob: string;
+  path: string;
+}
+
 async function stageChanges(
   env: NodeJS.ProcessEnv,
   directory: string,
@@ -90,11 +98,13 @@ async function stageChanges(
     context,
     remaining,
   );
-  if (converted.length > NO_CONFLICTS)
+  for (const batch of pathBatches(
+    converted.map(({ mode, blob, path }) => `${mode},${blob},${path}`),
+  ))
     await run(
       env,
       directory,
-      ["reset", "--quiet", "HEAD", "--", ...converted],
+      ["update-index", ...batch.flatMap((entry) => ["--cacheinfo", entry])],
       context,
       remaining(),
     );
@@ -106,7 +116,7 @@ async function conversionOnlyPaths(
   directory: string,
   context: Context,
   remaining: () => number,
-): Promise<string[]> {
+): Promise<IndexEntry[]> {
   const fields = (
     await run(
       env,
@@ -116,7 +126,7 @@ async function conversionOnlyPaths(
       remaining(),
     )
   ).split(NUL);
-  const modified: { path: string; blob: string }[] = [];
+  const modified: IndexEntry[] = [];
   for (let index = 0; index + 1 < fields.length; index += 2) {
     const [oldMode, newMode, blob, , status] =
       fields[index]!.slice(1).split(" ");
@@ -126,29 +136,39 @@ async function conversionOnlyPaths(
       oldMode === newMode &&
       REGULAR_MODES.has(oldMode!)
     )
-      modified.push({ path: fields[index + 1]!, blob });
+      modified.push({ mode: oldMode!, blob, path: fields[index + 1]! });
   }
-  if (modified.length === NO_CONFLICTS) return [];
-  const hashes = (
-    await run(
+  const hashes: string[] = [];
+  for (const batch of pathBatches(modified.map(({ path }) => path))) {
+    const output = await run(
       env,
       directory,
-      [
-        "hash-object",
-        "--no-filters",
-        "--",
-        ...modified.map(({ path }) => path),
-      ],
+      ["hash-object", "--no-filters", "--", ...batch],
       context,
       remaining(),
-    )
-  )
-    .trim()
-    .split("\n");
+    );
+    hashes.push(...output.trim().split("\n"));
+  }
   assert.equal(hashes.length, modified.length);
-  return modified
-    .filter(({ blob }, index) => hashes[index] === blob)
-    .map(({ path }) => path);
+  return modified.filter(({ blob }, index) => hashes[index] === blob);
+}
+
+function pathBatches(paths: readonly string[]): string[][] {
+  const batches: string[][] = [];
+  let batch: string[] = [];
+  let bytes = 0;
+  for (const path of paths) {
+    const size = Buffer.byteLength(path) + NUL.length;
+    if (batch.length > NO_PATHS && bytes + size > PATH_BATCH_BYTES) {
+      batches.push(batch);
+      batch = [];
+      bytes = 0;
+    }
+    batch.push(path);
+    bytes += size;
+  }
+  if (batch.length > NO_PATHS) batches.push(batch);
+  return batches;
 }
 
 async function indexMatchesHead(

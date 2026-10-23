@@ -31,6 +31,9 @@ const DEFAULT_IDENTITY = "kanthord <kanthord@localhost>";
 const CRLF_CONTENT = "a\r\nb\r\n";
 const HOOK_MARKER = "hook-ran";
 const EXECUTABLE_MODE = 0o755;
+const MANY_FILES = 20000;
+const LONG_NAME = "x".repeat(120);
+const CRLF_LINE = "a\r\n";
 
 function writeRefusingHook(hooks: string, marker: string): void {
   mkdirSync(hooks, { recursive: true });
@@ -342,4 +345,30 @@ test("a git exit that is not zero and writes no error output fails the call", as
     isAncestor(env, directory, initial, background, 10000),
     /git exited with 1/,
   );
+});
+
+test("work commits handle more conversion-only files than one command line holds", async (t) => {
+  const directory = temporary(t);
+  const git = simpleGit(directory);
+  await git.init();
+  await git.addConfig("user.name", "Test");
+  await git.addConfig("user.email", "test@example.invalid");
+  await git.addConfig("core.autocrlf", "false");
+  const names = Array.from(
+    { length: MANY_FILES },
+    (_, index) => `${LONG_NAME}-${index}.txt`,
+  );
+  for (const name of names) writeFileSync(join(directory, name), CRLF_LINE);
+  await git.raw(["add", "--all"]);
+  await git.raw(["commit", "-q", "-m", "initial"]);
+  writeFileSync(join(directory, ".gitattributes"), "*.txt text\n");
+  for (const name of names) writeFileSync(join(directory, name), CRLF_LINE);
+  writeFileSync(join(directory, names[0]!), "changed\n");
+  const head = await commitWork(env, directory, "many", background, 60000);
+  assert.ok(head);
+  const changed = await git.raw(["show", "--name-only", "--format=", "HEAD"]);
+  assert.deepEqual(changed.trim().split("\n").sort(), [
+    ".gitattributes",
+    names[0]!,
+  ]);
 });
