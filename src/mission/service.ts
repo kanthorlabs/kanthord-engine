@@ -36,6 +36,7 @@ import {
   type HumanActor,
   type MissionBindings,
   type MissionCollaborations,
+  type MissionEnvironments,
   type WorkQueue,
   type SchedulerClaims,
   type SchedulerMatch,
@@ -172,6 +173,7 @@ export interface Dependencies {
   config: MissionConfig;
   health?: HealthRegistry;
   bindings: MissionBindings;
+  environments: MissionEnvironments;
   workQueue: WorkQueue;
   schedulerClaims: SchedulerClaims;
   schedulerMatch: SchedulerMatch;
@@ -782,6 +784,7 @@ export class MissionService
               body,
               humanActor(caller),
               this.dependencies.bindings,
+              this.dependencies.environments,
               this.dependencies.config.text_max_bytes,
             ),
           ),
@@ -867,6 +870,7 @@ export class MissionService
               body,
               humanActor(caller),
               this.dependencies.bindings,
+              this.dependencies.environments,
               this.dependencies.config.text_max_bytes,
             ),
           ),
@@ -883,6 +887,7 @@ export class MissionService
               body,
               humanActor(caller),
               this.dependencies.bindings,
+              this.dependencies.environments,
               this.dependencies.workQueue,
               this.dependencies.config.text_max_bytes,
             ),
