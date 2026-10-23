@@ -1,10 +1,14 @@
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
 import { IN_MEMORY_DATABASE, Store } from "../kernel/store.ts";
-import { TRACKING_SERVICE_NAME, type ExecutionTrace } from "./contract.ts";
+import {
+  TRACKING_SERVICE_NAME,
+  type ExecutionTrace,
+  type ServerTrace,
+} from "./contract.ts";
 import { trackingMigrations } from "./migrations.ts";
 import { DAY_MS, retentionCutoff, sweepExpiredTraces } from "./retention.ts";
-import { insertTrace } from "./trace-store.ts";
+import { insertTrace, traceRowOf } from "./trace-store.ts";
 
 const NOW = 1751566593132;
 const RETENTION_DAYS = 30;
@@ -42,14 +46,23 @@ function traceOf(index: number): ExecutionTrace {
   };
 }
 
+function serverTraceOf(index: number, createdAt: number): ServerTrace {
+  return {
+    trace_id: index.toString(16).padStart(32, "0"),
+    root_span_id: index.toString(16).padStart(16, "0"),
+    project_id: "project_01JZ8PZ0A1B2C3D4E5F6G7H8J9",
+    created_at: createdAt,
+  };
+}
+
 function insertTraceWithChildren(
   store: Store,
   index: number,
   createdAt: number,
+  trace: ExecutionTrace | ServerTrace = traceOf(index),
 ): void {
-  const trace = traceOf(index);
   store.transaction((tx) => {
-    insertTrace(tx, trace, createdAt);
+    insertTrace(tx, traceRowOf(trace), createdAt);
     tx.database
       .prepare(
         "INSERT INTO tracking_span VALUES (?, ?, NULL, 'p', 'observed', 'op', NULL, NULL, 'unset', '{}', '[]', '[]', '[]', ?)",
@@ -115,4 +128,21 @@ test("one sweep deletes 45 expired traces in three batches", (t) => {
 
 test("the cutoff lies the retention before now", () => {
   assert.equal(retentionCutoff(NOW, RETENTION_DAYS), CUTOFF_30_DAYS);
+});
+
+test("the sweep deletes an expired server trace with its children by created_at", (t) => {
+  const store = memoryStore(t);
+  insertTraceWithChildren(store, 1, EXPIRED_AT, serverTraceOf(1, EXPIRED_AT));
+  insertTraceWithChildren(store, 2, FRESH_AT, serverTraceOf(2, FRESH_AT));
+  const deleted = sweepExpiredTraces(
+    store,
+    retentionCutoff(NOW, RETENTION_DAYS),
+  );
+  assert.equal(deleted, ONE_ROW);
+  assert.equal(countOf(store, "tracking_trace"), ONE_ROW);
+  for (const table of TABLES) assert.equal(countOf(store, table), ONE_ROW);
+  const kept = store.database
+    .prepare("SELECT trace_id FROM tracking_trace")
+    .get() as { trace_id: string };
+  assert.equal(kept.trace_id, serverTraceOf(2, FRESH_AT).trace_id);
 });
