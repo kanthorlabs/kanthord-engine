@@ -261,6 +261,9 @@ async function checkpointOnStop(state: StepsState): Promise<void> {
     await pushNodeBranches(state, cleanup, remaining);
   } catch (error) {
     if (!(error instanceof Error)) throw error;
+    state.run.log("checkpoint failed", {
+      reason: await state.run.reasonOf(error),
+    });
   } finally {
     cleanup.cancel();
   }
@@ -299,7 +302,7 @@ export async function runStepsImplement(
       ran.completedTasks,
     );
   } catch (error) {
-    const stopped = state.run.stopOf(error);
+    const stopped = await state.run.stopOf(error);
     if (stopped.reason !== EndReason.Revoked) await checkpointOnStop(state);
     throw stopped;
   } finally {

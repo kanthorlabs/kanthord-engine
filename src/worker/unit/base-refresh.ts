@@ -22,6 +22,7 @@ import { GitStep, withinGit } from "./method-telemetry.ts";
 
 const NO_FILES = 0;
 const NO_MERGES = 0;
+export const MERGE_MARKERS_LEFT = "worker.merge.markers_left";
 
 export const RefreshResult = {
   Current: "current",
@@ -132,7 +133,7 @@ async function mergeAtClaim(
         context,
         budget.remainingMs(),
       );
-      state.run.stop(EndReason.OperationFailed);
+      state.run.stop(EndReason.OperationFailed, MERGE_MARKERS_LEFT);
     }
     await concludeMerge(
       state.input.env,

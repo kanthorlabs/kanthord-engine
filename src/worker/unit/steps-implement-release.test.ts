@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  appendFileSync,
+  existsSync,
+  readFileSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import { simpleGit } from "simple-git";
 import { fauxAssistantMessage, fauxToolCall } from "./test-support.ts";
@@ -12,6 +17,8 @@ import { runTask, runStepsImplement } from "./steps-implement.ts";
 import { refreshBeforeRelease } from "./base-refresh.ts";
 import { headSetOf, recordJudged } from "./judged-tasks.ts";
 import { Diagnostic } from "../../kernel/errors.ts";
+import { background } from "../../kernel/context.ts";
+import { commitWork } from "./local-git.ts";
 import {
   RecordKind,
   SpanStatus,
@@ -25,6 +32,7 @@ import {
   implementFixture as fixture,
   NO_PROVIDER_CALLS,
   recordReleases,
+  STEPS_KEY,
   task,
   transport,
 } from "./test-support.ts";
@@ -232,6 +240,58 @@ test("a failed push still releases with the stop and a failed release ends with 
     ),
     { kind: "ended", ...stop },
   );
+});
+
+const COMMIT_REFUSAL = "hook refused";
+const COMMIT_DEADLINE_MS = 10000;
+const CHECKPOINT_FAILED = "checkpoint failed";
+const REDACTED_REFUSAL = new RegExp(`${COMMIT_REFUSAL} \\[redacted\\]`);
+const SECRET_TEXT = new RegExp(STEPS_KEY);
+
+function refuseCommits(directory: string): void {
+  appendFileSync(
+    join(directory, ".git", "config"),
+    `[commit]\n\tgpgSign = true\n[gpg]\n\tformat = ssh\n[user]\n\tsigningKey = ${COMMIT_REFUSAL} ${STEPS_KEY}\n`,
+  );
+}
+
+const committingRunner: TaskRunner = async (state) => {
+  const directory = state.checkouts[0]!.directory;
+  writeFileSync(join(directory, PARTIAL_WORK), PARTIAL_WORK);
+  await commitWork(
+    state.input.env,
+    directory,
+    PARTIAL_WORK,
+    background,
+    COMMIT_DEADLINE_MS,
+  );
+  assert.fail("The commit must fail.");
+};
+
+test("a failed commit releases the stop with its redacted cause and logs the dropped checkpoint error", async (t) => {
+  const h = await fixture(t, [task("refused", "false")], []);
+  refuseCommits(h.checkouts[0]!.directory);
+  const bodies = recordReleases(h);
+  const events = t.mock.method(h.run, "log");
+  const end = await executionBoundary(h.run, () =>
+    runStepsImplement(h, committingRunner),
+  );
+  const [body, ...others] = bodies as { stop: { detail?: string } }[];
+  assert.deepEqual(others, []);
+  const stop = body!.stop;
+  const { detail, ...cause } = stop;
+  assert.deepEqual(cause, { reason: EndReason.OperationFailed, code: null });
+  assert.match(String(detail), REDACTED_REFUSAL);
+  assert.doesNotMatch(String(detail), SECRET_TEXT);
+  assert.deepEqual(end, { kind: "released", furtherWork: true, stop });
+  const dropped = events.mock.calls
+    .filter((call) => call.arguments[0] === CHECKPOINT_FAILED)
+    .map((call) => String(call.arguments[1].reason));
+  assert.deepEqual(
+    dropped.map((reason) => REDACTED_REFUSAL.test(reason)),
+    [true],
+  );
+  assert.doesNotMatch(dropped.join(), SECRET_TEXT);
 });
 
 test("a revoked stop writes no checkpoint, pushes nothing and releases nothing", async (t) => {

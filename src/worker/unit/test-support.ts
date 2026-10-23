@@ -250,6 +250,7 @@ export async function implementFixture(
     } as unknown as MethodClients,
     credentials: { release: async () => {} },
     context: background,
+    secrets: async () => [STEPS_KEY],
   });
   t.after(() => run.dispose());
   const workspace = await prepareStepsWorkspace(input, run);
