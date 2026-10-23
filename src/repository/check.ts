@@ -108,11 +108,14 @@ export function parseSshVersion(output: string): [number, number] {
   return [major, minor];
 }
 
-export function requireTool(cmd: string): void {
+export function requireTool(
+  cmd: string,
+  timeoutMs: number = PRESENCE_TIMEOUT_MS,
+): void {
   const result = spawnSync(cmd, [USAGE_OPTION], {
     env: process.env.PATH === undefined ? {} : { PATH: process.env.PATH },
     stdio: "ignore",
-    timeout: PRESENCE_TIMEOUT_MS,
+    timeout: timeoutMs,
   });
   if (!result.error) return;
   if ((result.error as NodeJS.ErrnoException).code === ENOENT_CODE)
