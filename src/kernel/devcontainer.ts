@@ -29,6 +29,10 @@ const SINGLE_QUOTE = /'/g;
 const QUOTED_SINGLE_QUOTE = "'\\''";
 const BUILD_KEY = "build";
 const FEATURES_KEY = "features";
+const CUSTOMIZATIONS_KEY = "customizations";
+const KANTHORD_KEY = "kanthord";
+const CHECKS_MAX = 32;
+const NON_BLANK = /\S/;
 const KEY_SEPARATOR = ".";
 const PARENT_DIRECTORY = "..";
 const LOCAL_FEATURE = /^\.{1,2}\//;
@@ -46,11 +50,11 @@ const ALLOWED_KEYS = new Set([
   "postCreateCommand",
 ]);
 const BUILD_ALLOWED_KEYS = new Set(["dockerfile", "context", "args", "target"]);
+const KANTHORD_ALLOWED_KEYS = new Set(["checks"]);
 const VARIABLE_KEYS = ["containerEnv", "remoteEnv"] as const;
 const DROPPED_KEYS = new Set([
   "$schema",
   "name",
-  "customizations",
   "forwardPorts",
   "portsAttributes",
   "otherPortsAttributes",
@@ -91,6 +95,8 @@ export const lifecycleCommandSchema = z.union([
 ]);
 export type LifecycleCommand = z.infer<typeof lifecycleCommandSchema>;
 
+const nonblank = z.string().regex(NON_BLANK);
+
 export const environmentSchema = z.looseObject({
   image: z.string().min(1).optional(),
   build: z
@@ -105,6 +111,13 @@ export const environmentSchema = z.looseObject({
   onCreateCommand: lifecycleCommandSchema.optional(),
   updateContentCommand: lifecycleCommandSchema.optional(),
   postCreateCommand: lifecycleCommandSchema.optional(),
+  customizations: z
+    .looseObject({
+      kanthord: z
+        .looseObject({ checks: z.array(nonblank).max(CHECKS_MAX).optional() })
+        .optional(),
+    })
+    .optional(),
 });
 export type Environment = z.infer<typeof environmentSchema>;
 
@@ -155,6 +168,25 @@ export function jsoncText(text: string): string | null {
   return output;
 }
 
+function withoutOtherTools(customizations: unknown): unknown {
+  if (!isObject(customizations) || Array.isArray(customizations))
+    return customizations;
+  const kanthord = (customizations as EnvironmentObject)[KANTHORD_KEY];
+  return kanthord === undefined ? undefined : { [KANTHORD_KEY]: kanthord };
+}
+
+function withoutInertKeys(document: EnvironmentObject): EnvironmentObject {
+  const kept = Object.fromEntries(
+    Object.entries(document).filter(([key]) => !DROPPED_KEYS.has(key)),
+  );
+  if (!(CUSTOMIZATIONS_KEY in kept)) return kept;
+  const { [CUSTOMIZATIONS_KEY]: customizations, ...rest } = kept;
+  const stripped = withoutOtherTools(customizations);
+  return stripped === undefined
+    ? rest
+    : { ...rest, [CUSTOMIZATIONS_KEY]: stripped };
+}
+
 export function parseEnvironmentText(text: string): ParsedEnvironment {
   const json = jsoncText(text);
   if (json === null)
@@ -170,7 +202,9 @@ export function parseEnvironmentText(text: string): ParsedEnvironment {
   }
   if (!isObject(value) || Array.isArray(value))
     return { document: null, error: "the environment is not a JSON object" };
-  const parsed = environmentSchema.safeParse(value);
+  const parsed = environmentSchema.safeParse(
+    withoutInertKeys(value as EnvironmentObject),
+  );
   if (!parsed.success)
     return {
       document: null,
@@ -202,6 +236,10 @@ export function setupScriptsOf(document: Environment): string[] {
     ...lifecycleScripts(document.updateContentCommand),
     ...lifecycleScripts(document.postCreateCommand),
   ];
+}
+
+export function checksOf(document: Environment): string[] {
+  return document.customizations?.kanthord?.checks ?? [];
 }
 
 function refusal(
@@ -246,7 +284,11 @@ export function variableRefusal(
 
 function keyRefusal(document: EnvironmentObject): EnvironmentRefusal | null {
   for (const key of Object.keys(document))
-    if (!ALLOWED_KEYS.has(key) && !DROPPED_KEYS.has(key))
+    if (
+      !ALLOWED_KEYS.has(key) &&
+      !DROPPED_KEYS.has(key) &&
+      key !== CUSTOMIZATIONS_KEY
+    )
       return refusal(key, EnvironmentRefusalReason.KeyNotAllowed);
   const build = document[BUILD_KEY];
   if (isObject(build))
@@ -254,6 +296,17 @@ function keyRefusal(document: EnvironmentObject): EnvironmentRefusal | null {
       if (!BUILD_ALLOWED_KEYS.has(key))
         return refusal(
           `${BUILD_KEY}${KEY_SEPARATOR}${key}`,
+          EnvironmentRefusalReason.KeyNotAllowed,
+        );
+  const customizations = document[CUSTOMIZATIONS_KEY];
+  const kanthord = isObject(customizations)
+    ? (customizations as EnvironmentObject)[KANTHORD_KEY]
+    : undefined;
+  if (isObject(kanthord))
+    for (const key of Object.keys(kanthord))
+      if (!KANTHORD_ALLOWED_KEYS.has(key))
+        return refusal(
+          [CUSTOMIZATIONS_KEY, KANTHORD_KEY, key].join(KEY_SEPARATOR),
           EnvironmentRefusalReason.KeyNotAllowed,
         );
   return null;

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   buildDocument,
+  checksOf,
   environmentRefusal,
   environmentSchema,
   jsoncText,
@@ -184,5 +185,108 @@ test("an environment refuses a variable name or value that a Containerfile line 
   assert.equal(
     environmentRefusal({ image: "b", remoteEnv: { DROPPED: null } }),
     null,
+  );
+});
+
+test("an environment text drops every inert key", () => {
+  const parsed = parseEnvironmentText(`{
+    "$schema": "x",
+    "name": "dev",
+    "image": "base",
+    "forwardPorts": [3000],
+    "portsAttributes": {},
+    "otherPortsAttributes": {},
+    "remoteUser": "vscode",
+    "containerUser": "vscode",
+    "updateRemoteUserUID": true,
+    "userEnvProbe": "none",
+    "overrideCommand": false,
+    "shutdownAction": "none",
+    "hostRequirements": {},
+    "waitFor": "postCreateCommand",
+    "postStartCommand": "start",
+    "postAttachCommand": "attach",
+    "workspaceFolder": "/w",
+    "init": true,
+    "appPort": [8080],
+    "secrets": {},
+    "customizations": { "vscode": {} }
+  }`);
+  assert.deepEqual(parsed, { document: { image: "base" }, error: null });
+});
+
+test("an environment text keeps customizations.kanthord and drops the other tools", () => {
+  const parsed = parseEnvironmentText(
+    JSON.stringify({
+      customizations: {
+        vscode: { extensions: ["x"] },
+        kanthord: { checks: ["node --version"] },
+      },
+    }),
+  );
+  assert.deepEqual(parsed, {
+    document: { customizations: { kanthord: { checks: ["node --version"] } } },
+    error: null,
+  });
+});
+
+test("an environment text refuses a check list of a wrong type", () => {
+  const many = Array.from({ length: 33 }, () => "true");
+  for (const checks of [many, [""], ["   "], [1], "node", {}]) {
+    const parsed = parseEnvironmentText(
+      JSON.stringify({ customizations: { kanthord: { checks } } }),
+    );
+    assert.equal(parsed.document, null);
+    assert.match(parsed.error ?? "", /customizations\.kanthord\.checks/);
+  }
+  const edge = Array.from({ length: 32 }, () => "true");
+  assert.equal(
+    parseEnvironmentText(
+      JSON.stringify({ customizations: { kanthord: { checks: edge } } }),
+    ).error,
+    null,
+  );
+});
+
+test("an environment text keeps another key of customizations.kanthord for the refusal", () => {
+  const parsed = parseEnvironmentText(
+    JSON.stringify({ customizations: { kanthord: { other: 1 } } }),
+  );
+  assert.equal(parsed.error, null);
+  assert.deepEqual(environmentRefusal(parsed.document!), {
+    key: "customizations.kanthord.other",
+    reason: "the key is not allowed",
+  });
+});
+
+test("the environment schema accepts the customizations of another tool", () => {
+  const parsed = environmentSchema.safeParse({
+    image: "base",
+    customizations: { vscode: { extensions: ["a"] } },
+  });
+  assert.equal(parsed.success, true);
+  assert.equal(environmentRefusal({ customizations: { vscode: {} } }), null);
+});
+
+test("an environment refuses another key of customizations.kanthord", () => {
+  assert.deepEqual(
+    environmentRefusal({ customizations: { kanthord: { other: 1 } } }),
+    { key: "customizations.kanthord.other", reason: "the key is not allowed" },
+  );
+  assert.equal(
+    environmentRefusal({
+      customizations: { vscode: {}, kanthord: { checks: ["a"] } },
+    }),
+    null,
+  );
+});
+
+test("checksOf answers the checks or an empty list", () => {
+  assert.deepEqual(checksOf({}), []);
+  assert.deepEqual(checksOf({ customizations: {} }), []);
+  assert.deepEqual(checksOf({ customizations: { kanthord: {} } }), []);
+  assert.deepEqual(
+    checksOf({ customizations: { kanthord: { checks: ["a", "b"] } } }),
+    ["a", "b"],
   );
 });
