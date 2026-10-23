@@ -1,6 +1,4 @@
 import assert from "node:assert/strict";
-import { readdirSync, rmSync } from "node:fs";
-import { basename, dirname, join } from "node:path";
 import {
   AssetKind,
   type Revision,
@@ -9,7 +7,6 @@ import {
 import type { ExecutionSetup, RepositoryTransport } from "../contract.ts";
 import type { SshAccess } from "../../repository/contract.ts";
 import {
-  SCRATCH_DIRECTORY,
   sshAccessOf,
   WorkspaceKind,
   workRepositoriesOf,
@@ -19,15 +16,21 @@ import {
 import type { Context } from "../../kernel/context.ts";
 import type { NativeAgent } from "./native-agent.ts";
 import {
+  checkpointGate,
+  gatedAgent,
+  isTurnViolation,
+  removeRootEntries,
+  restoreCheckout,
+} from "./turn-gate.ts";
+import {
   EndReason,
   ExecutionRun,
+  type ExecutionStop,
   type MethodClaim,
   type ExecutionEnd,
 } from "./execution-run.ts";
 import { renderWorkPrompt } from "../../agent/prompt-composer.ts";
 import {
-  commitWork,
-  discardChanges,
   headCommit,
   taskCommitMessage,
   checkpointCommitMessage,
@@ -77,8 +80,6 @@ import {
 export const HEAD_COMMIT_SUBJECT = "Head commit of the node branch";
 const NO_TASKS = 0;
 const NO_CHECKOUTS = 0;
-const SINGLE_CHECKOUT = 1;
-const SCRATCH_ENTRY = basename(SCRATCH_DIRECTORY);
 const NO_PROGRESS_LIMIT = 2;
 
 export function workUnitsOf(
@@ -125,15 +126,10 @@ async function settleImplement(
   const cleanup = state.agent.budget.cleanupContext(state.run.operationContext);
   const remaining = () => state.input.claim.expired_at - Date.now();
   try {
-    if (furtherWork && task !== null) {
+    if (furtherWork) {
       await state.agent.abort();
       await withinGit(state.run.spans, GitStep.Commit, () =>
-        commitCheckouts(
-          state,
-          checkpointCommitMessage(task.id, state.input.claim.attempt),
-          cleanup,
-          remaining,
-        ),
+        checkpointGate(state, checkpointMessage(state, task), cleanup),
       );
     }
     if (
@@ -170,56 +166,14 @@ async function settleImplement(
   }
 }
 
-async function commitCheckouts(
+function checkpointMessage(
   state: StepsState,
-  message: string,
-  context: Context,
-  remaining: () => number,
-): Promise<boolean> {
-  let changed = false;
-  for (const checkout of state.checkouts) {
-    const commit = await commitWork(
-      state.input.env,
-      checkout.directory,
-      message,
-      context,
-      remaining(),
-    );
-    if (commit !== null) changed = true;
-    checkout.head = await headCommit(
-      state.input.env,
-      checkout.directory,
-      context,
-      remaining(),
-    );
-  }
-  return changed;
-}
-
-function gatedAgent(state: StepsState, message: string): NativeAgent {
-  const agent = state.agent;
-  const gate = async () => {
-    if (agent.budget.exhausted()) return;
-    await commitCheckouts(state, message, state.run.operationContext, () =>
-      agent.budget.remainingMs(),
-    );
-  };
-  return {
-    budget: agent.budget,
-    composition: agent.composition,
-    async prompt(work) {
-      await agent.prompt(work);
-      await gate();
-    },
-    async instruct(work, text) {
-      await agent.instruct(work, text);
-      await gate();
-    },
-    lastText: () => agent.lastText(),
-    abort: () => agent.abort(),
-    closeTrace: (status) => agent.closeTrace(status),
-    dispose: () => agent.dispose(),
-  };
+  task: TaskContent | null,
+): string {
+  return checkpointCommitMessage(
+    task?.id ?? state.input.claim.node_id,
+    state.input.claim.attempt,
+  );
 }
 
 async function pushNodeBranches(
@@ -248,17 +202,19 @@ export function repositoryOf(
   return repository;
 }
 
-async function checkpointOnStop(state: StepsState): Promise<void> {
+async function checkpointOnStop(
+  state: StepsState,
+  stopped: ExecutionStop,
+): Promise<void> {
   const cleanup = state.run.cleanupContext();
   const remaining = () => state.input.claim.expired_at - Date.now();
   try {
     await state.agent.abort();
-    if (state.task)
-      await commitCheckouts(
+    if (!isTurnViolation(stopped.code))
+      await checkpointGate(
         state,
-        checkpointCommitMessage(state.task.id, state.input.claim.attempt),
+        checkpointMessage(state, state.task ?? null),
         cleanup,
-        remaining,
       );
     await pushNodeBranches(state, cleanup, remaining);
   } catch (error) {
@@ -304,7 +260,8 @@ export async function runStepsImplement(
     );
   } catch (error) {
     const stopped = await state.run.stopOf(error);
-    if (stopped.reason !== EndReason.Revoked) await checkpointOnStop(state);
+    if (stopped.reason !== EndReason.Revoked)
+      await checkpointOnStop(state, stopped);
     throw stopped;
   } finally {
     state.input.workspaces.release(
@@ -426,8 +383,6 @@ export async function runTask(
     kind: TaskResultKind.BudgetEnd,
     boundary,
   });
-  let revisingFailedRun = false;
-  let unchangedRevisions = 0;
   state.run.log("task started", { task_id: task.id });
   const agent = gatedAgent(
     state,
@@ -436,15 +391,10 @@ export async function runTask(
   while (!budget.exhausted()) {
     await state.run.checkClaim();
     boundary = TaskBoundary.InProgress;
-    const before = headSetOf(state.checkouts);
     if (instruction === null) await agent.prompt(taskWork(state, task));
     else await agent.instruct(taskWork(state, task), instruction);
     if (budget.exhausted()) return ended(TaskBoundary.InProgress);
-    const changed = headSetOf(state.checkouts) !== before;
-    unchangedRevisions =
-      revisingFailedRun && !changed ? unchangedRevisions + 1 : 0;
-    if (unchangedRevisions >= NO_PROGRESS_LIMIT)
-      state.run.stop(EndReason.NoProgress);
+    if (instruction !== null && !agent.changed()) countUnchangedTurn(state);
     state.run.log("task committed", {
       task_id: task.id,
       commit: headSetOf(state.checkouts),
@@ -457,7 +407,6 @@ export async function runTask(
       passed,
       exit_codes: verification.results.map((result) => result.exit_code),
     });
-    revisingFailedRun = !passed;
     if (!passed) {
       boundary = TaskBoundary.RunFailed;
       if (budget.exhausted()) return ended(TaskBoundary.RunFailed);
@@ -497,6 +446,12 @@ export async function runTask(
   return ended(boundary);
 }
 
+function countUnchangedTurn(state: StepsState): void {
+  state.unchangedTurns++;
+  if (state.unchangedTurns >= NO_PROGRESS_LIMIT)
+    state.run.stop(EndReason.NoProgress);
+}
+
 export interface StepsInput {
   claim: MethodClaim;
   setup: ExecutionSetup;
@@ -515,6 +470,7 @@ export interface StepsState {
   nodeBranch: string;
   priorRationale: string | null;
   rework: boolean;
+  unchangedTurns: number;
   task?: TaskContent;
 }
 
@@ -531,6 +487,10 @@ export async function prepareStepsWorkspace(
       ),
     ),
   );
+  const deadline = Math.min(
+    input.claim.created_at + input.setup.resource_budget.wall_time_ms,
+    input.claim.expired_at,
+  );
   const prepared = await input.workspaces.prepareImplement({
     nodeId: input.claim.node_id,
     nodeBranch: input.claim.node_branch,
@@ -539,12 +499,25 @@ export async function prepareStepsWorkspace(
     transport: input.transport,
     sshAccess: input.sshAccess,
     context: run.operationContext,
-    deadlineMs:
-      Math.min(
-        input.claim.created_at + input.setup.resource_budget.wall_time_ms,
-        input.claim.expired_at,
-      ) - Date.now(),
+    deadlineMs: deadline - Date.now(),
   });
+  try {
+    for (const checkout of prepared.checkouts)
+      await restoreCheckout(
+        input.env,
+        checkout,
+        input.claim.node_branch,
+        checkout.head,
+        run.operationContext,
+        () => deadline - Date.now(),
+      );
+  } catch (error) {
+    input.workspaces.release(
+      input.workspaces.nodeKey(input.claim.node_id),
+      WorkspaceKind.Node,
+    );
+    throw error;
+  }
   return { ...prepared, nodeBranch: input.claim.node_branch };
 }
 
@@ -599,31 +572,21 @@ async function verifyCommands(
   const cleanup = state.agent.budget.cleanupContext(state.run.operationContext);
   try {
     for (const checkout of state.checkouts)
-      await discardChanges(
+      await restoreCheckout(
         state.input.env,
-        checkout.directory,
+        checkout,
+        state.nodeBranch,
+        checkout.head,
         cleanup,
-        state.input.claim.expired_at - Date.now(),
+        () => state.input.claim.expired_at - Date.now(),
       );
-    discardRootEntries(state);
+    removeRootEntries(state);
   } finally {
     cleanup.cancel();
   }
   const stop = infrastructureStop(run);
   if (stop) throw stop;
   return run;
-}
-
-function discardRootEntries(state: StepsState): void {
-  if (state.checkouts.length === SINGLE_CHECKOUT) return;
-  const kept = new Set([SCRATCH_ENTRY]);
-  for (const checkout of state.checkouts) {
-    assert.equal(dirname(checkout.directory), state.root);
-    kept.add(basename(checkout.directory));
-  }
-  for (const entry of readdirSync(state.root))
-    if (!kept.has(entry))
-      rmSync(join(state.root, entry), { recursive: true, force: true });
 }
 
 async function allTasksPass(state: StepsState): Promise<boolean> {
@@ -707,10 +670,7 @@ async function chooseTask(
     nodeWork(state),
     taskChoiceInstruction(state.input.setup.templates, tasks, failure),
   );
-  if (state.agent.budget.exhausted()) {
-    await checkpointChoice(state);
-    return null;
-  }
+  if (state.agent.budget.exhausted()) return null;
   const reply = parseJudgement(state.agent.lastText(), taskChoiceSchema);
   const chosen = tasks.find((task) => task.filename === reply?.filename);
   state.run.log("task chosen", {
@@ -719,23 +679,6 @@ async function chooseTask(
     fallback: chosen === undefined,
   });
   return chosen ?? last;
-}
-
-async function checkpointChoice(state: StepsState): Promise<void> {
-  const cleanup = state.agent.budget.cleanupContext(state.run.operationContext);
-  try {
-    await commitCheckouts(
-      state,
-      checkpointCommitMessage(
-        state.input.claim.node_id,
-        state.input.claim.attempt,
-      ),
-      cleanup,
-      () => state.input.claim.expired_at - Date.now(),
-    );
-  } finally {
-    cleanup.cancel();
-  }
 }
 
 export async function startCheck(state: StepsState): Promise<StartCheck> {

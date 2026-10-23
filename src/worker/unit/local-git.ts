@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { simpleGit, type SimpleGitOptions } from "simple-git";
 import type { Context } from "../../kernel/context.ts";
 import {
@@ -11,8 +13,22 @@ const CLEAN_STATUS = "";
 const FIRST_ATTEMPT = 1;
 const NO_CONFLICTS = 0;
 const EXIT_SUCCESS = 0;
+const EXIT_NO_MATCH = 1;
+const NO_EXIT = -1;
+const GIT_DIRECTORY = ".git";
+export const MERGE_HEAD = "MERGE_HEAD";
+const GIT_OPERATIONS = [
+  { state: "rebase-merge", quit: ["rebase", "--quit"] },
+  { state: "rebase-apply", quit: ["rebase", "--quit"] },
+  { state: "CHERRY_PICK_HEAD", quit: ["cherry-pick", "--quit"] },
+  { state: "REVERT_HEAD", quit: ["revert", "--quit"] },
+  { state: MERGE_HEAD, quit: ["merge", "--abort"] },
+] as const;
 
-const failNonzeroExit: SimpleGitOptions["errors"] = (error, result) =>
+const failNonzeroExit: NonNullable<SimpleGitOptions["errors"]> = (
+  error,
+  result,
+) =>
   result.exitCode === EXIT_SUCCESS
     ? error
     : (error ?? new Error(`git exited with ${result.exitCode}`));
@@ -72,6 +88,7 @@ async function run(
   args: string[],
   context: Context,
   deadlineMs: number,
+  errors: SimpleGitOptions["errors"] = failNonzeroExit,
 ): Promise<string> {
   assert.ok(directory);
   assert.ok(deadlineMs > EXPIRED);
@@ -81,10 +98,36 @@ async function run(
     abort: context.signal,
     timeout: { block: deadlineMs },
     unsafe: GIT_UNSAFE_OPTIONS,
-    errors: failNonzeroExit,
+    errors,
   })
     .env(gitEnvironment(env))
     .raw(args);
+}
+
+async function runMatch(
+  env: NodeJS.ProcessEnv,
+  directory: string,
+  args: string[],
+  context: Context,
+  deadlineMs: number,
+): Promise<{ matched: boolean; output: string }> {
+  const observed = { exitCode: NO_EXIT };
+  const output = await run(
+    env,
+    directory,
+    args,
+    context,
+    deadlineMs,
+    (error, result) => {
+      observed.exitCode = result.exitCode;
+      if (result.exitCode === EXIT_NO_MATCH) return undefined;
+      return failNonzeroExit(error, result);
+    },
+  );
+  assert.ok(
+    observed.exitCode === EXIT_SUCCESS || observed.exitCode === EXIT_NO_MATCH,
+  );
+  return { matched: observed.exitCode === EXIT_SUCCESS, output };
 }
 
 function gitEnvironment(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
@@ -121,6 +164,132 @@ export async function headCommit(
   assert.match(commit, /^[a-f0-9]{40,64}$/);
   assert.ok(directory);
   return commit;
+}
+
+export async function commitOf(
+  env: NodeJS.ProcessEnv,
+  directory: string,
+  revision: string,
+  context: Context,
+  deadlineMs: number,
+): Promise<string> {
+  assert.ok(directory);
+  assert.ok(revision && !revision.startsWith("-"));
+  const commit = (
+    await run(
+      env,
+      directory,
+      ["rev-parse", "--verify", `${revision}^{commit}`],
+      context,
+      deadlineMs,
+    )
+  ).trim();
+  assert.match(commit, /^[a-f0-9]{40,64}$/);
+  return commit;
+}
+
+export async function symbolicHead(
+  env: NodeJS.ProcessEnv,
+  directory: string,
+  context: Context,
+  deadlineMs: number,
+): Promise<string | null> {
+  const { matched, output } = await runMatch(
+    env,
+    directory,
+    ["symbolic-ref", "--quiet", "HEAD"],
+    context,
+    deadlineMs,
+  );
+  return matched ? output.trim() : null;
+}
+
+export async function containsCommit(
+  env: NodeJS.ProcessEnv,
+  directory: string,
+  commit: string,
+  context: Context,
+  deadlineMs: number,
+): Promise<boolean> {
+  assert.match(commit, /^[a-f0-9]{40,64}$/);
+  const { matched } = await runMatch(
+    env,
+    directory,
+    ["merge-base", "--is-ancestor", commit, "HEAD"],
+    context,
+    deadlineMs,
+  );
+  return matched;
+}
+
+export async function softReset(
+  env: NodeJS.ProcessEnv,
+  directory: string,
+  commit: string,
+  context: Context,
+  deadlineMs: number,
+): Promise<void> {
+  assert.match(commit, /^[a-f0-9]{40,64}$/);
+  await run(env, directory, ["reset", "--soft", commit], context, deadlineMs);
+}
+
+export async function forceBranch(
+  env: NodeJS.ProcessEnv,
+  directory: string,
+  branch: string,
+  commit: string,
+  context: Context,
+  deadlineMs: number,
+): Promise<void> {
+  assert.ok(branch && !branch.startsWith("-"));
+  assert.match(commit, /^[a-f0-9]{40,64}$/);
+  await run(
+    env,
+    directory,
+    ["checkout", "--force", "-B", branch, commit, "--"],
+    context,
+    deadlineMs,
+  );
+}
+
+export async function isClean(
+  env: NodeJS.ProcessEnv,
+  directory: string,
+  context: Context,
+  deadlineMs: number,
+): Promise<boolean> {
+  const status = await run(
+    env,
+    directory,
+    ["status", "--porcelain"],
+    context,
+    deadlineMs,
+  );
+  return status.trim() === CLEAN_STATUS;
+}
+
+export function operationsInProgress(directory: string): string[] {
+  assert.ok(directory);
+  return GIT_OPERATIONS.filter(({ state }) =>
+    existsSync(join(directory, GIT_DIRECTORY, state)),
+  ).map(({ state }) => state);
+}
+
+export function mergeHeadOf(directory: string): string | null {
+  const path = join(directory, GIT_DIRECTORY, MERGE_HEAD);
+  return existsSync(path) ? readFileSync(path, "utf8").trim() : null;
+}
+
+export async function quitOperations(
+  env: NodeJS.ProcessEnv,
+  directory: string,
+  context: Context,
+  deadlineMs: number,
+): Promise<void> {
+  const end = performance.now() + deadlineMs;
+  for (const { state, quit } of GIT_OPERATIONS)
+    if (existsSync(join(directory, GIT_DIRECTORY, state)))
+      await run(env, directory, [...quit], context, end - performance.now());
 }
 
 export async function diffText(
@@ -268,12 +437,12 @@ export async function conflictMarkerFiles(
   deadlineMs: number,
 ): Promise<string[]> {
   assert.ok(files.length > NO_CONFLICTS);
-  const output = await run(
+  const { output } = await runMatch(
     env,
     directory,
     ["grep", "--no-index", "-l", "-E", "^(<{7}|>{7})( |$)", "--", ...files],
     context,
     deadlineMs,
-  ).catch(() => CLEAN_STATUS);
+  );
   return output.split("\n").filter((line) => line.trim() !== CLEAN_STATUS);
 }

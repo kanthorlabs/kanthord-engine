@@ -94,6 +94,7 @@ test("the conflict instruction names the binding and the directory", async (t) =
     fauxAssistantMessage("resolved"),
   ]);
   await commitOnNode(web.directory, "node side");
+  web.head = await headOf(web.directory);
   await advanceBase({ bare: webBare }, t, "main side");
   await h.input.transport.fetchBase(
     web.directory,

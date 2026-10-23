@@ -14,7 +14,13 @@ import {
   scriptedProvider,
   TEST_SSH_ACCESS,
 } from "./test-support.ts";
-import { EndReason, ExecutionRun, ExecutionStop } from "./execution-run.ts";
+import {
+  EndReason,
+  ExecutionEndKind,
+  ExecutionRun,
+  ExecutionStop,
+} from "./execution-run.ts";
+import { executionBoundary } from "./native-method.ts";
 import {
   criterionRevisionInstruction,
   requestedChangesText,
@@ -22,12 +28,13 @@ import {
 import type { MethodClients } from "./method-clients.ts";
 import { WorkspaceKind } from "./workspace.ts";
 import { TaskBoundary } from "./steps-implement.ts";
-import { prepareStepsWorkspace, startCheck } from "./steps-implement.ts";
 import {
-  MERGE_MARKERS_LEFT,
-  RefreshResult,
-  refreshAtClaim,
-} from "./base-refresh.ts";
+  prepareStepsWorkspace,
+  runStepsImplement,
+  startCheck,
+} from "./steps-implement.ts";
+import { RefreshResult, refreshAtClaim } from "./base-refresh.ts";
+import { MERGE_MARKERS_LEFT } from "./turn-gate.ts";
 import { judgedAt } from "./judged-tasks.ts";
 import { SHIPPED_TEMPLATES } from "../../agent/prompt-templates.ts";
 import {
@@ -35,6 +42,7 @@ import {
   commitOnNode,
   implementFixture as fixture,
   NO_PROVIDER_CALLS,
+  recordReleases,
   task,
 } from "./test-support.ts";
 
@@ -51,6 +59,7 @@ const TASK_JUDGED = "task judged";
 const CHOICE_AND_TWO_JUDGEMENTS = 3;
 const THREE_JUDGEMENTS = 3;
 const STRAY_FILE = "stray.txt";
+const ONE_RELEASE = 1;
 
 test("start check judges passing tasks in order and discards verification changes", async (t) => {
   const tasks = [
@@ -386,17 +395,17 @@ test("a budget end in the task choice turn commits its files as a checkpoint", a
     await instruct(...args);
     h.agent.budget.exhausted = () => true;
   };
-  assert.deepEqual((await startCheck(h)).budgetEnd, {
-    task: null,
-    boundary: TaskBoundary.InProgress,
-  });
+  const bodies = recordReleases(h);
+  const end = await executionBoundary(h.run, () => runStepsImplement(h));
+  assert.ok(end.kind === ExecutionEndKind.Released && end.furtherWork);
+  assert.equal(bodies.length, ONE_RELEASE);
   assert.equal(
     (await simpleGit(h.root).raw(["ls-files", STRAY_FILE])).trim(),
     STRAY_FILE,
   );
-  assert.ok(
-    (await simpleGit(h.root).log()).latest!.message.includes("checkpoint"),
-  );
+  const latest = (await simpleGit(h.root).log()).latest!.message;
+  assert.ok(latest.includes("checkpoint"));
+  assert.ok(latest.includes(h.input.claim.node_id));
 });
 
 test("an invalid task choice of a rework falls back to the last task", async (t) => {
@@ -600,6 +609,7 @@ test("the claim refresh lets the agent resolve a merge conflict and commits the 
   );
   h.revision = { content: NODE_CONTENT, tasks: [] } as unknown as Revision;
   await commitOnNode(h.root, "node side");
+  h.checkouts[0]!.head = (await simpleGit(h.root).revparse(["HEAD"])).trim();
   await advanceBase(h, t, "main side");
   await h.input.transport.fetchBase(
     h.root,
@@ -623,6 +633,7 @@ test("the claim refresh aborts the merge and stops when a conflict marker remain
   h.revision = { content: NODE_CONTENT, tasks: [] } as unknown as Revision;
   await commitOnNode(h.root, "node side");
   const before = await simpleGit(h.root).revparse(["HEAD"]);
+  h.checkouts[0]!.head = before;
   await advanceBase(h, t, "main side");
   await h.input.transport.fetchBase(
     h.root,
