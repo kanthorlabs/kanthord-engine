@@ -14,7 +14,7 @@ import {
   discardChanges,
   forceBranch,
   headCommit,
-  isClean,
+  isCommitted,
   MERGE_HEAD,
   mergeHeadOf,
   operationsInProgress,
@@ -38,6 +38,11 @@ export const TurnViolation = {
   MergeMissing: "worker.turn.merge_missing",
 } as const;
 export type TurnViolation = (typeof TurnViolation)[keyof typeof TurnViolation];
+export const ViolationEnd = {
+  Stop: "stop",
+  Restore: "restore",
+} as const;
+export type ViolationEnd = (typeof ViolationEnd)[keyof typeof ViolationEnd];
 export const MERGE_MARKERS_LEFT = "worker.merge.markers_left";
 const NO_ENTRIES = 0;
 const NO_UNCHANGED_TURNS = 0;
@@ -54,6 +59,7 @@ interface GateTurn {
   mode: GateMode;
   message: string;
   merge: ConflictMerge | null;
+  violationEnd: ViolationEnd;
 }
 interface Violation {
   code: TurnViolation;
@@ -78,6 +84,7 @@ export function gatedAgent(
     mode: merge === null ? GateMode.Write : GateMode.Conflict,
     message,
     merge,
+    violationEnd: ViolationEnd.Stop,
   };
   let changed = false;
   const gated = async (work: () => Promise<void>): Promise<void> => {
@@ -111,10 +118,11 @@ export async function checkpointGate(
   state: StepsState,
   message: string,
   context: Context,
+  violationEnd: ViolationEnd,
 ): Promise<boolean> {
   return runGate(
     state,
-    { mode: GateMode.Checkpoint, message, merge: null },
+    { mode: GateMode.Checkpoint, message, merge: null, violationEnd },
     state.checkouts.map((checkout) => checkout.head),
     context,
   );
@@ -130,7 +138,14 @@ async function runGate(
   const remaining = remainingOf(state);
   if (turn.mode === GateMode.Checkpoint)
     for (const checkout of state.checkouts)
-      if (mergeHeadOf(checkout.directory) !== null)
+      if (
+        (await mergeHeadOf(
+          state.input.env,
+          checkout.directory,
+          context,
+          remaining(),
+        )) !== null
+      )
         await abortMerge(
           state.input.env,
           checkout.directory,
@@ -145,7 +160,10 @@ async function runGate(
       mergeOf(turn, checkout),
       context,
     );
-    if (violation !== null) await violate(state, before, violation, context);
+    if (violation === null) continue;
+    const detail = await violate(state, before, violation, context);
+    if (turn.violationEnd === ViolationEnd.Restore) return false;
+    state.run.stop(EndReason.OperationFailed, violation.code, detail);
   }
   let changed = false;
   for (const [index, checkout] of state.checkouts.entries())
@@ -188,10 +206,13 @@ async function violationOf(
       code: TurnViolation.HistoryRewritten,
       detail: `The HEAD of checkout ${checkout.name} does not contain ${before}.`,
     };
-  const operations = operationsInProgress(directory).filter(
-    (operation) => merge === null || operation !== MERGE_HEAD,
-  );
-  if (merge !== null && mergeHeadOf(directory) !== merge.commit)
+  const operations = (
+    await operationsInProgress(env, directory, context, remaining())
+  ).filter((operation) => merge === null || operation !== MERGE_HEAD);
+  if (
+    merge !== null &&
+    (await mergeHeadOf(env, directory, context, remaining())) !== merge.commit
+  )
     return {
       code: TurnViolation.MergeMissing,
       detail: `Checkout ${checkout.name} holds no open merge of ${merge.commit}.`,
@@ -209,7 +230,7 @@ async function violate(
   before: readonly string[],
   violation: Violation,
   context: Context,
-): Promise<never> {
+): Promise<string | null> {
   for (const [index, checkout] of state.checkouts.entries())
     await restoreCheckout(
       state.input.env,
@@ -219,11 +240,9 @@ async function violate(
       context,
       remainingOf(state),
     );
-  return state.run.stop(
-    EndReason.OperationFailed,
-    violation.code,
-    await state.run.reasonOf(new Error(violation.detail)),
-  );
+  const detail = await state.run.reasonOf(new Error(violation.detail));
+  state.run.log("turn violation", { code: violation.code, detail });
+  return detail;
 }
 
 async function settleCheckout(
@@ -246,7 +265,7 @@ async function settleCheckout(
       null;
   else {
     await refuseMarkers(state, checkout, merge, context);
-    await concludeMerge(env, directory, context, remaining());
+    await concludeMerge(env, directory, turn.message, context, remaining());
   }
   checkout.head = await headCommit(env, directory, context, remaining());
   await assertInvariant(env, checkout, state.nodeBranch, context, remaining);
@@ -304,8 +323,11 @@ async function assertInvariant(
     await headCommit(env, directory, context, remaining()),
     checkout.head,
   );
-  assert.ok(await isClean(env, directory, context, remaining()));
-  assert.deepEqual(operationsInProgress(directory), []);
+  assert.ok(await isCommitted(env, directory, context, remaining()));
+  assert.deepEqual(
+    await operationsInProgress(env, directory, context, remaining()),
+    [],
+  );
 }
 
 export function removeRootEntries(state: StepsState): void {

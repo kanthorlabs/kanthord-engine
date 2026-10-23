@@ -21,6 +21,7 @@ import {
   isTurnViolation,
   removeRootEntries,
   restoreCheckout,
+  ViolationEnd,
 } from "./turn-gate.ts";
 import {
   EndReason,
@@ -129,7 +130,12 @@ async function settleImplement(
     if (furtherWork) {
       await state.agent.abort();
       await withinGit(state.run.spans, GitStep.Commit, () =>
-        checkpointGate(state, checkpointMessage(state, task), cleanup),
+        checkpointGate(
+          state,
+          checkpointMessage(state, task),
+          cleanup,
+          ViolationEnd.Stop,
+        ),
       );
     }
     if (
@@ -215,6 +221,7 @@ async function checkpointOnStop(
         state,
         checkpointMessage(state, state.task ?? null),
         cleanup,
+        ViolationEnd.Restore,
       );
     await pushNodeBranches(state, cleanup, remaining);
   } catch (error) {

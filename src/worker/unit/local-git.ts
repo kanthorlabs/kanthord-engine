@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { resolve } from "node:path";
 import { simpleGit, type SimpleGitOptions } from "simple-git";
 import type { Context } from "../../kernel/context.ts";
 import {
@@ -15,10 +15,13 @@ const NO_CONFLICTS = 0;
 const EXIT_SUCCESS = 0;
 const EXIT_NO_MATCH = 1;
 const NO_EXIT = -1;
-const GIT_DIRECTORY = ".git";
+const NUL = "\0";
+const MODIFIED = "M";
+const REGULAR_MODES = new Set(["100644", "100755"]);
 export const MERGE_HEAD = "MERGE_HEAD";
 const GIT_OPERATIONS = [
   { state: "rebase-merge", quit: ["rebase", "--quit"] },
+  { state: "rebase-apply/applying", quit: ["am", "--quit"] },
   { state: "rebase-apply", quit: ["rebase", "--quit"] },
   { state: "CHERRY_PICK_HEAD", quit: ["cherry-pick", "--quit"] },
   { state: "REVERT_HEAD", quit: ["revert", "--quit"] },
@@ -63,15 +66,7 @@ export async function commitWork(
     assert.ok(duration > EXPIRED, "Commit deadline reached");
     return duration;
   };
-  await run(env, directory, ["add", "--all"], context, remaining());
-  const status = await run(
-    env,
-    directory,
-    ["status", "--porcelain"],
-    context,
-    remaining(),
-  );
-  if (status.trim() === CLEAN_STATUS) return null;
+  if (!(await stageChanges(env, directory, context, remaining))) return null;
   await run(
     env,
     directory,
@@ -80,6 +75,96 @@ export async function commitWork(
     remaining(),
   );
   return headCommit(env, directory, context, remaining());
+}
+
+async function stageChanges(
+  env: NodeJS.ProcessEnv,
+  directory: string,
+  context: Context,
+  remaining: () => number,
+): Promise<boolean> {
+  await run(env, directory, ["add", "--all"], context, remaining());
+  const converted = await conversionOnlyPaths(
+    env,
+    directory,
+    context,
+    remaining,
+  );
+  if (converted.length > NO_CONFLICTS)
+    await run(
+      env,
+      directory,
+      ["reset", "--quiet", "HEAD", "--", ...converted],
+      context,
+      remaining(),
+    );
+  return !(await indexMatchesHead(env, directory, context, remaining()));
+}
+
+async function conversionOnlyPaths(
+  env: NodeJS.ProcessEnv,
+  directory: string,
+  context: Context,
+  remaining: () => number,
+): Promise<string[]> {
+  const fields = (
+    await run(
+      env,
+      directory,
+      ["diff", "--cached", "--raw", "-z", "--no-abbrev", "--no-renames"],
+      context,
+      remaining(),
+    )
+  ).split(NUL);
+  const modified: { path: string; blob: string }[] = [];
+  for (let index = 0; index + 1 < fields.length; index += 2) {
+    const [oldMode, newMode, blob, , status] =
+      fields[index]!.slice(1).split(" ");
+    assert.ok(status !== undefined && blob !== undefined);
+    if (
+      status === MODIFIED &&
+      oldMode === newMode &&
+      REGULAR_MODES.has(oldMode!)
+    )
+      modified.push({ path: fields[index + 1]!, blob });
+  }
+  if (modified.length === NO_CONFLICTS) return [];
+  const hashes = (
+    await run(
+      env,
+      directory,
+      [
+        "hash-object",
+        "--no-filters",
+        "--",
+        ...modified.map(({ path }) => path),
+      ],
+      context,
+      remaining(),
+    )
+  )
+    .trim()
+    .split("\n");
+  assert.equal(hashes.length, modified.length);
+  return modified
+    .filter(({ blob }, index) => hashes[index] === blob)
+    .map(({ path }) => path);
+}
+
+async function indexMatchesHead(
+  env: NodeJS.ProcessEnv,
+  directory: string,
+  context: Context,
+  deadlineMs: number,
+): Promise<boolean> {
+  const { matched } = await runMatch(
+    env,
+    directory,
+    ["diff", "--cached", "--quiet", "--"],
+    context,
+    deadlineMs,
+  );
+  return matched;
 }
 
 async function run(
@@ -252,32 +337,88 @@ export async function forceBranch(
   );
 }
 
-export async function isClean(
+export async function isCommitted(
   env: NodeJS.ProcessEnv,
   directory: string,
   context: Context,
   deadlineMs: number,
 ): Promise<boolean> {
-  const status = await run(
+  const end = performance.now() + deadlineMs;
+  if (!(await indexMatchesHead(env, directory, context, deadlineMs)))
+    return false;
+  const untracked = await run(
     env,
     directory,
-    ["status", "--porcelain"],
+    ["ls-files", "--others", "--exclude-standard", "-z"],
+    context,
+    end - performance.now(),
+  );
+  return untracked === CLEAN_STATUS;
+}
+
+async function gitPaths(
+  env: NodeJS.ProcessEnv,
+  directory: string,
+  names: readonly string[],
+  context: Context,
+  deadlineMs: number,
+): Promise<string[]> {
+  const output = await run(
+    env,
+    directory,
+    ["rev-parse", ...names.flatMap((name) => ["--git-path", name])],
     context,
     deadlineMs,
   );
-  return status.trim() === CLEAN_STATUS;
+  const paths = output.trim().split("\n");
+  assert.equal(paths.length, names.length);
+  return paths.map((path) => resolve(directory, path));
 }
 
-export function operationsInProgress(directory: string): string[] {
-  assert.ok(directory);
-  return GIT_OPERATIONS.filter(({ state }) =>
-    existsSync(join(directory, GIT_DIRECTORY, state)),
-  ).map(({ state }) => state);
+async function operationPaths(
+  env: NodeJS.ProcessEnv,
+  directory: string,
+  context: Context,
+  deadlineMs: number,
+) {
+  const paths = await gitPaths(
+    env,
+    directory,
+    GIT_OPERATIONS.map(({ state }) => state),
+    context,
+    deadlineMs,
+  );
+  return GIT_OPERATIONS.map((operation, index) => ({
+    ...operation,
+    path: paths[index]!,
+  }));
 }
 
-export function mergeHeadOf(directory: string): string | null {
-  const path = join(directory, GIT_DIRECTORY, MERGE_HEAD);
-  return existsSync(path) ? readFileSync(path, "utf8").trim() : null;
+export async function operationsInProgress(
+  env: NodeJS.ProcessEnv,
+  directory: string,
+  context: Context,
+  deadlineMs: number,
+): Promise<string[]> {
+  return (await operationPaths(env, directory, context, deadlineMs))
+    .filter(({ path }) => existsSync(path))
+    .map(({ state }) => state);
+}
+
+export async function mergeHeadOf(
+  env: NodeJS.ProcessEnv,
+  directory: string,
+  context: Context,
+  deadlineMs: number,
+): Promise<string | null> {
+  const [path] = await gitPaths(
+    env,
+    directory,
+    [MERGE_HEAD],
+    context,
+    deadlineMs,
+  );
+  return existsSync(path!) ? readFileSync(path!, "utf8").trim() : null;
 }
 
 export async function quitOperations(
@@ -287,8 +428,13 @@ export async function quitOperations(
   deadlineMs: number,
 ): Promise<void> {
   const end = performance.now() + deadlineMs;
-  for (const { state, quit } of GIT_OPERATIONS)
-    if (existsSync(join(directory, GIT_DIRECTORY, state)))
+  for (const { path, quit } of await operationPaths(
+    env,
+    directory,
+    context,
+    deadlineMs,
+  ))
+    if (existsSync(path))
       await run(env, directory, [...quit], context, end - performance.now());
 }
 
@@ -396,17 +542,20 @@ export async function mergeRef(
 export async function concludeMerge(
   env: NodeJS.ProcessEnv,
   directory: string,
+  message: string,
   context: Context,
   deadlineMs: number,
 ): Promise<void> {
+  assert.ok(message);
   const end = performance.now() + deadlineMs;
-  await run(env, directory, ["add", "--all"], context, end - performance.now());
+  const remaining = () => end - performance.now();
+  await stageChanges(env, directory, context, remaining);
   await run(
     env,
     directory,
-    ["commit", "--no-edit"],
+    ["commit", "--message", message],
     context,
-    end - performance.now(),
+    remaining(),
   );
 }
 

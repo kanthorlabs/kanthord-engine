@@ -1,8 +1,15 @@
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
-import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import { simpleGit } from "simple-git";
+import { temporary } from "../../kernel/test-support.ts";
 import { background } from "../../kernel/context.ts";
 import { BudgetLimit, ExecutionStopReason } from "../../scheduler/contract.ts";
 import {
@@ -46,6 +53,10 @@ const DEADLINE_MS = 20000;
 const MERGE_COMMIT_FIELDS = 3;
 const ONE_RELEASE = 1;
 const COUNTED_TURNS = 5;
+const CRLF_FILE = "f.txt";
+const CRLF_CONTENT = "a\r\nb\r\n";
+const HIJACKED_MESSAGE = "hijack";
+const TURN_VIOLATION_LOG = "turn violation";
 
 type Fixture = Awaited<ReturnType<typeof fixture>>;
 
@@ -294,4 +305,158 @@ test("a budget end during a verification that writes build output leaves no buil
   ]);
   assert.equal(files.split("\n").includes(BUILD_OUTPUT), false);
   assert.equal(await remoteHead(h), before);
+});
+
+async function pushNodeBranch(h: Fixture): Promise<void> {
+  await simpleGit(h.root).raw([
+    "push",
+    "-q",
+    "origin",
+    `HEAD:refs/heads/${h.nodeBranch}`,
+  ]);
+}
+
+function releaseWorkspace(h: Fixture): void {
+  h.input.workspaces.release(
+    h.input.workspaces.nodeKey(h.input.claim.node_id),
+    WorkspaceKind.Node,
+  );
+}
+
+test("a CRLF blob under a text attribute keeps invariant I and the gate commits only the agent change", async (t) => {
+  const current = task("crlf", `test -f ${WORK_FILE}`);
+  const h = await fixture(
+    t,
+    [current],
+    [
+      fauxAssistantMessage("nothing"),
+      write(WORK_FILE, WORK_FILE),
+      fauxAssistantMessage("done"),
+      fauxAssistantMessage(MET),
+    ],
+  );
+  const git = simpleGit(h.root);
+  await git.raw(["config", "core.autocrlf", "false"]);
+  writeFileSync(join(h.root, CRLF_FILE), CRLF_CONTENT);
+  await git.add(CRLF_FILE);
+  await git.commit("crlf");
+  writeFileSync(join(h.root, ".gitattributes"), "*.txt text\n");
+  await git.add(".gitattributes");
+  await git.commit("attributes");
+  await pushNodeBranch(h);
+  releaseWorkspace(h);
+  const prepared = await prepareStepsWorkspace(h.input, h.run);
+  const before = prepared.checkouts[0]!.head;
+  const state = { ...h, ...prepared };
+  assert.deepEqual(await runTask(state, current), {
+    kind: TaskResultKind.Complete,
+  });
+  const subjects = await git.raw(["log", "--format=%s", `${before}..HEAD`]);
+  assert.deepEqual(subjects.trim().split("\n"), [
+    taskCommitMessage(current.id, h.input.claim.attempt),
+  ]);
+  assert.equal(
+    (await git.raw(["show", "--name-only", "--format=", "HEAD"])).trim(),
+    WORK_FILE,
+  );
+  assert.equal(
+    await git.raw(["cat-file", "blob", `HEAD:${CRLF_FILE}`]),
+    CRLF_CONTENT,
+  );
+});
+
+test("the prepare quits a git am that the agent left in progress", async (t) => {
+  const h = await fixture(t, [task("am", "true")], []);
+  const git = simpleGit(h.root);
+  writeFileSync(join(h.root, "file"), "side\n");
+  await git.raw(["commit", "-qam", "side"]);
+  const patch = (
+    await git.raw([
+      "format-patch",
+      "-1",
+      "-o",
+      join(h.root, ".kanthord-scratch"),
+    ])
+  ).trim();
+  await git.raw(["reset", "-q", "--hard", "HEAD~1"]);
+  writeFileSync(join(h.root, "file"), "other\n");
+  await git.raw(["commit", "-qam", "other"]);
+  await assert.rejects(git.raw(["am", patch]));
+  assert.ok(existsSync(gitPath(h, "rebase-apply/applying")));
+  releaseWorkspace(h);
+  const prepared = await prepareStepsWorkspace(h.input, h.run);
+  assert.equal(existsSync(gitPath(h, "rebase-apply")), false);
+  assert.equal(prepared.checkouts[0]!.head, await headOf(h.root));
+});
+
+test("a violation in the checkpoint of a stop restores the checkout and pushes the node branch", async (t) => {
+  const first = task("first", `test -f ${WORK_FILE}`);
+  const second = task("second", "false");
+  const h = await fixture(
+    t,
+    [first, second],
+    [
+      write(WORK_FILE, WORK_FILE),
+      fauxAssistantMessage("done"),
+      fauxAssistantMessage(MET),
+      bash(`git checkout -q -b ${OTHER_BRANCH}`),
+      fauxAssistantMessage("", {
+        stopReason: "error",
+        errorMessage: "503 overloaded",
+      }),
+    ],
+  );
+  const events = t.mock.method(h.run, "log");
+  recordReleases(h);
+  const end = await executionBoundary(h.run, () => runStepsImplement(h));
+  assert.ok("stop" in end);
+  assert.equal(end.stop?.reason, EndReason.ProviderFailed);
+  const local = await headOf(h.root, `refs/heads/${h.nodeBranch}`);
+  assert.equal(await remoteHead(h), local);
+  assert.ok(
+    (await simpleGit(h.root).raw(["log", "-1", "--format=%s", local])).includes(
+      first.id,
+    ),
+  );
+  await assertAtBefore(h, local);
+  assert.deepEqual(
+    events.mock.calls
+      .filter((call) => call.arguments[0] === TURN_VIOLATION_LOG)
+      .map((call) => call.arguments[1].code),
+    [TurnViolation.BranchChanged],
+  );
+});
+
+test("the gate finds a rebase in progress behind a gitdir file", async (t) => {
+  const h = await fixture(
+    t,
+    [task("gitdir", "false")],
+    [
+      bash('mkdir "$(git rev-parse --git-path rebase-merge)"'),
+      fauxAssistantMessage("left"),
+    ],
+  );
+  const gitdir = join(temporary(t), "gitdir");
+  renameSync(join(h.root, ".git"), gitdir);
+  writeFileSync(join(h.root, ".git"), `gitdir: ${gitdir}\n`);
+  const bodies = recordReleases(h);
+  const end = await executionBoundary(h.run, () => runStepsImplement(h));
+  violationEnd(end, bodies, TurnViolation.GitInProgress);
+  assert.equal(existsSync(join(gitdir, "rebase-merge")), false);
+});
+
+test("the merge commit takes the template message and not the merge message file", async (t) => {
+  const h = await conflictFixture(t, [
+    bash(
+      `printf '${HIJACKED_MESSAGE}\\n' > "$(git rev-parse --git-path MERGE_MSG)"`,
+    ),
+    write("file", RESOLVED),
+    fauxAssistantMessage(RESOLVED),
+  ]);
+  await fetchBase(h);
+  assert.equal(await refreshAtClaim(h), RefreshResult.Merged);
+  assert.equal(
+    (await simpleGit(h.root).raw(["log", "-1", "--format=%s"])).trim(),
+    taskCommitMessage(h.input.claim.node_id, h.input.claim.attempt),
+  );
 });

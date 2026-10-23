@@ -22,6 +22,7 @@ import {
   commitWork,
   discardChanges,
   headCommit,
+  isAncestor,
   taskCommitMessage,
 } from "./local-git.ts";
 
@@ -306,7 +307,7 @@ test("work commits run no hook of the hooks path in the host git configuration p
   assert.equal(existsSync(marker), false);
 });
 
-test("work commits fail when git refuses the commit with no error output", async (t) => {
+test("work commits make no commit for a change inside a nested repository", async (t) => {
   const directory = temporary(t);
   const nested = join(directory, "nested");
   mkdirSync(nested);
@@ -316,7 +317,29 @@ test("work commits fail when git refuses the commit with no error output", async
   await simpleGit(directory).init();
   await commitWork(env, directory, "initial", background, 10000);
   writeFileSync(join(nested, "file"), "changed");
+  assert.equal(
+    await commitWork(env, directory, "nested change", background, 10000),
+    null,
+  );
+});
+
+test("a git exit that is not zero and writes no error output fails the call", async (t) => {
+  const directory = temporary(t);
+  const git = simpleGit(directory);
+  await git.init();
+  writeFileSync(join(directory, "tracked"), "original");
+  const initial = await commitWork(
+    env,
+    directory,
+    "initial",
+    background,
+    10000,
+  );
+  assert.ok(initial);
+  await git.raw(["checkout", "-q", "--orphan", "unrelated"]);
+  await commitWork(env, directory, "unrelated", background, 10000);
   await assert.rejects(
-    commitWork(env, directory, "refused", background, 10000),
+    isAncestor(env, directory, initial, background, 10000),
+    /git exited with 1/,
   );
 });
