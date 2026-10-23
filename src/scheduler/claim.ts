@@ -108,6 +108,7 @@ function acquire(
       declared_node_states: declaration.declared_node_states,
       declared_intents: declaration.declared_intents,
       tags: binding.tags,
+      environment: binding.environment,
     },
     executionId,
     now,

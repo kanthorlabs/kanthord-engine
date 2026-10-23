@@ -937,7 +937,7 @@ export class MissionService
   }
 
   claimFacts(tx: Transaction, nodeId: string) {
-    return claimFacts(tx, nodeId);
+    return claimFacts(tx, this.dependencies.bindings, nodeId);
   }
 
   claimFactsOf(tx: Transaction, projectId: string) {

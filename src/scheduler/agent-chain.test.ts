@@ -547,6 +547,7 @@ function pinHarness(
     worker_name: PIN_WORKER,
     instance_count: 1,
     tags: [],
+    environment: null,
     tombstone: false,
     resource_budget: null,
   });
