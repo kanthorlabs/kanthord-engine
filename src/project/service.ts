@@ -1,3 +1,4 @@
+import type { Environment } from "../kernel/devcontainer.ts";
 import { addAbortListener } from "node:events";
 import assert from "node:assert/strict";
 import { join } from "node:path";
@@ -503,6 +504,17 @@ export interface Dependencies {
   health?: HealthRegistry;
   bindings?: ProjectBindings;
 }
+function currentEnvironmentOf(
+  tx: Transaction,
+  binding: { project_id: string; resource_identity: string },
+): Environment | null {
+  const current = Array.from(
+    readCurrentBindingSet(tx, binding.project_id).values(),
+  ).find((entry) => entry.resource_identity === binding.resource_identity);
+  if (!current) return null;
+  return repositoryConfigSchema.parse(current.config).environment ?? null;
+}
+
 export class ProjectService implements Service, ProjectBindings {
   private readonly bindings?: ProjectBindings;
   private readonly operationalStore: Store;
@@ -1454,7 +1466,7 @@ export class ProjectService implements Service, ProjectBindings {
       landing: config.strategy.action?.landing ?? Landing.Human,
       project_prompt: config.project_prompt ?? null,
       working_layer: config.working_layer,
-      environment: config.environment ?? null,
+      environment: currentEnvironmentOf(tx, binding),
     };
   }
   slotEnvironment(

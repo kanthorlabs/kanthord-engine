@@ -5401,6 +5401,20 @@ test("binding.environment.set stores the environment as a new revision with no r
   );
 });
 
+test("a revision pinned before an environment set takes the environment of the current revision", async (t) => {
+  const { f, saved } = instructionFixture(t, {}, WRITABLE);
+  const pinned = f.store.transaction((tx) =>
+    f.project.repositoryPolicyOf(tx, saved.binding_id),
+  );
+  assert.equal(pinned?.environment, null);
+  await setEnvironment(f, saved, STORED_ENVIRONMENT);
+  const policy = f.store.transaction((tx) =>
+    f.project.repositoryPolicyOf(tx, saved.binding_id),
+  );
+  assert.equal(policy?.binding_id, saved.binding_id);
+  assert.deepEqual(policy?.environment, STORED_ENVIRONMENT);
+});
+
 test("binding.environment.get answers the stored environment with no repository read", async (t) => {
   const { f, saved, resolveCalls, readCalls } = instructionFixture(
     t,

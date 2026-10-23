@@ -588,7 +588,7 @@ The environment of a repository binding comes from the first source that exists:
 - `environment` is the document, or null.
 - `reason` names the defect of a repository file that is no valid environment, else null.
 
-`environment set` reads a `devcontainer.json` file with `--file`. The file accepts comments and trailing commas. The command sends the body `{ environment }`. The service writes the current binding set again with the new `environment` key of the binding, so the change is a new revision of the binding at the next binding-set version. It answers the answer of `binding apply`. A change of `environment` alone runs no repository check. A node pins the binding revision at its import, so a node of an earlier revision keeps its earlier environment.
+`environment set` reads a `devcontainer.json` file with `--file`. The file accepts comments and trailing commas. The command sends the body `{ environment }`. The service writes the current binding set again with the new `environment` key of the binding, so the change is a new revision of the binding at the next binding-set version. It answers the answer of `binding apply`. A change of `environment` alone runs no repository check. A node pins the binding revision at its import, but each claim takes the environment of the current revision of that binding, the same input as the image. A repair with `environment set` thus reaches the nodes that wait.
 
 The environment has these effects:
 
