@@ -2,6 +2,7 @@ import { OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import type { Transaction } from "../kernel/store.ts";
 import { isObject, isString } from "../kernel/values.ts";
+import { isCommitSubject } from "../kernel/commit-message.ts";
 import {
   MissionBindingKind,
   MissionErrorCode,
@@ -153,6 +154,7 @@ export function validatePlanContent(
     const value = nonblankText(field, input[field]);
     validateText(field, value, textMaxBytes);
   }
+  if (!isCommitSubject(input[Field.Name] as string)) invalidContent(Field.Name);
   const verifications = input[Field.Verifications];
   if (
     verifications === undefined ||

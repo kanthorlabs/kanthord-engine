@@ -797,6 +797,7 @@ from fields whose authoritative schema is still absent.
 A new binding kind adds a row. No binding comes from the project.
 An upload grant uses the first working storage binding of the ordered list, and the asset pins that binding.
 An absent, blank or nontext `name`, `requirement` or `criterion` answers `mission.node.content_invalid`.
+A node or task `name` that holds only full stops and spaces gives no commit subject and answers `mission.node.content_invalid` with `details: { field: "name" }`.
 In an import, an absent or empty `verifications` list answers `mission.node.verifications_missing`.
 In an import, a nonlist `verifications` value or a blank or nontext item answers `mission.node.content_invalid`.
 In a node API write, an absent, empty or nonlist `verifications` value, or an empty or nontext item, answers 400 `gateway.request.validation_failed`.

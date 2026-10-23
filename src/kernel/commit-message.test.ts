@@ -8,9 +8,13 @@ import {
   commitTypeOf,
   isCommitHeader,
   isCommitMessage,
+  isCommitSubject,
 } from "./commit-message.ts";
 
 const UNIT_ID = "task_01ARZ3NDEKTSV4RRFFQ69G5FAV";
+const STOPPED_HEADER = "feat: a";
+const EMOJI = "\u{1F600}";
+const HIGH_SURROGATE = /[\uD800-\uDBFF]$/;
 const KEPT_HEADER = "fix: keep the session";
 const ADDED_HEADER = "feat: add the form";
 
@@ -33,6 +37,29 @@ test("the header is cut to 100 characters", () => {
   assert.ok(header.startsWith("refactor: move x"));
 });
 
+test("the header removes every final full stop and space", () => {
+  for (const subject of ["a..", "a. .", "A . . "])
+    assert.equal(commitHeader(CommitType.Feat, subject), STOPPED_HEADER);
+});
+
+test("the cut keeps no half of a surrogate pair", () => {
+  const prefix = `${CommitType.Feat}: `;
+  const room = COMMIT_HEADER_MAX_LENGTH - prefix.length;
+  const header = commitHeader(
+    CommitType.Feat,
+    `${"a".repeat(room - 1)}${EMOJI}`,
+  );
+  assert.equal(header, `${prefix}${"a".repeat(room - 1)}`);
+  assert.equal(HIGH_SURROGATE.test(header), false);
+  assert.equal(header.isWellFormed(), true);
+});
+
+test("a subject is valid only when it gives text after the cleanup", () => {
+  assert.equal(isCommitSubject("Add the form."), true);
+  for (const subject of [".", "..", ". .", " "])
+    assert.equal(isCommitSubject(subject), false, subject);
+});
+
 test("a subject with no text fails the header rule", () => {
   assert.throws(() => commitHeader(CommitType.Feat, "."));
   assert.throws(() => commitHeader(CommitType.Feat, " "));
@@ -47,6 +74,7 @@ test("the header rule accepts a type, an optional scope and a subject", () => {
     "feat:add",
     "feat: ",
     "build: add",
+    "feat: add.",
     `feat: ${"x".repeat(COMMIT_HEADER_MAX_LENGTH)}`,
   ])
     assert.equal(isCommitHeader(header), false, header);

@@ -163,6 +163,21 @@ test("commit_type takes one value of the closed set and is optional", () => {
     );
 });
 
+test("a name that gives no commit subject answers mission.node.content_invalid", () => {
+  for (const name of [".", "..", ". ."]) {
+    contentError(
+      () => validateNodeContent({ ...base(), name }, DEFAULT_MAX),
+      "name",
+    );
+    const { intent, ...task } = base();
+    assert.equal(intent, Intent.Implement);
+    contentError(
+      () => validatePlanContent({ ...task, name }, DEFAULT_MAX),
+      "name",
+    );
+  }
+});
+
 test("a task body holds the five plan content fields alone", () => {
   const { intent, ...task } = base();
   assert.equal(intent, Intent.Implement);

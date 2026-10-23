@@ -21,7 +21,9 @@ const NO_TEXT = "";
 const FIRST_LETTER = 0;
 const AFTER_FIRST_LETTER = 1;
 const WHITESPACE = /\s+/g;
-const FINAL_FULL_STOP = /\.$/;
+const FULL_STOP = ".";
+const FINAL_FULL_STOP = /[.\s]+$/;
+const FINAL_HIGH_SURROGATE = /[\uD800-\uDBFF]$/;
 const UNIT_ID = /^[^\s:]+$/;
 const COMMIT_HEADER = new RegExp(
   `^(${Object.values(CommitType).join("|")})(\\([^()\\s]+\\))?: \\S.*$`,
@@ -33,7 +35,9 @@ export function commitTypeOf(value: CommitType | undefined): CommitType {
 
 export function isCommitHeader(header: string): boolean {
   return (
-    header.length <= COMMIT_HEADER_MAX_LENGTH && COMMIT_HEADER.test(header)
+    header.length <= COMMIT_HEADER_MAX_LENGTH &&
+    COMMIT_HEADER.test(header) &&
+    !header.endsWith(FULL_STOP)
   );
 }
 
@@ -42,19 +46,28 @@ export function isCommitMessage(message: string): boolean {
   return header !== undefined && isCommitHeader(header);
 }
 
+export function isCommitSubject(subject: string): boolean {
+  return Object.values(CommitType).every((type) =>
+    isCommitHeader(headerOf(type, subject)),
+  );
+}
+
 export function commitHeader(type: CommitType, subject: string): string {
+  const header = headerOf(type, subject);
+  assert.ok(isCommitHeader(header), `Invalid commit header: ${header}`);
+  return header;
+}
+
+function headerOf(type: CommitType, subject: string): string {
   const prefix = `${type}${HEADER_SEPARATOR}`;
   const line = subject.replace(WHITESPACE, SPACE).trim();
   const lowered =
     line.charAt(FIRST_LETTER).toLowerCase() + line.slice(AFTER_FIRST_LETTER);
   const cut = lowered
     .slice(FIRST_LETTER, COMMIT_HEADER_MAX_LENGTH - prefix.length)
-    .trimEnd()
-    .replace(FINAL_FULL_STOP, NO_TEXT)
-    .trimEnd();
-  const header = `${prefix}${cut}`;
-  assert.ok(isCommitHeader(header), `Invalid commit header: ${header}`);
-  return header;
+    .replace(FINAL_HIGH_SURROGATE, NO_TEXT)
+    .replace(FINAL_FULL_STOP, NO_TEXT);
+  return `${prefix}${cut}`;
 }
 
 export function commitMessage(

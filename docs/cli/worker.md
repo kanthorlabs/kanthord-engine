@@ -159,7 +159,7 @@ The execution commits each checkout that holds a change and pushes the node bran
 Each commit of the execution has the header `<commit_type>: <subject>` with no scope, and `commit_type` comes from the node content, `feat` when absent.
 The subject of a task commit is the task `name`. The subject of a node unit commit and of a verdict commit is the node `name`.
 The subject of a merge commit is `merge <base branch>`. The subject of a checkpoint commit is the `name` of the current unit.
-The subject starts with a lowercase letter, loses a final full stop and is cut so that the header holds at most 100 characters.
+The subject starts with a lowercase letter and is cut so that the header holds at most 100 characters. The subject then loses every final full stop and space.
 The body holds the unit identity on its own line. A passed unit adds the `Kanthord-Done` trailer after a blank line.
 It then submits one evidence with one `repository` asset for each binding in binding order.
 
