@@ -33,6 +33,7 @@ import {
   type RepositoryFiles,
   type SlotEnvironment,
 } from "./contract.ts";
+import { EnvironmentTarget } from "./environment-state.ts";
 import {
   kindOf,
   readBindingRevision,
@@ -64,6 +65,12 @@ type RepositoryBinding = {
   resource_identity: string;
   config: RepositoryConfig;
 };
+export interface GroupResolution {
+  source: EnvironmentSource;
+  commit: string;
+  document: Environment | null;
+  files: RepositoryFile[];
+}
 interface ResolvedSlot {
   readonly revisions: string;
   readonly environment: SlotEnvironment | null;
@@ -305,6 +312,80 @@ export class ProjectEnvironments {
         { fields: [["project_id", projectId]] },
       );
     return found[0] ?? null;
+  }
+
+  async resolveGroup(
+    bindingId: string,
+    target: EnvironmentTarget,
+    context: Context,
+  ): Promise<GroupResolution> {
+    const config = this.dependencies.store.transaction((tx) => {
+      const binding = readBindingRevision(tx, bindingId);
+      assert.ok(binding);
+      return repositoryConfigSchema.parse(binding.config);
+    });
+    const caller = { context };
+    const stored = config.environment;
+    if (stored !== undefined) {
+      refusedDocument(stored, EnvironmentSource.Stored);
+      const dockerfile = dockerfilePath(stored);
+      const read = await this.readBase(
+        bindingId,
+        config,
+        target === EnvironmentTarget.Image && dockerfile !== null
+          ? [dockerfile]
+          : [],
+        caller,
+      );
+      return {
+        source: EnvironmentSource.Stored,
+        commit: read.commit,
+        document: stored,
+        files: read.files,
+      };
+    }
+    if (target !== EnvironmentTarget.Image) {
+      const read = await this.readBase(bindingId, config, [], caller);
+      return {
+        source: EnvironmentSource.None,
+        commit: read.commit,
+        document: null,
+        files: [],
+      };
+    }
+    const read = await this.readBase(
+      bindingId,
+      config,
+      [DEVCONTAINER_FILE],
+      caller,
+    );
+    const file = read.files[0];
+    assert.ok(file);
+    const document = repositoryDocument(file);
+    if (document === null)
+      return {
+        source: EnvironmentSource.None,
+        commit: read.commit,
+        document: null,
+        files: [],
+      };
+    const dockerfile = dockerfilePath(document);
+    const extra =
+      dockerfile === null
+        ? []
+        : await this.readFiles(
+            bindingId,
+            config,
+            read.commit,
+            [dockerfile],
+            context,
+          );
+    return {
+      source: EnvironmentSource.Repository,
+      commit: read.commit,
+      document,
+      files: [file, ...extra],
+    };
   }
 
   async exportRepository(
