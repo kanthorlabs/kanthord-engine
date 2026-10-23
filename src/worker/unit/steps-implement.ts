@@ -53,6 +53,7 @@ import {
   type SetupEntry,
 } from "./environment-setup.ts";
 import { BudgetLimit } from "../../scheduler/contract.ts";
+import { setupScriptsOf } from "../../kernel/devcontainer.ts";
 import {
   taskRevisionInstruction,
   criterionRevisionInstruction,
@@ -543,6 +544,12 @@ export async function prepareStepsWorkspace(
       base,
       prepared.checkouts.map((checkout) => checkout.head),
     );
+    run.log("environment setup", {
+      end: result.end,
+      commands: setup.flatMap((entry) =>
+        entry.environment === null ? [] : setupScriptsOf(entry.environment),
+      ).length,
+    });
     if (result.end === SetupEnd.BudgetEnd)
       throw new ExecutionStop(EndReason.BudgetEnd, BudgetLimit.WallTime);
     if (result.end === SetupEnd.Failed)
