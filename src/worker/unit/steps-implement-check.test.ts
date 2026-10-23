@@ -46,6 +46,7 @@ const SECOND_JUDGEMENT = 2;
 const TASK_JUDGED = "task judged";
 const CHOICE_AND_TWO_JUDGEMENTS = 3;
 const THREE_JUDGEMENTS = 3;
+const STRAY_FILE = "stray.txt";
 
 test("start check judges passing tasks in order and discards verification changes", async (t) => {
   const tasks = [
@@ -100,6 +101,44 @@ test("start check judges passing tasks in order and discards verification change
   h.input.workspaces.release(
     h.input.workspaces.nodeKey(h.input.claim.node_id),
     WorkspaceKind.Node,
+  );
+});
+
+test("a start-check judgement that changes files commits them and leaves the task pending", async (t) => {
+  const current = task("judged", "true");
+  const h = await fixture(
+    t,
+    [current],
+    [
+      fauxAssistantMessage(
+        fauxToolCall("write", { path: STRAY_FILE, content: "stray" }),
+        { stopReason: "toolUse" },
+      ),
+      fauxAssistantMessage(
+        'kanthord-judgement: {"criterion_met":true,"rationale":"met"}',
+      ),
+    ],
+  );
+  const base = h.checkouts[0]!.head;
+  assert.deepEqual(
+    (await startCheck(h)).pending.map(({ task, instruction }) => [
+      task.id,
+      instruction,
+    ]),
+    [[current.id, null]],
+  );
+  assert.notEqual(h.checkouts[0]!.head, base);
+  assert.equal(
+    (await simpleGit(h.root).raw(["ls-files", STRAY_FILE])).trim(),
+    STRAY_FILE,
+  );
+  assert.equal(
+    judgedAt(h.input.workspaces.nodeKey(h.input.claim.node_id), {
+      attempt: h.input.claim.attempt,
+      revision: h.input.claim.pinned_revision,
+      taskId: current.id,
+    }),
+    null,
   );
 });
 
@@ -297,6 +336,62 @@ test("the start check of a rework revises the chosen task when a node verificati
       (fields) => (fields as { task_id: string }).task_id,
     ),
     [tasks[0]!.id, tasks[2]!.id],
+  );
+});
+
+test("the template commits the files that a task choice turn changes", async (t) => {
+  const { h } = await reworkFixture(
+    t,
+    [
+      fauxAssistantMessage(
+        fauxToolCall("write", { path: STRAY_FILE, content: "stray" }),
+        { stopReason: "toolUse" },
+      ),
+      fauxAssistantMessage('kanthord-judgement: {"filename":"second.md"}'),
+      fauxAssistantMessage(MET),
+      fauxAssistantMessage(MET),
+    ],
+    `echo ${NODE_FAILURE}; false`,
+  );
+  await startCheck(h);
+  assert.equal(
+    (await simpleGit(h.root).raw(["ls-files", STRAY_FILE])).trim(),
+    STRAY_FILE,
+  );
+  assert.ok(
+    (await simpleGit(h.root).log()).latest!.message.includes(
+      h.input.claim.node_id,
+    ),
+  );
+});
+
+test("a budget end in the task choice turn commits its files as a checkpoint", async (t) => {
+  const { h } = await reworkFixture(
+    t,
+    [
+      fauxAssistantMessage(
+        fauxToolCall("write", { path: STRAY_FILE, content: "stray" }),
+        { stopReason: "toolUse" },
+      ),
+      fauxAssistantMessage('kanthord-judgement: {"filename":"second.md"}'),
+    ],
+    `echo ${NODE_FAILURE}; false`,
+  );
+  const instruct = h.agent.instruct.bind(h.agent);
+  h.agent.instruct = async (...args) => {
+    await instruct(...args);
+    h.agent.budget.exhausted = () => true;
+  };
+  assert.deepEqual((await startCheck(h)).budgetEnd, {
+    task: null,
+    boundary: TaskBoundary.InProgress,
+  });
+  assert.equal(
+    (await simpleGit(h.root).raw(["ls-files", STRAY_FILE])).trim(),
+    STRAY_FILE,
+  );
+  assert.ok(
+    (await simpleGit(h.root).log()).latest!.message.includes("checkpoint"),
   );
 });
 
