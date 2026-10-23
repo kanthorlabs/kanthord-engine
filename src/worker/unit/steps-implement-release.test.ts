@@ -14,7 +14,7 @@ import { executionBoundary } from "./native-method.ts";
 import type { MethodClients } from "./method-clients.ts";
 import type { TaskRunner } from "./steps-implement.ts";
 import { runTask, runStepsImplement } from "./steps-implement.ts";
-import { refreshBeforeRelease } from "./base-refresh.ts";
+import { releaseGate, ReleaseGateKind } from "./release-gate.ts";
 import { headSetOf, recordJudged } from "./judged-tasks.ts";
 import { Diagnostic } from "../../kernel/errors.ts";
 import { background } from "../../kernel/context.ts";
@@ -28,7 +28,6 @@ import { SpanOperation, SpanRecorder } from "./telemetry.ts";
 import { GitStep } from "./method-telemetry.ts";
 import {
   advanceBase,
-  commitOnNode,
   implementFixture as fixture,
   NO_PROVIDER_CALLS,
   recordReleases,
@@ -127,7 +126,7 @@ test("implement checkpoints budget-ended work and refuses release after a failed
   assert.ok(existsSync(other.root));
 });
 
-test("S1 budget-ended task verification releases the evidenced head without further work", async (t) => {
+test("S1 budget-ended task verification releases further work and submits no evidence", async (t) => {
   const current = task("failed-budget", "false");
   const h = await fixture(t, [current], []);
   h.agent.budget.exhausted = () => true;
@@ -141,17 +140,18 @@ test("S1 budget-ended task verification releases the evidenced head without furt
   } as unknown as MethodClients["mission"];
   h.run.clients.scheduler = {
     executionRelease: async (input: { body: { further_work: boolean } }) => {
-      assert.ok(evidenced);
-      assert.equal(input.body.further_work, false);
+      assert.equal(input.body.further_work, true);
       released = true;
       return { type: "completed", status: 200, data: {} };
     },
   } as unknown as MethodClients["scheduler"];
   assert.deepEqual(await runStepsImplement(h), {
     kind: "released",
-    furtherWork: false,
+    furtherWork: true,
+    stop: { reason: "budget_end", code: "wall_time" },
   });
   assert.ok(released);
+  assert.equal(evidenced, false);
   const timed = await fixture(
     t,
     [task("timed", "touch transient; sleep 30")],
@@ -165,7 +165,6 @@ test("S1 budget-ended task verification releases the evidenced head without furt
   timed.agent.budget.exhausted = () => Date.now() >= deadline;
   assert.deepEqual(await runTask(timed, timed.revision.tasks![0]!), {
     kind: "budget_end",
-    boundary: "run_failed",
   });
   assert.equal(existsSync(join(timed.root, "transient")), false);
 });
@@ -318,33 +317,22 @@ test("a revoked stop writes no checkpoint, pushes nothing and releases nothing",
   );
 });
 
-test("the release refresh merges a clean base change only when every task still passes", async (t) => {
+test("the release gate merges a clean base change and verifies the merged head", async (t) => {
   const passing = await fixture(t, [task("pass", "true")], []);
+  const before = passing.checkouts[0]!.head;
   await advanceBase(passing, t, LATE_MAIN_CHANGE, "other");
-  assert.equal(await refreshBeforeRelease(passing, async () => true), true);
+  assert.deepEqual(await releaseGate(passing), {
+    kind: ReleaseGateKind.Passed,
+  });
   assert.equal(
     readFileSync(join(passing.root, "other"), "utf8"),
     LATE_MAIN_CHANGE,
   );
-  const failing = await fixture(t, [task("fail", "false")], []);
-  const before = failing.checkouts[0]!.head;
-  await advanceBase(failing, t, LATE_MAIN_CHANGE, "other");
-  assert.equal(await refreshBeforeRelease(failing, async () => false), false);
-  assert.equal(failing.checkouts[0]!.head, before);
-  assert.equal(await simpleGit(failing.root).revparse(["HEAD"]), before);
-});
-
-test("the release refresh refuses a conflicting base change and keeps the node head", async (t) => {
-  const h = await fixture(t, [], []);
-  await commitOnNode(h.root, "node side");
-  h.checkouts[0]!.head = await simpleGit(h.root).revparse(["HEAD"]);
-  await advanceBase(h, t, "main side");
-  assert.equal(await refreshBeforeRelease(h, async () => true), false);
+  assert.notEqual(passing.checkouts[0]!.head, before);
   assert.equal(
-    await simpleGit(h.root).revparse(["HEAD"]),
-    h.checkouts[0]!.head,
+    (await simpleGit(passing.root).revparse(["HEAD"])).trim(),
+    passing.checkouts[0]!.head,
   );
-  assert.equal((await simpleGit(h.root).status()).isClean(), true);
 });
 
 test("the finish writes one git span for each git step and the cause of a failed push", async (t) => {

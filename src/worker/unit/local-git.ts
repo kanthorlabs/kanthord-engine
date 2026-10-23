@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { dirname, resolve } from "node:path";
 import { simpleGit, type SimpleGitOptions } from "simple-git";
 import type { Context } from "../../kernel/context.ts";
 import {
@@ -588,14 +588,39 @@ export async function abortMerge(
   await run(env, directory, ["merge", "--abort"], context, deadlineMs);
 }
 
-export async function resetTo(
+export async function cloneLocal(
+  env: NodeJS.ProcessEnv,
+  source: string,
+  directory: string,
+  context: Context,
+  deadlineMs: number,
+): Promise<void> {
+  assert.ok(source && !source.startsWith("-"));
+  assert.ok(directory && !directory.startsWith("-"));
+  await run(
+    env,
+    dirname(directory),
+    ["clone", "--local", "--no-checkout", "--", source, directory],
+    context,
+    deadlineMs,
+  );
+}
+
+export async function checkoutDetached(
   env: NodeJS.ProcessEnv,
   directory: string,
   commit: string,
   context: Context,
   deadlineMs: number,
 ): Promise<void> {
-  await run(env, directory, ["reset", "--hard", commit], context, deadlineMs);
+  assert.match(commit, /^[a-f0-9]{40,64}$/);
+  await run(
+    env,
+    directory,
+    ["checkout", "--detach", commit, "--"],
+    context,
+    deadlineMs,
+  );
 }
 
 export async function conflictMarkerFiles(

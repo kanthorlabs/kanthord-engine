@@ -9,7 +9,6 @@ import {
   runStepsImplement,
   runTask,
   startCheck,
-  TaskBoundary,
   TaskResultKind,
 } from "./steps-implement.ts";
 import {
@@ -92,9 +91,7 @@ test("exit 127 in a task verification is a code failure that sends a work turn",
   const h = await fixture(t, [current], []);
   const checked = await startCheck(h);
   assert.deepEqual(checked, {
-    pending: [
-      { task: current, boundary: TaskBoundary.RunFailed, instruction: null },
-    ],
+    pending: [{ task: current, instruction: null }],
     budgetEnd: null,
   });
 });
@@ -106,7 +103,7 @@ test("a kill at the wall deadline during a verification is a budget end and not 
   checked.agent.budget.wallDeadline = () => checkDeadline;
   assert.deepEqual(await startCheck(checked), {
     pending: [],
-    budgetEnd: { task: current, boundary: TaskBoundary.RunFailed },
+    budgetEnd: { task: current },
   });
   assert.equal(checked.agent.budget.exhausted(), true);
   const worked = await fixture(t, [current], [fauxAssistantMessage("work")]);
@@ -114,7 +111,6 @@ test("a kill at the wall deadline during a verification is a budget end and not 
   worked.agent.budget.wallDeadline = () => workDeadline;
   assert.deepEqual(await runTask(worked, current), {
     kind: TaskResultKind.BudgetEnd,
-    boundary: TaskBoundary.RunFailed,
   });
   assert.equal(worked.provider.calls.length, ONE_TURN);
 });

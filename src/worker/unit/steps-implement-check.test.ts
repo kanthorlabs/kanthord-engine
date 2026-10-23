@@ -27,7 +27,6 @@ import {
 } from "./judgement.ts";
 import type { MethodClients } from "./method-clients.ts";
 import { WorkspaceKind } from "./workspace.ts";
-import { TaskBoundary } from "./steps-implement.ts";
 import {
   prepareStepsWorkspace,
   runStepsImplement,
@@ -238,7 +237,6 @@ test("the start check revises a task that the prior rationale names without a ju
   assert.deepEqual(checked.pending, [
     {
       task: named,
-      boundary: "run_passed",
       instruction: criterionRevisionInstruction(SHIPPED_TEMPLATES, rationale),
     },
   ]);
@@ -280,7 +278,6 @@ test("the start check judges a task against the requested changes of a change re
   assert.deepEqual(checked.pending, [
     {
       task: current,
-      boundary: "run_passed",
       instruction: criterionRevisionInstruction(SHIPPED_TEMPLATES, requested),
     },
   ]);
@@ -334,7 +331,6 @@ test("the start check of a rework revises the chosen task when a node verificati
   assert.equal(checked.pending.length, ONE_JUDGEMENT);
   const [pending] = checked.pending;
   assert.equal(pending!.task, tasks[1]);
-  assert.equal(pending!.boundary, TaskBoundary.RunPassed);
   assert.ok(pending!.instruction?.includes(NODE_FAILURE));
   assert.ok(pending!.instruction?.includes("the last 4 KiB"));
   const choice = JSON.stringify(h.provider.calls[0]);

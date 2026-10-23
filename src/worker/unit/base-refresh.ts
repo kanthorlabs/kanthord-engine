@@ -4,12 +4,10 @@ import { PromptTemplate, type PromptTemplates } from "../../agent/contract.ts";
 import { renderWorkPrompt } from "../../agent/prompt-composer.ts";
 import { renderTemplate } from "../../agent/prompt-templates.ts";
 import {
-  abortMerge,
   commitOf,
   headCommit,
   isAncestor,
   mergeRef,
-  resetTo,
   taskCommitMessage,
 } from "./local-git.ts";
 import {
@@ -22,7 +20,6 @@ import { GitStep, withinGit } from "./method-telemetry.ts";
 import { gatedAgent } from "./turn-gate.ts";
 
 const NO_FILES = 0;
-const NO_MERGES = 0;
 
 export const RefreshResult = {
   Current: "current",
@@ -126,94 +123,24 @@ async function mergeUnder(
   return RefreshResult.Merged;
 }
 
-export async function refreshBeforeRelease(
+export async function refreshAtRelease(
   state: StepsState,
-  verifyAll: () => Promise<boolean>,
-): Promise<boolean> {
-  const budget = state.agent.budget;
-  const context = state.run.cleanupContext();
+): Promise<RefreshResult> {
+  const context = state.agent.budget.cleanupContext(state.run.operationContext);
   const remaining = () => state.input.claim.expired_at - Date.now();
-  const merged: { checkout: WorkspaceCheckout; before: string }[] = [];
-  const reset = async () => {
-    for (const { checkout, before } of merged) {
-      await resetTo(
-        state.input.env,
-        checkout.directory,
-        before,
-        context,
-        remaining(),
-      );
-      checkout.head = before;
-    }
-  };
   try {
-    for (const checkout of state.checkouts) {
-      const base = baseBranchOf(state, checkout);
+    for (const checkout of state.checkouts)
       await withinGit(state.run.spans, GitStep.FetchBase, () =>
         state.input.transport.fetchBase(
           checkout.directory,
-          base,
+          baseBranchOf(state, checkout),
           context,
           remaining(),
           sshAccessOf(state.input.sshAccess, checkout.binding_id),
         ),
       );
-      const ref = `origin/${base}`;
-      if (
-        await isAncestor(
-          state.input.env,
-          checkout.directory,
-          ref,
-          context,
-          remaining(),
-        )
-      )
-        continue;
-      const before = checkout.head;
-      const conflicts = await withinGit(
-        state.run.spans,
-        GitStep.MergeBase,
-        () =>
-          mergeRef(
-            state.input.env,
-            checkout.directory,
-            ref,
-            context,
-            remaining(),
-          ),
-      );
-      if (conflicts.length > NO_FILES) {
-        await abortMerge(
-          state.input.env,
-          checkout.directory,
-          context,
-          remaining(),
-        );
-        await reset();
-        return false;
-      }
-      merged.push({ checkout, before });
-      checkout.head = await headCommit(
-        state.input.env,
-        checkout.directory,
-        context,
-        remaining(),
-      );
-    }
-    if (merged.length === NO_MERGES) return true;
-    if (!budget.exhausted() && (await verifyAll())) {
-      for (const { checkout } of merged)
-        state.run.log("base merged", {
-          binding: checkout.name,
-          base_branch: baseBranchOf(state, checkout),
-          commit: checkout.head,
-          conflicts: NO_FILES,
-        });
-      return true;
-    }
-    await reset();
-    return false;
   } finally {
     context.cancel();
   }
+  return refreshAtClaim(state);
 }
