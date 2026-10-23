@@ -26,6 +26,7 @@ import {
   type Content,
   type HumanActor,
   type MissionBindings,
+  type MissionEnvironments,
   type NodeChange,
   type NodeCreate,
   type Revision,
@@ -35,6 +36,7 @@ import {
   type Intent,
   type WorkQueue,
 } from "./contract.ts";
+import { guardEnvironmentMix } from "./environment-mix.ts";
 import { revisionFromRow } from "./revision.ts";
 import { openAttemptsOf } from "./store.ts";
 import { claimableMap, reconcileMission, routeMission } from "./routing.ts";
@@ -201,6 +203,7 @@ export function createNode(
   body: NodeCreate,
   actor: HumanActor,
   bindings: MissionBindings,
+  environments: MissionEnvironments,
   workQueue: WorkQueue,
   textMaxBytes: number,
 ): NodeChange {
@@ -221,6 +224,12 @@ export function createNode(
     body.tasks,
     [],
     textMaxBytes,
+  );
+  guardEnvironmentMix(
+    tx,
+    { bindings, environments },
+    mission.project_id,
+    content.bindings,
   );
   const before = claimableMap(tx, missionId, bindings);
   const nodeId = createIdentity(NODE_IDENTITY_PREFIX);

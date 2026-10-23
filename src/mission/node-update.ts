@@ -17,6 +17,7 @@ import {
   type HumanActor,
   type Mission,
   type MissionBindings,
+  type MissionEnvironments,
   type NodeChange,
   type NodeUpdate,
   type Revision,
@@ -24,6 +25,7 @@ import {
   type TaskContent,
   type Intent,
 } from "./contract.ts";
+import { guardEnvironmentMix } from "./environment-mix.ts";
 import { resolveContent, resolveTasks } from "./node-create.ts";
 import { requireNode } from "./node-read.ts";
 import { revisionFromRow } from "./revision.ts";
@@ -206,6 +208,7 @@ export function updateNode(
   body: NodeUpdate,
   actor: HumanActor,
   bindings: MissionBindings,
+  environments: MissionEnvironments,
   textMaxBytes: number,
 ): NodeChange {
   const context = editContext(tx, nodeId, body);
@@ -228,6 +231,12 @@ export function updateNode(
     body.tasks,
     context.previous.tasks,
     textMaxBytes,
+  );
+  guardEnvironmentMix(
+    tx,
+    { bindings, environments },
+    context.mission.project_id,
+    content.bindings,
   );
   return finishEdit(
     tx,
