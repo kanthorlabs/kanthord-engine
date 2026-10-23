@@ -428,6 +428,7 @@ test(
         strategy: { base_branch: "main" },
         project_prompt: PROJECT,
         working_layer: WORKING_LAYER_ALL_ON,
+        environment: null,
       });
       assert.ok(
         runtimeX.setup.agents[0]!.prompt.final.endsWith(

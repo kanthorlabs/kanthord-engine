@@ -330,6 +330,123 @@ components:
                   - claude_local_md
                   - project_prompt
                 additionalProperties: false
+              environment:
+                anyOf:
+                  - oneOf:
+                      - type: object
+                        properties:
+                          source:
+                            type: string
+                            const: stored
+                          document:
+                            type: object
+                            properties:
+                              image:
+                                type: string
+                                minLength: 1
+                              build:
+                                type: object
+                                properties:
+                                  dockerfile:
+                                    type: string
+                                    minLength: 1
+                                  context:
+                                    type: string
+                                    minLength: 1
+                                additionalProperties: {}
+                              features:
+                                type: object
+                                propertyNames:
+                                  type: string
+                                additionalProperties: {}
+                              containerEnv:
+                                type: object
+                                propertyNames:
+                                  type: string
+                                additionalProperties:
+                                  type: string
+                              remoteEnv:
+                                type: object
+                                propertyNames:
+                                  type: string
+                                additionalProperties:
+                                  anyOf:
+                                    - type: string
+                                    - type: "null"
+                              onCreateCommand:
+                                anyOf:
+                                  - anyOf:
+                                      - type: string
+                                        minLength: 1
+                                      - minItems: 1
+                                        type: array
+                                        items:
+                                          type: string
+                                  - type: object
+                                    propertyNames:
+                                      type: string
+                                    additionalProperties:
+                                      anyOf:
+                                        - type: string
+                                          minLength: 1
+                                        - minItems: 1
+                                          type: array
+                                          items:
+                                            type: string
+                              updateContentCommand:
+                                anyOf:
+                                  - anyOf:
+                                      - type: string
+                                        minLength: 1
+                                      - minItems: 1
+                                        type: array
+                                        items:
+                                          type: string
+                                  - type: object
+                                    propertyNames:
+                                      type: string
+                                    additionalProperties:
+                                      anyOf:
+                                        - type: string
+                                          minLength: 1
+                                        - minItems: 1
+                                          type: array
+                                          items:
+                                            type: string
+                              postCreateCommand:
+                                anyOf:
+                                  - anyOf:
+                                      - type: string
+                                        minLength: 1
+                                      - minItems: 1
+                                        type: array
+                                        items:
+                                          type: string
+                                  - type: object
+                                    propertyNames:
+                                      type: string
+                                    additionalProperties:
+                                      anyOf:
+                                        - type: string
+                                          minLength: 1
+                                        - minItems: 1
+                                          type: array
+                                          items:
+                                            type: string
+                            additionalProperties: {}
+                        required:
+                          - source
+                          - document
+                        additionalProperties: false
+                      - type: object
+                        properties:
+                          source:
+                            type: string
+                            const: repository
+                        required:
+                          - source
+                        additionalProperties: false
+                  - type: "null"
             required:
               - binding_id
               - name
@@ -339,6 +456,7 @@ components:
               - strategy
               - project_prompt
               - working_layer
+              - environment
             additionalProperties: false
       required:
         - execution_id
