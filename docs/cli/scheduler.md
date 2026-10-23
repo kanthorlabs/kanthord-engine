@@ -495,12 +495,19 @@ No query fields are accepted. The required file supplies the following fields.
   the command.
 - A worker runs the setup of the environment of each repository binding in
   each checkout and each clone: `updateContentCommand`, then
-  `postCreateCommand`. A setup failure on the node head reruns the setup on the
-  base head. A failure on the base head stops with `environment_failed` and the
-  code `setup_failed`. A pass on the base head is a code failure of the node
-  unit. A verification exit code 127 reruns the command once on the base head.
-  127 on both heads stops with `environment_failed` and the code
-  `command_absent`. The stop detail holds the exit code and the command.
+  `postCreateCommand`. A setup that changes a tracked file stops with
+  `environment_failed` and the code `setup_failed`, and the detail names the
+  paths. A setup failure on the node head reruns the setup on the base head. A
+  failure on the base head stops with `environment_failed` and the code
+  `setup_failed`. A pass on the base head is a code failure of the node unit.
+  The node unit then gets the setup output as its first revision instruction,
+  and the setup runs again before the next verification. The reviewer then
+  assesses `criterion_not_met` with the setup output. A verification exit code
+  127 reruns the command once on the base head, after the setup of the base
+  clone. A setup failure of that clone stops with `setup_failed`, and an end of
+  the budget is a budget end. 127 on both heads stops with `environment_failed`
+  and the code `command_absent`. The stop detail holds the exit code and the
+  command.
 - Mission checks the release predicate of a release with no `stop` in the
   release transaction, before the terminal write, under [the release admission](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/mission-service.impl.md#the-release-admission).
   A release that fails it answers 409 `mission.release.obligation_unmet` with
