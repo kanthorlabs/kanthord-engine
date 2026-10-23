@@ -154,7 +154,7 @@ export function environmentTag(resourceIdentity: string, sum: string): string {
 
 export function environmentDigest(
   environment: SlotEnvironment,
-  kanthordImage: string,
+  kanthordImageId: string,
   version: string,
 ): string {
   return digest({
@@ -166,7 +166,7 @@ export function environmentDigest(
       state: file.state,
       text: file.text,
     })),
-    kanthord_image: kanthordImage,
+    kanthord_image: kanthordImageId,
     version,
   });
 }
@@ -351,7 +351,7 @@ export class EnvironmentImages {
       environment.resource_identity,
       environmentDigest(
         environment,
-        this.options.kanthordImage,
+        await this.kanthordImageId(runtime),
         this.options.version,
       ),
     );
@@ -371,6 +371,18 @@ export class EnvironmentImages {
       this.building.set(tag, pending);
     }
     return pending;
+  }
+
+  private async kanthordImageId(runtime: ContainerRuntime): Promise<string> {
+    const inspected = await this.options.host.run(
+      runtime,
+      ["image", "inspect", "--format", "{{.Id}}", this.options.kanthordImage],
+      IMAGE_COMMAND_TIMEOUT_MS,
+    );
+    const id = inspected.stdout.trim();
+    return inspected.code === SUCCESS_CODE && id
+      ? id
+      : this.options.kanthordImage;
   }
 
   private async build(

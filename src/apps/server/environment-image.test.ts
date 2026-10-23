@@ -28,6 +28,8 @@ import {
 const OWNER = "OWNER";
 const KANTHORD_IMAGE = "localhost/kanthord-dev-node:1.0.0";
 const VERSION = "1.0.0";
+const KANTHORD_IMAGE_ID = `sha256:${"b".repeat(64)}`;
+const INSPECT = "inspect";
 const SUM = "a".repeat(64);
 const IDENTITY = "repository:github:Acme/.Todo_App";
 const SUCCESS = 0;
@@ -80,7 +82,11 @@ function images(
     resolves: () => true,
     run: (_runtime, args) => {
       calls.push([...args]);
-      return Promise.resolve({ code: options.exists, stdout: "", stderr: "" });
+      return Promise.resolve(
+        args[1] === INSPECT
+          ? { code: SUCCESS, stdout: `${KANTHORD_IMAGE_ID}\n`, stderr: "" }
+          : { code: options.exists, stdout: "", stderr: "" },
+      );
     },
   };
   const cli = join(directory, "cli.mjs");
@@ -250,17 +256,20 @@ test("a slot of a project with no environment runs on the container image", asyn
   assert.deepEqual(calls, []);
 });
 
-test("a slot runs on an existing environment image and builds nothing", async (t) => {
+test("a slot runs on an existing environment image of the current slot image id and builds nothing", async (t) => {
   const { built, calls, exports } = images(temporary(t), {
     environment: environment(),
     exists: SUCCESS,
   });
   const tag = environmentTag(
     IDENTITY,
-    environmentDigest(environment(), KANTHORD_IMAGE, VERSION),
+    environmentDigest(environment(), KANTHORD_IMAGE_ID, VERSION),
   );
   assert.equal(await built.imageFor(ContainerRuntime.Podman, slot), tag);
-  assert.deepEqual(calls, [["image", "exists", tag]]);
+  assert.deepEqual(calls, [
+    ["image", "inspect", "--format", "{{.Id}}", KANTHORD_IMAGE],
+    ["image", "exists", tag],
+  ]);
   assert.deepEqual(exports, []);
 });
 
