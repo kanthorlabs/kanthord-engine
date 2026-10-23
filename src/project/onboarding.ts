@@ -26,10 +26,15 @@ import {
   environmentPath,
   environmentTagOf,
   type EnvironmentRuntime,
-  type EnvironmentState,
   type ProofFile,
   type ProofFiles,
+  type EnvironmentState,
   type ProofVerdict,
+} from "./environment-state.ts";
+
+export {
+  environmentStateSchema,
+  type EnvironmentState,
 } from "./environment-state.ts";
 
 const KEY_SEPARATOR = "\u0000";
@@ -238,6 +243,20 @@ function detailFacts(detail: string): {
   return {
     command: parsed.data.command ?? NO_COMMAND,
     exit_code: parsed.data.exit_code ?? NO_EXIT_CODE,
+  };
+}
+
+function failedVerdict(
+  failureClass: EnvironmentFailureClass,
+  tail: string,
+): ProofVerdict {
+  return {
+    outcome: ProofOutcome.Failed,
+    class: failureClass,
+    command: NO_COMMAND,
+    exit_code: NO_EXIT_CODE,
+    tail,
+    checks: [],
   };
 }
 
@@ -581,15 +600,7 @@ export class Onboarding {
     this.logRun(RUN_STARTED, record);
     let completed = false;
     try {
-      const signal = AbortSignal.any([
-        this.context.signal,
-        AbortSignal.timeout(RUN_DEADLINE_MS),
-      ]);
-      const verdict = await this.execute(
-        record,
-        this.dependencies.runId(),
-        signal,
-      );
+      const verdict = await this.verdictOf(record, this.dependencies.runId());
       if (verdict !== null) {
         await this.finalize(record, verdict);
         completed = true;
@@ -628,6 +639,31 @@ export class Onboarding {
     );
   }
 
+  private async verdictOf(
+    record: GroupRecord,
+    runId: string,
+  ): Promise<ProofVerdict | null> {
+    const signal = AbortSignal.any([
+      this.context.signal,
+      AbortSignal.timeout(RUN_DEADLINE_MS),
+    ]);
+    try {
+      return await this.execute(record, runId, signal);
+    } catch (error) {
+      if (this.context.signal.aborted) return null;
+      this.dependencies.logger.error(
+        { err: error, binding: record.binding_name, digest: record.digest },
+        RUN_FAILED,
+      );
+      return failedVerdict(
+        record.step === EnvironmentStatus.Building
+          ? EnvironmentFailureClass.BuildFailed
+          : EnvironmentFailureClass.SetupFailed,
+        signal.aborted ? RUN_DEADLINE_TAIL : messageOf(error),
+      );
+    }
+  }
+
   private async execute(
     record: GroupRecord,
     runId: string,
@@ -653,41 +689,16 @@ export class Onboarding {
     }
     assert.ok(tag !== null, "An image group holds a tag.");
     if (record.step === EnvironmentStatus.Building) {
-      const failure = await this.build({ ...base, tag, document }, signal);
+      const built = await runtime.build({ ...base, tag, document }, signal);
       if (this.context.signal.aborted) return null;
-      if (failure !== null) return failure;
+      if (built.outcome !== ImageBuildOutcome.Built)
+        return failedVerdict(built.class, built.tail);
       record.step = EnvironmentStatus.Proving;
       record.step_started_at = this.dependencies.now();
       this.notify();
     }
     const results = await runtime.prove({ ...proof, tag }, signal);
     return this.context.signal.aborted ? null : classifyProof(results);
-  }
-
-  private async build(
-    input: Parameters<EnvironmentRuntime["build"]>[0],
-    signal: AbortSignal,
-  ): Promise<ProofVerdict | null> {
-    const failed = (
-      failureClass: EnvironmentFailureClass,
-      tail: string,
-    ): ProofVerdict => ({
-      outcome: ProofOutcome.Failed,
-      class: failureClass,
-      command: NO_COMMAND,
-      exit_code: NO_EXIT_CODE,
-      tail,
-      checks: [],
-    });
-    try {
-      const built = await this.dependencies.runtime.build(input, signal);
-      return built.outcome === ImageBuildOutcome.Built
-        ? null
-        : failed(built.class, built.tail);
-    } catch (error) {
-      if (this.context.signal.aborted || !signal.aborted) throw error;
-      return failed(EnvironmentFailureClass.BuildFailed, RUN_DEADLINE_TAIL);
-    }
   }
 
   private async finalize(
@@ -741,8 +752,7 @@ export class Onboarding {
     for (const identity of input.resource_identities) {
       const record = this.records.get(keyOf(input.project_id, identity));
       if (record === undefined || record.digest === null) continue;
-      const entry = input.digests[identity];
-      if (entry !== undefined && entry !== record.digest) continue;
+      if (input.digests[identity] !== record.digest) continue;
       const file: ProofFile = {
         digest: record.digest,
         outcome: ProofOutcome.Failed,

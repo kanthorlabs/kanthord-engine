@@ -16,7 +16,6 @@ import {
   ProofFiles,
   environmentDigest,
   environmentPath,
-  environmentStateSchema,
   environmentTagOf,
   type CommandResult,
   type EnvironmentRuntime,
@@ -27,6 +26,7 @@ import {
 } from "./environment-state.ts";
 import {
   Onboarding,
+  environmentStateSchema,
   statusOf,
   targetOf,
   type BindingFacts,
@@ -69,7 +69,6 @@ const FAILED = "failed";
 const ONBOARDING = "onboarding";
 const EXECUTION = "execution";
 const BUILD_FAILED = "build_failed";
-const SETUP_FAILED = "setup_failed";
 const NO_SPACE = "no space";
 const BOOM = "boom";
 const MAKE_SETUP = "make setup";
@@ -78,6 +77,9 @@ const PROVE = "prove";
 const APP_NAME = "app";
 const IMAGE = "image";
 const EXECUTION_ID = "execution_1";
+const SETUP_FAILED = "setup_failed";
+const PROOF_CRASHED = "proof crashed";
+const HOST_CRASHED = "host crashed";
 const DEADLINE_TAIL = "the run deadline of 30 minutes passed";
 const TWO_CALLS = 2;
 const RUNTIME_NAME = "podman";
@@ -172,6 +174,7 @@ class Harness {
   proveGate: Deferred | null = new Deferred();
   buildResult: ImageBuildResult = { outcome: "built" };
   proveResults: CommandResult[] = [];
+  proveError: Error | null = null;
   images = new Map<string, string>([
     [BASE, "sha256:base"],
     [SLOT_IMAGE, "sha256:slot"],
@@ -213,12 +216,14 @@ class Harness {
         this.events.push("prove");
         this.proveInputs.push(input);
         await hold(this.proveGate, signal);
+        if (this.proveError !== null) throw this.proveError;
         return this.proveResults;
       },
       proveOnHost: async (input: ProofInput, signal: AbortSignal) => {
         this.events.push("proveOnHost");
         this.proveInputs.push(input);
         await hold(this.proveGate, signal);
+        if (this.proveError !== null) throw this.proveError;
         return this.proveResults;
       },
       tagProved: async (tag: string) => {
@@ -1199,6 +1204,62 @@ test(
 );
 
 test(
+  "a rejection of the proof writes a failed proof file and leaves no pending status",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const h = new Harness(t);
+    h.proveError = new Error(PROOF_CRASHED);
+    await h.compute();
+    h.open();
+    await h.ended();
+    const file = h.proofOf(h.digest());
+    assert.ok(file);
+    assert.equal(file.outcome, FAILED);
+    assert.equal(file.class, SETUP_FAILED);
+    assert.equal(file.tail, PROOF_CRASHED);
+    assert.equal(h.state().status, EnvironmentStatus.Failed);
+    assert.equal(h.state().run_started_at, null);
+  },
+);
+
+test(
+  "a rejection of the host proof writes a failed proof file",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const h = new Harness(t);
+    h.bindings = facts([APP], []);
+    h.resolution = STORED;
+    h.proveError = new Error(HOST_CRASHED);
+    await h.compute();
+    h.open();
+    await h.ended();
+    const file = h.proofOf(h.digest());
+    assert.ok(file);
+    assert.equal(file.outcome, FAILED);
+    assert.equal(file.tail, HOST_CRASHED);
+    assert.equal(h.state().status, EnvironmentStatus.Failed);
+  },
+);
+
+test(
+  "a deadline in the proof writes setup_failed with the deadline tail",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const h = new Harness(t);
+    h.existing.add(h.tagOf(h.digest()));
+    t.mock.method(AbortSignal, "timeout", () =>
+      AbortSignal.abort(new Error("deadline")),
+    );
+    await h.compute();
+    await h.ended();
+    const file = h.proofOf(h.digest());
+    assert.ok(file);
+    assert.equal(file.class, SETUP_FAILED);
+    assert.equal(file.tail, DEADLINE_TAIL);
+  },
+);
+
+test(
   "the logger receives the start and the end of a run",
   { timeout: TEST_TIMEOUT_MS },
   async (t) => {
@@ -1318,17 +1379,23 @@ test("environmentFailed keeps the status of a group with another current digest"
   assert.equal(h.state().status, EnvironmentStatus.Ready);
 });
 
-test("environmentFailed closes the gate of a group with no digests entry", async (t) => {
+test("environmentFailed keeps the status of a group with no digests entry", async (t) => {
   const h = await readyHarness(t);
   h.onboarding.environmentFailed(failureInput(h, { digests: {} }));
-  assert.equal(h.state().status, EnvironmentStatus.Failed);
+  assert.deepEqual(h.proofs.digests(h.pathOf()), []);
+  assert.equal(h.state().status, EnvironmentStatus.Ready);
 
   const none = new Harness(t);
   none.bindings = facts([APP], []);
   none.resolution = NOTHING;
   await none.compute();
-  assert.equal(none.state().status, EnvironmentStatus.None);
   none.onboarding.environmentFailed(failureInput(none, { digests: {} }));
+  assert.equal(none.state().status, EnvironmentStatus.None);
+  none.onboarding.environmentFailed(
+    failureInput(none, {
+      digests: { [APP.resource_identity]: none.digest() },
+    }),
+  );
   assert.equal(none.state().status, EnvironmentStatus.Failed);
   assert.equal(none.state().failure?.reproduce, null);
 });
