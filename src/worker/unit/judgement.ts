@@ -24,9 +24,6 @@ export const taskJudgementSchema = z.strictObject({
 });
 export const JUDGEMENT_CHANGE_RATIONALE =
   "The judgement turn changed files, and the worker committed them.";
-export const taskChoiceSchema = z.strictObject({
-  filename: z.string().trim().min(1),
-});
 const unmetItemSchema = z.strictObject({
   id: z.string().trim().min(1),
   reason: z.string().trim().min(1),
@@ -119,32 +116,12 @@ export async function parseRepaired<T extends z.ZodType>(
 export function taskJudgementInstruction(
   templates: PromptTemplates,
   task: TaskContent,
-  priorRationale: string | null = null,
 ): string {
   assert.ok(task.id);
   assert.ok(task.content.criterion);
   return renderTemplate(templates, PromptTemplate.TaskJudgement, {
     task_id: task.id,
     criterion: task.content.criterion,
-    prior_rationale: priorRationale,
-    marker: JUDGEMENT_MARKER,
-  });
-}
-
-export function taskChoiceInstruction(
-  templates: PromptTemplates,
-  tasks: readonly TaskContent[],
-  failure: string,
-): string {
-  assert.ok(tasks.length > NO_ITEMS);
-  assert.ok(failure.trim());
-  return renderTemplate(templates, PromptTemplate.TaskChoice, {
-    failure,
-    tasks: tasks.map((task) => ({
-      filename: task.filename,
-      name: task.content.name,
-      criterion: task.content.criterion,
-    })),
     marker: JUDGEMENT_MARKER,
   });
 }

@@ -327,6 +327,49 @@ export async function containsCommit(
   return matched;
 }
 
+export async function hasCommit(
+  env: NodeJS.ProcessEnv,
+  directory: string,
+  commit: string,
+  context: Context,
+  deadlineMs: number,
+): Promise<boolean> {
+  assert.match(commit, /^[a-f0-9]{40,64}$/);
+  const { matched } = await runMatch(
+    env,
+    directory,
+    ["rev-parse", "--quiet", "--verify", `${commit}^{commit}`],
+    context,
+    deadlineMs,
+  );
+  return matched;
+}
+
+export async function hasWorkSince(
+  env: NodeJS.ProcessEnv,
+  directory: string,
+  commit: string,
+  context: Context,
+  deadlineMs: number,
+): Promise<boolean> {
+  assert.match(commit, /^[a-f0-9]{40,64}$/);
+  const output = await run(
+    env,
+    directory,
+    [
+      "rev-list",
+      "--first-parent",
+      "--ancestry-path",
+      "--no-merges",
+      "--max-count=1",
+      `${commit}..HEAD`,
+    ],
+    context,
+    deadlineMs,
+  );
+  return output.trim() !== CLEAN_STATUS;
+}
+
 export async function softReset(
   env: NodeJS.ProcessEnv,
   directory: string,

@@ -30,7 +30,7 @@ import type {
   ModelRuntimeFactory,
 } from "./model-runtime.ts";
 import { ExecutionBudget } from "./budget.ts";
-import { readPriorRationale, readPinnedRevision } from "./node-reads.ts";
+import { readPrior, readPinnedRevision } from "./node-reads.ts";
 import { prepareStepsWorkspace, runStepsImplement } from "./steps-implement.ts";
 import { runStepsExamine } from "./steps-examine.ts";
 import { runEvaluation } from "./evaluation.ts";
@@ -137,7 +137,7 @@ export async function runNativeExecution(
         return runEvaluation(input, run, budget, open);
       if (intent === ExecutionIntent.Examine)
         return runStepsExamine(input, run, revision, budget, open);
-      const prior = await readPriorRationale(run, input.setup.repositories);
+      const prior = await readPrior(run, input.setup.repositories);
       const workspace = await run.spans.within(phaseSpan(Phase.Prepare), () =>
         prepareStepsWorkspace(input, run),
       );
@@ -160,8 +160,8 @@ export async function runNativeExecution(
         revision,
         agent: working,
         ...workspace,
-        priorRationale: prior.rationale,
-        rework: prior.rework,
+        verdict: prior.verdict,
+        cleared: prior.cleared,
         unchangedTurns: 0,
       };
       return runStepsImplement(state);

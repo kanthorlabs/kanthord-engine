@@ -11,13 +11,13 @@ import {
   evaluationInstruction,
   JUDGEMENT_MARKER,
   repairInstruction,
-  taskJudgementInstruction,
   taskRevisionInstruction,
   requestedChangesText,
   REQUESTED_CHANGES_MAX_BYTES,
 } from "./judgement.ts";
 import { VerificationClass, type Verification } from "./verification.ts";
 import { SHIPPED_TEMPLATES } from "../../agent/prompt-templates.ts";
+import { PromptTemplate } from "../../agent/contract.ts";
 
 const TWO_GAP_RATIONALE =
   "two gaps\nUnmet:\n- task_a: no route check\n- task_b: no restart test";
@@ -181,27 +181,10 @@ test("the repair instruction names the marker of the invalid reply", () => {
   );
 });
 
-test("a prior rationale adds the previous judgement to the task judgement instruction", () => {
-  const task = {
-    id: "task_01ARZ3NDEKTSV4RRFFQ69G5FAA",
-    filename: "task.md",
-    content: {
-      name: "task",
-      requirement: "work",
-      criterion: "criterion",
-      verifications: ["true"],
-      bindings: [],
-    },
-  };
-  const plain = taskJudgementInstruction(SHIPPED_TEMPLATES, task);
-  assert.equal(taskJudgementInstruction(SHIPPED_TEMPLATES, task, null), plain);
-  assert.doesNotMatch(plain, /Previous judgement/);
-  assert.equal(
-    taskJudgementInstruction(SHIPPED_TEMPLATES, task, "edge case unmet"),
-    plain.replace(
-      "\nEnd with exactly:",
-      "\nPrevious judgement: edge case unmet. Judge whether the task criterion is met now.\nEnd with exactly:",
-    ),
+test("the task judgement instruction carries no previous judgement", () => {
+  assert.doesNotMatch(
+    SHIPPED_TEMPLATES[PromptTemplate.TaskJudgement],
+    /prior_rationale|Previous judgement/,
   );
 });
 

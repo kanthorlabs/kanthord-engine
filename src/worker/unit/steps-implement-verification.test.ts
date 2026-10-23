@@ -13,6 +13,7 @@ import {
 } from "./steps-implement.ts";
 import {
   fauxAssistantMessage,
+  fauxToolCall,
   implementFixture as fixture,
   NO_PROVIDER_CALLS,
   recordReleases,
@@ -23,6 +24,7 @@ const SIGNAL_KILL = "sh -c 'kill -9 $$'";
 const EXIT_KILL = "sh -c 'kill -9 $$'; exit $?";
 const ONE_JUDGEMENT = 1;
 const ONE_TURN = 1;
+const JUDGEMENT_AND_VERDICT_TURN = 3;
 const WALL_DEADLINE_MS = 300;
 const MET = 'kanthord-judgement: {"criterion_met":true,"rationale":"met"}';
 
@@ -57,13 +59,26 @@ test("a persistent kill in a task verification stops with the infrastructure cod
   }
 });
 
-test("a persistent kill in a node verification of a rework stops with the infrastructure code", async (t) => {
+test("a persistent kill in a node verification of the verdict unit stops with the infrastructure code", async (t) => {
   const h = await fixture(
     t,
     [task("passing", "true")],
-    [fauxAssistantMessage("never")],
+    [
+      fauxAssistantMessage(MET),
+      fauxAssistantMessage(
+        fauxToolCall("write", { path: "verdict", content: "verdict" }),
+        { stopReason: "toolUse" },
+      ),
+      fauxAssistantMessage("addressed"),
+      fauxAssistantMessage("never"),
+    ],
   );
-  h.rework = true;
+  h.verdict = {
+    text: "The verdict names no task.",
+    judged: [
+      { binding_id: h.checkouts[0]!.binding_id, commit: h.checkouts[0]!.head },
+    ],
+  };
   h.revision = {
     ...h.revision,
     content: { ...h.revision.content, verifications: [SIGNAL_KILL] },
@@ -71,7 +86,7 @@ test("a persistent kill in a node verification of a rework stops with the infras
   const bodies = recordReleases(h);
   const end = await executionBoundary(h.run, () => runStepsImplement(h));
   infrastructureEnd(end, bodies, SIGNAL_KILL);
-  assert.equal(h.provider.calls.length, NO_PROVIDER_CALLS);
+  assert.equal(h.provider.calls.length, JUDGEMENT_AND_VERDICT_TURN);
 });
 
 test("a kill on the first run and a pass on the rerun passes the task verification", async (t) => {
@@ -82,7 +97,7 @@ test("a kill on the first run and a pass on the rerun passes the task verificati
   );
   const h = await fixture(t, [current], [fauxAssistantMessage(MET)]);
   const checked = await startCheck(h);
-  assert.deepEqual(checked, { pending: [], budgetEnd: null });
+  assert.deepEqual(checked, { pending: [], node: null, budgetEnd: null });
   assert.equal(h.provider.calls.length, ONE_JUDGEMENT);
 });
 
@@ -92,6 +107,7 @@ test("exit 127 in a task verification is a code failure that sends a work turn",
   const checked = await startCheck(h);
   assert.deepEqual(checked, {
     pending: [{ task: current, instruction: null }],
+    node: null,
     budgetEnd: null,
   });
 });
@@ -103,6 +119,7 @@ test("a kill at the wall deadline during a verification is a budget end and not 
   checked.agent.budget.wallDeadline = () => checkDeadline;
   assert.deepEqual(await startCheck(checked), {
     pending: [],
+    node: null,
     budgetEnd: { task: current },
   });
   assert.equal(checked.agent.budget.exhausted(), true);
