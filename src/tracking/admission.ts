@@ -11,7 +11,6 @@ import {
   TELEMETRY_WRITE_RECORDS_MAX,
   type Acknowledgement,
   type Attributes,
-  type ExecutionTrace,
   type RecordDisposition,
   type SessionEntryRecord,
   type Span,
@@ -33,11 +32,12 @@ import {
   recordExists,
   sessionSequenceTaken,
   updateSpan,
+  type TraceRow,
 } from "./trace-store.ts";
 import { updateTraceSummary } from "./trace-summary.ts";
 
 export interface Admission {
-  trace: ExecutionTrace;
+  trace: TraceRow;
   producer: string;
   origin: SpanOrigin;
   now: number;

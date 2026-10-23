@@ -9,6 +9,7 @@ import {
   Disposition,
   ExecutionEnd,
   MISSION_PRODUCER,
+  PROJECT_PRODUCER,
   RecordKind,
   RefusalReason,
   ROOT_SPAN_OPERATION,
@@ -17,8 +18,10 @@ import {
   SpanStatus,
   TRACKING_SERVICE_NAME,
   TraceSort,
+  TraceState,
   traceSummarySchema,
   type ExecutionTrace,
+  type ServerTrace,
   type SessionEntryRecord,
 } from "./contract.ts";
 import { trackingMigrations } from "./migrations.ts";
@@ -727,4 +730,169 @@ test("a root open of an expired execution is dropped and counted", (t) => {
   service.executionOpened(TRACE, CREATED);
   assert.equal(service.droppedRecords(), ONE_DROP);
   assert.equal(traceCount(store), NO_ROWS);
+});
+
+const SERVER_TRACE: ServerTrace = {
+  trace_id: "c".repeat(32),
+  root_span_id: "4".repeat(16),
+  project_id: TRACE.project_id,
+  created_at: NOW - DAY_MS,
+};
+const SECOND_SERVER_TRACE: ServerTrace = {
+  trace_id: "d".repeat(32),
+  root_span_id: "5".repeat(16),
+  project_id: TRACE.project_id,
+  created_at: NOW - DAY_MS,
+};
+const SERVER_ROOT_OPERATION = "project.onboarding";
+const ERROR_TYPE = "onboarding.clone_failed";
+const TWO_ROWS = 2;
+
+function serverRootStart(trace: ServerTrace) {
+  return {
+    record_id: `${trace.root_span_id}:start`,
+    span_id: trace.root_span_id,
+    parent_span_id: null,
+    operation: SERVER_ROOT_OPERATION,
+    start_time: trace.created_at,
+  };
+}
+
+function serverRootEnd(
+  trace: ServerTrace,
+  status: SpanStatus,
+  attributes?: Record<string, string>,
+) {
+  return {
+    record_id: `${trace.root_span_id}:end`,
+    span_id: trace.root_span_id,
+    parent_span_id: null,
+    operation: SERVER_ROOT_OPERATION,
+    end_time: ENDED,
+    status,
+    attributes,
+  };
+}
+
+function traceRows(store: Store) {
+  return store.database
+    .prepare(
+      "SELECT trace_id, execution_id, node_id, attempt, state, project_id, created_at FROM tracking_trace ORDER BY trace_id",
+    )
+    .all();
+}
+
+test("a server trace stores a row that names no execution and ends ok", (t) => {
+  const { store, service } = harness(t);
+  service.serverTraceSpan(
+    SERVER_TRACE,
+    PROJECT_PRODUCER,
+    serverRootStart(SERVER_TRACE),
+  );
+  service.serverTraceSpan(
+    SERVER_TRACE,
+    PROJECT_PRODUCER,
+    serverRootEnd(SERVER_TRACE, SpanStatus.Ok),
+  );
+  const rows = traceRows(store);
+  assert.equal(rows.length, ONE_ENTRY);
+  assert.equal(rows[0]?.execution_id, null);
+  assert.equal(rows[0]?.node_id, null);
+  assert.equal(rows[0]?.attempt, null);
+  assert.equal(rows[0]?.project_id, SERVER_TRACE.project_id);
+  assert.equal(rows[0]?.created_at, SERVER_TRACE.created_at);
+  assert.equal(rows[0]?.state, TraceState.Ok);
+  const root = service.spanList(
+    SERVER_TRACE.trace_id,
+    { limit: SPAN_PAGE },
+    caller(store, false),
+  ).items[0];
+  assert.equal(root?.producer, PROJECT_PRODUCER);
+  assert.equal(root?.start_time, SERVER_TRACE.created_at);
+  assert.equal(root?.end_time, ENDED);
+  assert.equal(
+    Object.keys(root?.attributes ?? {}).some((name) =>
+      name.startsWith("kanthord."),
+    ),
+    false,
+  );
+  assert.equal(service.droppedRecords(), NO_DROP);
+});
+
+test("a server trace admits a child of the root span and refuses another parent by assertion", (t) => {
+  const { store, service } = harness(t);
+  service.serverTraceSpan(
+    SERVER_TRACE,
+    PROJECT_PRODUCER,
+    serverRootStart(SERVER_TRACE),
+  );
+  service.serverTraceSpan(SERVER_TRACE, PROJECT_PRODUCER, {
+    record_id: `${SPAN}:end`,
+    span_id: SPAN,
+    parent_span_id: SERVER_TRACE.root_span_id,
+    operation: "project.onboarding.clone",
+    start_time: SERVER_TRACE.created_at,
+    end_time: ENDED,
+  });
+  const spans = service.spanList(
+    SERVER_TRACE.trace_id,
+    { limit: SPAN_PAGE },
+    caller(store, false),
+  ).items;
+  assert.equal(spans.length, TWO_ROWS);
+  assert.equal(
+    spans.find((span) => span.span_id === SPAN)?.parent_span_id,
+    SERVER_TRACE.root_span_id,
+  );
+  assert.equal(service.droppedRecords(), NO_DROP);
+  assert.throws(() =>
+    service.serverTraceSpan(SERVER_TRACE, PROJECT_PRODUCER, {
+      record_id: `${SPAN}:other`,
+      span_id: SPAN,
+      parent_span_id: "3".repeat(16),
+      operation: "project.onboarding.clone",
+      end_time: ENDED,
+    }),
+  );
+});
+
+test("a server trace older than the retention is dropped and counted", (t) => {
+  const { store, service } = harness(t);
+  service.serverTraceSpan(
+    { ...SERVER_TRACE, created_at: NOW - EXPIRED_AGE_DAYS * DAY_MS },
+    PROJECT_PRODUCER,
+    serverRootStart({
+      ...SERVER_TRACE,
+      created_at: NOW - EXPIRED_AGE_DAYS * DAY_MS,
+    }),
+  );
+  assert.equal(service.droppedRecords(), ONE_DROP);
+  assert.equal(traceCount(store), NO_ROWS);
+});
+
+test("two server traces of one project keep their rows", (t) => {
+  const { store, service } = harness(t);
+  for (const trace of [SERVER_TRACE, SECOND_SERVER_TRACE])
+    service.serverTraceSpan(trace, PROJECT_PRODUCER, serverRootStart(trace));
+  assert.equal(traceRows(store).length, TWO_ROWS);
+  assert.equal(service.droppedRecords(), NO_DROP);
+});
+
+test("a server root end with an error status sets the state and lists the error type", (t) => {
+  const { store, service } = harness(t);
+  service.serverTraceSpan(
+    SERVER_TRACE,
+    PROJECT_PRODUCER,
+    serverRootStart(SERVER_TRACE),
+  );
+  service.serverTraceSpan(
+    SERVER_TRACE,
+    PROJECT_PRODUCER,
+    serverRootEnd(SERVER_TRACE, SpanStatus.Error, { "error.type": ERROR_TYPE }),
+  );
+  const summary = service.traceGet(SERVER_TRACE.trace_id, caller(store, false));
+  assert.equal(summary.state, TraceState.Error);
+  assert.deepEqual(summary.error_types, [ERROR_TYPE]);
+  assert.equal(summary.execution_id, null);
+  assert.equal(service.droppedRecords(), NO_DROP);
 });
