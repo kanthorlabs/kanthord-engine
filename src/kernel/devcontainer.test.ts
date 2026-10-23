@@ -248,6 +248,26 @@ test("an environment text refuses a check list of a wrong type", () => {
   );
 });
 
+test("an environment text keeps another key of customizations.kanthord for the refusal", () => {
+  const parsed = parseEnvironmentText(
+    JSON.stringify({ customizations: { kanthord: { other: 1 } } }),
+  );
+  assert.equal(parsed.error, null);
+  assert.deepEqual(environmentRefusal(parsed.document!), {
+    key: "customizations.kanthord.other",
+    reason: "the key is not allowed",
+  });
+});
+
+test("the environment schema accepts the customizations of another tool", () => {
+  const parsed = environmentSchema.safeParse({
+    image: "base",
+    customizations: { vscode: { extensions: ["a"] } },
+  });
+  assert.equal(parsed.success, true);
+  assert.equal(environmentRefusal({ customizations: { vscode: {} } }), null);
+});
+
 test("an environment refuses another key of customizations.kanthord", () => {
   assert.deepEqual(
     environmentRefusal({ customizations: { kanthord: { other: 1 } } }),

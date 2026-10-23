@@ -112,9 +112,9 @@ export const environmentSchema = z.looseObject({
   updateContentCommand: lifecycleCommandSchema.optional(),
   postCreateCommand: lifecycleCommandSchema.optional(),
   customizations: z
-    .strictObject({
+    .looseObject({
       kanthord: z
-        .strictObject({ checks: z.array(nonblank).max(CHECKS_MAX).optional() })
+        .looseObject({ checks: z.array(nonblank).max(CHECKS_MAX).optional() })
         .optional(),
     })
     .optional(),
