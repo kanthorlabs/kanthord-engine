@@ -23,6 +23,7 @@ const GIT_MIN_VERSION = [2, 40];
 const GIT_NEWER_VERSION = [2, 41];
 const SSH_MIN_VERSION = [9, 0];
 const SSH_NEWER_VERSION = [9, 1];
+const LOADED_HOST_TIMEOUT_MS = 50_000;
 
 function assertDiagnosticCode(action: () => unknown, code: string): void {
   assert.throws(action, (error: unknown) => {
@@ -117,7 +118,7 @@ test("requireTool runs the tool without the agent of the host", (t) => {
   process.env.PATH = `${root}${delimiter}${path ?? ""}`;
   process.env.SSH_AUTH_SOCK = join(root, "host-agent");
   try {
-    requireTool(tool);
+    requireTool(tool, LOADED_HOST_TIMEOUT_MS);
   } finally {
     process.env.PATH = path;
     if (socket === undefined) delete process.env.SSH_AUTH_SOCK;
