@@ -1,11 +1,13 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { environmentSchema } from "../kernel/devcontainer.ts";
 import type { RepositoryFile } from "../repository/contract.ts";
 import {
   DETECTION_PATHS,
   DetectedStack,
   WORKFLOW_DIRECTORY,
   WORKFLOW_FILES_MAX,
+  detectEnvironment,
   detectStacks,
   packageManagerVersion,
   workflowPaths,
@@ -283,5 +285,271 @@ test("the package manager version comes from packageManager", () => {
       packageManagerVersion([tooLarge("package.json")], "pnpm"),
     ],
     ["9.12.0", "latest", "latest", "latest", "latest", "latest"],
+  );
+});
+
+const BASE_ENV = {
+  PATH: "/var/lib/kanthord/.local/bin:${containerEnv:PATH}",
+  GOPATH: "/var/lib/kanthord/go",
+  CARGO_HOME: "/var/lib/kanthord/.cache/cargo",
+};
+const COREPACK_ENV = { COREPACK_HOME: "/usr/local/share/corepack" };
+
+type Expected = {
+  image: string;
+  onCreateCommand?: string;
+  updateContentCommand?: string;
+  checks: string[];
+  features?: Record<string, unknown>;
+  env?: Record<string, string>;
+};
+
+function expectDraft(files: RepositoryFile[], expected: Expected) {
+  const drafted = detectEnvironment(files);
+  assert.ok(drafted);
+  assert.ok(environmentSchema.safeParse(drafted.document).success);
+  assert.deepEqual(drafted.checks, expected.checks);
+  assert.deepEqual(drafted.document, {
+    image: expected.image,
+    ...(expected.features ? { features: expected.features } : {}),
+    containerEnv: { ...BASE_ENV, ...expected.env },
+    ...(expected.onCreateCommand
+      ? { onCreateCommand: expected.onCreateCommand }
+      : {}),
+    ...(expected.updateContentCommand
+      ? { updateContentCommand: expected.updateContentCommand }
+      : {}),
+    customizations: { kanthord: { checks: expected.checks } },
+  });
+}
+
+const NODE_20 = file(".nvmrc", "20");
+const PACKAGE = file("package.json", "{}");
+const packageManager = (value: string) =>
+  file("package.json", JSON.stringify({ packageManager: value }));
+const NODE_IMAGE =
+  "mcr.microsoft.com/devcontainers/javascript-node:20-bookworm";
+const BASE_IMAGE = "mcr.microsoft.com/devcontainers/base:bookworm";
+const JAVA_FEATURE = "ghcr.io/devcontainers/features/java:1";
+
+test("no manifest drafts no environment", () => {
+  assert.equal(detectEnvironment([]), null);
+  assert.equal(detectEnvironment([file(".nvmrc", "20")]), null);
+});
+
+test("a node repository drafts its install rows", () => {
+  expectDraft(
+    [NODE_20, packageManager("pnpm@9.12.0"), file("pnpm-lock.yaml", "")],
+    {
+      image: NODE_IMAGE,
+      onCreateCommand: "npm install -g pnpm@9.12.0",
+      updateContentCommand: "pnpm install --frozen-lockfile",
+      checks: ["node --version", "pnpm --version"],
+    },
+  );
+  expectDraft(
+    [
+      NODE_20,
+      PACKAGE,
+      file("yarn.lock", "# yarn\n__metadata:\n  version: 8\n"),
+    ],
+    {
+      image: NODE_IMAGE,
+      onCreateCommand:
+        "corepack enable && corepack prepare yarn@stable --activate",
+      updateContentCommand: "yarn install --immutable",
+      checks: ["node --version", "yarn --version"],
+      env: COREPACK_ENV,
+    },
+  );
+  expectDraft([NODE_20, PACKAGE, file("yarn.lock", "# yarn lockfile v1\n")], {
+    image: NODE_IMAGE,
+    onCreateCommand:
+      "corepack enable && corepack prepare yarn@1.22.22 --activate",
+    updateContentCommand: "yarn install --frozen-lockfile",
+    checks: ["node --version", "yarn --version"],
+    env: COREPACK_ENV,
+  });
+  expectDraft([NODE_20, packageManager("yarn@4.5.0"), file("yarn.lock", "")], {
+    image: NODE_IMAGE,
+    onCreateCommand:
+      "corepack enable && corepack prepare yarn@4.5.0 --activate",
+    updateContentCommand: "yarn install --immutable",
+    checks: ["node --version", "yarn --version"],
+    env: COREPACK_ENV,
+  });
+  expectDraft(
+    [
+      NODE_20,
+      packageManager("yarn@1.22.19"),
+      file("yarn.lock", "__metadata:\n"),
+    ],
+    {
+      image: NODE_IMAGE,
+      onCreateCommand:
+        "corepack enable && corepack prepare yarn@1.22.19 --activate",
+      updateContentCommand: "yarn install --frozen-lockfile",
+      checks: ["node --version", "yarn --version"],
+      env: COREPACK_ENV,
+    },
+  );
+  expectDraft([NODE_20, PACKAGE, file("package-lock.json", "")], {
+    image: NODE_IMAGE,
+    updateContentCommand: "npm ci",
+    checks: ["node --version", "npm --version"],
+  });
+});
+
+test("a python, go, rust or java repository drafts its install rows", () => {
+  const python = "mcr.microsoft.com/devcontainers/python:3.12-bookworm";
+  const pyproject = file("pyproject.toml", "");
+  expectDraft([pyproject, file("uv.lock", "")], {
+    image: python,
+    onCreateCommand: "pip install uv",
+    updateContentCommand: "uv sync --frozen",
+    checks: ["python --version", "uv --version"],
+  });
+  expectDraft([pyproject, file("poetry.lock", "")], {
+    image: python,
+    onCreateCommand: "pip install poetry",
+    updateContentCommand: "poetry install --no-interaction",
+    checks: ["python --version", "poetry --version"],
+  });
+  expectDraft([file("requirements.txt", "")], {
+    image: python,
+    updateContentCommand: "pip install --user -r requirements.txt",
+    checks: ["python --version"],
+  });
+  expectDraft([file("go.mod", "go 1.22.3\n")], {
+    image: "mcr.microsoft.com/devcontainers/go:1.22-bookworm",
+    updateContentCommand: "go mod download",
+    checks: ["go version"],
+  });
+  expectDraft([file("Cargo.toml", "")], {
+    image: "mcr.microsoft.com/devcontainers/rust:1-bookworm",
+    updateContentCommand: "cargo fetch",
+    checks: ["cargo --version"],
+  });
+  const java = "mcr.microsoft.com/devcontainers/java:21-bookworm";
+  expectDraft([file("pom.xml", ""), file("mvnw", "")], {
+    image: java,
+    updateContentCommand: "./mvnw -B -q dependency:go-offline",
+    checks: ["java -version"],
+  });
+  expectDraft([file("pom.xml", "")], {
+    image: java,
+    features: { [JAVA_FEATURE]: { version: "none", installMaven: true } },
+    updateContentCommand: "mvn -B -q dependency:go-offline",
+    checks: ["java -version"],
+  });
+  expectDraft([file("build.gradle", ""), file("gradlew", "")], {
+    image: java,
+    updateContentCommand: "./gradlew --no-daemon dependencies",
+    checks: ["java -version"],
+  });
+  expectDraft([file("build.gradle.kts", "")], {
+    image: java,
+    features: { [JAVA_FEATURE]: { version: "none", installGradle: true } },
+    updateContentCommand: "gradle --no-daemon dependencies",
+    checks: ["java -version"],
+  });
+});
+
+test("a lock file order decides between the rows", () => {
+  expectDraft(
+    [
+      NODE_20,
+      PACKAGE,
+      file("package-lock.json", ""),
+      file("pnpm-lock.yaml", ""),
+    ],
+    {
+      image: NODE_IMAGE,
+      onCreateCommand: "npm install -g pnpm@latest",
+      updateContentCommand: "pnpm install --frozen-lockfile",
+      checks: ["node --version", "pnpm --version"],
+    },
+  );
+  expectDraft([file("requirements.txt", ""), file("uv.lock", "")], {
+    image: "mcr.microsoft.com/devcontainers/python:3.12-bookworm",
+    onCreateCommand: "pip install uv",
+    updateContentCommand: "uv sync --frozen",
+    checks: ["python --version", "uv --version"],
+  });
+  expectDraft([file("build.gradle", ""), file("pom.xml", "")], {
+    image: "mcr.microsoft.com/devcontainers/java:21-bookworm",
+    features: { [JAVA_FEATURE]: { version: "none", installMaven: true } },
+    updateContentCommand: "mvn -B -q dependency:go-offline",
+    checks: ["java -version"],
+  });
+});
+
+test("a repository with no lock file drafts no install command", () => {
+  expectDraft([NODE_20, PACKAGE], {
+    image: NODE_IMAGE,
+    checks: ["node --version", "npm --version"],
+  });
+  expectDraft([file("pyproject.toml", "")], {
+    image: "mcr.microsoft.com/devcontainers/python:3.12-bookworm",
+    checks: ["python --version"],
+  });
+});
+
+test("two stacks draft the base image with one feature each", () => {
+  expectDraft(
+    [
+      NODE_20,
+      PACKAGE,
+      file("package-lock.json", ""),
+      file("go.mod", "go 1.22.1\n"),
+    ],
+    {
+      image: BASE_IMAGE,
+      features: {
+        "ghcr.io/devcontainers/features/node:1": { version: "20" },
+        "ghcr.io/devcontainers/features/go:1": { version: "1.22" },
+      },
+      updateContentCommand: "npm ci && go mod download",
+      checks: ["node --version", "npm --version", "go version"],
+    },
+  );
+  expectDraft([file("go.mod", ""), file("Cargo.toml", "")], {
+    image: BASE_IMAGE,
+    features: {
+      "ghcr.io/devcontainers/features/go:1": { version: "latest" },
+      "ghcr.io/devcontainers/features/rust:1": { version: "latest" },
+    },
+    updateContentCommand: "go mod download && cargo fetch",
+    checks: ["go version", "cargo --version"],
+  });
+  expectDraft([file("go.mod", "")], {
+    image: "mcr.microsoft.com/devcontainers/go:1-bookworm",
+    updateContentCommand: "go mod download",
+    checks: ["go version"],
+  });
+  expectDraft([file("pom.xml", ""), file("Cargo.toml", "")], {
+    image: BASE_IMAGE,
+    features: {
+      "ghcr.io/devcontainers/features/rust:1": { version: "latest" },
+      [JAVA_FEATURE]: { version: "21", installMaven: true },
+    },
+    updateContentCommand: "cargo fetch && mvn -B -q dependency:go-offline",
+    checks: ["cargo --version", "java -version"],
+  });
+});
+
+test("a draft answers the same document for another file order", () => {
+  const files = [
+    NODE_20,
+    PACKAGE,
+    file("yarn.lock", ""),
+    file("go.mod", "go 1.22\n"),
+    file("Cargo.toml", ""),
+    file("pom.xml", ""),
+    file("requirements.txt", ""),
+  ];
+  assert.deepEqual(
+    detectEnvironment([...files].reverse()),
+    detectEnvironment(files),
   );
 });

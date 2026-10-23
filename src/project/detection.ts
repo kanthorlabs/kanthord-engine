@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { Environment } from "../kernel/devcontainer.ts";
 import { Diagnostic } from "../kernel/errors.ts";
 import { isNumber, isObject, isString } from "../kernel/values.ts";
 import { parseMapping } from "../kernel/yaml.ts";
@@ -294,4 +295,244 @@ export function packageManagerVersion(
   const prefix = `${manager}@`;
   if (!declared.startsWith(prefix)) return LATEST_VERSION;
   return declared.slice(prefix.length).split("+")[0] || LATEST_VERSION;
+}
+
+const IMAGE_REGISTRY = "mcr.microsoft.com/devcontainers";
+const IMAGE_VARIANT = "bookworm";
+const BASE_IMAGE = `${IMAGE_REGISTRY}/base:${IMAGE_VARIANT}`;
+const FEATURE_PREFIX = "ghcr.io/devcontainers/features";
+const FEATURE_VERSION_NONE = "none";
+const FEATURE_VERSION_LATEST = "latest";
+const SINGLE_STACK = 1;
+const DEFAULT_MAJOR_VERSION = "1";
+const RUST_IMAGE_TAG = `1-${IMAGE_VARIANT}`;
+const COMMAND_SEPARATOR = " && ";
+const KANTHORD_HOME = "/var/lib/kanthord";
+const COREPACK_HOME = "/usr/local/share/corepack";
+const YARN_STABLE = "stable";
+const YARN_CLASSIC_VERSION = "1.22.22";
+const YARN_BERRY_MAJOR = 2;
+const YARN_BERRY_MARKER = /^__metadata:/m;
+
+const BASE_CONTAINER_ENV: Readonly<Record<string, string>> = {
+  PATH: `${KANTHORD_HOME}/.local/bin:\${containerEnv:PATH}`,
+  GOPATH: `${KANTHORD_HOME}/go`,
+  CARGO_HOME: `${KANTHORD_HOME}/.cache/cargo`,
+};
+
+const NodeCheck = {
+  Node: "node --version",
+  Npm: "npm --version",
+  Pnpm: "pnpm --version",
+  Yarn: "yarn --version",
+} as const;
+const PythonCheck = {
+  Python: "python --version",
+  Uv: "uv --version",
+  Poetry: "poetry --version",
+} as const;
+const GO_CHECK = "go version";
+const RUST_CHECK = "cargo --version";
+const JAVA_CHECK = "java -version";
+
+const NPM_CI = "npm ci";
+const PNPM_INSTALL = "pnpm install --frozen-lockfile";
+const YARN_IMMUTABLE_INSTALL = "yarn install --immutable";
+const YARN_FROZEN_INSTALL = "yarn install --frozen-lockfile";
+const COREPACK_ENABLE = "corepack enable";
+const GO_DOWNLOAD = "go mod download";
+const CARGO_FETCH = "cargo fetch";
+const MAVEN_WRAPPER_FETCH = "./mvnw -B -q dependency:go-offline";
+const MAVEN_FETCH = "mvn -B -q dependency:go-offline";
+const GRADLE_WRAPPER_FETCH = "./gradlew --no-daemon dependencies";
+const GRADLE_FETCH = "gradle --no-daemon dependencies";
+
+type Draft = {
+  onCreate?: string;
+  update?: string;
+  checks: string[];
+  javaFeatureOptions?: Record<string, unknown>;
+  containerEnv?: Record<string, string>;
+};
+
+type DraftSource = { files: readonly RepositoryFile[]; inputs: Inputs };
+
+type StackRow = {
+  image: (version: string) => string;
+  featureVersion: (version: string) => string;
+  draft: (source: DraftSource) => Draft;
+};
+
+const imageOf = (name: string) => (version: string) =>
+  `${IMAGE_REGISTRY}/${name}:${version}-${IMAGE_VARIANT}`;
+const sameVersion = (version: string) => version;
+const latestForDefault = (version: string) =>
+  version === DEFAULT_MAJOR_VERSION ? FEATURE_VERSION_LATEST : version;
+
+function yarnVersion({ files, inputs }: DraftSource): string {
+  const declared = packageManagerVersion(files, "yarn");
+  if (declared !== LATEST_VERSION) return declared;
+  return YARN_BERRY_MARKER.test(inputs.text(Path.YarnLock) ?? "")
+    ? YARN_STABLE
+    : YARN_CLASSIC_VERSION;
+}
+
+function yarnInstall(version: string): string {
+  const berry =
+    version === YARN_STABLE || Number.parseInt(version, 10) >= YARN_BERRY_MAJOR;
+  return berry ? YARN_IMMUTABLE_INSTALL : YARN_FROZEN_INSTALL;
+}
+
+function nodeDraft(source: DraftSource): Draft {
+  const { files, inputs } = source;
+  if (inputs.has(Path.PnpmLock))
+    return {
+      onCreate: `npm install -g pnpm@${packageManagerVersion(files, "pnpm")}`,
+      update: PNPM_INSTALL,
+      checks: [NodeCheck.Node, NodeCheck.Pnpm],
+    };
+  if (inputs.has(Path.YarnLock)) {
+    const version = yarnVersion(source);
+    return {
+      onCreate: `${COREPACK_ENABLE}${COMMAND_SEPARATOR}corepack prepare yarn@${version} --activate`,
+      update: yarnInstall(version),
+      checks: [NodeCheck.Node, NodeCheck.Yarn],
+      containerEnv: { COREPACK_HOME },
+    };
+  }
+  return {
+    ...(inputs.has(Path.PackageLock) ? { update: NPM_CI } : {}),
+    checks: [NodeCheck.Node, NodeCheck.Npm],
+  };
+}
+
+function pythonDraft({ inputs }: DraftSource): Draft {
+  if (inputs.has(Path.UvLock))
+    return {
+      onCreate: "pip install uv",
+      update: "uv sync --frozen",
+      checks: [PythonCheck.Python, PythonCheck.Uv],
+    };
+  if (inputs.has(Path.PoetryLock))
+    return {
+      onCreate: "pip install poetry",
+      update: "poetry install --no-interaction",
+      checks: [PythonCheck.Python, PythonCheck.Poetry],
+    };
+  return {
+    ...(inputs.has(Path.Requirements)
+      ? { update: "pip install --user -r requirements.txt" }
+      : {}),
+    checks: [PythonCheck.Python],
+  };
+}
+
+function javaDraft({ inputs }: DraftSource): Draft {
+  const checks = [JAVA_CHECK];
+  if (inputs.has(Path.Mvnw)) return { update: MAVEN_WRAPPER_FETCH, checks };
+  if (inputs.has(Path.PomXml))
+    return {
+      update: MAVEN_FETCH,
+      checks,
+      javaFeatureOptions: { installMaven: true },
+    };
+  if (inputs.has(Path.Gradlew)) return { update: GRADLE_WRAPPER_FETCH, checks };
+  return {
+    update: GRADLE_FETCH,
+    checks,
+    javaFeatureOptions: { installGradle: true },
+  };
+}
+
+const STACK_TABLE: Record<DetectedStack, StackRow> = {
+  [DetectedStack.Node]: {
+    image: imageOf("javascript-node"),
+    featureVersion: sameVersion,
+    draft: nodeDraft,
+  },
+  [DetectedStack.Python]: {
+    image: imageOf("python"),
+    featureVersion: sameVersion,
+    draft: pythonDraft,
+  },
+  [DetectedStack.Go]: {
+    image: imageOf("go"),
+    featureVersion: latestForDefault,
+    draft: () => ({ update: GO_DOWNLOAD, checks: [GO_CHECK] }),
+  },
+  [DetectedStack.Rust]: {
+    image: () => `${IMAGE_REGISTRY}/rust:${RUST_IMAGE_TAG}`,
+    featureVersion: latestForDefault,
+    draft: () => ({ update: CARGO_FETCH, checks: [RUST_CHECK] }),
+  },
+  [DetectedStack.Java]: {
+    image: imageOf("java"),
+    featureVersion: sameVersion,
+    draft: javaDraft,
+  },
+};
+
+type DetectedStackVersion = ReturnType<typeof detectStacks>[number];
+
+type Planned = { detected: DetectedStackVersion; draft: Draft };
+
+function featureOptions(
+  { detected, draft }: Planned,
+  single: boolean,
+): Record<string, unknown> {
+  const extra = draft.javaFeatureOptions ?? {};
+  if (single) return { version: FEATURE_VERSION_NONE, ...extra };
+  const version = STACK_TABLE[detected.stack].featureVersion(detected.version);
+  return { version, ...extra };
+}
+
+function featuresOf(planned: Planned[]): Record<string, unknown> | null {
+  const single = planned.length === SINGLE_STACK;
+  const entries = planned.flatMap((entry) => {
+    if (single && !entry.draft.javaFeatureOptions) return [];
+    const name = `${FEATURE_PREFIX}/${entry.detected.stack}:1`;
+    return [[name, featureOptions(entry, single)] as const];
+  });
+  return entries.length ? Object.fromEntries(entries) : null;
+}
+
+function joined(parts: Array<string | undefined>): string | null {
+  const present = parts.filter((part) => part !== undefined);
+  return present.length ? present.join(COMMAND_SEPARATOR) : null;
+}
+
+export function detectEnvironment(files: readonly RepositoryFile[]): {
+  stacks: DetectedStack[];
+  document: Environment;
+  checks: string[];
+} | null {
+  const detected = detectStacks(files);
+  if (!detected.length) return null;
+  const source = { files, inputs: readInputs(files) };
+  const planned = detected.map((entry) => ({
+    detected: entry,
+    draft: STACK_TABLE[entry.stack].draft(source),
+  }));
+  const drafts = planned.map((entry) => entry.draft);
+  const checks = drafts.flatMap((draft) => draft.checks);
+  const onCreate = joined(drafts.map((draft) => draft.onCreate));
+  const update = joined(drafts.map((draft) => draft.update));
+  const features = featuresOf(planned);
+  const only = planned.length === SINGLE_STACK ? planned[0] : undefined;
+  const image = only
+    ? STACK_TABLE[only.detected.stack].image(only.detected.version)
+    : BASE_IMAGE;
+  const document: Environment = {
+    image,
+    ...(features ? { features } : {}),
+    containerEnv: Object.assign(
+      {},
+      BASE_CONTAINER_ENV,
+      ...drafts.map((draft) => draft.containerEnv ?? {}),
+    ),
+    ...(onCreate ? { onCreateCommand: onCreate } : {}),
+    ...(update ? { updateContentCommand: update } : {}),
+    customizations: { kanthord: { checks } },
+  };
+  return { stacks: detected.map((entry) => entry.stack), document, checks };
 }
