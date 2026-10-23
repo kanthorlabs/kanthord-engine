@@ -25,6 +25,7 @@ import {
   landedOn,
   resolveBranchCommit,
   readFilesAtCommit,
+  listFilesAtCommit,
   readObjectIds,
 } from "./connector.ts";
 import { RepositoryErrorCode } from "./contract.ts";
@@ -81,6 +82,7 @@ export const platformImplementations = {
 export const repositoryFiles = {
   resolveBranchCommit,
   readFilesAtCommit,
+  listFilesAtCommit,
   readObjectIds,
   cloneSnapshot,
 };

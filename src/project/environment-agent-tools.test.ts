@@ -226,6 +226,7 @@ function storeFixture(t: TestContext, beforeWrite: () => void = () => {}) {
     repositoryFiles: {
       resolveBranchCommit: unexpected,
       readFilesAtCommit: unexpected,
+      listFilesAtCommit: async () => [],
       readObjectIds: unexpected,
       cloneSnapshot: unexpected,
     },
@@ -254,6 +255,7 @@ function storeFixture(t: TestContext, beforeWrite: () => void = () => {}) {
     repositoryFiles: {
       resolveBranchCommit: unexpected,
       readFilesAtCommit: unexpected,
+      listFilesAtCommit: async () => [],
       readObjectIds: unexpected,
       cloneSnapshot: unexpected,
     },
