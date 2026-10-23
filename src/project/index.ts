@@ -3,3 +3,8 @@ export { enforceBindingPlacements } from "./placement-check.ts";
 export { projectMigrations } from "./migrations.ts";
 export { projectSshIdentityAuthorization } from "./ssh-authorization.ts";
 export const projectConfigSchema = {};
+export type {
+  EnvironmentProbeRunner,
+  ProbeAnswer,
+  ProbeCommand,
+} from "./environment-probe-contract.ts";
