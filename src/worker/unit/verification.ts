@@ -2,7 +2,6 @@ import { addAbortListener } from "node:events";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import type { Context } from "../../kernel/context.ts";
-import { canonicalJSON } from "../../kernel/json.ts";
 import { killProcessGroup } from "../../kernel/process-group.ts";
 import { redactReason } from "../../kernel/probe.ts";
 import { EndReason, ExecutionStop } from "./execution-run.ts";
@@ -322,7 +321,14 @@ export function infrastructureStop(run: VerificationRun): ExecutionStop | null {
   return new ExecutionStop(
     EndReason.OperationFailed,
     VERIFICATION_INFRASTRUCTURE_FAILED,
-    redactReason(canonicalJSON(result)),
+    redactReason(
+      JSON.stringify({
+        exit_code: result.exit_code,
+        signal: result.signal,
+        timed_out: result.timed_out,
+        command: result.command,
+      }),
+    ),
   );
 }
 

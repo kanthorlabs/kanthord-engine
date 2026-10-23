@@ -21,6 +21,7 @@ import {
   testedInputOf,
 } from "./verification.ts";
 import { EndReason, ExecutionStop } from "./execution-run.ts";
+import { REASON_MAX_LENGTH } from "../../kernel/probe.ts";
 
 test("verification runs in order and stops on the first failure or unstarted deadline", async (t) => {
   const expectedOrder = "first\nsecond\n";
@@ -397,4 +398,36 @@ test("an infrastructure failure stops with its code and a detail that names the 
     infrastructureStop(await runVerificationsWithOutput(passing)),
     null,
   );
+});
+
+const LONG_COMMAND_LENGTH = 400;
+const CANCEL_AFTER_MS = 200;
+
+test("the infrastructure stop detail keeps the result before the cut of a long command", async (t) => {
+  const prefix = `${SIGNAL_KILL} #`;
+  const command = `${prefix}${"x ".repeat(LONG_COMMAND_LENGTH)}`.slice(
+    0,
+    LONG_COMMAND_LENGTH,
+  );
+  const { input } = countedInput(temporary(t), [command]);
+  const stop = infrastructureStop(await runVerificationsWithOutput(input));
+  assert.ok(stop);
+  const detail = stop.detail ?? "";
+  assert.equal(detail.length, REASON_MAX_LENGTH);
+  assert.match(detail, /"signal":"SIGKILL"/);
+  assert.match(detail, /"timed_out":false/);
+  assert.match(detail, /"exit_code":null/);
+  assert.ok(detail.includes(prefix));
+});
+
+test("a cancel in the middle of a command is a code failure with one run", async (t) => {
+  const context = new CancellationContext();
+  const { input, runs } = countedInput(temporary(t), ["sleep 30"]);
+  const cancel = setTimeout(() => context.cancel(), CANCEL_AFTER_MS);
+  t.after(() => clearTimeout(cancel));
+  const run = await runVerificationsWithOutput({ ...input, context });
+  assert.equal(run.outcome, VerificationClass.CodeFailure);
+  assert.equal(runs.length, SINGLE_RUN);
+  assert.equal(run.verification.results[0]?.timed_out, false);
+  assert.equal(run.verification.results[0]?.signal, KILL_SIGNAL);
 });
