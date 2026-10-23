@@ -5,7 +5,11 @@ import { test } from "node:test";
 import { background } from "../kernel/context.ts";
 import { OperationError } from "../kernel/errors.ts";
 import { temporary } from "../kernel/test-support.ts";
-import { AgentErrorCode, PromptTemplate } from "./contract.ts";
+import {
+  AgentErrorCode,
+  PromptTemplate,
+  promptTemplatesSchema,
+} from "./contract.ts";
 import { InvalidReason, PROMPT_SOURCE_MAX_BYTES } from "./prompt-source.ts";
 import {
   renderTemplate,
@@ -66,6 +70,34 @@ test("a template file of the directory replaces only its shipped template", asyn
       rationale: UNSAFE_RATIONALE,
     }),
     OVERRIDE_RENDERED,
+  );
+});
+
+const CODER_ANSWER_TEMPLATES = ["task-judgement", "task-choice"];
+const INVALID_SYNTAX = "{{#if}";
+
+test("a template set with a coder answer template fails the strict schema", () => {
+  assert.equal(
+    promptTemplatesSchema.safeParse(SHIPPED_TEMPLATES).success,
+    true,
+  );
+  for (const name of CODER_ANSWER_TEMPLATES)
+    assert.equal(
+      promptTemplatesSchema.safeParse({ ...SHIPPED_TEMPLATES, [name]: "" })
+        .success,
+      false,
+      name,
+    );
+});
+
+test("a coder answer template file of the directory is ignored", async (t) => {
+  const directory = join(temporary(t), TEMPLATE_DIRECTORY);
+  mkdirSync(directory);
+  for (const name of CODER_ANSWER_TEMPLATES)
+    writeFileSync(join(directory, `${name}.md`), INVALID_SYNTAX);
+  assert.deepEqual(
+    await resolveTemplates(directory, background),
+    SHIPPED_TEMPLATES,
   );
 });
 

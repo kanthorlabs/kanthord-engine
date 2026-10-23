@@ -301,7 +301,7 @@ kanthord worker get <worker-name>
 HTTP `200` returns the summary fields plus:
 
 - `harness: string` for an external worker, naming its hosting harness.
-- `method: "steps" | "evaluation"` and `agent_names: AgentName[]` for a native worker, in the order of the declaration. `coder@1` judges each task itself. `reviewer@1` reviews the whole node after the release.
+- `method: "steps" | "evaluation"` and `agent_names: AgentName[]` for a native worker, in the order of the declaration. `coder@1` runs the verifications of each task and judges no criterion. `reviewer@1` reviews the whole node after the release.
 - `resource_budget` for every worker, with a required positive safe integer
   `wall_time_ms` and an optional positive safe integer `turns`.
   `coder@1` and `reviewer@1` default to
@@ -318,10 +318,8 @@ HTTP `200` returns the summary fields plus:
   `stop: { reason, code }`. A reviewer execution writes no commit and releases
   with the `stop`. A failed push still releases with the `stop`. A failed
   release ends the execution with no release.
-  A reply with no valid marker line gets one repair turn, for the task
-  judgement, the evaluation judgement and the review reply. A second invalid
-  judgement stops the execution with `judgement_invalid`, and a second invalid
-  review reply ends the review of that task.
+  An evaluation judgement with no valid marker line gets one repair turn. A
+  second invalid judgement stops the execution with `judgement_invalid`.
   An evaluation judgement of an `examine` node carries `proposals`: one
   fix-node proposal for each defect inside a completed `implement` dependency.
   Each proposal holds `dependency_id`, `name`, `requirement`, `criterion` and
@@ -330,10 +328,12 @@ HTTP `200` returns the summary fields plus:
   `implement` node. See `mission proposal approve` in the [Mission CLI](mission.md).
   A steps execution reads the assessment that caused the latest rework of its
   attempt. When the attempt holds no such assessment, the execution reads the
-  assessment that the cleared outcome names. The task judgement at the start
-  carries the rationale of the first assessment that exists. A task that the
-  agent judges unmet starts its work with a revision instruction that holds the
-  rationale. A reviewer execution whose
+  change requests of the pull request, then the assessment that the cleared
+  outcome names. The verdict is the rationale of the rework assessment, else
+  the requested-changes text. When no checkout holds a commit that is not a
+  merge commit after the judged commit of the verdict, the node gets a turn
+  with the verdict. A cleared assessment that is not `success` gives the node a
+  turn with its rationale. A reviewer execution whose
   `criterion-not-met` assessment causes a rework ends with no release, because
   the assessment ends its claim.
   An external harness must release before its `expired_at`.
