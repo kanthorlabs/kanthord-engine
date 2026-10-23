@@ -118,6 +118,8 @@ export const ProjectErrorCode = {
   RepositoryActionUnsupported: "project.bindings.repository.action_unsupported",
   WorkerAgentUnknown: "project.bindings.worker.agent_unknown",
   WorkerFieldForbidden: "project.bindings.worker.field_forbidden",
+  WorkerEnvironmentRequired: "project.bindings.worker.environment_required",
+  WorkerEnvironmentUnknown: "project.bindings.worker.environment_unknown",
   WorkerInstanceCountRange: "project.bindings.worker.instance_count_range",
   WorkerResourceChanged: "project.bindings.worker.resource_changed",
   WorkerPlacementChanged: "project.bindings.worker.placement_changed",
@@ -239,6 +241,7 @@ const workerConfigFields = {
   worker: z.string().min(1),
   instance_count: z.number().int().optional(),
   placement: z.enum(WorkerPlacement).optional(),
+  environment: z.string().min(1).optional(),
   resource_budget: z
     .strictObject({
       turns: z.number().int().positive(),
@@ -340,6 +343,7 @@ export const WorkerField = {
   Placement: "placement",
   InstanceCount: "instance_count",
   WorkerInstances: "worker_instances",
+  Environment: "environment",
 } as const;
 const CUSTOM_ISSUE = "custom";
 type BindingEdits = Record<string, z.infer<typeof bindingEditSchema>>;
@@ -1017,6 +1021,7 @@ export interface WorkerBindingRow {
   instance_count: number;
   worker_instances: string[];
   placement: WorkerPlacement | null;
+  environment: string | null;
   generation: number;
   resource_budget: { turns: number; wall_time_ms: number } | null;
   entries: NonNullable<z.infer<typeof workerConfigSchema>["entries"]>;

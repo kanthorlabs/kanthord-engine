@@ -1032,6 +1032,7 @@ test("workerBindingOf reads current configuration, disablement and tombstone in 
     instance_count: SINGLE_INSTANCE,
     worker_instances: [],
     placement: null,
+    environment: null,
     generation: revisionOf(f, first),
     resource_budget: null,
     entries: [],
@@ -1985,6 +1986,157 @@ test("an external worker with the container placement refuses the field before t
     HttpStatus.BadRequest,
     ProjectErrorCode.WorkerFieldForbidden,
     { binding: WORKER_NAME, field: WorkerField.Placement },
+  );
+});
+
+function containerWithEnvironment(environment?: string) {
+  const binding = containerBinding();
+  return {
+    ...binding,
+    config: {
+      ...binding.config,
+      ...(environment === undefined ? {} : { environment }),
+    },
+  };
+}
+
+function workerRows(f: ReturnType<typeof probedFixture>) {
+  return f.store.transaction((tx) => ({
+    one: f.project.workerBindingOf(tx, f.params.project_id, WORKER_GROUP),
+    all: f.project.workerBindingsOf(tx, f.params.project_id),
+  }));
+}
+
+function repositoryIdentity(f: ReturnType<typeof probedFixture>, name: string) {
+  return f.store.transaction(
+    (tx) =>
+      readCurrentBindingSet(tx, f.params.project_id).get(name)!
+        .resource_identity,
+  );
+}
+
+for (const environment of [undefined, REPOSITORY_NAME])
+  test(`a container binding with environment ${environment ?? "absent"} resolves the only repository binding`, async (t) => {
+    const f = probedFixture(t, null);
+    await f.write({
+      [REPOSITORY_NAME]: repositoryBinding(),
+      [WORKER_NAME]: containerWithEnvironment(environment),
+    });
+    const expected = repositoryIdentity(f, REPOSITORY_NAME);
+    const rows = workerRows(f);
+    assert.equal(rows.one?.environment, expected);
+    assert.deepEqual(
+      rows.all.map(({ environment }) => environment),
+      [expected],
+    );
+  });
+
+test("a container binding with a named environment resolves among two repository bindings", async (t) => {
+  const f = probedFixture(t, null);
+  await f.write({
+    [REPOSITORY_NAME]: repositoryBinding(),
+    [SECOND_REPOSITORY_NAME]: repositoryBinding(SECOND_REPOSITORY_ADDRESS),
+    [WORKER_NAME]: containerWithEnvironment(SECOND_REPOSITORY_NAME),
+  });
+  assert.equal(
+    workerRows(f).one?.environment,
+    repositoryIdentity(f, SECOND_REPOSITORY_NAME),
+  );
+});
+
+test("a container binding with two repository bindings and no environment refuses the write", async (t) => {
+  const f = probedFixture(t, null);
+  const before = f.snapshot();
+  await rejectsWrite(
+    f.write({
+      [REPOSITORY_NAME]: repositoryBinding(),
+      [SECOND_REPOSITORY_NAME]: repositoryBinding(SECOND_REPOSITORY_ADDRESS),
+      [WORKER_NAME]: containerWithEnvironment(),
+    }),
+    HttpStatus.BadRequest,
+    ProjectErrorCode.WorkerEnvironmentRequired,
+    { binding: WORKER_NAME },
+  );
+  assert.deepEqual(f.snapshot(), before);
+});
+
+for (const environment of ["missing", STORAGE_NAME])
+  test(`a container binding with the environment ${environment} refuses the write`, async (t) => {
+    const f = probedFixture(t, null);
+    const before = f.snapshot();
+    await rejectsWrite(
+      f.write({
+        [REPOSITORY_NAME]: repositoryBinding(),
+        [STORAGE_NAME]: storageBinding(),
+        [WORKER_NAME]: containerWithEnvironment(environment),
+      }),
+      HttpStatus.BadRequest,
+      ProjectErrorCode.WorkerEnvironmentUnknown,
+      { binding: WORKER_NAME, environment },
+    );
+    assert.deepEqual(f.snapshot(), before);
+  });
+
+test("environment refuses at the server placement, the worker placement and an external harness", async (t) => {
+  const f = instanceFixture(t);
+  const before = f.snapshot();
+  const configs = [
+    { ...workerBinding().config, environment: REPOSITORY_NAME },
+    instanceBinding({ worker_instances: [], environment: REPOSITORY_NAME })
+      .config,
+    { ...workerBinding(EXTERNAL_WORKER).config, environment: REPOSITORY_NAME },
+  ];
+  for (const config of configs) {
+    await rejectsWrite(
+      f.write({
+        [REPOSITORY_NAME]: repositoryBinding(),
+        [WORKER_NAME]: { kind: BindingKind.Worker, config },
+      }),
+      HttpStatus.BadRequest,
+      ProjectErrorCode.WorkerFieldForbidden,
+      { binding: WORKER_NAME, field: WorkerField.Environment },
+    );
+    assert.deepEqual(f.snapshot(), before);
+  }
+});
+
+test("a write that adds a second repository binding to a keyless container binding refuses", async (t) => {
+  const f = probedFixture(t, null);
+  const first = await f.write({
+    [REPOSITORY_NAME]: repositoryBinding(),
+    [WORKER_NAME]: containerWithEnvironment(),
+  });
+  const before = f.snapshot();
+  await rejectsWrite(
+    f.write(
+      {
+        [REPOSITORY_NAME]: repositoryBinding(),
+        [SECOND_REPOSITORY_NAME]: repositoryBinding(SECOND_REPOSITORY_ADDRESS),
+        [WORKER_NAME]: containerWithEnvironment(),
+      },
+      first.binding_set_version,
+    ),
+    HttpStatus.BadRequest,
+    ProjectErrorCode.WorkerEnvironmentRequired,
+    { binding: WORKER_NAME },
+  );
+  assert.deepEqual(f.snapshot(), before);
+});
+
+test("the server placement answers a null environment", async (t) => {
+  const f = writeFixture(t);
+  await f.write({
+    [REPOSITORY_NAME]: repositoryBinding(),
+    [WORKER_NAME]: workerBinding(),
+  });
+  const rows = f.store.transaction((tx) => ({
+    one: f.project.workerBindingOf(tx, f.params.project_id, WORKER_GROUP),
+    all: f.project.workerBindingsOf(tx, f.params.project_id),
+  }));
+  assert.equal(rows.one?.environment, null);
+  assert.deepEqual(
+    rows.all.map(({ environment }) => environment),
+    [null],
   );
 });
 

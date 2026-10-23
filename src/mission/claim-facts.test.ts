@@ -29,6 +29,9 @@ const SECOND_REVISION = 2;
 const NO_ACTIONS = 0;
 const ACTOR = { kind: ActorKind.Human, account: "ulrich", name: "Ulrich" };
 const MACOS = "platform.macos";
+const STORAGE_BINDING = createIdentity("binding");
+const WEB_BINDING = createIdentity("binding");
+const API_BINDING = createIdentity("binding");
 
 function factsHarness(
   t: TestContext,
@@ -138,6 +141,7 @@ test("a node with a pull request action claims External.Requested", (t) => {
       revision: FIRST_REVISION,
       intent: Intent.Implement,
       tags: [],
+      repositories: ["repository:github:owner/repo"],
       claims: [
         ClaimableState.Available,
         ClaimableState.Waiting,
@@ -152,11 +156,16 @@ test("a node with a pull request action claims External.Requested", (t) => {
       revision: FIRST_REVISION,
       intent: Intent.Examine,
       tags: [MACOS],
+      repositories: [],
       claims: [ClaimableState.Available, ClaimableState.Waiting],
     },
   );
   assert.equal(rows.length, [action, plain].length);
-  assert.deepEqual(h.facts(plain), { intent: Intent.Examine, tags: [MACOS] });
+  assert.deepEqual(h.facts(plain), {
+    intent: Intent.Examine,
+    tags: [MACOS],
+    repositories: [],
+  });
   assert.deepEqual(h.factsOf(), rows);
 });
 
@@ -174,7 +183,11 @@ test("an open attempt adds its pinned revision", (t) => {
       { revision: FIRST_REVISION, tags: [] },
     ],
   );
-  assert.deepEqual(h.facts(nodeId), { intent: Intent.Implement, tags: [] });
+  assert.deepEqual(h.facts(nodeId), {
+    intent: Intent.Implement,
+    tags: [],
+    repositories: [],
+  });
   h.store.transaction((tx) =>
     tx.database
       .prepare("UPDATE mission_attempt SET closed_at = ? WHERE node_id = ?")
@@ -187,7 +200,38 @@ test("an open attempt adds its pinned revision", (t) => {
   assert.deepEqual(h.facts(nodeId), {
     intent: Intent.Implement,
     tags: [MACOS],
+    repositories: [],
   });
+});
+
+test("claim facts answer the repository identities of the claim revision in binding order and no storage binding", (t) => {
+  const identities: Record<string, string> = {
+    [STORAGE_BINDING]: "storage:s3:evidence",
+    [WEB_BINDING]: "repository:github:acme/web",
+    [API_BINDING]: "repository:github:acme/api",
+  };
+  const fixtures = factsHarness(t);
+  const h = factsHarness(t, {
+    getBindingRevision: (tx, bindingId) => {
+      const revision = fixtures.dependencies.bindings.getBindingRevision(
+        tx,
+        bindingId,
+      );
+      return (
+        revision && { ...revision, resource_identity: identities[bindingId]! }
+      );
+    },
+  });
+  const nodeId = h.node({
+    bindings: [WEB_BINDING, STORAGE_BINDING, API_BINDING],
+    intent: Intent.Examine,
+  });
+  const expected = ["repository:github:acme/web", "repository:github:acme/api"];
+  assert.deepEqual(h.facts(nodeId)?.repositories, expected);
+  assert.deepEqual(
+    h.factsOf().map(({ repositories }) => repositories),
+    [expected],
+  );
 });
 
 test("a terminal node answers no row", (t) => {

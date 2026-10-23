@@ -335,6 +335,8 @@ const FIRST_INDEX = 0;
 const LAST_INDEX = 1;
 const MINIMUM_LIMIT = 1;
 const EMPTY_IDENTITY_LENGTH = 0;
+const BINDING_INDEX = 1;
+const SINGLE_REPOSITORY = 1;
 type InstructionFilesAnswer = {
   commit: string;
   read_at: number;
@@ -358,6 +360,61 @@ function requireBinding(tx: Transaction, projectId: string, bindingId: string) {
   return binding;
 }
 
+function resolveEnvironment(
+  tx: Transaction,
+  config: { placement?: WorkerPlacement; environment?: string },
+  projectId: string,
+): string | null {
+  if (config.placement !== WorkerPlacement.Container) return null;
+  const repositories = Array.from(
+    readCurrentBindingSet(tx, projectId).entries(),
+  ).filter(
+    ([, binding]) =>
+      kindOf(binding.resource_identity) === BindingKind.Repository,
+  );
+  if (config.environment !== undefined)
+    return (
+      repositories.find(([name]) => name === config.environment)?.[
+        BINDING_INDEX
+      ].resource_identity ?? null
+    );
+  if (repositories.length !== SINGLE_REPOSITORY) return null;
+  return repositories[FIRST_INDEX]![BINDING_INDEX].resource_identity;
+}
+
+function refuseWorkerEnvironments(
+  submission: ReadonlyMap<string, BindingEdit>,
+): void {
+  const repositories = Array.from(submission.values()).filter(
+    (binding) => binding.kind === BindingKind.Repository,
+  ).length;
+  for (const [name, binding] of submission) {
+    if (
+      binding.kind !== BindingKind.Worker ||
+      binding.config.placement !== WorkerPlacement.Container
+    )
+      continue;
+    const { environment } = binding.config;
+    if (environment === undefined && repositories > SINGLE_REPOSITORY)
+      throw new OperationError(
+        HttpStatus.BadRequest,
+        ProjectErrorCode.WorkerEnvironmentRequired,
+        "A container worker binding names one repository binding when the project holds several.",
+        { binding: name },
+      );
+    if (
+      environment !== undefined &&
+      submission.get(environment)?.kind !== BindingKind.Repository
+    )
+      throw new OperationError(
+        HttpStatus.BadRequest,
+        ProjectErrorCode.WorkerEnvironmentUnknown,
+        "The environment names no repository binding of the project.",
+        { binding: name, environment },
+      );
+  }
+}
+
 function workerRowOf(
   tx: Transaction,
   row: StoredBinding,
@@ -373,6 +430,7 @@ function workerRowOf(
     instance_count: effectiveInstanceCount(config),
     worker_instances: config.worker_instances ?? [],
     placement: config.placement ?? null,
+    environment: resolveEnvironment(tx, config, row.project_id),
     generation:
       readGeneration(tx, row.project_id, row.resource_identity) ??
       NO_GENERATION,
@@ -1037,6 +1095,7 @@ export class ProjectService implements Service, ProjectBindings {
       assert.equal(submission.size, Object.keys(body.bindings).length);
       for (const [name, binding] of submission)
         this.validateBinding(tx, name, binding);
+      refuseWorkerEnvironments(submission);
       if (unavailable) throw unavailable;
       const before = new Set(
         this.unmatchedClaims(tx, projectId).map(unmatchedKey),
@@ -1227,6 +1286,7 @@ export class ProjectService implements Service, ProjectBindings {
         WorkerField.ResourceBudget,
         WorkerField.Placement,
         WorkerField.WorkerInstances,
+        WorkerField.Environment,
       ]) {
         if (config[field] === undefined) continue;
         throw new OperationError(
@@ -1245,6 +1305,16 @@ export class ProjectService implements Service, ProjectBindings {
         ProjectErrorCode.WorkerPlacementRequired,
         "A hosted worker binding states its placement.",
         { binding: name },
+      );
+    if (
+      config.environment !== undefined &&
+      config.placement !== WorkerPlacement.Container
+    )
+      throw new OperationError(
+        HttpStatus.BadRequest,
+        ProjectErrorCode.WorkerFieldForbidden,
+        "Only a binding at the container placement names an environment.",
+        { binding: name, field: WorkerField.Environment },
       );
     const instances =
       config.placement === WorkerPlacement.Worker
