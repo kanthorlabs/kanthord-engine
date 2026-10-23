@@ -11,7 +11,9 @@ import type { Dependencies } from "./service.ts";
 export function admits(claimant: Claimant, facts: ClaimFacts): boolean {
   return (
     claimant.declared_intents.includes(facts.intent) &&
-    facts.tags.every((tag) => claimant.tags.includes(tag))
+    facts.tags.every((tag) => claimant.tags.includes(tag)) &&
+    (claimant.environment === null ||
+      facts.repositories.includes(claimant.environment))
   );
 }
 
@@ -43,6 +45,7 @@ function claimantsOf(
           declared_node_states: declaration.declared_node_states,
           declared_intents: declaration.declared_intents,
           tags: binding.tags,
+          environment: binding.environment,
         },
       ];
     });

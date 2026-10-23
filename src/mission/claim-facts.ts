@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
+import { z } from "zod";
 import type { Transaction } from "../kernel/store.ts";
 import { isTerminal } from "./admission.ts";
 import {
   ClaimableState,
+  MissionBindingKind,
   tagsSchema,
   intentSchema,
   type ClaimFacts,
@@ -21,15 +23,39 @@ import {
 } from "./store.ts";
 
 const NO_ACTIONS = 0;
+const RESOURCE_KIND_SEPARATOR = ":";
+const bindingIdsSchema = z.array(z.string());
 
 function claimable(node: NodeRow | null): node is NodeRow {
   return node !== null && node.retired_at === null && !isTerminal(node.state);
 }
 
-function factsOf(revision: RevisionRow): ClaimFacts {
+function repositoriesOf(
+  tx: Transaction,
+  bindings: MissionBindings,
+  revision: RevisionRow,
+): string[] {
+  return bindingIdsSchema
+    .parse(JSON.parse(revision.bindings))
+    .flatMap((bindingId) => {
+      const binding = bindings.getBindingRevision(tx, bindingId);
+      assert.ok(binding);
+      return binding.resource_identity.split(RESOURCE_KIND_SEPARATOR)[0] ===
+        MissionBindingKind.Repository
+        ? [binding.resource_identity]
+        : [];
+    });
+}
+
+function factsOf(
+  tx: Transaction,
+  bindings: MissionBindings,
+  revision: RevisionRow,
+): ClaimFacts {
   return {
     intent: intentSchema.parse(revision.intent),
     tags: tagsSchema.parse(JSON.parse(revision.tags)),
+    repositories: repositoriesOf(tx, bindings, revision),
   };
 }
 
@@ -48,15 +74,19 @@ function rowOf(
   return {
     node_id: revision.node_id,
     revision: revision.revision,
-    ...factsOf(revision),
+    ...factsOf(tx, bindings, revision),
     claims,
   };
 }
 
-export function claimFacts(tx: Transaction, nodeId: string): ClaimFacts | null {
+export function claimFacts(
+  tx: Transaction,
+  bindings: MissionBindings,
+  nodeId: string,
+): ClaimFacts | null {
   assert.ok(tx.database.isTransaction);
   if (!claimable(readNode(tx, nodeId))) return null;
-  return factsOf(claimRevisionOf(tx, nodeId));
+  return factsOf(tx, bindings, claimRevisionOf(tx, nodeId));
 }
 
 export function claimFactsOf(
@@ -68,7 +98,22 @@ export function claimFactsOf(
   const mission = readMissionByProject(tx, projectId);
   if (!mission) return [];
   const actions = new Map<string, FrozenAction | null>();
+  const revisions = new Map<
+    string,
+    ReturnType<MissionBindings["getBindingRevision"]>
+  >();
+  const cached: MissionBindings = {
+    ...bindings,
+    getBindingRevision: (bindingTx, bindingId) => {
+      if (!revisions.has(bindingId))
+        revisions.set(
+          bindingId,
+          bindings.getBindingRevision(bindingTx, bindingId),
+        );
+      return revisions.get(bindingId) ?? null;
+    },
+  };
   return readClaimRevisions(tx, mission.id).map((revision) =>
-    rowOf(tx, bindings, revision, actions),
+    rowOf(tx, cached, revision, actions),
   );
 }

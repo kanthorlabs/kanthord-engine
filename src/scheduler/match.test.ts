@@ -14,6 +14,7 @@ const coder: Claimant = {
   declared_node_states: [ClaimNodeState.Available],
   declared_intents: [ClaimIntent.Implement, ClaimIntent.Examine],
   tags: [],
+  environment: null,
 };
 const macosCoder: Claimant = { ...coder, tags: [MACOS, XCODE] };
 const reviewer: Claimant = {
@@ -23,43 +24,65 @@ const reviewer: Claimant = {
   ],
   declared_intents: [ClaimIntent.Implement, ClaimIntent.Examine],
   tags: [],
+  environment: null,
 };
 
 test("a claimant admits a node only when its worker declares the intent and its tags include every tag of the node", () => {
   assert.equal(
-    admits(coder, { intent: ClaimIntent.Implement, tags: [] }),
+    admits(coder, {
+      intent: ClaimIntent.Implement,
+      tags: [],
+      repositories: [],
+    }),
     true,
   );
   assert.equal(
-    admits(coder, { intent: ClaimIntent.Implement, tags: [MACOS] }),
+    admits(coder, {
+      intent: ClaimIntent.Implement,
+      tags: [MACOS],
+      repositories: [],
+    }),
     false,
   );
   assert.equal(
-    admits(macosCoder, { intent: ClaimIntent.Examine, tags: [MACOS] }),
+    admits(macosCoder, {
+      intent: ClaimIntent.Examine,
+      tags: [MACOS],
+      repositories: [],
+    }),
     true,
   );
   assert.equal(
     admits(macosCoder, {
       intent: ClaimIntent.Implement,
       tags: [MACOS, "platform.linux"],
+      repositories: [],
     }),
     false,
   );
   assert.equal(
     admits(
       { ...macosCoder, declared_intents: [ClaimIntent.Examine] },
-      { intent: ClaimIntent.Implement, tags: [] },
+      { intent: ClaimIntent.Implement, tags: [], repositories: [] },
     ),
     false,
   );
   assert.equal(
-    admits(coder, { intent: ClaimIntent.Implement, tags: ["platform.MACOS"] }),
+    admits(coder, {
+      intent: ClaimIntent.Implement,
+      tags: ["platform.MACOS"],
+      repositories: [],
+    }),
     false,
   );
 });
 
 test("a claimant covers a state only when its worker declares the state and it admits the node", () => {
-  const facts = { intent: ClaimIntent.Implement, tags: [MACOS] };
+  const facts = {
+    intent: ClaimIntent.Implement,
+    tags: [MACOS],
+    repositories: [],
+  };
   assert.equal(
     covered([coder, reviewer], facts, ClaimNodeState.Available),
     false,
@@ -92,16 +115,19 @@ test("unmatched claims answer each uncovered pair of Available, Waiting and Exte
       binding_id: createIdentity("binding"),
       worker_name: "coder@1",
       tags: [MACOS],
+      environment: null,
     },
     {
       binding_id: createIdentity("binding"),
       worker_name: "reviewer@1",
       tags: [],
+      environment: null,
     },
     {
       binding_id: createIdentity("binding"),
       worker_name: "unknown@1",
       tags: [MACOS],
+      environment: null,
     },
   ];
   h.dependencies.bindings.workerBindingsOf = (_tx, id) => {
@@ -116,6 +142,7 @@ test("unmatched claims answer each uncovered pair of Available, Waiting and Exte
         revision: 1,
         intent: ClaimIntent.Implement,
         tags: [],
+        repositories: [],
         claims: [ClaimNodeState.Available, ClaimNodeState.Waiting],
       },
       {
@@ -123,6 +150,7 @@ test("unmatched claims answer each uncovered pair of Available, Waiting and Exte
         revision: 2,
         intent: ClaimIntent.Implement,
         tags: [MACOS],
+        repositories: [],
         claims: [ClaimNodeState.Available, ClaimNodeState.Waiting],
       },
       {
@@ -130,6 +158,7 @@ test("unmatched claims answer each uncovered pair of Available, Waiting and Exte
         revision: 1,
         intent: ClaimIntent.Examine,
         tags: [MACOS],
+        repositories: [],
         claims: [
           ClaimNodeState.Available,
           ClaimNodeState.Waiting,
@@ -160,4 +189,64 @@ test("unmatched claims answer each uncovered pair of Available, Waiting and Exte
     h.calls.filter(({ method }) => method === PINNED_BINDING_READ),
     [],
   );
+});
+
+const API = "repository:github:acme/api";
+const WEB = "repository:github:acme/web";
+
+test("a claimant with an environment admits only facts that name its repository binding", () => {
+  const apiCoder: Claimant = { ...coder, environment: API };
+  const facts = (repositories: string[]) => ({
+    intent: ClaimIntent.Implement,
+    tags: [],
+    repositories,
+  });
+  assert.equal(admits(apiCoder, facts([API])), true);
+  assert.equal(admits(apiCoder, facts([WEB, API])), true);
+  assert.equal(admits(apiCoder, facts([WEB])), false);
+  assert.equal(admits(apiCoder, facts([])), false);
+  for (const repositories of [[API], [WEB], []])
+    assert.equal(admits(coder, facts(repositories)), true);
+});
+
+test("unmatched claims follow the environment of the worker binding", (t) => {
+  const h = schedulerHarness(t);
+  const projectId = createIdentity("project");
+  const webNode = createIdentity("node");
+  h.dependencies.declarations.declarationOf = () => ({
+    declared_node_states: [ClaimNodeState.Available],
+    declared_intents: [ClaimIntent.Implement],
+    resource_budget: { wall_time_ms: WALL_TIME },
+  });
+  const bindings = [
+    {
+      binding_id: createIdentity("binding"),
+      worker_name: "coder@1",
+      tags: [],
+      environment: API as string | null,
+    },
+  ];
+  h.dependencies.bindings.workerBindingsOf = () => bindings;
+  h.dependencies.facts.claimFactsOf = () => [
+    {
+      node_id: webNode,
+      revision: 1,
+      intent: ClaimIntent.Implement,
+      tags: [],
+      repositories: [WEB],
+      claims: [ClaimNodeState.Available],
+    },
+  ];
+  const read = () =>
+    h.store.transaction((tx) => h.service.unmatchedClaims(tx, projectId));
+  assert.deepEqual(read(), [
+    { node_id: webNode, revision: 1, claim: ClaimNodeState.Available },
+  ]);
+  bindings.push({
+    binding_id: createIdentity("binding"),
+    worker_name: "coder@1",
+    tags: [],
+    environment: null,
+  });
+  assert.deepEqual(read(), []);
 });
