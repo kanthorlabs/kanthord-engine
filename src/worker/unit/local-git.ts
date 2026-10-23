@@ -22,6 +22,7 @@ const PATH_BATCH_BYTES = 262144;
 const MODIFIED = "M";
 const REGULAR_MODES = new Set(["100644", "100755"]);
 const NEWLINE = "\n";
+const STATUS_PREFIX_LENGTH = 3;
 const EXCLUDE_SPECIAL = /[\\*?[\]!#]/g;
 export const MERGE_HEAD = "MERGE_HEAD";
 const GIT_OPERATIONS = [
@@ -822,4 +823,24 @@ export async function excludeUntracked(
         .join(""),
   );
   return paths;
+}
+
+export async function trackedChanges(
+  env: NodeJS.ProcessEnv,
+  directory: string,
+  context: Context,
+  deadlineMs: number,
+): Promise<string[]> {
+  return (
+    await run(
+      env,
+      directory,
+      ["status", "--porcelain=v1", "-z", "--untracked-files=no"],
+      context,
+      deadlineMs,
+    )
+  )
+    .split(NUL)
+    .filter((entry) => entry.length > STATUS_PREFIX_LENGTH)
+    .map((entry) => entry.slice(STATUS_PREFIX_LENGTH));
 }

@@ -238,3 +238,23 @@ test("the base rerun answers no exit when the budget ends in the base setup", as
   const base = new BaseHead(exhausted, join(root, "base"), entries);
   assert.equal(await base.exitOf("command-absent-x"), null);
 });
+
+test("a setup that changes a tracked file stops with setup_failed and names the path", async (t) => {
+  const { checkout } = await repository(t, { "package-lock.json": "{}" });
+  await assert.rejects(
+    runSetup(
+      input(),
+      await setupEntries(input(), [
+        setupCheckout(
+          checkout,
+          stored({ postCreateCommand: "echo changed > package-lock.json" }),
+        ),
+      ]),
+    ),
+    (error) =>
+      error instanceof ExecutionStop &&
+      error.reason === EndReason.EnvironmentFailed &&
+      error.code === EnvironmentFailure.SetupFailed &&
+      /package-lock\.json/.test(error.detail ?? ""),
+  );
+});

@@ -23,6 +23,7 @@ import {
   excludeUntracked,
   fileAtRevision,
   headCommit,
+  trackedChanges,
 } from "./local-git.ts";
 import {
   runVerificationsWithOutput,
@@ -188,6 +189,18 @@ export async function runSetup(
       return { end: SetupEnd.BudgetEnd };
     if (run.outcome !== VerificationClass.Pass)
       return { end: SetupEnd.Failed, run, commands };
+    const changed = await trackedChanges(
+      input.env,
+      entry.directory,
+      input.context,
+      remaining(input),
+    );
+    if (changed.length)
+      throw new ExecutionStop(
+        EndReason.EnvironmentFailed,
+        EnvironmentFailure.SetupFailed,
+        redactReason(JSON.stringify({ changed_tracked_files: changed })),
+      );
     await excludeUntracked(
       input.env,
       entry.directory,
