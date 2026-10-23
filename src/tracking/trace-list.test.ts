@@ -316,3 +316,49 @@ test("a facet answers at most the facet value limit", (t) => {
   assert.equal(facets.worker_names.length, FACET_VALUES_MAX);
   assert.deepEqual(facets.worker_names, [...facets.worker_names].sort());
 });
+
+const SERVER_TRACE_NUMBER = 6;
+const SERVER_CREATED = 5000;
+
+function insertServerTrace(store: Store): void {
+  store.transaction((tx) => {
+    tx.database
+      .prepare(
+        "INSERT INTO tracking_trace (trace_id, project_id, root_span_id, created_at) VALUES (?, ?, ?, ?)",
+      )
+      .run(
+        traceIdOf(SERVER_TRACE_NUMBER),
+        PROJECT_A,
+        SERVER_TRACE_NUMBER.toString(16).padStart(16, "0"),
+        SERVER_CREATED,
+      );
+  });
+}
+
+test("a server trace lists with a null execution, node and attempt and a filter by execution excludes it", (t) => {
+  const store = seeded(t);
+  insertServerTrace(store);
+  const page = store.transaction((tx) =>
+    listTraces(tx, queryOf({ project_id: PROJECT_A }), null),
+  );
+  const item = page.items.find(
+    (entry) => entry.trace_id === traceIdOf(SERVER_TRACE_NUMBER),
+  );
+  assert.ok(item);
+  assert.equal(item.execution_id, null);
+  assert.equal(item.node_id, null);
+  assert.equal(item.attempt, null);
+  assert.equal(item.project_id, PROJECT_A);
+  assert.deepEqual(
+    idsOf(store, {
+      execution_id: `execution_${ULID_HEAD}1`,
+    }),
+    [1],
+  );
+  assert.equal(
+    idsOf(store, { execution_id: `execution_${ULID_HEAD}2` }).includes(
+      SERVER_TRACE_NUMBER,
+    ),
+    false,
+  );
+});

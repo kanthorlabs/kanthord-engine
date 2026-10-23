@@ -13,6 +13,7 @@ export const EXECUTION_IDENTITY_PREFIX = "execution";
 export const ROOT_SPAN_OPERATION = "scheduler.execution";
 export const SCHEDULER_PRODUCER = "scheduler";
 export const MISSION_PRODUCER = "mission";
+export const PROJECT_PRODUCER = "project";
 const ONE_KIND_AT_MOST = 1;
 export const TRACKING_TIMEOUT_MS = 30000;
 export const TELEMETRY_WRITE_MAX_BODY_BYTES = 1048576;
@@ -294,6 +295,12 @@ export interface ExecutionTrace {
   attempt: number;
   trace_id: string;
   root_span_id: string;
+}
+export interface ServerTrace {
+  trace_id: string;
+  root_span_id: string;
+  project_id: string;
+  created_at: number;
 }
 export interface ExecutionTraces {
   traceOf(executionId: string): ExecutionTrace | undefined;
