@@ -118,7 +118,7 @@ A task is one commit of fewer than about 400 changed lines, except a fixture tas
 
 ## D20 — Main-session paths
 
-`scripts/lane-check.sh` of the engine and of `apps` denies these paths to every lane role: engine `AGENTS.md`, `static/`, `docs/`, `scripts/*.test.sh`; apps `mock/`, `.claude/`, `.opencode/`, `scripts/*.test.sh`, `AGENTS.md`. A task that edits them carries the mark `Lane: main session`. The root `AGENTS.md:21-24` route sends each plan to a sub-agent outside the lane pipeline, so the mark only names the reviewer duty: the main session reviews each such diff itself.
+A task that edits one of these paths carries the mark `Lane: main session`: engine `AGENTS.md`, `static/`, `docs/`, `scripts/*.test.sh`; apps `mock/`, `.claude/`, `.opencode/`, `scripts/*.test.sh`, `AGENTS.md`. `scripts/lane-check.sh` of `apps` denies the apps paths to every lane role. The root `AGENTS.md:21-24` route sends each plan to a sub-agent outside the lane pipeline, so the mark only names the reviewer duty: the main session reviews each such diff itself.
 
 ## D21 — Apps personas
 
