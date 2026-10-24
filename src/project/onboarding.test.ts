@@ -1039,16 +1039,27 @@ test("a failed read logs one read_failed record until the reason changes", async
   assert.deepEqual(
     h
       .logged(READ_FAILED)
-      .map(({ level, binding, resource_identity, reason, failure_reason }) => ({
-        level,
-        binding,
-        resource_identity,
-        reason,
-        failure_reason,
-      })),
+      .map(
+        ({
+          level,
+          project_id,
+          binding,
+          resource_identity,
+          reason,
+          failure_reason,
+        }) => ({
+          level,
+          project_id,
+          binding,
+          resource_identity,
+          reason,
+          failure_reason,
+        }),
+      ),
     [
       {
         level: ERROR_LEVEL,
+        project_id: PROJECT,
         binding: APP_NAME,
         resource_identity: APP.resource_identity,
         reason: `${SSH_READ_FAILED} The failure reason is ${KEY_REFUSED}.`,
@@ -1073,6 +1084,24 @@ test("a read that answers an invalid document logs a read_failed record", async 
   const [record] = h.logged(READ_FAILED);
   assert.equal(record?.reason, INVALID_DOCUMENT);
   assert.equal(record?.failure_reason, null);
+});
+
+test("a binding change re-arms the read_failed record", async (t) => {
+  const h = new Harness(t);
+  h.resolution = sshReadError();
+  await h.compute();
+  assert.equal(h.logged(READ_FAILED).length, ONE_CALL);
+  h.bindings = facts(
+    [{ ...APP, binding_id: RENAMED_BINDING_ID }],
+    [container("app")],
+  );
+  h.onboarding.bindingsChanged(PROJECT);
+  await h.until(() => h.logged(READ_FAILED).length === TWO_RECORDS);
+  const [, record] = h.logged(READ_FAILED);
+  assert.equal(
+    record?.reason,
+    `${SSH_READ_FAILED} The failure reason is ${KEY_REFUSED}.`,
+  );
 });
 
 test("a successful read logs nothing and rearms the read_failed record", async (t) => {

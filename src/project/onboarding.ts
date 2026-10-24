@@ -442,6 +442,7 @@ export class Onboarding {
   private readonly again = new Set<string>();
   private readonly marked = new Set<string>();
   private readonly retries = new Map<string, NodeJS.Timeout>();
+  private readonly loggedReadFailures = new Map<string, string>();
   private readonly queue: string[] = [];
   private draining: Promise<void> | null = null;
   private readonly listeners = new Set<() => void>();
@@ -675,6 +676,7 @@ export class Onboarding {
     record.binding_name = group.binding_name;
     record.environment_from_agent = false;
     record.read_succeeded = false;
+    this.loggedReadFailures.delete(key);
     if (record.run_started_at === null) {
       record.step = null;
       record.step_started_at = null;
@@ -685,6 +687,7 @@ export class Onboarding {
 
   private dropRecord(key: string): void {
     this.records.delete(key);
+    this.loggedReadFailures.delete(key);
     const index = this.queue.indexOf(key);
     if (index !== NOT_QUEUED) this.queue.splice(index, 1);
     this.clearRetry(key);
@@ -765,8 +768,7 @@ export class Onboarding {
       return;
     }
     this.records.set(key, next);
-    if (failure !== null && failure.reason !== previous?.reason)
-      this.logReadFailed(next, failure);
+    this.logReadFailure(key, next, failure);
     this.schedule(key, next);
     this.retryWhilePending(key, next);
     this.notify();
@@ -1022,9 +1024,20 @@ export class Onboarding {
     );
   }
 
-  private logReadFailed(record: GroupRecord, failure: ReadFailure): void {
+  private logReadFailure(
+    key: string,
+    record: GroupRecord,
+    failure: ReadFailure | null,
+  ): void {
+    if (failure === null) {
+      this.loggedReadFailures.delete(key);
+      return;
+    }
+    if (this.loggedReadFailures.get(key) === failure.reason) return;
+    this.loggedReadFailures.set(key, failure.reason);
     this.dependencies.logger.error(
       {
+        project_id: record.project_id,
         binding: record.binding_name,
         resource_identity: record.resource_identity,
         reason: failure.reason,
