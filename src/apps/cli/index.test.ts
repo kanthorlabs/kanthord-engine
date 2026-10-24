@@ -354,7 +354,7 @@ test("project environment commands expose help and reject invalid inputs before 
     t.signal,
   );
   assert.equal(group.status, ExitCode.Success, group.stderr);
-  for (const leaf of ["show", "set"]) {
+  for (const leaf of ["show", "set", "list", "rebuild", "export", "unset"]) {
     assert.match(group.stdout, new RegExp(`\\b${leaf}\\b`));
     const help = await invocation(
       ["project", "environment", leaf, "--help"],
@@ -400,6 +400,44 @@ test("project environment commands expose help and reject invalid inputs before 
       ["set", PROJECT_ID, BINDING_ID, "--file", commentedFile],
       "cli.project.environment.set.token_required",
     ],
+    [["list", "invalid"], "cli.project.environment.list.invalid_project_id"],
+    [["list", PROJECT_ID], "cli.project.environment.list.token_required"],
+    [
+      ["rebuild", "invalid", BINDING_ID],
+      "cli.project.environment.rebuild.invalid_project_id",
+    ],
+    [
+      ["rebuild", PROJECT_ID, "invalid"],
+      "cli.project.environment.rebuild.invalid_binding_id",
+    ],
+    [
+      ["rebuild", PROJECT_ID, BINDING_ID],
+      "cli.project.environment.rebuild.token_required",
+    ],
+    [
+      ["export", "invalid", BINDING_ID],
+      "cli.project.environment.export.invalid_project_id",
+    ],
+    [
+      ["export", PROJECT_ID, "invalid"],
+      "cli.project.environment.export.invalid_binding_id",
+    ],
+    [
+      ["export", PROJECT_ID, BINDING_ID],
+      "cli.project.environment.export.token_required",
+    ],
+    [
+      ["unset", "invalid", BINDING_ID],
+      "cli.project.environment.unset.invalid_project_id",
+    ],
+    [
+      ["unset", PROJECT_ID, "invalid"],
+      "cli.project.environment.unset.invalid_binding_id",
+    ],
+    [
+      ["unset", PROJECT_ID, BINDING_ID],
+      "cli.project.environment.unset.token_required",
+    ],
   ] as const) {
     const result = await invocation(
       ["project", "environment", ...args],
@@ -410,6 +448,169 @@ test("project environment commands expose help and reject invalid inputs before 
     assert.match(result.stderr, new RegExp(`^${code.replaceAll(".", "\\.")}:`));
     assert.equal(result.stdout, EMPTY_OUTPUT);
   }
+});
+
+const ENVIRONMENT_PATH = `/api/project/${PROJECT_ID}/binding/${BINDING_ID}/environment`;
+const ENVIRONMENT_STATE = {
+  binding_id: BINDING_ID,
+  binding_name: "main-repo",
+  resource_identity: "repository:github:owner/repository",
+  target: "image",
+  source: "repository",
+  status: "ready",
+  digest: "digest",
+  tag: "localhost/kanthord-env/tag",
+  run_started_at: null,
+  step_started_at: null,
+  reason: null,
+  failure: null,
+  checks: [],
+  repairs: 0,
+  repairing: false,
+};
+const STORED_ENVIRONMENT = { image: "debian", postCreateCommand: "make setup" };
+const BINDING_SET_ANSWER = {
+  project_id: PROJECT_ID,
+  binding_set_version: 2,
+  bindings: {},
+  changes: [],
+};
+
+interface SeenRequest {
+  method: string | undefined;
+  url: string | undefined;
+  body: string;
+}
+
+async function environmentServer(
+  t: TestContext,
+  answer: unknown,
+): Promise<{ endpoint: string; seen: SeenRequest[] }> {
+  const seen: SeenRequest[] = [];
+  const server = createServer(async (request, response) => {
+    const chunks: Buffer[] = [];
+    for await (const chunk of request) chunks.push(chunk as Buffer);
+    seen.push({
+      method: request.method,
+      url: request.url,
+      body: Buffer.concat(chunks).toString("utf8"),
+    });
+    response.writeHead(200, { "Content-Type": "application/json" });
+    response.end(JSON.stringify(answer));
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  t.after(() => server.close());
+  return {
+    endpoint: `http://127.0.0.1:${(server.address() as AddressInfo).port}`,
+    seen,
+  };
+}
+
+function environmentCommand(t: TestContext, endpoint: string, args: string[]) {
+  return invocation(
+    ["project", "environment", ...args, "--endpoint", endpoint, "--token", "t"],
+    environment(temporary(t)),
+    t.signal,
+  );
+}
+
+test("project environment list reads the states of a project", async (t) => {
+  const answer = { items: [ENVIRONMENT_STATE] };
+  const { endpoint, seen } = await environmentServer(t, answer);
+  const result = await environmentCommand(t, endpoint, ["list", PROJECT_ID]);
+  assert.equal(result.status, ExitCode.Success, result.stderr);
+  assert.deepEqual(seen, [
+    {
+      method: "GET",
+      url: `/api/project/${PROJECT_ID}/environment`,
+      body: EMPTY_OUTPUT,
+    },
+  ]);
+  assert.deepEqual(JSON.parse(result.stdout), answer);
+});
+
+test("project environment rebuild posts with no body and prints the state", async (t) => {
+  const { endpoint, seen } = await environmentServer(t, ENVIRONMENT_STATE);
+  const result = await environmentCommand(t, endpoint, [
+    "rebuild",
+    PROJECT_ID,
+    BINDING_ID,
+  ]);
+  assert.equal(result.status, ExitCode.Success, result.stderr);
+  assert.deepEqual(seen, [
+    {
+      method: "POST",
+      url: `${ENVIRONMENT_PATH}/rebuild`,
+      body: EMPTY_OUTPUT,
+    },
+  ]);
+  assert.deepEqual(
+    { ...JSON.parse(result.stdout), idempotency_key: undefined },
+    { ...ENVIRONMENT_STATE, idempotency_key: undefined },
+  );
+});
+
+test("project environment unset puts a null environment and prints the answer", async (t) => {
+  const { endpoint, seen } = await environmentServer(t, BINDING_SET_ANSWER);
+  const result = await environmentCommand(t, endpoint, [
+    "unset",
+    PROJECT_ID,
+    BINDING_ID,
+  ]);
+  assert.equal(result.status, ExitCode.Success, result.stderr);
+  assert.deepEqual(seen, [
+    {
+      method: "PUT",
+      url: ENVIRONMENT_PATH,
+      body: JSON.stringify({ environment: null }),
+    },
+  ]);
+  assert.deepEqual(
+    { ...JSON.parse(result.stdout), idempotency_key: undefined },
+    { ...BINDING_SET_ANSWER, idempotency_key: undefined },
+  );
+});
+
+test("project environment export prints only the environment as indented JSON", async (t) => {
+  const { endpoint, seen } = await environmentServer(t, {
+    source: "stored",
+    commit: null,
+    environment: STORED_ENVIRONMENT,
+    reason: null,
+  });
+  const result = await environmentCommand(t, endpoint, [
+    "export",
+    PROJECT_ID,
+    BINDING_ID,
+  ]);
+  assert.equal(result.status, ExitCode.Success, result.stderr);
+  assert.deepEqual(seen, [
+    { method: "GET", url: ENVIRONMENT_PATH, body: EMPTY_OUTPUT },
+  ]);
+  assert.equal(
+    result.stdout,
+    `${JSON.stringify(STORED_ENVIRONMENT, null, 2)}\n`,
+  );
+});
+
+test("project environment export stops when the binding holds no environment", async (t) => {
+  const { endpoint } = await environmentServer(t, {
+    source: "none",
+    commit: "c1",
+    environment: null,
+    reason: null,
+  });
+  const result = await environmentCommand(t, endpoint, [
+    "export",
+    PROJECT_ID,
+    BINDING_ID,
+  ]);
+  assert.equal(result.status, ExitCode.Failure);
+  assert.match(
+    result.stderr,
+    /^cli\.project\.environment\.export\.environment_absent:/,
+  );
+  assert.equal(result.stdout, EMPTY_OUTPUT);
 });
 
 test("project agent commands expose help and reject invalid inputs before I/O", async (t) => {
