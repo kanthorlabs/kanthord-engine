@@ -23,6 +23,7 @@ import {
   verificationPassed,
   type VerificationRun,
 } from "./verification.ts";
+import { verificationFactsOf } from "./progress-rule.ts";
 import { CHECKOUTS_DIRECTORY, RELEASE_DIRECTORY } from "./workspace.ts";
 import { SetupEnd, setUpHeads, type SetupEntry } from "./environment-setup.ts";
 
@@ -80,6 +81,7 @@ export async function releaseGate(state: StepsState): Promise<ReleaseGate> {
   if (stop) throw stop;
   const passed =
     !checked.setup && verificationPassed(run.verification, commands);
+  state.lastVerification = verificationFactsOf(passed, run.verification);
   state.run.log("release verified", {
     commits: state.checkouts.map((checkout) => checkout.head),
     passed,

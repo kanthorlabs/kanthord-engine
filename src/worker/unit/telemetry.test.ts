@@ -20,9 +20,15 @@ import { AgentErrorType, traceAgent } from "./agent-telemetry.ts";
 import {
   environmentDigestsOf,
   GitStep,
+  taskEnd,
+  taskFailure,
+  taskSpan,
   verificationObserver,
   withinGit,
 } from "./method-telemetry.ts";
+import { EndReason, ExecutionStop } from "./execution-run.ts";
+import { NoProgressRule, noProgressDetail } from "./progress-rule.ts";
+import type { TaskContent } from "../../mission/contract.ts";
 import { CommandEnd, type CommandRun } from "./verification.ts";
 import { EnvironmentSource } from "../../kernel/devcontainer.ts";
 import { Diagnostic } from "../../kernel/errors.ts";
@@ -43,6 +49,8 @@ const FAILED = "failed";
 const INPUT_TOKENS = 10;
 const SPLIT_BEFORE_PAIR = 14999;
 const ONE_FAULT = 1;
+const NO_PROGRESS_COUNT = 2;
+const FAILED_EXIT = 1;
 const NO_SENT = 0;
 const ONE_ENTRY = 1;
 const TWO_ENTRIES = 2;
@@ -299,6 +307,53 @@ test("a failed operation ends its span with Error and keeps the error", async ()
   const end = spanRecords(records).find((record) => record.end_time);
   assert.equal(end?.status, SpanStatus.Error);
   assert.equal(spans.current(), CLAIM.root_span_id);
+});
+
+async function stoppedTaskEnd(stop: ExecutionStop) {
+  const { records, spans } = recorder();
+  await assert.rejects(
+    spans.within(
+      taskSpan(spans, { id: CLAIM.node_id } as TaskContent),
+      async () => {
+        throw stop;
+      },
+      taskEnd,
+      taskFailure,
+    ),
+    stop,
+  );
+  return spanRecords(records).find((record) => record.end_time);
+}
+
+test("a no_progress stop ends the task span with the rule, the counts and the verification state", async () => {
+  const end = await stoppedTaskEnd(
+    new ExecutionStop(
+      EndReason.NoProgress,
+      null,
+      noProgressDetail({
+        rule: NoProgressRule.UnchangedRevision,
+        count: NO_PROGRESS_COUNT,
+        limit: NO_PROGRESS_COUNT,
+        verification: { passed: false, exit_codes: [FAILED_EXIT, null] },
+      }),
+    ),
+  );
+  assert.equal(end?.status, SpanStatus.Error);
+  assert.deepEqual(end?.attributes, {
+    "kanthord.stop.reason": EndReason.NoProgress,
+    "kanthord.stop.rule": NoProgressRule.UnchangedRevision,
+    "kanthord.stop.count": NO_PROGRESS_COUNT,
+    "kanthord.stop.limit": NO_PROGRESS_COUNT,
+    "kanthord.stop.verification.passed": false,
+  });
+});
+
+test("another stop ends the task span with Error and no stop attribute", async () => {
+  const end = await stoppedTaskEnd(
+    new ExecutionStop(EndReason.OperationFailed, null, FAILED),
+  );
+  assert.equal(end?.status, SpanStatus.Error);
+  assert.deepEqual(end?.attributes, {});
 });
 
 test("a git failure span text holds the diagnostic line and its rows", async () => {

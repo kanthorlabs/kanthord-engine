@@ -15,6 +15,7 @@ import type {
 } from "./verification.ts";
 import type { ExecutionEnvironment } from "../contract.ts";
 import { CodedError, diagnostic, diagnosticRows } from "../../kernel/errors.ts";
+import { noProgressAttributes } from "./progress-rule.ts";
 
 const SUCCESS = 0;
 const NO_LENGTH = 0;
@@ -86,6 +87,10 @@ export function taskEnd(result: { kind: string }): SpanEnd {
   };
   assert.ok(end.attributes["kanthord.task.result"]);
   return end;
+}
+
+export function taskFailure(error: unknown): SpanEnd {
+  return { status: SpanStatus.Error, attributes: noProgressAttributes(error) };
 }
 
 function commandEnd(ran: CommandRun): SpanEnd {

@@ -48,6 +48,7 @@ import type { MethodClients } from "./method-clients.ts";
 import { WorkspaceRoot } from "./workspace.ts";
 import { prepareStepsWorkspace } from "./steps-implement.ts";
 import type { Verdict } from "./node-reads.ts";
+import type { VerificationFacts } from "./progress-rule.ts";
 import { doneTrailerOf } from "./done-record.ts";
 export { LOCAL_GIT_SSH_ACCESS } from "../../repository/test-sshd.ts";
 export {
@@ -358,6 +359,7 @@ async function openExecution(
     verdict: null as Verdict | null,
     cleared: null as string | null,
     unchangedTurns: 0,
+    lastVerification: null as VerificationFacts,
     provider,
     bare: bares[0]!,
     bares,

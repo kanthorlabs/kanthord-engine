@@ -72,12 +72,19 @@ import {
   withinGit,
   phaseSpan,
   taskEnd,
+  taskFailure,
   taskSpan,
   testedCommitOf,
   environmentDigestsOf,
   verificationObserver,
 } from "./method-telemetry.ts";
 import { nodeWork, RefreshResult, refreshAtClaim } from "./base-refresh.ts";
+import {
+  NoProgressRule,
+  noProgressDetail,
+  verificationFactsOf,
+  type VerificationFacts,
+} from "./progress-rule.ts";
 import { nodeUnitOf, releaseGate, ReleaseGateKind } from "./release-gate.ts";
 
 export const HEAD_COMMIT_SUBJECT = "Head commit of the node branch";
@@ -353,6 +360,7 @@ async function runPending(
       taskSpan(state.run.spans, task),
       run,
       taskEnd,
+      taskFailure,
     );
     if (result.kind === TaskResultKind.BudgetEnd)
       return { task, budgetEnd: true, completedTasks: completed.size };
@@ -389,13 +397,15 @@ async function runNodeInstruction(
       });
       if (ruled) {
         state.unchangedTurns = unchangedTurns;
-        countUnchangedTurn(state);
+        countUnchangedTurn(state, NoProgressRule.VerdictRuleHolds);
         continue;
       }
-    } else if (revised && !agent.changed()) countUnchangedTurn(state);
+    } else if (revised && !agent.changed())
+      countUnchangedTurn(state, NoProgressRule.UnchangedRevision);
     const checked = await verifyCommands(state, commands);
     const { verification, outputs } = checked;
     const passed = verificationPassed(verification, commands);
+    state.lastVerification = verificationFactsOf(passed, verification);
     state.run.log("task verified", {
       task_id: unit.id,
       commit: headSetOf(state.checkouts),
@@ -448,7 +458,8 @@ export async function runTask(
     if (instruction === null) await agent.prompt(taskWork(state, task));
     else await agent.instruct(taskWork(state, task), instruction);
     if (budget.exhausted()) return ended;
-    if (instruction !== null && !agent.changed()) countUnchangedTurn(state);
+    if (instruction !== null && !agent.changed())
+      countUnchangedTurn(state, NoProgressRule.UnchangedRevision);
     state.run.log("task committed", {
       task_id: task.id,
       commit: headSetOf(state.checkouts),
@@ -456,6 +467,7 @@ export async function runTask(
     const checked = await verifyTaskRun(state, task);
     const { verification, outputs } = checked;
     const passed = verificationPassed(verification, task.content.verifications);
+    state.lastVerification = verificationFactsOf(passed, verification);
     state.run.log("task verified", {
       task_id: task.id,
       commit: headSetOf(state.checkouts),
@@ -473,10 +485,19 @@ export async function runTask(
   return ended;
 }
 
-function countUnchangedTurn(state: StepsState): void {
+function countUnchangedTurn(state: StepsState, rule: NoProgressRule): void {
   state.unchangedTurns++;
   if (state.unchangedTurns >= NO_PROGRESS_LIMIT)
-    state.run.stop(EndReason.NoProgress);
+    state.run.stop(
+      EndReason.NoProgress,
+      null,
+      noProgressDetail({
+        rule,
+        count: state.unchangedTurns,
+        limit: NO_PROGRESS_LIMIT,
+        verification: state.lastVerification,
+      }),
+    );
 }
 
 export interface StepsInput {
@@ -498,6 +519,7 @@ export interface StepsState {
   verdict: Verdict | null;
   cleared: string | null;
   unchangedTurns: number;
+  lastVerification: VerificationFacts;
   setup: SetupEntry[];
   base: BaseHead;
   setupPending: boolean;

@@ -9,6 +9,9 @@ import { executionBoundary } from "./native-method.ts";
 import type { MethodClients } from "./method-clients.ts";
 import { runStepsImplement, startCheck } from "./steps-implement.ts";
 import type { WorkspaceCheckout } from "./workspace.ts";
+import { NoProgressRule } from "./progress-rule.ts";
+import { SpanOperation } from "./telemetry.ts";
+import { SpanStatus } from "../../tracking/contract.ts";
 import {
   advanceBase,
   commitOnNode,
@@ -102,7 +105,31 @@ test("a verdict that names no task sends a verdict turn and an unchanged tree st
   ]);
   const judged = h.checkouts[0]!.head;
   h.verdict = verdictAt(VERDICT, h.checkouts);
-  await noProgressEnd(h);
+  const starts = t.mock.method(h.run.spans, "start");
+  const ends = t.mock.method(h.run.spans, "end");
+  const { end } = await noProgressEnd(h);
+  assert.ok("stop" in end && end.stop);
+  assert.deepEqual(JSON.parse(end.stop.detail!), {
+    rule: NoProgressRule.VerdictRuleHolds,
+    count: TWO_TURNS,
+    limit: TWO_TURNS,
+    verification: null,
+  });
+  const taskStart = starts.mock.calls.find(
+    (call) => call.arguments[0].operation === SpanOperation.Task,
+  );
+  const taskEnd = ends.mock.calls.find(
+    (call) => call.arguments[0] === taskStart?.result,
+  );
+  assert.deepEqual(taskEnd?.arguments[1], {
+    status: SpanStatus.Error,
+    attributes: {
+      "kanthord.stop.reason": EndReason.NoProgress,
+      "kanthord.stop.rule": NoProgressRule.VerdictRuleHolds,
+      "kanthord.stop.count": TWO_TURNS,
+      "kanthord.stop.limit": TWO_TURNS,
+    },
+  });
   assert.equal(h.provider.calls.length, TWO_TURNS);
   const first = JSON.stringify(h.provider.calls[0]);
   assert.ok(first.includes(VERDICT));
