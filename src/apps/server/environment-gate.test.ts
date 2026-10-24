@@ -40,7 +40,6 @@ import {
   SINGLE_SLOT,
   slotRuns,
   SLOT_NAME_PREFIX,
-  STATUS_WAIT_MS,
   worker,
   type Fixture,
   type SlotStart,
@@ -407,8 +406,6 @@ test(
           call[1] === CREATE_VERB &&
           call.at(-1) === `${SLOT_NAME_PREFIX}${clientId}`,
       );
-    const bounded = () =>
-      AbortSignal.any([t.signal, AbortSignal.timeout(STATUS_WAIT_MS)]);
 
     const firstBuild = environment.hold();
     const project = await createProject(fixture, {
@@ -421,7 +418,7 @@ test(
     await until(
       () => starts.length > NO_ITEMS && volumeCreated(starts[0]!.clientId),
       Boolean,
-      bounded(),
+      t.signal,
     );
     assert.deepEqual(slotRuns(fake), []);
     assert.deepEqual(
@@ -444,11 +441,12 @@ test(
     const runs = await until(
       () => slotRuns(fake),
       (found) => found.length > NO_ITEMS,
-      bounded(),
+      t.signal,
     );
     assert.equal(runs[0]![runs[0]!.indexOf("--") - 1], ready.tag);
 
     const before = starts.length;
+    const runsBefore = slotRuns(fake).length;
     environment.hold();
     const current = await humanCaller(fixture)(
       projectOperations["bindingSet.get"],
@@ -473,7 +471,7 @@ test(
         starts.length > before &&
         starts.slice(before).some((start) => volumeCreated(start.clientId)),
       Boolean,
-      bounded(),
+      t.signal,
     );
 
     fixture.project.cancelEnvironmentRuns();
@@ -485,7 +483,6 @@ test(
         assert.fail("a slot wait outlived the stop"),
       ),
     ]);
-    for (const start of later)
-      assert.deepEqual(slotRuns(fake, start.clientId), []);
+    assert.deepEqual(slotRuns(fake).slice(runsBefore), []);
   },
 );

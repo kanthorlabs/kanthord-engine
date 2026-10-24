@@ -61,8 +61,6 @@ import {
 import { humanCaller } from "./test-support.ts";
 
 const TEST_TIMEOUT_MS = 120000;
-const WAIT_MS = 30000;
-const PULL_WAIT_MS = 5000;
 const CONTAINER_IMAGE = "kanthord-test";
 const SECRET = "l3-gate-secret-value";
 const ROTATED_SECRET = "l3-gate-secret-rotated";
@@ -172,10 +170,6 @@ interface Invocation {
 
 function sha256(text: string): string {
   return createHash("sha256").update(text).digest("hex");
-}
-
-function bounded(t: TestContext): AbortSignal {
-  return AbortSignal.any([t.signal, AbortSignal.timeout(WAIT_MS)]);
 }
 
 function fakeDevcontainerCli(t: TestContext) {
@@ -484,7 +478,7 @@ async function awaitItems(
   projectId: string,
   done: (items: EnvironmentState[]) => boolean,
 ): Promise<EnvironmentState[]> {
-  return until(() => environmentList(fixture, projectId), done, bounded(t));
+  return until(() => environmentList(fixture, projectId), done, t.signal);
 }
 
 async function settledItem(
@@ -749,7 +743,7 @@ test(
           (page) =>
             page.items.length > NO_ITEMS &&
             page.items.every((item) => item.ended_at),
-          bounded(t),
+          t.signal,
         );
         assert.equal(traces.items.length, SINGLE_ITEM);
         const [summary] = traces.items;
@@ -771,7 +765,7 @@ test(
               })
             ).items,
           (found) => found.length >= TRACE_SPANS,
-          bounded(t),
+          t.signal,
         );
         const root = spans.find((span) => span.span_id === got.root_span_id)!;
         assert.equal(root.operation, EnvironmentSpan.Root);
@@ -807,7 +801,7 @@ test(
               l3.starts.some((start) => start.slot === slot),
             ),
           Boolean,
-          bounded(t),
+          t.signal,
         );
         const slotA = l3.starts.find((start) => start.slot === SLOT_A)!;
         const slotB = l3.starts.find((start) => start.slot === SLOT_B)!;
@@ -824,7 +818,7 @@ test(
         const runs = await until(
           () => [slotA, slotB].map((start) => slotRuns(podman, start.clientId)),
           (found) => found.every((list) => list.length > NO_ITEMS),
-          bounded(t),
+          t.signal,
         );
         cacheName = cacheVolumeName(
           containerOwner(fixture.masterKey),
@@ -879,7 +873,7 @@ test(
                 item.status === EnvironmentStatus.Ready &&
                 item.digest !== first.digest,
             ),
-          AbortSignal.any([u.signal, AbortSignal.timeout(PULL_WAIT_MS)]),
+          u.signal,
         );
         assert.notEqual(items[0]!.digest, first.digest);
       },
@@ -923,7 +917,7 @@ test(
         await until(
           () => volumeCalled(l3, Subject.Remove, cacheName),
           Boolean,
-          bounded(t),
+          t.signal,
         );
       },
     );

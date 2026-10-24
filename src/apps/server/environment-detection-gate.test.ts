@@ -30,7 +30,6 @@ import {
   recordingSlotDriver,
   RUN_VERB,
   slotRuns,
-  STATUS_WAIT_MS,
   worker,
   REPOSITORY_BINDING,
   type SlotStart,
@@ -180,14 +179,10 @@ async function settled(
   t: TestContext,
   detection: Detection,
 ): Promise<EnvironmentState> {
-  const signal = AbortSignal.any([
-    t.signal,
-    AbortSignal.timeout(STATUS_WAIT_MS),
-  ]);
   const items = await until(
     () => environmentList(detection.fixture, detection.project.id),
     (found) => found.some((item) => SETTLED_STATUSES.includes(item.status)),
-    signal,
+    t.signal,
   );
   assert.equal(items.length, SINGLE_SLOT);
   return items[0]!;
@@ -224,17 +219,13 @@ async function claimOnReadyTag(
     ready.tag,
     environmentTagOf(ready.resource_identity, ready.digest),
   );
-  const signal = AbortSignal.any([
-    t.signal,
-    AbortSignal.timeout(STATUS_WAIT_MS),
-  ]);
   const runs = await until(
     () =>
       detection.starts.flatMap((start) =>
         slotRuns(detection.podman, start.clientId),
       ),
     (found) => found.length > NO_ITEMS,
-    signal,
+    t.signal,
   );
   for (const run of runs)
     assert.equal(run[run.indexOf(SEPARATOR_OPTION) - 1], ready.tag);

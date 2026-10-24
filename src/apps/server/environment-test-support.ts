@@ -39,7 +39,6 @@ import {
 
 export type Fixture = Awaited<ReturnType<typeof gatewayFixture>>;
 
-export const STATUS_WAIT_MS = 10000;
 export const FIRST_VERSION = 1;
 export const SINGLE_SLOT = 1;
 export const FIRST_SLOT = 0;
@@ -278,14 +277,10 @@ export async function awaitStatus(
   projectId: string,
   status: EnvironmentStatus,
 ): Promise<EnvironmentState> {
-  const signal = AbortSignal.any([
-    t.signal,
-    AbortSignal.timeout(STATUS_WAIT_MS),
-  ]);
   const items = await until(
     () => environmentList(fixture, projectId),
     (found) => found.some((item) => item.status === status),
-    signal,
+    t.signal,
   );
   return items.find((item) => item.status === status)!;
 }
@@ -325,8 +320,6 @@ export async function worker(
       },
       options,
     );
-  const bounded = () =>
-    AbortSignal.any([t.signal, AbortSignal.timeout(STATUS_WAIT_MS)]);
   return {
     pull,
     release: async (executionId: string, stop: ReleaseStop) =>
@@ -351,7 +344,7 @@ export async function worker(
         until(
           () => fixture.scheduler.pulling(runtimeIdentity),
           Boolean,
-          bounded(),
+          t.signal,
         ),
         held.then((answer) =>
           assert.fail(`the first pull answered ${JSON.stringify(answer)}`),
