@@ -19,7 +19,7 @@ import { SshIdentitySubjectKind } from "../custody/contract.ts";
 import type { SshIdentitySubject } from "../custody/contract.ts";
 import type { CallerIdentity } from "../kernel/caller.ts";
 import { RepositoryFileState } from "../repository/contract.ts";
-import type { SshAccess } from "../repository/contract.ts";
+import type { RepositoryFile, SshAccess } from "../repository/contract.ts";
 import { gitFailureReason } from "../repository/git-failure.ts";
 import {
   BINDING_CHECK_TIMEOUT_MS,
@@ -32,6 +32,13 @@ import {
   type RepositoryFiles,
   type SlotEnvironment,
 } from "./contract.ts";
+import {
+  DETECTION_PATHS,
+  WORKFLOW_DIRECTORY,
+  WORKFLOW_FILES_MAX,
+  detectEnvironment,
+  workflowPaths,
+} from "./detection.ts";
 import { EnvironmentTarget } from "./environment-state.ts";
 import {
   kindOf,
@@ -40,6 +47,7 @@ import {
   requireProject,
   requireRepositoryBinding,
 } from "./store.ts";
+import { universalEnvironment } from "./universal-environment.ts";
 
 export const ENVIRONMENT_CLONE_TIMEOUT_MS = 300000;
 export const EnvironmentErrorCode = {
@@ -51,12 +59,12 @@ const ENVIRONMENT_KEY = "environment";
 
 type RepositoryConfig = typeof repositoryConfigSchema._output;
 type BindingSetWrite = typeof bindingSetWriteInputSchema._output;
-type RepositoryFile = { path: string; state: string; text: string | null };
 export interface GroupResolution {
   source: EnvironmentSource;
   commit: string;
   document: Environment | null;
   files: RepositoryFile[];
+  reason?: string;
 }
 interface ResolvedSlot {
   readonly revisions: string;
@@ -70,6 +78,7 @@ export interface EnvironmentDependencies {
   store: Store;
   repositoryFiles: RepositoryFiles;
   identity: ServiceIdentity;
+  targetOf(projectId: string, bindingId: string): EnvironmentTarget;
   sshAccess(
     platform: string,
     release: SshRelease,
@@ -84,6 +93,12 @@ export interface EnvironmentDependencies {
 interface BaseRead {
   commit: string;
   files: RepositoryFile[];
+}
+
+function inPathOrder(files: RepositoryFile[]): RepositoryFile[] {
+  return files.sort((first, second) =>
+    first.path < second.path ? -1 : first.path > second.path ? 1 : 0,
+  );
 }
 
 function refuseUnreadable(context: Context, error: unknown): never {
@@ -201,29 +216,17 @@ export class ProjectEnvironments {
         environment: stored,
         reason: null,
       }));
-    const read = await this.readBase(id, config, [DEVCONTAINER_FILE], caller);
-    const file = read.files[0];
-    assert.ok(file);
-    let document: Environment | null;
-    try {
-      document = repositoryDocument(file);
-    } catch (error) {
-      if (!(error instanceof Diagnostic)) throw error;
-      return caller.commit(() => ({
-        source: EnvironmentSource.Repository,
-        commit: read.commit,
-        environment: null,
-        reason: error.message,
-      }));
-    }
+    const resolved = await this.resolveUnstored(
+      id,
+      config,
+      this.dependencies.targetOf(params.project_id, id),
+      caller.context,
+    );
     return caller.commit(() => ({
-      source:
-        document === null
-          ? EnvironmentSource.None
-          : EnvironmentSource.Repository,
-      commit: read.commit,
-      environment: document,
-      reason: null,
+      source: resolved.source,
+      commit: resolved.commit,
+      environment: resolved.document,
+      reason: resolved.reason ?? null,
     }));
   }
 
@@ -286,31 +289,78 @@ export class ProjectEnvironments {
         files: read.files,
       };
     }
-    if (target !== EnvironmentTarget.Image) {
-      const read = await this.readBase(bindingId, config, [], caller);
-      return {
-        source: EnvironmentSource.None,
-        commit: read.commit,
-        document: null,
-        files: [],
-      };
-    }
-    const read = await this.readBase(
+    return this.resolveUnstored(bindingId, config, target, context);
+  }
+
+  private async resolveUnstored(
+    bindingId: string,
+    config: RepositoryConfig,
+    target: EnvironmentTarget,
+    context: Context,
+  ): Promise<GroupResolution> {
+    const atImage = target === EnvironmentTarget.Image;
+    const base = await this.readBase(
       bindingId,
       config,
-      [DEVCONTAINER_FILE],
-      caller,
+      atImage ? [DEVCONTAINER_FILE] : [],
+      { context },
     );
-    const file = read.files[0];
-    assert.ok(file);
-    const document = repositoryDocument(file);
-    if (document === null)
+    if (atImage) {
+      const file = base.files[0];
+      assert.ok(file);
+      const repository = await this.repositoryResolution(
+        bindingId,
+        config,
+        base.commit,
+        file,
+        context,
+      );
+      if (repository !== null) return repository;
+    }
+    const detection = await this.readDetection(
+      bindingId,
+      config,
+      base.commit,
+      context,
+    );
+    const files = inPathOrder([...base.files, ...detection]);
+    const detected = detectEnvironment(detection);
+    if (detected !== null)
       return {
-        source: EnvironmentSource.None,
-        commit: read.commit,
-        document: null,
-        files: [],
+        source: EnvironmentSource.Detected,
+        commit: base.commit,
+        document: detected.document,
+        files,
       };
+    return {
+      source: atImage ? EnvironmentSource.Universal : EnvironmentSource.None,
+      commit: base.commit,
+      document: atImage ? universalEnvironment() : null,
+      files,
+    };
+  }
+
+  private async repositoryResolution(
+    bindingId: string,
+    config: RepositoryConfig,
+    commit: string,
+    file: RepositoryFile,
+    context: Context,
+  ): Promise<GroupResolution | null> {
+    let document: Environment | null;
+    try {
+      document = repositoryDocument(file);
+    } catch (error) {
+      if (!(error instanceof Diagnostic)) throw error;
+      return {
+        source: EnvironmentSource.Repository,
+        commit,
+        document: null,
+        files: [file],
+        reason: error.message,
+      };
+    }
+    if (document === null) return null;
     const dockerfile = dockerfilePath(document);
     const extra =
       dockerfile === null
@@ -318,16 +368,39 @@ export class ProjectEnvironments {
         : await this.readFiles(
             bindingId,
             config,
-            read.commit,
+            commit,
             [dockerfile],
             context,
           );
     return {
       source: EnvironmentSource.Repository,
-      commit: read.commit,
+      commit,
       document,
-      files: [file, ...extra],
+      files: inPathOrder([file, ...extra]),
     };
+  }
+
+  private async readDetection(
+    bindingId: string,
+    config: RepositoryConfig,
+    commit: string,
+    context: Context,
+  ): Promise<RepositoryFile[]> {
+    const listed = await this.listFiles(
+      bindingId,
+      config,
+      commit,
+      WORKFLOW_DIRECTORY,
+      WORKFLOW_FILES_MAX,
+      context,
+    );
+    return this.readFiles(
+      bindingId,
+      config,
+      commit,
+      [...DETECTION_PATHS, ...workflowPaths(listed)],
+      context,
+    );
   }
 
   async exportRepository(
@@ -420,6 +493,30 @@ export class ProjectEnvironments {
       );
       assert.equal(files.length, paths.length);
       return files;
+    } catch (error) {
+      return refuseUnreadable(context, error);
+    }
+  }
+
+  private async listFiles(
+    bindingId: string,
+    config: RepositoryConfig,
+    commit: string,
+    directory: string,
+    limit: number,
+    context: Context,
+  ): Promise<string[]> {
+    const { address, ssh } = this.access(bindingId, config);
+    try {
+      return await this.dependencies.repositoryFiles.listFilesAtCommit(
+        address,
+        commit,
+        directory,
+        limit,
+        context,
+        BINDING_CHECK_TIMEOUT_MS,
+        ssh,
+      );
     } catch (error) {
       return refuseUnreadable(context, error);
     }

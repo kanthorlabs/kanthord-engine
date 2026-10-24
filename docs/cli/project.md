@@ -580,10 +580,30 @@ An absent project answers `404 project.project.not_found`.
 
 `environment show` calls `project.binding.environment.get`, a read under `human` access. `environment set` calls `project.binding.environment.set`, a mutation under `human` access. `environment list` calls `project.environment.list`, a read. `environment rebuild` calls `project.binding.environment.rebuild`, a mutation with no body. `environment export` calls `project.binding.environment.get`. `environment unset` calls `project.binding.environment.set` with the body `{ environment: null }`. The required `ProjectId` and `BindingId` map to `params.project_id` and `params.binding_id`. `<binding-id>` names a revision of a repository binding. KanthorD never writes to the repository.
 
-The environment of a repository binding comes from the first source that exists:
+The environment of a repository binding comes from the first source that exists. The order depends on the placement of the worker binding that names the repository binding:
 
-1. The stored environment: the key `environment` of the repository binding configuration.
-2. The file `.devcontainer/devcontainer.json` of the repository at the head of the base branch.
+- At the `container` placement, the order is `stored`, `repository`, `detected`, `universal`.
+- At the `server` and the `worker` placements, the order is `stored`, `detected`, `none`. KanthorD never reads the repository devcontainer there.
+
+The sources are:
+
+1. `stored`: the key `environment` of the repository binding configuration.
+2. `repository`: the file `.devcontainer/devcontainer.json` of the repository at the head of the base branch.
+3. `detected`: a document that KanthorD derives from the files of the repository at the head of the base branch.
+4. `universal`: the fixed document of KanthorD for a repository with no manifest.
+5. `none`: no environment.
+
+KanthorD reads the detection files only when no earlier source exists. It reads these files: `.nvmrc`, `.node-version`, `package.json`, `pnpm-lock.yaml`, `package-lock.json`, `yarn.lock`, `.python-version`, `pyproject.toml`, `requirements.txt`, `uv.lock`, `poetry.lock`, `go.mod`, `Cargo.toml`, `rust-toolchain.toml`, `rust-toolchain`, `pom.xml`, `mvnw`, `build.gradle`, `build.gradle.kts`, `gradlew`, `.java-version`, `.tool-versions` and `flake.nix`. It also reads at most 20 files with the extension `.yml` or `.yaml` in `.github/workflows`, in path order. These files enter the digest of the environment. A manifest selects a stack: `package.json` for Node, `pyproject.toml` or `requirements.txt` for Python, `go.mod` for Go, `Cargo.toml` for Rust, and `pom.xml`, `build.gradle` or `build.gradle.kts` for Java. A repository with no manifest has no `detected` source. The first candidate of a stack that parses decides the version, in this order, and the default applies when no candidate parses:
+
+- Node: `.nvmrc`, `.node-version`, `nodejs` of `.tool-versions`, `node-version` of a workflow, `engines.node` of `package.json`. The version is the major number. The default is `24`.
+- Python: `.python-version`, `python` of `.tool-versions`, `python-version` of a workflow. The version is the major and minor number. The default is `3.12`.
+- Go: `golang` of `.tool-versions`, `go-version` of a workflow, the `go` line of `go.mod`. The version is the major and minor number. The default is `1`.
+- Rust: the `channel` of `rust-toolchain.toml`, the `channel` of `rust-toolchain`, the text of `rust-toolchain`, `rust` of `.tool-versions`. The version starts with a digit. The default is `1`.
+- Java: `.java-version`, `java` of `.tool-versions`, `java-version` of a workflow. The version is the first number. The default is `21`.
+
+A workflow value counts only for the actions `actions/setup-node`, `actions/setup-python`, `actions/setup-go` and `actions/setup-java`, and only when the value holds no `${{` expression. A repository with one stack gets the image of that stack. A repository with several stacks gets the base image `mcr.microsoft.com/devcontainers/base:bookworm` and one feature for each stack. The document holds the install command of the lock file in `updateContentCommand` and the version commands of the stack in `customizations.kanthord.checks`. A `detected` document at the `server` and the `worker` placements runs only its `checks`. It runs no `updateContentCommand` and no `postCreateCommand`.
+
+The `universal` environment is the file `static/environment/universal.json` of KanthorD. It holds the image `mcr.microsoft.com/devcontainers/base:bookworm`, the features Node `24`, Python `3.12`, Go `1.25` and Java `21`, and the checks `node --version`, `python --version`, `go version` and `java -version`. It has no `updateContentCommand`, so it installs no project dependency. It applies only at the `container` placement.
 
 The environment accepts these keys: `image`, `build` with `dockerfile`, `context`, `args` and `target`, `features`, `containerEnv`, `remoteEnv`, `onCreateCommand`, `updateContentCommand` and `postCreateCommand`. The build drops these keys and does not use them: `$schema`, `name`, `forwardPorts`, `portsAttributes`, `otherPortsAttributes`, `hostRequirements`, `remoteUser`, `containerUser`, `updateRemoteUserUID`, `userEnvProbe`, `overrideCommand`, `shutdownAction`, `waitFor`, `postStartCommand`, `postAttachCommand`, `workspaceFolder`, `init`, `appPort` and `secrets`. The build also drops every key of `customizations` except `customizations.kanthord`. The only key of `customizations.kanthord` is `checks`, a list of 0 to 32 nonblank commands. KanthorD refuses every other key with `project.environment.key_refused`, for example `build.options`, `dockerComposeFile`, `runArgs`, `mounts` or `initializeCommand`. These rules also refuse a document with `project.environment.key_refused`:
 
@@ -595,9 +615,9 @@ The refusal names the key and the reason.
 
 `environment show` answers `{ source, commit, environment, reason }`:
 
-- `source` is `stored`, `repository` or `none`.
+- `source` is `stored`, `repository`, `detected`, `universal` or `none`, under the order of the target.
 - For `stored`, `commit` is null, and the command reads no repository.
-- For `repository` and `none`, the service reads the file at the base branch with the read of [binding instruction-files](#binding-instruction-files). `commit` is the commit of the base branch. The file accepts comments and trailing commas.
+- For the other sources, the service reads the files at the base branch with the read of [binding instruction-files](#binding-instruction-files). `commit` is the commit of the base branch. The devcontainer file accepts comments and trailing commas.
 - `environment` is the document, or null.
 - `reason` names the defect of a repository file that is no valid environment, or the refused key, else null.
 
@@ -608,20 +628,20 @@ The environment has these effects:
 - The Onboarding component of the server builds and proves the environment of each repository binding. It reads the source, computes the digest of the inputs and runs when no proof file exists for that digest. The proof file holds the outcome, the failure, the check results and the number of repairs. The component keeps one record for each repository binding and answers `environment list` from the records and the proof files. A read starts no build.
 - The target of a record decides the run. The target is `image` when a `container` worker binding names the repository binding. The target is `remote` when every worker binding is at the `worker` placement or is external. In any other case the target is `host`. At `image`, the run builds one image with `devcontainer build` from the accepted keys, which it writes to its own `devcontainer.json` outside the checkout. The build gets only `PATH`, `HOME`, `TMPDIR`, the `XDG_*` variables and the container connection variables of the server. The run adds the KanthorD layer, checks the image, runs the setup commands and the checks, and tags the image only when the proof passes. At `host`, the run proves the setup commands and the checks on the server host. At `remote`, the server runs nothing.
 - The status of a record is one of `none`, `pending`, `building`, `proving`, `ready` and `failed`:
-  - `none`: the binding has no environment source, or the target is `remote` and no proof failed.
+  - `none`: the target has no environment source, or the target is `remote` and no proof failed.
   - `pending`: no read of the source has succeeded, or a run waits.
   - `building`: a run builds the image.
   - `proving`: a run proves the setup commands and the checks.
   - `ready`: the proof of the digest passed.
   - `failed`: the proof file of the digest holds a failure.
-- A container slot waits for the `ready` image of the environment that its worker binding names. Each slot of the project starts on that image. A project with no environment source keeps `worker.container_image`.
+- A container slot waits for the `ready` image of the environment that its worker binding names. Each slot of the project starts on that image. A project with no worker binding at the `container` placement keeps `worker.container_image`.
 - The claim skips a node whose repository binding holds an environment that is not `none` or `ready`. The node waits.
 - `environment rebuild` discards the proof file and the images of the digest, pulls the base image and runs the environment again. It answers the state of the group with the status of the new run. During an active run of the group, it answers `409 project.environment.run_active`.
 - A stored environment wins over the devcontainer files of the other repository bindings. While one binding stores an environment, the worker runs no repository devcontainer setup for the other bindings.
 - When the read of the remote fails at a slot start, the slot uses the environment of the last read of the same binding revisions.
-- At the `server` and the `worker` placements, only the setup commands `updateContentCommand` and `postCreateCommand` of a stored environment apply. `image`, `build`, `features`, `onCreateCommand`, `containerEnv` and `remoteEnv` have no effect there. The repository devcontainer applies only at the `container` placement.
+- At the `server` and the `worker` placements, only the setup commands `updateContentCommand` and `postCreateCommand` of a stored environment apply. `image`, `build`, `features`, `onCreateCommand`, `containerEnv` and `remoteEnv` have no effect there. The repository devcontainer, the `detected` document and the `universal` document apply only at the `container` placement.
 - The setup writes only inside the checkout, `$HOME` and `/tmp`, because the slot root is read-only. A system install belongs in `onCreateCommand`, which runs at the build as root.
-- In each checkout and each clone, the worker runs the `updateContentCommand` and then the `postCreateCommand` of the environment before the agent or the verifications use it.
+- In each checkout and each clone, the worker runs the `updateContentCommand` and then the `postCreateCommand` of the environment before the agent or the verifications use it. A container slot of a `detected` or a `universal` environment gets that document from the Onboarding record, and the worker runs its setup commands like the setup commands of a stored document.
 
 `environment list` answers `{ items }`, one environment state for each current repository binding in binding name order. `environment rebuild` answers one environment state. An environment state holds these fields:
 
@@ -629,7 +649,7 @@ The environment has these effects:
 - `binding_name`: the name of the repository binding.
 - `resource_identity`: the resource identity of the environment group.
 - `target`: `image`, `host` or `remote`.
-- `source`: `stored`, `repository` or `none`, or null before the first successful read.
+- `source`: `stored`, `repository`, `detected`, `universal` or `none`, or null before the first successful read.
 - `status`: `none`, `pending`, `building`, `proving`, `ready` or `failed`.
 - `digest`: the digest of the inputs of the environment, or null.
 - `tag`: the image tag of the digest at `image`, or null.
@@ -643,7 +663,7 @@ The environment has these effects:
 
 `environment export` prints only the `environment` of `environment show` as JSON indented by two spaces, with a final newline. A user who wants one file for KanthorD and the CI commits that output. KanthorD never commits it. A null `environment` stops the command with `cli.project.environment.export.environment_absent`.
 
-`environment unset` sends `{ environment: null }` to the route of `environment set`. The service removes the key `environment` from the binding as a binding revision, so the source returns to the repository file or the next source. It answers the answer of `binding apply`.
+`environment unset` sends `{ environment: null }` to the route of `environment set`. The service removes the key `environment` from the binding as a binding revision, so the source returns to the next source of the order of the target. It answers the answer of `binding apply`.
 
 A binding that is absent, belongs to another project, is removed or is no repository binding answers `404 project.binding.not_found`.
 For `environment show`, a failed read answers the codes of binding instruction-files.

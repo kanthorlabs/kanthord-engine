@@ -99,6 +99,8 @@ components:
                     enum:
                       - stored
                       - repository
+                      - detected
+                      - universal
                       - none
                   - type: "null"
               status:

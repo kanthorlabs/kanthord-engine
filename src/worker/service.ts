@@ -21,6 +21,7 @@ import {
 } from "../kernel/health.ts";
 import type { OperationRegistry } from "../kernel/operation.ts";
 import assert from "node:assert/strict";
+import type { Environment, EnvironmentSource } from "../kernel/devcontainer.ts";
 import type { Logger } from "pino";
 import { isMachineIdentity } from "../kernel/caller.ts";
 import { AccessPolicy } from "../kernel/operation.ts";
@@ -147,6 +148,10 @@ export interface Dependencies {
     projectId: string,
     resourceIdentity: string,
   ): string | null;
+  environmentOf(
+    projectId: string,
+    resourceIdentity: string,
+  ): { source: EnvironmentSource; document: Environment } | null;
   instanceIssuer: InstanceIssuer;
   workerBindingRowOf: WorkerBindingRowOf;
   repositoryPolicyOf: RepositoryPolicyOf;

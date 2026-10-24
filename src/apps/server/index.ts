@@ -654,6 +654,8 @@ export function composeServices(options: {
       project.environmentClaimed(projectId, resourceIdentity),
     environmentDigestOf: (projectId, resourceIdentity) =>
       project.environmentDigestOf(projectId, resourceIdentity),
+    environmentOf: (projectId, resourceIdentity) =>
+      project.environmentOf(projectId, resourceIdentity),
     workerBindingRowOf: (tx, id) => project.workerBindingRowOf(tx, id),
     repositoryPolicyOf: (tx, id) => project.repositoryPolicyOf(tx, id),
     repositoryBindingIdsOf: (tx, nodeId, revision) =>

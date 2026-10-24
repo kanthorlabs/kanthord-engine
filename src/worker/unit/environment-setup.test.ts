@@ -109,6 +109,32 @@ test("setup runs the commands of a stored environment in the checkout", async (t
   );
 });
 
+test("setup runs the commands of a detected and a universal environment in the checkout", async (t) => {
+  for (const source of [
+    EnvironmentSource.Detected,
+    EnvironmentSource.Universal,
+  ]) {
+    const { checkout } = await repository(t, { file: "base" });
+    const result = await runSetup(
+      input(),
+      await setupEntries(input(), [
+        setupCheckout(checkout, {
+          source,
+          document: {
+            updateContentCommand: `echo update > ${SETUP_MARKER}`,
+            postCreateCommand: ["sh", "-c", `echo create >> ${SETUP_MARKER}`],
+          },
+        }),
+      ]),
+    );
+    assert.deepEqual(result, { end: SetupEnd.Pass });
+    assert.equal(
+      readFileSync(join(checkout, SETUP_MARKER), "utf8"),
+      SETUP_OUTPUT,
+    );
+  }
+});
+
 test("setup reads the devcontainer file of the base head for a repository source", async (t) => {
   const { checkout } = await repository(t, {
     ".devcontainer/devcontainer.json": `{

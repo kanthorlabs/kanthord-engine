@@ -167,6 +167,7 @@ function instanceFixture(t: TestContext) {
     },
     environmentClaimed: unexpected,
     environmentDigestOf: unexpected,
+    environmentOf: unexpected,
     workerBindingRowOf: unexpected,
     repositoryPolicyOf: unexpected,
     repositoryBindingIdsOf: unexpected,

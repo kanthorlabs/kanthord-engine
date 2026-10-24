@@ -4,6 +4,7 @@ import {
   buildDocument,
   checksOf,
   environmentRefusal,
+  EnvironmentSource,
   environmentSchema,
   jsoncText,
   lifecycleScripts,
@@ -289,4 +290,14 @@ test("checksOf answers the checks or an empty list", () => {
     checksOf({ customizations: { kanthord: { checks: ["a", "b"] } } }),
     ["a", "b"],
   );
+});
+
+test("EnvironmentSource holds the five sources", () => {
+  assert.deepEqual(EnvironmentSource, {
+    Stored: "stored",
+    Repository: "repository",
+    Detected: "detected",
+    Universal: "universal",
+    None: "none",
+  });
 });

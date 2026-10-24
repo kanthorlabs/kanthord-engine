@@ -157,10 +157,12 @@ import { ProjectEnvironments, refuseEnvironment } from "./environment.ts";
 import {
   ENVIRONMENT_DIRECTORY,
   ProofFiles,
+  EnvironmentTarget,
   type EnvironmentRuntime,
 } from "./environment-state.ts";
 import {
   Onboarding,
+  targetOf,
   type BindingFacts,
   type EnvironmentFailedInput,
 } from "./onboarding.ts";
@@ -659,6 +661,8 @@ export class ProjectService implements Service, ProjectBindings {
       store: dependencies.operationalStore,
       repositoryFiles: dependencies.repositoryFiles,
       identity: dependencies.identity,
+      targetOf: (projectId, bindingId) =>
+        this.targetOfBinding(projectId, bindingId),
       sshAccess: (platform, release) => this.sshAccess(platform, release),
       writeBindings: (projectId, body, caller) =>
         this.writeBindings(projectId, body, caller),
@@ -1615,6 +1619,25 @@ export class ProjectService implements Service, ProjectBindings {
       repository_environment: noStoredEnvironment(tx, binding.project_id),
     };
   }
+  private targetOfBinding(
+    projectId: string,
+    bindingId: string,
+  ): EnvironmentTarget {
+    const binding = this.operationalStore.transaction((tx) =>
+      readBindingRevision(tx, bindingId),
+    );
+    assert.ok(binding);
+    const recorded = this.onboarding
+      .states(projectId)
+      .find((state) => state.resource_identity === binding.resource_identity);
+    if (recorded !== undefined) return recorded.target;
+    const facts = this.bindingFactsOf(projectId);
+    const group = facts.repositories.find(
+      (candidate) => candidate.resource_identity === binding.resource_identity,
+    );
+    assert.ok(group, "A readable binding belongs to the current binding set.");
+    return targetOf(group, facts);
+  }
   private bindingFactsOf(projectId: string): BindingFacts {
     const bindings = this.operationalStore.transaction((tx) =>
       Array.from(readCurrentBindingSet(tx, projectId).values()),
@@ -1677,6 +1700,9 @@ export class ProjectService implements Service, ProjectBindings {
     resourceIdentity: string,
   ): string | null {
     return this.onboarding.environmentDigestOf(projectId, resourceIdentity);
+  }
+  environmentOf(projectId: string, resourceIdentity: string) {
+    return this.onboarding.environmentOf(projectId, resourceIdentity);
   }
   environmentFailed(input: EnvironmentFailedInput): void {
     this.onboarding.environmentFailed(input);

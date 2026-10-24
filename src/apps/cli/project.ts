@@ -751,7 +751,7 @@ function addEnvironmentCommands(project: Command): void {
   environment
     .command(SHOW)
     .description(
-      "Show the environment of a repository binding as JSON: the stored environment, or the devcontainer file at the base branch",
+      "Show the environment of a repository binding as JSON with its source: stored, repository, detected, universal or none",
     )
     .argument("<project-id>", "Project ID")
     .argument("<binding-id>", "Repository binding ID")

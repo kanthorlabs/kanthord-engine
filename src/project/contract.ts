@@ -21,7 +21,7 @@ import {
   fallbackConfigurationsSchema,
   type HolderScope,
 } from "../agent/contract.ts";
-import type { SshAccess } from "../repository/contract.ts";
+import type { RepositoryFile, SshAccess } from "../repository/contract.ts";
 import { timestamp } from "../kernel/json.ts";
 import {
   EnvironmentSource,
@@ -500,7 +500,7 @@ export type RepositoryFiles = {
     context: Context,
     deadlineMs: number,
     ssh: SshAccess,
-  ): Promise<Array<{ path: string; state: string; text: string | null }>>;
+  ): Promise<RepositoryFile[]>;
   listFilesAtCommit(
     address: string,
     commit: string,
@@ -1020,7 +1020,7 @@ export const projectOperations = {
     input: readInput(bindingParams, emptyFields),
     output: environmentAnswerSchema,
     description:
-      "Read the environment of one repository binding: the stored environment, or the devcontainer file at the base branch.",
+      "Read the environment of one repository binding with its source: stored, repository, detected, universal or none.",
   },
   "binding.environment.set": {
     ...writeOperation,
