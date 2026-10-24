@@ -631,7 +631,7 @@ The environment has these effects:
 - `reason_started_at`: the time when `reason` changed from null to a message, or null when `reason` is null. A later message keeps the time.
 - `failure`: the class, origin, execution, command, exit code, output tail, reproduce command and end time of a failed proof, or null.
 - `checks`: the command and the exit code of each check of the last proof.
-- `repairs`: the number of repairs that the proof file records.
+- `repairs`: the number of repairs that the proof file of the current digest records, or 0 when no proof file exists.
 - `repairing`: `true` while a repair of the environment runs, else `false`.
 
 `environment export` prints only the `environment` of `environment show` as JSON indented by two spaces, with a final newline. A user who wants one file for KanthorD and the CI commits that output. KanthorD never commits it. A null `environment` stops the command with `cli.project.environment.export.environment_absent`.

@@ -277,9 +277,11 @@ export class ProofFiles {
     return parsed.success ? parsed.data : null;
   }
 
-  write(path: string, file: ProofFileInput): void {
+  write(path: string, file: ProofFileInput): ProofFile {
     const repairs = this.read(path, file.digest)?.repairs ?? file.repairs ?? 0;
-    this.store(path, { ...file, repairs });
+    const stored = { ...file, repairs };
+    this.store(path, stored);
+    return stored;
   }
 
   incrementRepairs(path: string, sum: string): number {
