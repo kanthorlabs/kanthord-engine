@@ -285,6 +285,9 @@ class Harness {
     [SLOT_IMAGE, "sha256:slot"],
   ]);
   existing = new Set<string>();
+  existsGate: Deferred | null = null;
+  existsCalls = 0;
+  removeTagsGate: Deferred | null = null;
   calls: string[] = [];
   events: string[] = [];
   buildInputs: ImageBuildInput[] = [];
@@ -346,7 +349,11 @@ class Harness {
         this.calls.push(`pullImage ${reference}`);
         this.images.set(reference, PULLED_IMAGE_ID);
       },
-      imageExists: async (tag: string) => this.existing.has(tag),
+      imageExists: async (tag: string) => {
+        this.existsCalls++;
+        await this.existsGate?.promise;
+        return this.existing.has(tag);
+      },
       build: async (input: ImageBuildInput, signal: AbortSignal) => {
         this.events.push("build");
         this.buildInputs.push(input);
@@ -378,6 +385,7 @@ class Harness {
       },
       removeTags: async (tags: readonly string[]) => {
         this.events.push(`removeTags ${tags.join(",")}`);
+        await this.removeTagsGate?.promise;
         for (const tag of tags) this.existing.delete(tag);
       },
       collect: async (path: string, keep: string | null) => {
@@ -4090,6 +4098,110 @@ test("the state shows the repairs on disk after an execution failure at a new co
   h.onboarding.environmentFailed(failureInput(h));
   assert.equal(h.proofOf(h.digest())?.repairs, KEPT_REPAIRS);
   assert.equal(h.state().repairs, KEPT_REPAIRS);
+});
+
+test("the state follows a proof file that changes during a run", async (t) => {
+  const h = new Harness(t);
+  await h.compute();
+  await h.until(() => h.events.includes(BUILD));
+  h.writeProof(proofFile(h.digest(), { repairs: KEPT_REPAIRS }));
+  h.open();
+  await h.ended();
+  assert.equal(h.state().repairs, KEPT_REPAIRS);
+});
+
+test("the state follows the proof file at an execution failure", async (t) => {
+  const h = await readyHarness(t);
+  h.writeProof(proofFile(h.digest(), { repairs: KEPT_REPAIRS }));
+  h.onboarding.environmentFailed(failureInput(h));
+  assert.equal(h.state().repairs, KEPT_REPAIRS);
+});
+
+test("a failed read after a target change shows no repairs", async (t) => {
+  const h = new Harness(t);
+  h.writeProof(
+    proofFile(h.digest(), {
+      outcome: "failed",
+      class: "setup_failed",
+      repairs: KEPT_REPAIRS,
+    }),
+  );
+  await h.compute();
+  assert.equal(h.state().target, EnvironmentTarget.Image);
+  assert.equal(h.state().repairs, KEPT_REPAIRS);
+  h.resolution = sshReadError();
+  h.bindings = facts([APP], [server]);
+  h.onboarding.bindingsChanged(PROJECT);
+  await h.compute();
+  assert.equal(h.state().target, EnvironmentTarget.Host);
+  assert.equal(h.state().digest, null);
+  assert.equal(h.state().repairs, NO_REPAIRS);
+});
+
+test("an execution failure during a re-read keeps the repairs on disk", async (t) => {
+  const h = new Harness(t);
+  h.resolution = UNIVERSAL;
+  h.agentEnabled = true;
+  h.existing.add(h.provedOf(h.digest()));
+  await h.compute();
+  assert.equal(h.state().status, EnvironmentStatus.Ready);
+  const gate = new Deferred();
+  h.existsGate = gate;
+  const calls = h.existsCalls;
+  const reading = h.compute();
+  await h.until(() => h.existsCalls > calls);
+  h.onboarding.environmentFailed(failureInput(h));
+  h.existsGate = null;
+  gate.release();
+  await reading;
+  await sessionsEnded(h, ONE_CALL);
+  assert.equal(h.proofOf(h.digest())?.repairs, ONE_CALL);
+  assert.equal(h.state().repairs, ONE_CALL);
+  assert.equal(h.state().status, EnvironmentStatus.Failed);
+});
+
+test("a run that ends during a re-read keeps its proof in the state", async (t) => {
+  const h = new Harness(t);
+  h.bindings = facts([APP, DOCS], [container("app"), container("docs")]);
+  h.proveResults = FAILING_RESULTS;
+  await h.compute(DOCS);
+  await h.until(() => h.events.includes(BUILD));
+  await h.compute();
+  assert.equal(h.logged(RUN_ENDED).length, NO_CALLS);
+  const gate = new Deferred();
+  h.existsGate = gate;
+  const calls = h.existsCalls;
+  const reading = h.compute();
+  await h.until(() => h.existsCalls > calls);
+  h.existsGate = null;
+  h.open();
+  await h.ended(TWO_CALLS);
+  gate.release();
+  await reading;
+  assert.equal(h.proofOf(h.digest())?.outcome, FAILED);
+  assert.equal(h.state().status, EnvironmentStatus.Failed);
+});
+
+test("a rebuild shows no repairs once it removes the proof file", async (t) => {
+  const h = new Harness(t);
+  h.writeProof(
+    proofFile(h.digest(), {
+      outcome: "failed",
+      class: "setup_failed",
+      repairs: KEPT_REPAIRS,
+    }),
+  );
+  await h.compute();
+  assert.equal(h.state().repairs, KEPT_REPAIRS);
+  const gate = new Deferred();
+  h.removeTagsGate = gate;
+  const rebuilding = h.onboarding.rebuild(PROJECT, APP.binding_id);
+  await h.until(() => h.events.some((event) => event.startsWith("removeTags")));
+  assert.equal(h.proofOf(h.digest()), null);
+  assert.equal(h.state().repairs, NO_REPAIRS);
+  h.removeTagsGate = null;
+  gate.release();
+  await rebuilding;
 });
 
 test(

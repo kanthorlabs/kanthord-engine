@@ -855,7 +855,13 @@ export class Onboarding {
         ...base,
         ...(base.target === target
           ? {}
-          : { digest: null, tag: null, proof: null, proved: false }),
+          : {
+              digest: null,
+              tag: null,
+              proof: null,
+              repairs: 0,
+              proved: false,
+            }),
         target,
         reason: failure.reason,
       };
@@ -1382,6 +1388,8 @@ export class Onboarding {
     const { digest, tag, commit } = record;
     assert.ok(digest !== null && commit !== null);
     const path = environmentPath(record.resource_identity);
+    const key = keyOf(record.project_id, record.resource_identity);
+    if (this.computing.has(key)) this.changedWhileReading.add(key);
     const file: ProofFile = {
       digest,
       outcome: verdict.outcome,
@@ -1624,7 +1632,8 @@ export class Onboarding {
   environmentFailed(input: EnvironmentFailedInput): void {
     const { proofs } = this.dependencies;
     for (const identity of input.resource_identities) {
-      const record = this.records.get(keyOf(input.project_id, identity));
+      const key = keyOf(input.project_id, identity);
+      const record = this.records.get(key);
       if (
         record === undefined ||
         record.digest === null ||
@@ -1646,10 +1655,11 @@ export class Onboarding {
         ended_at: this.dependencies.now(),
         commit: record.commit,
       };
+      if (this.computing.has(key)) this.changedWhileReading.add(key);
       record.proof = proofs.write(environmentPath(identity), file);
       record.repairs = record.proof.repairs;
       this.considerSession(record);
-      this.retryWhileWaiting(keyOf(input.project_id, identity), record);
+      this.retryWhileWaiting(key, record);
     }
     this.notify();
   }
