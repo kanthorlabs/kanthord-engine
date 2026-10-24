@@ -158,11 +158,12 @@ With `--view final`, `parts` is absent.
 An override file that is not a regular UTF-8 file, exceeds 32768 bytes or holds a control character answers `409 agent.prompt.template_invalid`.
 The details are `{ file, path, reason }`. `file` names the file, for example `swe@1.md`.
 The same refusal applies to the execution setup, the Workbench session open and the `env@1` run. No reader falls back to the shipped text.
+For `env@1`, the refusal ends the session, and the server logs `project.onboarding.session_failed`. No client receives a 409 there.
 
 ### Prompt templates
 
 A file `prompts/<template>.md` in `agent_directory` replaces a shipped template, for example `prompts/framing-worker.md`.
-An invalid template answers `409 agent.prompt.template_invalid` with the details `{ template, file, path, reason }`.
+An invalid template answers `409 agent.prompt.template_invalid` with the details `{ template, file, path, reason }`. `file` is `prompts/<template>.md`, for example `prompts/framing-worker.md`.
 
 ```sh
 kanthord agent get swe@1 --view final
@@ -388,7 +389,7 @@ Every remote command can also answer the shared codes of [other.md](other.md#err
 | 404   | `agent.catalog.not_found`                                 | The agent name is absent from the agent catalog.                                                                                                                                                                                                                | agent enablement put, agent enablement enable, agent enablement disable, agent enablement remove, agent enablement provider model list, agent get |
 | 404   | `project.binding.not_found`                               | The `--binding-id` value names no repository binding of the `--project` value.                                                                                                                                                                                  | agent get                                                                                                                                         |
 | 409   | `agent.prompt.template_invalid`                           | An override file or a prompt template is invalid; details `{ file, path, reason }`, and `template` for a template.                                                                                                                                              | agent get                                                                                                                                         |
-| 400   | `gateway.request.validation_failed`                       | The request violates the input schema, for example a `view` value other than `final`.                                                                                                                                                                           | agent get, agent prompt get, agent prompt put, agent prompt switch                                                                                |
+| 400   | `gateway.request.validation_failed`                       | The request violates the input schema, for example a `view` value other than `final`.                                                                                                                                                                           | agent get                                                                                                                                         |
 
 `error.details` names the agent and lists affected bindings or other dependents when applicable. No error holds secret material.
 
