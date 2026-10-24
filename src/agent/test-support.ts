@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import type { TestContext } from "node:test";
 import {
   createFauxCore,
   createProvider,
@@ -131,4 +132,57 @@ export function capturedLogger() {
     { write: (line: string) => logs.push(JSON.parse(line) as CapturedLog) },
   );
   return { logger, logs };
+}
+
+const ESCAPED_SECONDS = 60;
+const GONE_POLLS = 40;
+const GONE_POLL_MS = 50;
+const PROCESS_ABSENT = "ESRCH";
+export const PROCESS_TREE_PIDS = 4;
+
+export function processTreeCommand(): string {
+  const escape = `const c=require("node:child_process").spawn("sleep",["${ESCAPED_SECONDS}"],{detached:true,stdio:"ignore"});console.log(c.pid);setInterval(()=>{},1000)`;
+  return [
+    `sh -c 'sleep ${ESCAPED_SECONDS} & echo $!; sleep ${ESCAPED_SECONDS}' &`,
+    `echo $!`,
+    `"${process.execPath}" -e '${escape}' &`,
+    `echo $!`,
+    `wait`,
+  ].join("\n");
+}
+
+function alive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    assert.ok(error instanceof Error && "code" in error);
+    assert.equal(error.code, PROCESS_ABSENT);
+    return false;
+  }
+}
+
+type TextContent = readonly { type: string; text?: string }[];
+
+export function pidsIn(content: TextContent): number[] {
+  const text = content.map((part) => part.text ?? "").join("");
+  return (text.match(/^\d+$/gm) ?? []).map(Number);
+}
+
+export function spawnedPids(t: TestContext, content: TextContent): number[] {
+  const spawned = pidsIn(content);
+  t.after(() => {
+    for (const pid of spawned.filter(alive)) process.kill(pid, "SIGKILL");
+  });
+  return spawned;
+}
+
+export async function survivingProcesses(
+  pids: readonly number[],
+): Promise<number[]> {
+  for (let poll = 0; poll < GONE_POLLS; poll += 1) {
+    if (!pids.some(alive)) return [];
+    await new Promise((resolve) => setTimeout(resolve, GONE_POLL_MS));
+  }
+  return pids.filter(alive);
 }
