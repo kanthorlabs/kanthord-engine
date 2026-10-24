@@ -3,7 +3,6 @@ import { execFileSync } from "node:child_process";
 import { randomInt } from "node:crypto";
 import { join } from "node:path";
 import { test, type TestContext } from "node:test";
-import { setTimeout as delay } from "node:timers/promises";
 import { simpleGit } from "simple-git";
 import { Diagnostic } from "../../kernel/errors.ts";
 import { requirePiTools, temporary } from "../../kernel/test-support.ts";
@@ -12,9 +11,15 @@ import { Intent, missionOperations } from "../../mission/contract.ts";
 import { projectOperations } from "../../project/contract.ts";
 import { ClaimState, schedulerOperations } from "../../scheduler/contract.ts";
 import {
+  instanceConfigurationSchema,
+  WORKER_TOKEN_INFO,
   workerOperations,
+  workerTokenPayloadSchema,
   type RepositoryTransport,
 } from "../../worker/contract.ts";
+import { httpClient } from "../../gateway/client.ts";
+import { openJSON } from "../../kernel/hpke.ts";
+import { createIdempotencyKey } from "../../kernel/identity.ts";
 import {
   fauxAssistantMessage,
   fauxToolCall,
@@ -22,7 +27,8 @@ import {
   scriptedProvider,
   transport as localTransport,
 } from "../../worker/unit/test-support.ts";
-import { Worker, type WorkerOptions } from "../worker/index.ts";
+import { Worker } from "../worker/index.ts";
+import { completed, until } from "./cli-support.ts";
 import {
   enableCoveringAgents,
   gatewayFixture,
@@ -40,11 +46,11 @@ const CREDENTIAL = "anthro-1";
 const PROVIDER_KEY = "supersede-provider-key";
 const FAST_HEARTBEAT_MS = 50;
 const SLOW_INTERVAL_MS = 3600000;
-const POLL_MS = 20;
 const SLEEP_MIN_SECONDS = 70000;
 const SLEEP_MAX_SECONDS = 80000;
 const PS_PATH = "/bin/ps";
-const TREE_PROCESSES_MIN = 2;
+const BASE64URL = "base64url";
+const TREE_PROCESSES = 4;
 const CONFIGURATION = {
   agent_provider: "default",
   model_identifier: "claude-sonnet-4-5",
@@ -57,15 +63,37 @@ const NODE = {
   verifications: ["true"],
 };
 
-async function until<T>(
-  read: () => Promise<T | undefined | false> | T | undefined | false,
-  signal: AbortSignal,
-): Promise<T> {
-  for (;;) {
-    const value = await read();
-    if (value) return value;
-    await delay(POLL_MS, undefined, { signal });
-  }
+async function takeConnection(
+  endpoint: string,
+  value: string,
+  connectionName: string,
+): Promise<void> {
+  const configuration = instanceConfigurationSchema.parse(
+    JSON.parse(Buffer.from(value, BASE64URL).toString("utf8")),
+  );
+  const answer = completed(
+    await httpClient(workerOperations, endpoint)["instance.token"]({
+      params: {},
+      query: {},
+      body: { instance_id: configuration.instance_id },
+    }),
+  );
+  const workerToken = workerTokenPayloadSchema.parse(
+    await openJSON(
+      Buffer.from(configuration.private_key, BASE64URL),
+      WORKER_TOKEN_INFO,
+      configuration.instance_id,
+      answer.sealed,
+    ),
+  ).token;
+  completed(
+    await httpClient(workerOperations, endpoint, workerToken)[
+      "instance.connect"
+    ](
+      { params: {}, query: {}, body: { connection_name: connectionName } },
+      { idempotencyKey: createIdempotencyKey() },
+    ),
+  );
 }
 
 function processesWith(marker: string): number[] {
@@ -211,7 +239,11 @@ async function instanceProject(t: TestContext) {
     }).then((page) =>
       page.items.find((item) => item.claim_state === ClaimState.Running),
     );
-  return { configuration: instance.instance_configuration, running };
+  return {
+    configuration: instance.instance_configuration,
+    endpoint: fixture.endpoint,
+    running,
+  };
 }
 
 test(
@@ -227,12 +259,14 @@ test(
     });
     const provider = scriptedProvider([
       fauxAssistantMessage(
-        fauxToolCall("bash", { command: `sh -c '${marker}' & ${marker}` }),
+        fauxToolCall("bash", {
+          command: `set -m; sh -c '${marker}; :' & ${marker}`,
+        }),
         { stopReason: "toolUse" },
       ),
     ]);
     const root = temporary(t);
-    const options = (connectionName: string): WorkerOptions => ({
+    const first = new Worker({
       env: {
         HOME: root,
         XDG_CONFIG_HOME: join(root, "config"),
@@ -240,25 +274,23 @@ test(
         XDG_STATE_HOME: join(root, "state"),
         KANTHORD_WORKER_CONFIG: project.configuration,
       },
-      connectionName,
+      connectionName: CONNECTION_A,
       heartbeatIntervalMs: FAST_HEARTBEAT_MS,
       renewalIntervalMs: SLOW_INTERVAL_MS,
       modelRuntimeFactory: scriptedModelRuntime(provider),
       repositoryTransport: localRepository(bare),
       log: () => {},
     });
-    const first = new Worker(options(CONNECTION_A));
     t.after(() => first.stop());
     const firstRun = first.run();
-    await until(project.running, t.signal);
+    await until(project.running, Boolean, t.signal);
     await until(
-      () => processesWith(marker).length >= TREE_PROCESSES_MIN,
+      () => processesWith(marker).length,
+      (count) => count >= TREE_PROCESSES,
       t.signal,
     );
 
-    const second = new Worker(options(CONNECTION_B));
-    t.after(() => second.stop());
-    assert.equal(await second.start(), null);
+    await takeConnection(project.endpoint, project.configuration, CONNECTION_B);
     const error = await firstRun;
     const survivors = processesWith(marker);
 
