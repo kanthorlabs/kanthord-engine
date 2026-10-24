@@ -809,6 +809,7 @@ export const environmentStateSchema = z.strictObject({
   run_started_at: timestamp.nullable(),
   step_started_at: timestamp.nullable(),
   reason: z.string().nullable(),
+  reason_started_at: timestamp.nullable(),
   failure: environmentFailureSchema.nullable(),
   checks: z.array(checkResultSchema).max(MAX_CHECKS),
   repairs: z.int().min(0),

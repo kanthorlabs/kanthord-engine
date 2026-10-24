@@ -471,6 +471,7 @@ const ENVIRONMENT_STATE = {
   run_started_at: null,
   step_started_at: null,
   reason: null,
+  reason_started_at: null,
   failure: null,
   checks: [],
   repairs: 0,
