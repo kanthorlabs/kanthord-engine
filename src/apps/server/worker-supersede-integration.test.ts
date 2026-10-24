@@ -4,7 +4,10 @@ import { randomInt } from "node:crypto";
 import { join } from "node:path";
 import { test, type TestContext } from "node:test";
 import { simpleGit } from "simple-git";
+import { httpClient } from "../../gateway/client.ts";
 import { Diagnostic } from "../../kernel/errors.ts";
+import { openJSON } from "../../kernel/hpke.ts";
+import { createIdempotencyKey } from "../../kernel/identity.ts";
 import { requirePiTools, temporary } from "../../kernel/test-support.ts";
 import { llmOperations } from "../../llm/contract.ts";
 import { Intent, missionOperations } from "../../mission/contract.ts";
@@ -17,9 +20,6 @@ import {
   workerTokenPayloadSchema,
   type RepositoryTransport,
 } from "../../worker/contract.ts";
-import { httpClient } from "../../gateway/client.ts";
-import { openJSON } from "../../kernel/hpke.ts";
-import { createIdempotencyKey } from "../../kernel/identity.ts";
 import {
   fauxAssistantMessage,
   fauxToolCall,
