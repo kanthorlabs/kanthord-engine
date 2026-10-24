@@ -9,7 +9,7 @@ import { WorkerUnit } from "../worker/unit.ts";
 import { directories } from "../../kernel/xdg.ts";
 import type { ModelRuntimeFactory } from "../../worker/unit/index.ts";
 import { httpTransport } from "../worker/transport.ts";
-import { temporary } from "../../kernel/test-support.ts";
+import { requirePiTools, temporary } from "../../kernel/test-support.ts";
 import { writePrivate } from "../../kernel/files.ts";
 import { httpClient } from "../../gateway/client.ts";
 import {
@@ -341,6 +341,7 @@ export async function inProcessWorker(
     repositoryTransport?: RepositoryTransport;
   },
 ) {
+  requirePiTools();
   const root = temporary(t);
   const env = {
     ...process.env,

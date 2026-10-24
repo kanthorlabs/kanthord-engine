@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { test, type TestContext } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 import { ProjectErrorCode, projectOperations } from "../../project/contract.ts";
-import { temporary } from "../../kernel/test-support.ts";
+import { requirePiTools, temporary } from "../../kernel/test-support.ts";
 import { HttpStatus } from "../../kernel/http.ts";
 import {
   InstancePlacement,
@@ -38,6 +38,7 @@ const FAILED_MESSAGE = "worker.pool.instance_failed";
 const LIMIT_MESSAGE = "worker.pool.slot_limit";
 
 async function serverPool(t: TestContext, count: number, slotLimit?: number) {
+  requirePiTools();
   const stateDirectory = temporary(t);
   const setup = await workerAcceptance(t, true, { stateDirectory, slotLimit });
   const call = humanCaller(setup.fixture);

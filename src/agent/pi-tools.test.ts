@@ -15,7 +15,7 @@ import {
   shippedAsset,
   type BinaryAssetSource,
 } from "../kernel/assets.ts";
-import { temporary } from "../kernel/test-support.ts";
+import { requirePiTools, temporary } from "../kernel/test-support.ts";
 import {
   installPiTools,
   piToolsManifestSchema,
@@ -283,4 +283,34 @@ test("the manifest tools equal the tools that the pi tool manager declares", asy
     declared.map(([, key]) => key).sort(),
     Object.keys(manifest.tools).sort(),
   );
+});
+
+test("the pi tools guard names each absent or stale tool and the fetch command", (t) => {
+  const target = `${process.platform}-${process.arch}`;
+  const shipped = piToolsManifestSchema.parse(
+    JSON.parse(shippedAsset(PI_TOOLS_MANIFEST)),
+  );
+  const tools = Object.keys(shipped.tools);
+  const root = temporary(t);
+  const directory = pathToFileURL(`${root}/`);
+  const refusal = (names: string[]) => ({
+    message: `pi tools are absent or stale: ${names.join(", ")}. Run pnpm run pi-tools:fetch before this test.`,
+  });
+  assert.throws(() => requirePiTools({ directory }), refusal(tools));
+  const bin = join(root, target, "bin");
+  mkdirSync(bin, { recursive: true });
+  writeFileSync(join(bin, TOOL), WORKING_BINARY);
+  const manifest = (binary: string): PiToolsManifest => ({
+    tools: {
+      [TOOL]: {
+        ...manifestOf(binary).tools[TOOL]!,
+        targets: { [target]: manifestOf(binary).tools[TOOL]!.targets[TARGET]! },
+      },
+    },
+  });
+  assert.throws(
+    () => requirePiTools({ directory, manifest: manifest(FAILING_BINARY) }),
+    refusal([TOOL]),
+  );
+  requirePiTools({ directory, manifest: manifest(WORKING_BINARY) });
 });

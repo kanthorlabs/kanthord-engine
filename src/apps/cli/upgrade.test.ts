@@ -9,7 +9,7 @@ import {
 } from "../../config/index.ts";
 import { writePrivate } from "../../kernel/files.ts";
 import { Store } from "../../kernel/store.ts";
-import { temporary } from "../../kernel/test-support.ts";
+import { requirePiTools, temporary } from "../../kernel/test-support.ts";
 import {
   DATABASE_FILE,
   TRACKING_DATABASE_FILE,
@@ -90,6 +90,7 @@ function olderDatabase(path: string): void {
 }
 
 test("serve refuses an older configuration and an older database, and upgrade brings both to the binary with backups", async (t) => {
+  requirePiTools();
   const paths = layout(temporary(t));
   const legacy = legacyConfig();
   writePrivate(paths.config, legacy);

@@ -6,7 +6,11 @@ import { CancellationContext } from "../../kernel/context.ts";
 import { Diagnostic } from "../../kernel/errors.ts";
 import { HttpStatus } from "../../kernel/http.ts";
 import { HealthStatus } from "../../kernel/service.ts";
-import { hostEnvironment, temporary } from "../../kernel/test-support.ts";
+import {
+  hostEnvironment,
+  requirePiTools,
+  temporary,
+} from "../../kernel/test-support.ts";
 import { isObject } from "../../kernel/values.ts";
 import { packageVersion } from "../../kernel/version.ts";
 import { WorkPullKind } from "../../scheduler/contract.ts";
@@ -99,6 +103,7 @@ async function until<T>(
 }
 
 function environmentOf(t: TestContext, value?: string): NodeJS.ProcessEnv {
+  requirePiTools();
   const root = temporary(t);
   return {
     HOME: root,

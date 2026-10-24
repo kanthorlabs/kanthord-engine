@@ -12,7 +12,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
-import { temporary } from "../../kernel/test-support.ts";
+import { requirePiTools, temporary } from "../../kernel/test-support.ts";
 import { initialConfig, loadConfig } from "../../config/index.ts";
 import { packageVersion } from "../../kernel/version.ts";
 import { IdentityKind, CLIENT_IDENTITY_PREFIX } from "../../kernel/caller.ts";
@@ -1404,6 +1404,7 @@ test("serve worker refuses --config and --token and requires an instance configu
 });
 
 test("serve worker with an instance configuration reports an unavailable server and writes only the pi tools", async (t) => {
+  requirePiTools();
   const directory = temporary(t);
   const env = environment(directory);
   env.XDG_STATE_HOME = temporary(t);
