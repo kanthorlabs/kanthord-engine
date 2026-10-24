@@ -620,16 +620,19 @@ export class Onboarding {
   }
 
   private trigger(projectId: string, resourceIdentity: string): void {
-    this.compute(projectId, resourceIdentity).catch((error: unknown) =>
-      this.dependencies.logger.error(
-        {
-          err: error,
-          project_id: projectId,
-          resource_identity: resourceIdentity,
-        },
-        "Onboarding compute failed.",
-      ),
-    );
+    setImmediate(() => {
+      if (this.context.signal.aborted) return;
+      this.compute(projectId, resourceIdentity).catch((error: unknown) =>
+        this.dependencies.logger.error(
+          {
+            err: error,
+            project_id: projectId,
+            resource_identity: resourceIdentity,
+          },
+          "Onboarding compute failed.",
+        ),
+      );
+    });
   }
 
   private markChanged(projectId: string, group: RepositoryGroup): void {
