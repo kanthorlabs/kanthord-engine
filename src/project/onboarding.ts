@@ -768,8 +768,12 @@ export class Onboarding {
         failure = { reason: next.reason, failure_reason: null };
     } catch (error) {
       failure = readFailureOf(error);
+      const base = previous ?? emptyRecord(projectId, group, target);
       next = {
-        ...(previous ?? emptyRecord(projectId, group, target)),
+        ...base,
+        ...(base.target === target
+          ? {}
+          : { digest: null, tag: null, proof: null, proved: false }),
         target,
         reason: failure.reason,
       };

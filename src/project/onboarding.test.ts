@@ -3542,6 +3542,48 @@ test(
 );
 
 test(
+  "a failed run of a binding that the facts no longer hold starts no session",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const h = new Harness(t);
+    h.resolution = UNIVERSAL;
+    h.agentEnabled = true;
+    h.proveResults = FAILING_RESULTS;
+    h.openBuild();
+    await h.compute();
+    await h.until(() => h.state().run_started_at !== null);
+    h.bindings = facts([], []);
+    h.openProve();
+    await h.ended();
+    await turn();
+    await turn();
+    assert.equal(h.sessionInputs.length, NO_CALLS);
+  },
+);
+
+test(
+  "an execution failure of the old target after a target change and a failed read starts no session",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const h = agentHarness(t, NOTHING);
+    h.bindings = facts([APP], [server]);
+    await h.compute();
+    const digests = digestsOf(h);
+    h.resolution = sshReadError();
+    h.bindings = facts([APP], [container("app")]);
+    h.onboarding.bindingsChanged(PROJECT);
+    await h.until(() => h.resolveCalls.length === TWO_CALLS);
+    await h.until(() => !h.onboarding["computing"].size);
+    assert.equal(h.state().target, EnvironmentTarget.Image);
+    assert.equal(h.state().digest, null);
+    h.onboarding.environmentFailed(failureInput(h, { digests }));
+    await turn();
+    await turn();
+    assert.equal(h.sessionInputs.length, NO_CALLS);
+  },
+);
+
+test(
   "a failure at the host target starts no session",
   { timeout: TEST_TIMEOUT_MS },
   async (t) => {
