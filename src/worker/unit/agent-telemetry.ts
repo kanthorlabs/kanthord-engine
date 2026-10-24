@@ -11,6 +11,8 @@ import { isObject } from "../../kernel/values.ts";
 import { providerFailureOf } from "../../llm/provider-failure.ts";
 import { SpanOperation, type SpanRecorder } from "./telemetry.ts";
 import { sessionEntryRecord } from "./session-entries.ts";
+import type { ToolProcesses } from "./tool-table.ts";
+import type { BashProcess } from "../../agent/bash-process.ts";
 
 const TURN_START = "turn_start";
 const TURN_END = "turn_end";
@@ -72,6 +74,15 @@ function turnAttributes(
   };
 }
 
+function processAttributes(bashProcess: BashProcess | undefined): Attributes {
+  if (bashProcess === undefined) return {};
+  return {
+    "process.pid": bashProcess.pid,
+    "process.group_leader.pid": bashProcess.pid,
+    "kanthord.tool.killed": bashProcess.killed,
+  };
+}
+
 type SessionEvent = Parameters<Parameters<AgentSession["subscribe"]>[0]>[0];
 type EventOf<T extends SessionEvent["type"]> = Extract<
   SessionEvent,
@@ -87,6 +98,7 @@ export interface AgentTracing {
   sessionId: string;
   secrets: readonly string[];
   refreshSecrets: () => Promise<readonly string[]>;
+  processes: Pick<ToolProcesses, "take">;
 }
 
 class AgentTracer {
@@ -103,6 +115,7 @@ class AgentTracer {
   private readonly session: AgentSession;
   private readonly sessionId: string;
   private readonly refreshSecrets: AgentTracing["refreshSecrets"];
+  private readonly processes: AgentTracing["processes"];
   private secrets: readonly string[];
   private sent = NO_ENTRIES;
 
@@ -119,6 +132,7 @@ class AgentTracer {
     this.sessionId = tracing.sessionId;
     this.secrets = tracing.secrets;
     this.refreshSecrets = tracing.refreshSecrets;
+    this.processes = tracing.processes;
     this.spans = spans;
     this.agentName = agent.agent_name;
     this.position = agent.position;
@@ -253,6 +267,7 @@ class AgentTracer {
 
   private toolEnded(event: EventOf<typeof TOOL_END>): void {
     assert.ok(this.tools.size <= TOOLS_OPEN_MAX);
+    const bashProcess = this.processes.take(event.toolCallId);
     const tool = this.tools.get(event.toolCallId);
     if (!tool) return;
     assert.ok(tool.span);
@@ -265,6 +280,7 @@ class AgentTracer {
           : ToolOutcome.Ok,
         "kanthord.tool.duration_ms": Date.now() - tool.started,
         ...(event.isError ? { "error.type": AgentErrorType.ToolError } : {}),
+        ...processAttributes(bashProcess),
       },
     });
   }

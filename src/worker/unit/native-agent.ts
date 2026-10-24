@@ -358,6 +358,7 @@ export async function openNativeAgent(
           sessionId,
           secrets: await secrets(),
           refreshSecrets: secrets,
+          processes,
         }),
       );
     return nativeAgent(
