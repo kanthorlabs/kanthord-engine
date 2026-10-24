@@ -1,6 +1,7 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { TestContext } from "node:test";
+import { simpleGit } from "simple-git";
 import { temporary } from "../../kernel/test-support.ts";
 import type { RepositoryFiles } from "../../project/contract.ts";
 import { RepositoryFileState } from "../../repository/contract.ts";
@@ -112,6 +113,14 @@ export function fakeRepositoryFiles(): RepositoryFiles {
       })),
     listFilesAtCommit: async () => [],
     readObjectIds: async (_address, _commit, paths) => paths.map(() => null),
-    cloneSnapshot: async (_address, revision) => revision,
+    cloneSnapshot: async (_address, revision, directory) => {
+      mkdirSync(directory, { recursive: true });
+      const git = simpleGit(directory);
+      await git.init(["--initial-branch=main"]);
+      await git.addConfig("user.name", "Fake Repository");
+      await git.addConfig("user.email", "fake_repository@example.invalid");
+      await git.commit("initial", ["--allow-empty"]);
+      return revision;
+    },
   };
 }
