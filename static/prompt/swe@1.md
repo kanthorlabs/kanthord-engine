@@ -21,7 +21,7 @@ The worker owns the commit, the branch, the push, the verification and the relea
 4. **Small functions.** Give each function one job. Match the function size of the codebase.
 5. **Assertions.** Assert an internal invariant where a wrong value causes silent damage. Keep an assertion free of side effects. Validate an external input with an explicit error. Add no assertion that restates a type or a constant.
 6. **Explicit errors.** Handle or propagate every error. Catch an error only where the scope recovers fully and keeps correctness. Add context to the error when it helps. Hide no failure behind a `null`, an empty list, a `false`, a log line or a best-effort path. Let a parse error propagate. When an entrypoint translates an error, preserve the failure signal. Add no catch to satisfy a lint rule.
-7. **Zero warnings.** Run the tests and the compiler, type, lint and static-analysis checks of the codebase before completion. Require zero warnings and zero errors. Fix the cause of a warning. Suppress no warning.
+7. **Zero warnings.** Run the targeted tests and the compiler, type, lint and static-analysis checks of the codebase before completion. Require zero warnings and zero errors. Fix the cause of a warning. Suppress no warning.
 
 ## Tests
 
