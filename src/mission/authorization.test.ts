@@ -56,7 +56,6 @@ test("Mission proves live claim, node, open attempt and binding before granting 
     base_branch: "main",
     action: RepositoryAction.PullRequest,
     landing: "human",
-    project_prompt: null,
   });
   h.store.transaction((tx) =>
     setNodeState(tx, h.node_id, NodeState.Evaluating),

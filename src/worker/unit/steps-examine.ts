@@ -61,10 +61,7 @@ export async function runStepsExamine(
   run: ExecutionRun,
   revision: Revision,
   budget: ExecutionBudget,
-  openAgent: (
-    directory: string,
-    checkouts: readonly string[],
-  ) => Promise<NativeAgent>,
+  openAgent: (directory: string) => Promise<NativeAgent>,
 ): Promise<ExecutionEnd> {
   const deadline = Math.min(
     input.claim.created_at + input.setup.resource_budget.wall_time_ms,
@@ -87,10 +84,7 @@ export async function runStepsExamine(
       return await run.release(true);
     const current = await readDependencies(run);
     if (budget.exhausted()) return await run.release(true);
-    const agent = await openAgent(
-      directory,
-      checkouts.map((checkout) => checkout.directory),
-    );
+    const agent = await openAgent(directory);
     if (agent.budget.exhausted()) return await run.release(true);
     const work = renderWorkPrompt(input.setup.templates, {
       node_id: input.claim.node_id,

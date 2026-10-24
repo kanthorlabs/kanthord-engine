@@ -245,7 +245,6 @@ for (const [end, target] of [
       base_branch: "main",
       action: RepositoryAction.PullRequest,
       landing: "human",
-      project_prompt: null,
     });
     h.store.transaction((tx) => {
       tx.database

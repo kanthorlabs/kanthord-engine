@@ -219,7 +219,7 @@ const fakeAgentCollaborations: Omit<AgentDependencies, "store"> = {
   credentialHolds: memoryCredentialHolds(),
   approvedModels: () => null,
   entriesOfAgent: () => [],
-  repositoryWorkingOf: () => null,
+  repositoryPromptsOf: () => null,
   providerHealthCheck: () => async () => ResourceStatus.Unknown,
   providerCapability: () => PROVIDER_CAPABILITY,
   toolDeclarations: async () => [],

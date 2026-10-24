@@ -18,7 +18,9 @@ import {
 import { tagSchema } from "../kernel/tag.ts";
 import { SERVER_HOLDER } from "../kernel/holder.ts";
 import {
+  AGENT_NAMES,
   fallbackConfigurationsSchema,
+  type AgentName,
   type HolderScope,
 } from "../agent/contract.ts";
 import {
@@ -73,7 +75,6 @@ export const PROJECT_ID_PREFIX = "project";
 export const BINDING_ID_PREFIX = "binding";
 export const BINDING_SET_INITIAL_VERSION = 1;
 export const LS_REMOTE_TIMEOUT_MS = 30000;
-export const PROJECT_PROMPT_MAX_BYTES = 32768;
 export const INSTANCE_COUNT_MIN = 0;
 export const INSTANCE_COUNT_MAX = 64;
 export const STORAGE_PLATFORM = "s3";
@@ -138,8 +139,7 @@ export const ProjectErrorCode = {
   DuplicateResource: "project.bindings.duplicate_resource",
   RepositoryAddressInvalid: "project.bindings.repository.address_invalid",
   RepositoryBaseBranchAbsent: "project.bindings.repository.base_branch_absent",
-  RepositoryPromptTooLarge:
-    "project.bindings.repository.project_prompt_too_large",
+  RepositoryPromptInvalid: "project.bindings.repository.prompt_invalid",
   RepositorySshUnreachable: "project.bindings.repository.ssh_unreachable",
   RepositoryCredentialRequired:
     "project.bindings.repository.credential_required",
@@ -187,33 +187,12 @@ export function isNonblank(s: string): boolean {
 export { EnvironmentSource };
 export const ENVIRONMENT_FILE_MAX_BYTES = 65536;
 
-export const InstructionFileState = {
-  Present: "present",
-  Absent: "absent",
-  Invalid: "invalid",
-} as const;
-
-export const WorkingLayerSwitch = {
-  AgentsMd: "agents_md",
-  AgentsLocalMd: "agents_local_md",
-  ClaudeMd: "claude_md",
-  ClaudeLocalMd: "claude_local_md",
-  ProjectPrompt: "project_prompt",
-} as const;
-export const workingLayerSchema = z
-  .strictObject(
-    Object.fromEntries(
-      Object.values(WorkingLayerSwitch).map((name) => [
-        name,
-        z.boolean().default(true),
-      ]),
-    ) as Record<
-      (typeof WorkingLayerSwitch)[keyof typeof WorkingLayerSwitch],
-      z.ZodDefault<z.ZodBoolean>
-    >,
-  )
-  .prefault({});
-export type WorkingLayer = z.output<typeof workingLayerSchema>;
+export const bindingPromptsSchema = z.strictObject(
+  Object.fromEntries(
+    AGENT_NAMES.map((name) => [name, z.string().optional()]),
+  ) as { [Name in AgentName]: z.ZodOptional<z.ZodString> },
+);
+export type BindingPrompts = z.infer<typeof bindingPromptsSchema>;
 
 export const ENVIRONMENT_SECRET_VARIABLE = /^[A-Z_][A-Z0-9_]*$/;
 export const ENVIRONMENT_SECRETS_MAX = 16;
@@ -249,8 +228,7 @@ export const repositoryConfigSchema = z.strictObject({
   }),
   ssh_credential: z.string().min(1),
   credential: z.string().min(1).optional(),
-  project_prompt: z.string().optional(),
-  working_layer: workingLayerSchema,
+  prompts: bindingPromptsSchema.optional(),
   environment: environmentSchema.optional(),
   environment_secrets: z.record(z.string(), z.string().min(1)).optional(),
 });
@@ -654,8 +632,7 @@ export type RepositoryPolicy = {
   base_branch: string;
   action: (typeof GitHubAction)[keyof typeof GitHubAction] | null;
   landing: Landing;
-  project_prompt: string | null;
-  working_layer: WorkingLayer;
+  prompts: BindingPrompts;
   environment: Environment | null;
   repository_environment: boolean;
 };
@@ -674,18 +651,6 @@ const projectParams = z.strictObject({ project_id: z.string().min(1) });
 const bindingParams = z.strictObject({
   project_id: z.string().min(1),
   binding_id: z.string().min(1),
-});
-const instructionFileEntry = z.strictObject({
-  source: z.enum([
-    WorkingLayerSwitch.AgentsMd,
-    WorkingLayerSwitch.AgentsLocalMd,
-    WorkingLayerSwitch.ClaudeMd,
-    WorkingLayerSwitch.ClaudeLocalMd,
-  ]),
-  path: z.string().min(1),
-  state: z.enum(InstructionFileState),
-  reason: z.string().min(1).nullable(),
-  text: z.string().nullable(),
 });
 const nameBody = z.strictObject({ name: projectNameSchema });
 const pageQuery = z.strictObject({
@@ -1020,21 +985,6 @@ export const projectOperations = {
       credential: bindingVerifyAnswerEntrySchema.nullable(),
     }),
     description: "Verify one repository binding address and credential.",
-  },
-  "binding.instruction_files.get": {
-    ...readOperation,
-    id: "project.binding.instruction_files.get",
-    method: HttpMethod.Get,
-    path: "/api/project/:project_id/binding/:binding_id/instruction_files",
-    timeoutMs: REPOSITORY_FILES_ROUTE_TIMEOUT_MS,
-    input: readInput(bindingParams, emptyFields),
-    output: z.strictObject({
-      commit: z.string().min(1),
-      read_at: z.number().int(),
-      files: z.array(instructionFileEntry),
-    }),
-    description:
-      "Read the instruction files of one repository binding at its base branch.",
   },
   "environment.list": {
     ...readOperation,

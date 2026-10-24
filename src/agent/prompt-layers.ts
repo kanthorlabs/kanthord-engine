@@ -14,7 +14,6 @@ import {
   WorkbenchPromptSource,
   type StoredPromptSettings,
 } from "./contract.ts";
-import type { RepositoryPolicy } from "../project/contract.ts";
 import { BASE_PROMPT, WORKBENCH_PROMPT } from "./prompt-assets.ts";
 import { digest, PromptLayer } from "./prompt-composer.ts";
 import {
@@ -30,7 +29,6 @@ const WORKING_OWNER = "Workbench Service";
 const SHIPPED_BASE_NAME = "base.md";
 const SHIPPED_WORKBENCH_NAME = "workbench.md";
 const MARKDOWN_EXTENSION = ".md";
-const PROJECT_PROMPT_SOURCE = "project_prompt";
 export const WORKING_FILES = [
   [WorkbenchPromptSource.AgentsMd, "AGENTS.md"],
   [WorkbenchPromptSource.AgentsLocalMd, "AGENTS.local.md"],
@@ -73,11 +71,6 @@ export interface PromptSettingsSet {
   working: StoredPromptSettings;
 }
 
-export type RepositoryLayerSource = Pick<
-  RepositoryPolicy,
-  "name" | "project_prompt" | "working_layer"
->;
-
 export interface LayerInput {
   agent: AgentDeclaration;
   settings: PromptSettingsSet;
@@ -86,14 +79,6 @@ export interface LayerInput {
   dataDirectory: string;
   hostHome: string;
   workingDirectory: string;
-  repository?: RepositoryLayerSource | null;
-  context: Context;
-}
-
-export interface RepositoryLayerInput {
-  repository: RepositoryLayerSource;
-  workspace: string | null;
-  hostHome: string;
   context: Context;
 }
 
@@ -101,7 +86,6 @@ interface SourceSpec {
   source: string;
   origin: PromptOrigin;
   path: string | null;
-  deferred?: boolean;
   owner: string;
   label: (path: string | null) => string;
   load: () => Promise<Loaded>;
@@ -155,13 +139,6 @@ function resolveSource(
       ...base,
       path: known,
       state: PromptSourceState.Off,
-      label: spec.label(known),
-    });
-  if (spec.deferred)
-    return Promise.resolve({
-      ...base,
-      path: known,
-      state: PromptSourceState.Deferred,
       label: spec.label(known),
     });
   return spec.load().then((loaded) => {
@@ -297,34 +274,6 @@ function workingSpecs(input: LayerInput): SourceSpec[] {
   ];
 }
 
-function repositorySpecs(input: RepositoryLayerInput): SourceSpec[] {
-  const { name, project_prompt } = input.repository;
-  const owner = `repository binding ${name}`;
-  const workspace = input.workspace;
-  return [
-    ...WORKING_FILES.map(([source, file]): SourceSpec => {
-      const path = workspace === null ? file : join(workspace, file);
-      return {
-        source,
-        origin: PromptOrigin.File,
-        path,
-        deferred: workspace === null,
-        owner,
-        label: fileLabel,
-        load: fileSource([path], workspace, input.context),
-      };
-    }),
-    {
-      source: PROJECT_PROMPT_SOURCE,
-      origin: PromptOrigin.Database,
-      path: null,
-      owner,
-      label: () => "database project prompt",
-      load: textSource(project_prompt ?? ""),
-    },
-  ];
-}
-
 async function resolveLayer(
   layer: PromptLayerKind,
   name: PromptLayer,
@@ -345,19 +294,6 @@ export function systemLayerEnabled(settings: PromptSettingsSet): boolean {
   if (override === SystemLayerOverride.On) return true;
   if (override === SystemLayerOverride.Off) return false;
   return settings.system.switches[SYSTEM_LAYER_SWITCH] === true;
-}
-
-export function resolveRepositoryLayer(
-  input: RepositoryLayerInput,
-): Promise<ResolvedLayer> {
-  assert.ok(input.hostHome);
-  return resolveLayer(
-    PromptLayerKind.Working,
-    PromptLayer.WorkingLayer,
-    repositorySpecs(input),
-    input.repository.working_layer,
-    input.hostHome,
-  );
 }
 
 export async function resolveLayers(
@@ -381,19 +317,12 @@ export async function resolveLayers(
       input.settings.agent.switches,
       input.hostHome,
     ),
-    input.repository
-      ? await resolveRepositoryLayer({
-          repository: input.repository,
-          workspace: null,
-          hostHome: input.hostHome,
-          context: input.context,
-        })
-      : await resolveLayer(
-          PromptLayerKind.Working,
-          PromptLayer.WorkingLayer,
-          workingSpecs(input),
-          input.settings.working.switches,
-          input.hostHome,
-        ),
+    await resolveLayer(
+      PromptLayerKind.Working,
+      PromptLayer.WorkingLayer,
+      workingSpecs(input),
+      input.settings.working.switches,
+      input.hostHome,
+    ),
   ];
 }

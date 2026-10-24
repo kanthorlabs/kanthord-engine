@@ -25,7 +25,6 @@ import {
   TEST_SSH_PUBLIC_KEY,
   everyBindingSshAccess,
   transport as localTransport,
-  WORKING_LAYER_ALL_ON,
 } from "./test-support.ts";
 import { EndReason, ExecutionRun, ExecutionStop } from "./execution-run.ts";
 import { ExecutionIntent } from "../contract.ts";
@@ -73,8 +72,6 @@ test("B3 review bundle places all supporting assets in the evidence directory ou
       resource_identity: "github:kanthorlabs/engine",
       ssh_public_key: TEST_SSH_PUBLIC_KEY,
       strategy: { base_branch: "main" },
-      project_prompt: null,
-      working_layer: WORKING_LAYER_ALL_ON,
       environment: null,
     };
     setup.repositories = [

@@ -582,7 +582,7 @@ export function composeServices(options: {
     providerHealthCheck: (tx, name) => llm.providerHealthCheck(tx, name),
     providerCapability: (tx, name) => llm.providerCapability(tx, name),
     entriesOfAgent: (tx, name) => project.entriesOfAgent(tx, name),
-    repositoryWorkingOf: (tx, id) => project.repositoryPolicyOf(tx, id),
+    repositoryPromptsOf: (tx, id) => project.repositoryPolicyOf(tx, id),
     toolDeclarations: (name) => toolDeclarations(name),
     logger: options.logger,
   });
@@ -852,6 +852,7 @@ export function composeServices(options: {
       }),
     serverAgentCredentials: (input) => custody.serverAgentCredentials(input),
     composePrompt: (name, context) => agent.composePrompt(name, context),
+    repositoryPromptsOf: (tx, id) => project.repositoryPolicyOf(tx, id),
     templates: (context) => agent.promptTemplates(context),
     exportRepository: (bindingId, commit, directory, context) =>
       project.exportRepository(bindingId, commit, directory, context),

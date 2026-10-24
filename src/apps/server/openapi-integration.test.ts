@@ -716,7 +716,6 @@ const OPERATION_INVENTORY: readonly (readonly [string, AccessPolicy])[] = [
   ["project.binding.list", AccessPolicy.Human],
   ["project.binding.get", AccessPolicy.Human],
   ["project.binding.verify", AccessPolicy.Human],
-  ["project.binding.instruction_files.get", AccessPolicy.Human],
   ["project.binding.environment.get", AccessPolicy.Human],
   ["project.binding.environment.set", AccessPolicy.Human],
   ["project.binding.environment.rebuild", AccessPolicy.Human],
@@ -834,8 +833,8 @@ const OPERATION_INVENTORY: readonly (readonly [string, AccessPolicy])[] = [
   ["tracking.session.entry.list", AccessPolicy.Human],
   ["tracking.session.entry.get", AccessPolicy.Human],
 ];
-const OPERATION_COUNT = 220;
-const ROUTED_OPERATION_COUNT = 210;
+const OPERATION_COUNT = 219;
+const ROUTED_OPERATION_COUNT = 209;
 const INTAKE_OPERATION_COUNT = 22;
 const INTAKE_ROUTED_OPERATION_COUNT = 14;
 const SERVICE_OPERATION_IDS = [

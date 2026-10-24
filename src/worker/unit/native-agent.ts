@@ -14,13 +14,7 @@ import type {
   HostTools,
 } from "../contract.ts";
 import type { ExecutionBudget } from "./budget.ts";
-import type {
-  CompositionRecord,
-  LayerText,
-  WorkPrompt,
-} from "../../agent/prompt-composer.ts";
-import { resolveRepositoryLayer } from "../../agent/prompt-layers.ts";
-import { compositionRecord, workingTexts } from "../../agent/prompt-render.ts";
+import type { WorkPrompt } from "../../agent/prompt-composer.ts";
 import { openSession, withDeadline } from "../../agent/agent-session.ts";
 import { countTurns, pinnedLayers } from "../../agent/pinned-layers.ts";
 import { loadPi } from "../../agent/pi.ts";
@@ -56,9 +50,7 @@ export interface NativeAgentInput {
   agent: AgentSetup;
   credential: ExecutionCredential;
   budget: ExecutionBudget;
-  workspaceAgentFiles: boolean;
   workspace: string;
-  checkouts: readonly string[];
   hostHome: string;
   env: NodeJS.ProcessEnv;
   modelRuntimeFactory: ModelRuntimeFactory;
@@ -74,7 +66,6 @@ export interface NativeAgent {
   lastText(): string | undefined;
   abort(): Promise<void>;
   readonly budget: ExecutionBudget;
-  readonly composition: CompositionRecord;
   closeTrace(status: SpanStatus): void;
   dispose(): void;
 }
@@ -163,7 +154,6 @@ function nativeAgent(
   opened: AgentSession,
   pins: ReturnType<typeof pinnedLayers>,
   budget: ExecutionBudget,
-  composition: CompositionRecord,
   context: CancellationContext,
   turnCheck: () => Promise<void>,
   trace: SessionTrace | undefined,
@@ -202,7 +192,6 @@ function nativeAgent(
   });
   return {
     budget,
-    composition,
     async prompt(work) {
       assert.ok(session);
       context.signal.throwIfAborted();
@@ -241,20 +230,11 @@ function nativeAgent(
 function appendPinnedContext(
   session: AgentSession,
   systemPrompt: string,
-  layers: readonly LayerText[],
 ): void {
-  const { sessionManager } = session;
-  sessionManager.appendCustomEntry(PINNED_CONTEXT_TYPE, {
+  session.sessionManager.appendCustomEntry(PINNED_CONTEXT_TYPE, {
     part: "system_prompt",
     text: systemPrompt,
   });
-  layers.forEach((layer, position) =>
-    sessionManager.appendCustomEntry(PINNED_CONTEXT_TYPE, {
-      part: "layer",
-      index: position + 1,
-      text: layer.message,
-    }),
-  );
 }
 
 export async function openNativeAgent(
@@ -269,22 +249,6 @@ export async function openNativeAgent(
   const secrets = credentialRedaction(input.credential);
   try {
     await secrets();
-    const layers = [];
-    for (const [index, repository] of input.setup.repositories.entries())
-      layers.push(
-        await resolveRepositoryLayer({
-          repository: {
-            name: repository.name,
-            project_prompt: repository.project_prompt,
-            working_layer: repository.working_layer,
-          },
-          workspace: input.workspaceAgentFiles
-            ? (input.checkouts[index] ?? null)
-            : null,
-          hostHome: input.hostHome,
-          context,
-        }),
-      );
     const { runtime, model } = await withDeadline(
       input.modelRuntimeFactory({
         credential: input.credential,
@@ -293,8 +257,7 @@ export async function openNativeAgent(
       }),
       context,
     );
-    const texts = workingTexts(layers, input.setup.templates);
-    const pins = pinnedLayers(texts);
+    const pins = pinnedLayers([]);
     const pi = await withDeadline(loadPi(), context);
     let sessionId: string | undefined;
     if (input.spans) {
@@ -351,7 +314,7 @@ export async function openNativeAgent(
       sessionManager,
     });
     pins.pinInference(session, input.agent.prompt.final);
-    appendPinnedContext(session, input.agent.prompt.final, texts);
+    appendPinnedContext(session, input.agent.prompt.final);
     if (input.spans && sessionId !== undefined)
       trace?.watch(
         traceAgent(session, input.spans, input.agent, {
@@ -365,7 +328,6 @@ export async function openNativeAgent(
       session,
       pins,
       budget,
-      compositionRecord(layers),
       context,
       input.turnCheck ?? (async () => {}),
       trace,

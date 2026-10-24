@@ -673,13 +673,7 @@ const REPOSITORY_CONFIG = {
   address: "git@github.com:owner/repository.git",
   strategy: { base_branch: "main" },
   ssh_credential: "github-ssh",
-  working_layer: {
-    agents_md: true,
-    agents_local_md: true,
-    claude_md: true,
-    claude_local_md: true,
-    project_prompt: true,
-  },
+  prompts: { "swe@1": "Run the unit tests first." },
 };
 const WORKER_BINDING = {
   kind: "worker",

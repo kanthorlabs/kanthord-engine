@@ -156,7 +156,6 @@ components:
                             - absent
                             - invalid
                             - off
-                            - deferred
                         digest:
                           anyOf:
                             - type: string

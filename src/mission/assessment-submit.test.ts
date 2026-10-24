@@ -187,7 +187,6 @@ async function fixture(t: TestContext, action: RepositoryAction | null = null) {
     base_branch: "main",
     action,
     landing: "human" as const,
-    project_prompt: null,
   });
   const address = {
     kind: AssetKind.Repository,

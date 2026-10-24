@@ -28,7 +28,6 @@ import {
   TEST_SSH_HOST_KEY,
   TEST_SSH_PUBLIC_KEY,
   unusedHostTools,
-  WORKING_LAYER_ALL_ON,
 } from "../test-support.ts";
 import type { SshAccess } from "../../repository/contract.ts";
 import {
@@ -188,8 +187,6 @@ export const repositorySetup = () => ({
   resource_identity: "github:kanthorlabs/engine",
   ssh_public_key: TEST_SSH_PUBLIC_KEY,
   strategy: { base_branch: "main" },
-  project_prompt: null,
-  working_layer: WORKING_LAYER_ALL_ON,
   environment: null,
 });
 
@@ -226,8 +223,6 @@ export async function implementFixture(
     resource_identity: "github:kanthorlabs/engine",
     ssh_public_key: TEST_SSH_PUBLIC_KEY,
     strategy: { base_branch: "main" },
-    project_prompt: null,
-    working_layer: WORKING_LAYER_ALL_ON,
     environment,
   }));
   const claim = {
@@ -331,9 +326,7 @@ async function openExecution(
       expired_at: Date.now() + 60000,
       resource_budget: setup.resource_budget,
     }),
-    workspaceAgentFiles: true,
     workspace: workspace.root,
-    checkouts: workspace.checkouts.map((checkout) => checkout.directory),
     hostHome: temporary(t),
     env: hostEnvironment(),
     modelRuntimeFactory: scriptedModelRuntime(provider),

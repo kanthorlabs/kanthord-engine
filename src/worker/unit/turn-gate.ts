@@ -135,7 +135,6 @@ export function gatedAgent(
   };
   return {
     budget: agent.budget,
-    composition: agent.composition,
     prompt: (work: WorkPrompt) => gated(() => agent.prompt(work)),
     instruct: (work: WorkPrompt, text: string) =>
       gated(() => agent.instruct(work, text)),

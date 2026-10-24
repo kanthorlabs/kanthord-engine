@@ -7,8 +7,6 @@ import {
   mkdirSync,
   readdirSync,
   readFileSync,
-  rmSync,
-  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
@@ -27,11 +25,7 @@ import {
 import { EndReason, ExecutionStop } from "./execution-run.ts";
 import { CodedError } from "../../kernel/errors.ts";
 import { ExecutionIntent } from "../contract.ts";
-import {
-  WorkerMethod,
-  type ExecutionSetup,
-  type HostTools,
-} from "../contract.ts";
+import { type ExecutionSetup, type HostTools } from "../contract.ts";
 import { renderWorkPrompt } from "../../agent/prompt-composer.ts";
 import {
   anthropicAgent,
@@ -43,7 +37,6 @@ import {
   SETUP_PROMPT,
   TEST_SSH_HOST_KEY,
   TEST_SSH_PUBLIC_KEY,
-  WORKING_LAYER_ALL_ON,
 } from "./test-support.ts";
 import { loadPi } from "../../agent/pi.ts";
 import { SHIPPED_TEMPLATES } from "../../agent/prompt-templates.ts";
@@ -63,7 +56,7 @@ const TRANSCRIPT_LENGTH_BEFORE = 3;
 const SINGLE_TURN_BUDGET = 1;
 const SINGLE_CALL_COUNT = 1;
 const CONTENT = "written";
-const PROJECT_PROMPT = "project prompt text";
+const USER_ROLE = "user";
 const HOME_TEXT = "home file text";
 const TOOL_RESULT = "toolResult";
 const START_POLL_MS = 10;
@@ -97,11 +90,9 @@ async function fixture(
   overrides: Partial<ExecutionSetup> = {},
   hostTools: HostTools = unusedHostTools,
   options: {
-    method?: WorkerMethod;
     prepare?: (workspace: string, hostHome: string) => void;
     turnCheck?: (context: CancellationContext) => Promise<void>;
     intent?: ExecutionIntent;
-    checkouts?: (workspace: string) => string[];
     sessionRoot?: false;
   } = {},
 ) {
@@ -153,10 +144,7 @@ async function fixture(
       expired_at: Date.now() + 60000,
       resource_budget: setup.resource_budget,
     }),
-    workspaceAgentFiles:
-      (options.method ?? WorkerMethod.Steps) !== WorkerMethod.Evaluation,
     workspace,
-    checkouts: options.checkouts?.(workspace) ?? [workspace],
     hostHome,
     env: hostEnvironment(),
     modelRuntimeFactory: scriptedModelRuntime(provider),
@@ -229,7 +217,6 @@ test("native software agent writes and runs bounded bash with execution credenti
       systemPrompt?.includes(SETUP_PROMPT),
     ),
   );
-  assert.deepEqual(h.agent.composition, { selected: [], rejected: [] });
 });
 
 test("the agent.session span starts with the session attributes and its identity", async (t) => {
@@ -316,10 +303,7 @@ test("without a session root pi writes no session file", async (t) => {
   );
 });
 
-function repositoryOf(
-  workingLayer: Partial<typeof WORKING_LAYER_ALL_ON>,
-  projectPrompt: string | null = PROJECT_PROMPT,
-) {
+function repositoryOf() {
   return {
     binding_id: createIdentity("binding"),
     name: "repo",
@@ -328,8 +312,6 @@ function repositoryOf(
     resource_identity: "github:kanthorlabs/engine",
     ssh_public_key: TEST_SSH_PUBLIC_KEY,
     strategy: { base_branch: "main" },
-    project_prompt: projectPrompt,
-    working_layer: { ...WORKING_LAYER_ALL_ON, ...workingLayer },
     environment: null,
   };
 }
@@ -351,44 +333,32 @@ function writeFiles(workspace: string, hostHome: string) {
 const callText = (h: Awaited<ReturnType<typeof fixture>>) =>
   JSON.stringify(h.provider.calls.map(({ messages }) => messages));
 
-test("native agent composes only the switched-on workspace files and the project prompt", async (t) => {
-  const h = await fixture(
-    t,
-    [fauxAssistantMessage("done")],
-    {
-      repositories: [
-        repositoryOf({ agents_local_md: false, claude_md: false }),
-      ],
-    },
-    unusedHostTools,
-    { prepare: writeFiles },
-  );
-  await h.agent.prompt(WORK);
-  const text = callText(h);
-  assert.ok(text.includes("agents text"));
-  assert.ok(text.includes("claude local text"));
-  assert.ok(text.includes(PROJECT_PROMPT));
-  assert.ok(!text.includes("agents local text"));
-  assert.ok(!text.includes('"claude text'));
-  assert.ok(!text.includes(HOME_TEXT));
-  assert.ok(
-    h.provider.calls.every(
-      ({ systemPrompt }) => !systemPrompt?.includes(HOME_TEXT),
-    ),
-  );
-  assert.deepEqual(
-    h.agent.composition.selected.map(({ source }) => source),
-    [
-      `file ${join(h.workspace, "AGENTS.md")}`,
-      `file ${join(h.workspace, "CLAUDE.local.md")}`,
-      "database project prompt",
-    ],
-  );
-  assert.ok(
-    h.agent.composition.selected.every(({ digest }) =>
-      /^[a-f0-9]{64}$/.test(digest),
-    ),
-  );
+test("the worker pins only the work prompt and reads no instruction file for every intent", async (t) => {
+  for (const intent of Object.values(ExecutionIntent)) {
+    const h = await fixture(
+      t,
+      [fauxAssistantMessage("done")],
+      { repositories: [repositoryOf()] },
+      unusedHostTools,
+      { intent, prepare: writeFiles },
+    );
+    await h.agent.prompt(WORK);
+    const work = JSON.stringify(WORK.text).slice(1, -1);
+    for (const call of h.provider.calls) {
+      assert.equal(call.systemPrompt?.includes(HOME_TEXT), false);
+      assert.deepEqual(
+        call.messages.flatMap((message) =>
+          message.role === USER_ROLE ? [JSON.stringify(message.content)] : [],
+        ),
+        [JSON.stringify([{ type: "text", text: WORK.text }])],
+      );
+    }
+    const text = callText(h);
+    assert.ok(text.includes(work));
+    for (const [, content] of WORKSPACE_FILES)
+      assert.equal(text.includes(content), false);
+    assert.equal(text.includes(HOME_TEXT), false);
+  }
 });
 
 function sessionEntries(h: Harness) {
@@ -401,7 +371,7 @@ test("a prompt writes every pi entry as a session_entry record with the pinned c
   const h = await fixture(
     t,
     [fauxAssistantMessage("done")],
-    { repositories: [repositoryOf({})] },
+    { repositories: [repositoryOf()] },
     unusedHostTools,
     { prepare: writeFiles },
   );
@@ -425,17 +395,10 @@ test("a prompt writes every pi entry as a session_entry record with the pinned c
   assert.ok(
     customs.every(({ entry }) => entry.customType === PINNED_CONTEXT_TYPE),
   );
-  const parts = customs.map(
-    ({ entry }) => entry.data as Record<string, unknown>,
-  );
-  assert.deepEqual(parts[0], { part: "system_prompt", text: SETUP_PROMPT });
-  const layers = parts.slice(1);
-  assert.ok(layers.length >= WORKSPACE_FILES.length);
   assert.deepEqual(
-    layers.map(({ part, index }) => [part, index]),
-    layers.map((_, index) => ["layer", index + 1]),
+    customs.map(({ entry }) => entry.data),
+    [{ part: "system_prompt", text: SETUP_PROMPT }],
   );
-  assert.ok(String(layers.at(-1)?.text).includes(PROJECT_PROMPT));
   assert.equal(
     new Set(entries.map(({ entry_id }) => entry_id)).size,
     entries.length,
@@ -493,58 +456,6 @@ test("a session entry record never holds the credential secret", async (t) => {
   assert.ok(JSON.stringify(sessionEntries(h)).includes("key [redacted]"));
 });
 
-async function composesOnePartPerBinding(
-  t: TestContext,
-  intent: ExecutionIntent,
-) {
-  const names = ["first", "second"];
-  const checkoutsOf = (workspace: string) =>
-    names.map((name) => join(workspace, "checkouts", name));
-  const h = await fixture(
-    t,
-    [fauxAssistantMessage("done")],
-    {
-      repositories: names.map((name) => ({
-        ...repositoryOf({}, `${name} project prompt`),
-        name,
-      })),
-    },
-    unusedHostTools,
-    {
-      intent,
-      checkouts: checkoutsOf,
-      prepare: (workspace) => {
-        for (const [index, directory] of checkoutsOf(workspace).entries()) {
-          mkdirSync(directory, { recursive: true });
-          writeFileSync(join(directory, "AGENTS.md"), `${names[index]} agents`);
-        }
-      },
-    },
-  );
-  await h.agent.prompt(WORK);
-  const text = callText(h);
-  for (const name of names) {
-    assert.ok(text.includes(`${name} agents`));
-    assert.ok(text.includes(`${name} project prompt`));
-  }
-  assert.deepEqual(
-    h.agent.composition.selected.map(({ owner, source }) => [owner, source]),
-    checkoutsOf(h.workspace).flatMap((directory, index) => [
-      [
-        `repository binding ${names[index]}`,
-        `file ${join(directory, "AGENTS.md")}`,
-      ],
-      [`repository binding ${names[index]}`, "database project prompt"],
-    ]),
-  );
-}
-
-test("an examine node composes one project prompt part for each repository binding in binding order", (t) =>
-  composesOnePartPerBinding(t, ExecutionIntent.Examine));
-
-test("two bindings compose two parts in binding order from their checkouts", (t) =>
-  composesOnePartPerBinding(t, ExecutionIntent.Implement));
-
 test("the work prompt lists both repositories", async (t) => {
   const current = task("both", "true");
   const h = await implementFixture(t, [current], [], undefined, ["api", "web"]);
@@ -559,60 +470,6 @@ test("the work prompt lists both repositories", async (t) => {
     taskWork(single, current).text.includes("## Repositories"),
     false,
   );
-});
-
-test("native agent rejects a working file that leaves the workspace and records the reason", async (t) => {
-  const h = await fixture(
-    t,
-    [fauxAssistantMessage("done")],
-    { repositories: [repositoryOf({}, null)] },
-    unusedHostTools,
-    {
-      prepare: (workspace, hostHome) => {
-        writeFiles(workspace, hostHome);
-        rmSync(join(workspace, "AGENTS.md"));
-        symlinkSync(
-          join(hostHome, ".agents/AGENTS.md"),
-          join(workspace, "AGENTS.md"),
-        );
-      },
-    },
-  );
-  await h.agent.prompt(WORK);
-  assert.deepEqual(
-    h.agent.composition.rejected.map(({ reason }) => reason),
-    ["outside_workspace"],
-  );
-  assert.ok(!callText(h).includes(HOME_TEXT));
-});
-
-test("an evaluation takes the project prompt only and reads no workspace file", async (t) => {
-  const h = await fixture(
-    t,
-    [fauxAssistantMessage("done")],
-    { repositories: [repositoryOf({})] },
-    unusedHostTools,
-    {
-      method: WorkerMethod.Evaluation,
-      prepare: (workspace, hostHome) => {
-        writeFiles(workspace, hostHome);
-        rmSync(join(workspace, "CLAUDE.md"));
-        symlinkSync(
-          join(hostHome, ".agents/AGENTS.md"),
-          join(workspace, "CLAUDE.md"),
-        );
-      },
-    },
-  );
-  await h.agent.prompt(WORK);
-  const text = callText(h);
-  assert.ok(text.includes(PROJECT_PROMPT));
-  for (const [, content] of WORKSPACE_FILES) assert.ok(!text.includes(content));
-  assert.deepEqual(
-    h.agent.composition.selected.map(({ source }) => source),
-    ["database project prompt"],
-  );
-  assert.deepEqual(h.agent.composition.rejected, []);
 });
 
 test("native reviewer refuses a scripted write tool", async (t) => {

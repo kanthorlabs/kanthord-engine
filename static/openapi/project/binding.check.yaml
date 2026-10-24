@@ -145,27 +145,15 @@ components:
                 credential:
                   type: string
                   minLength: 1
-                project_prompt:
-                  type: string
-                working_layer:
+                prompts:
                   type: object
                   properties:
-                    agents_md:
-                      default: true
-                      type: boolean
-                    agents_local_md:
-                      default: true
-                      type: boolean
-                    claude_md:
-                      default: true
-                      type: boolean
-                    claude_local_md:
-                      default: true
-                      type: boolean
-                    project_prompt:
-                      default: true
-                      type: boolean
-                  required: []
+                    swe@1:
+                      type: string
+                    re@1:
+                      type: string
+                    env@1:
+                      type: string
                   additionalProperties: false
                 environment:
                   type: object
@@ -290,7 +278,6 @@ components:
                 - address
                 - strategy
                 - ssh_credential
-                - working_layer
               additionalProperties: false
           required:
             - kind

@@ -18,6 +18,7 @@ import {
 } from "@earendil-works/pi-ai";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { SHIPPED_TEMPLATES } from "../agent/prompt-templates.ts";
+import { framing, PromptConsumer } from "../agent/prompt-render.ts";
 import { ENV_AGENT_PROMPT } from "../agent/prompt-assets.ts";
 import { PromptLayer } from "../agent/prompt-composer.ts";
 import {
@@ -65,6 +66,9 @@ const LINKED_TEXT = "text-behind-the-link";
 const WRITE_TOOL = "environment_write";
 const FINISH_TOOL = "environment_finish";
 const BINDING_NAME = "app";
+const BINDING_ID = "binding_01";
+const ENV_BINDING_TEXT = "Use the pinned toolchain image.";
+const SWE_TEXT = "Prefer small commits.";
 const COMMIT = "0123456789abcdef";
 const TAIL = "npm ERR! missing script: build";
 const FAILURE_CLASS = "setup_failed";
@@ -221,6 +225,13 @@ function fixture(
       return credentials;
     },
     composePrompt: async () => [agentLayer()],
+    repositoryPromptsOf: (_tx, bindingId) =>
+      bindingId === BINDING_ID
+        ? {
+            name: BINDING_NAME,
+            prompts: { [ENV_AGENT_NAME]: ENV_BINDING_TEXT, "swe@1": SWE_TEXT },
+          }
+        : null,
     templates: async () => SHIPPED_TEMPLATES,
     exportRepository: async (bindingId, commit, directory) => {
       record.exports.push({ bindingId, commit, directory });
@@ -247,7 +258,7 @@ function fixture(
     },
   ): EnvironmentSessionInput => ({
     project_id: "project_01",
-    binding_id: "binding_01",
+    binding_id: BINDING_ID,
     binding_name: BINDING_NAME,
     resource_identity: "github:acme/app",
     commit: COMMIT,
@@ -341,6 +352,12 @@ test(
     await f.agent.run(f.input());
     const first = f.provider.calls[0]!;
     assert.ok(first.systemPrompt?.includes(ENV_AGENT_PROMPT));
+    assert.ok(
+      first.systemPrompt?.includes(
+        `Instructions of repository ${BINDING_NAME}:\n\n${ENV_BINDING_TEXT}\n\n${framing(SHIPPED_TEMPLATES, PromptConsumer.Worker)}`,
+      ),
+    );
+    assert.ok(!first.systemPrompt?.includes(SWE_TEXT));
     const user = first.messages.find((message) => message.role === ROLE_USER)!;
     const body = text(user);
     assert.ok(body.includes(BINDING_NAME));

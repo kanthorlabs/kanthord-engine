@@ -450,7 +450,7 @@ function pinHarness(
     credentialHolds: holds,
     approvedModels: () => null,
     entriesOfAgent: () => [],
-    repositoryWorkingOf: () => null,
+    repositoryPromptsOf: () => null,
     providerHealthCheck: () => async () => ResourceStatus.Unknown,
     providerCapability: () => "model-list read",
     toolDeclarations: async () => [],

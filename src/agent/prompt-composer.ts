@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import type { InvalidReason } from "./prompt-source.ts";
 import { PromptTemplate, type PromptTemplates } from "./contract.ts";
 import { renderTemplate } from "./prompt-templates.ts";
 
@@ -17,21 +16,6 @@ export interface LayerText {
   source: string;
   text: string;
   message: string;
-}
-export interface CompositionRecord {
-  selected: {
-    layer: PromptLayer;
-    owner: string;
-    source: string;
-    path: string | null;
-    digest: string;
-  }[];
-  rejected: {
-    layer: PromptLayer;
-    source: string;
-    path: string | null;
-    reason: InvalidReason;
-  }[];
 }
 export interface WorkPrompt {
   text: string;

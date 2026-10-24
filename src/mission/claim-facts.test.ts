@@ -64,7 +64,6 @@ function factsHarness(
       base_branch: "main",
       action: RepositoryAction.PullRequest,
       landing: "human" as const,
-      project_prompt: null,
     }),
     ...overrides,
   };

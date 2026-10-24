@@ -81,9 +81,10 @@ Required token: human JWT. Absent body. HTTP `200` returns
 | Option                      | Query        | Meaning                                                                                                                                       |
 | --------------------------- | ------------ | --------------------------------------------------------------------------------------------------------------------------------------------- |
 | `--view final`              | `view`       | Optional. The only value is `final`. The `prompt` answer holds `final` only and no `layers`.                                                  |
-| `--project <project-id>`    | `project_id` | Optional, and only together with `--binding-id`. Selects the repository binding of the working layer.                                         |
+| `--project <project-id>`    | `project_id` | Optional, and only together with `--binding-id`. Selects the repository binding whose binding prompt of the agent joins `final`.              |
 | `--binding-id <binding-id>` | `binding_id` | Optional, and only together with `--project`. A binding that is no repository binding of the project answers `404 project.binding.not_found`. |
 
+With `--project` and `--binding-id`, `layers` holds the system layer and the agent layer. `final` is the worker system prompt with the binding prompt of the agent before the framing.
 Without `--project` and `--binding-id`, the working layer is the workbench working layer of the agent.
 
 | Result field           | Type and meaning                                                                                                                                                                                                                                                                                                                                                                                                              |
@@ -135,15 +136,15 @@ reads a local `AGENTS.md`/`CLAUDE.md`. Each prompt source holds at most 32768 UT
 Each item holds `{ layer, enabled, sources }`, and `layer` is `system`, `agent` or `working`.
 Each source holds the following fields:
 
-| Source field | Type and meaning                                                                                                                                     |
-| ------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `source`     | The source name, for example `host_file`, `base`, `custom`, `agent_file`, `shipped` or `agents_md`.                                                  |
-| `origin`     | One of `binary`, `file` and `database`.                                                                                                              |
-| `path`       | The home-relative path of a `file` source, else `null`.                                                                                              |
-| `enabled`    | The boolean switch of the source.                                                                                                                    |
-| `state`      | One of `present`, `absent`, `invalid`, `off` and `deferred`. `deferred` marks an agent file of a workspace, which only the worker application reads. |
-| `digest`     | The digest of the text when `state` is `present`, else `null`.                                                                                       |
-| `text`       | The text of the source when `state` is `present`, else `null`.                                                                                       |
+| Source field | Type and meaning                                                                                    |
+| ------------ | --------------------------------------------------------------------------------------------------- |
+| `source`     | The source name, for example `host_file`, `base`, `custom`, `agent_file`, `shipped` or `agents_md`. |
+| `origin`     | One of `binary`, `file` and `database`.                                                             |
+| `path`       | The home-relative path of a `file` source, else `null`.                                             |
+| `enabled`    | The boolean switch of the source.                                                                   |
+| `state`      | One of `present`, `absent`, `invalid` and `off`.                                                    |
+| `digest`     | The digest of the text when `state` is `present`, else `null`.                                      |
+| `text`       | The text of the source when `state` is `present`, else `null`.                                      |
 
 `final` holds the system prompt that ends with the framing, then the message of every `present` source of the working layer, in reading order.
 With `--view final`, `layers` is absent.
@@ -173,7 +174,7 @@ An absent row answers every switch on, an empty custom text, `revision` 0 and, f
 kanthord agent prompt get --scope agent --agent swe@1
 ```
 
-The working switches of a repository binding belong to [Project](./project.md#binding-resource-and-complete-set-edits).
+The binding prompts of a repository binding belong to [Project](./project.md#repository-configuration--proposed-fields).
 
 ### `prompt put --scope <scope> [--agent <agent-name>] [--expected-revision <revision>] --file <path>`
 

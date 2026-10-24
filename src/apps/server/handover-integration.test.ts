@@ -51,7 +51,6 @@ import {
 import { HttpStatus } from "../../kernel/http.ts";
 import { SWE_AGENT_PROMPT } from "../../agent/prompt-assets.ts";
 import { framing, PromptConsumer } from "../../agent/prompt-render.ts";
-import { WORKING_LAYER_ALL_ON } from "../../worker/test-support.ts";
 import { createIdentity, createIdempotencyKey } from "../../kernel/identity.ts";
 import { canonicalJSON, digest } from "../../kernel/json.ts";
 import {
@@ -173,7 +172,7 @@ for (const adapter of ["direct", "http"] as const) {
     assert.equal(answer.agents[0]!.metadata, null);
     assert.ok(
       answer.agents[0]!.prompt.final.endsWith(
-        framing(SHIPPED_TEMPLATES, PromptConsumer.Worker),
+        `Instructions of repository repo:\n\nFollow repository conventions.\n\n${framing(SHIPPED_TEMPLATES, PromptConsumer.Worker)}`,
       ),
     );
     assert.ok(answer.agents[0]!.prompt.final.includes(SWE_AGENT_PROMPT));
@@ -187,8 +186,6 @@ for (const adapter of ["direct", "http"] as const) {
       resource_identity: "repository:github:owner/repo",
       ssh_public_key: h.sshPublicKey,
       strategy: { base_branch: "main" },
-      project_prompt: "Follow repository conventions.",
-      working_layer: WORKING_LAYER_ALL_ON,
       environment: null,
     });
     assert.deepEqual(
@@ -561,7 +558,7 @@ async function setup(
       ssh_credential: FAKE_SSH_CREDENTIAL,
       strategy: { base_branch: "main" },
       credential: "github",
-      project_prompt: "Follow repository conventions.",
+      prompts: { "swe@1": "Follow repository conventions." },
     },
   };
   const bindingSet = completed(

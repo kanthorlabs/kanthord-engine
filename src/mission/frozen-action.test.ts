@@ -50,7 +50,6 @@ test("an examine node with a repository binding requires no external action, and
         base_branch: BASE_BRANCH,
         action: RepositoryAction.PullRequest,
         landing: "human" as const,
-        project_prompt: null,
       },
     ],
     [
@@ -66,7 +65,6 @@ test("an examine node with a repository binding requires no external action, and
         base_branch: "develop",
         action: RepositoryAction.MergePush,
         landing: "human" as const,
-        project_prompt: null,
       },
     ],
   ]);
@@ -256,7 +254,6 @@ test("two bindings freeze one action each", (t) => {
           ? RepositoryAction.PullRequest
           : RepositoryAction.MergePush,
       landing: "human" as const,
-      project_prompt: null,
     }),
   };
   h.store.transaction((tx) => {
@@ -336,7 +333,6 @@ test("actionsOfRevision with a shared map answers the actions of a new map", (t)
           ? RepositoryAction.PullRequest
           : RepositoryAction.MergePush,
       landing: "human" as const,
-      project_prompt: null,
     }),
   };
   h.store.transaction((tx) => {

@@ -21,7 +21,6 @@ import {
   CooldownChangeKind,
   type AgentSelection,
   type ChainEntry,
-  PromptOrigin,
   PromptLayerKind,
   PromptScope,
   PromptSourceState,
@@ -63,8 +62,8 @@ import {
 const PROVIDER_CAPABILITY = "model-list read";
 const DEFAULT_REASONING = "off";
 const WORKING_PATH = "~/working/AGENTS.md";
-const CLAUDE_FILE = "CLAUDE.md";
 const PROJECT_TEXT = "project prompt text";
+const REVIEW_TEXT = "review prompt text";
 const WORKING_TEXT = "workbench directory text";
 const CUSTOM_TEXT = "custom workbench text";
 const AGENT = "swe@1";
@@ -117,7 +116,7 @@ const fakeCollaborations: Omit<Dependencies, "store" | "credentialHolds"> = {
   copyHeld: () => true,
   approvedModels: () => null,
   entriesOfAgent: () => [],
-  repositoryWorkingOf: () => null,
+  repositoryPromptsOf: () => null,
   providerHealthCheck: () => async () => ResourceStatus.Unknown,
   providerCapability: () => PROVIDER_CAPABILITY,
   toolDeclarations: async () => TOOLS,
@@ -304,43 +303,25 @@ test("agent read renders the framing and layer messages from the template files 
   });
 });
 
-test("agent read with a repository binding answers its working layer and the worker framing", async (t) => {
+test("agent read with a repository binding answers the binding prompt of the agent in the worker final", async (t) => {
   const root = temporary(t);
-  const allOn = {
-    agents_md: true,
-    agents_local_md: true,
-    claude_md: true,
-    claude_local_md: true,
-    project_prompt: true,
-  };
   const policies: Record<
     string,
-    {
-      project_id: string;
-      project_prompt: string | null;
-      working_layer: typeof allOn;
-    }
+    { project_id: string; prompts: Record<string, string> }
   > = {
     "binding-on": {
       project_id: "project-a",
-      project_prompt: PROJECT_TEXT,
-      working_layer: allOn,
+      prompts: { [AGENT]: PROJECT_TEXT, "re@1": REVIEW_TEXT },
     },
-    "binding-empty": {
+    "binding-blank": {
       project_id: "project-a",
-      project_prompt: "",
-      working_layer: allOn,
-    },
-    "binding-off": {
-      project_id: "project-a",
-      project_prompt: PROJECT_TEXT,
-      working_layer: { ...allOn, claude_md: false, project_prompt: false },
+      prompts: { [AGENT]: " \n" },
     },
   };
   const f = enablementFixture(t, {
     dataDirectory: root,
     hostHome: root,
-    repositoryWorkingOf: (_, id) =>
+    repositoryPromptsOf: (_, id) =>
       policies[id] ? { name: "repo", ...policies[id] } : null,
   });
   const operation = agentOperations.get;
@@ -355,50 +336,22 @@ test("agent read with a repository binding answers its working layer and the wor
         f.caller,
       ),
     );
-  const working = async (bindingId: string) => {
-    const answer = await read({
-      project_id: "project-a",
-      binding_id: bindingId,
-    });
-    return { answer, sources: answer.prompt.layers![2]!.sources };
-  };
-  const on = await working("binding-on");
+  const on = await read({ project_id: "project-a", binding_id: "binding-on" });
   assert.deepEqual(
-    on.sources.map(({ source }) => source),
-    [
-      "agents_md",
-      "agents_local_md",
-      "claude_md",
-      "claude_local_md",
-      "project_prompt",
-    ],
+    on.prompt.layers!.map(({ layer }) => layer),
+    ["system", "agent"],
   );
-  assert.deepEqual(
-    on.sources
-      .slice(0, 4)
-      .map(({ state, origin, path, text }) => [state, origin, path, text]),
-    ["AGENTS.md", "AGENTS.local.md", "CLAUDE.md", "CLAUDE.local.md"].map(
-      (name) => [PromptSourceState.Deferred, "file", name, null],
-    ),
-  );
-  const prompt = on.sources[4]!;
-  assert.equal(prompt.origin, PromptOrigin.Database);
-  assert.equal(prompt.state, PromptSourceState.Present);
-  assert.equal(prompt.text, PROJECT_TEXT);
   assert.ok(
-    on.answer.prompt.final.includes(
-      framing(SHIPPED_TEMPLATES, PromptConsumer.Worker),
+    on.prompt.final.endsWith(
+      `Instructions of repository repo:\n\n${PROJECT_TEXT}\n\n${framing(SHIPPED_TEMPLATES, PromptConsumer.Worker)}`,
     ),
   );
-  assert.ok(on.answer.prompt.final.includes(PROJECT_TEXT));
-  assert.ok(!on.answer.prompt.final.includes("deferred"));
-  const empty = await working("binding-empty");
-  assert.equal(empty.sources[4]!.state, PromptSourceState.Absent);
-  const off = await working("binding-off");
-  assert.equal(off.sources[2]!.state, PromptSourceState.Off);
-  assert.equal(off.sources[2]!.path, CLAUDE_FILE);
-  assert.equal(off.sources[4]!.state, PromptSourceState.Off);
-  assert.ok(!off.answer.prompt.final.includes(PROJECT_TEXT));
+  assert.ok(!on.prompt.final.includes(REVIEW_TEXT));
+  const blank = await read({
+    project_id: "project-a",
+    binding_id: "binding-blank",
+  });
+  assert.ok(!blank.prompt.final.includes("Instructions of repository"));
   await assert.rejects(
     read({ project_id: "project-b", binding_id: "binding-on" }),
     (error) =>

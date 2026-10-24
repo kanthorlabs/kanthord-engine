@@ -299,7 +299,6 @@ test("an approval that adds an unmatched pair is refused and writes nothing", as
     base_branch: "main",
     action: null,
     landing: "human",
-    project_prompt: null,
   });
   h.dependencies.schedulerMatch = {
     unmatchedClaims: (tx, projectId) =>

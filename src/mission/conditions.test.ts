@@ -140,7 +140,6 @@ test("open-attempt unresolved actions do not block readiness but stop continuati
       base_branch: "main",
       action: RepositoryAction.PullRequest,
       landing: "human" as const,
-      project_prompt: null,
     }),
   };
   h.store.transaction((tx) => {

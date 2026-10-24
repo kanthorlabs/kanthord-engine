@@ -35,6 +35,7 @@ import {
   agentModelSchema,
   agentCooldownSchema,
   effectiveConfigurationSchema,
+  PromptLayerKind,
   PromptView,
   type PromptLayerAnswer,
   type PromptTemplates,
@@ -85,10 +86,14 @@ import {
 import {
   resolveLayers,
   type PromptSettingsSet,
-  type RepositoryLayerSource,
   type ResolvedLayer,
 } from "./prompt-layers.ts";
-import { finalPrompt, PromptConsumer } from "./prompt-render.ts";
+import {
+  bindingPrompts,
+  finalPrompt,
+  PromptConsumer,
+  systemPrompt,
+} from "./prompt-render.ts";
 import { resolveTemplates, templateDirectory } from "./prompt-templates.ts";
 
 const NO_ITEMS = 0;
@@ -321,13 +326,10 @@ export interface Dependencies {
   credentialHolds: CredentialHolds;
   approvedModels: ApprovedModelsFn;
   entriesOfAgent: EntriesOfAgent;
-  repositoryWorkingOf: (
+  repositoryPromptsOf: (
     tx: Transaction,
     bindingId: string,
-  ) => Pick<
-    RepositoryPolicy,
-    "project_id" | "name" | "project_prompt" | "working_layer"
-  > | null;
+  ) => Pick<RepositoryPolicy, "project_id" | "name" | "prompts"> | null;
   providerHealthCheck: ProviderHealthCheckFn;
   providerCapability: ProviderCapabilityFn;
   toolDeclarations: ToolDeclarationsFn;
@@ -1112,12 +1114,12 @@ export class AgentComponent {
     return [...matches.values()];
   }
 
-  private repositoryWorking(
+  private repositoryPrompts(
     projectId: string,
     bindingId: string,
-  ): RepositoryLayerSource {
+  ): Pick<RepositoryPolicy, "name" | "prompts"> {
     const repository = this.dependencies.store.transaction((tx) =>
-      this.dependencies.repositoryWorkingOf(tx, bindingId),
+      this.dependencies.repositoryPromptsOf(tx, bindingId),
     );
     if (repository?.project_id !== projectId)
       throw new OperationError(
@@ -1129,11 +1131,7 @@ export class AgentComponent {
     return repository;
   }
 
-  composePrompt(
-    agentName: string,
-    context: Context,
-    repository: RepositoryLayerSource | null = null,
-  ): Promise<ResolvedLayer[]> {
+  composePrompt(agentName: string, context: Context): Promise<ResolvedLayer[]> {
     const agent = getAgentDeclaration(agentName);
     assert.ok(agent);
     const { config, dataDirectory, workbenchDirectory } = this.dependencies;
@@ -1155,7 +1153,6 @@ export class AgentComponent {
       dataDirectory,
       hostHome: this.dependencies.hostHome ?? homedir(),
       workingDirectory: workbenchDirectory(agentName),
-      repository,
       context,
     });
   }
@@ -1227,17 +1224,23 @@ export class AgentComponent {
         const repository =
           query.binding_id === undefined || query.project_id === undefined
             ? null
-            : this.repositoryWorking(query.project_id, query.binding_id);
-        const layers = await this.composePrompt(
+            : this.repositoryPrompts(query.project_id, query.binding_id);
+        const composed = await this.composePrompt(
           params.agent_name,
           caller.context,
-          repository,
         );
-        const final = finalPrompt(
-          layers,
-          repository ? PromptConsumer.Worker : PromptConsumer.Workbench,
-          await this.promptTemplates(caller.context),
-        );
+        const templates = await this.promptTemplates(caller.context);
+        const layers = repository
+          ? composed.filter((layer) => layer.layer !== PromptLayerKind.Working)
+          : composed;
+        const final = repository
+          ? systemPrompt(
+              layers,
+              PromptConsumer.Worker,
+              templates,
+              bindingPrompts([repository], params.agent_name),
+            )
+          : finalPrompt(layers, PromptConsumer.Workbench, templates);
         return caller.commit((tx) => {
           const row = getEnablement(tx, params.agent_name);
           const view = this.agentView(

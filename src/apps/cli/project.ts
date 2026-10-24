@@ -146,15 +146,6 @@ const BINDING_VERIFY_TOKEN_REQUIRED =
   "cli.project.binding.verify.token_required";
 const BINDING_VERIFY_INDETERMINATE = "cli.project.binding.verify.indeterminate";
 const VERIFY = "verify";
-const INSTRUCTION_FILES = "instruction-files";
-const BINDING_INSTRUCTION_FILES_INVALID_PROJECT_ID =
-  "cli.project.binding.instruction_files.invalid_project_id";
-const BINDING_INSTRUCTION_FILES_INVALID_BINDING_ID =
-  "cli.project.binding.instruction_files.invalid_binding_id";
-const BINDING_INSTRUCTION_FILES_TOKEN_REQUIRED =
-  "cli.project.binding.instruction_files.token_required";
-const BINDING_INSTRUCTION_FILES_INDETERMINATE =
-  "cli.project.binding.instruction_files.indeterminate";
 const CHECK = "check";
 const BINDING_CHECK_INVALID_PROJECT_ID =
   "cli.project.binding.check.invalid_project_id";
@@ -497,27 +488,6 @@ async function bindingVerify(
   });
   process.stdout.write(
     `${JSON.stringify(handleReadResult(result, BINDING_VERIFY_INDETERMINATE))}\n`,
-  );
-}
-
-async function bindingInstructionFiles(
-  projectId: string,
-  bindingId: string,
-  command: Command,
-): Promise<void> {
-  validateProjectId(projectId, BINDING_INSTRUCTION_FILES_INVALID_PROJECT_ID);
-  validateBindingId(bindingId, BINDING_INSTRUCTION_FILES_INVALID_BINDING_ID);
-  const { endpoint, token } = resolveClient(command.optsWithGlobals());
-  requireToken(token, BINDING_INSTRUCTION_FILES_TOKEN_REQUIRED);
-  const result = await httpClient(projectOperations, endpoint, token)[
-    "binding.instruction_files.get"
-  ]({
-    params: { project_id: projectId, binding_id: bindingId },
-    query: {},
-    body: null,
-  });
-  process.stdout.write(
-    `${JSON.stringify(handleReadResult(result, BINDING_INSTRUCTION_FILES_INDETERMINATE))}\n`,
   );
 }
 
@@ -1174,15 +1144,6 @@ function addBindingCommands(project: Command): void {
     .action(
       (projectId: string, bindingId: string, _options, command: Command) =>
         bindingVerify(projectId, bindingId, command),
-    );
-  binding
-    .command(INSTRUCTION_FILES)
-    .description("Read the instruction files of a repository binding as JSON")
-    .argument("<project-id>", "Project ID")
-    .argument("<binding-id>", "Binding ID")
-    .action(
-      (projectId: string, bindingId: string, _options, command: Command) =>
-        bindingInstructionFiles(projectId, bindingId, command),
     );
   addFileBodyHelp(
     binding
