@@ -43,7 +43,17 @@ import { testHumanIdentity } from "../../kernel/test-identity.ts";
 import type { Material } from "../../custody/contract.ts";
 import pino from "pino";
 import { ulid } from "ulid";
-import { domainHealth, fakeGitHub, gatewayFixture } from "./test-support.ts";
+import {
+  domainHealth,
+  fakeGitHub,
+  gatewayFixture,
+  humanCaller,
+} from "./test-support.ts";
+import { fakeContainerHost, fakeRepositoryFiles } from "./container-fakes.ts";
+import { workerAcceptance, WORKER_DEFAULTS } from "./worker-acceptance.ts";
+import type { EnvironmentRuntime } from "../../project/environment-state.ts";
+import { packageVersion } from "../../kernel/version.ts";
+import type { SlotDriver } from "./slot-driver.ts";
 import { llmOperations } from "../../llm/contract.ts";
 import { agentOperations } from "../../agent/contract.ts";
 import { gatewayOperations, OWNER_INTAKE } from "../../gateway/contract.ts";
@@ -1195,3 +1205,188 @@ test("the shutdown watchdog holds the event loop and exits the process when clea
   assert.doesNotMatch(result.stderr, /unsettled top-level await/);
   assert.ok(Date.now() - started >= SHUTDOWN_DEADLINE_MS);
 });
+
+const CONTAINER_BINDING = "boxed";
+const CONTAINER_IMAGE = "kanthord-test";
+const STORED_BASE_IMAGE = "registry.example/base:1";
+const CONTAINER_TEST_TIMEOUT_MS = 120000;
+const NO_ITEMS = 0;
+const Verb = {
+  Build: "build",
+  Image: "image",
+  Inspect: "inspect",
+  Run: "run",
+} as const;
+
+async function containerSetup(
+  t: TestContext,
+  options: Parameters<typeof gatewayFixture>[1] = {},
+) {
+  const fake = fakeContainerHost(t);
+  const setup = await workerAcceptance(t, true, {
+    containerImage: CONTAINER_IMAGE,
+    fixtureOptions: {
+      containerRuntimeHost: fake.host,
+      environmentDevcontainerCli: () => fake.cli,
+      repositoryFiles: fakeRepositoryFiles(),
+      ...options,
+    },
+  });
+  const call = humanCaller(setup.fixture);
+  const params = { project_id: setup.project_id };
+  const writeContainer = async (
+    instanceCount: number,
+    environment?: { image: string },
+  ) => {
+    const current = await call(projectOperations["bindingSet.get"], {
+      params,
+      query: {},
+      body: null,
+    });
+    const repository = current.bindings.repo;
+    assert.ok(repository);
+    return call(projectOperations["bindingSet.write"], {
+      params,
+      query: {},
+      body: {
+        version: current.version,
+        bindings: {
+          ...current.bindings,
+          ...(environment === undefined
+            ? {}
+            : {
+                repo: {
+                  ...repository,
+                  config: { ...repository.config, environment },
+                },
+              }),
+          [CONTAINER_BINDING]: {
+            kind: "worker",
+            config: {
+              worker: "coder@1",
+              instance_count: instanceCount,
+              placement: "container",
+              entries: [{ agent: "swe@1", ...WORKER_DEFAULTS }],
+            },
+          },
+        } as never,
+      },
+    });
+  };
+  return { fake, setup, writeContainer };
+}
+
+test(
+  "the composed server takes a fake environment runtime, starts, and stops with no active run left",
+  { timeout: CONTAINER_TEST_TIMEOUT_MS },
+  async (t) => {
+    const builds: AbortSignal[] = [];
+    const environmentRuntime: EnvironmentRuntime = {
+      runtimeName: "podman",
+      imageId: async (reference) => `sha256:${reference}`,
+      pullImage: async () => {},
+      imageExists: async () => false,
+      build: (_input, signal) => {
+        builds.push(signal);
+        return new Promise((_resolve, reject) =>
+          signal.addEventListener("abort", () => reject(signal.reason), {
+            once: true,
+          }),
+        );
+      },
+      prove: async () => [],
+      proveOnHost: async () => [],
+      tagProved: async () => {},
+      removeTags: async () => {},
+      collect: async () => {},
+      removeStaleRuns: async () => {},
+    };
+    const { setup, writeContainer } = await containerSetup(t, {
+      environmentRuntime,
+    });
+    await writeContainer(NO_ITEMS, { image: STORED_BASE_IMAGE });
+    await until(
+      () => builds.length,
+      (count) => count > NO_ITEMS,
+      t.signal,
+    );
+    const { project } = setup.fixture;
+    assert.ok(
+      project
+        .environmentStates(setup.project_id)
+        .some((state) => state.run_started_at !== null),
+    );
+    assert.equal(await project.stop(), null);
+    assert.ok(builds.every((signal) => signal.aborted));
+    assert.ok(
+      project
+        .environmentStates(setup.project_id)
+        .every((state) => state.run_started_at === null),
+    );
+  },
+);
+
+test(
+  "a binding-set write of a stored environment at the container placement builds the layer through the fake host",
+  { timeout: CONTAINER_TEST_TIMEOUT_MS },
+  async (t) => {
+    const { fake, setup, writeContainer } = await containerSetup(t);
+    await writeContainer(NO_ITEMS, { image: STORED_BASE_IMAGE });
+    const builds = await until(
+      () => fake.commands().filter((command) => command[0] === Verb.Build),
+      (found) => found.length > NO_ITEMS,
+      t.signal,
+    );
+    const command = builds[NO_ITEMS]!;
+    const staging = command[command.indexOf("--tag") + 1]!;
+    assert.match(staging, /-unchecked$/);
+    const base = fake.calls
+      .filter((call) => call[0] === Verb.Image && call[1] === Verb.Inspect)
+      .map((call) => call.at(-1)!)
+      .find((reference) => reference.endsWith("-base"));
+    assert.ok(base);
+    assert.equal(fake.containerfile(staging).split("\n")[1], `FROM ${base}`);
+    await until(
+      () => setup.fixture.project.environmentStates(setup.project_id),
+      (states) => states.every((state) => state.run_started_at === null),
+      t.signal,
+    );
+  },
+);
+
+test(
+  "the container slot wrapper records the start of a slot and the image of the real driver",
+  { timeout: CONTAINER_TEST_TIMEOUT_MS },
+  async (t) => {
+    const starts: string[] = [];
+    const holder: { fake?: ReturnType<typeof fakeContainerHost> } = {};
+    const wrap = (driver: SlotDriver): SlotDriver => ({
+      placement: driver.placement,
+      check: () => driver.check(),
+      prepare: () => driver.prepare(),
+      removeVolume: (clientId) => driver.removeVolume(clientId),
+      sweepVolumes: (live) => driver.sweepVolumes(live),
+      launch: (launch) => {
+        assert.ok(holder.fake);
+        starts.push(launch.slot.client_id);
+        return driver.launch({
+          ...launch,
+          environment: holder.fake.host.environment,
+        });
+      },
+    });
+    const container = await containerSetup(t, { containerSlotDriver: wrap });
+    holder.fake = container.fake;
+    container.setup.fixture.worker.startPool();
+    await container.writeContainer(1);
+    const runs = await until(
+      () =>
+        container.fake.commands().filter((command) => command[0] === Verb.Run),
+      (found) => found.length > NO_ITEMS,
+      t.signal,
+    );
+    const images = runs.map((command) => command[command.indexOf("--") - 1]);
+    assert.ok(starts.length > NO_ITEMS);
+    assert.equal(images[NO_ITEMS], `${CONTAINER_IMAGE}:${packageVersion()}`);
+  },
+);

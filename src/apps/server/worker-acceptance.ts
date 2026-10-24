@@ -34,10 +34,12 @@ export async function workerAcceptance(
     slotLimit?: number;
     containerImage?: string;
     fakeSlots?: boolean;
+    fixtureOptions?: Parameters<typeof gatewayFixture>[1];
   } = {},
 ) {
   const s3 = host ? await fakeS3(t) : undefined;
   const fixture = await gatewayFixture(t, {
+    ...options.fixtureOptions,
     stateDirectory: options.stateDirectory,
     serverSlotLimit: options.slotLimit,
     containerImage: options.containerImage,

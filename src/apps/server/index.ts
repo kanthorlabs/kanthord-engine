@@ -47,6 +47,7 @@ import {
   projectOperations,
   type ProjectBindings,
   type RepositoryConnector,
+  type RepositoryFiles,
 } from "../../project/contract.ts";
 import type {
   PoolPlacement,
@@ -111,7 +112,14 @@ import { installPiTools } from "../../agent/pi-tools.ts";
 import { ThreadDriver } from "./thread-driver.ts";
 import { ContainerDriver } from "./container-driver.ts";
 import { EnvironmentImages } from "./environment-image.ts";
-import { containerOwner, systemRuntimeHost } from "./container-runtime.ts";
+import { HostProofs } from "./environment-host-proof.ts";
+import type { EnvironmentRuntime } from "../../project/environment-state.ts";
+import { COMMAND_LIMIT_MS } from "../../worker/unit/budget.ts";
+import {
+  containerOwner,
+  systemRuntimeHost,
+  type RuntimeHost,
+} from "./container-runtime.ts";
 import { packageVersion } from "../../kernel/version.ts";
 import { WorkerPool } from "./worker-pool.ts";
 import { instanceIssuer } from "./instance-issuer.ts";
@@ -219,6 +227,11 @@ export function composeServices(options: {
   inventoryOverrides?: Partial<ResourceInventories>;
   intake?: { pendingEventLimit?: number; pollIntervalMs?: number };
   serverSlotDriver?: SlotDriver;
+  environmentRuntime?: EnvironmentRuntime;
+  containerRuntimeHost?: RuntimeHost;
+  environmentDevcontainerCli?: () => string;
+  containerSlotDriver?: (driver: SlotDriver) => SlotDriver;
+  repositoryFiles?: RepositoryFiles;
 }) {
   const repoConnector =
     options.repositoryConnector ??
@@ -272,7 +285,8 @@ export function composeServices(options: {
   });
   const threadDriver = new ThreadDriver();
   const containerImage = `${options.config.worker.container_image}:${packageVersion()}`;
-  const containerHost = systemRuntimeHost(process.env);
+  const containerHost =
+    options.containerRuntimeHost ?? systemRuntimeHost(process.env);
   const environmentImages = new EnvironmentImages({
     host: containerHost,
     owner: containerOwner(options.config.master_key),
@@ -280,6 +294,7 @@ export function composeServices(options: {
     version: packageVersion(),
     stateDirectory: options.stateDirectory,
     fallbackImage: containerImage,
+    devcontainerCli: options.environmentDevcontainerCli,
     slotEnvironment: (projectId, context) =>
       project.slotEnvironment(projectId, context),
     exportRepository: (bindingId, commit, directory, context) =>
@@ -291,11 +306,38 @@ export function composeServices(options: {
     host: containerHost,
     imageFor: (runtime, slot) => environmentImages.imageFor(runtime, slot),
   });
+  const hostProofs = new HostProofs({
+    stateDirectory: options.stateDirectory,
+    source: process.env,
+    commandLimitMs: COMMAND_LIMIT_MS,
+    exportRepository: (bindingId, commit, directory, context) =>
+      project.exportRepository(bindingId, commit, directory, context),
+  });
+  const environmentRuntime: EnvironmentRuntime = options.environmentRuntime ?? {
+    get runtimeName() {
+      return environmentImages.runtimeName;
+    },
+    imageId: (reference, signal) =>
+      environmentImages.imageId(reference, signal),
+    pullImage: (reference, signal) =>
+      environmentImages.pullImage(reference, signal),
+    imageExists: (tag) => environmentImages.imageExists(tag),
+    build: (input, signal) => environmentImages.build(input, signal),
+    prove: (input, signal) => environmentImages.prove(input, signal),
+    proveOnHost: (input, signal) => hostProofs.proveOnHost(input, signal),
+    tagProved: (tag) => environmentImages.tagProved(tag),
+    removeTags: (tags) => environmentImages.removeTags(tags),
+    collect: (identityPath, keepDigest) =>
+      environmentImages.collect(identityPath, keepDigest),
+    removeStaleRuns: () => environmentImages.removeStaleRuns(),
+  };
+  const containerSlotDriver =
+    options.containerSlotDriver?.(containerDriver) ?? containerDriver;
   const serverSlotDriver = options.serverSlotDriver ?? threadDriver;
   const workerPool = new WorkerPool({
     drivers: new Map<PoolPlacement, SlotDriver>([
       [serverSlotDriver.placement, serverSlotDriver],
-      [containerDriver.placement, containerDriver],
+      [containerDriver.placement, containerSlotDriver],
     ]),
     invocation,
     masterKey: options.config.master_key,
@@ -786,7 +828,7 @@ export function composeServices(options: {
       worker.validateEntry(tx, name, entry, holders),
     custodySuitability: (tx, req) => custody.custodySuitability(tx, req),
     repositoryConnector: repoConnector,
-    repositoryFiles,
+    repositoryFiles: options.repositoryFiles ?? repositoryFiles,
     verifyRepositoryCredential: (name, context) =>
       repositoryCredentials.verifyCredential(name, context),
     identity: mintServiceIdentity(PROJECT_SERVICE_NAME),
@@ -800,6 +842,11 @@ export function composeServices(options: {
     workerAgentsOf: (name) => worker.workerAgentsOf(name),
     workerAgentView: (tx, w, a, entry, scope) =>
       worker.workerAgentView(tx, w, a, entry, scope),
+    environmentRuntime,
+    slotImage: containerImage,
+    version: packageVersion(),
+    environmentReady: (projectId) => worker.bindingsChanged(projectId),
+    logger: options.logger,
     health: options.health,
     bindings: options.bindings,
   });
@@ -1000,6 +1047,7 @@ export class Server implements Service {
   private runs: Promise<Error | null>[] = [];
   private invocation?: ReturnType<typeof createInvocation>;
   private environmentImages?: EnvironmentImages;
+  private project?: ProjectService;
   private quiesceTask?: Promise<Error | null>;
   private startTask?: Promise<Error | null>;
   private stopTask?: Promise<Error | null>;
@@ -1077,6 +1125,7 @@ export class Server implements Service {
       this.worker = worker;
       this.invocation = invocation;
       this.environmentImages = environmentImages;
+      this.project = project;
       this.releases.push(() => invocation.stop());
       const services = [
         tracking,
@@ -1149,6 +1198,7 @@ export class Server implements Service {
   stop(): Promise<Error | null> {
     if (this.stopTask) return this.stopTask;
     this.shutdown.cancel();
+    this.project?.cancelEnvironmentRuns();
     this.environmentImages?.stop();
     this.stopTask = lifecycle(async () => {
       const watchdog = setTimeout(() => process.exit(1), 10000);

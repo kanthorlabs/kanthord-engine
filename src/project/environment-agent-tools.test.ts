@@ -30,6 +30,7 @@ import type {
 } from "./environment-probe-contract.ts";
 import { projectMigrations } from "./migrations.ts";
 import { ProjectService } from "./service.ts";
+import { inertEnvironmentRuntime } from "./test-support.ts";
 import {
   insertProject,
   readCurrentBindingSet,
@@ -245,6 +246,10 @@ function storeFixture(t: TestContext, beforeWrite: () => void = () => {}) {
     endRegistrations: () => {},
     bindingsChanged: () => {},
     wakeup: { wake: () => {} },
+    environmentRuntime: inertEnvironmentRuntime(),
+    slotImage: "kanthord:test",
+    version: "0.0.0",
+    environmentReady: async () => {},
   });
   t.after(() => service.stop());
   const registry = new OperationRegistry();

@@ -1,7 +1,9 @@
 import type { Environment } from "../kernel/devcontainer.ts";
 import { addAbortListener } from "node:events";
 import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
 import { join } from "node:path";
+import pino, { type Logger } from "pino";
 import {
   isHumanIdentity,
   IdentityKind,
@@ -17,7 +19,7 @@ import {
   type Context,
   reasonOf,
 } from "../kernel/context.ts";
-import { Diagnostic, OperationError } from "../kernel/errors.ts";
+import { Diagnostic, OperationError, asError } from "../kernel/errors.ts";
 import { ensureDirectory } from "../kernel/files.ts";
 import { homeRelative } from "../kernel/xdg.ts";
 import { canonicalJSON } from "../kernel/json.ts";
@@ -143,6 +145,7 @@ import {
   readCurrentBindingSet,
   readCurrentBindings,
   readCurrentRepositories,
+  readProjectIds,
   readCurrentBindingByName,
   readCredentialBindings,
   hasBindingTombstone,
@@ -152,6 +155,16 @@ import {
   type StoredProject,
 } from "./store.ts";
 import { ProjectEnvironments, refuseEnvironment } from "./environment.ts";
+import {
+  ENVIRONMENT_DIRECTORY,
+  ProofFiles,
+  type EnvironmentRuntime,
+} from "./environment-state.ts";
+import {
+  Onboarding,
+  type BindingFacts,
+  type EnvironmentFailedInput,
+} from "./onboarding.ts";
 
 const SSH_UNREACHABLE_STATUS = 422;
 const PROJECTS_DIRECTORY = "projects";
@@ -560,6 +573,15 @@ export interface Dependencies {
   placementStatus: PlacementStatusOf;
   instanceOf: InstanceOf;
   wakeup: SchedulerWakeup;
+  environmentRuntime: EnvironmentRuntime;
+  slotImage: string;
+  version: string;
+  environmentReady(
+    projectId: string,
+    resourceIdentity: string,
+    tag: string,
+  ): void | Promise<void>;
+  logger?: Logger;
   health?: HealthRegistry;
   bindings?: ProjectBindings;
 }
@@ -610,6 +632,7 @@ export class ProjectService implements Service, ProjectBindings {
   private readonly instanceOf: InstanceOf;
   private readonly wakeup: SchedulerWakeup;
   private readonly environments: ProjectEnvironments;
+  private readonly onboarding: Onboarding;
   constructor(dependencies: Dependencies) {
     this.bindings = dependencies.bindings;
     this.operationalStore = dependencies.operationalStore;
@@ -640,6 +663,25 @@ export class ProjectService implements Service, ProjectBindings {
       sshAccess: (platform, release) => this.sshAccess(platform, release),
       writeBindings: (projectId, body, caller) =>
         this.writeBindings(projectId, body, caller),
+    });
+    this.onboarding = new Onboarding({
+      bindingsOf: (projectId) => this.bindingFactsOf(projectId),
+      workerEnvironmentOf: (projectId, resourceIdentity) =>
+        this.workerEnvironmentOf(projectId, resourceIdentity),
+      projectIds: () =>
+        this.operationalStore.transaction((tx) => readProjectIds(tx)),
+      resolveGroup: (bindingId, target, context) =>
+        this.environments.resolveGroup(bindingId, target, context),
+      runtime: dependencies.environmentRuntime,
+      proofs: new ProofFiles(join(this.stateDirectory, ENVIRONMENT_DIRECTORY)),
+      slotImage: dependencies.slotImage,
+      version: dependencies.version,
+      wake: (projectId) => this.wakeup.wake(projectId),
+      environmentReady: async (projectId, resourceIdentity, tag) =>
+        dependencies.environmentReady(projectId, resourceIdentity, tag),
+      logger: dependencies.logger ?? pino({ level: "silent" }),
+      now: () => Date.now(),
+      runId: () => randomUUID(),
     });
     dependencies.health?.register("project", () => this.healthcheck());
   }
@@ -1117,6 +1159,7 @@ export class ProjectService implements Service, ProjectBindings {
         changes: result.changes,
       };
     });
+    this.onboarding.bindingsChanged(projectId);
     this.bindingsChanged(projectId);
     this.wakeup.wake(projectId);
     return answer;
@@ -1556,6 +1599,78 @@ export class ProjectService implements Service, ProjectBindings {
   ): Promise<SlotEnvironment | null> {
     return this.environments.slotEnvironment(projectId, context);
   }
+  private bindingFactsOf(projectId: string): BindingFacts {
+    const bindings = this.operationalStore.transaction((tx) =>
+      Array.from(readCurrentBindingSet(tx, projectId).values()),
+    );
+    return {
+      repositories: bindings
+        .filter(
+          (binding) =>
+            kindOf(binding.resource_identity) === BindingKind.Repository,
+        )
+        .map((binding) => ({
+          binding_id: binding.id,
+          binding_name: binding.name,
+          resource_identity: binding.resource_identity,
+        })),
+      workers: bindings
+        .filter(
+          (binding) => kindOf(binding.resource_identity) === BindingKind.Worker,
+        )
+        .map((binding) => {
+          const config = workerConfigSchema.parse(binding.config);
+          return {
+            placement: config.placement ?? null,
+            external: config.placement === undefined,
+            environment: config.environment ?? null,
+          };
+        }),
+    };
+  }
+  private workerEnvironmentOf(
+    projectId: string,
+    resourceIdentity: string,
+  ): string | null {
+    const binding = this.operationalStore.transaction((tx) =>
+      Array.from(readCurrentBindingSet(tx, projectId).values()).find(
+        (entry) => entry.resource_identity === resourceIdentity,
+      ),
+    );
+    if (binding === undefined) return null;
+    return workerConfigSchema.parse(binding.config).environment ?? null;
+  }
+  environmentsClaimable(
+    projectId: string,
+    resourceIdentities: readonly string[],
+  ): boolean {
+    return this.onboarding.environmentsClaimable(projectId, resourceIdentities);
+  }
+  slotImage(
+    projectId: string,
+    workerResourceIdentity: string,
+    signal: AbortSignal,
+  ): Promise<string> {
+    return this.onboarding.slotImage(projectId, workerResourceIdentity, signal);
+  }
+  environmentClaimed(projectId: string, resourceIdentity: string): void {
+    this.onboarding.environmentClaimed(projectId, resourceIdentity);
+  }
+  environmentDigestOf(
+    projectId: string,
+    resourceIdentity: string,
+  ): string | null {
+    return this.onboarding.environmentDigestOf(projectId, resourceIdentity);
+  }
+  environmentFailed(input: EnvironmentFailedInput): void {
+    this.onboarding.environmentFailed(input);
+  }
+  environmentStates(projectId: string) {
+    return this.onboarding.states(projectId);
+  }
+  rebuildEnvironment(projectId: string, bindingId: string) {
+    return this.onboarding.rebuild(projectId, bindingId);
+  }
   exportRepository(
     bindingId: string,
     commit: string,
@@ -1691,6 +1806,26 @@ export class ProjectService implements Service, ProjectBindings {
   private stopTask?: Promise<Error | null>;
   private readonly quiesceTask = Promise.resolve(null);
   private started = false;
+  private async startOnboarding(): Promise<Error | null> {
+    try {
+      ensureDirectory(join(this.stateDirectory, ENVIRONMENT_DIRECTORY));
+      await this.onboarding.start();
+      return null;
+    } catch (error) {
+      return asError(error);
+    }
+  }
+  private async stopOnboarding(): Promise<Error | null> {
+    try {
+      await this.onboarding.stop();
+      return null;
+    } catch (error) {
+      return asError(error);
+    }
+  }
+  cancelEnvironmentRuns(): void {
+    this.onboarding.cancel();
+  }
   start(): Promise<Error | null> {
     if (this.shutdown.signal.aborted)
       return Promise.resolve(
@@ -1699,7 +1834,7 @@ export class ProjectService implements Service, ProjectBindings {
           "project: a stopped service cannot start again.",
         ),
       );
-    this.startTask ??= Promise.resolve(null);
+    this.startTask ??= this.startOnboarding();
     this.started = true;
     return this.startTask;
   }
@@ -1709,7 +1844,7 @@ export class ProjectService implements Service, ProjectBindings {
   stop(): Promise<Error | null> {
     this.shutdown.cancel();
     this.started = false;
-    this.stopTask ??= Promise.resolve(null);
+    this.stopTask ??= this.stopOnboarding();
     return this.stopTask;
   }
   async run(context: Context = background): Promise<Error | null> {

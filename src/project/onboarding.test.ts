@@ -87,6 +87,10 @@ const UNTIL_ATTEMPTS = 1000;
 const SETUP_EXIT = 3;
 const COMMAND_ABSENT_EXIT = 127;
 const RUN_DEADLINE_MS = 1800000;
+const PENDING_RETRY_MS = 60000;
+const REMOVE_STALE_RUNS = "removeStaleRuns";
+const RENAMED_BINDING_ID = "binding_app_2";
+const STRAY_IDENTITY = "repository:github:acme/gone";
 const RUN_STARTED = "project.onboarding.run_started";
 const RUN_ENDED = "project.onboarding.run_ended";
 const DOCUMENT: Environment = {
@@ -236,6 +240,9 @@ class Harness {
       },
       collect: async (path: string, keep: string | null) => {
         this.events.push(`collect ${path} ${keep}`);
+      },
+      removeStaleRuns: async () => {
+        this.events.push("removeStaleRuns");
       },
     } as unknown as EnvironmentRuntime;
     this.onboarding = new Onboarding({
@@ -1477,4 +1484,158 @@ test("rebuild answers 404 for an unknown, a foreign, a removed and a worker bind
   );
   h.bindings = facts([DOCS], []);
   await assert.rejects(h.onboarding.rebuild(PROJECT, APP.binding_id), notFound);
+});
+
+test("bindingsChanged sets a changed record to pending before it returns, computes again and drops a removed binding", async (t) => {
+  const h = new Harness(t);
+  h.resolution = NOTHING;
+  await h.compute();
+  assert.equal(h.state().status, EnvironmentStatus.None);
+  h.bindings = facts(
+    [{ ...APP, binding_id: RENAMED_BINDING_ID }],
+    [container("app")],
+  );
+  h.onboarding.bindingsChanged(PROJECT);
+  assert.equal(h.state().status, EnvironmentStatus.Pending);
+  assert.equal(h.state().binding_id, RENAMED_BINDING_ID);
+  await h.until(() => h.state().status === EnvironmentStatus.None);
+  assert.deepEqual(
+    h.resolveCalls.map((call) => call.bindingId),
+    [APP.binding_id, RENAMED_BINDING_ID],
+  );
+  h.bindings = facts([], []);
+  h.onboarding.bindingsChanged(PROJECT);
+  assert.deepEqual(h.onboarding.states(PROJECT), []);
+});
+
+test("bindingsChanged keeps the record of an unchanged binding and computes it again", async (t) => {
+  const h = new Harness(t);
+  h.resolution = NOTHING;
+  await h.compute();
+  h.onboarding.bindingsChanged(PROJECT);
+  assert.equal(h.state().status, EnvironmentStatus.None);
+  await h.until(() => h.resolveCalls.length === TWO_CALLS);
+});
+
+test("environmentsClaimable answers false for a changed ready binding until its computation ends", async (t) => {
+  const h = new Harness(t);
+  h.existing.add(h.provedOf(h.digest()));
+  await h.compute();
+  const claimable = () =>
+    h.onboarding.environmentsClaimable(PROJECT, [APP.resource_identity]);
+  assert.equal(claimable(), true);
+  h.bindings = facts(
+    [{ ...APP, binding_id: RENAMED_BINDING_ID }],
+    [container("app")],
+  );
+  const gate = new Deferred();
+  h.resolveGate = gate;
+  h.onboarding.bindingsChanged(PROJECT);
+  assert.equal(claimable(), false);
+  await turn();
+  assert.equal(claimable(), false);
+  gate.release();
+  await h.until(claimable);
+  assert.equal(h.state().status, EnvironmentStatus.Ready);
+});
+
+test("start removes the stale runs, computes each binding and collects each path that no binding holds", async (t) => {
+  const h = new Harness(t);
+  h.resolution = NOTHING;
+  const stray = environmentPath(STRAY_IDENTITY);
+  h.proofs.write(stray, proofFile("old"));
+  h.writeProof(proofFile(h.digest()));
+  await h.onboarding.start();
+  assert.equal(h.events.at(NO_CALLS), REMOVE_STALE_RUNS);
+  assert.deepEqual(
+    h.events.filter((event) => event.startsWith("collect")),
+    [`collect ${stray} null`],
+  );
+  assert.deepEqual(h.proofs.paths(), [h.pathOf()]);
+  assert.deepEqual(
+    h.resolveCalls.map((call) => call.bindingId),
+    [APP.binding_id],
+  );
+  await h.until(() => h.onboarding.states(PROJECT).length === ONE_CALL);
+});
+
+test("environmentClaimed returns at once, starts a run for a changed digest and none for an equal digest", async (t) => {
+  const h = new Harness(t);
+  h.existing.add(h.provedOf(h.digest()));
+  await h.compute();
+  assert.equal(h.resolveCalls.length, ONE_CALL);
+  assert.equal(
+    h.onboarding.environmentClaimed(PROJECT, APP.resource_identity),
+    undefined,
+  );
+  await h.until(() => h.resolveCalls.length === TWO_CALLS);
+  for (let attempt = 0; attempt < TWO_CALLS * TWO_CALLS; attempt++)
+    await turn();
+  assert.equal(h.events.includes("build"), false);
+  assert.equal(h.state().status, EnvironmentStatus.Ready);
+  h.resolution = {
+    ...REPOSITORY,
+    document: { ...DOCUMENT, postCreateCommand: "make other" },
+  };
+  h.onboarding.environmentClaimed(PROJECT, APP.resource_identity);
+  await h.until(() => h.events.includes("build"));
+  assert.equal(h.state().status, EnvironmentStatus.Building);
+});
+
+test("a pending group computes again every 60 seconds and a ready group does not", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const pending = new Harness(t);
+  pending.resolution = new Error(UNREACHABLE);
+  await pending.compute();
+  assert.equal(pending.resolveCalls.length, ONE_CALL);
+  t.mock.timers.tick(PENDING_RETRY_MS - ONE_CALL);
+  await turn();
+  assert.equal(pending.resolveCalls.length, ONE_CALL);
+  t.mock.timers.tick(ONE_CALL);
+  await pending.until(() => pending.resolveCalls.length === TWO_CALLS);
+  await turn();
+  t.mock.timers.tick(PENDING_RETRY_MS);
+  await pending.until(
+    () => pending.resolveCalls.length === TWO_CALLS + ONE_CALL,
+  );
+
+  const ready = new Harness(t);
+  ready.existing.add(ready.provedOf(ready.digest()));
+  await ready.compute();
+  t.mock.timers.tick(PENDING_RETRY_MS * TWO_CALLS);
+  await turn();
+  assert.equal(ready.resolveCalls.length, ONE_CALL);
+});
+
+test("stop aborts the active run, clears the timer and rejects each slotImage wait", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const waiting = new Harness(t);
+  await waiting.compute();
+  await waiting.until(() => waiting.events.includes("build"));
+  const wait = assert.rejects(
+    waiting.onboarding.slotImage(
+      PROJECT,
+      WORKER_IDENTITY,
+      new AbortController().signal,
+    ),
+  );
+  await waiting.onboarding.stop();
+  await wait;
+  assert.deepEqual(waiting.proofs.digests(waiting.pathOf()), []);
+  assert.equal(waiting.state().run_started_at, null);
+  await assert.rejects(
+    waiting.onboarding.slotImage(
+      PROJECT,
+      WORKER_IDENTITY,
+      new AbortController().signal,
+    ),
+  );
+
+  const pending = new Harness(t);
+  pending.resolution = new Error(UNREACHABLE);
+  await pending.compute();
+  await pending.onboarding.stop();
+  t.mock.timers.tick(PENDING_RETRY_MS * TWO_CALLS);
+  await turn();
+  assert.equal(pending.resolveCalls.length, ONE_CALL);
 });
