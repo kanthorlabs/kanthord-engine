@@ -905,13 +905,11 @@ function batchInput(objects: readonly string[]): string {
   return objects.map((object) => object + BATCH_LINE_END).join(EMPTY_STRING);
 }
 
-async function readSymlinkTargets(
+async function fetchBlobs(
   runInput: GitInputRun,
-  tree: RepositoryTree,
   objects: readonly string[],
 ): Promise<void> {
   assert.ok(objects.length);
-  assert.ok(objects.every((object) => !tree.targets.has(object)));
   await runInput(
     [
       "fetch",
@@ -924,6 +922,16 @@ async function readSymlinkTargets(
     batchInput(objects),
     GIT_MESSAGE_BYTES_MAX,
   );
+}
+
+async function readSymlinkTargets(
+  runInput: GitInputRun,
+  tree: RepositoryTree,
+  objects: readonly string[],
+): Promise<void> {
+  assert.ok(objects.length);
+  assert.ok(objects.every((object) => !tree.targets.has(object)));
+  await fetchBlobs(runInput, objects);
   const sizes = batchSizes(
     await runInput(
       ["cat-file", "--batch-check"],
@@ -1091,9 +1099,14 @@ async function resolveRepositoryFiles(
   };
   await listPaths(run, commit, tree, paths);
   await completeRepositoryTree(run, runInput, commit, tree, paths);
+  const steps = paths.map((path) => followLinks(tree, path));
+  const objects = new Set<string>();
+  for (const step of steps)
+    if (step.kind === LinkStepKind.Regular)
+      objects.add(tree.entries.get(step.current)!.object);
+  if (objects.size) await fetchBlobs(runInput, [...objects]);
   const files: RepositoryFile[] = [];
-  for (const path of paths) {
-    const step = followLinks(tree, path);
+  for (const [index, step] of steps.entries()) {
     if (step.kind === LinkStepKind.Answered) {
       files.push(step.file);
       continue;
@@ -1103,8 +1116,8 @@ async function resolveRepositoryFiles(
       await regularRepositoryFile(
         run,
         readBlob,
-        `${commit}:${step.current}`,
-        path,
+        tree.entries.get(step.current)!.object,
+        paths[index]!,
         maxBytes,
       ),
     );

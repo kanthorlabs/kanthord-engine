@@ -556,7 +556,7 @@ It reads the instruction files of one repository binding and stores nothing in t
 
 - It reads the configuration of the revision that `<binding-id>` names.
 - It checks that the address host is in the SSH host set of the platform and holds a pin. Then custody releases the key of the `ssh_credential` under the service identity of the Project Service. These checks run before any git process starts.
-- The repository connector resolves the commit of the base branch with `ls-remote`. It fetches that commit at depth 1 with no blobs into a temporary directory, reads the four paths with `git show` and deletes the directory.
+- The repository connector resolves the commit of the base branch with `ls-remote`. It fetches that commit at depth 1 with no blobs into a temporary directory. It lists the four paths and fetches the blobs of all regular files in one fetch. Then it reads the files and deletes the directory.
 - The deadline of the resource healthcheck bounds the read.
 - The service caches the answer in memory per binding revision and commit. Each request runs `ls-remote`, so a new commit of the base branch replaces the answer.
 
