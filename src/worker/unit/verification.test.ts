@@ -24,6 +24,12 @@ import {
 import { EndReason, ExecutionStop } from "./execution-run.ts";
 import { REASON_MAX_LENGTH } from "../../kernel/probe.ts";
 import { EnvironmentFailure } from "../../scheduler/contract.ts";
+import {
+  PROCESS_TREE_PIDS,
+  processTreeCommand,
+  spawnedPids,
+  survivingProcesses,
+} from "../../agent/test-support.ts";
 
 test("verification runs in order and stops on the first failure or unstarted deadline", async (t) => {
   const expectedOrder = "first\nsecond\n";
@@ -210,6 +216,24 @@ test("verification ends a command at its own limit before the execution deadline
     },
   ]);
   assert.match(run.outputs[0] ?? "", /started/);
+});
+
+const TREE_LIMIT_MS = 5000;
+
+test("a command that reaches its limit leaves no process of its tree, also a process in its own group", async (t) => {
+  const run = await runVerificationsWithOutput({
+    directory: temporary(t),
+    commands: [processTreeCommand()],
+    tested_input: { kind: "produced", sha256: "hash" },
+    deadline: Date.now() + 60000,
+    context: background,
+    env: hostEnvironment(),
+    commandLimitMs: TREE_LIMIT_MS,
+  });
+  const spawned = spawnedPids(t, [{ type: "text", text: run.outputs[0] }]);
+  assert.equal(run.verification.results[0]?.timed_out, true);
+  assert.equal(spawned.length, PROCESS_TREE_PIDS);
+  assert.deepEqual(await survivingProcesses(spawned), []);
 });
 
 const FAILED_EXIT = 1;
