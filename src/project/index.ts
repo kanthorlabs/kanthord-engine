@@ -12,3 +12,8 @@ export type {
   ProbeAnswer,
   ProbeCommand,
 } from "./environment-probe-contract.ts";
+export {
+  ENVIRONMENT_SECRET_PLATFORM,
+  ENVIRONMENT_SECRET_PLATFORMS,
+} from "./environment-secret-platform.ts";
+export { environmentSecretOperations } from "./contract.ts";

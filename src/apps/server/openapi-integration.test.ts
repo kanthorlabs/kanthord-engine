@@ -19,7 +19,10 @@ import {
   promptTemplatesSchema,
 } from "../../agent/contract.ts";
 import { schedulerOperations } from "../../scheduler/contract.ts";
-import { projectOperations } from "../../project/contract.ts";
+import {
+  environmentSecretOperations,
+  projectOperations,
+} from "../../project/contract.ts";
 import {
   MISSION_INITIAL_VERSION,
   AssetKind,
@@ -603,6 +606,7 @@ const apiOperations = [
   ...Object.values(workerOperations),
   ...Object.values(schedulerOperations),
   ...Object.values(projectOperations),
+  ...Object.values(environmentSecretOperations),
   ...Object.values(missionOperations),
   ...Object.values(workbenchOperations),
   ...Object.values(intakeOperations),
@@ -723,6 +727,16 @@ const OPERATION_INVENTORY: readonly (readonly [string, AccessPolicy])[] = [
   ["project.bindingRevision.list", AccessPolicy.Human],
   ["project.agentConfiguration.list", AccessPolicy.Human],
   ["project.agentConfiguration.get", AccessPolicy.Human],
+  ["project.credential.platform_list", AccessPolicy.Human],
+  ["project.credential.create", AccessPolicy.Human],
+  ["project.credential.list", AccessPolicy.Human],
+  ["project.credential.get", AccessPolicy.Human],
+  ["project.credential.rotate", AccessPolicy.Human],
+  ["project.credential.update_metadata", AccessPolicy.Human],
+  ["project.credential.revoke", AccessPolicy.Human],
+  ["project.credential.archive", AccessPolicy.Human],
+  ["project.credential.verify", AccessPolicy.Human],
+  ["project.credential.check", AccessPolicy.Human],
   ["mission.get", AccessPolicy.Human],
   ["mission.export", AccessPolicy.Human],
   ["mission.import.preview", AccessPolicy.Human],
@@ -820,8 +834,8 @@ const OPERATION_INVENTORY: readonly (readonly [string, AccessPolicy])[] = [
   ["tracking.session.entry.list", AccessPolicy.Human],
   ["tracking.session.entry.get", AccessPolicy.Human],
 ];
-const OPERATION_COUNT = 210;
-const ROUTED_OPERATION_COUNT = 200;
+const OPERATION_COUNT = 220;
+const ROUTED_OPERATION_COUNT = 210;
 const INTAKE_OPERATION_COUNT = 22;
 const INTAKE_ROUTED_OPERATION_COUNT = 14;
 const SERVICE_OPERATION_IDS = [

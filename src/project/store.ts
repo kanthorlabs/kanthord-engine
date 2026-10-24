@@ -36,6 +36,7 @@ const LAST_ROW_OFFSET = 1;
 const RESOURCE_SEPARATOR = ":";
 const CREDENTIAL_KEY = "credential";
 const SSH_CREDENTIAL_KEY = "ssh_credential";
+const ENVIRONMENT_SECRETS_PATH = '$."environment_secrets"';
 const CURSOR_ENCODING = "base64url";
 const TEXT_ENCODING = "utf8";
 const REPOSITORY_ADDRESS_PATTERN =
@@ -393,12 +394,16 @@ export function readCredentialBindings(
         AND NOT EXISTS (${followingTombstoneQuery})
         AND EXISTS (
           SELECT 1 FROM json_tree(b.config) reference
-          WHERE reference.key IN (?, ?) AND reference.atom = ?
+          WHERE (reference.key IN (?, ?) OR reference.path = ?)
+            AND reference.atom = ?
         )`,
     )
-    .all(CREDENTIAL_KEY, SSH_CREDENTIAL_KEY, credentialName) as Array<
-    BindingRow & { latest_revision: number }
-  >;
+    .all(
+      CREDENTIAL_KEY,
+      SSH_CREDENTIAL_KEY,
+      ENVIRONMENT_SECRETS_PATH,
+      credentialName,
+    ) as Array<BindingRow & { latest_revision: number }>;
   return rows.map((row) => {
     assert.equal(row.removed_at, null);
     assert.ok(row.latest_revision >= row.revision);
