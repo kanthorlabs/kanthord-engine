@@ -96,7 +96,7 @@ import {
   workerResourceIdentity,
   type ProjectBindings,
 } from "../../project/contract.ts";
-import type { WorkerRegistrations } from "../../worker/contract.ts";
+import type { PoolSlot, WorkerRegistrations } from "../../worker/contract.ts";
 export interface MachineDependencies {
   project: ProjectBindings;
   worker: WorkerRegistrations;
@@ -718,6 +718,24 @@ export async function gatewayFixture(
   const endpoint = `http://127.0.0.1:${port}`;
   const request = (path: string, init?: RequestInit) =>
     fetch(endpoint + path, init);
+  const slotTokenOf = async (slot: PoolSlot) => {
+    const { sign } = await import("hono/jwt");
+    const iat = Math.floor(Date.now() / MILLISECONDS_PER_SECOND);
+    return sign(
+      {
+        sub: slot.client_id,
+        name: `server slot ${slot.slot}`,
+        kind: IdentityKind.Client,
+        project_id: slot.project_id,
+        resource_identity: slot.resource_identity,
+        iat,
+        exp: iat + config.gateway.auth.token_lifetime,
+        jti: ulid(),
+      },
+      await signingKey(config.master_key, config.gateway.auth.version),
+      "HS256",
+    );
+  };
   return {
     repoConnector,
     github,
@@ -763,6 +781,7 @@ export async function gatewayFixture(
           name,
         )
       ).token,
+    slotTokenOf,
     slotClient: async (
       projectId: string,
       bindingName: string,
@@ -774,25 +793,9 @@ export async function gatewayFixture(
         workerResourceIdentity(bindingName),
         slot,
       );
-      const { sign } = await import("hono/jwt");
-      const iat = Math.floor(Date.now() / MILLISECONDS_PER_SECOND);
-      const token = await sign(
-        {
-          sub: launch.slot.client_id,
-          name: `server slot ${slot}`,
-          kind: IdentityKind.Client,
-          project_id: projectId,
-          resource_identity: launch.slot.resource_identity,
-          iat,
-          exp: iat + config.gateway.auth.token_lifetime,
-          jti: ulid(),
-        },
-        await signingKey(config.master_key, config.gateway.auth.version),
-        "HS256",
-      );
       return {
         client_id: launch.slot.client_id,
-        token,
+        token: await slotTokenOf(launch.slot),
         client_secret: launch.client_secret,
       };
     },
