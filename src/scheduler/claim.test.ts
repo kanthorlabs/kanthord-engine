@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
-import { setImmediate as turn } from "node:timers/promises";
+import {
+  setImmediate as turn,
+  setTimeout as sleep,
+} from "node:timers/promises";
 import { test, type TestContext } from "node:test";
 import { createIdentity } from "../kernel/identity.ts";
 import { testMachineIdentity } from "../kernel/test-identity.ts";
@@ -30,6 +33,7 @@ const ONE_CALL = 1;
 const NO_CALLS = 0;
 const CLAIM_METHOD = "claim";
 const FIRST_JOB = 0;
+const QUEUE_TICK_MS = 2;
 const BACKOFF_MS = DEFAULT_STOP_BACKOFF_SECONDS * 1000;
 
 export function claimHarness(
@@ -154,7 +158,7 @@ test("selection preserves priority and age while skipping a stale job", (t) => {
     for (let i = 0; i < nodes.length; i++)
       tx.database
         .prepare(
-          "INSERT INTO scheduler_job (id, project_id, node_id, priority) VALUES (?, ?, ?, ?)",
+          "INSERT INTO scheduler_job (id, project_id, node_id, priority, queued_at) VALUES (?, ?, ?, ?, 0)",
         )
         .run(jobs[i]!, h.row.project_id, nodes[i]!, i === FIRST_JOB ? 0 : 1);
   });
@@ -176,6 +180,23 @@ test("selection preserves priority and age while skipping a stale job", (t) => {
   };
   assert.equal(h.claim().row!.node_id, nodes[2]);
   assert.deepEqual(visited, [nodes[1], nodes[2]]);
+});
+
+test("a node that returns to the queue keeps the queue place of its first job", async (t) => {
+  const h = claimHarness(t);
+  const newer = createIdentity("node");
+  h.store.transaction((tx) =>
+    h.service.insert(tx, h.row.node_id, h.row.project_id, 0),
+  );
+  await sleep(QUEUE_TICK_MS);
+  h.store.transaction((tx) => h.service.insert(tx, newer, h.row.project_id, 0));
+  assert.equal(h.claim().row!.node_id, h.row.node_id);
+  h.store.transaction((tx) => h.service.revoke(tx, h.row.node_id, FIXTURE_NOW));
+  await sleep(QUEUE_TICK_MS);
+  h.store.transaction((tx) =>
+    h.service.insert(tx, h.row.node_id, h.row.project_id, 0),
+  );
+  assert.equal(h.claim().row!.node_id, h.row.node_id);
 });
 
 test("health, tombstones, zero counts and occupied binding counts refuse admission", (t) => {

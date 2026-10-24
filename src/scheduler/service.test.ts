@@ -61,6 +61,8 @@ const QUEUE_FIXTURE: readonly [string, number][] = [
   [JOB_A, PRIORITY_TOP],
 ];
 const QUEUE_ORDER = [JOB_A, JOB_B, JOB_C, JOB_D, JOB_E, JOB_F, JOB_G];
+const FIRST_QUEUED_AT = 1_700_000_000_000;
+const LATER_QUEUED_AT = 1_700_000_060_000;
 const LOWEST_JOB_ID = "job_00000000000000000000000000";
 const HIGHEST_JOB_ID = "job_7ZZZZZZZZZZZZZZZZZZZZZZZZZ";
 const MALFORMED_CURSOR = "dGVzdA";
@@ -206,6 +208,55 @@ test("WorkQueue priorityUpdate changes priority and preserves id", (t) => {
   assert.equal(updated.id, original.id);
 });
 
+test("WorkQueue insert of a returning node reuses the identity of the first job of that node", (t) => {
+  const store = makeStore();
+  t.after(() => store.close());
+  const scheduler = schedulerHarness(t, { store }).service;
+  const nodeId = createIdentity(NODE_PREFIX);
+  const projectId = createIdentity(PROJECT_PREFIX);
+  const readId = () =>
+    (
+      store.database
+        .prepare("SELECT id FROM scheduler_job WHERE node_id = ?")
+        .get(nodeId) as StoredJob
+    ).id;
+  store.transaction((tx) =>
+    scheduler.insert(tx, nodeId, projectId, INITIAL_PRIORITY),
+  );
+  const first = readId();
+  store.transaction((tx) => scheduler.delete(tx, nodeId));
+  store.transaction((tx) =>
+    scheduler.insert(tx, nodeId, projectId, UPDATED_PRIORITY),
+  );
+  assert.equal(readId(), first);
+});
+
+test("a returning job keeps the identity of its first job and carries the time of its own insert", (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: FIRST_QUEUED_AT });
+  const store = makeStore();
+  t.after(() => store.close());
+  const scheduler = schedulerHarness(t, { store }).service;
+  const nodeId = createIdentity(NODE_PREFIX);
+  const projectId = createIdentity(PROJECT_PREFIX);
+  const registry = new OperationRegistry();
+  scheduler.declare(registry);
+  const caller = makeCallerContext(store);
+  store.transaction((tx) =>
+    scheduler.insert(tx, nodeId, projectId, INITIAL_PRIORITY),
+  );
+  const first = invokePeek(registry, caller, projectId).job;
+  assert.equal(first?.queued_at, FIRST_QUEUED_AT);
+  t.mock.timers.setTime(LATER_QUEUED_AT);
+  store.transaction((tx) => scheduler.delete(tx, nodeId));
+  store.transaction((tx) =>
+    scheduler.insert(tx, nodeId, projectId, INITIAL_PRIORITY),
+  );
+  assert.deepEqual(invokePeek(registry, caller, projectId).job, {
+    ...first,
+    queued_at: LATER_QUEUED_AT,
+  });
+});
+
 test("queue list handler pages the work queue order with no duplicate and no omission", (t) => {
   const store = makeStore();
   t.after(() => store.close());
@@ -214,7 +265,7 @@ test("queue list handler pages the work queue order with no duplicate and no omi
   const otherProjectId = createIdentity(PROJECT_PREFIX);
   store.transaction((tx) => {
     const insert = tx.database.prepare(
-      "INSERT INTO scheduler_job (id, project_id, node_id, priority) VALUES (?, ?, ?, ?)",
+      "INSERT INTO scheduler_job (id, project_id, node_id, priority, queued_at) VALUES (?, ?, ?, ?, 0)",
     );
     for (const [id, priority] of QUEUE_FIXTURE)
       insert.run(id, projectId, createIdentity(NODE_PREFIX), priority);
@@ -267,7 +318,7 @@ test("queue list handler continues after a cursor whose job left the queue", (t)
   const projectId = createIdentity(PROJECT_PREFIX);
   store.transaction((tx) => {
     const insert = tx.database.prepare(
-      "INSERT INTO scheduler_job (id, project_id, node_id, priority) VALUES (?, ?, ?, ?)",
+      "INSERT INTO scheduler_job (id, project_id, node_id, priority, queued_at) VALUES (?, ?, ?, ?, 0)",
     );
     for (const [id, priority] of QUEUE_FIXTURE)
       insert.run(id, projectId, createIdentity(NODE_PREFIX), priority);
@@ -348,7 +399,7 @@ test("queue peek handler returns the first job by priority desc then id asc, or 
   );
   store.transaction((tx) => {
     const insert = tx.database.prepare(
-      "INSERT INTO scheduler_job (id, project_id, node_id, priority) VALUES (?, ?, ?, ?)",
+      "INSERT INTO scheduler_job (id, project_id, node_id, priority, queued_at) VALUES (?, ?, ?, ?, 0)",
     );
     insert.run(
       LOWEST_JOB_ID,
