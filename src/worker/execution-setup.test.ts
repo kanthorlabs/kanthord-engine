@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import type { Environment } from "../kernel/devcontainer.ts";
 import { EnvironmentSource } from "../project/contract.ts";
+import { setImmediate as turn } from "node:timers/promises";
 import { test, type TestContext } from "node:test";
 import { background } from "../kernel/context.ts";
 import { createIdentity } from "../kernel/identity.ts";
@@ -44,11 +45,16 @@ import {
 } from "../repository/contract.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import { ProjectErrorCode, RepositoryPlatform } from "../project/contract.ts";
+import {
+  Onboarding,
+  type OnboardingDependencies,
+} from "../project/onboarding.ts";
 
 const SSH_CREDENTIAL = "kanthorlabs-ssh";
 const HOST_KEY =
   "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl";
 const NO_REQUESTS = 0;
+const ONE_READ = 1;
 const REPOSITORY_IDENTITY = "repository:github:kanthorlabs/api";
 const API_IDENTITY = "repository:github:kanthorlabs/api";
 const ENVIRONMENT_DIGEST = "e".repeat(64);
@@ -531,6 +537,120 @@ test("setup claims no environment for a container slot whose worker binding name
     },
   );
   assert.deepEqual(claimed, []);
+});
+
+test("setup of a container worker binding with an environment claims inside a real transaction and its compute reads the binding facts", async (t) => {
+  const store = new Store(":memory:");
+  t.after(() => store.close());
+  const setup = anthropicSetup();
+  const agent = setup.agents[0]!;
+  const claim = {
+    executionId: setup.execution_id,
+    runtimeIdentity: createIdentity("worker_registration"),
+    workerBindingId: createIdentity("binding"),
+    nodeId: createIdentity("node"),
+    pinnedRevision: 1,
+    nodeBranch: "kanthord/node_01ARZ3NDEKTSV4RRFFQ69G5FAA",
+    attempt: 1,
+    projectId: createIdentity("project"),
+  };
+  const failures: unknown[] = [];
+  let reads = 0;
+  const onboarding = new Onboarding({
+    bindingsOf: () => {
+      reads++;
+      return store.transaction(() => ({ repositories: [], workers: [] }));
+    },
+    logger: { error: (failure: unknown) => failures.push(failure) },
+  } as unknown as OnboardingDependencies);
+  t.after(() => onboarding.stop());
+  const bindingId = createIdentity("binding");
+  const answer = await executionSetup(
+    {
+      store,
+      agentPrompt: {
+        templates: async () => SHIPPED_TEMPLATES,
+        compose: async () => promptLayers,
+      },
+      workerBindingRowOf: () => ({
+        binding_id: claim.workerBindingId,
+        project_id: claim.projectId,
+        resource_identity: "worker:coder@1",
+        tombstone: false,
+        disabled: false,
+        placement: InstancePlacement.Container,
+        worker_instances: [],
+        environment: API_IDENTITY,
+        worker_name: setup.worker_name,
+        entries: [],
+        resource_budget: null,
+      }),
+      pinnedCredentialMetadata: (_tx, _claim, name) => ({
+        id: agent.credential_id,
+        name,
+        platform: agent.effective_configuration.provider,
+        metadata: null,
+      }),
+      environmentClaimed: (projectId, resourceIdentity) =>
+        onboarding.environmentClaimed(projectId, resourceIdentity),
+      environmentDigestOf: () => ENVIRONMENT_DIGEST,
+      environmentOf: () => null,
+      repositoryBindingIdsOf: () => [bindingId],
+      intentOf: () => ExecutionIntent.Implement,
+      repositoryPolicyOf: () => ({
+        binding_id: bindingId,
+        resource_identity: API_IDENTITY,
+        name: "api",
+        address: "git@github.com:kanthorlabs/kanthord.git",
+        platform: RepositoryPlatform.GitHub,
+        ssh_credential: SSH_CREDENTIAL,
+        base_branch: "main",
+        project_prompt: null,
+        working_layer: WORKING_LAYER_ALL_ON,
+        environment: null,
+        repository_environment: true,
+      }),
+      sshHostKeysOf: () => `github.com ${HOST_KEY}\n`,
+      custodyHandover: publicKeyCustody,
+      schedulerClaims: {
+        agentSelectionsOf: () => [
+          {
+            agent_name: agent.agent_name,
+            position: 0,
+            level: ChainLevel.Enablement,
+            agent_provider: "default",
+            provider: agent.effective_configuration.provider,
+            credential: "key",
+            model_identifier: agent.effective_configuration.model_identifier,
+            reasoning_effort: "low",
+          },
+        ],
+      },
+    },
+    {
+      declarationOf: (name: string) => getWorkerDeclaration(name) ?? null,
+      pinnedAgentView: () => ({
+        effective: agent.effective_configuration,
+        valid: true,
+        issues: [],
+      }),
+    },
+    {
+      identity: testHumanIdentity("ulrich", "Ulrich", "jti"),
+      context: background,
+      requestId: "request",
+      execution: claim,
+      commit: (fn) => store.transaction(fn),
+    },
+  );
+  assert.deepEqual(answer.repositories[0]?.environment, {
+    source: EnvironmentSource.Repository,
+    digest: ENVIRONMENT_DIGEST,
+  });
+  assert.equal(reads, NO_REQUESTS);
+  await turn();
+  assert.equal(reads, ONE_READ);
+  assert.deepEqual(failures, []);
 });
 
 test("setup answers one entry per agent of a two-agent worker with its own prompt and pinned credential", async (t) => {

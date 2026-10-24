@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { setImmediate as turn } from "node:timers/promises";
 import { test, type TestContext } from "node:test";
 import { createIdentity } from "../kernel/identity.ts";
 import { testMachineIdentity } from "../kernel/test-identity.ts";
@@ -17,11 +18,16 @@ import {
   FIXTURE_DEADLINE,
 } from "./test-support.ts";
 import { DEFAULT_STOP_BACKOFF_SECONDS } from "./config.ts";
+import {
+  Onboarding,
+  type OnboardingDependencies,
+} from "../project/onboarding.ts";
 
 const WALL_TIME = 7200000;
 const RESERVE_MS = 600000;
 const PIN = 3;
 const ONE_CALL = 1;
+const NO_CALLS = 0;
 const CLAIM_METHOD = "claim";
 const FIRST_JOB = 0;
 const BACKOFF_MS = DEFAULT_STOP_BACKOFF_SECONDS * 1000;
@@ -678,4 +684,36 @@ test("the gate holds for a claimant of a server binding with no environment", (t
   assert.equal(h.claim().outcome, ClaimOutcome.None);
   h.dependencies.environments.environmentsClaimable = () => true;
   assert.equal(h.claim().outcome, ClaimOutcome.Claimed);
+});
+
+test("a claim whose repository group has no record answers no claim and starts one compute after the transaction commits", async (t) => {
+  const h = claimHarness(t);
+  const identity = "repository:github:acme/api";
+  h.store.transaction((tx) =>
+    h.service.insert(tx, h.row.node_id, h.row.project_id, 0),
+  );
+  h.dependencies.facts.claimFacts = () => ({
+    intent: ClaimIntent.Implement,
+    tags: [],
+    repositories: [identity],
+  });
+  const failures: unknown[] = [];
+  let reads = 0;
+  const onboarding = new Onboarding({
+    bindingsOf: () => {
+      reads++;
+      return h.store.transaction(() => ({ repositories: [], workers: [] }));
+    },
+    logger: { error: (failure: unknown) => failures.push(failure) },
+  } as unknown as OnboardingDependencies);
+  t.after(() => onboarding.stop());
+  h.dependencies.environments.environmentsClaimable = (projectId, ids) =>
+    onboarding.environmentsClaimable(projectId, ids);
+  const result = h.claim();
+  assert.equal(result.outcome, ClaimOutcome.None);
+  assert.equal(result.row, null);
+  assert.equal(reads, NO_CALLS);
+  await turn();
+  assert.equal(reads, ONE_CALL);
+  assert.deepEqual(failures, []);
 });
