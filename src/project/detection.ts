@@ -32,6 +32,7 @@ const Path = {
   JavaVersion: ".java-version",
   ToolVersions: ".tool-versions",
   FlakeNix: "flake.nix",
+  FlakeLock: "flake.lock",
 } as const;
 
 export const DETECTION_PATHS: readonly string[] = Object.freeze(
@@ -320,6 +321,13 @@ const BASE_CONTAINER_ENV: Readonly<Record<string, string>> = {
   CARGO_HOME: `${KANTHORD_HOME}/.cache/cargo`,
 };
 
+export const NIX_BASE_IMAGE = BASE_IMAGE;
+export const NIX_FEATURE = `${FEATURE_PREFIX}/nix:1`;
+export const NIX_FLAKE_DIRECTORY = "/etc/kanthord-flake";
+export const NIX_ENV_FILE = "/etc/kanthord-nix-env.sh";
+export const NIX_CHECK = "nix --version";
+const NIX_ON_CREATE = `nix --extra-experimental-features 'nix-command flakes' print-dev-env ${NIX_FLAKE_DIRECTORY} > ${NIX_ENV_FILE}`;
+
 const NodeCheck = {
   Node: "node --version",
   Npm: "npm --version",
@@ -501,11 +509,29 @@ function joined(parts: Array<string | undefined>): string | null {
   return present.length ? present.join(COMMAND_SEPARATOR) : null;
 }
 
-export function detectEnvironment(files: readonly RepositoryFile[]): {
+type Detected = {
   stacks: DetectedStack[];
   document: Environment;
   checks: string[];
-} | null {
+};
+
+function flakeDetection(): Detected {
+  const checks = [NIX_CHECK];
+  const document: Environment = {
+    image: NIX_BASE_IMAGE,
+    features: { [NIX_FEATURE]: { multiUser: false } },
+    containerEnv: { ...BASE_CONTAINER_ENV, BASH_ENV: NIX_ENV_FILE },
+    onCreateCommand: NIX_ON_CREATE,
+    customizations: { kanthord: { checks } },
+  };
+  return { stacks: [], document, checks };
+}
+
+export function detectEnvironment(
+  files: readonly RepositoryFile[],
+): Detected | null {
+  const flake = files.find((file) => file.path === Path.FlakeNix);
+  if (textOf(flake) !== null) return flakeDetection();
   const detected = detectStacks(files);
   if (!detected.length) return null;
   const source = { files, inputs: readInputs(files) };
