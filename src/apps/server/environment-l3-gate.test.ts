@@ -23,12 +23,14 @@ import {
   projectOperations,
   type RepositoryFiles,
 } from "../../project/contract.ts";
+import { workerOperations } from "../../worker/contract.ts";
 import { EnvironmentSource } from "../../kernel/devcontainer.ts";
 import {
   ENVIRONMENT_DIRECTORY,
   type EnvironmentState,
 } from "../../project/environment-state.ts";
 import { RepositoryFileState } from "../../repository/contract.ts";
+import { ExecutionStopReason } from "../../scheduler/contract.ts";
 import { trackingOperations } from "../../tracking/contract.ts";
 import { until } from "./cli-support.ts";
 import { fakeContainerHost } from "./container-fakes.ts";
@@ -43,6 +45,7 @@ import {
   type RuntimeHost,
 } from "./container-runtime.ts";
 import {
+  completed,
   CONFIGURATION,
   createProject,
   environmentList,
@@ -140,6 +143,10 @@ const SETTLED_STATUSES: readonly EnvironmentStatus[] = [
   EnvironmentStatus.None,
   EnvironmentStatus.Failed,
 ];
+const RELEASE_STOP = {
+  reason: ExecutionStopReason.JudgementInvalid,
+  code: null,
+};
 const REVIEWER = {
   kind: "worker",
   config: { worker: "reviewer@1", placement: "server", instance_count: 0 },
@@ -718,6 +725,9 @@ test(
     const first = await settledItem(t, fixture, projectId);
     let cacheName = "";
     let nodes: string[] = [];
+    let claimant: Awaited<ReturnType<typeof worker>> | null = null;
+    let claimedExecution = "";
+    let claimantToken = "";
 
     await t.test(
       "the secret reaches one command of the onCreateCommand step from a private file that the run removes",
@@ -834,10 +844,12 @@ test(
           token: await fixture.slotTokenOf(slotA.poolSlot),
         });
         await clientA.claimed(nodes);
+        claimantToken = await fixture.slotTokenOf(slotB.poolSlot);
         const clientB = await worker(t, fixture, projectId, nodes[1]!, 1, {
-          token: await fixture.slotTokenOf(slotB.poolSlot),
+          token: claimantToken,
         });
-        await clientB.claimed(nodes);
+        claimedExecution = await clientB.claimed(nodes);
+        claimant = clientB;
         const runs = await until(
           () => [slotA, slotB].map((start) => slotRuns(podman, start.clientId)),
           (found) => found.every((list) => list.length > NO_ITEMS),
@@ -851,6 +863,7 @@ test(
         for (const list of runs)
           for (const run of list) assert.equal(cacheVolumeOf(run), cacheName);
         assert.equal(proofRuns(l3).length, SINGLE_ITEM);
+        assert.equal(cacheVolumeOf(proofRuns(l3)[0]!), cacheName);
         assert.deepEqual(Array.from(cacheNames(l3)), [cacheName]);
         const homes = [slotA, slotB].map(
           ({ clientId }) => `${SLOT_NAME_PREFIX}${clientId}`,
@@ -865,7 +878,28 @@ test(
       "a rotation of the secret gives a new digest and keeps the cache volume",
       async () => {
         await rotateSecret(fixture, ROTATED_SECRET);
-        await writeBindings(fixture, projectId, secretBindings());
+        const third = await importNode(fixture, project, "implement-3.md");
+        await claimant!.release(claimedExecution, RELEASE_STOP);
+        const pulled = await claimant!.claimed([...nodes, third]);
+        const workerClient = httpClient(
+          workerOperations,
+          fixture.endpoint,
+          claimantToken,
+        );
+        completed(
+          await workerClient.handover({
+            params: {},
+            query: {},
+            body: { execution_id: pulled },
+          }),
+        );
+        completed(
+          await workerClient["execution.setup.get"]({
+            params: { execution_id: pulled },
+            query: {},
+            body: null,
+          }),
+        );
         const rotated = await settledItem(t, fixture, projectId, first.digest);
         assert.notEqual(rotated.digest, first.digest);
         assert.notEqual(rotated.tag, first.tag);
