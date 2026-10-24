@@ -17,9 +17,12 @@ import {
   readExecution,
   claimStateOf,
 } from "./execution-store.ts";
+import type { Dependencies } from "./service.ts";
 import {
   BudgetLimit,
+  ClaimIntent,
   ClaimState,
+  EnvironmentFailure,
   ExecutionStopReason,
   schedulerOperations,
   type ReleaseStop,
@@ -33,6 +36,8 @@ import { DEFAULT_STOP_BACKOFF_SECONDS } from "./config.ts";
 
 const WAKE_CALL_COUNT = 1;
 const NO_STALLS = 0;
+const NO_FAILURES = 0;
+const ONE_CALL = 1;
 const PRIOR_STALLS = 2;
 const CURRENT_STALL = 1;
 const FIRST_FAILURE = 1;
@@ -346,4 +351,137 @@ test("a release with a stop holds the job of the node until the stop backoff end
     job.available_at,
     FIXTURE_NOW + DEFAULT_STOP_BACKOFF_SECONDS * 1000,
   );
+});
+
+const API = "repository:github:acme/api";
+const WEB = "repository:github:acme/web";
+const APP_DIGEST = "sha256:aaaa";
+const WEB_DIGEST = "sha256:bbbb";
+const ENVIRONMENT_STOP: ReleaseStop = {
+  reason: ExecutionStopReason.EnvironmentFailed,
+  code: EnvironmentFailure.SetupFailed,
+};
+
+function environmentHarness(t: TestContext) {
+  const h = harness(t);
+  t.mock.method(Date, "now", () => FIXTURE_NOW);
+  const events: string[] = [];
+  const failed: Parameters<
+    Dependencies["environments"]["environmentFailed"]
+  >[0][] = [];
+  let committed = false;
+  h.caller.commit = (write) => {
+    const result = h.store.transaction(write);
+    committed = true;
+    events.push("commit");
+    return result;
+  };
+  h.dependencies.facts.claimFacts = () => ({
+    intent: ClaimIntent.Implement,
+    tags: [],
+    repositories: [API, WEB],
+  });
+  h.dependencies.environments.environmentFailed = (input) => {
+    assert.equal(committed, true);
+    events.push("environmentFailed");
+    failed.push(input);
+  };
+  t.mock.method(h.service, "wake", () => events.push("wake"));
+  return { ...h, events, failed };
+}
+
+test("an environment_failed release calls environmentFailed once after the commit and before the wake", async (t) => {
+  const h = environmentHarness(t);
+  const detail = JSON.stringify({
+    command: "pnpm install",
+    exit_code: 1,
+    digests: { [API]: APP_DIGEST, [WEB]: WEB_DIGEST },
+  });
+  const stop: ReleaseStop = { ...ENVIRONMENT_STOP, detail };
+  await h.release(true, stop);
+  assert.deepEqual(h.events, ["commit", "environmentFailed", "wake"]);
+  assert.deepEqual(h.failed, [
+    {
+      project_id: h.row.project_id,
+      execution_id: h.row.execution_id,
+      resource_identities: [API, WEB],
+      digests: { [API]: APP_DIGEST, [WEB]: WEB_DIGEST },
+      stop: { code: EnvironmentFailure.SetupFailed, detail },
+    },
+  ]);
+});
+
+test("an environment_failed release with no detail passes a null detail", async (t) => {
+  const h = environmentHarness(t);
+  await h.release(true, {
+    reason: ExecutionStopReason.EnvironmentFailed,
+    code: EnvironmentFailure.CommandAbsent,
+  });
+  assert.equal(h.failed.length, ONE_CALL);
+  assert.deepEqual(h.failed[0]!.digests, {});
+  assert.deepEqual(h.failed[0]!.stop, {
+    code: EnvironmentFailure.CommandAbsent,
+    detail: null,
+  });
+});
+
+for (const detail of [
+  "setup failed",
+  "[1,2]",
+  "null",
+  JSON.stringify({ command: "pnpm install" }),
+  JSON.stringify({ digests: "none" }),
+  JSON.stringify({ digests: { [API]: 1 } }),
+]) {
+  test(`a stop detail of ${detail} passes empty digests`, async (t) => {
+    const h = environmentHarness(t);
+    await h.release(true, { ...ENVIRONMENT_STOP, detail });
+    assert.equal(h.failed.length, ONE_CALL);
+    assert.deepEqual(h.failed[0]!.digests, {});
+    assert.equal(h.failed[0]!.stop.detail, detail);
+  });
+}
+
+test("an environment_failed release neither counts a failure nor holds the job", async (t) => {
+  const h = environmentHarness(t);
+  await h.release(true, ENVIRONMENT_STOP);
+  assert.deepEqual(
+    h.calls.map((call) => [call.method, ...call.arguments.slice(1)]),
+    [["failure", h.row.node_id, NO_FAILURES, FIXTURE_NOW]],
+  );
+  assert.deepEqual(
+    h.store.database.prepare("SELECT * FROM scheduler_job").all(),
+    [],
+  );
+});
+
+test("a release that fails in its transaction calls environmentFailed never", async (t) => {
+  const h = environmentHarness(t);
+  const failure = new Error("Mission refused failure");
+  h.dependencies.transitions.failure = () => {
+    throw failure;
+  };
+  await assert.rejects(h.release(true, ENVIRONMENT_STOP), failure);
+  assert.deepEqual(h.failed, []);
+  assert.deepEqual(h.events, []);
+  assert.equal(h.read().ended_at, null);
+});
+
+test("a release with another stop reason calls environmentFailed never", async (t) => {
+  const h = environmentHarness(t);
+  await h.release(true, STOP);
+  assert.deepEqual(h.failed, []);
+  assert.deepEqual(h.events, ["commit", "wake"]);
+});
+
+test("a release with no stop calls environmentFailed never", async (t) => {
+  const h = environmentHarness(t);
+  await h.release(true);
+  assert.deepEqual(h.failed, []);
+});
+
+test("a budget-end release calls environmentFailed never", async (t) => {
+  const h = environmentHarness(t);
+  await h.release(true, BUDGET_END);
+  assert.deepEqual(h.failed, []);
 });
