@@ -381,4 +381,8 @@ export interface EnvironmentRuntime {
   removeTags(tags: readonly string[]): Promise<void>;
   collect(identityPath: string, keepDigest: string | null): Promise<void>;
   removeStaleRuns(): Promise<void>;
+  cacheVolumes(): Promise<
+    Array<{ project_id: string; resource_identity: string }>
+  >;
+  removeCacheVolume(projectId: string, resourceIdentity: string): Promise<void>;
 }

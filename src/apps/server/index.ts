@@ -333,6 +333,9 @@ export function composeServices(options: {
     collect: (identityPath, keepDigest) =>
       environmentImages.collect(identityPath, keepDigest),
     removeStaleRuns: () => environmentImages.removeStaleRuns(),
+    cacheVolumes: () => environmentImages.cacheVolumes(),
+    removeCacheVolume: (projectId, resourceIdentity) =>
+      environmentImages.removeCacheVolume(projectId, resourceIdentity),
   };
   const containerSlotDriver =
     options.containerSlotDriver?.(containerDriver) ?? containerDriver;

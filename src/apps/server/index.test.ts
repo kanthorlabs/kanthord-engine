@@ -1300,6 +1300,8 @@ test(
       removeTags: async () => {},
       collect: async () => {},
       removeStaleRuns: async () => {},
+      cacheVolumes: async () => [],
+      removeCacheVolume: async () => {},
     };
     const { setup, writeContainer } = await containerSetup(t, {
       environmentRuntime,

@@ -38,6 +38,8 @@ const OWNER_LABEL_TEXT = "worker/container-owner";
 const SLOT_NAME_PREFIX = "kanthord_slot_";
 const DETAIL_LIMIT_BYTES = 200;
 const CACHE_NAME_HEX_LENGTH = 24;
+const FIELD_SEPARATOR = "\t";
+const STRING_LABELS_TEST = '(eq (printf "%T" .Labels) "string")';
 const MINIMUM_DOCKER_CLIENT_MAJOR = 23;
 const ROOT_UID = 0;
 const FAILED_CODE = 1;
@@ -183,6 +185,51 @@ export function cacheVolumeArguments(
     `${CACHE_RESOURCE_LABEL}=${resourceIdentity}`,
     cacheVolumeName(owner, projectId, resourceIdentity),
   ];
+}
+
+function labelTemplate(label: string): string {
+  return `{{if ${STRING_LABELS_TEST}}}{{.Label "${label}"}}{{else}}{{index .Labels "${label}"}}{{end}}`;
+}
+
+export function ownedCacheVolumeArguments(owner: string): string[] {
+  return [
+    "volume",
+    "ls",
+    "--filter",
+    `label=${OWNER_LABEL}=${owner}`,
+    "--format",
+    [
+      "{{.Name}}",
+      labelTemplate(CACHE_PROJECT_LABEL),
+      labelTemplate(CACHE_RESOURCE_LABEL),
+    ].join(FIELD_SEPARATOR),
+  ];
+}
+
+export function removeNamedVolumeArguments(name: string): string[] {
+  return ["volume", "rm", name];
+}
+
+export interface CacheVolumeListing {
+  readonly name: string;
+  readonly project_id: string;
+  readonly resource_identity: string;
+}
+
+export function parseCacheVolumes(stdout: string): CacheVolumeListing[] {
+  const listings: CacheVolumeListing[] = [];
+  for (const line of stdout.split(LINE_BREAK)) {
+    const [name, projectId, resourceIdentity] = line
+      .trim()
+      .split(FIELD_SEPARATOR);
+    if (!name || !projectId || !resourceIdentity) continue;
+    listings.push({
+      name,
+      project_id: projectId,
+      resource_identity: resourceIdentity,
+    });
+  }
+  return listings;
 }
 
 export function runArguments(command: RunCommand): string[] {

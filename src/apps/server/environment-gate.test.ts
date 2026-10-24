@@ -135,6 +135,8 @@ function fakeEnvironmentRuntime() {
     },
     collect: async () => {},
     removeStaleRuns: async () => {},
+    cacheVolumes: async () => [],
+    removeCacheVolume: async () => {},
   };
   return {
     runtime,
