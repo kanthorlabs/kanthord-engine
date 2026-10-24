@@ -452,6 +452,7 @@ test("a node create takes no parent and the node read holds intent and tags", ()
     "intent",
     "mission_id",
     "pinned_by_attempts",
+    "pinned_revision",
     "priority",
     "retired_at",
     "state",

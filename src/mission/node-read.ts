@@ -14,6 +14,7 @@ import {
 } from "./contract.ts";
 import { revisionFromRow } from "./revision.ts";
 import { blockedContextOf } from "./record-read.ts";
+import { readOpenAttempt } from "./record-store.ts";
 import {
   claimRevisionOf,
   listNodes,
@@ -107,6 +108,7 @@ export function nodeRecord(
     tasks: claim.tasks,
     state: node.state,
     attempt: node.attempt,
+    pinned_revision: readOpenAttempt(tx, node.id)?.node_revision ?? null,
     priority: node.priority ?? 0,
     depends_on: readDependsOnIds(tx, node.id),
     ...(node.state === NodeState.Blocked

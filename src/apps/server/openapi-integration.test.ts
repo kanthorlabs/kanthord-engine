@@ -1115,6 +1115,7 @@ test("dependency list exception preserves full dependency and identity-only vari
     "pinned_by_attempts",
     "state",
     "attempt",
+    "pinned_revision",
     "priority",
     "depends_on",
     "intent",
