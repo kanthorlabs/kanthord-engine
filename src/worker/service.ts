@@ -95,8 +95,7 @@ import {
   registrationRecord,
   listRegistrationRecords,
 } from "./registration-record.ts";
-import type { ResolvedLayer } from "../agent/prompt-layers.ts";
-import type { PromptTemplates } from "../agent/contract.ts";
+import type { PromptPartAnswer, PromptTemplates } from "../agent/contract.ts";
 import type { WorkerConfig } from "./config.ts";
 import {
   HeartbeatClock,
@@ -137,7 +136,7 @@ export interface Dependencies {
   custodyHandover: CustodyHandover;
   config: WorkerConfig;
   agentPrompt: {
-    compose(agentName: string, context: Context): Promise<ResolvedLayer[]>;
+    compose(agentName: string, context: Context): Promise<PromptPartAnswer[]>;
     templates(context: Context): Promise<PromptTemplates>;
   };
   store: Store;

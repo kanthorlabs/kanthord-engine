@@ -352,9 +352,7 @@ test(
         (typeof agentOperations)["get"]["output"]["_output"]
       >(["agent", "get", "swe@1"]);
       assert.equal(declaration.agent_name, SWE);
-      const texts = declaration.prompt.layers!.flatMap(({ sources }) =>
-        sources.map((source) => source.text),
-      );
+      const texts = declaration.prompt.parts!.map((part) => part.text);
       for (const name of ["base.md", "swe@1.md"])
         assert.ok(
           texts.includes(

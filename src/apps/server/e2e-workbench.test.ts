@@ -1,10 +1,13 @@
 import assert from "node:assert/strict";
+import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test, type TestContext } from "node:test";
 import {
   fauxAssistantMessage,
   fauxToolCall,
+  getSystemMessageText,
   type FauxResponseStep,
+  type SystemMessage,
 } from "@earendil-works/pi-ai";
 import {
   BASE_PROMPT,
@@ -20,7 +23,7 @@ import {
 } from "../../kernel/operation.ts";
 import { temporary } from "../../kernel/test-support.ts";
 import { isString } from "../../kernel/values.ts";
-import { agentOperations } from "../../agent/contract.ts";
+import { AgentErrorCode, agentOperations } from "../../agent/contract.ts";
 import { loadPi } from "../../agent/pi.ts";
 import { scriptedProvider } from "../../agent/test-support.ts";
 import { llmOperations } from "../../llm/contract.ts";
@@ -59,6 +62,9 @@ const ModelChange = "model_change";
 const ThinkingChange = "thinking_level_change";
 const SINGLE = 1;
 const MESSAGE_ENTRY = "message";
+const SYSTEM_ROLE = "system";
+const INVALID_OVERRIDE_TEXT = "bell\u0007";
+const OVERRIDE_TEXT = "Answer in one sentence.";
 const QUESTION = "How many objectives are open?";
 const ANSWER = "Two objectives are open.";
 const FIRST_MESSAGE = "List the open objectives.";
@@ -115,10 +121,12 @@ async function workbenchFixture(
   t: TestContext,
   script: FauxResponseStep[] = [],
   stateDirectory = temporary(t),
+  agentDirectory = temporary(t),
 ) {
   const scripted = scriptedFactory(script);
   const fixture = await gatewayFixture(t, {
     stateDirectory,
+    agentDirectory,
     workbenchModelRuntimeFactory: scripted.factory,
   });
   const options = { identity };
@@ -716,14 +724,61 @@ test("a message runs the agent while a long poll follows the run to its end", as
   const call = fixture.provider.calls[0]!;
   assert.ok(call.systemPrompt?.includes(BASE_PROMPT));
   assert.ok(call.systemPrompt?.includes(SWE_AGENT_PROMPT));
-  assert.ok(!call.systemPrompt?.includes(WORKBENCH_PROMPT));
   assert.ok(
     call.systemPrompt?.includes(
-      framing(SHIPPED_TEMPLATES, PromptConsumer.Workbench),
+      `${WORKBENCH_PROMPT}\n\n${framing(SHIPPED_TEMPLATES, PromptConsumer.Workbench)}`,
     ),
   );
-  assert.ok(JSON.stringify(call.messages).includes("## Human interlocutor"));
+  const [pin] = call.messages;
+  assert.equal(pin?.role, SYSTEM_ROLE);
+  assert.ok(
+    getSystemMessageText(pin as SystemMessage).includes(WORKBENCH_PROMPT),
+  );
+  assert.ok(
+    !JSON.stringify(
+      call.messages.filter((entry) => entry.role !== SYSTEM_ROLE),
+    ).includes("## Human interlocutor"),
+  );
   assert.equal(call.apiKey, PRIMARY_KEY);
+});
+
+test("an override file replaces the shipped workbench text and an invalid one refuses the session with a conflict", async (t) => {
+  const agentDirectory = temporary(t);
+  const overridePath = join(agentDirectory, "workbench.md");
+  writeFileSync(overridePath, OVERRIDE_TEXT);
+  const fixture = await workbenchFixture(
+    t,
+    [fauxAssistantMessage(ANSWER)],
+    temporary(t),
+    agentDirectory,
+  );
+  const session = await createSession(fixture);
+  completed(await message(fixture, session.id, QUESTION));
+  await untilIdle(fixture, session.id, t.signal);
+  const call = fixture.provider.calls[0]!;
+  assert.ok(call.systemPrompt?.includes(OVERRIDE_TEXT));
+  assert.ok(!call.systemPrompt?.includes(WORKBENCH_PROMPT));
+  writeFileSync(overridePath, INVALID_OVERRIDE_TEXT);
+  const refused = await fixture.workbench["session.create"](
+    {
+      params: {},
+      query: {},
+      body: {
+        agent_name: AGENT,
+        agent_provider: DEFAULT,
+        model_identifier: SONNET,
+        reasoning_effort: OFF,
+      },
+    },
+    fixture.options,
+  );
+  failed(refused, HttpStatus.Conflict, AgentErrorCode.PromptTemplateInvalid);
+  assert.ok(refused.type === OperationResultType.Failure);
+  assert.deepEqual(refused.error.error.details, {
+    file: "workbench.md",
+    path: overridePath,
+    reason: "control_character",
+  });
 });
 
 test("an abort stops the active run", async (t) => {

@@ -21,11 +21,8 @@ import {
   CooldownChangeKind,
   type AgentSelection,
   type ChainEntry,
-  PromptLayerKind,
-  PromptScope,
-  PromptSourceState,
-  PROMPT_SWITCHES,
-  PROMPT_TEXT_MAX_BYTES,
+  PromptOrigin,
+  PromptPart,
   AGENT_COMPONENT_NAME,
   AGENT_PROVIDER_TARGET_KIND,
   LIST_LIMIT_DEFAULT,
@@ -37,7 +34,7 @@ import {
   type HolderScope,
 } from "./contract.ts";
 import { agentMigrations } from "./migrations.ts";
-import { promptSettings } from "./prompts.ts";
+import { getAgentDeclaration } from "./catalog.ts";
 import {
   AgentProviderKind,
   EnablementState,
@@ -52,7 +49,10 @@ import { HttpStatus } from "../kernel/http.ts";
 import { CodedError, OperationError } from "../kernel/errors.ts";
 import { ProjectErrorCode } from "../project/contract.ts";
 import { framing, PromptConsumer } from "./prompt-render.ts";
-import { SHIPPED_TEMPLATES } from "./prompt-templates.ts";
+import {
+  SHIPPED_TEMPLATES,
+  TemplateInvalidReason,
+} from "./prompt-templates.ts";
 import {
   capturedLogger,
   FallbackLog,
@@ -61,11 +61,11 @@ import {
 
 const PROVIDER_CAPABILITY = "model-list read";
 const DEFAULT_REASONING = "off";
-const WORKING_PATH = "~/working/AGENTS.md";
 const PROJECT_TEXT = "project prompt text";
 const REVIEW_TEXT = "review prompt text";
-const WORKING_TEXT = "workbench directory text";
-const CUSTOM_TEXT = "custom workbench text";
+const FRAMING_WORKBENCH = "framing-workbench";
+const OVERRIDE_TEXT = "Write the smallest complete change.";
+const INVALID_OVERRIDE_TEXT = "bell\u0007";
 const AGENT = "swe@1";
 const OTHER_AGENT = "re@1";
 const ENV_AGENT = "env@1";
@@ -74,7 +74,6 @@ const MODEL = "claude-sonnet-4-5";
 const SUBSCRIPTION_MODEL = "claude-haiku-5-5";
 const MISSING_MODEL = "claude-3-5-sonnet-20241022";
 const UNKNOWN = "unknown";
-const ABSENT_REVISION = 0;
 const FIRST_REVISION = 1;
 const SECOND_REVISION = 2;
 const THIRD_REVISION = 3;
@@ -106,12 +105,10 @@ const binding = {
 const SERVER_SCOPE = { holders: [SERVER_HOLDER], claimant: SERVER_HOLDER };
 const fakeCollaborations: Omit<Dependencies, "store" | "credentialHolds"> = {
   config: {
-    prompt: { system_file: "", agent_directory: "", host_file: true },
+    prompt: { agent_directory: "" },
     cooldown: COOLDOWN_DEFAULTS,
   },
   dataDirectory: "/nonexistent/data",
-  hostHome: "/nonexistent/home",
-  workbenchDirectory: (agentName) => `/nonexistent/workbench/${agentName}`,
   custodySuitability: () => {},
   copyHeld: () => true,
   approvedModels: () => null,
@@ -182,123 +179,123 @@ function refuses(
   });
 }
 
-test("agent read answers the layers, the working layer of the workbench and the final prompt", async (t) => {
-  const root = temporary(t);
-  const working = join(root, "working");
-  mkdirSync(working);
-  writeFileSync(join(working, "AGENTS.md"), WORKING_TEXT);
-  const f = enablementFixture(t, {
-    dataDirectory: root,
-    hostHome: root,
-    workbenchDirectory: () => working,
-  });
-  f.invoke(
-    "prompt.put",
-    {
-      scope: PromptScope.Workbench,
-      agent_name: AGENT,
-      custom_text: CUSTOM_TEXT,
-    },
-    {},
-  );
-  f.invoke(
-    "prompt.switch",
-    { scope: PromptScope.System, switch: "base", enabled: false },
-    {},
-  );
+function promptReader(f: ReturnType<typeof enablementFixture>) {
   const operation = agentOperations.get;
-  const read = async (query: Record<string, unknown> = {}) =>
+  return async (agentName: string, query: Record<string, unknown> = {}) =>
     operation.output.parse(
       await f.registry.get(operation.id).handler(
         operation.input.parse({
-          params: { agent_name: AGENT },
+          params: { agent_name: agentName },
           query,
           body: null,
         }),
         f.caller,
       ),
     );
-  const answer = await read();
-  const layers = answer.prompt.layers!;
+}
+
+test("agent read answers the shipped parts, the workbench part of a workbench agent and the final prompt", async (t) => {
+  const f = enablementFixture(t);
+  const read = promptReader(f);
+  const answer = await read(AGENT);
+  const parts = answer.prompt.parts!;
   assert.deepEqual(
-    layers.map(({ layer }) => layer),
-    ["system", "agent", "working"],
-  );
-  assert.deepEqual(
-    layers.map(({ sources }) => sources.map(({ source }) => source)),
+    parts.map(({ part, name, origin, path }) => [part, name, origin, path]),
     [
-      ["host_file", "base", "custom"],
-      ["agent_file", "shipped", "custom"],
-      [
-        "agents_md",
-        "agents_local_md",
-        "claude_md",
-        "claude_local_md",
-        "shipped",
-        "custom",
-      ],
+      [PromptPart.Standard, "base.md", PromptOrigin.Binary, null],
+      [PromptPart.Role, `${AGENT}.md`, PromptOrigin.Binary, null],
+      [PromptPart.Workbench, "workbench.md", PromptOrigin.Binary, null],
     ],
   );
-  const base = layers[0]!.sources[1]!;
-  assert.equal(base.state, PromptSourceState.Off);
-  assert.equal(base.enabled, false);
-  assert.equal(base.text, null);
-  const file = layers[2]!.sources[0]!;
-  assert.equal(file.state, PromptSourceState.Present);
-  assert.equal(file.path, WORKING_PATH);
-  assert.equal(file.text, WORKING_TEXT);
-  assert.match(file.digest!, /^[a-f0-9]{64}$/);
-  assert.equal(layers[2]!.sources[5]!.text, CUSTOM_TEXT);
-  assert.ok(answer.prompt.final.includes(WORKING_TEXT));
-  assert.ok(answer.prompt.final.includes(CUSTOM_TEXT));
-  assert.ok(!answer.prompt.final.includes(base.text ?? "\u0000"));
-  const final = await read({ view: "final" });
-  assert.equal(final.prompt.layers, undefined);
+  assert.equal(parts[1]!.text, getAgentDeclaration(AGENT)!.agent_prompt);
+  assert.match(parts[0]!.digest, /^[a-f0-9]{64}$/);
+  assert.equal(
+    answer.prompt.final,
+    [
+      ...parts.map(({ text }) => text),
+      framing(SHIPPED_TEMPLATES, PromptConsumer.Workbench),
+    ].join("\n\n"),
+  );
+  const final = await read(AGENT, { view: "final" });
+  assert.equal(final.prompt.parts, undefined);
   assert.equal(final.prompt.final, answer.prompt.final);
+  const env = await read(ENV_AGENT);
+  assert.deepEqual(
+    env.prompt.parts!.map(({ part }) => part),
+    [PromptPart.Standard, PromptPart.Role],
+  );
+  assert.ok(
+    env.prompt.final.endsWith(
+      framing(SHIPPED_TEMPLATES, PromptConsumer.Worker),
+    ),
+  );
 });
 
-test("agent read renders the framing and layer messages from the template files of the agent directory", async (t) => {
+test("an override file of the agent directory replaces the shipped text and an invalid one answers a conflict", async (t) => {
+  const root = temporary(t);
+  const directory = join(root, "agents");
+  mkdirSync(directory);
+  const f = enablementFixture(t, {
+    config: {
+      prompt: { agent_directory: "agents" },
+      cooldown: COOLDOWN_DEFAULTS,
+    },
+    dataDirectory: root,
+  });
+  const read = promptReader(f);
+  const overridePath = join(directory, `${AGENT}.md`);
+  writeFileSync(overridePath, OVERRIDE_TEXT);
+  const parts = (await read(AGENT)).prompt.parts!;
+  assert.deepEqual(parts[0]!.path, join(directory, "base.md"));
+  assert.equal(parts[0]!.origin, PromptOrigin.Binary);
+  assert.deepEqual(
+    {
+      origin: parts[1]!.origin,
+      path: parts[1]!.path,
+      text: parts[1]!.text,
+    },
+    { origin: PromptOrigin.File, path: overridePath, text: OVERRIDE_TEXT },
+  );
+  const final = (await read(AGENT)).prompt.final;
+  assert.ok(final.includes(OVERRIDE_TEXT));
+  assert.ok(!final.includes(getAgentDeclaration(AGENT)!.agent_prompt));
+  writeFileSync(overridePath, INVALID_OVERRIDE_TEXT);
+  await assert.rejects(read(AGENT), {
+    status: HttpStatus.Conflict,
+    code: AgentErrorCode.PromptTemplateInvalid,
+    details: {
+      file: `${AGENT}.md`,
+      path: overridePath,
+      reason: "control_character",
+    },
+  });
+});
+
+test("agent read renders the framing from the template files of the agent directory", async (t) => {
   const root = temporary(t);
   const templates = join(root, "agents", "prompts");
   mkdirSync(templates, { recursive: true });
   writeFileSync(join(templates, "framing-workbench.md"), "Custom framing.\n");
-  writeFileSync(
-    join(templates, "layer-message.md"),
-    "From {{source}}: {{text}}\n",
-  );
-  const working = join(root, "working");
-  mkdirSync(working);
-  writeFileSync(join(working, "AGENTS.md"), WORKING_TEXT);
   const f = enablementFixture(t, {
     config: {
-      prompt: { system_file: "", agent_directory: "agents", host_file: true },
+      prompt: { agent_directory: "agents" },
       cooldown: COOLDOWN_DEFAULTS,
     },
     dataDirectory: root,
-    hostHome: root,
-    workbenchDirectory: () => working,
   });
-  const operation = agentOperations.get;
-  const read = async () =>
-    operation.output.parse(
-      await f.registry.get(operation.id).handler(
-        operation.input.parse({
-          params: { agent_name: AGENT },
-          query: { view: "final" },
-          body: null,
-        }),
-        f.caller,
-      ),
-    );
-  const answer = await read();
-  assert.ok(answer.prompt.final.includes("Custom framing."));
-  assert.ok(
-    answer.prompt.final.includes(`From file ${WORKING_PATH}: ${WORKING_TEXT}`),
-  );
-  writeFileSync(join(templates, "layer-message.md"), "{{#if}}");
-  await assert.rejects(read(), (error) => {
+  const read = promptReader(f);
+  const answer = await read(AGENT, { view: "final" });
+  assert.ok(answer.prompt.final.endsWith("Custom framing."));
+  writeFileSync(join(templates, "framing-workbench.md"), "{{#if}}");
+  await assert.rejects(read(AGENT), (error) => {
     assert.ok(error instanceof OperationError);
     assert.equal(error.code, AgentErrorCode.PromptTemplateInvalid);
+    assert.deepEqual(error.details, {
+      template: FRAMING_WORKBENCH,
+      file: `${FRAMING_WORKBENCH}.md`,
+      path: join(templates, `${FRAMING_WORKBENCH}.md`),
+      reason: TemplateInvalidReason.Syntax,
+    });
     return true;
   });
 });
@@ -320,7 +317,6 @@ test("agent read with a repository binding answers the binding prompt of the age
   };
   const f = enablementFixture(t, {
     dataDirectory: root,
-    hostHome: root,
     repositoryPromptsOf: (_, id) =>
       policies[id] ? { name: "repo", ...policies[id] } : null,
   });
@@ -338,8 +334,17 @@ test("agent read with a repository binding answers the binding prompt of the age
     );
   const on = await read({ project_id: "project-a", binding_id: "binding-on" });
   assert.deepEqual(
-    on.prompt.layers!.map(({ layer }) => layer),
-    ["system", "agent"],
+    on.prompt.parts!.map(({ part, origin, path, text }) => [
+      part,
+      origin,
+      path,
+      part === PromptPart.Binding ? text : null,
+    ]),
+    [
+      [PromptPart.Standard, PromptOrigin.Binary, null, null],
+      [PromptPart.Role, PromptOrigin.Binary, null, null],
+      [PromptPart.Binding, PromptOrigin.Database, null, PROJECT_TEXT],
+    ],
   );
   assert.ok(
     on.prompt.final.endsWith(
@@ -405,17 +410,9 @@ test("agent declaration read exposes prompts, tools and current enablement witho
   const declaration = await read();
   assert.equal(declaration.enablement, null);
   assert.deepEqual(declaration.tools, TOOLS);
-  const sources = Object.fromEntries(
-    declaration.prompt.layers!.flatMap(({ layer, sources }) =>
-      sources.map((source) => [`${layer}.${source.source}`, source]),
-    ),
-  );
-  assert.ok(
-    sources["system.base"]!.text?.startsWith(
-      "This text is the default standard.",
-    ),
-  );
-  assert.ok(sources["agent.shipped"]!.text?.startsWith("## Role"));
+  const parts = declaration.prompt.parts!;
+  assert.ok(parts[0]!.text.startsWith("This text is the default standard."));
+  assert.ok(parts[1]!.text.startsWith("## Role"));
   assert.equal(declaration.configuration_schema.$schema, schemaVersion);
   assert.equal(declaration.configuration_schema.additionalProperties, false);
   assert.deepEqual(declaration.configuration_schema.required, [
@@ -1691,434 +1688,6 @@ test("every listed model and reasoning effort passes the configuration validatio
           ),
         );
   }
-});
-
-const PROMPT_TARGETS = [
-  { scope: PromptScope.System },
-  { scope: PromptScope.Agent, agent_name: AGENT },
-  { scope: PromptScope.Workbench, agent_name: AGENT },
-] as const;
-
-function allOn(scope: PromptScope) {
-  return Object.fromEntries(PROMPT_SWITCHES[scope].map((name) => [name, true]));
-}
-
-test("prompt settings of an absent row answer every switch on and an empty text", (t) => {
-  const f = enablementFixture(t);
-  for (const target of PROMPT_TARGETS)
-    assert.deepEqual(
-      f.store.transaction((tx) =>
-        promptSettings(
-          tx,
-          target.scope,
-          "agent_name" in target ? target.agent_name : undefined,
-        ),
-      ),
-      {
-        scope: target.scope,
-        agent_name: "agent_name" in target ? target.agent_name : "",
-        switches: allOn(target.scope),
-        custom_text: "",
-        system_layer: target.scope === PromptScope.Agent ? "inherit" : null,
-        revision: 0,
-      },
-    );
-});
-
-test("prompt writes create the row at revision one and replace it at the expected revision", (t) => {
-  const f = enablementFixture(t);
-  for (const target of PROMPT_TARGETS) {
-    const agentName = "agent_name" in target ? target.agent_name : "";
-    const created = f.invoke(
-      "prompt.put",
-      { ...target, custom_text: "one" },
-      {},
-    );
-    assert.deepEqual(created, {
-      scope: target.scope,
-      agent_name: agentName,
-      switches: allOn(target.scope),
-      custom_text: "one",
-      system_layer: target.scope === PromptScope.Agent ? "inherit" : null,
-      revision: 1,
-      locked_switches: [],
-    });
-    const switched = f.invoke(
-      "prompt.switch",
-      { ...target, expected_revision: 1, switch: "custom", enabled: false },
-      {},
-    );
-    assert.deepEqual(switched, {
-      ...created,
-      switches: { ...allOn(target.scope), custom: false },
-      revision: 2,
-    });
-    const replaced = f.invoke(
-      "prompt.put",
-      { ...target, expected_revision: 2, custom_text: "two" },
-      {},
-    );
-    assert.deepEqual(
-      [replaced.custom_text, replaced.revision],
-      ["two", THIRD_REVISION],
-    );
-    assert.deepEqual(replaced.switches, switched.switches);
-  }
-});
-
-const CUSTOM_A = "a";
-
-test("prompt read answers the settings of a scope, the absent row included", (t) => {
-  const f = enablementFixture(t);
-  const target = { scope: PromptScope.Agent, agent_name: AGENT };
-  assert.deepEqual(f.invoke("prompt.get", null, {}, target), {
-    ...target,
-    switches: allOn(PromptScope.Agent),
-    custom_text: "",
-    system_layer: "inherit",
-    revision: 0,
-    locked_switches: [],
-  });
-  f.invoke("prompt.put", { ...target, custom_text: CUSTOM_A }, {});
-  assert.equal(f.invoke("prompt.get", null, {}, target).custom_text, CUSTOM_A);
-  assert.equal(
-    f.invoke("prompt.get", null, {}, { scope: PromptScope.System })
-      .system_layer,
-    null,
-  );
-  refuses(
-    () => f.invoke("prompt.get", null, {}, { ...target, agent_name: UNKNOWN }),
-    AgentErrorCode.AgentNotFound,
-    HttpStatus.NotFound,
-  );
-});
-
-const HOST_FILE = "host_file";
-const HOST_TEXT = "host agent file text";
-
-function lockedFixture(t: TestContext, hostFile: boolean) {
-  const root = temporary(t);
-  mkdirSync(join(root, ".agents"));
-  writeFileSync(join(root, ".agents", "AGENTS.md"), HOST_TEXT);
-  const config = (host_file: boolean) => ({
-    prompt: { system_file: "", agent_directory: "", host_file },
-    cooldown: COOLDOWN_DEFAULTS,
-  });
-  const f = enablementFixture(t, {
-    config: config(hostFile),
-    dataDirectory: root,
-    hostHome: root,
-  });
-  const composeHostFile = async (host_file: boolean) => {
-    const component = new AgentComponent({
-      store: f.store,
-      ...fakeCollaborations,
-      credentialHolds: memoryCredentialHolds(),
-      config: config(host_file),
-      dataDirectory: root,
-      hostHome: root,
-    });
-    const layers = await component.composePrompt(AGENT, background);
-    return layers[0]!.sources.find(({ source }) => source === HOST_FILE)!;
-  };
-  return { ...f, composeHostFile };
-}
-
-test("prompt settings answer no locked switch by default and the host file when the configuration locks it", (t) => {
-  const unlocked = lockedFixture(t, true);
-  const locked = lockedFixture(t, false);
-  for (const target of PROMPT_TARGETS) {
-    const query = { ...target };
-    assert.deepEqual(
-      unlocked.invoke("prompt.get", null, {}, query).locked_switches,
-      [],
-    );
-    assert.deepEqual(
-      locked.invoke("prompt.get", null, {}, query).locked_switches,
-      target.scope === PromptScope.System ? [HOST_FILE] : [],
-    );
-  }
-  const put = locked.invoke(
-    "prompt.put",
-    { scope: PromptScope.System, custom_text: "x" },
-    {},
-  );
-  assert.deepEqual(put.locked_switches, [HOST_FILE]);
-  assert.deepEqual(put.switches, allOn(PromptScope.System));
-});
-
-test("a locked host file switch answers a refusal after the revision check and keeps the other switches writable", (t) => {
-  const locked = lockedFixture(t, false);
-  const body = { scope: PromptScope.System, switch: HOST_FILE, enabled: false };
-  refuses(
-    () => locked.invoke("prompt.switch", body, {}),
-    AgentErrorCode.PromptSwitchLocked,
-    HttpStatus.Conflict,
-    { scope: PromptScope.System, switch: HOST_FILE },
-  );
-  assert.equal(
-    locked.store.transaction((tx) => promptSettings(tx, PromptScope.System))
-      .revision,
-    ABSENT_REVISION,
-  );
-  const base = locked.invoke("prompt.switch", { ...body, switch: "base" }, {});
-  assert.deepEqual(
-    [base.switches.base, base.locked_switches, base.revision],
-    [false, [HOST_FILE], FIRST_REVISION],
-  );
-  refuses(
-    () => locked.invoke("prompt.switch", { ...body, expected_revision: 5 }, {}),
-    AgentErrorCode.PromptRevisionConflict,
-    HttpStatus.Conflict,
-    {
-      scope: PromptScope.System,
-      agent_name: "",
-      current: base,
-    },
-  );
-  const unlocked = lockedFixture(t, true);
-  const written = unlocked.invoke("prompt.switch", body, {});
-  assert.deepEqual(
-    [written.switches[HOST_FILE], written.locked_switches],
-    [false, []],
-  );
-});
-
-test("the composer resolves the host file off while locked and keeps the stored switch", async (t) => {
-  const f = lockedFixture(t, true);
-  assert.equal(
-    (await f.composeHostFile(true)).state,
-    PromptSourceState.Present,
-  );
-  f.invoke("prompt.put", { scope: PromptScope.System, custom_text: "x" }, {});
-  const locked = await f.composeHostFile(false);
-  assert.equal(locked.state, PromptSourceState.Off);
-  assert.equal(locked.enabled, false);
-  assert.equal(
-    f.store.transaction((tx) => promptSettings(tx, PromptScope.System))
-      .switches[HOST_FILE],
-    true,
-  );
-  const restored = await f.composeHostFile(true);
-  assert.equal(restored.state, PromptSourceState.Present);
-  assert.equal(restored.text, HOST_TEXT);
-});
-
-test("the system layer switch and the override of an agent decide its system layer", async (t) => {
-  const f = enablementFixture(t);
-  const operation = agentOperations.get;
-  const systemLayer = async () =>
-    operation.output
-      .parse(
-        await f.registry.get(operation.id).handler(
-          operation.input.parse({
-            params: { agent_name: AGENT },
-            query: {},
-            body: null,
-          }),
-          f.caller,
-        ),
-      )
-      .prompt.layers?.find(({ layer }) => layer === PromptLayerKind.System);
-  assert.equal((await systemLayer())?.enabled, true);
-  f.invoke(
-    "prompt.switch",
-    { scope: PromptScope.System, switch: "layer", enabled: false },
-    {},
-  );
-  const inherited = await systemLayer();
-  assert.equal(inherited?.enabled, false);
-  assert.ok(
-    inherited?.sources.every(({ state }) => state === PromptSourceState.Off),
-  );
-  const target = { scope: PromptScope.Agent, agent_name: AGENT };
-  const on = f.invoke("prompt.switch", { ...target, system_layer: "on" }, {});
-  assert.deepEqual([on.system_layer, on.revision], ["on", FIRST_REVISION]);
-  assert.equal((await systemLayer())?.enabled, true);
-  f.invoke(
-    "prompt.switch",
-    {
-      scope: PromptScope.System,
-      expected_revision: 1,
-      switch: "layer",
-      enabled: true,
-    },
-    {},
-  );
-  f.invoke(
-    "prompt.switch",
-    { ...target, expected_revision: 1, system_layer: "off" },
-    {},
-  );
-  assert.equal((await systemLayer())?.enabled, false);
-});
-
-test("a prompt switch takes either a source switch or the override of an agent scope", () => {
-  const body = agentOperations["prompt.switch"].input.shape.body;
-  const agent = { scope: PromptScope.Agent, agent_name: AGENT };
-  for (const invalid of [
-    agent,
-    { ...agent, switch: "custom", enabled: false, system_layer: "on" },
-    { ...agent, switch: "custom" },
-    { scope: PromptScope.System, system_layer: "on" },
-    { scope: PromptScope.Workbench, agent_name: AGENT, system_layer: "off" },
-    { ...agent, switch: "layer", enabled: false },
-  ])
-    assert.equal(
-      body.safeParse(invalid).success,
-      false,
-      JSON.stringify(invalid),
-    );
-  assert.ok(body.safeParse({ ...agent, system_layer: "inherit" }).success);
-  assert.ok(
-    body.safeParse({
-      scope: PromptScope.System,
-      switch: "layer",
-      enabled: true,
-    }).success,
-  );
-});
-
-test("a second prompt write at one expected revision answers a conflict with the current row", (t) => {
-  const f = enablementFixture(t);
-  const target = { scope: PromptScope.Agent, agent_name: AGENT };
-  const first = f.invoke("prompt.put", { ...target, custom_text: "a" }, {});
-  f.invoke(
-    "prompt.put",
-    { ...target, expected_revision: 1, custom_text: "b" },
-    {},
-  );
-  refuses(
-    () =>
-      f.invoke(
-        "prompt.put",
-        { ...target, expected_revision: 1, custom_text: "c" },
-        {},
-      ),
-    AgentErrorCode.PromptRevisionConflict,
-    HttpStatus.Conflict,
-    {
-      scope: target.scope,
-      agent_name: AGENT,
-      current: { ...first, custom_text: "b", revision: 2 },
-    },
-  );
-  refuses(
-    () => f.invoke("prompt.put", { ...target, custom_text: "d" }, {}),
-    AgentErrorCode.PromptRevisionConflict,
-    HttpStatus.Conflict,
-  );
-  refuses(
-    () =>
-      f.invoke(
-        "prompt.switch",
-        {
-          scope: PromptScope.System,
-          expected_revision: 1,
-          switch: "base",
-          enabled: false,
-        },
-        {},
-      ),
-    AgentErrorCode.PromptRevisionConflict,
-    HttpStatus.Conflict,
-  );
-});
-
-test("prompt writes refuse an oversized text, an empty agent layer and an unknown agent", (t) => {
-  const f = enablementFixture(t);
-  const target = { scope: PromptScope.Agent, agent_name: AGENT };
-  refuses(
-    () =>
-      f.invoke(
-        "prompt.put",
-        { ...target, custom_text: "a".repeat(PROMPT_TEXT_MAX_BYTES + 1) },
-        {},
-      ),
-    AgentErrorCode.PromptTooLarge,
-  );
-  assert.equal(
-    f.invoke(
-      "prompt.put",
-      { ...target, custom_text: "\u00e9".repeat(PROMPT_TEXT_MAX_BYTES / 2) },
-      {},
-    ).revision,
-    FIRST_REVISION,
-  );
-  f.invoke(
-    "prompt.switch",
-    { ...target, expected_revision: 1, switch: "agent_file", enabled: false },
-    {},
-  );
-  f.invoke(
-    "prompt.switch",
-    { ...target, expected_revision: 2, switch: "shipped", enabled: false },
-    {},
-  );
-  refuses(
-    () =>
-      f.invoke(
-        "prompt.switch",
-        { ...target, expected_revision: 3, switch: "custom", enabled: false },
-        {},
-      ),
-    AgentErrorCode.PromptAgentLayerEmpty,
-    HttpStatus.Conflict,
-  );
-  refuses(
-    () =>
-      f.invoke(
-        "prompt.put",
-        { scope: PromptScope.Workbench, agent_name: UNKNOWN, custom_text: "x" },
-        {},
-      ),
-    AgentErrorCode.AgentNotFound,
-    HttpStatus.NotFound,
-  );
-});
-
-test("prompt inputs refuse an unknown switch and a wrong agent name", () => {
-  const input = (body: unknown) =>
-    agentOperations["prompt.switch"].input.safeParse({
-      params: {},
-      query: {},
-      body,
-    }).success;
-  assert.equal(
-    input({ scope: "system", switch: "agents_md", enabled: true }),
-    false,
-  );
-  assert.equal(
-    input({
-      scope: "workbench",
-      agent_name: AGENT,
-      switch: "bogus",
-      enabled: true,
-    }),
-    false,
-  );
-  assert.equal(
-    input({
-      scope: "system",
-      agent_name: AGENT,
-      switch: "base",
-      enabled: true,
-    }),
-    false,
-  );
-  assert.equal(
-    input({ scope: "agent", switch: "custom", enabled: true }),
-    false,
-  );
-  assert.equal(
-    input({
-      scope: "agent",
-      agent_name: AGENT,
-      switch: "custom",
-      enabled: true,
-    }),
-    true,
-  );
 });
 
 const HAIKU = "claude-haiku-4-5";

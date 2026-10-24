@@ -35,21 +35,6 @@ import {
   type HolderScope,
   type DefaultConfiguration,
 } from "../agent/contract.ts";
-export const SourceState = {
-  Present: "present",
-  Absent: "absent",
-  Invalid: "invalid",
-} as const;
-export const InvalidReason = {
-  TooLarge: "too_large",
-  NotUtf8: "not_utf8",
-  ControlCharacter: "control_character",
-  NotRegularFile: "not_regular_file",
-  OutsideWorkspace: "outside_workspace",
-  Deadline: "deadline",
-  Unreadable: "unreadable",
-} as const;
-export type InvalidReason = (typeof InvalidReason)[keyof typeof InvalidReason];
 export const WorkerHost = {
   Kanthord: "kanthord",
   ExternalHarness: "external-harness",

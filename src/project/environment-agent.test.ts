@@ -20,13 +20,10 @@ import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { SHIPPED_TEMPLATES } from "../agent/prompt-templates.ts";
 import { framing, PromptConsumer } from "../agent/prompt-render.ts";
 import { ENV_AGENT_PROMPT } from "../agent/prompt-assets.ts";
-import { PromptLayer } from "../agent/prompt-composer.ts";
-import {
-  PromptLayerKind,
-  PromptOrigin,
-  PromptSourceState,
-  type AgentView,
-} from "../agent/contract.ts";
+import { getAgentDeclaration } from "../agent/catalog.ts";
+import { AgentErrorCode, type AgentView } from "../agent/contract.ts";
+import { InvalidReason } from "../agent/prompt-source.ts";
+import { resolveAgentPrompt } from "../agent/prompt-files.ts";
 import { loadPi } from "../agent/pi.ts";
 import {
   scriptedProvider,
@@ -35,6 +32,7 @@ import {
 import { background, CancellationContext } from "../kernel/context.ts";
 import { EnvironmentSource } from "../kernel/devcontainer.ts";
 import { FacilityError } from "../kernel/errors.ts";
+import { HttpStatus } from "../kernel/http.ts";
 import { testServiceIdentity } from "../kernel/test-identity.ts";
 import { IN_MEMORY_DATABASE, Store } from "../kernel/store.ts";
 import { temporary } from "../kernel/test-support.ts";
@@ -69,6 +67,8 @@ const BINDING_NAME = "app";
 const BINDING_ID = "binding_01";
 const ENV_BINDING_TEXT = "Use the pinned toolchain image.";
 const SWE_TEXT = "Prefer small commits.";
+const OVERRIDE_TEXT = "Use only the documented build command.";
+const INVALID_OVERRIDE_TEXT = "bell\u0007";
 const COMMIT = "0123456789abcdef";
 const TAIL = "npm ERR! missing script: build";
 const FAILURE_CLASS = "setup_failed";
@@ -120,28 +120,6 @@ const failure: ProofFile = {
   commit: "c1",
 };
 
-function agentLayer() {
-  return {
-    layer: PromptLayerKind.Agent,
-    name: PromptLayer.AgentLayer,
-    enabled: true,
-    sources: [
-      {
-        source: "shipped",
-        origin: PromptOrigin.Binary,
-        path: null,
-        enabled: true,
-        state: PromptSourceState.Present,
-        reason: null,
-        digest: "digest",
-        text: ENV_AGENT_PROMPT,
-        owner: "kanthord",
-        label: "env@1.md",
-      },
-    ],
-  };
-}
-
 function text(message: { content: unknown }): string {
   return isString(message.content)
     ? message.content
@@ -178,7 +156,11 @@ function finishTool(handle: EnvironmentSessionHandle): ToolDefinition {
 function fixture(
   t: TestContext,
   script: FauxResponseStep[],
-  state: { view: AgentView; onExport?: () => void } = { view: available },
+  state: {
+    view: AgentView;
+    onExport?: () => void;
+    promptDirectory?: string;
+  } = { view: available },
 ) {
   const stateDirectory = temporary(t);
   const store = new Store(IN_MEMORY_DATABASE);
@@ -224,7 +206,13 @@ function fixture(
       }));
       return credentials;
     },
-    composePrompt: async () => [agentLayer()],
+    composePrompt: (agentName, context) =>
+      resolveAgentPrompt({
+        agent: getAgentDeclaration(agentName)!,
+        directory: state.promptDirectory ?? null,
+        workbench: false,
+        context,
+      }),
     repositoryPromptsOf: (_tx, bindingId) =>
       bindingId === BINDING_ID
         ? {
@@ -363,6 +351,49 @@ test(
     assert.ok(body.includes(BINDING_NAME));
     assert.ok(body.includes(FAILURE_CLASS));
     assert.ok(body.includes(TAIL));
+  },
+);
+
+test(
+  "an override file replaces the shipped env@1 prompt",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const promptDirectory = temporary(t);
+    writeFileSync(join(promptDirectory, `${ENV_AGENT_NAME}.md`), OVERRIDE_TEXT);
+    const f = fixture(t, [fauxAssistantMessage("done")], {
+      view: available,
+      promptDirectory,
+    });
+    assert.equal(await f.agent.run(f.input()), EnvironmentSessionEnd.Ended);
+    const first = f.provider.calls[0]!;
+    assert.ok(first.systemPrompt?.includes(OVERRIDE_TEXT));
+    assert.ok(!first.systemPrompt?.includes(ENV_AGENT_PROMPT));
+  },
+);
+
+test(
+  "an invalid override file answers 409 template_invalid with no model call",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const promptDirectory = temporary(t);
+    writeFileSync(
+      join(promptDirectory, `${ENV_AGENT_NAME}.md`),
+      INVALID_OVERRIDE_TEXT,
+    );
+    const f = fixture(t, [fauxAssistantMessage("done")], {
+      view: available,
+      promptDirectory,
+    });
+    await assert.rejects(f.agent.run(f.input()), {
+      status: HttpStatus.Conflict,
+      code: AgentErrorCode.PromptTemplateInvalid,
+      details: {
+        file: `${ENV_AGENT_NAME}.md`,
+        path: join(promptDirectory, `${ENV_AGENT_NAME}.md`),
+        reason: InvalidReason.ControlCharacter,
+      },
+    });
+    assert.equal(f.provider.calls.length, NO_CALLS);
   },
 );
 

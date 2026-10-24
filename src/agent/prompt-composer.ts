@@ -3,20 +3,6 @@ import { createHash } from "node:crypto";
 import { PromptTemplate, type PromptTemplates } from "./contract.ts";
 import { renderTemplate } from "./prompt-templates.ts";
 
-export const PromptLayer = {
-  Work: "work prompt",
-  SystemLayer: "system layer",
-  AgentLayer: "agent layer",
-  WorkingLayer: "working layer",
-} as const;
-export type PromptLayer = (typeof PromptLayer)[keyof typeof PromptLayer];
-export interface LayerText {
-  layer: PromptLayer;
-  owner: string;
-  source: string;
-  text: string;
-  message: string;
-}
 export interface WorkPrompt {
   text: string;
   digest: string;
@@ -26,27 +12,6 @@ export function digest(text: string): string {
   assert.match(result, /^[a-f0-9]{64}$/);
   assert.ok(Buffer.isEncoding("utf8"));
   return result;
-}
-
-export function layerText(
-  templates: PromptTemplates,
-  layer: PromptLayer,
-  owner: string,
-  source: string,
-  text: string,
-): LayerText {
-  assert.ok(owner);
-  assert.ok(source);
-  return {
-    layer,
-    owner,
-    source,
-    text,
-    message: renderTemplate(templates, PromptTemplate.LayerMessage, {
-      source,
-      text,
-    }),
-  };
 }
 
 const LISTED_REPOSITORIES_MIN = 2;

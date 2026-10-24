@@ -1,12 +1,13 @@
 import assert from "node:assert/strict";
-import { PromptLayerKind, PromptSourceState } from "./contract.ts";
-import { layerText, type LayerText } from "./prompt-composer.ts";
-import type { ResolvedLayer } from "./prompt-layers.ts";
 import {
+  PromptOrigin,
+  PromptPart,
   PromptTemplate,
   type AgentName,
+  type PromptPartAnswer,
   type PromptTemplates,
 } from "./contract.ts";
+import { digest } from "./prompt-composer.ts";
 import { renderTemplate } from "./prompt-templates.ts";
 
 export const PromptConsumer = {
@@ -29,87 +30,47 @@ export function framing(
   return renderTemplate(templates, FRAMING_TEMPLATES[consumer], {});
 }
 
-export function layerTexts(
-  layer: ResolvedLayer,
-  templates: PromptTemplates,
-): LayerText[] {
-  return layer.sources
-    .filter((source) => source.state === PromptSourceState.Present)
-    .map((source) => {
-      assert.ok(source.text !== null);
-      return layerText(
-        templates,
-        layer.name,
-        source.owner,
-        source.label,
-        source.text,
-      );
-    });
-}
-
 const PART_SEPARATOR = "\n\n";
 const NO_CHARACTERS = 0;
 
-export interface BindingPrompt {
-  name: string;
-  text: string;
-}
-
-export function bindingPrompts(
+export function bindingParts(
   repositories: readonly {
     name: string;
     prompts: Partial<Record<AgentName, string>>;
   }[],
   agentName: string,
-): BindingPrompt[] {
+): PromptPartAnswer[] {
   return repositories.flatMap(({ name, prompts }) => {
     const text = Object.hasOwn(prompts, agentName)
       ? prompts[agentName as AgentName]
       : undefined;
     return text === undefined || text.trim().length === NO_CHARACTERS
       ? []
-      : [{ name, text }];
+      : [
+          {
+            part: PromptPart.Binding,
+            name,
+            origin: PromptOrigin.Database,
+            path: null,
+            digest: digest(text),
+            text,
+          },
+        ];
   });
 }
 
-function bindingText(binding: BindingPrompt): string {
-  assert.ok(binding.name);
-  return `Instructions of repository ${binding.name}:\n\n${binding.text}`;
+function partText(part: PromptPartAnswer): string {
+  if (part.part !== PromptPart.Binding) return part.text;
+  assert.ok(part.name);
+  return `Instructions of repository ${part.name}:\n\n${part.text}`;
 }
 
 export function systemPrompt(
-  layers: readonly ResolvedLayer[],
+  parts: readonly PromptPartAnswer[],
   consumer: PromptConsumer,
   templates: PromptTemplates,
-  bindings: readonly BindingPrompt[] = [],
 ): string {
-  return [
-    ...layers
-      .filter((layer) => layer.layer !== PromptLayerKind.Working)
-      .flatMap((layer) => layerTexts(layer, templates))
-      .map(({ text }) => text),
-    ...bindings.map(bindingText),
-    framing(templates, consumer),
-  ].join(PART_SEPARATOR);
-}
-
-export function finalPrompt(
-  layers: readonly ResolvedLayer[],
-  consumer: PromptConsumer,
-  templates: PromptTemplates,
-  bindings: readonly BindingPrompt[] = [],
-): string {
-  return [
-    systemPrompt(layers, consumer, templates, bindings),
-    ...workingTexts(layers, templates).map(({ message }) => message),
-  ].join(PART_SEPARATOR);
-}
-
-export function workingTexts(
-  layers: readonly ResolvedLayer[],
-  templates: PromptTemplates,
-): LayerText[] {
-  return layers
-    .filter((layer) => layer.layer === PromptLayerKind.Working)
-    .flatMap((layer) => layerTexts(layer, templates));
+  return [...parts.map(partText), framing(templates, consumer)].join(
+    PART_SEPARATOR,
+  );
 }

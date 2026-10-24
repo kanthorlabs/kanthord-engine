@@ -439,12 +439,10 @@ function pinHarness(
   const agent = new AgentComponent({
     store: h.store,
     config: {
-      prompt: { system_file: "", agent_directory: "", host_file: true },
+      prompt: { agent_directory: "" },
       cooldown: COOLDOWN_DEFAULTS,
     },
     dataDirectory: "/nonexistent/data",
-    hostHome: "/nonexistent/home",
-    workbenchDirectory: (agentName) => `/nonexistent/workbench/${agentName}`,
     custodySuitability: () => {},
     copyHeld: () => true,
     credentialHolds: holds,

@@ -561,6 +561,7 @@ export async function gatewayFixture(
       typeof composeServices
     >[0]["environmentModelRuntimeFactory"];
     stateDirectory?: string;
+    agentDirectory?: string;
     serverSlotLimit?: number;
     containerImage?: string;
     intake?: { pendingEventLimit?: number; pollIntervalMs?: number };
@@ -588,6 +589,10 @@ export async function gatewayFixture(
     gateway: { port: 0, allowed_hosts: ["localhost"] },
     scheduler: options.scheduler ?? {},
     project: options.project ?? {},
+    agent:
+      options.agentDirectory === undefined
+        ? {}
+        : { prompt: { agent_directory: options.agentDirectory } },
     worker: {
       ...(options.serverSlotLimit === undefined
         ? {}

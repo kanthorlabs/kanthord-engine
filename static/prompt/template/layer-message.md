@@ -1,3 +1,0 @@
-Instructions of {{source}}:
-
-{{text}}

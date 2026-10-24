@@ -40,13 +40,8 @@ import { openSession, withDeadline } from "../agent/agent-session.ts";
 import { pinnedLayers } from "../agent/pinned-layers.ts";
 import { toolApproval } from "../agent/hooks/tool-approval.ts";
 import { loadPi } from "../agent/pi.ts";
-import type { ResolvedLayer } from "../agent/prompt-layers.ts";
-import type { PromptTemplates } from "../agent/contract.ts";
-import {
-  systemPrompt,
-  PromptConsumer,
-  workingTexts,
-} from "../agent/prompt-render.ts";
+import type { PromptPartAnswer, PromptTemplates } from "../agent/contract.ts";
+import { systemPrompt, PromptConsumer } from "../agent/prompt-render.ts";
 import {
   connectModel,
   type ModelConnectorInput,
@@ -100,7 +95,7 @@ export interface Dependencies {
   stateDirectory: string;
   hostHome?: string;
   agentPrompt: {
-    compose(agentName: string, context: Context): Promise<ResolvedLayer[]>;
+    compose(agentName: string, context: Context): Promise<PromptPartAnswer[]>;
     templates(context: Context): Promise<PromptTemplates>;
   };
   agentConfiguration: {
@@ -358,13 +353,12 @@ export class WorkbenchService implements Service {
         );
       });
       const hostHome = this.dependencies.hostHome ?? homedir();
-      const layers = await this.dependencies.agentPrompt.compose(
+      const parts = await this.dependencies.agentPrompt.compose(
         session.agentName,
         context,
       );
       const templates = await this.dependencies.agentPrompt.templates(context);
-      const prompt = systemPrompt(layers, PromptConsumer.Workbench, templates);
-      const pins = pinnedLayers(workingTexts(layers, templates));
+      const prompt = systemPrompt(parts, PromptConsumer.Workbench, templates);
       const builtin = builtinTools(
         await loadPi(),
         session.agentName,
@@ -395,7 +389,6 @@ export class WorkbenchService implements Service {
         customTools: [...builtin.customTools, ...operations],
         hostHome,
         hooks: [
-          pins.hook,
           toolApproval({
             approve: async (call, signal) => {
               const operation = mutations.get(call.toolName);
@@ -416,7 +409,7 @@ export class WorkbenchService implements Service {
         context,
         sessionManager: session.manager,
       });
-      pins.pinInference(agent, prompt);
+      pinnedLayers().pinInference(agent, prompt);
       const opened = agent;
       const unsubscribeEvents = opened.subscribe((event) => {
         if (event.type === AGENT_END && session.run) session.run.ended = true;

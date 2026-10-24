@@ -62,7 +62,7 @@ test("agent migration creates the agent enablement schema", () => {
   }
 });
 
-test("agent migration creates the prompt settings schema", () => {
+test("agent migration creates no prompt table", () => {
   const store = new Store(IN_MEMORY_DATABASE);
   try {
     store.migrate([
@@ -70,35 +70,11 @@ test("agent migration creates the prompt settings schema", () => {
     ]);
     assert.deepEqual(
       store.database
-        .prepare("PRAGMA table_info(agent_prompt)")
-        .all()
-        .map(({ name, type, notnull, pk }) => ({ name, type, notnull, pk })),
-      [
-        { name: "id", type: "TEXT", notnull: 1, pk: 1 },
-        { name: "scope", type: "TEXT", notnull: 1, pk: 0 },
-        { name: "agent_name", type: "TEXT", notnull: 1, pk: 0 },
-        { name: "switches", type: "TEXT", notnull: 1, pk: 0 },
-        { name: "custom_text", type: "TEXT", notnull: 1, pk: 0 },
-        { name: "system_layer", type: "TEXT", notnull: 0, pk: 0 },
-        { name: "revision", type: "INTEGER", notnull: 1, pk: 0 },
-        { name: "updated_at", type: "INTEGER", notnull: 1, pk: 0 },
-      ],
-    );
-    assert.deepEqual(
-      store.database
-        .prepare("PRAGMA index_list(agent_prompt)")
-        .all()
-        .filter((row) => row.origin === CREATED_INDEX_ORIGIN)
-        .map((row) => ({ name: row.name, unique: row.unique })),
-      [{ name: "agent_prompt_scope_agent_name", unique: 1 }],
-    );
-    assert.equal(
-      store.database
-        .prepare("SELECT sql FROM sqlite_master WHERE name = 'agent_prompt'")
-        .get()
-        ?.sql?.toString()
-        .includes("CHECK"),
-      false,
+        .prepare(
+          "SELECT name FROM sqlite_master WHERE name LIKE 'agent_prompt%'",
+        )
+        .all(),
+      [],
     );
   } finally {
     store.close();

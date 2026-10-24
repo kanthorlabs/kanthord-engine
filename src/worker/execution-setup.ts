@@ -17,11 +17,11 @@ import {
   type SchedulerClaims,
 } from "./contract.ts";
 import {
-  bindingPrompts,
+  bindingParts,
   PromptConsumer,
   systemPrompt,
 } from "../agent/prompt-render.ts";
-import type { ResolvedLayer } from "../agent/prompt-layers.ts";
+import type { PromptPartAnswer } from "../agent/contract.ts";
 import type { Dependencies, WorkerService } from "./service.ts";
 import { RepositoryErrorCode } from "../repository/contract.ts";
 
@@ -79,9 +79,9 @@ export async function executionSetup(
     assert.ok(row);
     return worker.declarationOf(row.worker_name)?.agent_names ?? [];
   });
-  const layers = new Map<string, ResolvedLayer[]>();
+  const parts = new Map<string, PromptPartAnswer[]>();
   for (const agentName of nativeAgentNames)
-    layers.set(
+    parts.set(
       agentName,
       await dependencies.agentPrompt.compose(agentName, caller.context),
     );
@@ -160,8 +160,8 @@ export async function executionSetup(
       }
       assert.ok(view.effective);
       const record = pinned(tx, view.effective.credential);
-      const agentLayers = layers.get(agentName);
-      assert.ok(agentLayers);
+      const agentParts = parts.get(agentName);
+      assert.ok(agentParts);
       return {
         agent_name: agentName,
         effective_configuration: view.effective,
@@ -171,10 +171,9 @@ export async function executionSetup(
         metadata: record.metadata,
         prompt: {
           final: systemPrompt(
-            agentLayers,
+            [...agentParts, ...bindingParts(policies, agentName)],
             PromptConsumer.Worker,
             templates,
-            bindingPrompts(policies, agentName),
           ),
         },
       };

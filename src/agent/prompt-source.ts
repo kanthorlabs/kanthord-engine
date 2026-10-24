@@ -1,14 +1,26 @@
 import assert from "node:assert/strict";
 import { constants } from "node:fs";
 import { open, realpath } from "node:fs/promises";
-import { isAbsolute, relative, sep } from "node:path";
 import {
   CancellationContext,
   cancelled,
   type Context,
 } from "../kernel/context.ts";
-import { InvalidReason, SourceState } from "../worker/contract.ts";
-export { InvalidReason, SourceState } from "../worker/contract.ts";
+
+export const SourceState = {
+  Present: "present",
+  Absent: "absent",
+  Invalid: "invalid",
+} as const;
+export const InvalidReason = {
+  TooLarge: "too_large",
+  NotUtf8: "not_utf8",
+  ControlCharacter: "control_character",
+  NotRegularFile: "not_regular_file",
+  Deadline: "deadline",
+  Unreadable: "unreadable",
+} as const;
+export type InvalidReason = (typeof InvalidReason)[keyof typeof InvalidReason];
 
 export const PROMPT_SOURCE_MAX_BYTES = 32768;
 export const PROMPT_READ_DEADLINE_MS = 10000;
@@ -23,7 +35,6 @@ const TAB = 9;
 const NEWLINE = 10;
 const DELETE = 127;
 const MISSING = "ENOENT";
-const PARENT = "..";
 
 export function validateText(text: string): InvalidReason | null {
   assert.equal(typeof text, STRING_TYPE);
@@ -49,20 +60,10 @@ function invalid(path: string, reason: InvalidReason): SourceRead {
 
 async function readBounded(
   path: string,
-  workspace: string | null,
   context: Context,
 ): Promise<SourceRead> {
   context.signal.throwIfAborted();
   const resolved = await realpath(path);
-  if (workspace !== null) {
-    const location = relative(await realpath(workspace), resolved);
-    if (
-      location === PARENT ||
-      location.startsWith(`${PARENT}${sep}`) ||
-      isAbsolute(location)
-    )
-      return invalid(path, InvalidReason.OutsideWorkspace);
-  }
   context.signal.throwIfAborted();
   const file = await open(
     resolved,
@@ -102,7 +103,7 @@ async function readBounded(
 
 export async function readAgentFile(
   path: string,
-  options: { workspace: string | null; context: Context },
+  options: { context: Context },
 ): Promise<SourceRead> {
   assert.equal(typeof path, STRING_TYPE);
   assert.ok(options.context);
@@ -112,7 +113,7 @@ export async function readAgentFile(
   );
   try {
     return await Promise.race([
-      readBounded(path, options.workspace, context),
+      readBounded(path, context),
       cancelled(context.signal).then(() =>
         invalid(path, InvalidReason.Deadline),
       ),

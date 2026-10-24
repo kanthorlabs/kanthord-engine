@@ -257,7 +257,7 @@ export async function openNativeAgent(
       }),
       context,
     );
-    const pins = pinnedLayers([]);
+    const pins = pinnedLayers();
     const pi = await withDeadline(loadPi(), context);
     let sessionId: string | undefined;
     if (input.spans) {

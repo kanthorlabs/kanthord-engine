@@ -1,10 +1,18 @@
 import type { Document } from "yaml";
 import { Diagnostic } from "../kernel/errors.ts";
 
-export interface ConfigChange {
-  readonly from: string;
-  readonly to: string;
-}
+export const ConfigChangeKind = {
+  Rename: "rename",
+  Removal: "removal",
+} as const;
+
+export type ConfigChange =
+  | {
+      readonly kind: typeof ConfigChangeKind.Rename;
+      readonly from: string;
+      readonly to: string;
+    }
+  | { readonly kind: typeof ConfigChangeKind.Removal; readonly key: string };
 
 export type ConfigStep = (document: Document) => readonly ConfigChange[];
 
@@ -32,7 +40,17 @@ export function renameKey(
     );
   document.setIn(target, document.getIn(source));
   document.deleteIn(source);
-  return [{ from, to }];
+  return [{ kind: ConfigChangeKind.Rename, from, to }];
+}
+
+export function removeKey(
+  document: Document,
+  key: string,
+): readonly ConfigChange[] {
+  const path = key.split(".");
+  if (!document.hasIn(path)) return [];
+  document.deleteIn(path);
+  return [{ kind: ConfigChangeKind.Removal, key }];
 }
 
 export const CONFIG_STEPS: readonly ConfigStep[] = [
@@ -48,6 +66,10 @@ export const CONFIG_STEPS: readonly ConfigStep[] = [
       "gateway.token_lifetime",
       "gateway.auth.token_lifetime",
     ),
+  ],
+  (document) => [
+    ...removeKey(document, "agent.prompt.system_file"),
+    ...removeKey(document, "agent.prompt.host_file"),
   ],
 ];
 

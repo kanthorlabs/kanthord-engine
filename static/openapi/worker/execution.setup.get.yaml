@@ -222,8 +222,6 @@ components:
           properties:
             work:
               type: string
-            layer-message:
-              type: string
             framing-worker:
               type: string
             framing-workbench:
@@ -242,7 +240,6 @@ components:
               type: string
           required:
             - work
-            - layer-message
             - framing-worker
             - framing-workbench
             - task-revision

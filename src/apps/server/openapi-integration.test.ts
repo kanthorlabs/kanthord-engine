@@ -82,7 +82,6 @@ test("published native setup is an execution-scoped bodyless read", () => {
 
 const SETUP_TEMPLATE_NAMES = [
   "work",
-  "layer-message",
   "framing-worker",
   "framing-workbench",
   "task-revision",
@@ -673,9 +672,6 @@ const OPERATION_INVENTORY: readonly (readonly [string, AccessPolicy])[] = [
   ["agent.model.list", AccessPolicy.Human],
   ["agent.cooldown.list", AccessPolicy.Human],
   ["agent.cooldown.clear", AccessPolicy.Human],
-  ["agent.prompt.put", AccessPolicy.Human],
-  ["agent.prompt.switch", AccessPolicy.Human],
-  ["agent.prompt.get", AccessPolicy.Human],
   ["worker.catalog.list", AccessPolicy.Human],
   ["worker.catalog.get", AccessPolicy.Human],
   ["agent.get", AccessPolicy.Human],
@@ -833,8 +829,8 @@ const OPERATION_INVENTORY: readonly (readonly [string, AccessPolicy])[] = [
   ["tracking.session.entry.list", AccessPolicy.Human],
   ["tracking.session.entry.get", AccessPolicy.Human],
 ];
-const OPERATION_COUNT = 219;
-const ROUTED_OPERATION_COUNT = 209;
+const OPERATION_COUNT = 216;
+const ROUTED_OPERATION_COUNT = 206;
 const INTAKE_OPERATION_COUNT = 22;
 const INTAKE_ROUTED_OPERATION_COUNT = 14;
 const SERVICE_OPERATION_IDS = [
@@ -1400,9 +1396,6 @@ test("published OpenAPI validates, matches the registry exactly, and describes r
     "agent.model.list",
     "agent.cooldown.list",
     "agent.cooldown.clear",
-    "agent.prompt.put",
-    "agent.prompt.switch",
-    "agent.prompt.get",
   ])
     assert.ok(emittedAgentIds.includes(id), id);
   for (const operation of [

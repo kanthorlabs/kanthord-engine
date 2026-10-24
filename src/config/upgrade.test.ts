@@ -21,6 +21,8 @@ const LEGACY_VERSION = 1;
 const MIGRATED_LIMIT = 4;
 const MIGRATED_VERSION = 2;
 const MIGRATED_LIFETIME = 600;
+const PROMPT_FILES_VERSION = 2;
+const PROMPT_DIRECTORY_LINE = "  prompt:\n    agent_directory: agents\n";
 
 function legacyConfig(): string {
   return `${COMMENT}\n${initialConfig()
@@ -99,7 +101,7 @@ test("upgrade renames the keys, keeps comments and values, sets the version and 
   assert.equal(upgrade.from, LEGACY_VERSION);
   assert.equal(upgrade.to, CONFIG_VERSION);
   assert.deepEqual(upgrade.changes, [
-    { from: `mission.${OLD_KEY}`, to: `mission.${NEW_KEY}` },
+    { kind: "rename", from: `mission.${OLD_KEY}`, to: `mission.${NEW_KEY}` },
   ]);
   assert.ok(upgrade.content!.startsWith(COMMENT));
   assert.ok(!upgrade.content!.includes(OLD_KEY));
@@ -142,12 +144,44 @@ test("upgrade moves the gateway token keys into the nested auth mapping", () => 
   assert.ok(!flat.includes(nested));
   const upgrade = upgradeConfig(flat);
   assert.deepEqual(upgrade.changes, [
-    { from: "gateway.token_version", to: "gateway.auth.version" },
-    { from: "gateway.token_lifetime", to: "gateway.auth.token_lifetime" },
+    {
+      kind: "rename",
+      from: "gateway.token_version",
+      to: "gateway.auth.version",
+    },
+    {
+      kind: "rename",
+      from: "gateway.token_lifetime",
+      to: "gateway.auth.token_lifetime",
+    },
   ]);
   assert.ok(!upgrade.content!.includes("token_version"));
   assert.deepEqual(
     configuration(parseMapping(upgrade.content!)).getProperties().gateway.auth,
     { version: MIGRATED_VERSION, token_lifetime: MIGRATED_LIFETIME },
+  );
+});
+
+test("upgrade removes the system file and the host file keys of the agent prompt", () => {
+  const legacy = initialConfig()
+    .replace(CURRENT_VERSION_LINE, `version: ${PROMPT_FILES_VERSION}\n`)
+    .replace(
+      PROMPT_DIRECTORY_LINE,
+      `  prompt:\n    system_file: ""\n${PROMPT_DIRECTORY_LINE.slice("  prompt:\n".length)}    host_file: true\n`,
+    );
+  assert.ok(legacy.includes("host_file"));
+  const upgrade = upgradeConfig(legacy);
+  assert.equal(upgrade.from, PROMPT_FILES_VERSION);
+  assert.equal(upgrade.to, CONFIG_VERSION);
+  assert.deepEqual(upgrade.changes, [
+    { kind: "removal", key: "agent.prompt.system_file" },
+    { kind: "removal", key: "agent.prompt.host_file" },
+  ]);
+  assert.ok(upgrade.content!.includes(PROMPT_DIRECTORY_LINE));
+  assert.ok(!upgrade.content!.includes("system_file"));
+  assert.ok(!upgrade.content!.includes("host_file"));
+  assert.deepEqual(
+    configuration(parseMapping(upgrade.content!)).getProperties().agent.prompt,
+    { agent_directory: "agents" },
   );
 });

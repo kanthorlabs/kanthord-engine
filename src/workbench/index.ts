@@ -5,4 +5,3 @@ export {
 } from "./service.ts";
 export { workbenchMigrations } from "./migrations.ts";
 export { toolName } from "./tools.ts";
-export { workbenchDirectory } from "./sessions.ts";

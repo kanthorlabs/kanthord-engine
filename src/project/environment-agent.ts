@@ -20,10 +20,13 @@ import { getAgentDeclaration } from "../agent/catalog.ts";
 import { openSession, withDeadline } from "../agent/agent-session.ts";
 import { checkoutConfinement } from "../agent/hooks/checkout-confinement.ts";
 import { loadPi } from "../agent/pi.ts";
-import type { PromptTemplates, AgentView } from "../agent/contract.ts";
-import type { ResolvedLayer } from "../agent/prompt-layers.ts";
+import type {
+  AgentView,
+  PromptPartAnswer,
+  PromptTemplates,
+} from "../agent/contract.ts";
 import {
-  bindingPrompts,
+  bindingParts,
   PromptConsumer,
   systemPrompt,
 } from "../agent/prompt-render.ts";
@@ -65,7 +68,10 @@ export interface EnvironmentAgentDependencies {
   identity: ServiceIdentity;
   agentView(tx: Transaction, agentName: string): AgentView | null;
   serverAgentCredentials(input: ServerAgentCredentialsInput): CredentialStore;
-  composePrompt(agentName: string, context: Context): Promise<ResolvedLayer[]>;
+  composePrompt(
+    agentName: string,
+    context: Context,
+  ): Promise<PromptPartAnswer[]>;
   repositoryPromptsOf(
     tx: Transaction,
     bindingId: string,
@@ -214,7 +220,7 @@ export class EnvironmentAgent {
       }),
       input.context,
     );
-    const layers = await this.dependencies.composePrompt(
+    const parts = await this.dependencies.composePrompt(
       ENV_AGENT_NAME,
       input.context,
     );
@@ -236,10 +242,12 @@ export class EnvironmentAgent {
       model,
       thinkingLevel: effective.reasoning_effort as ReasoningLevel,
       systemPrompt: systemPrompt(
-        layers,
+        [
+          ...parts,
+          ...bindingParts(repository ? [repository] : [], ENV_AGENT_NAME),
+        ],
         PromptConsumer.Worker,
         templates,
-        bindingPrompts(repository ? [repository] : [], ENV_AGENT_NAME),
       ),
       allowlist: [
         ...declaration.tools,

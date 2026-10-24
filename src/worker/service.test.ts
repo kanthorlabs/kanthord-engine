@@ -208,12 +208,10 @@ const PROVIDER_CAPABILITY = "model-list read";
 const SERVER_SCOPE = { holders: [SERVER_HOLDER], claimant: SERVER_HOLDER };
 const fakeAgentCollaborations: Omit<AgentDependencies, "store"> = {
   config: {
-    prompt: { system_file: "", agent_directory: "", host_file: true },
+    prompt: { agent_directory: "" },
     cooldown: COOLDOWN_DEFAULTS,
   },
   dataDirectory: "/nonexistent/data",
-  hostHome: "/nonexistent/home",
-  workbenchDirectory: (agentName) => `/nonexistent/workbench/${agentName}`,
   custodySuitability: () => {},
   copyHeld: () => true,
   credentialHolds: memoryCredentialHolds(),

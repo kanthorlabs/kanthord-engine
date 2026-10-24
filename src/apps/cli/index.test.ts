@@ -1198,21 +1198,17 @@ test("agent enablement commands expose offline help and validate inputs before I
   );
 });
 
-test("agent get and prompt commands expose help and refuse invalid options before I/O", async (t) => {
+test("agent get exposes help, refuses invalid options before I/O and has no prompt command", async (t) => {
   const env = environment(temporary(t));
-  const remote = ["--endpoint", "http://127.0.0.1:1", "--token", "t"];
-  for (const [path, flags] of [
-    [
-      ["get"],
-      /--view <view>[\s\S]*--project <project-id>[\s\S]*--binding-id <binding-id>/,
-    ],
-    [["prompt", "put"], /--scope <scope>[\s\S]*--file <path>/],
-    [["prompt", "switch"], /--switch <source>[\s\S]*--on[\s\S]*--off/],
-  ] as const) {
-    const help = await invocation(["agent", ...path, "--help"], env, t.signal);
-    assert.equal(help.status, ExitCode.Success, help.stderr);
-    assert.match(help.stdout, flags);
-  }
+  const help = await invocation(["agent", "get", "--help"], env, t.signal);
+  assert.equal(help.status, ExitCode.Success, help.stderr);
+  assert.match(
+    help.stdout,
+    /--view <view>[\s\S]*--project <project-id>[\s\S]*--binding-id <binding-id>/,
+  );
+  const agentHelp = await invocation(["agent", "--help"], env, t.signal);
+  assert.equal(agentHelp.status, ExitCode.Success, agentHelp.stderr);
+  assert.doesNotMatch(agentHelp.stdout, /^ +prompt\b/m);
   for (const [args, code] of [
     [["get", "swe@1", "--view", "full"], "cli.agent.get.invalid_view"],
     [
@@ -1224,119 +1220,14 @@ test("agent get and prompt commands expose help and refuse invalid options befor
       "cli.agent.get.project_binding_pair_required",
     ],
     [["get", "swe@1", "--view", "final"], "cli.agent.get.token_required"],
-    [
-      ["prompt", "put", "--scope", "global", "--file", "a.md"],
-      "cli.agent.prompt.put.invalid_scope",
-    ],
-    [
-      [
-        "prompt",
-        "put",
-        "--scope",
-        "system",
-        "--agent",
-        "swe@1",
-        "--file",
-        "a.md",
-      ],
-      "cli.agent.prompt.put.agent_refused",
-    ],
-    [
-      ["prompt", "put", "--scope", "agent", "--file", "a.md"],
-      "cli.agent.prompt.put.agent_required",
-    ],
-    [
-      [
-        "prompt",
-        "put",
-        "--scope",
-        "system",
-        "--expected-revision",
-        "0",
-        "--file",
-        "a.md",
-      ],
-      "cli.agent.prompt.put.invalid_revision",
-    ],
-    [
-      ["prompt", "put", "--scope", "system", "--file", "a.md"],
-      "cli.agent.prompt.put.token_required",
-    ],
-    [
-      ["prompt", "switch", "--scope", "agent", "--switch", "custom", "--on"],
-      "cli.agent.prompt.switch.agent_required",
-    ],
-    [
-      [
-        "prompt",
-        "switch",
-        "--scope",
-        "system",
-        "--agent",
-        "swe@1",
-        "--switch",
-        "custom",
-        "--on",
-      ],
-      "cli.agent.prompt.switch.agent_refused",
-    ],
-    [
-      [
-        "prompt",
-        "switch",
-        "--scope",
-        "system",
-        "--switch",
-        "agent_file",
-        "--on",
-      ],
-      "cli.agent.prompt.switch.invalid_switch",
-    ],
-    [
-      ["prompt", "switch", "--scope", "system", "--switch", "custom"],
-      "cli.agent.prompt.switch.state_required",
-    ],
-    [
-      [
-        "prompt",
-        "switch",
-        "--scope",
-        "system",
-        "--switch",
-        "custom",
-        "--on",
-        "--off",
-      ],
-      "cli.agent.prompt.switch.state_required",
-    ],
-    [
-      [
-        "prompt",
-        "switch",
-        "--scope",
-        "system",
-        "--switch",
-        "custom",
-        "--on",
-        "--expected-revision",
-        "x",
-      ],
-      "cli.agent.prompt.switch.invalid_revision",
-    ],
-    [
-      ["prompt", "switch", "--scope", "system", "--switch", "custom", "--on"],
-      "cli.agent.prompt.switch.token_required",
-    ],
   ] as const) {
-    const withToken = code.endsWith("token_required") ? [] : remote;
     const result = await invocation(
       [
         "agent",
         ...args,
-        ...withToken,
         ...(code.endsWith("token_required")
           ? ["--endpoint", "http://127.0.0.1:1"]
-          : []),
+          : ["--endpoint", "http://127.0.0.1:1", "--token", "t"]),
       ],
       env,
       t.signal,
@@ -1349,22 +1240,6 @@ test("agent get and prompt commands expose help and refuse invalid options befor
       code,
     );
   }
-  const missing = await invocation(
-    [
-      "agent",
-      "prompt",
-      "put",
-      "--scope",
-      "system",
-      "--file",
-      "absent.md",
-      ...remote,
-    ],
-    env,
-    t.signal,
-  );
-  assert.equal(missing.status, ExitCode.Failure);
-  assert.match(missing.stderr, /^cli\.file\.not_found:/);
 });
 
 test("serve worker refuses --config and --token and requires an instance configuration before contacting a server", async (t) => {

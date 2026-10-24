@@ -259,7 +259,7 @@ test("agent prompt configuration defaults the agent directory to agents and acce
       master_key: masterKey,
     }).getProperties().agent,
     {
-      prompt: { system_file: "", agent_directory: "agents", host_file: true },
+      prompt: { agent_directory: "agents" },
       cooldown: {
         rate_limited_ms: 60000,
         unavailable_ms: 60000,
@@ -268,11 +268,7 @@ test("agent prompt configuration defaults the agent directory to agents and acce
       },
     },
   );
-  const prompt = {
-    system_file: "a/AGENTS.md",
-    agent_directory: "/agents",
-    host_file: false,
-  };
+  const prompt = { agent_directory: "/agents" };
   assert.deepEqual(
     configuration({
       version: CONFIG_VERSION,
@@ -282,13 +278,10 @@ test("agent prompt configuration defaults the agent directory to agents and acce
     prompt,
   );
   for (const bad of [
-    { system_file: 1 },
     { agent_directory: null },
-    { host_file: 1 },
-    { host_file: null },
-    { host_file: "off" },
-    { host_file: "no" },
-    { host_file: "false" },
+    { agent_directory: 1 },
+    { system_file: "" },
+    { host_file: true },
     { x: "" },
   ])
     assert.throws(

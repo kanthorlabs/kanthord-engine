@@ -547,15 +547,19 @@ test("E03.17 credential model list answers over HTTP before any enablement", asy
   assert.ok(answer.items.some((item) => item.model_identifier === SONNET));
 });
 
-test("E03.18 prompt read answers over HTTP beside the agent name path", async (t) => {
+test("E03.18 agent get answers the prompt parts over HTTP", async (t) => {
   const fixture = await setup(t);
-  const answer = success<{ scope: string; system_layer: string | null }>(
-    await kanthord(
-      ["agent", "prompt", "get", "--scope", "agent", "--agent", AGENT],
-      fixture.env,
-    ),
+  const answer = success<{
+    prompt: { parts: { part: string; name: string }[]; final: string };
+  }>(await kanthord(["agent", "get", AGENT], fixture.env));
+  assert.deepEqual(
+    answer.prompt.parts.map(({ part, name }) => [part, name]),
+    [
+      ["standard", "base.md"],
+      ["role", `${AGENT}.md`],
+      ["workbench", "workbench.md"],
+    ],
   );
-  assert.deepEqual([answer.scope, answer.system_layer], ["agent", "inherit"]);
 });
 
 test("E03.20 cooldown list answers no hold and a clear of a credential with no hold is refused", async (t) => {
