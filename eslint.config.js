@@ -320,7 +320,6 @@ export default tseslint.config(
                       "environment",
                       "catalog",
                       "prompt-composer",
-                      "prompt-layers",
                       "prompt-render",
                       "prompt-templates",
                       "prompt-source",
