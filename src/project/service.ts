@@ -816,6 +816,27 @@ export class ProjectService implements Service, ProjectBindings {
       ({ params }, caller) => this.environments.read(params, caller),
     );
     registry.register(
+      projectOperations["environment.list"],
+      ({ params }, caller) =>
+        caller.commit((tx) => {
+          requireProject(tx, params.project_id);
+          return { items: this.environmentStates(params.project_id) };
+        }),
+    );
+    registry.register(
+      projectOperations["binding.environment.rebuild"],
+      async ({ params }, caller) => {
+        this.operationalStore.transaction((tx) =>
+          requireRepositoryBinding(tx, params),
+        );
+        const state = await this.rebuildEnvironment(
+          params.project_id,
+          params.binding_id,
+        );
+        return caller.commit(() => state);
+      },
+    );
+    registry.register(
       projectOperations["binding.check"],
       ({ params, body }, caller) =>
         this.checkBinding(params, body.config, caller),

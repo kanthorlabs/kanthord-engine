@@ -14,48 +14,41 @@ import { join } from "node:path";
 import { z } from "zod";
 import { EnvironmentSource, type Environment } from "../kernel/devcontainer.ts";
 import { digest, timestamp } from "../kernel/json.ts";
+import {
+  EnvironmentFailureClass,
+  EnvironmentStatus,
+  EnvironmentTarget,
+  FailureOrigin,
+  MAX_CHECKS,
+  checkResultSchema,
+  environmentFailureClassSchema,
+  environmentFailureSchema,
+  environmentStateSchema,
+  environmentStatusSchema,
+  environmentTargetSchema,
+  failureOriginSchema,
+  type CheckResult,
+} from "./contract.ts";
 
-export const EnvironmentStatus = {
-  None: "none",
-  Pending: "pending",
-  Building: "building",
-  Proving: "proving",
-  Ready: "ready",
-  Failed: "failed",
-} as const;
-export type EnvironmentStatus =
-  (typeof EnvironmentStatus)[keyof typeof EnvironmentStatus];
-export const environmentStatusSchema = z.enum(EnvironmentStatus);
-
-export const EnvironmentTarget = {
-  Image: "image",
-  Host: "host",
-  Remote: "remote",
-} as const;
-export type EnvironmentTarget =
-  (typeof EnvironmentTarget)[keyof typeof EnvironmentTarget];
-export const environmentTargetSchema = z.enum(EnvironmentTarget);
+export {
+  EnvironmentFailureClass,
+  EnvironmentStatus,
+  EnvironmentTarget,
+  FailureOrigin,
+  MAX_CHECKS,
+  checkResultSchema,
+  environmentFailureClassSchema,
+  environmentFailureSchema,
+  environmentStateSchema,
+  environmentStatusSchema,
+  environmentTargetSchema,
+  failureOriginSchema,
+};
+export type { CheckResult, EnvironmentState } from "./contract.ts";
 
 export const ProofOutcome = { Passed: "passed", Failed: "failed" } as const;
 export type ProofOutcome = (typeof ProofOutcome)[keyof typeof ProofOutcome];
 export const proofOutcomeSchema = z.enum(ProofOutcome);
-
-export const FailureOrigin = {
-  Onboarding: "onboarding",
-  Execution: "execution",
-} as const;
-export type FailureOrigin = (typeof FailureOrigin)[keyof typeof FailureOrigin];
-export const failureOriginSchema = z.enum(FailureOrigin);
-
-export const EnvironmentFailureClass = {
-  BuildFailed: "build_failed",
-  ImageInvalid: "image_invalid",
-  SetupFailed: "setup_failed",
-  CommandAbsent: "command_absent",
-} as const;
-export type EnvironmentFailureClass =
-  (typeof EnvironmentFailureClass)[keyof typeof EnvironmentFailureClass];
-export const environmentFailureClassSchema = z.enum(EnvironmentFailureClass);
 
 export const ProofPhase = { Setup: "setup", Check: "check" } as const;
 export type ProofPhase = (typeof ProofPhase)[keyof typeof ProofPhase];
@@ -68,7 +61,6 @@ export const BASE_SUFFIX = "-base";
 export const PROVED_SUFFIX = "-proved";
 export const UNCHECKED_SUFFIX = "-unchecked";
 export const TAIL_BYTES = 4096;
-export const MAX_CHECKS = 32;
 
 const PATH_MAX_LENGTH = 200;
 const PATH_KEPT_LENGTH = 180;
@@ -151,12 +143,6 @@ export function environmentDigest(input: EnvironmentDigestInput): string {
   });
 }
 
-export const checkResultSchema = z.strictObject({
-  command: z.string(),
-  exit_code: z.int().nullable(),
-});
-export type CheckResult = z.infer<typeof checkResultSchema>;
-
 export const proofFileSchema = z.strictObject({
   digest: z.string().min(1),
   outcome: proofOutcomeSchema,
@@ -172,36 +158,6 @@ export const proofFileSchema = z.strictObject({
   ended_at: timestamp,
 });
 export type ProofFile = z.infer<typeof proofFileSchema>;
-
-export const environmentFailureSchema = z.strictObject({
-  class: environmentFailureClassSchema.nullable(),
-  origin: failureOriginSchema,
-  execution_id: z.string().nullable(),
-  command: z.string().nullable(),
-  exit_code: z.int().nullable(),
-  tail: z.string(),
-  reproduce: z.string().nullable(),
-  ended_at: timestamp,
-});
-
-export const environmentStateSchema = z.strictObject({
-  binding_id: z.string().min(1),
-  binding_name: z.string().min(1),
-  resource_identity: z.string().min(1),
-  target: environmentTargetSchema,
-  source: z.enum(EnvironmentSource).nullable(),
-  status: environmentStatusSchema,
-  digest: z.string().min(1).nullable(),
-  tag: z.string().min(1).nullable(),
-  run_started_at: timestamp.nullable(),
-  step_started_at: timestamp.nullable(),
-  reason: z.string().nullable(),
-  failure: environmentFailureSchema.nullable(),
-  checks: z.array(checkResultSchema).max(MAX_CHECKS),
-  repairs: z.int().min(0),
-  repairing: z.boolean(),
-});
-export type EnvironmentState = z.infer<typeof environmentStateSchema>;
 
 export interface CommandResult {
   phase: ProofPhase;

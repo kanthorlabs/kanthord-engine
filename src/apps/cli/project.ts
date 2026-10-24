@@ -2,7 +2,10 @@ import assert from "node:assert/strict";
 import { Command } from "commander";
 import { httpClient, resolveClient } from "../../gateway/client.ts";
 import { Diagnostic } from "../../kernel/errors.ts";
-import { parseEnvironmentText } from "../../kernel/devcontainer.ts";
+import {
+  environmentSchema,
+  parseEnvironmentText,
+} from "../../kernel/devcontainer.ts";
 import { identitySchema } from "../../kernel/identity.ts";
 import {
   BINDING_ID_PREFIX,
@@ -155,6 +158,11 @@ const BINDING_CHECK_INDETERMINATE = "cli.project.binding.check.indeterminate";
 const ENVIRONMENT = "environment";
 const SHOW = "show";
 const SET = "set";
+const REBUILD = "rebuild";
+const UNSET = "unset";
+const ENVIRONMENT_EXPORT_ABSENT =
+  "cli.project.environment.export.environment_absent";
+const EXPORT_INDENT = 2;
 const ENVIRONMENT_SET_FILE_INVALID = "cli.project.environment.set.file_invalid";
 const ENVIRONMENT_EXAMPLE = {
   image: "mcr.microsoft.com/devcontainers/python:3.12",
@@ -529,15 +537,16 @@ function environmentCode(leaf: string, suffix: string): string {
   return `cli.project.environment.${leaf}.${suffix}`;
 }
 
-async function environmentShow(
+async function readEnvironment(
+  leaf: string,
   projectId: string,
   bindingId: string,
   command: Command,
-): Promise<void> {
-  validateProjectId(projectId, environmentCode(SHOW, "invalid_project_id"));
-  validateBindingId(bindingId, environmentCode(SHOW, "invalid_binding_id"));
+) {
+  validateProjectId(projectId, environmentCode(leaf, "invalid_project_id"));
+  validateBindingId(bindingId, environmentCode(leaf, "invalid_binding_id"));
   const { endpoint, token } = resolveClient(command.optsWithGlobals());
-  requireToken(token, environmentCode(SHOW, "token_required"));
+  requireToken(token, environmentCode(leaf, "token_required"));
   const result = await httpClient(projectOperations, endpoint, token)[
     "binding.environment.get"
   ]({
@@ -545,8 +554,47 @@ async function environmentShow(
     query: {},
     body: null,
   });
+  return handleReadResult(result, environmentCode(leaf, "indeterminate"));
+}
+
+async function environmentShow(
+  projectId: string,
+  bindingId: string,
+  command: Command,
+): Promise<void> {
+  const answer = await readEnvironment(SHOW, projectId, bindingId, command);
+  process.stdout.write(`${JSON.stringify(answer)}\n`);
+}
+
+async function environmentExport(
+  projectId: string,
+  bindingId: string,
+  command: Command,
+): Promise<void> {
+  const answer = await readEnvironment(EXPORT, projectId, bindingId, command);
+  if (answer.environment === null)
+    throw new Diagnostic(
+      ENVIRONMENT_EXPORT_ABSENT,
+      answer.reason ?? "the binding holds no environment to export",
+      { fields: [["source", answer.source]] },
+    );
   process.stdout.write(
-    `${JSON.stringify(handleReadResult(result, environmentCode(SHOW, "indeterminate")))}\n`,
+    `${JSON.stringify(answer.environment, null, EXPORT_INDENT)}\n`,
+  );
+}
+
+async function environmentList(
+  projectId: string,
+  command: Command,
+): Promise<void> {
+  validateProjectId(projectId, environmentCode(LIST, "invalid_project_id"));
+  const { endpoint, token } = resolveClient(command.optsWithGlobals());
+  requireToken(token, environmentCode(LIST, "token_required"));
+  const result = await httpClient(projectOperations, endpoint, token)[
+    "environment.list"
+  ]({ params: { project_id: projectId }, query: {}, body: null });
+  process.stdout.write(
+    `${JSON.stringify(handleReadResult(result, environmentCode(LIST, "indeterminate")))}\n`,
   );
 }
 
@@ -591,11 +639,115 @@ async function environmentSet(
   );
 }
 
+async function environmentRebuild(
+  projectId: string,
+  bindingId: string,
+  command: Command,
+): Promise<void> {
+  validateProjectId(projectId, environmentCode(REBUILD, "invalid_project_id"));
+  validateBindingId(bindingId, environmentCode(REBUILD, "invalid_binding_id"));
+  const options = command.optsWithGlobals();
+  const { endpoint, token } = resolveClient(options);
+  requireToken(token, environmentCode(REBUILD, "token_required"));
+  const key = resolveKey(options);
+  const result = await httpClient(projectOperations, endpoint, token)[
+    "binding.environment.rebuild"
+  ](
+    {
+      params: { project_id: projectId, binding_id: bindingId },
+      query: {},
+      body: null,
+    },
+    { idempotencyKey: key },
+  );
+  const data = handleMutationResult(
+    result,
+    environmentCode(REBUILD, "indeterminate"),
+    key,
+  );
+  process.stdout.write(
+    `${JSON.stringify({ ...data, idempotency_key: key })}\n`,
+  );
+}
+
+async function environmentUnset(
+  projectId: string,
+  bindingId: string,
+  command: Command,
+): Promise<void> {
+  validateProjectId(projectId, environmentCode(UNSET, "invalid_project_id"));
+  validateBindingId(bindingId, environmentCode(UNSET, "invalid_binding_id"));
+  const options = command.optsWithGlobals();
+  const { endpoint, token } = resolveClient(options);
+  requireToken(token, environmentCode(UNSET, "token_required"));
+  const key = resolveKey(options);
+  const result = await httpClient(projectOperations, endpoint, token)[
+    "binding.environment.set"
+  ](
+    {
+      params: { project_id: projectId, binding_id: bindingId },
+      query: {},
+      body: { environment: null },
+    },
+    { idempotencyKey: key },
+  );
+  const data = handleMutationResult(
+    result,
+    environmentCode(UNSET, "indeterminate"),
+    key,
+  );
+  process.stdout.write(
+    `${JSON.stringify({ ...data, idempotency_key: key })}\n`,
+  );
+}
+
 function addEnvironmentCommands(project: Command): void {
   const environment = project
     .command(ENVIRONMENT)
     .description("Project environment commands");
   environment.action(() => environment.help());
+  environment
+    .command(LIST)
+    .description("List the environment state of each repository binding")
+    .argument("<project-id>", "Project ID")
+    .action((projectId: string, _options, command: Command) =>
+      environmentList(projectId, command),
+    );
+  environment
+    .command(REBUILD)
+    .description(
+      "Discard the proof and the images of the environment of a repository binding and build it again",
+    )
+    .argument("<project-id>", "Project ID")
+    .argument("<binding-id>", "Repository binding ID")
+    .option("--idempotency-key <key>", "Mutation key", singleUse(KEY_OPTION))
+    .action(
+      (projectId: string, bindingId: string, _options, command: Command) =>
+        environmentRebuild(projectId, bindingId, command),
+    );
+  environment
+    .command(EXPORT)
+    .description(
+      "Print the environment of a repository binding as indented JSON for a devcontainer.json file",
+    )
+    .argument("<project-id>", "Project ID")
+    .argument("<binding-id>", "Repository binding ID")
+    .action(
+      (projectId: string, bindingId: string, _options, command: Command) =>
+        environmentExport(projectId, bindingId, command),
+    );
+  environment
+    .command(UNSET)
+    .description(
+      "Remove the stored environment of a repository binding as a new binding revision",
+    )
+    .argument("<project-id>", "Project ID")
+    .argument("<binding-id>", "Repository binding ID")
+    .option("--idempotency-key <key>", "Mutation key", singleUse(KEY_OPTION))
+    .action(
+      (projectId: string, bindingId: string, _options, command: Command) =>
+        environmentUnset(projectId, bindingId, command),
+    );
   environment
     .command(SHOW)
     .description(
@@ -622,9 +774,7 @@ function addEnvironmentCommands(project: Command): void {
       )
       .option("--idempotency-key <key>", "Mutation key", singleUse(KEY_OPTION)),
     {
-      schema:
-        projectOperations["binding.environment.set"].input.shape.body.shape
-          .environment,
+      schema: environmentSchema,
       example: ENVIRONMENT_EXAMPLE,
       note: "The file is a devcontainer.json document. KanthorD never writes it to the repository.",
     },

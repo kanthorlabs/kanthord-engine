@@ -206,6 +206,8 @@ paths:
     $ref: ./openapi/project/binding.check.yaml#/pathItem
   /api/project/{project_id}/binding/{binding_id}/environment:
     $ref: ./openapi/project/binding.environment.get.yaml#/pathItem
+  /api/project/{project_id}/binding/{binding_id}/environment/rebuild:
+    $ref: ./openapi/project/binding.environment.rebuild.yaml#/pathItem
   /api/project/{project_id}/binding/{binding_id}:
     $ref: ./openapi/project/binding.get.yaml#/pathItem
   /api/project/{project_id}/binding/{binding_id}/instruction_files:
@@ -220,6 +222,8 @@ paths:
     $ref: ./openapi/project/bindingSet.get.yaml#/pathItem
   /api/project:
     $ref: ./openapi/project/create.yaml#/pathItem
+  /api/project/{project_id}/environment:
+    $ref: ./openapi/project/environment.list.yaml#/pathItem
   /api/project/{project_id}:
     $ref: ./openapi/project/get.yaml#/pathItem
   /api/project/{project_id}/pause:

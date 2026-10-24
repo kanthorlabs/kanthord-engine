@@ -1,0 +1,238 @@
+# Generated from the operation registry by kanthord gateway openapi.
+pathItem:
+  get:
+    operationId: project.environment.list
+    tags:
+      - project
+    description: List the environment state of each current repository binding of a project.
+    x-access-policy: human
+    x-timeout-ms: 30000
+    x-mutation: false
+    x-kanthord-lifetime: unary
+    security:
+      - bearerAuth: []
+    parameters:
+      - name: project_id
+        in: path
+        required: true
+        schema:
+          $ref: "#/components/schemas/project.environment.list.Input/properties/params/pr\
+            operties/project_id"
+    responses:
+      "200":
+        description: Completed result
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/project.environment.list.Output"
+      "400":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "401":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "403":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "404":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "409":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "413":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "415":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "500":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "503":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "504":
+        $ref: ../shared/components.yaml#/components/responses/Error
+components:
+  schemas:
+    project.environment.list.Input:
+      type: object
+      properties:
+        params:
+          type: object
+          properties:
+            project_id:
+              type: string
+              minLength: 1
+          required:
+            - project_id
+          additionalProperties: false
+        query:
+          type: object
+          properties: {}
+          additionalProperties: false
+        body:
+          type: "null"
+      required:
+        - params
+        - query
+        - body
+      additionalProperties: false
+    project.environment.list.Output:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            type: object
+            properties:
+              binding_id:
+                type: string
+                minLength: 1
+              binding_name:
+                type: string
+                minLength: 1
+              resource_identity:
+                type: string
+                minLength: 1
+              target:
+                type: string
+                enum:
+                  - image
+                  - host
+                  - remote
+              source:
+                anyOf:
+                  - type: string
+                    enum:
+                      - stored
+                      - repository
+                      - none
+                  - type: "null"
+              status:
+                type: string
+                enum:
+                  - none
+                  - pending
+                  - building
+                  - proving
+                  - ready
+                  - failed
+              digest:
+                anyOf:
+                  - type: string
+                    minLength: 1
+                  - type: "null"
+              tag:
+                anyOf:
+                  - type: string
+                    minLength: 1
+                  - type: "null"
+              run_started_at:
+                anyOf:
+                  - type: integer
+                    minimum: 0
+                    maximum: 9007199254740991
+                    description: Unix timestamp in milliseconds since 1970-01-01T00:00:00Z (UTC).
+                  - type: "null"
+              step_started_at:
+                anyOf:
+                  - type: integer
+                    minimum: 0
+                    maximum: 9007199254740991
+                    description: Unix timestamp in milliseconds since 1970-01-01T00:00:00Z (UTC).
+                  - type: "null"
+              reason:
+                anyOf:
+                  - type: string
+                  - type: "null"
+              failure:
+                anyOf:
+                  - type: object
+                    properties:
+                      class:
+                        anyOf:
+                          - type: string
+                            enum:
+                              - build_failed
+                              - image_invalid
+                              - setup_failed
+                              - command_absent
+                          - type: "null"
+                      origin:
+                        type: string
+                        enum:
+                          - onboarding
+                          - execution
+                      execution_id:
+                        anyOf:
+                          - type: string
+                          - type: "null"
+                      command:
+                        anyOf:
+                          - type: string
+                          - type: "null"
+                      exit_code:
+                        anyOf:
+                          - type: integer
+                            minimum: -9007199254740991
+                            maximum: 9007199254740991
+                          - type: "null"
+                      tail:
+                        type: string
+                      reproduce:
+                        anyOf:
+                          - type: string
+                          - type: "null"
+                      ended_at:
+                        type: integer
+                        minimum: 0
+                        maximum: 9007199254740991
+                        description: Unix timestamp in milliseconds since 1970-01-01T00:00:00Z (UTC).
+                    required:
+                      - class
+                      - origin
+                      - execution_id
+                      - command
+                      - exit_code
+                      - tail
+                      - reproduce
+                      - ended_at
+                    additionalProperties: false
+                  - type: "null"
+              checks:
+                maxItems: 32
+                type: array
+                items:
+                  type: object
+                  properties:
+                    command:
+                      type: string
+                    exit_code:
+                      anyOf:
+                        - type: integer
+                          minimum: -9007199254740991
+                          maximum: 9007199254740991
+                        - type: "null"
+                  required:
+                    - command
+                    - exit_code
+                  additionalProperties: false
+              repairs:
+                type: integer
+                minimum: 0
+                maximum: 9007199254740991
+              repairing:
+                type: boolean
+            required:
+              - binding_id
+              - binding_name
+              - resource_identity
+              - target
+              - source
+              - status
+              - digest
+              - tag
+              - run_started_at
+              - step_started_at
+              - reason
+              - failure
+              - checks
+              - repairs
+              - repairing
+            additionalProperties: false
+      required:
+        - items
+      additionalProperties: false

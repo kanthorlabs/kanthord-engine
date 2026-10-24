@@ -56,7 +56,8 @@ pathItem:
     operationId: project.binding.environment.set
     tags:
       - project
-    description: Store the environment of one repository binding as a new binding revision.
+    description: Store the environment of one repository binding as a new binding
+      revision, or remove it with null.
     x-access-policy: human
     x-timeout-ms: 30000
     x-mutation: true
@@ -250,6 +251,20 @@ components:
                             type: array
                             items:
                               type: string
+                customizations:
+                  type: object
+                  properties:
+                    kanthord:
+                      type: object
+                      properties:
+                        checks:
+                          maxItems: 32
+                          type: array
+                          items:
+                            type: string
+                            pattern: \S
+                      additionalProperties: {}
+                  additionalProperties: {}
               additionalProperties: {}
             - type: "null"
         reason:
@@ -286,102 +301,7 @@ components:
         body:
           type: object
           properties:
-            environment:
-              type: object
-              properties:
-                image:
-                  type: string
-                  minLength: 1
-                build:
-                  type: object
-                  properties:
-                    dockerfile:
-                      type: string
-                      minLength: 1
-                    context:
-                      type: string
-                      minLength: 1
-                  additionalProperties: {}
-                features:
-                  type: object
-                  propertyNames:
-                    type: string
-                  additionalProperties: {}
-                containerEnv:
-                  type: object
-                  propertyNames:
-                    type: string
-                  additionalProperties:
-                    type: string
-                remoteEnv:
-                  type: object
-                  propertyNames:
-                    type: string
-                  additionalProperties:
-                    anyOf:
-                      - type: string
-                      - type: "null"
-                onCreateCommand:
-                  anyOf:
-                    - anyOf:
-                        - type: string
-                          minLength: 1
-                        - minItems: 1
-                          type: array
-                          items:
-                            type: string
-                    - type: object
-                      propertyNames:
-                        type: string
-                      additionalProperties:
-                        anyOf:
-                          - type: string
-                            minLength: 1
-                          - minItems: 1
-                            type: array
-                            items:
-                              type: string
-                updateContentCommand:
-                  anyOf:
-                    - anyOf:
-                        - type: string
-                          minLength: 1
-                        - minItems: 1
-                          type: array
-                          items:
-                            type: string
-                    - type: object
-                      propertyNames:
-                        type: string
-                      additionalProperties:
-                        anyOf:
-                          - type: string
-                            minLength: 1
-                          - minItems: 1
-                            type: array
-                            items:
-                              type: string
-                postCreateCommand:
-                  anyOf:
-                    - anyOf:
-                        - type: string
-                          minLength: 1
-                        - minItems: 1
-                          type: array
-                          items:
-                            type: string
-                    - type: object
-                      propertyNames:
-                        type: string
-                      additionalProperties:
-                        anyOf:
-                          - type: string
-                            minLength: 1
-                          - minItems: 1
-                            type: array
-                            items:
-                              type: string
-              additionalProperties: {}
+            environment: {}
           required:
             - environment
           additionalProperties: false

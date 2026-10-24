@@ -22,6 +22,7 @@ import {
   type HolderScope,
 } from "../agent/contract.ts";
 import type { SshAccess } from "../repository/contract.ts";
+import { timestamp } from "../kernel/json.ts";
 import {
   EnvironmentSource,
   environmentSchema,
@@ -705,6 +706,82 @@ const bindingSetWriteAnswerSchema = z.strictObject({
     z.strictObject({ kind: z.enum(ChangeKind), binding_id: z.string() }),
   ),
 });
+export const EnvironmentStatus = {
+  None: "none",
+  Pending: "pending",
+  Building: "building",
+  Proving: "proving",
+  Ready: "ready",
+  Failed: "failed",
+} as const;
+export type EnvironmentStatus =
+  (typeof EnvironmentStatus)[keyof typeof EnvironmentStatus];
+export const environmentStatusSchema = z.enum(EnvironmentStatus);
+
+export const EnvironmentTarget = {
+  Image: "image",
+  Host: "host",
+  Remote: "remote",
+} as const;
+export type EnvironmentTarget =
+  (typeof EnvironmentTarget)[keyof typeof EnvironmentTarget];
+export const environmentTargetSchema = z.enum(EnvironmentTarget);
+
+export const FailureOrigin = {
+  Onboarding: "onboarding",
+  Execution: "execution",
+} as const;
+export type FailureOrigin = (typeof FailureOrigin)[keyof typeof FailureOrigin];
+export const failureOriginSchema = z.enum(FailureOrigin);
+
+export const EnvironmentFailureClass = {
+  BuildFailed: "build_failed",
+  ImageInvalid: "image_invalid",
+  SetupFailed: "setup_failed",
+  CommandAbsent: "command_absent",
+} as const;
+export type EnvironmentFailureClass =
+  (typeof EnvironmentFailureClass)[keyof typeof EnvironmentFailureClass];
+export const environmentFailureClassSchema = z.enum(EnvironmentFailureClass);
+
+export const MAX_CHECKS = 32;
+
+export const checkResultSchema = z.strictObject({
+  command: z.string(),
+  exit_code: z.int().nullable(),
+});
+export type CheckResult = z.infer<typeof checkResultSchema>;
+
+export const environmentFailureSchema = z.strictObject({
+  class: environmentFailureClassSchema.nullable(),
+  origin: failureOriginSchema,
+  execution_id: z.string().nullable(),
+  command: z.string().nullable(),
+  exit_code: z.int().nullable(),
+  tail: z.string(),
+  reproduce: z.string().nullable(),
+  ended_at: timestamp,
+});
+
+export const environmentStateSchema = z.strictObject({
+  binding_id: z.string().min(1),
+  binding_name: z.string().min(1),
+  resource_identity: z.string().min(1),
+  target: environmentTargetSchema,
+  source: z.enum(EnvironmentSource).nullable(),
+  status: environmentStatusSchema,
+  digest: z.string().min(1).nullable(),
+  tag: z.string().min(1).nullable(),
+  run_started_at: timestamp.nullable(),
+  step_started_at: timestamp.nullable(),
+  reason: z.string().nullable(),
+  failure: environmentFailureSchema.nullable(),
+  checks: z.array(checkResultSchema).max(MAX_CHECKS),
+  repairs: z.int().min(0),
+  repairing: z.boolean(),
+});
+export type EnvironmentState = z.infer<typeof environmentStateSchema>;
+
 const environmentAnswerSchema = z.strictObject({
   source: z.enum(EnvironmentSource),
   commit: z.string().min(1).nullable(),
@@ -923,6 +1000,16 @@ export const projectOperations = {
     description:
       "Read the instruction files of one repository binding at its base branch.",
   },
+  "environment.list": {
+    ...readOperation,
+    id: "project.environment.list",
+    method: HttpMethod.Get,
+    path: "/api/project/:project_id/environment",
+    input: readInput(projectParams, emptyFields),
+    output: z.strictObject({ items: z.array(environmentStateSchema) }),
+    description:
+      "List the environment state of each current repository binding of a project.",
+  },
   "binding.environment.get": {
     ...readOperation,
     id: "project.binding.environment.get",
@@ -943,11 +1030,23 @@ export const projectOperations = {
     input: z.strictObject({
       params: bindingParams,
       query: emptyFields,
-      body: z.strictObject({ environment: environmentSchema }),
+      body: z.strictObject({ environment: z.unknown() }),
     }),
     output: bindingSetWriteAnswerSchema,
     description:
-      "Store the environment of one repository binding as a new binding revision.",
+      "Store the environment of one repository binding as a new binding revision, or remove it with null.",
+  },
+  "binding.environment.rebuild": {
+    ...writeOperation,
+    body: false,
+    id: "project.binding.environment.rebuild",
+    method: HttpMethod.Post,
+    path: "/api/project/:project_id/binding/:binding_id/environment/rebuild",
+    timeoutMs: BINDING_VERIFY_TIMEOUT_MS,
+    input: readInput(bindingParams, emptyFields),
+    output: environmentStateSchema,
+    description:
+      "Discard the proof and the images of the environment group of one repository binding and build it again.",
   },
   "binding.check": {
     ...readOperation,
