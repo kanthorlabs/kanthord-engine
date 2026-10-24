@@ -67,11 +67,13 @@ const WRITE_TOOL = "environment_write";
 const PROBE_TOOL = "probe";
 const TOOL_USE = "toolUse";
 const TOOL_RESULT_ROLE = "toolResult";
+const MESSAGE_ENTRY = "message";
 const COMMAND_ABSENT_EXIT = 127;
 const FAILED_EXIT = 1;
 const PASSED_EXIT = 0;
 const ATTEMPT_LIMIT = 5;
 const SIXTH_ATTEMPT = 6;
+const ATTEMPT_LIMIT_REASON = "attempt_limit";
 const FAILURE_COUNT = 4;
 const FIRST_SESSION = 1;
 const NO_REPAIRS = 0;
@@ -147,7 +149,25 @@ function fakeEnvironmentRuntime(passing: ReadonlySet<string>) {
   return { runtime, proves, builds };
 }
 
-function scriptedModel(script: FauxResponseStep[]) {
+async function recordSessionManagers(t: TestContext) {
+  const { SessionManager } = await loadPi();
+  const managers: ReturnType<typeof SessionManager.inMemory>[] = [];
+  const original = SessionManager.inMemory;
+  SessionManager.inMemory = (...input) => {
+    const manager = original.apply(SessionManager, input);
+    managers.push(manager);
+    return manager;
+  };
+  t.after(() => {
+    SessionManager.inMemory = original;
+  });
+  return managers;
+}
+
+function scriptedModel(
+  script: FauxResponseStep[],
+  managers: Awaited<ReturnType<typeof recordSessionManagers>>,
+) {
   const provider = scriptedProvider(script);
   const record = { sessions: 0 };
   const factory: EnvironmentModelRuntimeFactory = async (input) => {
@@ -156,7 +176,7 @@ function scriptedModel(script: FauxResponseStep[]) {
     runtime.registerNativeProvider(provider.provider);
     return { runtime, model: resolveModel(runtime, input.configuration) };
   };
-  return { provider, record, factory };
+  return { provider, record, factory, managers };
 }
 
 function toolCall(name: string, args: Parameters<typeof fauxToolCall>[1]) {
@@ -176,13 +196,17 @@ function writeTurn(...tools: string[]) {
 }
 
 function toolAnswers(
-  provider: ReturnType<typeof scriptedProvider>,
+  model: ReturnType<typeof scriptedModel>,
 ): Record<string, unknown>[] {
-  const messages = provider.calls.at(-1)?.messages ?? [];
-  return messages
-    .filter((message) => message.role === TOOL_RESULT_ROLE)
-    .map((message) => {
-      const [part] = message.content as { type: string; text: string }[];
+  return model.managers
+    .flatMap((manager) => manager.getEntries())
+    .flatMap((entry) =>
+      entry.type === MESSAGE_ENTRY && entry.message.role === TOOL_RESULT_ROLE
+        ? [entry.message.content]
+        : [],
+    )
+    .map((content) => {
+      const [part] = content as { type: string; text: string }[];
       return JSON.parse(part!.text) as Record<string, unknown>;
     });
 }
@@ -233,7 +257,7 @@ async function agentFixture(
   passing: readonly string[] = [],
 ): Promise<AgentFixture> {
   const environment = fakeEnvironmentRuntime(new Set(passing));
-  const model = scriptedModel(script);
+  const model = scriptedModel(script, await recordSessionManagers(t));
   const podman = fakeContainerHost(t);
   const starts: SlotStart[] = [];
   const stateDirectory = temporary(t);
@@ -413,9 +437,10 @@ test(
     assert.equal(agent.environment.proves.length, SECOND_ATTEMPT_RUNS);
     assert.deepEqual(first!.checks, [checkOf("tool_a")]);
     assert.deepEqual(second!.checks, [checkOf("tool_b")]);
-    const [, firstWrite] = toolAnswers(model.provider);
+    const [, firstWrite, secondWrite] = toolAnswers(model);
     assert.equal(firstWrite!.outcome, ProofOutcome.Failed);
     assert.equal(firstWrite!.class, EnvironmentFailureClass.CommandAbsent);
+    assert.equal(secondWrite!.outcome, ProofOutcome.Passed);
     assert.equal(
       agent.proofs.read(environmentPath(ready.resource_identity), ready.digest)
         ?.outcome,
@@ -483,14 +508,14 @@ test(
     for (let attempt = 1; attempt <= ATTEMPT_LIMIT; attempt++)
       assert.ok(containsDocument(revisions, `tool_${attempt}`));
 
-    const answers = toolAnswers(model.provider);
+    const answers = toolAnswers(model);
+    const refused = answers.at(-1);
+    assert.equal(answers.length, SIXTH_ATTEMPT);
+    assert.equal(refused!.reason, ATTEMPT_LIMIT_REASON);
+    assert.equal(refused!.outcome, null);
     assert.deepEqual(
-      answers.map((answer) => answer.attempts_left),
-      [4, 3, 2, 1],
-    );
-    assert.deepEqual(
-      answers.map((answer) => answer.outcome),
-      Array(answers.length).fill(ProofOutcome.Failed),
+      answers.slice(0, ATTEMPT_LIMIT).map((answer) => answer.outcome),
+      Array(ATTEMPT_LIMIT).fill(ProofOutcome.Failed),
     );
 
     await delay(SETTLE_WAIT_MS);
