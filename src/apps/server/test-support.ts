@@ -68,6 +68,7 @@ import { agentMigrations } from "../../agent/index.ts";
 import { workbenchMigrations } from "../../workbench/index.ts";
 import { WORKBENCH_SERVICE_NAME } from "../../workbench/contract.ts";
 import { AGENT_COMPONENT_NAME } from "../../agent/contract.ts";
+import { fakeRepositoryFiles } from "./container-fakes.ts";
 import { environment, kanthord } from "./cli-support.ts";
 import { composeServices, trackingDatabaseMigrations } from "./index.ts";
 import {
@@ -653,7 +654,7 @@ export async function gatewayFixture(
     containerRuntimeHost: options.containerRuntimeHost,
     environmentDevcontainerCli: options.environmentDevcontainerCli,
     containerSlotDriver: options.containerSlotDriver,
-    repositoryFiles: options.repositoryFiles,
+    repositoryFiles: options.repositoryFiles ?? fakeRepositoryFiles(),
     logger: pino(
       { level: "info" },
       {

@@ -184,7 +184,7 @@ for (const adapter of ["direct", "http"] as const) {
       ssh_host_key: {
         known_hosts: `${FAKE_SSH_HOST} ${FAKE_GITHUB_HOST_KEY}\n`,
       },
-      resource_identity: "github:kanthorlabs/engine",
+      resource_identity: "repository:github:owner/repo",
       ssh_public_key: h.sshPublicKey,
       strategy: { base_branch: "main" },
       project_prompt: "Follow repository conventions.",
