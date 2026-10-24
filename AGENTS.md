@@ -49,7 +49,7 @@ engine/
 │   │   ├── probe.ts            # Remote HTTP probe and failure-reason redaction
 │   │   ├── pi-provider.ts      # Platform to pi provider id map
 │   │   ├── assets.ts           # Shipped assets and pi tool binaries from the single binary, static/ or .pi-tools/
-│   │   └── test-support.ts     # Isolated temporary filesystem fixtures
+│   │   └── test-support.ts     # Isolated temporary filesystem fixtures and the pi tools guard
 │   ├── repository/             # Repository component: startup gate, SSH reachability, checkout, snapshot, node-branch transport, server-side git write and landing read, and repository credentials
 │   │   ├── contract.ts         # Repository credential route group
 │   │   ├── credential-platform.ts # github platform validator and GitHub probe
@@ -344,6 +344,10 @@ pnpm start --help
 pnpm test
 pnpm run verify
 ```
+
+In a fresh checkout, run `pnpm run pi-tools:fetch` before the tests that start
+a server or a worker. When a pi tool is absent or stale, these tests fail with a
+message that names this command.
 
 Run `pnpm run verify` before handing off code. It checks formatting, types,
 lint, and the build, then runs the tests. Report failures and checks not run.
