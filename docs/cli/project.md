@@ -706,6 +706,8 @@ The command prints the answer of the binding-set write and the idempotency key. 
 
 A secret reaches only the `onCreateCommand` steps of the image build. No other lifecycle command, no check and no execution receives it. The build sets each variable of `environment_secrets` for these steps only.
 
+A secret that an `onCreateCommand` step prints appears as `[redacted]` in the failure tail.
+
 Put the install of a private-registry package into `onCreateCommand`. A command must not write a secret to a file of the image. Every slot of the image holds that file. Pass the secret to one command with the form below. The shell expands `$<variable>` for that command only:
 
 ```sh

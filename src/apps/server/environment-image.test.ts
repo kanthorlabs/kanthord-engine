@@ -96,6 +96,7 @@ function images(
     inspect?: unknown;
     buildTimeoutMs?: number;
     memoryMb?: number;
+    secrets?: ReadonlyArray<{ variable: string; file: string }>;
   },
 ) {
   const calls: string[][] = [];
@@ -164,6 +165,7 @@ function images(
         commit: "c".repeat(40),
         tag: TAG,
         document: (options.environment ?? environment()).document,
+        secrets: options.secrets ?? [],
       },
       NEVER_ABORTED,
     );
@@ -294,6 +296,7 @@ test("the layer copies kanthord and tini, adds uid 10001, writes the variables a
     environment: new Map([["PATH", "/a:$HOME/b"]]),
     onCreate: ["apt-get install -y libpq-dev"],
     owner: OWNER,
+    secrets: [],
   });
   const lines = text.split("\n");
   assert.deepEqual(lines.slice(0, HEADER_LINES), [
@@ -624,6 +627,7 @@ test("the layer runs each create command before kanthord, tini and the passwd en
     environment: new Map(),
     onCreate: ["create"],
     owner: OWNER,
+    secrets: [],
   }).split("\n");
   const create = lines.indexOf('RUN ["/bin/sh","-c","create"]');
   assert.notEqual(create, NOT_FOUND);
@@ -655,6 +659,7 @@ function layerLines(environment: Map<string, string>): string[] {
     environment,
     onCreate: [],
     owner: OWNER,
+    secrets: [],
   }).split("\n");
 }
 
@@ -785,6 +790,7 @@ function buildInput(): ImageBuildInput {
     commit: "c".repeat(40),
     tag: TAG,
     document: environment().document,
+    secrets: [],
   };
 }
 
@@ -1055,4 +1061,170 @@ test("prove runs the commands in one container of the image through the proof", 
     ),
   );
   assert.equal(existsSync(runDirectory(directory)), false);
+});
+
+const REGISTRY_SECRET = {
+  variable: "REGISTRY_AUTH",
+  file: "/state/environments/run-1/secrets/REGISTRY_AUTH",
+};
+const NPM_SECRET = {
+  variable: "NPM_TOKEN",
+  file: "/state/environments/run-1/secrets/NPM_TOKEN",
+};
+const PNPM_STEP = "npm install -g pnpm@9";
+const CONFIG_STEP = "npm config list";
+const SECRET_FLAG = "--secret";
+const CREATE_STEPS = 2;
+
+function secretMount(secret: { variable: string }): string {
+  return `--mount=type=secret,id=${secret.variable}`;
+}
+
+function secretExport(secret: { variable: string }): string {
+  return `export ${secret.variable}="$(cat /run/secrets/${secret.variable})"`;
+}
+
+function secretLayer(
+  secrets: ReadonlyArray<{ variable: string; file: string }>,
+): string[] {
+  return layerContainerfile({
+    base: "tag-base",
+    kanthordImage: KANTHORD_IMAGE,
+    environment: new Map(),
+    onCreate: [PNPM_STEP, CONFIG_STEP],
+    owner: OWNER,
+    secrets,
+  }).split("\n");
+}
+
+test("a build with a secret passes the secret to the layer build", async (t) => {
+  const directory = temporary(t);
+  const { build, lines } = images(directory, {
+    environment: environment(),
+    exists: ABSENT,
+    cli: PASSING_CLI,
+    variables: fakePodman(directory, { build: SUCCESS, run: SUCCESS }),
+    secrets: [REGISTRY_SECRET],
+  });
+  assert.deepEqual(await build(), { outcome: ImageBuildOutcome.Built });
+  const layer = lines().find(
+    (line) => line[0] === PODMAN_LINE && line[1] === BUILD_COMMAND,
+  );
+  assert.ok(layer);
+  const flag = layer.indexOf(SECRET_FLAG);
+  assert.notEqual(flag, NOT_FOUND);
+  assert.equal(layer[flag + 1], `id=REGISTRY_AUTH,src=${REGISTRY_SECRET.file}`);
+});
+
+test("a build with no secret passes no secret argument", async (t) => {
+  const directory = temporary(t);
+  const { build, lines } = images(directory, {
+    environment: environment(),
+    exists: ABSENT,
+    cli: PASSING_CLI,
+    variables: fakePodman(directory, { build: SUCCESS, run: SUCCESS }),
+  });
+  assert.deepEqual(await build(), { outcome: ImageBuildOutcome.Built });
+  const layer = lines().find(
+    (line) => line[0] === PODMAN_LINE && line[1] === BUILD_COMMAND,
+  );
+  assert.ok(layer);
+  assert.equal(layer.includes(SECRET_FLAG), false);
+});
+
+test("the layer mounts the secret in each create command and exports it from the secret file", () => {
+  const lines = secretLayer([REGISTRY_SECRET]);
+  for (const step of [PNPM_STEP, CONFIG_STEP])
+    assert.ok(
+      lines.includes(
+        `RUN ${secretMount(REGISTRY_SECRET)} ${JSON.stringify([
+          "/bin/sh",
+          "-c",
+          `${secretExport(REGISTRY_SECRET)}; ${step}`,
+        ])}`,
+      ),
+      step,
+    );
+  assert.equal(
+    lines.filter((line) => line.includes("--mount")).length,
+    CREATE_STEPS,
+  );
+});
+
+test("the layer mounts and exports two secrets in variable order", () => {
+  const lines = secretLayer([REGISTRY_SECRET, NPM_SECRET]);
+  for (const step of [PNPM_STEP, CONFIG_STEP])
+    assert.ok(
+      lines.includes(
+        `RUN ${secretMount(NPM_SECRET)} ${secretMount(REGISTRY_SECRET)} ${JSON.stringify(
+          [
+            "/bin/sh",
+            "-c",
+            `${secretExport(NPM_SECRET)}; ${secretExport(REGISTRY_SECRET)}; ${step}`,
+          ],
+        )}`,
+      ),
+      step,
+    );
+});
+
+test("the layer with no secret writes the create commands without a mount", () => {
+  const lines = secretLayer([]);
+  assert.ok(
+    lines.includes(`RUN ${JSON.stringify(["/bin/sh", "-c", PNPM_STEP])}`),
+  );
+  assert.ok(
+    lines.includes(`RUN ${JSON.stringify(["/bin/sh", "-c", CONFIG_STEP])}`),
+  );
+  assert.equal(
+    lines.some(
+      (line) => line.includes("--mount") || line.includes("/run/secrets"),
+    ),
+    false,
+  );
+});
+
+test("the passwd step, the cache step and the copy steps of the layer hold no secret mount", () => {
+  const lines = secretLayer([REGISTRY_SECRET]);
+  const others = lines.filter(
+    (line) =>
+      !line.includes(PNPM_STEP) &&
+      !line.includes(CONFIG_STEP) &&
+      !line.startsWith("FROM"),
+  );
+  assert.ok(others.some((line) => line.startsWith("COPY --from=kanthord")));
+  assert.ok(others.some((line) => line.includes("10001::/var/lib/kanthord")));
+  assert.equal(
+    others.some(
+      (line) => line.includes("--mount") || line.includes("REGISTRY_AUTH"),
+    ),
+    false,
+  );
+});
+
+test("the devcontainer build holds no secret argument, no secret path and no secret variable", async (t) => {
+  const directory = temporary(t);
+  const record = join(directory, "invocation");
+  const { build } = images(directory, {
+    environment: environment(),
+    exists: ABSENT,
+    cli: `import { writeFileSync } from "node:fs";
+writeFileSync(${JSON.stringify(record)}, JSON.stringify({ argv: process.argv.slice(2), env: process.env }));`,
+    variables: {
+      ...fakePodman(directory, { build: SUCCESS, run: SUCCESS }),
+      REGISTRY_AUTH: "ambient-value",
+    },
+    secrets: [REGISTRY_SECRET],
+  });
+  assert.deepEqual(await build(), { outcome: ImageBuildOutcome.Built });
+  const invocation = JSON.parse(readFileSync(record, "utf8")) as {
+    argv: string[];
+    env: Record<string, string>;
+  };
+  assert.equal(invocation.argv.includes(SECRET_FLAG), false);
+  assert.equal(
+    invocation.argv.some((argument) => argument.includes(REGISTRY_SECRET.file)),
+    false,
+  );
+  assert.equal(Object.hasOwn(invocation.env, "REGISTRY_AUTH"), false);
 });

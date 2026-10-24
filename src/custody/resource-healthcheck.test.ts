@@ -22,6 +22,7 @@ import { encrypt } from "./envelope.ts";
 import { custodyMigrations } from "./migrations.ts";
 import { CustodyComponent } from "./service.ts";
 import { INTAKE_SERVICE_NAME } from "../intake/contract.ts";
+import { PROJECT_SERVICE_NAME } from "../project/contract.ts";
 
 const SECRET = "test_private-resource-health-secret";
 const ENVELOPE_KEY = Buffer.alloc(32, 7);
@@ -119,6 +120,7 @@ function fixture(
     bindingsNaming: () => [],
     inboundsNaming: () => [],
     intakeServiceName: INTAKE_SERVICE_NAME,
+    projectServiceName: PROJECT_SERVICE_NAME,
   });
   const calls: ProbeCall[] = [];
   return { store, component, calls, set: platformSet(calls) };

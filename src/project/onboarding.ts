@@ -15,6 +15,11 @@ import { SpanStatus, type ServerTrace } from "../tracking/contract.ts";
 import { ProjectErrorCode, WorkerPlacement } from "./contract.ts";
 import type { GroupResolution } from "./environment.ts";
 import {
+  SecretReleaseOutcome,
+  type EnvironmentSecrets,
+  type SecretRelease,
+} from "./environment-secrets.ts";
+import {
   EnvironmentSpan,
   environmentRootEnd,
   environmentRootStart,
@@ -38,6 +43,7 @@ import {
   environmentTagOf,
   type CommandResult,
   type EnvironmentRuntime,
+  type EnvironmentSecretEntry,
   type ImageBuildInput,
   type ImageBuildResult,
   type ProofFile,
@@ -64,6 +70,7 @@ const RUN_FAILED = "project.onboarding.run_failed";
 const CACHE_COLLECTION_FAILED = "project.onboarding.cache_collection_failed";
 const TRACE_ID_BYTES = 16;
 const SPAN_ID_BYTES = 8;
+const REDACTED = "[redacted]";
 const NO_COMMAND = null;
 const NO_EXIT_CODE = null;
 
@@ -71,6 +78,7 @@ export interface RepositoryGroup {
   binding_id: string;
   binding_name: string;
   resource_identity: string;
+  environment_secrets?: Readonly<Record<string, string>>;
 }
 
 export interface WorkerBindingFacts {
@@ -98,6 +106,7 @@ export interface OnboardingDependencies {
   ): Promise<GroupResolution>;
   runtime: EnvironmentRuntime;
   proofs: ProofFiles;
+  secrets: Pick<EnvironmentSecrets, "entriesOf" | "release" | "remove">;
   slotImage: string;
   version: string;
   wake(projectId: string): void;
@@ -133,6 +142,7 @@ export interface GroupRecord {
   source: EnvironmentSource | null;
   commit: string | null;
   document: Environment | null;
+  secrets: EnvironmentSecretEntry[];
   digest: string | null;
   tag: string | null;
   proof: ProofFile | null;
@@ -191,6 +201,18 @@ function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+function redact(text: string, values: readonly string[]): string {
+  return values
+    .filter((value) => value.length > NO_ITEMS)
+    .toSorted((first, second) => second.length - first.length)
+    .reduce((redacted, value) => redacted.split(value).join(REDACTED), text);
+}
+
+function redactedError(error: unknown, values: readonly string[]): unknown {
+  if (values.length === NO_ITEMS) return error;
+  return new Error(redact(messageOf(error), values));
+}
+
 function emptyRecord(
   projectId: string,
   group: RepositoryGroup,
@@ -205,6 +227,7 @@ function emptyRecord(
     source: null,
     commit: null,
     document: null,
+    secrets: [],
     digest: null,
     tag: null,
     proof: null,
@@ -408,9 +431,7 @@ export class Onboarding {
       this.again.add(key);
       return running;
     }
-    const run = this.computeWhileMarked(projectId, resourceIdentity).finally(
-      () => this.computing.delete(key),
-    );
+    const run = this.computeWhileMarked(projectId, resourceIdentity);
     this.computing.set(key, run);
     return run;
   }
@@ -591,10 +612,14 @@ export class Onboarding {
     resourceIdentity: string,
   ): Promise<void> {
     const key = keyOf(projectId, resourceIdentity);
-    do {
-      this.again.delete(key);
-      await this.computeOnce(projectId, resourceIdentity);
-    } while (this.again.has(key));
+    try {
+      do {
+        this.again.delete(key);
+        await this.computeOnce(projectId, resourceIdentity);
+      } while (this.again.has(key));
+    } finally {
+      this.computing.delete(key);
+    }
   }
 
   private async computeOnce(
@@ -661,6 +686,9 @@ export class Onboarding {
         reason: resolved.reason,
       };
     const atImage = target === EnvironmentTarget.Image;
+    const secrets = this.dependencies.secrets.entriesOf(
+      group.environment_secrets ?? {},
+    );
     const sum = environmentDigest({
       resource_identity: group.resource_identity,
       target,
@@ -673,6 +701,7 @@ export class Onboarding {
       slot_image: atImage
         ? await runtime.imageId(this.dependencies.slotImage, signal)
         : null,
+      secrets,
       version,
     });
     const tag = atImage ? environmentTagOf(group.resource_identity, sum) : null;
@@ -684,6 +713,7 @@ export class Onboarding {
       source: resolved.source,
       commit: resolved.commit,
       document: resolved.document,
+      secrets,
       digest: sum,
       tag,
       proof: proofs.read(environmentPath(group.resource_identity), sum),
@@ -763,21 +793,29 @@ export class Onboarding {
     this.logRun(RUN_STARTED, record);
     let completed = false;
     let verdict: ProofVerdict | null = null;
+    const runId = this.dependencies.runId();
+    const secretValues: string[] = [];
     try {
-      verdict = await this.verdictOf(record, this.dependencies.runId(), trace);
+      verdict = await this.verdictOf(record, runId, trace, secretValues);
       if (verdict !== null) {
         await this.finalize(record, verdict);
         completed = true;
       }
     } catch (error) {
       if (!this.context.signal.aborted) {
-        record.reason = messageOf(error);
+        record.reason = redact(messageOf(error), secretValues);
         this.dependencies.logger.error(
-          { err: error, binding: record.binding_name, digest: record.digest },
+          {
+            err: redactedError(error, secretValues),
+            binding: record.binding_name,
+            digest: record.digest,
+          },
           RUN_FAILED,
         );
       }
     } finally {
+      this.dependencies.secrets.remove(runId);
+      secretValues.length = NO_ITEMS;
       record.run_started_at = null;
       record.step = null;
       record.step_started_at = null;
@@ -870,24 +908,40 @@ export class Onboarding {
     record: GroupRecord,
     runId: string,
     trace: ServerTrace,
+    secretValues: string[],
   ): Promise<ProofVerdict | null> {
     const signal = AbortSignal.any([
       this.context.signal,
       AbortSignal.timeout(this.dependencies.environmentBuildTimeoutMs),
     ]);
     try {
-      return await this.execute(record, runId, signal, trace);
+      const verdict = await this.execute(
+        record,
+        runId,
+        signal,
+        trace,
+        secretValues,
+      );
+      return verdict === null
+        ? null
+        : { ...verdict, tail: redact(verdict.tail, secretValues) };
     } catch (error) {
       if (this.context.signal.aborted) return null;
       this.dependencies.logger.error(
-        { err: error, binding: record.binding_name, digest: record.digest },
+        {
+          err: redactedError(error, secretValues),
+          binding: record.binding_name,
+          digest: record.digest,
+        },
         RUN_FAILED,
       );
       return failedVerdict(
         record.step === EnvironmentStatus.Building
           ? EnvironmentFailureClass.BuildFailed
           : EnvironmentFailureClass.SetupFailed,
-        signal.aborted ? this.deadlineTail() : messageOf(error),
+        signal.aborted
+          ? this.deadlineTail()
+          : redact(messageOf(error), secretValues),
       );
     }
   }
@@ -902,6 +956,7 @@ export class Onboarding {
     runId: string,
     signal: AbortSignal,
     trace: ServerTrace,
+    secretValues: string[],
   ): Promise<ProofVerdict | null> {
     const { runtime } = this.dependencies;
     const { document, commit, tag } = record;
@@ -928,9 +983,20 @@ export class Onboarding {
     }
     assert.ok(tag !== null, "An image group holds a tag.");
     if (record.step === EnvironmentStatus.Building) {
+      const released = this.releaseSecrets(record, runId);
+      if (released.outcome === SecretReleaseOutcome.Stale) {
+        this.marked.add(keyOf(record.project_id, record.resource_identity));
+        return null;
+      }
+      if (released.outcome === SecretReleaseOutcome.Unavailable)
+        return failedVerdict(
+          EnvironmentFailureClass.BuildFailed,
+          `environment secret ${released.variable} is unavailable`,
+        );
+      secretValues.push(...released.values);
       const built = await this.tracedBuild(
         trace,
-        { ...base, tag, document },
+        { ...base, tag, document, secrets: released.files },
         signal,
       );
       if (built === null) return null;
@@ -943,6 +1009,17 @@ export class Onboarding {
     return this.tracedProof(trace, proof.setup.length, () =>
       runtime.prove({ ...proof, tag }, signal),
     );
+  }
+
+  private releaseSecrets(record: GroupRecord, runId: string): SecretRelease {
+    if (record.secrets.length === NO_ITEMS)
+      return { outcome: SecretReleaseOutcome.Released, files: [], values: [] };
+    return this.dependencies.secrets.release({
+      projectId: record.project_id,
+      bindingId: record.binding_id,
+      runId,
+      entries: record.secrets,
+    });
   }
 
   private async tracedBuild(

@@ -12,7 +12,7 @@ import {
   Store,
   type Transaction,
 } from "../kernel/store.ts";
-import type { ServiceIdentity } from "../kernel/caller.ts";
+import type { CallerIdentity, ServiceIdentity } from "../kernel/caller.ts";
 import {
   CUSTODY_SERVICE_NAME,
   SecretShape,
@@ -44,6 +44,7 @@ import {
   type AssetFacts,
   type CustodyExecution,
   type Grant,
+  type GrantRequest,
 } from "./contract.ts";
 import type { ExecutionClaim } from "../kernel/operation.ts";
 import {
@@ -52,6 +53,10 @@ import {
 } from "./contract.ts";
 import { generateX25519KeyPair, keyFingerprint } from "../kernel/hpke.ts";
 import { INTAKE_SERVICE_NAME } from "../intake/contract.ts";
+import {
+  ENVIRONMENT_SECRET_PLATFORM,
+  PROJECT_SERVICE_NAME,
+} from "../project/contract.ts";
 
 const TestPlatform = {
   Key: "key-platform",
@@ -257,6 +262,7 @@ function fixture(
     bindingsNaming: collaborations.bindingsNaming ?? (() => []),
     inboundsNaming: collaborations.inboundsNaming ?? (() => []),
     intakeServiceName: INTAKE_SERVICE_NAME,
+    projectServiceName: PROJECT_SERVICE_NAME,
     instanceKeys: collaborations.instanceKeys,
   });
   let lastTransaction: Transaction | undefined;
@@ -1823,6 +1829,7 @@ test("lifecycle reports health and joins cancellation", async () => {
       bindingsNaming: () => [],
       inboundsNaming: () => [],
       intakeServiceName: INTAKE_SERVICE_NAME,
+      projectServiceName: PROJECT_SERVICE_NAME,
       platforms: TEST_SET.platforms,
     });
     const context = new CancellationContext();
@@ -2427,6 +2434,136 @@ test("serverAgentCredentials releases the secret to a service identity and refus
         key: "changed",
       })),
       FacilityError,
+    );
+  } finally {
+    f.store.close();
+  }
+});
+
+const ENVIRONMENT_SECRET_SET: CredentialPlatformSet = {
+  platforms: {
+    [ENVIRONMENT_SECRET_PLATFORM]: testPlatform(SecretShape.ApiKey),
+  },
+};
+const REGISTRY_CREDENTIAL = "registry-auth";
+
+function environmentSecretRequest(identity: CallerIdentity) {
+  return {
+    kind: GrantKind.EnvironmentSecret,
+    identity: identity as ServiceIdentity,
+    projectId: createIdentity("project"),
+    bindingId: createIdentity("binding"),
+    variable: "REGISTRY_AUTH",
+    credential: REGISTRY_CREDENTIAL,
+  } satisfies GrantRequest;
+}
+
+function environmentSecretFixture() {
+  const f = fixture();
+  f.create(
+    {
+      name: REGISTRY_CREDENTIAL,
+      platform: ENVIRONMENT_SECRET_PLATFORM,
+      secret: apiSecret,
+      metadata: null,
+    },
+    ENVIRONMENT_SECRET_SET,
+  );
+  return f;
+}
+
+test("environment secret grant releases the material to the Project Service", () => {
+  const f = environmentSecretFixture();
+  try {
+    const request = environmentSecretRequest(
+      testServiceIdentity(PROJECT_SERVICE_NAME),
+    );
+    const released = f.store.transaction((tx) => {
+      const grant = f.component.authorizeOperation(tx, request, Date.now());
+      assert.equal(grant.kind, GrantKind.EnvironmentSecret);
+      assert.equal(grant.execution, null);
+      assert.deepEqual(grant.facts, {
+        binding_id: request.bindingId,
+        variable: "REGISTRY_AUTH",
+      });
+      const material = f.component.release(tx, grant, Date.now());
+      try {
+        return material.value();
+      } finally {
+        material.drop();
+      }
+    });
+    assert.deepEqual(released, apiSecret);
+  } finally {
+    f.store.close();
+  }
+});
+
+test("environment secret grant refuses another service, a human and a machine", () => {
+  const f = environmentSecretFixture();
+  try {
+    const machine = testMachineIdentity(
+      {
+        clientId: createIdentity("client_identity"),
+        projectId: createIdentity("project"),
+        resourceIdentity: "worker:kanthord:general",
+        name: "machine",
+        issuedAt: 0,
+      },
+      "jti",
+      createIdentity("worker_registration"),
+    );
+    for (const identity of [
+      testServiceIdentity(INTAKE_SERVICE_NAME),
+      testHumanIdentity(HUMAN_ACCOUNT_ID, "Alice", "jti"),
+      machine,
+    ])
+      assert.throws(
+        () =>
+          f.store.transaction((tx) =>
+            f.component.authorizeOperation(
+              tx,
+              environmentSecretRequest(identity),
+              Date.now(),
+            ),
+          ),
+        FacilityError,
+      );
+  } finally {
+    f.store.close();
+  }
+});
+
+test("environment secret grant refuses an archived credential and a credential of another platform", () => {
+  const f = environmentSecretFixture();
+  try {
+    const request = environmentSecretRequest(
+      testServiceIdentity(PROJECT_SERVICE_NAME),
+    );
+    const authorize = (credential: string) => () =>
+      f.store.transaction((tx) =>
+        f.component.authorizeOperation(
+          tx,
+          { ...request, credential } as GrantRequest,
+          Date.now(),
+        ),
+      );
+    f.create({
+      name: "other-platform",
+      platform: TestPlatform.Key,
+      secret: apiSecret,
+      metadata: null,
+    });
+    fails(
+      authorize("other-platform"),
+      HttpStatus.BadRequest,
+      PLATFORM_MISMATCH_CODE,
+    );
+    f.archive(REGISTRY_CREDENTIAL, ENVIRONMENT_SECRET_SET);
+    fails(
+      authorize(REGISTRY_CREDENTIAL),
+      HttpStatus.NotFound,
+      CREDENTIAL_NOT_FOUND_CODE,
     );
   } finally {
     f.store.close();

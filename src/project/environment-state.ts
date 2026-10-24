@@ -111,6 +111,17 @@ export function environmentTagOf(
   return `${ENVIRONMENT_IMAGE_PREFIX}/${environmentPath(resourceIdentity)}${TAG_SEPARATOR}${sum}`;
 }
 
+export interface EnvironmentSecretEntry {
+  variable: string;
+  credential: string;
+  revision: number;
+}
+
+export interface EnvironmentSecretFile {
+  variable: string;
+  file: string;
+}
+
 export interface EnvironmentDigestInput {
   resource_identity: string;
   target: EnvironmentTarget;
@@ -123,6 +134,7 @@ export interface EnvironmentDigestInput {
   }[];
   base_image: string | null;
   slot_image: string | null;
+  secrets: readonly EnvironmentSecretEntry[];
   version: string;
 }
 
@@ -139,6 +151,13 @@ export function environmentDigest(input: EnvironmentDigestInput): string {
     })),
     base_image: input.base_image,
     slot_image: input.slot_image,
+    secrets: input.secrets
+      .map(({ variable, credential, revision }) => ({
+        variable,
+        credential,
+        revision,
+      }))
+      .sort((first, second) => (first.variable < second.variable ? -1 : 1)),
     version: input.version,
   });
 }
@@ -346,6 +365,7 @@ export interface ImageBuildInput {
   commit: string;
   tag: string;
   document: Environment;
+  readonly secrets: ReadonlyArray<EnvironmentSecretFile>;
 }
 
 export type ImageBuildResult =

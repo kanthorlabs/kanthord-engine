@@ -160,6 +160,7 @@ import {
 import type { ProjectConfig } from "./config.ts";
 import { ProjectEnvironments, refuseEnvironment } from "./environment.ts";
 import { EnvironmentSecretRoutes } from "./environment-secret.ts";
+import { EnvironmentSecrets } from "./environment-secrets.ts";
 import type { EnvironmentTelemetry } from "./environment-telemetry.ts";
 import {
   ENVIRONMENT_DIRECTORY,
@@ -688,6 +689,14 @@ export class ProjectService implements Service, ProjectBindings {
         this.environments.resolveGroup(bindingId, target, context),
       runtime: dependencies.environmentRuntime,
       proofs: new ProofFiles(join(this.stateDirectory, ENVIRONMENT_DIRECTORY)),
+      secrets: new EnvironmentSecrets({
+        root: join(this.stateDirectory, ENVIRONMENT_DIRECTORY),
+        transaction: (write) => this.operationalStore.transaction(write),
+        identity: this.identity,
+        custody: this.custody,
+        records: this.credentialRecords,
+        now: () => Date.now(),
+      }),
       slotImage: dependencies.slotImage,
       version: dependencies.version,
       wake: (projectId) => this.wakeup.wake(projectId),
@@ -1704,6 +1713,9 @@ export class ProjectService implements Service, ProjectBindings {
           binding_id: binding.id,
           binding_name: binding.name,
           resource_identity: binding.resource_identity,
+          environment_secrets:
+            repositoryConfigSchema.parse(binding.config).environment_secrets ??
+            {},
         })),
       workers: bindings
         .filter(

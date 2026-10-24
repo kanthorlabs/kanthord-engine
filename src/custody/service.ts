@@ -135,6 +135,7 @@ import type { HandoverEnvelope } from "../kernel/handover.ts";
 import { encrypt } from "./envelope.ts";
 import { heldByInstance, openSecret, storedSealed } from "./secret.ts";
 import { isReservedName, validateNameForm } from "./names.ts";
+import { ENVIRONMENT_SECRET_PLATFORM } from "../project/contract.ts";
 
 export interface Dependencies {
   executions: CustodyExecutions;
@@ -150,6 +151,7 @@ export interface Dependencies {
   bindingsNaming: BindingsNamingFn;
   inboundsNaming: InboundsNamingFn;
   intakeServiceName: string;
+  projectServiceName: string;
   sshIdentityAuthorization?: SshIdentityAuthorization;
   sshAccessOf?: SshAccessOf;
   sshSignatureOf?: SshSignatureOf;
@@ -548,6 +550,7 @@ export class CustodyComponent implements Service, CredentialRecords {
   private readonly missionAuthorization: MissionAuthorization;
   private readonly clientSecret: (clientId: string) => string;
   private readonly intakeServiceName: string;
+  private readonly projectServiceName: string;
   private readonly sshIdentityAuthorization:
     SshIdentityAuthorization | undefined;
   private readonly sshAccessOf: SshAccessOf | undefined;
@@ -569,6 +572,7 @@ export class CustodyComponent implements Service, CredentialRecords {
     this.bindingsNaming = dependencies.bindingsNaming;
     this.inboundsNaming = dependencies.inboundsNaming;
     this.intakeServiceName = dependencies.intakeServiceName;
+    this.projectServiceName = dependencies.projectServiceName;
     this.sshIdentityAuthorization = dependencies.sshIdentityAuthorization;
     this.sshAccessOf = dependencies.sshAccessOf;
     this.sshSignatureOf = dependencies.sshSignatureOf;
@@ -617,6 +621,8 @@ export class CustodyComponent implements Service, CredentialRecords {
     assert.equal(tx.database, this.store.database);
     if (request.kind === GrantKind.Inbound)
       return this.inboundGrant(tx, request);
+    if (request.kind === GrantKind.EnvironmentSecret)
+      return this.environmentSecretGrant(tx, request);
     const execution =
       request.claim === null
         ? null
@@ -682,11 +688,45 @@ export class CustodyComponent implements Service, CredentialRecords {
     });
   }
 
+  private environmentSecretGrant(
+    tx: Transaction,
+    request: Extract<
+      GrantRequest,
+      { kind: typeof GrantKind.EnvironmentSecret }
+    >,
+  ): GrantOf<typeof GrantKind.EnvironmentSecret> {
+    assert(tx.database.isTransaction);
+    assert.equal(request.kind, GrantKind.EnvironmentSecret);
+    const { identity, projectId, bindingId, variable, credential } = request;
+    if (
+      !isServiceIdentity(identity) ||
+      identity.service !== this.projectServiceName
+    )
+      throw new FacilityError();
+    this.custodySuitability(tx, {
+      credential,
+      platform: ENVIRONMENT_SECRET_PLATFORM,
+    });
+    return mintGrant({
+      kind: request.kind,
+      credential,
+      platform: ENVIRONMENT_SECRET_PLATFORM,
+      project_id: projectId,
+      execution: null,
+      facts: { binding_id: bindingId, variable },
+    });
+  }
+
   private missionGrant(
     tx: Transaction,
     request: Exclude<
       GrantRequest,
-      { kind: typeof GrantKind.Inbound | typeof GrantKind.SshIdentity }
+      {
+        kind:
+          | typeof GrantKind.Inbound
+          | typeof GrantKind.SshIdentity
+          | typeof GrantKind.EnvironmentSecret;
+      }
     >,
     execution: CustodyExecution | null,
   ): Grant {

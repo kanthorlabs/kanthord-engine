@@ -522,6 +522,7 @@ export function composeServices(options: {
       nameOf: (tx, instanceId) => worker.instanceNameOf(tx, instanceId),
     },
     intakeServiceName: INTAKE_SERVICE_NAME,
+    projectServiceName: PROJECT_SERVICE_NAME,
     sshIdentityAuthorization: projectSshIdentityAuthorization({
       custodySuitability: (tx, req) => custody.custodySuitability(tx, req),
       repositoryBindingIdsOf: (tx, nodeId, revision) =>
