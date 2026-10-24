@@ -6,7 +6,7 @@ pathItem:
       - project
     description: Read the instruction files of one repository binding at its base branch.
     x-access-policy: human
-    x-timeout-ms: 35000
+    x-timeout-ms: 36000
     x-mutation: false
     x-kanthord-lifetime: unary
     security:

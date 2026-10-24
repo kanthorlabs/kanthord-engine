@@ -21,7 +21,11 @@ import {
   fallbackConfigurationsSchema,
   type HolderScope,
 } from "../agent/contract.ts";
-import type { RepositoryFile, SshAccess } from "../repository/contract.ts";
+import {
+  SSH_AGENT_CLEANUP_TIMEOUT_MS,
+  type RepositoryFile,
+  type SshAccess,
+} from "../repository/contract.ts";
 import { timestamp } from "../kernel/json.ts";
 import {
   CREATE_MAX_BODY_BYTES,
@@ -48,7 +52,11 @@ import {
 export const BINDING_CHECK_TIMEOUT_MS = 10000;
 export const BINDING_VERIFY_TIMEOUT_MS = 30000;
 export const REPOSITORY_FILES_READ_TIMEOUT_MS = 30000;
-export const REPOSITORY_FILES_ROUTE_TIMEOUT_MS = 35000;
+const ROUTE_ANSWER_MARGIN_MS = 1000;
+export const REPOSITORY_FILES_ROUTE_TIMEOUT_MS =
+  REPOSITORY_FILES_READ_TIMEOUT_MS +
+  SSH_AGENT_CLEANUP_TIMEOUT_MS +
+  ROUTE_ANSWER_MARGIN_MS;
 export const bindingVerifyAnswerEntrySchema = z.strictObject({
   status: z.enum([
     ResourceStatus.Healthy,

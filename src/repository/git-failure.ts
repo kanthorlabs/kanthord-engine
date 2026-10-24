@@ -1,3 +1,4 @@
+import { DeadlineExceeded } from "../kernel/context.ts";
 import { Diagnostic, diagnostic, OperationError } from "../kernel/errors.ts";
 import { ResourceFailureReason } from "../kernel/health.ts";
 import { HostKeyErrorCode, RepositoryErrorCode } from "./contract.ts";
@@ -43,6 +44,8 @@ const REFUSAL_REASONS: ReadonlyMap<string, ResourceFailureReason> = new Map([
 ]);
 
 export function gitFailureReason(error: unknown): ResourceFailureReason {
+  if (error instanceof DeadlineExceeded)
+    return ResourceFailureReason.DeadlineExceeded;
   const refusal =
     error instanceof Diagnostic || error instanceof OperationError
       ? REFUSAL_REASONS.get(error.code)

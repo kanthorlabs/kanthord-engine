@@ -27,6 +27,7 @@ import {
 
 export const REPOSITORY_COMPONENT_NAME = "repository";
 export const HOST_KEY_SCAN_FAILED_STATUS = 422;
+export const SSH_AGENT_CLEANUP_TIMEOUT_MS = 5000;
 export const HOST_KEY_FINGERPRINT_PATTERN = /^SHA256:[A-Za-z0-9+/]{43}$/;
 
 export const HostKeySource = {

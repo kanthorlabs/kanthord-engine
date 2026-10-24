@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { once } from "node:events";
 import { createServer, type AddressInfo, type Socket } from "node:net";
 import test from "node:test";
-import { background } from "../kernel/context.ts";
+import { background, DeadlineExceeded } from "../kernel/context.ts";
 import { Diagnostic, OperationError } from "../kernel/errors.ts";
 import { ResourceFailureReason } from "../kernel/health.ts";
 import { HttpStatus } from "../kernel/http.ts";
@@ -239,4 +239,11 @@ test("gitFailureReason answers deadline_exceeded for a real ls-remote that excee
   assert.ok(error instanceof Diagnostic);
   assert.equal(error.code, GIT_FAILED);
   assert.equal(gitFailureReason(error), ResourceFailureReason.DeadlineExceeded);
+});
+
+test("gitFailureReason answers deadline_exceeded for a deadline that fires outside a git process", () => {
+  assert.equal(
+    gitFailureReason(new DeadlineExceeded()),
+    ResourceFailureReason.DeadlineExceeded,
+  );
 });

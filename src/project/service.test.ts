@@ -42,6 +42,7 @@ import { redactingLogger, temporary } from "../kernel/test-support.ts";
 import { IdentityKind } from "../kernel/caller.ts";
 import { Diagnostic, OperationError } from "../kernel/errors.ts";
 import { GIT_DEADLINE_EXCEEDED } from "../repository/git-failure.ts";
+import { SSH_AGENT_CLEANUP_TIMEOUT_MS } from "../repository/contract.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import { AgentErrorCode, type HolderScope } from "../agent/contract.ts";
 import { SERVER_HOLDER } from "../custody/contract.ts";
@@ -1266,6 +1267,7 @@ const MODEL = "model";
 const REPOSITORY_ADDRESS = "git@github.com:owner/repo.git";
 const HEALTH_DEADLINE_MS = 1000;
 const SLOW_CHECK_DEADLINE_MS = 100;
+const COMMIT_READ_MS = 20000;
 const SLOW_CHECK_ROUNDS = 5;
 const AGENT_CLEANUP_DELAY_MS = 20;
 const ALIAS_ADDRESS = "git@github:owner/alias.git";
@@ -4950,7 +4952,7 @@ test("binding.verify returns unknown for address when the SSH read exceeds its d
   assert.deepEqual(result.address, {
     status: ResourceStatus.Unknown,
     capability: RESOURCE_CAPABILITY_NETWORK_GIT_READ,
-    failure_reason: ResourceFailureReason.Unclassified,
+    failure_reason: ResourceFailureReason.DeadlineExceeded,
   });
   assert.deepEqual(credentialCalls, [
     sshCredentialOf(REPOSITORY_ADDRESS),
@@ -5198,6 +5200,7 @@ function instructionFixture(
     readFails?: boolean;
     hang?: boolean;
     readHang?: boolean;
+    resolveAdvance?: () => void;
   } = {},
   overrides: Partial<Dependencies> = {},
 ) {
@@ -5231,6 +5234,7 @@ function instructionFixture(
           await cancelled(context.signal);
           throw context.signal.reason;
         }
+        behavior.resolveAdvance?.();
         if (behavior.resolveFailure) throw behavior.resolveFailure;
         if (behavior.resolveFails) throw new Error("ls-remote failed");
         return commits.length > ONE_CALL
@@ -5581,6 +5585,7 @@ test("binding.instruction_files.get refuses a read that exceeds the read deadlin
     f.invokeAsync("binding.instruction_files.get", saved),
     SSH_FAILURE_STATUS,
     ProjectErrorCode.RepositorySshUnreachable,
+    { failure_reason: ResourceFailureReason.DeadlineExceeded },
   ).finally(() => {
     settled = true;
   });
@@ -5767,7 +5772,7 @@ test("binding.check answers the verify badges of an unsaved configuration and wr
   );
 });
 
-test("binding.check answers unclassified for an address read that exceeds its deadline", async (t) => {
+test("binding.check answers deadline_exceeded for an address read that exceeds its deadline", async (t) => {
   const { f, sshStarted } = verifyFixture(t, ADDRESS_SSH_HANG, "healthy", {
     custodySuitability: () => {},
   });
@@ -5779,7 +5784,7 @@ test("binding.check answers unclassified for an address read that exceeds its de
   assert.deepEqual((await pending).address, {
     status: ResourceStatus.Unknown,
     capability: RESOURCE_CAPABILITY_NETWORK_GIT_READ,
-    failure_reason: ResourceFailureReason.Unclassified,
+    failure_reason: ResourceFailureReason.DeadlineExceeded,
   });
 });
 
@@ -6025,6 +6030,7 @@ test("binding.environment.get refuses a read that exceeds the read deadline, not
     f.invokeAsync("binding.environment.get", saved),
     SSH_FAILURE_STATUS,
     ProjectErrorCode.RepositorySshUnreachable,
+    { failure_reason: ResourceFailureReason.DeadlineExceeded },
   ).finally(() => {
     settled = true;
   });
@@ -6038,7 +6044,7 @@ test("binding.environment.get refuses a read that exceeds the read deadline, not
   await refusal;
 });
 
-test("binding.environment.get refuses a detection read that exceeds the read deadline with ssh_unreachable", async (t) => {
+test("binding.environment.get refuses a devcontainer read that exceeds the read deadline with ssh_unreachable", async (t) => {
   const { f, saved, readStarted } = instructionFixture(t, {
     readHang: true,
     placement: WorkerPlacement.Container,
@@ -6054,12 +6060,38 @@ test("binding.environment.get refuses a detection read that exceeds the read dea
   await refusal;
 });
 
+test("binding.environment.get bounds the commit read and the detection read with one read deadline", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"], now: Date.now() });
+  const { f, saved, readStarted } = instructionFixture(t, {
+    readHang: true,
+    resolveAdvance: () => t.mock.timers.tick(COMMIT_READ_MS),
+  });
+  let settled = false;
+  const refusal = refusesInstructionFiles(
+    f.invokeAsync("binding.environment.get", saved),
+    SSH_FAILURE_STATUS,
+    ProjectErrorCode.RepositorySshUnreachable,
+    { failure_reason: ResourceFailureReason.DeadlineExceeded },
+  ).finally(() => {
+    settled = true;
+  });
+  await readStarted.promise;
+  t.mock.timers.tick(REPOSITORY_FILES_READ_TIMEOUT_MS - COMMIT_READ_MS);
+  await turn();
+  await turn();
+  assert.equal(settled, true);
+  await refusal;
+});
+
 test("the instruction files route and the environment route outlast the read deadline", () => {
   for (const operation of [
     projectOperations["binding.instruction_files.get"],
     projectOperations["binding.environment.get"],
   ])
-    assert.ok(operation.timeoutMs > REPOSITORY_FILES_READ_TIMEOUT_MS);
+    assert.ok(
+      operation.timeoutMs >
+        REPOSITORY_FILES_READ_TIMEOUT_MS + SSH_AGENT_CLEANUP_TIMEOUT_MS,
+    );
 });
 
 test("binding.environment.get answers the universal source at the image target with no manifest", async (t) => {
