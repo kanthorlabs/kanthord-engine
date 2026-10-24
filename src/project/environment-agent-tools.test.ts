@@ -255,6 +255,7 @@ function storeFixture(t: TestContext, beforeWrite: () => void = () => {}) {
     bindingsChanged: () => {},
     wakeup: { wake: () => {} },
     environmentRuntime: inertEnvironmentRuntime(),
+    telemetry: { span: () => undefined },
     slotImage: "kanthord:test",
     version: "0.0.0",
     environmentReady: async () => {},
