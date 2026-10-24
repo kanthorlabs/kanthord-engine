@@ -71,6 +71,7 @@ export interface ProofOptions {
     context: Context,
   ): Promise<void>;
   readonly commandLimitMs?: number;
+  readonly environmentMemoryMb: number;
   readonly running?: Set<number>;
 }
 
@@ -177,6 +178,7 @@ function startArguments(
   name: string,
   tag: string,
   owner: string,
+  memoryMb: number,
 ): readonly string[] {
   return [
     "run",
@@ -186,6 +188,8 @@ function startArguments(
     name,
     "--label",
     `${OWNER_LABEL}=${owner}`,
+    "--memory",
+    `${memoryMb}m`,
     "--user",
     `${CONTAINER_UID}:${CONTAINER_UID}`,
     "--no-healthcheck",
@@ -355,7 +359,12 @@ export async function proveInImage(
     await requireSuccess(
       options,
       "start",
-      startArguments(name, input.tag, options.owner),
+      startArguments(
+        name,
+        input.tag,
+        options.owner,
+        options.environmentMemoryMb,
+      ),
     );
     await feedBundle(options, name, root, signal);
     return await runCommands(options, name, input, signal);

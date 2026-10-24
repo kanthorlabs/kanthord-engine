@@ -54,7 +54,6 @@ import {
   type RuntimeHost,
 } from "./container-runtime.ts";
 
-export const ENVIRONMENT_BUILD_TIMEOUT_MS = 1800000;
 export const EnvironmentImageFailure = {
   BuildFailed: "build_failed",
   ImageInvalid: "image_invalid",
@@ -146,7 +145,8 @@ export interface EnvironmentImageOptions {
     context: Context,
   ): Promise<void>;
   readonly devcontainerCli?: () => string;
-  readonly buildTimeoutMs?: number;
+  readonly buildTimeoutMs: number;
+  readonly environmentMemoryMb: number;
 }
 
 export interface LayerInput {
@@ -459,7 +459,7 @@ export class EnvironmentImages implements Omit<
       this.runtime(),
       ["pull", reference],
       buildEnvironment(this.options.host.environment),
-      this.buildTimeoutMs(),
+      this.options.buildTimeoutMs,
       this.running,
       signal,
     );
@@ -573,6 +573,7 @@ export class EnvironmentImages implements Omit<
         stateDirectory: this.options.stateDirectory,
         exportRepository: this.options.exportRepository,
         running: this.running,
+        environmentMemoryMb: this.options.environmentMemoryMb,
       },
       input,
       signal,
@@ -607,16 +608,12 @@ export class EnvironmentImages implements Omit<
         owner: this.options.owner,
       }),
       buildEnvironment(this.options.host.environment),
-      this.buildTimeoutMs(),
+      this.options.buildTimeoutMs,
       this.running,
       signal,
     );
     if (built.code !== SUCCESS_CODE)
       throw new BuildFailure(EnvironmentImageFailure.BuildFailed, built.tail);
-  }
-
-  private buildTimeoutMs(): number {
-    return this.options.buildTimeoutMs ?? ENVIRONMENT_BUILD_TIMEOUT_MS;
   }
 
   private async buildLayer(
@@ -662,10 +659,12 @@ export class EnvironmentImages implements Omit<
         staging,
         "--label",
         `${OWNER_LABEL}=${this.options.owner}`,
+        "--memory",
+        `${this.options.environmentMemoryMb}m`,
         layer,
       ],
       buildEnvironment(this.options.host.environment),
-      this.buildTimeoutMs(),
+      this.options.buildTimeoutMs,
       this.running,
       signal,
     );
@@ -685,6 +684,8 @@ export class EnvironmentImages implements Omit<
         name,
         "--label",
         `${OWNER_LABEL}=${this.options.owner}`,
+        "--memory",
+        `${this.options.environmentMemoryMb}m`,
         "--read-only",
         "--cap-drop=ALL",
         "--security-opt=no-new-privileges",

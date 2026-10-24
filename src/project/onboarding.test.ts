@@ -2,7 +2,10 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { posix } from "node:path";
 import { test, type TestContext } from "node:test";
-import { setImmediate as turn } from "node:timers/promises";
+import {
+  setImmediate as turn,
+  setTimeout as pause,
+} from "node:timers/promises";
 import pino from "pino";
 import { IdentityKind } from "../kernel/caller.ts";
 import {
@@ -121,6 +124,9 @@ const UNTIL_ATTEMPTS = 1000;
 const SETUP_EXIT = 3;
 const COMMAND_ABSENT_EXIT = 127;
 const RUN_DEADLINE_MS = 1800000;
+const SHORT_DEADLINE_MS = 1000;
+const DEADLINE_POLL_MS = 50;
+const DEADLINE_POLL_ATTEMPTS = 100;
 const PENDING_RETRY_MS = 60000;
 const REMOVE_STALE_RUNS = "removeStaleRuns";
 const RENAMED_BINDING_ID = "binding_app_2";
@@ -230,7 +236,11 @@ class Harness {
   readonly proofs: ProofFiles;
   readonly onboarding: Onboarding;
 
-  constructor(t: TestContext, resolve?: ResolveGroup) {
+  constructor(
+    t: TestContext,
+    resolve?: ResolveGroup,
+    environmentBuildTimeoutMs: number = RUN_DEADLINE_MS,
+  ) {
     this.proofs = new ProofFiles(temporary(t));
     const runtime = {
       runtimeName: RUNTIME_NAME,
@@ -311,6 +321,7 @@ class Harness {
       ),
       now: () => ++this.clock,
       runId: () => "run_1",
+      environmentBuildTimeoutMs,
     });
     t.after(() => this.onboarding.stop());
   }
@@ -348,6 +359,14 @@ class Harness {
 
   async ended(count = ONE_CALL): Promise<void> {
     await this.until(() => this.logged(RUN_ENDED).length >= count);
+  }
+
+  async endedAfterDeadline(): Promise<void> {
+    for (let attempt = 0; attempt < DEADLINE_POLL_ATTEMPTS; attempt++) {
+      if (this.logged(RUN_ENDED).length >= ONE_CALL) return;
+      await pause(DEADLINE_POLL_MS);
+    }
+    assert.fail("The run did not end after its deadline.");
   }
 
   async compute(group: RepositoryGroup = APP): Promise<void> {
@@ -1245,6 +1264,21 @@ test(
     assert.ok(file);
     assert.equal(file.class, BUILD_FAILED);
     assert.equal(file.tail, DEADLINE_TAIL);
+  },
+);
+
+test(
+  "the deadline option cancels a build that never ends and writes build_failed",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const h = new Harness(t, undefined, SHORT_DEADLINE_MS);
+    await h.compute();
+    await h.endedAfterDeadline();
+    const file = h.proofOf(h.digest());
+    assert.ok(file);
+    assert.equal(file.outcome, FAILED);
+    assert.equal(file.class, BUILD_FAILED);
+    assert.equal(h.state().status, EnvironmentStatus.Failed);
   },
 );
 

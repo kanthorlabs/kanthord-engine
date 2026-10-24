@@ -62,6 +62,11 @@ const ONE_BUILD = 1;
 const WAIT_ROUNDS = 100;
 const WAIT_STEP_MS = 50;
 const SHORT_TIMEOUT_MS = 5000;
+const BUILD_TIMEOUT_MS = 1800000;
+const MEMORY_MB = 4096;
+const BOUNDED_MEMORY_MB = 8192;
+const MEMORY_FLAG = "--memory";
+const BOUNDED_MEMORY_ARGUMENT = `${BOUNDED_MEMORY_MB}m`;
 const START_WAIT_ROUNDS = 1200;
 
 function environment(
@@ -90,6 +95,7 @@ function images(
     checkout?: (target: string) => void;
     inspect?: unknown;
     buildTimeoutMs?: number;
+    memoryMb?: number;
   },
 ) {
   const calls: string[][] = [];
@@ -139,9 +145,8 @@ function images(
       return Promise.resolve();
     },
     devcontainerCli: () => cli,
-    ...(options.buildTimeoutMs === undefined
-      ? {}
-      : { buildTimeoutMs: options.buildTimeoutMs }),
+    buildTimeoutMs: options.buildTimeoutMs ?? BUILD_TIMEOUT_MS,
+    environmentMemoryMb: options.memoryMb ?? MEMORY_MB,
   });
   const lines = (): string[][] =>
     existsSync(log)
@@ -544,6 +549,44 @@ test("the image check runs hardened with the owner label and a failed check remo
   );
 });
 
+test("the layer build and the image check hold the memory bound and the devcontainer build holds none", async (t) => {
+  const directory = temporary(t);
+  const { build, lines } = images(directory, {
+    environment: environment(),
+    exists: ABSENT,
+    cli: PASSING_CLI,
+    variables: fakePodman(directory, { build: SUCCESS, run: SUCCESS }),
+    memoryMb: BOUNDED_MEMORY_MB,
+  });
+  assert.deepEqual(await build(), { outcome: ImageBuildOutcome.Built });
+  const log = lines();
+  const layer = log.find(
+    (line) =>
+      line[0] === PODMAN_LINE &&
+      line[1] === BUILD_COMMAND &&
+      line.includes(STAGING),
+  );
+  const check = log.find(
+    (line) =>
+      line[0] === PODMAN_LINE &&
+      line[1] === RUN_COMMAND &&
+      line.includes(STAGING),
+  );
+  for (const call of [layer, check]) {
+    assert.ok(call);
+    assert.equal(call[call.indexOf(MEMORY_FLAG) + 1], BOUNDED_MEMORY_ARGUMENT);
+  }
+  const devcontainer = devcontainerBuildArguments({
+    cli: "/cli/devcontainer.js",
+    runtime: ContainerRuntime.Podman,
+    workspace: "/state/workspace",
+    config: "/state/config/.devcontainer/devcontainer.json",
+    image: "base",
+    owner: OWNER,
+  });
+  assert.equal(devcontainer.includes(MEMORY_FLAG), false);
+});
+
 test("a layer variable that a Containerfile line cannot hold fails the build and names the key", async (t) => {
   const directory = temporary(t);
   const { build, lines } = images(directory, {
@@ -812,6 +855,8 @@ function runtimeImages(
     kanthordImage: KANTHORD_IMAGE,
     version: VERSION,
     stateDirectory: directory,
+    buildTimeoutMs: BUILD_TIMEOUT_MS,
+    environmentMemoryMb: MEMORY_MB,
     exportRepository: () => Promise.resolve(),
   });
   return { built, calls };
