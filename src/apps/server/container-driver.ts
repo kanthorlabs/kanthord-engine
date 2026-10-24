@@ -19,6 +19,8 @@ import type { SlotControl } from "../worker/thread-data.ts";
 import {
   absentContainer,
   absentVolume,
+  cacheVolumeArguments,
+  cacheVolumeName,
   containerOwner,
   killArguments,
   ownedArguments,
@@ -61,6 +63,7 @@ export interface ContainerDriverOptions {
     slot: PoolSlot,
     signal: AbortSignal,
   ): Promise<string>;
+  cacheGroupOf?(slot: PoolSlot, image: string): string | null;
 }
 
 interface StatusEntry {
@@ -179,7 +182,19 @@ class ContainerInstance implements SlotInstance {
       return;
     }
     if (this.settled) return;
-    this.spawn(runtime, image);
+    const cacheVolume = await this.cacheVolumeFor(runtime, image);
+    if (this.settled) return;
+    this.spawn(runtime, image, cacheVolume);
+  }
+
+  private async cacheVolumeFor(
+    runtime: ContainerRuntime,
+    image: string,
+  ): Promise<string | null> {
+    const { slot } = this.launch;
+    const group = this.driver.cacheGroupOf(slot, image);
+    if (group === null) return null;
+    return this.driver.createCacheVolume(runtime, slot.project_id, group);
   }
 
   private waitForImage(runtime: ContainerRuntime): Promise<string | null> {
@@ -194,7 +209,11 @@ class ContainerInstance implements SlotInstance {
     });
   }
 
-  private spawn(runtime: ContainerRuntime, image: string): void {
+  private spawn(
+    runtime: ContainerRuntime,
+    image: string,
+    cacheVolume: string | null,
+  ): void {
     const client = spawn(
       runtime,
       runArguments({
@@ -202,6 +221,7 @@ class ContainerInstance implements SlotInstance {
         clientId: this.launch.slot.client_id,
         owner: this.driver.owner,
         environment: this.launch.environment,
+        cacheVolume,
       }),
       {
         detached: true,
@@ -266,6 +286,7 @@ export class ContainerDriver implements SlotDriver {
   readonly owner: string;
   private readonly host: RuntimeHost;
   private readonly resolveImage: ContainerDriverOptions["imageFor"];
+  private readonly resolveCacheGroup: ContainerDriverOptions["cacheGroupOf"];
   private latest: StatusEntry | null = null;
   private prepared: Promise<void> | null = null;
   private readonly images = new Map<string, string>();
@@ -275,6 +296,11 @@ export class ContainerDriver implements SlotDriver {
     this.owner = containerOwner(options.masterKey);
     this.host = options.host;
     this.resolveImage = options.imageFor;
+    this.resolveCacheGroup = options.cacheGroupOf;
+  }
+
+  cacheGroupOf(slot: PoolSlot, image: string): string | null {
+    return this.resolveCacheGroup?.(slot, image) ?? null;
   }
 
   imageFor(
@@ -362,6 +388,21 @@ export class ContainerDriver implements SlotDriver {
         `volume create ${slotName(clientId)}`,
         answer.stderr,
       );
+  }
+
+  async createCacheVolume(
+    runtime: ContainerRuntime,
+    projectId: string,
+    resourceIdentity: string,
+  ): Promise<string> {
+    const name = cacheVolumeName(this.owner, projectId, resourceIdentity);
+    const answer = await this.command(
+      runtime,
+      cacheVolumeArguments(this.owner, projectId, resourceIdentity),
+    );
+    if (!presentVolume(answer))
+      throw commandFailure(`volume create ${name}`, answer.stderr);
+    return name;
   }
 
   async removeVolume(clientId: string): Promise<void> {

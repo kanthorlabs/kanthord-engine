@@ -35,6 +35,7 @@ const SOURCE: NodeJS.ProcessEnv = {
 function input(setup: string[], checks: string[]): ProofInput {
   return {
     run_id: RUN_ID,
+    project_id: "project",
     binding_id: "binding",
     resource_identity: "resource",
     commit: COMMIT,

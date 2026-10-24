@@ -15,12 +15,19 @@ import {
   type ProofInput,
 } from "../../project/environment-state.ts";
 import { ContainerRuntime } from "../../worker/contract.ts";
-import type { RuntimeHost } from "./container-runtime.ts";
+import {
+  cacheVolumeArguments,
+  cacheVolumeName,
+  type RuntimeHost,
+} from "./container-runtime.ts";
 import { proveInImage, type ProofOptions } from "./environment-proof.ts";
 
 const OWNER = "OWNER";
 const TAG = "localhost/kanthord-env/repository/github/acme/app:digest";
 const RUN_ID = "RUN1";
+const PROJECT_ID = "project_01ARZ3NDEKTSV4RRFFQ69G5FAV";
+const RESOURCE = "repository:github:Acme/App";
+const CACHE_VOLUME = cacheVolumeName(OWNER, PROJECT_ID, RESOURCE);
 const NAME = `kanthord-proof-${RUN_ID}`;
 const HOME = "/var/lib/kanthord";
 const CHECKOUT = `${HOME}/checkout`;
@@ -33,7 +40,12 @@ const SLOT_USER = "10001:10001";
 const TINI = "/usr/bin/tini";
 const MINIMUM_BUNDLE_BYTES = 0;
 const START = "run";
+const NOT_FOUND = -1;
+const VOLUME_OPTION = "--volume";
+const REMOVE = "rm";
 const FAILED_EXIT = 3;
+const EXISTS_EXIT = 125;
+const COMMAND_COUNT = 5;
 const MEMORY_MB = 4096;
 const BOUNDED_MEMORY_MB = 8192;
 const SHORT_LIMIT_MS = 500;
@@ -70,8 +82,9 @@ function input(overrides: Partial<ProofInput> = {}): ProofInput & {
 } {
   return {
     run_id: RUN_ID,
+    project_id: PROJECT_ID,
     binding_id: "binding",
-    resource_identity: "repository:github:Acme/App",
+    resource_identity: RESOURCE,
     commit: "c".repeat(40),
     setup: ["echo one", "echo two"],
     checks: ["echo check-one", "exit 3", "echo check-three"],
@@ -86,6 +99,7 @@ function proof(
     hostCode?: number;
     commandLimitMs?: number;
     environmentMemoryMb?: number;
+    existingCache?: boolean;
   } = {},
 ) {
   const log = join(directory, "log");
@@ -110,6 +124,16 @@ function proof(
     resolves: () => true,
     run: (_runtime, args) => {
       appendFileSync(log, `${JSON.stringify([HOST_LINE, ...args])}\n`);
+      if (
+        overrides.existingCache &&
+        args.join(" ") ===
+          cacheVolumeArguments(OWNER, PROJECT_ID, RESOURCE).join(" ")
+      )
+        return Promise.resolve({
+          code: EXISTS_EXIT,
+          stdout: "",
+          stderr: `Error: volume with name ${CACHE_VOLUME} already exists: volume already exists`,
+        });
       return Promise.resolve({
         code: overrides.hostCode ?? 0,
         stdout: "",
@@ -369,4 +393,47 @@ test("a refused container start fails the proof and still removes what exists", 
   );
   assert.equal(cleaned(lines()), true);
   assert.equal(existsSync(runDirectory), false);
+});
+
+test("the proof container mounts the cache volume of the group after the cache volume is created", async (t) => {
+  const { options, lines } = proof(temporary(t));
+  await proveInImage(options, input(), new AbortController().signal);
+  const host = ofKind(lines(), HOST_LINE);
+  const create = host.findIndex(
+    (line) =>
+      line.join(" ") ===
+      cacheVolumeArguments(OWNER, PROJECT_ID, RESOURCE).join(" "),
+  );
+  const start = host.findIndex((line) => line[0] === START);
+  assert.notEqual(create, NOT_FOUND);
+  assert.ok(create < start);
+  const volumes = host[start]!.flatMap((arg, index) =>
+    host[start]![index - 1] === VOLUME_OPTION ? [arg] : [],
+  );
+  assert.deepEqual(volumes, [
+    `${NAME}:${HOME}`,
+    `${CACHE_VOLUME}:${HOME}/.cache`,
+  ]);
+});
+
+test("the proof container starts with the cache volume of the group when the volume exists", async (t) => {
+  const { options, lines } = proof(temporary(t), { existingCache: true });
+  const results = await proveInImage(
+    options,
+    input(),
+    new AbortController().signal,
+  );
+  const start = ofKind(lines(), HOST_LINE).find((line) => line[0] === START);
+  assert.ok(start);
+  assert.ok(start.includes(`${CACHE_VOLUME}:${HOME}/.cache`));
+  assert.equal(results.length, COMMAND_COUNT);
+});
+
+test("the run removes the home volume and never the cache volume", async (t) => {
+  const { options, lines } = proof(temporary(t));
+  await proveInImage(options, input(), new AbortController().signal);
+  const removed = ofKind(lines(), HOST_LINE).filter(
+    (line) => line[0] === VOLUME && line[1] === REMOVE,
+  );
+  assert.deepEqual(removed, [["volume", "rm", "--force", NAME]]);
 });

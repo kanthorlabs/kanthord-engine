@@ -307,6 +307,8 @@ export function composeServices(options: {
     host: containerHost,
     imageFor: (_runtime, slot, signal) =>
       project.slotImage(slot.project_id, slot.resource_identity, signal),
+    cacheGroupOf: (slot, image) =>
+      project.slotCacheGroupOf(slot.project_id, slot.resource_identity, image),
   });
   const hostProofs = new HostProofs({
     stateDirectory: options.stateDirectory,
@@ -332,6 +334,9 @@ export function composeServices(options: {
     collect: (identityPath, keepDigest) =>
       environmentImages.collect(identityPath, keepDigest),
     removeStaleRuns: () => environmentImages.removeStaleRuns(),
+    cacheVolumes: () => environmentImages.cacheVolumes(),
+    removeCacheVolume: (projectId, resourceIdentity) =>
+      environmentImages.removeCacheVolume(projectId, resourceIdentity),
   };
   const containerSlotDriver =
     options.containerSlotDriver?.(containerDriver) ?? containerDriver;

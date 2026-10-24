@@ -14,6 +14,7 @@ import {
 import { COMMAND_LIMIT_MS } from "../../worker/unit/budget.ts";
 import type { ContainerRuntime } from "../../worker/contract.ts";
 import {
+  CACHE_MOUNT,
   CONTAINER_UID,
   OWNER_LABEL,
   SLOT_HOME,
@@ -21,6 +22,9 @@ import {
   TMP_MOUNT,
   absentContainer,
   absentVolume,
+  cacheVolumeArguments,
+  cacheVolumeName,
+  presentVolume,
   removeArguments,
   type RuntimeHost,
 } from "./container-runtime.ts";
@@ -179,6 +183,7 @@ function startArguments(
   tag: string,
   owner: string,
   memoryMb: number,
+  cacheVolume: string,
 ): readonly string[] {
   return [
     "run",
@@ -202,6 +207,8 @@ function startArguments(
     TMP_MOUNT,
     "--volume",
     `${name}:${SLOT_HOME}`,
+    "--volume",
+    `${cacheVolume}:${CACHE_MOUNT}`,
     "--workdir",
     SLOT_HOME,
     "--env",
@@ -235,6 +242,20 @@ async function requireSuccess(
   );
   if (answer.code !== SUCCESS_CODE)
     throw proofFailure(step, answer.stderr.slice(-OUTPUT_TAIL_BYTES));
+}
+
+async function ensureCacheVolume(options: ProofOptions, input: ProofInput) {
+  const answer = await options.host.run(
+    options.runtime,
+    cacheVolumeArguments(
+      options.owner,
+      input.project_id,
+      input.resource_identity,
+    ),
+    PROOF_COMMAND_TIMEOUT_MS,
+  );
+  if (!presentVolume(answer))
+    throw proofFailure("cache volume", answer.stderr.slice(-OUTPUT_TAIL_BYTES));
 }
 
 async function feedBundle(
@@ -356,6 +377,7 @@ export async function proveInImage(
       `${OWNER_LABEL}=${options.owner}`,
       name,
     ]);
+    await ensureCacheVolume(options, input);
     await requireSuccess(
       options,
       "start",
@@ -364,6 +386,11 @@ export async function proveInImage(
         input.tag,
         options.owner,
         options.environmentMemoryMb,
+        cacheVolumeName(
+          options.owner,
+          input.project_id,
+          input.resource_identity,
+        ),
       ),
     );
     await feedBundle(options, name, root, signal);

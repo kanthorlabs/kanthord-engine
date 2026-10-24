@@ -639,6 +639,54 @@ test("the layer runs each create command before kanthord, tini and the passwd en
   );
 });
 
+const CACHE_ROOT = "/var/lib/kanthord/.cache";
+const CACHE_DEFAULT_LINES = [
+  `ENV npm_config_cache=${CACHE_ROOT}/npm`,
+  `ENV npm_config_store_dir=${CACHE_ROOT}/pnpm-store`,
+  `ENV PIP_CACHE_DIR=${CACHE_ROOT}/pip`,
+  `ENV GOMODCACHE=${CACHE_ROOT}/go-mod`,
+  `ENV CARGO_HOME=${CACHE_ROOT}/cargo`,
+];
+
+function layerLines(environment: Map<string, string>): string[] {
+  return layerContainerfile({
+    base: "tag-base",
+    kanthordImage: KANTHORD_IMAGE,
+    environment,
+    onCreate: [],
+    owner: OWNER,
+  }).split("\n");
+}
+
+test("the layer writes the five cache defaults when the document sets no cache variable", () => {
+  const lines = layerLines(new Map());
+  for (const line of CACHE_DEFAULT_LINES) assert.ok(lines.includes(line), line);
+});
+
+test("the layer keeps a cache variable of the document and writes the other four defaults before the document variables", () => {
+  const lines = layerLines(new Map([["CARGO_HOME", "/custom"]]));
+  assert.ok(lines.includes('ENV CARGO_HOME="/custom"'));
+  assert.ok(!lines.includes(`ENV CARGO_HOME=${CACHE_ROOT}/cargo`));
+  for (const line of CACHE_DEFAULT_LINES.slice(0, -1))
+    assert.ok(lines.includes(line), line);
+  assert.ok(
+    lines.indexOf(CACHE_DEFAULT_LINES[0]!) <
+      lines.indexOf('ENV CARGO_HOME="/custom"'),
+  );
+});
+
+test("the layer creates the cache directory for uid 10001 after the passwd step and before the USER line", () => {
+  const lines = layerLines(new Map());
+  const step = lines.findIndex((line) =>
+    line.includes(`mkdir -p ${CACHE_ROOT} && chown 10001:10001 ${CACHE_ROOT}`),
+  );
+  assert.notEqual(step, NOT_FOUND);
+  assert.ok(
+    step > lines.findIndex((line) => line.includes("10001::/var/lib/kanthord")),
+  );
+  assert.ok(step < lines.indexOf("USER 10001"));
+});
+
 function alive(pid: number): boolean {
   try {
     process.kill(pid, 0);
@@ -984,6 +1032,7 @@ test("prove runs the commands in one container of the image through the proof", 
   const results = await built.prove(
     {
       run_id: RUN_ID,
+      project_id: "project",
       binding_id: "binding",
       resource_identity: IDENTITY,
       commit: "c".repeat(40),

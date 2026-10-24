@@ -13,5 +13,7 @@ export function inertEnvironmentRuntime(): EnvironmentRuntime {
     removeTags: async () => {},
     collect: async () => {},
     removeStaleRuns: async () => {},
+    cacheVolumes: async () => [],
+    removeCacheVolume: async () => {},
   };
 }

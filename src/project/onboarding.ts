@@ -61,6 +61,7 @@ const PENDING_RETRY_MS = 60000;
 const RUN_STARTED = "project.onboarding.run_started";
 const RUN_ENDED = "project.onboarding.run_ended";
 const RUN_FAILED = "project.onboarding.run_failed";
+const CACHE_COLLECTION_FAILED = "project.onboarding.cache_collection_failed";
 const TRACE_ID_BYTES = 16;
 const SPAN_ID_BYTES = 8;
 const NO_COMMAND = null;
@@ -343,6 +344,28 @@ export class Onboarding {
       await runtime.collect(path, null);
       proofs.removePath(path);
     }
+    await this.collectCacheVolumes();
+  }
+
+  private async collectCacheVolumes(): Promise<void> {
+    const { runtime, logger } = this.dependencies;
+    const held = new Set<string>();
+    for (const projectId of this.dependencies.projectIds())
+      for (const group of this.dependencies.bindingsOf(projectId).repositories)
+        held.add(keyOf(projectId, group.resource_identity));
+    try {
+      for (const volume of await runtime.cacheVolumes()) {
+        if (held.has(keyOf(volume.project_id, volume.resource_identity)))
+          continue;
+        await runtime
+          .removeCacheVolume(volume.project_id, volume.resource_identity)
+          .catch((error: unknown) =>
+            logger.error({ err: error, ...volume }, CACHE_COLLECTION_FAILED),
+          );
+      }
+    } catch (error) {
+      logger.error({ err: error }, CACHE_COLLECTION_FAILED);
+    }
   }
 
   cancel(): void {
@@ -371,6 +394,7 @@ export class Onboarding {
       this.markChanged(projectId, group);
       this.trigger(projectId, group.resource_identity);
     }
+    void this.collectCacheVolumes();
   }
 
   environmentClaimed(projectId: string, resourceIdentity: string): void {
@@ -463,6 +487,17 @@ export class Onboarding {
         this.trigger(projectId, group.resource_identity);
       settle();
     });
+  }
+
+  slotCacheGroupOf(
+    projectId: string,
+    workerResourceIdentity: string,
+    image: string,
+  ): string | null {
+    const group = this.slotGroupOf(projectId, workerResourceIdentity);
+    if (group === null) return null;
+    const record = this.records.get(keyOf(projectId, group.resource_identity));
+    return record?.tag === image ? group.resource_identity : null;
   }
 
   private slotGroupOf(
@@ -882,6 +917,7 @@ export class Onboarding {
       record.source === EnvironmentSource.Detected;
     const proof = {
       ...base,
+      project_id: record.project_id,
       setup: checksOnly ? [] : setupScriptsOf(document),
       checks: checksOf(document),
     };
@@ -1011,6 +1047,7 @@ export class Onboarding {
       record.proved = true;
     }
     await runtime.collect(path, digest);
+    await this.collectCacheVolumes();
     for (const other of proofs.digests(path))
       if (other !== digest) proofs.remove(path, other);
     if (proved)

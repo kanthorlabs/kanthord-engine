@@ -47,6 +47,12 @@ import {
   runCommand,
 } from "./environment-proof.ts";
 import {
+  absentVolume,
+  cacheVolumeName,
+  ownedCacheVolumeArguments,
+  parseCacheVolumes,
+  removeNamedVolumeArguments,
+  CACHE_MOUNT,
   CONTAINER_UID,
   OWNER_LABEL,
   SLOT_HOME,
@@ -109,6 +115,16 @@ const imageInspectSchema = z
     }),
   )
   .min(1);
+
+export const CACHE_DIRECTORY_SCRIPT = `mkdir -p ${CACHE_MOUNT} && chown ${CONTAINER_UID}:${CONTAINER_UID} ${CACHE_MOUNT}`;
+
+export const CACHE_DEFAULTS = [
+  ["npm_config_cache", "npm"],
+  ["npm_config_store_dir", "pnpm-store"],
+  ["PIP_CACHE_DIR", "pip"],
+  ["GOMODCACHE", "go-mod"],
+  ["CARGO_HOME", "cargo"],
+] as const;
 
 export const PASSWD_SCRIPT = [
   `getent passwd ${CONTAINER_UID} >/dev/null || echo 'kanthord:x:${CONTAINER_UID}:${CONTAINER_UID}::${SLOT_HOME}:/bin/sh' >> /etc/passwd`,
@@ -350,6 +366,9 @@ function shellStep(script: string): string {
 }
 
 export function layerContainerfile(input: LayerInput): string {
+  const defaults = CACHE_DEFAULTS.filter(
+    ([name]) => !input.environment.has(name),
+  ).map(([name, directory]) => `ENV ${name}=${CACHE_MOUNT}/${directory}`);
   const variables = Array.from(
     input.environment,
     ([name, value]) =>
@@ -359,12 +378,14 @@ export function layerContainerfile(input: LayerInput): string {
     `FROM ${input.kanthordImage} AS kanthord`,
     `FROM ${input.base}`,
     "USER root",
+    ...defaults,
     ...variables,
     "WORKDIR /",
     ...input.onCreate.map(shellStep),
     `COPY --from=kanthord ${KANTHORD_PATH} ${KANTHORD_PATH}`,
     `COPY --from=kanthord ${TINI_STATIC_PATH} ${TINI_PATH}`,
     shellStep(PASSWD_SCRIPT),
+    shellStep(CACHE_DIRECTORY_SCRIPT),
     `LABEL ${OWNER_LABEL}=${JSON.stringify(input.owner)}`,
     `USER ${CONTAINER_UID}`,
     `WORKDIR ${SLOT_HOME}`,
@@ -474,6 +495,44 @@ export class EnvironmentImages implements Omit<
   async imageExists(tag: string): Promise<boolean> {
     const exists = await this.answer(["image", "exists", tag]);
     return exists.code === SUCCESS_CODE;
+  }
+
+  async cacheVolumes(): Promise<
+    Array<{ project_id: string; resource_identity: string }>
+  > {
+    if (
+      !RUNTIME_ORDER.some((candidate) => this.options.host.resolves(candidate))
+    )
+      return [];
+    const listed = await this.answer(
+      ownedCacheVolumeArguments(this.options.owner),
+    );
+    if (listed.code !== SUCCESS_CODE)
+      throw new Error(
+        `The cache volume listing failed: ${listed.stderr.slice(-OUTPUT_TAIL_BYTES)}`,
+      );
+    return parseCacheVolumes(listed.stdout).map(
+      ({ project_id, resource_identity }) => ({
+        project_id,
+        resource_identity,
+      }),
+    );
+  }
+
+  async removeCacheVolume(
+    projectId: string,
+    resourceIdentity: string,
+  ): Promise<void> {
+    const name = cacheVolumeName(
+      this.options.owner,
+      projectId,
+      resourceIdentity,
+    );
+    const removed = await this.answer(removeNamedVolumeArguments(name));
+    if (!absentVolume(removed))
+      throw new Error(
+        `The removal of the cache volume ${name} failed: ${removed.stderr.slice(-OUTPUT_TAIL_BYTES)}`,
+      );
   }
 
   async tagProved(tag: string): Promise<void> {

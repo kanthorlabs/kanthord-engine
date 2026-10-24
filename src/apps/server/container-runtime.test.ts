@@ -9,13 +9,18 @@ import {
 } from "../../worker/contract.ts";
 import {
   boundedDetail,
+  cacheVolumeArguments,
+  cacheVolumeName,
   containerOwner,
   detectRuntime,
   infoArguments,
   killArguments,
   ownedArguments,
+  ownedCacheVolumeArguments,
+  parseCacheVolumes,
   removeArguments,
   runArguments,
+  slotClientId,
   volumeArguments,
   type RuntimeAnswer,
   type RuntimeHost,
@@ -207,6 +212,7 @@ for (const runtime of Object.values(ContainerRuntime))
       clientId: CLIENT_ID,
       owner: OWNER,
       environment: HOST_ENVIRONMENT,
+      cacheVolume: null,
     });
     assert.deepEqual([runtime, ...args], [runtime, ...GOLDEN_RUN]);
     const text = args.join("\n");
@@ -239,6 +245,7 @@ test("the run command forwards only the env names that the server sets", () => {
     clientId: CLIENT_ID,
     owner: OWNER,
     environment: { TZ: "UTC" },
+    cacheVolume: null,
   });
   const forwarded = args.filter(
     (arg, index) => args[index - 1] === ENV_OPTION && !arg.includes("="),
@@ -518,4 +525,98 @@ test("Docker answers when Podman fails, and the first failure names the detail o
     await detectRuntime(silent.host),
     expected(PlacementIssue.RuntimeFailed, null, "podman info exits 1"),
   );
+});
+
+const PROJECT_ID = "project_01ARZ3NDEKTSV4RRFFQ69G5FAV";
+const RESOURCE = "repository:github:acme/app";
+const CACHE_NAME = /^kanthord_cache_[0-9a-f]{24}$/;
+const VOLUME_OPTION = "--volume";
+const SLOT_VOLUMES = 1;
+const FORMAT_INDEX = 4;
+const FORMAT_FLAG = "--format";
+const FORMAT_VALUE_INDEX = 5;
+const CACHE_MOUNT = "/var/lib/kanthord/.cache";
+
+test("cacheVolumeName answers one name for one group and another name for another group", () => {
+  const name = cacheVolumeName(OWNER, PROJECT_ID, RESOURCE);
+  assert.match(name, CACHE_NAME);
+  assert.equal(cacheVolumeName(OWNER, PROJECT_ID, RESOURCE), name);
+  assert.notEqual(cacheVolumeName("OTHER", PROJECT_ID, RESOURCE), name);
+  assert.notEqual(cacheVolumeName(OWNER, "project_other", RESOURCE), name);
+  assert.notEqual(cacheVolumeName(OWNER, PROJECT_ID, "repository:other"), name);
+});
+
+test("the run command mounts the cache volume after the slot volume and only when it is set", () => {
+  const base = {
+    image: IMAGE,
+    clientId: CLIENT_ID,
+    owner: OWNER,
+    environment: {},
+  };
+  const mounted = runArguments({ ...base, cacheVolume: "kanthord_cache_abc" });
+  const volumes = mounted.flatMap((arg, index) =>
+    mounted[index - 1] === VOLUME_OPTION ? [arg] : [],
+  );
+  assert.deepEqual(volumes, [
+    `kanthord_slot_${CLIENT_ID}:/var/lib/kanthord`,
+    `kanthord_cache_abc:${CACHE_MOUNT}`,
+  ]);
+  const bare = runArguments({ ...base, cacheVolume: null });
+  assert.equal(
+    bare.filter((arg) => arg === VOLUME_OPTION).length,
+    SLOT_VOLUMES,
+  );
+});
+
+test("cacheVolumeArguments creates the named volume with the owner and group labels", () => {
+  assert.deepEqual(cacheVolumeArguments(OWNER, PROJECT_ID, RESOURCE), [
+    "volume",
+    "create",
+    "--label",
+    `io.kanthord.owner=${OWNER}`,
+    "--label",
+    `io.kanthord.cache_project=${PROJECT_ID}`,
+    "--label",
+    `io.kanthord.cache_resource=${RESOURCE}`,
+    cacheVolumeName(OWNER, PROJECT_ID, RESOURCE),
+  ]);
+});
+
+test("slotClientId answers null for a cache volume name", () => {
+  assert.equal(
+    slotClientId(cacheVolumeName(OWNER, PROJECT_ID, RESOURCE)),
+    null,
+  );
+});
+
+test("ownedCacheVolumeArguments lists the volumes of the owner and prints the name and the two cache labels", () => {
+  const args = ownedCacheVolumeArguments(OWNER);
+  assert.deepEqual(args.slice(0, 4), [
+    "volume",
+    "ls",
+    "--filter",
+    `label=io.kanthord.owner=${OWNER}`,
+  ]);
+  assert.equal(args[FORMAT_INDEX], FORMAT_FLAG);
+  const format = args[FORMAT_VALUE_INDEX] ?? "";
+  assert.ok(format.startsWith("{{.Name}}\t"));
+  assert.ok(format.includes("io.kanthord.cache_project"));
+  assert.ok(format.includes("io.kanthord.cache_resource"));
+});
+
+test("parseCacheVolumes answers the name and the two labels of each line and skips a line without both labels", () => {
+  const output = [
+    `kanthord_cache_aaa\t${PROJECT_ID}\t${RESOURCE}`,
+    `kanthord_slot_${CLIENT_ID}\t\t`,
+    `kanthord_cache_bbb\t${PROJECT_ID}\t`,
+    `kanthord_cache_ccc\t\t${RESOURCE}`,
+    "",
+  ].join("\n");
+  assert.deepEqual(parseCacheVolumes(output), [
+    {
+      name: "kanthord_cache_aaa",
+      project_id: PROJECT_ID,
+      resource_identity: RESOURCE,
+    },
+  ]);
 });
