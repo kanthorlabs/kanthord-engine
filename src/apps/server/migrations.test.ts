@@ -638,7 +638,7 @@ test("Scheduler executions have exactly the ruled columns and partial unique ind
   );
 });
 
-test("Scheduler jobs hold available_at", (t) => {
+test("Scheduler jobs hold available_at and queued_at", (t) => {
   const store = new Store(IN_MEMORY_DATABASE);
   t.after(() => store.close());
   store.migrate([
@@ -655,6 +655,7 @@ test("Scheduler jobs hold available_at", (t) => {
       ["node_id", "TEXT", 1, 0],
       ["priority", "INTEGER", 1, 0],
       ["available_at", "INTEGER", 0, 0],
+      ["queued_at", "INTEGER", 1, 0],
     ],
   );
 });

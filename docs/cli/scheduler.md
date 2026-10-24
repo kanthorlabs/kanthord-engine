@@ -235,11 +235,13 @@ Every field below is required in a result; none has a client default.
 | `job_id`                | `job_<ulid>`; the ULID carries the creation time of the first job of the node.                         |
 | `project_id`, `node_id` | Project and Mission node references. Only a node is queued.                                            |
 | `priority`              | Safe integer copied from the Mission-owned priority. An absent node priority is Mission's default `0`. |
+| `queued_at`             | Unix epoch milliseconds of the insert of this job.                                                     |
 
-A priority change preserves the job identity. A release with further work
-creates a new job when the node is claimable. Each job of a node takes the
-identity of the first job of that node, so a revision turn keeps the queue
-place of the node inside its priority. Membership means claimable work,
+A priority change keeps the job identity. A release with further work
+creates a new job when the node is claimable. Each later job of a node keeps
+the identity of the first job of that node, so a rework keeps the queue
+place of the node inside its priority. `queued_at` states when the current
+job entered the queue. Membership means claimable work,
 not necessarily Mission state `Available`. Neither priority, age, inspection nor a stale job admits
 a claim. Mission state and every admission condition are rechecked at claim.
 

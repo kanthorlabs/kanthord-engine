@@ -1,3 +1,4 @@
+import assert from "node:assert/strict";
 import { addAbortListener } from "node:events";
 import {
   background,
@@ -66,6 +67,7 @@ const CURSOR_ENCODING = "base64url";
 const TEXT_ENCODING = "utf8";
 const FIRST_ROW = 0;
 const EXTRA_ROW = 1;
+const ONE_JOB = 1;
 const CURSOR_SEPARATOR = "|";
 const QUEUE_CURSOR_PARTS = 2;
 
@@ -76,6 +78,7 @@ type JobRow = {
   project_id: string;
   node_id: string;
   priority: number;
+  queued_at: number;
 };
 
 function toJob(row: JobRow): Job {
@@ -84,6 +87,7 @@ function toJob(row: JobRow): Job {
     project_id: row.project_id,
     node_id: row.node_id,
     priority: row.priority,
+    queued_at: row.queued_at,
   };
 }
 
@@ -269,11 +273,12 @@ export class SchedulerService implements Service, WorkQueue {
         "INSERT INTO scheduler_queue_place (node_id, job_id) VALUES (?, ?) ON CONFLICT (node_id) DO NOTHING",
       )
       .run(nodeId, createIdentity(JOB_IDENTITY_PREFIX));
-    tx.database
+    const inserted = tx.database
       .prepare(
-        "INSERT INTO scheduler_job (id, project_id, node_id, priority) SELECT job_id, ?, node_id, ? FROM scheduler_queue_place WHERE node_id = ?",
+        "INSERT INTO scheduler_job (id, project_id, node_id, priority, queued_at) SELECT job_id, ?, node_id, ?, ? FROM scheduler_queue_place WHERE node_id = ?",
       )
-      .run(projectId, priority, nodeId);
+      .run(projectId, priority, Date.now(), nodeId);
+    assert.equal(inserted.changes, ONE_JOB);
   }
 
   delete(tx: Transaction, nodeId: string): void {
@@ -371,12 +376,12 @@ export class SchedulerService implements Service, WorkQueue {
         after === undefined
           ? tx.database
               .prepare(
-                "SELECT id, project_id, node_id, priority FROM scheduler_job WHERE project_id = ? ORDER BY priority DESC, id ASC LIMIT ?",
+                "SELECT id, project_id, node_id, priority, queued_at FROM scheduler_job WHERE project_id = ? ORDER BY priority DESC, id ASC LIMIT ?",
               )
               .all(projectId, limit + EXTRA_ROW)
           : tx.database
               .prepare(
-                "SELECT id, project_id, node_id, priority FROM scheduler_job WHERE project_id = ? AND (priority < ? OR (priority = ? AND id > ?)) ORDER BY priority DESC, id ASC LIMIT ?",
+                "SELECT id, project_id, node_id, priority, queued_at FROM scheduler_job WHERE project_id = ? AND (priority < ? OR (priority = ? AND id > ?)) ORDER BY priority DESC, id ASC LIMIT ?",
               )
               .all(
                 projectId,
@@ -399,7 +404,7 @@ export class SchedulerService implements Service, WorkQueue {
     return caller.commit((tx) => {
       const row = tx.database
         .prepare(
-          "SELECT id, project_id, node_id, priority FROM scheduler_job WHERE project_id = ? ORDER BY priority DESC, id ASC LIMIT 1",
+          "SELECT id, project_id, node_id, priority, queued_at FROM scheduler_job WHERE project_id = ? ORDER BY priority DESC, id ASC LIMIT 1",
         )
         .get(input.params.project_id) as JobRow | undefined;
       return { job: row ? toJob(row) : null };

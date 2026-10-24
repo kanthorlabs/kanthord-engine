@@ -158,7 +158,7 @@ test("selection preserves priority and age while skipping a stale job", (t) => {
     for (let i = 0; i < nodes.length; i++)
       tx.database
         .prepare(
-          "INSERT INTO scheduler_job (id, project_id, node_id, priority) VALUES (?, ?, ?, ?)",
+          "INSERT INTO scheduler_job (id, project_id, node_id, priority, queued_at) VALUES (?, ?, ?, ?, 0)",
         )
         .run(jobs[i]!, h.row.project_id, nodes[i]!, i === FIRST_JOB ? 0 : 1);
   });
