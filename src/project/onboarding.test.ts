@@ -15,6 +15,7 @@ import {
 } from "../custody/contract.ts";
 import { INTAKE_SERVICE_NAME } from "../intake/contract.ts";
 import { IdentityKind } from "../kernel/caller.ts";
+import { CancellationContext } from "../kernel/context.ts";
 import {
   DEVCONTAINER_FILE,
   EnvironmentSource,
@@ -143,6 +144,7 @@ const BOOM = "boom";
 const MAKE_SETUP = "make setup";
 const MAKE_TEST = "make test";
 const PROVE = "prove";
+const BUILD = "build";
 const APP_NAME = "app";
 const IMAGE = "image";
 const EXECUTION_ID = "execution_1";
@@ -162,6 +164,12 @@ const SHORT_DEADLINE_MS = 1000;
 const DEADLINE_POLL_MS = 50;
 const DEADLINE_POLL_ATTEMPTS = 100;
 const PENDING_RETRY_MS = 60000;
+const COMMIT_CHECK_MS = 60000;
+const BASE_COMMIT = "c1";
+const MOVED_COMMIT = "c2";
+const LAST_COMMIT = "c5";
+const PULLED_IMAGE_ID = "sha256:pulled";
+const KEPT_REPAIRS = 2;
 const REMOVE_STALE_RUNS = "removeStaleRuns";
 const RENAMED_BINDING_ID = "binding_app_2";
 const STRAY_IDENTITY = "repository:github:acme/gone";
@@ -239,6 +247,7 @@ function proofFile(sum: string, override: Partial<ProofFile> = {}): ProofFile {
     checks: [{ command: "make test", exit_code: 2 }],
     repairs: 0,
     ended_at: 1,
+    commit: BASE_COMMIT,
     ...override,
   };
 }
@@ -258,6 +267,11 @@ class Harness {
   workerEnvironment: string | null = "app";
   resolution: GroupResolution | Error = REPOSITORY;
   resolveCalls: Array<{ bindingId: string; target: EnvironmentTarget }> = [];
+  headCommit: string | Error = BASE_COMMIT;
+  headCalls: string[] = [];
+  readyError: Error | null = null;
+  tagProvedError: Error | null = null;
+  headGate: Deferred | null = null;
   bindingsCalls = 0;
   resolveGate: Deferred | null = null;
   buildGate: Deferred | null = new Deferred();
@@ -330,7 +344,7 @@ class Harness {
       },
       pullImage: async (reference: string) => {
         this.calls.push(`pullImage ${reference}`);
-        this.images.set(reference, "sha256:pulled");
+        this.images.set(reference, PULLED_IMAGE_ID);
       },
       imageExists: async (tag: string) => this.existing.has(tag),
       build: async (input: ImageBuildInput, signal: AbortSignal) => {
@@ -359,6 +373,7 @@ class Harness {
       },
       tagProved: async (tag: string) => {
         this.events.push(`tagProved ${tag}`);
+        if (this.tagProvedError !== null) throw this.tagProvedError;
         this.existing.add(`${tag}${PROVED_SUFFIX}`);
       },
       removeTags: async (tags: readonly string[]) => {
@@ -397,6 +412,12 @@ class Harness {
           if (this.resolution instanceof Error) throw this.resolution;
           return this.resolution;
         }),
+      baseCommitOf: async (bindingId) => {
+        this.headCalls.push(bindingId);
+        await this.headGate?.promise;
+        if (this.headCommit instanceof Error) throw this.headCommit;
+        return this.headCommit;
+      },
       runtime,
       proofs: this.proofs,
       secrets: {
@@ -448,6 +469,7 @@ class Harness {
       },
       environmentReady: async (projectId, identity, tag) => {
         this.events.push(`environmentReady ${projectId} ${identity} ${tag}`);
+        if (this.readyError !== null) throw this.readyError;
       },
       logger: pino(
         { level: "info" },
@@ -678,6 +700,7 @@ function record(override: Partial<GroupRecord> = {}): GroupRecord {
     run_started_at: null,
     step_started_at: null,
     reason: null,
+    reason_started_at: null,
     session: null,
     environment_from_agent: false,
     ...override,
@@ -1798,6 +1821,15 @@ test("environmentFailed writes the failed proof file of the current digest", asy
   assert.equal(h.woken.length, NO_CALLS);
 });
 
+test("environmentFailed records the commit of the group and reads the base-branch commit after 60 seconds", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const h = await readyHarness(t);
+  h.onboarding.environmentFailed(failureInput(h));
+  assert.equal(h.proofOf(h.digest())?.commit, BASE_COMMIT);
+  t.mock.timers.tick(COMMIT_CHECK_MS);
+  await h.until(() => h.headCalls.length === ONE_CALL);
+});
+
 test("environmentFailed keeps a null command and exit code for a text detail", async (t) => {
   const h = await readyHarness(t);
   h.onboarding.environmentFailed(failureInput(h));
@@ -2335,6 +2367,213 @@ test("a pending group computes again every 60 seconds and a ready group does not
   assert.equal(ready.resolveCalls.length, ONE_CALL);
 });
 
+async function failedGroup(t: TestContext): Promise<Harness> {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const h = new Harness(t);
+  h.writeProof(
+    proofFile(h.digest(), { outcome: "failed", class: "setup_failed" }),
+  );
+  await h.compute();
+  assert.equal(h.state().status, EnvironmentStatus.Failed);
+  return h;
+}
+
+function runEvents(h: Harness): string[] {
+  return h.events.filter((event) => event === BUILD || event === PROVE);
+}
+
+test("a failed group reads the commit of its base branch every 60 seconds and an unchanged commit starts no read and no run", async (t) => {
+  const h = await failedGroup(t);
+  assert.deepEqual(h.headCalls, []);
+  t.mock.timers.tick(COMMIT_CHECK_MS - ONE_CALL);
+  await turn();
+  assert.deepEqual(h.headCalls, []);
+  t.mock.timers.tick(ONE_CALL);
+  await h.until(() => h.headCalls.length === ONE_CALL);
+  assert.deepEqual(h.headCalls, [APP.binding_id]);
+  await turn();
+  t.mock.timers.tick(COMMIT_CHECK_MS);
+  await h.until(() => h.headCalls.length === TWO_CALLS);
+  await turn();
+  assert.equal(h.resolveCalls.length, ONE_CALL);
+  assert.deepEqual(runEvents(h), []);
+  assert.equal(h.state().status, EnvironmentStatus.Failed);
+});
+
+test("a changed commit of the base branch reads a failed group again and runs it at the new commit", async (t) => {
+  const h = await failedGroup(t);
+  h.headCommit = MOVED_COMMIT;
+  h.resolution = { ...REPOSITORY, commit: MOVED_COMMIT };
+  t.mock.timers.tick(COMMIT_CHECK_MS);
+  await h.until(() => h.resolveCalls.length === TWO_CALLS);
+  await h.until(() => h.events.includes("build"));
+  assert.equal(h.state().status, EnvironmentStatus.Building);
+  assert.equal(h.buildInputs[0]?.commit, MOVED_COMMIT);
+  h.open();
+  await h.ended();
+  assert.equal(h.state().status, EnvironmentStatus.Ready);
+  assert.equal(h.proofOf(h.digest())?.commit, MOVED_COMMIT);
+});
+
+test("a failed proof decides failed only at the commit of its run", async (t) => {
+  const h = new Harness(t);
+  h.proveResults = FAILING_RESULTS;
+  h.open();
+  await h.compute();
+  await h.ended();
+  assert.equal(h.state().status, EnvironmentStatus.Failed);
+  assert.equal(h.proofOf(h.digest())?.commit, BASE_COMMIT);
+  await h.compute();
+  assert.equal(h.state().status, EnvironmentStatus.Failed);
+  h.resolution = { ...REPOSITORY, commit: MOVED_COMMIT };
+  await h.compute();
+  await h.ended(TWO_CALLS);
+  assert.equal(
+    runEvents(h).filter((event) => event === PROVE).length,
+    TWO_CALLS,
+  );
+  assert.equal(h.proofOf(h.digest())?.commit, MOVED_COMMIT);
+});
+
+test("a failed read of the base-branch commit keeps the failed group, logs read_failed once and reads again", async (t) => {
+  const h = await failedGroup(t);
+  h.headCommit = sshReadError();
+  t.mock.timers.tick(COMMIT_CHECK_MS);
+  await h.until(() => h.headCalls.length === ONE_CALL);
+  await h.until(() => h.logged(READ_FAILED).length === ONE_CALL);
+  assert.equal(
+    h.logged(READ_FAILED)[0]?.reason,
+    `${SSH_READ_FAILED} The failure reason is ${KEY_REFUSED}.`,
+  );
+  assert.equal(h.state().status, EnvironmentStatus.Failed);
+  await turn();
+  t.mock.timers.tick(COMMIT_CHECK_MS);
+  await h.until(() => h.headCalls.length === TWO_CALLS);
+  await turn();
+  assert.equal(h.logged(READ_FAILED).length, ONE_CALL);
+  assert.equal(h.resolveCalls.length, ONE_CALL);
+});
+
+test("a failed group whose target moved reads no commit of its base branch", async (t) => {
+  const h = await failedGroup(t);
+  h.bindings = facts([APP], [server]);
+  h.headCommit = MOVED_COMMIT;
+  t.mock.timers.tick(COMMIT_CHECK_MS);
+  await turn();
+  await turn();
+  assert.deepEqual(h.headCalls, []);
+  assert.equal(h.resolveCalls.length, ONE_CALL);
+});
+
+test("a failed group that turns pending at a binding change with a failed read reads again after 60 seconds", async (t) => {
+  const h = await failedGroup(t);
+  h.resolution = new Error(UNREACHABLE);
+  h.bindings = facts([APP], [server]);
+  h.onboarding.bindingsChanged(PROJECT);
+  await h.until(() => h.resolveCalls.length === TWO_CALLS);
+  await h.until(() => h.state().status === EnvironmentStatus.Pending);
+  await turn();
+  t.mock.timers.tick(PENDING_RETRY_MS);
+  await h.until(() => h.resolveCalls.length === THREE_CALLS);
+});
+
+test("a rebuild of a failed group with a failed read reads again after 60 seconds", async (t) => {
+  const h = await failedGroup(t);
+  h.resolution = new Error(UNREACHABLE);
+  await h.onboarding.rebuild(PROJECT, APP.binding_id);
+  assert.equal(h.state().status, EnvironmentStatus.Pending);
+  assert.equal(h.resolveCalls.length, TWO_CALLS);
+  t.mock.timers.tick(PENDING_RETRY_MS);
+  await h.until(() => h.resolveCalls.length === THREE_CALLS);
+});
+
+test("a commit check that ends during a computation of the group starts no second read", async (t) => {
+  const h = await failedGroup(t);
+  h.headGate = new Deferred();
+  h.headCommit = MOVED_COMMIT;
+  t.mock.timers.tick(COMMIT_CHECK_MS);
+  await h.until(() => h.headCalls.length === ONE_CALL);
+  h.resolveGate = new Deferred();
+  const computing = h.compute();
+  await h.until(() => h.resolveCalls.length === TWO_CALLS);
+  h.headGate.release();
+  for (let attempt = 0; attempt < THREE_CALLS; attempt++) await turn();
+  h.resolveGate.release();
+  await computing;
+  for (let attempt = 0; attempt < THREE_CALLS; attempt++) await turn();
+  assert.equal(h.resolveCalls.length, TWO_CALLS);
+  assert.equal(h.state().status, EnvironmentStatus.Failed);
+});
+
+test("an execution failure of a proved image proves again at a new commit and keeps the failed proof of the old commit until the run", async (t) => {
+  const h = await readyHarness(t);
+  h.onboarding.environmentFailed(failureInput(h));
+  assert.equal(h.state().status, EnvironmentStatus.Failed);
+  h.existing.add(h.tagOf(h.digest()));
+  h.resolution = { ...REPOSITORY, commit: MOVED_COMMIT };
+  h.proveGate = new Deferred();
+  await h.compute();
+  assert.equal(h.proofOf(h.digest())?.commit, BASE_COMMIT);
+  assert.equal(h.state().failure, null);
+  await h.until(() => h.events.includes(PROVE));
+  assert.equal(h.state().status, EnvironmentStatus.Proving);
+  assert.equal(h.events.includes(BUILD), false);
+  h.openProve();
+  await h.ended();
+  assert.equal(h.state().status, EnvironmentStatus.Ready);
+  assert.equal(h.proofOf(h.digest())?.commit, MOVED_COMMIT);
+});
+
+test("a run that ends pending after a failed tag of the proof reads again after 60 seconds", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const h = new Harness(t);
+  h.tagProvedError = new Error(BOOM);
+  h.open();
+  await h.compute();
+  await h.ended();
+  assert.equal(h.state().status, EnvironmentStatus.Pending);
+  assert.equal(h.state().reason, BOOM);
+  assert.equal(h.resolveCalls.length, ONE_CALL);
+  t.mock.timers.tick(PENDING_RETRY_MS);
+  await h.until(() => h.resolveCalls.length === TWO_CALLS);
+});
+
+test("a pending group holds reason_started_at from its first failed read until a read succeeds", async (t) => {
+  const h = new Harness(t);
+  h.resolution = new Error(UNREACHABLE);
+  await h.compute();
+  const first = h.state().reason_started_at;
+  assert.ok(Number.isInteger(first));
+  h.resolution = new Error(TRANSIENT);
+  await h.compute();
+  assert.equal(h.state().reason, TRANSIENT);
+  assert.equal(h.state().reason_started_at, first);
+  h.resolution = { ...REPOSITORY, document: null, reason: INVALID_DOCUMENT };
+  await h.compute();
+  assert.equal(h.state().status, EnvironmentStatus.Pending);
+  assert.equal(h.state().reason_started_at, first);
+  h.resolution = REPOSITORY;
+  h.existing.add(h.provedOf(h.digest()));
+  await h.compute();
+  assert.equal(h.state().reason, null);
+  assert.equal(h.state().reason_started_at, null);
+  h.resolution = new Error(UNREACHABLE);
+  await h.compute();
+  const second = h.state().reason_started_at;
+  assert.ok(Number.isInteger(second));
+  assert.notEqual(second, first);
+});
+
+test("a run that throws after its proof sets reason_started_at with its reason", async (t) => {
+  const h = new Harness(t);
+  h.readyError = new Error(BOOM);
+  h.open();
+  await h.compute();
+  await h.ended();
+  assert.equal(h.state().reason, BOOM);
+  assert.ok(Number.isInteger(h.state().reason_started_at));
+});
+
 test("stop aborts the active run, clears the timer and rejects each slotImage wait", async (t) => {
   t.mock.timers.enable({ apis: ["setTimeout"] });
   const waiting = new Harness(t);
@@ -2490,8 +2729,22 @@ function resolvingHarness(
   );
   h.bindings = facts([group], workers(group.binding_name));
   h.workerEnvironment = group.binding_name;
-  return { h, group };
+  return { h, group, environments };
 }
+
+test("baseCommitOf answers the commit of the base branch and reads no file", async (t) => {
+  const repository = new FakeRepository();
+  const { group, environments } = resolvingHarness(t, repository, imageWorkers);
+  assert.equal(
+    await environments.baseCommitOf(
+      group.binding_id,
+      new CancellationContext(),
+    ),
+    BASE_COMMIT,
+  );
+  assert.deepEqual(repository.reads, []);
+  assert.deepEqual(repository.lists, []);
+});
 
 const imageWorkers = (name: string) => [container(name)];
 const hostWorkers = () => [server];
@@ -3382,6 +3635,49 @@ async function failRun(
 }
 
 test(
+  "the repair counter of a digest stays across commit changes and caps the sessions",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const h = agentHarness(t);
+    await failRun(h);
+    await sessionsEnded(h, ONE_CALL);
+    const commits = [MOVED_COMMIT, "c3", "c4", LAST_COMMIT];
+    for (const [index, commit] of commits.entries()) {
+      h.resolution = { ...UNIVERSAL, commit };
+      await h.compute();
+      await h.ended(index + TWO_CALLS);
+      await h.until(() =>
+        h.onboarding.states(PROJECT).every((state) => !state.repairing),
+      );
+    }
+    assert.equal(h.sessionInputs.length, REPAIR_LIMIT);
+    assert.equal(h.proofOf(h.digest())?.repairs, REPAIR_LIMIT);
+    assert.equal(h.proofOf(h.digest())?.commit, LAST_COMMIT);
+  },
+);
+
+test(
+  "a failed group reads no base-branch commit while a repair session runs",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    const h = agentHarness(t);
+    const session = new Deferred();
+    h.script = () => session.promise;
+    await failRun(h);
+    await h.until(() => h.state().repairing);
+    t.mock.timers.tick(COMMIT_CHECK_MS);
+    await turn();
+    await turn();
+    assert.deepEqual(h.headCalls, []);
+    session.release();
+    await sessionsEnded(h, ONE_CALL);
+    t.mock.timers.tick(COMMIT_CHECK_MS);
+    await h.until(() => h.headCalls.length === ONE_CALL);
+  },
+);
+
+test(
   "a first run that fails at the image target with the source universal starts one session after it counts a repair",
   { timeout: TEST_TIMEOUT_MS },
   async (t) => {
@@ -3703,6 +3999,8 @@ test(
   { timeout: TEST_TIMEOUT_MS },
   async (t) => {
     const h = agentHarness(t);
+    h.images.set(BASE, PULLED_IMAGE_ID);
+    const sum = h.digest();
     const repairsInSession: Array<number | undefined> = [];
     h.script = async () => {
       repairsInSession.push(h.proofOf(h.digest())?.repairs);
@@ -3711,9 +4009,49 @@ test(
     await sessionsEnded(h, ONE_CALL);
     await h.onboarding.rebuild(PROJECT, APP.binding_id);
     await sessionsEnded(h, TWO_CALLS);
+    assert.equal(h.digest(), sum);
     assert.deepEqual(repairsInSession, [ONE_CALL, ONE_CALL]);
   },
 );
+
+test(
+  "a rebuild after a commit change resets the repair counter of a stable digest",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const h = agentHarness(t);
+    h.images.set(BASE, PULLED_IMAGE_ID);
+    const sum = h.digest();
+    await failRun(h);
+    await sessionsEnded(h, ONE_CALL);
+    h.resolution = { ...UNIVERSAL, commit: MOVED_COMMIT };
+    await h.compute();
+    await h.ended(TWO_CALLS);
+    await sessionsEnded(h, TWO_CALLS);
+    await h.onboarding.rebuild(PROJECT, APP.binding_id);
+    await sessionsEnded(h, THREE_CALLS);
+    assert.equal(h.digest(), sum);
+    assert.deepEqual(
+      h.sessionInputs.map((input) => input.failure.repairs),
+      [ONE_CALL, TWO_CALLS, ONE_CALL],
+    );
+  },
+);
+
+test("a stop between the read at a new commit and the run end keeps the repair counter on disk", async (t) => {
+  const h = new Harness(t);
+  h.writeProof(
+    proofFile(h.digest(), {
+      outcome: "failed",
+      class: "setup_failed",
+      repairs: KEPT_REPAIRS,
+    }),
+  );
+  h.resolution = { ...REPOSITORY, commit: MOVED_COMMIT };
+  await h.compute();
+  await h.until(() => h.events.includes(BUILD));
+  await h.onboarding.stop();
+  assert.equal(h.proofOf(h.digest())?.repairs, KEPT_REPAIRS);
+});
 
 test(
   "the stop of the component aborts each running session",

@@ -175,6 +175,7 @@ export const proofFileSchema = z.strictObject({
   checks: z.array(checkResultSchema).max(MAX_CHECKS),
   repairs: z.int().min(0),
   ended_at: timestamp,
+  commit: z.string().min(1),
 });
 export type ProofFile = z.infer<typeof proofFileSchema>;
 export type ProofFileInput = Omit<ProofFile, "repairs"> & { repairs?: number };

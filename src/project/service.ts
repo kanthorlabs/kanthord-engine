@@ -701,6 +701,8 @@ export class ProjectService implements Service, ProjectBindings {
         this.operationalStore.transaction((tx) => readProjectIds(tx)),
       resolveGroup: (bindingId, target, context) =>
         this.environments.resolveGroup(bindingId, target, context),
+      baseCommitOf: (bindingId, context) =>
+        this.environments.baseCommitOf(bindingId, context),
       runtime: dependencies.environmentRuntime,
       proofs: new ProofFiles(join(this.stateDirectory, ENVIRONMENT_DIRECTORY)),
       secrets: new EnvironmentSecrets({

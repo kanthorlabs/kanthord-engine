@@ -113,6 +113,7 @@ const failure: ProofFile = {
   checks: [{ command: "make test", exit_code: 2 }],
   repairs: 0,
   ended_at: 1,
+  commit: "c1",
 };
 
 function agentLayer() {

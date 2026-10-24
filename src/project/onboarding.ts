@@ -82,6 +82,7 @@ const NO_ITEMS = 0;
 const NOT_QUEUED = -1;
 const MS_PER_MINUTE = 60000;
 const PENDING_RETRY_MS = 60000;
+const COMMIT_CHECK_MS = 60000;
 const RUN_STARTED = "project.onboarding.run_started";
 const RUN_ENDED = "project.onboarding.run_ended";
 const RUN_FAILED = "project.onboarding.run_failed";
@@ -155,6 +156,7 @@ export interface OnboardingDependencies {
     target: EnvironmentTarget,
     context: Context,
   ): Promise<GroupResolution>;
+  baseCommitOf(bindingId: string, context: Context): Promise<string>;
   runtime: EnvironmentRuntime;
   proofs: ProofFiles;
   secrets: Pick<EnvironmentSecrets, "entriesOf" | "release" | "remove">;
@@ -211,8 +213,17 @@ export interface GroupRecord {
   run_started_at: number | null;
   step_started_at: number | null;
   reason: string | null;
+  reason_started_at: number | null;
   session: AbortController | null;
   environment_from_agent: boolean;
+}
+
+type WaitingStatus =
+  typeof EnvironmentStatus.Pending | typeof EnvironmentStatus.Failed;
+
+interface WaitingRetry {
+  status: WaitingStatus;
+  timer: NodeJS.Timeout;
 }
 
 interface ReadFailure {
@@ -323,6 +334,7 @@ function emptyRecord(
     run_started_at: null,
     step_started_at: null,
     reason: null,
+    reason_started_at: null,
     session: null,
     environment_from_agent: false,
   };
@@ -336,6 +348,13 @@ function repairableSource(record: GroupRecord): boolean {
     record.source === EnvironmentSource.Universal ||
     record.source === EnvironmentSource.None
   );
+}
+
+function staleFailure(
+  proof: ProofFile | null,
+  commit: string,
+): proof is ProofFile {
+  return proof?.outcome === ProofOutcome.Failed && proof.commit !== commit;
 }
 
 function decidedStatusOf(record: GroupRecord): EnvironmentStatus | null {
@@ -415,6 +434,7 @@ function stateOf(record: GroupRecord): EnvironmentState {
     run_started_at: record.run_started_at,
     step_started_at: record.step_started_at,
     reason: record.reason,
+    reason_started_at: record.reason_started_at,
     failure:
       status === EnvironmentStatus.Failed && proof !== null
         ? {
@@ -442,7 +462,7 @@ export class Onboarding {
   private readonly again = new Set<string>();
   private readonly marked = new Set<string>();
   private readonly changedWhileReading = new Set<string>();
-  private readonly retries = new Map<string, NodeJS.Timeout>();
+  private readonly retries = new Map<string, WaitingRetry>();
   private readonly loggedReadFailures = new Map<string, string>();
   private readonly queue: string[] = [];
   private draining: Promise<void> | null = null;
@@ -494,7 +514,7 @@ export class Onboarding {
   cancel(): void {
     for (const record of this.records.values()) record.session?.abort();
     this.context.cancel();
-    for (const timer of this.retries.values()) clearTimeout(timer);
+    for (const retry of this.retries.values()) clearTimeout(retry.timer);
     this.retries.clear();
   }
 
@@ -705,22 +725,82 @@ export class Onboarding {
   }
 
   private clearRetry(key: string): void {
-    const timer = this.retries.get(key);
-    if (timer === undefined) return;
-    clearTimeout(timer);
+    const retry = this.retries.get(key);
+    if (retry === undefined) return;
+    clearTimeout(retry.timer);
     this.retries.delete(key);
   }
 
-  private retryWhilePending(key: string, record: GroupRecord): void {
-    if (statusOf(record) !== EnvironmentStatus.Pending)
-      return this.clearRetry(key);
-    if (this.retries.has(key) || this.context.signal.aborted) return;
+  private retryWhileWaiting(key: string, record: GroupRecord): void {
+    const status = statusOf(record);
+    if (status === EnvironmentStatus.Pending)
+      return this.retryAfter(key, status, PENDING_RETRY_MS, () =>
+        this.trigger(record.project_id, record.resource_identity),
+      );
+    if (status === EnvironmentStatus.Failed)
+      return this.retryAfter(
+        key,
+        status,
+        COMMIT_CHECK_MS,
+        () => void this.checkBaseCommit(key),
+      );
+    this.clearRetry(key);
+  }
+
+  private retryAfter(
+    key: string,
+    status: WaitingStatus,
+    delayMs: number,
+    retry: () => void,
+  ): void {
+    if (this.retries.get(key)?.status === status) return;
+    this.clearRetry(key);
+    if (this.context.signal.aborted) return;
     const timer = setTimeout(() => {
       this.retries.delete(key);
-      this.trigger(record.project_id, record.resource_identity);
-    }, PENDING_RETRY_MS);
+      retry();
+    }, delayMs);
     timer.unref();
-    this.retries.set(key, timer);
+    this.retries.set(key, { status, timer });
+  }
+
+  private async checkBaseCommit(key: string): Promise<void> {
+    const record = this.records.get(key);
+    if (record === undefined) return;
+    if (statusOf(record) !== EnvironmentStatus.Failed)
+      return this.retryWhileWaiting(key, record);
+    if (this.busy(key, record) || this.targetMoved(record))
+      return this.retryWhileWaiting(key, record);
+    let commit: string;
+    try {
+      commit = await this.dependencies.baseCommitOf(
+        record.binding_id,
+        this.context,
+      );
+    } catch (error) {
+      if (this.context.signal.aborted) return;
+      this.logReadFailure(key, record, readFailureOf(error));
+      return this.retryWhileWaiting(key, record);
+    }
+    if (this.context.signal.aborted || this.records.get(key) !== record) return;
+    if (
+      statusOf(record) !== EnvironmentStatus.Failed ||
+      this.busy(key, record) ||
+      this.targetMoved(record)
+    )
+      return this.retryWhileWaiting(key, record);
+    this.loggedReadFailures.delete(key);
+    if (record.proof?.commit === commit)
+      return this.retryWhileWaiting(key, record);
+    this.trigger(record.project_id, record.resource_identity);
+  }
+
+  private busy(key: string, record: GroupRecord): boolean {
+    return (
+      record.run_started_at !== null ||
+      record.session !== null ||
+      this.computing.has(key)
+    );
   }
 
   private async computeWhileMarked(
@@ -778,6 +858,10 @@ export class Onboarding {
         reason: failure.reason,
       };
     }
+    next.reason_started_at =
+      next.reason === null
+        ? null
+        : (previous?.reason_started_at ?? this.dependencies.now());
     if (this.changedWhileReading.delete(key)) {
       if (!this.context.signal.aborted) this.again.add(key);
       return;
@@ -790,7 +874,7 @@ export class Onboarding {
     this.records.set(key, next);
     this.logReadFailure(key, next, failure);
     this.schedule(key, next);
-    this.retryWhilePending(key, next);
+    this.retryWhileWaiting(key, next);
     this.notify();
     if (!wasClaimable && claimable(statusOf(next)))
       this.dependencies.wake(projectId);
@@ -836,6 +920,9 @@ export class Onboarding {
       version,
     });
     const tag = atImage ? environmentTagOf(group.resource_identity, sum) : null;
+    const path = environmentPath(group.resource_identity);
+    const stored = proofs.read(path, sum);
+    const stale = staleFailure(stored, resolved.commit);
     const next: GroupRecord = {
       ...(previous ?? emptyRecord(projectId, group, target)),
       binding_id: group.binding_id,
@@ -847,9 +934,11 @@ export class Onboarding {
       secrets,
       digest: sum,
       tag,
-      proof: proofs.read(environmentPath(group.resource_identity), sum),
+      proof: stale ? null : stored,
       proved:
-        tag !== null && (await runtime.imageExists(`${tag}${PROVED_SUFFIX}`)),
+        !stale &&
+        tag !== null &&
+        (await runtime.imageExists(`${tag}${PROVED_SUFFIX}`)),
       read_succeeded: true,
       reason: null,
     };
@@ -936,6 +1025,7 @@ export class Onboarding {
     } catch (error) {
       if (!this.context.signal.aborted) {
         record.reason = redact(messageOf(error), secretValues);
+        record.reason_started_at ??= this.dependencies.now();
         this.dependencies.logger.error(
           {
             err: redactedError(error, secretValues),
@@ -957,6 +1047,7 @@ export class Onboarding {
     }
     if (completed && claimable(statusOf(record)))
       this.dependencies.wake(record.project_id);
+    if (this.records.get(key) === record) this.retryWhileWaiting(key, record);
     if (this.marked.delete(key))
       this.trigger(record.project_id, record.resource_identity);
     if (completed && verdict?.outcome === ProofOutcome.Failed && !ranForSession)
@@ -981,7 +1072,7 @@ export class Onboarding {
     assert.ok(group.digest !== null, "A failed group holds a digest.");
     const { proofs } = this.dependencies;
     const path = environmentPath(group.resource_identity);
-    const proof = proofs.read(path, group.digest);
+    const proof = this.proofAtCommit(group);
     if (proof === null || proof.repairs >= ENV_AGENT_REPAIR_LIMIT) return;
     const failure = {
       ...proof,
@@ -1284,8 +1375,8 @@ export class Onboarding {
     verdict: ProofVerdict,
   ): Promise<void> {
     const { runtime, proofs } = this.dependencies;
-    const { digest, tag } = record;
-    assert.ok(digest !== null);
+    const { digest, tag, commit } = record;
+    assert.ok(digest !== null && commit !== null);
     const path = environmentPath(record.resource_identity);
     const file: ProofFile = {
       digest,
@@ -1300,6 +1391,7 @@ export class Onboarding {
       checks: verdict.checks,
       repairs: 0,
       ended_at: this.dependencies.now(),
+      commit,
     };
     proofs.write(path, file);
     record.proof = file;
@@ -1465,14 +1557,17 @@ export class Onboarding {
     return { ...proof, attempts_left: attemptsLeft };
   }
 
+  private proofAtCommit(record: GroupRecord): ProofFile | null {
+    if (record.digest === null || record.commit === null) return null;
+    const file = this.dependencies.proofs.read(
+      environmentPath(record.resource_identity),
+      record.digest,
+    );
+    return staleFailure(file, record.commit) ? null : file;
+  }
+
   private currentProof(record: GroupRecord) {
-    const file =
-      record.digest === null
-        ? null
-        : this.dependencies.proofs.read(
-            environmentPath(record.resource_identity),
-            record.digest,
-          );
+    const file = this.proofAtCommit(record);
     if (file === null)
       return {
         outcome: ProofOutcome.Failed,
@@ -1526,7 +1621,12 @@ export class Onboarding {
     const { proofs } = this.dependencies;
     for (const identity of input.resource_identities) {
       const record = this.records.get(keyOf(input.project_id, identity));
-      if (record === undefined || record.digest === null) continue;
+      if (
+        record === undefined ||
+        record.digest === null ||
+        record.commit === null
+      )
+        continue;
       if (input.digests[identity] !== record.digest) continue;
       const file: ProofFile = {
         digest: record.digest,
@@ -1540,10 +1640,12 @@ export class Onboarding {
         checks: record.proof?.checks ?? [],
         repairs: record.proof?.repairs ?? 0,
         ended_at: this.dependencies.now(),
+        commit: record.commit,
       };
       proofs.write(environmentPath(identity), file);
       record.proof = file;
       this.considerSession(record);
+      this.retryWhileWaiting(keyOf(input.project_id, identity), record);
     }
     this.notify();
   }

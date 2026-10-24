@@ -297,6 +297,16 @@ export class ProjectEnvironments {
     return this.resolveUnstored(bindingId, config, target, context);
   }
 
+  async baseCommitOf(bindingId: string, context: Context): Promise<string> {
+    const config = this.dependencies.store.transaction((tx) => {
+      const binding = readBindingRevision(tx, bindingId);
+      assert.ok(binding);
+      return repositoryConfigSchema.parse(binding.config);
+    });
+    const read = await this.readBase(bindingId, config, [], { context });
+    return read.commit;
+  }
+
   private async resolveUnstored(
     bindingId: string,
     config: RepositoryConfig,
