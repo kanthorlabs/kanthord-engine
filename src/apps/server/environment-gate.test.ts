@@ -66,6 +66,8 @@ const SETTLE_WAIT_MS = 10000;
 const FIRST_VERSION = 1;
 const SINGLE_SLOT = 1;
 const SECOND_SLOT = 2;
+const FIRST_SLOT = 0;
+const SECOND_SLOT_INDEX = 1;
 const FAILING_SETUP = "false";
 const PASSING_SETUP = "true";
 const BROKEN_ENVIRONMENT = { postCreateCommand: FAILING_SETUP };
@@ -349,6 +351,7 @@ async function createProject(fixture: Fixture, input: ProjectInput) {
 async function importNode(
   fixture: Fixture,
   project: { id: string; repositoryId: string },
+  filename = "implement-1.md",
 ): Promise<string> {
   const call = humanCaller(fixture);
   const mission = await call(missionOperations.get, {
@@ -360,7 +363,7 @@ async function importNode(
     params: { mission_id: mission.id },
     query: {},
     body: {
-      filename: "implement-1.md",
+      filename,
       content: {
         ...NODE_CONTENT,
         intent: Intent.Implement,
@@ -455,8 +458,9 @@ async function worker(
   fixture: Fixture,
   projectId: string,
   nodeId: string,
+  slotIndex = FIRST_SLOT,
 ) {
-  const slot = await fixture.slotClient(projectId, WORKER_BINDING);
+  const slot = await fixture.slotClient(projectId, WORKER_BINDING, slotIndex);
   const call = <T extends Operation>(
     operation: T,
     input: z.input<T["input"]>,
@@ -494,11 +498,11 @@ async function worker(
           body: { further_work: true, stop },
         }),
       ),
-    claimed: async () => {
+    claimed: async (expectedNodeIds = [nodeId]) => {
       const answer = completed(await pull());
       assert.equal(answer.kind, WorkPullKind.Claimed);
       assert.ok(answer.kind === WorkPullKind.Claimed);
-      assert.equal(answer.execution.node_id, nodeId);
+      assert.ok(expectedNodeIds.includes(answer.execution.node_id));
       return answer.execution.execution_id;
     },
     blocked: async () => {
@@ -661,15 +665,23 @@ test(
     );
 
     await t.test(
-      "an environment without a stored document fails on a stop that names its digest and holds the node",
+      "an environment without a stored document fails on a stop that names its digest, keeps failing on a stop with no digests, and holds the node",
       async () => {
         const bare = await createProject(fixture, {
           name: "environment-gate-bare",
           placement: "server",
-          instanceCount: SINGLE_SLOT,
+          instanceCount: SECOND_SLOT,
         });
         const bareNode = await importNode(fixture, bare);
+        const otherNode = await importNode(fixture, bare, "implement-2.md");
         const bareClient = await worker(t, fixture, bare.id, bareNode);
+        const otherClient = await worker(
+          t,
+          fixture,
+          bare.id,
+          otherNode,
+          SECOND_SLOT_INDEX,
+        );
         const none = await awaitStatus(
           t,
           fixture,
@@ -677,7 +689,8 @@ test(
           EnvironmentStatus.None,
         );
         assert.ok(none.digest);
-        const first = await bareClient.claimed();
+        const first = await bareClient.claimed([bareNode, otherNode]);
+        const second = await otherClient.claimed([bareNode, otherNode]);
         await bareClient.release(first, {
           ...COMMAND_ABSENT_STOP,
           detail: failureDetail(FAILED_COMMAND, {
@@ -690,6 +703,17 @@ test(
         );
         const firstGate = await bareClient.blocked();
         await firstGate.cancel();
+
+        await otherClient.release(second, {
+          ...COMMAND_ABSENT_STOP,
+          detail: failureDetail(FAILED_COMMAND, {}),
+        });
+        assert.equal(
+          (await currentItem(fixture, bare.id)).status,
+          EnvironmentStatus.Failed,
+        );
+        const secondGate = await otherClient.blocked();
+        await secondGate.cancel();
       },
     );
   },
