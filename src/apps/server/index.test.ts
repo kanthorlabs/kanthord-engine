@@ -47,11 +47,9 @@ import {
   domainHealth,
   fakeGitHub,
   gatewayFixture,
-  FakeSlotInstance,
   humanCaller,
 } from "./test-support.ts";
 import { fakeContainerHost, fakeRepositoryFiles } from "./container-fakes.ts";
-import { ContainerDriver } from "./container-driver.ts";
 import { workerAcceptance, WORKER_DEFAULTS } from "./worker-acceptance.ts";
 import type { EnvironmentRuntime } from "../../project/environment-state.ts";
 import { packageVersion } from "../../kernel/version.ts";
@@ -1213,7 +1211,12 @@ const CONTAINER_IMAGE = "kanthord-test";
 const STORED_BASE_IMAGE = "registry.example/base:1";
 const CONTAINER_TEST_TIMEOUT_MS = 120000;
 const NO_ITEMS = 0;
-const Verb = { Build: "build", Image: "image", Inspect: "inspect" } as const;
+const Verb = {
+  Build: "build",
+  Image: "image",
+  Inspect: "inspect",
+  Run: "run",
+} as const;
 
 async function containerSetup(
   t: TestContext,
@@ -1356,7 +1359,7 @@ test(
   { timeout: CONTAINER_TEST_TIMEOUT_MS },
   async (t) => {
     const starts: string[] = [];
-    const images: string[] = [];
+    const holder: { fake?: ReturnType<typeof fakeContainerHost> } = {};
     const wrap = (driver: SlotDriver): SlotDriver => ({
       placement: driver.placement,
       check: () => driver.check(),
@@ -1364,25 +1367,25 @@ test(
       removeVolume: (clientId) => driver.removeVolume(clientId),
       sweepVolumes: (live) => driver.sweepVolumes(live),
       launch: (launch) => {
-        assert.ok(driver instanceof ContainerDriver);
+        assert.ok(holder.fake);
         starts.push(launch.slot.client_id);
-        void driver
-          .runtime()
-          .then((runtime) => driver.imageFor(runtime, launch.slot))
-          .then((image) => images.push(image));
-        return new FakeSlotInstance();
+        return driver.launch({
+          ...launch,
+          environment: holder.fake.host.environment,
+        });
       },
     });
-    const { setup, writeContainer } = await containerSetup(t, {
-      containerSlotDriver: wrap,
-    });
-    setup.fixture.worker.startPool();
-    await writeContainer(1);
-    await until(
-      () => images.length,
-      (count) => count > NO_ITEMS,
+    const container = await containerSetup(t, { containerSlotDriver: wrap });
+    holder.fake = container.fake;
+    container.setup.fixture.worker.startPool();
+    await container.writeContainer(1);
+    const runs = await until(
+      () =>
+        container.fake.commands().filter((command) => command[0] === Verb.Run),
+      (found) => found.length > NO_ITEMS,
       t.signal,
     );
+    const images = runs.map((command) => command[command.indexOf("--") - 1]);
     assert.ok(starts.length > NO_ITEMS);
     assert.equal(images[NO_ITEMS], `${CONTAINER_IMAGE}:${packageVersion()}`);
   },
