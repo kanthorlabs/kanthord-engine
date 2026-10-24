@@ -167,6 +167,7 @@ const PENDING_RETRY_MS = 60000;
 const COMMIT_CHECK_MS = 60000;
 const BASE_COMMIT = "c1";
 const MOVED_COMMIT = "c2";
+const LAST_COMMIT = "c5";
 const REMOVE_STALE_RUNS = "removeStaleRuns";
 const RENAMED_BINDING_ID = "binding_app_2";
 const STRAY_IDENTITY = "repository:github:acme/gone";
@@ -698,6 +699,7 @@ function record(override: Partial<GroupRecord> = {}): GroupRecord {
     step_started_at: null,
     reason: null,
     reason_started_at: null,
+    carried_repairs: 0,
     session: null,
     environment_from_agent: false,
     ...override,
@@ -3629,6 +3631,28 @@ async function failRun(
   await h.compute(group);
   await h.ended();
 }
+
+test(
+  "the repair counter of a digest stays across commit changes and caps the sessions",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const h = agentHarness(t);
+    await failRun(h);
+    await sessionsEnded(h, ONE_CALL);
+    const commits = [MOVED_COMMIT, "c3", "c4", LAST_COMMIT];
+    for (const [index, commit] of commits.entries()) {
+      h.resolution = { ...UNIVERSAL, commit };
+      await h.compute();
+      await h.ended(index + TWO_CALLS);
+      await h.until(() =>
+        h.onboarding.states(PROJECT).every((state) => !state.repairing),
+      );
+    }
+    assert.equal(h.sessionInputs.length, REPAIR_LIMIT);
+    assert.equal(h.proofOf(h.digest())?.repairs, REPAIR_LIMIT);
+    assert.equal(h.proofOf(h.digest())?.commit, LAST_COMMIT);
+  },
+);
 
 test(
   "a failed group reads no base-branch commit while a repair session runs",

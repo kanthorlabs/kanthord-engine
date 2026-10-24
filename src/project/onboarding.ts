@@ -96,6 +96,7 @@ const NO_EXIT_CODE = null;
 const SESSION_FAILED = "project.onboarding.session_failed";
 const NO_TOOL_CALLS = 0;
 const NO_ATTEMPTS = 0;
+const NO_REPAIRS = 0;
 
 export const ENV_AGENT_ATTEMPT_LIMIT = 5;
 export const ENV_AGENT_TOOL_CALL_LIMIT = 64;
@@ -214,6 +215,7 @@ export interface GroupRecord {
   step_started_at: number | null;
   reason: string | null;
   reason_started_at: number | null;
+  carried_repairs: number;
   session: AbortController | null;
   environment_from_agent: boolean;
 }
@@ -335,6 +337,7 @@ function emptyRecord(
     step_started_at: null,
     reason: null,
     reason_started_at: null,
+    carried_repairs: NO_REPAIRS,
     session: null,
     environment_from_agent: false,
   };
@@ -350,7 +353,10 @@ function repairableSource(record: GroupRecord): boolean {
   );
 }
 
-function staleFailure(proof: ProofFile | null, commit: string): boolean {
+function staleFailure(
+  proof: ProofFile | null,
+  commit: string,
+): proof is ProofFile {
   return proof?.outcome === ProofOutcome.Failed && proof.commit !== commit;
 }
 
@@ -921,6 +927,11 @@ export class Onboarding {
     const stored = proofs.read(path, sum);
     const stale = staleFailure(stored, resolved.commit);
     if (stale) proofs.remove(path, sum);
+    const carriedRepairs = stale
+      ? stored.repairs
+      : stored === null && previous?.digest === sum
+        ? previous.carried_repairs
+        : NO_REPAIRS;
     const next: GroupRecord = {
       ...(previous ?? emptyRecord(projectId, group, target)),
       binding_id: group.binding_id,
@@ -933,6 +944,7 @@ export class Onboarding {
       digest: sum,
       tag,
       proof: stale ? null : stored,
+      carried_repairs: carriedRepairs,
       proved:
         !stale &&
         tag !== null &&
@@ -1387,7 +1399,7 @@ export class Onboarding {
       tail: verdict.tail,
       reproduce: this.reproduceOf(tag),
       checks: verdict.checks,
-      repairs: 0,
+      repairs: record.carried_repairs,
       ended_at: this.dependencies.now(),
       commit,
     };
@@ -1633,7 +1645,7 @@ export class Onboarding {
         tail: input.stop.detail,
         reproduce: this.reproduceOf(record.tag),
         checks: record.proof?.checks ?? [],
-        repairs: record.proof?.repairs ?? 0,
+        repairs: record.proof?.repairs ?? record.carried_repairs,
         ended_at: this.dependencies.now(),
         commit: record.commit,
       };
