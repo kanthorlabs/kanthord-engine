@@ -277,6 +277,13 @@ components:
                           additionalProperties: {}
                       additionalProperties: {}
                   additionalProperties: {}
+                environment_secrets:
+                  type: object
+                  propertyNames:
+                    type: string
+                  additionalProperties:
+                    type: string
+                    minLength: 1
               required:
                 - available
                 - platform

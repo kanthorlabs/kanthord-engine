@@ -458,13 +458,17 @@ export default tseslint.config(
                 {
                   from: element({
                     anyOf: [
-                      "kernel",
                       "component",
                       "service",
                       "apps-cli",
                       "apps-worker",
                       "worker-unit",
                     ],
+                  }),
+                },
+                {
+                  from: element("kernel", {
+                    fileInternalPath: "!test-identity.ts",
                   }),
                 },
                 { from: file({ anyOf: ["config", "config-global", "main"] }) },
@@ -508,6 +512,40 @@ export default tseslint.config(
                   }),
                 },
                 { to: file({ anyOf: ["config-global", "config", "main"] }) },
+              ],
+            },
+            {
+              from: element("service", {
+                captured: { name: "project" },
+                fileInternalPath: "contract.ts",
+              }),
+              allow: [
+                {
+                  to: element("service", {
+                    captured: { name: "custody" },
+                    fileInternalPath: "contract.ts",
+                  }),
+                },
+              ],
+            },
+            {
+              from: element("service", {
+                captured: { name: "project" },
+                fileInternalPath: "environment-secret.test.ts",
+              }),
+              allow: [
+                {
+                  to: element("service", {
+                    captured: { name: "custody" },
+                    fileInternalPath: "index.ts",
+                  }),
+                },
+                {
+                  to: element("service", {
+                    captured: { name: "gateway" },
+                    fileInternalPath: "test-support.ts",
+                  }),
+                },
               ],
             },
           ],

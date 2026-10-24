@@ -222,6 +222,24 @@ paths:
     $ref: ./openapi/project/bindingSet.get.yaml#/pathItem
   /api/project:
     $ref: ./openapi/project/create.yaml#/pathItem
+  /api/project/credential/{credential_name}/archive:
+    $ref: ./openapi/project/credential.archive.yaml#/pathItem
+  /api/project/credential/check:
+    $ref: ./openapi/project/credential.check.yaml#/pathItem
+  /api/project/credential:
+    $ref: ./openapi/project/credential.create.yaml#/pathItem
+  /api/project/credential/{credential_name}:
+    $ref: ./openapi/project/credential.get.yaml#/pathItem
+  /api/project/credential/platform:
+    $ref: ./openapi/project/credential.platform_list.yaml#/pathItem
+  /api/project/credential/{credential_name}/revision/{revision}/revoke:
+    $ref: ./openapi/project/credential.revoke.yaml#/pathItem
+  /api/project/credential/{credential_name}/revision:
+    $ref: ./openapi/project/credential.rotate.yaml#/pathItem
+  /api/project/credential/{credential_name}/metadata:
+    $ref: ./openapi/project/credential.update_metadata.yaml#/pathItem
+  /api/project/credential/{credential_name}/verify:
+    $ref: ./openapi/project/credential.verify.yaml#/pathItem
   /api/project/{project_id}/environment:
     $ref: ./openapi/project/environment.list.yaml#/pathItem
   /api/project/{project_id}:

@@ -61,6 +61,7 @@ import {
   type GrantRequest,
   type Material,
   type SshIdentitySubject,
+  type CredentialRecords,
 } from "../custody/contract.ts";
 import type { SshAccess, SshGrantFacts } from "../repository/index.ts";
 import {
@@ -84,6 +85,9 @@ import {
   SSH_CREDENTIAL_PLATFORM,
   RESOURCE_TARGET_KIND_REPOSITORY,
   STORAGE_PLATFORM,
+  ENVIRONMENT_SECRET_PLATFORM,
+  ENVIRONMENT_SECRET_VARIABLE,
+  ENVIRONMENT_SECRETS_MAX,
   WorkerField,
   bindingEditSchema,
   bindingSchema,
@@ -155,6 +159,7 @@ import {
 } from "./store.ts";
 import type { ProjectConfig } from "./config.ts";
 import { ProjectEnvironments, refuseEnvironment } from "./environment.ts";
+import { EnvironmentSecretRoutes } from "./environment-secret.ts";
 import type { EnvironmentTelemetry } from "./environment-telemetry.ts";
 import {
   ENVIRONMENT_DIRECTORY,
@@ -568,6 +573,7 @@ export interface Dependencies {
   verifyRepositoryCredential: VerifyRepositoryCredential;
   identity: ServiceIdentity;
   custody: ProjectCustody;
+  credentialRecords: CredentialRecords;
   sshAccessOf: SshAccessOf;
   workerAgentsOf: WorkerAgentsOfFn;
   workerAgentView: WorkerAgentViewFn;
@@ -627,6 +633,7 @@ export class ProjectService implements Service, ProjectBindings {
   private readonly verifyRepositoryCredential: VerifyRepositoryCredential;
   private readonly identity: ServiceIdentity;
   private readonly custody: ProjectCustody;
+  private readonly credentialRecords: CredentialRecords;
   private readonly sshAccessOf: SshAccessOf;
   private readonly workerAgentsOf: WorkerAgentsOfFn;
   private readonly workerAgentView: WorkerAgentViewFn;
@@ -652,6 +659,7 @@ export class ProjectService implements Service, ProjectBindings {
     this.verifyRepositoryCredential = dependencies.verifyRepositoryCredential;
     this.identity = dependencies.identity;
     this.custody = dependencies.custody;
+    this.credentialRecords = dependencies.credentialRecords;
     this.sshAccessOf = dependencies.sshAccessOf;
     this.workerAgentsOf = dependencies.workerAgentsOf;
     this.workerAgentView = dependencies.workerAgentView;
@@ -695,6 +703,10 @@ export class ProjectService implements Service, ProjectBindings {
     dependencies.health?.register("project", () => this.healthcheck());
   }
   declare(registry: OperationRegistry): void {
+    new EnvironmentSecretRoutes({
+      records: this.credentialRecords,
+      bindingsNaming: (tx, name) => this.bindingsNaming(tx, name),
+    }).declare(registry);
     registry.register(projectOperations.create, ({ body }, caller) => {
       const record = caller.commit((tx) => {
         const identity = caller.identity;
@@ -1345,6 +1357,40 @@ export class ProjectService implements Service, ProjectBindings {
         credential: binding.config.credential,
         platform: REPOSITORY_PLATFORM,
       });
+    this.validateEnvironmentSecrets(
+      tx,
+      name,
+      binding.config.environment_secrets ?? {},
+    );
+  }
+  private validateEnvironmentSecrets(
+    tx: Transaction,
+    name: string,
+    secrets: Record<string, string>,
+  ): void {
+    Object.entries(secrets).forEach(([variable, credential], index) => {
+      const refuse = () =>
+        new OperationError(
+          HttpStatus.BadRequest,
+          ProjectErrorCode.EnvironmentSecretInvalid,
+          "The environment secret is not valid.",
+          { binding: name, variable, credential },
+        );
+      if (
+        index >= ENVIRONMENT_SECRETS_MAX ||
+        !ENVIRONMENT_SECRET_VARIABLE.test(variable)
+      )
+        throw refuse();
+      try {
+        this.custodySuitability(tx, {
+          credential,
+          platform: ENVIRONMENT_SECRET_PLATFORM,
+        });
+      } catch (error) {
+        if (error instanceof OperationError) throw refuse();
+        throw error;
+      }
+    });
   }
   private validateWorker(
     tx: Transaction,

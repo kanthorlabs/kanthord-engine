@@ -2,14 +2,19 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { readFileSync } from "node:fs";
 import {
+  ENV_AGENT_PROMPT,
   RE_AGENT_PROMPT,
   SWE_AGENT_PROMPT,
   WORKBENCH_PROMPT,
 } from "./prompt-assets.ts";
-import { AGENT_DECLARATIONS, getAgentDeclaration } from "./catalog.ts";
+import {
+  AGENT_DECLARATIONS,
+  getAgentDeclaration,
+  WORKBENCH_AGENT_NAMES,
+} from "./catalog.ts";
 
 test("static agent declarations", () => {
-  assert.deepEqual(Object.keys(AGENT_DECLARATIONS), ["swe@1", "re@1"]);
+  assert.deepEqual(Object.keys(AGENT_DECLARATIONS), ["swe@1", "re@1", "env@1"]);
   assert.deepEqual(getAgentDeclaration("swe@1"), {
     agent_name: "swe@1",
     agent_prompt: SWE_AGENT_PROMPT,
@@ -21,6 +26,7 @@ test("static agent declarations", () => {
       "reasoning_effort",
       "fallback_configurations",
     ],
+    workbench: true,
   });
   assert.deepEqual(getAgentDeclaration("re@1"), {
     agent_name: "re@1",
@@ -33,7 +39,27 @@ test("static agent declarations", () => {
       "reasoning_effort",
       "fallback_configurations",
     ],
+    workbench: true,
   });
+  assert.deepEqual(getAgentDeclaration("env@1"), {
+    agent_name: "env@1",
+    agent_prompt: ENV_AGENT_PROMPT,
+    host_tools: [],
+    tools: ["read", "grep", "find", "ls"],
+    overridable_fields: [],
+    workbench: false,
+  });
+  assert.deepEqual(WORKBENCH_AGENT_NAMES, ["swe@1", "re@1"]);
+});
+
+test("env@1 prompt equals the shipped file", () => {
+  assert.equal(
+    ENV_AGENT_PROMPT,
+    readFileSync(
+      new URL("../../static/prompt/env@1.md", import.meta.url),
+      "utf8",
+    ),
+  );
 });
 
 test("agent prompts are valid published UTF-8 assets", () => {
@@ -42,7 +68,13 @@ test("agent prompts are valid published UTF-8 assets", () => {
   const newline = "\n";
   const firstPrintable = 32;
   const deleteCharacter = 127;
-  for (const file of ["base.md", "swe@1.md", "re@1.md", "workbench.md"]) {
+  for (const file of [
+    "base.md",
+    "swe@1.md",
+    "re@1.md",
+    "env@1.md",
+    "workbench.md",
+  ]) {
     const bytes = readFileSync(
       new URL(`../../static/prompt/${file}`, import.meta.url),
     );

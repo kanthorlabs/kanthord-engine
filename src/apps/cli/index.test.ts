@@ -354,7 +354,15 @@ test("project environment commands expose help and reject invalid inputs before 
     t.signal,
   );
   assert.equal(group.status, ExitCode.Success, group.stderr);
-  for (const leaf of ["show", "set", "list", "rebuild", "export", "unset"]) {
+  for (const leaf of [
+    "show",
+    "set",
+    "list",
+    "rebuild",
+    "export",
+    "unset",
+    "secret",
+  ]) {
     assert.match(group.stdout, new RegExp(`\\b${leaf}\\b`));
     const help = await invocation(
       ["project", "environment", leaf, "--help"],
@@ -648,6 +656,315 @@ test("project environment export stops when the binding holds no environment", a
     /^cli\.project\.environment\.export\.environment_absent:/,
   );
   assert.equal(result.stdout, EMPTY_OUTPUT);
+});
+
+const SECRET_CREDENTIAL = "registry-auth";
+const SECRET_VARIABLE = "REGISTRY_AUTH";
+const SECRET_TEXT = "test_private-registry-token";
+const SECRET_MISSING_CODE = "credential.credential.not_found";
+const REPOSITORY_BINDING_NAME = "main-repo";
+const SECRET_REVISION = 3;
+const WRITTEN_VERSION = 5;
+const POST_METHOD = "POST";
+const REPOSITORY_CONFIG = {
+  available: true,
+  platform: "github",
+  address: "git@github.com:owner/repository.git",
+  strategy: { base_branch: "main" },
+  ssh_credential: "github-ssh",
+  working_layer: {
+    agents_md: true,
+    agents_local_md: true,
+    claude_md: true,
+    claude_local_md: true,
+    project_prompt: true,
+  },
+};
+const WORKER_BINDING = {
+  kind: "worker",
+  config: { worker: "coder@1", placement: "server", instance_count: 1 },
+};
+const SECRET_BINDING_SET = {
+  version: 4,
+  bindings: {
+    [REPOSITORY_BINDING_NAME]: {
+      kind: "repository",
+      config: REPOSITORY_CONFIG,
+    },
+    worker: WORKER_BINDING,
+  },
+};
+const SECRET_BINDING_RECORD = {
+  id: BINDING_ID,
+  project_id: PROJECT_ID,
+  name: REPOSITORY_BINDING_NAME,
+  kind: "repository",
+  resource_identity: "repository:github:owner/repository",
+  revision: 1,
+  config: REPOSITORY_CONFIG,
+  created_at: 1,
+  removed_at: null,
+};
+const SECRET_REQUEST_ID = "request_01ARZ3NDEKTSV4RRFFQ69G5FAV";
+const CREDENTIAL_ANSWER = {
+  name: SECRET_CREDENTIAL,
+  platform: "environment_secret",
+  holder: "server",
+  sealed_to: null,
+  sealed_current: true,
+  revisions: [
+    {
+      id: "credential_one",
+      revision: 1,
+      metadata: null,
+      created_at: 1,
+      ended_at: 1,
+    },
+    {
+      id: "credential_two",
+      revision: SECRET_REVISION,
+      metadata: null,
+      created_at: 2,
+      ended_at: null,
+    },
+  ],
+};
+
+async function secretServer(
+  t: TestContext,
+  credentialExists: boolean,
+): Promise<{ endpoint: string; seen: SeenRequest[] }> {
+  const seen: SeenRequest[] = [];
+  const server = createServer(async (request, response) => {
+    const chunks: Buffer[] = [];
+    for await (const chunk of request) chunks.push(chunk as Buffer);
+    seen.push({
+      method: request.method,
+      url: request.url,
+      body: Buffer.concat(chunks).toString("utf8"),
+    });
+    const reply = (status: number, body: unknown) => {
+      response.writeHead(status, { "Content-Type": "application/json" });
+      response.end(JSON.stringify(body));
+    };
+    const route = `${request.method} ${request.url}`;
+    if (route === `GET /api/project/credential/${SECRET_CREDENTIAL}`)
+      return credentialExists
+        ? reply(200, { ...CREDENTIAL_ANSWER, bindings: [] })
+        : reply(404, {
+            error: {
+              code: SECRET_MISSING_CODE,
+              message: "Credential not found.",
+              details: null,
+            },
+            request_id: SECRET_REQUEST_ID,
+          });
+    if (request.method === POST_METHOD) return reply(200, CREDENTIAL_ANSWER);
+    if (route === `GET /api/project/${PROJECT_ID}/binding/${BINDING_ID}`)
+      return reply(200, SECRET_BINDING_RECORD);
+    if (route === `GET /api/project/${PROJECT_ID}/binding-set`)
+      return reply(200, SECRET_BINDING_SET);
+    return reply(200, {
+      ...BINDING_SET_ANSWER,
+      binding_set_version: WRITTEN_VERSION,
+    });
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  t.after(() => server.close());
+  return {
+    endpoint: `http://127.0.0.1:${(server.address() as AddressInfo).port}`,
+    seen,
+  };
+}
+
+function secretFile(t: TestContext, text = SECRET_TEXT): string {
+  const file = join(temporary(t), "secret.txt");
+  writeFileSync(file, text);
+  return file;
+}
+
+function secretSetCommand(
+  t: TestContext,
+  endpoint: string,
+  file: string,
+  more: string[] = [],
+) {
+  return environmentCommand(t, endpoint, [
+    "secret",
+    "set",
+    PROJECT_ID,
+    BINDING_ID,
+    SECRET_VARIABLE,
+    "--credential",
+    SECRET_CREDENTIAL,
+    "--file",
+    file,
+    ...more,
+  ]);
+}
+
+function expectedBindingWrite() {
+  return {
+    version: SECRET_BINDING_SET.version,
+    bindings: {
+      ...SECRET_BINDING_SET.bindings,
+      [REPOSITORY_BINDING_NAME]: {
+        kind: "repository",
+        config: {
+          ...REPOSITORY_CONFIG,
+          environment_secrets: { [SECRET_VARIABLE]: SECRET_CREDENTIAL },
+        },
+      },
+    },
+  };
+}
+
+test("project environment secret set creates an absent credential and writes the key through the binding set", async (t) => {
+  const { endpoint, seen } = await secretServer(t, false);
+  const result = await secretSetCommand(t, endpoint, secretFile(t));
+  assert.equal(result.status, ExitCode.Success, result.stderr);
+  assert.deepEqual(
+    seen.map(({ method, url }) => `${method} ${url}`),
+    [
+      `GET /api/project/credential/${SECRET_CREDENTIAL}`,
+      "POST /api/project/credential",
+      `GET /api/project/${PROJECT_ID}/binding/${BINDING_ID}`,
+      `GET /api/project/${PROJECT_ID}/binding-set`,
+      `PUT /api/project/${PROJECT_ID}/binding-set`,
+    ],
+  );
+  assert.deepEqual(JSON.parse(seen[1]!.body), {
+    name: SECRET_CREDENTIAL,
+    platform: "environment_secret",
+    secret: { key: SECRET_TEXT },
+    metadata: null,
+  });
+  assert.deepEqual(JSON.parse(seen[4]!.body), expectedBindingWrite());
+  const printed = JSON.parse(result.stdout);
+  assert.equal(printed.binding_set_version, WRITTEN_VERSION);
+  assert.match(printed.idempotency_key, /^idempotency_key_/);
+  assert.ok(!result.stdout.includes(SECRET_TEXT));
+  assert.ok(!result.stderr.includes(SECRET_TEXT));
+});
+
+test("project environment secret set rotates an existing credential at its newest revision", async (t) => {
+  const { endpoint, seen } = await secretServer(t, true);
+  const result = await secretSetCommand(t, endpoint, secretFile(t));
+  assert.equal(result.status, ExitCode.Success, result.stderr);
+  assert.deepEqual(
+    seen.map(({ method, url }) => `${method} ${url}`).slice(0, 2),
+    [
+      `GET /api/project/credential/${SECRET_CREDENTIAL}`,
+      `POST /api/project/credential/${SECRET_CREDENTIAL}/revision`,
+    ],
+  );
+  assert.deepEqual(JSON.parse(seen[1]!.body), {
+    expected_revision: SECRET_REVISION,
+    secret: { key: SECRET_TEXT },
+  });
+  assert.deepEqual(JSON.parse(seen[4]!.body), expectedBindingWrite());
+  assert.ok(!result.stdout.includes(SECRET_TEXT));
+  assert.ok(!result.stderr.includes(SECRET_TEXT));
+});
+
+test("project environment secret set stops on a bad variable, file or id before any request", async (t) => {
+  const { endpoint, seen } = await secretServer(t, false);
+  const directory = temporary(t);
+  const empty = join(directory, "empty.txt");
+  writeFileSync(empty, "");
+  const file = secretFile(t);
+  const set = (...args: string[]) =>
+    environmentCommand(t, endpoint, ["secret", "set", ...args]);
+  for (const [args, code] of [
+    [
+      [
+        PROJECT_ID,
+        BINDING_ID,
+        "node_auth_token",
+        "--credential",
+        "c",
+        "--file",
+        file,
+      ],
+      "cli.project.environment.secret.set.invalid_variable",
+    ],
+    [
+      [PROJECT_ID, BINDING_ID, "1TOKEN", "--credential", "c", "--file", file],
+      "cli.project.environment.secret.set.invalid_variable",
+    ],
+    [
+      [
+        PROJECT_ID,
+        BINDING_ID,
+        SECRET_VARIABLE,
+        "--credential",
+        "c",
+        "--file",
+        empty,
+      ],
+      "cli.project.environment.secret.set.file_invalid",
+    ],
+    [
+      [
+        PROJECT_ID,
+        BINDING_ID,
+        SECRET_VARIABLE,
+        "--credential",
+        "c",
+        "--file",
+        join(directory, "missing.txt"),
+      ],
+      "cli.project.environment.secret.set.file_invalid",
+    ],
+    [
+      [
+        "invalid",
+        BINDING_ID,
+        SECRET_VARIABLE,
+        "--credential",
+        "c",
+        "--file",
+        file,
+      ],
+      "cli.project.environment.secret.set.invalid_project_id",
+    ],
+    [
+      [
+        PROJECT_ID,
+        "invalid",
+        SECRET_VARIABLE,
+        "--credential",
+        "c",
+        "--file",
+        file,
+      ],
+      "cli.project.environment.secret.set.invalid_binding_id",
+    ],
+  ] as const) {
+    const result = await set(...args);
+    assert.equal(result.status, ExitCode.Failure, result.stderr);
+    assert.match(result.stderr, new RegExp(`^${code.replaceAll(".", "\\.")}:`));
+    assert.equal(result.stdout, EMPTY_OUTPUT);
+  }
+  assert.deepEqual(seen, []);
+});
+
+test("project environment secret set prints no secret text when a request fails", async (t) => {
+  const { endpoint } = await environmentServer(t, {
+    error: {
+      code: "gateway.request.validation_failed",
+      message: "Invalid request.",
+      details: null,
+    },
+    request_id: SECRET_REQUEST_ID,
+  });
+  const result = await secretSetCommand(t, endpoint, secretFile(t));
+  assert.equal(result.status, ExitCode.Failure);
+  assert.ok(!result.stdout.includes(SECRET_TEXT));
+  assert.ok(!result.stderr.includes(SECRET_TEXT));
+  const unreadable = await secretSetCommand(t, endpoint, secretFile(t, " \n"));
+  assert.equal(unreadable.status, ExitCode.Failure);
+  assert.match(unreadable.stderr, /secret\.set\.file_invalid/);
 });
 
 test("project agent commands expose help and reject invalid inputs before I/O", async (t) => {

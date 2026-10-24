@@ -92,6 +92,7 @@ import {
 } from "../../gateway/index.ts";
 import {
   ProjectService,
+  ENVIRONMENT_SECRET_PLATFORMS,
   enforceBindingPlacements,
   projectMigrations,
   projectSshIdentityAuthorization,
@@ -476,6 +477,7 @@ export function composeServices(options: {
       ...LLM_PLATFORMS,
       ...REPOSITORY_PLATFORMS,
       ...STORAGE_PLATFORMS,
+      ...ENVIRONMENT_SECRET_PLATFORMS,
     },
     executions: {
       requireRunning: (...args) => scheduler.requireRunning(...args),
@@ -853,6 +855,7 @@ export function composeServices(options: {
     verifyRepositoryCredential: (name, context) =>
       repositoryCredentials.verifyCredential(name, context),
     identity: mintServiceIdentity(PROJECT_SERVICE_NAME),
+    credentialRecords: custody,
     custody: {
       authorizeOperation: (...args) => custody.authorizeOperation(...args),
       release: (...args) => custody.release(...args),

@@ -6,6 +6,7 @@
 
 The Workbench Service has **no CLI command**. A human drives a workbench session through the chat of the dashboard or through the API.
 [Workbench Service](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/workbench-service.md) and its [implementation contract](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/workbench-service.impl.md) own the rules.
+The Workbench opens sessions of `swe@1` and `re@1` only.
 This page lists the operations and the error codes. It introduces no design rule.
 The [operation contracts](../../src/workbench/contract.ts) and the generated OpenAPI publish the wire names, paths and output shapes.
 
