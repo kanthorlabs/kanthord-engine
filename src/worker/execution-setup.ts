@@ -23,26 +23,30 @@ import { RepositoryErrorCode } from "../repository/contract.ts";
 
 const FIRST_ISSUE_INDEX = 0;
 
+type RecordedEnvironment = ReturnType<Dependencies["environmentOf"]> & object;
+
 function executionEnvironment(
   stored: Environment | null,
   repositoryEnvironment: boolean,
   placement: InstancePlacement | null,
   digest: string | null,
+  recorded: RecordedEnvironment | null,
 ): ExecutionEnvironment {
-  if (stored === null && !isRepositorySource(repositoryEnvironment, placement))
-    return null;
+  if (stored !== null) {
+    assert.ok(digest, "A claimed environment must hold a computed digest.");
+    return { source: EnvironmentSource.Stored, document: stored, digest };
+  }
+  if (placement !== InstancePlacement.Container) return null;
+  if (
+    recorded?.source === EnvironmentSource.Detected ||
+    recorded?.source === EnvironmentSource.Universal
+  )
+    return { source: recorded.source, document: recorded.document };
+  if (!repositoryEnvironment) return null;
   assert.ok(digest, "A claimed environment must hold a computed digest.");
-  return stored !== null
-    ? { source: EnvironmentSource.Stored, document: stored, digest }
-    : { source: EnvironmentSource.Repository, digest };
+  return { source: EnvironmentSource.Repository, digest };
 }
 
-function isRepositorySource(
-  repositoryEnvironment: boolean,
-  placement: InstancePlacement | null,
-): boolean {
-  return placement === InstancePlacement.Container && repositoryEnvironment;
-}
 const NO_AGENTS = 0;
 
 export async function executionSetup(
@@ -59,6 +63,7 @@ export async function executionSetup(
     | "custodyHandover"
     | "environmentClaimed"
     | "environmentDigestOf"
+    | "environmentOf"
   > & { schedulerClaims: Pick<SchedulerClaims, "agentSelectionsOf"> },
   worker: Pick<WorkerService, "declarationOf" | "pinnedAgentView">,
   caller: CallerContext,
@@ -200,6 +205,10 @@ export async function executionSetup(
             repository.repository_environment,
             row.placement,
             dependencies.environmentDigestOf(
+              claim.projectId,
+              repository.resource_identity,
+            ),
+            dependencies.environmentOf(
               claim.projectId,
               repository.resource_identity,
             ),

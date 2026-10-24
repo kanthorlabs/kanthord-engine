@@ -265,6 +265,7 @@ function storeFixture(t: TestContext, beforeWrite: () => void = () => {}) {
       cloneSnapshot: unexpected,
     },
     identity: PROJECT_IDENTITY,
+    targetOf: unexpected,
     sshAccess: unexpected,
     writeBindings: async (projectId, body, caller) => {
       callers.push(caller);

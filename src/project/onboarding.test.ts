@@ -1787,6 +1787,9 @@ function resolvingHarness(
     store,
     repositoryFiles: repository.asRepositoryFiles(),
     identity: REPOSITORY_SERVICE,
+    targetOf: () => {
+      throw new Error("Unexpected target read.");
+    },
     sshAccess: () => ({ address: REPOSITORY_ADDRESS, ssh: {} as never }),
     writeBindings: () => {
       throw new Error("Unexpected binding write.");

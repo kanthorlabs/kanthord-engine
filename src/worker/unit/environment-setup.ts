@@ -120,7 +120,7 @@ export async function environmentOf(
 ): Promise<Environment | null> {
   const environment = checkout.repository.environment;
   if (environment === null) return null;
-  if (environment.source === EnvironmentSource.Stored)
+  if (environment.source !== EnvironmentSource.Repository)
     return environment.document;
   const text = await fileAtRevision(
     input.env,

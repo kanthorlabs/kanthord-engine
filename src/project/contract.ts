@@ -1020,7 +1020,7 @@ export const projectOperations = {
     input: readInput(bindingParams, emptyFields),
     output: environmentAnswerSchema,
     description:
-      "Read the environment of one repository binding: the stored environment, or the devcontainer file at the base branch.",
+      "Read the environment of one repository binding with its source: stored, repository, detected, universal or none.",
   },
   "binding.environment.set": {
     ...writeOperation,

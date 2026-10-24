@@ -593,6 +593,43 @@ test("project environment export prints only the environment as indented JSON", 
   );
 });
 
+const DETECTED_ENVIRONMENT = {
+  image: "mcr.microsoft.com/devcontainers/javascript-node:22-bookworm",
+  updateContentCommand: "npm ci",
+  customizations: { kanthord: { checks: ["node --version", "npm --version"] } },
+};
+const DETECTED_ANSWER = {
+  source: "detected",
+  commit: "c1",
+  environment: DETECTED_ENVIRONMENT,
+  reason: null,
+};
+
+test("project environment export prints the detected document as indented JSON", async (t) => {
+  const { endpoint } = await environmentServer(t, DETECTED_ANSWER);
+  const result = await environmentCommand(t, endpoint, [
+    "export",
+    PROJECT_ID,
+    BINDING_ID,
+  ]);
+  assert.equal(result.status, ExitCode.Success, result.stderr);
+  assert.equal(
+    result.stdout,
+    `${JSON.stringify(DETECTED_ENVIRONMENT, null, 2)}\n`,
+  );
+});
+
+test("project environment show prints the source detected", async (t) => {
+  const { endpoint } = await environmentServer(t, DETECTED_ANSWER);
+  const result = await environmentCommand(t, endpoint, [
+    "show",
+    PROJECT_ID,
+    BINDING_ID,
+  ]);
+  assert.equal(result.status, ExitCode.Success, result.stderr);
+  assert.deepEqual(JSON.parse(result.stdout), DETECTED_ANSWER);
+});
+
 test("project environment export stops when the binding holds no environment", async (t) => {
   const { endpoint } = await environmentServer(t, {
     source: "none",

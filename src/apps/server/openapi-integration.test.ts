@@ -404,6 +404,14 @@ const LEGACY_FRAGMENT_EXCEPTIONS = [
   "openapi/project/bindingSet.get.yaml",
 ];
 const AGENT_PROVIDER_FRAGMENT_EXCEPTION = "openapi/agent/enablement.get.yaml";
+const EXECUTION_SETUP_FRAGMENT_EXCEPTION =
+  "openapi/worker/execution.setup.get.yaml";
+const EXECUTION_ENVIRONMENT_SOURCES = [
+  "stored",
+  "repository",
+  "detected",
+  "universal",
+];
 const PROVIDER_PROPERTY = "provider";
 const ENUM_KEYWORD = "enum";
 const AGENT_PROVIDER_ENUM_COUNT = 3;
@@ -417,6 +425,7 @@ const NAMED_FRAGMENT_EXCEPTIONS = new Set([
   "openapi/mission/execution.dependency.list.yaml",
   ...LEGACY_FRAGMENT_EXCEPTIONS,
   AGENT_PROVIDER_FRAGMENT_EXCEPTION,
+  EXECUTION_SETUP_FRAGMENT_EXCEPTION,
 ]);
 const NULL_SCHEMA_TYPE = "null";
 const STRING_SCHEMA_TYPE = "string";
@@ -1146,6 +1155,29 @@ test("the agent enablement fragment exceeds the soft limit only through the agen
   assert.equal(enums.length, AGENT_PROVIDER_ENUM_COUNT);
   for (const values of enums)
     assert.deepEqual(values, agentProviderKindSchema.options);
+});
+test("the execution setup fragment exceeds the soft limit only through the environment documents", () => {
+  const fragment = parse(
+    readFileSync(
+      join(dirname(openapiPath()), EXECUTION_SETUP_FRAGMENT_EXCEPTION),
+      "utf8",
+    ),
+  );
+  const environment =
+    fragment.components.schemas["worker.execution.setup.get.Output"].properties
+      .repositories.items.properties.environment;
+  const variants = environment.anyOf[0].oneOf;
+  assert.deepEqual(
+    variants.map((variant: ResolvedSchema) => variant.properties.source!.const),
+    EXECUTION_ENVIRONMENT_SOURCES,
+  );
+  const [stored, repository, detected, universal] = variants;
+  assert.deepEqual(stored.required, ["source", "document", "digest"]);
+  assert.deepEqual(repository.required, ["source", "digest"]);
+  for (const variant of [detected, universal]) {
+    assert.deepEqual(variant.required, ["source", "document"]);
+    assert.equal(variant.additionalProperties, false);
+  }
 });
 test("published OpenAPI validates, matches the registry exactly, and describes real responses", async (t) => {
   const files = emitOpenAPIFiles(apiOperations);

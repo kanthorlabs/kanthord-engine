@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
-import { existsSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
 import { test, type TestContext } from "node:test";
 import { setImmediate as turn } from "node:timers/promises";
+import { detectEnvironment } from "./detection.ts";
 import { ProjectService, type Dependencies } from "./service.ts";
 import {
   background,
@@ -4966,6 +4967,9 @@ function instructionFixture(
     commits?: Array<string | null>;
     texts?: InstructionTexts;
     states?: RepositoryFileState[];
+    files?: Record<string, string>;
+    listed?: string[];
+    placement?: WorkerPlacement;
     resolveFails?: boolean;
     resolveFailure?: Error;
     address?: string;
@@ -5021,7 +5025,10 @@ function instructionFixture(
         readCalls.push({ address, commit, paths, maxBytes, timeout, ssh });
         if (behavior.readFails) throw new Error("fetch failed");
         return paths.map((path, index) => {
-          const text = behavior.texts?.[index] ?? null;
+          const text =
+            behavior.files === undefined
+              ? (behavior.texts?.[index] ?? null)
+              : (behavior.files[path] ?? null);
           return {
             path,
             state:
@@ -5033,7 +5040,7 @@ function instructionFixture(
           };
         });
       },
-      listFilesAtCommit: async () => [],
+      listFilesAtCommit: async () => behavior.listed ?? [],
       async readObjectIds(_address, _commit, paths) {
         objectCalls.push([...paths]);
         if (behavior.resolveFails) throw new Error("fetch failed");
@@ -5049,7 +5056,22 @@ function instructionFixture(
       tx,
       p.id,
       p.binding_set_version,
-      new Map([[REPOSITORY_NAME, repositoryBinding(behavior.address)]]),
+      new Map(
+        Object.entries({
+          [REPOSITORY_NAME]: repositoryBinding(behavior.address),
+          ...(behavior.placement === undefined
+            ? {}
+            : {
+                general: {
+                  ...workerBinding(),
+                  config: {
+                    ...workerBinding().config,
+                    placement: behavior.placement,
+                  },
+                },
+              }),
+        } as Bindings),
+      ),
     );
     const bindingId = result.changes[NO_ITEMS]?.binding_id;
     assert.ok(bindingId);
@@ -5634,7 +5656,10 @@ test("binding.environment.get answers the stored environment with no repository 
 });
 
 test("binding.environment.get reads the devcontainer file of the repository at the base head", async (t) => {
-  const present = instructionFixture(t, { texts: [DEVCONTAINER_TEXT] });
+  const present = instructionFixture(t, {
+    texts: [DEVCONTAINER_TEXT],
+    placement: WorkerPlacement.Container,
+  });
   assert.deepEqual(
     await present.f.invokeAsync("binding.environment.get", present.saved),
     {
@@ -5648,17 +5673,10 @@ test("binding.environment.get reads the devcontainer file of the repository at t
     },
   );
   assert.deepEqual(present.readCalls[NO_ITEMS]?.paths, [DEVCONTAINER_FILE]);
-  const absent = instructionFixture(t, {}, WRITABLE);
-  assert.deepEqual(
-    await absent.f.invokeAsync("binding.environment.get", absent.saved),
-    {
-      source: EnvironmentSource.None,
-      commit: INSTRUCTION_COMMIT,
-      environment: null,
-      reason: null,
-    },
-  );
-  const invalid = instructionFixture(t, { texts: ["{"] });
+  const invalid = instructionFixture(t, {
+    texts: ["{"],
+    placement: WorkerPlacement.Container,
+  });
   const answer = await invalid.f.invokeAsync(
     "binding.environment.get",
     invalid.saved,
@@ -5666,6 +5684,86 @@ test("binding.environment.get reads the devcontainer file of the repository at t
   assert.equal(answer.source, EnvironmentSource.Repository);
   assert.equal(answer.environment, null);
   assert.match(answer.reason ?? "", /invalid JSON/);
+});
+
+const PACKAGE_JSON_TEXT = '{"engines":{"node":"22"}}';
+const PACKAGE_LOCK_TEXT = "{}";
+
+test("binding.environment.get answers the detected source at the image target with no devcontainer", async (t) => {
+  const files = {
+    "package.json": PACKAGE_JSON_TEXT,
+    "package-lock.json": PACKAGE_LOCK_TEXT,
+  };
+  const { f, saved } = instructionFixture(t, {
+    files,
+    placement: WorkerPlacement.Container,
+  });
+  const detected = detectEnvironment([
+    {
+      path: "package.json",
+      state: RepositoryFileState.Present,
+      text: PACKAGE_JSON_TEXT,
+    },
+    {
+      path: "package-lock.json",
+      state: RepositoryFileState.Present,
+      text: PACKAGE_LOCK_TEXT,
+    },
+  ]);
+  assert.ok(detected);
+  assert.deepEqual(await f.invokeAsync("binding.environment.get", saved), {
+    source: EnvironmentSource.Detected,
+    commit: INSTRUCTION_COMMIT,
+    environment: detected.document,
+    reason: null,
+  });
+});
+
+test("binding.environment.get answers the universal source at the image target with no manifest", async (t) => {
+  const { f, saved } = instructionFixture(t, {
+    files: {},
+    placement: WorkerPlacement.Container,
+  });
+  assert.deepEqual(await f.invokeAsync("binding.environment.get", saved), {
+    source: EnvironmentSource.Universal,
+    commit: INSTRUCTION_COMMIT,
+    environment: JSON.parse(
+      readFileSync(
+        new URL("../../static/environment/universal.json", import.meta.url),
+        "utf8",
+      ),
+    ),
+    reason: null,
+  });
+});
+
+test("binding.environment.get at the host target ignores the repository devcontainer", async (t) => {
+  const none = instructionFixture(t, {
+    files: { [DEVCONTAINER_FILE]: DEVCONTAINER_TEXT },
+  });
+  assert.deepEqual(
+    await none.f.invokeAsync("binding.environment.get", none.saved),
+    {
+      source: EnvironmentSource.None,
+      commit: INSTRUCTION_COMMIT,
+      environment: null,
+      reason: null,
+    },
+  );
+  assert.ok(
+    none.readCalls.every((call) => !call.paths.includes(DEVCONTAINER_FILE)),
+  );
+  const detected = instructionFixture(t, {
+    files: {
+      [DEVCONTAINER_FILE]: DEVCONTAINER_TEXT,
+      "package.json": PACKAGE_JSON_TEXT,
+    },
+  });
+  const answer = await detected.f.invokeAsync(
+    "binding.environment.get",
+    detected.saved,
+  );
+  assert.equal(answer.source, EnvironmentSource.Detected);
 });
 
 test("binding.environment.get and set refuse a binding that is not a repository binding", async (t) => {
@@ -5717,6 +5815,7 @@ test("binding.environment.set refuses a key or a value that the build path does 
 test("a repository devcontainer with a refused key names the key in environment show", async (t) => {
   const refused = instructionFixture(t, {
     texts: [`{ "image": "base", "runArgs": ["--privileged"] }`],
+    placement: WorkerPlacement.Container,
   });
   const answer = await refused.f.invokeAsync(
     "binding.environment.get",
@@ -6211,8 +6310,8 @@ test("binding.environment.set answers key_refused for a document with runArgs an
 test("binding.environment.set with null removes the key and the source returns to the repository file", async (t) => {
   const { f, saved } = instructionFixture(
     t,
-    { texts: [DEVCONTAINER_TEXT] },
-    WRITABLE,
+    { texts: [DEVCONTAINER_TEXT], placement: WorkerPlacement.Container },
+    { ...WRITABLE, workerAgentsOf: () => [AGENT], validateEntry: () => {} },
   );
   f.project.cancelEnvironmentRuns();
   const stored = (await setEnvironment(f, saved, STORED_ENVIRONMENT)).bindings[

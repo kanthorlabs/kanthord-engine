@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import type { Environment } from "../kernel/devcontainer.ts";
 import { EnvironmentSource } from "../project/contract.ts";
 import { test, type TestContext } from "node:test";
 import { background } from "../kernel/context.ts";
@@ -188,6 +189,7 @@ test("setup answers the system and agent prompt after its single snapshot and su
       digested.push([projectId, resourceIdentity]);
       return ENVIRONMENT_DIGEST;
     },
+    environmentOf: () => null,
     repositoryBindingIdsOf: () => [],
     intentOf: () => ExecutionIntent.Implement,
     repositoryPolicyOf: () => null,
@@ -332,11 +334,16 @@ test("setup answers the system and agent prompt after its single snapshot and su
     environment: typeof stored | null,
     placement: InstancePlacement,
     repositoryEnvironment = true,
+    recorded: {
+      source: EnvironmentSource;
+      document: Environment;
+    } | null = null,
   ) =>
     (
       await executionSetup(
         {
           ...dependencies,
+          environmentOf: () => recorded,
           workerBindingRowOf: () => ({
             ...dependencies.workerBindingRowOf(),
             placement,
@@ -380,6 +387,26 @@ test("setup answers the system and agent prompt after its single snapshot and su
   );
   assert.equal(await environmentOf(null, InstancePlacement.Server), null);
   assert.equal(await environmentOf(null, InstancePlacement.Worker), null);
+  const detected = { image: "debian", updateContentCommand: "npm ci" };
+  for (const source of [
+    EnvironmentSource.Detected,
+    EnvironmentSource.Universal,
+  ])
+    assert.deepEqual(
+      await environmentOf(null, InstancePlacement.Container, true, {
+        source,
+        document: detected,
+      }),
+      { source, document: detected },
+    );
+  for (const placement of [InstancePlacement.Server, InstancePlacement.Worker])
+    assert.equal(
+      await environmentOf(null, placement, true, {
+        source: EnvironmentSource.Detected,
+        document: detected,
+      }),
+      null,
+    );
   const claimedBy = async (placement: InstancePlacement) => {
     claimed.length = NO_REQUESTS;
     await executionSetup(
@@ -464,6 +491,7 @@ test("setup claims no environment for a container slot whose worker binding name
         claimed.push([projectId, resourceIdentity]);
       },
       environmentDigestOf: () => ENVIRONMENT_DIGEST,
+      environmentOf: () => null,
       repositoryBindingIdsOf: () => [],
       intentOf: () => ExecutionIntent.Implement,
       repositoryPolicyOf: () => null,
@@ -563,6 +591,7 @@ test("setup answers one entry per agent of a two-agent worker with its own promp
       }),
       environmentClaimed: () => {},
       environmentDigestOf: () => ENVIRONMENT_DIGEST,
+      environmentOf: () => null,
       repositoryBindingIdsOf: () => [],
       intentOf: () => ExecutionIntent.Implement,
       repositoryPolicyOf: () => null,
@@ -671,6 +700,7 @@ async function repositorySetup(t: TestContext, address: string, pin: boolean) {
       }),
       environmentClaimed: () => {},
       environmentDigestOf: () => ENVIRONMENT_DIGEST,
+      environmentOf: () => null,
       repositoryBindingIdsOf: () => [bindingId],
       intentOf: () => ExecutionIntent.Implement,
       repositoryPolicyOf: () => ({

@@ -994,6 +994,14 @@ export const executionEnvironmentSchema = z
       source: z.literal(EnvironmentSource.Repository),
       digest: z.string().min(1),
     }),
+    z.strictObject({
+      source: z.literal(EnvironmentSource.Detected),
+      document: environmentSchema,
+    }),
+    z.strictObject({
+      source: z.literal(EnvironmentSource.Universal),
+      document: environmentSchema,
+    }),
   ])
   .nullable();
 export type ExecutionEnvironment = z.infer<typeof executionEnvironmentSchema>;

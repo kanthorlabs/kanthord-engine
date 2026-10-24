@@ -78,6 +78,7 @@ export interface EnvironmentDependencies {
   store: Store;
   repositoryFiles: RepositoryFiles;
   identity: ServiceIdentity;
+  targetOf(projectId: string, bindingId: string): EnvironmentTarget;
   sshAccess(
     platform: string,
     release: SshRelease,
@@ -215,29 +216,17 @@ export class ProjectEnvironments {
         environment: stored,
         reason: null,
       }));
-    const read = await this.readBase(id, config, [DEVCONTAINER_FILE], caller);
-    const file = read.files[0];
-    assert.ok(file);
-    let document: Environment | null;
-    try {
-      document = repositoryDocument(file);
-    } catch (error) {
-      if (!(error instanceof Diagnostic)) throw error;
-      return caller.commit(() => ({
-        source: EnvironmentSource.Repository,
-        commit: read.commit,
-        environment: null,
-        reason: error.message,
-      }));
-    }
+    const resolved = await this.resolveUnstored(
+      id,
+      config,
+      this.dependencies.targetOf(params.project_id, id),
+      caller.context,
+    );
     return caller.commit(() => ({
-      source:
-        document === null
-          ? EnvironmentSource.None
-          : EnvironmentSource.Repository,
-      commit: read.commit,
-      environment: document,
-      reason: null,
+      source: resolved.source,
+      commit: resolved.commit,
+      environment: resolved.document,
+      reason: resolved.reason ?? null,
     }));
   }
 
@@ -300,12 +289,21 @@ export class ProjectEnvironments {
         files: read.files,
       };
     }
+    return this.resolveUnstored(bindingId, config, target, context);
+  }
+
+  private async resolveUnstored(
+    bindingId: string,
+    config: RepositoryConfig,
+    target: EnvironmentTarget,
+    context: Context,
+  ): Promise<GroupResolution> {
     const atImage = target === EnvironmentTarget.Image;
     const base = await this.readBase(
       bindingId,
       config,
       atImage ? [DEVCONTAINER_FILE] : [],
-      caller,
+      { context },
     );
     if (atImage) {
       const file = base.files[0];

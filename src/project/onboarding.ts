@@ -405,6 +405,15 @@ export class Onboarding {
     return this.records.get(keyOf(projectId, resourceIdentity))?.digest ?? null;
   }
 
+  environmentOf(
+    projectId: string,
+    resourceIdentity: string,
+  ): { source: EnvironmentSource; document: Environment } | null {
+    const record = this.records.get(keyOf(projectId, resourceIdentity));
+    if (record?.source == null || record.document === null) return null;
+    return { source: record.source, document: record.document };
+  }
+
   slotImage(
     projectId: string,
     workerResourceIdentity: string,

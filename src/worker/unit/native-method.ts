@@ -181,7 +181,7 @@ export function environmentDigestsOf(
 ): Record<string, string> {
   return Object.fromEntries(
     repositories.flatMap((repository) =>
-      repository.environment === null
+      repository.environment === null || !("digest" in repository.environment)
         ? []
         : [[repository.resource_identity, repository.environment.digest]],
     ),

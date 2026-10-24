@@ -109,7 +109,9 @@ export function environmentDigestsOf(
   repositories: ReadonlyArray<{ environment: ExecutionEnvironment }>,
 ): string[] {
   return repositories.flatMap(({ environment }) =>
-    environment === null ? [] : [environment.digest],
+    environment === null || !("digest" in environment)
+      ? []
+      : [environment.digest],
   );
 }
 

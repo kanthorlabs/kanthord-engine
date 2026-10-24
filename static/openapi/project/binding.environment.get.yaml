@@ -4,8 +4,8 @@ pathItem:
     operationId: project.binding.environment.get
     tags:
       - project
-    description: "Read the environment of one repository binding: the stored
-      environment, or the devcontainer file at the base branch."
+    description: "Read the environment of one repository binding with its source:
+      stored, repository, detected, universal or none."
     x-access-policy: human
     x-timeout-ms: 30000
     x-mutation: false
@@ -149,6 +149,8 @@ components:
           enum:
             - stored
             - repository
+            - detected
+            - universal
             - none
         commit:
           anyOf:
