@@ -419,6 +419,7 @@ test(
       assert.match(repository.ssh_public_key, /^ssh-ed25519 /);
       assert.deepEqual(repository, {
         binding_id: repository.binding_id,
+        resource_identity: "repository:github:owner/repo",
         name: "repo",
         address: ADDRESS,
         ssh_host_key: {
