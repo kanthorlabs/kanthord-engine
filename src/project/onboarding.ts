@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { randomBytes } from "node:crypto";
 import type { Logger } from "pino";
 import { z } from "zod";
 import { CancellationContext, type Context } from "../kernel/context.ts";
@@ -10,8 +11,18 @@ import {
 } from "../kernel/devcontainer.ts";
 import { OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
+import { SpanStatus, type ServerTrace } from "../tracking/contract.ts";
 import { ProjectErrorCode, WorkerPlacement } from "./contract.ts";
 import type { GroupResolution } from "./environment.ts";
+import {
+  EnvironmentSpan,
+  environmentRootEnd,
+  environmentRootStart,
+  environmentStepSpan,
+  type EnvironmentContribution,
+  type EnvironmentStepSpan,
+  type EnvironmentTelemetry,
+} from "./environment-telemetry.ts";
 import {
   BASE_SUFFIX,
   EnvironmentFailureClass,
@@ -25,7 +36,10 @@ import {
   environmentDigest,
   environmentPath,
   environmentTagOf,
+  type CommandResult,
   type EnvironmentRuntime,
+  type ImageBuildInput,
+  type ImageBuildResult,
   type ProofFile,
   type ProofFiles,
   type EnvironmentState,
@@ -47,6 +61,8 @@ const PENDING_RETRY_MS = 60000;
 const RUN_STARTED = "project.onboarding.run_started";
 const RUN_ENDED = "project.onboarding.run_ended";
 const RUN_FAILED = "project.onboarding.run_failed";
+const TRACE_ID_BYTES = 16;
+const SPAN_ID_BYTES = 8;
 const NO_COMMAND = null;
 const NO_EXIT_CODE = null;
 
@@ -93,6 +109,7 @@ export interface OnboardingDependencies {
   now(): number;
   runId(): string;
   environmentBuildTimeoutMs: number;
+  telemetry: EnvironmentTelemetry;
 }
 
 type QueuedStep =
@@ -707,10 +724,12 @@ export class Onboarding {
     record.run_started_at = now;
     record.step_started_at = now;
     this.notify();
+    const trace = this.openTrace(record, now);
     this.logRun(RUN_STARTED, record);
     let completed = false;
+    let verdict: ProofVerdict | null = null;
     try {
-      const verdict = await this.verdictOf(record, this.dependencies.runId());
+      verdict = await this.verdictOf(record, this.dependencies.runId(), trace);
       if (verdict !== null) {
         await this.finalize(record, verdict);
         completed = true;
@@ -728,12 +747,75 @@ export class Onboarding {
       record.step = null;
       record.step_started_at = null;
       this.notify();
+      this.closeTrace(trace, completed ? verdict : null);
       this.logRun(RUN_ENDED, record);
     }
     if (completed && claimable(statusOf(record)))
       this.dependencies.wake(record.project_id);
     if (this.marked.delete(key))
       this.trigger(record.project_id, record.resource_identity);
+  }
+
+  private emit(trace: ServerTrace, contribution: EnvironmentContribution) {
+    try {
+      this.dependencies.telemetry.span(trace, contribution);
+    } catch {
+      return;
+    }
+  }
+
+  private openTrace(record: GroupRecord, startedAt: number): ServerTrace {
+    assert.ok(
+      record.source !== null && record.digest !== null,
+      "A run holds its source and its digest.",
+    );
+    const trace: ServerTrace = {
+      trace_id: randomBytes(TRACE_ID_BYTES).toString("hex"),
+      root_span_id: randomBytes(SPAN_ID_BYTES).toString("hex"),
+      project_id: record.project_id,
+      created_at: startedAt,
+    };
+    this.emit(
+      trace,
+      environmentRootStart(trace, {
+        binding_name: record.binding_name,
+        target: record.target,
+        source: record.source,
+        digest: record.digest,
+      }),
+    );
+    return trace;
+  }
+
+  private closeTrace(trace: ServerTrace, verdict: ProofVerdict | null): void {
+    const passed = verdict?.outcome === ProofOutcome.Passed;
+    this.emit(
+      trace,
+      environmentRootEnd(trace, {
+        end_time: this.dependencies.now(),
+        status: passed ? SpanStatus.Ok : SpanStatus.Error,
+        error_type: verdict?.class ?? null,
+      }),
+    );
+  }
+
+  private recordStep(
+    trace: ServerTrace,
+    operation: EnvironmentStepSpan,
+    startedAt: number,
+    failure: EnvironmentFailureClass | null,
+  ): void {
+    this.emit(
+      trace,
+      environmentStepSpan(trace, {
+        span_id: randomBytes(SPAN_ID_BYTES).toString("hex"),
+        operation,
+        start_time: startedAt,
+        end_time: this.dependencies.now(),
+        status: failure === null ? SpanStatus.Ok : SpanStatus.Error,
+        error_type: failure,
+      }),
+    );
   }
 
   private logRun(event: string, record: GroupRecord): void {
@@ -752,13 +834,14 @@ export class Onboarding {
   private async verdictOf(
     record: GroupRecord,
     runId: string,
+    trace: ServerTrace,
   ): Promise<ProofVerdict | null> {
     const signal = AbortSignal.any([
       this.context.signal,
       AbortSignal.timeout(this.dependencies.environmentBuildTimeoutMs),
     ]);
     try {
-      return await this.execute(record, runId, signal);
+      return await this.execute(record, runId, signal, trace);
     } catch (error) {
       if (this.context.signal.aborted) return null;
       this.dependencies.logger.error(
@@ -783,6 +866,7 @@ export class Onboarding {
     record: GroupRecord,
     runId: string,
     signal: AbortSignal,
+    trace: ServerTrace,
   ): Promise<ProofVerdict | null> {
     const { runtime } = this.dependencies;
     const { document, commit, tag } = record;
@@ -802,21 +886,99 @@ export class Onboarding {
       checks: checksOf(document),
     };
     if (record.target !== EnvironmentTarget.Image) {
-      const results = await runtime.proveOnHost(proof, signal);
-      return this.context.signal.aborted ? null : classifyProof(results);
+      return this.tracedProof(trace, proof.setup.length, () =>
+        runtime.proveOnHost(proof, signal),
+      );
     }
     assert.ok(tag !== null, "An image group holds a tag.");
     if (record.step === EnvironmentStatus.Building) {
-      const built = await runtime.build({ ...base, tag, document }, signal);
-      if (this.context.signal.aborted) return null;
+      const built = await this.tracedBuild(
+        trace,
+        { ...base, tag, document },
+        signal,
+      );
+      if (built === null) return null;
       if (built.outcome !== ImageBuildOutcome.Built)
         return failedVerdict(built.class, built.tail);
       record.step = EnvironmentStatus.Proving;
       record.step_started_at = this.dependencies.now();
       this.notify();
     }
-    const results = await runtime.prove({ ...proof, tag }, signal);
-    return this.context.signal.aborted ? null : classifyProof(results);
+    return this.tracedProof(trace, proof.setup.length, () =>
+      runtime.prove({ ...proof, tag }, signal),
+    );
+  }
+
+  private async tracedBuild(
+    trace: ServerTrace,
+    input: ImageBuildInput,
+    signal: AbortSignal,
+  ): Promise<ImageBuildResult | null> {
+    const startedAt = this.dependencies.now();
+    let built: ImageBuildResult;
+    try {
+      built = await this.dependencies.runtime.build(input, signal);
+    } catch (error) {
+      if (!this.context.signal.aborted)
+        this.recordStep(
+          trace,
+          EnvironmentSpan.Build,
+          startedAt,
+          EnvironmentFailureClass.BuildFailed,
+        );
+      throw error;
+    }
+    if (this.context.signal.aborted) return null;
+    this.recordStep(
+      trace,
+      EnvironmentSpan.Build,
+      startedAt,
+      built.outcome === ImageBuildOutcome.Built ? null : built.class,
+    );
+    return built;
+  }
+
+  private async tracedProof(
+    trace: ServerTrace,
+    setupCount: number,
+    prove: () => Promise<CommandResult[]>,
+  ): Promise<ProofVerdict | null> {
+    const startedAt = this.dependencies.now();
+    let results: CommandResult[];
+    try {
+      results = await prove();
+    } catch (error) {
+      if (!this.context.signal.aborted)
+        this.recordProofSteps(
+          trace,
+          setupCount,
+          startedAt,
+          EnvironmentFailureClass.SetupFailed,
+        );
+      throw error;
+    }
+    if (this.context.signal.aborted) return null;
+    const verdict = classifyProof(results);
+    this.recordProofSteps(trace, setupCount, startedAt, verdict.class);
+    return verdict;
+  }
+
+  private recordProofSteps(
+    trace: ServerTrace,
+    setupCount: number,
+    startedAt: number,
+    failure: EnvironmentFailureClass | null,
+  ): void {
+    const setupFailed = failure === EnvironmentFailureClass.SetupFailed;
+    if (setupCount > NO_ITEMS || setupFailed)
+      this.recordStep(
+        trace,
+        EnvironmentSpan.Setup,
+        startedAt,
+        setupFailed ? failure : null,
+      );
+    if (setupFailed) return;
+    this.recordStep(trace, EnvironmentSpan.Proof, startedAt, failure);
   }
 
   private async finalize(

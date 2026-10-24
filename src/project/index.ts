@@ -3,6 +3,10 @@ export { enforceBindingPlacements } from "./placement-check.ts";
 export { projectMigrations } from "./migrations.ts";
 export { projectSshIdentityAuthorization } from "./ssh-authorization.ts";
 export { projectConfigSchema, type ProjectConfig } from "./config.ts";
+export {
+  EnvironmentSpan,
+  type EnvironmentTelemetry,
+} from "./environment-telemetry.ts";
 export type {
   EnvironmentProbeRunner,
   ProbeAnswer,

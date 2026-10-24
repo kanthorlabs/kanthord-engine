@@ -30,6 +30,7 @@ import {
 import { TrackingService, trackingMigrations } from "../../tracking/index.ts";
 import {
   MISSION_PRODUCER,
+  PROJECT_PRODUCER,
   TRACKING_SERVICE_NAME,
 } from "../../tracking/contract.ts";
 import {
@@ -858,6 +859,10 @@ export function composeServices(options: {
     workerAgentView: (tx, w, a, entry, scope) =>
       worker.workerAgentView(tx, w, a, entry, scope),
     environmentRuntime,
+    telemetry: {
+      span: (trace, contribution) =>
+        tracking.serverTraceSpan(trace, PROJECT_PRODUCER, contribution),
+    },
     slotImage: containerImage,
     version: packageVersion(),
     environmentReady: (projectId, resourceIdentity, tag) =>
