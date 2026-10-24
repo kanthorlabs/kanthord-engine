@@ -153,7 +153,7 @@ test("probeHttp observes a network error as unreachable without the secret", asy
   assert.ok(!observed[0]![0].includes(SECRET));
 });
 
-test("probeHttp past its deadline observes unclassified", async (t) => {
+test("probeHttp past its deadline observes deadline_exceeded", async (t) => {
   const server = createServer(() => {});
   t.after(() => server.closeAllConnections());
   t.after(() => server.close());
@@ -165,6 +165,25 @@ test("probeHttp past its deadline observes unclassified", async (t) => {
       `http://127.0.0.1:${port}/`,
       HEADERS,
       new CancellationContext(background, Date.now() + DEADLINE_MS),
+      (_reason, failureReason) => void observed.push(failureReason),
+    ),
+    ResourceStatus.Unknown,
+  );
+  assert.deepEqual(observed, [ResourceFailureReason.DeadlineExceeded]);
+});
+
+test("probeHttp cancelled by its caller observes unclassified", async (t) => {
+  const caller = new CancellationContext();
+  t.mock.method(globalThis, "fetch", async () => {
+    caller.cancel();
+    throw caller.signal.reason;
+  });
+  const observed: string[] = [];
+  assert.equal(
+    await probeHttp(
+      URL,
+      HEADERS,
+      caller,
       (_reason, failureReason) => void observed.push(failureReason),
     ),
     ResourceStatus.Unknown,

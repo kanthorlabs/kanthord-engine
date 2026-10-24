@@ -5,6 +5,7 @@ import {
   CancellationContext,
   cancelled,
   type Context,
+  DeadlineExceeded,
 } from "./context.ts";
 import { HealthStatus, type Healthcheck } from "./service.ts";
 import { ValueType } from "./values.ts";
@@ -163,6 +164,16 @@ export type ResourceObserver = (
   reason: string,
   failure_reason: ResourceFailureReason,
 ) => void;
+
+export const CHECK_DEADLINE_EXCEEDED = "check deadline exceeded";
+
+export function observeDeadline(
+  context: Context,
+  observe?: ResourceObserver,
+): void {
+  if (context.signal.reason instanceof DeadlineExceeded)
+    observe?.(CHECK_DEADLINE_EXCEEDED, ResourceFailureReason.DeadlineExceeded);
+}
 
 export type ResourceCheck = (
   context: Context,

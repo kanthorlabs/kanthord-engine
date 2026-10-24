@@ -6,6 +6,7 @@ import {
 import { Diagnostic } from "../../kernel/errors.ts";
 import {
   entryFailureReason,
+  observeDeadline,
   ResourceFailureReason,
   ResourceStatus,
   type ResourceStatusValue,
@@ -193,7 +194,10 @@ export class CopyChecks {
         provider.check(secret, copy.metadata, deadline, observe),
         cancelled(deadline.signal).then(() => unknown.answer),
       ]);
-      if (deadline.signal.aborted) return unknown;
+      if (deadline.signal.aborted) {
+        observeDeadline(deadline, observe);
+        return unknown;
+      }
       return { status: HEALTH_OF_CONNECTION[answer.connection], answer };
     } catch {
       observe(

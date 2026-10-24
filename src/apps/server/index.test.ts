@@ -398,7 +398,7 @@ function intakeOnlyReport(t: TestContext, fixture: Fixture) {
   );
 }
 
-test("the check deadline of a poll inbound answers unknown through the report, drops the material and changes no inbound", async (t) => {
+test("the check deadline of a poll inbound answers unknown with deadline_exceeded through the report, drops the material and changes no inbound", async (t) => {
   const { gitHub, fixture, pollInbound, inboundRow } = await pollFixture(t);
   const id = await pollInbound();
   const before = inboundRow(id);
@@ -416,7 +416,7 @@ test("the check deadline of a poll inbound answers unknown through the report, d
         [encodeURIComponent(id)]: {
           status: ResourceStatus.Unknown,
           capability: POLL_CAPABILITY,
-          failure_reason: ResourceFailureReason.Unclassified,
+          failure_reason: ResourceFailureReason.DeadlineExceeded,
         },
       },
     },

@@ -1936,7 +1936,7 @@ test("check runs the probe of the platform on the parsed secret and metadata and
   assert.equal(credentialCount(f), NO_CREDENTIALS);
 });
 
-test("check answers unclassified when the probe exceeds the 10 s deadline", async (t) => {
+test("check answers deadline_exceeded when the probe exceeds the 10 s deadline", async (t) => {
   t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
   const f = fixture();
   t.after(() => f.store.close());
@@ -1960,8 +1960,38 @@ test("check answers unclassified when the probe exceeds the 10 s deadline", asyn
   assert.deepEqual(await pending, {
     status: "unknown",
     capability: NO_CAPABILITY,
-    failure_reason: ResourceFailureReason.Unclassified,
+    failure_reason: ResourceFailureReason.DeadlineExceeded,
   });
+});
+
+test("check answers unclassified when the caller cancels the probe", async (t) => {
+  const f = fixture();
+  t.after(() => f.store.close());
+  const caller = new CancellationContext();
+  const set: CredentialPlatformSet = {
+    platforms: {
+      [TestPlatform.Key]: {
+        ...TEST_SET.platforms[TestPlatform.Key]!,
+        probe: async (_secret, _metadata, context) => {
+          caller.cancel();
+          await cancelled(context.signal);
+          return "unknown";
+        },
+      },
+    },
+  };
+  assert.deepEqual(
+    await f.component.check(
+      set,
+      { platform: TestPlatform.Key, secret: apiSecret, metadata: null },
+      caller,
+    ),
+    {
+      status: "unknown",
+      capability: NO_CAPABILITY,
+      failure_reason: ResourceFailureReason.Unclassified,
+    },
+  );
 });
 
 test("check answers unknown when the probe throws", async (t) => {

@@ -525,7 +525,7 @@ async function silentServer(t: TestContext): Promise<string> {
   return `http://127.0.0.1:${port}`;
 }
 
-test("a model-list check past its deadline observes unclassified", async (t) => {
+test("a model-list check past its deadline observes deadline_exceeded", async (t) => {
   const baseUrl = await silentServer(t);
   const observed: string[] = [];
   const answer = await checkOpenAICompatible(
@@ -535,10 +535,10 @@ test("a model-list check past its deadline observes unclassified", async (t) => 
     (_reason, failureReason) => void observed.push(failureReason),
   );
   assert.deepEqual(answer, UNREACHABLE);
-  assert.deepEqual(observed, [ResourceFailureReason.Unclassified]);
+  assert.deepEqual(observed, [ResourceFailureReason.DeadlineExceeded]);
 });
 
-test("a model-call check past its deadline observes unclassified", async () => {
+test("a model-call check past its deadline observes deadline_exceeded", async () => {
   const observed: string[] = [];
   const waiting: ModelCall = (_model, _context, options) =>
     new Promise((_resolve, reject) =>
@@ -550,6 +550,26 @@ test("a model-call check past its deadline observes unclassified", async () => {
     credentialOf(Date.now() + FUTURE_MS),
     new CancellationContext(background, Date.now() + DEADLINE_MS),
     waiting,
+    (_reason, failureReason) => void observed.push(failureReason),
+  );
+  assert.deepEqual(answer, UNREACHABLE);
+  assert.deepEqual(observed, [ResourceFailureReason.DeadlineExceeded]);
+});
+
+test("a model-call check cancelled by its caller observes unclassified", async () => {
+  const observed: string[] = [];
+  const caller = new CancellationContext();
+  const cancelling: ModelCall = (_model, _context, options) =>
+    new Promise((_resolve, reject) => {
+      options.signal?.addEventListener("abort", () =>
+        reject(new DOMException("aborted", "AbortError")),
+      );
+      caller.cancel();
+    });
+  const answer = await checkOpenAICodex(
+    credentialOf(Date.now() + FUTURE_MS),
+    caller,
+    cancelling,
     (_reason, failureReason) => void observed.push(failureReason),
   );
   assert.deepEqual(answer, UNREACHABLE);

@@ -6,13 +6,15 @@ import {
   CancellationContext,
   cancelled,
   type Context,
+  DeadlineExceeded,
   joined,
 } from "../kernel/context.ts";
 import {
   entryFailureReason,
   HealthScope,
+  observeDeadline,
+  ResourceFailureReason,
   ResourceStatus,
-  type ResourceFailureReason,
   type ResourceObserver,
   type ResourceStatusValue,
 } from "../kernel/health.ts";
@@ -151,12 +153,12 @@ async function checkResource(
         .catch(() => ResourceStatus.Unknown),
       cancelled(context.signal).then(() => ResourceStatus.Unknown),
     ]);
-    if (
-      context.signal.aborted ||
-      Date.now() >= deadline ||
-      Date.now() >= reportAt
-    )
+    if (Date.now() >= deadline || Date.now() >= reportAt)
+      context.cancel(new DeadlineExceeded());
+    if (context.signal.aborted) {
+      observeDeadline(context, observe);
       return ResourceStatus.Unknown;
+    }
     return Object.values(ResourceStatus).includes(result)
       ? result
       : ResourceStatus.Unknown;
@@ -180,7 +182,7 @@ async function runChecks(
   const failureReasons = new Map<string, ResourceFailureReason>();
   const reportContext = new CancellationContext(caller.context);
   const timer = setTimeout(
-    () => reportContext.cancel(),
+    () => reportContext.cancel(new DeadlineExceeded()),
     Math.max(EMPTY_COUNT, reportAt - Date.now()),
   );
   let next = 0;
@@ -214,6 +216,8 @@ async function runChecks(
         work,
       ),
     );
+    for (const { entry } of entries.slice(next))
+      failureReasons.set(entry.target, ResourceFailureReason.DeadlineExceeded);
     return { statuses, failureReasons };
   } finally {
     clearTimeout(timer);

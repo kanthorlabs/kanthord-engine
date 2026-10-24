@@ -673,7 +673,7 @@ test("E07.12 a failed project inventory refuses the healthcheck report", async (
   assert.ok(details.missing_inventories.includes(OWNER_PROJECT));
 });
 
-test("E07.13 a resource check past its deadline reports unknown", async (t) => {
+test("E07.13 a resource check past its deadline reports unknown with deadline_exceeded", async (t) => {
   let timer: NodeJS.Timeout | undefined;
   t.after(() => clearTimeout(timer));
   const check: ResourceCheck = () =>
@@ -698,7 +698,7 @@ test("E07.13 a resource check past its deadline reports unknown", async (t) => {
   assert.deepEqual(body.shared.llm.global[FIRST_RESOURCE], {
     status: ResourceStatus.Unknown,
     capability: CAPABILITY,
-    failure_reason: ResourceFailureReason.Unclassified,
+    failure_reason: ResourceFailureReason.DeadlineExceeded,
   });
 });
 

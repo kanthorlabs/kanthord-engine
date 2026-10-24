@@ -20,6 +20,7 @@ import {
 import {
   entryFailureReason,
   HealthScope,
+  observeDeadline,
   ResourceFailureReason,
   ResourceStatus,
   type HealthRegistry,
@@ -1589,26 +1590,24 @@ export class CustodyComponent implements Service, CredentialRecords {
       Date.now() + CREDENTIAL_CHECK_TIMEOUT_MS,
     );
     let failureReason: ResourceFailureReason | null = null;
+    const observe = (reason: string, observed: ResourceFailureReason) => {
+      failureReason = observed;
+      this.logger.info(
+        {
+          credential_name: credentialName,
+          platform: row.platform,
+          reason,
+        },
+        "credential verify failed",
+      );
+    };
     try {
       const checked = await Promise.race([
-        capturedResourceCheck(
-          row,
-          this.envelopeKey,
-          entry,
-        )(deadline, (reason, observed) => {
-          failureReason = observed;
-          this.logger.info(
-            {
-              credential_name: credentialName,
-              platform: row.platform,
-              reason,
-            },
-            "credential verify failed",
-          );
-        }),
+        capturedResourceCheck(row, this.envelopeKey, entry)(deadline, observe),
         cancelled(deadline.signal).then(() => ResourceStatus.Unknown),
       ]);
       const status = deadline.signal.aborted ? ResourceStatus.Unknown : checked;
+      observeDeadline(deadline, observe);
       return {
         status,
         capability: entry.capability,
@@ -1651,15 +1650,16 @@ export class CustodyComponent implements Service, CredentialRecords {
       Date.now() + CREDENTIAL_CHECK_TIMEOUT_MS,
     );
     let failureReason: ResourceFailureReason | null = null;
+    const observe = (reason: string, observed: ResourceFailureReason) => {
+      failureReason = observed;
+      this.logger.info({ platform, reason }, "credential check failed");
+    };
     try {
       const status = await probe(
         parsedSecret.data,
         parsedMetadata,
         deadline,
-        (reason, observed) => {
-          failureReason = observed;
-          this.logger.info({ platform, reason }, "credential check failed");
-        },
+        observe,
       ).catch(() => {
         this.logger.info(
           { platform, reason: "check failed before the remote call" },
@@ -1667,6 +1667,7 @@ export class CustodyComponent implements Service, CredentialRecords {
         );
         return ResourceStatus.Unknown;
       });
+      if (status === ResourceStatus.Unknown) observeDeadline(deadline, observe);
       return {
         status,
         capability: entry.capability,

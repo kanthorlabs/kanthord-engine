@@ -209,7 +209,7 @@ test("a version change during a check runs one more check after it", async () =>
   assert.equal(f.reports.length, RUNS_FOR_A_CHANGE_DURING_A_RUN);
 });
 
-test("a check past its deadline reports unknown, and only bounded models reach the report", async () => {
+test("a check past its deadline reports unknown with deadline_exceeded, and only bounded models reach the report", async () => {
   const long = "m".repeat(COPY_REPORT_TEXT_MAX_LENGTH + 1);
   const slow = await fixture(
     [{ name: "slow", platform: OPENAI, secret: { key: "k" } }],
@@ -227,7 +227,7 @@ test("a check past its deadline reports unknown, and only bounded models reach t
   assert.equal(slow.reports[0]!.body.status, ResourceStatus.Unknown);
   assert.equal(
     slow.reports[0]!.body.failure_reason,
-    ResourceFailureReason.Unclassified,
+    ResourceFailureReason.DeadlineExceeded,
   );
   const listing = await fixture(
     [{ name: "listing", platform: OPENAI, secret: { key: "k" } }],
