@@ -264,12 +264,16 @@ export class SchedulerService implements Service, WorkQueue {
     projectId: string,
     priority: number,
   ): void {
-    const id = createIdentity(JOB_IDENTITY_PREFIX);
     tx.database
       .prepare(
-        "INSERT INTO scheduler_job (id, project_id, node_id, priority) VALUES (?, ?, ?, ?)",
+        "INSERT INTO scheduler_queue_place (node_id, job_id) VALUES (?, ?) ON CONFLICT (node_id) DO NOTHING",
       )
-      .run(id, projectId, nodeId, priority);
+      .run(nodeId, createIdentity(JOB_IDENTITY_PREFIX));
+    tx.database
+      .prepare(
+        "INSERT INTO scheduler_job (id, project_id, node_id, priority) SELECT job_id, ?, node_id, ? FROM scheduler_queue_place WHERE node_id = ?",
+      )
+      .run(projectId, priority, nodeId);
   }
 
   delete(tx: Transaction, nodeId: string): void {

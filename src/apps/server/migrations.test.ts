@@ -53,8 +53,13 @@ const ERD2_WORKER_TABLES = [WORKER_REGISTRATION_TABLE, WORKER_INSTANCE_TABLE];
 const PROJECT_PROJECT_TABLE = "project_project";
 const PROJECT_BINDING_TABLE = "project_binding";
 const SCHEDULER_JOB_TABLE = "scheduler_job";
+const SCHEDULER_QUEUE_PLACE_TABLE = "scheduler_queue_place";
 const SCHEDULER_EXECUTION_TABLE = "scheduler_execution";
-const SCHEDULER_TABLES = [SCHEDULER_JOB_TABLE, SCHEDULER_EXECUTION_TABLE];
+const SCHEDULER_TABLES = [
+  SCHEDULER_JOB_TABLE,
+  SCHEDULER_QUEUE_PLACE_TABLE,
+  SCHEDULER_EXECUTION_TABLE,
+];
 const MISSION_MISSION_TABLE = "mission_mission";
 const MISSION_NODE_TABLE = "mission_node";
 const MISSION_NODE_REVISION_TABLE = "mission_node_revision";
@@ -121,6 +126,7 @@ const ALL_TABLES = [
   REPOSITORY_HOST_KEY_TABLE,
   SCHEDULER_EXECUTION_TABLE,
   SCHEDULER_JOB_TABLE,
+  SCHEDULER_QUEUE_PLACE_TABLE,
   WORKER_INSTANCE_TABLE,
   WORKER_REGISTRATION_TABLE,
 ];
@@ -649,6 +655,24 @@ test("Scheduler jobs hold available_at", (t) => {
       ["node_id", "TEXT", 1, 0],
       ["priority", "INTEGER", 1, 0],
       ["available_at", "INTEGER", 0, 0],
+    ],
+  );
+});
+
+test("Scheduler queue places hold the first job identity of each node", (t) => {
+  const store = new Store(IN_MEMORY_DATABASE);
+  t.after(() => store.close());
+  store.migrate([
+    { service: SCHEDULER_SERVICE_NAME, migrations: schedulerMigrations },
+  ]);
+  const columns = store.database
+    .prepare(`PRAGMA table_info('${SCHEDULER_QUEUE_PLACE_TABLE}')`)
+    .all();
+  assert.deepEqual(
+    columns.map((row) => [row.name, row.type, row.notnull, row.pk]),
+    [
+      ["node_id", "TEXT", 1, 1],
+      ["job_id", "TEXT", 1, 0],
     ],
   );
 });

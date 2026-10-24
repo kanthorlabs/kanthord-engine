@@ -206,6 +206,29 @@ test("WorkQueue priorityUpdate changes priority and preserves id", (t) => {
   assert.equal(updated.id, original.id);
 });
 
+test("WorkQueue insert of a returning node reuses the identity of the first job of that node", (t) => {
+  const store = makeStore();
+  t.after(() => store.close());
+  const scheduler = schedulerHarness(t, { store }).service;
+  const nodeId = createIdentity(NODE_PREFIX);
+  const projectId = createIdentity(PROJECT_PREFIX);
+  const readId = () =>
+    (
+      store.database
+        .prepare("SELECT id FROM scheduler_job WHERE node_id = ?")
+        .get(nodeId) as StoredJob
+    ).id;
+  store.transaction((tx) =>
+    scheduler.insert(tx, nodeId, projectId, INITIAL_PRIORITY),
+  );
+  const first = readId();
+  store.transaction((tx) => scheduler.delete(tx, nodeId));
+  store.transaction((tx) =>
+    scheduler.insert(tx, nodeId, projectId, UPDATED_PRIORITY),
+  );
+  assert.equal(readId(), first);
+});
+
 test("queue list handler pages the work queue order with no duplicate and no omission", (t) => {
   const store = makeStore();
   t.after(() => store.close());

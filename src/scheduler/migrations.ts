@@ -10,6 +10,10 @@ const createSchedulerTables: Migration = (database) => {
       available_at INTEGER
     );
     CREATE UNIQUE INDEX scheduler_job_node_id ON scheduler_job (node_id);
+    CREATE TABLE scheduler_queue_place (
+      node_id TEXT NOT NULL PRIMARY KEY,
+      job_id TEXT NOT NULL
+    );
     CREATE TABLE scheduler_execution (
       id TEXT NOT NULL PRIMARY KEY,
       project_id TEXT NOT NULL,
