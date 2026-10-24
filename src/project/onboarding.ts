@@ -441,6 +441,7 @@ export class Onboarding {
   private readonly computing = new Map<string, Promise<void>>();
   private readonly again = new Set<string>();
   private readonly marked = new Set<string>();
+  private readonly changedWhileReading = new Set<string>();
   private readonly retries = new Map<string, NodeJS.Timeout>();
   private readonly loggedReadFailures = new Map<string, string>();
   private readonly queue: string[] = [];
@@ -503,10 +504,14 @@ export class Onboarding {
   }
 
   bindingsChanged(projectId: string): void {
-    const { repositories } = this.dependencies.bindingsOf(projectId);
+    const facts = this.dependencies.bindingsOf(projectId);
+    const { repositories } = facts;
     const current = new Set(
       repositories.map((group) => group.resource_identity),
     );
+    for (const key of this.computing.keys())
+      if (key.startsWith(keyOf(projectId, "")))
+        this.changedWhileReading.add(key);
     for (const [key, record] of Array.from(this.records))
       if (
         record.project_id === projectId &&
@@ -514,7 +519,7 @@ export class Onboarding {
       )
         this.dropRecord(key);
     for (const group of repositories) {
-      this.markChanged(projectId, group);
+      this.markChanged(projectId, group, facts);
       this.trigger(projectId, group.resource_identity);
     }
     void this.collectCacheVolumes();
@@ -663,18 +668,23 @@ export class Onboarding {
     });
   }
 
-  private markChanged(projectId: string, group: RepositoryGroup): void {
+  private markChanged(
+    projectId: string,
+    group: RepositoryGroup,
+    facts: BindingFacts,
+  ): void {
     const key = keyOf(projectId, group.resource_identity);
     const record = this.records.get(key);
-    if (
-      record === undefined ||
-      (record.binding_id === group.binding_id &&
-        record.binding_name === group.binding_name)
-    )
-      return;
-    record.binding_id = group.binding_id;
-    record.binding_name = group.binding_name;
-    record.environment_from_agent = false;
+    if (record === undefined) return;
+    const rowChanged =
+      record.binding_id !== group.binding_id ||
+      record.binding_name !== group.binding_name;
+    if (!rowChanged && targetOf(group, facts) === record.target) return;
+    if (rowChanged) {
+      record.binding_id = group.binding_id;
+      record.binding_name = group.binding_name;
+      record.environment_from_agent = false;
+    }
     record.read_succeeded = false;
     this.loggedReadFailures.delete(key);
     if (record.run_started_at === null) {
@@ -733,6 +743,7 @@ export class Onboarding {
     resourceIdentity: string,
   ): Promise<void> {
     const key = keyOf(projectId, resourceIdentity);
+    this.changedWhileReading.delete(key);
     const facts = this.dependencies.bindingsOf(projectId);
     const group = facts.repositories.find(
       (candidate) => candidate.resource_identity === resourceIdentity,
@@ -757,10 +768,19 @@ export class Onboarding {
         failure = { reason: next.reason, failure_reason: null };
     } catch (error) {
       failure = readFailureOf(error);
+      const base = previous ?? emptyRecord(projectId, group, target);
       next = {
-        ...(previous ?? emptyRecord(projectId, group, target)),
+        ...base,
+        ...(base.target === target
+          ? {}
+          : { digest: null, tag: null, proof: null, proved: false }),
+        target,
         reason: failure.reason,
       };
+    }
+    if (this.changedWhileReading.delete(key)) {
+      if (!this.context.signal.aborted) this.again.add(key);
+      return;
     }
     const current = this.records.get(key);
     if (current !== undefined && current.run_started_at !== null) {
@@ -943,11 +963,20 @@ export class Onboarding {
       this.considerSession(record);
   }
 
+  private targetMoved(record: GroupRecord): boolean {
+    const facts = this.dependencies.bindingsOf(record.project_id);
+    const group = facts.repositories.find(
+      (candidate) => candidate.resource_identity === record.resource_identity,
+    );
+    return group === undefined || targetOf(group, facts) !== record.target;
+  }
+
   private considerSession(group: GroupRecord): void {
     const key = keyOf(group.project_id, group.resource_identity);
     if (this.records.get(key) !== group || group.session !== null) return;
     if (group.target !== EnvironmentTarget.Image || !repairableSource(group))
       return;
+    if (this.targetMoved(group)) return;
     if (!this.dependencies.environmentAgent.enabled()) return;
     assert.ok(group.digest !== null, "A failed group holds a digest.");
     const { proofs } = this.dependencies;

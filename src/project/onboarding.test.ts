@@ -152,6 +152,7 @@ const HOST_CRASHED = "host crashed";
 const DEADLINE_TAIL = "the run deadline of 30 minutes passed";
 const TWO_CALLS = 2;
 const THREE_DIGESTS = 3;
+const THREE_CALLS = 3;
 const RUNTIME_NAME = "podman";
 const UNTIL_ATTEMPTS = 1000;
 const SETUP_EXIT = 3;
@@ -1104,6 +1105,32 @@ test("a binding change re-arms the read_failed record", async (t) => {
   );
 });
 
+test("a target change re-arms the read_failed record", async (t) => {
+  const h = new Harness(t);
+  h.bindings = facts([APP], [server]);
+  h.resolution = sshReadError();
+  await h.compute();
+  assert.equal(h.logged(READ_FAILED).length, ONE_CALL);
+  h.bindings = facts([APP], [container("app")]);
+  h.onboarding.bindingsChanged(PROJECT);
+  await h.until(() => h.logged(READ_FAILED).length === TWO_RECORDS);
+});
+
+test("a failed read after a target change writes the new target, and a later write of the same facts logs no second record", async (t) => {
+  const h = new Harness(t);
+  h.bindings = facts([APP], [server]);
+  h.resolution = sshReadError();
+  await h.compute();
+  h.bindings = facts([APP], [container("app")]);
+  h.onboarding.bindingsChanged(PROJECT);
+  await h.until(() => h.logged(READ_FAILED).length === TWO_RECORDS);
+  assert.equal(h.state().target, EnvironmentTarget.Image);
+  h.onboarding.bindingsChanged(PROJECT);
+  await h.until(() => h.resolveCalls.length === THREE_CALLS);
+  await h.until(() => !h.onboarding["computing"].size);
+  assert.equal(h.logged(READ_FAILED).length, TWO_RECORDS);
+});
+
 test("a successful read logs nothing and rearms the read_failed record", async (t) => {
   const h = new Harness(t);
   h.existing.add(h.provedOf(h.digest()));
@@ -1934,6 +1961,46 @@ test("bindingsChanged keeps the record of an unchanged binding and computes it a
   await h.until(() => h.resolveCalls.length === TWO_CALLS);
 });
 
+test("a worker binding write that changes the target sets the record to pending", async (t) => {
+  const h = new Harness(t);
+  h.resolution = NOTHING;
+  h.bindings = facts([APP], [server]);
+  await h.compute();
+  assert.equal(h.state().status, EnvironmentStatus.None);
+  assert.equal(h.state().target, EnvironmentTarget.Host);
+  const record = Array.from(h.onboarding["records"].values()).find(
+    (candidate) => candidate.resource_identity === APP.resource_identity,
+  );
+  assert.ok(record);
+  record.environment_from_agent = true;
+  const gate = new Deferred();
+  h.resolveGate = gate;
+  h.bindings = facts([APP], [container("app")]);
+  h.onboarding.bindingsChanged(PROJECT);
+  assert.equal(h.state().status, EnvironmentStatus.Pending);
+  assert.equal(h.state().binding_id, APP.binding_id);
+  assert.equal(record.environment_from_agent, true);
+  assert.equal(
+    h.onboarding.environmentsClaimable(PROJECT, [APP.resource_identity]),
+    false,
+  );
+  const waiting = new AbortController();
+  let slot: string | null = null;
+  const answer = h.onboarding
+    .slotImage(PROJECT, WORKER_IDENTITY, waiting.signal)
+    .then((image) => (slot = image));
+  await turn();
+  assert.equal(slot, null);
+  gate.release();
+  await answer;
+  assert.equal(slot, SLOT_IMAGE);
+  assert.equal(h.state().target, EnvironmentTarget.Image);
+  assert.deepEqual(
+    h.resolveCalls.map((call) => call.target),
+    [EnvironmentTarget.Host, EnvironmentTarget.Image],
+  );
+});
+
 test("environmentClaimed returns before any dependency of the compute runs", async (t) => {
   const h = new Harness(t);
   h.onboarding.environmentClaimed(PROJECT, APP.resource_identity);
@@ -2017,6 +2084,139 @@ test("start removes the stale runs, computes each binding and collects each path
     h.resolveCalls.map((call) => call.bindingId),
     [APP.binding_id],
   );
+});
+
+test("a binding write during a held read keeps the record pending and computes again with the new binding", async (t) => {
+  const h = new Harness(t);
+  h.resolution = NOTHING;
+  await h.compute();
+  const held = new Deferred();
+  h.resolveGate = held;
+  const running = h.compute();
+  await h.until(() => h.resolveCalls.length === TWO_CALLS);
+  h.bindings = facts(
+    [{ ...APP, binding_id: RENAMED_BINDING_ID }],
+    [container("app")],
+  );
+  h.onboarding.bindingsChanged(PROJECT);
+  const rerun = new Deferred();
+  h.resolveGate = rerun;
+  held.release();
+  await h.until(() => h.resolveCalls.length === THREE_CALLS);
+  assert.equal(h.state().status, EnvironmentStatus.Pending);
+  assert.equal(
+    h.onboarding.environmentsClaimable(PROJECT, [APP.resource_identity]),
+    false,
+  );
+  rerun.release();
+  await running;
+  await h.until(() => h.state().status === EnvironmentStatus.None);
+  assert.deepEqual(
+    h.resolveCalls.map((call) => call.bindingId).slice(NO_CALLS, THREE_CALLS),
+    [APP.binding_id, APP.binding_id, RENAMED_BINDING_ID],
+  );
+});
+
+test("a binding write during the first read writes no record until the read of the new binding ends", async (t) => {
+  const h = new Harness(t);
+  h.resolution = NOTHING;
+  const held = new Deferred();
+  h.resolveGate = held;
+  const running = h.compute();
+  await h.until(() => h.resolveCalls.length === ONE_CALL);
+  h.bindings = facts(
+    [{ ...APP, binding_id: RENAMED_BINDING_ID }],
+    [container("app")],
+  );
+  h.onboarding.bindingsChanged(PROJECT);
+  const rerun = new Deferred();
+  h.resolveGate = rerun;
+  held.release();
+  await h.until(() => h.resolveCalls.length === TWO_CALLS);
+  assert.deepEqual(h.onboarding.states(PROJECT), []);
+  rerun.release();
+  await running;
+  await h.until(() => h.onboarding.states(PROJECT).length === ONE_CALL);
+  assert.equal(h.state().binding_id, RENAMED_BINDING_ID);
+});
+
+test("a target flip-back during a held read keeps the record pending and computes again at the new target", async (t) => {
+  const h = new Harness(t);
+  h.resolution = NOTHING;
+  await h.compute();
+  assert.equal(h.state().target, EnvironmentTarget.Image);
+  const held = new Deferred();
+  h.resolveGate = held;
+  h.bindings = facts([APP], [server]);
+  h.onboarding.bindingsChanged(PROJECT);
+  await h.until(() => h.resolveCalls.length === TWO_CALLS);
+  h.bindings = facts([APP], [container("app")]);
+  h.onboarding.bindingsChanged(PROJECT);
+  const rerun = new Deferred();
+  h.resolveGate = rerun;
+  held.release();
+  await h.until(() => h.resolveCalls.length === THREE_CALLS);
+  assert.equal(h.state().status, EnvironmentStatus.Pending);
+  assert.equal(
+    h.onboarding.environmentsClaimable(PROJECT, [APP.resource_identity]),
+    false,
+  );
+  rerun.release();
+  await h.until(() => h.state().status === EnvironmentStatus.None);
+  assert.equal(h.state().target, EnvironmentTarget.Image);
+  assert.deepEqual(
+    h.resolveCalls.map((call) => call.target).slice(NO_CALLS, THREE_CALLS),
+    [EnvironmentTarget.Image, EnvironmentTarget.Host, EnvironmentTarget.Image],
+  );
+});
+
+test("a binding removal during a held read leaves no record", async (t) => {
+  const h = new Harness(t);
+  h.resolution = NOTHING;
+  await h.compute();
+  const held = new Deferred();
+  h.resolveGate = held;
+  const running = h.compute();
+  await h.until(() => h.resolveCalls.length === TWO_CALLS);
+  h.bindings = facts([], []);
+  h.onboarding.bindingsChanged(PROJECT);
+  assert.deepEqual(h.onboarding.states(PROJECT), []);
+  held.release();
+  await running;
+  await h.until(() => !h.onboarding["computing"].size);
+  assert.deepEqual(h.onboarding.states(PROJECT), []);
+});
+
+test("a binding-set write of another project keeps a held read of this project", async (t) => {
+  const h = new Harness(t);
+  h.resolution = NOTHING;
+  await h.compute();
+  const held = new Deferred();
+  h.resolveGate = held;
+  const running = h.compute();
+  await h.until(() => h.resolveCalls.length === TWO_CALLS);
+  h.onboarding.bindingsChanged("project_2");
+  held.release();
+  await running;
+  await h.until(() => !h.onboarding["computing"].size);
+  assert.equal(h.resolveCalls.length, TWO_CALLS);
+  assert.equal(h.state().status, EnvironmentStatus.None);
+});
+
+test("a held read discarded by a write computes no more after cancel", async (t) => {
+  const h = new Harness(t);
+  h.resolution = NOTHING;
+  await h.compute();
+  const held = new Deferred();
+  h.resolveGate = held;
+  const running = h.compute();
+  await h.until(() => h.resolveCalls.length === TWO_CALLS);
+  h.onboarding.bindingsChanged(PROJECT);
+  h.onboarding.cancel();
+  held.release();
+  await running;
+  await turn();
+  assert.equal(h.resolveCalls.length, TWO_CALLS);
 });
 
 const GONE_CACHE = { project_id: PROJECT, resource_identity: STRAY_IDENTITY };
@@ -3254,6 +3454,132 @@ test(
     await h.compute();
     h.onboarding.environmentFailed(failureInput(h));
     assert.equal(h.sessionInputs.length, TWO_CALLS);
+  },
+);
+
+test(
+  "a failed run after a target change during the run starts no session",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const h = new Harness(t);
+    h.resolution = UNIVERSAL;
+    h.agentEnabled = true;
+    h.proveResults = FAILING_RESULTS;
+    h.openBuild();
+    await h.compute();
+    await h.until(() => h.state().run_started_at !== null);
+    h.bindings = facts([APP], [server]);
+    h.onboarding.bindingsChanged(PROJECT);
+    h.openProve();
+    await h.ended();
+    await turn();
+    await turn();
+    assert.equal(h.sessionInputs.length, NO_CALLS);
+    assert.equal(h.state().repairs, NO_REPAIRS);
+  },
+);
+
+test(
+  "a failed run after a binding rename during the run starts one session",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const h = new Harness(t);
+    h.resolution = UNIVERSAL;
+    h.agentEnabled = true;
+    h.proveResults = FAILING_RESULTS;
+    h.openBuild();
+    await h.compute();
+    await h.until(() => h.state().run_started_at !== null);
+    h.bindings = facts(
+      [{ ...APP, binding_id: RENAMED_BINDING_ID }],
+      [container("app")],
+    );
+    h.onboarding.bindingsChanged(PROJECT);
+    h.openProve();
+    await sessionsEnded(h, ONE_CALL);
+  },
+);
+
+async function heldAfterWrite(h: Harness, bindings: BindingFacts) {
+  await h.compute();
+  const digests = digestsOf(h);
+  const held = new Deferred();
+  h.resolveGate = held;
+  h.bindings = bindings;
+  h.onboarding.bindingsChanged(PROJECT);
+  await h.until(() => h.resolveCalls.length === TWO_CALLS);
+  assert.equal(h.state().status, EnvironmentStatus.Pending);
+  return { digests, held };
+}
+
+test(
+  "an execution failure after a binding rename during a held read starts one session",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const h = agentHarness(t, NOTHING);
+    const { digests, held } = await heldAfterWrite(
+      h,
+      facts([{ ...APP, binding_id: RENAMED_BINDING_ID }], [container("app")]),
+    );
+    h.onboarding.environmentFailed(failureInput(h, { digests }));
+    await sessionsEnded(h, ONE_CALL);
+    held.release();
+  },
+);
+
+test(
+  "an execution failure after a target change during a held read starts no session",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const h = agentHarness(t, NOTHING);
+    const { digests, held } = await heldAfterWrite(h, facts([APP], [server]));
+    h.onboarding.environmentFailed(failureInput(h, { digests }));
+    await turn();
+    await turn();
+    assert.equal(h.sessionInputs.length, NO_CALLS);
+    held.release();
+  },
+);
+
+test(
+  "a failed run of a binding that the facts no longer hold starts no session",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const h = new Harness(t);
+    h.resolution = UNIVERSAL;
+    h.agentEnabled = true;
+    h.proveResults = FAILING_RESULTS;
+    h.openBuild();
+    await h.compute();
+    await h.until(() => h.state().run_started_at !== null);
+    h.bindings = facts([], []);
+    h.openProve();
+    await h.ended();
+    await turn();
+    await turn();
+    assert.equal(h.sessionInputs.length, NO_CALLS);
+  },
+);
+
+test(
+  "an execution failure of the old target after a target change and a failed read starts no session",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const h = agentHarness(t, NOTHING);
+    h.bindings = facts([APP], [server]);
+    await h.compute();
+    const digests = digestsOf(h);
+    h.resolution = sshReadError();
+    h.bindings = facts([APP], [container("app")]);
+    h.onboarding.bindingsChanged(PROJECT);
+    await h.until(() => h.resolveCalls.length === TWO_CALLS);
+    await h.until(() => !h.onboarding["computing"].size);
+    assert.equal(h.state().target, EnvironmentTarget.Image);
+    assert.equal(h.state().digest, null);
+    h.onboarding.environmentFailed(failureInput(h, { digests }));
+    await turn();
+    await turn();
+    assert.equal(h.sessionInputs.length, NO_CALLS);
   },
 );
 
