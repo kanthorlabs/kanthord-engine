@@ -674,6 +674,31 @@ A refused key, path or variable answers `400 project.environment.key_refused` wi
 For `environment set`, every code of `binding apply` applies.
 An absent project answers `404 project.project.not_found`.
 
+### The repair by env@1
+
+The agent `env@1` repairs a failed environment. A human enables it with `kanthord agent enablement put env@1`. The enablement takes a credential with the holder `server`. Without an enabled `env@1`, a failure stays for the human.
+
+The Onboarding component starts one session after a failed proof. The start follows a run that writes a failed proof file, or an execution that reports an environment failure. A session starts only when each condition holds:
+
+- The target is `image`.
+- The source is `detected`, `universal` or `none`. The source `stored` qualifies only when the last write of the stored environment came from a session of `env@1`. A binding-set write from another caller clears that mark.
+- No session of the group runs, and the failed run did not run for a session.
+- `env@1` is enabled.
+- `repairs` of the proof file of the current digest is below 3.
+
+The component increments `repairs` before it starts the session. One digest gets at most 3 sessions. A session has at most 5 attempts and at most 64 tool calls. The server stop aborts each session.
+
+A session has two tools:
+
+- `probe` runs one read-only command in a throwaway container of the last image, or of its base image. The command must match the allowlist: `cat /etc/os-release`, `uname -a`, `command -v <word>`, `<word> --version`, `ls <path>`, `dpkg -l` and `apk info`.
+- `environment_write` stores an environment document. Each call is one attempt. The write is a binding revision under the service identity of the Project Service. The answer holds `outcome`, `class`, `tail`, `checks` and `attempts_left` of the proof of the new digest.
+
+`attempt_limit`, `tool_limit` and `write_refused` are reasons of a tool answer to the session. They are no codes of an operation, so the error table holds none of them.
+
+The environment state shows the repair with two fields. `repairs` is the number of sessions that the proof file of the digest records. `repairing` is `true` while a session of the group runs.
+
+A session that fails logs `project.onboarding.session_failed` with the binding and the digest. The error does not stop the server.
+
 ### Environment secrets
 
 An environment secret is one custody credential of the platform `environment_secret`. Its secret has the shape `api_key`: `{ "key": "<text>" }`. The platform takes no metadata and has no probe. A create or an update with metadata other than `null` answers `400`. Verify and check answer `400 credential.check.unsupported`.

@@ -2,6 +2,7 @@ import { addAbortListener } from "node:events";
 import assert from "node:assert/strict";
 import { join, dirname } from "node:path";
 import { randomBytes } from "node:crypto";
+import { homedir } from "node:os";
 import { deriveClientSecret } from "../../gateway/auth/jwt.ts";
 import {
   directories,
@@ -91,6 +92,8 @@ import {
   collectInventories,
 } from "../../gateway/index.ts";
 import {
+  EnvironmentAgent,
+  type EnvironmentModelRuntimeFactory,
   ProjectService,
   ENVIRONMENT_SECRET_PLATFORMS,
   enforceBindingPlacements,
@@ -114,6 +117,7 @@ import { installPiTools } from "../../agent/pi-tools.ts";
 import { ThreadDriver } from "./thread-driver.ts";
 import { ContainerDriver } from "./container-driver.ts";
 import { EnvironmentImages } from "./environment-image.ts";
+import { EnvironmentProbe } from "./environment-probe.ts";
 import { HostProofs } from "./environment-host-proof.ts";
 import type { EnvironmentRuntime } from "../../project/environment-state.ts";
 import { COMMAND_LIMIT_MS } from "../../worker/unit/budget.ts";
@@ -226,6 +230,7 @@ export function composeServices(options: {
   bindings?: ProjectBindings;
   registrations?: WorkerRegistrations;
   workbenchModelRuntimeFactory?: WorkbenchModelRuntimeFactory;
+  environmentModelRuntimeFactory?: EnvironmentModelRuntimeFactory;
   inventoryOverrides?: Partial<ResourceInventories>;
   intake?: { pendingEventLimit?: number; pollIntervalMs?: number };
   serverSlotDriver?: SlotDriver;
@@ -834,6 +839,26 @@ export function composeServices(options: {
         project.environmentsMixed(tx, projectId, identities),
     },
   });
+  const projectIdentity = mintServiceIdentity(PROJECT_SERVICE_NAME);
+  const environmentAgent = new EnvironmentAgent({
+    store: options.store,
+    stateDirectory: options.stateDirectory,
+    hostHome: homedir(),
+    identity: projectIdentity,
+    agentView: (tx, name) =>
+      agent.agentView(tx, name, null, {
+        holders: [SERVER_HOLDER],
+        claimant: SERVER_HOLDER,
+      }),
+    serverAgentCredentials: (input) => custody.serverAgentCredentials(input),
+    composePrompt: (name, context) => agent.composePrompt(name, context),
+    templates: (context) => agent.promptTemplates(context),
+    exportRepository: (bindingId, commit, directory, context) =>
+      project.exportRepository(bindingId, commit, directory, context),
+    credentialMetadata: (tx, name) =>
+      custody.credentialMetadata(tx, name, SERVER_HOLDER),
+    modelRuntimeFactory: options.environmentModelRuntimeFactory,
+  });
   const project: ProjectService = new ProjectService({
     config: options.config.project,
     operationalStore: options.store,
@@ -855,7 +880,7 @@ export function composeServices(options: {
     repositoryFiles: options.repositoryFiles ?? repositoryFiles,
     verifyRepositoryCredential: (name, context) =>
       repositoryCredentials.verifyCredential(name, context),
-    identity: mintServiceIdentity(PROJECT_SERVICE_NAME),
+    identity: projectIdentity,
     credentialRecords: custody,
     custody: {
       authorizeOperation: (...args) => custody.authorizeOperation(...args),
@@ -868,6 +893,16 @@ export function composeServices(options: {
     workerAgentView: (tx, w, a, entry, scope) =>
       worker.workerAgentView(tx, w, a, entry, scope),
     environmentRuntime,
+    environmentAgent,
+    environmentProbe: {
+      run: (input) =>
+        new EnvironmentProbe(
+          containerHost,
+          environmentImages.runtimeName,
+          containerOwner(options.config.master_key),
+          options.config.project.environment_memory_mb,
+        ).run(input),
+    },
     telemetry: {
       span: (trace, contribution) =>
         tracking.serverTraceSpan(trace, PROJECT_PRODUCER, contribution),

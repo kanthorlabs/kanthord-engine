@@ -8,10 +8,7 @@ import { createIdentity } from "../kernel/identity.ts";
 import { canonicalJSON } from "../kernel/json.ts";
 import type { CallerContext } from "../kernel/operation.ts";
 import type { Store } from "../kernel/store.ts";
-import type {
-  ProbeAnswer,
-  ProbeCommand,
-} from "./environment-probe-contract.ts";
+import type { ProbeCommand } from "./environment-probe-contract.ts";
 import type { ProjectEnvironments } from "./environment.ts";
 
 const WORD = /^[A-Za-z0-9][A-Za-z0-9._+-]{0,63}$/;
@@ -49,7 +46,7 @@ export type WriteAnswer =
   { written: true } | { written: false; reason: string };
 
 export interface EnvironmentAgentPort {
-  probe(command: ProbeCommand, signal: AbortSignal): Promise<ProbeAnswer>;
+  probe(command: ProbeCommand, signal: AbortSignal): Promise<unknown>;
   write(environment: unknown, signal: AbortSignal): Promise<unknown>;
 }
 
