@@ -508,10 +508,6 @@ HTTP integration tests compare the generated files with the published assets.
 - Keep no backward compatibility. The project has no deployment yet.
 - Name a constant for its domain role, never for the English word of its value,
   for example `PROBE_CALLS_PER_CHECK`, not `ONE_CALL`.
-- Edit `.agents/plan/*` only in a main session or by hand. `scripts/lane-check.sh`
-  denies it to every lane role.
-- Never plan a story whose change edits a plan document. No lane role can
-  execute it, and a `Paths:` line cannot authorize it.
 - Expect other sessions to write sibling plans at the same time. Before you ask
   for a ruling on a shared token, list `.agents/plan/` again and search the
   sibling plans for the token. Name each sibling that already made the choice.
