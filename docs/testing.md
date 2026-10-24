@@ -17,4 +17,4 @@ the machine `token:` and `client_secret:` lines from a PTY. It checks that the
 client secret has the canonical 32-byte base64 form. The sentinel sweep checks
 every evidence file for both values.
 
-Source: [acceptance runner](../scripts/e2e-jwt.py). General validation commands and documentation checks are in [AGENTS.md](../AGENTS.md).
+Source: [acceptance runner](../scripts/e2e-jwt.py). Validation commands are in [AGENTS.md](../AGENTS.md).

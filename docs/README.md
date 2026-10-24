@@ -4,16 +4,12 @@ This directory contains implementation details and technical notes for engine co
 
 The public documentation lives in the kanthord repository and is published at [kanthord.kanthorlabs.com](https://kanthord.kanthorlabs.com). Internal brainstorming belongs to that repository's `docs/brainstorm/`, not here. Discussion material is input, not proof of implemented behavior.
 
-## Project structure
-
-The [project map](../AGENTS.md#project-structure) lists the directories, the services, and the files of the engine.
-
 ## Internal notes
 
 - [Engine CLI specification](cli/README.md): target commands, arguments, and
   parameters, with one document per service and one for shared commands.
 - [JWT acceptance checks](testing.md): repeatable contributor validation.
-- [Agent instructions](../AGENTS.md): project map and routine contributor tasks.
+- [Agent instructions](../AGENTS.md): layout, validation, code rules and plan rules.
 
 ## Authoring policy
 
