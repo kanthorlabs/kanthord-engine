@@ -5153,6 +5153,7 @@ function instructionFixture(
     address?: string;
     readFails?: boolean;
     hang?: boolean;
+    readHang?: boolean;
   } = {},
   overrides: Partial<Dependencies> = {},
 ) {
@@ -5173,6 +5174,7 @@ function instructionFixture(
   }> = [];
   const objectCalls: string[][] = [];
   const started = Promise.withResolvers<void>();
+  const readStarted = Promise.withResolvers<void>();
   const f = fixture(t, {
     repositoryConnector: {
       gitLsRemote: unexpected,
@@ -5196,11 +5198,16 @@ function instructionFixture(
         commit,
         paths,
         maxBytes,
-        _context,
+        context,
         timeout,
         ssh,
       ) {
         readCalls.push({ address, commit, paths, maxBytes, timeout, ssh });
+        if (behavior.readHang) {
+          readStarted.resolve();
+          await cancelled(context.signal);
+          throw context.signal.reason;
+        }
         if (behavior.readFails) throw new Error("fetch failed");
         return paths.map((path, index) => {
           const text =
@@ -5255,7 +5262,15 @@ function instructionFixture(
     assert.ok(bindingId);
     return { project_id: p.id, binding_id: bindingId };
   });
-  return { f, saved, resolveCalls, readCalls, objectCalls, started };
+  return {
+    f,
+    saved,
+    resolveCalls,
+    readCalls,
+    objectCalls,
+    started,
+    readStarted,
+  };
 }
 
 function refusesInstructionFiles(
@@ -5977,6 +5992,30 @@ test("binding.environment.get refuses a read that exceeds the read deadline, not
     REPOSITORY_FILES_READ_TIMEOUT_MS - BINDING_CHECK_TIMEOUT_MS,
   );
   await refusal;
+});
+
+test("binding.environment.get refuses a detection read that exceeds the read deadline with ssh_unreachable", async (t) => {
+  const { f, saved, readStarted } = instructionFixture(t, {
+    readHang: true,
+    placement: WorkerPlacement.Container,
+  });
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"], now: Date.now() });
+  const refusal = refusesInstructionFiles(
+    f.invokeAsync("binding.environment.get", saved),
+    SSH_FAILURE_STATUS,
+    ProjectErrorCode.RepositorySshUnreachable,
+  );
+  await readStarted.promise;
+  t.mock.timers.tick(REPOSITORY_FILES_READ_TIMEOUT_MS);
+  await refusal;
+});
+
+test("the instruction files route and the environment route outlast the read deadline", () => {
+  for (const operation of [
+    projectOperations["binding.instruction_files.get"],
+    projectOperations["binding.environment.get"],
+  ])
+    assert.ok(operation.timeoutMs > REPOSITORY_FILES_READ_TIMEOUT_MS);
 });
 
 test("binding.environment.get answers the universal source at the image target with no manifest", async (t) => {

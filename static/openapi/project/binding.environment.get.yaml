@@ -7,7 +7,7 @@ pathItem:
     description: "Read the environment of one repository binding with its source:
       stored, repository, detected, universal or none."
     x-access-policy: human
-    x-timeout-ms: 30000
+    x-timeout-ms: 35000
     x-mutation: false
     x-kanthord-lifetime: unary
     security:

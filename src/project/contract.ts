@@ -48,6 +48,7 @@ import {
 export const BINDING_CHECK_TIMEOUT_MS = 10000;
 export const BINDING_VERIFY_TIMEOUT_MS = 30000;
 export const REPOSITORY_FILES_READ_TIMEOUT_MS = 30000;
+export const REPOSITORY_FILES_ROUTE_TIMEOUT_MS = 35000;
 export const bindingVerifyAnswerEntrySchema = z.strictObject({
   status: z.enum([
     ResourceStatus.Healthy,
@@ -1016,6 +1017,7 @@ export const projectOperations = {
     id: "project.binding.instruction_files.get",
     method: HttpMethod.Get,
     path: "/api/project/:project_id/binding/:binding_id/instruction_files",
+    timeoutMs: REPOSITORY_FILES_ROUTE_TIMEOUT_MS,
     input: readInput(bindingParams, emptyFields),
     output: z.strictObject({
       commit: z.string().min(1),
@@ -1040,7 +1042,7 @@ export const projectOperations = {
     id: "project.binding.environment.get",
     method: HttpMethod.Get,
     path: "/api/project/:project_id/binding/:binding_id/environment",
-    timeoutMs: BINDING_VERIFY_TIMEOUT_MS,
+    timeoutMs: REPOSITORY_FILES_ROUTE_TIMEOUT_MS,
     input: readInput(bindingParams, emptyFields),
     output: environmentAnswerSchema,
     description:

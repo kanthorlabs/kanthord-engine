@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import { posix } from "node:path";
 import type { ServiceIdentity } from "../kernel/caller.ts";
-import { CancellationContext, type Context } from "../kernel/context.ts";
+import {
+  CancellationContext,
+  DeadlineExceeded,
+  type Context,
+} from "../kernel/context.ts";
 import {
   DEVCONTAINER_DIRECTORY,
   DEVCONTAINER_FILE,
@@ -102,7 +106,8 @@ function inPathOrder(files: RepositoryFile[]): RepositoryFile[] {
 }
 
 function refuseUnreadable(context: Context, error: unknown): never {
-  context.signal.throwIfAborted();
+  if (!(context.signal.reason instanceof DeadlineExceeded))
+    context.signal.throwIfAborted();
   throw new OperationError(
     SSH_UNREACHABLE_STATUS,
     ProjectErrorCode.RepositorySshUnreachable,
@@ -293,6 +298,23 @@ export class ProjectEnvironments {
   }
 
   private async resolveUnstored(
+    bindingId: string,
+    config: RepositoryConfig,
+    target: EnvironmentTarget,
+    context: Context,
+  ): Promise<GroupResolution> {
+    const deadline = new CancellationContext(
+      context,
+      Date.now() + REPOSITORY_FILES_READ_TIMEOUT_MS,
+    );
+    try {
+      return await this.resolveWithin(bindingId, config, target, deadline);
+    } finally {
+      deadline.cancel();
+    }
+  }
+
+  private async resolveWithin(
     bindingId: string,
     config: RepositoryConfig,
     target: EnvironmentTarget,
