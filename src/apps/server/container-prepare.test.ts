@@ -1,11 +1,17 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import { test, type TestContext } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 import { Writable } from "node:stream";
 import { MessageChannel } from "node:worker_threads";
-import { temporary } from "../../kernel/test-support.ts";
+import { temporary, temporaryDirectory } from "../../kernel/test-support.ts";
 import { ContainerRuntime, PoolPlacement } from "../../worker/contract.ts";
 import { SlotControl } from "../worker/thread-data.ts";
 import {
@@ -207,7 +213,7 @@ test("a launch whose environment image fails starts no container and exits with 
 
 const SETTLE_MS = 50;
 const POLL_MS = 20;
-const POLL_ROUNDS = 250;
+const POLL_ROUNDS = 1000;
 const READY_TAG = "localhost/kanthord-env/repository_app:ready";
 
 function imageGate() {
@@ -224,20 +230,32 @@ function imageGate() {
   return { answer, asked: asked.promise, imageFor };
 }
 
-function recordingRuntime(t: TestContext) {
-  const directory = temporary(t);
-  const bin = join(directory, "bin");
-  const argumentsFile = join(directory, "arguments");
-  const releaseFile = join(directory, "release");
+let sharedBin: string | null = null;
+
+function recordingBin(): string {
+  if (sharedBin !== null) return sharedBin;
+  const root = temporaryDirectory();
+  const bin = join(root, "bin");
   mkdirSync(bin);
   writeFileSync(
     join(bin, ContainerRuntime.Podman),
     `#!/bin/sh
-printf '%s\\n' "$@" > "${argumentsFile}"
-n=0; while [ ! -e "${releaseFile}" ] && [ $n -lt 500 ]; do sleep 0.02; n=$((n+1)); done
+printf '%s\\n' "$@" > "$KANTHORD_TEST_ARGUMENTS.partial"
+mv "$KANTHORD_TEST_ARGUMENTS.partial" "$KANTHORD_TEST_ARGUMENTS"
+n=0; while [ ! -e "$KANTHORD_TEST_RELEASE" ] && [ $n -lt 500 ]; do sleep 0.02; n=$((n+1)); done
 `,
     { mode: 0o755 },
   );
+  process.on("exit", () => rmSync(root, { recursive: true, force: true }));
+  sharedBin = bin;
+  return bin;
+}
+
+function recordingRuntime(t: TestContext) {
+  const directory = temporary(t);
+  const argumentsFile = join(directory, "arguments");
+  const releaseFile = join(directory, "release");
+  const bin = recordingBin();
   const recorded = async (): Promise<string[]> => {
     for (let round = 0; round < POLL_ROUNDS; round++) {
       if (existsSync(argumentsFile))
@@ -247,7 +265,11 @@ n=0; while [ ! -e "${releaseFile}" ] && [ $n -lt 500 ]; do sleep 0.02; n=$((n+1)
     assert.fail("The runtime did not receive the run command.");
   };
   return {
-    environment: { PATH: `${bin}:${process.env.PATH}` },
+    environment: {
+      PATH: `${bin}:${process.env.PATH}`,
+      KANTHORD_TEST_ARGUMENTS: argumentsFile,
+      KANTHORD_TEST_RELEASE: releaseFile,
+    },
     spawned: () => existsSync(argumentsFile),
     recorded,
     release: () => writeFileSync(releaseFile, ""),
@@ -314,12 +336,16 @@ test("a resolved image answer starts the container on that image and imageOf ans
 
 test("the image wait logs no line", async (t) => {
   const writes: string[] = [];
-  for (const stream of [process.stdout, process.stderr])
-    t.mock.method(stream, "write", (chunk: unknown) => {
-      if (chunk instanceof Buffer) return true;
+  for (const stream of [process.stdout, process.stderr]) {
+    const original = stream.write.bind(stream) as (
+      ...args: unknown[]
+    ) => boolean;
+    t.mock.method(stream, "write", (chunk: unknown, ...rest: unknown[]) => {
+      if (chunk instanceof Buffer) return original(chunk, ...rest);
       writes.push(String(chunk));
       return true;
     });
+  }
   const gate = imageGate();
   const f = hostWith(true, () => ok(), gate.imageFor);
   const instance = f.driver.launch(launchOf());
