@@ -3,7 +3,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { access } from "node:fs/promises";
 import { constants as osConstants } from "node:os";
 import type { BashOperations } from "@earendil-works/pi-coding-agent";
-import { killProcessTree } from "../kernel/process-group.ts";
+import { killChildTree } from "../kernel/process-group.ts";
 
 const MILLISECONDS_PER_SECOND = 1000;
 const TIMER_LIMIT_MS = 2_147_483_647;
@@ -64,7 +64,11 @@ async function runBash(
     if (killed || child.pid === undefined) return;
     killed = true;
     try {
-      killProcessTree(child.pid);
+      killChildTree({
+        pid: child.pid,
+        exitCode: child.exitCode,
+        signalCode: child.signalCode,
+      });
     } catch (error) {
       killFailure = error;
     }
@@ -72,6 +76,7 @@ async function runBash(
   const timer =
     timeoutMs === undefined ? undefined : setTimeout(kill, timeoutMs);
   signal?.addEventListener("abort", kill, { once: true });
+  if (signal?.aborted) kill();
   child.stdout?.on("data", onData);
   child.stderr?.on("data", onData);
   try {

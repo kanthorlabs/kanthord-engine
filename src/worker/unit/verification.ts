@@ -2,7 +2,7 @@ import { addAbortListener } from "node:events";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import type { Context } from "../../kernel/context.ts";
-import { killProcessTree } from "../../kernel/process-group.ts";
+import { killChildTree } from "../../kernel/process-group.ts";
 import { redactReason } from "../../kernel/probe.ts";
 import { EndReason, ExecutionStop } from "./execution-run.ts";
 import { EnvironmentFailure } from "../../scheduler/contract.ts";
@@ -156,7 +156,11 @@ function runCommand(
     const kill = () => {
       if (!child.pid) return;
       try {
-        killProcessTree(child.pid);
+        killChildTree({
+          pid: child.pid,
+          exitCode: child.exitCode,
+          signalCode: child.signalCode,
+        });
       } catch (error) {
         reject(error);
       }
