@@ -73,8 +73,7 @@ const FAILURE_METHOD = "failure";
 const NO_FAILURES = 0;
 const ONE_FAILURE = 1;
 const TWO_FAILURES = 2;
-const FOUR_FAILURES = 4;
-const FIVE_FAILURES = 5;
+const THREE_FAILURES = 3;
 const FIRST_STRIKE = 1;
 
 function stopOf(reason: ReleaseStop["reason"], code: string | null) {
@@ -231,32 +230,15 @@ test("a first advancing provider stop counts no failure", async (t) => {
   assert.equal(h.failureCount(), NO_FAILURES);
 });
 
-test("an environment stop counts its own streak and not the earlier code failures", async (t) => {
+test("three consecutive environment stops set no hold and never pause the node", async (t) => {
   const h = releaseHarness(t);
   t.mock.method(h.service, "wake", () => {});
   t.mock.method(Date, "now", () => FIXTURE_NOW);
-  h.prior(stopOf(ExecutionStopReason.JudgementInvalid, null));
-  h.prior(
-    stopOf(
-      ExecutionStopReason.EnvironmentFailed,
-      EnvironmentFailure.SetupFailed,
-    ),
-  );
-  await h.release(
-    stopOf(
-      ExecutionStopReason.EnvironmentFailed,
-      EnvironmentFailure.CommandAbsent,
-    ),
-  );
-  assert.equal(h.failureCount(), TWO_FAILURES);
-});
-
-test("five consecutive environment stops count five, so the backoff grows and the limit pauses the node", async (t) => {
-  const h = releaseHarness(t);
-  t.mock.method(h.service, "wake", () => {});
-  t.mock.method(Date, "now", () => FIXTURE_NOW);
-  h.prior(stopOf(ExecutionStopReason.NoProgress, null));
-  for (let index = 0; index < FOUR_FAILURES; index += 1)
+  h.dependencies.transitions.failure = (tx, nodeId, count) => {
+    h.calls.push({ method: FAILURE_METHOD, arguments: [tx, nodeId, count] });
+    h.service.insert(tx, nodeId, h.row.project_id, 0);
+  };
+  for (let index = 0; index < TWO_FAILURES; index += 1)
     h.prior(
       stopOf(
         ExecutionStopReason.EnvironmentFailed,
@@ -269,20 +251,28 @@ test("five consecutive environment stops count five, so the backoff grows and th
       EnvironmentFailure.SetupFailed,
     ),
   );
-  assert.equal(h.failureCount(), FIVE_FAILURES);
+  assert.equal(h.failureCount(), NO_FAILURES);
+  assert.deepEqual(
+    h.store.database
+      .prepare("SELECT node_id, available_at FROM scheduler_job")
+      .all()
+      .map((job) => ({ ...job })),
+    [{ node_id: h.row.node_id, available_at: null }],
+  );
 });
 
-test("a code failure after an environment streak does not count the environment stops", async (t) => {
+test("environment stops between two code failures change no count of the other failures", async (t) => {
   const h = releaseHarness(t);
   t.mock.method(h.service, "wake", () => {});
   t.mock.method(Date, "now", () => FIXTURE_NOW);
   h.prior(stopOf(ExecutionStopReason.JudgementInvalid, null));
-  h.prior(
-    stopOf(
-      ExecutionStopReason.EnvironmentFailed,
-      EnvironmentFailure.SetupFailed,
-    ),
-  );
+  for (let index = 0; index < THREE_FAILURES; index += 1)
+    h.prior(
+      stopOf(
+        ExecutionStopReason.EnvironmentFailed,
+        EnvironmentFailure.SetupFailed,
+      ),
+    );
   await h.release(stopOf(ExecutionStopReason.NoProgress, null));
   assert.equal(h.failureCount(), TWO_FAILURES);
 });

@@ -557,3 +557,125 @@ test("a pruned registration that is no longer live holds no place in the order",
   );
   assert.equal(h.claim().outcome, ClaimOutcome.Claimed);
 });
+
+function jobRows(h: ReturnType<typeof claimHarness>) {
+  return h.store.transaction((tx) =>
+    tx.database.prepare("SELECT * FROM scheduler_job ORDER BY node_id").all(),
+  );
+}
+
+test("the claim walk skips a job of a node whose repositories are not claimable and leaves its rows unchanged", (t) => {
+  const h = claimHarness(t);
+  const blocked = "repository:github:acme/blocked";
+  const open = "repository:github:acme/open";
+  const blockedNode = createIdentity("node");
+  const openNode = createIdentity("node");
+  h.store.transaction((tx) => {
+    h.service.insert(tx, blockedNode, h.row.project_id, 2);
+    h.service.insert(tx, openNode, h.row.project_id, 1);
+  });
+  const facts = new Map([
+    [
+      blockedNode,
+      { intent: ClaimIntent.Implement, tags: [], repositories: [blocked] },
+    ],
+    [
+      openNode,
+      { intent: ClaimIntent.Implement, tags: [], repositories: [open] },
+    ],
+  ]);
+  h.dependencies.facts.claimFacts = (_tx, nodeId) => facts.get(nodeId) ?? null;
+  h.dependencies.environments.environmentsClaimable = (_projectId, ids) =>
+    !ids.includes(blocked);
+  const blockedBefore = h.store.transaction((tx) =>
+    tx.database
+      .prepare("SELECT * FROM scheduler_job WHERE node_id = ?")
+      .get(blockedNode),
+  );
+  const result = h.claim();
+  assert.equal(result.outcome, ClaimOutcome.Claimed);
+  assert.equal(result.row!.node_id, openNode);
+  assert.deepEqual(
+    h.calls
+      .filter((call) => call.method === CLAIM_METHOD)
+      .map((call) => call.arguments[0]),
+    [openNode],
+  );
+  const blockedAfter = h.store.transaction((tx) =>
+    tx.database
+      .prepare("SELECT * FROM scheduler_job WHERE node_id = ?")
+      .get(blockedNode),
+  );
+  assert.deepEqual(blockedAfter, blockedBefore);
+  assert.equal(blockedAfter!.available_at, null);
+  assert.equal(h.claim().outcome, ClaimOutcome.Running);
+  assert.equal(jobRows(h).length, ONE_CALL);
+});
+
+test("the claim answers no work while every node has a repository that is not claimable", (t) => {
+  const h = claimHarness(t);
+  h.store.transaction((tx) =>
+    h.service.insert(tx, h.row.node_id, h.row.project_id, 0),
+  );
+  h.dependencies.environments.environmentsClaimable = () => false;
+  const result = h.claim();
+  assert.equal(result.outcome, ClaimOutcome.None);
+  assert.equal(result.row, null);
+  assert.equal(jobRows(h).length, ONE_CALL);
+  assert.deepEqual(
+    h.calls.filter((call) => call.method === CLAIM_METHOD),
+    [],
+  );
+});
+
+test("the environment gate receives the project id and the repositories of the node", (t) => {
+  const h = claimHarness(t);
+  const api = "repository:github:acme/api";
+  const web = "repository:github:acme/web";
+  h.store.transaction((tx) =>
+    h.service.insert(tx, h.row.node_id, h.row.project_id, 0),
+  );
+  h.dependencies.facts.claimFacts = () => ({
+    intent: ClaimIntent.Implement,
+    tags: [],
+    repositories: [api, web],
+  });
+  const asked: { projectId: string; ids: readonly string[] }[] = [];
+  h.dependencies.environments.environmentsClaimable = (projectId, ids) => {
+    asked.push({ projectId, ids });
+    return true;
+  };
+  assert.equal(h.claim().outcome, ClaimOutcome.Claimed);
+  assert.deepEqual(asked, [{ projectId: h.row.project_id, ids: [api, web] }]);
+});
+
+test("a node with no repository binding is claimed with an empty identity list", (t) => {
+  const h = claimHarness(t);
+  h.store.transaction((tx) =>
+    h.service.insert(tx, h.row.node_id, h.row.project_id, 0),
+  );
+  const asked: (readonly string[])[] = [];
+  h.dependencies.environments.environmentsClaimable = (_projectId, ids) => {
+    asked.push(ids);
+    return true;
+  };
+  assert.equal(h.claim().outcome, ClaimOutcome.Claimed);
+  assert.deepEqual(asked, [[]]);
+});
+
+test("the gate holds for a claimant of a server binding with no environment", (t) => {
+  const h = claimHarness(t);
+  h.binding.environment = null;
+  h.store.transaction((tx) =>
+    h.service.insert(tx, h.row.node_id, h.row.project_id, 0),
+  );
+  h.dependencies.facts.claimFacts = () => ({
+    intent: ClaimIntent.Implement,
+    tags: [],
+    repositories: ["repository:github:acme/api"],
+  });
+  h.dependencies.environments.environmentsClaimable = () => false;
+  assert.equal(h.claim().outcome, ClaimOutcome.None);
+  h.dependencies.environments.environmentsClaimable = () => true;
+  assert.equal(h.claim().outcome, ClaimOutcome.Claimed);
+});

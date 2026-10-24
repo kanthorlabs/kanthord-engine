@@ -17,7 +17,11 @@ import {
   ResourceStatus,
 } from "../kernel/health.ts";
 import { HealthStatus } from "../kernel/service.ts";
-import { OperationRegistry, type CallerContext } from "../kernel/operation.ts";
+import {
+  AccessPolicy,
+  OperationRegistry,
+  type CallerContext,
+} from "../kernel/operation.ts";
 import {
   IN_MEMORY_DATABASE,
   Store,
@@ -83,6 +87,8 @@ import { Onboarding } from "./onboarding.ts";
 import {
   EnvironmentFailureClass,
   EnvironmentStatus,
+  environmentStateSchema,
+  type EnvironmentRuntime,
 } from "./environment-state.ts";
 import {
   DEVCONTAINER_FILE,
@@ -159,17 +165,23 @@ const CORE_OPERATIONS = [
   "project.binding.instruction_files.get",
   "project.binding.environment.get",
   "project.binding.environment.set",
+  "project.binding.environment.rebuild",
+  "project.environment.list",
   "project.binding.check",
 ];
 const CURSOR_ENCODING = "base64url";
 type OperationKey = Exclude<
   keyof typeof projectOperations,
-  "bindingSet.write" | "binding.check" | "binding.environment.set"
+  | "bindingSet.write"
+  | "binding.check"
+  | "binding.environment.set"
+  | "binding.environment.rebuild"
 >;
 type AsyncOperationKey =
   | "binding.verify"
   | "binding.instruction_files.get"
-  | "binding.environment.get";
+  | "binding.environment.get"
+  | "binding.environment.rebuild";
 
 function unexpected(): never {
   throw new Error("Unexpected peer collaboration call.");
@@ -5720,8 +5732,9 @@ const OTHER_ADDRESS = "git@github.com:owner/other.git";
 function twoRepositories(
   t: TestContext,
   behavior: Parameters<typeof instructionFixture>[1],
+  overrides: Partial<Dependencies> = {},
 ) {
-  const fixed = instructionFixture(t, behavior, WRITABLE);
+  const fixed = instructionFixture(t, behavior, { ...WRITABLE, ...overrides });
   const other = fixed.f.store.transaction((tx) => {
     const version = requireProject(
       tx,
@@ -5997,4 +6010,235 @@ test("Project answers the environment methods through the onboarding component",
   const rebuilt = await f.project.rebuildEnvironment(projectId, bindingId);
   assert.equal(rebuilt.binding_id, bindingId);
   assert.equal(rebuilt.status, EnvironmentStatus.None);
+});
+
+const ENVIRONMENT_LIST = projectOperations["environment.list"];
+const ENVIRONMENT_REBUILD = projectOperations["binding.environment.rebuild"];
+const BASE_IMAGE_ID = "sha256:base";
+
+function loggedRuntime(overrides: Partial<EnvironmentRuntime> = {}): {
+  runtime: EnvironmentRuntime;
+  calls: string[];
+} {
+  const calls: string[] = [];
+  const members = { ...inertEnvironmentRuntime(), ...overrides };
+  const runtime = Object.fromEntries(
+    Object.entries(members).map(([name, member]) => [
+      name,
+      member instanceof Function
+        ? (...args: unknown[]) => {
+            calls.push(name);
+            return (member as (...values: unknown[]) => unknown)(...args);
+          }
+        : member,
+    ]),
+  ) as unknown as EnvironmentRuntime;
+  return { runtime, calls };
+}
+
+function untilAborted(signal: AbortSignal): Promise<never> {
+  return new Promise((_resolve, reject) =>
+    signal.addEventListener("abort", () => reject(signal.reason), {
+      once: true,
+    }),
+  );
+}
+
+function imageGroupFixture(t: TestContext, provedTag: boolean) {
+  const state = { proved: provedTag };
+  const logged = loggedRuntime({
+    imageId: async () => BASE_IMAGE_ID,
+    imageExists: async () => state.proved,
+    removeTags: async () => {
+      state.proved = false;
+    },
+    build: async (_input, signal) => untilAborted(signal),
+  });
+  const fixed = instructionFixture(
+    t,
+    { texts: [DEVCONTAINER_TEXT] },
+    { ...WRITABLE, environmentRuntime: logged.runtime },
+  );
+  const written = fixed.f.store.transaction(
+    (tx) =>
+      persistBindings(tx, fixed.saved.project_id, {
+        [REPOSITORY_NAME]: repositoryBinding(),
+        [WORKER_NAME]: containerBinding(),
+      }).bindings,
+  );
+  const repository = written[REPOSITORY_NAME];
+  assert.ok(repository);
+  const params = {
+    project_id: fixed.saved.project_id,
+    binding_id: repository.id,
+  };
+  fixed.f.project.environmentClaimed(
+    params.project_id,
+    repository.resource_identity,
+  );
+  return { ...fixed, ...logged, params, written };
+}
+
+test("environment.list answers the states in binding name order and reads nothing", async (t) => {
+  const logged = loggedRuntime();
+  const { f, saved, other, readCalls, resolveCalls } = twoRepositories(
+    t,
+    {},
+    { environmentRuntime: logged.runtime },
+  );
+  for (const binding of [saved, other])
+    f.project.environmentClaimed(saved.project_id, identityOf(f, binding));
+  await untilTrue(
+    () => f.project.environmentStates(saved.project_id).length === TWO_CALLS,
+  );
+  const runtimeCalls = logged.calls.length;
+  const reads = readCalls.length;
+  const resolves = resolveCalls.length;
+  const answer = f.invoke("environment.list", null, {
+    project_id: saved.project_id,
+  });
+  assert.deepEqual(
+    answer.items.map((item) => item.binding_name),
+    [OTHER_REPOSITORY_NAME, REPOSITORY_NAME],
+  );
+  for (const item of answer.items) environmentStateSchema.parse(item);
+  assert.deepEqual(answer.items, f.project.environmentStates(saved.project_id));
+  assert.equal(logged.calls.length, runtimeCalls);
+  assert.equal(readCalls.length, reads);
+  assert.equal(resolveCalls.length, resolves);
+});
+
+test("environment.list answers 404 for an unknown project", (t) => {
+  const f = fixture(t);
+  refuses(
+    () =>
+      f.invoke("environment.list", null, {
+        project_id: "project_01ARZ3NDEKTSV4RRFFQ69G5FAV",
+      }),
+    HttpStatus.NotFound,
+    ProjectErrorCode.ProjectNotFound,
+  );
+});
+
+test("binding.environment.rebuild answers the state of the group with the status of the new run", async (t) => {
+  const { f, params, calls } = imageGroupFixture(t, true);
+  await untilTrue(
+    () =>
+      f.project.environmentStates(params.project_id)[NO_ITEMS]?.status ===
+      EnvironmentStatus.Ready,
+  );
+  const state = await f.invokeAsync("binding.environment.rebuild", params);
+  assert.equal(state.binding_id, params.binding_id);
+  assert.equal(state.binding_name, REPOSITORY_NAME);
+  assert.ok(
+    state.status === EnvironmentStatus.Building ||
+      state.status === EnvironmentStatus.Proving,
+  );
+  assert.ok(calls.includes("removeTags"));
+});
+
+test("binding.environment.rebuild answers 409 during an active run of the group", async (t) => {
+  const { f, params } = imageGroupFixture(t, false);
+  await untilTrue(
+    () =>
+      f.project.environmentStates(params.project_id)[NO_ITEMS]
+        ?.run_started_at !== null &&
+      f.project.environmentStates(params.project_id).length === ONE_CALL,
+  );
+  await refusesInstructionFiles(
+    f.invokeAsync("binding.environment.rebuild", params),
+    HttpStatus.Conflict,
+    ProjectErrorCode.EnvironmentRunActive,
+  );
+});
+
+test("binding.environment.rebuild answers 404 for an unknown, a foreign, a removed and a worker binding", async (t) => {
+  const { f, params, written } = imageGroupFixture(t, true);
+  const worker = written[WORKER_NAME];
+  assert.ok(worker);
+  const foreign = f.store.transaction((tx) => {
+    const project = insertProject(tx, OTHER_NAME);
+    return persistBindings(tx, project.id, {
+      [REPOSITORY_NAME]: repositoryBinding(),
+    }).bindings[REPOSITORY_NAME]!.id;
+  });
+  const removed = f.store.transaction((tx) => {
+    const project = insertProject(tx, RENAMED_NAME);
+    const id = persistBindings(tx, project.id, {
+      [REPOSITORY_NAME]: repositoryBinding(),
+    }).bindings[REPOSITORY_NAME]!.id;
+    persistBindings(tx, project.id, {});
+    return { project_id: project.id, binding_id: id };
+  });
+  for (const refused of [
+    { ...params, binding_id: "binding_01ARZ3NDEKTSV4RRFFQ69G5FAV" },
+    { ...params, binding_id: foreign },
+    removed,
+    { ...params, binding_id: worker.id },
+  ])
+    await refusesInstructionFiles(
+      f.invokeAsync("binding.environment.rebuild", refused),
+      HttpStatus.NotFound,
+      ProjectErrorCode.BindingNotFound,
+    );
+});
+
+test("both environment operations refuse a machine caller by their access policy", () => {
+  for (const operation of [ENVIRONMENT_LIST, ENVIRONMENT_REBUILD]) {
+    assert.equal(operation.access, AccessPolicy.Human);
+    assert.equal(operation.mutation, operation === ENVIRONMENT_REBUILD);
+  }
+});
+
+const REFUSED_KEY = "runArgs";
+
+test("binding.environment.set answers key_refused for a document with runArgs and invalid for a non-object or a wrong type", async (t) => {
+  const { f, saved } = instructionFixture(t, {}, WRITABLE);
+  await refusesInstructionFiles(
+    setEnvironment(f, saved, { image: "base", runArgs: ["--privileged"] }),
+    HttpStatus.BadRequest,
+    EnvironmentErrorCode.KeyRefused,
+    { key: REFUSED_KEY, reason: EnvironmentRefusalReason.KeyNotAllowed },
+  );
+  for (const invalid of [[], "image", 5, { image: 5 }])
+    await refusesInstructionFiles(
+      setEnvironment(f, saved, invalid),
+      HttpStatus.BadRequest,
+      EnvironmentErrorCode.Invalid,
+    );
+});
+
+test("binding.environment.set with null removes the key and the source returns to the repository file", async (t) => {
+  const { f, saved } = instructionFixture(
+    t,
+    { texts: [DEVCONTAINER_TEXT] },
+    WRITABLE,
+  );
+  f.project.cancelEnvironmentRuns();
+  const stored = (await setEnvironment(f, saved, STORED_ENVIRONMENT)).bindings[
+    REPOSITORY_NAME
+  ];
+  assert.ok(stored);
+  assert.equal(
+    (
+      await f.invokeAsync("binding.environment.get", {
+        ...saved,
+        binding_id: stored.id,
+      })
+    ).source,
+    EnvironmentSource.Stored,
+  );
+  const changes = f.bindingChanges.length;
+  const answer = await setEnvironment(f, saved, null);
+  const removed = answer.bindings[REPOSITORY_NAME];
+  assert.ok(removed);
+  assert.equal(removed.revision, REVISION_THREE);
+  assert.equal(Object.hasOwn(removed.config as object, "environment"), false);
+  assert.equal(f.bindingChanges.length, changes + ONE_CALL);
+  const read = await f.invokeAsync("binding.environment.get", {
+    ...saved,
+    binding_id: removed.id,
+  });
+  assert.equal(read.source, EnvironmentSource.Repository);
+  assert.equal(read.commit, INSTRUCTION_COMMIT);
 });

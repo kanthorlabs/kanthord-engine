@@ -74,6 +74,7 @@ export const EnvironmentFailure = {
 } as const;
 export type EnvironmentFailure =
   (typeof EnvironmentFailure)[keyof typeof EnvironmentFailure];
+export const environmentFailureSchema = z.enum(EnvironmentFailure);
 export const AdvancingProviderFailure = {
   RateLimited: ProviderFailure.RateLimited,
   QuotaExhausted: ProviderFailure.QuotaExhausted,
@@ -370,6 +371,19 @@ export interface MissionClaimFacts {
     revision: number;
     claims: readonly ClaimNodeState[];
   })[];
+}
+export interface EnvironmentGate {
+  environmentsClaimable(
+    projectId: string,
+    resourceIdentities: readonly string[],
+  ): boolean;
+  environmentFailed(input: {
+    project_id: string;
+    execution_id: string;
+    resource_identities: string[];
+    digests: Readonly<Record<string, string>>;
+    stop: { code: EnvironmentFailure; detail: string | null };
+  }): void;
 }
 export interface Claimant {
   declared_node_states: readonly string[];

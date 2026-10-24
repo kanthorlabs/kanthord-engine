@@ -53,6 +53,7 @@ import {
   type WorkerDeclarations,
   type ProjectPauses,
   type WorkerBindings,
+  type EnvironmentGate,
   type MissionClaimFacts,
   type TraceIdentity,
   type UnmatchedClaim,
@@ -140,6 +141,7 @@ export interface Dependencies {
   declarations: WorkerDeclarations;
   bindings: WorkerBindings;
   facts: MissionClaimFacts;
+  environments: EnvironmentGate;
   branches: MissionBranches;
   projects: ProjectPauses;
   agentChains: AgentChains;

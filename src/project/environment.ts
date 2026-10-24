@@ -6,11 +6,13 @@ import {
   DEVCONTAINER_DIRECTORY,
   DEVCONTAINER_FILE,
   environmentRefusal,
+  environmentSchema,
   parseEnvironmentText,
   type Environment,
 } from "../kernel/devcontainer.ts";
 import { Diagnostic, OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
+import { isObject } from "../kernel/values.ts";
 import type { CallerContext } from "../kernel/operation.ts";
 import type { Store } from "../kernel/store.ts";
 import { SshIdentitySubjectKind } from "../custody/contract.ts";
@@ -45,6 +47,7 @@ export const EnvironmentErrorCode = {
   KeyRefused: "project.environment.key_refused",
 } as const;
 const SSH_UNREACHABLE_STATUS = 422;
+const ENVIRONMENT_KEY = "environment";
 
 type RepositoryConfig = typeof repositoryConfigSchema._output;
 type BindingSetWrite = typeof bindingSetWriteInputSchema._output;
@@ -110,6 +113,40 @@ export function refuseEnvironment(environment: Environment | undefined): void {
       `The environment key ${refusal.key} is refused: ${refusal.reason}.`,
       { key: refusal.key, reason: refusal.reason },
     );
+}
+
+function invalidEnvironment(message: string): OperationError {
+  return new OperationError(
+    HttpStatus.BadRequest,
+    EnvironmentErrorCode.Invalid,
+    message,
+  );
+}
+
+function submittedEnvironment(value: unknown): Environment | null {
+  if (value === null) return null;
+  if (!isObject(value) || Array.isArray(value))
+    throw invalidEnvironment("The environment is not a JSON object.");
+  const parsed = environmentSchema.safeParse(value);
+  if (!parsed.success)
+    throw invalidEnvironment(
+      `The environment is invalid: ${parsed.error.issues
+        .map((issue) => `${issue.path.join(".")} ${issue.message}`)
+        .join("; ")}.`,
+    );
+  return parsed.data;
+}
+
+function withEnvironment(
+  config: object,
+  environment: Environment | null,
+): object {
+  const kept = Object.entries(config).filter(
+    ([key]) => key !== ENVIRONMENT_KEY,
+  );
+  return Object.fromEntries(
+    environment === null ? kept : [...kept, [ENVIRONMENT_KEY, environment]],
+  );
 }
 
 function refusedDocument(document: Environment, origin: string): Environment {
@@ -192,9 +229,10 @@ export class ProjectEnvironments {
 
   async write(
     params: { project_id: string; binding_id: string },
-    environment: Environment,
+    submitted: unknown,
     caller: CallerContext,
   ) {
+    const environment = submittedEnvironment(submitted);
     const body = this.dependencies.store.transaction((tx) => {
       const { name } = requireRepositoryBinding(tx, params);
       const version = requireProject(tx, params.project_id).binding_set_version;
@@ -208,7 +246,7 @@ export class ProjectEnvironments {
               kind: kindOf(binding.resource_identity),
               config:
                 bindingName === name
-                  ? { ...(binding.config as object), environment }
+                  ? withEnvironment(binding.config as object, environment)
                   : binding.config,
             },
           ]),

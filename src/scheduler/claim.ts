@@ -72,6 +72,13 @@ function selectJob(
     }
     const facts = dependencies.facts.claimFacts(tx, nodeId);
     if (facts === null || !admits(claimant, facts)) continue;
+    if (
+      !dependencies.environments.environmentsClaimable(
+        identity.projectId,
+        facts.repositories,
+      )
+    )
+      continue;
     const claim = dependencies.transitions.claim(
       tx,
       nodeId,

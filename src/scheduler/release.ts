@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
+import { z } from "zod";
 import type { CallerContext } from "../kernel/operation.ts";
 import {
+  environmentFailureSchema,
   ExecutionStopReason,
   isAdvancingProviderFailure,
   isAdvancingStop,
@@ -13,13 +15,50 @@ import { executionTrace } from "./telemetry.ts";
 import type { Dependencies } from "./service.ts";
 import { consecutiveStalls, endExecution } from "./execution-store.ts";
 import {
-  consecutiveEnvironmentFailures,
   consecutiveFailures,
   recordFailure,
   requireRunning,
 } from "./settlement.ts";
 
 const NO_STALLS = 0;
+const digestsDetailSchema = z.looseObject({
+  digests: z.record(z.string(), z.string()),
+});
+
+function countsFailure(stop: ExecutionRelease["stop"]): boolean {
+  return (
+    !isAdvancingStop(stop) &&
+    stop?.reason !== ExecutionStopReason.EnvironmentFailed
+  );
+}
+
+function digestsOf(detail: string | null): Record<string, string> {
+  if (detail === null) return {};
+  let value: unknown;
+  try {
+    value = JSON.parse(detail);
+  } catch {
+    return {};
+  }
+  const parsed = digestsDetailSchema.safeParse(value);
+  return parsed.success ? parsed.data.digests : {};
+}
+
+function reportEnvironmentFailure(
+  dependencies: Dependencies,
+  row: ExecutionRow,
+  repositories: string[],
+  stop: NonNullable<ExecutionRelease["stop"]>,
+): void {
+  const detail = stop.detail ?? null;
+  dependencies.environments.environmentFailed({
+    project_id: row.project_id,
+    execution_id: row.execution_id,
+    resource_identities: repositories,
+    digests: digestsOf(detail),
+    stop: { code: environmentFailureSchema.parse(stop.code), detail },
+  });
+}
 
 export function release(
   dependencies: Dependencies,
@@ -34,6 +73,7 @@ export function release(
   let released: ExecutionRow | undefined;
   let siblings: string[] = [];
   let cooldowns: CooldownChange[] = [];
+  let environmentRepositories: string[] | null = null;
   const result = caller.commit((tx) => {
     const now = Date.now();
     const row = requireRunning(tx, executionId, proof.runtimeIdentity, now);
@@ -73,13 +113,16 @@ export function release(
     ) {
       assert.ok(body.further_work);
       endExecution(tx, executionId, now, body.stop);
+      if (body.stop.reason === ExecutionStopReason.EnvironmentFailed)
+        environmentRepositories = [
+          ...(dependencies.facts.claimFacts(tx, row.node_id)?.repositories ??
+            []),
+        ];
       recordFailure(
         tx,
         dependencies,
         row.node_id,
-        body.stop.reason === ExecutionStopReason.EnvironmentFailed
-          ? consecutiveEnvironmentFailures(tx, row)
-          : consecutiveFailures(tx, row, !isAdvancingStop(body.stop)),
+        consecutiveFailures(tx, row, countsFailure(body.stop)),
         now,
       );
       return { execution_id: executionId, ended_at: now };
@@ -103,6 +146,13 @@ export function release(
     end: ExecutionEnd.Finished,
     stop: body.stop,
   });
+  if (environmentRepositories !== null && body.stop !== null)
+    reportEnvironmentFailure(
+      dependencies,
+      released,
+      environmentRepositories,
+      body.stop,
+    );
   wake(proof.projectId, siblings);
   return result;
 }

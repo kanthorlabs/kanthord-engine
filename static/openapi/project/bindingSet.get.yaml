@@ -335,6 +335,20 @@ components:
                                       type: array
                                       items:
                                         type: string
+                          customizations:
+                            type: object
+                            properties:
+                              kanthord:
+                                type: object
+                                properties:
+                                  checks:
+                                    maxItems: 32
+                                    type: array
+                                    items:
+                                      type: string
+                                      pattern: \S
+                                additionalProperties: {}
+                            additionalProperties: {}
                         additionalProperties: {}
                     required:
                       - available
@@ -713,6 +727,20 @@ components:
                                           type: array
                                           items:
                                             type: string
+                              customizations:
+                                type: object
+                                properties:
+                                  kanthord:
+                                    type: object
+                                    properties:
+                                      checks:
+                                        maxItems: 32
+                                        type: array
+                                        items:
+                                          type: string
+                                          pattern: \S
+                                    additionalProperties: {}
+                                additionalProperties: {}
                             additionalProperties: {}
                         required:
                           - available
