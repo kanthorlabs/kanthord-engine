@@ -526,7 +526,7 @@ HTTP `200` answers `{ address, ssh_credential, credential }`. `credential` is nu
 
 - `status` is `healthy`, `unhealthy` or `unknown`.
 - The `address` entry has the capability `network git read`. A host outside the set, an unpinned host, a key that does not load or a failed read answers `unhealthy`. A check that exceeds its deadline answers `unknown`.
-- `failure_reason` is null for a `healthy` entry only. Every other `address` entry carries a value of the list below, a check that exceeds its deadline included.
+- `failure_reason` is null for a `healthy` entry only. Every other `address` entry carries a value of the list below. A git read that exceeds its deadline carries `deadline_exceeded`.
 - The `ssh_credential` and `credential` entries are the answers of the record verify.
 
 The failure reasons of the `address` entry:
@@ -540,7 +540,8 @@ The failure reasons of the `address` entry:
 | `key_refused`          | ssh writes "Permission denied (publickey)".                                                                                                                                 |
 | `repository_not_found` | The remote writes "Repository not found", or GitLab writes "The project you were looking for could not be found". A deploy key of another repository also gives this value. |
 | `host_unreachable`     | ssh writes "Could not resolve hostname", "Connection timed out", "Connection refused", "Operation timed out", "No route to host" or "Network is unreachable".               |
-| `unclassified`         | Any other failure, a check that exceeds its deadline included.                                                                                                              |
+| `deadline_exceeded`    | A git read exceeds its deadline. The host answers too slowly or not at all. Verify again.                                                                                   |
+| `unclassified`         | Any other failure.                                                                                                                                                          |
 
 The server reads only the lines of ssh and of the remote, because git translates its own lines. No remote text reaches the client.
 
@@ -556,8 +557,9 @@ It reads the instruction files of one repository binding and stores nothing in t
 
 - It reads the configuration of the revision that `<binding-id>` names.
 - It checks that the address host is in the SSH host set of the platform and holds a pin. Then custody releases the key of the `ssh_credential` under the service identity of the Project Service. These checks run before any git process starts.
-- The repository connector resolves the commit of the base branch with `ls-remote`. It fetches that commit at depth 1 with no blobs into a temporary directory, reads the four paths with `git show` and deletes the directory.
-- The deadline of the resource healthcheck bounds the read.
+- The repository connector resolves the commit of the base branch with `ls-remote`. It fetches that commit at depth 1 with no blobs into a temporary directory. It lists the four paths and fetches the blobs of all regular files in one fetch. Then it reads the files and deletes the directory.
+- A deadline of 30 s bounds the read. The read deadline is longer than the 10 s deadline of the resource healthcheck, because the read opens several SSH sessions. The route timeout is 36 s, the read deadline plus the 5 s SSH agent cleanup and 1 s, so a read that exceeds its deadline answers `422`, not `504`.
+- A failed read logs `project.binding.instruction_files.read_failed` at the `warn` level with `project_id`, `binding_id`, `failure_reason` and `reason`. `reason` is the git failure text with the user information of a URL redacted.
 - The service caches the answer in memory per binding revision and commit. Each request runs `ls-remote`, so a new commit of the base branch replaces the answer.
 
 HTTP `200` answers `{ commit, read_at, files }`. `commit` is the commit of the base branch. `read_at` is a Unix timestamp in milliseconds. `files` holds four entries in the order `AGENTS.md`, `AGENTS.local.md`, `CLAUDE.md`, `CLAUDE.local.md`. Each entry is `{ source, path, state, reason, text }`:
@@ -619,7 +621,7 @@ The refusal names the key and the reason.
 
 - `source` is `stored`, `repository`, `detected`, `universal` or `none`, under the order of the target.
 - For `stored`, `commit` is null, and the command reads no repository.
-- For the other sources, the service reads the files at the base branch with the read of [binding instruction-files](#binding-instruction-files). `commit` is the commit of the base branch. The devcontainer file accepts comments and trailing commas.
+- For the other sources, the service reads the files at the base branch with the read of [binding instruction-files](#binding-instruction-files). One deadline of 30 s bounds all reads of one request, and the route timeout is 36 s. `commit` is the commit of the base branch. The devcontainer file accepts comments and trailing commas.
 - `environment` is the document, or null.
 - `reason` names the defect of a repository file that is no valid environment, or the refused key, else null.
 

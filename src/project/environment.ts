@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import { posix } from "node:path";
 import type { ServiceIdentity } from "../kernel/caller.ts";
-import { CancellationContext, type Context } from "../kernel/context.ts";
+import {
+  CancellationContext,
+  DeadlineExceeded,
+  type Context,
+} from "../kernel/context.ts";
 import {
   DEVCONTAINER_DIRECTORY,
   DEVCONTAINER_FILE,
@@ -22,7 +26,7 @@ import { RepositoryFileState } from "../repository/contract.ts";
 import type { RepositoryFile, SshAccess } from "../repository/contract.ts";
 import { gitFailureReason } from "../repository/git-failure.ts";
 import {
-  BINDING_CHECK_TIMEOUT_MS,
+  REPOSITORY_FILES_READ_TIMEOUT_MS,
   ENVIRONMENT_FILE_MAX_BYTES,
   EnvironmentSource,
   ProjectErrorCode,
@@ -102,7 +106,8 @@ function inPathOrder(files: RepositoryFile[]): RepositoryFile[] {
 }
 
 function refuseUnreadable(context: Context, error: unknown): never {
-  context.signal.throwIfAborted();
+  if (!(context.signal.reason instanceof DeadlineExceeded))
+    context.signal.throwIfAborted();
   throw new OperationError(
     SSH_UNREACHABLE_STATUS,
     ProjectErrorCode.RepositorySshUnreachable,
@@ -298,6 +303,23 @@ export class ProjectEnvironments {
     target: EnvironmentTarget,
     context: Context,
   ): Promise<GroupResolution> {
+    const deadline = new CancellationContext(
+      context,
+      Date.now() + REPOSITORY_FILES_READ_TIMEOUT_MS,
+    );
+    try {
+      return await this.resolveWithin(bindingId, config, target, deadline);
+    } finally {
+      deadline.cancel();
+    }
+  }
+
+  private async resolveWithin(
+    bindingId: string,
+    config: RepositoryConfig,
+    target: EnvironmentTarget,
+    context: Context,
+  ): Promise<GroupResolution> {
     const atImage = target === EnvironmentTarget.Image;
     const base = await this.readBase(
       bindingId,
@@ -441,9 +463,9 @@ export class ProjectEnvironments {
     caller.context.signal.throwIfAborted();
     const deadline = new CancellationContext(
       caller.context,
-      Date.now() + BINDING_CHECK_TIMEOUT_MS,
+      Date.now() + REPOSITORY_FILES_READ_TIMEOUT_MS,
     );
-    const end = Date.now() + BINDING_CHECK_TIMEOUT_MS;
+    const end = Date.now() + REPOSITORY_FILES_READ_TIMEOUT_MS;
     try {
       const { address, ssh } = this.access(bindingId, config);
       let commit: string | null;
@@ -488,7 +510,7 @@ export class ProjectEnvironments {
         paths,
         ENVIRONMENT_FILE_MAX_BYTES,
         context,
-        BINDING_CHECK_TIMEOUT_MS,
+        REPOSITORY_FILES_READ_TIMEOUT_MS,
         ssh,
       );
       assert.equal(files.length, paths.length);
@@ -514,7 +536,7 @@ export class ProjectEnvironments {
         directory,
         limit,
         context,
-        BINDING_CHECK_TIMEOUT_MS,
+        REPOSITORY_FILES_READ_TIMEOUT_MS,
         ssh,
       );
     } catch (error) {

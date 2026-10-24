@@ -1,4 +1,9 @@
-import { simpleGit, type SimpleGit, type SimpleGitOptions } from "simple-git";
+import {
+  GitPluginError,
+  simpleGit,
+  type SimpleGit,
+  type SimpleGitOptions,
+} from "simple-git";
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { mkdtemp, rm, stat } from "node:fs/promises";
@@ -7,13 +12,18 @@ import { join, posix } from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { promisify } from "node:util";
-import { CancellationContext, type Context } from "../kernel/context.ts";
+import {
+  CancellationContext,
+  DeadlineExceeded,
+  type Context,
+} from "../kernel/context.ts";
 import { CodedError, Diagnostic } from "../kernel/errors.ts";
 import {
   GIT_UNSAFE_OPTIONS,
   isolatedGitEnvironment,
 } from "../kernel/git-environment.ts";
 import { RepositoryFileState, type RepositoryFile } from "./contract.ts";
+import { GIT_DEADLINE_EXCEEDED } from "./git-failure.ts";
 import { CheckEndState, ExpectedEndState, type CheckFold } from "./github.ts";
 import { NODE_BRANCH_PATTERN } from "./node-branch.ts";
 import {
@@ -26,6 +36,7 @@ const GIT_FAILED = "repository.connector.git_failed";
 export const NODE_BRANCH_MISSING = "repository.node_branch.missing";
 const EMPTY_STRING = "";
 const EXPIRED = 0;
+const TIMEOUT_PLUGIN = "timeout";
 const EMPTY_BYTES = 0;
 const REPOSITORY_FILES_DIRECTORY_PREFIX = "kanthord-repository-files-";
 const OBJECT_ID_PATTERN = /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/;
@@ -242,7 +253,7 @@ async function runGitTask<T>(
   );
   try {
     context.signal.throwIfAborted();
-    if (deadlineMs <= EXPIRED) throw new Error("Git deadline exceeded");
+    if (deadlineMs <= EXPIRED) throw new Error(GIT_DEADLINE_EXCEEDED);
     const git = simpleGit({
       ...(directory === undefined ? {} : { baseDir: directory }),
       errors: options.errors ?? failNonzeroExit,
@@ -257,12 +268,22 @@ async function runGitTask<T>(
     if (deadline.signal.aborted) throw new Error("Git aborted");
     return output;
   } catch (error) {
+    const failure = deadlineExpired(error, deadline.signal)
+      ? new Error(GIT_DEADLINE_EXCEEDED)
+      : error;
     throw new Diagnostic(GIT_FAILED, `${operation}: git failed.`, {
-      cause: new Error(gitFailureText(operation, error)),
+      cause: new Error(gitFailureText(operation, failure)),
     });
   } finally {
     deadline.cancel();
   }
+}
+
+function deadlineExpired(error: unknown, signal: AbortSignal): boolean {
+  return (
+    signal.reason instanceof DeadlineExceeded ||
+    (error instanceof GitPluginError && error.plugin === TIMEOUT_PLUGIN)
+  );
 }
 
 export async function gitLsRemote(
@@ -905,13 +926,11 @@ function batchInput(objects: readonly string[]): string {
   return objects.map((object) => object + BATCH_LINE_END).join(EMPTY_STRING);
 }
 
-async function readSymlinkTargets(
+async function fetchBlobs(
   runInput: GitInputRun,
-  tree: RepositoryTree,
   objects: readonly string[],
 ): Promise<void> {
   assert.ok(objects.length);
-  assert.ok(objects.every((object) => !tree.targets.has(object)));
   await runInput(
     [
       "fetch",
@@ -924,6 +943,16 @@ async function readSymlinkTargets(
     batchInput(objects),
     GIT_MESSAGE_BYTES_MAX,
   );
+}
+
+async function readSymlinkTargets(
+  runInput: GitInputRun,
+  tree: RepositoryTree,
+  objects: readonly string[],
+): Promise<void> {
+  assert.ok(objects.length);
+  assert.ok(objects.every((object) => !tree.targets.has(object)));
+  await fetchBlobs(runInput, objects);
   const sizes = batchSizes(
     await runInput(
       ["cat-file", "--batch-check"],
@@ -1091,9 +1120,14 @@ async function resolveRepositoryFiles(
   };
   await listPaths(run, commit, tree, paths);
   await completeRepositoryTree(run, runInput, commit, tree, paths);
+  const steps = paths.map((path) => followLinks(tree, path));
+  const objects = new Set<string>();
+  for (const step of steps)
+    if (step.kind === LinkStepKind.Regular)
+      objects.add(tree.entries.get(step.current)!.object);
+  if (objects.size) await fetchBlobs(runInput, [...objects]);
   const files: RepositoryFile[] = [];
-  for (const path of paths) {
-    const step = followLinks(tree, path);
+  for (const [index, step] of steps.entries()) {
     if (step.kind === LinkStepKind.Answered) {
       files.push(step.file);
       continue;
@@ -1103,8 +1137,8 @@ async function resolveRepositoryFiles(
       await regularRepositoryFile(
         run,
         readBlob,
-        `${commit}:${step.current}`,
-        path,
+        tree.entries.get(step.current)!.object,
+        paths[index]!,
         maxBytes,
       ),
     );

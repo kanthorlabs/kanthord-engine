@@ -9,7 +9,11 @@ import { promisify } from "node:util";
 import { type Context } from "../kernel/context.ts";
 import { Diagnostic } from "../kernel/errors.ts";
 import { isolatedGitEnvironment } from "../kernel/git-environment.ts";
-import type { SshAccess, SshRelayAccess } from "./contract.ts";
+import {
+  SSH_AGENT_CLEANUP_TIMEOUT_MS,
+  type SshAccess,
+  type SshRelayAccess,
+} from "./contract.ts";
 import { serveRelayAgent, type RelayAgent } from "./ssh-relay-agent.ts";
 
 export type {
@@ -50,7 +54,6 @@ const SINGLE_QUOTE = "'";
 const AGENT_SCRIPT =
   'exec 3<&0; ssh-agent -D -a "$1" & agent=$!; { cat; kill "$agent"; } <&3 2>/dev/null & wait "$agent"';
 const SOCKET_POLL_MS = 10;
-const CLEANUP_TIMEOUT_MS = 5000;
 const SOCKET_PROBE_TIMEOUT_MS = 1000;
 const MS_PER_SECOND = 1000;
 const KEY_LIFETIME_SECONDS_MIN = 1;
@@ -300,7 +303,7 @@ async function startRelayAgent(
 async function stopAgent(agent: Agent, socket: string): Promise<void> {
   await execFileAsync("ssh-add", ["-q", "-D"], {
     env: toolEnvironment(socket),
-    timeout: CLEANUP_TIMEOUT_MS,
+    timeout: SSH_AGENT_CLEANUP_TIMEOUT_MS,
   }).catch(() => {});
   agent.child.stdin?.end();
   await agent.closed;

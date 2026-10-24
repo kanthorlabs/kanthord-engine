@@ -1204,6 +1204,7 @@ const WANTED_OBJECT_GROUP = 1;
 const START_EVENT = "start";
 const NO_TEXT = "";
 const GIT_ARGUMENTS_START = 1;
+const TREE_AND_BLOB_PACKS = 2;
 
 function blobObject(text: string): string {
   return createHash("sha1")
@@ -1275,6 +1276,28 @@ test("readFilesAtCommit lists only the requested paths when no path is a symlink
         ...INSTRUCTION_PATHS,
       ],
     ],
+  );
+});
+
+test("readFilesAtCommit fetches the blobs of all regular files in one fetch", async (t) => {
+  const { read, starts } = await tracedRead(t, {
+    "AGENTS.md": "agents\n",
+    "AGENTS.local.md": "agents local\n",
+    "CLAUDE.md": "claude\n",
+    "CLAUDE.local.md": "claude local\n",
+  });
+  assert.deepEqual(
+    read.map(({ state, text }) => [state, text]),
+    [
+      [RepositoryFileState.Present, "agents\n"],
+      [RepositoryFileState.Present, "agents local\n"],
+      [RepositoryFileState.Present, "claude\n"],
+      [RepositoryFileState.Present, "claude local\n"],
+    ],
+  );
+  assert.equal(
+    starts.filter((argv) => argv.includes("pack-objects")).length,
+    TREE_AND_BLOB_PACKS,
   );
 });
 

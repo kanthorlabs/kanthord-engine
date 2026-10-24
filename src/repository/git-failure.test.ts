@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
+import { once } from "node:events";
+import { createServer, type AddressInfo, type Socket } from "node:net";
 import test from "node:test";
-import { background } from "../kernel/context.ts";
+import { background, DeadlineExceeded } from "../kernel/context.ts";
 import { Diagnostic, OperationError } from "../kernel/errors.ts";
 import { ResourceFailureReason } from "../kernel/health.ts";
 import { HttpStatus } from "../kernel/http.ts";
@@ -17,6 +19,8 @@ import {
 
 const GIT_FAILED = "repository.connector.git_failed";
 const DEADLINE_MS = 60_000;
+const SILENT_HOST_DEADLINE_MS = 3000;
+const SILENT_HOST = "127.0.0.1";
 const MISSING_REPOSITORY = "file:////nonexistent_kanthord_git_failure_test";
 const READ_FAILED =
   "fatal: Could not read from remote repository.\n\nPlease make sure you have the correct access rights\nand the repository exists.";
@@ -148,10 +152,14 @@ test("classifyGitFailure reads the OpenSSH line next to a translated git line", 
   );
 });
 
-test("classifyGitFailure answers unclassified for an unknown text", () => {
+test("classifyGitFailure answers unclassified for an unknown text and deadline_exceeded for the deadline text", () => {
+  assert.equal(
+    classifyGitFailure("ls-remote: Git aborted"),
+    ResourceFailureReason.Unclassified,
+  );
   assert.equal(
     classifyGitFailure("ls-remote: Git deadline exceeded"),
-    ResourceFailureReason.Unclassified,
+    ResourceFailureReason.DeadlineExceeded,
   );
   assert.equal(classifyGitFailure(""), ResourceFailureReason.Unclassified);
 });
@@ -207,4 +215,35 @@ test("gitFailureReason classifies a real failed ls-remote as unclassified", asyn
   assert.ok(error instanceof Diagnostic);
   assert.equal(error.code, GIT_FAILED);
   assert.equal(gitFailureReason(error), ResourceFailureReason.Unclassified);
+});
+
+test("gitFailureReason answers deadline_exceeded for a real ls-remote that exceeds its deadline", async (t) => {
+  const sockets = new Set<Socket>();
+  const server = createServer((socket) => sockets.add(socket));
+  server.listen(0, SILENT_HOST);
+  await once(server, "listening");
+  t.after(() => {
+    for (const socket of sockets) socket.destroy();
+    server.close();
+  });
+  const { port } = server.address() as AddressInfo;
+  const error = await gitLsRemote(
+    `ssh://git@${SILENT_HOST}:${port}/silent.git`,
+    background,
+    SILENT_HOST_DEADLINE_MS,
+    { ...LOCAL_GIT_SSH_ACCESS, port },
+  ).then(
+    () => assert.fail("The read of a silent host must fail."),
+    (failure: unknown) => failure,
+  );
+  assert.ok(error instanceof Diagnostic);
+  assert.equal(error.code, GIT_FAILED);
+  assert.equal(gitFailureReason(error), ResourceFailureReason.DeadlineExceeded);
+});
+
+test("gitFailureReason answers deadline_exceeded for a deadline that fires outside a git process", () => {
+  assert.equal(
+    gitFailureReason(new DeadlineExceeded()),
+    ResourceFailureReason.DeadlineExceeded,
+  );
 });

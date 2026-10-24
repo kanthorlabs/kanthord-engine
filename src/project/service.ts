@@ -17,6 +17,7 @@ import {
   CancellationContext,
   cancelled,
   type Context,
+  DeadlineExceeded,
   reasonOf,
 } from "../kernel/context.ts";
 import { Diagnostic, OperationError, asError } from "../kernel/errors.ts";
@@ -49,7 +50,10 @@ import {
   validateText,
 } from "../agent/prompt-source.ts";
 import { RepositoryFileState } from "../repository/contract.ts";
-import { gitFailureReason } from "../repository/git-failure.ts";
+import {
+  gitFailureCause,
+  gitFailureReason,
+} from "../repository/git-failure.ts";
 import { tagSchema } from "../kernel/tag.ts";
 import { isObject, isString } from "../kernel/values.ts";
 import {
@@ -70,6 +74,7 @@ import {
   BindingState,
   ChangeKind,
   BINDING_CHECK_TIMEOUT_MS,
+  REPOSITORY_FILES_READ_TIMEOUT_MS,
   EMPTY_LENGTH,
   LIST_LIMIT_MAX,
   INSTANCE_COUNT_MIN,
@@ -179,6 +184,8 @@ import {
 } from "./onboarding.ts";
 
 const SSH_UNREACHABLE_STATUS = 422;
+const INSTRUCTION_FILES_READ_FAILED =
+  "project.binding.instruction_files.read_failed";
 const PROJECTS_DIRECTORY = "projects";
 const NO_GENERATION = 0;
 const SINGLE_FORM = 1;
@@ -650,7 +657,9 @@ export class ProjectService implements Service, ProjectBindings {
   private readonly wakeup: SchedulerWakeup;
   private readonly environments: ProjectEnvironments;
   private readonly onboarding: Onboarding;
+  private readonly logger: Logger;
   constructor(dependencies: Dependencies) {
+    this.logger = dependencies.logger ?? pino({ level: "silent" });
     this.bindings = dependencies.bindings;
     this.operationalStore = dependencies.operationalStore;
     this.stateDirectory = dependencies.stateDirectory;
@@ -719,7 +728,7 @@ export class ProjectService implements Service, ProjectBindings {
         }),
       environmentReady: async (projectId, resourceIdentity, tag) =>
         dependencies.environmentReady(projectId, resourceIdentity, tag),
-      logger: dependencies.logger ?? pino({ level: "silent" }),
+      logger: this.logger,
       now: () => Date.now(),
       runId: () => randomUUID(),
       environmentBuildTimeoutMs:
@@ -917,15 +926,15 @@ export class ProjectService implements Service, ProjectBindings {
     caller.context.signal.throwIfAborted();
     const deadline = new CancellationContext(
       caller.context,
-      Date.now() + BINDING_CHECK_TIMEOUT_MS,
+      Date.now() + REPOSITORY_FILES_READ_TIMEOUT_MS,
     );
-    const end = Date.now() + BINDING_CHECK_TIMEOUT_MS;
+    const end = Date.now() + REPOSITORY_FILES_READ_TIMEOUT_MS;
     try {
       const { address, ssh } = this.sshAccess(config.platform, {
         identity: this.identity,
         subject: { kind: SshIdentitySubjectKind.Binding, binding_id: id },
       });
-      const commit = await this.refuseUnreadable(caller.context, () =>
+      const commit = await this.refuseUnreadable(caller.context, params, () =>
         this.repositoryFiles.resolveBranchCommit(
           address,
           config.strategy.base_branch,
@@ -942,7 +951,7 @@ export class ProjectService implements Service, ProjectBindings {
         );
       const cached = this.instructionFiles.get(id);
       if (cached?.commit === commit) return caller.commit(() => cached.answer);
-      const files = await this.refuseUnreadable(caller.context, () =>
+      const files = await this.refuseUnreadable(caller.context, params, () =>
         this.repositoryFiles.readFilesAtCommit(
           address,
           commit,
@@ -971,17 +980,28 @@ export class ProjectService implements Service, ProjectBindings {
   }
   private async refuseUnreadable<T>(
     context: Context,
+    params: { project_id: string; binding_id: string },
     read: () => Promise<T>,
   ): Promise<T> {
     try {
       return await read();
     } catch (error) {
       context.signal.throwIfAborted();
+      const failureReason = repositoryFailureReason(error);
+      this.logger.warn(
+        {
+          project_id: params.project_id,
+          binding_id: params.binding_id,
+          failure_reason: failureReason,
+          reason: gitFailureCause(error),
+        },
+        INSTRUCTION_FILES_READ_FAILED,
+      );
       throw new OperationError(
         SSH_UNREACHABLE_STATUS,
         ProjectErrorCode.RepositorySshUnreachable,
         "Repository SSH read failed.",
-        { failure_reason: repositoryFailureReason(error) },
+        { failure_reason: failureReason },
       );
     }
   }
@@ -2020,7 +2040,16 @@ export class ProjectService implements Service, ProjectBindings {
                 observe?.(error.code, repositoryFailureReason(error));
               throw error;
             }
+            const expired = () =>
+              context.signal.reason instanceof DeadlineExceeded;
             try {
+              using deadlineObserver = addAbortListener(context.signal, () => {
+                if (expired())
+                  observe?.(
+                    ProjectErrorCode.RepositorySshUnreachable,
+                    ResourceFailureReason.DeadlineExceeded,
+                  );
+              });
               await this.repositoryConnector.gitLsRemote(
                 access.address,
                 context,
@@ -2028,10 +2057,11 @@ export class ProjectService implements Service, ProjectBindings {
                 access.ssh,
               );
             } catch (error) {
-              observe?.(
-                ProjectErrorCode.RepositorySshUnreachable,
-                gitFailureReason(error),
-              );
+              if (!expired())
+                observe?.(
+                  ProjectErrorCode.RepositorySshUnreachable,
+                  gitFailureReason(error),
+                );
               throw error;
             }
             return ResourceStatus.Healthy;
