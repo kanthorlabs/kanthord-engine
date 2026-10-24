@@ -5,3 +5,5 @@
 
 # OpenCode model configuration, loaded through .envrc.
 .data/opencode-*
+
+.pi-tools/
