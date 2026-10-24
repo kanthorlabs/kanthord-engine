@@ -78,6 +78,12 @@ import { TAG_MAX_BYTES } from "../kernel/tag.ts";
 import { PlacementIssue } from "../worker/contract.ts";
 import { projectMigrations } from "./migrations.ts";
 import { EnvironmentErrorCode } from "./environment.ts";
+import { inertEnvironmentRuntime } from "./test-support.ts";
+import { Onboarding } from "./onboarding.ts";
+import {
+  EnvironmentFailureClass,
+  EnvironmentStatus,
+} from "./environment-state.ts";
 import {
   DEVCONTAINER_FILE,
   EnvironmentRefusalReason,
@@ -123,6 +129,8 @@ const NO_INSTANCES = 0;
 const NO_BINDING_CHANGES = 0;
 const TWO_INSTANCES = 2;
 const NO_CALLS = 0;
+const SLOT_IMAGE = "registry/kanthord:1.0.0";
+const ENVIRONMENT_VERSION = "1.0.0";
 const ONE_CALL = 1;
 const NO_ITEMS = 0;
 const WORKER_GROUP = "worker:kanthord:worker";
@@ -286,7 +294,6 @@ function fakeCustody(
 
 function fixture(t: TestContext, overrides: Partial<Dependencies> = {}) {
   const store = new Store(IN_MEMORY_DATABASE);
-  t.after(() => store.close());
   store.migrate([
     { service: PROJECT_SERVICE_NAME, migrations: projectMigrations },
     { service: "repository", migrations: repositoryMigrations },
@@ -358,11 +365,16 @@ function fixture(t: TestContext, overrides: Partial<Dependencies> = {}) {
       assert.equal(store.database.isTransaction, false);
       bindingChanges.push(projectId);
     },
+    environmentRuntime: inertEnvironmentRuntime(),
+    slotImage: SLOT_IMAGE,
+    version: ENVIRONMENT_VERSION,
+    environmentReady: async () => {},
     ...overrides,
   };
   held.dependencies = dependencies;
   const project = new ProjectService(dependencies);
   t.after(() => project.stop());
+  t.after(() => store.close());
   const registry = new OperationRegistry();
   project.declare(registry);
   let commits = NO_CALLS;
@@ -2380,6 +2392,7 @@ test("a new binding releases the key of its SSH credential under the human draft
       },
     },
   });
+  f.project.cancelEnvironmentRuns();
   await f.write({ [REPOSITORY_NAME]: repositoryBinding() });
   const credential = sshCredentialOf(REPOSITORY_ADDRESS);
   assert.deepEqual(f.releases, [
@@ -5548,6 +5561,7 @@ async function setEnvironment(
 
 test("binding.environment.set stores the environment as a new revision with no repository check", async (t) => {
   const { f, saved, resolveCalls } = instructionFixture(t, {}, WRITABLE);
+  f.project.cancelEnvironmentRuns();
   const answer = await setEnvironment(f, saved, STORED_ENVIRONMENT);
   const stored = answer.bindings[REPOSITORY_NAME];
   assert.ok(stored);
@@ -5587,6 +5601,7 @@ test("binding.environment.get answers the stored environment with no repository 
     {},
     WRITABLE,
   );
+  f.project.cancelEnvironmentRuns();
   const answer = await setEnvironment(f, saved, STORED_ENVIRONMENT);
   const stored = answer.bindings[REPOSITORY_NAME];
   assert.ok(stored);
@@ -5981,4 +5996,120 @@ test("environmentsMixed counts an identity that is no repository binding as no e
     f.mixed([f.identity(REPOSITORY_NAME), "repository:github:owner/absent"]),
     false,
   );
+});
+
+const UNKNOWN_WORKER_IDENTITY = "worker:missing";
+const UNTIL_ATTEMPTS = 1000;
+
+async function untilTrue(condition: () => boolean): Promise<void> {
+  for (let attempt = 0; attempt < UNTIL_ATTEMPTS; attempt++) {
+    if (condition()) return;
+    await turn();
+  }
+  assert.fail("The condition did not hold.");
+}
+
+function identityOf(
+  f: ReturnType<typeof fixture>,
+  saved: { binding_id: string },
+): string {
+  const binding = f.store.transaction((tx) =>
+    readBindingRevision(tx, saved.binding_id),
+  );
+  assert.ok(binding);
+  return binding.resource_identity;
+}
+
+test("a binding-set write notifies the onboarding component after the commit and before the wake, and a refused write notifies neither", async (t) => {
+  const events: string[] = [];
+  const f = writeFixture(t, {
+    bindingsChanged: () => void events.push("worker"),
+    wakeup: { wake: () => void events.push("wake") },
+  });
+  t.mock.method(Onboarding.prototype, "bindingsChanged", () => {
+    assert.equal(f.store.database.isTransaction, false);
+    events.push("onboarding");
+  });
+  await f.write({ [WORKER_NAME]: workerBinding() });
+  assert.deepEqual(events, ["onboarding", "worker", "wake"]);
+  await assert.rejects(f.write({}));
+  assert.deepEqual(events, ["onboarding", "worker", "wake"]);
+});
+
+test("a wake of a binding-set write finds a changed repository binding not claimable", async (t) => {
+  let armed = false;
+  const answers: boolean[] = [];
+  const { f, saved } = instructionFixture(
+    t,
+    {},
+    {
+      ...WRITABLE,
+      wakeup: {
+        wake: (projectId) => {
+          if (!armed) return;
+          answers.push(
+            f.project.environmentsClaimable(projectId, [identityOf(f, saved)]),
+          );
+        },
+      },
+    },
+  );
+  const identity = identityOf(f, saved);
+  await untilTrue(() =>
+    f.project.environmentsClaimable(saved.project_id, [identity]),
+  );
+  armed = true;
+  await setEnvironment(f, saved, STORED_ENVIRONMENT);
+  assert.deepEqual(answers.slice(0, 1), [false]);
+});
+
+test("binding.environment.set notifies the onboarding component once", async (t) => {
+  const { f, saved } = instructionFixture(t, {}, WRITABLE);
+  const mocked = t.mock.method(
+    Onboarding.prototype,
+    "bindingsChanged",
+    () => {},
+  );
+  await setEnvironment(f, saved, STORED_ENVIRONMENT);
+  assert.equal(mocked.mock.callCount(), ONE_CALL);
+  assert.deepEqual(mocked.mock.calls[NO_CALLS]?.arguments, [saved.project_id]);
+});
+
+test("Project answers the environment methods through the onboarding component", async (t) => {
+  const { f, saved, resolveCalls } = instructionFixture(t, {}, WRITABLE);
+  const { project_id: projectId, binding_id: bindingId } = saved;
+  const identity = identityOf(f, saved);
+  const claimable = () =>
+    f.project.environmentsClaimable(projectId, [identity]);
+  assert.equal(claimable(), false);
+  await untilTrue(claimable);
+  assert.equal(
+    await f.project.slotImage(
+      projectId,
+      UNKNOWN_WORKER_IDENTITY,
+      AbortSignal.timeout(BINDING_CHECK_TIMEOUT_MS),
+    ),
+    SLOT_IMAGE,
+  );
+  const [state] = f.project.environmentStates(projectId);
+  assert.equal(state?.status, EnvironmentStatus.None);
+  const digest = f.project.environmentDigestOf(projectId, identity);
+  assert.ok(digest);
+  const calls = resolveCalls.length;
+  assert.equal(f.project.environmentClaimed(projectId, identity), undefined);
+  await untilTrue(() => resolveCalls.length > calls);
+  f.project.environmentFailed({
+    project_id: projectId,
+    execution_id: "execution_1",
+    resource_identities: [identity],
+    stop: { code: EnvironmentFailureClass.SetupFailed, detail: "failed" },
+    digests: { [identity]: digest },
+  });
+  assert.equal(
+    f.project.environmentStates(projectId)[NO_CALLS]?.status,
+    EnvironmentStatus.Failed,
+  );
+  const rebuilt = await f.project.rebuildEnvironment(projectId, bindingId);
+  assert.equal(rebuilt.binding_id, bindingId);
+  assert.equal(rebuilt.status, EnvironmentStatus.None);
 });

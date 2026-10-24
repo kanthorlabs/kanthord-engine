@@ -316,6 +316,14 @@ export function readCurrentBindingSet(
   return current;
 }
 
+export function readProjectIds(tx: Transaction): string[] {
+  return (
+    tx.database.prepare("SELECT id FROM project_project").all() as Array<{
+      id: string;
+    }>
+  ).map((row) => row.id);
+}
+
 export function readCurrentBindings(tx: Transaction): StoredBinding[] {
   const rows = tx.database
     .prepare(

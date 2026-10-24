@@ -43,6 +43,7 @@ const NO_WORKER_BINDING = 0;
 const NO_ITEMS = 0;
 const NOT_QUEUED = -1;
 const RUN_DEADLINE_MS = 1800000;
+const PENDING_RETRY_MS = 60000;
 const RUN_DEADLINE_TAIL = "the run deadline of 30 minutes passed";
 const RUN_STARTED = "project.onboarding.run_started";
 const RUN_ENDED = "project.onboarding.run_ended";
@@ -301,6 +302,7 @@ export class Onboarding {
   private readonly computing = new Map<string, Promise<void>>();
   private readonly again = new Set<string>();
   private readonly marked = new Set<string>();
+  private readonly retries = new Map<string, NodeJS.Timeout>();
   private readonly queue: string[] = [];
   private draining: Promise<void> | null = null;
   private readonly listeners = new Set<() => void>();
@@ -309,9 +311,53 @@ export class Onboarding {
     this.dependencies = dependencies;
   }
 
-  async stop(): Promise<void> {
+  async start(): Promise<void> {
+    const { runtime, proofs } = this.dependencies;
+    await runtime.removeStaleRuns();
+    const held = new Set<string>();
+    for (const projectId of this.dependencies.projectIds())
+      for (const group of this.dependencies.bindingsOf(projectId)
+        .repositories) {
+        held.add(environmentPath(group.resource_identity));
+        this.trigger(projectId, group.resource_identity);
+      }
+    for (const path of proofs.paths()) {
+      if (held.has(path)) continue;
+      await runtime.collect(path, null);
+      proofs.removePath(path);
+    }
+  }
+
+  cancel(): void {
     this.context.cancel();
+    for (const timer of this.retries.values()) clearTimeout(timer);
+    this.retries.clear();
+  }
+
+  async stop(): Promise<void> {
+    this.cancel();
     await this.draining;
+  }
+
+  bindingsChanged(projectId: string): void {
+    const { repositories } = this.dependencies.bindingsOf(projectId);
+    const current = new Set(
+      repositories.map((group) => group.resource_identity),
+    );
+    for (const [key, record] of Array.from(this.records))
+      if (
+        record.project_id === projectId &&
+        !current.has(record.resource_identity)
+      )
+        this.dropRecord(key);
+    for (const group of repositories) {
+      this.markChanged(projectId, group);
+      this.trigger(projectId, group.resource_identity);
+    }
+  }
+
+  environmentClaimed(projectId: string, resourceIdentity: string): void {
+    this.trigger(projectId, resourceIdentity);
   }
 
   compute(projectId: string, resourceIdentity: string): Promise<void> {
@@ -364,8 +410,9 @@ export class Onboarding {
     workerResourceIdentity: string,
     signal: AbortSignal,
   ): Promise<string> {
+    const waiting = AbortSignal.any([signal, this.context.signal]);
     return new Promise((resolve, reject) => {
-      if (signal.aborted) return reject(signal.reason);
+      if (waiting.aborted) return reject(waiting.reason);
       const settle = () => {
         const answer = this.slotAnswerOf(projectId, workerResourceIdentity);
         if (answer === null) return;
@@ -374,14 +421,14 @@ export class Onboarding {
       };
       const abort = () => {
         release();
-        reject(signal.reason);
+        reject(waiting.reason);
       };
       const release = () => {
         this.listeners.delete(settle);
-        signal.removeEventListener("abort", abort);
+        waiting.removeEventListener("abort", abort);
       };
       this.listeners.add(settle);
-      signal.addEventListener("abort", abort, { once: true });
+      waiting.addEventListener("abort", abort, { once: true });
       const group = this.slotGroupOf(projectId, workerResourceIdentity);
       if (
         group !== null &&
@@ -431,6 +478,53 @@ export class Onboarding {
     );
   }
 
+  private markChanged(projectId: string, group: RepositoryGroup): void {
+    const key = keyOf(projectId, group.resource_identity);
+    const record = this.records.get(key);
+    if (
+      record === undefined ||
+      (record.binding_id === group.binding_id &&
+        record.binding_name === group.binding_name)
+    )
+      return;
+    record.binding_id = group.binding_id;
+    record.binding_name = group.binding_name;
+    record.read_succeeded = false;
+    if (record.run_started_at === null) {
+      record.step = null;
+      record.step_started_at = null;
+      this.schedule(key, record);
+    }
+    this.notify();
+  }
+
+  private dropRecord(key: string): void {
+    this.records.delete(key);
+    const index = this.queue.indexOf(key);
+    if (index !== NOT_QUEUED) this.queue.splice(index, 1);
+    this.clearRetry(key);
+    this.notify();
+  }
+
+  private clearRetry(key: string): void {
+    const timer = this.retries.get(key);
+    if (timer === undefined) return;
+    clearTimeout(timer);
+    this.retries.delete(key);
+  }
+
+  private retryWhilePending(key: string, record: GroupRecord): void {
+    if (statusOf(record) !== EnvironmentStatus.Pending)
+      return this.clearRetry(key);
+    if (this.retries.has(key) || this.context.signal.aborted) return;
+    const timer = setTimeout(() => {
+      this.retries.delete(key);
+      this.trigger(record.project_id, record.resource_identity);
+    }, PENDING_RETRY_MS);
+    timer.unref();
+    this.retries.set(key, timer);
+  }
+
   private async computeWhileMarked(
     projectId: string,
     resourceIdentity: string,
@@ -452,8 +546,7 @@ export class Onboarding {
       (candidate) => candidate.resource_identity === resourceIdentity,
     );
     if (group === undefined) {
-      this.records.delete(key);
-      this.notify();
+      this.dropRecord(key);
       return;
     }
     const target = targetOf(group, facts);
@@ -480,6 +573,7 @@ export class Onboarding {
     }
     this.records.set(key, next);
     this.schedule(key, next);
+    this.retryWhilePending(key, next);
     this.notify();
     if (!wasClaimable && claimable(statusOf(next)))
       this.dependencies.wake(projectId);

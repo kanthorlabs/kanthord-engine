@@ -164,7 +164,7 @@ const FIRST_SLOT = 0;
 const MILLISECONDS_PER_SECOND = 1000;
 const SLOT_EXIT: SlotExit = { code: 0, error: null };
 
-class FakeSlotInstance implements SlotInstance {
+export class FakeSlotInstance implements SlotInstance {
   private readonly exit = Promise.withResolvers<SlotExit>();
   readonly exited = this.exit.promise;
 
@@ -559,6 +559,19 @@ export async function gatewayFixture(
     containerImage?: string;
     intake?: { pendingEventLimit?: number; pollIntervalMs?: number };
     fakeSlots?: boolean;
+    environmentRuntime?: Parameters<
+      typeof composeServices
+    >[0]["environmentRuntime"];
+    containerRuntimeHost?: Parameters<
+      typeof composeServices
+    >[0]["containerRuntimeHost"];
+    environmentDevcontainerCli?: Parameters<
+      typeof composeServices
+    >[0]["environmentDevcontainerCli"];
+    containerSlotDriver?: Parameters<
+      typeof composeServices
+    >[0]["containerSlotDriver"];
+    repositoryFiles?: Parameters<typeof composeServices>[0]["repositoryFiles"];
   } = {},
 ) {
   process.umask(0o077);
@@ -630,6 +643,11 @@ export async function gatewayFixture(
     inventoryOverrides: options.inventoryOverrides,
     intake: options.intake,
     serverSlotDriver: slotDriver,
+    environmentRuntime: options.environmentRuntime,
+    containerRuntimeHost: options.containerRuntimeHost,
+    environmentDevcontainerCli: options.environmentDevcontainerCli,
+    containerSlotDriver: options.containerSlotDriver,
+    repositoryFiles: options.repositoryFiles,
     logger: pino(
       { level: "info" },
       {
