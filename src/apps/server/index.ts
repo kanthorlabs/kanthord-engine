@@ -382,6 +382,15 @@ export function composeServices(options: {
       claimFacts: (tx, nodeId) => mission.claimFacts(tx, nodeId),
       claimFactsOf: (tx, projectId) => mission.claimFactsOf(tx, projectId),
     },
+    environments: {
+      environmentsClaimable: (projectId, ids) =>
+        project.environmentsClaimable(projectId, ids),
+      environmentFailed: (input) =>
+        project.environmentFailed({
+          ...input,
+          stop: { ...input.stop, detail: input.stop.detail ?? "" },
+        }),
+    },
     branches: {
       nodeBranchesOf: (tx, keys) => mission.nodeBranchesOf(tx, keys),
     },
