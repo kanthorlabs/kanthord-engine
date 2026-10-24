@@ -6,6 +6,7 @@ import {
   mkdirSync,
   readFileSync,
   readdirSync,
+  readlinkSync,
   realpathSync,
   symlinkSync,
   writeFileSync,
@@ -297,6 +298,7 @@ test("the layer copies kanthord and tini, adds uid 10001, writes the variables a
     onCreate: ["apt-get install -y libpq-dev"],
     owner: OWNER,
     secrets: [],
+    flake: false,
   });
   const lines = text.split("\n");
   assert.deepEqual(lines.slice(0, HEADER_LINES), [
@@ -628,6 +630,7 @@ test("the layer runs each create command before kanthord, tini and the passwd en
     onCreate: ["create"],
     owner: OWNER,
     secrets: [],
+    flake: false,
   }).split("\n");
   const create = lines.indexOf('RUN ["/bin/sh","-c","create"]');
   assert.notEqual(create, NOT_FOUND);
@@ -660,6 +663,7 @@ function layerLines(environment: Map<string, string>): string[] {
     onCreate: [],
     owner: OWNER,
     secrets: [],
+    flake: false,
   }).split("\n");
 }
 
@@ -1094,6 +1098,7 @@ function secretLayer(
     onCreate: [PNPM_STEP, CONFIG_STEP],
     owner: OWNER,
     secrets,
+    flake: false,
   }).split("\n");
 }
 
@@ -1227,4 +1232,120 @@ writeFileSync(${JSON.stringify(record)}, JSON.stringify({ argv: process.argv.sli
     false,
   );
   assert.equal(Object.hasOwn(invocation.env, "REGISTRY_AUTH"), false);
+});
+
+const FLAKE_COPY = "COPY flake/ /etc/kanthord-flake/";
+
+function snapshotPodman(directory: string, snapshot: string) {
+  const bin = join(directory, "bin");
+  mkdirSync(bin);
+  const log = join(directory, "log");
+  writeFileSync(
+    join(bin, "podman"),
+    `#!/bin/sh
+"${process.execPath}" -e 'require("node:fs").appendFileSync(process.argv[1], JSON.stringify(["podman", ...process.argv.slice(2)]) + "\\n")' "${log}" "$@"
+if [ "$1" = build ]; then
+  for last; do :; done
+  cp -R "$last" "${snapshot}"
+fi
+exit 0
+`,
+    { mode: 0o755 },
+  );
+  return { PATH: `${bin}:${process.env.PATH}`, HOME: process.env.HOME };
+}
+
+function snapshotBuild(
+  directory: string,
+  files: Record<string, string>,
+  extra?: (target: string) => void,
+) {
+  const snapshot = join(directory, "snapshot");
+  return {
+    snapshot,
+    ...images(directory, {
+      environment: environment({
+        image: "base",
+        onCreateCommand: "nix print-dev-env",
+      }),
+      exists: ABSENT,
+      cli: PASSING_CLI,
+      variables: snapshotPodman(directory, snapshot),
+      checkout: (target) => {
+        writeCheckout(target, files);
+        extra?.(target);
+      },
+      inspect: [
+        {
+          Config: {
+            Env: [],
+            Labels: {
+              "devcontainer.metadata": JSON.stringify([
+                { onCreateCommand: "nix print-dev-env" },
+              ]),
+            },
+          },
+        },
+      ],
+    }),
+  };
+}
+
+test("a build with flake.nix copies the workspace without .git into the layer before the create commands", async (t) => {
+  const directory = temporary(t);
+  const { build, snapshot } = snapshotBuild(directory, {
+    "flake.nix": "{}",
+    "flake.lock": "{}",
+    "nix/shell.nix": "{}",
+    ".git/HEAD": "ref",
+  });
+  assert.deepEqual(await build(), { outcome: ImageBuildOutcome.Built });
+  const copied = join(snapshot, "flake");
+  assert.deepEqual(
+    readdirSync(copied, { recursive: true }).map(String).sort(),
+    ["flake.lock", "flake.nix", "nix", "nix/shell.nix"],
+  );
+  const lines = readFileSync(join(snapshot, "Containerfile"), "utf8").split(
+    "\n",
+  );
+  const copy = lines.indexOf(FLAKE_COPY);
+  assert.ok(copy > lines.indexOf("WORKDIR /"));
+  assert.ok(copy < lines.indexOf('RUN ["/bin/sh","-c","nix print-dev-env"]'));
+  assert.equal(existsSync(runDirectory(directory)), false);
+});
+
+test("a workspace link that leaves the workspace refuses the flake build and names the link", async (t) => {
+  const directory = temporary(t);
+  const { build } = snapshotBuild(directory, { "flake.nix": "{}" }, (target) =>
+    symlinkSync("/etc/passwd", join(target, "passwd-link")),
+  );
+  const failure = failureOf(await build());
+  assert.equal(failure.class, EnvironmentImageFailure.BuildFailed);
+  assert.ok(failure.detail.includes("passwd-link"));
+});
+
+test("a workspace link that stays inside the workspace is copied as a link", async (t) => {
+  const directory = temporary(t);
+  const { build, snapshot } = snapshotBuild(
+    directory,
+    { "flake.nix": "{}", "nix/shell.nix": "{}" },
+    (target) => symlinkSync("nix/shell.nix", join(target, "shell-link")),
+  );
+  assert.deepEqual(await build(), { outcome: ImageBuildOutcome.Built });
+  assert.deepEqual(
+    [readlinkSync(join(snapshot, "flake", "shell-link"))],
+    ["nix/shell.nix"],
+  );
+});
+
+test("a build without flake.nix writes no flake copy and no flake directory", async (t) => {
+  const directory = temporary(t);
+  const { build, snapshot } = snapshotBuild(directory, {
+    "package.json": "{}",
+    ".git/HEAD": "ref",
+  });
+  assert.deepEqual(await build(), { outcome: ImageBuildOutcome.Built });
+  assert.equal(existsSync(join(snapshot, "flake")), false);
+  const text = readFileSync(join(snapshot, "Containerfile"), "utf8");
+  assert.equal(text.includes("/etc/kanthord-flake/"), false);
 });

@@ -1,10 +1,15 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { environmentSchema } from "../kernel/devcontainer.ts";
+import { checksOf, environmentSchema } from "../kernel/devcontainer.ts";
 import type { RepositoryFile } from "../repository/contract.ts";
 import {
   DETECTION_PATHS,
   DetectedStack,
+  NIX_BASE_IMAGE,
+  NIX_CHECK,
+  NIX_ENV_FILE,
+  NIX_FEATURE,
+  NIX_FLAKE_DIRECTORY,
   WORKFLOW_DIRECTORY,
   WORKFLOW_FILES_MAX,
   detectEnvironment,
@@ -244,7 +249,7 @@ test("workflowPaths keeps the workflow files in path order", () => {
   assert.deepEqual(workflowPaths(many), many.slice(0, WORKFLOW_FILES_MAX));
 });
 
-test("the detection paths hold the 23 design paths in order", () => {
+test("the detection paths hold the 24 design paths in order", () => {
   assert.deepEqual(DETECTION_PATHS, [
     ".nvmrc",
     ".node-version",
@@ -269,6 +274,7 @@ test("the detection paths hold the 23 design paths in order", () => {
     ".java-version",
     ".tool-versions",
     "flake.nix",
+    "flake.lock",
   ]);
 });
 
@@ -552,4 +558,88 @@ test("a draft answers the same document for another file order", () => {
     detectEnvironment([...files].reverse()),
     detectEnvironment(files),
   );
+});
+
+const FLAKE = file("flake.nix", "{}");
+const FLAKE_DOCUMENT: Expected = {
+  image: "mcr.microsoft.com/devcontainers/base:bookworm",
+  features: {
+    "ghcr.io/devcontainers/features/nix:1": { multiUser: false },
+  },
+  onCreateCommand:
+    "nix --extra-experimental-features 'nix-command flakes' print-dev-env /etc/kanthord-flake > /etc/kanthord-nix-env.sh",
+  checks: ["nix --version"],
+  env: { BASH_ENV: "/etc/kanthord-nix-env.sh" },
+};
+
+test("the nix constants hold the design values", () => {
+  assert.equal(NIX_BASE_IMAGE, FLAKE_DOCUMENT.image);
+  assert.deepEqual(Object.keys(FLAKE_DOCUMENT.features ?? {}), [NIX_FEATURE]);
+  assert.deepEqual(
+    [NIX_FLAKE_DIRECTORY, NIX_ENV_FILE, NIX_CHECK],
+    ["/etc/kanthord-flake", "/etc/kanthord-nix-env.sh", "nix --version"],
+  );
+});
+
+test("a repository with only flake.nix drafts the flake document", () => {
+  expectDraft([FLAKE], FLAKE_DOCUMENT);
+  const drafted = detectEnvironment([FLAKE]);
+  assert.ok(drafted);
+  assert.equal(drafted.document.updateContentCommand, undefined);
+  assert.equal(drafted.document.postCreateCommand, undefined);
+});
+
+test("flake.nix takes precedence over the node, go, rust and ci inputs", () => {
+  expectDraft(
+    [
+      FLAKE,
+      PACKAGE,
+      file("pnpm-lock.yaml", ""),
+      file("flake.lock", "{}"),
+      NODE_20,
+    ],
+    FLAKE_DOCUMENT,
+  );
+  const drafted = detectEnvironment([
+    FLAKE,
+    PACKAGE,
+    file("pnpm-lock.yaml", ""),
+  ]);
+  assert.ok(drafted);
+  const text = JSON.stringify(drafted.document);
+  for (const absent of ["features/node", "pnpm", "frozen-lockfile"])
+    assert.equal(text.includes(absent), false, absent);
+  expectDraft(
+    [FLAKE, file("go.mod", "go 1.22\n"), file("Cargo.toml", "")],
+    FLAKE_DOCUMENT,
+  );
+  expectDraft(
+    [FLAKE, setupWorkflow("actions/setup-node@v4", "node-version", "20")],
+    FLAKE_DOCUMENT,
+  );
+  assert.deepEqual(detectEnvironment([FLAKE, PACKAGE])?.stacks, []);
+});
+
+test("the checks of a flake document are the nix check", () => {
+  const drafted = detectEnvironment([FLAKE, PACKAGE]);
+  assert.ok(drafted);
+  assert.deepEqual(checksOf(drafted.document), ["nix --version"]);
+});
+
+test("a flake.nix that is not present drafts no flake document", () => {
+  assert.equal(detectEnvironment([tooLarge("flake.nix")]), null);
+  assert.equal(
+    detectEnvironment([
+      { path: "flake.nix", state: "not_regular_file", text: null },
+    ]),
+    null,
+  );
+  assert.deepEqual(
+    [detectEnvironment([tooLarge("flake.nix"), PACKAGE])?.document.image],
+    ["mcr.microsoft.com/devcontainers/javascript-node:24-bookworm"],
+  );
+});
+
+test("a flake.lock alone drafts nothing", () => {
+  assert.equal(detectEnvironment([file("flake.lock", "{}")]), null);
 });

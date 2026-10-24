@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
 import {
   cpSync,
+  lstatSync,
   readdirSync,
   realpathSync,
   rmSync,
@@ -8,7 +9,13 @@ import {
   writeFileSync,
 } from "node:fs";
 import { createRequire } from "node:module";
-import { dirname, join, resolve as resolvePath, sep } from "node:path";
+import {
+  dirname,
+  join,
+  relative,
+  resolve as resolvePath,
+  sep,
+} from "node:path";
 import { isSea } from "node:sea";
 import { z } from "zod";
 import { background, type Context } from "../../kernel/context.ts";
@@ -84,6 +91,12 @@ const PATH_OUTSIDE = "the path leaves the checkout";
 const PATH_ABSENT = "the path is absent";
 const FEATURE_NOT_DIRECTORY = "the feature is not a directory";
 const FEATURE_SYMLINK = "the feature holds a symbolic link";
+const FLAKE_FILE = "flake.nix";
+const FLAKE_DIRECTORY = "flake";
+const FLAKE_TARGET = "/etc/kanthord-flake/";
+const GIT_DIRECTORY = ".git";
+const WORKSPACE_LINK_OUTSIDE =
+  "the workspace holds a symbolic link that leaves the workspace";
 const CONTAINERFILE = "Containerfile";
 const METADATA_LABEL = "devcontainer.metadata";
 const DEVCONTAINER_CLI = "@devcontainers/cli/package.json";
@@ -174,6 +187,7 @@ export interface LayerInput {
   readonly onCreate: readonly string[];
   readonly owner: string;
   readonly secrets: ReadonlyArray<{ variable: string; file: string }>;
+  readonly flake: boolean;
 }
 
 class BuildFailure extends Error {
@@ -323,6 +337,54 @@ export function serverConfig(
   return config;
 }
 
+function holdsFlake(workspace: string): boolean {
+  return (
+    lstatSync(join(workspace, FLAKE_FILE), {
+      throwIfNoEntry: false,
+    })?.isFile() === true
+  );
+}
+
+function outsideGit(path: string): boolean {
+  return path !== GIT_DIRECTORY && !path.startsWith(`${GIT_DIRECTORY}${sep}`);
+}
+
+function leavesWorkspace(root: string, link: string): boolean {
+  try {
+    const target = realpathSync(link);
+    return target !== root && !target.startsWith(`${root}${sep}`);
+  } catch {
+    return true;
+  }
+}
+
+function refuseOutsideLinks(workspace: string): void {
+  const root = realpathSync(workspace);
+  const entries = readdirSync(workspace, {
+    recursive: true,
+    withFileTypes: true,
+  });
+  for (const entry of entries) {
+    const path = join(entry.parentPath, entry.name);
+    const relative = path.slice(workspace.length + sep.length);
+    if (!entry.isSymbolicLink() || !outsideGit(relative)) continue;
+    if (leavesWorkspace(root, path))
+      throw new BuildFailure(
+        EnvironmentImageFailure.BuildFailed,
+        `${relative}: ${WORKSPACE_LINK_OUTSIDE}`,
+      );
+  }
+}
+
+function copyWorkspace(workspace: string, layer: string): void {
+  refuseOutsideLinks(workspace);
+  cpSync(workspace, join(layer, FLAKE_DIRECTORY), {
+    recursive: true,
+    verbatimSymlinks: true,
+    filter: (source) => outsideGit(relative(workspace, source)),
+  });
+}
+
 function substituted(value: string, current: ReadonlyMap<string, string>) {
   return value.replace(
     VARIABLE_REFERENCE,
@@ -407,6 +469,7 @@ export function layerContainerfile(input: LayerInput): string {
     ...defaults,
     ...variables,
     "WORKDIR /",
+    ...(input.flake ? [`COPY ${FLAKE_DIRECTORY}/ ${FLAKE_TARGET}`] : []),
     ...input.onCreate.map((script) => secretStep(script, secrets)),
     `COPY --from=kanthord ${KANTHORD_PATH} ${KANTHORD_PATH}`,
     `COPY --from=kanthord ${TINI_STATIC_PATH} ${TINI_PATH}`,
@@ -731,6 +794,9 @@ export class EnvironmentImages implements Omit<
     }
     const layer = join(directory, LAYER_DIRECTORY);
     ensureDirectory(layer);
+    const workspace = join(directory, WORKSPACE_DIRECTORY);
+    const flake = holdsFlake(workspace);
+    if (flake) copyWorkspace(workspace, layer);
     writeFileSync(
       join(layer, CONTAINERFILE),
       layerContainerfile({
@@ -740,6 +806,7 @@ export class EnvironmentImages implements Omit<
         onCreate: settings.onCreate,
         owner: this.options.owner,
         secrets,
+        flake,
       }),
     );
     const built = await runCommand(
