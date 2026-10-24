@@ -2187,6 +2187,38 @@ test("a binding removal during a held read leaves no record", async (t) => {
   assert.deepEqual(h.onboarding.states(PROJECT), []);
 });
 
+test("a binding-set write of another project keeps a held read of this project", async (t) => {
+  const h = new Harness(t);
+  h.resolution = NOTHING;
+  await h.compute();
+  const held = new Deferred();
+  h.resolveGate = held;
+  const running = h.compute();
+  await h.until(() => h.resolveCalls.length === TWO_CALLS);
+  h.onboarding.bindingsChanged("project_2");
+  held.release();
+  await running;
+  await h.until(() => !h.onboarding["computing"].size);
+  assert.equal(h.resolveCalls.length, TWO_CALLS);
+  assert.equal(h.state().status, EnvironmentStatus.None);
+});
+
+test("a held read discarded by a write computes no more after cancel", async (t) => {
+  const h = new Harness(t);
+  h.resolution = NOTHING;
+  await h.compute();
+  const held = new Deferred();
+  h.resolveGate = held;
+  const running = h.compute();
+  await h.until(() => h.resolveCalls.length === TWO_CALLS);
+  h.onboarding.bindingsChanged(PROJECT);
+  h.onboarding.cancel();
+  held.release();
+  await running;
+  await turn();
+  assert.equal(h.resolveCalls.length, TWO_CALLS);
+});
+
 const GONE_CACHE = { project_id: PROJECT, resource_identity: STRAY_IDENTITY };
 
 function cacheOf(identity: string) {
@@ -3444,6 +3476,68 @@ test(
     await turn();
     assert.equal(h.sessionInputs.length, NO_CALLS);
     assert.equal(h.state().repairs, NO_REPAIRS);
+  },
+);
+
+test(
+  "a failed run after a binding rename during the run starts one session",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const h = new Harness(t);
+    h.resolution = UNIVERSAL;
+    h.agentEnabled = true;
+    h.proveResults = FAILING_RESULTS;
+    h.openBuild();
+    await h.compute();
+    await h.until(() => h.state().run_started_at !== null);
+    h.bindings = facts(
+      [{ ...APP, binding_id: RENAMED_BINDING_ID }],
+      [container("app")],
+    );
+    h.onboarding.bindingsChanged(PROJECT);
+    h.openProve();
+    await sessionsEnded(h, ONE_CALL);
+  },
+);
+
+async function heldAfterWrite(h: Harness, bindings: BindingFacts) {
+  await h.compute();
+  const digests = digestsOf(h);
+  const held = new Deferred();
+  h.resolveGate = held;
+  h.bindings = bindings;
+  h.onboarding.bindingsChanged(PROJECT);
+  await h.until(() => h.resolveCalls.length === TWO_CALLS);
+  assert.equal(h.state().status, EnvironmentStatus.Pending);
+  return { digests, held };
+}
+
+test(
+  "an execution failure after a binding rename during a held read starts one session",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const h = agentHarness(t, NOTHING);
+    const { digests, held } = await heldAfterWrite(
+      h,
+      facts([{ ...APP, binding_id: RENAMED_BINDING_ID }], [container("app")]),
+    );
+    h.onboarding.environmentFailed(failureInput(h, { digests }));
+    await sessionsEnded(h, ONE_CALL);
+    held.release();
+  },
+);
+
+test(
+  "an execution failure after a target change during a held read starts no session",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const h = agentHarness(t, NOTHING);
+    const { digests, held } = await heldAfterWrite(h, facts([APP], [server]));
+    h.onboarding.environmentFailed(failureInput(h, { digests }));
+    await turn();
+    await turn();
+    assert.equal(h.sessionInputs.length, NO_CALLS);
+    held.release();
   },
 );
 

@@ -959,16 +959,20 @@ export class Onboarding {
       this.considerSession(record);
   }
 
+  private targetMoved(record: GroupRecord): boolean {
+    const facts = this.dependencies.bindingsOf(record.project_id);
+    const group = facts.repositories.find(
+      (candidate) => candidate.resource_identity === record.resource_identity,
+    );
+    return group === undefined || targetOf(group, facts) !== record.target;
+  }
+
   private considerSession(group: GroupRecord): void {
     const key = keyOf(group.project_id, group.resource_identity);
-    if (
-      this.records.get(key) !== group ||
-      group.session !== null ||
-      !group.read_succeeded
-    )
-      return;
+    if (this.records.get(key) !== group || group.session !== null) return;
     if (group.target !== EnvironmentTarget.Image || !repairableSource(group))
       return;
+    if (this.targetMoved(group)) return;
     if (!this.dependencies.environmentAgent.enabled()) return;
     assert.ok(group.digest !== null, "A failed group holds a digest.");
     const { proofs } = this.dependencies;
