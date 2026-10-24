@@ -85,6 +85,9 @@ import {
   SSH_CREDENTIAL_PLATFORM,
   RESOURCE_TARGET_KIND_REPOSITORY,
   STORAGE_PLATFORM,
+  ENVIRONMENT_SECRET_PLATFORM,
+  ENVIRONMENT_SECRET_VARIABLE,
+  ENVIRONMENT_SECRETS_MAX,
   WorkerField,
   bindingEditSchema,
   bindingSchema,
@@ -1348,6 +1351,40 @@ export class ProjectService implements Service, ProjectBindings {
         credential: binding.config.credential,
         platform: REPOSITORY_PLATFORM,
       });
+    this.validateEnvironmentSecrets(
+      tx,
+      name,
+      binding.config.environment_secrets ?? {},
+    );
+  }
+  private validateEnvironmentSecrets(
+    tx: Transaction,
+    name: string,
+    secrets: Record<string, string>,
+  ): void {
+    Object.entries(secrets).forEach(([variable, credential], index) => {
+      const refuse = () =>
+        new OperationError(
+          HttpStatus.BadRequest,
+          ProjectErrorCode.EnvironmentSecretInvalid,
+          "The environment secret is not valid.",
+          { binding: name, variable, credential },
+        );
+      if (
+        index >= ENVIRONMENT_SECRETS_MAX ||
+        !ENVIRONMENT_SECRET_VARIABLE.test(variable)
+      )
+        throw refuse();
+      try {
+        this.custodySuitability(tx, {
+          credential,
+          platform: ENVIRONMENT_SECRET_PLATFORM,
+        });
+      } catch (error) {
+        if (error instanceof OperationError) throw refuse();
+        throw error;
+      }
+    });
   }
   private validateWorker(
     tx: Transaction,

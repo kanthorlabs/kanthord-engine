@@ -2,16 +2,22 @@ import assert from "node:assert/strict";
 import { Command } from "commander";
 import { httpClient, resolveClient } from "../../gateway/client.ts";
 import { Diagnostic } from "../../kernel/errors.ts";
+import { HttpStatus } from "../../kernel/http.ts";
+import { OperationResultType } from "../../kernel/operation.ts";
 import {
   environmentSchema,
   parseEnvironmentText,
 } from "../../kernel/devcontainer.ts";
-import { identitySchema } from "../../kernel/identity.ts";
+import { createIdempotencyKey, identitySchema } from "../../kernel/identity.ts";
 import {
   BINDING_ID_PREFIX,
   BindingKind,
   BindingState,
   bindingSetWriteInputSchema,
+  ENVIRONMENT_SECRET_PLATFORM,
+  ENVIRONMENT_SECRET_VARIABLE,
+  environmentSecretOperations,
+  isNonblank,
   LIST_LIMIT_DEFAULT,
   LIST_LIMIT_MAX,
   PROJECT_ID_PREFIX,
@@ -160,6 +166,9 @@ const SHOW = "show";
 const SET = "set";
 const REBUILD = "rebuild";
 const UNSET = "unset";
+const SECRET_SET = "secret.set";
+const ENVIRONMENT_SECRET_VARIABLE_RULE =
+  "use uppercase letters, digits and underscores, and start with a letter or an underscore";
 const ENVIRONMENT_EXPORT_ABSENT =
   "cli.project.environment.export.environment_absent";
 const EXPORT_INDENT = 2;
@@ -701,6 +710,150 @@ async function environmentUnset(
   );
 }
 
+function readSecretFile(path: string): string {
+  const code = environmentCode(SECRET_SET, "file_invalid");
+  let text: string;
+  try {
+    text = readTextFile(path);
+  } catch (error) {
+    if (error instanceof Diagnostic)
+      throw new Diagnostic(code, error.message, { fields: [["path", path]] });
+    throw new Diagnostic(code, "the file cannot be read", {
+      fields: [["path", path]],
+    });
+  }
+  if (!isNonblank(text))
+    throw new Diagnostic(code, "the file holds no secret", {
+      fields: [["path", path]],
+    });
+  return text;
+}
+
+async function environmentSecretSet(
+  projectId: string,
+  bindingId: string,
+  variable: string,
+  command: Command,
+): Promise<void> {
+  validateProjectId(
+    projectId,
+    environmentCode(SECRET_SET, "invalid_project_id"),
+  );
+  validateBindingId(
+    bindingId,
+    environmentCode(SECRET_SET, "invalid_binding_id"),
+  );
+  if (!ENVIRONMENT_SECRET_VARIABLE.test(variable))
+    throw new Diagnostic(
+      environmentCode(SECRET_SET, "invalid_variable"),
+      `invalid variable name: ${ENVIRONMENT_SECRET_VARIABLE_RULE}`,
+    );
+  const options = command.optsWithGlobals();
+  const secret = readSecretFile(options.file);
+  const { endpoint, token } = resolveClient(options);
+  requireToken(token, environmentCode(SECRET_SET, "token_required"));
+  const key = resolveKey(options);
+  const indeterminate = environmentCode(SECRET_SET, "indeterminate");
+  const credentials = httpClient(environmentSecretOperations, endpoint, token);
+  const credentialName: string = options.credential;
+  const existing = await credentials.get({
+    params: { credential_name: credentialName },
+    query: {},
+    body: null,
+  });
+  const credentialKey = createIdempotencyKey();
+  if (existing.type === OperationResultType.Completed)
+    handleMutationResult(
+      await credentials.rotate(
+        {
+          params: { credential_name: credentialName },
+          query: {},
+          body: {
+            expected_revision: Math.max(
+              ...existing.data.revisions.map(({ revision }) => revision),
+            ),
+            secret: { key: secret },
+          },
+        },
+        { idempotencyKey: credentialKey },
+      ),
+      indeterminate,
+      credentialKey,
+    );
+  else if (
+    existing.type === OperationResultType.Failure &&
+    existing.status === HttpStatus.NotFound
+  )
+    handleMutationResult(
+      await credentials.create(
+        {
+          params: {},
+          query: {},
+          body: {
+            name: credentialName,
+            platform: ENVIRONMENT_SECRET_PLATFORM,
+            secret: { key: secret },
+            metadata: null,
+          },
+        },
+        { idempotencyKey: credentialKey },
+      ),
+      indeterminate,
+      credentialKey,
+    );
+  else handleReadResult(existing, indeterminate);
+  const projects = httpClient(projectOperations, endpoint, token);
+  const binding = handleReadResult(
+    await projects["binding.get"]({
+      params: { project_id: projectId, binding_id: bindingId },
+      query: {},
+      body: null,
+    }),
+    indeterminate,
+  );
+  const current = handleReadResult(
+    await projects["bindingSet.get"]({
+      params: { project_id: projectId },
+      query: {},
+      body: null,
+    }),
+    indeterminate,
+  );
+  const target = current.bindings[binding.name];
+  if (target?.kind !== BindingKind.Repository)
+    throw new Diagnostic(
+      environmentCode(SECRET_SET, "binding_not_found"),
+      "the binding is not a current repository binding",
+    );
+  const written = await projects["bindingSet.write"](
+    {
+      params: { project_id: projectId },
+      query: {},
+      body: {
+        version: current.version,
+        bindings: {
+          ...current.bindings,
+          [binding.name]: {
+            kind: target.kind,
+            config: {
+              ...target.config,
+              environment_secrets: {
+                ...target.config.environment_secrets,
+                [variable]: credentialName,
+              },
+            },
+          },
+        },
+      },
+    },
+    { idempotencyKey: key },
+  );
+  const data = handleMutationResult(written, indeterminate, key);
+  process.stdout.write(
+    `${JSON.stringify({ ...data, idempotency_key: key })}\n`,
+  );
+}
+
 function addEnvironmentCommands(project: Command): void {
   const environment = project
     .command(ENVIRONMENT)
@@ -759,6 +912,43 @@ function addEnvironmentCommands(project: Command): void {
       (projectId: string, bindingId: string, _options, command: Command) =>
         environmentShow(projectId, bindingId, command),
     );
+  const secret = environment
+    .command("secret")
+    .description("Environment secret commands");
+  secret.action(() => secret.help());
+  addFileBodyHelp(
+    secret
+      .command(SET)
+      .description(
+        "Store a secret as an environment_secret credential and name it in the environment secrets of a repository binding",
+      )
+      .argument("<project-id>", "Project ID")
+      .argument("<binding-id>", "Repository binding ID")
+      .argument("<variable>", "Environment variable name")
+      .requiredOption(
+        "--credential <name>",
+        "Credential name",
+        singleUse("--credential"),
+      )
+      .requiredOption(
+        "--file <path>",
+        "File that holds the secret text",
+        singleUse("--file"),
+      )
+      .option("--idempotency-key <key>", "Mutation key", singleUse(KEY_OPTION)),
+    {
+      example: "<secret text>",
+      note: "The file text is the secret, byte for byte. The command never prints it.",
+    },
+  ).action(
+    (
+      projectId: string,
+      bindingId: string,
+      variable: string,
+      _options,
+      command: Command,
+    ) => environmentSecretSet(projectId, bindingId, variable, command),
+  );
   addFileBodyHelp(
     environment
       .command(SET)

@@ -69,6 +69,7 @@ export const INSTANCE_COUNT_MAX = 64;
 export const STORAGE_PLATFORM = "s3";
 export const REPOSITORY_PLATFORM = "github";
 export const SSH_CREDENTIAL_PLATFORM = "ssh";
+export const ENVIRONMENT_SECRET_PLATFORM = "environment_secret";
 export const RepositoryPlatform = {
   GitHub: "github",
   GitLab: "gitlab",
@@ -133,6 +134,8 @@ export const ProjectErrorCode = {
   RepositoryCredentialRequired:
     "project.bindings.repository.credential_required",
   RepositoryActionUnsupported: "project.bindings.repository.action_unsupported",
+  EnvironmentSecretInvalid:
+    "project.bindings.repository.environment_secret_invalid",
   WorkerAgentUnknown: "project.bindings.worker.agent_unknown",
   WorkerFieldForbidden: "project.bindings.worker.field_forbidden",
   WorkerEnvironmentRequired: "project.bindings.worker.environment_required",
@@ -202,6 +205,9 @@ export const workingLayerSchema = z
   .prefault({});
 export type WorkingLayer = z.output<typeof workingLayerSchema>;
 
+export const ENVIRONMENT_SECRET_VARIABLE = /^[A-Z_][A-Z0-9_]*$/;
+export const ENVIRONMENT_SECRETS_MAX = 16;
+
 export const repositoryConfigSchema = z.strictObject({
   available: z.boolean(),
   platform: z.enum(RepositoryPlatform),
@@ -236,6 +242,7 @@ export const repositoryConfigSchema = z.strictObject({
   project_prompt: z.string().optional(),
   working_layer: workingLayerSchema,
   environment: environmentSchema.optional(),
+  environment_secrets: z.record(z.string(), z.string().min(1)).optional(),
 });
 export const WorkerPlacement = {
   Server: "server",

@@ -72,6 +72,7 @@ import {
   PROJECT_ID_PREFIX,
   PROJECT_SERVICE_NAME,
   ProjectErrorCode,
+  ENVIRONMENT_SECRETS_MAX,
   projectOperations,
 } from "./contract.ts";
 import {
@@ -3973,6 +3974,154 @@ test("bindingsNaming finds exact credential keys at any depth across projects an
       },
     );
     assert.deepEqual(f.project.bindingsNaming(tx, MISSING_NAME), []);
+  });
+});
+
+const REGISTRY_CREDENTIAL = "registry-auth";
+const REGISTRY_VARIABLE = "REGISTRY_AUTH";
+const ENVIRONMENT_SECRET_CREDENTIAL_PLATFORM = "environment_secret";
+const ARCHIVED_CREDENTIAL = "archived-auth";
+const STORAGE_SECRET_CREDENTIAL = "evidence";
+const CUSTODY_PLATFORM_MISMATCH = "credential.platform.mismatch";
+
+function environmentSecretBinding(secrets: unknown) {
+  return {
+    ...repositoryBinding(),
+    config: { ...repositoryBinding().config, environment_secrets: secrets },
+  } as ReturnType<typeof repositoryBinding>;
+}
+
+function environmentSecretCustody(): Partial<Dependencies> {
+  const held: Record<string, string> = {
+    [REGISTRY_CREDENTIAL]: ENVIRONMENT_SECRET_CREDENTIAL_PLATFORM,
+    [STORAGE_SECRET_CREDENTIAL]: "s3",
+  };
+  return {
+    custodySuitability: (_tx, { credential, platform }) => {
+      if (platform !== ENVIRONMENT_SECRET_CREDENTIAL_PLATFORM) return;
+      const holding = held[credential];
+      if (holding === undefined)
+        throw new OperationError(
+          HttpStatus.NotFound,
+          CREDENTIAL_NOT_FOUND,
+          "Credential not found.",
+        );
+      if (holding !== platform)
+        throw new OperationError(
+          HttpStatus.BadRequest,
+          CUSTODY_PLATFORM_MISMATCH,
+          "Credential platform mismatch.",
+        );
+    },
+  };
+}
+
+test("a repository binding writes environment secrets and the binding get answers them", async (t) => {
+  const f = writeFixture(t, environmentSecretCustody());
+  const secrets = { [REGISTRY_VARIABLE]: REGISTRY_CREDENTIAL };
+  const answer = await f.write({
+    [REPOSITORY_NAME]: environmentSecretBinding(secrets),
+  });
+  const written = answer.bindings[REPOSITORY_NAME]!;
+  const stored = f.invoke("binding.get", null, {
+    ...f.params,
+    binding_id: written.id,
+  });
+  assert.deepEqual(
+    (stored.config as { environment_secrets: unknown }).environment_secrets,
+    secrets,
+  );
+  const full = Object.fromEntries(
+    Array.from({ length: ENVIRONMENT_SECRETS_MAX }, (_, index) => [
+      `VARIABLE_${index}`,
+      REGISTRY_CREDENTIAL,
+    ]),
+  );
+  await f.write(
+    { [REPOSITORY_NAME]: environmentSecretBinding(full) },
+    answer.binding_set_version,
+  );
+});
+
+test("a repository binding refuses an environment secret that is not valid", async (t) => {
+  const f = writeFixture(t, environmentSecretCustody());
+  const before = f.snapshot();
+  const overLimit = Object.fromEntries(
+    Array.from({ length: ENVIRONMENT_SECRETS_MAX + 1 }, (_, index) => [
+      `VARIABLE_${index}`,
+      REGISTRY_CREDENTIAL,
+    ]),
+  );
+  const refused: Array<[Record<string, string>, string, string]> = [
+    [{ [REGISTRY_VARIABLE]: "absent-auth" }, REGISTRY_VARIABLE, "absent-auth"],
+    [
+      { [REGISTRY_VARIABLE]: ARCHIVED_CREDENTIAL },
+      REGISTRY_VARIABLE,
+      ARCHIVED_CREDENTIAL,
+    ],
+    [
+      { [REGISTRY_VARIABLE]: STORAGE_SECRET_CREDENTIAL },
+      REGISTRY_VARIABLE,
+      STORAGE_SECRET_CREDENTIAL,
+    ],
+    [
+      { node_auth_token: REGISTRY_CREDENTIAL },
+      "node_auth_token",
+      REGISTRY_CREDENTIAL,
+    ],
+    [{ "1TOKEN": REGISTRY_CREDENTIAL }, "1TOKEN", REGISTRY_CREDENTIAL],
+    [overLimit, `VARIABLE_${ENVIRONMENT_SECRETS_MAX}`, REGISTRY_CREDENTIAL],
+  ];
+  for (const [secrets, variable, credential] of refused) {
+    await rejectsWrite(
+      f.write({ [REPOSITORY_NAME]: environmentSecretBinding(secrets) }),
+      HttpStatus.BadRequest,
+      ProjectErrorCode.EnvironmentSecretInvalid,
+      { binding: REPOSITORY_NAME, variable, credential },
+    );
+    assert.deepEqual(f.snapshot(), before);
+  }
+});
+
+test("an environment secrets value that is no object of strings fails the input schema", () => {
+  const operation = projectOperations["bindingSet.write"];
+  for (const secrets of [
+    "registry-auth",
+    [REGISTRY_CREDENTIAL],
+    { [REGISTRY_VARIABLE]: 1 },
+    { [REGISTRY_VARIABLE]: "" },
+    null,
+  ])
+    assert.equal(
+      operation.input.safeParse({
+        params: { project_id: "project" },
+        query: {},
+        body: {
+          version: BINDING_SET_INITIAL_VERSION,
+          bindings: { [REPOSITORY_NAME]: environmentSecretBinding(secrets) },
+        },
+      }).success,
+      false,
+    );
+});
+
+test("bindingsNaming names the binding that holds the credential in environment secrets", async (t) => {
+  const f = writeFixture(t, environmentSecretCustody());
+  const answer = await f.write({
+    [REPOSITORY_NAME]: environmentSecretBinding({
+      [REGISTRY_VARIABLE]: REGISTRY_CREDENTIAL,
+    }),
+  });
+  f.store.transaction((tx) => {
+    assert.deepEqual(f.project.bindingsNaming(tx, REGISTRY_CREDENTIAL), [
+      {
+        binding_id: answer.bindings[REPOSITORY_NAME]!.id,
+        project_id: f.params.project_id,
+        project_name: PROJECT_NAME,
+        name: REPOSITORY_NAME,
+      },
+    ]);
+    assert.deepEqual(f.project.bindingsNaming(tx, REGISTRY_VARIABLE), []);
   });
 });
 

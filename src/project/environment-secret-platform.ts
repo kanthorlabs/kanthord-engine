@@ -1,6 +1,7 @@
 import { SecretShape, type CredentialPlatform } from "../custody/contract.ts";
+import { ENVIRONMENT_SECRET_PLATFORM } from "./contract.ts";
 
-export const ENVIRONMENT_SECRET_PLATFORM = "environment_secret";
+export { ENVIRONMENT_SECRET_PLATFORM };
 export const CAPABILITY_ENVIRONMENT_SECRET = "environment secret";
 
 export const ENVIRONMENT_SECRET_PLATFORMS: Readonly<
