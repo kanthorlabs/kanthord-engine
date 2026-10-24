@@ -745,7 +745,13 @@ test("setup answers one entry per agent of a two-agent worker with its own promp
       environmentClaimed: () => {},
       environmentDigestOf: () => ENVIRONMENT_DIGEST,
       environmentOf: () => null,
-      repositoryBindingIdsOf: () => Object.keys(policies),
+      repositoryBindingIdsOf: (_tx, nodeId, pinnedRevision) => {
+        assert.deepEqual(
+          [nodeId, pinnedRevision],
+          [claim.nodeId, claim.pinnedRevision],
+        );
+        return Object.keys(policies);
+      },
       intentOf: () => ExecutionIntent.Implement,
       repositoryPolicyOf: (_tx, id) => ({
         binding_id: id,

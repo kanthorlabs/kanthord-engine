@@ -292,7 +292,7 @@ test("agent read renders the framing from the template files of the agent direct
     assert.equal(error.code, AgentErrorCode.PromptTemplateInvalid);
     assert.deepEqual(error.details, {
       template: FRAMING_WORKBENCH,
-      file: `${FRAMING_WORKBENCH}.md`,
+      file: `prompts/${FRAMING_WORKBENCH}.md`,
       path: join(templates, `${FRAMING_WORKBENCH}.md`),
       reason: TemplateInvalidReason.Syntax,
     });

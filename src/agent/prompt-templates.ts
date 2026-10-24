@@ -46,7 +46,12 @@ function templateInvalid(
     HttpStatus.Conflict,
     AgentErrorCode.PromptTemplateInvalid,
     `Prompt template ${name} is invalid: ${message}`,
-    { template: name, file: `${name}${MARKDOWN_EXTENSION}`, path, reason },
+    {
+      template: name,
+      file: `${TEMPLATE_DIRECTORY}/${name}${MARKDOWN_EXTENSION}`,
+      path,
+      reason,
+    },
   );
 }
 

@@ -31,7 +31,7 @@ export interface AgentPromptInput {
   context: Context;
 }
 
-export function promptFileInvalid(
+function promptFileInvalid(
   file: string,
   path: string,
   reason: string,

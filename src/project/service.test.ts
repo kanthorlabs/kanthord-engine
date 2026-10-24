@@ -5108,7 +5108,7 @@ const INSTRUCTION_COMMIT = "a".repeat(40);
 const TREE_PREFIX = "tree-";
 type InstructionTexts = Array<string | null>;
 
-function instructionFixture(
+function environmentReadFixture(
   t: TestContext,
   behavior: {
     commits?: Array<string | null>;
@@ -5244,7 +5244,7 @@ function instructionFixture(
   };
 }
 
-function refusesInstructionFiles(
+function refusesRead(
   promise: Promise<unknown>,
   status: number,
   code: string,
@@ -5440,7 +5440,7 @@ async function setEnvironment(
 }
 
 test("binding.environment.set stores the environment as a new revision with no repository check", async (t) => {
-  const { f, saved, resolveCalls } = instructionFixture(t, {}, WRITABLE);
+  const { f, saved, resolveCalls } = environmentReadFixture(t, {}, WRITABLE);
   f.project.cancelEnvironmentRuns();
   const answer = await setEnvironment(f, saved, STORED_ENVIRONMENT);
   const stored = answer.bindings[REPOSITORY_NAME];
@@ -5462,7 +5462,7 @@ test("binding.environment.set stores the environment as a new revision with no r
 });
 
 test("a revision pinned before an environment set takes the environment of the current revision", async (t) => {
-  const { f, saved } = instructionFixture(t, {}, WRITABLE);
+  const { f, saved } = environmentReadFixture(t, {}, WRITABLE);
   const pinned = f.store.transaction((tx) =>
     f.project.repositoryPolicyOf(tx, saved.binding_id),
   );
@@ -5476,7 +5476,7 @@ test("a revision pinned before an environment set takes the environment of the c
 });
 
 test("binding.environment.get answers the stored environment with no repository read", async (t) => {
-  const { f, saved, resolveCalls, readCalls } = instructionFixture(
+  const { f, saved, resolveCalls, readCalls } = environmentReadFixture(
     t,
     {},
     WRITABLE,
@@ -5500,7 +5500,7 @@ test("binding.environment.get answers the stored environment with no repository 
 });
 
 test("binding.environment.get reads the devcontainer file of the repository at the base head", async (t) => {
-  const present = instructionFixture(t, {
+  const present = environmentReadFixture(t, {
     texts: [DEVCONTAINER_TEXT],
     placement: WorkerPlacement.Container,
   });
@@ -5517,7 +5517,7 @@ test("binding.environment.get reads the devcontainer file of the repository at t
     },
   );
   assert.deepEqual(present.readCalls[NO_ITEMS]?.paths, [DEVCONTAINER_FILE]);
-  const invalid = instructionFixture(t, {
+  const invalid = environmentReadFixture(t, {
     texts: ["{"],
     placement: WorkerPlacement.Container,
   });
@@ -5538,7 +5538,7 @@ test("binding.environment.get answers the detected source at the image target wi
     "package.json": PACKAGE_JSON_TEXT,
     "package-lock.json": PACKAGE_LOCK_TEXT,
   };
-  const { f, saved } = instructionFixture(t, {
+  const { f, saved } = environmentReadFixture(t, {
     files,
     placement: WorkerPlacement.Container,
   });
@@ -5564,7 +5564,7 @@ test("binding.environment.get answers the detected source at the image target wi
 });
 
 test("binding.environment.get reads the detection files under the read deadline, not the healthcheck deadline", async (t) => {
-  const { f, saved, resolveCalls, readCalls } = instructionFixture(t, {
+  const { f, saved, resolveCalls, readCalls } = environmentReadFixture(t, {
     files: { "package.json": PACKAGE_JSON_TEXT },
     placement: WorkerPlacement.Container,
   });
@@ -5581,13 +5581,13 @@ test("binding.environment.get reads the detection files under the read deadline,
 });
 
 test("binding.environment.get refuses a read that exceeds the read deadline, not the healthcheck deadline", async (t) => {
-  const { f, saved, started } = instructionFixture(t, {
+  const { f, saved, started } = environmentReadFixture(t, {
     hang: true,
     placement: WorkerPlacement.Container,
   });
   t.mock.timers.enable({ apis: ["setTimeout", "Date"], now: Date.now() });
   let settled = false;
-  const refusal = refusesInstructionFiles(
+  const refusal = refusesRead(
     f.invokeAsync("binding.environment.get", saved),
     SSH_FAILURE_STATUS,
     ProjectErrorCode.RepositorySshUnreachable,
@@ -5606,12 +5606,12 @@ test("binding.environment.get refuses a read that exceeds the read deadline, not
 });
 
 test("binding.environment.get refuses a devcontainer read that exceeds the read deadline with ssh_unreachable", async (t) => {
-  const { f, saved, readStarted } = instructionFixture(t, {
+  const { f, saved, readStarted } = environmentReadFixture(t, {
     readHang: true,
     placement: WorkerPlacement.Container,
   });
   t.mock.timers.enable({ apis: ["setTimeout", "Date"], now: Date.now() });
-  const refusal = refusesInstructionFiles(
+  const refusal = refusesRead(
     f.invokeAsync("binding.environment.get", saved),
     SSH_FAILURE_STATUS,
     ProjectErrorCode.RepositorySshUnreachable,
@@ -5623,12 +5623,12 @@ test("binding.environment.get refuses a devcontainer read that exceeds the read 
 
 test("binding.environment.get bounds the commit read and the detection read with one read deadline", async (t) => {
   t.mock.timers.enable({ apis: ["setTimeout", "Date"], now: Date.now() });
-  const { f, saved, readStarted } = instructionFixture(t, {
+  const { f, saved, readStarted } = environmentReadFixture(t, {
     readHang: true,
     resolveAdvance: () => t.mock.timers.tick(COMMIT_READ_MS),
   });
   let settled = false;
-  const refusal = refusesInstructionFiles(
+  const refusal = refusesRead(
     f.invokeAsync("binding.environment.get", saved),
     SSH_FAILURE_STATUS,
     ProjectErrorCode.RepositorySshUnreachable,
@@ -5652,7 +5652,7 @@ test("the environment route outlasts the read deadline", () => {
 });
 
 test("binding.environment.get answers the universal source at the image target with no manifest", async (t) => {
-  const { f, saved } = instructionFixture(t, {
+  const { f, saved } = environmentReadFixture(t, {
     files: {},
     placement: WorkerPlacement.Container,
   });
@@ -5670,7 +5670,7 @@ test("binding.environment.get answers the universal source at the image target w
 });
 
 test("binding.environment.get at the host target ignores the repository devcontainer", async (t) => {
-  const none = instructionFixture(t, {
+  const none = environmentReadFixture(t, {
     files: { [DEVCONTAINER_FILE]: DEVCONTAINER_TEXT },
   });
   assert.deepEqual(
@@ -5685,7 +5685,7 @@ test("binding.environment.get at the host target ignores the repository devconta
   assert.ok(
     none.readCalls.every((call) => !call.paths.includes(DEVCONTAINER_FILE)),
   );
-  const detected = instructionFixture(t, {
+  const detected = environmentReadFixture(t, {
     files: {
       [DEVCONTAINER_FILE]: DEVCONTAINER_TEXT,
       "package.json": PACKAGE_JSON_TEXT,
@@ -5699,7 +5699,7 @@ test("binding.environment.get at the host target ignores the repository devconta
 });
 
 test("binding.environment.get and set refuse a binding that is not a repository binding", async (t) => {
-  const { f, saved } = instructionFixture(t, {}, WRITABLE);
+  const { f, saved } = environmentReadFixture(t, {}, WRITABLE);
   const worker = f.store.transaction((tx) => {
     const written = persistBindings(tx, saved.project_id, {
       [REPOSITORY_NAME]: repositoryBinding(),
@@ -5708,12 +5708,12 @@ test("binding.environment.get and set refuse a binding that is not a repository 
     assert.ok(written);
     return { project_id: saved.project_id, binding_id: written.id };
   });
-  await refusesInstructionFiles(
+  await refusesRead(
     f.invokeAsync("binding.environment.get", worker),
     HttpStatus.NotFound,
     ProjectErrorCode.BindingNotFound,
   );
-  await refusesInstructionFiles(
+  await refusesRead(
     setEnvironment(f, worker, STORED_ENVIRONMENT),
     HttpStatus.NotFound,
     ProjectErrorCode.BindingNotFound,
@@ -5721,8 +5721,8 @@ test("binding.environment.get and set refuse a binding that is not a repository 
 });
 
 test("binding.environment.set refuses a key or a value that the build path does not allow and names the key", async (t) => {
-  const { f, saved } = instructionFixture(t, {}, WRITABLE);
-  await refusesInstructionFiles(
+  const { f, saved } = environmentReadFixture(t, {}, WRITABLE);
+  await refusesRead(
     setEnvironment(f, saved, {
       build: { dockerfile: "Dockerfile", options: ["--volume=/:/host"] },
     }),
@@ -5730,7 +5730,7 @@ test("binding.environment.set refuses a key or a value that the build path does 
     EnvironmentErrorCode.KeyRefused,
     { key: "build.options", reason: EnvironmentRefusalReason.KeyNotAllowed },
   );
-  await refusesInstructionFiles(
+  await refusesRead(
     setEnvironment(f, saved, {
       image: STORED_ENVIRONMENT.image,
       containerEnv: { TOKEN: "${localEnv:GH_TOKEN}" },
@@ -5745,7 +5745,7 @@ test("binding.environment.set refuses a key or a value that the build path does 
 });
 
 test("a repository devcontainer with a refused key names the key in environment show", async (t) => {
-  const refused = instructionFixture(t, {
+  const refused = environmentReadFixture(t, {
     texts: [`{ "image": "base", "runArgs": ["--privileged"] }`],
     placement: WorkerPlacement.Container,
   });
@@ -5762,10 +5762,13 @@ const OTHER_ADDRESS = "git@github.com:owner/other.git";
 
 function twoRepositories(
   t: TestContext,
-  behavior: Parameters<typeof instructionFixture>[1],
+  behavior: Parameters<typeof environmentReadFixture>[1],
   overrides: Partial<Dependencies> = {},
 ) {
-  const fixed = instructionFixture(t, behavior, { ...WRITABLE, ...overrides });
+  const fixed = environmentReadFixture(t, behavior, {
+    ...WRITABLE,
+    ...overrides,
+  });
   const other = fixed.f.store.transaction((tx) => {
     const version = requireProject(
       tx,
@@ -5968,7 +5971,7 @@ test("a binding-set write notifies the onboarding component after the commit and
 test("a wake of a binding-set write finds a changed repository binding not claimable", async (t) => {
   let armed = false;
   const answers: boolean[] = [];
-  const { f, saved } = instructionFixture(
+  const { f, saved } = environmentReadFixture(
     t,
     {},
     {
@@ -5993,7 +5996,7 @@ test("a wake of a binding-set write finds a changed repository binding not claim
 });
 
 test("binding.environment.set notifies the onboarding component once", async (t) => {
-  const { f, saved } = instructionFixture(t, {}, WRITABLE);
+  const { f, saved } = environmentReadFixture(t, {}, WRITABLE);
   const mocked = t.mock.method(
     Onboarding.prototype,
     "bindingsChanged",
@@ -6005,7 +6008,7 @@ test("binding.environment.set notifies the onboarding component once", async (t)
 });
 
 test("Project answers the environment methods through the onboarding component", async (t) => {
-  const { f, saved, resolveCalls } = instructionFixture(t, {}, WRITABLE);
+  const { f, saved, resolveCalls } = environmentReadFixture(t, {}, WRITABLE);
   const { project_id: projectId, binding_id: bindingId } = saved;
   const identity = identityOf(f, saved);
   const claimable = () =>
@@ -6085,7 +6088,7 @@ function imageGroupFixture(t: TestContext, provedTag: boolean) {
     },
     build: async (_input, signal) => untilAborted(signal),
   });
-  const fixed = instructionFixture(
+  const fixed = environmentReadFixture(
     t,
     { texts: [DEVCONTAINER_TEXT] },
     { ...WRITABLE, environmentRuntime: logged.runtime },
@@ -6176,7 +6179,7 @@ test("binding.environment.rebuild answers 409 during an active run of the group"
         ?.run_started_at !== null &&
       f.project.environmentStates(params.project_id).length === ONE_CALL,
   );
-  await refusesInstructionFiles(
+  await refusesRead(
     f.invokeAsync("binding.environment.rebuild", params),
     HttpStatus.Conflict,
     ProjectErrorCode.EnvironmentRunActive,
@@ -6207,7 +6210,7 @@ test("binding.environment.rebuild answers 404 for an unknown, a foreign, a remov
     removed,
     { ...params, binding_id: worker.id },
   ])
-    await refusesInstructionFiles(
+    await refusesRead(
       f.invokeAsync("binding.environment.rebuild", refused),
       HttpStatus.NotFound,
       ProjectErrorCode.BindingNotFound,
@@ -6224,15 +6227,15 @@ test("both environment operations refuse a machine caller by their access policy
 const REFUSED_KEY = "runArgs";
 
 test("binding.environment.set answers key_refused for a document with runArgs and invalid for a non-object or a wrong type", async (t) => {
-  const { f, saved } = instructionFixture(t, {}, WRITABLE);
-  await refusesInstructionFiles(
+  const { f, saved } = environmentReadFixture(t, {}, WRITABLE);
+  await refusesRead(
     setEnvironment(f, saved, { image: "base", runArgs: ["--privileged"] }),
     HttpStatus.BadRequest,
     EnvironmentErrorCode.KeyRefused,
     { key: REFUSED_KEY, reason: EnvironmentRefusalReason.KeyNotAllowed },
   );
   for (const invalid of [[], "image", 5, { image: 5 }])
-    await refusesInstructionFiles(
+    await refusesRead(
       setEnvironment(f, saved, invalid),
       HttpStatus.BadRequest,
       EnvironmentErrorCode.Invalid,
@@ -6240,7 +6243,7 @@ test("binding.environment.set answers key_refused for a document with runArgs an
 });
 
 test("binding.environment.set with null removes the key and the source returns to the repository file", async (t) => {
-  const { f, saved } = instructionFixture(
+  const { f, saved } = environmentReadFixture(
     t,
     { texts: [DEVCONTAINER_TEXT], placement: WorkerPlacement.Container },
     { ...WRITABLE, workerAgentsOf: () => [AGENT], validateEntry: () => {} },
