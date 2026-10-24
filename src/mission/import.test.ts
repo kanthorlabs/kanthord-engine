@@ -30,6 +30,7 @@ import {
   type ImportSnapshot,
   type Mission,
   type MissionBindings,
+  type MissionEnvironments,
   type SchedulerClaims,
   type WorkQueue,
   Intent,
@@ -56,6 +57,7 @@ import {
   insertRevision,
   readCurrentRevision,
   readMission,
+  readMissionNodes,
   readNode,
 } from "./store.ts";
 
@@ -95,6 +97,22 @@ const content: TaskBody = {
   verifications: ["true"],
   bindings: [],
 };
+const SECOND_REPOSITORY = "repo_two";
+const IDENTITIES: Record<string, string> = {
+  [BINDING_ID]: "repository:example",
+  [NEXT_BINDING_ID]: "repository:other",
+};
+let mixedAnswer = false;
+const environments: MissionEnvironments = {
+  environmentsMixed: (_tx, projectId, identities) => {
+    assert.equal(projectId, PROJECT_ID);
+    return (
+      mixedAnswer &&
+      identities.includes(IDENTITIES[BINDING_ID]!) &&
+      identities.includes(IDENTITIES[NEXT_BINDING_ID]!)
+    );
+  },
+};
 const bindings: MissionBindings = {
   storageBindingOf: () =>
     assert.fail("Import does not read storage configuration."),
@@ -102,14 +120,26 @@ const bindings: MissionBindings = {
     assert.fail("Import does not derive repository policies."),
   resolveBinding: (_tx, projectId, name) => {
     assert.equal(projectId, PROJECT_ID);
+    if (name === SECOND_REPOSITORY)
+      return {
+        binding_id: NEXT_BINDING_ID,
+        resource_identity: IDENTITIES[NEXT_BINDING_ID]!,
+      };
     return name === REPOSITORY
       ? { binding_id: BINDING_ID, resource_identity: "repository:example" }
       : null;
   },
   resolveBindingIdentity: () =>
     assert.fail("Import resolves names, not binding identities."),
-  getBindingRevision: () =>
-    assert.fail("Import resolves names, not historical bindings."),
+  getBindingRevision: (_tx, bindingId) => ({
+    binding_id: bindingId,
+    project_id: PROJECT_ID,
+    name: bindingId,
+    resource_identity: IDENTITIES[bindingId]!,
+    revision: VERSION,
+    tombstone: false,
+    disabled: false,
+  }),
 };
 const markdown = `---
 intent: examine
@@ -254,7 +284,9 @@ function fixture(t: TestContext, inputs = [entry()]) {
   }));
   const entries = store.transaction((tx) => seed(tx, mission, inputs));
   const resolve = (set = entries, resolver = bindings) =>
-    store.transaction((tx) => resolveImportSet(tx, mission, set, resolver));
+    store.transaction((tx) =>
+      resolveImportSet(tx, mission, set, resolver, environments),
+    );
   return { store, mission, entries, resolve };
 }
 
@@ -1326,6 +1358,7 @@ test("prepared import exposes the resolved state without resolving bindings twic
           return bindings.resolveBinding(...args);
         },
       },
+      environments,
       TEXT_MAX_BYTES,
     ),
   );
@@ -1466,6 +1499,7 @@ function importer(t: TestContext) {
         body,
         mission.id,
         bindings,
+        environments,
         TEXT_MAX_BYTES,
       );
       return applyImport(
@@ -1478,6 +1512,7 @@ function importer(t: TestContext) {
         },
         actor,
         bindings,
+        environments,
         workQueue,
         TEXT_MAX_BYTES,
         schedulerClaims,
@@ -1587,6 +1622,7 @@ test("import refuses a removed task identity with mission.import.retired_id", (t
       readMission(tx, mission.id)!,
       [...entries, unknown],
       bindings,
+      environments,
     ),
   );
   assert.deepEqual(
@@ -1652,6 +1688,7 @@ test("an import that retires a node keeps its tasks in the last revision", (t) =
       readMission(tx, mission.id)!,
       [...survivors, ...named],
       bindings,
+      environments,
     ),
   );
   assert.deepEqual(
@@ -1819,6 +1856,7 @@ function checkPreview(
       },
       mission.id,
       bindings,
+      environments,
       TEXT_MAX_BYTES,
     );
     assert.deepEqual(readMission(tx, mission.id), before);
@@ -2091,4 +2129,154 @@ test("preview reports the unmatched pairs and leaves the mission version unchang
   ]);
   assert.deepEqual(covered.violations, []);
   assert.deepEqual(rows(), before);
+});
+
+function mixedSet() {
+  return [
+    markdownFile(
+      "first.md",
+      `intent: implement\nbindings: [${REPOSITORY}, ${SECOND_REPOSITORY}]\nverifications: [npm run lint]`,
+    ),
+    markdownFile(
+      "second.md",
+      `intent: implement\nbindings: [${SECOND_REPOSITORY}, ${REPOSITORY}]\nverifications: [npm run lint]`,
+    ),
+  ];
+}
+
+function mixedPreview(t: TestContext, files: ReturnType<typeof mixedSet>) {
+  const { store, mission } = fixture(t, []);
+  return store.transaction((tx) =>
+    prepareImport(
+      tx,
+      mission,
+      {
+        format: ImportFormat.Markdown,
+        mission_id: mission.id,
+        mission_version: mission.version,
+        reason: REASON,
+        files,
+      },
+      mission.id,
+      bindings,
+      environments,
+      TEXT_MAX_BYTES,
+    ).preview.violations.map(({ code, filename, details }) => ({
+      code,
+      filename,
+      details,
+    })),
+  );
+}
+
+test("import preview lists the environment mix of a node file", (t) => {
+  mixedAnswer = true;
+  t.after(() => {
+    mixedAnswer = false;
+  });
+  assert.deepEqual(mixedPreview(t, mixedSet().slice(0, 1)), [
+    {
+      code: MissionErrorCode.EnvironmentMixed,
+      filename: "first.md",
+      details: { bindings: [BINDING_ID, NEXT_BINDING_ID] },
+    },
+  ]);
+});
+
+test("import preview lists one environment mix violation for each node file", (t) => {
+  mixedAnswer = true;
+  t.after(() => {
+    mixedAnswer = false;
+  });
+  assert.deepEqual(mixedPreview(t, mixedSet()), [
+    {
+      code: MissionErrorCode.EnvironmentMixed,
+      filename: "first.md",
+      details: { bindings: [BINDING_ID, NEXT_BINDING_ID] },
+    },
+    {
+      code: MissionErrorCode.EnvironmentMixed,
+      filename: "second.md",
+      details: { bindings: [NEXT_BINDING_ID, BINDING_ID] },
+    },
+  ]);
+});
+
+test("import apply refuses the environment mix and writes no node", (t) => {
+  mixedAnswer = true;
+  t.after(() => {
+    mixedAnswer = false;
+  });
+  const { store, mission } = fixture(t, []);
+  const body = {
+    format: ImportFormat.Markdown,
+    mission_id: mission.id,
+    mission_version: mission.version,
+    reason: REASON,
+    files: mixedSet().slice(0, 1),
+  } as const;
+  assert.throws(
+    () =>
+      store.transaction((tx) =>
+        applyImport(
+          tx,
+          mission.id,
+          { ...body, preview_digest: "none", confirmed_retirements: [] },
+          actor,
+          bindings,
+          environments,
+          workQueue,
+          TEXT_MAX_BYTES,
+          schedulerClaims,
+        ),
+      ),
+    (error) =>
+      error instanceof OperationError &&
+      error.status === HttpStatus.BadRequest &&
+      error.code === MissionErrorCode.EnvironmentMixed,
+  );
+  assert.deepEqual(
+    store.transaction((tx) => readMissionNodes(tx, mission.id)),
+    [],
+  );
+});
+
+test("import with equal stored environments lists no violation and applies", (t) => {
+  const files = mixedSet().slice(0, 1);
+  assert.deepEqual(mixedPreview(t, files), []);
+  const { store, mission } = fixture(t, []);
+  const body = {
+    format: ImportFormat.Markdown,
+    mission_id: mission.id,
+    mission_version: mission.version,
+    reason: REASON,
+    files,
+  } as const;
+  const result = store.transaction((tx) => {
+    const { preview } = prepareImport(
+      tx,
+      mission,
+      body,
+      mission.id,
+      bindings,
+      environments,
+      TEXT_MAX_BYTES,
+    );
+    return applyImport(
+      tx,
+      mission.id,
+      {
+        ...body,
+        preview_digest: preview.preview_digest,
+        confirmed_retirements: preview.retirements,
+      },
+      actor,
+      bindings,
+      environments,
+      workQueue,
+      TEXT_MAX_BYTES,
+      schedulerClaims,
+    );
+  });
+  assert.equal(result.assigned_ids.length, SINGLE_ENTRY);
 });

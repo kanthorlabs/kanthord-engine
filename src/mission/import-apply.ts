@@ -15,6 +15,7 @@ import {
   type ImportResult,
   type Mission,
   type MissionBindings,
+  type MissionEnvironments,
   type Revision,
   type Violation,
   type WorkQueue,
@@ -365,6 +366,7 @@ export function applyImport(
   body: ImportApply,
   actor: HumanActor,
   bindings: MissionBindings,
+  environments: MissionEnvironments,
   workQueue: WorkQueue,
   textMaxBytes: number,
   schedulerClaims: SchedulerClaims,
@@ -376,6 +378,7 @@ export function applyImport(
     body,
     missionId,
     bindings,
+    environments,
     textMaxBytes,
   );
   confirmImport(preview, body);

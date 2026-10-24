@@ -3,6 +3,7 @@ import { OperationError } from "../kernel/errors.ts";
 import { canonicalJSON, digest } from "../kernel/json.ts";
 import type { Transaction } from "../kernel/store.ts";
 import { importAdmissible, isTerminal } from "./admission.ts";
+import { guardEnvironmentMix } from "./environment-mix.ts";
 import {
   commitTypeField,
   resolveNodeBindings,
@@ -25,6 +26,7 @@ import {
   type ImportSnapshot,
   type Mission,
   type MissionBindings,
+  type MissionEnvironments,
   type TaskBody,
   type TaskContent,
   type Violation,
@@ -361,6 +363,7 @@ function resolveBindings(
   mission: Mission,
   entry: NormalizedEntry,
   bindings: MissionBindings,
+  environments: MissionEnvironments,
   violations: Violation[],
 ): string[] {
   if (isTaskEntry(entry)) {
@@ -376,16 +379,23 @@ function resolveBindings(
     return [];
   }
   const intent = entry.intent as Intent;
-  const resolved = collect(violations, entry, () =>
-    resolveNodeBindings(
+  const resolved = collect(violations, entry, () => {
+    const named = resolveNodeBindings(
       tx,
       (inner, projectId, name) =>
         bindings.resolveBinding(inner, projectId, name),
       mission.project_id,
       intent,
       entry.bindings,
-    ),
-  );
+    );
+    guardEnvironmentMix(
+      tx,
+      { bindings, environments },
+      mission.project_id,
+      named.map((binding) => binding.binding_id),
+    );
+    return named;
+  });
   return (resolved ?? []).map((binding) => binding.binding_id);
 }
 
@@ -589,6 +599,7 @@ export function resolveImportSet(
   mission: Mission,
   entries: NormalizedEntry[],
   bindings: MissionBindings,
+  environments: MissionEnvironments,
 ): ResolvedImport {
   assert.ok(
     Number.isSafeInteger(mission.version),
@@ -647,6 +658,7 @@ export function resolveImportSet(
         mission,
         entry,
         bindings,
+        environments,
         result.violations,
       ),
     });
@@ -756,6 +768,7 @@ export function prepareImport(
   snapshot: ImportSnapshot,
   routeMissionId: string,
   bindings: MissionBindings,
+  environments: MissionEnvironments,
   textMaxBytes: number,
 ): PreparedImport {
   assert.equal(mission.id, routeMissionId, "Route mission was loaded.");
@@ -771,7 +784,13 @@ export function prepareImport(
   );
   const resolved =
     normalized.violations.length === NO_VIOLATIONS
-      ? resolveImportSet(tx, mission, normalized.entries, bindings)
+      ? resolveImportSet(
+          tx,
+          mission,
+          normalized.entries,
+          bindings,
+          environments,
+        )
       : null;
   const violations =
     resolved === null
