@@ -24,5 +24,5 @@ test("the fake repository clones a checkout that git bundles at its head", async
   const git = simpleGit(directory);
   const bundle = join(directory, "..", "repository.bundle");
   await git.raw(["bundle", "create", "--quiet", bundle, "HEAD"]);
-  await simpleGit().raw(["bundle", "verify", "--quiet", bundle]);
+  await git.raw(["bundle", "verify", "--quiet", bundle]);
 });
