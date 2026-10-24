@@ -238,6 +238,7 @@ function storeFixture(t: TestContext, beforeWrite: () => void = () => {}) {
       grantFacts: () => ({ facts: { address: ADDRESS } }),
       release: () => ({}),
     } as never,
+    credentialRecords: {} as never,
     sshAccessOf: () => ({}) as never,
     workerAgentsOf: unexpected,
     workerAgentView: unexpected,

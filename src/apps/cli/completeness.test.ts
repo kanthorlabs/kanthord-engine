@@ -10,7 +10,10 @@ import { storageOperations } from "../../storage/contract.ts";
 import { workerOperations } from "../../worker/contract.ts";
 import { agentOperations } from "../../agent/contract.ts";
 import { schedulerOperations } from "../../scheduler/contract.ts";
-import { projectOperations } from "../../project/contract.ts";
+import {
+  environmentSecretOperations,
+  projectOperations,
+} from "../../project/contract.ts";
 import { missionOperations } from "../../mission/contract.ts";
 import { intakeOperations } from "../../intake/contract.ts";
 import { trackingOperations } from "../../tracking/contract.ts";
@@ -45,6 +48,16 @@ const API_ONLY_OPERATIONS = [
   "gateway.healthcheck",
   "gateway.openapi",
   "gateway.openapiFile",
+  "project.credential.platform_list",
+  "project.credential.create",
+  "project.credential.get",
+  "project.credential.rotate",
+  "project.credential.list",
+  "project.credential.update_metadata",
+  "project.credential.revoke",
+  "project.credential.archive",
+  "project.credential.verify",
+  "project.credential.check",
   "worker.credential",
   "worker.ssh.sign",
   "worker.instance.token",
@@ -95,7 +108,7 @@ const TOP_LEVEL_DEPTH = 1;
 const INTAKE_GROUP = "intake";
 const TRACKING_GROUP = "tracking";
 const IMPLEMENTED_COUNT = 187;
-const OPERATION_COUNT = 202;
+const OPERATION_COUNT = 212;
 const INTAKE_LEAVES = [
   "intake event delete",
   "intake event discard",
@@ -254,6 +267,7 @@ test("documented ERD 2 and ERD 3 CLI leaves and API-only operations exactly cove
     workerOperations,
     schedulerOperations,
     projectOperations,
+    environmentSecretOperations,
     missionOperations,
     intakeOperations,
     trackingOperations,

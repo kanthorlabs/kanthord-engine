@@ -24,6 +24,22 @@ import {
 import type { RepositoryFile, SshAccess } from "../repository/contract.ts";
 import { timestamp } from "../kernel/json.ts";
 import {
+  CREATE_MAX_BODY_BYTES,
+  CREDENTIAL_TIMEOUT_MS,
+  credentialAnswerSchema,
+  credentialCheckAnswerSchema,
+  credentialCheckBodySchema,
+  credentialCreateSchema,
+  credentialListAnswerSchema,
+  credentialListQuerySchema,
+  credentialParamsSchema,
+  credentialPlatformListAnswerSchema,
+  credentialRevisionParamsSchema,
+  credentialRotateBodySchema,
+  credentialUpdateMetadataBodySchema,
+  METADATA_MAX_BODY_BYTES,
+} from "../custody/contract.ts";
+import {
   EnvironmentSource,
   environmentSchema,
   type Environment,
@@ -1142,3 +1158,153 @@ export type VerifyRepositoryCredential = (
   credentialName: string,
   context: Context,
 ) => Promise<BindingCheckEntry>;
+
+export const environmentSecretCredentialAnswerSchema =
+  credentialAnswerSchema.extend({
+    bindings: z.array(
+      z.strictObject({
+        project_id: z.string(),
+        project_name: z.string(),
+        binding_id: z.string(),
+        name: z.string(),
+      }),
+    ),
+  });
+export type EnvironmentSecretCredentialAnswer = z.infer<
+  typeof environmentSecretCredentialAnswerSchema
+>;
+
+const credentialOperation = {
+  ...baseOperation,
+  timeoutMs: CREDENTIAL_TIMEOUT_MS,
+} as const;
+const credentialRead = {
+  ...credentialOperation,
+  mutation: false,
+  body: false,
+} as const;
+const credentialWrite = {
+  ...credentialOperation,
+  mutation: true,
+  body: true,
+  maxBodyBytes: CREATE_MAX_BODY_BYTES,
+} as const;
+const credentialAction = {
+  ...credentialOperation,
+  mutation: true,
+  body: false,
+} as const;
+
+export const environmentSecretOperations = {
+  platform_list: {
+    ...credentialRead,
+    id: "project.credential.platform_list",
+    method: HttpMethod.Get,
+    path: "/api/project/credential/platform",
+    input: readInput(emptyFields, emptyFields),
+    output: credentialPlatformListAnswerSchema,
+    description: "List the environment secret credential platforms.",
+  },
+  create: {
+    ...credentialWrite,
+    id: "project.credential.create",
+    method: HttpMethod.Post,
+    path: "/api/project/credential",
+    input: z.strictObject({
+      params: emptyFields,
+      query: emptyFields,
+      body: credentialCreateSchema,
+    }),
+    output: credentialAnswerSchema,
+    description: "Create an environment secret with its first revision.",
+  },
+  list: {
+    ...credentialRead,
+    id: "project.credential.list",
+    method: HttpMethod.Get,
+    path: "/api/project/credential",
+    input: readInput(emptyFields, credentialListQuerySchema),
+    output: credentialListAnswerSchema,
+    description:
+      "List environment secrets with optional platform filtering and pagination.",
+  },
+  get: {
+    ...credentialRead,
+    id: "project.credential.get",
+    method: HttpMethod.Get,
+    path: "/api/project/credential/:credential_name",
+    input: readInput(credentialParamsSchema, emptyFields),
+    output: environmentSecretCredentialAnswerSchema,
+    description:
+      "Get an environment secret, all its revisions and the bindings that name it.",
+  },
+  rotate: {
+    ...credentialWrite,
+    id: "project.credential.rotate",
+    method: HttpMethod.Post,
+    path: "/api/project/credential/:credential_name/revision",
+    input: z.strictObject({
+      params: credentialParamsSchema,
+      query: emptyFields,
+      body: credentialRotateBodySchema,
+    }),
+    output: credentialAnswerSchema,
+    description: "Rotate an environment secret into a new revision.",
+  },
+  update_metadata: {
+    ...credentialWrite,
+    id: "project.credential.update_metadata",
+    method: HttpMethod.Put,
+    path: "/api/project/credential/:credential_name/metadata",
+    maxBodyBytes: METADATA_MAX_BODY_BYTES,
+    input: z.strictObject({
+      params: credentialParamsSchema,
+      query: emptyFields,
+      body: credentialUpdateMetadataBodySchema,
+    }),
+    output: credentialAnswerSchema,
+    description: "Update environment secret metadata in a new revision.",
+  },
+  revoke: {
+    ...credentialAction,
+    id: "project.credential.revoke",
+    method: HttpMethod.Post,
+    path: "/api/project/credential/:credential_name/revision/:revision/revoke",
+    input: readInput(credentialRevisionParamsSchema, emptyFields),
+    output: credentialAnswerSchema,
+    description: "End an older environment secret revision.",
+  },
+  archive: {
+    ...credentialAction,
+    id: "project.credential.archive",
+    method: HttpMethod.Post,
+    path: "/api/project/credential/:credential_name/archive",
+    input: readInput(credentialParamsSchema, emptyFields),
+    output: credentialAnswerSchema,
+    description: "Archive an environment secret that no dependent names.",
+  },
+  check: {
+    ...credentialWrite,
+    id: "project.credential.check",
+    method: HttpMethod.Post,
+    path: "/api/project/credential/check",
+    mutation: false,
+    input: z.strictObject({
+      params: emptyFields,
+      query: emptyFields,
+      body: credentialCheckBodySchema,
+    }),
+    output: credentialCheckAnswerSchema,
+    description: "Check a typed environment secret before it is saved.",
+  },
+  verify: {
+    ...credentialAction,
+    id: "project.credential.verify",
+    method: HttpMethod.Post,
+    path: "/api/project/credential/:credential_name/verify",
+    mutation: false,
+    input: readInput(credentialParamsSchema, emptyFields),
+    output: credentialCheckAnswerSchema,
+    description: "Verify one stored environment secret record.",
+  },
+} as const satisfies Record<string, Operation>;

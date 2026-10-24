@@ -169,6 +169,16 @@ const CORE_OPERATIONS = [
   "project.binding.environment.rebuild",
   "project.environment.list",
   "project.binding.check",
+  "project.credential.platform_list",
+  "project.credential.create",
+  "project.credential.list",
+  "project.credential.get",
+  "project.credential.rotate",
+  "project.credential.update_metadata",
+  "project.credential.revoke",
+  "project.credential.archive",
+  "project.credential.verify",
+  "project.credential.check",
 ];
 const CURSOR_ENCODING = "base64url";
 type OperationKey = Exclude<
@@ -359,6 +369,7 @@ function fixture(t: TestContext, overrides: Partial<Dependencies> = {}) {
     verifyRepositoryCredential: unexpected,
     identity: PROJECT_IDENTITY,
     custody: ssh.custody,
+    credentialRecords: {} as never,
     sshAccessOf: (tx, granted, material) =>
       repository.sshAccessOf(tx, granted, material),
     workerAgentsOf: unexpected,

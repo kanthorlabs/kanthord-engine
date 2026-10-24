@@ -7,7 +7,10 @@ import { llmOperations } from "../../llm/contract.ts";
 import { repositoryOperations } from "../../repository/contract.ts";
 import { storageOperations } from "../../storage/contract.ts";
 import { schedulerOperations } from "../../scheduler/contract.ts";
-import { projectOperations } from "../../project/contract.ts";
+import {
+  environmentSecretOperations,
+  projectOperations,
+} from "../../project/contract.ts";
 import { missionOperations } from "../../mission/contract.ts";
 import { workbenchOperations } from "../../workbench/contract.ts";
 import { intakeOperations } from "../../intake/contract.ts";
@@ -415,6 +418,7 @@ const apiOperations = [
   ...Object.values(workerOperations),
   ...Object.values(schedulerOperations),
   ...Object.values(projectOperations),
+  ...Object.values(environmentSecretOperations),
   ...Object.values(missionOperations),
   ...Object.values(workbenchOperations),
   ...Object.values(intakeOperations),
