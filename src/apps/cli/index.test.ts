@@ -1421,6 +1421,7 @@ test("serve worker with an instance configuration reports an unavailable server 
   assert.equal(
     unavailable.stderr.trim().split("\n").length,
     SINGLE_DIAGNOSTIC_LINE,
+    unavailable.stderr,
   );
   assert.match(unavailable.stderr, /^worker\.version\.unavailable:/);
   assert.deepEqual(readdirSync(directory), [DATA_DIRECTORY]);
@@ -2264,6 +2265,7 @@ test("launcher rejects an unsupported runtime before importing application code"
     assert.equal(
       result.stderr.trim().split("\n").length,
       SINGLE_DIAGNOSTIC_LINE,
+      result.stderr,
     );
     assert.match(result.stderr, />=24.15.0 <25/);
   }
