@@ -14,6 +14,7 @@ import {
 import { COMMAND_LIMIT_MS } from "../../worker/unit/budget.ts";
 import type { ContainerRuntime } from "../../worker/contract.ts";
 import {
+  CACHE_MOUNT,
   CONTAINER_UID,
   OWNER_LABEL,
   SLOT_HOME,
@@ -21,6 +22,8 @@ import {
   TMP_MOUNT,
   absentContainer,
   absentVolume,
+  cacheVolumeArguments,
+  cacheVolumeName,
   removeArguments,
   type RuntimeHost,
 } from "./container-runtime.ts";
@@ -179,6 +182,7 @@ function startArguments(
   tag: string,
   owner: string,
   memoryMb: number,
+  cacheVolume: string,
 ): readonly string[] {
   return [
     "run",
@@ -202,6 +206,8 @@ function startArguments(
     TMP_MOUNT,
     "--volume",
     `${name}:${SLOT_HOME}`,
+    "--volume",
+    `${cacheVolume}:${CACHE_MOUNT}`,
     "--workdir",
     SLOT_HOME,
     "--env",
@@ -358,12 +364,26 @@ export async function proveInImage(
     ]);
     await requireSuccess(
       options,
+      "cache volume",
+      cacheVolumeArguments(
+        options.owner,
+        input.project_id,
+        input.resource_identity,
+      ),
+    );
+    await requireSuccess(
+      options,
       "start",
       startArguments(
         name,
         input.tag,
         options.owner,
         options.environmentMemoryMb,
+        cacheVolumeName(
+          options.owner,
+          input.project_id,
+          input.resource_identity,
+        ),
       ),
     );
     await feedBundle(options, name, root, signal);

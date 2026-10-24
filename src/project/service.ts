@@ -1698,6 +1698,17 @@ export class ProjectService implements Service, ProjectBindings {
   ): Promise<string> {
     return this.onboarding.slotImage(projectId, workerResourceIdentity, signal);
   }
+  slotCacheGroupOf(
+    projectId: string,
+    workerResourceIdentity: string,
+    image: string,
+  ): string | null {
+    return this.onboarding.slotCacheGroupOf(
+      projectId,
+      workerResourceIdentity,
+      image,
+    );
+  }
   environmentClaimed(projectId: string, resourceIdentity: string): void {
     this.onboarding.environmentClaimed(projectId, resourceIdentity);
   }

@@ -13,6 +13,8 @@ import {
   type ContainerDriverOptions,
 } from "./container-driver.ts";
 import {
+  cacheVolumeName,
+  containerOwner,
   SUCCESS_CODE,
   type RuntimeAnswer,
   type RuntimeHost,
@@ -61,6 +63,7 @@ function hostWith(
   installed: boolean,
   answerOf: (call: Call) => Promise<RuntimeAnswer>,
   imageFor?: ContainerDriverOptions["imageFor"],
+  cacheGroupOf?: ContainerDriverOptions["cacheGroupOf"],
 ) {
   const calls: Call[] = [];
   const host: RuntimeHost = {
@@ -83,6 +86,7 @@ function hostWith(
     image: "kanthord:test",
     host,
     imageFor,
+    cacheGroupOf,
   });
   const verbs = (verb: string) => calls.filter((call) => call.verb === verb);
   return { driver, calls, verbs };
@@ -326,6 +330,39 @@ test("the image wait logs no line", async (t) => {
   assert.deepEqual(writes, []);
 });
 
+test("a slot on the image of its group creates the cache volume and mounts it, and a slot on another image mounts none", async (t) => {
+  const group = "repository:github:acme/app";
+  const cache = cacheVolumeName(
+    containerOwner(MASTER_KEY),
+    "project_01ARZ3NDEKTSV4RRFFQ69G5FAV",
+    group,
+  );
+  const mounts = async (image: string) => {
+    const runtime = recordingRuntime(t);
+    const f = hostWith(
+      true,
+      () => ok(),
+      () => Promise.resolve(image),
+      (_slot, answered) => (answered === READY_TAG ? group : null),
+    );
+    const instance = f.driver.launch(launchOf(runtime.environment));
+    const lines = await runtime.recorded();
+    runtime.release();
+    await instance.exited;
+    return { lines, creates: f.verbs("volume") };
+  };
+  const grouped = await mounts(READY_TAG);
+  assert.ok(grouped.lines.includes(`${cache}:/var/lib/kanthord/.cache`));
+  assert.ok(grouped.creates.some((call) => call.args.includes(cache)));
+  const plain = await mounts("kanthord:test");
+  assert.equal(
+    plain.lines.filter((line) => line === VOLUME_OPTION).length,
+    ONE_CALL,
+  );
+  assert.ok(!plain.creates.some((call) => call.args.includes(cache)));
+});
+
+const VOLUME_OPTION = "--volume";
 const VolumeAction = { List: "ls", Remove: "rm" } as const;
 const VOLUME_PREFIX = "kanthord_slot_";
 const LIVE_ID = "client_identity_live";
@@ -387,6 +424,19 @@ test("sweepVolumes removes each owner volume of no live identity and only that v
       arg.startsWith("label=io.kanthord.owner="),
     ),
   );
+  assert.deepEqual(
+    volumeCalls(f, VolumeAction.Remove).map((call) => call.args[2]),
+    [`${VOLUME_PREFIX}${ORPHAN_ID}`],
+  );
+});
+
+test("sweepVolumes keeps a cache volume", async () => {
+  const cache = cacheVolumeName("OWNER", "project", "resource");
+  const names = [`${VOLUME_PREFIX}${ORPHAN_ID}`, cache].join("\n");
+  const f = hostWith(true, (call) =>
+    call.args[1] === VolumeAction.List ? ok(names) : ok(),
+  );
+  await f.driver.sweepVolumes(new Set());
   assert.deepEqual(
     volumeCalls(f, VolumeAction.Remove).map((call) => call.args[2]),
     [`${VOLUME_PREFIX}${ORPHAN_ID}`],

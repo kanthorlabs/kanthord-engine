@@ -358,6 +358,7 @@ export type ImageBuildResult =
 
 export interface ProofInput {
   run_id: string;
+  project_id: string;
   binding_id: string;
   resource_identity: string;
   commit: string;

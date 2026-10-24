@@ -465,6 +465,17 @@ export class Onboarding {
     });
   }
 
+  slotCacheGroupOf(
+    projectId: string,
+    workerResourceIdentity: string,
+    image: string,
+  ): string | null {
+    const group = this.slotGroupOf(projectId, workerResourceIdentity);
+    if (group === null) return null;
+    const record = this.records.get(keyOf(projectId, group.resource_identity));
+    return record?.tag === image ? group.resource_identity : null;
+  }
+
   private slotGroupOf(
     projectId: string,
     workerResourceIdentity: string,
@@ -882,6 +893,7 @@ export class Onboarding {
       record.source === EnvironmentSource.Detected;
     const proof = {
       ...base,
+      project_id: record.project_id,
       setup: checksOnly ? [] : setupScriptsOf(document),
       checks: checksOf(document),
     };

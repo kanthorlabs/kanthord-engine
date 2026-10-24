@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { createHash } from "node:crypto";
 import { accessSync, constants, existsSync } from "node:fs";
 import { delimiter, join } from "node:path";
 import { userInfo } from "node:os";
@@ -16,6 +17,10 @@ export const CONTAINER_UID = 10001;
 export const SLOT_HOME = "/var/lib/kanthord";
 export const OWNER_LABEL = "io.kanthord.owner";
 export const CLIENT_ID_LABEL = "io.kanthord.client_id";
+export const CACHE_MOUNT = "/var/lib/kanthord/.cache";
+export const CACHE_VOLUME_PREFIX = "kanthord_cache_";
+export const CACHE_PROJECT_LABEL = "io.kanthord.cache_project";
+export const CACHE_RESOURCE_LABEL = "io.kanthord.cache_resource";
 export const FORWARDED_VARIABLES = [
   "TZ",
   "GIT_AUTHOR_NAME",
@@ -32,6 +37,7 @@ const RUNTIME_ORDER = [ContainerRuntime.Podman, ContainerRuntime.Docker];
 const OWNER_LABEL_TEXT = "worker/container-owner";
 const SLOT_NAME_PREFIX = "kanthord_slot_";
 const DETAIL_LIMIT_BYTES = 200;
+const CACHE_NAME_HEX_LENGTH = 24;
 const MINIMUM_DOCKER_CLIENT_MAJOR = 23;
 const ROOT_UID = 0;
 const FAILED_CODE = 1;
@@ -77,6 +83,7 @@ export interface RunCommand {
   readonly clientId: string;
   readonly owner: string;
   readonly environment: NodeJS.ProcessEnv;
+  readonly cacheVolume: string | null;
 }
 
 interface RuntimeAttempt {
@@ -149,6 +156,35 @@ export function volumeArguments(clientId: string, owner: string): string[] {
   ];
 }
 
+export function cacheVolumeName(
+  owner: string,
+  projectId: string,
+  resourceIdentity: string,
+): string {
+  const digest = createHash("sha256")
+    .update(JSON.stringify([owner, projectId, resourceIdentity]))
+    .digest("hex");
+  return `${CACHE_VOLUME_PREFIX}${digest.slice(0, CACHE_NAME_HEX_LENGTH)}`;
+}
+
+export function cacheVolumeArguments(
+  owner: string,
+  projectId: string,
+  resourceIdentity: string,
+): string[] {
+  return [
+    "volume",
+    "create",
+    "--label",
+    `${OWNER_LABEL}=${owner}`,
+    "--label",
+    `${CACHE_PROJECT_LABEL}=${projectId}`,
+    "--label",
+    `${CACHE_RESOURCE_LABEL}=${resourceIdentity}`,
+    cacheVolumeName(owner, projectId, resourceIdentity),
+  ];
+}
+
 export function runArguments(command: RunCommand): string[] {
   const name = slotName(command.clientId);
   const directories = Object.entries(SLOT_DIRECTORIES).flatMap(
@@ -186,6 +222,9 @@ export function runArguments(command: RunCommand): string[] {
     TMP_MOUNT,
     "--volume",
     `${name}:${SLOT_HOME}`,
+    ...(command.cacheVolume === null
+      ? []
+      : ["--volume", `${command.cacheVolume}:${CACHE_MOUNT}`]),
     "--workdir",
     SLOT_HOME,
     "--env",

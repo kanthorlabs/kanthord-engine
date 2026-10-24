@@ -1065,6 +1065,7 @@ test(
     });
     assert.deepEqual(h.proveInputs[0], {
       run_id: "run_1",
+      project_id: PROJECT,
       binding_id: APP.binding_id,
       resource_identity: APP.resource_identity,
       commit: "c1",

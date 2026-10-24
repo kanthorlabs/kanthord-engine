@@ -47,6 +47,7 @@ import {
   runCommand,
 } from "./environment-proof.ts";
 import {
+  CACHE_MOUNT,
   CONTAINER_UID,
   OWNER_LABEL,
   SLOT_HOME,
@@ -109,6 +110,16 @@ const imageInspectSchema = z
     }),
   )
   .min(1);
+
+export const CACHE_DIRECTORY_SCRIPT = `mkdir -p ${CACHE_MOUNT} && chown ${CONTAINER_UID}:${CONTAINER_UID} ${CACHE_MOUNT}`;
+
+export const CACHE_DEFAULTS = [
+  ["npm_config_cache", "npm"],
+  ["npm_config_store_dir", "pnpm-store"],
+  ["PIP_CACHE_DIR", "pip"],
+  ["GOMODCACHE", "go-mod"],
+  ["CARGO_HOME", "cargo"],
+] as const;
 
 export const PASSWD_SCRIPT = [
   `getent passwd ${CONTAINER_UID} >/dev/null || echo 'kanthord:x:${CONTAINER_UID}:${CONTAINER_UID}::${SLOT_HOME}:/bin/sh' >> /etc/passwd`,
@@ -350,6 +361,9 @@ function shellStep(script: string): string {
 }
 
 export function layerContainerfile(input: LayerInput): string {
+  const defaults = CACHE_DEFAULTS.filter(
+    ([name]) => !input.environment.has(name),
+  ).map(([name, directory]) => `ENV ${name}=${CACHE_MOUNT}/${directory}`);
   const variables = Array.from(
     input.environment,
     ([name, value]) =>
@@ -359,12 +373,14 @@ export function layerContainerfile(input: LayerInput): string {
     `FROM ${input.kanthordImage} AS kanthord`,
     `FROM ${input.base}`,
     "USER root",
+    ...defaults,
     ...variables,
     "WORKDIR /",
     ...input.onCreate.map(shellStep),
     `COPY --from=kanthord ${KANTHORD_PATH} ${KANTHORD_PATH}`,
     `COPY --from=kanthord ${TINI_STATIC_PATH} ${TINI_PATH}`,
     shellStep(PASSWD_SCRIPT),
+    shellStep(CACHE_DIRECTORY_SCRIPT),
     `LABEL ${OWNER_LABEL}=${JSON.stringify(input.owner)}`,
     `USER ${CONTAINER_UID}`,
     `WORKDIR ${SLOT_HOME}`,

@@ -306,6 +306,8 @@ export function composeServices(options: {
     host: containerHost,
     imageFor: (_runtime, slot, signal) =>
       project.slotImage(slot.project_id, slot.resource_identity, signal),
+    cacheGroupOf: (slot, image) =>
+      project.slotCacheGroupOf(slot.project_id, slot.resource_identity, image),
   });
   const hostProofs = new HostProofs({
     stateDirectory: options.stateDirectory,
