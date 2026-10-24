@@ -142,12 +142,14 @@ The relay serves only an execution whose worker binding is at the `worker` place
 The planned `worker.execution.setup.get` runs inside the `worker` application alone and is no CLI command. Its target route is `GET /api/worker/execution/:execution_id/setup`, with `client` access and a live execution requirement. The [execution setup](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/worker-service.impl.md#the-execution-setup) rules its answer and its handover prerequisite.
 
 The answer holds `prompt` and `repositories`, among other fields.
-`prompt` is `{ final }`. `final` holds the system layer, the agent layer, the binding prompts and the framing that the server composes. The binding prompts are the non-blank texts of `prompts[<agent>]` of each repository binding of the node at its pinned revision, in binding order. [`agent get`](./agent.md#the-prompt-answer) with `--view final` answers the same composition.
+`prompt` is `{ final }`. `final` holds `base.md`, `<agent>.md`, the binding prompts and the framing that the server composes. The binding prompts are the non-blank texts of `prompts[<agent>]` of each repository binding of the node at its pinned revision, in binding order. [`agent get`](./agent.md#the-prompt-answer) with `--view final` answers the same composition.
 Each item of `repositories` holds `{ binding_id, resource_identity, name, address, ssh_host_key, ssh_public_key, strategy, environment }`.
 `ssh_host_key` is `{ known_hosts }`: the line of the pinned host key of the address host. The line has the form `<host> <key>` for port 22 and `[<host>]:<port> <key>` for another port. The answer holds no key.
 `ssh_public_key` is the OpenSSH public key of the SSH credential of the binding: the key of the revision that the execution pins, else of the newest live revision. The read creates no pin, and the answer holds no private key. A revision without a generated public key answers 409 `repository.credential.ssh_key_legacy`.
 The read refuses an address host outside the SSH host set of the binding platform with `project.bindings.repository.address_invalid`, and an address host without a pin with `repository.host_key.unpinned`.
+An invalid override file of the agent directory answers 409 `agent.prompt.template_invalid` with the details `{ file, path, reason }`.
 The worker application reads no prompt file of a workspace or of its host. It uses `final` as the system prompt and pins only the work prompt as a message.
+The execution setup contract of this version differs from the previous version. Upgrade the server and every worker host together.
 [Project](./project.md#repository-configuration--proposed-fields) rules `prompts`.
 
 The steps method of an `implement` node keeps its workspace in `workspaces/<node identity>/` of the state directory.

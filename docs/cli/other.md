@@ -350,8 +350,7 @@ bindings or option overrides for server field values. `KANTHORD_ENDPOINT` does
 not change `gateway.bind` or `gateway.port`. Configuration is read at startup,
 and an edit takes effect on the next start. **Target requirement:** a relative
 path-valued field inside the configuration resolves against the data directory.
-`agent.prompt.system_file` and `agent.prompt.agent_directory` declare such fields.
-`agent.prompt.host_file` holds a boolean and defaults to `true`. `false` locks the `host_file` prompt switch of the `system` scope off.
+`agent.prompt.agent_directory` declares such a field.
 
 Reads require a user-owned regular `0600` file and a user-owned `0700` containing
 directory. Exact modes are checked, including rejection of special bits and
@@ -403,6 +402,12 @@ The implemented fields are:
 - `gateway.idempotency_ttl`: optional positive safe integer in seconds, default
   `86400`. The idempotency component uses it as the TTL of an in-memory record.
 
+- `agent.prompt.agent_directory`: optional string, default `agents`. It names
+  the directory of the agent prompt override files on the server host. An
+  empty string selects the shipped texts only. See
+  [the prompt answer](./agent.md#the-prompt-answer).
+- The former keys `agent.prompt.system_file` and `agent.prompt.host_file`
+  belong to configuration version 2. `kanthord upgrade` removes them.
 - `agent.cooldown.rate_limited_ms`, `agent.cooldown.unavailable_ms`,
   `agent.cooldown.quota_exhausted_ms`: optional Convict `nat` in milliseconds,
   defaults `60000`, `60000` and `3600000`. Each holds the base cooldown of a
@@ -597,7 +602,8 @@ The command runs in this order:
    `migrated: <service> <a> -> <b>` for each service. An existing backup path
    fails the command.
 6. Replace the configuration file atomically. Print
-   `renamed: <old key> -> <new key>` for each rename, then
+   `renamed: <old key> -> <new key>` for each rename,
+   `removed: <key>` for each removed key, then
    `upgraded: <path>` and `config_version: <a> -> <b>`.
 
 The command prints each row when its step happens. A later failure or a stop
