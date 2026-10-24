@@ -343,6 +343,7 @@ test("a stop during the cache volume command spawns no container and ends the in
   t.after(() => instance.terminate());
   await asked.promise;
   instance.control(SlotControl.Stop);
+  runtime.release();
   held.resolve(await ok());
   const exit = await instance.exited;
   assert.deepEqual(exit, { code: SUCCESS_CODE, error: null });
