@@ -155,6 +155,7 @@ import {
 } from "./store.ts";
 import type { ProjectConfig } from "./config.ts";
 import { ProjectEnvironments, refuseEnvironment } from "./environment.ts";
+import type { EnvironmentTelemetry } from "./environment-telemetry.ts";
 import {
   ENVIRONMENT_DIRECTORY,
   ProofFiles,
@@ -576,6 +577,7 @@ export interface Dependencies {
   instanceOf: InstanceOf;
   wakeup: SchedulerWakeup;
   environmentRuntime: EnvironmentRuntime;
+  telemetry: EnvironmentTelemetry;
   slotImage: string;
   version: string;
   environmentReady(
@@ -688,6 +690,7 @@ export class ProjectService implements Service, ProjectBindings {
       runId: () => randomUUID(),
       environmentBuildTimeoutMs:
         dependencies.config.environment_build_timeout_ms,
+      telemetry: dependencies.telemetry,
     });
     dependencies.health?.register("project", () => this.healthcheck());
   }

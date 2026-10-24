@@ -386,6 +386,7 @@ function fixture(t: TestContext, overrides: Partial<Dependencies> = {}) {
       bindingChanges.push(projectId);
     },
     environmentRuntime: inertEnvironmentRuntime(),
+    telemetry: { span: () => undefined },
     slotImage: SLOT_IMAGE,
     version: ENVIRONMENT_VERSION,
     environmentReady: async () => {},
