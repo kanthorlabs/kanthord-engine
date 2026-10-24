@@ -15,6 +15,13 @@ export const errorCodeSchema = z
   );
 
 /** An engine-defined code; native and dependency errors retain their own codes. */
+export class FacilityError extends Error {
+  constructor() {
+    super("The credential facility refuses this use.");
+    this.name = "FacilityError";
+  }
+}
+
 export class CodedError extends Error {
   readonly code: string;
 
