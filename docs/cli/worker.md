@@ -143,7 +143,7 @@ The planned `worker.execution.setup.get` runs inside the `worker` application al
 
 The answer holds `prompt` and `repositories`, among other fields.
 `prompt` is `{ final }`. `final` holds the system layer, the agent layer and the framing that the server composes, as [`agent get`](./agent.md#the-prompt-answer) with `--view final` answers them.
-Each item of `repositories` holds `{ binding_id, name, address, ssh_host_key, ssh_public_key, strategy, project_prompt, working_layer }`.
+Each item of `repositories` holds `{ binding_id, resource_identity, name, address, ssh_host_key, ssh_public_key, strategy, project_prompt, working_layer }`.
 `ssh_host_key` is `{ known_hosts }`: the line of the pinned host key of the address host. The line has the form `<host> <key>` for port 22 and `[<host>]:<port> <key>` for another port. The answer holds no key.
 `ssh_public_key` is the OpenSSH public key of the SSH credential of the binding: the key of the revision that the execution pins, else of the newest live revision. The read creates no pin, and the answer holds no private key. A revision without a generated public key answers 409 `repository.credential.ssh_key_legacy`.
 The read refuses an address host outside the SSH host set of the binding platform with `project.bindings.repository.address_invalid`, and an address host without a pin with `repository.host_key.unpinned`.

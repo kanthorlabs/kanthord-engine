@@ -296,6 +296,7 @@ test("setup answers the system and agent prompt after its single snapshot and su
     known_hosts: knownHosts,
   });
   assert.equal(pinned.repositories[0]?.ssh_public_key, TEST_SSH_PUBLIC_KEY);
+  assert.equal(pinned.repositories[0]?.resource_identity, REPOSITORY_IDENTITY);
   await assert.rejects(
     executionSetup(
       {

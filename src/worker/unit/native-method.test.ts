@@ -19,6 +19,7 @@ import {
   stopOnEnd,
   runNativeExecution,
   disposeAgent,
+  environmentDigestsOf,
 } from "./native-method.ts";
 import { temporary, hostEnvironment } from "../../kernel/test-support.ts";
 import { createIdentity } from "../../kernel/identity.ts";
@@ -42,6 +43,7 @@ import {
 import { AgentErrorType } from "./agent-telemetry.ts";
 import { SpanOperation } from "./telemetry.ts";
 import { ExecutionIntent, type RepositoryTransport } from "../contract.ts";
+import { EnvironmentSource } from "../../kernel/devcontainer.ts";
 import type { MethodClients } from "./method-clients.ts";
 import { openNativeAgent, type NativeAgent } from "./native-agent.ts";
 import { renderWorkPrompt } from "../../agent/prompt-composer.ts";
@@ -517,4 +519,20 @@ test("refused execution evidence aborts the agent and prevents later server oper
     assert.equal(aborts, EXPECTED_CALL_COUNT);
     assert.equal(releases, NO_RELEASES);
   }
+});
+
+test("the environment digests of a setup name each repository environment by its resource identity", () => {
+  const repository = repositorySetup();
+  const digest = "d".repeat(64);
+  assert.deepEqual(
+    environmentDigestsOf([
+      {
+        ...repository,
+        resource_identity: "github:acme/engine",
+        environment: { source: EnvironmentSource.Repository, digest },
+      },
+      { ...repository, resource_identity: "github:acme/none" },
+    ]),
+    { "github:acme/engine": digest },
+  );
 });

@@ -237,7 +237,7 @@ components:
                 detail:
                   type: string
                   minLength: 1
-                  maxLength: 300
+                  maxLength: 2048
               required:
                 - reason
                 - code

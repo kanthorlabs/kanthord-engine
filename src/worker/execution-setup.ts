@@ -181,6 +181,7 @@ export async function executionSetup(
         assert.ok(repository);
         return {
           binding_id: repository.binding_id,
+          resource_identity: repository.resource_identity,
           name: repository.name,
           address: repository.address,
           ssh_host_key: {

@@ -1007,6 +1007,7 @@ export const executionSetupSchema = z.strictObject({
   repositories: z.array(
     z.strictObject({
       binding_id: identitySchema("binding"),
+      resource_identity: z.string().min(1),
       name: z.string(),
       address: z.string(),
       ssh_host_key: sshHostKeySchema,
