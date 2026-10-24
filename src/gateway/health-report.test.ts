@@ -448,13 +448,71 @@ test("a never-settling check expires, releases its slot and retains its unknown 
   assert.deepEqual(report.shared.llm.global.hung, {
     status: ResourceStatus.Unknown,
     capability: CAPABILITY,
-    failure_reason: ResourceFailureReason.Unclassified,
+    failure_reason: ResourceFailureReason.DeadlineExceeded,
   });
   assert.equal(
     report.services.worker.global.next?.status,
     ResourceStatus.Healthy,
   );
   assert.ok(contexts.every((context) => context.signal.reason));
+});
+
+test("a check of every owner that exceeds its deadline carries deadline_exceeded over its observed reason", async (t) => {
+  const f = fixture(
+    t,
+    OWNERS.map((owner) => ({
+      owner,
+      entry: entry(owner, {
+        check: (_context, observe) => {
+          observe?.(SICK_REASON, ResourceFailureReason.Forbidden);
+          return new Promise(() => {});
+        },
+      }),
+    })),
+  );
+  const report = await f.report({
+    ...LIMITS,
+    maxConcurrent: OWNERS.length,
+    checkDeadlineMs: CHECK_DEADLINE_MS,
+  });
+  const owners = {
+    llm: report.shared.llm,
+    repository: report.shared.repository,
+    storage: report.shared.storage,
+    agent: report.shared.agent,
+    worker: report.services.worker,
+    project: report.services.project,
+    intake: report.services.intake,
+  };
+  for (const owner of OWNERS)
+    assert.deepEqual(owners[owner].global[owner], {
+      status: ResourceStatus.Unknown,
+      capability: CAPABILITY,
+      failure_reason: ResourceFailureReason.DeadlineExceeded,
+    });
+});
+
+test("a check that settles within its deadline keeps its observed reason", async (t) => {
+  const f = fixture(t, [
+    {
+      owner: OWNER_STORAGE,
+      entry: entry("forbidden", {
+        check: async (_context, observe) => {
+          observe?.("status=403", ResourceFailureReason.Forbidden);
+          return ResourceStatus.Unknown;
+        },
+      }),
+    },
+  ]);
+  const report = await f.report({
+    ...LIMITS,
+    checkDeadlineMs: CHECK_DEADLINE_MS,
+  });
+  assert.deepEqual(report.shared.storage.global.forbidden, {
+    status: ResourceStatus.Unknown,
+    capability: CAPABILITY,
+    failure_reason: ResourceFailureReason.Forbidden,
+  });
 });
 
 test("synchronous throws, rejections and invalid statuses become unknown without losing entries", async (t) => {
@@ -561,7 +619,9 @@ test("report budget abandons active and unstarted targets, cancels contexts and 
   assert.equal(Object.keys(report.shared.llm.global).length, TARGET_COUNT);
   assert.ok(
     Object.values(report.shared.llm.global).every(
-      ({ status }) => status === ResourceStatus.Unknown,
+      ({ status, failure_reason }) =>
+        status === ResourceStatus.Unknown &&
+        failure_reason === ResourceFailureReason.DeadlineExceeded,
     ),
   );
   assert.equal(f.logs.length, TARGET_COUNT);
@@ -600,7 +660,11 @@ test("report budget includes inventory collection time and never starts expired 
     { ...LIMITS, reportBudgetMs: REPORT_BUDGET_MS },
   );
   assert.equal(checks, EMPTY_COUNT);
-  assert.equal(report.shared.llm.global.queued?.status, ResourceStatus.Unknown);
+  assert.deepEqual(report.shared.llm.global.queued, {
+    status: ResourceStatus.Unknown,
+    capability: CAPABILITY,
+    failure_reason: ResourceFailureReason.DeadlineExceeded,
+  });
   assert.equal(f.commits(), SINGLE_CHECK);
 });
 
@@ -628,7 +692,9 @@ test("checks scheduled before the report moment do not start after it", async (t
   assert.equal(checks, SINGLE_CHECK);
   assert.ok(
     Object.values(report.shared.llm.global).every(
-      ({ status }) => status === ResourceStatus.Unknown,
+      ({ status, failure_reason }) =>
+        status === ResourceStatus.Unknown &&
+        failure_reason === ResourceFailureReason.DeadlineExceeded,
     ),
   );
 });

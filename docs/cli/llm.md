@@ -218,7 +218,7 @@ It checks a typed secret before a `create` and stores nothing. It takes no mutat
 The required `--file` holds the closed object `{ platform, secret, metadata }`, the `create` body without `name`. The secret-file policy of `create` applies: a regular, non-symlink file at mode `0600`.
 The component validates the body with the secret shape and the metadata schema of the platform, as `create` does.
 The check runs through the LLM provider of the platform, and the connection maps to the status as the healthcheck does: `ok` to `healthy`, `unauthorized` to `unhealthy`, and `unreachable` and `invalid_response` to `unknown`.
-The platform check runs on the typed secret with a 10 s deadline. A check that exceeds its deadline answers `unknown`.
+The platform check runs on the typed secret with a 10 s deadline. A check that exceeds its deadline answers `unknown` with `deadline_exceeded`.
 The component drops the secret after the call and logs no material.
 
 HTTP `200` answers `{ status, capability, failure_reason }`, the health entry of the [health report](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/gateway-service.impl.md#the-resource-healthcheck-report):
@@ -229,14 +229,15 @@ HTTP `200` answers `{ status, capability, failure_reason }`, the health entry of
 
 The failure reasons of the answer:
 
-| Value              | Cause                                                                                                       |
-| ------------------ | ----------------------------------------------------------------------------------------------------------- |
-| `unauthorized`     | The provider answers HTTP `401`, or the `openai-codex` or `anthropic-subscription` access token is expired. |
-| `forbidden`        | The provider answers HTTP `403`.                                                                            |
-| `rate_limited`     | The provider answers HTTP `429`.                                                                            |
-| `invalid_response` | The provider answers another HTTP status, or a model list that the check cannot read.                       |
-| `unreachable`      | The request fails before an HTTP answer, or a failed model call carries no HTTP status.                     |
-| `unclassified`     | Any other failure, a check that exceeds its deadline included.                                              |
+| Value               | Cause                                                                                                       |
+| ------------------- | ----------------------------------------------------------------------------------------------------------- |
+| `unauthorized`      | The provider answers HTTP `401`, or the `openai-codex` or `anthropic-subscription` access token is expired. |
+| `forbidden`         | The provider answers HTTP `403`.                                                                            |
+| `rate_limited`      | The provider answers HTTP `429`.                                                                            |
+| `invalid_response`  | The provider answers another HTTP status, or a model list that the check cannot read.                       |
+| `unreachable`       | The request fails before an HTTP answer, or a failed model call carries no HTTP status.                     |
+| `deadline_exceeded` | The check exceeds its 10 s deadline. Check again.                                                           |
+| `unclassified`      | Any other failure.                                                                                          |
 
 A platform with `verifiable: false` or with the secret shape `oauth` answers `400 credential.check.unsupported`.
 A platform of another component answers `400 credential.platform.unsupported`.
@@ -251,7 +252,7 @@ The [record verify](https://github.com/kanthorlabs/kanthord/blob/main/docs/brain
 The required `CredentialName` maps to `params.credential_name`. Query is empty and body absent. The command takes no mutation key and rejects `--idempotency-key`.
 It checks one stored record and stores no result.
 The check runs through the LLM provider of the platform, and the connection maps to the status as the healthcheck does.
-The component releases the newest live revision of the record, runs the same platform check as the health report with a 10 s deadline, and drops the material after the call. A check that exceeds its deadline answers `unknown`.
+The component releases the newest live revision of the record, runs the same platform check as the health report with a 10 s deadline, and drops the material after the call. A check that exceeds its deadline answers `unknown` with `deadline_exceeded`.
 The release outside an execution pins no revision, drains no revision and writes no row.
 
 HTTP `200` answers `{ status, capability, failure_reason }`, the health entry of the [health report](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/gateway-service.impl.md#the-resource-healthcheck-report):

@@ -1,4 +1,4 @@
-import type { Context } from "./context.ts";
+import { DeadlineExceeded, type Context } from "./context.ts";
 import {
   ResourceFailureReason,
   ResourceStatus,
@@ -77,6 +77,8 @@ export function failureReasonOfStatus(status: number): ResourceFailureReason {
 }
 
 export function thrownFailureReason(context: Context): ResourceFailureReason {
+  if (context.signal.reason instanceof DeadlineExceeded)
+    return ResourceFailureReason.DeadlineExceeded;
   return context.signal.aborted
     ? ResourceFailureReason.Unclassified
     : ResourceFailureReason.Unreachable;

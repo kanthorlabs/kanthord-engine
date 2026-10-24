@@ -398,7 +398,7 @@ test("verify answers unknown on corrupted ciphertext and on a cancelled caller w
   assert.equal(calls.length, NO_CALLS);
 });
 
-test("verify answers unknown when the probe exceeds the 10 s deadline", async (t) => {
+test("verify answers deadline_exceeded when the probe exceeds the 10 s deadline", async (t) => {
   t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
   const { store, component, set } = fixture(t);
   insert(store, PROBED_PLATFORM, "probed");
@@ -413,6 +413,28 @@ test("verify answers unknown when the probe exceeds the 10 s deadline", async (t
   const pending = component.verify(hanging, "probed", background);
   t.mock.timers.tick(VERIFY_DEADLINE_MS);
   assert.deepEqual(await pending, {
+    status: ResourceStatus.Unknown,
+    capability: PROBED_CAPABILITY,
+    failure_reason: ResourceFailureReason.DeadlineExceeded,
+  });
+});
+
+test("verify answers unclassified when the caller cancels the probe", async (t) => {
+  const { store, component, set } = fixture(t);
+  insert(store, PROBED_PLATFORM, "probed");
+  const caller = new CancellationContext();
+  const hanging: CredentialPlatformSet = {
+    platforms: {
+      [PROBED_PLATFORM]: {
+        ...set.platforms[PROBED_PLATFORM]!,
+        probe: () => {
+          caller.cancel();
+          return new Promise(() => {});
+        },
+      },
+    },
+  };
+  assert.deepEqual(await component.verify(hanging, "probed", caller), {
     status: ResourceStatus.Unknown,
     capability: PROBED_CAPABILITY,
     failure_reason: ResourceFailureReason.Unclassified,

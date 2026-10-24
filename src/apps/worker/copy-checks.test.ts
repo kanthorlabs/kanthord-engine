@@ -7,7 +7,11 @@ import {
   type SealedCopyAnswer,
 } from "../../custody/contract.ts";
 import type { InstanceCopyKey } from "../../custody/client.ts";
-import { background, CancellationContext } from "../../kernel/context.ts";
+import {
+  background,
+  CancellationContext,
+  type Context,
+} from "../../kernel/context.ts";
 import { Diagnostic } from "../../kernel/errors.ts";
 import {
   ResourceFailureReason,
@@ -86,6 +90,7 @@ async function fixture(
   check: (
     secret: unknown,
     observe?: ResourceObserver,
+    context?: Context,
   ) => Promise<ProviderCheckAnswer>,
   options: { reportFails?: boolean; timeoutMs?: number } = {},
 ) {
@@ -116,7 +121,9 @@ async function fixture(
     key,
     context: background,
     timeoutMs: options.timeoutMs,
-    providers: { [OPENAI]: { check: (secret, _m, _c, o) => check(secret, o) } },
+    providers: {
+      [OPENAI]: { check: (secret, _m, c, o) => check(secret, o, c) },
+    },
     exchange: {
       copies: async () => {
         lists++;
@@ -209,7 +216,27 @@ test("a version change during a check runs one more check after it", async () =>
   assert.equal(f.reports.length, RUNS_FOR_A_CHANGE_DURING_A_RUN);
 });
 
-test("a check past its deadline reports unknown, and only bounded models reach the report", async () => {
+test("a check that rejects on its deadline abort reports deadline_exceeded", async () => {
+  const f = await fixture(
+    [{ name: "rejecting", platform: OPENAI, secret: { key: "k" } }],
+    (_secret, _observe, context) =>
+      new Promise((_resolve, reject) => {
+        context?.signal.addEventListener("abort", () =>
+          reject(context.signal.reason),
+        );
+      }),
+    { timeoutMs: SHORT_TIMEOUT_MS },
+  );
+  f.checks.observe(NO_CREDENTIAL_VERSION);
+  await f.checks.idle();
+  assert.equal(f.reports[0]!.body.status, ResourceStatus.Unknown);
+  assert.equal(
+    f.reports[0]!.body.failure_reason,
+    ResourceFailureReason.DeadlineExceeded,
+  );
+});
+
+test("a check past its deadline reports unknown with deadline_exceeded, and only bounded models reach the report", async () => {
   const long = "m".repeat(COPY_REPORT_TEXT_MAX_LENGTH + 1);
   const slow = await fixture(
     [{ name: "slow", platform: OPENAI, secret: { key: "k" } }],
@@ -227,7 +254,7 @@ test("a check past its deadline reports unknown, and only bounded models reach t
   assert.equal(slow.reports[0]!.body.status, ResourceStatus.Unknown);
   assert.equal(
     slow.reports[0]!.body.failure_reason,
-    ResourceFailureReason.Unclassified,
+    ResourceFailureReason.DeadlineExceeded,
   );
   const listing = await fixture(
     [{ name: "listing", platform: OPENAI, secret: { key: "k" } }],

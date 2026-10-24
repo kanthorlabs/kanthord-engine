@@ -179,7 +179,7 @@ It checks a typed secret before a `create` and stores nothing. It takes no mutat
 The required `--file` holds the closed object `{ platform, secret, metadata }`, the `create` body without `name`. The secret-file policy of `create` applies: a regular, non-symlink file at mode `0600`.
 The component validates the body with the secret shape and the metadata schema of the platform, as `create` does.
 The `github` check reads the rate limit with the typed token.
-The platform check runs on the typed secret with a 10 s deadline. A check that exceeds its deadline answers `unknown`.
+The platform check runs on the typed secret with a 10 s deadline. A check that exceeds its deadline answers `unknown` with `deadline_exceeded`.
 The component drops the secret after the call and logs no material.
 
 HTTP `200` answers `{ status, capability, failure_reason }`, the health entry of the [health report](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/gateway-service.impl.md#the-resource-healthcheck-report):
@@ -198,7 +198,8 @@ The failure reasons of the answer:
 | `invalid_response`     | The `github` check gets another HTTP status.                                                                                                                                 |
 | `unreachable`          | The `github` request fails before an HTTP answer.                                                                                                                            |
 | `identity_unavailable` | The `ssh` check of `verify` refuses the record: the key does not decrypt or parse, the record holds no generated key, or the derived public key differs from the stored one. |
-| `unclassified`         | Any other failure, a check that exceeds its deadline included.                                                                                                               |
+| `deadline_exceeded`    | The check exceeds its 10 s deadline. Check again.                                                                                                                            |
+| `unclassified`         | Any other failure.                                                                                                                                                           |
 
 A platform with `verifiable: false`, with the secret shape `oauth` or with the secret shape `ssh_key` answers `400 credential.check.unsupported`.
 A platform of another component answers `400 credential.platform.unsupported`.
@@ -215,7 +216,7 @@ It checks one stored record and stores no result.
 The `github` check reads the rate limit with the stored token.
 The `ssh` check is local. It decrypts the newest live revision, parses the key, derives the public key and compares it with the stored `public_key` and `fingerprint`. It makes no remote call. The capability is `ssh identity`.
 A refusal of the `ssh` check answers `unhealthy` with `failure_reason: identity_unavailable`. A record that holds no generated key is a refusal.
-The component releases the newest live revision of the record, runs the same platform check as the health report with a 10 s deadline, and drops the material after the call. A check that exceeds its deadline answers `unknown`.
+The component releases the newest live revision of the record, runs the same platform check as the health report with a 10 s deadline, and drops the material after the call. A check that exceeds its deadline answers `unknown` with `deadline_exceeded`.
 The release outside an execution pins no revision, drains no revision and writes no row.
 
 HTTP `200` answers `{ status, capability, failure_reason }`, the health entry of the [health report](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/gateway-service.impl.md#the-resource-healthcheck-report):
