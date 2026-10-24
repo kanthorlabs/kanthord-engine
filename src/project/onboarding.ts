@@ -96,7 +96,6 @@ const NO_EXIT_CODE = null;
 const SESSION_FAILED = "project.onboarding.session_failed";
 const NO_TOOL_CALLS = 0;
 const NO_ATTEMPTS = 0;
-const NO_REPAIRS = 0;
 
 export const ENV_AGENT_ATTEMPT_LIMIT = 5;
 export const ENV_AGENT_TOOL_CALL_LIMIT = 64;
@@ -215,7 +214,6 @@ export interface GroupRecord {
   step_started_at: number | null;
   reason: string | null;
   reason_started_at: number | null;
-  carried_repairs: number;
   session: AbortController | null;
   environment_from_agent: boolean;
 }
@@ -337,7 +335,6 @@ function emptyRecord(
     step_started_at: null,
     reason: null,
     reason_started_at: null,
-    carried_repairs: NO_REPAIRS,
     session: null,
     environment_from_agent: false,
   };
@@ -926,12 +923,6 @@ export class Onboarding {
     const path = environmentPath(group.resource_identity);
     const stored = proofs.read(path, sum);
     const stale = staleFailure(stored, resolved.commit);
-    if (stale) proofs.remove(path, sum);
-    const carriedRepairs = stale
-      ? stored.repairs
-      : stored === null && previous?.digest === sum
-        ? previous.carried_repairs
-        : NO_REPAIRS;
     const next: GroupRecord = {
       ...(previous ?? emptyRecord(projectId, group, target)),
       binding_id: group.binding_id,
@@ -944,7 +935,6 @@ export class Onboarding {
       digest: sum,
       tag,
       proof: stale ? null : stored,
-      carried_repairs: carriedRepairs,
       proved:
         !stale &&
         tag !== null &&
@@ -1082,7 +1072,7 @@ export class Onboarding {
     assert.ok(group.digest !== null, "A failed group holds a digest.");
     const { proofs } = this.dependencies;
     const path = environmentPath(group.resource_identity);
-    const proof = proofs.read(path, group.digest);
+    const proof = this.proofAtCommit(group);
     if (proof === null || proof.repairs >= ENV_AGENT_REPAIR_LIMIT) return;
     const failure = {
       ...proof,
@@ -1399,7 +1389,7 @@ export class Onboarding {
       tail: verdict.tail,
       reproduce: this.reproduceOf(tag),
       checks: verdict.checks,
-      repairs: record.carried_repairs,
+      repairs: 0,
       ended_at: this.dependencies.now(),
       commit,
     };
@@ -1567,14 +1557,17 @@ export class Onboarding {
     return { ...proof, attempts_left: attemptsLeft };
   }
 
+  private proofAtCommit(record: GroupRecord): ProofFile | null {
+    if (record.digest === null || record.commit === null) return null;
+    const file = this.dependencies.proofs.read(
+      environmentPath(record.resource_identity),
+      record.digest,
+    );
+    return staleFailure(file, record.commit) ? null : file;
+  }
+
   private currentProof(record: GroupRecord) {
-    const file =
-      record.digest === null
-        ? null
-        : this.dependencies.proofs.read(
-            environmentPath(record.resource_identity),
-            record.digest,
-          );
+    const file = this.proofAtCommit(record);
     if (file === null)
       return {
         outcome: ProofOutcome.Failed,
@@ -1645,7 +1638,7 @@ export class Onboarding {
         tail: input.stop.detail,
         reproduce: this.reproduceOf(record.tag),
         checks: record.proof?.checks ?? [],
-        repairs: record.proof?.repairs ?? record.carried_repairs,
+        repairs: record.proof?.repairs ?? 0,
         ended_at: this.dependencies.now(),
         commit: record.commit,
       };

@@ -168,6 +168,8 @@ const COMMIT_CHECK_MS = 60000;
 const BASE_COMMIT = "c1";
 const MOVED_COMMIT = "c2";
 const LAST_COMMIT = "c5";
+const PULLED_IMAGE_ID = "sha256:pulled";
+const KEPT_REPAIRS = 2;
 const REMOVE_STALE_RUNS = "removeStaleRuns";
 const RENAMED_BINDING_ID = "binding_app_2";
 const STRAY_IDENTITY = "repository:github:acme/gone";
@@ -342,7 +344,7 @@ class Harness {
       },
       pullImage: async (reference: string) => {
         this.calls.push(`pullImage ${reference}`);
-        this.images.set(reference, "sha256:pulled");
+        this.images.set(reference, PULLED_IMAGE_ID);
       },
       imageExists: async (tag: string) => this.existing.has(tag),
       build: async (input: ImageBuildInput, signal: AbortSignal) => {
@@ -699,7 +701,6 @@ function record(override: Partial<GroupRecord> = {}): GroupRecord {
     step_started_at: null,
     reason: null,
     reason_started_at: null,
-    carried_repairs: 0,
     session: null,
     environment_from_agent: false,
     ...override,
@@ -2504,7 +2505,7 @@ test("a commit check that ends during a computation of the group starts no secon
   assert.equal(h.state().status, EnvironmentStatus.Failed);
 });
 
-test("an execution failure of a proved image proves again at a new commit and drops the failed proof of the old commit", async (t) => {
+test("an execution failure of a proved image proves again at a new commit and keeps the failed proof of the old commit until the run", async (t) => {
   const h = await readyHarness(t);
   h.onboarding.environmentFailed(failureInput(h));
   assert.equal(h.state().status, EnvironmentStatus.Failed);
@@ -2512,7 +2513,8 @@ test("an execution failure of a proved image proves again at a new commit and dr
   h.resolution = { ...REPOSITORY, commit: MOVED_COMMIT };
   h.proveGate = new Deferred();
   await h.compute();
-  assert.equal(h.proofOf(h.digest()), null);
+  assert.equal(h.proofOf(h.digest())?.commit, BASE_COMMIT);
+  assert.equal(h.state().failure, null);
   await h.until(() => h.events.includes(PROVE));
   assert.equal(h.state().status, EnvironmentStatus.Proving);
   assert.equal(h.events.includes(BUILD), false);
@@ -3997,6 +3999,8 @@ test(
   { timeout: TEST_TIMEOUT_MS },
   async (t) => {
     const h = agentHarness(t);
+    h.images.set(BASE, PULLED_IMAGE_ID);
+    const sum = h.digest();
     const repairsInSession: Array<number | undefined> = [];
     h.script = async () => {
       repairsInSession.push(h.proofOf(h.digest())?.repairs);
@@ -4005,9 +4009,49 @@ test(
     await sessionsEnded(h, ONE_CALL);
     await h.onboarding.rebuild(PROJECT, APP.binding_id);
     await sessionsEnded(h, TWO_CALLS);
+    assert.equal(h.digest(), sum);
     assert.deepEqual(repairsInSession, [ONE_CALL, ONE_CALL]);
   },
 );
+
+test(
+  "a rebuild after a commit change resets the repair counter of a stable digest",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const h = agentHarness(t);
+    h.images.set(BASE, PULLED_IMAGE_ID);
+    const sum = h.digest();
+    await failRun(h);
+    await sessionsEnded(h, ONE_CALL);
+    h.resolution = { ...UNIVERSAL, commit: MOVED_COMMIT };
+    await h.compute();
+    await h.ended(TWO_CALLS);
+    await sessionsEnded(h, TWO_CALLS);
+    await h.onboarding.rebuild(PROJECT, APP.binding_id);
+    await sessionsEnded(h, THREE_CALLS);
+    assert.equal(h.digest(), sum);
+    assert.deepEqual(
+      h.sessionInputs.map((input) => input.failure.repairs),
+      [ONE_CALL, TWO_CALLS, ONE_CALL],
+    );
+  },
+);
+
+test("a stop between the read at a new commit and the run end keeps the repair counter on disk", async (t) => {
+  const h = new Harness(t);
+  h.writeProof(
+    proofFile(h.digest(), {
+      outcome: "failed",
+      class: "setup_failed",
+      repairs: KEPT_REPAIRS,
+    }),
+  );
+  h.resolution = { ...REPOSITORY, commit: MOVED_COMMIT };
+  await h.compute();
+  await h.until(() => h.events.includes(BUILD));
+  await h.onboarding.stop();
+  assert.equal(h.proofOf(h.digest())?.repairs, KEPT_REPAIRS);
+});
 
 test(
   "the stop of the component aborts each running session",
