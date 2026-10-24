@@ -34,7 +34,7 @@ import {
 } from "../kernel/store.ts";
 import { createIdentity, identitySchema } from "../kernel/identity.ts";
 import { testHumanIdentity } from "../kernel/test-identity.ts";
-import { temporary } from "../kernel/test-support.ts";
+import { redactingLogger, temporary } from "../kernel/test-support.ts";
 import { IdentityKind } from "../kernel/caller.ts";
 import { Diagnostic, OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
@@ -51,6 +51,7 @@ import {
   BindingState,
   ChangeKind,
   BINDING_CHECK_TIMEOUT_MS,
+  REPOSITORY_FILES_READ_TIMEOUT_MS,
   EnvironmentSource,
   FollowsType,
   GitHubAction,
@@ -1276,6 +1277,9 @@ const KEY_REFUSED_STDERR =
   "git@github.com: Permission denied (publickey).\nfatal: Could not read from remote repository.";
 const HOST_KEY_CHANGED_STDERR =
   "@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@\n@    WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED!     @\nHost key verification failed.";
+const INSTRUCTION_FILES_READ_FAILED =
+  "project.binding.instruction_files.read_failed";
+const WARN_LEVEL = 40;
 const REPOSITORY_NOT_FOUND_STDERR =
   "ERROR: Repository not found.\nfatal: Could not read from remote repository.";
 
@@ -5317,7 +5321,10 @@ test("binding.instruction_files.get answers the four files with their states", a
   assert.equal(resolveCalls[NO_ITEMS]?.branch, BASE_BRANCH);
   assert.ok(
     (resolveCalls[NO_ITEMS]?.timeout ?? NO_CALLS) > NO_CALLS &&
-      (resolveCalls[NO_ITEMS]?.timeout ?? NO_CALLS) <= BINDING_CHECK_TIMEOUT_MS,
+      (resolveCalls[NO_ITEMS]?.timeout ?? NO_CALLS) >
+        BINDING_CHECK_TIMEOUT_MS &&
+      (resolveCalls[NO_ITEMS]?.timeout ?? NO_CALLS) <=
+        REPOSITORY_FILES_READ_TIMEOUT_MS,
   );
   assert.equal(readCalls.length, ONE_CALL);
   assert.equal(readCalls[NO_ITEMS]?.commit, INSTRUCTION_COMMIT);
@@ -5507,17 +5514,55 @@ test("binding.instruction_files.get refuses a failed file read and caches nothin
   assert.equal(readCalls.length, TWO_CALLS);
 });
 
-test("binding.instruction_files.get refuses a read that exceeds the deadline", async (t) => {
+test("binding.instruction_files.get refuses a read that exceeds the read deadline, not the healthcheck deadline", async (t) => {
   const { f, saved, started } = instructionFixture(t, { hang: true });
   t.mock.timers.enable({ apis: ["setTimeout", "Date"], now: Date.now() });
+  let settled = false;
   const refusal = refusesInstructionFiles(
     f.invokeAsync("binding.instruction_files.get", saved),
     SSH_FAILURE_STATUS,
     ProjectErrorCode.RepositorySshUnreachable,
-  );
+  ).finally(() => {
+    settled = true;
+  });
   await started.promise;
   t.mock.timers.tick(BINDING_CHECK_TIMEOUT_MS);
+  await turn();
+  assert.equal(settled, false);
+  t.mock.timers.tick(
+    REPOSITORY_FILES_READ_TIMEOUT_MS - BINDING_CHECK_TIMEOUT_MS,
+  );
   await refusal;
+});
+
+test("binding.instruction_files.get logs one warn record with the binding, the failure reason and the git text of a failed read", async (t) => {
+  const lines: string[] = [];
+  const { f, saved } = instructionFixture(
+    t,
+    { resolveFailure: gitFailure(REPOSITORY_NOT_FOUND_STDERR) },
+    { logger: redactingLogger(lines) },
+  );
+  await refusesInstructionFiles(
+    f.invokeAsync("binding.instruction_files.get", saved),
+    SSH_FAILURE_STATUS,
+    ProjectErrorCode.RepositorySshUnreachable,
+  );
+  const records = lines
+    .map((line) => JSON.parse(line) as Record<string, unknown>)
+    .filter(({ msg }) => msg === INSTRUCTION_FILES_READ_FAILED);
+  assert.equal(records.length, ONE_CALL);
+  const [record] = records;
+  assert.equal(record?.level, WARN_LEVEL);
+  assert.equal(record?.project_id, saved.project_id);
+  assert.equal(record?.binding_id, saved.binding_id);
+  assert.equal(
+    record?.failure_reason,
+    ResourceFailureReason.RepositoryNotFound,
+  );
+  assert.equal(
+    record?.reason,
+    `ls-remote: git exited with 128: ${REPOSITORY_NOT_FOUND_STDERR}`,
+  );
 });
 
 test("binding.instruction_files.get answers 404 for an absent project", async (t) => {
@@ -5891,6 +5936,47 @@ test("binding.environment.get answers the detected source at the image target wi
     environment: detected.document,
     reason: null,
   });
+});
+
+test("binding.environment.get reads the detection files under the read deadline, not the healthcheck deadline", async (t) => {
+  const { f, saved, resolveCalls, readCalls } = instructionFixture(t, {
+    files: { "package.json": PACKAGE_JSON_TEXT },
+    placement: WorkerPlacement.Container,
+  });
+  await f.invokeAsync("binding.environment.get", saved);
+  const timeouts = [...resolveCalls, ...readCalls].map(
+    ({ timeout }) => timeout,
+  );
+  assert.ok(timeouts.length > ONE_CALL);
+  for (const timeout of timeouts)
+    assert.ok(
+      timeout > BINDING_CHECK_TIMEOUT_MS &&
+        timeout <= REPOSITORY_FILES_READ_TIMEOUT_MS,
+    );
+});
+
+test("binding.environment.get refuses a read that exceeds the read deadline, not the healthcheck deadline", async (t) => {
+  const { f, saved, started } = instructionFixture(t, {
+    hang: true,
+    placement: WorkerPlacement.Container,
+  });
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"], now: Date.now() });
+  let settled = false;
+  const refusal = refusesInstructionFiles(
+    f.invokeAsync("binding.environment.get", saved),
+    SSH_FAILURE_STATUS,
+    ProjectErrorCode.RepositorySshUnreachable,
+  ).finally(() => {
+    settled = true;
+  });
+  await started.promise;
+  t.mock.timers.tick(BINDING_CHECK_TIMEOUT_MS);
+  await turn();
+  assert.equal(settled, false);
+  t.mock.timers.tick(
+    REPOSITORY_FILES_READ_TIMEOUT_MS - BINDING_CHECK_TIMEOUT_MS,
+  );
+  await refusal;
 });
 
 test("binding.environment.get answers the universal source at the image target with no manifest", async (t) => {

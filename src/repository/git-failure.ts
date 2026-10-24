@@ -1,10 +1,16 @@
-import { Diagnostic, OperationError } from "../kernel/errors.ts";
+import { Diagnostic, diagnostic, OperationError } from "../kernel/errors.ts";
 import { ResourceFailureReason } from "../kernel/health.ts";
 import { HostKeyErrorCode, RepositoryErrorCode } from "./contract.ts";
 import { SshAgentErrorCode } from "./ssh-agent.ts";
 
+export const GIT_DEADLINE_EXCEEDED = "Git deadline exceeded";
+
 const GIT_FAILURE_LINES: readonly (readonly [RegExp, ResourceFailureReason])[] =
   [
+    [
+      new RegExp(`: ${GIT_DEADLINE_EXCEEDED}$`, "m"),
+      ResourceFailureReason.DeadlineExceeded,
+    ],
     [
       /REMOTE HOST IDENTIFICATION HAS CHANGED/,
       ResourceFailureReason.HostKeyChanged,
@@ -45,4 +51,10 @@ export function gitFailureReason(error: unknown): ResourceFailureReason {
   if (!(error instanceof Diagnostic) || !(error.cause instanceof Error))
     return ResourceFailureReason.Unclassified;
   return classifyGitFailure(error.cause.message);
+}
+
+export function gitFailureCause(error: unknown): string {
+  return error instanceof Diagnostic && error.cause instanceof Error
+    ? error.cause.message
+    : diagnostic(error);
 }

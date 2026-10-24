@@ -22,7 +22,7 @@ import { RepositoryFileState } from "../repository/contract.ts";
 import type { RepositoryFile, SshAccess } from "../repository/contract.ts";
 import { gitFailureReason } from "../repository/git-failure.ts";
 import {
-  BINDING_CHECK_TIMEOUT_MS,
+  REPOSITORY_FILES_READ_TIMEOUT_MS,
   ENVIRONMENT_FILE_MAX_BYTES,
   EnvironmentSource,
   ProjectErrorCode,
@@ -441,9 +441,9 @@ export class ProjectEnvironments {
     caller.context.signal.throwIfAborted();
     const deadline = new CancellationContext(
       caller.context,
-      Date.now() + BINDING_CHECK_TIMEOUT_MS,
+      Date.now() + REPOSITORY_FILES_READ_TIMEOUT_MS,
     );
-    const end = Date.now() + BINDING_CHECK_TIMEOUT_MS;
+    const end = Date.now() + REPOSITORY_FILES_READ_TIMEOUT_MS;
     try {
       const { address, ssh } = this.access(bindingId, config);
       let commit: string | null;
@@ -488,7 +488,7 @@ export class ProjectEnvironments {
         paths,
         ENVIRONMENT_FILE_MAX_BYTES,
         context,
-        BINDING_CHECK_TIMEOUT_MS,
+        REPOSITORY_FILES_READ_TIMEOUT_MS,
         ssh,
       );
       assert.equal(files.length, paths.length);
@@ -514,7 +514,7 @@ export class ProjectEnvironments {
         directory,
         limit,
         context,
-        BINDING_CHECK_TIMEOUT_MS,
+        REPOSITORY_FILES_READ_TIMEOUT_MS,
         ssh,
       );
     } catch (error) {

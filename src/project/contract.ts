@@ -47,6 +47,7 @@ import {
 
 export const BINDING_CHECK_TIMEOUT_MS = 10000;
 export const BINDING_VERIFY_TIMEOUT_MS = 30000;
+export const REPOSITORY_FILES_READ_TIMEOUT_MS = 30000;
 export const bindingVerifyAnswerEntrySchema = z.strictObject({
   status: z.enum([
     ResourceStatus.Healthy,

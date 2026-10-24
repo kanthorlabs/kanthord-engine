@@ -142,6 +142,7 @@ export const ResourceFailureReason = {
   HostKeyChanged: "host_key_changed",
   IdentityUnavailable: "identity_unavailable",
   HeldByInstance: "held_by_instance",
+  DeadlineExceeded: "deadline_exceeded",
   Unclassified: "unclassified",
 } as const;
 export type ResourceFailureReason =
