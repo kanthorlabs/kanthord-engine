@@ -18,7 +18,7 @@ import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 import { stringify } from "yaml";
 import { configuration, CONFIG_VERSION } from "../../config/index.ts";
-import { temporary } from "../../kernel/test-support.ts";
+import { requirePiTools, temporary } from "../../kernel/test-support.ts";
 import { createServer } from "node:http";
 import { writePrivate } from "../../kernel/files.ts";
 import {
@@ -526,6 +526,7 @@ test("composed Custody and Worker share credential and enablement collaborations
 });
 
 test("serve rejects unsafe owned directories/files and releases earlier resources after startup failure", async (t) => {
+  requirePiTools();
   const paths = layout(temporary(t));
   const listener = createServer();
   await new Promise<void>((resolve) =>
@@ -573,6 +574,7 @@ test("serve rejects unsafe owned directories/files and releases earlier resource
 const MASTER_KEY_ROWS = 1;
 
 test("serve refuses another master_key against an existing database and writes nothing", async (t) => {
+  requirePiTools();
   const paths = layout(temporary(t));
   const listener = createServer();
   await new Promise<void>((resolve) =>
@@ -653,6 +655,7 @@ function createDatabase(path: string, migrations: Migrations): void {
 }
 
 function serveOnce(env: NodeJS.ProcessEnv, signal: AbortSignal) {
+  requirePiTools();
   return nodeChild(
     [
       "--input-type=module",
@@ -722,6 +725,7 @@ test("serve refuses a stored hosted worker binding with no placement and names t
 });
 
 test("serve starts with redirected stdout without issuing a JWT; SIGTERM drains and releases the database", async (t) => {
+  requirePiTools();
   const paths = layout(temporary(t));
   const child = spawn(
     process.execPath,
@@ -815,6 +819,7 @@ test("serve starts with redirected stdout without issuing a JWT; SIGTERM drains 
 });
 
 test("serve installs the pinned pi tools into the state directory before the gateway starts", async (t) => {
+  requirePiTools();
   const paths = layout(temporary(t));
   const child = spawn(
     process.execPath,
@@ -871,6 +876,7 @@ test("serve refuses to start when the pi tool directory cannot be installed", as
 });
 
 test("unsafe SIGHUP replacement initiates shutdown and receives no log record", async (t) => {
+  requirePiTools();
   const paths = layout(temporary(t));
   paths.config.log.destination = "file";
   writePrivate(paths.env.KANTHORD_CONFIG!, stringify(paths.config), true);
@@ -919,6 +925,7 @@ test("unsafe SIGHUP replacement initiates shutdown and receives no log record", 
 });
 
 test("server lifecycle returns errors, reports owned health and releases every resource even when cleanup fails", async (t) => {
+  requirePiTools();
   const paths = layout(temporary(t));
   paths.config.log.destination = "file";
   writePrivate(paths.env.KANTHORD_CONFIG!, stringify(paths.config), true);
@@ -1006,6 +1013,7 @@ test("server lifecycle returns errors, reports owned health and releases every r
 });
 
 test("server quiesces concurrently, drains Intake with direct calls available, joins the chain and releases Intake between Gateway and Project", async (t) => {
+  requirePiTools();
   const paths = layout(temporary(t));
   const result = await nodeChild(
     [
@@ -1090,6 +1098,7 @@ test("server quiesces concurrently, drains Intake with direct calls available, j
 });
 
 test("server starts the worker pool after the Gateway is ready and stops it before it quiesces", async (t) => {
+  requirePiTools();
   const paths = layout(temporary(t));
   paths.config.log.destination = "file";
   writePrivate(paths.env.KANTHORD_CONFIG!, stringify(paths.config), true);
@@ -1141,6 +1150,7 @@ test("server starts the worker pool after the Gateway is ready and stops it befo
 });
 
 test("server startup failure releases Mission in reverse construction order and stop is idempotent", async (t) => {
+  requirePiTools();
   const paths = layout(temporary(t));
   const result = await nodeChild(
     [

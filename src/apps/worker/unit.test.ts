@@ -6,7 +6,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { stringify } from "yaml";
 import type { Context } from "../../kernel/context.ts";
 import { HealthStatus } from "../../kernel/service.ts";
-import { temporary } from "../../kernel/test-support.ts";
+import { requirePiTools, temporary } from "../../kernel/test-support.ts";
 import { directories } from "../../kernel/xdg.ts";
 import { OperationResultType } from "../../kernel/operation.ts";
 import { packageVersion } from "../../kernel/version.ts";
@@ -96,13 +96,8 @@ function scripted(options: {
 
 function environmentOf(t: TestContext): NodeJS.ProcessEnv {
   const env = { XDG_CONFIG_HOME: temporary(t), XDG_STATE_HOME: temporary(t) };
-  try {
-    installPiTools({ env });
-  } catch (error) {
-    assert.fail(
-      `${(error as Error).message} Run pnpm run pi-tools:fetch before this test.`,
-    );
-  }
+  requirePiTools();
+  installPiTools({ env });
   return env;
 }
 

@@ -1,3 +1,4 @@
+import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { cpSync, mkdtempSync, rmSync, mkdirSync } from "node:fs";
@@ -5,9 +6,44 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { TestContext } from "node:test";
 import pino from "pino";
+import {
+  PI_TOOLS_MANIFEST,
+  piToolAsset,
+  piToolCurrent,
+  shippedAsset,
+} from "./assets.ts";
 import { CancellationContext } from "./context.ts";
 import { diagnostic, diagnosticRows } from "./errors.ts";
 import { redaction } from "./log.ts";
+
+interface PiToolsDigests {
+  tools: Record<string, { targets: Record<string, { binary_sha256: string }> }>;
+}
+
+export function requirePiTools(
+  options: { directory?: URL; manifest?: PiToolsDigests } = {},
+): void {
+  const manifest =
+    options.manifest ??
+    (JSON.parse(shippedAsset(PI_TOOLS_MANIFEST)) as PiToolsDigests);
+  const target = `${process.platform}-${process.arch}`;
+  const refused = Object.entries(manifest.tools)
+    .filter(([tool, definition]) => {
+      const entry = definition.targets[target];
+      const binary = piToolAsset(
+        target,
+        `bin/${tool}`,
+        undefined,
+        options.directory,
+      );
+      return !entry || !binary || !piToolCurrent(binary, entry.binary_sha256);
+    })
+    .map(([tool]) => tool);
+  if (refused.length)
+    assert.fail(
+      `pi tools are absent or stale: ${refused.join(", ")}. Run pnpm run pi-tools:fetch before this test.`,
+    );
+}
 
 export function diagnosticText(error: unknown): string {
   return `${diagnostic(error)}\n${diagnosticRows(error)}`;

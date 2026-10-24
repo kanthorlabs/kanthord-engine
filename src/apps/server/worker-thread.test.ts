@@ -9,7 +9,11 @@ import { build } from "esbuild";
 import pino from "pino";
 import { servePort } from "../../gateway/index.ts";
 import { LogDestination } from "../../kernel/log.ts";
-import { hostEnvironment, temporary } from "../../kernel/test-support.ts";
+import {
+  hostEnvironment,
+  requirePiTools,
+  temporary,
+} from "../../kernel/test-support.ts";
 import { directories } from "../../kernel/xdg.ts";
 import { workerOperations } from "../../worker/contract.ts";
 import { threadDataSchema } from "../worker/thread-data.ts";
@@ -89,6 +93,7 @@ test("the worker data of a thread holds a port, a client secret and a log destin
 });
 
 test("a worker thread registers its worker unit through the port and the invocation chain", async (t) => {
+  requirePiTools();
   const fixture = await gatewayFixture(t, {
     repositoryConnector: {
       gitLsRemote: async () => {},
@@ -153,6 +158,7 @@ test("a worker thread refuses to start without an absolute directory variable", 
 });
 
 test("a worker thread exits by itself after its run ends", async (t) => {
+  requirePiTools();
   const { port1, port2 } = new MessageChannel();
   const thread = startThread(
     threadData(port2),

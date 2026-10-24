@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import {
   chmodSync,
   mkdirSync,
@@ -11,7 +11,9 @@ import {
 import { basename, dirname, join } from "node:path";
 import { z } from "zod";
 import {
+  PI_TOOLS_MANIFEST,
   piToolAsset,
+  piToolCurrent,
   shippedAsset,
   type BinaryAssetSource,
 } from "../kernel/assets.ts";
@@ -22,7 +24,6 @@ import { WorkerErrorCode } from "../worker/contract.ts";
 import { childEnvironment } from "./environment.ts";
 import { piDirectory } from "./pi.ts";
 
-export const PI_TOOLS_MANIFEST = "pi-tools.json";
 const BIN_DIRECTORY_NAME = "bin";
 const LICENSES_DIRECTORY_NAME = "licenses";
 const BINARY_MODE = 0o755;
@@ -69,13 +70,9 @@ function toolMissing(
   });
 }
 
-function sha256(bytes: Buffer): string {
-  return createHash("sha256").update(bytes).digest("hex");
-}
-
 function hasDigest(path: string, digest: string): boolean {
   try {
-    return sha256(readFileSync(path)) === digest;
+    return piToolCurrent(readFileSync(path), digest);
   } catch {
     return false;
   }
@@ -107,7 +104,7 @@ function installTool(
     options.root,
   );
   if (!binary) throw toolMissing(tool, "binary source is absent");
-  if (sha256(binary) !== entry.binary_sha256)
+  if (!piToolCurrent(binary, entry.binary_sha256))
     throw toolMissing(tool, "binary digest differs from the manifest");
   const path = join(binDirectory, tool);
   try {
