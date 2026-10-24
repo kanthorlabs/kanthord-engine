@@ -18,6 +18,7 @@ import { OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import { IN_MEMORY_DATABASE, Store } from "../kernel/store.ts";
 import { temporary } from "../kernel/test-support.ts";
+import { SpanStatus, type ServerTrace } from "../tracking/contract.ts";
 import {
   RepositoryFileState,
   type RepositoryFile,
@@ -37,6 +38,7 @@ import {
   detectEnvironment,
 } from "./detection.ts";
 import { ProjectEnvironments, type GroupResolution } from "./environment.ts";
+import type { EnvironmentContribution } from "./environment-telemetry.ts";
 import {
   BASE_SUFFIX,
   EnvironmentStatus,
@@ -232,6 +234,9 @@ class Harness {
   proveInputs: ProofInput[] = [];
   woken: string[] = [];
   lines: string[] = [];
+  spans: Array<{ trace: ServerTrace; contribution: EnvironmentContribution }> =
+    [];
+  telemetryFails = false;
   clock = 0;
   readonly proofs: ProofFiles;
   readonly onboarding: Onboarding;
@@ -322,6 +327,12 @@ class Harness {
       now: () => ++this.clock,
       runId: () => "run_1",
       environmentBuildTimeoutMs,
+      telemetry: {
+        span: (trace, contribution) => {
+          if (this.telemetryFails) throw new Error(BOOM);
+          this.spans.push({ trace, contribution });
+        },
+      },
     });
     t.after(() => this.onboarding.stop());
   }
@@ -341,6 +352,19 @@ class Harness {
   open(): void {
     this.openBuild();
     this.openProve();
+  }
+
+  recorded(): string[] {
+    return this.spans.map(
+      ({ contribution }) =>
+        `${contribution.operation}:${contribution.status ?? "start"}`,
+    );
+  }
+
+  spanOf(operation: string): EnvironmentContribution | undefined {
+    return this.spans
+      .map(({ contribution }) => contribution)
+      .find((contribution) => contribution.operation === operation);
   }
 
   logged(message: string): Array<Record<string, unknown>> {
@@ -2026,3 +2050,184 @@ test("the universal environment passes the schema and holds the pinned stacks", 
   ]);
   assert.equal(document.updateContentCommand, undefined);
 });
+
+const ROOT_SPAN = "project.environment";
+const BUILD_SPAN = "environment.build";
+const SETUP_SPAN = "environment.setup";
+const PROOF_SPAN = "environment.proof";
+
+function rootEndOf(h: Harness): EnvironmentContribution | undefined {
+  return h.spans
+    .map(({ contribution }) => contribution)
+    .find(
+      (contribution) =>
+        contribution.operation === ROOT_SPAN &&
+        contribution.status !== undefined,
+    );
+}
+
+test(
+  "a passed image run records the root, the three steps and the root end in order under one trace",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const h = new Harness(t);
+    h.open();
+    h.proveResults = PASSING_RESULTS;
+    await h.compute();
+    await h.ended();
+    assert.deepEqual(h.recorded(), [
+      `${ROOT_SPAN}:start`,
+      `${BUILD_SPAN}:${SpanStatus.Ok}`,
+      `${SETUP_SPAN}:${SpanStatus.Ok}`,
+      `${PROOF_SPAN}:${SpanStatus.Ok}`,
+      `${ROOT_SPAN}:${SpanStatus.Ok}`,
+    ]);
+    const [first] = h.spans;
+    assert.ok(first);
+    assert.equal(first.trace.project_id, PROJECT);
+    assert.match(first.trace.trace_id, /^[0-9a-f]{32}$/);
+    assert.match(first.trace.root_span_id, /^[0-9a-f]{16}$/);
+    for (const { trace } of h.spans) assert.deepEqual(trace, first.trace);
+    assert.deepEqual(first.contribution.attributes, {
+      "project.id": PROJECT,
+      "project.binding.name": APP_NAME,
+      "environment.target": IMAGE,
+      "environment.source": REPOSITORY_SOURCE,
+      "environment.digest": h.digest(),
+    });
+  },
+);
+
+test(
+  "a failed setup records the setup span with setup_failed, no proof span and a root end with Error",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const h = new Harness(t);
+    h.open();
+    h.proveResults = [
+      result("setup", "make setup", SETUP_EXIT, { output: "SECRET_OUTPUT" }),
+      result("check", "make test", 0),
+    ];
+    await h.compute();
+    await h.ended();
+    const setup = h.spanOf(SETUP_SPAN);
+    assert.equal(setup?.status, SpanStatus.Error);
+    assert.equal(setup?.attributes?.["error.type"], SETUP_FAILED);
+    assert.equal(h.spanOf(PROOF_SPAN), undefined);
+    const end = rootEndOf(h);
+    assert.equal(end?.status, SpanStatus.Error);
+    assert.equal(end?.attributes?.["error.type"], SETUP_FAILED);
+    assert.ok(!JSON.stringify(h.spans).includes("SECRET_OUTPUT"));
+  },
+);
+
+test(
+  "a failed build records the build span with build_failed and a root end with Error",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const h = new Harness(t);
+    h.open();
+    h.buildResult = {
+      outcome: "failed",
+      class: "build_failed",
+      tail: "SECRET_TAIL",
+    };
+    await h.compute();
+    await h.ended();
+    const build = h.spanOf(BUILD_SPAN);
+    assert.equal(build?.status, SpanStatus.Error);
+    assert.equal(build?.attributes?.["error.type"], BUILD_FAILED);
+    assert.equal(h.spanOf(SETUP_SPAN), undefined);
+    assert.equal(h.spanOf(PROOF_SPAN), undefined);
+    const end = rootEndOf(h);
+    assert.equal(end?.status, SpanStatus.Error);
+    assert.equal(end?.attributes?.["error.type"], BUILD_FAILED);
+    assert.ok(!JSON.stringify(h.spans).includes("SECRET_TAIL"));
+  },
+);
+
+test(
+  "a rejected build records the build span with build_failed",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const h = new Harness(t);
+    h.open();
+    t.mock.method(AbortSignal, "timeout", () =>
+      AbortSignal.abort(new Error("deadline")),
+    );
+    await h.compute();
+    await h.ended();
+    const build = h.spanOf(BUILD_SPAN);
+    assert.equal(build?.status, SpanStatus.Error);
+    assert.equal(build?.attributes?.["error.type"], BUILD_FAILED);
+  },
+);
+
+test(
+  "a host run records no build span",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const h = new Harness(t);
+    h.open();
+    h.bindings = facts([APP], []);
+    h.resolution = STORED;
+    h.proveResults = PASSING_RESULTS;
+    await h.compute();
+    await h.ended();
+    assert.deepEqual(h.recorded(), [
+      `${ROOT_SPAN}:start`,
+      `${SETUP_SPAN}:${SpanStatus.Ok}`,
+      `${PROOF_SPAN}:${SpanStatus.Ok}`,
+      `${ROOT_SPAN}:${SpanStatus.Ok}`,
+    ]);
+    assert.equal(h.spanOf(BUILD_SPAN), undefined);
+  },
+);
+
+test(
+  "a run with an existing tag records no build span",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const h = new Harness(t);
+    h.open();
+    h.existing.add(h.tagOf(h.digest()));
+    h.proveResults = PASSING_RESULTS;
+    await h.compute();
+    await h.ended();
+    assert.equal(h.spanOf(BUILD_SPAN), undefined);
+    assert.equal(h.recorded().at(-1), `${ROOT_SPAN}:${SpanStatus.Ok}`);
+  },
+);
+
+test(
+  "a cancelled run records the root end with Error and no class",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const h = new Harness(t);
+    await h.compute();
+    await h.until(() => h.events.length > NO_CALLS);
+    await h.onboarding.stop();
+    const end = rootEndOf(h);
+    assert.equal(end?.status, SpanStatus.Error);
+    assert.equal(end?.attributes?.["error.type"], undefined);
+    assert.equal(h.spanOf(BUILD_SPAN), undefined);
+  },
+);
+
+test(
+  "a telemetry that throws changes no status and no proof file",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const h = new Harness(t);
+    h.open();
+    h.telemetryFails = true;
+    h.proveResults = PASSING_RESULTS;
+    await h.compute();
+    await h.ended();
+    const file = h.proofOf(h.digest());
+    assert.ok(file);
+    assert.equal(file.outcome, PASSED);
+    assert.equal(h.state().status, EnvironmentStatus.Ready);
+    assert.equal(h.spans.length, NO_CALLS);
+  },
+);
