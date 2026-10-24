@@ -2140,6 +2140,53 @@ test("a binding write during the first read writes no record until the read of t
   assert.equal(h.state().binding_id, RENAMED_BINDING_ID);
 });
 
+test("a target flip-back during a held read keeps the record pending and computes again at the new target", async (t) => {
+  const h = new Harness(t);
+  h.resolution = NOTHING;
+  await h.compute();
+  assert.equal(h.state().target, EnvironmentTarget.Image);
+  const held = new Deferred();
+  h.resolveGate = held;
+  h.bindings = facts([APP], [server]);
+  h.onboarding.bindingsChanged(PROJECT);
+  await h.until(() => h.resolveCalls.length === TWO_CALLS);
+  h.bindings = facts([APP], [container("app")]);
+  h.onboarding.bindingsChanged(PROJECT);
+  const rerun = new Deferred();
+  h.resolveGate = rerun;
+  held.release();
+  await h.until(() => h.resolveCalls.length === THREE_CALLS);
+  assert.equal(h.state().status, EnvironmentStatus.Pending);
+  assert.equal(
+    h.onboarding.environmentsClaimable(PROJECT, [APP.resource_identity]),
+    false,
+  );
+  rerun.release();
+  await h.until(() => h.state().status === EnvironmentStatus.None);
+  assert.equal(h.state().target, EnvironmentTarget.Image);
+  assert.deepEqual(
+    h.resolveCalls.map((call) => call.target).slice(NO_CALLS, THREE_CALLS),
+    [EnvironmentTarget.Image, EnvironmentTarget.Host, EnvironmentTarget.Image],
+  );
+});
+
+test("a binding removal during a held read leaves no record", async (t) => {
+  const h = new Harness(t);
+  h.resolution = NOTHING;
+  await h.compute();
+  const held = new Deferred();
+  h.resolveGate = held;
+  const running = h.compute();
+  await h.until(() => h.resolveCalls.length === TWO_CALLS);
+  h.bindings = facts([], []);
+  h.onboarding.bindingsChanged(PROJECT);
+  assert.deepEqual(h.onboarding.states(PROJECT), []);
+  held.release();
+  await running;
+  await h.until(() => !h.onboarding["computing"].size);
+  assert.deepEqual(h.onboarding.states(PROJECT), []);
+});
+
 const GONE_CACHE = { project_id: PROJECT, resource_identity: STRAY_IDENTITY };
 
 function cacheOf(identity: string) {
@@ -3375,6 +3422,28 @@ test(
     await h.compute();
     h.onboarding.environmentFailed(failureInput(h));
     assert.equal(h.sessionInputs.length, TWO_CALLS);
+  },
+);
+
+test(
+  "a failed run after a target change during the run starts no session",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const h = new Harness(t);
+    h.resolution = UNIVERSAL;
+    h.agentEnabled = true;
+    h.proveResults = FAILING_RESULTS;
+    h.openBuild();
+    await h.compute();
+    await h.until(() => h.state().run_started_at !== null);
+    h.bindings = facts([APP], [server]);
+    h.onboarding.bindingsChanged(PROJECT);
+    h.openProve();
+    await h.ended();
+    await turn();
+    await turn();
+    assert.equal(h.sessionInputs.length, NO_CALLS);
+    assert.equal(h.state().repairs, NO_REPAIRS);
   },
 );
 

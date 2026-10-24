@@ -509,6 +509,9 @@ export class Onboarding {
     const current = new Set(
       repositories.map((group) => group.resource_identity),
     );
+    for (const key of this.computing.keys())
+      if (key.startsWith(keyOf(projectId, "")))
+        this.changedWhileReading.add(key);
     for (const [key, record] of Array.from(this.records))
       if (
         record.project_id === projectId &&
@@ -672,15 +675,11 @@ export class Onboarding {
   ): void {
     const key = keyOf(projectId, group.resource_identity);
     const record = this.records.get(key);
-    if (record === undefined) {
-      if (this.computing.has(key)) this.changedWhileReading.add(key);
-      return;
-    }
+    if (record === undefined) return;
     const rowChanged =
       record.binding_id !== group.binding_id ||
       record.binding_name !== group.binding_name;
     if (!rowChanged && targetOf(group, facts) === record.target) return;
-    if (this.computing.has(key)) this.changedWhileReading.add(key);
     if (rowChanged) {
       record.binding_id = group.binding_id;
       record.binding_name = group.binding_name;
@@ -776,7 +775,7 @@ export class Onboarding {
       };
     }
     if (this.changedWhileReading.delete(key)) {
-      this.again.add(key);
+      if (!this.context.signal.aborted) this.again.add(key);
       return;
     }
     const current = this.records.get(key);
@@ -962,7 +961,12 @@ export class Onboarding {
 
   private considerSession(group: GroupRecord): void {
     const key = keyOf(group.project_id, group.resource_identity);
-    if (this.records.get(key) !== group || group.session !== null) return;
+    if (
+      this.records.get(key) !== group ||
+      group.session !== null ||
+      !group.read_succeeded
+    )
+      return;
     if (group.target !== EnvironmentTarget.Image || !repairableSource(group))
       return;
     if (!this.dependencies.environmentAgent.enabled()) return;

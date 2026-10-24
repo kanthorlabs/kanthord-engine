@@ -684,6 +684,7 @@ The Onboarding component starts one session after a failed proof. The start foll
 - The target is `image`.
 - The source is `detected`, `universal` or `none`. The source `stored` qualifies only when the last write of the stored environment came from a session of `env@1`. A binding-set write from another caller clears that mark.
 - No session of the group runs, and the failed run did not run for a session.
+- The last read of the group succeeded, and no binding-set write changed the binding or its target after that read.
 - `env@1` is enabled.
 - `repairs` of the proof file of the current digest is below 3.
 
