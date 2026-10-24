@@ -547,6 +547,7 @@ export async function gatewayFixture(
     >[0]["inventoryOverrides"];
     path?: string;
     scheduler?: Partial<SchedulerConfig>;
+    project?: { environment_memory_mb?: number };
     oauthProviders?: Parameters<typeof composeServices>[0]["oauthProviders"];
     loadModelRuntime?: Parameters<
       typeof composeServices
@@ -581,6 +582,7 @@ export async function gatewayFixture(
     master_key: randomBytes(32).toString("base64"),
     gateway: { port: 0, allowed_hosts: ["localhost"] },
     scheduler: options.scheduler ?? {},
+    project: options.project ?? {},
     worker: {
       ...(options.serverSlotLimit === undefined
         ? {}
