@@ -1,22 +1,8 @@
 import assert from "node:assert/strict";
-import { test, type TestContext } from "node:test";
+import { test } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
-import type { z } from "zod";
-import { agentOperations } from "../../agent/contract.ts";
 import { EnvironmentSource } from "../../kernel/devcontainer.ts";
-import { httpClient } from "../../gateway/client.ts";
-import { CancellationContext } from "../../kernel/context.ts";
-import {
-  OperationResultType,
-  type ClientOptions,
-  type Operation,
-  type OperationResult,
-} from "../../kernel/operation.ts";
-import {
-  Intent,
-  missionOperations,
-  NodeState,
-} from "../../mission/contract.ts";
+import { missionOperations, NodeState } from "../../mission/contract.ts";
 import {
   environmentTagOf,
   ImageBuildOutcome,
@@ -35,38 +21,34 @@ import {
   FailureOrigin,
   EnvironmentFailureClass,
   projectOperations,
-  workerResourceIdentity,
-  type RepositoryFiles,
 } from "../../project/contract.ts";
-import { repositoryFiles } from "../../repository/index.ts";
-import { LOCAL_GIT_SSH_ACCESS } from "../../repository/test-sshd.ts";
-import {
-  ExecutionStopReason,
-  schedulerOperations,
-  WorkPullKind,
-  type ReleaseStop,
-} from "../../scheduler/contract.ts";
-import { workerOperations } from "../../worker/contract.ts";
+import { ExecutionStopReason, WorkPullKind } from "../../scheduler/contract.ts";
 import { fakeContainerHost } from "./container-fakes.ts";
 import { until } from "./cli-support.ts";
-import type { SlotDriver, SlotInstance } from "./slot-driver.ts";
+import { humanCaller } from "./test-support.ts";
 import {
-  bareRepository,
-  gatewayFixture,
-  humanCaller,
-  provisionNativeAgent,
-  provisionRepositoryCredentials,
-} from "./test-support.ts";
-
-type Fixture = Awaited<ReturnType<typeof gatewayFixture>>;
+  awaitStatus,
+  bindingsOf,
+  completed,
+  createProject,
+  environmentList,
+  gateFixture,
+  importNode,
+  NO_ITEMS,
+  recordingSlotDriver,
+  RUN_VERB,
+  SINGLE_SLOT,
+  slotRuns,
+  SLOT_NAME_PREFIX,
+  STATUS_WAIT_MS,
+  worker,
+  type Fixture,
+  type SlotStart,
+} from "./environment-test-support.ts";
 
 const TEST_TIMEOUT_MS = 120000;
-const STATUS_WAIT_MS = 10000;
 const SETTLE_WAIT_MS = 10000;
-const FIRST_VERSION = 1;
-const SINGLE_SLOT = 1;
 const SECOND_SLOT = 2;
-const FIRST_SLOT = 0;
 const SECOND_SLOT_INDEX = 1;
 const FAILING_SETUP = "false";
 const PASSING_SETUP = "true";
@@ -74,48 +56,19 @@ const BROKEN_ENVIRONMENT = { postCreateCommand: FAILING_SETUP };
 const FIXED_ENVIRONMENT = { postCreateCommand: PASSING_SETUP };
 const BASE_IMAGE = "mcr.microsoft.com/devcontainers/base:bookworm";
 const OTHER_BASE_IMAGE = "mcr.microsoft.com/devcontainers/base:ubuntu";
-const REPOSITORY_BINDING = "repo";
-const WORKER_BINDING = "general";
-const REVIEWER_BINDING = "reviewer";
 const COMMAND_ABSENT_EXIT = 127;
 const FAILED_COMMAND = "pnpm test";
 const OLDER_DIGEST = "older_digest";
 const CONTAINER_IMAGE = "kanthord-test";
-const NO_ITEMS = 0;
 const PASSED_EXIT = 0;
 const FAILED_EXIT = 1;
-const RUN_VERB = "run";
 const VOLUME_VERB = "volume";
 const CREATE_VERB = "create";
 const HOST_PROOF_METHOD = "proveOnHost";
-const NAME_OPTION = "--name";
-const SLOT_NAME_PREFIX = "kanthord_slot_";
-const CONFIGURATION = {
-  agent_provider: "default",
-  model_identifier: "claude-sonnet-4-5",
-  reasoning_effort: "off",
-} as const;
-const NODE_CONTENT = {
-  name: "Work",
-  requirement: "Do work",
-  criterion: "Done",
-  verifications: ["true"],
-};
-const NO_INPUT = { params: {}, query: {}, body: null };
 const COMMAND_ABSENT_STOP = {
   reason: ExecutionStopReason.EnvironmentFailed,
   code: EnvironmentFailureClass.CommandAbsent,
 } as const;
-
-function completed<T>(result: OperationResult<T>): T {
-  assert.equal(
-    result.type,
-    OperationResultType.Completed,
-    JSON.stringify(result),
-  );
-  assert.ok(result.type === OperationResultType.Completed);
-  return result.data;
-}
 
 function commandResult(phase: ProofPhase, command: string): CommandResult {
   return {
@@ -193,219 +146,6 @@ function fakeEnvironmentRuntime() {
   };
 }
 
-function localRepositoryFiles(bare: string): RepositoryFiles {
-  return {
-    resolveBranchCommit: (_address, branch, context, deadlineMs) =>
-      repositoryFiles.resolveBranchCommit(
-        bare,
-        branch,
-        context,
-        deadlineMs,
-        LOCAL_GIT_SSH_ACCESS,
-      ),
-    readFilesAtCommit: (
-      _address,
-      commit,
-      paths,
-      maxBytes,
-      context,
-      deadlineMs,
-    ) =>
-      repositoryFiles.readFilesAtCommit(
-        bare,
-        commit,
-        paths,
-        maxBytes,
-        context,
-        deadlineMs,
-        LOCAL_GIT_SSH_ACCESS,
-      ),
-    listFilesAtCommit: (
-      _address,
-      commit,
-      directory,
-      limit,
-      context,
-      deadlineMs,
-    ) =>
-      repositoryFiles.listFilesAtCommit(
-        bare,
-        commit,
-        directory,
-        limit,
-        context,
-        deadlineMs,
-        LOCAL_GIT_SSH_ACCESS,
-      ),
-    readObjectIds: (_address, commit, paths, context, deadlineMs) =>
-      repositoryFiles.readObjectIds(
-        bare,
-        commit,
-        paths,
-        context,
-        deadlineMs,
-        LOCAL_GIT_SSH_ACCESS,
-      ),
-    cloneSnapshot: (_address, revision, directory, context, deadlineMs) =>
-      repositoryFiles.cloneSnapshot(
-        bare,
-        revision,
-        directory,
-        context,
-        deadlineMs,
-        LOCAL_GIT_SSH_ACCESS,
-      ),
-  };
-}
-
-async function gateFixture(
-  t: TestContext,
-  options: Parameters<typeof gatewayFixture>[1],
-) {
-  const { bare } = await bareRepository(t, "environment_gate");
-  const fixture = await gatewayFixture(t, {
-    repositoryConnector: { gitLsRemote: async () => {} },
-    repositoryFiles: localRepositoryFiles(bare),
-    ...options,
-  });
-  await provisionRepositoryCredentials(fixture);
-  await provisionNativeAgent(fixture);
-  await humanCaller(fixture)(agentOperations["enablement.put"], {
-    params: { agent_name: "re@1" },
-    query: {},
-    body: {
-      agent_providers: [
-        {
-          name: CONFIGURATION.agent_provider,
-          provider: "anthropic",
-          credential: "native-credential",
-        },
-      ],
-      default_configuration: CONFIGURATION,
-      fallback_configurations: [],
-    },
-  });
-  return fixture;
-}
-
-interface ProjectInput {
-  name: string;
-  placement: "server" | "container";
-  instanceCount: number;
-  environment?: unknown;
-}
-
-function bindingsOf(input: ProjectInput) {
-  return {
-    [REPOSITORY_BINDING]: {
-      kind: "repository",
-      config: {
-        available: true,
-        platform: "github",
-        address: "git@github.com:owner/repo.git",
-        ssh_credential: "github-ssh",
-        strategy: { base_branch: "main" },
-        credential: "github",
-        ...(input.environment === undefined
-          ? {}
-          : { environment: input.environment }),
-      },
-    },
-    [WORKER_BINDING]: {
-      kind: "worker",
-      config: {
-        worker: "coder@1",
-        placement: input.placement,
-        instance_count: input.instanceCount,
-        entries: [{ agent: "swe@1", ...CONFIGURATION }],
-      },
-    },
-    [REVIEWER_BINDING]: {
-      kind: "worker",
-      config: {
-        worker: "reviewer@1",
-        placement: "server",
-        instance_count: NO_ITEMS,
-      },
-    },
-  };
-}
-
-async function createProject(fixture: Fixture, input: ProjectInput) {
-  const call = humanCaller(fixture);
-  const project = await call(projectOperations.create, {
-    params: {},
-    query: {},
-    body: { name: input.name },
-  });
-  const written = await call(projectOperations["bindingSet.write"], {
-    params: { project_id: project.id },
-    query: {},
-    body: { version: FIRST_VERSION, bindings: bindingsOf(input) as never },
-  });
-  const repository = written.bindings[REPOSITORY_BINDING];
-  assert.ok(repository);
-  return { id: project.id, repositoryId: repository.id };
-}
-
-async function importNode(
-  fixture: Fixture,
-  project: { id: string; repositoryId: string },
-  filename = "implement-1.md",
-): Promise<string> {
-  const call = humanCaller(fixture);
-  const mission = await call(missionOperations.get, {
-    params: { project_id: project.id },
-    query: {},
-    body: null,
-  });
-  const created = await call(missionOperations["node.create"], {
-    params: { mission_id: mission.id },
-    query: {},
-    body: {
-      filename,
-      content: {
-        ...NODE_CONTENT,
-        intent: Intent.Implement,
-        bindings: [project.repositoryId],
-      },
-      tasks: [],
-      reason: "plan",
-      expected_mission_version: mission.version,
-    },
-  });
-  return created.revisions[0]!.node_id;
-}
-
-function environmentList(
-  fixture: Fixture,
-  projectId: string,
-): Promise<EnvironmentState[]> {
-  return humanCaller(fixture)(projectOperations["environment.list"], {
-    params: { project_id: projectId },
-    query: {},
-    body: null,
-  }).then((answer) => answer.items);
-}
-
-async function awaitStatus(
-  t: TestContext,
-  fixture: Fixture,
-  projectId: string,
-  status: EnvironmentStatus,
-): Promise<EnvironmentState> {
-  const signal = AbortSignal.any([
-    t.signal,
-    AbortSignal.timeout(STATUS_WAIT_MS),
-  ]);
-  const items = await until(
-    () => environmentList(fixture, projectId),
-    (found) => found.some((item) => item.status === status),
-    signal,
-  );
-  return items.find((item) => item.status === status)!;
-}
-
 async function currentItem(
   fixture: Fixture,
   projectId: string,
@@ -451,83 +191,6 @@ async function rebuild(fixture: Fixture, projectId: string) {
       body: null,
     },
   );
-}
-
-async function worker(
-  t: TestContext,
-  fixture: Fixture,
-  projectId: string,
-  nodeId: string,
-  slotIndex = FIRST_SLOT,
-) {
-  const slot = await fixture.slotClient(projectId, WORKER_BINDING, slotIndex);
-  const call = <T extends Operation>(
-    operation: T,
-    input: z.input<T["input"]>,
-    options: ClientOptions = {},
-  ) =>
-    httpClient({ operation }, fixture.endpoint, slot.token).operation(
-      input,
-      options,
-    );
-  const { runtime_identity: runtimeIdentity } = completed(
-    await call(workerOperations.register, NO_INPUT),
-  );
-  const pull = (options: ClientOptions = {}) =>
-    call(
-      schedulerOperations.workPull,
-      {
-        params: {},
-        query: {},
-        body: {
-          resource_identity: workerResourceIdentity(WORKER_BINDING),
-          runtime_identity: runtimeIdentity,
-        },
-      },
-      options,
-    );
-  const bounded = () =>
-    AbortSignal.any([t.signal, AbortSignal.timeout(STATUS_WAIT_MS)]);
-  return {
-    pull,
-    release: async (executionId: string, stop: ReleaseStop) =>
-      completed(
-        await call(schedulerOperations.executionRelease, {
-          params: { execution_id: executionId },
-          query: {},
-          body: { further_work: true, stop },
-        }),
-      ),
-    claimed: async (expectedNodeIds = [nodeId]) => {
-      const answer = completed(await pull());
-      assert.equal(answer.kind, WorkPullKind.Claimed);
-      assert.ok(answer.kind === WorkPullKind.Claimed);
-      assert.ok(expectedNodeIds.includes(answer.execution.node_id));
-      return answer.execution.execution_id;
-    },
-    blocked: async () => {
-      const context = new CancellationContext();
-      const held = pull({ context });
-      await Promise.race([
-        until(
-          () => fixture.scheduler.pulling(runtimeIdentity),
-          Boolean,
-          bounded(),
-        ),
-        held.then((answer) =>
-          assert.fail(`the first pull answered ${JSON.stringify(answer)}`),
-        ),
-      ]);
-      assert.equal(completed(await pull()).kind, WorkPullKind.NoWork);
-      return {
-        held,
-        cancel: async () => {
-          context.cancel();
-          await held.catch(() => undefined);
-        },
-      };
-    },
-  };
 }
 
 function executionRows(fixture: Fixture, nodeId: string): number {
@@ -719,27 +382,6 @@ test(
   },
 );
 
-interface SlotStart {
-  clientId: string;
-  slot: number;
-  instance: SlotInstance;
-}
-
-function slotRuns(
-  fake: ReturnType<typeof fakeContainerHost>,
-  clientId?: string,
-): string[][] {
-  return fake
-    .commands()
-    .filter(
-      (command) =>
-        command[0] === RUN_VERB &&
-        (clientId === undefined ||
-          command[command.indexOf(NAME_OPTION) + 1] ===
-            `${SLOT_NAME_PREFIX}${clientId}`),
-    );
-}
-
 test(
   "a container slot starts only on the ready image of its environment, and a stop ends the slot wait",
   { timeout: TEST_TIMEOUT_MS },
@@ -747,26 +389,7 @@ test(
     const environment = fakeEnvironmentRuntime();
     const fake = fakeContainerHost(t);
     const starts: SlotStart[] = [];
-    const wrap = (driver: SlotDriver): SlotDriver => ({
-      placement: driver.placement,
-      check: () => driver.check(),
-      prepare: () => driver.prepare(),
-      removeVolume: (clientId) => driver.removeVolume(clientId),
-      sweepVolumes: (live) => driver.sweepVolumes(live),
-      imageOf: (clientId) => driver.imageOf?.(clientId) ?? null,
-      launch: (launch) => {
-        const instance = driver.launch({
-          ...launch,
-          environment: fake.host.environment,
-        });
-        starts.push({
-          clientId: launch.slot.client_id,
-          slot: launch.slot.slot,
-          instance,
-        });
-        return instance;
-      },
-    });
+    const wrap = recordingSlotDriver(fake, starts);
     const fixture = await gateFixture(t, {
       containerImage: CONTAINER_IMAGE,
       environmentRuntime: environment.runtime,
