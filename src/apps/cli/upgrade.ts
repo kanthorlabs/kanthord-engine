@@ -7,6 +7,7 @@ import {
 } from "../../kernel/store.ts";
 import { directories } from "../../kernel/xdg.ts";
 import { formatRows, rowWidth, type RowValue } from "../../kernel/rows.ts";
+import { ConfigChangeKind } from "../../config/steps.ts";
 
 const STAMP_LENGTH = 15;
 const UpgradeRow = {
@@ -14,6 +15,7 @@ const UpgradeRow = {
   Backup: "backup",
   Migrated: "migrated",
   Renamed: "renamed",
+  Removed: "removed",
   Upgraded: "upgraded",
   ConfigVersion: "config_version",
 } as const;
@@ -101,7 +103,9 @@ export async function upgrade(
     if (config.content !== null) {
       writePrivate(path, config.content, true);
       for (const change of config.changes)
-        row(UpgradeRow.Renamed, `${change.from} -> ${change.to}`);
+        if (change.kind === ConfigChangeKind.Rename)
+          row(UpgradeRow.Renamed, `${change.from} -> ${change.to}`);
+        else row(UpgradeRow.Removed, change.key);
       row(UpgradeRow.Upgraded, path);
       row(UpgradeRow.ConfigVersion, `${config.from} -> ${config.to}`);
     }

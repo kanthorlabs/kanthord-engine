@@ -132,13 +132,13 @@ import { instanceIssuer } from "./instance-issuer.ts";
 import { AgentComponent, agentMigrations } from "../../agent/index.ts";
 import {
   WorkbenchService,
-  workbenchDirectory,
   workbenchMigrations,
   type WorkbenchModelRuntimeFactory,
 } from "../../workbench/index.ts";
 import { WORKBENCH_SERVICE_NAME } from "../../workbench/contract.ts";
 import { AGENT_COMPONENT_NAME } from "../../agent/contract.ts";
 import { loadPi } from "../../agent/pi.ts";
+import { PromptConsumer } from "../../agent/prompt-render.ts";
 import {
   RepositoryComponent,
   checkServerRepositoryTools,
@@ -567,8 +567,6 @@ export function composeServices(options: {
     store: options.store,
     config: options.config.agent,
     dataDirectory: directories(process.env).data,
-    workbenchDirectory: (name) =>
-      workbenchDirectory(options.stateDirectory, name),
     custodySuitability: (tx, req) => custody.custodySuitability(tx, req),
     copyHeld: (tx, name, holder) => custody.copyHeld(tx, name, holder),
     credentialHolds: {
@@ -582,7 +580,7 @@ export function composeServices(options: {
     providerHealthCheck: (tx, name) => llm.providerHealthCheck(tx, name),
     providerCapability: (tx, name) => llm.providerCapability(tx, name),
     entriesOfAgent: (tx, name) => project.entriesOfAgent(tx, name),
-    repositoryWorkingOf: (tx, id) => project.repositoryPolicyOf(tx, id),
+    repositoryPromptsOf: (tx, id) => project.repositoryPolicyOf(tx, id),
     toolDeclarations: (name) => toolDeclarations(name),
     logger: options.logger,
   });
@@ -654,7 +652,8 @@ export function composeServices(options: {
     },
     config: options.config.worker,
     agentPrompt: {
-      compose: (name, context) => agent.composePrompt(name, context),
+      compose: (name, context) =>
+        agent.composePrompt(name, PromptConsumer.Worker, context),
       templates: (context) => agent.promptTemplates(context),
     },
     store: options.store,
@@ -851,7 +850,9 @@ export function composeServices(options: {
         claimant: SERVER_HOLDER,
       }),
     serverAgentCredentials: (input) => custody.serverAgentCredentials(input),
-    composePrompt: (name, context) => agent.composePrompt(name, context),
+    composePrompt: (name, context) =>
+      agent.composePrompt(name, PromptConsumer.Worker, context),
+    repositoryPromptsOf: (tx, id) => project.repositoryPolicyOf(tx, id),
     templates: (context) => agent.promptTemplates(context),
     exportRepository: (bindingId, commit, directory, context) =>
       project.exportRepository(bindingId, commit, directory, context),
@@ -952,7 +953,8 @@ export function composeServices(options: {
     store: options.store,
     stateDirectory: options.stateDirectory,
     agentPrompt: {
-      compose: (name, context) => agent.composePrompt(name, context),
+      compose: (name, context) =>
+        agent.composePrompt(name, PromptConsumer.Workbench, context),
       templates: (context) => agent.promptTemplates(context),
     },
     agentConfiguration: {

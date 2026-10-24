@@ -61,7 +61,6 @@ test("implement override validates its attempt repository pin after the current 
     base_branch: "main",
     action: null,
     landing: "human",
-    project_prompt: null,
   });
   h.store.transaction((tx) => {
     tx.database

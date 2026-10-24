@@ -36,13 +36,6 @@ export const TEST_SSH_HOST_KEY = {
 };
 export const TEST_SSH_PUBLIC_KEY =
   "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIK/1WjvJ+fY2mkZ9670QDeSr+uQmk08SfSTmqmUDvbbH kanthord-test";
-export const WORKING_LAYER_ALL_ON = {
-  agents_md: true,
-  agents_local_md: true,
-  claude_md: true,
-  claude_local_md: true,
-  project_prompt: true,
-};
 
 export function anthropicAgent(
   overrides: Partial<AgentSetup> = {},

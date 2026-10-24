@@ -350,8 +350,7 @@ bindings or option overrides for server field values. `KANTHORD_ENDPOINT` does
 not change `gateway.bind` or `gateway.port`. Configuration is read at startup,
 and an edit takes effect on the next start. **Target requirement:** a relative
 path-valued field inside the configuration resolves against the data directory.
-`agent.prompt.system_file` and `agent.prompt.agent_directory` declare such fields.
-`agent.prompt.host_file` holds a boolean and defaults to `true`. `false` locks the `host_file` prompt switch of the `system` scope off.
+`agent.prompt.agent_directory` declares such a field.
 
 Reads require a user-owned regular `0600` file and a user-owned `0700` containing
 directory. Exact modes are checked, including rejection of special bits and
@@ -403,6 +402,12 @@ The implemented fields are:
 - `gateway.idempotency_ttl`: optional positive safe integer in seconds, default
   `86400`. The idempotency component uses it as the TTL of an in-memory record.
 
+- `agent.prompt.agent_directory`: optional string, default `agents`. It names
+  the directory of the agent prompt override files on the server host. An
+  empty string selects the shipped texts only. See
+  [the prompt answer](./agent.md#the-prompt-answer).
+- The former keys `agent.prompt.system_file` and `agent.prompt.host_file`
+  belong to configuration version 2. `kanthord upgrade` removes them.
 - `agent.cooldown.rate_limited_ms`, `agent.cooldown.unavailable_ms`,
   `agent.cooldown.quota_exhausted_ms`: optional Convict `nat` in milliseconds,
   defaults `60000`, `60000` and `3600000`. Each holds the base cooldown of a
@@ -597,7 +602,8 @@ The command runs in this order:
    `migrated: <service> <a> -> <b>` for each service. An existing backup path
    fails the command.
 6. Replace the configuration file atomically. Print
-   `renamed: <old key> -> <new key>` for each rename, then
+   `renamed: <old key> -> <new key>` for each rename,
+   `removed: <key>` for each removed key, then
    `upgraded: <path>` and `config_version: <a> -> <b>`.
 
 The command prints each row when its step happens. A later failure or a stop
@@ -1182,7 +1188,6 @@ implement them. Help is not an extra root name or a reason to load secrets.
 | local           | `project.onboarding.cache_collection_failed`     | The list of the cache volumes fails, or the removal of a cache volume that no current repository binding holds fails. The `error` record holds `err`, and for a removal also `project_id` and `resource_identity`. The server keeps running.                               | serve server                                                               |
 | local           | `project.onboarding.read_failed`                 | A read of the environment source of a repository binding fails with a new reason. The `error` record holds `project_id`, `binding`, `resource_identity`, `reason` and `failure_reason`. A group with no successful read stays `pending`.                                   | serve server                                                               |
 | local           | `project.onboarding.session_failed`              | A session of `env@1` for the environment of a repository binding fails. The `error` record holds `binding` and `digest`. The server keeps running.                                                                                                                         | serve server                                                               |
-| local           | `project.binding.instruction_files.read_failed`  | A read of the instruction files of a repository binding fails. The `warn` record holds `project_id`, `binding_id`, `failure_reason` and `reason`, the git failure text with the user information of a URL redacted.                                                        | serve server                                                               |
 | local           | `worker.verification.infrastructure_failed`      | A verification command fails because of the infrastructure on its run and on its rerun: a signal, an exit code from 129 to 192 with no timeout, or no start; the execution stops.                                                                                          | serve worker                                                               |
 | local           | `worker.turn.branch_changed`                     | An agent turn leaves a checkout off the node branch; the worker restores the head before the turn and the steps execution stops.                                                                                                                                           | serve worker                                                               |
 | local           | `worker.turn.history_rewritten`                  | An agent turn moves the head of a checkout to a commit that does not contain the head before the turn; the worker restores that head and the steps execution stops.                                                                                                        | serve worker                                                               |

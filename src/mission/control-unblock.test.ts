@@ -48,7 +48,6 @@ for (const filenames of [
       base_branch: "main",
       action: null,
       landing: "human",
-      project_prompt: null,
     });
     const taskIds = [createIdentity("task"), createIdentity("task")];
     const content = {
@@ -641,7 +640,6 @@ test("unblock refuses an intent change after the first claim with mission.node.i
     base_branch: "main",
     action: null,
     landing: "human",
-    project_prompt: null,
   });
   const content = {
     name: "Task",

@@ -46,7 +46,6 @@ const HISTORY_TABLE = "migration";
 const CREDENTIAL_TABLE = "credential";
 const CUSTODY_MASTER_KEY_TABLE = "custody_master_key";
 const AGENT_ENABLEMENT_TABLE = "agent_enablement";
-const AGENT_PROMPT_TABLE = "agent_prompt";
 const WORKER_REGISTRATION_TABLE = "worker_registration";
 const WORKER_INSTANCE_TABLE = "worker_instance";
 const ERD2_WORKER_TABLES = [WORKER_REGISTRATION_TABLE, WORKER_INSTANCE_TABLE];
@@ -107,7 +106,6 @@ const INDEX_SCHEMA_TYPE = "index";
 const UNIQUE_INDEX = 1;
 const ALL_TABLES = [
   AGENT_ENABLEMENT_TABLE,
-  AGENT_PROMPT_TABLE,
   CREDENTIAL_TABLE,
   CUSTODY_MASTER_KEY_TABLE,
   ...INTAKE_TABLES,
@@ -132,7 +130,6 @@ const ALL_TABLES = [
 ];
 const ALL_INDEXES = [
   "agent_enablement_agent_name_revision",
-  "agent_prompt_scope_agent_name",
   "credential_name_holder_revision",
   "intake_inbound_event_inbound_event",
   "intake_outbound_request_operation_key",
@@ -209,7 +206,6 @@ test("service migrations own distinct prefixes and create only tables in their n
       CREDENTIAL_TABLE,
       CUSTODY_MASTER_KEY_TABLE,
       AGENT_ENABLEMENT_TABLE,
-      AGENT_PROMPT_TABLE,
       ...ERD2_WORKER_TABLES,
       PROJECT_PROJECT_TABLE,
       PROJECT_BINDING_TABLE,
@@ -287,10 +283,7 @@ test("each service migration set applies alone to an empty store", () => {
         );
       }
       if (service.service === AGENT_COMPONENT_NAME)
-        assert.deepEqual(tables(store), [
-          AGENT_ENABLEMENT_TABLE,
-          AGENT_PROMPT_TABLE,
-        ]);
+        assert.deepEqual(tables(store), [AGENT_ENABLEMENT_TABLE]);
       if (service.service === WORKER_SERVICE_NAME)
         assert.deepEqual(tables(store), ERD2_WORKER_TABLES);
       if (service.service === PROJECT_SERVICE_NAME) {
@@ -445,7 +438,7 @@ test("each service migration set applies alone to an empty store", () => {
   }
 });
 
-test("all ERD 1, ERD 2 and ERD 3 migrations produce exactly the twenty-four tables", () => {
+test("all ERD 1, ERD 2 and ERD 3 migrations produce exactly the twenty-three tables", () => {
   const allServices: Migrations = [
     { service: CUSTODY_SERVICE_NAME, migrations: custodyMigrations },
     { service: SCHEDULER_SERVICE_NAME, migrations: schedulerMigrations },

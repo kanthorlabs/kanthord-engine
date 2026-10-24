@@ -28,10 +28,7 @@ export interface SessionPlace {
   sessionDir: string;
 }
 
-export function workbenchDirectory(
-  stateDirectory: string,
-  agentName: string,
-): string {
+function workbenchDirectory(stateDirectory: string, agentName: string): string {
   assert.ok(stateDirectory);
   assert.ok(agentName);
   return join(stateDirectory, WORKBENCH_DIRECTORY_NAME, agentName);

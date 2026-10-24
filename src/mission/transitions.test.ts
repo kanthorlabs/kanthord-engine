@@ -79,7 +79,6 @@ function fixture(
     base_branch: "main",
     action: RepositoryAction.PullRequest,
     landing: "human",
-    project_prompt: null,
   });
   h.store.transaction((tx) => {
     tx.database
@@ -742,7 +741,6 @@ function deferredBranchPushFixture(
     base_branch: "main",
     action: RepositoryAction.MergePush,
     landing: "human",
-    project_prompt: null,
   });
   h.store.transaction((tx) =>
     insertAssessment(tx, {

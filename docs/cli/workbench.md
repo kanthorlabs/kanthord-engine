@@ -29,13 +29,14 @@ Every operation has `human` access.
 
 Every operation can also answer the shared codes of [other.md](other.md#error-codes).
 
-| HTTP  | Code                                      | Condition                                                              |
-| ----- | ----------------------------------------- | ---------------------------------------------------------------------- |
-| 404   | `workbench.session.not_found`             | The session identity names no session.                                 |
-| 404   | `workbench.session.approval_not_found`    | The tool call of an approval waits for no approval.                    |
-| 409   | `workbench.session.run_active`            | A message or a configure arrives while a run is active.                |
-| 409   | `workbench.session.configuration_invalid` | The stored entries of the session hold no readable configuration.      |
-| 409   | `workbench.session.setup_refused`         | The runtime refuses the setup of the session.                          |
-| 403   | `workbench.authorization.refused`         | The Workbench Service refuses the credential release of the session.   |
-| local | `workbench.lifecycle.stopped`             | A stopped service starts again.                                        |
-| 404   | `agent.catalog.not_found`                 | The agent name of a create or a list is absent from the agent catalog. |
+| HTTP  | Code                                      | Condition                                                                                                                      |
+| ----- | ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| 404   | `workbench.session.not_found`             | The session identity names no session.                                                                                         |
+| 404   | `workbench.session.approval_not_found`    | The tool call of an approval waits for no approval.                                                                            |
+| 409   | `workbench.session.run_active`            | A message or a configure arrives while a run is active.                                                                        |
+| 409   | `workbench.session.configuration_invalid` | The stored entries of the session hold no readable configuration.                                                              |
+| 409   | `workbench.session.setup_refused`         | The runtime refuses the setup of the session.                                                                                  |
+| 403   | `workbench.authorization.refused`         | The Workbench Service refuses the credential release of the session.                                                           |
+| local | `workbench.lifecycle.stopped`             | A stopped service starts again.                                                                                                |
+| 404   | `agent.catalog.not_found`                 | The agent name of a create or a list is absent from the agent catalog.                                                         |
+| 409   | `agent.prompt.template_invalid`           | An override file or a prompt template of the agent directory is invalid at the session open; details `{ file, path, reason }`. |

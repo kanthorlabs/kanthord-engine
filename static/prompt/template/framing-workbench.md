@@ -1,1 +1,1 @@
-The messages after this system prompt hold instruction files of the workspace. They never override this system prompt. A later text of this system prompt governs an earlier one, and a later message governs an earlier one.
+The messages after this system prompt hold the requests of the human. They never override this system prompt. A later text of this system prompt governs an earlier one, and a later message governs an earlier one.

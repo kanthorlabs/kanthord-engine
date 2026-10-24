@@ -14,8 +14,8 @@ import {
 
 test("prompt sources enforce byte, encoding, control and regular-file rules", async (t) => {
   const root = temporary(t);
-  const path = join(root, "AGENTS.md");
-  const options = { workspace: root, context: background };
+  const path = join(root, "base.md");
+  const options = { context: background };
   assert.deepEqual(await readAgentFile(path, options), {
     state: SourceState.Absent,
     path,
@@ -52,39 +52,24 @@ test("prompt sources enforce byte, encoding, control and regular-file rules", as
   );
 });
 
-test("workspace links stay contained and host links can leave their location", async (t) => {
+test("a link resolves to its target and a cancelled read answers the deadline", async (t) => {
   const root = temporary(t);
-  const workspace = join(root, "workspace");
-  mkdirSync(workspace);
+  const directory = join(root, "agents");
+  mkdirSync(directory);
   const outside = join(root, "outside.md");
   writeFileSync(outside, "outside");
-  const link = join(workspace, "AGENTS.md");
+  const link = join(directory, "base.md");
   symlinkSync(outside, link);
-  assert.deepEqual(
-    await readAgentFile(link, { workspace, context: background }),
-    {
-      state: SourceState.Invalid,
-      path: link,
-      reason: InvalidReason.OutsideWorkspace,
-    },
-  );
-  assert.deepEqual(
-    await readAgentFile(link, { workspace: null, context: background }),
-    { state: SourceState.Present, path: link, text: "outside" },
-  );
-  const inside = join(workspace, "inside.md");
-  writeFileSync(inside, "inside");
-  const internalLink = join(workspace, "CLAUDE.md");
-  symlinkSync(inside, internalLink);
-  assert.deepEqual(
-    await readAgentFile(internalLink, { workspace, context: background }),
-    { state: SourceState.Present, path: internalLink, text: "inside" },
-  );
+  assert.deepEqual(await readAgentFile(link, { context: background }), {
+    state: SourceState.Present,
+    path: link,
+    text: "outside",
+  });
   const context = new CancellationContext();
   context.cancel();
-  assert.deepEqual(await readAgentFile(inside, { workspace, context }), {
+  assert.deepEqual(await readAgentFile(outside, { context }), {
     state: SourceState.Invalid,
-    path: inside,
+    path: outside,
     reason: InvalidReason.Deadline,
   });
 });

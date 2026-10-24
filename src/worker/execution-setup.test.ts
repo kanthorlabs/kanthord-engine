@@ -11,14 +11,18 @@ import type { CallerContext } from "../kernel/operation.ts";
 import { OperationError } from "../kernel/errors.ts";
 import { executionSetup } from "./execution-setup.ts";
 import { getWorkerDeclaration } from "./catalog.ts";
+import { writeFileSync } from "node:fs";
+import { join } from "node:path";
 import {
+  AgentErrorCode,
   ChainLevel,
-  PromptLayerKind,
   PromptOrigin,
-  PromptSourceState,
+  PromptPart,
+  type PromptPartAnswer,
 } from "../agent/contract.ts";
-import { PromptLayer } from "../agent/prompt-composer.ts";
-import type { ResolvedLayer } from "../agent/prompt-layers.ts";
+import { getAgentDeclaration } from "../agent/catalog.ts";
+import { resolveAgentPrompt } from "../agent/prompt-files.ts";
+import { temporary } from "../kernel/test-support.ts";
 import {
   framing,
   PromptConsumer,
@@ -29,7 +33,6 @@ import {
   TEST_SSH_PUBLIC_KEY,
   TWO_AGENT_WORKER,
   twoAgentDeclarationOf,
-  WORKING_LAYER_ALL_ON,
 } from "./test-support.ts";
 import { WorkerErrorCode } from "./contract.ts";
 import { SHIPPED_TEMPLATES } from "../agent/prompt-templates.ts";
@@ -73,40 +76,32 @@ const publicKeyCustody = {
     return TEST_SSH_PUBLIC_KEY;
   },
 };
-const SYSTEM_TEXT = "system layer text";
-const AGENT_TEXT = "agent layer text";
-const WORKING_TEXT = "working layer text";
+const STANDARD_TEXT = "standard part text";
+const AGENT_TEXT = "agent part text";
+const SWE_BINDING_TEXT = "Run pnpm verify before the end of a turn.";
+const OVERRIDE_TEXT = "Write the smallest complete change.";
+const INVALID_OVERRIDE_TEXT = "bell\u0007";
+const SECOND_SWE_TEXT = "Keep the web bundle small.";
+const RE_BINDING_TEXT = "Treat a missing changelog entry as a blocker.";
 
-function layerOf(
-  layer: PromptLayerKind,
-  name: PromptLayer,
+function partOf(
+  part: PromptPart,
+  name: string,
   text: string,
-): ResolvedLayer {
+): PromptPartAnswer {
   return {
-    layer,
+    part,
     name,
-    enabled: true,
-    sources: [
-      {
-        source: "custom",
-        origin: PromptOrigin.Database,
-        path: null,
-        enabled: true,
-        state: PromptSourceState.Present,
-        reason: null,
-        digest: "0".repeat(64),
-        text,
-        owner: "owner",
-        label: "label",
-      },
-    ],
+    origin: PromptOrigin.File,
+    path: null,
+    digest: "0".repeat(64),
+    text,
   };
 }
 
-const promptLayers = [
-  layerOf(PromptLayerKind.System, PromptLayer.SystemLayer, SYSTEM_TEXT),
-  layerOf(PromptLayerKind.Agent, PromptLayer.AgentLayer, AGENT_TEXT),
-  layerOf(PromptLayerKind.Working, PromptLayer.WorkingLayer, WORKING_TEXT),
+const promptParts = [
+  partOf(PromptPart.Standard, "base.md", STANDARD_TEXT),
+  partOf(PromptPart.Role, "swe@1.md", AGENT_TEXT),
 ];
 
 test("setup answers the system and agent prompt after its single snapshot and supports a pinned entry", async (t) => {
@@ -161,7 +156,7 @@ test("setup answers the system and agent prompt after its single snapshot and su
       templates: async () => SHIPPED_TEMPLATES,
       compose: async (agentName: string) => {
         composed.push(agentName);
-        return promptLayers;
+        return promptParts;
       },
     },
     workerBindingRowOf: () => ({
@@ -232,16 +227,15 @@ test("setup answers the system and agent prompt after its single snapshot and su
   const [answered] = answer.agents;
   assert.ok(answered);
   assert.deepEqual(answered.prompt, {
-    final: systemPrompt(promptLayers, PromptConsumer.Worker, SHIPPED_TEMPLATES),
+    final: systemPrompt(promptParts, PromptConsumer.Worker, SHIPPED_TEMPLATES),
   });
   assert.ok(
     answered.prompt.final.endsWith(
       framing(SHIPPED_TEMPLATES, PromptConsumer.Worker),
     ),
   );
-  assert.ok(answered.prompt.final.includes(SYSTEM_TEXT));
+  assert.ok(answered.prompt.final.includes(STANDARD_TEXT));
   assert.ok(answered.prompt.final.includes(AGENT_TEXT));
-  assert.ok(!answered.prompt.final.includes(WORKING_TEXT));
   assert.equal(
     answered.effective_configuration.reasoning_effort,
     entry.reasoning_effort,
@@ -269,8 +263,40 @@ test("setup answers the system and agent prompt after its single snapshot and su
       error instanceof OperationError &&
       error.code === WorkerErrorCode.ExecutionNoNativeAgent,
   );
+  const promptDirectory = temporary(t);
+  const overridePath = join(promptDirectory, `${agent.agent_name}.md`);
+  writeFileSync(overridePath, OVERRIDE_TEXT);
+  const resolving = {
+    ...dependencies,
+    agentPrompt: {
+      templates: async () => SHIPPED_TEMPLATES,
+      compose: (agentName: string) =>
+        resolveAgentPrompt({
+          agent: getAgentDeclaration(agentName)!,
+          directory: promptDirectory,
+          workbench: false,
+          context: background,
+        }),
+    },
+  };
+  const overridden = await executionSetup(resolving, worker, caller);
+  assert.ok(overridden.agents[0]!.prompt.final.includes(OVERRIDE_TEXT));
+  assert.ok(
+    !overridden.agents[0]!.prompt.final.includes(
+      getAgentDeclaration(agent.agent_name)!.agent_prompt,
+    ),
+  );
+  writeFileSync(overridePath, INVALID_OVERRIDE_TEXT);
+  await assert.rejects(executionSetup(resolving, worker, caller), {
+    status: HttpStatus.Conflict,
+    code: AgentErrorCode.PromptTemplateInvalid,
+    details: {
+      file: `${agent.agent_name}.md`,
+      path: overridePath,
+      reason: "control_character",
+    },
+  });
   const bindingId = createIdentity("binding");
-  const workingLayer = { ...WORKING_LAYER_ALL_ON, claude_md: false };
   const address = "git@github.com:kanthorlabs/kanthord.git";
   const knownHosts = `github.com ${HOST_KEY}\n`;
   const pinned = await executionSetup(
@@ -286,8 +312,7 @@ test("setup answers the system and agent prompt after its single snapshot and su
         platform: RepositoryPlatform.GitHub,
         ssh_credential: SSH_CREDENTIAL,
         base_branch: "main",
-        project_prompt: null,
-        working_layer: workingLayer,
+        prompts: {},
         environment: null,
         repository_environment: true,
       }),
@@ -318,8 +343,7 @@ test("setup answers the system and agent prompt after its single snapshot and su
           platform: RepositoryPlatform.GitHub,
           ssh_credential: SSH_CREDENTIAL,
           base_branch: "main",
-          project_prompt: null,
-          working_layer: workingLayer,
+          prompts: {},
           environment: null,
           repository_environment: true,
         }),
@@ -334,7 +358,6 @@ test("setup answers the system and agent prompt after its single snapshot and su
       error.code === RepositoryErrorCode.SshKeyLegacy &&
       error.status === HttpStatus.Conflict,
   );
-  assert.deepEqual(pinned.repositories[0]?.working_layer, workingLayer);
   const stored = { image: "debian", postCreateCommand: "make deps" };
   const environmentOf = async (
     environment: typeof stored | null,
@@ -363,8 +386,7 @@ test("setup answers the system and agent prompt after its single snapshot and su
             platform: RepositoryPlatform.GitHub,
             ssh_credential: SSH_CREDENTIAL,
             base_branch: "main",
-            project_prompt: null,
-            working_layer: workingLayer,
+            prompts: {},
             environment,
             repository_environment: repositoryEnvironment,
           }),
@@ -432,8 +454,7 @@ test("setup answers the system and agent prompt after its single snapshot and su
           platform: RepositoryPlatform.GitHub,
           ssh_credential: SSH_CREDENTIAL,
           base_branch: "main",
-          project_prompt: null,
-          working_layer: workingLayer,
+          prompts: {},
           environment: null,
           repository_environment: true,
         }),
@@ -472,7 +493,7 @@ test("setup claims no environment for a container slot whose worker binding name
       store,
       agentPrompt: {
         templates: async () => SHIPPED_TEMPLATES,
-        compose: async () => promptLayers,
+        compose: async () => promptParts,
       },
       workerBindingRowOf: () => ({
         binding_id: claim.workerBindingId,
@@ -570,7 +591,7 @@ test("setup of a container worker binding with an environment claims inside a re
       store,
       agentPrompt: {
         templates: async () => SHIPPED_TEMPLATES,
-        compose: async () => promptLayers,
+        compose: async () => promptParts,
       },
       workerBindingRowOf: () => ({
         binding_id: claim.workerBindingId,
@@ -605,8 +626,7 @@ test("setup of a container worker binding with an environment claims inside a re
         platform: RepositoryPlatform.GitHub,
         ssh_credential: SSH_CREDENTIAL,
         base_branch: "main",
-        project_prompt: null,
-        working_layer: WORKING_LAYER_ALL_ON,
+        prompts: {},
         environment: null,
         repository_environment: true,
       }),
@@ -653,7 +673,7 @@ test("setup of a container worker binding with an environment claims inside a re
   assert.deepEqual(failures, []);
 });
 
-test("setup answers one entry per agent of a two-agent worker with its own prompt and pinned credential", async (t) => {
+test("setup answers one entry per agent of a two-agent worker with its own prompt, binding prompts and pinned credential", async (t) => {
   const store = new Store(":memory:");
   t.after(() => store.close());
   const setup = anthropicSetup();
@@ -675,6 +695,19 @@ test("setup answers one entry per agent of a two-agent worker with its own promp
     attempt: 1,
     projectId: createIdentity("project"),
   };
+  const policies: Record<
+    string,
+    { name: string; prompts: Record<string, string> }
+  > = {
+    [createIdentity("binding")]: {
+      name: "api",
+      prompts: { "swe@1": SWE_BINDING_TEXT, "re@1": RE_BINDING_TEXT },
+    },
+    [createIdentity("binding")]: {
+      name: "web",
+      prompts: { "swe@1": SECOND_SWE_TEXT, "re@1": "  " },
+    },
+  };
   const caller: CallerContext = {
     identity: testHumanIdentity("ulrich", "Ulrich", "jti"),
     context: background,
@@ -688,7 +721,7 @@ test("setup answers one entry per agent of a two-agent worker with its own promp
       agentPrompt: {
         templates: async () => SHIPPED_TEMPLATES,
         compose: async (agentName: string) => [
-          layerOf(PromptLayerKind.Agent, PromptLayer.AgentLayer, agentName),
+          partOf(PromptPart.Role, `${agentName}.md`, agentName),
         ],
       },
       workerBindingRowOf: () => ({
@@ -712,12 +745,27 @@ test("setup answers one entry per agent of a two-agent worker with its own promp
       environmentClaimed: () => {},
       environmentDigestOf: () => ENVIRONMENT_DIGEST,
       environmentOf: () => null,
-      repositoryBindingIdsOf: () => [],
-      intentOf: () => ExecutionIntent.Implement,
-      repositoryPolicyOf: () => null,
-      sshHostKeysOf: () => {
-        throw new Error("UNEXPECTED_COLLABORATION");
+      repositoryBindingIdsOf: (_tx, nodeId, pinnedRevision) => {
+        assert.deepEqual(
+          [nodeId, pinnedRevision],
+          [claim.nodeId, claim.pinnedRevision],
+        );
+        return Object.keys(policies);
       },
+      intentOf: () => ExecutionIntent.Implement,
+      repositoryPolicyOf: (_tx, id) => ({
+        binding_id: id,
+        resource_identity: REPOSITORY_IDENTITY,
+        name: policies[id]!.name,
+        address: "git@github.com:kanthorlabs/api.git",
+        platform: RepositoryPlatform.GitHub,
+        ssh_credential: SSH_CREDENTIAL,
+        base_branch: "main",
+        prompts: policies[id]!.prompts,
+        environment: null,
+        repository_environment: false,
+      }),
+      sshHostKeysOf: () => `github.com ${HOST_KEY}\n`,
       custodyHandover: publicKeyCustody,
       schedulerClaims: {
         agentSelectionsOf: () =>
@@ -754,9 +802,27 @@ test("setup answers one entry per agent of a two-agent worker with its own promp
     answer.agents.map((agent) => agent.credential_id),
     [credentialIds["worker-key"], credentialIds["reviewer-key"]],
   );
-  assert.ok(answer.agents[0]!.prompt.final.includes("swe@1"));
-  assert.ok(answer.agents[1]!.prompt.final.includes("re@1"));
-  assert.ok(!answer.agents[1]!.prompt.final.includes("swe@1"));
+  const [swe, re] = answer.agents.map((agent) => agent.prompt.final);
+  const worker = framing(SHIPPED_TEMPLATES, PromptConsumer.Worker);
+  assert.equal(
+    swe,
+    [
+      "swe@1",
+      `Instructions of repository api:\n\n${SWE_BINDING_TEXT}`,
+      `Instructions of repository web:\n\n${SECOND_SWE_TEXT}`,
+      worker,
+    ].join("\n\n"),
+  );
+  assert.equal(
+    re,
+    [
+      "re@1",
+      `Instructions of repository api:\n\n${RE_BINDING_TEXT}`,
+      worker,
+    ].join("\n\n"),
+  );
+  assert.ok(!re!.includes(SWE_BINDING_TEXT));
+  assert.ok(!swe!.includes(RE_BINDING_TEXT));
 });
 
 async function repositorySetup(t: TestContext, address: string, pin: boolean) {
@@ -798,7 +864,7 @@ async function repositorySetup(t: TestContext, address: string, pin: boolean) {
       store,
       agentPrompt: {
         templates: async () => SHIPPED_TEMPLATES,
-        compose: async () => promptLayers,
+        compose: async () => promptParts,
       },
       workerBindingRowOf: () => ({
         binding_id: claim.workerBindingId,
@@ -831,8 +897,7 @@ async function repositorySetup(t: TestContext, address: string, pin: boolean) {
         platform: RepositoryPlatform.GitHub,
         ssh_credential: SSH_CREDENTIAL,
         base_branch: "main",
-        project_prompt: null,
-        working_layer: WORKING_LAYER_ALL_ON,
+        prompts: {},
         environment: null,
         repository_environment: true,
       }),

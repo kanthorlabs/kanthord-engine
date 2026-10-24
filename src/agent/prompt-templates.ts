@@ -46,7 +46,12 @@ function templateInvalid(
     HttpStatus.Conflict,
     AgentErrorCode.PromptTemplateInvalid,
     `Prompt template ${name} is invalid: ${message}`,
-    { template: name, path, reason },
+    {
+      template: name,
+      file: `${TEMPLATE_DIRECTORY}/${name}${MARKDOWN_EXTENSION}`,
+      path,
+      reason,
+    },
   );
 }
 
@@ -80,7 +85,7 @@ export async function resolveTemplates(
   const templates: Record<PromptTemplate, string> = { ...SHIPPED_TEMPLATES };
   for (const name of TEMPLATE_NAMES) {
     const path = join(directory, `${name}${MARKDOWN_EXTENSION}`);
-    const read = await readAgentFile(path, { workspace: null, context });
+    const read = await readAgentFile(path, { context });
     if (read.state === SourceState.Absent) continue;
     if (read.state === SourceState.Invalid)
       throw templateInvalid(name, path, read.reason, read.reason);

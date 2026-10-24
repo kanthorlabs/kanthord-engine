@@ -38,7 +38,7 @@ import {
 } from "../kernel/store.ts";
 import { createIdentity, identitySchema } from "../kernel/identity.ts";
 import { testHumanIdentity } from "../kernel/test-identity.ts";
-import { redactingLogger, temporary } from "../kernel/test-support.ts";
+import { temporary } from "../kernel/test-support.ts";
 import { IdentityKind } from "../kernel/caller.ts";
 import { Diagnostic, OperationError } from "../kernel/errors.ts";
 import { GIT_DEADLINE_EXCEEDED } from "../repository/git-failure.ts";
@@ -62,11 +62,9 @@ import {
   FollowsType,
   GitHubAction,
   Landing,
-  InstructionFileState,
   INSTANCE_COUNT_MIN,
   INSTANCE_COUNT_MAX,
   LS_REMOTE_TIMEOUT_MS,
-  PROJECT_PROMPT_MAX_BYTES,
   REPOSITORY_PLATFORM,
   SSH_CREDENTIAL_PLATFORM,
   RepositoryPlatform,
@@ -179,7 +177,6 @@ const CORE_OPERATIONS = [
   "project.agentConfiguration.list",
   "project.agentConfiguration.get",
   "project.binding.verify",
-  "project.binding.instruction_files.get",
   "project.binding.environment.get",
   "project.binding.environment.set",
   "project.binding.environment.rebuild",
@@ -205,10 +202,7 @@ type OperationKey = Exclude<
   | "binding.environment.rebuild"
 >;
 type AsyncOperationKey =
-  | "binding.verify"
-  | "binding.instruction_files.get"
-  | "binding.environment.get"
-  | "binding.environment.rebuild";
+  "binding.verify" | "binding.environment.get" | "binding.environment.rebuild";
 
 function unexpected(): never {
   throw new Error("Unexpected peer collaboration call.");
@@ -1258,6 +1252,8 @@ const EXTERNAL_WORKER = "external@1";
 const UNKNOWN_WORKER = "unknown@1";
 const AGENT = "general";
 const SECOND_AGENT = "reviewer";
+const SWE_AGENT = "swe@1";
+const RE_AGENT = "re@1";
 const THIRD_AGENT = "writer";
 const AGENT_PAGE_LIMIT = 2;
 const MALFORMED_CURSOR = "!";
@@ -1287,9 +1283,6 @@ const KEY_REFUSED_STDERR =
   "git@github.com: Permission denied (publickey).\nfatal: Could not read from remote repository.";
 const HOST_KEY_CHANGED_STDERR =
   "@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@\n@    WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED!     @\nHost key verification failed.";
-const INSTRUCTION_FILES_READ_FAILED =
-  "project.binding.instruction_files.read_failed";
-const WARN_LEVEL = 40;
 const REPOSITORY_NOT_FOUND_STDERR =
   "ERROR: Repository not found.\nfatal: Could not read from remote repository.";
 
@@ -1325,13 +1318,6 @@ function repositoryBinding(
       strategy: { base_branch: "main" },
       ssh_credential: sshCredentialOf(address),
       credential: REPOSITORY_CREDENTIAL,
-      working_layer: {
-        agents_md: true,
-        agents_local_md: true,
-        claude_md: true,
-        claude_local_md: true,
-        project_prompt: true,
-      },
     },
   };
 }
@@ -2623,14 +2609,6 @@ test("an unchanged alias-model binding does not block a worker save and its chec
 
 const GITLAB_IDENTITY = "repository:gitlab:acme/api";
 
-function withoutWorkingLayer<T extends { working_layer?: unknown }>(
-  config: T,
-): Omit<T, "working_layer"> {
-  const copy: Partial<T> = { ...config };
-  delete copy.working_layer;
-  return copy as Omit<T, "working_layer">;
-}
-
 function withoutCredential<T extends { credential?: string }>(
   config: T,
 ): Omit<T, "credential"> {
@@ -2674,42 +2652,53 @@ test("the credential is optional and pull_request requires it", async (t) => {
   );
 });
 
-test("a write stores the full working layer map and a switch change revises the binding", async (t) => {
+test("a write stores the binding prompts and a prompt change revises the binding", async (t) => {
   const f = writeFixture(t);
-  const config = withoutWorkingLayer(repositoryBinding().config);
-  const allOn = {
-    agents_md: true,
-    agents_local_md: true,
-    claude_md: true,
-    claude_local_md: true,
-    project_prompt: true,
-  };
+  const config = repositoryBinding().config;
   const first = await f.write({
-    [REPOSITORY_NAME]: {
-      kind: BindingKind.Repository,
-      config,
-    } as Bindings[string],
+    [REPOSITORY_NAME]: { kind: BindingKind.Repository, config },
   });
-  assert.deepEqual(
+  assert.equal(
     repositoryConfigSchema.parse(first.bindings[REPOSITORY_NAME]?.config)
-      .working_layer,
-    allOn,
+      .prompts,
+    undefined,
   );
   assert.equal(first.bindings[REPOSITORY_NAME]?.revision, FIRST_REVISION);
+  const prompts = { [SWE_AGENT]: "Run make check.", [RE_AGENT]: "Be strict." };
   const second = await f.write(
     {
       [REPOSITORY_NAME]: {
         kind: BindingKind.Repository,
-        config: { ...config, working_layer: { agents_local_md: false } },
-      } as Bindings[string],
+        config: { ...config, prompts },
+      },
     },
     first.binding_set_version,
   );
   assert.equal(second.bindings[REPOSITORY_NAME]?.revision, SECOND_REVISION);
   assert.deepEqual(
-    (second.bindings[REPOSITORY_NAME]?.config as { working_layer: unknown })
-      .working_layer,
-    { ...allOn, agents_local_md: false },
+    repositoryConfigSchema.parse(second.bindings[REPOSITORY_NAME]?.config)
+      .prompts,
+    prompts,
+  );
+});
+
+test("a binding prompt key outside the agent catalog fails the strict parse", () => {
+  assert.deepEqual(
+    schemaIssues({
+      [REPOSITORY_NAME]: {
+        ...repositoryBinding(),
+        config: {
+          ...repositoryBinding().config,
+          prompts: { "coder@1": "text" },
+        },
+      },
+    }),
+    [
+      {
+        code: "unrecognized_keys",
+        path: ["body", "bindings", REPOSITORY_NAME, "config", "prompts"],
+      },
+    ],
   );
 });
 
@@ -3030,38 +3019,38 @@ test("instance count and UTF-8 prompt bounds return domain refusals and roll bac
     );
     assert.deepEqual(f.snapshot(), before);
   }
-  const projectPrompt = "é".repeat(PROJECT_PROMPT_MAX_BYTES);
-  assert.ok(Buffer.byteLength(projectPrompt, UTF8) > PROJECT_PROMPT_MAX_BYTES);
-  await rejectsWrite(
-    f.write({
-      [REPOSITORY_NAME]: {
-        ...repositoryBinding(),
-        config: {
-          ...repositoryBinding().config,
-          project_prompt: projectPrompt,
+  const oversized = "é".repeat(PROMPT_SOURCE_MAX_BYTES);
+  assert.ok(Buffer.byteLength(oversized, UTF8) > PROMPT_SOURCE_MAX_BYTES);
+  const refusals = [
+    [
+      { [SWE_AGENT]: oversized },
+      { agent_name: SWE_AGENT, reason: InvalidReason.TooLarge },
+    ],
+    [
+      { [RE_AGENT]: "a".repeat(PROMPT_SOURCE_MAX_BYTES + ONE_BYTE_OVER) },
+      { agent_name: RE_AGENT, reason: InvalidReason.TooLarge },
+    ],
+    [
+      { [SWE_AGENT]: "valid", [RE_AGENT]: "bad\u0000text" },
+      { agent_name: RE_AGENT, reason: InvalidReason.ControlCharacter },
+    ],
+  ] as const;
+  for (const [prompts, details] of refusals)
+    await rejectsWrite(
+      f.write({
+        [REPOSITORY_NAME]: {
+          ...repositoryBinding(),
+          config: { ...repositoryBinding().config, prompts },
         },
-      },
-    }),
-    HttpStatus.BadRequest,
-    ProjectErrorCode.RepositoryPromptTooLarge,
-  );
-  await rejectsWrite(
-    f.write({
-      [REPOSITORY_NAME]: {
-        ...repositoryBinding(),
-        config: {
-          ...repositoryBinding().config,
-          project_prompt: "a".repeat(PROJECT_PROMPT_MAX_BYTES + ONE_BYTE_OVER),
-        },
-      },
-    }),
-    HttpStatus.BadRequest,
-    ProjectErrorCode.RepositoryPromptTooLarge,
-  );
+      }),
+      HttpStatus.BadRequest,
+      ProjectErrorCode.RepositoryPromptInvalid,
+      details,
+    );
   assert.deepEqual(f.snapshot(), before);
   assert.deepEqual(
     f.custody,
-    Array.from({ length: TWO_CALLS }, () => ({
+    Array.from({ length: refusals.length }, () => ({
       credential: sshCredentialOf(REPOSITORY_ADDRESS),
       platform: SSH_CREDENTIAL_PLATFORM,
     })),
@@ -3079,7 +3068,7 @@ test("instance count and UTF-8 prompt bounds return domain refusals and roll bac
           ...repositoryBinding(),
           config: {
             ...repositoryBinding().config,
-            project_prompt: "a".repeat(PROJECT_PROMPT_MAX_BYTES),
+            prompts: { [SWE_AGENT]: "a".repeat(PROMPT_SOURCE_MAX_BYTES) },
           },
         },
       },
@@ -4516,7 +4505,7 @@ test("workerBindingRowOf retains the pinned configuration in the caller transact
 test("repositoryPolicyOf preserves the named revision after a strategy change", (t) => {
   const f = fixture(t);
   const baseBranch = "develop";
-  const projectPrompt = "Follow the repository conventions.";
+  const prompts = { [SWE_AGENT]: "Follow the repository conventions." };
   f.store.transaction((tx) => {
     const project = insertProject(tx, PROJECT_NAME);
     const original = repositoryBinding();
@@ -4524,7 +4513,7 @@ test("repositoryPolicyOf preserves the named revision after a strategy change", 
       name: GitHubAction.PullRequest,
       follows: { type: FollowsType.AssessmentPassed },
     };
-    original.config.project_prompt = projectPrompt;
+    original.config.prompts = prompts;
     const pinned = persistBindings(tx, project.id, {
       [REPOSITORY_NAME]: original,
     }).bindings[REPOSITORY_NAME]!;
@@ -4556,8 +4545,7 @@ test("repositoryPolicyOf preserves the named revision after a strategy change", 
       base_branch: original.config.strategy.base_branch,
       action: GitHubAction.PullRequest,
       landing: Landing.Human,
-      project_prompt: projectPrompt,
-      working_layer: original.config.working_layer,
+      prompts,
       environment: null,
       repository_environment: true,
     });
@@ -4567,75 +4555,29 @@ test("repositoryPolicyOf preserves the named revision after a strategy change", 
   });
 });
 
-test("a working layer switch change inserts the next binding revision and the policy keeps the pinned map", (t) => {
+test("a binding prompt change inserts the next binding revision and the policy keeps the pinned text", (t) => {
   const f = fixture(t);
   f.store.transaction((tx) => {
     const project = insertProject(tx, PROJECT_NAME);
     const original = repositoryBinding();
+    original.config.prompts = { [SWE_AGENT]: "first" };
     const pinned = persistBindings(tx, project.id, {
       [REPOSITORY_NAME]: original,
     }).bindings[REPOSITORY_NAME]!;
-    const switched = {
-      ...original,
-      config: {
-        ...original.config,
-        working_layer: {
-          ...original.config.working_layer,
-          claude_md: false,
-          project_prompt: false,
-        },
-      },
-    };
     const later = persistBindings(tx, project.id, {
-      [REPOSITORY_NAME]: switched,
+      [REPOSITORY_NAME]: {
+        ...original,
+        config: { ...original.config, prompts: { [SWE_AGENT]: "second" } },
+      },
     }).bindings[REPOSITORY_NAME]!;
     assert.equal(later.revision, pinned.revision + 1);
-    assert.deepEqual(
-      f.project.repositoryPolicyOf(tx, pinned.id)?.working_layer,
-      {
-        agents_md: true,
-        agents_local_md: true,
-        claude_md: true,
-        claude_local_md: true,
-        project_prompt: true,
-      },
-    );
-    assert.deepEqual(
-      f.project.repositoryPolicyOf(tx, later.id)?.working_layer,
-      {
-        agents_md: true,
-        agents_local_md: true,
-        claude_md: false,
-        claude_local_md: true,
-        project_prompt: false,
-      },
-    );
+    assert.deepEqual(f.project.repositoryPolicyOf(tx, pinned.id)?.prompts, {
+      [SWE_AGENT]: "first",
+    });
+    assert.deepEqual(f.project.repositoryPolicyOf(tx, later.id)?.prompts, {
+      [SWE_AGENT]: "second",
+    });
   });
-});
-
-test("a repository config without working_layer parses with every switch on and a partial map fills the rest", () => {
-  const config = withoutWorkingLayer(repositoryBinding().config);
-  const allOn = {
-    agents_md: true,
-    agents_local_md: true,
-    claude_md: true,
-    claude_local_md: true,
-    project_prompt: true,
-  };
-  assert.deepEqual(repositoryConfigSchema.parse(config).working_layer, allOn);
-  assert.deepEqual(
-    repositoryConfigSchema.parse({
-      ...config,
-      working_layer: { agents_md: false },
-    }).working_layer,
-    { ...allOn, agents_md: false },
-  );
-  assert.throws(() =>
-    repositoryConfigSchema.parse({
-      ...config,
-      working_layer: { agents: false },
-    }),
-  );
 });
 
 test("repositoryPolicyOf answers null for an absent or nonrepository binding", (t) => {
@@ -4671,7 +4613,7 @@ test("repositoryPolicyOf shares the caller transaction and does not retain rolle
         assert.ok(policy);
         assert.equal(policy.binding_id, bindingId);
         assert.equal(policy.action, null);
-        assert.equal(policy.project_prompt, null);
+        assert.deepEqual(policy.prompts, {});
         assert.equal(nested.mock.callCount(), NO_CALLS);
         nested.mock.restore();
         assert.ok(tx.database.isTransaction);
@@ -5162,30 +5104,11 @@ test("binding.verify returns 404 for a non-repository binding", async (t) => {
   );
 });
 
-const BASE_BRANCH = "main";
 const INSTRUCTION_COMMIT = "a".repeat(40);
 const TREE_PREFIX = "tree-";
-const NEXT_INSTRUCTION_COMMIT = "b".repeat(40);
-const INSTRUCTION_PATHS = [
-  "AGENTS.md",
-  "AGENTS.local.md",
-  "CLAUDE.md",
-  "CLAUDE.local.md",
-];
-const INSTRUCTION_SOURCES = [
-  "agents_md",
-  "agents_local_md",
-  "claude_md",
-  "claude_local_md",
-];
-const AGENTS_TEXT = "# Agents\n";
-const CONTROL_TEXT = "bad\u0000text";
-const BASE_BRANCH_ABSENT_MESSAGE = "The base branch is absent on the remote.";
-const OTHER_PROJECT_NAME = "gamma";
-
 type InstructionTexts = Array<string | null>;
 
-function instructionFixture(
+function environmentReadFixture(
   t: TestContext,
   behavior: {
     commits?: Array<string | null>;
@@ -5321,7 +5244,7 @@ function instructionFixture(
   };
 }
 
-function refusesInstructionFiles(
+function refusesRead(
   promise: Promise<unknown>,
   status: number,
   code: string,
@@ -5335,368 +5258,6 @@ function refusesInstructionFiles(
     return true;
   });
 }
-
-test("binding.instruction_files.get answers the four files with their states", async (t) => {
-  const { f, saved, resolveCalls, readCalls } = instructionFixture(t, {
-    texts: [
-      AGENTS_TEXT,
-      null,
-      CONTROL_TEXT,
-      "x".repeat(PROMPT_SOURCE_MAX_BYTES + ONE_BYTE_OVER),
-    ],
-  });
-  const before = Date.now();
-  const result = await f.invokeAsync("binding.instruction_files.get", saved);
-  assert.equal(result.commit, INSTRUCTION_COMMIT);
-  assert.ok(result.read_at >= before && result.read_at <= Date.now());
-  assert.deepEqual(result.files, [
-    {
-      source: INSTRUCTION_SOURCES[0],
-      path: INSTRUCTION_PATHS[0],
-      state: InstructionFileState.Present,
-      reason: null,
-      text: AGENTS_TEXT,
-    },
-    {
-      source: INSTRUCTION_SOURCES[1],
-      path: INSTRUCTION_PATHS[1],
-      state: InstructionFileState.Absent,
-      reason: null,
-      text: null,
-    },
-    {
-      source: INSTRUCTION_SOURCES[2],
-      path: INSTRUCTION_PATHS[2],
-      state: InstructionFileState.Invalid,
-      reason: InvalidReason.ControlCharacter,
-      text: null,
-    },
-    {
-      source: INSTRUCTION_SOURCES[3],
-      path: INSTRUCTION_PATHS[3],
-      state: InstructionFileState.Invalid,
-      reason: InvalidReason.TooLarge,
-      text: null,
-    },
-  ]);
-  assert.equal(resolveCalls.length, ONE_CALL);
-  assert.equal(resolveCalls[NO_ITEMS]?.address, REPOSITORY_ADDRESS);
-  assert.equal(resolveCalls[NO_ITEMS]?.branch, BASE_BRANCH);
-  assert.ok(
-    (resolveCalls[NO_ITEMS]?.timeout ?? NO_CALLS) > NO_CALLS &&
-      (resolveCalls[NO_ITEMS]?.timeout ?? NO_CALLS) >
-        BINDING_CHECK_TIMEOUT_MS &&
-      (resolveCalls[NO_ITEMS]?.timeout ?? NO_CALLS) <=
-        REPOSITORY_FILES_READ_TIMEOUT_MS,
-  );
-  assert.equal(readCalls.length, ONE_CALL);
-  assert.equal(readCalls[NO_ITEMS]?.commit, INSTRUCTION_COMMIT);
-  assert.deepEqual(readCalls[NO_ITEMS]?.paths, INSTRUCTION_PATHS);
-  assert.equal(readCalls[NO_ITEMS]?.maxBytes, PROMPT_SOURCE_MAX_BYTES);
-});
-
-test("binding.instruction_files.get releases the key under the Project identity and reads with it", async (t) => {
-  const { f, saved, resolveCalls, readCalls } = instructionFixture(t);
-  await f.invokeAsync("binding.instruction_files.get", saved);
-  assert.deepEqual(
-    f.releases.map(({ identity, subject }) => ({ identity, subject })),
-    [
-      {
-        identity: PROJECT_IDENTITY,
-        subject: {
-          kind: SshIdentitySubjectKind.Binding,
-          binding_id: saved.binding_id,
-        },
-      },
-    ],
-  );
-  const ssh = {
-    private_key: SSH_KEY.private_key,
-    public_key: SSH_KEY.public_key,
-    known_hosts: `github.com ${HOST_KEY}\n`,
-    port: DEFAULT_SSH_PORT,
-  };
-  assert.deepEqual(resolveCalls[NO_ITEMS]?.ssh, ssh);
-  assert.deepEqual(readCalls[NO_ITEMS]?.ssh, ssh);
-});
-
-test("binding.instruction_files.get maps the connector reasons of unreadable files to the invalid reasons of the working layer", async (t) => {
-  const { f, saved } = instructionFixture(t, {
-    states: [
-      RepositoryFileState.NotRegularFile,
-      RepositoryFileState.OutsideRoot,
-      RepositoryFileState.Unreadable,
-      RepositoryFileState.Absent,
-    ],
-  });
-  const result = await f.invokeAsync("binding.instruction_files.get", saved);
-  assert.deepEqual(
-    result.files.map(({ state, reason, text }) => [state, reason, text]),
-    [
-      [InstructionFileState.Invalid, InvalidReason.NotRegularFile, null],
-      [InstructionFileState.Invalid, InvalidReason.OutsideWorkspace, null],
-      [InstructionFileState.Invalid, InvalidReason.Unreadable, null],
-      [InstructionFileState.Absent, null, null],
-    ],
-  );
-});
-
-test("binding.instruction_files.get maps an oversized file and a file that is not UTF-8 to the invalid reasons of the working layer", async (t) => {
-  const { f, saved } = instructionFixture(t, {
-    states: [
-      RepositoryFileState.TooLarge,
-      RepositoryFileState.NotUtf8,
-      RepositoryFileState.Absent,
-      RepositoryFileState.Absent,
-    ],
-  });
-  const result = await f.invokeAsync("binding.instruction_files.get", saved);
-  assert.deepEqual(
-    result.files.map(({ state, reason, text }) => [state, reason, text]),
-    [
-      [InstructionFileState.Invalid, InvalidReason.TooLarge, null],
-      [InstructionFileState.Invalid, InvalidReason.NotUtf8, null],
-      [InstructionFileState.Absent, null, null],
-      [InstructionFileState.Absent, null, null],
-    ],
-  );
-});
-
-test("binding.instruction_files.get answers four absent files for a repository without instructions", async (t) => {
-  const { f, saved } = instructionFixture(t);
-  const result = await f.invokeAsync("binding.instruction_files.get", saved);
-  assert.deepEqual(
-    result.files.map(({ state, reason, text }) => [state, reason, text]),
-    INSTRUCTION_PATHS.map(() => [InstructionFileState.Absent, null, null]),
-  );
-});
-
-test("binding.instruction_files.get serves the cache for the same commit and reads again for a new commit", async (t) => {
-  const { f, saved, resolveCalls, readCalls } = instructionFixture(t, {
-    commits: [INSTRUCTION_COMMIT, INSTRUCTION_COMMIT, NEXT_INSTRUCTION_COMMIT],
-    texts: [AGENTS_TEXT, null, null, null],
-  });
-  const first = await f.invokeAsync("binding.instruction_files.get", saved);
-  const second = await f.invokeAsync("binding.instruction_files.get", saved);
-  assert.deepEqual(second, first);
-  assert.equal(resolveCalls.length, TWO_CALLS);
-  assert.equal(readCalls.length, ONE_CALL);
-  const third = await f.invokeAsync("binding.instruction_files.get", saved);
-  assert.equal(third.commit, NEXT_INSTRUCTION_COMMIT);
-  assert.equal(resolveCalls.length, TWO_CALLS + ONE_CALL);
-  assert.equal(readCalls.length, TWO_CALLS);
-  assert.equal(readCalls[ONE_CALL]?.commit, NEXT_INSTRUCTION_COMMIT);
-});
-
-test("binding.instruction_files.get stores nothing in the database", async (t) => {
-  const { f, saved } = instructionFixture(t, { texts: [AGENTS_TEXT] });
-  const rows = () =>
-    f.store.database
-      .prepare("SELECT COUNT(*) AS count FROM project_binding")
-      .get();
-  const before = rows();
-  await f.invokeAsync("binding.instruction_files.get", saved);
-  assert.deepEqual(rows(), before);
-});
-
-test("binding.instruction_files.get refuses an absent base branch", async (t) => {
-  const { f, saved, readCalls } = instructionFixture(t, { commits: [null] });
-  await assert.rejects(
-    f.invokeAsync("binding.instruction_files.get", saved),
-    (error) => {
-      assert.ok(error instanceof OperationError);
-      assert.equal(error.status, SSH_FAILURE_STATUS);
-      assert.equal(error.code, ProjectErrorCode.RepositoryBaseBranchAbsent);
-      assert.equal(error.message, BASE_BRANCH_ABSENT_MESSAGE);
-      return true;
-    },
-  );
-  assert.equal(readCalls.length, NO_CALLS);
-});
-
-test("binding.instruction_files.get refuses a failed commit resolution", async (t) => {
-  const { f, saved } = instructionFixture(t, { resolveFails: true });
-  await refusesInstructionFiles(
-    f.invokeAsync("binding.instruction_files.get", saved),
-    SSH_FAILURE_STATUS,
-    ProjectErrorCode.RepositorySshUnreachable,
-    { failure_reason: ResourceFailureReason.Unclassified },
-  );
-});
-
-test("binding.instruction_files.get refuses an alias-model binding and an unpinned host before any read", async (t) => {
-  for (const [address, status, code, details] of [
-    [
-      ALIAS_ADDRESS,
-      HttpStatus.BadRequest,
-      ProjectErrorCode.RepositoryAddressInvalid,
-      null,
-    ],
-    [
-      UNPINNED_ADDRESS,
-      HttpStatus.Conflict,
-      HOST_KEY_UNPINNED,
-      { host: "ssh.github.com" },
-    ],
-  ] as const) {
-    const { f, saved, resolveCalls } = instructionFixture(t, { address });
-    await refusesInstructionFiles(
-      f.invokeAsync("binding.instruction_files.get", saved),
-      status,
-      code,
-      details,
-    );
-    assert.deepEqual(resolveCalls, []);
-  }
-});
-
-test("binding.instruction_files.get names the git failure reason of a failed read", async (t) => {
-  const { f, saved } = instructionFixture(t, {
-    resolveFailure: gitFailure(REPOSITORY_NOT_FOUND_STDERR),
-  });
-  await refusesInstructionFiles(
-    f.invokeAsync("binding.instruction_files.get", saved),
-    SSH_FAILURE_STATUS,
-    ProjectErrorCode.RepositorySshUnreachable,
-    { failure_reason: ResourceFailureReason.RepositoryNotFound },
-  );
-});
-
-test("binding.instruction_files.get refuses a failed file read and caches nothing", async (t) => {
-  const { f, saved, readCalls } = instructionFixture(t, { readFails: true });
-  await refusesInstructionFiles(
-    f.invokeAsync("binding.instruction_files.get", saved),
-    SSH_FAILURE_STATUS,
-    ProjectErrorCode.RepositorySshUnreachable,
-  );
-  await refusesInstructionFiles(
-    f.invokeAsync("binding.instruction_files.get", saved),
-    SSH_FAILURE_STATUS,
-    ProjectErrorCode.RepositorySshUnreachable,
-  );
-  assert.equal(readCalls.length, TWO_CALLS);
-});
-
-test("binding.instruction_files.get refuses a read that exceeds the read deadline, not the healthcheck deadline", async (t) => {
-  const { f, saved, started } = instructionFixture(t, { hang: true });
-  t.mock.timers.enable({ apis: ["setTimeout", "Date"], now: Date.now() });
-  let settled = false;
-  const refusal = refusesInstructionFiles(
-    f.invokeAsync("binding.instruction_files.get", saved),
-    SSH_FAILURE_STATUS,
-    ProjectErrorCode.RepositorySshUnreachable,
-    { failure_reason: ResourceFailureReason.DeadlineExceeded },
-  ).finally(() => {
-    settled = true;
-  });
-  await started.promise;
-  t.mock.timers.tick(BINDING_CHECK_TIMEOUT_MS);
-  await turn();
-  assert.equal(settled, false);
-  t.mock.timers.tick(
-    REPOSITORY_FILES_READ_TIMEOUT_MS - BINDING_CHECK_TIMEOUT_MS,
-  );
-  await refusal;
-});
-
-test("binding.instruction_files.get logs one warn record with the binding, the failure reason and the git text of a failed read", async (t) => {
-  const lines: string[] = [];
-  const { f, saved } = instructionFixture(
-    t,
-    { resolveFailure: gitFailure(REPOSITORY_NOT_FOUND_STDERR) },
-    { logger: redactingLogger(lines) },
-  );
-  await refusesInstructionFiles(
-    f.invokeAsync("binding.instruction_files.get", saved),
-    SSH_FAILURE_STATUS,
-    ProjectErrorCode.RepositorySshUnreachable,
-  );
-  const records = lines
-    .map((line) => JSON.parse(line) as Record<string, unknown>)
-    .filter(({ msg }) => msg === INSTRUCTION_FILES_READ_FAILED);
-  assert.equal(records.length, ONE_CALL);
-  const [record] = records;
-  assert.equal(record?.level, WARN_LEVEL);
-  assert.equal(record?.project_id, saved.project_id);
-  assert.equal(record?.binding_id, saved.binding_id);
-  assert.equal(
-    record?.failure_reason,
-    ResourceFailureReason.RepositoryNotFound,
-  );
-  assert.equal(
-    record?.reason,
-    `ls-remote: git exited with 128: ${REPOSITORY_NOT_FOUND_STDERR}`,
-  );
-});
-
-test("binding.instruction_files.get answers 404 for an absent project", async (t) => {
-  const { f, saved } = instructionFixture(t);
-  await refusesInstructionFiles(
-    f.invokeAsync("binding.instruction_files.get", {
-      ...saved,
-      project_id: `${PROJECT_ID_PREFIX}_01ARZ3NDEKTSV4RRFFQ69G5FAV`,
-    }),
-    HttpStatus.NotFound,
-    ProjectErrorCode.ProjectNotFound,
-  );
-});
-
-test("binding.instruction_files.get answers 404 for an absent binding and a binding of another project", async (t) => {
-  const { f, saved } = instructionFixture(t);
-  const other = f.store.transaction((tx) =>
-    insertProject(tx, OTHER_PROJECT_NAME),
-  );
-  await refusesInstructionFiles(
-    f.invokeAsync("binding.instruction_files.get", {
-      ...saved,
-      binding_id: `${BINDING_ID_PREFIX}_01ARZ3NDEKTSV4RRFFQ69G5FAV`,
-    }),
-    HttpStatus.NotFound,
-    ProjectErrorCode.BindingNotFound,
-  );
-  await refusesInstructionFiles(
-    f.invokeAsync("binding.instruction_files.get", {
-      ...saved,
-      project_id: other.id,
-    }),
-    HttpStatus.NotFound,
-    ProjectErrorCode.BindingNotFound,
-  );
-});
-
-test("binding.instruction_files.get answers 404 for a removed binding", async (t) => {
-  const { f, saved } = instructionFixture(t);
-  f.store.transaction((tx) => {
-    const project = requireProject(tx, saved.project_id);
-    writeBindingSet(tx, project.id, project.binding_set_version, new Map());
-  });
-  await refusesInstructionFiles(
-    f.invokeAsync("binding.instruction_files.get", saved),
-    HttpStatus.NotFound,
-    ProjectErrorCode.BindingNotFound,
-  );
-});
-
-test("binding.instruction_files.get answers 404 for a non-repository binding", async (t) => {
-  const { f } = instructionFixture(t);
-  const worker = f.store.transaction((tx) => {
-    const p = insertProject(tx, OTHER_PROJECT_NAME);
-    const result = writeBindingSet(
-      tx,
-      p.id,
-      p.binding_set_version,
-      new Map([[WORKER_NAME, workerBinding()]]),
-    );
-    const bindingId = result.changes[NO_ITEMS]?.binding_id;
-    assert.ok(bindingId);
-    return { project_id: p.id, binding_id: bindingId };
-  });
-  await refusesInstructionFiles(
-    f.invokeAsync("binding.instruction_files.get", worker),
-    HttpStatus.NotFound,
-    ProjectErrorCode.BindingNotFound,
-  );
-});
 
 async function checkBinding(
   f: ReturnType<typeof fixture>,
@@ -5879,7 +5440,7 @@ async function setEnvironment(
 }
 
 test("binding.environment.set stores the environment as a new revision with no repository check", async (t) => {
-  const { f, saved, resolveCalls } = instructionFixture(t, {}, WRITABLE);
+  const { f, saved, resolveCalls } = environmentReadFixture(t, {}, WRITABLE);
   f.project.cancelEnvironmentRuns();
   const answer = await setEnvironment(f, saved, STORED_ENVIRONMENT);
   const stored = answer.bindings[REPOSITORY_NAME];
@@ -5901,7 +5462,7 @@ test("binding.environment.set stores the environment as a new revision with no r
 });
 
 test("a revision pinned before an environment set takes the environment of the current revision", async (t) => {
-  const { f, saved } = instructionFixture(t, {}, WRITABLE);
+  const { f, saved } = environmentReadFixture(t, {}, WRITABLE);
   const pinned = f.store.transaction((tx) =>
     f.project.repositoryPolicyOf(tx, saved.binding_id),
   );
@@ -5915,7 +5476,7 @@ test("a revision pinned before an environment set takes the environment of the c
 });
 
 test("binding.environment.get answers the stored environment with no repository read", async (t) => {
-  const { f, saved, resolveCalls, readCalls } = instructionFixture(
+  const { f, saved, resolveCalls, readCalls } = environmentReadFixture(
     t,
     {},
     WRITABLE,
@@ -5939,7 +5500,7 @@ test("binding.environment.get answers the stored environment with no repository 
 });
 
 test("binding.environment.get reads the devcontainer file of the repository at the base head", async (t) => {
-  const present = instructionFixture(t, {
+  const present = environmentReadFixture(t, {
     texts: [DEVCONTAINER_TEXT],
     placement: WorkerPlacement.Container,
   });
@@ -5956,7 +5517,7 @@ test("binding.environment.get reads the devcontainer file of the repository at t
     },
   );
   assert.deepEqual(present.readCalls[NO_ITEMS]?.paths, [DEVCONTAINER_FILE]);
-  const invalid = instructionFixture(t, {
+  const invalid = environmentReadFixture(t, {
     texts: ["{"],
     placement: WorkerPlacement.Container,
   });
@@ -5977,7 +5538,7 @@ test("binding.environment.get answers the detected source at the image target wi
     "package.json": PACKAGE_JSON_TEXT,
     "package-lock.json": PACKAGE_LOCK_TEXT,
   };
-  const { f, saved } = instructionFixture(t, {
+  const { f, saved } = environmentReadFixture(t, {
     files,
     placement: WorkerPlacement.Container,
   });
@@ -6003,7 +5564,7 @@ test("binding.environment.get answers the detected source at the image target wi
 });
 
 test("binding.environment.get reads the detection files under the read deadline, not the healthcheck deadline", async (t) => {
-  const { f, saved, resolveCalls, readCalls } = instructionFixture(t, {
+  const { f, saved, resolveCalls, readCalls } = environmentReadFixture(t, {
     files: { "package.json": PACKAGE_JSON_TEXT },
     placement: WorkerPlacement.Container,
   });
@@ -6020,13 +5581,13 @@ test("binding.environment.get reads the detection files under the read deadline,
 });
 
 test("binding.environment.get refuses a read that exceeds the read deadline, not the healthcheck deadline", async (t) => {
-  const { f, saved, started } = instructionFixture(t, {
+  const { f, saved, started } = environmentReadFixture(t, {
     hang: true,
     placement: WorkerPlacement.Container,
   });
   t.mock.timers.enable({ apis: ["setTimeout", "Date"], now: Date.now() });
   let settled = false;
-  const refusal = refusesInstructionFiles(
+  const refusal = refusesRead(
     f.invokeAsync("binding.environment.get", saved),
     SSH_FAILURE_STATUS,
     ProjectErrorCode.RepositorySshUnreachable,
@@ -6045,12 +5606,12 @@ test("binding.environment.get refuses a read that exceeds the read deadline, not
 });
 
 test("binding.environment.get refuses a devcontainer read that exceeds the read deadline with ssh_unreachable", async (t) => {
-  const { f, saved, readStarted } = instructionFixture(t, {
+  const { f, saved, readStarted } = environmentReadFixture(t, {
     readHang: true,
     placement: WorkerPlacement.Container,
   });
   t.mock.timers.enable({ apis: ["setTimeout", "Date"], now: Date.now() });
-  const refusal = refusesInstructionFiles(
+  const refusal = refusesRead(
     f.invokeAsync("binding.environment.get", saved),
     SSH_FAILURE_STATUS,
     ProjectErrorCode.RepositorySshUnreachable,
@@ -6062,12 +5623,12 @@ test("binding.environment.get refuses a devcontainer read that exceeds the read 
 
 test("binding.environment.get bounds the commit read and the detection read with one read deadline", async (t) => {
   t.mock.timers.enable({ apis: ["setTimeout", "Date"], now: Date.now() });
-  const { f, saved, readStarted } = instructionFixture(t, {
+  const { f, saved, readStarted } = environmentReadFixture(t, {
     readHang: true,
     resolveAdvance: () => t.mock.timers.tick(COMMIT_READ_MS),
   });
   let settled = false;
-  const refusal = refusesInstructionFiles(
+  const refusal = refusesRead(
     f.invokeAsync("binding.environment.get", saved),
     SSH_FAILURE_STATUS,
     ProjectErrorCode.RepositorySshUnreachable,
@@ -6083,19 +5644,15 @@ test("binding.environment.get bounds the commit read and the detection read with
   await refusal;
 });
 
-test("the instruction files route and the environment route outlast the read deadline", () => {
-  for (const operation of [
-    projectOperations["binding.instruction_files.get"],
-    projectOperations["binding.environment.get"],
-  ])
-    assert.ok(
-      operation.timeoutMs >
-        REPOSITORY_FILES_READ_TIMEOUT_MS + SSH_AGENT_CLEANUP_TIMEOUT_MS,
-    );
+test("the environment route outlasts the read deadline", () => {
+  assert.ok(
+    projectOperations["binding.environment.get"].timeoutMs >
+      REPOSITORY_FILES_READ_TIMEOUT_MS + SSH_AGENT_CLEANUP_TIMEOUT_MS,
+  );
 });
 
 test("binding.environment.get answers the universal source at the image target with no manifest", async (t) => {
-  const { f, saved } = instructionFixture(t, {
+  const { f, saved } = environmentReadFixture(t, {
     files: {},
     placement: WorkerPlacement.Container,
   });
@@ -6113,7 +5670,7 @@ test("binding.environment.get answers the universal source at the image target w
 });
 
 test("binding.environment.get at the host target ignores the repository devcontainer", async (t) => {
-  const none = instructionFixture(t, {
+  const none = environmentReadFixture(t, {
     files: { [DEVCONTAINER_FILE]: DEVCONTAINER_TEXT },
   });
   assert.deepEqual(
@@ -6128,7 +5685,7 @@ test("binding.environment.get at the host target ignores the repository devconta
   assert.ok(
     none.readCalls.every((call) => !call.paths.includes(DEVCONTAINER_FILE)),
   );
-  const detected = instructionFixture(t, {
+  const detected = environmentReadFixture(t, {
     files: {
       [DEVCONTAINER_FILE]: DEVCONTAINER_TEXT,
       "package.json": PACKAGE_JSON_TEXT,
@@ -6142,7 +5699,7 @@ test("binding.environment.get at the host target ignores the repository devconta
 });
 
 test("binding.environment.get and set refuse a binding that is not a repository binding", async (t) => {
-  const { f, saved } = instructionFixture(t, {}, WRITABLE);
+  const { f, saved } = environmentReadFixture(t, {}, WRITABLE);
   const worker = f.store.transaction((tx) => {
     const written = persistBindings(tx, saved.project_id, {
       [REPOSITORY_NAME]: repositoryBinding(),
@@ -6151,12 +5708,12 @@ test("binding.environment.get and set refuse a binding that is not a repository 
     assert.ok(written);
     return { project_id: saved.project_id, binding_id: written.id };
   });
-  await refusesInstructionFiles(
+  await refusesRead(
     f.invokeAsync("binding.environment.get", worker),
     HttpStatus.NotFound,
     ProjectErrorCode.BindingNotFound,
   );
-  await refusesInstructionFiles(
+  await refusesRead(
     setEnvironment(f, worker, STORED_ENVIRONMENT),
     HttpStatus.NotFound,
     ProjectErrorCode.BindingNotFound,
@@ -6164,8 +5721,8 @@ test("binding.environment.get and set refuse a binding that is not a repository 
 });
 
 test("binding.environment.set refuses a key or a value that the build path does not allow and names the key", async (t) => {
-  const { f, saved } = instructionFixture(t, {}, WRITABLE);
-  await refusesInstructionFiles(
+  const { f, saved } = environmentReadFixture(t, {}, WRITABLE);
+  await refusesRead(
     setEnvironment(f, saved, {
       build: { dockerfile: "Dockerfile", options: ["--volume=/:/host"] },
     }),
@@ -6173,7 +5730,7 @@ test("binding.environment.set refuses a key or a value that the build path does 
     EnvironmentErrorCode.KeyRefused,
     { key: "build.options", reason: EnvironmentRefusalReason.KeyNotAllowed },
   );
-  await refusesInstructionFiles(
+  await refusesRead(
     setEnvironment(f, saved, {
       image: STORED_ENVIRONMENT.image,
       containerEnv: { TOKEN: "${localEnv:GH_TOKEN}" },
@@ -6188,7 +5745,7 @@ test("binding.environment.set refuses a key or a value that the build path does 
 });
 
 test("a repository devcontainer with a refused key names the key in environment show", async (t) => {
-  const refused = instructionFixture(t, {
+  const refused = environmentReadFixture(t, {
     texts: [`{ "image": "base", "runArgs": ["--privileged"] }`],
     placement: WorkerPlacement.Container,
   });
@@ -6205,10 +5762,13 @@ const OTHER_ADDRESS = "git@github.com:owner/other.git";
 
 function twoRepositories(
   t: TestContext,
-  behavior: Parameters<typeof instructionFixture>[1],
+  behavior: Parameters<typeof environmentReadFixture>[1],
   overrides: Partial<Dependencies> = {},
 ) {
-  const fixed = instructionFixture(t, behavior, { ...WRITABLE, ...overrides });
+  const fixed = environmentReadFixture(t, behavior, {
+    ...WRITABLE,
+    ...overrides,
+  });
   const other = fixed.f.store.transaction((tx) => {
     const version = requireProject(
       tx,
@@ -6411,7 +5971,7 @@ test("a binding-set write notifies the onboarding component after the commit and
 test("a wake of a binding-set write finds a changed repository binding not claimable", async (t) => {
   let armed = false;
   const answers: boolean[] = [];
-  const { f, saved } = instructionFixture(
+  const { f, saved } = environmentReadFixture(
     t,
     {},
     {
@@ -6436,7 +5996,7 @@ test("a wake of a binding-set write finds a changed repository binding not claim
 });
 
 test("binding.environment.set notifies the onboarding component once", async (t) => {
-  const { f, saved } = instructionFixture(t, {}, WRITABLE);
+  const { f, saved } = environmentReadFixture(t, {}, WRITABLE);
   const mocked = t.mock.method(
     Onboarding.prototype,
     "bindingsChanged",
@@ -6448,7 +6008,7 @@ test("binding.environment.set notifies the onboarding component once", async (t)
 });
 
 test("Project answers the environment methods through the onboarding component", async (t) => {
-  const { f, saved, resolveCalls } = instructionFixture(t, {}, WRITABLE);
+  const { f, saved, resolveCalls } = environmentReadFixture(t, {}, WRITABLE);
   const { project_id: projectId, binding_id: bindingId } = saved;
   const identity = identityOf(f, saved);
   const claimable = () =>
@@ -6528,7 +6088,7 @@ function imageGroupFixture(t: TestContext, provedTag: boolean) {
     },
     build: async (_input, signal) => untilAborted(signal),
   });
-  const fixed = instructionFixture(
+  const fixed = environmentReadFixture(
     t,
     { texts: [DEVCONTAINER_TEXT] },
     { ...WRITABLE, environmentRuntime: logged.runtime },
@@ -6619,7 +6179,7 @@ test("binding.environment.rebuild answers 409 during an active run of the group"
         ?.run_started_at !== null &&
       f.project.environmentStates(params.project_id).length === ONE_CALL,
   );
-  await refusesInstructionFiles(
+  await refusesRead(
     f.invokeAsync("binding.environment.rebuild", params),
     HttpStatus.Conflict,
     ProjectErrorCode.EnvironmentRunActive,
@@ -6650,7 +6210,7 @@ test("binding.environment.rebuild answers 404 for an unknown, a foreign, a remov
     removed,
     { ...params, binding_id: worker.id },
   ])
-    await refusesInstructionFiles(
+    await refusesRead(
       f.invokeAsync("binding.environment.rebuild", refused),
       HttpStatus.NotFound,
       ProjectErrorCode.BindingNotFound,
@@ -6667,15 +6227,15 @@ test("both environment operations refuse a machine caller by their access policy
 const REFUSED_KEY = "runArgs";
 
 test("binding.environment.set answers key_refused for a document with runArgs and invalid for a non-object or a wrong type", async (t) => {
-  const { f, saved } = instructionFixture(t, {}, WRITABLE);
-  await refusesInstructionFiles(
+  const { f, saved } = environmentReadFixture(t, {}, WRITABLE);
+  await refusesRead(
     setEnvironment(f, saved, { image: "base", runArgs: ["--privileged"] }),
     HttpStatus.BadRequest,
     EnvironmentErrorCode.KeyRefused,
     { key: REFUSED_KEY, reason: EnvironmentRefusalReason.KeyNotAllowed },
   );
   for (const invalid of [[], "image", 5, { image: 5 }])
-    await refusesInstructionFiles(
+    await refusesRead(
       setEnvironment(f, saved, invalid),
       HttpStatus.BadRequest,
       EnvironmentErrorCode.Invalid,
@@ -6683,7 +6243,7 @@ test("binding.environment.set answers key_refused for a document with runArgs an
 });
 
 test("binding.environment.set with null removes the key and the source returns to the repository file", async (t) => {
-  const { f, saved } = instructionFixture(
+  const { f, saved } = environmentReadFixture(
     t,
     { texts: [DEVCONTAINER_TEXT], placement: WorkerPlacement.Container },
     { ...WRITABLE, workerAgentsOf: () => [AGENT], validateEntry: () => {} },

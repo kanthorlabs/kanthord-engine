@@ -31,24 +31,10 @@ import {
   type AgentView,
   type AgentSelection,
   type ApprovedModelsFn,
+  type AgentName,
   type HolderScope,
   type DefaultConfiguration,
 } from "../agent/contract.ts";
-export const SourceState = {
-  Present: "present",
-  Absent: "absent",
-  Invalid: "invalid",
-} as const;
-export const InvalidReason = {
-  TooLarge: "too_large",
-  NotUtf8: "not_utf8",
-  ControlCharacter: "control_character",
-  NotRegularFile: "not_regular_file",
-  OutsideWorkspace: "outside_workspace",
-  Deadline: "deadline",
-  Unreadable: "unreadable",
-} as const;
-export type InvalidReason = (typeof InvalidReason)[keyof typeof InvalidReason];
 export const WorkerHost = {
   Kanthord: "kanthord",
   ExternalHarness: "external-harness",
@@ -478,8 +464,7 @@ export type RepositoryPolicyOf = (
   platform: string;
   ssh_credential: string;
   base_branch: string;
-  project_prompt: string | null;
-  working_layer: WorkingLayer;
+  prompts: Partial<Record<AgentName, string>>;
   environment: Environment | null;
   repository_environment: boolean;
 } | null;
@@ -953,14 +938,6 @@ const resourceBudgetSchema = z.strictObject({
   wall_time_ms: z.number().int().positive(),
   turns: z.number().int().positive().optional(),
 });
-export const workingLayerSchema = z.strictObject({
-  agents_md: z.boolean(),
-  agents_local_md: z.boolean(),
-  claude_md: z.boolean(),
-  claude_local_md: z.boolean(),
-  project_prompt: z.boolean(),
-});
-export type WorkingLayer = z.infer<typeof workingLayerSchema>;
 export const sshHostKeySchema = z.strictObject({
   known_hosts: z.string().min(1),
 });
@@ -1021,8 +998,6 @@ export const executionSetupSchema = z.strictObject({
       ssh_host_key: sshHostKeySchema,
       ssh_public_key: z.string().min(1),
       strategy: z.strictObject({ base_branch: z.string() }),
-      project_prompt: z.string().nullable(),
-      working_layer: workingLayerSchema,
       environment: executionEnvironmentSchema,
     }),
   ),

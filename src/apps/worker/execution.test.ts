@@ -28,10 +28,7 @@ import { hostExecution } from "./execution.ts";
 import { ChainLevel } from "../../agent/contract.ts";
 import { SHIPPED_TEMPLATES } from "../../agent/prompt-templates.ts";
 import { ExecutionIntent } from "../../worker/contract.ts";
-import {
-  TEST_SSH_PUBLIC_KEY,
-  WORKING_LAYER_ALL_ON,
-} from "../../worker/test-support.ts";
+import { TEST_SSH_PUBLIC_KEY } from "../../worker/test-support.ts";
 import { generateSshKey } from "../../repository/ssh-key.ts";
 import type { SshAccess } from "../../repository/contract.ts";
 import { DEFAULT_SSH_PORT } from "../../repository/test-sshd.ts";
@@ -199,8 +196,6 @@ test("host takes handover before setup and method, discards on every method end"
         resource_identity: "github:kanthorlabs/engine",
         ssh_public_key: TEST_SSH_PUBLIC_KEY,
         strategy: { base_branch: "main" },
-        project_prompt: null,
-        working_layer: WORKING_LAYER_ALL_ON,
         environment: null,
       },
     ],
@@ -472,8 +467,6 @@ test("host builds the SSH access of each repository from the handover and leaves
           resource_identity: "github:kanthorlabs/engine",
           ssh_public_key: TEST_SSH_PUBLIC_KEY,
           strategy: { base_branch: "main" },
-          project_prompt: null,
-          working_layer: WORKING_LAYER_ALL_ON,
           environment: null,
         },
       ],
@@ -571,8 +564,6 @@ test("host builds a relay SSH access for a repository whose handover holds no SS
           resource_identity: "github:kanthorlabs/engine",
           ssh_public_key: TEST_SSH_PUBLIC_KEY,
           strategy: { base_branch: "main" },
-          project_prompt: null,
-          working_layer: WORKING_LAYER_ALL_ON,
           environment: null,
         },
       ],

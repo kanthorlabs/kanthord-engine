@@ -16,8 +16,12 @@ import {
   type ExecutionSetup,
   type SchedulerClaims,
 } from "./contract.ts";
-import { PromptConsumer, systemPrompt } from "../agent/prompt-render.ts";
-import type { ResolvedLayer } from "../agent/prompt-layers.ts";
+import {
+  bindingParts,
+  PromptConsumer,
+  systemPrompt,
+} from "../agent/prompt-render.ts";
+import type { PromptPartAnswer } from "../agent/contract.ts";
 import type { Dependencies, WorkerService } from "./service.ts";
 import { RepositoryErrorCode } from "../repository/contract.ts";
 
@@ -75,9 +79,9 @@ export async function executionSetup(
     assert.ok(row);
     return worker.declarationOf(row.worker_name)?.agent_names ?? [];
   });
-  const layers = new Map<string, ResolvedLayer[]>();
+  const parts = new Map<string, PromptPartAnswer[]>();
   for (const agentName of nativeAgentNames)
-    layers.set(
+    parts.set(
       agentName,
       await dependencies.agentPrompt.compose(agentName, caller.context),
     );
@@ -122,6 +126,13 @@ export async function executionSetup(
       const record = pinned(transaction, name);
       return approvedModels(record.platform, record.metadata);
     };
+    const policies = dependencies
+      .repositoryBindingIdsOf(tx, claim.nodeId, claim.pinnedRevision)
+      .map((id) => {
+        const repository = dependencies.repositoryPolicyOf(tx, id);
+        assert.ok(repository);
+        return repository;
+      });
     const agents = agentNames.map((agentName) => {
       const selection = selections.find(
         ({ agent_name }) => agent_name === agentName,
@@ -149,8 +160,8 @@ export async function executionSetup(
       }
       assert.ok(view.effective);
       const record = pinned(tx, view.effective.credential);
-      const agentLayers = layers.get(agentName);
-      assert.ok(agentLayers);
+      const agentParts = parts.get(agentName);
+      assert.ok(agentParts);
       return {
         agent_name: agentName,
         effective_configuration: view.effective,
@@ -159,7 +170,11 @@ export async function executionSetup(
         credential_id: record.id,
         metadata: record.metadata,
         prompt: {
-          final: systemPrompt(agentLayers, PromptConsumer.Worker, templates),
+          final: systemPrompt(
+            [...agentParts, ...bindingParts(policies, agentName)],
+            PromptConsumer.Worker,
+            templates,
+          ),
         },
       };
     });
@@ -179,42 +194,34 @@ export async function executionSetup(
         );
       return publicKey;
     };
-    const repositories = dependencies
-      .repositoryBindingIdsOf(tx, claim.nodeId, claim.pinnedRevision)
-      .map((id) => {
-        const repository = dependencies.repositoryPolicyOf(tx, id);
-        assert.ok(repository);
-        return {
-          binding_id: repository.binding_id,
-          resource_identity: repository.resource_identity,
-          name: repository.name,
-          address: repository.address,
-          ssh_host_key: {
-            known_hosts: dependencies.sshHostKeysOf(
-              tx,
-              repository.platform,
-              repository.address,
-            ),
-          },
-          ssh_public_key: sshPublicKeyOf(repository.ssh_credential),
-          strategy: { base_branch: repository.base_branch },
-          project_prompt: repository.project_prompt,
-          working_layer: repository.working_layer,
-          environment: executionEnvironment(
-            repository.environment,
-            repository.repository_environment,
-            row.placement,
-            dependencies.environmentDigestOf(
-              claim.projectId,
-              repository.resource_identity,
-            ),
-            dependencies.environmentOf(
-              claim.projectId,
-              repository.resource_identity,
-            ),
-          ),
-        };
-      });
+    const repositories = policies.map((repository) => ({
+      binding_id: repository.binding_id,
+      resource_identity: repository.resource_identity,
+      name: repository.name,
+      address: repository.address,
+      ssh_host_key: {
+        known_hosts: dependencies.sshHostKeysOf(
+          tx,
+          repository.platform,
+          repository.address,
+        ),
+      },
+      ssh_public_key: sshPublicKeyOf(repository.ssh_credential),
+      strategy: { base_branch: repository.base_branch },
+      environment: executionEnvironment(
+        repository.environment,
+        repository.repository_environment,
+        row.placement,
+        dependencies.environmentDigestOf(
+          claim.projectId,
+          repository.resource_identity,
+        ),
+        dependencies.environmentOf(
+          claim.projectId,
+          repository.resource_identity,
+        ),
+      ),
+    }));
     if (row.placement === InstancePlacement.Container && row.environment)
       dependencies.environmentClaimed(claim.projectId, row.environment);
     return executionSetupSchema.parse({

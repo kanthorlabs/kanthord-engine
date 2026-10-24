@@ -13,11 +13,7 @@ import type { StreamFn } from "@earendil-works/pi-agent-core";
 import { background } from "../../kernel/context.ts";
 import { temporary } from "../../kernel/test-support.ts";
 import { getAgentDeclaration } from "../../agent/catalog.ts";
-import {
-  layerText,
-  PromptLayer,
-  renderWorkPrompt,
-} from "../../agent/prompt-composer.ts";
+import { renderWorkPrompt } from "../../agent/prompt-composer.ts";
 import { framing, PromptConsumer } from "../../agent/prompt-render.ts";
 import { openSession } from "../../agent/agent-session.ts";
 import { loadPi } from "../../agent/pi.ts";
@@ -32,20 +28,13 @@ import {
 import { SHIPPED_TEMPLATES } from "../../agent/prompt-templates.ts";
 
 function composedPrompt(first: string, second: string) {
-  const layer = (text: string) =>
-    layerText(
-      SHIPPED_TEMPLATES,
-      PromptLayer.WorkingLayer,
-      "owner",
-      "source",
-      text,
-    );
   return {
     systemPrompt: [
-      framing(SHIPPED_TEMPLATES, PromptConsumer.Worker),
       getAgentDeclaration("swe@1")!.agent_prompt,
+      first,
+      second,
+      framing(SHIPPED_TEMPLATES, PromptConsumer.Worker),
     ].join("\n"),
-    layers: { global: layer(first), project: layer(second) },
   };
 }
 
@@ -63,10 +52,7 @@ test("pinned prompt layers survive compaction and all model calls retain their o
       verifications: [],
     },
   });
-  const pinned = pinnedLayers([
-    composed.layers.global,
-    composed.layers.project,
-  ]);
+  const pinned = pinnedLayers();
   pinned.setWork(work);
   const provider = scriptedProvider([
     fauxAssistantMessage("first ".repeat(30000)),
@@ -116,26 +102,20 @@ test("pinned prompt layers survive compaction and all model calls retain their o
   assert.equal(turns, expectedTurns);
   for (const call of provider.calls) {
     const text = JSON.stringify(call.messages);
-    assert.match(text, /GLOBAL_MARKER/);
-    assert.match(text, /PROJECT_MARKER/);
+    assert.match(call.systemPrompt ?? "", /GLOBAL_MARKER/);
+    assert.match(call.systemPrompt ?? "", /PROJECT_MARKER/);
     assert.match(text, /WORK_MARKER/);
     assert.ok(call.systemPrompt?.includes(composed.systemPrompt));
     const userRole = "user";
-    for (const pinned of [
-      composed.layers.global!.message,
-      composed.layers.project!.message,
-      work.text,
-    ]) {
-      assert.deepEqual(
-        call.messages
-          .filter(
-            (entry) =>
-              entry.role === userRole && contentText(entry.content) === pinned,
-          )
-          .map((entry) => contentText(entry.content)),
-        [pinned],
-      );
-    }
+    assert.deepEqual(
+      call.messages
+        .filter(
+          (entry) =>
+            entry.role === userRole && contentText(entry.content) === work.text,
+        )
+        .map((entry) => contentText(entry.content)),
+      [work.text],
+    );
     assert.ok(
       call.systemPrompt?.includes(getAgentDeclaration("swe@1")!.agent_prompt),
     );
@@ -146,7 +126,7 @@ test("pinned prompt layers survive compaction and all model calls retain their o
 test("two tool calls produce three counted turns with no absent project message", async (t) => {
   const cwd = temporary(t);
   writeFileSync(join(cwd, "file"), "content");
-  const pins = pinnedLayers([]);
+  const pins = pinnedLayers();
   const provider = scriptedProvider([
     fauxAssistantMessage(fauxToolCall("read", { path: "file" }), {
       stopReason: "toolUse",
@@ -205,7 +185,7 @@ test("inference pin preserves stream arguments and later system updates across w
     throw failure;
   };
   const session = { agent: { streamFunction: original } } as AgentSession;
-  const pins = pinnedLayers([]);
+  const pins = pinnedLayers();
   const systemPrompt = "declared system";
   pins.pinInference(session, systemPrompt);
   const model = {} as Parameters<StreamFn>[0];
@@ -280,10 +260,7 @@ for (const isSplitTurn of [false, true]) {
         verifications: [],
       },
     });
-    const pins = pinnedLayers([
-      composed.layers.global,
-      composed.layers.project,
-    ]);
+    const pins = pinnedLayers();
     pins.setWork(work);
     const provider = scriptedProvider([
       fauxAssistantMessage("", {
@@ -452,8 +429,6 @@ for (const isSplitTurn of [false, true]) {
           .filter((message) => message.role === USER)
           .map((message) => contentText(message.content)),
         [
-          composed.layers.global!.message,
-          composed.layers.project!.message,
           work.text,
           ...original.messages
             .filter((message) => message.role === USER)

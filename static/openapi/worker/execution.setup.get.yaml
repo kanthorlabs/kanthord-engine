@@ -222,8 +222,6 @@ components:
           properties:
             work:
               type: string
-            layer-message:
-              type: string
             framing-worker:
               type: string
             framing-workbench:
@@ -242,7 +240,6 @@ components:
               type: string
           required:
             - work
-            - layer-message
             - framing-worker
             - framing-workbench
             - task-revision
@@ -308,30 +305,6 @@ components:
                     type: string
                 required:
                   - base_branch
-                additionalProperties: false
-              project_prompt:
-                anyOf:
-                  - type: string
-                  - type: "null"
-              working_layer:
-                type: object
-                properties:
-                  agents_md:
-                    type: boolean
-                  agents_local_md:
-                    type: boolean
-                  claude_md:
-                    type: boolean
-                  claude_local_md:
-                    type: boolean
-                  project_prompt:
-                    type: boolean
-                required:
-                  - agents_md
-                  - agents_local_md
-                  - claude_md
-                  - claude_local_md
-                  - project_prompt
                 additionalProperties: false
               environment:
                 anyOf:
@@ -718,8 +691,6 @@ components:
               - ssh_host_key
               - ssh_public_key
               - strategy
-              - project_prompt
-              - working_layer
               - environment
             additionalProperties: false
       required:

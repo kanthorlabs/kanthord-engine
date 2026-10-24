@@ -40,7 +40,6 @@ import {
 import { agentOperations, ChainLevel } from "../../agent/contract.ts";
 import { SWE_AGENT_PROMPT } from "../../agent/prompt-assets.ts";
 import { framing, PromptConsumer } from "../../agent/prompt-render.ts";
-import { WORKING_LAYER_ALL_ON } from "../../worker/test-support.ts";
 import {
   WorkspaceRoot,
   WorkspaceKind,
@@ -86,10 +85,10 @@ const NO_OUTPUT = "";
 const SECRET = "test_e2e-runtime-secret";
 const GLOBAL = "Every answer is short.";
 const PROJECT = "The work product is TypeScript.";
-const REPOSITORY_OWNER = "repository binding repo";
 const WORKSPACE_FILE = "Workspace agent file text.";
 const ADDRESS = "git@github.com:owner/repo.git";
 const SWE = "swe@1";
+const SYSTEM_ROLE = "system";
 const PROOF_FAILED = "gateway.invocation.execution_proof_failed";
 const DEFAULTS = {
   agent_provider: "default",
@@ -187,7 +186,7 @@ test(
             ssh_credential: "github-ssh",
             strategy: { base_branch: "main" },
             credential: "github",
-            project_prompt: PROJECT,
+            prompts: { [SWE]: PROJECT },
           },
         },
         general: { kind: "worker", config: worker },
@@ -353,9 +352,7 @@ test(
         (typeof agentOperations)["get"]["output"]["_output"]
       >(["agent", "get", "swe@1"]);
       assert.equal(declaration.agent_name, SWE);
-      const texts = declaration.prompt.layers!.flatMap(({ sources }) =>
-        sources.map((source) => source.text),
-      );
+      const texts = declaration.prompt.parts!.map((part) => part.text);
       for (const name of ["base.md", "swe@1.md"])
         assert.ok(
           texts.includes(
@@ -427,19 +424,16 @@ test(
         },
         ssh_public_key: repository.ssh_public_key,
         strategy: { base_branch: "main" },
-        project_prompt: PROJECT,
-        working_layer: WORKING_LAYER_ALL_ON,
         environment: null,
       });
       assert.ok(
         runtimeX.setup.agents[0]!.prompt.final.endsWith(
-          framing(SHIPPED_TEMPLATES, PromptConsumer.Worker),
+          `Instructions of repository repo:\n\n${PROJECT}\n\n${framing(SHIPPED_TEMPLATES, PromptConsumer.Worker)}`,
         ),
       );
       assert.ok(
         runtimeX.setup.agents[0]!.prompt.final.includes(SWE_AGENT_PROMPT),
       );
-      assert.ok(!runtimeX.setup.agents[0]!.prompt.final.includes(PROJECT));
       assert.equal(
         runtimeX.setup.agents[0]!.credential_id,
         runtimeX.item.credential_id,
@@ -504,9 +498,7 @@ test(
         ...x.execution,
         resource_budget: runtimeX.setup.resource_budget,
       }),
-      workspaceAgentFiles: true,
       workspace: prepared.directory,
-      checkouts: [prepared.directory],
       hostHome,
       env: hostEnvironment(),
       modelRuntimeFactory: scriptedModelRuntime(provider),
@@ -545,19 +537,14 @@ test(
               ),
             ),
           );
-          const text = JSON.stringify(call.messages);
-          assert.ok(text.indexOf(WORKSPACE_FILE) < text.indexOf(PROJECT));
+          const text = JSON.stringify(
+            call.messages.filter(({ role }) => role !== SYSTEM_ROLE),
+          );
+          assert.equal(text.includes(WORKSPACE_FILE), false);
+          assert.equal(text.includes(PROJECT), false);
+          assert.ok(call.systemPrompt?.includes(PROJECT));
           assert.equal(text.includes(GLOBAL), false);
           assert.equal(call.systemPrompt?.includes(GLOBAL), false);
-          assert.ok(
-            text.indexOf(PROJECT) <
-              text.indexOf(
-                JSON.stringify(work.text).slice(
-                  BRACKET_TRIM_OFFSET,
-                  -BRACKET_TRIM_OFFSET,
-                ),
-              ),
-          );
           assert.ok(
             text.includes(
               JSON.stringify(work.text).slice(
@@ -567,15 +554,6 @@ test(
             ),
           );
         }
-        assert.deepEqual(
-          agent.composition.selected.map(({ path }) => path),
-          [join(prepared.directory, "AGENTS.md"), null],
-        );
-        assert.ok(
-          agent.composition.selected.every(
-            ({ owner }) => owner === REPOSITORY_OWNER,
-          ),
-        );
       },
     );
     const local = simpleGit(prepared.directory);
@@ -693,9 +671,7 @@ test(
           ...y.execution,
           resource_budget: runtimeY.setup.resource_budget,
         }),
-        workspaceAgentFiles: true,
         workspace: lab.directory,
-        checkouts: [lab.directory],
         hostHome,
         env: hostEnvironment(),
         modelRuntimeFactory: scriptedModelRuntime(fake),

@@ -33,6 +33,7 @@ function templateInvalid(path: string | null, reason: string) {
     assert.equal(error.code, AgentErrorCode.PromptTemplateInvalid);
     assert.deepEqual(error.details, {
       template: PromptTemplate.CriterionRevision,
+      file: `prompts/${PromptTemplate.CriterionRevision}.md`,
       path,
       reason,
     });

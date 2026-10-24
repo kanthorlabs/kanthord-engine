@@ -22,49 +22,14 @@ import {
 } from "../scheduler/contract.ts";
 
 export const AGENT_COMPONENT_NAME = "agent";
+export const AGENT_NAMES = ["swe@1", "re@1", "env@1"] as const;
+export type AgentName = (typeof AGENT_NAMES)[number];
 export const ENABLEMENT_MAX_BODY_BYTES = 64 * 1024;
 export const ENABLEMENT_TIMEOUT_MS = 30000;
 export const LIST_LIMIT_DEFAULT = 100;
 export const LIST_LIMIT_MAX = 1000;
 export const AGENT_PROVIDER_TARGET_KIND = "agent-provider";
 export const FALLBACK_CONFIGURATIONS_MAX = 7;
-
-export const PROMPT_MAX_BODY_BYTES = 64 * 1024;
-export const PROMPT_TEXT_MAX_BYTES = 32768;
-
-export const PromptScope = {
-  System: "system",
-  Agent: "agent",
-  Workbench: "workbench",
-} as const;
-export type PromptScope = (typeof PromptScope)[keyof typeof PromptScope];
-
-export const SystemPromptSource = {
-  HostFile: "host_file",
-  Base: "base",
-  Custom: "custom",
-} as const;
-export const AgentPromptSource = {
-  AgentFile: "agent_file",
-  Shipped: "shipped",
-  Custom: "custom",
-} as const;
-export const WorkbenchPromptSource = {
-  AgentsMd: "agents_md",
-  AgentsLocalMd: "agents_local_md",
-  ClaudeMd: "claude_md",
-  ClaudeLocalMd: "claude_local_md",
-  Shipped: "shipped",
-  Custom: "custom",
-} as const;
-
-export const PromptLayerKind = {
-  System: "system",
-  Agent: "agent",
-  Working: "working",
-} as const;
-export type PromptLayerKind =
-  (typeof PromptLayerKind)[keyof typeof PromptLayerKind];
 
 export const PromptOrigin = {
   Binary: "binary",
@@ -73,41 +38,19 @@ export const PromptOrigin = {
 } as const;
 export type PromptOrigin = (typeof PromptOrigin)[keyof typeof PromptOrigin];
 
-export const PromptSourceState = {
-  Present: "present",
-  Absent: "absent",
-  Invalid: "invalid",
-  Off: "off",
-  Deferred: "deferred",
+export const PromptPart = {
+  Standard: "standard",
+  Role: "role",
+  Workbench: "workbench",
+  Binding: "binding",
 } as const;
-export type PromptSourceState =
-  (typeof PromptSourceState)[keyof typeof PromptSourceState];
+export type PromptPart = (typeof PromptPart)[keyof typeof PromptPart];
 
 export const PromptView = { Final: "final" } as const;
 export type PromptView = (typeof PromptView)[keyof typeof PromptView];
 
-export const SYSTEM_LAYER_SWITCH = "layer";
-
-export const SystemLayerOverride = {
-  Inherit: "inherit",
-  On: "on",
-  Off: "off",
-} as const;
-export type SystemLayerOverride =
-  (typeof SystemLayerOverride)[keyof typeof SystemLayerOverride];
-
-export const PROMPT_SWITCHES: Record<PromptScope, readonly string[]> = {
-  [PromptScope.System]: [
-    ...Object.values(SystemPromptSource),
-    SYSTEM_LAYER_SWITCH,
-  ],
-  [PromptScope.Agent]: Object.values(AgentPromptSource),
-  [PromptScope.Workbench]: Object.values(WorkbenchPromptSource),
-};
-
 export const PromptTemplate = {
   Work: "work",
-  LayerMessage: "layer-message",
   FramingWorker: "framing-worker",
   FramingWorkbench: "framing-workbench",
   TaskRevision: "task-revision",
@@ -149,10 +92,6 @@ export const AgentErrorCode = {
   ReasoningUnsupported: "agent.configuration.reasoning_effort_unsupported",
   CredentialUnsuitable: "agent.configuration.credential_unsuitable",
   CredentialHolderMismatch: "agent.configuration.credential_holder_mismatch",
-  PromptRevisionConflict: "agent.prompt.revision_conflict",
-  PromptTooLarge: "agent.prompt.too_large",
-  PromptAgentLayerEmpty: "agent.prompt.agent_layer_empty",
-  PromptSwitchLocked: "agent.prompt.switch_locked",
   PromptTemplateInvalid: "agent.prompt.template_invalid",
 } as const;
 
@@ -404,26 +343,18 @@ export const agentModelSchema = z.strictObject({
   reasoning_efforts: z.array(reasoningEffortSchema),
 });
 
-export const promptSourceSchema = z.strictObject({
-  source: z.string().min(1),
+export const promptPartSchema = z.strictObject({
+  part: z.enum(PromptPart),
+  name: z.string().min(1),
   origin: z.enum(PromptOrigin),
   path: z.string().nullable(),
-  enabled: z.boolean(),
-  state: z.enum(PromptSourceState),
-  digest: z.string().nullable(),
-  text: z.string().nullable(),
+  digest: z.string(),
+  text: z.string(),
 });
-export type PromptSource = z.infer<typeof promptSourceSchema>;
-
-export const promptLayerSchema = z.strictObject({
-  layer: z.enum(PromptLayerKind),
-  enabled: z.boolean(),
-  sources: z.array(promptSourceSchema),
-});
-export type PromptLayerAnswer = z.infer<typeof promptLayerSchema>;
+export type PromptPartAnswer = z.infer<typeof promptPartSchema>;
 
 export const promptAnswerSchema = z.strictObject({
-  layers: z.array(promptLayerSchema).optional(),
+  parts: z.array(promptPartSchema).optional(),
   final: z.string(),
 });
 
@@ -451,77 +382,6 @@ export const agentDeclarationSchema = z.strictObject({
   active_position: z.number().int().nonnegative().nullable(),
   cooling: chainCoolingSchema.nullable(),
 });
-
-export const promptSettingsSchema = z.strictObject({
-  scope: z.enum(PromptScope),
-  agent_name: z.string(),
-  switches: z.record(z.string(), z.boolean()),
-  custom_text: z.string(),
-  system_layer: z.enum(SystemLayerOverride).nullable(),
-  revision: z.number().int().nonnegative(),
-  locked_switches: z.array(z.string()),
-});
-export type PromptSettings = z.infer<typeof promptSettingsSchema>;
-export type StoredPromptSettings = Omit<PromptSettings, "locked_switches">;
-
-const promptSwitchNames = [
-  ...new Set(Object.values(PROMPT_SWITCHES).flat()),
-] as [string, ...string[]];
-const promptTarget = {
-  scope: z.enum(PromptScope),
-  agent_name: z.string().min(1).optional(),
-  expected_revision: z.number().int().positive().optional(),
-};
-
-function checkPromptSwitch(
-  body: {
-    scope: PromptScope;
-    switch?: string;
-    enabled?: boolean;
-    system_layer?: SystemLayerOverride;
-  },
-  context: z.core.$RefinementCtx,
-): void {
-  const partial = body.switch !== undefined || body.enabled !== undefined;
-  const source = body.switch !== undefined && body.enabled !== undefined;
-  const override = body.system_layer !== undefined;
-  if (!(source && !override) && !(override && !partial))
-    context.addIssue({
-      code: "custom",
-      path: ["switch"],
-      message: "The body takes either switch with enabled, or system_layer.",
-    });
-  if (override && body.scope !== PromptScope.Agent)
-    context.addIssue({
-      code: "custom",
-      path: ["system_layer"],
-      message: "The system layer override belongs to the agent scope.",
-    });
-}
-
-function checkPromptTarget(
-  body: { scope: PromptScope; agent_name?: string; switch?: string },
-  context: z.core.$RefinementCtx,
-): void {
-  const system = body.scope === PromptScope.System;
-  if (system === (body.agent_name !== undefined))
-    context.addIssue({
-      code: "custom",
-      path: ["agent_name"],
-      message: system
-        ? "The system scope takes no agent name."
-        : "The scope requires an agent name.",
-    });
-  if (
-    body.switch !== undefined &&
-    !PROMPT_SWITCHES[body.scope].includes(body.switch)
-  )
-    context.addIssue({
-      code: "custom",
-      path: ["switch"],
-      message: "The switch is not a source of the scope.",
-    });
-}
 
 const emptyFields = z.strictObject({});
 const agentParams = z.strictObject({ agent_name: z.string().min(1) });
@@ -768,66 +628,5 @@ export const agentOperations = {
     output: z.null(),
     description:
       "Clear the cooldown of one credential copy so that the next claim can select its chain entries again. The holder defaults to server.",
-  },
-  "prompt.put": {
-    ...enablementMutation,
-    id: "agent.prompt.put",
-    method: HttpMethod.Put,
-    path: "/api/agent/prompt",
-    maxBodyBytes: PROMPT_MAX_BODY_BYTES,
-    input: z.strictObject({
-      params: emptyFields,
-      query: emptyFields,
-      body: z
-        .strictObject({ ...promptTarget, custom_text: z.string() })
-        .superRefine(checkPromptTarget),
-    }),
-    output: promptSettingsSchema,
-    description:
-      "Replace the custom text of one prompt scope at its expected revision.",
-  },
-  "prompt.switch": {
-    ...enablementMutation,
-    id: "agent.prompt.switch",
-    method: HttpMethod.Post,
-    path: "/api/agent/prompt/switch",
-    maxBodyBytes: PROMPT_MAX_BODY_BYTES,
-    input: z.strictObject({
-      params: emptyFields,
-      query: emptyFields,
-      body: z
-        .strictObject({
-          ...promptTarget,
-          switch: z.enum(promptSwitchNames).optional(),
-          enabled: z.boolean().optional(),
-          system_layer: z.enum(SystemLayerOverride).optional(),
-        })
-        .superRefine(checkPromptTarget)
-        .superRefine(checkPromptSwitch),
-    }),
-    output: promptSettingsSchema,
-    description:
-      "Set one switch of one prompt scope, or the system layer override of one agent scope, at its expected revision.",
-  },
-  "prompt.get": {
-    ...enablementOperation,
-    id: "agent.prompt.get",
-    method: HttpMethod.Get,
-    path: "/api/agent/prompt",
-    mutation: false,
-    body: false,
-    input: z.strictObject({
-      params: emptyFields,
-      query: z
-        .strictObject({
-          scope: z.enum(PromptScope),
-          agent_name: z.string().min(1).optional(),
-        })
-        .superRefine(checkPromptTarget),
-      body: z.null(),
-    }),
-    output: promptSettingsSchema,
-    description:
-      "Read the switches, the custom text and the system layer override of one prompt scope.",
   },
 } as const satisfies Record<string, Operation>;

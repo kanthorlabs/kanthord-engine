@@ -360,10 +360,10 @@ test("an examine node with two repository bindings runs from checkouts/ and list
   const transport = {
     cloneSnapshot: async () => "a".repeat(40),
   } as unknown as RepositoryTransport;
-  const opened: { directory: string; checkouts: readonly string[] }[] = [];
+  const opened: string[] = [];
   const texts: string[] = [];
-  const open = async (directory: string, checkouts: readonly string[]) => {
-    opened.push({ directory, checkouts });
+  const open = async (directory: string) => {
+    opened.push(directory);
     return {
       instruct: async (work: { text: string }, text: string) => {
         texts.push(work.text, text);
@@ -400,9 +400,7 @@ test("an examine node with two repository bindings runs from checkouts/ and list
     { kind: "released", furtherWork: false },
   );
   assert.equal(readFileSync(output, "utf8").trim(), root);
-  assert.deepEqual(opened, [
-    { directory: root, checkouts: names.map((name) => join(root, name)) },
-  ]);
+  assert.deepEqual(opened, [root]);
   const [work, examine] = texts;
   for (const text of [work, examine])
     for (const name of names)

@@ -116,68 +116,42 @@ components:
         prompt:
           type: object
           properties:
-            layers:
+            parts:
               type: array
               items:
                 type: object
                 properties:
-                  layer:
+                  part:
                     type: string
                     enum:
-                      - system
-                      - agent
-                      - working
-                  enabled:
-                    type: boolean
-                  sources:
-                    type: array
-                    items:
-                      type: object
-                      properties:
-                        source:
-                          type: string
-                          minLength: 1
-                        origin:
-                          type: string
-                          enum:
-                            - binary
-                            - file
-                            - database
-                        path:
-                          anyOf:
-                            - type: string
-                            - type: "null"
-                        enabled:
-                          type: boolean
-                        state:
-                          type: string
-                          enum:
-                            - present
-                            - absent
-                            - invalid
-                            - off
-                            - deferred
-                        digest:
-                          anyOf:
-                            - type: string
-                            - type: "null"
-                        text:
-                          anyOf:
-                            - type: string
-                            - type: "null"
-                      required:
-                        - source
-                        - origin
-                        - path
-                        - enabled
-                        - state
-                        - digest
-                        - text
-                      additionalProperties: false
+                      - standard
+                      - role
+                      - workbench
+                      - binding
+                  name:
+                    type: string
+                    minLength: 1
+                  origin:
+                    type: string
+                    enum:
+                      - binary
+                      - file
+                      - database
+                  path:
+                    anyOf:
+                      - type: string
+                      - type: "null"
+                  digest:
+                    type: string
+                  text:
+                    type: string
                 required:
-                  - layer
-                  - enabled
-                  - sources
+                  - part
+                  - name
+                  - origin
+                  - path
+                  - digest
+                  - text
                 additionalProperties: false
             final:
               type: string

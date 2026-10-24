@@ -43,17 +43,8 @@ import {
   isGitOnlyPlatform,
   isPlatformSshHost,
 } from "../repository/platform.ts";
-import { WORKING_FILES } from "../agent/prompt-layers.ts";
-import {
-  InvalidReason,
-  PROMPT_SOURCE_MAX_BYTES,
-  validateText,
-} from "../agent/prompt-source.ts";
-import { RepositoryFileState } from "../repository/contract.ts";
-import {
-  gitFailureCause,
-  gitFailureReason,
-} from "../repository/git-failure.ts";
+import { validateText } from "../agent/prompt-source.ts";
+import { gitFailureReason } from "../repository/git-failure.ts";
 import { tagSchema } from "../kernel/tag.ts";
 import { isObject, isString } from "../kernel/values.ts";
 import {
@@ -74,18 +65,15 @@ import {
   BindingState,
   ChangeKind,
   BINDING_CHECK_TIMEOUT_MS,
-  REPOSITORY_FILES_READ_TIMEOUT_MS,
   EMPTY_LENGTH,
   LIST_LIMIT_MAX,
   INSTANCE_COUNT_MIN,
   INSTANCE_COUNT_MAX,
   LS_REMOTE_TIMEOUT_MS,
-  PROJECT_PROMPT_MAX_BYTES,
   ProjectErrorCode,
   REPOSITORY_PLATFORM,
   GitHubAction,
   Landing,
-  InstructionFileState,
   RESOURCE_CAPABILITY_NETWORK_GIT_READ,
   SSH_CREDENTIAL_PLATFORM,
   RESOURCE_TARGET_KIND_REPOSITORY,
@@ -118,6 +106,7 @@ import {
   type CustodySuitability,
   type RepositoryConnector,
   type RepositoryFiles,
+  type BindingPrompts,
   type RepositoryPolicy,
   type StorageBinding,
   type WorkerAgentsOfFn,
@@ -184,8 +173,6 @@ import {
 } from "./onboarding.ts";
 
 const SSH_UNREACHABLE_STATUS = 422;
-const INSTRUCTION_FILES_READ_FAILED =
-  "project.binding.instruction_files.read_failed";
 const PROJECTS_DIRECTORY = "projects";
 const NO_GENERATION = 0;
 const SINGLE_FORM = 1;
@@ -370,11 +357,6 @@ const MINIMUM_LIMIT = 1;
 const EMPTY_IDENTITY_LENGTH = 0;
 const BINDING_INDEX = 1;
 const SINGLE_REPOSITORY = 1;
-type InstructionFilesAnswer = {
-  commit: string;
-  read_at: number;
-  files: ReturnType<typeof instructionFileEntry>[];
-};
 type BindingEdit = typeof bindingEditSchema._output;
 type BindingSetWrite = typeof bindingSetWriteInputSchema._output;
 
@@ -490,36 +472,18 @@ function requireWorkerBinding(
   return { project, config: workerConfigSchema.parse(binding.config) };
 }
 
-const INVALID_REASON_OF_FILE_STATE: Record<string, InvalidReason> = {
-  [RepositoryFileState.NotRegularFile]: InvalidReason.NotRegularFile,
-  [RepositoryFileState.OutsideRoot]: InvalidReason.OutsideWorkspace,
-  [RepositoryFileState.Unreadable]: InvalidReason.Unreadable,
-  [RepositoryFileState.TooLarge]: InvalidReason.TooLarge,
-  [RepositoryFileState.NotUtf8]: InvalidReason.NotUtf8,
-};
-
-function instructionFileEntry(
-  source: (typeof WORKING_FILES)[number][0],
-  read: { path: string; state: string; text: string | null },
-) {
-  const { path, text } = read;
-  if (read.state === RepositoryFileState.Absent)
-    return {
-      source,
-      path,
-      state: InstructionFileState.Absent,
-      reason: null,
-      text: null,
-    };
-  let reason: InvalidReason | null | undefined;
-  if (read.state === RepositoryFileState.Present) {
-    assert.ok(text !== null);
-    reason = validateText(text);
-  } else reason = INVALID_REASON_OF_FILE_STATE[read.state];
-  assert.ok(reason !== undefined);
-  return reason === null
-    ? { source, path, state: InstructionFileState.Present, reason, text }
-    : { source, path, state: InstructionFileState.Invalid, reason, text: null };
+function validatePrompts(prompts: BindingPrompts): void {
+  for (const [agentName, text] of Object.entries(prompts)) {
+    if (text === undefined) continue;
+    const reason = validateText(text);
+    if (reason !== null)
+      throw new OperationError(
+        HttpStatus.BadRequest,
+        ProjectErrorCode.RepositoryPromptInvalid,
+        "Repository binding prompt is invalid.",
+        { agent_name: agentName, reason },
+      );
+  }
 }
 
 function agentCursor(cursor: string): string {
@@ -638,11 +602,6 @@ export class ProjectService implements Service, ProjectBindings {
   private readonly validateEntry: ValidateEntry;
   private readonly custodySuitability: CustodySuitability;
   private readonly repositoryConnector: RepositoryConnector;
-  private readonly repositoryFiles: RepositoryFiles;
-  private readonly instructionFiles = new Map<
-    string,
-    { commit: string; answer: InstructionFilesAnswer }
-  >();
   private readonly verifyRepositoryCredential: VerifyRepositoryCredential;
   private readonly identity: ServiceIdentity;
   private readonly custody: ProjectCustody;
@@ -670,7 +629,6 @@ export class ProjectService implements Service, ProjectBindings {
     this.validateEntry = dependencies.validateEntry;
     this.custodySuitability = dependencies.custodySuitability;
     this.repositoryConnector = dependencies.repositoryConnector;
-    this.repositoryFiles = dependencies.repositoryFiles;
     this.verifyRepositoryCredential = dependencies.verifyRepositoryCredential;
     this.identity = dependencies.identity;
     this.custody = dependencies.custody;
@@ -866,10 +824,6 @@ export class ProjectService implements Service, ProjectBindings {
       ({ params }, caller) => this.verifyBinding(params, caller),
     );
     registry.register(
-      projectOperations["binding.instruction_files.get"],
-      ({ params }, caller) => this.readInstructionFiles(params, caller),
-    );
-    registry.register(
       projectOperations["binding.environment.get"],
       ({ params }, caller) => this.environments.read(params, caller),
     );
@@ -917,95 +871,6 @@ export class ProjectService implements Service, ProjectBindings {
       caller.context,
     );
     return caller.commit(() => health);
-  }
-  private async readInstructionFiles(
-    params: { project_id: string; binding_id: string },
-    caller: CallerContext,
-  ) {
-    const { id, config } = this.operationalStore.transaction((tx) =>
-      requireRepositoryBinding(tx, params),
-    );
-    caller.context.signal.throwIfAborted();
-    const deadline = new CancellationContext(
-      caller.context,
-      Date.now() + REPOSITORY_FILES_READ_TIMEOUT_MS,
-    );
-    const end = Date.now() + REPOSITORY_FILES_READ_TIMEOUT_MS;
-    try {
-      const { address, ssh } = this.sshAccess(config.platform, {
-        identity: this.identity,
-        subject: { kind: SshIdentitySubjectKind.Binding, binding_id: id },
-      });
-      const commit = await this.refuseUnreadable(caller.context, params, () =>
-        this.repositoryFiles.resolveBranchCommit(
-          address,
-          config.strategy.base_branch,
-          deadline,
-          end - Date.now(),
-          ssh,
-        ),
-      );
-      if (commit === null)
-        throw new OperationError(
-          SSH_UNREACHABLE_STATUS,
-          ProjectErrorCode.RepositoryBaseBranchAbsent,
-          "The base branch is absent on the remote.",
-        );
-      const cached = this.instructionFiles.get(id);
-      if (cached?.commit === commit) return caller.commit(() => cached.answer);
-      const files = await this.refuseUnreadable(caller.context, params, () =>
-        this.repositoryFiles.readFilesAtCommit(
-          address,
-          commit,
-          WORKING_FILES.map(([, path]) => path),
-          PROMPT_SOURCE_MAX_BYTES,
-          deadline,
-          end - Date.now(),
-          ssh,
-        ),
-      );
-      caller.context.signal.throwIfAborted();
-      assert.equal(files.length, WORKING_FILES.length);
-      const answer = {
-        commit,
-        read_at: Date.now(),
-        files: WORKING_FILES.map(([source, path], index) => {
-          assert.equal(files[index]!.path, path);
-          return instructionFileEntry(source, files[index]!);
-        }),
-      };
-      this.instructionFiles.set(id, { commit, answer });
-      return caller.commit(() => answer);
-    } finally {
-      deadline.cancel();
-    }
-  }
-  private async refuseUnreadable<T>(
-    context: Context,
-    params: { project_id: string; binding_id: string },
-    read: () => Promise<T>,
-  ): Promise<T> {
-    try {
-      return await read();
-    } catch (error) {
-      context.signal.throwIfAborted();
-      const failureReason = repositoryFailureReason(error);
-      this.logger.warn(
-        {
-          project_id: params.project_id,
-          binding_id: params.binding_id,
-          failure_reason: failureReason,
-          reason: gitFailureCause(error),
-        },
-        INSTRUCTION_FILES_READ_FAILED,
-      );
-      throw new OperationError(
-        SSH_UNREACHABLE_STATUS,
-        ProjectErrorCode.RepositorySshUnreachable,
-        "Repository SSH read failed.",
-        { failure_reason: failureReason },
-      );
-    }
   }
   private async checkBinding(
     params: { project_id: string },
@@ -1379,16 +1244,8 @@ export class ProjectService implements Service, ProjectBindings {
       this.validateWorker(tx, name, binding.config);
       return;
     }
-    if (
-      binding.kind === BindingKind.Repository &&
-      Buffer.byteLength(binding.config.project_prompt ?? "", UTF8_ENCODING) >
-        PROJECT_PROMPT_MAX_BYTES
-    )
-      throw new OperationError(
-        HttpStatus.BadRequest,
-        ProjectErrorCode.RepositoryPromptTooLarge,
-        "Repository project prompt exceeds the UTF-8 byte limit.",
-      );
+    if (binding.kind === BindingKind.Repository)
+      validatePrompts(binding.config.prompts ?? {});
     if (binding.kind === BindingKind.Storage) {
       this.custodySuitability(tx, {
         credential: binding.config.credential,
@@ -1713,8 +1570,7 @@ export class ProjectService implements Service, ProjectBindings {
       base_branch: config.strategy.base_branch,
       action: config.strategy.action?.name ?? null,
       landing: config.strategy.action?.landing ?? Landing.Human,
-      project_prompt: config.project_prompt ?? null,
-      working_layer: config.working_layer,
+      prompts: config.prompts ?? {},
       environment: currentEnvironmentOf(tx, binding),
       repository_environment: noStoredEnvironment(tx, binding.project_id),
     };

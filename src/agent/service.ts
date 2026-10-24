@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { homedir } from "node:os";
 import { resolve } from "node:path";
 import type { Logger } from "pino";
 import { z } from "zod";
@@ -26,17 +25,11 @@ import {
 import {
   agentOperations,
   agentEnablementSchema,
-  promptSettingsSchema,
-  PROMPT_TEXT_MAX_BYTES,
-  PromptScope,
-  SystemLayerOverride,
-  type PromptSettings,
-  type StoredPromptSettings,
   agentModelSchema,
   agentCooldownSchema,
   effectiveConfigurationSchema,
   PromptView,
-  type PromptLayerAnswer,
+  type PromptPartAnswer,
   type PromptTemplates,
   AgentErrorCode,
   CooldownChangeKind,
@@ -70,31 +63,23 @@ import {
   enablementsByModel,
   type EnablementRow,
 } from "./enablements.ts";
-import { promptSettings, savePromptSettings } from "./prompts.ts";
 import { cooldownDuration } from "./cooldowns.ts";
 import {
   SERVER_HOLDER,
   type CredentialHold,
   type CredentialHolds,
 } from "../custody/contract.ts";
-import { applyLocks, lockedSwitches, withLocks } from "./prompt-locks.ts";
 import {
   ProjectErrorCode,
   type RepositoryPolicy,
 } from "../project/contract.ts";
-import {
-  resolveLayers,
-  type PromptSettingsSet,
-  type RepositoryLayerSource,
-  type ResolvedLayer,
-} from "./prompt-layers.ts";
-import { finalPrompt, PromptConsumer } from "./prompt-render.ts";
+import { resolveAgentPrompt } from "./prompt-files.ts";
+import { bindingParts, PromptConsumer, systemPrompt } from "./prompt-render.ts";
 import { resolveTemplates, templateDirectory } from "./prompt-templates.ts";
 
 const NO_ITEMS = 0;
 const LAST_PROVIDER = 1;
 const HEALTH_PAGE_SIZE = 100;
-const ABSENT_REVISION = 0;
 const FIRST_POSITION = 0;
 const NO_STRIKES = 0;
 const FIRST_STRIKE = 1;
@@ -189,145 +174,19 @@ function saveRevision(tx: Transaction, current: EnablementRow) {
   );
 }
 
-type PromptTarget = {
-  scope: PromptScope;
-  agent_name?: string | undefined;
-  expected_revision?: number | undefined;
-};
-
-function currentPrompt(
-  tx: Transaction,
-  target: PromptTarget,
-  config: AgentConfig["prompt"],
-): StoredPromptSettings {
-  const agentName = target.agent_name ?? "";
-  if (target.scope !== PromptScope.System) requireAgent(agentName);
-  const current = promptSettings(tx, target.scope, agentName);
-  if ((target.expected_revision ?? ABSENT_REVISION) !== current.revision)
-    throw new OperationError(
-      HttpStatus.Conflict,
-      AgentErrorCode.PromptRevisionConflict,
-      "Prompt settings revision conflict.",
-      {
-        scope: target.scope,
-        agent_name: agentName,
-        current: withLocks(current, config),
-      },
-    );
-  return current;
-}
-
-function putPrompt(
-  tx: Transaction,
-  body: PromptTarget & { custom_text: string },
-  config: AgentConfig["prompt"],
-): PromptSettings {
-  const current = currentPrompt(tx, body, config);
-  if (Buffer.byteLength(body.custom_text) > PROMPT_TEXT_MAX_BYTES)
-    throw new OperationError(
-      HttpStatus.BadRequest,
-      AgentErrorCode.PromptTooLarge,
-      "Custom prompt text is too large.",
-      { scope: body.scope, maxBytes: PROMPT_TEXT_MAX_BYTES },
-    );
-  return promptSettingsSchema.parse(
-    withLocks(
-      savePromptSettings(
-        tx,
-        { ...current, custom_text: body.custom_text },
-        current.revision,
-      ),
-      config,
-    ),
-  );
-}
-
-function switchPrompt(
-  tx: Transaction,
-  body: PromptTarget & {
-    switch?: string | undefined;
-    enabled?: boolean | undefined;
-    system_layer?: SystemLayerOverride | undefined;
-  },
-  config: AgentConfig["prompt"],
-): PromptSettings {
-  const current = currentPrompt(tx, body, config);
-  if (body.system_layer !== undefined)
-    return promptSettingsSchema.parse(
-      withLocks(
-        savePromptSettings(
-          tx,
-          { ...current, system_layer: body.system_layer },
-          current.revision,
-        ),
-        config,
-      ),
-    );
-  assert.ok(body.switch !== undefined && body.enabled !== undefined);
-  if (lockedSwitches(body.scope, config).includes(body.switch))
-    throw new OperationError(
-      HttpStatus.Conflict,
-      AgentErrorCode.PromptSwitchLocked,
-      "The configuration locks this prompt switch.",
-      { scope: body.scope, switch: body.switch },
-    );
-  const switches = { ...current.switches, [body.switch]: body.enabled };
-  if (
-    body.scope === PromptScope.Agent &&
-    Object.values(switches).every((enabled) => !enabled)
-  )
-    throw new OperationError(
-      HttpStatus.Conflict,
-      AgentErrorCode.PromptAgentLayerEmpty,
-      "An agent prompt layer needs one source.",
-      {
-        scope: body.scope,
-        agent_name: current.agent_name,
-        switch: body.switch,
-      },
-    );
-  return promptSettingsSchema.parse(
-    withLocks(
-      savePromptSettings(tx, { ...current, switches }, current.revision),
-      config,
-    ),
-  );
-}
-
-function layerAnswer(layer: ResolvedLayer): PromptLayerAnswer {
-  return {
-    layer: layer.layer,
-    enabled: layer.enabled,
-    sources: layer.sources.map((source) => ({
-      source: source.source,
-      origin: source.origin,
-      path: source.path,
-      enabled: source.enabled,
-      state: source.state,
-      digest: source.digest,
-      text: source.text,
-    })),
-  };
-}
-
 export interface Dependencies {
   store: Store;
   config: AgentConfig;
   dataDirectory: string;
-  hostHome?: string;
-  workbenchDirectory: (agentName: string) => string;
   custodySuitability: CustodySuitability;
   copyHeld: CopyHeldFn;
   credentialHolds: CredentialHolds;
   approvedModels: ApprovedModelsFn;
   entriesOfAgent: EntriesOfAgent;
-  repositoryWorkingOf: (
+  repositoryPromptsOf: (
     tx: Transaction,
     bindingId: string,
-  ) => Pick<
-    RepositoryPolicy,
-    "project_id" | "name" | "project_prompt" | "working_layer"
-  > | null;
+  ) => Pick<RepositoryPolicy, "project_id" | "name" | "prompts"> | null;
   providerHealthCheck: ProviderHealthCheckFn;
   providerCapability: ProviderCapabilityFn;
   toolDeclarations: ToolDeclarationsFn;
@@ -1112,12 +971,12 @@ export class AgentComponent {
     return [...matches.values()];
   }
 
-  private repositoryWorking(
+  private repositoryPrompts(
     projectId: string,
     bindingId: string,
-  ): RepositoryLayerSource {
+  ): Pick<RepositoryPolicy, "name" | "prompts"> {
     const repository = this.dependencies.store.transaction((tx) =>
-      this.dependencies.repositoryWorkingOf(tx, bindingId),
+      this.dependencies.repositoryPromptsOf(tx, bindingId),
     );
     if (repository?.project_id !== projectId)
       throw new OperationError(
@@ -1131,41 +990,28 @@ export class AgentComponent {
 
   composePrompt(
     agentName: string,
+    consumer: PromptConsumer,
     context: Context,
-    repository: RepositoryLayerSource | null = null,
-  ): Promise<ResolvedLayer[]> {
+  ): Promise<PromptPartAnswer[]> {
     const agent = getAgentDeclaration(agentName);
     assert.ok(agent);
-    const { config, dataDirectory, workbenchDirectory } = this.dependencies;
-    const settings: PromptSettingsSet = this.dependencies.store.transaction(
-      (tx) => ({
-        system: applyLocks(
-          promptSettings(tx, PromptScope.System),
-          config.prompt,
-        ),
-        agent: promptSettings(tx, PromptScope.Agent, agentName),
-        working: promptSettings(tx, PromptScope.Workbench, agentName),
-      }),
-    );
-    return resolveLayers({
+    return resolveAgentPrompt({
       agent,
-      settings,
-      systemFile: config.prompt.system_file,
-      agentDirectory: config.prompt.agent_directory,
-      dataDirectory,
-      hostHome: this.dependencies.hostHome ?? homedir(),
-      workingDirectory: workbenchDirectory(agentName),
-      repository,
+      directory: this.agentDirectory(),
+      workbench: consumer === PromptConsumer.Workbench,
       context,
     });
   }
 
-  promptTemplates(context: Context): Promise<PromptTemplates> {
+  private agentDirectory(): string | null {
     const { config, dataDirectory } = this.dependencies;
-    const agentDirectory = config.prompt.agent_directory
+    return config.prompt.agent_directory
       ? resolve(dataDirectory, config.prompt.agent_directory)
       : null;
-    return resolveTemplates(templateDirectory(agentDirectory), context);
+  }
+
+  promptTemplates(context: Context): Promise<PromptTemplates> {
+    return resolveTemplates(templateDirectory(this.agentDirectory()), context);
   }
 
   declare(registry: OperationRegistry): void {
@@ -1227,15 +1073,25 @@ export class AgentComponent {
         const repository =
           query.binding_id === undefined || query.project_id === undefined
             ? null
-            : this.repositoryWorking(query.project_id, query.binding_id);
-        const layers = await this.composePrompt(
-          params.agent_name,
-          caller.context,
-          repository,
-        );
-        const final = finalPrompt(
-          layers,
-          repository ? PromptConsumer.Worker : PromptConsumer.Workbench,
+            : this.repositoryPrompts(query.project_id, query.binding_id);
+        const consumer =
+          repository === null && declaration.workbench
+            ? PromptConsumer.Workbench
+            : PromptConsumer.Worker;
+        const parts = [
+          ...(await this.composePrompt(
+            params.agent_name,
+            consumer,
+            caller.context,
+          )),
+          ...bindingParts(
+            repository === null ? [] : [repository],
+            params.agent_name,
+          ),
+        ];
+        const final = systemPrompt(
+          parts,
+          consumer,
           await this.promptTemplates(caller.context),
         );
         return caller.commit((tx) => {
@@ -1252,9 +1108,7 @@ export class AgentComponent {
             configuration_schema: z.toJSONSchema(effectiveConfigurationSchema),
             overridable_fields: [...declaration.overridable_fields],
             prompt:
-              query.view === PromptView.Final
-                ? { final }
-                : { layers: layers.map(layerAnswer), final },
+              query.view === PromptView.Final ? { final } : { parts, final },
             tools,
             enablement: row ? wireRecord(row) : null,
             chain: view.chain,
@@ -1321,28 +1175,6 @@ export class AgentComponent {
             body.expected_revision,
           ),
         ),
-    );
-    registry.register(agentOperations["prompt.put"], ({ body }, caller) =>
-      caller.commit((tx) =>
-        putPrompt(tx, body, this.dependencies.config.prompt),
-      ),
-    );
-    registry.register(agentOperations["prompt.switch"], ({ body }, caller) =>
-      caller.commit((tx) =>
-        switchPrompt(tx, body, this.dependencies.config.prompt),
-      ),
-    );
-    registry.register(agentOperations["prompt.get"], ({ query }, caller) =>
-      caller.commit((tx) => {
-        const agentName = query.agent_name ?? "";
-        if (query.scope !== PromptScope.System) requireAgent(agentName);
-        return promptSettingsSchema.parse(
-          withLocks(
-            promptSettings(tx, query.scope, agentName),
-            this.dependencies.config.prompt,
-          ),
-        );
-      }),
     );
     registry.register(
       agentOperations["enablement.provider.model.list"],

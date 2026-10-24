@@ -46,7 +46,6 @@ export interface MissionBindings {
     base_branch: string;
     action: "pull_request" | "merge_push" | null;
     landing: "human" | "kanthord";
-    project_prompt: string | null;
   } | null;
   resolveBinding(
     tx: Transaction,

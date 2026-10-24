@@ -20,9 +20,16 @@ import { getAgentDeclaration } from "../agent/catalog.ts";
 import { openSession, withDeadline } from "../agent/agent-session.ts";
 import { checkoutConfinement } from "../agent/hooks/checkout-confinement.ts";
 import { loadPi } from "../agent/pi.ts";
-import type { PromptTemplates, AgentView } from "../agent/contract.ts";
-import type { ResolvedLayer } from "../agent/prompt-layers.ts";
-import { PromptConsumer, systemPrompt } from "../agent/prompt-render.ts";
+import type {
+  AgentView,
+  PromptPartAnswer,
+  PromptTemplates,
+} from "../agent/contract.ts";
+import {
+  bindingParts,
+  PromptConsumer,
+  systemPrompt,
+} from "../agent/prompt-render.ts";
 import {
   connectModel,
   type ModelConnectorInput,
@@ -32,7 +39,7 @@ import type {
   CredentialMetadataFn,
   ServerAgentCredentialsInput,
 } from "../custody/contract.ts";
-import type { EnvironmentTarget } from "./contract.ts";
+import type { EnvironmentTarget, RepositoryPolicy } from "./contract.ts";
 import { ENVIRONMENT_DIRECTORY, type ProofFile } from "./environment-state.ts";
 
 export const ENV_AGENT_NAME = "env@1";
@@ -61,7 +68,14 @@ export interface EnvironmentAgentDependencies {
   identity: ServiceIdentity;
   agentView(tx: Transaction, agentName: string): AgentView | null;
   serverAgentCredentials(input: ServerAgentCredentialsInput): CredentialStore;
-  composePrompt(agentName: string, context: Context): Promise<ResolvedLayer[]>;
+  composePrompt(
+    agentName: string,
+    context: Context,
+  ): Promise<PromptPartAnswer[]>;
+  repositoryPromptsOf(
+    tx: Transaction,
+    bindingId: string,
+  ): Pick<RepositoryPolicy, "name" | "prompts"> | null;
   templates(context: Context): Promise<PromptTemplates>;
   exportRepository(
     bindingId: string,
@@ -206,11 +220,14 @@ export class EnvironmentAgent {
       }),
       input.context,
     );
-    const layers = await this.dependencies.composePrompt(
+    const parts = await this.dependencies.composePrompt(
       ENV_AGENT_NAME,
       input.context,
     );
     const templates = await this.dependencies.templates(input.context);
+    const repository = this.dependencies.store.transaction((tx) =>
+      this.dependencies.repositoryPromptsOf(tx, input.binding_id),
+    );
     let ended = false;
     const customTools = input.tools({
       session_id: sessionId,
@@ -224,7 +241,14 @@ export class EnvironmentAgent {
       modelRuntime: runtime,
       model,
       thinkingLevel: effective.reasoning_effort as ReasoningLevel,
-      systemPrompt: systemPrompt(layers, PromptConsumer.Worker, templates),
+      systemPrompt: systemPrompt(
+        [
+          ...parts,
+          ...bindingParts(repository ? [repository] : [], ENV_AGENT_NAME),
+        ],
+        PromptConsumer.Worker,
+        templates,
+      ),
       allowlist: [
         ...declaration.tools,
         ...customTools.map((tool) => tool.name),

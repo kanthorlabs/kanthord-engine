@@ -8,9 +8,7 @@ const USER_ROLE = "user";
 const TEXT_TYPE = "text";
 const FIRST_INDEX = 0;
 
-export function pinnedLayersHook(
-  pinned: () => { layers: string[]; work: string | null },
-): InlineExtension {
+export function pinnedLayersHook(pinned: () => string | null): InlineExtension {
   const message = (content: string): AgentMessage => ({
     role: CUSTOM_ROLE,
     customType: LAYER_MESSAGE_TYPE,
@@ -20,8 +18,8 @@ export function pinnedLayersHook(
   });
   return (pi) => {
     pi.on("context", (event) => {
-      const { layers, work } = pinned();
-      const messages = layers.map(message);
+      const work = pinned();
+      const messages: AgentMessage[] = [];
       const hasWork = event.messages.some(
         (entry) =>
           entry.role === USER_ROLE &&

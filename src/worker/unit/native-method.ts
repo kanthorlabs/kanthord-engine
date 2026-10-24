@@ -91,10 +91,7 @@ export async function runNativeExecution(
       if (!method) return run.stop(EndReason.OperationFailed);
       const revision = await readPinnedRevision(run);
       const intent = input.setup.intent;
-      const open = async (
-        workspace: string,
-        checkouts: readonly string[] = [workspace],
-      ) => {
+      const open = async (workspace: string) => {
         const agent = input.setup.agents[WORKING_AGENT];
         assert.ok(agent);
         const credential = input.credentials.items.find(
@@ -108,9 +105,7 @@ export async function runNativeExecution(
           agent,
           credential,
           budget,
-          workspaceAgentFiles: method !== WorkerMethod.Evaluation,
           workspace,
-          checkouts,
           hostHome: input.hostHome,
           env: input.env,
           modelRuntimeFactory: input.modelRuntimeFactory,
@@ -144,10 +139,7 @@ export async function runNativeExecution(
       );
       let working: NativeAgent;
       try {
-        working = await open(
-          workspace.root,
-          workspace.checkouts.map((checkout) => checkout.directory),
-        );
+        working = await open(workspace.root);
       } catch (error) {
         input.workspaces.release(
           input.workspaces.nodeKey(input.claim.node_id),
