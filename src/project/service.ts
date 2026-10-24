@@ -153,6 +153,7 @@ import {
   type StoredBinding,
   type StoredProject,
 } from "./store.ts";
+import type { ProjectConfig } from "./config.ts";
 import { ProjectEnvironments, refuseEnvironment } from "./environment.ts";
 import {
   ENVIRONMENT_DIRECTORY,
@@ -552,7 +553,7 @@ export type SshAccessOf = (
 ) => SshAccess;
 
 export interface Dependencies {
-  config: Record<string, never>;
+  config: ProjectConfig;
   operationalStore: Store;
   stateDirectory: string;
   hostHome?: string;
@@ -685,6 +686,8 @@ export class ProjectService implements Service, ProjectBindings {
       logger: dependencies.logger ?? pino({ level: "silent" }),
       now: () => Date.now(),
       runId: () => randomUUID(),
+      environmentBuildTimeoutMs:
+        dependencies.config.environment_build_timeout_ms,
     });
     dependencies.health?.register("project", () => this.healthcheck());
   }

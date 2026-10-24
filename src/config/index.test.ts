@@ -28,6 +28,10 @@ import {
   DEFAULT_RETENTION_DAYS,
   RETENTION_DAYS_MAX,
 } from "../tracking/config.ts";
+import {
+  DEFAULT_ENVIRONMENT_BUILD_TIMEOUT_MS,
+  DEFAULT_ENVIRONMENT_MEMORY_MB,
+} from "../project/config.ts";
 import { writePrivate } from "../kernel/files.ts";
 import { Diagnostic } from "../kernel/errors.ts";
 
@@ -51,6 +55,10 @@ const DEFAULT_SERVER_SLOT_LIMIT = 16;
 const DEFAULT_CONTAINER_IMAGE = "docker.io/kanthorlabs/kanthord";
 const DEFAULT_RELEASE_RESERVE = 600;
 const DEFAULT_STOP_BACKOFF_SECONDS = 30;
+const DEFAULT_BUILD_TIMEOUT_MS = 1800000;
+const DEFAULT_MEMORY_MB = 4096;
+const CONFIGURED_BUILD_TIMEOUT_MS = 600000;
+const CONFIGURED_MEMORY_MB = 8192;
 const ROOT_BASE_PATH = "/";
 const INVALID_FIELD_CODE = "system.config.invalid_field";
 const ORIGINAL_CONTENT = "original";
@@ -86,6 +94,7 @@ test("service fragments preserve the existing YAML field set", () => {
     "log",
     "master_key",
     "mission",
+    "project",
     "scheduler",
     "tracking",
     "version",
@@ -372,6 +381,66 @@ test("Tracking retention accepts only a safe integer from 1 to 3650", () => {
         tracking: { retention_days: retentionDays },
       }).getProperties().tracking.retention_days,
       retentionDays,
+    );
+});
+
+test("project configuration defaults to the environment run limits", () => {
+  const properties = configuration({
+    version: CONFIG_VERSION,
+    master_key: randomBytes(32).toString("base64"),
+  }).getProperties();
+  assert.equal(
+    properties.project.environment_build_timeout_ms,
+    DEFAULT_ENVIRONMENT_BUILD_TIMEOUT_MS,
+  );
+  assert.equal(
+    properties.project.environment_memory_mb,
+    DEFAULT_ENVIRONMENT_MEMORY_MB,
+  );
+  assert.equal(DEFAULT_ENVIRONMENT_BUILD_TIMEOUT_MS, DEFAULT_BUILD_TIMEOUT_MS);
+  assert.equal(DEFAULT_ENVIRONMENT_MEMORY_MB, DEFAULT_MEMORY_MB);
+});
+
+test("project configuration reads back the configured environment run limits", () => {
+  const { project } = configuration({
+    version: CONFIG_VERSION,
+    master_key: randomBytes(32).toString("base64"),
+    project: {
+      environment_build_timeout_ms: CONFIGURED_BUILD_TIMEOUT_MS,
+      environment_memory_mb: CONFIGURED_MEMORY_MB,
+    },
+  }).getProperties();
+  assert.equal(
+    project.environment_build_timeout_ms,
+    CONFIGURED_BUILD_TIMEOUT_MS,
+  );
+  assert.equal(project.environment_memory_mb, CONFIGURED_MEMORY_MB);
+});
+
+test("project configuration refuses an environment run limit below its bound, a fraction or a string", () => {
+  const masterKey = randomBytes(32).toString("base64");
+  const refused = [
+    { environment_build_timeout_ms: 59999 },
+    { environment_build_timeout_ms: 60000.5 },
+    { environment_build_timeout_ms: "600000" },
+    { environment_memory_mb: 255 },
+  ];
+  for (const project of refused)
+    assert.throws(
+      () =>
+        configuration({
+          version: CONFIG_VERSION,
+          master_key: masterKey,
+          project,
+        }),
+      (error: Error & { code?: string }) => {
+        assert.equal(error.code, INVALID_FIELD_CODE);
+        assert.match(
+          diagnosticText(error),
+          new RegExp(`project.${Object.keys(project)[0]}`),
+        );
+        return true;
+      },
     );
 });
 
