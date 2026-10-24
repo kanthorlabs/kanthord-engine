@@ -4,6 +4,10 @@ import { isAbsolute, join } from "node:path";
 import { test, type TestContext } from "node:test";
 import { setImmediate as turn } from "node:timers/promises";
 import { detectEnvironment } from "./detection.ts";
+import {
+  DEFAULT_ENVIRONMENT_BUILD_TIMEOUT_MS,
+  DEFAULT_ENVIRONMENT_MEMORY_MB,
+} from "./config.ts";
 import { ProjectService, type Dependencies } from "./service.ts";
 import {
   background,
@@ -344,7 +348,10 @@ function fixture(t: TestContext, overrides: Partial<Dependencies> = {}) {
     secrets,
   );
   const dependencies: Dependencies = {
-    config: {},
+    config: {
+      environment_build_timeout_ms: DEFAULT_ENVIRONMENT_BUILD_TIMEOUT_MS,
+      environment_memory_mb: DEFAULT_ENVIRONMENT_MEMORY_MB,
+    },
     operationalStore: store,
     stateDirectory,
     health,

@@ -295,6 +295,8 @@ export function composeServices(options: {
     version: packageVersion(),
     stateDirectory: options.stateDirectory,
     devcontainerCli: options.environmentDevcontainerCli,
+    buildTimeoutMs: options.config.project.environment_build_timeout_ms,
+    environmentMemoryMb: options.config.project.environment_memory_mb,
     exportRepository: (bindingId, commit, directory, context) =>
       project.exportRepository(bindingId, commit, directory, context),
   });
@@ -826,7 +828,7 @@ export function composeServices(options: {
     },
   });
   const project: ProjectService = new ProjectService({
-    config: {},
+    config: options.config.project,
     operationalStore: options.store,
     stateDirectory: options.stateDirectory,
     wakeup: { wake: (projectId) => scheduler.wake(projectId) },

@@ -17,6 +17,10 @@ import {
   repositoryConfigSchema,
 } from "./contract.ts";
 import {
+  DEFAULT_ENVIRONMENT_BUILD_TIMEOUT_MS,
+  DEFAULT_ENVIRONMENT_MEMORY_MB,
+} from "./config.ts";
+import {
   PROBE_ALLOWLIST,
   environmentAgentTools,
   parseProbeCommand,
@@ -215,7 +219,10 @@ function storeFixture(t: TestContext, beforeWrite: () => void = () => {}) {
     throw new Error("Unexpected peer collaboration call.");
   };
   const service = new ProjectService({
-    config: {},
+    config: {
+      environment_build_timeout_ms: DEFAULT_ENVIRONMENT_BUILD_TIMEOUT_MS,
+      environment_memory_mb: DEFAULT_ENVIRONMENT_MEMORY_MB,
+    },
     operationalStore: store,
     stateDirectory: temporary(t),
     createMission: unexpected,

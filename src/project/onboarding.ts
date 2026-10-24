@@ -42,9 +42,8 @@ const SINGLE_REPOSITORY = 1;
 const NO_WORKER_BINDING = 0;
 const NO_ITEMS = 0;
 const NOT_QUEUED = -1;
-const RUN_DEADLINE_MS = 1800000;
+const MS_PER_MINUTE = 60000;
 const PENDING_RETRY_MS = 60000;
-const RUN_DEADLINE_TAIL = "the run deadline of 30 minutes passed";
 const RUN_STARTED = "project.onboarding.run_started";
 const RUN_ENDED = "project.onboarding.run_ended";
 const RUN_FAILED = "project.onboarding.run_failed";
@@ -93,6 +92,7 @@ export interface OnboardingDependencies {
   logger: Logger;
   now(): number;
   runId(): string;
+  environmentBuildTimeoutMs: number;
 }
 
 type QueuedStep =
@@ -755,7 +755,7 @@ export class Onboarding {
   ): Promise<ProofVerdict | null> {
     const signal = AbortSignal.any([
       this.context.signal,
-      AbortSignal.timeout(RUN_DEADLINE_MS),
+      AbortSignal.timeout(this.dependencies.environmentBuildTimeoutMs),
     ]);
     try {
       return await this.execute(record, runId, signal);
@@ -769,9 +769,14 @@ export class Onboarding {
         record.step === EnvironmentStatus.Building
           ? EnvironmentFailureClass.BuildFailed
           : EnvironmentFailureClass.SetupFailed,
-        signal.aborted ? RUN_DEADLINE_TAIL : messageOf(error),
+        signal.aborted ? this.deadlineTail() : messageOf(error),
       );
     }
+  }
+
+  private deadlineTail(): string {
+    const minutes = this.dependencies.environmentBuildTimeoutMs / MS_PER_MINUTE;
+    return `the run deadline of ${minutes} minutes passed`;
   }
 
   private async execute(

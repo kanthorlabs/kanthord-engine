@@ -34,6 +34,8 @@ const TINI = "/usr/bin/tini";
 const MINIMUM_BUNDLE_BYTES = 0;
 const START = "run";
 const FAILED_EXIT = 3;
+const MEMORY_MB = 4096;
+const BOUNDED_MEMORY_MB = 8192;
 const SHORT_LIMIT_MS = 500;
 const POLL_STEP_MS = 50;
 const POLL_ROUNDS = 100;
@@ -80,7 +82,11 @@ function input(overrides: Partial<ProofInput> = {}): ProofInput & {
 
 function proof(
   directory: string,
-  overrides: { hostCode?: number; commandLimitMs?: number } = {},
+  overrides: {
+    hostCode?: number;
+    commandLimitMs?: number;
+    environmentMemoryMb?: number;
+  } = {},
 ) {
   const log = join(directory, "log");
   const script = join(directory, "fake-podman.cjs");
@@ -140,6 +146,7 @@ function proof(
     ...(overrides.commandLimitMs === undefined
       ? {}
       : { commandLimitMs: overrides.commandLimitMs }),
+    environmentMemoryMb: overrides.environmentMemoryMb ?? MEMORY_MB,
   };
   const lines = (): unknown[][] =>
     existsSync(log)
@@ -209,6 +216,16 @@ test("the container starts hardened with the slot flags, a new volume and an idl
     start.some((argument) => argument.startsWith("--network")),
     false,
   );
+});
+
+test("the proof container holds the memory bound", async (t) => {
+  const { options, lines } = proof(temporary(t), {
+    environmentMemoryMb: BOUNDED_MEMORY_MB,
+  });
+  await proveInImage(options, input(), new AbortController().signal);
+  const start = ofKind(lines(), HOST_LINE).find((line) => line[0] === START);
+  assert.ok(start);
+  assert.equal(after(start, "--memory"), `${BOUNDED_MEMORY_MB}m`);
 });
 
 test("the bundle goes to the container on standard input and the clone lands in the checkout of the home", async (t) => {
