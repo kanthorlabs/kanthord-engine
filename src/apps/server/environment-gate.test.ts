@@ -446,6 +446,7 @@ test(
     assert.equal(runs[0]![runs[0]!.indexOf("--") - 1], ready.tag);
 
     const before = starts.length;
+    const runsBefore = slotRuns(fake).length;
     environment.hold();
     const current = await humanCaller(fixture)(
       projectOperations["bindingSet.get"],
@@ -482,7 +483,6 @@ test(
         assert.fail("a slot wait outlived the stop"),
       ),
     ]);
-    for (const start of later)
-      assert.deepEqual(slotRuns(fake, start.clientId), []);
+    assert.deepEqual(slotRuns(fake).slice(runsBefore), []);
   },
 );
