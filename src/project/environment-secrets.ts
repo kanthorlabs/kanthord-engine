@@ -32,6 +32,7 @@ export type SecretRelease =
   | {
       outcome: typeof SecretReleaseOutcome.Released;
       files: EnvironmentSecretFile[];
+      values: string[];
     }
   | { outcome: typeof SecretReleaseOutcome.Stale }
   | { outcome: typeof SecretReleaseOutcome.Unavailable; variable: string };
@@ -94,12 +95,16 @@ export class EnvironmentSecrets {
         this.releaseAll(tx, input, released),
       );
       if (refusal !== null) return refusal;
+      const values = released.map(
+        ({ material }) => apiKeySecretSchema.parse(material.value()).key,
+      );
       return {
         outcome: SecretReleaseOutcome.Released,
-        files: released.map(({ variable, material }) => ({
+        files: released.map(({ variable }, index) => ({
           variable,
-          file: this.writeSecret(input.runId, variable, material),
+          file: this.writeSecret(input.runId, variable, values[index]!),
         })),
+        values,
       };
     } finally {
       for (const { material } of released) material.drop();
@@ -185,17 +190,13 @@ export class EnvironmentSecrets {
     return found.revision;
   }
 
-  private writeSecret(
-    runId: string,
-    variable: string,
-    material: Material,
-  ): string {
+  private writeSecret(runId: string, variable: string, value: string): string {
     const directory = this.directoryOf(runId);
     ensureDirectory(this.dependencies.root);
     ensureDirectory(this.runDirectoryOf(runId));
     ensureDirectory(directory);
     const file = join(directory, variable);
-    writeFileSync(file, apiKeySecretSchema.parse(material.value()).key, {
+    writeFileSync(file, value, {
       flag: "wx",
       mode: PRIVATE_FILE_MODE,
     });

@@ -70,6 +70,7 @@ const RUN_FAILED = "project.onboarding.run_failed";
 const CACHE_COLLECTION_FAILED = "project.onboarding.cache_collection_failed";
 const TRACE_ID_BYTES = 16;
 const SPAN_ID_BYTES = 8;
+const REDACTED = "[redacted]";
 const NO_COMMAND = null;
 const NO_EXIT_CODE = null;
 
@@ -198,6 +199,18 @@ function keyOf(projectId: string, resourceIdentity: string): string {
 
 function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function redact(text: string, values: readonly string[]): string {
+  return values
+    .filter((value) => value.length > NO_ITEMS)
+    .toSorted((first, second) => second.length - first.length)
+    .reduce((redacted, value) => redacted.split(value).join(REDACTED), text);
+}
+
+function redactedError(error: unknown, values: readonly string[]): unknown {
+  if (values.length === NO_ITEMS) return error;
+  return new Error(redact(messageOf(error), values));
 }
 
 function emptyRecord(
@@ -781,22 +794,28 @@ export class Onboarding {
     let completed = false;
     let verdict: ProofVerdict | null = null;
     const runId = this.dependencies.runId();
+    const secretValues: string[] = [];
     try {
-      verdict = await this.verdictOf(record, runId, trace);
+      verdict = await this.verdictOf(record, runId, trace, secretValues);
       if (verdict !== null) {
         await this.finalize(record, verdict);
         completed = true;
       }
     } catch (error) {
       if (!this.context.signal.aborted) {
-        record.reason = messageOf(error);
+        record.reason = redact(messageOf(error), secretValues);
         this.dependencies.logger.error(
-          { err: error, binding: record.binding_name, digest: record.digest },
+          {
+            err: redactedError(error, secretValues),
+            binding: record.binding_name,
+            digest: record.digest,
+          },
           RUN_FAILED,
         );
       }
     } finally {
       this.dependencies.secrets.remove(runId);
+      secretValues.length = NO_ITEMS;
       record.run_started_at = null;
       record.step = null;
       record.step_started_at = null;
@@ -889,24 +908,40 @@ export class Onboarding {
     record: GroupRecord,
     runId: string,
     trace: ServerTrace,
+    secretValues: string[],
   ): Promise<ProofVerdict | null> {
     const signal = AbortSignal.any([
       this.context.signal,
       AbortSignal.timeout(this.dependencies.environmentBuildTimeoutMs),
     ]);
     try {
-      return await this.execute(record, runId, signal, trace);
+      const verdict = await this.execute(
+        record,
+        runId,
+        signal,
+        trace,
+        secretValues,
+      );
+      return verdict === null
+        ? null
+        : { ...verdict, tail: redact(verdict.tail, secretValues) };
     } catch (error) {
       if (this.context.signal.aborted) return null;
       this.dependencies.logger.error(
-        { err: error, binding: record.binding_name, digest: record.digest },
+        {
+          err: redactedError(error, secretValues),
+          binding: record.binding_name,
+          digest: record.digest,
+        },
         RUN_FAILED,
       );
       return failedVerdict(
         record.step === EnvironmentStatus.Building
           ? EnvironmentFailureClass.BuildFailed
           : EnvironmentFailureClass.SetupFailed,
-        signal.aborted ? this.deadlineTail() : messageOf(error),
+        signal.aborted
+          ? this.deadlineTail()
+          : redact(messageOf(error), secretValues),
       );
     }
   }
@@ -921,6 +956,7 @@ export class Onboarding {
     runId: string,
     signal: AbortSignal,
     trace: ServerTrace,
+    secretValues: string[],
   ): Promise<ProofVerdict | null> {
     const { runtime } = this.dependencies;
     const { document, commit, tag } = record;
@@ -957,6 +993,7 @@ export class Onboarding {
           EnvironmentFailureClass.BuildFailed,
           `environment secret ${released.variable} is unavailable`,
         );
+      secretValues.push(...released.values);
       const built = await this.tracedBuild(
         trace,
         { ...base, tag, document, secrets: released.files },
@@ -976,7 +1013,7 @@ export class Onboarding {
 
   private releaseSecrets(record: GroupRecord, runId: string): SecretRelease {
     if (record.secrets.length === NO_ITEMS)
-      return { outcome: SecretReleaseOutcome.Released, files: [] };
+      return { outcome: SecretReleaseOutcome.Released, files: [], values: [] };
     return this.dependencies.secrets.release({
       projectId: record.project_id,
       bindingId: record.binding_id,

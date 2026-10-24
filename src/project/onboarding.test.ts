@@ -99,7 +99,8 @@ const DOCS: RepositoryGroup = {
 };
 const SECRET_VARIABLE = "REGISTRY_AUTH";
 const SECRET_CREDENTIAL = "registry-auth";
-const SECRET_TEXT = "registry-secret-one";
+const SECRET_TEXT = "s3cr3t-value";
+const REDACTED_TAIL = "token=[redacted]";
 const ROTATED_SECRET_TEXT = "registry-secret-two";
 const SECRET_APP: RepositoryGroup = {
   ...APP,
@@ -243,6 +244,7 @@ class Harness {
   buildGate: Deferred | null = new Deferred();
   proveGate: Deferred | null = new Deferred();
   buildResult: ImageBuildResult = { outcome: "built" };
+  buildError: Error | null = null;
   proveResults: CommandResult[] = [];
   proveError: Error | null = null;
   images = new Map<string, string>([
@@ -306,6 +308,7 @@ class Harness {
         this.events.push("build");
         this.buildInputs.push(input);
         await hold(this.buildGate, signal);
+        if (this.buildError !== null) throw this.buildError;
         return this.buildResult;
       },
       prove: async (
@@ -2565,5 +2568,69 @@ test(
     assert.notEqual(fresh, staleDigest);
     assert.equal(fresh, h.digest(SECRET_APP));
     assert.equal(h.buildInputs.length, ONE_CALL);
+  },
+);
+
+test(
+  "a failed build writes a proof file whose tail holds no secret value",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const h = secretHarness(t);
+    h.openBuild();
+    h.buildResult = {
+      outcome: "failed",
+      class: "build_failed",
+      tail: `token=${SECRET_TEXT}`,
+    };
+    await h.compute(SECRET_APP);
+    const sum = h.state(SECRET_APP).digest;
+    assert.ok(sum);
+    await h.ended();
+    const file = h.proofOf(sum, SECRET_APP);
+    assert.ok(file);
+    assert.equal(file.tail, REDACTED_TAIL);
+    assert.ok(!JSON.stringify(h.state(SECRET_APP)).includes(SECRET_TEXT));
+  },
+);
+
+test(
+  "no log line of a run holds a secret value",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const h = secretHarness(t);
+    h.openBuild();
+    h.buildError = new Error(`token=${SECRET_TEXT}`);
+    await h.compute(SECRET_APP);
+    const sum = h.state(SECRET_APP).digest;
+    assert.ok(sum);
+    await h.ended();
+    assert.equal(h.logged(RUN_ENDED).length, ONE_CALL);
+    assert.ok(h.lines.length > ONE_CALL);
+    for (const line of h.lines) assert.ok(!line.includes(SECRET_TEXT), line);
+    const file = h.proofOf(sum, SECRET_APP);
+    assert.ok(file);
+    assert.equal(file.tail, REDACTED_TAIL);
+  },
+);
+
+test(
+  "the proof container and the slot of a ready group get no secret",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const h = secretHarness(t);
+    h.open();
+    h.proveResults = PASSING_RESULTS;
+    await h.compute(SECRET_APP);
+    await h.ended();
+    assert.equal(h.state(SECRET_APP).status, EnvironmentStatus.Ready);
+    const slot = await h.onboarding.slotImage(
+      PROJECT,
+      WORKER_IDENTITY,
+      AbortSignal.timeout(TEST_TIMEOUT_MS),
+    );
+    const seen = JSON.stringify([h.proveInputs, slot, h.events]);
+    for (const forbidden of [SECRET_TEXT, "secrets", "--secret"])
+      assert.ok(!seen.includes(forbidden), forbidden);
+    assert.ok(seen.includes(SECRET_APP.resource_identity));
   },
 );

@@ -365,7 +365,7 @@ export interface ImageBuildInput {
   commit: string;
   tag: string;
   document: Environment;
-  secrets: EnvironmentSecretFile[];
+  readonly secrets: ReadonlyArray<EnvironmentSecretFile>;
 }
 
 export type ImageBuildResult =

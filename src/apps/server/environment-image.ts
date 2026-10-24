@@ -92,6 +92,8 @@ const KANTHORD_PATH = "/usr/local/bin/kanthord";
 const TINI_PATH = "/usr/bin/tini";
 const TINI_STATIC_PATH = "/usr/bin/tini-static";
 const SHELL = "/bin/sh";
+const SECRETS_MOUNT = "/run/secrets";
+const NO_SECRETS = 0;
 const ENVIRONMENT_ASSIGNMENT = "=";
 const NOT_FOUND = -1;
 const VARIABLE_REFERENCE =
@@ -171,6 +173,7 @@ export interface LayerInput {
   readonly environment: ReadonlyMap<string, string>;
   readonly onCreate: readonly string[];
   readonly owner: string;
+  readonly secrets: ReadonlyArray<{ variable: string; file: string }>;
 }
 
 class BuildFailure extends Error {
@@ -365,7 +368,30 @@ function shellStep(script: string): string {
   return `RUN ${JSON.stringify([SHELL, "-c", script])}`;
 }
 
+function bySecretVariable(
+  first: { variable: string },
+  second: { variable: string },
+): number {
+  return first.variable < second.variable ? -1 : 1;
+}
+
+function secretStep(
+  script: string,
+  secrets: ReadonlyArray<{ variable: string }>,
+): string {
+  if (secrets.length === NO_SECRETS) return shellStep(script);
+  const mounts = secrets
+    .map(({ variable }) => `--mount=type=secret,id=${variable}`)
+    .join(" ");
+  const exports = secrets.map(
+    ({ variable }) =>
+      `export ${variable}="$(cat ${SECRETS_MOUNT}/${variable})"`,
+  );
+  return `RUN ${mounts} ${JSON.stringify([SHELL, "-c", [...exports, script].join("; ")])}`;
+}
+
 export function layerContainerfile(input: LayerInput): string {
+  const secrets = [...input.secrets].sort(bySecretVariable);
   const defaults = CACHE_DEFAULTS.filter(
     ([name]) => !input.environment.has(name),
   ).map(([name, directory]) => `ENV ${name}=${CACHE_MOUNT}/${directory}`);
@@ -381,7 +407,7 @@ export function layerContainerfile(input: LayerInput): string {
     ...defaults,
     ...variables,
     "WORKDIR /",
-    ...input.onCreate.map(shellStep),
+    ...input.onCreate.map((script) => secretStep(script, secrets)),
     `COPY --from=kanthord ${KANTHORD_PATH} ${KANTHORD_PATH}`,
     `COPY --from=kanthord ${TINI_STATIC_PATH} ${TINI_PATH}`,
     shellStep(PASSWD_SCRIPT),
@@ -604,7 +630,13 @@ export class EnvironmentImages implements Omit<
       const base = `${input.tag}${BASE_SUFFIX}`;
       const staging = `${input.tag}${UNCHECKED_SUFFIX}`;
       await this.buildBase(input, directory, base, signal);
-      await this.buildLayer(directory, base, staging, signal);
+      await this.buildLayer(
+        directory,
+        base,
+        staging,
+        [...input.secrets].sort(bySecretVariable),
+        signal,
+      );
       await this.check(staging, signal);
       await this.promote(input.tag, staging);
       return { outcome: ImageBuildOutcome.Built };
@@ -679,6 +711,7 @@ export class EnvironmentImages implements Omit<
     directory: string,
     base: string,
     staging: string,
+    secrets: ReadonlyArray<{ variable: string; file: string }>,
     signal: AbortSignal,
   ): Promise<void> {
     const inspected = await this.answer(["image", "inspect", base]);
@@ -706,6 +739,7 @@ export class EnvironmentImages implements Omit<
         environment: settings.environment,
         onCreate: settings.onCreate,
         owner: this.options.owner,
+        secrets,
       }),
     );
     const built = await runCommand(
@@ -716,6 +750,10 @@ export class EnvironmentImages implements Omit<
         join(layer, CONTAINERFILE),
         "--tag",
         staging,
+        ...secrets.flatMap(({ variable, file }) => [
+          "--secret",
+          `id=${variable},src=${file}`,
+        ]),
         "--label",
         `${OWNER_LABEL}=${this.options.owner}`,
         "--memory",
