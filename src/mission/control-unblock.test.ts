@@ -391,6 +391,57 @@ test("unblock checks attempt and revision before changing content; changed conte
   assert.equal(mission.version, SECOND_ATTEMPT);
 });
 
+test("a node update keeps the open attempt on its revision, and unblock pins the updated revision", async (t) => {
+  const h = controlHarness(t, IDENTITY);
+  h.store.transaction((tx) => {
+    openAttempt(tx, h.node_id, FIRST_ATTEMPT, h.actor, NOW);
+    setNodeState(tx, h.node_id, NodeState.Paused);
+  });
+  const read = () =>
+    h.invoke("node.get", {
+      params: { node_id: h.node_id },
+      query: {},
+      body: null,
+    });
+  const before = await read();
+  await h.invoke("node.update", {
+    params: { node_id: h.node_id },
+    query: {},
+    body: {
+      filename: before.filename,
+      content: { ...before.content, name: "New direction" },
+      tasks: [],
+      reason: "Redirect",
+      expected_revision: FIRST_ATTEMPT,
+      expected_mission_version: FIRST_ATTEMPT,
+    },
+  });
+  const updated = await read();
+  assert.equal(updated.visible_revision, SECOND_ATTEMPT);
+  assert.equal(updated.pinned_revision, FIRST_ATTEMPT);
+  const blocked = await h.invoke("node.block", {
+    params: { node_id: h.node_id },
+    query: {},
+    body: {
+      ...h.body(NodeState.Paused, FIRST_ATTEMPT),
+      expected_mission_version: SECOND_ATTEMPT,
+    },
+  });
+  assert.equal(blocked.node.pinned_revision, null);
+  const result = await h.invoke("node.unblock", {
+    params: { node_id: h.node_id },
+    query: {},
+    body: {
+      blocked_attempt: FIRST_ATTEMPT,
+      expected_revision: updated.visible_revision,
+      expected_mission_version: SECOND_ATTEMPT,
+    },
+  });
+  assert.equal(result.attempt?.attempt, SECOND_ATTEMPT);
+  assert.equal(result.attempt?.node_revision, SECOND_ATTEMPT);
+  assert.equal(result.node.pinned_revision, result.node.visible_revision);
+});
+
 test("unchanged content makes no revision and unsatisfied closure routes unblock to Pending", async (t) => {
   const h = controlHarness(t, IDENTITY);
   const target = createIdentity("node");
