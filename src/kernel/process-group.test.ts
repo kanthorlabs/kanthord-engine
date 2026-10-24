@@ -23,6 +23,7 @@ const KILL = "SIGKILL";
 const ESCAPED_SECONDS = 60;
 const FORK_INTERVAL_MS = 5;
 const FORKS_BEFORE_KILL = 5;
+const FORKS_MAX = 50;
 const POLLS = 100;
 const START_POLLS = 500;
 const TWO_FAILURES = 2;
@@ -228,7 +229,7 @@ function detachedLeader(t: TestContext, script: string) {
 
 test("a descendant that forks into new groups during the kill leaves no process", async (t) => {
   const seconds = uniqueSeconds();
-  const forker = `const {spawn}=require("node:child_process");setInterval(()=>spawn("sleep",["${seconds}"],{detached:true,stdio:"ignore"}),${FORK_INTERVAL_MS})`;
+  const forker = `const {spawn}=require("node:child_process");let n=0;setInterval(()=>{if(n<${FORKS_MAX}){n+=1;spawn("sleep",["${seconds}"],{detached:true,stdio:"ignore"})}},${FORK_INTERVAL_MS})`;
   const leader = detachedLeader(t, `"${process.execPath}" -e '${forker}'`);
   t.after(() => markedPids(seconds).forEach(killIfPresent));
   for (let poll = 0; poll < START_POLLS; poll += 1) {

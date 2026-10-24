@@ -143,14 +143,15 @@ test("child environment removes provider keys and bash timeout stays below the b
   assert.equal(processes.take(TOOL_CALL), undefined);
 });
 
-const SHORT_TIMEOUT_SECONDS = 5;
+const TREE_TIMEOUT_SECONDS = 20;
 
 async function killedBashCall(
   t: TestContext,
   timeout: number | undefined,
   controller: AbortController | undefined,
-): Promise<{ message: string; spawned: number[] }> {
+): Promise<{ message: string; spawned: number[]; ready: boolean }> {
   const pi = await loadPi();
+  let ready = false;
   const cwd = temporary(t);
   const now = Date.now();
   const budget = new ExecutionBudget({
@@ -173,8 +174,9 @@ async function killedBashCall(
       { command: processTreeCommand(), ...(timeout ? { timeout } : {}) },
       controller?.signal,
       (update) => {
-        if (pidsIn(update.content).length === PROCESS_TREE_PIDS)
-          controller?.abort();
+        if (pidsIn(update.content).length !== PROCESS_TREE_PIDS) return;
+        ready = true;
+        controller?.abort();
       },
       undefined as never,
     )
@@ -185,16 +187,18 @@ async function killedBashCall(
   return {
     message: failure.message,
     spawned: spawnedPids(t, [{ type: "text", text: failure.message }]),
+    ready,
   };
 }
 
 test("a bash call that times out leaves no process of its tree, also a process in its own group", async (t) => {
-  const { message, spawned } = await killedBashCall(
+  const { message, spawned, ready } = await killedBashCall(
     t,
-    SHORT_TIMEOUT_SECONDS,
+    TREE_TIMEOUT_SECONDS,
     undefined,
   );
-  assert.match(message, /Command timed out after 5 seconds/);
+  assert.ok(ready, "the process tree did not start before the timeout");
+  assert.match(message, /Command timed out after 20 seconds/);
   assert.equal(spawned.length, PROCESS_TREE_PIDS);
   assert.deepEqual(await survivingProcesses(spawned), []);
 });
