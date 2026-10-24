@@ -11,8 +11,10 @@ const PROC_DIRECTORY = "/proc";
 const STAT_PPID_FIELD = 1;
 const STAT_GROUP_FIELD = 2;
 const PS_COLUMNS = 3;
+const STAT_NAME_GAP = 2;
+const STAT_NAME_START = 0;
 
-interface ProcessRow {
+export interface ProcessRow {
   pid: number;
   ppid: number;
   group: number;
@@ -27,7 +29,7 @@ export function killProcessGroup(leader: number): void {
 export function killProcessTree(leader: number): void {
   assert.ok(Number.isSafeInteger(leader) && leader > FIRST_USER_PID);
   assert.ok(leader !== process.pid && leader !== process.ppid);
-  const rows = processTable();
+  const rows = tableOrLeaderKill(leader);
   const own = new Set(
     rows
       .filter((row) => row.pid === process.pid || row.pid === process.ppid)
@@ -38,6 +40,15 @@ export function killProcessTree(leader: number): void {
   );
   const [failure] = [...new Set(groups)].flatMap((group) => killGroup(group));
   if (failure !== undefined) throw failure;
+}
+
+function tableOrLeaderKill(leader: number): ProcessRow[] {
+  try {
+    return processTable();
+  } catch (error) {
+    killGroup(leader);
+    throw error;
+  }
 }
 
 function killGroup(group: number): unknown[] {
@@ -79,16 +90,21 @@ function procTable(): ProcessRow[] {
     .filter((name) => /^\d+$/.test(name))
     .flatMap((name) => {
       const stat = procStat(name);
-      if (stat === null) return [];
-      const fields = stat.slice(stat.lastIndexOf(")") + 2).split(" ");
-      return [
-        {
-          pid: Number(name),
-          ppid: Number(fields[STAT_PPID_FIELD]),
-          group: Number(fields[STAT_GROUP_FIELD]),
-        },
-      ];
+      return stat === null ? [] : [procStatRow(stat)];
     });
+}
+
+export function procStatRow(stat: string): ProcessRow {
+  const name = stat.lastIndexOf(")");
+  assert.ok(name > STAT_NAME_START);
+  const fields = stat.slice(name + STAT_NAME_GAP).split(" ");
+  const row = {
+    pid: Number.parseInt(stat, 10),
+    ppid: Number(fields[STAT_PPID_FIELD]),
+    group: Number(fields[STAT_GROUP_FIELD]),
+  };
+  assert.ok(Object.values(row).every(Number.isSafeInteger));
+  return row;
 }
 
 function procStat(pid: string): string | null {
