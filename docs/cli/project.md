@@ -640,6 +640,7 @@ The environment has these effects:
 - The claim skips a node whose repository binding holds an environment that is not `none` or `ready`. The node waits.
 - `environment rebuild` discards the proof file and the images of the digest, pulls the base image and runs the environment again. It answers the state of the group with the status of the new run. During an active run of the group, it answers `409 project.environment.run_active`.
 - A stored environment wins over the devcontainer files of the other repository bindings. While one binding stores an environment, the worker runs no repository devcontainer setup for the other bindings.
+- The component reads a `pending` record again each 60 s. A failed read logs `project.onboarding.read_failed` at the `error` level with `project_id`, `binding`, `resource_identity`, `reason` and `failure_reason`. `failure_reason` is null for a failure other than an SSH read. A failed read with the `reason` of the last logged record of the group logs no record. A successful read, a change of the binding and a removal of the binding clear the last logged record, so the next failed read logs again.
 - When the read of the remote fails at a slot start, the slot uses the environment of the last read of the same binding revisions.
 - At the `server` and the `worker` placements, only the setup commands `updateContentCommand` and `postCreateCommand` of a stored environment apply. `image`, `build`, `features`, `onCreateCommand`, `containerEnv` and `remoteEnv` have no effect there. The repository devcontainer, the `detected` document and the `universal` document apply only at the `container` placement.
 - The setup writes only inside the checkout, `$HOME` and `/tmp`, because the slot root is read-only. A system install belongs in `onCreateCommand`, which runs at the build as root.
@@ -657,7 +658,7 @@ The environment has these effects:
 - `tag`: the image tag of the digest at `image`, or null.
 - `run_started_at`: the start time of the active run, or null.
 - `step_started_at`: the start time of the active step of the run, or null.
-- `reason`: the message of the last failed read or run, or null.
+- `reason`: the message of the last failed read or run, or null. The message of a failed SSH read ends with `The failure reason is <failure_reason>.`, where `<failure_reason>` is a git value of the [failure reason list](#binding-verify).
 - `failure`: the class, origin, execution, command, exit code, output tail, reproduce command and end time of a failed proof, or null.
 - `checks`: the command and the exit code of each check of the last proof.
 - `repairs`: the number of repairs that the proof file records.

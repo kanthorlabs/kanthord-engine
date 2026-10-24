@@ -1004,6 +1004,120 @@ test("a failed read after a successful read keeps the status and the digest", as
   assert.equal(h.state().reason, null);
 });
 
+const READ_FAILED = "project.onboarding.read_failed";
+const SSH_READ_FAILED = "Repository SSH read failed.";
+const KEY_REFUSED = "key_refused";
+const SSH_UNREACHABLE_STATUS = 422;
+const ERROR_LEVEL = 50;
+const TWO_RECORDS = 2;
+
+function sshReadError(failureReason: string = KEY_REFUSED): OperationError {
+  return new OperationError(
+    SSH_UNREACHABLE_STATUS,
+    ProjectErrorCode.RepositorySshUnreachable,
+    SSH_READ_FAILED,
+    { failure_reason: failureReason },
+  );
+}
+
+test("a failed SSH read carries the failure reason into the reason", async (t) => {
+  const h = new Harness(t);
+  h.resolution = sshReadError();
+  await h.compute();
+  assert.equal(h.state().status, EnvironmentStatus.Pending);
+  assert.equal(
+    h.state().reason,
+    `${SSH_READ_FAILED} The failure reason is ${KEY_REFUSED}.`,
+  );
+});
+
+test("a failed read logs one read_failed record until the reason changes", async (t) => {
+  const h = new Harness(t);
+  h.resolution = sshReadError();
+  await h.compute();
+  await h.compute();
+  assert.deepEqual(
+    h
+      .logged(READ_FAILED)
+      .map(
+        ({
+          level,
+          project_id,
+          binding,
+          resource_identity,
+          reason,
+          failure_reason,
+        }) => ({
+          level,
+          project_id,
+          binding,
+          resource_identity,
+          reason,
+          failure_reason,
+        }),
+      ),
+    [
+      {
+        level: ERROR_LEVEL,
+        project_id: PROJECT,
+        binding: APP_NAME,
+        resource_identity: APP.resource_identity,
+        reason: `${SSH_READ_FAILED} The failure reason is ${KEY_REFUSED}.`,
+        failure_reason: KEY_REFUSED,
+      },
+    ],
+  );
+  h.resolution = new Error(TRANSIENT);
+  await h.compute();
+  await h.compute();
+  const records = h.logged(READ_FAILED);
+  assert.equal(records.length, TWO_RECORDS);
+  assert.equal(records[1]?.reason, TRANSIENT);
+  assert.equal(records[1]?.failure_reason, null);
+});
+
+test("a read that answers an invalid document logs a read_failed record", async (t) => {
+  const h = new Harness(t);
+  h.resolution = { ...REPOSITORY, reason: INVALID_DOCUMENT };
+  await h.compute();
+  assert.equal(h.state().status, EnvironmentStatus.Pending);
+  const [record] = h.logged(READ_FAILED);
+  assert.equal(record?.reason, INVALID_DOCUMENT);
+  assert.equal(record?.failure_reason, null);
+});
+
+test("a binding change re-arms the read_failed record", async (t) => {
+  const h = new Harness(t);
+  h.resolution = sshReadError();
+  await h.compute();
+  assert.equal(h.logged(READ_FAILED).length, ONE_CALL);
+  h.bindings = facts(
+    [{ ...APP, binding_id: RENAMED_BINDING_ID }],
+    [container("app")],
+  );
+  h.onboarding.bindingsChanged(PROJECT);
+  await h.until(() => h.logged(READ_FAILED).length === TWO_RECORDS);
+  const [, record] = h.logged(READ_FAILED);
+  assert.equal(
+    record?.reason,
+    `${SSH_READ_FAILED} The failure reason is ${KEY_REFUSED}.`,
+  );
+});
+
+test("a successful read logs nothing and rearms the read_failed record", async (t) => {
+  const h = new Harness(t);
+  h.existing.add(h.provedOf(h.digest()));
+  h.resolution = sshReadError();
+  await h.compute();
+  h.resolution = REPOSITORY;
+  await h.compute();
+  assert.equal(h.state().status, EnvironmentStatus.Ready);
+  assert.equal(h.logged(READ_FAILED).length, ONE_CALL);
+  h.resolution = sshReadError();
+  await h.compute();
+  assert.equal(h.logged(READ_FAILED).length, TWO_RECORDS);
+});
+
 test("states answers the fields of an environment state in binding name order", async (t) => {
   const h = new Harness(t);
   h.bindings = facts([DOCS, APP], []);

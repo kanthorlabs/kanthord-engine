@@ -11,6 +11,7 @@ import {
 } from "../kernel/devcontainer.ts";
 import { OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
+import { isObject, isString } from "../kernel/values.ts";
 import { SpanStatus, type ServerTrace } from "../tracking/contract.ts";
 import {
   ProjectErrorCode,
@@ -85,6 +86,7 @@ const RUN_STARTED = "project.onboarding.run_started";
 const RUN_ENDED = "project.onboarding.run_ended";
 const RUN_FAILED = "project.onboarding.run_failed";
 const CACHE_COLLECTION_FAILED = "project.onboarding.cache_collection_failed";
+const READ_FAILED = "project.onboarding.read_failed";
 const TRACE_ID_BYTES = 16;
 const SPAN_ID_BYTES = 8;
 const REDACTED = "[redacted]";
@@ -213,6 +215,11 @@ export interface GroupRecord {
   environment_from_agent: boolean;
 }
 
+interface ReadFailure {
+  reason: string;
+  failure_reason: string | null;
+}
+
 function groupNamed(
   environment: string | null,
   repositories: readonly RepositoryGroup[],
@@ -258,6 +265,26 @@ function keyOf(projectId: string, resourceIdentity: string): string {
 
 function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function failureReasonOf(error: unknown): string | null {
+  if (!(error instanceof OperationError)) return null;
+  const { details } = error;
+  if (!isObject(details) || Array.isArray(details)) return null;
+  const failureReason = details.failure_reason;
+  return isString(failureReason) ? failureReason : null;
+}
+
+function readFailureOf(error: unknown): ReadFailure {
+  const failureReason = failureReasonOf(error);
+  const message = messageOf(error);
+  return {
+    reason:
+      failureReason === null
+        ? message
+        : `${message} The failure reason is ${failureReason}.`,
+    failure_reason: failureReason,
+  };
 }
 
 function redact(text: string, values: readonly string[]): string {
@@ -415,6 +442,7 @@ export class Onboarding {
   private readonly again = new Set<string>();
   private readonly marked = new Set<string>();
   private readonly retries = new Map<string, NodeJS.Timeout>();
+  private readonly loggedReadFailures = new Map<string, string>();
   private readonly queue: string[] = [];
   private draining: Promise<void> | null = null;
   private readonly listeners = new Set<() => void>();
@@ -648,6 +676,7 @@ export class Onboarding {
     record.binding_name = group.binding_name;
     record.environment_from_agent = false;
     record.read_succeeded = false;
+    this.loggedReadFailures.delete(key);
     if (record.run_started_at === null) {
       record.step = null;
       record.step_started_at = null;
@@ -658,6 +687,7 @@ export class Onboarding {
 
   private dropRecord(key: string): void {
     this.records.delete(key);
+    this.loggedReadFailures.delete(key);
     const index = this.queue.indexOf(key);
     if (index !== NOT_QUEUED) this.queue.splice(index, 1);
     this.clearRetry(key);
@@ -720,12 +750,16 @@ export class Onboarding {
     const wasClaimable =
       previous !== undefined && claimable(statusOf(previous));
     let next: GroupRecord;
+    let failure: ReadFailure | null = null;
     try {
       next = await this.read(projectId, group, target, previous);
+      if (!next.read_succeeded && next.reason !== null)
+        failure = { reason: next.reason, failure_reason: null };
     } catch (error) {
+      failure = readFailureOf(error);
       next = {
         ...(previous ?? emptyRecord(projectId, group, target)),
-        reason: messageOf(error),
+        reason: failure.reason,
       };
     }
     const current = this.records.get(key);
@@ -734,6 +768,7 @@ export class Onboarding {
       return;
     }
     this.records.set(key, next);
+    this.logReadFailure(key, next, failure);
     this.schedule(key, next);
     this.retryWhilePending(key, next);
     this.notify();
@@ -986,6 +1021,29 @@ export class Onboarding {
         status: failure === null ? SpanStatus.Ok : SpanStatus.Error,
         error_type: failure,
       }),
+    );
+  }
+
+  private logReadFailure(
+    key: string,
+    record: GroupRecord,
+    failure: ReadFailure | null,
+  ): void {
+    if (failure === null) {
+      this.loggedReadFailures.delete(key);
+      return;
+    }
+    if (this.loggedReadFailures.get(key) === failure.reason) return;
+    this.loggedReadFailures.set(key, failure.reason);
+    this.dependencies.logger.error(
+      {
+        project_id: record.project_id,
+        binding: record.binding_name,
+        resource_identity: record.resource_identity,
+        reason: failure.reason,
+        failure_reason: failure.failure_reason,
+      },
+      READ_FAILED,
     );
   }
 
