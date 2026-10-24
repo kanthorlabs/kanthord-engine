@@ -4965,7 +4965,7 @@ function instructionFixture(
   behavior: {
     commits?: Array<string | null>;
     texts?: InstructionTexts;
-    states?: string[];
+    states?: RepositoryFileState[];
     resolveFails?: boolean;
     resolveFailure?: Error;
     address?: string;

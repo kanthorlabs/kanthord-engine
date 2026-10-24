@@ -592,6 +592,13 @@ export class Onboarding {
       target,
       this.context,
     );
+    if (resolved.reason !== undefined)
+      return {
+        ...emptyRecord(projectId, group, target),
+        source: resolved.source,
+        commit: resolved.commit,
+        reason: resolved.reason,
+      };
     const atImage = target === EnvironmentTarget.Image;
     const sum = environmentDigest({
       resource_identity: group.resource_identity,
@@ -772,9 +779,12 @@ export class Onboarding {
       resource_identity: record.resource_identity,
       commit,
     };
+    const checksOnly =
+      record.target !== EnvironmentTarget.Image &&
+      record.source === EnvironmentSource.Detected;
     const proof = {
       ...base,
-      setup: setupScriptsOf(document),
+      setup: checksOnly ? [] : setupScriptsOf(document),
       checks: checksOf(document),
     };
     if (record.target !== EnvironmentTarget.Image) {

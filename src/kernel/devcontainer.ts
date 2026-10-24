@@ -7,6 +7,8 @@ export const DEVCONTAINER_DIRECTORY = ".devcontainer";
 export const EnvironmentSource = {
   Stored: "stored",
   Repository: "repository",
+  Detected: "detected",
+  Universal: "universal",
   None: "none",
 } as const;
 export type EnvironmentSource =

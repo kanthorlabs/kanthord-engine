@@ -1,13 +1,39 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { posix } from "node:path";
 import { test, type TestContext } from "node:test";
 import { setImmediate as turn } from "node:timers/promises";
 import pino from "pino";
-import type { Environment } from "../kernel/devcontainer.ts";
+import { IdentityKind } from "../kernel/caller.ts";
+import {
+  DEVCONTAINER_FILE,
+  EnvironmentSource,
+  environmentSchema,
+  type Environment,
+} from "../kernel/devcontainer.ts";
 import { OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
+import { IN_MEMORY_DATABASE, Store } from "../kernel/store.ts";
 import { temporary } from "../kernel/test-support.ts";
-import { ProjectErrorCode, WorkerPlacement } from "./contract.ts";
-import type { GroupResolution } from "./environment.ts";
+import {
+  RepositoryFileState,
+  type RepositoryFile,
+} from "../repository/contract.ts";
+import {
+  BindingKind,
+  PROJECT_SERVICE_NAME,
+  ProjectErrorCode,
+  WorkerPlacement,
+  bindingSetWriteInputSchema,
+  type RepositoryFiles,
+} from "./contract.ts";
+import {
+  DETECTION_PATHS,
+  WORKFLOW_DIRECTORY,
+  WORKFLOW_FILES_MAX,
+  detectEnvironment,
+} from "./detection.ts";
+import { ProjectEnvironments, type GroupResolution } from "./environment.ts";
 import {
   BASE_SUFFIX,
   EnvironmentStatus,
@@ -32,9 +58,16 @@ import {
   type BindingFacts,
   type EnvironmentFailedInput,
   type GroupRecord,
+  type OnboardingDependencies,
   type RepositoryGroup,
   type WorkerBindingFacts,
 } from "./onboarding.ts";
+import { projectMigrations } from "./migrations.ts";
+import {
+  insertProject,
+  readCurrentBindingSet,
+  writeBindingSet,
+} from "./store.ts";
 
 const PROJECT = "project_1";
 const APP: RepositoryGroup = {
@@ -82,6 +115,7 @@ const PROOF_CRASHED = "proof crashed";
 const HOST_CRASHED = "host crashed";
 const DEADLINE_TAIL = "the run deadline of 30 minutes passed";
 const TWO_CALLS = 2;
+const THREE_DIGESTS = 3;
 const RUNTIME_NAME = "podman";
 const UNTIL_ATTEMPTS = 1000;
 const SETUP_EXIT = 3;
@@ -168,6 +202,8 @@ class Deferred {
   }
 }
 
+type ResolveGroup = OnboardingDependencies["resolveGroup"];
+
 class Harness {
   bindings: BindingFacts = facts([APP], [container("app")]);
   workerEnvironment: string | null = "app";
@@ -194,7 +230,7 @@ class Harness {
   readonly proofs: ProofFiles;
   readonly onboarding: Onboarding;
 
-  constructor(t: TestContext) {
+  constructor(t: TestContext, resolve?: ResolveGroup) {
     this.proofs = new ProofFiles(temporary(t));
     const runtime = {
       runtimeName: RUNTIME_NAME,
@@ -250,12 +286,14 @@ class Harness {
         projectId === PROJECT ? this.bindings : facts([], []),
       workerEnvironmentOf: () => this.workerEnvironment,
       projectIds: () => [PROJECT],
-      resolveGroup: async (bindingId, target) => {
-        this.resolveCalls.push({ bindingId, target });
-        await this.resolveGate?.promise;
-        if (this.resolution instanceof Error) throw this.resolution;
-        return this.resolution;
-      },
+      resolveGroup:
+        resolve ??
+        (async (bindingId, target) => {
+          this.resolveCalls.push({ bindingId, target });
+          await this.resolveGate?.promise;
+          if (this.resolution instanceof Error) throw this.resolution;
+          return this.resolution;
+        }),
       runtime,
       proofs: this.proofs,
       slotImage: SLOT_IMAGE,
@@ -1638,4 +1676,316 @@ test("stop aborts the active run, clears the timer and rejects each slotImage wa
   t.mock.timers.tick(PENDING_RETRY_MS * TWO_CALLS);
   await turn();
   assert.equal(pending.resolveCalls.length, ONE_CALL);
+});
+
+const UNIVERSAL_IMAGE = "mcr.microsoft.com/devcontainers/base:bookworm";
+const REPOSITORY_ADDRESS = "git@github.com:owner/repo.git";
+const PACKAGE_JSON = "package.json";
+const PACKAGE_LOCK = "package-lock.json";
+const WORKFLOW_FILE = `${WORKFLOW_DIRECTORY}/ci.yml`;
+const NODE_PACKAGE = '{"engines":{"node":"22"}}';
+const ADDED_PACKAGE = '{"engines":{"node":"20"}}';
+const WORKFLOW_TEXT = (version: string) =>
+  `jobs:\n  test:\n    steps:\n      - uses: actions/setup-node@v4\n        with:\n          node-version: ${version}\n`;
+const BROKEN_DEVCONTAINER = "{";
+const UNIVERSAL_FILE = new URL(
+  "../../static/environment/universal.json",
+  import.meta.url,
+);
+const REPOSITORY_SERVICE = {
+  kind: IdentityKind.Service,
+  service: PROJECT_SERVICE_NAME,
+} as const;
+
+class FakeRepository {
+  files = new Map<string, string>();
+  reads: Array<{ commit: string; paths: string[] }> = [];
+  lists: Array<{
+    commit: string;
+    directory: string;
+    limit: number;
+  }> = [];
+
+  readPaths(): string[] {
+    return this.reads.flatMap((read) => read.paths);
+  }
+
+  asRepositoryFiles(): RepositoryFiles {
+    const unexpected = (): never => {
+      throw new Error("Unexpected repository call.");
+    };
+    return {
+      resolveBranchCommit: async () => "c1",
+      readFilesAtCommit: async (_address, commit, paths) => {
+        this.reads.push({ commit, paths: [...paths] });
+        return paths.map((path) => {
+          const text = this.files.get(path) ?? null;
+          return {
+            path,
+            state:
+              text === null
+                ? RepositoryFileState.Absent
+                : RepositoryFileState.Present,
+            text,
+          };
+        });
+      },
+      listFilesAtCommit: async (_address, commit, directory, limit) => {
+        this.lists.push({ commit, directory, limit });
+        return [...this.files.keys()]
+          .filter((path) => posix.dirname(path) === directory)
+          .sort()
+          .slice(0, limit);
+      },
+      readObjectIds: unexpected,
+      cloneSnapshot: unexpected,
+    };
+  }
+}
+
+function resolvingHarness(
+  t: TestContext,
+  repository: FakeRepository,
+  workers: (name: string) => readonly WorkerBindingFacts[],
+) {
+  const store = new Store(IN_MEMORY_DATABASE);
+  t.after(() => store.close());
+  store.migrate([{ service: "project", migrations: projectMigrations }]);
+  const group = store.transaction((tx) => {
+    const project = insertProject(tx, "alpha");
+    writeBindingSet(
+      tx,
+      project.id,
+      project.binding_set_version,
+      new Map(
+        Object.entries(
+          bindingSetWriteInputSchema.shape.bindings.parse({
+            repo: {
+              kind: BindingKind.Repository,
+              config: {
+                available: true,
+                platform: "github",
+                address: REPOSITORY_ADDRESS,
+                strategy: { base_branch: "main" },
+                ssh_credential: "ssh-github.com",
+                credential: "github-key",
+              },
+            },
+          }),
+        ),
+      ),
+    );
+    const binding = readCurrentBindingSet(tx, project.id).get("repo");
+    assert.ok(binding);
+    return {
+      binding_id: binding.id,
+      binding_name: "repo",
+      resource_identity: binding.resource_identity,
+    };
+  });
+  const environments = new ProjectEnvironments({
+    store,
+    repositoryFiles: repository.asRepositoryFiles(),
+    identity: REPOSITORY_SERVICE,
+    sshAccess: () => ({ address: REPOSITORY_ADDRESS, ssh: {} as never }),
+    writeBindings: () => {
+      throw new Error("Unexpected binding write.");
+    },
+  });
+  const h = new Harness(t, (bindingId, target, context) =>
+    environments.resolveGroup(bindingId, target, context),
+  );
+  h.bindings = facts([group], workers(group.binding_name));
+  h.workerEnvironment = group.binding_name;
+  return { h, group };
+}
+
+const imageWorkers = (name: string) => [container(name)];
+const hostWorkers = () => [server];
+const remoteWorkers = () => [remoteWorker];
+
+function textOnlyFiles(
+  paths: readonly string[],
+  files: Map<string, string>,
+): RepositoryFile[] {
+  return paths
+    .map((path) => ({
+      path,
+      state: files.has(path)
+        ? RepositoryFileState.Present
+        : RepositoryFileState.Absent,
+      text: files.get(path) ?? null,
+    }))
+    .sort((first, second) => (first.path < second.path ? -1 : 1));
+}
+
+test("an image target without a stored environment or a devcontainer resolves the detected source", async (t) => {
+  const repository = new FakeRepository();
+  repository.files.set(PACKAGE_JSON, NODE_PACKAGE);
+  repository.files.set(PACKAGE_LOCK, "{}");
+  const { h, group } = resolvingHarness(t, repository, imageWorkers);
+  await h.compute(group);
+  assert.equal(h.state(group).source, EnvironmentSource.Detected);
+  await h.until(() => h.events.includes("build"));
+  const detected = detectEnvironment(
+    textOnlyFiles([...DETECTION_PATHS], repository.files) as Parameters<
+      typeof detectEnvironment
+    >[0],
+  );
+  assert.ok(detected);
+  assert.deepEqual(h.buildInputs[0]?.document, detected.document);
+});
+
+test("an image target with a repository devcontainer reads no detection input", async (t) => {
+  const repository = new FakeRepository();
+  repository.files.set(DEVCONTAINER_FILE, `{"image":"${BASE}"}`);
+  repository.files.set(PACKAGE_JSON, NODE_PACKAGE);
+  const { h, group } = resolvingHarness(t, repository, imageWorkers);
+  await h.compute(group);
+  assert.equal(h.state(group).source, EnvironmentSource.Repository);
+  assert.deepEqual(repository.readPaths(), [DEVCONTAINER_FILE]);
+  assert.equal(repository.lists.length, NO_CALLS);
+});
+
+test("an image target keeps the repository source and the reason of a devcontainer that fails to parse", async (t) => {
+  const repository = new FakeRepository();
+  repository.files.set(DEVCONTAINER_FILE, BROKEN_DEVCONTAINER);
+  repository.files.set(PACKAGE_JSON, NODE_PACKAGE);
+  const { h, group } = resolvingHarness(t, repository, imageWorkers);
+  await h.compute(group);
+  const state = h.state(group);
+  assert.equal(state.source, EnvironmentSource.Repository);
+  assert.match(
+    state.reason ?? "",
+    /^\.devcontainer\/devcontainer\.json: invalid JSON/,
+  );
+  assert.equal(state.status, EnvironmentStatus.Pending);
+  assert.deepEqual(repository.readPaths(), [DEVCONTAINER_FILE]);
+  assert.equal(repository.lists.length, NO_CALLS);
+});
+
+test("an image target without a manifest resolves the universal source", async (t) => {
+  const repository = new FakeRepository();
+  const { h, group } = resolvingHarness(t, repository, imageWorkers);
+  await h.compute(group);
+  assert.equal(h.state(group).source, EnvironmentSource.Universal);
+  await h.until(() => h.events.includes("build"));
+  assert.deepEqual(
+    h.buildInputs[0]?.document,
+    JSON.parse(readFileSync(UNIVERSAL_FILE, "utf8")),
+  );
+});
+
+test("a host target proves only the checks of a detected source", async (t) => {
+  const repository = new FakeRepository();
+  repository.files.set("go.mod", "module example.com/app\n\ngo 1.25\n");
+  const { h, group } = resolvingHarness(t, repository, hostWorkers);
+  await h.compute(group);
+  assert.equal(h.state(group).source, EnvironmentSource.Detected);
+  await h.until(() => h.proveInputs.length === ONE_CALL);
+  assert.deepEqual(h.proveInputs[0]?.checks, ["go version"]);
+  assert.deepEqual(h.proveInputs[0]?.setup, []);
+  assert.deepEqual(h.events, ["proveOnHost"]);
+});
+
+test("a host target ignores the repository devcontainer", async (t) => {
+  const repository = new FakeRepository();
+  repository.files.set(DEVCONTAINER_FILE, `{"image":"${BASE}"}`);
+  const { h, group } = resolvingHarness(t, repository, hostWorkers);
+  await h.compute(group);
+  assert.equal(h.state(group).source, EnvironmentSource.None);
+  assert.ok(!repository.readPaths().includes(DEVCONTAINER_FILE));
+});
+
+test("a remote target resolves the detected source and starts no run", async (t) => {
+  const repository = new FakeRepository();
+  repository.files.set("Cargo.toml", '[package]\nname = "app"\n');
+  const { h, group } = resolvingHarness(t, repository, remoteWorkers);
+  await h.compute(group);
+  assert.equal(h.state(group).source, EnvironmentSource.Detected);
+  assert.equal(h.state(group).status, EnvironmentStatus.None);
+  assert.deepEqual(h.events, [`wake ${PROJECT}`]);
+  const digest = h.state(group).digest;
+  assert.ok(digest);
+  h.onboarding.environmentFailed({
+    project_id: PROJECT,
+    execution_id: EXECUTION_ID,
+    resource_identities: [group.resource_identity],
+    stop: { code: SETUP_FAILED, detail: BOOM },
+    digests: { [group.resource_identity]: digest },
+  });
+  assert.equal(h.state(group).status, EnvironmentStatus.Failed);
+});
+
+test("the digest changes with the text of a manifest and of a workflow file", async (t) => {
+  const repository = new FakeRepository();
+  repository.files.set(PACKAGE_JSON, NODE_PACKAGE);
+  repository.files.set(WORKFLOW_FILE, WORKFLOW_TEXT("22"));
+  const { h, group } = resolvingHarness(t, repository, remoteWorkers);
+  await h.compute(group);
+  const first = h.state(group).digest;
+  assert.deepEqual(repository.lists, [
+    { commit: "c1", directory: WORKFLOW_DIRECTORY, limit: WORKFLOW_FILES_MAX },
+  ]);
+  repository.files.set(PACKAGE_JSON, ADDED_PACKAGE);
+  await h.compute(group);
+  const second = h.state(group).digest;
+  repository.files.set(WORKFLOW_FILE, WORKFLOW_TEXT("20"));
+  await h.compute(group);
+  const third = h.state(group).digest;
+  assert.ok(first && second && third);
+  assert.equal(new Set([first, second, third]).size, THREE_DIGESTS);
+});
+
+test("the digest input lists every read file in path order", async (t) => {
+  const repository = new FakeRepository();
+  repository.files.set(PACKAGE_JSON, NODE_PACKAGE);
+  repository.files.set(WORKFLOW_FILE, WORKFLOW_TEXT("22"));
+  const { h, group } = resolvingHarness(t, repository, remoteWorkers);
+  await h.compute(group);
+  const detected = detectEnvironment(
+    textOnlyFiles([...DETECTION_PATHS, WORKFLOW_FILE], repository.files),
+  );
+  assert.ok(detected);
+  const files = textOnlyFiles(
+    [...DETECTION_PATHS, WORKFLOW_FILE],
+    repository.files,
+  );
+  assert.equal(
+    h.state(group).digest,
+    environmentDigest({
+      resource_identity: group.resource_identity,
+      target: EnvironmentTarget.Remote,
+      source: EnvironmentSource.Detected,
+      document: detected.document,
+      files,
+      base_image: null,
+      slot_image: null,
+      version: VERSION,
+    }),
+  );
+});
+
+test("the universal environment passes the schema and holds the pinned stacks", () => {
+  const document = JSON.parse(readFileSync(UNIVERSAL_FILE, "utf8"));
+  assert.ok(environmentSchema.safeParse(document).success);
+  assert.equal(document.image, UNIVERSAL_IMAGE);
+  const features = document.features as Record<string, { version: string }>;
+  for (const name of ["node", "python", "go", "java"])
+    assert.ok(
+      features[`ghcr.io/devcontainers/features/${name}:1`]?.version,
+      name,
+    );
+  assert.deepEqual(Object.keys(document.containerEnv), [
+    "PATH",
+    "GOPATH",
+    "CARGO_HOME",
+  ]);
+  assert.deepEqual(document.customizations.kanthord.checks, [
+    "node --version",
+    "python --version",
+    "go version",
+    "java -version",
+  ]);
+  assert.equal(document.updateContentCommand, undefined);
 });
