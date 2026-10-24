@@ -441,6 +441,7 @@ export class Onboarding {
   private readonly computing = new Map<string, Promise<void>>();
   private readonly again = new Set<string>();
   private readonly marked = new Set<string>();
+  private readonly changedWhileReading = new Set<string>();
   private readonly retries = new Map<string, NodeJS.Timeout>();
   private readonly loggedReadFailures = new Map<string, string>();
   private readonly queue: string[] = [];
@@ -503,7 +504,8 @@ export class Onboarding {
   }
 
   bindingsChanged(projectId: string): void {
-    const { repositories } = this.dependencies.bindingsOf(projectId);
+    const facts = this.dependencies.bindingsOf(projectId);
+    const { repositories } = facts;
     const current = new Set(
       repositories.map((group) => group.resource_identity),
     );
@@ -514,7 +516,7 @@ export class Onboarding {
       )
         this.dropRecord(key);
     for (const group of repositories) {
-      this.markChanged(projectId, group);
+      this.markChanged(projectId, group, facts);
       this.trigger(projectId, group.resource_identity);
     }
     void this.collectCacheVolumes();
@@ -663,18 +665,27 @@ export class Onboarding {
     });
   }
 
-  private markChanged(projectId: string, group: RepositoryGroup): void {
+  private markChanged(
+    projectId: string,
+    group: RepositoryGroup,
+    facts: BindingFacts,
+  ): void {
     const key = keyOf(projectId, group.resource_identity);
     const record = this.records.get(key);
-    if (
-      record === undefined ||
-      (record.binding_id === group.binding_id &&
-        record.binding_name === group.binding_name)
-    )
+    if (record === undefined) {
+      if (this.computing.has(key)) this.changedWhileReading.add(key);
       return;
-    record.binding_id = group.binding_id;
-    record.binding_name = group.binding_name;
-    record.environment_from_agent = false;
+    }
+    const rowChanged =
+      record.binding_id !== group.binding_id ||
+      record.binding_name !== group.binding_name;
+    if (!rowChanged && targetOf(group, facts) === record.target) return;
+    if (this.computing.has(key)) this.changedWhileReading.add(key);
+    if (rowChanged) {
+      record.binding_id = group.binding_id;
+      record.binding_name = group.binding_name;
+      record.environment_from_agent = false;
+    }
     record.read_succeeded = false;
     this.loggedReadFailures.delete(key);
     if (record.run_started_at === null) {
@@ -733,6 +744,7 @@ export class Onboarding {
     resourceIdentity: string,
   ): Promise<void> {
     const key = keyOf(projectId, resourceIdentity);
+    this.changedWhileReading.delete(key);
     const facts = this.dependencies.bindingsOf(projectId);
     const group = facts.repositories.find(
       (candidate) => candidate.resource_identity === resourceIdentity,
@@ -761,6 +773,10 @@ export class Onboarding {
         ...(previous ?? emptyRecord(projectId, group, target)),
         reason: failure.reason,
       };
+    }
+    if (this.changedWhileReading.delete(key)) {
+      this.again.add(key);
+      return;
     }
     const current = this.records.get(key);
     if (current !== undefined && current.run_started_at !== null) {
