@@ -464,7 +464,7 @@ test("a check of every owner that exceeds its deadline carries deadline_exceeded
       owner,
       entry: entry(owner, {
         check: (_context, observe) => {
-          observe?.(SICK_REASON, ResourceFailureReason.Unclassified);
+          observe?.(SICK_REASON, ResourceFailureReason.Forbidden);
           return new Promise(() => {});
         },
       }),

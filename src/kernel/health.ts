@@ -165,7 +165,7 @@ export type ResourceObserver = (
   failure_reason: ResourceFailureReason,
 ) => void;
 
-export const CHECK_DEADLINE_EXCEEDED = "check deadline exceeded";
+const CHECK_DEADLINE_EXCEEDED = "check deadline exceeded";
 
 export function observeDeadline(
   context: Context,

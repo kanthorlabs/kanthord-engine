@@ -204,6 +204,7 @@ export class CopyChecks {
         "check failed before the remote call",
         ResourceFailureReason.Unclassified,
       );
+      observeDeadline(deadline, observe);
       return unknown;
     } finally {
       deadline.cancel();

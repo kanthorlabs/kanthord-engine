@@ -1964,6 +1964,35 @@ test("check answers deadline_exceeded when the probe exceeds the 10 s deadline",
   });
 });
 
+test("check keeps a definite answer that the probe returns after the 10 s deadline", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
+  const f = fixture();
+  t.after(() => f.store.close());
+  const set: CredentialPlatformSet = {
+    platforms: {
+      [TestPlatform.Key]: {
+        ...TEST_SET.platforms[TestPlatform.Key]!,
+        probe: async (_secret, _metadata, context, observe) => {
+          observe?.("status=401", ResourceFailureReason.Unauthorized);
+          await cancelled(context.signal);
+          return "unhealthy";
+        },
+      },
+    },
+  };
+  const pending = f.component.check(
+    set,
+    { platform: TestPlatform.Key, secret: apiSecret, metadata: null },
+    new CancellationContext(),
+  );
+  t.mock.timers.tick(CHECK_DEADLINE_MS);
+  assert.deepEqual(await pending, {
+    status: "unhealthy",
+    capability: NO_CAPABILITY,
+    failure_reason: ResourceFailureReason.Unauthorized,
+  });
+});
+
 test("check answers unclassified when the caller cancels the probe", async (t) => {
   const f = fixture();
   t.after(() => f.store.close());
