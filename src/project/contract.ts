@@ -611,6 +611,7 @@ export type BindingRevisionResult = {
 };
 export type RepositoryPolicy = {
   binding_id: string;
+  resource_identity: string;
   project_id: string;
   name: string;
   address: string;

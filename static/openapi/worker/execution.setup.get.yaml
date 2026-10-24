@@ -282,6 +282,9 @@ components:
                 maxLength: 34
                 pattern: ^binding_[0-7][0-9A-HJKMNP-TV-Z]{25}$
                 description: binding_ followed by a canonical 26-character uppercase ULID.
+              resource_identity:
+                type: string
+                minLength: 1
               name:
                 type: string
               address:
@@ -448,21 +451,30 @@ components:
                                     additionalProperties: {}
                                 additionalProperties: {}
                             additionalProperties: {}
+                          digest:
+                            type: string
+                            minLength: 1
                         required:
                           - source
                           - document
+                          - digest
                         additionalProperties: false
                       - type: object
                         properties:
                           source:
                             type: string
                             const: repository
+                          digest:
+                            type: string
+                            minLength: 1
                         required:
                           - source
+                          - digest
                         additionalProperties: false
                   - type: "null"
             required:
               - binding_id
+              - resource_identity
               - name
               - address
               - ssh_host_key

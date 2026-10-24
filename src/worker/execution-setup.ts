@@ -27,12 +27,21 @@ function executionEnvironment(
   stored: Environment | null,
   repositoryEnvironment: boolean,
   placement: InstancePlacement | null,
+  digest: string | null,
 ): ExecutionEnvironment {
-  if (stored !== null)
-    return { source: EnvironmentSource.Stored, document: stored };
-  return placement === InstancePlacement.Container && repositoryEnvironment
-    ? { source: EnvironmentSource.Repository }
-    : null;
+  if (stored === null && !isRepositorySource(repositoryEnvironment, placement))
+    return null;
+  assert.ok(digest, "A claimed environment must hold a computed digest.");
+  return stored !== null
+    ? { source: EnvironmentSource.Stored, document: stored, digest }
+    : { source: EnvironmentSource.Repository, digest };
+}
+
+function isRepositorySource(
+  repositoryEnvironment: boolean,
+  placement: InstancePlacement | null,
+): boolean {
+  return placement === InstancePlacement.Container && repositoryEnvironment;
 }
 const NO_AGENTS = 0;
 
@@ -48,6 +57,8 @@ export async function executionSetup(
     | "intentOf"
     | "repositoryPolicyOf"
     | "custodyHandover"
+    | "environmentClaimed"
+    | "environmentDigestOf"
   > & { schedulerClaims: Pick<SchedulerClaims, "agentSelectionsOf"> },
   worker: Pick<WorkerService, "declarationOf" | "pinnedAgentView">,
   caller: CallerContext,
@@ -170,6 +181,7 @@ export async function executionSetup(
         assert.ok(repository);
         return {
           binding_id: repository.binding_id,
+          resource_identity: repository.resource_identity,
           name: repository.name,
           address: repository.address,
           ssh_host_key: {
@@ -187,9 +199,15 @@ export async function executionSetup(
             repository.environment,
             repository.repository_environment,
             row.placement,
+            dependencies.environmentDigestOf(
+              claim.projectId,
+              repository.resource_identity,
+            ),
           ),
         };
       });
+    if (row.placement === InstancePlacement.Container && row.environment)
+      dependencies.environmentClaimed(claim.projectId, row.environment);
     return executionSetupSchema.parse({
       execution_id: claim.executionId,
       worker_name: row.worker_name,

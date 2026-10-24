@@ -78,6 +78,12 @@ const fakeCollaborations = {
       throw new Error("UNEXPECTED_COLLABORATION");
     },
   },
+  environmentClaimed: () => {
+    throw new Error("UNEXPECTED_COLLABORATION");
+  },
+  environmentDigestOf: () => {
+    throw new Error("UNEXPECTED_COLLABORATION");
+  },
   workerBindingRowOf: () => {
     throw new Error("UNEXPECTED_COLLABORATION");
   },
@@ -1852,6 +1858,12 @@ function poolFixture(t: TestContext, initialCount: number) {
     count: initialCount,
     placement: InstancePlacement.Server as InstancePlacement | null,
     generation: POOL_GENERATION,
+    environment: null as string | null,
+    others: [] as Array<{
+      resource_identity: string;
+      placement: InstancePlacement;
+      environment: string | null;
+    }>,
     failure: null as Error | null,
     executing: new Set<string>(),
   };
@@ -1861,6 +1873,7 @@ function poolFixture(t: TestContext, initialCount: number) {
     instance_count: state.count,
     placement: state.placement,
     worker_instances: [],
+    environment: state.environment,
     generation: state.generation,
   });
   const f = enablementFixture(t, {
@@ -1885,6 +1898,11 @@ function poolFixture(t: TestContext, initialCount: number) {
             project_id: POOL_PROJECT,
             resource_identity: POOL_RESOURCE,
           },
+          ...state.others.map((other) => ({
+            ...binding(),
+            ...other,
+            project_id: POOL_PROJECT,
+          })),
         ];
       },
       logger: pino({ level: "error" }, { write: (line) => logs.push(line) }),
@@ -2205,4 +2223,62 @@ test("start checks no runtime when no live binding holds the container placement
   f.host.statuses.set(PoolPlacement.Container, UNAVAILABLE_CONTAINER);
   assert.deepEqual(await loggedAfterStart(f), []);
   assert.equal(f.host.statusReads, NO_STATUS_READS);
+});
+
+const READY_ENVIRONMENT = "repository:github:Acme/app";
+const READY_TAG = "localhost/kanthord-env/app:ready";
+const STALE_TAG = "localhost/kanthord-env/app:stale";
+const OTHER_WORKER = "worker:kanthord:other";
+const SERVER_WORKER = "worker:kanthord:inline";
+
+test("environmentReady marks the slots to restart as draining before it returns and restarts each container slot of the environment on another image", (t) => {
+  const f = poolFixture(t, 3);
+  f.state.placement = InstancePlacement.Container;
+  f.state.environment = READY_ENVIRONMENT;
+  f.worker.startPool();
+  f.host.images.set(f.slotId(0), READY_TAG);
+  f.host.images.set(f.slotId(1), STALE_TAG);
+  f.worker.environmentReady(POOL_PROJECT, READY_ENVIRONMENT, READY_TAG);
+  assert.deepEqual(
+    f.host.restarted.map(({ client_id, draining }) => [client_id, draining]),
+    [
+      [f.slotId(1), true],
+      [f.slotId(2), true],
+    ],
+  );
+  assert.deepEqual(f.host.drained, []);
+});
+
+test("environmentReady keeps the slots of another repository binding and of a server binding", (t) => {
+  const f = poolFixture(t, 1);
+  f.state.placement = InstancePlacement.Container;
+  f.state.environment = READY_ENVIRONMENT;
+  f.state.others = [
+    {
+      resource_identity: OTHER_WORKER,
+      placement: InstancePlacement.Container,
+      environment: "repository:github:Acme/other",
+    },
+    {
+      resource_identity: SERVER_WORKER,
+      placement: InstancePlacement.Server,
+      environment: READY_ENVIRONMENT,
+    },
+  ];
+  f.worker.startPool();
+  f.worker.environmentReady(POOL_PROJECT, READY_ENVIRONMENT, READY_TAG);
+  assert.deepEqual(
+    f.host.restarted.map(({ resource_identity }) => resource_identity),
+    [POOL_RESOURCE],
+  );
+});
+
+test("environmentReady restarts no slot that is already draining", (t) => {
+  const f = poolFixture(t, 2);
+  f.state.placement = InstancePlacement.Container;
+  f.state.environment = READY_ENVIRONMENT;
+  f.worker.startPool();
+  f.worker.environmentReady(POOL_PROJECT, READY_ENVIRONMENT, READY_TAG);
+  f.worker.environmentReady(POOL_PROJECT, READY_ENVIRONMENT, READY_TAG);
+  assert.equal(f.host.restarted.length, POOL_TWO_STARTS);
 });

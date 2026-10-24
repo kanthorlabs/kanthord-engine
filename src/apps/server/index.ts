@@ -293,10 +293,7 @@ export function composeServices(options: {
     kanthordImage: containerImage,
     version: packageVersion(),
     stateDirectory: options.stateDirectory,
-    fallbackImage: containerImage,
     devcontainerCli: options.environmentDevcontainerCli,
-    slotEnvironment: (projectId, context) =>
-      project.slotEnvironment(projectId, context),
     exportRepository: (bindingId, commit, directory, context) =>
       project.exportRepository(bindingId, commit, directory, context),
   });
@@ -304,7 +301,8 @@ export function composeServices(options: {
     masterKey: options.config.master_key,
     image: containerImage,
     host: containerHost,
-    imageFor: (runtime, slot) => environmentImages.imageFor(runtime, slot),
+    imageFor: (_runtime, slot, signal) =>
+      project.slotImage(slot.project_id, slot.resource_identity, signal),
   });
   const hostProofs = new HostProofs({
     stateDirectory: options.stateDirectory,
@@ -652,6 +650,10 @@ export function composeServices(options: {
       options.config.master_key,
       options.config.gateway.auth.version,
     ),
+    environmentClaimed: (projectId, resourceIdentity) =>
+      project.environmentClaimed(projectId, resourceIdentity),
+    environmentDigestOf: (projectId, resourceIdentity) =>
+      project.environmentDigestOf(projectId, resourceIdentity),
     workerBindingRowOf: (tx, id) => project.workerBindingRowOf(tx, id),
     repositoryPolicyOf: (tx, id) => project.repositoryPolicyOf(tx, id),
     repositoryBindingIdsOf: (tx, nodeId, revision) =>
@@ -854,7 +856,8 @@ export function composeServices(options: {
     environmentRuntime,
     slotImage: containerImage,
     version: packageVersion(),
-    environmentReady: (projectId) => worker.bindingsChanged(projectId),
+    environmentReady: (projectId, resourceIdentity, tag) =>
+      worker.environmentReady(projectId, resourceIdentity, tag),
     logger: options.logger,
     health: options.health,
     bindings: options.bindings,

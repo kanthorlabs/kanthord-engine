@@ -40,6 +40,7 @@ const FAILURE_CODE = 1;
 const CLEAN_CODE = 0;
 const FIRST_LAUNCH = 1;
 const RELAUNCH = 2;
+const CONTAINER_IMAGE = "kanthord:test";
 const SECOND_RELAUNCH = 3;
 const THIRD_RELAUNCH = 4;
 const NO_TERMINATE = 0;
@@ -136,6 +137,11 @@ class FakeDriver implements SlotDriver {
   }
 
   unavailable: PlacementStatus | null = null;
+  readonly images = new Map<string, string>();
+
+  imageOf(clientId: string): string | null {
+    return this.images.get(clientId) ?? null;
+  }
 
   launch(launch: SlotLaunch): SlotInstance {
     this.launches.push(launch);
@@ -338,6 +344,41 @@ test("a drain request reaches the driver once and a raise of the slot resumes it
   assert.equal(f.driver.launches[1]!.slot.draining, false);
   assert.deepEqual(f.ended, []);
   assert.deepEqual(f.driver.instances[1]!.controls, []);
+});
+
+test("a restart marks the slot as draining at once and starts it again after the exit with the same client identity", async (t) => {
+  const f = fixture(t);
+  const slot = f.slotOf(LOWEST_SLOT);
+  f.pool.start(slot);
+  f.pool.restart(slot);
+  assert.equal(slot.draining, true);
+  assert.deepEqual(f.driver.instances[0]!.controls, [SlotControl.Drain]);
+  assert.equal(f.driver.launches.length, FIRST_LAUNCH);
+  f.driver.instances[0]!.end(CLEAN_CODE);
+  await flush();
+  assert.equal(f.driver.launches.length, RELAUNCH);
+  assert.equal(f.driver.launches[1]!.slot.client_id, slot.client_id);
+  assert.equal(slot.draining, false);
+  assert.deepEqual(f.ended, []);
+  assert.deepEqual(f.driver.instances[1]!.controls, []);
+});
+
+test("a restart of an unknown slot changes nothing", (t) => {
+  const f = fixture(t);
+  const slot = f.slotOf(LOWEST_SLOT);
+  f.pool.restart(slot);
+  assert.equal(slot.draining, false);
+  assert.deepEqual(f.ended, []);
+  assert.equal(f.driver.launches.length, NO_LAUNCH);
+});
+
+test("imageOf asks the driver of the slot and answers null for a driver with no image", (t) => {
+  const f = fixture(t);
+  const container = f.slotOf(MIDDLE_SLOT, false, PoolPlacement.Container);
+  const server = f.slotOf(LOWEST_SLOT);
+  f.containerDriver.images.set(container.client_id, CONTAINER_IMAGE);
+  assert.equal(f.pool.imageOf(container), CONTAINER_IMAGE);
+  assert.equal(f.pool.imageOf(server), null);
 });
 
 test("a slot that starts in drain mode receives the drain control at once", (t) => {

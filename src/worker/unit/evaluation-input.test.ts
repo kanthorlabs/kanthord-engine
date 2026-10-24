@@ -70,6 +70,7 @@ test("B3 review bundle places all supporting assets in the evidence directory ou
       name: "repo",
       address: "git@github.com:owner/repo.git",
       ssh_host_key: TEST_SSH_HOST_KEY,
+      resource_identity: "github:kanthorlabs/engine",
       ssh_public_key: TEST_SSH_PUBLIC_KEY,
       strategy: { base_branch: "main" },
       project_prompt: null,

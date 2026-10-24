@@ -67,6 +67,7 @@ export async function runNativeExecution(
     ...input,
     workerName: input.setup.worker_name,
     secrets,
+    environmentDigests: environmentDigestsOf(input.setup.repositories),
   });
   const opened = new Map<NativeAgent, Disposable>();
   const budget = new ExecutionBudget({
@@ -173,6 +174,18 @@ export async function runNativeExecution(
       run.dispose();
     }
   }
+}
+
+export function environmentDigestsOf(
+  repositories: NativeExecutionInput["setup"]["repositories"],
+): Record<string, string> {
+  return Object.fromEntries(
+    repositories.flatMap((repository) =>
+      repository.environment === null
+        ? []
+        : [[repository.resource_identity, repository.environment.digest]],
+    ),
+  );
 }
 
 function runSecrets(

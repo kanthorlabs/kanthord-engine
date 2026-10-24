@@ -17,7 +17,14 @@ import {
   type TelemetrySink,
 } from "./telemetry.ts";
 import { AgentErrorType, traceAgent } from "./agent-telemetry.ts";
-import { GitStep, withinGit } from "./method-telemetry.ts";
+import {
+  environmentDigestsOf,
+  GitStep,
+  verificationObserver,
+  withinGit,
+} from "./method-telemetry.ts";
+import { CommandEnd, type CommandRun } from "./verification.ts";
+import { EnvironmentSource } from "../../kernel/devcontainer.ts";
 import { Diagnostic } from "../../kernel/errors.ts";
 import { ChainLevel } from "../../agent/contract.ts";
 
@@ -321,6 +328,66 @@ test("a git failure span text holds the diagnostic line and its rows", async () 
       [text],
     );
   }
+});
+
+const FIRST_DIGEST = "a".repeat(64);
+const SECOND_DIGEST = "b".repeat(64);
+const DIGEST_ATTRIBUTE = "environment.digest";
+const PASSED_COMMAND: CommandRun = {
+  result: { command: "true", exit_code: 0, signal: null, timed_out: false },
+  output: "",
+  end: CommandEnd.Exit,
+};
+
+async function verificationStart(digests: readonly string[]) {
+  const { records, spans } = recorder();
+  await verificationObserver(
+    spans,
+    null,
+    digests,
+  )({ command: "true", index: 0, run: 1 }, async () => PASSED_COMMAND);
+  return startOf(records, SpanOperation.Verification);
+}
+
+test("a verification span records the one digest of the node", async () => {
+  const start = await verificationStart([FIRST_DIGEST]);
+  assert.equal(start?.attributes?.[DIGEST_ATTRIBUTE], FIRST_DIGEST);
+});
+
+test("a verification span joins the digests of two repositories with a comma in binding order", async () => {
+  const start = await verificationStart([FIRST_DIGEST, SECOND_DIGEST]);
+  assert.equal(
+    start?.attributes?.[DIGEST_ATTRIBUTE],
+    `${FIRST_DIGEST},${SECOND_DIGEST}`,
+  );
+});
+
+test("a verification span records no digest attribute for no digest", async () => {
+  const start = await verificationStart([]);
+  assert.ok(start);
+  assert.equal(DIGEST_ATTRIBUTE in (start.attributes ?? {}), false);
+});
+
+test("the digests of the repositories skip a repository with no environment", () => {
+  assert.deepEqual(
+    environmentDigestsOf([
+      {
+        environment: {
+          source: EnvironmentSource.Repository,
+          digest: FIRST_DIGEST,
+        },
+      },
+      { environment: null },
+      {
+        environment: {
+          source: EnvironmentSource.Stored,
+          document: {},
+          digest: SECOND_DIGEST,
+        },
+      },
+    ]),
+    [FIRST_DIGEST, SECOND_DIGEST],
+  );
 });
 
 test("a long text splits into numbered parts", () => {

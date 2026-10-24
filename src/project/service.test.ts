@@ -4273,6 +4273,7 @@ test("workerBindingRowOf retains the pinned configuration in the caller transact
         disabled: false,
         placement: WorkerPlacement.Server,
         worker_instances: [],
+        environment: null,
         entries: [],
         resource_budget: null,
       },
@@ -4320,6 +4321,7 @@ test("repositoryPolicyOf preserves the named revision after a strategy change", 
     assert.notEqual(pinned.id, later.id);
     assert.deepEqual(f.project.repositoryPolicyOf(tx, pinned.id), {
       binding_id: pinned.id,
+      resource_identity: pinned.resource_identity,
       project_id: project.id,
       name: REPOSITORY_NAME,
       address: original.config.address,
@@ -5688,46 +5690,6 @@ test("binding.environment.get and set refuse a binding that is not a repository 
   );
 });
 
-test("the slot environment is the one repository binding with an environment source", async (t) => {
-  const absent = instructionFixture(t, {}, WRITABLE);
-  assert.equal(
-    await absent.f.project.slotEnvironment(absent.saved.project_id, background),
-    null,
-  );
-  const present = instructionFixture(t, { texts: [DEVCONTAINER_TEXT] });
-  const found = await present.f.project.slotEnvironment(
-    present.saved.project_id,
-    background,
-  );
-  assert.equal(found?.source, EnvironmentSource.Repository);
-  assert.equal(found?.binding_id, present.saved.binding_id);
-  assert.equal(found?.commit, INSTRUCTION_COMMIT);
-  assert.deepEqual(
-    found?.files.map((file) => file.path),
-    [DEVCONTAINER_FILE],
-  );
-  const stored = instructionFixture(t, {}, WRITABLE);
-  await setEnvironment(stored.f, stored.saved, {
-    build: { dockerfile: "Dockerfile" },
-  });
-  const built = await stored.f.project.slotEnvironment(
-    stored.saved.project_id,
-    background,
-  );
-  assert.equal(built?.source, EnvironmentSource.Stored);
-  assert.deepEqual(
-    built?.files.map((file) => file.path),
-    [".devcontainer/Dockerfile"],
-  );
-  const invalid = instructionFixture(t, { texts: ["[]"] });
-  await assert.rejects(
-    invalid.f.project.slotEnvironment(invalid.saved.project_id, background),
-    (error) =>
-      error instanceof Diagnostic &&
-      error.code === EnvironmentErrorCode.Invalid,
-  );
-});
-
 test("binding.environment.set refuses a key or a value that the build path does not allow and names the key", async (t) => {
   const { f, saved } = instructionFixture(t, {}, WRITABLE);
   await refusesInstructionFiles(
@@ -5752,19 +5714,10 @@ test("binding.environment.set refuses a key or a value that the build path does 
   );
 });
 
-const REFUSED_KEY = "runArgs";
-
-test("a repository devcontainer with a refused key stops the slot and names the key in environment show", async (t) => {
+test("a repository devcontainer with a refused key names the key in environment show", async (t) => {
   const refused = instructionFixture(t, {
     texts: [`{ "image": "base", "runArgs": ["--privileged"] }`],
   });
-  await assert.rejects(
-    refused.f.project.slotEnvironment(refused.saved.project_id, background),
-    (error) =>
-      error instanceof Diagnostic &&
-      error.code === EnvironmentErrorCode.KeyRefused &&
-      new Map(error.fields).get("key") === REFUSED_KEY,
-  );
   const answer = await refused.f.invokeAsync(
     "binding.environment.get",
     refused.saved,
@@ -5804,74 +5757,6 @@ function twoRepositories(
   });
   return { ...fixed, other };
 }
-
-function ambiguous(error: unknown): boolean {
-  return (
-    error instanceof Diagnostic && error.code === EnvironmentErrorCode.Ambiguous
-  );
-}
-
-test("a stored environment wins over the devcontainer of another binding, and two of one kind are ambiguous", async (t) => {
-  const { f, saved, other } = twoRepositories(t, {
-    texts: [DEVCONTAINER_TEXT],
-  });
-  await assert.rejects(
-    f.project.slotEnvironment(saved.project_id, background),
-    ambiguous,
-  );
-  const answer = await setEnvironment(f, saved, STORED_ENVIRONMENT);
-  const stored = answer.bindings[REPOSITORY_NAME];
-  assert.ok(stored);
-  const found = await f.project.slotEnvironment(saved.project_id, background);
-  assert.equal(found?.source, EnvironmentSource.Stored);
-  assert.equal(found?.binding_id, stored.id);
-  const otherCurrent = answer.bindings[OTHER_REPOSITORY_NAME];
-  assert.ok(otherCurrent);
-  await setEnvironment(
-    f,
-    { ...other, binding_id: otherCurrent.id },
-    STORED_ENVIRONMENT,
-  );
-  await assert.rejects(
-    f.project.slotEnvironment(saved.project_id, background),
-    ambiguous,
-  );
-});
-
-test("a failed remote read reuses the last slot environment of the same binding revisions", async (t) => {
-  const behavior: Parameters<typeof instructionFixture>[1] = {
-    texts: [DEVCONTAINER_TEXT],
-  };
-  const { f, saved } = instructionFixture(t, behavior, WRITABLE);
-  const first = await f.project.slotEnvironment(saved.project_id, background);
-  assert.equal(first?.source, EnvironmentSource.Repository);
-  behavior.resolveFails = true;
-  assert.deepEqual(
-    await f.project.slotEnvironment(saved.project_id, background),
-    first,
-  );
-  await setEnvironment(f, saved, STORED_ENVIRONMENT);
-  await assert.rejects(
-    f.project.slotEnvironment(saved.project_id, background),
-    (error) =>
-      error instanceof OperationError &&
-      error.code === ProjectErrorCode.RepositorySshUnreachable,
-  );
-});
-
-test("the slot environment carries the tree ids of the build context and of each local feature", async (t) => {
-  const { f, saved, objectCalls } = instructionFixture(t, {}, WRITABLE);
-  await setEnvironment(f, saved, {
-    build: { dockerfile: "Dockerfile", context: ".." },
-    features: { "./local": {}, "ghcr.io/devcontainers/features/node:1": {} },
-  });
-  const found = await f.project.slotEnvironment(saved.project_id, background);
-  assert.deepEqual(objectCalls, [[".", ".devcontainer/local"]]);
-  assert.deepEqual(found?.trees, [
-    { path: ".", object: `${TREE_PREFIX}0` },
-    { path: ".devcontainer/local", object: `${TREE_PREFIX}1` },
-  ]);
-});
 
 test("at a stored environment of one binding, no other binding takes its repository devcontainer", async (t) => {
   const { f, saved, other } = twoRepositories(t, {
@@ -6304,6 +6189,8 @@ test("both environment operations refuse a machine caller by their access policy
     assert.equal(operation.mutation, operation === ENVIRONMENT_REBUILD);
   }
 });
+
+const REFUSED_KEY = "runArgs";
 
 test("binding.environment.set answers key_refused for a document with runArgs and invalid for a non-object or a wrong type", async (t) => {
   const { f, saved } = instructionFixture(t, {}, WRITABLE);

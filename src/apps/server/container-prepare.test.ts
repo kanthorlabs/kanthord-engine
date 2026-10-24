@@ -1,8 +1,13 @@
 import assert from "node:assert/strict";
-import { test } from "node:test";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { test, type TestContext } from "node:test";
+import { setTimeout as delay } from "node:timers/promises";
 import { Writable } from "node:stream";
 import { MessageChannel } from "node:worker_threads";
+import { temporary } from "../../kernel/test-support.ts";
 import { ContainerRuntime, PoolPlacement } from "../../worker/contract.ts";
+import { SlotControl } from "../worker/thread-data.ts";
 import {
   ContainerDriver,
   type ContainerDriverOptions,
@@ -83,7 +88,7 @@ function hostWith(
   return { driver, calls, verbs };
 }
 
-function launchOf(): SlotLaunch {
+function launchOf(environment: NodeJS.ProcessEnv = {}): SlotLaunch {
   const { port2 } = new MessageChannel();
   return {
     slot: {
@@ -99,7 +104,7 @@ function launchOf(): SlotLaunch {
     client_secret: "unused",
     root: "unused",
     output: new Writable({ write: (_chunk, _encoding, done) => done() }),
-    environment: {},
+    environment,
   };
 }
 
@@ -194,6 +199,131 @@ test("a launch whose environment image fails starts no container and exits with 
   assert.match(exit.error?.message ?? "", /environment image refused/);
   assert.deepEqual(slots, [launchOf().slot.project_id]);
   assert.equal(f.verbs(Verb.Run).length, NO_CALLS);
+});
+
+const SETTLE_MS = 50;
+const POLL_MS = 20;
+const POLL_ROUNDS = 250;
+const READY_TAG = "localhost/kanthord-env/repository_app:ready";
+
+function imageGate() {
+  const answer = Promise.withResolvers<string>();
+  const asked = Promise.withResolvers<AbortSignal>();
+  const imageFor: NonNullable<ContainerDriverOptions["imageFor"]> = (
+    _runtime,
+    _slot,
+    signal,
+  ) => {
+    asked.resolve(signal);
+    return answer.promise;
+  };
+  return { answer, asked: asked.promise, imageFor };
+}
+
+function recordingRuntime(t: TestContext) {
+  const directory = temporary(t);
+  const bin = join(directory, "bin");
+  const argumentsFile = join(directory, "arguments");
+  const releaseFile = join(directory, "release");
+  mkdirSync(bin);
+  writeFileSync(
+    join(bin, ContainerRuntime.Podman),
+    `#!/bin/sh
+printf '%s\\n' "$@" > "${argumentsFile}"
+n=0; while [ ! -e "${releaseFile}" ] && [ $n -lt 500 ]; do sleep 0.02; n=$((n+1)); done
+`,
+    { mode: 0o755 },
+  );
+  const recorded = async (): Promise<string[]> => {
+    for (let round = 0; round < POLL_ROUNDS; round++) {
+      if (existsSync(argumentsFile))
+        return readFileSync(argumentsFile, "utf8").split("\n");
+      await delay(POLL_MS);
+    }
+    assert.fail("The runtime did not receive the run command.");
+  };
+  return {
+    environment: { PATH: `${bin}:${process.env.PATH}` },
+    spawned: () => existsSync(argumentsFile),
+    recorded,
+    release: () => writeFileSync(releaseFile, ""),
+  };
+}
+
+test("an instance spawns no container while the image answer is pending", async (t) => {
+  const runtime = recordingRuntime(t);
+  const gate = imageGate();
+  const f = hostWith(true, () => ok(), gate.imageFor);
+  const instance = f.driver.launch(launchOf(runtime.environment));
+  t.after(() => instance.terminate());
+  await gate.asked;
+  await delay(SETTLE_MS);
+  assert.equal(runtime.spawned(), false);
+  assert.equal(f.driver.imageOf(CLIENT_ID), null);
+  assert.equal(
+    await Promise.race([instance.exited, delay(SETTLE_MS, null)]),
+    null,
+  );
+});
+
+test("a stop during the image wait aborts the signal, spawns no container and ends the instance", async (t) => {
+  const runtime = recordingRuntime(t);
+  const gate = imageGate();
+  const f = hostWith(true, () => ok(), gate.imageFor);
+  const instance = f.driver.launch(launchOf(runtime.environment));
+  const signal = await gate.asked;
+  assert.equal(signal.aborted, false);
+  instance.control(SlotControl.Stop);
+  assert.equal(signal.aborted, true);
+  const exit = await instance.exited;
+  assert.equal(exit.code, SUCCESS_CODE);
+  assert.equal(exit.error, null);
+  assert.equal(runtime.spawned(), false);
+  assert.equal(f.driver.imageOf(CLIENT_ID), null);
+});
+
+test("a drain during the image wait aborts the signal and ends the instance with no error", async () => {
+  const gate = imageGate();
+  const f = hostWith(true, () => ok(), gate.imageFor);
+  const instance = f.driver.launch(launchOf());
+  const signal = await gate.asked;
+  instance.control(SlotControl.Drain);
+  assert.equal(signal.aborted, true);
+  const exit = await instance.exited;
+  assert.deepEqual(exit, { code: SUCCESS_CODE, error: null });
+});
+
+test("a resolved image answer starts the container on that image and imageOf answers it until the exit", async (t) => {
+  const runtime = recordingRuntime(t);
+  const gate = imageGate();
+  const f = hostWith(true, () => ok(), gate.imageFor);
+  const instance = f.driver.launch(launchOf(runtime.environment));
+  await gate.asked;
+  gate.answer.resolve(READY_TAG);
+  const lines = await runtime.recorded();
+  assert.ok(lines.includes(READY_TAG));
+  assert.equal(f.driver.imageOf(CLIENT_ID), READY_TAG);
+  runtime.release();
+  await instance.exited;
+  assert.equal(f.driver.imageOf(CLIENT_ID), null);
+});
+
+test("the image wait logs no line", async (t) => {
+  const writes: string[] = [];
+  for (const stream of [process.stdout, process.stderr])
+    t.mock.method(stream, "write", (chunk: unknown) => {
+      if (chunk instanceof Buffer) return true;
+      writes.push(String(chunk));
+      return true;
+    });
+  const gate = imageGate();
+  const f = hostWith(true, () => ok(), gate.imageFor);
+  const instance = f.driver.launch(launchOf());
+  await gate.asked;
+  await delay(SETTLE_MS);
+  instance.control(SlotControl.Stop);
+  await instance.exited;
+  assert.deepEqual(writes, []);
 });
 
 const VolumeAction = { List: "ls", Remove: "rm" } as const;

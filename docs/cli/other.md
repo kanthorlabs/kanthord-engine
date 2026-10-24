@@ -436,19 +436,8 @@ The implemented fields are:
   unavailable at the server start, the server logs `worker.pool.driver_unavailable`
   with `placement`, `reason` and `detail`, and it still starts. The slots start
   again with a backoff when the runtime recovers.
-  A project with an environment on a repository binding runs its container
-  slots on the environment image
-  `localhost/kanthord-env/<resource_identity>:<digest>`. The digest covers the
-  environment file, the dockerfile, the tree of the build context, the tree of
-  each local feature, the slot image and the server version. At a slot start
-  the server builds an absent environment image with `devcontainer build`, then
-  adds the KanthorD layer and checks bash, glibc, git 2.40 or later and OpenSSH
-  9.0 or later. The check runs with no network, no capability and a read-only
-  root. A build has a limit of 30 minutes, and the server stop ends a build. A
-  failed build logs `worker.pool.instance_failed` with the error
-  `worker.pool.environment_image_failed`, its `class` (`build_failed` or
-  `image_invalid`), `tag` and `detail`. The server does not build that digest
-  again for 15 minutes, or until the next revision of the binding.
+  A container slot waits for the `ready` image of its environment and pulls no
+  work while it waits.
 
 - `scheduler.release_reserve`: optional positive safe integer in seconds, default
   `600`. A claim adds this reserve after its effective worker wall time.
@@ -1179,9 +1168,7 @@ implement them. Help is not an extra root name or a reason to load secrets.
 | local           | `repository.connector.git_failed`                | A git operation of the repository connector fails, is aborted or reaches its deadline; the message names the operation.                                                                                                                     | serve worker, binding apply                                                |
 | local           | `repository.node_branch.missing`                 | A record shows a push of the node branch and the remote holds no such branch; the steps execution stops.                                                                                                                                    | serve worker                                                               |
 | local           | `worker.merge.markers_left`                      | A file of the base merge still holds a conflict marker after the conflict turn; the worker aborts the merge and the steps execution stops.                                                                                                  | serve worker                                                               |
-| local           | `worker.pool.environment_image_failed`           | The environment image of a container slot fails to build (`build_failed`) or fails the image check (`image_invalid`); the slot does not start.                                                                                              | serve server                                                               |
 | local           | `project.environment.invalid`                    | The `.devcontainer/devcontainer.json` of the base head is not valid JSONC or not a valid environment; the container slot does not start.                                                                                                    | serve server                                                               |
-| local           | `project.environment.ambiguous`                  | Two repository bindings of the project store an environment, or two hold a devcontainer file and none stores an environment; the container slot does not start.                                                                             | serve server                                                               |
 | local           | `project.environment.key_refused`                | The repository devcontainer file of a slot start holds a key, a path or a variable that the build does not allow. The server logs it before the Onboarding component runs; the message names the key and the container slot does not start. | serve server                                                               |
 | local           | `project.onboarding.run_started`                 | The Onboarding component starts a run of the environment of a repository binding. The `info` record holds `binding`, `digest`, `target`, `status` and `class`.                                                                              | serve server                                                               |
 | local           | `project.onboarding.run_ended`                   | The run of the environment of a repository binding ends. The `info` record holds `binding`, `digest`, `target`, `status` and `class`.                                                                                                       | serve server                                                               |

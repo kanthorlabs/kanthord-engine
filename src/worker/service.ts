@@ -142,6 +142,11 @@ export interface Dependencies {
   store: Store;
   workerBindingOf: WorkerBindingOf;
   workerBindingsOf: WorkerBindingsOf;
+  environmentClaimed(projectId: string, resourceIdentity: string): void;
+  environmentDigestOf(
+    projectId: string,
+    resourceIdentity: string,
+  ): string | null;
   instanceIssuer: InstanceIssuer;
   workerBindingRowOf: WorkerBindingRowOf;
   repositoryPolicyOf: RepositoryPolicyOf;
@@ -465,6 +470,32 @@ export class WorkerService implements Service {
         );
       }
     });
+  }
+
+  environmentReady(
+    projectId: string,
+    resourceIdentity: string,
+    tag: string,
+  ): void {
+    const pool = this.pool;
+    if (!pool) return;
+    const { host, workerBindingsOf } = this.dependencies.pool!;
+    const bindings = this.dependencies.store.transaction((tx) =>
+      workerBindingsOf(tx, projectId),
+    );
+    for (const binding of bindings) {
+      if (
+        binding.placement !== InstancePlacement.Container ||
+        binding.environment !== resourceIdentity
+      )
+        continue;
+      for (const slot of pool.slotsOf(
+        projectId,
+        binding.resource_identity,
+        binding.generation,
+      ))
+        if (host.imageOf(slot) !== tag) pool.restart(slot);
+    }
   }
 
   private reconcile(projectId: string | null, restore: boolean): void {

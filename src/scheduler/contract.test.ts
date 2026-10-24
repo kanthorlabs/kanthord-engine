@@ -111,7 +111,7 @@ test("Trace protocol identities refuse all-zero, uppercase and wrong lengths", (
   }
 });
 
-test("a release stop carries an optional cause detail of at most 300 characters", () => {
+test("a release stop carries an optional cause detail of at most 2048 characters", () => {
   const stop = { reason: "provider_failed", code: "unavailable" };
   const parse = (detail: unknown) =>
     releaseStopSchema.safeParse({ ...stop, detail });
@@ -120,8 +120,8 @@ test("a release stop carries an optional cause detail of at most 300 characters"
     ...stop,
     detail: "Cannot find module",
   });
-  assert.equal(parse("x".repeat(300)).success, true);
-  assert.equal(parse("x".repeat(301)).success, false);
+  assert.equal(parse("x".repeat(2048)).success, true);
+  assert.equal(parse("x".repeat(2049)).success, false);
   assert.equal(parse("").success, false);
   assert.equal(parse(null).success, false);
 });

@@ -26,7 +26,11 @@ import type { ExecutionBudget } from "./budget.ts";
 import { ContextCancelled, DeadlineExceeded } from "../../kernel/context.ts";
 import { runVerifications } from "./verification.ts";
 import { reportFacts } from "./report-facts.ts";
-import { testedCommitOf, verificationObserver } from "./method-telemetry.ts";
+import {
+  environmentDigestsOf,
+  testedCommitOf,
+  verificationObserver,
+} from "./method-telemetry.ts";
 
 export const REPORT_SUBJECT = "Report on current dependency outcomes";
 export const REPORT_MEDIA_TYPE = "text/markdown";
@@ -101,6 +105,7 @@ export async function runStepsExamine(
             observe: verificationObserver(
               run.spans,
               testedCommitOf(workspace.tested_input),
+              environmentDigestsOf(input.setup.repositories),
             ),
             directory,
             commands: revision.content.verifications,

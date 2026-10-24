@@ -49,6 +49,7 @@ import {
   evaluationEnd,
   evaluationSpan,
   testedCommitOf,
+  environmentDigestsOf,
   verificationObserver,
 } from "./method-telemetry.ts";
 
@@ -177,6 +178,7 @@ async function evaluate(
     observe: verificationObserver(
       run.spans,
       testedCommitOf(prepared.tested_input),
+      environmentDigestsOf(input.setup.repositories),
     ),
     directory: prepared.directory,
     commands: verificationCommands(revision),

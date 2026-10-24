@@ -1,4 +1,5 @@
 import { addAbortListener } from "node:events";
+import { z } from "zod";
 import assert from "node:assert/strict";
 import { CancellationContext, type Context } from "../../kernel/context.ts";
 import { CodedError } from "../../kernel/errors.ts";
@@ -98,6 +99,27 @@ export class ExecutionStop extends Error {
   }
 }
 
+const detailFactsSchema = z.record(z.string(), z.unknown());
+
+function detailFactsOf(detail: string | null): Record<string, unknown> {
+  if (detail === null) return {};
+  let value: unknown;
+  try {
+    value = JSON.parse(detail);
+  } catch {
+    return { detail };
+  }
+  const parsed = detailFactsSchema.safeParse(value);
+  return parsed.success ? parsed.data : { detail };
+}
+
+function detailWithDigests(
+  detail: string | null,
+  digests: Readonly<Record<string, string>>,
+): string {
+  return JSON.stringify({ ...detailFactsOf(detail), digests });
+}
+
 export class ExecutionRun {
   readonly claim: MethodClaim;
   readonly clients: MethodClients;
@@ -105,6 +127,7 @@ export class ExecutionRun {
   readonly spans: SpanRecorder;
   private readonly credentials: { release(): Promise<void> };
   private readonly secrets: () => Promise<readonly string[]>;
+  private readonly environmentDigests: Readonly<Record<string, string>>;
   private readonly parent: Context;
   private readonly logSink: (record: Record<string, unknown>) => void;
   private stopped: ExecutionStop | null = null;
@@ -120,6 +143,7 @@ export class ExecutionRun {
     telemetry?: TelemetrySink;
     workerName?: string;
     secrets?: () => Promise<readonly string[]>;
+    environmentDigests?: Readonly<Record<string, string>>;
   }) {
     assert.ok(input.claim.execution_id);
     assert.ok(input.claim.node_id);
@@ -132,6 +156,7 @@ export class ExecutionRun {
     this.clients = input.clients;
     this.credentials = input.credentials;
     this.secrets = input.secrets ?? (async () => []);
+    this.environmentDigests = input.environmentDigests ?? {};
     this.parent = input.context;
     this.logSink = input.log ?? (() => {});
     this.operationContext = new CancellationContext(
@@ -217,7 +242,14 @@ export class ExecutionRun {
     code: string | null,
     detail: string | null = null,
   ): ExecutionStop {
-    this.stopped ??= new ExecutionStop(reason, code, detail);
+    this.stopped ??= new ExecutionStop(
+      reason,
+      code,
+      reason === EndReason.EnvironmentFailed &&
+        Object.keys(this.environmentDigests).length
+        ? detailWithDigests(detail, this.environmentDigests)
+        : detail,
+    );
     this.operationContext.cancel(this.stopped);
     return this.stopped;
   }

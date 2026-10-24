@@ -324,6 +324,54 @@ test(
   },
 );
 
+test(
+  "a restart marks the slot as draining before it returns and starts the slot again after the exit with the same client identity",
+  { timeout: POOL_TEST_TIMEOUT },
+  async (t) => {
+    const f = await serverPool(t, ONE_INSTANCE);
+    f.fixture.worker.startPool();
+    await f.waitFor(ONE_INSTANCE);
+    const [slot] = f.slots();
+    assert.ok(slot);
+    const thread = f.fixture.threadDriver.threadOf(slot.client_id);
+    assert.ok(thread);
+    f.fixture.workerPool.restart(slot);
+    assert.equal(slot.draining, true);
+    const restarted = await until(
+      () => f.fixture.threadDriver.threadOf(slot.client_id),
+      (current) => current !== undefined && current !== thread,
+      t.signal,
+    );
+    assert.ok(restarted);
+    assert.equal(slot.draining, false);
+    const [again] = await f.waitFor(ONE_INSTANCE);
+    assert.equal(again!.client_id, slot.client_id);
+    assert.equal(f.slots().length, ONE_INSTANCE);
+  },
+);
+
+test(
+  "a restart of an idle slot ends its work pull with no claim and starts the slot again with no failure",
+  { timeout: POOL_TEST_TIMEOUT },
+  async (t) => {
+    const f = await serverPool(t, ONE_INSTANCE);
+    f.fixture.worker.startPool();
+    const [first] = await f.waitFor(ONE_INSTANCE);
+    const [slot] = f.slots();
+    assert.ok(slot);
+    const thread = f.fixture.threadDriver.threadOf(slot.client_id);
+    f.fixture.workerPool.restart(slot);
+    await until(
+      () => f.fixture.threadDriver.threadOf(slot.client_id),
+      (current) => current !== undefined && current !== thread,
+      t.signal,
+    );
+    const [again] = await f.waitFor(ONE_INSTANCE);
+    assert.equal(again!.client_id, first!.client_id);
+    assert.ok(!f.fixture.logs.some((line) => line.includes(FAILED_MESSAGE)));
+  },
+);
+
 test("the thread environment holds the allowlist and the slot directories only", () => {
   const source = {
     PATH: "/bin",

@@ -424,6 +424,7 @@ export type WorkerBindingOf = (
   instance_count: number;
   worker_instances?: string[];
   placement: InstancePlacement | null;
+  environment?: string | null;
   generation: number;
   resource_budget: { turns: number; wall_time_ms: number } | null;
   entries: Array<WorkerEntry & { agent: string }>;
@@ -461,6 +462,7 @@ export type WorkerBindingRowOf = (
   worker_name: string;
   placement: InstancePlacement | null;
   worker_instances: string[];
+  environment?: string | null;
   entries: Array<WorkerEntry & { agent: string }>;
   resource_budget: { turns: number; wall_time_ms: number } | null;
 } | null;
@@ -470,6 +472,7 @@ export type RepositoryPolicyOf = (
   bindingId: string,
 ) => {
   binding_id: string;
+  resource_identity: string;
   name: string;
   address: string;
   platform: string;
@@ -751,6 +754,8 @@ export interface PoolHost {
   prepare(): void;
   start(slot: PoolSlot): void;
   drain(slot: PoolSlot): void;
+  restart(slot: PoolSlot): void;
+  imageOf(slot: PoolSlot): string | null;
   remove(slot: PoolSlot): Promise<void>;
   sweep(live: ReadonlySet<string>): Promise<void>;
   stop(): Promise<void>;
@@ -983,8 +988,12 @@ export const executionEnvironmentSchema = z
     z.strictObject({
       source: z.literal(EnvironmentSource.Stored),
       document: environmentSchema,
+      digest: z.string().min(1),
     }),
-    z.strictObject({ source: z.literal(EnvironmentSource.Repository) }),
+    z.strictObject({
+      source: z.literal(EnvironmentSource.Repository),
+      digest: z.string().min(1),
+    }),
   ])
   .nullable();
 export type ExecutionEnvironment = z.infer<typeof executionEnvironmentSchema>;
@@ -998,6 +1007,7 @@ export const executionSetupSchema = z.strictObject({
   repositories: z.array(
     z.strictObject({
       binding_id: identitySchema("binding"),
+      resource_identity: z.string().min(1),
       name: z.string(),
       address: z.string(),
       ssh_host_key: sshHostKeySchema,

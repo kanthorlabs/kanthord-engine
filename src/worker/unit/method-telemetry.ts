@@ -13,11 +13,13 @@ import type {
   CommandRun,
   TestedInput,
 } from "./verification.ts";
+import type { ExecutionEnvironment } from "../contract.ts";
 import { CodedError, diagnostic, diagnosticRows } from "../../kernel/errors.ts";
 
 const SUCCESS = 0;
 const NO_LENGTH = 0;
 const COMMIT_INPUT_KIND = "repository";
+const DIGEST_SEPARATOR = ",";
 
 export function phaseSpan(phase: Phase): SpanStart {
   assert.ok(phase);
@@ -103,9 +105,18 @@ function commandEnd(ran: CommandRun): SpanEnd {
   };
 }
 
+export function environmentDigestsOf(
+  repositories: ReadonlyArray<{ environment: ExecutionEnvironment }>,
+): string[] {
+  return repositories.flatMap(({ environment }) =>
+    environment === null ? [] : [environment.digest],
+  );
+}
+
 export function verificationObserver(
   spans: SpanRecorder,
   commit: string | null,
+  digests: readonly string[],
 ): CommandObserver {
   assert.ok(spans);
   assert.ok(commit === null || commit.length > NO_LENGTH);
@@ -116,6 +127,9 @@ export function verificationObserver(
         operation: SpanOperation.Verification,
         attributes: {
           ...(commit === null ? {} : { "kanthord.commit": commit }),
+          ...(digests.length === NO_LENGTH
+            ? {}
+            : { "environment.digest": digests.join(DIGEST_SEPARATOR) }),
           "kanthord.verification.index": attempt.index,
           "kanthord.verification.run": attempt.run,
         },

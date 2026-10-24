@@ -9,7 +9,6 @@ import {
   type Operation,
 } from "../kernel/operation.ts";
 import type { Transaction } from "../kernel/store.ts";
-import { REASON_MAX_LENGTH } from "../kernel/probe.ts";
 
 export const SCHEDULER_SERVICE_NAME = "scheduler";
 export const JOB_IDENTITY_PREFIX = "job";
@@ -119,11 +118,12 @@ function stopCodeFits(stop: {
   return !budgetCode && !providerCode && !environmentCode;
 }
 
+export const STOP_DETAIL_MAX_LENGTH = 2048;
 export const releaseStopSchema = z
   .strictObject({
     reason: executionStopReasonSchema,
     code: z.string().min(1).nullable(),
-    detail: z.string().min(1).max(REASON_MAX_LENGTH).optional(),
+    detail: z.string().min(1).max(STOP_DETAIL_MAX_LENGTH).optional(),
   })
   .refine(stopCodeFits, { path: ["code"] });
 export type ReleaseStop = z.infer<typeof releaseStopSchema>;

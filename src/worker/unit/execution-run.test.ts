@@ -35,6 +35,7 @@ const RUN_SECRET = "short-run-secret";
 function fixture(
   release = async () => {},
   secrets: () => Promise<readonly string[]> = async () => [RUN_SECRET],
+  environmentDigests: Readonly<Record<string, string>> = {},
 ) {
   return new ExecutionRun({
     claim: CLAIM,
@@ -42,6 +43,7 @@ function fixture(
     credentials: { release },
     context: background,
     secrets,
+    environmentDigests,
   });
 }
 
@@ -489,5 +491,83 @@ test("the claim check stops the run as revoked when the server refuses the execu
     run.checkClaim(),
     (error) =>
       error instanceof ExecutionStop && error.reason === EndReason.Revoked,
+  );
+});
+
+const CAUSE = "cause";
+const DIGESTS = { "github:acme/engine": "d".repeat(64) };
+
+async function releasedStop(run: ExecutionRun, stop: ExecutionStop) {
+  const stopped = await run.stopOf(stop);
+  const bodies: { stop: { detail?: string } }[] = [];
+  run.clients.scheduler = {
+    executionRelease: async (input: { body: (typeof bodies)[number] }) => {
+      bodies.push(input.body);
+      return {
+        type: OperationResultType.Completed,
+        status: 200,
+        data: { execution_id: "execution", ended_at: 1 },
+      };
+    },
+  } as unknown as MethodClients["scheduler"];
+  await run.releaseStop(stopped);
+  return bodies[0]!.stop;
+}
+
+test("an environment failure stop detail holds the digests of the environments of the setup", async (t) => {
+  const run = fixture(async () => {}, undefined, DIGESTS);
+  t.after(() => run.dispose());
+  const stop = await releasedStop(
+    run,
+    new ExecutionStop(
+      EndReason.EnvironmentFailed,
+      "setup_failed",
+      JSON.stringify({ exit_code: 3, command: "exit 3" }),
+    ),
+  );
+  assert.deepEqual(JSON.parse(stop.detail!), {
+    exit_code: 3,
+    command: "exit 3",
+    digests: DIGESTS,
+  });
+});
+
+test("an environment failure stop with a text detail or no detail holds the digests", async (t) => {
+  for (const detail of [".devcontainer/devcontainer.json: invalid", null]) {
+    const run = fixture(async () => {}, undefined, DIGESTS);
+    t.after(() => run.dispose());
+    const stop = await releasedStop(
+      run,
+      new ExecutionStop(EndReason.EnvironmentFailed, "setup_failed", detail),
+    );
+    assert.deepEqual(JSON.parse(stop.detail!), {
+      ...(detail === null ? {} : { detail }),
+      digests: DIGESTS,
+    });
+  }
+});
+
+test("a stop of another reason or a setup without environment digests keeps its detail", async (t) => {
+  const other = fixture(async () => {}, undefined, DIGESTS);
+  t.after(() => other.dispose());
+  assert.equal(
+    (
+      await releasedStop(
+        other,
+        new ExecutionStop(EndReason.ProviderFailed, "unavailable", CAUSE),
+      )
+    ).detail,
+    CAUSE,
+  );
+  const bare = fixture();
+  t.after(() => bare.dispose());
+  assert.equal(
+    (
+      await releasedStop(
+        bare,
+        new ExecutionStop(EndReason.EnvironmentFailed, "setup_failed", CAUSE),
+      )
+    ).detail,
+    CAUSE,
   );
 });

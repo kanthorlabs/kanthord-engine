@@ -5,10 +5,8 @@ import { CancellationContext, type Context } from "../kernel/context.ts";
 import {
   DEVCONTAINER_DIRECTORY,
   DEVCONTAINER_FILE,
-  devcontainerPath,
   environmentRefusal,
   environmentSchema,
-  isLocalFeature,
   parseEnvironmentText,
   type Environment,
 } from "../kernel/devcontainer.ts";
@@ -25,7 +23,6 @@ import type { SshAccess } from "../repository/contract.ts";
 import { gitFailureReason } from "../repository/git-failure.ts";
 import {
   BINDING_CHECK_TIMEOUT_MS,
-  BindingKind,
   ENVIRONMENT_FILE_MAX_BYTES,
   EnvironmentSource,
   ProjectErrorCode,
@@ -47,27 +44,14 @@ import {
 export const ENVIRONMENT_CLONE_TIMEOUT_MS = 300000;
 export const EnvironmentErrorCode = {
   Invalid: "project.environment.invalid",
-  Ambiguous: "project.environment.ambiguous",
   KeyRefused: "project.environment.key_refused",
 } as const;
 const SSH_UNREACHABLE_STATUS = 422;
 const ENVIRONMENT_KEY = "environment";
-const SINGLE_ENVIRONMENT = 1;
-const DEFAULT_CONTEXT = ".";
-const READ_FAILURES: ReadonlySet<string> = new Set([
-  ProjectErrorCode.RepositorySshUnreachable,
-  ProjectErrorCode.RepositoryBaseBranchAbsent,
-]);
 
 type RepositoryConfig = typeof repositoryConfigSchema._output;
 type BindingSetWrite = typeof bindingSetWriteInputSchema._output;
 type RepositoryFile = { path: string; state: string; text: string | null };
-type RepositoryTree = { path: string; object: string | null };
-type RepositoryBinding = {
-  id: string;
-  resource_identity: string;
-  config: RepositoryConfig;
-};
 export interface GroupResolution {
   source: EnvironmentSource;
   commit: string;
@@ -117,20 +101,6 @@ function dockerfilePath(document: Environment): string | null {
   return dockerfile === undefined
     ? null
     : posix.normalize(posix.join(DEVCONTAINER_DIRECTORY, dockerfile));
-}
-
-function treePaths(document: Environment): string[] {
-  const paths =
-    document.build?.dockerfile === undefined
-      ? []
-      : [devcontainerPath(document.build.context ?? DEFAULT_CONTEXT)];
-  for (const feature of Object.keys(document.features ?? {}))
-    if (isLocalFeature(feature)) paths.push(devcontainerPath(feature));
-  return paths;
-}
-
-function isReadFailure(error: unknown): boolean {
-  return error instanceof OperationError && READ_FAILURES.has(error.code);
 }
 
 export function refuseEnvironment(environment: Environment | undefined): void {
@@ -286,72 +256,6 @@ export class ProjectEnvironments {
     return this.dependencies.writeBindings(params.project_id, body, caller);
   }
 
-  async slotEnvironment(
-    projectId: string,
-    context: Context,
-  ): Promise<SlotEnvironment | null> {
-    const repositories: RepositoryBinding[] =
-      this.dependencies.store.transaction((tx) =>
-        Array.from(readCurrentBindingSet(tx, projectId).values())
-          .filter(
-            (binding) =>
-              kindOf(binding.resource_identity) === BindingKind.Repository,
-          )
-          .map((binding) => ({
-            id: binding.id,
-            resource_identity: binding.resource_identity,
-            config: repositoryConfigSchema.parse(binding.config),
-          })),
-      );
-    const revisions = repositories.map((binding) => binding.id).join();
-    try {
-      const environment = await this.slotOf(projectId, repositories, context);
-      this.resolved.set(projectId, { revisions, environment });
-      return environment;
-    } catch (error) {
-      const last = this.resolved.get(projectId);
-      if (isReadFailure(error) && last?.revisions === revisions)
-        return last.environment;
-      throw error;
-    }
-  }
-
-  private async slotOf(
-    projectId: string,
-    repositories: readonly RepositoryBinding[],
-    context: Context,
-  ): Promise<SlotEnvironment | null> {
-    const stored = repositories.filter(
-      (binding) => binding.config.environment !== undefined,
-    );
-    if (stored.length > SINGLE_ENVIRONMENT)
-      throw new Diagnostic(
-        EnvironmentErrorCode.Ambiguous,
-        "Two or more repository bindings of the project store an environment.",
-        { fields: [["project_id", projectId]] },
-      );
-    const found: SlotEnvironment[] = [];
-    for (const binding of stored.length ? stored : repositories) {
-      const environment = await this.resolve(
-        binding.id,
-        binding.config,
-        context,
-      );
-      if (environment !== null)
-        found.push({
-          ...environment,
-          resource_identity: binding.resource_identity,
-        });
-    }
-    if (found.length > SINGLE_ENVIRONMENT)
-      throw new Diagnostic(
-        EnvironmentErrorCode.Ambiguous,
-        "Two or more repository bindings of the project hold a devcontainer file, and none stores an environment.",
-        { fields: [["project_id", projectId]] },
-      );
-    return found[0] ?? null;
-  }
-
   async resolveGroup(
     bindingId: string,
     target: EnvironmentTarget,
@@ -446,103 +350,6 @@ export class ProjectEnvironments {
       ENVIRONMENT_CLONE_TIMEOUT_MS,
       ssh,
     );
-  }
-
-  private async resolve(
-    bindingId: string,
-    config: RepositoryConfig,
-    context: Context,
-  ): Promise<Omit<SlotEnvironment, "resource_identity"> | null> {
-    const caller = { context };
-    if (config.environment !== undefined) {
-      refusedDocument(config.environment, EnvironmentSource.Stored);
-      const dockerfile = dockerfilePath(config.environment);
-      const read = await this.readBase(
-        bindingId,
-        config,
-        dockerfile === null ? [] : [dockerfile],
-        caller,
-      );
-      return {
-        binding_id: bindingId,
-        source: EnvironmentSource.Stored,
-        commit: read.commit,
-        document: config.environment,
-        files: read.files,
-        trees: await this.readTrees(
-          bindingId,
-          config,
-          read.commit,
-          config.environment,
-          context,
-        ),
-      };
-    }
-    const read = await this.readBase(
-      bindingId,
-      config,
-      [DEVCONTAINER_FILE],
-      caller,
-    );
-    const file = read.files[0];
-    assert.ok(file);
-    const document = repositoryDocument(file);
-    if (document === null) return null;
-    const dockerfile = dockerfilePath(document);
-    const extra =
-      dockerfile === null
-        ? []
-        : await this.readFiles(
-            bindingId,
-            config,
-            read.commit,
-            [dockerfile],
-            context,
-          );
-    return {
-      binding_id: bindingId,
-      source: EnvironmentSource.Repository,
-      commit: read.commit,
-      document,
-      files: [file, ...extra],
-      trees: await this.readTrees(
-        bindingId,
-        config,
-        read.commit,
-        document,
-        context,
-      ),
-    };
-  }
-
-  private async readTrees(
-    bindingId: string,
-    config: RepositoryConfig,
-    commit: string,
-    document: Environment,
-    context: Context,
-  ): Promise<RepositoryTree[]> {
-    const paths = treePaths(document);
-    if (!paths.length) return [];
-    const { address, ssh } = this.access(bindingId, config);
-    let objects: Array<string | null>;
-    try {
-      objects = await this.dependencies.repositoryFiles.readObjectIds(
-        address,
-        commit,
-        paths,
-        context,
-        BINDING_CHECK_TIMEOUT_MS,
-        ssh,
-      );
-    } catch (error) {
-      return refuseUnreadable(context, error);
-    }
-    assert.equal(objects.length, paths.length);
-    return paths.map((path, index) => ({
-      path,
-      object: objects[index] ?? null,
-    }));
   }
 
   private access(bindingId: string, config: RepositoryConfig) {

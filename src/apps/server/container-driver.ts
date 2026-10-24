@@ -56,7 +56,11 @@ export interface ContainerDriverOptions {
   readonly masterKey: string;
   readonly image: string;
   readonly host: RuntimeHost;
-  imageFor?(runtime: ContainerRuntime, slot: PoolSlot): Promise<string>;
+  imageFor?(
+    runtime: ContainerRuntime,
+    slot: PoolSlot,
+    signal: AbortSignal,
+  ): Promise<string>;
 }
 
 interface StatusEntry {
@@ -116,6 +120,7 @@ class ContainerInstance implements SlotInstance {
   private readonly launch: SlotLaunch;
   private readonly name: string;
   private readonly queued: SlotControl["kind"][] = [];
+  private readonly waiting = new AbortController();
   private settle: (exit: SlotExit) => void = () => {};
   private settled = false;
   private terminating = false;
@@ -139,6 +144,7 @@ class ContainerInstance implements SlotInstance {
   }
 
   control(kind: SlotControl["kind"]): void {
+    this.waiting.abort();
     if (this.client)
       writeFrame(this.client.stdin, { kind: FrameKind.Control, control: kind });
     else this.queued.push(kind);
@@ -147,6 +153,7 @@ class ContainerInstance implements SlotInstance {
   terminate(): void {
     if (this.settled || this.terminating) return;
     this.terminating = true;
+    this.waiting.abort();
     const client = this.client;
     if (!client || this.runtime === null) {
       this.finish(FAILED_CODE, new Error("container: terminated before start"));
@@ -166,9 +173,25 @@ class ContainerInstance implements SlotInstance {
     await this.driver.prepare();
     await this.driver.removeContainer(runtime, this.name);
     await this.driver.createVolume(runtime, this.launch.slot.client_id);
-    const image = await this.driver.imageFor(runtime, this.launch.slot);
+    const image = await this.waitForImage(runtime);
+    if (image === null) {
+      this.finish(SUCCESS_CODE, null);
+      return;
+    }
     if (this.settled) return;
     this.spawn(runtime, image);
+  }
+
+  private waitForImage(runtime: ContainerRuntime): Promise<string | null> {
+    const { signal } = this.waiting;
+    return new Promise((resolve, reject) => {
+      if (signal.aborted) return resolve(null);
+      signal.addEventListener("abort", () => resolve(null), { once: true });
+      this.driver.imageFor(runtime, this.launch.slot, signal).then(
+        (image) => resolve(signal.aborted ? null : image),
+        (error: unknown) => (signal.aborted ? resolve(null) : reject(error)),
+      );
+    });
   }
 
   private spawn(runtime: ContainerRuntime, image: string): void {
@@ -187,6 +210,7 @@ class ContainerInstance implements SlotInstance {
       },
     );
     this.client = client;
+    this.driver.recordImage(this.launch.slot.client_id, image);
     client.stdin.on("error", () => {});
     client.stderr.pipe(this.launch.output, { end: false });
     const closeBridge = bridgePort(
@@ -231,6 +255,7 @@ class ContainerInstance implements SlotInstance {
   private finish(code: number, error: Error | null): void {
     if (this.settled) return;
     this.settled = true;
+    this.driver.forgetImage(this.launch.slot.client_id);
     this.settle({ code, error });
   }
 }
@@ -243,6 +268,7 @@ export class ContainerDriver implements SlotDriver {
   private readonly resolveImage: ContainerDriverOptions["imageFor"];
   private latest: StatusEntry | null = null;
   private prepared: Promise<void> | null = null;
+  private readonly images = new Map<string, string>();
 
   constructor(options: ContainerDriverOptions) {
     this.image = options.image;
@@ -251,10 +277,26 @@ export class ContainerDriver implements SlotDriver {
     this.resolveImage = options.imageFor;
   }
 
-  imageFor(runtime: ContainerRuntime, slot: PoolSlot): Promise<string> {
+  imageFor(
+    runtime: ContainerRuntime,
+    slot: PoolSlot,
+    signal: AbortSignal,
+  ): Promise<string> {
     return this.resolveImage
-      ? this.resolveImage(runtime, slot)
+      ? this.resolveImage(runtime, slot, signal)
       : Promise.resolve(this.image);
+  }
+
+  imageOf(clientId: string): string | null {
+    return this.images.get(clientId) ?? null;
+  }
+
+  recordImage(clientId: string, image: string): void {
+    this.images.set(clientId, image);
+  }
+
+  forgetImage(clientId: string): void {
+    this.images.delete(clientId);
   }
 
   check(): Promise<PlacementStatus> {
