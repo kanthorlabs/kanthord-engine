@@ -44,6 +44,8 @@ const NOT_FOUND = -1;
 const VOLUME_OPTION = "--volume";
 const REMOVE = "rm";
 const FAILED_EXIT = 3;
+const EXISTS_EXIT = 125;
+const COMMAND_COUNT = 5;
 const MEMORY_MB = 4096;
 const BOUNDED_MEMORY_MB = 8192;
 const SHORT_LIMIT_MS = 500;
@@ -97,6 +99,7 @@ function proof(
     hostCode?: number;
     commandLimitMs?: number;
     environmentMemoryMb?: number;
+    existingCache?: boolean;
   } = {},
 ) {
   const log = join(directory, "log");
@@ -121,6 +124,16 @@ function proof(
     resolves: () => true,
     run: (_runtime, args) => {
       appendFileSync(log, `${JSON.stringify([HOST_LINE, ...args])}\n`);
+      if (
+        overrides.existingCache &&
+        args.join(" ") ===
+          cacheVolumeArguments(OWNER, PROJECT_ID, RESOURCE).join(" ")
+      )
+        return Promise.resolve({
+          code: EXISTS_EXIT,
+          stdout: "",
+          stderr: `Error: volume with name ${CACHE_VOLUME} already exists: volume already exists`,
+        });
       return Promise.resolve({
         code: overrides.hostCode ?? 0,
         stdout: "",
@@ -401,6 +414,19 @@ test("the proof container mounts the cache volume of the group after the cache v
     `${NAME}:${HOME}`,
     `${CACHE_VOLUME}:${HOME}/.cache`,
   ]);
+});
+
+test("the proof container starts with the cache volume of the group when the volume exists", async (t) => {
+  const { options, lines } = proof(temporary(t), { existingCache: true });
+  const results = await proveInImage(
+    options,
+    input(),
+    new AbortController().signal,
+  );
+  const start = ofKind(lines(), HOST_LINE).find((line) => line[0] === START);
+  assert.ok(start);
+  assert.ok(start.includes(`${CACHE_VOLUME}:${HOME}/.cache`));
+  assert.equal(results.length, COMMAND_COUNT);
 });
 
 test("the run removes the home volume and never the cache volume", async (t) => {

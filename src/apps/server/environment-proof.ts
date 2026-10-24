@@ -24,6 +24,7 @@ import {
   absentVolume,
   cacheVolumeArguments,
   cacheVolumeName,
+  presentVolume,
   removeArguments,
   type RuntimeHost,
 } from "./container-runtime.ts";
@@ -243,6 +244,20 @@ async function requireSuccess(
     throw proofFailure(step, answer.stderr.slice(-OUTPUT_TAIL_BYTES));
 }
 
+async function ensureCacheVolume(options: ProofOptions, input: ProofInput) {
+  const answer = await options.host.run(
+    options.runtime,
+    cacheVolumeArguments(
+      options.owner,
+      input.project_id,
+      input.resource_identity,
+    ),
+    PROOF_COMMAND_TIMEOUT_MS,
+  );
+  if (!presentVolume(answer))
+    throw proofFailure("cache volume", answer.stderr.slice(-OUTPUT_TAIL_BYTES));
+}
+
 async function feedBundle(
   options: ProofOptions,
   name: string,
@@ -362,15 +377,7 @@ export async function proveInImage(
       `${OWNER_LABEL}=${options.owner}`,
       name,
     ]);
-    await requireSuccess(
-      options,
-      "cache volume",
-      cacheVolumeArguments(
-        options.owner,
-        input.project_id,
-        input.resource_identity,
-      ),
-    );
+    await ensureCacheVolume(options, input);
     await requireSuccess(
       options,
       "start",
