@@ -17,6 +17,7 @@ import {
   CancellationContext,
   cancelled,
   type Context,
+  DeadlineExceeded,
   reasonOf,
 } from "../kernel/context.ts";
 import { Diagnostic, OperationError, asError } from "../kernel/errors.ts";
@@ -2039,7 +2040,16 @@ export class ProjectService implements Service, ProjectBindings {
                 observe?.(error.code, repositoryFailureReason(error));
               throw error;
             }
+            const expired = () =>
+              context.signal.reason instanceof DeadlineExceeded;
             try {
+              using deadlineObserver = addAbortListener(context.signal, () => {
+                if (expired())
+                  observe?.(
+                    ProjectErrorCode.RepositorySshUnreachable,
+                    ResourceFailureReason.DeadlineExceeded,
+                  );
+              });
               await this.repositoryConnector.gitLsRemote(
                 access.address,
                 context,
@@ -2047,10 +2057,11 @@ export class ProjectService implements Service, ProjectBindings {
                 access.ssh,
               );
             } catch (error) {
-              observe?.(
-                ProjectErrorCode.RepositorySshUnreachable,
-                gitFailureReason(error),
-              );
+              if (!expired())
+                observe?.(
+                  ProjectErrorCode.RepositorySshUnreachable,
+                  gitFailureReason(error),
+                );
               throw error;
             }
             return ResourceStatus.Healthy;

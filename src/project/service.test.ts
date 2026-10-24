@@ -2,7 +2,10 @@ import assert from "node:assert/strict";
 import { existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
 import { test, type TestContext } from "node:test";
-import { setImmediate as turn } from "node:timers/promises";
+import {
+  setTimeout as delay,
+  setImmediate as turn,
+} from "node:timers/promises";
 import { detectEnvironment } from "./detection.ts";
 import {
   DEFAULT_ENVIRONMENT_BUILD_TIMEOUT_MS,
@@ -20,6 +23,7 @@ import {
   HealthScope,
   ResourceFailureReason,
   ResourceStatus,
+  type ResourceStatusValue,
 } from "../kernel/health.ts";
 import { HealthStatus } from "../kernel/service.ts";
 import {
@@ -37,6 +41,7 @@ import { testHumanIdentity } from "../kernel/test-identity.ts";
 import { redactingLogger, temporary } from "../kernel/test-support.ts";
 import { IdentityKind } from "../kernel/caller.ts";
 import { Diagnostic, OperationError } from "../kernel/errors.ts";
+import { GIT_DEADLINE_EXCEEDED } from "../repository/git-failure.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import { AgentErrorCode, type HolderScope } from "../agent/contract.ts";
 import { SERVER_HOLDER } from "../custody/contract.ts";
@@ -1260,6 +1265,9 @@ const UNKNOWN_AGENT = "undeclared";
 const MODEL = "model";
 const REPOSITORY_ADDRESS = "git@github.com:owner/repo.git";
 const HEALTH_DEADLINE_MS = 1000;
+const SLOW_CHECK_DEADLINE_MS = 100;
+const SLOW_CHECK_ROUNDS = 5;
+const AGENT_CLEANUP_DELAY_MS = 20;
 const ALIAS_ADDRESS = "git@github:owner/alias.git";
 const UNPINNED_ADDRESS = "git@ssh.github.com:owner/unpinned.git";
 const SECOND_REPOSITORY_ADDRESS = "git@github.com:owner/other.git";
@@ -3812,6 +3820,42 @@ test("resource checks pass the caller deadline and distinguish success, failure 
       subject: { kind: SshIdentitySubjectKind.Binding, binding_id: bindingId },
     })),
   );
+});
+
+test("a binding check observes deadline_exceeded before a deadline race settles, every time", async (t) => {
+  const f = fixture(t, {
+    repositoryConnector: {
+      async gitLsRemote(_address, context) {
+        await cancelled(context.signal);
+        await delay(AGENT_CLEANUP_DELAY_MS);
+        throw new Diagnostic(GIT_FAILED, "ls-remote: git failed.", {
+          cause: new Error(`ls-remote: ${GIT_DEADLINE_EXCEEDED}`),
+        });
+      },
+    },
+  });
+  const entry = f.store.transaction((tx) => {
+    const project = insertProject(tx, PROJECT_NAME);
+    persistBindings(tx, project.id, { [REPOSITORY_NAME]: repositoryBinding() });
+    return f.project.resourceInventory(tx)[NO_ITEMS];
+  });
+  assert.ok(entry);
+  for (let round = 0; round < SLOW_CHECK_ROUNDS; round++) {
+    const context = new CancellationContext(
+      background,
+      Date.now() + SLOW_CHECK_DEADLINE_MS,
+    );
+    t.after(() => context.cancel());
+    const observed: string[] = [];
+    const pending: Promise<ResourceStatusValue> = entry.check(
+      context,
+      (_reason, failureReason) => observed.push(failureReason),
+    );
+    await Promise.race([pending, cancelled(context.signal)]);
+    assert.deepEqual(observed, [ResourceFailureReason.DeadlineExceeded]);
+    assert.equal(await pending, ResourceStatus.Unknown);
+    assert.deepEqual(observed, [ResourceFailureReason.DeadlineExceeded]);
+  }
 });
 
 test("resource inventory keeps separate checks for the same repository address across projects", async (t) => {
