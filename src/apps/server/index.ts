@@ -93,6 +93,7 @@ import {
 } from "../../gateway/index.ts";
 import {
   EnvironmentAgent,
+  type EnvironmentModelRuntimeFactory,
   ProjectService,
   ENVIRONMENT_SECRET_PLATFORMS,
   enforceBindingPlacements,
@@ -229,6 +230,7 @@ export function composeServices(options: {
   bindings?: ProjectBindings;
   registrations?: WorkerRegistrations;
   workbenchModelRuntimeFactory?: WorkbenchModelRuntimeFactory;
+  environmentModelRuntimeFactory?: EnvironmentModelRuntimeFactory;
   inventoryOverrides?: Partial<ResourceInventories>;
   intake?: { pendingEventLimit?: number; pollIntervalMs?: number };
   serverSlotDriver?: SlotDriver;
@@ -855,6 +857,7 @@ export function composeServices(options: {
       project.exportRepository(bindingId, commit, directory, context),
     credentialMetadata: (tx, name) =>
       custody.credentialMetadata(tx, name, SERVER_HOLDER),
+    modelRuntimeFactory: options.environmentModelRuntimeFactory,
   });
   const project: ProjectService = new ProjectService({
     config: options.config.project,

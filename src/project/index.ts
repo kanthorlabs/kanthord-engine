@@ -7,7 +7,10 @@ export {
   EnvironmentSpan,
   type EnvironmentTelemetry,
 } from "./environment-telemetry.ts";
-export { EnvironmentAgent } from "./environment-agent.ts";
+export {
+  EnvironmentAgent,
+  type EnvironmentModelRuntimeFactory,
+} from "./environment-agent.ts";
 export type {
   EnvironmentProbeRunner,
   ProbeAnswer,

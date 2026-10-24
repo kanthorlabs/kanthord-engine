@@ -285,6 +285,7 @@ class Harness {
   script: (tools: ToolDefinition[]) => Promise<void> = async () => {};
   sessionInputs: EnvironmentSessionInput[] = [];
   sessionEnds = 0;
+  agentEnabled = false;
   writes: unknown[] = [];
   probes: Array<{
     tags: readonly string[];
@@ -409,7 +410,7 @@ class Harness {
         this.woken.push(projectId);
       },
       environmentAgent: {
-        enabled: () => true,
+        enabled: () => this.agentEnabled,
         run: async (input) => {
           this.sessionInputs.push(input);
           const handle: EnvironmentSessionHandle = {
@@ -438,7 +439,7 @@ class Harness {
         const written = environment as { invalid?: boolean } & Environment;
         if (written.invalid === true)
           return { written: false, reason: INVALID_DOCUMENT };
-        this.resolution = { ...REPOSITORY, document: written };
+        this.resolution = { ...STORED, document: written };
         return { written: true };
       },
       environmentReady: async (projectId, identity, tag) => {
@@ -2973,5 +2974,277 @@ test(
     await startSession(h);
     assert.equal(h.logged(SESSION_FAILED).length, ONE_CALL);
     assert.equal(h.state().repairing, false);
+  },
+);
+
+const UNIVERSAL: GroupResolution = { ...REPOSITORY, source: "universal" };
+const REPAIR_LIMIT = 3;
+const ABORT_ERROR = "AbortError";
+
+function agentHarness(
+  t: TestContext,
+  resolution: GroupResolution = UNIVERSAL,
+): Harness {
+  const h = new Harness(t);
+  h.resolution = resolution;
+  h.agentEnabled = true;
+  h.open();
+  h.proveResults = FAILING_RESULTS;
+  return h;
+}
+
+async function provedAgentHarness(
+  t: TestContext,
+  resolution: GroupResolution = UNIVERSAL,
+): Promise<Harness> {
+  const h = agentHarness(t, resolution);
+  h.existing.add(h.provedOf(h.digest()));
+  await h.compute();
+  assert.equal(h.state().status, EnvironmentStatus.Ready);
+  return h;
+}
+
+async function sessionsEnded(h: Harness, count: number): Promise<void> {
+  await h.until(
+    () =>
+      h.sessionInputs.length >= count &&
+      h.onboarding.states(PROJECT).every((state) => !state.repairing),
+  );
+  assert.equal(h.sessionInputs.length, count);
+}
+
+async function failRun(
+  h: Harness,
+  group: RepositoryGroup = APP,
+): Promise<void> {
+  await h.compute(group);
+  await h.ended();
+}
+
+test(
+  "a first run that fails at the image target with the source universal starts one session after it counts a repair",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const h = agentHarness(t);
+    const repairsInSession: Array<number | undefined> = [];
+    h.script = async () => {
+      repairsInSession.push(h.proofOf(h.digest())?.repairs);
+    };
+    await failRun(h);
+    await sessionsEnded(h, ONE_CALL);
+    assert.deepEqual(repairsInSession, [ONE_CALL]);
+    assert.equal(h.sessionInputs[0]?.failure.repairs, ONE_CALL);
+    assert.equal(h.state().status, EnvironmentStatus.Failed);
+    assert.equal(h.state().repairs, ONE_CALL);
+  },
+);
+
+test(
+  "the source detected starts a session and the source repository starts none",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const detected = agentHarness(t, { ...REPOSITORY, source: "detected" });
+    await failRun(detected);
+    await sessionsEnded(detected, ONE_CALL);
+    const repository = agentHarness(t, REPOSITORY);
+    await failRun(repository);
+    assert.equal(repository.sessionInputs.length, NO_CALLS);
+    assert.equal(repository.state().repairs, NO_REPAIRS);
+  },
+);
+
+test(
+  "the source none starts a session at an execution failure",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const h = agentHarness(t, NOTHING);
+    await h.compute();
+    h.onboarding.environmentFailed(failureInput(h, { digests: digestsOf(h) }));
+    await sessionsEnded(h, ONE_CALL);
+  },
+);
+
+function digestsOf(h: Harness): Record<string, string> {
+  const sum = h.state().digest;
+  assert.ok(sum);
+  return { [APP.resource_identity]: sum };
+}
+
+test(
+  "the source stored starts no session for a human write and one after a session write",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const human = agentHarness(t, STORED);
+    await failRun(human);
+    assert.equal(human.sessionInputs.length, NO_CALLS);
+    const h = agentHarness(t);
+    h.script = async (tools) => {
+      await writeTool(tools, agentDocument(ONE_CALL));
+    };
+    await failRun(h);
+    await sessionsEnded(h, ONE_CALL);
+    h.script = async () => {};
+    h.onboarding.environmentFailed(failureInput(h));
+    await sessionsEnded(h, TWO_CALLS);
+    h.bindings = facts(
+      [{ ...APP, binding_id: RENAMED_BINDING_ID }],
+      [container("app")],
+    );
+    h.onboarding.bindingsChanged(PROJECT);
+    await h.compute();
+    h.onboarding.environmentFailed(failureInput(h));
+    assert.equal(h.sessionInputs.length, TWO_CALLS);
+  },
+);
+
+test(
+  "a failure at the host target starts no session",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const h = agentHarness(t);
+    h.bindings = facts([APP], []);
+    await failRun(h);
+    assert.equal(h.state().status, EnvironmentStatus.Failed);
+    assert.equal(h.sessionInputs.length, NO_CALLS);
+  },
+);
+
+test(
+  "an execution failure at the remote target starts no session",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const h = agentHarness(t);
+    h.bindings = facts([APP], [remoteWorker]);
+    await h.compute();
+    h.onboarding.environmentFailed(failureInput(h, { digests: digestsOf(h) }));
+    assert.equal(h.state().target, EnvironmentTarget.Remote);
+    assert.equal(h.sessionInputs.length, NO_CALLS);
+  },
+);
+
+test(
+  "a failure with no enabled env@1 starts no session and counts no repair",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const h = agentHarness(t);
+    h.agentEnabled = false;
+    await failRun(h);
+    assert.equal(h.sessionInputs.length, NO_CALLS);
+    assert.equal(h.state().repairs, NO_REPAIRS);
+    assert.equal(h.state().status, EnvironmentStatus.Failed);
+  },
+);
+
+test(
+  "environmentFailed at the image target starts a session and counts a repair",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const h = await provedAgentHarness(t);
+    h.onboarding.environmentFailed(failureInput(h));
+    await sessionsEnded(h, ONE_CALL);
+    assert.equal(h.proofOf(h.digest())?.repairs, ONE_CALL);
+    assert.equal(h.sessionInputs[0]?.failure.repairs, ONE_CALL);
+  },
+);
+
+test(
+  "four failures of one digest start 3 sessions",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const h = await provedAgentHarness(t);
+    for (let failure = 1; failure <= REPAIR_LIMIT + ONE_CALL; failure++) {
+      h.onboarding.environmentFailed(failureInput(h));
+      await sessionsEnded(h, Math.min(failure, REPAIR_LIMIT));
+    }
+    assert.equal(h.proofOf(h.digest())?.repairs, REPAIR_LIMIT);
+    assert.equal(h.sessionInputs.length, REPAIR_LIMIT);
+  },
+);
+
+test(
+  "a failed run of an active session starts no second session",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const h = agentHarness(t);
+    h.script = async (tools) => {
+      const answer = await writeTool(tools, agentDocument(ONE_CALL));
+      assert.equal(answer.outcome, FAILED);
+    };
+    await failRun(h);
+    await sessionsEnded(h, ONE_CALL);
+    await h.ended(TWO_CALLS);
+    assert.equal(h.sessionInputs.length, ONE_CALL);
+  },
+);
+
+test(
+  "a session that ends after 5 failed attempts starts no new session",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const h = agentHarness(t);
+    h.script = async (tools) => {
+      for (let attempt = 1; attempt <= ENV_AGENT_ATTEMPT_LIMIT; attempt++)
+        await writeTool(tools, agentDocument(attempt));
+    };
+    await failRun(h);
+    await sessionsEnded(h, ONE_CALL);
+    await h.ended(ENV_AGENT_ATTEMPT_LIMIT + ONE_CALL);
+    assert.equal(h.sessionInputs.length, ONE_CALL);
+  },
+);
+
+test(
+  "a failure while a session of another group runs starts a session for this group",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const h = agentHarness(t);
+    h.bindings = facts([APP, DOCS], [container("app"), container("docs")]);
+    const gate = new Deferred();
+    h.script = () => gate.promise;
+    await failRun(h);
+    await h.until(() => h.state().repairing);
+    await h.compute(DOCS);
+    await h.ended(TWO_CALLS);
+    await h.until(() => h.state(DOCS).repairing);
+    assert.equal(h.sessionInputs.length, TWO_CALLS);
+    gate.release();
+    await sessionsEnded(h, TWO_CALLS);
+  },
+);
+
+test(
+  "a rebuild removes the proof file and the next failure starts a session with one repair",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const h = agentHarness(t);
+    const repairsInSession: Array<number | undefined> = [];
+    h.script = async () => {
+      repairsInSession.push(h.proofOf(h.digest())?.repairs);
+    };
+    await failRun(h);
+    await sessionsEnded(h, ONE_CALL);
+    await h.onboarding.rebuild(PROJECT, APP.binding_id);
+    await sessionsEnded(h, TWO_CALLS);
+    assert.deepEqual(repairsInSession, [ONE_CALL, ONE_CALL]);
+  },
+);
+
+test(
+  "the stop of the component aborts each running session",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const h = agentHarness(t);
+    const gate = new Deferred();
+    h.script = () => gate.promise;
+    await failRun(h);
+    await h.until(() => h.state().repairing);
+    const signal = h.sessionInputs[0]?.context.signal;
+    assert.ok(signal);
+    assert.equal(signal.aborted, false);
+    await h.onboarding.stop();
+    assert.equal(signal.aborted, true);
+    assert.equal((signal.reason as Error).name, ABORT_ERROR);
+    gate.release();
+    await sessionsEnded(h, ONE_CALL);
   },
 );

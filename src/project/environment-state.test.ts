@@ -15,6 +15,7 @@ import {
   type CommandResult,
   type EnvironmentDigestInput,
   type ProofFile,
+  type ProofFileInput,
 } from "./environment-state.ts";
 
 const MIXED_IDENTITY = "repository:github:Acme/My_App";
@@ -31,6 +32,9 @@ const LONG_PATH_KEPT = 180;
 const TAIL_LIMIT = 4096;
 const PRIVATE_MODE = 0o600;
 const MODE_MASK = 0o777;
+const KEPT_REPAIRS = 2;
+const NO_REPAIRS = 0;
+const FAILED = "failed";
 
 function input(
   override: Partial<EnvironmentDigestInput> = {},
@@ -319,4 +323,41 @@ test("a proof file that fails the schema reads as absent", (t) => {
     JSON.stringify({ ...proofFile(sum), repairs: -1 }),
   );
   assert.equal(files.read(path, sum), null);
+});
+
+test("a write keeps the repairs of the file of the same digest and a new file holds 0", (t) => {
+  const files = new ProofFiles(temporary(t));
+  const path = "repository/github/acme/app";
+  const sum = "e".repeat(64);
+  const other = "f".repeat(64);
+  const withoutRepairs = (file: ProofFile): ProofFileInput => ({
+    ...file,
+    repairs: undefined,
+  });
+  files.write(path, proofFile(sum, { repairs: KEPT_REPAIRS }));
+  files.write(path, withoutRepairs(proofFile(sum, { outcome: FAILED })));
+  assert.equal(files.read(path, sum)?.repairs, KEPT_REPAIRS);
+  assert.equal(files.read(path, sum)?.outcome, FAILED);
+  files.write(path, withoutRepairs(proofFile(other)));
+  assert.equal(files.read(path, other)?.repairs, NO_REPAIRS);
+});
+
+test("incrementRepairs writes repairs plus one atomically and answers the new value", (t) => {
+  const root = temporary(t);
+  const files = new ProofFiles(root);
+  const path = "repository/github/acme/app";
+  const sum = "a".repeat(64);
+  files.write(path, proofFile(sum, { repairs: 1 }));
+  assert.equal(files.incrementRepairs(path, sum), KEPT_REPAIRS);
+  assert.equal(files.incrementRepairs(path, sum), KEPT_REPAIRS + 1);
+  assert.equal(files.read(path, sum)?.repairs, KEPT_REPAIRS + 1);
+  assert.equal(
+    statSync(join(root, path, `${sum}.json`)).mode & MODE_MASK,
+    PRIVATE_MODE,
+  );
+  assert.deepEqual(
+    readdirSync(join(root, path)).filter((name) => name.endsWith(".tmp")),
+    [],
+  );
+  assert.throws(() => files.incrementRepairs(path, "b".repeat(64)));
 });

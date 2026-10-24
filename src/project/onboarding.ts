@@ -96,6 +96,7 @@ const NO_ATTEMPTS = 0;
 
 export const ENV_AGENT_ATTEMPT_LIMIT = 5;
 export const ENV_AGENT_TOOL_CALL_LIMIT = 64;
+export const ENV_AGENT_REPAIR_LIMIT = 3;
 
 export const AttemptRefusal = {
   AttemptLimit: "attempt_limit",
@@ -300,6 +301,16 @@ function emptyRecord(
   };
 }
 
+function repairableSource(record: GroupRecord): boolean {
+  if (record.source === EnvironmentSource.Stored)
+    return record.environment_from_agent;
+  return (
+    record.source === EnvironmentSource.Detected ||
+    record.source === EnvironmentSource.Universal ||
+    record.source === EnvironmentSource.None
+  );
+}
+
 function decidedStatusOf(record: GroupRecord): EnvironmentStatus | null {
   if (!record.read_succeeded) return EnvironmentStatus.Pending;
   if (record.proof?.outcome === ProofOutcome.Failed)
@@ -452,6 +463,7 @@ export class Onboarding {
   }
 
   cancel(): void {
+    for (const record of this.records.values()) record.session?.abort();
     this.context.cancel();
     for (const timer of this.retries.values()) clearTimeout(timer);
     this.retries.clear();
@@ -631,6 +643,7 @@ export class Onboarding {
       return;
     record.binding_id = group.binding_id;
     record.binding_name = group.binding_name;
+    record.environment_from_agent = false;
     record.read_succeeded = false;
     if (record.run_started_at === null) {
       record.step = null;
@@ -845,6 +858,7 @@ export class Onboarding {
     )
       return;
     assert.ok(record.digest !== null, "A queued group holds a digest.");
+    const ranForSession = record.session !== null;
     const now = this.dependencies.now();
     record.run_started_at = now;
     record.step_started_at = now;
@@ -887,6 +901,27 @@ export class Onboarding {
       this.dependencies.wake(record.project_id);
     if (this.marked.delete(key))
       this.trigger(record.project_id, record.resource_identity);
+    if (completed && verdict?.outcome === ProofOutcome.Failed && !ranForSession)
+      this.considerSession(record);
+  }
+
+  private considerSession(group: GroupRecord): void {
+    const key = keyOf(group.project_id, group.resource_identity);
+    if (this.records.get(key) !== group || group.session !== null) return;
+    if (group.target !== EnvironmentTarget.Image || !repairableSource(group))
+      return;
+    if (!this.dependencies.environmentAgent.enabled()) return;
+    assert.ok(group.digest !== null, "A failed group holds a digest.");
+    const { proofs } = this.dependencies;
+    const path = environmentPath(group.resource_identity);
+    const proof = proofs.read(path, group.digest);
+    if (proof === null || proof.repairs >= ENV_AGENT_REPAIR_LIMIT) return;
+    const failure = {
+      ...proof,
+      repairs: proofs.incrementRepairs(path, group.digest),
+    };
+    group.proof = failure;
+    void this.startSession(group, failure);
   }
 
   private emit(trace: ServerTrace, contribution: EnvironmentContribution) {
@@ -1418,6 +1453,7 @@ export class Onboarding {
       };
       proofs.write(environmentPath(identity), file);
       record.proof = file;
+      this.considerSession(record);
     }
     this.notify();
   }

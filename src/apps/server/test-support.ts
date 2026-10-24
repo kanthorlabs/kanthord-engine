@@ -554,6 +554,9 @@ export async function gatewayFixture(
     workbenchModelRuntimeFactory?: Parameters<
       typeof composeServices
     >[0]["workbenchModelRuntimeFactory"];
+    environmentModelRuntimeFactory?: Parameters<
+      typeof composeServices
+    >[0]["environmentModelRuntimeFactory"];
     stateDirectory?: string;
     serverSlotLimit?: number;
     containerImage?: string;
@@ -630,6 +633,7 @@ export async function gatewayFixture(
     trackingStore,
     stateDirectory: options.stateDirectory ?? temporary(t),
     workbenchModelRuntimeFactory: options.workbenchModelRuntimeFactory,
+    environmentModelRuntimeFactory: options.environmentModelRuntimeFactory,
     registry: options.registry,
     health: options.health ?? new HealthRegistry(),
     repositoryConnector: options.repositoryConnector,
