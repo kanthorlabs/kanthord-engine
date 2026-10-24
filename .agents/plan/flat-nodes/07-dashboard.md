@@ -16,8 +16,6 @@ This plan moves the dashboard of `kanthorlabs/kanthord-apps` onto the engine con
 
 Out of scope:
 
-- The persona files `.claude/agents/*.md` and `.opencode/agents/*.md` (decision D21).
-- `scripts/lane-check.test.sh`. Its paths name the plan pipeline, not a Mission node (decision D21).
 - A requires editor on the node sheet. No node edit form of the dashboard writes `work` or `requires`.
 
 ## Model

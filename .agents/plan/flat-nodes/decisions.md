@@ -118,11 +118,7 @@ A task is one commit of fewer than about 400 changed lines, except a fixture tas
 
 ## D20 — Main-session paths
 
-A task that edits one of these paths carries the mark `Lane: main session`: engine `AGENTS.md`, `static/`, `docs/`, `scripts/*.test.sh`; apps `mock/`, `.claude/`, `.opencode/`, `scripts/*.test.sh`, `AGENTS.md`. `scripts/lane-check.sh` of `apps` denies the apps paths to every lane role. The root `AGENTS.md:21-24` route sends each plan to a sub-agent outside the lane pipeline, so the mark only names the reviewer duty: the main session reviews each such diff itself.
-
-## D21 — Apps personas
-
-The persona files `apps/.claude/agents/*.md` and `apps/.opencode/agents/*.md` use the vocabulary of the plan pipeline (`.agents/plan/<initiative-slug>/…`), not the Mission node kinds. Plan 07 changes no persona file. `scripts/persona-sync.test.sh` stays green.
+A task that edits one of these paths carries the mark `Lane: main session`: engine `AGENTS.md`, `static/`, `docs/`; apps `mock/`, `.opencode/`, `AGENTS.md`. The mark names the reviewer duty: the main session reviews each such diff itself.
 
 ## D22 — Error tables and documents move with the code
 
