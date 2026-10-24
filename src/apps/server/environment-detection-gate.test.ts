@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFileSync, writeFileSync } from "node:fs";
+import { cpSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test, type TestContext } from "node:test";
 import { simpleGit } from "simple-git";
@@ -64,7 +64,20 @@ appendFileSync(${JSON.stringify(log)}, readFileSync(config, "utf8") + "\\n");
 `;
 }
 
-function memoryRepository(files: Record<string, string>): RepositoryFiles {
+async function memoryRepository(
+  t: TestContext,
+  files: Record<string, string>,
+): Promise<RepositoryFiles> {
+  const seed = join(temporary(t), "seed");
+  mkdirSync(seed);
+  for (const [path, text] of Object.entries(files))
+    writeFileSync(join(seed, path), text);
+  const git = simpleGit(seed);
+  await git.init(["--initial-branch=main"]);
+  await git.addConfig("user.name", "Detection Gate");
+  await git.addConfig("user.email", "detection_gate@example.invalid");
+  await git.add(".");
+  await git.commit("initial", ["--allow-empty"]);
   return {
     resolveBranchCommit: async () => FAKE_COMMIT,
     readFilesAtCommit: async (_address, _commit, paths) =>
@@ -76,14 +89,7 @@ function memoryRepository(files: Record<string, string>): RepositoryFiles {
     listFilesAtCommit: async () => [],
     readObjectIds: async (_address, _commit, paths) => paths.map(() => null),
     cloneSnapshot: async (_address, revision, directory) => {
-      for (const [path, text] of Object.entries(files))
-        writeFileSync(join(directory, path), text);
-      const git = simpleGit(directory);
-      await git.init(["--initial-branch=main"]);
-      await git.addConfig("user.name", "Detection Gate");
-      await git.addConfig("user.email", "detection_gate@example.invalid");
-      await git.add(".");
-      await git.commit("initial", ["--allow-empty"]);
+      cpSync(seed, directory, { recursive: true });
       return revision;
     },
   };
@@ -147,7 +153,7 @@ async function detectionFixture(
     containerRuntimeHost: host,
     environmentDevcontainerCli: () => devcontainer.cli,
     containerSlotDriver: recordingSlotDriver(podman, starts),
-    repositoryFiles: memoryRepository(files),
+    repositoryFiles: await memoryRepository(t, files),
   });
   if (placement === WorkerPlacement.Container) {
     fixture.worker.startPool();
