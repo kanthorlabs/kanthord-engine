@@ -1747,6 +1747,58 @@ test("export and import both formats unchanged", (t) => {
   }
 });
 
+test("a re-import matches a node by the id of its plan file, never by its file name", (t) => {
+  const editedFile = "p.md";
+  const { mission, store, apply, assigned } = importer(t);
+  const first = apply(plan());
+  const exported = store.transaction((tx) =>
+    exportMission(tx, mission.id, ImportFormat.Markdown, exportBindings),
+  );
+  assert.ok("files" in exported);
+  const edited = exported.files.map((file) =>
+    file.filename === editedFile
+      ? { ...file, content: file.content.replace('- "true"', '- "false"') }
+      : file,
+  );
+  assert.notDeepEqual(edited, exported.files);
+  const preview = (files: typeof edited) =>
+    store.transaction((tx) => {
+      const current = readMission(tx, mission.id);
+      assert.ok(current);
+      return prepareImport(
+        tx,
+        current,
+        {
+          format: ImportFormat.Markdown,
+          mission_id: mission.id,
+          mission_version: current.version,
+          reason: REASON,
+          files,
+        },
+        mission.id,
+        bindings,
+        environments,
+        TEXT_MAX_BYTES,
+      ).preview;
+    });
+  const kept = preview(edited);
+  assert.deepEqual(kept.violations, []);
+  assert.deepEqual(kept.updates, [assigned(first, editedFile)]);
+  assert.deepEqual(kept.retirements, []);
+  assert.deepEqual(kept.creates, []);
+  const replacing = preview(
+    edited.map((file) => ({
+      ...file,
+      content: file.content.replace(/^id: .*\n/m, ""),
+    })),
+  );
+  assert.deepEqual(replacing.creates, ["a.md", "o.md", "p.md", "s.md", "t.md"]);
+  assert.deepEqual(
+    replacing.retirements,
+    ["a.md", "o.md", "p.md"].map((name) => assigned(first, name)).sort(),
+  );
+});
+
 test("an import that moves a task revises both owners with moved-out and moved-in", (t) => {
   const { apply, assigned, identified } = importer(t);
   const first = apply(plan());

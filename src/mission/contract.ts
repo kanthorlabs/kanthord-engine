@@ -1120,6 +1120,7 @@ const runnableNodeFields = {
   blocked_context: blockedContextSchema.optional(),
   state: nodeStateSchema,
   attempt: z.number().int().nonnegative(),
+  pinned_revision: z.number().int().positive().nullable(),
   priority: z
     .number()
     .int()

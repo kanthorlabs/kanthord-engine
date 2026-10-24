@@ -859,6 +859,12 @@ components:
               type: integer
               minimum: 0
               maximum: 9007199254740991
+            pinned_revision:
+              anyOf:
+                - type: integer
+                  exclusiveMinimum: 0
+                  maximum: 9007199254740991
+                - type: "null"
             priority:
               type: integer
               minimum: -9007199254740991
@@ -893,6 +899,7 @@ components:
             - pinned_by_attempts
             - state
             - attempt
+            - pinned_revision
             - priority
             - depends_on
             - intent

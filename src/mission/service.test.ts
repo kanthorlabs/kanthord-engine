@@ -2725,6 +2725,32 @@ test("node update refuses an intent change after the first claim with mission.no
   );
 });
 
+test("a node update keeps the pinned revision of the open attempt, and the node record answers it", (t) => {
+  const f = nodeFixture(t);
+  const id = f.implement();
+  assert.equal(f.read(id).pinned_revision, null);
+  f.store.transaction((tx) => {
+    openAttempt(tx, id, FIRST_REVISION, HUMAN_ACTOR, CREATED_AT);
+    tx.database
+      .prepare("UPDATE mission_node SET attempt = ? WHERE id = ?")
+      .run(FIRST_ATTEMPT, id);
+  });
+  const body = updateBody(f, id);
+  f.update(id, {
+    ...body,
+    content: {
+      ...body.content,
+      verifications: [...body.content.verifications, NODE_TEXT],
+    },
+  });
+  const node = f.read(id);
+  assert.equal(node.visible_revision, NEXT_REVISION);
+  assert.equal(node.pinned_revision, FIRST_REVISION);
+  assert.deepEqual(node.pinned_by_attempts, []);
+  f.store.transaction((tx) => closeAttempt(tx, id, FIRST_ATTEMPT, RETIRED_AT));
+  assert.equal(f.read(id).pinned_revision, null);
+});
+
 for (const [label, field, value] of [
   ["an unknown intent", ContentField.Intent, "build"],
   ["a nonlist tags field", ContentField.Tags, "x"],
