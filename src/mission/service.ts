@@ -635,6 +635,7 @@ export class MissionService
               body,
               humanActor(caller),
               this.dependencies.bindings,
+              this.dependencies.environments,
               this.dependencies.workQueue,
               this.dependencies.config.text_max_bytes,
               this.dependencies.schedulerClaims,
@@ -659,6 +660,7 @@ export class MissionService
               body,
               params.mission_id,
               this.dependencies.bindings,
+              this.dependencies.environments,
               this.dependencies.config.text_max_bytes,
             );
             if (prepared.preview.violations.length > NO_VIOLATIONS)
