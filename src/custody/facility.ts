@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { FacilityError } from "../kernel/errors.ts";
 import { canonicalJSON } from "../kernel/json.ts";
 import { isObject } from "../kernel/values.ts";
 import type {
@@ -14,12 +15,7 @@ const grants = new WeakSet<object>();
 const minted = new WeakSet<object>();
 const DEEP_FREEZE_DEPTH_LIMIT = 32;
 
-export class FacilityError extends Error {
-  constructor() {
-    super("The credential facility refuses this use.");
-    this.name = "FacilityError";
-  }
-}
+export { FacilityError };
 
 function deepFrozen<T>(value: T, depth = 0): T {
   assert(depth <= DEEP_FREEZE_DEPTH_LIMIT);

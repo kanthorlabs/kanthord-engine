@@ -181,6 +181,16 @@ export type WorkbenchCredentialsInput = {
 export type WorkbenchCredentialsFn = (
   input: WorkbenchCredentialsInput,
 ) => CredentialStore;
+export type ServerAgentCredentialsInput = {
+  session_id: string;
+  platform: string;
+  requester: () => ServiceIdentity;
+  authorize(
+    tx: Transaction,
+    requester: ServiceIdentity,
+    sessionId: string,
+  ): { credential: string; platform: string };
+};
 export type WorkbenchGrant = Readonly<{
   credential: string;
   platform: string;

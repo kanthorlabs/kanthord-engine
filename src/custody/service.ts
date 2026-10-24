@@ -2,6 +2,7 @@ import { addAbortListener } from "node:events";
 import { z } from "zod";
 import assert from "node:assert/strict";
 import type { Logger } from "pino";
+import type { Credential } from "@earendil-works/pi-ai";
 import {
   background,
   CancellationContext,
@@ -102,6 +103,7 @@ import {
   type MissionAuthorization,
   type Material,
   piCredentialSchema,
+  type ServerAgentCredentialsInput,
   type WorkbenchCredentialsInput,
   type WorkbenchGrant,
 } from "./contract.ts";
@@ -930,9 +932,6 @@ export class CustodyComponent implements Service, CredentialRecords {
   }
 
   workbenchCredentials(input: WorkbenchCredentialsInput) {
-    assert(Object.hasOwn(this.platforms, input.platform));
-    const shape = this.platforms[input.platform]!.secret_shape;
-    assert(shape === SecretShape.ApiKey || shape === SecretShape.OAuth);
     const grant = (tx: Transaction): WorkbenchGrant => {
       const requester = input.requester();
       if (!isHumanIdentity(requester)) throw new FacilityError();
@@ -941,15 +940,71 @@ export class CustodyComponent implements Service, CredentialRecords {
         requester,
         input.session_id,
       );
-      if (platform !== input.platform) throw new FacilityError();
-      return mintWorkbenchGrant({
-        credential,
-        platform,
-        session_id: input.session_id,
-      });
+      return this.grantOf(input, credential, platform);
     };
+    return this.grantedCredentialStore(
+      input.platform,
+      grant,
+      (tx, current, next) => {
+        const row = this.workbenchRow(tx, grant(tx));
+        if (this.executions.liveExecutionsPinning(tx, row.id).length)
+          throw new ExecutionStoreError(
+            "A live execution holds the credential revision.",
+          );
+        applyReport(
+          tx,
+          this.envelopeKey,
+          {
+            credential_id: row.id,
+            digest: digest(current),
+            credential: piCredentialSchema.parse(next),
+          },
+          this.platforms,
+          this.instanceKeys,
+        );
+      },
+    );
+  }
+
+  serverAgentCredentials(input: ServerAgentCredentialsInput) {
+    const grant = (tx: Transaction): WorkbenchGrant => {
+      const requester = input.requester();
+      if (!isServiceIdentity(requester)) throw new FacilityError();
+      const { credential, platform } = input.authorize(
+        tx,
+        requester,
+        input.session_id,
+      );
+      return this.grantOf(input, credential, platform);
+    };
+    return this.grantedCredentialStore(input.platform, grant, () => {
+      throw new FacilityError();
+    });
+  }
+
+  private grantOf(
+    input: { platform: string; session_id: string },
+    credential: string,
+    platform: string,
+  ): WorkbenchGrant {
+    if (platform !== input.platform) throw new FacilityError();
+    return mintWorkbenchGrant({
+      credential,
+      platform,
+      session_id: input.session_id,
+    });
+  }
+
+  private grantedCredentialStore(
+    inputPlatform: string,
+    grant: (tx: Transaction) => WorkbenchGrant,
+    replace: (tx: Transaction, current: Credential, next: Credential) => void,
+  ) {
+    assert(Object.hasOwn(this.platforms, inputPlatform));
+    const shape = this.platforms[inputPlatform]!.secret_shape;
+    assert(shape === SecretShape.ApiKey || shape === SecretShape.OAuth);
     return workbenchCredentialStore({
-      providerId: piProviderId(input.platform),
+      providerId: piProviderId(inputPlatform),
       type: shape,
       release: () =>
         this.store.transaction((tx) => {
@@ -961,24 +1016,7 @@ export class CustodyComponent implements Service, CredentialRecords {
           }
         }),
       replace: (current, next) =>
-        this.store.transaction((tx) => {
-          const row = this.workbenchRow(tx, grant(tx));
-          if (this.executions.liveExecutionsPinning(tx, row.id).length)
-            throw new ExecutionStoreError(
-              "A live execution holds the credential revision.",
-            );
-          applyReport(
-            tx,
-            this.envelopeKey,
-            {
-              credential_id: row.id,
-              digest: digest(current),
-              credential: piCredentialSchema.parse(next),
-            },
-            this.platforms,
-            this.instanceKeys,
-          );
-        }),
+        this.store.transaction((tx) => replace(tx, current, next)),
     });
   }
 
