@@ -544,6 +544,34 @@ export default tseslint.config(
             },
             {
               from: element("service", {
+                captured: { name: "scheduler" },
+                fileInternalPath: "claim.test.ts",
+              }),
+              allow: [
+                {
+                  to: element("service", {
+                    captured: { name: "project" },
+                    fileInternalPath: "onboarding.ts",
+                  }),
+                },
+              ],
+            },
+            {
+              from: element("service", {
+                captured: { name: "worker" },
+                fileInternalPath: "execution-setup.test.ts",
+              }),
+              allow: [
+                {
+                  to: element("service", {
+                    captured: { name: "project" },
+                    fileInternalPath: "onboarding.ts",
+                  }),
+                },
+              ],
+            },
+            {
+              from: element("service", {
                 captured: { name: "project" },
                 fileInternalPath: "environment-secret.test.ts",
               }),

@@ -257,6 +257,7 @@ class Harness {
   workerEnvironment: string | null = "app";
   resolution: GroupResolution | Error = REPOSITORY;
   resolveCalls: Array<{ bindingId: string; target: EnvironmentTarget }> = [];
+  bindingsCalls = 0;
   resolveGate: Deferred | null = null;
   buildGate: Deferred | null = new Deferred();
   proveGate: Deferred | null = new Deferred();
@@ -381,8 +382,10 @@ class Harness {
       },
     } as unknown as EnvironmentRuntime;
     this.onboarding = new Onboarding({
-      bindingsOf: (projectId) =>
-        projectId === PROJECT ? this.bindings : facts([], []),
+      bindingsOf: (projectId) => {
+        this.bindingsCalls++;
+        return projectId === PROJECT ? this.bindings : facts([], []);
+      },
       workerEnvironmentOf: () => this.workerEnvironment,
       projectIds: () => [PROJECT],
       resolveGroup:
@@ -1817,6 +1820,49 @@ test("bindingsChanged keeps the record of an unchanged binding and computes it a
   await h.until(() => h.resolveCalls.length === TWO_CALLS);
 });
 
+test("environmentClaimed returns before any dependency of the compute runs", async (t) => {
+  const h = new Harness(t);
+  h.onboarding.environmentClaimed(PROJECT, APP.resource_identity);
+  assert.equal(h.bindingsCalls, NO_CALLS);
+  await turn();
+  assert.equal(h.bindingsCalls, ONE_CALL);
+});
+
+test("environmentsClaimable for a group with no record answers false before any dependency of the compute runs", async (t) => {
+  const h = new Harness(t);
+  assert.equal(
+    h.onboarding.environmentsClaimable(PROJECT, [APP.resource_identity]),
+    false,
+  );
+  assert.equal(h.bindingsCalls, NO_CALLS);
+  await turn();
+  assert.equal(h.bindingsCalls, ONE_CALL);
+  await h.until(() => h.onboarding.states(PROJECT).length === ONE_CALL);
+});
+
+test("a trigger during a running compute runs the compute once more and starts no parallel compute", async (t) => {
+  const h = new Harness(t);
+  const gate = new Deferred();
+  h.resolveGate = gate;
+  const running = h.compute();
+  await h.until(() => h.resolveCalls.length === ONE_CALL);
+  h.onboarding.environmentClaimed(PROJECT, APP.resource_identity);
+  await turn();
+  await turn();
+  assert.equal(h.bindingsCalls, ONE_CALL);
+  gate.release();
+  await running;
+  assert.equal(h.bindingsCalls, TWO_CALLS);
+});
+
+test("a deferred trigger starts no compute after stop", async (t) => {
+  const h = new Harness(t);
+  h.onboarding.environmentClaimed(PROJECT, APP.resource_identity);
+  await h.onboarding.stop();
+  await turn();
+  assert.equal(h.bindingsCalls, NO_CALLS);
+});
+
 test("environmentsClaimable answers false for a changed ready binding until its computation ends", async (t) => {
   const h = new Harness(t);
   h.existing.add(h.provedOf(h.digest()));
@@ -1852,11 +1898,11 @@ test("start removes the stale runs, computes each binding and collects each path
     [`collect ${stray} null`],
   );
   assert.deepEqual(h.proofs.paths(), [h.pathOf()]);
+  await h.until(() => h.onboarding.states(PROJECT).length === ONE_CALL);
   assert.deepEqual(
     h.resolveCalls.map((call) => call.bindingId),
     [APP.binding_id],
   );
-  await h.until(() => h.onboarding.states(PROJECT).length === ONE_CALL);
 });
 
 const GONE_CACHE = { project_id: PROJECT, resource_identity: STRAY_IDENTITY };
