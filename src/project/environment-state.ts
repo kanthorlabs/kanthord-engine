@@ -177,6 +177,7 @@ export const proofFileSchema = z.strictObject({
   ended_at: timestamp,
 });
 export type ProofFile = z.infer<typeof proofFileSchema>;
+export type ProofFileInput = Omit<ProofFile, "repairs"> & { repairs?: number };
 
 export interface CommandResult {
   phase: ProofPhase;
@@ -275,7 +276,20 @@ export class ProofFiles {
     return parsed.success ? parsed.data : null;
   }
 
-  write(path: string, file: ProofFile): void {
+  write(path: string, file: ProofFileInput): void {
+    const repairs = this.read(path, file.digest)?.repairs ?? file.repairs ?? 0;
+    this.store(path, { ...file, repairs });
+  }
+
+  incrementRepairs(path: string, sum: string): number {
+    const file = this.read(path, sum);
+    if (file === null) throw new Error("The proof file is absent.");
+    const repairs = file.repairs + 1;
+    this.store(path, { ...file, repairs });
+    return repairs;
+  }
+
+  private store(path: string, file: ProofFile): void {
     const directory = join(this.root, path);
     mkdirSync(directory, { recursive: true, mode: PRIVATE_DIRECTORY_MODE });
     const target = this.fileOf(path, file.digest);

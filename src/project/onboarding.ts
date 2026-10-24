@@ -12,8 +12,25 @@ import {
 import { OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import { SpanStatus, type ServerTrace } from "../tracking/contract.ts";
-import { ProjectErrorCode, WorkerPlacement } from "./contract.ts";
+import {
+  ProjectErrorCode,
+  WorkerPlacement,
+  type CheckResult,
+} from "./contract.ts";
 import type { GroupResolution } from "./environment.ts";
+import type {
+  EnvironmentAgent,
+  EnvironmentSessionHandle,
+} from "./environment-agent.ts";
+import {
+  environmentAgentTools,
+  type EnvironmentAgentPort,
+  type WriteAnswer,
+} from "./environment-agent-tools.ts";
+import type {
+  EnvironmentProbeRunner,
+  ProbeCommand,
+} from "./environment-probe-contract.ts";
 import {
   SecretReleaseOutcome,
   type EnvironmentSecrets,
@@ -73,6 +90,38 @@ const SPAN_ID_BYTES = 8;
 const REDACTED = "[redacted]";
 const NO_COMMAND = null;
 const NO_EXIT_CODE = null;
+const SESSION_FAILED = "project.onboarding.session_failed";
+const NO_TOOL_CALLS = 0;
+const NO_ATTEMPTS = 0;
+
+export const ENV_AGENT_ATTEMPT_LIMIT = 5;
+export const ENV_AGENT_TOOL_CALL_LIMIT = 64;
+export const ENV_AGENT_REPAIR_LIMIT = 3;
+
+export const AttemptRefusal = {
+  AttemptLimit: "attempt_limit",
+  WriteRefused: "write_refused",
+} as const;
+export type AttemptRefusal =
+  (typeof AttemptRefusal)[keyof typeof AttemptRefusal];
+export const attemptRefusalSchema = z.enum(AttemptRefusal);
+
+export type AttemptAnswer =
+  | {
+      outcome: ProofOutcome;
+      class: EnvironmentFailureClass | null;
+      tail: string;
+      checks: CheckResult[];
+      attempts_left: number;
+    }
+  | {
+      outcome: null;
+      reason: AttemptRefusal;
+      detail: string | null;
+      attempts_left: number;
+    };
+
+const TOOL_LIMIT_ANSWER = { reason: "tool_limit" } as const;
 
 export interface RepositoryGroup {
   binding_id: string;
@@ -110,6 +159,14 @@ export interface OnboardingDependencies {
   slotImage: string;
   version: string;
   wake(projectId: string): void;
+  environmentAgent: Pick<EnvironmentAgent, "enabled" | "run">;
+  probe: EnvironmentProbeRunner;
+  writeEnvironment(
+    projectId: string,
+    bindingId: string,
+    environment: unknown,
+    context: Context,
+  ): Promise<WriteAnswer>;
   environmentReady(
     projectId: string,
     resourceIdentity: string,
@@ -152,6 +209,8 @@ export interface GroupRecord {
   run_started_at: number | null;
   step_started_at: number | null;
   reason: string | null;
+  session: AbortController | null;
+  environment_from_agent: boolean;
 }
 
 function groupNamed(
@@ -237,7 +296,19 @@ function emptyRecord(
     run_started_at: null,
     step_started_at: null,
     reason: null,
+    session: null,
+    environment_from_agent: false,
   };
+}
+
+function repairableSource(record: GroupRecord): boolean {
+  if (record.source === EnvironmentSource.Stored)
+    return record.environment_from_agent;
+  return (
+    record.source === EnvironmentSource.Detected ||
+    record.source === EnvironmentSource.Universal ||
+    record.source === EnvironmentSource.None
+  );
 }
 
 function decidedStatusOf(record: GroupRecord): EnvironmentStatus | null {
@@ -332,7 +403,7 @@ function stateOf(record: GroupRecord): EnvironmentState {
         : null,
     checks: proof?.checks ?? [],
     repairs: proof?.repairs ?? 0,
-    repairing: false,
+    repairing: record.session !== null,
   };
 }
 
@@ -392,6 +463,7 @@ export class Onboarding {
   }
 
   cancel(): void {
+    for (const record of this.records.values()) record.session?.abort();
     this.context.cancel();
     for (const timer of this.retries.values()) clearTimeout(timer);
     this.retries.clear();
@@ -571,6 +643,7 @@ export class Onboarding {
       return;
     record.binding_id = group.binding_id;
     record.binding_name = group.binding_name;
+    record.environment_from_agent = false;
     record.read_succeeded = false;
     if (record.run_started_at === null) {
       record.step = null;
@@ -785,6 +858,7 @@ export class Onboarding {
     )
       return;
     assert.ok(record.digest !== null, "A queued group holds a digest.");
+    const ranForSession = record.session !== null;
     const now = this.dependencies.now();
     record.run_started_at = now;
     record.step_started_at = now;
@@ -827,6 +901,27 @@ export class Onboarding {
       this.dependencies.wake(record.project_id);
     if (this.marked.delete(key))
       this.trigger(record.project_id, record.resource_identity);
+    if (completed && verdict?.outcome === ProofOutcome.Failed && !ranForSession)
+      this.considerSession(record);
+  }
+
+  private considerSession(group: GroupRecord): void {
+    const key = keyOf(group.project_id, group.resource_identity);
+    if (this.records.get(key) !== group || group.session !== null) return;
+    if (group.target !== EnvironmentTarget.Image || !repairableSource(group))
+      return;
+    if (!this.dependencies.environmentAgent.enabled()) return;
+    assert.ok(group.digest !== null, "A failed group holds a digest.");
+    const { proofs } = this.dependencies;
+    const path = environmentPath(group.resource_identity);
+    const proof = proofs.read(path, group.digest);
+    if (proof === null || proof.repairs >= ENV_AGENT_REPAIR_LIMIT) return;
+    const failure = {
+      ...proof,
+      repairs: proofs.incrementRepairs(path, group.digest),
+    };
+    group.proof = failure;
+    void this.startSession(group, failure);
   }
 
   private emit(trace: ServerTrace, contribution: EnvironmentContribution) {
@@ -1141,6 +1236,202 @@ export class Onboarding {
       : `${this.dependencies.runtime.runtimeName} run -it --rm ${tag} bash`;
   }
 
+  private async startSession(
+    group: GroupRecord,
+    failure: ProofFile,
+  ): Promise<void> {
+    assert.ok(
+      group.source !== null && group.commit !== null,
+      "A session holds its source and its commit.",
+    );
+    const key = keyOf(group.project_id, group.resource_identity);
+    const controller = new AbortController();
+    group.session = controller;
+    this.notify();
+    try {
+      await this.dependencies.environmentAgent.run({
+        project_id: group.project_id,
+        binding_id: group.binding_id,
+        binding_name: group.binding_name,
+        resource_identity: group.resource_identity,
+        commit: group.commit,
+        target: group.target,
+        source: group.source,
+        document: group.document,
+        failure,
+        context: {
+          signal: AbortSignal.any([controller.signal, this.context.signal]),
+          deadline: null,
+        },
+        tools: (handle) => environmentAgentTools(this.sessionPort(key, handle)),
+      });
+    } catch (error) {
+      this.dependencies.logger.error(
+        {
+          err: error,
+          binding: group.binding_name,
+          digest: group.digest,
+        },
+        SESSION_FAILED,
+      );
+    } finally {
+      const current = this.records.get(key);
+      if (current?.session === controller) current.session = null;
+      this.notify();
+    }
+  }
+
+  private sessionPort(
+    key: string,
+    handle: EnvironmentSessionHandle,
+  ): EnvironmentAgentPort {
+    let toolCalls = NO_TOOL_CALLS;
+    let attempts = NO_ATTEMPTS;
+    const overLimit = (): boolean => {
+      toolCalls++;
+      if (toolCalls <= ENV_AGENT_TOOL_CALL_LIMIT) return false;
+      handle.end();
+      return true;
+    };
+    return {
+      probe: async (command, signal) =>
+        overLimit()
+          ? TOOL_LIMIT_ANSWER
+          : this.probeOf(key, handle, command, signal),
+      write: async (environment, signal) => {
+        if (overLimit()) return TOOL_LIMIT_ANSWER;
+        attempts++;
+        return this.attemptOf(key, handle, attempts, environment, signal);
+      },
+    };
+  }
+
+  private liveRecord(key: string): GroupRecord {
+    const record = this.records.get(key);
+    if (record === undefined) throw new Error("The environment group is gone.");
+    return record;
+  }
+
+  private probeOf(
+    key: string,
+    handle: EnvironmentSessionHandle,
+    command: ProbeCommand,
+    signal: AbortSignal,
+  ) {
+    const record = this.liveRecord(key);
+    if (record.digest === null)
+      throw new Error("The environment group holds no digest.");
+    const tag = environmentTagOf(record.resource_identity, record.digest);
+    return this.dependencies.probe.run({
+      tags: [tag, `${tag}${BASE_SUFFIX}`],
+      checkout: handle.checkout,
+      command,
+      signal,
+    });
+  }
+
+  private async attemptOf(
+    key: string,
+    handle: EnvironmentSessionHandle,
+    attempt: number,
+    environment: unknown,
+    signal: AbortSignal,
+  ): Promise<AttemptAnswer> {
+    const attemptsLeft = Math.max(
+      ENV_AGENT_ATTEMPT_LIMIT - attempt,
+      NO_ATTEMPTS,
+    );
+    if (attempt > ENV_AGENT_ATTEMPT_LIMIT) {
+      handle.end();
+      return {
+        outcome: null,
+        reason: AttemptRefusal.AttemptLimit,
+        detail: null,
+        attempts_left: attemptsLeft,
+      };
+    }
+    const lastAttempt = attempt === ENV_AGENT_ATTEMPT_LIMIT;
+    const record = this.liveRecord(key);
+    const written = await this.dependencies.writeEnvironment(
+      record.project_id,
+      record.binding_id,
+      environment,
+      { signal, deadline: null },
+    );
+    if (!written.written) {
+      if (lastAttempt) handle.end();
+      return {
+        outcome: null,
+        reason: AttemptRefusal.WriteRefused,
+        detail: written.reason,
+        attempts_left: attemptsLeft,
+      };
+    }
+    this.liveRecord(key).environment_from_agent = true;
+    await this.compute(record.project_id, record.resource_identity);
+    await this.settled(key, signal);
+    const proof = this.currentProof(this.liveRecord(key));
+    if (lastAttempt || proof.outcome === ProofOutcome.Passed) handle.end();
+    return { ...proof, attempts_left: attemptsLeft };
+  }
+
+  private currentProof(record: GroupRecord) {
+    const file =
+      record.digest === null
+        ? null
+        : this.dependencies.proofs.read(
+            environmentPath(record.resource_identity),
+            record.digest,
+          );
+    if (file === null)
+      return {
+        outcome: ProofOutcome.Failed,
+        class: null,
+        tail: record.reason ?? "",
+        checks: [],
+      };
+    return {
+      outcome: file.outcome,
+      class: file.class,
+      tail: file.tail,
+      checks: file.checks,
+    };
+  }
+
+  private settled(key: string, signal: AbortSignal): Promise<void> {
+    const waiting = AbortSignal.any([signal, this.context.signal]);
+    return new Promise((resolve, reject) => {
+      if (waiting.aborted) return reject(waiting.reason);
+      const check = () => {
+        if (!this.runSettled(key)) return;
+        release();
+        resolve();
+      };
+      const abort = () => {
+        release();
+        reject(waiting.reason);
+      };
+      const release = () => {
+        this.listeners.delete(check);
+        waiting.removeEventListener("abort", abort);
+      };
+      this.listeners.add(check);
+      waiting.addEventListener("abort", abort, { once: true });
+      check();
+    });
+  }
+
+  private runSettled(key: string): boolean {
+    const record = this.records.get(key);
+    return (
+      record === undefined ||
+      (record.step === null &&
+        record.run_started_at === null &&
+        !this.computing.has(key) &&
+        !this.marked.has(key))
+    );
+  }
+
   environmentFailed(input: EnvironmentFailedInput): void {
     const { proofs } = this.dependencies;
     for (const identity of input.resource_identities) {
@@ -1162,6 +1453,7 @@ export class Onboarding {
       };
       proofs.write(environmentPath(identity), file);
       record.proof = file;
+      this.considerSession(record);
     }
     this.notify();
   }

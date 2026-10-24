@@ -88,7 +88,11 @@ import { TAG_MAX_BYTES } from "../kernel/tag.ts";
 import { PlacementIssue } from "../worker/contract.ts";
 import { projectMigrations } from "./migrations.ts";
 import { EnvironmentErrorCode } from "./environment.ts";
-import { inertEnvironmentRuntime } from "./test-support.ts";
+import {
+  inertEnvironmentAgent,
+  inertEnvironmentProbe,
+  inertEnvironmentRuntime,
+} from "./test-support.ts";
 import { Onboarding } from "./onboarding.ts";
 import {
   EnvironmentFailureClass,
@@ -398,6 +402,8 @@ function fixture(t: TestContext, overrides: Partial<Dependencies> = {}) {
       bindingChanges.push(projectId);
     },
     environmentRuntime: inertEnvironmentRuntime(),
+    environmentAgent: inertEnvironmentAgent(),
+    environmentProbe: inertEnvironmentProbe(),
     telemetry: { span: () => undefined },
     slotImage: SLOT_IMAGE,
     version: ENVIRONMENT_VERSION,
