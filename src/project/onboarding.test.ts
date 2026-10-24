@@ -267,6 +267,8 @@ class Harness {
   headCommit: string | Error = BASE_COMMIT;
   headCalls: string[] = [];
   readyError: Error | null = null;
+  tagProvedError: Error | null = null;
+  headGate: Deferred | null = null;
   bindingsCalls = 0;
   resolveGate: Deferred | null = null;
   buildGate: Deferred | null = new Deferred();
@@ -368,6 +370,7 @@ class Harness {
       },
       tagProved: async (tag: string) => {
         this.events.push(`tagProved ${tag}`);
+        if (this.tagProvedError !== null) throw this.tagProvedError;
         this.existing.add(`${tag}${PROVED_SUFFIX}`);
       },
       removeTags: async (tags: readonly string[]) => {
@@ -408,6 +411,7 @@ class Harness {
         }),
       baseCommitOf: async (bindingId) => {
         this.headCalls.push(bindingId);
+        await this.headGate?.promise;
         if (this.headCommit instanceof Error) throw this.headCommit;
         return this.headCommit;
       },
@@ -2456,6 +2460,78 @@ test("a failed group whose target moved reads no commit of its base branch", asy
   await turn();
   assert.deepEqual(h.headCalls, []);
   assert.equal(h.resolveCalls.length, ONE_CALL);
+});
+
+test("a failed group that turns pending at a binding change with a failed read reads again after 60 seconds", async (t) => {
+  const h = await failedGroup(t);
+  h.resolution = new Error(UNREACHABLE);
+  h.bindings = facts([APP], [server]);
+  h.onboarding.bindingsChanged(PROJECT);
+  await h.until(() => h.resolveCalls.length === TWO_CALLS);
+  await h.until(() => h.state().status === EnvironmentStatus.Pending);
+  await turn();
+  t.mock.timers.tick(PENDING_RETRY_MS);
+  await h.until(() => h.resolveCalls.length === THREE_CALLS);
+});
+
+test("a rebuild of a failed group with a failed read reads again after 60 seconds", async (t) => {
+  const h = await failedGroup(t);
+  h.resolution = new Error(UNREACHABLE);
+  await h.onboarding.rebuild(PROJECT, APP.binding_id);
+  assert.equal(h.state().status, EnvironmentStatus.Pending);
+  assert.equal(h.resolveCalls.length, TWO_CALLS);
+  t.mock.timers.tick(PENDING_RETRY_MS);
+  await h.until(() => h.resolveCalls.length === THREE_CALLS);
+});
+
+test("a commit check that ends during a computation of the group starts no second read", async (t) => {
+  const h = await failedGroup(t);
+  h.headGate = new Deferred();
+  h.headCommit = MOVED_COMMIT;
+  t.mock.timers.tick(COMMIT_CHECK_MS);
+  await h.until(() => h.headCalls.length === ONE_CALL);
+  h.resolveGate = new Deferred();
+  const computing = h.compute();
+  await h.until(() => h.resolveCalls.length === TWO_CALLS);
+  h.headGate.release();
+  for (let attempt = 0; attempt < THREE_CALLS; attempt++) await turn();
+  h.resolveGate.release();
+  await computing;
+  for (let attempt = 0; attempt < THREE_CALLS; attempt++) await turn();
+  assert.equal(h.resolveCalls.length, TWO_CALLS);
+  assert.equal(h.state().status, EnvironmentStatus.Failed);
+});
+
+test("an execution failure of a proved image proves again at a new commit and drops the failed proof of the old commit", async (t) => {
+  const h = await readyHarness(t);
+  h.onboarding.environmentFailed(failureInput(h));
+  assert.equal(h.state().status, EnvironmentStatus.Failed);
+  h.existing.add(h.tagOf(h.digest()));
+  h.resolution = { ...REPOSITORY, commit: MOVED_COMMIT };
+  h.proveGate = new Deferred();
+  await h.compute();
+  assert.equal(h.proofOf(h.digest()), null);
+  await h.until(() => h.events.includes(PROVE));
+  assert.equal(h.state().status, EnvironmentStatus.Proving);
+  assert.equal(h.events.includes(BUILD), false);
+  h.openProve();
+  await h.ended();
+  assert.equal(h.state().status, EnvironmentStatus.Ready);
+  assert.equal(h.proofOf(h.digest())?.commit, MOVED_COMMIT);
+});
+
+test("a run that ends pending after a failed tag of the proof reads again after 60 seconds", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const h = new Harness(t);
+  h.tagProvedError = new Error(BOOM);
+  h.open();
+  await h.compute();
+  await h.ended();
+  assert.equal(h.state().status, EnvironmentStatus.Pending);
+  assert.equal(h.state().reason, BOOM);
+  assert.equal(h.resolveCalls.length, ONE_CALL);
+  t.mock.timers.tick(PENDING_RETRY_MS);
+  await h.until(() => h.resolveCalls.length === TWO_CALLS);
 });
 
 test("a pending group holds reason_started_at from its first failed read until a read succeeds", async (t) => {

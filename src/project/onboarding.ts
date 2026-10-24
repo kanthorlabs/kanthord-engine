@@ -218,6 +218,14 @@ export interface GroupRecord {
   environment_from_agent: boolean;
 }
 
+type WaitingStatus =
+  typeof EnvironmentStatus.Pending | typeof EnvironmentStatus.Failed;
+
+interface WaitingRetry {
+  status: WaitingStatus;
+  timer: NodeJS.Timeout;
+}
+
 interface ReadFailure {
   reason: string;
   failure_reason: string | null;
@@ -342,13 +350,8 @@ function repairableSource(record: GroupRecord): boolean {
   );
 }
 
-function proofAtCommit(
-  proof: ProofFile | null,
-  commit: string,
-): ProofFile | null {
-  return proof?.outcome === ProofOutcome.Failed && proof.commit !== commit
-    ? null
-    : proof;
+function staleFailure(proof: ProofFile | null, commit: string): boolean {
+  return proof?.outcome === ProofOutcome.Failed && proof.commit !== commit;
 }
 
 function decidedStatusOf(record: GroupRecord): EnvironmentStatus | null {
@@ -456,7 +459,7 @@ export class Onboarding {
   private readonly again = new Set<string>();
   private readonly marked = new Set<string>();
   private readonly changedWhileReading = new Set<string>();
-  private readonly retries = new Map<string, NodeJS.Timeout>();
+  private readonly retries = new Map<string, WaitingRetry>();
   private readonly loggedReadFailures = new Map<string, string>();
   private readonly queue: string[] = [];
   private draining: Promise<void> | null = null;
@@ -508,7 +511,7 @@ export class Onboarding {
   cancel(): void {
     for (const record of this.records.values()) record.session?.abort();
     this.context.cancel();
-    for (const timer of this.retries.values()) clearTimeout(timer);
+    for (const retry of this.retries.values()) clearTimeout(retry.timer);
     this.retries.clear();
   }
 
@@ -719,41 +722,50 @@ export class Onboarding {
   }
 
   private clearRetry(key: string): void {
-    const timer = this.retries.get(key);
-    if (timer === undefined) return;
-    clearTimeout(timer);
+    const retry = this.retries.get(key);
+    if (retry === undefined) return;
+    clearTimeout(retry.timer);
     this.retries.delete(key);
   }
 
   private retryWhileWaiting(key: string, record: GroupRecord): void {
     const status = statusOf(record);
     if (status === EnvironmentStatus.Pending)
-      return this.retryAfter(key, PENDING_RETRY_MS, () =>
+      return this.retryAfter(key, status, PENDING_RETRY_MS, () =>
         this.trigger(record.project_id, record.resource_identity),
       );
     if (status === EnvironmentStatus.Failed)
       return this.retryAfter(
         key,
+        status,
         COMMIT_CHECK_MS,
         () => void this.checkBaseCommit(key),
       );
     this.clearRetry(key);
   }
 
-  private retryAfter(key: string, delayMs: number, retry: () => void): void {
-    if (this.retries.has(key) || this.context.signal.aborted) return;
+  private retryAfter(
+    key: string,
+    status: WaitingStatus,
+    delayMs: number,
+    retry: () => void,
+  ): void {
+    if (this.retries.get(key)?.status === status) return;
+    this.clearRetry(key);
+    if (this.context.signal.aborted) return;
     const timer = setTimeout(() => {
       this.retries.delete(key);
       retry();
     }, delayMs);
     timer.unref();
-    this.retries.set(key, timer);
+    this.retries.set(key, { status, timer });
   }
 
   private async checkBaseCommit(key: string): Promise<void> {
     const record = this.records.get(key);
-    if (record === undefined || statusOf(record) !== EnvironmentStatus.Failed)
-      return;
+    if (record === undefined) return;
+    if (statusOf(record) !== EnvironmentStatus.Failed)
+      return this.retryWhileWaiting(key, record);
     if (this.busy(key, record) || this.targetMoved(record))
       return this.retryWhileWaiting(key, record);
     let commit: string;
@@ -767,12 +779,13 @@ export class Onboarding {
       this.logReadFailure(key, record, readFailureOf(error));
       return this.retryWhileWaiting(key, record);
     }
+    if (this.context.signal.aborted || this.records.get(key) !== record) return;
     if (
-      this.context.signal.aborted ||
-      this.records.get(key) !== record ||
-      statusOf(record) !== EnvironmentStatus.Failed
+      statusOf(record) !== EnvironmentStatus.Failed ||
+      this.busy(key, record) ||
+      this.targetMoved(record)
     )
-      return;
+      return this.retryWhileWaiting(key, record);
     this.loggedReadFailures.delete(key);
     if (record.proof?.commit === commit)
       return this.retryWhileWaiting(key, record);
@@ -904,6 +917,10 @@ export class Onboarding {
       version,
     });
     const tag = atImage ? environmentTagOf(group.resource_identity, sum) : null;
+    const path = environmentPath(group.resource_identity);
+    const stored = proofs.read(path, sum);
+    const stale = staleFailure(stored, resolved.commit);
+    if (stale) proofs.remove(path, sum);
     const next: GroupRecord = {
       ...(previous ?? emptyRecord(projectId, group, target)),
       binding_id: group.binding_id,
@@ -915,12 +932,11 @@ export class Onboarding {
       secrets,
       digest: sum,
       tag,
-      proof: proofAtCommit(
-        proofs.read(environmentPath(group.resource_identity), sum),
-        resolved.commit,
-      ),
+      proof: stale ? null : stored,
       proved:
-        tag !== null && (await runtime.imageExists(`${tag}${PROVED_SUFFIX}`)),
+        !stale &&
+        tag !== null &&
+        (await runtime.imageExists(`${tag}${PROVED_SUFFIX}`)),
       read_succeeded: true,
       reason: null,
     };
