@@ -34,7 +34,11 @@ import type {
 } from "./environment-probe-contract.ts";
 import { projectMigrations } from "./migrations.ts";
 import { ProjectService } from "./service.ts";
-import { inertEnvironmentRuntime } from "./test-support.ts";
+import {
+  inertEnvironmentAgent,
+  inertEnvironmentProbe,
+  inertEnvironmentRuntime,
+} from "./test-support.ts";
 import {
   insertProject,
   readCurrentBindingSet,
@@ -255,6 +259,8 @@ function storeFixture(t: TestContext, beforeWrite: () => void = () => {}) {
     bindingsChanged: () => {},
     wakeup: { wake: () => {} },
     environmentRuntime: inertEnvironmentRuntime(),
+    environmentAgent: inertEnvironmentAgent(),
+    environmentProbe: inertEnvironmentProbe(),
     telemetry: { span: () => undefined },
     slotImage: "kanthord:test",
     version: "0.0.0",

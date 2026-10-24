@@ -159,6 +159,9 @@ import {
 } from "./store.ts";
 import type { ProjectConfig } from "./config.ts";
 import { ProjectEnvironments, refuseEnvironment } from "./environment.ts";
+import type { EnvironmentAgent } from "./environment-agent.ts";
+import { writeStoredEnvironment } from "./environment-agent-tools.ts";
+import type { EnvironmentProbeRunner } from "./environment-probe-contract.ts";
 import { EnvironmentSecretRoutes } from "./environment-secret.ts";
 import { EnvironmentSecrets } from "./environment-secrets.ts";
 import type { EnvironmentTelemetry } from "./environment-telemetry.ts";
@@ -584,6 +587,8 @@ export interface Dependencies {
   instanceOf: InstanceOf;
   wakeup: SchedulerWakeup;
   environmentRuntime: EnvironmentRuntime;
+  environmentAgent: Pick<EnvironmentAgent, "enabled" | "run">;
+  environmentProbe: EnvironmentProbeRunner;
   telemetry: EnvironmentTelemetry;
   slotImage: string;
   version: string;
@@ -700,6 +705,18 @@ export class ProjectService implements Service, ProjectBindings {
       slotImage: dependencies.slotImage,
       version: dependencies.version,
       wake: (projectId) => this.wakeup.wake(projectId),
+      environmentAgent: dependencies.environmentAgent,
+      probe: dependencies.environmentProbe,
+      writeEnvironment: (projectId, bindingId, environment, context) =>
+        writeStoredEnvironment({
+          environments: this.environments,
+          store: this.operationalStore,
+          identity: this.identity,
+          project_id: projectId,
+          binding_id: bindingId,
+          environment,
+          context,
+        }),
       environmentReady: async (projectId, resourceIdentity, tag) =>
         dependencies.environmentReady(projectId, resourceIdentity, tag),
       logger: dependencies.logger ?? pino({ level: "silent" }),

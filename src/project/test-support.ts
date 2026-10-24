@@ -1,3 +1,5 @@
+import type { EnvironmentAgent } from "./environment-agent.ts";
+import type { EnvironmentProbeRunner } from "./environment-probe-contract.ts";
 import type { EnvironmentRuntime } from "./environment-state.ts";
 
 export function inertEnvironmentRuntime(): EnvironmentRuntime {
@@ -16,4 +18,15 @@ export function inertEnvironmentRuntime(): EnvironmentRuntime {
     cacheVolumes: async () => [],
     removeCacheVolume: async () => {},
   };
+}
+
+export function inertEnvironmentAgent(): Pick<
+  EnvironmentAgent,
+  "enabled" | "run"
+> {
+  return { enabled: () => false, run: async () => "not_enabled" };
+}
+
+export function inertEnvironmentProbe(): EnvironmentProbeRunner {
+  return { run: async () => ({ image: null, exit_code: null, output: "" }) };
 }

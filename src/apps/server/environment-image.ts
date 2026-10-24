@@ -442,7 +442,7 @@ export class EnvironmentImages implements Omit<
     this.removeRuns();
   }
 
-  get runtimeName(): string {
+  get runtimeName(): ContainerRuntime {
     return this.runtime();
   }
 
