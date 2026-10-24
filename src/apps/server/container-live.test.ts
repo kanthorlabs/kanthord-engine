@@ -45,6 +45,8 @@ const TERMINATE_LIMIT_MS = 5000;
 const POLL_MS = 250;
 const STOP_GRACE_MS = 1000;
 const BINDING = "boxed";
+const REPOSITORY = "repo";
+const ENVIRONMENT = { image: `${IMAGE_NAME}:${packageVersion()}` };
 const PROJECT = "project_01ARZ3NDEKTSV4RRFFQ69G5FAV";
 const RESOURCE = `worker:kanthord:${BINDING}`;
 const GENERATION = 1;
@@ -152,6 +154,15 @@ async function removeOwned(runtime: ContainerRuntime, owner: string) {
   ]);
   for (const name of volumes.stdout.split("\n").filter(Boolean))
     await runtimeCall(runtime, ["volume", "rm", "--force", name]);
+  const images = await runtimeCall(runtime, [
+    "images",
+    "--filter",
+    `label=${OWNER_LABEL}=${owner}`,
+    "--format",
+    "{{.ID}}",
+  ]);
+  for (const id of new Set(images.stdout.split("\n").filter(Boolean)))
+    await runtimeCall(runtime, ["rmi", "--force", id]);
 }
 
 async function liveDriver(t: TestContext) {
@@ -208,6 +219,8 @@ async function containerPool(t: TestContext) {
       query: {},
       body: null,
     });
+    const repository = current.bindings[REPOSITORY];
+    assert.ok(repository);
     return call(projectOperations["bindingSet.write"], {
       params,
       query: {},
@@ -215,6 +228,10 @@ async function containerPool(t: TestContext) {
         version: current.version,
         bindings: {
           ...current.bindings,
+          [REPOSITORY]: {
+            ...repository,
+            config: { ...repository.config, environment: ENVIRONMENT },
+          },
           [BINDING]: {
             kind: "worker",
             config: {
@@ -236,7 +253,33 @@ async function containerPool(t: TestContext) {
     }).then((page) =>
       page.items.filter((item) => item.resource_identity === RESOURCE),
     );
-  return { ...setup, stateDirectory, runtime, owner, setCount, instances };
+  const environmentTag = () => {
+    const state = setup.fixture.project
+      .environmentStates(setup.project_id)
+      .find((entry) => entry.binding_name === REPOSITORY);
+    assert.ok(state?.tag);
+    return state.tag;
+  };
+  const imageOf = async (name: string) => {
+    const answer = await runtimeCall(runtime, [
+      "inspect",
+      "--format",
+      "{{.ImageName}}",
+      name,
+    ]);
+    assert.equal(answer.code, SUCCESS_CODE, answer.stderr);
+    return answer.stdout.trim();
+  };
+  return {
+    ...setup,
+    stateDirectory,
+    runtime,
+    owner,
+    setCount,
+    instances,
+    environmentTag,
+    imageOf,
+  };
 }
 
 test(
@@ -259,6 +302,8 @@ test(
     assert.equal(item!.draining, false);
     const clientId = item!.client_id!;
     const name = slotName(clientId);
+    const tag = f.environmentTag();
+    assert.equal(await f.imageOf(name), tag);
 
     const inspected = await runtimeCall(f.runtime, ["inspect", name]);
     assert.equal(inspected.code, SUCCESS_CODE, inspected.stderr);
@@ -353,6 +398,7 @@ test(
       t.signal,
     );
     assert.equal(again!.client_id, clientId);
+    assert.equal(await f.imageOf(name), tag);
     assert.equal(
       await shell(
         f.runtime,
