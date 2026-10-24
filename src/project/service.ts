@@ -110,7 +110,6 @@ import {
   type RepositoryConnector,
   type RepositoryFiles,
   type RepositoryPolicy,
-  type SlotEnvironment,
   type StorageBinding,
   type WorkerAgentsOfFn,
   type WorkerAgentViewFn,
@@ -1592,12 +1591,6 @@ export class ProjectService implements Service, ProjectBindings {
       environment: currentEnvironmentOf(tx, binding),
       repository_environment: noStoredEnvironment(tx, binding.project_id),
     };
-  }
-  slotEnvironment(
-    projectId: string,
-    context: Context,
-  ): Promise<SlotEnvironment | null> {
-    return this.environments.slotEnvironment(projectId, context);
   }
   private bindingFactsOf(projectId: string): BindingFacts {
     const bindings = this.operationalStore.transaction((tx) =>

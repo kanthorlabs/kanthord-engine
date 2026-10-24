@@ -21,7 +21,6 @@ import {
   lifecycleScripts,
   variableRefusal,
 } from "../../kernel/devcontainer.ts";
-import { Diagnostic } from "../../kernel/errors.ts";
 import { ensureDirectory } from "../../kernel/files.ts";
 import { digest } from "../../kernel/json.ts";
 import type { SlotEnvironment } from "../../project/contract.ts";
@@ -32,7 +31,6 @@ import {
   ImageBuildOutcome,
   PROVED_SUFFIX,
   UNCHECKED_SUFFIX,
-  environmentTagOf,
   type EnvironmentFailureClass,
   type EnvironmentRuntime,
   type ImageBuildInput,
@@ -40,7 +38,7 @@ import {
   type CommandResult,
   type ProofInput,
 } from "../../project/environment-state.ts";
-import { ContainerRuntime, type PoolSlot } from "../../worker/contract.ts";
+import { ContainerRuntime } from "../../worker/contract.ts";
 import {
   OUTPUT_TAIL_BYTES,
   buildEnvironment,
@@ -57,24 +55,19 @@ import {
 } from "./container-runtime.ts";
 
 export const ENVIRONMENT_BUILD_TIMEOUT_MS = 1800000;
-export const FAILURE_HOLD_MS = 900000;
 export const EnvironmentImageFailure = {
   BuildFailed: "build_failed",
   ImageInvalid: "image_invalid",
 } as const;
 export type EnvironmentImageFailure =
   (typeof EnvironmentImageFailure)[keyof typeof EnvironmentImageFailure];
-export const ENVIRONMENT_IMAGE_FAILED = "worker.pool.environment_image_failed";
 const IMAGE_CHECK_TIMEOUT_MS = 120000;
 export const IMAGE_COMMAND_TIMEOUT_MS = 60000;
 const RUN_DIRECTORY_PREFIX = "run-";
-const GENERATED_RUN_PREFIX = "slot-";
-const GENERATED_RUN_BYTES = 8;
 const BUILD_DOCUMENT = "devcontainer.json";
 const IMAGE_LIST_FORMAT = "{{.Repository}}:{{.Tag}}";
 const UNTAGGED = "<none>";
 const LINE_BREAK = /\r?\n/;
-const NO_SIGNAL = new AbortController().signal;
 const RUNTIME_ORDER = [ContainerRuntime.Podman, ContainerRuntime.Docker];
 const CHECK_NAME_PREFIX = "kanthord-env-check-";
 const CHECK_NAME_BYTES = 8;
@@ -146,11 +139,6 @@ export interface EnvironmentImageOptions {
   readonly kanthordImage: string;
   readonly version: string;
   readonly stateDirectory: string;
-  readonly fallbackImage: string;
-  slotEnvironment(
-    projectId: string,
-    context: Context,
-  ): Promise<SlotEnvironment | null>;
   exportRepository(
     bindingId: string,
     commit: string,
@@ -158,14 +146,7 @@ export interface EnvironmentImageOptions {
     context: Context,
   ): Promise<void>;
   readonly devcontainerCli?: () => string;
-  readonly now?: () => number;
   readonly buildTimeoutMs?: number;
-}
-
-interface HeldFailure {
-  readonly error: Diagnostic;
-  readonly at: number;
-  readonly bindingId: string;
 }
 
 export interface LayerInput {
@@ -395,17 +376,9 @@ function imageFailure(
   failure: EnvironmentFailureClass,
   tag: string,
   detail: string,
-): Diagnostic {
-  return new Diagnostic(
-    ENVIRONMENT_IMAGE_FAILED,
-    `The environment image ${tag} failed: ${failure}.`,
-    {
-      fields: [
-        ["class", failure],
-        ["tag", tag],
-        ["detail", detail],
-      ],
-    },
+): Error {
+  return new Error(
+    `The environment image ${tag} failed: ${failure}. ${detail}`,
   );
 }
 
@@ -414,8 +387,6 @@ export class EnvironmentImages implements Omit<
   "proveOnHost"
 > {
   private readonly options: EnvironmentImageOptions;
-  private readonly building = new Map<string, Promise<string>>();
-  private readonly failures = new Map<string, HeldFailure>();
   private readonly running = new Set<number>();
   private resolved: ContainerRuntime | null = null;
 
@@ -443,11 +414,7 @@ export class EnvironmentImages implements Omit<
         this.options.host.resolves(candidate),
       ) ?? null;
     if (this.resolved === null)
-      throw new Diagnostic(
-        ENVIRONMENT_IMAGE_FAILED,
-        "No container runtime is available.",
-        { fields: [["class", EnvironmentImageFailure.BuildFailed]] },
-      );
+      throw new Error("No container runtime is available.");
     return this.resolved;
   }
 
@@ -463,84 +430,11 @@ export class EnvironmentImages implements Omit<
         rmSync(join(root, entry), { recursive: true, force: true });
   }
 
-  private now(): number {
-    return (this.options.now ?? Date.now)();
-  }
-
   private answer(args: readonly string[]) {
     return this.options.host.run(
       this.runtime(),
       args,
       IMAGE_COMMAND_TIMEOUT_MS,
-    );
-  }
-
-  private heldFailure(tag: string, bindingId: string): Diagnostic | null {
-    const held = this.failures.get(tag);
-    if (held === undefined) return null;
-    if (held.bindingId === bindingId && this.now() - held.at < FAILURE_HOLD_MS)
-      return held.error;
-    this.failures.delete(tag);
-    return null;
-  }
-
-  async imageFor(runtime: ContainerRuntime, slot: PoolSlot): Promise<string> {
-    this.resolved ??= runtime;
-    const environment = await this.options.slotEnvironment(
-      slot.project_id,
-      background,
-    );
-    if (environment === null) return this.options.fallbackImage;
-    const tag = environmentTagOf(
-      environment.resource_identity,
-      environmentDigest(
-        environment,
-        await this.kanthordImageId(),
-        this.options.version,
-      ),
-    );
-    const failure = this.heldFailure(tag, environment.binding_id);
-    if (failure) throw failure;
-    let pending = this.building.get(tag);
-    if (!pending) {
-      pending = this.ensure(environment, tag).finally(() => {
-        this.building.delete(tag);
-      });
-      this.building.set(tag, pending);
-    }
-    return pending;
-  }
-
-  private async ensure(
-    environment: SlotEnvironment,
-    tag: string,
-  ): Promise<string> {
-    if (await this.imageExists(tag)) return tag;
-    const result = await this.build(
-      {
-        run_id: `${GENERATED_RUN_PREFIX}${randomBytes(GENERATED_RUN_BYTES).toString("hex")}`,
-        binding_id: environment.binding_id,
-        resource_identity: environment.resource_identity,
-        commit: environment.commit,
-        tag,
-        document: environment.document,
-      },
-      NO_SIGNAL,
-    );
-    if (result.outcome === ImageBuildOutcome.Built) return tag;
-    const error = imageFailure(result.class, tag, result.tail);
-    this.failures.set(tag, {
-      error,
-      at: this.now(),
-      bindingId: environment.binding_id,
-    });
-    throw error;
-  }
-
-  private async kanthordImageId(): Promise<string> {
-    return (
-      (await this.imageId(this.options.kanthordImage, NO_SIGNAL)) ??
-      this.options.kanthordImage
     );
   }
 

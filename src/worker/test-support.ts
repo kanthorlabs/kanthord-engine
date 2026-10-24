@@ -86,6 +86,8 @@ export function anthropicSetup(
 export class FakePoolHost implements PoolHost {
   readonly started: PoolSlot[] = [];
   readonly drained: PoolSlot[] = [];
+  readonly restarted: PoolSlot[] = [];
+  readonly images = new Map<string, string>();
   prepared = 0;
   readonly removed: PoolSlot[] = [];
   readonly swept: Array<ReadonlySet<string>> = [];
@@ -120,6 +122,12 @@ export class FakePoolHost implements PoolHost {
   }
   drain(slot: PoolSlot): void {
     this.drained.push({ ...slot });
+  }
+  restart(slot: PoolSlot): void {
+    this.restarted.push({ ...slot });
+  }
+  imageOf(slot: PoolSlot): string | null {
+    return this.images.get(slot.client_id) ?? null;
   }
   stopped = false;
   private readonly identities = new Map<string, string>();

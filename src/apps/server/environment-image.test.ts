@@ -14,14 +14,9 @@ import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 import { temporary } from "../../kernel/test-support.ts";
+import { ContainerRuntime } from "../../worker/contract.ts";
 import { EnvironmentSource } from "../../kernel/devcontainer.ts";
-import { Diagnostic } from "../../kernel/errors.ts";
 import type { SlotEnvironment } from "../../project/contract.ts";
-import {
-  ContainerRuntime,
-  PoolPlacement,
-  type PoolSlot,
-} from "../../worker/contract.ts";
 import {
   BASE_SUFFIX,
   UNCHECKED_SUFFIX,
@@ -30,6 +25,7 @@ import {
   environmentPath,
   environmentTagOf,
   type ImageBuildInput,
+  type ImageBuildResult,
 } from "../../project/environment-state.ts";
 import {
   OWNER_LABEL,
@@ -38,8 +34,6 @@ import {
 } from "./container-runtime.ts";
 import {
   devcontainerBuildArguments,
-  ENVIRONMENT_IMAGE_FAILED,
-  FAILURE_HOLD_MS,
   EnvironmentImageFailure,
   EnvironmentImages,
   environmentDigest,
@@ -55,7 +49,6 @@ const INSPECT = "inspect";
 const EXISTS = "exists";
 const PASSING_CLI = "process.exit(0)";
 const NOT_FOUND = -1;
-const HOST_LINE = "host";
 const PODMAN_LINE = "podman";
 const BUILD_COMMAND = "build";
 const RUN_COMMAND = "run";
@@ -87,16 +80,6 @@ function environment(
   };
 }
 
-const slot: PoolSlot = {
-  project_id: "project",
-  resource_identity: "worker:coder",
-  generation: 1,
-  placement: PoolPlacement.Container,
-  slot: 0,
-  client_id: "client",
-  draining: false,
-};
-
 function images(
   directory: string,
   options: {
@@ -106,9 +89,7 @@ function images(
     variables?: NodeJS.ProcessEnv;
     checkout?: (target: string) => void;
     inspect?: unknown;
-    now?: () => number;
     buildTimeoutMs?: number;
-    slotEnvironment?: () => Promise<SlotEnvironment | null>;
   },
 ) {
   const calls: string[][] = [];
@@ -151,9 +132,6 @@ function images(
     kanthordImage: KANTHORD_IMAGE,
     version: VERSION,
     stateDirectory: directory,
-    fallbackImage: KANTHORD_IMAGE,
-    slotEnvironment:
-      options.slotEnvironment ?? (() => Promise.resolve(options.environment)),
     exportRepository: (_binding, _commit, target) => {
       assert.equal(existsSync(target), true);
       exports.push(target);
@@ -161,7 +139,6 @@ function images(
       return Promise.resolve();
     },
     devcontainerCli: () => cli,
-    ...(options.now === undefined ? {} : { now: options.now }),
     ...(options.buildTimeoutMs === undefined
       ? {}
       : { buildTimeoutMs: options.buildTimeoutMs }),
@@ -173,7 +150,19 @@ function images(
           .split("\n")
           .map((line) => JSON.parse(line) as string[])
       : [];
-  return { built, calls, exports, lines };
+  const build = () =>
+    built.build(
+      {
+        run_id: RUN_ID,
+        binding_id: "binding",
+        resource_identity: IDENTITY,
+        commit: "c".repeat(40),
+        tag: TAG,
+        document: (options.environment ?? environment()).document,
+      },
+      NEVER_ABORTED,
+    );
+  return { built, build, calls, exports, lines };
 }
 
 function fakePodman(directory: string, codes: { build: number; run: number }) {
@@ -324,63 +313,6 @@ test("the layer copies kanthord and tini, adds uid 10001, writes the variables a
   assert.ok(lines.includes(`LABEL ${OWNER_LABEL}="${OWNER}"`));
 });
 
-test("a slot of a project with no environment runs on the container image", async (t) => {
-  const { built, calls } = images(temporary(t), {
-    environment: null,
-    exists: SUCCESS,
-  });
-  assert.equal(
-    await built.imageFor(ContainerRuntime.Podman, slot),
-    KANTHORD_IMAGE,
-  );
-  assert.deepEqual(calls, []);
-});
-
-test("a slot runs on an existing environment image of the current slot image id and builds nothing", async (t) => {
-  const { built, calls, exports } = images(temporary(t), {
-    environment: environment(),
-    exists: SUCCESS,
-  });
-  const tag = environmentTagOf(
-    IDENTITY,
-    environmentDigest(environment(), KANTHORD_IMAGE_ID, VERSION),
-  );
-  assert.equal(await built.imageFor(ContainerRuntime.Podman, slot), tag);
-  assert.deepEqual(calls, [
-    ["image", "inspect", "--format", "{{.Id}}", KANTHORD_IMAGE],
-    ["image", "exists", tag],
-  ]);
-  assert.deepEqual(exports, []);
-});
-
-test("a failed build writes the stored config on a server copy, fails with build_failed and is not retried", async (t) => {
-  const directory = temporary(t);
-  const { built, exports } = images(directory, {
-    environment: environment(),
-    exists: ABSENT,
-    cli: `import { readFileSync } from "node:fs";
-const config = process.argv[process.argv.indexOf("--config") + 1];
-process.stderr.write("config " + readFileSync(config, "utf8"));
-process.exit(3);`,
-  });
-  const failed = (error: unknown) => {
-    assert.ok(error instanceof Diagnostic);
-    assert.equal(error.code, ENVIRONMENT_IMAGE_FAILED);
-    const fields = new Map(error.fields);
-    assert.equal(fields.get("class"), EnvironmentImageFailure.BuildFailed);
-    assert.ok(
-      String(fields.get("detail")).includes(
-        'config {"image":"mcr.microsoft.com/devcontainers/python:3.12"}',
-      ),
-    );
-    return true;
-  };
-  await assert.rejects(built.imageFor(ContainerRuntime.Podman, slot), failed);
-  await assert.rejects(built.imageFor(ContainerRuntime.Podman, slot), failed);
-  assert.equal(exports.length, ONE_BUILD);
-  assert.equal(existsSync(exports[0]!), false);
-});
-
 const REPORT_CLI = `import { existsSync, readFileSync } from "node:fs";
 const value = (flag) => process.argv[process.argv.indexOf(flag) + 1];
 const config = value("--config");
@@ -394,7 +326,7 @@ process.stderr.write(JSON.stringify({
 }));
 process.exit(3);`;
 
-function reportOf(error: unknown): {
+function reportOf(result: ImageBuildResult): {
   config: string;
   workspace: string;
   document: Record<string, unknown>;
@@ -402,27 +334,16 @@ function reportOf(error: unknown): {
   variables: string[];
   values: string[];
 } {
-  assert.ok(error instanceof Diagnostic);
-  return JSON.parse(String(new Map(error.fields).get("detail")));
+  assert.ok(result.outcome === ImageBuildOutcome.Failed);
+  return JSON.parse(result.tail);
 }
 
-function failureOf(error: unknown): { class: string; detail: string } {
-  assert.ok(error instanceof Diagnostic);
-  assert.equal(error.code, ENVIRONMENT_IMAGE_FAILED);
-  const fields = new Map(error.fields);
-  return {
-    class: String(fields.get("class")),
-    detail: String(fields.get("detail")),
-  };
-}
-
-async function buildError(built: EnvironmentImages): Promise<unknown> {
-  try {
-    await built.imageFor(ContainerRuntime.Podman, slot);
-  } catch (error) {
-    return error;
-  }
-  assert.fail("The build did not fail.");
+function failureOf(result: ImageBuildResult): {
+  class: string;
+  detail: string;
+} {
+  assert.ok(result.outcome === ImageBuildOutcome.Failed);
+  return { class: result.class, detail: result.tail };
 }
 
 function writeCheckout(target: string, files: Record<string, string>) {
@@ -435,7 +356,7 @@ function writeCheckout(target: string, files: Record<string, string>) {
 test("the build writes the allowlisted document outside the checkout with absolute build paths", async (t) => {
   const directory = temporary(t);
   let checkout = "";
-  const { built } = images(directory, {
+  const { build } = images(directory, {
     environment: environment({
       name: "dev",
       customizations: { kanthord: { checks: ["node --version"] } },
@@ -453,7 +374,7 @@ test("the build writes the allowlisted document outside the checkout with absolu
       });
     },
   });
-  const report = reportOf(await buildError(built));
+  const report = reportOf(await build());
   assert.equal(report.config.startsWith(checkout), false);
   assert.equal(report.workspace.startsWith(checkout), false);
   assert.deepEqual(report.document, {
@@ -468,7 +389,7 @@ test("the build writes the allowlisted document outside the checkout with absolu
 });
 
 test("the build gives the devcontainer CLI no server variable", async (t) => {
-  const { built } = images(temporary(t), {
+  const { build } = images(temporary(t), {
     environment: environment(),
     exists: ABSENT,
     cli: REPORT_CLI,
@@ -481,7 +402,7 @@ test("the build gives the devcontainer CLI no server variable", async (t) => {
       OPENROUTER_API_KEY: "s3cr3t",
     },
   });
-  const report = reportOf(await buildError(built));
+  const report = reportOf(await build());
   const PLATFORM_VARIABLE = "__CF_";
   assert.deepEqual(
     report.variables
@@ -506,7 +427,7 @@ test("a symlinked .devcontainer of the checkout gets no write and no build path 
     cli: REPORT_CLI,
     checkout: link,
   });
-  reportOf(await buildError(stored.built));
+  reportOf(await stored.build());
   assert.deepEqual(readdirSync(outside), ["Dockerfile"]);
   mkdirSync(join(directory, "dockerfile"));
   const dockerfile = images(join(directory, "dockerfile"), {
@@ -515,14 +436,14 @@ test("a symlinked .devcontainer of the checkout gets no write and no build path 
     cli: REPORT_CLI,
     checkout: link,
   });
-  assert.deepEqual(failureOf(await buildError(dockerfile.built)), {
+  assert.deepEqual(failureOf(await dockerfile.build()), {
     class: EnvironmentImageFailure.BuildFailed,
     detail: "build.dockerfile: the path leaves the checkout",
   });
 });
 
 test("a local feature with a symbolic link fails the build and names the feature", async (t) => {
-  const { built } = images(temporary(t), {
+  const { build } = images(temporary(t), {
     environment: environment({ image: "base", features: { "./local": {} } }),
     exists: ABSENT,
     cli: REPORT_CLI,
@@ -531,7 +452,7 @@ test("a local feature with a symbolic link fails the build and names the feature
       symlinkSync("/etc/passwd", join(target, ".devcontainer/local/passwd"));
     },
   });
-  assert.deepEqual(failureOf(await buildError(built)), {
+  assert.deepEqual(failureOf(await build()), {
     class: EnvironmentImageFailure.BuildFailed,
     detail: "features../local: the feature holds a symbolic link",
   });
@@ -552,32 +473,22 @@ function indexOf(
   return index;
 }
 
-test("the layer gets the final tag only after the check passes, and concurrent slots share one build", async (t) => {
+test("the layer gets the final tag only after the check passes", async (t) => {
   const directory = temporary(t);
-  const { built, lines } = images(directory, {
+  const { build, lines } = images(directory, {
     environment: environment(),
     exists: ABSENT,
     cli: PASSING_CLI,
     variables: fakePodman(directory, { build: SUCCESS, run: SUCCESS }),
   });
-  assert.deepEqual(
-    await Promise.all([
-      built.imageFor(ContainerRuntime.Podman, slot),
-      built.imageFor(ContainerRuntime.Podman, slot),
-    ]),
-    [TAG, TAG],
-  );
+  assert.deepEqual(await build(), { outcome: ImageBuildOutcome.Built });
   const log = lines();
-  assert.equal(
-    log.filter((line) => line[0] === HOST_LINE && line[2] === EXISTS).length,
-    ONE_BUILD,
-  );
   assert.equal(
     log.filter((line) => line[0] === PODMAN_LINE && line[1] === BUILD_COMMAND)
       .length,
     ONE_BUILD,
   );
-  const build = indexOf(
+  const built = indexOf(
     log,
     (line) => line[1] === BUILD_COMMAND && line.includes(STAGING),
   );
@@ -591,7 +502,7 @@ test("the layer gets the final tag only after the check passes, and concurrent s
   const untagged = indexOf(log, (line) =>
     line.join(" ").endsWith(`untag ${STAGING} ${STAGING}`),
   );
-  assert.ok(build < check && check < tagged && tagged < untagged);
+  assert.ok(built < check && check < tagged && tagged < untagged);
   assert.equal(
     log
       .slice(0, tagged)
@@ -602,13 +513,13 @@ test("the layer gets the final tag only after the check passes, and concurrent s
 
 test("the image check runs hardened with the owner label and a failed check removes the container and the staging tag", async (t) => {
   const directory = temporary(t);
-  const { built, lines } = images(directory, {
+  const { build, lines } = images(directory, {
     environment: environment(),
     exists: ABSENT,
     cli: PASSING_CLI,
     variables: fakePodman(directory, { build: SUCCESS, run: ABSENT }),
   });
-  const failure = failureOf(await buildError(built));
+  const failure = failureOf(await build());
   assert.equal(failure.class, EnvironmentImageFailure.ImageInvalid);
   const log = lines();
   const check = log.find(
@@ -635,7 +546,7 @@ test("the image check runs hardened with the owner label and a failed check remo
 
 test("a layer variable that a Containerfile line cannot hold fails the build and names the key", async (t) => {
   const directory = temporary(t);
-  const { built, lines } = images(directory, {
+  const { build, lines } = images(directory, {
     environment: environment(),
     exists: ABSENT,
     cli: PASSING_CLI,
@@ -653,7 +564,7 @@ test("a layer variable that a Containerfile line cannot hold fails the build and
       },
     ],
   });
-  assert.deepEqual(failureOf(await buildError(built)), {
+  assert.deepEqual(failureOf(await build()), {
     class: EnvironmentImageFailure.BuildFailed,
     detail: "containerEnv.BAD NAME: the variable name is not valid",
   });
@@ -683,27 +594,6 @@ test("the layer runs each create command before kanthord, tini and the passwd en
     create <
       lines.findIndex((line) => line.includes("10001::/var/lib/kanthord")),
   );
-});
-
-test("a build failure holds for 15 minutes or until the next binding revision", async (t) => {
-  let now = 0;
-  let current = environment();
-  const { built, exports } = images(temporary(t), {
-    environment: null,
-    exists: ABSENT,
-    now: () => now,
-    slotEnvironment: () => Promise.resolve(current),
-  });
-  await buildError(built);
-  now = FAILURE_HOLD_MS - 1;
-  await buildError(built);
-  assert.equal(exports.length, ONE_BUILD);
-  now = FAILURE_HOLD_MS;
-  await buildError(built);
-  assert.equal(exports.length, ONE_BUILD + 1);
-  current = { ...environment(), binding_id: "binding-2" };
-  await buildError(built);
-  assert.equal(exports.length, ONE_BUILD + 2);
 });
 
 function alive(pid: number): boolean {
@@ -744,13 +634,13 @@ async function pidOf(file: string): Promise<number> {
 test("a build past its time limit ends the whole process group", async (t) => {
   const directory = temporary(t);
   const pidFile = join(directory, "pid");
-  const { built } = images(directory, {
+  const { build } = images(directory, {
     environment: environment(),
     exists: ABSENT,
     cli: HANGING_CLI(pidFile),
     buildTimeoutMs: SHORT_TIMEOUT_MS,
   });
-  const failure = failureOf(await buildError(built));
+  const failure = failureOf(await build());
   assert.equal(failure.class, EnvironmentImageFailure.BuildFailed);
   assert.match(failure.detail, /time limit/);
   assert.equal(await ended(await pidOf(pidFile)), true);
@@ -761,13 +651,13 @@ test("a stop ends a running build and a start removes the run directories of an 
   const stale = join(directory, "environments", "run-stale");
   mkdirSync(stale, { recursive: true });
   const pidFile = join(directory, "pid");
-  const { built } = images(directory, {
+  const { built, build } = images(directory, {
     environment: environment(),
     exists: ABSENT,
     cli: HANGING_CLI(pidFile),
   });
   assert.equal(existsSync(stale), false);
-  const pending = buildError(built);
+  const pending = build();
   const pid = await pidOf(pidFile);
   built.stop();
   await pending;
@@ -922,8 +812,6 @@ function runtimeImages(
     kanthordImage: KANTHORD_IMAGE,
     version: VERSION,
     stateDirectory: directory,
-    fallbackImage: KANTHORD_IMAGE,
-    slotEnvironment: () => Promise.resolve(null),
     exportRepository: () => Promise.resolve(),
   });
   return { built, calls };

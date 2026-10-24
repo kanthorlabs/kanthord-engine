@@ -114,6 +114,24 @@ export class Pool {
     );
   }
 
+  slotsOf(
+    projectId: string,
+    resourceIdentity: string,
+    generation: number,
+  ): PoolSlot[] {
+    const group = this.groups.get(
+      keyOf(projectId, resourceIdentity, generation),
+    );
+    return Array.from(group?.slots.values() ?? []).filter(
+      ({ draining }) => !draining,
+    );
+  }
+
+  restart(slot: PoolSlot): void {
+    slot.draining = true;
+    this.host.restart(slot);
+  }
+
   draining(clientId: string): boolean {
     return this.slotOf(clientId)?.draining ?? false;
   }

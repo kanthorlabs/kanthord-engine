@@ -467,6 +467,32 @@ export class WorkerService implements Service {
     });
   }
 
+  environmentReady(
+    projectId: string,
+    resourceIdentity: string,
+    tag: string,
+  ): void {
+    const pool = this.pool;
+    if (!pool) return;
+    const { host, workerBindingsOf } = this.dependencies.pool!;
+    const bindings = this.dependencies.store.transaction((tx) =>
+      workerBindingsOf(tx, projectId),
+    );
+    for (const binding of bindings) {
+      if (
+        binding.placement !== InstancePlacement.Container ||
+        binding.environment !== resourceIdentity
+      )
+        continue;
+      for (const slot of pool.slotsOf(
+        projectId,
+        binding.resource_identity,
+        binding.generation,
+      ))
+        if (host.imageOf(slot) !== tag) pool.restart(slot);
+    }
+  }
+
   private reconcile(projectId: string | null, restore: boolean): void {
     const pool = this.pool!;
     const effects = this.dependencies.store.transaction((tx) => {

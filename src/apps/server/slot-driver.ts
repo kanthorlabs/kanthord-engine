@@ -34,4 +34,5 @@ export interface SlotDriver {
   removeVolume(clientId: string): Promise<void>;
   sweepVolumes(live: ReadonlySet<string>): Promise<void>;
   launch(launch: SlotLaunch): SlotInstance;
+  imageOf?(clientId: string): string | null;
 }

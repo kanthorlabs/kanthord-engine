@@ -424,6 +424,7 @@ export type WorkerBindingOf = (
   instance_count: number;
   worker_instances?: string[];
   placement: InstancePlacement | null;
+  environment?: string | null;
   generation: number;
   resource_budget: { turns: number; wall_time_ms: number } | null;
   entries: Array<WorkerEntry & { agent: string }>;
@@ -751,6 +752,8 @@ export interface PoolHost {
   prepare(): void;
   start(slot: PoolSlot): void;
   drain(slot: PoolSlot): void;
+  restart(slot: PoolSlot): void;
+  imageOf(slot: PoolSlot): string | null;
   remove(slot: PoolSlot): Promise<void>;
   sweep(live: ReadonlySet<string>): Promise<void>;
   stop(): Promise<void>;

@@ -164,6 +164,18 @@ export class WorkerPool implements PoolHost {
     }
   }
 
+  restart(slot: PoolSlot): void {
+    const entry = this.entries.get(slot.client_id);
+    if (!entry) return;
+    slot.draining = true;
+    this.drain(slot);
+    entry.resume = true;
+  }
+
+  imageOf(slot: PoolSlot): string | null {
+    return this.driver(slot.placement).imageOf?.(slot.client_id) ?? null;
+  }
+
   async stop(): Promise<void> {
     this.stopping = true;
     await Promise.all(

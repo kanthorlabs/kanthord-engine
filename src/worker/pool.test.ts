@@ -230,3 +230,51 @@ test("a slot that ends while its binding stays live is not removed", () => {
   f.host.end(f.slotId(1));
   assert.deepEqual(f.host.removed, []);
 });
+
+test("the pool answers the slots of one binding that do not drain for the restart", () => {
+  const f = fixture();
+  f.run(null, [target(THREE_SLOTS)]);
+  f.run(null, [target(TWO_SLOTS)], probes([f.slotId(0), f.slotId(1)]));
+  assert.deepEqual(
+    f.pool.slotsOf(PROJECT_ID, RESOURCE, GENERATION).map(({ slot }) => slot),
+    [0, 1],
+  );
+  assert.deepEqual(f.pool.slotsOf(PROJECT_ID, RESOURCE, NEXT_GENERATION), []);
+  assert.deepEqual(f.pool.slotsOf(OTHER_PROJECT_ID, RESOURCE, GENERATION), []);
+});
+
+test("a restart marks the slot as draining and asks the host to restart it", () => {
+  const f = fixture();
+  f.run(null, [target(TWO_SLOTS)]);
+  const [first] = f.pool.slotsOf(PROJECT_ID, RESOURCE, GENERATION);
+  f.pool.restart(first!);
+  assert.ok(f.pool.draining(f.slotId(0)));
+  assert.deepEqual(
+    f.host.restarted.map(({ slot, draining }) => [slot, draining]),
+    [[0, true]],
+  );
+  assert.deepEqual(
+    f.pool.slotsOf(PROJECT_ID, RESOURCE, GENERATION).map(({ slot }) => slot),
+    [1],
+  );
+});
+
+test("a restarted slot is not counted twice in the plan", () => {
+  const f = fixture();
+  f.run(null, [target(TWO_SLOTS)]);
+  const [first] = f.pool.slotsOf(PROJECT_ID, RESOURCE, GENERATION);
+  f.pool.restart(first!);
+  f.run(null, [target(TWO_SLOTS)]);
+  assert.equal(f.host.started.length, TWO_SLOTS + 1);
+  assert.deepEqual(
+    f.host.started.map(({ slot }) => slot),
+    [0, 1, 0],
+  );
+  assert.ok(!f.pool.draining(f.slotId(0)));
+  assert.deepEqual(f.host.drained, []);
+  f.run(null, [target(1)], probes([f.slotId(1)]));
+  assert.deepEqual(
+    f.host.drained.map(({ slot }) => slot),
+    [0],
+  );
+});
