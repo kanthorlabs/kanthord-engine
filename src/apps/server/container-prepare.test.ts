@@ -319,6 +319,36 @@ test("a drain during the image wait aborts the signal and ends the instance with
   assert.deepEqual(exit, { code: SUCCESS_CODE, error: null });
 });
 
+test("a stop during the cache volume command spawns no container and ends the instance", async (t) => {
+  const group = "repository:github:acme/app";
+  const cache = cacheVolumeName(
+    containerOwner(MASTER_KEY),
+    "project_01ARZ3NDEKTSV4RRFFQ69G5FAV",
+    group,
+  );
+  const runtime = recordingRuntime(t);
+  const asked = Promise.withResolvers<void>();
+  const held = Promise.withResolvers<RuntimeAnswer>();
+  const f = hostWith(
+    true,
+    (call) => {
+      if (!call.args.includes(cache)) return ok();
+      asked.resolve();
+      return held.promise;
+    },
+    () => Promise.resolve(READY_TAG),
+    () => group,
+  );
+  const instance = f.driver.launch(launchOf(runtime.environment));
+  t.after(() => instance.terminate());
+  await asked.promise;
+  instance.control(SlotControl.Stop);
+  held.resolve(await ok());
+  const exit = await instance.exited;
+  assert.deepEqual(exit, { code: SUCCESS_CODE, error: null });
+  assert.equal(runtime.spawned(), false);
+});
+
 test("a resolved image answer starts the container on that image and imageOf answers it until the exit", async (t) => {
   const runtime = recordingRuntime(t);
   const gate = imageGate();

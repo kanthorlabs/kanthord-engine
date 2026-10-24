@@ -184,6 +184,10 @@ class ContainerInstance implements SlotInstance {
     if (this.settled) return;
     const cacheVolume = await this.cacheVolumeFor(runtime, image);
     if (this.settled) return;
+    if (this.waiting.signal.aborted) {
+      this.finish(SUCCESS_CODE, null);
+      return;
+    }
     this.spawn(runtime, image, cacheVolume);
   }
 
