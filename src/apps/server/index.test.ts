@@ -50,9 +50,9 @@ import {
   humanCaller,
 } from "./test-support.ts";
 import { fakeContainerHost, fakeRepositoryFiles } from "./container-fakes.ts";
+import { slotRuns } from "./environment-test-support.ts";
 import { workerAcceptance, WORKER_DEFAULTS } from "./worker-acceptance.ts";
 import type { EnvironmentRuntime } from "../../project/environment-state.ts";
-import { packageVersion } from "../../kernel/version.ts";
 import type { SlotDriver } from "./slot-driver.ts";
 import { llmOperations } from "../../llm/contract.ts";
 import { agentOperations } from "../../agent/contract.ts";
@@ -76,6 +76,7 @@ import {
 import { repositoryOperations } from "../../repository/contract.ts";
 import {
   BINDING_ID_PREFIX,
+  EnvironmentStatus,
   PROJECT_ID_PREFIX,
   projectOperations,
 } from "../../project/contract.ts";
@@ -1221,11 +1222,11 @@ const CONTAINER_IMAGE = "kanthord-test";
 const STORED_BASE_IMAGE = "registry.example/base:1";
 const CONTAINER_TEST_TIMEOUT_MS = 120000;
 const NO_ITEMS = 0;
+const SEPARATOR_OPTION = "--";
 const Verb = {
   Build: "build",
   Image: "image",
   Inspect: "inspect",
-  Run: "run",
 } as const;
 
 async function containerSetup(
@@ -1392,13 +1393,16 @@ test(
     container.setup.fixture.worker.startPool();
     await container.writeContainer(1);
     const runs = await until(
-      () =>
-        container.fake.commands().filter((command) => command[0] === Verb.Run),
+      () => starts.flatMap((clientId) => slotRuns(container.fake, clientId)),
       (found) => found.length > NO_ITEMS,
       t.signal,
     );
-    const images = runs.map((command) => command[command.indexOf("--") - 1]);
-    assert.ok(starts.length > NO_ITEMS);
-    assert.equal(images[NO_ITEMS], `${CONTAINER_IMAGE}:${packageVersion()}`);
+    const [state] = await container.setup.fixture.project.environmentStates(
+      container.setup.project_id,
+    );
+    assert.equal(state?.status, EnvironmentStatus.Ready);
+    assert.ok(state.tag);
+    for (const run of runs)
+      assert.equal(run[run.indexOf(SEPARATOR_OPTION) - 1], state.tag);
   },
 );

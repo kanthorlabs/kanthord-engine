@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import {
-  cpSync,
   existsSync,
   mkdirSync,
   readdirSync,
@@ -10,7 +9,6 @@ import {
 } from "node:fs";
 import { delimiter, dirname, join } from "node:path";
 import { test, type TestContext } from "node:test";
-import { simpleGit } from "simple-git";
 import { httpClient } from "../../gateway/client.ts";
 import { OperationResultType } from "../../kernel/operation.ts";
 import { temporary } from "../../kernel/test-support.ts";
@@ -21,7 +19,6 @@ import {
   EnvironmentTarget,
   environmentSecretOperations,
   projectOperations,
-  type RepositoryFiles,
 } from "../../project/contract.ts";
 import { workerOperations } from "../../worker/contract.ts";
 import { EnvironmentSource } from "../../kernel/devcontainer.ts";
@@ -29,11 +26,10 @@ import {
   ENVIRONMENT_DIRECTORY,
   type EnvironmentState,
 } from "../../project/environment-state.ts";
-import { RepositoryFileState } from "../../repository/contract.ts";
 import { ExecutionStopReason } from "../../scheduler/contract.ts";
 import { trackingOperations } from "../../tracking/contract.ts";
 import { until } from "./cli-support.ts";
-import { fakeContainerHost } from "./container-fakes.ts";
+import { fakeContainerHost, fakeRepositoryFiles } from "./container-fakes.ts";
 import {
   cacheVolumeName,
   CACHE_MOUNT,
@@ -67,7 +63,6 @@ import { humanCaller } from "./test-support.ts";
 const TEST_TIMEOUT_MS = 120000;
 const WAIT_MS = 30000;
 const PULL_WAIT_MS = 5000;
-const FAKE_COMMIT = "a".repeat(40);
 const CONTAINER_IMAGE = "kanthord-test";
 const SECRET = "l3-gate-secret-value";
 const ROTATED_SECRET = "l3-gate-secret-rotated";
@@ -181,31 +176,6 @@ function sha256(text: string): string {
 
 function bounded(t: TestContext): AbortSignal {
   return AbortSignal.any([t.signal, AbortSignal.timeout(WAIT_MS)]);
-}
-
-async function memoryRepository(t: TestContext): Promise<RepositoryFiles> {
-  const seed = join(temporary(t), "seed");
-  mkdirSync(seed);
-  const git = simpleGit(seed);
-  await git.init(["--initial-branch=main"]);
-  await git.addConfig("user.name", "L3 Gate");
-  await git.addConfig("user.email", "l3_gate@example.invalid");
-  await git.commit("initial", ["--allow-empty"]);
-  return {
-    resolveBranchCommit: async () => FAKE_COMMIT,
-    readFilesAtCommit: async (_address, _commit, paths) =>
-      paths.map((path) => ({
-        path,
-        state: RepositoryFileState.Absent,
-        text: null,
-      })),
-    listFilesAtCommit: async () => [],
-    readObjectIds: async (_address, _commit, paths) => paths.map(() => null),
-    cloneSnapshot: async (_address, revision, directory) => {
-      cpSync(seed, directory, { recursive: true });
-      return revision;
-    },
-  };
 }
 
 function fakeDevcontainerCli(t: TestContext) {
@@ -367,7 +337,7 @@ async function l3Fixture(t: TestContext, options: { memoryMb?: number } = {}) {
     containerRuntimeHost: host,
     environmentDevcontainerCli: () => devcontainer.cli,
     containerSlotDriver: recordingSlotDriver({ ...podman, host }, starts),
-    repositoryFiles: await memoryRepository(t),
+    repositoryFiles: fakeRepositoryFiles(),
     stateDirectory,
     ...(options.memoryMb === undefined
       ? {}
