@@ -444,6 +444,12 @@ The implemented fields are:
 - `scheduler.stop_backoff`: optional positive safe integer in seconds, default
   `30`. After a counted failure, the claim skips the node for this wait, doubled
   for each further consecutive failure.
+- `project.environment_build_timeout_ms`: optional safe integer of at least
+  `60000`, default `1800000`. A run of the Onboarding component ends as failed
+  when it passes this deadline in milliseconds.
+- `project.environment_memory_mb`: optional safe integer of at least `256`,
+  default `4096`. The layer build, the image check and the proof container of an
+  environment take this memory bound in megabytes.
 - `tracking.retention_days`: optional positive safe integer from 1 to 3650,
   default `30`. The server deletes a trace, with its spans, texts and session
   entries, when the trace is older than this retention. A sweep runs at the

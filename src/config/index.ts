@@ -30,7 +30,7 @@ import {
 import { gatewayConfigSchema, type GatewayConfig } from "../gateway/config.ts";
 import { missionConfigSchema, type MissionConfig } from "../mission/config.ts";
 import { agentConfigSchema, type AgentConfig } from "../agent/config.ts";
-import { projectConfigSchema } from "../project/index.ts";
+import { projectConfigSchema, type ProjectConfig } from "../project/index.ts";
 import { intakeConfigSchema } from "../intake/index.ts";
 import { workerConfigSchema, type WorkerConfig } from "../worker/config.ts";
 import {
@@ -48,6 +48,7 @@ export interface ServerConfig extends GlobalConfig {
   version: number;
   gateway: GatewayConfig;
   mission: MissionConfig;
+  project: ProjectConfig;
   agent: AgentConfig;
   worker: WorkerConfig;
   scheduler: SchedulerConfig;
