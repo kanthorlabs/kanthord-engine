@@ -1116,6 +1116,21 @@ test("a target change re-arms the read_failed record", async (t) => {
   await h.until(() => h.logged(READ_FAILED).length === TWO_RECORDS);
 });
 
+test("a failed read after a target change writes the new target, and a later write of the same facts logs no second record", async (t) => {
+  const h = new Harness(t);
+  h.bindings = facts([APP], [server]);
+  h.resolution = sshReadError();
+  await h.compute();
+  h.bindings = facts([APP], [container("app")]);
+  h.onboarding.bindingsChanged(PROJECT);
+  await h.until(() => h.logged(READ_FAILED).length === TWO_RECORDS);
+  assert.equal(h.state().target, EnvironmentTarget.Image);
+  h.onboarding.bindingsChanged(PROJECT);
+  await h.until(() => h.resolveCalls.length === THREE_CALLS);
+  await h.until(() => !h.onboarding["computing"].size);
+  assert.equal(h.logged(READ_FAILED).length, TWO_RECORDS);
+});
+
 test("a successful read logs nothing and rearms the read_failed record", async (t) => {
   const h = new Harness(t);
   h.existing.add(h.provedOf(h.digest()));

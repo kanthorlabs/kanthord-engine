@@ -771,6 +771,7 @@ export class Onboarding {
       failure = readFailureOf(error);
       next = {
         ...(previous ?? emptyRecord(projectId, group, target)),
+        target,
         reason: failure.reason,
       };
     }
