@@ -128,6 +128,10 @@ export function schedulerHarness(
         return [];
       },
     },
+    environments: {
+      environmentsClaimable: () => true,
+      environmentFailed: () => {},
+    },
     branches: {
       nodeBranchesOf: (_tx, keys) =>
         keys.map((key) => `kanthord/${key.node_id}`),
