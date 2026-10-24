@@ -229,6 +229,7 @@ engine/
 │   │   │   ├── judgement.ts        # Strict handoff parsing and method instructions
 │   │   │   ├── node-reads.ts       # Bounded pinned-context and dependency reads
 │   │   │   ├── steps-implement.ts  # Start checks, task revisions and implement-node publication
+│   │   │   ├── progress-rule.ts    # No-progress rules, the stop detail and its task span attributes
 │   │   │   ├── steps-examine.ts    # Dependency outcome report and examine-node release
 │   │   │   ├── evaluation-input.ts # Isolated snapshots and evidence placement
 │   │   │   ├── evaluation.ts       # Verification evidence, assessment and action requests

@@ -16,6 +16,7 @@ import {
   verifyTaskRun,
 } from "./steps-implement.ts";
 import { ProviderFailure } from "../../scheduler/contract.ts";
+import { NoProgressRule } from "./progress-rule.ts";
 import {
   implementFixture as fixture,
   NO_PROVIDER_CALLS,
@@ -138,6 +139,9 @@ test("the start check runs no verification, and a verification timeout cleans it
 });
 
 const VERIFIED_BEFORE_NO_PROGRESS = 2;
+const NO_PROGRESS_LIMIT = 2;
+const FAILED_EXIT_CODE = 1;
+const ONE_COMMAND = 1;
 
 async function stopOf(work: Promise<unknown>): Promise<ExecutionStop> {
   try {
@@ -164,6 +168,16 @@ test("a revision that changes nothing twice stops the task with no_progress", as
   const stopped = await stopOf(runTask(h, current));
   assert.equal(stopped.reason, EndReason.NoProgress);
   assert.equal(stopped.code, null);
+  assert.deepEqual(JSON.parse(stopped.detail!), {
+    rule: NoProgressRule.UnchangedRevision,
+    count: NO_PROGRESS_LIMIT,
+    limit: NO_PROGRESS_LIMIT,
+    verification: {
+      passed: false,
+      ran: ONE_COMMAND,
+      exit_code: FAILED_EXIT_CODE,
+    },
+  });
   assert.deepEqual(
     events.mock.calls
       .map((call) => call.arguments[0])

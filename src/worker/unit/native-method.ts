@@ -164,6 +164,7 @@ export async function runNativeExecution(
         verdict: prior.verdict,
         cleared: prior.cleared,
         unchangedTurns: 0,
+        lastVerification: null,
       };
       return runStepsImplement(state);
     });

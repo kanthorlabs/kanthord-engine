@@ -20,6 +20,7 @@ import {
   taskWork,
 } from "./steps-implement.ts";
 import { releaseGate, ReleaseGateKind } from "./release-gate.ts";
+import { NoProgressRule, noProgressDetail } from "./progress-rule.ts";
 import { RELEASE_DIRECTORY, WorkspaceKind } from "./workspace.ts";
 import {
   advanceBase,
@@ -33,6 +34,9 @@ import {
 type Fixture = Awaited<ReturnType<typeof fixture>>;
 
 const NOTHING = fauxAssistantMessage("nothing");
+const NO_PROGRESS_LIMIT = 2;
+const RELEASE_COMMANDS_RAN = 2;
+const FAILED_EXIT_CODE = 1;
 const REVISION_TEXT = "Revise the task work";
 const REVISED_CONTENT = "base two";
 const SECRET = "secret";
@@ -124,12 +128,38 @@ test("a release failure that no revision changes stops with no_progress and neve
   assert.deepEqual(end, {
     kind: "released",
     furtherWork: true,
-    stop: { reason: EndReason.NoProgress, code: null },
+    stop: {
+      reason: EndReason.NoProgress,
+      code: null,
+      detail: noProgressDetail({
+        rule: NoProgressRule.UnchangedRevision,
+        count: NO_PROGRESS_LIMIT,
+        limit: NO_PROGRESS_LIMIT,
+        verification: {
+          passed: false,
+          ran: RELEASE_COMMANDS_RAN,
+          exit_code: FAILED_EXIT_CODE,
+        },
+      }),
+    },
   });
   assert.deepEqual(bodies, [
     {
       further_work: true,
-      stop: { reason: EndReason.NoProgress, code: null },
+      stop: {
+        reason: EndReason.NoProgress,
+        code: null,
+        detail: noProgressDetail({
+          rule: NoProgressRule.UnchangedRevision,
+          count: NO_PROGRESS_LIMIT,
+          limit: NO_PROGRESS_LIMIT,
+          verification: {
+            passed: false,
+            ran: RELEASE_COMMANDS_RAN,
+            exit_code: FAILED_EXIT_CODE,
+          },
+        }),
+      },
     },
   ]);
 });

@@ -9,6 +9,9 @@ import { executionBoundary } from "./native-method.ts";
 import type { MethodClients } from "./method-clients.ts";
 import { runStepsImplement, startCheck } from "./steps-implement.ts";
 import type { WorkspaceCheckout } from "./workspace.ts";
+import { NoProgressRule } from "./progress-rule.ts";
+import { SpanOperation } from "./telemetry.ts";
+import { SpanStatus } from "../../tracking/contract.ts";
 import {
   advanceBase,
   commitOnNode,
@@ -26,6 +29,8 @@ const VERDICT = "The edge case of an empty list stays unhandled.";
 const CLEARED = "The verification host lost its network.";
 const TWO_TURNS = 2;
 const ONE_TURN = 1;
+const PASSED_EXIT_CODE = 0;
+const ONE_COMMAND = 1;
 const TWO_TOOL_TURNS = 4;
 const TWO_BINDINGS = ["api", "web"];
 const BASE_FILE = "other";
@@ -102,7 +107,31 @@ test("a verdict that names no task sends a verdict turn and an unchanged tree st
   ]);
   const judged = h.checkouts[0]!.head;
   h.verdict = verdictAt(VERDICT, h.checkouts);
-  await noProgressEnd(h);
+  const starts = t.mock.method(h.run.spans, "start");
+  const ends = t.mock.method(h.run.spans, "end");
+  const { end } = await noProgressEnd(h);
+  assert.ok("stop" in end && end.stop);
+  assert.deepEqual(JSON.parse(end.stop.detail!), {
+    rule: NoProgressRule.VerdictRuleUnmet,
+    count: TWO_TURNS,
+    limit: TWO_TURNS,
+    verification: null,
+  });
+  const taskStart = starts.mock.calls.find(
+    (call) => call.arguments[0].operation === SpanOperation.Task,
+  );
+  const taskEnd = ends.mock.calls.find(
+    (call) => call.arguments[0] === taskStart?.result,
+  );
+  assert.deepEqual(taskEnd?.arguments[1], {
+    status: SpanStatus.Error,
+    attributes: {
+      "kanthord.stop.reason": EndReason.NoProgress,
+      "kanthord.stop.rule": NoProgressRule.VerdictRuleUnmet,
+      "kanthord.stop.count": TWO_TURNS,
+      "kanthord.stop.limit": TWO_TURNS,
+    },
+  });
   assert.equal(h.provider.calls.length, TWO_TURNS);
   const first = JSON.stringify(h.provider.calls[0]);
   assert.ok(first.includes(VERDICT));
@@ -110,6 +139,35 @@ test("a verdict that names no task sends a verdict turn and an unchanged tree st
   assert.ok(first.includes("## Tasks"));
   assert.equal(occurrences(h.provider.calls[1], VERDICT), TWO_TURNS);
   assert.equal(h.checkouts[0]!.head, judged);
+});
+
+test("a verdict stop carries the passing verification of a task that ran before the verdict turns", async (t) => {
+  const judgedTask = task("judged", "true");
+  const pending = task("pending", "true");
+  const h = await fixture(
+    t,
+    [judgedTask, pending],
+    [
+      fauxAssistantMessage("pending work"),
+      fauxAssistantMessage("nothing"),
+      fauxAssistantMessage("nothing again"),
+      fauxAssistantMessage("never"),
+    ],
+  );
+  await recordDone(h, judgedTask);
+  h.verdict = verdictAt(VERDICT, h.checkouts);
+  const { end } = await noProgressEnd(h);
+  assert.ok("stop" in end && end.stop);
+  assert.deepEqual(JSON.parse(end.stop.detail!), {
+    rule: NoProgressRule.VerdictRuleUnmet,
+    count: TWO_TURNS,
+    limit: TWO_TURNS,
+    verification: {
+      passed: true,
+      ran: ONE_COMMAND,
+      exit_code: PASSED_EXIT_CODE,
+    },
+  });
 });
 
 test("a base move between the review and the rework does not satisfy the verdict rule", async (t) => {
