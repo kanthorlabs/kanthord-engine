@@ -385,6 +385,57 @@ test("the Agent component refuses an invalid workbench configuration", async (t)
   );
 });
 
+test("the workbench lists and opens no env@1 session", async (t) => {
+  const state = temporary(t);
+  const pi = await loadPi();
+  const envAgent = "env@1";
+  pi.SessionManager.create(
+    join(state, "workbench", envAgent),
+    join(state, "pi", "sessions", "workbench", envAgent),
+    { id: "workbench_session_01ARZ3NDEKTSV4RRFFQ69G5FAV" },
+  ).appendMessage({
+    role: "user",
+    content: FIRST_MESSAGE,
+    timestamp: Date.now(),
+  });
+  const fixture = await workbenchFixture(t, [], state);
+  const listed = completed(
+    await fixture.workbench["session.list"](
+      { params: {}, query: {}, body: null },
+      fixture.options,
+    ),
+  );
+  assert.deepEqual(
+    listed.items.filter((item) => item.agent_name === envAgent),
+    [],
+  );
+  failed(
+    await fixture.workbench["session.list"](
+      { params: {}, query: { agent_name: envAgent }, body: null },
+      fixture.options,
+    ),
+    HttpStatus.NotFound,
+    "agent.catalog.not_found",
+  );
+  failed(
+    await fixture.workbench["session.create"](
+      {
+        params: {},
+        query: {},
+        body: {
+          agent_name: envAgent,
+          agent_provider: DEFAULT,
+          model_identifier: SONNET,
+          reasoning_effort: OFF,
+        },
+      },
+      fixture.options,
+    ),
+    HttpStatus.NotFound,
+    "agent.catalog.not_found",
+  );
+});
+
 test("a stored session resumes from the last entry of each kind and lists through pi", async (t) => {
   const state = temporary(t);
   const pi = await loadPi();

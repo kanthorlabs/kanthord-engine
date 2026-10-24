@@ -458,13 +458,17 @@ export default tseslint.config(
                 {
                   from: element({
                     anyOf: [
-                      "kernel",
                       "component",
                       "service",
                       "apps-cli",
                       "apps-worker",
                       "worker-unit",
                     ],
+                  }),
+                },
+                {
+                  from: element("kernel", {
+                    fileInternalPath: "!test-identity.ts",
                   }),
                 },
                 { from: file({ anyOf: ["config", "config-global", "main"] }) },

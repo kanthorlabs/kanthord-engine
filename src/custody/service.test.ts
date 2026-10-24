@@ -12,6 +12,7 @@ import {
   Store,
   type Transaction,
 } from "../kernel/store.ts";
+import type { ServiceIdentity } from "../kernel/caller.ts";
 import {
   CUSTODY_SERVICE_NAME,
   SecretShape,
@@ -31,6 +32,7 @@ import { CustodyComponent, type Dependencies } from "./service.ts";
 import {
   testHumanIdentity,
   testMachineIdentity,
+  testServiceIdentity,
 } from "../kernel/test-identity.ts";
 import { createIdentity } from "../kernel/identity.ts";
 import { canonicalJSON } from "../kernel/json.ts";
@@ -2373,6 +2375,58 @@ test("instance copies share a name and a platform, keep separate holds and archi
           sealed_current: false,
         },
       ],
+    );
+  } finally {
+    f.store.close();
+  }
+});
+
+test("serverAgentCredentials releases the secret to a service identity and refuses a human or another platform", async () => {
+  const f = fixture();
+  try {
+    f.create({
+      name: "github",
+      platform: TestPlatform.Key,
+      metadata: null,
+      secret: apiSecret,
+    });
+    const sessionId = "environment-session";
+    const service = testServiceIdentity("project");
+    const human = testHumanIdentity("alice", "Alice", "jti");
+    const authorized: string[] = [];
+    const credentials = (
+      requester: () => unknown,
+      answerPlatform: string = TestPlatform.Key,
+    ) =>
+      f.component.serverAgentCredentials({
+        session_id: sessionId,
+        platform: TestPlatform.Key,
+        requester: requester as () => ServiceIdentity,
+        authorize: (_tx, identity, id) => {
+          authorized.push(`${identity.service}:${id}`);
+          return { credential: "github", platform: answerPlatform };
+        },
+      });
+    assert.deepEqual(await credentials(() => service).read(TestPlatform.Key), {
+      type: SecretShape.ApiKey,
+      key: secretValue,
+    });
+    assert.deepEqual(authorized, [`project:${sessionId}`]);
+    await assert.rejects(
+      credentials(() => human).read(TestPlatform.Key),
+      FacilityError,
+    );
+    assert.deepEqual(authorized, [`project:${sessionId}`]);
+    await assert.rejects(
+      credentials(() => service, TestPlatform.OtherKey).read(TestPlatform.Key),
+      FacilityError,
+    );
+    await assert.rejects(
+      credentials(() => service).modify(TestPlatform.Key, async () => ({
+        type: SecretShape.ApiKey,
+        key: "changed",
+      })),
+      FacilityError,
     );
   } finally {
     f.store.close();

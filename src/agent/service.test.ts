@@ -69,6 +69,7 @@ const WORKING_TEXT = "workbench directory text";
 const CUSTOM_TEXT = "custom workbench text";
 const AGENT = "swe@1";
 const OTHER_AGENT = "re@1";
+const ENV_AGENT = "env@1";
 const WORKER = "coder@1";
 const MODEL = "claude-sonnet-4-5";
 const SUBSCRIPTION_MODEL = "claude-haiku-5-5";
@@ -3272,4 +3273,21 @@ test("a view without a claimant shows the hold with the latest available_at over
     { available_at: EARLY, strikes: FIRST_STRIKE },
   );
   assert.equal(cooldownOf(SERVER_SCOPE), null);
+});
+
+test("env@1 enablement takes a credential with the holder server", (t) => {
+  const f = enablementFixture(t, {
+    copyHeld: (_tx, _credential, holder) => holder === SERVER_HOLDER,
+  });
+  const params = { agent_name: ENV_AGENT };
+  const put = f.invoke("enablement.put", putBody, params);
+  assert.equal(put.agent_name, ENV_AGENT);
+  const view = (agentName: string) =>
+    f.store.transaction((tx) =>
+      f.agent.agentView(tx, agentName, null, SERVER_SCOPE),
+    );
+  assert.equal(view(ENV_AGENT)?.valid, true);
+  assert.deepEqual(view(AGENT)?.issues, [
+    { path: [], code: AgentErrorCode.Unavailable },
+  ]);
 });

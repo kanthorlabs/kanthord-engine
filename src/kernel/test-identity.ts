@@ -3,9 +3,11 @@ import {
   mintMachineIdentity,
   mintWorkerIdentity,
 } from "./caller-mint.ts";
+import { mintServiceIdentity } from "./service-mint.ts";
 import type {
   HumanIdentity,
   MachineIdentity,
+  ServiceIdentity,
   WorkerIdentity,
 } from "./caller.ts";
 
@@ -31,4 +33,8 @@ export function testWorkerIdentity(
   jti: string,
 ): WorkerIdentity {
   return mintWorkerIdentity(instanceId, name, jti);
+}
+
+export function testServiceIdentity(service: string): ServiceIdentity {
+  return mintServiceIdentity(service);
 }
