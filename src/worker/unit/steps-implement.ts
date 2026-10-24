@@ -397,7 +397,7 @@ async function runNodeInstruction(
       });
       if (ruled) {
         state.unchangedTurns = unchangedTurns;
-        countUnchangedTurn(state, NoProgressRule.VerdictRuleHolds);
+        countUnchangedTurn(state, NoProgressRule.VerdictRuleUnmet);
         continue;
       }
     } else if (revised && !agent.changed())

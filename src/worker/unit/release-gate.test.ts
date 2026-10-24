@@ -35,7 +35,7 @@ type Fixture = Awaited<ReturnType<typeof fixture>>;
 
 const NOTHING = fauxAssistantMessage("nothing");
 const NO_PROGRESS_LIMIT = 2;
-const PASSED_EXIT_CODE = 0;
+const RELEASE_COMMANDS_RAN = 2;
 const FAILED_EXIT_CODE = 1;
 const REVISION_TEXT = "Revise the task work";
 const REVISED_CONTENT = "base two";
@@ -137,7 +137,8 @@ test("a release failure that no revision changes stops with no_progress and neve
         limit: NO_PROGRESS_LIMIT,
         verification: {
           passed: false,
-          exit_codes: [PASSED_EXIT_CODE, FAILED_EXIT_CODE],
+          ran: RELEASE_COMMANDS_RAN,
+          exit_code: FAILED_EXIT_CODE,
         },
       }),
     },
@@ -154,7 +155,8 @@ test("a release failure that no revision changes stops with no_progress and neve
           limit: NO_PROGRESS_LIMIT,
           verification: {
             passed: false,
-            exit_codes: [PASSED_EXIT_CODE, FAILED_EXIT_CODE],
+            ran: RELEASE_COMMANDS_RAN,
+            exit_code: FAILED_EXIT_CODE,
           },
         }),
       },

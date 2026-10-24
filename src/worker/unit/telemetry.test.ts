@@ -51,6 +51,7 @@ const SPLIT_BEFORE_PAIR = 14999;
 const ONE_FAULT = 1;
 const NO_PROGRESS_COUNT = 2;
 const FAILED_EXIT = 1;
+const TWO_COMMANDS = 2;
 const NO_SENT = 0;
 const ONE_ENTRY = 1;
 const TWO_ENTRIES = 2;
@@ -334,7 +335,11 @@ test("a no_progress stop ends the task span with the rule, the counts and the ve
         rule: NoProgressRule.UnchangedRevision,
         count: NO_PROGRESS_COUNT,
         limit: NO_PROGRESS_COUNT,
-        verification: { passed: false, exit_codes: [FAILED_EXIT, null] },
+        verification: {
+          passed: false,
+          ran: TWO_COMMANDS,
+          exit_code: FAILED_EXIT,
+        },
       }),
     ),
   );

@@ -141,6 +141,7 @@ test("the start check runs no verification, and a verification timeout cleans it
 const VERIFIED_BEFORE_NO_PROGRESS = 2;
 const NO_PROGRESS_LIMIT = 2;
 const FAILED_EXIT_CODE = 1;
+const ONE_COMMAND = 1;
 
 async function stopOf(work: Promise<unknown>): Promise<ExecutionStop> {
   try {
@@ -171,7 +172,11 @@ test("a revision that changes nothing twice stops the task with no_progress", as
     rule: NoProgressRule.UnchangedRevision,
     count: NO_PROGRESS_LIMIT,
     limit: NO_PROGRESS_LIMIT,
-    verification: { passed: false, exit_codes: [FAILED_EXIT_CODE] },
+    verification: {
+      passed: false,
+      ran: ONE_COMMAND,
+      exit_code: FAILED_EXIT_CODE,
+    },
   });
   assert.deepEqual(
     events.mock.calls

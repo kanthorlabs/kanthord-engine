@@ -6,7 +6,7 @@ import type { Verification } from "./verification.ts";
 
 export const NoProgressRule = {
   UnchangedRevision: "unchanged_revision",
-  VerdictRuleHolds: "verdict_rule_holds",
+  VerdictRuleUnmet: "verdict_rule_unmet",
 } as const;
 export type NoProgressRule =
   (typeof NoProgressRule)[keyof typeof NoProgressRule];
@@ -19,7 +19,8 @@ const noProgressFactsSchema = z.strictObject({
   verification: z
     .strictObject({
       passed: z.boolean(),
-      exit_codes: z.array(z.number().int().nullable()),
+      ran: z.number().int().nonnegative(),
+      exit_code: z.number().int().nullable(),
     })
     .nullable(),
 });
@@ -32,7 +33,8 @@ export function verificationFactsOf(
 ): VerificationFacts {
   return {
     passed,
-    exit_codes: verification.results.map((result) => result.exit_code),
+    ran: verification.results.length,
+    exit_code: verification.results.at(-1)?.exit_code ?? null,
   };
 }
 

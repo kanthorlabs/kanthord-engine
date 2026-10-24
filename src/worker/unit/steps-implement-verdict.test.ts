@@ -29,6 +29,8 @@ const VERDICT = "The edge case of an empty list stays unhandled.";
 const CLEARED = "The verification host lost its network.";
 const TWO_TURNS = 2;
 const ONE_TURN = 1;
+const PASSED_EXIT_CODE = 0;
+const ONE_COMMAND = 1;
 const TWO_TOOL_TURNS = 4;
 const TWO_BINDINGS = ["api", "web"];
 const BASE_FILE = "other";
@@ -110,7 +112,7 @@ test("a verdict that names no task sends a verdict turn and an unchanged tree st
   const { end } = await noProgressEnd(h);
   assert.ok("stop" in end && end.stop);
   assert.deepEqual(JSON.parse(end.stop.detail!), {
-    rule: NoProgressRule.VerdictRuleHolds,
+    rule: NoProgressRule.VerdictRuleUnmet,
     count: TWO_TURNS,
     limit: TWO_TURNS,
     verification: null,
@@ -125,7 +127,7 @@ test("a verdict that names no task sends a verdict turn and an unchanged tree st
     status: SpanStatus.Error,
     attributes: {
       "kanthord.stop.reason": EndReason.NoProgress,
-      "kanthord.stop.rule": NoProgressRule.VerdictRuleHolds,
+      "kanthord.stop.rule": NoProgressRule.VerdictRuleUnmet,
       "kanthord.stop.count": TWO_TURNS,
       "kanthord.stop.limit": TWO_TURNS,
     },
@@ -137,6 +139,35 @@ test("a verdict that names no task sends a verdict turn and an unchanged tree st
   assert.ok(first.includes("## Tasks"));
   assert.equal(occurrences(h.provider.calls[1], VERDICT), TWO_TURNS);
   assert.equal(h.checkouts[0]!.head, judged);
+});
+
+test("a verdict stop carries the passing verification of a task that ran before the verdict turns", async (t) => {
+  const judgedTask = task("judged", "true");
+  const pending = task("pending", "true");
+  const h = await fixture(
+    t,
+    [judgedTask, pending],
+    [
+      fauxAssistantMessage("pending work"),
+      fauxAssistantMessage("nothing"),
+      fauxAssistantMessage("nothing again"),
+      fauxAssistantMessage("never"),
+    ],
+  );
+  await recordDone(h, judgedTask);
+  h.verdict = verdictAt(VERDICT, h.checkouts);
+  const { end } = await noProgressEnd(h);
+  assert.ok("stop" in end && end.stop);
+  assert.deepEqual(JSON.parse(end.stop.detail!), {
+    rule: NoProgressRule.VerdictRuleUnmet,
+    count: TWO_TURNS,
+    limit: TWO_TURNS,
+    verification: {
+      passed: true,
+      ran: ONE_COMMAND,
+      exit_code: PASSED_EXIT_CODE,
+    },
+  });
 });
 
 test("a base move between the review and the rework does not satisfy the verdict rule", async (t) => {
