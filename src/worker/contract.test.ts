@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { StablePlacementIssue, WorkerPlacement } from "../project/contract.ts";
+import { EnvironmentSource } from "../kernel/devcontainer.ts";
 import {
   ACTION_REQUEST_TOOL_NAME,
   ContainerRuntime,
@@ -16,6 +17,7 @@ import {
   Uncertainty,
   actionRequestResultSchema,
   actionResultItemSchema,
+  executionEnvironmentSchema,
   platformAddressSchema,
 } from "./contract.ts";
 
@@ -146,6 +148,44 @@ test("platform addresses require their complete kind-specific operands", () => {
       kind: PlatformAddressKind.PullRequest,
       resource_identity: resourceIdentity,
       number: Number.MAX_SAFE_INTEGER + 1,
+    }).success,
+    false,
+  );
+});
+
+test("an execution environment refuses a stored or a repository source with no digest", () => {
+  const digest = "d".repeat(64);
+  assert.equal(executionEnvironmentSchema.parse(null), null);
+  assert.ok(
+    executionEnvironmentSchema.safeParse({
+      source: EnvironmentSource.Stored,
+      document: { image: "debian" },
+      digest,
+    }).success,
+  );
+  assert.ok(
+    executionEnvironmentSchema.safeParse({
+      source: EnvironmentSource.Repository,
+      digest,
+    }).success,
+  );
+  assert.equal(
+    executionEnvironmentSchema.safeParse({
+      source: EnvironmentSource.Stored,
+      document: { image: "debian" },
+    }).success,
+    false,
+  );
+  assert.equal(
+    executionEnvironmentSchema.safeParse({
+      source: EnvironmentSource.Repository,
+    }).success,
+    false,
+  );
+  assert.equal(
+    executionEnvironmentSchema.safeParse({
+      source: EnvironmentSource.Repository,
+      digest: "",
     }).success,
     false,
   );

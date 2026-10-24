@@ -142,6 +142,11 @@ export interface Dependencies {
   store: Store;
   workerBindingOf: WorkerBindingOf;
   workerBindingsOf: WorkerBindingsOf;
+  environmentClaimed(projectId: string, resourceIdentity: string): void;
+  environmentDigestOf(
+    projectId: string,
+    resourceIdentity: string,
+  ): string | null;
   instanceIssuer: InstanceIssuer;
   workerBindingRowOf: WorkerBindingRowOf;
   repositoryPolicyOf: RepositoryPolicyOf;

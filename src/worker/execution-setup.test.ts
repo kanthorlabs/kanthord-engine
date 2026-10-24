@@ -48,6 +48,9 @@ const SSH_CREDENTIAL = "kanthorlabs-ssh";
 const HOST_KEY =
   "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl";
 const NO_REQUESTS = 0;
+const REPOSITORY_IDENTITY = "repository:github:kanthorlabs/api";
+const API_IDENTITY = "repository:github:kanthorlabs/api";
+const ENVIRONMENT_DIGEST = "e".repeat(64);
 const publicKeyCustody = {
   handover: () => {
     throw new Error("UNEXPECTED_COLLABORATION");
@@ -143,6 +146,8 @@ test("setup answers the system and agent prompt after its single snapshot and su
       return store.transaction(fn);
     },
   };
+  const claimed: string[][] = [];
+  const digested: string[][] = [];
   const dependencies = {
     store,
     agentPrompt: {
@@ -175,6 +180,13 @@ test("setup answers the system and agent prompt after its single snapshot and su
         platform: agent.effective_configuration.provider,
         metadata: null,
       };
+    },
+    environmentClaimed: (projectId: string, resourceIdentity: string) => {
+      claimed.push([projectId, resourceIdentity]);
+    },
+    environmentDigestOf: (projectId: string, resourceIdentity: string) => {
+      digested.push([projectId, resourceIdentity]);
+      return ENVIRONMENT_DIGEST;
     },
     repositoryBindingIdsOf: () => [],
     intentOf: () => ExecutionIntent.Implement,
@@ -260,6 +272,7 @@ test("setup answers the system and agent prompt after its single snapshot and su
       intentOf: () => ExecutionIntent.Implement,
       repositoryPolicyOf: () => ({
         binding_id: bindingId,
+        resource_identity: REPOSITORY_IDENTITY,
         name: "repo",
         address,
         platform: RepositoryPlatform.GitHub,
@@ -290,6 +303,7 @@ test("setup answers the system and agent prompt after its single snapshot and su
         repositoryBindingIdsOf: () => [bindingId],
         repositoryPolicyOf: () => ({
           binding_id: bindingId,
+          resource_identity: REPOSITORY_IDENTITY,
           name: "repo",
           address,
           platform: RepositoryPlatform.GitHub,
@@ -329,6 +343,7 @@ test("setup answers the system and agent prompt after its single snapshot and su
           repositoryBindingIdsOf: () => [bindingId],
           repositoryPolicyOf: () => ({
             binding_id: bindingId,
+            resource_identity: REPOSITORY_IDENTITY,
             name: "repo",
             address,
             platform: RepositoryPlatform.GitHub,
@@ -349,16 +364,144 @@ test("setup answers the system and agent prompt after its single snapshot and su
     assert.deepEqual(await environmentOf(stored, placement), {
       source: EnvironmentSource.Stored,
       document: stored,
+      digest: ENVIRONMENT_DIGEST,
     });
   assert.deepEqual(await environmentOf(null, InstancePlacement.Container), {
     source: EnvironmentSource.Repository,
+    digest: ENVIRONMENT_DIGEST,
   });
+  assert.ok(digested.length > NO_REQUESTS);
+  for (const call of digested)
+    assert.deepEqual(call, [claim.projectId, REPOSITORY_IDENTITY]);
   assert.equal(
     await environmentOf(null, InstancePlacement.Container, false),
     null,
   );
   assert.equal(await environmentOf(null, InstancePlacement.Server), null);
   assert.equal(await environmentOf(null, InstancePlacement.Worker), null);
+  const claimedBy = async (placement: InstancePlacement) => {
+    claimed.length = NO_REQUESTS;
+    await executionSetup(
+      {
+        ...dependencies,
+        workerBindingRowOf: () => ({
+          ...dependencies.workerBindingRowOf(),
+          placement,
+          environment: API_IDENTITY,
+        }),
+        repositoryBindingIdsOf: () => [bindingId],
+        repositoryPolicyOf: () => ({
+          binding_id: bindingId,
+          resource_identity: API_IDENTITY,
+          name: "api",
+          address,
+          platform: RepositoryPlatform.GitHub,
+          ssh_credential: SSH_CREDENTIAL,
+          base_branch: "main",
+          project_prompt: null,
+          working_layer: workingLayer,
+          environment: null,
+          repository_environment: true,
+        }),
+        sshHostKeysOf: () => knownHosts,
+      },
+      worker,
+      caller,
+    );
+    return [...claimed];
+  };
+  assert.deepEqual(await claimedBy(InstancePlacement.Container), [
+    [claim.projectId, API_IDENTITY],
+  ]);
+  assert.deepEqual(await claimedBy(InstancePlacement.Server), []);
+  assert.deepEqual(await claimedBy(InstancePlacement.Worker), []);
+});
+
+test("setup claims no environment for a container slot whose worker binding names none", async (t) => {
+  const store = new Store(":memory:");
+  t.after(() => store.close());
+  const setup = anthropicSetup();
+  const agent = setup.agents[0]!;
+  const claimed: string[][] = [];
+  const claim = {
+    executionId: setup.execution_id,
+    runtimeIdentity: createIdentity("worker_registration"),
+    workerBindingId: createIdentity("binding"),
+    nodeId: createIdentity("node"),
+    pinnedRevision: 1,
+    nodeBranch: "kanthord/node_01ARZ3NDEKTSV4RRFFQ69G5FAA",
+    attempt: 1,
+    projectId: createIdentity("project"),
+  };
+  await executionSetup(
+    {
+      store,
+      agentPrompt: {
+        templates: async () => SHIPPED_TEMPLATES,
+        compose: async () => promptLayers,
+      },
+      workerBindingRowOf: () => ({
+        binding_id: claim.workerBindingId,
+        project_id: claim.projectId,
+        resource_identity: "worker:coder@1",
+        tombstone: false,
+        disabled: false,
+        placement: InstancePlacement.Container,
+        worker_instances: [],
+        environment: null,
+        worker_name: setup.worker_name,
+        entries: [],
+        resource_budget: null,
+      }),
+      pinnedCredentialMetadata: (_tx, _claim, name) => ({
+        id: agent.credential_id,
+        name,
+        platform: agent.effective_configuration.provider,
+        metadata: null,
+      }),
+      environmentClaimed: (projectId, resourceIdentity) => {
+        claimed.push([projectId, resourceIdentity]);
+      },
+      environmentDigestOf: () => ENVIRONMENT_DIGEST,
+      repositoryBindingIdsOf: () => [],
+      intentOf: () => ExecutionIntent.Implement,
+      repositoryPolicyOf: () => null,
+      sshHostKeysOf: () => {
+        throw new Error("UNEXPECTED_COLLABORATION");
+      },
+      custodyHandover: publicKeyCustody,
+      schedulerClaims: {
+        agentSelectionsOf: () => [
+          {
+            agent_name: agent.agent_name,
+            position: 0,
+            level: ChainLevel.Enablement,
+            agent_provider: "default",
+            provider: agent.effective_configuration.provider,
+            credential: "key",
+            model_identifier: agent.effective_configuration.model_identifier,
+            reasoning_effort: "low",
+          },
+        ],
+      },
+    },
+    {
+      declarationOf: (name: string) => getWorkerDeclaration(name) ?? null,
+      pinnedAgentView: () => ({
+        effective: agent.effective_configuration,
+        valid: true,
+        issues: [],
+      }),
+    },
+    {
+      identity: testHumanIdentity("ulrich", "Ulrich", "jti"),
+      context: background,
+      requestId: "request",
+      execution: claim,
+      commit: (fn) => store.transaction(fn),
+    },
+  );
+  assert.deepEqual(claimed, []);
 });
 
 test("setup answers one entry per agent of a two-agent worker with its own prompt and pinned credential", async (t) => {
@@ -417,6 +560,8 @@ test("setup answers one entry per agent of a two-agent worker with its own promp
         platform: "anthropic",
         metadata: null,
       }),
+      environmentClaimed: () => {},
+      environmentDigestOf: () => ENVIRONMENT_DIGEST,
       repositoryBindingIdsOf: () => [],
       intentOf: () => ExecutionIntent.Implement,
       repositoryPolicyOf: () => null,
@@ -523,10 +668,13 @@ async function repositorySetup(t: TestContext, address: string, pin: boolean) {
         platform: agent.effective_configuration.provider,
         metadata: null,
       }),
+      environmentClaimed: () => {},
+      environmentDigestOf: () => ENVIRONMENT_DIGEST,
       repositoryBindingIdsOf: () => [bindingId],
       intentOf: () => ExecutionIntent.Implement,
       repositoryPolicyOf: () => ({
         binding_id: bindingId,
+        resource_identity: REPOSITORY_IDENTITY,
         name: "repo",
         address,
         platform: RepositoryPlatform.GitHub,

@@ -78,6 +78,12 @@ const fakeCollaborations = {
       throw new Error("UNEXPECTED_COLLABORATION");
     },
   },
+  environmentClaimed: () => {
+    throw new Error("UNEXPECTED_COLLABORATION");
+  },
+  environmentDigestOf: () => {
+    throw new Error("UNEXPECTED_COLLABORATION");
+  },
   workerBindingRowOf: () => {
     throw new Error("UNEXPECTED_COLLABORATION");
   },

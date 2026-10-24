@@ -74,6 +74,7 @@ import {
   taskEnd,
   taskSpan,
   testedCommitOf,
+  environmentDigestsOf,
   verificationObserver,
 } from "./method-telemetry.ts";
 import { nodeWork, RefreshResult, refreshAtClaim } from "./base-refresh.ts";
@@ -674,7 +675,11 @@ async function verifyCommands(
   if (setup !== null) return setup;
   const testedInput = testedInputOf(state.checkouts);
   const run = await runVerificationsWithOutput({
-    observe: verificationObserver(state.run.spans, testedCommitOf(testedInput)),
+    observe: verificationObserver(
+      state.run.spans,
+      testedCommitOf(testedInput),
+      environmentDigestsOf(state.input.setup.repositories),
+    ),
     directory: state.root,
     commands,
     tested_input: testedInput,

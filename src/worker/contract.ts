@@ -462,6 +462,7 @@ export type WorkerBindingRowOf = (
   worker_name: string;
   placement: InstancePlacement | null;
   worker_instances: string[];
+  environment?: string | null;
   entries: Array<WorkerEntry & { agent: string }>;
   resource_budget: { turns: number; wall_time_ms: number } | null;
 } | null;
@@ -471,6 +472,7 @@ export type RepositoryPolicyOf = (
   bindingId: string,
 ) => {
   binding_id: string;
+  resource_identity: string;
   name: string;
   address: string;
   platform: string;
@@ -986,8 +988,12 @@ export const executionEnvironmentSchema = z
     z.strictObject({
       source: z.literal(EnvironmentSource.Stored),
       document: environmentSchema,
+      digest: z.string().min(1),
     }),
-    z.strictObject({ source: z.literal(EnvironmentSource.Repository) }),
+    z.strictObject({
+      source: z.literal(EnvironmentSource.Repository),
+      digest: z.string().min(1),
+    }),
   ])
   .nullable();
 export type ExecutionEnvironment = z.infer<typeof executionEnvironmentSchema>;

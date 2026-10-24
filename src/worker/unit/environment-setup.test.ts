@@ -35,6 +35,7 @@ const ONE_RUN = "run\n";
 const TWO_RUNS = "run\nrun\n";
 const MAGIC_PATH = ":lock";
 const MAGIC_TEXT = "{}";
+const DIGEST = "d".repeat(64);
 
 async function commit(directory: string, path: string, content: string) {
   writeFileSync(join(directory, path), content);
@@ -73,7 +74,7 @@ function setupCheckout(
 }
 
 function stored(document: Record<string, unknown>): ExecutionEnvironment {
-  return { source: EnvironmentSource.Stored, document };
+  return { source: EnvironmentSource.Stored, document, digest: DIGEST };
 }
 
 function input() {
@@ -117,6 +118,7 @@ test("setup reads the devcontainer file of the base head for a repository source
   });
   const source = setupCheckout(checkout, {
     source: EnvironmentSource.Repository,
+    digest: DIGEST,
   });
   const [entry] = await setupEntries(input(), [source]);
   assert.deepEqual(entry?.environment, {
@@ -128,7 +130,10 @@ test("setup reads the devcontainer file of the base head for a repository source
   assert.equal(existsSync(join(checkout, SETUP_MARKER)), true);
   const none = await repository(t, { file: "base" });
   const [absent] = await setupEntries(input(), [
-    setupCheckout(none.checkout, { source: EnvironmentSource.Repository }),
+    setupCheckout(none.checkout, {
+      source: EnvironmentSource.Repository,
+      digest: DIGEST,
+    }),
   ]);
   assert.equal(absent?.environment, null);
   assert.equal(
@@ -144,7 +149,10 @@ test("an invalid devcontainer file of the base head stops with an environment fa
   });
   await assert.rejects(
     setupEntries(input(), [
-      setupCheckout(checkout, { source: EnvironmentSource.Repository }),
+      setupCheckout(checkout, {
+        source: EnvironmentSource.Repository,
+        digest: DIGEST,
+      }),
     ]),
     (error) =>
       error instanceof ExecutionStop &&

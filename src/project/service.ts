@@ -1546,6 +1546,7 @@ export class ProjectService implements Service, ProjectBindings {
       disabled: resolution.disabled,
       placement: config.placement ?? null,
       worker_instances: config.worker_instances ?? [],
+      environment: resolveEnvironment(tx, config, binding.project_id),
       entries: config.entries ?? [],
       resource_budget: config.resource_budget ?? null,
     };
@@ -1577,6 +1578,7 @@ export class ProjectService implements Service, ProjectBindings {
     const config = repositoryConfigSchema.parse(binding.config);
     return {
       binding_id: binding.id,
+      resource_identity: binding.resource_identity,
       project_id: binding.project_id,
       name: binding.name,
       address: config.address,

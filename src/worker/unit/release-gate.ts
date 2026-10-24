@@ -8,7 +8,11 @@ import { refreshAtRelease, RefreshResult } from "./base-refresh.ts";
 import { verificationCommands } from "./evaluation-input.ts";
 import { taskRevisionInstruction } from "./judgement.ts";
 import { checkoutDetached, cloneLocal, matchRemote } from "./local-git.ts";
-import { testedCommitOf, verificationObserver } from "./method-telemetry.ts";
+import {
+  environmentDigestsOf,
+  testedCommitOf,
+  verificationObserver,
+} from "./method-telemetry.ts";
 import { repositoryOf, type StepsState } from "./steps-implement.ts";
 import {
   environmentStop,
@@ -167,6 +171,7 @@ async function verifyInReleaseClones(
       observe: verificationObserver(
         state.run.spans,
         testedCommitOf(testedInput),
+        environmentDigestsOf(state.input.setup.repositories),
       ),
       directory,
       commands,

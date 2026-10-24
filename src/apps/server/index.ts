@@ -641,6 +641,10 @@ export function composeServices(options: {
       options.config.master_key,
       options.config.gateway.auth.version,
     ),
+    environmentClaimed: (projectId, resourceIdentity) =>
+      project.environmentClaimed(projectId, resourceIdentity),
+    environmentDigestOf: (projectId, resourceIdentity) =>
+      project.environmentDigestOf(projectId, resourceIdentity),
     workerBindingRowOf: (tx, id) => project.workerBindingRowOf(tx, id),
     repositoryPolicyOf: (tx, id) => project.repositoryPolicyOf(tx, id),
     repositoryBindingIdsOf: (tx, nodeId, revision) =>

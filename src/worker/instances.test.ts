@@ -165,6 +165,8 @@ function instanceFixture(t: TestContext) {
         clientIdentity(instanceId, projectId, resourceIdentity, generation),
       clientSecret: (clientId) => `secret.${clientId}`,
     },
+    environmentClaimed: unexpected,
+    environmentDigestOf: unexpected,
     workerBindingRowOf: unexpected,
     repositoryPolicyOf: unexpected,
     repositoryBindingIdsOf: unexpected,

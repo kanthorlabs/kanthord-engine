@@ -4261,6 +4261,7 @@ test("workerBindingRowOf retains the pinned configuration in the caller transact
         disabled: false,
         placement: WorkerPlacement.Server,
         worker_instances: [],
+        environment: null,
         entries: [],
         resource_budget: null,
       },
@@ -4308,6 +4309,7 @@ test("repositoryPolicyOf preserves the named revision after a strategy change", 
     assert.notEqual(pinned.id, later.id);
     assert.deepEqual(f.project.repositoryPolicyOf(tx, pinned.id), {
       binding_id: pinned.id,
+      resource_identity: pinned.resource_identity,
       project_id: project.id,
       name: REPOSITORY_NAME,
       address: original.config.address,

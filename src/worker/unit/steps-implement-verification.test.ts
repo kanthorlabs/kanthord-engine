@@ -163,6 +163,7 @@ test("a stored environment runs its setup in the node checkout before the first 
     {
       source: EnvironmentSource.Stored,
       document: { postCreateCommand: `touch ${SETUP_MARKER}` },
+      digest: "d".repeat(64),
     },
   );
   assert.equal(existsSync(join(h.checkouts[0]!.directory, SETUP_MARKER)), true);
@@ -183,6 +184,7 @@ test("a setup failure on the base head stops the prepare with environment_failed
       {
         source: EnvironmentSource.Stored,
         document: { postCreateCommand: "exit 5" },
+        digest: "d".repeat(64),
       },
     ),
     {
