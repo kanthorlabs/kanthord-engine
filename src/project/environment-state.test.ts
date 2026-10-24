@@ -343,6 +343,16 @@ test("a write keeps the repairs of the file of the same digest and a new file ho
   assert.equal(files.read(path, other)?.repairs, NO_REPAIRS);
 });
 
+test("a write answers the stored file with the repairs of the same digest", (t) => {
+  const files = new ProofFiles(temporary(t));
+  const path = "repository/github/acme/app";
+  const sum = "e".repeat(64);
+  files.write(path, proofFile(sum, { repairs: KEPT_REPAIRS }));
+  const stored = files.write(path, proofFile(sum, { outcome: FAILED }));
+  assert.deepEqual(stored, files.read(path, sum));
+  assert.equal(stored.repairs, KEPT_REPAIRS);
+});
+
 test("incrementRepairs writes repairs plus one atomically and answers the new value", (t) => {
   const root = temporary(t);
   const files = new ProofFiles(root);

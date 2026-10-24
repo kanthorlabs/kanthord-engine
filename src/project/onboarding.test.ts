@@ -694,6 +694,7 @@ function record(override: Partial<GroupRecord> = {}): GroupRecord {
     digest: "d",
     tag: "t",
     proof: null,
+    repairs: 0,
     proved: false,
     read_succeeded: true,
     step: null,
@@ -4051,6 +4052,44 @@ test("a stop between the read at a new commit and the run end keeps the repair c
   await h.until(() => h.events.includes(BUILD));
   await h.onboarding.stop();
   assert.equal(h.proofOf(h.digest())?.repairs, KEPT_REPAIRS);
+});
+
+function staleFailureHarness(t: TestContext): Harness {
+  const h = new Harness(t);
+  h.writeProof(
+    proofFile(h.digest(), {
+      outcome: "failed",
+      class: "setup_failed",
+      repairs: KEPT_REPAIRS,
+    }),
+  );
+  h.resolution = { ...REPOSITORY, commit: MOVED_COMMIT };
+  return h;
+}
+
+test("the state shows the repairs on disk during a run at a new commit", async (t) => {
+  const h = staleFailureHarness(t);
+  await h.compute();
+  await h.until(() => h.events.includes(BUILD));
+  assert.equal(h.state().repairs, KEPT_REPAIRS);
+});
+
+test("the state shows the repairs on disk after a run at a new commit", async (t) => {
+  const h = staleFailureHarness(t);
+  h.open();
+  await h.compute();
+  await h.ended();
+  assert.equal(h.proofOf(h.digest())?.repairs, KEPT_REPAIRS);
+  assert.equal(h.state().repairs, KEPT_REPAIRS);
+});
+
+test("the state shows the repairs on disk after an execution failure at a new commit", async (t) => {
+  const h = staleFailureHarness(t);
+  await h.compute();
+  await h.until(() => h.events.includes(BUILD));
+  h.onboarding.environmentFailed(failureInput(h));
+  assert.equal(h.proofOf(h.digest())?.repairs, KEPT_REPAIRS);
+  assert.equal(h.state().repairs, KEPT_REPAIRS);
 });
 
 test(

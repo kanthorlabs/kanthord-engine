@@ -207,6 +207,7 @@ export interface GroupRecord {
   digest: string | null;
   tag: string | null;
   proof: ProofFile | null;
+  repairs: number;
   proved: boolean;
   read_succeeded: boolean;
   step: QueuedStep | null;
@@ -328,6 +329,7 @@ function emptyRecord(
     digest: null,
     tag: null,
     proof: null,
+    repairs: 0,
     proved: false,
     read_succeeded: false,
     step: null,
@@ -449,7 +451,7 @@ function stateOf(record: GroupRecord): EnvironmentState {
           }
         : null,
     checks: proof?.checks ?? [],
-    repairs: proof?.repairs ?? 0,
+    repairs: record.repairs,
     repairing: record.session !== null,
   };
 }
@@ -935,6 +937,7 @@ export class Onboarding {
       digest: sum,
       tag,
       proof: stale ? null : stored,
+      repairs: stored?.repairs ?? 0,
       proved:
         !stale &&
         tag !== null &&
@@ -1079,6 +1082,7 @@ export class Onboarding {
       repairs: proofs.incrementRepairs(path, group.digest),
     };
     group.proof = failure;
+    group.repairs = failure.repairs;
     void this.startSession(group, failure);
   }
 
@@ -1393,8 +1397,8 @@ export class Onboarding {
       ended_at: this.dependencies.now(),
       commit,
     };
-    proofs.write(path, file);
-    record.proof = file;
+    record.proof = proofs.write(path, file);
+    record.repairs = record.proof.repairs;
     const proved = verdict.outcome === ProofOutcome.Passed && tag !== null;
     if (proved) {
       await runtime.tagProved(tag);
@@ -1642,8 +1646,8 @@ export class Onboarding {
         ended_at: this.dependencies.now(),
         commit: record.commit,
       };
-      proofs.write(environmentPath(identity), file);
-      record.proof = file;
+      record.proof = proofs.write(environmentPath(identity), file);
+      record.repairs = record.proof.repairs;
       this.considerSession(record);
       this.retryWhileWaiting(keyOf(input.project_id, identity), record);
     }
@@ -1691,6 +1695,7 @@ export class Onboarding {
     if (record.digest !== null)
       proofs.remove(environmentPath(record.resource_identity), record.digest);
     record.proof = null;
+    record.repairs = 0;
     record.proved = false;
     const { tag } = record;
     if (tag === null) return;
