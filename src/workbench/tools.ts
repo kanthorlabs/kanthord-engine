@@ -16,6 +16,7 @@ import {
 } from "../kernel/operation.ts";
 import { BuiltinTool, getAgentDeclaration } from "../agent/catalog.ts";
 import { childEnvironment } from "../agent/environment.ts";
+import { processBashOperations } from "../agent/bash-process.ts";
 import { llmOperations } from "../llm/contract.ts";
 import { repositoryOperations } from "../repository/contract.ts";
 import { storageOperations } from "../storage/contract.ts";
@@ -127,7 +128,7 @@ export function builtinTools(
   const allowlist: string[] = [...agent.tools];
   if (!agent.tools.includes(BuiltinTool.Bash))
     return { allowlist, customTools: [] };
-  const local = pi.createLocalBashOperations();
+  const local = processBashOperations(pi.getShellConfig(), () => {});
   const bash = pi.createBashToolDefinition(cwd, {
     exposeSessionEnvironment: false,
     spawnHook: (context) => ({

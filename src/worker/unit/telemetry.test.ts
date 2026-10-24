@@ -67,6 +67,7 @@ const TRACING = {
   sessionId: SESSION_ID,
   secrets: [] as readonly string[],
   refreshSecrets: async (): Promise<readonly string[]> => [],
+  processes: { take: () => undefined },
 };
 const MODEL = "glm-test-model";
 const OUTCOME_OK = "ok";
@@ -653,6 +654,55 @@ test("a tool error ends with Error and the tool_error type", () => {
     ...TOOL_END_ATTRIBUTES,
   ]);
   assert.deepEqual(textRecordsOf(records), []);
+});
+
+const BASH_PID = 4242;
+
+function bashProcessEnd(killed: boolean) {
+  const { records, spans } = recorder();
+  const scripted = scriptedSession();
+  const ended = new Map([[TOOL_CALL, { pid: BASH_PID, killed }]]);
+  traceAgent(scripted.session, spans, TRACED_AGENT, {
+    ...TRACING,
+    processes: {
+      take: (toolCallId: string) => {
+        const bashProcess = ended.get(toolCallId);
+        ended.delete(toolCallId);
+        return bashProcess;
+      },
+    },
+  });
+  scripted.emit({ type: "turn_start" });
+  scripted.emit({
+    type: "tool_execution_start",
+    toolCallId: TOOL_CALL,
+    toolName: "bash",
+    args: {},
+  });
+  scripted.emit({
+    type: "tool_execution_end",
+    toolCallId: TOOL_CALL,
+    toolName: "bash",
+    result: { content: [{ type: "text", text: "Command timed out" }] },
+    isError: killed,
+  });
+  assert.equal(ended.has(TOOL_CALL), false);
+  return endOf(records, SpanOperation.Tool)?.attributes ?? {};
+}
+
+test("a bash call that the timeout or the abort ended records its process and the kill", () => {
+  const attributes = bashProcessEnd(true);
+  assert.equal(attributes["process.pid"], BASH_PID);
+  assert.equal(attributes["process.group_leader.pid"], BASH_PID);
+  assert.equal(attributes["kanthord.tool.killed"], true);
+  assert.equal(attributes["kanthord.tool.outcome"], OUTCOME_ERROR);
+});
+
+test("a bash call that exits records its process and no kill", () => {
+  const attributes = bashProcessEnd(false);
+  assert.equal(attributes["process.pid"], BASH_PID);
+  assert.equal(attributes["process.group_leader.pid"], BASH_PID);
+  assert.equal(attributes["kanthord.tool.killed"], false);
 });
 
 test("a turn under a worker.task span names that span as its parent", async () => {

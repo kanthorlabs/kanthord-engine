@@ -315,6 +315,7 @@ export default tseslint.config(
                     fileInternalPath: `{${[
                       "pi",
                       "pi-tools",
+                      "bash-process",
                       "agent-session",
                       "environment",
                       "catalog",

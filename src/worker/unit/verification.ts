@@ -2,7 +2,7 @@ import { addAbortListener } from "node:events";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import type { Context } from "../../kernel/context.ts";
-import { killProcessGroup } from "../../kernel/process-group.ts";
+import { killChildTree } from "../../kernel/process-group.ts";
 import { redactReason } from "../../kernel/probe.ts";
 import { EndReason, ExecutionStop } from "./execution-run.ts";
 import { EnvironmentFailure } from "../../scheduler/contract.ts";
@@ -58,7 +58,6 @@ const SUCCESS = 0;
 const COMMAND_ABSENT_EXIT = 127;
 const SIGNAL_EXIT_FIRST = 129;
 const SIGNAL_EXIT_LAST = 192;
-const PROCESS_ABSENT = "ESRCH";
 const OUTPUT_TAIL_BYTES = 4096;
 const OUTPUT_GRACE_MS = 1000;
 export const CommandEnd = {
@@ -157,14 +156,13 @@ function runCommand(
     const kill = () => {
       if (!child.pid) return;
       try {
-        killProcessGroup(child.pid);
+        killChildTree({
+          pid: child.pid,
+          exitCode: child.exitCode,
+          signalCode: child.signalCode,
+        });
       } catch (error) {
-        if (!(
-          error instanceof Error &&
-          "code" in error &&
-          error.code === PROCESS_ABSENT
-        ))
-          reject(error);
+        reject(error);
       }
     };
     const timer = setTimeout(

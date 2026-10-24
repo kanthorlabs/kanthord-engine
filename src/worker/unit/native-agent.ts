@@ -24,7 +24,7 @@ import { compositionRecord, workingTexts } from "../../agent/prompt-render.ts";
 import { openSession, withDeadline } from "../../agent/agent-session.ts";
 import { countTurns, pinnedLayers } from "../../agent/pinned-layers.ts";
 import { loadPi } from "../../agent/pi.ts";
-import { sessionTools } from "./tool-table.ts";
+import { sessionTools, ToolProcesses } from "./tool-table.ts";
 import type {
   ExecutionCredential,
   ModelRuntimeFactory,
@@ -329,6 +329,7 @@ export async function openNativeAgent(
           options,
         )
       : pi.SessionManager.inMemory(input.workspace, options);
+    const processes = new ToolProcesses(pi.getShellConfig());
     session = await openSession({
       cwd: input.workspace,
       modelRuntime: runtime,
@@ -342,6 +343,7 @@ export async function openNativeAgent(
         budget,
         input.hostTools,
         input.env,
+        processes,
       ),
       hostHome: input.hostHome,
       hooks: [pins.hook],
@@ -356,6 +358,7 @@ export async function openNativeAgent(
           sessionId,
           secrets: await secrets(),
           refreshSecrets: secrets,
+          processes,
         }),
       );
     return nativeAgent(
