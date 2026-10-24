@@ -264,7 +264,7 @@ async function containerPool(t: TestContext) {
     const answer = await runtimeCall(runtime, [
       "inspect",
       "--format",
-      "{{.ImageName}}",
+      "{{.Config.Image}}",
       name,
     ]);
     assert.equal(answer.code, SUCCESS_CODE, answer.stderr);
