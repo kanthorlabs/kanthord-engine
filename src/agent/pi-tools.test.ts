@@ -10,11 +10,14 @@ import {
 import { join } from "node:path";
 import { test, type TestContext } from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { shippedAsset, type BinaryAssetSource } from "../kernel/assets.ts";
+import {
+  PI_TOOLS_MANIFEST,
+  shippedAsset,
+  type BinaryAssetSource,
+} from "../kernel/assets.ts";
 import { temporary } from "../kernel/test-support.ts";
 import {
   installPiTools,
-  PI_TOOLS_MANIFEST,
   piToolsManifestSchema,
   type PiToolsManifest,
 } from "./pi-tools.ts";

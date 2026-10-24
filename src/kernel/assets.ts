@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { getAsset, getAssetKeys, isSea } from "node:sea";
 import { FILE_NOT_FOUND } from "./files.ts";
@@ -17,6 +18,7 @@ const TEXT_ENCODING = "utf8";
 export const PACKAGE_MANIFEST = "package.json";
 export const DASHBOARD_ASSET_PREFIX = "dashboard/";
 export const PI_TOOLS_ASSET_PREFIX = "pi-tools/";
+export const PI_TOOLS_MANIFEST = "pi-tools.json";
 export const WORKER_THREAD_ASSET = "worker-thread.cjs";
 const PI_TOOLS_DIRECTORY = new URL("../../.pi-tools/", import.meta.url);
 const nodeAssetSource: AssetSource = { isSea, getAsset };
@@ -62,6 +64,10 @@ export function dashboardAsset(
   return source.getAssetKeys().includes(name)
     ? source.getAsset(name)
     : undefined;
+}
+
+export function piToolCurrent(binary: Buffer, binarySha256: string): boolean {
+  return createHash("sha256").update(binary).digest("hex") === binarySha256;
 }
 
 export function piToolAsset(
