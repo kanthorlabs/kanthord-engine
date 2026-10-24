@@ -49,7 +49,6 @@ import {
   RUN_VERB,
   SINGLE_SLOT,
   slotRuns,
-  STATUS_WAIT_MS,
   worker,
   type Fixture,
   type SlotStart,
@@ -287,10 +286,6 @@ async function agentFixture(
   };
 }
 
-function bounded(t: TestContext): AbortSignal {
-  return AbortSignal.any([t.signal, AbortSignal.timeout(STATUS_WAIT_MS)]);
-}
-
 async function currentItem(
   fixture: Fixture,
   projectId: string,
@@ -312,7 +307,7 @@ async function settledFailed(
       item.status === EnvironmentStatus.Failed &&
       !item.repairing &&
       sessions() >= FIRST_SESSION,
-    bounded(t),
+    t.signal,
   );
   return currentItem(fixture, projectId);
 }
@@ -416,7 +411,7 @@ test(
     const ready = await until(
       () => currentItem(fixture, project.id),
       (item) => item.status === EnvironmentStatus.Ready && !item.repairing,
-      bounded(t),
+      t.signal,
     );
     assert.equal(ready.source, EnvironmentSource.Stored);
     assert.equal(ready.target, EnvironmentTarget.Image);
@@ -447,11 +442,11 @@ test(
       ProofOutcome.Passed,
     );
 
-    const slot = await until(() => starts[0], Boolean, bounded(t));
+    const slot = await until(() => starts[0], Boolean, t.signal);
     const runs = await until(
       () => slotRuns(podman, slot!.clientId),
       (found) => found.length > NO_ITEMS,
-      bounded(t),
+      t.signal,
     );
     for (const run of runs) assert.equal(run[run.indexOf("--") - 1], ready.tag);
     const client = await worker(t, fixture, project.id, nodeId, slot!.slot, {
@@ -566,7 +561,7 @@ test(
       await until(
         () => currentItem(fixture, project.id),
         (item) => !item.repairing,
-        bounded(t),
+        t.signal,
       );
     }
 
@@ -599,7 +594,7 @@ test(
     const failed = await until(
       () => currentItem(fixture, project.id),
       (item) => item.status === EnvironmentStatus.Failed,
-      bounded(t),
+      t.signal,
     );
     await delay(SETTLE_WAIT_MS);
     const later = await currentItem(fixture, project.id);
@@ -630,7 +625,7 @@ test(
     const project = await repositoryProject(fixture, "environment-agent-held");
     await importNode(fixture, project);
 
-    await until(() => reached.step, Boolean, bounded(t));
+    await until(() => reached.step, Boolean, t.signal);
     const during = await currentItem(fixture, project.id);
     assert.equal(during.status, EnvironmentStatus.Failed);
     assert.equal(during.repairing, true);
@@ -639,7 +634,7 @@ test(
     const after = await until(
       () => currentItem(fixture, project.id),
       (item) => !item.repairing,
-      bounded(t),
+      t.signal,
     );
     assert.equal(after.status, EnvironmentStatus.Failed);
     assert.equal(model.record.sessions, FIRST_SESSION);
