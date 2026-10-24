@@ -27,3 +27,4 @@ The worker owns the commit, the branch, the push, the verification and the relea
 
 1. **Bounded waits.** Give every test that waits for an event, a process or a request its own timeout.
 2. **No self-spawning test.** Never spawn the test runner on the test file that holds the spawning test.
+3. **Targeted test runs.** Run the verification commands of the work prompt and the test files that you change. Never run the whole test suite of a directory. The worker runs the verifications after the turn.

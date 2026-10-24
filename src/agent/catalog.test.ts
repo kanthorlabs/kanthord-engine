@@ -92,6 +92,9 @@ test("agent prompts are valid published UTF-8 assets", () => {
   }
   assert.ok(SWE_AGENT_PROMPT.startsWith("## Role"));
   assert.ok(SWE_AGENT_PROMPT.includes("swe@1"));
+  assert.ok(
+    SWE_AGENT_PROMPT.includes("Never run the whole test suite of a directory."),
+  );
   assert.ok(RE_AGENT_PROMPT.includes("re@1"));
   assert.ok(WORKBENCH_PROMPT.startsWith("## Human interlocutor"));
 });
