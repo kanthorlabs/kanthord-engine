@@ -3,6 +3,10 @@ import { execFileSync } from "node:child_process";
 import { readdirSync, readFileSync } from "node:fs";
 
 const SIGNAL_KILL = "SIGKILL";
+const SIGNAL_STOP = "SIGSTOP";
+const NO_GROUPS = 0;
+const SINGLE_FAILURE = 1;
+export const FREEZE_PASSES_MAX = 8;
 const FIRST_USER_PID = 1;
 const PROCESS_ABSENT = "ESRCH";
 const ENTRY_ABSENT = "ENOENT";
@@ -11,6 +15,7 @@ const PROC_DIRECTORY = "/proc";
 const STAT_PPID_FIELD = 1;
 const STAT_GROUP_FIELD = 2;
 const PS_COLUMNS = 3;
+const PS_PATH = "/bin/ps";
 const STAT_NAME_GAP = 2;
 const STAT_NAME_START = 0;
 
@@ -26,39 +31,102 @@ export function killProcessGroup(leader: number): void {
   process.kill(-leader, SIGNAL_KILL);
 }
 
-export function killProcessTree(leader: number): void {
+export interface ProcessSystem {
+  readTable: () => ProcessRow[];
+  signalGroup: (group: number, signal: NodeJS.Signals) => void;
+}
+
+export const SYSTEM_PROCESSES: ProcessSystem = {
+  readTable: () => processTable(),
+  signalGroup: (group, signal) => process.kill(-group, signal),
+};
+
+export interface ChildState {
+  pid: number;
+  exitCode: number | null;
+  signalCode: string | null;
+}
+
+export function killChildTree(
+  child: ChildState,
+  system: ProcessSystem = SYSTEM_PROCESSES,
+): void {
+  if (child.exitCode === null && child.signalCode === null) {
+    killProcessTree(child.pid, system);
+    return;
+  }
+  assertLeader(child.pid);
+  throwFailures(signalGroups([child.pid], SIGNAL_KILL, system));
+}
+
+export function killProcessTree(
+  leader: number,
+  system: ProcessSystem = SYSTEM_PROCESSES,
+): void {
+  assertLeader(leader);
+  const stopped = new Set<number>();
+  const failures: unknown[] = [];
+  try {
+    freezeTree(leader, system, stopped, failures);
+  } finally {
+    const groups = stopped.size === NO_GROUPS ? [leader] : [...stopped];
+    failures.push(...signalGroups(groups, SIGNAL_KILL, system));
+  }
+  throwFailures(failures);
+}
+
+function assertLeader(leader: number): void {
   assert.ok(Number.isSafeInteger(leader) && leader > FIRST_USER_PID);
   assert.ok(leader !== process.pid && leader !== process.ppid);
-  const rows = tableOrLeaderKill(leader);
-  const own = new Set(
+}
+
+function freezeTree(
+  leader: number,
+  system: ProcessSystem,
+  stopped: Set<number>,
+  failures: unknown[],
+): void {
+  for (let pass = 0; pass < FREEZE_PASSES_MAX; pass += 1) {
+    const rows = system.readTable();
+    const own = ownGroups(rows);
+    const found = [leader, ...descendantGroups(leader, rows)].filter(
+      (group) =>
+        group > FIRST_USER_PID && !own.has(group) && !stopped.has(group),
+    );
+    const fresh = [...new Set(found)];
+    if (fresh.length === NO_GROUPS) return;
+    for (const group of fresh) stopped.add(group);
+    failures.push(...signalGroups(fresh, SIGNAL_STOP, system));
+  }
+}
+
+function ownGroups(rows: readonly ProcessRow[]): Set<number> {
+  return new Set(
     rows
       .filter((row) => row.pid === process.pid || row.pid === process.ppid)
       .map((row) => row.group),
   );
-  const groups = [leader, ...descendantGroups(leader, rows)].filter(
-    (group) => group > FIRST_USER_PID && !own.has(group),
-  );
-  const [failure] = [...new Set(groups)].flatMap((group) => killGroup(group));
-  if (failure !== undefined) throw failure;
 }
 
-function tableOrLeaderKill(leader: number): ProcessRow[] {
-  try {
-    return processTable();
-  } catch (error) {
-    killGroup(leader);
-    throw error;
-  }
+function signalGroups(
+  groups: readonly number[],
+  signal: NodeJS.Signals,
+  system: ProcessSystem,
+): unknown[] {
+  return groups.flatMap((group) => {
+    try {
+      system.signalGroup(group, signal);
+      return [];
+    } catch (error) {
+      return isCode(error, PROCESS_ABSENT) ? [] : [error];
+    }
+  });
 }
 
-function killGroup(group: number): unknown[] {
-  try {
-    process.kill(-group, SIGNAL_KILL);
-    return [];
-  } catch (error) {
-    if (isCode(error, PROCESS_ABSENT)) return [];
-    return [error];
-  }
+function throwFailures(failures: readonly unknown[]): void {
+  if (failures.length === NO_GROUPS) return;
+  if (failures.length === SINGLE_FAILURE) throw failures[0];
+  throw new AggregateError(failures, "the kill of a process tree failed");
 }
 
 function descendantGroups(
@@ -118,7 +186,7 @@ function procStat(pid: string): string | null {
 }
 
 function psTable(): ProcessRow[] {
-  const output = execFileSync("ps", ["-A", "-o", "pid=,ppid=,pgid="], {
+  const output = execFileSync(PS_PATH, ["-A", "-o", "pid=,ppid=,pgid="], {
     encoding: "utf8",
   });
   return output
