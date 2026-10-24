@@ -14,6 +14,7 @@ import { OperationRegistry, type CallerContext } from "../kernel/operation.ts";
 import { IN_MEMORY_DATABASE, Store } from "../kernel/store.ts";
 import { gatewayFixture } from "../gateway/test-support.ts";
 import { INTAKE_SERVICE_NAME } from "../intake/contract.ts";
+import { PROJECT_SERVICE_NAME } from "../project/contract.ts";
 import { REPOSITORY_PLATFORMS } from "../repository/index.ts";
 import { STORAGE_PLATFORMS } from "../storage/index.ts";
 import { environmentSecretOperations, projectOperations } from "./contract.ts";
@@ -81,6 +82,7 @@ function custodyOf(store: Store) {
     bindingsNaming: () => [],
     inboundsNaming: () => [],
     intakeServiceName: INTAKE_SERVICE_NAME,
+    projectServiceName: PROJECT_SERVICE_NAME,
   });
 }
 

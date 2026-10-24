@@ -36,6 +36,7 @@ import {
 } from "./credential-platform.ts";
 import { RepositoryCredentials } from "./credential.ts";
 import { INTAKE_SERVICE_NAME } from "../intake/contract.ts";
+import { PROJECT_SERVICE_NAME } from "../project/contract.ts";
 import { decrypt, encrypt } from "../custody/envelope.ts";
 import { createIdentity } from "../kernel/identity.ts";
 import { temporary } from "../kernel/test-support.ts";
@@ -100,6 +101,7 @@ function fixture(
     bindingsNaming: () => [],
     inboundsNaming: () => [],
     intakeServiceName: INTAKE_SERVICE_NAME,
+    projectServiceName: PROJECT_SERVICE_NAME,
   });
   const component = new RepositoryCredentials({
     store,

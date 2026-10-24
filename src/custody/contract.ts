@@ -311,6 +311,7 @@ export const GrantKind = {
   ObjectPut: "object_put",
   Inbound: "inbound",
   SshIdentity: "ssh_identity",
+  EnvironmentSecret: "environment_secret",
 } as const;
 export type GrantKind = (typeof GrantKind)[keyof typeof GrantKind];
 export const InboundOperation = { Poll: "poll" } as const;
@@ -407,6 +408,14 @@ export type GrantRequest =
       identity: CallerIdentity;
       subject: SshIdentitySubject;
       claim: ExecutionClaim | null;
+    }
+  | {
+      kind: typeof GrantKind.EnvironmentSecret;
+      identity: ServiceIdentity;
+      projectId: string;
+      bindingId: string;
+      variable: string;
+      credential: string;
     };
 export type ModelInferenceFacts = {
   provider_id: string;
@@ -420,6 +429,7 @@ type GrantFactsOfKind = {
   [GrantKind.ObjectPut]: AssetFacts;
   [GrantKind.Inbound]: InboundFacts;
   [GrantKind.SshIdentity]: SshIdentityFacts;
+  [GrantKind.EnvironmentSecret]: { binding_id: string; variable: string };
 };
 export type GrantExecution = Readonly<
   Omit<CustodyExecution, "credentials"> & { credentials: readonly string[] }

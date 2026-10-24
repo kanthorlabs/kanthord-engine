@@ -1,12 +1,18 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
-import { posix } from "node:path";
+import { existsSync, readFileSync, statSync } from "node:fs";
+import { join, posix } from "node:path";
 import { test, type TestContext } from "node:test";
 import {
   setImmediate as turn,
   setTimeout as pause,
 } from "node:timers/promises";
 import pino from "pino";
+import { CustodyComponent, custodyMigrations } from "../custody/index.ts";
+import {
+  CUSTODY_SERVICE_NAME,
+  type CredentialAnswer,
+} from "../custody/contract.ts";
+import { INTAKE_SERVICE_NAME } from "../intake/contract.ts";
 import { IdentityKind } from "../kernel/caller.ts";
 import {
   DEVCONTAINER_FILE,
@@ -18,6 +24,7 @@ import { OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import { IN_MEMORY_DATABASE, Store } from "../kernel/store.ts";
 import { temporary } from "../kernel/test-support.ts";
+import { testServiceIdentity } from "../kernel/test-identity.ts";
 import { SpanStatus, type ServerTrace } from "../tracking/contract.ts";
 import {
   RepositoryFileState,
@@ -38,6 +45,11 @@ import {
   detectEnvironment,
 } from "./detection.ts";
 import { ProjectEnvironments, type GroupResolution } from "./environment.ts";
+import {
+  ENVIRONMENT_SECRET_PLATFORM,
+  ENVIRONMENT_SECRET_PLATFORMS,
+} from "./environment-secret-platform.ts";
+import { EnvironmentSecrets } from "./environment-secrets.ts";
 import type { EnvironmentContribution } from "./environment-telemetry.ts";
 import {
   BASE_SUFFIX,
@@ -85,6 +97,16 @@ const DOCS: RepositoryGroup = {
   binding_name: "docs",
   resource_identity: "repository:github:acme/docs",
 };
+const SECRET_VARIABLE = "REGISTRY_AUTH";
+const SECRET_CREDENTIAL = "registry-auth";
+const SECRET_TEXT = "registry-secret-one";
+const ROTATED_SECRET_TEXT = "registry-secret-two";
+const SECRET_APP: RepositoryGroup = {
+  ...APP,
+  environment_secrets: { [SECRET_VARIABLE]: SECRET_CREDENTIAL },
+};
+const PRIVATE_MODE = 0o600;
+const MODE_MASK = 0o777;
 const WORKER_IDENTITY = "worker:builder";
 const SLOT_IMAGE = "registry/kanthord:1.0.0";
 const VERSION = "1.0.0";
@@ -240,7 +262,12 @@ class Harness {
   cacheList: Array<{ project_id: string; resource_identity: string }> = [];
   cacheRemovalFails = false;
   clock = 0;
+  beforeRelease: (() => void) | null = null;
+  readonly root: string;
   readonly proofs: ProofFiles;
+  readonly secrets: EnvironmentSecrets;
+  readonly custody: CustodyComponent;
+  readonly custodyStore: Store;
   readonly onboarding: Onboarding;
 
   constructor(
@@ -248,7 +275,22 @@ class Harness {
     resolve?: ResolveGroup,
     environmentBuildTimeoutMs: number = RUN_DEADLINE_MS,
   ) {
-    this.proofs = new ProofFiles(temporary(t));
+    this.root = temporary(t);
+    this.proofs = new ProofFiles(this.root);
+    this.custodyStore = new Store(IN_MEMORY_DATABASE);
+    t.after(() => this.custodyStore.close());
+    this.custodyStore.migrate([
+      { service: CUSTODY_SERVICE_NAME, migrations: custodyMigrations },
+    ]);
+    this.custody = secretCustody(this.custodyStore);
+    this.secrets = new EnvironmentSecrets({
+      root: this.root,
+      transaction: (write) => this.custodyStore.transaction(write),
+      identity: testServiceIdentity(PROJECT_SERVICE_NAME),
+      custody: this.custody,
+      records: this.custody,
+      now: () => Date.now(),
+    });
     const runtime = {
       runtimeName: RUNTIME_NAME,
       imageId: async (reference: string) => {
@@ -323,6 +365,14 @@ class Harness {
         }),
       runtime,
       proofs: this.proofs,
+      secrets: {
+        entriesOf: (variables) => this.secrets.entriesOf(variables),
+        release: (input) => {
+          this.beforeRelease?.();
+          return this.secrets.release(input);
+        },
+        remove: (runId) => this.secrets.remove(runId),
+      },
       slotImage: SLOT_IMAGE,
       version: VERSION,
       wake: (projectId) => {
@@ -347,6 +397,44 @@ class Harness {
       },
     });
     t.after(() => this.onboarding.stop());
+  }
+
+  createSecret(text: string = SECRET_TEXT): void {
+    this.custodyStore.transaction((tx) =>
+      this.custody.create(
+        tx,
+        SECRET_SET,
+        {
+          name: SECRET_CREDENTIAL,
+          platform: ENVIRONMENT_SECRET_PLATFORM,
+          secret: { key: text },
+          metadata: null,
+        },
+        undefined,
+      ),
+    );
+  }
+
+  rotateSecret(expectedRevision: number, text = ROTATED_SECRET_TEXT): void {
+    this.custodyStore.transaction((tx) =>
+      this.custody.rotate(
+        tx,
+        SECRET_SET,
+        SECRET_CREDENTIAL,
+        { expected_revision: expectedRevision, secret: { key: text } },
+        undefined,
+      ),
+    );
+  }
+
+  archiveSecret(): CredentialAnswer {
+    return this.custodyStore.transaction((tx) =>
+      this.custody.archive(tx, SECRET_SET, SECRET_CREDENTIAL),
+    );
+  }
+
+  secretFile(runId = "run_1"): string {
+    return join(this.root, `run-${runId}`, "secrets", SECRET_VARIABLE);
   }
 
   openBuild(): void {
@@ -452,9 +540,42 @@ class Harness {
           ? (this.images.get(document.image) ?? null)
           : null,
       slot_image: image ? (this.images.get(SLOT_IMAGE) ?? null) : null,
+      secrets: this.secrets.entriesOf(group.environment_secrets ?? {}),
       version: VERSION,
     });
   }
+}
+
+const SECRET_SET = { platforms: ENVIRONMENT_SECRET_PLATFORMS };
+
+function secretCustody(store: Store): CustodyComponent {
+  const unexpected = () => {
+    throw new Error("UNEXPECTED_COLLABORATION");
+  };
+  return new CustodyComponent({
+    executions: {
+      requireRunning: unexpected,
+      pinCredential: unexpected,
+      liveExecutionsPinning: () => [],
+    },
+    authorization: { authorizeModelInference: unexpected },
+    missionAuthorization: {
+      frozenAction: unexpected,
+      requestEvidence: unexpected,
+      evidenceAsset: unexpected,
+      objectPut: unexpected,
+    },
+    clientSecret: () => Buffer.alloc(32, 9).toString("base64"),
+    store,
+    platforms: ENVIRONMENT_SECRET_PLATFORMS,
+    envelopeKey: Buffer.alloc(32, 7),
+    logger: pino({ enabled: false }),
+    agentProvidersDependentOn: () => [],
+    bindingsNaming: () => [],
+    inboundsNaming: () => [],
+    intakeServiceName: INTAKE_SERVICE_NAME,
+    projectServiceName: PROJECT_SERVICE_NAME,
+  });
 }
 
 async function hold(gate: Deferred | null, signal: AbortSignal): Promise<void> {
@@ -480,6 +601,7 @@ function record(override: Partial<GroupRecord> = {}): GroupRecord {
     source: "repository",
     commit: "c1",
     document: DOCUMENT,
+    secrets: [],
     digest: "d",
     tag: "t",
     proof: null,
@@ -606,6 +728,7 @@ test("the digest of a record equals the environment digest of its inputs at imag
     files: REPOSITORY.files,
     base_image: "sha256:base",
     slot_image: "sha256:slot",
+    secrets: [],
     version: VERSION,
   });
   assert.equal(h.state().digest, expected);
@@ -632,6 +755,7 @@ test("the run pulls a missing base image before the digest", async (t) => {
     files: REPOSITORY.files,
     base_image: "sha256:pulled",
     slot_image: "sha256:slot",
+    secrets: [],
     version: VERSION,
   });
   assert.equal(h.state().digest, expected);
@@ -650,6 +774,7 @@ test("the digest holds null base and slot images outside image", async (t) => {
     files: REPOSITORY.files,
     base_image: null,
     slot_image: null,
+    secrets: [],
     version: VERSION,
   });
   assert.equal(h.state().digest, expected);
@@ -1074,6 +1199,7 @@ test(
       commit: "c1",
       tag,
       document: DOCUMENT,
+      secrets: [],
     });
     assert.deepEqual(h.proveInputs[0], {
       run_id: "run_1",
@@ -2103,6 +2229,7 @@ test("the digest input lists every read file in path order", async (t) => {
       files,
       base_image: null,
       slot_image: null,
+      secrets: [],
       version: VERSION,
     }),
   );
@@ -2310,5 +2437,133 @@ test(
     assert.equal(file.outcome, PASSED);
     assert.equal(h.state().status, EnvironmentStatus.Ready);
     assert.equal(h.spans.length, NO_CALLS);
+  },
+);
+
+function secretHarness(t: TestContext): Harness {
+  const h = new Harness(t);
+  h.bindings = facts([SECRET_APP], [container("app")]);
+  h.createSecret();
+  return h;
+}
+
+test(
+  "a run writes each secret to a private file before the build and passes only the variable and the path",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const h = secretHarness(t);
+    await h.compute(SECRET_APP);
+    await h.until(() => h.buildInputs.length > NO_CALLS);
+    const file = h.secretFile();
+    assert.equal(readFileSync(file, "utf8"), SECRET_TEXT);
+    assert.equal(statSync(file).mode & MODE_MASK, PRIVATE_MODE);
+    assert.deepEqual(h.buildInputs[0]?.secrets, [
+      { variable: SECRET_VARIABLE, file },
+    ]);
+    assert.ok(!JSON.stringify(h.buildInputs).includes(SECRET_TEXT));
+  },
+);
+
+test(
+  "the secrets directory is gone after a passed run, a failed build and a cancelled run",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const passed = secretHarness(t);
+    passed.open();
+    passed.proveResults = PASSING_RESULTS;
+    await passed.compute(SECRET_APP);
+    await passed.ended();
+    assert.equal(passed.state(SECRET_APP).status, EnvironmentStatus.Ready);
+    assert.equal(existsSync(passed.secretFile()), false);
+
+    const failed = secretHarness(t);
+    failed.openBuild();
+    failed.buildResult = {
+      outcome: "failed",
+      class: "build_failed",
+      tail: "x",
+    };
+    await failed.compute(SECRET_APP);
+    await failed.ended();
+    assert.equal(failed.state(SECRET_APP).status, EnvironmentStatus.Failed);
+    assert.equal(existsSync(failed.secretFile()), false);
+
+    const cancelled = secretHarness(t);
+    await cancelled.compute(SECRET_APP);
+    await cancelled.until(() => cancelled.buildInputs.length > NO_CALLS);
+    assert.equal(existsSync(cancelled.secretFile()), true);
+    await cancelled.onboarding.stop();
+    assert.equal(existsSync(cancelled.secretFile()), false);
+  },
+);
+
+test(
+  "a rotation of the credential gives the next trigger a new digest and a new run",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const h = secretHarness(t);
+    h.open();
+    h.proveResults = PASSING_RESULTS;
+    await h.compute(SECRET_APP);
+    await h.ended();
+    const first = h.state(SECRET_APP).digest;
+    assert.equal(h.state(SECRET_APP).status, EnvironmentStatus.Ready);
+    h.rotateSecret(1);
+    await h.compute(SECRET_APP);
+    await h.ended(TWO_CALLS);
+    const second = h.state(SECRET_APP).digest;
+    assert.notEqual(second, first);
+    assert.equal(second, h.digest(SECRET_APP));
+    assert.equal(h.buildInputs.length, TWO_CALLS);
+  },
+);
+
+test(
+  "a credential archived after the binding write ends the run with build_failed and a tail without the secret",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const h = secretHarness(t);
+    h.open();
+    h.beforeRelease = () => h.archiveSecret();
+    await h.compute(SECRET_APP);
+    const sum = h.state(SECRET_APP).digest;
+    assert.ok(sum);
+    await h.ended();
+    const file = h.proofOf(sum, SECRET_APP);
+    assert.ok(file);
+    assert.equal(file.outcome, FAILED);
+    assert.equal(file.class, BUILD_FAILED);
+    assert.equal(
+      file.tail,
+      `environment secret ${SECRET_VARIABLE} is unavailable`,
+    );
+    assert.ok(!file.tail.includes(SECRET_TEXT));
+    assert.equal(h.buildInputs.length, NO_CALLS);
+    assert.equal(existsSync(h.secretFile()), false);
+  },
+);
+
+test(
+  "a rotation between the digest and the release ends the run with no proof file and computes the group again",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const h = secretHarness(t);
+    h.open();
+    h.proveResults = PASSING_RESULTS;
+    h.beforeRelease = () => {
+      h.beforeRelease = null;
+      h.rotateSecret(1);
+    };
+    const staleDigest = h.digest(SECRET_APP);
+    await h.compute(SECRET_APP);
+    await h.ended();
+    assert.equal(h.proofOf(staleDigest, SECRET_APP), null);
+    assert.equal(h.buildInputs.length, NO_CALLS);
+    assert.equal(existsSync(h.secretFile()), false);
+    await h.until(() => h.state(SECRET_APP).status === EnvironmentStatus.Ready);
+    const fresh = h.state(SECRET_APP).digest;
+    assert.notEqual(fresh, staleDigest);
+    assert.equal(fresh, h.digest(SECRET_APP));
+    assert.equal(h.buildInputs.length, ONE_CALL);
   },
 );

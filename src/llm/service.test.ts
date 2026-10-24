@@ -81,6 +81,7 @@ import { loadPi } from "../agent/pi.ts";
 import { redactingLogger } from "../kernel/test-support.ts";
 import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai";
 import { INTAKE_SERVICE_NAME } from "../intake/contract.ts";
+import { PROJECT_SERVICE_NAME } from "../project/contract.ts";
 
 const FIRST_REVISION = 1;
 const HUMAN_ACCOUNT_ID = "alice";
@@ -172,6 +173,7 @@ function fixture(
     bindingsNaming: () => [],
     inboundsNaming: () => [],
     intakeServiceName: INTAKE_SERVICE_NAME,
+    projectServiceName: PROJECT_SERVICE_NAME,
     instanceKeys: collaborations.instanceKeys,
   });
   const component = new LlmComponent({

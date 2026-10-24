@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readdirSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
+import { canonicalJSON } from "../kernel/json.ts";
 import { temporary } from "../kernel/test-support.ts";
 import {
   EnvironmentTarget,
@@ -42,6 +43,7 @@ function input(
     files: [{ path: "a", state: "present", text: "x" }],
     base_image: "sha256:1",
     slot_image: "sha256:2",
+    secrets: [],
     version: "1.0.0",
     ...override,
   };
@@ -122,6 +124,7 @@ test("the environment digest changes with each input and ignores the key order",
   assert.match(first, /^[0-9a-f]{64}$/);
   const reordered: EnvironmentDigestInput = {
     version: "1.0.0",
+    secrets: [],
     slot_image: "sha256:2",
     base_image: "sha256:1",
     files: [{ text: "x", state: "present", path: "a" }],
@@ -142,6 +145,44 @@ test("the environment digest changes with each input and ignores the key order",
     input({ version: "2.0.0" }),
   ])
     assert.notEqual(environmentDigest(other), first);
+});
+
+const REGISTRY_SECRET = {
+  variable: "REGISTRY_AUTH",
+  credential: "registry-auth",
+  revision: 1,
+};
+const NPM_SECRET = {
+  variable: "NPM_TOKEN",
+  credential: "npm-token",
+  revision: 3,
+};
+
+test("the environment digest changes with the revision of a secret and with no secret", () => {
+  const first = environmentDigest(input({ secrets: [REGISTRY_SECRET] }));
+  assert.notEqual(
+    environmentDigest(
+      input({ secrets: [{ ...REGISTRY_SECRET, revision: 2 }] }),
+    ),
+    first,
+  );
+  assert.notEqual(environmentDigest(input()), first);
+});
+
+test("the environment digest ignores the order of the secrets", () => {
+  assert.equal(
+    environmentDigest(input({ secrets: [REGISTRY_SECRET, NPM_SECRET] })),
+    environmentDigest(input({ secrets: [NPM_SECRET, REGISTRY_SECRET] })),
+  );
+});
+
+test("the canonical JSON of the digest input holds the variable, the credential and the revision of a secret only", () => {
+  const text = canonicalJSON(input({ secrets: [REGISTRY_SECRET] }));
+  assert.ok(
+    text.includes(
+      '"secrets":[{"credential":"registry-auth","revision":1,"variable":"REGISTRY_AUTH"}]',
+    ),
+  );
 });
 
 test("a proof of commands that all end with exit 0 passes", () => {

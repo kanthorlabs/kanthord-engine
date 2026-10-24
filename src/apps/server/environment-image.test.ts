@@ -164,6 +164,7 @@ function images(
         commit: "c".repeat(40),
         tag: TAG,
         document: (options.environment ?? environment()).document,
+        secrets: [],
       },
       NEVER_ABORTED,
     );
@@ -785,6 +786,7 @@ function buildInput(): ImageBuildInput {
     commit: "c".repeat(40),
     tag: TAG,
     document: environment().document,
+    secrets: [],
   };
 }
 

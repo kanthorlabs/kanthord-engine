@@ -24,6 +24,7 @@ import { OperationRegistry, type CallerContext } from "../kernel/operation.ts";
 import { IN_MEMORY_DATABASE, Store } from "../kernel/store.ts";
 import { testWorkerIdentity } from "../kernel/test-identity.ts";
 import { INTAKE_SERVICE_NAME } from "../intake/contract.ts";
+import { PROJECT_SERVICE_NAME } from "../project/contract.ts";
 import { REPOSITORY_PLATFORMS } from "../repository/index.ts";
 import { STORAGE_PLATFORMS } from "../storage/index.ts";
 import {
@@ -137,6 +138,7 @@ async function fixture(t: TestContext) {
     bindingsNaming: () => [],
     inboundsNaming: () => [],
     intakeServiceName: INTAKE_SERVICE_NAME,
+    projectServiceName: PROJECT_SERVICE_NAME,
     instanceKeys,
   });
   const component = new LlmComponent({

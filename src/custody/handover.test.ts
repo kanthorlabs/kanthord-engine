@@ -55,6 +55,7 @@ import {
   sealJSON,
 } from "../kernel/hpke.ts";
 import { INTAKE_SERVICE_NAME } from "../intake/contract.ts";
+import { PROJECT_SERVICE_NAME } from "../project/contract.ts";
 import type { ExecutionClaim } from "../kernel/operation.ts";
 import { RepositoryComponent } from "../repository/index.ts";
 import { generateSshKey, sshPublicKeyOf } from "../repository/ssh-key.ts";
@@ -238,6 +239,7 @@ function fixture(
     bindingsNaming: () => [],
     inboundsNaming: () => [],
     intakeServiceName: INTAKE_SERVICE_NAME,
+    projectServiceName: PROJECT_SERVICE_NAME,
     agentProvidersDependentOn: () => [],
     platforms: TEST_SET.platforms,
     executions: {

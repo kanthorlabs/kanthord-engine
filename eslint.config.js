@@ -531,6 +531,20 @@ export default tseslint.config(
             {
               from: element("service", {
                 captured: { name: "project" },
+                fileInternalPath: "onboarding.test.ts",
+              }),
+              allow: [
+                {
+                  to: element("service", {
+                    captured: { name: "custody" },
+                    fileInternalPath: "index.ts",
+                  }),
+                },
+              ],
+            },
+            {
+              from: element("service", {
+                captured: { name: "project" },
                 fileInternalPath: "environment-secret.test.ts",
               }),
               allow: [

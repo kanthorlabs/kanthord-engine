@@ -3,6 +3,7 @@ import { test, type TestContext } from "node:test";
 import pino from "pino";
 import { z } from "zod";
 import { INTAKE_SERVICE_NAME } from "../intake/contract.ts";
+import { PROJECT_SERVICE_NAME } from "../project/contract.ts";
 import type { CallerIdentity } from "../kernel/caller.ts";
 import { createIdentity } from "../kernel/identity.ts";
 import type { ExecutionClaim } from "../kernel/operation.ts";
@@ -243,6 +244,7 @@ function sshFixture(t: TestContext) {
       bindingsNaming: () => [],
       inboundsNaming: () => [],
       intakeServiceName: INTAKE_SERVICE_NAME,
+      projectServiceName: PROJECT_SERVICE_NAME,
       ...(sshIdentityAuthorization === undefined
         ? {}
         : { sshIdentityAuthorization }),
