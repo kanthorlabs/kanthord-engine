@@ -14,6 +14,7 @@ export function guardEnvironmentMix(
   projectId: string,
   bindingIds: readonly string[],
 ): void {
+  if (bindingIds.length < MIN_MIXED_BINDINGS) return;
   const repositories = bindingIds.flatMap((bindingId) => {
     const revision = dependencies.bindings.getBindingRevision(tx, bindingId);
     assert.ok(revision, "A resolved binding must have a revision.");
