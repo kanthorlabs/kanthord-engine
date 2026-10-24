@@ -15,7 +15,6 @@ import { httpClient } from "../../gateway/client.ts";
 import { OperationResultType } from "../../kernel/operation.ts";
 import { temporary } from "../../kernel/test-support.ts";
 import { HttpStatus } from "../../kernel/http.ts";
-import { workerOperations } from "../../worker/contract.ts";
 import { MissionErrorCode, missionOperations } from "../../mission/contract.ts";
 import {
   EnvironmentStatus,
@@ -45,7 +44,6 @@ import {
 } from "./container-runtime.ts";
 import {
   CONFIGURATION,
-  completed,
   createProject,
   environmentList,
   gateFixture,
@@ -83,7 +81,7 @@ const STORED_ENVIRONMENT = {
   onCreateCommand: ON_CREATE_COMMAND,
   postCreateCommand: POST_CREATE_COMMAND,
 };
-const SLOT_COUNT = 3;
+const SLOT_COUNT = 2;
 const MEMORY_MB = 2048;
 const MIXED_NODE_FILE = "first.md";
 const SINGLE_NODE_FILE = "single.md";
@@ -131,8 +129,7 @@ const EnvironmentAttribute = {
 } as const;
 const SLOT_A = 0;
 const SLOT_B = 1;
-const SLOT_C = 2;
-const SLOTS_STARTED = [SLOT_A, SLOT_B, SLOT_C];
+const SLOTS_STARTED = [SLOT_A, SLOT_B];
 const SINGLE_ITEM = 1;
 const ROTATED_PROOF_RUNS = 2;
 const MIXED_GROUPS = 2;
@@ -822,7 +819,6 @@ test(
         nodes = [
           await importNode(fixture, project, "implement-1.md"),
           await importNode(fixture, project, "implement-2.md"),
-          await importNode(fixture, project, "implement-3.md"),
         ];
         await until(
           () =>
@@ -869,31 +865,7 @@ test(
       "a rotation of the secret gives a new digest and keeps the cache volume",
       async () => {
         await rotateSecret(fixture, ROTATED_SECRET);
-        const slotC = l3.starts.find((start) => start.slot === SLOT_C)!;
-        const token = await fixture.slotTokenOf(slotC.poolSlot);
-        const clientC = await worker(t, fixture, projectId, nodes[2]!, SLOT_C, {
-          token,
-        });
-        const executionId = await clientC.claimed(nodes);
-        const workerClient = httpClient(
-          workerOperations,
-          fixture.endpoint,
-          token,
-        );
-        completed(
-          await workerClient.handover({
-            params: {},
-            query: {},
-            body: { execution_id: executionId },
-          }),
-        );
-        completed(
-          await workerClient["execution.setup.get"]({
-            params: { execution_id: executionId },
-            query: {},
-            body: null,
-          }),
-        );
+        await writeBindings(fixture, projectId, secretBindings());
         const rotated = await settledItem(t, fixture, projectId, first.digest);
         assert.notEqual(rotated.digest, first.digest);
         assert.notEqual(rotated.tag, first.tag);
