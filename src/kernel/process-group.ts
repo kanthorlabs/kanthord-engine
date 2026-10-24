@@ -68,10 +68,11 @@ export function killProcessTree(
   const failures: unknown[] = [];
   try {
     freezeTree(leader, system, stopped, failures);
-  } finally {
-    const groups = stopped.size === NO_GROUPS ? [leader] : [...stopped];
-    failures.push(...signalGroups(groups, SIGNAL_KILL, system));
+  } catch (error) {
+    failures.push(error);
   }
+  const groups = stopped.size === NO_GROUPS ? [leader] : [...stopped];
+  failures.push(...signalGroups(groups, SIGNAL_KILL, system));
   throwFailures(failures);
 }
 
@@ -87,17 +88,31 @@ function freezeTree(
   failures: unknown[],
 ): void {
   for (let pass = 0; pass < FREEZE_PASSES_MAX; pass += 1) {
-    const rows = system.readTable();
-    const own = ownGroups(rows);
-    const found = [leader, ...descendantGroups(leader, rows)].filter(
-      (group) =>
-        group > FIRST_USER_PID && !own.has(group) && !stopped.has(group),
-    );
-    const fresh = [...new Set(found)];
+    const fresh = freshGroups(leader, system.readTable(), stopped);
     if (fresh.length === NO_GROUPS) return;
     for (const group of fresh) stopped.add(group);
     failures.push(...signalGroups(fresh, SIGNAL_STOP, system));
   }
+  const late = freshGroups(leader, system.readTable(), stopped);
+  if (late.length === NO_GROUPS) return;
+  for (const group of late) stopped.add(group);
+  failures.push(
+    new Error(
+      `the process tree kept forking after ${FREEZE_PASSES_MAX} passes`,
+    ),
+  );
+}
+
+function freshGroups(
+  leader: number,
+  rows: readonly ProcessRow[],
+  stopped: ReadonlySet<number>,
+): number[] {
+  const own = ownGroups(rows);
+  const found = [leader, ...descendantGroups(leader, rows)].filter(
+    (group) => group > FIRST_USER_PID && !own.has(group) && !stopped.has(group),
+  );
+  return [...new Set(found)];
 }
 
 function ownGroups(rows: readonly ProcessRow[]): Set<number> {

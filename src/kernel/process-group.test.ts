@@ -29,6 +29,7 @@ const TWO_FAILURES = 2;
 const NO_READS = 0;
 const NO_PROCESSES = 0;
 const ONE_ORPHAN = 1;
+const FIRST_READ = 1;
 const POLL_MS = 20;
 
 const ownRow: ProcessRow = {
@@ -102,7 +103,7 @@ test("a group that a descendant forks during the freeze is stopped and killed", 
   ]);
 });
 
-test("the freeze ends after its pass limit and kills every group it found", () => {
+test("a tree that still forks after the pass limit is killed with one more read and throws the limit", () => {
   let next = FORKED;
   const { system, signals, reads } = recordingSystem([
     () => {
@@ -110,11 +111,42 @@ test("the freeze ends after its pass limit and kills every group it found", () =
       return [ownRow, leaderRow, { pid: next, ppid: LEADER, group: next }];
     },
   ]);
-  killProcessTree(LEADER, system);
-  assert.equal(reads(), FREEZE_PASSES_MAX);
+  assert.throws(
+    () => killProcessTree(LEADER, system),
+    new RegExp(`kept forking after ${FREEZE_PASSES_MAX} passes`),
+  );
+  assert.equal(reads(), FREEZE_PASSES_MAX + 1);
   assert.equal(
     signals.filter((signal) => signal.startsWith(KILL)).length,
-    FREEZE_PASSES_MAX + 1,
+    FREEZE_PASSES_MAX + 2,
+  );
+});
+
+test("a table read error after a stop still kills the stopped group and throws both failures", () => {
+  const readFailure = new Error("table read failed");
+  let reads = 0;
+  const signals: string[] = [];
+  const system: ProcessSystem = {
+    readTable: () => {
+      reads += 1;
+      if (reads > FIRST_READ) throw readFailure;
+      return [ownRow, leaderRow, { pid: CHILD, ppid: LEADER, group: CHILD }];
+    },
+    signalGroup: (group, signal) => {
+      signals.push(`${signal} ${group}`);
+      if (signal === KILL && group === CHILD) throw errorWithCode("EPERM");
+    },
+  };
+  assert.throws(
+    () => killProcessTree(LEADER, system),
+    (error: unknown) =>
+      error instanceof AggregateError &&
+      error.errors.includes(readFailure) &&
+      error.errors.length === TWO_FAILURES,
+  );
+  assert.deepEqual(
+    signals.filter((signal) => signal.startsWith(KILL)),
+    [`${KILL} ${LEADER}`, `${KILL} ${CHILD}`],
   );
 });
 
@@ -187,7 +219,10 @@ function detachedLeader(t: TestContext, script: string) {
     stdio: "ignore",
   });
   assert.ok(leader.pid);
-  t.after(() => killIfPresent(leader.pid!));
+  t.after(() => {
+    if (leader.exitCode === null && leader.signalCode === null)
+      killIfPresent(leader.pid!);
+  });
   return leader.pid;
 }
 
@@ -205,7 +240,7 @@ test("a descendant that forks into new groups during the kill leaves no process"
   assert.deepEqual(await settledPids(seconds), []);
 });
 
-test("a descendant whose parent already exited (ppid 1) survives the tree kill", async (t) => {
+test("a descendant whose parent exited before the kill is no longer a descendant of the leader and survives the kill", async (t) => {
   const seconds = uniqueSeconds();
   const orphan = `require("node:child_process").spawn("sleep",["${seconds}"],{detached:true,stdio:"ignore"}).unref()`;
   const leader = detachedLeader(
