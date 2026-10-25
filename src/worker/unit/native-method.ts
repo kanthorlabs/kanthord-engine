@@ -11,7 +11,10 @@ import {
   openNativeAgent,
   type NativeAgent,
 } from "./native-agent.ts";
-import { Phase, type TelemetrySink } from "./telemetry.ts";
+import { Phase, type SpanEnd, type TelemetrySink } from "./telemetry.ts";
+import { SpanStatus } from "../../tracking/contract.ts";
+import type { Revision } from "../../mission/contract.ts";
+import { verificationCommands } from "./evaluation-input.ts";
 import type { Context } from "../../kernel/context.ts";
 import { ExecutionRun as Run, type MethodClaim } from "./execution-run.ts";
 import type { MethodClients } from "./method-clients.ts";
@@ -38,6 +41,9 @@ import { phaseSpan } from "./method-telemetry.ts";
 
 export type { ExecutionEnd } from "./execution-run.ts";
 const WORKING_AGENT = 0;
+const NODE_TASK_COUNT = "kanthord.node.task_count";
+const NODE_VERIFICATION_COUNT = "kanthord.node.verification_count";
+const NODE_BINDING_COUNT = "kanthord.node.binding_count";
 export interface NativeExecutionInput {
   claim: MethodClaim;
   setup: ExecutionSetup;
@@ -134,8 +140,10 @@ export async function runNativeExecution(
       if (intent === ExecutionIntent.Examine)
         return runStepsExamine(input, run, revision, budget, open);
       const prior = await readPrior(run, input.setup.repositories);
-      const workspace = await run.spans.within(phaseSpan(Phase.Prepare), () =>
-        prepareStepsWorkspace(input, run),
+      const workspace = await run.spans.within(
+        phaseSpan(Phase.Prepare),
+        () => prepareStepsWorkspace(input, run),
+        () => nodeShapeEnd(revision),
       );
       let working: NativeAgent;
       try {
@@ -167,6 +175,17 @@ export async function runNativeExecution(
       run.dispose();
     }
   }
+}
+
+function nodeShapeEnd(revision: Revision): SpanEnd {
+  return {
+    status: SpanStatus.Ok,
+    attributes: {
+      [NODE_TASK_COUNT]: revision.tasks.length,
+      [NODE_VERIFICATION_COUNT]: verificationCommands(revision).length,
+      [NODE_BINDING_COUNT]: revision.content.bindings.length,
+    },
+  };
 }
 
 export function environmentDigestsOf(
