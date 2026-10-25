@@ -1,4 +1,9 @@
 import assert from "node:assert/strict";
+import {
+  attributed,
+  CauseCategory,
+  CauseSubcategory,
+} from "../../kernel/cause.ts";
 import { test } from "node:test";
 import { join } from "node:path";
 import { temporary } from "../../kernel/test-support.ts";
@@ -43,6 +48,10 @@ function infrastructureEnd(
     reason: EndReason.OperationFailed,
     code: VERIFICATION_INFRASTRUCTURE_FAILED,
     detail,
+    cause: attributed(
+      CauseCategory.Infrastructure,
+      CauseSubcategory.VerificationKilled,
+    ),
   };
   assert.deepEqual(end, { kind: "released", furtherWork: true, stop });
   assert.deepEqual(bodies, [{ further_work: true, stop }]);

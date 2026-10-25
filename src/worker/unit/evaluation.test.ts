@@ -38,6 +38,7 @@ import {
   CauseAssigner,
   CauseCategory,
   CauseSubcategory,
+  unattributed,
 } from "../../kernel/cause.ts";
 import { EnvironmentSource } from "../../kernel/devcontainer.ts";
 import { mkdirSync, writeFileSync } from "node:fs";
@@ -123,7 +124,14 @@ test("reviewer release accepts only settled or prerequisite-waiting action resul
         kind === ActionResultKind.Submitted ||
         kind === ActionResultKind.AwaitingPrerequisite,
     );
-    const stop = { reason: EndReason.ActionUnsettled, code: null };
+    const stop = {
+      reason: EndReason.ActionUnsettled,
+      code: null,
+      cause: unattributed([
+        CauseCategory.WorkerAction,
+        CauseCategory.Infrastructure,
+      ]),
+    };
     if (accepted) {
       assert.deepEqual(await requestAndRelease(run), {
         kind: "released",
@@ -552,7 +560,11 @@ test("an evaluation that its agent deadline cuts ends with no assessment and no 
   assert.deepEqual(releases, [
     {
       further_work: true,
-      stop: { reason: EndReason.AssessmentAbsent, code: null },
+      stop: {
+        reason: EndReason.AssessmentAbsent,
+        code: null,
+        cause: unattributed([CauseCategory.Plan, CauseCategory.Model]),
+      },
     },
   ]);
 });
@@ -775,7 +787,11 @@ test("a wall deadline during a review verification ends with no assessment and n
   assert.deepEqual(review.releases, [
     {
       further_work: true,
-      stop: { reason: EndReason.AssessmentAbsent, code: null },
+      stop: {
+        reason: EndReason.AssessmentAbsent,
+        code: null,
+        cause: unattributed([CauseCategory.Plan, CauseCategory.Model]),
+      },
     },
   ]);
 });

@@ -1,4 +1,14 @@
 import assert from "node:assert/strict";
+import {
+  CauseCategory,
+  unattributed,
+  type FailureCause,
+} from "../../kernel/cause.ts";
+
+const PLAN_MODEL_CAUSE = unattributed([
+  CauseCategory.Plan,
+  CauseCategory.Model,
+]);
 import { test } from "node:test";
 import {
   appendFileSync,
@@ -100,7 +110,11 @@ test("implement checkpoints budget-ended work and refuses release after a failed
   assert.deepEqual(await runStepsImplement(h), {
     kind: "released",
     furtherWork: true,
-    stop: { reason: "budget_end", code: "turns" },
+    stop: {
+      reason: "budget_end",
+      code: "turns",
+      cause: PLAN_MODEL_CAUSE,
+    },
   });
   assert.ok(released);
   const log = await simpleGit(h.bare).raw([
@@ -168,7 +182,11 @@ test("S1 budget-ended task verification releases further work and submits no evi
   assert.deepEqual(await runStepsImplement(h), {
     kind: "released",
     furtherWork: true,
-    stop: { reason: "budget_end", code: "wall_time" },
+    stop: {
+      reason: "budget_end",
+      code: "wall_time",
+      cause: PLAN_MODEL_CAUSE,
+    },
   });
   assert.ok(released);
   assert.equal(evidenced, false);
@@ -197,6 +215,22 @@ const STOP_REASONS = [
   EndReason.AssessmentAbsent,
 ];
 const STOP_CODE = "test.operation.failed";
+const STOP_CAUSES: Readonly<Record<string, FailureCause>> = {
+  [EndReason.OperationFailed]: unattributed([]),
+  [EndReason.JudgementInvalid]: unattributed([
+    CauseCategory.Model,
+    CauseCategory.Prompt,
+  ]),
+  [EndReason.ReportAbsent]: unattributed([
+    CauseCategory.Model,
+    CauseCategory.Prompt,
+  ]),
+  [EndReason.ActionUnsettled]: unattributed([
+    CauseCategory.WorkerAction,
+    CauseCategory.Infrastructure,
+  ]),
+  [EndReason.AssessmentAbsent]: PLAN_MODEL_CAUSE,
+};
 const PARTIAL_WORK = "partial";
 
 function stoppingRunner(reason: EndReason): TaskRunner {
@@ -210,7 +244,7 @@ for (const reason of STOP_REASONS) {
   test(`a stop with the reason ${reason} checkpoints, pushes and releases with the stop`, async (t) => {
     const h = await fixture(t, [task("stopped", "false")], []);
     const bodies = recordReleases(h);
-    const stop = { reason, code: STOP_CODE };
+    const stop = { reason, code: STOP_CODE, cause: STOP_CAUSES[reason] };
     assert.deepEqual(
       await executionBoundary(h.run, () =>
         runStepsImplement(h, stoppingRunner(reason)),
@@ -241,7 +275,11 @@ test("a failed push still releases with the stop and a failed release ends with 
     },
   };
   const bodies = recordReleases(pushed);
-  const stop = { reason: EndReason.OperationFailed, code: STOP_CODE };
+  const stop = {
+    reason: EndReason.OperationFailed,
+    code: STOP_CODE,
+    cause: STOP_CAUSES[EndReason.OperationFailed],
+  };
   assert.deepEqual(
     await executionBoundary(pushed.run, () =>
       runStepsImplement(pushed, stoppingRunner(EndReason.OperationFailed)),
@@ -259,7 +297,7 @@ test("a failed push still releases with the stop and a failed release ends with 
     await executionBoundary(refused.run, () =>
       runStepsImplement(refused, stoppingRunner(EndReason.OperationFailed)),
     ),
-    { kind: "ended", ...stop },
+    { kind: "ended", reason: stop.reason, code: stop.code },
   );
 });
 
@@ -301,7 +339,14 @@ test("a failed commit releases the stop with its redacted cause and logs the dro
   assert.deepEqual(others, []);
   const stop = body!.stop;
   const { detail, ...cause } = stop;
-  assert.deepEqual(cause, { reason: EndReason.OperationFailed, code: null });
+  assert.deepEqual(cause, {
+    reason: EndReason.OperationFailed,
+    code: null,
+    cause: unattributed([
+      CauseCategory.Infrastructure,
+      CauseCategory.WorkerAction,
+    ]),
+  });
   assert.match(String(detail), REDACTED_REFUSAL);
   assert.doesNotMatch(String(detail), SECRET_TEXT);
   assert.deepEqual(end, { kind: "released", furtherWork: true, stop });

@@ -15,6 +15,15 @@ import {
 import type { MethodClients } from "./method-clients.ts";
 import { ProviderFailure } from "../../scheduler/contract.ts";
 import { CodedError } from "../../kernel/errors.ts";
+import {
+  attributed,
+  CauseCategory,
+  CauseSubcategory,
+  unattributed,
+} from "../../kernel/cause.ts";
+import { BudgetLimit } from "../../scheduler/contract.ts";
+import { GIT_COMMIT_FAILED } from "./stop-codes.ts";
+import { GitStep, markGitStep } from "./git-step.ts";
 
 const SETTLE_CALL_COUNT = 1;
 const CALLS = 2;
@@ -264,7 +273,11 @@ test("release refusal preserves the owning error code", async (t) => {
 
 test("a stop release settles credentials under a fresh context and reconciles a lost answer only with a stopped claim", async (t) => {
   const stop = { reason: EndReason.JudgementInvalid, code: null };
-  for (const recorded of [stop, null]) {
+  const sent = {
+    ...stop,
+    cause: unattributed([CauseCategory.Model, CauseCategory.Prompt]),
+  };
+  for (const recorded of [sent, null]) {
     let reports = 0;
     const run = fixture(async () => {
       reports++;
@@ -277,7 +290,7 @@ test("a stop release settles credentials under a fresh context and reconciles a 
         input: { body: unknown },
         options: { context: { signal: AbortSignal } },
       ) => {
-        assert.deepEqual(input.body, { further_work: true, stop });
+        assert.deepEqual(input.body, { further_work: true, stop: sent });
         assert.equal(options.context.signal.aborted, false);
         return { type: OperationResultType.Indeterminate };
       },
@@ -290,7 +303,7 @@ test("a stop release settles credentials under a fresh context and reconciles a 
     assert.deepEqual(
       await run.releaseStop(stopped),
       recorded
-        ? { kind: "released", furtherWork: true, stop }
+        ? { kind: "released", furtherWork: true, stop: sent }
         : { kind: "ended", ...stop },
     );
     assert.equal(reports, SETTLE_CALL_COUNT);
@@ -325,10 +338,17 @@ test("a stop of an uncoded error halts and releases with no detail when the secr
   assert.equal(await run.reasonOf(new Error("hook refused")), null);
   const stopped = await run.stopOf(new Error("hook refused"));
   assert.ok(run.operationContext.signal.aborted);
-  const stop = { reason: EndReason.OperationFailed, code: null };
+  const stop = {
+    reason: EndReason.OperationFailed,
+    code: null,
+    cause: unattributed([
+      CauseCategory.Infrastructure,
+      CauseCategory.WorkerAction,
+    ]),
+  };
   assert.deepEqual(
     { reason: stopped.reason, code: stopped.code, detail: stopped.detail },
-    { ...stop, detail: null },
+    { reason: stop.reason, code: stop.code, detail: null },
   );
   const bodies: unknown[] = [];
   run.clients.scheduler = {
@@ -366,6 +386,7 @@ test("a stop release sends the cause detail of a provider failure", async (t) =>
     reason: EndReason.ProviderFailed,
     code: ProviderFailure.Unavailable,
     detail: "OAuth auth derivation failed for anthropic",
+    cause: attributed(CauseCategory.LlmProvider, CauseSubcategory.Unavailable),
   };
   const stopped = await run.stopOf(
     new ExecutionStop(stop.reason, stop.code, stop.detail),
@@ -395,7 +416,11 @@ test("a stop release keeps the cause detail when it reconciles a lost answer or 
     code: ProviderFailure.Unavailable,
     detail: "OAuth auth derivation failed for anthropic",
   };
-  for (const recorded of [stop, null]) {
+  const sent = {
+    ...stop,
+    cause: attributed(CauseCategory.LlmProvider, CauseSubcategory.Unavailable),
+  };
+  for (const recorded of [sent, null]) {
     const run = fixture();
     t.after(() => run.dispose());
     const stopped = await run.stopOf(
@@ -414,7 +439,7 @@ test("a stop release keeps the cause detail when it reconciles a lost answer or 
     assert.deepEqual(
       await run.releaseStop(stopped),
       recorded
-        ? { kind: "released", furtherWork: true, stop }
+        ? { kind: "released", furtherWork: true, stop: sent }
         : { kind: "ended", ...stop },
     );
   }
@@ -497,9 +522,9 @@ test("the claim check stops the run as revoked when the server refuses the execu
 const CAUSE = "cause";
 const DIGESTS = { "github:acme/engine": "d".repeat(64) };
 
-async function releasedStop(run: ExecutionRun, stop: ExecutionStop) {
+async function releasedStop(run: ExecutionRun, stop: unknown) {
   const stopped = await run.stopOf(stop);
-  const bodies: { stop: { detail?: string } }[] = [];
+  const bodies: { stop: { detail?: string; cause?: unknown } }[] = [];
   run.clients.scheduler = {
     executionRelease: async (input: { body: (typeof bodies)[number] }) => {
       bodies.push(input.body);
@@ -570,4 +595,91 @@ test("a stop of another reason or a setup without environment digests keeps its 
     ).detail,
     CAUSE,
   );
+});
+
+function capture(run: ExecutionRun) {
+  const bodies: { stop: Record<string, unknown> | null }[] = [];
+  run.clients.scheduler = {
+    executionRelease: async (input: { body: (typeof bodies)[number] }) => {
+      bodies.push(input.body);
+      return {
+        type: OperationResultType.Completed,
+        status: 200,
+        data: { execution_id: "execution", ended_at: 1 },
+      };
+    },
+  } as unknown as MethodClients["scheduler"];
+  return bodies;
+}
+
+test("a budget-end release sends the cause with the timeout of the last noted verification", async (t) => {
+  const run = fixture();
+  t.after(() => run.dispose());
+  const bodies = capture(run);
+  await run.release(true, BudgetLimit.Turns);
+  run.noteVerification(true);
+  await run.release(true, BudgetLimit.Turns);
+  assert.deepEqual(
+    bodies.map((body) => body.stop?.cause),
+    [
+      unattributed([CauseCategory.Plan, CauseCategory.Model]),
+      unattributed([
+        CauseCategory.Environment,
+        CauseCategory.Plan,
+        CauseCategory.Model,
+      ]),
+    ],
+  );
+});
+
+test("a provider failure stop sends the provider cause", async (t) => {
+  const run = fixture();
+  t.after(() => run.dispose());
+  const stop = await releasedStop(
+    run,
+    new ExecutionStop(EndReason.ProviderFailed, ProviderFailure.RateLimited),
+  );
+  assert.deepEqual(
+    stop.cause,
+    attributed(CauseCategory.LlmProvider, CauseSubcategory.RateLimited),
+  );
+});
+
+test("a git commit failure sends the redacted git stderr and its suspects", async (t) => {
+  const run = fixture();
+  t.after(() => run.dispose());
+  const stop = await releasedStop(
+    run,
+    new CodedError(GIT_COMMIT_FAILED, "commit failed", {
+      cause: new Error(`hook rejected ${RUN_SECRET}`),
+    }),
+  );
+  assert.deepEqual(stop, {
+    reason: EndReason.OperationFailed,
+    code: GIT_COMMIT_FAILED,
+    detail: "Error: hook rejected [redacted]",
+    cause: unattributed([
+      CauseCategory.WorkerAction,
+      CauseCategory.Environment,
+    ]),
+  });
+});
+
+test("an error marked with a git step sends the suspects of the step", async (t) => {
+  const run = fixture();
+  t.after(() => run.dispose());
+  const error = new Error("push refused");
+  markGitStep(error, GitStep.Push);
+  const stop = await releasedStop(run, error);
+  assert.deepEqual(
+    stop.cause,
+    unattributed([CauseCategory.Infrastructure, CauseCategory.WorkerAction]),
+  );
+});
+
+test("a revoked stop holds no cause", async (t) => {
+  const run = fixture();
+  t.after(() => run.dispose());
+  const stopped = await run.stopOf(new ExecutionStop(EndReason.Revoked, null));
+  assert.equal(stopped.cause, null);
 });
