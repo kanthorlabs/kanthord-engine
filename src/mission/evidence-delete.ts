@@ -14,7 +14,7 @@ import {
   type evidenceDeleteSchema,
 } from "./contract.ts";
 import { isTerminal } from "./admission.ts";
-import { Act, recordAct } from "./act-telemetry.ts";
+import { Act, recordAct, type ActFacts } from "./act-telemetry.ts";
 import type { ExecutionTrace } from "../tracking/contract.ts";
 import { objectContentSchema } from "./evidence-content-read.ts";
 import { requireTextBound } from "./execution.ts";
@@ -183,7 +183,8 @@ export async function removeEvidence(
   for (const asset of prepared.assets)
     await deleteObject(dependencies, caller, asset);
   const ends = executionEnds();
-  const facts = caller.commit((tx) => {
+  let facts: ActFacts | null = null;
+  const result = caller.commit((tx) => {
     const now = Date.now();
     const { evidence, node, mission } = prepareEvidenceDelete(
       tx,
@@ -211,7 +212,7 @@ export async function removeEvidence(
     }
     const current = requireNode(tx, node.id);
     assert.ok(from && current.state);
-    return {
+    facts = {
       project_id: mission.project_id,
       node_id: node.id,
       attempt: current.attempt ?? NO_ATTEMPT,
@@ -223,7 +224,9 @@ export async function removeEvidence(
       revoked,
       evidence_id: evidenceId,
     };
+    return null;
   });
+  assert.ok(facts);
   reportEnds(dependencies, ends);
   recordAct(dependencies, Act.DeleteEvidence, facts);
   dependencies.logger.info(
@@ -231,5 +234,5 @@ export async function removeEvidence(
     "evidence deleted",
   );
   dependencies.wakeup.wake(prepared.mission.project_id);
-  return null;
+  return result;
 }
