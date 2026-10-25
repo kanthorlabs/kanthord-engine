@@ -119,6 +119,7 @@ import { unreportedHealth } from "../llm/copy-health.ts";
 import { WorkerInstances } from "./instances.ts";
 import { readInstanceById, readLiveInstance } from "./instance-rows.ts";
 import { declareInstances } from "./instance-operations.ts";
+import type { AgentPromptFacts } from "./prompt-telemetry.ts";
 
 const NO_ITEMS = 0;
 
@@ -141,6 +142,9 @@ export interface Dependencies {
   agentPrompt: {
     compose(agentName: string, context: Context): Promise<PromptPartAnswer[]>;
     templates(context: Context): Promise<PromptTemplates>;
+  };
+  promptTelemetry: {
+    agentPrompted(executionId: string, facts: AgentPromptFacts): void;
   };
   store: Store;
   workerBindingOf: WorkerBindingOf;

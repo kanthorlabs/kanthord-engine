@@ -35,6 +35,9 @@ import {
   twoAgentDeclarationOf,
 } from "./test-support.ts";
 import { WorkerErrorCode } from "./contract.ts";
+import { digest } from "../agent/prompt-composer.ts";
+import type { Dependencies } from "./service.ts";
+import type { AgentPromptFacts } from "./prompt-telemetry.ts";
 import { SHIPPED_TEMPLATES } from "../agent/prompt-templates.ts";
 import { ExecutionIntent, InstancePlacement } from "./contract.ts";
 import type { AgentSelection } from "../scheduler/contract.ts";
@@ -152,6 +155,7 @@ test("setup answers the system and agent prompt after its single snapshot and su
   const digested: string[][] = [];
   const dependencies = {
     store,
+    promptTelemetry: { agentPrompted: () => {} },
     agentPrompt: {
       templates: async () => SHIPPED_TEMPLATES,
       compose: async (agentName: string) => {
@@ -268,6 +272,7 @@ test("setup answers the system and agent prompt after its single snapshot and su
   writeFileSync(overridePath, OVERRIDE_TEXT);
   const resolving = {
     ...dependencies,
+    promptTelemetry: { agentPrompted: () => {} },
     agentPrompt: {
       templates: async () => SHIPPED_TEMPLATES,
       compose: (agentName: string) =>
@@ -491,6 +496,7 @@ test("setup claims no environment for a container slot whose worker binding name
   await executionSetup(
     {
       store,
+      promptTelemetry: { agentPrompted: () => {} },
       agentPrompt: {
         templates: async () => SHIPPED_TEMPLATES,
         compose: async () => promptParts,
@@ -589,6 +595,7 @@ test("setup of a container worker binding with an environment claims inside a re
   const answer = await executionSetup(
     {
       store,
+      promptTelemetry: { agentPrompted: () => {} },
       agentPrompt: {
         templates: async () => SHIPPED_TEMPLATES,
         compose: async () => promptParts,
@@ -673,7 +680,10 @@ test("setup of a container worker binding with an environment claims inside a re
   assert.deepEqual(failures, []);
 });
 
-test("setup answers one entry per agent of a two-agent worker with its own prompt, binding prompts and pinned credential", async (t) => {
+async function twoAgentAnswer(
+  t: TestContext,
+  promptTelemetry: Dependencies["promptTelemetry"],
+) {
   const store = new Store(":memory:");
   t.after(() => store.close());
   const setup = anthropicSetup();
@@ -718,6 +728,7 @@ test("setup answers one entry per agent of a two-agent worker with its own promp
   const answer = await executionSetup(
     {
       store,
+      promptTelemetry,
       agentPrompt: {
         templates: async () => SHIPPED_TEMPLATES,
         compose: async (agentName: string) => [
@@ -794,6 +805,13 @@ test("setup answers one entry per agent of a two-agent worker with its own promp
     },
     caller,
   );
+  return { answer, credentialIds };
+}
+
+test("setup answers one entry per agent of a two-agent worker with its own prompt, binding prompts and pinned credential", async (t) => {
+  const { answer, credentialIds } = await twoAgentAnswer(t, {
+    agentPrompted: () => {},
+  });
   assert.deepEqual(
     answer.agents.map((agent) => agent.agent_name),
     ["swe@1", "re@1"],
@@ -823,6 +841,44 @@ test("setup answers one entry per agent of a two-agent worker with its own promp
   );
   assert.ok(!re!.includes(SWE_BINDING_TEXT));
   assert.ok(!swe!.includes(RE_BINDING_TEXT));
+});
+
+test("setup reports the prompt facts of each native agent once and survives a failing report", async (t) => {
+  const reported: [string, AgentPromptFacts][] = [];
+  const { answer } = await twoAgentAnswer(t, {
+    agentPrompted: (executionId, facts) => {
+      reported.push([executionId, facts]);
+    },
+  });
+  assert.deepEqual(
+    reported.map(([executionId]) => executionId),
+    [answer.execution_id, answer.execution_id],
+  );
+  assert.deepEqual(
+    reported.map(([, facts]) => facts.agent_name),
+    ["swe@1", "re@1"],
+  );
+  const [swe, re] = reported.map(([, facts]) => facts);
+  const empty = "0".repeat(64);
+  assert.deepEqual(swe!.parts, [
+    `role:swe@1.md:${empty}`,
+    `binding:api:${digest(SWE_BINDING_TEXT)}`,
+    `binding:web:${digest(SECOND_SWE_TEXT)}`,
+  ]);
+  assert.deepEqual(re!.parts, [
+    `role:re@1.md:${empty}`,
+    `binding:api:${digest(RE_BINDING_TEXT)}`,
+  ]);
+  assert.equal(swe!.templates_digest, re!.templates_digest);
+  const failing = await twoAgentAnswer(t, {
+    agentPrompted: () => {
+      throw new Error("TRACKING_DOWN");
+    },
+  });
+  assert.deepEqual(
+    failing.answer.agents.map((agent) => agent.prompt),
+    answer.agents.map((agent) => agent.prompt),
+  );
 });
 
 async function repositorySetup(t: TestContext, address: string, pin: boolean) {
@@ -862,6 +918,7 @@ async function repositorySetup(t: TestContext, address: string, pin: boolean) {
   return executionSetup(
     {
       store,
+      promptTelemetry: { agentPrompted: () => {} },
       agentPrompt: {
         templates: async () => SHIPPED_TEMPLATES,
         compose: async () => promptParts,

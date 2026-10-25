@@ -24,6 +24,7 @@ import {
 import type { PromptPartAnswer } from "../agent/contract.ts";
 import type { Dependencies, WorkerService } from "./service.ts";
 import { RepositoryErrorCode } from "../repository/contract.ts";
+import { agentPromptFacts, type AgentPromptFacts } from "./prompt-telemetry.ts";
 
 const FIRST_ISSUE_INDEX = 0;
 
@@ -57,6 +58,7 @@ export async function executionSetup(
   dependencies: Pick<
     Dependencies,
     | "agentPrompt"
+    | "promptTelemetry"
     | "store"
     | "workerBindingRowOf"
     | "pinnedCredentialMetadata"
@@ -86,7 +88,8 @@ export async function executionSetup(
       await dependencies.agentPrompt.compose(agentName, caller.context),
     );
   const templates = await dependencies.agentPrompt.templates(caller.context);
-  return caller.commit((tx) => {
+  const prompted: AgentPromptFacts[] = [];
+  const setup = caller.commit((tx) => {
     const now = Date.now();
     const row = dependencies.workerBindingRowOf(tx, claim.workerBindingId);
     assert.ok(row);
@@ -162,6 +165,8 @@ export async function executionSetup(
       const record = pinned(tx, view.effective.credential);
       const agentParts = parts.get(agentName);
       assert.ok(agentParts);
+      const promptParts = [...agentParts, ...bindingParts(policies, agentName)];
+      prompted.push(agentPromptFacts(agentName, promptParts, templates));
       return {
         agent_name: agentName,
         effective_configuration: view.effective,
@@ -170,11 +175,7 @@ export async function executionSetup(
         credential_id: record.id,
         metadata: record.metadata,
         prompt: {
-          final: systemPrompt(
-            [...agentParts, ...bindingParts(policies, agentName)],
-            PromptConsumer.Worker,
-            templates,
-          ),
+          final: systemPrompt(promptParts, PromptConsumer.Worker, templates),
         },
       };
     });
@@ -234,4 +235,12 @@ export async function executionSetup(
       repositories,
     });
   });
+  for (const facts of prompted) {
+    try {
+      dependencies.promptTelemetry.agentPrompted(claim.executionId, facts);
+    } catch {
+      continue;
+    }
+  }
+  return setup;
 }

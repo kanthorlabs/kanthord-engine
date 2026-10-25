@@ -15,6 +15,7 @@ export const TRANSITION_SPAN_OPERATION = "scheduler.transition";
 export const SCHEDULER_PRODUCER = "scheduler";
 export const MISSION_PRODUCER = "mission";
 export const PROJECT_PRODUCER = "project";
+export const WORKER_PRODUCER = "worker";
 const ONE_KIND_AT_MOST = 1;
 export const TRACKING_TIMEOUT_MS = 30000;
 export const TELEMETRY_WRITE_MAX_BODY_BYTES = 1048576;
@@ -358,6 +359,20 @@ export const sessionEntrySchema = z.strictObject({
 });
 export type SessionEntry = z.infer<typeof sessionEntrySchema>;
 
+export interface SpanContribution {
+  record_id: string;
+  span_id: string;
+  parent_span_id: string | null;
+  operation: string;
+  start_time?: number;
+  end_time?: number;
+  status?: SpanStatus;
+  attributes?: Attributes;
+  events?: SpanEvent[];
+  links?: SpanLink[];
+  text_ids?: string[];
+  texts?: { text_id: string; text: string }[];
+}
 export interface ExecutionTrace {
   execution_id: string;
   project_id: string;
