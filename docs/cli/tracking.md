@@ -19,8 +19,9 @@ data directory beside `kanthord.db`. It holds the tables of
   `tracking.telemetry.write` during its live execution. The operation is
   API-only.
 - A human lists traces, reads a trace, its spans, its telemetry texts and its
-  session entries, reads the timeline of an execution, a node or a project, and
-  reads the filter values with the eight CLI leaves below.
+  session entries, reads the timeline of an execution, a node or a project,
+  reads the cost and duration analytics, and reads the filter values with the ten
+  CLI leaves below.
 - The server deletes a trace, with its spans, texts, records and session
   entries, `tracking.retention_days` after its creation. A sweep runs at the
   start and then every hour. A record of an older execution is `Refused` with
@@ -45,6 +46,8 @@ The literal service prefix is `/api/tracking`. Read requests have no body.
 | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------- | ----------------------------------------------------------------------- | --------------- |
 | `trace list [--project <project-id>] [--node <node-id>] [--state <state>] [--query <text>] [--sort <field>] [--from <unix-ms>] [--to <unix-ms>] [--limit <count>] [--cursor <opaque>]` | `tracking.trace.list`         | `GET /api/tracking/trace`                                               | `human`; read   |
 | `timeline list (--execution <execution-id> \| --node <node-id> \| --project <project-id>) [--depth <1\|2>] [--from <unix-ms>] [--to <unix-ms>] [--limit <count>] [--cursor <opaque>]`  | `tracking.timeline.list`      | `GET /api/tracking/timeline`                                            | `human`; read   |
+| `analytics cost [--group-by <field>] [--bucket <size>] [--project <project-id>] [--node <node-id>] [--from <unix-ms>] [--to <unix-ms>]`                                                | `tracking.analytics.cost`     | `GET /api/tracking/analytics/cost`                                      | `human`; read   |
+| `analytics duration --measure <measure> [--operation <name>] [--group-by <field>] [--bucket <size>] [--project <project-id>] [--node <node-id>] [--from <unix-ms>] [--to <unix-ms>]`   | `tracking.analytics.duration` | `GET /api/tracking/analytics/duration`                                  | `human`; read   |
 | `facet get [--project <project-id>]`                                                                                                                                                   | `tracking.facet.get`          | `GET /api/tracking/facet`                                               | `human`; read   |
 | `trace get <trace-id>`                                                                                                                                                                 | `tracking.trace.get`          | `GET /api/tracking/trace/:trace_id`                                     | `human`; read   |
 | `span list <trace-id> [--limit <count>] [--cursor <opaque>]`                                                                                                                           | `tracking.span.list`          | `GET /api/tracking/trace/:trace_id/span`                                | `human`; read   |
@@ -72,6 +75,16 @@ kanthord tracking timeline list
   (--execution <execution-id> | --node <node-id> | --project <project-id>)
   [--depth <1|2>] [--from <unix-ms>] [--to <unix-ms>] [--limit <count>]
   [--cursor <opaque>]
+  [--endpoint <url>] [--token <jwt>] [--help]
+
+kanthord tracking analytics cost [--group-by <field>] [--bucket <size>]
+  [--project <project-id>] [--node <node-id>] [--from <unix-ms>]
+  [--to <unix-ms>]
+  [--endpoint <url>] [--token <jwt>] [--help]
+
+kanthord tracking analytics duration --measure <measure> [--operation <name>]
+  [--group-by <field>] [--bucket <size>] [--project <project-id>]
+  [--node <node-id>] [--from <unix-ms>] [--to <unix-ms>]
   [--endpoint <url>] [--token <jwt>] [--help]
 
 kanthord tracking facet get [--project <project-id>]
@@ -212,6 +225,88 @@ The CLI takes exactly one of `--execution`, `--node` and `--project`. `--depth`
 takes `1` or `2`. `--from` and `--to` set `from` and `to` and take Unix
 milliseconds. `--limit` is 1 to 1000. A missing scope or two scopes exit 1 with
 `cli.tracking.timeline.list.invalid_query`.
+
+## `analytics cost`
+
+Sums the tokens and the cost of the `agent.turn` spans that start in a range. The
+read selects the traces that overlap the range, as `trace list` does, and reads
+their spans in steps of 100 traces. It never writes. `from` and `to` are
+`Timestamp` values.
+
+| Query field  | Meaning                                                              |
+| ------------ | -------------------------------------------------------------------- |
+| `project_id` | The trace has this project.                                          |
+| `node_id`    | The trace has this node.                                             |
+| `from`       | The start of the range. Default: 7 days before `to`.                 |
+| `to`         | The end of the range. Default: the time of the read.                 |
+| `group_by`   | The group of an item. Default `model`. See the closed set below.     |
+| `bucket`     | The time bucket of an item. Default `day`. See the closed set below. |
+
+The range holds at most 31 days. A range of more than 31 days, or a `from` after
+`to`, answers `400` `tracking.analytics.range_invalid`. The check uses the
+default of a missing bound.
+
+`group_by` is one of `none`, `model`, `agent_name`, `provider_name`,
+`worker_name`, `node_id` and `project_id`. The key `model` is
+`gen_ai.response.model`, else `gen_ai.request.model`. The keys `agent_name` and
+`provider_name` come from `kanthord.agent.name` and `gen_ai.provider.name`. The
+keys `worker_name`, `node_id` and `project_id` come from the trace row. `none`
+gives the key `null`. A span without the value has the key `null`.
+
+`bucket` is one of `none`, `hour`, `day` and `week`. A bucket starts at a UTC
+hour, a UTC day or a UTC Monday. `none` gives `bucket_start: null`.
+
+The answer holds `items` and `truncated`. Each item holds `key`, `bucket_start`,
+`turn_count`, `input_tokens`, `output_tokens`, `cache_read_tokens`,
+`cache_creation_tokens`, `total_tokens` and `cost_usd`. A missing attribute counts
+as 0. The order is ascending by `bucket_start`, then descending by `cost_usd`,
+then ascending by `key` with `null` last. The answer holds at most 1000 items.
+`truncated` is `true` when more items exist.
+
+The CLI exposes `--group-by`, `--bucket`, `--project`, `--node`, `--from` and
+`--to`. An invalid `--group-by`, `--bucket`, `--from` or `--to` exits 1 with
+`cli.tracking.analytics.cost.invalid_query`. `--from` and `--to` take Unix
+milliseconds.
+
+## `analytics duration`
+
+Summarizes one measure of the spans that start in a range as percentiles, mean
+and maximum. The range, the filters, the trace selection, the step size and the
+bucket rules are those of [`analytics cost`](#analytics-cost).
+
+| Query field                           | Meaning                                                              |
+| ------------------------------------- | -------------------------------------------------------------------- |
+| `measure`                             | Required. The measure. See the closed set below.                     |
+| `operation`                           | The span operation of the measure `span_duration`. Others ignore it. |
+| `group_by`                            | The group of an item. Default `none`. See the closed set below.      |
+| `bucket`                              | The time bucket of an item. Default `none`.                          |
+| `project_id`, `node_id`, `from`, `to` | As in `analytics cost`.                                              |
+
+`measure` is one of:
+
+| Measure             | Value of one sample                                                                                             |
+| ------------------- | --------------------------------------------------------------------------------------------------------------- |
+| `span_duration`     | `end_time - start_time` of a span, all spans or the spans of `operation`. A span without both times is skipped. |
+| `tool_latency`      | The same for the `agent.tool` spans.                                                                            |
+| `verification_time` | The same for the `worker.verification` spans.                                                                   |
+| `queue_wait`        | `kanthord.queue.wait_ms` of the root span of an execution of the kind `steps`.                                  |
+| `review_wait`       | `kanthord.queue.wait_ms` of the root span of an execution of the kind `evaluation`.                             |
+| `revision_turns`    | The count of transitions from `Evaluating` to `Available` of one node attempt.                                  |
+
+`group_by` is one of `none`, `operation`, `tool_name`, `agent_name`, `model`,
+`worker_name`, `node_id` and `project_id`. The key `tool_name` is
+`gen_ai.tool.name`. The other keys follow `analytics cost`.
+
+The answer holds `items` and `truncated`. Each item holds `key`, `bucket_start`,
+`count`, `p50`, `p90`, `p99`, `mean` and `max`. A percentile interpolates
+linearly between the two nearest samples. The order is ascending by
+`bucket_start`, then descending by `count`, then ascending by `key` with `null`
+last. The answer holds at most 1000 items.
+
+The CLI exposes `--measure`, `--operation`, `--group-by`, `--bucket`, `--project`,
+`--node`, `--from` and `--to`. A missing `--measure`, or an invalid `--measure`,
+`--group-by`, `--bucket`, `--from` or `--to`, exits 1 with
+`cli.tracking.analytics.duration.invalid_query`.
 
 ## `facet get`
 
@@ -386,47 +481,58 @@ with the same identities.
 Every remote command can also answer the shared codes of
 [other.md](other.md#error-codes).
 
-| HTTP  | Code                                                 | Condition                                                                                                              | Commands                                                 |
-| ----- | ---------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------- |
-| local | `cli.tracking.trace.list.invalid_project_id`         | `--project` is not a `ProjectID`.                                                                                      | trace list                                               |
-| local | `cli.tracking.trace.list.invalid_node_id`            | `--node` is not a `NodeID`.                                                                                            | trace list                                               |
-| local | `cli.tracking.trace.list.invalid_state`              | `--state` is not `open`, `ok` or `error`.                                                                              | trace list                                               |
-| local | `cli.tracking.trace.list.invalid_sort`               | `--sort` is not a sort field.                                                                                          | trace list                                               |
-| local | `cli.tracking.trace.list.invalid_query`              | `--query` is empty or has more than 200 characters, or `--from` or `--to` is not Unix milliseconds.                    | trace list                                               |
-| local | `cli.tracking.timeline.list.invalid_query`           | `--execution`, `--node` and `--project` do not hold exactly one scope, or `--from` or `--to` is not Unix milliseconds. | timeline list                                            |
-| local | `cli.tracking.timeline.list.invalid_execution_id`    | `--execution` is not an `ExecutionID`.                                                                                 | timeline list                                            |
-| local | `cli.tracking.timeline.list.invalid_node_id`         | `--node` is not a `NodeID`.                                                                                            | timeline list                                            |
-| local | `cli.tracking.timeline.list.invalid_project_id`      | `--project` is not a `ProjectID`.                                                                                      | timeline list                                            |
-| local | `cli.tracking.timeline.list.invalid_depth`           | `--depth` is not `1` or `2`.                                                                                           | timeline list                                            |
-| local | `cli.tracking.timeline.list.token_required`          | No token resolves from `--token`, `KANTHORD_TOKEN` or `cli.yaml`.                                                      | timeline list                                            |
-| local | `cli.tracking.timeline.list.indeterminate`           | The answer is lost. Repeat the read.                                                                                   | timeline list                                            |
-| local | `cli.tracking.facet.get.invalid_project_id`          | `--project` is not a `ProjectID`.                                                                                      | facet get                                                |
-| local | `cli.tracking.trace.list.token_required`             | No token resolves from `--token`, `KANTHORD_TOKEN` or `cli.yaml`.                                                      | trace list                                               |
-| local | `cli.tracking.facet.get.token_required`              | No token resolves from `--token`, `KANTHORD_TOKEN` or `cli.yaml`.                                                      | facet get                                                |
-| local | `cli.tracking.trace.list.indeterminate`              | The answer is lost. Repeat the read.                                                                                   | trace list                                               |
-| local | `cli.tracking.facet.get.indeterminate`               | The answer is lost. Repeat the read.                                                                                   | facet get                                                |
-| local | `cli.tracking.trace.get.invalid_trace_id`            | The `<trace-id>` argument is not a `TraceID`.                                                                          | trace get                                                |
-| local | `cli.tracking.span.list.invalid_trace_id`            | The `<trace-id>` argument is not a `TraceID`.                                                                          | span list                                                |
-| local | `cli.tracking.text.get.invalid_trace_id`             | The `<trace-id>` argument is not a `TraceID`.                                                                          | text get                                                 |
-| local | `cli.tracking.text.get.invalid_text_id`              | The `<text-id>` argument is not a `TextID`.                                                                            | text get                                                 |
-| local | `cli.tracking.trace.get.token_required`              | No token resolves from `--token`, `KANTHORD_TOKEN` or `cli.yaml`.                                                      | trace get                                                |
-| local | `cli.tracking.span.list.token_required`              | No token resolves from `--token`, `KANTHORD_TOKEN` or `cli.yaml`.                                                      | span list                                                |
-| local | `cli.tracking.text.get.token_required`               | No token resolves from `--token`, `KANTHORD_TOKEN` or `cli.yaml`.                                                      | text get                                                 |
-| local | `cli.tracking.trace.get.indeterminate`               | The answer is lost. Repeat the read.                                                                                   | trace get                                                |
-| local | `cli.tracking.span.list.indeterminate`               | The answer is lost. Repeat the read.                                                                                   | span list                                                |
-| local | `cli.tracking.text.get.indeterminate`                | The answer is lost. Repeat the read.                                                                                   | text get                                                 |
-| local | `cli.tracking.session.entry.list.invalid_trace_id`   | The `<trace-id>` argument is not a `TraceID`.                                                                          | session entry list                                       |
-| local | `cli.tracking.session.entry.list.invalid_session_id` | The `<session-id>` argument is not a `SpanID`.                                                                         | session entry list                                       |
-| local | `cli.tracking.session.entry.list.token_required`     | No token resolves from `--token`, `KANTHORD_TOKEN` or `cli.yaml`.                                                      | session entry list                                       |
-| local | `cli.tracking.session.entry.list.indeterminate`      | The answer is lost. Repeat the read.                                                                                   | session entry list                                       |
-| local | `cli.tracking.session.entry.get.invalid_trace_id`    | The `<trace-id>` argument is not a `TraceID`.                                                                          | session entry get                                        |
-| local | `cli.tracking.session.entry.get.invalid_session_id`  | The `<session-id>` argument is not a `SpanID`.                                                                         | session entry get                                        |
-| local | `cli.tracking.session.entry.get.invalid_entry_id`    | The `<entry-id>` argument is not an `EntryID`.                                                                         | session entry get                                        |
-| local | `cli.tracking.session.entry.get.token_required`      | No token resolves from `--token`, `KANTHORD_TOKEN` or `cli.yaml`.                                                      | session entry get                                        |
-| local | `cli.tracking.session.entry.get.indeterminate`       | The answer is lost. Repeat the read.                                                                                   | session entry get                                        |
-| local | `cli.pagination.limit_invalid`                       | `--limit` is not a positive integer.                                                                                   | span list, timeline list, trace list, session entry list |
-| local | `cli.pagination.limit_out_of_range`                  | `--limit` is outside 1 to 1000 for `span list`, `timeline list`, `trace list` and `session entry list`.                | span list, timeline list, trace list, session entry list |
-| 400   | `system.pagination.cursor_invalid`                   | `--cursor` is not a cursor of this listing.                                                                            | span list, timeline list, trace list, session entry list |
-| 404   | `tracking.trace.not_found`                           | The trace is unknown.                                                                                                  | all                                                      |
-| 404   | `tracking.text.not_found`                            | The trace holds no such text.                                                                                          | text get                                                 |
-| 404   | `tracking.entry.not_found`                           | The session holds no such entry.                                                                                       | session entry get                                        |
+| HTTP  | Code                                                 | Condition                                                                                                                            | Commands                                                 |
+| ----- | ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------- |
+| local | `cli.tracking.trace.list.invalid_project_id`         | `--project` is not a `ProjectID`.                                                                                                    | trace list                                               |
+| local | `cli.tracking.trace.list.invalid_node_id`            | `--node` is not a `NodeID`.                                                                                                          | trace list                                               |
+| local | `cli.tracking.trace.list.invalid_state`              | `--state` is not `open`, `ok` or `error`.                                                                                            | trace list                                               |
+| local | `cli.tracking.trace.list.invalid_sort`               | `--sort` is not a sort field.                                                                                                        | trace list                                               |
+| local | `cli.tracking.trace.list.invalid_query`              | `--query` is empty or has more than 200 characters, or `--from` or `--to` is not Unix milliseconds.                                  | trace list                                               |
+| local | `cli.tracking.timeline.list.invalid_query`           | `--execution`, `--node` and `--project` do not hold exactly one scope, or `--from` or `--to` is not Unix milliseconds.               | timeline list                                            |
+| local | `cli.tracking.timeline.list.invalid_execution_id`    | `--execution` is not an `ExecutionID`.                                                                                               | timeline list                                            |
+| local | `cli.tracking.timeline.list.invalid_node_id`         | `--node` is not a `NodeID`.                                                                                                          | timeline list                                            |
+| local | `cli.tracking.timeline.list.invalid_project_id`      | `--project` is not a `ProjectID`.                                                                                                    | timeline list                                            |
+| local | `cli.tracking.timeline.list.invalid_depth`           | `--depth` is not `1` or `2`.                                                                                                         | timeline list                                            |
+| local | `cli.tracking.timeline.list.token_required`          | No token resolves from `--token`, `KANTHORD_TOKEN` or `cli.yaml`.                                                                    | timeline list                                            |
+| local | `cli.tracking.timeline.list.indeterminate`           | The answer is lost. Repeat the read.                                                                                                 | timeline list                                            |
+| local | `cli.tracking.facet.get.invalid_project_id`          | `--project` is not a `ProjectID`.                                                                                                    | facet get                                                |
+| local | `cli.tracking.trace.list.token_required`             | No token resolves from `--token`, `KANTHORD_TOKEN` or `cli.yaml`.                                                                    | trace list                                               |
+| local | `cli.tracking.facet.get.token_required`              | No token resolves from `--token`, `KANTHORD_TOKEN` or `cli.yaml`.                                                                    | facet get                                                |
+| local | `cli.tracking.trace.list.indeterminate`              | The answer is lost. Repeat the read.                                                                                                 | trace list                                               |
+| local | `cli.tracking.facet.get.indeterminate`               | The answer is lost. Repeat the read.                                                                                                 | facet get                                                |
+| local | `cli.tracking.trace.get.invalid_trace_id`            | The `<trace-id>` argument is not a `TraceID`.                                                                                        | trace get                                                |
+| local | `cli.tracking.span.list.invalid_trace_id`            | The `<trace-id>` argument is not a `TraceID`.                                                                                        | span list                                                |
+| local | `cli.tracking.text.get.invalid_trace_id`             | The `<trace-id>` argument is not a `TraceID`.                                                                                        | text get                                                 |
+| local | `cli.tracking.text.get.invalid_text_id`              | The `<text-id>` argument is not a `TextID`.                                                                                          | text get                                                 |
+| local | `cli.tracking.trace.get.token_required`              | No token resolves from `--token`, `KANTHORD_TOKEN` or `cli.yaml`.                                                                    | trace get                                                |
+| local | `cli.tracking.span.list.token_required`              | No token resolves from `--token`, `KANTHORD_TOKEN` or `cli.yaml`.                                                                    | span list                                                |
+| local | `cli.tracking.text.get.token_required`               | No token resolves from `--token`, `KANTHORD_TOKEN` or `cli.yaml`.                                                                    | text get                                                 |
+| local | `cli.tracking.trace.get.indeterminate`               | The answer is lost. Repeat the read.                                                                                                 | trace get                                                |
+| local | `cli.tracking.span.list.indeterminate`               | The answer is lost. Repeat the read.                                                                                                 | span list                                                |
+| local | `cli.tracking.text.get.indeterminate`                | The answer is lost. Repeat the read.                                                                                                 | text get                                                 |
+| local | `cli.tracking.session.entry.list.invalid_trace_id`   | The `<trace-id>` argument is not a `TraceID`.                                                                                        | session entry list                                       |
+| local | `cli.tracking.session.entry.list.invalid_session_id` | The `<session-id>` argument is not a `SpanID`.                                                                                       | session entry list                                       |
+| local | `cli.tracking.session.entry.list.token_required`     | No token resolves from `--token`, `KANTHORD_TOKEN` or `cli.yaml`.                                                                    | session entry list                                       |
+| local | `cli.tracking.session.entry.list.indeterminate`      | The answer is lost. Repeat the read.                                                                                                 | session entry list                                       |
+| local | `cli.tracking.session.entry.get.invalid_trace_id`    | The `<trace-id>` argument is not a `TraceID`.                                                                                        | session entry get                                        |
+| local | `cli.tracking.session.entry.get.invalid_session_id`  | The `<session-id>` argument is not a `SpanID`.                                                                                       | session entry get                                        |
+| local | `cli.tracking.session.entry.get.invalid_entry_id`    | The `<entry-id>` argument is not an `EntryID`.                                                                                       | session entry get                                        |
+| local | `cli.tracking.session.entry.get.token_required`      | No token resolves from `--token`, `KANTHORD_TOKEN` or `cli.yaml`.                                                                    | session entry get                                        |
+| local | `cli.tracking.session.entry.get.indeterminate`       | The answer is lost. Repeat the read.                                                                                                 | session entry get                                        |
+| local | `cli.tracking.analytics.cost.invalid_project_id`     | `--project` is not a `ProjectID`.                                                                                                    | analytics cost                                           |
+| local | `cli.tracking.analytics.cost.invalid_node_id`        | `--node` is not a `NodeID`.                                                                                                          | analytics cost                                           |
+| local | `cli.tracking.analytics.cost.invalid_query`          | `--group-by`, `--bucket`, `--from` or `--to` is not a value of its set or Unix milliseconds.                                         | analytics cost                                           |
+| local | `cli.tracking.analytics.cost.token_required`         | No token resolves from `--token`, `KANTHORD_TOKEN` or `cli.yaml`.                                                                    | analytics cost                                           |
+| local | `cli.tracking.analytics.cost.indeterminate`          | The answer is lost. Repeat the read.                                                                                                 | analytics cost                                           |
+| local | `cli.tracking.analytics.duration.invalid_project_id` | `--project` is not a `ProjectID`.                                                                                                    | analytics duration                                       |
+| local | `cli.tracking.analytics.duration.invalid_node_id`    | `--node` is not a `NodeID`.                                                                                                          | analytics duration                                       |
+| local | `cli.tracking.analytics.duration.invalid_query`      | `--measure` is missing, or `--measure`, `--group-by`, `--bucket`, `--from` or `--to` is not a value of its set or Unix milliseconds. | analytics duration                                       |
+| local | `cli.tracking.analytics.duration.token_required`     | No token resolves from `--token`, `KANTHORD_TOKEN` or `cli.yaml`.                                                                    | analytics duration                                       |
+| local | `cli.tracking.analytics.duration.indeterminate`      | The answer is lost. Repeat the read.                                                                                                 | analytics duration                                       |
+| local | `cli.pagination.limit_invalid`                       | `--limit` is not a positive integer.                                                                                                 | span list, timeline list, trace list, session entry list |
+| local | `cli.pagination.limit_out_of_range`                  | `--limit` is outside 1 to 1000 for `span list`, `timeline list`, `trace list` and `session entry list`.                              | span list, timeline list, trace list, session entry list |
+| 400   | `system.pagination.cursor_invalid`                   | `--cursor` is not a cursor of this listing.                                                                                          | span list, timeline list, trace list, session entry list |
+| 400   | `tracking.analytics.range_invalid`                   | The range of `from` and `to` is longer than 31 days, or `from` is after `to`.                                                        | analytics cost, analytics duration                       |
+| 404   | `tracking.trace.not_found`                           | The trace is unknown.                                                                                                                | all                                                      |
+| 404   | `tracking.text.not_found`                            | The trace holds no such text.                                                                                                        | text get                                                 |
+| 404   | `tracking.entry.not_found`                           | The session holds no such entry.                                                                                                     | session entry get                                        |

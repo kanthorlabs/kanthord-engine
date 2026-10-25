@@ -1,0 +1,190 @@
+# Generated from the operation registry by kanthord gateway openapi.
+pathItem:
+  get:
+    operationId: tracking.analytics.cost
+    tags:
+      - tracking
+    description: Sum the tokens and the cost of the agent turns in a time range of
+      at most 31 days, by group and time bucket. The default range is the last 7
+      days. The answer holds at most 1000 items.
+    x-access-policy: human
+    x-timeout-ms: 30000
+    x-mutation: false
+    x-kanthord-lifetime: unary
+    security:
+      - bearerAuth: []
+    parameters:
+      - name: project_id
+        in: query
+        required: false
+        schema:
+          $ref: "#/components/schemas/tracking.analytics.cost.Input/properties/query/prop\
+            erties/project_id"
+      - name: node_id
+        in: query
+        required: false
+        schema:
+          $ref: "#/components/schemas/tracking.analytics.cost.Input/properties/query/prop\
+            erties/node_id"
+      - name: from
+        in: query
+        required: false
+        schema:
+          $ref: "#/components/schemas/tracking.analytics.cost.Input/properties/query/prop\
+            erties/from"
+      - name: to
+        in: query
+        required: false
+        schema:
+          $ref: "#/components/schemas/tracking.analytics.cost.Input/properties/query/prop\
+            erties/to"
+      - name: group_by
+        in: query
+        required: false
+        schema:
+          $ref: "#/components/schemas/tracking.analytics.cost.Input/properties/query/prop\
+            erties/group_by"
+      - name: bucket
+        in: query
+        required: false
+        schema:
+          $ref: "#/components/schemas/tracking.analytics.cost.Input/properties/query/prop\
+            erties/bucket"
+    responses:
+      "200":
+        description: Completed result
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/tracking.analytics.cost.Output"
+      "400":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "401":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "403":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "404":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "409":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "413":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "415":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "500":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "503":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "504":
+        $ref: ../shared/components.yaml#/components/responses/Error
+components:
+  schemas:
+    tracking.analytics.cost.Input:
+      type: object
+      properties:
+        params:
+          type: object
+          properties: {}
+          additionalProperties: false
+        query:
+          type: object
+          properties:
+            project_id:
+              type: string
+              minLength: 34
+              maxLength: 34
+              pattern: ^project_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+              description: project_ followed by a canonical 26-character uppercase ULID.
+            node_id:
+              type: string
+              minLength: 31
+              maxLength: 31
+              pattern: ^node_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+              description: node_ followed by a canonical 26-character uppercase ULID.
+            from:
+              type: integer
+              minimum: 0
+              maximum: 9007199254740991
+            to:
+              type: integer
+              minimum: 0
+              maximum: 9007199254740991
+            group_by:
+              default: model
+              type: string
+              enum:
+                - none
+                - model
+                - agent_name
+                - provider_name
+                - worker_name
+                - node_id
+                - project_id
+            bucket:
+              default: day
+              type: string
+              enum:
+                - none
+                - hour
+                - day
+                - week
+          required: []
+          additionalProperties: false
+        body:
+          type: "null"
+      required:
+        - params
+        - query
+        - body
+      additionalProperties: false
+    tracking.analytics.cost.Output:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            type: object
+            properties:
+              key:
+                anyOf:
+                  - type: string
+                  - type: "null"
+              bucket_start:
+                anyOf:
+                  - type: integer
+                    minimum: -9007199254740991
+                    maximum: 9007199254740991
+                  - type: "null"
+              turn_count:
+                type: integer
+                minimum: -9007199254740991
+                maximum: 9007199254740991
+              input_tokens:
+                type: number
+              output_tokens:
+                type: number
+              cache_read_tokens:
+                type: number
+              cache_creation_tokens:
+                type: number
+              total_tokens:
+                type: number
+              cost_usd:
+                type: number
+            required:
+              - key
+              - bucket_start
+              - turn_count
+              - input_tokens
+              - output_tokens
+              - cache_read_tokens
+              - cache_creation_tokens
+              - total_tokens
+              - cost_usd
+            additionalProperties: false
+        truncated:
+          type: boolean
+      required:
+        - items
+        - truncated
+      additionalProperties: false

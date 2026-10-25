@@ -23,6 +23,8 @@ import {
 } from "../kernel/service.ts";
 import { identityTime } from "../kernel/identity.ts";
 import type { Store } from "../kernel/store.ts";
+import { readCost } from "./analytics-cost.ts";
+import { readDuration } from "./analytics-duration.ts";
 import {
   admitRecords,
   admitServerSpan,
@@ -30,6 +32,9 @@ import {
   type SpanContribution,
 } from "./admission.ts";
 import {
+  ANALYTICS_ITEMS_MAX,
+  ANALYTICS_RANGE_DAYS_DEFAULT,
+  ANALYTICS_RANGE_DAYS_MAX,
   ROOT_SPAN_OPERATION,
   SCHEDULER_PRODUCER,
   TRANSITION_SPAN_OPERATION,
@@ -48,6 +53,8 @@ import {
   traceSortSchema,
   trackingOperations,
   type Acknowledgement,
+  type AnalyticsCostQuery,
+  type AnalyticsDurationQuery,
   type Attributes,
   type ExecutionOpening,
   type ExecutionTelemetry,
@@ -98,6 +105,8 @@ const TEXT_ENCODING = "utf8";
 const CURSOR_START = 0;
 const TRACE_CURSOR_PARTS = 3;
 const TIMELINE_CURSOR_PARTS = 4;
+const RANGE_INVALID_CODE = "tracking.analytics.range_invalid";
+const DAY_MS = 86400000;
 
 export interface Dependencies {
   store: Store;
@@ -113,6 +122,24 @@ function traceNotFound(): never {
     "tracking.trace.not_found",
     "The trace is unknown or expired.",
   );
+}
+
+function rangeInvalid(message: string): never {
+  throw new OperationError(HttpStatus.BadRequest, RANGE_INVALID_CODE, message);
+}
+
+function analyticsRange(
+  query: { from?: number; to?: number },
+  now: number,
+): { from: number; to: number } {
+  const to = query.to ?? now;
+  const from = query.from ?? to - ANALYTICS_RANGE_DAYS_DEFAULT * DAY_MS;
+  if (from > to) return rangeInvalid("from is after to.");
+  if (to - from > ANALYTICS_RANGE_DAYS_MAX * DAY_MS)
+    return rangeInvalid(
+      `The range is longer than ${ANALYTICS_RANGE_DAYS_MAX} days.`,
+    );
+  return { from, to };
 }
 
 function decodeCursor(cursor: string | undefined): number {
@@ -474,6 +501,31 @@ export class TrackingService implements Service, ExecutionTelemetry {
     });
   }
 
+  async analyticsCost(query: AnalyticsCostQuery, caller: CallerContext) {
+    assert.ok(caller.identity);
+    const range = analyticsRange(query, this.now());
+    return readCost(
+      this.dependencies.store,
+      { ...query, ...range },
+      ANALYTICS_ITEMS_MAX,
+      caller.context.signal,
+    );
+  }
+
+  async analyticsDuration(
+    query: AnalyticsDurationQuery,
+    caller: CallerContext,
+  ) {
+    assert.ok(caller.identity);
+    const range = analyticsRange(query, this.now());
+    return readDuration(
+      this.dependencies.store,
+      { ...query, ...range },
+      ANALYTICS_ITEMS_MAX,
+      caller.context.signal,
+    );
+  }
+
   facetGet(query: { project_id?: string }, caller: CallerContext) {
     assert.ok(caller.identity);
     return caller.commit((tx) => readFacets(tx, query.project_id));
@@ -567,6 +619,8 @@ export class TrackingService implements Service, ExecutionTelemetry {
       trackingOperations.traceList.access !== AccessPolicy.Human ||
       trackingOperations.facetGet.access !== AccessPolicy.Human ||
       trackingOperations.timelineList.access !== AccessPolicy.Human ||
+      trackingOperations.analyticsCost.access !== AccessPolicy.Human ||
+      trackingOperations.analyticsDuration.access !== AccessPolicy.Human ||
       trackingOperations.spanList.access !== AccessPolicy.Human ||
       trackingOperations.textGet.access !== AccessPolicy.Human ||
       trackingOperations.sessionEntryList.access !== AccessPolicy.Human ||
@@ -593,6 +647,12 @@ export class TrackingService implements Service, ExecutionTelemetry {
     );
     registry.register(trackingOperations.timelineList, (input, caller) =>
       this.timelineList(input.query, caller),
+    );
+    registry.register(trackingOperations.analyticsCost, (input, caller) =>
+      this.analyticsCost(input.query, caller),
+    );
+    registry.register(trackingOperations.analyticsDuration, (input, caller) =>
+      this.analyticsDuration(input.query, caller),
     );
     registry.register(trackingOperations.spanList, (input, caller) =>
       this.spanList(input.params.trace_id, input.query, caller),

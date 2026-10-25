@@ -1,15 +1,15 @@
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
 import { IN_MEMORY_DATABASE, Store } from "../kernel/store.ts";
-import { SpanOrigin, SpanStatus, TRACKING_SERVICE_NAME } from "./contract.ts";
-import { trackingMigrations } from "./migrations.ts";
-import { AnalyticsBucket } from "./analytics-bucket.ts";
 import {
+  AnalyticsBucket,
   CostGroupBy,
-  readCost,
-  type CostItem,
-  type CostQuery,
-} from "./analytics-cost.ts";
+  SpanOrigin,
+  SpanStatus,
+  TRACKING_SERVICE_NAME,
+} from "./contract.ts";
+import { trackingMigrations } from "./migrations.ts";
+import { readCost, type CostItem, type CostQuery } from "./analytics-cost.ts";
 import { insertSpan } from "./trace-store.ts";
 
 interface Turn {
