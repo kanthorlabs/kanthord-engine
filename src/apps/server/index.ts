@@ -830,6 +830,10 @@ export function composeServices(options: {
         );
       },
     },
+    acts: {
+      act: (trace, contribution) =>
+        tracking.serverTraceSpan(trace, MISSION_PRODUCER, contribution),
+    },
     logger: options.logger,
     bindings: {
       resolveBinding: (tx, pid, name) => project.resolveBinding(tx, pid, name),

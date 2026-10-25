@@ -375,6 +375,7 @@ function makeService(
       },
     },
     telemetry: { uploadCheckFailed: () => {} },
+    acts: { act: () => {} },
     logger: pino({ enabled: false }),
     ...collaborators,
   });

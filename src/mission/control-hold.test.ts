@@ -13,7 +13,9 @@ import {
   StartPoint,
   type RevokedExecution,
 } from "./contract.ts";
+import { Act, ActAttribute, type ActContribution } from "./act-telemetry.ts";
 import { ControlError } from "./control.ts";
+import type { ServerTrace } from "../tracking/contract.ts";
 import { openAttempt, readAttempt, insertEvidence } from "./record-store.ts";
 import { setNodeState, insertNode, insertDependency } from "./store.ts";
 import { controlHarness, revokedExecution } from "./test-support.ts";
@@ -30,6 +32,9 @@ const NOT_READY = "mission.node.not_ready";
 const REASON_LIMIT = 12;
 const ROLLBACK = "rollback";
 const CONTENT_INVALID = "mission.node.content_invalid";
+const ACT = "acts.act";
+const NO_ACTS = 0;
+const ONE_ACT = 1;
 test("controls reject blank and oversized UTF-8 reasons without writes, preserving exact-limit text", async (t) => {
   const h = controlHarness(t, IDENTITY);
   h.dependencies.config.text_max_bytes = REASON_LIMIT;
@@ -435,4 +440,102 @@ test("pause refuses Blocked without a write or wakeup", async (t) => {
     h.calls.some((call) => call.method === WAKE),
     false,
   );
+});
+
+function actCalls(h: ReturnType<typeof controlHarness>) {
+  return h.calls
+    .filter((call) => call.method === ACT)
+    .map((call) => call.arguments as [ServerTrace, ActContribution]);
+}
+
+for (const [operation, act, from, to, body] of [
+  ["node.ready", Act.Ready, NodeState.Available, NodeState.Waiting, {}],
+  [
+    "node.resume",
+    Act.Resume,
+    NodeState.Paused,
+    NodeState.Waiting,
+    { target: ResumeTarget.Waiting },
+  ],
+  ["node.pause", Act.Pause, NodeState.Available, NodeState.Paused, {}],
+] as const) {
+  test(`${operation} writes one act trace after the commit with the states before and after`, async (t) => {
+    const h = controlHarness(t, IDENTITY);
+    h.store.transaction((tx) => setNodeState(tx, h.node_id, from));
+    const statesAtAct: (NodeState | null)[] = [];
+    h.dependencies.acts.act = (...args) => {
+      statesAtAct.push(h.node().state);
+      h.calls.push({ method: ACT, arguments: args });
+    };
+    await h.invoke(operation, {
+      params: { node_id: h.node_id },
+      query: {},
+      body: { ...h.body(from), ...body },
+    });
+    const written = actCalls(h);
+    assert.equal(written.length, ONE_ACT);
+    assert.deepEqual(statesAtAct, [to]);
+    const [trace, contribution] = written[0]!;
+    assert.equal(contribution.operation, act);
+    assert.equal(trace.project_id, h.project_id);
+    assert.equal(trace.node_id, h.node_id);
+    assert.equal(contribution.attributes[ActAttribute.StateFrom], from);
+    assert.equal(contribution.attributes[ActAttribute.StateTo], to);
+    assert.deepEqual(contribution.texts, [
+      { text_id: `${trace.root_span_id}:reason`, text: "Hold" },
+    ]);
+    assert.equal(contribution.links, undefined);
+  });
+}
+
+test("a pause of a node with a live execution links the root span of that execution", async (t) => {
+  const h = controlHarness(t, IDENTITY);
+  const revoked = revokedExecution(createIdentity("execution"), h.node_id, NOW);
+  h.dependencies.schedulerClaims.revoke = () => revoked;
+  h.store.transaction((tx) => {
+    openAttempt(tx, h.node_id, FIRST_ATTEMPT, h.actor, NOW);
+    setNodeState(tx, h.node_id, NodeState.Executing);
+  });
+  await h.invoke("node.pause", {
+    params: { node_id: h.node_id },
+    query: {},
+    body: h.body(NodeState.Executing, FIRST_ATTEMPT),
+  });
+  const written = actCalls(h);
+  assert.equal(written.length, ONE_ACT);
+  const [trace, contribution] = written[0]!;
+  assert.equal(trace.attempt, FIRST_ATTEMPT);
+  assert.deepEqual(contribution.links, [
+    { trace_id: revoked.trace.trace_id, span_id: revoked.trace.root_span_id },
+  ]);
+});
+
+test("a refused pause writes no act trace", async (t) => {
+  const h = controlHarness(t, IDENTITY);
+  h.store.transaction((tx) => setNodeState(tx, h.node_id, NodeState.Blocked));
+  await assert.rejects(
+    h.invoke("node.pause", {
+      params: { node_id: h.node_id },
+      query: {},
+      body: h.body(NodeState.Blocked),
+    }),
+    (error) =>
+      error instanceof OperationError && error.code === ControlError.Refused,
+  );
+  assert.equal(actCalls(h).length, NO_ACTS);
+});
+
+test("an act telemetry that throws changes no answer and no state", async (t) => {
+  const h = controlHarness(t, IDENTITY);
+  h.dependencies.acts.act = () => {
+    throw new Error("telemetry down");
+  };
+  const result = await h.invoke("node.pause", {
+    params: { node_id: h.node_id },
+    query: {},
+    body: h.body(),
+  });
+  assert.equal(result.node.state, NodeState.Paused);
+  assert.equal(h.node().state, NodeState.Paused);
+  assert.equal(h.calls.at(-1)?.method, WAKE);
 });

@@ -378,6 +378,7 @@ export function missionHarness(
       uploadCheckFailed: (...args) =>
         record("telemetry.uploadCheckFailed", args),
     },
+    acts: { act: (...args) => record("acts.act", args) },
     logger: pino({ enabled: false }),
     ...overrides,
   };
