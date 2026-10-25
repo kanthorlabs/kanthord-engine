@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { PromptTemplate } from "../../agent/contract.ts";
 import { readdirSync, rmSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import type { Context } from "../../kernel/context.ts";
@@ -136,8 +137,8 @@ export function gatedAgent(
   return {
     budget: agent.budget,
     prompt: (work: WorkPrompt) => gated(() => agent.prompt(work)),
-    instruct: (work: WorkPrompt, text: string) =>
-      gated(() => agent.instruct(work, text)),
+    instruct: (work: WorkPrompt, text: string, template: PromptTemplate) =>
+      gated(() => agent.instruct(work, text, template)),
     changed: () => changed,
     commits: () => commits,
     lastText: () => agent.lastText(),

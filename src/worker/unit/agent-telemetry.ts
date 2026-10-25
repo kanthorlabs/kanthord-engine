@@ -11,6 +11,7 @@ import { isObject } from "../../kernel/values.ts";
 import { providerFailureOf } from "../../llm/provider-failure.ts";
 import { SpanOperation, type SpanRecorder } from "./telemetry.ts";
 import { sessionEntryRecord } from "./session-entries.ts";
+import type { TurnPrompt } from "./native-agent.ts";
 import type { ToolProcesses } from "./tool-table.ts";
 import type { BashProcess } from "../../agent/bash-process.ts";
 
@@ -30,6 +31,9 @@ export const AgentErrorType = {
   ToolError: "tool_error",
   Stopped: "stopped",
 } as const;
+const PROMPT_TEMPLATE_ATTRIBUTE = "kanthord.prompt.template";
+const PROMPT_TEMPLATE_DIGEST_ATTRIBUTE = "kanthord.prompt.template.digest";
+const PROMPT_WORK_DIGEST_ATTRIBUTE = "kanthord.prompt.work.digest";
 const FIRST_SEQUENCE = 1;
 const NO_ENTRIES = 0;
 
@@ -83,6 +87,15 @@ function processAttributes(bashProcess: BashProcess | undefined): Attributes {
   };
 }
 
+function promptAttributes(prompt: TurnPrompt | null): Attributes {
+  if (prompt === null) return {};
+  return {
+    [PROMPT_TEMPLATE_ATTRIBUTE]: prompt.template,
+    [PROMPT_TEMPLATE_DIGEST_ATTRIBUTE]: prompt.template_digest,
+    [PROMPT_WORK_DIGEST_ATTRIBUTE]: prompt.work_digest,
+  };
+}
+
 type SessionEvent = Parameters<Parameters<AgentSession["subscribe"]>[0]>[0];
 type EventOf<T extends SessionEvent["type"]> = Extract<
   SessionEvent,
@@ -99,6 +112,7 @@ export interface AgentTracing {
   secrets: readonly string[];
   refreshSecrets: () => Promise<readonly string[]>;
   processes: Pick<ToolProcesses, "take">;
+  promptOf: () => TurnPrompt | null;
 }
 
 class AgentTracer {
@@ -116,6 +130,7 @@ class AgentTracer {
   private readonly sessionId: string;
   private readonly refreshSecrets: AgentTracing["refreshSecrets"];
   private readonly processes: AgentTracing["processes"];
+  private readonly promptOf: AgentTracing["promptOf"];
   private secrets: readonly string[];
   private sent = NO_ENTRIES;
 
@@ -133,6 +148,7 @@ class AgentTracer {
     this.secrets = tracing.secrets;
     this.refreshSecrets = tracing.refreshSecrets;
     this.processes = tracing.processes;
+    this.promptOf = tracing.promptOf;
     this.spans = spans;
     this.agentName = agent.agent_name;
     this.position = agent.position;
@@ -220,6 +236,7 @@ class AgentTracer {
         "gen_ai.operation.name": CHAT_OPERATION,
         "gen_ai.conversation.id": this.sessionId,
         "gen_ai.request.model": this.model,
+        ...promptAttributes(this.promptOf()),
       },
     });
     this.turnStartedAt = Date.now();

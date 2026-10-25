@@ -26,7 +26,8 @@ import { EndReason, ExecutionStop } from "./execution-run.ts";
 import { CodedError } from "../../kernel/errors.ts";
 import { ExecutionIntent } from "../contract.ts";
 import { type ExecutionSetup, type HostTools } from "../contract.ts";
-import { renderWorkPrompt } from "../../agent/prompt-composer.ts";
+import { digest, renderWorkPrompt } from "../../agent/prompt-composer.ts";
+import { PromptTemplate } from "../../agent/contract.ts";
 import {
   anthropicAgent,
   anthropicSetup,
@@ -55,6 +56,7 @@ const CALLS_BEFORE_FAILED_CHECK = 1;
 const TRANSCRIPT_LENGTH_BEFORE = 3;
 const SINGLE_TURN_BUDGET = 1;
 const SINGLE_CALL_COUNT = 1;
+const TWO_SENDS = 2;
 const CONTENT = "written";
 const USER_ROLE = "user";
 const HOME_TEXT = "home file text";
@@ -437,6 +439,45 @@ test("a turn end names the assistant session entry of the turn and links the ses
   );
 });
 
+function turnStarts(h: Harness) {
+  return h.records.flatMap((record) =>
+    record.kind === RecordKind.Span &&
+    record.operation === SpanOperation.Turn &&
+    record.start_time
+      ? [record.attributes]
+      : [],
+  );
+}
+
+test("a prompt send records the work template on its turn start", async (t) => {
+  const h = await fixture(t, [fauxAssistantMessage("done")]);
+  await h.agent.prompt(WORK);
+  const [start] = turnStarts(h);
+  assert.equal(start?.["kanthord.prompt.template"], PromptTemplate.Work);
+  assert.equal(
+    start?.["kanthord.prompt.template.digest"],
+    digest(SHIPPED_TEMPLATES[PromptTemplate.Work]),
+  );
+  assert.equal(start?.["kanthord.prompt.work.digest"], WORK.digest);
+});
+
+test("an instruct send records the template that it names on its turn start", async (t) => {
+  const h = await fixture(t, [
+    fauxAssistantMessage("done"),
+    fauxAssistantMessage("repaired"),
+  ]);
+  await h.agent.prompt(WORK);
+  await h.agent.instruct(WORK, "repair", PromptTemplate.Repair);
+  const starts = turnStarts(h);
+  assert.equal(starts.length, TWO_SENDS);
+  assert.equal(starts[1]?.["kanthord.prompt.template"], PromptTemplate.Repair);
+  assert.equal(
+    starts[1]?.["kanthord.prompt.template.digest"],
+    digest(SHIPPED_TEMPLATES[PromptTemplate.Repair]),
+  );
+  assert.equal(starts[1]?.["kanthord.prompt.work.digest"], WORK.digest);
+});
+
 test("the entry_count of the agent.session end equals the count of sent entries", async (t) => {
   const h = await fixture(t, [fauxAssistantMessage("done")]);
   await h.agent.prompt(WORK);
@@ -603,7 +644,9 @@ test("native parent cancellation aborts an active tool and disposal refuses reus
   assert.equal(h.provider.calls.length, SINGLE_CALL_COUNT);
   h.agent.dispose();
   await assert.rejects(h.agent.prompt(WORK));
-  await assert.rejects(h.agent.instruct(WORK, "judge"));
+  await assert.rejects(
+    h.agent.instruct(WORK, "judge", PromptTemplate.Evaluation),
+  );
 });
 
 test("native instructions preserve pinned work and persist the session and last text", async (t) => {
@@ -614,7 +657,7 @@ test("native instructions preserve pinned work and persist the session and last 
   assert.equal(h.agent.lastText(), undefined);
   await h.agent.prompt(WORK);
   const before = sessionMessages(h);
-  await h.agent.instruct(WORK, "judge");
+  await h.agent.instruct(WORK, "judge", PromptTemplate.Evaluation);
   const call = h.provider.calls.at(-1)!;
   const messages = JSON.stringify(call.messages);
   assert.equal(

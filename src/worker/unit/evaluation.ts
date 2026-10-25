@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { PromptTemplate } from "../../agent/contract.ts";
 import type { SetupFailure } from "./environment-setup.ts";
 import { canonicalJSON } from "../../kernel/json.ts";
 import {
@@ -147,6 +148,7 @@ async function judge(
       evidence,
       dependencies,
     }),
+    PromptTemplate.Evaluation,
   );
   if (agent.budget.exhausted()) return run.stop(EndReason.AssessmentAbsent);
   const { reply: judgement, repaired } = await parseRepaired(

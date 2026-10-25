@@ -21,6 +21,7 @@ import {
 import { VerificationClass, type Verification } from "./verification.ts";
 import { SHIPPED_TEMPLATES } from "../../agent/prompt-templates.ts";
 import type { NativeAgent } from "./native-agent.ts";
+import { PromptTemplate } from "../../agent/contract.ts";
 import type { WorkPrompt } from "../../agent/prompt-composer.ts";
 
 const TWO_GAP_RATIONALE =
@@ -378,14 +379,20 @@ test("an unmet item requires a ground of the closed set", () => {
 
 function repairAgent(replies: readonly (string | undefined)[]) {
   const instructions: string[] = [];
+  const templates: PromptTemplate[] = [];
   const agent = {
     budget: { exhausted: () => false },
-    instruct: async (_work: unknown, instruction: string) => {
+    instruct: async (
+      _work: unknown,
+      instruction: string,
+      template: PromptTemplate,
+    ) => {
       instructions.push(instruction);
+      templates.push(template);
     },
     lastText: () => replies[Math.max(instructions.length, 0)],
   };
-  return { agent: agent as unknown as NativeAgent, instructions };
+  return { agent: agent as unknown as NativeAgent, instructions, templates };
 }
 
 test("parseRepaired marks a reply that the repair turn produced", async () => {
@@ -409,6 +416,7 @@ test("parseRepaired marks a reply that the repair turn produced", async () => {
   );
   assert.equal(second.repaired, true);
   assert.equal(repaired.instructions.length, SINGLE_REPAIR);
+  assert.deepEqual(repaired.templates, [PromptTemplate.Repair]);
   assert.equal(
     (second.reply as { unmet: { ground: string }[] }).unmet.at(0)?.ground,
     UnmetGround.Unstated,

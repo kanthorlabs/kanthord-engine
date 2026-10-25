@@ -17,6 +17,7 @@ import {
   type TelemetrySink,
 } from "./telemetry.ts";
 import { AgentErrorType, traceAgent } from "./agent-telemetry.ts";
+import type { TurnPrompt } from "./native-agent.ts";
 import {
   environmentDigestsOf,
   GitStep,
@@ -32,7 +33,7 @@ import type { TaskContent } from "../../mission/contract.ts";
 import { CommandEnd, type CommandRun } from "./verification.ts";
 import { EnvironmentSource } from "../../kernel/devcontainer.ts";
 import { Diagnostic } from "../../kernel/errors.ts";
-import { ChainLevel } from "../../agent/contract.ts";
+import { ChainLevel, PromptTemplate } from "../../agent/contract.ts";
 
 const CLAIM = {
   execution_id: "execution_01JZ8R2B3C4D5E6F7G8H9J0K1M",
@@ -68,6 +69,7 @@ const TRACING = {
   secrets: [] as readonly string[],
   refreshSecrets: async (): Promise<readonly string[]> => [],
   processes: { take: () => undefined },
+  promptOf: (): TurnPrompt | null => null,
 };
 const MODEL = "glm-test-model";
 const OUTCOME_OK = "ok";
@@ -538,6 +540,46 @@ test("the agent tracer writes a turn and its tool call without a text", () => {
   assert.deepEqual(textRecordsOf(records), []);
   for (const span of spanRecords(records))
     assert.deepEqual(span.text_ids ?? [], []);
+});
+
+const TURN_PROMPT: TurnPrompt = {
+  template: PromptTemplate.Repair,
+  template_digest: "a".repeat(64),
+  work_digest: "b".repeat(64),
+};
+
+test("a turn start holds the prompt facts that promptOf answers", () => {
+  const { records, spans } = recorder();
+  const scripted = scriptedSession();
+  traceAgent(scripted.session, spans, TRACED_AGENT, {
+    ...TRACING,
+    promptOf: () => TURN_PROMPT,
+  });
+  scripted.emit({ type: "turn_start" });
+  const attributes = startOf(records, SpanOperation.Turn)?.attributes;
+  assert.equal(attributes?.["kanthord.prompt.template"], TURN_PROMPT.template);
+  assert.equal(
+    attributes?.["kanthord.prompt.template.digest"],
+    TURN_PROMPT.template_digest,
+  );
+  assert.equal(
+    attributes?.["kanthord.prompt.work.digest"],
+    TURN_PROMPT.work_digest,
+  );
+});
+
+test("a turn start holds no prompt fact when promptOf answers null", () => {
+  const { records, spans } = recorder();
+  const scripted = scriptedSession();
+  traceAgent(scripted.session, spans, TRACED_AGENT, TRACING);
+  scripted.emit({ type: "turn_start" });
+  const attributes = startOf(records, SpanOperation.Turn)?.attributes ?? {};
+  assert.deepEqual(
+    Object.keys(attributes).filter((name) =>
+      name.startsWith("kanthord.prompt."),
+    ),
+    [],
+  );
 });
 
 test("the turn start and end attributes hold exactly the listed names", () => {

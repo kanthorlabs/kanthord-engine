@@ -109,6 +109,7 @@ async function mergeUnder(
         },
         conflicts,
       ),
+      PromptTemplate.Conflict,
     );
     if (state.agent.budget.exhausted()) return RefreshResult.BudgetEnd;
   } else checkout.head = await headCommit(env, directory, context, remaining());
