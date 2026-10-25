@@ -17,6 +17,7 @@ import {
   anthropicSetup,
   everyBindingSshAccess,
   repositorySetup,
+  transport as localTransport,
 } from "./test-support.ts";
 import { WorkspaceRoot } from "./workspace.ts";
 import type { MethodClients } from "./method-clients.ts";
@@ -32,6 +33,19 @@ import { SetupEnd } from "./environment-setup.ts";
 import { VerificationClass } from "./verification.ts";
 import { ActionResultKind } from "../contract.ts";
 import { AssessmentResult } from "../../mission/contract.ts";
+import { RecordKind, type TelemetryRecord } from "../../tracking/contract.ts";
+import {
+  CauseAssigner,
+  CauseCategory,
+  CauseSubcategory,
+  unattributed,
+} from "../../kernel/cause.ts";
+import { EnvironmentSource } from "../../kernel/devcontainer.ts";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { simpleGit } from "simple-git";
+import { SpanOperation } from "./telemetry.ts";
+import { EvaluationAttribute } from "./method-telemetry.ts";
+import { EvaluationStage } from "./evaluation.ts";
 import { JUDGEMENT_MARKER, repairInstruction } from "./judgement.ts";
 import { SHIPPED_TEMPLATES } from "../../agent/prompt-templates.ts";
 import { VERIFICATION_INFRASTRUCTURE_FAILED } from "./verification.ts";
@@ -110,7 +124,14 @@ test("reviewer release accepts only settled or prerequisite-waiting action resul
         kind === ActionResultKind.Submitted ||
         kind === ActionResultKind.AwaitingPrerequisite,
     );
-    const stop = { reason: EndReason.ActionUnsettled, code: null };
+    const stop = {
+      reason: EndReason.ActionUnsettled,
+      code: null,
+      cause: unattributed([
+        CauseCategory.WorkerAction,
+        CauseCategory.Infrastructure,
+      ]),
+    };
     if (accepted) {
       assert.deepEqual(await requestAndRelease(run), {
         kind: "released",
@@ -145,7 +166,7 @@ test("evaluation writes failed-verification assessments without inference and ga
     {
       command: "true",
       texts: [
-        'kanthord-judgement: {"result":"criterion-not-met","rationale":"unmet","unmet":[{"id":"task","reason":"the defect"}]}',
+        'kanthord-judgement: {"result":"criterion-not-met","rationale":"unmet","unmet":[{"id":"task","reason":"the defect","ground":"stated"}]}',
       ],
       result: "criterion-not-met",
       opens: 1,
@@ -154,7 +175,7 @@ test("evaluation writes failed-verification assessments without inference and ga
     {
       command: "true",
       texts: [
-        'kanthord-judgement: {"result":"criterion-not-met","rationale":"unmet","unmet":[{"id":"task","reason":"the defect"}]}',
+        'kanthord-judgement: {"result":"criterion-not-met","rationale":"unmet","unmet":[{"id":"task","reason":"the defect","ground":"stated"}]}',
       ],
       result: "criterion-not-met",
       opens: 1,
@@ -539,13 +560,29 @@ test("an evaluation that its agent deadline cuts ends with no assessment and no 
   assert.deepEqual(releases, [
     {
       further_work: true,
-      stop: { reason: EndReason.AssessmentAbsent, code: null },
+      stop: {
+        reason: EndReason.AssessmentAbsent,
+        code: null,
+        cause: unattributed([CauseCategory.Plan, CauseCategory.Model]),
+      },
     },
   ]);
 });
 
-async function reviewOf(t: TestContext, command: string, wallTimeMs?: number) {
-  const repository = repositorySetup();
+interface ReviewOptions {
+  reply?: string;
+  repository?: ReturnType<typeof repositorySetup>;
+  snapshot?: string;
+  transport?: RepositoryTransport;
+}
+
+async function reviewOf(
+  t: TestContext,
+  command: string,
+  wallTimeMs?: number,
+  options: ReviewOptions = {},
+) {
+  const repository = options.repository ?? repositorySetup();
   const setup = anthropicSetup({ repositories: [repository] });
   if (wallTimeMs !== undefined) setup.resource_budget.wall_time_ms = wallTimeMs;
   const claim = {
@@ -566,7 +603,12 @@ async function reviewOf(t: TestContext, command: string, wallTimeMs?: number) {
     status: 200,
     data,
   });
-  const assessments: { result: string; rationale: string }[] = [];
+  const assessments: {
+    result: string;
+    rationale: string;
+    cause?: unknown;
+  }[] = [];
+  const records: TelemetryRecord[] = [];
   const verifications: { results: { exit_code: number | null }[] }[] = [];
   const releases: unknown[] = [];
   const clients = {
@@ -589,6 +631,24 @@ async function reviewOf(t: TestContext, command: string, wallTimeMs?: number) {
               id: "placed",
               assets: [{ id: assetId, kind: "produced", address }],
             },
+            ...(options.snapshot === undefined
+              ? []
+              : [
+                  {
+                    id: "snapshot",
+                    assets: [
+                      {
+                        id: createIdentity("evidence_asset"),
+                        kind: "repository",
+                        address: {
+                          kind: "repository",
+                          binding_id: repository.binding_id,
+                          commit: options.snapshot,
+                        },
+                      },
+                    ],
+                  },
+                ]),
           ],
           next_cursor: null,
         }),
@@ -625,6 +685,10 @@ async function reviewOf(t: TestContext, command: string, wallTimeMs?: number) {
     clients,
     credentials: { release: async () => {} },
     context: background,
+    telemetry: {
+      write: (batch) => records.push(...batch),
+      flush: async () => {},
+    },
   });
   t.after(() => run.dispose());
   const budget = new ExecutionBudget({
@@ -638,6 +702,7 @@ async function reviewOf(t: TestContext, command: string, wallTimeMs?: number) {
       budget,
       instruct: async () => {},
       lastText: () =>
+        options.reply ??
         'kanthord-judgement: {"result":"success","rationale":"met"}',
     } as unknown as NativeAgent;
   };
@@ -647,7 +712,7 @@ async function reviewOf(t: TestContext, command: string, wallTimeMs?: number) {
         setup,
         claim,
         workspaces: WorkspaceRoot.open(temporary(t)),
-        transport: {} as RepositoryTransport,
+        transport: options.transport ?? ({} as RepositoryTransport),
         sshAccess: everyBindingSshAccess,
         env: hostEnvironment(),
       },
@@ -656,7 +721,14 @@ async function reviewOf(t: TestContext, command: string, wallTimeMs?: number) {
       open,
     ),
   );
-  return { end, assessments, verifications, releases, opens: () => opens };
+  return {
+    end,
+    assessments,
+    verifications,
+    releases,
+    records,
+    opens: () => opens,
+  };
 }
 
 const SIGNAL_KILL = "sh -c 'kill -9 $$'";
@@ -715,7 +787,11 @@ test("a wall deadline during a review verification ends with no assessment and n
   assert.deepEqual(review.releases, [
     {
       further_work: true,
-      stop: { reason: EndReason.AssessmentAbsent, code: null },
+      stop: {
+        reason: EndReason.AssessmentAbsent,
+        code: null,
+        cause: unattributed([CauseCategory.Plan, CauseCategory.Model]),
+      },
     },
   ]);
 });
@@ -746,4 +822,112 @@ test("a node-head setup failure of a review is criterion-not-met and names the s
   assert.equal(assessment?.result, AssessmentResult.CriterionNotMet);
   assert.match(assessment?.rationale ?? "", /Verification 1 `npm ci` failed/);
   assert.deepEqual(assessment?.proposals, []);
+});
+
+const STATED_REPLY =
+  'kanthord-judgement: {"result":"criterion-not-met","rationale":"unmet","unmet":[{"id":"task","reason":"a","ground":"stated"},{"id":"other","reason":"b","ground":"unstated"}]}';
+
+function evaluationEndOf(records: readonly TelemetryRecord[]) {
+  const ends = records.filter(
+    (record) =>
+      record.kind === RecordKind.Span &&
+      record.operation === SpanOperation.Evaluation &&
+      record.end_time !== undefined,
+  );
+  assert.equal(ends.length, SINGLE_RELEASE);
+  return ends[0] as TelemetryRecord & { attributes: Record<string, unknown> };
+}
+
+test("a failed review verification submits the cause with the suspects model and plan", async (t) => {
+  const review = await reviewOf(t, "false");
+  assert.deepEqual(review.assessments[0]?.cause, {
+    category: CauseCategory.Unattributed,
+    assigner: CauseAssigner.Rule,
+    suspects: [CauseCategory.Model, CauseCategory.Plan],
+  });
+  const attributes = evaluationEndOf(review.records).attributes;
+  assert.equal(
+    attributes[EvaluationAttribute.Stage],
+    EvaluationStage.Verification,
+  );
+  assert.deepEqual(attributes[EvaluationAttribute.UnmetIds], []);
+  assert.deepEqual(attributes[EvaluationAttribute.UnmetGrounds], []);
+  assert.equal(attributes[EvaluationAttribute.ProposalCount], NO_RELEASES);
+  assert.equal(EvaluationAttribute.Repaired in attributes, false);
+});
+
+test("a judgement with a stated first unmet item submits the work defect cause and its facts", async (t) => {
+  const review = await reviewOf(t, "true", undefined, { reply: STATED_REPLY });
+  assert.deepEqual(review.assessments[0]?.cause, {
+    category: CauseCategory.Model,
+    subcategory: CauseSubcategory.WorkDefect,
+    assigner: CauseAssigner.Reviewer,
+  });
+  const end = evaluationEndOf(review.records);
+  assert.deepEqual(end.attributes, {
+    [EvaluationAttribute.Result]: AssessmentResult.CriterionNotMet,
+    [EvaluationAttribute.Stage]: EvaluationStage.Judgement,
+    [EvaluationAttribute.UnmetIds]: ["task", "other"],
+    [EvaluationAttribute.UnmetGrounds]: ["stated", "unstated"],
+    [EvaluationAttribute.ProposalCount]: NO_RELEASES,
+    [EvaluationAttribute.Repaired]: false,
+  });
+  assert.equal(
+    Object.keys(end.attributes).some((name) =>
+      name.startsWith("kanthord.cause."),
+    ),
+    false,
+  );
+});
+
+test("a success result submits no cause", async (t) => {
+  const review = await reviewOf(t, "true");
+  assert.equal(review.assessments[0]?.result, AssessmentResult.Success);
+  assert.equal("cause" in (review.assessments[0] ?? {}), false);
+  assert.equal(
+    evaluationEndOf(review.records).attributes[EvaluationAttribute.Repaired],
+    false,
+  );
+});
+
+test("a failed node-head setup submits the cause with the suspects environment and model", async (t) => {
+  const origin = join(temporary(t), "origin");
+  mkdirSync(origin);
+  const git = simpleGit(origin);
+  await git.raw(["init", "-b", "main"]);
+  writeFileSync(join(origin, "base"), "base");
+  await git.add("base");
+  const identity = [
+    "-c",
+    "user.name=Test",
+    "-c",
+    "user.email=a@example.invalid",
+  ];
+  await git.raw([...identity, "commit", "-m", "base"]);
+  await git.raw(["checkout", "-b", "node"]);
+  writeFileSync(join(origin, "work"), "work");
+  await git.add("work");
+  await git.raw([...identity, "commit", "-m", "work"]);
+  const snapshot = (await git.revparse(["HEAD"])).trim();
+  await git.raw(["checkout", "main"]);
+  const review = await reviewOf(t, "true", undefined, {
+    repository: {
+      ...repositorySetup(),
+      address: origin,
+      environment: {
+        source: EnvironmentSource.Detected,
+        document: { postCreateCommand: "test ! -e work" },
+      },
+    } as unknown as ReturnType<typeof repositorySetup>,
+    snapshot,
+    transport: localTransport,
+  });
+  assert.equal(review.opens(), NO_OPENS);
+  assert.deepEqual(review.assessments[0]?.cause, {
+    category: CauseCategory.Unattributed,
+    assigner: CauseAssigner.Rule,
+    suspects: [CauseCategory.Environment, CauseCategory.Model],
+  });
+  const attributes = evaluationEndOf(review.records).attributes;
+  assert.equal(attributes[EvaluationAttribute.Stage], EvaluationStage.Setup);
 });

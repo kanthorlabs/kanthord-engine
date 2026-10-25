@@ -18,9 +18,17 @@ const AssessmentResult = {
   CriterionNotMet: "criterion-not-met",
   Undetermined: "undetermined",
 } as const;
+export const UnmetGround = {
+  Stated: "stated",
+  Standard: "standard",
+  Unstated: "unstated",
+} as const;
+export const unmetGroundSchema = z.enum(UnmetGround);
+export type UnmetGround = z.infer<typeof unmetGroundSchema>;
 const unmetItemSchema = z.strictObject({
   id: z.string().trim().min(1),
   reason: z.string().trim().min(1),
+  ground: unmetGroundSchema,
 });
 const proposalTextSchema = z.string().trim().min(1);
 const proposalSchema = z.strictObject({
@@ -97,14 +105,17 @@ export async function parseRepaired<T extends z.ZodType>(
   work: WorkPrompt,
   schema: T,
   marker: string = JUDGEMENT_MARKER,
-): Promise<z.output<T> | ReplyRepair> {
-  const reply = parseJudgement(agent.lastText(), schema, marker);
-  if (reply !== null) return reply;
+): Promise<{ reply: z.output<T> | ReplyRepair; repaired: boolean }> {
+  const first = parseJudgement(agent.lastText(), schema, marker);
+  if (first !== null) return { reply: first, repaired: false };
   await agent.instruct(work, repairInstruction(templates, marker));
-  if (agent.budget.exhausted()) return ReplyRepair.BudgetEnd;
-  return (
-    parseJudgement(agent.lastText(), schema, marker) ?? ReplyRepair.Invalid
-  );
+  if (agent.budget.exhausted())
+    return { reply: ReplyRepair.BudgetEnd, repaired: true };
+  return {
+    reply:
+      parseJudgement(agent.lastText(), schema, marker) ?? ReplyRepair.Invalid,
+    repaired: true,
+  };
 }
 
 export function requestedChangesText(

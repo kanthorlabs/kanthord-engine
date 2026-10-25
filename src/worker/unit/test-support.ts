@@ -40,7 +40,9 @@ import {
   type ExecutionSetup,
   type RepositoryTransport,
 } from "../contract.ts";
+import { RecordKind, type TelemetryRecord } from "../../tracking/contract.ts";
 import { ExecutionBudget } from "./budget.ts";
+import { SpanRecorder, type SpanOperation } from "./telemetry.ts";
 import { openNativeAgent } from "./native-agent.ts";
 import { ExecutionRun, type MethodClaim } from "./execution-run.ts";
 import type { MethodClients } from "./method-clients.ts";
@@ -409,4 +411,29 @@ export function recordReleases(
     },
   } as unknown as MethodClients["scheduler"];
   return bodies;
+}
+
+export function recordSpans(
+  h: Awaited<ReturnType<typeof implementFixture>>,
+): TelemetryRecord[] {
+  const records: TelemetryRecord[] = [];
+  (h.run as { spans: SpanRecorder }).spans = new SpanRecorder(
+    h.run.claim,
+    "coder-1",
+    { write: (batch) => records.push(...batch), flush: async () => {} },
+  );
+  return records;
+}
+
+export function spanEnds(
+  records: readonly TelemetryRecord[],
+  operation: SpanOperation,
+) {
+  return records.flatMap((record) =>
+    record.kind === RecordKind.Span &&
+    record.operation === operation &&
+    "end_time" in record
+      ? [record]
+      : [],
+  );
 }

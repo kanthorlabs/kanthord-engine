@@ -478,6 +478,8 @@ No query fields are accepted. The required file supplies the following fields.
   it inserts the job when the node is claimable. At the limit, Mission moves the
   node to `Paused`, the attempt stays open, and no job exists. A release with a
   `stop` writes no outcome and no assessment.
+- The worker computes `stop.cause` with the rule table of the worker. A stop
+  with no `cause` gives `unattributed` with no suspects.
 - A steps execution whose node branch is gone after a recorded push stops with
   `operation_failed` and the code `repository.node_branch.missing`.
 - A steps execution whose conflict turn leaves a conflict marker aborts the
@@ -499,6 +501,9 @@ No query fields are accepted. The required file supplies the following fields.
   exit code from 129 to 192 with no command timeout, or a command that does
   not start. The stop detail holds the exit code, the signal, `timed_out` and
   the command.
+- A gate G commit that fails stops with `operation_failed` and the code
+  `worker.git.commit_failed`. The stop detail holds the redacted git stderr,
+  cut to 300 characters.
 - A worker runs the setup of the environment of each repository binding in
   each checkout and each clone: `updateContentCommand`, then
   `postCreateCommand`. A setup that changes a tracked file fails, and the

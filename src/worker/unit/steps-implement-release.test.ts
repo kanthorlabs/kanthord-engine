@@ -1,4 +1,14 @@
 import assert from "node:assert/strict";
+import {
+  CauseCategory,
+  unattributed,
+  type FailureCause,
+} from "../../kernel/cause.ts";
+
+const PLAN_MODEL_CAUSE = unattributed([
+  CauseCategory.Plan,
+  CauseCategory.Model,
+]);
 import { test } from "node:test";
 import {
   appendFileSync,
@@ -32,6 +42,7 @@ import {
   NO_PROVIDER_CALLS,
   recordDone,
   recordReleases,
+  recordSpans,
   STEPS_KEY,
   task,
   transport,
@@ -100,7 +111,11 @@ test("implement checkpoints budget-ended work and refuses release after a failed
   assert.deepEqual(await runStepsImplement(h), {
     kind: "released",
     furtherWork: true,
-    stop: { reason: "budget_end", code: "turns" },
+    stop: {
+      reason: "budget_end",
+      code: "turns",
+      cause: PLAN_MODEL_CAUSE,
+    },
   });
   assert.ok(released);
   const log = await simpleGit(h.bare).raw([
@@ -119,6 +134,31 @@ test("implement checkpoints budget-ended work and refuses release after a failed
   };
   await assert.rejects(runStepsImplement(other));
   assert.ok(existsSync(other.root));
+});
+
+test("a budget end writes no commit git span and still writes the push git span", async (t) => {
+  const h = await fixture(
+    t,
+    [task("partial", "false")],
+    [
+      fauxAssistantMessage(
+        fauxToolCall("write", { path: "notes", content: "partial" }),
+        { stopReason: "toolUse" },
+      ),
+    ],
+    1,
+  );
+  const records = recordSpans(h);
+  recordReleases(h);
+  await runStepsImplement(h);
+  const starts = records.flatMap((record) =>
+    record.kind === RecordKind.Span &&
+    record.operation === SpanOperation.Git &&
+    "start_time" in record
+      ? [record.attributes?.["kanthord.git.step"]]
+      : [],
+  );
+  assert.deepEqual(starts, [GitStep.Push]);
 });
 
 test("S1 budget-ended task verification releases further work and submits no evidence", async (t) => {
@@ -143,7 +183,11 @@ test("S1 budget-ended task verification releases further work and submits no evi
   assert.deepEqual(await runStepsImplement(h), {
     kind: "released",
     furtherWork: true,
-    stop: { reason: "budget_end", code: "wall_time" },
+    stop: {
+      reason: "budget_end",
+      code: "wall_time",
+      cause: PLAN_MODEL_CAUSE,
+    },
   });
   assert.ok(released);
   assert.equal(evidenced, false);
@@ -172,6 +216,22 @@ const STOP_REASONS = [
   EndReason.AssessmentAbsent,
 ];
 const STOP_CODE = "test.operation.failed";
+const STOP_CAUSES: Readonly<Record<string, FailureCause>> = {
+  [EndReason.OperationFailed]: unattributed([]),
+  [EndReason.JudgementInvalid]: unattributed([
+    CauseCategory.Model,
+    CauseCategory.Prompt,
+  ]),
+  [EndReason.ReportAbsent]: unattributed([
+    CauseCategory.Model,
+    CauseCategory.Prompt,
+  ]),
+  [EndReason.ActionUnsettled]: unattributed([
+    CauseCategory.WorkerAction,
+    CauseCategory.Infrastructure,
+  ]),
+  [EndReason.AssessmentAbsent]: PLAN_MODEL_CAUSE,
+};
 const PARTIAL_WORK = "partial";
 
 function stoppingRunner(reason: EndReason): TaskRunner {
@@ -185,7 +245,7 @@ for (const reason of STOP_REASONS) {
   test(`a stop with the reason ${reason} checkpoints, pushes and releases with the stop`, async (t) => {
     const h = await fixture(t, [task("stopped", "false")], []);
     const bodies = recordReleases(h);
-    const stop = { reason, code: STOP_CODE };
+    const stop = { reason, code: STOP_CODE, cause: STOP_CAUSES[reason] };
     assert.deepEqual(
       await executionBoundary(h.run, () =>
         runStepsImplement(h, stoppingRunner(reason)),
@@ -216,7 +276,11 @@ test("a failed push still releases with the stop and a failed release ends with 
     },
   };
   const bodies = recordReleases(pushed);
-  const stop = { reason: EndReason.OperationFailed, code: STOP_CODE };
+  const stop = {
+    reason: EndReason.OperationFailed,
+    code: STOP_CODE,
+    cause: STOP_CAUSES[EndReason.OperationFailed],
+  };
   assert.deepEqual(
     await executionBoundary(pushed.run, () =>
       runStepsImplement(pushed, stoppingRunner(EndReason.OperationFailed)),
@@ -234,13 +298,14 @@ test("a failed push still releases with the stop and a failed release ends with 
     await executionBoundary(refused.run, () =>
       runStepsImplement(refused, stoppingRunner(EndReason.OperationFailed)),
     ),
-    { kind: "ended", ...stop },
+    { kind: "ended", reason: stop.reason, code: stop.code },
   );
 });
 
 const COMMIT_REFUSAL = "hook refused";
 const COMMIT_DEADLINE_MS = 10000;
 const CHECKPOINT_FAILED = "checkpoint failed";
+const REDACTED_REFUSAL = new RegExp(`${COMMIT_REFUSAL} \\[redacted\\]`);
 const ONE_DROPPED_CHECKPOINT = 1;
 const SECRET_TEXT = new RegExp(STEPS_KEY);
 
@@ -279,7 +344,12 @@ test("a failed commit releases the stop with its redacted cause and logs the dro
   assert.deepEqual(cause, {
     reason: EndReason.OperationFailed,
     code: GIT_COMMIT_FAILED,
+    cause: unattributed([
+      CauseCategory.WorkerAction,
+      CauseCategory.Environment,
+    ]),
   });
+  assert.match(String(detail), REDACTED_REFUSAL);
   assert.doesNotMatch(String(detail), SECRET_TEXT);
   assert.deepEqual(end, { kind: "released", furtherWork: true, stop });
   const dropped = events.mock.calls

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { CauseCategory, unattributed } from "../../kernel/cause.ts";
 import { test } from "node:test";
 import {
   appendFileSync,
@@ -28,8 +29,12 @@ import {
   fauxToolCall,
   implementFixture as fixture,
   recordReleases,
+  recordSpans,
+  spanEnds,
   task,
 } from "./test-support.ts";
+import { SpanStatus } from "../../tracking/contract.ts";
+import { SpanOperation } from "./telemetry.ts";
 
 type Fixture = Awaited<ReturnType<typeof fixture>>;
 
@@ -41,6 +46,7 @@ const REVISION_TEXT = "Revise the task work";
 const REVISED_CONTENT = "base two";
 const SECRET = "secret";
 const MARKER = "release-directory";
+const ONE_SPAN = 1;
 const TAG = "x";
 const CONFIG_KEY = "a.b";
 const BASE_CHANGE = "base change";
@@ -131,6 +137,11 @@ test("a release failure that no revision changes stops with no_progress and neve
     stop: {
       reason: EndReason.NoProgress,
       code: null,
+      cause: unattributed([
+        CauseCategory.Model,
+        CauseCategory.Prompt,
+        CauseCategory.Plan,
+      ]),
       detail: noProgressDetail({
         rule: NoProgressRule.UnchangedRevision,
         count: NO_PROGRESS_LIMIT,
@@ -150,6 +161,11 @@ test("a release failure that no revision changes stops with no_progress and neve
       stop: {
         reason: EndReason.NoProgress,
         code: null,
+        cause: unattributed([
+          CauseCategory.Model,
+          CauseCategory.Prompt,
+          CauseCategory.Plan,
+        ]),
         detail: noProgressDetail({
           rule: NoProgressRule.UnchangedRevision,
           count: NO_PROGRESS_LIMIT,
@@ -165,6 +181,12 @@ test("a release failure that no revision changes stops with no_progress and neve
     },
   ]);
 });
+
+const BUDGET_STOP = {
+  reason: "budget_end",
+  code: "wall_time",
+  cause: unattributed([CauseCategory.Plan, CauseCategory.Model]),
+};
 
 test("a wall deadline during a task verification releases further work", async (t) => {
   const h = await fixture(
@@ -183,11 +205,9 @@ test("a wall deadline during a task verification releases further work", async (
   assert.deepEqual(await runStepsImplement(h), {
     kind: "released",
     furtherWork: true,
-    stop: { reason: "budget_end", code: "wall_time" },
+    stop: BUDGET_STOP,
   });
-  assert.deepEqual(bodies, [
-    { further_work: true, stop: { reason: "budget_end", code: "wall_time" } },
-  ]);
+  assert.deepEqual(bodies, [{ further_work: true, stop: BUDGET_STOP }]);
 });
 
 test("a release failure goes to the owner of the first failed index when the node and a task share one command", async (t) => {
@@ -271,4 +291,43 @@ test("the next prepare removes release clones that a crash left", async (t) => {
   h.input.workspaces.release(key, WorkspaceKind.Node);
   await prepareStepsWorkspace(h.input, h.run);
   assert.equal(existsSync(join(key, RELEASE_DIRECTORY)), false);
+});
+
+test("a passing release gate writes one release gate span with the result passed", async (t) => {
+  const h = await fixture(t, [task("pass", "true")], []);
+  const records = recordSpans(h);
+  assert.deepEqual(await releaseGate(h), { kind: ReleaseGateKind.Passed });
+  const ends = spanEnds(records, SpanOperation.ReleaseGate);
+  assert.equal(ends.length, ONE_SPAN);
+  assert.equal(ends[0]?.status, SpanStatus.Ok);
+  assert.deepEqual(ends[0]?.attributes, {
+    "kanthord.release_gate.result": "passed",
+  });
+});
+
+test("a failed release command writes the result routed with the unit id of its owner", async (t) => {
+  const owner = task("owner", "false");
+  const h = await fixture(t, [owner], []);
+  const records = recordSpans(h);
+  const gate = await releaseGate(h);
+  assert.equal(gate.kind, ReleaseGateKind.Routed);
+  const ends = spanEnds(records, SpanOperation.ReleaseGate);
+  assert.equal(ends.length, ONE_SPAN);
+  assert.equal(ends[0]?.status, SpanStatus.Ok);
+  assert.deepEqual(ends[0]?.attributes, {
+    "kanthord.release_gate.result": "routed",
+    "kanthord.release_gate.unit_id": owner.id,
+  });
+});
+
+test("a budget end writes the release gate result budget_end", async (t) => {
+  const h = await fixture(t, [task("late", "true")], []);
+  const records = recordSpans(h);
+  h.agent.budget.exhausted = () => true;
+  assert.deepEqual(await releaseGate(h), { kind: ReleaseGateKind.BudgetEnd });
+  const ends = spanEnds(records, SpanOperation.ReleaseGate);
+  assert.equal(ends.length, ONE_SPAN);
+  assert.deepEqual(ends[0]?.attributes, {
+    "kanthord.release_gate.result": "budget_end",
+  });
 });
