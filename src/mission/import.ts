@@ -358,10 +358,32 @@ function resolveReference(
   return target.key;
 }
 
+function pinnedBindingOf(
+  tx: Transaction,
+  bindings: MissionBindings,
+  current: NodeRow | null,
+): (name: string, resourceIdentity: string) => string | null {
+  if (current === null) return () => null;
+  const row = readCurrentRevision(tx, current.id);
+  assert.ok(row, "A current node has a revision.");
+  const pinned = revisionFromRow(tx, row).content.bindings.map((id) => {
+    const revision = bindings.getBindingRevision(tx, id);
+    assert.ok(revision, "A pinned binding has a revision.");
+    return revision;
+  });
+  return (name, resourceIdentity) =>
+    pinned.find(
+      (revision) =>
+        revision.name === name &&
+        revision.resource_identity === resourceIdentity,
+    )?.binding_id ?? null;
+}
+
 function resolveBindings(
   tx: Transaction,
   mission: Mission,
   entry: NormalizedEntry,
+  current: NodeRow | null,
   bindings: MissionBindings,
   environments: MissionEnvironments,
   violations: Violation[],
@@ -396,7 +418,12 @@ function resolveBindings(
     );
     return named;
   });
-  return (resolved ?? []).map((binding) => binding.binding_id);
+  const pinnedBinding = pinnedBindingOf(tx, bindings, current);
+  return (resolved ?? []).map(
+    (binding, index) =>
+      pinnedBinding(entry.bindings[index]!, binding.resource_identity) ??
+      binding.binding_id,
+  );
 }
 
 function checkVerificationCoverage(result: ResolvedImport): void {
@@ -640,23 +667,25 @@ export function resolveImportSet(
   };
   const seen = new Set<string>();
   for (const entry of entries) {
+    const identity = resolveIdentity(
+      tx,
+      mission,
+      entry,
+      seen,
+      result.violations,
+      currentTasks,
+    );
     result.resolved_entries.push({
       entry,
       key: entry.id ?? `${TEMPORARY_KEY_PREFIX}${entry.filename}`,
-      ...resolveIdentity(
-        tx,
-        mission,
-        entry,
-        seen,
-        result.violations,
-        currentTasks,
-      ),
+      ...identity,
       owner_id: null,
       depends_on: new Set(),
       binding_ids: resolveBindings(
         tx,
         mission,
         entry,
+        identity.current,
         bindings,
         environments,
         result.violations,

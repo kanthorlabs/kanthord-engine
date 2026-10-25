@@ -322,6 +322,7 @@ The execution reads that dependency at the revision that its current outcome pin
 - Apply checks `preview_digest` and `confirmed_retirements` against that exact set at commit, then returns `ImportResult`.
 - The CLI reports the map. It writes no assigned identity back to a plan file and asks no interactive confirmation.
 - An import covers the whole mission: an absent ID creates, a known ID updates, and omission retires.
+- The import compares the bindings of a node by binding name, so a new binding revision changes no node. The node keeps its pinned binding revision, and `node rebind` moves it. A name that now names a binding with another resource identity is a change.
 - Unknown IDs, duplicate IDs, foreign-mission IDs, retired IDs, duplicate plan file names and unresolved `node` or dependency names fail.
 - Every `node` of a task file and every `depends_on` names a plan file inside the import set, never a path or a boundary reference.
 - A task file names an `implement` node in `node`. A node file names its `intent`, its `depends_on` list, its `tags` list and an optional `commit_type`.
