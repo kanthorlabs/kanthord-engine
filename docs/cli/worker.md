@@ -258,6 +258,7 @@ kanthord worker [--endpoint <url>] handover <execution-id> [--token <jwt>] [--id
 
 The command calls `POST /api/worker/handover`, operation `worker.handover`, with `client` access and the body `{ execution_id }`, which names the execution that the invocation chain proves. It is a secret mutation with `[M]`: a repeat of its key answers 409 without the envelope, and a lost answer takes a new key.
 The operation is implemented, requires a live execution and returns the strict AES-256-GCM envelope `{ nonce, ciphertext }` as canonical base64. It has a 30-second timeout and a 1 KiB body limit. Registration and execution proof precede replay lookup; the handler repeats execution liveness in its one write transaction before authorization, pinning and encryption.
+A server placement handover of a credential revision with an [OAuth refresh](./llm.md#oauth-refresh) in flight waits until the refresh ends, and then hands over the new value. A wait longer than the 30-second timeout answers 504 `gateway.invocation.timeout`.
 The command prints only `{ "received": true, "idempotency_key": "<key>" }` and never prints the envelope.
 The [credential handover](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/worker-service.impl.md#the-credential-handover) rules the application call after a claim and before inference.
 The [Custody handover](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/custody.impl.md#the-credential-handover) rules the envelope and credential report.

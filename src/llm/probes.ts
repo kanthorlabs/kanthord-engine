@@ -36,10 +36,9 @@ import {
 } from "../kernel/probe.ts";
 import { Connection, type ProviderCheckAnswer } from "./contract.ts";
 import {
+  frozenStore,
   insideRefreshWindow,
   refreshWatch,
-  seededStore,
-  storedSecrets,
 } from "./refresh-watch.ts";
 
 export const GITHUB_COPILOT_TOKEN_URL =
@@ -301,6 +300,7 @@ async function modelCallCheck(
 ): Promise<ProviderCheckAnswer> {
   const { providerId, modelId, credential, options, call, refreshStore } =
     check;
+  const watch = refreshWatch();
   try {
     const { signal } = context;
     if (signal.aborted) return UNREACHABLE;
@@ -309,8 +309,8 @@ async function modelCallCheck(
       observe?.("check model not found", ResourceFailureReason.Unclassified);
       return INVALID_RESPONSE;
     }
-    const watch = refreshWatch(
-      refreshStore ?? (await seededStore(providerId, credential)),
+    const credentials = watch.wrap(
+      refreshStore ?? frozenStore(providerId, credential),
     );
     let responseStatus: number | null = null;
     const reply = await call(
@@ -331,7 +331,7 @@ async function modelCallCheck(
           responseStatus = status;
         },
       },
-      watch.store,
+      credentials,
     );
     if (signal.aborted) return UNREACHABLE;
     if (watch.refreshFailed()) {
@@ -341,10 +341,7 @@ async function modelCallCheck(
       );
       return UNAUTHORIZED;
     }
-    const secrets = [
-      ...check.secrets,
-      ...(await storedSecrets(watch.store, providerId)),
-    ];
+    const secrets = [...check.secrets, ...watch.secrets()];
     if (!MODEL_CALL_FAILURES.includes(reply.stopReason))
       return OK_WITHOUT_MODELS;
     const status = refusedStatus(responseStatus, reply.errorMessage);
@@ -357,7 +354,10 @@ async function modelCallCheck(
     if (status === null) return UNREACHABLE;
     return { connection: connectionOfStatus(status), models: null };
   } catch (error) {
-    observe?.(thrownReason(error, check.secrets), thrownFailureReason(context));
+    observe?.(
+      thrownReason(error, [...check.secrets, ...watch.secrets()]),
+      thrownFailureReason(context),
+    );
     return UNREACHABLE;
   }
 }

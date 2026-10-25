@@ -2,7 +2,12 @@ import assert from "node:assert/strict";
 import { createServer, type IncomingMessage } from "node:http";
 import type { AddressInfo } from "node:net";
 import { test, type TestContext } from "node:test";
-import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai";
+import {
+  fauxAssistantMessage,
+  fauxToolCall,
+  type CredentialStore,
+  type OAuthAuth,
+} from "@earendil-works/pi-ai";
 import { loadPi } from "../agent/pi.ts";
 import { background } from "../kernel/context.ts";
 import { OperationError } from "../kernel/errors.ts";
@@ -450,4 +455,101 @@ test("an OAuth access token inside the pi-ai refresh window answers unauthorized
     message: MODEL_CHECK_TOKEN_EXPIRED,
   });
   assert.equal(scripted.calls.length, NO_CALLS);
+});
+
+const PI_REFRESH_WINDOW_MS = 300000;
+const OUTSIDE_WINDOW_MARGIN_MS = 1000;
+const WINDOW_CROSSING_MS = 2000;
+const ROTATED_ACCESS = "rotated-access-q7";
+const ROTATED_REFRESH = "rotated-refresh-q7";
+
+function countingOAuth(counter: { refreshes: number }): OAuthAuth {
+  return {
+    name: "scripted OAuth",
+    login: async () => {
+      throw new Error("UNEXPECTED_LOGIN");
+    },
+    refresh: async () => {
+      counter.refreshes += 1;
+      return {
+        type: "oauth",
+        refresh: ROTATED_REFRESH,
+        access: ROTATED_ACCESS,
+        expires: Date.now() + SUBSCRIPTION_LIFETIME_MS,
+      };
+    },
+    toAuth: async (credential) => ({ apiKey: credential.access }),
+  };
+}
+
+test("a model check without a refresh store never refreshes when the token enters the pi-ai window between the two model calls", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: Date.now() });
+  const counter = { refreshes: 0 };
+  const scripted = scriptedModelRuntime(
+    await loadPi(),
+    [
+      () => {
+        t.mock.timers.tick(WINDOW_CROSSING_MS);
+        return toolCall();
+      },
+      finalAnswer(),
+    ],
+    { providerId: Platform.OpenAICodex, oauth: countingOAuth(counter) },
+  );
+  const answer = await checkModel(
+    input({
+      platform: Platform.OpenAICodex,
+      secret: {
+        refresh: "stored-refresh",
+        access: "stored-access",
+        expires: Date.now() + PI_REFRESH_WINDOW_MS + OUTSIDE_WINDOW_MARGIN_MS,
+      },
+    }),
+    scripted.module,
+    background,
+  );
+  assert.deepEqual(answer, { result: ModelCheckResult.Ok, message: null });
+  assert.equal(scripted.calls.length, TWO_CALLS);
+  assert.equal(counter.refreshes, NO_CALLS);
+});
+
+function droppingStore(providerId: string): CredentialStore {
+  const stored = {
+    type: "oauth" as const,
+    refresh: "stored-refresh",
+    access: "stored-access",
+    expires: 1,
+  };
+  return {
+    read: async (id) => (id === providerId ? stored : undefined),
+    list: async () => [{ providerId, type: "oauth" }],
+    delete: async () => {},
+    modify: async (_id, fn) => (await fn(stored)) ?? stored,
+  };
+}
+
+test("a model check redacts the refreshed tokens from the provider error, even when the store drops the write", async () => {
+  const counter = { refreshes: 0 };
+  const scripted = scriptedModelRuntime(
+    await loadPi(),
+    [providerError(`401: denied ${ROTATED_ACCESS} ${ROTATED_REFRESH}`)],
+    { providerId: Platform.OpenAICodex, oauth: countingOAuth(counter) },
+  );
+  const answer = await checkModel(
+    input({
+      platform: Platform.OpenAICodex,
+      secret: {
+        refresh: "stored-refresh",
+        access: "stored-access",
+        expires: 1,
+      },
+    }),
+    scripted.module,
+    background,
+    droppingStore(Platform.OpenAICodex),
+  );
+  assert.equal(counter.refreshes, ONE_CALL);
+  assert.equal(answer.result, ModelCheckResult.Unauthorized);
+  assert.ok(!answer.message?.includes(ROTATED_ACCESS), answer.message ?? "");
+  assert.ok(!answer.message?.includes(ROTATED_REFRESH), answer.message ?? "");
 });

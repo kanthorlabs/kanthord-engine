@@ -487,10 +487,14 @@ function oauthPlatform(calls: RefreshProbeCall[]): CredentialPlatform {
   };
 }
 
-function oauthFixture(t: TestContext, pinning: string[] = []) {
+function oauthFixture(
+  t: TestContext,
+  pinning: string[] = [],
+  logger: pino.Logger = pino({ enabled: false }),
+) {
   const calls: RefreshProbeCall[] = [];
   const platform = oauthPlatform(calls);
-  const owned = fixture(t, pino({ enabled: false }), {
+  const owned = fixture(t, logger, {
     platforms: { [OAUTH_PLATFORM]: platform },
     pinning,
   });
@@ -649,5 +653,100 @@ test("the check material of an OAuth record carries a refresh store that writes 
       plain.component.checkMaterial(tx, plain.set, PROBED_NAME),
     )?.refreshStore,
     null,
+  );
+});
+
+const STALE_REFRESH_MESSAGE = "credential refresh stale";
+const OTHER_OAUTH = {
+  refresh: "test_private-other-refresh",
+  access: "test_private-other-access",
+  expires: 4102444800001,
+};
+
+test("two refresh stores of one record serialize modify, so the second sees the value of the first refresh and refreshes nothing", async (t) => {
+  const f = oauthFixture(t);
+  const refreshStore = () =>
+    f.store.transaction((tx) =>
+      f.component.checkMaterial(tx, f.set, OAUTH_NAME),
+    )!.refreshStore!;
+  const first = refreshStore();
+  const second = refreshStore();
+  let release = () => {};
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const seen: unknown[] = [];
+  const refreshing = first.modify(OAUTH_PROVIDER_ID, async (current) => {
+    seen.push(current);
+    await gate;
+    return { type: SecretShape.OAuth, ...REFRESHED_OAUTH };
+  });
+  const waiting = second.modify(OAUTH_PROVIDER_ID, async (current) => {
+    seen.push(current);
+    return undefined;
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(seen.length, ONE_CALL);
+  release();
+  await Promise.all([refreshing, waiting]);
+  assert.deepEqual(seen, [
+    { type: SecretShape.OAuth, ...EXPIRED_OAUTH },
+    { type: SecretShape.OAuth, ...REFRESHED_OAUTH },
+  ]);
+  assert.deepEqual(f.stored(), [
+    { id: f.id, revision: FIRST_REVISION, secret: REFRESHED_OAUTH },
+  ]);
+});
+
+test("a pin that starts after the check and before modify refuses the write and keeps the row", async (t) => {
+  const pinning: string[] = [];
+  const f = oauthFixture(t, pinning);
+  const check = f.store.transaction((tx) =>
+    f.component.resourceCheck(tx, f.set, OAUTH_NAME),
+  );
+  const material = f.store.transaction((tx) =>
+    f.component.checkMaterial(tx, f.set, OAUTH_NAME),
+  );
+  pinning.push(LIVE_EXECUTION);
+  assert.equal(await check(background), ResourceStatus.Unknown);
+  await assert.rejects(
+    material!.refreshStore!.modify(OAUTH_PROVIDER_ID, async () => ({
+      type: SecretShape.OAuth,
+      ...REFRESHED_OAUTH,
+    })),
+    /A live execution holds the credential revision/,
+  );
+  assert.deepEqual(f.stored(), [
+    { id: f.id, revision: FIRST_REVISION, secret: EXPIRED_OAUTH },
+  ]);
+});
+
+test("a refresh write whose stored value changed during the refresh writes nothing and logs credential refresh stale", async (t) => {
+  const lines: string[] = [];
+  const f = oauthFixture(t, [], redactingLogger(lines));
+  const material = f.store.transaction((tx) =>
+    f.component.checkMaterial(tx, f.set, OAUTH_NAME),
+  );
+  await material!.refreshStore!.modify(OAUTH_PROVIDER_ID, async () => {
+    const { nonce, ciphertext } = encrypt(
+      ENVELOPE_KEY,
+      f.id,
+      OAUTH_PLATFORM,
+      OTHER_OAUTH,
+    );
+    f.store.database
+      .prepare("UPDATE credential SET nonce = ?, ciphertext = ? WHERE id = ?")
+      .run(nonce, ciphertext, f.id);
+    return { type: SecretShape.OAuth, ...REFRESHED_OAUTH };
+  });
+  assert.deepEqual(f.stored(), [
+    { id: f.id, revision: FIRST_REVISION, secret: OTHER_OAUTH },
+  ]);
+  const records = lines.map((line) => JSON.parse(line));
+  assert.ok(
+    records.some(
+      (record) =>
+        record.msg === STALE_REFRESH_MESSAGE && record.credential_id === f.id,
+    ),
   );
 });

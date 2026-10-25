@@ -2,7 +2,10 @@ import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { test, type TestContext } from "node:test";
-import { InMemoryCredentialStore } from "@earendil-works/pi-ai";
+import {
+  InMemoryCredentialStore,
+  type CredentialStore,
+} from "@earendil-works/pi-ai";
 import { SecretShape } from "../custody/contract.ts";
 import { background, CancellationContext } from "../kernel/context.ts";
 import { ResourceFailureReason, ResourceStatus } from "../kernel/health.ts";
@@ -1038,6 +1041,91 @@ test("an OAuth check without a refresh store answers unauthorized without a call
     assert.equal(calls, NO_CALLS);
     assert.deepEqual(observed, [
       [ACCESS_TOKEN_EXPIRED_REASON, ResourceFailureReason.Unauthorized],
+    ]);
+  }
+});
+
+function droppingStore(providerId: string, expires: number): CredentialStore {
+  const stored = { type: "oauth" as const, ...credentialOf(expires) };
+  return {
+    read: async (id) => (id === providerId ? stored : undefined),
+    list: async () => [{ providerId, type: "oauth" }],
+    delete: async () => {},
+    modify: async (_id, fn) => (await fn(stored)) ?? stored,
+  };
+}
+
+const ROTATED_ACCESS = "rotated-access-q7";
+const ROTATED_REFRESH = "rotated-refresh-q7";
+const refreshedOAuth = () => ({
+  type: "oauth" as const,
+  refresh: ROTATED_REFRESH,
+  access: ROTATED_ACCESS,
+  expires: Date.now() + LONG_FUTURE_MS,
+});
+
+test("an OAuth check redacts the refreshed tokens from a provider error and from a thrown error, even when the store drops the write", async () => {
+  for (const [check, providerId] of OAUTH_CHECKS) {
+    const reasons: string[] = [];
+    const observe = (reason: string) => void reasons.push(reason);
+    const expires = Date.now() - FUTURE_MS;
+    const leaking: ModelCall = async (model, modelContext, options, store) => {
+      await store.modify(model.provider, async () => refreshedOAuth());
+      return reply("error", `401: denied ${ROTATED_ACCESS} ${ROTATED_REFRESH}`)(
+        model,
+        modelContext,
+        options,
+        store,
+      );
+    };
+    const throwing: ModelCall = async (_model, _context, _options, store) => {
+      await store.modify(providerId, async () => refreshedOAuth());
+      throw new Error(`failed with ${ROTATED_ACCESS} ${ROTATED_REFRESH}`);
+    };
+    for (const call of [leaking, throwing])
+      await check(
+        credentialOf(expires),
+        background,
+        call,
+        observe,
+        droppingStore(providerId, expires),
+      );
+    assert.equal(reasons.length, TWO_CALLS);
+    for (const reason of reasons) {
+      assert.ok(!reason.includes(ROTATED_ACCESS), reason);
+      assert.ok(!reason.includes(ROTATED_REFRESH), reason);
+    }
+  }
+});
+
+test("an OAuth check without a refresh store gives pi-ai a store whose modify never runs the refresh", async () => {
+  for (const [check, providerId] of OAUTH_CHECKS) {
+    const future = Date.now() + LONG_FUTURE_MS;
+    const seen: unknown[] = [];
+    let refreshes = NO_CALLS;
+    const refreshing: ModelCall = async (
+      model,
+      modelContext,
+      options,
+      store,
+    ) => {
+      seen.push(
+        await store.modify(providerId, async () => {
+          refreshes += ONE_CALL;
+          return refreshedOAuth();
+        }),
+      );
+      seen.push(await store.read(providerId));
+      return reply("stop")(model, modelContext, options, store);
+    };
+    assert.deepEqual(
+      await check(credentialOf(future), background, refreshing),
+      { connection: Connection.Ok, models: null },
+    );
+    assert.equal(refreshes, NO_CALLS);
+    assert.deepEqual(seen, [
+      { type: "oauth", ...credentialOf(future) },
+      { type: "oauth", ...credentialOf(future) },
     ]);
   }
 });

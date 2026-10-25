@@ -339,7 +339,7 @@ Each agent provider has a report-only [resource healthcheck](https://github.com/
 The check calls the [LLM provider check](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/llm.impl.md#the-llm-provider) of its credential, groups calls by credential and attributes each result.
 A credential whose platform has no LLM provider reports `unknown`.
 This check belongs to neither the liveness answer nor the claim path and changes no registration healthcheck.
-No check refreshes OAuth. An expired `openai-codex` or `anthropic-subscription` access token reports `unhealthy`.
+The check refreshes an `openai-codex` or `anthropic-subscription` access token by the [OAuth refresh](./llm.md#oauth-refresh) of the LLM component.
 The human [provider check](./llm.md#provider-check) belongs to the LLM component.
 
 ## Error codes

@@ -229,15 +229,15 @@ HTTP `200` answers `{ status, capability, failure_reason }`, the health entry of
 
 The failure reasons of the answer:
 
-| Value               | Cause                                                                                                                                    |
-| ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| `unauthorized`      | The provider answers HTTP `401`, the [OAuth refresh](#oauth-refresh) fails, or an access token that the check cannot refresh is expired. |
-| `forbidden`         | The provider answers HTTP `403`.                                                                                                         |
-| `rate_limited`      | The provider answers HTTP `429`.                                                                                                         |
-| `invalid_response`  | The provider answers another HTTP status, or a model list that the check cannot read.                                                    |
-| `unreachable`       | The request fails before an HTTP answer, or a failed model call carries no HTTP status.                                                  |
-| `deadline_exceeded` | The check exceeds its 10 s deadline. Check again.                                                                                        |
-| `unclassified`      | Any other failure.                                                                                                                       |
+| Value               | Cause                                                                                                                                                  |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `unauthorized`      | The provider answers HTTP `401`, the [OAuth refresh](#oauth-refresh) fails, or an access token that the check cannot refresh expires within 5 minutes. |
+| `forbidden`         | The provider answers HTTP `403`.                                                                                                                       |
+| `rate_limited`      | The provider answers HTTP `429`.                                                                                                                       |
+| `invalid_response`  | The provider answers another HTTP status, or a model list that the check cannot read.                                                                  |
+| `unreachable`       | The request fails before an HTTP answer, or a failed model call carries no HTTP status.                                                                |
+| `deadline_exceeded` | The check exceeds its 10 s deadline. Check again.                                                                                                      |
+| `unclassified`      | Any other failure.                                                                                                                                     |
 
 A platform with `verifiable: false` or with the secret shape `oauth` answers `400 credential.check.unsupported`.
 A platform of another component answers `400 credential.platform.unsupported`.
@@ -428,7 +428,7 @@ Each call has a 10 s deadline.
 HTTP `200` answers `{ connection, models }`:
 
 - `connection` is `ok`, `unauthorized`, `unreachable` or `invalid_response`.
-- `ok`: the remote answers. `unauthorized`: the remote answers 401 or 403, the OAuth refresh fails, or an `openai-codex` or `anthropic-subscription` access token that the check cannot refresh is expired.
+- `ok`: the remote answers. `unauthorized`: the remote answers 401 or 403, the OAuth refresh fails, or an `openai-codex` or `anthropic-subscription` access token that the check cannot refresh expires within 5 minutes.
 - `unreachable`: a network failure or the deadline prevents the answer.
 - `invalid_response`: every other answer.
 - `models` is an array of `{ id, owned_by, created }` for `openai-compatible` and `openai`, which read the OpenAI list shape of `GET /models`. `owned_by` and `created` are `null` when the remote leaves them out. Every other platform answers `models: null`.
@@ -525,7 +525,12 @@ The health report, `verify`, `provider check` and `model check` run on the `serv
 - pi-ai refreshes the access token with the stored refresh token when the token expires within 5 minutes. Then the model call uses the new access token.
 - Custody writes the refreshed value in place at the same revision, by the rule of a [refresh report](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/custody.impl.md#the-credential-handover). The refresh adds no revision.
 - When a live execution pins the revision, the check does not refresh. An access token that expires within 5 minutes then answers `unauthorized` with no remote call.
-- A failed refresh, for example a revoked refresh token, answers `unauthorized`. The stored value does not change, and the server log records the reason `access token refresh failed`.
+- A failed refresh, for example a revoked refresh token, answers `unauthorized`. The stored value does not change.
+- The server log records the reason `access token refresh failed` for the health report, `verify` and `provider check`. The `model check` log record `model check failed` holds the reason `The access token refresh failed.`
+- Custody serializes the refreshes of one revision on the server. A second check waits for the first refresh and then uses its new access token.
+- A server placement handover of a revision with a refresh in flight waits until the refresh ends. A wait longer than the 30 s handover timeout answers 504 `gateway.invocation.timeout`.
+- Custody refuses the write of a refreshed value when a live execution pins the revision at the write. Then the health report and `verify` answer `unknown` with `unreachable`, `provider check` answers `unreachable`, and `model check` answers `unavailable`. The stored value does not change.
+- A check without a refresh store never refreshes, also when the token enters the 5-minute window during the check.
 - The check of a worker instance copy never refreshes. An access token that expires within 5 minutes answers `unauthorized` with no remote call.
 - The `github-copilot` check sends the stored GitHub token. It refreshes nothing.
 

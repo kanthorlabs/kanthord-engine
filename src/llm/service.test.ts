@@ -3062,3 +3062,59 @@ test("the model check of an anthropic-subscription record answers unauthorized a
     secret: STORED_OAUTH,
   });
 });
+
+const TOKEN_ENDPOINT_DELAY_MS = 20;
+
+test("two concurrent checks of one expired anthropic-subscription record make one token-endpoint call and both use the rotated token", async (t) => {
+  const f = fixture();
+  t.after(() => f.store.close());
+  const id = insertSubscription(f);
+  const requests: { url: string; authorization: string | null }[] = [];
+  t.mock.method(
+    globalThis,
+    "fetch",
+    async (url: unknown, init?: RequestInit) => {
+      requests.push({
+        url: String(url),
+        authorization: new Headers(init?.headers).get("authorization"),
+      });
+      if (String(url) === SUBSCRIPTION_TOKEN_URL) {
+        await new Promise((resolve) =>
+          setTimeout(resolve, TOKEN_ENDPOINT_DELAY_MS),
+        );
+        return Response.json({
+          access_token: REFRESHED_SUBSCRIPTION_ACCESS,
+          refresh_token: REFRESHED_SUBSCRIPTION_REFRESH,
+          expires_in: SUBSCRIPTION_EXPIRES_IN_S,
+        });
+      }
+      return Response.json(
+        { type: "error" },
+        { status: HttpStatus.Unauthorized },
+      );
+    },
+  );
+  const [entry] = f.store.transaction((tx) =>
+    f.component.resourceInventory(tx),
+  );
+  await Promise.all([
+    credentialVerify(f, SUBSCRIPTION_NAME),
+    entry!.check(background),
+  ]);
+  const tokenCalls = requests.filter(
+    ({ url }) => url === SUBSCRIPTION_TOKEN_URL,
+  );
+  const modelCalls = requests.filter(
+    ({ url }) => url !== SUBSCRIPTION_TOKEN_URL,
+  );
+  assert.equal(tokenCalls.length, ONE_REFRESH_CALL);
+  assert.deepEqual(
+    modelCalls.map(({ authorization }) => authorization),
+    [
+      `Bearer ${REFRESHED_SUBSCRIPTION_ACCESS}`,
+      `Bearer ${REFRESHED_SUBSCRIPTION_ACCESS}`,
+    ],
+  );
+  const stored = storedSubscription(f, id);
+  assert.equal(stored.secret.refresh, REFRESHED_SUBSCRIPTION_REFRESH);
+});

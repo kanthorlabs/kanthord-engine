@@ -1,11 +1,15 @@
 import assert from "node:assert/strict";
 import { COOLDOWN_DEFAULTS } from "../agent/config.ts";
-import { SERVER_HOLDER } from "../custody/contract.ts";
+import {
+  CredentialRefreshInFlight,
+  SERVER_HOLDER,
+} from "../custody/contract.ts";
 import { test, type TestContext } from "node:test";
 import pino from "pino";
 import { WorkerService, type Dependencies } from "./service.ts";
 import { ActionPerformer } from "./action-performer.ts";
 import {
+  HANDOVER_TIMEOUT_MS,
   workerOperations,
   ACTION_REQUEST_TOOL_NAME,
   WorkerErrorCode,
@@ -1302,7 +1306,7 @@ function refuses(
   });
 }
 
-test("handover handlers pass the proven execution and one transactional clock reading", (t) => {
+test("handover handlers pass the proven execution and one transactional clock reading", async (t) => {
   const execution = {
     executionId: createIdentity("execution"),
     projectId: createIdentity("project"),
@@ -1406,7 +1410,7 @@ test("handover handlers pass the proven execution and one transactional clock re
   const caller = { ...f.caller, identity, execution };
   const body = { execution_id: createIdentity("execution"), ...envelope };
   assert.deepEqual(
-    f.registry
+    await f.registry
       .get(workerOperations.handover.id)
       .handler({ params: {}, query: {}, body }, caller),
     envelope,
@@ -2282,4 +2286,92 @@ test("environmentReady restarts no slot that is already draining", (t) => {
   f.worker.environmentReady(POOL_PROJECT, READY_ENVIRONMENT, READY_TAG);
   f.worker.environmentReady(POOL_PROJECT, READY_ENVIRONMENT, READY_TAG);
   assert.equal(f.host.restarted.length, POOL_TWO_STARTS);
+});
+
+const GATEWAY_TIMEOUT_CODE = "gateway.invocation.timeout";
+const FIRST_HANDOVER_ATTEMPT = 1;
+const TWO_HANDOVER_ATTEMPTS = 2;
+
+function refreshingHandoverFixture(
+  t: TestContext,
+  handover: () => { nonce: string; ciphertext: string },
+) {
+  const execution = {
+    executionId: createIdentity("execution"),
+    projectId: createIdentity("project"),
+    nodeId: createIdentity("node"),
+    attempt: 1,
+    pinnedRevision: 1,
+    nodeBranch: "kanthord/node_01ARZ3NDEKTSV4RRFFQ69G5FAA",
+    runtimeIdentity: createIdentity("worker_registration"),
+    workerBindingId: createIdentity("binding"),
+  };
+  const identity = testMachineIdentity(
+    {
+      clientId: createIdentity("client_identity"),
+      name: "machine",
+      projectId: execution.projectId,
+      resourceIdentity: "worker:kanthord:general",
+      issuedAt: 0,
+    },
+    "jti",
+    execution.runtimeIdentity,
+  );
+  const f = enablementFixture(t, {
+    repositoryBindingIdsOf: () => [],
+    workerBindingRowOf: () => null,
+    custodyHandover: {
+      ...fakeCollaborations.custodyHandover,
+      handover,
+    },
+  });
+  const caller = { ...f.caller, identity, execution };
+  const body = { execution_id: execution.executionId };
+  return () =>
+    f.registry
+      .get(workerOperations.handover.id)
+      .handler({ params: {}, query: {}, body }, caller);
+}
+
+test("a handover that meets an in-flight credential refresh waits for the refresh to settle and then answers the envelope", async (t) => {
+  const envelope = { nonce: "nonce", ciphertext: "ciphertext" };
+  let release = () => {};
+  const settled = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let attempts = 0;
+  const invoke = refreshingHandoverFixture(t, () => {
+    attempts++;
+    if (attempts === FIRST_HANDOVER_ATTEMPT)
+      throw new CredentialRefreshInFlight(settled);
+    return envelope;
+  });
+  const answer = invoke();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(attempts, FIRST_HANDOVER_ATTEMPT);
+  release();
+  assert.deepEqual(await answer, envelope);
+  assert.equal(attempts, TWO_HANDOVER_ATTEMPTS);
+});
+
+test("a handover whose credential refresh outlasts the handover deadline answers 504 gateway.invocation.timeout", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
+  let attempts = 0;
+  const invoke = refreshingHandoverFixture(t, () => {
+    attempts++;
+    throw new CredentialRefreshInFlight(new Promise<void>(() => {}));
+  });
+  const answer = invoke();
+  await new Promise((resolve) => setImmediate(resolve));
+  t.mock.timers.tick(HANDOVER_TIMEOUT_MS);
+  await assert.rejects(
+    async () => {
+      await answer;
+    },
+    (error: unknown) =>
+      error instanceof OperationError &&
+      error.status === HttpStatus.GatewayTimeout &&
+      error.code === GATEWAY_TIMEOUT_CODE,
+  );
+  assert.equal(attempts, FIRST_HANDOVER_ATTEMPT);
 });

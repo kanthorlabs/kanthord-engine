@@ -611,6 +611,16 @@ export const secretSchemas: Readonly<Record<SecretShape, z.ZodType>> = {
   [SecretShape.SshKey]: sshKeySecretSchema,
 };
 
+export class CredentialRefreshInFlight extends Error {
+  readonly settled: Promise<void>;
+
+  constructor(settled: Promise<void>) {
+    super("A refresh of the credential revision is in flight.");
+    this.name = "CredentialRefreshInFlight";
+    this.settled = settled;
+  }
+}
+
 export type PlatformProbe = (
   secret: unknown,
   metadata: unknown,

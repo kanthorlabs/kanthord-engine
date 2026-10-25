@@ -39,6 +39,7 @@ import {
 } from "../kernel/service.ts";
 import type { Store, Transaction } from "../kernel/store.ts";
 import {
+  CredentialRefreshInFlight,
   CREDENTIAL_CHECK_TIMEOUT_MS,
   LIST_LIMIT_DEFAULT,
   RevisionChange,
@@ -566,6 +567,7 @@ export class CustodyComponent implements Service, CredentialRecords {
   private readonly instanceKeys: InstanceKeys;
   private readonly bindingsListingInstance: BindingsListingInstanceFn;
   private readonly instanceCopyRefreshed: (holder: string) => void;
+  private readonly refreshes = new Map<string, Promise<void>>();
 
   constructor(dependencies: Dependencies) {
     this.executions = dependencies.executions;
@@ -1013,7 +1015,7 @@ export class CustodyComponent implements Service, CredentialRecords {
       throw new ExecutionStoreError(
         "A live execution holds the credential revision.",
       );
-    applyReport(
+    const written = applyReport(
       tx,
       this.envelopeKey,
       {
@@ -1024,6 +1026,36 @@ export class CustodyComponent implements Service, CredentialRecords {
       this.platforms,
       this.instanceKeys,
     );
+    if (!written)
+      this.logger.info(
+        { credential_id: credentialId },
+        "credential refresh stale",
+      );
+  }
+
+  private serializedRefresh<T>(
+    credentialId: string,
+    operation: () => Promise<T>,
+  ): Promise<T> {
+    const previous = this.refreshes.get(credentialId) ?? Promise.resolve();
+    const result = previous.then(operation);
+    const settled = result.then(
+      () => undefined,
+      () => undefined,
+    );
+    this.refreshes.set(credentialId, settled);
+    void settled.then(() => {
+      if (this.refreshes.get(credentialId) === settled)
+        this.refreshes.delete(credentialId);
+    });
+    return result;
+  }
+
+  private refuseRefreshing(materials: readonly Material[]): void {
+    for (const material of materials) {
+      const settled = this.refreshes.get(material.credential_id);
+      if (settled) throw new CredentialRefreshInFlight(settled);
+    }
   }
 
   private refreshStoreOf(
@@ -1052,6 +1084,7 @@ export class CustodyComponent implements Service, CredentialRecords {
         this.store.transaction((tx) =>
           this.replaceServerCopy(tx, row.id, current, next),
         ),
+      serialize: (operation) => this.serializedRefresh(row.id, operation),
     });
   }
 
@@ -1106,6 +1139,11 @@ export class CustodyComponent implements Service, CredentialRecords {
         }),
       replace: (current, next) =>
         this.store.transaction((tx) => replace(tx, current, next)),
+      serialize: (operation) =>
+        this.serializedRefresh(
+          this.store.transaction((tx) => this.workbenchRow(tx, grant(tx)).id),
+          operation,
+        ),
     });
   }
 
@@ -1129,6 +1167,7 @@ export class CustodyComponent implements Service, CredentialRecords {
     const materials: Material[] = [];
     try {
       for (const grant of grants) materials.push(this.release(tx, grant, now));
+      this.refuseRefreshing(materials);
       const sshIdentities = repositoryBindingIds.map((bindingId) =>
         this.sshIdentityOf(tx, identity, claim, bindingId, now),
       );

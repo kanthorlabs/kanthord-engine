@@ -19,6 +19,7 @@ import {
 import { redactionPaths } from "../kernel/log.ts";
 import { custodyMigrations } from "./migrations.ts";
 import { CustodyComponent } from "./service.ts";
+import { encrypt } from "./envelope.ts";
 import {
   CUSTODY_HOLDER_REFUSED,
   CUSTODY_REPORT_INVALID,
@@ -27,6 +28,7 @@ import {
   SSH_SIGN_PLACEMENT_REFUSED,
 } from "./handover.ts";
 import {
+  CredentialRefreshInFlight,
   CUSTODY_SERVICE_NAME,
   handoverPayloadSchema,
   plainHandoverPayloadSchema,
@@ -1244,4 +1246,64 @@ test("sshPublicKeyOf answers the pinned revision, else the newest live revision,
     .prepare("UPDATE credential SET metadata = NULL WHERE name = ?")
     .run("deploy");
   assert.equal(f.publicKeyOf("deploy"), null);
+});
+
+const SUBSCRIPTION = "subscription";
+const STORED_SUBSCRIPTION = {
+  refresh: "private-stored-refresh",
+  access: "private-stored-access",
+  expires: 1,
+};
+const ROTATED_SUBSCRIPTION = {
+  refresh: "private-rotated-refresh",
+  access: "private-rotated-access",
+  expires: 4102444800000,
+};
+
+test("a server placement handover of a revision with an in-flight refresh refuses with the settle promise, then takes the rotated value", async (t) => {
+  const f = fixture(t, [], [], new Map(), [SUBSCRIPTION]);
+  const id = createIdentity("credential");
+  const { nonce, ciphertext } = encrypt(
+    Buffer.alloc(32, 7),
+    id,
+    OAUTH_PLATFORM,
+    STORED_SUBSCRIPTION,
+  );
+  f.store.database
+    .prepare(
+      "INSERT INTO credential (id, name, platform, holder, revision, nonce, ciphertext, metadata, created_at, ended_at) VALUES (?, ?, ?, 'server', 1, ?, ?, NULL, ?, NULL)",
+    )
+    .run(id, SUBSCRIPTION, OAUTH_PLATFORM, nonce, ciphertext, NOW);
+  const refreshStore = f.store.transaction((tx) =>
+    f.component.checkMaterial(tx, TEST_SET, SUBSCRIPTION),
+  )!.refreshStore!;
+  let release = () => {};
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const refreshing = refreshStore.modify(OAUTH_PLATFORM, async () => {
+    await gate;
+    return { type: SecretShape.OAuth, ...ROTATED_SUBSCRIPTION };
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  let refused: unknown;
+  try {
+    f.handover([]);
+  } catch (error) {
+    refused = error;
+  }
+  assert.ok(refused instanceof CredentialRefreshInFlight);
+  const rolledBackPins = f.row.credentials.splice(0);
+  assert.deepEqual(rolledBackPins, [id]);
+  release();
+  await refreshing;
+  await refused.settled;
+  const payload = plainHandoverPayloadSchema.parse(
+    openEnvelope(f.keys.handover, f.aad, f.handover([])),
+  );
+  assert.deepEqual(payload.items[0]!.credential, {
+    type: SecretShape.OAuth,
+    ...ROTATED_SUBSCRIPTION,
+  });
+  assert.ok(f.row.credentials.includes(id));
 });

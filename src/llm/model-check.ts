@@ -40,10 +40,9 @@ import {
 } from "./platforms.ts";
 import { providerFailureOf } from "./provider-failure.ts";
 import {
+  frozenStore,
   insideRefreshWindow,
   refreshWatch,
-  seededStore,
-  storedSecrets,
 } from "./refresh-watch.ts";
 
 export const MODEL_CHECK_PROMPT =
@@ -173,7 +172,7 @@ function interrupted(): ModelCheckAnswer {
 async function toolRoundTrip(
   connected: ConnectedModel,
   signal: AbortSignal,
-  secretsOf: () => Promise<readonly string[]>,
+  secretsOf: () => readonly string[],
 ): Promise<ModelCheckAnswer> {
   const { runtime, model, effort } = connected;
   const options: ModelsSimpleStreamOptions = {
@@ -190,7 +189,7 @@ async function toolRoundTrip(
   const first = await complete([prompt]);
   if (signal.aborted) return interrupted();
   if (MODEL_CALL_FAILURES.includes(first.stopReason))
-    return failure(first, await secretsOf());
+    return failure(first, secretsOf());
   const call = toolCallOf(first);
   if (!call)
     return {
@@ -211,7 +210,7 @@ async function toolRoundTrip(
   ]);
   if (signal.aborted) return interrupted();
   if (MODEL_CALL_FAILURES.includes(second.stopReason))
-    return failure(second, await secretsOf());
+    return failure(second, secretsOf());
   return { result: ModelCheckResult.Ok, message: null };
 }
 
@@ -227,11 +226,15 @@ export async function checkModel(
   );
   const { signal } = context;
   const providerId = piProviderId(input.platform);
+  const watch = refreshWatch();
+  const secretsOf = () => [...secrets, ...watch.secrets()];
   try {
-    const watch = refreshWatch(
-      refreshStore ?? (await seededStore(providerId, credential)),
+    const connected = await connectedModel(
+      input,
+      pi,
+      watch.wrap(refreshStore ?? frozenStore(providerId, credential)),
+      signal,
     );
-    const connected = await connectedModel(input, pi, watch.store, signal);
     if (
       refreshStore === undefined &&
       credential.type === SecretShape.OAuth &&
@@ -241,10 +244,7 @@ export async function checkModel(
         result: ModelCheckResult.Unauthorized,
         message: MODEL_CHECK_TOKEN_EXPIRED,
       };
-    const answer = await toolRoundTrip(connected, signal, async () => [
-      ...secrets,
-      ...(await storedSecrets(watch.store, providerId)),
-    ]);
+    const answer = await toolRoundTrip(connected, signal, secretsOf);
     if (signal.aborted || !watch.refreshFailed()) return answer;
     return {
       result: ModelCheckResult.Unauthorized,
@@ -252,7 +252,7 @@ export async function checkModel(
     };
   } catch (error) {
     if (error instanceof OperationError) throw error;
-    const message = thrownReason(error, secrets);
+    const message = thrownReason(error, secretsOf());
     return { result: providerFailureOf(message), message };
   }
 }
