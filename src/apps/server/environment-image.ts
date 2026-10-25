@@ -906,6 +906,6 @@ export class EnvironmentImages implements Omit<
         EnvironmentImageFailure.BuildFailed,
         tagged.stderr.slice(-OUTPUT_TAIL_BYTES),
       );
-    await this.answer(["image", "rm", staging]);
+    await this.removeTags([staging]);
   }
 }

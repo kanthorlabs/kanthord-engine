@@ -119,6 +119,10 @@ function traceIdOf(n: number): string {
   return n.toString(16).padStart(32, "0");
 }
 
+function rootSpanIdOf(n: number): string {
+  return n.toString(16).padStart(16, "0");
+}
+
 function insert(store: Store, fixture: Fixture): void {
   store.transaction((tx) => {
     tx.database
@@ -129,7 +133,7 @@ function insert(store: Store, fixture: Fixture): void {
         traceIdOf(fixture.n),
         fixture.project,
         `execution_${ULID_HEAD}${fixture.n}`,
-        fixture.n.toString(16).padStart(16, "0"),
+        rootSpanIdOf(fixture.n),
         fixture.created,
         `node_${ULID_HEAD}${fixture.n}`,
         fixture.state,
@@ -394,6 +398,7 @@ function insertSpanOf(
   store: Store,
   n: number,
   spanId: string,
+  parentSpanId: string | null,
   operation: string,
   attributes: Record<string, string | number>,
 ): void {
@@ -401,7 +406,7 @@ function insertSpanOf(
     insertSpan(tx, {
       trace_id: traceIdOf(n),
       span_id: spanId,
-      parent_span_id: null,
+      parent_span_id: parentSpanId,
       producer: "server",
       origin: SpanOrigin.Observed,
       operation,
@@ -422,11 +427,12 @@ test("each item answers the operation and the attributes of its root span, or nu
   insertSpanOf(
     store,
     1,
-    (1).toString(16).padStart(16, "0"),
+    rootSpanIdOf(1),
+    null,
     ROOT_OPERATION,
     ROOT_ATTRIBUTES,
   );
-  insertSpanOf(store, 2, CHILD_SPAN_ID, "agent.turn", {
+  insertSpanOf(store, 2, CHILD_SPAN_ID, rootSpanIdOf(2), "agent.turn", {
     "gen_ai.request.model": "gpt-4",
   });
   const items = store.transaction((tx) =>
