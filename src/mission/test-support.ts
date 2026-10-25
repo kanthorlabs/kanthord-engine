@@ -11,7 +11,11 @@ import {
   type CallerContext,
   type ExecutionClaim,
 } from "../kernel/operation.ts";
-import { IN_MEMORY_DATABASE, Store } from "../kernel/store.ts";
+import {
+  IN_MEMORY_DATABASE,
+  Store,
+  type Transaction,
+} from "../kernel/store.ts";
 import {
   MISSION_SERVICE_NAME,
   missionOperations,
@@ -389,13 +393,16 @@ export function missionHarness(
   const registry = new OperationRegistry();
   service.declare(registry);
   let commits = 0;
+  let invoked: z.ZodType | undefined;
   const caller: CallerContext = {
     identity,
     context: background,
     requestId: createIdentity("request"),
-    commit: (write) => {
+    commit: <T>(write: (tx: Transaction) => T): T => {
       commits++;
-      return store.transaction(write);
+      const output = invoked;
+      assert.ok(output, "caller.commit: no operation is invoked");
+      return store.transaction((tx) => output.parse(write(tx)) as T);
     },
   };
   async function invoke<K extends keyof typeof missionOperations>(
@@ -407,7 +414,13 @@ export function missionHarness(
     const registered = registry.get(operation.id);
     assert.equal(registered.operation, operation);
     const before = commits;
-    const output = await registered.handler(parsed, caller);
+    invoked = operation.output;
+    let output: unknown;
+    try {
+      output = await registered.handler(parsed, caller);
+    } finally {
+      invoked = undefined;
+    }
     assert.equal(commits, before + 1);
     return operation.output.parse(output) as z.output<
       (typeof missionOperations)[K]["output"]
