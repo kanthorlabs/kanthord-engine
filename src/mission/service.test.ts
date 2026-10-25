@@ -5684,6 +5684,7 @@ const UnmatchedPin = {
   Foreign: "foreign pin",
   Newer: "newer pin",
   Missing: "missing pin",
+  Removed: "pin from before a removal",
 } as const;
 for (const condition of Object.values(UnmatchedPin)) {
   test(`mission rebind ignores a ${condition} and refuses it when named`, (t) => {
@@ -5694,6 +5695,10 @@ for (const condition of Object.values(UnmatchedPin)) {
       stored.project_id = UNKNOWN_PROJECT_ID;
     if (condition === UnmatchedPin.Newer) stored.revision = THIRD_REVISION;
     if (condition === UnmatchedPin.Missing) f.table.delete(BINDING_ID);
+    if (condition === UnmatchedPin.Removed) {
+      stored.tombstone = true;
+      f.table.get(NEXT_BINDING_ID)!.revision = THIRD_REVISION;
+    }
     const before = f.snapshot();
     assert.deepEqual(f.rebind(), {
       node_change: emptyRebindChange(f.version()),
@@ -5708,6 +5713,38 @@ for (const condition of Object.values(UnmatchedPin)) {
     );
   });
 }
+
+const LATEST_BINDING_ID = "binding_00000000000000000000000008";
+const FOURTH_REVISION = 4;
+
+test("mission rebind keeps a pin from before a removal and rebinds a pin of the current lineage", (t) => {
+  const f = rebindFixture(t);
+  const removedPin = f.implement();
+  const body = f.body(Intent.Implement);
+  body.filename = OTHER_FILENAME;
+  const currentPin = f.create(body).revisions[FIRST_ELEMENT_INDEX]!.node_id;
+  f.table.get(NEXT_BINDING_ID)!.revision = THIRD_REVISION;
+  f.rebind({ node_id: currentPin });
+  f.table.get(BINDING_ID)!.tombstone = true;
+  f.table.set(LATEST_BINDING_ID, {
+    ...f.table.get(NEXT_BINDING_ID)!,
+    binding_id: LATEST_BINDING_ID,
+    revision: FOURTH_REVISION,
+  });
+  f.refuses(
+    { node_id: removedPin, binding_id: LATEST_BINDING_ID },
+    MissionErrorCode.BindingMismatch,
+    HttpStatus.Conflict,
+    { node_id: removedPin, binding_id: LATEST_BINDING_ID },
+  );
+  const result = f.rebind({ binding_id: LATEST_BINDING_ID });
+  assert.deepEqual(
+    result.node_change.revisions.map((r) => [r.node_id, r.content.bindings]),
+    [[currentPin, [LATEST_BINDING_ID]]],
+  );
+  assert.deepEqual(result.skipped, []);
+  assert.deepEqual(f.read(removedPin).content.bindings, [BINDING_ID]);
+});
 
 test("MissionService refuses to restart after stop", async (t) => {
   const { mission } = fixture(t);
