@@ -48,7 +48,11 @@ import {
   type NormalizedEntry,
 } from "./import.ts";
 import { missionMigrations } from "./migrations.ts";
-import { databaseSnapshot, missionHarness } from "./test-support.ts";
+import {
+  databaseSnapshot,
+  lostTransition,
+  missionHarness,
+} from "./test-support.ts";
 import { parsePlanFile, type ParsedNodeFile } from "./parser.ts";
 import { revisionFromRow } from "./revision.ts";
 import {
@@ -1630,6 +1634,7 @@ test("an import that adds a dependency to a node settles its expired execution a
           root_span_id: "b".repeat(16),
         },
         ended_at: now,
+        transition: lostTransition(),
       },
     ],
   });

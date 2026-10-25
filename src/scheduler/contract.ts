@@ -236,7 +236,22 @@ export interface ExecutionRow {
   ended_at: number | null;
   stop: ReleaseStop | null;
 }
-export interface EndedExecution {
+export const TransitionRule = {
+  None: "none",
+  FailureLimit: "failure_limit",
+  FurtherWorkLimit: "further_work_limit",
+  ReworkLimit: "rework_limit",
+} as const;
+export const transitionRuleSchema = z.enum(TransitionRule);
+export type TransitionRule = z.infer<typeof transitionRuleSchema>;
+export interface NodeTransition {
+  from: string;
+  to: string;
+  rule: TransitionRule;
+  count: number | null;
+  limit: number | null;
+}
+export interface RevokedExecution {
   execution_id: string;
   trace: {
     execution_id: string;
@@ -248,7 +263,9 @@ export interface EndedExecution {
   };
   ended_at: number;
 }
-export type RevokedExecution = EndedExecution;
+export interface EndedExecution extends RevokedExecution {
+  transition: NodeTransition;
+}
 export interface SchedulerClaims {
   revoke(tx: Transaction, nodeId: string, now: number): RevokedExecution | null;
   settle(tx: Transaction, nodeId: string, now: number): EndedExecution[];
@@ -312,13 +329,13 @@ export interface MissionTransitions {
     furtherWork: boolean,
     stalledReleases: number,
     now: number,
-  ): void;
+  ): NodeTransition;
   failure(
     tx: Transaction,
     nodeId: string,
     consecutiveFailures: number,
     now: number,
-  ): void;
+  ): NodeTransition;
 }
 export interface NodeAttemptKey {
   node_id: string;

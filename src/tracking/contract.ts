@@ -11,6 +11,7 @@ import {
 export const TRACKING_SERVICE_NAME = "tracking";
 export const EXECUTION_IDENTITY_PREFIX = "execution";
 export const ROOT_SPAN_OPERATION = "scheduler.execution";
+export const TRANSITION_SPAN_OPERATION = "scheduler.transition";
 export const SCHEDULER_PRODUCER = "scheduler";
 export const MISSION_PRODUCER = "mission";
 export const PROJECT_PRODUCER = "project";
@@ -324,9 +325,29 @@ export interface RootSpanEnd {
   revoke_cause: RevokeCause | null;
   stop: { reason: string; code: string | null; detail?: string } | null;
 }
+export const TransitionRule = {
+  None: "none",
+  FailureLimit: "failure_limit",
+  FurtherWorkLimit: "further_work_limit",
+  ReworkLimit: "rework_limit",
+} as const;
+export const transitionRuleSchema = z.enum(TransitionRule);
+export type TransitionRule = z.infer<typeof transitionRuleSchema>;
+export interface ExecutionTransition {
+  transitioned_at: number;
+  from: string;
+  to: string;
+  rule: TransitionRule;
+  count: number | null;
+  limit: number | null;
+}
 export interface ExecutionTelemetry {
   executionOpened(trace: ExecutionTrace, createdAt: number): void;
   executionEnded(end: RootSpanEnd): void;
+  executionTransition(
+    trace: ExecutionTrace,
+    transition: ExecutionTransition,
+  ): void;
 }
 
 const traceParams = z.strictObject({ trace_id: traceIdSchema });

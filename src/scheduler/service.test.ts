@@ -14,6 +14,7 @@ import {
   SCHEDULER_SERVICE_NAME,
   QUEUE_LIST_LIMIT_DEFAULT,
   LOSS_SWEEP_INTERVAL_MS,
+  TransitionRule,
 } from "./contract.ts";
 import { schedulerMigrations } from "./migrations.ts";
 import {
@@ -21,12 +22,16 @@ import {
   executionFixture,
   FIXTURE_DEADLINE,
   FIXTURE_NOW,
+  transitionFixture,
 } from "./test-support.ts";
 import { ExecutionEnd, RevokeCause } from "../tracking/contract.ts";
 import { executionTrace } from "./telemetry.ts";
 import { insertExecution, readExecution } from "./execution-store.ts";
 
 const EXECUTION_ENDED = "executionEnded";
+const EXECUTION_TRANSITION = "executionTransition";
+const END_AND_TRANSITION = 2;
+const FAILURE_LIMIT = 2;
 const PROJECT_PREFIX = "project";
 const NODE_PREFIX = "node";
 const REQUEST_PREFIX = "request";
@@ -473,8 +478,10 @@ test("run owns the 30-second loss sweep and quiescence stops it permanently", as
     h.store.transaction((tx) => readExecution(tx, row.execution_id))?.ended_at,
     FIXTURE_DEADLINE,
   );
-  assert.equal(h.telemetry.length, ONE_ROW);
-  assert.equal(h.telemetry[0]?.method, EXECUTION_ENDED);
+  assert.deepEqual(
+    h.telemetry.map((entry) => entry.method),
+    [EXECUTION_ENDED, EXECUTION_TRANSITION],
+  );
   await h.service.quiesce();
   const later = executionFixture();
   h.store.transaction((tx) => insertExecution(tx, later));
@@ -513,7 +520,7 @@ test("a revocation writes one root end after the commit and a rolled back revoca
   );
   assert.ok(revoked);
   assert.deepEqual(h.telemetry, []);
-  h.service.executionRevoked(revoked, RevokeCause.Human);
+  h.service.executionRevoked(revoked, RevokeCause.Human, null);
   assert.deepEqual(h.telemetry, [
     {
       method: EXECUTION_ENDED,
@@ -528,6 +535,44 @@ test("a revocation writes one root end after the commit and a rolled back revoca
       ],
     },
   ]);
+});
+
+test("a revocation by an assessment writes the root end and then one transition span", (t) => {
+  const h = schedulerHarness(t);
+  const row = executionFixture();
+  h.store.transaction((tx) => insertExecution(tx, row));
+  const revoked = h.store.transaction((tx) =>
+    h.service.revoke(tx, row.node_id, FIXTURE_NOW),
+  );
+  assert.ok(revoked);
+  const transition = transitionFixture({
+    from: "Evaluating",
+    to: "Available",
+  });
+  h.service.executionRevoked(revoked, RevokeCause.Assessment, transition);
+  assert.deepEqual(
+    h.telemetry.map((entry) => entry.method),
+    [EXECUTION_ENDED, EXECUTION_TRANSITION],
+  );
+  assert.deepEqual(h.telemetry[1]!.arguments, [
+    executionTrace(row),
+    { ...transition, transitioned_at: FIXTURE_NOW },
+  ]);
+});
+
+test("a revocation by a human writes the root end and no transition span", (t) => {
+  const h = schedulerHarness(t);
+  const row = executionFixture();
+  h.store.transaction((tx) => insertExecution(tx, row));
+  const revoked = h.store.transaction((tx) =>
+    h.service.revoke(tx, row.node_id, FIXTURE_NOW),
+  );
+  assert.ok(revoked);
+  h.service.executionRevoked(revoked, RevokeCause.Human, null);
+  assert.deepEqual(
+    h.telemetry.map((entry) => entry.method),
+    [EXECUTION_ENDED],
+  );
 });
 
 test("settle answers each execution that it ends with its trace and writes no end itself", (t) => {
@@ -546,6 +591,7 @@ test("settle answers each execution that it ends with its trace and writes no en
       execution_id: row.execution_id,
       trace: executionTrace(row),
       ended_at: FIXTURE_DEADLINE,
+      transition: transitionFixture(),
     },
   ]);
   assert.deepEqual(h.telemetry, []);
@@ -563,6 +609,13 @@ test("settle answers each execution that it ends with its trace and writes no en
         },
       ],
     },
+    {
+      method: EXECUTION_TRANSITION,
+      arguments: [
+        executionTrace(row),
+        { ...transitionFixture(), transitioned_at: FIXTURE_DEADLINE },
+      ],
+    },
   ]);
 });
 
@@ -577,7 +630,45 @@ test("a sweep after an inline settlement writes no second end", (t) => {
     ),
   );
   h.service.sweep();
-  assert.equal(h.telemetry.length, ONE_ROW);
+  assert.equal(h.telemetry.length, END_AND_TRANSITION);
+});
+
+test("a sweep loss below the failure limit writes Executing to Available and at the limit Paused", (t) => {
+  const h = schedulerHarness(t);
+  let now = FIXTURE_DEADLINE;
+  t.mock.method(Date, "now", () => now);
+  const paused = transitionFixture({
+    to: "Paused",
+    rule: TransitionRule.FailureLimit,
+    count: FAILURE_LIMIT,
+    limit: FAILURE_LIMIT,
+  });
+  h.dependencies.transitions.failure = (_tx, _nodeId, count) =>
+    count >= FAILURE_LIMIT ? paused : transitionFixture();
+  const first = executionFixture();
+  const second = executionFixture({ node_id: first.node_id });
+  h.store.transaction((tx) => insertExecution(tx, first));
+  h.service.sweep();
+  h.store.transaction((tx) => insertExecution(tx, second));
+  now = FIXTURE_DEADLINE + 1;
+  h.service.sweep();
+  assert.deepEqual(
+    h.telemetry.map((entry) => entry.method),
+    [
+      EXECUTION_ENDED,
+      EXECUTION_TRANSITION,
+      EXECUTION_ENDED,
+      EXECUTION_TRANSITION,
+    ],
+  );
+  assert.deepEqual(h.telemetry[1]!.arguments, [
+    executionTrace(first),
+    { ...transitionFixture(), transitioned_at: FIXTURE_DEADLINE },
+  ]);
+  assert.deepEqual(h.telemetry[3]!.arguments, [
+    executionTrace(second),
+    { ...paused, transitioned_at: FIXTURE_DEADLINE + 1 },
+  ]);
 });
 
 test("sweep hands consecutive loss counts to Mission once per steps and evaluation row", (t) => {
@@ -590,6 +681,7 @@ test("sweep hands consecutive loss counts to Mission once per steps and evaluati
     assert.ok(tx.database.isTransaction);
     assert.ok(rows.some((row) => row.node_id === nodeId));
     counts.push(count);
+    return transitionFixture();
   };
   h.store.transaction((tx) => rows.forEach((row) => insertExecution(tx, row)));
   h.service.sweep();

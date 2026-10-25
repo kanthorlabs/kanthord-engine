@@ -20,6 +20,7 @@ import {
   TRACKING_SERVICE_NAME,
   TraceSort,
   TraceState,
+  TransitionRule,
   traceSummarySchema,
   type ExecutionTrace,
   type ServerTrace,
@@ -53,6 +54,8 @@ const ONE_DROP = 1;
 const PAGE_OF_ONE = 1;
 const STOP_DETAIL = "Cannot find module";
 const SPAN_PAGE = 10;
+const TRANSITION_SPAN = "scheduler.transition";
+const KEPT_STATE = "Executing";
 const SUMMARY_FIELDS = 27;
 const RATE_LIMITED = "rate_limited";
 const INPUT_TEXT = "npm test";
@@ -129,6 +132,78 @@ test("the root span opens at the claim and ends at the release", (t) => {
   assert.equal(root?.status, SpanStatus.Error);
   assert.equal(root?.attributes["kanthord.stop.code"], RATE_LIMITED);
   assert.equal(service.droppedRecords(), NO_DROP);
+});
+
+test("a transition span is a child of the root span with the states, the rule and the time of the transition", (t) => {
+  const { store, service } = harness(t);
+  service.executionOpened(TRACE, CREATED);
+  const transition = {
+    from: "Evaluating",
+    to: "Blocked",
+    rule: TransitionRule.ReworkLimit,
+    count: 3,
+    limit: 3,
+    transitioned_at: ENDED,
+  };
+  service.executionTransition(TRACE, transition);
+  service.executionTransition(TRACE, transition);
+  const items = service.spanList(
+    TRACE.trace_id,
+    { limit: SPAN_PAGE },
+    caller(store),
+  ).items;
+  const spans = items.filter((span) => span.operation === TRANSITION_SPAN);
+  assert.equal(spans.length, ONE_ENTRY);
+  const span = spans[0]!;
+  assert.equal(span.parent_span_id, TRACE.root_span_id);
+  assert.equal(span.producer, SCHEDULER_PRODUCER);
+  assert.equal(span.start_time, ENDED);
+  assert.equal(span.end_time, ENDED);
+  assert.equal(span.status, SpanStatus.Ok);
+  assert.deepEqual(span.attributes, {
+    "kanthord.execution.id": TRACE.execution_id,
+    "kanthord.node.id": TRACE.node_id,
+    "kanthord.project.id": TRACE.project_id,
+    "kanthord.attempt": TRACE.attempt,
+    "kanthord.node.state.from": "Evaluating",
+    "kanthord.node.state.to": "Blocked",
+    "kanthord.transition.rule": TransitionRule.ReworkLimit,
+    "kanthord.transition.count": 3,
+    "kanthord.transition.limit": 3,
+  });
+  assert.equal(
+    store.database
+      .prepare(
+        "SELECT count(*) AS count FROM tracking_record WHERE record_id = ?",
+      )
+      .get(`${TRACE.root_span_id}:transition`)!.count,
+    ONE_ENTRY,
+  );
+  assert.equal(service.droppedRecords(), NO_DROP);
+});
+
+test("a transition span with the rule none holds neither the count nor the limit", (t) => {
+  const { store, service } = harness(t);
+  service.executionOpened(TRACE, CREATED);
+  service.executionTransition(TRACE, {
+    from: KEPT_STATE,
+    to: KEPT_STATE,
+    rule: TransitionRule.None,
+    count: null,
+    limit: null,
+    transitioned_at: ENDED,
+  });
+  const span = service
+    .spanList(TRACE.trace_id, { limit: SPAN_PAGE }, caller(store))
+    .items.find((item) => item.operation === TRANSITION_SPAN);
+  assert.equal(span?.attributes["kanthord.node.state.from"], KEPT_STATE);
+  assert.equal(span?.attributes["kanthord.node.state.to"], KEPT_STATE);
+  assert.equal(
+    span?.attributes["kanthord.transition.rule"],
+    TransitionRule.None,
+  );
+  assert.equal("kanthord.transition.count" in span!.attributes, false);
+  assert.equal("kanthord.transition.limit" in span!.attributes, false);
 });
 
 for (const [cause, status, state] of [

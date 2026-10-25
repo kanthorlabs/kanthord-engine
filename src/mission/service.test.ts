@@ -82,7 +82,11 @@ import {
 } from "./content.ts";
 import { ControlError } from "./control.ts";
 import { revisionFromRow } from "./revision.ts";
-import { databaseSnapshot, unexpectedCollaboration } from "./test-support.ts";
+import {
+  databaseSnapshot,
+  lostTransition,
+  unexpectedCollaboration,
+} from "./test-support.ts";
 import { claimableMap, reconcileMission, routeMission } from "./routing.ts";
 import {
   insertDependency,
@@ -4183,6 +4187,7 @@ test("an import apply that settles an expired execution of a dependent writes on
                   root_span_id: "b".repeat(16),
                 },
                 ended_at: now,
+                transition: lostTransition(),
               },
             ]
           : [],

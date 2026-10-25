@@ -361,6 +361,7 @@ test("a pause of a node with a live execution ends its root span with the human 
   const [execution, cause] = ends[0]!.arguments as [RevokedExecution, string];
   assert.equal(execution.execution_id, executionId);
   assert.equal(cause, RevokeCause.Human);
+  assert.equal(ends[0]!.arguments[2], null);
   assert.ok(
     h.calls.findIndex((call) => call.method === EXECUTION_REVOKED) <
       h.calls.findIndex((call) => call.method === WAKE),

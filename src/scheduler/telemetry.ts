@@ -10,7 +10,7 @@ export function reportLost(
   telemetry: ExecutionTelemetry,
   lost: readonly EndedExecution[],
 ): void {
-  for (const execution of lost)
+  for (const execution of lost) {
     telemetry.executionEnded({
       trace: execution.trace,
       ended_at: execution.ended_at,
@@ -18,6 +18,11 @@ export function reportLost(
       revoke_cause: null,
       stop: null,
     });
+    telemetry.executionTransition(execution.trace, {
+      ...execution.transition,
+      transitioned_at: execution.ended_at,
+    });
+  }
 }
 
 export function executionTrace(row: {

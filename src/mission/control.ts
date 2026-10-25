@@ -13,7 +13,10 @@ import {
   type Mission,
   RevokeCause,
   type ControlResult,
+  TransitionRule,
   type ExecutionEnds,
+  type NodeTransition,
+  type RevokedClaim,
   type SchedulerClaims,
 } from "./contract.ts";
 import type { Dependencies } from "./service.ts";
@@ -174,12 +177,15 @@ export function endLiveClaim(
   now: number,
   cause: RevokeCause,
   ends: ExecutionEnds,
-): void {
+): RevokedClaim | null {
   assert.ok(tx.database.isTransaction);
   if (node.state !== NodeState.Executing && node.state !== NodeState.Evaluating)
-    return;
+    return null;
   const execution = dependencies.schedulerClaims.revoke(tx, node.id, now);
-  if (execution !== null) ends.revoked.push({ execution, cause });
+  if (execution === null) return null;
+  const claim = { execution, cause, transition: null };
+  ends.revoked.push(claim);
+  return claim;
 }
 
 export function executionEnds(): ExecutionEnds {
@@ -203,7 +209,11 @@ export function reportEnds(
   if (ends.lost.length > NO_ENDS)
     dependencies.schedulerClaims.executionsLost(ends.lost);
   for (const claim of ends.revoked)
-    dependencies.schedulerClaims.executionRevoked(claim.execution, claim.cause);
+    dependencies.schedulerClaims.executionRevoked(
+      claim.execution,
+      claim.cause,
+      claim.transition,
+    );
 }
 
 export function transition(
@@ -229,6 +239,23 @@ export function transition(
     before,
     dependencies.bindings,
   );
+}
+
+export function nodeTransition(
+  tx: Transaction,
+  nodeId: string,
+  from: NodeState,
+  limited: { rule: TransitionRule; count: number; limit: number } | null,
+): NodeTransition {
+  const to = requireNode(tx, nodeId).state;
+  assert.ok(to);
+  return {
+    from,
+    to,
+    rule: limited?.rule ?? TransitionRule.None,
+    count: limited?.count ?? null,
+    limit: limited?.limit ?? null,
+  };
 }
 
 export function controlResult(

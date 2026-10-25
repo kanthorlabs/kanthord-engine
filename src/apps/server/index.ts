@@ -456,6 +456,8 @@ export function composeServices(options: {
       executionOpened: (trace, createdAt) =>
         tracking.executionOpened(trace, createdAt),
       executionEnded: (end) => tracking.executionEnded(end),
+      executionTransition: (trace, transition) =>
+        tracking.executionTransition(trace, transition),
     },
     health: options.health,
   });

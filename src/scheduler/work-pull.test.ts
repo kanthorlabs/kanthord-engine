@@ -16,7 +16,11 @@ import {
   type AgentSelection,
 } from "./contract.ts";
 import { insertExecution, readExecution } from "./execution-store.ts";
-import { schedulerHarness, executionFixture } from "./test-support.ts";
+import {
+  schedulerHarness,
+  executionFixture,
+  transitionFixture,
+} from "./test-support.ts";
 import { ExecutionEnd } from "../tracking/contract.ts";
 import { executionTrace } from "./telemetry.ts";
 import { DEFAULT_STOP_BACKOFF_SECONDS } from "./config.ts";
@@ -25,6 +29,7 @@ const NO_COMMITS = 0;
 const NO_CLAIMS = 0;
 const ONE_COMMIT = 1;
 const ONE_REPORT = 1;
+const END_AND_TRANSITION = 2;
 const TWO_CHECKS = 2;
 const FIRST_ATTEMPT = 1;
 const CLAIMANT_MISMATCH = "scheduler.work.claimant_mismatch";
@@ -143,9 +148,16 @@ for (const [name, sameRuntime] of [
           },
         ],
       },
+      {
+        method: "executionTransition",
+        arguments: [
+          executionTrace(expired),
+          { ...transitionFixture(), transitioned_at: ended },
+        ],
+      },
     ]);
     h.service.sweep();
-    assert.equal(h.telemetry.length, ONE_REPORT);
+    assert.equal(h.telemetry.length, END_AND_TRANSITION);
   });
 }
 
@@ -423,8 +435,10 @@ test("loss probes commit settlement at once and claim the node after the stop ba
   t.mock.method(Date, "now", () => now);
   const expired = { ...h.row, created_at: now - 1000, expired_at: now };
   h.store.transaction((tx) => insertExecution(tx, expired));
-  h.dependencies.transitions.failure = (tx, nodeId) =>
+  h.dependencies.transitions.failure = (tx, nodeId) => {
     h.service.insert(tx, nodeId, h.row.project_id, 0);
+    return transitionFixture();
+  };
   const settledAt = now;
   assert.equal((await h.pull()).kind, WorkPullKind.NoWork);
   assert.equal(h.commits(), ONE_COMMIT);

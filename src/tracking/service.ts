@@ -1,5 +1,6 @@
 import { addAbortListener } from "node:events";
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import {
   background,
   CancellationContext,
@@ -31,6 +32,7 @@ import {
 import {
   ROOT_SPAN_OPERATION,
   SCHEDULER_PRODUCER,
+  TRANSITION_SPAN_OPERATION,
   Disposition,
   ExecutionEnd,
   RefusalReason,
@@ -39,6 +41,8 @@ import {
   SpanOrigin,
   SpanStatus,
   TRACKING_SERVICE_NAME,
+  TransitionRule,
+  transitionRuleSchema,
   traceSortSchema,
   trackingOperations,
   type Acknowledgement,
@@ -46,6 +50,7 @@ import {
   type ExecutionTelemetry,
   type ExecutionTrace,
   type ExecutionTraces,
+  type ExecutionTransition,
   type RootSpanEnd,
   type ServerTrace,
   type TelemetryRecord,
@@ -75,6 +80,8 @@ import {
 
 const ROOT_START_RECORD = "start";
 const ROOT_END_RECORD = "end";
+const TRANSITION_RECORD = "transition";
+const SPAN_ID_LENGTH = 16;
 const TRACKING_STOPPED_CODE = "system.tracking.stopped";
 const CURSOR_INVALID_CODE = "system.pagination.cursor_invalid";
 const CURSOR_ENCODING = "base64url";
@@ -248,6 +255,28 @@ export class TrackingService implements Service, ExecutionTelemetry {
         ...revokeAttributes(end),
         ...stopAttributes(end.stop),
       },
+    });
+  }
+
+  executionTransition(
+    trace: ExecutionTrace,
+    transition: ExecutionTransition,
+  ): void {
+    assert.ok(trace.trace_id);
+    assert.ok(Number.isSafeInteger(transition.transitioned_at));
+    const recordId = `${trace.root_span_id}:${TRANSITION_RECORD}`;
+    this.serverSpan(trace, SCHEDULER_PRODUCER, {
+      record_id: recordId,
+      span_id: createHash("sha256")
+        .update(recordId)
+        .digest("hex")
+        .slice(0, SPAN_ID_LENGTH),
+      parent_span_id: trace.root_span_id,
+      operation: TRANSITION_SPAN_OPERATION,
+      start_time: transition.transitioned_at,
+      end_time: transition.transitioned_at,
+      status: SpanStatus.Ok,
+      attributes: transitionAttributes(transition),
     });
   }
 
@@ -560,6 +589,25 @@ function revokeAttributes(end: RootSpanEnd): Attributes {
   if (end.end !== ExecutionEnd.Revoked) return {};
   assert.ok(end.revoke_cause);
   return { "kanthord.revoke.cause": revokeCauseSchema.parse(end.revoke_cause) };
+}
+
+function transitionAttributes(transition: ExecutionTransition): Attributes {
+  assert.ok(transition.from);
+  assert.ok(transition.to);
+  const limited = transition.rule !== TransitionRule.None;
+  assert.equal(limited, transition.count !== null);
+  assert.equal(limited, transition.limit !== null);
+  return {
+    "kanthord.node.state.from": transition.from,
+    "kanthord.node.state.to": transition.to,
+    "kanthord.transition.rule": transitionRuleSchema.parse(transition.rule),
+    ...(transition.count === null || transition.limit === null
+      ? {}
+      : {
+          "kanthord.transition.count": transition.count,
+          "kanthord.transition.limit": transition.limit,
+        }),
+  };
 }
 
 function stopAttributes(stop: RootSpanEnd["stop"]): Attributes {

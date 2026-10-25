@@ -52,6 +52,7 @@ import {
   executionFixture,
   schedulerHarness,
   FIXTURE_NOW,
+  transitionFixture,
 } from "./test-support.ts";
 
 const selection: AgentSelection = {
@@ -237,6 +238,7 @@ test("three consecutive environment stops set no hold and never pause the node",
   h.dependencies.transitions.failure = (tx, nodeId, count) => {
     h.calls.push({ method: FAILURE_METHOD, arguments: [tx, nodeId, count] });
     h.service.insert(tx, nodeId, h.row.project_id, 0);
+    return transitionFixture();
   };
   for (let index = 0; index < TWO_FAILURES; index += 1)
     h.prior(

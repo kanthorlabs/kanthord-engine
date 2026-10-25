@@ -16,6 +16,7 @@ import {
   ReleaseObligation,
   RepositoryAction,
   StartPoint,
+  TransitionRule,
   missionOperations,
   type AssetKind as AssetType,
 } from "./contract.ts";
@@ -958,4 +959,115 @@ test("one asset for each of two bindings releases", (t) => {
   h.evidence([h.second_id, h.binding_id]);
   h.release();
   assert.equal(h.node().state, NodeState.Waiting);
+});
+
+test("a release answers the states, the rule, the count and the limit", (t) => {
+  const h = fixture(t);
+  h.claim();
+  h.evidence(AssetKind.Repository, true);
+  assert.deepEqual(h.release(), {
+    from: NodeState.Executing,
+    to: NodeState.Waiting,
+    rule: TransitionRule.None,
+    count: null,
+    limit: null,
+  });
+  h.store.transaction((tx) => setNodeState(tx, h.node_id, NodeState.Available));
+  h.claim();
+  assert.deepEqual(h.release(true, FURTHER_WORK_LIMIT - 1), {
+    from: NodeState.Executing,
+    to: NodeState.Available,
+    rule: TransitionRule.None,
+    count: null,
+    limit: null,
+  });
+  h.claim();
+  assert.deepEqual(h.release(true, FURTHER_WORK_LIMIT), {
+    from: NodeState.Executing,
+    to: NodeState.Paused,
+    rule: TransitionRule.FurtherWorkLimit,
+    count: FURTHER_WORK_LIMIT,
+    limit: h.dependencies.config.further_work_limit,
+  });
+});
+
+test("a release of an evaluating node answers the state after the fold", (t) => {
+  const h = fixture(t);
+  h.store.transaction((tx) =>
+    insertAssessment(tx, {
+      id: createIdentity("assessment"),
+      node_id: h.node_id,
+      attempt: FIRST_ATTEMPT,
+      node_revision: FIRST_ATTEMPT,
+      result: AssessmentResult.Success,
+      rationale: "Passed",
+      evidence_ids: "[]",
+      dependency_outcome_ids: "[]",
+      tested_input: null,
+      execution_id: h.execution_id,
+      actor: null,
+      created_at: NOW,
+    }),
+  );
+  h.claim();
+  h.store.transaction((tx) =>
+    setNodeState(tx, h.node_id, NodeState.Evaluating),
+  );
+  h.store.transaction((tx) =>
+    insertEvidence(
+      tx,
+      {
+        id: createIdentity("evidence"),
+        node_id: h.node_id,
+        attempt: FIRST_ATTEMPT,
+        subject: "Request",
+        requirement_key: "repo.pull_request",
+        end_state: EndState.Expected,
+        verification: null,
+        provenance: JSON.stringify(h.opener),
+        created_at: NOW,
+      },
+      [],
+    ),
+  );
+  assert.deepEqual(h.release(), {
+    from: NodeState.Evaluating,
+    to: NodeState.Completed,
+    rule: TransitionRule.None,
+    count: null,
+    limit: null,
+  });
+});
+
+test("a failure answers the states, the rule, the count and the limit", (t) => {
+  const h = fixture(t);
+  const failure = (count: number) =>
+    h.store.transaction((tx) => h.service.failure(tx, h.node_id, count, NOW));
+  h.claim();
+  assert.deepEqual(failure(FIRST_ATTEMPT), {
+    from: NodeState.Executing,
+    to: NodeState.Available,
+    rule: TransitionRule.None,
+    count: null,
+    limit: null,
+  });
+  h.claim();
+  const limit = h.dependencies.config.consecutive_failure_limit;
+  assert.deepEqual(failure(limit), {
+    from: NodeState.Executing,
+    to: NodeState.Paused,
+    rule: TransitionRule.FailureLimit,
+    count: limit,
+    limit,
+  });
+  h.store.transaction((tx) =>
+    setNodeState(tx, h.node_id, NodeState.Evaluating),
+  );
+  assert.deepEqual(failure(FIRST_ATTEMPT), {
+    from: NodeState.Evaluating,
+    to: NodeState.Waiting,
+    rule: TransitionRule.None,
+    count: null,
+    limit: null,
+  });
 });

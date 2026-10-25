@@ -10,8 +10,10 @@ import {
   AssessmentResult,
   ReleaseObligation,
   Intent,
+  TransitionRule,
   type ExecutionActor,
   type ClaimAdmission,
+  type NodeTransition,
 } from "./contract.ts";
 import type { Dependencies } from "./service.ts";
 import {
@@ -32,7 +34,7 @@ import { nodeBranchOf } from "../repository/node-branch.ts";
 import { nodeClaimable } from "./routing.ts";
 import { requireNode } from "./node-read.ts";
 import { requireMission } from "./write.ts";
-import { transition } from "./control.ts";
+import { nodeTransition, transition } from "./control.ts";
 import { currentAssessmentOf } from "./currency.ts";
 import { actionStatesOf, eligibleUnrequested } from "./frozen-action.ts";
 import { foldExternalState, scheduleDeferredCheck } from "./node-check.ts";
@@ -160,7 +162,7 @@ export function release(
   furtherWork: boolean,
   stalledReleases: number,
   now: number,
-): void {
+): NodeTransition {
   const node = requireNode(tx, execution.node_id);
   assert.ok(
     node.state === NodeState.Executing || node.state === NodeState.Evaluating,
@@ -215,6 +217,14 @@ export function release(
     );
     scheduleDeferredCheck(dependencies, node.id, execution.attempt);
   }
+  return nodeTransition(
+    tx,
+    node.id,
+    node.state,
+    state === NodeState.Paused
+      ? { rule: TransitionRule.FurtherWorkLimit, count: stalledReleases, limit }
+      : null,
+  );
 }
 
 export function failure(
@@ -223,7 +233,7 @@ export function failure(
   nodeId: string,
   consecutiveFailures: number,
   now: number,
-): void {
+): NodeTransition {
   const node = requireNode(tx, nodeId);
   assert.ok(
     node.state === NodeState.Executing || node.state === NodeState.Evaluating,
@@ -232,8 +242,9 @@ export function failure(
     Number.isSafeInteger(consecutiveFailures) &&
       consecutiveFailures >= NO_CONSECUTIVE_FAILURES,
   );
+  const limit = dependencies.config.consecutive_failure_limit;
   const state =
-    consecutiveFailures >= dependencies.config.consecutive_failure_limit
+    consecutiveFailures >= limit
       ? NodeState.Paused
       : node.state === NodeState.Executing
         ? NodeState.Available
@@ -245,5 +256,17 @@ export function failure(
     node,
     state,
     now,
+  );
+  return nodeTransition(
+    tx,
+    node.id,
+    node.state,
+    state === NodeState.Paused
+      ? {
+          rule: TransitionRule.FailureLimit,
+          count: consecutiveFailures,
+          limit,
+        }
+      : null,
   );
 }
