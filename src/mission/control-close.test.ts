@@ -7,7 +7,9 @@ import {
   AssessmentResult,
   ClosingEvent,
   Intent,
+  RevokeCause,
   NodeState,
+  type RevokedExecution,
 } from "./contract.ts";
 import { ControlError } from "./control.ts";
 import {
@@ -22,7 +24,7 @@ import {
   setNodeState,
   readNode,
 } from "./store.ts";
-import { controlHarness } from "./test-support.ts";
+import { controlHarness, revokedExecution } from "./test-support.ts";
 import { readCurrentRevision, insertRevision } from "./store.ts";
 import { revisionFromRow } from "./revision.ts";
 
@@ -33,6 +35,7 @@ const FIRST_ELEMENT = 0;
 const NO_EVIDENCE = 0;
 const FIRST_ATTEMPT = 1;
 const REVOKE = "schedulerClaims.revoke";
+const EXECUTION_REVOKED = "schedulerClaims.executionRevoked";
 const BINDING_MISMATCH = "mission.evidence.binding_mismatch";
 const VALIDATION = "gateway.request.validation_failed";
 const COMMIT = "a".repeat(40);
@@ -332,6 +335,67 @@ test("discard revokes execution and closes its open attempt", async (t) => {
   assert.ok(result.attempt?.closed_at);
   assert.equal(result.outcome?.closing_event, ClosingEvent.HumanDiscard);
   assert.ok(h.calls.some((call) => call.method === REVOKE));
+});
+
+for (const [operation, extra] of [
+  ["node.discard", {}],
+  ["node.override", { result: AssessmentResult.Success }],
+] as const) {
+  test(`${operation} of a node with a live execution ends its root span with the human cause`, async (t) => {
+    const h = controlHarness(t, IDENTITY);
+    const executionId = createIdentity("execution");
+    h.dependencies.schedulerClaims.revoke = (_tx, nodeId, now) =>
+      revokedExecution(executionId, nodeId, now);
+    h.store.transaction((tx) => {
+      openAttempt(tx, h.node_id, FIRST_ATTEMPT, h.actor, NOW);
+      setNodeState(tx, h.node_id, NodeState.Executing);
+    });
+    await h.invoke(operation, {
+      params: { node_id: h.node_id },
+      query: {},
+      body: { ...h.body(NodeState.Executing, FIRST_ATTEMPT), ...extra },
+    });
+    const ends = h.calls.filter((call) => call.method === EXECUTION_REVOKED);
+    assert.equal(ends.length, FIRST_ATTEMPT);
+    const [execution, cause] = ends[0]!.arguments as [RevokedExecution, string];
+    assert.equal(execution.execution_id, executionId);
+    assert.equal(cause, RevokeCause.Human);
+  });
+
+  test(`${operation} of a node with no live execution ends no root span`, async (t) => {
+    const h = controlHarness(t, IDENTITY);
+    h.store.transaction((tx) => {
+      openAttempt(tx, h.node_id, FIRST_ATTEMPT, h.actor, NOW);
+      setNodeState(tx, h.node_id, NodeState.Executing);
+    });
+    await h.invoke(operation, {
+      params: { node_id: h.node_id },
+      query: {},
+      body: { ...h.body(NodeState.Executing, FIRST_ATTEMPT), ...extra },
+    });
+    assert.ok(h.calls.some((call) => call.method === REVOKE));
+    assert.equal(
+      h.calls.some((call) => call.method === EXECUTION_REVOKED),
+      false,
+    );
+  });
+}
+
+test("a block of a Paused node ends no root span", async (t) => {
+  const h = controlHarness(t, IDENTITY);
+  h.store.transaction((tx) => {
+    openAttempt(tx, h.node_id, FIRST_ATTEMPT, h.actor, NOW);
+    setNodeState(tx, h.node_id, NodeState.Paused);
+  });
+  await h.invoke("node.block", {
+    params: { node_id: h.node_id },
+    query: {},
+    body: h.body(NodeState.Paused, FIRST_ATTEMPT),
+  });
+  assert.equal(
+    h.calls.some((call) => call.method === EXECUTION_REVOKED),
+    false,
+  );
 });
 
 test("discard refuses unresolved request without revocation or closure", async (t) => {

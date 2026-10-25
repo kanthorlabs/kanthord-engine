@@ -10,8 +10,10 @@ import {
   type ExecutionRow,
   type MissionTransitions,
   type Registrations,
+  type RevokedExecution,
   type WorkerBindings,
 } from "./contract.ts";
+import { executionTrace } from "./telemetry.ts";
 import {
   endExecution,
   readExecution,
@@ -207,11 +209,15 @@ export function revoke(
   tx: Transaction,
   nodeId: string,
   now: number,
-): string | null {
+): RevokedExecution | null {
   const row = liveExecutionOf(tx, nodeId, now);
   if (!row) return null;
   endExecution(tx, row.execution_id, now);
-  return row.execution_id;
+  return {
+    execution_id: row.execution_id,
+    trace: executionTrace(row),
+    ended_at: now,
+  };
 }
 export function liveExecutionOf(
   tx: Transaction,

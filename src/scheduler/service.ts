@@ -23,7 +23,11 @@ import {
 } from "../kernel/service.ts";
 import type { Store, Transaction } from "../kernel/store.ts";
 import type { SchedulerConfig } from "./config.ts";
-import { ExecutionEnd, type ExecutionTelemetry } from "../tracking/contract.ts";
+import {
+  ExecutionEnd,
+  type ExecutionTelemetry,
+  type RevokeCause,
+} from "../tracking/contract.ts";
 import { executionTrace } from "./telemetry.ts";
 import * as settlement from "./settlement.ts";
 import {
@@ -56,6 +60,7 @@ import {
   type WorkerBindings,
   type EnvironmentGate,
   type MissionClaimFacts,
+  type RevokedExecution,
   type TraceIdentity,
   type UnmatchedClaim,
 } from "./contract.ts";
@@ -219,8 +224,21 @@ export class SchedulerService implements Service, WorkQueue {
       };
     });
   }
-  revoke(tx: Transaction, nodeId: string, now: number): string | null {
+  revoke(
+    tx: Transaction,
+    nodeId: string,
+    now: number,
+  ): RevokedExecution | null {
     return settlement.revoke(tx, nodeId, now);
+  }
+  executionRevoked(execution: RevokedExecution, cause: RevokeCause): void {
+    this.dependencies.telemetry.executionEnded({
+      trace: execution.trace,
+      ended_at: execution.ended_at,
+      end: ExecutionEnd.Revoked,
+      revoke_cause: cause,
+      stop: null,
+    });
   }
   liveExecutionOf(tx: Transaction, nodeId: string, now: number) {
     return settlement.liveExecutionOf(tx, nodeId, now);
@@ -491,6 +509,7 @@ export class SchedulerService implements Service, WorkQueue {
         trace: executionTrace(lost.row),
         ended_at: lost.now,
         end: ExecutionEnd.Lost,
+        revoke_cause: null,
         stop: null,
       });
       this.wake(lost.row.project_id);

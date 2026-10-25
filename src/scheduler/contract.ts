@@ -236,8 +236,20 @@ export interface ExecutionRow {
   ended_at: number | null;
   stop: ReleaseStop | null;
 }
+export interface RevokedExecution {
+  execution_id: string;
+  trace: {
+    execution_id: string;
+    project_id: string;
+    node_id: string;
+    attempt: number;
+    trace_id: string;
+    root_span_id: string;
+  };
+  ended_at: number;
+}
 export interface SchedulerClaims {
-  revoke(tx: Transaction, nodeId: string, now: number): string | null;
+  revoke(tx: Transaction, nodeId: string, now: number): RevokedExecution | null;
   settle(tx: Transaction, nodeId: string, now: number): void;
   liveExecutionOf(
     tx: Transaction,

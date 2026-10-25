@@ -305,12 +305,22 @@ export interface ServerTrace {
 export interface ExecutionTraces {
   traceOf(executionId: string): ExecutionTrace | undefined;
 }
-export const ExecutionEnd = { Finished: "finished", Lost: "lost" } as const;
+export const ExecutionEnd = {
+  Finished: "finished",
+  Lost: "lost",
+  Revoked: "revoked",
+} as const;
 export type ExecutionEnd = (typeof ExecutionEnd)[keyof typeof ExecutionEnd];
+export const RevokeCause = {
+  Assessment: "assessment",
+  Human: "human",
+} as const;
+export type RevokeCause = (typeof RevokeCause)[keyof typeof RevokeCause];
 export interface RootSpanEnd {
   trace: ExecutionTrace;
   ended_at: number;
   end: ExecutionEnd;
+  revoke_cause: RevokeCause | null;
   stop: { reason: string; code: string | null; detail?: string } | null;
 }
 export interface ExecutionTelemetry {

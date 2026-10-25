@@ -1457,6 +1457,7 @@ const workQueue: WorkQueue = {
 };
 const schedulerClaims: SchedulerClaims = {
   revoke: () => null,
+  executionRevoked: () => undefined,
   settle: () => undefined,
   liveExecutionOf: () => null,
 };

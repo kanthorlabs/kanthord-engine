@@ -11,7 +11,9 @@ import {
   type HumanActor,
   type HumanAct,
   type Mission,
+  RevokeCause,
   type ControlResult,
+  type RevokedClaim,
 } from "./contract.ts";
 import type { Dependencies } from "./service.ts";
 import { currentAssessmentOf } from "./currency.ts";
@@ -167,10 +169,22 @@ export function endLiveClaim(
   dependencies: Dependencies,
   node: NodeRow,
   now: number,
+  cause: RevokeCause,
+  revoked: RevokedClaim[],
 ): void {
   assert.ok(tx.database.isTransaction);
-  if (node.state === NodeState.Executing || node.state === NodeState.Evaluating)
-    dependencies.schedulerClaims.revoke(tx, node.id, now);
+  if (node.state !== NodeState.Executing && node.state !== NodeState.Evaluating)
+    return;
+  const execution = dependencies.schedulerClaims.revoke(tx, node.id, now);
+  if (execution !== null) revoked.push({ execution, cause });
+}
+
+export function reportRevoked(
+  dependencies: Dependencies,
+  revoked: readonly RevokedClaim[],
+): void {
+  for (const claim of revoked)
+    dependencies.schedulerClaims.executionRevoked(claim.execution, claim.cause);
 }
 
 export function transition(

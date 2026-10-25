@@ -144,6 +144,7 @@ export function release(
     trace: executionTrace(released),
     ended_at: result.ended_at,
     end: ExecutionEnd.Finished,
+    revoke_cause: null,
     stop: body.stop,
   });
   if (environmentRepositories !== null && body.stop !== null)

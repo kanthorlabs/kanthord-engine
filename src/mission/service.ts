@@ -50,7 +50,9 @@ import {
   type EventDecoder,
   type Intent,
   type ImportPreview,
+  type RevokedClaim,
 } from "./contract.ts";
+import { reportRevoked } from "./control.ts";
 import { addDependency, removeDependency } from "./dependency.ts";
 import { pauseNode, readyNode, resumeNode } from "./control-hold.ts";
 import { blockNode, discardNode, overrideNode } from "./control-close.ts";
@@ -352,6 +354,7 @@ export class MissionService
       ({ params, body }, caller) => {
         const claim = caller.execution;
         assert.ok(claim);
+        const revoked: RevokedClaim[] = [];
         const result = caller.commit((tx) =>
           submitAssessment(
             tx,
@@ -360,8 +363,10 @@ export class MissionService
             params.node_id,
             body,
             Date.now(),
+            revoked,
           ),
         );
+        reportRevoked(this.dependencies, revoked);
         this.dependencies.wakeup.wake(claim.projectId);
         return result;
       },
@@ -533,7 +538,7 @@ export class MissionService
     registry.register(
       missionOperations["node.override"],
       ({ params, body }, caller) =>
-        this.commitGraph(caller, { node_id: params.node_id }, (tx) =>
+        this.commitGraph(caller, { node_id: params.node_id }, (tx, revoked) =>
           overrideNode(
             tx,
             this.dependencies,
@@ -541,6 +546,7 @@ export class MissionService
             body,
             humanActor(caller),
             Date.now(),
+            revoked,
           ),
         ),
     );
@@ -561,7 +567,7 @@ export class MissionService
     registry.register(
       missionOperations["node.discard"],
       ({ params, body }, caller) =>
-        this.commitGraph(caller, { node_id: params.node_id }, (tx) =>
+        this.commitGraph(caller, { node_id: params.node_id }, (tx, revoked) =>
           discardNode(
             tx,
             this.dependencies,
@@ -569,6 +575,7 @@ export class MissionService
             body,
             humanActor(caller),
             Date.now(),
+            revoked,
           ),
         ),
     );
@@ -603,7 +610,7 @@ export class MissionService
     registry.register(
       missionOperations["node.pause"],
       ({ params, body }, caller) =>
-        this.commitGraph(caller, { node_id: params.node_id }, (tx) =>
+        this.commitGraph(caller, { node_id: params.node_id }, (tx, revoked) =>
           pauseNode(
             tx,
             this.dependencies,
@@ -611,6 +618,7 @@ export class MissionService
             body,
             humanActor(caller),
             Date.now(),
+            revoked,
           ),
         ),
     );
@@ -921,15 +929,17 @@ export class MissionService
   private commitGraph<T>(
     caller: CallerContext,
     scope: WriteScope,
-    write: (tx: Transaction) => T,
+    write: (tx: Transaction, revoked: RevokedClaim[]) => T,
   ): T {
     let projectId: string | null = null;
+    const revoked: RevokedClaim[] = [];
     const result = caller.commit((tx) => {
-      const result = write(tx);
+      const result = write(tx, revoked);
       projectId = projectOf(tx, scope);
       return result;
     });
     assert.ok(projectId);
+    reportRevoked(this.dependencies, revoked);
     this.dependencies.wakeup.wake(projectId);
     return result;
   }

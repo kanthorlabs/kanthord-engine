@@ -8,6 +8,7 @@ import {
   FIXTURE_NOW,
   FIXTURE_DEADLINE,
 } from "./test-support.ts";
+import { executionTrace } from "./telemetry.ts";
 import {
   insertExecution,
   readExecution,
@@ -172,10 +173,11 @@ test("consecutive losses reset after a finished row or revocation and isolate at
       expired_at: FIXTURE_DEADLINE + 100,
     });
     insertExecution(tx, revoked);
-    assert.equal(
-      revoke(tx, row.node_id, FIXTURE_DEADLINE + 2),
-      revoked.execution_id,
-    );
+    assert.deepEqual(revoke(tx, row.node_id, FIXTURE_DEADLINE + 2), {
+      execution_id: revoked.execution_id,
+      trace: executionTrace(revoked),
+      ended_at: FIXTURE_DEADLINE + 2,
+    });
     assert.equal(
       claimStateOf(
         readExecution(tx, revoked.execution_id)!,

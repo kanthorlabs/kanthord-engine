@@ -162,6 +162,7 @@ test("priority refuses a live claim before changing its node or job", (t) => {
     schedulerClaims: {
       settle: () => assert.fail(),
       revoke: () => assert.fail(),
+      executionRevoked: () => assert.fail(),
       liveExecutionOf: () => ({
         execution_id: executionId,
         runtime_identity: "runtime",
@@ -184,6 +185,7 @@ test("dependency admission settles the dependent before testing its live claim",
   const f = dependencyFixture(t, undefined, undefined, {
     schedulerClaims: {
       revoke: () => assert.fail(),
+      executionRevoked: () => assert.fail(),
       settle: (tx, id) => {
         assert.ok(tx.database.isTransaction);
         settled.add(id);
@@ -352,6 +354,7 @@ function makeService(
     health,
     schedulerClaims: {
       revoke: () => null,
+      executionRevoked: () => undefined,
       settle: () => {},
       liveExecutionOf: () => null,
     },
@@ -4092,6 +4095,7 @@ test("import dependency additions settle a live dependent and dependency-only ed
   const f = importApplyFixture(t, undefined, undefined, {
     schedulerClaims: {
       revoke: () => assert.fail(),
+      executionRevoked: () => assert.fail(),
       settle: (_tx, id) => {
         settled.add(id);
       },

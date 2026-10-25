@@ -13,7 +13,9 @@ import {
   PlatformAddressKind,
   Intent,
   MissionErrorCode,
+  RevokeCause,
   type AssessmentSubmit,
+  type RevokedExecution,
 } from "./contract.ts";
 import {
   readOpenAttempt,
@@ -31,7 +33,11 @@ import {
   insertDependency,
 } from "./store.ts";
 import { getRevision } from "./node-read.ts";
-import { evidenceHarness, executionHarness } from "./test-support.ts";
+import {
+  evidenceHarness,
+  executionHarness,
+  revokedExecution,
+} from "./test-support.ts";
 
 const IDENTITY = testHumanIdentity("ulrich", "Ulrich", "token");
 const SUCCESSFUL_EXIT_CODE = 0;
@@ -42,6 +48,8 @@ const NOT_RUNNING = "scheduler.execution.not_running";
 const VALIDATION = "gateway.request.validation_failed";
 const QUEUE_INSERT = "workQueue.insert";
 const REWORK_OFF = 0;
+const ROLLBACK = "rollback";
+const EXECUTION_REVOKED = "schedulerClaims.executionRevoked";
 const SECOND_ATTEMPT = 2;
 const FIRST_REWORK = 1;
 const HUMAN_REASON = "Hold";
@@ -217,10 +225,10 @@ async function fixture(t: TestContext, action: RepositoryAction | null = null) {
     setNodeState(tx, h.node_id, NodeState.Evaluating),
   );
   let revokes = NO_CALLS;
-  h.dependencies.schedulerClaims.revoke = () => {
+  h.dependencies.schedulerClaims.revoke = (_tx, nodeId, now) => {
     revokes++;
     h.dependencies.schedulerClaims.liveExecutionOf = () => null;
-    return h.claim.executionId;
+    return revokedExecution(h.claim.executionId, nodeId, now);
   };
   const body: AssessmentSubmit = {
     ...h.context,
@@ -257,6 +265,49 @@ test("current passing assessments close attempts and revoke claims without an ex
   await assert.rejects(
     h.submit(),
     (error) => error instanceof OperationError && error.code === NOT_RUNNING,
+  );
+});
+
+test("a not-met assessment that sends rework and a passed assessment that completes the node end the root span with the assessment cause", async (t) => {
+  for (const [result, state] of [
+    [AssessmentResult.CriterionNotMet, NodeState.Available],
+    [AssessmentResult.Success, NodeState.Completed],
+  ] as const) {
+    const h = await fixture(t);
+    const answer = await h.submit({ ...h.body, result });
+    assert.ok("state" in answer.node);
+    assert.equal(answer.node.state, state);
+    const ends = h.calls.filter((call) => call.method === EXECUTION_REVOKED);
+    assert.equal(ends.length, FIRST_REVISION);
+    const [execution, cause] = ends[0]!.arguments as [RevokedExecution, string];
+    assert.equal(execution.execution_id, h.claim.executionId);
+    assert.equal(execution.trace.execution_id, h.claim.executionId);
+    assert.equal(cause, RevokeCause.Assessment);
+  }
+});
+
+test("a required-action pass keeps the claim and ends no root span", async (t) => {
+  const h = await fixture(t, RepositoryAction.PullRequest);
+  await h.submit();
+  assert.equal(
+    h.calls.some((call) => call.method === EXECUTION_REVOKED),
+    false,
+  );
+});
+
+test("a rolled back assessment ends no root span", async (t) => {
+  const h = await fixture(t);
+  h.dependencies.workQueue.insert = () => {
+    throw new Error(ROLLBACK);
+  };
+  await assert.rejects(
+    h.submit({ ...h.body, result: AssessmentResult.CriterionNotMet }),
+    { message: ROLLBACK },
+  );
+  assert.equal(h.revokes(), FIRST_REVISION);
+  assert.equal(
+    h.calls.some((call) => call.method === EXECUTION_REVOKED),
+    false,
   );
 });
 

@@ -3,7 +3,12 @@ import { test } from "node:test";
 import { testHumanIdentity } from "../kernel/test-identity.ts";
 import { OperationError } from "../kernel/errors.ts";
 import { createIdentity } from "../kernel/identity.ts";
-import { AssessmentResult, MissionErrorCode, NodeState } from "./contract.ts";
+import {
+  AssessmentResult,
+  MissionErrorCode,
+  NodeState,
+  RevokeCause,
+} from "./contract.ts";
 import {
   admitControl,
   ControlError,
@@ -93,6 +98,7 @@ test("control admission re-reads settled state and terminal refusal precedes exp
   const h = controlHarness(t, IDENTITY, {
     schedulerClaims: {
       revoke: () => null,
+      executionRevoked: () => undefined,
       liveExecutionOf: () => null,
       settle: (tx, id) => setNodeState(tx, id, NodeState.Paused),
     },
@@ -181,14 +187,25 @@ test("transition replaces a claimable job and revokes only active claims", (t) =
       h.dependencies,
       { ...node, state: NodeState.Executing },
       NOW,
+      RevokeCause.Human,
+      [],
     );
     endLiveClaim(
       tx,
       h.dependencies,
       { ...node, state: NodeState.Evaluating },
       NOW,
+      RevokeCause.Human,
+      [],
     );
-    endLiveClaim(tx, h.dependencies, { ...node, state: NodeState.Paused }, NOW);
+    endLiveClaim(
+      tx,
+      h.dependencies,
+      { ...node, state: NodeState.Paused },
+      NOW,
+      RevokeCause.Human,
+      [],
+    );
   });
   assert.deepEqual(
     h.calls.map((call) => call.method),

@@ -8,7 +8,9 @@ import {
   ResumeTarget,
   type Resume,
   type HumanAct,
+  RevokeCause,
   type HumanActor,
+  type RevokedClaim,
 } from "./contract.ts";
 import { readinessOf } from "./conditions.ts";
 import { actionStatesOf } from "./frozen-action.ts";
@@ -129,6 +131,7 @@ export function pauseNode(
   body: HumanAct,
   actor: HumanActor,
   now: number,
+  revoked: RevokedClaim[],
 ) {
   const { node, mission } = admitControl(
     tx,
@@ -138,7 +141,7 @@ export function pauseNode(
     PAUSE_STATES,
     now,
   );
-  endLiveClaim(tx, dependencies, node, now);
+  endLiveClaim(tx, dependencies, node, now, RevokeCause.Human, revoked);
   transition(tx, dependencies, mission, node, NodeState.Paused, now);
   return controlResult(tx, dependencies, nodeId, null, actor, now);
 }

@@ -20,7 +20,10 @@ import {
   schedulerHarness,
   executionFixture,
   FIXTURE_DEADLINE,
+  FIXTURE_NOW,
 } from "./test-support.ts";
+import { ExecutionEnd, RevokeCause } from "../tracking/contract.ts";
+import { executionTrace } from "./telemetry.ts";
 import { insertExecution, readExecution } from "./execution-store.ts";
 
 const EXECUTION_ENDED = "executionEnded";
@@ -485,6 +488,46 @@ test("run owns the 30-second loss sweep and quiescence stops it permanently", as
       .get()!.count,
     LIST_PAGE_LIMIT,
   );
+});
+
+test("a revocation writes one root end after the commit and a rolled back revocation writes none", (t) => {
+  const h = schedulerHarness(t);
+  const row = executionFixture();
+  const rollback = new Error("rollback");
+  h.store.transaction((tx) => insertExecution(tx, row));
+  assert.throws(
+    () =>
+      h.store.transaction((tx) => {
+        h.service.revoke(tx, row.node_id, FIXTURE_NOW);
+        throw rollback;
+      }),
+    rollback,
+  );
+  assert.equal(
+    h.store.transaction((tx) => readExecution(tx, row.execution_id))?.ended_at,
+    null,
+  );
+  assert.deepEqual(h.telemetry, []);
+  const revoked = h.store.transaction((tx) =>
+    h.service.revoke(tx, row.node_id, FIXTURE_NOW),
+  );
+  assert.ok(revoked);
+  assert.deepEqual(h.telemetry, []);
+  h.service.executionRevoked(revoked, RevokeCause.Human);
+  assert.deepEqual(h.telemetry, [
+    {
+      method: EXECUTION_ENDED,
+      arguments: [
+        {
+          trace: executionTrace(row),
+          ended_at: FIXTURE_NOW,
+          end: ExecutionEnd.Revoked,
+          revoke_cause: RevokeCause.Human,
+          stop: null,
+        },
+      ],
+    },
+  ]);
 });
 
 test("sweep hands consecutive loss counts to Mission once per steps and evaluation row", (t) => {

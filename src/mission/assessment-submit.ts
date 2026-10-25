@@ -7,7 +7,9 @@ import {
   AssessmentResult,
   NodeState,
   PROPOSAL_IDENTITY_PREFIX,
+  RevokeCause,
   type AssessmentSubmit,
+  type RevokedClaim,
 } from "./contract.ts";
 import { admitAssessment } from "./assessment-admit.ts";
 import {
@@ -64,6 +66,7 @@ export function submitAssessment(
   nodeId: string,
   body: AssessmentSubmit,
   now: number,
+  revoked: RevokedClaim[],
 ) {
   const { node, attempt, revision } = admitExecution(
     tx,
@@ -98,7 +101,7 @@ export function submitAssessment(
   );
   let outcome: OutcomeRow | null = null;
   if (current && causesRework(tx, dependencies, assessment)) {
-    endLiveClaim(tx, dependencies, node, now);
+    endLiveClaim(tx, dependencies, node, now, RevokeCause.Assessment, revoked);
     transition(
       tx,
       dependencies,
@@ -114,7 +117,7 @@ export function submitAssessment(
   ) {
     if (body.result === AssessmentResult.Success)
       requireNoUnresolvedAction(tx, node);
-    endLiveClaim(tx, dependencies, node, now);
+    endLiveClaim(tx, dependencies, node, now, RevokeCause.Assessment, revoked);
     closeAttempt(tx, node.id, attempt.attempt, now);
     outcome = insertOutcome(tx, {
       id: createIdentity("outcome"),

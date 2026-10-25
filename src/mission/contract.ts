@@ -109,8 +109,33 @@ export interface MissionCollaborations {
   claimFactsOf(tx: Transaction, projectId: string): ClaimFactsRow[];
 }
 
+export const RevokeCause = {
+  Assessment: "assessment",
+  Human: "human",
+} as const;
+export type RevokeCause = (typeof RevokeCause)[keyof typeof RevokeCause];
+
+export interface RevokedExecution {
+  execution_id: string;
+  trace: {
+    execution_id: string;
+    project_id: string;
+    node_id: string;
+    attempt: number;
+    trace_id: string;
+    root_span_id: string;
+  };
+  ended_at: number;
+}
+
+export interface RevokedClaim {
+  execution: RevokedExecution;
+  cause: RevokeCause;
+}
+
 export interface SchedulerClaims {
-  revoke(tx: Transaction, nodeId: string, now: number): string | null;
+  revoke(tx: Transaction, nodeId: string, now: number): RevokedExecution | null;
+  executionRevoked(execution: RevokedExecution, cause: RevokeCause): void;
   settle(tx: Transaction, nodeId: string, now: number): void;
   liveExecutionOf(
     tx: Transaction,
