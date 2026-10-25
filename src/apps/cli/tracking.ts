@@ -18,6 +18,10 @@ import {
   TIMELINE_LIMIT_MIN,
   TimelineScope,
   TraceSort,
+  analyticsBucketSchema,
+  analyticsMeasureSchema,
+  costGroupBySchema,
+  durationGroupBySchema,
   entryIdentitySchema,
   spanIdSchema,
   timelineDepthSchema,
@@ -41,6 +45,9 @@ const SESSION = "session";
 const ENTRY = "entry";
 const FACET = "facet";
 const TIMELINE = "timeline";
+const ANALYTICS = "analytics";
+const COST = "cost";
+const DURATION = "duration";
 const PROJECT_IDENTITY_PREFIX = "project";
 const NODE_IDENTITY_PREFIX = "node";
 const EXECUTION_IDENTITY_PREFIX = "execution";
@@ -218,6 +225,101 @@ async function timelineList(command: Command): Promise<void> {
     cursor: options.cursor,
   };
   const result = await client(command, leaf).timelineList({
+    params: {},
+    query,
+    body: null,
+  });
+  process.stdout.write(
+    `${JSON.stringify(handleReadResult(result, code("indeterminate")))}\n`,
+  );
+}
+
+function analyticsFilter(
+  options: Record<string, string | undefined>,
+  code: (suffix: string) => string,
+) {
+  return {
+    project_id: optionOf(
+      identitySchema(PROJECT_IDENTITY_PREFIX),
+      options.project,
+      code("invalid_project_id"),
+      "project ID",
+    ),
+    node_id: optionOf(
+      identitySchema(NODE_IDENTITY_PREFIX),
+      options.node,
+      code("invalid_node_id"),
+      "node ID",
+    ),
+    from: unixMsOption(options.from, code("invalid_query")),
+    to: unixMsOption(options.to, code("invalid_query")),
+  };
+}
+
+async function analyticsCost(command: Command): Promise<void> {
+  const leaf = `${ANALYTICS}.${COST}`;
+  const options = command.optsWithGlobals();
+  const code = (suffix: string) => `cli.tracking.${leaf}.${suffix}`;
+  const query = {
+    ...analyticsFilter(options, code),
+    group_by: optionOf(
+      costGroupBySchema,
+      options.groupBy,
+      code("invalid_query"),
+      "group",
+    ),
+    bucket: optionOf(
+      analyticsBucketSchema,
+      options.bucket,
+      code("invalid_query"),
+      "bucket",
+    ),
+  };
+  const result = await client(command, leaf).analyticsCost({
+    params: {},
+    query,
+    body: null,
+  });
+  process.stdout.write(
+    `${JSON.stringify(handleReadResult(result, code("indeterminate")))}\n`,
+  );
+}
+
+async function analyticsDuration(command: Command): Promise<void> {
+  const leaf = `${ANALYTICS}.${DURATION}`;
+  const options = command.optsWithGlobals();
+  const code = (suffix: string) => `cli.tracking.${leaf}.${suffix}`;
+  const measure = optionOf(
+    analyticsMeasureSchema,
+    options.measure,
+    code("invalid_query"),
+    "measure",
+  );
+  if (measure === undefined)
+    throw new Diagnostic(code("invalid_query"), "--measure is required");
+  const query = {
+    ...analyticsFilter(options, code),
+    measure,
+    operation: optionOf(
+      trackingOperations.analyticsDuration.input.shape.query.shape.operation,
+      options.operation,
+      code("invalid_query"),
+      "operation",
+    ),
+    group_by: optionOf(
+      durationGroupBySchema,
+      options.groupBy,
+      code("invalid_query"),
+      "group",
+    ),
+    bucket: optionOf(
+      analyticsBucketSchema,
+      options.bucket,
+      code("invalid_query"),
+      "bucket",
+    ),
+  };
+  const result = await client(command, leaf).analyticsDuration({
     params: {},
     query,
     body: null,
@@ -421,6 +523,32 @@ export function addTrackingCommand(program: Command): void {
       singleUse("--cursor"),
     )
     .action((_options, command: Command) => timelineList(command));
+  const analytics = tracking
+    .command(ANALYTICS)
+    .description("Read the cost and the duration analytics of the traces");
+  analytics.action(() => analytics.help());
+  analytics
+    .command(COST)
+    .description("Sum the tokens and the cost of the agent turns as JSON")
+    .option("--group-by <field>", "Group field", singleUse("--group-by"))
+    .option("--bucket <size>", "Time bucket", singleUse("--bucket"))
+    .option("--project <project-id>", "Project ID", singleUse("--project"))
+    .option("--node <node-id>", "Node ID", singleUse("--node"))
+    .option("--from <unix-ms>", "Range start", singleUse("--from"))
+    .option("--to <unix-ms>", "Range end", singleUse("--to"))
+    .action((_options, command: Command) => analyticsCost(command));
+  analytics
+    .command(DURATION)
+    .description("Summarize one duration measure as JSON")
+    .option("--measure <measure>", "Measure", singleUse("--measure"))
+    .option("--operation <name>", "Span operation", singleUse("--operation"))
+    .option("--group-by <field>", "Group field", singleUse("--group-by"))
+    .option("--bucket <size>", "Time bucket", singleUse("--bucket"))
+    .option("--project <project-id>", "Project ID", singleUse("--project"))
+    .option("--node <node-id>", "Node ID", singleUse("--node"))
+    .option("--from <unix-ms>", "Range start", singleUse("--from"))
+    .option("--to <unix-ms>", "Range end", singleUse("--to"))
+    .action((_options, command: Command) => analyticsDuration(command));
   const span = tracking.command(SPAN).description("Read the spans of a trace");
   span.action(() => span.help());
   span
