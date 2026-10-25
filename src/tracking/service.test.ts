@@ -673,6 +673,27 @@ function timelineListQuery(
   };
 }
 
+test("a trace list and a timeline with from after to answer the range error", (t) => {
+  const { store, service } = harness(t);
+  service.executionOpened(TRACE, CREATED, OPENING);
+  const inverted = { from: ENDED, to: CREATED };
+  assert.throws(
+    () => service.traceList(traceListQuery(inverted), caller(store)),
+    rangeInvalid,
+  );
+  assert.throws(
+    () => service.timelineList(timelineListQuery(inverted), caller(store)),
+    rangeInvalid,
+  );
+  assert.equal(
+    service.traceList(
+      traceListQuery({ from: CREATED, to: CREATED }),
+      caller(store),
+    ).items.length,
+    ONE_ENTRY,
+  );
+});
+
 test("a timeline page of a node scope holds the root and its child with a null cursor", (t) => {
   const { store, service } = harness(t);
   service.executionOpened(TRACE, CREATED, OPENING);
@@ -1293,7 +1314,7 @@ test("a refused server contribution raises no error and counts as a drop", (t) =
 
 const HOUR_MS = 3600000;
 const DAY_START = Math.floor(NOW / DAY_MS) * DAY_MS;
-const RANGE_INVALID = "tracking.analytics.range_invalid";
+const RANGE_INVALID = "tracking.filter.range_invalid";
 const ANALYTICS_LIMIT = 1000;
 const OVER_LIMIT = 1001;
 const TRACES_OVER_STEP = 300;
