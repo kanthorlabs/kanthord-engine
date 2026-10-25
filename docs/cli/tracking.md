@@ -131,8 +131,10 @@ rejects unknown arguments and options before work.
 ## `trace list`
 
 Reads one page of trace summaries, newest first by default. Each item is a
-trace summary of [`trace get`](#trace-get). `next_cursor` is `null` on the last
-page.
+trace summary of [`trace get`](#trace-get) with two more fields:
+`root_operation` and `root_attributes`. They hold the `operation` and the
+`attributes` of the root span. Both are `null` while the store holds no root
+span. `next_cursor` is `null` on the last page.
 
 The API filters of `tracking.trace.list` combine with AND:
 

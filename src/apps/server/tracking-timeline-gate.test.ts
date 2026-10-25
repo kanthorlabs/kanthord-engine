@@ -432,6 +432,14 @@ test(
     assert.equal(executionSummaries.length, EXECUTION_TRACES);
     assert.equal(actSummaries.length, ACT_TRACES);
 
+    await t.test("0 trace list root span", () => {
+      for (const summary of summaries) {
+        const root = rootOf(summary);
+        assert.equal(summary.root_operation, root.operation);
+        assert.deepEqual(summary.root_attributes, root.attributes);
+      }
+    });
+
     await t.test("1 node scope, depth 1", async () => {
       const page = await r.timeline({
         node_id: nodeId,
