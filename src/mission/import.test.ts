@@ -1827,6 +1827,7 @@ const workQueue: WorkQueue = {
   insert: () => undefined,
   delete: () => undefined,
   priorityUpdate: () => undefined,
+  firstQueuedAt: () => null,
 };
 const schedulerClaims: SchedulerClaims = {
   revoke: () => null,

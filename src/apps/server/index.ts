@@ -481,6 +481,7 @@ export function composeServices(options: {
     delete: (tx, nodeId) => scheduler.delete(tx, nodeId),
     priorityUpdate: (tx, nodeId, priority) =>
       scheduler.priorityUpdate(tx, nodeId, priority),
+    firstQueuedAt: (tx, nodeId) => scheduler.firstQueuedAt(tx, nodeId),
   };
   const custody = new CustodyComponent({
     instanceCopyRefreshed: (holder) => llm.raiseCredentialVersion(holder),

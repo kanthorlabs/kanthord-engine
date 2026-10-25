@@ -19,6 +19,7 @@ import {
   type NodeTransition,
   type RevokedClaim,
   type SchedulerClaims,
+  type WorkQueue,
 } from "./contract.ts";
 import type { ExecutionTrace } from "../tracking/contract.ts";
 import type { Acted } from "./act-telemetry.ts";
@@ -253,6 +254,7 @@ export function transition(
 
 export function nodeTransition(
   tx: Transaction,
+  workQueue: WorkQueue,
   nodeId: string,
   from: NodeState,
   limited: { rule: TransitionRule; count: number; limit: number } | null,
@@ -265,7 +267,8 @@ export function nodeTransition(
     rule: limited?.rule ?? TransitionRule.None,
     count: limited?.count ?? null,
     limit: limited?.limit ?? null,
-    first_available_at: null,
+    first_available_at:
+      to === NodeState.Completed ? workQueue.firstQueuedAt(tx, nodeId) : null,
   };
 }
 
@@ -364,6 +367,7 @@ export function actedOn(
       reason,
       revoked,
       evidence_id: null,
+      lead_time_ms: null,
     },
   };
 }

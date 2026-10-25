@@ -148,6 +148,7 @@ export function approveProposal(
       reason: body.reason ?? null,
       revoked: null,
       evidence_id: null,
+      lead_time_ms: null,
     },
   };
 }

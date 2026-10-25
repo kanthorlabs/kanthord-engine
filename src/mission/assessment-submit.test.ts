@@ -62,6 +62,7 @@ const FIRST_REWORK = 1;
 const HUMAN_REASON = "Hold";
 const TRANSITION_ARGUMENT = 2;
 const FAILURE_CAUSE_ARGUMENT = 3;
+const FIRST_QUEUED_AT = 40;
 const REWORK_CAUSE = attributed(
   CauseCategory.Model,
   CauseSubcategory.WorkDefect,
@@ -335,6 +336,25 @@ test("a revocation by an assessment hands over the states and the rule that does
       count: null,
       limit: null,
       first_available_at: null,
+    });
+  }
+});
+
+test("a transition to Completed hands the first queue time and another transition hands null", async (t) => {
+  for (const [result, to, firstAvailableAt] of [
+    [AssessmentResult.Success, NodeState.Completed, FIRST_QUEUED_AT],
+    [AssessmentResult.Undetermined, NodeState.Blocked, null],
+  ] as const) {
+    const h = await fixture(t);
+    h.dependencies.workQueue.firstQueuedAt = () => FIRST_QUEUED_AT;
+    await h.submit({ ...h.body, result });
+    assert.deepEqual(revokedTransition(h.calls), {
+      from: NodeState.Evaluating,
+      to,
+      rule: TransitionRule.None,
+      count: null,
+      limit: null,
+      first_available_at: firstAvailableAt,
     });
   }
 });

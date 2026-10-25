@@ -30,9 +30,11 @@ const FACTS: ActFacts = {
   reason: "Stop for review.",
   revoked: null,
   evidence_id: null,
+  lead_time_ms: null,
 };
 const NINE_ACTS = 9;
 const EVIDENCE_ID = "evidence_1";
+const LEAD_TIME_MS = 460;
 
 test("the acts are the closed set of nine operations", () => {
   assert.equal(Object.keys(Act).length, NINE_ACTS);
@@ -98,6 +100,19 @@ test("actTrace links the root span of a revoked execution", () => {
   assert.deepEqual(contribution.links, [
     { trace_id: REVOKED.trace_id, span_id: REVOKED.root_span_id },
   ]);
+});
+
+test("actTrace writes the lead time only when the facts hold it", () => {
+  const { contribution } = actTrace(Act.Override, {
+    ...FACTS,
+    lead_time_ms: LEAD_TIME_MS,
+  });
+  assert.equal(contribution.attributes[ActAttribute.LeadTimeMs], LEAD_TIME_MS);
+  assert.equal(
+    ActAttribute.LeadTimeMs in
+      actTrace(Act.Pause, FACTS).contribution.attributes,
+    false,
+  );
 });
 
 test("actTrace names no attempt before the first attempt opens", () => {
