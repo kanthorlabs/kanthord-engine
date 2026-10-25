@@ -523,7 +523,14 @@ test(
         assert.deepEqual(answer.result, {
           kind: "released",
           furtherWork: true,
-          stop: budgetEnd,
+          stop: {
+            ...budgetEnd,
+            cause: {
+              category: "unattributed",
+              suspects: ["plan", "model"],
+              assigner: "rule",
+            },
+          },
         });
         assert.equal(answer.provider.calls.length, SINGLE_ITEM);
         assert.deepEqual((await evidence(B)).items, []);
