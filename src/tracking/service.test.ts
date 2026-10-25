@@ -1,12 +1,18 @@
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
+import { setImmediate } from "node:timers/promises";
 import { IdentityKind } from "../kernel/caller.ts";
-import { background } from "../kernel/context.ts";
+import { background, CancellationContext } from "../kernel/context.ts";
 import { OperationError } from "../kernel/errors.ts";
+import { HttpStatus } from "../kernel/http.ts";
 import type { CallerContext } from "../kernel/operation.ts";
 import { IN_MEMORY_DATABASE, Store } from "../kernel/store.ts";
 import {
+  AnalyticsBucket,
+  AnalyticsMeasure,
+  CostGroupBy,
   Disposition,
+  DurationGroupBy,
   ExecutionEnd,
   ExecutionKind,
   MISSION_PRODUCER,
@@ -33,7 +39,7 @@ import {
 } from "./contract.ts";
 import { trackingMigrations } from "./migrations.ts";
 import { TrackingService } from "./service.ts";
-import { insertTrace } from "./trace-store.ts";
+import { insertSpan, insertTrace } from "./trace-store.ts";
 
 const TRACE: ExecutionTrace = {
   trace_id: "a".repeat(32),
@@ -1283,4 +1289,268 @@ test("a refused server contribution raises no error and counts as a drop", (t) =
     ).items.length,
     ONE_ENTRY,
   );
+});
+
+const HOUR_MS = 3600000;
+const DAY_START = Math.floor(NOW / DAY_MS) * DAY_MS;
+const RANGE_INVALID = "tracking.analytics.range_invalid";
+const ANALYTICS_LIMIT = 1000;
+const OVER_LIMIT = 1001;
+const TRACES_OVER_STEP = 300;
+const ABORT_CALLS = 2;
+const TURN_OPERATION = "agent.turn";
+const TOOL_OPERATION = "agent.tool";
+const MODEL_ATTRIBUTE = "gen_ai.response.model";
+const COST_ATTRIBUTE = "kanthord.usage.cost_usd";
+const AGENT_ATTRIBUTE = "kanthord.agent.name";
+const TOOL_ATTRIBUTE = "gen_ai.tool.name";
+
+interface AnalyticsSpanSeed {
+  trace?: number;
+  operation?: string;
+  start: number;
+  end?: number | null;
+  attributes?: Record<string, string | number>;
+}
+
+function analyticsTraceId(n: number): string {
+  return n.toString(16).padStart(32, "0");
+}
+
+function analyticsSpanId(n: number): string {
+  return n.toString(16).padStart(16, "0");
+}
+
+function seedAnalytics(
+  store: Store,
+  spans: readonly AnalyticsSpanSeed[],
+  traces = 1,
+): void {
+  store.transaction((tx) => {
+    for (let n = 1; n <= traces; n += 1)
+      tx.database
+        .prepare(
+          "INSERT INTO tracking_trace (trace_id, root_span_id, created_at, started_at) VALUES (?, ?, ?, ?)",
+        )
+        .run(
+          analyticsTraceId(n),
+          analyticsSpanId(n),
+          NOW - 20 * DAY_MS,
+          NOW - 20 * DAY_MS,
+        );
+    spans.forEach((span, index) =>
+      insertSpan(tx, {
+        trace_id: analyticsTraceId(span.trace ?? 1),
+        span_id: analyticsSpanId(1000 + index),
+        parent_span_id: null,
+        producer: "worker",
+        origin: SpanOrigin.Observed,
+        operation: span.operation ?? TURN_OPERATION,
+        start_time: span.start,
+        end_time: span.end ?? null,
+        status: SpanStatus.Unset,
+        attributes: span.attributes ?? {},
+        events: [],
+        links: [],
+        text_ids: [],
+        created_at: span.start,
+      }),
+    );
+  });
+}
+
+function costQuery(query: object = {}) {
+  return trackingOperations.analyticsCost.input.shape.query.parse(query);
+}
+
+function durationQuery(query: object = {}) {
+  return trackingOperations.analyticsDuration.input.shape.query.parse({
+    measure: AnalyticsMeasure.SpanDuration,
+    ...query,
+  });
+}
+
+function rangeInvalid(error: unknown): boolean {
+  return (
+    error instanceof OperationError &&
+    error.status === HttpStatus.BadRequest &&
+    error.code === RANGE_INVALID
+  );
+}
+
+function turn(model: string, start: number, cost: number): AnalyticsSpanSeed {
+  return {
+    start,
+    attributes: { [MODEL_ATTRIBUTE]: model, [COST_ATTRIBUTE]: cost },
+  };
+}
+
+test("a cost read without a query answers the agent turns of the last 7 days by model and day", async (t) => {
+  const { store, service } = harness(t);
+  seedAnalytics(store, [
+    turn("model_a", DAY_START - 2 * DAY_MS + HOUR_MS, 1),
+    turn("model_a", DAY_START - 2 * DAY_MS + 2 * HOUR_MS, 2),
+    turn("model_b", DAY_START - DAY_MS + HOUR_MS, 4),
+    turn("model_a", NOW - 8 * DAY_MS, 8),
+    { ...turn("model_a", NOW - DAY_MS, 16), operation: TOOL_OPERATION },
+  ]);
+  const read = await service.analyticsCost(costQuery(), caller(store));
+  assert.equal(read.truncated, false);
+  assert.deepEqual(
+    read.items.map((item) => [
+      item.key,
+      item.bucket_start,
+      item.turn_count,
+      item.cost_usd,
+    ]),
+    [
+      ["model_a", DAY_START - 2 * DAY_MS, 2, 3],
+      ["model_b", DAY_START - DAY_MS, 1, 4],
+    ],
+  );
+});
+
+test("a duration query holds a measure of the closed set", () => {
+  const { query } = trackingOperations.analyticsDuration.input.shape;
+  assert.ok(!query.safeParse({}).success);
+  assert.ok(!query.safeParse({ measure: "latency" }).success);
+  assert.ok(!query.safeParse({ measure: "span_duration", extra: 1 }).success);
+  for (const measure of Object.values(AnalyticsMeasure))
+    assert.ok(query.safeParse({ measure }).success);
+  assert.ok(
+    !query.safeParse({ measure: "span_duration", group_by: "unknown" }).success,
+  );
+  assert.ok(
+    !query.safeParse({ measure: "span_duration", bucket: "month" }).success,
+  );
+});
+
+test("a cost range of more than 31 days or with from after to is refused", async (t) => {
+  const { store, service } = harness(t);
+  const refused = [
+    { from: NOW - 32 * DAY_MS, to: NOW },
+    { from: NOW - 32 * DAY_MS },
+    { from: NOW - DAY_MS, to: NOW - 2 * DAY_MS },
+    { from: NOW + 1 },
+  ];
+  for (const query of refused)
+    await assert.rejects(
+      service.analyticsCost(costQuery(query), caller(store)),
+      rangeInvalid,
+    );
+  const exact = await service.analyticsCost(
+    costQuery({ from: NOW - 31 * DAY_MS }),
+    caller(store),
+  );
+  assert.deepEqual(exact, { items: [], truncated: false });
+});
+
+test("a duration range of more than 31 days or with from after to is refused", async (t) => {
+  const { store, service } = harness(t);
+  for (const query of [
+    { from: NOW - 32 * DAY_MS },
+    { from: NOW - DAY_MS, to: NOW - 2 * DAY_MS },
+  ])
+    await assert.rejects(
+      service.analyticsDuration(durationQuery(query), caller(store)),
+      rangeInvalid,
+    );
+});
+
+test("a read with only to takes from 7 days before it", async (t) => {
+  const { store, service } = harness(t);
+  const to = NOW - 10 * DAY_MS;
+  seedAnalytics(store, [
+    { ...turn("model_a", to - 6 * DAY_MS, 1), end: to - 6 * DAY_MS + 5 },
+    { ...turn("model_a", to - 8 * DAY_MS, 2), end: to - 8 * DAY_MS + 5 },
+  ]);
+  const cost = await service.analyticsCost(costQuery({ to }), caller(store));
+  assert.deepEqual(
+    cost.items.map((item) => item.turn_count),
+    [1],
+  );
+  const duration = await service.analyticsDuration(
+    durationQuery({ to, operation: TURN_OPERATION }),
+    caller(store),
+  );
+  assert.deepEqual(
+    duration.items.map((item) => item.count),
+    [1],
+  );
+});
+
+test("a cost read answers truncated and at most 1000 items", async (t) => {
+  const { store, service } = harness(t);
+  seedAnalytics(
+    store,
+    Array.from({ length: OVER_LIMIT }, (_, index) => ({
+      start: NOW - HOUR_MS,
+      attributes: { [AGENT_ATTRIBUTE]: `agent_${index}` },
+    })),
+  );
+  const read = await service.analyticsCost(
+    costQuery({
+      group_by: CostGroupBy.AgentName,
+      bucket: AnalyticsBucket.None,
+    }),
+    caller(store),
+  );
+  assert.equal(read.items.length, ANALYTICS_LIMIT);
+  assert.equal(read.truncated, true);
+});
+
+test("a duration read answers truncated and at most 1000 items", async (t) => {
+  const { store, service } = harness(t);
+  seedAnalytics(
+    store,
+    Array.from({ length: OVER_LIMIT }, (_, index) => ({
+      operation: TOOL_OPERATION,
+      start: NOW - HOUR_MS,
+      end: NOW - HOUR_MS + 5,
+      attributes: { [TOOL_ATTRIBUTE]: `tool_${index}` },
+    })),
+  );
+  const read = await service.analyticsDuration(
+    durationQuery({
+      measure: AnalyticsMeasure.ToolLatency,
+      group_by: DurationGroupBy.ToolName,
+    }),
+    caller(store),
+  );
+  assert.equal(read.items.length, ANALYTICS_LIMIT);
+  assert.equal(read.truncated, true);
+});
+
+test("an analytics read never commits and yields to the event loop between steps", async (t) => {
+  const { store, service } = harness(t);
+  seedAnalytics(store, [turn("model_a", NOW - HOUR_MS, 1)], TRACES_OVER_STEP);
+  const reader: CallerContext = {
+    ...caller(store),
+    commit: () => assert.fail("an analytics read must not commit"),
+  };
+  const reads = [
+    (): Promise<unknown> => service.analyticsCost(costQuery(), reader),
+    (): Promise<unknown> => service.analyticsDuration(durationQuery(), reader),
+  ];
+  for (const read of reads) {
+    const order: string[] = [];
+    void setImmediate().then(() => order.push("callback"));
+    await read();
+    order.push("answer");
+    assert.deepEqual(order, ["callback", "answer"]);
+  }
+});
+
+test("an analytics read stops at the step after its signal aborts", async (t) => {
+  const { store, service } = harness(t);
+  seedAnalytics(store, [turn("model_a", NOW - HOUR_MS, 1)], TRACES_OVER_STEP);
+  const transaction = t.mock.method(store, "transaction");
+  const context = new CancellationContext();
+  const reader: CallerContext = { ...caller(store), context };
+  void setImmediate().then(() => context.cancel());
+  await assert.rejects(
+    service.analyticsCost(costQuery(), reader),
+    (error: unknown) => error === context.signal.reason,
+  );
+  assert.equal(transaction.mock.callCount(), ABORT_CALLS);
 });

@@ -1,8 +1,7 @@
 import assert from "node:assert/strict";
-import { z } from "zod";
 import type { Store } from "../kernel/store.ts";
 import { isNumber, isString } from "../kernel/values.ts";
-import { bucketStart, type AnalyticsBucket } from "./analytics-bucket.ts";
+import { bucketStart } from "./analytics-bucket.ts";
 import {
   selectTraces,
   walkSpanGroups,
@@ -11,30 +10,11 @@ import {
   type SelectedTrace,
   type TraceFilter,
 } from "./analytics-walk.ts";
-
-export const AnalyticsMeasure = {
-  SpanDuration: "span_duration",
-  ToolLatency: "tool_latency",
-  VerificationTime: "verification_time",
-  QueueWait: "queue_wait",
-  ReviewWait: "review_wait",
-  RevisionTurns: "revision_turns",
-} as const;
-export const analyticsMeasureSchema = z.enum(AnalyticsMeasure);
-export type AnalyticsMeasure = z.infer<typeof analyticsMeasureSchema>;
-
-export const DurationGroupBy = {
-  None: "none",
-  Operation: "operation",
-  ToolName: "tool_name",
-  AgentName: "agent_name",
-  Model: "model",
-  WorkerName: "worker_name",
-  NodeId: "node_id",
-  ProjectId: "project_id",
-} as const;
-export const durationGroupBySchema = z.enum(DurationGroupBy);
-export type DurationGroupBy = z.infer<typeof durationGroupBySchema>;
+import {
+  AnalyticsMeasure,
+  DurationGroupBy,
+  type AnalyticsBucket,
+} from "./contract.ts";
 
 export interface DurationQuery extends TraceFilter {
   from: number;

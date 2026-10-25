@@ -1,0 +1,213 @@
+# Generated from the operation registry by kanthord gateway openapi.
+pathItem:
+  get:
+    operationId: tracking.analytics.duration
+    tags:
+      - tracking
+    description: Summarize one duration measure in a time range of at most 31 days
+      as percentiles, mean and maximum, by group and time bucket. The default
+      range is the last 7 days. The answer holds at most 1000 items.
+    x-access-policy: human
+    x-timeout-ms: 30000
+    x-mutation: false
+    x-kanthord-lifetime: unary
+    security:
+      - bearerAuth: []
+    parameters:
+      - name: project_id
+        in: query
+        required: false
+        schema:
+          $ref: "#/components/schemas/tracking.analytics.duration.Input/properties/query/\
+            properties/project_id"
+      - name: node_id
+        in: query
+        required: false
+        schema:
+          $ref: "#/components/schemas/tracking.analytics.duration.Input/properties/query/\
+            properties/node_id"
+      - name: from
+        in: query
+        required: false
+        schema:
+          $ref: "#/components/schemas/tracking.analytics.duration.Input/properties/query/\
+            properties/from"
+      - name: to
+        in: query
+        required: false
+        schema:
+          $ref: "#/components/schemas/tracking.analytics.duration.Input/properties/query/\
+            properties/to"
+      - name: measure
+        in: query
+        required: true
+        schema:
+          $ref: "#/components/schemas/tracking.analytics.duration.Input/properties/query/\
+            properties/measure"
+      - name: operation
+        in: query
+        required: false
+        schema:
+          $ref: "#/components/schemas/tracking.analytics.duration.Input/properties/query/\
+            properties/operation"
+      - name: group_by
+        in: query
+        required: false
+        schema:
+          $ref: "#/components/schemas/tracking.analytics.duration.Input/properties/query/\
+            properties/group_by"
+      - name: bucket
+        in: query
+        required: false
+        schema:
+          $ref: "#/components/schemas/tracking.analytics.duration.Input/properties/query/\
+            properties/bucket"
+    responses:
+      "200":
+        description: Completed result
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/tracking.analytics.duration.Output"
+      "400":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "401":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "403":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "404":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "409":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "413":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "415":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "500":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "503":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "504":
+        $ref: ../shared/components.yaml#/components/responses/Error
+components:
+  schemas:
+    tracking.analytics.duration.Input:
+      type: object
+      properties:
+        params:
+          type: object
+          properties: {}
+          additionalProperties: false
+        query:
+          type: object
+          properties:
+            project_id:
+              type: string
+              minLength: 34
+              maxLength: 34
+              pattern: ^project_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+              description: project_ followed by a canonical 26-character uppercase ULID.
+            node_id:
+              type: string
+              minLength: 31
+              maxLength: 31
+              pattern: ^node_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+              description: node_ followed by a canonical 26-character uppercase ULID.
+            from:
+              type: integer
+              minimum: 0
+              maximum: 9007199254740991
+            to:
+              type: integer
+              minimum: 0
+              maximum: 9007199254740991
+            measure:
+              type: string
+              enum:
+                - span_duration
+                - tool_latency
+                - verification_time
+                - queue_wait
+                - review_wait
+                - revision_turns
+            operation:
+              type: string
+              minLength: 1
+            group_by:
+              default: none
+              type: string
+              enum:
+                - none
+                - operation
+                - tool_name
+                - agent_name
+                - model
+                - worker_name
+                - node_id
+                - project_id
+            bucket:
+              default: none
+              type: string
+              enum:
+                - none
+                - hour
+                - day
+                - week
+          required:
+            - measure
+          additionalProperties: false
+        body:
+          type: "null"
+      required:
+        - params
+        - query
+        - body
+      additionalProperties: false
+    tracking.analytics.duration.Output:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            type: object
+            properties:
+              key:
+                anyOf:
+                  - type: string
+                  - type: "null"
+              bucket_start:
+                anyOf:
+                  - type: integer
+                    minimum: -9007199254740991
+                    maximum: 9007199254740991
+                  - type: "null"
+              count:
+                type: integer
+                minimum: -9007199254740991
+                maximum: 9007199254740991
+              p50:
+                type: number
+              p90:
+                type: number
+              p99:
+                type: number
+              mean:
+                type: number
+              max:
+                type: number
+            required:
+              - key
+              - bucket_start
+              - count
+              - p50
+              - p90
+              - p99
+              - mean
+              - max
+            additionalProperties: false
+        truncated:
+          type: boolean
+      required:
+        - items
+        - truncated
+      additionalProperties: false

@@ -54,9 +54,11 @@ The literal service prefix is `/api/tracking`. Read requests have no body.
 
 API-only operation:
 
-| Operation identifier       | HTTP route                                             | Access / effect                                                       |
-| -------------------------- | ------------------------------------------------------ | --------------------------------------------------------------------- |
-| `tracking.telemetry.write` | `POST /api/tracking/execution/:execution_id/telemetry` | `client` with the execution proof; mutation, idempotency key required |
+| Operation identifier          | HTTP route                                             | Access / effect                                                       |
+| ----------------------------- | ------------------------------------------------------ | --------------------------------------------------------------------- |
+| `tracking.telemetry.write`    | `POST /api/tracking/execution/:execution_id/telemetry` | `client` with the execution proof; mutation, idempotency key required |
+| `tracking.analytics.cost`     | `GET /api/tracking/analytics/cost`                     | `human`; read                                                         |
+| `tracking.analytics.duration` | `GET /api/tracking/analytics/duration`                 | `human`; read                                                         |
 
 ## Synopses
 
@@ -427,6 +429,7 @@ Every remote command can also answer the shared codes of
 | local | `cli.pagination.limit_invalid`                       | `--limit` is not a positive integer.                                                                                   | span list, timeline list, trace list, session entry list |
 | local | `cli.pagination.limit_out_of_range`                  | `--limit` is outside 1 to 1000 for `span list`, `timeline list`, `trace list` and `session entry list`.                | span list, timeline list, trace list, session entry list |
 | 400   | `system.pagination.cursor_invalid`                   | `--cursor` is not a cursor of this listing.                                                                            | span list, timeline list, trace list, session entry list |
+| 400   | `tracking.analytics.range_invalid`                   | The range of `from` and `to` is longer than 31 days, or `from` is after `to`.                                          | analytics cost, analytics duration                       |
 | 404   | `tracking.trace.not_found`                           | The trace is unknown.                                                                                                  | all                                                      |
 | 404   | `tracking.text.not_found`                            | The trace holds no such text.                                                                                          | text get                                                 |
 | 404   | `tracking.entry.not_found`                           | The session holds no such entry.                                                                                       | session entry get                                        |

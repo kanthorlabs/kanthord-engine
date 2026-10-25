@@ -1,12 +1,16 @@
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
 import { IN_MEMORY_DATABASE, Store } from "../kernel/store.ts";
-import { SpanOrigin, SpanStatus, TRACKING_SERVICE_NAME } from "./contract.ts";
-import { trackingMigrations } from "./migrations.ts";
-import { AnalyticsBucket } from "./analytics-bucket.ts";
 import {
+  AnalyticsBucket,
   AnalyticsMeasure,
   DurationGroupBy,
+  SpanOrigin,
+  SpanStatus,
+  TRACKING_SERVICE_NAME,
+} from "./contract.ts";
+import { trackingMigrations } from "./migrations.ts";
+import {
   readDuration,
   type DurationItem,
   type DurationQuery,

@@ -80,6 +80,8 @@ const API_ONLY_OPERATIONS = [
   "intake.storage.delete",
   "intake.inbound.event.receive",
   "tracking.telemetry.write",
+  "tracking.analytics.cost",
+  "tracking.analytics.duration",
 ];
 const TOP_LEVEL_NAMES = new Set([
   "config",
@@ -105,7 +107,7 @@ const TOP_LEVEL_DEPTH = 1;
 const INTAKE_GROUP = "intake";
 const TRACKING_GROUP = "tracking";
 const IMPLEMENTED_COUNT = 185;
-const OPERATION_COUNT = 209;
+const OPERATION_COUNT = 211;
 const INTAKE_LEAVES = [
   "intake event delete",
   "intake event discard",

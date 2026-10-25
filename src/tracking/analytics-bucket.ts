@@ -1,13 +1,4 @@
-import { z } from "zod";
-
-export const AnalyticsBucket = {
-  None: "none",
-  Hour: "hour",
-  Day: "day",
-  Week: "week",
-} as const;
-export const analyticsBucketSchema = z.enum(AnalyticsBucket);
-export type AnalyticsBucket = z.infer<typeof analyticsBucketSchema>;
+import { AnalyticsBucket } from "./contract.ts";
 
 const HOUR_MS = 3_600_000;
 const DAY_MS = 24 * HOUR_MS;
