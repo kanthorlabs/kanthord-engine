@@ -3,10 +3,11 @@ import { test } from "node:test";
 import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { join } from "node:path";
 import { temporary, hostEnvironment } from "../../kernel/test-support.ts";
+import { CauseCategory, unattributed } from "../../kernel/cause.ts";
 import { createIdentity } from "../../kernel/identity.ts";
 import { background } from "../../kernel/context.ts";
 import type { Revision } from "../../mission/contract.ts";
-import { ExecutionRun, ExecutionStop } from "./execution-run.ts";
+import { EndReason, ExecutionRun, ExecutionStop } from "./execution-run.ts";
 import {
   anthropicSetup,
   everyBindingSshAccess,
@@ -28,6 +29,7 @@ import { setTimeout } from "node:timers/promises";
 const EVIDENCE_UPLOAD_COUNT = 1;
 const EXPECTED_RELEASES = 1;
 const NO_EVIDENCE_UPLOADS = 0;
+const WALL_TIME_MS = 1500;
 test("examine reports its dependencies once and removes its workspace", async (t) => {
   const scenarios = [
     {
@@ -409,4 +411,97 @@ test("an examine node with two repository bindings runs from checkouts/ and list
           `Repository ${name}: directory \`${name}\`, base branch \`main\``,
         ),
       );
+});
+
+test("an examine verification that the wall deadline cuts gives a later assessment_absent stop the timed-out cause", async (t) => {
+  const setup = anthropicSetup({
+    repositories: [repositorySetup()],
+    resource_budget: { turns: 200, wall_time_ms: WALL_TIME_MS },
+  });
+  const claim = {
+    execution_id: setup.execution_id,
+    node_id: createIdentity("node"),
+    attempt: 1,
+    pinned_revision: 1,
+    node_branch: "kanthord/node_01ARZ3NDEKTSV4RRFFQ69G5FAA",
+    created_at: Date.now(),
+    expired_at: Date.now() + 60000,
+    trace_id: "trace",
+    root_span_id: "1".repeat(16),
+  };
+  const page = async () => ({
+    type: "completed",
+    status: 200,
+    data: { items: [], next_cursor: null },
+  });
+  const clients = {
+    mission: {
+      "execution.dependency.list": page,
+      "execution.dependency.outcome.list": page,
+      "execution.dependency.evidence.list": page,
+    },
+    scheduler: {
+      executionRelease: async () => ({
+        type: "completed",
+        status: 200,
+        data: {},
+      }),
+    },
+  } as unknown as MethodClients;
+  const run = new ExecutionRun({
+    claim,
+    clients,
+    credentials: { release: async () => {} },
+    context: background,
+  });
+  t.after(() => run.dispose());
+  const budget = new ExecutionBudget({
+    ...claim,
+    resource_budget: setup.resource_budget,
+  });
+  const open = async () =>
+    ({ budget, instruct: async () => {} }) as unknown as NativeAgent;
+  const workspaces = WorkspaceRoot.open(realpathSync(temporary(t)));
+  const transport = {
+    cloneSnapshot: async () => "a".repeat(40),
+  } as unknown as RepositoryTransport;
+  assert.deepEqual(
+    await runStepsExamine(
+      {
+        setup,
+        claim,
+        workspaces,
+        transport,
+        sshAccess: everyBindingSshAccess,
+        env: hostEnvironment(),
+      },
+      run,
+      {
+        content: {
+          name: "examine",
+          requirement: "examine",
+          criterion: "examine",
+          verifications: ["sleep 30"],
+        },
+      } as unknown as Revision,
+      budget,
+      open,
+    ),
+    { kind: "released", furtherWork: true },
+  );
+  let stopped: unknown;
+  try {
+    run.stop(EndReason.AssessmentAbsent);
+  } catch (error) {
+    stopped = error;
+  }
+  assert.ok(stopped instanceof ExecutionStop);
+  assert.deepEqual(
+    stopped.cause,
+    unattributed([
+      CauseCategory.Environment,
+      CauseCategory.Plan,
+      CauseCategory.Model,
+    ]),
+  );
 });

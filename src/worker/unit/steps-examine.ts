@@ -115,6 +115,7 @@ export async function runStepsExamine(
             context: run.operationContext,
             env: input.env,
           });
+    run.noteVerification(verification?.results.at(-1)?.timed_out ?? false);
     await agent.instruct(
       work,
       examineInstruction(input.setup.templates, {

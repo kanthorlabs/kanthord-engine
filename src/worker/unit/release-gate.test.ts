@@ -214,6 +214,39 @@ test("a wall deadline during a task verification releases further work", async (
   assert.deepEqual(bodies, [{ further_work: true, stop: BUDGET_STOP }]);
 });
 
+test("a wall deadline during a release verification releases with the timed-out budget cause", async (t) => {
+  const h = await fixture(t, [task("settled", "true")], [NOTHING]);
+  h.revision = {
+    ...h.revision,
+    content: {
+      ...h.revision.content,
+      verifications: [
+        `case "$PWD" in */${RELEASE_DIRECTORY}/*) sleep 30;; esac`,
+      ],
+    },
+  };
+  const releaseDirectory = join(
+    h.input.workspaces.nodeKey(h.input.claim.node_id),
+    RELEASE_DIRECTORY,
+  );
+  const wallDeadline = h.agent.budget.wallDeadline.bind(h.agent.budget);
+  let deadline = Number.POSITIVE_INFINITY;
+  h.agent.budget.wallDeadline = () => {
+    if (!existsSync(releaseDirectory)) return wallDeadline();
+    deadline = Math.min(deadline, Date.now() + 500);
+    return deadline;
+  };
+  h.agent.budget.exhausted = () => Date.now() >= deadline;
+  const bodies = recordReleases(h);
+  acceptEvidence(h);
+  assert.deepEqual(await runStepsImplement(h), {
+    kind: "released",
+    furtherWork: true,
+    stop: BUDGET_STOP,
+  });
+  assert.deepEqual(bodies, [{ further_work: true, stop: BUDGET_STOP }]);
+});
+
 test("a release failure goes to the owner of the first failed index when the node and a task share one command", async (t) => {
   const current = task("shared", RUN_ONCE);
   const h = await fixture(
