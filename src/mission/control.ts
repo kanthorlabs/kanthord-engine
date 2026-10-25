@@ -257,6 +257,7 @@ export function nodeTransition(
     rule: limited?.rule ?? TransitionRule.None,
     count: limited?.count ?? null,
     limit: limited?.limit ?? null,
+    first_available_at: null,
   };
 }
 

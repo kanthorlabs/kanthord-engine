@@ -306,6 +306,7 @@ test("a revocation by an assessment hands over the states and the rule that does
       rule: TransitionRule.None,
       count: null,
       limit: null,
+      first_available_at: null,
     });
   }
 });
@@ -433,6 +434,7 @@ test("a criterion-not-met assessment below the rework limit returns the node to 
       rule: TransitionRule.None,
       count: null,
       limit: null,
+      first_available_at: null,
     });
     assert.ok(
       h.calls
@@ -460,6 +462,7 @@ test("a criterion-not-met assessment below the rework limit returns the node to 
     rule: TransitionRule.ReworkLimit,
     count: limit,
     limit,
+    first_available_at: null,
   });
   assert.equal(
     blocked.outcome?.closing_event,

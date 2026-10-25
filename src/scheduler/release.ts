@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { z } from "zod";
+import { unattributed } from "../kernel/cause.ts";
 import type { CallerContext } from "../kernel/operation.ts";
 import {
   environmentFailureSchema,
@@ -12,7 +13,7 @@ import {
   type NodeTransition,
 } from "./contract.ts";
 import { ExecutionEnd } from "../tracking/contract.ts";
-import { executionTrace } from "./telemetry.ts";
+import { executionTrace, executionTransition } from "./telemetry.ts";
 import type { Dependencies } from "./service.ts";
 import { consecutiveStalls, endExecution } from "./execution-store.ts";
 import {
@@ -149,11 +150,12 @@ export function release(
     end: ExecutionEnd.Finished,
     revoke_cause: null,
     stop: body.stop,
+    cause: body.stop === null ? null : (body.stop.cause ?? unattributed([])),
   });
-  dependencies.telemetry.executionTransition(executionTrace(released), {
-    ...transition,
-    transitioned_at: result.ended_at,
-  });
+  dependencies.telemetry.executionTransition(
+    executionTrace(released),
+    executionTransition(transition, result.ended_at),
+  );
   if (environmentRepositories !== null && body.stop !== null)
     reportEnvironmentFailure(
       dependencies,

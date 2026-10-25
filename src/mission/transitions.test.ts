@@ -971,6 +971,7 @@ test("a release answers the states, the rule, the count and the limit", (t) => {
     rule: TransitionRule.None,
     count: null,
     limit: null,
+    first_available_at: null,
   });
   h.store.transaction((tx) => setNodeState(tx, h.node_id, NodeState.Available));
   h.claim();
@@ -980,6 +981,7 @@ test("a release answers the states, the rule, the count and the limit", (t) => {
     rule: TransitionRule.None,
     count: null,
     limit: null,
+    first_available_at: null,
   });
   h.claim();
   assert.deepEqual(h.release(true, FURTHER_WORK_LIMIT), {
@@ -988,6 +990,7 @@ test("a release answers the states, the rule, the count and the limit", (t) => {
     rule: TransitionRule.FurtherWorkLimit,
     count: FURTHER_WORK_LIMIT,
     limit: h.dependencies.config.further_work_limit,
+    first_available_at: null,
   });
 });
 
@@ -1036,6 +1039,7 @@ test("a release of an evaluating node answers the state after the fold", (t) => 
     rule: TransitionRule.None,
     count: null,
     limit: null,
+    first_available_at: null,
   });
 });
 
@@ -1050,6 +1054,7 @@ test("a failure answers the states, the rule, the count and the limit", (t) => {
     rule: TransitionRule.None,
     count: null,
     limit: null,
+    first_available_at: null,
   });
   h.claim();
   const limit = h.dependencies.config.consecutive_failure_limit;
@@ -1059,6 +1064,7 @@ test("a failure answers the states, the rule, the count and the limit", (t) => {
     rule: TransitionRule.FailureLimit,
     count: limit,
     limit,
+    first_available_at: null,
   });
   h.store.transaction((tx) =>
     setNodeState(tx, h.node_id, NodeState.Evaluating),
@@ -1069,5 +1075,6 @@ test("a failure answers the states, the rule, the count and the limit", (t) => {
     rule: TransitionRule.None,
     count: null,
     limit: null,
+    first_available_at: null,
   });
 });

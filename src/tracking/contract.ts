@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { HttpMethod, HttpStatus } from "../kernel/http.ts";
+import type { FailureCause } from "../kernel/cause.ts";
 import { identitySchema } from "../kernel/identity.ts";
 import { timestamp } from "../kernel/json.ts";
 import {
@@ -410,6 +411,7 @@ export interface RootSpanEnd {
   end: ExecutionEnd;
   revoke_cause: RevokeCause | null;
   stop: { reason: string; code: string | null; detail?: string } | null;
+  cause: FailureCause | null;
 }
 export const TransitionRule = {
   None: "none",
@@ -426,6 +428,7 @@ export interface ExecutionTransition {
   rule: TransitionRule;
   count: number | null;
   limit: number | null;
+  lead_time_ms: number | null;
 }
 export const ExecutionKind = {
   Steps: "steps",
@@ -437,6 +440,10 @@ export interface ExecutionOpening {
   kind: ExecutionKind;
   worker_name: string;
   queue_wait_ms: number;
+  worker_instance: string | null;
+  placement: string | null;
+  revision_turn: boolean | null;
+  dependency_count: number | null;
 }
 export interface ExecutionTelemetry {
   executionOpened(

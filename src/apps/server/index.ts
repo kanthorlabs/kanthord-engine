@@ -819,7 +819,8 @@ export function composeServices(options: {
     workQueue,
     schedulerClaims: {
       revoke: (...args) => scheduler.revoke(...args),
-      executionRevoked: (...args) => scheduler.executionRevoked(...args),
+      executionRevoked: (execution, cause, transition) =>
+        scheduler.executionRevoked(execution, cause, transition, null),
       executionsLost: (...args) => scheduler.executionsLost(...args),
       settle: (...args) => scheduler.settle(...args),
       liveExecutionOf: (...args) => scheduler.liveExecutionOf(...args),
