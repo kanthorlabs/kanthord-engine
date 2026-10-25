@@ -218,7 +218,7 @@ function capturedResourceCheck(
   row: LiveRow,
   key: Buffer,
   entry: CredentialPlatform,
-  refreshStore?: CredentialStore,
+  refreshStore: CredentialStore | null,
 ): ResourceCheck {
   const { id, platform, holder } = row;
   const { probe } = entry;
@@ -237,7 +237,13 @@ function capturedResourceCheck(
         nonce,
         ciphertext,
       });
-      return await probe(secret, metadata, context, observe, refreshStore);
+      return await probe(
+        secret,
+        metadata,
+        context,
+        observe,
+        refreshStore ?? undefined,
+      );
     } catch {
       observe?.(
         "probe failed before the remote call",
@@ -1020,7 +1026,18 @@ export class CustodyComponent implements Service, CredentialRecords {
     );
   }
 
-  private verifyRefreshStore(row: LiveRow): CredentialStore {
+  private refreshStoreOf(
+    tx: Transaction,
+    row: LiveRow,
+    entry: CredentialPlatform,
+  ): CredentialStore | null {
+    if (entry.secret_shape !== SecretShape.OAuth) return null;
+    if (this.executions.liveExecutionsPinning(tx, row.id).length !== NO_ROWS)
+      return null;
+    return this.serverRefreshStore(row);
+  }
+
+  private serverRefreshStore(row: LiveRow): CredentialStore {
     return workbenchCredentialStore({
       providerId: piProviderId(row.platform),
       type: SecretShape.OAuth,
@@ -1558,7 +1575,12 @@ export class CustodyComponent implements Service, CredentialRecords {
         name: encodeURIComponent(row.name),
         target: `${TARGET_KIND_CREDENTIAL}:${row.id}`,
         capability: entry.capability,
-        check: capturedResourceCheck(row, this.envelopeKey, entry),
+        check: capturedResourceCheck(
+          row,
+          this.envelopeKey,
+          entry,
+          this.refreshStoreOf(tx, row, entry),
+        ),
       };
     });
   }
@@ -1573,7 +1595,12 @@ export class CustodyComponent implements Service, CredentialRecords {
     if (!row && liveHoldersOf(tx, credentialName).length !== NO_ROWS)
       return heldByInstanceCheck();
     if (!row || !entry) return async () => ResourceStatus.Unknown;
-    return capturedResourceCheck(row, this.envelopeKey, entry);
+    return capturedResourceCheck(
+      row,
+      this.envelopeKey,
+      entry,
+      this.refreshStoreOf(tx, row, entry),
+    );
   }
 
   checkMaterial(
@@ -1582,7 +1609,8 @@ export class CustodyComponent implements Service, CredentialRecords {
     credentialName: string,
   ): CheckMaterial | null {
     const owner = firstRowOfName(tx, credentialName);
-    if (!owner || !ownedPlatform(set, owner.platform)) return null;
+    const entry = owner && ownedPlatform(set, owner.platform);
+    if (!entry) return null;
     const row = serverLive(tx, credentialName);
     if (!row) return null;
     const { id, platform, holder } = row;
@@ -1594,6 +1622,7 @@ export class CustodyComponent implements Service, CredentialRecords {
       metadata: row.metadata === null ? null : JSON.parse(row.metadata),
       secret: () =>
         openSecret(key, { id, platform, holder, nonce, ciphertext }),
+      refreshStore: this.refreshStoreOf(tx, row, entry),
     };
   }
 
@@ -1602,7 +1631,7 @@ export class CustodyComponent implements Service, CredentialRecords {
     credentialName: string,
     context: Context,
   ): Promise<CredentialCheckAnswer> {
-    const { row, entry, refreshable } = this.store.transaction((tx) => {
+    const { row, entry, refreshStore } = this.store.transaction((tx) => {
       refuseForeign(tx, set, credentialName);
       refuseArchived(tx, credentialName, SERVER_HOLDER);
       const live = serverLive(tx, credentialName);
@@ -1617,9 +1646,7 @@ export class CustodyComponent implements Service, CredentialRecords {
       return {
         row: live,
         entry: owned,
-        refreshable:
-          owned.secret_shape === SecretShape.OAuth &&
-          this.executions.liveExecutionsPinning(tx, live.id).length === NO_ROWS,
+        refreshStore: this.refreshStoreOf(tx, live, owned),
       };
     });
     const deadline = new CancellationContext(
@@ -1644,7 +1671,7 @@ export class CustodyComponent implements Service, CredentialRecords {
           row,
           this.envelopeKey,
           entry,
-          refreshable ? this.verifyRefreshStore(row) : undefined,
+          refreshStore,
         )(deadline, observe),
         cancelled(deadline.signal).then(() => ResourceStatus.Unknown),
       ]);

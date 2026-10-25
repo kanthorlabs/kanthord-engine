@@ -580,10 +580,74 @@ test("verify and the resource check hand no refresh store for an api_key record"
   assert.deepEqual(stores, [undefined, undefined]);
 });
 
-test("the resource check of an OAuth record hands no refresh store", async (t) => {
-  const { store, component, set, calls } = oauthFixture(t);
-  await store.transaction((tx) => component.resourceCheck(tx, set, OAUTH_NAME))(
-    background,
+test("the resource check and the inventory check of an OAuth record write the refreshed value in place through the refresh store", async (t) => {
+  for (const check of [
+    (f: ReturnType<typeof oauthFixture>) =>
+      f.store.transaction((tx) =>
+        f.component.resourceCheck(tx, f.set, OAUTH_NAME),
+      ),
+    (f: ReturnType<typeof oauthFixture>) =>
+      f.store.transaction(
+        (tx) => f.component.resourceInventory(tx, f.set)[0]!.check,
+      ),
+  ]) {
+    const f = oauthFixture(t);
+    assert.equal(await check(f)(background), ResourceStatus.Healthy);
+    assert.deepEqual(f.calls, [
+      {
+        stored: { type: SecretShape.OAuth, ...EXPIRED_OAUTH },
+        refreshStore: true,
+      },
+    ]);
+    assert.deepEqual(f.stored(), [
+      { id: f.id, revision: FIRST_REVISION, secret: REFRESHED_OAUTH },
+    ]);
+  }
+});
+
+test("the resource check, the inventory check and the check material hand no refresh store while a live execution pins the OAuth revision", async (t) => {
+  const f = oauthFixture(t, [LIVE_EXECUTION]);
+  await f.store.transaction((tx) =>
+    f.component.resourceCheck(tx, f.set, OAUTH_NAME),
+  )(background);
+  await f.store.transaction(
+    (tx) => f.component.resourceInventory(tx, f.set)[0]!.check,
+  )(background);
+  const material = f.store.transaction((tx) =>
+    f.component.checkMaterial(tx, f.set, OAUTH_NAME),
   );
-  assert.deepEqual(calls, [{ stored: undefined, refreshStore: false }]);
+  assert.deepEqual(f.calls, [
+    { stored: undefined, refreshStore: false },
+    { stored: undefined, refreshStore: false },
+  ]);
+  assert.equal(material?.refreshStore, null);
+  assert.deepEqual(f.stored(), [
+    { id: f.id, revision: FIRST_REVISION, secret: EXPIRED_OAUTH },
+  ]);
+});
+
+test("the check material of an OAuth record carries a refresh store that writes in place, and an api_key record carries none", async (t) => {
+  const f = oauthFixture(t);
+  const material = f.store.transaction((tx) =>
+    f.component.checkMaterial(tx, f.set, OAUTH_NAME),
+  );
+  assert.deepEqual(await material?.refreshStore?.read(OAUTH_PROVIDER_ID), {
+    type: SecretShape.OAuth,
+    ...EXPIRED_OAUTH,
+  });
+  await material?.refreshStore?.modify(OAUTH_PROVIDER_ID, async () => ({
+    type: SecretShape.OAuth,
+    ...REFRESHED_OAUTH,
+  }));
+  assert.deepEqual(f.stored(), [
+    { id: f.id, revision: FIRST_REVISION, secret: REFRESHED_OAUTH },
+  ]);
+  const plain = fixture(t);
+  insert(plain.store, PROBED_PLATFORM, PROBED_NAME);
+  assert.equal(
+    plain.store.transaction((tx) =>
+      plain.component.checkMaterial(tx, plain.set, PROBED_NAME),
+    )?.refreshStore,
+    null,
+  );
 });

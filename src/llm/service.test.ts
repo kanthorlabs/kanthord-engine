@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { test } from "node:test";
+import { test, type TestContext } from "node:test";
 import { setImmediate } from "node:timers/promises";
 import {
   createModels,
@@ -56,6 +56,7 @@ import { HealthStatus } from "../kernel/service.ts";
 import { REPOSITORY_PLATFORMS } from "../repository/index.ts";
 import { STORAGE_PLATFORMS } from "../storage/index.ts";
 import {
+  Connection,
   llmOperations,
   ModelCheckResult,
   type EnablementsDependentOnModelFn,
@@ -70,7 +71,12 @@ import {
   Platform,
 } from "./platforms.ts";
 import type { ModelRuntimeModule } from "./model-connector.ts";
-import { ANTHROPIC_MODELS_URL, GITHUB_COPILOT_TOKEN_URL } from "./probes.ts";
+import { MODEL_CHECK_REFRESH_FAILED } from "./model-check.ts";
+import {
+  ANTHROPIC_MODELS_URL,
+  ANTHROPIC_SUBSCRIPTION_CHECK_MODEL,
+  GITHUB_COPILOT_TOKEN_URL,
+} from "./probes.ts";
 import {
   LoginSessionMode,
   LoginSessionState,
@@ -2947,6 +2953,110 @@ test("verify of an anthropic-subscription record answers unauthorized and keeps 
     failure_reason: ResourceFailureReason.Unauthorized,
   });
   assert.equal(fetch.mock.callCount(), ONE_REFRESH_CALL);
+  assert.deepEqual(storedSubscription(f, id), {
+    revision: FIRST_REVISION,
+    secret: STORED_OAUTH,
+  });
+});
+
+function refreshingFetch(t: TestContext) {
+  const requests: { url: string; authorization: string | null }[] = [];
+  t.mock.method(
+    globalThis,
+    "fetch",
+    async (url: unknown, init?: RequestInit) => {
+      requests.push({
+        url: String(url),
+        authorization: new Headers(init?.headers).get("authorization"),
+      });
+      if (String(url) === SUBSCRIPTION_TOKEN_URL)
+        return Response.json({
+          access_token: REFRESHED_SUBSCRIPTION_ACCESS,
+          refresh_token: REFRESHED_SUBSCRIPTION_REFRESH,
+          expires_in: SUBSCRIPTION_EXPIRES_IN_S,
+        });
+      return Response.json(
+        { type: "error" },
+        { status: HttpStatus.Unauthorized },
+      );
+    },
+  );
+  return requests;
+}
+
+function assertRefreshed(
+  f: ReturnType<typeof fixture>,
+  id: string,
+  requests: { url: string; authorization: string | null }[],
+) {
+  assert.equal(requests[0]!.url, SUBSCRIPTION_TOKEN_URL);
+  assert.equal(
+    requests[1]!.authorization,
+    `Bearer ${REFRESHED_SUBSCRIPTION_ACCESS}`,
+  );
+  const stored = storedSubscription(f, id);
+  assert.equal(stored.revision, FIRST_REVISION);
+  assert.equal(stored.secret.access, REFRESHED_SUBSCRIPTION_ACCESS);
+  assert.equal(stored.secret.refresh, REFRESHED_SUBSCRIPTION_REFRESH);
+}
+
+test("the provider check of an expired anthropic-subscription record refreshes through pi-ai and stores the token in place", async (t) => {
+  const f = fixture();
+  t.after(() => f.store.close());
+  const id = insertSubscription(f);
+  const requests = refreshingFetch(t);
+  const answer = await f.providerCheck({ credential: SUBSCRIPTION_NAME });
+  assert.equal(answer.connection, Connection.Unauthorized);
+  assertRefreshed(f, id, requests);
+});
+
+test("the health check of an expired anthropic-subscription record refreshes through pi-ai and stores the token in place", async (t) => {
+  const f = fixture();
+  t.after(() => f.store.close());
+  const id = insertSubscription(f);
+  const requests = refreshingFetch(t);
+  const [entry] = f.store.transaction((tx) =>
+    f.component.resourceInventory(tx),
+  );
+  assert.equal(await entry!.check(background), ResourceStatus.Unhealthy);
+  assertRefreshed(f, id, requests);
+});
+
+test("the model check of an expired anthropic-subscription record refreshes through pi-ai and stores the token in place", async (t) => {
+  const f = fixture({ loadModelRuntime: loadPi });
+  t.after(() => f.store.close());
+  const id = insertSubscription(f);
+  const requests = refreshingFetch(t);
+  const answer = await f.modelCheck({
+    credential: SUBSCRIPTION_NAME,
+    model_identifier: ANTHROPIC_SUBSCRIPTION_CHECK_MODEL,
+    reasoning_effort: "low",
+  });
+  assert.equal(answer.result, ModelCheckResult.Unauthorized);
+  assertRefreshed(f, id, requests);
+});
+
+test("the model check of an anthropic-subscription record answers unauthorized and keeps the stored value when the refresh fails", async (t) => {
+  const f = fixture({ loadModelRuntime: loadPi });
+  t.after(() => f.store.close());
+  const id = insertSubscription(f);
+  t.mock.method(globalThis, "fetch", async () =>
+    Response.json(
+      { error: "invalid_grant" },
+      { status: HttpStatus.BadRequest },
+    ),
+  );
+  assert.deepEqual(
+    await f.modelCheck({
+      credential: SUBSCRIPTION_NAME,
+      model_identifier: ANTHROPIC_SUBSCRIPTION_CHECK_MODEL,
+      reasoning_effort: "low",
+    }),
+    {
+      result: ModelCheckResult.Unauthorized,
+      message: MODEL_CHECK_REFRESH_FAILED,
+    },
+  );
   assert.deepEqual(storedSubscription(f, id), {
     revision: FIRST_REVISION,
     secret: STORED_OAUTH,

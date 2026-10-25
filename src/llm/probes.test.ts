@@ -22,6 +22,7 @@ import {
   piProviderId,
 } from "./platforms.ts";
 import {
+  ACCESS_TOKEN_EXPIRED_REASON,
   ANTHROPIC_API_KEY_HEADER,
   ANTHROPIC_MODELS_URL,
   ANTHROPIC_SUBSCRIPTION_CHECK_MAX_TOKENS,
@@ -54,7 +55,7 @@ import { HEALTH_OF_CONNECTION } from "./provider.ts";
 
 const SECRET = "test_private-resource-health-secret";
 const BASE_URL = "https://models.example/v1";
-const FUTURE_MS = 60000;
+const FUTURE_MS = 600000;
 const LONG_FUTURE_MS = 3600000;
 const ANTHROPIC_OAUTH_ACCESS = "sk-ant-oat01-test-private-access";
 const ANTHROPIC_MESSAGES_URL = "https://api.anthropic.com/v1/messages";
@@ -1013,4 +1014,30 @@ test("the anthropic-subscription probe refreshes an expired token through pi-ai 
   assert.ok(stored?.type === SecretShape.OAuth);
   assert.equal(stored.access, REFRESHED_ACCESS);
   assert.equal(stored.refresh, REFRESHED_REFRESH);
+});
+
+const INSIDE_REFRESH_WINDOW_MS = 60000;
+
+test("an OAuth check without a refresh store answers unauthorized without a call when the access token expires within the pi-ai refresh window", async () => {
+  for (const [check] of OAUTH_CHECKS) {
+    const observed: Array<[string, string]> = [];
+    let calls = NO_CALLS;
+    const counting: ModelCall = async (model, modelContext, options, store) => {
+      calls += ONE_CALL;
+      return reply("stop")(model, modelContext, options, store);
+    };
+    assert.deepEqual(
+      await check(
+        credentialOf(Date.now() + INSIDE_REFRESH_WINDOW_MS),
+        background,
+        counting,
+        (reason, failureReason) => void observed.push([reason, failureReason]),
+      ),
+      UNAUTHORIZED,
+    );
+    assert.equal(calls, NO_CALLS);
+    assert.deepEqual(observed, [
+      [ACCESS_TOKEN_EXPIRED_REASON, ResourceFailureReason.Unauthorized],
+    ]);
+  }
 });

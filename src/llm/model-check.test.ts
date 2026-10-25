@@ -426,3 +426,28 @@ test("an openai-compatible credential refuses a model outside its list and an ef
   );
   assert.equal(server.requests.length, NO_CALLS);
 });
+
+const INSIDE_REFRESH_WINDOW_MS = 60000;
+
+test("an OAuth access token inside the pi-ai refresh window answers unauthorized without a call when no refresh store exists", async () => {
+  const scripted = scriptedModelRuntime(await loadPi(), [finalAnswer()], {
+    providerId: Platform.OpenAICodex,
+  });
+  const answer = await checkModel(
+    input({
+      platform: Platform.OpenAICodex,
+      secret: {
+        refresh: "refresh-value",
+        access: "access-value",
+        expires: Date.now() + INSIDE_REFRESH_WINDOW_MS,
+      },
+    }),
+    scripted.module,
+    background,
+  );
+  assert.deepEqual(answer, {
+    result: ModelCheckResult.Unauthorized,
+    message: MODEL_CHECK_TOKEN_EXPIRED,
+  });
+  assert.equal(scripted.calls.length, NO_CALLS);
+});

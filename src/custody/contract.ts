@@ -630,6 +630,7 @@ export type CheckMaterial = {
   platform: string;
   metadata: unknown;
   secret: () => unknown;
+  refreshStore: CredentialStore | null;
 };
 export const RevisionChange = {
   Create: "create",
