@@ -24,6 +24,10 @@ const ERROR_TYPE_ATTRIBUTE = "error.type";
 const WORKER_NAME_ATTRIBUTE = "kanthord.worker.name";
 const STOP_REASON_ATTRIBUTE = "kanthord.stop.reason";
 const ONE_ROW = 1;
+const RECOVERED_ERROR_TYPES: ReadonlySet<string> = new Set([
+  "tool_error",
+  "stopped",
+]);
 
 function numberAdded(before: Span | null, after: Span, name: string): number {
   if (before && Object.hasOwn(before.attributes, name)) return 0;
@@ -34,6 +38,12 @@ function numberAdded(before: Span | null, after: Span, name: string): number {
 function stringOf(span: Span, name: string): string | null {
   const value = span.attributes[name];
   return isString(value) ? value : null;
+}
+
+function countsAsFirstError(span: Span, isRoot: boolean): boolean {
+  if (span.status !== SpanStatus.Error || isRoot) return false;
+  const errorType = stringOf(span, ERROR_TYPE_ATTRIBUTE);
+  return errorType === null || !RECOVERED_ERROR_TYPES.has(errorType);
 }
 
 function stringsOf(span: Span, names: readonly string[]): string[] {
@@ -102,7 +112,7 @@ export function updateTraceSummary(
       isNew && after.operation === TURN_OPERATION ? 1 : 0,
       isNew && after.operation === TOOL_OPERATION ? 1 : 0,
       newError ? 1 : 0,
-      isError && !isRoot ? after.span_id : null,
+      countsAsFirstError(after, isRoot) ? after.span_id : null,
       numberAdded(before, after, INPUT_TOKENS_ATTRIBUTE),
       numberAdded(before, after, OUTPUT_TOKENS_ATTRIBUTE),
       numberAdded(before, after, CACHE_READ_TOKENS_ATTRIBUTE),
