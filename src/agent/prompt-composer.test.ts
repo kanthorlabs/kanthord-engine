@@ -89,11 +89,8 @@ test("a task work prompt carries the node frame above the task text", () => {
   };
   assert.equal(
     renderWorkPrompt(SHIPPED_TEMPLATES, { ...task, node }).text,
-    "# api\n\n## Requirement\n\nserve json only\n\n## Criterion\n\nevery route answers json\n\n" +
-      renderWorkPrompt(SHIPPED_TEMPLATES, task).text,
-  );
-  assert.equal(
-    renderWorkPrompt(SHIPPED_TEMPLATES, { ...task, node: null }).text,
-    renderWorkPrompt(SHIPPED_TEMPLATES, task).text,
+    "# Node api\n\n## Requirement\n\nserve json only\n\n## Criterion\n\nevery route answers json\n\n" +
+      "Do only the task below. The node part above is context.\n\n# Task " +
+      renderWorkPrompt(SHIPPED_TEMPLATES, task).text.slice("# ".length),
   );
 });

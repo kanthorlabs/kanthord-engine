@@ -1,6 +1,6 @@
 {{#if node~}}
 
-# {{node.name}}
+# Node {{node.name}}
 
 ## Requirement
 
@@ -10,9 +10,15 @@
 
 {{node.criterion}}
 
-{{/if~}}
+Do only the task below. The node part above is context.
+
+# Task {{name}}
+
+{{else~}}
 
 # {{name}}
+
+{{/if~}}
 
 ## Requirement
 

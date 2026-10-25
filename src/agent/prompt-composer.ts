@@ -45,7 +45,7 @@ export function renderWorkPrompt(
     };
     repositories?: readonly WorkRepository[];
     tasks?: readonly WorkTask[];
-    node?: WorkNode | null;
+    node?: WorkNode;
   },
 ): WorkPrompt {
   assert.ok(unit.node_id);
@@ -53,16 +53,14 @@ export function renderWorkPrompt(
   const { name, requirement, criterion, verifications } = unit.content;
   const repositories = unit.repositories ?? [];
   const tasks = unit.tasks ?? [];
-  const node = unit.node ?? null;
   const text = renderTemplate(templates, PromptTemplate.Work, {
-    node:
-      node === null
-        ? null
-        : {
-            name: node.name,
-            requirement: node.requirement,
-            criterion: node.criterion,
-          },
+    node: unit.node
+      ? {
+          name: unit.node.name,
+          requirement: unit.node.requirement,
+          criterion: unit.node.criterion,
+        }
+      : null,
     name,
     requirement,
     criterion,
