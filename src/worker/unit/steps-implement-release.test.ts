@@ -35,6 +35,7 @@ import {
 } from "../../tracking/contract.ts";
 import { SpanOperation, SpanRecorder } from "./telemetry.ts";
 import { GitStep } from "./method-telemetry.ts";
+import { GIT_COMMIT_FAILED } from "./stop-codes.ts";
 import {
   advanceBase,
   implementFixture as fixture,
@@ -305,6 +306,7 @@ const COMMIT_REFUSAL = "hook refused";
 const COMMIT_DEADLINE_MS = 10000;
 const CHECKPOINT_FAILED = "checkpoint failed";
 const REDACTED_REFUSAL = new RegExp(`${COMMIT_REFUSAL} \\[redacted\\]`);
+const ONE_DROPPED_CHECKPOINT = 1;
 const SECRET_TEXT = new RegExp(STEPS_KEY);
 
 function refuseCommits(directory: string): void {
@@ -341,10 +343,10 @@ test("a failed commit releases the stop with its redacted cause and logs the dro
   const { detail, ...cause } = stop;
   assert.deepEqual(cause, {
     reason: EndReason.OperationFailed,
-    code: null,
+    code: GIT_COMMIT_FAILED,
     cause: unattributed([
-      CauseCategory.Infrastructure,
       CauseCategory.WorkerAction,
+      CauseCategory.Environment,
     ]),
   });
   assert.match(String(detail), REDACTED_REFUSAL);
@@ -353,10 +355,7 @@ test("a failed commit releases the stop with its redacted cause and logs the dro
   const dropped = events.mock.calls
     .filter((call) => call.arguments[0] === CHECKPOINT_FAILED)
     .map((call) => String(call.arguments[1].reason));
-  assert.deepEqual(
-    dropped.map((reason) => REDACTED_REFUSAL.test(reason)),
-    [true],
-  );
+  assert.equal(dropped.length, ONE_DROPPED_CHECKPOINT);
   assert.doesNotMatch(dropped.join(), SECRET_TEXT);
 });
 

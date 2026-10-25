@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
+  appendFileSync,
   chmodSync,
   existsSync,
   mkdirSync,
@@ -9,7 +10,8 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import { simpleGit } from "simple-git";
-import { background } from "../../kernel/context.ts";
+import { background, CancellationContext } from "../../kernel/context.ts";
+import { CodedError } from "../../kernel/errors.ts";
 import {
   hostEnvironment,
   overrideEnvironment,
@@ -25,6 +27,7 @@ import {
   headCommit,
   isAncestor,
 } from "./local-git.ts";
+import { GIT_COMMIT_FAILED } from "./stop-codes.ts";
 
 const env = hostEnvironment();
 const DEFAULT_IDENTITY = "kanthord <kanthord@localhost>";
@@ -35,6 +38,8 @@ const MANY_FILES = 20000;
 const LONG_NAME = "x".repeat(120);
 const CRLF_LINE = "a\r\n";
 const EMPTY_OBJECT = "{}";
+const FAILING_SIGNER = "false";
+const SIGNER_FAILURE = "failed to sign the data";
 
 function writeRefusingHook(hooks: string, marker: string): void {
   mkdirSync(hooks, { recursive: true });
@@ -42,6 +47,49 @@ function writeRefusingHook(hooks: string, marker: string): void {
   writeFileSync(hook, `#!/bin/sh\ntouch "${marker}"\nexit 1\n`);
   chmodSync(hook, EXECUTABLE_MODE);
 }
+
+async function repositoryWithFailingSigner(
+  t: Parameters<typeof temporary>[0],
+): Promise<string> {
+  const directory = temporary(t);
+  await simpleGit(directory).init();
+  appendFileSync(
+    join(directory, ".git", "config"),
+    `[commit]\n\tgpgsign = true\n[gpg]\n\tprogram = ${FAILING_SIGNER}\n`,
+  );
+  writeFileSync(join(directory, "tracked"), "original");
+  return directory;
+}
+
+test("a refused work commit throws the commit code with the git error as the cause", async (t) => {
+  const directory = await repositoryWithFailingSigner(t);
+  await assert.rejects(
+    commitWork(env, directory, "refused", background, 10000),
+    (error) => {
+      assert.ok(error instanceof CodedError);
+      assert.equal(error.code, GIT_COMMIT_FAILED);
+      assert.ok(error.cause instanceof Error);
+      assert.ok(error.cause.message.includes(SIGNER_FAILURE));
+      return true;
+    },
+  );
+});
+
+test("a cancelled work commit throws the cancellation and not the commit code", async (t) => {
+  const directory = await repositoryWithFailingSigner(t);
+  const context = new CancellationContext();
+  context.cancel();
+  await assert.rejects(
+    commitWork(env, directory, "cancelled", context, 10000),
+    (error) => {
+      assert.ok(error instanceof Error);
+      assert.ok(
+        !(error instanceof CodedError && error.code === GIT_COMMIT_FAILED),
+      );
+      return true;
+    },
+  );
+});
 
 test("verification cleanup discards tracked and untracked edits but keeps ignored files", async (t) => {
   const original = "original";

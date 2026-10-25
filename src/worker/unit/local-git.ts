@@ -7,7 +7,9 @@ import {
   GIT_UNSAFE_OPTIONS,
   isolatedGitEnvironment,
 } from "../../kernel/git-environment.ts";
+import { CodedError } from "../../kernel/errors.ts";
 import { ensureDirectory } from "../../kernel/files.ts";
+import { GIT_COMMIT_FAILED } from "./stop-codes.ts";
 import { childEnvironment } from "./tool-table.ts";
 const EXPIRED = 0;
 const CLEAN_STATUS = "";
@@ -58,14 +60,31 @@ export async function commitWork(
     return duration;
   };
   if (!(await stageChanges(env, directory, context, remaining))) return null;
-  await run(
-    env,
-    directory,
-    ["commit", "--message", message],
-    context,
-    remaining(),
-  );
+  await runCommit(env, directory, message, context, remaining());
   return headCommit(env, directory, context, remaining());
+}
+
+async function runCommit(
+  env: NodeJS.ProcessEnv,
+  directory: string,
+  message: string,
+  context: Context,
+  deadlineMs: number,
+): Promise<void> {
+  try {
+    await run(
+      env,
+      directory,
+      ["commit", "--message", message],
+      context,
+      deadlineMs,
+    );
+  } catch (error) {
+    if (context.signal.aborted) throw error;
+    throw new CodedError(GIT_COMMIT_FAILED, "Git commit failed.", {
+      cause: error,
+    });
+  }
 }
 
 interface IndexEntry {
@@ -604,13 +623,7 @@ export async function concludeMerge(
   const end = performance.now() + deadlineMs;
   const remaining = () => end - performance.now();
   await stageChanges(env, directory, context, remaining);
-  await run(
-    env,
-    directory,
-    ["commit", "--message", message],
-    context,
-    remaining(),
-  );
+  await runCommit(env, directory, message, context, remaining());
 }
 
 export async function amendTrailer(
