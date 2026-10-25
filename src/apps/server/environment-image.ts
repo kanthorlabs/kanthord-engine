@@ -109,6 +109,7 @@ const TINI_STATIC_PATH = "/usr/bin/tini-static";
 const SHELL = "/bin/sh";
 const SECRETS_MOUNT = "/run/secrets";
 const NO_SECRETS = 0;
+const NO_VOLUMES = 0;
 const ENVIRONMENT_ASSIGNMENT = "=";
 const NOT_FOUND = -1;
 const VARIABLE_REFERENCE =
@@ -606,7 +607,7 @@ export class EnvironmentImages implements Omit<
     );
     if (listed.code !== SUCCESS_CODE) throw cacheListingFailure(listed.stderr);
     const names = linesOf(listed.stdout);
-    if (!names.length) return [];
+    if (names.length === NO_VOLUMES) return [];
     const inspected = await this.answer(inspectVolumeArguments(names));
     if (inspected.code !== SUCCESS_CODE)
       throw cacheListingFailure(inspected.stderr);

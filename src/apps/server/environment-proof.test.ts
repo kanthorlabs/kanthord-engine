@@ -18,6 +18,7 @@ import { ContainerRuntime } from "../../worker/contract.ts";
 import {
   cacheVolumeArguments,
   cacheVolumeName,
+  inspectContainerArguments,
   type RuntimeAnswer,
   type RuntimeHost,
 } from "./container-runtime.ts";
@@ -56,7 +57,7 @@ const BUNDLE_HEADER = "# v";
 const REMOVE_REFUSED = 125;
 const NETAVARK_ERROR =
   'Error: netavark (exit code 1): nftables error: "nft" did not return successfully while applying ruleset';
-const INSPECT_ARGUMENTS = ["container", "inspect", "--format", "{{.Id}}", NAME];
+const INSPECT_ARGUMENTS = inspectContainerArguments(NAME);
 const FAKE_PODMAN = `const fs = require("node:fs");
 const args = process.argv.slice(2);
 const log = (entry) => fs.appendFileSync(require("node:path").join(__dirname, "log"), JSON.stringify(entry) + "\\n");

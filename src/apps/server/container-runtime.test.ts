@@ -15,6 +15,7 @@ import {
   containerRemovalFailure,
   detectRuntime,
   infoArguments,
+  inspectContainerArguments,
   inspectVolumeArguments,
   killArguments,
   ownedArguments,
@@ -270,6 +271,13 @@ test("the runtime commands of the driver hold their documented argv", () => {
   assert.deepEqual(removeArguments(`kanthord_slot_${CLIENT_ID}`), [
     "rm",
     "--force",
+    `kanthord_slot_${CLIENT_ID}`,
+  ]);
+  assert.deepEqual(inspectContainerArguments(`kanthord_slot_${CLIENT_ID}`), [
+    "container",
+    "inspect",
+    "--format",
+    "{{.Id}}",
     `kanthord_slot_${CLIENT_ID}`,
   ]);
   assert.deepEqual(killArguments(`kanthord_slot_${CLIENT_ID}`), [
@@ -695,7 +703,7 @@ test("containerRemovalFailure answers null when a refused removal leaves no cont
   assert.equal(await containerRemovalFailure(call, NAME_OF_SLOT), null);
   assert.deepEqual(calls, [
     ["rm", "--force", NAME_OF_SLOT],
-    ["container", "inspect", "--format", "{{.Id}}", NAME_OF_SLOT],
+    inspectContainerArguments(NAME_OF_SLOT),
   ]);
 });
 
