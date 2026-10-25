@@ -374,6 +374,7 @@ function pinnedBindingOf(
   return (name, resourceIdentity) =>
     pinned.find(
       (revision) =>
+        !revision.tombstone &&
         revision.name === name &&
         revision.resource_identity === resourceIdentity,
     )?.binding_id ?? null;

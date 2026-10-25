@@ -141,15 +141,21 @@ const bindings: MissionBindings = {
   },
   resolveBindingIdentity: () =>
     assert.fail("Import resolves names, not binding identities."),
-  getBindingRevision: (_tx, bindingId) => ({
-    binding_id: bindingId,
-    project_id: PROJECT_ID,
-    name: BINDING_NAMES[bindingId]!,
-    resource_identity: IDENTITIES[bindingId]!,
-    revision: VERSION,
-    tombstone: false,
-    disabled: false,
-  }),
+  getBindingRevision: (_tx, bindingId) => {
+    const name = BINDING_NAMES[bindingId];
+    const resourceIdentity = IDENTITIES[bindingId];
+    assert.ok(name);
+    assert.ok(resourceIdentity);
+    return {
+      binding_id: bindingId,
+      project_id: PROJECT_ID,
+      name,
+      resource_identity: resourceIdentity,
+      revision: VERSION,
+      tombstone: false,
+      disabled: false,
+    };
+  },
 };
 const markdown = `---
 intent: examine
@@ -220,7 +226,13 @@ function bodyOf(item: NormalizedEntry): TaskBody {
     requirement: item.requirement,
     criterion: item.criterion,
     verifications: item.verifications,
-    bindings: item.bindings.map(() => BINDING_ID),
+    bindings: item.bindings.map((name) => {
+      const found = Object.entries(BINDING_NAMES).find(
+        ([, value]) => value === name,
+      );
+      assert.ok(found);
+      return found[0];
+    }),
   };
 }
 
@@ -1065,6 +1077,62 @@ test("a node whose plan file names another binding is an update", (t) => {
       .transaction((tx) => checkImportCondition(tx, terminal))
       .map(({ code, node_id }) => ({ code, node_id })),
     [{ code: MissionErrorCode.TerminalChange, node_id: id }],
+  );
+});
+
+test("a node with two bindings and one new revision changes no node", (t) => {
+  const { store, entries, resolve } = fixture(t, [
+    implement("o.md", { bindings: [REPOSITORY, SECOND_REPOSITORY] }),
+  ]);
+  const id = item(entries, "o.md").id!;
+  store.database
+    .prepare("UPDATE mission_node SET state = ? WHERE id = ?")
+    .run(NodeState.Completed, id);
+  const resolved = resolve(entries, revisedBindings);
+  assert.deepEqual(resolved.violations, []);
+  assert.deepEqual(resolved.no_ops, [id]);
+  assert.deepEqual(resolved.resolved_entries[FIRST_ENTRY_INDEX]?.binding_ids, [
+    BINDING_ID,
+    NEXT_BINDING_ID,
+  ]);
+  assert.deepEqual(
+    store.transaction((tx) => checkImportCondition(tx, resolved)),
+    [],
+  );
+});
+
+const removedBindings: MissionBindings = {
+  ...revisedBindings,
+  getBindingRevision: (tx, bindingId) => {
+    const revision = revisedBindings.getBindingRevision(tx, bindingId);
+    assert.ok(revision);
+    return bindingId === BINDING_ID
+      ? { ...revision, tombstone: true }
+      : revision;
+  },
+};
+
+test("a pin from before a removal of its binding resolves to the current revision", (t) => {
+  const { store, entries, resolve } = fixture(t, hierarchy());
+  const completed = item(entries, "o.md").id!;
+  const pending = item(entries, "p.md").id!;
+  store.database
+    .prepare("UPDATE mission_node SET state = ? WHERE id = ?")
+    .run(NodeState.Completed, completed);
+  const resolved = resolve(entries, removedBindings);
+  assert.deepEqual(resolved.violations, []);
+  assert.deepEqual(resolved.updates, [completed, pending].sort());
+  assert.deepEqual(
+    resolved.resolved_entries.find(
+      (value) => value.entry.filename === PEER_FILENAME,
+    )?.binding_ids,
+    [REVISED_BINDING_ID],
+  );
+  assert.deepEqual(
+    store
+      .transaction((tx) => checkImportCondition(tx, resolved))
+      .map(({ code, node_id }) => ({ code, node_id })),
+    [{ code: MissionErrorCode.TerminalChange, node_id: completed }],
   );
 });
 
@@ -2013,6 +2081,27 @@ test("an export with a new binding revision and one new plan file creates only t
   assert.deepEqual(pins(completed), [BINDING_ID]);
   assert.deepEqual(pins(assigned(first, "p.md")), [BINDING_ID]);
   assert.deepEqual(pins(added), [REVISED_BINDING_ID]);
+});
+
+test("a content change of a node with an older pin keeps the pin", (t) => {
+  const { store, apply, assigned, identified } = importer(t);
+  const first = apply(plan());
+  const edited = assigned(first, "p.md");
+  const changedName = "Changed";
+  const again = apply(
+    change(identified(first), "p.md", { name: changedName }),
+    executionEnds(),
+    revisedBindings,
+  );
+  assert.deepEqual(
+    again.changes.revisions.map((value) => value.node_id),
+    [edited],
+  );
+  const row = store.transaction((tx) => readCurrentRevision(tx, edited));
+  assert.ok(row);
+  const revision = store.transaction((tx) => revisionFromRow(tx, row));
+  assert.equal(revision.content.name, changedName);
+  assert.deepEqual(revision.content.bindings, [BINDING_ID]);
 });
 
 function markdownFile(
