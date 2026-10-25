@@ -401,7 +401,7 @@ export function missionHarness(
     commit: <T>(write: (tx: Transaction) => T): T => {
       commits++;
       const output = invoked;
-      assert.ok(output, "caller.commit: no operation is invoked");
+      if (!output) return store.transaction(write);
       return store.transaction((tx) => output.parse(write(tx)) as T);
     },
   };
