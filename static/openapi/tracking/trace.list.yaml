@@ -4,7 +4,8 @@ pathItem:
     operationId: tracking.trace.list
     tags:
       - tracking
-    description: List one page of trace summaries, newest first by default.
+    description: List one page of trace summaries with the root span operation and
+      attributes, newest first by default.
     x-access-policy: human
     x-timeout-ms: 30000
     x-mutation: false
