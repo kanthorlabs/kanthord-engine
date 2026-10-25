@@ -1129,3 +1129,39 @@ test("an OAuth check without a refresh store gives pi-ai a store whose modify ne
     ]);
   }
 });
+
+function refusingStore(providerId: string, expires: number): CredentialStore {
+  const stored = { type: "oauth" as const, ...credentialOf(expires) };
+  return {
+    read: async (id) => (id === providerId ? stored : undefined),
+    list: async () => [{ providerId, type: "oauth" }],
+    delete: async () => {},
+    modify: async (_id, fn) => {
+      const next = await fn(stored);
+      const access = next?.type === SecretShape.OAuth ? next.access : "";
+      throw new Error(`write refused for ${access}`);
+    },
+  };
+}
+
+test("an OAuth check redacts the refreshed token when the store throws after the refresh returns", async () => {
+  for (const [check, providerId] of OAUTH_CHECKS) {
+    const reasons: string[] = [];
+    const expires = Date.now() - FUTURE_MS;
+    const refusing: ModelCall = async (_model, _context, _options, store) => {
+      await store.modify(providerId, async () => refreshedOAuth());
+      throw new Error("unreachable");
+    };
+    await check(
+      credentialOf(expires),
+      background,
+      refusing,
+      (reason) => void reasons.push(reason),
+      refusingStore(providerId, expires),
+    );
+    assert.equal(reasons.length, ONE_CALL);
+    const reason = reasons[0] ?? "";
+    assert.ok(reason.includes("write refused for"), reason);
+    assert.ok(!reason.includes(ROTATED_ACCESS), reason);
+  }
+});

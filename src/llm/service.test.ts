@@ -139,6 +139,7 @@ function fixture(
     loadModelRuntime?: () => Promise<ModelRuntimeModule>;
     logger?: Logger;
     instanceKeys?: InstanceKeys;
+    pinning?: () => string[];
   } = {},
 ) {
   const store = new Store(IN_MEMORY_DATABASE);
@@ -158,7 +159,7 @@ function fixture(
     executions: {
       requireRunning: unexpectedCollaboration,
       pinCredential: unexpectedCollaboration,
-      liveExecutionsPinning: () => [],
+      liveExecutionsPinning: () => collaborations.pinning?.() ?? [],
     },
     authorization: { authorizeModelInference: unexpectedCollaboration },
     missionAuthorization: {
@@ -3117,4 +3118,26 @@ test("two concurrent checks of one expired anthropic-subscription record make on
   );
   const stored = storedSubscription(f, id);
   assert.equal(stored.secret.refresh, REFRESHED_SUBSCRIPTION_REFRESH);
+});
+
+test("a pin that commits after the health inventory and before the refresh makes no token-endpoint call and keeps the stored value", async (t) => {
+  const pins: string[] = [];
+  const f = fixture({ pinning: () => pins });
+  t.after(() => f.store.close());
+  const id = insertSubscription(f);
+  const requests = refreshingFetch(t);
+  const [entry] = f.store.transaction((tx) =>
+    f.component.resourceInventory(tx),
+  );
+  pins.push("execution_live");
+  assert.equal(await entry!.check(background), ResourceStatus.Unhealthy);
+  assert.deepEqual(
+    requests.map(({ authorization }) => authorization),
+    [`Bearer ${STORED_OAUTH.access}`],
+  );
+  assert.ok(requests.every(({ url }) => url !== SUBSCRIPTION_TOKEN_URL));
+  assert.deepEqual(storedSubscription(f, id), {
+    revision: FIRST_REVISION,
+    secret: STORED_OAUTH,
+  });
 });

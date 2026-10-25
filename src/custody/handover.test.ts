@@ -4,7 +4,10 @@ import pino from "pino";
 import { z } from "zod";
 import { Store, IN_MEMORY_DATABASE } from "../kernel/store.ts";
 import { createIdentity } from "../kernel/identity.ts";
-import { testMachineIdentity } from "../kernel/test-identity.ts";
+import {
+  testHumanIdentity,
+  testMachineIdentity,
+} from "../kernel/test-identity.ts";
 import { OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import { digest } from "../kernel/json.ts";
@@ -1249,6 +1252,7 @@ test("sshPublicKeyOf answers the pinned revision, else the newest live revision,
 });
 
 const SUBSCRIPTION = "subscription";
+const ONE_REFRESH = 1;
 const STORED_SUBSCRIPTION = {
   refresh: "private-stored-refresh",
   access: "private-stored-access",
@@ -1260,8 +1264,7 @@ const ROTATED_SUBSCRIPTION = {
   expires: 4102444800000,
 };
 
-test("a server placement handover of a revision with an in-flight refresh refuses with the settle promise, then takes the rotated value", async (t) => {
-  const f = fixture(t, [], [], new Map(), [SUBSCRIPTION]);
+function insertSubscription(f: ReturnType<typeof fixture>): string {
   const id = createIdentity("credential");
   const { nonce, ciphertext } = encrypt(
     Buffer.alloc(32, 7),
@@ -1274,6 +1277,83 @@ test("a server placement handover of a revision with an in-flight refresh refuse
       "INSERT INTO credential (id, name, platform, holder, revision, nonce, ciphertext, metadata, created_at, ended_at) VALUES (?, ?, ?, 'server', 1, ?, ?, NULL, ?, NULL)",
     )
     .run(id, SUBSCRIPTION, OAUTH_PLATFORM, nonce, ciphertext, NOW);
+  return id;
+}
+
+function workbenchStore(f: ReturnType<typeof fixture>) {
+  const human = testHumanIdentity("alice", "Alice", "jti-human");
+  return f.component.workbenchCredentials({
+    session_id: createIdentity("workbench_session"),
+    platform: OAUTH_PLATFORM,
+    requester: () => human,
+    authorize: () => ({ credential: SUBSCRIPTION, platform: OAUTH_PLATFORM }),
+  });
+}
+
+function gated() {
+  let release = () => {};
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  return { gate, release };
+}
+
+const tick = () => new Promise((resolve) => setImmediate(resolve));
+
+test("a workbench store and a check store of one record serialize modify and refresh once", async (t) => {
+  const f = fixture(t, [], [], new Map(), [SUBSCRIPTION]);
+  insertSubscription(f);
+  const check = f.store.transaction((tx) =>
+    f.component.checkMaterial(tx, TEST_SET, SUBSCRIPTION),
+  )!.refreshStore!;
+  const { gate, release } = gated();
+  let refreshes = 0;
+  const refresh = async (current: unknown) => {
+    if (
+      (current as { expires?: number } | undefined)?.expires !==
+      STORED_SUBSCRIPTION.expires
+    )
+      return undefined;
+    refreshes++;
+    await gate;
+    return { type: SecretShape.OAuth, ...ROTATED_SUBSCRIPTION };
+  };
+  const first = workbenchStore(f).modify(OAUTH_PLATFORM, refresh);
+  const second = check.modify(OAUTH_PLATFORM, refresh);
+  await tick();
+  release();
+  const answers = await Promise.all([first, second]);
+  assert.equal(refreshes, ONE_REFRESH);
+  assert.deepEqual(answers, [
+    { type: SecretShape.OAuth, ...ROTATED_SUBSCRIPTION },
+    { type: SecretShape.OAuth, ...ROTATED_SUBSCRIPTION },
+  ]);
+});
+
+test("a server placement handover refuses while a workbench refresh of its revision is in flight", async (t) => {
+  const f = fixture(t, [], [], new Map(), [SUBSCRIPTION]);
+  insertSubscription(f);
+  const { gate, release } = gated();
+  const refreshing = workbenchStore(f).modify(OAUTH_PLATFORM, async () => {
+    await gate;
+    return { type: SecretShape.OAuth, ...ROTATED_SUBSCRIPTION };
+  });
+  await tick();
+  assert.throws(() => f.handover([]), CredentialRefreshInFlight);
+  f.row.credentials.splice(0);
+  release();
+  await refreshing;
+  assert.deepEqual(
+    plainHandoverPayloadSchema.parse(
+      openEnvelope(f.keys.handover, f.aad, f.handover([])),
+    ).items[0]!.credential,
+    { type: SecretShape.OAuth, ...ROTATED_SUBSCRIPTION },
+  );
+});
+
+test("a server placement handover of a revision with an in-flight refresh refuses with the settle promise, then takes the rotated value", async (t) => {
+  const f = fixture(t, [], [], new Map(), [SUBSCRIPTION]);
+  const id = insertSubscription(f);
   const refreshStore = f.store.transaction((tx) =>
     f.component.checkMaterial(tx, TEST_SET, SUBSCRIPTION),
   )!.refreshStore!;

@@ -1011,7 +1011,7 @@ export class CustodyComponent implements Service, CredentialRecords {
     current: Credential,
     next: Credential,
   ): void {
-    if (this.executions.liveExecutionsPinning(tx, credentialId).length)
+    if (this.pinned(tx, credentialId))
       throw new ExecutionStoreError(
         "A live execution holds the credential revision.",
       );
@@ -1051,6 +1051,12 @@ export class CustodyComponent implements Service, CredentialRecords {
     return result;
   }
 
+  private pinned(tx: Transaction, credentialId: string): boolean {
+    return (
+      this.executions.liveExecutionsPinning(tx, credentialId).length !== NO_ROWS
+    );
+  }
+
   private refuseRefreshing(materials: readonly Material[]): void {
     for (const material of materials) {
       const settled = this.refreshes.get(material.credential_id);
@@ -1064,8 +1070,7 @@ export class CustodyComponent implements Service, CredentialRecords {
     entry: CredentialPlatform,
   ): CredentialStore | null {
     if (entry.secret_shape !== SecretShape.OAuth) return null;
-    if (this.executions.liveExecutionsPinning(tx, row.id).length !== NO_ROWS)
-      return null;
+    if (this.pinned(tx, row.id)) return null;
     return this.serverRefreshStore(row);
   }
 
@@ -1074,12 +1079,13 @@ export class CustodyComponent implements Service, CredentialRecords {
       providerId: piProviderId(row.platform),
       type: SecretShape.OAuth,
       release: () =>
-        this.store.transaction((tx) =>
-          credentialOfSecret(
+        this.store.transaction((tx) => ({
+          credential: credentialOfSecret(
             SecretShape.OAuth,
             openSecret(this.envelopeKey, this.storedRowOf(tx, row)),
           ),
-        ),
+          pinned: this.pinned(tx, row.id),
+        })),
       replace: (current, next) =>
         this.store.transaction((tx) =>
           this.replaceServerCopy(tx, row.id, current, next),
@@ -1132,7 +1138,10 @@ export class CustodyComponent implements Service, CredentialRecords {
         this.store.transaction((tx) => {
           const material = this.releaseWorkbench(tx, grant(tx));
           try {
-            return credentialOfSecret(shape, material.value());
+            return {
+              credential: credentialOfSecret(shape, material.value()),
+              pinned: this.pinned(tx, material.credential_id),
+            };
           } finally {
             material.drop();
           }

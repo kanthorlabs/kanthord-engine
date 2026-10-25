@@ -698,7 +698,7 @@ test("two refresh stores of one record serialize modify, so the second sees the 
   ]);
 });
 
-test("a pin that starts after the check and before modify refuses the write and keeps the row", async (t) => {
+test("a pin that commits after the check and before modify runs no refresh and keeps the row", async (t) => {
   const pinning: string[] = [];
   const f = oauthFixture(t, pinning);
   const check = f.store.transaction((tx) =>
@@ -708,12 +708,38 @@ test("a pin that starts after the check and before modify refuses the write and 
     f.component.checkMaterial(tx, f.set, OAUTH_NAME),
   );
   pinning.push(LIVE_EXECUTION);
-  assert.equal(await check(background), ResourceStatus.Unknown);
+  let refreshes = NO_CALLS;
+  assert.equal(await check(background), ResourceStatus.Healthy);
+  assert.deepEqual(
+    await material!.refreshStore!.modify(OAUTH_PROVIDER_ID, async () => {
+      refreshes += ONE_CALL;
+      return { type: SecretShape.OAuth, ...REFRESHED_OAUTH };
+    }),
+    { type: SecretShape.OAuth, ...EXPIRED_OAUTH },
+  );
+  assert.equal(refreshes, NO_CALLS);
+  assert.deepEqual(f.calls, [
+    {
+      stored: { type: SecretShape.OAuth, ...EXPIRED_OAUTH },
+      refreshStore: true,
+    },
+  ]);
+  assert.deepEqual(f.stored(), [
+    { id: f.id, revision: FIRST_REVISION, secret: EXPIRED_OAUTH },
+  ]);
+});
+
+test("a pin that commits during the refresh refuses the write and keeps the row", async (t) => {
+  const pinning: string[] = [];
+  const f = oauthFixture(t, pinning);
+  const material = f.store.transaction((tx) =>
+    f.component.checkMaterial(tx, f.set, OAUTH_NAME),
+  );
   await assert.rejects(
-    material!.refreshStore!.modify(OAUTH_PROVIDER_ID, async () => ({
-      type: SecretShape.OAuth,
-      ...REFRESHED_OAUTH,
-    })),
+    material!.refreshStore!.modify(OAUTH_PROVIDER_ID, async () => {
+      pinning.push(LIVE_EXECUTION);
+      return { type: SecretShape.OAuth, ...REFRESHED_OAUTH };
+    }),
     /A live execution holds the credential revision/,
   );
   assert.deepEqual(f.stored(), [
