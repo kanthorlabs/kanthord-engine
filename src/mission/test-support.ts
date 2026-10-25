@@ -25,6 +25,8 @@ import {
   PlatformAddressKind,
   RepositoryAction,
   type PlatformAddress,
+  TransitionRule,
+  type NodeTransition,
   type RevokedExecution,
 } from "./contract.ts";
 import {
@@ -67,6 +69,16 @@ export function databaseSnapshot(store: Store): Record<string, unknown[]> {
   );
 }
 
+export function lostTransition(): NodeTransition {
+  return {
+    from: NodeState.Executing,
+    to: NodeState.Available,
+    rule: TransitionRule.None,
+    count: null,
+    limit: null,
+  };
+}
+
 export function revokedExecution(
   executionId: string,
   nodeId: string,
@@ -91,7 +103,10 @@ export function settlesExpired(
   executionId: string,
 ): void {
   dependencies.schedulerClaims.settle = (_tx, nodeId, now) => [
-    revokedExecution(executionId, nodeId, now),
+    {
+      ...revokedExecution(executionId, nodeId, now),
+      transition: lostTransition(),
+    },
   ];
 }
 

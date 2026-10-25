@@ -19,9 +19,10 @@ import {
   schedulerHarness,
   FIXTURE_NOW,
   FIXTURE_DEADLINE,
+  transitionFixture,
 } from "./test-support.ts";
 import { DEFAULT_STOP_BACKOFF_SECONDS } from "./config.ts";
-import { executionTrace } from "./telemetry.ts";
+import { executionTrace, reportLost } from "./telemetry.ts";
 import {
   Onboarding,
   type OnboardingDependencies,
@@ -320,6 +321,7 @@ test("a claim walk answers each execution that it settles with its trace", (t) =
       execution_id: h.row.execution_id,
       trace: executionTrace(h.row),
       ended_at: FIXTURE_DEADLINE,
+      transition: transitionFixture(),
     },
   ]);
   const other = executionFixture({
@@ -340,6 +342,29 @@ test("a claim walk answers each execution that it settles with its trace", (t) =
   assert.deepEqual(h.claim(FIXTURE_DEADLINE).lost, []);
 });
 
+test("an inline loss of a claim walk writes one transition span after its commit", (t) => {
+  const h = claimHarness(t);
+  h.store.transaction((tx) => insertExecution(tx, h.row));
+  const result = h.claim(FIXTURE_DEADLINE);
+  assert.equal(h.telemetry.length, NO_CALLS);
+  reportLost(h.dependencies.telemetry, result.lost);
+  assert.deepEqual(
+    h.telemetry.map((entry) => entry.method),
+    ["executionEnded", "executionTransition"],
+  );
+  assert.deepEqual(h.telemetry[1]!.arguments, [
+    executionTrace(h.row),
+    {
+      from: "Executing",
+      to: "Available",
+      rule: "none",
+      count: null,
+      limit: null,
+      transitioned_at: FIXTURE_DEADLINE,
+    },
+  ]);
+});
+
 test("runtime and node expiry settle before admission; rollback undoes all claim writes", (t) => {
   const h = claimHarness(t);
   h.store.transaction((tx) => insertExecution(tx, h.row));
@@ -347,6 +372,7 @@ test("runtime and node expiry settle before admission; rollback undoes all claim
     assert.equal(count, ONE_CALL);
     assert.equal(now, FIXTURE_DEADLINE);
     h.service.insert(tx, nodeId, h.row.project_id, 0);
+    return transitionFixture();
   };
   const held = h.claim(FIXTURE_DEADLINE);
   assert.equal(held.settled, true);

@@ -116,7 +116,24 @@ export const RevokeCause = {
 export const revokeCauseSchema = z.enum(RevokeCause);
 export type RevokeCause = z.infer<typeof revokeCauseSchema>;
 
-export interface EndedExecution {
+export const TransitionRule = {
+  None: "none",
+  FailureLimit: "failure_limit",
+  FurtherWorkLimit: "further_work_limit",
+  ReworkLimit: "rework_limit",
+} as const;
+export const transitionRuleSchema = z.enum(TransitionRule);
+export type TransitionRule = z.infer<typeof transitionRuleSchema>;
+
+export interface NodeTransition {
+  from: string;
+  to: string;
+  rule: TransitionRule;
+  count: number | null;
+  limit: number | null;
+}
+
+export interface RevokedExecution {
   execution_id: string;
   trace: {
     execution_id: string;
@@ -129,11 +146,14 @@ export interface EndedExecution {
   ended_at: number;
 }
 
-export type RevokedExecution = EndedExecution;
+export interface EndedExecution extends RevokedExecution {
+  transition: NodeTransition;
+}
 
 export interface RevokedClaim {
   execution: RevokedExecution;
   cause: RevokeCause;
+  transition: NodeTransition | null;
 }
 
 export interface ExecutionEnds {
@@ -143,7 +163,11 @@ export interface ExecutionEnds {
 
 export interface SchedulerClaims {
   revoke(tx: Transaction, nodeId: string, now: number): RevokedExecution | null;
-  executionRevoked(execution: RevokedExecution, cause: RevokeCause): void;
+  executionRevoked(
+    execution: RevokedExecution,
+    cause: RevokeCause,
+    transition: NodeTransition | null,
+  ): void;
   executionsLost(lost: readonly EndedExecution[]): void;
   settle(tx: Transaction, nodeId: string, now: number): EndedExecution[];
   liveExecutionOf(
@@ -297,13 +321,13 @@ export interface MissionTransitions {
     furtherWork: boolean,
     stalledReleases: number,
     now: number,
-  ): void;
+  ): NodeTransition;
   failure(
     tx: Transaction,
     nodeId: string,
     consecutiveFailures: number,
     now: number,
-  ): void;
+  ): NodeTransition;
 }
 
 export const MissionErrorCode = {

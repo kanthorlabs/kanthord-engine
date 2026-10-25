@@ -25,8 +25,8 @@ import type { Store, Transaction } from "../kernel/store.ts";
 import type { SchedulerConfig } from "./config.ts";
 import {
   ExecutionEnd,
+  RevokeCause,
   type ExecutionTelemetry,
-  type RevokeCause,
 } from "../tracking/contract.ts";
 import { reportLost } from "./telemetry.ts";
 import * as settlement from "./settlement.ts";
@@ -61,6 +61,7 @@ import {
   type EnvironmentGate,
   type MissionClaimFacts,
   type EndedExecution,
+  type NodeTransition,
   type RevokedExecution,
   type TraceIdentity,
   type UnmatchedClaim,
@@ -236,13 +237,23 @@ export class SchedulerService implements Service, WorkQueue {
   ): RevokedExecution | null {
     return settlement.revoke(tx, nodeId, now);
   }
-  executionRevoked(execution: RevokedExecution, cause: RevokeCause): void {
+  executionRevoked(
+    execution: RevokedExecution,
+    cause: RevokeCause,
+    transition: NodeTransition | null,
+  ): void {
     this.dependencies.telemetry.executionEnded({
       trace: execution.trace,
       ended_at: execution.ended_at,
       end: ExecutionEnd.Revoked,
       revoke_cause: cause,
       stop: null,
+    });
+    if (cause !== RevokeCause.Assessment) return;
+    assert.ok(transition, "a revocation by an assessment moved its node");
+    this.dependencies.telemetry.executionTransition(execution.trace, {
+      ...transition,
+      transitioned_at: execution.ended_at,
     });
   }
   liveExecutionOf(tx: Transaction, nodeId: string, now: number) {

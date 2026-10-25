@@ -8,12 +8,14 @@ import {
   NodeState,
   PROPOSAL_IDENTITY_PREFIX,
   RevokeCause,
+  TransitionRule,
   type AssessmentSubmit,
   type ExecutionEnds,
 } from "./contract.ts";
 import { admitAssessment } from "./assessment-admit.ts";
 import {
   endLiveClaim,
+  nodeTransition,
   requireNoUnresolvedAction,
   transition,
 } from "./control.ts";
@@ -39,24 +41,22 @@ import { requireMission } from "./write.ts";
 const NO_REQUIRED_ACTIONS = 0;
 const NO_REQUESTS = 0;
 
-function causesRework(
+function priorReworks(
   tx: Transaction,
-  dependencies: Dependencies,
   assessment: AssessmentRow,
-): boolean {
-  if (assessment.result !== AssessmentResult.CriterionNotMet) return false;
+): number | null {
+  if (assessment.result !== AssessmentResult.CriterionNotMet) return null;
   if (
     readRequests(tx, assessment.node_id, assessment.attempt).length >
     NO_REQUESTS
   )
-    return false;
-  const reworks = readExecutionAssessmentsOfAttempt(
+    return null;
+  return readExecutionAssessmentsOfAttempt(
     tx,
     assessment.node_id,
     assessment.attempt,
     AssessmentResult.CriterionNotMet,
-  ).filter((row) => row.sequence < assessment.sequence);
-  return reworks.length < dependencies.config.rework_limit;
+  ).filter((row) => row.sequence < assessment.sequence).length;
 }
 
 export function submitAssessment(
@@ -100,8 +100,25 @@ export function submitAssessment(
     revision.revision,
   );
   let outcome: OutcomeRow | null = null;
-  if (current && causesRework(tx, dependencies, assessment)) {
-    endLiveClaim(tx, dependencies, node, now, RevokeCause.Assessment, ends);
+  const reworks = current ? priorReworks(tx, assessment) : null;
+  const reworkLimit = dependencies.config.rework_limit;
+  const limited =
+    reworks === null
+      ? null
+      : {
+          rule: TransitionRule.ReworkLimit,
+          count: reworks,
+          limit: reworkLimit,
+        };
+  if (reworks !== null && reworks < reworkLimit) {
+    const revoked = endLiveClaim(
+      tx,
+      dependencies,
+      node,
+      now,
+      RevokeCause.Assessment,
+      ends,
+    );
     transition(
       tx,
       dependencies,
@@ -110,6 +127,8 @@ export function submitAssessment(
       NodeState.Available,
       now,
     );
+    if (revoked !== null)
+      revoked.transition = nodeTransition(tx, node.id, node.state, null);
   } else if (
     current &&
     (body.result !== AssessmentResult.Success ||
@@ -117,7 +136,14 @@ export function submitAssessment(
   ) {
     if (body.result === AssessmentResult.Success)
       requireNoUnresolvedAction(tx, node);
-    endLiveClaim(tx, dependencies, node, now, RevokeCause.Assessment, ends);
+    const revoked = endLiveClaim(
+      tx,
+      dependencies,
+      node,
+      now,
+      RevokeCause.Assessment,
+      ends,
+    );
     closeAttempt(tx, node.id, attempt.attempt, now);
     outcome = insertOutcome(tx, {
       id: createIdentity("outcome"),
@@ -152,6 +178,8 @@ export function submitAssessment(
         : NodeState.Blocked,
       now,
     );
+    if (revoked !== null)
+      revoked.transition = nodeTransition(tx, node.id, node.state, limited);
   }
   assert.equal(assessment.node_id, node.id);
   assert.equal(assessment.execution_id, claim.executionId);

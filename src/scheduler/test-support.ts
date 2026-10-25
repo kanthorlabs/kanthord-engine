@@ -13,7 +13,9 @@ import {
   ClaimIntent,
   SCHEDULER_SERVICE_NAME,
   schedulerOperations,
+  TransitionRule,
   type ExecutionRow,
+  type NodeTransition,
 } from "./contract.ts";
 import { schedulerMigrations } from "./migrations.ts";
 import { SchedulerService, type Dependencies } from "./service.ts";
@@ -51,6 +53,19 @@ export function executionFixture(
   return row;
 }
 
+export function transitionFixture(
+  overrides: Partial<NodeTransition> = {},
+): NodeTransition {
+  return {
+    from: "Executing",
+    to: "Available",
+    rule: TransitionRule.None,
+    count: null,
+    limit: null,
+    ...overrides,
+  };
+}
+
 export function schedulerHarness(
   t: TestContext,
   overrides: Partial<Dependencies> = {},
@@ -76,8 +91,14 @@ export function schedulerHarness(
         record("claim", args);
         return null;
       },
-      release: (...args) => record("release", args),
-      failure: (...args) => record("failure", args),
+      release: (...args) => {
+        record("release", args);
+        return transitionFixture({ to: "Waiting" });
+      },
+      failure: (...args) => {
+        record("failure", args);
+        return transitionFixture();
+      },
     },
     registrations: {
       clientAttributionOf: (...args) => {
@@ -153,6 +174,8 @@ export function schedulerHarness(
         telemetry.push({ method: "executionOpened", arguments: args }),
       executionEnded: (...args) =>
         telemetry.push({ method: "executionEnded", arguments: args }),
+      executionTransition: (...args) =>
+        telemetry.push({ method: "executionTransition", arguments: args }),
     },
     ...overrides,
   };

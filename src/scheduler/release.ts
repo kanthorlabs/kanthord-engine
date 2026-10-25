@@ -9,6 +9,7 @@ import {
   type CooldownChange,
   type ExecutionRelease,
   type ExecutionRow,
+  type NodeTransition,
 } from "./contract.ts";
 import { ExecutionEnd } from "../tracking/contract.ts";
 import { executionTrace } from "./telemetry.ts";
@@ -71,6 +72,7 @@ export function release(
   assert.ok(proof, "release requires an execution proof");
   assert.equal(proof.executionId, executionId);
   let released: ExecutionRow | undefined;
+  let transition: NodeTransition | undefined;
   let siblings: string[] = [];
   let cooldowns: CooldownChange[] = [];
   let environmentRepositories: string[] | null = null;
@@ -118,7 +120,7 @@ export function release(
           ...(dependencies.facts.claimFacts(tx, row.node_id)?.repositories ??
             []),
         ];
-      recordFailure(
+      transition = recordFailure(
         tx,
         dependencies,
         row.node_id,
@@ -129,7 +131,7 @@ export function release(
     }
     endExecution(tx, executionId, now, body.stop);
     const stalled = body.stop !== null;
-    dependencies.transitions.release(
+    transition = dependencies.transitions.release(
       tx,
       { execution_id: executionId, node_id: row.node_id, attempt: row.attempt },
       body.further_work,
@@ -139,6 +141,7 @@ export function release(
     return { execution_id: executionId, ended_at: now };
   });
   assert.ok(released, "a committed release read its execution");
+  assert.ok(transition, "a committed release moved its node");
   dependencies.agentChains.cooldownsChanged(cooldowns);
   dependencies.telemetry.executionEnded({
     trace: executionTrace(released),
@@ -146,6 +149,10 @@ export function release(
     end: ExecutionEnd.Finished,
     revoke_cause: null,
     stop: body.stop,
+  });
+  dependencies.telemetry.executionTransition(executionTrace(released), {
+    ...transition,
+    transitioned_at: result.ended_at,
   });
   if (environmentRepositories !== null && body.stop !== null)
     reportEnvironmentFailure(

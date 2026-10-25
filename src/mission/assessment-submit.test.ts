@@ -14,6 +14,7 @@ import {
   Intent,
   MissionErrorCode,
   RevokeCause,
+  TransitionRule,
   type AssessmentSubmit,
   type RevokedExecution,
 } from "./contract.ts";
@@ -53,6 +54,12 @@ const EXECUTION_REVOKED = "schedulerClaims.executionRevoked";
 const SECOND_ATTEMPT = 2;
 const FIRST_REWORK = 1;
 const HUMAN_REASON = "Hold";
+const TRANSITION_ARGUMENT = 2;
+
+function revokedTransition(calls: { method: string; arguments: unknown[] }[]) {
+  const ends = calls.filter((call) => call.method === EXECUTION_REVOKED);
+  return ends.at(-1)!.arguments[TRANSITION_ARGUMENT];
+}
 
 test("examine currency follows real dependency outcomes and only current closure releases dependent work", async (t) => {
   const h = executionHarness(t, IDENTITY);
@@ -286,6 +293,23 @@ test("a not-met assessment that sends rework and a passed assessment that comple
   }
 });
 
+test("a revocation by an assessment hands over the states and the rule that does not limit", async (t) => {
+  for (const [result, to] of [
+    [AssessmentResult.Success, NodeState.Completed],
+    [AssessmentResult.Undetermined, NodeState.Blocked],
+  ] as const) {
+    const h = await fixture(t);
+    await h.submit({ ...h.body, result });
+    assert.deepEqual(revokedTransition(h.calls), {
+      from: NodeState.Evaluating,
+      to,
+      rule: TransitionRule.None,
+      count: null,
+      limit: null,
+    });
+  }
+});
+
 test("a required-action pass keeps the claim and ends no root span", async (t) => {
   const h = await fixture(t, RepositoryAction.PullRequest);
   await h.submit();
@@ -403,6 +427,13 @@ test("a criterion-not-met assessment below the rework limit returns the node to 
     assert.equal(answer.node.state, NodeState.Available);
     assert.equal(answer.outcome, null);
     assert.equal(h.revokes(), rework);
+    assert.deepEqual(revokedTransition(h.calls), {
+      from: NodeState.Evaluating,
+      to: NodeState.Available,
+      rule: TransitionRule.None,
+      count: null,
+      limit: null,
+    });
     assert.ok(
       h.calls
         .filter((call) => call.method === QUEUE_INSERT)
@@ -423,6 +454,13 @@ test("a criterion-not-met assessment below the rework limit returns the node to 
   const blocked = await h.submit(notMet);
   assert.ok("state" in blocked.node);
   assert.equal(blocked.node.state, NodeState.Blocked);
+  assert.deepEqual(revokedTransition(h.calls), {
+    from: NodeState.Evaluating,
+    to: NodeState.Blocked,
+    rule: TransitionRule.ReworkLimit,
+    count: limit,
+    limit,
+  });
   assert.equal(
     blocked.outcome?.closing_event,
     ClosingEvent.AssessmentNotPassed,

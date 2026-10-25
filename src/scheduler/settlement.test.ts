@@ -1,12 +1,13 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { createIdentity } from "../kernel/identity.ts";
-import { ClaimState, ExecutionStopReason } from "./contract.ts";
+import { ClaimState, ExecutionStopReason, TransitionRule } from "./contract.ts";
 import {
   executionFixture,
   schedulerHarness,
   FIXTURE_NOW,
   FIXTURE_DEADLINE,
+  transitionFixture,
 } from "./test-support.ts";
 import { executionTrace } from "./telemetry.ts";
 import {
@@ -135,6 +136,7 @@ test("settlement records exactly one loss at the transaction reading", (t) => {
         execution_id: row.execution_id,
         trace: executionTrace(row),
         ended_at: FIXTURE_DEADLINE,
+        transition: transitionFixture(),
       },
     );
     assert.equal(
@@ -160,6 +162,34 @@ test("settlement records exactly one loss at the transaction reading", (t) => {
     ONE_LOSS,
     FIXTURE_DEADLINE,
   ]);
+});
+
+test("a loss answers the transition of the failure count below the limit and at the limit", (t) => {
+  const h = schedulerHarness(t);
+  const limit = SECOND_LOSS;
+  const paused = transitionFixture({
+    to: "Paused",
+    rule: TransitionRule.FailureLimit,
+    count: limit,
+    limit,
+  });
+  h.dependencies.transitions.failure = (_tx, _nodeId, count) =>
+    count >= limit ? paused : transitionFixture();
+  const row = executionFixture();
+  const next = executionFixture({ node_id: row.node_id });
+  h.store.transaction((tx) => {
+    insertExecution(tx, row);
+    assert.deepEqual(
+      settleNode(tx, h.dependencies, row.node_id, FIXTURE_DEADLINE)?.transition,
+      transitionFixture(),
+    );
+    insertExecution(tx, next);
+    assert.deepEqual(
+      settleNode(tx, h.dependencies, row.node_id, FIXTURE_DEADLINE + 1)
+        ?.transition,
+      paused,
+    );
+  });
 });
 
 test("consecutive losses reset after a finished row or revocation and isolate attempts", (t) => {

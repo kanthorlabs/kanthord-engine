@@ -10,6 +10,7 @@ import {
   type EndedExecution,
   type ExecutionRow,
   type MissionTransitions,
+  type NodeTransition,
   type Registrations,
   type RevokedExecution,
   type WorkerBindings,
@@ -57,13 +58,19 @@ export function recordFailure(
   nodeId: string,
   failures: number,
   now: number,
-): void {
-  dependencies.transitions.failure(tx, nodeId, failures, now);
+): NodeTransition {
+  const transition = dependencies.transitions.failure(
+    tx,
+    nodeId,
+    failures,
+    now,
+  );
   const until = heldUntil(failures, now, dependencies.config.stop_backoff);
-  if (until === null) return;
+  if (until === null) return transition;
   tx.database
     .prepare("UPDATE scheduler_job SET available_at = ? WHERE node_id = ?")
     .run(until, nodeId);
+  return transition;
 }
 
 export function pinCredential(
@@ -176,7 +183,7 @@ export function declareLoss(
   assert.equal(row.ended_at, null);
   assert.ok(now >= row.expired_at);
   endExecution(tx, row.execution_id, now);
-  recordFailure(
+  const transition = recordFailure(
     tx,
     dependencies,
     row.node_id,
@@ -187,6 +194,7 @@ export function declareLoss(
     execution_id: row.execution_id,
     trace: executionTrace(row),
     ended_at: now,
+    transition,
   };
 }
 export function settleNode(

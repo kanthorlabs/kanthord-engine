@@ -10,6 +10,7 @@ import {
   schedulerHarness,
   FIXTURE_NOW,
   FIXTURE_DEADLINE,
+  transitionFixture,
 } from "./test-support.ts";
 import {
   consecutiveStalls,
@@ -25,6 +26,7 @@ import {
   EnvironmentFailure,
   ExecutionStopReason,
   schedulerOperations,
+  TransitionRule,
   type ReleaseStop,
 } from "./contract.ts";
 import {
@@ -39,6 +41,7 @@ const NO_STALLS = 0;
 const NO_FAILURES = 0;
 const ONE_CALL = 1;
 const PRIOR_STALLS = 2;
+const FAILURE_LIMIT = 3;
 const CURRENT_STALL = 1;
 const FIRST_FAILURE = 1;
 const SECOND_FAILURE = 2;
@@ -221,6 +224,7 @@ test("a release begun before expiry remains finished when commit ends after expi
   t.mock.method(Date, "now", () => now);
   h.dependencies.transitions.release = () => {
     now = FIXTURE_DEADLINE + 1;
+    return transitionFixture();
   };
   assert.deepEqual(await h.release(), {
     execution_id: h.row.execution_id,
@@ -252,6 +256,13 @@ test("a release with a stop stores the stop and routes the failure count", async
         },
       ],
     },
+    {
+      method: "executionTransition",
+      arguments: [
+        executionTrace(h.row),
+        { ...transitionFixture(), transitioned_at: FIXTURE_NOW },
+      ],
+    },
   ]);
   assert.deepEqual(
     h.calls.map((call) => [call.method, ...call.arguments.slice(1)]),
@@ -279,7 +290,93 @@ test("a release stores the cause detail of its stop and hands it to telemetry", 
         },
       ],
     },
+    {
+      method: "executionTransition",
+      arguments: [
+        executionTrace(h.row),
+        { ...transitionFixture(), transitioned_at: FIXTURE_NOW },
+      ],
+    },
   ]);
+});
+
+test("a release writes one transition span after its root end", async (t) => {
+  const h = harness(t);
+  t.mock.method(Date, "now", () => FIXTURE_NOW);
+  await h.release(false);
+  assert.deepEqual(
+    h.telemetry.map((entry) => entry.method),
+    ["executionEnded", "executionTransition"],
+  );
+  assert.deepEqual(h.telemetry[1]!.arguments, [
+    executionTrace(h.row),
+    {
+      from: "Executing",
+      to: "Waiting",
+      rule: TransitionRule.None,
+      count: null,
+      limit: null,
+      transitioned_at: FIXTURE_NOW,
+    },
+  ]);
+});
+
+test("a release of an evaluating node hands over the state at the commit", async (t) => {
+  const h = harness(t);
+  t.mock.method(Date, "now", () => FIXTURE_NOW);
+  h.dependencies.transitions.release = () =>
+    transitionFixture({ from: "Evaluating", to: "Completed" });
+  await h.release(false);
+  assert.deepEqual(h.telemetry[1]!.arguments[1], {
+    ...transitionFixture({ from: "Evaluating", to: "Completed" }),
+    transitioned_at: FIXTURE_NOW,
+  });
+});
+
+test("a stop at the failure limit writes the failure limit rule with its count and limit", async (t) => {
+  const h = harness(t);
+  t.mock.method(Date, "now", () => FIXTURE_NOW);
+  t.mock.method(h.service, "wake", () => {});
+  const paused = transitionFixture({
+    to: "Paused",
+    rule: TransitionRule.FailureLimit,
+    count: FAILURE_LIMIT,
+    limit: FAILURE_LIMIT,
+  });
+  h.dependencies.transitions.failure = () => paused;
+  await h.release(true, STOP);
+  assert.deepEqual(h.telemetry[1]!.arguments, [
+    executionTrace(h.row),
+    { ...paused, transitioned_at: FIXTURE_NOW },
+  ]);
+});
+
+test("a stalled release at the further work limit writes the further work limit rule", async (t) => {
+  const h = harness(t);
+  t.mock.method(Date, "now", () => FIXTURE_NOW);
+  t.mock.method(h.service, "wake", () => {});
+  const paused = transitionFixture({
+    to: "Paused",
+    rule: TransitionRule.FurtherWorkLimit,
+    count: PRIOR_STALLS + CURRENT_STALL,
+    limit: PRIOR_STALLS + CURRENT_STALL,
+  });
+  h.dependencies.transitions.release = () => paused;
+  await h.release(true, BUDGET_END);
+  assert.deepEqual(h.telemetry[1]!.arguments, [
+    executionTrace(h.row),
+    { ...paused, transitioned_at: FIXTURE_NOW },
+  ]);
+});
+
+test("a refused release writes no transition span", async (t) => {
+  const h = harness(t);
+  t.mock.method(Date, "now", () => FIXTURE_NOW);
+  h.dependencies.transitions.release = () => {
+    throw new Error("Mission refused release");
+  };
+  await assert.rejects(h.release());
+  assert.deepEqual(h.telemetry, []);
 });
 
 test("a release without a stop field stores no stop", async (t) => {
@@ -340,8 +437,10 @@ test("the stop backoff doubles with each consecutive failure and holds no job wi
 test("a release with a stop holds the job of the node until the stop backoff ends", async (t) => {
   const h = harness(t);
   t.mock.method(Date, "now", () => FIXTURE_NOW);
-  h.dependencies.transitions.failure = (tx, nodeId) =>
+  h.dependencies.transitions.failure = (tx, nodeId) => {
     h.service.insert(tx, nodeId, h.row.project_id, 0);
+    return transitionFixture();
+  };
   await h.release(true, STOP);
   const job = h.store.transaction(
     (tx) =>
