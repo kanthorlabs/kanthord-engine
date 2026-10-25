@@ -18,6 +18,7 @@ import { ContainerRuntime } from "../../worker/contract.ts";
 import {
   cacheVolumeArguments,
   cacheVolumeName,
+  type RuntimeAnswer,
   type RuntimeHost,
 } from "./container-runtime.ts";
 import { proveInImage, type ProofOptions } from "./environment-proof.ts";
@@ -52,6 +53,10 @@ const SHORT_LIMIT_MS = 500;
 const POLL_STEP_MS = 50;
 const POLL_ROUNDS = 100;
 const BUNDLE_HEADER = "# v";
+const REMOVE_REFUSED = 125;
+const NETAVARK_ERROR =
+  'Error: netavark (exit code 1): nftables error: "nft" did not return successfully while applying ruleset';
+const INSPECT_ARGUMENTS = ["container", "inspect", "--format", "{{.Id}}", NAME];
 const FAKE_PODMAN = `const fs = require("node:fs");
 const args = process.argv.slice(2);
 const log = (entry) => fs.appendFileSync(require("node:path").join(__dirname, "log"), JSON.stringify(entry) + "\\n");
@@ -100,6 +105,7 @@ function proof(
     commandLimitMs?: number;
     environmentMemoryMb?: number;
     existingCache?: boolean;
+    answerOf?: (args: readonly string[]) => RuntimeAnswer | null;
   } = {},
 ) {
   const log = join(directory, "log");
@@ -124,6 +130,8 @@ function proof(
     resolves: () => true,
     run: (_runtime, args) => {
       appendFileSync(log, `${JSON.stringify([HOST_LINE, ...args])}\n`);
+      const answer = overrides.answerOf?.(args) ?? null;
+      if (answer !== null) return Promise.resolve(answer);
       if (
         overrides.existingCache &&
         args.join(" ") ===
@@ -436,4 +444,51 @@ test("the run removes the home volume and never the cache volume", async (t) => 
     (line) => line[0] === VOLUME && line[1] === REMOVE,
   );
   assert.deepEqual(removed, [["volume", "rm", "--force", NAME]]);
+});
+
+function refusedRemoval(inspected: RuntimeAnswer) {
+  return (args: readonly string[]): RuntimeAnswer | null => {
+    if (args.join(" ") === `rm --force ${NAME}`)
+      return { code: REMOVE_REFUSED, stdout: "", stderr: NETAVARK_ERROR };
+    if (args.join(" ") === INSPECT_ARGUMENTS.join(" ")) return inspected;
+    return null;
+  };
+}
+
+test("a refused container removal that leaves no container still passes the proof", async (t) => {
+  const { options, lines } = proof(temporary(t), {
+    answerOf: refusedRemoval({
+      code: REMOVE_REFUSED,
+      stdout: "",
+      stderr: `Error: no such container "${NAME}"`,
+    }),
+  });
+  const results = await proveInImage(
+    options,
+    input(),
+    new AbortController().signal,
+  );
+  assert.equal(results.length, COMMAND_COUNT);
+  assert.ok(
+    ofKind(lines(), HOST_LINE).some(
+      (line) => line.join(" ") === INSPECT_ARGUMENTS.join(" "),
+    ),
+  );
+});
+
+test("a refused container removal that leaves the container fails the proof with the runtime message", async (t) => {
+  const { options, runDirectory } = proof(temporary(t), {
+    answerOf: refusedRemoval({ code: 0, stdout: "abc\n", stderr: "" }),
+  });
+  await assert.rejects(
+    proveInImage(options, input(), new AbortController().signal),
+    (error: Error) => {
+      assert.equal(
+        error.message,
+        `The environment proof failed at remove container: ${NETAVARK_ERROR}`,
+      );
+      return true;
+    },
+  );
+  assert.equal(existsSync(runDirectory), false);
 });

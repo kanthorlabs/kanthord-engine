@@ -12,8 +12,10 @@ import {
   cacheVolumeArguments,
   cacheVolumeName,
   containerOwner,
+  containerRemovalFailure,
   detectRuntime,
   infoArguments,
+  inspectVolumeArguments,
   killArguments,
   ownedArguments,
   ownedCacheVolumeArguments,
@@ -21,6 +23,7 @@ import {
   removeArguments,
   runArguments,
   slotClientId,
+  SUCCESS_CODE,
   volumeArguments,
   type RuntimeAnswer,
   type RuntimeHost,
@@ -29,6 +32,7 @@ import {
 const CLIENT_ID = "client_identity_01ARZ3NDEKTSV4RRFFQ69G5FAV";
 const OWNER = "0123456789ABCDEFGHJKMNPQRS";
 const IMAGE = "localhost/kanthord-dev:28.0.1";
+const NAME_OF_SLOT = `kanthord_slot_${CLIENT_ID}`;
 const SECRET = "slot_client_secret_value";
 const SERVER_USER = "kanthord";
 const SERVER_UID = 1000;
@@ -532,9 +536,10 @@ const RESOURCE = "repository:github:acme/app";
 const CACHE_NAME = /^kanthord_cache_[0-9a-f]{24}$/;
 const VOLUME_OPTION = "--volume";
 const SLOT_VOLUMES = 1;
-const FORMAT_INDEX = 4;
-const FORMAT_FLAG = "--format";
-const FORMAT_VALUE_INDEX = 5;
+const NETAVARK_ERROR =
+  'Error: netavark (exit code 1): nftables error: "nft" did not return successfully while applying ruleset';
+const REMOVE_REFUSED = 125;
+const INSPECT_ABSENT = 125;
 const CACHE_MOUNT = "/var/lib/kanthord/.cache";
 
 test("cacheVolumeName answers one name for one group and another name for another group", () => {
@@ -589,29 +594,46 @@ test("slotClientId answers null for a cache volume name", () => {
   );
 });
 
-test("ownedCacheVolumeArguments lists the volumes of the owner and prints the name and the two cache labels", () => {
-  const args = ownedCacheVolumeArguments(OWNER);
-  assert.deepEqual(args.slice(0, 4), [
+test("ownedCacheVolumeArguments lists the names of the cache volumes of the owner with no label template", () => {
+  assert.deepEqual(ownedCacheVolumeArguments(OWNER), [
     "volume",
     "ls",
     "--filter",
     `label=io.kanthord.owner=${OWNER}`,
+    "--filter",
+    "label=io.kanthord.cache_project",
+    "--format",
+    "{{.Name}}",
   ]);
-  assert.equal(args[FORMAT_INDEX], FORMAT_FLAG);
-  const format = args[FORMAT_VALUE_INDEX] ?? "";
-  assert.ok(format.startsWith("{{.Name}}\t"));
-  assert.ok(format.includes("io.kanthord.cache_project"));
-  assert.ok(format.includes("io.kanthord.cache_resource"));
 });
 
-test("parseCacheVolumes answers the name and the two labels of each line and skips a line without both labels", () => {
-  const output = [
-    `kanthord_cache_aaa\t${PROJECT_ID}\t${RESOURCE}`,
-    `kanthord_slot_${CLIENT_ID}\t\t`,
-    `kanthord_cache_bbb\t${PROJECT_ID}\t`,
-    `kanthord_cache_ccc\t\t${RESOURCE}`,
-    "",
-  ].join("\n");
+test("inspectVolumeArguments inspects each named volume in one command", () => {
+  assert.deepEqual(
+    inspectVolumeArguments(["kanthord_cache_a", "kanthord_cache_b"]),
+    ["volume", "inspect", "kanthord_cache_a", "kanthord_cache_b"],
+  );
+});
+
+test("parseCacheVolumes answers the name and the two labels of each inspected volume and skips a volume without both labels", () => {
+  const output = JSON.stringify([
+    {
+      Name: "kanthord_cache_aaa",
+      Labels: {
+        "io.kanthord.owner": OWNER,
+        "io.kanthord.cache_project": PROJECT_ID,
+        "io.kanthord.cache_resource": RESOURCE,
+      },
+    },
+    {
+      Name: `kanthord_slot_${CLIENT_ID}`,
+      Labels: { "io.kanthord.owner": OWNER },
+    },
+    {
+      Name: "kanthord_cache_bbb",
+      Labels: { "io.kanthord.cache_project": PROJECT_ID },
+    },
+    { Name: "kanthord_cache_ccc", Labels: null },
+  ]);
   assert.deepEqual(parseCacheVolumes(output), [
     {
       name: "kanthord_cache_aaa",
@@ -619,4 +641,78 @@ test("parseCacheVolumes answers the name and the two labels of each line and ski
       resource_identity: RESOURCE,
     },
   ]);
+});
+
+test("parseCacheVolumes rejects an answer that is not a list", () => {
+  assert.throws(() => parseCacheVolumes("not json"));
+  assert.throws(() => parseCacheVolumes("{}"));
+});
+
+function removal(answers: readonly RuntimeAnswer[]) {
+  const calls: string[][] = [];
+  const call = (args: readonly string[]) => {
+    calls.push([...args]);
+    return Promise.resolve(
+      answers[calls.length - 1] ?? {
+        code: SUCCESS_CODE,
+        stdout: "",
+        stderr: "",
+      },
+    );
+  };
+  return { call, calls };
+}
+
+test("containerRemovalFailure answers null after a removal that exits 0 and inspects nothing", async () => {
+  const { call, calls } = removal([
+    { code: SUCCESS_CODE, stdout: "", stderr: "" },
+  ]);
+  assert.equal(await containerRemovalFailure(call, NAME_OF_SLOT), null);
+  assert.deepEqual(calls, [["rm", "--force", NAME_OF_SLOT]]);
+});
+
+test("containerRemovalFailure answers null when the runtime answers no such container", async () => {
+  const { call, calls } = removal([
+    {
+      code: REMOVE_REFUSED,
+      stdout: "",
+      stderr: `Error: no such container "${NAME_OF_SLOT}"`,
+    },
+  ]);
+  assert.equal(await containerRemovalFailure(call, NAME_OF_SLOT), null);
+  assert.deepEqual(calls, [["rm", "--force", NAME_OF_SLOT]]);
+});
+
+test("containerRemovalFailure answers null when a refused removal leaves no container", async () => {
+  const { call, calls } = removal([
+    { code: REMOVE_REFUSED, stdout: "", stderr: NETAVARK_ERROR },
+    {
+      code: INSPECT_ABSENT,
+      stdout: "",
+      stderr: `Error: no such container "${NAME_OF_SLOT}"`,
+    },
+  ]);
+  assert.equal(await containerRemovalFailure(call, NAME_OF_SLOT), null);
+  assert.deepEqual(calls, [
+    ["rm", "--force", NAME_OF_SLOT],
+    ["container", "inspect", "--format", "{{.Id}}", NAME_OF_SLOT],
+  ]);
+});
+
+test("containerRemovalFailure answers the refused removal when the container still exists", async () => {
+  const refused = { code: REMOVE_REFUSED, stdout: "", stderr: NETAVARK_ERROR };
+  const { call } = removal([
+    refused,
+    { code: SUCCESS_CODE, stdout: "abc\n", stderr: "" },
+  ]);
+  assert.deepEqual(await containerRemovalFailure(call, NAME_OF_SLOT), refused);
+});
+
+test("containerRemovalFailure answers the refused removal when the inspection fails for another reason", async () => {
+  const refused = { code: REMOVE_REFUSED, stdout: "", stderr: NETAVARK_ERROR };
+  const { call } = removal([
+    refused,
+    { code: INSPECT_ABSENT, stdout: "", stderr: "Error: cannot connect" },
+  ]);
+  assert.deepEqual(await containerRemovalFailure(call, NAME_OF_SLOT), refused);
 });

@@ -255,10 +255,29 @@ function labelOf(args: readonly string[], label: string): string {
 }
 
 function listedCaches(state: RuntimeState): string {
-  return Array.from(
-    state.caches,
-    ([name, { project, resource }]) => `${name}\t${project}\t${resource}`,
-  ).join("\n");
+  return Array.from(state.caches.keys()).join("\n");
+}
+
+function inspectedCaches(
+  state: RuntimeState,
+  names: readonly string[],
+): string {
+  return JSON.stringify(
+    names.flatMap((name) => {
+      const cache = state.caches.get(name);
+      return cache === undefined
+        ? []
+        : [
+            {
+              Name: name,
+              Labels: {
+                [CACHE_PROJECT_LABEL]: cache.project,
+                [CACHE_RESOURCE_LABEL]: cache.resource,
+              },
+            },
+          ];
+    }),
+  );
 }
 
 async function answered(
@@ -293,6 +312,8 @@ async function answered(
     });
   if (volume && subject === Subject.List && cache)
     return { ...fallback, stdout: listedCaches(state) };
+  if (volume && subject === Subject.Inspect)
+    return { ...fallback, stdout: inspectedCaches(state, args.slice(2)) };
   if (volume && subject === Subject.Remove) state.caches.delete(target!);
   return fallback;
 }

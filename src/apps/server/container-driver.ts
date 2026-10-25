@@ -17,16 +17,16 @@ import {
 } from "../worker/frames.ts";
 import type { SlotControl } from "../worker/thread-data.ts";
 import {
-  absentContainer,
   absentVolume,
   cacheVolumeArguments,
   cacheVolumeName,
   containerOwner,
+  containerRemovalFailure,
   killArguments,
+  linesOf,
   ownedArguments,
   ownedVolumeArguments,
   presentVolume,
-  removeArguments,
   removeVolumeArguments,
   runArguments,
   RUNTIME_CHECK_TIMEOUT_MS,
@@ -52,7 +52,6 @@ const SIGNAL_CODE_BASE = 128;
 const RUNTIME_ERROR_CODE = 125;
 const NOT_EXECUTABLE_CODE = 126;
 const NOT_FOUND_CODE = 127;
-const LINE_BREAK = /\r?\n/;
 
 export interface ContainerDriverOptions {
   readonly masterKey: string;
@@ -89,13 +88,6 @@ function unavailable(status: PlacementStatus): Diagnostic {
 
 function commandFailure(action: string, stderr: string): Error {
   return new Error(`container: ${action} failed: ${stderr.trim()}`);
-}
-
-function linesOf(text: string): string[] {
-  return text
-    .split(LINE_BREAK)
-    .map((line) => line.trim())
-    .filter(Boolean);
 }
 
 function exitError(code: number): Error | null {
@@ -377,9 +369,11 @@ export class ContainerDriver implements SlotDriver {
   }
 
   async removeContainer(runtime: ContainerRuntime, name: string) {
-    const answer = await this.command(runtime, removeArguments(name));
-    if (!absentContainer(answer))
-      throw commandFailure(`rm ${name}`, answer.stderr);
+    const failed = await containerRemovalFailure(
+      (args) => this.command(runtime, args),
+      name,
+    );
+    if (failed !== null) throw commandFailure(`rm ${name}`, failed.stderr);
   }
 
   async createVolume(runtime: ContainerRuntime, clientId: string) {

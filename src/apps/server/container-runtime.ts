@@ -38,10 +38,9 @@ const OWNER_LABEL_TEXT = "worker/container-owner";
 const SLOT_NAME_PREFIX = "kanthord_slot_";
 const DETAIL_LIMIT_BYTES = 200;
 const CACHE_NAME_HEX_LENGTH = 24;
-const FIELD_SEPARATOR = "\t";
-const STRING_LABELS_TEST = '(eq (printf "%T" .Labels) "string")';
 const MINIMUM_DOCKER_CLIENT_MAJOR = 23;
 const ROOT_UID = 0;
+const NO_LENGTH = 0;
 const FAILED_CODE = 1;
 export const SUCCESS_CODE = 0;
 const LINUX: NodeJS.Platform = "linux";
@@ -187,23 +186,21 @@ export function cacheVolumeArguments(
   ];
 }
 
-function labelTemplate(label: string): string {
-  return `{{if ${STRING_LABELS_TEST}}}{{.Label "${label}"}}{{else}}{{index .Labels "${label}"}}{{end}}`;
-}
-
 export function ownedCacheVolumeArguments(owner: string): string[] {
   return [
     "volume",
     "ls",
     "--filter",
     `label=${OWNER_LABEL}=${owner}`,
+    "--filter",
+    `label=${CACHE_PROJECT_LABEL}`,
     "--format",
-    [
-      "{{.Name}}",
-      labelTemplate(CACHE_PROJECT_LABEL),
-      labelTemplate(CACHE_RESOURCE_LABEL),
-    ].join(FIELD_SEPARATOR),
+    "{{.Name}}",
   ];
+}
+
+export function inspectVolumeArguments(names: readonly string[]): string[] {
+  return ["volume", "inspect", ...names];
 }
 
 export function removeNamedVolumeArguments(name: string): string[] {
@@ -216,13 +213,28 @@ export interface CacheVolumeListing {
   readonly resource_identity: string;
 }
 
+export function linesOf(text: string): string[] {
+  return text
+    .split(LINE_BREAK)
+    .map((line) => line.trim())
+    .filter(Boolean);
+}
+
+function filled(value: unknown): value is string {
+  return isString(value) && value.length > NO_LENGTH;
+}
+
 export function parseCacheVolumes(stdout: string): CacheVolumeListing[] {
+  const volumes: unknown = JSON.parse(stdout);
+  if (!Array.isArray(volumes))
+    throw new Error("The volume inspection answers no list.");
   const listings: CacheVolumeListing[] = [];
-  for (const line of stdout.split(LINE_BREAK)) {
-    const [name, projectId, resourceIdentity] = line
-      .trim()
-      .split(FIELD_SEPARATOR);
-    if (!name || !projectId || !resourceIdentity) continue;
+  for (const volume of volumes) {
+    const name = field(volume, "Name");
+    const projectId = field(volume, "Labels", CACHE_PROJECT_LABEL);
+    const resourceIdentity = field(volume, "Labels", CACHE_RESOURCE_LABEL);
+    if (!filled(name) || !filled(projectId) || !filled(resourceIdentity))
+      continue;
     listings.push({
       name,
       project_id: projectId,
@@ -292,8 +304,25 @@ export function runArguments(command: RunCommand): string[] {
   ];
 }
 
-export function absentContainer(answer: RuntimeAnswer): boolean {
+export function inspectContainerArguments(name: string): string[] {
+  return ["container", "inspect", "--format", "{{.Id}}", name];
+}
+
+function absentContainer(answer: RuntimeAnswer): boolean {
   return answer.code === SUCCESS_CODE || NO_SUCH_CONTAINER.test(answer.stderr);
+}
+
+export async function containerRemovalFailure(
+  call: (args: readonly string[]) => Promise<RuntimeAnswer>,
+  name: string,
+): Promise<RuntimeAnswer | null> {
+  const removed = await call(removeArguments(name));
+  if (absentContainer(removed)) return null;
+  const inspected = await call(inspectContainerArguments(name));
+  return inspected.code !== SUCCESS_CODE &&
+    NO_SUCH_CONTAINER.test(inspected.stderr)
+    ? null
+    : removed;
 }
 
 export function absentVolume(answer: RuntimeAnswer): boolean {

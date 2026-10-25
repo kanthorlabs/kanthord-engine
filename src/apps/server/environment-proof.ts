@@ -20,12 +20,11 @@ import {
   SLOT_HOME,
   SUCCESS_CODE,
   TMP_MOUNT,
-  absentContainer,
   absentVolume,
   cacheVolumeArguments,
   cacheVolumeName,
+  containerRemovalFailure,
   presentVolume,
-  removeArguments,
   type RuntimeHost,
 } from "./container-runtime.ts";
 
@@ -166,9 +165,12 @@ export function runCommand(
 }
 
 function proofFailure(step: string, detail: string): Diagnostic {
+  const message = detail.trim();
   return new Diagnostic(
     ENVIRONMENT_PROOF_FAILED,
-    `The environment proof failed at ${step}.`,
+    message
+      ? `The environment proof failed at ${step}: ${message}`
+      : `The environment proof failed at ${step}.`,
     {
       fields: [
         ["step", step],
@@ -333,10 +335,9 @@ async function runCommands(
 }
 
 async function removeRun(options: ProofOptions, name: string, root: string) {
-  const container = await options.host.run(
-    options.runtime,
-    removeArguments(name),
-    PROOF_COMMAND_TIMEOUT_MS,
+  const container = await containerRemovalFailure(
+    (args) => options.host.run(options.runtime, args, PROOF_COMMAND_TIMEOUT_MS),
+    name,
   );
   const volume = await options.host.run(
     options.runtime,
@@ -344,9 +345,16 @@ async function removeRun(options: ProofOptions, name: string, root: string) {
     PROOF_COMMAND_TIMEOUT_MS,
   );
   rmSync(root, { recursive: true, force: true });
-  if (!absentContainer(container))
-    throw proofFailure("remove container", container.stderr);
-  if (!absentVolume(volume)) throw proofFailure("remove volume", volume.stderr);
+  if (container !== null)
+    throw proofFailure(
+      "remove container",
+      container.stderr.slice(-OUTPUT_TAIL_BYTES),
+    );
+  if (!absentVolume(volume))
+    throw proofFailure(
+      "remove volume",
+      volume.stderr.slice(-OUTPUT_TAIL_BYTES),
+    );
 }
 
 export async function proveInImage(

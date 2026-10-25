@@ -56,6 +56,8 @@ import {
 import {
   absentVolume,
   cacheVolumeName,
+  inspectVolumeArguments,
+  linesOf,
   ownedCacheVolumeArguments,
   parseCacheVolumes,
   removeNamedVolumeArguments,
@@ -482,6 +484,12 @@ export function layerContainerfile(input: LayerInput): string {
   ].join("\n");
 }
 
+function cacheListingFailure(stderr: string): Error {
+  return new Error(
+    `The cache volume listing failed: ${stderr.slice(-OUTPUT_TAIL_BYTES)}`,
+  );
+}
+
 function imageFailure(
   failure: EnvironmentFailureClass,
   tag: string,
@@ -596,11 +604,13 @@ export class EnvironmentImages implements Omit<
     const listed = await this.answer(
       ownedCacheVolumeArguments(this.options.owner),
     );
-    if (listed.code !== SUCCESS_CODE)
-      throw new Error(
-        `The cache volume listing failed: ${listed.stderr.slice(-OUTPUT_TAIL_BYTES)}`,
-      );
-    return parseCacheVolumes(listed.stdout).map(
+    if (listed.code !== SUCCESS_CODE) throw cacheListingFailure(listed.stderr);
+    const names = linesOf(listed.stdout);
+    if (!names.length) return [];
+    const inspected = await this.answer(inspectVolumeArguments(names));
+    if (inspected.code !== SUCCESS_CODE)
+      throw cacheListingFailure(inspected.stderr);
+    return parseCacheVolumes(inspected.stdout).map(
       ({ project_id, resource_identity }) => ({
         project_id,
         resource_identity,
