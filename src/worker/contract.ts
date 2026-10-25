@@ -53,6 +53,9 @@ export interface VerifiedClient {
   instance_id?: string | null;
 }
 export const HANDOVER_TIMEOUT_MS = 30000;
+export const HANDOVER_TIMEOUT_MARGIN_MS = 5000;
+export const HANDOVER_REFRESH_WAIT_MS =
+  HANDOVER_TIMEOUT_MS - HANDOVER_TIMEOUT_MARGIN_MS;
 export const ACTION_REQUEST_TOOL_NAME = "repository-action-request";
 export const ACTION_REQUEST_TIMEOUT_MS = 900000;
 export const CHANGE_REQUEST_TIMEOUT_MS = 60000;
@@ -755,6 +758,7 @@ export const LIST_LIMIT_MAX = 1000;
 
 export const WorkerErrorCode = {
   AuthorizationRefused: "worker.authorization.refused",
+  HandoverRefreshInFlight: "worker.handover.refresh_in_flight",
   ExecutionNoNativeAgent: "worker.execution.no_native_agent",
   ExecutionCredentialNotPinned: "worker.execution.credential_not_pinned",
   StartToolMissing: "worker.start.tool_missing",

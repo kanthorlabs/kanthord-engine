@@ -9,6 +9,7 @@ import pino from "pino";
 import { WorkerService, type Dependencies } from "./service.ts";
 import { ActionPerformer } from "./action-performer.ts";
 import {
+  HANDOVER_REFRESH_WAIT_MS,
   HANDOVER_TIMEOUT_MS,
   workerOperations,
   ACTION_REQUEST_TOOL_NAME,
@@ -2288,7 +2289,6 @@ test("environmentReady restarts no slot that is already draining", (t) => {
   assert.equal(f.host.restarted.length, POOL_TWO_STARTS);
 });
 
-const GATEWAY_TIMEOUT_CODE = "gateway.invocation.timeout";
 const FIRST_HANDOVER_ATTEMPT = 1;
 const TWO_HANDOVER_ATTEMPTS = 2;
 
@@ -2354,7 +2354,7 @@ test("a handover that meets an in-flight credential refresh waits for the refres
   assert.equal(attempts, TWO_HANDOVER_ATTEMPTS);
 });
 
-test("a handover whose credential refresh outlasts the handover deadline answers 504 gateway.invocation.timeout", async (t) => {
+test("a handover whose credential refresh outlasts the wait answers 503 worker.handover.refresh_in_flight before the route timeout", async (t) => {
   t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
   let attempts = 0;
   const invoke = refreshingHandoverFixture(t, () => {
@@ -2363,15 +2363,19 @@ test("a handover whose credential refresh outlasts the handover deadline answers
   });
   const answer = invoke();
   await new Promise((resolve) => setImmediate(resolve));
-  t.mock.timers.tick(HANDOVER_TIMEOUT_MS);
+  t.mock.timers.tick(HANDOVER_REFRESH_WAIT_MS);
   await assert.rejects(
     async () => {
       await answer;
     },
     (error: unknown) =>
       error instanceof OperationError &&
-      error.status === HttpStatus.GatewayTimeout &&
-      error.code === GATEWAY_TIMEOUT_CODE,
+      error.status === HttpStatus.ServiceUnavailable &&
+      error.code === WorkerErrorCode.HandoverRefreshInFlight,
   );
   assert.equal(attempts, FIRST_HANDOVER_ATTEMPT);
+});
+
+test("the handover refresh wait ends before the route timeout with a margin", () => {
+  assert.ok(HANDOVER_REFRESH_WAIT_MS < HANDOVER_TIMEOUT_MS);
 });

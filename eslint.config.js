@@ -244,7 +244,7 @@ export default tseslint.config(
                 {
                   to: element("apps-worker", {
                     fileInternalPath:
-                      "{transport,thread-data,evidence-upload,unit}.ts",
+                      "{transport,thread-data,evidence-upload,unit,handover}.ts",
                   }),
                 },
                 {

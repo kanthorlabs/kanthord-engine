@@ -524,12 +524,12 @@ The health report, `verify`, `provider check` and `model check` run on the `serv
 
 - pi-ai refreshes the access token with the stored refresh token when the token expires within 5 minutes. Then the model call uses the new access token.
 - Custody writes the refreshed value in place at the same revision, by the rule of a [refresh report](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/custody.impl.md#the-credential-handover). The refresh adds no revision.
-- When a live execution pins the revision, the check does not refresh. An access token that expires within 5 minutes then answers `unauthorized` with no remote call.
+- When a live execution pins the revision before the refresh starts, the check does not refresh. This also applies to a pin that commits after the check reads the record. An access token that expires within 5 minutes then answers `unauthorized` with no remote call.
 - A failed refresh, for example a revoked refresh token, answers `unauthorized`. The stored value does not change.
 - The server log records the reason `access token refresh failed` for the health report, `verify` and `provider check`. The `model check` log record `model check failed` holds the reason `The access token refresh failed.`
 - Custody serializes the refreshes of one revision on the server. A second check waits for the first refresh and then uses its new access token.
-- A server placement handover of a revision with a refresh in flight waits until the refresh ends. A wait longer than the 30 s handover timeout answers 504 `gateway.invocation.timeout`.
-- Custody refuses the write of a refreshed value when a live execution pins the revision at the write. Then the health report and `verify` answer `unknown` with `unreachable`, `provider check` answers `unreachable`, and `model check` answers `unavailable`. The stored value does not change.
+- In server and container placements, a handover of a revision with a refresh in flight waits until the refresh ends. The wait ends 5 s before the 30 s handover timeout. When the refresh does not end in the wait, the handover answers 503 `worker.handover.refresh_in_flight`, and the worker application retries it until the claim expires.
+- Custody refuses the write of a refreshed value when a live execution pins the revision during the refresh. Then the health report and `verify` answer `unknown` with `unreachable`, `provider check` answers `unreachable`, and `model check` answers `unavailable`. The stored value does not change.
 - A check without a refresh store never refreshes, also when the token enters the 5-minute window during the check.
 - The check of a worker instance copy never refreshes. An access token that expires within 5 minutes answers `unauthorized` with no remote call.
 - The `github-copilot` check sends the stored GitHub token. It refreshes nothing.

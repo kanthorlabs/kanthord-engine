@@ -239,6 +239,7 @@ export function composeServices(options: {
   environmentDevcontainerCli?: () => string;
   containerSlotDriver?: (driver: SlotDriver) => SlotDriver;
   repositoryFiles?: RepositoryFiles;
+  handoverRefreshWaitMs?: number;
 }) {
   const repoConnector =
     options.repositoryConnector ??
@@ -703,6 +704,7 @@ export function composeServices(options: {
       },
       heldCopies: (tx, holder) => custody.heldCopies(tx, holder),
     },
+    handoverRefreshWaitMs: options.handoverRefreshWaitMs,
     loginSessionsOf: (holder) => llm.loginSessionsOf(holder),
     credentialVersionOf: (holder) => llm.credentialVersionOf(holder),
     copyHealthOf: (holder, copy) => llm.copyHealthOf(holder, copy),

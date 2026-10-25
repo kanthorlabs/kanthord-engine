@@ -37,7 +37,7 @@ import {
   hostsPoolSlot,
   POOL_SLOT_COUNT,
   alwaysAvailable,
-  HANDOVER_TIMEOUT_MS,
+  HANDOVER_REFRESH_WAIT_MS,
   InstancePlacement,
   type PlacementStatus,
   type WorkerRegistrations,
@@ -132,6 +132,7 @@ function invalidWorkerConfiguration(workerName: string): OperationError {
 }
 
 export interface Dependencies {
+  handoverRefreshWaitMs?: number;
   missionActions: MissionActions;
   intakeActions: IntakeActions;
   evidenceRequests: EvidenceRequests;
@@ -191,13 +192,11 @@ function claimantOf(
   return instance.name;
 }
 
-const HANDOVER_TIMEOUT_CODE = "gateway.invocation.timeout";
-
-function handoverTimedOut(): OperationError {
+function refreshInFlight(): OperationError {
   return new OperationError(
-    HttpStatus.GatewayTimeout,
-    HANDOVER_TIMEOUT_CODE,
-    "Request timed out; the operation may still complete.",
+    HttpStatus.ServiceUnavailable,
+    WorkerErrorCode.HandoverRefreshInFlight,
+    "A credential refresh is in flight; retry the handover.",
   );
 }
 
@@ -217,7 +216,7 @@ async function settledBefore(
       cancelled(context.signal).then(() => false),
     ]);
     context.signal.throwIfAborted();
-    if (timedOut) throw handoverTimedOut();
+    if (timedOut) throw refreshInFlight();
   } finally {
     clearTimeout(timer);
   }
@@ -996,7 +995,9 @@ export class WorkerService implements Service {
       assert(isMachineIdentity(identity));
       const execution = caller.execution;
       assert(execution);
-      const deadline = Date.now() + HANDOVER_TIMEOUT_MS;
+      const deadline =
+        Date.now() +
+        (this.dependencies.handoverRefreshWaitMs ?? HANDOVER_REFRESH_WAIT_MS);
       while (Date.now() < deadline) {
         try {
           return caller.commit((tx) =>
@@ -1021,7 +1022,7 @@ export class WorkerService implements Service {
           await settledBefore(error.settled, deadline, caller.context);
         }
       }
-      throw handoverTimedOut();
+      throw refreshInFlight();
     });
     registry.register(workerOperations.credential, ({ body }, caller) => {
       const identity = caller.identity;
