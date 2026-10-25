@@ -12,7 +12,8 @@ export interface TraceFilter {
   node_id?: string;
 }
 export interface SpanFilter {
-  operation: string;
+  operation?: string;
+  roots?: boolean;
   from: number;
   to: number;
 }
@@ -21,6 +22,7 @@ export interface SelectedTrace {
   root_span_id: string;
   project_id: string | null;
   node_id: string | null;
+  attempt: number | null;
   worker_name: string | null;
 }
 export interface AnalyticsSpan {
@@ -51,6 +53,7 @@ function selectedTraceOf(row: Record<string, unknown>): SelectedTrace {
     root_span_id: String(row.root_span_id),
     project_id: textOrNull(row.project_id),
     node_id: textOrNull(row.node_id),
+    attempt: numberOrNull(row.attempt),
     worker_name: textOrNull(row.worker_name),
   };
 }
@@ -87,21 +90,43 @@ export function selectTraces(
   }
   return tx.database
     .prepare(
-      `SELECT trace_id, root_span_id, project_id, node_id, worker_name FROM tracking_trace WHERE ${clauses.join(" AND ")} ORDER BY trace_id`,
+      `SELECT trace_id, root_span_id, project_id, node_id, attempt, worker_name FROM tracking_trace WHERE ${clauses.join(" AND ")} ORDER BY trace_id`,
     )
     .all(...params)
     .map(selectedTraceOf);
 }
 
-function stepSql(count: number): string {
-  const marks = Array.from({ length: count }, () => "?").join(", ");
-  return `SELECT trace_id, span_id, parent_span_id, operation, start_time, end_time, attributes FROM tracking_span WHERE trace_id IN (${marks}) AND operation = ? AND start_time BETWEEN ? AND ?`;
+function marks(count: number, width: number): string {
+  const mark = `(${Array.from({ length: width }, () => "?").join(", ")})`;
+  return Array.from({ length: count }, () => mark).join(", ");
 }
 
-export async function walkSpans(
-  store: Store,
+function stepQuery(
   traces: readonly SelectedTrace[],
   filter: SpanFilter,
+): { sql: string; params: (string | number)[] } {
+  const clauses = filter.roots
+    ? [`(trace_id, span_id) IN (VALUES ${marks(traces.length, 2)})`]
+    : [`trace_id IN (VALUES ${marks(traces.length, 1)})`];
+  const params: (string | number)[] = filter.roots
+    ? traces.flatMap((trace) => [trace.trace_id, trace.root_span_id])
+    : traces.map((trace) => trace.trace_id);
+  if (filter.operation !== undefined) {
+    clauses.push("operation = ?");
+    params.push(filter.operation);
+  }
+  clauses.push("start_time BETWEEN ? AND ?");
+  params.push(filter.from, filter.to);
+  return {
+    sql: `SELECT trace_id, span_id, parent_span_id, operation, start_time, end_time, attributes FROM tracking_span WHERE ${clauses.join(" AND ")}`,
+    params,
+  };
+}
+
+export async function walkSpanGroups(
+  store: Store,
+  traces: readonly SelectedTrace[],
+  filters: readonly SpanFilter[],
   signal: AbortSignal,
   visit: (span: AnalyticsSpan, trace: SelectedTrace) => void,
 ): Promise<void> {
@@ -109,13 +134,12 @@ export async function walkSpans(
   for (let offset = 0; offset < traces.length; offset += STEP_TRACES_MAX) {
     if (offset !== FIRST_OFFSET) await setImmediate();
     signal.throwIfAborted();
-    const identities = traces
-      .slice(offset, offset + STEP_TRACES_MAX)
-      .map((trace) => trace.trace_id);
+    const step = traces.slice(offset, offset + STEP_TRACES_MAX);
     const rows = store.transaction((tx) =>
-      tx.database
-        .prepare(stepSql(identities.length))
-        .all(...identities, filter.operation, filter.from, filter.to),
+      filters.flatMap((filter) => {
+        const { sql, params } = stepQuery(step, filter);
+        return tx.database.prepare(sql).all(...params);
+      }),
     );
     for (const row of rows) {
       const span = analyticsSpanOf(row);
@@ -124,4 +148,14 @@ export async function walkSpans(
       visit(span, trace);
     }
   }
+}
+
+export function walkSpans(
+  store: Store,
+  traces: readonly SelectedTrace[],
+  filter: SpanFilter,
+  signal: AbortSignal,
+  visit: (span: AnalyticsSpan, trace: SelectedTrace) => void,
+): Promise<void> {
+  return walkSpanGroups(store, traces, [filter], signal, visit);
 }

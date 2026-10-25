@@ -165,6 +165,7 @@ test("the selection answers the identity fields of each trace", (t) => {
         root_span_id: spanIdOf(1),
         project_id: PROJECT_A,
         node_id: NODE_A,
+        attempt: null,
         worker_name: null,
       },
     ],
