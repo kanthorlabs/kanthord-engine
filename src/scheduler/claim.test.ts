@@ -1,3 +1,4 @@
+import { ExecutionKind } from "../tracking/contract.ts";
 import assert from "node:assert/strict";
 import {
   setImmediate as turn,
@@ -92,7 +93,7 @@ export function claimHarness(
     });
     h.service.delete(tx, nodeId);
     return {
-      kind: "claim",
+      kind: ExecutionKind.Steps,
       project_id: row.project_id,
       attempt: 1,
       node_revision: PIN,
@@ -793,4 +794,72 @@ test("a claim whose repository group has no record answers no claim and starts o
   await turn();
   assert.equal(reads, ONE_CALL);
   assert.deepEqual(failures, []);
+});
+
+const QUEUED_AT = 500;
+const WAITED_MS = FIXTURE_NOW - QUEUED_AT;
+const REVISION_QUEUED_AT = 900;
+
+function setQueuedAt(h: ReturnType<typeof claimHarness>, queuedAt: number) {
+  h.store.database
+    .prepare("UPDATE scheduler_job SET queued_at = ? WHERE node_id = ?")
+    .run(queuedAt, h.row.node_id);
+}
+
+test("a claim of a Waiting node opens the execution with evaluation and the wait of its job", (t) => {
+  const h = claimHarness(t, [ClaimNodeState.Waiting]);
+  const claimed = h.dependencies.transitions.claim;
+  h.dependencies.transitions.claim = (...args) => ({
+    ...claimed(...args)!,
+    kind: ExecutionKind.Evaluation,
+  });
+  h.store.transaction((tx) =>
+    h.service.insert(tx, h.row.node_id, h.row.project_id, 0),
+  );
+  setQueuedAt(h, QUEUED_AT);
+  const result = h.claim();
+  assert.equal(result.outcome, ClaimOutcome.Claimed);
+  assert.deepEqual(result.opening, {
+    kind: "evaluation",
+    worker_name: "coder@1",
+    queue_wait_ms: WAITED_MS,
+  });
+});
+
+test("the job of a revision turn measures the wait from its own queued_at", (t) => {
+  const h = claimHarness(t);
+  const enqueue = () =>
+    h.store.transaction((tx) =>
+      h.service.insert(tx, h.row.node_id, h.row.project_id, 0),
+    );
+  const jobId = () =>
+    h.store.database
+      .prepare("SELECT job_id FROM scheduler_queue_place WHERE node_id = ?")
+      .get(h.row.node_id)!.job_id;
+  enqueue();
+  setQueuedAt(h, QUEUED_AT);
+  const first = h.claim();
+  assert.equal(first.opening!.queue_wait_ms, WAITED_MS);
+  const placeBefore = jobId();
+  h.store.transaction((tx) => h.service.revoke(tx, h.row.node_id, FIXTURE_NOW));
+  enqueue();
+  setQueuedAt(h, REVISION_QUEUED_AT);
+  assert.equal(jobId(), placeBefore);
+  const turn = h.claim(FIXTURE_DEADLINE);
+  assert.equal(turn.outcome, ClaimOutcome.Claimed);
+  assert.equal(
+    turn.opening!.queue_wait_ms,
+    FIXTURE_DEADLINE - REVISION_QUEUED_AT,
+  );
+});
+
+test("a repeat claim that answers the running execution carries no opening", (t) => {
+  const h = claimHarness(t);
+  h.store.transaction((tx) =>
+    h.service.insert(tx, h.row.node_id, h.row.project_id, 0),
+  );
+  assert.ok(h.claim().opening);
+  const repeat = h.claim();
+  assert.equal(repeat.outcome, ClaimOutcome.Running);
+  assert.equal(repeat.opening, null);
 });

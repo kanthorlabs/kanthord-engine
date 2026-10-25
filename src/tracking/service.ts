@@ -47,6 +47,7 @@ import {
   trackingOperations,
   type Acknowledgement,
   type Attributes,
+  type ExecutionOpening,
   type ExecutionTelemetry,
   type ExecutionTrace,
   type ExecutionTraces,
@@ -228,15 +229,26 @@ export class TrackingService implements Service, ExecutionTelemetry {
     return retentionCutoff(this.now(), this.dependencies.retentionDays);
   }
 
-  executionOpened(trace: ExecutionTrace, createdAt: number): void {
+  executionOpened(
+    trace: ExecutionTrace,
+    createdAt: number,
+    opening: ExecutionOpening,
+  ): void {
     assert.ok(trace.trace_id);
     assert.ok(Number.isSafeInteger(createdAt));
+    assert.ok(opening.worker_name);
+    assert.ok(Number.isSafeInteger(opening.queue_wait_ms));
     this.serverSpan(trace, SCHEDULER_PRODUCER, {
       record_id: `${trace.root_span_id}:${ROOT_START_RECORD}`,
       span_id: trace.root_span_id,
       parent_span_id: null,
       operation: ROOT_SPAN_OPERATION,
       start_time: createdAt,
+      attributes: {
+        "kanthord.execution.kind": opening.kind,
+        "kanthord.worker.name": opening.worker_name,
+        "kanthord.queue.wait_ms": opening.queue_wait_ms,
+      },
     });
   }
 

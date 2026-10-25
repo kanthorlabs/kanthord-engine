@@ -8,6 +8,7 @@ import { IN_MEMORY_DATABASE, Store } from "../kernel/store.ts";
 import {
   Disposition,
   ExecutionEnd,
+  ExecutionKind,
   MISSION_PRODUCER,
   PROJECT_PRODUCER,
   RecordKind,
@@ -22,6 +23,7 @@ import {
   TraceState,
   TransitionRule,
   traceSummarySchema,
+  type ExecutionOpening,
   type ExecutionTrace,
   type ServerTrace,
   type SessionEntryRecord,
@@ -37,6 +39,11 @@ const TRACE: ExecutionTrace = {
   project_id: "project_01JZ8PZ0A1B2C3D4E5F6G7H8J9",
   node_id: "node_01JZ8Q0K4M6N8P0R2S4T6V8W0X",
   attempt: 1,
+};
+const OPENING: ExecutionOpening = {
+  kind: ExecutionKind.Steps,
+  worker_name: "coder@1",
+  queue_wait_ms: 250,
 };
 const SPAN = "2".repeat(16);
 const RUNTIME = "worker_registration_01JZ8R2B3C4D5E6F7G8H9J0K1M";
@@ -109,9 +116,33 @@ function caller(store: Store, execution = true): CallerContext {
   };
 }
 
+test("the root start stores the kind, the worker name and the queue wait, and the trace row holds the worker name", (t) => {
+  const { store, service } = harness(t);
+  const opening: ExecutionOpening = {
+    kind: ExecutionKind.Evaluation,
+    worker_name: "judge@2",
+    queue_wait_ms: 1500,
+  };
+  service.executionOpened(TRACE, CREATED, opening);
+  const page = service.spanList(
+    TRACE.trace_id,
+    { limit: PAGE_OF_ONE },
+    caller(store),
+  );
+  assert.equal(page.items[0]!.span_id, TRACE.root_span_id);
+  const attributes = page.items[0]!.attributes;
+  assert.equal(attributes["kanthord.execution.kind"], opening.kind);
+  assert.equal(attributes["kanthord.worker.name"], opening.worker_name);
+  assert.equal(attributes["kanthord.queue.wait_ms"], opening.queue_wait_ms);
+  const row = store.database
+    .prepare("SELECT worker_name FROM tracking_trace WHERE trace_id = ?")
+    .get(TRACE.trace_id);
+  assert.deepEqual({ ...row }, { worker_name: opening.worker_name });
+});
+
 test("the root span opens at the claim and ends at the release", (t) => {
   const { store, service } = harness(t);
-  service.executionOpened(TRACE, CREATED);
+  service.executionOpened(TRACE, CREATED, OPENING);
   service.executionEnded({
     trace: TRACE,
     ended_at: ENDED,
@@ -136,7 +167,7 @@ test("the root span opens at the claim and ends at the release", (t) => {
 
 test("a transition span is a child of the root span with the states, the rule and the time of the transition", (t) => {
   const { store, service } = harness(t);
-  service.executionOpened(TRACE, CREATED);
+  service.executionOpened(TRACE, CREATED, OPENING);
   const transition = {
     from: "Evaluating",
     to: "Blocked",
@@ -184,7 +215,7 @@ test("a transition span is a child of the root span with the states, the rule an
 
 test("a transition span with the rule none holds neither the count nor the limit", (t) => {
   const { store, service } = harness(t);
-  service.executionOpened(TRACE, CREATED);
+  service.executionOpened(TRACE, CREATED, OPENING);
   service.executionTransition(TRACE, {
     from: KEPT_STATE,
     to: KEPT_STATE,
@@ -212,7 +243,7 @@ for (const [cause, status, state] of [
 ] as const) {
   test(`a revocation by ${cause} stores the cause and ends the trace as ${state}`, (t) => {
     const { store, service } = harness(t);
-    service.executionOpened(TRACE, CREATED);
+    service.executionOpened(TRACE, CREATED, OPENING);
     service.executionEnded({
       trace: TRACE,
       ended_at: ENDED,
@@ -238,7 +269,7 @@ for (const [cause, status, state] of [
 
 test("a revocation with an unknown cause is refused and writes no end", (t) => {
   const { store, service } = harness(t);
-  service.executionOpened(TRACE, CREATED);
+  service.executionOpened(TRACE, CREATED, OPENING);
   assert.throws(() =>
     service.executionEnded({
       trace: TRACE,
@@ -258,7 +289,7 @@ test("a revocation with an unknown cause is refused and writes no end", (t) => {
 
 test("the root span end carries the stop detail", (t) => {
   const { store, service } = harness(t);
-  service.executionOpened(TRACE, CREATED);
+  service.executionOpened(TRACE, CREATED, OPENING);
   service.executionEnded({
     trace: TRACE,
     ended_at: ENDED,
@@ -280,8 +311,8 @@ test("the root span end carries the stop detail", (t) => {
 
 test("a repeated root open changes nothing", (t) => {
   const { store, service } = harness(t);
-  service.executionOpened(TRACE, CREATED);
-  service.executionOpened(TRACE, ENDED);
+  service.executionOpened(TRACE, CREATED, OPENING);
+  service.executionOpened(TRACE, ENDED, OPENING);
   const trace = service.traceGet(TRACE.trace_id, caller(store));
   assert.equal(trace.execution_id, TRACE.execution_id);
   const root = service.spanList(
@@ -295,7 +326,7 @@ test("a repeated root open changes nothing", (t) => {
 
 test("the trace summary answers exactly the 27 fields with the node and the attempt of the execution", (t) => {
   const { store, service } = harness(t);
-  service.executionOpened(TRACE, CREATED);
+  service.executionOpened(TRACE, CREATED, OPENING);
   const trace = service.traceGet(TRACE.trace_id, caller(store));
   assert.deepEqual(
     Object.keys(trace).sort(),
@@ -312,7 +343,7 @@ test("the trace summary answers exactly the 27 fields with the node and the atte
 test("a failed root write is counted and never thrown", (t) => {
   const { store, service } = harness(t);
   store.close();
-  assert.doesNotThrow(() => service.executionOpened(TRACE, CREATED));
+  assert.doesNotThrow(() => service.executionOpened(TRACE, CREATED, OPENING));
   assert.equal(service.droppedRecords(), ONE_DROP);
 });
 
@@ -386,7 +417,7 @@ test("textGet answers exactly the trace, the text id, the content and the creati
 
 test("a trace delete removes its spans, records, texts and session entries", (t) => {
   const { store, service } = harness(t);
-  service.executionOpened(TRACE, CREATED);
+  service.executionOpened(TRACE, CREATED, OPENING);
   service.telemetryWrite(
     TRACE.execution_id,
     [
@@ -460,7 +491,7 @@ test("a trace delete removes its spans, records, texts and session entries", (t)
 
 test("a server span of another producer under the root span is stored", (t) => {
   const { store, service } = harness(t);
-  service.executionOpened(TRACE, CREATED);
+  service.executionOpened(TRACE, CREATED, OPENING);
   const contribution = {
     record_id: `${SPAN}:end`,
     span_id: SPAN,
@@ -510,7 +541,7 @@ test("a server span outside the root span is refused by assertion", (t) => {
 
 test("a span page continues from its cursor", (t) => {
   const { store, service } = harness(t);
-  service.executionOpened(TRACE, CREATED);
+  service.executionOpened(TRACE, CREATED, OPENING);
   service.telemetryWrite(
     TRACE.execution_id,
     [
@@ -548,7 +579,7 @@ test("an unknown trace and an unknown text answer not found", (t) => {
     (error) =>
       error instanceof OperationError && error.code === TRACE_NOT_FOUND,
   );
-  service.executionOpened(TRACE, CREATED);
+  service.executionOpened(TRACE, CREATED, OPENING);
   assert.throws(
     () => service.textGet(TRACE.trace_id, `${SPAN}:input`, caller(store)),
     (error) => error instanceof OperationError && error.code === TEXT_NOT_FOUND,
@@ -571,7 +602,7 @@ function cursorInvalid(error: unknown): boolean {
 
 test("a trace page continues from its cursor and ends with a null cursor", (t) => {
   const { store, service } = harness(t);
-  service.executionOpened(TRACE, CREATED);
+  service.executionOpened(TRACE, CREATED, OPENING);
   store.transaction((tx) =>
     insertTrace(
       tx,
@@ -614,9 +645,9 @@ test("a malformed cursor and a cursor of another sort are refused", (t) => {
 
 test("the facet read answers the four arrays", (t) => {
   const { store, service } = harness(t);
-  service.executionOpened(TRACE, CREATED);
+  service.executionOpened(TRACE, CREATED, OPENING);
   assert.deepEqual(service.facetGet({}, caller(store)), {
-    worker_names: [],
+    worker_names: [OPENING.worker_name],
     agent_names: [],
     models: [],
     error_types: [],
@@ -855,7 +886,7 @@ test("a telemetry write of an expired execution is refused and opens no trace", 
 
 test("a root open of an expired execution is dropped and counted", (t) => {
   const { store, service } = harness(t, () => EXPIRED_NOW);
-  service.executionOpened(TRACE, CREATED);
+  service.executionOpened(TRACE, CREATED, OPENING);
   assert.equal(service.droppedRecords(), ONE_DROP);
   assert.equal(traceCount(store), NO_ROWS);
 });

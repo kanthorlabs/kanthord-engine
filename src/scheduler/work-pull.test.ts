@@ -755,3 +755,47 @@ test("the instance guard still allows one execution per instance", async (t) => 
     ONE_COMMIT,
   );
 });
+
+const QUEUED_AT = 1700000000000;
+const WAITED_MS = 4200;
+const CLAIMED_AT = QUEUED_AT + WAITED_MS;
+const ONE_ROOT_START = 1;
+
+const OPENED = "executionOpened";
+
+function setQueuedAt(h: ReturnType<typeof harness>, queuedAt: number) {
+  h.store.database
+    .prepare("UPDATE scheduler_job SET queued_at = ? WHERE node_id = ?")
+    .run(queuedAt, h.row.node_id);
+}
+
+test("a pull that claims an Available node opens the execution with steps, the worker name and the queue wait", async (t) => {
+  const h = harness(t);
+  h.enqueue();
+  setQueuedAt(h, QUEUED_AT);
+  t.mock.method(Date, "now", () => CLAIMED_AT);
+  const result = await h.pull();
+  assert.equal(result.kind, WorkPullKind.Claimed);
+  const opened = h.telemetry.filter((call) => call.method === OPENED);
+  assert.equal(opened.length, ONE_ROOT_START);
+  assert.equal(opened[0]!.arguments[1], result.execution!.created_at);
+  assert.deepEqual(opened[0]!.arguments[2], {
+    kind: "steps",
+    worker_name: "coder@1",
+    queue_wait_ms: WAITED_MS,
+  });
+});
+
+test("a repeat pull that answers the existing claim writes no second root start", async (t) => {
+  const h = harness(t);
+  h.enqueue();
+  setQueuedAt(h, QUEUED_AT);
+  t.mock.method(Date, "now", () => CLAIMED_AT);
+  const first = await h.pull();
+  const repeat = await h.pull();
+  assert.deepEqual(repeat, first);
+  assert.equal(
+    h.telemetry.filter((call) => call.method === OPENED).length,
+    ONE_ROOT_START,
+  );
+});
