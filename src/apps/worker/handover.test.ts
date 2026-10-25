@@ -337,3 +337,28 @@ test("handover retries a refresh-in-flight refusal until the envelope arrives", 
   );
   result.credentials.discard();
 });
+
+test("handover ends after one call on a 503 with another code", async (t) => {
+  const api = httpTransport("http://127.0.0.1:1");
+  const claim = testClaim();
+  let calls = 0;
+  t.mock.method(api.worker, "handover", async () => {
+    calls++;
+    return {
+      type: OperationResultType.Failure,
+      status: HttpStatus.ServiceUnavailable,
+      error: {
+        error: {
+          code: "gateway.invocation.stopping",
+          message: "The server is stopping.",
+          details: null,
+        },
+        request_id: "request_01ARZ3NDEKTSV4RRFFQ69G5FAV",
+      },
+    };
+  });
+  await assert.rejects(
+    takeHandover({ api, claim, clientSecret: SECRET, context: background }),
+  );
+  assert.equal(calls, ONCE);
+});

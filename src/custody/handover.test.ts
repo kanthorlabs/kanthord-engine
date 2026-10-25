@@ -1330,6 +1330,23 @@ test("a workbench store and a check store of one record serialize modify and ref
   ]);
 });
 
+test("a workbench store modify of a pinned revision runs no refresh and keeps the row", async (t) => {
+  const f = fixture(t, [], [], new Map(), [SUBSCRIPTION]);
+  const id = insertSubscription(f);
+  f.row.credentials.push(id);
+  const stored = () =>
+    f.store.database.prepare("SELECT * FROM credential WHERE id = ?").get(id);
+  const before = stored();
+  let refreshes = 0;
+  const answer = await workbenchStore(f).modify(OAUTH_PLATFORM, async () => {
+    refreshes++;
+    return { type: SecretShape.OAuth, ...ROTATED_SUBSCRIPTION };
+  });
+  assert.equal(refreshes, NO_CALLS);
+  assert.deepEqual(answer, { type: SecretShape.OAuth, ...STORED_SUBSCRIPTION });
+  assert.deepEqual(stored(), before);
+});
+
 test("a server placement handover refuses while a workbench refresh of its revision is in flight", async (t) => {
   const f = fixture(t, [], [], new Map(), [SUBSCRIPTION]);
   insertSubscription(f);
