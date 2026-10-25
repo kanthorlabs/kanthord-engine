@@ -1,10 +1,10 @@
 import {
   getSupportedThinkingLevels,
-  InMemoryCredentialStore,
   Type,
   type Api,
   type AssistantMessage,
   type Credential,
+  type CredentialStore,
   type Message,
   type Model,
   type ModelThinkingLevel,
@@ -39,13 +39,20 @@ import {
   type Platform,
 } from "./platforms.ts";
 import { providerFailureOf } from "./provider-failure.ts";
+import {
+  frozenStore,
+  insideRefreshWindow,
+  refreshWatch,
+} from "./refresh-watch.ts";
 
 export const MODEL_CHECK_PROMPT =
   "Call the check_tool tool once. After the tool answers, reply with the word done.";
 export const MODEL_CHECK_TOOL_NAME = "check_tool";
 export const MODEL_CHECK_TOOL_RESULT = "ready";
 export const MODEL_CHECK_TOOL_MISSING = "The model did not call the tool.";
-export const MODEL_CHECK_TOKEN_EXPIRED = "The access token is expired.";
+export const MODEL_CHECK_TOKEN_EXPIRED =
+  "The access token is expired or expires within 5 minutes, and the check cannot refresh it.";
+export const MODEL_CHECK_REFRESH_FAILED = "The access token refresh failed.";
 export const MODEL_CHECK_INTERRUPTED =
   "The model check ended before the model answered.";
 const TOOL_CALL_BLOCK = "toolCall";
@@ -120,13 +127,11 @@ type ConnectedModel = {
 async function connectedModel(
   input: ModelCheckInput,
   pi: ModelRuntimeModule,
-  credential: Credential,
+  credentials: CredentialStore,
   signal: AbortSignal,
 ): Promise<ConnectedModel> {
   const { platform, model_identifier: modelIdentifier } = input;
   const providerId = piProviderId(platform);
-  const credentials = new InMemoryCredentialStore();
-  await credentials.modify(providerId, async () => credential);
   const runtime = await createModelRuntime(pi, {
     credentials,
     handoverItem: { credential_id: input.credential, provider_id: providerId },
@@ -167,7 +172,7 @@ function interrupted(): ModelCheckAnswer {
 async function toolRoundTrip(
   connected: ConnectedModel,
   signal: AbortSignal,
-  secrets: readonly string[],
+  secretsOf: () => readonly string[],
 ): Promise<ModelCheckAnswer> {
   const { runtime, model, effort } = connected;
   const options: ModelsSimpleStreamOptions = {
@@ -184,7 +189,7 @@ async function toolRoundTrip(
   const first = await complete([prompt]);
   if (signal.aborted) return interrupted();
   if (MODEL_CALL_FAILURES.includes(first.stopReason))
-    return failure(first, secrets);
+    return failure(first, secretsOf());
   const call = toolCallOf(first);
   if (!call)
     return {
@@ -205,7 +210,7 @@ async function toolRoundTrip(
   ]);
   if (signal.aborted) return interrupted();
   if (MODEL_CALL_FAILURES.includes(second.stopReason))
-    return failure(second, secrets);
+    return failure(second, secretsOf());
   return { result: ModelCheckResult.Ok, message: null };
 }
 
@@ -213,26 +218,41 @@ export async function checkModel(
   input: ModelCheckInput,
   pi: ModelRuntimeModule,
   context: Context,
+  refreshStore?: CredentialStore,
 ): Promise<ModelCheckAnswer> {
   const { credential, secrets } = releasedCredential(
     input.platform,
     input.secret,
   );
   const { signal } = context;
+  const providerId = piProviderId(input.platform);
+  const watch = refreshWatch();
+  const secretsOf = () => [...secrets, ...watch.secrets()];
   try {
-    const connected = await connectedModel(input, pi, credential, signal);
+    const connected = await connectedModel(
+      input,
+      pi,
+      watch.wrap(refreshStore ?? frozenStore(providerId, credential)),
+      signal,
+    );
     if (
+      refreshStore === undefined &&
       credential.type === SecretShape.OAuth &&
-      credential.expires <= Date.now()
+      insideRefreshWindow(credential.expires)
     )
       return {
         result: ModelCheckResult.Unauthorized,
         message: MODEL_CHECK_TOKEN_EXPIRED,
       };
-    return await toolRoundTrip(connected, signal, secrets);
+    const answer = await toolRoundTrip(connected, signal, secretsOf);
+    if (signal.aborted || !watch.refreshFailed()) return answer;
+    return {
+      result: ModelCheckResult.Unauthorized,
+      message: MODEL_CHECK_REFRESH_FAILED,
+    };
   } catch (error) {
     if (error instanceof OperationError) throw error;
-    const message = thrownReason(error, secrets);
+    const message = thrownReason(error, secretsOf());
     return { result: providerFailureOf(message), message };
   }
 }

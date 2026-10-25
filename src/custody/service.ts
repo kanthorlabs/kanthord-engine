@@ -2,7 +2,7 @@ import { addAbortListener } from "node:events";
 import { z } from "zod";
 import assert from "node:assert/strict";
 import type { Logger } from "pino";
-import type { Credential } from "@earendil-works/pi-ai";
+import type { Credential, CredentialStore } from "@earendil-works/pi-ai";
 import {
   background,
   CancellationContext,
@@ -39,6 +39,7 @@ import {
 } from "../kernel/service.ts";
 import type { Store, Transaction } from "../kernel/store.ts";
 import {
+  CredentialRefreshInFlight,
   CREDENTIAL_CHECK_TIMEOUT_MS,
   LIST_LIMIT_DEFAULT,
   RevisionChange,
@@ -218,6 +219,7 @@ function capturedResourceCheck(
   row: LiveRow,
   key: Buffer,
   entry: CredentialPlatform,
+  refreshStore: CredentialStore | null,
 ): ResourceCheck {
   const { id, platform, holder } = row;
   const { probe } = entry;
@@ -236,7 +238,13 @@ function capturedResourceCheck(
         nonce,
         ciphertext,
       });
-      return await probe(secret, metadata, context, observe);
+      return await probe(
+        secret,
+        metadata,
+        context,
+        observe,
+        refreshStore ?? undefined,
+      );
     } catch {
       observe?.(
         "probe failed before the remote call",
@@ -559,6 +567,7 @@ export class CustodyComponent implements Service, CredentialRecords {
   private readonly instanceKeys: InstanceKeys;
   private readonly bindingsListingInstance: BindingsListingInstanceFn;
   private readonly instanceCopyRefreshed: (holder: string) => void;
+  private readonly refreshes = new Map<string, Promise<void>>();
 
   constructor(dependencies: Dependencies) {
     this.executions = dependencies.executions;
@@ -986,25 +995,103 @@ export class CustodyComponent implements Service, CredentialRecords {
     return this.grantedCredentialStore(
       input.platform,
       grant,
-      (tx, current, next) => {
-        const row = this.workbenchRow(tx, grant(tx));
-        if (this.executions.liveExecutionsPinning(tx, row.id).length)
-          throw new ExecutionStoreError(
-            "A live execution holds the credential revision.",
-          );
-        applyReport(
+      (tx, current, next) =>
+        this.replaceServerCopy(
           tx,
-          this.envelopeKey,
-          {
-            credential_id: row.id,
-            digest: digest(current),
-            credential: piCredentialSchema.parse(next),
-          },
-          this.platforms,
-          this.instanceKeys,
-        );
-      },
+          this.workbenchRow(tx, grant(tx)).id,
+          current,
+          next,
+        ),
     );
+  }
+
+  private replaceServerCopy(
+    tx: Transaction,
+    credentialId: string,
+    current: Credential,
+    next: Credential,
+  ): void {
+    if (this.pinned(tx, credentialId))
+      throw new ExecutionStoreError(
+        "A live execution holds the credential revision.",
+      );
+    const written = applyReport(
+      tx,
+      this.envelopeKey,
+      {
+        credential_id: credentialId,
+        digest: digest(current),
+        credential: piCredentialSchema.parse(next),
+      },
+      this.platforms,
+      this.instanceKeys,
+    );
+    if (!written)
+      this.logger.info(
+        { credential_id: credentialId },
+        "credential refresh stale",
+      );
+  }
+
+  private serializedRefresh<T>(
+    credentialId: string,
+    operation: () => Promise<T>,
+  ): Promise<T> {
+    const previous = this.refreshes.get(credentialId) ?? Promise.resolve();
+    const result = previous.then(operation);
+    const settled = result.then(
+      () => undefined,
+      () => undefined,
+    );
+    this.refreshes.set(credentialId, settled);
+    void settled.then(() => {
+      if (this.refreshes.get(credentialId) === settled)
+        this.refreshes.delete(credentialId);
+    });
+    return result;
+  }
+
+  private pinned(tx: Transaction, credentialId: string): boolean {
+    return (
+      this.executions.liveExecutionsPinning(tx, credentialId).length !== NO_ROWS
+    );
+  }
+
+  private refuseRefreshing(materials: readonly Material[]): void {
+    for (const material of materials) {
+      const settled = this.refreshes.get(material.credential_id);
+      if (settled) throw new CredentialRefreshInFlight(settled);
+    }
+  }
+
+  private refreshStoreOf(
+    tx: Transaction,
+    row: LiveRow,
+    entry: CredentialPlatform,
+  ): CredentialStore | null {
+    if (entry.secret_shape !== SecretShape.OAuth) return null;
+    if (this.pinned(tx, row.id)) return null;
+    return this.serverRefreshStore(row);
+  }
+
+  private serverRefreshStore(row: LiveRow): CredentialStore {
+    return workbenchCredentialStore({
+      providerId: piProviderId(row.platform),
+      type: SecretShape.OAuth,
+      release: () =>
+        this.store.transaction((tx) => ({
+          credential: credentialOfSecret(
+            SecretShape.OAuth,
+            openSecret(this.envelopeKey, this.storedRowOf(tx, row)),
+          ),
+          pinned: this.pinned(tx, row.id),
+        })),
+      replace: (current, next) =>
+        this.store.transaction((tx) =>
+          this.replaceServerCopy(tx, row.id, current, next),
+        ),
+      serialize: (operation) => this.serializedRefresh(row.id, operation),
+    });
   }
 
   serverAgentCredentials(input: ServerAgentCredentialsInput) {
@@ -1051,13 +1138,21 @@ export class CustodyComponent implements Service, CredentialRecords {
         this.store.transaction((tx) => {
           const material = this.releaseWorkbench(tx, grant(tx));
           try {
-            return credentialOfSecret(shape, material.value());
+            return {
+              credential: credentialOfSecret(shape, material.value()),
+              pinned: this.pinned(tx, material.credential_id),
+            };
           } finally {
             material.drop();
           }
         }),
       replace: (current, next) =>
         this.store.transaction((tx) => replace(tx, current, next)),
+      serialize: (operation) =>
+        this.serializedRefresh(
+          this.store.transaction((tx) => this.workbenchRow(tx, grant(tx)).id),
+          operation,
+        ),
     });
   }
 
@@ -1081,6 +1176,7 @@ export class CustodyComponent implements Service, CredentialRecords {
     const materials: Material[] = [];
     try {
       for (const grant of grants) materials.push(this.release(tx, grant, now));
+      this.refuseRefreshing(materials);
       const sshIdentities = repositoryBindingIds.map((bindingId) =>
         this.sshIdentityOf(tx, identity, claim, bindingId, now),
       );
@@ -1527,7 +1623,12 @@ export class CustodyComponent implements Service, CredentialRecords {
         name: encodeURIComponent(row.name),
         target: `${TARGET_KIND_CREDENTIAL}:${row.id}`,
         capability: entry.capability,
-        check: capturedResourceCheck(row, this.envelopeKey, entry),
+        check: capturedResourceCheck(
+          row,
+          this.envelopeKey,
+          entry,
+          this.refreshStoreOf(tx, row, entry),
+        ),
       };
     });
   }
@@ -1542,7 +1643,12 @@ export class CustodyComponent implements Service, CredentialRecords {
     if (!row && liveHoldersOf(tx, credentialName).length !== NO_ROWS)
       return heldByInstanceCheck();
     if (!row || !entry) return async () => ResourceStatus.Unknown;
-    return capturedResourceCheck(row, this.envelopeKey, entry);
+    return capturedResourceCheck(
+      row,
+      this.envelopeKey,
+      entry,
+      this.refreshStoreOf(tx, row, entry),
+    );
   }
 
   checkMaterial(
@@ -1551,7 +1657,8 @@ export class CustodyComponent implements Service, CredentialRecords {
     credentialName: string,
   ): CheckMaterial | null {
     const owner = firstRowOfName(tx, credentialName);
-    if (!owner || !ownedPlatform(set, owner.platform)) return null;
+    const entry = owner && ownedPlatform(set, owner.platform);
+    if (!entry) return null;
     const row = serverLive(tx, credentialName);
     if (!row) return null;
     const { id, platform, holder } = row;
@@ -1563,6 +1670,7 @@ export class CustodyComponent implements Service, CredentialRecords {
       metadata: row.metadata === null ? null : JSON.parse(row.metadata),
       secret: () =>
         openSecret(key, { id, platform, holder, nonce, ciphertext }),
+      refreshStore: this.refreshStoreOf(tx, row, entry),
     };
   }
 
@@ -1571,7 +1679,7 @@ export class CustodyComponent implements Service, CredentialRecords {
     credentialName: string,
     context: Context,
   ): Promise<CredentialCheckAnswer> {
-    const { row, entry } = this.store.transaction((tx) => {
+    const { row, entry, refreshStore } = this.store.transaction((tx) => {
       refuseForeign(tx, set, credentialName);
       refuseArchived(tx, credentialName, SERVER_HOLDER);
       const live = serverLive(tx, credentialName);
@@ -1583,7 +1691,11 @@ export class CustodyComponent implements Service, CredentialRecords {
           CustodyErrorCode.CheckUnsupported,
           "Unsupported credential check.",
         );
-      return { row: live, entry: owned };
+      return {
+        row: live,
+        entry: owned,
+        refreshStore: this.refreshStoreOf(tx, live, owned),
+      };
     });
     const deadline = new CancellationContext(
       context,
@@ -1603,7 +1715,12 @@ export class CustodyComponent implements Service, CredentialRecords {
     };
     try {
       const checked = await Promise.race([
-        capturedResourceCheck(row, this.envelopeKey, entry)(deadline, observe),
+        capturedResourceCheck(
+          row,
+          this.envelopeKey,
+          entry,
+          refreshStore,
+        )(deadline, observe),
         cancelled(deadline.signal).then(() => ResourceStatus.Unknown),
       ]);
       const status = deadline.signal.aborted ? ResourceStatus.Unknown : checked;

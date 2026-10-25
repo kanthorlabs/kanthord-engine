@@ -709,6 +709,7 @@ export class LlmComponent implements Service {
             { credential_name: body.data.credential, reason },
             "provider check failed",
           ),
+        material.refreshStore ?? undefined,
       );
       caller.context.signal.throwIfAborted();
       return caller.commit(() => answer);
@@ -747,6 +748,7 @@ export class LlmComponent implements Service {
         },
         await this.loadModelRuntime(),
         context,
+        material.refreshStore ?? undefined,
       );
       caller.context.signal.throwIfAborted();
       if (answer.message !== null)

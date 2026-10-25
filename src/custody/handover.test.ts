@@ -4,7 +4,10 @@ import pino from "pino";
 import { z } from "zod";
 import { Store, IN_MEMORY_DATABASE } from "../kernel/store.ts";
 import { createIdentity } from "../kernel/identity.ts";
-import { testMachineIdentity } from "../kernel/test-identity.ts";
+import {
+  testHumanIdentity,
+  testMachineIdentity,
+} from "../kernel/test-identity.ts";
 import { OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import { digest } from "../kernel/json.ts";
@@ -19,6 +22,7 @@ import {
 import { redactionPaths } from "../kernel/log.ts";
 import { custodyMigrations } from "./migrations.ts";
 import { CustodyComponent } from "./service.ts";
+import { encrypt } from "./envelope.ts";
 import {
   CUSTODY_HOLDER_REFUSED,
   CUSTODY_REPORT_INVALID,
@@ -27,6 +31,7 @@ import {
   SSH_SIGN_PLACEMENT_REFUSED,
 } from "./handover.ts";
 import {
+  CredentialRefreshInFlight,
   CUSTODY_SERVICE_NAME,
   handoverPayloadSchema,
   plainHandoverPayloadSchema,
@@ -1244,4 +1249,158 @@ test("sshPublicKeyOf answers the pinned revision, else the newest live revision,
     .prepare("UPDATE credential SET metadata = NULL WHERE name = ?")
     .run("deploy");
   assert.equal(f.publicKeyOf("deploy"), null);
+});
+
+const SUBSCRIPTION = "subscription";
+const ONE_REFRESH = 1;
+const STORED_SUBSCRIPTION = {
+  refresh: "private-stored-refresh",
+  access: "private-stored-access",
+  expires: 1,
+};
+const ROTATED_SUBSCRIPTION = {
+  refresh: "private-rotated-refresh",
+  access: "private-rotated-access",
+  expires: 4102444800000,
+};
+
+function insertSubscription(f: ReturnType<typeof fixture>): string {
+  const id = createIdentity("credential");
+  const { nonce, ciphertext } = encrypt(
+    Buffer.alloc(32, 7),
+    id,
+    OAUTH_PLATFORM,
+    STORED_SUBSCRIPTION,
+  );
+  f.store.database
+    .prepare(
+      "INSERT INTO credential (id, name, platform, holder, revision, nonce, ciphertext, metadata, created_at, ended_at) VALUES (?, ?, ?, 'server', 1, ?, ?, NULL, ?, NULL)",
+    )
+    .run(id, SUBSCRIPTION, OAUTH_PLATFORM, nonce, ciphertext, NOW);
+  return id;
+}
+
+function workbenchStore(f: ReturnType<typeof fixture>) {
+  const human = testHumanIdentity("alice", "Alice", "jti-human");
+  return f.component.workbenchCredentials({
+    session_id: createIdentity("workbench_session"),
+    platform: OAUTH_PLATFORM,
+    requester: () => human,
+    authorize: () => ({ credential: SUBSCRIPTION, platform: OAUTH_PLATFORM }),
+  });
+}
+
+function gated() {
+  let release = () => {};
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  return { gate, release };
+}
+
+const tick = () => new Promise((resolve) => setImmediate(resolve));
+
+test("a workbench store and a check store of one record serialize modify and refresh once", async (t) => {
+  const f = fixture(t, [], [], new Map(), [SUBSCRIPTION]);
+  insertSubscription(f);
+  const check = f.store.transaction((tx) =>
+    f.component.checkMaterial(tx, TEST_SET, SUBSCRIPTION),
+  )!.refreshStore!;
+  const { gate, release } = gated();
+  let refreshes = 0;
+  const refresh = async (current: unknown) => {
+    if (
+      (current as { expires?: number } | undefined)?.expires !==
+      STORED_SUBSCRIPTION.expires
+    )
+      return undefined;
+    refreshes++;
+    await gate;
+    return { type: SecretShape.OAuth, ...ROTATED_SUBSCRIPTION };
+  };
+  const first = workbenchStore(f).modify(OAUTH_PLATFORM, refresh);
+  const second = check.modify(OAUTH_PLATFORM, refresh);
+  await tick();
+  release();
+  const answers = await Promise.all([first, second]);
+  assert.equal(refreshes, ONE_REFRESH);
+  assert.deepEqual(answers, [
+    { type: SecretShape.OAuth, ...ROTATED_SUBSCRIPTION },
+    { type: SecretShape.OAuth, ...ROTATED_SUBSCRIPTION },
+  ]);
+});
+
+test("a workbench store modify of a pinned revision runs no refresh and keeps the row", async (t) => {
+  const f = fixture(t, [], [], new Map(), [SUBSCRIPTION]);
+  const id = insertSubscription(f);
+  f.row.credentials.push(id);
+  const stored = () =>
+    f.store.database.prepare("SELECT * FROM credential WHERE id = ?").get(id);
+  const before = stored();
+  let refreshes = 0;
+  const answer = await workbenchStore(f).modify(OAUTH_PLATFORM, async () => {
+    refreshes++;
+    return { type: SecretShape.OAuth, ...ROTATED_SUBSCRIPTION };
+  });
+  assert.equal(refreshes, NO_CALLS);
+  assert.deepEqual(answer, { type: SecretShape.OAuth, ...STORED_SUBSCRIPTION });
+  assert.deepEqual(stored(), before);
+});
+
+test("a server placement handover refuses while a workbench refresh of its revision is in flight", async (t) => {
+  const f = fixture(t, [], [], new Map(), [SUBSCRIPTION]);
+  insertSubscription(f);
+  const { gate, release } = gated();
+  const refreshing = workbenchStore(f).modify(OAUTH_PLATFORM, async () => {
+    await gate;
+    return { type: SecretShape.OAuth, ...ROTATED_SUBSCRIPTION };
+  });
+  await tick();
+  assert.throws(() => f.handover([]), CredentialRefreshInFlight);
+  f.row.credentials.splice(0);
+  release();
+  await refreshing;
+  assert.deepEqual(
+    plainHandoverPayloadSchema.parse(
+      openEnvelope(f.keys.handover, f.aad, f.handover([])),
+    ).items[0]!.credential,
+    { type: SecretShape.OAuth, ...ROTATED_SUBSCRIPTION },
+  );
+});
+
+test("a server placement handover of a revision with an in-flight refresh refuses with the settle promise, then takes the rotated value", async (t) => {
+  const f = fixture(t, [], [], new Map(), [SUBSCRIPTION]);
+  const id = insertSubscription(f);
+  const refreshStore = f.store.transaction((tx) =>
+    f.component.checkMaterial(tx, TEST_SET, SUBSCRIPTION),
+  )!.refreshStore!;
+  let release = () => {};
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const refreshing = refreshStore.modify(OAUTH_PLATFORM, async () => {
+    await gate;
+    return { type: SecretShape.OAuth, ...ROTATED_SUBSCRIPTION };
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  let refused: unknown;
+  try {
+    f.handover([]);
+  } catch (error) {
+    refused = error;
+  }
+  assert.ok(refused instanceof CredentialRefreshInFlight);
+  const rolledBackPins = f.row.credentials.splice(0);
+  assert.deepEqual(rolledBackPins, [id]);
+  release();
+  await refreshing;
+  await refused.settled;
+  const payload = plainHandoverPayloadSchema.parse(
+    openEnvelope(f.keys.handover, f.aad, f.handover([])),
+  );
+  assert.deepEqual(payload.items[0]!.credential, {
+    type: SecretShape.OAuth,
+    ...ROTATED_SUBSCRIPTION,
+  });
+  assert.ok(f.row.credentials.includes(id));
 });

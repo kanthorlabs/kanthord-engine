@@ -2,6 +2,11 @@ import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { test, type TestContext } from "node:test";
+import {
+  InMemoryCredentialStore,
+  type CredentialStore,
+} from "@earendil-works/pi-ai";
+import { SecretShape } from "../custody/contract.ts";
 import { background, CancellationContext } from "../kernel/context.ts";
 import { ResourceFailureReason, ResourceStatus } from "../kernel/health.ts";
 import { HttpMethod, HttpStatus } from "../kernel/http.ts";
@@ -20,6 +25,7 @@ import {
   piProviderId,
 } from "./platforms.ts";
 import {
+  ACCESS_TOKEN_EXPIRED_REASON,
   ANTHROPIC_API_KEY_HEADER,
   ANTHROPIC_MODELS_URL,
   ANTHROPIC_SUBSCRIPTION_CHECK_MAX_TOKENS,
@@ -52,7 +58,7 @@ import { HEALTH_OF_CONNECTION } from "./provider.ts";
 
 const SECRET = "test_private-resource-health-secret";
 const BASE_URL = "https://models.example/v1";
-const FUTURE_MS = 60000;
+const FUTURE_MS = 600000;
 const LONG_FUTURE_MS = 3600000;
 const ANTHROPIC_OAUTH_ACCESS = "sk-ant-oat01-test-private-access";
 const ANTHROPIC_MESSAGES_URL = "https://api.anthropic.com/v1/messages";
@@ -868,4 +874,294 @@ test("a Copilot check sends the request whatever the stored expiry", async (t) =
     { connection: Connection.Ok, models: null },
   );
   assert.equal(fetch.mock.callCount(), TWO_CALLS);
+});
+
+const REFRESHED_ACCESS = "sk-ant-oat01-test-private-refreshed-access";
+const REFRESHED_REFRESH = "test_private-refreshed-refresh-token";
+const ANTHROPIC_TOKEN_URL = "https://platform.claude.com/v1/oauth/token";
+const REFRESHED_EXPIRES_IN_S = 3600;
+const REFRESH_FAILED_REASON = "access token refresh failed";
+const OAUTH_CHECKS = [
+  [checkOpenAICodex, OPENAI_CODEX_PROVIDER_ID],
+  [checkAnthropicSubscription, piProviderId(Platform.AnthropicSubscription)],
+] as const;
+
+async function refreshStoreOf(providerId: string, expires: number) {
+  const store = new InMemoryCredentialStore();
+  await store.modify(providerId, async () => ({
+    type: "oauth",
+    ...credentialOf(expires),
+  }));
+  return store;
+}
+
+test("an OAuth check with a refresh store lets pi-ai refresh an expired access token and checks with the new token", async () => {
+  const refreshed = {
+    type: "oauth",
+    refresh: REFRESHED_REFRESH,
+    access: REFRESHED_ACCESS,
+    expires: Date.now() + LONG_FUTURE_MS,
+  } as const;
+  for (const [check, providerId] of OAUTH_CHECKS) {
+    const seen: unknown[] = [];
+    const refreshing: ModelCall = async (
+      model,
+      modelContext,
+      options,
+      store,
+    ) => {
+      await store.modify(model.provider, async () => refreshed);
+      seen.push(await store.read(model.provider));
+      return reply("stop")(model, modelContext, options, store);
+    };
+    const store = await refreshStoreOf(providerId, Date.now() - FUTURE_MS);
+    assert.deepEqual(
+      await check(
+        credentialOf(Date.now() - FUTURE_MS),
+        background,
+        refreshing,
+        undefined,
+        store,
+      ),
+      { connection: Connection.Ok, models: null },
+    );
+    assert.deepEqual(seen, [refreshed]);
+    assert.deepEqual(await store.read(providerId), refreshed);
+  }
+});
+
+test("an OAuth check answers unauthorized and observes the refresh failure when pi-ai cannot refresh the access token", async () => {
+  for (const [check, providerId] of OAUTH_CHECKS) {
+    const observed: Array<[string, string]> = [];
+    const revoked: ModelCall = async (model, modelContext, options, store) => {
+      await store
+        .modify(model.provider, async () => {
+          throw new Error(`invalid_grant ${REFRESH}`);
+        })
+        .catch(() => undefined);
+      return reply("error", `OAuth refresh failed for ${model.provider}`)(
+        model,
+        modelContext,
+        options,
+        store,
+      );
+    };
+    const expires = Date.now() - FUTURE_MS;
+    const store = await refreshStoreOf(providerId, expires);
+    assert.deepEqual(
+      await check(
+        credentialOf(expires),
+        background,
+        revoked,
+        (reason, failureReason) => void observed.push([reason, failureReason]),
+        store,
+      ),
+      UNAUTHORIZED,
+    );
+    assert.deepEqual(observed, [
+      [REFRESH_FAILED_REASON, ResourceFailureReason.Unauthorized],
+    ]);
+    assert.deepEqual(await store.read(providerId), {
+      type: "oauth",
+      ...credentialOf(expires),
+    });
+  }
+});
+
+test("the anthropic-subscription probe refreshes an expired token through pi-ai into the refresh store and calls the model with the new token", async (t) => {
+  const requests: {
+    url: string;
+    authorization: string | null;
+    body: string;
+  }[] = [];
+  t.mock.method(
+    globalThis,
+    "fetch",
+    async (url: unknown, init?: RequestInit) => {
+      requests.push({
+        url: String(url),
+        authorization: new Headers(init?.headers).get(AUTHORIZATION_HEADER),
+        body: String(init?.body ?? ""),
+      });
+      if (String(url) === ANTHROPIC_TOKEN_URL)
+        return Response.json({
+          access_token: REFRESHED_ACCESS,
+          refresh_token: REFRESHED_REFRESH,
+          expires_in: REFRESHED_EXPIRES_IN_S,
+        });
+      return Response.json(
+        { type: "error" },
+        { status: HttpStatus.Unauthorized },
+      );
+    },
+  );
+  const providerId = piProviderId(Platform.AnthropicSubscription);
+  const expires = Date.now() - FUTURE_MS;
+  const store = await refreshStoreOf(providerId, expires);
+  assert.equal(
+    await LLM_PLATFORMS[Platform.AnthropicSubscription].probe?.(
+      credentialOf(expires),
+      null,
+      background,
+      undefined,
+      store,
+    ),
+    ResourceStatus.Unhealthy,
+  );
+  assert.equal(requests.length, TWO_CALLS);
+  assert.equal(requests[0]!.url, ANTHROPIC_TOKEN_URL);
+  assert.equal(JSON.parse(requests[0]!.body).refresh_token, REFRESH);
+  assert.equal(requests[1]!.url.startsWith(ANTHROPIC_MESSAGES_URL), true);
+  assert.equal(requests[1]!.authorization, `Bearer ${REFRESHED_ACCESS}`);
+  const stored = await store.read(providerId);
+  assert.ok(stored?.type === SecretShape.OAuth);
+  assert.equal(stored.access, REFRESHED_ACCESS);
+  assert.equal(stored.refresh, REFRESHED_REFRESH);
+});
+
+const INSIDE_REFRESH_WINDOW_MS = 60000;
+
+test("an OAuth check without a refresh store answers unauthorized without a call when the access token expires within the pi-ai refresh window", async () => {
+  for (const [check] of OAUTH_CHECKS) {
+    const observed: Array<[string, string]> = [];
+    let calls = NO_CALLS;
+    const counting: ModelCall = async (model, modelContext, options, store) => {
+      calls += ONE_CALL;
+      return reply("stop")(model, modelContext, options, store);
+    };
+    assert.deepEqual(
+      await check(
+        credentialOf(Date.now() + INSIDE_REFRESH_WINDOW_MS),
+        background,
+        counting,
+        (reason, failureReason) => void observed.push([reason, failureReason]),
+      ),
+      UNAUTHORIZED,
+    );
+    assert.equal(calls, NO_CALLS);
+    assert.deepEqual(observed, [
+      [ACCESS_TOKEN_EXPIRED_REASON, ResourceFailureReason.Unauthorized],
+    ]);
+  }
+});
+
+function droppingStore(providerId: string, expires: number): CredentialStore {
+  const stored = { type: "oauth" as const, ...credentialOf(expires) };
+  return {
+    read: async (id) => (id === providerId ? stored : undefined),
+    list: async () => [{ providerId, type: "oauth" }],
+    delete: async () => {},
+    modify: async (_id, fn) => (await fn(stored)) ?? stored,
+  };
+}
+
+const ROTATED_ACCESS = "rotated-access-q7";
+const ROTATED_REFRESH = "rotated-refresh-q7";
+const refreshedOAuth = () => ({
+  type: "oauth" as const,
+  refresh: ROTATED_REFRESH,
+  access: ROTATED_ACCESS,
+  expires: Date.now() + LONG_FUTURE_MS,
+});
+
+test("an OAuth check redacts the refreshed tokens from a provider error and from a thrown error, even when the store drops the write", async () => {
+  for (const [check, providerId] of OAUTH_CHECKS) {
+    const reasons: string[] = [];
+    const observe = (reason: string) => void reasons.push(reason);
+    const expires = Date.now() - FUTURE_MS;
+    const leaking: ModelCall = async (model, modelContext, options, store) => {
+      await store.modify(model.provider, async () => refreshedOAuth());
+      return reply("error", `401: denied ${ROTATED_ACCESS} ${ROTATED_REFRESH}`)(
+        model,
+        modelContext,
+        options,
+        store,
+      );
+    };
+    const throwing: ModelCall = async (_model, _context, _options, store) => {
+      await store.modify(providerId, async () => refreshedOAuth());
+      throw new Error(`failed with ${ROTATED_ACCESS} ${ROTATED_REFRESH}`);
+    };
+    for (const call of [leaking, throwing])
+      await check(
+        credentialOf(expires),
+        background,
+        call,
+        observe,
+        droppingStore(providerId, expires),
+      );
+    assert.equal(reasons.length, TWO_CALLS);
+    for (const reason of reasons) {
+      assert.ok(!reason.includes(ROTATED_ACCESS), reason);
+      assert.ok(!reason.includes(ROTATED_REFRESH), reason);
+    }
+  }
+});
+
+test("an OAuth check without a refresh store gives pi-ai a store whose modify never runs the refresh", async () => {
+  for (const [check, providerId] of OAUTH_CHECKS) {
+    const future = Date.now() + LONG_FUTURE_MS;
+    const seen: unknown[] = [];
+    let refreshes = NO_CALLS;
+    const refreshing: ModelCall = async (
+      model,
+      modelContext,
+      options,
+      store,
+    ) => {
+      seen.push(
+        await store.modify(providerId, async () => {
+          refreshes += ONE_CALL;
+          return refreshedOAuth();
+        }),
+      );
+      seen.push(await store.read(providerId));
+      return reply("stop")(model, modelContext, options, store);
+    };
+    assert.deepEqual(
+      await check(credentialOf(future), background, refreshing),
+      { connection: Connection.Ok, models: null },
+    );
+    assert.equal(refreshes, NO_CALLS);
+    assert.deepEqual(seen, [
+      { type: "oauth", ...credentialOf(future) },
+      { type: "oauth", ...credentialOf(future) },
+    ]);
+  }
+});
+
+function refusingStore(providerId: string, expires: number): CredentialStore {
+  const stored = { type: "oauth" as const, ...credentialOf(expires) };
+  return {
+    read: async (id) => (id === providerId ? stored : undefined),
+    list: async () => [{ providerId, type: "oauth" }],
+    delete: async () => {},
+    modify: async (_id, fn) => {
+      const next = await fn(stored);
+      const access = next?.type === SecretShape.OAuth ? next.access : "";
+      throw new Error(`write refused for ${access}`);
+    },
+  };
+}
+
+test("an OAuth check redacts the refreshed token when the store throws after the refresh returns", async () => {
+  for (const [check, providerId] of OAUTH_CHECKS) {
+    const reasons: string[] = [];
+    const expires = Date.now() - FUTURE_MS;
+    const refusing: ModelCall = async (_model, _context, _options, store) => {
+      await store.modify(providerId, async () => refreshedOAuth());
+      throw new Error("unreachable");
+    };
+    await check(
+      credentialOf(expires),
+      background,
+      refusing,
+      (reason) => void reasons.push(reason),
+      refusingStore(providerId, expires),
+    );
+    assert.equal(reasons.length, ONE_CALL);
+    const reason = reasons[0] ?? "";
+    assert.ok(reason.includes("write refused for"), reason);
+    assert.ok(!reason.includes(ROTATED_ACCESS), reason);
+  }
 });

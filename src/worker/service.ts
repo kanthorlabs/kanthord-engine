@@ -37,6 +37,7 @@ import {
   hostsPoolSlot,
   POOL_SLOT_COUNT,
   alwaysAvailable,
+  HANDOVER_REFRESH_WAIT_MS,
   InstancePlacement,
   type PlacementStatus,
   type WorkerRegistrations,
@@ -68,6 +69,7 @@ import {
 } from "../agent/contract.ts";
 import { bindingHolders } from "../project/contract.ts";
 import {
+  CredentialRefreshInFlight,
   SERVER_HOLDER,
   type HeldCopy,
   type InstanceKey,
@@ -130,6 +132,7 @@ function invalidWorkerConfiguration(workerName: string): OperationError {
 }
 
 export interface Dependencies {
+  handoverRefreshWaitMs?: number;
   missionActions: MissionActions;
   intakeActions: IntakeActions;
   evidenceRequests: EvidenceRequests;
@@ -187,6 +190,36 @@ function claimantOf(
   const instance = instanceId ? readInstanceById(tx, instanceId) : null;
   assert.ok(instance, "A worker placement claimant names its instance.");
   return instance.name;
+}
+
+function refreshInFlight(): OperationError {
+  return new OperationError(
+    HttpStatus.ServiceUnavailable,
+    WorkerErrorCode.HandoverRefreshInFlight,
+    "A credential refresh is in flight; retry the handover.",
+  );
+}
+
+async function settledBefore(
+  settled: Promise<void>,
+  deadline: number,
+  context: Context,
+): Promise<void> {
+  let timer: NodeJS.Timeout | undefined;
+  const expired = new Promise<boolean>((resolve) => {
+    timer = setTimeout(() => resolve(true), Math.max(0, deadline - Date.now()));
+  });
+  try {
+    const timedOut = await Promise.race([
+      settled.then(() => false),
+      expired,
+      cancelled(context.signal).then(() => false),
+    ]);
+    context.signal.throwIfAborted();
+    if (timedOut) throw refreshInFlight();
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 export class WorkerService implements Service {
@@ -957,26 +990,39 @@ export class WorkerService implements Service {
   }
 
   private declareHandover(registry: OperationRegistry): void {
-    registry.register(workerOperations.handover, (_input, caller) => {
+    registry.register(workerOperations.handover, async (_input, caller) => {
       const identity = caller.identity;
       assert(isMachineIdentity(identity));
       const execution = caller.execution;
       assert(execution);
-      return caller.commit((tx) =>
-        this.dependencies.custodyHandover.handover(
-          tx,
-          identity,
-          execution,
-          this.dependencies.workerBindingRowOf(tx, execution.workerBindingId)
-            ?.placement ?? null,
-          this.dependencies.repositoryBindingIdsOf(
-            tx,
-            execution.nodeId,
-            execution.pinnedRevision,
-          ),
-          Date.now(),
-        ),
-      );
+      const deadline =
+        Date.now() +
+        (this.dependencies.handoverRefreshWaitMs ?? HANDOVER_REFRESH_WAIT_MS);
+      while (Date.now() < deadline) {
+        try {
+          return caller.commit((tx) =>
+            this.dependencies.custodyHandover.handover(
+              tx,
+              identity,
+              execution,
+              this.dependencies.workerBindingRowOf(
+                tx,
+                execution.workerBindingId,
+              )?.placement ?? null,
+              this.dependencies.repositoryBindingIdsOf(
+                tx,
+                execution.nodeId,
+                execution.pinnedRevision,
+              ),
+              Date.now(),
+            ),
+          );
+        } catch (error) {
+          if (!(error instanceof CredentialRefreshInFlight)) throw error;
+          await settledBefore(error.settled, deadline, caller.context);
+        }
+      }
+      throw refreshInFlight();
     });
     registry.register(workerOperations.credential, ({ body }, caller) => {
       const identity = caller.identity;

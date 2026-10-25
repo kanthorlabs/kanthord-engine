@@ -1,3 +1,4 @@
+import type { CredentialStore } from "@earendil-works/pi-ai";
 import type { Context } from "../kernel/context.ts";
 import {
   ResourceStatus,
@@ -12,6 +13,7 @@ export interface LlmProvider {
     metadata: unknown,
     context: Context,
     observe?: ResourceObserver,
+    refreshStore?: CredentialStore,
   ): Promise<ProviderCheckAnswer>;
 }
 

@@ -5,6 +5,7 @@ import {
   getCurrentTools,
   type FauxResponseStep,
   type Message,
+  type OAuthAuth,
   type SimpleStreamOptions,
   type StreamFunction,
 } from "@earendil-works/pi-ai";
@@ -22,6 +23,7 @@ export function scriptedModelRuntime(
   options: {
     providerId?: string;
     models?: { id: string; reasoning: boolean }[];
+    oauth?: OAuthAuth;
   } = {},
 ) {
   const providerId = options.providerId ?? "anthropic";
@@ -44,7 +46,10 @@ export function scriptedModelRuntime(
     };
   const provider = createProvider({
     id: providerId,
-    auth: { apiKey: envApiKeyAuth("scripted API key", []) },
+    auth: {
+      apiKey: envApiKeyAuth("scripted API key", []),
+      ...(options.oauth ? { oauth: options.oauth } : {}),
+    },
     models: core.models,
     api: {
       stream: record(core.stream),

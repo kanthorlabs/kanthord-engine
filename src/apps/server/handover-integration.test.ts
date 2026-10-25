@@ -23,11 +23,17 @@ import {
   EXECUTION_CREDENTIAL_MAX_BYTES,
 } from "../../custody/contract.ts";
 import { llmOperations } from "../../llm/contract.ts";
+import { LLM_PLATFORMS } from "../../llm/platforms.ts";
+import { background } from "../../kernel/context.ts";
+import { takeHandover } from "../worker/handover.ts";
+import { httpTransport } from "../worker/transport.ts";
 import { repositoryOperations } from "../../repository/contract.ts";
 import { projectOperations } from "../../project/contract.ts";
 import {
   INSTANCE_CONNECTION_INFO,
   WORKER_TOKEN_INFO,
+  HANDOVER_TIMEOUT_MS,
+  WorkerErrorCode,
   connectionPayloadSchema,
   workerOperations,
   workerTokenPayloadSchema,
@@ -397,6 +403,7 @@ async function setup(
     workerName?: string;
     resourceBudget?: { turns: number; wall_time_ms: number };
     extraRepository?: boolean;
+    handoverRefreshWaitMs?: number;
   } = {},
 ) {
   const oauth = boundary?.type === SecretShape.OAuth ? boundary : undefined;
@@ -414,6 +421,7 @@ async function setup(
       gitLsRemote: async () => {},
     },
     oauthProviders: oauth ? () => [offlineProvider(oauth)] : undefined,
+    handoverRefreshWaitMs: setupOptions.handoverRefreshWaitMs,
   });
   async function call<T extends Operation>(
     operation: T,
@@ -1445,4 +1453,96 @@ test("HTTP handover enforces its byte limit before body parsing", async (t) => {
   assert.equal(response.status, HttpStatus.PayloadTooLarge);
   const body = (await response.json()) as { error: { code: string } };
   assert.equal(body.error.code, BODY_TOO_LARGE);
+});
+
+const REFRESH_WAIT_MS = 200;
+const NO_ANSWER = 0;
+const STORED_OAUTH: Credential = {
+  type: SecretShape.OAuth,
+  refresh: "test_stored-refresh",
+  access: "test_stored-access",
+  expires: 1700000000000,
+};
+const ROTATED_OAUTH: Credential = {
+  type: SecretShape.OAuth,
+  refresh: "test_rotated-refresh",
+  access: "test_rotated-access",
+  expires: 4102444800000,
+};
+
+test("http handover answers a retryable refusal before the route timer while a refresh is in flight, and the worker retries to the envelope", async (t) => {
+  const h = await setup(t, HTTP, STORED_OAUTH, {
+    handoverRefreshWaitMs: REFRESH_WAIT_MS,
+  });
+  const refreshStore = h.f.store.transaction((tx) =>
+    h.f.custody.checkMaterial(tx, { platforms: LLM_PLATFORMS }, "anthro-1"),
+  )!.refreshStore!;
+  let release = () => {};
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const refreshing = refreshStore.modify(COPILOT, async () => {
+    await gate;
+    return ROTATED_OAUTH;
+  });
+  await setImmediate();
+  const pins = () =>
+    h.f.store.database
+      .prepare("SELECT credentials FROM scheduler_execution WHERE id = ?")
+      .get(h.execution.execution_id);
+  const before = pins();
+  const started = Date.now();
+  refused(
+    await h.handover(),
+    HttpStatus.ServiceUnavailable,
+    WorkerErrorCode.HandoverRefreshInFlight,
+  );
+  assert.ok(Date.now() - started < HANDOVER_TIMEOUT_MS);
+  await setImmediate();
+  assert.deepEqual(pins(), before);
+  const claims = JSON.parse(
+    Buffer.from(h.token.split(".")[1]!, "base64url").toString("utf8"),
+  );
+  const api = httpTransport(h.f.endpoint, h.token);
+  const handover = api.worker.handover.bind(api.worker);
+  const statuses: number[] = [];
+  let refusedOnce = () => {};
+  const firstRefusal = new Promise<void>((resolve) => {
+    refusedOnce = resolve;
+  });
+  t.mock.method(
+    api.worker,
+    "handover",
+    async (...args: Parameters<typeof handover>) => {
+      const answer = await handover(...args);
+      statuses.push(
+        answer.type === OperationResultType.Indeterminate
+          ? NO_ANSWER
+          : answer.status,
+      );
+      refusedOnce();
+      return answer;
+    },
+  );
+  const pending = takeHandover({
+    api,
+    claim: h.execution,
+    clientSecret: deriveClientSecret(
+      h.f.config.master_key,
+      h.f.config.gateway.auth.version,
+      claims.sub,
+    ),
+    context: background,
+  });
+  await firstRefusal;
+  assert.deepEqual(statuses, [HttpStatus.ServiceUnavailable]);
+  assert.deepEqual(pins(), before);
+  release();
+  assert.deepEqual(await refreshing, ROTATED_OAUTH);
+  const taken = await pending;
+  assert.deepEqual(statuses, [HttpStatus.ServiceUnavailable, HttpStatus.OK]);
+  const item = taken.credentials.items[0]!;
+  assert.deepEqual(await item.store.read(item.provider_id), ROTATED_OAUTH);
+  assert.notDeepEqual(pins(), before);
+  taken.credentials.discard();
 });

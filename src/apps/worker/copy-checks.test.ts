@@ -30,6 +30,8 @@ import {
   type ProviderCheckAnswer,
 } from "../../llm/contract.ts";
 import { HttpStatus } from "../../kernel/http.ts";
+import { LLM_PROVIDERS, Platform } from "../../llm/platforms.ts";
+import type { LlmProvider } from "../../llm/provider.ts";
 import { CopyChecks } from "./copy-checks.ts";
 import { EXCHANGE_UNAVAILABLE, ExchangeFailure } from "./instance-exchange.ts";
 
@@ -92,7 +94,11 @@ async function fixture(
     observe?: ResourceObserver,
     context?: Context,
   ) => Promise<ProviderCheckAnswer>,
-  options: { reportFails?: boolean; timeoutMs?: number } = {},
+  options: {
+    reportFails?: boolean;
+    timeoutMs?: number;
+    providers?: Readonly<Record<string, LlmProvider>>;
+  } = {},
 ) {
   const key = await instanceKey();
   const sealed = new Map<string, SealedCopyAnswer>();
@@ -121,7 +127,7 @@ async function fixture(
     key,
     context: background,
     timeoutMs: options.timeoutMs,
-    providers: {
+    providers: options.providers ?? {
       [OPENAI]: { check: (secret, _m, c, o) => check(secret, o, c) },
     },
     exchange: {
@@ -339,4 +345,56 @@ test("a run that ends on an indeterminate or server failure runs again at the ne
     await checks.idle();
   }
   assert.equal(lists, RUNS_UNTIL_A_REFUSAL);
+});
+
+const INSIDE_REFRESH_WINDOW_MS = 60000;
+const NO_FETCH_CALLS = 0;
+
+test("the copy check of an OAuth copy inside the pi-ai refresh window answers unauthorized without a refresh or a remote call", async (t) => {
+  const fetch = t.mock.method(globalThis, "fetch", async () => {
+    throw new Error("unexpected request");
+  });
+  const subscription = LLM_PROVIDERS[Platform.AnthropicSubscription]!;
+  const stores: unknown[] = [];
+  const f = await fixture(
+    [
+      {
+        name: "claude",
+        platform: Platform.AnthropicSubscription,
+        secret: {
+          refresh: "copy-refresh-value",
+          access: "copy-access-value",
+          expires: Date.now() + INSIDE_REFRESH_WINDOW_MS,
+        },
+      },
+    ],
+    async () => {
+      throw new Error("unexpected check");
+    },
+    {
+      providers: {
+        [Platform.AnthropicSubscription]: {
+          check: (secret, metadata, context, observe, refreshStore) => {
+            stores.push(refreshStore);
+            return subscription.check(
+              secret,
+              metadata,
+              context,
+              observe,
+              refreshStore,
+            );
+          },
+        },
+      },
+    },
+  );
+  f.checks.observe(NO_CREDENTIAL_VERSION);
+  await f.checks.idle();
+  assert.deepEqual(stores, [undefined]);
+  assert.equal(fetch.mock.callCount(), NO_FETCH_CALLS);
+  assert.equal(f.reports[0]?.body.status, ResourceStatus.Unhealthy);
+  assert.equal(
+    f.reports[0]?.body.failure_reason,
+    ResourceFailureReason.Unauthorized,
+  );
 });

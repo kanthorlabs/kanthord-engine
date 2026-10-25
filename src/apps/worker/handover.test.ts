@@ -23,6 +23,8 @@ import {
 import { httpTransport } from "./transport.ts";
 import { takeHandover } from "./handover.ts";
 import { testClaim } from "./test-support.ts";
+import { HttpStatus } from "../../kernel/http.ts";
+import { WorkerErrorCode } from "../../worker/contract.ts";
 
 const SECRET = Buffer.alloc(32, 5).toString("base64");
 const CREDENTIAL = { type: "api_key" as const, key: "test_handover_key" };
@@ -79,7 +81,7 @@ test("handover retries a lost answer with a fresh key and reports refresh and re
     clientSecret: SECRET,
     context: background,
   });
-  await Promise.resolve();
+  await new Promise((resolve) => setImmediate(resolve));
   t.mock.timers.tick(1000);
   const result = await pending;
   assert.equal(new Set(requestKeys).size, requestKeys.length);
@@ -277,4 +279,86 @@ test("a unit opens a sealed handover item with the instance key, reports a seale
   );
   assert.equal(JSON.stringify(reports).includes(refreshed.key), false);
   result.credentials.discard();
+});
+
+test("handover retries a refresh-in-flight refusal until the envelope arrives", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"], now: 10000 });
+  const api = httpTransport("http://127.0.0.1:1");
+  const claim = testClaim();
+  const keys = deriveHandoverKeys(SECRET);
+  const aad = handoverAad(claim.execution_id, claim.claimant.runtime_identity);
+  const requestKeys: string[] = [];
+  t.mock.method(
+    api.worker,
+    "handover",
+    async (
+      _input: unknown,
+      options: Parameters<typeof api.worker.handover>[1],
+    ) => {
+      requestKeys.push(options!.idempotencyKey!);
+      return requestKeys.length === ONCE
+        ? {
+            type: OperationResultType.Failure,
+            status: HttpStatus.ServiceUnavailable,
+            error: {
+              error: {
+                code: WorkerErrorCode.HandoverRefreshInFlight,
+                message:
+                  "A credential refresh is in flight; retry the handover.",
+                details: null,
+              },
+              request_id: "request_01ARZ3NDEKTSV4RRFFQ69G5FAV",
+            },
+          }
+        : {
+            type: OperationResultType.Completed,
+            status: 200,
+            data: sealEnvelope(keys.handover, aad, {
+              items: [ITEM],
+              ssh_identities: [],
+            }),
+          };
+    },
+  );
+  const pending = takeHandover({
+    api,
+    claim,
+    clientSecret: SECRET,
+    context: background,
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  t.mock.timers.tick(1000);
+  const result = await pending;
+  const twice = 2;
+  assert.equal(requestKeys.length, twice);
+  assert.deepEqual(
+    await result.credentials.items[0]!.store.read(ITEM.provider_id),
+    CREDENTIAL,
+  );
+  result.credentials.discard();
+});
+
+test("handover ends after one call on a 503 with another code", async (t) => {
+  const api = httpTransport("http://127.0.0.1:1");
+  const claim = testClaim();
+  let calls = 0;
+  t.mock.method(api.worker, "handover", async () => {
+    calls++;
+    return {
+      type: OperationResultType.Failure,
+      status: HttpStatus.ServiceUnavailable,
+      error: {
+        error: {
+          code: "gateway.invocation.stopping",
+          message: "The server is stopping.",
+          details: null,
+        },
+        request_id: "request_01ARZ3NDEKTSV4RRFFQ69G5FAV",
+      },
+    };
+  });
+  await assert.rejects(
+    takeHandover({ api, claim, clientSecret: SECRET, context: background }),
+  );
+  assert.equal(calls, ONCE);
 });

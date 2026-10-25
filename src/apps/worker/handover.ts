@@ -27,6 +27,7 @@ import {
 } from "../../custody/client.ts";
 import { isLlmPlatform, LLM_PLATFORMS } from "../../llm/platforms.ts";
 import type { ExecutionRecord } from "../../scheduler/contract.ts";
+import { WorkerErrorCode } from "../../worker/contract.ts";
 import { retryIndeterminate } from "./api.ts";
 import type { WorkerTransport } from "./transport.ts";
 
@@ -114,6 +115,20 @@ async function executionItems(
   return views;
 }
 
+export function retryableRefreshInFlight<T>(
+  result: OperationResult<T>,
+): OperationResult<T> {
+  if (
+    result.type === OperationResultType.Failure &&
+    result.error.error.code === WorkerErrorCode.HandoverRefreshInFlight
+  )
+    return {
+      type: OperationResultType.Indeterminate,
+      idempotencyKey: result.idempotencyKey,
+    };
+  return result;
+}
+
 export async function takeHandover(input: {
   api: WorkerTransport;
   claim: ExecutionRecord;
@@ -130,14 +145,16 @@ export async function takeHandover(input: {
   try {
     const envelope = completed(
       await retryIndeterminate(
-        (key) =>
-          api.worker.handover(
-            {
-              params: {},
-              query: {},
-              body: { execution_id: claim.execution_id },
-            },
-            { context, idempotencyKey: key },
+        async (key) =>
+          retryableRefreshInFlight(
+            await api.worker.handover(
+              {
+                params: {},
+                query: {},
+                body: { execution_id: claim.execution_id },
+              },
+              { context, idempotencyKey: key },
+            ),
           ),
         claim.expired_at,
         context,

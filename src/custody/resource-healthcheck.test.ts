@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
+import type { CredentialStore } from "@earendil-works/pi-ai";
 import pino from "pino";
 import { z } from "zod";
 import { background, CancellationContext } from "../kernel/context.ts";
@@ -15,10 +16,11 @@ import { redactingLogger } from "../kernel/test-support.ts";
 import {
   CUSTODY_SERVICE_NAME,
   SecretShape,
+  type CredentialPlatform,
   type CredentialPlatformSet,
   type PlatformProbe,
 } from "./contract.ts";
-import { encrypt } from "./envelope.ts";
+import { decrypt, encrypt } from "./envelope.ts";
 import { custodyMigrations } from "./migrations.ts";
 import { CustodyComponent } from "./service.ts";
 import { INTAKE_SERVICE_NAME } from "../intake/contract.ts";
@@ -74,6 +76,13 @@ function platformSet(calls: ProbeCall[]): CredentialPlatformSet {
 function fixture(
   t: TestContext,
   logger: pino.Logger = pino({ enabled: false }),
+  owned: {
+    platforms: Record<string, CredentialPlatform>;
+    pinning: string[];
+  } = {
+    platforms: {},
+    pinning: [],
+  },
 ) {
   const store = new Store(IN_MEMORY_DATABASE);
   t.after(() => {
@@ -90,7 +99,7 @@ function fixture(
       pinCredential: () => {
         throw new Error("UNEXPECTED_COLLABORATION");
       },
-      liveExecutionsPinning: () => [],
+      liveExecutionsPinning: () => owned.pinning,
     },
     authorization: {
       authorizeModelInference: () => {
@@ -113,7 +122,7 @@ function fixture(
     },
     clientSecret: () => Buffer.alloc(32, 9).toString("base64"),
     store,
-    platforms: {},
+    platforms: owned.platforms,
     envelopeKey: ENVELOPE_KEY,
     logger,
     agentProvidersDependentOn: () => [],
@@ -439,4 +448,331 @@ test("verify answers unclassified when the caller cancels the probe", async (t) 
     capability: PROBED_CAPABILITY,
     failure_reason: ResourceFailureReason.Unclassified,
   });
+});
+
+const OAUTH_PLATFORM = "anthropic-subscription";
+const OAUTH_PROVIDER_ID = "anthropic";
+const OAUTH_NAME = "subscription";
+const EXPIRED_OAUTH = {
+  refresh: "test_private-stored-refresh",
+  access: "test_private-stored-access",
+  expires: 1,
+};
+const REFRESHED_OAUTH = {
+  refresh: "test_private-refreshed-refresh",
+  access: "test_private-refreshed-access",
+  expires: 4102444800000,
+};
+const LIVE_EXECUTION = "execution-live";
+
+type RefreshProbeCall = { stored: unknown; refreshStore: boolean };
+
+function oauthPlatform(calls: RefreshProbeCall[]): CredentialPlatform {
+  return {
+    secret_shape: SecretShape.OAuth,
+    login_modes: [],
+    metadata_schema: null,
+    capability: PROBED_CAPABILITY,
+    probe: async (_secret, _metadata, _context, _observe, refreshStore) => {
+      calls.push({
+        stored: await refreshStore?.read(OAUTH_PROVIDER_ID),
+        refreshStore: refreshStore !== undefined,
+      });
+      await refreshStore?.modify(OAUTH_PROVIDER_ID, async () => ({
+        type: SecretShape.OAuth,
+        ...REFRESHED_OAUTH,
+      }));
+      return ResourceStatus.Healthy;
+    },
+  };
+}
+
+function oauthFixture(
+  t: TestContext,
+  pinning: string[] = [],
+  logger: pino.Logger = pino({ enabled: false }),
+) {
+  const calls: RefreshProbeCall[] = [];
+  const platform = oauthPlatform(calls);
+  const owned = fixture(t, logger, {
+    platforms: { [OAUTH_PLATFORM]: platform },
+    pinning,
+  });
+  const set: CredentialPlatformSet = {
+    platforms: { [OAUTH_PLATFORM]: platform },
+  };
+  const id = insert(
+    owned.store,
+    OAUTH_PLATFORM,
+    OAUTH_NAME,
+    FIRST_REVISION,
+    null,
+    EXPIRED_OAUTH,
+  );
+  const stored = () => {
+    const rows = owned.store.database
+      .prepare("SELECT id, revision, nonce, ciphertext FROM credential")
+      .all() as {
+      id: string;
+      revision: number;
+      nonce: Buffer;
+      ciphertext: Buffer;
+    }[];
+    return rows.map((row) => ({
+      id: row.id,
+      revision: row.revision,
+      secret: decrypt(
+        ENVELOPE_KEY,
+        row.id,
+        OAUTH_PLATFORM,
+        row.nonce,
+        row.ciphertext,
+      ),
+    }));
+  };
+  return { ...owned, set, calls, id, stored };
+}
+
+test("verify hands the probe a refresh store of the OAuth record and writes the refreshed value in place at the same revision", async (t) => {
+  const { component, set, calls, id, stored } = oauthFixture(t);
+  assert.deepEqual(await component.verify(set, OAUTH_NAME, background), {
+    status: ResourceStatus.Healthy,
+    capability: PROBED_CAPABILITY,
+    failure_reason: null,
+  });
+  assert.deepEqual(calls, [
+    {
+      stored: { type: SecretShape.OAuth, ...EXPIRED_OAUTH },
+      refreshStore: true,
+    },
+  ]);
+  assert.deepEqual(stored(), [
+    { id, revision: FIRST_REVISION, secret: REFRESHED_OAUTH },
+  ]);
+});
+
+test("verify hands no refresh store while a live execution pins the OAuth revision", async (t) => {
+  const { component, set, calls, id, stored } = oauthFixture(t, [
+    LIVE_EXECUTION,
+  ]);
+  await component.verify(set, OAUTH_NAME, background);
+  assert.deepEqual(calls, [{ stored: undefined, refreshStore: false }]);
+  assert.deepEqual(stored(), [
+    { id, revision: FIRST_REVISION, secret: EXPIRED_OAUTH },
+  ]);
+});
+
+test("verify and the resource check hand no refresh store for an api_key record", async (t) => {
+  const { store, component } = fixture(t);
+  insert(store, PROBED_PLATFORM, PROBED_NAME);
+  const stores: Array<CredentialStore | undefined> = [];
+  const recording: CredentialPlatformSet = {
+    platforms: {
+      [PROBED_PLATFORM]: {
+        ...platformSet([]).platforms[PROBED_PLATFORM]!,
+        probe: async (_secret, _metadata, _context, _observe, refreshStore) => {
+          stores.push(refreshStore);
+          return ResourceStatus.Healthy;
+        },
+      },
+    },
+  };
+  await component.verify(recording, PROBED_NAME, background);
+  await store.transaction((tx) =>
+    component.resourceCheck(tx, recording, PROBED_NAME),
+  )(background);
+  assert.deepEqual(stores, [undefined, undefined]);
+});
+
+test("the resource check and the inventory check of an OAuth record write the refreshed value in place through the refresh store", async (t) => {
+  for (const check of [
+    (f: ReturnType<typeof oauthFixture>) =>
+      f.store.transaction((tx) =>
+        f.component.resourceCheck(tx, f.set, OAUTH_NAME),
+      ),
+    (f: ReturnType<typeof oauthFixture>) =>
+      f.store.transaction(
+        (tx) => f.component.resourceInventory(tx, f.set)[0]!.check,
+      ),
+  ]) {
+    const f = oauthFixture(t);
+    assert.equal(await check(f)(background), ResourceStatus.Healthy);
+    assert.deepEqual(f.calls, [
+      {
+        stored: { type: SecretShape.OAuth, ...EXPIRED_OAUTH },
+        refreshStore: true,
+      },
+    ]);
+    assert.deepEqual(f.stored(), [
+      { id: f.id, revision: FIRST_REVISION, secret: REFRESHED_OAUTH },
+    ]);
+  }
+});
+
+test("the resource check, the inventory check and the check material hand no refresh store while a live execution pins the OAuth revision", async (t) => {
+  const f = oauthFixture(t, [LIVE_EXECUTION]);
+  await f.store.transaction((tx) =>
+    f.component.resourceCheck(tx, f.set, OAUTH_NAME),
+  )(background);
+  await f.store.transaction(
+    (tx) => f.component.resourceInventory(tx, f.set)[0]!.check,
+  )(background);
+  const material = f.store.transaction((tx) =>
+    f.component.checkMaterial(tx, f.set, OAUTH_NAME),
+  );
+  assert.deepEqual(f.calls, [
+    { stored: undefined, refreshStore: false },
+    { stored: undefined, refreshStore: false },
+  ]);
+  assert.equal(material?.refreshStore, null);
+  assert.deepEqual(f.stored(), [
+    { id: f.id, revision: FIRST_REVISION, secret: EXPIRED_OAUTH },
+  ]);
+});
+
+test("the check material of an OAuth record carries a refresh store that writes in place, and an api_key record carries none", async (t) => {
+  const f = oauthFixture(t);
+  const material = f.store.transaction((tx) =>
+    f.component.checkMaterial(tx, f.set, OAUTH_NAME),
+  );
+  assert.deepEqual(await material?.refreshStore?.read(OAUTH_PROVIDER_ID), {
+    type: SecretShape.OAuth,
+    ...EXPIRED_OAUTH,
+  });
+  await material?.refreshStore?.modify(OAUTH_PROVIDER_ID, async () => ({
+    type: SecretShape.OAuth,
+    ...REFRESHED_OAUTH,
+  }));
+  assert.deepEqual(f.stored(), [
+    { id: f.id, revision: FIRST_REVISION, secret: REFRESHED_OAUTH },
+  ]);
+  const plain = fixture(t);
+  insert(plain.store, PROBED_PLATFORM, PROBED_NAME);
+  assert.equal(
+    plain.store.transaction((tx) =>
+      plain.component.checkMaterial(tx, plain.set, PROBED_NAME),
+    )?.refreshStore,
+    null,
+  );
+});
+
+const STALE_REFRESH_MESSAGE = "credential refresh stale";
+const OTHER_OAUTH = {
+  refresh: "test_private-other-refresh",
+  access: "test_private-other-access",
+  expires: 4102444800001,
+};
+
+test("two refresh stores of one record serialize modify, so the second sees the value of the first refresh and refreshes nothing", async (t) => {
+  const f = oauthFixture(t);
+  const refreshStore = () =>
+    f.store.transaction((tx) =>
+      f.component.checkMaterial(tx, f.set, OAUTH_NAME),
+    )!.refreshStore!;
+  const first = refreshStore();
+  const second = refreshStore();
+  let release = () => {};
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const seen: unknown[] = [];
+  const refreshing = first.modify(OAUTH_PROVIDER_ID, async (current) => {
+    seen.push(current);
+    await gate;
+    return { type: SecretShape.OAuth, ...REFRESHED_OAUTH };
+  });
+  const waiting = second.modify(OAUTH_PROVIDER_ID, async (current) => {
+    seen.push(current);
+    return undefined;
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(seen.length, ONE_CALL);
+  release();
+  await Promise.all([refreshing, waiting]);
+  assert.deepEqual(seen, [
+    { type: SecretShape.OAuth, ...EXPIRED_OAUTH },
+    { type: SecretShape.OAuth, ...REFRESHED_OAUTH },
+  ]);
+  assert.deepEqual(f.stored(), [
+    { id: f.id, revision: FIRST_REVISION, secret: REFRESHED_OAUTH },
+  ]);
+});
+
+test("a pin that commits after the check and before modify runs no refresh and keeps the row", async (t) => {
+  const pinning: string[] = [];
+  const f = oauthFixture(t, pinning);
+  const check = f.store.transaction((tx) =>
+    f.component.resourceCheck(tx, f.set, OAUTH_NAME),
+  );
+  const material = f.store.transaction((tx) =>
+    f.component.checkMaterial(tx, f.set, OAUTH_NAME),
+  );
+  pinning.push(LIVE_EXECUTION);
+  let refreshes = NO_CALLS;
+  assert.equal(await check(background), ResourceStatus.Healthy);
+  assert.deepEqual(
+    await material!.refreshStore!.modify(OAUTH_PROVIDER_ID, async () => {
+      refreshes += ONE_CALL;
+      return { type: SecretShape.OAuth, ...REFRESHED_OAUTH };
+    }),
+    { type: SecretShape.OAuth, ...EXPIRED_OAUTH },
+  );
+  assert.equal(refreshes, NO_CALLS);
+  assert.deepEqual(f.calls, [
+    {
+      stored: { type: SecretShape.OAuth, ...EXPIRED_OAUTH },
+      refreshStore: true,
+    },
+  ]);
+  assert.deepEqual(f.stored(), [
+    { id: f.id, revision: FIRST_REVISION, secret: EXPIRED_OAUTH },
+  ]);
+});
+
+test("a pin that commits during the refresh refuses the write and keeps the row", async (t) => {
+  const pinning: string[] = [];
+  const f = oauthFixture(t, pinning);
+  const material = f.store.transaction((tx) =>
+    f.component.checkMaterial(tx, f.set, OAUTH_NAME),
+  );
+  await assert.rejects(
+    material!.refreshStore!.modify(OAUTH_PROVIDER_ID, async () => {
+      pinning.push(LIVE_EXECUTION);
+      return { type: SecretShape.OAuth, ...REFRESHED_OAUTH };
+    }),
+    /A live execution holds the credential revision/,
+  );
+  assert.deepEqual(f.stored(), [
+    { id: f.id, revision: FIRST_REVISION, secret: EXPIRED_OAUTH },
+  ]);
+});
+
+test("a refresh write whose stored value changed during the refresh writes nothing and logs credential refresh stale", async (t) => {
+  const lines: string[] = [];
+  const f = oauthFixture(t, [], redactingLogger(lines));
+  const material = f.store.transaction((tx) =>
+    f.component.checkMaterial(tx, f.set, OAUTH_NAME),
+  );
+  await material!.refreshStore!.modify(OAUTH_PROVIDER_ID, async () => {
+    const { nonce, ciphertext } = encrypt(
+      ENVELOPE_KEY,
+      f.id,
+      OAUTH_PLATFORM,
+      OTHER_OAUTH,
+    );
+    f.store.database
+      .prepare("UPDATE credential SET nonce = ?, ciphertext = ? WHERE id = ?")
+      .run(nonce, ciphertext, f.id);
+    return { type: SecretShape.OAuth, ...REFRESHED_OAUTH };
+  });
+  assert.deepEqual(f.stored(), [
+    { id: f.id, revision: FIRST_REVISION, secret: OTHER_OAUTH },
+  ]);
+  const records = lines.map((line) => JSON.parse(line));
+  assert.ok(
+    records.some(
+      (record) =>
+        record.msg === STALE_REFRESH_MESSAGE && record.credential_id === f.id,
+    ),
+  );
 });
