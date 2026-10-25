@@ -167,6 +167,7 @@ const fakeCollaborations = {
   }),
   schedulerClaims: {
     agentSelectionsOf: () => [],
+    agentPinsOf: () => null,
     requireRunning: () => {
       throw new Error("UNEXPECTED_COLLABORATION");
     },

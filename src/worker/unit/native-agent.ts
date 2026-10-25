@@ -39,6 +39,8 @@ import {
 import { executionSessionDirectory } from "./session-store.ts";
 import { PINNED_CONTEXT_TYPE } from "./session-entries.ts";
 
+const REASONING_EFFORT_ATTRIBUTE = "kanthord.agent.reasoning_effort";
+
 export interface NativeAgentInput {
   setup: ExecutionSetup;
   claim: {
@@ -296,6 +298,8 @@ export async function openNativeAgent(
           "kanthord.agent.chain_level": input.agent.level,
           "gen_ai.request.model":
             input.agent.effective_configuration.model_identifier,
+          [REASONING_EFFORT_ATTRIBUTE]:
+            input.agent.effective_configuration.reasoning_effort,
           "kanthord.session.format": SessionFormat.Pi,
           "kanthord.session.format_version": pi.CURRENT_SESSION_VERSION,
         },

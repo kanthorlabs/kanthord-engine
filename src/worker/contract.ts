@@ -30,6 +30,7 @@ import {
   promptTemplatesSchema,
   type AgentView,
   type AgentSelection,
+  type AgentPin,
   type ApprovedModelsFn,
   type AgentName,
   type HolderScope,
@@ -638,6 +639,10 @@ export interface SchedulerClaims {
     now: number,
   ): { activity: RegistrationActivity; execution_id: string | null };
   agentSelectionsOf(tx: Transaction, executionId: string): AgentSelection[];
+  agentPinsOf(
+    tx: Transaction,
+    executionId: string,
+  ): { worker_binding_id: string; pins: AgentPin[] } | null;
 }
 
 export type WorkerEntry = {
@@ -956,6 +961,8 @@ export type CredentialMetadataOf = (
 ) => { platform: string; metadata: Record<string, unknown> | null } | null;
 export const agentSetupSchema = z.strictObject({
   agent_name: z.string().min(1),
+  enablement_id: z.string().min(1).nullable(),
+  worker_binding_id: z.string().min(1),
   effective_configuration: effectiveConfigurationSchema,
   position: z.number().int().min(0),
   level: z.enum(ChainLevel),

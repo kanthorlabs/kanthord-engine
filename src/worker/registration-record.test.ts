@@ -121,6 +121,7 @@ test("registration records distinguish native/external placement and pure Schedu
             workerBindingOf: () => ({ ...BINDING, worker_name: workerName }),
             schedulerClaims: {
               agentSelectionsOf: () => [],
+              agentPinsOf: () => null,
               unendedExecutionOf: () => null,
               requireRunning: () => assert.fail("UNEXPECTED_COLLABORATION"),
               runningExecutionOfRuntime: () => {
@@ -162,6 +163,7 @@ test("registration inventory pages live rows descending with both filters and ca
       workerBindingOf: () => binding,
       schedulerClaims: {
         agentSelectionsOf: () => [],
+        agentPinsOf: () => null,
         requireRunning: () => assert.fail("UNEXPECTED_COLLABORATION"),
         runningExecutionOfRuntime: () => null,
         unendedExecutionOf: () => null,

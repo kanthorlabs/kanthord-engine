@@ -96,6 +96,14 @@ components:
               agent_name:
                 type: string
                 minLength: 1
+              enablement_id:
+                anyOf:
+                  - type: string
+                    minLength: 1
+                  - type: "null"
+              worker_binding_id:
+                type: string
+                minLength: 1
               effective_configuration:
                 type: object
                 properties:
@@ -210,6 +218,8 @@ components:
                 additionalProperties: false
             required:
               - agent_name
+              - enablement_id
+              - worker_binding_id
               - effective_configuration
               - position
               - level

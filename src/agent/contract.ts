@@ -17,6 +17,7 @@ import {
   CooldownChangeKind as SchedulerCooldownChangeKind,
   agentSelectionSchema,
   isAdvancingProviderFailure,
+  type AgentPin as SchedulerAgentPin,
   type AgentSelection as SchedulerAgentSelection,
   type CooldownChange as SchedulerCooldownChange,
 } from "../scheduler/contract.ts";
@@ -131,6 +132,7 @@ export type AdvancingFailure = AdvancingProviderFailure;
 export const isAdvancingFailure = isAdvancingProviderFailure;
 
 export type AgentSelection = SchedulerAgentSelection;
+export type AgentPin = SchedulerAgentPin;
 
 export const CooldownChangeKind = SchedulerCooldownChangeKind;
 export type CooldownChange = SchedulerCooldownChange;

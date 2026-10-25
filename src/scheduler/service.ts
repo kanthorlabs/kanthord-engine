@@ -64,6 +64,7 @@ import {
   type MissionBranches,
   type AgentChains,
   type AgentSelection,
+  type AgentPin,
   type Registrations,
   type WorkerDeclarations,
   type ProjectPauses,
@@ -306,6 +307,15 @@ export class SchedulerService implements Service, WorkQueue {
           row.agent_pins,
         )
       : [];
+  }
+  agentPinsOf(
+    tx: Transaction,
+    executionId: string,
+  ): { worker_binding_id: string; pins: AgentPin[] } | null {
+    const row = readExecution(tx, executionId);
+    return row
+      ? { worker_binding_id: row.worker_binding_id, pins: row.agent_pins }
+      : null;
   }
   unmatchedClaims(tx: Transaction, projectId: string): UnmatchedClaim[] {
     return unmatchedClaims(tx, this.dependencies, projectId);

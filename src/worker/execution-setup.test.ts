@@ -128,6 +128,7 @@ test("setup answers the system and agent prompt after its single snapshot and su
     model_identifier: entry.model_identifier,
     reasoning_effort: entry.reasoning_effort,
   };
+  const enablementId = createIdentity("agent_enablement");
   const composed: string[] = [];
   const requested: string[] = [];
   let commits = 0;
@@ -202,7 +203,19 @@ test("setup answers the system and agent prompt after its single snapshot and su
       throw new Error("UNEXPECTED_COLLABORATION");
     },
     custodyHandover: publicKeyCustody,
-    schedulerClaims: { agentSelectionsOf: () => [selection] },
+    schedulerClaims: {
+      agentSelectionsOf: () => [selection],
+      agentPinsOf: () => ({
+        worker_binding_id: claim.workerBindingId,
+        pins: [
+          {
+            agent_name: agent.agent_name,
+            enablement_id: enablementId,
+            position: selection.position,
+          },
+        ],
+      }),
+    },
   };
   const worker = {
     declarationOf: (name: string) => getWorkerDeclaration(name) ?? null,
@@ -253,6 +266,8 @@ test("setup answers the system and agent prompt after its single snapshot and su
   assert.ok(requested.length > NO_REQUESTS);
   assert.equal(answered.position, selection.position);
   assert.equal(answered.level, selection.level);
+  assert.equal(answered.enablement_id, enablementId);
+  assert.equal(answered.worker_binding_id, claim.workerBindingId);
   assert.equal(commits, before + 1);
   await assert.rejects(
     executionSetup(
@@ -545,6 +560,10 @@ test("setup claims no environment for a container slot whose worker binding name
             reasoning_effort: "low",
           },
         ],
+        agentPinsOf: () => ({
+          worker_binding_id: claim.workerBindingId,
+          pins: [],
+        }),
       },
     },
     {
@@ -652,6 +671,10 @@ test("setup of a container worker binding with an environment claims inside a re
             reasoning_effort: "low",
           },
         ],
+        agentPinsOf: () => ({
+          worker_binding_id: claim.workerBindingId,
+          pins: [],
+        }),
       },
     },
     {
@@ -687,6 +710,10 @@ async function twoAgentAnswer(
   const store = new Store(":memory:");
   t.after(() => store.close());
   const setup = anthropicSetup();
+  const enablementIds: Record<string, string> = {
+    "swe@1": createIdentity("agent_enablement"),
+    "re@1": createIdentity("agent_enablement"),
+  };
   const credentials: Record<string, string> = {
     "swe@1": "worker-key",
     "re@1": "reviewer-key",
@@ -790,6 +817,14 @@ async function twoAgentAnswer(
             model_identifier: "claude-sonnet-4-5",
             reasoning_effort: "off",
           })),
+        agentPinsOf: () => ({
+          worker_binding_id: claim.workerBindingId,
+          pins: Object.keys(credentials).map((agent, position) => ({
+            agent_name: agent,
+            enablement_id: enablementIds[agent]!,
+            position,
+          })),
+        }),
       },
     },
     {
@@ -805,13 +840,19 @@ async function twoAgentAnswer(
     },
     caller,
   );
-  return { answer, credentialIds };
+  return {
+    answer,
+    credentialIds,
+    enablementIds,
+    workerBindingId: claim.workerBindingId,
+  };
 }
 
 test("setup answers one entry per agent of a two-agent worker with its own prompt, binding prompts and pinned credential", async (t) => {
-  const { answer, credentialIds } = await twoAgentAnswer(t, {
-    agentPrompted: () => {},
-  });
+  const { answer, credentialIds, enablementIds, workerBindingId } =
+    await twoAgentAnswer(t, {
+      agentPrompted: () => {},
+    });
   assert.deepEqual(
     answer.agents.map((agent) => agent.agent_name),
     ["swe@1", "re@1"],
@@ -819,6 +860,14 @@ test("setup answers one entry per agent of a two-agent worker with its own promp
   assert.deepEqual(
     answer.agents.map((agent) => agent.credential_id),
     [credentialIds["worker-key"], credentialIds["reviewer-key"]],
+  );
+  assert.deepEqual(
+    answer.agents.map((agent) => agent.enablement_id),
+    [enablementIds["swe@1"], enablementIds["re@1"]],
+  );
+  assert.deepEqual(
+    answer.agents.map((agent) => agent.worker_binding_id),
+    [workerBindingId, workerBindingId],
   );
   const [swe, re] = answer.agents.map((agent) => agent.prompt.final);
   const worker = framing(SHIPPED_TEMPLATES, PromptConsumer.Worker);
@@ -961,7 +1010,13 @@ async function repositorySetup(t: TestContext, address: string, pin: boolean) {
       sshHostKeysOf: (tx, platform, received) =>
         repository.sshHostKeysOf(tx, platform, received),
       custodyHandover: publicKeyCustody,
-      schedulerClaims: { agentSelectionsOf: () => [selection] },
+      schedulerClaims: {
+        agentSelectionsOf: () => [selection],
+        agentPinsOf: () => ({
+          worker_binding_id: claim.workerBindingId,
+          pins: [],
+        }),
+      },
     },
     {
       declarationOf: (name: string) => getWorkerDeclaration(name) ?? null,

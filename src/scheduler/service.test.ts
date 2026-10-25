@@ -832,3 +832,28 @@ test("activity is a pure read that never settles an expired execution", (t) => {
   });
   assert.deepEqual(h.calls, []);
 });
+
+test("agentPinsOf answers the binding id and the pins of an execution and null for an unknown execution", (t) => {
+  const h = schedulerHarness(t);
+  const pins = [
+    {
+      agent_name: "swe@1",
+      enablement_id: createIdentity("agent_enablement"),
+      position: 0,
+    },
+    {
+      agent_name: "re@1",
+      enablement_id: createIdentity("agent_enablement"),
+      position: 1,
+    },
+  ];
+  const row = executionFixture({ agent_pins: pins });
+  h.store.transaction((tx) => {
+    insertExecution(tx, row);
+    assert.deepEqual(h.service.agentPinsOf(tx, row.execution_id), {
+      worker_binding_id: row.worker_binding_id,
+      pins,
+    });
+    assert.equal(h.service.agentPinsOf(tx, createIdentity("execution")), null);
+  });
+});
