@@ -101,6 +101,7 @@ import {
   type BindingRevisionResult,
   type CreateMission,
   type LiveNodesPinning,
+  type LiveNodePins,
   type UnmatchedClaims,
   type ValidateEntry,
   type CustodySuitability,
@@ -120,6 +121,7 @@ import {
   WorkerPlacement,
   type EndRegistrations,
   type BindingChange,
+  type StalePin,
   type SchedulerWakeup,
   type VerifyRepositoryCredential,
 } from "./contract.ts";
@@ -131,6 +133,7 @@ import {
   pauseProject,
   resumeProject,
   readBindingRevision,
+  readOlderRevisions,
   readLatestBinding,
   readLatestTombstone,
   readGeneration,
@@ -175,6 +178,9 @@ import {
 const SSH_UNREACHABLE_STATUS = 422;
 const PROJECTS_DIRECTORY = "projects";
 const NO_GENERATION = 0;
+const BEFORE = -1;
+const SAME = 0;
+const AFTER = 1;
 const SINGLE_FORM = 1;
 
 function refuseAddressForm(address: string): void {
@@ -540,6 +546,7 @@ export interface Dependencies {
   hostHome?: string;
   createMission: CreateMission;
   liveNodesPinning: LiveNodesPinning;
+  liveNodePins: LiveNodePins;
   unmatchedClaims: UnmatchedClaims;
   validateEntry: ValidateEntry;
   custodySuitability: CustodySuitability;
@@ -583,6 +590,13 @@ function currentEnvironmentOf(
   return repositoryConfigSchema.parse(current.config).environment ?? null;
 }
 
+function byNodeThenName(left: StalePin, right: StalePin): number {
+  if (left.node_id !== right.node_id)
+    return left.node_id < right.node_id ? BEFORE : AFTER;
+  if (left.binding_name === right.binding_name) return SAME;
+  return left.binding_name < right.binding_name ? BEFORE : AFTER;
+}
+
 function noStoredEnvironment(tx: Transaction, projectId: string): boolean {
   return Array.from(readCurrentBindingSet(tx, projectId).values()).every(
     (entry) =>
@@ -598,6 +612,7 @@ export class ProjectService implements Service, ProjectBindings {
   private readonly hostHome?: string;
   private readonly createMission: CreateMission;
   private readonly liveNodesPinning: LiveNodesPinning;
+  private readonly liveNodePins: LiveNodePins;
   private readonly unmatchedClaims: UnmatchedClaims;
   private readonly validateEntry: ValidateEntry;
   private readonly custodySuitability: CustodySuitability;
@@ -625,6 +640,7 @@ export class ProjectService implements Service, ProjectBindings {
     this.hostHome = dependencies.hostHome;
     this.createMission = dependencies.createMission;
     this.liveNodesPinning = dependencies.liveNodesPinning;
+    this.liveNodePins = dependencies.liveNodePins;
     this.unmatchedClaims = dependencies.unmatchedClaims;
     this.validateEntry = dependencies.validateEntry;
     this.custodySuitability = dependencies.custodySuitability;
@@ -1112,12 +1128,47 @@ export class ProjectService implements Service, ProjectBindings {
         binding_set_version: result.newVersion,
         bindings,
         changes: result.changes,
+        stale_pins: this.stalePins(tx, projectId, result.changes),
       };
     });
     this.onboarding.bindingsChanged(projectId);
     this.bindingsChanged(projectId);
     this.wakeup.wake(projectId);
     return answer;
+  }
+  private stalePins(
+    tx: Transaction,
+    projectId: string,
+    changes: readonly BindingChange[],
+  ): StalePin[] {
+    const older = new Map<
+      string,
+      { name: string; pinned: number; current: number }
+    >();
+    for (const change of changes) {
+      if (change.kind !== ChangeKind.Revised) continue;
+      const current = readBindingRevision(tx, change.binding_id);
+      assert.ok(current && current.removed_at === null);
+      for (const revision of readOlderRevisions(tx, current))
+        older.set(revision.id, {
+          name: current.name,
+          pinned: revision.revision,
+          current: current.revision,
+        });
+    }
+    if (older.size === EMPTY_LENGTH) return [];
+    return this.liveNodePins(tx, projectId, Array.from(older.keys()))
+      .map(({ node_id, binding_id }) => {
+        const revision = older.get(binding_id);
+        assert.ok(revision);
+        return {
+          node_id,
+          binding_name: revision.name,
+          pinned_revision: revision.pinned,
+          current_revision: revision.current,
+        };
+      })
+      .sort(byNodeThenName);
   }
   private async unavailablePlacement(
     projectId: string,

@@ -102,9 +102,19 @@ export interface MissionEnvironments {
   ): boolean;
 }
 
+export interface LiveNodePin {
+  node_id: string;
+  binding_id: string;
+}
+
 export interface MissionCollaborations {
   createMission(tx: Transaction, projectId: string, actor: HumanActor): void;
   liveNodesPinning(tx: Transaction, bindingId: string): string[];
+  liveNodePins(
+    tx: Transaction,
+    projectId: string,
+    bindingIds: readonly string[],
+  ): LiveNodePin[];
   claimFacts(tx: Transaction, nodeId: string): ClaimFacts | null;
   claimFactsOf(tx: Transaction, projectId: string): ClaimFactsRow[];
 }

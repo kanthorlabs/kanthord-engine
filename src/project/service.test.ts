@@ -368,6 +368,7 @@ function fixture(t: TestContext, overrides: Partial<Dependencies> = {}) {
     },
     createMission: unexpected,
     liveNodesPinning: unexpected,
+    liveNodePins: () => [],
     unmatchedClaims: () => [],
     validateEntry: unexpected,
     custodySuitability: unexpected,
@@ -1444,6 +1445,126 @@ test("binding writes wake Scheduler once after commit and refused writes wake no
   );
   await assert.rejects(f.write({}));
   assert.deepEqual(f.wakes, [f.params.project_id]);
+});
+
+const STALE_FIRST_NODE = "node-stale-a";
+const STALE_SECOND_NODE = "node-stale-b";
+const CURRENT_NODE = "node-current";
+const ALPHA_WORKER = "alpha";
+const BETA_WORKER = "beta";
+const THIRD_REVISION = 3;
+
+test("binding set write lists the stale pins of each revised binding in node and name order", async (t) => {
+  const pins = new Map<string, string[]>();
+  const calls: Array<{ project_id: string; binding_ids: string[] }> = [];
+  const f = writeFixture(t, {
+    liveNodePins: (tx, projectId, bindingIds) => {
+      assert.ok(tx.database.isTransaction);
+      calls.push({ project_id: projectId, binding_ids: [...bindingIds] });
+      return bindingIds.flatMap((bindingId) =>
+        (pins.get(bindingId) ?? []).map((nodeId) => ({
+          node_id: nodeId,
+          binding_id: bindingId,
+        })),
+      );
+    },
+  });
+  const scaled = (instance_count: number) => ({
+    ...workerBinding(),
+    config: { ...workerBinding().config, instance_count },
+  });
+  const first = await f.write({
+    [ALPHA_WORKER]: workerBinding(),
+    [BETA_WORKER]: workerBinding(),
+    repository: repositoryBinding(),
+  });
+  assert.deepEqual(first.stale_pins, []);
+  assert.deepEqual(calls, []);
+  const alphaFirst = first.bindings[ALPHA_WORKER]!.id;
+  const betaFirst = first.bindings[BETA_WORKER]!.id;
+  pins.set(alphaFirst, [STALE_SECOND_NODE, STALE_FIRST_NODE]);
+  pins.set(betaFirst, [STALE_FIRST_NODE]);
+  pins.set(first.bindings.repository!.id, [STALE_FIRST_NODE]);
+  const second = await f.write(
+    {
+      [BETA_WORKER]: scaled(TWO_INSTANCES),
+      [ALPHA_WORKER]: scaled(TWO_INSTANCES),
+      repository: repositoryBinding(),
+    },
+    first.binding_set_version,
+  );
+  assert.deepEqual(second.stale_pins, [
+    {
+      node_id: STALE_FIRST_NODE,
+      binding_name: ALPHA_WORKER,
+      pinned_revision: FIRST_REVISION,
+      current_revision: SECOND_REVISION,
+    },
+    {
+      node_id: STALE_FIRST_NODE,
+      binding_name: BETA_WORKER,
+      pinned_revision: FIRST_REVISION,
+      current_revision: SECOND_REVISION,
+    },
+    {
+      node_id: STALE_SECOND_NODE,
+      binding_name: ALPHA_WORKER,
+      pinned_revision: FIRST_REVISION,
+      current_revision: SECOND_REVISION,
+    },
+  ]);
+  assert.deepEqual(
+    new Set(calls.flatMap(({ binding_ids }) => binding_ids)),
+    new Set([alphaFirst, betaFirst]),
+  );
+  assert.ok(
+    calls.every(({ project_id }) => project_id === f.params.project_id),
+  );
+  const alphaSecond = second.bindings[ALPHA_WORKER]!.id;
+  pins.delete(betaFirst);
+  pins.set(alphaSecond, [CURRENT_NODE]);
+  calls.length = NO_CALLS;
+  const third = await f.write(
+    {
+      [ALPHA_WORKER]: scaled(SINGLE_INSTANCE),
+      [BETA_WORKER]: scaled(TWO_INSTANCES),
+      repository: repositoryBinding(),
+    },
+    second.binding_set_version,
+  );
+  const alphaThird = third.bindings[ALPHA_WORKER]!;
+  assert.equal(alphaThird.revision, THIRD_REVISION);
+  assert.deepEqual(third.stale_pins, [
+    {
+      node_id: CURRENT_NODE,
+      binding_name: ALPHA_WORKER,
+      pinned_revision: SECOND_REVISION,
+      current_revision: THIRD_REVISION,
+    },
+    {
+      node_id: STALE_FIRST_NODE,
+      binding_name: ALPHA_WORKER,
+      pinned_revision: FIRST_REVISION,
+      current_revision: THIRD_REVISION,
+    },
+    {
+      node_id: STALE_SECOND_NODE,
+      binding_name: ALPHA_WORKER,
+      pinned_revision: FIRST_REVISION,
+      current_revision: THIRD_REVISION,
+    },
+  ]);
+  assert.deepEqual(
+    new Set(calls.flatMap(({ binding_ids }) => binding_ids)),
+    new Set([alphaFirst, alphaSecond]),
+  );
+  calls.length = NO_CALLS;
+  const removed = await f.write(
+    { [BETA_WORKER]: scaled(TWO_INSTANCES), repository: repositoryBinding() },
+    third.binding_set_version,
+  );
+  assert.deepEqual(removed.stale_pins, []);
+  assert.deepEqual(calls, []);
 });
 
 function storedBindings(f: ReturnType<typeof writeFixture>) {

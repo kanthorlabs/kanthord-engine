@@ -630,6 +630,53 @@ test("liveNodesPinning checks only the current revision of live nonterminal node
   );
 });
 
+test("liveNodePins answers the current pins of live nonterminal nodes of one project", (t) => {
+  const { store, mission } = fixture(t);
+  const expected = store.transaction((tx) => {
+    mission.createMission(tx, PROJECT_ID, HUMAN_ACTOR);
+    mission.createMission(tx, UNKNOWN_PROJECT_ID, HUMAN_ACTOR);
+    const missionOf = (projectId: string) =>
+      String(
+        tx.database
+          .prepare("SELECT id FROM mission_mission WHERE project_id = ?")
+          .get(projectId)?.id,
+      );
+    const missionId = missionOf(PROJECT_ID);
+    const pending = insertNode(tx, missionId, NodeState.Pending);
+    insertRevision(tx, pending, FIRST_REVISION, [BINDING_ID, OTHER_BINDING_ID]);
+    const rebound = insertNode(tx, missionId, NodeState.Available);
+    insertRevision(tx, rebound, FIRST_REVISION, [BINDING_ID]);
+    insertRevision(tx, rebound, NEXT_REVISION, [UNKNOWN_BINDING_ID]);
+    openAttempt(tx, rebound, FIRST_REVISION, HUMAN_ACTOR, CREATED_AT);
+    const retired = insertNode(tx, missionId, NodeState.Pending, RETIRED_AT);
+    insertRevision(tx, retired, FIRST_REVISION, [BINDING_ID]);
+    const completed = insertNode(tx, missionId, NodeState.Completed);
+    insertRevision(tx, completed, FIRST_REVISION, [BINDING_ID]);
+    const discarded = insertNode(tx, missionId, NodeState.Discarded);
+    insertRevision(tx, discarded, FIRST_REVISION, [BINDING_ID]);
+    const foreign = insertNode(
+      tx,
+      missionOf(UNKNOWN_PROJECT_ID),
+      NodeState.Pending,
+    );
+    insertRevision(tx, foreign, FIRST_REVISION, [BINDING_ID]);
+    return [
+      { node_id: pending, binding_id: BINDING_ID },
+      { node_id: pending, binding_id: OTHER_BINDING_ID },
+    ];
+  });
+  assert.deepEqual(
+    store.transaction((tx) =>
+      mission.liveNodePins(tx, PROJECT_ID, [OTHER_BINDING_ID, BINDING_ID]),
+    ),
+    expected,
+  );
+  assert.deepEqual(
+    store.transaction((tx) => mission.liveNodePins(tx, PROJECT_ID, [])),
+    [],
+  );
+});
+
 const FIRST_ELEMENT_INDEX = 0;
 const EMPTY_CALLS = 0;
 const NO_ATTEMPT = 0;

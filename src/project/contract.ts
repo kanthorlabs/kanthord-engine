@@ -483,6 +483,11 @@ export type CreateMission = (
   actor: HumanActor,
 ) => void;
 export type LiveNodesPinning = (tx: Transaction, bindingId: string) => string[];
+export type LiveNodePins = (
+  tx: Transaction,
+  projectId: string,
+  bindingIds: readonly string[],
+) => { node_id: string; binding_id: string }[];
 export type UnmatchedClaims = (
   tx: Transaction,
   projectId: string,
@@ -697,6 +702,13 @@ const agentConfigItem = z.strictObject({
     z.strictObject({ path: z.array(z.string()), code: z.string() }),
   ),
 });
+const stalePinSchema = z.strictObject({
+  node_id: z.string(),
+  binding_name: z.string(),
+  pinned_revision: z.number().int().positive(),
+  current_revision: z.number().int().positive(),
+});
+export type StalePin = z.infer<typeof stalePinSchema>;
 const bindingSetWriteAnswerSchema = z.strictObject({
   project_id: z.string(),
   binding_set_version: z.number().int().positive(),
@@ -704,6 +716,7 @@ const bindingSetWriteAnswerSchema = z.strictObject({
   changes: z.array(
     z.strictObject({ kind: z.enum(ChangeKind), binding_id: z.string() }),
   ),
+  stale_pins: z.array(stalePinSchema),
 });
 export const EnvironmentStatus = {
   None: "none",
