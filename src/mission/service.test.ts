@@ -3731,7 +3731,7 @@ test("import.preview stage one stops before unknown identity and binding resolut
       f.mission_id,
       snapshot.mission_version,
       normalizeImportSnapshot(snapshot, f.mission_id, TEXT_MAX_BYTES).entries,
-      [],
+      { creates: [], updates: [], retirements: [] },
     ),
   );
 });
@@ -3752,7 +3752,11 @@ test("import.preview malformed Markdown digest omits refused files and does not 
   );
   assert.equal(
     result.preview_digest,
-    importDigest(f.mission_id, snapshot.mission_version, [], []),
+    importDigest(f.mission_id, snapshot.mission_version, [], {
+      creates: [],
+      updates: [],
+      retirements: [],
+    }),
   );
   assert.deepEqual(result.retirements, []);
 });
@@ -3918,12 +3922,11 @@ test("import.preview empty set retires every current node without writes or queu
   assert.deepEqual(result.removed_edges, []);
   assert.equal(
     result.preview_digest,
-    importDigest(
-      f.mission_id,
-      f.importSnapshot.mission_version,
-      [],
-      result.retirements,
-    ),
+    importDigest(f.mission_id, f.importSnapshot.mission_version, [], {
+      creates: [],
+      updates: [],
+      retirements: result.retirements,
+    }),
   );
 });
 
@@ -4529,6 +4532,45 @@ for (const [state, code] of [
     assert.deepEqual(f.state(), before);
   });
 }
+
+test("import.apply refuses a preview whose classification changed after a discard", async (t) => {
+  const f = importApplyFixture(t);
+  const entries = f.identified(f.apply(f.request()));
+  const implement = entries.find(
+    (item) => item.filename === IMPLEMENT_FILENAME,
+  )!;
+  const body = f.request(
+    f.importSnapshot(
+      entries.map((item) =>
+        item.id === implement.id
+          ? { ...item, name: IMPORT_UPDATED_NAME }
+          : item,
+      ),
+    ),
+  );
+  const node = f.store.transaction((tx) => readNode(tx, implement.id!))!;
+  const operation = missionOperations["node.discard"];
+  await f.registry.get(operation.id).handler(
+    operation.input.parse({
+      params: { node_id: implement.id },
+      query: {},
+      body: {
+        reason: REASON,
+        expected_mission_version: f.version(),
+        expected_state: node.state,
+        expected_attempt: node.attempt,
+      },
+    }),
+    f.caller,
+  );
+  assert.equal(f.version(), body.mission_version);
+  const before = f.state();
+  assert.throws(
+    () => f.apply(body),
+    retirementError(MissionErrorCode.RetirementMismatch),
+  );
+  assert.deepEqual(f.state(), before);
+});
 
 test("import.apply refuses a dependency edit on a Waiting dependent", (t) => {
   const f = importApplyFixture(t);

@@ -1061,7 +1061,7 @@ test("a new binding revision under the same name changes no node", (t) => {
   );
 });
 
-test("a nonterminal node whose plan file names another binding is an update", (t) => {
+test("another binding name updates a nonterminal node and is a no-op for a terminal node", (t) => {
   const { store, entries, resolve } = fixture(t, hierarchy());
   const id = item(entries, "o.md").id!;
   const renamed = change(entries, "o.md", { bindings: [SECOND_REPOSITORY] });
@@ -1081,26 +1081,28 @@ test("a nonterminal node whose plan file names another binding is an update", (t
   );
 });
 
-test("a node with two bindings and one new revision changes no node", (t) => {
-  const { store, entries, resolve } = fixture(t, [
-    implement("o.md", { bindings: [REPOSITORY, SECOND_REPOSITORY] }),
-  ]);
-  const id = item(entries, "o.md").id!;
-  store.database
-    .prepare("UPDATE mission_node SET state = ? WHERE id = ?")
-    .run(NodeState.Completed, id);
-  const resolved = resolve(entries, revisedBindings);
-  assert.deepEqual(resolved.violations, []);
-  assert.deepEqual(resolved.no_ops, [id]);
-  assert.deepEqual(resolved.resolved_entries[FIRST_ENTRY_INDEX]?.binding_ids, [
-    BINDING_ID,
-    NEXT_BINDING_ID,
-  ]);
-  assert.deepEqual(
-    store.transaction((tx) => checkImportCondition(tx, resolved)),
-    [],
-  );
-});
+for (const state of [NodeState.Pending, NodeState.Completed]) {
+  test(`a ${state} node with two bindings and one new revision changes no node`, (t) => {
+    const { store, entries, resolve } = fixture(t, [
+      implement("o.md", { bindings: [REPOSITORY, SECOND_REPOSITORY] }),
+    ]);
+    const id = item(entries, "o.md").id!;
+    store.database
+      .prepare("UPDATE mission_node SET state = ? WHERE id = ?")
+      .run(state, id);
+    const resolved = resolve(entries, revisedBindings);
+    assert.deepEqual(resolved.violations, []);
+    assert.deepEqual(resolved.no_ops, [id]);
+    assert.deepEqual(
+      resolved.resolved_entries[FIRST_ENTRY_INDEX]?.binding_ids,
+      [BINDING_ID, NEXT_BINDING_ID],
+    );
+    assert.deepEqual(
+      store.transaction((tx) => checkImportCondition(tx, resolved)),
+      [],
+    );
+  });
+}
 
 const removedBindings: MissionBindings = {
   ...revisedBindings,
@@ -1226,6 +1228,42 @@ for (const [label, resolver] of [
   });
 }
 
+test("a task names a terminal node by its stored intent", (t) => {
+  const { store, entries, resolve } = fixture(t, hierarchy());
+  store.database
+    .prepare("UPDATE mission_node SET state = ? WHERE id = ?")
+    .run(NodeState.Completed, item(entries, "a.md").id!);
+  const edited = change(entries, "a.md", {
+    intent: Intent.Implement,
+    bindings: [REPOSITORY],
+  });
+  const resolved = resolve([...edited, task("n-task.md", "a.md")]);
+  assert.deepEqual(
+    resolved.violations.map(({ code, filename }) => ({ code, filename })),
+    [{ code: MissionErrorCode.ReferenceKindInvalid, filename: "n-task.md" }],
+  );
+  const stored = change(entries, "o.md", { intent: Intent.Examine });
+  store.database
+    .prepare("UPDATE mission_node SET state = ? WHERE id = ?")
+    .run(NodeState.Completed, item(entries, "o.md").id!);
+  assert.deepEqual(resolve(stored).violations, []);
+});
+
+test("a nonterminal node that names its terminal dependent forms a cycle", (t) => {
+  const { store, entries, resolve } = fixture(t, [
+    entry("n.md"),
+    entry("t.md", { depends_on: ["n.md"] }),
+  ]);
+  store.database
+    .prepare("UPDATE mission_node SET state = ? WHERE id = ?")
+    .run(NodeState.Discarded, item(entries, "t.md").id!);
+  const resolved = resolve(change(entries, "n.md", { depends_on: ["t.md"] }));
+  assert.deepEqual(
+    resolved.violations.map(({ code }) => code),
+    [MissionErrorCode.Cycle],
+  );
+});
+
 test("a terminal node ignores its own dependency names", (t) => {
   const { store, entries, resolve } = fixture(t, hierarchy());
   const id = item(entries, "b.md").id!;
@@ -1290,6 +1328,7 @@ test("an edited task file of a terminal node is a no-op", (t) => {
   );
   assert.deepEqual(resolved.violations, []);
   assert.deepEqual(resolved.updates, []);
+  assert.ok(resolved.no_ops.includes(id));
   assert.deepEqual(
     store.transaction((tx) => checkImportCondition(tx, resolved)),
     [],
@@ -1437,19 +1476,24 @@ test("retiring an endpoint removes incoming dependencies, and same-name replacem
   ]);
 });
 
-test("digest is canonical, input-order independent, nonmutating and retirement-sensitive", () => {
+test("digest is canonical, input-order independent, nonmutating and classification-sensitive", () => {
   const entries = [entry("a_.md"), entry("a.md"), entry("a-.md")];
   const retired = [createIdentity("node"), createIdentity("node")].reverse();
-  const before = structuredClone({ entries, retired });
-  const actual = importDigest(MISSION_ID, VERSION, entries, retired);
+  const updated = [createIdentity("node"), createIdentity("node")].reverse();
+  const classification = {
+    creates: ["a.md", "a_.md"],
+    updates: updated,
+    retirements: retired,
+  };
+  const before = structuredClone({ entries, classification });
+  const actual = importDigest(MISSION_ID, VERSION, entries, classification);
   assert.equal(
     actual,
-    importDigest(
-      MISSION_ID,
-      VERSION,
-      [...entries].reverse(),
-      [...retired].reverse(),
-    ),
+    importDigest(MISSION_ID, VERSION, [...entries].reverse(), {
+      creates: [...classification.creates].reverse(),
+      updates: [...updated].reverse(),
+      retirements: [...retired].reverse(),
+    }),
   );
   assert.equal(
     actual,
@@ -1457,22 +1501,32 @@ test("digest is canonical, input-order independent, nonmutating and retirement-s
       mission_id: MISSION_ID,
       mission_version: VERSION,
       entries: [...entries].reverse(),
+      creates: [...classification.creates].sort(),
+      updates: [...updated].sort(),
       retirements: [...retired].sort(),
     }),
   );
-  assert.notEqual(actual, importDigest(MISSION_ID, VERSION, entries, []));
+  for (const changed of [
+    { ...classification, retirements: [] },
+    { ...classification, updates: [] },
+    { ...classification, creates: [] },
+  ])
+    assert.notEqual(
+      actual,
+      importDigest(MISSION_ID, VERSION, entries, changed),
+    );
   assert.notEqual(
     actual,
     importDigest(
       MISSION_ID,
       VERSION + NEXT_VERSION_INCREMENT,
       entries,
-      retired,
+      classification,
     ),
   );
   assert.notEqual(
     actual,
-    importDigest(OTHER_MISSION_ID, VERSION, entries, retired),
+    importDigest(OTHER_MISSION_ID, VERSION, entries, classification),
   );
   assert.notEqual(
     actual,
@@ -1480,10 +1534,10 @@ test("digest is canonical, input-order independent, nonmutating and retirement-s
       MISSION_ID,
       VERSION,
       change(entries, "a.md", { name: "Changed" }),
-      retired,
+      classification,
     ),
   );
-  assert.deepEqual({ entries, retired }, before);
+  assert.deepEqual({ entries, classification }, before);
   assert.match(actual, /^[0-9a-f]{64}$/);
 });
 

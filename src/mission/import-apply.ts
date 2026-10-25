@@ -106,11 +106,8 @@ function assignIdentities(resolved: ResolvedImport): ResolvedImportEntry[] {
   assert.equal(ids.size, resolved.resolved_entries.length);
   const identity = (key: string): string => {
     const id =
-      ids.get(key) ?? (resolved.current_nodes.has(key) ? key : undefined);
-    assert.ok(
-      id,
-      "Resolved references name the imported set or a current node.",
-    );
+      ids.get(key) ?? (resolved.retirements.includes(key) ? key : undefined);
+    assert.ok(id, "Resolved references name the imported set or a retirement.");
     return id;
   };
   const entries = resolved.resolved_entries.map((item) => ({

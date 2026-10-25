@@ -97,6 +97,7 @@ export interface ResolvedImportEntry {
   owner_id: string | null;
   depends_on: Set<string>;
   binding_ids: string[];
+  intent: Intent | null;
   terminal: boolean;
 }
 
@@ -343,8 +344,7 @@ function resolveReference(
   }
   const valid =
     !isTaskEntry(target.entry) &&
-    (reference === REFERENCE.DependsOn ||
-      target.entry.intent === Intent.Implement);
+    (reference === REFERENCE.DependsOn || target.intent === Intent.Implement);
   if (!valid) {
     violations.push(
       violation(
@@ -437,15 +437,17 @@ function terminalOwner(
   return owner !== undefined && isTerminal(owner.state);
 }
 
-function pinnedBindings(
+function storedContent(
   tx: Transaction,
   identity: Pick<ResolvedImportEntry, "current" | "task">,
-): string[] {
-  if (identity.task !== null) return identity.task.content.bindings;
+): Pick<ResolvedImportEntry, "binding_ids" | "intent"> {
+  if (identity.task !== null)
+    return { binding_ids: identity.task.content.bindings, intent: null };
   assert.ok(identity.current, "A terminal entry has an identity.");
   const row = readCurrentRevision(tx, identity.current.id);
   assert.ok(row, "A current node has a revision.");
-  return revisionFromRow(tx, row).content.bindings;
+  const { content } = revisionFromRow(tx, row);
+  return { binding_ids: content.bindings, intent: content.intent };
 }
 
 function checkVerificationCoverage(result: ResolvedImport): void {
@@ -712,17 +714,20 @@ export function resolveImportSet(
       ...identity,
       owner_id: null,
       depends_on: new Set(),
-      binding_ids: terminal
-        ? pinnedBindings(tx, identity)
-        : resolveBindings(
-            tx,
-            mission,
-            entry,
-            identity.current,
-            bindings,
-            environments,
-            result.violations,
-          ),
+      ...(terminal
+        ? storedContent(tx, identity)
+        : {
+            binding_ids: resolveBindings(
+              tx,
+              mission,
+              entry,
+              identity.current,
+              bindings,
+              environments,
+              result.violations,
+            ),
+            intent: isTaskEntry(entry) ? null : (entry.intent as Intent),
+          }),
       terminal,
     });
   }
@@ -871,7 +876,11 @@ export function prepareImport(
         mission.id,
         snapshot.mission_version,
         normalized.entries,
-        retirements,
+        {
+          creates: resolved?.creates ?? [],
+          updates: resolved?.updates ?? [],
+          retirements,
+        },
       ),
       creates: resolved?.creates ?? [],
       updates: resolved?.updates ?? [],
@@ -887,7 +896,7 @@ export function importDigest(
   missionId: string,
   missionVersion: number,
   entries: NormalizedEntry[],
-  retirements: string[],
+  classification: Pick<ImportPreview, "creates" | "updates" | "retirements">,
 ): string {
   assert.ok(
     Number.isSafeInteger(missionVersion),
@@ -907,6 +916,8 @@ export function importDigest(
           ? SORT_BEFORE
           : SORT_AFTER,
     ),
-    retirements: [...retirements].sort(),
+    creates: [...classification.creates].sort(),
+    updates: [...classification.updates].sort(),
+    retirements: [...classification.retirements].sort(),
   });
 }
