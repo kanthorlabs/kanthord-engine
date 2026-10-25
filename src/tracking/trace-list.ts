@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import type { z } from "zod";
+import { CauseAttribute } from "../kernel/cause.ts";
 import type { Transaction } from "../kernel/store.ts";
+import { CAUSE_LABEL_SUFFIX, effectiveCauseOf } from "./cause-label.ts";
 import {
   FACET_VALUES_MAX,
   TraceSort,
@@ -36,6 +38,10 @@ const SORT_VALUES: Record<TraceSort, string> = {
   [TraceSort.TotalTokens]: TOTAL_TOKENS_VALUE,
   [TraceSort.CostUsd]: "cost_usd",
 };
+const CAUSE_CATEGORY_PATH = `'$."${CauseAttribute.Category}"'`;
+const causeCategoryOf = (spanId: string) =>
+  `(SELECT json_extract(attributes, ${CAUSE_CATEGORY_PATH}) FROM tracking_span WHERE trace_id = tracking_trace.trace_id AND span_id = ${spanId})`;
+const EFFECTIVE_CAUSE_CATEGORY = `COALESCE(${causeCategoryOf(`tracking_trace.root_span_id || '${CAUSE_LABEL_SUFFIX}'`)}, ${causeCategoryOf("tracking_trace.root_span_id")})`;
 const EXACT_FILTERS = [
   "project_id",
   "node_id",
@@ -88,6 +94,10 @@ function conditionOf(query: TraceListQuery): Condition {
     );
     condition.params.push(value);
   }
+  if (query.cause_category !== undefined) {
+    condition.clauses.push(`${EFFECTIVE_CAUSE_CATEGORY} = ?`);
+    condition.params.push(query.cause_category);
+  }
   const text = query.q;
   if (text !== undefined) {
     condition.clauses.push(
@@ -112,17 +122,22 @@ function conditionOf(query: TraceListQuery): Condition {
   return condition;
 }
 
+function attributesOf(value: unknown): TraceListItem["root_attributes"] {
+  return value === null
+    ? null
+    : traceListItemSchema.shape.root_attributes.parse(
+        JSON.parse(String(value)),
+      );
+}
+
 function traceListItemOf(row: Record<string, unknown>): TraceListItem {
+  const rootAttributes = attributesOf(row.root_attributes);
   return {
     ...traceSummaryOf(row),
     root_operation:
       row.root_operation === null ? null : String(row.root_operation),
-    root_attributes:
-      row.root_attributes === null
-        ? null
-        : traceListItemSchema.shape.root_attributes.parse(
-            JSON.parse(String(row.root_attributes)),
-          ),
+    root_attributes: rootAttributes,
+    cause: effectiveCauseOf(rootAttributes, attributesOf(row.label_attributes)),
   };
 }
 
@@ -153,7 +168,7 @@ export function listTraces(
       : ` WHERE ${condition.clauses.join(" AND ")}`;
   const rows = tx.database
     .prepare(
-      `SELECT t.*, r.operation AS root_operation, r.attributes AS root_attributes FROM (SELECT rowid AS position, ${value} AS sort_value, ${TRACE_COLUMNS} FROM tracking_trace${where} ORDER BY ${value} DESC, rowid DESC LIMIT ?) t LEFT JOIN tracking_span r ON r.trace_id = t.trace_id AND r.span_id = t.root_span_id ORDER BY t.sort_value DESC, t.position DESC`,
+      `SELECT t.*, r.operation AS root_operation, r.attributes AS root_attributes, l.attributes AS label_attributes FROM (SELECT rowid AS position, ${value} AS sort_value, ${TRACE_COLUMNS} FROM tracking_trace${where} ORDER BY ${value} DESC, rowid DESC LIMIT ?) t LEFT JOIN tracking_span r ON r.trace_id = t.trace_id AND r.span_id = t.root_span_id LEFT JOIN tracking_span l ON l.trace_id = t.trace_id AND l.span_id = t.root_span_id || '${CAUSE_LABEL_SUFFIX}' ORDER BY t.sort_value DESC, t.position DESC`,
     )
     .all(...condition.params, query.limit + 1);
   const page = rows.slice(0, query.limit);
@@ -205,5 +220,10 @@ export function readFacets(
     agent_names: jsonFacet(tx, "agent_names", projectId),
     models: jsonFacet(tx, "models", projectId),
     error_types: jsonFacet(tx, "error_types", projectId),
+    cause_categories: facetValues(
+      tx,
+      `SELECT DISTINCT ${EFFECTIVE_CAUSE_CATEGORY} AS value FROM tracking_trace WHERE ${EFFECTIVE_CAUSE_CATEGORY} IS NOT NULL${filter}`,
+      projectId === undefined ? [] : [projectId],
+    ),
   };
 }

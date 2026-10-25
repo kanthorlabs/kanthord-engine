@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { Command } from "commander";
 import type { z } from "zod";
 import { httpClient, resolveClient } from "../../gateway/client.ts";
+import { causeCategorySchema } from "../../kernel/cause.ts";
 import { Diagnostic } from "../../kernel/errors.ts";
 import { identitySchema } from "../../kernel/identity.ts";
 import {
@@ -20,6 +21,7 @@ import {
   TraceSort,
   analyticsBucketSchema,
   analyticsMeasureSchema,
+  causeLabelTextIdSchema,
   costGroupBySchema,
   durationGroupBySchema,
   entryIdentitySchema,
@@ -142,6 +144,12 @@ async function traceList(command: Command): Promise<void> {
       options.state,
       code("invalid_state"),
       "state",
+    ),
+    cause_category: optionOf(
+      causeCategorySchema,
+      options.causeCategory,
+      code("invalid_cause_category"),
+      "cause category",
     ),
     q: optionOf(
       trackingOperations.traceList.input.shape.query.shape.q,
@@ -378,7 +386,10 @@ async function textGet(
 ): Promise<void> {
   const leaf = `${TEXT}.${GET}`;
   requireTraceId(traceId, leaf);
-  if (!TEXT_IDENTITY.test(textId))
+  if (
+    !TEXT_IDENTITY.test(textId) &&
+    !causeLabelTextIdSchema.safeParse(textId).success
+  )
     throw new Diagnostic(
       `cli.tracking.${leaf}.invalid_text_id`,
       "invalid text ID",
@@ -488,6 +499,11 @@ export function addTrackingCommand(program: Command): void {
     .option("--project <project-id>", "Project ID", singleUse("--project"))
     .option("--node <node-id>", "Node ID", singleUse("--node"))
     .option("--state <state>", "Trace state", singleUse("--state"))
+    .option(
+      "--cause-category <category>",
+      "Effective cause category",
+      singleUse("--cause-category"),
+    )
     .option("--query <text>", "Search text", singleUse("--query"))
     .option("--sort <field>", "Sort field", singleUse("--sort"))
     .option("--from <unix-ms>", "Window start", singleUse("--from"))

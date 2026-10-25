@@ -945,7 +945,7 @@ test("a timeline query holds exactly one scope", () => {
   );
 });
 
-test("the facet read answers the four arrays", (t) => {
+test("the facet read answers the five arrays", (t) => {
   const { store, service } = harness(t);
   service.executionOpened(TRACE, CREATED, OPENING);
   assert.deepEqual(service.facetGet({}, caller(store)), {
@@ -953,6 +953,7 @@ test("the facet read answers the four arrays", (t) => {
     agent_names: [],
     models: [],
     error_types: [],
+    cause_categories: [],
   });
 });
 

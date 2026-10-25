@@ -1,6 +1,10 @@
 import { z } from "zod";
 import { HttpMethod, HttpStatus } from "../kernel/http.ts";
-import type { FailureCause } from "../kernel/cause.ts";
+import {
+  causeCategorySchema,
+  effectiveCauseSchema,
+  type FailureCause,
+} from "../kernel/cause.ts";
 import { identitySchema } from "../kernel/identity.ts";
 import { timestamp } from "../kernel/json.ts";
 import {
@@ -160,6 +164,12 @@ export const spanIdSchema = z
   .string()
   .regex(/^[0-9a-f]{16}$/)
   .refine((value) => !/^0+$/.test(value));
+export const causeLabelSpanIdSchema = z
+  .string()
+  .regex(/^[0-9a-f]{16}\.cause_label$/);
+export const causeLabelTextIdSchema = z
+  .string()
+  .regex(/^[0-9a-f]{16}\.cause_label:reason$/);
 const boundedName = z
   .string()
   .min(1)
@@ -318,11 +328,12 @@ export type TraceSummary = z.infer<typeof traceSummarySchema>;
 export const traceListItemSchema = traceSummarySchema.extend({
   root_operation: z.string().nullable(),
   root_attributes: z.record(z.string(), attributeValueSchema).nullable(),
+  cause: effectiveCauseSchema.nullable(),
 });
 export type TraceListItem = z.infer<typeof traceListItemSchema>;
 export const spanSchema = z.strictObject({
   trace_id: traceIdSchema,
-  span_id: spanIdSchema,
+  span_id: spanIdSchema.or(causeLabelSpanIdSchema),
   parent_span_id: spanIdSchema.nullable(),
   producer: z.string().min(1),
   origin: spanOriginSchema,
@@ -612,6 +623,7 @@ export const trackingOperations = {
         agent_name: boundedName.optional(),
         model: boundedName.optional(),
         error_type: boundedName.optional(),
+        cause_category: causeCategorySchema.optional(),
         state: traceStateSchema.optional(),
         q: z.string().min(1).max(TRACE_QUERY_MAX_CHARACTERS).optional(),
         from: nonNegativeInteger.optional(),
@@ -664,6 +676,7 @@ export const trackingOperations = {
       agent_names: z.array(z.string()),
       models: z.array(z.string()),
       error_types: z.array(z.string()),
+      cause_categories: z.array(z.string()),
     }),
   },
   spanList: {
@@ -786,7 +799,7 @@ export const trackingOperations = {
     input: z.strictObject({
       params: z.strictObject({
         trace_id: traceIdSchema,
-        text_id: recordIdentitySchema,
+        text_id: recordIdentitySchema.or(causeLabelTextIdSchema),
       }),
       query: z.strictObject({}),
       body: z.null(),

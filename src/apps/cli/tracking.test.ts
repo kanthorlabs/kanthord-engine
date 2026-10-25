@@ -19,9 +19,11 @@ const FACET_ANSWER = {
   agent_names: ["coder"],
   models: ["qwen"],
   error_types: [],
+  cause_categories: [],
 };
 const NO_REQUESTS = 0;
 const ONE_REQUEST = 1;
+const CAUSE_CATEGORY = "prompt";
 const LIMIT_LISTED = "10";
 const LIMIT_TOO_LARGE = "1001";
 const LIMIT_NOT_NUMBER = "many";
@@ -136,11 +138,45 @@ test("trace list without an option sends the default sort and limit", async (t) 
   });
 });
 
+test("trace list sends the cause category as a query field", async (t) => {
+  const { endpoint, seen } = await fakeServer(t, LIST_ANSWER);
+  const result = await run(
+    t,
+    ["trace", "list", "--cause-category", CAUSE_CATEGORY],
+    endpoint,
+  );
+  assert.equal(result.code, ExitCode.Success, result.stderr);
+  const url = new URL(seen[0]?.url ?? "", endpoint);
+  assert.equal(url.searchParams.get("cause_category"), CAUSE_CATEGORY);
+});
+
+test("trace list refuses a second --cause-category before any request", async (t) => {
+  const { endpoint, seen } = await fakeServer(t, LIST_ANSWER);
+  const result = await run(
+    t,
+    [
+      "trace",
+      "list",
+      "--cause-category",
+      "prompt",
+      "--cause-category",
+      "model",
+    ],
+    endpoint,
+  );
+  assert.equal(result.code, ExitCode.Failure);
+  assert.equal(seen.length, NO_REQUESTS);
+});
+
 const INVALID_LIST_OPTIONS: readonly (readonly [string[], string])[] = [
   [["--project", "invalid"], "cli.tracking.trace.list.invalid_project_id"],
   [["--node", "invalid"], "cli.tracking.trace.list.invalid_node_id"],
   [["--state", "unknown"], "cli.tracking.trace.list.invalid_state"],
   [["--sort", "unknown"], "cli.tracking.trace.list.invalid_sort"],
+  [
+    ["--cause-category", "unknown"],
+    "cli.tracking.trace.list.invalid_cause_category",
+  ],
   [["--query", ""], "cli.tracking.trace.list.invalid_query"],
   [
     ["--query", "x".repeat(TRACE_QUERY_MAX_CHARACTERS + 1)],
@@ -256,6 +292,46 @@ test("session entry get sends the entry path and writes the answer", async (t) =
   assert.equal(seen[0]?.method, HttpMethod.Get);
   assert.equal(seen[0]?.url, ENTRY_GET_PATH);
   assert.deepEqual(JSON.parse(result.stdout), ENTRY_ANSWER);
+});
+
+const ROOT_SPAN_ID = "0123456789abcdef";
+const REASON_TEXT_ID = `${ROOT_SPAN_ID}.cause_label:reason`;
+const TEXT_ANSWER = {
+  trace_id: TRACE_ID,
+  text_id: REASON_TEXT_ID,
+  content: "why",
+  created_at: 1000,
+};
+
+test("text get sends the reason text identity of a cause label", async (t) => {
+  const { endpoint, seen } = await fakeServer(t, TEXT_ANSWER);
+  const result = await run(
+    t,
+    ["text", "get", TRACE_ID, REASON_TEXT_ID],
+    endpoint,
+  );
+  assert.equal(result.code, ExitCode.Success, result.stderr);
+  assert.equal(seen.length, ONE_REQUEST);
+  assert.equal(
+    seen[0]?.url,
+    `/api/tracking/trace/${TRACE_ID}/text/${encodeURIComponent(REASON_TEXT_ID)}`,
+  );
+  assert.deepEqual(JSON.parse(result.stdout), TEXT_ANSWER);
+});
+
+test("text get refuses another cause label text identity before any request", async (t) => {
+  const { endpoint, seen } = await fakeServer(t, TEXT_ANSWER);
+  const result = await run(
+    t,
+    ["text", "get", TRACE_ID, `${ROOT_SPAN_ID}.cause_label:other`],
+    endpoint,
+  );
+  assert.equal(result.code, ExitCode.Failure);
+  assert.ok(
+    result.stderr.includes("cli.tracking.text.get.invalid_text_id"),
+    result.stderr,
+  );
+  assert.equal(seen.length, NO_REQUESTS);
 });
 
 const INVALID_ENTRY_ARGUMENTS: readonly (readonly [string[], string])[] = [
