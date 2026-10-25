@@ -395,6 +395,7 @@ export function composeServices(options: {
     },
     facts: {
       claimFacts: (tx, nodeId) => mission.claimFacts(tx, nodeId),
+      openingFacts: (tx, nodeId) => mission.openingFacts(tx, nodeId),
       claimFactsOf: (tx, projectId) => mission.claimFactsOf(tx, projectId),
     },
     environments: {

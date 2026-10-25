@@ -94,7 +94,7 @@ import {
 } from "./execution-read.ts";
 import { claim, release, failure, nodeBranchesOf } from "./transitions.ts";
 import { actionContextOf } from "./action-context.ts";
-import { claimFacts, claimFactsOf } from "./claim-facts.ts";
+import { claimFacts, claimFactsOf, openingFacts } from "./claim-facts.ts";
 import { guardCoverage } from "./coverage.ts";
 import {
   authorizeAction,
@@ -1042,6 +1042,10 @@ export class MissionService
 
   claimFacts(tx: Transaction, nodeId: string) {
     return claimFacts(tx, this.dependencies.bindings, nodeId);
+  }
+
+  openingFacts(tx: Transaction, nodeId: string) {
+    return openingFacts(tx, nodeId);
   }
 
   claimFactsOf(tx: Transaction, projectId: string) {
