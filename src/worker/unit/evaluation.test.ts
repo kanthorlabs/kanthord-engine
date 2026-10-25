@@ -582,10 +582,13 @@ test("an evaluation that its agent deadline cuts ends with no assessment and no 
   ]);
 });
 
+const TASK_ID = createIdentity("task");
+
 interface ReviewOptions {
   reply?: string;
   repository?: ReturnType<typeof repositorySetup>;
   snapshot?: string;
+  taskCommand?: string;
   transport?: RepositoryTransport;
 }
 
@@ -635,7 +638,22 @@ async function reviewOf(
             verifications: [command],
             bindings: [repository.binding_id],
           },
-          tasks: [],
+          tasks:
+            options.taskCommand === undefined
+              ? []
+              : [
+                  {
+                    id: TASK_ID,
+                    filename: "task.md",
+                    content: {
+                      name: "task",
+                      requirement: "work",
+                      criterion: "met",
+                      verifications: [options.taskCommand],
+                      bindings: [repository.binding_id],
+                    },
+                  },
+                ],
         }),
       "execution.evidence.list": async () =>
         complete({
@@ -735,6 +753,7 @@ async function reviewOf(
     ),
   );
   return {
+    nodeId: claim.node_id,
     end,
     assessments,
     verifications,
@@ -835,6 +854,30 @@ test("a node-head setup failure of a review is criterion-not-met and names the s
   assert.equal(assessment?.result, AssessmentResult.CriterionNotMet);
   assert.match(assessment?.rationale ?? "", /Verification 1 `npm ci` failed/);
   assert.deepEqual(assessment?.proposals, []);
+});
+
+function verificationStarts(records: readonly TelemetryRecord[]) {
+  return records.flatMap((record) =>
+    record.kind === RecordKind.Span &&
+    record.operation === SpanOperation.Verification &&
+    record.start_time !== undefined
+      ? [record.attributes]
+      : [],
+  );
+}
+
+test("the verification spans of a review name the owner of each command with the context evaluation", async (t) => {
+  const review = await reviewOf(t, "true", undefined, { taskCommand: "true" });
+  assert.deepEqual(
+    verificationStarts(review.records).map((attributes) => [
+      attributes?.["kanthord.verification.context"],
+      attributes?.["kanthord.verification.owner_id"],
+    ]),
+    [
+      ["evaluation", review.nodeId],
+      ["evaluation", TASK_ID],
+    ],
+  );
 });
 
 const STATED_REPLY =

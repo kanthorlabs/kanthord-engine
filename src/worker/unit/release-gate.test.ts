@@ -33,7 +33,7 @@ import {
   spanEnds,
   task,
 } from "./test-support.ts";
-import { SpanStatus } from "../../tracking/contract.ts";
+import { RecordKind, SpanStatus } from "../../tracking/contract.ts";
 import { SpanOperation } from "./telemetry.ts";
 
 type Fixture = Awaited<ReturnType<typeof fixture>>;
@@ -318,6 +318,34 @@ test("a failed release command writes the result routed with the unit id of its 
     "kanthord.release_gate.result": "routed",
     "kanthord.release_gate.unit_id": owner.id,
   });
+});
+
+test("the verification spans of a release name the owner of each command with the context release", async (t) => {
+  const owner = task("owner", "true");
+  const h = await fixture(t, [owner], []);
+  h.revision = {
+    ...h.revision,
+    content: { ...h.revision.content, verifications: ["true"] },
+  };
+  const records = recordSpans(h);
+  assert.deepEqual(await releaseGate(h), { kind: ReleaseGateKind.Passed });
+  const starts = records.flatMap((record) =>
+    record.kind === RecordKind.Span &&
+    record.operation === SpanOperation.Verification &&
+    record.start_time !== undefined
+      ? [record.attributes]
+      : [],
+  );
+  assert.deepEqual(
+    starts.map((attributes) => [
+      attributes?.["kanthord.verification.context"],
+      attributes?.["kanthord.verification.owner_id"],
+    ]),
+    [
+      ["release", h.input.claim.node_id],
+      ["release", owner.id],
+    ],
+  );
 });
 
 test("a budget end writes the release gate result budget_end", async (t) => {

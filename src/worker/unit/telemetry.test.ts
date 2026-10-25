@@ -25,12 +25,18 @@ import {
   taskFailure,
   taskSpan,
   verificationObserver,
+  VerificationContext,
+  type VerificationScope,
   withinGit,
 } from "./method-telemetry.ts";
 import { EndReason, ExecutionStop } from "./execution-run.ts";
 import { NoProgressRule, noProgressDetail } from "./progress-rule.ts";
 import type { TaskContent } from "../../mission/contract.ts";
-import { CommandEnd, type CommandRun } from "./verification.ts";
+import {
+  CommandEnd,
+  type CommandRun,
+  VerificationClass,
+} from "./verification.ts";
 import { EnvironmentSource } from "../../kernel/devcontainer.ts";
 import { Diagnostic } from "../../kernel/errors.ts";
 import { ChainLevel, PromptTemplate } from "../../agent/contract.ts";
@@ -409,9 +415,90 @@ async function verificationStart(digests: readonly string[]) {
     spans,
     null,
     digests,
-  )({ command: "true", index: 0, run: 1 }, async () => PASSED_COMMAND);
+    TASK_SCOPE,
+  )(
+    { command: "true", index: 0, run: 1, flaky_check: false },
+    async () => PASSED_COMMAND,
+  );
   return startOf(records, SpanOperation.Verification);
 }
+
+const CONTEXT_ATTRIBUTE = "kanthord.verification.context";
+const OWNER_ATTRIBUTE = "kanthord.verification.owner_id";
+const CLASS_ATTRIBUTE = "kanthord.verification.class";
+const FLAKY_ATTRIBUTE = "kanthord.verification.flaky";
+const TASK_OWNER = "task_owner";
+
+const TASK_SCOPE = {
+  context: VerificationContext.Task,
+  ownerOf: () => TASK_OWNER,
+};
+
+async function observedVerification(
+  scope: VerificationScope,
+  flakyCheck: boolean,
+  ran: CommandRun,
+) {
+  const { records, spans } = recorder();
+  await verificationObserver(
+    spans,
+    null,
+    [],
+    scope,
+  )(
+    { command: "x", index: 0, run: 1, flaky_check: flakyCheck },
+    async () => ran,
+  );
+  return {
+    start: startOf(records, SpanOperation.Verification),
+    end: endOf(records, SpanOperation.Verification),
+  };
+}
+
+const FAILED_COMMAND: CommandRun = {
+  result: { command: "x", exit_code: 1, signal: null, timed_out: false },
+  output: "",
+  end: CommandEnd.Exit,
+};
+
+test("a verification span records its context, its owner and the class of the run", async () => {
+  const { start, end } = await observedVerification(
+    TASK_SCOPE,
+    false,
+    PASSED_COMMAND,
+  );
+  assert.equal(
+    start?.attributes?.[CONTEXT_ATTRIBUTE],
+    VerificationContext.Task,
+  );
+  assert.equal(start?.attributes?.[OWNER_ATTRIBUTE], TASK_OWNER);
+  assert.equal(end?.attributes?.[CLASS_ATTRIBUTE], VerificationClass.Pass);
+  assert.equal(FLAKY_ATTRIBUTE in (end?.attributes ?? {}), false);
+});
+
+test("a verification span records no owner when the command has none", async () => {
+  const { start } = await observedVerification(
+    { context: VerificationContext.Node, ownerOf: () => null },
+    false,
+    PASSED_COMMAND,
+  );
+  assert.equal(
+    start?.attributes?.[CONTEXT_ATTRIBUTE],
+    VerificationContext.Node,
+  );
+  assert.equal(OWNER_ATTRIBUTE in (start?.attributes ?? {}), false);
+});
+
+test("a verification span records the flaky mark only on a passing flaky check", async () => {
+  const passing = await observedVerification(TASK_SCOPE, true, PASSED_COMMAND);
+  assert.equal(passing.end?.attributes?.[FLAKY_ATTRIBUTE], true);
+  const failing = await observedVerification(TASK_SCOPE, true, FAILED_COMMAND);
+  assert.equal(FLAKY_ATTRIBUTE in (failing.end?.attributes ?? {}), false);
+  assert.equal(
+    failing.end?.attributes?.[CLASS_ATTRIBUTE],
+    VerificationClass.CodeFailure,
+  );
+});
 
 test("a verification span records the one digest of the node", async () => {
   const start = await verificationStart([FIRST_DIGEST]);

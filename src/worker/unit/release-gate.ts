@@ -13,6 +13,7 @@ import {
   environmentDigestsOf,
   testedCommitOf,
   verificationObserver,
+  VerificationContext,
 } from "./method-telemetry.ts";
 import { repositoryOf, type StepsState } from "./steps-implement.ts";
 import {
@@ -194,11 +195,16 @@ async function verifyInReleaseClones(
     const setup = await setUpReleaseClones(state, key, base);
     if (setup !== null) return setup;
     const testedInput = testedInputOf(state.checkouts);
+    const owners = commandOwners(state);
     const run = await runVerificationsWithOutput({
       observe: verificationObserver(
         state.run.spans,
         testedCommitOf(testedInput),
         environmentDigestsOf(state.input.setup.repositories),
+        {
+          context: VerificationContext.Release,
+          ownerOf: (index) => owners[index]!.id,
+        },
       ),
       directory,
       commands,

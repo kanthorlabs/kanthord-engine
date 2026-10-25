@@ -78,6 +78,7 @@ import {
   testedCommitOf,
   environmentDigestsOf,
   verificationObserver,
+  VerificationContext,
 } from "./method-telemetry.ts";
 import { nodeWork, RefreshResult, refreshAtClaim } from "./base-refresh.ts";
 import {
@@ -402,7 +403,7 @@ async function runNodeInstruction(
       }
     } else if (revised && !agent.changed())
       countUnchangedTurn(state, NoProgressRule.UnchangedRevision);
-    const checked = await verifyCommands(state, commands);
+    const checked = await verifyCommands(state, unit, commands);
     const { verification, outputs } = checked;
     const passed = verificationPassed(verification, commands);
     state.lastVerification = verificationFactsOf(passed, verification);
@@ -657,7 +658,7 @@ export function verifyTaskRun(
   state: StepsState,
   task: TaskContent,
 ): Promise<CheckedRun> {
-  return verifyCommands(state, task.content.verifications);
+  return verifyCommands(state, task, task.content.verifications);
 }
 
 async function pendingSetup(state: StepsState): Promise<CheckedRun | null> {
@@ -700,6 +701,7 @@ function setupCommandsOf(entries: readonly SetupEntry[]): string[] {
 
 async function verifyCommands(
   state: StepsState,
+  task: TaskContent,
   commands: readonly string[],
 ): Promise<CheckedRun> {
   const setup = await pendingSetup(state);
@@ -710,6 +712,13 @@ async function verifyCommands(
       state.run.spans,
       testedCommitOf(testedInput),
       environmentDigestsOf(state.input.setup.repositories),
+      {
+        context:
+          task.id === state.input.claim.node_id
+            ? VerificationContext.Node
+            : VerificationContext.Task,
+        ownerOf: () => task.id,
+      },
     ),
     directory: state.root,
     commands,

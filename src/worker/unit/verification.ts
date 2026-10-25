@@ -77,6 +77,7 @@ export interface CommandAttempt {
   command: string;
   index: number;
   run: number;
+  flaky_check: boolean;
 }
 export type CommandObserver = (
   attempt: CommandAttempt,
@@ -233,6 +234,10 @@ function classOf(ran: CommandRun, exhausted: boolean): VerificationClass {
     : VerificationClass.CodeFailure;
 }
 
+export function commandClassOf(ran: CommandRun): VerificationClass {
+  return classOf(ran, false);
+}
+
 function unstartedClass(input: VerificationInput): VerificationClass | null {
   if (input.context.signal.aborted) return VerificationClass.CodeFailure;
   if (Date.now() >= input.deadline) return VerificationClass.BudgetEnd;
@@ -259,7 +264,10 @@ async function classifiedCommand(
   input: VerificationInput,
 ): Promise<{ ran: CommandRun; outcome: VerificationClass; runs: number }> {
   const exhausted = input.exhausted ?? (() => false);
-  const ran = await observedCommand({ command, index, run: FIRST_RUN }, input);
+  const ran = await observedCommand(
+    { command, index, run: FIRST_RUN, flaky_check: false },
+    input,
+  );
   const outcome = classOf(ran, exhausted());
   if (
     outcome === VerificationClass.CodeFailure &&
@@ -276,7 +284,7 @@ async function classifiedCommand(
   const unstarted = unstartedClass(input);
   if (unstarted !== null) return { ran, outcome: unstarted, runs: FIRST_RUN };
   const rerun = await observedCommand(
-    { command, index, run: FIRST_RERUN },
+    { command, index, run: FIRST_RERUN, flaky_check: false },
     input,
   );
   return {
@@ -333,7 +341,12 @@ async function passesOnRerun(
   for (let rerun = 0; rerun < (input.reruns ?? 0); rerun++) {
     if (Date.now() >= input.deadline || input.context.signal.aborted)
       return false;
-    const attempt = { command, index, run: runs + FIRST_RUN + rerun };
+    const attempt = {
+      command,
+      index,
+      run: runs + FIRST_RUN + rerun,
+      flaky_check: true,
+    };
     if ((await observedCommand(attempt, input)).result.exit_code === SUCCESS)
       return true;
   }

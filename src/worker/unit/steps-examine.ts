@@ -31,6 +31,7 @@ import {
   environmentDigestsOf,
   testedCommitOf,
   verificationObserver,
+  VerificationContext,
 } from "./method-telemetry.ts";
 
 export const REPORT_SUBJECT = "Report on current dependency outcomes";
@@ -102,6 +103,10 @@ export async function runStepsExamine(
               run.spans,
               testedCommitOf(workspace.tested_input),
               environmentDigestsOf(input.setup.repositories),
+              {
+                context: VerificationContext.Node,
+                ownerOf: () => input.claim.node_id,
+              },
             ),
             directory,
             commands: revision.content.verifications,
