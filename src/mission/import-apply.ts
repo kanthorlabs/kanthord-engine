@@ -105,8 +105,9 @@ function assignIdentities(resolved: ResolvedImport): ResolvedImportEntry[] {
   );
   assert.equal(ids.size, resolved.resolved_entries.length);
   const identity = (key: string): string => {
-    const id = ids.get(key);
-    assert.ok(id, "Resolved references belong to the imported set.");
+    const id =
+      ids.get(key) ?? (resolved.retirements.includes(key) ? key : undefined);
+    assert.ok(id, "Resolved references name the imported set or a retirement.");
     return id;
   };
   const entries = resolved.resolved_entries.map((item) => ({

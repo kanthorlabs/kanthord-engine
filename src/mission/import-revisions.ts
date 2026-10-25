@@ -193,6 +193,7 @@ export function importRevisions(
   }
   const revisions: Revision[] = [];
   for (const id of owners) {
+    if (byId.get(id)?.terminal === true) continue;
     const row = readCurrentRevision(tx, id);
     assert.equal(row === null, !resolved.current_nodes.has(id));
     const previous = row === null ? undefined : revisionFromRow(tx, row);

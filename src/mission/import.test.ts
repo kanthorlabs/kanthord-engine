@@ -1061,7 +1061,7 @@ test("a new binding revision under the same name changes no node", (t) => {
   );
 });
 
-test("a node whose plan file names another binding is an update", (t) => {
+test("another binding name updates a nonterminal node and is a no-op for a terminal node", (t) => {
   const { store, entries, resolve } = fixture(t, hierarchy());
   const id = item(entries, "o.md").id!;
   const renamed = change(entries, "o.md", { bindings: [SECOND_REPOSITORY] });
@@ -1072,34 +1072,37 @@ test("a node whose plan file names another binding is an update", (t) => {
     .prepare("UPDATE mission_node SET state = ? WHERE id = ?")
     .run(NodeState.Completed, id);
   const terminal = resolve(renamed, revisedBindings);
+  assert.deepEqual(terminal.violations, []);
+  assert.deepEqual(terminal.updates, []);
+  assert.ok(terminal.no_ops.includes(id));
   assert.deepEqual(
-    store
-      .transaction((tx) => checkImportCondition(tx, terminal))
-      .map(({ code, node_id }) => ({ code, node_id })),
-    [{ code: MissionErrorCode.TerminalChange, node_id: id }],
-  );
-});
-
-test("a node with two bindings and one new revision changes no node", (t) => {
-  const { store, entries, resolve } = fixture(t, [
-    implement("o.md", { bindings: [REPOSITORY, SECOND_REPOSITORY] }),
-  ]);
-  const id = item(entries, "o.md").id!;
-  store.database
-    .prepare("UPDATE mission_node SET state = ? WHERE id = ?")
-    .run(NodeState.Completed, id);
-  const resolved = resolve(entries, revisedBindings);
-  assert.deepEqual(resolved.violations, []);
-  assert.deepEqual(resolved.no_ops, [id]);
-  assert.deepEqual(resolved.resolved_entries[FIRST_ENTRY_INDEX]?.binding_ids, [
-    BINDING_ID,
-    NEXT_BINDING_ID,
-  ]);
-  assert.deepEqual(
-    store.transaction((tx) => checkImportCondition(tx, resolved)),
+    store.transaction((tx) => checkImportCondition(tx, terminal)),
     [],
   );
 });
+
+for (const state of [NodeState.Pending, NodeState.Completed]) {
+  test(`a ${state} node with two bindings and one new revision changes no node`, (t) => {
+    const { store, entries, resolve } = fixture(t, [
+      implement("o.md", { bindings: [REPOSITORY, SECOND_REPOSITORY] }),
+    ]);
+    const id = item(entries, "o.md").id!;
+    store.database
+      .prepare("UPDATE mission_node SET state = ? WHERE id = ?")
+      .run(state, id);
+    const resolved = resolve(entries, revisedBindings);
+    assert.deepEqual(resolved.violations, []);
+    assert.deepEqual(resolved.no_ops, [id]);
+    assert.deepEqual(
+      resolved.resolved_entries[FIRST_ENTRY_INDEX]?.binding_ids,
+      [BINDING_ID, NEXT_BINDING_ID],
+    );
+    assert.deepEqual(
+      store.transaction((tx) => checkImportCondition(tx, resolved)),
+      [],
+    );
+  });
+}
 
 const removedBindings: MissionBindings = {
   ...revisedBindings,
@@ -1112,7 +1115,7 @@ const removedBindings: MissionBindings = {
   },
 };
 
-test("a pin from before a removal of its binding resolves to the current revision", (t) => {
+test("a pin from before a removal of its binding resolves to the current revision on a nonterminal node", (t) => {
   const { store, entries, resolve } = fixture(t, hierarchy());
   const completed = item(entries, "o.md").id!;
   const pending = item(entries, "p.md").id!;
@@ -1121,7 +1124,8 @@ test("a pin from before a removal of its binding resolves to the current revisio
     .run(NodeState.Completed, completed);
   const resolved = resolve(entries, removedBindings);
   assert.deepEqual(resolved.violations, []);
-  assert.deepEqual(resolved.updates, [completed, pending].sort());
+  assert.deepEqual(resolved.updates, [pending]);
+  assert.ok(resolved.no_ops.includes(completed));
   assert.deepEqual(
     resolved.resolved_entries.find(
       (value) => value.entry.filename === PEER_FILENAME,
@@ -1129,10 +1133,205 @@ test("a pin from before a removal of its binding resolves to the current revisio
     [REVISED_BINDING_ID],
   );
   assert.deepEqual(
-    store
-      .transaction((tx) => checkImportCondition(tx, resolved))
-      .map(({ code, node_id }) => ({ code, node_id })),
-    [{ code: MissionErrorCode.TerminalChange, node_id: completed }],
+    resolved.resolved_entries.find(
+      (value) => value.entry.filename === IMPLEMENT_FILENAME,
+    )?.binding_ids,
+    [BINDING_ID],
+  );
+  assert.deepEqual(
+    store.transaction((tx) => checkImportCondition(tx, resolved)),
+    [],
+  );
+});
+
+const RENAMED_BINDING_ID = "binding_00000000000000000000000003";
+const RENAMED_REPOSITORY = "repo_renamed";
+
+const renamedBindings: MissionBindings = {
+  ...bindings,
+  resolveBinding: (tx, projectId, name) => {
+    if (name === REPOSITORY) return null;
+    return name === RENAMED_REPOSITORY
+      ? {
+          binding_id: RENAMED_BINDING_ID,
+          resource_identity: IDENTITIES[BINDING_ID]!,
+        }
+      : bindings.resolveBinding(tx, projectId, name);
+  },
+  getBindingRevision: (tx, bindingId) => {
+    if (bindingId !== RENAMED_BINDING_ID)
+      return bindings.getBindingRevision(tx, bindingId);
+    const pinned = bindings.getBindingRevision(tx, BINDING_ID);
+    assert.ok(pinned);
+    return { ...pinned, binding_id: bindingId, name: RENAMED_REPOSITORY };
+  },
+};
+
+const tombstonedBindings: MissionBindings = {
+  ...bindings,
+  resolveBinding: (tx, projectId, name) =>
+    name === REPOSITORY ? null : bindings.resolveBinding(tx, projectId, name),
+  getBindingRevision: (tx, bindingId) => {
+    const revision = bindings.getBindingRevision(tx, bindingId);
+    assert.ok(revision);
+    return bindingId === BINDING_ID
+      ? { ...revision, tombstone: true }
+      : revision;
+  },
+};
+
+for (const [label, resolver] of [
+  ["renamed", renamedBindings],
+  ["removed", tombstonedBindings],
+] as const) {
+  test(`a nonterminal node that names a ${label} binding keeps mission.node.bindings_invalid`, (t) => {
+    const { entries, resolve } = fixture(t, hierarchy());
+    const resolved = resolve(entries, resolver);
+    assert.deepEqual(
+      resolved.violations.map(({ code, filename }) => ({ code, filename })),
+      [
+        {
+          code: MissionErrorCode.BindingsInvalid,
+          filename: IMPLEMENT_FILENAME,
+        },
+        { code: MissionErrorCode.BindingsInvalid, filename: PEER_FILENAME },
+      ],
+    );
+  });
+
+  test(`a terminal node that names a ${label} binding is a no-op with its pins`, (t) => {
+    const { store, entries, resolve } = fixture(t, hierarchy());
+    store.database
+      .prepare("UPDATE mission_node SET state = ? WHERE id IN (?, ?)")
+      .run(
+        NodeState.Completed,
+        item(entries, "o.md").id!,
+        item(entries, "p.md").id!,
+      );
+    const resolved = resolve(entries, resolver);
+    assert.deepEqual(resolved.violations, []);
+    assert.deepEqual(resolved.updates, []);
+    assert.deepEqual(
+      resolved.resolved_entries
+        .filter((value) => !isTaskEntry(value.entry))
+        .map((value) => value.binding_ids),
+      entries
+        .filter((value) => !isTaskEntry(value))
+        .map((value) =>
+          value.bindings.length === NO_BINDING_COUNT ? [] : [BINDING_ID],
+        ),
+    );
+    assert.deepEqual(
+      store.transaction((tx) => checkImportCondition(tx, resolved)),
+      [],
+    );
+  });
+}
+
+test("a task names a terminal node by its stored intent", (t) => {
+  const { store, entries, resolve } = fixture(t, hierarchy());
+  store.database
+    .prepare("UPDATE mission_node SET state = ? WHERE id = ?")
+    .run(NodeState.Completed, item(entries, "a.md").id!);
+  const edited = change(entries, "a.md", {
+    intent: Intent.Implement,
+    bindings: [REPOSITORY],
+  });
+  const resolved = resolve([...edited, task("n-task.md", "a.md")]);
+  assert.deepEqual(
+    resolved.violations.map(({ code, filename }) => ({ code, filename })),
+    [{ code: MissionErrorCode.ReferenceKindInvalid, filename: "n-task.md" }],
+  );
+  const stored = change(entries, "o.md", { intent: Intent.Examine });
+  store.database
+    .prepare("UPDATE mission_node SET state = ? WHERE id = ?")
+    .run(NodeState.Completed, item(entries, "o.md").id!);
+  assert.deepEqual(resolve(stored).violations, []);
+});
+
+test("a nonterminal node that names its terminal dependent forms a cycle", (t) => {
+  const { store, entries, resolve } = fixture(t, [
+    entry("n.md"),
+    entry("t.md", { depends_on: ["n.md"] }),
+  ]);
+  store.database
+    .prepare("UPDATE mission_node SET state = ? WHERE id = ?")
+    .run(NodeState.Discarded, item(entries, "t.md").id!);
+  const resolved = resolve(change(entries, "n.md", { depends_on: ["t.md"] }));
+  assert.deepEqual(
+    resolved.violations.map(({ code }) => code),
+    [MissionErrorCode.Cycle],
+  );
+});
+
+test("a terminal node ignores its own dependency names", (t) => {
+  const { store, entries, resolve } = fixture(t, hierarchy());
+  const id = item(entries, "b.md").id!;
+  store.database
+    .prepare("UPDATE mission_node SET state = ? WHERE id = ?")
+    .run(NodeState.Completed, id);
+  for (const depends_on of [["a.md"], ["missing.md"]]) {
+    const resolved = resolve(change(entries, "b.md", { depends_on }));
+    assert.deepEqual(resolved.violations, []);
+    assert.deepEqual(resolved.updates, []);
+    assert.deepEqual(resolved.removed_edges, []);
+    assert.ok(resolved.no_ops.includes(id));
+  }
+});
+
+for (const [label, transform] of [
+  [
+    "a renamed task file",
+    (entries: NormalizedEntry[]) =>
+      change(entries, "t.md", { filename: "renamed.md" }),
+  ],
+  [
+    "a task moved to another node",
+    (entries: NormalizedEntry[]) => change(entries, "t.md", { node: "p.md" }),
+  ],
+  [
+    "an omitted task",
+    (entries: NormalizedEntry[]) =>
+      entries.filter((value) => value.filename !== SIBLING_TASK_FILENAME),
+  ],
+  [
+    "a new task",
+    (entries: NormalizedEntry[]) => [...entries, task("n-task.md", "o.md")],
+  ],
+] as const) {
+  test(`${label} of a terminal node is a terminal change`, (t) => {
+    const { store, entries, resolve } = fixture(t, hierarchy());
+    const id = item(entries, "o.md").id!;
+    store.database
+      .prepare("UPDATE mission_node SET state = ? WHERE id = ?")
+      .run(NodeState.Completed, id);
+    const resolved = resolve(transform(entries));
+    assert.deepEqual(resolved.violations, []);
+    assert.deepEqual(
+      store
+        .transaction((tx) => checkImportCondition(tx, resolved))
+        .filter(({ code }) => code === MissionErrorCode.TerminalChange)
+        .map(({ node_id }) => node_id),
+      [id],
+    );
+  });
+}
+
+test("an edited task file of a terminal node is a no-op", (t) => {
+  const { store, entries, resolve } = fixture(t, hierarchy());
+  const id = item(entries, "o.md").id!;
+  store.database
+    .prepare("UPDATE mission_node SET state = ? WHERE id = ?")
+    .run(NodeState.Completed, id);
+  const resolved = resolve(
+    change(entries, "t.md", { name: "Changed task", bindings: [REPOSITORY] }),
+  );
+  assert.deepEqual(resolved.violations, []);
+  assert.deepEqual(resolved.updates, []);
+  assert.ok(resolved.no_ops.includes(id));
+  assert.deepEqual(
+    store.transaction((tx) => checkImportCondition(tx, resolved)),
+    [],
   );
 });
 
@@ -1277,19 +1476,24 @@ test("retiring an endpoint removes incoming dependencies, and same-name replacem
   ]);
 });
 
-test("digest is canonical, input-order independent, nonmutating and retirement-sensitive", () => {
+test("digest is canonical, input-order independent, nonmutating and classification-sensitive", () => {
   const entries = [entry("a_.md"), entry("a.md"), entry("a-.md")];
   const retired = [createIdentity("node"), createIdentity("node")].reverse();
-  const before = structuredClone({ entries, retired });
-  const actual = importDigest(MISSION_ID, VERSION, entries, retired);
+  const updated = [createIdentity("node"), createIdentity("node")].reverse();
+  const classification = {
+    creates: ["a.md", "a_.md"],
+    updates: updated,
+    retirements: retired,
+  };
+  const before = structuredClone({ entries, classification });
+  const actual = importDigest(MISSION_ID, VERSION, entries, classification);
   assert.equal(
     actual,
-    importDigest(
-      MISSION_ID,
-      VERSION,
-      [...entries].reverse(),
-      [...retired].reverse(),
-    ),
+    importDigest(MISSION_ID, VERSION, [...entries].reverse(), {
+      creates: [...classification.creates].reverse(),
+      updates: [...updated].reverse(),
+      retirements: [...retired].reverse(),
+    }),
   );
   assert.equal(
     actual,
@@ -1297,22 +1501,32 @@ test("digest is canonical, input-order independent, nonmutating and retirement-s
       mission_id: MISSION_ID,
       mission_version: VERSION,
       entries: [...entries].reverse(),
+      creates: [...classification.creates].sort(),
+      updates: [...updated].sort(),
       retirements: [...retired].sort(),
     }),
   );
-  assert.notEqual(actual, importDigest(MISSION_ID, VERSION, entries, []));
+  for (const changed of [
+    { ...classification, retirements: [] },
+    { ...classification, updates: [] },
+    { ...classification, creates: [] },
+  ])
+    assert.notEqual(
+      actual,
+      importDigest(MISSION_ID, VERSION, entries, changed),
+    );
   assert.notEqual(
     actual,
     importDigest(
       MISSION_ID,
       VERSION + NEXT_VERSION_INCREMENT,
       entries,
-      retired,
+      classification,
     ),
   );
   assert.notEqual(
     actual,
-    importDigest(OTHER_MISSION_ID, VERSION, entries, retired),
+    importDigest(OTHER_MISSION_ID, VERSION, entries, classification),
   );
   assert.notEqual(
     actual,
@@ -1320,10 +1534,10 @@ test("digest is canonical, input-order independent, nonmutating and retirement-s
       MISSION_ID,
       VERSION,
       change(entries, "a.md", { name: "Changed" }),
-      retired,
+      classification,
     ),
   );
-  assert.deepEqual({ entries, retired }, before);
+  assert.deepEqual({ entries, classification }, before);
   assert.match(actual, /^[0-9a-f]{64}$/);
 });
 
@@ -1427,18 +1641,27 @@ for (const scenario of CONDITION_CASES) {
 }
 
 for (const state of [NodeState.Completed, NodeState.Discarded]) {
-  test(`import condition permits ${state} noOps but rejects changes and retirement`, (t) => {
+  test(`import condition permits ${state} content edits as noOps but rejects a new filename and retirement`, (t) => {
     const { store, entries, resolve } = fixture(t);
     const id = entries[FIRST_ENTRY_INDEX]!.id!;
     store.database
       .prepare("UPDATE mission_node SET state = ? WHERE id = ?")
       .run(state, id);
-    const unchanged = resolve();
-    assert.deepEqual(
-      store.transaction((tx) => checkImportCondition(tx, unchanged)),
+    for (const input of [
+      entries,
+      change(entries, "a.md", { name: "Changed", tags: ["platform.macos"] }),
+    ]) {
+      const resolved = resolve(input);
+      assert.deepEqual(resolved.no_ops, [id]);
+      assert.deepEqual(
+        store.transaction((tx) => checkImportCondition(tx, resolved)),
+        [],
+      );
+    }
+    for (const input of [
+      change(entries, "a.md", { filename: "renamed.md" }),
       [],
-    );
-    for (const input of [change(entries, "a.md", { name: "Changed" }), []]) {
+    ]) {
       const resolved = resolve(input);
       const violations = store.transaction((tx) =>
         checkImportCondition(tx, resolved),
@@ -2081,6 +2304,113 @@ test("an export with a new binding revision and one new plan file creates only t
   assert.deepEqual(pins(completed), [BINDING_ID]);
   assert.deepEqual(pins(assigned(first, "p.md")), [BINDING_ID]);
   assert.deepEqual(pins(added), [REVISED_BINDING_ID]);
+});
+
+for (const [label, resolver, binding] of [
+  ["renamed", renamedBindings, RENAMED_REPOSITORY],
+  ["removed", tombstonedBindings, SECOND_REPOSITORY],
+] as const) {
+  test(`an export after the binding of finished nodes is ${label} imports one new plan file`, (t) => {
+    const { mission, store, apply, assigned } = importer(t);
+    const first = apply(plan());
+    const finished = [assigned(first, "o.md"), assigned(first, "p.md")];
+    store.database
+      .prepare("UPDATE mission_node SET state = ? WHERE id IN (?, ?)")
+      .run(NodeState.Completed, ...finished);
+    const exported = store.transaction((tx) =>
+      exportMission(tx, mission.id, ImportFormat.Json, resolver),
+    );
+    assert.ok("entries" in exported);
+    const again = apply(
+      [
+        ...exported.entries,
+        implement("n.md", { bindings: [binding], depends_on: ["o.md"] }),
+      ],
+      executionEnds(),
+      resolver,
+    );
+    const added = assigned(again, "n.md");
+    assert.deepEqual(
+      again.changes.revisions.map((value) => value.node_id),
+      [added],
+    );
+    assert.deepEqual(again.changes.added_edges, [
+      { dependent_id: added, depends_on_id: finished[FIRST_ENTRY_INDEX]! },
+    ]);
+    for (const id of finished)
+      assert.deepEqual(
+        store.transaction((tx) => {
+          const row = readCurrentRevision(tx, id);
+          assert.ok(row);
+          return revisionFromRow(tx, row).content.bindings;
+        }),
+        [BINDING_ID],
+      );
+  });
+}
+
+test("an import ignores an edited plan file of a terminal node and writes it no revision", (t) => {
+  const { store, apply, assigned, identified } = importer(t);
+  const first = apply(plan());
+  const completed = assigned(first, "o.md");
+  store.database
+    .prepare("UPDATE mission_node SET state = ? WHERE id = ?")
+    .run(NodeState.Completed, completed);
+  const before = store.transaction((tx) => readCurrentRevision(tx, completed));
+  const edited = change(
+    change(identified(first), "o.md", {
+      name: "Changed",
+      requirement: "Changed",
+      tags: ["platform.macos"],
+      commit_type: CommitType.Fix,
+    }),
+    "t.md",
+    { name: "Changed task" },
+  );
+  const again = apply([...edited, entry("n.md")]);
+  const added = assigned(again, "n.md");
+  assert.deepEqual(
+    again.changes.revisions.map((value) => value.node_id),
+    [added],
+  );
+  assert.deepEqual(
+    store.transaction((tx) => readCurrentRevision(tx, completed)),
+    before,
+  );
+});
+
+test("an import that retires the dependency of a terminal node keeps that edge", (t) => {
+  const { store, apply, assigned, identified } = importer(t);
+  const first = apply(plan());
+  const retired = assigned(first, "o.md");
+  const completed = assigned(first, "p.md");
+  const examine = assigned(first, "a.md");
+  store.database
+    .prepare("UPDATE mission_node SET state = ? WHERE id = ?")
+    .run(NodeState.Completed, completed);
+  const again = apply(
+    change(
+      identified(first).filter(
+        (value) => !["o.md", "t.md", "s.md"].includes(value.filename),
+      ),
+      "a.md",
+      { depends_on: ["p.md"] },
+    ),
+  );
+  assert.deepEqual(again.changes.retired_node_ids, [retired]);
+  assert.deepEqual(again.changes.removed_edges, [
+    { dependent_id: examine, depends_on_id: retired },
+  ]);
+  assert.deepEqual(again.changes.revisions, []);
+  assert.deepEqual(
+    store.database
+      .prepare(
+        "SELECT depends_on_id FROM mission_dependency WHERE dependent_id = ?",
+      )
+      .all(completed)
+      .map((row) => ({ ...row })),
+    [{ depends_on_id: retired }],
+  );
 });
 
 test("a content change of a node with an older pin keeps the pin", (t) => {

@@ -97,6 +97,8 @@ export interface ResolvedImportEntry {
   owner_id: string | null;
   depends_on: Set<string>;
   binding_ids: string[];
+  intent: Intent | null;
+  terminal: boolean;
 }
 
 export interface ResolvedImport {
@@ -342,8 +344,7 @@ function resolveReference(
   }
   const valid =
     !isTaskEntry(target.entry) &&
-    (reference === REFERENCE.DependsOn ||
-      target.entry.intent === Intent.Implement);
+    (reference === REFERENCE.DependsOn || target.intent === Intent.Implement);
   if (!valid) {
     violations.push(
       violation(
@@ -427,6 +428,28 @@ function resolveBindings(
   );
 }
 
+function terminalOwner(
+  identity: Pick<ResolvedImportEntry, "current" | "task">,
+  currentNodes: Map<string, NodeRow>,
+): boolean {
+  const ownerId = identity.task?.owner_id ?? identity.current?.id;
+  const owner = ownerId === undefined ? undefined : currentNodes.get(ownerId);
+  return owner !== undefined && isTerminal(owner.state);
+}
+
+function storedContent(
+  tx: Transaction,
+  identity: Pick<ResolvedImportEntry, "current" | "task">,
+): Pick<ResolvedImportEntry, "binding_ids" | "intent"> {
+  if (identity.task !== null)
+    return { binding_ids: identity.task.content.bindings, intent: null };
+  assert.ok(identity.current, "A terminal entry has an identity.");
+  const row = readCurrentRevision(tx, identity.current.id);
+  assert.ok(row, "A current node has a revision.");
+  const { content } = revisionFromRow(tx, row);
+  return { binding_ids: content.bindings, intent: content.intent };
+}
+
 function checkVerificationCoverage(result: ResolvedImport): void {
   const covered = new Map<string, Set<string>>();
   for (const item of result.resolved_entries) {
@@ -438,6 +461,7 @@ function checkVerificationCoverage(result: ResolvedImport): void {
   for (const item of result.resolved_entries) {
     if (
       isTaskEntry(item.entry) ||
+      item.terminal ||
       item.entry.intent !== Intent.Implement ||
       !covered.has(item.key)
     )
@@ -471,16 +495,20 @@ function resolveGraph(result: ResolvedImport): void {
       );
       continue;
     }
-    for (const name of entry.depends_on) {
-      const key = resolveReference(
-        entry,
-        name,
-        REFERENCE.DependsOn,
-        byFilename,
-        result.violations,
-      );
-      if (key !== null) item.depends_on.add(key);
-    }
+    const targets = item.terminal
+      ? result.current_dependencies
+          .filter((edge) => edge.dependent === item.key)
+          .map((edge) => edge.depends_on)
+      : entry.depends_on.map((name) =>
+          resolveReference(
+            entry,
+            name,
+            REFERENCE.DependsOn,
+            byFilename,
+            result.violations,
+          ),
+        );
+    for (const key of targets) if (key !== null) item.depends_on.add(key);
     result.dependencies.set(item.key, item.depends_on);
   }
   checkVerificationCoverage(result);
@@ -511,6 +539,7 @@ function entryChanged(
   assert.ok(current, "Only an existing identity can be compared.");
   assert.equal(current.retired_at, null, "Compared identity is current.");
   assert.ok(!isTaskEntry(entry), "Only a node file is compared to a node.");
+  if (item.terminal) return current.filename !== entry.filename;
   const content: Content = {
     name: entry.name,
     requirement: entry.requirement,
@@ -531,6 +560,8 @@ function entryChanged(
 function taskChanged(item: ResolvedImportEntry): boolean {
   const { entry, task } = item;
   assert.ok(task, "Only an existing task can be compared.");
+  if (item.terminal)
+    return task.filename !== entry.filename || task.owner_id !== item.owner_id;
   const content: TaskBody = {
     name: entry.name,
     requirement: entry.requirement,
@@ -676,21 +707,28 @@ export function resolveImportSet(
       result.violations,
       currentTasks,
     );
+    const terminal = terminalOwner(identity, currentNodes);
     result.resolved_entries.push({
       entry,
       key: entry.id ?? `${TEMPORARY_KEY_PREFIX}${entry.filename}`,
       ...identity,
       owner_id: null,
       depends_on: new Set(),
-      binding_ids: resolveBindings(
-        tx,
-        mission,
-        entry,
-        identity.current,
-        bindings,
-        environments,
-        result.violations,
-      ),
+      ...(terminal
+        ? storedContent(tx, identity)
+        : {
+            binding_ids: resolveBindings(
+              tx,
+              mission,
+              entry,
+              identity.current,
+              bindings,
+              environments,
+              result.violations,
+            ),
+            intent: isTaskEntry(entry) ? null : (entry.intent as Intent),
+          }),
+      terminal,
     });
   }
   resolveGraph(result);
@@ -838,7 +876,11 @@ export function prepareImport(
         mission.id,
         snapshot.mission_version,
         normalized.entries,
-        retirements,
+        {
+          creates: resolved?.creates ?? [],
+          updates: resolved?.updates ?? [],
+          retirements,
+        },
       ),
       creates: resolved?.creates ?? [],
       updates: resolved?.updates ?? [],
@@ -854,7 +896,7 @@ export function importDigest(
   missionId: string,
   missionVersion: number,
   entries: NormalizedEntry[],
-  retirements: string[],
+  classification: Pick<ImportPreview, "creates" | "updates" | "retirements">,
 ): string {
   assert.ok(
     Number.isSafeInteger(missionVersion),
@@ -874,6 +916,8 @@ export function importDigest(
           ? SORT_BEFORE
           : SORT_AFTER,
     ),
-    retirements: [...retirements].sort(),
+    creates: [...classification.creates].sort(),
+    updates: [...classification.updates].sort(),
+    retirements: [...classification.retirements].sort(),
   });
 }
