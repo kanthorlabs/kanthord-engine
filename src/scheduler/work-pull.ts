@@ -20,6 +20,7 @@ import {
 import { executionRecord } from "./execution-store.ts";
 import { settleRuntime } from "./settlement.ts";
 import { executionTrace, reportLost } from "./telemetry.ts";
+import type { ExecutionOpening } from "../tracking/contract.ts";
 
 const WINDOW_ENDED = 0;
 const NO_LOSSES = 0;
@@ -50,6 +51,7 @@ function decide(
   return {
     outcome: ClaimOutcome.None,
     row: null,
+    opening: null,
     settled: ended !== null,
     lost: ended === null ? [] : [ended],
   };
@@ -105,12 +107,14 @@ function commit(
 ) {
   cancelled(caller);
   let lost: EndedExecution[] = [];
+  let opening: ExecutionOpening | null = null;
   let claimed = false;
   let siblings: string[] = [];
   const answer = caller.commit((tx) => {
     const result = decide(tx, dependencies, identity, pull, now);
     lost = result.lost;
     claimed = result.outcome === ClaimOutcome.Claimed;
+    opening = result.opening;
     if (claimed)
       siblings = dependencies.registrations.registrationsOfInstance(
         tx,
@@ -126,15 +130,18 @@ function commit(
   if (lost.length > NO_LOSSES) dependencies.waiting.wake(identity.projectId);
   if (claimed) dependencies.instances.claimed(pull.runtime_identity, siblings);
   if (answer.kind === WorkPullKind.Claimed) {
-    if (claimed)
+    if (claimed) {
+      assert.ok(opening);
       dependencies.agentChains.selected(
         answer.execution.agent_selections,
         answer.execution.execution_id,
       );
-    dependencies.telemetry.executionOpened(
-      executionTrace(answer.execution),
-      answer.execution.created_at,
-    );
+      dependencies.telemetry.executionOpened(
+        executionTrace(answer.execution),
+        answer.execution.created_at,
+        opening,
+      );
+    }
   }
   return answer;
 }

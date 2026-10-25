@@ -1,10 +1,14 @@
 import assert from "node:assert/strict";
 import {
   ExecutionEnd,
+  type ExecutionKind,
+  type ExecutionOpening,
   type ExecutionTelemetry,
   type ExecutionTrace,
 } from "../tracking/contract.ts";
 import type { EndedExecution } from "./contract.ts";
+
+const NO_WAIT = 0;
 
 export function reportLost(
   telemetry: ExecutionTelemetry,
@@ -42,5 +46,19 @@ export function executionTrace(row: {
     attempt: row.attempt,
     trace_id: row.trace_id,
     root_span_id: row.root_span_id,
+  };
+}
+
+export function executionOpening(
+  kind: ExecutionKind,
+  workerName: string,
+  queuedAt: number,
+  claimedAt: number,
+): ExecutionOpening {
+  assert.ok(workerName);
+  return {
+    kind,
+    worker_name: workerName,
+    queue_wait_ms: Math.max(NO_WAIT, claimedAt - queuedAt),
   };
 }

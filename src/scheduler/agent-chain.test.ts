@@ -1,3 +1,4 @@
+import { ExecutionKind } from "../tracking/contract.ts";
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
 import pino from "pino";
@@ -549,7 +550,7 @@ function pinHarness(
   h.dependencies.transitions.claim = (tx, nodeId) => {
     h.service.delete(tx, nodeId);
     return {
-      kind: "claim",
+      kind: ExecutionKind.Steps,
       project_id: row.project_id,
       attempt: 1,
       node_revision: CLAIM_REVISION,
