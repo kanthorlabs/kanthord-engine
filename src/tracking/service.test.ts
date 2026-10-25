@@ -18,11 +18,14 @@ import {
   SCHEDULER_PRODUCER,
   SpanOrigin,
   SpanStatus,
+  TIMELINE_LIMIT_DEFAULT,
   TRACKING_SERVICE_NAME,
+  TimelineDepth,
   TraceSort,
   TraceState,
   TransitionRule,
   traceSummarySchema,
+  trackingOperations,
   type ExecutionOpening,
   type ExecutionTrace,
   type ServerTrace,
@@ -641,6 +644,129 @@ test("a malformed cursor and a cursor of another sort are refused", (t) => {
       () => service.traceList(traceListQuery({ cursor }), caller(store)),
       cursorInvalid,
     );
+});
+
+const TIMELINE_PAGE = 100;
+const TRANSITION = {
+  from: "Evaluating",
+  to: "Blocked",
+  rule: TransitionRule.None,
+  count: null,
+  limit: null,
+  transitioned_at: 2000,
+};
+
+function timelineListQuery(
+  overrides: Partial<Parameters<TrackingService["timelineList"]>[0]> = {},
+) {
+  return {
+    node_id: TRACE.node_id,
+    depth: TimelineDepth.Child,
+    limit: TIMELINE_PAGE,
+    ...overrides,
+  };
+}
+
+test("a timeline page of a node scope holds the root and its child with a null cursor", (t) => {
+  const { store, service } = harness(t);
+  service.executionOpened(TRACE, CREATED, OPENING);
+  service.executionTransition(TRACE, TRANSITION);
+  const page = service.timelineList(timelineListQuery(), caller(store));
+  assert.deepEqual(
+    page.items.map((item) => [item.span_id, item.depth, item.worker_name]),
+    [
+      [TRACE.root_span_id, 1, OPENING.worker_name],
+      [page.items[1]!.span_id, 2, null],
+    ],
+  );
+  assert.equal(page.items[0]?.execution_id, TRACE.execution_id);
+  assert.equal(page.items[0]?.project_id, TRACE.project_id);
+  assert.equal(page.items[0]?.attempt, TRACE.attempt);
+  assert.equal(page.next_cursor, null);
+  const shallow = service.timelineList(
+    timelineListQuery({ depth: 1 }),
+    caller(store),
+  );
+  assert.equal(shallow.items.length, ONE_ENTRY);
+});
+
+test("a timeline page continues from its cursor until the cursor is null", (t) => {
+  const { store, service } = harness(t);
+  service.executionOpened(TRACE, CREATED, OPENING);
+  service.executionTransition(TRACE, TRANSITION);
+  const first = service.timelineList(
+    timelineListQuery({ limit: PAGE_OF_ONE }),
+    caller(store),
+  );
+  assert.equal(first.items.length, ONE_ENTRY);
+  assert.ok(first.next_cursor);
+  const second = service.timelineList(
+    timelineListQuery({ limit: PAGE_OF_ONE, cursor: first.next_cursor }),
+    caller(store),
+  );
+  assert.equal(second.items[0]?.depth, TimelineDepth.Child);
+  assert.equal(second.next_cursor, null);
+});
+
+test("from and to bound the traces of a timeline by window overlap", (t) => {
+  const { store, service } = harness(t);
+  service.executionOpened(TRACE, CREATED, OPENING);
+  const idsOf = (overrides: object) =>
+    service
+      .timelineList(timelineListQuery(overrides), caller(store))
+      .items.map((item) => item.trace_id);
+  assert.deepEqual(idsOf({ to: CREATED - 1 }), []);
+  assert.deepEqual(idsOf({ to: CREATED }), [TRACE.trace_id]);
+  assert.deepEqual(idsOf({ from: ENDED * 2 }), [TRACE.trace_id]);
+  service.executionEnded({
+    trace: TRACE,
+    ended_at: ENDED,
+    end: ExecutionEnd.Finished,
+    revoke_cause: null,
+    stop: null,
+  });
+  assert.deepEqual(idsOf({ from: ENDED }), [TRACE.trace_id]);
+  assert.deepEqual(idsOf({ from: ENDED + 1 }), []);
+});
+
+test("a malformed timeline cursor is refused", (t) => {
+  const { store, service } = harness(t);
+  for (const cursor of [
+    "not-a-cursor",
+    cursorOf("text"),
+    cursorOf([1, TRACE.trace_id, 1]),
+    cursorOf([1, TRACE.trace_id, 1, SPAN, 1]),
+    cursorOf(["1", TRACE.trace_id, 1, SPAN]),
+    cursorOf([1, "short", 1, SPAN]),
+    cursorOf([1, TRACE.trace_id, 1.5, SPAN]),
+    cursorOf([1, TRACE.trace_id, 1, "short"]),
+    cursorOf([1, TRACE.trace_id, 1, null]),
+  ])
+    assert.throws(
+      () => service.timelineList(timelineListQuery({ cursor }), caller(store)),
+      cursorInvalid,
+    );
+});
+
+test("a timeline query holds exactly one scope", () => {
+  const { query } = trackingOperations.timelineList.input.shape;
+  assert.ok(!query.safeParse({}).success);
+  assert.ok(
+    !query.safeParse({ node_id: TRACE.node_id, project_id: TRACE.project_id })
+      .success,
+  );
+  assert.ok(query.safeParse({ node_id: TRACE.node_id }).success);
+  assert.ok(query.safeParse({ execution_id: TRACE.execution_id }).success);
+  assert.ok(query.safeParse({ project_id: TRACE.project_id }).success);
+  assert.ok(!query.safeParse({ node_id: TRACE.node_id, depth: "3" }).success);
+  assert.equal(
+    query.parse({ node_id: TRACE.node_id }).depth,
+    TimelineDepth.Child,
+  );
+  assert.equal(
+    query.parse({ node_id: TRACE.node_id }).limit,
+    TIMELINE_LIMIT_DEFAULT,
+  );
 });
 
 test("the facet read answers the four arrays", (t) => {

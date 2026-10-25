@@ -6,6 +6,7 @@ import {
   TRACKING_SERVICE_NAME,
   TraceSort,
   TRACE_LIST_LIMIT_DEFAULT,
+  trackingOperations,
 } from "./contract.ts";
 import { trackingMigrations } from "./migrations.ts";
 import {
@@ -253,8 +254,17 @@ const FILTER_CASES: readonly (readonly [
   ["q worker_name", { q: "W3" }, [4]],
   ["q trace_id", { q: "0003" }, [3]],
   ["q error_types", { q: "RATE_" }, [2]],
-  ["started_from inclusive", { started_from: 3000 }, [2, 4, 5]],
-  ["started_to inclusive", { started_to: 2000 }, [1, 3]],
+  ["from keeps a trace that ends at it", { from: 2000 }, [1, 2, 3, 4, 5]],
+  ["from keeps a trace that started before it", { from: 2500 }, [2, 3, 4, 5]],
+  [
+    "from keeps an open trace that started before it",
+    { from: 4500 },
+    [3, 4, 5],
+  ],
+  ["from drops a trace that ended before it", { from: 3501 }, [3, 4, 5]],
+  ["to keeps a trace that starts at it", { to: 2000 }, [1, 3]],
+  ["to drops a trace that starts after it", { to: 3500 }, [1, 2, 3]],
+  ["from and to bound the window", { from: 2500, to: 3200 }, [2, 3]],
   ["min_duration_ms", { min_duration_ms: 1000 }, [1, 3]],
   ["max_duration_ms", { max_duration_ms: 1000 }, [1, 2]],
   ["min_total_tokens", { min_total_tokens: 20 }, [2, 3]],
@@ -269,6 +279,13 @@ for (const [name, overrides, expected] of FILTER_CASES)
     const store = seeded(t);
     assert.deepEqual(idsOf(store, overrides).sort(), expected);
   });
+
+test("the input schema refuses started_from and started_to", () => {
+  const { query } = trackingOperations.traceList.input.shape;
+  assert.ok(query.safeParse({ from: "1", to: "2" }).success);
+  assert.ok(!query.safeParse({ started_from: "1" }).success);
+  assert.ok(!query.safeParse({ started_to: "1" }).success);
+});
 
 test("a duration bound excludes an open trace", (t) => {
   const store = seeded(t);

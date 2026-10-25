@@ -66,18 +66,18 @@ pathItem:
         schema:
           $ref: "#/components/schemas/tracking.trace.list.Input/properties/query/properti\
             es/q"
-      - name: started_from
+      - name: from
         in: query
         required: false
         schema:
           $ref: "#/components/schemas/tracking.trace.list.Input/properties/query/properti\
-            es/started_from"
-      - name: started_to
+            es/from"
+      - name: to
         in: query
         required: false
         schema:
           $ref: "#/components/schemas/tracking.trace.list.Input/properties/query/properti\
-            es/started_to"
+            es/to"
       - name: min_duration_ms
         in: query
         required: false
@@ -211,11 +211,11 @@ components:
               type: string
               minLength: 1
               maxLength: 200
-            started_from:
+            from:
               type: integer
               minimum: 0
               maximum: 9007199254740991
-            started_to:
+            to:
               type: integer
               minimum: 0
               maximum: 9007199254740991
