@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { readFileSync } from "node:fs";
 import {
+  BASE_PROMPT,
   ENV_AGENT_PROMPT,
   RE_AGENT_PROMPT,
   SWE_AGENT_PROMPT,
@@ -99,11 +100,42 @@ test("agent prompts are valid published UTF-8 assets", () => {
   );
   assert.ok(
     SWE_AGENT_PROMPT.includes(
-      "Run the tests of Tests rule 3 and the compiler, type, lint and static-analysis checks",
+      "Run the compiler, type, lint and static-analysis checks of the codebase.",
     ),
   );
   assert.ok(RE_AGENT_PROMPT.includes("re@1"));
+  assert.ok(
+    RE_AGENT_PROMPT.includes(
+      "The prose style and the finding format of a report that the candidate produces are no ground for a blocker.",
+    ),
+  );
   assert.ok(WORKBENCH_PROMPT.startsWith("## Human interlocutor"));
+});
+
+test("base prompt holds no rule that only code or a review needs", () => {
+  assert.doesNotMatch(
+    BASE_PROMPT,
+    /\b(code|comment|commit|test|repository|review|blocker|suggestion|debug)/i,
+  );
+});
+
+test("swe@1 and re@1 hold the code rules in the same words", () => {
+  const heading = "## Code principles";
+  const fileStart = 0;
+  const sweStart = SWE_AGENT_PROMPT.indexOf(heading);
+  const reStart = RE_AGENT_PROMPT.indexOf(heading);
+  assert.ok(sweStart > fileStart);
+  assert.ok(reStart > fileStart);
+  const shared = SWE_AGENT_PROMPT.slice(sweStart);
+  assert.equal(RE_AGENT_PROMPT.slice(reStart), shared);
+  for (const rule of [
+    "**Code comments are forbidden.**",
+    "**No leftover.**",
+    "**Zero warnings.**",
+    "**Bounded waits.**",
+    "`<B1/S1> - status:<FIXED/OPEN> - action:<YES/NO>",
+  ])
+    assert.ok(shared.includes(rule), rule);
 });
 
 test("unknown and inherited names are not agent declarations", () => {

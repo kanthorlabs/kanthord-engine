@@ -411,7 +411,11 @@ test("agent declaration read exposes prompts, tools and current enablement witho
   assert.equal(declaration.enablement, null);
   assert.deepEqual(declaration.tools, TOOLS);
   const parts = declaration.prompt.parts!;
-  assert.ok(parts[0]!.text.startsWith("This text is the default standard."));
+  assert.ok(
+    parts[0]!.text.startsWith(
+      "This text is the shared standard of every agent.",
+    ),
+  );
   assert.ok(parts[1]!.text.startsWith("## Role"));
   assert.equal(declaration.configuration_schema.$schema, schemaVersion);
   assert.equal(declaration.configuration_schema.additionalProperties, false);
