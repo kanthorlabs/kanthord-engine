@@ -15,6 +15,7 @@ import {
 
 const SERVER_UID = 1000;
 const ABSENT_CODE = 1;
+const FORMAT_OPTION = "--format";
 const Verb = { Info: "info", Image: "image" } as const;
 const Subject = { Inspect: "inspect" } as const;
 const FAKE_COMMIT = "a".repeat(40);
@@ -44,6 +45,7 @@ function answerOf(args: readonly string[]): RuntimeAnswer {
   if (
     verb === Verb.Image &&
     subject === Subject.Inspect &&
+    args.includes(FORMAT_OPTION) &&
     reference.startsWith(ENVIRONMENT_IMAGE_PREFIX)
   )
     return {
@@ -54,7 +56,7 @@ function answerOf(args: readonly string[]): RuntimeAnswer {
   if (verb === Verb.Image && subject === Subject.Inspect)
     return {
       code: SUCCESS_CODE,
-      stdout: args.includes("--format")
+      stdout: args.includes(FORMAT_OPTION)
         ? `sha256:${reference}\n`
         : IMAGE_SETTINGS,
       stderr: "",
