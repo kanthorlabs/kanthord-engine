@@ -19,6 +19,8 @@ import {
   type RevokedClaim,
   type SchedulerClaims,
 } from "./contract.ts";
+import type { ExecutionTrace } from "../tracking/contract.ts";
+import type { Acted } from "./act-telemetry.ts";
 import type { Dependencies } from "./service.ts";
 import { currentAssessmentOf } from "./currency.ts";
 import { requireNode, nodeRecord } from "./node-read.ts";
@@ -327,4 +329,30 @@ export function closeExternalAttempt(
     now,
   );
   return outcome;
+}
+
+export function actedOn(
+  mission: Mission,
+  before: NodeRow,
+  reason: string | null,
+  now: number,
+  result: ControlResult,
+  revoked: ExecutionTrace | null,
+): Acted<ControlResult> {
+  assert.ok(before.state);
+  assert.ok(result.node.state);
+  return {
+    result,
+    act: {
+      project_id: mission.project_id,
+      node_id: before.id,
+      attempt: result.node.attempt ?? NO_ATTEMPT,
+      acted_at: now,
+      from: before.state,
+      to: result.node.state,
+      reason,
+      revoked,
+      evidence_id: null,
+    },
+  };
 }

@@ -25,7 +25,9 @@ import {
 } from "./record-store.ts";
 import { outcomeRecord } from "./record-read.ts";
 import { readMission, setNodeState } from "./store.ts";
+import { Act, ActAttribute } from "./act-telemetry.ts";
 import {
+  actCalls,
   evidenceHarness,
   revokedExecution,
   settlesExpired,
@@ -36,6 +38,7 @@ const EXECUTIONS_LOST = "schedulerClaims.executionsLost";
 
 const IDENTITY = testHumanIdentity("ulrich", "Ulrich", "token");
 const NO_CALLS = 0;
+const ONE_ACT = 1;
 const FIRST_ATTEMPT = 1;
 const SECOND_VERSION = 2;
 const VERSION = "version";
@@ -433,4 +436,118 @@ test("both deletes log the human, the force and the reason after the commit", as
       message: "evidence deleted",
     },
   ]);
+});
+
+test("a delete writes one act trace with the evidence, the reason and equal states", async (t) => {
+  const h = fixture(t);
+  h.dependencies.intakeStorage.delete = async () => undefined;
+  const state = h.node().state;
+  await h.invoke("evidence.delete", {
+    params: { evidence_id: h.evidence_id },
+    query: {},
+    body: {
+      expected_mission_version: FIRST_ATTEMPT,
+      force: true,
+      reason: "Remove stored",
+    },
+  });
+  const written = actCalls(h);
+  assert.equal(written.length, ONE_ACT);
+  const [trace, contribution] = written[0]!;
+  assert.equal(contribution.operation, Act.DeleteEvidence);
+  assert.equal(trace.project_id, h.project_id);
+  assert.equal(trace.node_id, h.node_id);
+  assert.equal(trace.attempt, FIRST_ATTEMPT);
+  assert.equal(contribution.attributes[ActAttribute.EvidenceId], h.evidence_id);
+  assert.equal(contribution.attributes[ActAttribute.StateFrom], state);
+  assert.equal(contribution.attributes[ActAttribute.StateTo], state);
+  assert.equal(contribution.links, undefined);
+  assert.deepEqual(contribution.texts, [
+    { text_id: `${trace.root_span_id}:reason`, text: "Remove stored" },
+  ]);
+});
+
+test("a forced delete of a request evidence holds the states and links the revoked execution", async (t) => {
+  const h = fixture(t, true);
+  const revoked = revokedExecution(
+    h.claim.executionId,
+    h.node_id,
+    FIRST_ATTEMPT,
+  );
+  h.dependencies.schedulerClaims.revoke = () => revoked;
+  const before = h.node().state;
+  await h.invoke("evidence.delete", {
+    params: { evidence_id: h.evidence_id },
+    query: {},
+    body: {
+      expected_mission_version: FIRST_ATTEMPT,
+      force: true,
+      reason: "Remove request",
+    },
+  });
+  const written = actCalls(h);
+  assert.equal(written.length, ONE_ACT);
+  const [, contribution] = written[0]!;
+  assert.equal(contribution.attributes[ActAttribute.StateFrom], before);
+  assert.equal(contribution.attributes[ActAttribute.StateTo], NodeState.Paused);
+  assert.deepEqual(contribution.links, [
+    { trace_id: revoked.trace.trace_id, span_id: revoked.trace.root_span_id },
+  ]);
+});
+
+test("a refused delete writes no act trace", async (t) => {
+  const h = fixture(t, true);
+  await assert.rejects(
+    h.invoke("evidence.delete", {
+      params: { evidence_id: h.evidence_id },
+      query: {},
+      body: { expected_mission_version: FIRST_ATTEMPT, force: false },
+    }),
+    (error) =>
+      error instanceof OperationError &&
+      error.code === MissionErrorCode.EvidenceRequestForceRequired,
+  );
+  assert.equal(actCalls(h).length, NO_CALLS);
+});
+
+test("a delete rolled back after the commit write writes no act trace", async (t) => {
+  const h = fixture(t, true);
+  h.caller.commit = (write) =>
+    h.store.transaction((tx) => {
+      write(tx);
+      throw new Error("rollback");
+    });
+  await assert.rejects(
+    h.invoke("evidence.delete", {
+      params: { evidence_id: h.evidence_id },
+      query: {},
+      body: {
+        expected_mission_version: FIRST_ATTEMPT,
+        force: true,
+        reason: "Remove request",
+      },
+    }),
+    { message: "rollback" },
+  );
+  assert.equal(actCalls(h).length, NO_CALLS);
+});
+
+test("a delete with an act telemetry that throws keeps its answer", async (t) => {
+  const h = fixture(t, true);
+  h.dependencies.acts.act = () => {
+    throw new Error("telemetry down");
+  };
+  assert.equal(
+    await h.invoke("evidence.delete", {
+      params: { evidence_id: h.evidence_id },
+      query: {},
+      body: {
+        expected_mission_version: FIRST_ATTEMPT,
+        force: true,
+        reason: "Remove request",
+      },
+    }),
+    null,
+  );
+  assert.equal(h.node().state, NodeState.Paused);
 });

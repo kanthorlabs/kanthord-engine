@@ -5,6 +5,7 @@ import { OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import { createIdentity } from "../kernel/identity.ts";
 import { MissionErrorCode, Intent, NodeState, TaskChange } from "./contract.ts";
+import { Act, ActAttribute } from "./act-telemetry.ts";
 import { ControlError } from "./control.ts";
 import { openAttempt } from "./record-store.ts";
 import {
@@ -13,7 +14,7 @@ import {
   setNodeState,
   readCurrentRevision,
 } from "./store.ts";
-import { controlHarness, settlesExpired } from "./test-support.ts";
+import { actCalls, controlHarness, settlesExpired } from "./test-support.ts";
 
 const IDENTITY = testHumanIdentity("ulrich", "Ulrich", "token");
 const FIRST_ATTEMPT = 1;
@@ -22,6 +23,9 @@ const NO_ATTEMPT = 0;
 const NOW = 100;
 const ADDED_TASK_FILE = "added.md";
 const EXECUTIONS_LOST = "schedulerClaims.executionsLost";
+const NO_ACTS = 0;
+const ONE_ACT = 1;
+const REDIRECT_ACTS = 3;
 for (const filenames of [
   ["b.md", "a.md"],
   ["b.md", "c.md"],
@@ -829,4 +833,130 @@ test("unblock with a change that names mixed environments refuses and keeps the 
     body: null,
   });
   assert.equal(node.state, NodeState.Blocked);
+});
+
+test("an unblock writes one act trace with the attempt that it opens and its reason", async (t) => {
+  const h = controlHarness(t, IDENTITY);
+  h.store.transaction((tx) => {
+    openAttempt(tx, h.node_id, FIRST_ATTEMPT, h.actor, NOW);
+    setNodeState(tx, h.node_id, NodeState.Paused);
+  });
+  await h.invoke("node.block", {
+    params: { node_id: h.node_id },
+    query: {},
+    body: h.body(NodeState.Paused, FIRST_ATTEMPT),
+  });
+  const statesAtAct: (NodeState | null)[] = [];
+  h.dependencies.acts.act = (...args) => {
+    statesAtAct.push(h.node().state);
+    h.calls.push({ method: "acts.act", arguments: args });
+  };
+  await h.invoke("node.unblock", {
+    params: { node_id: h.node_id },
+    query: {},
+    body: {
+      blocked_attempt: FIRST_ATTEMPT,
+      expected_revision: FIRST_ATTEMPT,
+      expected_mission_version: FIRST_ATTEMPT,
+      reason: "Retry on the current base branch.",
+    },
+  });
+  const written = actCalls(h).filter(
+    ([, contribution]) => contribution.operation === Act.Unblock,
+  );
+  assert.equal(written.length, ONE_ACT);
+  assert.deepEqual(statesAtAct, [NodeState.Available]);
+  const [trace, contribution] = written[0]!;
+  assert.equal(contribution.operation, Act.Unblock);
+  assert.equal(trace.node_id, h.node_id);
+  assert.equal(trace.attempt, SECOND_ATTEMPT);
+  assert.equal(contribution.attributes[ActAttribute.Attempt], SECOND_ATTEMPT);
+  assert.equal(
+    contribution.attributes[ActAttribute.StateFrom],
+    NodeState.Blocked,
+  );
+  assert.equal(
+    contribution.attributes[ActAttribute.StateTo],
+    NodeState.Available,
+  );
+  assert.deepEqual(contribution.texts, [
+    {
+      text_id: `${trace.root_span_id}:reason`,
+      text: "Retry on the current base branch.",
+    },
+  ]);
+});
+
+test("an unblock without a reason writes an act trace without a text", async (t) => {
+  const h = controlHarness(t, IDENTITY);
+  h.store.transaction((tx) => setNodeState(tx, h.node_id, NodeState.Blocked));
+  await h.invoke("node.unblock", {
+    params: { node_id: h.node_id },
+    query: {},
+    body: {
+      blocked_attempt: NO_ATTEMPT,
+      expected_revision: FIRST_ATTEMPT,
+      expected_mission_version: FIRST_ATTEMPT,
+    },
+  });
+  const [trace, contribution] = actCalls(h)[0]!;
+  assert.equal(trace.attempt, null);
+  assert.equal(contribution.texts, undefined);
+});
+
+test("a redirect writes the pause, the block and the unblock acts in that order", async (t) => {
+  const h = controlHarness(t, IDENTITY);
+  h.store.transaction((tx) => {
+    openAttempt(tx, h.node_id, FIRST_ATTEMPT, h.actor, NOW);
+    setNodeState(tx, h.node_id, NodeState.Waiting);
+  });
+  const paused = await h.invoke("node.pause", {
+    params: { node_id: h.node_id },
+    query: {},
+    body: h.body(NodeState.Waiting, FIRST_ATTEMPT),
+  });
+  await h.invoke("node.block", {
+    params: { node_id: h.node_id },
+    query: {},
+    body: h.body(NodeState.Paused, FIRST_ATTEMPT),
+  });
+  await h.invoke("node.unblock", {
+    params: { node_id: h.node_id },
+    query: {},
+    body: {
+      blocked_attempt: FIRST_ATTEMPT,
+      expected_revision: FIRST_ATTEMPT,
+      expected_mission_version: FIRST_ATTEMPT,
+      change: {
+        content: { ...paused.node.content, name: "New direction" },
+        tasks: [],
+        reason: "Redirect",
+      },
+    },
+  });
+  const written = actCalls(h);
+  assert.equal(written.length, REDIRECT_ACTS);
+  assert.deepEqual(
+    written.map(([, contribution]) => contribution.operation),
+    [Act.Pause, Act.Block, Act.Unblock],
+  );
+});
+
+test("a refused unblock writes no act trace", async (t) => {
+  const h = controlHarness(t, IDENTITY);
+  h.store.transaction((tx) => setNodeState(tx, h.node_id, NodeState.Paused));
+  await assert.rejects(
+    h.invoke("node.unblock", {
+      params: { node_id: h.node_id },
+      query: {},
+      body: {
+        blocked_attempt: NO_ATTEMPT,
+        expected_revision: FIRST_ATTEMPT,
+        expected_mission_version: FIRST_ATTEMPT,
+      },
+    }),
+    (error) =>
+      error instanceof OperationError && error.code === ControlError.Refused,
+  );
+  assert.equal(actCalls(h).length, NO_ACTS);
 });

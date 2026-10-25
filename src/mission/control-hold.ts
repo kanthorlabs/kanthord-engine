@@ -11,11 +11,7 @@ import {
   RevokeCause,
   type HumanActor,
   type ExecutionEnds,
-  type ControlResult,
-  type Mission,
 } from "./contract.ts";
-import type { ExecutionTrace } from "../tracking/contract.ts";
-import type { Acted } from "./act-telemetry.ts";
 import { readinessOf } from "./conditions.ts";
 import { actionStatesOf } from "./frozen-action.ts";
 import { openAttempt } from "./record-store.ts";
@@ -26,6 +22,7 @@ import {
   transition,
   controlResult,
   closeExternalAttempt,
+  actedOn,
 } from "./control.ts";
 import type { Dependencies } from "./service.ts";
 
@@ -41,31 +38,6 @@ function requireReady(tx: Transaction, node: NodeRow): void {
       "Node is not ready for evaluation.",
       { unsatisfied_ids: readiness.unsatisfied_ids },
     );
-}
-
-function actedOn(
-  mission: Mission,
-  before: NodeRow,
-  reason: string,
-  now: number,
-  result: ControlResult,
-  revoked: ExecutionTrace | null,
-): Acted<ControlResult> {
-  assert.ok(before.state);
-  assert.ok(result.node.state);
-  return {
-    result,
-    act: {
-      project_id: mission.project_id,
-      node_id: before.id,
-      attempt: result.node.attempt ?? NO_ATTEMPT,
-      acted_at: now,
-      from: before.state,
-      to: result.node.state,
-      reason,
-      revoked,
-    },
-  };
 }
 
 function openCurrentAttempt(

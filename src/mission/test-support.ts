@@ -38,6 +38,8 @@ import {
   setNodeState,
   intentOf,
 } from "./store.ts";
+import type { ServerTrace } from "../tracking/contract.ts";
+import type { ActContribution } from "./act-telemetry.ts";
 import { missionMigrations } from "./migrations.ts";
 import { MissionService, type Dependencies } from "./service.ts";
 import {
@@ -53,6 +55,7 @@ const REWORK_LIMIT = 2;
 const TEXT_MAX_BYTES = 32768;
 const FIXTURE_TIME = 100;
 const FIRST_REVISION = 1;
+const ACT_CALL = "acts.act";
 const UNEXPECTED_COLLABORATION = "unexpected collaboration call";
 
 export function databaseSnapshot(store: Store): Record<string, unknown[]> {
@@ -628,4 +631,12 @@ export async function externalRequestHarness(
   assert.equal(h.node().state, NodeState.ExternalRequested);
   assert.ok(request.requirement_key);
   return { ...h, request, address, claim };
+}
+
+export function actCalls(h: {
+  calls: { method: string; arguments: unknown[] }[];
+}) {
+  return h.calls
+    .filter((call) => call.method === ACT_CALL)
+    .map((call) => call.arguments as [ServerTrace, ActContribution]);
 }

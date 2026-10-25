@@ -11,6 +11,7 @@ import {
   NodeState,
   type RevokedExecution,
 } from "./contract.ts";
+import { Act, ActAttribute } from "./act-telemetry.ts";
 import { ControlError } from "./control.ts";
 import {
   openAttempt,
@@ -25,6 +26,7 @@ import {
   readNode,
 } from "./store.ts";
 import {
+  actCalls,
   controlHarness,
   revokedExecution,
   settlesExpired,
@@ -45,6 +47,8 @@ const BINDING_MISMATCH = "mission.evidence.binding_mismatch";
 const VALIDATION = "gateway.request.validation_failed";
 const COMMIT = "a".repeat(40);
 const SECOND_ATTEMPT = 2;
+const NO_ACTS = 0;
+const ONE_ACT = 1;
 test("implement override validates its attempt repository pin after the current revision changes", async (t) => {
   const h = controlHarness(t, IDENTITY);
   const original = createIdentity("binding");
@@ -551,4 +555,124 @@ test("a success override of a node with two bindings lands a list in binding ord
       [firstId, secondId].sort(),
     ),
   );
+});
+
+for (const [operation, act, from, to, extra] of [
+  ["node.block", Act.Block, NodeState.Paused, NodeState.Blocked, {}],
+  ["node.discard", Act.Discard, NodeState.Executing, NodeState.Discarded, {}],
+  [
+    "node.override",
+    Act.Override,
+    NodeState.Executing,
+    NodeState.Completed,
+    { result: AssessmentResult.Success },
+  ],
+] as const) {
+  test(`${operation} writes one act trace after the commit with the states before and after and the reason`, async (t) => {
+    const h = controlHarness(t, IDENTITY);
+    h.store.transaction((tx) => {
+      openAttempt(tx, h.node_id, FIRST_ATTEMPT, h.actor, NOW);
+      setNodeState(tx, h.node_id, from);
+    });
+    const statesAtAct: (NodeState | null)[] = [];
+    h.dependencies.acts.act = (...args) => {
+      statesAtAct.push(h.node().state);
+      h.calls.push({ method: "acts.act", arguments: args });
+    };
+    await h.invoke(operation, {
+      params: { node_id: h.node_id },
+      query: {},
+      body: { ...h.body(from, FIRST_ATTEMPT), ...extra },
+    });
+    const written = actCalls(h);
+    assert.equal(written.length, ONE_ACT);
+    assert.deepEqual(statesAtAct, [to]);
+    const [trace, contribution] = written[0]!;
+    assert.equal(contribution.operation, act);
+    assert.equal(trace.project_id, h.project_id);
+    assert.equal(trace.node_id, h.node_id);
+    assert.equal(trace.attempt, FIRST_ATTEMPT);
+    assert.equal(contribution.attributes[ActAttribute.StateFrom], from);
+    assert.equal(contribution.attributes[ActAttribute.StateTo], to);
+    assert.deepEqual(contribution.texts, [
+      { text_id: `${trace.root_span_id}:reason`, text: "Hold" },
+    ]);
+  });
+}
+
+for (const [operation, extra] of [
+  ["node.discard", {}],
+  ["node.override", { result: AssessmentResult.Success }],
+] as const) {
+  test(`${operation} of a node with a live execution links the revoked execution`, async (t) => {
+    const h = controlHarness(t, IDENTITY);
+    const revoked = revokedExecution(
+      createIdentity("execution"),
+      h.node_id,
+      NOW,
+    );
+    h.dependencies.schedulerClaims.revoke = () => revoked;
+    h.store.transaction((tx) => {
+      openAttempt(tx, h.node_id, FIRST_ATTEMPT, h.actor, NOW);
+      setNodeState(tx, h.node_id, NodeState.Executing);
+    });
+    await h.invoke(operation, {
+      params: { node_id: h.node_id },
+      query: {},
+      body: { ...h.body(NodeState.Executing, FIRST_ATTEMPT), ...extra },
+    });
+    const written = actCalls(h);
+    assert.equal(written.length, ONE_ACT);
+    assert.deepEqual(written[0]![1].links, [
+      {
+        trace_id: revoked.trace.trace_id,
+        span_id: revoked.trace.root_span_id,
+      },
+    ]);
+  });
+
+  test(`${operation} that the state check refuses writes no act trace`, async (t) => {
+    const h = controlHarness(t, IDENTITY);
+    h.store.transaction((tx) => setNodeState(tx, h.node_id, NodeState.Waiting));
+    await assert.rejects(
+      h.invoke(operation, {
+        params: { node_id: h.node_id },
+        query: {},
+        body: { ...h.body(NodeState.Executing), ...extra },
+      }),
+      (error) =>
+        error instanceof OperationError &&
+        error.code === ControlError.StateConflict,
+    );
+    assert.equal(actCalls(h).length, NO_ACTS);
+  });
+}
+
+test("a block links nothing, because it admits only a Paused node", async (t) => {
+  const h = controlHarness(t, IDENTITY);
+  h.store.transaction((tx) => {
+    openAttempt(tx, h.node_id, FIRST_ATTEMPT, h.actor, NOW);
+    setNodeState(tx, h.node_id, NodeState.Paused);
+  });
+  await h.invoke("node.block", {
+    params: { node_id: h.node_id },
+    query: {},
+    body: h.body(NodeState.Paused, FIRST_ATTEMPT),
+  });
+  assert.equal(actCalls(h)[0]![1].links, undefined);
+});
+
+test("a block of a node that is not Paused writes no act trace", async (t) => {
+  const h = controlHarness(t, IDENTITY);
+  h.store.transaction((tx) => setNodeState(tx, h.node_id, NodeState.Waiting));
+  await assert.rejects(
+    h.invoke("node.block", {
+      params: { node_id: h.node_id },
+      query: {},
+      body: h.body(NodeState.Waiting),
+    }),
+    (error) =>
+      error instanceof OperationError && error.code === ControlError.Refused,
+  );
+  assert.equal(actCalls(h).length, NO_ACTS);
 });

@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto";
+import type { Logger } from "pino";
 import {
   SpanStatus,
   type Attributes,
@@ -32,6 +33,7 @@ export const ActAttribute = {
   Attempt: "kanthord.attempt",
   StateFrom: "kanthord.node.state.from",
   StateTo: "kanthord.node.state.to",
+  EvidenceId: "kanthord.evidence.id",
 } as const;
 
 export interface ActFacts {
@@ -39,10 +41,11 @@ export interface ActFacts {
   node_id: string;
   attempt: number;
   acted_at: number;
-  from: string;
+  from: string | null;
   to: string;
   reason: string | null;
   revoked: ExecutionTrace | null;
+  evidence_id: string | null;
 }
 
 export interface ActContribution {
@@ -78,8 +81,11 @@ function attributesOf(facts: ActFacts): Attributes {
     [ActAttribute.ProjectId]: facts.project_id,
     [ActAttribute.NodeId]: facts.node_id,
     ...(attempt === null ? {} : { [ActAttribute.Attempt]: attempt }),
-    [ActAttribute.StateFrom]: facts.from,
+    ...(facts.from === null ? {} : { [ActAttribute.StateFrom]: facts.from }),
     [ActAttribute.StateTo]: facts.to,
+    ...(facts.evidence_id === null
+      ? {}
+      : { [ActAttribute.EvidenceId]: facts.evidence_id }),
   };
 }
 
@@ -123,4 +129,20 @@ export function actTrace(
       ...reasonOf(trace.root_span_id, facts.reason),
     },
   };
+}
+
+export function recordAct(
+  dependencies: { acts: ActTelemetry; logger: Logger },
+  act: Act,
+  facts: ActFacts,
+): void {
+  try {
+    const { trace, contribution } = actTrace(act, facts);
+    dependencies.acts.act(trace, contribution);
+  } catch (error) {
+    dependencies.logger.warn(
+      { error, act, node_id: facts.node_id },
+      "Act trace failed.",
+    );
+  }
 }

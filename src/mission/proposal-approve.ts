@@ -28,6 +28,7 @@ const FILENAME_SUFFIX = ".md";
 const TASK_FILENAME_SUFFIX = "-task.md";
 const REASON_PREFIX = "Approve fix-node proposal ";
 const NO_BINDINGS: string[] = [];
+const NO_ATTEMPT = 0;
 
 function filenameStem(proposalId: string): string {
   return `${FILENAME_PREFIX}${proposalId
@@ -123,14 +124,29 @@ export function approveProposal(
     ends,
   );
   markProposalApproved(tx, proposal.id, createdId, now);
+  const createdNode = requireNode(tx, createdId);
+  assert.ok(createdNode.state);
   return {
-    created: {
-      ...created,
-      added_edges: [
-        ...created.added_edges,
-        { dependent_id: proposer.id, depends_on_id: createdId },
-      ],
+    result: {
+      created: {
+        ...created,
+        added_edges: [
+          ...created.added_edges,
+          { dependent_id: proposer.id, depends_on_id: createdId },
+        ],
+      },
+      proposer: unblocked.result,
     },
-    proposer: unblocked,
+    act: {
+      project_id: mission.project_id,
+      node_id: createdId,
+      attempt: createdNode.attempt ?? NO_ATTEMPT,
+      acted_at: now,
+      from: null,
+      to: createdNode.state,
+      reason: body.reason ?? null,
+      revoked: null,
+      evidence_id: null,
+    },
   };
 }

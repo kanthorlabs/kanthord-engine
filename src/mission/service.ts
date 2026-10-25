@@ -54,7 +54,7 @@ import {
 } from "./contract.ts";
 import {
   Act,
-  actTrace,
+  recordAct,
   type ActFacts,
   type ActTelemetry,
   type Acted,
@@ -514,7 +514,8 @@ export class MissionService
     registry.register(
       missionOperations["proposal.approve"],
       ({ params, body }, caller) =>
-        this.commitGraph(
+        this.commitAct(
+          Act.ApproveProposal,
           caller,
           { proposal_id: params.proposal_id },
           (tx, ends) =>
@@ -534,9 +535,33 @@ export class MissionService
     registry.register(
       missionOperations["node.unblock"],
       ({ params, body }, caller) =>
-        this.commitGraph(caller, { node_id: params.node_id }, (tx, ends) =>
-          this.covered(tx, { node_id: params.node_id }, (tx) =>
-            unblockNode(
+        this.commitAct(
+          Act.Unblock,
+          caller,
+          { node_id: params.node_id },
+          (tx, ends) =>
+            this.covered(tx, { node_id: params.node_id }, (tx) =>
+              unblockNode(
+                tx,
+                this.dependencies,
+                params.node_id,
+                body,
+                humanActor(caller),
+                Date.now(),
+                ends,
+              ),
+            ),
+        ),
+    );
+    registry.register(
+      missionOperations["node.override"],
+      ({ params, body }, caller) =>
+        this.commitAct(
+          Act.Override,
+          caller,
+          { node_id: params.node_id },
+          (tx, ends) =>
+            overrideNode(
               tx,
               this.dependencies,
               params.node_id,
@@ -545,52 +570,44 @@ export class MissionService
               Date.now(),
               ends,
             ),
-          ),
-        ),
-    );
-    registry.register(
-      missionOperations["node.override"],
-      ({ params, body }, caller) =>
-        this.commitGraph(caller, { node_id: params.node_id }, (tx, ends) =>
-          overrideNode(
-            tx,
-            this.dependencies,
-            params.node_id,
-            body,
-            humanActor(caller),
-            Date.now(),
-            ends,
-          ),
         ),
     );
     registry.register(
       missionOperations["node.block"],
       ({ params, body }, caller) =>
-        this.commitGraph(caller, { node_id: params.node_id }, (tx, ends) =>
-          blockNode(
-            tx,
-            this.dependencies,
-            params.node_id,
-            body,
-            humanActor(caller),
-            Date.now(),
-            ends,
-          ),
+        this.commitAct(
+          Act.Block,
+          caller,
+          { node_id: params.node_id },
+          (tx, ends) =>
+            blockNode(
+              tx,
+              this.dependencies,
+              params.node_id,
+              body,
+              humanActor(caller),
+              Date.now(),
+              ends,
+            ),
         ),
     );
     registry.register(
       missionOperations["node.discard"],
       ({ params, body }, caller) =>
-        this.commitGraph(caller, { node_id: params.node_id }, (tx, ends) =>
-          discardNode(
-            tx,
-            this.dependencies,
-            params.node_id,
-            body,
-            humanActor(caller),
-            Date.now(),
-            ends,
-          ),
+        this.commitAct(
+          Act.Discard,
+          caller,
+          { node_id: params.node_id },
+          (tx, ends) =>
+            discardNode(
+              tx,
+              this.dependencies,
+              params.node_id,
+              body,
+              humanActor(caller),
+              Date.now(),
+              ends,
+            ),
         ),
     );
     registry.register(
@@ -996,21 +1013,9 @@ export class MissionService
       },
       () => {
         assert.ok(facts);
-        this.recordAct(act, facts);
+        recordAct(this.dependencies, act, facts);
       },
     );
-  }
-
-  private recordAct(act: Act, facts: ActFacts): void {
-    try {
-      const { trace, contribution } = actTrace(act, facts);
-      this.dependencies.acts.act(trace, contribution);
-    } catch (error) {
-      this.dependencies.logger.warn(
-        { error, act, node_id: facts.node_id },
-        "Act trace failed.",
-      );
-    }
   }
 
   createMission(tx: Transaction, projectId: string, actor: HumanActor): void {

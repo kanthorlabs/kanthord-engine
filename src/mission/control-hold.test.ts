@@ -13,12 +13,11 @@ import {
   StartPoint,
   type RevokedExecution,
 } from "./contract.ts";
-import { Act, ActAttribute, type ActContribution } from "./act-telemetry.ts";
+import { Act, ActAttribute } from "./act-telemetry.ts";
 import { ControlError } from "./control.ts";
-import type { ServerTrace } from "../tracking/contract.ts";
 import { openAttempt, readAttempt, insertEvidence } from "./record-store.ts";
 import { setNodeState, insertNode, insertDependency } from "./store.ts";
-import { controlHarness, revokedExecution } from "./test-support.ts";
+import { actCalls, controlHarness, revokedExecution } from "./test-support.ts";
 
 const IDENTITY = testHumanIdentity("ulrich", "Ulrich", "token");
 const FIRST_ATTEMPT = 1;
@@ -441,12 +440,6 @@ test("pause refuses Blocked without a write or wakeup", async (t) => {
     false,
   );
 });
-
-function actCalls(h: ReturnType<typeof controlHarness>) {
-  return h.calls
-    .filter((call) => call.method === ACT)
-    .map((call) => call.arguments as [ServerTrace, ActContribution]);
-}
 
 for (const [operation, act, from, to, body] of [
   ["node.ready", Act.Ready, NodeState.Available, NodeState.Waiting, {}],

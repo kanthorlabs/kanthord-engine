@@ -28,6 +28,7 @@ import {
   stateConflict,
   transition,
   controlResult,
+  actedOn,
 } from "./control.ts";
 import { openAttempt } from "./record-store.ts";
 import { revisionFromRow } from "./revision.ts";
@@ -176,5 +177,12 @@ export function unblockNode(
       body.start_point ?? StartPoint.NodeBranch,
     );
   transition(tx, dependencies, mission, node, NodeState.Available, now);
-  return controlResult(tx, dependencies, nodeId, null, actor, now);
+  return actedOn(
+    mission,
+    node,
+    body.reason ?? null,
+    now,
+    controlResult(tx, dependencies, nodeId, null, actor, now),
+    null,
+  );
 }

@@ -21,8 +21,10 @@ const FACTS: ActFacts = {
   to: "Paused",
   reason: "Stop for review.",
   revoked: null,
+  evidence_id: null,
 };
 const NINE_ACTS = 9;
+const EVIDENCE_ID = "evidence_1";
 
 test("the acts are the closed set of nine operations", () => {
   assert.equal(Object.keys(Act).length, NINE_ACTS);
@@ -91,4 +93,21 @@ test("actTrace names no attempt before the first attempt opens", () => {
   });
   assert.equal(trace.attempt, null);
   assert.equal(ActAttribute.Attempt in contribution.attributes, false);
+});
+
+test("actTrace names no state before when the act creates the node", () => {
+  const { contribution } = actTrace(Act.ApproveProposal, {
+    ...FACTS,
+    from: null,
+  });
+  assert.equal(ActAttribute.StateFrom in contribution.attributes, false);
+  assert.equal(contribution.attributes[ActAttribute.StateTo], FACTS.to);
+});
+
+test("actTrace names the evidence of an evidence delete", () => {
+  const { contribution } = actTrace(Act.DeleteEvidence, {
+    ...FACTS,
+    evidence_id: EVIDENCE_ID,
+  });
+  assert.equal(contribution.attributes[ActAttribute.EvidenceId], EVIDENCE_ID);
 });
