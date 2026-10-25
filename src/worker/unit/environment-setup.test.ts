@@ -19,6 +19,13 @@ import {
   type SetupCheckout,
 } from "./environment-setup.ts";
 import { headCommit } from "./local-git.ts";
+import {
+  RecordKind,
+  SpanStatus,
+  type TelemetryRecord,
+} from "../../tracking/contract.ts";
+import { SpanOperation, SpanRecorder } from "./telemetry.ts";
+import { spanEnds } from "./test-support.ts";
 
 const env = hostEnvironment();
 const IDENTITY = [
@@ -35,7 +42,15 @@ const ONE_RUN = "run\n";
 const TWO_RUNS = "run\nrun\n";
 const MAGIC_PATH = ":lock";
 const MAGIC_TEXT = "{}";
+const ONE_SPAN = 1;
 const DIGEST = "d".repeat(64);
+const CLAIM = {
+  execution_id: "execution_01JZ8R2B3C4D5E6F7G8H9J0K1M",
+  node_id: "node_01JZ8Q0K4M6N8P0R2S4T6V8W0X",
+  attempt: 1,
+  trace_id: "a".repeat(32),
+  root_span_id: "1".repeat(16),
+};
 
 async function commit(directory: string, path: string, content: string) {
   writeFileSync(join(directory, path), content);
@@ -78,7 +93,12 @@ function stored(document: Record<string, unknown>): ExecutionEnvironment {
 }
 
 function input() {
-  return { env, context: background, deadline: Date.now() + 30000 };
+  return {
+    env,
+    context: background,
+    deadline: Date.now() + 30000,
+    spans: null,
+  };
 }
 
 async function prepared(checkout: SetupCheckout, root: string) {
@@ -354,4 +374,57 @@ test("a tracked change restores a path that reads as pathspec magic", async (t) 
   assert.ok(result.end === SetupEnd.Failed);
   assert.deepEqual(result.changed, [MAGIC_PATH]);
   assert.equal(readFileSync(join(checkout, MAGIC_PATH), "utf8"), MAGIC_TEXT);
+});
+
+function recorded() {
+  const records: TelemetryRecord[] = [];
+  const spans = new SpanRecorder(CLAIM, "coder-1", {
+    write: (batch) => records.push(...batch),
+    flush: async () => {},
+  });
+  return { records, spans };
+}
+
+test("a setup run with a recorder writes one setup span with its result", async (t) => {
+  const { checkout } = await repository(t, { file: "base" });
+  const { records, spans } = recorded();
+  const withSpans = { ...input(), spans };
+  const entries = await setupEntries(withSpans, [
+    setupCheckout(checkout, stored({ postCreateCommand: "true" })),
+  ]);
+  assert.deepEqual(await runSetup(withSpans, entries), { end: SetupEnd.Pass });
+  const ends = spanEnds(records, SpanOperation.Setup);
+  assert.equal(ends.length, ONE_SPAN);
+  assert.equal(ends[0]?.status, SpanStatus.Ok);
+  assert.deepEqual(ends[0]?.attributes, { "kanthord.setup.result": "pass" });
+  const starts = records.filter((record) => "start_time" in record);
+  assert.equal(
+    starts[0]?.kind === RecordKind.Span &&
+      starts[0].attributes?.["kanthord.setup.entry_count"],
+    ONE_SPAN,
+  );
+});
+
+test("a failed setup script writes a setup span with the result failed and the status Ok", async (t) => {
+  const { checkout } = await repository(t, { file: "base" });
+  const { records, spans } = recorded();
+  const withSpans = { ...input(), spans };
+  const entries = await setupEntries(withSpans, [
+    setupCheckout(checkout, stored({ postCreateCommand: "exit 1" })),
+  ]);
+  assert.equal((await runSetup(withSpans, entries)).end, SetupEnd.Failed);
+  const ends = spanEnds(records, SpanOperation.Setup);
+  assert.equal(ends.length, ONE_SPAN);
+  assert.equal(ends[0]?.status, SpanStatus.Ok);
+  assert.deepEqual(ends[0]?.attributes, { "kanthord.setup.result": "failed" });
+});
+
+test("a setup run with no recorder writes no span", async (t) => {
+  const { checkout } = await repository(t, { file: "base" });
+  const { records } = recorded();
+  const entries = await setupEntries(input(), [
+    setupCheckout(checkout, stored({ postCreateCommand: "true" })),
+  ]);
+  assert.deepEqual(await runSetup(input(), entries), { end: SetupEnd.Pass });
+  assert.deepEqual(records, []);
 });

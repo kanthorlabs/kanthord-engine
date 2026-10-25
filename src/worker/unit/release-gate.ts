@@ -4,6 +4,7 @@ import { isAbsolute, join, relative } from "node:path";
 import type { Context } from "../../kernel/context.ts";
 import { ensureDirectory } from "../../kernel/files.ts";
 import type { Revision, TaskContent } from "../../mission/contract.ts";
+import { SpanStatus } from "../../tracking/contract.ts";
 import { refreshAtRelease, RefreshResult } from "./base-refresh.ts";
 import { verificationCommands } from "./evaluation-input.ts";
 import { taskRevisionInstruction } from "./judgement.ts";
@@ -25,11 +26,14 @@ import {
 } from "./verification.ts";
 import { verificationFactsOf } from "./progress-rule.ts";
 import { CHECKOUTS_DIRECTORY, RELEASE_DIRECTORY } from "./workspace.ts";
+import { SpanOperation } from "./telemetry.ts";
 import { SetupEnd, setUpHeads, type SetupEntry } from "./environment-setup.ts";
 
 const EXIT_SUCCESS = 0;
 const NOT_FOUND = -1;
 const PARENT = "..";
+const RELEASE_GATE_RESULT = "kanthord.release_gate.result";
+const RELEASE_GATE_UNIT_ID = "kanthord.release_gate.unit_id";
 
 export const ReleaseGateKind = {
   Passed: "passed",
@@ -65,7 +69,27 @@ export function commandOwners(
   ];
 }
 
-export async function releaseGate(state: StepsState): Promise<ReleaseGate> {
+export function releaseGate(state: StepsState): Promise<ReleaseGate> {
+  const spans = state.run.spans;
+  return spans.within(
+    {
+      key: spans.key(SpanOperation.ReleaseGate),
+      operation: SpanOperation.ReleaseGate,
+    },
+    () => gateRelease(state),
+    (gate) => ({
+      status: SpanStatus.Ok,
+      attributes: {
+        [RELEASE_GATE_RESULT]: gate.kind,
+        ...(gate.kind === ReleaseGateKind.Routed
+          ? { [RELEASE_GATE_UNIT_ID]: gate.unit.id }
+          : {}),
+      },
+    }),
+  );
+}
+
+async function gateRelease(state: StepsState): Promise<ReleaseGate> {
   if ((await refreshAtRelease(state)) === RefreshResult.BudgetEnd)
     return { kind: ReleaseGateKind.BudgetEnd };
   const commands = verificationCommands(state.revision);
@@ -143,6 +167,7 @@ async function setUpReleaseClones(
       env: state.input.env,
       context: state.run.operationContext,
       deadline: state.agent.budget.wallDeadline(),
+      spans: state.run.spans,
       exhausted: () => state.agent.budget.exhausted(),
     },
     clones,
