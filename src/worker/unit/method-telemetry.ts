@@ -17,6 +17,7 @@ import type { ExecutionEnvironment } from "../contract.ts";
 import { CodedError, diagnostic, diagnosticRows } from "../../kernel/errors.ts";
 import { markGitStep, type GitStep } from "./git-step.ts";
 import { noProgressAttributes } from "./progress-rule.ts";
+import type { EvaluationFacts } from "./rework-cause.ts";
 
 const SUCCESS = 0;
 const NO_LENGTH = 0;
@@ -170,15 +171,35 @@ export function evaluationSpan(
   };
 }
 
+export const EvaluationAttribute = {
+  Result: "kanthord.evaluation.result",
+  Stage: "kanthord.evaluation.stage",
+  UnmetIds: "kanthord.evaluation.unmet_ids",
+  UnmetGrounds: "kanthord.evaluation.unmet_grounds",
+  ProposalCount: "kanthord.evaluation.proposal_count",
+  Repaired: "kanthord.judgement.repaired",
+} as const;
+
 export function evaluationEnd(judgement: {
   result: string;
   rationale: string;
+  facts: EvaluationFacts;
 }): SpanEnd {
   assert.ok(judgement.result);
   assert.ok(judgement.rationale);
+  const { facts } = judgement;
   return {
     status: SpanStatus.Ok,
-    attributes: { "kanthord.evaluation.result": judgement.result },
+    attributes: {
+      [EvaluationAttribute.Result]: judgement.result,
+      [EvaluationAttribute.Stage]: facts.stage,
+      [EvaluationAttribute.UnmetIds]: facts.unmet_ids,
+      [EvaluationAttribute.UnmetGrounds]: facts.unmet_grounds,
+      [EvaluationAttribute.ProposalCount]: facts.proposal_count,
+      ...(facts.repaired === null
+        ? {}
+        : { [EvaluationAttribute.Repaired]: facts.repaired }),
+    },
     texts: { rationale: judgement.rationale },
   };
 }

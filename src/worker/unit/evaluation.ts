@@ -36,7 +36,13 @@ import {
   failedVerificationReport,
   parseRepaired,
   ReplyRepair,
+  type UnmetGround,
 } from "./judgement.ts";
+import {
+  EvaluationStage,
+  reworkCauseOf,
+  type EvaluationFacts,
+} from "./rework-cause.ts";
 import { renderWorkPrompt } from "../../agent/prompt-composer.ts";
 import type { StepsInput } from "./steps-implement.ts";
 import {
@@ -52,6 +58,8 @@ import {
   environmentDigestsOf,
   verificationObserver,
 } from "./method-telemetry.ts";
+
+export { EvaluationStage };
 
 export const ACCEPTED_ITEM_KINDS: readonly ActionResultKind[] = [
   ActionResultKind.Submitted,
@@ -71,6 +79,23 @@ const NO_ITEMS = 0;
 const VERIFICATION_RERUNS = 2;
 export const VERIFICATION_SUBJECT = "Evaluation verification results";
 type OpenAgent = (directory: string) => Promise<NativeAgent>;
+
+function factsOf(
+  stage: EvaluationStage,
+  verificationRun: VerificationRun,
+  unmet: readonly { id: string; ground: UnmetGround }[] = [],
+  proposalCount = NO_ITEMS,
+  repaired: boolean | null = null,
+): EvaluationFacts {
+  return {
+    stage,
+    unmet_ids: unmet.map((item) => item.id),
+    unmet_grounds: unmet.map((item) => item.ground),
+    proposal_count: proposalCount,
+    repaired,
+    verification_class: verificationRun.outcome,
+  };
+}
 
 async function judge(
   input: StepsInput,
@@ -93,12 +118,17 @@ async function judge(
     infrastructureStop(verificationRun) ?? environmentStop(verificationRun);
   if (stop) throw stop;
   const setupAssessment = setupFailureAssessment(setupFailure);
-  if (setupAssessment) return setupAssessment;
+  if (setupAssessment)
+    return {
+      ...setupAssessment,
+      facts: factsOf(EvaluationStage.Setup, verificationRun),
+    };
   if (!verificationPassed(verification, commands))
     return {
       result: AssessmentResult.CriterionNotMet,
       rationale: failedVerificationReport(verificationRun, commands),
       proposals: [],
+      facts: factsOf(EvaluationStage.Verification, verificationRun),
     };
   const agent = await openAgent(directory);
   if (agent.budget.exhausted()) return run.stop(EndReason.AssessmentAbsent);
@@ -119,7 +149,7 @@ async function judge(
     }),
   );
   if (agent.budget.exhausted()) return run.stop(EndReason.AssessmentAbsent);
-  const judgement = await parseRepaired(
+  const { reply: judgement, repaired } = await parseRepaired(
     input.setup.templates,
     agent,
     work,
@@ -141,6 +171,13 @@ async function judge(
         : judgement.result,
     rationale: judgementRationale(judgement),
     proposals,
+    facts: factsOf(
+      EvaluationStage.Judgement,
+      verificationRun,
+      judgement.unmet,
+      proposals.length,
+      repaired,
+    ),
   };
 }
 
@@ -239,7 +276,10 @@ async function evaluate(
     evidence_ids: [recorded.id, ...prepared.evidenceIds],
     dependency_outcome_ids:
       dependencies?.outcomes.map((outcome) => outcome.id) ?? [],
-    ...judgement,
+    result: judgement.result,
+    rationale: judgement.rationale,
+    proposals: judgement.proposals,
+    facts: judgement.facts,
   };
 }
 
@@ -264,8 +304,15 @@ export async function runEvaluation(
       evaluationEnd,
     );
     const answer = await run.submitAssessment(input.claim.node_id, {
-      ...assessment,
+      evidence_ids: assessment.evidence_ids,
+      dependency_outcome_ids: assessment.dependency_outcome_ids,
+      result: assessment.result,
+      rationale: assessment.rationale,
+      proposals: assessment.proposals,
       tested_input: prepared.tested_input,
+      ...(assessment.result === AssessmentResult.CriterionNotMet
+        ? { cause: reworkCauseOf(assessment.facts) }
+        : {}),
     });
     if (answer.outcome)
       return { kind: ExecutionEndKind.Closed, outcomeId: answer.outcome.id };
