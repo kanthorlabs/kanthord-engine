@@ -157,7 +157,7 @@ export function overrideNode(
     now,
   );
   transition(tx, dependencies, mission, node, NodeState.Completed, now);
-  return actedOn(
+  const acted = actedOn(
     tx,
     mission,
     node,
@@ -166,6 +166,10 @@ export function overrideNode(
     controlResult(tx, dependencies, nodeId, outcome, actor, now),
     claim?.execution.trace ?? null,
   );
+  const firstQueuedAt = dependencies.workQueue.firstQueuedAt(tx, nodeId);
+  if (acted.result.node.state !== NodeState.Completed || firstQueuedAt === null)
+    return acted;
+  return { ...acted, act: { ...acted.act, lead_time_ms: now - firstQueuedAt } };
 }
 const DISCARD_STATES = [
   NodeState.Pending,

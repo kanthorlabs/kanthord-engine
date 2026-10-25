@@ -354,6 +354,10 @@ export function missionHarness(
       insert: (...args) => record("workQueue.insert", args),
       delete: (...args) => record("workQueue.delete", args),
       priorityUpdate: (...args) => record("workQueue.priorityUpdate", args),
+      firstQueuedAt: (...args) => {
+        record("workQueue.firstQueuedAt", args);
+        return null;
+      },
     },
     schedulerClaims: {
       revoke: (...args) => {

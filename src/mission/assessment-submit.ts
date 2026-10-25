@@ -129,7 +129,13 @@ export function submitAssessment(
       now,
     );
     if (revoked !== null)
-      revoked.transition = nodeTransition(tx, node.id, node.state, null);
+      revoked.transition = nodeTransition(
+        tx,
+        dependencies.workQueue,
+        node.id,
+        node.state,
+        null,
+      );
   } else if (
     current &&
     (body.result !== AssessmentResult.Success ||
@@ -181,7 +187,13 @@ export function submitAssessment(
       now,
     );
     if (revoked !== null)
-      revoked.transition = nodeTransition(tx, node.id, node.state, limited);
+      revoked.transition = nodeTransition(
+        tx,
+        dependencies.workQueue,
+        node.id,
+        node.state,
+        limited,
+      );
   }
   assert.equal(assessment.node_id, node.id);
   assert.equal(assessment.execution_id, claim.executionId);

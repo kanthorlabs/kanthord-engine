@@ -226,6 +226,17 @@ export function readNode(tx: Transaction, nodeId: string): NodeRow | null {
   );
 }
 
+export function countDependencies(tx: Transaction, nodeId: string): number {
+  const row = tx.database
+    .prepare(
+      `SELECT COUNT(*) AS total FROM mission_dependency d
+       JOIN mission_node target ON target.id = d.depends_on_id
+       WHERE d.dependent_id = ? AND target.retired_at IS NULL`,
+    )
+    .get(nodeId) as { total: number };
+  return row.total;
+}
+
 export function readMissionNodes(
   tx: Transaction,
   missionId: string,

@@ -230,6 +230,7 @@ export async function removeEvidence(
       reason: body.reason ?? null,
       revoked,
       evidence_id: evidenceId,
+      lead_time_ms: null,
     };
     return null;
   });

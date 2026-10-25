@@ -377,6 +377,7 @@ export interface WorkerBindings {
     resource_budget?: { wall_time_ms: number } | null;
     tags: readonly string[];
     environment: string | null;
+    placement: string | null;
     tombstone: boolean;
   } | null;
   workerBindingsOf(
@@ -396,6 +397,10 @@ export interface ClaimFacts {
 }
 export interface MissionClaimFacts {
   claimFacts(tx: Transaction, nodeId: string): ClaimFacts | null;
+  openingFacts(
+    tx: Transaction,
+    nodeId: string,
+  ): { dependency_count: number; revision_turn: boolean } | null;
   claimFactsOf(
     tx: Transaction,
     projectId: string,
@@ -505,6 +510,7 @@ export interface WorkQueue {
   ): void;
   delete(tx: Transaction, nodeId: string): void;
   priorityUpdate(tx: Transaction, nodeId: string, priority: number): void;
+  firstQueuedAt(tx: Transaction, nodeId: string): number | null;
 }
 
 export const jobSchema = z.strictObject({
