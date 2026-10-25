@@ -17,6 +17,8 @@ import {
 } from "./contract.ts";
 import { insertExecution, readExecution } from "./execution-store.ts";
 import { schedulerHarness, executionFixture } from "./test-support.ts";
+import { ExecutionEnd } from "../tracking/contract.ts";
+import { executionTrace } from "./telemetry.ts";
 import { DEFAULT_STOP_BACKOFF_SECONDS } from "./config.ts";
 
 const NO_COMMITS = 0;
@@ -104,6 +106,47 @@ function harness(t: TestContext) {
     enqueue,
     commits: () => commits,
   };
+}
+
+for (const [name, sameRuntime] of [
+  ["the runtime", true],
+  ["a queued node", false],
+] as const) {
+  test(`a pull that settles an expired execution of ${name} inline writes one lost end after its commit`, async (t) => {
+    const h = harness(t);
+    const expired = executionFixture({
+      node_id: h.row.node_id,
+      runtime_identity: sameRuntime
+        ? h.row.runtime_identity
+        : createIdentity("worker_registration"),
+      created_at: Date.now() - TWO_CHECKS,
+      expired_at: Date.now() - ONE_COMMIT,
+    });
+    h.store.transaction((tx) => insertExecution(tx, expired));
+    if (!sameRuntime) h.enqueue();
+    const result = await h.pull();
+    assert.equal(result.kind, WorkPullKind.NoWork);
+    const ended = h.store.transaction((tx) =>
+      readExecution(tx, expired.execution_id),
+    )?.ended_at;
+    assert.ok(ended);
+    assert.deepEqual(h.telemetry, [
+      {
+        method: "executionEnded",
+        arguments: [
+          {
+            trace: executionTrace(expired),
+            ended_at: ended,
+            end: ExecutionEnd.Lost,
+            revoke_cause: null,
+            stop: null,
+          },
+        ],
+      },
+    ]);
+    h.service.sweep();
+    assert.equal(h.telemetry.length, ONE_REPORT);
+  });
 }
 
 test("pull rolls back its probe, rechecks health, and commits exactly one claim", async (t) => {

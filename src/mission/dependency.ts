@@ -13,8 +13,9 @@ import {
   type WorkQueue,
   type MissionBindings,
   type SchedulerClaims,
+  type ExecutionEnds,
 } from "./contract.ts";
-import { stateConflict } from "./control.ts";
+import { settleClaim, stateConflict } from "./control.ts";
 import { requireNode } from "./node-read.ts";
 import { readOpenAttempt, readRequests } from "./record-store.ts";
 import { claimableMap, reconcileMission, routeMission } from "./routing.ts";
@@ -138,6 +139,7 @@ export function addDependency(
   textMaxBytes: number,
   bindings: MissionBindings,
   schedulerClaims: SchedulerClaims,
+  ends: ExecutionEnds,
 ): NodeChange {
   const node = requireNode(tx, nodeId);
   const target = requireNode(tx, dependsOnId);
@@ -151,7 +153,7 @@ export function addDependency(
   validateEndpoints(node, target);
   requireNonterminal(node);
   if (dependencyEditGuarded(tx, node, true)) stateConflict(node);
-  requireNoLiveClaim(tx, nodeId, schedulerClaims, Date.now());
+  requireNoLiveClaim(tx, nodeId, schedulerClaims, Date.now(), ends);
   validateText(REASON_FIELD, body.reason, textMaxBytes);
   if (hasDependency(tx, nodeId, dependsOnId))
     return emptyChange(mission.version);
@@ -165,8 +167,9 @@ export function requireNoLiveClaim(
   nodeId: string,
   claims: SchedulerClaims,
   now: number,
+  ends: ExecutionEnds,
 ): void {
-  claims.settle(tx, nodeId, now);
+  settleClaim(tx, claims, nodeId, now, ends);
   const live = claims.liveExecutionOf(tx, nodeId, now);
   if (live !== null)
     throw new OperationError(

@@ -803,6 +803,8 @@ export function composeServices(options: {
     workQueue,
     schedulerClaims: {
       revoke: (...args) => scheduler.revoke(...args),
+      executionRevoked: (...args) => scheduler.executionRevoked(...args),
+      executionsLost: (...args) => scheduler.executionsLost(...args),
       settle: (...args) => scheduler.settle(...args),
       liveExecutionOf: (...args) => scheduler.liveExecutionOf(...args),
     },

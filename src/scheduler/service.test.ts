@@ -20,7 +20,10 @@ import {
   schedulerHarness,
   executionFixture,
   FIXTURE_DEADLINE,
+  FIXTURE_NOW,
 } from "./test-support.ts";
+import { ExecutionEnd, RevokeCause } from "../tracking/contract.ts";
+import { executionTrace } from "./telemetry.ts";
 import { insertExecution, readExecution } from "./execution-store.ts";
 
 const EXECUTION_ENDED = "executionEnded";
@@ -485,6 +488,96 @@ test("run owns the 30-second loss sweep and quiescence stops it permanently", as
       .get()!.count,
     LIST_PAGE_LIMIT,
   );
+});
+
+test("a revocation writes one root end after the commit and a rolled back revocation writes none", (t) => {
+  const h = schedulerHarness(t);
+  const row = executionFixture();
+  const rollback = new Error("rollback");
+  h.store.transaction((tx) => insertExecution(tx, row));
+  assert.throws(
+    () =>
+      h.store.transaction((tx) => {
+        h.service.revoke(tx, row.node_id, FIXTURE_NOW);
+        throw rollback;
+      }),
+    rollback,
+  );
+  assert.equal(
+    h.store.transaction((tx) => readExecution(tx, row.execution_id))?.ended_at,
+    null,
+  );
+  assert.deepEqual(h.telemetry, []);
+  const revoked = h.store.transaction((tx) =>
+    h.service.revoke(tx, row.node_id, FIXTURE_NOW),
+  );
+  assert.ok(revoked);
+  assert.deepEqual(h.telemetry, []);
+  h.service.executionRevoked(revoked, RevokeCause.Human);
+  assert.deepEqual(h.telemetry, [
+    {
+      method: EXECUTION_ENDED,
+      arguments: [
+        {
+          trace: executionTrace(row),
+          ended_at: FIXTURE_NOW,
+          end: ExecutionEnd.Revoked,
+          revoke_cause: RevokeCause.Human,
+          stop: null,
+        },
+      ],
+    },
+  ]);
+});
+
+test("settle answers each execution that it ends with its trace and writes no end itself", (t) => {
+  const h = schedulerHarness(t);
+  const row = executionFixture();
+  h.store.transaction((tx) => insertExecution(tx, row));
+  assert.deepEqual(
+    h.store.transaction((tx) => h.service.settle(tx, row.node_id, FIXTURE_NOW)),
+    [],
+  );
+  const lost = h.store.transaction((tx) =>
+    h.service.settle(tx, row.node_id, FIXTURE_DEADLINE),
+  );
+  assert.deepEqual(lost, [
+    {
+      execution_id: row.execution_id,
+      trace: executionTrace(row),
+      ended_at: FIXTURE_DEADLINE,
+    },
+  ]);
+  assert.deepEqual(h.telemetry, []);
+  h.service.executionsLost(lost);
+  assert.deepEqual(h.telemetry, [
+    {
+      method: EXECUTION_ENDED,
+      arguments: [
+        {
+          trace: executionTrace(row),
+          ended_at: FIXTURE_DEADLINE,
+          end: ExecutionEnd.Lost,
+          revoke_cause: null,
+          stop: null,
+        },
+      ],
+    },
+  ]);
+});
+
+test("a sweep after an inline settlement writes no second end", (t) => {
+  const h = schedulerHarness(t);
+  const row = executionFixture();
+  h.store.transaction((tx) => insertExecution(tx, row));
+  t.mock.method(Date, "now", () => FIXTURE_DEADLINE);
+  h.service.executionsLost(
+    h.store.transaction((tx) =>
+      h.service.settle(tx, row.node_id, FIXTURE_DEADLINE),
+    ),
+  );
+  h.service.sweep();
+  assert.equal(h.telemetry.length, ONE_ROW);
 });
 
 test("sweep hands consecutive loss counts to Mission once per steps and evaluation row", (t) => {

@@ -109,9 +109,43 @@ export interface MissionCollaborations {
   claimFactsOf(tx: Transaction, projectId: string): ClaimFactsRow[];
 }
 
+export const RevokeCause = {
+  Assessment: "assessment",
+  Human: "human",
+} as const;
+export const revokeCauseSchema = z.enum(RevokeCause);
+export type RevokeCause = z.infer<typeof revokeCauseSchema>;
+
+export interface EndedExecution {
+  execution_id: string;
+  trace: {
+    execution_id: string;
+    project_id: string;
+    node_id: string;
+    attempt: number;
+    trace_id: string;
+    root_span_id: string;
+  };
+  ended_at: number;
+}
+
+export type RevokedExecution = EndedExecution;
+
+export interface RevokedClaim {
+  execution: RevokedExecution;
+  cause: RevokeCause;
+}
+
+export interface ExecutionEnds {
+  lost: EndedExecution[];
+  revoked: RevokedClaim[];
+}
+
 export interface SchedulerClaims {
-  revoke(tx: Transaction, nodeId: string, now: number): string | null;
-  settle(tx: Transaction, nodeId: string, now: number): void;
+  revoke(tx: Transaction, nodeId: string, now: number): RevokedExecution | null;
+  executionRevoked(execution: RevokedExecution, cause: RevokeCause): void;
+  executionsLost(lost: readonly EndedExecution[]): void;
+  settle(tx: Transaction, nodeId: string, now: number): EndedExecution[];
   liveExecutionOf(
     tx: Transaction,
     nodeId: string,

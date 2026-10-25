@@ -23,8 +23,12 @@ import {
 } from "../kernel/service.ts";
 import type { Store, Transaction } from "../kernel/store.ts";
 import type { SchedulerConfig } from "./config.ts";
-import { ExecutionEnd, type ExecutionTelemetry } from "../tracking/contract.ts";
-import { executionTrace } from "./telemetry.ts";
+import {
+  ExecutionEnd,
+  type ExecutionTelemetry,
+  type RevokeCause,
+} from "../tracking/contract.ts";
+import { reportLost } from "./telemetry.ts";
 import * as settlement from "./settlement.ts";
 import {
   nodeBranchOfExecution,
@@ -56,6 +60,8 @@ import {
   type WorkerBindings,
   type EnvironmentGate,
   type MissionClaimFacts,
+  type EndedExecution,
+  type RevokedExecution,
   type TraceIdentity,
   type UnmatchedClaim,
 } from "./contract.ts";
@@ -176,8 +182,12 @@ export class SchedulerService implements Service, WorkQueue {
     );
   }
 
-  settle(tx: Transaction, nodeId: string, now: number): void {
-    settlement.settleNode(tx, this.dependencies, nodeId, now);
+  settle(tx: Transaction, nodeId: string, now: number): EndedExecution[] {
+    const lost = settlement.settleNode(tx, this.dependencies, nodeId, now);
+    return lost === null ? [] : [lost];
+  }
+  executionsLost(lost: readonly EndedExecution[]): void {
+    reportLost(this.dependencies.telemetry, lost);
   }
   pinCredential(
     tx: Transaction,
@@ -219,8 +229,21 @@ export class SchedulerService implements Service, WorkQueue {
       };
     });
   }
-  revoke(tx: Transaction, nodeId: string, now: number): string | null {
+  revoke(
+    tx: Transaction,
+    nodeId: string,
+    now: number,
+  ): RevokedExecution | null {
     return settlement.revoke(tx, nodeId, now);
+  }
+  executionRevoked(execution: RevokedExecution, cause: RevokeCause): void {
+    this.dependencies.telemetry.executionEnded({
+      trace: execution.trace,
+      ended_at: execution.ended_at,
+      end: ExecutionEnd.Revoked,
+      revoke_cause: cause,
+      stop: null,
+    });
   }
   liveExecutionOf(tx: Transaction, nodeId: string, now: number) {
     return settlement.liveExecutionOf(tx, nodeId, now);
@@ -483,17 +506,11 @@ export class SchedulerService implements Service, WorkQueue {
         const now = Date.now();
         const row = readExecution(tx, identities[index]!);
         if (!row || row.ended_at !== null || now < row.expired_at) return null;
-        settlement.declareLoss(tx, this.dependencies, row, now);
-        return { row, now };
+        return settlement.declareLoss(tx, this.dependencies, row, now);
       });
       if (lost === null) continue;
-      this.dependencies.telemetry.executionEnded({
-        trace: executionTrace(lost.row),
-        ended_at: lost.now,
-        end: ExecutionEnd.Lost,
-        stop: null,
-      });
-      this.wake(lost.row.project_id);
+      this.executionsLost([lost]);
+      this.wake(lost.trace.project_id);
     }
     const projects = this.waiting.projectIds();
     for (let index = 0; index < projects.length; index++)

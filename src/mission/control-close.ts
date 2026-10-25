@@ -14,7 +14,9 @@ import {
   type RepositoryAddress,
   type HumanAct,
   type HumanActor,
+  RevokeCause,
   type Mission,
+  type ExecutionEnds,
 } from "./contract.ts";
 import type { Dependencies } from "./service.ts";
 import type { NodeRow } from "./store.ts";
@@ -103,6 +105,7 @@ export function overrideNode(
   body: Override,
   actor: HumanActor,
   now: number,
+  ends: ExecutionEnds,
 ) {
   const { node, mission } = admitControl(
     tx,
@@ -111,9 +114,10 @@ export function overrideNode(
     body,
     OVERRIDE_STATES,
     now,
+    ends,
   );
   requireNoUnresolvedAction(tx, node);
-  endLiveClaim(tx, dependencies, node, now);
+  endLiveClaim(tx, dependencies, node, now, RevokeCause.Human, ends);
   assert.ok(node.attempt !== null);
   const evidenceIds =
     node.attempt === NO_ATTEMPT
@@ -197,6 +201,7 @@ export function blockNode(
   body: HumanAct,
   actor: HumanActor,
   now: number,
+  ends: ExecutionEnds,
 ) {
   const { node, mission } = admitControl(
     tx,
@@ -205,6 +210,7 @@ export function blockNode(
     body,
     [NodeState.Paused],
     now,
+    ends,
   );
   return closeHuman(
     tx,
@@ -225,6 +231,7 @@ export function discardNode(
   body: HumanAct,
   actor: HumanActor,
   now: number,
+  ends: ExecutionEnds,
 ) {
   const { node, mission } = admitControl(
     tx,
@@ -233,9 +240,10 @@ export function discardNode(
     body,
     DISCARD_STATES,
     now,
+    ends,
   );
   requireNoUnresolvedAction(tx, node);
-  endLiveClaim(tx, dependencies, node, now);
+  endLiveClaim(tx, dependencies, node, now, RevokeCause.Human, ends);
   return closeHuman(
     tx,
     dependencies,

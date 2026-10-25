@@ -25,6 +25,7 @@ import {
   PlatformAddressKind,
   RepositoryAction,
   type PlatformAddress,
+  type RevokedExecution,
 } from "./contract.ts";
 import {
   insertDependency,
@@ -64,6 +65,34 @@ export function databaseSnapshot(store: Store): Record<string, unknown[]> {
       store.database.prepare(`SELECT * FROM "${name}" ORDER BY rowid`).all(),
     ]),
   );
+}
+
+export function revokedExecution(
+  executionId: string,
+  nodeId: string,
+  endedAt: number,
+): RevokedExecution {
+  return {
+    execution_id: executionId,
+    trace: {
+      execution_id: executionId,
+      project_id: createIdentity("project"),
+      node_id: nodeId,
+      attempt: FIRST_REVISION,
+      trace_id: "a".repeat(32),
+      root_span_id: "b".repeat(16),
+    },
+    ended_at: endedAt,
+  };
+}
+
+export function settlesExpired(
+  dependencies: Dependencies,
+  executionId: string,
+): void {
+  dependencies.schedulerClaims.settle = (_tx, nodeId, now) => [
+    revokedExecution(executionId, nodeId, now),
+  ];
 }
 
 export function unexpectedCollaboration(): never {
@@ -308,7 +337,14 @@ export function missionHarness(
         record("schedulerClaims.revoke", args);
         return null;
       },
-      settle: (...args) => record("schedulerClaims.settle", args),
+      executionRevoked: (...args) =>
+        record("schedulerClaims.executionRevoked", args),
+      executionsLost: (...args) =>
+        record("schedulerClaims.executionsLost", args),
+      settle: (...args) => {
+        record("schedulerClaims.settle", args);
+        return [];
+      },
       liveExecutionOf: (...args) => {
         record("schedulerClaims.liveExecutionOf", args);
         return null;

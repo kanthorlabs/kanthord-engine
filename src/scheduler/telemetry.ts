@@ -1,5 +1,24 @@
 import assert from "node:assert/strict";
-import type { ExecutionTrace } from "../tracking/contract.ts";
+import {
+  ExecutionEnd,
+  type ExecutionTelemetry,
+  type ExecutionTrace,
+} from "../tracking/contract.ts";
+import type { EndedExecution } from "./contract.ts";
+
+export function reportLost(
+  telemetry: ExecutionTelemetry,
+  lost: readonly EndedExecution[],
+): void {
+  for (const execution of lost)
+    telemetry.executionEnded({
+      trace: execution.trace,
+      ended_at: execution.ended_at,
+      end: ExecutionEnd.Lost,
+      revoke_cause: null,
+      stop: null,
+    });
+}
 
 export function executionTrace(row: {
   execution_id: string;

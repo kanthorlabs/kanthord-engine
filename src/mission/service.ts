@@ -50,7 +50,9 @@ import {
   type EventDecoder,
   type Intent,
   type ImportPreview,
+  type ExecutionEnds,
 } from "./contract.ts";
+import { executionEnds, reportEnds } from "./control.ts";
 import { addDependency, removeDependency } from "./dependency.ts";
 import { pauseNode, readyNode, resumeNode } from "./control-hold.ts";
 import { blockNode, discardNode, overrideNode } from "./control-close.ts";
@@ -352,6 +354,7 @@ export class MissionService
       ({ params, body }, caller) => {
         const claim = caller.execution;
         assert.ok(claim);
+        const ends = executionEnds();
         const result = caller.commit((tx) =>
           submitAssessment(
             tx,
@@ -360,8 +363,10 @@ export class MissionService
             params.node_id,
             body,
             Date.now(),
+            ends,
           ),
         );
+        reportEnds(this.dependencies, ends);
         this.dependencies.wakeup.wake(claim.projectId);
         return result;
       },
@@ -501,23 +506,27 @@ export class MissionService
     registry.register(
       missionOperations["proposal.approve"],
       ({ params, body }, caller) =>
-        this.commitGraph(caller, { proposal_id: params.proposal_id }, (tx) =>
-          this.covered(tx, { proposal_id: params.proposal_id }, (tx) =>
-            approveProposal(
-              tx,
-              this.dependencies,
-              params.proposal_id,
-              body,
-              humanActor(caller),
-              Date.now(),
+        this.commitGraph(
+          caller,
+          { proposal_id: params.proposal_id },
+          (tx, ends) =>
+            this.covered(tx, { proposal_id: params.proposal_id }, (tx) =>
+              approveProposal(
+                tx,
+                this.dependencies,
+                params.proposal_id,
+                body,
+                humanActor(caller),
+                Date.now(),
+                ends,
+              ),
             ),
-          ),
         ),
     );
     registry.register(
       missionOperations["node.unblock"],
       ({ params, body }, caller) =>
-        this.commitGraph(caller, { node_id: params.node_id }, (tx) =>
+        this.commitGraph(caller, { node_id: params.node_id }, (tx, ends) =>
           this.covered(tx, { node_id: params.node_id }, (tx) =>
             unblockNode(
               tx,
@@ -526,6 +535,7 @@ export class MissionService
               body,
               humanActor(caller),
               Date.now(),
+              ends,
             ),
           ),
         ),
@@ -533,7 +543,7 @@ export class MissionService
     registry.register(
       missionOperations["node.override"],
       ({ params, body }, caller) =>
-        this.commitGraph(caller, { node_id: params.node_id }, (tx) =>
+        this.commitGraph(caller, { node_id: params.node_id }, (tx, ends) =>
           overrideNode(
             tx,
             this.dependencies,
@@ -541,13 +551,14 @@ export class MissionService
             body,
             humanActor(caller),
             Date.now(),
+            ends,
           ),
         ),
     );
     registry.register(
       missionOperations["node.block"],
       ({ params, body }, caller) =>
-        this.commitGraph(caller, { node_id: params.node_id }, (tx) =>
+        this.commitGraph(caller, { node_id: params.node_id }, (tx, ends) =>
           blockNode(
             tx,
             this.dependencies,
@@ -555,13 +566,14 @@ export class MissionService
             body,
             humanActor(caller),
             Date.now(),
+            ends,
           ),
         ),
     );
     registry.register(
       missionOperations["node.discard"],
       ({ params, body }, caller) =>
-        this.commitGraph(caller, { node_id: params.node_id }, (tx) =>
+        this.commitGraph(caller, { node_id: params.node_id }, (tx, ends) =>
           discardNode(
             tx,
             this.dependencies,
@@ -569,13 +581,14 @@ export class MissionService
             body,
             humanActor(caller),
             Date.now(),
+            ends,
           ),
         ),
     );
     registry.register(
       missionOperations["node.ready"],
       ({ params, body }, caller) =>
-        this.commitGraph(caller, { node_id: params.node_id }, (tx) =>
+        this.commitGraph(caller, { node_id: params.node_id }, (tx, ends) =>
           readyNode(
             tx,
             this.dependencies,
@@ -583,13 +596,14 @@ export class MissionService
             body,
             humanActor(caller),
             Date.now(),
+            ends,
           ),
         ),
     );
     registry.register(
       missionOperations["node.resume"],
       ({ params, body }, caller) =>
-        this.commitGraph(caller, { node_id: params.node_id }, (tx) =>
+        this.commitGraph(caller, { node_id: params.node_id }, (tx, ends) =>
           resumeNode(
             tx,
             this.dependencies,
@@ -597,13 +611,14 @@ export class MissionService
             body,
             humanActor(caller),
             Date.now(),
+            ends,
           ),
         ),
     );
     registry.register(
       missionOperations["node.pause"],
       ({ params, body }, caller) =>
-        this.commitGraph(caller, { node_id: params.node_id }, (tx) =>
+        this.commitGraph(caller, { node_id: params.node_id }, (tx, ends) =>
           pauseNode(
             tx,
             this.dependencies,
@@ -611,6 +626,7 @@ export class MissionService
             body,
             humanActor(caller),
             Date.now(),
+            ends,
           ),
         ),
     );
@@ -627,20 +643,24 @@ export class MissionService
     registry.register(
       missionOperations["import.apply"],
       ({ params, body }, caller) =>
-        this.commitGraph(caller, { mission_id: params.mission_id }, (tx) =>
-          this.covered(tx, { mission_id: params.mission_id }, (tx) =>
-            applyImport(
-              tx,
-              params.mission_id,
-              body,
-              humanActor(caller),
-              this.dependencies.bindings,
-              this.dependencies.environments,
-              this.dependencies.workQueue,
-              this.dependencies.config.text_max_bytes,
-              this.dependencies.schedulerClaims,
+        this.commitGraph(
+          caller,
+          { mission_id: params.mission_id },
+          (tx, ends) =>
+            this.covered(tx, { mission_id: params.mission_id }, (tx) =>
+              applyImport(
+                tx,
+                params.mission_id,
+                body,
+                humanActor(caller),
+                this.dependencies.bindings,
+                this.dependencies.environments,
+                this.dependencies.workQueue,
+                this.dependencies.config.text_max_bytes,
+                this.dependencies.schedulerClaims,
+                ends,
+              ),
             ),
-          ),
         ),
     );
     registry.register(
@@ -706,7 +726,7 @@ export class MissionService
     registry.register(
       missionOperations["dependency.add"],
       ({ params, body }, caller) =>
-        this.commitGraph(caller, { node_id: params.node_id }, (tx) =>
+        this.commitGraph(caller, { node_id: params.node_id }, (tx, ends) =>
           addDependency(
             tx,
             params.node_id,
@@ -716,6 +736,7 @@ export class MissionService
             this.dependencies.config.text_max_bytes,
             this.dependencies.bindings,
             this.dependencies.schedulerClaims,
+            ends,
           ),
         ),
     );
@@ -921,15 +942,17 @@ export class MissionService
   private commitGraph<T>(
     caller: CallerContext,
     scope: WriteScope,
-    write: (tx: Transaction) => T,
+    write: (tx: Transaction, ends: ExecutionEnds) => T,
   ): T {
     let projectId: string | null = null;
+    const ends = executionEnds();
     const result = caller.commit((tx) => {
-      const result = write(tx);
+      const result = write(tx, ends);
       projectId = projectOf(tx, scope);
       return result;
     });
     assert.ok(projectId);
+    reportEnds(this.dependencies, ends);
     this.dependencies.wakeup.wake(projectId);
     return result;
   }

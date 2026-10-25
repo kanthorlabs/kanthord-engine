@@ -13,7 +13,7 @@ import {
   setNodeState,
   readCurrentRevision,
 } from "./store.ts";
-import { controlHarness } from "./test-support.ts";
+import { controlHarness, settlesExpired } from "./test-support.ts";
 
 const IDENTITY = testHumanIdentity("ulrich", "Ulrich", "token");
 const FIRST_ATTEMPT = 1;
@@ -21,6 +21,7 @@ const SECOND_ATTEMPT = 2;
 const NO_ATTEMPT = 0;
 const NOW = 100;
 const ADDED_TASK_FILE = "added.md";
+const EXECUTIONS_LOST = "schedulerClaims.executionsLost";
 for (const filenames of [
   ["b.md", "a.md"],
   ["b.md", "c.md"],
@@ -507,6 +508,46 @@ test("unblock accepts an optional nonblank reason and refuses a blank one", asyn
   });
   const result = await unblock("Retry on the current base branch.");
   assert.equal(result.node.state, NodeState.Available);
+});
+
+test("an unblock that settles an expired execution inline writes one lost end after its commit", async (t) => {
+  const h = controlHarness(t, IDENTITY);
+  const executionId = createIdentity("execution");
+  h.store.transaction((tx) => setNodeState(tx, h.node_id, NodeState.Paused));
+  await h.invoke("node.block", {
+    params: { node_id: h.node_id },
+    query: {},
+    body: h.body(NodeState.Paused),
+  });
+  settlesExpired(h.dependencies, executionId);
+  const unblock = (attempt: number) =>
+    h.invoke("node.unblock", {
+      params: { node_id: h.node_id },
+      query: {},
+      body: {
+        blocked_attempt: attempt,
+        expected_revision: FIRST_ATTEMPT,
+        expected_mission_version: FIRST_ATTEMPT,
+      },
+    });
+  await assert.rejects(
+    unblock(SECOND_ATTEMPT),
+    (error) =>
+      error instanceof OperationError &&
+      error.code === ControlError.StateConflict,
+  );
+  assert.equal(
+    h.calls.some((call) => call.method === EXECUTIONS_LOST),
+    false,
+  );
+  await unblock(NO_ATTEMPT);
+  const ends = h.calls.filter((call) => call.method === EXECUTIONS_LOST);
+  assert.equal(ends.length, FIRST_ATTEMPT);
+  const [lost] = ends[0]!.arguments as [{ execution_id: string }[]];
+  assert.deepEqual(
+    lost.map((execution) => execution.execution_id),
+    [executionId],
+  );
 });
 
 test("unblock change adds and removes a task", async (t) => {

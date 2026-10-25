@@ -9,6 +9,7 @@ import {
   type Claimant,
   traceIdSchema,
   spanIdSchema,
+  type EndedExecution,
   type ExecutionRow,
   type WorkPull,
 } from "./contract.ts";
@@ -35,12 +36,22 @@ export interface ClaimResult {
   outcome: ClaimOutcome;
   row: ExecutionRow | null;
   settled: boolean;
+  lost: EndedExecution[];
 }
 export interface ClaimDependencies extends Dependencies {
   instances: InstanceQueue;
 }
 const NO_INSTANCES = 0;
+const NO_LOSSES = 0;
 const MILLISECONDS_PER_SECOND = 1000;
+
+function claimResult(
+  outcome: ClaimOutcome,
+  row: ExecutionRow | null,
+  lost: EndedExecution[],
+): ClaimResult {
+  return { outcome, row, settled: lost.length > NO_LOSSES, lost };
+}
 
 type Binding = NonNullable<
   ReturnType<Dependencies["bindings"]["workerBindingOf"]>
@@ -63,11 +74,12 @@ function selectJob(
       "SELECT node_id FROM scheduler_job WHERE project_id = ? AND (available_at IS NULL OR available_at <= ?) ORDER BY priority DESC, id ASC",
     )
     .all(identity.projectId, now) as { node_id: string }[];
-  let settled = false;
+  const lost: EndedExecution[] = [];
   for (let index = 0; index < jobs.length; index++) {
     const nodeId = jobs[index]!.node_id;
-    if (settleNode(tx, dependencies, nodeId, now)) {
-      settled = true;
+    const ended = settleNode(tx, dependencies, nodeId, now);
+    if (ended !== null) {
+      lost.push(ended);
       continue;
     }
     const facts = dependencies.facts.claimFacts(tx, nodeId);
@@ -91,9 +103,9 @@ function selectJob(
       },
       now,
     );
-    if (claim) return { node_id: nodeId, claim, settled };
+    if (claim) return { node_id: nodeId, claim, lost };
   }
-  return { node_id: null, claim: null, settled };
+  return { node_id: null, claim: null, lost };
 }
 
 function acquire(
@@ -121,7 +133,7 @@ function acquire(
     now,
   );
   if (!selected.claim)
-    return { outcome: ClaimOutcome.None, row: null, settled: selected.settled };
+    return claimResult(ClaimOutcome.None, null, selected.lost);
   assert.ok(selected.node_id);
   assert.equal(selected.claim.project_id, identity.projectId);
   const trace = dependencies.traceIdentity.mint();
@@ -151,7 +163,7 @@ function acquire(
     stop: null,
   };
   insertExecution(tx, row);
-  return { outcome: ClaimOutcome.Claimed, row, settled: selected.settled };
+  return claimResult(ClaimOutcome.Claimed, row, selected.lost);
 }
 
 function admit(
@@ -163,29 +175,30 @@ function admit(
 ): ClaimResult {
   assert.equal(pull.runtime_identity, identity.runtimeIdentity);
   assert.equal(pull.resource_identity, identity.resourceIdentity);
-  const settled = settleRuntime(tx, dependencies, pull.runtime_identity, now);
+  const ended = settleRuntime(tx, dependencies, pull.runtime_identity, now);
+  const lost = ended === null ? [] : [ended];
   const row = readUnendedOfRuntime(tx, pull.runtime_identity);
-  if (row) return { outcome: ClaimOutcome.Running, row, settled };
+  if (row) return claimResult(ClaimOutcome.Running, row, lost);
   if (dependencies.projects.projectPaused(tx, identity.projectId))
-    return { outcome: ClaimOutcome.None, row: null, settled };
+    return claimResult(ClaimOutcome.None, null, lost);
   if (
     !dependencies.registrations.registrationHealthcheck(
       tx,
       pull.runtime_identity,
     )
   )
-    return { outcome: ClaimOutcome.Refused, row: null, settled };
+    return claimResult(ClaimOutcome.Refused, null, lost);
   const binding = dependencies.bindings.workerBindingOf(
     tx,
     identity.projectId,
     identity.resourceIdentity,
   );
   if (!binding || binding.tombstone || binding.instance_count <= NO_INSTANCES)
-    return { outcome: ClaimOutcome.None, row: null, settled };
+    return claimResult(ClaimOutcome.None, null, lost);
   const declaration = dependencies.declarations.declarationOf(
     binding.worker_name,
   );
-  if (!declaration) return { outcome: ClaimOutcome.None, row: null, settled };
+  if (!declaration) return claimResult(ClaimOutcome.None, null, lost);
   if (
     countRunningOfGroup(
       tx,
@@ -194,7 +207,7 @@ function admit(
       now,
     ) >= binding.instance_count
   )
-    return { outcome: ClaimOutcome.None, row: null, settled };
+    return claimResult(ClaimOutcome.None, null, lost);
   const siblings = dependencies.registrations.registrationsOfInstance(
     tx,
     pull.runtime_identity,
@@ -203,14 +216,14 @@ function admit(
     countRunningOfRuntimes(tx, siblings, now) > NO_INSTANCES ||
     !dependencies.instances.turn(pull.runtime_identity, siblings)
   )
-    return { outcome: ClaimOutcome.Queued, row: null, settled };
+    return claimResult(ClaimOutcome.Queued, null, lost);
   const choice = dependencies.agentChains.select(
     tx,
     binding.binding_id,
     pull.runtime_identity,
   );
   if (choice.kind === AgentChoiceKind.Cooling)
-    return { outcome: ClaimOutcome.None, row: null, settled };
+    return claimResult(ClaimOutcome.None, null, lost);
   const result = acquire(
     tx,
     dependencies,
@@ -221,7 +234,7 @@ function admit(
     choice.pins,
     now,
   );
-  return { ...result, settled: result.settled || settled };
+  return claimResult(result.outcome, result.row, [...lost, ...result.lost]);
 }
 
 export function claimOnce(

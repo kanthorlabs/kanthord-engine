@@ -9,22 +9,26 @@ import {
   ResumeTarget,
   EndState,
   RepositoryAction,
+  RevokeCause,
   StartPoint,
+  type RevokedExecution,
 } from "./contract.ts";
 import { ControlError } from "./control.ts";
 import { openAttempt, readAttempt, insertEvidence } from "./record-store.ts";
 import { setNodeState, insertNode, insertDependency } from "./store.ts";
-import { controlHarness } from "./test-support.ts";
+import { controlHarness, revokedExecution } from "./test-support.ts";
 
 const IDENTITY = testHumanIdentity("ulrich", "Ulrich", "token");
 const FIRST_ATTEMPT = 1;
 const NO_ATTEMPT = 0;
 const NOW = 100;
 const REVOKE = "schedulerClaims.revoke";
+const EXECUTION_REVOKED = "schedulerClaims.executionRevoked";
 const WAKE = "wakeup.wake";
 const INSERT = "workQueue.insert";
 const NOT_READY = "mission.node.not_ready";
 const REASON_LIMIT = 12;
+const ROLLBACK = "rollback";
 const CONTENT_INVALID = "mission.node.content_invalid";
 test("controls reject blank and oversized UTF-8 reasons without writes, preserving exact-limit text", async (t) => {
   const h = controlHarness(t, IDENTITY);
@@ -337,6 +341,81 @@ for (const state of [
     assert.equal(mission.version, FIRST_ATTEMPT);
   });
 }
+
+test("a pause of a node with a live execution ends its root span with the human cause after the commit", async (t) => {
+  const h = controlHarness(t, IDENTITY);
+  const executionId = createIdentity("execution");
+  h.dependencies.schedulerClaims.revoke = (_tx, nodeId, now) =>
+    revokedExecution(executionId, nodeId, now);
+  h.store.transaction((tx) => {
+    openAttempt(tx, h.node_id, FIRST_ATTEMPT, h.actor, NOW);
+    setNodeState(tx, h.node_id, NodeState.Executing);
+  });
+  await h.invoke("node.pause", {
+    params: { node_id: h.node_id },
+    query: {},
+    body: h.body(NodeState.Executing, FIRST_ATTEMPT),
+  });
+  const ends = h.calls.filter((call) => call.method === EXECUTION_REVOKED);
+  assert.equal(ends.length, FIRST_ATTEMPT);
+  const [execution, cause] = ends[0]!.arguments as [RevokedExecution, string];
+  assert.equal(execution.execution_id, executionId);
+  assert.equal(cause, RevokeCause.Human);
+  assert.ok(
+    h.calls.findIndex((call) => call.method === EXECUTION_REVOKED) <
+      h.calls.findIndex((call) => call.method === WAKE),
+  );
+});
+
+test("a pause of a node with no live execution ends no root span", async (t) => {
+  for (const state of [NodeState.Executing, NodeState.Waiting]) {
+    const h = controlHarness(t, IDENTITY);
+    h.store.transaction((tx) => {
+      openAttempt(tx, h.node_id, FIRST_ATTEMPT, h.actor, NOW);
+      setNodeState(tx, h.node_id, state);
+    });
+    await h.invoke("node.pause", {
+      params: { node_id: h.node_id },
+      query: {},
+      body: h.body(state, FIRST_ATTEMPT),
+    });
+    assert.equal(
+      h.calls.some((call) => call.method === EXECUTION_REVOKED),
+      false,
+    );
+  }
+});
+
+test("a pause rolled back after the revocation ends no root span", async (t) => {
+  const h = controlHarness(t, IDENTITY);
+  let revokes = 0;
+  h.dependencies.schedulerClaims.revoke = (_tx, nodeId, now) => {
+    revokes++;
+    return revokedExecution(createIdentity("execution"), nodeId, now);
+  };
+  h.caller.commit = (write) =>
+    h.store.transaction((tx) => {
+      write(tx);
+      throw new Error(ROLLBACK);
+    });
+  h.store.transaction((tx) => {
+    openAttempt(tx, h.node_id, FIRST_ATTEMPT, h.actor, NOW);
+    setNodeState(tx, h.node_id, NodeState.Executing);
+  });
+  await assert.rejects(
+    h.invoke("node.pause", {
+      params: { node_id: h.node_id },
+      query: {},
+      body: h.body(NodeState.Executing, FIRST_ATTEMPT),
+    }),
+    { message: ROLLBACK },
+  );
+  assert.equal(revokes, FIRST_ATTEMPT);
+  assert.equal(
+    h.calls.some((call) => call.method === EXECUTION_REVOKED),
+    false,
+  );
+});
 
 test("pause refuses Blocked without a write or wakeup", async (t) => {
   const h = controlHarness(t, IDENTITY);

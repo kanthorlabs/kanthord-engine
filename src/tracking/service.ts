@@ -34,6 +34,8 @@ import {
   Disposition,
   ExecutionEnd,
   RefusalReason,
+  RevokeCause,
+  revokeCauseSchema,
   SpanOrigin,
   SpanStatus,
   TRACKING_SERVICE_NAME,
@@ -240,12 +242,10 @@ export class TrackingService implements Service, ExecutionTelemetry {
       parent_span_id: null,
       operation: ROOT_SPAN_OPERATION,
       end_time: end.ended_at,
-      status:
-        end.stop === null && end.end === ExecutionEnd.Finished
-          ? SpanStatus.Ok
-          : SpanStatus.Error,
+      status: endsWell(end) ? SpanStatus.Ok : SpanStatus.Error,
       attributes: {
         "kanthord.execution.end": end.end,
+        ...revokeAttributes(end),
         ...stopAttributes(end.stop),
       },
     });
@@ -548,6 +548,18 @@ export class TrackingService implements Service, ExecutionTelemetry {
           : HealthStatus.Unavailable,
     };
   }
+}
+
+function endsWell(end: RootSpanEnd): boolean {
+  if (end.end === ExecutionEnd.Revoked)
+    return end.revoke_cause === RevokeCause.Assessment;
+  return end.stop === null && end.end === ExecutionEnd.Finished;
+}
+
+function revokeAttributes(end: RootSpanEnd): Attributes {
+  if (end.end !== ExecutionEnd.Revoked) return {};
+  assert.ok(end.revoke_cause);
+  return { "kanthord.revoke.cause": revokeCauseSchema.parse(end.revoke_cause) };
 }
 
 function stopAttributes(stop: RootSpanEnd["stop"]): Attributes {

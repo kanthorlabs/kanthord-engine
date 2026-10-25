@@ -8,6 +8,7 @@ import {
   FIXTURE_NOW,
   FIXTURE_DEADLINE,
 } from "./test-support.ts";
+import { executionTrace } from "./telemetry.ts";
 import {
   insertExecution,
   readExecution,
@@ -122,19 +123,23 @@ test("settlement records exactly one loss at the transaction reading", (t) => {
     insertExecution(tx, row);
     assert.equal(
       settleNode(tx, h.dependencies, row.node_id, FIXTURE_NOW),
-      false,
+      null,
     );
     assert.equal(
       h.service.liveExecutionOf(tx, row.node_id, FIXTURE_NOW)?.execution_id,
       row.execution_id,
     );
-    assert.equal(
+    assert.deepEqual(
       settleRuntime(tx, h.dependencies, row.runtime_identity, FIXTURE_DEADLINE),
-      true,
+      {
+        execution_id: row.execution_id,
+        trace: executionTrace(row),
+        ended_at: FIXTURE_DEADLINE,
+      },
     );
     assert.equal(
       settleNode(tx, h.dependencies, row.node_id, FIXTURE_DEADLINE),
-      false,
+      null,
     );
     assert.equal(
       readExecution(tx, row.execution_id)?.ended_at,
@@ -172,10 +177,11 @@ test("consecutive losses reset after a finished row or revocation and isolate at
       expired_at: FIXTURE_DEADLINE + 100,
     });
     insertExecution(tx, revoked);
-    assert.equal(
-      revoke(tx, row.node_id, FIXTURE_DEADLINE + 2),
-      revoked.execution_id,
-    );
+    assert.deepEqual(revoke(tx, row.node_id, FIXTURE_DEADLINE + 2), {
+      execution_id: revoked.execution_id,
+      trace: executionTrace(revoked),
+      ended_at: FIXTURE_DEADLINE + 2,
+    });
     assert.equal(
       claimStateOf(
         readExecution(tx, revoked.execution_id)!,

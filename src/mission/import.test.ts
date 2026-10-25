@@ -37,6 +37,7 @@ import {
 } from "./contract.ts";
 import { exportMission } from "./export.ts";
 import { applyImport } from "./import-apply.ts";
+import { executionEnds } from "./control.ts";
 import {
   checkImportCondition,
   importDigest,
@@ -1457,7 +1458,9 @@ const workQueue: WorkQueue = {
 };
 const schedulerClaims: SchedulerClaims = {
   revoke: () => null,
-  settle: () => undefined,
+  executionRevoked: () => undefined,
+  executionsLost: () => undefined,
+  settle: () => [],
   liveExecutionOf: () => null,
 };
 const exportBindings: MissionBindings = {
@@ -1483,9 +1486,9 @@ function plan(): NormalizedEntry[] {
   ];
 }
 
-function importer(t: TestContext) {
+function importer(t: TestContext, claims: SchedulerClaims = schedulerClaims) {
   const { store, mission } = fixture(t, []);
-  const apply = (entries: ImportEntry[]) =>
+  const apply = (entries: ImportEntry[], ends = executionEnds()) =>
     store.transaction((tx) => {
       const current = readMission(tx, mission.id);
       assert.ok(current);
@@ -1515,7 +1518,8 @@ function importer(t: TestContext) {
         environments,
         workQueue,
         TEXT_MAX_BYTES,
-        schedulerClaims,
+        claims,
+        ends,
       );
     });
   const assigned = (result: ReturnType<typeof apply>, filename: string) => {
@@ -1608,6 +1612,44 @@ Criterion
         details: { filename, reason: "id_prefix_invalid" },
       })),
     );
+});
+
+test("an import that adds a dependency to a node settles its expired execution and collects the end", (t) => {
+  const executionId = createIdentity("execution");
+  const { apply, assigned, identified } = importer(t, {
+    ...schedulerClaims,
+    settle: (_tx, nodeId, now) => [
+      {
+        execution_id: executionId,
+        trace: {
+          execution_id: executionId,
+          project_id: createIdentity("project"),
+          node_id: nodeId,
+          attempt: 1,
+          trace_id: "a".repeat(32),
+          root_span_id: "b".repeat(16),
+        },
+        ended_at: now,
+      },
+    ],
+  });
+  const first = apply(plan());
+  const ends = executionEnds();
+  const added = apply(
+    [
+      ...change(identified(first), ROOT_FILENAME, {
+        depends_on: ["o.md", PEER_FILENAME, "q.md"],
+      }),
+      entry("q.md"),
+    ],
+    ends,
+  );
+  assert.ok(assigned(added, "q.md"));
+  assert.deepEqual(
+    ends.lost.map((lost) => [lost.execution_id, lost.trace.node_id]),
+    [[executionId, assigned(first, ROOT_FILENAME)]],
+  );
+  assert.deepEqual(ends.revoked, []);
 });
 
 test("import refuses a removed task identity with mission.import.retired_id", (t) => {
@@ -2280,6 +2322,7 @@ test("import apply refuses the environment mix and writes no node", (t) => {
           workQueue,
           TEXT_MAX_BYTES,
           schedulerClaims,
+          executionEnds(),
         ),
       ),
     (error) =>
@@ -2328,6 +2371,7 @@ test("import with equal stored environments lists no violation and applies", (t)
       workQueue,
       TEXT_MAX_BYTES,
       schedulerClaims,
+      executionEnds(),
     );
   });
   assert.equal(result.assigned_ids.length, SINGLE_ENTRY);

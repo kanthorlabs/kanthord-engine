@@ -12,6 +12,7 @@ import {
   PROJECT_PRODUCER,
   RecordKind,
   RefusalReason,
+  RevokeCause,
   ROOT_SPAN_OPERATION,
   SCHEDULER_PRODUCER,
   SpanOrigin,
@@ -112,6 +113,7 @@ test("the root span opens at the claim and ends at the release", (t) => {
     trace: TRACE,
     ended_at: ENDED,
     end: ExecutionEnd.Finished,
+    revoke_cause: null,
     stop: { reason: "provider_failed", code: RATE_LIMITED },
   });
   const page = service.spanList(
@@ -129,6 +131,56 @@ test("the root span opens at the claim and ends at the release", (t) => {
   assert.equal(service.droppedRecords(), NO_DROP);
 });
 
+for (const [cause, status, state] of [
+  [RevokeCause.Human, SpanStatus.Error, TraceState.Error],
+  [RevokeCause.Assessment, SpanStatus.Ok, TraceState.Ok],
+] as const) {
+  test(`a revocation by ${cause} stores the cause and ends the trace as ${state}`, (t) => {
+    const { store, service } = harness(t);
+    service.executionOpened(TRACE, CREATED);
+    service.executionEnded({
+      trace: TRACE,
+      ended_at: ENDED,
+      end: ExecutionEnd.Revoked,
+      revoke_cause: cause,
+      stop: null,
+    });
+    const root = service.spanList(
+      TRACE.trace_id,
+      { limit: PAGE_OF_ONE },
+      caller(store),
+    ).items[0];
+    assert.equal(root?.end_time, ENDED);
+    assert.equal(root?.status, status);
+    assert.equal(
+      root?.attributes["kanthord.execution.end"],
+      ExecutionEnd.Revoked,
+    );
+    assert.equal(root?.attributes["kanthord.revoke.cause"], cause);
+    assert.equal(service.traceGet(TRACE.trace_id, caller(store)).state, state);
+  });
+}
+
+test("a revocation with an unknown cause is refused and writes no end", (t) => {
+  const { store, service } = harness(t);
+  service.executionOpened(TRACE, CREATED);
+  assert.throws(() =>
+    service.executionEnded({
+      trace: TRACE,
+      ended_at: ENDED,
+      end: ExecutionEnd.Revoked,
+      revoke_cause: "other" as RevokeCause,
+      stop: null,
+    }),
+  );
+  const root = service.spanList(
+    TRACE.trace_id,
+    { limit: PAGE_OF_ONE },
+    caller(store),
+  ).items[0];
+  assert.equal(root?.end_time, null);
+});
+
 test("the root span end carries the stop detail", (t) => {
   const { store, service } = harness(t);
   service.executionOpened(TRACE, CREATED);
@@ -136,6 +188,7 @@ test("the root span end carries the stop detail", (t) => {
     trace: TRACE,
     ended_at: ENDED,
     end: ExecutionEnd.Finished,
+    revoke_cause: null,
     stop: {
       reason: "provider_failed",
       code: "unavailable",

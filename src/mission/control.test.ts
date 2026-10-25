@@ -3,10 +3,16 @@ import { test } from "node:test";
 import { testHumanIdentity } from "../kernel/test-identity.ts";
 import { OperationError } from "../kernel/errors.ts";
 import { createIdentity } from "../kernel/identity.ts";
-import { AssessmentResult, MissionErrorCode, NodeState } from "./contract.ts";
+import {
+  AssessmentResult,
+  MissionErrorCode,
+  NodeState,
+  RevokeCause,
+} from "./contract.ts";
 import {
   admitControl,
   ControlError,
+  executionEnds,
   controlResult,
   writeHumanRecords,
   transition,
@@ -22,13 +28,15 @@ import {
 } from "./record-store.ts";
 import { requireMission } from "./write.ts";
 import { setNodeState } from "./store.ts";
-import { controlHarness } from "./test-support.ts";
+import { controlHarness, settlesExpired } from "./test-support.ts";
 
 const NOW = 100;
 const FIRST_ATTEMPT = 1;
 const NO_ATTEMPT = 0;
 const IDENTITY = testHumanIdentity("ulrich", "Ulrich", "token");
 const KEY = "repo.pull_request";
+const EXECUTIONS_LOST = "schedulerClaims.executionsLost";
+const WAKE = "wakeup.wake";
 
 test("control admission checks retirement and mission before settlement and state", (t) => {
   const h = controlHarness(t, IDENTITY);
@@ -43,6 +51,7 @@ test("control admission checks retirement and mission before settlement and stat
             { ...h.body(), expected_mission_version: NO_ATTEMPT },
             [NodeState.Paused],
             NOW,
+            executionEnds(),
           ),
         ),
       (error) => error instanceof OperationError && error.code === code,
@@ -66,6 +75,7 @@ test("control admission checks retirement and mission before settlement and stat
           h.body(NodeState.Paused),
           [NodeState.Paused],
           NOW,
+          executionEnds(),
         ),
       ),
     (error) =>
@@ -82,6 +92,7 @@ test("control admission checks retirement and mission before settlement and stat
           h.body(),
           [NodeState.Paused],
           NOW,
+          executionEnds(),
         ),
       ),
     (error) =>
@@ -89,12 +100,65 @@ test("control admission checks retirement and mission before settlement and stat
   );
 });
 
+for (const [operation, state, body] of [
+  ["node.ready", NodeState.Available, {}],
+  ["node.resume", NodeState.Paused, { target: "Available" }],
+] as const) {
+  test(`${operation} whose admission settles an expired execution writes one lost end after its commit`, async (t) => {
+    const h = controlHarness(t, IDENTITY);
+    const executionId = createIdentity("execution");
+    settlesExpired(h.dependencies, executionId);
+    h.store.transaction((tx) => setNodeState(tx, h.node_id, state));
+    await h.invoke(operation, {
+      params: { node_id: h.node_id },
+      query: {},
+      body: { ...h.body(state), ...body },
+    });
+    const ends = h.calls.filter((call) => call.method === EXECUTIONS_LOST);
+    assert.equal(ends.length, FIRST_ATTEMPT);
+    const [lost] = ends[0]!.arguments as [{ execution_id: string }[]];
+    assert.deepEqual(
+      lost.map((execution) => execution.execution_id),
+      [executionId],
+    );
+    assert.ok(
+      h.calls.findIndex((call) => call.method === EXECUTIONS_LOST) <
+        h.calls.findIndex((call) => call.method === WAKE),
+    );
+  });
+
+  test(`${operation} that the state check refuses after the settlement writes no end`, async (t) => {
+    const h = controlHarness(t, IDENTITY);
+    settlesExpired(h.dependencies, createIdentity("execution"));
+    h.store.transaction((tx) => setNodeState(tx, h.node_id, state));
+    await assert.rejects(
+      h.invoke(operation, {
+        params: { node_id: h.node_id },
+        query: {},
+        body: { ...h.body(NodeState.Waiting), ...body },
+      }),
+      (error) =>
+        error instanceof OperationError &&
+        error.code === ControlError.StateConflict,
+    );
+    assert.equal(
+      h.calls.some((call) => call.method === EXECUTIONS_LOST),
+      false,
+    );
+  });
+}
+
 test("control admission re-reads settled state and terminal refusal precedes expected-state mismatch", (t) => {
   const h = controlHarness(t, IDENTITY, {
     schedulerClaims: {
       revoke: () => null,
+      executionRevoked: () => undefined,
+      executionsLost: () => undefined,
       liveExecutionOf: () => null,
-      settle: (tx, id) => setNodeState(tx, id, NodeState.Paused),
+      settle: (tx, id) => {
+        setNodeState(tx, id, NodeState.Paused);
+        return [];
+      },
     },
   });
   const admitted = h.store.transaction((tx) =>
@@ -105,11 +169,14 @@ test("control admission re-reads settled state and terminal refusal precedes exp
       h.body(NodeState.Paused),
       [NodeState.Paused],
       NOW,
+      executionEnds(),
     ),
   );
   assert.equal(admitted.node.state, NodeState.Paused);
-  h.dependencies.schedulerClaims.settle = (tx, id) =>
+  h.dependencies.schedulerClaims.settle = (tx, id) => {
     setNodeState(tx, id, NodeState.Completed);
+    return [];
+  };
   assert.throws(
     () =>
       h.store.transaction((tx) =>
@@ -120,6 +187,7 @@ test("control admission re-reads settled state and terminal refusal precedes exp
           h.body(),
           [NodeState.Available],
           NOW,
+          executionEnds(),
         ),
       ),
     (error) =>
@@ -181,14 +249,25 @@ test("transition replaces a claimable job and revokes only active claims", (t) =
       h.dependencies,
       { ...node, state: NodeState.Executing },
       NOW,
+      RevokeCause.Human,
+      executionEnds(),
     );
     endLiveClaim(
       tx,
       h.dependencies,
       { ...node, state: NodeState.Evaluating },
       NOW,
+      RevokeCause.Human,
+      executionEnds(),
     );
-    endLiveClaim(tx, h.dependencies, { ...node, state: NodeState.Paused }, NOW);
+    endLiveClaim(
+      tx,
+      h.dependencies,
+      { ...node, state: NodeState.Paused },
+      NOW,
+      RevokeCause.Human,
+      executionEnds(),
+    );
   });
   assert.deepEqual(
     h.calls.map((call) => call.method),

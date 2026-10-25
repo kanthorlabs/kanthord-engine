@@ -11,7 +11,10 @@ import {
   type HumanActor,
   type HumanAct,
   type Mission,
+  RevokeCause,
   type ControlResult,
+  type ExecutionEnds,
+  type SchedulerClaims,
 } from "./contract.ts";
 import type { Dependencies } from "./service.ts";
 import { currentAssessmentOf } from "./currency.ts";
@@ -33,6 +36,7 @@ import { requireActive, requireMission, requireNonterminal } from "./write.ts";
 import { validateText } from "./content.ts";
 
 const NO_ATTEMPT = 0;
+const NO_ENDS = 0;
 const NO_REQUIREMENT_KEYS = 0;
 export const ControlError = {
   Refused: "mission.node.control_refused",
@@ -76,6 +80,7 @@ export function admitControl(
   body: HumanAct,
   admitted: readonly NodeState[],
   now: number,
+  ends: ExecutionEnds,
 ) {
   const initial = requireNode(tx, nodeId);
   requireActive(initial);
@@ -85,7 +90,7 @@ export function admitControl(
     initial.mission_id,
     body.expected_mission_version,
   );
-  dependencies.schedulerClaims.settle(tx, nodeId, now);
+  settleClaim(tx, dependencies.schedulerClaims, nodeId, now, ends);
   const node = requireNode(tx, nodeId);
   requireNonterminal(node);
   if (
@@ -167,10 +172,38 @@ export function endLiveClaim(
   dependencies: Dependencies,
   node: NodeRow,
   now: number,
+  cause: RevokeCause,
+  ends: ExecutionEnds,
 ): void {
   assert.ok(tx.database.isTransaction);
-  if (node.state === NodeState.Executing || node.state === NodeState.Evaluating)
-    dependencies.schedulerClaims.revoke(tx, node.id, now);
+  if (node.state !== NodeState.Executing && node.state !== NodeState.Evaluating)
+    return;
+  const execution = dependencies.schedulerClaims.revoke(tx, node.id, now);
+  if (execution !== null) ends.revoked.push({ execution, cause });
+}
+
+export function executionEnds(): ExecutionEnds {
+  return { lost: [], revoked: [] };
+}
+
+export function settleClaim(
+  tx: Transaction,
+  claims: Pick<SchedulerClaims, "settle">,
+  nodeId: string,
+  now: number,
+  ends: ExecutionEnds,
+): void {
+  ends.lost.push(...claims.settle(tx, nodeId, now));
+}
+
+export function reportEnds(
+  dependencies: Dependencies,
+  ends: ExecutionEnds,
+): void {
+  if (ends.lost.length > NO_ENDS)
+    dependencies.schedulerClaims.executionsLost(ends.lost);
+  for (const claim of ends.revoked)
+    dependencies.schedulerClaims.executionRevoked(claim.execution, claim.cause);
 }
 
 export function transition(
