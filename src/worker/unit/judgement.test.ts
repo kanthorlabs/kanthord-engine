@@ -6,6 +6,10 @@ import {
   parseJudgement,
   evaluationJudgementSchema,
   judgementRationale,
+  parseRepaired,
+  ReplyRepair,
+  UnmetGround,
+  unmetGroundSchema,
   examineInstruction,
   evaluationInstruction,
   JUDGEMENT_MARKER,
@@ -16,6 +20,8 @@ import {
 } from "./judgement.ts";
 import { VerificationClass, type Verification } from "./verification.ts";
 import { SHIPPED_TEMPLATES } from "../../agent/prompt-templates.ts";
+import type { NativeAgent } from "./native-agent.ts";
+import type { WorkPrompt } from "../../agent/prompt-composer.ts";
 
 const TWO_GAP_RATIONALE =
   "two gaps\nUnmet:\n- task_a: no route check\n- task_b: no restart test";
@@ -39,13 +45,13 @@ test("the final marker is strict and invalid handoffs are refused", () => {
     assert.equal(parseJudgement(invalid, evaluationJudgementSchema), null);
   assert.deepEqual(
     parseJudgement(
-      'kanthord-judgement: {"result":"criterion-not-met","rationale":"task failed","unmet":[{"id":"task","reason":"no test"}]}',
+      'kanthord-judgement: {"result":"criterion-not-met","rationale":"task failed","unmet":[{"id":"task","reason":"no test","ground":"stated"}]}',
       evaluationJudgementSchema,
     ),
     {
       result: "criterion-not-met",
       rationale: "task failed",
-      unmet: [{ id: "task", reason: "no test" }],
+      unmet: [{ id: "task", reason: "no test", ground: "stated" }],
       proposals: [],
     },
   );
@@ -162,6 +168,11 @@ test("failed and unrun rationale names the command and cause", () => {
   );
   assert.doesNotMatch(instruction, /prose style/);
   assert.match(instruction, /List every unmet item that you find/);
+  assert.match(
+    instruction,
+    /Give each unmet item a ground: stated for a requirement or criterion of the work prompt, standard for a default-standard rule, unstated for a defect that neither states\./,
+  );
+  assert.match(instruction, /"ground": "stated"/);
   assert.doesNotMatch(
     instruction,
     /reasoningEffort|modelIdentifier|resourceBudget/,
@@ -332,5 +343,84 @@ test("each change request names its binding", () => {
       `Reviewer octo requests changes on api at commit ${"a".repeat(40)}: octo body`,
       `Reviewer hubot requests changes on web at commit ${"b".repeat(40)}: hubot body`,
     ].join("\n"),
+  );
+});
+
+const SINGLE_REPAIR = 1;
+const GROUNDED_REPLY =
+  'kanthord-judgement: {"result":"criterion-not-met","rationale":"r","unmet":[{"id":"task","reason":"no test","ground":"unstated"}]}';
+const UNGROUNDED_REPLY =
+  'kanthord-judgement: {"result":"criterion-not-met","rationale":"r","unmet":[{"id":"task","reason":"no test"}]}';
+
+test("an unmet item requires a ground of the closed set", () => {
+  assert.deepEqual(Object.values(UnmetGround), [
+    "stated",
+    "standard",
+    "unstated",
+  ]);
+  assert.equal(unmetGroundSchema.safeParse("other").success, false);
+  assert.equal(
+    parseJudgement(UNGROUNDED_REPLY, evaluationJudgementSchema),
+    null,
+  );
+  assert.equal(
+    parseJudgement(
+      GROUNDED_REPLY.replace("unstated", "other"),
+      evaluationJudgementSchema,
+    ),
+    null,
+  );
+  assert.equal(
+    parseJudgement(GROUNDED_REPLY, evaluationJudgementSchema)?.unmet[0]?.ground,
+    UnmetGround.Unstated,
+  );
+});
+
+function repairAgent(replies: readonly (string | undefined)[]) {
+  const instructions: string[] = [];
+  const agent = {
+    budget: { exhausted: () => false },
+    instruct: async (_work: unknown, instruction: string) => {
+      instructions.push(instruction);
+    },
+    lastText: () => replies[Math.max(instructions.length, 0)],
+  };
+  return { agent: agent as unknown as NativeAgent, instructions };
+}
+
+test("parseRepaired marks a reply that the repair turn produced", async () => {
+  const work = {} as WorkPrompt;
+  const valid = repairAgent([GROUNDED_REPLY]);
+  const first = await parseRepaired(
+    SHIPPED_TEMPLATES,
+    valid.agent,
+    work,
+    evaluationJudgementSchema,
+  );
+  assert.equal(first.repaired, false);
+  assert.notEqual(first.reply, ReplyRepair.Invalid);
+  assert.deepEqual(valid.instructions, []);
+  const repaired = repairAgent([UNGROUNDED_REPLY, GROUNDED_REPLY]);
+  const second = await parseRepaired(
+    SHIPPED_TEMPLATES,
+    repaired.agent,
+    work,
+    evaluationJudgementSchema,
+  );
+  assert.equal(second.repaired, true);
+  assert.equal(repaired.instructions.length, SINGLE_REPAIR);
+  assert.equal(
+    (second.reply as { unmet: { ground: string }[] }).unmet.at(0)?.ground,
+    UnmetGround.Unstated,
+  );
+  const invalid = repairAgent([UNGROUNDED_REPLY, UNGROUNDED_REPLY]);
+  assert.deepEqual(
+    await parseRepaired(
+      SHIPPED_TEMPLATES,
+      invalid.agent,
+      work,
+      evaluationJudgementSchema,
+    ),
+    { reply: ReplyRepair.Invalid, repaired: true },
   );
 });
