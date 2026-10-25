@@ -313,6 +313,11 @@ export const traceSummarySchema = z.strictObject({
   first_error_span_id: spanIdSchema.nullable(),
 });
 export type TraceSummary = z.infer<typeof traceSummarySchema>;
+export const traceListItemSchema = traceSummarySchema.extend({
+  root_operation: z.string().nullable(),
+  root_attributes: z.record(z.string(), attributeValueSchema).nullable(),
+});
+export type TraceListItem = z.infer<typeof traceListItemSchema>;
 export const spanSchema = z.strictObject({
   trace_id: traceIdSchema,
   span_id: spanIdSchema,
@@ -606,7 +611,7 @@ export const trackingOperations = {
       body: z.null(),
     }),
     output: z.strictObject({
-      items: z.array(traceSummarySchema),
+      items: z.array(traceListItemSchema),
       next_cursor: z.string().nullable(),
     }),
   },

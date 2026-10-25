@@ -82,6 +82,7 @@ const BUILD_DOCUMENT = "devcontainer.json";
 const IMAGE_LIST_FORMAT = "{{.Repository}}:{{.Tag}}";
 const UNTAGGED = "<none>";
 const LINE_BREAK = /\r?\n/;
+const NO_SUCH_IMAGE = /no such image|image not known/i;
 const RUNTIME_ORDER = [ContainerRuntime.Podman, ContainerRuntime.Docker];
 const CHECK_NAME_PREFIX = "kanthord-env-check-";
 const CHECK_NAME_BYTES = 8;
@@ -591,8 +592,18 @@ export class EnvironmentImages implements Omit<
   }
 
   async imageExists(tag: string): Promise<boolean> {
-    const exists = await this.answer(["image", "exists", tag]);
-    return exists.code === SUCCESS_CODE;
+    const inspected = await this.answer([
+      "image",
+      "inspect",
+      "--format",
+      "{{.Id}}",
+      tag,
+    ]);
+    if (inspected.code === SUCCESS_CODE) return true;
+    if (NO_SUCH_IMAGE.test(inspected.stderr)) return false;
+    throw new Error(
+      `The inspection of the image ${tag} failed: ${inspected.stderr.slice(-OUTPUT_TAIL_BYTES)}`,
+    );
   }
 
   async cacheVolumes(): Promise<
@@ -895,6 +906,6 @@ export class EnvironmentImages implements Omit<
         EnvironmentImageFailure.BuildFailed,
         tagged.stderr.slice(-OUTPUT_TAIL_BYTES),
       );
-    await this.answer(["untag", staging, staging]);
+    await this.removeTags([staging]);
   }
 }

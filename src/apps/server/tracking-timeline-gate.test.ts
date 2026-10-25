@@ -50,6 +50,7 @@ const STEPS_BINDING = "steps";
 const REVIEWER_BINDING = "reviewer";
 const VALIDATION_FAILED = "gateway.request.validation_failed";
 const CURSOR_INVALID = "system.pagination.cursor_invalid";
+const RANGE_INVALID = "tracking.filter.range_invalid";
 const CONFIGURATION = {
   agent_provider: "default",
   model_identifier: "claude-sonnet-4-5",
@@ -69,6 +70,7 @@ const KIND_ATTRIBUTE = "kanthord.execution.kind";
 const WAIT_ATTRIBUTE = "kanthord.queue.wait_ms";
 const NUMBER_TYPE = "number";
 const TIMELINE_PATH = "/api/tracking/timeline";
+const TRACE_PATH = "/api/tracking/trace";
 
 type Caller = ReturnType<typeof humanCaller>;
 interface Worker {
@@ -339,9 +341,12 @@ function reads(h: Harness) {
       query,
       body: null,
     });
-  const refused = async (query: Record<string, string>) => {
+  const refused = async (
+    query: Record<string, string>,
+    path: string = TIMELINE_PATH,
+  ) => {
     const response = await fetch(
-      `${h.fixture.endpoint}${TIMELINE_PATH}?${new URLSearchParams(query)}`,
+      `${h.fixture.endpoint}${path}?${new URLSearchParams(query)}`,
       {
         headers: { authorization: `Bearer ${h.fixture.token}` },
         signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
@@ -426,6 +431,14 @@ test(
     );
     assert.equal(executionSummaries.length, EXECUTION_TRACES);
     assert.equal(actSummaries.length, ACT_TRACES);
+
+    await t.test("0 trace list root span", () => {
+      for (const summary of summaries) {
+        const root = rootOf(summary);
+        assert.equal(summary.root_operation, root.operation);
+        assert.deepEqual(summary.root_attributes, root.attributes);
+      }
+    });
 
     await t.test("1 node scope, depth 1", async () => {
       const page = await r.timeline({
@@ -590,6 +603,20 @@ test(
       assert.deepEqual(
         await r.refused({ node_id: nodeId, cursor: traceCursor }),
         { status: BAD_REQUEST, code: CURSOR_INVALID },
+      );
+      const first = summaryOf(runs.firstSteps);
+      assert.ok(first.ended_at !== null && first.ended_at > traceTime(first));
+      const inverted = {
+        from: String(first.ended_at),
+        to: String(traceTime(first)),
+      };
+      assert.deepEqual(
+        await r.refused({ ...inverted, limit: "200" }, TRACE_PATH),
+        { status: BAD_REQUEST, code: RANGE_INVALID },
+      );
+      assert.deepEqual(
+        await r.refused({ ...inverted, project_id: h.project_id }),
+        { status: BAD_REQUEST, code: RANGE_INVALID },
       );
     });
   },

@@ -98,7 +98,6 @@ const Verb = {
 } as const;
 const Subject = {
   Create: "create",
-  Exists: "exists",
   Inspect: "inspect",
   List: "ls",
   Remove: "rm",
@@ -110,7 +109,6 @@ const Option = {
   Memory: "--memory",
   Volume: "--volume",
 } as const;
-const ABSENT_CODE = 1;
 const EnvironmentSpan = {
   Root: "project.environment",
   Build: "environment.build",
@@ -298,10 +296,11 @@ async function answered(
       stderr: "",
     };
   }
-  if (image && subject === Subject.Exists)
+  if (image && subject === Subject.Inspect && state.tags.has(args.at(-1)!))
     return {
-      ...fallback,
-      code: state.tags.has(target!) ? SUCCESS_CODE : ABSENT_CODE,
+      code: SUCCESS_CODE,
+      stdout: `sha256:${args.at(-1)}\n`,
+      stderr: "",
     };
   if (image && subject === Subject.Remove) state.tags.delete(target!);
   if (verb === Verb.Tag) state.tags.add(args.at(-1)!);

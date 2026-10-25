@@ -3,12 +3,15 @@ import { test, type TestContext } from "node:test";
 import { IN_MEMORY_DATABASE, Store } from "../kernel/store.ts";
 import {
   FACET_VALUES_MAX,
+  SpanOrigin,
+  SpanStatus,
   TRACKING_SERVICE_NAME,
   TraceSort,
   TRACE_LIST_LIMIT_DEFAULT,
   trackingOperations,
 } from "./contract.ts";
 import { trackingMigrations } from "./migrations.ts";
+import { insertSpan } from "./trace-store.ts";
 import {
   listTraces,
   readFacets,
@@ -116,6 +119,10 @@ function traceIdOf(n: number): string {
   return n.toString(16).padStart(32, "0");
 }
 
+function rootSpanIdOf(n: number): string {
+  return n.toString(16).padStart(16, "0");
+}
+
 function insert(store: Store, fixture: Fixture): void {
   store.transaction((tx) => {
     tx.database
@@ -126,7 +133,7 @@ function insert(store: Store, fixture: Fixture): void {
         traceIdOf(fixture.n),
         fixture.project,
         `execution_${ULID_HEAD}${fixture.n}`,
-        fixture.n.toString(16).padStart(16, "0"),
+        rootSpanIdOf(fixture.n),
         fixture.created,
         `node_${ULID_HEAD}${fixture.n}`,
         fixture.state,
@@ -377,5 +384,69 @@ test("a server trace lists with a null execution, node and attempt and a filter 
       SERVER_TRACE_NUMBER,
     ),
     false,
+  );
+});
+
+const ROOT_OPERATION = "kanthord.execution";
+const ROOT_ATTRIBUTES = {
+  "kanthord.execution.kind": "steps",
+  "kanthord.attempt": 1,
+};
+const CHILD_SPAN_ID = "f".repeat(16);
+
+function insertSpanOf(
+  store: Store,
+  n: number,
+  spanId: string,
+  parentSpanId: string | null,
+  operation: string,
+  attributes: Record<string, string | number>,
+): void {
+  store.transaction((tx) =>
+    insertSpan(tx, {
+      trace_id: traceIdOf(n),
+      span_id: spanId,
+      parent_span_id: parentSpanId,
+      producer: "server",
+      origin: SpanOrigin.Observed,
+      operation,
+      start_time: 1000,
+      end_time: null,
+      status: SpanStatus.Unset,
+      attributes,
+      events: [],
+      links: [],
+      text_ids: [],
+      created_at: 1000,
+    }),
+  );
+}
+
+test("each item answers the operation and the attributes of its root span, or null before the root span is stored", (t) => {
+  const store = seeded(t);
+  insertSpanOf(
+    store,
+    1,
+    rootSpanIdOf(1),
+    null,
+    ROOT_OPERATION,
+    ROOT_ATTRIBUTES,
+  );
+  insertSpanOf(store, 2, CHILD_SPAN_ID, rootSpanIdOf(2), "agent.turn", {
+    "gen_ai.request.model": "gpt-4",
+  });
+  const items = store.transaction((tx) =>
+    listTraces(tx, queryOf(), null),
+  ).items;
+  const byNumber = new Map(
+    items.map((item) => [Number.parseInt(item.trace_id, 16), item]),
+  );
+  assert.equal(byNumber.get(1)?.root_operation, ROOT_OPERATION);
+  assert.deepEqual(byNumber.get(1)?.root_attributes, ROOT_ATTRIBUTES);
+  assert.equal(byNumber.get(2)?.root_operation, null);
+  assert.equal(byNumber.get(2)?.root_attributes, null);
+  assert.deepEqual(idsOf(store), [4, 5, 2, 3, 1]);
+  assert.doesNotThrow(() =>
+    trackingOperations.traceList.output.parse({ items, next_cursor: null }),
   );
 });

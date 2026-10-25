@@ -405,6 +405,35 @@ components:
                   - type: string
                     pattern: ^[0-9a-f]{16}$
                   - type: "null"
+              root_operation:
+                anyOf:
+                  - type: string
+                  - type: "null"
+              root_attributes:
+                anyOf:
+                  - type: object
+                    propertyNames:
+                      type: string
+                    additionalProperties:
+                      anyOf:
+                        - anyOf:
+                            - type: string
+                            - type: boolean
+                            - type: integer
+                              minimum: -9007199254740991
+                              maximum: 9007199254740991
+                            - type: number
+                        - maxItems: 128
+                          type: array
+                          items:
+                            anyOf:
+                              - type: string
+                              - type: boolean
+                              - type: integer
+                                minimum: -9007199254740991
+                                maximum: 9007199254740991
+                              - type: number
+                  - type: "null"
             required:
               - trace_id
               - project_id
@@ -433,6 +462,8 @@ components:
               - tool_count
               - error_count
               - first_error_span_id
+              - root_operation
+              - root_attributes
             additionalProperties: false
         next_cursor:
           anyOf:

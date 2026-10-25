@@ -105,7 +105,7 @@ const TEXT_ENCODING = "utf8";
 const CURSOR_START = 0;
 const TRACE_CURSOR_PARTS = 3;
 const TIMELINE_CURSOR_PARTS = 4;
-const RANGE_INVALID_CODE = "tracking.analytics.range_invalid";
+const RANGE_INVALID_CODE = "tracking.filter.range_invalid";
 const DAY_MS = 86400000;
 
 export interface Dependencies {
@@ -128,13 +128,22 @@ function rangeInvalid(message: string): never {
   throw new OperationError(HttpStatus.BadRequest, RANGE_INVALID_CODE, message);
 }
 
+function refuseInvertedRange(query: { from?: number; to?: number }): void {
+  if (
+    query.from !== undefined &&
+    query.to !== undefined &&
+    query.from > query.to
+  )
+    rangeInvalid("from is after to.");
+}
+
 function analyticsRange(
   query: { from?: number; to?: number },
   now: number,
 ): { from: number; to: number } {
   const to = query.to ?? now;
   const from = query.from ?? to - ANALYTICS_RANGE_DAYS_DEFAULT * DAY_MS;
-  if (from > to) return rangeInvalid("from is after to.");
+  refuseInvertedRange({ from, to });
   if (to - from > ANALYTICS_RANGE_DAYS_MAX * DAY_MS)
     return rangeInvalid(
       `The range is longer than ${ANALYTICS_RANGE_DAYS_MAX} days.`,
@@ -482,6 +491,7 @@ export class TrackingService implements Service, ExecutionTelemetry {
 
   traceList(query: TraceListQuery, caller: CallerContext) {
     assert.ok(caller.identity);
+    refuseInvertedRange(query);
     const after = decodeTraceCursor(query.cursor, query.sort);
     return caller.commit((tx) => {
       const page = listTraces(tx, query, after);
@@ -491,6 +501,7 @@ export class TrackingService implements Service, ExecutionTelemetry {
 
   timelineList(query: TimelineListQuery, caller: CallerContext) {
     assert.ok(caller.identity);
+    refuseInvertedRange(query);
     const after = decodeTimelineCursor(query.cursor);
     return caller.commit((tx) => {
       const page = listTimeline(tx, query, after);

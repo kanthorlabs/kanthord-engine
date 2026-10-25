@@ -4,8 +4,9 @@ import type { Transaction } from "../kernel/store.ts";
 import {
   FACET_VALUES_MAX,
   TraceSort,
+  traceListItemSchema,
   trackingOperations,
-  type TraceSummary,
+  type TraceListItem,
 } from "./contract.ts";
 import { TRACE_COLUMNS, traceSummaryOf } from "./trace-store.ts";
 
@@ -19,7 +20,7 @@ export interface TraceCursor {
   position: number;
 }
 export interface TracePage {
-  items: TraceSummary[];
+  items: TraceListItem[];
   last: TraceCursor | null;
 }
 
@@ -111,6 +112,20 @@ function conditionOf(query: TraceListQuery): Condition {
   return condition;
 }
 
+function traceListItemOf(row: Record<string, unknown>): TraceListItem {
+  return {
+    ...traceSummaryOf(row),
+    root_operation:
+      row.root_operation === null ? null : String(row.root_operation),
+    root_attributes:
+      row.root_attributes === null
+        ? null
+        : traceListItemSchema.shape.root_attributes.parse(
+            JSON.parse(String(row.root_attributes)),
+          ),
+  };
+}
+
 function cursorOf(sort: TraceSort, row: Record<string, unknown>): TraceCursor {
   const value = Number(row.sort_value);
   const position = Number(row.position);
@@ -138,13 +153,13 @@ export function listTraces(
       : ` WHERE ${condition.clauses.join(" AND ")}`;
   const rows = tx.database
     .prepare(
-      `SELECT rowid AS position, ${value} AS sort_value, ${TRACE_COLUMNS} FROM tracking_trace${where} ORDER BY ${value} DESC, rowid DESC LIMIT ?`,
+      `SELECT t.*, r.operation AS root_operation, r.attributes AS root_attributes FROM (SELECT rowid AS position, ${value} AS sort_value, ${TRACE_COLUMNS} FROM tracking_trace${where} ORDER BY ${value} DESC, rowid DESC LIMIT ?) t LEFT JOIN tracking_span r ON r.trace_id = t.trace_id AND r.span_id = t.root_span_id ORDER BY t.sort_value DESC, t.position DESC`,
     )
     .all(...condition.params, query.limit + 1);
   const page = rows.slice(0, query.limit);
   const lastRow = page.at(-1);
   return {
-    items: page.map(traceSummaryOf),
+    items: page.map(traceListItemOf),
     last:
       rows.length > query.limit && lastRow !== undefined
         ? cursorOf(query.sort, lastRow)

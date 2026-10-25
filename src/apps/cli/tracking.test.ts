@@ -430,7 +430,7 @@ const ANALYTICS_DURATION_LEAF = "cli.tracking.analytics.duration";
 const ANALYTICS_ANSWER = { items: [], truncated: false };
 const RANGE_INVALID_ANSWER = {
   error: {
-    code: "tracking.analytics.range_invalid",
+    code: "tracking.filter.range_invalid",
     message: "The range is invalid.",
     details: null,
   },
@@ -614,7 +614,7 @@ for (const [leaf, prefix, options] of [
     const result = await run(t, ["analytics", leaf, ...options], endpoint);
     assert.equal(result.code, ExitCode.Failure);
     assert.ok(
-      result.stderr.includes("tracking.analytics.range_invalid"),
+      result.stderr.includes("tracking.filter.range_invalid"),
       result.stderr,
     );
   });

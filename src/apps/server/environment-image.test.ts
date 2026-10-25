@@ -512,7 +512,7 @@ test("the layer gets the final tag only after the check passes", async (t) => {
     line.join(" ").endsWith(`tag ${STAGING} ${TAG}`),
   );
   const untagged = indexOf(log, (line) =>
-    line.join(" ").endsWith(`untag ${STAGING} ${STAGING}`),
+    line.join(" ").endsWith(`image rm ${STAGING}`),
   );
   assert.ok(built < check && check < tagged && tagged < untagged);
   assert.equal(
@@ -922,7 +922,7 @@ function runtimeImages(
   return { built, calls };
 }
 
-test("imageId answers the id of the image and null for an absent image, and imageExists answers the runtime", async (t) => {
+test("imageId answers the id of the image and null for an absent image", async (t) => {
   const { built } = runtimeImages(temporary(t), (args) =>
     args.includes("present")
       ? { stdout: `${KANTHORD_IMAGE_ID}\n` }
@@ -933,9 +933,35 @@ test("imageId answers the id of the image and null for an absent image, and imag
     KANTHORD_IMAGE_ID,
   );
   assert.equal(await built.imageId("absent", NEVER_ABORTED), null);
-  assert.equal(await built.imageExists("present"), true);
-  const absent = runtimeImages(temporary(t), () => ({ code: REJECTED }));
-  assert.equal(await absent.built.imageExists("absent"), false);
+});
+
+const PRESENT = "present";
+const BROKEN = "broken";
+const PODMAN_ABSENT = "podman_absent";
+const DOCKER_ABSENT = "docker_absent";
+const ABSENT_ANSWERS: Record<string, string> = {
+  [PODMAN_ABSENT]: `Error: ${PODMAN_ABSENT}: image not known\n`,
+  [DOCKER_ABSENT]: `Error: No such image: ${DOCKER_ABSENT}\n`,
+};
+const RUNTIME_DOWN =
+  "Cannot connect to the Docker daemon. Is the daemon running?\n";
+
+test("imageExists inspects the image id with a command of podman and docker, and refuses another failure", async (t) => {
+  const { built, calls } = runtimeImages(temporary(t), (args) => {
+    const reference = args.at(-1)!;
+    if (reference === PRESENT) return { stdout: `${KANTHORD_IMAGE_ID}\n` };
+    return {
+      code: REJECTED,
+      stderr: ABSENT_ANSWERS[reference] ?? RUNTIME_DOWN,
+    };
+  });
+  assert.equal(await built.imageExists(PRESENT), true);
+  assert.deepEqual(calls, [
+    ["image", "inspect", "--format", "{{.Id}}", PRESENT],
+  ]);
+  assert.equal(await built.imageExists(PODMAN_ABSENT), false);
+  assert.equal(await built.imageExists(DOCKER_ABSENT), false);
+  await assert.rejects(built.imageExists(BROKEN), new RegExp(BROKEN));
 });
 
 test("tagProved tags the proved suffix and removeTags removes each tag past a failed removal", async (t) => {

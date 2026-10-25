@@ -131,8 +131,10 @@ rejects unknown arguments and options before work.
 ## `trace list`
 
 Reads one page of trace summaries, newest first by default. Each item is a
-trace summary of [`trace get`](#trace-get). `next_cursor` is `null` on the last
-page.
+trace summary of [`trace get`](#trace-get) with two more fields:
+`root_operation` and `root_attributes`. They hold the `operation` and the
+`attributes` of the root span. Both are `null` while the store holds no root
+span. `next_cursor` is `null` on the last page.
 
 The API filters of `tracking.trace.list` combine with AND:
 
@@ -158,7 +160,8 @@ The API filters of `tracking.trace.list` combine with AND:
 
 `from` and `to` select by window overlap: the window of a trace runs from its
 start to its `ended_at`, and stays open with no `ended_at`. A missing bound
-leaves that side open.
+leaves that side open. A `from` after `to` answers `400`
+`tracking.filter.range_invalid`.
 
 The CLI exposes `--project`, `--node`, `--state`, `--query`, `--sort`, `--from`
 and `--to`. `--query` sets `q` and has 1 to 200 characters. `--from` and `--to`
@@ -192,6 +195,8 @@ whose row names that execution, that node or that project.
 | `depth`        | `1` or `2`, default `2`. Depth 1 answers the root span of each trace. Depth 2 also answers each span whose parent is the root span. |
 | `limit`        | 1 to 1000, default 500.                                                                                                             |
 | `cursor`       | The `next_cursor` of the previous page.                                                                                             |
+
+A `from` after `to` answers `400` `tracking.filter.range_invalid`.
 
 Depth 2 answers a span of the root span also when the store holds no row of the
 root span. The timeline holds depths 1 and 2 only. `span list` of one trace
@@ -243,7 +248,7 @@ their spans in steps of 100 traces. It never writes. `from` and `to` are
 | `bucket`     | The time bucket of an item. Default `day`. See the closed set below. |
 
 The range holds at most 31 days. A range of more than 31 days, or a `from` after
-`to`, answers `400` `tracking.analytics.range_invalid`. The check uses the
+`to`, answers `400` `tracking.filter.range_invalid`. The check uses the
 default of a missing bound.
 
 `group_by` is one of `none`, `model`, `agent_name`, `provider_name`,
@@ -532,7 +537,8 @@ Every remote command can also answer the shared codes of
 | local | `cli.pagination.limit_invalid`                       | `--limit` is not a positive integer.                                                                                                 | span list, timeline list, trace list, session entry list |
 | local | `cli.pagination.limit_out_of_range`                  | `--limit` is outside 1 to 1000 for `span list`, `timeline list`, `trace list` and `session entry list`.                              | span list, timeline list, trace list, session entry list |
 | 400   | `system.pagination.cursor_invalid`                   | `--cursor` is not a cursor of this listing.                                                                                          | span list, timeline list, trace list, session entry list |
-| 400   | `tracking.analytics.range_invalid`                   | The range of `from` and `to` is longer than 31 days, or `from` is after `to`.                                                        | analytics cost, analytics duration                       |
+| 400   | `tracking.filter.range_invalid`                      | `from` is after `to`.                                                                                                                | trace list, timeline list                                |
+| 400   | `tracking.filter.range_invalid`                      | The range of `from` and `to` is longer than 31 days, or `from` is after `to`.                                                        | analytics cost, analytics duration                       |
 | 404   | `tracking.trace.not_found`                           | The trace is unknown.                                                                                                                | all                                                      |
 | 404   | `tracking.text.not_found`                            | The trace holds no such text.                                                                                                        | text get                                                 |
 | 404   | `tracking.entry.not_found`                           | The session holds no such entry.                                                                                                     | session entry get                                        |
