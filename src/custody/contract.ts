@@ -616,6 +616,7 @@ export type PlatformProbe = (
   metadata: unknown,
   context: Context,
   observe?: ResourceObserver,
+  refreshStore?: CredentialStore,
 ) => Promise<ResourceStatusValue>;
 export type CredentialPlatform = {
   secret_shape: SecretShape;

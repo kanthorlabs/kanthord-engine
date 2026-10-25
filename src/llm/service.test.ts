@@ -27,10 +27,10 @@ import {
   type InstanceKey,
   type InstanceKeys,
 } from "../custody/contract.ts";
-import { decrypt } from "../custody/envelope.ts";
+import { decrypt, encrypt } from "../custody/envelope.ts";
 import { background, CancellationContext } from "../kernel/context.ts";
 import { OperationError } from "../kernel/errors.ts";
-import { ResourceFailureReason } from "../kernel/health.ts";
+import { ResourceFailureReason, ResourceStatus } from "../kernel/health.ts";
 import { HttpMethod, HttpStatus } from "../kernel/http.ts";
 import { canonicalJSON } from "../kernel/json.ts";
 import {
@@ -62,6 +62,7 @@ import {
 } from "./contract.ts";
 import { COPILOT_ENTERPRISE_DOMAIN_PLACEHOLDER } from "./login.ts";
 import {
+  CAPABILITY_MODEL_CALL,
   CAPABILITY_MODEL_LIST_READ,
   CAPABILITY_NONE,
   LLM_PLATFORMS,
@@ -2833,4 +2834,121 @@ test("an instance archive between the server seal and the commit refuses the cre
   } finally {
     f.store.close();
   }
+});
+
+const STORED_OAUTH = {
+  refresh: "test_private-stored-subscription-refresh",
+  access: "sk-ant-oat01-test-private-stored-access",
+  expires: 1,
+};
+const REFRESHED_SUBSCRIPTION_ACCESS = "sk-ant-oat01-test-private-new-access";
+const REFRESHED_SUBSCRIPTION_REFRESH = "test_private-new-subscription-refresh";
+const SUBSCRIPTION_TOKEN_URL = "https://platform.claude.com/v1/oauth/token";
+const SUBSCRIPTION_EXPIRES_IN_S = 3600;
+const SUBSCRIPTION_NAME = "claude";
+const ONE_REFRESH_CALL = 1;
+
+function insertSubscription(f: ReturnType<typeof fixture>): string {
+  const id = "subscription-1";
+  const platform = Platform.AnthropicSubscription;
+  const { nonce, ciphertext } = encrypt(key, id, platform, STORED_OAUTH);
+  f.store.database
+    .prepare(
+      "INSERT INTO credential (id, name, platform, holder, revision, nonce, ciphertext, metadata, created_at, ended_at) VALUES (?, ?, ?, 'server', ?, ?, ?, NULL, ?, NULL)",
+    )
+    .run(
+      id,
+      SUBSCRIPTION_NAME,
+      platform,
+      FIRST_REVISION,
+      nonce,
+      ciphertext,
+      Date.now(),
+    );
+  return id;
+}
+
+function storedSubscription(f: ReturnType<typeof fixture>, id: string) {
+  const row = f.store.database
+    .prepare("SELECT revision, nonce, ciphertext FROM credential WHERE id = ?")
+    .get(id) as { revision: number; nonce: Buffer; ciphertext: Buffer };
+  return {
+    revision: row.revision,
+    secret: decrypt(
+      key,
+      id,
+      Platform.AnthropicSubscription,
+      row.nonce,
+      row.ciphertext,
+    ) as typeof STORED_OAUTH,
+  };
+}
+
+test("verify of an expired anthropic-subscription record refreshes the token through pi-ai, stores it in place and checks with the new token", async (t) => {
+  const f = fixture();
+  t.after(() => f.store.close());
+  const id = insertSubscription(f);
+  const requests: { url: string; authorization: string | null }[] = [];
+  t.mock.method(
+    globalThis,
+    "fetch",
+    async (url: unknown, init?: RequestInit) => {
+      requests.push({
+        url: String(url),
+        authorization: new Headers(init?.headers).get("authorization"),
+      });
+      if (String(url) === SUBSCRIPTION_TOKEN_URL)
+        return Response.json({
+          access_token: REFRESHED_SUBSCRIPTION_ACCESS,
+          refresh_token: REFRESHED_SUBSCRIPTION_REFRESH,
+          expires_in: SUBSCRIPTION_EXPIRES_IN_S,
+        });
+      return Response.json(
+        { type: "error" },
+        { status: HttpStatus.Unauthorized },
+      );
+    },
+  );
+  const answer = await credentialVerify(f, SUBSCRIPTION_NAME);
+  assert.equal(answer.status, ResourceStatus.Unhealthy);
+  assert.equal(answer.failure_reason, ResourceFailureReason.Unauthorized);
+  assert.equal(requests[0]!.url, SUBSCRIPTION_TOKEN_URL);
+  assert.equal(
+    requests[1]!.authorization,
+    `Bearer ${REFRESHED_SUBSCRIPTION_ACCESS}`,
+  );
+  const stored = storedSubscription(f, id);
+  assert.equal(stored.revision, FIRST_REVISION);
+  assert.equal(stored.secret.access, REFRESHED_SUBSCRIPTION_ACCESS);
+  assert.equal(stored.secret.refresh, REFRESHED_SUBSCRIPTION_REFRESH);
+  assert.ok(stored.secret.expires > Date.now());
+  for (const secret of [
+    STORED_OAUTH.access,
+    STORED_OAUTH.refresh,
+    REFRESHED_SUBSCRIPTION_ACCESS,
+    REFRESHED_SUBSCRIPTION_REFRESH,
+  ])
+    assert.ok(!JSON.stringify([answer, f.logs]).includes(secret));
+});
+
+test("verify of an anthropic-subscription record answers unauthorized and keeps the stored value when the refresh fails", async (t) => {
+  const f = fixture();
+  t.after(() => f.store.close());
+  const id = insertSubscription(f);
+  const fetch = t.mock.method(globalThis, "fetch", async () =>
+    Response.json(
+      { error: "invalid_grant" },
+      { status: HttpStatus.BadRequest },
+    ),
+  );
+  assert.deepEqual(await credentialVerify(f, SUBSCRIPTION_NAME), {
+    status: "unhealthy",
+    capability: CAPABILITY_MODEL_CALL,
+    failure_reason: ResourceFailureReason.Unauthorized,
+  });
+  assert.equal(fetch.mock.callCount(), ONE_REFRESH_CALL);
+  assert.deepEqual(storedSubscription(f, id), {
+    revision: FIRST_REVISION,
+    secret: STORED_OAUTH,
+  });
 });

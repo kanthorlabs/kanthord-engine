@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
+import type { CredentialStore } from "@earendil-works/pi-ai";
 import pino from "pino";
 import { z } from "zod";
 import { background, CancellationContext } from "../kernel/context.ts";
@@ -15,10 +16,11 @@ import { redactingLogger } from "../kernel/test-support.ts";
 import {
   CUSTODY_SERVICE_NAME,
   SecretShape,
+  type CredentialPlatform,
   type CredentialPlatformSet,
   type PlatformProbe,
 } from "./contract.ts";
-import { encrypt } from "./envelope.ts";
+import { decrypt, encrypt } from "./envelope.ts";
 import { custodyMigrations } from "./migrations.ts";
 import { CustodyComponent } from "./service.ts";
 import { INTAKE_SERVICE_NAME } from "../intake/contract.ts";
@@ -74,6 +76,13 @@ function platformSet(calls: ProbeCall[]): CredentialPlatformSet {
 function fixture(
   t: TestContext,
   logger: pino.Logger = pino({ enabled: false }),
+  owned: {
+    platforms: Record<string, CredentialPlatform>;
+    pinning: string[];
+  } = {
+    platforms: {},
+    pinning: [],
+  },
 ) {
   const store = new Store(IN_MEMORY_DATABASE);
   t.after(() => {
@@ -90,7 +99,7 @@ function fixture(
       pinCredential: () => {
         throw new Error("UNEXPECTED_COLLABORATION");
       },
-      liveExecutionsPinning: () => [],
+      liveExecutionsPinning: () => owned.pinning,
     },
     authorization: {
       authorizeModelInference: () => {
@@ -113,7 +122,7 @@ function fixture(
     },
     clientSecret: () => Buffer.alloc(32, 9).toString("base64"),
     store,
-    platforms: {},
+    platforms: owned.platforms,
     envelopeKey: ENVELOPE_KEY,
     logger,
     agentProvidersDependentOn: () => [],
@@ -439,4 +448,142 @@ test("verify answers unclassified when the caller cancels the probe", async (t) 
     capability: PROBED_CAPABILITY,
     failure_reason: ResourceFailureReason.Unclassified,
   });
+});
+
+const OAUTH_PLATFORM = "anthropic-subscription";
+const OAUTH_PROVIDER_ID = "anthropic";
+const OAUTH_NAME = "subscription";
+const EXPIRED_OAUTH = {
+  refresh: "test_private-stored-refresh",
+  access: "test_private-stored-access",
+  expires: 1,
+};
+const REFRESHED_OAUTH = {
+  refresh: "test_private-refreshed-refresh",
+  access: "test_private-refreshed-access",
+  expires: 4102444800000,
+};
+const LIVE_EXECUTION = "execution-live";
+
+type RefreshProbeCall = { stored: unknown; refreshStore: boolean };
+
+function oauthPlatform(calls: RefreshProbeCall[]): CredentialPlatform {
+  return {
+    secret_shape: SecretShape.OAuth,
+    login_modes: [],
+    metadata_schema: null,
+    capability: PROBED_CAPABILITY,
+    probe: async (_secret, _metadata, _context, _observe, refreshStore) => {
+      calls.push({
+        stored: await refreshStore?.read(OAUTH_PROVIDER_ID),
+        refreshStore: refreshStore !== undefined,
+      });
+      await refreshStore?.modify(OAUTH_PROVIDER_ID, async () => ({
+        type: SecretShape.OAuth,
+        ...REFRESHED_OAUTH,
+      }));
+      return ResourceStatus.Healthy;
+    },
+  };
+}
+
+function oauthFixture(t: TestContext, pinning: string[] = []) {
+  const calls: RefreshProbeCall[] = [];
+  const platform = oauthPlatform(calls);
+  const owned = fixture(t, pino({ enabled: false }), {
+    platforms: { [OAUTH_PLATFORM]: platform },
+    pinning,
+  });
+  const set: CredentialPlatformSet = {
+    platforms: { [OAUTH_PLATFORM]: platform },
+  };
+  const id = insert(
+    owned.store,
+    OAUTH_PLATFORM,
+    OAUTH_NAME,
+    FIRST_REVISION,
+    null,
+    EXPIRED_OAUTH,
+  );
+  const stored = () => {
+    const rows = owned.store.database
+      .prepare("SELECT id, revision, nonce, ciphertext FROM credential")
+      .all() as {
+      id: string;
+      revision: number;
+      nonce: Buffer;
+      ciphertext: Buffer;
+    }[];
+    return rows.map((row) => ({
+      id: row.id,
+      revision: row.revision,
+      secret: decrypt(
+        ENVELOPE_KEY,
+        row.id,
+        OAUTH_PLATFORM,
+        row.nonce,
+        row.ciphertext,
+      ),
+    }));
+  };
+  return { ...owned, set, calls, id, stored };
+}
+
+test("verify hands the probe a refresh store of the OAuth record and writes the refreshed value in place at the same revision", async (t) => {
+  const { component, set, calls, id, stored } = oauthFixture(t);
+  assert.deepEqual(await component.verify(set, OAUTH_NAME, background), {
+    status: ResourceStatus.Healthy,
+    capability: PROBED_CAPABILITY,
+    failure_reason: null,
+  });
+  assert.deepEqual(calls, [
+    {
+      stored: { type: SecretShape.OAuth, ...EXPIRED_OAUTH },
+      refreshStore: true,
+    },
+  ]);
+  assert.deepEqual(stored(), [
+    { id, revision: FIRST_REVISION, secret: REFRESHED_OAUTH },
+  ]);
+});
+
+test("verify hands no refresh store while a live execution pins the OAuth revision", async (t) => {
+  const { component, set, calls, id, stored } = oauthFixture(t, [
+    LIVE_EXECUTION,
+  ]);
+  await component.verify(set, OAUTH_NAME, background);
+  assert.deepEqual(calls, [{ stored: undefined, refreshStore: false }]);
+  assert.deepEqual(stored(), [
+    { id, revision: FIRST_REVISION, secret: EXPIRED_OAUTH },
+  ]);
+});
+
+test("verify and the resource check hand no refresh store for an api_key record", async (t) => {
+  const { store, component } = fixture(t);
+  insert(store, PROBED_PLATFORM, PROBED_NAME);
+  const stores: Array<CredentialStore | undefined> = [];
+  const recording: CredentialPlatformSet = {
+    platforms: {
+      [PROBED_PLATFORM]: {
+        ...platformSet([]).platforms[PROBED_PLATFORM]!,
+        probe: async (_secret, _metadata, _context, _observe, refreshStore) => {
+          stores.push(refreshStore);
+          return ResourceStatus.Healthy;
+        },
+      },
+    },
+  };
+  await component.verify(recording, PROBED_NAME, background);
+  await store.transaction((tx) =>
+    component.resourceCheck(tx, recording, PROBED_NAME),
+  )(background);
+  assert.deepEqual(stores, [undefined, undefined]);
+});
+
+test("the resource check of an OAuth record hands no refresh store", async (t) => {
+  const { store, component, set, calls } = oauthFixture(t);
+  await store.transaction((tx) => component.resourceCheck(tx, set, OAUTH_NAME))(
+    background,
+  );
+  assert.deepEqual(calls, [{ stored: undefined, refreshStore: false }]);
 });

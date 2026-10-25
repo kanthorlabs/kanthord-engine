@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { test, type TestContext } from "node:test";
+import { InMemoryCredentialStore } from "@earendil-works/pi-ai";
+import { SecretShape } from "../custody/contract.ts";
 import { background, CancellationContext } from "../kernel/context.ts";
 import { ResourceFailureReason, ResourceStatus } from "../kernel/health.ts";
 import { HttpMethod, HttpStatus } from "../kernel/http.ts";
@@ -868,4 +870,147 @@ test("a Copilot check sends the request whatever the stored expiry", async (t) =
     { connection: Connection.Ok, models: null },
   );
   assert.equal(fetch.mock.callCount(), TWO_CALLS);
+});
+
+const REFRESHED_ACCESS = "sk-ant-oat01-test-private-refreshed-access";
+const REFRESHED_REFRESH = "test_private-refreshed-refresh-token";
+const ANTHROPIC_TOKEN_URL = "https://platform.claude.com/v1/oauth/token";
+const REFRESHED_EXPIRES_IN_S = 3600;
+const REFRESH_FAILED_REASON = "access token refresh failed";
+const OAUTH_CHECKS = [
+  [checkOpenAICodex, OPENAI_CODEX_PROVIDER_ID],
+  [checkAnthropicSubscription, piProviderId(Platform.AnthropicSubscription)],
+] as const;
+
+async function refreshStoreOf(providerId: string, expires: number) {
+  const store = new InMemoryCredentialStore();
+  await store.modify(providerId, async () => ({
+    type: "oauth",
+    ...credentialOf(expires),
+  }));
+  return store;
+}
+
+test("an OAuth check with a refresh store lets pi-ai refresh an expired access token and checks with the new token", async () => {
+  const refreshed = {
+    type: "oauth",
+    refresh: REFRESHED_REFRESH,
+    access: REFRESHED_ACCESS,
+    expires: Date.now() + LONG_FUTURE_MS,
+  } as const;
+  for (const [check, providerId] of OAUTH_CHECKS) {
+    const seen: unknown[] = [];
+    const refreshing: ModelCall = async (
+      model,
+      modelContext,
+      options,
+      store,
+    ) => {
+      await store.modify(model.provider, async () => refreshed);
+      seen.push(await store.read(model.provider));
+      return reply("stop")(model, modelContext, options, store);
+    };
+    const store = await refreshStoreOf(providerId, Date.now() - FUTURE_MS);
+    assert.deepEqual(
+      await check(
+        credentialOf(Date.now() - FUTURE_MS),
+        background,
+        refreshing,
+        undefined,
+        store,
+      ),
+      { connection: Connection.Ok, models: null },
+    );
+    assert.deepEqual(seen, [refreshed]);
+    assert.deepEqual(await store.read(providerId), refreshed);
+  }
+});
+
+test("an OAuth check answers unauthorized and observes the refresh failure when pi-ai cannot refresh the access token", async () => {
+  for (const [check, providerId] of OAUTH_CHECKS) {
+    const observed: Array<[string, string]> = [];
+    const revoked: ModelCall = async (model, modelContext, options, store) => {
+      await store
+        .modify(model.provider, async () => {
+          throw new Error(`invalid_grant ${REFRESH}`);
+        })
+        .catch(() => undefined);
+      return reply("error", `OAuth refresh failed for ${model.provider}`)(
+        model,
+        modelContext,
+        options,
+        store,
+      );
+    };
+    const expires = Date.now() - FUTURE_MS;
+    const store = await refreshStoreOf(providerId, expires);
+    assert.deepEqual(
+      await check(
+        credentialOf(expires),
+        background,
+        revoked,
+        (reason, failureReason) => void observed.push([reason, failureReason]),
+        store,
+      ),
+      UNAUTHORIZED,
+    );
+    assert.deepEqual(observed, [
+      [REFRESH_FAILED_REASON, ResourceFailureReason.Unauthorized],
+    ]);
+    assert.deepEqual(await store.read(providerId), {
+      type: "oauth",
+      ...credentialOf(expires),
+    });
+  }
+});
+
+test("the anthropic-subscription probe refreshes an expired token through pi-ai into the refresh store and calls the model with the new token", async (t) => {
+  const requests: {
+    url: string;
+    authorization: string | null;
+    body: string;
+  }[] = [];
+  t.mock.method(
+    globalThis,
+    "fetch",
+    async (url: unknown, init?: RequestInit) => {
+      requests.push({
+        url: String(url),
+        authorization: new Headers(init?.headers).get(AUTHORIZATION_HEADER),
+        body: String(init?.body ?? ""),
+      });
+      if (String(url) === ANTHROPIC_TOKEN_URL)
+        return Response.json({
+          access_token: REFRESHED_ACCESS,
+          refresh_token: REFRESHED_REFRESH,
+          expires_in: REFRESHED_EXPIRES_IN_S,
+        });
+      return Response.json(
+        { type: "error" },
+        { status: HttpStatus.Unauthorized },
+      );
+    },
+  );
+  const providerId = piProviderId(Platform.AnthropicSubscription);
+  const expires = Date.now() - FUTURE_MS;
+  const store = await refreshStoreOf(providerId, expires);
+  assert.equal(
+    await LLM_PLATFORMS[Platform.AnthropicSubscription].probe?.(
+      credentialOf(expires),
+      null,
+      background,
+      undefined,
+      store,
+    ),
+    ResourceStatus.Unhealthy,
+  );
+  assert.equal(requests.length, TWO_CALLS);
+  assert.equal(requests[0]!.url, ANTHROPIC_TOKEN_URL);
+  assert.equal(JSON.parse(requests[0]!.body).refresh_token, REFRESH);
+  assert.equal(requests[1]!.url.startsWith(ANTHROPIC_MESSAGES_URL), true);
+  assert.equal(requests[1]!.authorization, `Bearer ${REFRESHED_ACCESS}`);
+  const stored = await store.read(providerId);
+  assert.ok(stored?.type === SecretShape.OAuth);
+  assert.equal(stored.access, REFRESHED_ACCESS);
+  assert.equal(stored.refresh, REFRESHED_REFRESH);
 });

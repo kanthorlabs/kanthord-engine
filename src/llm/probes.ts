@@ -17,6 +17,7 @@ import { anthropicProvider } from "@earendil-works/pi-ai/providers/anthropic";
 import { openaiCodexProvider } from "@earendil-works/pi-ai/providers/openai-codex";
 import { opencodeGoProvider } from "@earendil-works/pi-ai/providers/opencode-go";
 import { z } from "zod";
+import { SecretShape } from "../custody/contract.ts";
 import type { Context } from "../kernel/context.ts";
 import {
   ResourceFailureReason,
@@ -52,6 +53,8 @@ export const ANTHROPIC_SUBSCRIPTION_CHECK_MODEL = "claude-haiku-5-5";
 export const ANTHROPIC_SUBSCRIPTION_CHECK_MAX_TOKENS = 1;
 export const MODEL_CALL_CHECK_PROMPT = "What time is it?";
 export const MODEL_CALL_FAILURES: readonly string[] = ["error", "aborted"];
+export const ACCESS_TOKEN_EXPIRED_REASON = "access token expired";
+export const ACCESS_TOKEN_REFRESH_FAILED_REASON = "access token refresh failed";
 const ERROR_MESSAGE_STATUS = /^([1-5]\d{2})[:\s]/;
 const UNAUTHORIZED_STATUSES: readonly number[] = [
   HttpStatus.Unauthorized,
@@ -283,14 +286,62 @@ type ModelCallCheck = {
   options: Omit<ModelsSimpleStreamOptions, "signal">;
   secrets: readonly string[];
   call: ModelCall;
+  refreshStore?: CredentialStore;
 };
+
+type RefreshWatch = { store: CredentialStore; refreshFailed(): boolean };
+
+function refreshWatch(store: CredentialStore): RefreshWatch {
+  let failed = false;
+  return {
+    store: {
+      read: (providerId, options) => store.read(providerId, options),
+      list: (options) => store.list(options),
+      delete: (providerId, options) => store.delete(providerId, options),
+      modify: (providerId, fn, options) =>
+        store.modify(
+          providerId,
+          async (current) => {
+            try {
+              return await fn(current);
+            } catch (error) {
+              failed = true;
+              throw error;
+            }
+          },
+          options,
+        ),
+    },
+    refreshFailed: () => failed,
+  };
+}
+
+async function seededStore(
+  providerId: string,
+  credential: Credential,
+): Promise<CredentialStore> {
+  const store = new InMemoryCredentialStore();
+  await store.modify(providerId, async () => credential);
+  return store;
+}
+
+async function storedSecrets(
+  store: CredentialStore,
+  providerId: string,
+): Promise<string[]> {
+  const stored = await store.read(providerId);
+  return stored?.type === SecretShape.OAuth
+    ? [stored.refresh, stored.access]
+    : [];
+}
 
 async function modelCallCheck(
   check: ModelCallCheck,
   context: Context,
   observe?: ResourceObserver,
 ): Promise<ProviderCheckAnswer> {
-  const { providerId, modelId, credential, options, secrets, call } = check;
+  const { providerId, modelId, credential, options, call, refreshStore } =
+    check;
   try {
     const { signal } = context;
     if (signal.aborted) return UNREACHABLE;
@@ -299,8 +350,9 @@ async function modelCallCheck(
       observe?.("check model not found", ResourceFailureReason.Unclassified);
       return INVALID_RESPONSE;
     }
-    const credentials = new InMemoryCredentialStore();
-    await credentials.modify(providerId, async () => credential);
+    const watch = refreshWatch(
+      refreshStore ?? (await seededStore(providerId, credential)),
+    );
     let responseStatus: number | null = null;
     const reply = await call(
       model,
@@ -320,9 +372,20 @@ async function modelCallCheck(
           responseStatus = status;
         },
       },
-      credentials,
+      watch.store,
     );
     if (signal.aborted) return UNREACHABLE;
+    if (watch.refreshFailed()) {
+      observe?.(
+        ACCESS_TOKEN_REFRESH_FAILED_REASON,
+        ResourceFailureReason.Unauthorized,
+      );
+      return UNAUTHORIZED;
+    }
+    const secrets = [
+      ...check.secrets,
+      ...(await storedSecrets(watch.store, providerId)),
+    ];
     if (!MODEL_CALL_FAILURES.includes(reply.stopReason))
       return OK_WITHOUT_MODELS;
     const status = refusedStatus(responseStatus, reply.errorMessage);
@@ -335,7 +398,7 @@ async function modelCallCheck(
     if (status === null) return UNREACHABLE;
     return { connection: connectionOfStatus(status), models: null };
   } catch (error) {
-    observe?.(thrownReason(error, secrets), thrownFailureReason(context));
+    observe?.(thrownReason(error, check.secrets), thrownFailureReason(context));
     return UNREACHABLE;
   }
 }
@@ -346,28 +409,53 @@ export interface CodexCredential {
   expires: number;
 }
 
+type OAuthModelCallCheck = Omit<
+  ModelCallCheck,
+  "credential" | "secrets" | "refreshStore"
+>;
+
+async function oauthModelCallCheck(
+  check: OAuthModelCallCheck,
+  credential: CodexCredential,
+  context: Context,
+  observe?: ResourceObserver,
+  refreshStore?: CredentialStore,
+): Promise<ProviderCheckAnswer> {
+  const { refresh, access, expires } = credential;
+  if (refreshStore === undefined && expires <= Date.now()) {
+    observe?.(ACCESS_TOKEN_EXPIRED_REASON, ResourceFailureReason.Unauthorized);
+    return UNAUTHORIZED;
+  }
+  return modelCallCheck(
+    {
+      ...check,
+      credential: { type: "oauth", refresh, access, expires },
+      secrets: [refresh, access],
+      refreshStore,
+    },
+    context,
+    observe,
+  );
+}
+
 export async function checkOpenAICodex(
   credential: CodexCredential,
   context: Context,
   call: ModelCall = codexModelCall,
   observe?: ResourceObserver,
+  refreshStore?: CredentialStore,
 ): Promise<ProviderCheckAnswer> {
-  const { refresh, access, expires } = credential;
-  if (expires <= Date.now()) {
-    observe?.("access token expired", ResourceFailureReason.Unauthorized);
-    return UNAUTHORIZED;
-  }
-  return modelCallCheck(
+  return oauthModelCallCheck(
     {
       providerId: OPENAI_CODEX_PROVIDER_ID,
       modelId: OPENAI_CODEX_CHECK_MODEL,
-      credential: { type: "oauth", refresh, access, expires },
       options: { reasoning: OPENAI_CODEX_CHECK_REASONING },
-      secrets: [refresh, access],
       call,
     },
+    credential,
     context,
     observe,
+    refreshStore,
   );
 }
 
@@ -376,23 +464,19 @@ export async function checkAnthropicSubscription(
   context: Context,
   call: ModelCall = anthropicSubscriptionModelCall,
   observe?: ResourceObserver,
+  refreshStore?: CredentialStore,
 ): Promise<ProviderCheckAnswer> {
-  const { refresh, access, expires } = credential;
-  if (expires <= Date.now()) {
-    observe?.("access token expired", ResourceFailureReason.Unauthorized);
-    return UNAUTHORIZED;
-  }
-  return modelCallCheck(
+  return oauthModelCallCheck(
     {
       providerId: piProviderId(ANTHROPIC_SUBSCRIPTION_PLATFORM),
       modelId: ANTHROPIC_SUBSCRIPTION_CHECK_MODEL,
-      credential: { type: "oauth", refresh, access, expires },
       options: { maxTokens: ANTHROPIC_SUBSCRIPTION_CHECK_MAX_TOKENS },
-      secrets: [refresh, access],
       call,
     },
+    credential,
     context,
     observe,
+    refreshStore,
   );
 }
 

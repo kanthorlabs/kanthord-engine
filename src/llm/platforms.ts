@@ -139,21 +139,23 @@ export const LLM_PROVIDERS: Readonly<Partial<Record<Platform, LlmProvider>>> = {
     },
   },
   [Platform.OpenAICodex]: {
-    check: (secret, _metadata, context, observe) =>
+    check: (secret, _metadata, context, observe, refreshStore) =>
       checkOpenAICodex(
         oauthSecretSchema.parse(secret),
         context,
         undefined,
         observe,
+        refreshStore,
       ),
   },
   [Platform.AnthropicSubscription]: {
-    check: (secret, _metadata, context, observe) =>
+    check: (secret, _metadata, context, observe, refreshStore) =>
       checkAnthropicSubscription(
         oauthSecretSchema.parse(secret),
         context,
         undefined,
         observe,
+        refreshStore,
       ),
   },
   [Platform.Anthropic]: {
@@ -191,9 +193,10 @@ export const LLM_PROVIDERS: Readonly<Partial<Record<Platform, LlmProvider>>> = {
 function providerProbe(platform: Platform): PlatformProbe | null {
   const provider = LLM_PROVIDERS[platform];
   if (!provider) return null;
-  return async (secret, metadata, context, observe) =>
+  return async (secret, metadata, context, observe, refreshStore) =>
     HEALTH_OF_CONNECTION[
-      (await provider.check(secret, metadata, context, observe)).connection
+      (await provider.check(secret, metadata, context, observe, refreshStore))
+        .connection
     ];
 }
 

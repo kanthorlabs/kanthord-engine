@@ -229,15 +229,15 @@ HTTP `200` answers `{ status, capability, failure_reason }`, the health entry of
 
 The failure reasons of the answer:
 
-| Value               | Cause                                                                                                       |
-| ------------------- | ----------------------------------------------------------------------------------------------------------- |
-| `unauthorized`      | The provider answers HTTP `401`, or the `openai-codex` or `anthropic-subscription` access token is expired. |
-| `forbidden`         | The provider answers HTTP `403`.                                                                            |
-| `rate_limited`      | The provider answers HTTP `429`.                                                                            |
-| `invalid_response`  | The provider answers another HTTP status, or a model list that the check cannot read.                       |
-| `unreachable`       | The request fails before an HTTP answer, or a failed model call carries no HTTP status.                     |
-| `deadline_exceeded` | The check exceeds its 10 s deadline. Check again.                                                           |
-| `unclassified`      | Any other failure.                                                                                          |
+| Value               | Cause                                                                                                                                            |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `unauthorized`      | The provider answers HTTP `401`, the OAuth refresh of `verify` fails, or the `openai-codex` or `anthropic-subscription` access token is expired. |
+| `forbidden`         | The provider answers HTTP `403`.                                                                                                                 |
+| `rate_limited`      | The provider answers HTTP `429`.                                                                                                                 |
+| `invalid_response`  | The provider answers another HTTP status, or a model list that the check cannot read.                                                            |
+| `unreachable`       | The request fails before an HTTP answer, or a failed model call carries no HTTP status.                                                          |
+| `deadline_exceeded` | The check exceeds its 10 s deadline. Check again.                                                                                                |
+| `unclassified`      | Any other failure.                                                                                                                               |
 
 A platform with `verifiable: false` or with the secret shape `oauth` answers `400 credential.check.unsupported`.
 A platform of another component answers `400 credential.platform.unsupported`.
@@ -253,7 +253,15 @@ The required `CredentialName` maps to `params.credential_name`. Query is empty a
 It checks one stored record and stores no result.
 The check runs through the LLM provider of the platform, and the connection maps to the status as the healthcheck does.
 The component releases the newest live revision of the record, runs the same platform check as the health report with a 10 s deadline, and drops the material after the call. A check that exceeds its deadline answers `unknown` with `deadline_exceeded`.
-The release outside an execution pins no revision, drains no revision and writes no row.
+The release outside an execution pins no revision, drains no revision and writes no row. The one exception is the write of a refreshed OAuth value below.
+
+The OAuth refresh of `verify` applies to the `openai-codex` and `anthropic-subscription` records:
+
+- pi-ai refreshes the access token with the stored refresh token when the token expires within 5 minutes. Then the model call uses the new access token.
+- Custody writes the refreshed value in place at the same revision, by the rule of a [refresh report](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/custody.impl.md#the-credential-handover). The verify adds no revision.
+- When a live execution pins the revision, the verify does not refresh. An expired access token then answers `unhealthy` with `unauthorized` and no remote call.
+- A failed refresh, for example a revoked refresh token, answers `unhealthy` with `unauthorized`. The stored value does not change, and the server log records the reason `access token refresh failed`.
+- The `github-copilot` check sends the stored GitHub token. It refreshes nothing.
 
 HTTP `200` answers `{ status, capability, failure_reason }`, the health entry of the [health report](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/gateway-service.impl.md#the-resource-healthcheck-report):
 
@@ -524,10 +532,10 @@ validates a record on demand through the health report. Create and rotate make
 no remote call. The platforms with an LLM provider are exactly the `verifiable` platforms.
 The `anthropic-subscription` check makes one model call to `claude-haiku-5-5`.
 The `opencode-go` check makes one model call to `deepseek-v4-flash`.
-No check refreshes OAuth. An expired `openai-codex` or `anthropic-subscription` access token reports `unhealthy` with `failure_reason: unauthorized` and no remote call. The `github-copilot` check sends the stored GitHub token and ignores the stored expiry.
+Only `verify` refreshes OAuth, as [`verify`](#verify-credential-name) describes. In every other check, an expired `openai-codex` or `anthropic-subscription` access token reports `unhealthy` with `failure_reason: unauthorized` and no remote call. The `github-copilot` check sends the stored GitHub token and ignores the stored expiry.
 
-No command here exports a credential, refreshes
-OAuth or rotates the master key. Dependents, including agent providers, prevent
+No command here exports a credential or rotates the master key. Only `verify` refreshes
+OAuth. Dependents, including agent providers, prevent
 an archive, and the dependency check and the archive are atomic.
 Secret handover and refresh reports are implemented Worker API operations; the
 handover CLI leaf is implemented. Acquisition grants remain later work. None is a

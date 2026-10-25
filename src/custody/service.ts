@@ -2,7 +2,7 @@ import { addAbortListener } from "node:events";
 import { z } from "zod";
 import assert from "node:assert/strict";
 import type { Logger } from "pino";
-import type { Credential } from "@earendil-works/pi-ai";
+import type { Credential, CredentialStore } from "@earendil-works/pi-ai";
 import {
   background,
   CancellationContext,
@@ -218,6 +218,7 @@ function capturedResourceCheck(
   row: LiveRow,
   key: Buffer,
   entry: CredentialPlatform,
+  refreshStore?: CredentialStore,
 ): ResourceCheck {
   const { id, platform, holder } = row;
   const { probe } = entry;
@@ -236,7 +237,7 @@ function capturedResourceCheck(
         nonce,
         ciphertext,
       });
-      return await probe(secret, metadata, context, observe);
+      return await probe(secret, metadata, context, observe, refreshStore);
     } catch {
       observe?.(
         "probe failed before the remote call",
@@ -986,25 +987,55 @@ export class CustodyComponent implements Service, CredentialRecords {
     return this.grantedCredentialStore(
       input.platform,
       grant,
-      (tx, current, next) => {
-        const row = this.workbenchRow(tx, grant(tx));
-        if (this.executions.liveExecutionsPinning(tx, row.id).length)
-          throw new ExecutionStoreError(
-            "A live execution holds the credential revision.",
-          );
-        applyReport(
+      (tx, current, next) =>
+        this.replaceServerCopy(
           tx,
-          this.envelopeKey,
-          {
-            credential_id: row.id,
-            digest: digest(current),
-            credential: piCredentialSchema.parse(next),
-          },
-          this.platforms,
-          this.instanceKeys,
-        );
-      },
+          this.workbenchRow(tx, grant(tx)).id,
+          current,
+          next,
+        ),
     );
+  }
+
+  private replaceServerCopy(
+    tx: Transaction,
+    credentialId: string,
+    current: Credential,
+    next: Credential,
+  ): void {
+    if (this.executions.liveExecutionsPinning(tx, credentialId).length)
+      throw new ExecutionStoreError(
+        "A live execution holds the credential revision.",
+      );
+    applyReport(
+      tx,
+      this.envelopeKey,
+      {
+        credential_id: credentialId,
+        digest: digest(current),
+        credential: piCredentialSchema.parse(next),
+      },
+      this.platforms,
+      this.instanceKeys,
+    );
+  }
+
+  private verifyRefreshStore(row: LiveRow): CredentialStore {
+    return workbenchCredentialStore({
+      providerId: piProviderId(row.platform),
+      type: SecretShape.OAuth,
+      release: () =>
+        this.store.transaction((tx) =>
+          credentialOfSecret(
+            SecretShape.OAuth,
+            openSecret(this.envelopeKey, this.storedRowOf(tx, row)),
+          ),
+        ),
+      replace: (current, next) =>
+        this.store.transaction((tx) =>
+          this.replaceServerCopy(tx, row.id, current, next),
+        ),
+    });
   }
 
   serverAgentCredentials(input: ServerAgentCredentialsInput) {
@@ -1571,7 +1602,7 @@ export class CustodyComponent implements Service, CredentialRecords {
     credentialName: string,
     context: Context,
   ): Promise<CredentialCheckAnswer> {
-    const { row, entry } = this.store.transaction((tx) => {
+    const { row, entry, refreshable } = this.store.transaction((tx) => {
       refuseForeign(tx, set, credentialName);
       refuseArchived(tx, credentialName, SERVER_HOLDER);
       const live = serverLive(tx, credentialName);
@@ -1583,7 +1614,13 @@ export class CustodyComponent implements Service, CredentialRecords {
           CustodyErrorCode.CheckUnsupported,
           "Unsupported credential check.",
         );
-      return { row: live, entry: owned };
+      return {
+        row: live,
+        entry: owned,
+        refreshable:
+          owned.secret_shape === SecretShape.OAuth &&
+          this.executions.liveExecutionsPinning(tx, live.id).length === NO_ROWS,
+      };
     });
     const deadline = new CancellationContext(
       context,
@@ -1603,7 +1640,12 @@ export class CustodyComponent implements Service, CredentialRecords {
     };
     try {
       const checked = await Promise.race([
-        capturedResourceCheck(row, this.envelopeKey, entry)(deadline, observe),
+        capturedResourceCheck(
+          row,
+          this.envelopeKey,
+          entry,
+          refreshable ? this.verifyRefreshStore(row) : undefined,
+        )(deadline, observe),
         cancelled(deadline.signal).then(() => ResourceStatus.Unknown),
       ]);
       const status = deadline.signal.aborted ? ResourceStatus.Unknown : checked;
