@@ -11,7 +11,11 @@ import {
   type CallerContext,
   type ExecutionClaim,
 } from "../kernel/operation.ts";
-import { IN_MEMORY_DATABASE, Store } from "../kernel/store.ts";
+import {
+  IN_MEMORY_DATABASE,
+  Store,
+  type Transaction,
+} from "../kernel/store.ts";
 import {
   MISSION_SERVICE_NAME,
   missionOperations,
@@ -407,7 +411,11 @@ export function missionHarness(
     const registered = registry.get(operation.id);
     assert.equal(registered.operation, operation);
     const before = commits;
-    const output = await registered.handler(parsed, caller);
+    const output = await registered.handler(parsed, {
+      ...caller,
+      commit: <T>(write: (tx: Transaction) => T): T =>
+        caller.commit((tx) => operation.output.parse(write(tx)) as T),
+    });
     assert.equal(commits, before + 1);
     return operation.output.parse(output) as z.output<
       (typeof missionOperations)[K]["output"]
