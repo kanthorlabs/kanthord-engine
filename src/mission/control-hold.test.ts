@@ -474,6 +474,10 @@ for (const [operation, act, from, to, body] of [
     assert.equal(trace.node_id, h.node_id);
     assert.equal(contribution.attributes[ActAttribute.StateFrom], from);
     assert.equal(contribution.attributes[ActAttribute.StateTo], to);
+    assert.equal(
+      contribution.attributes[ActAttribute.MissionVersion],
+      FIRST_ATTEMPT,
+    );
     assert.deepEqual(contribution.texts, [
       { text_id: `${trace.root_span_id}:reason`, text: "Hold" },
     ]);

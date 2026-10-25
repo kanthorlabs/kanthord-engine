@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
 import type { Logger } from "pino";
+import { z } from "zod";
 import {
   SpanStatus,
   type Attributes,
@@ -26,6 +27,7 @@ export const Act = {
   DeleteEvidence: "mission.evidence.delete",
 } as const;
 export type Act = (typeof Act)[keyof typeof Act];
+export const actSchema = z.enum(Act);
 
 export const ActAttribute = {
   ProjectId: "kanthord.project.id",
@@ -33,6 +35,7 @@ export const ActAttribute = {
   Attempt: "kanthord.attempt",
   StateFrom: "kanthord.node.state.from",
   StateTo: "kanthord.node.state.to",
+  MissionVersion: "kanthord.mission.version",
   EvidenceId: "kanthord.evidence.id",
 } as const;
 
@@ -41,6 +44,7 @@ export interface ActFacts {
   node_id: string;
   attempt: number;
   acted_at: number;
+  mission_version: number;
   from: string | null;
   to: string;
   reason: string | null;
@@ -83,6 +87,7 @@ function attributesOf(facts: ActFacts): Attributes {
     ...(attempt === null ? {} : { [ActAttribute.Attempt]: attempt }),
     ...(facts.from === null ? {} : { [ActAttribute.StateFrom]: facts.from }),
     [ActAttribute.StateTo]: facts.to,
+    [ActAttribute.MissionVersion]: facts.mission_version,
     ...(facts.evidence_id === null
       ? {}
       : { [ActAttribute.EvidenceId]: facts.evidence_id }),

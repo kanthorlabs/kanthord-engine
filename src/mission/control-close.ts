@@ -157,6 +157,7 @@ export function overrideNode(
   );
   transition(tx, dependencies, mission, node, NodeState.Completed, now);
   return actedOn(
+    tx,
     mission,
     node,
     body.reason,
@@ -209,6 +210,7 @@ function closeHuman(
   );
   transition(tx, dependencies, mission, node, state, now);
   return actedOn(
+    tx,
     mission,
     node,
     body.reason,

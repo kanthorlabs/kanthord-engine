@@ -867,6 +867,10 @@ test("an unblock writes one act trace with the attempt that it opens and its rea
   assert.equal(written.length, ONE_ACT);
   assert.deepEqual(statesAtAct, [NodeState.Available]);
   const [trace, contribution] = written[0]!;
+  assert.equal(
+    contribution.attributes[ActAttribute.MissionVersion],
+    FIRST_ATTEMPT,
+  );
   assert.equal(contribution.operation, Act.Unblock);
   assert.equal(trace.node_id, h.node_id);
   assert.equal(trace.attempt, SECOND_ATTEMPT);

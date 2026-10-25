@@ -216,6 +216,7 @@ export async function removeEvidence(
       node_id: node.id,
       attempt: current.attempt ?? NO_ATTEMPT,
       acted_at: now,
+      mission_version: requireMission(tx, mission.id).version,
       from,
       to: current.state,
       reason: body.reason ?? null,

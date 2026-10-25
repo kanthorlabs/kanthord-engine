@@ -332,6 +332,7 @@ export function closeExternalAttempt(
 }
 
 export function actedOn(
+  tx: Transaction,
   mission: Mission,
   before: NodeRow,
   reason: string | null,
@@ -348,6 +349,7 @@ export function actedOn(
       node_id: before.id,
       attempt: result.node.attempt ?? NO_ATTEMPT,
       acted_at: now,
+      mission_version: requireMission(tx, mission.id).version,
       from: before.state,
       to: result.node.state,
       reason,

@@ -441,6 +441,10 @@ test("an approve writes one act trace that names the created node and no state b
   assert.equal(contribution.attributes[ActAttribute.NodeId], createdId);
   assert.equal(ActAttribute.StateFrom in contribution.attributes, false);
   assert.equal(
+    contribution.attributes[ActAttribute.MissionVersion],
+    result.created.mission_version,
+  );
+  assert.equal(
     contribution.attributes[ActAttribute.StateTo],
     NodeState.Available,
   );

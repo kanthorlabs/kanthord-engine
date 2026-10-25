@@ -1,7 +1,13 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { SpanStatus, type ExecutionTrace } from "../tracking/contract.ts";
-import { Act, ActAttribute, actTrace, type ActFacts } from "./act-telemetry.ts";
+import {
+  Act,
+  ActAttribute,
+  actSchema,
+  actTrace,
+  type ActFacts,
+} from "./act-telemetry.ts";
 
 const REVOKED: ExecutionTrace = {
   execution_id: "execution_1",
@@ -12,11 +18,13 @@ const REVOKED: ExecutionTrace = {
   root_span_id: "b".repeat(16),
 };
 const ACTED_AT = 500;
+const MISSION_VERSION = 7;
 const FACTS: ActFacts = {
   project_id: "project_1",
   node_id: "node_1",
   attempt: 2,
   acted_at: ACTED_AT,
+  mission_version: MISSION_VERSION,
   from: "Executing",
   to: "Paused",
   reason: "Stop for review.",
@@ -29,6 +37,11 @@ const EVIDENCE_ID = "evidence_1";
 test("the acts are the closed set of nine operations", () => {
   assert.equal(Object.keys(Act).length, NINE_ACTS);
   assert.equal(new Set(Object.values(Act)).size, NINE_ACTS);
+});
+
+test("actSchema accepts each act and refuses another operation", () => {
+  for (const act of Object.values(Act)) assert.equal(actSchema.parse(act), act);
+  assert.equal(actSchema.safeParse("mission.node.create").success, false);
 });
 
 test("actTrace answers the trace with the project, the node, the attempt and the act time", () => {
@@ -56,6 +69,7 @@ test("actTrace answers a root contribution that starts and ends at the act time"
     [ActAttribute.Attempt]: 2,
     [ActAttribute.StateFrom]: "Executing",
     [ActAttribute.StateTo]: "Paused",
+    [ActAttribute.MissionVersion]: MISSION_VERSION,
   });
   assert.equal(contribution.links, undefined);
 });

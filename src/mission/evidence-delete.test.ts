@@ -461,6 +461,10 @@ test("a delete writes one act trace with the evidence, the reason and equal stat
   assert.equal(contribution.attributes[ActAttribute.EvidenceId], h.evidence_id);
   assert.equal(contribution.attributes[ActAttribute.StateFrom], state);
   assert.equal(contribution.attributes[ActAttribute.StateTo], state);
+  assert.equal(
+    contribution.attributes[ActAttribute.MissionVersion],
+    FIRST_ATTEMPT,
+  );
   assert.equal(contribution.links, undefined);
   assert.deepEqual(contribution.texts, [
     { text_id: `${trace.root_span_id}:reason`, text: "Remove stored" },

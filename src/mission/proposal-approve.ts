@@ -142,6 +142,7 @@ export function approveProposal(
       node_id: createdId,
       attempt: createdNode.attempt ?? NO_ATTEMPT,
       acted_at: now,
+      mission_version: requireMission(tx, mission.id).version,
       from: null,
       to: createdNode.state,
       reason: body.reason ?? null,

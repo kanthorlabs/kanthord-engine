@@ -73,6 +73,7 @@ export function readyNode(
   if (node.attempt === NO_ATTEMPT) openCurrentAttempt(tx, nodeId, actor, now);
   transition(tx, dependencies, mission, node, NodeState.Waiting, now);
   return actedOn(
+    tx,
     mission,
     node,
     body.reason,
@@ -123,6 +124,7 @@ export function resumeNode(
   assert.ok(current);
   const outcome = closeExternalAttempt(tx, dependencies, current, now);
   return actedOn(
+    tx,
     mission,
     node,
     body.reason,
@@ -171,6 +173,7 @@ export function pauseNode(
   );
   transition(tx, dependencies, mission, node, NodeState.Paused, now);
   return actedOn(
+    tx,
     mission,
     node,
     body.reason,

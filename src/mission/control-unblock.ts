@@ -178,6 +178,7 @@ export function unblockNode(
     );
   transition(tx, dependencies, mission, node, NodeState.Available, now);
   return actedOn(
+    tx,
     mission,
     node,
     body.reason ?? null,
