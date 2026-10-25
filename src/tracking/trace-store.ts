@@ -48,8 +48,8 @@ export function traceRowOf(trace: ExecutionTrace | ServerTrace): TraceRow {
     trace_id: trace.trace_id,
     project_id: trace.project_id,
     execution_id: "execution_id" in trace ? trace.execution_id : null,
-    node_id: "node_id" in trace ? trace.node_id : null,
-    attempt: "attempt" in trace ? trace.attempt : null,
+    node_id: trace.node_id,
+    attempt: trace.attempt,
     root_span_id: trace.root_span_id,
   };
 }

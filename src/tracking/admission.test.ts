@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
 import { IN_MEMORY_DATABASE, Store } from "../kernel/store.ts";
-import { admitRecords, type Admission } from "./admission.ts";
+import { admitRecords, admitServerSpan, type Admission } from "./admission.ts";
 import {
   Disposition,
   RecordKind,
@@ -334,4 +334,48 @@ test("the record schema admits a UUID entry identity", () => {
     }),
   );
   assert.equal(result.success, true);
+});
+
+test("a server contribution whose text identity exists is refused and stores neither its span nor its texts", (t) => {
+  const store = trackingStore(t);
+  admit(store, [
+    {
+      record_id: `${SPAN}:output`,
+      trace_id: TRACE,
+      kind: RecordKind.Text,
+      text_id: `${SPAN}:output`,
+      text: TEXT_CONTENT,
+    },
+  ]);
+  let reason: RefusalReason | null = null;
+  assert.throws(() =>
+    store.transaction((tx) => {
+      reason = admitServerSpan(tx, admission(), {
+        record_id: `${SPAN}:start`,
+        span_id: SPAN,
+        parent_span_id: ROOT,
+        operation: "agent.tool",
+        start_time: STARTED,
+        text_ids: [`${SPAN}:fresh`, `${SPAN}:output`],
+        texts: [
+          { text_id: `${SPAN}:fresh`, text: "fresh" },
+          { text_id: `${SPAN}:output`, text: "changed" },
+        ],
+      });
+      if (reason !== null) throw new Error(reason);
+    }),
+  );
+  assert.equal(reason, RefusalReason.TextExists);
+  assert.equal(
+    store.transaction((tx) => readSpan(tx, TRACE, SPAN)),
+    null,
+  );
+  assert.equal(
+    store.transaction((tx) => readText(tx, TRACE, `${SPAN}:fresh`)),
+    null,
+  );
+  assert.equal(
+    store.transaction((tx) => readText(tx, TRACE, `${SPAN}:output`))?.content,
+    TEXT_CONTENT,
+  );
 });

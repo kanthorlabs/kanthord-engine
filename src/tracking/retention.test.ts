@@ -52,6 +52,8 @@ function serverTraceOf(index: number, createdAt: number): ServerTrace {
     root_span_id: index.toString(16).padStart(16, "0"),
     project_id: "project_01JZ8PZ0A1B2C3D4E5F6G7H8J9",
     created_at: createdAt,
+    node_id: null,
+    attempt: null,
   };
 }
 

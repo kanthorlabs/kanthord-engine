@@ -302,6 +302,8 @@ export interface ServerTrace {
   root_span_id: string;
   project_id: string;
   created_at: number;
+  node_id: string | null;
+  attempt: number | null;
 }
 export interface ExecutionTraces {
   traceOf(executionId: string): ExecutionTrace | undefined;

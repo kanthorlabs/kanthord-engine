@@ -54,6 +54,7 @@ export interface SpanContribution {
   events?: SpanEvent[];
   links?: SpanLink[];
   text_ids?: string[];
+  texts?: { text_id: string; text: string }[];
 }
 interface Outcome {
   disposition: Disposition;
@@ -289,6 +290,30 @@ export function admitRecords(
   };
 }
 
+function applyServerTexts(
+  tx: Transaction,
+  admission: Admission,
+  added: SpanContribution,
+): RefusalReason | null {
+  for (const { text_id, text } of added.texts ?? []) {
+    const record: TextRecord = {
+      record_id: text_id,
+      trace_id: admission.trace.trace_id,
+      kind: RecordKind.Text,
+      text_id,
+      text,
+    };
+    if (
+      Buffer.byteLength(canonicalJSON(record), "utf8") >
+      TELEMETRY_RECORD_MAX_BYTES
+    )
+      return RefusalReason.RecordTooLarge;
+    const reason = applyText(tx, admission, record);
+    if (reason) return reason;
+  }
+  return null;
+}
+
 export function admitServerSpan(
   tx: Transaction,
   admission: Admission,
@@ -299,6 +324,8 @@ export function admitServerSpan(
   if (recordExists(tx, admission.trace.trace_id, added.record_id)) return null;
   const reason = applySpan(tx, admission, added);
   if (reason) return reason;
+  const textReason = applyServerTexts(tx, admission, added);
+  if (textReason) return textReason;
   insertRecord(
     tx,
     {
