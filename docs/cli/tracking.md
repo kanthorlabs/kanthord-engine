@@ -357,7 +357,7 @@ in the same transaction. An unknown trace answers `404`
 | `turn_count`            | Integer of 0 or more            | The number of stored `agent.turn` spans.                                                                             |
 | `tool_count`            | Integer of 0 or more            | The number of stored `agent.tool` spans.                                                                             |
 | `error_count`           | Integer of 0 or more            | The number of stored spans with the status `Error`.                                                                  |
-| `first_error_span_id`   | `SpanID` or `null`              | The first stored span below the root with the status `Error`.                                                        |
+| `first_error_span_id`   | `SpanID` or `null`              | The first stored span below the root with the status `Error` and no `error.type` `tool_error` or `stopped`.          |
 
 The summary counts the stored spans only, so it is as lossy as the spans. The
 field `cost_usd` is an estimate that pi computes from its model price table.
