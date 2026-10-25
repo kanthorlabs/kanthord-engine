@@ -355,6 +355,7 @@ async function openExecution(
     cleared: null as string | null,
     unchangedTurns: 0,
     lastVerification: null as VerificationFacts,
+    revisionCount: 0,
     provider,
     bare: bares[0]!,
     bares,

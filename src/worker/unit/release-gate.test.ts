@@ -33,7 +33,7 @@ import {
   spanEnds,
   task,
 } from "./test-support.ts";
-import { SpanStatus } from "../../tracking/contract.ts";
+import { RecordKind, SpanStatus } from "../../tracking/contract.ts";
 import { SpanOperation } from "./telemetry.ts";
 
 type Fixture = Awaited<ReturnType<typeof fixture>>;
@@ -185,7 +185,11 @@ test("a release failure that no revision changes stops with no_progress and neve
 const BUDGET_STOP = {
   reason: "budget_end",
   code: "wall_time",
-  cause: unattributed([CauseCategory.Plan, CauseCategory.Model]),
+  cause: unattributed([
+    CauseCategory.Environment,
+    CauseCategory.Plan,
+    CauseCategory.Model,
+  ]),
 };
 
 test("a wall deadline during a task verification releases further work", async (t) => {
@@ -197,6 +201,39 @@ test("a wall deadline during a task verification releases further work", async (
   let deadline = Date.now() + 60000;
   h.agent.budget.wallDeadline = () => {
     deadline = Date.now() + 30;
+    return deadline;
+  };
+  h.agent.budget.exhausted = () => Date.now() >= deadline;
+  const bodies = recordReleases(h);
+  acceptEvidence(h);
+  assert.deepEqual(await runStepsImplement(h), {
+    kind: "released",
+    furtherWork: true,
+    stop: BUDGET_STOP,
+  });
+  assert.deepEqual(bodies, [{ further_work: true, stop: BUDGET_STOP }]);
+});
+
+test("a wall deadline during a release verification releases with the timed-out budget cause", async (t) => {
+  const h = await fixture(t, [task("settled", "true")], [NOTHING]);
+  h.revision = {
+    ...h.revision,
+    content: {
+      ...h.revision.content,
+      verifications: [
+        `case "$PWD" in */${RELEASE_DIRECTORY}/*) sleep 30;; esac`,
+      ],
+    },
+  };
+  const releaseDirectory = join(
+    h.input.workspaces.nodeKey(h.input.claim.node_id),
+    RELEASE_DIRECTORY,
+  );
+  const wallDeadline = h.agent.budget.wallDeadline.bind(h.agent.budget);
+  let deadline = Number.POSITIVE_INFINITY;
+  h.agent.budget.wallDeadline = () => {
+    if (!existsSync(releaseDirectory)) return wallDeadline();
+    deadline = Math.min(deadline, Date.now() + 500);
     return deadline;
   };
   h.agent.budget.exhausted = () => Date.now() >= deadline;
@@ -318,6 +355,34 @@ test("a failed release command writes the result routed with the unit id of its 
     "kanthord.release_gate.result": "routed",
     "kanthord.release_gate.unit_id": owner.id,
   });
+});
+
+test("the verification spans of a release name the owner of each command with the context release", async (t) => {
+  const owner = task("owner", "true");
+  const h = await fixture(t, [owner], []);
+  h.revision = {
+    ...h.revision,
+    content: { ...h.revision.content, verifications: ["true"] },
+  };
+  const records = recordSpans(h);
+  assert.deepEqual(await releaseGate(h), { kind: ReleaseGateKind.Passed });
+  const starts = records.flatMap((record) =>
+    record.kind === RecordKind.Span &&
+    record.operation === SpanOperation.Verification &&
+    record.start_time !== undefined
+      ? [record.attributes]
+      : [],
+  );
+  assert.deepEqual(
+    starts.map((attributes) => [
+      attributes?.["kanthord.verification.context"],
+      attributes?.["kanthord.verification.owner_id"],
+    ]),
+    [
+      ["release", h.input.claim.node_id],
+      ["release", owner.id],
+    ],
+  );
 });
 
 test("a budget end writes the release gate result budget_end", async (t) => {

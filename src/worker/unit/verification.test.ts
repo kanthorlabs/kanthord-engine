@@ -11,6 +11,8 @@ import {
   temporary,
 } from "../../kernel/test-support.ts";
 import {
+  commandClassOf,
+  CommandEnd,
   environmentStop,
   infrastructureStop,
   runVerifications,
@@ -297,6 +299,44 @@ test("the tested input is one address for one checkout and the list in binding o
 });
 
 const SIGNAL_KILL = "sh -c 'kill -9 $$'";
+test("a rerun of a failed command carries flaky_check and no other attempt does", async (t) => {
+  const attempts: boolean[] = [];
+  await runVerificationsWithOutput({
+    observe: (attempt, execute) => {
+      attempts.push(attempt.flaky_check);
+      return execute();
+    },
+    directory: temporary(t),
+    commands: ["false"],
+    tested_input: { kind: "produced", sha256: "hash" },
+    deadline: Date.now() + 10000,
+    context: background,
+    env: hostEnvironment(),
+    reruns: 2,
+  });
+  assert.deepEqual(attempts, [false, true, true]);
+});
+
+function commandRun(exit_code: number | null, signal: string | null) {
+  return {
+    result: { command: "x", exit_code, signal, timed_out: false },
+    output: "",
+    end: CommandEnd.Exit,
+  };
+}
+
+test("commandClassOf answers code_failure for a failed exit, infrastructure for a signal and pass for a success", () => {
+  assert.equal(
+    commandClassOf(commandRun(FAILED_EXIT, null)),
+    VerificationClass.CodeFailure,
+  );
+  assert.equal(
+    commandClassOf(commandRun(null, KILL_SIGNAL)),
+    VerificationClass.Infrastructure,
+  );
+  assert.equal(commandClassOf(commandRun(0, null)), VerificationClass.Pass);
+});
+
 const EXIT_KILL = "sh -c 'kill -9 $$'; exit $?";
 const KILLED_EXIT = 137;
 const KILL_SIGNAL = "SIGKILL";

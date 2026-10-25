@@ -78,6 +78,7 @@ import {
   testedCommitOf,
   environmentDigestsOf,
   verificationObserver,
+  VerificationContext,
 } from "./method-telemetry.ts";
 import { nodeWork, RefreshResult, refreshAtClaim } from "./base-refresh.ts";
 import {
@@ -355,11 +356,12 @@ async function runPending(
   }
   for (const { task, verdict, run } of units) {
     state.task = task;
+    state.revisionCount = 0;
     const result = await state.run.spans.within(
       taskSpan(state.run.spans, task),
       run,
-      taskEnd,
-      taskFailure,
+      (ended) => taskEnd(ended, state.revisionCount),
+      (error) => taskFailure(error, state.revisionCount),
     );
     if (result.kind === TaskResultKind.BudgetEnd)
       return { task, budgetEnd: true, completedTasks: completed.size };
@@ -398,14 +400,16 @@ async function runNodeInstruction(
       if (ruled) {
         state.unchangedTurns = unchangedTurns;
         countUnchangedTurn(state, NoProgressRule.VerdictRuleUnmet);
+        state.revisionCount++;
         continue;
       }
     } else if (revised && !agent.changed())
       countUnchangedTurn(state, NoProgressRule.UnchangedRevision);
-    const checked = await verifyCommands(state, commands);
+    const checked = await verifyCommands(state, unit, commands);
     const { verification, outputs } = checked;
     const passed = verificationPassed(verification, commands);
     state.lastVerification = verificationFactsOf(passed, verification);
+    state.run.noteVerification(state.lastVerification?.timed_out ?? false);
     state.run.log("task verified", {
       task_id: unit.id,
       commit: headSetOf(state.checkouts),
@@ -421,6 +425,7 @@ async function runNodeInstruction(
     );
     template = PromptTemplate.TaskRevision;
     revised = true;
+    state.revisionCount++;
   }
   return ended;
 }
@@ -474,6 +479,7 @@ export async function runTask(
     const { verification, outputs } = checked;
     const passed = verificationPassed(verification, task.content.verifications);
     state.lastVerification = verificationFactsOf(passed, verification);
+    state.run.noteVerification(state.lastVerification?.timed_out ?? false);
     state.run.log("task verified", {
       task_id: task.id,
       commit: headSetOf(state.checkouts),
@@ -487,6 +493,7 @@ export async function runTask(
       checked.commands,
       outputs.at(-1) ?? "",
     );
+    state.revisionCount++;
   }
   return ended;
 }
@@ -526,6 +533,7 @@ export interface StepsState {
   cleared: string | null;
   unchangedTurns: number;
   lastVerification: VerificationFacts;
+  revisionCount: number;
   setup: SetupEntry[];
   base: BaseHead;
   setupPending: boolean;
@@ -657,7 +665,7 @@ export function verifyTaskRun(
   state: StepsState,
   task: TaskContent,
 ): Promise<CheckedRun> {
-  return verifyCommands(state, task.content.verifications);
+  return verifyCommands(state, task, task.content.verifications);
 }
 
 async function pendingSetup(state: StepsState): Promise<CheckedRun | null> {
@@ -700,6 +708,7 @@ function setupCommandsOf(entries: readonly SetupEntry[]): string[] {
 
 async function verifyCommands(
   state: StepsState,
+  task: TaskContent,
   commands: readonly string[],
 ): Promise<CheckedRun> {
   const setup = await pendingSetup(state);
@@ -710,6 +719,13 @@ async function verifyCommands(
       state.run.spans,
       testedCommitOf(testedInput),
       environmentDigestsOf(state.input.setup.repositories),
+      {
+        context:
+          task.id === state.input.claim.node_id
+            ? VerificationContext.Node
+            : VerificationContext.Task,
+        ownerOf: () => task.id,
+      },
     ),
     directory: state.root,
     commands,

@@ -8,10 +8,12 @@ import {
   type SpanRecorder,
   type SpanStart,
 } from "./telemetry.ts";
-import type {
-  CommandObserver,
-  CommandRun,
-  TestedInput,
+import {
+  commandClassOf,
+  type CommandAttempt,
+  type CommandObserver,
+  type CommandRun,
+  type TestedInput,
 } from "./verification.ts";
 import type { ExecutionEnvironment } from "../contract.ts";
 import { CodedError, diagnostic, diagnosticRows } from "../../kernel/errors.ts";
@@ -82,25 +84,66 @@ export function taskSpan(spans: SpanRecorder, task: TaskContent): SpanStart {
   };
 }
 
-export function taskEnd(result: { kind: string }): SpanEnd {
+const TaskAttribute = {
+  Result: "kanthord.task.result",
+  RevisionCount: "kanthord.task.revision_count",
+} as const;
+
+export function taskEnd(
+  result: { kind: string },
+  revisionCount: number,
+): SpanEnd {
   assert.ok(result.kind);
   const end = {
     status: SpanStatus.Ok,
-    attributes: { "kanthord.task.result": result.kind },
+    attributes: {
+      [TaskAttribute.Result]: result.kind,
+      [TaskAttribute.RevisionCount]: revisionCount,
+    },
   };
-  assert.ok(end.attributes["kanthord.task.result"]);
+  assert.ok(end.attributes[TaskAttribute.Result]);
   return end;
 }
 
-export function taskFailure(error: unknown): SpanEnd {
-  return { status: SpanStatus.Error, attributes: noProgressAttributes(error) };
+export function taskFailure(error: unknown, revisionCount: number): SpanEnd {
+  return {
+    status: SpanStatus.Error,
+    attributes: {
+      ...noProgressAttributes(error),
+      [TaskAttribute.RevisionCount]: revisionCount,
+    },
+  };
 }
 
-function commandEnd(ran: CommandRun): SpanEnd {
+export const VerificationContext = {
+  Task: "task",
+  Node: "node",
+  Release: "release",
+  Evaluation: "evaluation",
+} as const;
+export type VerificationContext =
+  (typeof VerificationContext)[keyof typeof VerificationContext];
+
+export interface VerificationScope {
+  context: VerificationContext;
+  ownerOf: (index: number) => string | null;
+}
+
+const VerificationAttribute = {
+  Context: "kanthord.verification.context",
+  Class: "kanthord.verification.class",
+  OwnerId: "kanthord.verification.owner_id",
+  Flaky: "kanthord.verification.flaky",
+} as const;
+
+function commandEnd(attempt: CommandAttempt, ran: CommandRun): SpanEnd {
   assert.ok(ran.result.command);
   const attributes: Attributes = {
     "kanthord.verification.timed_out": ran.result.timed_out,
+    [VerificationAttribute.Class]: commandClassOf(ran),
   };
+  if (attempt.flaky_check && ran.result.exit_code === SUCCESS)
+    attributes[VerificationAttribute.Flaky] = true;
   if (ran.result.exit_code !== null)
     attributes["process.exit.code"] = ran.result.exit_code;
   if (ran.result.signal !== null)
@@ -127,11 +170,13 @@ export function verificationObserver(
   spans: SpanRecorder,
   commit: string | null,
   digests: readonly string[],
+  scope: VerificationScope,
 ): CommandObserver {
   assert.ok(spans);
   assert.ok(commit === null || commit.length > NO_LENGTH);
-  return (attempt, execute) =>
-    spans.within(
+  return (attempt, execute) => {
+    const owner = scope.ownerOf(attempt.index);
+    return spans.within(
       {
         key: spans.key(SpanOperation.Verification),
         operation: SpanOperation.Verification,
@@ -142,12 +187,15 @@ export function verificationObserver(
             : { "environment.digest": digests.join(DIGEST_SEPARATOR) }),
           "kanthord.verification.index": attempt.index,
           "kanthord.verification.run": attempt.run,
+          [VerificationAttribute.Context]: scope.context,
+          ...(owner === null ? {} : { [VerificationAttribute.OwnerId]: owner }),
         },
         texts: { command: attempt.command },
       },
       execute,
-      commandEnd,
+      (ran) => commandEnd(attempt, ran),
     );
+  };
 }
 
 export function testedCommitOf(tested: TestedInput): string | null {

@@ -13,6 +13,7 @@ import {
   environmentDigestsOf,
   testedCommitOf,
   verificationObserver,
+  VerificationContext,
 } from "./method-telemetry.ts";
 import { repositoryOf, type StepsState } from "./steps-implement.ts";
 import {
@@ -97,6 +98,9 @@ async function gateRelease(state: StepsState): Promise<ReleaseGate> {
   assert.equal(owners.length, commands.length);
   const checked = await verifyInReleaseClones(state, commands);
   const run = checked.run;
+  state.run.noteVerification(
+    run.verification.results.at(-1)?.timed_out ?? false,
+  );
   if (run.outcome === VerificationClass.BudgetEnd) {
     state.agent.budget.wallDeadlineReached();
     return { kind: ReleaseGateKind.BudgetEnd };
@@ -194,11 +198,16 @@ async function verifyInReleaseClones(
     const setup = await setUpReleaseClones(state, key, base);
     if (setup !== null) return setup;
     const testedInput = testedInputOf(state.checkouts);
+    const owners = commandOwners(state);
     const run = await runVerificationsWithOutput({
       observe: verificationObserver(
         state.run.spans,
         testedCommitOf(testedInput),
         environmentDigestsOf(state.input.setup.repositories),
+        {
+          context: VerificationContext.Release,
+          ownerOf: (index) => owners[index]!.id,
+        },
       ),
       directory,
       commands,

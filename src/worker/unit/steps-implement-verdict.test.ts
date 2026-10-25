@@ -27,6 +27,7 @@ import {
 
 const VERDICT = "The edge case of an empty list stays unhandled.";
 const CLEARED = "The verification host lost its network.";
+const ONE_REVISION = 1;
 const TWO_TURNS = 2;
 const ONE_TURN = 1;
 const PASSED_EXIT_CODE = 0;
@@ -130,6 +131,7 @@ test("a verdict that names no task sends a verdict turn and an unchanged tree st
       "kanthord.stop.rule": NoProgressRule.VerdictRuleUnmet,
       "kanthord.stop.count": TWO_TURNS,
       "kanthord.stop.limit": TWO_TURNS,
+      "kanthord.task.revision_count": ONE_REVISION,
     },
   });
   assert.equal(h.provider.calls.length, TWO_TURNS);

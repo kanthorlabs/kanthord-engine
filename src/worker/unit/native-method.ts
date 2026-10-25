@@ -165,6 +165,7 @@ export async function runNativeExecution(
         cleared: prior.cleared,
         unchangedTurns: 0,
         lastVerification: null,
+        revisionCount: 0,
       };
       return runStepsImplement(state);
     });

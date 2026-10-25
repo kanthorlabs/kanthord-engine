@@ -46,6 +46,7 @@ import {
 } from "./rework-cause.ts";
 import { renderWorkPrompt } from "../../agent/prompt-composer.ts";
 import type { StepsInput } from "./steps-implement.ts";
+import { commandOwners } from "./release-gate.ts";
 import {
   WorkspaceKind,
   workRepositoriesOf,
@@ -58,6 +59,7 @@ import {
   testedCommitOf,
   environmentDigestsOf,
   verificationObserver,
+  VerificationContext,
 } from "./method-telemetry.ts";
 
 export { EvaluationStage };
@@ -213,11 +215,16 @@ async function evaluate(
 ) {
   assert.ok(prepared.directory);
   assert.equal(input.claim.execution_id, input.setup.execution_id);
+  const owners = commandOwners({ input, revision });
   const verificationRun = await runVerificationsWithOutput({
     observe: verificationObserver(
       run.spans,
       testedCommitOf(prepared.tested_input),
       environmentDigestsOf(input.setup.repositories),
+      {
+        context: VerificationContext.Evaluation,
+        ownerOf: (index) => owners[index]!.id,
+      },
     ),
     directory: prepared.directory,
     commands: verificationCommands(revision),
@@ -229,6 +236,9 @@ async function evaluate(
     exhausted: () => budget.exhausted(),
     ...baselineOf(prepared.base),
   });
+  run.noteVerification(
+    verificationRun.verification.results.at(-1)?.timed_out ?? false,
+  );
   const verification = verificationRun.verification;
   const recorded = await run.submitEvidence(input.claim.node_id, {
     subject: VERIFICATION_SUBJECT,
