@@ -25,12 +25,7 @@ import { identityTime } from "../kernel/identity.ts";
 import type { Store } from "../kernel/store.ts";
 import { readCost } from "./analytics-cost.ts";
 import { readDuration } from "./analytics-duration.ts";
-import {
-  admitRecords,
-  admitServerSpan,
-  type Admission,
-  type SpanContribution,
-} from "./admission.ts";
+import { admitRecords, admitServerSpan, type Admission } from "./admission.ts";
 import {
   ANALYTICS_ITEMS_MAX,
   ANALYTICS_RANGE_DAYS_DEFAULT,
@@ -66,6 +61,7 @@ import {
   type TelemetryRecord,
   type TimelineListQuery,
   type TraceSort,
+  type SpanContribution,
 } from "./contract.ts";
 import {
   TRACE_END_SPAN_ID,

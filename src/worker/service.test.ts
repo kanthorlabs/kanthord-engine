@@ -75,6 +75,7 @@ import { HEARTBEAT_SWEEP_INTERVAL_MS } from "./heartbeat.ts";
 import { FakePoolHost } from "./test-support.ts";
 
 const fakeCollaborations = {
+  promptTelemetry: { agentPrompted: () => {} },
   agentPrompt: {
     compose: async () => {
       throw new Error("UNEXPECTED_COLLABORATION");
@@ -1718,6 +1719,7 @@ function authorizationFixture(t: TestContext) {
         return record ? { ...record, name } : null;
       },
       credentialMetadata: (_tx, name) => newestOf(name),
+      promptTelemetry: { agentPrompted: () => {} },
       agentPrompt: {
         compose: async () => [],
         templates: async () => SHIPPED_TEMPLATES,

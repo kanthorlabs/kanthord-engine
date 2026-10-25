@@ -1,17 +1,13 @@
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
 import { IN_MEMORY_DATABASE, Store } from "../kernel/store.ts";
-import {
-  admitRecords,
-  admitServerSpan,
-  type Admission,
-  type SpanContribution,
-} from "./admission.ts";
+import { admitRecords, admitServerSpan, type Admission } from "./admission.ts";
 import {
   Disposition,
   RecordKind,
   SpanOrigin,
   SpanStatus,
+  type SpanContribution,
   TRACKING_SERVICE_NAME,
   TraceState,
   traceSummarySchema,

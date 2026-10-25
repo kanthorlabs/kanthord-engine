@@ -141,6 +141,7 @@ function instanceFixture(t: TestContext) {
       sshSign: unexpected,
       sshPublicKeyOf: unexpected,
     },
+    promptTelemetry: { agentPrompted: () => {} },
     agentPrompt: { compose: unexpected, templates: unexpected },
     workerBindingOf: (_tx, projectId, resourceIdentity) =>
       bindings.find(

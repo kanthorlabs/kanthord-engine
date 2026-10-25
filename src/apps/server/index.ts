@@ -32,6 +32,7 @@ import { TrackingService, trackingMigrations } from "../../tracking/index.ts";
 import {
   MISSION_PRODUCER,
   PROJECT_PRODUCER,
+  WORKER_PRODUCER,
   TRACKING_SERVICE_NAME,
 } from "../../tracking/contract.ts";
 import {
@@ -112,6 +113,7 @@ import {
   isHostedWorker,
   workerMigrations,
   toolDeclarations,
+  agentPromptContribution,
 } from "../../worker/index.ts";
 import { installPiTools } from "../../agent/pi-tools.ts";
 import { ThreadDriver } from "./thread-driver.ts";
@@ -658,6 +660,18 @@ export function composeServices(options: {
       compose: (name, context) =>
         agent.composePrompt(name, PromptConsumer.Worker, context),
       templates: (context) => agent.promptTemplates(context),
+    },
+    promptTelemetry: {
+      agentPrompted: (executionId, facts) => {
+        const row = scheduler.executionOf(executionId);
+        if (row === undefined) return;
+        const trace = executionTrace(row);
+        tracking.serverSpan(
+          trace,
+          WORKER_PRODUCER,
+          agentPromptContribution(trace, facts, Date.now()),
+        );
+      },
     },
     store: options.store,
     workerBindingOf: (tx, projectId, resourceIdentity) =>
