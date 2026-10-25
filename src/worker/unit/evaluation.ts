@@ -236,6 +236,9 @@ async function evaluate(
     exhausted: () => budget.exhausted(),
     ...baselineOf(prepared.base),
   });
+  run.noteVerification(
+    verificationRun.verification.results.at(-1)?.timed_out ?? false,
+  );
   const verification = verificationRun.verification;
   const recorded = await run.submitEvidence(input.claim.node_id, {
     subject: VERIFICATION_SUBJECT,

@@ -107,6 +107,7 @@ async function gateRelease(state: StepsState): Promise<ReleaseGate> {
   const passed =
     !checked.setup && verificationPassed(run.verification, commands);
   state.lastVerification = verificationFactsOf(passed, run.verification);
+  state.run.noteVerification(state.lastVerification?.timed_out ?? false);
   state.run.log("release verified", {
     commits: state.checkouts.map((checkout) => checkout.head),
     passed,

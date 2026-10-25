@@ -319,6 +319,9 @@ test("a failed operation ends its span with Error and keeps the error", async ()
   assert.equal(spans.current(), CLAIM.root_span_id);
 });
 
+const NO_REVISIONS = 0;
+const REVISION_COUNT_ATTRIBUTE = "kanthord.task.revision_count";
+
 async function stoppedTaskEnd(stop: ExecutionStop) {
   const { records, spans } = recorder();
   await assert.rejects(
@@ -327,8 +330,8 @@ async function stoppedTaskEnd(stop: ExecutionStop) {
       async () => {
         throw stop;
       },
-      taskEnd,
-      taskFailure,
+      (ended) => taskEnd(ended, NO_REVISIONS),
+      (error) => taskFailure(error, NO_REVISIONS),
     ),
     stop,
   );
@@ -360,6 +363,7 @@ test("a no_progress stop ends the task span with the rule, the counts and the ve
     "kanthord.stop.count": NO_PROGRESS_COUNT,
     "kanthord.stop.limit": NO_PROGRESS_COUNT,
     "kanthord.stop.verification.passed": false,
+    [REVISION_COUNT_ATTRIBUTE]: NO_REVISIONS,
   });
 });
 
@@ -368,7 +372,9 @@ test("another stop ends the task span with Error and no stop attribute", async (
     new ExecutionStop(EndReason.OperationFailed, null, FAILED),
   );
   assert.equal(end?.status, SpanStatus.Error);
-  assert.deepEqual(end?.attributes, {});
+  assert.deepEqual(end?.attributes, {
+    [REVISION_COUNT_ATTRIBUTE]: NO_REVISIONS,
+  });
 });
 
 test("a git failure span text holds the diagnostic line and its rows", async () => {

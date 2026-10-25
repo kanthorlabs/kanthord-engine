@@ -5,7 +5,14 @@ import { join } from "node:path";
 import { simpleGit } from "simple-git";
 import { contentText } from "@earendil-works/pi-ai";
 import { REASON_MAX_LENGTH } from "../../kernel/probe.ts";
-import { fauxAssistantMessage, fauxToolCall } from "./test-support.ts";
+import {
+  fauxAssistantMessage,
+  fauxToolCall,
+  recordSpans,
+  spanEnds,
+} from "./test-support.ts";
+import { SpanOperation } from "./telemetry.ts";
+import { CauseCategory, unattributed } from "../../kernel/cause.ts";
 import { EndReason, ExecutionStop } from "./execution-run.ts";
 import type { MethodClients } from "./method-clients.ts";
 import { CHECKOUTS_DIRECTORY, WorkspaceKind } from "./workspace.ts";
@@ -35,6 +42,83 @@ import type { Revision } from "../../mission/contract.ts";
 import { executionBoundary } from "./native-method.ts";
 
 const TASK_VERIFIED = "task verified";
+const REVISION_COUNT_ATTRIBUTE = "kanthord.task.revision_count";
+const WALL_DEADLINE_MS = 2000;
+
+function writeFile(content: string) {
+  return fauxAssistantMessage(
+    fauxToolCall("write", { path: "file", content }),
+    { stopReason: "toolUse" },
+  );
+}
+
+function acceptEvidence(h: Awaited<ReturnType<typeof fixture>>): void {
+  h.run.clients.mission = {
+    "evidence.submit": async () => ({
+      type: "completed",
+      status: 200,
+      data: { evidence: {} },
+    }),
+  } as unknown as MethodClients["mission"];
+}
+
+async function revisionCountsOf(
+  t: Parameters<typeof fixture>[0],
+  script: Parameters<typeof fixture>[2],
+) {
+  const h = await fixture(t, [task("work", "grep -q good file")], script);
+  const records = recordSpans(h);
+  acceptEvidence(h);
+  recordReleases(h);
+  await runStepsImplement(h);
+  return spanEnds(records, SpanOperation.Task).map(
+    (end) => end.attributes?.[REVISION_COUNT_ATTRIBUTE],
+  );
+}
+
+test("a task that passes on its first send ends with the revision count 0", async (t) => {
+  const counts = await revisionCountsOf(t, [
+    writeFile("good"),
+    fauxAssistantMessage("first"),
+  ]);
+  assert.deepEqual(counts, [0]);
+});
+
+test("a task with two revision turns ends with the revision count 2", async (t) => {
+  const counts = await revisionCountsOf(t, [
+    writeFile("bad"),
+    fauxAssistantMessage("first"),
+    writeFile("worse"),
+    fauxAssistantMessage("second"),
+    writeFile("good"),
+    fauxAssistantMessage("third"),
+  ]);
+  assert.deepEqual(counts, [2]);
+});
+
+test("a budget end after a timed-out verification releases with the suspects environment, plan and model", async (t) => {
+  const h = await fixture(
+    t,
+    [task("slow", "sleep 30")],
+    [fauxAssistantMessage("work")],
+  );
+  const deadline = Date.now() + WALL_DEADLINE_MS;
+  h.agent.budget.wallDeadline = () => deadline;
+  const bodies = recordReleases(h) as {
+    stop: { cause: unknown };
+  }[];
+  await runStepsImplement(h);
+  assert.deepEqual(
+    bodies.map((body) => body.stop.cause),
+    [
+      unattributed([
+        CauseCategory.Environment,
+        CauseCategory.Plan,
+        CauseCategory.Model,
+      ]),
+    ],
+  );
+});
 
 test("a node instruction names criterion-revision, then task-revision for its revision", async (t) => {
   const done = task("done", "true");

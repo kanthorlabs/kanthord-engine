@@ -813,7 +813,7 @@ test("exit 127 in a review verification stays criterion-not-met", async (t) => {
   assert.deepEqual(review.releases, []);
 });
 
-test("a wall deadline during a review verification ends with no assessment and no infrastructure stop", async (t) => {
+test("a wall deadline during a review verification ends with no assessment and the suspects environment, plan and model", async (t) => {
   const review = await reviewOf(t, "sleep 30", SHORT_WALL_TIME_MS);
   assert.deepEqual(review.assessments, []);
   assert.deepEqual(review.releases, [
@@ -822,7 +822,11 @@ test("a wall deadline during a review verification ends with no assessment and n
       stop: {
         reason: EndReason.AssessmentAbsent,
         code: null,
-        cause: unattributed([CauseCategory.Plan, CauseCategory.Model]),
+        cause: unattributed([
+          CauseCategory.Environment,
+          CauseCategory.Plan,
+          CauseCategory.Model,
+        ]),
       },
     },
   ]);

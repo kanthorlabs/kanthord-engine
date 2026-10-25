@@ -84,18 +84,35 @@ export function taskSpan(spans: SpanRecorder, task: TaskContent): SpanStart {
   };
 }
 
-export function taskEnd(result: { kind: string }): SpanEnd {
+const TaskAttribute = {
+  Result: "kanthord.task.result",
+  RevisionCount: "kanthord.task.revision_count",
+} as const;
+
+export function taskEnd(
+  result: { kind: string },
+  revisionCount: number,
+): SpanEnd {
   assert.ok(result.kind);
   const end = {
     status: SpanStatus.Ok,
-    attributes: { "kanthord.task.result": result.kind },
+    attributes: {
+      [TaskAttribute.Result]: result.kind,
+      [TaskAttribute.RevisionCount]: revisionCount,
+    },
   };
-  assert.ok(end.attributes["kanthord.task.result"]);
+  assert.ok(end.attributes[TaskAttribute.Result]);
   return end;
 }
 
-export function taskFailure(error: unknown): SpanEnd {
-  return { status: SpanStatus.Error, attributes: noProgressAttributes(error) };
+export function taskFailure(error: unknown, revisionCount: number): SpanEnd {
+  return {
+    status: SpanStatus.Error,
+    attributes: {
+      ...noProgressAttributes(error),
+      [TaskAttribute.RevisionCount]: revisionCount,
+    },
+  };
 }
 
 export const VerificationContext = {

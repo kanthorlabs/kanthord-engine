@@ -185,7 +185,11 @@ test("a release failure that no revision changes stops with no_progress and neve
 const BUDGET_STOP = {
   reason: "budget_end",
   code: "wall_time",
-  cause: unattributed([CauseCategory.Plan, CauseCategory.Model]),
+  cause: unattributed([
+    CauseCategory.Environment,
+    CauseCategory.Plan,
+    CauseCategory.Model,
+  ]),
 };
 
 test("a wall deadline during a task verification releases further work", async (t) => {
