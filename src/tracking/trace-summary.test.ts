@@ -1,17 +1,13 @@
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
 import { IN_MEMORY_DATABASE, Store } from "../kernel/store.ts";
-import {
-  admitRecords,
-  admitServerSpan,
-  type Admission,
-  type SpanContribution,
-} from "./admission.ts";
+import { admitRecords, admitServerSpan, type Admission } from "./admission.ts";
 import {
   Disposition,
   RecordKind,
   SpanOrigin,
   SpanStatus,
+  type SpanContribution,
   TRACKING_SERVICE_NAME,
   TraceState,
   traceSummarySchema,
@@ -43,6 +39,7 @@ const AGENT = "coder";
 const NO_COUNT = 0;
 const ONE_SPAN = 1;
 const TWO_SPANS = 2;
+const THREE_SPANS = 3;
 const FOUR_SPANS = 4;
 const SUMMARY_TOTALS = 10;
 const NAME_LIMIT = 128;
@@ -305,6 +302,49 @@ test("the first error below the root sets first_error_span_id and a second one l
   assert.equal(answer.first_error_span_id, FIRST);
   assert.equal(answer.error_count, TWO_SPANS);
   assert.equal(answer.span_count, FOUR_SPANS);
+});
+
+test("a recovered tool error and a stopped span never set first_error_span_id", (t) => {
+  const store = trackingStore(t);
+  admitRoot(store, { start_time: STARTED });
+  admit(store, [
+    spanRecord("2222222222222222:start", FIRST, {
+      operation: "agent.tool",
+      status: SpanStatus.Error,
+      attributes: { "error.type": "tool_error" },
+    }),
+    spanRecord("3333333333333333:start", SECOND, {
+      status: SpanStatus.Error,
+      attributes: { "error.type": "stopped" },
+    }),
+  ]);
+  const answer = summary(store);
+  assert.equal(answer.first_error_span_id, null);
+  assert.equal(answer.error_count, TWO_SPANS);
+});
+
+test("the first error skips a tool error and keeps a span with another or no error type", (t) => {
+  const store = trackingStore(t);
+  admitRoot(store, { start_time: STARTED });
+  admit(store, [
+    spanRecord("2222222222222222:start", FIRST, {
+      operation: "agent.tool",
+      status: SpanStatus.Error,
+      attributes: { "error.type": "tool_error" },
+    }),
+    spanRecord("3333333333333333:start", SECOND, {
+      operation: "worker.git",
+      status: SpanStatus.Error,
+    }),
+    spanRecord("4444444444444444:start", THIRD, {
+      status: SpanStatus.Error,
+      attributes: { "error.type": "stopped" },
+    }),
+  ]);
+  const answer = summary(store);
+  assert.equal(answer.first_error_span_id, SECOND);
+  assert.equal(answer.error_count, THREE_SPANS);
+  assert.deepEqual(answer.error_types, ["tool_error", "stopped"]);
 });
 
 test("a refused record and a repeated record change nothing", (t) => {

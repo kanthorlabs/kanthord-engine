@@ -14,10 +14,8 @@ import {
   type RecordDisposition,
   type SessionEntryRecord,
   type Span,
-  type SpanEvent,
-  type SpanLink,
+  type SpanContribution,
   type SpanOrigin,
-  type SpanStatus as SpanStatusValue,
   type TelemetryRecord,
   type TextRecord,
 } from "./contract.ts";
@@ -41,20 +39,6 @@ export interface Admission {
   producer: string;
   origin: SpanOrigin;
   now: number;
-}
-export interface SpanContribution {
-  record_id: string;
-  span_id: string;
-  parent_span_id: string | null;
-  operation: string;
-  start_time?: number;
-  end_time?: number;
-  status?: SpanStatusValue;
-  attributes?: Attributes;
-  events?: SpanEvent[];
-  links?: SpanLink[];
-  text_ids?: string[];
-  texts?: { text_id: string; text: string }[];
 }
 interface Outcome {
   disposition: Disposition;
