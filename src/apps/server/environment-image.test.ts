@@ -12,7 +12,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { dirname, join } from "node:path";
-import { test } from "node:test";
+import { test, type TestContext } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 import { temporary } from "../../kernel/test-support.ts";
 import { ContainerRuntime } from "../../worker/contract.ts";
@@ -69,6 +69,8 @@ const BOUNDED_MEMORY_MB = 8192;
 const MEMORY_FLAG = "--memory";
 const BOUNDED_MEMORY_ARGUMENT = `${BOUNDED_MEMORY_MB}m`;
 const START_WAIT_ROUNDS = 1200;
+const CACHE_PROJECT = "project_01ARZ3NDEKTSV4RRFFQ69G5FAV";
+const CACHE_INSPECT_REFUSED = 125;
 
 function environment(
   document: SlotEnvironment["document"] = {
@@ -1348,4 +1350,97 @@ test("a build without flake.nix writes no flake copy and no flake directory", as
   assert.equal(existsSync(join(snapshot, "flake")), false);
   const text = readFileSync(join(snapshot, "Containerfile"), "utf8");
   assert.equal(text.includes("/etc/kanthord-flake/"), false);
+});
+
+function cacheListing(
+  t: TestContext,
+  answers: { listed: RuntimeAnswer; inspected: RuntimeAnswer },
+) {
+  const calls: string[][] = [];
+  const host: RuntimeHost = {
+    platform: "linux",
+    uid: 1000,
+    user: "user",
+    environment: process.env,
+    exists: () => false,
+    resolves: () => true,
+    run: (_runtime, args) => {
+      calls.push([...args]);
+      return Promise.resolve(
+        args[1] === LIST_COMMAND ? answers.listed : answers.inspected,
+      );
+    },
+  };
+  const built = new EnvironmentImages({
+    host,
+    owner: OWNER,
+    kanthordImage: KANTHORD_IMAGE,
+    version: VERSION,
+    stateDirectory: temporary(t),
+    exportRepository: () => Promise.resolve(),
+    buildTimeoutMs: BUILD_TIMEOUT_MS,
+    environmentMemoryMb: MEMORY_MB,
+  });
+  return { built, calls };
+}
+
+test("cacheVolumes reads the cache labels from the inspection of the listed volumes", async (t) => {
+  const { built, calls } = cacheListing(t, {
+    listed: {
+      code: SUCCESS,
+      stdout: "kanthord_cache_aaa\nkanthord_cache_bbb\n",
+      stderr: "",
+    },
+    inspected: {
+      code: SUCCESS,
+      stdout: JSON.stringify([
+        {
+          Name: "kanthord_cache_aaa",
+          Labels: {
+            [OWNER_LABEL]: OWNER,
+            "io.kanthord.cache_project": CACHE_PROJECT,
+            "io.kanthord.cache_resource": IDENTITY,
+          },
+        },
+        { Name: "kanthord_cache_bbb", Labels: { [OWNER_LABEL]: OWNER } },
+      ]),
+      stderr: "",
+    },
+  });
+  assert.deepEqual(await built.cacheVolumes(), [
+    { project_id: CACHE_PROJECT, resource_identity: IDENTITY },
+  ]);
+  assert.deepEqual(calls.at(-1), [
+    "volume",
+    "inspect",
+    "kanthord_cache_aaa",
+    "kanthord_cache_bbb",
+  ]);
+});
+
+test("cacheVolumes inspects nothing when the owner holds no cache volume", async (t) => {
+  const { built, calls } = cacheListing(t, {
+    listed: { code: SUCCESS, stdout: "\n", stderr: "" },
+    inspected: { code: ABSENT, stdout: "", stderr: "unexpected" },
+  });
+  assert.deepEqual(await built.cacheVolumes(), []);
+  assert.equal(
+    calls.some((args) => args[1] === INSPECT),
+    false,
+  );
+});
+
+test("cacheVolumes rejects with the runtime message when the inspection fails", async (t) => {
+  const { built } = cacheListing(t, {
+    listed: { code: SUCCESS, stdout: "kanthord_cache_aaa\n", stderr: "" },
+    inspected: {
+      code: CACHE_INSPECT_REFUSED,
+      stdout: "",
+      stderr: 'Error: no such volume "kanthord_cache_aaa"',
+    },
+  });
+  await assert.rejects(
+    built.cacheVolumes(),
+    /The cache volume listing failed: Error: no such volume/,
+  );
 });

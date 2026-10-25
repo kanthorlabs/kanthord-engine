@@ -33,7 +33,11 @@ const Verb = {
   Rm: "rm",
   Volume: "volume",
   Run: "run",
+  Container: "container",
 } as const;
+const REMOVE_REFUSED = 125;
+const NETAVARK_ERROR =
+  'Error: netavark (exit code 1): nftables error: "nft" did not return successfully while applying ruleset';
 const SERVER_UID = 1000;
 const FAILED_CODE = 1;
 const MASTER_KEY = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
@@ -147,6 +151,44 @@ test("prepare removes each container of the owner once and a second call reuses 
   await f.driver.prepare();
   assert.equal(f.verbs(Verb.Ps).length, ONE_CALL);
   assert.equal(f.verbs(Verb.Rm).length, PRIOR_COUNT);
+});
+
+test("prepare accepts a refused removal that leaves no container", async () => {
+  const f = hostWith(true, (call) => {
+    if (call.verb === Verb.Ps) return ok(PRIOR_NAMES);
+    if (call.verb === Verb.Rm)
+      return Promise.resolve({
+        code: REMOVE_REFUSED,
+        stdout: "",
+        stderr: NETAVARK_ERROR,
+      });
+    if (call.verb === Verb.Container)
+      return Promise.resolve({
+        code: REMOVE_REFUSED,
+        stdout: "",
+        stderr: `Error: no such container "${call.args.at(-1)}"`,
+      });
+    return ok();
+  });
+  await f.driver.prepare();
+  assert.equal(f.verbs(Verb.Container).length, PRIOR_COUNT);
+});
+
+test("prepare rejects with the runtime message when a refused removal leaves the container", async () => {
+  const f = hostWith(true, (call) => {
+    if (call.verb === Verb.Ps) return ok(PRIOR_NAMES);
+    if (call.verb === Verb.Rm)
+      return Promise.resolve({
+        code: REMOVE_REFUSED,
+        stdout: "",
+        stderr: NETAVARK_ERROR,
+      });
+    return ok("abc\n");
+  });
+  await assert.rejects(
+    f.driver.prepare(),
+    /rm kanthord_slot_one failed: .*nftables error/,
+  );
 });
 
 test("a failed prepare runs again at the next prepare", async () => {
