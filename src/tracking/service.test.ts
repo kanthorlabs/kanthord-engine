@@ -45,10 +45,12 @@ import {
   type ServerTrace,
   type SessionEntryRecord,
 } from "./contract.ts";
+import { CauseLabelCode, HUMAN_USERNAME_ATTRIBUTE } from "./cause-label.ts";
 import { trackingMigrations } from "./migrations.ts";
 import { TrackingService } from "./service.ts";
 import { insertSpan, insertTrace } from "./trace-store.ts";
 
+const HUMAN_ACCOUNT = "account_01JZ8R2B3C4D5E6F7G8H9J0K1M";
 const TRACE: ExecutionTrace = {
   trace_id: "a".repeat(32),
   root_span_id: "1".repeat(16),
@@ -119,7 +121,7 @@ function caller(store: Store, execution = true): CallerContext {
   return {
     identity: {
       kind: IdentityKind.Human,
-      accountId: "account_01JZ8R2B3C4D5E6F7G8H9J0K1M",
+      accountId: HUMAN_ACCOUNT,
       name: "Ulrich",
       jti: "jti",
     },
@@ -1724,4 +1726,67 @@ test("an analytics read stops at the step after its signal aborts", async (t) =>
     (error: unknown) => error === context.signal.reason,
   );
   assert.equal(transaction.mock.callCount(), ABORT_CALLS);
+});
+
+test("the cause label operation answers the cause with the assigner human and writes the username", (t) => {
+  const { store, service } = harness(t, () => ENDED);
+  service.executionOpened(TRACE, CREATED, OPENING);
+  service.executionEnded({
+    trace: TRACE,
+    ended_at: ENDED,
+    end: ExecutionEnd.Finished,
+    revoke_cause: null,
+    stop: null,
+    cause: unattributed([CauseCategory.Prompt, CauseCategory.Model]),
+  });
+  const body = {
+    category: CauseCategory.Prompt,
+    subcategory: CauseSubcategory.ContextMissing,
+    reason: "The prompt lacked the build command.",
+  };
+  const answer = service.causeLabel(TRACE.trace_id, body, caller(store));
+  assert.deepEqual(answer, {
+    trace_id: TRACE.trace_id,
+    span_id: `${TRACE.root_span_id}.cause_label`,
+    cause: {
+      category: CauseCategory.Prompt,
+      subcategory: CauseSubcategory.ContextMissing,
+      assigner: CauseAssigner.Human,
+    },
+    reason: body.reason,
+    created_at: ENDED,
+  });
+  assert.doesNotThrow(() => trackingOperations.causeLabel.output.parse(answer));
+  const label = service
+    .spanList(TRACE.trace_id, { limit: SPAN_PAGE }, caller(store))
+    .items.find((span) => span.span_id === answer.span_id);
+  assert.equal(label?.attributes[HUMAN_USERNAME_ATTRIBUTE], HUMAN_ACCOUNT);
+  assert.equal(
+    service.textGet(
+      TRACE.trace_id,
+      `${TRACE.root_span_id}.cause_label:reason`,
+      caller(store),
+    ).content,
+    body.reason,
+  );
+});
+
+test("the cause label operation refuses a trace that is still open", (t) => {
+  const { store, service } = harness(t);
+  service.executionOpened(TRACE, CREATED, OPENING);
+  assert.throws(
+    () =>
+      service.causeLabel(
+        TRACE.trace_id,
+        {
+          category: CauseCategory.Prompt,
+          subcategory: CauseSubcategory.ContextMissing,
+          reason: "why",
+        },
+        caller(store),
+      ),
+    (error) =>
+      error instanceof OperationError &&
+      error.code === CauseLabelCode.TraceOpen,
+  );
 });

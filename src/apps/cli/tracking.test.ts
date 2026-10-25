@@ -31,6 +31,8 @@ const LIMIT_NOT_NUMBER = "many";
 interface Seen {
   method: string | undefined;
   url: string | undefined;
+  body: string;
+  idempotencyKey: string | string[] | undefined;
 }
 
 async function fakeServer(
@@ -40,10 +42,18 @@ async function fakeServer(
 ): Promise<{ endpoint: string; seen: Seen[] }> {
   const seen: Seen[] = [];
   const server = createServer((request, response) => {
-    seen.push({ method: request.method, url: request.url });
-    request.resume();
-    response.writeHead(status, { "Content-Type": "application/json" });
-    response.end(JSON.stringify(answer));
+    const chunks: Buffer[] = [];
+    request.on("data", (chunk: Buffer) => chunks.push(chunk));
+    request.on("end", () => {
+      seen.push({
+        method: request.method,
+        url: request.url,
+        body: Buffer.concat(chunks).toString(),
+        idempotencyKey: request.headers["idempotency-key"],
+      });
+      response.writeHead(status, { "Content-Type": "application/json" });
+      response.end(JSON.stringify(answer));
+    });
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   t.after(() => server.close());
@@ -695,3 +705,116 @@ for (const [leaf, prefix, options] of [
     );
   });
 }
+
+const KEY = "idempotency_key_01ARZ3NDEKTSV4RRFFQ69G5FAV";
+const LABEL_LEAF = "cli.tracking.cause.label";
+const LABEL_PATH = `/api/tracking/trace/${TRACE_ID}/cause/label`;
+const LABEL_BODY = {
+  category: "prompt",
+  subcategory: "context_missing",
+  reason: "The prompt lacked the build command.",
+};
+const LABEL_OPTIONS = [
+  "--category",
+  LABEL_BODY.category,
+  "--subcategory",
+  LABEL_BODY.subcategory,
+  "--reason",
+  LABEL_BODY.reason,
+];
+const LABEL_ANSWER = {
+  trace_id: TRACE_ID,
+  span_id: `${ROOT_SPAN_ID}.cause_label`,
+  cause: {
+    category: LABEL_BODY.category,
+    subcategory: LABEL_BODY.subcategory,
+    assigner: "human",
+  },
+  reason: LABEL_BODY.reason,
+  created_at: 1000,
+};
+
+test("cause label sends the body and the idempotency key and writes the answer with the key", async (t) => {
+  const { endpoint, seen } = await fakeServer(t, LABEL_ANSWER);
+  const result = await run(
+    t,
+    ["cause", "label", TRACE_ID, ...LABEL_OPTIONS, "--idempotency-key", KEY],
+    endpoint,
+  );
+  assert.equal(result.code, ExitCode.Success, result.stderr);
+  assert.equal(seen.length, ONE_REQUEST);
+  assert.equal(seen[0]?.method, HttpMethod.Post);
+  assert.equal(seen[0]?.url, LABEL_PATH);
+  assert.equal(seen[0]?.idempotencyKey, KEY);
+  assert.deepEqual(JSON.parse(seen[0]?.body ?? ""), LABEL_BODY);
+  assert.deepEqual(JSON.parse(result.stdout), {
+    ...LABEL_ANSWER,
+    idempotency_key: KEY,
+  });
+});
+
+const INVALID_LABEL_ARGUMENTS: readonly (readonly [string[], string])[] = [
+  [["invalid", ...LABEL_OPTIONS], `${LABEL_LEAF}.invalid_trace_id`],
+  [
+    [TRACE_ID, "--category", "unattributed", ...LABEL_OPTIONS.slice(2)],
+    `${LABEL_LEAF}.invalid_input`,
+  ],
+  [
+    [
+      TRACE_ID,
+      ...LABEL_OPTIONS.slice(0, 2),
+      "--subcategory",
+      "invalid",
+      ...LABEL_OPTIONS.slice(4),
+    ],
+    `${LABEL_LEAF}.invalid_input`,
+  ],
+  [
+    [TRACE_ID, ...LABEL_OPTIONS.slice(0, 4), "--reason", "  "],
+    `${LABEL_LEAF}.invalid_input`,
+  ],
+];
+
+for (const [args, code] of INVALID_LABEL_ARGUMENTS)
+  test(`cause label ${args.join(" ")} exits with ${code} before any request`, async (t) => {
+    const { endpoint, seen } = await fakeServer(t, LABEL_ANSWER);
+    const result = await run(t, ["cause", "label", ...args], endpoint);
+    assert.equal(result.code, ExitCode.Failure);
+    assert.ok(result.stderr.includes(code), result.stderr);
+    assert.equal(seen.length, NO_REQUESTS);
+  });
+
+test("cause label without a token exits with token_required", async (t) => {
+  const directory = temporary(t);
+  const result = await runKanthord(
+    ["tracking", "cause", "label", TRACE_ID, ...LABEL_OPTIONS],
+    {
+      ...process.env,
+      XDG_CONFIG_HOME: directory,
+      XDG_DATA_HOME: join(directory, "data"),
+      XDG_STATE_HOME: join(directory, "state"),
+      KANTHORD_ENDPOINT: undefined,
+      KANTHORD_TOKEN: undefined,
+    },
+    t.signal,
+  );
+  assert.equal(result.code, ExitCode.Failure);
+  assert.ok(
+    result.stderr.includes(`${LABEL_LEAF}.token_required`),
+    result.stderr,
+  );
+});
+
+test("cause label prints the key with the indeterminate code when the server is unreachable", async (t) => {
+  const result = await run(
+    t,
+    ["cause", "label", TRACE_ID, ...LABEL_OPTIONS, "--idempotency-key", KEY],
+    "http://127.0.0.1:1",
+  );
+  assert.equal(result.code, ExitCode.Failure);
+  assert.ok(
+    result.stderr.includes(`${LABEL_LEAF}.indeterminate`),
+    result.stderr,
+  );
+  assert.ok(result.stderr.includes(KEY), result.stderr);
+});

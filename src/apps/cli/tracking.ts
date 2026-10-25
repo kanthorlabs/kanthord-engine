@@ -34,9 +34,11 @@ import {
 } from "../../tracking/contract.ts";
 import { CommandName, PROGRAM_NAME } from "./constants.ts";
 import {
+  handleMutationResult,
   handleReadResult,
   parsePositiveInt,
   requireToken,
+  resolveKey,
   singleUse,
 } from "./shared.ts";
 
@@ -46,6 +48,8 @@ const TEXT = "text";
 const SESSION = "session";
 const ENTRY = "entry";
 const FACET = "facet";
+const CAUSE = "cause";
+const LABEL = "label";
 const TIMELINE = "timeline";
 const ANALYTICS = "analytics";
 const COST = "cost";
@@ -467,6 +471,35 @@ async function sessionEntryGet(
   );
 }
 
+async function causeLabel(traceId: string, command: Command): Promise<void> {
+  const leaf = `${CAUSE}.${LABEL}`;
+  requireTraceId(traceId, leaf);
+  const options = command.optsWithGlobals();
+  const body = trackingOperations.causeLabel.input.shape.body.safeParse({
+    category: options.category,
+    subcategory: options.subcategory,
+    reason: options.reason,
+  });
+  if (!body.success)
+    throw new Diagnostic(
+      `cli.tracking.${leaf}.invalid_input`,
+      "invalid cause label",
+    );
+  const key = resolveKey(options);
+  const result = await client(command, leaf).causeLabel(
+    { params: { trace_id: traceId }, query: {}, body: body.data },
+    { idempotencyKey: key },
+  );
+  const data = handleMutationResult(
+    result,
+    `cli.tracking.${leaf}.indeterminate`,
+    key,
+  );
+  process.stdout.write(
+    `${JSON.stringify({ ...data, idempotency_key: key })}\n`,
+  );
+}
+
 export function addTrackingCommand(program: Command): void {
   assert.equal(program.name(), PROGRAM_NAME);
   assert.ok(
@@ -643,4 +676,31 @@ export function addTrackingCommand(program: Command): void {
     .description("Read the distinct filter values as JSON")
     .option("--project <project-id>", "Project ID", singleUse("--project"))
     .action((_options, command: Command) => facetGet(command));
+  const cause = tracking
+    .command(CAUSE)
+    .description("Label the cause of a trace");
+  cause.action(() => cause.help());
+  cause
+    .command(LABEL)
+    .description("Write the human cause label of an ended trace as JSON")
+    .argument("<trace-id>", "Trace ID")
+    .requiredOption(
+      "--category <category>",
+      "Cause category",
+      singleUse("--category"),
+    )
+    .requiredOption(
+      "--subcategory <subcategory>",
+      "Cause subcategory",
+      singleUse("--subcategory"),
+    )
+    .requiredOption("--reason <text>", "Label reason", singleUse("--reason"))
+    .option(
+      "--idempotency-key <key>",
+      "Mutation key",
+      singleUse("--idempotency-key"),
+    )
+    .action((traceId: string, _options, command: Command) =>
+      causeLabel(traceId, command),
+    );
 }

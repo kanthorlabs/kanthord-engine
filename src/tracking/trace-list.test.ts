@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
+import { IdentityKind } from "../kernel/caller.ts";
+import { background } from "../kernel/context.ts";
+import type { CallerContext } from "../kernel/operation.ts";
 import { IN_MEMORY_DATABASE, Store } from "../kernel/store.ts";
 import {
   FACET_VALUES_MAX,
@@ -10,8 +13,14 @@ import {
   TRACE_LIST_LIMIT_DEFAULT,
   trackingOperations,
 } from "./contract.ts";
-import { CAUSE_LABEL_OPERATION, causeLabelSpanId } from "./cause-label.ts";
+import {
+  CAUSE_LABEL_OPERATION,
+  TRACKING_PRODUCER,
+  causeLabelSpanId,
+  writeCauseLabel,
+} from "./cause-label.ts";
 import { trackingMigrations } from "./migrations.ts";
+import { TrackingService } from "./service.ts";
 import { insertSpan } from "./trace-store.ts";
 import {
   listTraces,
@@ -539,4 +548,62 @@ test("the facets answer the categories of the effective causes, the label catego
     store.transaction((tx) => readFacets(tx, PROJECT_A)).cause_categories,
     ["model", "prompt"],
   );
+});
+
+const LABEL_USERNAME = "account_01JZ8R2B3C4D5E6F7G8H9J0K1M";
+const LABEL_TIME = 7000;
+const SPAN_PAGE = 10;
+
+test("after a label the list item answers the label cause and the span list answers the label span", (t) => {
+  const store = seeded(t);
+  insertSpanOf(store, 1, rootSpanIdOf(1), null, ROOT_OPERATION, MODEL_CAUSE);
+  store.transaction((tx) =>
+    writeCauseLabel(
+      tx,
+      traceIdOf(1),
+      {
+        category: "prompt",
+        subcategory: "context_missing",
+        reason: "The prompt lacked the build command.",
+      },
+      LABEL_USERNAME,
+      LABEL_TIME,
+    ),
+  );
+  const item = store
+    .transaction((tx) => listTraces(tx, queryOf(), null))
+    .items.find((candidate) => candidate.trace_id === traceIdOf(1));
+  assert.deepEqual(item?.cause, {
+    category: "prompt",
+    subcategory: "context_missing",
+    assigner: "human",
+  });
+  assert.deepEqual(idsOf(store, { cause_category: "prompt" }), [1]);
+  assert.deepEqual(idsOf(store, { cause_category: "model" }), []);
+  const service = new TrackingService({
+    store,
+    retentionDays: 30,
+    executions: { traceOf: () => undefined },
+  });
+  const caller: CallerContext = {
+    identity: {
+      kind: IdentityKind.Human,
+      accountId: LABEL_USERNAME,
+      name: "Ulrich",
+      jti: "jti",
+    },
+    context: background,
+    requestId: "request",
+    commit: (write) => store.transaction(write),
+  };
+  const spans = service.spanList(
+    traceIdOf(1),
+    { limit: SPAN_PAGE },
+    caller,
+  ).items;
+  const label = spans.find(
+    (span) => span.span_id === causeLabelSpanId(rootSpanIdOf(1)),
+  );
+  assert.equal(label?.operation, CAUSE_LABEL_OPERATION);
+  assert.equal(label?.producer, TRACKING_PRODUCER);
 });
