@@ -28,6 +28,7 @@ import {
   softReset,
   symbolicHead,
 } from "./local-git.ts";
+import { MERGE_MARKERS_LEFT, TurnViolation } from "./stop-codes.ts";
 import type { StepsState } from "./steps-implement.ts";
 import { SCRATCH_DIRECTORY, type WorkspaceCheckout } from "./workspace.ts";
 
@@ -37,19 +38,12 @@ export const GateMode = {
   Checkpoint: "checkpoint",
 } as const;
 export type GateMode = (typeof GateMode)[keyof typeof GateMode];
-export const TurnViolation = {
-  BranchChanged: "worker.turn.branch_changed",
-  HistoryRewritten: "worker.turn.history_rewritten",
-  GitInProgress: "worker.turn.git_in_progress",
-  MergeMissing: "worker.turn.merge_missing",
-} as const;
-export type TurnViolation = (typeof TurnViolation)[keyof typeof TurnViolation];
+export { MERGE_MARKERS_LEFT, TurnViolation } from "./stop-codes.ts";
 export const ViolationEnd = {
   Stop: "stop",
   Restore: "restore",
 } as const;
 export type ViolationEnd = (typeof ViolationEnd)[keyof typeof ViolationEnd];
-export const MERGE_MARKERS_LEFT = "worker.merge.markers_left";
 const NO_ENTRIES = 0;
 const NO_UNCHANGED_TURNS = 0;
 const SINGLE_CHECKOUT = 1;

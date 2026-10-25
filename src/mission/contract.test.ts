@@ -95,6 +95,23 @@ const ASSESSMENT = {
   tested_input: { kind: "produced", sha256: "a".repeat(64) },
 };
 
+test("the assessment body allows a cause only with the result criterion-not-met", () => {
+  const cause = {
+    category: "model",
+    assigner: "rule",
+    subcategory: "work_defect",
+  };
+  const notMet = { ...ASSESSMENT, result: AssessmentResult.CriterionNotMet };
+  assert.equal(
+    assessmentSubmitSchema.safeParse({ ...notMet, cause }).success,
+    true,
+  );
+  assert.equal(assessmentSubmitSchema.safeParse(notMet).success, true);
+  const refused = assessmentSubmitSchema.safeParse({ ...ASSESSMENT, cause });
+  assert.equal(refused.success, false);
+  assert.deepEqual(refused.error?.issues[0]?.path, ["cause"]);
+});
+
 test("execution and evidence control inputs are strict and refuse forged actors", () => {
   const inputs = [
     { schema: executionContextSchema, input: CONTEXT },

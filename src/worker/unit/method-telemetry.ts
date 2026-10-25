@@ -15,6 +15,7 @@ import type {
 } from "./verification.ts";
 import type { ExecutionEnvironment } from "../contract.ts";
 import { CodedError, diagnostic, diagnosticRows } from "../../kernel/errors.ts";
+import { markGitStep, type GitStep } from "./git-step.ts";
 import { noProgressAttributes } from "./progress-rule.ts";
 
 const SUCCESS = 0;
@@ -33,13 +34,7 @@ export function phaseSpan(phase: Phase): SpanStart {
   return span;
 }
 
-export const GitStep = {
-  Commit: "commit",
-  FetchBase: "fetch_base",
-  MergeBase: "merge_base",
-  Push: "push",
-} as const;
-export type GitStep = (typeof GitStep)[keyof typeof GitStep];
+export { GitStep } from "./git-step.ts";
 
 function gitFailure(error: unknown): SpanEnd {
   const line =
@@ -62,7 +57,14 @@ export function withinGit<T>(
       operation: SpanOperation.Git,
       attributes: { "kanthord.git.step": step },
     },
-    work,
+    async () => {
+      try {
+        return await work();
+      } catch (error) {
+        markGitStep(error, step);
+        throw error;
+      }
+    },
     () => ({ status: SpanStatus.Ok }),
     gitFailure,
   );

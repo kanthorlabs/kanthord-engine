@@ -238,6 +238,84 @@ components:
                   type: string
                   minLength: 1
                   maxLength: 2048
+                cause:
+                  type: object
+                  properties:
+                    category:
+                      type: string
+                      enum:
+                        - prompt
+                        - plan
+                        - worker_action
+                        - llm_provider
+                        - model
+                        - environment
+                        - infrastructure
+                        - human
+                        - unattributed
+                    assigner:
+                      type: string
+                      enum:
+                        - rule
+                        - reviewer
+                        - human
+                    subcategory:
+                      type: string
+                      enum:
+                        - context_missing
+                        - instruction_conflict
+                        - rule_absent
+                        - criterion_unstated
+                        - dependency
+                        - verification_context
+                        - verification_insufficient
+                        - decomposition
+                        - oversized
+                        - gate_commit
+                        - merge_base
+                        - release_gate
+                        - review_flow
+                        - step_failed
+                        - rate_limited
+                        - quota_exhausted
+                        - unavailable
+                        - work_defect
+                        - standard_violation
+                        - verification_failed
+                        - no_progress
+                        - reply_invalid
+                        - protocol_violation
+                        - output_truncated
+                        - budget_exhausted
+                        - judgement_wrong
+                        - setup_failed
+                        - command_absent
+                        - flaky_verification
+                        - verification_hang
+                        - repository_hook
+                        - verification_killed
+                        - network
+                        - execution_lost
+                        - intervention
+                        - configuration
+                    suspects:
+                      type: array
+                      items:
+                        type: string
+                        enum:
+                          - prompt
+                          - plan
+                          - worker_action
+                          - llm_provider
+                          - model
+                          - environment
+                          - infrastructure
+                          - human
+                          - unattributed
+                  required:
+                    - category
+                    - assigner
+                  additionalProperties: false
               required:
                 - reason
                 - code

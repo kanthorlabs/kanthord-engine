@@ -8,6 +8,7 @@ import { EndReason, ExecutionStop } from "./execution-run.ts";
 import { EnvironmentFailure } from "../../scheduler/contract.ts";
 import { childEnvironment } from "./tool-table.ts";
 import { COMMAND_LIMIT_MS } from "./budget.ts";
+import { VERIFICATION_INFRASTRUCTURE_FAILED } from "./stop-codes.ts";
 import type { WorkspaceCheckout } from "./workspace.ts";
 
 export type TestedInput =
@@ -46,8 +47,7 @@ export const VerificationClass = {
 } as const;
 export type VerificationClass =
   (typeof VerificationClass)[keyof typeof VerificationClass];
-export const VERIFICATION_INFRASTRUCTURE_FAILED =
-  "worker.verification.infrastructure_failed";
+export { VERIFICATION_INFRASTRUCTURE_FAILED } from "./stop-codes.ts";
 export interface VerificationRun {
   verification: Verification;
   outputs: string[];

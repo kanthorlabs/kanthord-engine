@@ -166,6 +166,7 @@ test("a verdict stop carries the passing verification of a task that ran before 
       passed: true,
       ran: ONE_COMMAND,
       exit_code: PASSED_EXIT_CODE,
+      timed_out: false,
     },
   });
 });

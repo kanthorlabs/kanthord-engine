@@ -340,6 +340,7 @@ test("a no_progress stop ends the task span with the rule, the counts and the ve
           passed: false,
           ran: TWO_COMMANDS,
           exit_code: FAILED_EXIT,
+          timed_out: false,
         },
       }),
     ),
