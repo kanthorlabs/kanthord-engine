@@ -37,6 +37,7 @@ const IDENTITY = testHumanIdentity("ulrich", "Ulrich", "token");
 const KEY = "repo.pull_request";
 const EXECUTIONS_LOST = "schedulerClaims.executionsLost";
 const WAKE = "wakeup.wake";
+const ACT = "acts.act";
 
 test("control admission checks retirement and mission before settlement and state", (t) => {
   const h = controlHarness(t, IDENTITY);
@@ -351,3 +352,43 @@ test("unresolved action guard reads the open attempt only", (t) => {
     );
   });
 });
+
+for (const [operation, state, body] of [
+  ["node.ready", NodeState.Available, {}],
+  ["node.resume", NodeState.Paused, { target: "Available" }],
+] as const) {
+  test(`${operation} that the state check refuses after the settlement writes no act trace`, async (t) => {
+    const h = controlHarness(t, IDENTITY);
+    h.store.transaction((tx) => setNodeState(tx, h.node_id, state));
+    await assert.rejects(
+      h.invoke(operation, {
+        params: { node_id: h.node_id },
+        query: {},
+        body: { ...h.body(NodeState.Waiting), ...body },
+      }),
+      (error) =>
+        error instanceof OperationError &&
+        error.code === ControlError.StateConflict,
+    );
+    assert.equal(
+      h.calls.some((call) => call.method === ACT),
+      false,
+    );
+  });
+
+  test(`${operation} with an act telemetry that throws keeps its answer and its state`, async (t) => {
+    const h = controlHarness(t, IDENTITY);
+    h.dependencies.acts.act = () => {
+      throw new Error("telemetry down");
+    };
+    h.store.transaction((tx) => setNodeState(tx, h.node_id, state));
+    const result = await h.invoke(operation, {
+      params: { node_id: h.node_id },
+      query: {},
+      body: { ...h.body(state), ...body },
+    });
+    assert.equal(result.node.state, h.node().state);
+    assert.notEqual(h.node().state, state);
+    assert.equal(h.calls.at(-1)?.method, WAKE);
+  });
+}

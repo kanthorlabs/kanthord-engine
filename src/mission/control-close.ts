@@ -18,6 +18,7 @@ import {
   type Mission,
   type ExecutionEnds,
 } from "./contract.ts";
+import type { ExecutionTrace } from "../tracking/contract.ts";
 import type { Dependencies } from "./service.ts";
 import type { NodeRow } from "./store.ts";
 import { getRevision } from "./node-read.ts";
@@ -35,6 +36,7 @@ import {
   transition,
   controlResult,
   actRevision,
+  actedOn,
 } from "./control.ts";
 
 const NO_ATTEMPT = 0;
@@ -117,7 +119,14 @@ export function overrideNode(
     ends,
   );
   requireNoUnresolvedAction(tx, node);
-  endLiveClaim(tx, dependencies, node, now, RevokeCause.Human, ends);
+  const claim = endLiveClaim(
+    tx,
+    dependencies,
+    node,
+    now,
+    RevokeCause.Human,
+    ends,
+  );
   assert.ok(node.attempt !== null);
   const evidenceIds =
     node.attempt === NO_ATTEMPT
@@ -147,7 +156,15 @@ export function overrideNode(
     now,
   );
   transition(tx, dependencies, mission, node, NodeState.Completed, now);
-  return controlResult(tx, dependencies, nodeId, outcome, actor, now);
+  return actedOn(
+    tx,
+    mission,
+    node,
+    body.reason,
+    now,
+    controlResult(tx, dependencies, nodeId, outcome, actor, now),
+    claim?.execution.trace ?? null,
+  );
 }
 const DISCARD_STATES = [
   NodeState.Pending,
@@ -170,6 +187,7 @@ function closeHuman(
   actor: HumanActor,
   state: NodeState,
   now: number,
+  revoked: ExecutionTrace | null,
 ) {
   assert.ok(node.attempt !== null);
   assert.ok(state === NodeState.Blocked || state === NodeState.Discarded);
@@ -191,7 +209,15 @@ function closeHuman(
     now,
   );
   transition(tx, dependencies, mission, node, state, now);
-  return controlResult(tx, dependencies, node.id, outcome, actor, now);
+  return actedOn(
+    tx,
+    mission,
+    node,
+    body.reason,
+    now,
+    controlResult(tx, dependencies, node.id, outcome, actor, now),
+    revoked,
+  );
 }
 
 export function blockNode(
@@ -221,6 +247,7 @@ export function blockNode(
     actor,
     NodeState.Blocked,
     now,
+    null,
   );
 }
 
@@ -243,7 +270,14 @@ export function discardNode(
     ends,
   );
   requireNoUnresolvedAction(tx, node);
-  endLiveClaim(tx, dependencies, node, now, RevokeCause.Human, ends);
+  const claim = endLiveClaim(
+    tx,
+    dependencies,
+    node,
+    now,
+    RevokeCause.Human,
+    ends,
+  );
   return closeHuman(
     tx,
     dependencies,
@@ -253,5 +287,6 @@ export function discardNode(
     actor,
     NodeState.Discarded,
     now,
+    claim?.execution.trace ?? null,
   );
 }
