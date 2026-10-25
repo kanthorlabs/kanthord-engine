@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { CauseCategory, unattributed } from "../../kernel/cause.ts";
 import { test } from "node:test";
 import {
   appendFileSync,
@@ -131,6 +132,11 @@ test("a release failure that no revision changes stops with no_progress and neve
     stop: {
       reason: EndReason.NoProgress,
       code: null,
+      cause: unattributed([
+        CauseCategory.Model,
+        CauseCategory.Prompt,
+        CauseCategory.Plan,
+      ]),
       detail: noProgressDetail({
         rule: NoProgressRule.UnchangedRevision,
         count: NO_PROGRESS_LIMIT,
@@ -150,6 +156,11 @@ test("a release failure that no revision changes stops with no_progress and neve
       stop: {
         reason: EndReason.NoProgress,
         code: null,
+        cause: unattributed([
+          CauseCategory.Model,
+          CauseCategory.Prompt,
+          CauseCategory.Plan,
+        ]),
         detail: noProgressDetail({
           rule: NoProgressRule.UnchangedRevision,
           count: NO_PROGRESS_LIMIT,
@@ -165,6 +176,12 @@ test("a release failure that no revision changes stops with no_progress and neve
     },
   ]);
 });
+
+const BUDGET_STOP = {
+  reason: "budget_end",
+  code: "wall_time",
+  cause: unattributed([CauseCategory.Plan, CauseCategory.Model]),
+};
 
 test("a wall deadline during a task verification releases further work", async (t) => {
   const h = await fixture(
@@ -183,11 +200,9 @@ test("a wall deadline during a task verification releases further work", async (
   assert.deepEqual(await runStepsImplement(h), {
     kind: "released",
     furtherWork: true,
-    stop: { reason: "budget_end", code: "wall_time" },
+    stop: BUDGET_STOP,
   });
-  assert.deepEqual(bodies, [
-    { further_work: true, stop: { reason: "budget_end", code: "wall_time" } },
-  ]);
+  assert.deepEqual(bodies, [{ further_work: true, stop: BUDGET_STOP }]);
 });
 
 test("a release failure goes to the owner of the first failed index when the node and a task share one command", async (t) => {

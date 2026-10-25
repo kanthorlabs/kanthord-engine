@@ -19,6 +19,10 @@ import {
 } from "../../scheduler/contract.ts";
 import { createIdempotencyKey } from "../../kernel/identity.ts";
 import { SpanStatus } from "../../tracking/contract.ts";
+import { unattributed, type FailureCause } from "../../kernel/cause.ts";
+import { gitStepOf, type GitStep } from "./git-step.ts";
+import { GIT_COMMIT_FAILED } from "./stop-codes.ts";
+import { stopCauseOf } from "./stop-cause.ts";
 
 type EvidenceBody = Omit<
   Parameters<MethodClients["mission"]["evidence.submit"]>[0]["body"],
@@ -87,15 +91,18 @@ export class ExecutionStop extends Error {
   readonly reason: EndReason;
   readonly code: string | null;
   readonly detail: string | null;
+  readonly cause: FailureCause | null;
   constructor(
     reason: EndReason,
     code: string | null,
     detail: string | null = null,
+    cause: FailureCause | null = null,
   ) {
     super(`Execution stopped: ${reason}`);
     this.reason = reason;
     this.code = code;
     this.detail = detail;
+    this.cause = cause;
   }
 }
 
@@ -132,6 +139,7 @@ export class ExecutionRun {
   private readonly logSink: (record: Record<string, unknown>) => void;
   private stopped: ExecutionStop | null = null;
   private settlement: Promise<void> | null = null;
+  private verificationTimedOut = false;
   private readonly traceClosers = new Set<(status: SpanStatus) => void>();
 
   constructor(input: {
@@ -183,6 +191,10 @@ export class ExecutionRun {
     };
   }
 
+  noteVerification(timedOut: boolean): void {
+    this.verificationTimedOut = timedOut;
+  }
+
   onStop(listener: () => void): Disposable {
     return addAbortListener(this.operationContext.signal, listener);
   }
@@ -224,12 +236,21 @@ export class ExecutionRun {
   async stopOf(error: unknown): Promise<ExecutionStop> {
     if (error instanceof ExecutionStop)
       return this.halt(error.reason, error.code, error.detail);
+    const gitStep = gitStepOf(error);
     if (error instanceof CodedError)
-      return this.halt(EndReason.OperationFailed, error.code);
+      return this.halt(
+        EndReason.OperationFailed,
+        error.code,
+        error.code === GIT_COMMIT_FAILED
+          ? await this.reasonOf(error.cause ?? error)
+          : null,
+        gitStep,
+      );
     return this.halt(
       EndReason.OperationFailed,
       null,
       await this.reasonOf(error),
+      gitStep,
     );
   }
 
@@ -241,17 +262,32 @@ export class ExecutionRun {
     reason: EndReason,
     code: string | null,
     detail: string | null = null,
+    gitStep: GitStep | null = null,
   ): ExecutionStop {
-    this.stopped ??= new ExecutionStop(
-      reason,
-      code,
-      reason === EndReason.EnvironmentFailed &&
-        Object.keys(this.environmentDigests).length
-        ? detailWithDigests(detail, this.environmentDigests)
-        : detail,
-    );
+    this.stopped ??= this.stopWith(reason, code, detail, gitStep);
     this.operationContext.cancel(this.stopped);
     return this.stopped;
+  }
+
+  private stopWith(
+    reason: EndReason,
+    code: string | null,
+    detail: string | null,
+    gitStep: GitStep | null,
+  ): ExecutionStop {
+    const stored =
+      reason === EndReason.EnvironmentFailed &&
+      Object.keys(this.environmentDigests).length
+        ? detailWithDigests(detail, this.environmentDigests)
+        : detail;
+    const cause =
+      reason === EndReason.Revoked
+        ? null
+        : stopCauseOf(reason, code, stored, {
+            git_step: gitStep,
+            verification_timed_out: this.verificationTimedOut,
+          });
+    return new ExecutionStop(reason, code, stored, cause);
   }
 
   private requireActive(): void {
@@ -385,7 +421,14 @@ export class ExecutionRun {
     const stop: ReleaseStop | null =
       budgetEnd === null
         ? null
-        : { reason: ExecutionStopReason.BudgetEnd, code: budgetEnd };
+        : {
+            reason: ExecutionStopReason.BudgetEnd,
+            code: budgetEnd,
+            cause: stopCauseOf(ExecutionStopReason.BudgetEnd, budgetEnd, null, {
+              git_step: null,
+              verification_timed_out: this.verificationTimedOut,
+            }),
+          };
     await this.settleCredentials();
     this.closeTraces(SpanStatus.Ok);
     await this.spans.flush(TELEMETRY_FLUSH_MS);
@@ -432,6 +475,7 @@ export class ExecutionRun {
       reason,
       code: stopped.code,
       ...(stopped.detail === null ? {} : { detail: stopped.detail }),
+      cause: stopped.cause ?? unattributed([]),
     };
     const context = this.cleanupContext();
     try {
