@@ -411,15 +411,20 @@ export function missionHarness(
     const registered = registry.get(operation.id);
     assert.equal(registered.operation, operation);
     const before = commits;
+    let committed: { body: unknown } | undefined;
     const output = await registered.handler(parsed, {
       ...caller,
       commit: <T>(write: (tx: Transaction) => T): T =>
-        caller.commit((tx) => operation.output.parse(write(tx)) as T),
+        caller.commit((tx) => {
+          const body = operation.output.parse(write(tx));
+          committed = { body };
+          return body as T;
+        }),
     });
     assert.equal(commits, before + 1);
-    return operation.output.parse(output) as z.output<
-      (typeof missionOperations)[K]["output"]
-    >;
+    return (
+      committed ? committed.body : operation.output.parse(output)
+    ) as z.output<(typeof missionOperations)[K]["output"]>;
   }
   return {
     store,
