@@ -882,8 +882,8 @@ export function composeServices(options: {
     instanceOf: (tx, name) => worker.instanceOf(tx, name),
     createMission: (tx, pid, actor) => mission.createMission(tx, pid, actor),
     liveNodesPinning: (tx, bid) => mission.liveNodesPinning(tx, bid),
-    liveNodePins: (tx, projectId, bindingIds) =>
-      mission.liveNodePins(tx, projectId, bindingIds),
+    currentNodePins: (tx, projectId, bindingIds) =>
+      mission.currentNodePins(tx, projectId, bindingIds),
     unmatchedClaims: (tx, projectId) =>
       scheduler.unmatchedClaims(tx, projectId),
     validateEntry: (tx, name, entry, holders) =>

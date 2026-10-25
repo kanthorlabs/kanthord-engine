@@ -101,7 +101,7 @@ import {
   type BindingRevisionResult,
   type CreateMission,
   type LiveNodesPinning,
-  type LiveNodePins,
+  type CurrentNodePins,
   type UnmatchedClaims,
   type ValidateEntry,
   type CustodySuitability,
@@ -546,7 +546,7 @@ export interface Dependencies {
   hostHome?: string;
   createMission: CreateMission;
   liveNodesPinning: LiveNodesPinning;
-  liveNodePins: LiveNodePins;
+  currentNodePins: CurrentNodePins;
   unmatchedClaims: UnmatchedClaims;
   validateEntry: ValidateEntry;
   custodySuitability: CustodySuitability;
@@ -612,7 +612,7 @@ export class ProjectService implements Service, ProjectBindings {
   private readonly hostHome?: string;
   private readonly createMission: CreateMission;
   private readonly liveNodesPinning: LiveNodesPinning;
-  private readonly liveNodePins: LiveNodePins;
+  private readonly currentNodePins: CurrentNodePins;
   private readonly unmatchedClaims: UnmatchedClaims;
   private readonly validateEntry: ValidateEntry;
   private readonly custodySuitability: CustodySuitability;
@@ -640,7 +640,7 @@ export class ProjectService implements Service, ProjectBindings {
     this.hostHome = dependencies.hostHome;
     this.createMission = dependencies.createMission;
     this.liveNodesPinning = dependencies.liveNodesPinning;
-    this.liveNodePins = dependencies.liveNodePins;
+    this.currentNodePins = dependencies.currentNodePins;
     this.unmatchedClaims = dependencies.unmatchedClaims;
     this.validateEntry = dependencies.validateEntry;
     this.custodySuitability = dependencies.custodySuitability;
@@ -1157,7 +1157,7 @@ export class ProjectService implements Service, ProjectBindings {
         });
     }
     if (older.size === EMPTY_LENGTH) return [];
-    return this.liveNodePins(tx, projectId, Array.from(older.keys()))
+    return this.currentNodePins(tx, projectId, Array.from(older.keys()))
       .map(({ node_id, binding_id }) => {
         const revision = older.get(binding_id);
         assert.ok(revision);

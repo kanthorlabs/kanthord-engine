@@ -35,7 +35,7 @@ import {
   MissionErrorCode,
   missionOperations,
   type HumanActor,
-  type LiveNodePin,
+  type CurrentNodePin,
   type MissionBindings,
   type MissionCollaborations,
   type MissionEnvironments,
@@ -1030,11 +1030,11 @@ export class MissionService
     return readLiveNodesPinning(tx, bindingId);
   }
 
-  liveNodePins(
+  currentNodePins(
     tx: Transaction,
     projectId: string,
     bindingIds: readonly string[],
-  ): LiveNodePin[] {
+  ): CurrentNodePin[] {
     return readCurrentPins(tx, projectId, bindingIds)
       .filter(({ state }) => !isTerminal(state))
       .map(({ node_id, binding_id }) => ({ node_id, binding_id }));

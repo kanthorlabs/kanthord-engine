@@ -483,7 +483,7 @@ export type CreateMission = (
   actor: HumanActor,
 ) => void;
 export type LiveNodesPinning = (tx: Transaction, bindingId: string) => string[];
-export type LiveNodePins = (
+export type CurrentNodePins = (
   tx: Transaction,
   projectId: string,
   bindingIds: readonly string[],

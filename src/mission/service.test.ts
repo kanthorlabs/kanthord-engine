@@ -630,7 +630,7 @@ test("liveNodesPinning checks only the current revision of live nonterminal node
   );
 });
 
-test("liveNodePins answers the current pins of live nonterminal nodes of one project", (t) => {
+test("currentNodePins answers the current pins of live nonterminal nodes of one project", (t) => {
   const { store, mission } = fixture(t);
   const expected = store.transaction((tx) => {
     mission.createMission(tx, PROJECT_ID, HUMAN_ACTOR);
@@ -667,12 +667,12 @@ test("liveNodePins answers the current pins of live nonterminal nodes of one pro
   });
   assert.deepEqual(
     store.transaction((tx) =>
-      mission.liveNodePins(tx, PROJECT_ID, [OTHER_BINDING_ID, BINDING_ID]),
+      mission.currentNodePins(tx, PROJECT_ID, [OTHER_BINDING_ID, BINDING_ID]),
     ),
     expected,
   );
   assert.deepEqual(
-    store.transaction((tx) => mission.liveNodePins(tx, PROJECT_ID, [])),
+    store.transaction((tx) => mission.currentNodePins(tx, PROJECT_ID, [])),
     [],
   );
 });
