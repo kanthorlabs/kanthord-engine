@@ -106,17 +106,33 @@ test("agent prompts are valid published UTF-8 assets", () => {
   assert.ok(RE_AGENT_PROMPT.includes("re@1"));
   assert.ok(
     RE_AGENT_PROMPT.includes(
-      "The prose style and the finding format of a report that the candidate produces are no ground for a blocker.",
+      "The prose style and the finding format of a candidate report are no default-standard violation.",
     ),
   );
   assert.ok(WORKBENCH_PROMPT.startsWith("## Human interlocutor"));
 });
 
-test("base prompt holds no rule that only code or a review needs", () => {
-  assert.doesNotMatch(
-    BASE_PROMPT,
-    /\b(code|comment|commit|test|repository|review|blocker|suggestion|debug)/i,
-  );
+function ruleNames(text: string): string[] {
+  return [...text.matchAll(/^\d+\. \*\*(.+?)\*\*/gm)].map((match) => match[1]!);
+}
+
+test("base prompt holds exactly the shared rules", () => {
+  assert.deepEqual(ruleNames(BASE_PROMPT), [
+    "Think before you act.",
+    "Simplicity first.",
+    "Surgical changes.",
+    "Every text follows the ASD-STE100 style.",
+    "No flattery.",
+    "No secret in the work.",
+  ]);
+  for (const sentence of [
+    "Keep the structure and the formatting that the request does not change, even when another choice is better.",
+    "Mention a defect in adjacent content instead of a fix.",
+    "Keep code, commands, names and identifiers exact.",
+    "This rule governs every reply, report, assessment and document that you write.",
+    "Write, log, print, send or report no secret: no token, password, key, credential hash or session record.",
+  ])
+    assert.ok(BASE_PROMPT.includes(sentence), sentence);
 });
 
 test("swe@1 and re@1 hold the code rules in the same words", () => {
@@ -128,14 +144,26 @@ test("swe@1 and re@1 hold the code rules in the same words", () => {
   assert.ok(reStart > fileStart);
   const shared = SWE_AGENT_PROMPT.slice(sweStart);
   assert.equal(RE_AGENT_PROMPT.slice(reStart), shared);
-  for (const rule of [
-    "**Code comments are forbidden.**",
-    "**No leftover.**",
-    "**Zero warnings.**",
-    "**Bounded waits.**",
-    "`<B1/S1> - status:<FIXED/OPEN> - action:<YES/NO>",
-  ])
-    assert.ok(shared.includes(rule), rule);
+  assert.deepEqual(ruleNames(shared), [
+    "Simplicity in code.",
+    "Surgical code changes.",
+    "Prefer the built-ins of the platform.",
+    "One responsibility per component.",
+    "Code comments are forbidden.",
+    "No leftover.",
+    "Linear control flow.",
+    "Bounded loops.",
+    "Resource ownership.",
+    "Small functions.",
+    "Assertions.",
+    "Explicit errors.",
+    "Zero warnings.",
+    "No test knowledge in production code.",
+    "Bounded waits.",
+    "No self-spawning test.",
+    "Present every blocker and every suggestion as a bullet list, one item per bullet, in this exact format:",
+  ]);
+  assert.ok(shared.includes("`status:FIXED` when the work holds the change"));
 });
 
 test("unknown and inherited names are not agent declarations", () => {

@@ -14,7 +14,7 @@ Your contribution to the WHAT is the assessment and its findings.
 4. **Every item of your finding list carries `status:OPEN`**, because you apply no fix. Every blocker names the criterion or the standard that it violates.
 5. **A passing assessment states the evidence that meets the criterion.** A failing assessment states its findings. Neither holds praise.
 6. **The default standard binds your own text.** A violation of it in your assessment is a defect of your assessment, not of the candidate.
-7. **The style of a produced report is no ground for a blocker.** The prose style and the finding format of a report that the candidate produces are no ground for a blocker.
+7. **The style of a candidate report is no violation.** The prose style and the finding format of a candidate report are no default-standard violation.
 
 ## Code principles
 
@@ -45,4 +45,4 @@ These rules bind every code change.
 
 ## Findings
 
-1. **Present every blocker and every suggestion as a bullet list, one item per bullet, in this exact format:** `<B1/S1> - status:<FIXED/OPEN> - action:<YES/NO> - <name> - <description> - fix:<recommended change> - why:<reason>`. `B` is a blocker and `S` is a suggestion, numbered. `status:FIXED` when the change is applied, `status:OPEN` when the work still needs it. `action:YES` when the change applies, `action:NO` when it is a no-op or a won't-do. Every item carries a status, a fix and a why. Bury no item in a table, in prose or in a count.
+1. **Present every blocker and every suggestion as a bullet list, one item per bullet, in this exact format:** `<B1/S1> - status:<FIXED/OPEN> - action:<YES/NO> - <name> - <description> - fix:<recommended change> - why:<reason>`. `B` is a blocker and `S` is a suggestion, numbered. `status:FIXED` when the work holds the change, `status:OPEN` when the work still needs it. `action:YES` when the change applies, `action:NO` when it is a no-op or a won't-do. Every item carries a status, a fix and a why. Bury no item in a table, in prose or in a count.

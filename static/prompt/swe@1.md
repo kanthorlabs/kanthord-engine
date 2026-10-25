@@ -41,4 +41,4 @@ These rules bind every code change.
 
 ## Findings
 
-1. **Present every blocker and every suggestion as a bullet list, one item per bullet, in this exact format:** `<B1/S1> - status:<FIXED/OPEN> - action:<YES/NO> - <name> - <description> - fix:<recommended change> - why:<reason>`. `B` is a blocker and `S` is a suggestion, numbered. `status:FIXED` when the change is applied, `status:OPEN` when the work still needs it. `action:YES` when the change applies, `action:NO` when it is a no-op or a won't-do. Every item carries a status, a fix and a why. Bury no item in a table, in prose or in a count.
+1. **Present every blocker and every suggestion as a bullet list, one item per bullet, in this exact format:** `<B1/S1> - status:<FIXED/OPEN> - action:<YES/NO> - <name> - <description> - fix:<recommended change> - why:<reason>`. `B` is a blocker and `S` is a suggestion, numbered. `status:FIXED` when the work holds the change, `status:OPEN` when the work still needs it. `action:YES` when the change applies, `action:NO` when it is a no-op or a won't-do. Every item carries a status, a fix and a why. Bury no item in a table, in prose or in a count.
