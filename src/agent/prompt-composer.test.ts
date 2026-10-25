@@ -70,3 +70,30 @@ test("a work prompt lists its tasks after the verifications", () => {
     /1\. first\n\n## Tasks\n\n1\. route \(`task_a`\)\. Criterion: routes\n2\. view \(`task_b`\)\. Criterion: renders$/,
   );
 });
+
+test("a task work prompt carries the node frame above the task text", () => {
+  const task = {
+    node_id: "task_a",
+    revision: 1,
+    content: {
+      name: "route",
+      requirement: "add the route",
+      criterion: "routes",
+      verifications: ["first"],
+    },
+  };
+  const node = {
+    name: "api",
+    requirement: "serve json only",
+    criterion: "every route answers json",
+  };
+  assert.equal(
+    renderWorkPrompt(SHIPPED_TEMPLATES, { ...task, node }).text,
+    "# api\n\n## Requirement\n\nserve json only\n\n## Criterion\n\nevery route answers json\n\n" +
+      renderWorkPrompt(SHIPPED_TEMPLATES, task).text,
+  );
+  assert.equal(
+    renderWorkPrompt(SHIPPED_TEMPLATES, { ...task, node: null }).text,
+    renderWorkPrompt(SHIPPED_TEMPLATES, task).text,
+  );
+});

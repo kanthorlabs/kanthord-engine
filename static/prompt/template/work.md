@@ -1,3 +1,17 @@
+{{#if node~}}
+
+# {{node.name}}
+
+## Requirement
+
+{{node.requirement}}
+
+## Criterion
+
+{{node.criterion}}
+
+{{/if~}}
+
 # {{name}}
 
 ## Requirement

@@ -13,8 +13,12 @@ import {
   startCheck,
   runTask,
   runStepsImplement,
+  taskWork,
+  TaskResultKind,
   verifyTaskRun,
 } from "./steps-implement.ts";
+import { nodeWork } from "./base-refresh.ts";
+import { nodeUnitOf } from "./release-gate.ts";
 import { ProviderFailure } from "../../scheduler/contract.ts";
 import { NoProgressRule } from "./progress-rule.ts";
 import {
@@ -285,6 +289,58 @@ test("an implement node with no task commits its change with the node identity i
   const log = await simpleGit(h.root).log();
   assert.equal(log.latest!.body.split("\n")[0], nodeId);
   assert.ok(existsSync(join(h.root, "node-file")));
+});
+
+const NODE_FRAME =
+  "# node frame\n\n## Requirement\n\nnode rule\n\n## Criterion\n\nnode check\n\n";
+
+test("every task work prompt carries the node frame above the task text", async (t) => {
+  const tasks = [task("first", "true"), task("second", "true")];
+  const h = await fixture(t, tasks, [
+    fauxAssistantMessage("first"),
+    fauxAssistantMessage("second"),
+  ]);
+  h.revision = {
+    ...h.revision,
+    content: {
+      ...h.revision.content,
+      name: "node frame",
+      requirement: "node rule",
+      criterion: "node check",
+    },
+  };
+  for (const current of tasks)
+    assert.ok(
+      taskWork(h, current).text.startsWith(
+        `${NODE_FRAME}# ${current.content.name}\n\n## Requirement\n\n${current.content.requirement}\n`,
+      ),
+    );
+  for (const current of tasks)
+    assert.equal((await runTask(h, current)).kind, TaskResultKind.Complete);
+  assert.equal(h.provider.calls.length, tasks.length);
+  tasks.forEach((current, index) =>
+    assert.ok(
+      JSON.stringify(h.provider.calls[index]!.messages).includes(
+        JSON.stringify(`${NODE_FRAME}# ${current.content.name}\n`).slice(1, -1),
+      ),
+    ),
+  );
+  h.input.workspaces.release(
+    h.input.workspaces.nodeKey(h.input.claim.node_id),
+    WorkspaceKind.Node,
+  );
+});
+
+test("the work prompt of a node unit holds no node frame", async (t) => {
+  const h = await fixture(t, [], []);
+  const unit = nodeUnitOf(h.input.claim.node_id, h.revision);
+  assert.deepEqual(taskWork(h, unit), nodeWork(h));
+  assert.ok(taskWork(h, unit).text.startsWith("# implement\n\n## Requirement"));
+  assert.ok(!taskWork(h, unit).text.slice(1).includes("# implement\n"));
+  h.input.workspaces.release(
+    h.input.workspaces.nodeKey(h.input.claim.node_id),
+    WorkspaceKind.Node,
+  );
 });
 
 const TWO_BINDINGS = ["api", "web"];

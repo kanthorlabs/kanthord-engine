@@ -627,6 +627,7 @@ export function taskWork(state: StepsState, task: TaskContent) {
     revision: state.input.claim.pinned_revision,
     content: task.content,
     repositories: implementRepositoriesOf(state),
+    node: state.revision.content,
   });
 }
 
