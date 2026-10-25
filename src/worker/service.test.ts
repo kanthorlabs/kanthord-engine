@@ -60,7 +60,11 @@ import {
   IN_MEMORY_DATABASE,
   type Transaction,
 } from "../kernel/store.ts";
-import { AgentChoiceKind, type AgentSelection } from "../scheduler/contract.ts";
+import {
+  AgentChoiceKind,
+  type AgentPin,
+  type AgentSelection,
+} from "../scheduler/contract.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import { OperationError } from "../kernel/errors.ts";
 import { createIdentity } from "../kernel/identity.ts";
@@ -1696,6 +1700,10 @@ function authorizationFixture(t: TestContext) {
   const pinned = new Map<string, CredentialRecord & { id: string }>();
   const newestOf = (name: string) => newest.get(name) ?? anthropicRecord;
   let selectionOf: (tx: Transaction) => AgentSelection[] = () => [];
+  let pinsOf: () => {
+    worker_binding_id: string;
+    pins: AgentPin[];
+  } | null = () => null;
   const f = enablementFixture(
     t,
     {
@@ -1714,6 +1722,7 @@ function authorizationFixture(t: TestContext) {
       schedulerClaims: {
         ...fakeCollaborations.schedulerClaims,
         agentSelectionsOf: (tx) => selectionOf(tx),
+        agentPinsOf: () => pinsOf(),
       },
       pinnedCredentialMetadata: (_tx, _claim, name) => {
         const record = pinned.get(name);
@@ -1747,6 +1756,16 @@ function authorizationFixture(t: TestContext) {
         chosen.selection.position,
       ),
     ];
+    pinsOf = () => ({
+      worker_binding_id: execution.worker_binding_id,
+      pins: [
+        {
+          agent_name: AGENT,
+          enablement_id: chosen.enablement_id,
+          position: chosen.selection.position,
+        },
+      ],
+    });
     return chosen.selection;
   };
   const authorize = () =>
