@@ -238,6 +238,7 @@ test("the agent.session span starts with the session attributes and its identity
     "kanthord.agent.chain_position": position,
     "kanthord.agent.chain_level": level,
     "gen_ai.request.model": effective_configuration.model_identifier,
+    "kanthord.agent.reasoning_effort": effective_configuration.reasoning_effort,
     "kanthord.session.format": SessionFormat.Pi,
     "kanthord.session.format_version": pi.CURRENT_SESSION_VERSION,
   };

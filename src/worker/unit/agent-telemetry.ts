@@ -34,6 +34,8 @@ export const AgentErrorType = {
 const PROMPT_TEMPLATE_ATTRIBUTE = "kanthord.prompt.template";
 const PROMPT_TEMPLATE_DIGEST_ATTRIBUTE = "kanthord.prompt.template.digest";
 const PROMPT_WORK_DIGEST_ATTRIBUTE = "kanthord.prompt.work.digest";
+const WORKER_BINDING_ATTRIBUTE = "kanthord.worker_binding.id";
+const AGENT_ENABLEMENT_ATTRIBUTE = "kanthord.agent_enablement.id";
 const FIRST_SEQUENCE = 1;
 const NO_ENTRIES = 0;
 
@@ -104,7 +106,12 @@ type EventOf<T extends SessionEvent["type"]> = Extract<
 
 type TracedAgent = Pick<
   AgentSetup,
-  "agent_name" | "position" | "level" | "effective_configuration"
+  | "agent_name"
+  | "position"
+  | "level"
+  | "effective_configuration"
+  | "enablement_id"
+  | "worker_binding_id"
 >;
 
 export interface AgentTracing {
@@ -121,6 +128,8 @@ class AgentTracer {
   private readonly position: number;
   private readonly level: AgentSetup["level"];
   private readonly model: string;
+  private readonly enablementId: string | null;
+  private readonly workerBindingId: string;
   private turn: string | null = null;
   private turnStartedAt = NO_ENTRIES;
   private turnEntryCount = NO_ENTRIES;
@@ -154,6 +163,8 @@ class AgentTracer {
     this.position = agent.position;
     this.level = agent.level;
     this.model = agent.effective_configuration.model_identifier;
+    this.enablementId = agent.enablement_id;
+    this.workerBindingId = agent.worker_binding_id;
   }
 
   observe(event: SessionEvent): void {
@@ -236,6 +247,10 @@ class AgentTracer {
         "gen_ai.operation.name": CHAT_OPERATION,
         "gen_ai.conversation.id": this.sessionId,
         "gen_ai.request.model": this.model,
+        [WORKER_BINDING_ATTRIBUTE]: this.workerBindingId,
+        ...(this.enablementId === null
+          ? {}
+          : { [AGENT_ENABLEMENT_ATTRIBUTE]: this.enablementId }),
         ...promptAttributes(this.promptOf()),
       },
     });

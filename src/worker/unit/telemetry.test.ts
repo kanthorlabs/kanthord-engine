@@ -89,8 +89,12 @@ const EFFECTIVE_CONFIGURATION = {
   model_identifier: MODEL,
   reasoning_effort: "off",
 } as const;
+const ENABLEMENT_ID = "agent_enablement_01ARZ3NDEKTSV4RRFFQ69G5FAV";
+const WORKER_BINDING_ID = "binding_01ARZ3NDEKTSV4RRFFQ69G5FAB";
 const TRACED_AGENT = {
   agent_name: "swe@1",
+  enablement_id: ENABLEMENT_ID,
+  worker_binding_id: WORKER_BINDING_ID,
   position: 0,
   level: ChainLevel.Enablement,
   effective_configuration: EFFECTIVE_CONFIGURATION,
@@ -107,7 +111,9 @@ const TURN_ATTRIBUTES = [
   "kanthord.agent.chain_level",
   "kanthord.agent.chain_position",
   "kanthord.agent.name",
+  "kanthord.agent_enablement.id",
   "kanthord.turn.index",
+  "kanthord.worker_binding.id",
 ];
 const TURN_END_ATTRIBUTES = [
   "gen_ai.provider.name",
@@ -605,6 +611,8 @@ test("the agent tracer writes a turn and its tool call without a text", () => {
     "gen_ai.operation.name": "chat",
     "gen_ai.conversation.id": SESSION_ID,
     "gen_ai.request.model": MODEL,
+    "kanthord.worker_binding.id": WORKER_BINDING_ID,
+    "kanthord.agent_enablement.id": ENABLEMENT_ID,
     ...identityOf(turnStart?.attributes),
   });
   assert.equal(turnEnd?.status, SpanStatus.Ok);
@@ -659,6 +667,31 @@ test("a turn start holds the prompt facts that promptOf answers", () => {
     attributes?.["kanthord.prompt.work.digest"],
     TURN_PROMPT.work_digest,
   );
+});
+
+test("a turn start holds the worker binding id and the enablement id", () => {
+  const { records, spans } = recorder();
+  const scripted = scriptedSession();
+  traceAgent(scripted.session, spans, TRACED_AGENT, TRACING);
+  scripted.emit({ type: "turn_start" });
+  const attributes = startOf(records, SpanOperation.Turn)?.attributes;
+  assert.equal(attributes?.["kanthord.worker_binding.id"], WORKER_BINDING_ID);
+  assert.equal(attributes?.["kanthord.agent_enablement.id"], ENABLEMENT_ID);
+});
+
+test("a turn start holds no enablement id when the agent has no pin", () => {
+  const { records, spans } = recorder();
+  const scripted = scriptedSession();
+  traceAgent(
+    scripted.session,
+    spans,
+    { ...TRACED_AGENT, enablement_id: null },
+    TRACING,
+  );
+  scripted.emit({ type: "turn_start" });
+  const attributes = startOf(records, SpanOperation.Turn)?.attributes ?? {};
+  assert.equal(attributes["kanthord.worker_binding.id"], WORKER_BINDING_ID);
+  assert.ok(!("kanthord.agent_enablement.id" in attributes));
 });
 
 test("a turn start holds no prompt fact when promptOf answers null", () => {

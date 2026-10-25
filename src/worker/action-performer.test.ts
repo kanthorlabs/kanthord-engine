@@ -121,6 +121,7 @@ function harness(t: TestContext) {
     store,
     schedulerClaims: {
       agentSelectionsOf: () => [],
+      agentPinsOf: () => null,
       unendedExecutionOf: () => null,
       requireRunning: (tx, executionId, runtimeIdentity, now) => {
         assert.ok(tx.database.isTransaction);

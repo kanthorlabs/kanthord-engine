@@ -178,6 +178,7 @@ function instanceFixture(t: TestContext) {
     sshHostKeysOf: unexpected,
     schedulerClaims: {
       agentSelectionsOf: () => [],
+      agentPinsOf: () => null,
       requireRunning: unexpected,
       runningExecutionOfRuntime: () => null,
       unendedExecutionOf: (_tx, runtimeIdentity) => {

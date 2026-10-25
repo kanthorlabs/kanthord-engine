@@ -46,6 +46,8 @@ function resolveModel(
 
 const setup: AgentSetup = {
   agent_name: "swe@1",
+  enablement_id: null,
+  worker_binding_id: "binding_01ARZ3NDEKTSV4RRFFQ69G5FAB",
   credential_id: "credential",
   effective_configuration: {
     agent_provider: "default",

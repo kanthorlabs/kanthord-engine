@@ -707,6 +707,7 @@ export function composeServices(options: {
       unendedExecutionOf: (...args) => scheduler.unendedExecutionOf(...args),
       activityOf: (...args) => scheduler.activityOf(...args),
       agentSelectionsOf: (...args) => scheduler.agentSelectionsOf(...args),
+      agentPinsOf: (...args) => scheduler.agentPinsOf(...args),
     },
     health: options.health,
     registrations: options.registrations,

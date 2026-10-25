@@ -170,6 +170,8 @@ test("host takes handover before setup and method, discards on every method end"
     agents: [
       {
         agent_name: "swe@1",
+        enablement_id: null,
+        worker_binding_id: "binding_01ARZ3NDEKTSV4RRFFQ69G5FAB",
         credential_id: credential.credential_id,
         effective_configuration: {
           agent_provider: "default",

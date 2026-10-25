@@ -70,7 +70,9 @@ export async function executionSetup(
     | "environmentClaimed"
     | "environmentDigestOf"
     | "environmentOf"
-  > & { schedulerClaims: Pick<SchedulerClaims, "agentSelectionsOf"> },
+  > & {
+    schedulerClaims: Pick<SchedulerClaims, "agentSelectionsOf" | "agentPinsOf">;
+  },
   worker: Pick<WorkerService, "declarationOf" | "pinnedAgentView">,
   caller: CallerContext,
 ): Promise<ExecutionSetup> {
@@ -100,6 +102,11 @@ export async function executionSetup(
       tx,
       claim.executionId,
     );
+    const agentPins = dependencies.schedulerClaims.agentPinsOf(
+      tx,
+      claim.executionId,
+    );
+    assert.ok(agentPins, "A claimed execution must hold a row.");
     if (agentNames.length === NO_AGENTS)
       throw new OperationError(
         HttpStatus.Conflict,
@@ -169,6 +176,10 @@ export async function executionSetup(
       prompted.push(agentPromptFacts(agentName, promptParts, templates));
       return {
         agent_name: agentName,
+        enablement_id:
+          agentPins.pins.find(({ agent_name }) => agent_name === agentName)
+            ?.enablement_id ?? null,
+        worker_binding_id: agentPins.worker_binding_id,
         effective_configuration: view.effective,
         position: selection.position,
         level: selection.level,
