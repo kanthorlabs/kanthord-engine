@@ -3,6 +3,7 @@ import { test } from "node:test";
 import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { simpleGit } from "simple-git";
+import { contentText } from "@earendil-works/pi-ai";
 import { REASON_MAX_LENGTH } from "../../kernel/probe.ts";
 import { fauxAssistantMessage, fauxToolCall } from "./test-support.ts";
 import { EndReason, ExecutionStop } from "./execution-run.ts";
@@ -13,8 +14,12 @@ import {
   startCheck,
   runTask,
   runStepsImplement,
+  taskWork,
+  TaskResultKind,
   verifyTaskRun,
 } from "./steps-implement.ts";
+import { nodeWork } from "./base-refresh.ts";
+import { nodeUnitOf } from "./release-gate.ts";
 import { ProviderFailure } from "../../scheduler/contract.ts";
 import { NoProgressRule } from "./progress-rule.ts";
 import {
@@ -285,6 +290,84 @@ test("an implement node with no task commits its change with the node identity i
   const log = await simpleGit(h.root).log();
   assert.equal(log.latest!.body.split("\n")[0], nodeId);
   assert.ok(existsSync(join(h.root, "node-file")));
+});
+
+const NODE_FRAME =
+  "# Node node frame\n\n## Requirement\n\nnode rule\n\n## Criterion\n\nnode check\n\n" +
+  "Do only the task below. The node part above is context.\n\n";
+const NODE_RULE = "node rule";
+const USER_ROLE = "user";
+const SYSTEM_ROLE = "system";
+const ONE_REVISION = 1;
+const ONE_WORK_MESSAGE = 1;
+
+test("every task work prompt and its revision turn carry the node frame in the user message", async (t) => {
+  const revised = task("first", "test -f revised");
+  const tasks = [revised, task("second", "true")];
+  const h = await fixture(t, tasks, [
+    fauxAssistantMessage("first"),
+    fauxAssistantMessage(
+      fauxToolCall("write", { path: "revised", content: "good" }),
+      { stopReason: "toolUse" },
+    ),
+    fauxAssistantMessage("revised"),
+    fauxAssistantMessage("second"),
+  ]);
+  h.revision = {
+    ...h.revision,
+    content: {
+      ...h.revision.content,
+      name: "node frame",
+      requirement: NODE_RULE,
+      criterion: "node check",
+    },
+  };
+  for (const current of tasks)
+    assert.ok(
+      taskWork(h, current).text.startsWith(
+        `${NODE_FRAME}# Task ${current.content.name}\n\n## Requirement\n\n${current.content.requirement}\n`,
+      ),
+    );
+  const instruct = t.mock.method(h.agent, "instruct");
+  for (const current of tasks)
+    assert.equal((await runTask(h, current)).kind, TaskResultKind.Complete);
+  assert.equal(instruct.mock.callCount(), ONE_REVISION);
+  const promptedTasks = [revised, revised, revised, tasks[1]!];
+  assert.equal(h.provider.calls.length, promptedTasks.length);
+  h.provider.calls.forEach((call, index) => {
+    const work = taskWork(h, promptedTasks[index]!).text;
+    assert.equal(
+      call.messages.filter(
+        (entry) =>
+          entry.role === USER_ROLE && contentText(entry.content) === work,
+      ).length,
+      ONE_WORK_MESSAGE,
+    );
+    assert.ok(!(call.systemPrompt ?? "").includes(NODE_RULE));
+    assert.ok(
+      !call.messages.some(
+        (entry) =>
+          entry.role === SYSTEM_ROLE &&
+          contentText(entry.content).includes(NODE_RULE),
+      ),
+    );
+  });
+  h.input.workspaces.release(
+    h.input.workspaces.nodeKey(h.input.claim.node_id),
+    WorkspaceKind.Node,
+  );
+});
+
+test("the work prompt of a node unit holds no node frame", async (t) => {
+  const h = await fixture(t, [], []);
+  const unit = nodeUnitOf(h.input.claim.node_id, h.revision);
+  assert.deepEqual(taskWork(h, unit), nodeWork(h));
+  assert.ok(taskWork(h, unit).text.startsWith("# implement\n\n## Requirement"));
+  assert.ok(!taskWork(h, unit).text.slice(1).includes("# implement\n"));
+  h.input.workspaces.release(
+    h.input.workspaces.nodeKey(h.input.claim.node_id),
+    WorkspaceKind.Node,
+  );
 });
 
 const TWO_BINDINGS = ["api", "web"];

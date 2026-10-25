@@ -1,4 +1,24 @@
+{{#if node~}}
+
+# Node {{node.name}}
+
+## Requirement
+
+{{node.requirement}}
+
+## Criterion
+
+{{node.criterion}}
+
+Do only the task below. The node part above is context.
+
+# Task {{name}}
+
+{{else~}}
+
 # {{name}}
+
+{{/if~}}
 
 ## Requirement
 

@@ -26,6 +26,12 @@ export interface WorkTask {
   content: { name: string; criterion: string };
 }
 
+export interface WorkNode {
+  name: string;
+  requirement: string;
+  criterion: string;
+}
+
 export function renderWorkPrompt(
   templates: PromptTemplates,
   unit: {
@@ -39,6 +45,7 @@ export function renderWorkPrompt(
     };
     repositories?: readonly WorkRepository[];
     tasks?: readonly WorkTask[];
+    node?: WorkNode;
   },
 ): WorkPrompt {
   assert.ok(unit.node_id);
@@ -47,6 +54,13 @@ export function renderWorkPrompt(
   const repositories = unit.repositories ?? [];
   const tasks = unit.tasks ?? [];
   const text = renderTemplate(templates, PromptTemplate.Work, {
+    node: unit.node
+      ? {
+          name: unit.node.name,
+          requirement: unit.node.requirement,
+          criterion: unit.node.criterion,
+        }
+      : null,
     name,
     requirement,
     criterion,
