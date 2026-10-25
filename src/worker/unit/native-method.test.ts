@@ -33,6 +33,10 @@ import {
   scriptedModelRuntime,
   repositorySetup,
   everyBindingSshAccess,
+  implementFixture,
+  task,
+  transport,
+  testSshAccess,
 } from "./test-support.ts";
 import { WorkspaceRoot } from "./workspace.ts";
 import {
@@ -41,7 +45,7 @@ import {
   type TelemetryRecord,
 } from "../../tracking/contract.ts";
 import { AgentErrorType } from "./agent-telemetry.ts";
-import { SpanOperation } from "./telemetry.ts";
+import { Phase, SpanOperation } from "./telemetry.ts";
 import { ExecutionIntent, type RepositoryTransport } from "../contract.ts";
 import { EnvironmentSource } from "../../kernel/devcontainer.ts";
 import type { MethodClients } from "./method-clients.ts";
@@ -56,6 +60,9 @@ const RELEASE_CALL = "executionRelease";
 const SESSION_END = "agent.session.end";
 const SESSION_ENTRY = "session_entry";
 const ONE_RELEASE = 1;
+const TASK_COUNT = 2;
+const VERIFICATION_COUNT = 3;
+const BINDING_COUNT = 1;
 async function startedSession(t: TestContext, clients: MethodClients) {
   const setup = anthropicSetup();
   const claim = {
@@ -320,6 +327,83 @@ test("S1 native reviewer evaluates even when the attempt already contains an exp
   assert.equal(assessments, EXPECTED_CALL_COUNT);
   assert.equal(provider.calls.length, EXPECTED_CALL_COUNT);
 });
+test("the end of the prepare phase span holds the shape of the pinned revision", async (t) => {
+  const h = await implementFixture(
+    t,
+    [task("first", "true"), task("second", "true")],
+    [],
+  );
+  const { setup, claim } = h.input;
+  const complete = (data: unknown) => ({
+    type: "completed",
+    status: 200,
+    data,
+  });
+  const clients = {
+    mission: {
+      "execution.pinnedRevision.get": async () =>
+        complete({
+          content: {
+            ...h.revision.content,
+            bindings: [setup.repositories[0]!.binding_id],
+          },
+          tasks: h.revision.tasks,
+        }),
+      "execution.rework_assessment.get": async () => complete(null),
+      "execution.evidence.list": async () =>
+        complete({ items: [], next_cursor: null }),
+    },
+    scheduler: { executionRelease: async () => complete({}) },
+  } as unknown as MethodClients;
+  const written: TelemetryRecord[] = [];
+  const store = new InMemoryCredentialStore();
+  await store.modify("anthropic", async () => ({
+    type: "api_key",
+    key: "test_prepare_shape",
+  }));
+  await runNativeExecution({
+    claim,
+    setup,
+    clients,
+    credentials: {
+      items: [
+        {
+          credential_id: setup.agents[0]!.credential_id,
+          provider_id: "anthropic",
+          store,
+        },
+      ],
+      release: async () => {},
+    },
+    transport,
+    sshAccess: testSshAccess(setup.repositories),
+    workspaces: WorkspaceRoot.open(temporary(t)),
+    hostHome: temporary(t),
+    env: hostEnvironment(),
+    modelRuntimeFactory: scriptedModelRuntime(scriptedProvider([])),
+    hostTools: () => unusedHostTools,
+    context: background,
+    telemetry: {
+      write: (records) => void written.push(...records),
+      flush: async () => {},
+    },
+  });
+  const spans = written.filter((record) => record.kind === RecordKind.Span);
+  const prepare = spans.find(
+    (record) => record.attributes?.["kanthord.phase"] === Phase.Prepare,
+  );
+  const end = spans.find(
+    (record) => record.end_time && record.span_id === prepare?.span_id,
+  );
+  assert.equal(end?.status, SpanStatus.Ok);
+  assert.equal(end?.attributes?.["kanthord.node.task_count"], TASK_COUNT);
+  assert.equal(
+    end?.attributes?.["kanthord.node.verification_count"],
+    VERIFICATION_COUNT,
+  );
+  assert.equal(end?.attributes?.["kanthord.node.binding_count"], BINDING_COUNT);
+});
+
 const OK_RELEASE = { kind: "released", furtherWork: false };
 
 async function examineRun(
