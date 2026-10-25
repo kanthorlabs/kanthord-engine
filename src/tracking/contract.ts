@@ -2,6 +2,7 @@ import { z } from "zod";
 import { HttpMethod, HttpStatus } from "../kernel/http.ts";
 import {
   causeCategorySchema,
+  causeSubcategorySchema,
   effectiveCauseSchema,
   type FailureCause,
 } from "../kernel/cause.ts";
@@ -41,6 +42,8 @@ export const ENTRY_LIST_LIMIT_MIN = 1;
 export const ENTRY_LIST_LIMIT_MAX = 1000;
 export const ENTRY_LIST_LIMIT_DEFAULT = 100;
 export const TRACE_QUERY_MAX_CHARACTERS = 200;
+export const CAUSE_REASON_MAX_CHARACTERS = 4096;
+const UNATTRIBUTED_CATEGORY_KEY = "Unattributed";
 export const FACET_VALUES_MAX = 200;
 export const TIMELINE_LIMIT_DEFAULT = 500;
 export const TIMELINE_LIMIT_MIN = 1;
@@ -840,6 +843,37 @@ export const trackingOperations = {
     output: z.strictObject({
       items: z.array(sessionEntrySchema),
       next_cursor: z.string().nullable(),
+    }),
+  },
+  causeLabel: {
+    id: "tracking.cause.label",
+    service: TRACKING_SERVICE_NAME,
+    method: HttpMethod.Post,
+    path: "/api/tracking/trace/:trace_id/cause/label",
+    access: AccessPolicy.Human,
+    store: StoreName.Tracking,
+    lifetime: OperationLifetime.Unary,
+    timeoutMs: TRACKING_TIMEOUT_MS,
+    mutation: true,
+    body: true,
+    status: HttpStatus.OK,
+    description:
+      "Write or replace the human cause label of an ended trace. The label is an annotation: it is no assessment and no service reads it to decide.",
+    input: z.strictObject({
+      params: traceParams,
+      query: z.strictObject({}),
+      body: z.strictObject({
+        category: causeCategorySchema.exclude([UNATTRIBUTED_CATEGORY_KEY]),
+        subcategory: causeSubcategorySchema,
+        reason: z.string().trim().min(1).max(CAUSE_REASON_MAX_CHARACTERS),
+      }),
+    }),
+    output: z.strictObject({
+      trace_id: traceIdSchema,
+      span_id: causeLabelSpanIdSchema,
+      cause: effectiveCauseSchema,
+      reason: z.string(),
+      created_at: timestamp,
     }),
   },
   sessionEntryGet: {
