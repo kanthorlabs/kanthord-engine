@@ -368,7 +368,7 @@ function fixture(t: TestContext, overrides: Partial<Dependencies> = {}) {
     },
     createMission: unexpected,
     liveNodesPinning: unexpected,
-    liveNodePins: () => [],
+    currentNodePins: () => [],
     unmatchedClaims: () => [],
     validateEntry: unexpected,
     custodySuitability: unexpected,
@@ -1453,12 +1453,13 @@ const CURRENT_NODE = "node-current";
 const ALPHA_WORKER = "alpha";
 const BETA_WORKER = "beta";
 const THIRD_REVISION = 3;
+const FOURTH_REVISION = 4;
 
 test("binding set write lists the stale pins of each revised binding in node and name order", async (t) => {
   const pins = new Map<string, string[]>();
   const calls: Array<{ project_id: string; binding_ids: string[] }> = [];
   const f = writeFixture(t, {
-    liveNodePins: (tx, projectId, bindingIds) => {
+    currentNodePins: (tx, projectId, bindingIds) => {
       assert.ok(tx.database.isTransaction);
       calls.push({ project_id: projectId, binding_ids: [...bindingIds] });
       return bindingIds.flatMap((bindingId) =>
@@ -1565,6 +1566,70 @@ test("binding set write lists the stale pins of each revised binding in node and
   );
   assert.deepEqual(removed.stale_pins, []);
   assert.deepEqual(calls, []);
+});
+
+function stalePinFixture(t: TestContext) {
+  const pins = new Map<string, string[]>();
+  const calls: string[][] = [];
+  const f = writeFixture(t, {
+    currentNodePins: (_tx, _projectId, bindingIds) => {
+      calls.push([...bindingIds]);
+      return bindingIds.flatMap((bindingId) =>
+        (pins.get(bindingId) ?? []).map((nodeId) => ({
+          node_id: nodeId,
+          binding_id: bindingId,
+        })),
+      );
+    },
+  });
+  return { f, pins, calls };
+}
+
+test("binding set write lists no stale pin for a name that changes its resource identity", async (t) => {
+  const { f, pins, calls } = stalePinFixture(t);
+  const first = await f.write({ repository: repositoryBinding() });
+  pins.set(first.bindings.repository!.id, [STALE_FIRST_NODE]);
+  const moved = await f.write(
+    { repository: repositoryBinding(SECOND_REPOSITORY_ADDRESS) },
+    first.binding_set_version,
+  );
+  assert.deepEqual(
+    moved.changes.map(({ kind }) => kind),
+    [ChangeKind.Created],
+  );
+  assert.deepEqual(moved.stale_pins, []);
+  assert.deepEqual(calls, []);
+});
+
+test("binding set write lists no stale pin from before a removal of the binding", async (t) => {
+  const { f, pins, calls } = stalePinFixture(t);
+  const scaled = {
+    ...workerBinding(),
+    config: { ...workerBinding().config, instance_count: TWO_INSTANCES },
+  };
+  const first = await f.write({ [ALPHA_WORKER]: workerBinding() });
+  pins.set(first.bindings[ALPHA_WORKER]!.id, [STALE_FIRST_NODE]);
+  const removed = await f.write({}, first.binding_set_version);
+  const added = await f.write(
+    { [ALPHA_WORKER]: workerBinding() },
+    removed.binding_set_version,
+  );
+  const readded = added.bindings[ALPHA_WORKER]!;
+  assert.equal(readded.revision, THIRD_REVISION);
+  pins.set(readded.id, [STALE_SECOND_NODE]);
+  const revised = await f.write(
+    { [ALPHA_WORKER]: scaled },
+    added.binding_set_version,
+  );
+  assert.deepEqual(revised.stale_pins, [
+    {
+      node_id: STALE_SECOND_NODE,
+      binding_name: ALPHA_WORKER,
+      pinned_revision: THIRD_REVISION,
+      current_revision: FOURTH_REVISION,
+    },
+  ]);
+  assert.deepEqual(calls, [[readded.id]]);
 });
 
 function storedBindings(f: ReturnType<typeof writeFixture>) {
