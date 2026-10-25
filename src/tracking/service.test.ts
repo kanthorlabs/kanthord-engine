@@ -1589,7 +1589,13 @@ test("a duration query holds a measure of the closed set", () => {
   assert.ok(!query.safeParse({ measure: "latency" }).success);
   assert.ok(!query.safeParse({ measure: "span_duration", extra: 1 }).success);
   for (const measure of Object.values(AnalyticsMeasure))
-    assert.ok(query.safeParse({ measure }).success);
+    assert.ok(
+      query.safeParse(
+        measure === AnalyticsMeasure.InstanceBusyRatio
+          ? { measure, group_by: DurationGroupBy.WorkerInstance }
+          : { measure },
+      ).success,
+    );
   assert.ok(
     !query.safeParse({ measure: "span_duration", group_by: "unknown" }).success,
   );
