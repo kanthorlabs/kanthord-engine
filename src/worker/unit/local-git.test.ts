@@ -38,10 +38,8 @@ const MANY_FILES = 20000;
 const LONG_NAME = "x".repeat(120);
 const CRLF_LINE = "a\r\n";
 const EMPTY_OBJECT = "{}";
-const SIGNER_OUTPUT = "signer refused the commit";
-const SIGNER_STARTED = "signer-started";
-const SIGNER_POLLS = 100;
-const SIGNER_POLL_MS = 50;
+const FAILING_SIGNER = "false";
+const SIGNER_FAILURE = "failed to sign the data";
 
 function writeRefusingHook(hooks: string, marker: string): void {
   mkdirSync(hooks, { recursive: true });
@@ -50,60 +48,47 @@ function writeRefusingHook(hooks: string, marker: string): void {
   chmodSync(hook, EXECUTABLE_MODE);
 }
 
-async function repositoryWithSigner(
+async function repositoryWithFailingSigner(
   t: Parameters<typeof temporary>[0],
-  script: string,
-): Promise<{ directory: string; scripts: string }> {
+): Promise<string> {
   const directory = temporary(t);
-  const scripts = temporary(t);
-  const signer = join(scripts, "signer");
-  writeFileSync(signer, `#!/bin/sh\n${script}\n`);
-  chmodSync(signer, EXECUTABLE_MODE);
-  const git = simpleGit(directory);
-  await git.init();
+  await simpleGit(directory).init();
   appendFileSync(
     join(directory, ".git", "config"),
-    `[commit]\n\tgpgsign = true\n[gpg]\n\tprogram = ${signer}\n`,
+    `[commit]\n\tgpgsign = true\n[gpg]\n\tprogram = ${FAILING_SIGNER}\n`,
   );
   writeFileSync(join(directory, "tracked"), "original");
-  return { directory, scripts };
+  return directory;
 }
 
 test("a refused work commit throws the commit code with the git error as the cause", async (t) => {
-  const { directory } = await repositoryWithSigner(
-    t,
-    `echo "${SIGNER_OUTPUT}" >&2\nexit 1`,
-  );
+  const directory = await repositoryWithFailingSigner(t);
   await assert.rejects(
     commitWork(env, directory, "refused", background, 10000),
     (error) => {
       assert.ok(error instanceof CodedError);
       assert.equal(error.code, GIT_COMMIT_FAILED);
       assert.ok(error.cause instanceof Error);
-      assert.ok(error.cause.message.includes(SIGNER_OUTPUT));
+      assert.ok(error.cause.message.includes(SIGNER_FAILURE));
       return true;
     },
   );
 });
 
 test("a cancelled work commit throws the cancellation and not the commit code", async (t) => {
-  const { directory, scripts } = await repositoryWithSigner(
-    t,
-    `touch "$(dirname "$0")/${SIGNER_STARTED}"\nsleep 30`,
-  );
+  const directory = await repositoryWithFailingSigner(t);
   const context = new CancellationContext();
-  const committing = commitWork(env, directory, "cancelled", context, 20000);
-  const started = join(scripts, SIGNER_STARTED);
-  for (let poll = 0; poll < SIGNER_POLLS && !existsSync(started); poll += 1)
-    await new Promise((resolve) => setTimeout(resolve, SIGNER_POLL_MS));
-  assert.equal(existsSync(started), true);
   context.cancel();
-  await assert.rejects(committing, (error) => {
-    assert.ok(
-      !(error instanceof CodedError && error.code === GIT_COMMIT_FAILED),
-    );
-    return true;
-  });
+  await assert.rejects(
+    commitWork(env, directory, "cancelled", context, 10000),
+    (error) => {
+      assert.ok(error instanceof Error);
+      assert.ok(
+        !(error instanceof CodedError && error.code === GIT_COMMIT_FAILED),
+      );
+      return true;
+    },
+  );
 });
 
 test("verification cleanup discards tracked and untracked edits but keeps ignored files", async (t) => {

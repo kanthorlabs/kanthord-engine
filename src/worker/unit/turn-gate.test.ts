@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
 import {
   appendFileSync,
-  chmodSync,
   existsSync,
   mkdirSync,
   readFileSync,
@@ -75,7 +74,8 @@ const ONE_GATE_SPAN = 1;
 const ONE_TEXT = 1;
 const GATE_MESSAGE = "feat: gate work";
 const EMPTY_PROMPT = { text: "prompt", digest: "digest" };
-const SIGNER_OUTPUT = "signer refused the commit";
+const FAILING_SIGNER = "false";
+const SIGNER_FAILURE = "failed to sign the data";
 
 type Fixture = Awaited<ReturnType<typeof fixture>>;
 
@@ -159,13 +159,10 @@ async function gatedTurn(
   await gatedAgent(h, GATE_MESSAGE).prompt(EMPTY_PROMPT);
 }
 
-function configureFailingSigner(h: Fixture, t: TestContext): void {
-  const signer = join(temporary(t), "signer");
-  writeFileSync(signer, `#!/bin/sh\necho "${SIGNER_OUTPUT}" >&2\nexit 1\n`);
-  chmodSync(signer, 0o755);
+function configureFailingSigner(h: Fixture): void {
   appendFileSync(
     join(h.root, ".git", "config"),
-    `[commit]\n\tgpgsign = true\n[gpg]\n\tprogram = ${signer}\n`,
+    `[commit]\n\tgpgsign = true\n[gpg]\n\tprogram = ${FAILING_SIGNER}\n`,
   );
 }
 
@@ -612,7 +609,7 @@ test("the checkpoint gate writes the checkpoint mode", async (t) => {
 test("a failed gate commit ends the gate span with Error and the commit text and writes no git span", async (t) => {
   const h = await fixture(t, [], []);
   const records = recordSpans(h);
-  configureFailingSigner(h, t);
+  configureFailingSigner(h);
   await assert.rejects(
     gatedTurn(h, t, async () =>
       writeFileSync(join(h.root, WORK_FILE), WORK_FILE),
@@ -623,6 +620,6 @@ test("a failed gate commit ends the gate span with Error and the commit text and
   assert.equal(end.status, SpanStatus.Error);
   assert.equal(texts.length, ONE_TEXT);
   assert.ok(texts[0]!.startsWith(`${GIT_COMMIT_FAILED}:`));
-  assert.ok(texts[0]!.includes(SIGNER_OUTPUT));
+  assert.ok(texts[0]!.includes(SIGNER_FAILURE));
   assert.deepEqual(spansOf(records, SpanOperation.Git), []);
 });
