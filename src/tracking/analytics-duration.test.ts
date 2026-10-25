@@ -3,6 +3,7 @@ import { test, type TestContext } from "node:test";
 import { IN_MEMORY_DATABASE, Store } from "../kernel/store.ts";
 import {
   AnalyticsBucket,
+  analyticsDurationQuerySchema,
   AnalyticsMeasure,
   DurationGroupBy,
   SpanOrigin,
@@ -12,8 +13,8 @@ import {
 import { trackingMigrations } from "./migrations.ts";
 import {
   readDuration,
-  type DurationItem,
   type DurationQuery,
+  type DurationRead,
 } from "./analytics-duration.ts";
 import { insertSpan } from "./trace-store.ts";
 
@@ -34,6 +35,7 @@ const LIMIT = 1000;
 const TOLERANCE = 0.000001;
 const SPAN_COUNT = 100;
 const ONE_ITEM = 1;
+const TWO_INSTANCES = 2;
 const ALL_DURATIONS = 3;
 const TURN_DURATIONS = 2;
 const TURN_MAX = 30;
@@ -58,6 +60,7 @@ const AGENT = "kanthord.agent.name";
 const TOOL = "gen_ai.tool.name";
 const KIND = "kanthord.execution.kind";
 const WAIT = "kanthord.queue.wait_ms";
+const INSTANCE = "kanthord.worker.instance";
 const STATE_FROM = "kanthord.node.state.from";
 const STATE_TO = "kanthord.node.state.to";
 
@@ -128,10 +131,10 @@ function addSpans(store: Store, seeds: readonly Seed[]): void {
 
 function read(
   store: Store,
-  measure: AnalyticsMeasure,
-  overrides: Partial<DurationQuery> = {},
+  measure: Exclude<AnalyticsMeasure, typeof AnalyticsMeasure.InstanceBusyRatio>,
+  overrides: Partial<Omit<DurationQuery, "measure">> = {},
   limit = LIMIT,
-): ReturnType<typeof readDuration> {
+): Promise<DurationRead> {
   return readDuration(
     store,
     {
@@ -147,7 +150,7 @@ function read(
   );
 }
 
-function keysOf(items: readonly DurationItem[]): (string | null)[] {
+function keysOf(items: readonly { key: string | null }[]): (string | null)[] {
   return items.map((item) => item.key);
 }
 
@@ -471,4 +474,156 @@ test("items order by bucket, count descending and key with null last, and trunca
   );
   assert.deepEqual(keysOf(limited.items), ["z", "a"]);
   assert.equal(limited.truncated, true);
+});
+
+function busyRoot(
+  trace: number,
+  instance: string | null,
+  start: number,
+  end: number | null,
+): Seed {
+  return {
+    trace,
+    root: true,
+    start,
+    end,
+    operation: ROOT_OPERATION,
+    attributes: instance === null ? {} : { [INSTANCE]: instance },
+  };
+}
+
+function readBusy(
+  store: Store,
+  overrides: Partial<Omit<DurationQuery, "measure">> = {},
+) {
+  return readDuration(
+    store,
+    {
+      from: MONDAY,
+      to: MONDAY + DAY,
+      measure: AnalyticsMeasure.InstanceBusyRatio,
+      group_by: DurationGroupBy.WorkerInstance,
+      bucket: AnalyticsBucket.None,
+      ...overrides,
+    },
+    LIMIT,
+    new AbortController().signal,
+  );
+}
+
+test("instance_busy_ratio answers the summed durations of each instance over the range", async (t) => {
+  const store = seededStore(t);
+  addSpans(store, [
+    busyRoot(1, "alpha", MONDAY, MONDAY + 3 * HOUR),
+    busyRoot(3, "alpha", MONDAY + 4 * HOUR, MONDAY + 7 * HOUR),
+    busyRoot(2, "beta", MONDAY, MONDAY + 12 * HOUR),
+  ]);
+  const { items, truncated } = await readBusy(store);
+  assert.equal(truncated, false);
+  assert.equal(items.length, TWO_INSTANCES);
+  assert.deepEqual(items[0], {
+    key: "alpha",
+    bucket_start: null,
+    count: 2,
+    ratio: 0.25,
+  });
+  assert.deepEqual(items[1], {
+    key: "beta",
+    bucket_start: null,
+    count: 1,
+    ratio: 0.5,
+  });
+});
+
+test("instance_busy_ratio adds nothing for an open root span", async (t) => {
+  const store = seededStore(t);
+  addSpans(store, [
+    busyRoot(1, "alpha", MONDAY, MONDAY + 6 * HOUR),
+    busyRoot(2, "alpha", MONDAY, null),
+  ]);
+  const { items } = await readBusy(store);
+  assert.deepEqual(items, [
+    { key: "alpha", bucket_start: null, count: 1, ratio: 0.25 },
+  ]);
+});
+
+test("instance_busy_ratio adds nothing for a root span with no instance", async (t) => {
+  const store = seededStore(t);
+  addSpans(store, [
+    busyRoot(1, null, MONDAY, MONDAY + 6 * HOUR),
+    {
+      trace: 2,
+      start: MONDAY,
+      end: MONDAY + HOUR,
+      attributes: { [INSTANCE]: "alpha" },
+    },
+  ]);
+  const { items } = await readBusy(store);
+  assert.deepEqual(items, []);
+});
+
+test("instance_busy_ratio cuts a root span at the end of its bucket and divides by the bucket length", async (t) => {
+  const store = seededStore(t);
+  addSpans(store, [
+    busyRoot(1, "alpha", MONDAY + 22 * HOUR, MONDAY + 30 * HOUR),
+    busyRoot(2, "alpha", MONDAY + DAY, MONDAY + DAY + 6 * HOUR),
+  ]);
+  const { items } = await readBusy(store, {
+    to: MONDAY + 2 * DAY,
+    bucket: AnalyticsBucket.Day,
+  });
+  assert.deepEqual(items, [
+    { key: "alpha", bucket_start: MONDAY, count: 1, ratio: 2 / 24 },
+    { key: "alpha", bucket_start: MONDAY + DAY, count: 1, ratio: 0.25 },
+  ]);
+});
+
+test("instance_busy_ratio cuts a root span at the end of the range with no bucket", async (t) => {
+  const store = seededStore(t);
+  addSpans(store, [busyRoot(1, "alpha", MONDAY + 12 * HOUR, MONDAY + 2 * DAY)]);
+  const { items } = await readBusy(store);
+  assert.deepEqual(items, [
+    { key: "alpha", bucket_start: null, count: 1, ratio: 0.5 },
+  ]);
+});
+
+test("instance_busy_ratio cuts the items to the limit", async (t) => {
+  const store = seededStore(t);
+  addSpans(store, [
+    busyRoot(1, "alpha", MONDAY, MONDAY + HOUR),
+    busyRoot(2, "beta", MONDAY, MONDAY + HOUR),
+  ]);
+  const { items, truncated } = await readDuration(
+    store,
+    {
+      from: MONDAY,
+      to: MONDAY + DAY,
+      measure: AnalyticsMeasure.InstanceBusyRatio,
+      group_by: DurationGroupBy.WorkerInstance,
+      bucket: AnalyticsBucket.None,
+    },
+    1,
+    new AbortController().signal,
+  );
+  assert.deepEqual(keysOf(items), ["alpha"]);
+  assert.equal(truncated, true);
+});
+
+test("the query schema pairs instance_busy_ratio with worker_instance only", () => {
+  const parse = (measure: string, group_by: string) =>
+    analyticsDurationQuerySchema.safeParse({ measure, group_by });
+  assert.equal(parse("instance_busy_ratio", "worker_instance").success, true);
+  for (const [measure, groupBy] of [
+    ["instance_busy_ratio", "model"],
+    ["tool_latency", "worker_instance"],
+  ] as const) {
+    const result = parse(measure, groupBy);
+    assert.equal(result.success, false);
+    assert.deepEqual(result.error?.issues[0]?.path, ["group_by"]);
+  }
+  assert.equal(
+    analyticsDurationQuerySchema.safeParse({ measure: "instance_busy_ratio" })
+      .success,
+    false,
+  );
 });

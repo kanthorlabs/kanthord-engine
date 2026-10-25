@@ -1,3 +1,4 @@
+import assert from "node:assert/strict";
 import { AnalyticsBucket } from "./contract.ts";
 
 const HOUR_MS = 3_600_000;
@@ -23,4 +24,9 @@ export function bucketStart(
   const size = BUCKET_SIZES[bucket];
   const origin = BUCKET_ORIGINS[bucket];
   return Math.floor((time - origin) / size) * size + origin;
+}
+
+export function bucketEnd(start: number, bucket: AnalyticsBucket): number {
+  assert.ok(bucket !== AnalyticsBucket.None);
+  return start + BUCKET_SIZES[bucket];
 }

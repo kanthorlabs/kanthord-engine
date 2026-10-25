@@ -436,14 +436,20 @@ function reads(h: Harness) {
       query,
       body: null,
     });
-  const duration = (
+  const duration = async (
     query: z.input<typeof trackingOperations.analyticsDuration.input>["query"],
-  ) =>
-    h.human(trackingOperations.analyticsDuration, {
+  ) => {
+    const answer = await h.human(trackingOperations.analyticsDuration, {
       params: {},
       query,
       body: null,
     });
+    const items = answer.items.map((item) => {
+      assert.ok("p50" in item);
+      return item;
+    });
+    return { ...answer, items };
+  };
   const refused = async (path: string, query: Record<string, string>) => {
     const response = await fetch(
       `${h.fixture.endpoint}${path}?${new URLSearchParams(query)}`,

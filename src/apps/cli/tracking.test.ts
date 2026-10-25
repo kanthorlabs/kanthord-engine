@@ -589,6 +589,30 @@ test("analytics duration sends its options as query fields and writes the page",
   assert.deepEqual(JSON.parse(result.stdout), ANALYTICS_ANSWER);
 });
 
+test("analytics duration sends the measure instance_busy_ratio by worker_instance", async (t) => {
+  const { endpoint, seen } = await fakeServer(t, ANALYTICS_ANSWER);
+  const result = await run(
+    t,
+    [
+      "analytics",
+      "duration",
+      "--measure",
+      "instance_busy_ratio",
+      "--group-by",
+      "worker_instance",
+    ],
+    endpoint,
+  );
+  assert.equal(result.code, ExitCode.Success, result.stderr);
+  const url = new URL(seen[0]?.url ?? "", endpoint);
+  assert.deepEqual(Object.fromEntries(url.searchParams), {
+    measure: "instance_busy_ratio",
+    group_by: "worker_instance",
+    bucket: "none",
+  });
+  assert.deepEqual(JSON.parse(result.stdout), ANALYTICS_ANSWER);
+});
+
 const INVALID_ANALYTICS_OPTIONS: readonly (readonly [
   string,
   string[],
@@ -623,6 +647,16 @@ const INVALID_ANALYTICS_OPTIONS: readonly (readonly [
   [
     "duration",
     ["--measure", "tool_latency", "--group-by", "model_name"],
+    `${ANALYTICS_DURATION_LEAF}.invalid_query`,
+  ],
+  [
+    "duration",
+    ["--measure", "instance_busy_ratio", "--group-by", "model"],
+    `${ANALYTICS_DURATION_LEAF}.invalid_query`,
+  ],
+  [
+    "duration",
+    ["--measure", "tool_latency", "--group-by", "worker_instance"],
     `${ANALYTICS_DURATION_LEAF}.invalid_query`,
   ],
   [
