@@ -5714,7 +5714,7 @@ for (const condition of Object.values(UnmatchedPin)) {
   });
 }
 
-const READDED_BINDING_ID = "binding_00000000000000000000000008";
+const LATEST_BINDING_ID = "binding_00000000000000000000000008";
 const FOURTH_REVISION = 4;
 
 test("mission rebind keeps a pin from before a removal and rebinds a pin of the current lineage", (t) => {
@@ -5726,21 +5726,21 @@ test("mission rebind keeps a pin from before a removal and rebinds a pin of the 
   f.table.get(NEXT_BINDING_ID)!.revision = THIRD_REVISION;
   f.rebind({ node_id: currentPin });
   f.table.get(BINDING_ID)!.tombstone = true;
-  f.table.set(READDED_BINDING_ID, {
+  f.table.set(LATEST_BINDING_ID, {
     ...f.table.get(NEXT_BINDING_ID)!,
-    binding_id: READDED_BINDING_ID,
+    binding_id: LATEST_BINDING_ID,
     revision: FOURTH_REVISION,
   });
   f.refuses(
-    { node_id: removedPin, binding_id: READDED_BINDING_ID },
+    { node_id: removedPin, binding_id: LATEST_BINDING_ID },
     MissionErrorCode.BindingMismatch,
     HttpStatus.Conflict,
-    { node_id: removedPin, binding_id: READDED_BINDING_ID },
+    { node_id: removedPin, binding_id: LATEST_BINDING_ID },
   );
-  const result = f.rebind({ binding_id: READDED_BINDING_ID });
+  const result = f.rebind({ binding_id: LATEST_BINDING_ID });
   assert.deepEqual(
     result.node_change.revisions.map((r) => [r.node_id, r.content.bindings]),
-    [[currentPin, [READDED_BINDING_ID]]],
+    [[currentPin, [LATEST_BINDING_ID]]],
   );
   assert.deepEqual(result.skipped, []);
   assert.deepEqual(f.read(removedPin).content.bindings, [BINDING_ID]);
