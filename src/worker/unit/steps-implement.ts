@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { PromptTemplate } from "../../agent/contract.ts";
 import {
   AssetKind,
   type Revision,
@@ -379,12 +380,13 @@ async function runNodeInstruction(
   const agent = gatedAgent(state, unitCommitMessage(state, unit));
   let ruled = node.judged.length > NO_CHECKOUTS;
   let instruction = node.text;
+  let template: PromptTemplate = PromptTemplate.CriterionRevision;
   let revised = false;
   state.run.log("node instruction started", { task_id: unit.id, ruled });
   while (!budget.exhausted()) {
     await state.run.checkClaim();
     const unchangedTurns = state.unchangedTurns;
-    await agent.instruct(taskWork(state, unit), instruction);
+    await agent.instruct(taskWork(state, unit), instruction, template);
     if (budget.exhausted()) return ended;
     if (ruled) {
       ruled = !(await verdictRuleHolds(state, node.judged));
@@ -417,6 +419,7 @@ async function runNodeInstruction(
       checked.commands,
       outputs.at(-1) ?? "",
     );
+    template = PromptTemplate.TaskRevision;
     revised = true;
   }
   return ended;
@@ -454,7 +457,12 @@ export async function runTask(
   while (!budget.exhausted()) {
     await state.run.checkClaim();
     if (instruction === null) await agent.prompt(taskWork(state, task));
-    else await agent.instruct(taskWork(state, task), instruction);
+    else
+      await agent.instruct(
+        taskWork(state, task),
+        instruction,
+        PromptTemplate.TaskRevision,
+      );
     if (budget.exhausted()) return ended;
     if (instruction !== null && !agent.changed())
       countUnchangedTurn(state, NoProgressRule.UnchangedRevision);

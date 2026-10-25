@@ -25,11 +25,51 @@ import { NoProgressRule } from "./progress-rule.ts";
 import {
   implementFixture as fixture,
   NO_PROVIDER_CALLS,
+  recordDone,
+  recordReleases,
   STEPS_KEY,
   task,
 } from "./test-support.ts";
+import { PromptTemplate } from "../../agent/contract.ts";
+import type { Revision } from "../../mission/contract.ts";
+import { executionBoundary } from "./native-method.ts";
 
 const TASK_VERIFIED = "task verified";
+
+test("a node instruction names criterion-revision, then task-revision for its revision", async (t) => {
+  const done = task("done", "true");
+  const h = await fixture(
+    t,
+    [done],
+    [
+      fauxAssistantMessage("nothing"),
+      fauxAssistantMessage(
+        fauxToolCall("write", { path: "revised", content: "good" }),
+        { stopReason: "toolUse" },
+      ),
+      fauxAssistantMessage("revised"),
+    ],
+  );
+  h.revision = {
+    tasks: [done],
+    content: {
+      name: "node",
+      requirement: "node",
+      criterion: "node",
+      verifications: ["test -f revised"],
+      bindings: [],
+    },
+  } as unknown as Revision;
+  await recordDone(h, done);
+  h.verdict = { text: "Rework the node.", judged: [] };
+  const instruct = t.mock.method(h.agent, "instruct");
+  recordReleases(h);
+  await executionBoundary(h.run, () => runStepsImplement(h));
+  assert.deepEqual(
+    instruct.mock.calls.map((call) => call.arguments[2]),
+    [PromptTemplate.CriterionRevision, PromptTemplate.TaskRevision],
+  );
+});
 
 test("task work commits revisions, cleans verification writes and records the pass", async (t) => {
   const current = task("work", "touch transient; grep -q good file");
@@ -333,6 +373,10 @@ test("every task work prompt and its revision turn carry the node frame in the u
   for (const current of tasks)
     assert.equal((await runTask(h, current)).kind, TaskResultKind.Complete);
   assert.equal(instruct.mock.callCount(), ONE_REVISION);
+  assert.equal(
+    instruct.mock.calls[0]?.arguments[2],
+    PromptTemplate.TaskRevision,
+  );
   const promptedTasks = [revised, revised, revised, tasks[1]!];
   assert.equal(h.provider.calls.length, promptedTasks.length);
   h.provider.calls.forEach((call, index) => {

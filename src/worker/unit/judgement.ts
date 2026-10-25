@@ -108,7 +108,11 @@ export async function parseRepaired<T extends z.ZodType>(
 ): Promise<{ reply: z.output<T> | ReplyRepair; repaired: boolean }> {
   const first = parseJudgement(agent.lastText(), schema, marker);
   if (first !== null) return { reply: first, repaired: false };
-  await agent.instruct(work, repairInstruction(templates, marker));
+  await agent.instruct(
+    work,
+    repairInstruction(templates, marker),
+    PromptTemplate.Repair,
+  );
   if (agent.budget.exhausted())
     return { reply: ReplyRepair.BudgetEnd, repaired: true };
   return {

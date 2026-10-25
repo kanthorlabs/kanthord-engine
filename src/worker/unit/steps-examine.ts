@@ -1,4 +1,5 @@
 import type { Revision } from "../../mission/contract.ts";
+import { PromptTemplate } from "../../agent/contract.ts";
 import type { NativeAgent } from "./native-agent.ts";
 import {
   EndReason,
@@ -118,6 +119,7 @@ export async function runStepsExamine(
         outcomes: current.outcomes,
         evidence: current.evidence,
       }),
+      PromptTemplate.Examine,
     );
     if (agent.budget.exhausted()) return await run.release(true);
     const assessment = agent.lastText();

@@ -14,7 +14,8 @@ import type {
   HostTools,
 } from "../contract.ts";
 import type { ExecutionBudget } from "./budget.ts";
-import type { WorkPrompt } from "../../agent/prompt-composer.ts";
+import { digest, type WorkPrompt } from "../../agent/prompt-composer.ts";
+import { PromptTemplate, type PromptTemplates } from "../../agent/contract.ts";
 import { openSession, withDeadline } from "../../agent/agent-session.ts";
 import { countTurns, pinnedLayers } from "../../agent/pinned-layers.ts";
 import { loadPi } from "../../agent/pi.ts";
@@ -60,9 +61,18 @@ export interface NativeAgentInput {
   spans?: SpanRecorder;
   sessionRoot?: string;
 }
+export interface TurnPrompt {
+  template: PromptTemplate;
+  template_digest: string;
+  work_digest: string;
+}
 export interface NativeAgent {
   prompt(work: WorkPrompt): Promise<void>;
-  instruct(work: WorkPrompt, text: string): Promise<void>;
+  instruct(
+    work: WorkPrompt,
+    text: string,
+    template: PromptTemplate,
+  ): Promise<void>;
   lastText(): string | undefined;
   abort(): Promise<void>;
   readonly budget: ExecutionBudget;
@@ -158,7 +168,15 @@ function nativeAgent(
   turnCheck: () => Promise<void>,
   trace: SessionTrace | undefined,
   secrets: CredentialRedaction,
+  templates: PromptTemplates,
+  record: (sent: TurnPrompt) => void,
 ): NativeAgent {
+  const recordSend = (work: WorkPrompt, template: PromptTemplate) =>
+    record({
+      template,
+      template_digest: digest(templates[template]),
+      work_digest: work.digest,
+    });
   let session: AgentSession | null = opened;
   const finishTurn = opened.agent.finishTurn;
   opened.agent.finishTurn = async (turn, signal) => {
@@ -196,15 +214,17 @@ function nativeAgent(
       assert.ok(session);
       context.signal.throwIfAborted();
       pins.setWork(work);
+      recordSend(work, PromptTemplate.Work);
       await settle(work.text);
     },
     async abort() {
       await session?.abort();
     },
-    async instruct(work, text) {
+    async instruct(work, text, template) {
       assert.ok(session);
       context.signal.throwIfAborted();
       pins.setWork(work);
+      recordSend(work, template);
       await settle(text);
     },
     lastText() {
@@ -247,6 +267,7 @@ export async function openNativeAgent(
   let session: AgentSession | undefined;
   let trace: SessionTrace | undefined;
   const secrets = credentialRedaction(input.credential);
+  let sent: TurnPrompt | null = null;
   try {
     await secrets();
     const { runtime, model } = await withDeadline(
@@ -322,6 +343,7 @@ export async function openNativeAgent(
           secrets: await secrets(),
           refreshSecrets: secrets,
           processes,
+          promptOf: () => sent,
         }),
       );
     return nativeAgent(
@@ -332,6 +354,10 @@ export async function openNativeAgent(
       input.turnCheck ?? (async () => {}),
       trace,
       secrets,
+      input.setup.templates,
+      (prompt) => {
+        sent = prompt;
+      },
     );
   } catch (error) {
     trace?.end(SpanStatus.Error);

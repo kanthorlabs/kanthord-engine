@@ -63,9 +63,9 @@ function write(path: string, content: string) {
 function recordRevisions(h: Fixture): string[] {
   const digests: string[] = [];
   const instruct = h.agent.instruct.bind(h.agent);
-  h.agent.instruct = async (work, text) => {
+  h.agent.instruct = async (work, text, template) => {
     if (text.startsWith(REVISION_TEXT)) digests.push(work.digest);
-    await instruct(work, text);
+    await instruct(work, text, template);
   };
   return digests;
 }

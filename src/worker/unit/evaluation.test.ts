@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { PromptTemplate } from "../../agent/contract.ts";
 import { test, type TestContext } from "node:test";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
@@ -260,6 +261,7 @@ test("evaluation writes failed-verification assessments without inference and ga
     let assessments = 0;
     let opens = 0;
     const instructions: string[] = [];
+    const templates: PromptTemplate[] = [];
     let reported = false;
     const clients = {
       mission: {
@@ -382,8 +384,13 @@ test("evaluation writes failed-verification assessments without inference and ga
             instructions.at(-1) ===
               repairInstruction(SHIPPED_TEMPLATES, JUDGEMENT_MARKER),
         },
-        instruct: async (_work: WorkPrompt, instruction: string) => {
+        instruct: async (
+          _work: WorkPrompt,
+          instruction: string,
+          template: PromptTemplate,
+        ) => {
           instructions.push(instruction);
+          templates.push(template);
           if (
             instruction ===
             repairInstruction(SHIPPED_TEMPLATES, JUDGEMENT_MARKER)
@@ -433,6 +440,12 @@ test("evaluation writes failed-verification assessments without inference and ga
         outcomeId: "outcome",
       });
     assert.equal(opens, scenario.opens);
+    if (instructions.length > NO_RELEASES)
+      assert.equal(templates[0], PromptTemplate.Evaluation);
+    assert.equal(
+      templates.at(-1) === PromptTemplate.Repair,
+      scenario.repaired === true,
+    );
     assert.equal(
       instructions.at(-1) ===
         repairInstruction(SHIPPED_TEMPLATES, JUDGEMENT_MARKER),

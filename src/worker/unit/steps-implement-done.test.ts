@@ -56,8 +56,8 @@ function endAfterTurn(h: Harness, last: number): void {
     await prompt(work);
     count();
   };
-  h.agent.instruct = async (work, text) => {
-    await instruct(work, text);
+  h.agent.instruct = async (work, text, template) => {
+    await instruct(work, text, template);
     count();
   };
 }

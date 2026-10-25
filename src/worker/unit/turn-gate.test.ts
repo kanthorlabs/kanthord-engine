@@ -33,6 +33,7 @@ import {
   TaskResultKind,
 } from "./steps-implement.ts";
 import { SpanOperation, SpanRecorder } from "./telemetry.ts";
+import { PromptTemplate } from "../../agent/contract.ts";
 import {
   checkpointGate,
   gatedAgent,
@@ -159,6 +160,21 @@ async function gatedTurn(
   t.mock.method(h.agent, "prompt", work);
   await gatedAgent(h, GATE_MESSAGE).prompt(EMPTY_PROMPT);
 }
+
+test("the gated agent passes the template of an instruction to the inner agent", async (t) => {
+  const h = await fixture(t, [], []);
+  const inner = t.mock.method(h.agent, "instruct", async () => {});
+  await gatedAgent(h, GATE_MESSAGE).instruct(
+    EMPTY_PROMPT,
+    "text",
+    PromptTemplate.Examine,
+  );
+  assert.deepEqual(inner.mock.calls[0]?.arguments, [
+    EMPTY_PROMPT,
+    "text",
+    PromptTemplate.Examine,
+  ]);
+});
 
 function configureFailingSigner(h: Fixture): void {
   appendFileSync(
@@ -325,8 +341,8 @@ test("a wall time end in a conflict turn aborts the merge and releases a budget 
   await fetchBase(h);
   const before = h.checkouts[0]!.head;
   const instruct = h.agent.instruct.bind(h.agent);
-  h.agent.instruct = async (work, text) => {
-    await instruct(work, text);
+  h.agent.instruct = async (work, text, template) => {
+    await instruct(work, text, template);
     h.agent.budget.wallDeadlineReached();
   };
   const bodies = recordReleases(h);
