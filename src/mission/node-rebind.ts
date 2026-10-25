@@ -119,6 +119,7 @@ function replacement(
     const stored = bindings.getBindingRevision(tx, id);
     if (
       stored === null ||
+      stored.tombstone ||
       stored.project_id !== target.project_id ||
       stored.resource_identity !== target.resource_identity ||
       stored.revision > target.revision
