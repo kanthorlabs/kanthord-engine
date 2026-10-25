@@ -4,6 +4,7 @@ import type { TestContext } from "node:test";
 import { simpleGit } from "simple-git";
 import { temporary } from "../../kernel/test-support.ts";
 import type { RepositoryFiles } from "../../project/contract.ts";
+import { ENVIRONMENT_IMAGE_PREFIX } from "../../project/environment-state.ts";
 import { RepositoryFileState } from "../../repository/contract.ts";
 import { ContainerRuntime } from "../../worker/contract.ts";
 import {
@@ -15,7 +16,7 @@ import {
 const SERVER_UID = 1000;
 const ABSENT_CODE = 1;
 const Verb = { Info: "info", Image: "image" } as const;
-const Subject = { Inspect: "inspect", Exists: "exists" } as const;
+const Subject = { Inspect: "inspect" } as const;
 const FAKE_COMMIT = "a".repeat(40);
 const IMAGE_SETTINGS = JSON.stringify([{ Config: { Env: [], Labels: null } }]);
 const INFO_ANSWER: RuntimeAnswer = {
@@ -39,16 +40,25 @@ const INFO_ANSWER: RuntimeAnswer = {
 function answerOf(args: readonly string[]): RuntimeAnswer {
   const [verb, subject] = args;
   if (verb === Verb.Info) return INFO_ANSWER;
+  const reference = args.at(-1)!;
+  if (
+    verb === Verb.Image &&
+    subject === Subject.Inspect &&
+    reference.startsWith(ENVIRONMENT_IMAGE_PREFIX)
+  )
+    return {
+      code: ABSENT_CODE,
+      stdout: "",
+      stderr: `Error: ${reference}: image not known\n`,
+    };
   if (verb === Verb.Image && subject === Subject.Inspect)
     return {
       code: SUCCESS_CODE,
       stdout: args.includes("--format")
-        ? `sha256:${args.at(-1)}\n`
+        ? `sha256:${reference}\n`
         : IMAGE_SETTINGS,
       stderr: "",
     };
-  if (verb === Verb.Image && subject === Subject.Exists)
-    return { code: ABSENT_CODE, stdout: "", stderr: "" };
   return { code: SUCCESS_CODE, stdout: "", stderr: "" };
 }
 
