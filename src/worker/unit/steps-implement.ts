@@ -137,13 +137,11 @@ async function settleImplement(
   try {
     if (end.budgetEnd) {
       await state.agent.abort();
-      await withinGit(state.run.spans, GitStep.Commit, () =>
-        checkpointGate(
-          state,
-          checkpointMessage(state, end.task),
-          cleanup,
-          ViolationEnd.Stop,
-        ),
+      await checkpointGate(
+        state,
+        checkpointMessage(state, end.task),
+        cleanup,
+        ViolationEnd.Stop,
       );
     }
     await withinGit(state.run.spans, GitStep.Push, () =>
@@ -559,6 +557,7 @@ export async function prepareStepsWorkspace(
     env: input.env,
     context: run.operationContext,
     deadline,
+    spans: run.spans,
   };
   let base: BaseHead | null = null;
   try {
@@ -660,6 +659,7 @@ async function pendingSetup(state: StepsState): Promise<CheckedRun | null> {
       env: state.input.env,
       context: state.run.operationContext,
       deadline: state.agent.budget.wallDeadline(),
+      spans: state.run.spans,
       exhausted: () => state.agent.budget.exhausted(),
     },
     state.setup,

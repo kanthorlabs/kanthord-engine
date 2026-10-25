@@ -41,6 +41,7 @@ import {
   NO_PROVIDER_CALLS,
   recordDone,
   recordReleases,
+  recordSpans,
   STEPS_KEY,
   task,
   transport,
@@ -132,6 +133,31 @@ test("implement checkpoints budget-ended work and refuses release after a failed
   };
   await assert.rejects(runStepsImplement(other));
   assert.ok(existsSync(other.root));
+});
+
+test("a budget end writes no commit git span and still writes the push git span", async (t) => {
+  const h = await fixture(
+    t,
+    [task("partial", "false")],
+    [
+      fauxAssistantMessage(
+        fauxToolCall("write", { path: "notes", content: "partial" }),
+        { stopReason: "toolUse" },
+      ),
+    ],
+    1,
+  );
+  const records = recordSpans(h);
+  recordReleases(h);
+  await runStepsImplement(h);
+  const starts = records.flatMap((record) =>
+    record.kind === RecordKind.Span &&
+    record.operation === SpanOperation.Git &&
+    "start_time" in record
+      ? [record.attributes?.["kanthord.git.step"]]
+      : [],
+  );
+  assert.deepEqual(starts, [GitStep.Push]);
 });
 
 test("S1 budget-ended task verification releases further work and submits no evidence", async (t) => {

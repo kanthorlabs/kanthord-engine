@@ -13,6 +13,7 @@ import { canonicalJSON, digest } from "../../kernel/json.ts";
 import { redactReason } from "../../kernel/probe.ts";
 import { EnvironmentSource } from "../../kernel/devcontainer.ts";
 import { EnvironmentFailure } from "../../scheduler/contract.ts";
+import { SpanStatus } from "../../tracking/contract.ts";
 import type { ExecutionEnvironment } from "../contract.ts";
 import { COMMAND_LIMIT_MS } from "./budget.ts";
 import { EndReason, ExecutionStop } from "./execution-run.ts";
@@ -26,6 +27,7 @@ import {
   restoreTracked,
   trackedChanges,
 } from "./local-git.ts";
+import { SpanOperation, type SpanRecorder } from "./telemetry.ts";
 import {
   runVerificationsWithOutput,
   VerificationClass,
@@ -39,6 +41,8 @@ const NO_EXIT = -1;
 const NO_DOCUMENT = "none";
 const TRACKED_CHECK = "git status --porcelain --untracked-files=no";
 const TRACKED_CHANGE_EXIT = 1;
+const SETUP_ENTRY_COUNT = "kanthord.setup.entry_count";
+const SETUP_RESULT = "kanthord.setup.result";
 
 export interface SetupRepository {
   binding_id: string;
@@ -56,6 +60,7 @@ export interface SetupInput {
   env: NodeJS.ProcessEnv;
   context: Context;
   deadline: number;
+  spans: SpanRecorder | null;
   exhausted?: () => boolean;
 }
 
@@ -201,7 +206,32 @@ function trackedFailure(
   };
 }
 
-export async function runSetup(
+export function runSetup(
+  input: SetupInput,
+  entries: readonly SetupEntry[],
+): Promise<SetupResult> {
+  if (input.spans === null) return setUpEntries(input, entries);
+  return input.spans.within(
+    {
+      key: input.spans.key(SpanOperation.Setup),
+      operation: SpanOperation.Setup,
+      attributes: {
+        [SETUP_ENTRY_COUNT]: entries.filter(
+          (entry) =>
+            entry.environment !== null &&
+            setupScriptsOf(entry.environment).length,
+        ).length,
+      },
+    },
+    () => setUpEntries(input, entries),
+    (result) => ({
+      status: SpanStatus.Ok,
+      attributes: { [SETUP_RESULT]: result.end },
+    }),
+  );
+}
+
+async function setUpEntries(
   input: SetupInput,
   entries: readonly SetupEntry[],
 ): Promise<SetupResult> {

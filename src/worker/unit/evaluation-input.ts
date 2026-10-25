@@ -212,6 +212,7 @@ async function setUpReview(
     env: input.env,
     context: run.operationContext,
     deadline,
+    spans: run.spans,
   };
   const setup = await setupEntries(
     setupInput,
