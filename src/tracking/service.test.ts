@@ -865,12 +865,16 @@ const SERVER_TRACE: ServerTrace = {
   root_span_id: "4".repeat(16),
   project_id: TRACE.project_id,
   created_at: NOW - DAY_MS,
+  node_id: null,
+  attempt: null,
 };
 const SECOND_SERVER_TRACE: ServerTrace = {
   trace_id: "d".repeat(32),
   root_span_id: "5".repeat(16),
   project_id: TRACE.project_id,
   created_at: NOW - DAY_MS,
+  node_id: null,
+  attempt: null,
 };
 const SERVER_ROOT_OPERATION = "project.onboarding";
 const ERROR_TYPE = "onboarding.clone_failed";
@@ -1023,4 +1027,103 @@ test("a server root end with an error status sets the state and lists the error 
   assert.deepEqual(summary.error_types, [ERROR_TYPE]);
   assert.equal(summary.execution_id, null);
   assert.equal(service.droppedRecords(), NO_DROP);
+});
+
+const NODE_ATTEMPT = 2;
+const NODE_TRACE: ServerTrace = {
+  ...SECOND_SERVER_TRACE,
+  node_id: TRACE.node_id,
+  attempt: NODE_ATTEMPT,
+};
+const ACT_TEXT = "the human revoked the attempt";
+const SECOND_ACT_TEXT = "the human asked for a retry";
+
+test("a server trace with a node stores its node and attempt and lists by node", (t) => {
+  const { store, service } = harness(t);
+  service.serverTraceSpan(
+    NODE_TRACE,
+    PROJECT_PRODUCER,
+    serverRootStart(NODE_TRACE),
+  );
+  const row = traceRows(store)[0];
+  assert.equal(row?.node_id, TRACE.node_id);
+  assert.equal(row?.attempt, NODE_ATTEMPT);
+  const page = service.traceList(
+    traceListQuery({ node_id: TRACE.node_id }),
+    caller(store, false),
+  );
+  assert.deepEqual(
+    page.items.map((item) => item.trace_id),
+    [NODE_TRACE.trace_id],
+  );
+  assert.equal(page.items[0]?.attempt, NODE_ATTEMPT);
+});
+
+test("a server trace with no node keeps its node and attempt null", (t) => {
+  const { store, service } = harness(t);
+  service.serverTraceSpan(
+    SERVER_TRACE,
+    PROJECT_PRODUCER,
+    serverRootStart(SERVER_TRACE),
+  );
+  const row = traceRows(store)[0];
+  assert.equal(row?.node_id, null);
+  assert.equal(row?.attempt, null);
+});
+
+test("a server contribution stores its span and its texts in one transaction", (t) => {
+  const { store, service } = harness(t);
+  service.serverTraceSpan(NODE_TRACE, PROJECT_PRODUCER, {
+    ...serverRootStart(NODE_TRACE),
+    text_ids: [`${SPAN}:reason`, `${SPAN}:note`],
+    texts: [
+      { text_id: `${SPAN}:reason`, text: ACT_TEXT },
+      { text_id: `${SPAN}:note`, text: SECOND_ACT_TEXT },
+    ],
+  });
+  assert.equal(service.droppedRecords(), NO_DROP);
+  const reader = caller(store, false);
+  assert.equal(
+    service.textGet(NODE_TRACE.trace_id, `${SPAN}:reason`, reader).content,
+    ACT_TEXT,
+  );
+  assert.equal(
+    service.textGet(NODE_TRACE.trace_id, `${SPAN}:note`, reader).content,
+    SECOND_ACT_TEXT,
+  );
+  const root = service.spanList(
+    NODE_TRACE.trace_id,
+    { limit: SPAN_PAGE },
+    reader,
+  ).items[0];
+  assert.deepEqual(root?.text_ids, [`${SPAN}:reason`, `${SPAN}:note`]);
+});
+
+test("a refused server contribution raises no error and counts as a drop", (t) => {
+  const { store, service } = harness(t);
+  service.serverTraceSpan(NODE_TRACE, PROJECT_PRODUCER, {
+    ...serverRootStart(NODE_TRACE),
+    text_ids: [`${SPAN}:reason`],
+    texts: [{ text_id: `${SPAN}:reason`, text: ACT_TEXT }],
+  });
+  assert.doesNotThrow(() =>
+    service.serverTraceSpan(NODE_TRACE, PROJECT_PRODUCER, {
+      record_id: `${SPAN}:end`,
+      span_id: SPAN,
+      parent_span_id: NODE_TRACE.root_span_id,
+      operation: "mission.act",
+      start_time: ENDED,
+      text_ids: [`${SPAN}:reason`],
+      texts: [{ text_id: `${SPAN}:reason`, text: SECOND_ACT_TEXT }],
+    }),
+  );
+  assert.equal(service.droppedRecords(), ONE_DROP);
+  assert.equal(
+    service.spanList(
+      NODE_TRACE.trace_id,
+      { limit: SPAN_PAGE },
+      caller(store, false),
+    ).items.length,
+    ONE_ENTRY,
+  );
 });

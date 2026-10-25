@@ -16,6 +16,8 @@ const TRACE: ServerTrace = {
   root_span_id: "b".repeat(16),
   project_id: "project_1",
   created_at: 10,
+  node_id: null,
+  attempt: null,
 };
 const STEP_SPAN_ID = "c".repeat(16);
 const RUN = {

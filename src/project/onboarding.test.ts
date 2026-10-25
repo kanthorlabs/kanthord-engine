@@ -2983,6 +2983,8 @@ test(
     assert.match(first.trace.trace_id, /^[0-9a-f]{32}$/);
     assert.match(first.trace.root_span_id, /^[0-9a-f]{16}$/);
     for (const { trace } of h.spans) assert.deepEqual(trace, first.trace);
+    assert.equal(first.trace.node_id, null);
+    assert.equal(first.trace.attempt, null);
     assert.deepEqual(first.contribution.attributes, {
       "project.id": PROJECT,
       "project.binding.name": APP_NAME,

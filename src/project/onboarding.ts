@@ -1110,6 +1110,8 @@ export class Onboarding {
       root_span_id: randomBytes(SPAN_ID_BYTES).toString("hex"),
       project_id: record.project_id,
       created_at: startedAt,
+      node_id: null,
+      attempt: null,
     };
     this.emit(
       trace,
