@@ -47,7 +47,6 @@ const KANTHORD_IMAGE = "localhost/kanthord-dev-node:1.0.0";
 const VERSION = "1.0.0";
 const KANTHORD_IMAGE_ID = `sha256:${"b".repeat(64)}`;
 const INSPECT = "inspect";
-const EXISTS = "exists";
 const PASSING_CLI = "process.exit(0)";
 const NOT_FOUND = -1;
 const PODMAN_LINE = "podman";
@@ -92,7 +91,6 @@ function images(
   directory: string,
   options: {
     environment: SlotEnvironment | null;
-    exists: number;
     cli?: string;
     variables?: NodeJS.ProcessEnv;
     checkout?: (target: string) => void;
@@ -128,7 +126,7 @@ function images(
               },
         );
       return Promise.resolve({
-        code: args[1] === EXISTS ? options.exists : SUCCESS,
+        code: SUCCESS,
         stdout: "",
         stderr: "",
       });
@@ -376,7 +374,6 @@ test("the build writes the allowlisted document outside the checkout with absolu
       features: { "./local": {} },
       postCreateCommand: "npm ci",
     }),
-    exists: ABSENT,
     cli: REPORT_CLI,
     checkout: (target) => {
       checkout = realpathSync(target);
@@ -403,7 +400,6 @@ test("the build writes the allowlisted document outside the checkout with absolu
 test("the build gives the devcontainer CLI no server variable", async (t) => {
   const { build } = images(temporary(t), {
     environment: environment(),
-    exists: ABSENT,
     cli: REPORT_CLI,
     variables: {
       PATH: process.env.PATH,
@@ -435,7 +431,6 @@ test("a symlinked .devcontainer of the checkout gets no write and no build path 
   mkdirSync(join(directory, "stored"));
   const stored = images(join(directory, "stored"), {
     environment: environment(),
-    exists: ABSENT,
     cli: REPORT_CLI,
     checkout: link,
   });
@@ -444,7 +439,6 @@ test("a symlinked .devcontainer of the checkout gets no write and no build path 
   mkdirSync(join(directory, "dockerfile"));
   const dockerfile = images(join(directory, "dockerfile"), {
     environment: environment({ build: { dockerfile: "Dockerfile" } }),
-    exists: ABSENT,
     cli: REPORT_CLI,
     checkout: link,
   });
@@ -457,7 +451,6 @@ test("a symlinked .devcontainer of the checkout gets no write and no build path 
 test("a local feature with a symbolic link fails the build and names the feature", async (t) => {
   const { build } = images(temporary(t), {
     environment: environment({ image: "base", features: { "./local": {} } }),
-    exists: ABSENT,
     cli: REPORT_CLI,
     checkout: (target) => {
       writeCheckout(target, { ".devcontainer/local/install.sh": "true" });
@@ -489,7 +482,6 @@ test("the layer gets the final tag only after the check passes", async (t) => {
   const directory = temporary(t);
   const { build, lines } = images(directory, {
     environment: environment(),
-    exists: ABSENT,
     cli: PASSING_CLI,
     variables: fakePodman(directory, { build: SUCCESS, run: SUCCESS }),
   });
@@ -516,9 +508,7 @@ test("the layer gets the final tag only after the check passes", async (t) => {
   );
   assert.ok(built < check && check < tagged && tagged < untagged);
   assert.equal(
-    log
-      .slice(0, tagged)
-      .some((line) => line.at(-1) === TAG && line[2] !== EXISTS),
+    log.slice(0, tagged).some((line) => line.at(-1) === TAG),
     false,
   );
 });
@@ -527,7 +517,6 @@ test("the image check runs hardened with the owner label and a failed check remo
   const directory = temporary(t);
   const { build, lines } = images(directory, {
     environment: environment(),
-    exists: ABSENT,
     cli: PASSING_CLI,
     variables: fakePodman(directory, { build: SUCCESS, run: ABSENT }),
   });
@@ -560,7 +549,6 @@ test("the layer build and the image check hold the memory bound and the devconta
   const directory = temporary(t);
   const { build, lines } = images(directory, {
     environment: environment(),
-    exists: ABSENT,
     cli: PASSING_CLI,
     variables: fakePodman(directory, { build: SUCCESS, run: SUCCESS }),
     memoryMb: BOUNDED_MEMORY_MB,
@@ -598,7 +586,6 @@ test("a layer variable that a Containerfile line cannot hold fails the build and
   const directory = temporary(t);
   const { build, lines } = images(directory, {
     environment: environment(),
-    exists: ABSENT,
     cli: PASSING_CLI,
     variables: fakePodman(directory, { build: SUCCESS, run: SUCCESS }),
     inspect: [
@@ -738,7 +725,6 @@ test("a build past its time limit ends the whole process group", async (t) => {
   const pidFile = join(directory, "pid");
   const { build } = images(directory, {
     environment: environment(),
-    exists: ABSENT,
     cli: HANGING_CLI(pidFile),
     buildTimeoutMs: SHORT_TIMEOUT_MS,
   });
@@ -755,7 +741,6 @@ test("a stop ends a running build and a start removes the run directories of an 
   const pidFile = join(directory, "pid");
   const { built, build } = images(directory, {
     environment: environment(),
-    exists: ABSENT,
     cli: HANGING_CLI(pidFile),
   });
   assert.equal(existsSync(stale), false);
@@ -811,7 +796,6 @@ test("a build exports into the run directory, writes the document outside the wo
   const record = join(directory, "record");
   const { built, exports, lines } = images(directory, {
     environment: null,
-    exists: ABSENT,
     cli: RECORDING_CLI(record).replace("CODE", "0"),
     variables: fakePodman(directory, { build: SUCCESS, run: SUCCESS }),
   });
@@ -843,7 +827,6 @@ test("a failed devcontainer build answers build_failed with the tail and removes
   const directory = temporary(t);
   const { built } = images(directory, {
     environment: null,
-    exists: ABSENT,
     cli: RECORDING_CLI(join(directory, "record")).replace("CODE", "3"),
   });
   const result = await built.build(buildInput(), NEVER_ABORTED);
@@ -857,7 +840,6 @@ test("a failed image check answers image_invalid, removes the staging tag and re
   const directory = temporary(t);
   const { built, lines } = images(directory, {
     environment: null,
-    exists: ABSENT,
     cli: PASSING_CLI,
     variables: fakePodman(directory, { build: SUCCESS, run: ABSENT }),
   });
@@ -875,7 +857,6 @@ test("an aborted signal ends the build, kills its process group and removes the 
   const pidFile = join(directory, "pid");
   const { built } = images(directory, {
     environment: null,
-    exists: ABSENT,
     cli: HANGING_CLI(pidFile),
   });
   const controller = new AbortController();
@@ -1046,7 +1027,6 @@ test("prove runs the commands in one container of the image through the proof", 
   const directory = temporary(t);
   const { built, lines } = images(directory, {
     environment: null,
-    exists: SUCCESS,
     variables: fakePodman(directory, { build: SUCCESS, run: SUCCESS }),
     checkout: (target) => {
       const git = (...args: string[]) =>
@@ -1134,7 +1114,6 @@ test("a build with a secret passes the secret to the layer build", async (t) => 
   const directory = temporary(t);
   const { build, lines } = images(directory, {
     environment: environment(),
-    exists: ABSENT,
     cli: PASSING_CLI,
     variables: fakePodman(directory, { build: SUCCESS, run: SUCCESS }),
     secrets: [REGISTRY_SECRET],
@@ -1153,7 +1132,6 @@ test("a build with no secret passes no secret argument", async (t) => {
   const directory = temporary(t);
   const { build, lines } = images(directory, {
     environment: environment(),
-    exists: ABSENT,
     cli: PASSING_CLI,
     variables: fakePodman(directory, { build: SUCCESS, run: SUCCESS }),
   });
@@ -1240,7 +1218,6 @@ test("the devcontainer build holds no secret argument, no secret path and no sec
   const record = join(directory, "invocation");
   const { build } = images(directory, {
     environment: environment(),
-    exists: ABSENT,
     cli: `import { writeFileSync } from "node:fs";
 writeFileSync(${JSON.stringify(record)}, JSON.stringify({ argv: process.argv.slice(2), env: process.env }));`,
     variables: {
@@ -1296,7 +1273,6 @@ function snapshotBuild(
         image: "base",
         onCreateCommand: "nix print-dev-env",
       }),
-      exists: ABSENT,
       cli: PASSING_CLI,
       variables: snapshotPodman(directory, snapshot),
       checkout: (target) => {
