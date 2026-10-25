@@ -251,6 +251,7 @@ test("transition replaces a claimable job and revokes only active claims", (t) =
       { ...node, state: NodeState.Executing },
       NOW,
       RevokeCause.Human,
+      null,
       executionEnds(),
     );
     endLiveClaim(
@@ -259,6 +260,7 @@ test("transition replaces a claimable job and revokes only active claims", (t) =
       { ...node, state: NodeState.Evaluating },
       NOW,
       RevokeCause.Human,
+      null,
       executionEnds(),
     );
     endLiveClaim(
@@ -267,6 +269,7 @@ test("transition replaces a claimable job and revokes only active claims", (t) =
       { ...node, state: NodeState.Paused },
       NOW,
       RevokeCause.Human,
+      null,
       executionEnds(),
     );
   });

@@ -95,7 +95,7 @@ const ASSESSMENT = {
   tested_input: { kind: "produced", sha256: "a".repeat(64) },
 };
 
-test("the assessment body allows a cause only with the result criterion-not-met", () => {
+test("the assessment body requires a cause with the result criterion-not-met and refuses it with another result", () => {
   const cause = {
     category: "model",
     assigner: "rule",
@@ -106,7 +106,9 @@ test("the assessment body allows a cause only with the result criterion-not-met"
     assessmentSubmitSchema.safeParse({ ...notMet, cause }).success,
     true,
   );
-  assert.equal(assessmentSubmitSchema.safeParse(notMet).success, true);
+  const missing = assessmentSubmitSchema.safeParse(notMet);
+  assert.equal(missing.success, false);
+  assert.deepEqual(missing.error?.issues[0]?.path, ["cause"]);
   const refused = assessmentSubmitSchema.safeParse({ ...ASSESSMENT, cause });
   assert.equal(refused.success, false);
   assert.deepEqual(refused.error?.issues[0]?.path, ["cause"]);
