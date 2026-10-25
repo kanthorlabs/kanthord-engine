@@ -58,8 +58,6 @@ const SEARCHED_COLUMNS = [
   "error_types",
 ] as const;
 const BOUND_FILTERS = [
-  ["started_from", STARTED_AT_VALUE, ">="],
-  ["started_to", STARTED_AT_VALUE, "<="],
   ["min_duration_ms", DURATION_VALUE, ">="],
   ["max_duration_ms", DURATION_VALUE, "<="],
   ["min_total_tokens", TOTAL_TOKENS_VALUE, ">="],
@@ -95,6 +93,14 @@ function conditionOf(query: TraceListQuery): Condition {
       `(${SEARCHED_COLUMNS.map((column) => `instr(lower(${column}), lower(?)) > 0`).join(" OR ")})`,
     );
     condition.params.push(...SEARCHED_COLUMNS.map(() => text));
+  }
+  if (query.to !== undefined) {
+    condition.clauses.push(`${STARTED_AT_VALUE} <= ?`);
+    condition.params.push(query.to);
+  }
+  if (query.from !== undefined) {
+    condition.clauses.push("(ended_at IS NULL OR ended_at >= ?)");
+    condition.params.push(query.from);
   }
   for (const [name, value, operator] of BOUND_FILTERS) {
     const bound = query[name];

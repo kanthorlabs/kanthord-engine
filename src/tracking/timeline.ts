@@ -1,20 +1,15 @@
 import assert from "node:assert/strict";
 import type { Transaction } from "../kernel/store.ts";
-import { spanSchema, type Span } from "./contract.ts";
+import {
+  TIMELINE_LIMIT_DEFAULT,
+  TIMELINE_LIMIT_MAX,
+  TIMELINE_LIMIT_MIN,
+  TimelineDepth,
+  TimelineScope,
+  spanSchema,
+  type Span,
+} from "./contract.ts";
 
-export const TimelineScope = {
-  ExecutionId: "execution_id",
-  NodeId: "node_id",
-  ProjectId: "project_id",
-} as const;
-export type TimelineScope = (typeof TimelineScope)[keyof typeof TimelineScope];
-
-export const TimelineDepth = { Root: 1, Child: 2 } as const;
-export type TimelineDepth = (typeof TimelineDepth)[keyof typeof TimelineDepth];
-
-export const TIMELINE_LIMIT_DEFAULT = 500;
-export const TIMELINE_LIMIT_MIN = 1;
-export const TIMELINE_LIMIT_MAX = 1000;
 export const TRACE_END_TIME = Number.MAX_SAFE_INTEGER;
 export const TRACE_END_SPAN_ID = "";
 

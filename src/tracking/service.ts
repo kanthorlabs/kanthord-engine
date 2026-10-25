@@ -43,6 +43,8 @@ import {
   TRACKING_SERVICE_NAME,
   TransitionRule,
   transitionRuleSchema,
+  traceIdSchema,
+  spanIdSchema,
   traceSortSchema,
   trackingOperations,
   type Acknowledgement,
@@ -55,8 +57,14 @@ import {
   type RootSpanEnd,
   type ServerTrace,
   type TelemetryRecord,
+  type TimelineListQuery,
   type TraceSort,
 } from "./contract.ts";
+import {
+  TRACE_END_SPAN_ID,
+  listTimeline,
+  type TimelineCursor,
+} from "./timeline.ts";
 import {
   RETENTION_SWEEP_INTERVAL_MS,
   retentionCutoff,
@@ -89,6 +97,7 @@ const CURSOR_ENCODING = "base64url";
 const TEXT_ENCODING = "utf8";
 const CURSOR_START = 0;
 const TRACE_CURSOR_PARTS = 3;
+const TIMELINE_CURSOR_PARTS = 4;
 
 export interface Dependencies {
   store: Store;
@@ -176,6 +185,45 @@ function encodeTraceCursor(cursor: TraceCursor | null): string | null {
   if (cursor === null) return null;
   return Buffer.from(
     JSON.stringify([cursor.sort, cursor.value, cursor.position]),
+    TEXT_ENCODING,
+  ).toString(CURSOR_ENCODING);
+}
+
+function decodeTimelineCursor(
+  cursor: string | undefined,
+): TimelineCursor | null {
+  if (cursor === undefined) return null;
+  const decoded = Buffer.from(cursor, CURSOR_ENCODING).toString(TEXT_ENCODING);
+  const parts = parsedCursor(decoded);
+  if (!Array.isArray(parts) || parts.length !== TIMELINE_CURSOR_PARTS)
+    return cursorInvalid();
+  const [traceTime, traceId, itemTime, spanId] = parts;
+  if (
+    !Number.isSafeInteger(traceTime) ||
+    !traceIdSchema.safeParse(traceId).success ||
+    !Number.isSafeInteger(itemTime) ||
+    (spanId !== TRACE_END_SPAN_ID && !spanIdSchema.safeParse(spanId).success)
+  )
+    return cursorInvalid();
+  const timelineCursor = {
+    trace_time: traceTime,
+    trace_id: traceId,
+    item_time: itemTime,
+    span_id: spanId,
+  };
+  if (encodeTimelineCursor(timelineCursor) !== cursor) return cursorInvalid();
+  return timelineCursor;
+}
+
+function encodeTimelineCursor(cursor: TimelineCursor | null): string | null {
+  if (cursor === null) return null;
+  return Buffer.from(
+    JSON.stringify([
+      cursor.trace_time,
+      cursor.trace_id,
+      cursor.item_time,
+      cursor.span_id,
+    ]),
     TEXT_ENCODING,
   ).toString(CURSOR_ENCODING);
 }
@@ -414,6 +462,18 @@ export class TrackingService implements Service, ExecutionTelemetry {
     });
   }
 
+  timelineList(query: TimelineListQuery, caller: CallerContext) {
+    assert.ok(caller.identity);
+    const after = decodeTimelineCursor(query.cursor);
+    return caller.commit((tx) => {
+      const page = listTimeline(tx, query, after);
+      return {
+        items: page.items,
+        next_cursor: encodeTimelineCursor(page.next_cursor),
+      };
+    });
+  }
+
   facetGet(query: { project_id?: string }, caller: CallerContext) {
     assert.ok(caller.identity);
     return caller.commit((tx) => readFacets(tx, query.project_id));
@@ -506,6 +566,7 @@ export class TrackingService implements Service, ExecutionTelemetry {
       trackingOperations.traceGet.access !== AccessPolicy.Human ||
       trackingOperations.traceList.access !== AccessPolicy.Human ||
       trackingOperations.facetGet.access !== AccessPolicy.Human ||
+      trackingOperations.timelineList.access !== AccessPolicy.Human ||
       trackingOperations.spanList.access !== AccessPolicy.Human ||
       trackingOperations.textGet.access !== AccessPolicy.Human ||
       trackingOperations.sessionEntryList.access !== AccessPolicy.Human ||
@@ -529,6 +590,9 @@ export class TrackingService implements Service, ExecutionTelemetry {
     );
     registry.register(trackingOperations.facetGet, (input, caller) =>
       this.facetGet(input.query, caller),
+    );
+    registry.register(trackingOperations.timelineList, (input, caller) =>
+      this.timelineList(input.query, caller),
     );
     registry.register(trackingOperations.spanList, (input, caller) =>
       this.spanList(input.params.trace_id, input.query, caller),

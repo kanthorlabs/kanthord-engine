@@ -6,11 +6,11 @@ import {
   SpanOrigin,
   SpanStatus,
   TRACKING_SERVICE_NAME,
+  TimelineDepth,
   type Span,
 } from "./contract.ts";
 import { trackingMigrations } from "./migrations.ts";
 import {
-  TimelineDepth,
   listTimeline,
   type TimelineCursor,
   type TimelineItem,

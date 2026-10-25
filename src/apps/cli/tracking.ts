@@ -14,9 +14,13 @@ import {
   TRACE_LIST_LIMIT_DEFAULT,
   TRACE_LIST_LIMIT_MAX,
   TRACE_LIST_LIMIT_MIN,
+  TIMELINE_LIMIT_MAX,
+  TIMELINE_LIMIT_MIN,
+  TimelineScope,
   TraceSort,
   entryIdentitySchema,
   spanIdSchema,
+  timelineDepthSchema,
   traceIdSchema,
   traceSortSchema,
   traceStateSchema,
@@ -36,8 +40,12 @@ const TEXT = "text";
 const SESSION = "session";
 const ENTRY = "entry";
 const FACET = "facet";
+const TIMELINE = "timeline";
 const PROJECT_IDENTITY_PREFIX = "project";
 const NODE_IDENTITY_PREFIX = "node";
+const EXECUTION_IDENTITY_PREFIX = "execution";
+const ONE_SCOPE = 1;
+const UNIX_MS = /^\d+$/;
 const GET = "get";
 const LIST = "list";
 const TEXT_IDENTITY = /^[0-9a-f]{16}:[a-z][a-z0-9_.-]*$/;
@@ -94,6 +102,17 @@ function traceListLimit(value: string | undefined): number {
   return limit;
 }
 
+function unixMsOption(
+  value: string | undefined,
+  code: string,
+): number | undefined {
+  if (value === undefined) return undefined;
+  const time = Number(value);
+  if (!UNIX_MS.test(value) || !Number.isSafeInteger(time))
+    throw new Diagnostic(code, "invalid Unix milliseconds time");
+  return time;
+}
+
 async function traceList(command: Command): Promise<void> {
   const leaf = `${TRACE}.${LIST}`;
   const options = command.optsWithGlobals();
@@ -130,10 +149,75 @@ async function traceList(command: Command): Promise<void> {
         code("invalid_sort"),
         "sort field",
       ) ?? TraceSort.StartedAt,
+    from: unixMsOption(options.from, code("invalid_query")),
+    to: unixMsOption(options.to, code("invalid_query")),
     limit: traceListLimit(options.limit),
     cursor: options.cursor,
   };
   const result = await client(command, leaf).traceList({
+    params: {},
+    query,
+    body: null,
+  });
+  process.stdout.write(
+    `${JSON.stringify(handleReadResult(result, code("indeterminate")))}\n`,
+  );
+}
+
+function timelineLimit(value: string | undefined): number | undefined {
+  if (value === undefined) return undefined;
+  const limit = parsePositiveInt(value, "cli.pagination.limit_invalid");
+  if (limit < TIMELINE_LIMIT_MIN || limit > TIMELINE_LIMIT_MAX)
+    throw new Diagnostic(
+      "cli.pagination.limit_out_of_range",
+      `limit must be between ${TIMELINE_LIMIT_MIN} and ${TIMELINE_LIMIT_MAX}`,
+    );
+  return limit;
+}
+
+async function timelineList(command: Command): Promise<void> {
+  const leaf = `${TIMELINE}.${LIST}`;
+  const options = command.optsWithGlobals();
+  const code = (suffix: string) => `cli.tracking.${leaf}.${suffix}`;
+  const scopes = [options.execution, options.node, options.project].filter(
+    (scope) => scope !== undefined,
+  );
+  if (scopes.length !== ONE_SCOPE)
+    throw new Diagnostic(
+      code("invalid_query"),
+      "exactly one of --execution, --node and --project is required",
+    );
+  const query = {
+    [TimelineScope.ExecutionId]: optionOf(
+      identitySchema(EXECUTION_IDENTITY_PREFIX),
+      options.execution,
+      code("invalid_execution_id"),
+      "execution ID",
+    ),
+    [TimelineScope.NodeId]: optionOf(
+      identitySchema(NODE_IDENTITY_PREFIX),
+      options.node,
+      code("invalid_node_id"),
+      "node ID",
+    ),
+    [TimelineScope.ProjectId]: optionOf(
+      identitySchema(PROJECT_IDENTITY_PREFIX),
+      options.project,
+      code("invalid_project_id"),
+      "project ID",
+    ),
+    depth: optionOf(
+      timelineDepthSchema,
+      options.depth,
+      code("invalid_depth"),
+      "depth",
+    ),
+    from: unixMsOption(options.from, code("invalid_query")),
+    to: unixMsOption(options.to, code("invalid_query")),
+    limit: timelineLimit(options.limit),
+    cursor: options.cursor,
+  };
+  const result = await client(command, leaf).timelineList({
     params: {},
     query,
     body: null,
@@ -304,6 +388,8 @@ export function addTrackingCommand(program: Command): void {
     .option("--state <state>", "Trace state", singleUse("--state"))
     .option("--query <text>", "Search text", singleUse("--query"))
     .option("--sort <field>", "Sort field", singleUse("--sort"))
+    .option("--from <unix-ms>", "Window start", singleUse("--from"))
+    .option("--to <unix-ms>", "Window end", singleUse("--to"))
     .option("--limit <count>", "Maximum results per page", singleUse("--limit"))
     .option(
       "--cursor <opaque>",
@@ -311,6 +397,30 @@ export function addTrackingCommand(program: Command): void {
       singleUse("--cursor"),
     )
     .action((_options, command: Command) => traceList(command));
+  const timeline = tracking
+    .command(TIMELINE)
+    .description("Read the timeline of an execution, a node or a project");
+  timeline.action(() => timeline.help());
+  timeline
+    .command(LIST)
+    .description("List the timeline spans of one scope as JSON")
+    .option(
+      "--execution <execution-id>",
+      "Execution ID",
+      singleUse("--execution"),
+    )
+    .option("--node <node-id>", "Node ID", singleUse("--node"))
+    .option("--project <project-id>", "Project ID", singleUse("--project"))
+    .option("--depth <1|2>", "Span depth", singleUse("--depth"))
+    .option("--from <unix-ms>", "Window start", singleUse("--from"))
+    .option("--to <unix-ms>", "Window end", singleUse("--to"))
+    .option("--limit <count>", "Maximum results per page", singleUse("--limit"))
+    .option(
+      "--cursor <opaque>",
+      "Continue from a cursor",
+      singleUse("--cursor"),
+    )
+    .action((_options, command: Command) => timelineList(command));
   const span = tracking.command(SPAN).description("Read the spans of a trace");
   span.action(() => span.help());
   span

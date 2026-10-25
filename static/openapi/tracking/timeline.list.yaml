@@ -1,0 +1,365 @@
+# Generated from the operation registry by kanthord gateway openapi.
+pathItem:
+  get:
+    operationId: tracking.timeline.list
+    tags:
+      - tracking
+    description: List one page of the root spans, and at depth 2 the child spans of
+      the roots, of the traces of one execution, node or project, in time order.
+    x-access-policy: human
+    x-timeout-ms: 30000
+    x-mutation: false
+    x-kanthord-lifetime: unary
+    security:
+      - bearerAuth: []
+    parameters:
+      - name: execution_id
+        in: query
+        required: false
+        schema:
+          $ref: "#/components/schemas/tracking.timeline.list.Input/properties/query/prope\
+            rties/execution_id"
+      - name: node_id
+        in: query
+        required: false
+        schema:
+          $ref: "#/components/schemas/tracking.timeline.list.Input/properties/query/prope\
+            rties/node_id"
+      - name: project_id
+        in: query
+        required: false
+        schema:
+          $ref: "#/components/schemas/tracking.timeline.list.Input/properties/query/prope\
+            rties/project_id"
+      - name: from
+        in: query
+        required: false
+        schema:
+          $ref: "#/components/schemas/tracking.timeline.list.Input/properties/query/prope\
+            rties/from"
+      - name: to
+        in: query
+        required: false
+        schema:
+          $ref: "#/components/schemas/tracking.timeline.list.Input/properties/query/prope\
+            rties/to"
+      - name: depth
+        in: query
+        required: false
+        schema:
+          $ref: "#/components/schemas/tracking.timeline.list.Input/properties/query/prope\
+            rties/depth"
+      - name: limit
+        in: query
+        required: false
+        schema:
+          $ref: "#/components/schemas/tracking.timeline.list.Input/properties/query/prope\
+            rties/limit"
+      - name: cursor
+        in: query
+        required: false
+        schema:
+          $ref: "#/components/schemas/tracking.timeline.list.Input/properties/query/prope\
+            rties/cursor"
+    responses:
+      "200":
+        description: Completed result
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/tracking.timeline.list.Output"
+      "400":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "401":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "403":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "404":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "409":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "413":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "415":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "500":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "503":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "504":
+        $ref: ../shared/components.yaml#/components/responses/Error
+components:
+  schemas:
+    tracking.timeline.list.Input:
+      type: object
+      properties:
+        params:
+          type: object
+          properties: {}
+          additionalProperties: false
+        query:
+          type: object
+          properties:
+            execution_id:
+              type: string
+              minLength: 36
+              maxLength: 36
+              pattern: ^execution_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+              description: execution_ followed by a canonical 26-character uppercase ULID.
+            node_id:
+              type: string
+              minLength: 31
+              maxLength: 31
+              pattern: ^node_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+              description: node_ followed by a canonical 26-character uppercase ULID.
+            project_id:
+              type: string
+              minLength: 34
+              maxLength: 34
+              pattern: ^project_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+              description: project_ followed by a canonical 26-character uppercase ULID.
+            from:
+              type: integer
+              minimum: 0
+              maximum: 9007199254740991
+            to:
+              type: integer
+              minimum: 0
+              maximum: 9007199254740991
+            depth:
+              default: 2
+              type: number
+              enum:
+                - 1
+                - 2
+            limit:
+              default: 500
+              type: integer
+              minimum: 1
+              maximum: 1000
+            cursor:
+              type: string
+              minLength: 1
+          required: []
+          additionalProperties: false
+        body:
+          type: "null"
+      required:
+        - params
+        - query
+        - body
+      additionalProperties: false
+    tracking.timeline.list.Output:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            type: object
+            properties:
+              trace_id:
+                type: string
+                pattern: ^[0-9a-f]{32}$
+              span_id:
+                type: string
+                pattern: ^[0-9a-f]{16}$
+              parent_span_id:
+                anyOf:
+                  - type: string
+                    pattern: ^[0-9a-f]{16}$
+                  - type: "null"
+              producer:
+                type: string
+                minLength: 1
+              origin:
+                type: string
+                enum:
+                  - observed
+                  - asserted
+              operation:
+                type: string
+                minLength: 1
+              start_time:
+                anyOf:
+                  - type: integer
+                    minimum: 0
+                    maximum: 9007199254740991
+                    description: Unix timestamp in milliseconds since 1970-01-01T00:00:00Z (UTC).
+                  - type: "null"
+              end_time:
+                anyOf:
+                  - type: integer
+                    minimum: 0
+                    maximum: 9007199254740991
+                    description: Unix timestamp in milliseconds since 1970-01-01T00:00:00Z (UTC).
+                  - type: "null"
+              status:
+                type: string
+                enum:
+                  - Unset
+                  - Ok
+                  - Error
+              attributes:
+                type: object
+                propertyNames:
+                  type: string
+                additionalProperties:
+                  anyOf:
+                    - anyOf:
+                        - type: string
+                        - type: boolean
+                        - type: integer
+                          minimum: -9007199254740991
+                          maximum: 9007199254740991
+                        - type: number
+                    - maxItems: 128
+                      type: array
+                      items:
+                        anyOf:
+                          - type: string
+                          - type: boolean
+                          - type: integer
+                            minimum: -9007199254740991
+                            maximum: 9007199254740991
+                          - type: number
+              events:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    name:
+                      type: string
+                      minLength: 1
+                    time:
+                      type: integer
+                      minimum: 0
+                      maximum: 9007199254740991
+                      description: Unix timestamp in milliseconds since 1970-01-01T00:00:00Z (UTC).
+                    attributes:
+                      type: object
+                      propertyNames:
+                        type: string
+                        minLength: 1
+                      additionalProperties:
+                        anyOf:
+                          - anyOf:
+                              - type: string
+                              - type: boolean
+                              - type: integer
+                                minimum: -9007199254740991
+                                maximum: 9007199254740991
+                              - type: number
+                          - maxItems: 128
+                            type: array
+                            items:
+                              anyOf:
+                                - type: string
+                                - type: boolean
+                                - type: integer
+                                  minimum: -9007199254740991
+                                  maximum: 9007199254740991
+                                - type: number
+                  required:
+                    - name
+                    - time
+                  additionalProperties: false
+              links:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    trace_id:
+                      type: string
+                      pattern: ^[0-9a-f]{32}$
+                    span_id:
+                      type: string
+                      pattern: ^[0-9a-f]{16}$
+                  required:
+                    - trace_id
+                    - span_id
+                  additionalProperties: false
+              text_ids:
+                type: array
+                items:
+                  type: string
+              created_at:
+                type: integer
+                minimum: 0
+                maximum: 9007199254740991
+                description: Unix timestamp in milliseconds since 1970-01-01T00:00:00Z (UTC).
+              depth:
+                type: number
+                enum:
+                  - 1
+                  - 2
+              duration_ms:
+                anyOf:
+                  - type: integer
+                    minimum: -9007199254740991
+                    maximum: 9007199254740991
+                  - type: "null"
+              project_id:
+                anyOf:
+                  - type: string
+                    minLength: 34
+                    maxLength: 34
+                    pattern: ^project_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                    description: project_ followed by a canonical 26-character uppercase ULID.
+                  - type: "null"
+              node_id:
+                anyOf:
+                  - type: string
+                    minLength: 31
+                    maxLength: 31
+                    pattern: ^node_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                    description: node_ followed by a canonical 26-character uppercase ULID.
+                  - type: "null"
+              execution_id:
+                anyOf:
+                  - type: string
+                    minLength: 36
+                    maxLength: 36
+                    pattern: ^execution_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                    description: execution_ followed by a canonical 26-character uppercase ULID.
+                  - type: "null"
+              attempt:
+                anyOf:
+                  - type: integer
+                    minimum: 1
+                    maximum: 9007199254740991
+                  - type: "null"
+              worker_name:
+                anyOf:
+                  - type: string
+                  - type: "null"
+            required:
+              - trace_id
+              - span_id
+              - parent_span_id
+              - producer
+              - origin
+              - operation
+              - start_time
+              - end_time
+              - status
+              - attributes
+              - events
+              - links
+              - text_ids
+              - created_at
+              - depth
+              - duration_ms
+              - project_id
+              - node_id
+              - execution_id
+              - attempt
+              - worker_name
+            additionalProperties: false
+        next_cursor:
+          anyOf:
+            - type: string
+            - type: "null"
+      required:
+        - items
+        - next_cursor
+      additionalProperties: false

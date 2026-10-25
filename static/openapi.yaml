@@ -314,6 +314,8 @@ paths:
     $ref: ./openapi/tracking/telemetry.write.yaml#/pathItem
   /api/tracking/trace/{trace_id}/text/{text_id}:
     $ref: ./openapi/tracking/text.get.yaml#/pathItem
+  /api/tracking/timeline:
+    $ref: ./openapi/tracking/timeline.list.yaml#/pathItem
   /api/tracking/trace/{trace_id}:
     $ref: ./openapi/tracking/trace.get.yaml#/pathItem
   /api/tracking/trace:

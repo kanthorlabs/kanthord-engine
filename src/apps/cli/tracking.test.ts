@@ -107,6 +107,23 @@ test("trace list sends its filters as query fields and writes the answer", async
   assert.deepEqual(JSON.parse(result.stdout), LIST_ANSWER);
 });
 
+test("trace list sends from and to as query fields", async (t) => {
+  const { endpoint, seen } = await fakeServer(t, LIST_ANSWER);
+  const result = await run(
+    t,
+    ["trace", "list", "--from", "1000", "--to", "2000"],
+    endpoint,
+  );
+  assert.equal(result.code, ExitCode.Success, result.stderr);
+  const url = new URL(seen[0]?.url ?? "", endpoint);
+  assert.deepEqual(Object.fromEntries(url.searchParams), {
+    from: "1000",
+    to: "2000",
+    sort: "started_at",
+    limit: "100",
+  });
+});
+
 test("trace list without an option sends the default sort and limit", async (t) => {
   const { endpoint, seen } = await fakeServer(t, LIST_ANSWER);
   const result = await run(t, ["trace", "list"], endpoint);
@@ -128,6 +145,9 @@ const INVALID_LIST_OPTIONS: readonly (readonly [string[], string])[] = [
     ["--query", "x".repeat(TRACE_QUERY_MAX_CHARACTERS + 1)],
     "cli.tracking.trace.list.invalid_query",
   ],
+  [["--from", "-1"], "cli.tracking.trace.list.invalid_query"],
+  [["--from", "soon"], "cli.tracking.trace.list.invalid_query"],
+  [["--to", "1.5"], "cli.tracking.trace.list.invalid_query"],
   [["--limit", LIMIT_NOT_NUMBER], "cli.pagination.limit_invalid"],
   [["--limit", LIMIT_TOO_LARGE], "cli.pagination.limit_out_of_range"],
 ];
@@ -276,3 +296,128 @@ for (const [args, code] of INVALID_ENTRY_ARGUMENTS)
     assert.ok(result.stderr.includes(code), result.stderr);
     assert.equal(seen.length, NO_REQUESTS);
   });
+
+const EXECUTION_ID = "execution_01ARZ3NDEKTSV4RRFFQ69G5FAV";
+const TIMELINE_PATH = "/api/tracking/timeline";
+const TIMELINE_LEAF = "cli.tracking.timeline.list";
+
+test("timeline list sends its scope and filters as query fields and writes the page", async (t) => {
+  const { endpoint, seen } = await fakeServer(t, LIST_ANSWER);
+  const result = await run(
+    t,
+    [
+      "timeline",
+      "list",
+      "--node",
+      NODE_ID,
+      "--depth",
+      "1",
+      "--from",
+      "1000",
+      "--to",
+      "2000",
+      "--limit",
+      LIMIT_LISTED,
+      "--cursor",
+      "opaque",
+    ],
+    endpoint,
+  );
+  assert.equal(result.code, ExitCode.Success, result.stderr);
+  assert.equal(seen.length, ONE_REQUEST);
+  assert.equal(seen[0]?.method, HttpMethod.Get);
+  const url = new URL(seen[0]?.url ?? "", endpoint);
+  assert.equal(url.pathname, TIMELINE_PATH);
+  assert.deepEqual(Object.fromEntries(url.searchParams), {
+    node_id: NODE_ID,
+    depth: "1",
+    from: "1000",
+    to: "2000",
+    limit: LIMIT_LISTED,
+    cursor: "opaque",
+  });
+  assert.deepEqual(JSON.parse(result.stdout), LIST_ANSWER);
+});
+
+for (const [flag, value, field] of [
+  ["--execution", EXECUTION_ID, "execution_id"],
+  ["--project", PROJECT_ID, "project_id"],
+] as const)
+  test(`timeline list ${flag} sends ${field}`, async (t) => {
+    const { endpoint, seen } = await fakeServer(t, LIST_ANSWER);
+    const result = await run(t, ["timeline", "list", flag, value], endpoint);
+    assert.equal(result.code, ExitCode.Success, result.stderr);
+    const url = new URL(seen[0]?.url ?? "", endpoint);
+    assert.equal(url.searchParams.get(field), value);
+  });
+
+const INVALID_TIMELINE_OPTIONS: readonly (readonly [string[], string])[] = [
+  [[], `${TIMELINE_LEAF}.invalid_query`],
+  [
+    ["--node", NODE_ID, "--project", PROJECT_ID],
+    `${TIMELINE_LEAF}.invalid_query`,
+  ],
+  [["--node", NODE_ID, "--from", "soon"], `${TIMELINE_LEAF}.invalid_query`],
+  [["--execution", "invalid"], `${TIMELINE_LEAF}.invalid_execution_id`],
+  [["--node", "invalid"], `${TIMELINE_LEAF}.invalid_node_id`],
+  [["--project", "invalid"], `${TIMELINE_LEAF}.invalid_project_id`],
+  [["--node", NODE_ID, "--depth", "3"], `${TIMELINE_LEAF}.invalid_depth`],
+  [
+    ["--node", NODE_ID, "--limit", LIMIT_NOT_NUMBER],
+    "cli.pagination.limit_invalid",
+  ],
+  [
+    ["--node", NODE_ID, "--limit", LIMIT_TOO_LARGE],
+    "cli.pagination.limit_out_of_range",
+  ],
+];
+
+for (const [options, code] of INVALID_TIMELINE_OPTIONS)
+  test(`timeline list ${options.join(" ")} exits with ${code} before any request`, async (t) => {
+    const { endpoint, seen } = await fakeServer(t, LIST_ANSWER);
+    const result = await run(t, ["timeline", "list", ...options], endpoint);
+    assert.equal(result.code, ExitCode.Failure);
+    assert.ok(result.stderr.includes(code), result.stderr);
+    assert.equal(seen.length, NO_REQUESTS);
+  });
+
+test("timeline list without a token exits with token_required", async (t) => {
+  const directory = temporary(t);
+  const result = await runKanthord(
+    ["tracking", "timeline", "list", "--node", NODE_ID],
+    {
+      ...process.env,
+      XDG_CONFIG_HOME: directory,
+      XDG_DATA_HOME: join(directory, "data"),
+      XDG_STATE_HOME: join(directory, "state"),
+      KANTHORD_ENDPOINT: undefined,
+      KANTHORD_TOKEN: undefined,
+    },
+    t.signal,
+  );
+  assert.equal(result.code, ExitCode.Failure);
+  assert.ok(
+    result.stderr.includes(`${TIMELINE_LEAF}.token_required`),
+    result.stderr,
+  );
+});
+
+test("timeline list with a lost answer exits with indeterminate", async (t) => {
+  const server = createServer((request, response) => {
+    request.resume();
+    response.destroy();
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  t.after(() => server.close());
+  const endpoint = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  const result = await run(
+    t,
+    ["timeline", "list", "--node", NODE_ID],
+    endpoint,
+  );
+  assert.equal(result.code, ExitCode.Failure);
+  assert.ok(
+    result.stderr.includes(`${TIMELINE_LEAF}.indeterminate`),
+    result.stderr,
+  );
+});

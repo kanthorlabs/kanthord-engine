@@ -36,6 +36,9 @@ export const ENTRY_LIST_LIMIT_MAX = 1000;
 export const ENTRY_LIST_LIMIT_DEFAULT = 100;
 export const TRACE_QUERY_MAX_CHARACTERS = 200;
 export const FACET_VALUES_MAX = 200;
+export const TIMELINE_LIMIT_DEFAULT = 500;
+export const TIMELINE_LIMIT_MIN = 1;
+export const TIMELINE_LIMIT_MAX = 1000;
 
 export const SpanStatus = { Unset: "Unset", Ok: "Ok", Error: "Error" } as const;
 export const spanStatusSchema = z.enum(SpanStatus);
@@ -85,6 +88,19 @@ export const TraceSort = {
 } as const;
 export const traceSortSchema = z.enum(TraceSort);
 export type TraceSort = z.infer<typeof traceSortSchema>;
+
+export const TimelineScope = {
+  ExecutionId: "execution_id",
+  NodeId: "node_id",
+  ProjectId: "project_id",
+} as const;
+export type TimelineScope = (typeof TimelineScope)[keyof typeof TimelineScope];
+
+export const TimelineDepth = { Root: 1, Child: 2 } as const;
+export type TimelineDepth = (typeof TimelineDepth)[keyof typeof TimelineDepth];
+export const timelineDepthSchema = z.coerce
+  .number()
+  .pipe(z.literal(Object.values(TimelineDepth)));
 
 export const traceIdSchema = z
   .string()
@@ -370,6 +386,40 @@ export interface ExecutionTelemetry {
 const traceParams = z.strictObject({ trace_id: traceIdSchema });
 const nonNegativeInteger = z.coerce.number().int().min(0);
 const nonNegativeCost = z.coerce.number().finite().min(0);
+const ONE_SCOPE = 1;
+
+export const timelineItemSchema = spanSchema.extend({
+  depth: timelineDepthSchema,
+  duration_ms: z.int().nullable(),
+  project_id: identitySchema("project").nullable(),
+  node_id: identitySchema("node").nullable(),
+  execution_id: identitySchema(EXECUTION_IDENTITY_PREFIX).nullable(),
+  attempt: z.int().min(1).nullable(),
+  worker_name: z.string().nullable(),
+});
+export const timelineQuerySchema = z
+  .strictObject({
+    execution_id: identitySchema(EXECUTION_IDENTITY_PREFIX).optional(),
+    node_id: identitySchema("node").optional(),
+    project_id: identitySchema("project").optional(),
+    from: nonNegativeInteger.optional(),
+    to: nonNegativeInteger.optional(),
+    depth: timelineDepthSchema.default(TimelineDepth.Child),
+    limit: z.coerce
+      .number()
+      .int()
+      .min(TIMELINE_LIMIT_MIN)
+      .max(TIMELINE_LIMIT_MAX)
+      .default(TIMELINE_LIMIT_DEFAULT),
+    cursor: z.string().min(1).optional(),
+  })
+  .refine(
+    (query) =>
+      Object.values(TimelineScope).filter((scope) => query[scope] !== undefined)
+        .length === ONE_SCOPE,
+    { message: "A timeline query holds exactly one scope." },
+  );
+export type TimelineListQuery = z.infer<typeof timelineQuerySchema>;
 
 export const trackingOperations = {
   telemetryWrite: {
@@ -442,8 +492,8 @@ export const trackingOperations = {
         error_type: boundedName.optional(),
         state: traceStateSchema.optional(),
         q: z.string().min(1).max(TRACE_QUERY_MAX_CHARACTERS).optional(),
-        started_from: nonNegativeInteger.optional(),
-        started_to: nonNegativeInteger.optional(),
+        from: nonNegativeInteger.optional(),
+        to: nonNegativeInteger.optional(),
         min_duration_ms: nonNegativeInteger.optional(),
         max_duration_ms: nonNegativeInteger.optional(),
         min_total_tokens: nonNegativeInteger.optional(),
@@ -523,6 +573,30 @@ export const trackingOperations = {
     }),
     output: z.strictObject({
       items: z.array(spanSchema),
+      next_cursor: z.string().nullable(),
+    }),
+  },
+  timelineList: {
+    id: "tracking.timeline.list",
+    service: TRACKING_SERVICE_NAME,
+    method: HttpMethod.Get,
+    path: "/api/tracking/timeline",
+    access: AccessPolicy.Human,
+    store: StoreName.Tracking,
+    lifetime: OperationLifetime.Unary,
+    timeoutMs: TRACKING_TIMEOUT_MS,
+    mutation: false,
+    body: false,
+    status: HttpStatus.OK,
+    description:
+      "List one page of the root spans, and at depth 2 the child spans of the roots, of the traces of one execution, node or project, in time order.",
+    input: z.strictObject({
+      params: z.strictObject({}),
+      query: timelineQuerySchema,
+      body: z.null(),
+    }),
+    output: z.strictObject({
+      items: z.array(timelineItemSchema),
       next_cursor: z.string().nullable(),
     }),
   },
