@@ -305,21 +305,36 @@ bucket rules are those of [`analytics cost`](#analytics-cost).
 
 `measure` is one of:
 
-| Measure             | Value of one sample                                                                                             |
-| ------------------- | --------------------------------------------------------------------------------------------------------------- |
-| `span_duration`     | `end_time - start_time` of a span, all spans or the spans of `operation`. A span without both times is skipped. |
-| `tool_latency`      | The same for the `agent.tool` spans.                                                                            |
-| `verification_time` | The same for the `worker.verification` spans.                                                                   |
-| `queue_wait`        | `kanthord.queue.wait_ms` of the root span of an execution of the kind `steps`.                                  |
-| `review_wait`       | `kanthord.queue.wait_ms` of the root span of an execution of the kind `evaluation`.                             |
-| `revision_turns`    | The count of transitions from `Evaluating` to `Available` of one node attempt.                                  |
+| Measure               | Value of one sample                                                                                                  |
+| --------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `span_duration`       | `end_time - start_time` of a span, all spans or the spans of `operation`. A span without both times is skipped.      |
+| `tool_latency`        | The same for the `agent.tool` spans.                                                                                 |
+| `verification_time`   | The same for the `worker.verification` spans.                                                                        |
+| `queue_wait`          | `kanthord.queue.wait_ms` of the root span of an execution of the kind `steps`.                                       |
+| `review_wait`         | `kanthord.queue.wait_ms` of the root span of an execution of the kind `evaluation`.                                  |
+| `revision_turns`      | The count of transitions from `Evaluating` to `Available` of one node attempt.                                       |
+| `instance_busy_ratio` | The sum of `duration_ms` of the root spans of one `kanthord.worker.instance`, divided by the range or bucket length. |
 
 `group_by` is one of `none`, `operation`, `tool_name`, `agent_name`, `model`,
-`worker_name`, `node_id` and `project_id`. The key `tool_name` is
-`gen_ai.tool.name`. The other keys follow `analytics cost`.
+`worker_name`, `worker_instance`, `node_id` and `project_id`. The key
+`tool_name` is `gen_ai.tool.name`. The key `worker_instance` is
+`kanthord.worker.instance` of the span. The other keys follow `analytics cost`.
+The measure `instance_busy_ratio` takes the `group_by` `worker_instance` only,
+and `worker_instance` takes that measure only. Another pairing answers `400`
+`gateway.request.validation_failed`.
+
+The measure `instance_busy_ratio` reads the root spans that start in the range.
+It skips a root span with no `end_time` or with no string
+`kanthord.worker.instance`, so an open root span adds nothing. A root span adds
+`min(end_time, limit) - start_time` to its instance and bucket. The `limit` is
+the end of its bucket, or `to` with no `bucket`. The `ratio` of an item is its
+sum divided by the length of its bucket, or by `to - from` with no `bucket`.
+The `ratio` is `0` when that length is `0`.
 
 The answer holds `items` and `truncated`. Each item holds `key`, `bucket_start`,
-`count`, `p50`, `p90`, `p99`, `mean` and `max`. A percentile interpolates
+`count`, `p50`, `p90`, `p99`, `mean` and `max`. An item of `instance_busy_ratio`
+holds `key` (the instance name), `bucket_start`, `count` (the root spans) and
+`ratio`, and no percentile. A percentile interpolates
 linearly between the two nearest samples. The order is ascending by
 `bucket_start`, then descending by `count`, then ascending by `key` with `null`
 last. The answer holds at most 1000 items.
@@ -327,7 +342,8 @@ last. The answer holds at most 1000 items.
 The CLI exposes `--measure`, `--operation`, `--group-by`, `--bucket`, `--project`,
 `--node`, `--from` and `--to`. A missing `--measure`, or an invalid `--measure`,
 `--group-by`, `--bucket`, `--from` or `--to`, exits 1 with
-`cli.tracking.analytics.duration.invalid_query`.
+`cli.tracking.analytics.duration.invalid_query`. A pair of `--measure` and
+`--group-by` that the pairing rule refuses exits 1 with the same code.
 
 ## `facet get`
 

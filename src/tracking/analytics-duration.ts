@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import type { Store } from "../kernel/store.ts";
 import { isNumber, isString } from "../kernel/values.ts";
-import { bucketStart } from "./analytics-bucket.ts";
+import { bucketEnd, bucketStart } from "./analytics-bucket.ts";
 import {
   selectTraces,
   walkSpanGroups,
@@ -34,15 +34,39 @@ export interface DurationItem {
   mean: number;
   max: number;
 }
+export interface BusyRatioItem {
+  key: string | null;
+  bucket_start: number | null;
+  count: number;
+  ratio: number;
+}
 export interface DurationRead {
   items: DurationItem[];
   truncated: boolean;
 }
+export interface BusyRatioRead {
+  items: BusyRatioItem[];
+  truncated: boolean;
+}
+
+type BusyRatioQuery = DurationQuery & {
+  measure: typeof AnalyticsMeasure.InstanceBusyRatio;
+};
+type SampleQuery = DurationQuery & {
+  measure: Exclude<AnalyticsMeasure, typeof AnalyticsMeasure.InstanceBusyRatio>;
+};
+type Ordered = Pick<DurationItem, "key" | "bucket_start" | "count">;
 
 interface Group {
   key: string | null;
   bucket_start: number | null;
   values: number[];
+}
+interface BusyGroup {
+  key: string;
+  bucket_start: number | null;
+  busy_ms: number;
+  count: number;
 }
 
 type KeyOf = (span: AnalyticsSpan, trace: SelectedTrace) => string | null;
@@ -71,6 +95,7 @@ const STATE_FROM_ATTRIBUTE = "kanthord.node.state.from";
 const STATE_TO_ATTRIBUTE = "kanthord.node.state.to";
 const EVALUATING_STATE = "Evaluating";
 const AVAILABLE_STATE = "Available";
+const WORKER_INSTANCE_ATTRIBUTE = "kanthord.worker.instance";
 const AGENT_NAME_ATTRIBUTE = "kanthord.agent.name";
 const TOOL_NAME_ATTRIBUTE = "gen_ai.tool.name";
 const REQUEST_MODEL_ATTRIBUTE = "gen_ai.request.model";
@@ -95,6 +120,8 @@ const KEY_OF: Record<DurationGroupBy, KeyOf> = {
     stringOf(span, RESPONSE_MODEL_ATTRIBUTE) ??
     stringOf(span, REQUEST_MODEL_ATTRIBUTE),
   [DurationGroupBy.WorkerName]: (_span, trace) => trace.worker_name,
+  [DurationGroupBy.WorkerInstance]: (span) =>
+    stringOf(span, WORKER_INSTANCE_ATTRIBUTE),
   [DurationGroupBy.NodeId]: (_span, trace) => trace.node_id,
   [DurationGroupBy.ProjectId]: (_span, trace) => trace.project_id,
 };
@@ -130,7 +157,7 @@ function compareKeys(left: string | null, right: string | null): number {
   return left < right ? -AFTER : AFTER;
 }
 
-function compareItems(left: DurationItem, right: DurationItem): number {
+function compareItems(left: Ordered, right: Ordered): number {
   return (
     (left.bucket_start ?? 0) - (right.bucket_start ?? 0) ||
     right.count - left.count ||
@@ -221,7 +248,10 @@ const collectRevisionTurns: Collect = async (
     if (first !== null) add(first.span, first.trace, turns);
 };
 
-const COLLECT: Record<AnalyticsMeasure, Collect> = {
+const COLLECT: Record<
+  Exclude<AnalyticsMeasure, typeof AnalyticsMeasure.InstanceBusyRatio>,
+  Collect
+> = {
   [AnalyticsMeasure.SpanDuration]: collectDurations((query) => query.operation),
   [AnalyticsMeasure.ToolLatency]: collectDurations(() => TOOL_OPERATION),
   [AnalyticsMeasure.VerificationTime]: collectDurations(
@@ -232,20 +262,103 @@ const COLLECT: Record<AnalyticsMeasure, Collect> = {
   [AnalyticsMeasure.RevisionTurns]: collectRevisionTurns,
 };
 
-export async function readDuration(
-  store: Store,
-  query: DurationQuery,
+function pageOf<T extends Ordered>(
+  items: T[],
   limit: number,
-  signal: AbortSignal,
-): Promise<DurationRead> {
-  assert.ok(Number.isSafeInteger(limit) && limit > NO_LIMIT);
-  const keyOf = KEY_OF[query.group_by];
-  const traces = store.transaction((tx) =>
+): { items: T[]; truncated: boolean } {
+  items.sort(compareItems);
+  return { items: items.slice(0, limit), truncated: items.length > limit };
+}
+
+function selectedTracesOf(store: Store, query: DurationQuery) {
+  return store.transaction((tx) =>
     selectTraces(tx, query, {
       project_id: query.project_id,
       node_id: query.node_id,
     }),
   );
+}
+
+function ratioOf(busyMs: number, lengthMs: number): number {
+  return lengthMs === NO_LIMIT ? NO_LIMIT : busyMs / lengthMs;
+}
+
+async function readBusyRatio(
+  store: Store,
+  query: DurationQuery,
+  limit: number,
+  signal: AbortSignal,
+): Promise<BusyRatioRead> {
+  const traces = selectedTracesOf(store, query);
+  const groups = new Map<string, BusyGroup>();
+  await walkSpans(
+    store,
+    traces,
+    { roots: true, from: query.from, to: query.to },
+    signal,
+    (span) => {
+      const instance = stringOf(span, WORKER_INSTANCE_ATTRIBUTE);
+      if (span.start_time === null || span.end_time === null) return;
+      if (instance === null) return;
+      const start = bucketStart(span.start_time, query.bucket);
+      const limitTime =
+        start === null ? query.to : bucketEnd(start, query.bucket);
+      const identity = JSON.stringify([start, instance]);
+      const group = groups.get(identity) ?? {
+        key: instance,
+        bucket_start: start,
+        busy_ms: 0,
+        count: 0,
+      };
+      groups.set(identity, group);
+      group.busy_ms += Math.min(span.end_time, limitTime) - span.start_time;
+      group.count += 1;
+    },
+  );
+  const items = [...groups.values()].map((group): BusyRatioItem => {
+    const lengthMs =
+      group.bucket_start === null
+        ? query.to - query.from
+        : bucketEnd(group.bucket_start, query.bucket) - group.bucket_start;
+    return {
+      key: group.key,
+      bucket_start: group.bucket_start,
+      count: group.count,
+      ratio: ratioOf(group.busy_ms, lengthMs),
+    };
+  });
+  return pageOf(items, limit);
+}
+
+export function readDuration(
+  store: Store,
+  query: BusyRatioQuery,
+  limit: number,
+  signal: AbortSignal,
+): Promise<BusyRatioRead>;
+export function readDuration(
+  store: Store,
+  query: SampleQuery,
+  limit: number,
+  signal: AbortSignal,
+): Promise<DurationRead>;
+export function readDuration(
+  store: Store,
+  query: DurationQuery,
+  limit: number,
+  signal: AbortSignal,
+): Promise<DurationRead | BusyRatioRead>;
+export async function readDuration(
+  store: Store,
+  query: DurationQuery,
+  limit: number,
+  signal: AbortSignal,
+): Promise<DurationRead | BusyRatioRead> {
+  assert.ok(Number.isSafeInteger(limit) && limit > NO_LIMIT);
+  if (query.measure === AnalyticsMeasure.InstanceBusyRatio)
+    return readBusyRatio(store, query, limit, signal);
+  const keyOf = KEY_OF[query.group_by];
+  const traces = selectedTracesOf(store, query);
   const groups = new Map<string, Group>();
   await COLLECT[query.measure](
     store,
@@ -266,6 +379,5 @@ export async function readDuration(
       group.values.push(value);
     },
   );
-  const items = [...groups.values()].map(itemOf).sort(compareItems);
-  return { items: items.slice(0, limit), truncated: items.length > limit };
+  return pageOf([...groups.values()].map(itemOf), limit);
 }

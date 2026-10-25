@@ -4,9 +4,12 @@ pathItem:
     operationId: tracking.analytics.duration
     tags:
       - tracking
-    description: Summarize one duration measure in a time range of at most 31 days
-      as percentiles, mean and maximum, by group and time bucket. The default
-      range is the last 7 days. The answer holds at most 1000 items.
+    description: Summarize one duration measure in a time range of at most 31 days,
+      by group and time bucket. An item holds the count, the percentiles, the
+      mean and the maximum. The measure instance_busy_ratio requires the
+      group_by worker_instance, and an item of it holds the count and the busy
+      ratio only. The default range is the last 7 days. The answer holds at most
+      1000 items.
     x-access-policy: human
     x-timeout-ms: 30000
     x-mutation: false
@@ -130,6 +133,7 @@ components:
                 - queue_wait
                 - review_wait
                 - revision_turns
+                - instance_busy_ratio
             operation:
               type: string
               minLength: 1
@@ -143,6 +147,7 @@ components:
                 - agent_name
                 - model
                 - worker_name
+                - worker_instance
                 - node_id
                 - project_id
             bucket:
@@ -169,42 +174,67 @@ components:
         items:
           type: array
           items:
-            type: object
-            properties:
-              key:
-                anyOf:
-                  - type: string
-                  - type: "null"
-              bucket_start:
-                anyOf:
-                  - type: integer
+            anyOf:
+              - type: object
+                properties:
+                  key:
+                    anyOf:
+                      - type: string
+                      - type: "null"
+                  bucket_start:
+                    anyOf:
+                      - type: integer
+                        minimum: -9007199254740991
+                        maximum: 9007199254740991
+                      - type: "null"
+                  count:
+                    type: integer
                     minimum: -9007199254740991
                     maximum: 9007199254740991
-                  - type: "null"
-              count:
-                type: integer
-                minimum: -9007199254740991
-                maximum: 9007199254740991
-              p50:
-                type: number
-              p90:
-                type: number
-              p99:
-                type: number
-              mean:
-                type: number
-              max:
-                type: number
-            required:
-              - key
-              - bucket_start
-              - count
-              - p50
-              - p90
-              - p99
-              - mean
-              - max
-            additionalProperties: false
+                  p50:
+                    type: number
+                  p90:
+                    type: number
+                  p99:
+                    type: number
+                  mean:
+                    type: number
+                  max:
+                    type: number
+                required:
+                  - key
+                  - bucket_start
+                  - count
+                  - p50
+                  - p90
+                  - p99
+                  - mean
+                  - max
+                additionalProperties: false
+              - type: object
+                properties:
+                  key:
+                    anyOf:
+                      - type: string
+                      - type: "null"
+                  bucket_start:
+                    anyOf:
+                      - type: integer
+                        minimum: -9007199254740991
+                        maximum: 9007199254740991
+                      - type: "null"
+                  count:
+                    type: integer
+                    minimum: -9007199254740991
+                    maximum: 9007199254740991
+                  ratio:
+                    type: number
+                required:
+                  - key
+                  - bucket_start
+                  - count
+                  - ratio
+                additionalProperties: false
         truncated:
           type: boolean
       required:

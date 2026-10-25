@@ -142,6 +142,7 @@ export const AnalyticsMeasure = {
   QueueWait: "queue_wait",
   ReviewWait: "review_wait",
   RevisionTurns: "revision_turns",
+  InstanceBusyRatio: "instance_busy_ratio",
 } as const;
 export const analyticsMeasureSchema = z.enum(AnalyticsMeasure);
 export type AnalyticsMeasure = z.infer<typeof analyticsMeasureSchema>;
@@ -153,6 +154,7 @@ export const DurationGroupBy = {
   AgentName: "agent_name",
   Model: "model",
   WorkerName: "worker_name",
+  WorkerInstance: "worker_instance",
   NodeId: "node_id",
   ProjectId: "project_id",
 } as const;
@@ -522,13 +524,24 @@ export const analyticsCostQuerySchema = z.strictObject({
   bucket: analyticsBucketSchema.default(AnalyticsBucket.Day),
 });
 export type AnalyticsCostQuery = z.infer<typeof analyticsCostQuerySchema>;
-export const analyticsDurationQuerySchema = z.strictObject({
-  ...analyticsFilterShape,
-  measure: analyticsMeasureSchema,
-  operation: boundedName.optional(),
-  group_by: durationGroupBySchema.default(DurationGroupBy.None),
-  bucket: analyticsBucketSchema.default(AnalyticsBucket.None),
-});
+export const analyticsDurationQuerySchema = z
+  .strictObject({
+    ...analyticsFilterShape,
+    measure: analyticsMeasureSchema,
+    operation: boundedName.optional(),
+    group_by: durationGroupBySchema.default(DurationGroupBy.None),
+    bucket: analyticsBucketSchema.default(AnalyticsBucket.None),
+  })
+  .refine(
+    (query) =>
+      (query.measure === AnalyticsMeasure.InstanceBusyRatio) ===
+      (query.group_by === DurationGroupBy.WorkerInstance),
+    {
+      message:
+        "The measure instance_busy_ratio and the group_by worker_instance require each other.",
+      path: ["group_by"],
+    },
+  );
 export type AnalyticsDurationQuery = z.infer<
   typeof analyticsDurationQuerySchema
 >;
@@ -554,6 +567,11 @@ export const analyticsDurationItemSchema = z.strictObject({
   p99: z.number(),
   mean: z.number(),
   max: z.number(),
+});
+export const analyticsBusyRatioItemSchema = z.strictObject({
+  ...analyticsItemShape,
+  count: z.int(),
+  ratio: z.number(),
 });
 
 export const trackingOperations = {
@@ -775,14 +793,16 @@ export const trackingOperations = {
     body: false,
     status: HttpStatus.OK,
     description:
-      "Summarize one duration measure in a time range of at most 31 days as percentiles, mean and maximum, by group and time bucket. The default range is the last 7 days. The answer holds at most 1000 items.",
+      "Summarize one duration measure in a time range of at most 31 days, by group and time bucket. An item holds the count, the percentiles, the mean and the maximum. The measure instance_busy_ratio requires the group_by worker_instance, and an item of it holds the count and the busy ratio only. The default range is the last 7 days. The answer holds at most 1000 items.",
     input: z.strictObject({
       params: z.strictObject({}),
       query: analyticsDurationQuerySchema,
       body: z.null(),
     }),
     output: z.strictObject({
-      items: z.array(analyticsDurationItemSchema),
+      items: z.array(
+        analyticsDurationItemSchema.or(analyticsBusyRatioItemSchema),
+      ),
       truncated: z.boolean(),
     }),
   },

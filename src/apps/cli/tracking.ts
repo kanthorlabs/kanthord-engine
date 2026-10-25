@@ -20,6 +20,7 @@ import {
   TimelineScope,
   TraceSort,
   analyticsBucketSchema,
+  analyticsDurationQuerySchema,
   analyticsMeasureSchema,
   causeLabelTextIdSchema,
   costGroupBySchema,
@@ -331,6 +332,11 @@ async function analyticsDuration(command: Command): Promise<void> {
       "bucket",
     ),
   };
+  if (!analyticsDurationQuerySchema.safeParse(query).success)
+    throw new Diagnostic(
+      code("invalid_query"),
+      "--measure instance_busy_ratio and --group-by worker_instance require each other",
+    );
   const result = await client(command, leaf).analyticsDuration({
     params: {},
     query,
