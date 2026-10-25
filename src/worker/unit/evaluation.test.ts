@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { CauseCategory, unattributed } from "../../kernel/cause.ts";
 import { test, type TestContext } from "node:test";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
@@ -39,6 +38,7 @@ import {
   CauseAssigner,
   CauseCategory,
   CauseSubcategory,
+  unattributed,
 } from "../../kernel/cause.ts";
 import { EnvironmentSource } from "../../kernel/devcontainer.ts";
 import { mkdirSync, writeFileSync } from "node:fs";
