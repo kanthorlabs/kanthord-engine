@@ -39,6 +39,9 @@ export const FACET_VALUES_MAX = 200;
 export const TIMELINE_LIMIT_DEFAULT = 500;
 export const TIMELINE_LIMIT_MIN = 1;
 export const TIMELINE_LIMIT_MAX = 1000;
+export const ANALYTICS_ITEMS_MAX = 1000;
+export const ANALYTICS_RANGE_DAYS_DEFAULT = 7;
+export const ANALYTICS_RANGE_DAYS_MAX = 31;
 
 export const SpanStatus = { Unset: "Unset", Ok: "Ok", Error: "Error" } as const;
 export const spanStatusSchema = z.enum(SpanStatus);
@@ -101,6 +104,51 @@ export type TimelineDepth = (typeof TimelineDepth)[keyof typeof TimelineDepth];
 export const timelineDepthSchema = z.coerce
   .number()
   .pipe(z.literal(Object.values(TimelineDepth)));
+
+export const AnalyticsBucket = {
+  None: "none",
+  Hour: "hour",
+  Day: "day",
+  Week: "week",
+} as const;
+export const analyticsBucketSchema = z.enum(AnalyticsBucket);
+export type AnalyticsBucket = z.infer<typeof analyticsBucketSchema>;
+
+export const CostGroupBy = {
+  None: "none",
+  Model: "model",
+  AgentName: "agent_name",
+  ProviderName: "provider_name",
+  WorkerName: "worker_name",
+  NodeId: "node_id",
+  ProjectId: "project_id",
+} as const;
+export const costGroupBySchema = z.enum(CostGroupBy);
+export type CostGroupBy = z.infer<typeof costGroupBySchema>;
+
+export const AnalyticsMeasure = {
+  SpanDuration: "span_duration",
+  ToolLatency: "tool_latency",
+  VerificationTime: "verification_time",
+  QueueWait: "queue_wait",
+  ReviewWait: "review_wait",
+  RevisionTurns: "revision_turns",
+} as const;
+export const analyticsMeasureSchema = z.enum(AnalyticsMeasure);
+export type AnalyticsMeasure = z.infer<typeof analyticsMeasureSchema>;
+
+export const DurationGroupBy = {
+  None: "none",
+  Operation: "operation",
+  ToolName: "tool_name",
+  AgentName: "agent_name",
+  Model: "model",
+  WorkerName: "worker_name",
+  NodeId: "node_id",
+  ProjectId: "project_id",
+} as const;
+export const durationGroupBySchema = z.enum(DurationGroupBy);
+export type DurationGroupBy = z.infer<typeof durationGroupBySchema>;
 
 export const traceIdSchema = z
   .string()
@@ -421,6 +469,52 @@ export const timelineQuerySchema = z
   );
 export type TimelineListQuery = z.infer<typeof timelineQuerySchema>;
 
+const analyticsFilterShape = {
+  project_id: identitySchema("project").optional(),
+  node_id: identitySchema("node").optional(),
+  from: nonNegativeInteger.optional(),
+  to: nonNegativeInteger.optional(),
+};
+export const analyticsCostQuerySchema = z.strictObject({
+  ...analyticsFilterShape,
+  group_by: costGroupBySchema.default(CostGroupBy.Model),
+  bucket: analyticsBucketSchema.default(AnalyticsBucket.Day),
+});
+export type AnalyticsCostQuery = z.infer<typeof analyticsCostQuerySchema>;
+export const analyticsDurationQuerySchema = z.strictObject({
+  ...analyticsFilterShape,
+  measure: analyticsMeasureSchema,
+  operation: boundedName.optional(),
+  group_by: durationGroupBySchema.default(DurationGroupBy.None),
+  bucket: analyticsBucketSchema.default(AnalyticsBucket.None),
+});
+export type AnalyticsDurationQuery = z.infer<
+  typeof analyticsDurationQuerySchema
+>;
+const analyticsItemShape = {
+  key: z.string().nullable(),
+  bucket_start: z.int().nullable(),
+};
+export const analyticsCostItemSchema = z.strictObject({
+  ...analyticsItemShape,
+  turn_count: z.int(),
+  input_tokens: z.number(),
+  output_tokens: z.number(),
+  cache_read_tokens: z.number(),
+  cache_creation_tokens: z.number(),
+  total_tokens: z.number(),
+  cost_usd: z.number(),
+});
+export const analyticsDurationItemSchema = z.strictObject({
+  ...analyticsItemShape,
+  count: z.int(),
+  p50: z.number(),
+  p90: z.number(),
+  p99: z.number(),
+  mean: z.number(),
+  max: z.number(),
+});
+
 export const trackingOperations = {
   telemetryWrite: {
     id: "tracking.telemetry.write",
@@ -598,6 +692,54 @@ export const trackingOperations = {
     output: z.strictObject({
       items: z.array(timelineItemSchema),
       next_cursor: z.string().nullable(),
+    }),
+  },
+  analyticsCost: {
+    id: "tracking.analytics.cost",
+    service: TRACKING_SERVICE_NAME,
+    method: HttpMethod.Get,
+    path: "/api/tracking/analytics/cost",
+    access: AccessPolicy.Human,
+    store: StoreName.Tracking,
+    lifetime: OperationLifetime.Unary,
+    timeoutMs: TRACKING_TIMEOUT_MS,
+    mutation: false,
+    body: false,
+    status: HttpStatus.OK,
+    description:
+      "Sum the tokens and the cost of the agent turns in a time range of at most 31 days, by group and time bucket. The default range is the last 7 days. The answer holds at most 1000 items.",
+    input: z.strictObject({
+      params: z.strictObject({}),
+      query: analyticsCostQuerySchema,
+      body: z.null(),
+    }),
+    output: z.strictObject({
+      items: z.array(analyticsCostItemSchema),
+      truncated: z.boolean(),
+    }),
+  },
+  analyticsDuration: {
+    id: "tracking.analytics.duration",
+    service: TRACKING_SERVICE_NAME,
+    method: HttpMethod.Get,
+    path: "/api/tracking/analytics/duration",
+    access: AccessPolicy.Human,
+    store: StoreName.Tracking,
+    lifetime: OperationLifetime.Unary,
+    timeoutMs: TRACKING_TIMEOUT_MS,
+    mutation: false,
+    body: false,
+    status: HttpStatus.OK,
+    description:
+      "Summarize one duration measure in a time range of at most 31 days as percentiles, mean and maximum, by group and time bucket. The default range is the last 7 days. The answer holds at most 1000 items.",
+    input: z.strictObject({
+      params: z.strictObject({}),
+      query: analyticsDurationQuerySchema,
+      body: z.null(),
+    }),
+    output: z.strictObject({
+      items: z.array(analyticsDurationItemSchema),
+      truncated: z.boolean(),
     }),
   },
   textGet: {

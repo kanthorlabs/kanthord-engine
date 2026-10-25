@@ -1,8 +1,7 @@
 import assert from "node:assert/strict";
-import { z } from "zod";
 import type { Store } from "../kernel/store.ts";
 import { isNumber, isString } from "../kernel/values.ts";
-import { bucketStart, type AnalyticsBucket } from "./analytics-bucket.ts";
+import { bucketStart } from "./analytics-bucket.ts";
 import {
   selectTraces,
   walkSpans,
@@ -10,18 +9,7 @@ import {
   type SelectedTrace,
   type TraceFilter,
 } from "./analytics-walk.ts";
-
-export const CostGroupBy = {
-  None: "none",
-  Model: "model",
-  AgentName: "agent_name",
-  ProviderName: "provider_name",
-  WorkerName: "worker_name",
-  NodeId: "node_id",
-  ProjectId: "project_id",
-} as const;
-export const costGroupBySchema = z.enum(CostGroupBy);
-export type CostGroupBy = z.infer<typeof costGroupBySchema>;
+import { CostGroupBy, type AnalyticsBucket } from "./contract.ts";
 
 export interface CostQuery extends TraceFilter {
   from: number;
