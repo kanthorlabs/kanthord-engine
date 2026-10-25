@@ -141,11 +141,10 @@ const PROCESS_ABSENT = "ESRCH";
 export const PROCESS_TREE_PIDS = 4;
 
 export function processTreeCommand(): string {
-  const escape = `const c=require("node:child_process").spawn("sleep",["${ESCAPED_SECONDS}"],{detached:true,stdio:"ignore"});console.log(c.pid);setInterval(()=>{},1000)`;
   return [
     `sh -c 'sleep ${ESCAPED_SECONDS} & echo $!; sleep ${ESCAPED_SECONDS}' &`,
     `echo $!`,
-    `"${process.execPath}" -e '${escape}' &`,
+    `sh -c 'set -m; sleep ${ESCAPED_SECONDS} & echo $!; sleep ${ESCAPED_SECONDS}' &`,
     `echo $!`,
     `wait`,
   ].join("\n");

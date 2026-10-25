@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { failureCauseSchema } from "../kernel/cause.ts";
 import { HttpMethod, HttpStatus } from "../kernel/http.ts";
 import { identitySchema } from "../kernel/identity.ts";
 import { timestamp } from "../kernel/json.ts";
@@ -124,6 +125,7 @@ export const releaseStopSchema = z
     reason: executionStopReasonSchema,
     code: z.string().min(1).nullable(),
     detail: z.string().min(1).max(STOP_DETAIL_MAX_LENGTH).optional(),
+    cause: failureCauseSchema.optional(),
   })
   .refine(stopCodeFits, { path: ["code"] });
 export type ReleaseStop = z.infer<typeof releaseStopSchema>;

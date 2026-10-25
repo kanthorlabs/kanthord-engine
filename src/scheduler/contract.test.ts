@@ -126,6 +126,28 @@ test("a release stop carries an optional cause detail of at most 2048 characters
   assert.equal(parse(null).success, false);
 });
 
+test("a release stop accepts a valid cause and refuses an invalid cause", () => {
+  const stop = { reason: "provider_failed", code: "unavailable" };
+  const cause = {
+    category: "llm_provider",
+    assigner: "rule",
+    subcategory: "unavailable",
+  };
+  assert.deepEqual(releaseStopSchema.parse({ ...stop, cause }), {
+    ...stop,
+    cause,
+  });
+  for (const invalid of [
+    { ...cause, subcategory: "network" },
+    { ...cause, assigner: "human" },
+    { category: "unattributed", assigner: "rule" },
+  ])
+    assert.equal(
+      releaseStopSchema.safeParse({ ...stop, cause: invalid }).success,
+      false,
+    );
+});
+
 test("a release stop code fits its reason", () => {
   const fits = (reason: string, code: string | null) =>
     releaseStopSchema.safeParse({ reason, code }).success;

@@ -166,6 +166,13 @@ export function countRunningOfRuntimes(
   }
   return count;
 }
+export function storedStopOf(stop: ReleaseStop): ReleaseStop {
+  return {
+    reason: stop.reason,
+    code: stop.code,
+    ...(stop.detail === undefined ? {} : { detail: stop.detail }),
+  };
+}
 export function endExecution(
   tx: Transaction,
   executionId: string,
@@ -179,7 +186,9 @@ export function endExecution(
     )
     .run(
       now,
-      stop === null ? null : canonicalJSON(releaseStopSchema.parse(stop)),
+      stop === null
+        ? null
+        : canonicalJSON(storedStopOf(releaseStopSchema.parse(stop))),
       executionId,
     );
   assert.equal(result.changes, ONE_ROW, "exactly one terminal write must win");

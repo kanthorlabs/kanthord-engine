@@ -181,6 +181,7 @@ test("a revision that changes nothing twice stops the task with no_progress", as
       passed: false,
       ran: ONE_COMMAND,
       exit_code: FAILED_EXIT_CODE,
+      timed_out: false,
     },
   });
   assert.deepEqual(

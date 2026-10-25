@@ -14,6 +14,7 @@ import type { Context } from "../kernel/context.ts";
 import type { CallerIdentity } from "../kernel/caller.ts";
 import { errorSchema } from "../kernel/errors.ts";
 import { tagSchema } from "../kernel/tag.ts";
+import { failureCauseSchema } from "../kernel/cause.ts";
 import { CommitType } from "../kernel/commit-message.ts";
 
 export const MISSION_SERVICE_NAME = "mission";
@@ -1284,20 +1285,28 @@ export const proposalApproveResultSchema = z.strictObject({
   created: nodeChangeSchema,
   proposer: controlResultSchema,
 });
-export const assessmentSubmitSchema = executionContextSchema.extend({
-  evidence_ids: z
-    .array(identitySchema("evidence"))
-    .refine((items) => new Set(items).size === items.length)
-    .meta({ uniqueItems: true }),
-  dependency_outcome_ids: z
-    .array(identitySchema("outcome"))
-    .refine((items) => new Set(items).size === items.length)
-    .meta({ uniqueItems: true }),
-  result: assessmentResultSchema,
-  rationale: textSchema,
-  tested_input: testedInputSchema,
-  proposals: z.array(proposalContentSchema).max(PROPOSAL_MAX).default([]),
-});
+export const assessmentSubmitSchema = executionContextSchema
+  .extend({
+    evidence_ids: z
+      .array(identitySchema("evidence"))
+      .refine((items) => new Set(items).size === items.length)
+      .meta({ uniqueItems: true }),
+    dependency_outcome_ids: z
+      .array(identitySchema("outcome"))
+      .refine((items) => new Set(items).size === items.length)
+      .meta({ uniqueItems: true }),
+    result: assessmentResultSchema,
+    rationale: textSchema,
+    tested_input: testedInputSchema,
+    proposals: z.array(proposalContentSchema).max(PROPOSAL_MAX).default([]),
+    cause: failureCauseSchema.optional(),
+  })
+  .refine(
+    (body) =>
+      body.cause === undefined ||
+      body.result === AssessmentResult.CriterionNotMet,
+    { path: ["cause"] },
+  );
 export type AssessmentSubmit = z.infer<typeof assessmentSubmitSchema>;
 export const evidenceRequestSchema = executionContextSchema.extend({
   requirement_key: actionKeySchema,

@@ -21,6 +21,7 @@ const noProgressFactsSchema = z.strictObject({
       passed: z.boolean(),
       ran: z.number().int().nonnegative(),
       exit_code: z.number().int().nullable(),
+      timed_out: z.boolean(),
     })
     .nullable(),
 });
@@ -35,6 +36,7 @@ export function verificationFactsOf(
     passed,
     ran: verification.results.length,
     exit_code: verification.results.at(-1)?.exit_code ?? null,
+    timed_out: verification.results.at(-1)?.timed_out ?? false,
   };
 }
 

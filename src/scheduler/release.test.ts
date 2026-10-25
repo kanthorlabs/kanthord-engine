@@ -4,6 +4,12 @@ import { executionTrace } from "./telemetry.ts";
 import { test, type TestContext } from "node:test";
 import { background } from "../kernel/context.ts";
 import { createIdentity } from "../kernel/identity.ts";
+import { testMachineIdentity } from "../kernel/test-identity.ts";
+import {
+  attributed,
+  CauseCategory,
+  CauseSubcategory,
+} from "../kernel/cause.ts";
 import type { CallerContext } from "../kernel/operation.ts";
 import {
   executionFixture,
@@ -377,6 +383,31 @@ test("a refused release writes no transition span", async (t) => {
   };
   await assert.rejects(h.release());
   assert.deepEqual(h.telemetry, []);
+});
+
+test("a release with a stop cause stores a stop with no cause", async (t) => {
+  const h = harness(t);
+  t.mock.method(Date, "now", () => FIXTURE_NOW);
+  const cause = attributed(CauseCategory.Model, CauseSubcategory.NoProgress);
+  await h.release(true, { ...STOP, cause });
+  assert.deepEqual(h.read().stop, STOP);
+  const machine = {
+    clientId: createIdentity("client_identity"),
+    name: "worker",
+    projectId: h.row.project_id,
+    resourceIdentity: h.row.resource_identity,
+    issuedAt: FIXTURE_NOW,
+  };
+  const claimed = await h.invoke(
+    "claimGet",
+    { params: { execution_id: h.row.execution_id }, query: {}, body: null },
+    {
+      ...h.caller,
+      identity: testMachineIdentity(machine, "machine", h.row.runtime_identity),
+    },
+  );
+  assert.deepEqual(claimed.stop, STOP);
+  assert.equal(JSON.stringify(claimed).includes("cause"), false);
 });
 
 test("a release without a stop field stores no stop", async (t) => {
