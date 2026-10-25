@@ -149,6 +149,8 @@ Each item of `repositories` holds `{ binding_id, resource_identity, name, addres
 The read refuses an address host outside the SSH host set of the binding platform with `project.bindings.repository.address_invalid`, and an address host without a pin with `repository.host_key.unpinned`.
 An invalid override file of the agent directory answers 409 `agent.prompt.template_invalid` with the details `{ file, path, reason }`.
 The worker application reads no prompt file of a workspace or of its host. It uses `final` as the system prompt and pins only the work prompt as a message.
+The work prompt of a task holds the `name`, the `requirement` and the `criterion` of the node first, then the task text. Both parts use the headings of the `work` template.
+Each work prompt of a task holds this node part, the first prompt and every later prompt. The work prompt of a node with no task holds the node content once.
 The execution setup contract of this version differs from the previous version. Upgrade the server and every worker host together.
 [Project](./project.md#repository-configuration--proposed-fields) rules `prompts`.
 
