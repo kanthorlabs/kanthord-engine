@@ -145,6 +145,10 @@ export function schedulerHarness(
         record("claimFacts", args);
         return { intent: ClaimIntent.Implement, tags: [], repositories: [] };
       },
+      openingFacts: (...args) => {
+        record("openingFacts", args);
+        return { dependency_count: 0, revision_turn: false };
+      },
       claimFactsOf: (...args) => {
         record("claimFactsOf", args);
         return [];

@@ -81,6 +81,7 @@ export interface WorkQueue {
   ): void;
   delete(tx: Transaction, nodeId: string): void;
   priorityUpdate(tx: Transaction, nodeId: string, priority: number): void;
+  firstQueuedAt(tx: Transaction, nodeId: string): number | null;
 }
 
 export interface ClaimFacts {

@@ -10,7 +10,11 @@ import {
 import { asError, Diagnostic, OperationError } from "../kernel/errors.ts";
 import type { HealthRegistry } from "../kernel/health.ts";
 import { HttpStatus } from "../kernel/http.ts";
-import { createIdentity, identitySchema } from "../kernel/identity.ts";
+import {
+  createIdentity,
+  identitySchema,
+  identityTime,
+} from "../kernel/identity.ts";
 import {
   AccessPolicy,
   type CallerContext,
@@ -324,6 +328,13 @@ export class SchedulerService implements Service, WorkQueue {
       )
       .run(projectId, priority, Date.now(), nodeId);
     assert.equal(inserted.changes, ONE_JOB);
+  }
+
+  firstQueuedAt(tx: Transaction, nodeId: string): number | null {
+    const place = tx.database
+      .prepare("SELECT job_id FROM scheduler_queue_place WHERE node_id = ?")
+      .get(nodeId) as { job_id: string } | undefined;
+    return place === undefined ? null : identityTime(place.job_id);
   }
 
   delete(tx: Transaction, nodeId: string): void {

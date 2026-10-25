@@ -64,6 +64,7 @@ function harness(t: TestContext) {
     instance_count: 2,
     tags: [],
     environment: null,
+    placement: null,
     tombstone: false,
   });
   h.dependencies.declarations.declarationOf = () => ({
@@ -794,8 +795,8 @@ test("a pull that claims an Available node opens the execution with steps, the w
     queue_wait_ms: WAITED_MS,
     worker_instance: null,
     placement: null,
-    revision_turn: null,
-    dependency_count: null,
+    revision_turn: false,
+    dependency_count: 0,
   });
 });
 

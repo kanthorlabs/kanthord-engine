@@ -321,6 +321,7 @@ const workQueue: WorkQueue = {
   priorityUpdate() {
     throw new Error(UNEXPECTED_COLLABORATION);
   },
+  firstQueuedAt: () => null,
 };
 
 type Collaborators = Pick<Dependencies, "bindings" | "workQueue"> &
@@ -770,6 +771,7 @@ function nodeFixture(
     priorityUpdate() {
       throw new Error(UNEXPECTED_COLLABORATION);
     },
+    firstQueuedAt: () => null,
   };
   const f = handlerFixture(
     t,

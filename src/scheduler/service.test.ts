@@ -77,6 +77,7 @@ const QUEUE_FIXTURE: readonly [string, number][] = [
 const QUEUE_ORDER = [JOB_A, JOB_B, JOB_C, JOB_D, JOB_E, JOB_F, JOB_G];
 const FIRST_QUEUED_AT = 1_700_000_000_000;
 const LATER_QUEUED_AT = 1_700_000_060_000;
+const LEAD_TIME_MS = 5000;
 const LOWEST_JOB_ID = "job_00000000000000000000000000";
 const HIGHEST_JOB_ID = "job_7ZZZZZZZZZZZZZZZZZZZZZZZZZ";
 const MALFORMED_CURSOR = "dGVzdA";
@@ -243,6 +244,29 @@ test("WorkQueue insert of a returning node reuses the identity of the first job 
     scheduler.insert(tx, nodeId, projectId, UPDATED_PRIORITY),
   );
   assert.equal(readId(), first);
+});
+
+test("firstQueuedAt answers the first insert, survives a delete and a second insert, and answers null for a node that never queued", (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: FIRST_QUEUED_AT });
+  const store = makeStore();
+  t.after(() => store.close());
+  const scheduler = schedulerHarness(t, { store }).service;
+  const nodeId = createIdentity(NODE_PREFIX);
+  const projectId = createIdentity(PROJECT_PREFIX);
+  const firstQueuedAt = (id: string) =>
+    store.transaction((tx) => scheduler.firstQueuedAt(tx, id));
+  assert.equal(firstQueuedAt(nodeId), null);
+  store.transaction((tx) =>
+    scheduler.insert(tx, nodeId, projectId, INITIAL_PRIORITY),
+  );
+  assert.equal(firstQueuedAt(nodeId), FIRST_QUEUED_AT);
+  t.mock.timers.setTime(LATER_QUEUED_AT);
+  store.transaction((tx) => scheduler.delete(tx, nodeId));
+  store.transaction((tx) =>
+    scheduler.insert(tx, nodeId, projectId, INITIAL_PRIORITY),
+  );
+  assert.equal(firstQueuedAt(nodeId), FIRST_QUEUED_AT);
+  assert.equal(firstQueuedAt(createIdentity(NODE_PREFIX)), null);
 });
 
 test("a returning job keeps the identity of its first job and carries the time of its own insert", (t) => {
@@ -579,6 +603,30 @@ test("a revocation by an assessment writes the root end and then one transition 
     executionTrace(row),
     executionTransition(transition, FIXTURE_NOW),
   ]);
+});
+
+test("a revocation by an assessment hands the lead time to the transition span", (t) => {
+  const h = schedulerHarness(t);
+  const row = executionFixture();
+  h.store.transaction((tx) => insertExecution(tx, row));
+  const revoked = h.store.transaction((tx) =>
+    h.service.revoke(tx, row.node_id, FIXTURE_NOW),
+  );
+  assert.ok(revoked);
+  const transition = transitionFixture({
+    from: "Evaluating",
+    to: "Completed",
+    first_available_at: FIXTURE_NOW - LEAD_TIME_MS,
+  });
+  h.service.executionRevoked(revoked, RevokeCause.Assessment, transition, null);
+  assert.deepEqual(h.telemetry[1]!.arguments, [
+    executionTrace(row),
+    executionTransition(transition, FIXTURE_NOW),
+  ]);
+  assert.equal(
+    (h.telemetry[1]!.arguments[1] as { lead_time_ms: number }).lead_time_ms,
+    LEAD_TIME_MS,
+  );
 });
 
 test("a revocation by a human writes the root end and no transition span", (t) => {

@@ -55,6 +55,7 @@ const PROBE_QUEUE: WorkQueue = {
   insert: () => undefined,
   delete: () => undefined,
   priorityUpdate: () => undefined,
+  firstQueuedAt: () => null,
 };
 const CONFLICT_CODES: ReadonlySet<string> = new Set([
   MissionErrorCode.ConditionFailed,

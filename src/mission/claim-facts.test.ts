@@ -6,6 +6,7 @@ import type { Transaction } from "../kernel/store.ts";
 import { testHumanIdentity } from "../kernel/test-identity.ts";
 import {
   ActorKind,
+  AssessmentResult,
   ClaimableState,
   NodeState,
   RepositoryAction,
@@ -14,10 +15,12 @@ import {
 } from "./contract.ts";
 import { isTerminal } from "./admission.ts";
 import { actionsOfRevision } from "./frozen-action.ts";
-import { openAttempt } from "./record-store.ts";
+import { insertAssessment, openAttempt } from "./record-store.ts";
 import {
+  insertDependency,
   insertMission,
   insertNode,
+  readNode,
   readClaimRevisions,
   setNodeState,
 } from "./store.ts";
@@ -27,6 +30,7 @@ const NOW = 100;
 const FIRST_REVISION = 1;
 const SECOND_REVISION = 2;
 const NO_ACTIONS = 0;
+const LIVE_DEPENDENCIES = 2;
 const ACTOR = { kind: ActorKind.Human, account: "ulrich", name: "Ulrich" };
 const MACOS = "platform.macos";
 const STORAGE_BINDING = createIdentity("binding");
@@ -376,5 +380,55 @@ test("claimFactsOf answers each live node and no terminal or retired node", (t) 
       .filter(({ state }) => !isTerminal(state))
       .map(({ id }) => id)
       .sort(),
+  );
+});
+
+test("opening facts count the live dependencies and skip a retired one", (t) => {
+  const h = factsHarness(t);
+  const nodeId = h.node({});
+  const [first, second, retired] = [h.node({}), h.node({}), h.node({})];
+  h.store.transaction((tx) => {
+    for (const target of [first, second, retired])
+      insertDependency(tx, h.missionId, nodeId, target!);
+    tx.database
+      .prepare("UPDATE mission_node SET retired_at = ? WHERE id = ?")
+      .run(NOW, retired!);
+  });
+  const facts = h.store.transaction((tx) => h.service.openingFacts(tx, nodeId));
+  assert.equal(facts!.dependency_count, LIVE_DEPENDENCIES);
+});
+
+test("opening facts answer a revision turn after a criterion-not-met assessment", (t) => {
+  const h = factsHarness(t);
+  const nodeId = h.node({});
+  const openingFacts = () =>
+    h.store.transaction((tx) => h.service.openingFacts(tx, nodeId));
+  assert.equal(openingFacts()!.revision_turn, false);
+  h.store.transaction((tx) =>
+    insertAssessment(tx, {
+      id: createIdentity("assessment"),
+      node_id: nodeId,
+      attempt: readNode(tx, nodeId)!.attempt,
+      result: AssessmentResult.CriterionNotMet,
+      rationale: "Rejected",
+      evidence_ids: "[]",
+      dependency_outcome_ids: "[]",
+      tested_input: null,
+      execution_id: createIdentity("execution"),
+      actor: null,
+      node_revision: FIRST_REVISION,
+      created_at: NOW,
+    }),
+  );
+  assert.equal(openingFacts()!.revision_turn, true);
+});
+
+test("opening facts answer null for an absent node", (t) => {
+  const h = factsHarness(t);
+  assert.equal(
+    h.store.transaction((tx) =>
+      h.service.openingFacts(tx, createIdentity("node")),
+    ),
+    null,
   );
 });

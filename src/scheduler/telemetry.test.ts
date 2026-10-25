@@ -7,10 +7,22 @@ import { transitionFixture } from "./test-support.ts";
 const QUEUED_AT = 10000;
 const CLAIMED_AT = 12500;
 const NO_WAIT = 0;
+const NO_FACTS = {
+  worker_instance: null,
+  placement: null,
+  revision_turn: null,
+  dependency_count: null,
+};
 
 test("the root start facts hold the kind, the worker name and the wait", () => {
   assert.deepEqual(
-    executionOpening(ExecutionKind.Steps, "coder@1", QUEUED_AT, CLAIMED_AT),
+    executionOpening(
+      ExecutionKind.Steps,
+      "coder@1",
+      QUEUED_AT,
+      CLAIMED_AT,
+      NO_FACTS,
+    ),
     {
       kind: "steps",
       worker_name: "coder@1",
@@ -22,7 +34,13 @@ test("the root start facts hold the kind, the worker name and the wait", () => {
     },
   );
   assert.deepEqual(
-    executionOpening(ExecutionKind.Evaluation, "judge@2", QUEUED_AT, QUEUED_AT),
+    executionOpening(
+      ExecutionKind.Evaluation,
+      "judge@2",
+      QUEUED_AT,
+      QUEUED_AT,
+      NO_FACTS,
+    ),
     {
       kind: "evaluation",
       worker_name: "judge@2",
@@ -35,17 +53,41 @@ test("the root start facts hold the kind, the worker name and the wait", () => {
   );
 });
 
+test("the root start copies the facts", () => {
+  const facts = {
+    worker_instance: "coder",
+    placement: "container",
+    revision_turn: true,
+    dependency_count: 2,
+  };
+  assert.deepEqual(
+    executionOpening(
+      ExecutionKind.Steps,
+      "coder@1",
+      QUEUED_AT,
+      CLAIMED_AT,
+      facts,
+    ),
+    { kind: "steps", worker_name: "coder@1", queue_wait_ms: 2500, ...facts },
+  );
+});
+
 test("the wait never drops below zero when the clock steps back", () => {
   assert.equal(
-    executionOpening(ExecutionKind.Steps, "coder@1", CLAIMED_AT, QUEUED_AT)
-      .queue_wait_ms,
+    executionOpening(
+      ExecutionKind.Steps,
+      "coder@1",
+      CLAIMED_AT,
+      QUEUED_AT,
+      NO_FACTS,
+    ).queue_wait_ms,
     NO_WAIT,
   );
 });
 
 test("a root start without a worker name is refused", () => {
   assert.throws(() =>
-    executionOpening(ExecutionKind.Steps, "", QUEUED_AT, CLAIMED_AT),
+    executionOpening(ExecutionKind.Steps, "", QUEUED_AT, CLAIMED_AT, NO_FACTS),
   );
 });
 

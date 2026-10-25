@@ -94,6 +94,7 @@ test("execution attribution reads retained registration and tombstoned binding a
       instance_count: 0,
       tags: [],
       environment: null,
+      placement: null,
       tombstone: true,
     };
   };

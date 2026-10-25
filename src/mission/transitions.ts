@@ -219,6 +219,7 @@ export function release(
   }
   return nodeTransition(
     tx,
+    dependencies.workQueue,
     node.id,
     node.state,
     state === NodeState.Paused
@@ -259,6 +260,7 @@ export function failure(
   );
   return nodeTransition(
     tx,
+    dependencies.workQueue,
     node.id,
     node.state,
     state === NodeState.Paused

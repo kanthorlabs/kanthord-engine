@@ -85,15 +85,19 @@ export function executionOpening(
   workerName: string,
   queuedAt: number,
   claimedAt: number,
+  facts: Pick<
+    ExecutionOpening,
+    "worker_instance" | "placement" | "revision_turn" | "dependency_count"
+  >,
 ): ExecutionOpening {
   assert.ok(workerName);
   return {
     kind,
     worker_name: workerName,
     queue_wait_ms: Math.max(NO_WAIT, claimedAt - queuedAt),
-    worker_instance: null,
-    placement: null,
-    revision_turn: null,
-    dependency_count: null,
+    worker_instance: facts.worker_instance,
+    placement: facts.placement,
+    revision_turn: facts.revision_turn,
+    dependency_count: facts.dependency_count,
   };
 }

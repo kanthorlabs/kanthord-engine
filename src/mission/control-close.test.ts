@@ -48,6 +48,7 @@ const VALIDATION = "gateway.request.validation_failed";
 const COMMIT = "a".repeat(40);
 const SECOND_ATTEMPT = 2;
 const NO_ACTS = 0;
+const FIRST_QUEUED_AT = 40;
 const ONE_ACT = 1;
 test("implement override validates its attempt repository pin after the current revision changes", async (t) => {
   const h = controlHarness(t, IDENTITY);
@@ -555,6 +556,55 @@ test("a success override of a node with two bindings lands a list in binding ord
       [firstId, secondId].sort(),
     ),
   );
+});
+
+test("an override to Completed writes the lead time from the first queue time", async (t) => {
+  const h = controlHarness(t, IDENTITY);
+  h.dependencies.workQueue.firstQueuedAt = () => FIRST_QUEUED_AT;
+  h.store.transaction((tx) => {
+    openAttempt(tx, h.node_id, FIRST_ATTEMPT, h.actor, NOW);
+    setNodeState(tx, h.node_id, NodeState.Executing);
+  });
+  await h.invoke("node.override", {
+    params: { node_id: h.node_id },
+    query: {},
+    body: {
+      ...h.body(NodeState.Executing, FIRST_ATTEMPT),
+      result: AssessmentResult.Success,
+    },
+  });
+  const [, contribution] = actCalls(h)[FIRST_ELEMENT]!;
+  assert.equal(
+    contribution.attributes[ActAttribute.LeadTimeMs],
+    contribution.start_time - FIRST_QUEUED_AT,
+  );
+});
+
+test("an override of a node that never queued and another act write no lead time", async (t) => {
+  for (const [operation, from, extra, queuedAt] of [
+    [
+      "node.override",
+      NodeState.Executing,
+      { result: AssessmentResult.Success },
+      null,
+    ],
+    ["node.discard", NodeState.Executing, {}, FIRST_QUEUED_AT],
+    ["node.block", NodeState.Paused, {}, FIRST_QUEUED_AT],
+  ] as const) {
+    const h = controlHarness(t, IDENTITY);
+    h.dependencies.workQueue.firstQueuedAt = () => queuedAt;
+    h.store.transaction((tx) => {
+      openAttempt(tx, h.node_id, FIRST_ATTEMPT, h.actor, NOW);
+      setNodeState(tx, h.node_id, from);
+    });
+    await h.invoke(operation, {
+      params: { node_id: h.node_id },
+      query: {},
+      body: { ...h.body(from, FIRST_ATTEMPT), ...extra },
+    });
+    const [, contribution] = actCalls(h)[FIRST_ELEMENT]!;
+    assert.equal(ActAttribute.LeadTimeMs in contribution.attributes, false);
+  }
 });
 
 for (const [operation, act, from, to, extra] of [

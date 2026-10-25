@@ -7,14 +7,18 @@ import {
   MissionBindingKind,
   tagsSchema,
   intentSchema,
+  AssessmentResult,
+  NodeState,
   type ClaimFacts,
   type ClaimFactsRow,
   type FrozenAction,
   type MissionBindings,
 } from "./contract.ts";
 import { actionsOfRevision } from "./frozen-action.ts";
+import { readAssessmentsOfAttempt } from "./record-store.ts";
 import {
   claimRevisionOf,
+  countDependencies,
   readClaimRevisions,
   readMissionByProject,
   readNode,
@@ -87,6 +91,22 @@ export function claimFacts(
   assert.ok(tx.database.isTransaction);
   if (!claimable(readNode(tx, nodeId))) return null;
   return factsOf(tx, bindings, claimRevisionOf(tx, nodeId));
+}
+
+export function openingFacts(
+  tx: Transaction,
+  nodeId: string,
+): { dependency_count: number; revision_turn: boolean } | null {
+  assert.ok(tx.database.isTransaction);
+  const node = readNode(tx, nodeId);
+  if (node === null) return null;
+  const last = readAssessmentsOfAttempt(tx, nodeId, node.attempt).at(-1);
+  return {
+    dependency_count: countDependencies(tx, nodeId),
+    revision_turn:
+      node.state === NodeState.Available &&
+      last?.result === AssessmentResult.CriterionNotMet,
+  };
 }
 
 export function claimFactsOf(

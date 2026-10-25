@@ -81,6 +81,7 @@ for (const [previous, current, expected] of [
       priorityUpdate() {
         throw new Error(UNEXPECTED_CALL);
       },
+      firstQueuedAt: () => null,
     };
     store.transaction((tx) =>
       reconcileJob(
@@ -110,6 +111,7 @@ test("reconcileJob maps null priority to zero", (t) => {
     priorityUpdate() {
       throw new Error(UNEXPECTED_CALL);
     },
+    firstQueuedAt: () => null,
   };
   store.transaction((tx) =>
     reconcileJob(tx, workQueue, QUEUED_NODE_ID, PROJECT_ID, null, false, true),

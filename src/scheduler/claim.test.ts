@@ -39,6 +39,8 @@ const RESERVE_MS = 600000;
 const PIN = 3;
 const ONE_CALL = 1;
 const NO_CALLS = 0;
+const PLACEMENT = "container";
+const DEPENDENCIES = 3;
 const CLAIM_METHOD = "claim";
 const FIRST_JOB = 0;
 const QUEUE_TICK_MS = 2;
@@ -76,6 +78,7 @@ export function claimHarness(
     instance_count: 1,
     tags: [] as string[],
     environment: null as string | null,
+    placement: null as string | null,
     tombstone: false,
     resource_budget: null as { wall_time_ms: number } | null,
   };
@@ -835,9 +838,51 @@ test("a claim of a Waiting node opens the execution with evaluation and the wait
     queue_wait_ms: WAITED_MS,
     worker_instance: null,
     placement: null,
-    revision_turn: null,
-    dependency_count: null,
+    revision_turn: false,
+    dependency_count: 0,
   });
+});
+
+test("the opening names the instance of a claimant with an instance", (t) => {
+  const h = claimHarness(t);
+  h.store.transaction((tx) =>
+    h.service.insert(tx, h.row.node_id, h.row.project_id, 0),
+  );
+  const instance = { ...h.identity, instanceId: createIdentity("instance") };
+  const result = h.store.transaction((tx) =>
+    claimOnce(tx, h.dependencies, instance, h.pull, FIXTURE_NOW),
+  );
+  assert.equal(result.opening!.worker_instance, instance.name);
+});
+
+test("the opening holds no instance for a claimant with no instance", (t) => {
+  const h = claimHarness(t);
+  h.store.transaction((tx) =>
+    h.service.insert(tx, h.row.node_id, h.row.project_id, 0),
+  );
+  assert.equal(h.claim().opening!.worker_instance, null);
+});
+
+test("the opening holds the placement of the binding and the facts of Mission", (t) => {
+  const h = claimHarness(t);
+  h.binding.placement = PLACEMENT;
+  const reads: string[] = [];
+  h.dependencies.facts.openingFacts = (_tx, nodeId) => {
+    reads.push(nodeId);
+    return { dependency_count: DEPENDENCIES, revision_turn: true };
+  };
+  const claim = h.dependencies.transitions.claim;
+  h.dependencies.transitions.claim = (...args) => {
+    assert.deepEqual(reads, [h.row.node_id]);
+    return claim(...args);
+  };
+  h.store.transaction((tx) =>
+    h.service.insert(tx, h.row.node_id, h.row.project_id, 0),
+  );
+  const opening = h.claim().opening!;
+  assert.equal(opening.placement, PLACEMENT);
+  assert.equal(opening.revision_turn, true);
+  assert.equal(opening.dependency_count, DEPENDENCIES);
 });
 
 test("the job of a revision turn measures the wait from its own queued_at", (t) => {

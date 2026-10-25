@@ -37,6 +37,7 @@ export const ActAttribute = {
   StateTo: "kanthord.node.state.to",
   MissionVersion: "kanthord.mission.version",
   EvidenceId: "kanthord.evidence.id",
+  LeadTimeMs: "kanthord.node.lead_time_ms",
 } as const;
 
 export interface ActFacts {
@@ -50,6 +51,7 @@ export interface ActFacts {
   reason: string | null;
   revoked: ExecutionTrace | null;
   evidence_id: string | null;
+  lead_time_ms: number | null;
 }
 
 export interface ActContribution {
@@ -91,6 +93,9 @@ function attributesOf(facts: ActFacts): Attributes {
     ...(facts.evidence_id === null
       ? {}
       : { [ActAttribute.EvidenceId]: facts.evidence_id }),
+    ...(facts.lead_time_ms === null
+      ? {}
+      : { [ActAttribute.LeadTimeMs]: facts.lead_time_ms }),
   };
 }
 

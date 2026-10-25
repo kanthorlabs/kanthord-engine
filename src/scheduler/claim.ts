@@ -73,6 +73,7 @@ function selectJob(
   identity: MachineIdentity,
   claimant: Claimant,
   workerName: string,
+  placement: string | null,
   executionId: string,
   now: number,
 ) {
@@ -99,6 +100,7 @@ function selectJob(
       )
     )
       continue;
+    const openingFacts = dependencies.facts.openingFacts(tx, nodeId);
     const claim = dependencies.transitions.claim(
       tx,
       nodeId,
@@ -120,6 +122,12 @@ function selectJob(
           workerName,
           queuedAt,
           now,
+          {
+            worker_instance: identity.instanceId ? identity.name : null,
+            placement,
+            revision_turn: openingFacts?.revision_turn ?? null,
+            dependency_count: openingFacts?.dependency_count ?? null,
+          },
         ),
         lost,
       };
@@ -149,6 +157,7 @@ function acquire(
       environment: binding.environment,
     },
     binding.worker_name,
+    binding.placement,
     executionId,
     now,
   );
