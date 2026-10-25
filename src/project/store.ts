@@ -666,6 +666,30 @@ export function readBindingRevision(
   return toBinding(row);
 }
 
+export function readOlderRevisions(
+  tx: Transaction,
+  binding: StoredBinding,
+): Array<{ id: string; revision: number }> {
+  const tombstone = readLatestTombstone(
+    tx,
+    binding.project_id,
+    binding.resource_identity,
+  );
+  return tx.database
+    .prepare(
+      "SELECT id, revision FROM project_binding WHERE project_id = ? AND resource_identity = ? AND revision < ? AND revision > ? ORDER BY revision ASC",
+    )
+    .all(
+      binding.project_id,
+      binding.resource_identity,
+      binding.revision,
+      tombstone?.revision ?? NO_REVISION,
+    ) as Array<{
+    id: string;
+    revision: number;
+  }>;
+}
+
 export function readLatestBinding(
   tx: Transaction,
   projectId: string,

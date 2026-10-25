@@ -39,7 +39,11 @@ import {
   type ImportResult,
   type RetirePreview,
 } from "../../mission/contract.ts";
-import { BindingKind, REPOSITORY_PLATFORM } from "../../project/contract.ts";
+import {
+  BindingKind,
+  REPOSITORY_PLATFORM,
+  type StalePin,
+} from "../../project/contract.ts";
 import type { Job } from "../../scheduler/contract.ts";
 import { environment, kanthord } from "./cli-support.ts";
 import {
@@ -1800,22 +1804,49 @@ async function scenarioImport(scenario: Scenario): Promise<void> {
   assert.ok(after.entries.some(({ id }) => id === assigned.node_id));
 }
 
-async function applyRepositorySet(scenario: Scenario, bindings: RepositorySet) {
+type BindingApplyAnswer = {
+  project_id: string;
+  binding_set_version: number;
+  stale_pins: StalePin[];
+};
+
+async function applyBindingFile(
+  scenario: Scenario,
+  version: number,
+  bindings: RepositorySet,
+  key: string,
+): Promise<BindingApplyAnswer> {
+  const { fixture, mission } = scenario;
+  const path = jsonFile(fixture, SCENARIO_FILE, {
+    version,
+    bindings: { ...COVERING_WORKER_BINDINGS, ...bindings },
+  });
+  return success<BindingApplyAnswer>(
+    await kanthord(
+      [PROJECT, BINDING, APPLY, mission.project_id, FILE, path, KEY, key],
+      fixture.env,
+    ),
+  );
+}
+
+async function applyRepositorySet(
+  scenario: Scenario,
+  bindings: RepositorySet,
+  stalePins: StalePin[] = [],
+  key = createIdempotencyKey(),
+) {
   const { fixture, mission } = scenario;
   const project = success<{ id: string; binding_set_version: number }>(
     await kanthord([PROJECT, GET, mission.project_id], fixture.env),
   );
-  const path = jsonFile(fixture, SCENARIO_FILE, {
-    version: project.binding_set_version,
-    bindings: { ...COVERING_WORKER_BINDINGS, ...bindings },
-  });
-  const applied = success<{ project_id: string; binding_set_version: number }>(
-    await kanthord(
-      [PROJECT, BINDING, APPLY, mission.project_id, FILE, path],
-      fixture.env,
-    ),
+  const applied = await applyBindingFile(
+    scenario,
+    project.binding_set_version,
+    bindings,
+    key,
   );
   assert.equal(applied.project_id, mission.project_id);
+  assert.deepEqual(applied.stale_pins, stalePins);
   assert.equal(
     applied.binding_set_version,
     project.binding_set_version + VERSION_INCREMENT,
@@ -1840,7 +1871,7 @@ async function applyRepositorySet(scenario: Scenario, bindings: RepositorySet) {
 
 async function scenarioRebind(scenario: Scenario): Promise<void> {
   const { fixture, mission, secondImplementId, importedId } = scenario;
-  const bindings = await applyRepositorySet(scenario, {
+  const repositorySet = {
     [REPOSITORY_NAME]: {
       kind: BindingKind.Repository,
       config: {
@@ -1848,7 +1879,20 @@ async function scenarioRebind(scenario: Scenario): Promise<void> {
         strategy: { base_branch: NEXT_BRANCH },
       },
     },
-  });
+  };
+  const stalePins = [secondImplementId, importedId].sort().map((nodeId) => ({
+    node_id: nodeId,
+    binding_name: REPOSITORY_NAME,
+    pinned_revision: FIRST_REVISION,
+    current_revision: SECOND_REVISION,
+  }));
+  const key = createIdempotencyKey();
+  const bindings = await applyRepositorySet(
+    scenario,
+    repositorySet,
+    stalePins,
+    key,
+  );
   const next = bindings.find(({ name }) => name === REPOSITORY_NAME);
   assert.ok(next);
   assert.equal(next.revision, SECOND_REVISION);
@@ -1880,6 +1924,17 @@ async function scenarioRebind(scenario: Scenario): Promise<void> {
   const imported = await readNode(fixture, importedId);
   assert.deepEqual(second.content.bindings, [next.id]);
   assert.deepEqual(imported.content.bindings, [next.id]);
+  const project = success<{ binding_set_version: number }>(
+    await kanthord([PROJECT, GET, mission.project_id], fixture.env),
+  );
+  const replay = await applyBindingFile(
+    scenario,
+    project.binding_set_version - VERSION_INCREMENT,
+    repositorySet,
+    key,
+  );
+  assert.equal(replay.binding_set_version, project.binding_set_version);
+  assert.deepEqual(replay.stale_pins, stalePins);
 }
 
 async function scenarioPriorityReplay(scenario: Scenario): Promise<void> {

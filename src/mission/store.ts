@@ -637,6 +637,33 @@ export function readLiveNodesPinning(
   return rows.map((row) => row.id);
 }
 
+export function readCurrentPins(
+  tx: Transaction,
+  projectId: string,
+  bindingIds: readonly string[],
+): Array<{ node_id: string; state: string; binding_id: string }> {
+  return tx.database
+    .prepare(
+      `SELECT n.id AS node_id, n.state AS state, binding.value AS binding_id
+       FROM mission_mission m
+       JOIN mission_node n ON n.mission_id = m.id AND n.retired_at IS NULL
+       JOIN mission_node_revision r ON r.node_id = n.id
+         AND r.revision = (
+           SELECT MAX(latest.revision) FROM mission_node_revision latest
+           WHERE latest.node_id = n.id
+         )
+       JOIN json_each(r.bindings) binding
+       WHERE m.project_id = ?
+         AND binding.value IN (SELECT value FROM json_each(?))
+       ORDER BY n.id ASC, binding.value ASC`,
+    )
+    .all(projectId, JSON.stringify(bindingIds)) as Array<{
+    node_id: string;
+    state: string;
+    binding_id: string;
+  }>;
+}
+
 export function openAttemptsOf(
   tx: Transaction,
   ownerIds: readonly string[],

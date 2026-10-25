@@ -27,6 +27,7 @@ import {
   type Service,
 } from "../kernel/service.ts";
 import type { Store, Transaction } from "../kernel/store.ts";
+import { isTerminal } from "./admission.ts";
 import type { MissionConfig } from "./config.ts";
 import {
   ActorKind,
@@ -34,6 +35,7 @@ import {
   MissionErrorCode,
   missionOperations,
   type HumanActor,
+  type CurrentNodePin,
   type MissionBindings,
   type MissionCollaborations,
   type MissionEnvironments,
@@ -136,6 +138,7 @@ import {
 import {
   insertMission,
   readLiveNodesPinning,
+  readCurrentPins,
   readMissionByProject,
   updateNodePriority,
 } from "./store.ts";
@@ -1025,6 +1028,16 @@ export class MissionService
 
   liveNodesPinning(tx: Transaction, bindingId: string): string[] {
     return readLiveNodesPinning(tx, bindingId);
+  }
+
+  currentNodePins(
+    tx: Transaction,
+    projectId: string,
+    bindingIds: readonly string[],
+  ): CurrentNodePin[] {
+    return readCurrentPins(tx, projectId, bindingIds)
+      .filter(({ state }) => !isTerminal(state))
+      .map(({ node_id, binding_id }) => ({ node_id, binding_id }));
   }
 
   claimFacts(tx: Transaction, nodeId: string) {

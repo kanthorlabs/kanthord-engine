@@ -231,6 +231,7 @@ function storeFixture(t: TestContext, beforeWrite: () => void = () => {}) {
     stateDirectory: temporary(t),
     createMission: unexpected,
     liveNodesPinning: unexpected,
+    currentNodePins: () => [],
     unmatchedClaims: () => [],
     validateEntry: unexpected,
     custodySuitability: () => {},

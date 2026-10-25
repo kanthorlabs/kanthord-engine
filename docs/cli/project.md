@@ -503,6 +503,20 @@ A stale `version` answers 409 `project.binding_set.version_conflict` with the
 current version in `error.details`. Binding identities come from `binding list`
 and `binding get`.
 
+The answer of `binding apply` holds `stale_pins`, under the
+[stale pin ruling](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/project-service.impl.md#stale-pins).
+The CLI prints the list as a field of the answer line.
+
+- `stale_pins` holds one item `{ node_id, binding_name, pinned_revision, current_revision }` for each pin of an older revision of a revised binding.
+- An older revision is in the current lineage of the binding. It follows the latest tombstone of its group. A pin from before a removal adds no item.
+- A pin counts when the node is not terminal and not retired, and the current node revision holds the pin. The pinned node revision of an open attempt does not count.
+- `binding_name` and `current_revision` name the new revision. `pinned_revision` is the revision that the node pins.
+- A removed binding and a binding with a new resource identity add no item.
+- The list is in the order of `node_id`, then `binding_name`. An apply with no revised binding answers `[]`.
+- The list is read only. No pin moves. Run `kanthord mission node rebind` to move a node to the current revision.
+- A replay with the same idempotency key answers the stored answer, with the list of the first apply, until a restart of the daemon.
+- `environment set` and `environment unset` answer the same list.
+
 Use this one write operation to add repositories, add workers, configure
 agent entries, change repository strategy, set resource budgets and instance
 counts, enable/disable a binding,

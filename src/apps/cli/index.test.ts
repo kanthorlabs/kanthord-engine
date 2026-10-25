@@ -483,6 +483,7 @@ const BINDING_SET_ANSWER = {
   binding_set_version: 2,
   bindings: {},
   changes: [],
+  stale_pins: [],
 };
 
 interface SeenRequest {
