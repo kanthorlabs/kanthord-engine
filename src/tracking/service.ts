@@ -22,6 +22,7 @@ import {
   type Service,
 } from "../kernel/service.ts";
 import { causeAttributes } from "../kernel/cause.ts";
+import { IdentityKind } from "../kernel/caller.ts";
 import { identityTime } from "../kernel/identity.ts";
 import type { Store } from "../kernel/store.ts";
 import { readCost } from "./analytics-cost.ts";
@@ -64,6 +65,11 @@ import {
   type TraceSort,
   type SpanContribution,
 } from "./contract.ts";
+import {
+  effectiveCauseOf,
+  writeCauseLabel,
+  type CauseLabelBody,
+} from "./cause-label.ts";
 import {
   TRACE_END_SPAN_ID,
   listTimeline,
@@ -626,6 +632,24 @@ export class TrackingService implements Service, ExecutionTelemetry {
     });
   }
 
+  causeLabel(traceId: string, body: CauseLabelBody, caller: CallerContext) {
+    assert.ok(traceId);
+    assert.ok(caller.identity?.kind === IdentityKind.Human);
+    const username = caller.identity.accountId;
+    return caller.commit((tx) => {
+      const span = writeCauseLabel(tx, traceId, body, username, this.now());
+      const cause = effectiveCauseOf(null, span.attributes);
+      assert.ok(cause);
+      return {
+        trace_id: traceId,
+        span_id: span.span_id,
+        cause,
+        reason: body.reason,
+        created_at: span.created_at,
+      };
+    });
+  }
+
   declare(registry: OperationRegistry): void {
     const operations = Object.values(trackingOperations);
     if (
@@ -642,7 +666,8 @@ export class TrackingService implements Service, ExecutionTelemetry {
       trackingOperations.spanList.access !== AccessPolicy.Human ||
       trackingOperations.textGet.access !== AccessPolicy.Human ||
       trackingOperations.sessionEntryList.access !== AccessPolicy.Human ||
-      trackingOperations.sessionEntryGet.access !== AccessPolicy.Human
+      trackingOperations.sessionEntryGet.access !== AccessPolicy.Human ||
+      trackingOperations.causeLabel.access !== AccessPolicy.Human
     )
       throw new Error(
         "Tracking operations require tracking ownership and their declared access.",
@@ -683,6 +708,9 @@ export class TrackingService implements Service, ExecutionTelemetry {
     );
     registry.register(trackingOperations.sessionEntryGet, (input, caller) =>
       this.sessionEntryGet(input.params, caller),
+    );
+    registry.register(trackingOperations.causeLabel, (input, caller) =>
+      this.causeLabel(input.params.trace_id, input.body, caller),
     );
   }
 

@@ -306,6 +306,8 @@ paths:
     $ref: ./openapi/tracking/analytics.cost.yaml#/pathItem
   /api/tracking/analytics/duration:
     $ref: ./openapi/tracking/analytics.duration.yaml#/pathItem
+  /api/tracking/trace/{trace_id}/cause/label:
+    $ref: ./openapi/tracking/cause.label.yaml#/pathItem
   /api/tracking/facet:
     $ref: ./openapi/tracking/facet.get.yaml#/pathItem
   /api/tracking/trace/{trace_id}/session/{session_id}/entry/{entry_id}:
