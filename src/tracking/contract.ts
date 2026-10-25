@@ -578,7 +578,8 @@ export const trackingOperations = {
     mutation: false,
     body: false,
     status: HttpStatus.OK,
-    description: "List one page of trace summaries, newest first by default.",
+    description:
+      "List one page of trace summaries with the root span operation and attributes, newest first by default.",
     input: z.strictObject({
       params: z.strictObject({}),
       query: z.strictObject({
