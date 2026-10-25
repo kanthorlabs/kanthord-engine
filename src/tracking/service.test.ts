@@ -161,6 +161,26 @@ for (const [cause, status, state] of [
   });
 }
 
+test("a revocation with an unknown cause is refused and writes no end", (t) => {
+  const { store, service } = harness(t);
+  service.executionOpened(TRACE, CREATED);
+  assert.throws(() =>
+    service.executionEnded({
+      trace: TRACE,
+      ended_at: ENDED,
+      end: ExecutionEnd.Revoked,
+      revoke_cause: "other" as RevokeCause,
+      stop: null,
+    }),
+  );
+  const root = service.spanList(
+    TRACE.trace_id,
+    { limit: PAGE_OF_ONE },
+    caller(store),
+  ).items[0];
+  assert.equal(root?.end_time, null);
+});
+
 test("the root span end carries the stop detail", (t) => {
   const { store, service } = harness(t);
   service.executionOpened(TRACE, CREATED);

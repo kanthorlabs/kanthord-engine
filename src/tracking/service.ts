@@ -35,6 +35,7 @@ import {
   ExecutionEnd,
   RefusalReason,
   RevokeCause,
+  revokeCauseSchema,
   SpanOrigin,
   SpanStatus,
   TRACKING_SERVICE_NAME,
@@ -558,7 +559,7 @@ function endsWell(end: RootSpanEnd): boolean {
 function revokeAttributes(end: RootSpanEnd): Attributes {
   if (end.end !== ExecutionEnd.Revoked) return {};
   assert.ok(end.revoke_cause);
-  return { "kanthord.revoke.cause": end.revoke_cause };
+  return { "kanthord.revoke.cause": revokeCauseSchema.parse(end.revoke_cause) };
 }
 
 function stopAttributes(stop: RootSpanEnd["stop"]): Attributes {

@@ -113,7 +113,8 @@ export const RevokeCause = {
   Assessment: "assessment",
   Human: "human",
 } as const;
-export type RevokeCause = (typeof RevokeCause)[keyof typeof RevokeCause];
+export const revokeCauseSchema = z.enum(RevokeCause);
+export type RevokeCause = z.infer<typeof revokeCauseSchema>;
 
 export interface EndedExecution {
   execution_id: string;
