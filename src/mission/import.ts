@@ -97,6 +97,7 @@ export interface ResolvedImportEntry {
   owner_id: string | null;
   depends_on: Set<string>;
   binding_ids: string[];
+  terminal: boolean;
 }
 
 export interface ResolvedImport {
@@ -427,6 +428,26 @@ function resolveBindings(
   );
 }
 
+function terminalOwner(
+  identity: Pick<ResolvedImportEntry, "current" | "task">,
+  currentNodes: Map<string, NodeRow>,
+): boolean {
+  const ownerId = identity.task?.owner_id ?? identity.current?.id;
+  const owner = ownerId === undefined ? undefined : currentNodes.get(ownerId);
+  return owner !== undefined && isTerminal(owner.state);
+}
+
+function pinnedBindings(
+  tx: Transaction,
+  identity: Pick<ResolvedImportEntry, "current" | "task">,
+): string[] {
+  if (identity.task !== null) return identity.task.content.bindings;
+  assert.ok(identity.current, "A terminal entry has an identity.");
+  const row = readCurrentRevision(tx, identity.current.id);
+  assert.ok(row, "A current node has a revision.");
+  return revisionFromRow(tx, row).content.bindings;
+}
+
 function checkVerificationCoverage(result: ResolvedImport): void {
   const covered = new Map<string, Set<string>>();
   for (const item of result.resolved_entries) {
@@ -438,6 +459,7 @@ function checkVerificationCoverage(result: ResolvedImport): void {
   for (const item of result.resolved_entries) {
     if (
       isTaskEntry(item.entry) ||
+      item.terminal ||
       item.entry.intent !== Intent.Implement ||
       !covered.has(item.key)
     )
@@ -471,16 +493,20 @@ function resolveGraph(result: ResolvedImport): void {
       );
       continue;
     }
-    for (const name of entry.depends_on) {
-      const key = resolveReference(
-        entry,
-        name,
-        REFERENCE.DependsOn,
-        byFilename,
-        result.violations,
-      );
-      if (key !== null) item.depends_on.add(key);
-    }
+    const targets = item.terminal
+      ? result.current_dependencies
+          .filter((edge) => edge.dependent === item.key)
+          .map((edge) => edge.depends_on)
+      : entry.depends_on.map((name) =>
+          resolveReference(
+            entry,
+            name,
+            REFERENCE.DependsOn,
+            byFilename,
+            result.violations,
+          ),
+        );
+    for (const key of targets) if (key !== null) item.depends_on.add(key);
     result.dependencies.set(item.key, item.depends_on);
   }
   checkVerificationCoverage(result);
@@ -511,6 +537,7 @@ function entryChanged(
   assert.ok(current, "Only an existing identity can be compared.");
   assert.equal(current.retired_at, null, "Compared identity is current.");
   assert.ok(!isTaskEntry(entry), "Only a node file is compared to a node.");
+  if (item.terminal) return current.filename !== entry.filename;
   const content: Content = {
     name: entry.name,
     requirement: entry.requirement,
@@ -531,6 +558,8 @@ function entryChanged(
 function taskChanged(item: ResolvedImportEntry): boolean {
   const { entry, task } = item;
   assert.ok(task, "Only an existing task can be compared.");
+  if (item.terminal)
+    return task.filename !== entry.filename || task.owner_id !== item.owner_id;
   const content: TaskBody = {
     name: entry.name,
     requirement: entry.requirement,
@@ -676,21 +705,25 @@ export function resolveImportSet(
       result.violations,
       currentTasks,
     );
+    const terminal = terminalOwner(identity, currentNodes);
     result.resolved_entries.push({
       entry,
       key: entry.id ?? `${TEMPORARY_KEY_PREFIX}${entry.filename}`,
       ...identity,
       owner_id: null,
       depends_on: new Set(),
-      binding_ids: resolveBindings(
-        tx,
-        mission,
-        entry,
-        identity.current,
-        bindings,
-        environments,
-        result.violations,
-      ),
+      binding_ids: terminal
+        ? pinnedBindings(tx, identity)
+        : resolveBindings(
+            tx,
+            mission,
+            entry,
+            identity.current,
+            bindings,
+            environments,
+            result.violations,
+          ),
+      terminal,
     });
   }
   resolveGraph(result);

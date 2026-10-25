@@ -3768,7 +3768,7 @@ for (const [label, patch, code] of [
 ] satisfies Array<[string, Partial<ImportEntry>, string]>) {
   test(`import.preview stage two rejects ${label} without running stage three`, (t) => {
     const f = importPreviewFixture(t);
-    f.setState(f.implementId, NodeState.Completed);
+    f.setState(f.implementId, NodeState.Executing);
     const result = f.preview(f.changed(patch));
     assert.deepEqual(
       result.violations.map((value) => value.code),
@@ -3837,11 +3837,18 @@ for (const [state, attempt] of [
   });
 }
 
-test("import.preview terminal noOps are allowed but changes are terminal_change", (t) => {
+test("import.preview terminal content edits are noOps but a task change is terminal_change", (t) => {
   const f = importPreviewFixture(t);
   f.setState(f.implementId, NodeState.Completed);
   assert.deepEqual(f.preview().violations, []);
-  const result = f.preview(f.changed({ name: "Changed" }));
+  const edited = f.preview(f.changed({ name: "Changed" }));
+  assert.deepEqual(edited.violations, []);
+  assert.deepEqual(edited.updates, []);
+  assert.ok(edited.no_ops.includes(f.implementId));
+  const result = f.preview({
+    ...f.importSnapshot,
+    entries: f.entries.filter((entry) => !("node" in entry)),
+  });
   assert.deepEqual(
     result.violations.map(({ code, node_id: nodeId, details }) => ({
       code,
@@ -4499,10 +4506,8 @@ for (const [state, code] of [
     )!;
     f.setState(implement.id!, state);
     const snapshot = f.importSnapshot(
-      entries.map((item) =>
-        item.id === implement.id
-          ? { ...item, name: IMPORT_UPDATED_NAME }
-          : item,
+      entries.filter(
+        (item) => !("node" in item && item.node === IMPLEMENT_FILENAME),
       ),
     );
     const before = f.state();
