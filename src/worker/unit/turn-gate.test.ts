@@ -11,6 +11,7 @@ import {
 import { join } from "node:path";
 import { simpleGit } from "simple-git";
 import { temporary } from "../../kernel/test-support.ts";
+import { CauseCategory, unattributed } from "../../kernel/cause.ts";
 import { background } from "../../kernel/context.ts";
 import {
   RecordKind,
@@ -170,7 +171,12 @@ function violationEnd(end: ExecutionEnd, bodies: unknown[], code: string) {
   assert.ok("stop" in end);
   const detail = end.stop?.detail;
   assert.ok(detail);
-  const stop = { reason: EndReason.OperationFailed, code, detail };
+  const stop = {
+    reason: EndReason.OperationFailed,
+    code,
+    detail,
+    cause: unattributed([CauseCategory.Model, CauseCategory.Prompt]),
+  };
   assert.deepEqual(end, { kind: "released", furtherWork: true, stop });
   assert.deepEqual(bodies, [{ further_work: true, stop }]);
   return detail;
@@ -327,6 +333,7 @@ test("a wall time end in a conflict turn aborts the merge and releases a budget 
   const stop = {
     reason: ExecutionStopReason.BudgetEnd,
     code: BudgetLimit.WallTime,
+    cause: unattributed([CauseCategory.Plan, CauseCategory.Model]),
   };
   assert.deepEqual(await executionBoundary(h.run, () => runStepsImplement(h)), {
     kind: "released",
