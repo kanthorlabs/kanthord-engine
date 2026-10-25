@@ -12,7 +12,6 @@ import {
   Intent,
   RevokeCause,
   type evidenceDeleteSchema,
-  type RevokedClaim,
 } from "./contract.ts";
 import { isTerminal } from "./admission.ts";
 import { objectContentSchema } from "./evidence-content-read.ts";
@@ -27,7 +26,13 @@ import {
   readOpenAttempt,
   type AssetRow,
 } from "./record-store.ts";
-import { endLiveClaim, reportRevoked, transition } from "./control.ts";
+import {
+  endLiveClaim,
+  executionEnds,
+  reportEnds,
+  settleClaim,
+  transition,
+} from "./control.ts";
 import {
   readDependencies,
   readMissionNodes,
@@ -173,7 +178,7 @@ export async function removeEvidence(
   );
   for (const asset of prepared.assets)
     await deleteObject(dependencies, caller, asset);
-  const revoked: RevokedClaim[] = [];
+  const ends = executionEnds();
   const result = caller.commit((tx) => {
     const now = Date.now();
     const { evidence, node, mission } = prepareEvidenceDelete(
@@ -190,14 +195,14 @@ export async function removeEvidence(
       !isTerminal(node.state);
     deleteEvidence(tx, evidenceId);
     if (hold) {
-      dependencies.schedulerClaims.settle(tx, node.id, now);
+      settleClaim(tx, dependencies.schedulerClaims, node.id, now, ends);
       const settled = requireNode(tx, node.id);
-      endLiveClaim(tx, dependencies, settled, now, RevokeCause.Human, revoked);
+      endLiveClaim(tx, dependencies, settled, now, RevokeCause.Human, ends);
       transition(tx, dependencies, mission, settled, NodeState.Paused, now);
     }
     return null;
   });
-  reportRevoked(dependencies, revoked);
+  reportEnds(dependencies, ends);
   dependencies.logger.info(
     { evidence_id: evidenceId, ...deletion(caller, body) },
     "evidence deleted",

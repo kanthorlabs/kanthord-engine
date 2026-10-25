@@ -25,9 +25,14 @@ import {
 } from "./record-store.ts";
 import { outcomeRecord } from "./record-read.ts";
 import { readMission, setNodeState } from "./store.ts";
-import { evidenceHarness, revokedExecution } from "./test-support.ts";
+import {
+  evidenceHarness,
+  revokedExecution,
+  settlesExpired,
+} from "./test-support.ts";
 
 const EXECUTION_REVOKED = "schedulerClaims.executionRevoked";
+const EXECUTIONS_LOST = "schedulerClaims.executionsLost";
 
 const IDENTITY = testHumanIdentity("ulrich", "Ulrich", "token");
 const NO_CALLS = 0;
@@ -340,6 +345,54 @@ test("forced request deletion pauses and revokes only the open attempt", async (
     assert.equal(ends.length, closed ? NO_CALLS : FIRST_ATTEMPT);
     if (!closed) assert.equal(ends[0]?.arguments[1], RevokeCause.Human);
   }
+});
+
+test("a forced request deletion that settles an expired execution inline writes one lost end after its commit", async (t) => {
+  const h = fixture(t, true);
+  const executionId = createIdentity("execution");
+  settlesExpired(h.dependencies, executionId);
+  await h.invoke("evidence.delete", {
+    params: { evidence_id: h.evidence_id },
+    query: {},
+    body: {
+      expected_mission_version: FIRST_ATTEMPT,
+      force: true,
+      reason: "Remove request",
+    },
+  });
+  const ends = h.calls.filter((call) => call.method === EXECUTIONS_LOST);
+  assert.equal(ends.length, FIRST_ATTEMPT);
+  const [lost] = ends[0]!.arguments as [{ execution_id: string }[]];
+  assert.deepEqual(
+    lost.map((execution) => execution.execution_id),
+    [executionId],
+  );
+});
+
+test("a forced request deletion rolled back after the settlement writes no end", async (t) => {
+  const h = fixture(t, true);
+  settlesExpired(h.dependencies, createIdentity("execution"));
+  h.caller.commit = (write) =>
+    h.store.transaction((tx) => {
+      write(tx);
+      throw new Error("rollback");
+    });
+  await assert.rejects(
+    h.invoke("evidence.delete", {
+      params: { evidence_id: h.evidence_id },
+      query: {},
+      body: {
+        expected_mission_version: FIRST_ATTEMPT,
+        force: true,
+        reason: "Remove request",
+      },
+    }),
+    { message: "rollback" },
+  );
+  assert.equal(
+    h.calls.some((call) => call.method === EXECUTIONS_LOST),
+    false,
+  );
 });
 
 test("both deletes log the human, the force and the reason after the commit", async (t) => {

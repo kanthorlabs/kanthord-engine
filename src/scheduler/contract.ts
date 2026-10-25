@@ -236,7 +236,7 @@ export interface ExecutionRow {
   ended_at: number | null;
   stop: ReleaseStop | null;
 }
-export interface RevokedExecution {
+export interface EndedExecution {
   execution_id: string;
   trace: {
     execution_id: string;
@@ -248,9 +248,10 @@ export interface RevokedExecution {
   };
   ended_at: number;
 }
+export type RevokedExecution = EndedExecution;
 export interface SchedulerClaims {
   revoke(tx: Transaction, nodeId: string, now: number): RevokedExecution | null;
-  settle(tx: Transaction, nodeId: string, now: number): void;
+  settle(tx: Transaction, nodeId: string, now: number): EndedExecution[];
   liveExecutionOf(
     tx: Transaction,
     nodeId: string,

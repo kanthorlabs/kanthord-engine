@@ -9,6 +9,7 @@ import {
   PROPOSAL_IDENTITY_PREFIX,
   type HumanActor,
   type ProposalApprove,
+  type ExecutionEnds,
 } from "./contract.ts";
 import { stateConflict } from "./control.ts";
 import { unblockNode } from "./control-unblock.ts";
@@ -41,6 +42,7 @@ export function approveProposal(
   body: ProposalApprove,
   actor: HumanActor,
   now: number,
+  ends: ExecutionEnds,
 ) {
   const row = requireProposal(tx, proposalId);
   if (row.approved_at !== null)
@@ -118,6 +120,7 @@ export function approveProposal(
     },
     actor,
     now,
+    ends,
   );
   markProposalApproved(tx, proposal.id, createdId, now);
   return {

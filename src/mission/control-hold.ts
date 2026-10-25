@@ -10,7 +10,7 @@ import {
   type HumanAct,
   RevokeCause,
   type HumanActor,
-  type RevokedClaim,
+  type ExecutionEnds,
 } from "./contract.ts";
 import { readinessOf } from "./conditions.ts";
 import { actionStatesOf } from "./frozen-action.ts";
@@ -57,6 +57,7 @@ export function readyNode(
   body: HumanAct,
   actor: HumanActor,
   now: number,
+  ends: ExecutionEnds,
 ) {
   const { node, mission } = admitControl(
     tx,
@@ -65,6 +66,7 @@ export function readyNode(
     body,
     [NodeState.Available],
     now,
+    ends,
   );
   requireReady(tx, node);
   if (node.attempt === NO_ATTEMPT) openCurrentAttempt(tx, nodeId, actor, now);
@@ -79,6 +81,7 @@ export function resumeNode(
   body: Resume,
   actor: HumanActor,
   now: number,
+  ends: ExecutionEnds,
 ) {
   const { node, mission } = admitControl(
     tx,
@@ -87,6 +90,7 @@ export function resumeNode(
     body,
     [NodeState.Paused],
     now,
+    ends,
   );
   assert.ok(node.attempt !== null);
   const actions =
@@ -131,7 +135,7 @@ export function pauseNode(
   body: HumanAct,
   actor: HumanActor,
   now: number,
-  revoked: RevokedClaim[],
+  ends: ExecutionEnds,
 ) {
   const { node, mission } = admitControl(
     tx,
@@ -140,8 +144,9 @@ export function pauseNode(
     body,
     PAUSE_STATES,
     now,
+    ends,
   );
-  endLiveClaim(tx, dependencies, node, now, RevokeCause.Human, revoked);
+  endLiveClaim(tx, dependencies, node, now, RevokeCause.Human, ends);
   transition(tx, dependencies, mission, node, NodeState.Paused, now);
   return controlResult(tx, dependencies, nodeId, null, actor, now);
 }

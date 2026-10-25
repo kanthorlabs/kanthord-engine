@@ -4,7 +4,12 @@ import { OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import type { CallerContext } from "../kernel/operation.ts";
 import type { Transaction } from "../kernel/store.ts";
-import { WORK_PULL_WAIT_MS, WorkPullKind, type WorkPull } from "./contract.ts";
+import {
+  WORK_PULL_WAIT_MS,
+  WorkPullKind,
+  type EndedExecution,
+  type WorkPull,
+} from "./contract.ts";
 import type { WaitingPulls } from "./wakeup.ts";
 import {
   claimOnce,
@@ -14,9 +19,10 @@ import {
 } from "./claim.ts";
 import { executionRecord } from "./execution-store.ts";
 import { settleRuntime } from "./settlement.ts";
-import { executionTrace } from "./telemetry.ts";
+import { executionTrace, reportLost } from "./telemetry.ts";
 
 const WINDOW_ENDED = 0;
+const NO_LOSSES = 0;
 export interface PullDependencies extends ClaimDependencies {
   waiting: WaitingPulls;
   accepting(): boolean;
@@ -40,10 +46,12 @@ function decide(
   assert.equal(identity.resourceIdentity, pull.resource_identity);
   if (dependencies.accepting())
     return claimOnce(tx, dependencies, identity, pull, now);
+  const ended = settleRuntime(tx, dependencies, pull.runtime_identity, now);
   return {
     outcome: ClaimOutcome.None,
     row: null,
-    settled: settleRuntime(tx, dependencies, pull.runtime_identity, now),
+    settled: ended !== null,
+    lost: ended === null ? [] : [ended],
   };
 }
 
@@ -96,12 +104,12 @@ function commit(
   now: number,
 ) {
   cancelled(caller);
-  let settled = false;
+  let lost: EndedExecution[] = [];
   let claimed = false;
   let siblings: string[] = [];
   const answer = caller.commit((tx) => {
     const result = decide(tx, dependencies, identity, pull, now);
-    settled = result.settled;
+    lost = result.lost;
     claimed = result.outcome === ClaimOutcome.Claimed;
     if (claimed)
       siblings = dependencies.registrations.registrationsOfInstance(
@@ -114,7 +122,8 @@ function commit(
       execution: executionRecord(tx, dependencies, result.row, now),
     } as const;
   });
-  if (settled) dependencies.waiting.wake(identity.projectId);
+  reportLost(dependencies.telemetry, lost);
+  if (lost.length > NO_LOSSES) dependencies.waiting.wake(identity.projectId);
   if (claimed) dependencies.instances.claimed(pull.runtime_identity, siblings);
   if (answer.kind === WorkPullKind.Claimed) {
     if (claimed)

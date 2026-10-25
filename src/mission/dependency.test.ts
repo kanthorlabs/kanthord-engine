@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { test } from "node:test";
+import { test, type TestContext } from "node:test";
 import { createIdentity } from "../kernel/identity.ts";
 import { testHumanIdentity } from "../kernel/test-identity.ts";
 import { hasDependencyCycle } from "./graph.ts";
@@ -10,9 +10,18 @@ import {
   insertNode,
   readDependencies,
 } from "./store.ts";
-import { missionHarness } from "./test-support.ts";
+import {
+  controlHarness,
+  missionHarness,
+  settlesExpired,
+} from "./test-support.ts";
 
 const NOW = 100;
+const FIRST_VERSION = 1;
+const ONE_END = 1;
+const ROLLBACK = "rollback";
+const EXECUTIONS_LOST = "schedulerClaims.executionsLost";
+const IDENTITY = testHumanIdentity("ulrich", "Ulrich", "token");
 const NO_REACHING_PAIRS = 0;
 const NODE_COUNT = 40;
 const RETIRED_EVERY = 6;
@@ -90,5 +99,53 @@ test("dependencyReaches answers the cycle check of the whole graph", (t) => {
   assert.ok(
     reaching > NO_REACHING_PAIRS,
     "The graph holds a path of one edge or more.",
+  );
+});
+
+function dependencyAddFixture(t: TestContext) {
+  const h = controlHarness(t, IDENTITY);
+  const executionId = createIdentity("execution");
+  const target = createIdentity("node");
+  h.store.transaction((tx) =>
+    insertNode(tx, {
+      id: target,
+      mission_id: h.mission_id,
+      filename: "dependency.md",
+      created_at: NOW,
+    }),
+  );
+  settlesExpired(h.dependencies, executionId);
+  const add = () =>
+    h.invoke("dependency.add", {
+      params: { node_id: h.node_id, depends_on_id: target },
+      query: {},
+      body: { expected_mission_version: FIRST_VERSION, reason: "Order" },
+    });
+  return { ...h, executionId, add };
+}
+
+test("a dependency add whose live claim check settles an expired execution writes one lost end after its commit", async (t) => {
+  const h = dependencyAddFixture(t);
+  await h.add();
+  const ends = h.calls.filter((call) => call.method === EXECUTIONS_LOST);
+  assert.equal(ends.length, ONE_END);
+  const [lost] = ends[0]!.arguments as [{ execution_id: string }[]];
+  assert.deepEqual(
+    lost.map((execution) => execution.execution_id),
+    [h.executionId],
+  );
+});
+
+test("a dependency add rolled back after the settlement writes no end", async (t) => {
+  const h = dependencyAddFixture(t);
+  h.caller.commit = (write) =>
+    h.store.transaction((tx) => {
+      write(tx);
+      throw new Error(ROLLBACK);
+    });
+  await assert.rejects(h.add(), { message: ROLLBACK });
+  assert.equal(
+    h.calls.some((call) => call.method === EXECUTIONS_LOST),
+    false,
   );
 });

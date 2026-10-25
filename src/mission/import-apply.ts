@@ -20,6 +20,7 @@ import {
   type Violation,
   type WorkQueue,
   type SchedulerClaims,
+  type ExecutionEnds,
 } from "./contract.ts";
 import { addedPairs, UNMATCHED_MESSAGE } from "./coverage.ts";
 import type { Dependencies } from "./service.ts";
@@ -370,6 +371,7 @@ export function applyImport(
   workQueue: WorkQueue,
   textMaxBytes: number,
   schedulerClaims: SchedulerClaims,
+  ends: ExecutionEnds,
 ): ImportResult {
   const mission = requireMission(tx, missionId, body.mission_version);
   const { preview, resolved } = prepareImport(
@@ -393,7 +395,13 @@ export function applyImport(
         .map((edge) => edge.depends_on),
     );
     if ([...item.depends_on].some((target) => !previous.has(target)))
-      requireNoLiveClaim(tx, item.current.id, schedulerClaims, acceptedAt);
+      requireNoLiveClaim(
+        tx,
+        item.current.id,
+        schedulerClaims,
+        acceptedAt,
+        ends,
+      );
   }
   const result = initialResult(mission, entries, actor, acceptedAt);
   if (!changesMission(resolved)) return result;

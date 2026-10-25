@@ -86,6 +86,15 @@ export function revokedExecution(
   };
 }
 
+export function settlesExpired(
+  dependencies: Dependencies,
+  executionId: string,
+): void {
+  dependencies.schedulerClaims.settle = (_tx, nodeId, now) => [
+    revokedExecution(executionId, nodeId, now),
+  ];
+}
+
 export function unexpectedCollaboration(): never {
   throw new Error(UNEXPECTED_COLLABORATION);
 }
@@ -330,7 +339,12 @@ export function missionHarness(
       },
       executionRevoked: (...args) =>
         record("schedulerClaims.executionRevoked", args),
-      settle: (...args) => record("schedulerClaims.settle", args),
+      executionsLost: (...args) =>
+        record("schedulerClaims.executionsLost", args),
+      settle: (...args) => {
+        record("schedulerClaims.settle", args);
+        return [];
+      },
       liveExecutionOf: (...args) => {
         record("schedulerClaims.liveExecutionOf", args);
         return null;

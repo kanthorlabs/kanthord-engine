@@ -21,6 +21,7 @@ import {
   FIXTURE_DEADLINE,
 } from "./test-support.ts";
 import { DEFAULT_STOP_BACKOFF_SECONDS } from "./config.ts";
+import { executionTrace } from "./telemetry.ts";
 import {
   Onboarding,
   type OnboardingDependencies,
@@ -308,6 +309,35 @@ test("a worker name with no declaration answers no work and asserts nothing", (t
     h.calls.filter((call) => call.method === CLAIM_METHOD),
     [],
   );
+});
+
+test("a claim walk answers each execution that it settles with its trace", (t) => {
+  const h = claimHarness(t);
+  h.store.transaction((tx) => insertExecution(tx, h.row));
+  const runtime = h.claim(FIXTURE_DEADLINE);
+  assert.deepEqual(runtime.lost, [
+    {
+      execution_id: h.row.execution_id,
+      trace: executionTrace(h.row),
+      ended_at: FIXTURE_DEADLINE,
+    },
+  ]);
+  const other = executionFixture({
+    project_id: h.row.project_id,
+    node_id: createIdentity("node"),
+    runtime_identity: createIdentity("worker_registration"),
+  });
+  h.store.transaction((tx) => {
+    insertExecution(tx, other);
+    h.service.insert(tx, other.node_id, other.project_id, 0);
+  });
+  const node = h.claim(FIXTURE_DEADLINE);
+  assert.deepEqual(
+    node.lost.map((ended) => ended.execution_id),
+    [other.execution_id],
+  );
+  assert.equal(node.settled, true);
+  assert.deepEqual(h.claim(FIXTURE_DEADLINE).lost, []);
 });
 
 test("runtime and node expiry settle before admission; rollback undoes all claim writes", (t) => {

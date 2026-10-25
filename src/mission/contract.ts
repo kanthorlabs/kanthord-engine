@@ -115,7 +115,7 @@ export const RevokeCause = {
 } as const;
 export type RevokeCause = (typeof RevokeCause)[keyof typeof RevokeCause];
 
-export interface RevokedExecution {
+export interface EndedExecution {
   execution_id: string;
   trace: {
     execution_id: string;
@@ -128,15 +128,23 @@ export interface RevokedExecution {
   ended_at: number;
 }
 
+export type RevokedExecution = EndedExecution;
+
 export interface RevokedClaim {
   execution: RevokedExecution;
   cause: RevokeCause;
 }
 
+export interface ExecutionEnds {
+  lost: EndedExecution[];
+  revoked: RevokedClaim[];
+}
+
 export interface SchedulerClaims {
   revoke(tx: Transaction, nodeId: string, now: number): RevokedExecution | null;
   executionRevoked(execution: RevokedExecution, cause: RevokeCause): void;
-  settle(tx: Transaction, nodeId: string, now: number): void;
+  executionsLost(lost: readonly EndedExecution[]): void;
+  settle(tx: Transaction, nodeId: string, now: number): EndedExecution[];
   liveExecutionOf(
     tx: Transaction,
     nodeId: string,

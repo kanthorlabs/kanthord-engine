@@ -123,19 +123,23 @@ test("settlement records exactly one loss at the transaction reading", (t) => {
     insertExecution(tx, row);
     assert.equal(
       settleNode(tx, h.dependencies, row.node_id, FIXTURE_NOW),
-      false,
+      null,
     );
     assert.equal(
       h.service.liveExecutionOf(tx, row.node_id, FIXTURE_NOW)?.execution_id,
       row.execution_id,
     );
-    assert.equal(
+    assert.deepEqual(
       settleRuntime(tx, h.dependencies, row.runtime_identity, FIXTURE_DEADLINE),
-      true,
+      {
+        execution_id: row.execution_id,
+        trace: executionTrace(row),
+        ended_at: FIXTURE_DEADLINE,
+      },
     );
     assert.equal(
       settleNode(tx, h.dependencies, row.node_id, FIXTURE_DEADLINE),
-      false,
+      null,
     );
     assert.equal(
       readExecution(tx, row.execution_id)?.ended_at,

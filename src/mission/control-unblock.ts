@@ -9,6 +9,7 @@ import {
   RevisionWrite,
   StartPoint,
   type Content,
+  type ExecutionEnds,
   type HumanActor,
   type Revision,
   type Unblock,
@@ -23,6 +24,7 @@ import { requireIntentUnlocked } from "./node-update.ts";
 import {
   requireRunnable,
   requireControlState,
+  settleClaim,
   stateConflict,
   transition,
   controlResult,
@@ -125,6 +127,7 @@ export function unblockNode(
   body: Unblock,
   actor: HumanActor,
   now: number,
+  ends: ExecutionEnds,
 ) {
   const initial = requireNode(tx, nodeId);
   requireActive(initial);
@@ -134,7 +137,7 @@ export function unblockNode(
     initial.mission_id,
     body.expected_mission_version,
   );
-  dependencies.schedulerClaims.settle(tx, nodeId, now);
+  settleClaim(tx, dependencies.schedulerClaims, nodeId, now, ends);
   const node = requireNode(tx, nodeId);
   requireNonterminal(node);
   if (node.attempt !== body.blocked_attempt) stateConflict(node);

@@ -7,6 +7,7 @@ import type { Transaction } from "../kernel/store.ts";
 import {
   AdvancingProviderFailure,
   ExecutionStopReason,
+  type EndedExecution,
   type ExecutionRow,
   type MissionTransitions,
   type Registrations,
@@ -171,7 +172,7 @@ export function declareLoss(
   dependencies: SettlementDependencies,
   row: ExecutionRow,
   now: number,
-): void {
+): EndedExecution {
   assert.equal(row.ended_at, null);
   assert.ok(now >= row.expired_at);
   endExecution(tx, row.execution_id, now);
@@ -182,28 +183,31 @@ export function declareLoss(
     consecutiveFailures(tx, row),
     now,
   );
+  return {
+    execution_id: row.execution_id,
+    trace: executionTrace(row),
+    ended_at: now,
+  };
 }
 export function settleNode(
   tx: Transaction,
   dependencies: SettlementDependencies,
   nodeId: string,
   now: number,
-): boolean {
+): EndedExecution | null {
   const row = readUnendedOfNode(tx, nodeId);
-  if (!row || row.expired_at > now) return false;
-  declareLoss(tx, dependencies, row, now);
-  return true;
+  if (!row || row.expired_at > now) return null;
+  return declareLoss(tx, dependencies, row, now);
 }
 export function settleRuntime(
   tx: Transaction,
   dependencies: SettlementDependencies,
   runtimeIdentity: string,
   now: number,
-): boolean {
+): EndedExecution | null {
   const row = readUnendedOfRuntime(tx, runtimeIdentity);
-  if (!row || row.expired_at > now) return false;
-  declareLoss(tx, dependencies, row, now);
-  return true;
+  if (!row || row.expired_at > now) return null;
+  return declareLoss(tx, dependencies, row, now);
 }
 export function revoke(
   tx: Transaction,

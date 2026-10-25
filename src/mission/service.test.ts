@@ -163,6 +163,7 @@ test("priority refuses a live claim before changing its node or job", (t) => {
       settle: () => assert.fail(),
       revoke: () => assert.fail(),
       executionRevoked: () => assert.fail(),
+      executionsLost: () => assert.fail(),
       liveExecutionOf: () => ({
         execution_id: executionId,
         runtime_identity: "runtime",
@@ -186,9 +187,11 @@ test("dependency admission settles the dependent before testing its live claim",
     schedulerClaims: {
       revoke: () => assert.fail(),
       executionRevoked: () => assert.fail(),
+      executionsLost: () => assert.fail(),
       settle: (tx, id) => {
         assert.ok(tx.database.isTransaction);
         settled.add(id);
+        return [];
       },
       liveExecutionOf: (_tx, id) => {
         assert.ok(settled.has(id));
@@ -355,7 +358,8 @@ function makeService(
     schedulerClaims: {
       revoke: () => null,
       executionRevoked: () => undefined,
-      settle: () => {},
+      executionsLost: () => undefined,
+      settle: () => [],
       liveExecutionOf: () => null,
     },
     schedulerMatch: { unmatchedClaims: () => [] },
@@ -4096,8 +4100,10 @@ test("import dependency additions settle a live dependent and dependency-only ed
     schedulerClaims: {
       revoke: () => assert.fail(),
       executionRevoked: () => assert.fail(),
+      executionsLost: () => assert.fail(),
       settle: (_tx, id) => {
         settled.add(id);
+        return [];
       },
       liveExecutionOf: (_tx, id) => {
         assert.ok(settled.has(id));
@@ -4152,6 +4158,63 @@ test("import dependency additions settle a live dependent and dependency-only ed
   );
   const removed = f.apply(f.request(f.importSnapshot(ids)));
   assert.equal(removed.changes.removed_edges.length, SINGLE_ITEM);
+});
+
+test("an import apply that settles an expired execution of a dependent writes one lost end after its commit", (t) => {
+  const executionId = createIdentity("execution");
+  const lost: unknown[][] = [];
+  let armed = false;
+  const f = importApplyFixture(t, undefined, undefined, {
+    schedulerClaims: {
+      revoke: () => assert.fail(),
+      executionRevoked: () => assert.fail(),
+      executionsLost: (...args) => lost.push(args),
+      settle: (_tx, nodeId, now) =>
+        armed
+          ? [
+              {
+                execution_id: executionId,
+                trace: {
+                  execution_id: executionId,
+                  project_id: createIdentity("project"),
+                  node_id: nodeId,
+                  attempt: FIRST_REVISION,
+                  trace_id: "a".repeat(32),
+                  root_span_id: "b".repeat(16),
+                },
+                ended_at: now,
+              },
+            ]
+          : [],
+      liveExecutionOf: () => null,
+    },
+  });
+  const entries = [...f.initial, f.entry(IMPORT_NEW_DEPENDENT, Intent.Examine)];
+  const ids = f.identified(
+    f.apply(f.request(f.importSnapshot(entries))),
+    entries,
+  );
+  assert.deepEqual(lost, []);
+  const parentId = ids.find((item) => item.filename === EXAMINE_FILENAME)!.id!;
+  armed = true;
+  f.apply(
+    f.request(
+      f.importSnapshot(
+        ids.map((item) =>
+          item.id === parentId
+            ? { ...item, depends_on: [IMPORT_NEW_DEPENDENT] }
+            : item,
+        ),
+      ),
+    ),
+  );
+  assert.equal(lost.length, SINGLE_ITEM);
+  assert.deepEqual(
+    (lost[0]![0] as { execution_id: string }[]).map(
+      (execution) => execution.execution_id,
+    ),
+    [executionId],
+  );
 });
 
 test("import.apply is a human mutation and imports a full graph in one commit and version increment", (t) => {

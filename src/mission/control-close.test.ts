@@ -24,7 +24,11 @@ import {
   setNodeState,
   readNode,
 } from "./store.ts";
-import { controlHarness, revokedExecution } from "./test-support.ts";
+import {
+  controlHarness,
+  revokedExecution,
+  settlesExpired,
+} from "./test-support.ts";
 import { readCurrentRevision, insertRevision } from "./store.ts";
 import { revisionFromRow } from "./revision.ts";
 
@@ -36,6 +40,7 @@ const NO_EVIDENCE = 0;
 const FIRST_ATTEMPT = 1;
 const REVOKE = "schedulerClaims.revoke";
 const EXECUTION_REVOKED = "schedulerClaims.executionRevoked";
+const EXECUTIONS_LOST = "schedulerClaims.executionsLost";
 const BINDING_MISMATCH = "mission.evidence.binding_mismatch";
 const VALIDATION = "gateway.request.validation_failed";
 const COMMIT = "a".repeat(40);
@@ -380,6 +385,32 @@ for (const [operation, extra] of [
     );
   });
 }
+
+test("a discard whose admission settles an expired execution writes one lost end after its commit", async (t) => {
+  const h = controlHarness(t, IDENTITY);
+  const executionId = createIdentity("execution");
+  settlesExpired(h.dependencies, executionId);
+  h.store.transaction((tx) => {
+    openAttempt(tx, h.node_id, FIRST_ATTEMPT, h.actor, NOW);
+    setNodeState(tx, h.node_id, NodeState.Waiting);
+  });
+  await h.invoke("node.discard", {
+    params: { node_id: h.node_id },
+    query: {},
+    body: h.body(NodeState.Waiting, FIRST_ATTEMPT),
+  });
+  const ends = h.calls.filter((call) => call.method === EXECUTIONS_LOST);
+  assert.equal(ends.length, FIRST_ATTEMPT);
+  const [lost] = ends[0]!.arguments as [{ execution_id: string }[]];
+  assert.deepEqual(
+    lost.map((execution) => execution.execution_id),
+    [executionId],
+  );
+  assert.equal(
+    h.calls.some((call) => call.method === EXECUTION_REVOKED),
+    false,
+  );
+});
 
 test("a block of a Paused node ends no root span", async (t) => {
   const h = controlHarness(t, IDENTITY);

@@ -530,6 +530,56 @@ test("a revocation writes one root end after the commit and a rolled back revoca
   ]);
 });
 
+test("settle answers each execution that it ends with its trace and writes no end itself", (t) => {
+  const h = schedulerHarness(t);
+  const row = executionFixture();
+  h.store.transaction((tx) => insertExecution(tx, row));
+  assert.deepEqual(
+    h.store.transaction((tx) => h.service.settle(tx, row.node_id, FIXTURE_NOW)),
+    [],
+  );
+  const lost = h.store.transaction((tx) =>
+    h.service.settle(tx, row.node_id, FIXTURE_DEADLINE),
+  );
+  assert.deepEqual(lost, [
+    {
+      execution_id: row.execution_id,
+      trace: executionTrace(row),
+      ended_at: FIXTURE_DEADLINE,
+    },
+  ]);
+  assert.deepEqual(h.telemetry, []);
+  h.service.executionsLost(lost);
+  assert.deepEqual(h.telemetry, [
+    {
+      method: EXECUTION_ENDED,
+      arguments: [
+        {
+          trace: executionTrace(row),
+          ended_at: FIXTURE_DEADLINE,
+          end: ExecutionEnd.Lost,
+          revoke_cause: null,
+          stop: null,
+        },
+      ],
+    },
+  ]);
+});
+
+test("a sweep after an inline settlement writes no second end", (t) => {
+  const h = schedulerHarness(t);
+  const row = executionFixture();
+  h.store.transaction((tx) => insertExecution(tx, row));
+  t.mock.method(Date, "now", () => FIXTURE_DEADLINE);
+  h.service.executionsLost(
+    h.store.transaction((tx) =>
+      h.service.settle(tx, row.node_id, FIXTURE_DEADLINE),
+    ),
+  );
+  h.service.sweep();
+  assert.equal(h.telemetry.length, ONE_ROW);
+});
+
 test("sweep hands consecutive loss counts to Mission once per steps and evaluation row", (t) => {
   const h = schedulerHarness(t);
   let now = FIXTURE_DEADLINE;
