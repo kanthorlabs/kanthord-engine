@@ -252,6 +252,7 @@ export interface NodeTransition {
   rule: TransitionRule;
   count: number | null;
   limit: number | null;
+  first_available_at: number | null;
 }
 export interface RevokedExecution {
   execution_id: string;

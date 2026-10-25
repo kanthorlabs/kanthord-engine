@@ -1,5 +1,11 @@
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
+import {
+  attributed,
+  CauseAssigner,
+  CauseCategory,
+  CauseSubcategory,
+} from "../kernel/cause.ts";
 import { OperationError } from "../kernel/errors.ts";
 import { testHumanIdentity } from "../kernel/test-identity.ts";
 import { createIdentity } from "../kernel/identity.ts";
@@ -55,10 +61,23 @@ const SECOND_ATTEMPT = 2;
 const FIRST_REWORK = 1;
 const HUMAN_REASON = "Hold";
 const TRANSITION_ARGUMENT = 2;
+const FAILURE_CAUSE_ARGUMENT = 3;
+const REWORK_CAUSE = attributed(
+  CauseCategory.Model,
+  CauseSubcategory.WorkDefect,
+  CauseAssigner.Reviewer,
+);
 
 function revokedTransition(calls: { method: string; arguments: unknown[] }[]) {
   const ends = calls.filter((call) => call.method === EXECUTION_REVOKED);
   return ends.at(-1)!.arguments[TRANSITION_ARGUMENT];
+}
+
+function revokedFailureCause(
+  calls: { method: string; arguments: unknown[] }[],
+) {
+  const ends = calls.filter((call) => call.method === EXECUTION_REVOKED);
+  return ends.at(-1)!.arguments[FAILURE_CAUSE_ARGUMENT];
 }
 
 test("examine currency follows real dependency outcomes and only current closure releases dependent work", async (t) => {
@@ -281,7 +300,12 @@ test("a not-met assessment that sends rework and a passed assessment that comple
     [AssessmentResult.Success, NodeState.Completed],
   ] as const) {
     const h = await fixture(t);
-    const answer = await h.submit({ ...h.body, result });
+    const notMet = result === AssessmentResult.CriterionNotMet;
+    const answer = await h.submit({
+      ...h.body,
+      result,
+      ...(notMet ? { cause: REWORK_CAUSE } : {}),
+    });
     assert.ok("state" in answer.node);
     assert.equal(answer.node.state, state);
     const ends = h.calls.filter((call) => call.method === EXECUTION_REVOKED);
@@ -290,6 +314,10 @@ test("a not-met assessment that sends rework and a passed assessment that comple
     assert.equal(execution.execution_id, h.claim.executionId);
     assert.equal(execution.trace.execution_id, h.claim.executionId);
     assert.equal(cause, RevokeCause.Assessment);
+    assert.deepEqual(
+      ends[0]!.arguments[FAILURE_CAUSE_ARGUMENT],
+      notMet ? REWORK_CAUSE : null,
+    );
   }
 });
 
@@ -306,6 +334,7 @@ test("a revocation by an assessment hands over the states and the rule that does
       rule: TransitionRule.None,
       count: null,
       limit: null,
+      first_available_at: null,
     });
   }
 });
@@ -325,7 +354,11 @@ test("a rolled back assessment ends no root span", async (t) => {
     throw new Error(ROLLBACK);
   };
   await assert.rejects(
-    h.submit({ ...h.body, result: AssessmentResult.CriterionNotMet }),
+    h.submit({
+      ...h.body,
+      result: AssessmentResult.CriterionNotMet,
+      cause: REWORK_CAUSE,
+    }),
     { message: ROLLBACK },
   );
   assert.equal(h.revokes(), FIRST_REVISION);
@@ -343,7 +376,13 @@ test("current nonpassing assessments block and a required-action pass keeps eval
     const h = await fixture(t);
     if (result === AssessmentResult.CriterionNotMet)
       h.dependencies.config.rework_limit = REWORK_OFF;
-    const answer = await h.submit({ ...h.body, result });
+    const answer = await h.submit({
+      ...h.body,
+      result,
+      ...(result === AssessmentResult.CriterionNotMet
+        ? { cause: REWORK_CAUSE }
+        : {}),
+    });
     assert.ok("state" in answer.node);
     assert.equal(answer.node.state, NodeState.Blocked);
     assert.equal(
@@ -381,6 +420,7 @@ test("a criterion-not-met assessment of an attempt with a request closes into Bl
   const answer = await h.submit({
     ...h.body,
     result: AssessmentResult.CriterionNotMet,
+    cause: REWORK_CAUSE,
   });
   assert.ok("state" in answer.node);
   assert.equal(answer.node.state, NodeState.Blocked);
@@ -418,7 +458,11 @@ test("a criterion-not-met assessment below the rework limit returns the node to 
     error instanceof OperationError &&
     error.code === MissionErrorCode.RecordNotFound;
   await assert.rejects(readRework(), notFound);
-  const notMet = { ...h.body, result: AssessmentResult.CriterionNotMet };
+  const notMet = {
+    ...h.body,
+    result: AssessmentResult.CriterionNotMet,
+    cause: REWORK_CAUSE,
+  };
   for (let rework = FIRST_REWORK; rework <= limit; rework++) {
     if (rework > FIRST_REWORK) evaluateAgain();
     const inserts = h.calls.filter((call) => call.method === QUEUE_INSERT);
@@ -427,12 +471,14 @@ test("a criterion-not-met assessment below the rework limit returns the node to 
     assert.equal(answer.node.state, NodeState.Available);
     assert.equal(answer.outcome, null);
     assert.equal(h.revokes(), rework);
+    assert.deepEqual(revokedFailureCause(h.calls), REWORK_CAUSE);
     assert.deepEqual(revokedTransition(h.calls), {
       from: NodeState.Evaluating,
       to: NodeState.Available,
       rule: TransitionRule.None,
       count: null,
       limit: null,
+      first_available_at: null,
     });
     assert.ok(
       h.calls
@@ -454,12 +500,14 @@ test("a criterion-not-met assessment below the rework limit returns the node to 
   const blocked = await h.submit(notMet);
   assert.ok("state" in blocked.node);
   assert.equal(blocked.node.state, NodeState.Blocked);
+  assert.deepEqual(revokedFailureCause(h.calls), REWORK_CAUSE);
   assert.deepEqual(revokedTransition(h.calls), {
     from: NodeState.Evaluating,
     to: NodeState.Blocked,
     rule: TransitionRule.ReworkLimit,
     count: limit,
     limit,
+    first_available_at: null,
   });
   assert.equal(
     blocked.outcome?.closing_event,

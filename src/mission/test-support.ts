@@ -83,6 +83,7 @@ export function lostTransition(): NodeTransition {
     rule: TransitionRule.None,
     count: null,
     limit: null,
+    first_available_at: null,
   };
 }
 

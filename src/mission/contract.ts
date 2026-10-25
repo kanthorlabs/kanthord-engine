@@ -14,7 +14,7 @@ import type { Context } from "../kernel/context.ts";
 import type { CallerIdentity } from "../kernel/caller.ts";
 import { errorSchema } from "../kernel/errors.ts";
 import { tagSchema } from "../kernel/tag.ts";
-import { failureCauseSchema } from "../kernel/cause.ts";
+import { failureCauseSchema, type FailureCause } from "../kernel/cause.ts";
 import { CommitType } from "../kernel/commit-message.ts";
 
 export const MISSION_SERVICE_NAME = "mission";
@@ -142,6 +142,7 @@ export interface NodeTransition {
   rule: TransitionRule;
   count: number | null;
   limit: number | null;
+  first_available_at: number | null;
 }
 
 export interface RevokedExecution {
@@ -165,6 +166,7 @@ export interface RevokedClaim {
   execution: RevokedExecution;
   cause: RevokeCause;
   transition: NodeTransition | null;
+  failure_cause: FailureCause | null;
 }
 
 export interface ExecutionEnds {
@@ -178,6 +180,7 @@ export interface SchedulerClaims {
     execution: RevokedExecution,
     cause: RevokeCause,
     transition: NodeTransition | null,
+    failureCause: FailureCause | null,
   ): void;
   executionsLost(lost: readonly EndedExecution[]): void;
   settle(tx: Transaction, nodeId: string, now: number): EndedExecution[];
@@ -1303,8 +1306,8 @@ export const assessmentSubmitSchema = executionContextSchema
   })
   .refine(
     (body) =>
-      body.cause === undefined ||
-      body.result === AssessmentResult.CriterionNotMet,
+      (body.cause !== undefined) ===
+      (body.result === AssessmentResult.CriterionNotMet),
     { path: ["cause"] },
   );
 export type AssessmentSubmit = z.infer<typeof assessmentSubmitSchema>;

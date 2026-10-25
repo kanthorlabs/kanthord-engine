@@ -1,14 +1,41 @@
 import assert from "node:assert/strict";
 import {
+  attributed,
+  CauseCategory,
+  CauseSubcategory,
+} from "../kernel/cause.ts";
+import {
   ExecutionEnd,
   type ExecutionKind,
   type ExecutionOpening,
   type ExecutionTelemetry,
   type ExecutionTrace,
+  type ExecutionTransition,
 } from "../tracking/contract.ts";
-import type { EndedExecution } from "./contract.ts";
+import type { EndedExecution, NodeTransition } from "./contract.ts";
 
 const NO_WAIT = 0;
+const COMPLETED_STATE = "Completed";
+
+export function executionTransition(
+  transition: NodeTransition,
+  transitionedAt: number,
+): ExecutionTransition {
+  const leadTimeMs =
+    transition.to === COMPLETED_STATE && transition.first_available_at !== null
+      ? transitionedAt - transition.first_available_at
+      : null;
+  assert.ok(leadTimeMs === null || leadTimeMs >= NO_WAIT);
+  return {
+    transitioned_at: transitionedAt,
+    from: transition.from,
+    to: transition.to,
+    rule: transition.rule,
+    count: transition.count,
+    limit: transition.limit,
+    lead_time_ms: leadTimeMs,
+  };
+}
 
 export function reportLost(
   telemetry: ExecutionTelemetry,
@@ -21,11 +48,15 @@ export function reportLost(
       end: ExecutionEnd.Lost,
       revoke_cause: null,
       stop: null,
+      cause: attributed(
+        CauseCategory.Infrastructure,
+        CauseSubcategory.ExecutionLost,
+      ),
     });
-    telemetry.executionTransition(execution.trace, {
-      ...execution.transition,
-      transitioned_at: execution.ended_at,
-    });
+    telemetry.executionTransition(
+      execution.trace,
+      executionTransition(execution.transition, execution.ended_at),
+    );
   }
 }
 
@@ -60,5 +91,9 @@ export function executionOpening(
     kind,
     worker_name: workerName,
     queue_wait_ms: Math.max(NO_WAIT, claimedAt - queuedAt),
+    worker_instance: null,
+    placement: null,
+    revision_turn: null,
+    dependency_count: null,
   };
 }

@@ -28,7 +28,13 @@ import {
   RevokeCause,
   type ExecutionTelemetry,
 } from "../tracking/contract.ts";
-import { reportLost } from "./telemetry.ts";
+import { executionTransition, reportLost } from "./telemetry.ts";
+import {
+  attributed,
+  CauseCategory,
+  CauseSubcategory,
+  type FailureCause,
+} from "../kernel/cause.ts";
 import * as settlement from "./settlement.ts";
 import {
   nodeBranchOfExecution,
@@ -241,6 +247,7 @@ export class SchedulerService implements Service, WorkQueue {
     execution: RevokedExecution,
     cause: RevokeCause,
     transition: NodeTransition | null,
+    failureCause: FailureCause | null,
   ): void {
     this.dependencies.telemetry.executionEnded({
       trace: execution.trace,
@@ -248,13 +255,17 @@ export class SchedulerService implements Service, WorkQueue {
       end: ExecutionEnd.Revoked,
       revoke_cause: cause,
       stop: null,
+      cause:
+        cause === RevokeCause.Human
+          ? attributed(CauseCategory.Human, CauseSubcategory.Intervention)
+          : failureCause,
     });
     if (cause !== RevokeCause.Assessment) return;
     assert.ok(transition, "a revocation by an assessment moved its node");
-    this.dependencies.telemetry.executionTransition(execution.trace, {
-      ...transition,
-      transitioned_at: execution.ended_at,
-    });
+    this.dependencies.telemetry.executionTransition(
+      execution.trace,
+      executionTransition(transition, execution.ended_at),
+    );
   }
   liveExecutionOf(tx: Transaction, nodeId: string, now: number) {
     return settlement.liveExecutionOf(tx, nodeId, now);

@@ -3,6 +3,11 @@ import { test, type TestContext } from "node:test";
 import { setImmediate as turn } from "node:timers/promises";
 import { ChainLevel } from "../agent/contract.ts";
 import { background, CancellationContext } from "../kernel/context.ts";
+import {
+  attributed,
+  CauseCategory,
+  CauseSubcategory,
+} from "../kernel/cause.ts";
 import { createIdentity } from "../kernel/identity.ts";
 import { testMachineIdentity } from "../kernel/test-identity.ts";
 import type { CallerContext } from "../kernel/operation.ts";
@@ -22,7 +27,7 @@ import {
   transitionFixture,
 } from "./test-support.ts";
 import { ExecutionEnd } from "../tracking/contract.ts";
-import { executionTrace } from "./telemetry.ts";
+import { executionTrace, executionTransition } from "./telemetry.ts";
 import { DEFAULT_STOP_BACKOFF_SECONDS } from "./config.ts";
 
 const NO_COMMITS = 0;
@@ -145,6 +150,10 @@ for (const [name, sameRuntime] of [
             end: ExecutionEnd.Lost,
             revoke_cause: null,
             stop: null,
+            cause: attributed(
+              CauseCategory.Infrastructure,
+              CauseSubcategory.ExecutionLost,
+            ),
           },
         ],
       },
@@ -152,7 +161,7 @@ for (const [name, sameRuntime] of [
         method: "executionTransition",
         arguments: [
           executionTrace(expired),
-          { ...transitionFixture(), transitioned_at: ended },
+          executionTransition(transitionFixture(), ended),
         ],
       },
     ]);
@@ -783,6 +792,10 @@ test("a pull that claims an Available node opens the execution with steps, the w
     kind: "steps",
     worker_name: "coder@1",
     queue_wait_ms: WAITED_MS,
+    worker_instance: null,
+    placement: null,
+    revision_turn: null,
+    dependency_count: null,
   });
 });
 

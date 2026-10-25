@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { ExecutionEnd } from "../tracking/contract.ts";
-import { executionTrace } from "./telemetry.ts";
+import { executionTrace, executionTransition } from "./telemetry.ts";
 import { test, type TestContext } from "node:test";
 import { background } from "../kernel/context.ts";
 import { createIdentity } from "../kernel/identity.ts";
@@ -9,6 +9,7 @@ import {
   attributed,
   CauseCategory,
   CauseSubcategory,
+  unattributed,
 } from "../kernel/cause.ts";
 import type { CallerContext } from "../kernel/operation.ts";
 import {
@@ -259,6 +260,7 @@ test("a release with a stop stores the stop and routes the failure count", async
           end: ExecutionEnd.Finished,
           revoke_cause: null,
           stop: STOP,
+          cause: unattributed([]),
         },
       ],
     },
@@ -266,7 +268,7 @@ test("a release with a stop stores the stop and routes the failure count", async
       method: "executionTransition",
       arguments: [
         executionTrace(h.row),
-        { ...transitionFixture(), transitioned_at: FIXTURE_NOW },
+        executionTransition(transitionFixture(), FIXTURE_NOW),
       ],
     },
   ]);
@@ -293,6 +295,7 @@ test("a release stores the cause detail of its stop and hands it to telemetry", 
           end: ExecutionEnd.Finished,
           revoke_cause: null,
           stop,
+          cause: unattributed([]),
         },
       ],
     },
@@ -300,10 +303,44 @@ test("a release stores the cause detail of its stop and hands it to telemetry", 
       method: "executionTransition",
       arguments: [
         executionTrace(h.row),
-        { ...transitionFixture(), transitioned_at: FIXTURE_NOW },
+        executionTransition(transitionFixture(), FIXTURE_NOW),
       ],
     },
   ]);
+});
+
+test("a release with a stop cause hands that cause to the root end", async (t) => {
+  const h = harness(t);
+  t.mock.method(Date, "now", () => FIXTURE_NOW);
+  const cause = attributed(
+    CauseCategory.LlmProvider,
+    CauseSubcategory.RateLimited,
+  );
+  await h.release(true, { ...STOP, cause });
+  assert.deepEqual(
+    (h.telemetry[0]!.arguments[0] as { cause: unknown }).cause,
+    cause,
+  );
+});
+
+test("a stop with no cause hands unattributed with no suspects to the root end", async (t) => {
+  const h = harness(t);
+  t.mock.method(Date, "now", () => FIXTURE_NOW);
+  await h.release(true, STOP);
+  assert.deepEqual(
+    (h.telemetry[0]!.arguments[0] as { cause: unknown }).cause,
+    unattributed([]),
+  );
+});
+
+test("a release with no stop hands no cause to the root end", async (t) => {
+  const h = harness(t);
+  t.mock.method(Date, "now", () => FIXTURE_NOW);
+  await h.release(false);
+  assert.equal(
+    (h.telemetry[0]!.arguments[0] as { cause: unknown }).cause,
+    null,
+  );
 });
 
 test("a release writes one transition span after its root end", async (t) => {
@@ -322,6 +359,7 @@ test("a release writes one transition span after its root end", async (t) => {
       rule: TransitionRule.None,
       count: null,
       limit: null,
+      lead_time_ms: null,
       transitioned_at: FIXTURE_NOW,
     },
   ]);
@@ -333,10 +371,13 @@ test("a release of an evaluating node hands over the state at the commit", async
   h.dependencies.transitions.release = () =>
     transitionFixture({ from: "Evaluating", to: "Completed" });
   await h.release(false);
-  assert.deepEqual(h.telemetry[1]!.arguments[1], {
-    ...transitionFixture({ from: "Evaluating", to: "Completed" }),
-    transitioned_at: FIXTURE_NOW,
-  });
+  assert.deepEqual(
+    h.telemetry[1]!.arguments[1],
+    executionTransition(
+      transitionFixture({ from: "Evaluating", to: "Completed" }),
+      FIXTURE_NOW,
+    ),
+  );
 });
 
 test("a stop at the failure limit writes the failure limit rule with its count and limit", async (t) => {
@@ -353,7 +394,7 @@ test("a stop at the failure limit writes the failure limit rule with its count a
   await h.release(true, STOP);
   assert.deepEqual(h.telemetry[1]!.arguments, [
     executionTrace(h.row),
-    { ...paused, transitioned_at: FIXTURE_NOW },
+    executionTransition(paused, FIXTURE_NOW),
   ]);
 });
 
@@ -371,7 +412,7 @@ test("a stalled release at the further work limit writes the further work limit 
   await h.release(true, BUDGET_END);
   assert.deepEqual(h.telemetry[1]!.arguments, [
     executionTrace(h.row),
-    { ...paused, transitioned_at: FIXTURE_NOW },
+    executionTransition(paused, FIXTURE_NOW),
   ]);
 });
 

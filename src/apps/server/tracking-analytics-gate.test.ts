@@ -34,6 +34,17 @@ import {
   gatewayFixture,
   humanCaller,
 } from "./test-support.ts";
+import {
+  attributed,
+  CauseAssigner,
+  CauseCategory,
+  CauseSubcategory,
+} from "../../kernel/cause.ts";
+const REWORK_CAUSE = attributed(
+  CauseCategory.Model,
+  CauseSubcategory.WorkDefect,
+  CauseAssigner.Reviewer,
+);
 
 const JOURNEY_TIMEOUT_MS = 120000;
 const FETCH_TIMEOUT_MS = 30000;
@@ -348,6 +359,7 @@ function operations(h: Harness) {
         evidence_ids: [evidence.id],
         dependency_outcome_ids: [],
         result: AssessmentResult.CriterionNotMet,
+        cause: REWORK_CAUSE,
         rationale: "not met",
         tested_input: evidence.address,
       },

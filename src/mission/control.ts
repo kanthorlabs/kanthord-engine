@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import type { FailureCause } from "../kernel/cause.ts";
 import { OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import { createIdentity } from "../kernel/identity.ts";
@@ -178,6 +179,7 @@ export function endLiveClaim(
   node: NodeRow,
   now: number,
   cause: RevokeCause,
+  failureCause: FailureCause | null,
   ends: ExecutionEnds,
 ): RevokedClaim | null {
   assert.ok(tx.database.isTransaction);
@@ -185,7 +187,12 @@ export function endLiveClaim(
     return null;
   const execution = dependencies.schedulerClaims.revoke(tx, node.id, now);
   if (execution === null) return null;
-  const claim = { execution, cause, transition: null };
+  const claim = {
+    execution,
+    cause,
+    transition: null,
+    failure_cause: failureCause,
+  };
   ends.revoked.push(claim);
   return claim;
 }
@@ -215,6 +222,7 @@ export function reportEnds(
       claim.execution,
       claim.cause,
       claim.transition,
+      claim.failure_cause,
     );
 }
 
@@ -257,6 +265,7 @@ export function nodeTransition(
     rule: limited?.rule ?? TransitionRule.None,
     count: limited?.count ?? null,
     limit: limited?.limit ?? null,
+    first_available_at: null,
   };
 }
 
