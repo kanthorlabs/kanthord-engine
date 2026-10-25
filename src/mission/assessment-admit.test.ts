@@ -1,5 +1,11 @@
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
+import {
+  attributed,
+  CauseAssigner,
+  CauseCategory,
+  CauseSubcategory,
+} from "../kernel/cause.ts";
 import { OperationError } from "../kernel/errors.ts";
 import { createIdentity } from "../kernel/identity.ts";
 import { canonicalJSON } from "../kernel/json.ts";
@@ -28,6 +34,11 @@ import {
 } from "./store.ts";
 import { executionHarness } from "./test-support.ts";
 
+const REWORK_CAUSE = attributed(
+  CauseCategory.Model,
+  CauseSubcategory.WorkDefect,
+  CauseAssigner.Reviewer,
+);
 const IDENTITY = testHumanIdentity("ulrich", "Ulrich", "token");
 const FIRST_ATTEMPT = 1;
 const FIRST_REVISION = 1;
@@ -202,7 +213,11 @@ test("assessment result order permits criterion-not-met for a failed run but rej
     }),
   ];
   refusal(() => h.admit(), MissionErrorCode.AssessmentVerificationFailed);
-  h.admit({ ...h.body, result: AssessmentResult.CriterionNotMet });
+  h.admit({
+    ...h.body,
+    result: AssessmentResult.CriterionNotMet,
+    cause: REWORK_CAUSE,
+  });
   refusal(
     () => h.admit({ ...h.body, result: AssessmentResult.Undetermined }),
     VALIDATION,
@@ -257,6 +272,9 @@ test("non-success assessments retain the verification's tested input", (t) => {
         h.admit({
           ...h.body,
           result,
+          ...(result === AssessmentResult.CriterionNotMet
+            ? { cause: REWORK_CAUSE }
+            : {}),
           tested_input: { ...INPUT, sha256: "b".repeat(64) },
         }),
       VALIDATION,

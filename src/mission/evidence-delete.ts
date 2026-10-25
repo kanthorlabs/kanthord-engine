@@ -206,8 +206,15 @@ export async function removeEvidence(
       const settled = requireNode(tx, node.id);
       from = settled.state;
       revoked =
-        endLiveClaim(tx, dependencies, settled, now, RevokeCause.Human, ends)
-          ?.execution.trace ?? null;
+        endLiveClaim(
+          tx,
+          dependencies,
+          settled,
+          now,
+          RevokeCause.Human,
+          null,
+          ends,
+        )?.execution.trace ?? null;
       transition(tx, dependencies, mission, settled, NodeState.Paused, now);
     }
     const current = requireNode(tx, node.id);

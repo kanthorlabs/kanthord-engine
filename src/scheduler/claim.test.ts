@@ -25,6 +25,11 @@ import {
 import { DEFAULT_STOP_BACKOFF_SECONDS } from "./config.ts";
 import { executionTrace, reportLost } from "./telemetry.ts";
 import {
+  attributed,
+  CauseCategory,
+  CauseSubcategory,
+} from "../kernel/cause.ts";
+import {
   Onboarding,
   type OnboardingDependencies,
 } from "../project/onboarding.ts";
@@ -361,9 +366,14 @@ test("an inline loss of a claim walk writes one transition span after its commit
       rule: "none",
       count: null,
       limit: null,
+      lead_time_ms: null,
       transitioned_at: FIXTURE_DEADLINE,
     },
   ]);
+  assert.deepEqual(
+    (h.telemetry[0]!.arguments[0] as { cause: unknown }).cause,
+    attributed(CauseCategory.Infrastructure, CauseSubcategory.ExecutionLost),
+  );
 });
 
 test("runtime and node expiry settle before admission; rollback undoes all claim writes", (t) => {
@@ -823,6 +833,10 @@ test("a claim of a Waiting node opens the execution with evaluation and the wait
     kind: "evaluation",
     worker_name: "coder@1",
     queue_wait_ms: WAITED_MS,
+    worker_instance: null,
+    placement: null,
+    revision_turn: null,
+    dependency_count: null,
   });
 });
 

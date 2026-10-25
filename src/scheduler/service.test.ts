@@ -25,7 +25,13 @@ import {
   transitionFixture,
 } from "./test-support.ts";
 import { ExecutionEnd, RevokeCause } from "../tracking/contract.ts";
-import { executionTrace } from "./telemetry.ts";
+import { executionTrace, executionTransition } from "./telemetry.ts";
+import {
+  attributed,
+  CauseAssigner,
+  CauseCategory,
+  CauseSubcategory,
+} from "../kernel/cause.ts";
 import { insertExecution, readExecution } from "./execution-store.ts";
 
 const EXECUTION_ENDED = "executionEnded";
@@ -520,7 +526,7 @@ test("a revocation writes one root end after the commit and a rolled back revoca
   );
   assert.ok(revoked);
   assert.deepEqual(h.telemetry, []);
-  h.service.executionRevoked(revoked, RevokeCause.Human, null);
+  h.service.executionRevoked(revoked, RevokeCause.Human, null, null);
   assert.deepEqual(h.telemetry, [
     {
       method: EXECUTION_ENDED,
@@ -531,6 +537,7 @@ test("a revocation writes one root end after the commit and a rolled back revoca
           end: ExecutionEnd.Revoked,
           revoke_cause: RevokeCause.Human,
           stop: null,
+          cause: attributed(CauseCategory.Human, CauseSubcategory.Intervention),
         },
       ],
     },
@@ -549,14 +556,28 @@ test("a revocation by an assessment writes the root end and then one transition 
     from: "Evaluating",
     to: "Available",
   });
-  h.service.executionRevoked(revoked, RevokeCause.Assessment, transition);
+  const failureCause = attributed(
+    CauseCategory.Model,
+    CauseSubcategory.WorkDefect,
+    CauseAssigner.Reviewer,
+  );
+  h.service.executionRevoked(
+    revoked,
+    RevokeCause.Assessment,
+    transition,
+    failureCause,
+  );
   assert.deepEqual(
     h.telemetry.map((entry) => entry.method),
     [EXECUTION_ENDED, EXECUTION_TRANSITION],
   );
+  assert.deepEqual(
+    (h.telemetry[0]!.arguments[0] as { cause: unknown }).cause,
+    failureCause,
+  );
   assert.deepEqual(h.telemetry[1]!.arguments, [
     executionTrace(row),
-    { ...transition, transitioned_at: FIXTURE_NOW },
+    executionTransition(transition, FIXTURE_NOW),
   ]);
 });
 
@@ -568,7 +589,7 @@ test("a revocation by a human writes the root end and no transition span", (t) =
     h.service.revoke(tx, row.node_id, FIXTURE_NOW),
   );
   assert.ok(revoked);
-  h.service.executionRevoked(revoked, RevokeCause.Human, null);
+  h.service.executionRevoked(revoked, RevokeCause.Human, null, null);
   assert.deepEqual(
     h.telemetry.map((entry) => entry.method),
     [EXECUTION_ENDED],
@@ -606,6 +627,10 @@ test("settle answers each execution that it ends with its trace and writes no en
           end: ExecutionEnd.Lost,
           revoke_cause: null,
           stop: null,
+          cause: attributed(
+            CauseCategory.Infrastructure,
+            CauseSubcategory.ExecutionLost,
+          ),
         },
       ],
     },
@@ -613,7 +638,7 @@ test("settle answers each execution that it ends with its trace and writes no en
       method: EXECUTION_TRANSITION,
       arguments: [
         executionTrace(row),
-        { ...transitionFixture(), transitioned_at: FIXTURE_DEADLINE },
+        executionTransition(transitionFixture(), FIXTURE_DEADLINE),
       ],
     },
   ]);
@@ -663,11 +688,11 @@ test("a sweep loss below the failure limit writes Executing to Available and at 
   );
   assert.deepEqual(h.telemetry[1]!.arguments, [
     executionTrace(first),
-    { ...transitionFixture(), transitioned_at: FIXTURE_DEADLINE },
+    executionTransition(transitionFixture(), FIXTURE_DEADLINE),
   ]);
   assert.deepEqual(h.telemetry[3]!.arguments, [
     executionTrace(second),
-    { ...paused, transitioned_at: FIXTURE_DEADLINE + 1 },
+    executionTransition(paused, FIXTURE_DEADLINE + 1),
   ]);
 });
 

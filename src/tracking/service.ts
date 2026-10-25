@@ -21,6 +21,7 @@ import {
   type Healthcheck,
   type Service,
 } from "../kernel/service.ts";
+import { causeAttributes } from "../kernel/cause.ts";
 import { identityTime } from "../kernel/identity.ts";
 import type { Store } from "../kernel/store.ts";
 import { readCost } from "./analytics-cost.ts";
@@ -90,6 +91,14 @@ import {
   type TraceRow,
 } from "./trace-store.ts";
 
+const OpeningAttribute = {
+  WorkerInstance: "kanthord.worker.instance",
+  Placement: "kanthord.worker.placement",
+  RevisionTurn: "kanthord.queue.revision_turn",
+  DependencyCount: "kanthord.node.dependency_count",
+  LeadTimeMs: "kanthord.node.lead_time_ms",
+} as const;
+const NO_LEAD_TIME = 0;
 const ROOT_START_RECORD = "start";
 const ROOT_END_RECORD = "end";
 const TRANSITION_RECORD = "transition";
@@ -328,6 +337,7 @@ export class TrackingService implements Service, ExecutionTelemetry {
         "kanthord.execution.kind": opening.kind,
         "kanthord.worker.name": opening.worker_name,
         "kanthord.queue.wait_ms": opening.queue_wait_ms,
+        ...openingAttributes(opening),
       },
     });
   }
@@ -346,6 +356,7 @@ export class TrackingService implements Service, ExecutionTelemetry {
         "kanthord.execution.end": end.end,
         ...revokeAttributes(end),
         ...stopAttributes(end.stop),
+        ...(end.cause === null ? {} : causeAttributes(end.cause)),
       },
     });
   }
@@ -734,12 +745,34 @@ function revokeAttributes(end: RootSpanEnd): Attributes {
   return { "kanthord.revoke.cause": revokeCauseSchema.parse(end.revoke_cause) };
 }
 
+function openingAttributes(opening: ExecutionOpening): Attributes {
+  return {
+    ...(opening.worker_instance === null
+      ? {}
+      : { [OpeningAttribute.WorkerInstance]: opening.worker_instance }),
+    ...(opening.placement === null
+      ? {}
+      : { [OpeningAttribute.Placement]: opening.placement }),
+    ...(opening.revision_turn === null
+      ? {}
+      : { [OpeningAttribute.RevisionTurn]: opening.revision_turn }),
+    ...(opening.dependency_count === null
+      ? {}
+      : { [OpeningAttribute.DependencyCount]: opening.dependency_count }),
+  };
+}
+
 function transitionAttributes(transition: ExecutionTransition): Attributes {
   assert.ok(transition.from);
   assert.ok(transition.to);
   const limited = transition.rule !== TransitionRule.None;
   assert.equal(limited, transition.count !== null);
   assert.equal(limited, transition.limit !== null);
+  assert.ok(
+    transition.lead_time_ms === null ||
+      (Number.isSafeInteger(transition.lead_time_ms) &&
+        transition.lead_time_ms >= NO_LEAD_TIME),
+  );
   return {
     "kanthord.node.state.from": transition.from,
     "kanthord.node.state.to": transition.to,
@@ -750,6 +783,9 @@ function transitionAttributes(transition: ExecutionTransition): Attributes {
           "kanthord.transition.count": transition.count,
           "kanthord.transition.limit": transition.limit,
         }),
+    ...(transition.lead_time_ms === null
+      ? {}
+      : { [OpeningAttribute.LeadTimeMs]: transition.lead_time_ms }),
   };
 }
 

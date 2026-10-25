@@ -62,6 +62,7 @@ export function transitionFixture(
     rule: TransitionRule.None,
     count: null,
     limit: null,
+    first_available_at: null,
     ...overrides,
   };
 }

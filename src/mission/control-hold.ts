@@ -169,6 +169,7 @@ export function pauseNode(
     node,
     now,
     RevokeCause.Human,
+    null,
     ends,
   );
   transition(tx, dependencies, mission, node, NodeState.Paused, now);

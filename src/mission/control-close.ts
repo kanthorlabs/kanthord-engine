@@ -125,6 +125,7 @@ export function overrideNode(
     node,
     now,
     RevokeCause.Human,
+    null,
     ends,
   );
   assert.ok(node.attempt !== null);
@@ -276,6 +277,7 @@ export function discardNode(
     node,
     now,
     RevokeCause.Human,
+    null,
     ends,
   );
   return closeHuman(

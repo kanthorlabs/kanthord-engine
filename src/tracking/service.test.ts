@@ -6,6 +6,13 @@ import { background, CancellationContext } from "../kernel/context.ts";
 import { OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import type { CallerContext } from "../kernel/operation.ts";
+import {
+  attributed,
+  CauseAssigner,
+  CauseCategory,
+  CauseSubcategory,
+  unattributed,
+} from "../kernel/cause.ts";
 import { IN_MEMORY_DATABASE, Store } from "../kernel/store.ts";
 import {
   AnalyticsBucket,
@@ -34,6 +41,7 @@ import {
   trackingOperations,
   type ExecutionOpening,
   type ExecutionTrace,
+  type RootSpanEnd,
   type ServerTrace,
   type SessionEntryRecord,
 } from "./contract.ts";
@@ -53,7 +61,15 @@ const OPENING: ExecutionOpening = {
   kind: ExecutionKind.Steps,
   worker_name: "coder@1",
   queue_wait_ms: 250,
+  worker_instance: null,
+  placement: null,
+  revision_turn: null,
+  dependency_count: null,
 };
+const WORKER_INSTANCE = "instance_1";
+const PLACEMENT = "local";
+const DEPENDENCY_COUNT = 2;
+const LEAD_TIME_MS = 4000;
 const SPAN = "2".repeat(16);
 const RUNTIME = "worker_registration_01JZ8R2B3C4D5E6F7G8H9J0K1M";
 const CREATED = 1000;
@@ -131,6 +147,10 @@ test("the root start stores the kind, the worker name and the queue wait, and th
     kind: ExecutionKind.Evaluation,
     worker_name: "judge@2",
     queue_wait_ms: 1500,
+    worker_instance: null,
+    placement: null,
+    revision_turn: null,
+    dependency_count: null,
   };
   service.executionOpened(TRACE, CREATED, opening);
   const page = service.spanList(
@@ -158,6 +178,7 @@ test("the root span opens at the claim and ends at the release", (t) => {
     end: ExecutionEnd.Finished,
     revoke_cause: null,
     stop: { reason: "provider_failed", code: RATE_LIMITED },
+    cause: null,
   });
   const page = service.spanList(
     TRACE.trace_id,
@@ -183,6 +204,7 @@ test("a transition span is a child of the root span with the states, the rule an
     rule: TransitionRule.ReworkLimit,
     count: 3,
     limit: 3,
+    lead_time_ms: null,
     transitioned_at: ENDED,
   };
   service.executionTransition(TRACE, transition);
@@ -231,6 +253,7 @@ test("a transition span with the rule none holds neither the count nor the limit
     rule: TransitionRule.None,
     count: null,
     limit: null,
+    lead_time_ms: null,
     transitioned_at: ENDED,
   });
   const span = service
@@ -259,6 +282,7 @@ for (const [cause, status, state] of [
       end: ExecutionEnd.Revoked,
       revoke_cause: cause,
       stop: null,
+      cause: null,
     });
     const root = service.spanList(
       TRACE.trace_id,
@@ -286,6 +310,7 @@ test("a revocation with an unknown cause is refused and writes no end", (t) => {
       end: ExecutionEnd.Revoked,
       revoke_cause: "other" as RevokeCause,
       stop: null,
+      cause: null,
     }),
   );
   const root = service.spanList(
@@ -294,6 +319,127 @@ test("a revocation with an unknown cause is refused and writes no end", (t) => {
     caller(store),
   ).items[0];
   assert.equal(root?.end_time, null);
+});
+
+function rootOf(
+  service: TrackingService,
+  store: Store,
+): Record<string, unknown> {
+  return service.spanList(TRACE.trace_id, { limit: PAGE_OF_ONE }, caller(store))
+    .items[0]!.attributes;
+}
+
+function endWith(service: TrackingService, cause: RootSpanEnd["cause"]): void {
+  service.executionOpened(TRACE, CREATED, OPENING);
+  service.executionEnded({
+    trace: TRACE,
+    ended_at: ENDED,
+    end: ExecutionEnd.Finished,
+    revoke_cause: null,
+    stop: { reason: "provider_failed", code: RATE_LIMITED },
+    cause,
+  });
+}
+
+test("a root end with an attributed cause holds the category, the subcategory and the assigner and no suspects", (t) => {
+  const { store, service } = harness(t);
+  endWith(
+    service,
+    attributed(CauseCategory.LlmProvider, CauseSubcategory.RateLimited),
+  );
+  const attributes = rootOf(service, store);
+  assert.equal(
+    attributes["kanthord.cause.category"],
+    CauseCategory.LlmProvider,
+  );
+  assert.equal(
+    attributes["kanthord.cause.subcategory"],
+    CauseSubcategory.RateLimited,
+  );
+  assert.equal(attributes["kanthord.cause.assigner"], CauseAssigner.Rule);
+  assert.equal("kanthord.cause.suspects" in attributes, false);
+});
+
+test("a root end with an unattributed cause holds the suspects in order", (t) => {
+  const { store, service } = harness(t);
+  endWith(
+    service,
+    unattributed([CauseCategory.Model, CauseCategory.Environment]),
+  );
+  const attributes = rootOf(service, store);
+  assert.equal(
+    attributes["kanthord.cause.category"],
+    CauseCategory.Unattributed,
+  );
+  assert.deepEqual(attributes["kanthord.cause.suspects"], [
+    CauseCategory.Model,
+    CauseCategory.Environment,
+  ]);
+  assert.equal("kanthord.cause.subcategory" in attributes, false);
+});
+
+test("a root end with a null cause writes no cause attribute", (t) => {
+  const { store, service } = harness(t);
+  endWith(service, null);
+  const attributes = rootOf(service, store);
+  assert.deepEqual(
+    Object.keys(attributes).filter((name) =>
+      name.startsWith("kanthord.cause."),
+    ),
+    [],
+  );
+});
+
+test("each non-null opening fact writes its attribute", (t) => {
+  const { store, service } = harness(t);
+  service.executionOpened(TRACE, CREATED, {
+    ...OPENING,
+    worker_instance: WORKER_INSTANCE,
+    placement: PLACEMENT,
+    revision_turn: true,
+    dependency_count: DEPENDENCY_COUNT,
+  });
+  const attributes = rootOf(service, store);
+  assert.equal(attributes["kanthord.worker.instance"], WORKER_INSTANCE);
+  assert.equal(attributes["kanthord.worker.placement"], PLACEMENT);
+  assert.equal(attributes["kanthord.queue.revision_turn"], true);
+  assert.equal(attributes["kanthord.node.dependency_count"], DEPENDENCY_COUNT);
+});
+
+test("a null opening fact writes no attribute", (t) => {
+  const { store, service } = harness(t);
+  service.executionOpened(TRACE, CREATED, OPENING);
+  const attributes = rootOf(service, store);
+  for (const name of [
+    "kanthord.worker.instance",
+    "kanthord.worker.placement",
+    "kanthord.queue.revision_turn",
+    "kanthord.node.dependency_count",
+  ])
+    assert.equal(name in attributes, false);
+});
+
+test("a transition with a lead time writes the lead time and a transition with none writes no lead time", (t) => {
+  const { store, service } = harness(t);
+  service.executionOpened(TRACE, CREATED, OPENING);
+  service.executionTransition(TRACE, {
+    ...TRANSITION,
+    lead_time_ms: LEAD_TIME_MS,
+  });
+  const span = service
+    .spanList(TRACE.trace_id, { limit: SPAN_PAGE }, caller(store))
+    .items.find((item) => item.operation === TRANSITION_SPAN);
+  assert.equal(span?.attributes["kanthord.node.lead_time_ms"], LEAD_TIME_MS);
+});
+
+test("a transition without a lead time writes no lead time attribute", (t) => {
+  const { store, service } = harness(t);
+  service.executionOpened(TRACE, CREATED, OPENING);
+  service.executionTransition(TRACE, TRANSITION);
+  const span = service
+    .spanList(TRACE.trace_id, { limit: SPAN_PAGE }, caller(store))
+    .items.find((item) => item.operation === TRANSITION_SPAN);
+  assert.equal("kanthord.node.lead_time_ms" in span!.attributes, false);
 });
 
 test("the root span end carries the stop detail", (t) => {
@@ -309,6 +455,7 @@ test("the root span end carries the stop detail", (t) => {
       code: "unavailable",
       detail: STOP_DETAIL,
     },
+    cause: null,
   });
   const root = service.spanList(
     TRACE.trace_id,
@@ -659,6 +806,7 @@ const TRANSITION = {
   rule: TransitionRule.None,
   count: null,
   limit: null,
+  lead_time_ms: null,
   transitioned_at: 2000,
 };
 
@@ -751,6 +899,7 @@ test("from and to bound the traces of a timeline by window overlap", (t) => {
     end: ExecutionEnd.Finished,
     revoke_cause: null,
     stop: null,
+    cause: null,
   });
   assert.deepEqual(idsOf({ from: ENDED }), [TRACE.trace_id]);
   assert.deepEqual(idsOf({ from: ENDED + 1 }), []);
