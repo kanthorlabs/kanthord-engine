@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
 import {
+  appendFileSync,
+  chmodSync,
   existsSync,
   mkdirSync,
   readFileSync,
@@ -11,6 +13,11 @@ import { join } from "node:path";
 import { simpleGit } from "simple-git";
 import { temporary } from "../../kernel/test-support.ts";
 import { background } from "../../kernel/context.ts";
+import {
+  RecordKind,
+  SpanStatus,
+  type TelemetryRecord,
+} from "../../tracking/contract.ts";
 import { BudgetLimit, ExecutionStopReason } from "../../scheduler/contract.ts";
 import {
   EndReason,
@@ -25,7 +32,15 @@ import {
   runTask,
   TaskResultKind,
 } from "./steps-implement.ts";
-import { TurnViolation } from "./turn-gate.ts";
+import { SpanOperation, SpanRecorder } from "./telemetry.ts";
+import {
+  checkpointGate,
+  gatedAgent,
+  GateMode,
+  TurnViolation,
+  ViolationEnd,
+} from "./turn-gate.ts";
+import { GIT_COMMIT_FAILED } from "./stop-codes.ts";
 import { WorkspaceKind } from "./workspace.ts";
 import {
   advanceBase,
@@ -56,6 +71,11 @@ const CRLF_FILE = "f.txt";
 const CRLF_CONTENT = "a\r\nb\r\n";
 const HIJACKED_MESSAGE = "hijack";
 const TURN_VIOLATION_LOG = "turn violation";
+const ONE_GATE_SPAN = 1;
+const ONE_TEXT = 1;
+const GATE_MESSAGE = "feat: gate work";
+const EMPTY_PROMPT = { text: "prompt", digest: "digest" };
+const SIGNER_OUTPUT = "signer refused the commit";
 
 type Fixture = Awaited<ReturnType<typeof fixture>>;
 
@@ -87,6 +107,66 @@ async function assertAtBefore(h: Fixture, before: string): Promise<void> {
   assert.equal(h.checkouts[0]!.head, before);
   assert.equal((await simpleGit(h.root).status()).isClean(), true);
   assert.equal(await remoteHead(h), before);
+}
+
+function recordSpans(h: Fixture): TelemetryRecord[] {
+  const records: TelemetryRecord[] = [];
+  (h.run as { spans: SpanRecorder }).spans = new SpanRecorder(
+    h.run.claim,
+    "coder-1",
+    { write: (batch) => records.push(...batch), flush: async () => {} },
+  );
+  return records;
+}
+
+function spansOf(records: readonly TelemetryRecord[], operation: string) {
+  const spans = records.flatMap((record) =>
+    record.kind === RecordKind.Span && record.operation === operation
+      ? [record]
+      : [],
+  );
+  const starts = spans.filter((record) => "start_time" in record);
+  const ends = spans.filter((record) => "end_time" in record);
+  assert.equal(ends.length, starts.length);
+  return starts.map((start) => ({
+    start,
+    end: ends.find((end) => end.span_id === start.span_id)!,
+    texts: records.flatMap((record) =>
+      record.kind === RecordKind.Text &&
+      ends.some(
+        (end) =>
+          end.span_id === start.span_id &&
+          end.text_ids?.includes(record.text_id),
+      )
+        ? [record.text]
+        : [],
+    ),
+  }));
+}
+
+function gateSpan(records: readonly TelemetryRecord[]) {
+  const spans = spansOf(records, SpanOperation.Gate);
+  assert.equal(spans.length, ONE_GATE_SPAN);
+  return spans[0]!;
+}
+
+async function gatedTurn(
+  h: Fixture,
+  t: TestContext,
+  work: () => Promise<void>,
+): Promise<void> {
+  t.mock.method(h.agent, "prompt", work);
+  await gatedAgent(h, GATE_MESSAGE).prompt(EMPTY_PROMPT);
+}
+
+function configureFailingSigner(h: Fixture, t: TestContext): void {
+  const signer = join(temporary(t), "signer");
+  writeFileSync(signer, `#!/bin/sh\necho "${SIGNER_OUTPUT}" >&2\nexit 1\n`);
+  chmodSync(signer, 0o755);
+  appendFileSync(
+    join(h.root, ".git", "config"),
+    `[commit]\n\tgpgsign = true\n[gpg]\n\tprogram = ${signer}\n`,
+  );
 }
 
 function violationEnd(end: ExecutionEnd, bodies: unknown[], code: string) {
@@ -454,4 +534,95 @@ test("the merge commit takes the template message and not the merge message file
     (await simpleGit(h.root).raw(["log", "-1", "--format=%s"])).trim(),
     MERGE_HEADER,
   );
+});
+
+test("a write turn that changes a file writes one gate span with the mode and the change", async (t) => {
+  const h = await fixture(t, [], []);
+  const records = recordSpans(h);
+  await gatedTurn(h, t, async () =>
+    writeFileSync(join(h.root, WORK_FILE), WORK_FILE),
+  );
+  const { start, end } = gateSpan(records);
+  assert.equal(start.attributes?.["kanthord.gate.mode"], GateMode.Write);
+  assert.equal(start.parent_span_id, h.run.claim.root_span_id);
+  assert.equal(end.status, SpanStatus.Ok);
+  assert.equal(end.attributes?.["kanthord.gate.changed"], true);
+  assert.equal("kanthord.gate.violation" in (end.attributes ?? {}), false);
+});
+
+test("a turn that changes nothing writes a gate span with no change", async (t) => {
+  const h = await fixture(t, [], []);
+  const records = recordSpans(h);
+  await gatedTurn(h, t, async () => {});
+  assert.equal(
+    gateSpan(records).end.attributes?.["kanthord.gate.changed"],
+    false,
+  );
+});
+
+test("a restored violation writes the violation and ends the gate span with Ok", async (t) => {
+  const h = await fixture(t, [], []);
+  const records = recordSpans(h);
+  await simpleGit(h.root).checkoutLocalBranch(OTHER_BRANCH);
+  assert.equal(
+    await checkpointGate(h, GATE_MESSAGE, background, ViolationEnd.Restore),
+    false,
+  );
+  const { start, end } = gateSpan(records);
+  assert.equal(start.attributes?.["kanthord.gate.mode"], GateMode.Checkpoint);
+  assert.equal(end.status, SpanStatus.Ok);
+  assert.equal(
+    end.attributes?.["kanthord.gate.violation"],
+    TurnViolation.BranchChanged,
+  );
+  assert.equal(end.attributes?.["kanthord.gate.changed"], false);
+});
+
+test("a stopping violation writes the violation and ends the gate span with Error and no text", async (t) => {
+  const h = await fixture(t, [], []);
+  const records = recordSpans(h);
+  await assert.rejects(
+    gatedTurn(h, t, async () => {
+      await simpleGit(h.root).checkoutLocalBranch(OTHER_BRANCH);
+    }),
+    { code: TurnViolation.BranchChanged },
+  );
+  const { end, texts } = gateSpan(records);
+  assert.equal(end.status, SpanStatus.Error);
+  assert.equal(
+    end.attributes?.["kanthord.gate.violation"],
+    TurnViolation.BranchChanged,
+  );
+  assert.deepEqual(texts, []);
+});
+
+test("the checkpoint gate writes the checkpoint mode", async (t) => {
+  const h = await fixture(t, [], []);
+  const records = recordSpans(h);
+  writeFileSync(join(h.root, WORK_FILE), WORK_FILE);
+  assert.equal(
+    await checkpointGate(h, GATE_MESSAGE, background, ViolationEnd.Stop),
+    true,
+  );
+  const { start, end } = gateSpan(records);
+  assert.equal(start.attributes?.["kanthord.gate.mode"], GateMode.Checkpoint);
+  assert.equal(end.attributes?.["kanthord.gate.changed"], true);
+});
+
+test("a failed gate commit ends the gate span with Error and the commit text and writes no git span", async (t) => {
+  const h = await fixture(t, [], []);
+  const records = recordSpans(h);
+  configureFailingSigner(h, t);
+  await assert.rejects(
+    gatedTurn(h, t, async () =>
+      writeFileSync(join(h.root, WORK_FILE), WORK_FILE),
+    ),
+    { code: GIT_COMMIT_FAILED },
+  );
+  const { end, texts } = gateSpan(records);
+  assert.equal(end.status, SpanStatus.Error);
+  assert.equal(texts.length, ONE_TEXT);
+  assert.ok(texts[0]!.startsWith(`${GIT_COMMIT_FAILED}:`));
+  assert.ok(texts[0]!.includes(SIGNER_OUTPUT));
+  assert.deepEqual(spansOf(records, SpanOperation.Git), []);
 });

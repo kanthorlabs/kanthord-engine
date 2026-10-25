@@ -9,7 +9,9 @@ import {
 } from "../../kernel/commit-message.ts";
 import type { TaskContent } from "../../mission/contract.ts";
 import type { WorkPrompt } from "../../agent/prompt-composer.ts";
-import { EndReason } from "./execution-run.ts";
+import { SpanStatus, type Attributes } from "../../tracking/contract.ts";
+import { EndReason, ExecutionStop } from "./execution-run.ts";
+import { gitFailure } from "./method-telemetry.ts";
 import type { NativeAgent } from "./native-agent.ts";
 import {
   abortMerge,
@@ -30,6 +32,7 @@ import {
 } from "./local-git.ts";
 import { MERGE_MARKERS_LEFT, TurnViolation } from "./stop-codes.ts";
 import type { StepsState } from "./steps-implement.ts";
+import { SpanOperation, type SpanEnd } from "./telemetry.ts";
 import { SCRATCH_DIRECTORY, type WorkspaceCheckout } from "./workspace.ts";
 
 export const GateMode = {
@@ -50,6 +53,9 @@ const SINGLE_CHECKOUT = 1;
 const SCRATCH_ENTRY = basename(SCRATCH_DIRECTORY);
 const DETACHED = "a detached HEAD";
 const MERGE_SUBJECT = "merge";
+const GATE_MODE_ATTRIBUTE = "kanthord.gate.mode";
+const GATE_CHANGED_ATTRIBUTE = "kanthord.gate.changed";
+const GATE_VIOLATION_ATTRIBUTE = "kanthord.gate.violation";
 
 export interface ConflictMerge {
   directory: string;
@@ -163,42 +169,78 @@ async function runGate(
   context: Context,
 ): Promise<boolean> {
   assert.equal(before.length, state.checkouts.length);
-  const remaining = remainingOf(state);
-  if (turn.mode === GateMode.Checkpoint)
-    for (const checkout of state.checkouts)
-      if (
-        (await mergeHeadOf(
-          state.input.env,
-          checkout.directory,
+  let violated: TurnViolation | null = null;
+  return state.run.spans.within(
+    {
+      key: state.run.spans.key(SpanOperation.Gate),
+      operation: SpanOperation.Gate,
+      attributes: { [GATE_MODE_ATTRIBUTE]: turn.mode },
+    },
+    async () => {
+      const remaining = remainingOf(state);
+      if (turn.mode === GateMode.Checkpoint)
+        for (const checkout of state.checkouts)
+          if (
+            (await mergeHeadOf(
+              state.input.env,
+              checkout.directory,
+              context,
+              remaining(),
+            )) !== null
+          )
+            await abortMerge(
+              state.input.env,
+              checkout.directory,
+              context,
+              remaining(),
+            );
+      for (const [index, checkout] of state.checkouts.entries()) {
+        const violation = await violationOf(
+          state,
+          checkout,
+          before[index]!,
+          mergeOf(turn, checkout),
           context,
-          remaining(),
-        )) !== null
-      )
-        await abortMerge(
-          state.input.env,
-          checkout.directory,
-          context,
-          remaining(),
         );
-  for (const [index, checkout] of state.checkouts.entries()) {
-    const violation = await violationOf(
-      state,
-      checkout,
-      before[index]!,
-      mergeOf(turn, checkout),
-      context,
-    );
-    if (violation === null) continue;
-    const detail = await violate(state, before, violation, context);
-    if (turn.violationEnd === ViolationEnd.Restore) return false;
-    state.run.stop(EndReason.OperationFailed, violation.code, detail);
-  }
-  let changed = false;
-  for (const [index, checkout] of state.checkouts.entries())
-    if (await settleCheckout(state, checkout, before[index]!, turn, context))
-      changed = true;
-  removeRootEntries(state);
-  return changed;
+        if (violation === null) continue;
+        violated = violation.code;
+        const detail = await violate(state, before, violation, context);
+        if (turn.violationEnd === ViolationEnd.Restore) return false;
+        state.run.stop(EndReason.OperationFailed, violation.code, detail);
+      }
+      let changed = false;
+      for (const [index, checkout] of state.checkouts.entries())
+        if (
+          await settleCheckout(state, checkout, before[index]!, turn, context)
+        )
+          changed = true;
+      removeRootEntries(state);
+      return changed;
+    },
+    (changed) => ({
+      status: SpanStatus.Ok,
+      attributes: {
+        [GATE_CHANGED_ATTRIBUTE]: changed,
+        ...violationAttributes(violated),
+      },
+    }),
+    (error) => gateFailure(violated)(error),
+  );
+}
+
+function violationAttributes(violation: TurnViolation | null): Attributes {
+  return violation === null ? {} : { [GATE_VIOLATION_ATTRIBUTE]: violation };
+}
+
+function gateFailure(
+  violation: TurnViolation | null,
+): (error: unknown) => SpanEnd {
+  return (error) => {
+    const attributes = violationAttributes(violation);
+    if (error instanceof ExecutionStop)
+      return { status: SpanStatus.Error, attributes };
+    return { ...gitFailure(error), attributes };
+  };
 }
 
 function mergeOf(
