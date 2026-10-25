@@ -10,6 +10,7 @@ import {
   TRACE_LIST_LIMIT_DEFAULT,
   trackingOperations,
 } from "./contract.ts";
+import { CAUSE_LABEL_OPERATION, causeLabelSpanId } from "./cause-label.ts";
 import { trackingMigrations } from "./migrations.ts";
 import { insertSpan } from "./trace-store.ts";
 import {
@@ -319,6 +320,7 @@ test("facets answer sorted distinct values and the project filter limits them", 
       agent_names: ["coder", "plan", "review"],
       models: ["Claude-3", "gpt-4"],
       error_types: ["rate_limited"],
+      cause_categories: [],
     },
   );
   assert.deepEqual(
@@ -328,6 +330,7 @@ test("facets answer sorted distinct values and the project filter limits them", 
       agent_names: ["plan"],
       models: ["gpt-4"],
       error_types: [],
+      cause_categories: [],
     },
   );
 });
@@ -448,5 +451,92 @@ test("each item answers the operation and the attributes of its root span, or nu
   assert.deepEqual(idsOf(store), [4, 5, 2, 3, 1]);
   assert.doesNotThrow(() =>
     trackingOperations.traceList.output.parse({ items, next_cursor: null }),
+  );
+});
+
+const MODEL_CAUSE = {
+  "kanthord.cause.category": "model",
+  "kanthord.cause.subcategory": "no_progress",
+  "kanthord.cause.assigner": "rule",
+};
+const PLAN_CAUSE = {
+  "kanthord.cause.category": "plan",
+  "kanthord.cause.subcategory": "oversized",
+  "kanthord.cause.assigner": "rule",
+};
+const LABEL_CAUSE = {
+  "kanthord.cause.category": "prompt",
+  "kanthord.cause.subcategory": "context_missing",
+};
+
+function insertCauses(store: Store): void {
+  insertSpanOf(store, 1, rootSpanIdOf(1), null, ROOT_OPERATION, MODEL_CAUSE);
+  insertSpanOf(store, 2, rootSpanIdOf(2), null, ROOT_OPERATION, PLAN_CAUSE);
+  insertSpanOf(
+    store,
+    2,
+    causeLabelSpanId(rootSpanIdOf(2)),
+    rootSpanIdOf(2),
+    CAUSE_LABEL_OPERATION,
+    LABEL_CAUSE,
+  );
+  insertSpanOf(
+    store,
+    3,
+    rootSpanIdOf(3),
+    null,
+    ROOT_OPERATION,
+    ROOT_ATTRIBUTES,
+  );
+}
+
+test("an item answers the root cause, the label cause with the assigner human, or null", (t) => {
+  const store = seeded(t);
+  insertCauses(store);
+  const items = store.transaction((tx) =>
+    listTraces(tx, queryOf(), null),
+  ).items;
+  const causeOf = (n: number) =>
+    items.find((item) => Number.parseInt(item.trace_id, 16) === n)?.cause;
+  assert.deepEqual(causeOf(1), {
+    category: "model",
+    subcategory: "no_progress",
+    assigner: "rule",
+  });
+  assert.deepEqual(causeOf(2), {
+    category: "prompt",
+    subcategory: "context_missing",
+    assigner: "human",
+  });
+  assert.equal(causeOf(3), null);
+  assert.equal(causeOf(4), null);
+  assert.doesNotThrow(() =>
+    trackingOperations.traceList.output.parse({ items, next_cursor: null }),
+  );
+});
+
+test("cause_category selects by the label over the root cause", (t) => {
+  const store = seeded(t);
+  insertCauses(store);
+  assert.deepEqual(idsOf(store, { cause_category: "model" }), [1]);
+  assert.deepEqual(idsOf(store, { cause_category: "prompt" }), [2]);
+  assert.deepEqual(idsOf(store, { cause_category: "plan" }), []);
+  assert.deepEqual(idsOf(store, { cause_category: "human" }), []);
+});
+
+test("the facets answer the categories of the effective causes, the label category included", (t) => {
+  const store = seeded(t);
+  insertCauses(store);
+  assert.deepEqual(
+    store.transaction((tx) => readFacets(tx, undefined)).cause_categories,
+    ["model", "prompt"],
+  );
+  assert.deepEqual(
+    store.transaction((tx) => readFacets(tx, PROJECT_B)).cause_categories,
+    [],
+  );
+  assert.deepEqual(
+    store.transaction((tx) => readFacets(tx, PROJECT_A)).cause_categories,
+    ["model", "prompt"],
   );
 });

@@ -41,6 +41,11 @@ import {
   emitOpenAPIFiles,
   serializeOpenAPIFile,
 } from "../../gateway/local.ts";
+import {
+  causeAssignerSchema,
+  causeCategorySchema,
+  causeSubcategorySchema,
+} from "../../kernel/cause.ts";
 import { errorSchema } from "../../kernel/errors.ts";
 import { createIdentity, createIdempotencyKey } from "../../kernel/identity.ts";
 import { HttpStatus } from "../../kernel/http.ts";
@@ -417,6 +422,7 @@ const EXECUTION_ENVIRONMENT_SOURCES = [
 const PROVIDER_PROPERTY = "provider";
 const ENUM_KEYWORD = "enum";
 const AGENT_PROVIDER_ENUM_COUNT = 3;
+const TRACE_LIST_FRAGMENT_EXCEPTION = "openapi/tracking/trace.list.yaml";
 const NAMED_FRAGMENT_EXCEPTIONS = new Set([
   ...MISSION_BLOCKED_CONTEXT_FRAGMENT_EXCEPTIONS.map(
     ([file]) => `openapi/mission/${file}.yaml`,
@@ -428,6 +434,7 @@ const NAMED_FRAGMENT_EXCEPTIONS = new Set([
   ...LEGACY_FRAGMENT_EXCEPTIONS,
   AGENT_PROVIDER_FRAGMENT_EXCEPTION,
   EXECUTION_SETUP_FRAGMENT_EXCEPTION,
+  TRACE_LIST_FRAGMENT_EXCEPTION,
 ]);
 const NULL_SCHEMA_TYPE = "null";
 const STRING_SCHEMA_TYPE = "string";
@@ -1168,6 +1175,27 @@ test("the agent enablement fragment exceeds the soft limit only through the agen
   assert.equal(enums.length, AGENT_PROVIDER_ENUM_COUNT);
   for (const values of enums)
     assert.deepEqual(values, agentProviderKindSchema.options);
+});
+test("the trace list fragment exceeds the soft limit only through the effective cause enums", () => {
+  const fragment = parse(
+    readFileSync(
+      join(dirname(openapiPath()), TRACE_LIST_FRAGMENT_EXCEPTION),
+      "utf8",
+    ),
+  );
+  const output = fragment.components.schemas["tracking.trace.list.Output"];
+  const [cause] = output.properties.items.items.properties.cause.anyOf;
+  assert.deepEqual(cause.properties.category.enum, causeCategorySchema.options);
+  assert.deepEqual(cause.properties.assigner.enum, causeAssignerSchema.options);
+  assert.deepEqual(
+    cause.properties.subcategory.enum,
+    causeSubcategorySchema.options,
+  );
+  assert.deepEqual(
+    cause.properties.suspects.items.enum,
+    causeCategorySchema.options,
+  );
+  assert.deepEqual(cause.required, ["category", "assigner"]);
 });
 test("the execution setup fragment exceeds the soft limit only through the environment documents", () => {
   const fragment = parse(

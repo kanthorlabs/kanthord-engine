@@ -63,9 +63,12 @@ components:
               type: string
               pattern: ^[0-9a-f]{32}$
             text_id:
-              type: string
-              maxLength: 128
-              pattern: ^[0-9a-f]{16}:[a-z][a-z0-9_.-]*$
+              anyOf:
+                - type: string
+                  maxLength: 128
+                  pattern: ^[0-9a-f]{16}:[a-z][a-z0-9_.-]*$
+                - type: string
+                  pattern: ^[0-9a-f]{16}\.cause_label:reason$
           required:
             - trace_id
             - text_id

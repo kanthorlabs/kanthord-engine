@@ -104,8 +104,11 @@ components:
                 type: string
                 pattern: ^[0-9a-f]{32}$
               span_id:
-                type: string
-                pattern: ^[0-9a-f]{16}$
+                anyOf:
+                  - type: string
+                    pattern: ^[0-9a-f]{16}$
+                  - type: string
+                    pattern: ^[0-9a-f]{16}\.cause_label$
               parent_span_id:
                 anyOf:
                   - type: string

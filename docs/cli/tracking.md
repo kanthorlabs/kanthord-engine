@@ -67,8 +67,9 @@ API-only operation:
 kanthord tracking [--help]
 
 kanthord tracking trace list [--project <project-id>] [--node <node-id>]
-  [--state <state>] [--query <text>] [--sort <field>] [--from <unix-ms>]
-  [--to <unix-ms>] [--limit <count>] [--cursor <opaque>]
+  [--state <state>] [--cause-category <category>] [--query <text>]
+  [--sort <field>] [--from <unix-ms>] [--to <unix-ms>] [--limit <count>]
+  [--cursor <opaque>]
   [--endpoint <url>] [--token <jwt>] [--help]
 
 kanthord tracking timeline list
@@ -119,7 +120,8 @@ rejects unknown arguments and options before work.
   whole value is at most 128 characters. A span record uses
   `<span_id>:start` and `<span_id>:end`. A text uses
   `<span_id>:<text name>`, and its record identity equals its text identity. A session entry record uses
-  `<session_id>:entry.<entry_id>`.
+  `<session_id>:entry.<entry_id>`. The one text identity outside this format is
+  `<root_span_id>.cause_label:reason`. See [`text get`](#text-get).
 - `EntryID` is 1 to 64 lower-case letters, digits and `-`. It starts with a
   letter or a digit.
 - `Timestamp` is a JSON integer of Unix milliseconds in UTC.
@@ -131,10 +133,14 @@ rejects unknown arguments and options before work.
 ## `trace list`
 
 Reads one page of trace summaries, newest first by default. Each item is a
-trace summary of [`trace get`](#trace-get) with two more fields:
-`root_operation` and `root_attributes`. They hold the `operation` and the
-`attributes` of the root span. Both are `null` while the store holds no root
-span. `next_cursor` is `null` on the last page.
+trace summary of [`trace get`](#trace-get) with three more fields:
+`root_operation`, `root_attributes` and `cause`. The first two hold the
+`operation` and the `attributes` of the root span. Both are `null` while the
+store holds no root span. `cause` is the effective cause of the trace as
+`{ category, subcategory, assigner, suspects }`, or `null` when the trace has no
+cause. The cause of the cause label span wins when the store holds one, and its
+assigner is `human`. Otherwise `cause` is the cause that the root span end
+holds. `next_cursor` is `null` on the last page.
 
 The API filters of `tracking.trace.list` combine with AND:
 
@@ -148,6 +154,7 @@ The API filters of `tracking.trace.list` combine with AND:
 | `model`            | The trace has this value in `models`.                                                                                                                   |
 | `error_type`       | The trace has this value in `error_types`.                                                                                                              |
 | `state`            | The trace has this state: `open`, `ok` or `error`.                                                                                                      |
+| `cause_category`   | The effective cause of the trace has this category. The label span wins over the root span.                                                             |
 | `q`                | A case-insensitive text of 1 to 200 characters. It matches a part of the trace ID, execution, node, worker, stop reason, agents, models or error types. |
 | `from`             | The trace ends at or after this `Timestamp`, or has no `ended_at`.                                                                                      |
 | `to`               | The trace starts at or before this `Timestamp`. The start is `started_at`, else `created_at`.                                                           |
@@ -163,8 +170,10 @@ start to its `ended_at`, and stays open with no `ended_at`. A missing bound
 leaves that side open. A `from` after `to` answers `400`
 `tracking.filter.range_invalid`.
 
-The CLI exposes `--project`, `--node`, `--state`, `--query`, `--sort`, `--from`
-and `--to`. `--query` sets `q` and has 1 to 200 characters. `--from` and `--to`
+The CLI exposes `--project`, `--node`, `--state`, `--cause-category`, `--query`,
+`--sort`, `--from` and `--to`. `--cause-category` sets `cause_category`. An
+invalid category exits 1 with `cli.tracking.trace.list.invalid_cause_category`.
+`--query` sets `q` and has 1 to 200 characters. `--from` and `--to`
 set `from` and `to` and take Unix milliseconds. An invalid value exits 1 with
 `cli.tracking.trace.list.invalid_query`. The other filters are API-only query
 fields.
@@ -315,9 +324,10 @@ The CLI exposes `--measure`, `--operation`, `--group-by`, `--bucket`, `--project
 
 ## `facet get`
 
-Reads the distinct values that a filter form offers. The answer holds the four
-arrays `worker_names`, `agent_names`, `models` and `error_types`. Each array
-holds at most 200 values in ascending order. `--project` limits the values to
+Reads the distinct values that a filter form offers. The answer holds the five
+arrays `worker_names`, `agent_names`, `models`, `error_types` and
+`cause_categories`. `cause_categories` holds the categories of the effective
+causes of the traces. Each array holds at most 200 values in ascending order. `--project` limits the values to
 the traces of one project.
 
 ## `trace get`
@@ -368,14 +378,17 @@ Reads one page of the stored spans of a trace, oldest first. `--limit` is 1 to
 1000 and defaults to 500. `next_cursor` is `null` on the last page. Each span
 holds `trace_id`, `span_id`, `parent_span_id`, `producer`, `origin`,
 `operation`, `start_time`, `end_time`, `status`, `attributes`, `events`,
-`links`, `text_ids` and `created_at`. A span with a start and no end is an
-operation that still runs. The parent of a span can be absent from the page or
+`links`, `text_ids` and `created_at`. The cause label span of a trace has the
+span identity `<root_span_id>.cause_label`, the one identity outside the
+`SpanID` format. A span with a start and no end is an operation that still runs. The parent of a span can be absent from the page or
 from the store.
 
 ## `text get`
 
 Reads one telemetry text. The answer holds `trace_id`, `text_id`, `content` and
-`created_at`. A telemetry text has no state of its own. It expires with its
+`created_at`. The reason text of a cause label has the text identity
+`<root_span_id>.cause_label:reason`, the one text identity outside the `TextID`
+format. A telemetry text has no state of its own. It expires with its
 trace: one delete of the trace row removes its spans, texts and records. A
 trace expires `tracking.retention_days` after its creation. An
 unknown text answers `404` `tracking.text.not_found`. An unknown or deleted
@@ -491,6 +504,7 @@ Every remote command can also answer the shared codes of
 | local | `cli.tracking.trace.list.invalid_project_id`         | `--project` is not a `ProjectID`.                                                                                                    | trace list                                               |
 | local | `cli.tracking.trace.list.invalid_node_id`            | `--node` is not a `NodeID`.                                                                                                          | trace list                                               |
 | local | `cli.tracking.trace.list.invalid_state`              | `--state` is not `open`, `ok` or `error`.                                                                                            | trace list                                               |
+| local | `cli.tracking.trace.list.invalid_cause_category`     | `--cause-category` is not a cause category.                                                                                          | trace list                                               |
 | local | `cli.tracking.trace.list.invalid_sort`               | `--sort` is not a sort field.                                                                                                        | trace list                                               |
 | local | `cli.tracking.trace.list.invalid_query`              | `--query` is empty or has more than 200 characters, or `--from` or `--to` is not Unix milliseconds.                                  | trace list                                               |
 | local | `cli.tracking.timeline.list.invalid_query`           | `--execution`, `--node` and `--project` do not hold exactly one scope, or `--from` or `--to` is not Unix milliseconds.               | timeline list                                            |
@@ -508,7 +522,7 @@ Every remote command can also answer the shared codes of
 | local | `cli.tracking.trace.get.invalid_trace_id`            | The `<trace-id>` argument is not a `TraceID`.                                                                                        | trace get                                                |
 | local | `cli.tracking.span.list.invalid_trace_id`            | The `<trace-id>` argument is not a `TraceID`.                                                                                        | span list                                                |
 | local | `cli.tracking.text.get.invalid_trace_id`             | The `<trace-id>` argument is not a `TraceID`.                                                                                        | text get                                                 |
-| local | `cli.tracking.text.get.invalid_text_id`              | The `<text-id>` argument is not a `TextID`.                                                                                          | text get                                                 |
+| local | `cli.tracking.text.get.invalid_text_id`              | The `<text-id>` argument is not a `TextID` or a cause label reason text identity.                                                    | text get                                                 |
 | local | `cli.tracking.trace.get.token_required`              | No token resolves from `--token`, `KANTHORD_TOKEN` or `cli.yaml`.                                                                    | trace get                                                |
 | local | `cli.tracking.span.list.token_required`              | No token resolves from `--token`, `KANTHORD_TOKEN` or `cli.yaml`.                                                                    | span list                                                |
 | local | `cli.tracking.text.get.token_required`               | No token resolves from `--token`, `KANTHORD_TOKEN` or `cli.yaml`.                                                                    | text get                                                 |

@@ -91,9 +91,14 @@ components:
           type: array
           items:
             type: string
+        cause_categories:
+          type: array
+          items:
+            type: string
       required:
         - worker_names
         - agent_names
         - models
         - error_types
+        - cause_categories
       additionalProperties: false
