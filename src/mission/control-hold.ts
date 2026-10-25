@@ -22,6 +22,7 @@ import {
   transition,
   controlResult,
   closeExternalAttempt,
+  actedOn,
 } from "./control.ts";
 import type { Dependencies } from "./service.ts";
 
@@ -71,7 +72,15 @@ export function readyNode(
   requireReady(tx, node);
   if (node.attempt === NO_ATTEMPT) openCurrentAttempt(tx, nodeId, actor, now);
   transition(tx, dependencies, mission, node, NodeState.Waiting, now);
-  return controlResult(tx, dependencies, nodeId, null, actor, now);
+  return actedOn(
+    tx,
+    mission,
+    node,
+    body.reason,
+    now,
+    controlResult(tx, dependencies, nodeId, null, actor, now),
+    null,
+  );
 }
 
 export function resumeNode(
@@ -114,7 +123,15 @@ export function resumeNode(
   const current = readNode(tx, nodeId);
   assert.ok(current);
   const outcome = closeExternalAttempt(tx, dependencies, current, now);
-  return controlResult(tx, dependencies, nodeId, outcome, actor, now);
+  return actedOn(
+    tx,
+    mission,
+    node,
+    body.reason,
+    now,
+    controlResult(tx, dependencies, nodeId, outcome, actor, now),
+    null,
+  );
 }
 
 const PAUSE_STATES = [
@@ -146,7 +163,22 @@ export function pauseNode(
     now,
     ends,
   );
-  endLiveClaim(tx, dependencies, node, now, RevokeCause.Human, ends);
+  const claim = endLiveClaim(
+    tx,
+    dependencies,
+    node,
+    now,
+    RevokeCause.Human,
+    ends,
+  );
   transition(tx, dependencies, mission, node, NodeState.Paused, now);
-  return controlResult(tx, dependencies, nodeId, null, actor, now);
+  return actedOn(
+    tx,
+    mission,
+    node,
+    body.reason,
+    now,
+    controlResult(tx, dependencies, nodeId, null, actor, now),
+    claim?.execution.trace ?? null,
+  );
 }

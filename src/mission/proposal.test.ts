@@ -14,6 +14,7 @@ import {
   StartPoint,
   type ProposalContent,
 } from "./contract.ts";
+import { Act, ActAttribute } from "./act-telemetry.ts";
 import { ControlError } from "./control.ts";
 import { getRevision } from "./node-read.ts";
 import {
@@ -32,7 +33,11 @@ import {
   readNode,
   setNodeState,
 } from "./store.ts";
-import { databaseSnapshot, executionHarness } from "./test-support.ts";
+import {
+  actCalls,
+  databaseSnapshot,
+  executionHarness,
+} from "./test-support.ts";
 
 const IDENTITY = testHumanIdentity("ulrich", "Ulrich", "token");
 const FIRST_REVISION = 1;
@@ -43,6 +48,8 @@ const NO_PROPOSALS = 0;
 const SINGLE_PROPOSAL = 1;
 const TWO_PROPOSALS = 2;
 const NOW = 100;
+const NO_ACTS = 0;
+const ONE_ACT = 1;
 const DEPENDENCY_TAG = "platform.linux";
 const VALIDATION = "gateway.request.validation_failed";
 const RESOURCE_IDENTITY = "repository:github:owner/repo";
@@ -412,4 +419,54 @@ test("approving refuses an unknown proposal, a stale version and a changed propo
     before.length,
   );
   assert.equal((await h.list()).items[0]!.approved_at, null);
+});
+
+test("an approve writes one act trace that names the created node and no state before", async (t) => {
+  const h = await fixture(t);
+  await h.submit([h.proposal()]);
+  const proposalId = (await h.list()).items[0]!.id;
+  const result = await h.invoke("proposal.approve", {
+    params: { proposal_id: proposalId },
+    query: {},
+    body: { expected_mission_version: FIRST_REVISION, reason: "Fix it." },
+  });
+  const createdId = result.created.revisions[0]!.node_id;
+  const written = actCalls(h);
+  assert.equal(written.length, ONE_ACT);
+  const [trace, contribution] = written[0]!;
+  assert.equal(contribution.operation, Act.ApproveProposal);
+  assert.equal(trace.project_id, h.project_id);
+  assert.equal(trace.node_id, createdId);
+  assert.equal(trace.attempt, null);
+  assert.equal(contribution.attributes[ActAttribute.NodeId], createdId);
+  assert.equal(ActAttribute.StateFrom in contribution.attributes, false);
+  assert.equal(
+    contribution.attributes[ActAttribute.MissionVersion],
+    result.created.mission_version,
+  );
+  assert.equal(
+    contribution.attributes[ActAttribute.StateTo],
+    NodeState.Available,
+  );
+  assert.deepEqual(contribution.texts, [
+    { text_id: `${trace.root_span_id}:reason`, text: "Fix it." },
+  ]);
+});
+
+test("an approve without a reason writes an act trace without a text", async (t) => {
+  const h = await fixture(t);
+  await h.submit([h.proposal()]);
+  await h.approve((await h.list()).items[0]!.id);
+  assert.equal(actCalls(h)[0]![1].texts, undefined);
+});
+
+test("a refused approve writes no act trace", async (t) => {
+  const h = await fixture(t);
+  await h.submit([h.proposal()]);
+  const proposalId = (await h.list()).items[0]!.id;
+  await refusal(
+    h.approve(proposalId, FIRST_REVISION + FIRST_REVISION),
+    MissionErrorCode.VersionConflict,
+  );
+  assert.equal(actCalls(h).length, NO_ACTS);
 });

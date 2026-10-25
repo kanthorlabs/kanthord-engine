@@ -14,6 +14,8 @@ import {
   type evidenceDeleteSchema,
 } from "./contract.ts";
 import { isTerminal } from "./admission.ts";
+import { Act, recordAct } from "./act-telemetry.ts";
+import type { ExecutionTrace } from "../tracking/contract.ts";
 import { objectContentSchema } from "./evidence-content-read.ts";
 import { requireTextBound } from "./execution.ts";
 import { requireNode } from "./node-read.ts";
@@ -42,6 +44,8 @@ import {
 import type { Dependencies } from "./service.ts";
 import { requireMission } from "./write.ts";
 import { authorizeStorage } from "./authorization.ts";
+
+const NO_ATTEMPT = 0;
 
 export type EvidenceDelete = z.infer<typeof evidenceDeleteSchema>;
 
@@ -179,7 +183,7 @@ export async function removeEvidence(
   for (const asset of prepared.assets)
     await deleteObject(dependencies, caller, asset);
   const ends = executionEnds();
-  const result = caller.commit((tx) => {
+  const facts = caller.commit((tx) => {
     const now = Date.now();
     const { evidence, node, mission } = prepareEvidenceDelete(
       tx,
@@ -194,19 +198,38 @@ export async function removeEvidence(
       node.state !== NodeState.Paused &&
       !isTerminal(node.state);
     deleteEvidence(tx, evidenceId);
+    let from = node.state;
+    let revoked: ExecutionTrace | null = null;
     if (hold) {
       settleClaim(tx, dependencies.schedulerClaims, node.id, now, ends);
       const settled = requireNode(tx, node.id);
-      endLiveClaim(tx, dependencies, settled, now, RevokeCause.Human, ends);
+      from = settled.state;
+      revoked =
+        endLiveClaim(tx, dependencies, settled, now, RevokeCause.Human, ends)
+          ?.execution.trace ?? null;
       transition(tx, dependencies, mission, settled, NodeState.Paused, now);
     }
-    return null;
+    const current = requireNode(tx, node.id);
+    assert.ok(from && current.state);
+    return {
+      project_id: mission.project_id,
+      node_id: node.id,
+      attempt: current.attempt ?? NO_ATTEMPT,
+      acted_at: now,
+      mission_version: requireMission(tx, mission.id).version,
+      from,
+      to: current.state,
+      reason: body.reason ?? null,
+      revoked,
+      evidence_id: evidenceId,
+    };
   });
   reportEnds(dependencies, ends);
+  recordAct(dependencies, Act.DeleteEvidence, facts);
   dependencies.logger.info(
     { evidence_id: evidenceId, ...deletion(caller, body) },
     "evidence deleted",
   );
   dependencies.wakeup.wake(prepared.mission.project_id);
-  return result;
+  return null;
 }
