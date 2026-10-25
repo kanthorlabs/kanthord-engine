@@ -453,8 +453,8 @@ export function composeServices(options: {
       }),
     },
     telemetry: {
-      executionOpened: (trace, createdAt) =>
-        tracking.executionOpened(trace, createdAt),
+      executionOpened: (trace, createdAt, opening) =>
+        tracking.executionOpened(trace, createdAt, opening),
       executionEnded: (end) => tracking.executionEnded(end),
       executionTransition: (trace, transition) =>
         tracking.executionTransition(trace, transition),

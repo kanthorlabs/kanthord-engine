@@ -23,6 +23,11 @@ import {
 import { settleNode, settleRuntime } from "./settlement.ts";
 import { admits } from "./match.ts";
 import type { InstanceQueue } from "./instance-queue.ts";
+import { executionOpening } from "./telemetry.ts";
+import {
+  executionKindSchema,
+  type ExecutionOpening,
+} from "../tracking/contract.ts";
 
 export const ClaimOutcome = {
   Running: "running",
@@ -35,6 +40,7 @@ export type ClaimOutcome = (typeof ClaimOutcome)[keyof typeof ClaimOutcome];
 export interface ClaimResult {
   outcome: ClaimOutcome;
   row: ExecutionRow | null;
+  opening: ExecutionOpening | null;
   settled: boolean;
   lost: EndedExecution[];
 }
@@ -49,8 +55,9 @@ function claimResult(
   outcome: ClaimOutcome,
   row: ExecutionRow | null,
   lost: EndedExecution[],
+  opening: ExecutionOpening | null = null,
 ): ClaimResult {
-  return { outcome, row, settled: lost.length > NO_LOSSES, lost };
+  return { outcome, row, opening, settled: lost.length > NO_LOSSES, lost };
 }
 
 type Binding = NonNullable<
@@ -65,18 +72,19 @@ function selectJob(
   dependencies: Dependencies,
   identity: MachineIdentity,
   claimant: Claimant,
+  workerName: string,
   executionId: string,
   now: number,
 ) {
   assert.ok(identity.runtimeIdentity);
   const jobs = tx.database
     .prepare(
-      "SELECT node_id FROM scheduler_job WHERE project_id = ? AND (available_at IS NULL OR available_at <= ?) ORDER BY priority DESC, id ASC",
+      "SELECT node_id, queued_at FROM scheduler_job WHERE project_id = ? AND (available_at IS NULL OR available_at <= ?) ORDER BY priority DESC, id ASC",
     )
-    .all(identity.projectId, now) as { node_id: string }[];
+    .all(identity.projectId, now) as { node_id: string; queued_at: number }[];
   const lost: EndedExecution[] = [];
   for (let index = 0; index < jobs.length; index++) {
-    const nodeId = jobs[index]!.node_id;
+    const { node_id: nodeId, queued_at: queuedAt } = jobs[index]!;
     const ended = settleNode(tx, dependencies, nodeId, now);
     if (ended !== null) {
       lost.push(ended);
@@ -103,9 +111,20 @@ function selectJob(
       },
       now,
     );
-    if (claim) return { node_id: nodeId, claim, lost };
+    if (claim)
+      return {
+        node_id: nodeId,
+        claim,
+        opening: executionOpening(
+          executionKindSchema.parse(claim.kind),
+          workerName,
+          queuedAt,
+          now,
+        ),
+        lost,
+      };
   }
-  return { node_id: null, claim: null, lost };
+  return { node_id: null, claim: null, opening: null, lost };
 }
 
 function acquire(
@@ -129,6 +148,7 @@ function acquire(
       tags: binding.tags,
       environment: binding.environment,
     },
+    binding.worker_name,
     executionId,
     now,
   );
@@ -163,7 +183,12 @@ function acquire(
     stop: null,
   };
   insertExecution(tx, row);
-  return claimResult(ClaimOutcome.Claimed, row, selected.lost);
+  return claimResult(
+    ClaimOutcome.Claimed,
+    row,
+    selected.lost,
+    selected.opening,
+  );
 }
 
 function admit(
@@ -234,7 +259,12 @@ function admit(
     choice.pins,
     now,
   );
-  return claimResult(result.outcome, result.row, [...lost, ...result.lost]);
+  return claimResult(
+    result.outcome,
+    result.row,
+    [...lost, ...result.lost],
+    result.opening,
+  );
 }
 
 export function claimOnce(

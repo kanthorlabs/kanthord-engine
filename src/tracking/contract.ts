@@ -343,8 +343,23 @@ export interface ExecutionTransition {
   count: number | null;
   limit: number | null;
 }
+export const ExecutionKind = {
+  Steps: "steps",
+  Evaluation: "evaluation",
+} as const;
+export const executionKindSchema = z.enum(ExecutionKind);
+export type ExecutionKind = z.infer<typeof executionKindSchema>;
+export interface ExecutionOpening {
+  kind: ExecutionKind;
+  worker_name: string;
+  queue_wait_ms: number;
+}
 export interface ExecutionTelemetry {
-  executionOpened(trace: ExecutionTrace, createdAt: number): void;
+  executionOpened(
+    trace: ExecutionTrace,
+    createdAt: number,
+    opening: ExecutionOpening,
+  ): void;
   executionEnded(end: RootSpanEnd): void;
   executionTransition(
     trace: ExecutionTrace,
