@@ -144,7 +144,7 @@ export function processTreeCommand(): string {
   return [
     `sh -c 'sleep ${ESCAPED_SECONDS} & echo $!; sleep ${ESCAPED_SECONDS}' &`,
     `echo $!`,
-    `sh -c 'set -m; sleep ${ESCAPED_SECONDS} & echo $!; sleep ${ESCAPED_SECONDS}' &`,
+    `bash -c 'set -m; sleep ${ESCAPED_SECONDS} & echo $!; sleep ${ESCAPED_SECONDS}' 2>/dev/null &`,
     `echo $!`,
     `wait`,
   ].join("\n");
