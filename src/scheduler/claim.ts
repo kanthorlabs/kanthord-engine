@@ -50,6 +50,8 @@ export interface ClaimDependencies extends Dependencies {
 const NO_INSTANCES = 0;
 const NO_LOSSES = 0;
 const MILLISECONDS_PER_SECOND = 1000;
+const RESOURCE_IDENTITY_SEPARATOR = ":";
+const INSTANCE_KEY_SEPARATOR = "/";
 
 function claimResult(
   outcome: ClaimOutcome,
@@ -58,6 +60,14 @@ function claimResult(
   opening: ExecutionOpening | null = null,
 ): ClaimResult {
   return { outcome, row, opening, settled: lost.length > NO_LOSSES, lost };
+}
+
+export function instanceKeyOf(identity: MachineIdentity): string {
+  if (identity.instanceId) return identity.name;
+  const bindingName = identity.resourceIdentity
+    .split(RESOURCE_IDENTITY_SEPARATOR)
+    .at(-1)!;
+  return `${bindingName}${INSTANCE_KEY_SEPARATOR}${identity.name}`;
 }
 
 type Binding = NonNullable<
@@ -123,7 +133,7 @@ function selectJob(
           queuedAt,
           now,
           {
-            worker_instance: identity.instanceId ? identity.name : null,
+            worker_instance: instanceKeyOf(identity),
             placement,
             revision_turn: openingFacts?.revision_turn ?? null,
             dependency_count: openingFacts?.dependency_count ?? null,

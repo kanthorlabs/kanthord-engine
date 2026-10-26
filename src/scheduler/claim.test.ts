@@ -8,7 +8,7 @@ import { test, type TestContext } from "node:test";
 import { createIdentity } from "../kernel/identity.ts";
 import { testMachineIdentity } from "../kernel/test-identity.ts";
 import { AgentChoiceKind, ClaimNodeState, ClaimIntent } from "./contract.ts";
-import { claimOnce, ClaimOutcome } from "./claim.ts";
+import { claimOnce, ClaimOutcome, instanceKeyOf } from "./claim.ts";
 import { InstanceQueue } from "./instance-queue.ts";
 import {
   endExecution,
@@ -43,6 +43,8 @@ const PLACEMENT = "container";
 const DEPENDENCIES = 3;
 const CLAIM_METHOD = "claim";
 const FIRST_JOB = 0;
+const DEFAULT_INSTANCE_KEY = "general/worker";
+const SLOT_INSTANCE_KEY = "coder/server slot 0";
 const QUEUE_TICK_MS = 2;
 const BACKOFF_MS = DEFAULT_STOP_BACKOFF_SECONDS * 1000;
 
@@ -836,7 +838,7 @@ test("a claim of a Waiting node opens the execution with evaluation and the wait
     kind: "evaluation",
     worker_name: "coder@1",
     queue_wait_ms: WAITED_MS,
-    worker_instance: null,
+    worker_instance: DEFAULT_INSTANCE_KEY,
     placement: null,
     revision_turn: false,
     dependency_count: 0,
@@ -855,12 +857,22 @@ test("the opening names the instance of a claimant with an instance", (t) => {
   assert.equal(result.opening!.worker_instance, instance.name);
 });
 
-test("the opening holds no instance for a claimant with no instance", (t) => {
+test("the opening keys a claimant with no instance by binding name and identity name", (t) => {
   const h = claimHarness(t);
   h.store.transaction((tx) =>
     h.service.insert(tx, h.row.node_id, h.row.project_id, 0),
   );
-  assert.equal(h.claim().opening!.worker_instance, null);
+  assert.equal(h.claim().opening!.worker_instance, DEFAULT_INSTANCE_KEY);
+});
+
+test("instanceKeyOf takes the binding name from the last segment of the resource identity", (t) => {
+  const h = claimHarness(t);
+  const slot = {
+    ...h.identity,
+    name: "server slot 0",
+    resourceIdentity: "worker:kanthord:coder",
+  };
+  assert.equal(instanceKeyOf(slot), SLOT_INSTANCE_KEY);
 });
 
 test("the opening holds the placement of the binding and the facts of Mission", (t) => {

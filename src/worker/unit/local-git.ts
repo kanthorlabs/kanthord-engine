@@ -557,6 +557,26 @@ export async function addedFiles(
   return output.split("\n").filter((line) => line.trim() !== CLEAN_STATUS);
 }
 
+export async function changedFiles(
+  env: NodeJS.ProcessEnv,
+  directory: string,
+  from: string,
+  to: string,
+  context: Context,
+  deadlineMs: number,
+): Promise<string[]> {
+  assert.ok(from && !from.startsWith("-"));
+  assert.ok(to && !to.startsWith("-"));
+  const output = await run(
+    env,
+    directory,
+    ["diff", "--name-only", "-z", "--no-renames", from, to, "--"],
+    context,
+    deadlineMs,
+  );
+  return output.split(NUL).filter(Boolean);
+}
+
 export async function isAncestor(
   env: NodeJS.ProcessEnv,
   directory: string,
