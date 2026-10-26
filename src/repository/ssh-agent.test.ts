@@ -119,6 +119,17 @@ async function agentEnds(socket: string, signal: AbortSignal): Promise<void> {
     await delay(AGENT_EXIT_POLL_MS, undefined, { signal });
 }
 
+async function slowAgentLives(): Promise<boolean> {
+  return (await commandLines()).some(
+    (line) => line.trim() === `sleep ${SLOW_AGENT_SECONDS}`,
+  );
+}
+
+async function slowAgentEnds(signal: AbortSignal): Promise<void> {
+  while (await slowAgentLives())
+    await delay(AGENT_EXIT_POLL_MS, undefined, { signal });
+}
+
 async function identityExit(socket: string): Promise<number> {
   try {
     await execFileAsync("ssh-add", ["-l"], {
@@ -295,7 +306,7 @@ test("withSshAgent waits for an agent socket that appears after 5 s", async () =
   });
 });
 
-test("a cancel ends the wait for a slow agent socket and leaves no agent directory", async () => {
+test("a cancel ends the wait for a slow agent socket and leaves no agent directory", async (t) => {
   await withSlowAgent(async () => {
     const context = new CancellationContext();
     const started = Date.now();
@@ -306,6 +317,7 @@ test("a cancel ends the wait for a slow agent socket and leaves no agent directo
       }),
       { code: CANCELLED_CODE },
     );
+    await slowAgentEnds(t.signal);
     assert.ok(Date.now() - started < SLOW_AGENT_SECONDS * MS_PER_SECOND);
     assert.deepEqual(
       (await readdir(scratch)).filter((name) =>
