@@ -41,6 +41,8 @@ const providerSubcategories: Readonly<Record<string, CauseSubcategory>> = {
 const environmentSubcategories: Readonly<Record<string, CauseSubcategory>> = {
   [EnvironmentFailure.SetupFailed]: CauseSubcategory.SetupFailed,
   [EnvironmentFailure.CommandAbsent]: CauseSubcategory.CommandAbsent,
+  [EnvironmentFailure.AffectedInvalid]: CauseSubcategory.AffectedInvalid,
+  [EnvironmentFailure.AffectedTimeout]: CauseSubcategory.AffectedTimeout,
 };
 
 const modelFaultCodes: readonly string[] = [

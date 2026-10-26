@@ -71,6 +71,8 @@ export type ProviderFailure =
 export const EnvironmentFailure = {
   SetupFailed: "setup_failed",
   CommandAbsent: "command_absent",
+  AffectedInvalid: "affected_invalid",
+  AffectedTimeout: "affected_timeout",
 } as const;
 export type EnvironmentFailure =
   (typeof EnvironmentFailure)[keyof typeof EnvironmentFailure];

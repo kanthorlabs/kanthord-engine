@@ -45,6 +45,8 @@ export const CauseSubcategory = {
   JudgementWrong: "judgement_wrong",
   SetupFailed: "setup_failed",
   CommandAbsent: "command_absent",
+  AffectedInvalid: "affected_invalid",
+  AffectedTimeout: "affected_timeout",
   FlakyVerification: "flaky_verification",
   VerificationHang: "verification_hang",
   RepositoryHook: "repository_hook",
@@ -99,6 +101,8 @@ export const CAUSE_SUBCATEGORIES: Readonly<
   [CauseCategory.Environment]: [
     CauseSubcategory.SetupFailed,
     CauseSubcategory.CommandAbsent,
+    CauseSubcategory.AffectedInvalid,
+    CauseSubcategory.AffectedTimeout,
     CauseSubcategory.FlakyVerification,
     CauseSubcategory.VerificationHang,
     CauseSubcategory.RepositoryHook,

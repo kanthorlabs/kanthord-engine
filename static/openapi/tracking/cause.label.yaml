@@ -117,6 +117,8 @@ components:
                 - judgement_wrong
                 - setup_failed
                 - command_absent
+                - affected_invalid
+                - affected_timeout
                 - flaky_verification
                 - verification_hang
                 - repository_hook
@@ -200,6 +202,8 @@ components:
                 - judgement_wrong
                 - setup_failed
                 - command_absent
+                - affected_invalid
+                - affected_timeout
                 - flaky_verification
                 - verification_hang
                 - repository_hook
