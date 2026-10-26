@@ -44,8 +44,8 @@ const SAMPLES = 5;
 const SLOW_AGENT_SECONDS = 6;
 const FAILED_AGENT_MS_MAX = 5000;
 const SCRIPT_MODE = 0o700;
-const CANCEL_AFTER_MS = 100;
-const MS_PER_SECOND = 1000;
+const SLOW_AGENT_START_MS = 15_000;
+const CANCEL_END_MS = 2000;
 const CANCELLED_CODE = "system.context.cancelled";
 const LIFECYCLE_RUNS = 3;
 const PARALLEL_RUNS = 8;
@@ -128,6 +128,20 @@ async function slowAgentLives(): Promise<boolean> {
 async function slowAgentEnds(signal: AbortSignal): Promise<void> {
   while (await slowAgentLives())
     await delay(AGENT_EXIT_POLL_MS, undefined, { signal });
+}
+
+async function cancelOnSlowAgent(
+  context: CancellationContext,
+  signal: AbortSignal,
+): Promise<number | undefined> {
+  const deadlineAt = Date.now() + SLOW_AGENT_START_MS;
+  let seen = await slowAgentLives();
+  while (!seen && Date.now() < deadlineAt) {
+    await delay(AGENT_EXIT_POLL_MS, undefined, { signal });
+    seen = await slowAgentLives();
+  }
+  context.cancel();
+  return seen ? Date.now() : undefined;
 }
 
 async function identityExit(socket: string): Promise<number> {
@@ -309,16 +323,17 @@ test("withSshAgent waits for an agent socket that appears after 5 s", async () =
 test("a cancel ends the wait for a slow agent socket and leaves no agent directory", async (t) => {
   await withSlowAgent(async () => {
     const context = new CancellationContext();
-    const started = Date.now();
-    setTimeout(() => context.cancel(), CANCEL_AFTER_MS);
+    const cancelled = cancelOnSlowAgent(context, t.signal);
     await assert.rejects(
       withSshAgent(access("cancel-wait"), context, DEADLINE_MS, async () => {
         assert.fail("The work must not run.");
       }),
       { code: CANCELLED_CODE },
     );
+    const cancelledAt = await cancelled;
+    assert.ok(cancelledAt !== undefined);
     await slowAgentEnds(t.signal);
-    assert.ok(Date.now() - started < SLOW_AGENT_SECONDS * MS_PER_SECOND);
+    assert.ok(Date.now() - cancelledAt < CANCEL_END_MS);
     assert.deepEqual(
       (await readdir(scratch)).filter((name) =>
         name.startsWith(SSH_AGENT_DIRECTORY_PREFIX),
