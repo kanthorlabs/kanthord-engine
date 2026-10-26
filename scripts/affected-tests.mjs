@@ -154,6 +154,7 @@ const FAILED_EXIT_CODE = 1;
 const ERROR_EXIT_CODE = 2;
 const FIRST_RUN_CONCURRENCY = 8;
 const RERUN_CONCURRENCY = 1;
+const RERUN_FILE_LIMIT = 8;
 const RUN_TEMPORARY_PREFIX = "kanthord-affected-";
 const FAILED_FILE_NAME = "failed.jsonl";
 const AFFECTED_REPORTER = "./scripts/affected-reporter.mjs";
@@ -578,11 +579,12 @@ export function affectedReport(root, changes) {
   if (!first.passed && failed.length === EMPTY_LENGTH) {
     throw new Error(FAILED_RUN_MESSAGE);
   }
+  const failedFiles = [...new Set(failed.map(({ file }) => file))];
+  if (failedFiles.length > RERUN_FILE_LIMIT) {
+    return buildReport(selected, failed, []);
+  }
   const reruns = new Map(
-    [...new Set(failed.map(({ file }) => file))].map((file) => [
-      file,
-      rerunFailures(root, file),
-    ]),
+    failedFiles.map((file) => [file, rerunFailures(root, file)]),
   );
   const stays = (id) => {
     const rerun = reruns.get(id.file);

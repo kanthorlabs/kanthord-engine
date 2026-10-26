@@ -64,6 +64,13 @@ test("fails once", () => {
   throw new Error("first run");
 });
 `;
+const FLAKY_MARKER = "marker";
+const RERUN_FILE_LIMIT = 8;
+
+function flakyTest(marker) {
+  return FLAKY_TEST.replaceAll(FLAKY_MARKER, marker);
+}
+
 const NESTED_TEST = `import { describe, it } from "node:test";
 describe("outer", () => {
   describe("inner", () => {
@@ -556,6 +563,38 @@ test("a test that fails once and passes on the rerun is flaky", async (t) => {
   assert.deepEqual(result.report.flaky, [
     { file: "src/a.test.ts", name: "fails once" },
   ]);
+});
+
+async function flakyFilesFixture(t, count) {
+  const numbers = Array.from({ length: count }, (_, index) => index + 1);
+  const files = { "src/a.ts": EMPTY_MODULE };
+  for (const number of numbers) {
+    files[`src/t${number}.test.ts`] =
+      `import "./a.ts";\n${flakyTest(`marker${number}`)}`;
+  }
+  const root = await fixture(t, files);
+  const result = runEntry(root, [], {
+    KANTHORD_CHANGES: await changesFile(root, [change("src/a.ts")]),
+  });
+  const ids = numbers.map((number) => ({
+    file: `src/t${number}.test.ts`,
+    name: "fails once",
+  }));
+  return { result, ids };
+}
+
+test("more than 8 files with failed ids run no rerun", async (t) => {
+  const { result, ids } = await flakyFilesFixture(t, RERUN_FILE_LIMIT + 1);
+  assert.equal(result.status, FAILED);
+  assert.deepEqual(result.report.failed, ids);
+  assert.deepEqual(result.report.flaky, []);
+});
+
+test("8 files with failed ids run the reruns", async (t) => {
+  const { result, ids } = await flakyFilesFixture(t, RERUN_FILE_LIMIT);
+  assert.equal(result.status, SUCCESS);
+  assert.deepEqual(result.report.failed, []);
+  assert.deepEqual(result.report.flaky, ids);
 });
 
 test("a file that fails to load is a failed id with the file path as name", async (t) => {
