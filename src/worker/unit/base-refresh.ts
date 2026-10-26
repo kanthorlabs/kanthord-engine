@@ -48,6 +48,7 @@ export function nodeWork(state: StepsState) {
     revision: state.input.claim.pinned_revision,
     content: state.revision.content,
     repositories: implementRepositoriesOf(state),
+    affected_tests: state.affectedTests,
     tasks: state.revision.tasks,
   });
 }

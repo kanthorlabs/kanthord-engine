@@ -21,6 +21,11 @@ export interface WorkRepository {
   base_branch: string;
 }
 
+export interface AffectedTest {
+  name: string;
+  command: string;
+}
+
 export interface WorkTask {
   id: string;
   content: { name: string; criterion: string };
@@ -44,6 +49,7 @@ export function renderWorkPrompt(
       verifications: string[];
     };
     repositories?: readonly WorkRepository[];
+    affected_tests?: readonly AffectedTest[];
     tasks?: readonly WorkTask[];
     node?: WorkNode;
   },
@@ -76,6 +82,7 @@ export function renderWorkPrompt(
     })),
     repositories:
       repositories.length >= LISTED_REPOSITORIES_MIN ? repositories : [],
+    affected_tests: unit.affected_tests ?? [],
   });
   return { text, digest: digest(text) };
 }

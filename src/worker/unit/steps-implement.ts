@@ -34,7 +34,11 @@ import {
   type MethodClaim,
   type ExecutionEnd,
 } from "./execution-run.ts";
-import { renderWorkPrompt } from "../../agent/prompt-composer.ts";
+import {
+  renderWorkPrompt,
+  type AffectedTest,
+} from "../../agent/prompt-composer.ts";
+import { readDeclaration } from "./affected.ts";
 import { headCommit } from "./local-git.ts";
 import {
   environmentStop,
@@ -535,10 +539,32 @@ export interface StepsState {
   lastVerification: VerificationFacts;
   revisionCount: number;
   setup: SetupEntry[];
+  affectedTests: AffectedTest[];
   base: BaseHead;
   setupPending: boolean;
   setupInstruction: string | null;
   task?: TaskContent;
+}
+
+async function affectedTestsOf(
+  input: StepsInput,
+  run: ExecutionRun,
+  checkouts: readonly WorkspaceCheckout[],
+  deadline: number,
+): Promise<AffectedTest[]> {
+  const tests: AffectedTest[] = [];
+  for (const checkout of checkouts) {
+    const declaration = await readDeclaration(
+      input.env,
+      checkout.directory,
+      repositoryOf({ input }, checkout).strategy.base_branch,
+      run.operationContext,
+      deadline - Date.now(),
+    );
+    if (declaration === null || "error" in declaration) continue;
+    tests.push({ name: checkout.name, command: declaration.command });
+  }
+  return tests;
 }
 
 export async function prepareStepsWorkspace(
@@ -593,6 +619,12 @@ export async function prepareStepsWorkspace(
         directory: checkout.directory,
       })),
     );
+    const affectedTests = await affectedTestsOf(
+      input,
+      run,
+      prepared.checkouts,
+      deadline,
+    );
     base = new BaseHead(setupInput, join(key, BASE_DIRECTORY), setup);
     const result = await setUpHeads(
       setupInput,
@@ -617,6 +649,7 @@ export async function prepareStepsWorkspace(
       ...prepared,
       nodeBranch: input.claim.node_branch,
       setup,
+      affectedTests,
       base,
       setupPending: failed,
       setupInstruction: failed
@@ -642,6 +675,7 @@ export function taskWork(state: StepsState, task: TaskContent) {
     revision: state.input.claim.pinned_revision,
     content: task.content,
     repositories: implementRepositoriesOf(state),
+    affected_tests: state.affectedTests,
     node: state.revision.content,
   });
 }

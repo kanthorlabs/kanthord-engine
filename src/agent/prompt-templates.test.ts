@@ -10,6 +10,7 @@ import {
   PromptTemplate,
   promptTemplatesSchema,
 } from "./contract.ts";
+import { renderWorkPrompt } from "./prompt-composer.ts";
 import { InvalidReason, PROMPT_SOURCE_MAX_BYTES } from "./prompt-source.ts";
 import {
   renderTemplate,
@@ -189,5 +190,26 @@ test("the conflict template names the binding, the directory and the base branch
       files: "a.ts, b.ts",
     }),
     CONFLICT_RENDERED,
+  );
+});
+
+test("the shipped work text renders the affected test line", () => {
+  const { text } = renderWorkPrompt(SHIPPED_TEMPLATES, {
+    node_id: "node",
+    revision: 1,
+    content: {
+      name: "unit",
+      requirement: "build",
+      criterion: "passes",
+      verifications: ["first"],
+    },
+    affected_tests: [
+      { name: "engine", command: "pnpm --silent run test:affected" },
+    ],
+  });
+  assert.ok(
+    text.includes(
+      "Repository engine: affected tests `pnpm --silent run test:affected`\n",
+    ),
   );
 });
