@@ -59,7 +59,6 @@ export const GLOBAL_INPUTS = [
   ".kanthord/affected-tests.json",
   "scripts/test-path.mjs",
   "scripts/test-reporter.mjs",
-  "scripts/affected-tests.mjs",
   "scripts/affected-reporter.mjs",
 ];
 
