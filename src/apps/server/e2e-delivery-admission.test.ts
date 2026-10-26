@@ -41,7 +41,7 @@ const PUSHED_COMMIT = "a".repeat(40);
 const BASE_BRANCH = "main";
 const SECOND_PULL_REQUEST = 2;
 const CLOSED_AT = "2026-10-15T03:57:51Z";
-const PENDING_THEN_DIRTY_READS = 2;
+const PULL_READS_WITH_REQUIRED_CHECKS = 4;
 const SERVICE_MISMATCH = "service_mismatch";
 const RETRYABLE_REFUSAL = "repository.platform.github.retryable_refusal";
 
@@ -264,7 +264,7 @@ test(
         (call) =>
           call.path === `/repos/owner/gated/pulls/${FIRST_PULL_REQUEST}`,
       );
-    assert.equal(reads.length, PENDING_THEN_DIRTY_READS);
+    assert.equal(reads.length, PULL_READS_WITH_REQUIRED_CHECKS);
     assert.equal((await h.node(P.nodeId)).state, NodeState.Available);
   },
 );
