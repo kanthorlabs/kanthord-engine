@@ -751,6 +751,8 @@ export const EnvironmentFailureClass = {
   ImageInvalid: "image_invalid",
   SetupFailed: "setup_failed",
   CommandAbsent: "command_absent",
+  AffectedInvalid: "affected_invalid",
+  AffectedTimeout: "affected_timeout",
 } as const;
 export type EnvironmentFailureClass =
   (typeof EnvironmentFailureClass)[keyof typeof EnvironmentFailureClass];

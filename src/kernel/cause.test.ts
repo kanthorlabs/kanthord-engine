@@ -13,7 +13,7 @@ import {
   unattributed,
 } from "./cause.ts";
 
-const SUBCATEGORY_COUNT = 36;
+const SUBCATEGORY_COUNT = 38;
 const EXPECTED_SUBCATEGORIES = {
   prompt: ["context_missing", "instruction_conflict", "rule_absent"],
   plan: [
@@ -46,6 +46,8 @@ const EXPECTED_SUBCATEGORIES = {
   environment: [
     "setup_failed",
     "command_absent",
+    "affected_invalid",
+    "affected_timeout",
     "flaky_verification",
     "verification_hang",
     "repository_hook",

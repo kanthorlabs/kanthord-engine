@@ -159,6 +159,8 @@ components:
                               - image_invalid
                               - setup_failed
                               - command_absent
+                              - affected_invalid
+                              - affected_timeout
                           - type: "null"
                       origin:
                         type: string
