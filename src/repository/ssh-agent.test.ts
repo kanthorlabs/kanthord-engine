@@ -46,7 +46,6 @@ const SLOW_AGENT_SECONDS = 6.0137;
 const FAILED_AGENT_MS_MAX = 2000;
 const SCRIPT_MODE = 0o700;
 const SLOW_AGENT_START_MS = 15_000;
-const CANCEL_END_MS = 2000;
 const CANCELLED_CODE = "system.context.cancelled";
 const LIFECYCLE_RUNS = 3;
 const PARALLEL_RUNS = 8;
@@ -124,11 +123,6 @@ async function slowAgentLives(): Promise<boolean> {
   return (await commandLines()).some(
     (line) => line.trim() === `sleep ${SLOW_AGENT_SECONDS}`,
   );
-}
-
-async function slowAgentEnds(signal: AbortSignal): Promise<void> {
-  while (await slowAgentLives())
-    await delay(AGENT_EXIT_POLL_MS, undefined, { signal });
 }
 
 async function cancelOnSlowAgent(
@@ -333,8 +327,7 @@ test("a cancel ends the wait for a slow agent socket and leaves no agent directo
     );
     const cancelledAt = await cancelled;
     assert.ok(cancelledAt !== undefined);
-    await slowAgentEnds(t.signal);
-    assert.ok(Date.now() - cancelledAt < CANCEL_END_MS);
+    assert.equal(await slowAgentLives(), false);
     assert.deepEqual(
       (await readdir(scratch)).filter((name) =>
         name.startsWith(SSH_AGENT_DIRECTORY_PREFIX),
