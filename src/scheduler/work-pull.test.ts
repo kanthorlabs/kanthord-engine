@@ -793,7 +793,7 @@ test("a pull that claims an Available node opens the execution with steps, the w
     kind: "steps",
     worker_name: "coder@1",
     queue_wait_ms: WAITED_MS,
-    worker_instance: null,
+    worker_instance: "general/worker",
     placement: null,
     revision_turn: false,
     dependency_count: 0,
