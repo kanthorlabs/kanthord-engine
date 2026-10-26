@@ -143,6 +143,46 @@ test("child environment removes provider keys and bash timeout stays below the b
   assert.equal(processes.take(TOOL_CALL), undefined);
 });
 
+test("bash records the requested and the applied timeout once and records nothing for a rejected exec", async (t) => {
+  const pi = await loadPi();
+  const processes = new RecordingProcesses(pi.getShellConfig());
+  const cwd = temporary(t);
+  const now = Date.now();
+  const budget = (wallTimeMs: number, createdAt: number) =>
+    new ExecutionBudget({
+      created_at: createdAt,
+      expired_at: now + wallTimeMs,
+      resource_budget: { wall_time_ms: wallTimeMs },
+    });
+  const tools = (executionBudget: ExecutionBudget) =>
+    sessionTools(
+      pi,
+      "swe@1",
+      cwd,
+      executionBudget,
+      unusedHostTools,
+      hostEnvironment(),
+      processes,
+    );
+  const long = budget(COMMAND_LIMIT_MS * 2, now);
+  const limitSeconds = COMMAND_LIMIT_MS / MILLISECONDS_PER_SECOND - 1;
+  const requestedSeconds = COMMAND_LIMIT_MS;
+  await runBash(tools(long), "true", requestedSeconds);
+  assert.deepEqual(processes.takeTimeout(TOOL_CALL), {
+    requestedMs: requestedSeconds * MILLISECONDS_PER_SECOND,
+    appliedMs: limitSeconds * MILLISECONDS_PER_SECOND,
+  });
+  assert.equal(processes.takeTimeout(TOOL_CALL), undefined);
+  await runBash(tools(long), "true");
+  assert.deepEqual(processes.takeTimeout(TOOL_CALL), {
+    requestedMs: null,
+    appliedMs: limitSeconds * MILLISECONDS_PER_SECOND,
+  });
+  const ended = budget(1, now - 10000);
+  await assert.rejects(runBash(tools(ended), "true"), /resource budget ended/);
+  assert.equal(processes.takeTimeout(TOOL_CALL), undefined);
+});
+
 const TREE_TIMEOUT_SECONDS = 20;
 
 async function killedBashCall(

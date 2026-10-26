@@ -18,6 +18,7 @@ import {
 } from "./telemetry.ts";
 import { AgentErrorType, traceAgent } from "./agent-telemetry.ts";
 import type { TurnPrompt } from "./native-agent.ts";
+import type { ToolTimeout } from "./tool-table.ts";
 import {
   environmentDigestsOf,
   GitStep,
@@ -74,7 +75,7 @@ const TRACING = {
   sessionId: SESSION_ID,
   secrets: [] as readonly string[],
   refreshSecrets: async (): Promise<readonly string[]> => [],
-  processes: { take: () => undefined },
+  processes: { take: () => undefined, takeTimeout: () => undefined },
   promptOf: (): TurnPrompt | null => null,
 };
 const MODEL = "glm-test-model";
@@ -859,6 +860,76 @@ test("a tool error ends with Error and the tool_error type", () => {
 });
 
 const BASH_PID = 4242;
+const REQUESTED_TIMEOUT_MS = 3600000;
+const APPLIED_TIMEOUT_MS = 599000;
+
+function timeoutEnd(timeout: ToolTimeout | undefined) {
+  const { records, spans } = recorder();
+  const scripted = scriptedSession();
+  const pending = new Map(timeout === undefined ? [] : [[TOOL_CALL, timeout]]);
+  traceAgent(scripted.session, spans, TRACED_AGENT, {
+    ...TRACING,
+    processes: {
+      take: () => undefined,
+      takeTimeout: (toolCallId: string) => {
+        const recorded = pending.get(toolCallId);
+        pending.delete(toolCallId);
+        return recorded;
+      },
+    },
+  });
+  scripted.emit({ type: "turn_start" });
+  scripted.emit({
+    type: "tool_execution_start",
+    toolCallId: TOOL_CALL,
+    toolName: "bash",
+    args: {},
+  });
+  scripted.emit({
+    type: "tool_execution_end",
+    toolCallId: TOOL_CALL,
+    toolName: "bash",
+    result: { content: [{ type: "text", text: "ok" }] },
+    isError: false,
+  });
+  assert.equal(pending.has(TOOL_CALL), false);
+  return endOf(records, SpanOperation.Tool)?.attributes ?? {};
+}
+
+test("a bash call with a requested and a cut timeout records both values", () => {
+  const attributes = timeoutEnd({
+    requestedMs: REQUESTED_TIMEOUT_MS,
+    appliedMs: APPLIED_TIMEOUT_MS,
+  });
+  assert.equal(
+    attributes["kanthord.tool.timeout.requested_ms"],
+    REQUESTED_TIMEOUT_MS,
+  );
+  assert.equal(
+    attributes["kanthord.tool.timeout.applied_ms"],
+    APPLIED_TIMEOUT_MS,
+  );
+});
+
+test("a bash call without a requested timeout records only the applied value", () => {
+  const attributes = timeoutEnd({
+    requestedMs: null,
+    appliedMs: APPLIED_TIMEOUT_MS,
+  });
+  assert.deepEqual(names(attributes), [
+    "kanthord.tool.duration_ms",
+    "kanthord.tool.outcome",
+    "kanthord.tool.timeout.applied_ms",
+  ]);
+  assert.equal(
+    attributes["kanthord.tool.timeout.applied_ms"],
+    APPLIED_TIMEOUT_MS,
+  );
+});
+
+test("a tool end without a recorded timeout holds no timeout attribute", () => {
+  assert.deepEqual(names(timeoutEnd(undefined)), TOOL_END_ATTRIBUTES);
+});
 
 function bashProcessEnd(killed: boolean) {
   const { records, spans } = recorder();
@@ -872,6 +943,7 @@ function bashProcessEnd(killed: boolean) {
         ended.delete(toolCallId);
         return bashProcess;
       },
+      takeTimeout: () => undefined,
     },
   });
   scripted.emit({ type: "turn_start" });

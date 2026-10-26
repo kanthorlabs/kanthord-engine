@@ -12,7 +12,7 @@ import { providerFailureOf } from "../../llm/provider-failure.ts";
 import { SpanOperation, type SpanRecorder } from "./telemetry.ts";
 import { sessionEntryRecord } from "./session-entries.ts";
 import type { TurnPrompt } from "./native-agent.ts";
-import type { ToolProcesses } from "./tool-table.ts";
+import type { ToolProcesses, ToolTimeout } from "./tool-table.ts";
 import type { BashProcess } from "../../agent/bash-process.ts";
 
 const TURN_START = "turn_start";
@@ -37,6 +37,8 @@ const PROMPT_WORK_DIGEST_ATTRIBUTE = "kanthord.prompt.work.digest";
 const WORKER_BINDING_ATTRIBUTE = "kanthord.worker_binding.id";
 const AGENT_ENABLEMENT_ATTRIBUTE = "kanthord.agent_enablement.id";
 const SESSION_ENTRY_ATTRIBUTE = "kanthord.session.entry_id";
+const TOOL_TIMEOUT_APPLIED_ATTRIBUTE = "kanthord.tool.timeout.applied_ms";
+const TOOL_TIMEOUT_REQUESTED_ATTRIBUTE = "kanthord.tool.timeout.requested_ms";
 const FIRST_SEQUENCE = 1;
 const NO_ENTRIES = 0;
 
@@ -90,6 +92,16 @@ function processAttributes(bashProcess: BashProcess | undefined): Attributes {
   };
 }
 
+function timeoutAttributes(timeout: ToolTimeout | undefined): Attributes {
+  if (timeout === undefined) return {};
+  return {
+    [TOOL_TIMEOUT_APPLIED_ATTRIBUTE]: timeout.appliedMs,
+    ...(timeout.requestedMs === null
+      ? {}
+      : { [TOOL_TIMEOUT_REQUESTED_ATTRIBUTE]: timeout.requestedMs }),
+  };
+}
+
 function promptAttributes(prompt: TurnPrompt | null): Attributes {
   if (prompt === null) return {};
   return {
@@ -119,7 +131,7 @@ export interface AgentTracing {
   sessionId: string;
   secrets: readonly string[];
   refreshSecrets: () => Promise<readonly string[]>;
-  processes: Pick<ToolProcesses, "take">;
+  processes: Pick<ToolProcesses, "take" | "takeTimeout">;
   promptOf: () => TurnPrompt | null;
 }
 
@@ -303,6 +315,7 @@ class AgentTracer {
   private toolEnded(event: EventOf<typeof TOOL_END>): void {
     assert.ok(this.tools.size <= TOOLS_OPEN_MAX);
     const bashProcess = this.processes.take(event.toolCallId);
+    const timeout = this.processes.takeTimeout(event.toolCallId);
     const tool = this.tools.get(event.toolCallId);
     if (!tool) return;
     assert.ok(tool.span);
@@ -316,6 +329,7 @@ class AgentTracer {
         "kanthord.tool.duration_ms": Date.now() - tool.started,
         ...(event.isError ? { "error.type": AgentErrorType.ToolError } : {}),
         ...processAttributes(bashProcess),
+        ...timeoutAttributes(timeout),
       },
     });
   }
