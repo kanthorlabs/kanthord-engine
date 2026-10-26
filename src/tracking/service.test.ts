@@ -67,9 +67,11 @@ const OPENING: ExecutionOpening = {
   placement: null,
   revision_turn: null,
   dependency_count: null,
+  node_name: null,
 };
 const WORKER_INSTANCE = "instance_1";
 const PLACEMENT = "local";
+const NODE_NAME = "Write the report";
 const DEPENDENCY_COUNT = 2;
 const LEAD_TIME_MS = 4000;
 const SPAN = "2".repeat(16);
@@ -153,6 +155,7 @@ test("the root start stores the kind, the worker name and the queue wait, and th
     placement: null,
     revision_turn: null,
     dependency_count: null,
+    node_name: null,
   };
   service.executionOpened(TRACE, CREATED, opening);
   const page = service.spanList(
@@ -400,12 +403,14 @@ test("each non-null opening fact writes its attribute", (t) => {
     placement: PLACEMENT,
     revision_turn: true,
     dependency_count: DEPENDENCY_COUNT,
+    node_name: NODE_NAME,
   });
   const attributes = rootOf(service, store);
   assert.equal(attributes["kanthord.worker.instance"], WORKER_INSTANCE);
   assert.equal(attributes["kanthord.worker.placement"], PLACEMENT);
   assert.equal(attributes["kanthord.queue.revision_turn"], true);
   assert.equal(attributes["kanthord.node.dependency_count"], DEPENDENCY_COUNT);
+  assert.equal(attributes["kanthord.node.name"], NODE_NAME);
 });
 
 test("a null opening fact writes no attribute", (t) => {
@@ -417,6 +422,7 @@ test("a null opening fact writes no attribute", (t) => {
     "kanthord.worker.placement",
     "kanthord.queue.revision_turn",
     "kanthord.node.dependency_count",
+    "kanthord.node.name",
   ])
     assert.equal(name in attributes, false);
 });

@@ -137,6 +137,7 @@ function selectJob(
             placement,
             revision_turn: openingFacts?.revision_turn ?? null,
             dependency_count: openingFacts?.dependency_count ?? null,
+            node_name: openingFacts?.node_name ?? null,
           },
         ),
         lost,

@@ -87,7 +87,11 @@ export function executionOpening(
   claimedAt: number,
   facts: Pick<
     ExecutionOpening,
-    "worker_instance" | "placement" | "revision_turn" | "dependency_count"
+    | "worker_instance"
+    | "placement"
+    | "revision_turn"
+    | "dependency_count"
+    | "node_name"
   >,
 ): ExecutionOpening {
   assert.ok(workerName);
@@ -99,5 +103,6 @@ export function executionOpening(
     placement: facts.placement,
     revision_turn: facts.revision_turn,
     dependency_count: facts.dependency_count,
+    node_name: facts.node_name,
   };
 }

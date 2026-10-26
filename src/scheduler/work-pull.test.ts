@@ -797,6 +797,7 @@ test("a pull that claims an Available node opens the execution with steps, the w
     placement: null,
     revision_turn: false,
     dependency_count: 0,
+    node_name: "name",
   });
 });
 

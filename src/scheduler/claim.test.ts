@@ -41,6 +41,7 @@ const ONE_CALL = 1;
 const NO_CALLS = 0;
 const PLACEMENT = "container";
 const DEPENDENCIES = 3;
+const NODE_NAME = "Write the report";
 const CLAIM_METHOD = "claim";
 const FIRST_JOB = 0;
 const DEFAULT_INSTANCE_KEY = "general/worker";
@@ -842,6 +843,7 @@ test("a claim of a Waiting node opens the execution with evaluation and the wait
     placement: null,
     revision_turn: false,
     dependency_count: 0,
+    node_name: "name",
   });
 });
 
@@ -881,7 +883,11 @@ test("the opening holds the placement of the binding and the facts of Mission", 
   const reads: string[] = [];
   h.dependencies.facts.openingFacts = (_tx, nodeId) => {
     reads.push(nodeId);
-    return { dependency_count: DEPENDENCIES, revision_turn: true };
+    return {
+      dependency_count: DEPENDENCIES,
+      revision_turn: true,
+      node_name: NODE_NAME,
+    };
   };
   const claim = h.dependencies.transitions.claim;
   h.dependencies.transitions.claim = (...args) => {
@@ -895,6 +901,7 @@ test("the opening holds the placement of the binding and the facts of Mission", 
   assert.equal(opening.placement, PLACEMENT);
   assert.equal(opening.revision_turn, true);
   assert.equal(opening.dependency_count, DEPENDENCIES);
+  assert.equal(opening.node_name, NODE_NAME);
 });
 
 test("the job of a revision turn measures the wait from its own queued_at", (t) => {

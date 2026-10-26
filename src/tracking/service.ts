@@ -102,6 +102,7 @@ const OpeningAttribute = {
   Placement: "kanthord.worker.placement",
   RevisionTurn: "kanthord.queue.revision_turn",
   DependencyCount: "kanthord.node.dependency_count",
+  NodeName: "kanthord.node.name",
   LeadTimeMs: "kanthord.node.lead_time_ms",
 } as const;
 const NO_LEAD_TIME = 0;
@@ -787,6 +788,9 @@ function openingAttributes(opening: ExecutionOpening): Attributes {
     ...(opening.dependency_count === null
       ? {}
       : { [OpeningAttribute.DependencyCount]: opening.dependency_count }),
+    ...(opening.node_name === null
+      ? {}
+      : { [OpeningAttribute.NodeName]: opening.node_name }),
   };
 }
 

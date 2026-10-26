@@ -460,6 +460,7 @@ export interface ExecutionOpening {
   placement: string | null;
   revision_turn: boolean | null;
   dependency_count: number | null;
+  node_name: string | null;
 }
 export interface ExecutionTelemetry {
   executionOpened(

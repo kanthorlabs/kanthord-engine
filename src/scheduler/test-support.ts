@@ -147,7 +147,7 @@ export function schedulerHarness(
       },
       openingFacts: (...args) => {
         record("openingFacts", args);
-        return { dependency_count: 0, revision_turn: false };
+        return { dependency_count: 0, revision_turn: false, node_name: "name" };
       },
       claimFactsOf: (...args) => {
         record("claimFactsOf", args);

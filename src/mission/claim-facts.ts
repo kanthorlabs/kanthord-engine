@@ -96,7 +96,11 @@ export function claimFacts(
 export function openingFacts(
   tx: Transaction,
   nodeId: string,
-): { dependency_count: number; revision_turn: boolean } | null {
+): {
+  dependency_count: number;
+  revision_turn: boolean;
+  node_name: string;
+} | null {
   assert.ok(tx.database.isTransaction);
   const node = readNode(tx, nodeId);
   if (node === null) return null;
@@ -106,6 +110,7 @@ export function openingFacts(
     revision_turn:
       node.state === NodeState.Available &&
       last?.result === AssessmentResult.CriterionNotMet,
+    node_name: claimRevisionOf(tx, nodeId).name,
   };
 }
 
