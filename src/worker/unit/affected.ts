@@ -42,6 +42,8 @@ import {
 export const AFFECTED_DECLARATION_FILE = ".kanthord/affected-tests.json";
 export const AFFECTED_REPORT_MAX_BYTES = 1048576;
 const MS_PER_SECOND = 1000;
+const COMMIT_KEY = "commit";
+const STRING_TYPE = "string";
 const DECLARATION_VERSION = 1;
 const REPORT_VERSION = 1;
 const DEFAULT_TIME_LIMIT_S = COMMAND_LIMIT_MS / MS_PER_SECOND;
@@ -609,11 +611,26 @@ function baseStop(
   });
 }
 
-function environmentStop(code: string, detail: object): ExecutionStop {
+function redactedDetail(detail: object, kept: readonly string[]): object {
+  return Object.fromEntries(
+    Object.entries(detail).map(([key, value]) => [
+      key,
+      !kept.includes(key) && typeof value === STRING_TYPE
+        ? redactReason(value)
+        : value,
+    ]),
+  );
+}
+
+function environmentStop(
+  code: string,
+  detail: object,
+  kept: readonly string[] = [],
+): ExecutionStop {
   return new ExecutionStop(
     EndReason.EnvironmentFailed,
     code,
-    redactReason(JSON.stringify(detail)),
+    JSON.stringify(redactedDetail(detail, kept)),
   );
 }
 
@@ -671,6 +688,17 @@ async function decide(
     prepared,
   );
   if (head === null) return { budgetEnd: true };
+  if ("failure" in head && head.failure.kind === HeadFailureKind.TimedOut)
+    throw environmentStop(
+      EnvironmentFailure.AffectedTimeout,
+      {
+        binding_id: checkout.binding_id,
+        commit: checkout.head,
+        command: declaration.command,
+        time_limit_s: head.failure.time_limit_s,
+      },
+      [COMMIT_KEY],
+    );
   const report = "report" in head ? head.report : null;
   const failedIds = report ? headFailed(report, files) : [];
   const result: AffectedRun = {

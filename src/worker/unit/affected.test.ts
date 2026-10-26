@@ -378,7 +378,7 @@ const PROBE_LINES = 7;
 const NO_SPANS = 0;
 const CHANGED_COUNT = 2;
 const EXIT_ABSENT = 127;
-const SHORT_LIMIT_S = 0.5;
+const SHORT_LIMIT_S = 2;
 const REASON = "config";
 const UNPROMOTED_FLAKY = 1;
 const LONG_LIST = 200;
@@ -387,7 +387,7 @@ const BYTE_BOUND_ENTRIES = 16;
 const SUBJECT_TEXT = "Affected test results";
 const EVIDENCE_VERSION = 1;
 const FIXTURE_DEADLINE_MS = 60000;
-const SHORT_LIMIT_MS = 500;
+const SHORT_LIMIT_MS = 2000;
 const SCRIPT = `probe="$1"
 mode=$(cat mode.txt)
 permission() { stat -c %a "$1" 2>/dev/null || stat -f %Lp "$1"; }
@@ -698,15 +698,26 @@ test("a time-limit end at both heads stops with affected_timeout", async (t) => 
   const f = await fixture(t, { base: "slow", head: "slow" });
   const stop = await stopOf(runOf(f, { commandLimitMs: SHORT_LIMIT_MS }));
   assert.equal(stop.code, EnvironmentFailure.AffectedTimeout);
+  assert.equal(stop.detail.commit, f.head);
   assert.equal(stop.detail.time_limit_s, SHORT_LIMIT_S);
 });
 
-test("a time-limit end at the head with a valid base report answers failed", async (t) => {
+test("a time-limit end at the head stops with affected_timeout before the base check", async (t) => {
   const f = await fixture(t, { base: "pass", head: "slow" });
-  const result = await ran(f, { commandLimitMs: SHORT_LIMIT_MS });
-  assert.equal(result.verdict, AffectedVerdict.Failed);
-  assert.equal(result.head.timed_out, true);
-  assert.match(result.failure_text ?? "", /reached its time limit of 0.5 s/);
+  const stop = await stopOf(runOf(f, { commandLimitMs: SHORT_LIMIT_MS }));
+  assert.equal(stop.code, EnvironmentFailure.AffectedTimeout);
+  assert.deepEqual(Object.keys(stop.detail), [
+    "binding_id",
+    "commit",
+    "command",
+    "time_limit_s",
+  ]);
+  assert.equal(stop.detail.commit, f.head);
+  assert.equal(stop.detail.time_limit_s, SHORT_LIMIT_S);
+  assert.equal(
+    readFileSync(f.probe, "utf8").split("\n").length - 1,
+    PROBE_LINES,
+  );
 });
 
 test("exit 127 at both heads stops with command_absent", async (t) => {
