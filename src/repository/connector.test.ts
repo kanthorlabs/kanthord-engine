@@ -13,7 +13,11 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import test, { type TestContext } from "node:test";
 import { simpleGit } from "simple-git";
-import { background, CancellationContext } from "../kernel/context.ts";
+import {
+  background,
+  CancellationContext,
+  DeadlineExceeded,
+} from "../kernel/context.ts";
 import { RepositoryFileState } from "./contract.ts";
 import {
   gitLsRemote,
@@ -1451,7 +1455,7 @@ test("readFilesAtCommit rejects when the deadline elapsed and deletes its direct
       LOCAL_GIT_SSH_ACCESS,
       scratch,
     ),
-    { code: SshAgentErrorCode.Failed },
+    DeadlineExceeded,
   );
   assert.equal(readdirSync(scratch).length, NO_ENTRIES);
 });

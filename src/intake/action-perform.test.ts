@@ -7,7 +7,11 @@ import {
   type ActionFacts,
   type GrantRequest,
 } from "../custody/contract.ts";
-import { background } from "../kernel/context.ts";
+import {
+  background,
+  DEADLINE_EXCEEDED_CODE,
+  DeadlineExceeded,
+} from "../kernel/context.ts";
 import { Diagnostic, OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import type { CallerContext, ExecutionClaim } from "../kernel/operation.ts";
@@ -456,6 +460,34 @@ test("an SSH agent failure of the base landing read of a pull request create ans
   assert.ok("class" in answer, JSON.stringify(answer));
   assert.equal(answer.class, ResultClass.ConfirmedFailure);
   assert.equal(answer.code, SshAgentErrorCode.Failed);
+  assert.deepEqual(h.githubCalls, []);
+  assert.ok(h.materials.every((material) => material.dropped));
+});
+
+test("a deadline of a merge push answers confirmed_failure with the deadline code", async (t) => {
+  const h = harness(t, {
+    facts: actionFacts(MERGE_PUSH_ACTION),
+    mergePush: async () => {
+      throw new GitWriteError(GitStage.BeforePush, new DeadlineExceeded());
+    },
+  });
+  const answer = await h.perform();
+  assert.ok("class" in answer, JSON.stringify(answer));
+  assert.equal(answer.class, ResultClass.ConfirmedFailure);
+  assert.equal(answer.code, DEADLINE_EXCEEDED_CODE);
+  assert.equal(h.rows()[0]?.state, OutboundRequestState.Failed);
+});
+
+test("a deadline of the base landing read of a pull request create answers confirmed_failure with the deadline code", async (t) => {
+  const h = harness(t, {
+    facts: actionFacts(PULL_REQUEST_ACTION),
+    credential: API_CREDENTIAL,
+    landingFailure: new DeadlineExceeded(),
+  });
+  const answer = await h.perform();
+  assert.ok("class" in answer, JSON.stringify(answer));
+  assert.equal(answer.class, ResultClass.ConfirmedFailure);
+  assert.equal(answer.code, DEADLINE_EXCEEDED_CODE);
   assert.deepEqual(h.githubCalls, []);
   assert.ok(h.materials.every((material) => material.dropped));
 });

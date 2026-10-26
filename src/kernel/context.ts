@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { addAbortListener } from "node:events";
 import { CodedError } from "./errors.ts";
 
+export const DEADLINE_EXCEEDED_CODE = "system.context.deadline_exceeded";
+
 const EXPIRED_REMAINING_MS = 0;
 const MAX_TIMER_DELAY_MS = 2 ** 31 - 1;
 
@@ -18,7 +20,7 @@ export class ContextCancelled extends CodedError {
 
 export class DeadlineExceeded extends CodedError {
   constructor() {
-    super("system.context.deadline_exceeded", "Context deadline exceeded.");
+    super(DEADLINE_EXCEEDED_CODE, "Context deadline exceeded.");
   }
 }
 

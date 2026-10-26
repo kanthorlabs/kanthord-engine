@@ -14,6 +14,7 @@ import { pipeline } from "node:stream/promises";
 import { promisify } from "node:util";
 import {
   CancellationContext,
+  DEADLINE_EXCEEDED_CODE,
   DeadlineExceeded,
   type Context,
 } from "../kernel/context.ts";
@@ -91,10 +92,12 @@ export type GitStage = (typeof GitStage)[keyof typeof GitStage];
 export class GitWriteError extends Diagnostic {
   readonly stage: GitStage;
 
-  constructor(stage: GitStage, cause: Diagnostic) {
+  constructor(stage: GitStage, cause: CodedError) {
     super(cause.code, cause.message, { cause });
     assert.ok(
-      cause.code === GIT_FAILED || cause.code === SshAgentErrorCode.Failed,
+      cause.code === GIT_FAILED ||
+        cause.code === SshAgentErrorCode.Failed ||
+        cause.code === DEADLINE_EXCEEDED_CODE,
     );
     assert.ok(Object.values(GitStage).includes(stage));
     this.stage = stage;
@@ -186,6 +189,8 @@ async function beforePush<T>(work: () => Promise<T>): Promise<T> {
     return await work();
   } catch (error) {
     if (error instanceof Diagnostic && error.code === SshAgentErrorCode.Failed)
+      throw new GitWriteError(GitStage.BeforePush, error);
+    if (error instanceof DeadlineExceeded)
       throw new GitWriteError(GitStage.BeforePush, error);
     throw error;
   }

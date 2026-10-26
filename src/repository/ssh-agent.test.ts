@@ -20,6 +20,7 @@ import {
   background,
   CancellationContext,
   cancelled,
+  DeadlineExceeded,
 } from "../kernel/context.ts";
 import { Diagnostic } from "../kernel/errors.ts";
 import {
@@ -38,6 +39,7 @@ import { generateSshKey } from "./ssh-key.ts";
 
 const execFileAsync = promisify(execFile);
 const DEADLINE_MS = 30_000;
+const ELAPSED_DEADLINE_MS = 0;
 const AGENT_EXIT_POLL_MS = 20;
 const PRIVATE_MODE = 0o700;
 const PERMISSION_BITS = 0o777;
@@ -430,6 +432,28 @@ test("withSshAgent reports an ssh-add refusal with no key material", async () =>
     },
   );
   assert.deepEqual(await readdir(scratch), before);
+});
+
+test("withSshAgent throws DeadlineExceeded for an elapsed deadline before it starts an agent", async () => {
+  const started = join(scratch, "agent-started");
+  await withAgentScript(`#!/bin/sh\ntouch '${started}'\nexit 1\n`, async () => {
+    await assert.rejects(
+      withSshAgent(
+        access("elapsed"),
+        background,
+        ELAPSED_DEADLINE_MS,
+        async () => assert.fail("The work must not run."),
+      ),
+      DeadlineExceeded,
+    );
+    assert.throws(() => statSync(started), { code: "ENOENT" });
+    assert.deepEqual(
+      (await readdir(scratch)).filter((name) =>
+        name.startsWith(SSH_AGENT_DIRECTORY_PREFIX),
+      ),
+      [],
+    );
+  });
 });
 
 test("a killed process leaves no agent, and a later sweep removes its directory", async (t) => {
