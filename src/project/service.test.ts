@@ -410,6 +410,7 @@ function fixture(t: TestContext, overrides: Partial<Dependencies> = {}) {
     slotImage: SLOT_IMAGE,
     version: ENVIRONMENT_VERSION,
     environmentReady: async () => {},
+    hostHome: join(stateDirectory, "home"),
     ...overrides,
   };
   held.dependencies = dependencies;

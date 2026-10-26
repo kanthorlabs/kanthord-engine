@@ -129,6 +129,7 @@ const TRANSIENT = "transient fetch failure";
 const UNREACHABLE = "ssh unreachable";
 const BRANCH_ABSENT = "base branch absent";
 const COMMAND_ABSENT = "command_absent";
+const AFFECTED_INVALID = "affected_invalid";
 const DOCS_NAME = "docs";
 const DOCS_REPAIRS = 2;
 const ONE_CALL = 1;
@@ -1828,6 +1829,19 @@ test("environmentFailed writes the failed proof file of the current digest", asy
   assert.equal(h.state().status, EnvironmentStatus.Failed);
   assert.equal(h.state().failure?.origin, EXECUTION);
   assert.equal(h.woken.length, NO_CALLS);
+});
+
+test("environmentFailed writes the affected_invalid class with the origin execution", async (t) => {
+  const h = await readyHarness(t);
+  h.onboarding.environmentFailed(
+    failureInput(h, { stop: { code: AFFECTED_INVALID, detail: BOOM } }),
+  );
+  const file = h.proofOf(h.digest());
+  assert.ok(file);
+  assert.equal(file.outcome, FAILED);
+  assert.equal(file.origin, EXECUTION);
+  assert.equal(file.class, AFFECTED_INVALID);
+  assert.equal(h.state().failure?.origin, EXECUTION);
 });
 
 test("environmentFailed records the commit of the group and reads the base-branch commit after 60 seconds", async (t) => {

@@ -87,6 +87,24 @@ test("an environment failure maps to the environment with its code", () => {
     ),
     attributed(CauseCategory.Environment, CauseSubcategory.CommandAbsent),
   );
+  assert.deepEqual(
+    stopCauseOf(
+      ExecutionStopReason.EnvironmentFailed,
+      EnvironmentFailure.AffectedInvalid,
+      null,
+      QUIET,
+    ),
+    attributed(CauseCategory.Environment, CauseSubcategory.AffectedInvalid),
+  );
+  assert.deepEqual(
+    stopCauseOf(
+      ExecutionStopReason.EnvironmentFailed,
+      EnvironmentFailure.AffectedTimeout,
+      null,
+      QUIET,
+    ),
+    attributed(CauseCategory.Environment, CauseSubcategory.AffectedTimeout),
+  );
 });
 
 test("an operation failure with a git step maps to the suspects of the step", () => {
