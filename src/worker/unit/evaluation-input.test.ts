@@ -61,6 +61,21 @@ test("snapshot selection excludes requests and verifications and orders by ident
   assert.equal(placedOf(evidence), null);
 });
 
+test("an affected test evidence is no snapshot and no placed asset", () => {
+  const assets = [
+    {
+      kind: "repository",
+      address: { kind: "repository", binding_id: "binding", commit: "head" },
+    },
+    { kind: "produced", address: { kind: "produced", sha256: "a".repeat(64) } },
+  ];
+  const evidence = [
+    { id: "z", subject: "Affected test results", assets },
+  ] as Evidence[];
+  assert.equal(snapshotOf(evidence, "binding"), null);
+  assert.equal(placedOf(evidence), null);
+});
+
 test("B3 review bundle places all supporting assets in the evidence directory outside the checkouts and removes partial object failures", async (t) => {
   for (const mode of ["success", "failure", "cancel"] as const) {
     const setup = anthropicSetup();
@@ -99,6 +114,17 @@ test("B3 review bundle places all supporting assets in the evidence directory ou
         assets: [
           { id: first, kind: "produced", address: produced },
           { id: second, kind: "object", address: object },
+        ],
+      },
+      {
+        id: "affected",
+        subject: "Affected test results",
+        assets: [
+          {
+            id: createIdentity("evidence_asset"),
+            kind: "produced",
+            address: produced,
+          },
         ],
       },
     ] as Evidence[];

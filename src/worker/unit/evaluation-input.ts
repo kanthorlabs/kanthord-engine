@@ -28,12 +28,21 @@ import {
   type SetupFailure,
 } from "./environment-setup.ts";
 import { ExecutionIntent } from "../contract.ts";
+import { AFFECTED_SUBJECT } from "./affected.ts";
 
 const NO_SNAPSHOTS = 0;
 
+function isSupportEvidence(item: Evidence): boolean {
+  return (
+    !item.verification &&
+    !item.requirement_key &&
+    item.subject !== AFFECTED_SUBJECT
+  );
+}
+
 export function snapshotOf(evidence: readonly Evidence[], bindingId: string) {
   const candidates = evidence
-    .filter((item) => !item.verification && !item.requirement_key)
+    .filter(isSupportEvidence)
     .toSorted((a, b) => b.id.localeCompare(a.id));
   for (const item of candidates) {
     const asset = item.assets.find(
@@ -49,7 +58,7 @@ export function snapshotOf(evidence: readonly Evidence[], bindingId: string) {
 
 export function placedOf(evidence: readonly Evidence[]) {
   const candidates = evidence
-    .filter((item) => !item.verification && !item.requirement_key)
+    .filter(isSupportEvidence)
     .toSorted((a, b) => b.id.localeCompare(a.id));
   for (const item of candidates) {
     const asset = item.assets.find(
@@ -257,9 +266,7 @@ export async function prepareEvaluation(
     const evidenceIds = new Set(workspace.evidenceIds);
     const assets: { evidence_id: string; asset_id: string; path: string }[] =
       [];
-    const support = evidence.filter(
-      (item) => !item.verification && !item.requirement_key,
-    );
+    const support = evidence.filter(isSupportEvidence);
     const selected = support.flatMap((item) =>
       item.assets
         .filter(

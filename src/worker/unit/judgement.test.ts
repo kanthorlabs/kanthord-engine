@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
+  affectedFailureReport,
   affectedRevisionInstruction,
   failedVerificationRationale,
   failedVerificationReport,
@@ -152,12 +153,30 @@ test("failed and unrun rationale names the command and cause", () => {
       ],
     },
     evidence: [],
+    affected: null,
   };
   const instruction = evaluationInstruction(SHIPPED_TEMPLATES, input);
   const examineEvaluation = evaluationInstruction(SHIPPED_TEMPLATES, {
     ...input,
     examine: true,
   });
+  assert.match(
+    instruction,
+    /^Affected test results of this evaluation: null$/m,
+  );
+  const document = { version: 1, verdict: "passed", repositories: [] };
+  assert.ok(
+    evaluationInstruction(SHIPPED_TEMPLATES, {
+      ...input,
+      affected: document,
+    }).includes(
+      `Affected test results of this evaluation: ${JSON.stringify(document)}\n`,
+    ),
+  );
+  assert.match(
+    instruction,
+    /KanthorD ran the affected test command of each repository after the verifications; weigh a `base_red` verdict, each flaky test and each excluded e2e test as facts about the change\. A change to a file that selects or runs tests is a test change; judge it against the criterion\./,
+  );
   assert.doesNotMatch(instruction, /proposals/);
   assert.match(
     examineEvaluation,
@@ -480,4 +499,24 @@ test("the affected revision renders the rationale of each failed repository, the
   assert.ok(instruction.includes(JSON.stringify([first.head, second.head])));
   assert.match(instruction, /```text\nfirst output\n```$/);
   assert.doesNotMatch(instruction, /second output/);
+});
+
+test("the affected failure report joins the text of each failed repository and ends with the first output", () => {
+  const first = failedRun("api", "first output");
+  const second = failedRun("web", "second output");
+  const passed = {
+    ...failedRun("cli", "cli output"),
+    verdict: "passed" as const,
+  };
+  const report = affectedFailureReport([first, passed, second]);
+  assert.equal(
+    report,
+    `${first.failure_text}\n\n${second.failure_text}\n\nOutput of the failed run (the last 4 KiB):\n\n\`\`\`text\nfirst output\n\`\`\``,
+  );
+  assert.doesNotMatch(report, /second output|cli output/);
+});
+
+test("the affected failure report holds no output block for an empty output", () => {
+  const run = failedRun("api", "");
+  assert.equal(affectedFailureReport([run]), run.failure_text);
 });

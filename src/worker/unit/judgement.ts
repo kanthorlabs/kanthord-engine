@@ -3,7 +3,11 @@ import { z } from "zod";
 import type { TaskContent } from "../../mission/contract.ts";
 import type { WorkPrompt } from "../../agent/prompt-composer.ts";
 import type { Verification, VerificationRun } from "./verification.ts";
-import type { AffectedRun } from "./affected.ts";
+import {
+  AffectedVerdict,
+  type AffectedResult,
+  type AffectedRun,
+} from "./affected.ts";
 import type { ChangeRequestRead } from "../contract.ts";
 import type { NativeAgent } from "./native-agent.ts";
 import { PromptTemplate, type PromptTemplates } from "../../agent/contract.ts";
@@ -216,6 +220,26 @@ export function affectedRevisionInstruction(
   });
 }
 
+export function affectedFailureReport(
+  results: readonly AffectedResult[],
+): string {
+  const failed = results.filter(
+    (result): result is AffectedRun =>
+      result.verdict === AffectedVerdict.Failed,
+  );
+  assert.ok(failed.length > NO_ITEMS);
+  const parts = failed.map((run) => {
+    assert.ok(run.failure_text);
+    return run.failure_text;
+  });
+  const output = failed[FIRST_ENTRY]!.output;
+  if (output)
+    parts.push(
+      `Output of the failed run (the last 4 KiB):\n\n\`\`\`text\n${output}\n\`\`\``,
+    );
+  return parts.join(RATIONALE_SEPARATOR);
+}
+
 export function criterionRevisionInstruction(
   templates: PromptTemplates,
   rationale: string,
@@ -235,6 +259,7 @@ export function evaluationInstruction(
     verification: Verification;
     evidence: unknown;
     dependencies?: unknown;
+    affected: unknown;
   },
 ): string {
   return renderTemplate(templates, PromptTemplate.Evaluation, {
@@ -247,6 +272,7 @@ export function evaluationInstruction(
     results: input.verification.results,
     evidence: input.evidence,
     dependencies: input.dependencies ?? null,
+    affected: input.affected,
     marker: JUDGEMENT_MARKER,
   });
 }
