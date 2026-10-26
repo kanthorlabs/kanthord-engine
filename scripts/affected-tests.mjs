@@ -6,7 +6,7 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
+import { availableParallelism, tmpdir } from "node:os";
 import { join, posix } from "node:path";
 import { pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
@@ -152,7 +152,7 @@ const NAME_STATUS_LETTERS = {
 const SUCCESS_STATUS = 0;
 const FAILED_EXIT_CODE = 1;
 const ERROR_EXIT_CODE = 2;
-const FIRST_RUN_CONCURRENCY = 8;
+const MAX_FIRST_RUN_CONCURRENCY = 8;
 const RERUN_CONCURRENCY = 1;
 const RUN_TEMPORARY_PREFIX = "kanthord-affected-";
 const FAILED_FILE_NAME = "failed.jsonl";
@@ -572,7 +572,11 @@ export function affectedReport(root, changes) {
   if (selected.selection === SELECTION.none) {
     return buildReport(selected, [], []);
   }
-  const first = runTests(root, selected.tests, FIRST_RUN_CONCURRENCY);
+  const first = runTests(
+    root,
+    selected.tests,
+    Math.min(MAX_FIRST_RUN_CONCURRENCY, availableParallelism()),
+  );
   const tests = new Set(selected.tests);
   const failed = uniqueIds(first.ids.filter(({ file }) => tests.has(file)));
   if (!first.passed && failed.length === EMPTY_LENGTH) {
