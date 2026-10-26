@@ -93,6 +93,7 @@ export interface VerificationInput {
   deadline: number;
   context: Context;
   env: NodeJS.ProcessEnv;
+  variables?: Readonly<Record<string, string>>;
   commandLimitMs?: number;
   reruns?: number;
   exhausted?: () => boolean;
@@ -133,7 +134,7 @@ function runCommand(
   return new Promise((resolve, reject) => {
     const child = spawn("bash", ["-c", command], {
       cwd: input.directory,
-      env: childEnvironment(input.env),
+      env: { ...childEnvironment(input.env), ...input.variables },
       stdio: ["ignore", "pipe", "pipe"],
       detached: true,
     });

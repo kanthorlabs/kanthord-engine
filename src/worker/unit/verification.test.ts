@@ -172,6 +172,23 @@ test("verification child gets no provider environment key", async (t) => {
   assert.equal(result.results.length, commands.length);
 });
 
+test("verification gives the child the variables and a variable replaces an environment variable of the same name", async (t) => {
+  const commands = [
+    'test "$EXTRA_VARIABLE" = extra',
+    'test "$SHARED_VARIABLE" = replaced',
+  ];
+  const result = await runVerifications({
+    directory: temporary(t),
+    commands,
+    tested_input: { kind: "produced", sha256: "hash" },
+    deadline: Date.now() + 10000,
+    context: background,
+    env: { ...hostEnvironment(), SHARED_VARIABLE: "original" },
+    variables: { EXTRA_VARIABLE: "extra", SHARED_VARIABLE: "replaced" },
+  });
+  assert.equal(verificationPassed(result, commands), true);
+});
+
 const OUTPUT_TAIL_BYTES = 4096;
 const LIMIT_BOUND_MS = 10000;
 

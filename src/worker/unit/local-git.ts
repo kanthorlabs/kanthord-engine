@@ -26,7 +26,28 @@ const REGULAR_MODES = new Set(["100644", "100755"]);
 const NEWLINE = "\n";
 const STATUS_PREFIX_LENGTH = 3;
 const EXCLUDE_SPECIAL = /[\\*?[\]!#]/g;
+const COMMIT_PATTERN = /^[a-f0-9]{40,64}$/;
+const RENAME_LETTER = "R";
+const STATUS_LETTER_LENGTH = 1;
 export const MERGE_HEAD = "MERGE_HEAD";
+export const ChangeStatus = {
+  Added: "added",
+  Modified: "modified",
+  Deleted: "deleted",
+  Renamed: "renamed",
+} as const;
+export type ChangeStatus = (typeof ChangeStatus)[keyof typeof ChangeStatus];
+export interface ChangeEntry {
+  path: string;
+  status: ChangeStatus;
+  previous_path?: string;
+}
+const PLAIN_STATUSES: Readonly<Record<string, ChangeStatus>> = {
+  A: ChangeStatus.Added,
+  M: ChangeStatus.Modified,
+  T: ChangeStatus.Modified,
+  D: ChangeStatus.Deleted,
+};
 const GIT_OPERATIONS = [
   { state: "rebase-merge", quit: ["rebase", "--quit"] },
   { state: "rebase-apply/applying", quit: ["am", "--quit"] },
@@ -575,6 +596,70 @@ export async function changedFiles(
     deadlineMs,
   );
   return output.split(NUL).filter(Boolean);
+}
+
+export async function changedEntries(
+  env: NodeJS.ProcessEnv,
+  directory: string,
+  from: string,
+  to: string,
+  context: Context,
+  deadlineMs: number,
+): Promise<ChangeEntry[]> {
+  assert.ok(from && !from.startsWith("-"));
+  assert.ok(to && !to.startsWith("-"));
+  const fields = (
+    await run(
+      env,
+      directory,
+      ["diff", "--name-status", "-z", "--find-renames", from, to, "--"],
+      context,
+      deadlineMs,
+    )
+  )
+    .split(NUL)
+    .filter(Boolean);
+  const entries: ChangeEntry[] = [];
+  let index = 0;
+  while (index < fields.length) {
+    const letter = fields[index]!.slice(0, STATUS_LETTER_LENGTH);
+    const path = fields[index + 1];
+    assert.ok(path !== undefined, "A change record holds a path.");
+    if (letter === RENAME_LETTER) {
+      const renamed = fields[index + 2];
+      assert.ok(renamed !== undefined, "A rename record holds a new path.");
+      entries.push({
+        path: renamed,
+        status: ChangeStatus.Renamed,
+        previous_path: path,
+      });
+      index += 3;
+      continue;
+    }
+    const status = PLAIN_STATUSES[letter];
+    if (status === undefined)
+      throw new Error(`Unsupported git change status ${letter}`);
+    entries.push({ path, status });
+    index += 2;
+  }
+  return entries;
+}
+
+export async function mergeBase(
+  env: NodeJS.ProcessEnv,
+  directory: string,
+  left: string,
+  right: string,
+  context: Context,
+  deadlineMs: number,
+): Promise<string> {
+  assert.ok(left && !left.startsWith("-"));
+  assert.ok(right && !right.startsWith("-"));
+  const commit = (
+    await run(env, directory, ["merge-base", left, right], context, deadlineMs)
+  ).trim();
+  assert.match(commit, COMMIT_PATTERN);
+  return commit;
 }
 
 export async function isAncestor(

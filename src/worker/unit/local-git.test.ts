@@ -7,6 +7,7 @@ import {
   mkdirSync,
   readFileSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
@@ -21,6 +22,8 @@ import {
 } from "../../kernel/test-support.ts";
 import {
   addedFiles,
+  ChangeStatus,
+  changedEntries,
   changedFiles,
   commitWork,
   discardChanges,
@@ -28,6 +31,7 @@ import {
   fileAtRevision,
   headCommit,
   isAncestor,
+  mergeBase,
 } from "./local-git.ts";
 import { GIT_COMMIT_FAILED } from "./stop-codes.ts";
 
@@ -236,6 +240,70 @@ test("changed files list an added, a modified, a deleted and a spaced path of a 
   assert.deepEqual(
     await changedFiles(env, directory, from, to, background, 10000),
     ["added", "deleted", "modified", "with space.txt"],
+  );
+});
+
+test("merge base answers the fork commit of two branches", async (t) => {
+  const directory = temporary(t);
+  const git = simpleGit(directory);
+  await git.init();
+  await git.addConfig("user.name", "Test");
+  await git.addConfig("user.email", "test@example.invalid");
+  await git.raw(["checkout", "-b", "main"]);
+  writeFileSync(join(directory, "kept"), "base");
+  const fork = await commitWork(env, directory, "base", background, 10000);
+  assert.ok(fork);
+  await git.raw(["checkout", "-b", "work"]);
+  writeFileSync(join(directory, "work"), "work");
+  await commitWork(env, directory, "work", background, 10000);
+  await git.raw(["checkout", "main"]);
+  writeFileSync(join(directory, "main"), "main");
+  await commitWork(env, directory, "main", background, 10000);
+  assert.equal(
+    await mergeBase(env, directory, "main", "work", background, 10000),
+    fork,
+  );
+  await assert.rejects(
+    mergeBase(env, directory, "--all", "work", background, 10000),
+  );
+});
+
+test("changed entries list the status of each path of a commit range in git order", async (t) => {
+  const directory = temporary(t);
+  const git = simpleGit(directory);
+  await git.init();
+  await git.addConfig("user.name", "Test");
+  await git.addConfig("user.email", "test@example.invalid");
+  writeFileSync(join(directory, "modified"), "base");
+  writeFileSync(join(directory, "deleted"), "base");
+  writeFileSync(join(directory, "typed"), "base");
+  writeFileSync(join(directory, "old name"), "renamed content\nsecond line\n");
+  const from = await commitWork(env, directory, "base", background, 10000);
+  assert.ok(from);
+  writeFileSync(join(directory, "modified"), "changed");
+  rmSync(join(directory, "deleted"));
+  rmSync(join(directory, "typed"));
+  symlinkSync("modified", join(directory, "typed"));
+  rmSync(join(directory, "old name"));
+  writeFileSync(join(directory, "new name"), "renamed content\nsecond line\n");
+  writeFileSync(join(directory, "added"), "new");
+  writeFileSync(join(directory, "with space.txt"), "new");
+  const to = await commitWork(env, directory, "work", background, 10000);
+  assert.ok(to);
+  assert.deepEqual(
+    await changedEntries(env, directory, from, to, background, 10000),
+    [
+      { path: "added", status: ChangeStatus.Added },
+      { path: "deleted", status: ChangeStatus.Deleted },
+      { path: "modified", status: ChangeStatus.Modified },
+      {
+        path: "new name",
+        status: ChangeStatus.Renamed,
+        previous_path: "old name",
+      },
+      { path: "typed", status: ChangeStatus.Modified },
+      { path: "with space.txt", status: ChangeStatus.Added },
+    ],
   );
 });
 
