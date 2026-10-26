@@ -43,6 +43,7 @@ import {
 import { requireMission } from "./write.ts";
 import { ControlError } from "./control.ts";
 import { requireNoLiveClaim } from "./dependency.ts";
+import type { ImportFacts } from "./import-telemetry.ts";
 
 const NO_VIOLATIONS = 0;
 const MINIMUM_MISSION_VERSION = 0;
@@ -374,6 +375,7 @@ export function applyImport(
   textMaxBytes: number,
   schedulerClaims: SchedulerClaims,
   ends: ExecutionEnds,
+  observe: (facts: Omit<ImportFacts, "version_to" | "error_type">) => void,
 ): ImportResult {
   const mission = requireMission(tx, missionId, body.mission_version);
   const { preview, resolved } = prepareImport(
@@ -385,6 +387,19 @@ export function applyImport(
     environments,
     textMaxBytes,
   );
+  observe({
+    project_id: mission.project_id,
+    mission_id: missionId,
+    version_from: mission.version,
+    creates: preview.creates.length,
+    updates: preview.updates.length,
+    retirements: preview.retirements.length,
+    removed_edges: preview.removed_edges.length,
+    actor_account: actor.account,
+    reason: body.reason,
+    violation_codes: preview.violations.map((violation) => violation.code),
+    applied_at: Date.now(),
+  });
   confirmImport(preview, body);
   assert.ok(resolved, "A valid import has a resolved graph.");
   const entries = assignIdentities(resolved);

@@ -1951,6 +1951,7 @@ function importer(t: TestContext, claims: SchedulerClaims = schedulerClaims) {
         TEXT_MAX_BYTES,
         claims,
         ends,
+        () => undefined,
       );
     });
   const assigned = (result: ReturnType<typeof apply>, filename: string) => {
@@ -2915,6 +2916,7 @@ test("import apply refuses the environment mix and writes no node", (t) => {
           TEXT_MAX_BYTES,
           schedulerClaims,
           executionEnds(),
+          () => undefined,
         ),
       ),
     (error) =>
@@ -2964,6 +2966,7 @@ test("import with equal stored environments lists no violation and applies", (t)
       TEXT_MAX_BYTES,
       schedulerClaims,
       executionEnds(),
+      () => undefined,
     );
   });
   assert.equal(result.assigned_ids.length, SINGLE_ENTRY);

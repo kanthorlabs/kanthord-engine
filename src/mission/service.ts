@@ -51,7 +51,9 @@ import {
   type IntakeCheck,
   type EventDecoder,
   type Intent,
+  type ImportApply,
   type ImportPreview,
+  type ImportResult,
   type ExecutionEnds,
 } from "./contract.ts";
 import {
@@ -61,6 +63,7 @@ import {
   type ActTelemetry,
   type Acted,
 } from "./act-telemetry.ts";
+import { recordImport, type ImportFacts } from "./import-telemetry.ts";
 import { executionEnds, reportEnds } from "./control.ts";
 import { addDependency, removeDependency } from "./dependency.ts";
 import { pauseNode, readyNode, resumeNode } from "./control-hold.ts";
@@ -683,25 +686,7 @@ export class MissionService
     registry.register(
       missionOperations["import.apply"],
       ({ params, body }, caller) =>
-        this.commitGraph(
-          caller,
-          { mission_id: params.mission_id },
-          (tx, ends) =>
-            this.covered(tx, { mission_id: params.mission_id }, (tx) =>
-              applyImport(
-                tx,
-                params.mission_id,
-                body,
-                humanActor(caller),
-                this.dependencies.bindings,
-                this.dependencies.environments,
-                this.dependencies.workQueue,
-                this.dependencies.config.text_max_bytes,
-                this.dependencies.schedulerClaims,
-                ends,
-              ),
-            ),
-        ),
+        this.importApplied(params.mission_id, body, caller),
     );
     registry.register(
       missionOperations["import.preview"],
@@ -996,6 +981,53 @@ export class MissionService
     reportEnds(this.dependencies, ends);
     committed?.();
     this.dependencies.wakeup.wake(projectId);
+    return result;
+  }
+
+  private importApplied(
+    missionId: string,
+    body: ImportApply,
+    caller: CallerContext,
+  ): ImportResult {
+    const observed: {
+      facts: Omit<ImportFacts, "version_to" | "error_type"> | null;
+    } = { facts: null };
+    let result: ImportResult;
+    try {
+      result = this.commitGraph(caller, { mission_id: missionId }, (tx, ends) =>
+        this.covered(tx, { mission_id: missionId }, (tx) =>
+          applyImport(
+            tx,
+            missionId,
+            body,
+            humanActor(caller),
+            this.dependencies.bindings,
+            this.dependencies.environments,
+            this.dependencies.workQueue,
+            this.dependencies.config.text_max_bytes,
+            this.dependencies.schedulerClaims,
+            ends,
+            (facts) => {
+              observed.facts = facts;
+            },
+          ),
+        ),
+      );
+    } catch (error) {
+      if (error instanceof OperationError && observed.facts !== null)
+        recordImport(this.dependencies, {
+          ...observed.facts,
+          version_to: observed.facts.version_from,
+          error_type: error.code,
+        });
+      throw error;
+    }
+    assert.ok(observed.facts);
+    recordImport(this.dependencies, {
+      ...observed.facts,
+      version_to: result.mission_version,
+      error_type: null,
+    });
     return result;
   }
 

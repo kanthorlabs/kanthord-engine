@@ -15,6 +15,9 @@ import {
 import { createIdentity, identitySchema } from "../kernel/identity.ts";
 import { Diagnostic } from "../kernel/errors.ts";
 import { HealthRegistry } from "../kernel/health.ts";
+import { SpanStatus, type ServerTrace } from "../tracking/contract.ts";
+import { ImportAttribute, IMPORT_OPERATION } from "./import-telemetry.ts";
+import type { ActContribution } from "./act-telemetry.ts";
 import { HealthStatus } from "../kernel/service.ts";
 import {
   IN_MEMORY_DATABASE,
@@ -333,6 +336,7 @@ type Collaborators = Pick<Dependencies, "bindings" | "workQueue"> &
       | "wakeup"
       | "executionAttribution"
       | "environments"
+      | "acts"
     >
   >;
 
@@ -4619,6 +4623,123 @@ test("import.apply refuses a preview whose classification changed after a discar
     retirementError(MissionErrorCode.RetirementMismatch),
   );
   assert.deepEqual(f.state(), before);
+});
+
+function importActs() {
+  const acts: { trace: ServerTrace; contribution: ActContribution }[] = [];
+  return {
+    acts,
+    collaborators: {
+      acts: {
+        act: (trace: ServerTrace, contribution: ActContribution) =>
+          void acts.push({ trace, contribution }),
+      },
+    },
+  };
+}
+
+test("an applied import sends one mission.import trace with the versions before and after", (t) => {
+  const recorded = importActs();
+  const f = importApplyFixture(t, undefined, undefined, recorded.collaborators);
+  const body = f.request();
+  const result = f.apply(body);
+  assert.equal(recorded.acts.length, SINGLE_ITEM);
+  const { trace, contribution } = recorded.acts[0]!;
+  assert.equal(contribution.operation, IMPORT_OPERATION);
+  assert.equal(contribution.status, SpanStatus.Ok);
+  assert.equal(trace.project_id, PROJECT_ID);
+  assert.equal(trace.node_id, null);
+  assert.equal(
+    contribution.attributes[ImportAttribute.MissionId],
+    f.mission_id,
+  );
+  assert.equal(
+    contribution.attributes[ImportAttribute.VersionFrom],
+    body.mission_version,
+  );
+  assert.equal(
+    contribution.attributes[ImportAttribute.VersionTo],
+    result.mission_version,
+  );
+  assert.equal(
+    contribution.attributes[ImportAttribute.Creates],
+    f.initial.length,
+  );
+  assert.equal(
+    contribution.attributes[ImportAttribute.HumanUsername],
+    ACCOUNT_ID,
+  );
+});
+
+test("a refused import apply sends one Error trace and still answers the violation", (t) => {
+  const recorded = importActs();
+  const f = importApplyFixture(t, undefined, undefined, recorded.collaborators);
+  const entries = f.identified(f.apply(f.request()));
+  const other = entries.find((item) => item.filename === OTHER_FILENAME)!;
+  f.setState(other.id!, NodeState.Waiting);
+  const snapshot = f.importSnapshot(
+    entries.map((item) =>
+      item.id === other.id ? { ...item, depends_on: [] } : item,
+    ),
+  );
+  recorded.acts.length = 0;
+  assert.throws(
+    () =>
+      f.apply({
+        ...snapshot,
+        preview_digest: INVALID_RETIRE_DIGEST,
+        confirmed_retirements: [],
+      }),
+    retirementError(ControlError.StateConflict),
+  );
+  assert.equal(recorded.acts.length, SINGLE_ITEM);
+  const { contribution } = recorded.acts[0]!;
+  assert.equal(contribution.operation, IMPORT_OPERATION);
+  assert.equal(contribution.status, SpanStatus.Error);
+  assert.equal(
+    contribution.attributes[ImportAttribute.ErrorType],
+    ControlError.StateConflict,
+  );
+  assert.deepEqual(contribution.attributes[ImportAttribute.ViolationCodes], [
+    ControlError.StateConflict,
+  ]);
+  assert.equal(
+    contribution.attributes[ImportAttribute.VersionTo],
+    contribution.attributes[ImportAttribute.VersionFrom],
+  );
+});
+
+test("a refused import apply without a violation records its error code", (t) => {
+  const recorded = importActs();
+  const f = importApplyFixture(t, undefined, undefined, recorded.collaborators);
+  const body = f.request();
+  assert.throws(
+    () => f.apply({ ...body, preview_digest: INVALID_RETIRE_DIGEST }),
+    retirementError(MissionErrorCode.RetirementMismatch),
+  );
+  assert.equal(recorded.acts.length, SINGLE_ITEM);
+  const { contribution } = recorded.acts[0]!;
+  assert.equal(contribution.status, SpanStatus.Error);
+  assert.equal(
+    contribution.attributes[ImportAttribute.ErrorType],
+    MissionErrorCode.RetirementMismatch,
+  );
+  assert.deepEqual(contribution.attributes[ImportAttribute.ViolationCodes], []);
+});
+
+test("an import preview and a stale import apply send no trace", (t) => {
+  const recorded = importActs();
+  const f = importApplyFixture(t, undefined, undefined, recorded.collaborators);
+  const body = f.request();
+  assert.deepEqual(recorded.acts, []);
+  f.apply(body);
+  recorded.acts.length = 0;
+  f.preview(f.importSnapshot());
+  assert.throws(
+    () => f.apply(body),
+    retirementError(MissionErrorCode.VersionConflict),
+  );
+  assert.deepEqual(recorded.acts, []);
 });
 
 test("import.apply refuses a dependency edit on a Waiting dependent", (t) => {
