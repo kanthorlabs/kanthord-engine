@@ -70,6 +70,7 @@ const MESSAGE_ENTRY = "message";
 const ASSISTANT_ROLE = "assistant";
 const CHAT_OPERATION = "chat";
 const CUSTOM_ENTRY = "custom";
+const TOOL_CALL_PART = "toolCall";
 const SESSION_HEADER = "session";
 const NO_ENTRIES = 0;
 const SPAN_ID_LENGTH = 16;
@@ -437,6 +438,40 @@ test("a turn end names the assistant session entry of the turn and links the ses
   assert.equal(
     end?.attributes?.["gen_ai.usage.input_tokens"],
     message.usage.input + message.usage.cacheRead + message.usage.cacheWrite,
+  );
+});
+
+test("a tool start names the stored assistant entry that holds its call", async (t) => {
+  const h = await fixture(t, [
+    tool("write", { path: "written.txt", content: CONTENT }),
+    fauxAssistantMessage("done"),
+  ]);
+  await h.agent.prompt(WORK);
+  h.agent.closeTrace(SpanStatus.Ok);
+  const start = h.records.find(
+    (record) =>
+      record.kind === RecordKind.Span &&
+      record.operation === SpanOperation.Tool &&
+      record.start_time,
+  );
+  const callId = (start as { attributes?: Record<string, unknown> })
+    .attributes?.["gen_ai.tool.call.id"];
+  const entryId = (start as { attributes?: Record<string, unknown> })
+    .attributes?.["kanthord.session.entry_id"];
+  assert.ok(callId);
+  const assistant = sessionEntries(h).find(
+    ({ entry_id }) => entry_id === entryId,
+  );
+  assert.equal(assistant?.entry_type, MESSAGE_ENTRY);
+  const message = assistant?.entry.message as {
+    role: string;
+    content: { type: string; id?: string }[];
+  };
+  assert.equal(message.role, ASSISTANT_ROLE);
+  assert.ok(
+    message.content.some(
+      (part) => part.type === TOOL_CALL_PART && part.id === callId,
+    ),
   );
 });
 
