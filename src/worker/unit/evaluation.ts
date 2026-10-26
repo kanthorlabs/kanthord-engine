@@ -4,9 +4,18 @@ import type { SetupFailure } from "./environment-setup.ts";
 import { canonicalJSON } from "../../kernel/json.ts";
 import {
   AssessmentResult,
+  AssetKind,
   NodeState,
   type Revision,
 } from "../../mission/contract.ts";
+import {
+  AFFECTED_SUBJECT,
+  affectedEvidenceOf,
+  AffectedVerdict,
+  runAffected,
+  type AffectedEvidence,
+  type AffectedResult,
+} from "./affected.ts";
 import type { ExecutionBudget } from "./budget.ts";
 import { ContextCancelled, DeadlineExceeded } from "../../kernel/context.ts";
 import {
@@ -31,6 +40,7 @@ import {
   type VerificationRun,
 } from "./verification.ts";
 import {
+  affectedFailureReport,
   evaluationInstruction,
   evaluationJudgementSchema,
   judgementRationale,
@@ -61,6 +71,7 @@ import {
   verificationObserver,
   VerificationContext,
 } from "./method-telemetry.ts";
+import type { TestedInput } from "./verification.ts";
 
 export { EvaluationStage };
 
@@ -89,6 +100,7 @@ function factsOf(
   unmet: readonly { id: string; ground: UnmetGround }[] = [],
   proposalCount = NO_ITEMS,
   repaired: boolean | null = null,
+  affected: AffectedVerdict | null = null,
 ): EvaluationFacts {
   return {
     stage,
@@ -97,7 +109,14 @@ function factsOf(
     proposal_count: proposalCount,
     repaired,
     verification_class: verificationRun.outcome,
+    affected,
   };
+}
+
+interface AffectedStep {
+  results: AffectedResult[];
+  verdict: AffectedVerdict;
+  document: AffectedEvidence | null;
 }
 
 async function judge(
@@ -111,6 +130,7 @@ async function judge(
   openAgent: OpenAgent,
   dependencies: Awaited<ReturnType<typeof readDependencies>> | null,
   setupFailure: SetupFailure | null,
+  affected: AffectedStep | null,
 ) {
   const examine = input.setup.intent === ExecutionIntent.Examine;
   const commands = verificationCommands(revision);
@@ -133,6 +153,20 @@ async function judge(
       proposals: [],
       facts: factsOf(EvaluationStage.Verification, verificationRun),
     };
+  if (affected?.verdict === AffectedVerdict.Failed)
+    return {
+      result: AssessmentResult.CriterionNotMet,
+      rationale: affectedFailureReport(affected.results),
+      proposals: [],
+      facts: factsOf(
+        EvaluationStage.Affected,
+        verificationRun,
+        [],
+        NO_ITEMS,
+        null,
+        affected.verdict,
+      ),
+    };
   const agent = await openAgent(directory);
   if (agent.budget.exhausted()) return run.stop(EndReason.AssessmentAbsent);
   const work = renderWorkPrompt(input.setup.templates, {
@@ -149,6 +183,7 @@ async function judge(
       verification,
       evidence,
       dependencies,
+      affected: affected?.document ?? null,
     }),
     PromptTemplate.Evaluation,
   );
@@ -181,6 +216,7 @@ async function judge(
       judgement.unmet,
       proposals.length,
       repaired,
+      affected?.verdict ?? null,
     ),
   };
 }
@@ -203,6 +239,77 @@ function baselineOf(base: PreparedEvaluation["base"]) {
   return base === null
     ? {}
     : { baseline: (command: string) => base.exitOf(command) };
+}
+
+function headOf(testedInput: TestedInput, bindingId: string): string {
+  const addresses = Array.isArray(testedInput) ? testedInput : [testedInput];
+  const address = addresses.find(
+    (entry) =>
+      entry.kind === AssetKind.Repository && entry.binding_id === bindingId,
+  );
+  assert.ok(address?.kind === AssetKind.Repository);
+  return address.commit;
+}
+
+async function runAffectedStep(
+  input: StepsInput,
+  run: ExecutionRun,
+  prepared: PreparedEvaluation,
+  budget: ExecutionBudget,
+): Promise<AffectedStep> {
+  assert.ok(prepared.base);
+  const results: AffectedResult[] = [];
+  for (const checkout of prepared.checkouts) {
+    const repository = input.setup.repositories.find(
+      (entry) => entry.name === checkout.name,
+    );
+    assert.ok(repository);
+    const result = await runAffected({
+      env: input.env,
+      context: run.operationContext,
+      deadline: budget.wallDeadline(),
+      exhausted: () => budget.exhausted(),
+      spans: run.spans,
+      scope: VerificationContext.Evaluation,
+      workspaceKey: prepared.key,
+      checkout: {
+        binding_id: repository.binding_id,
+        name: checkout.name,
+        directory: checkout.directory,
+        base_branch: checkout.base_branch,
+        head: headOf(prepared.tested_input, repository.binding_id),
+      },
+      digests: environmentDigestsOf(input.setup.repositories),
+      base: prepared.base,
+    });
+    if ("budgetEnd" in result) return run.stop(EndReason.AssessmentAbsent);
+    results.push(result);
+  }
+  const evidence = affectedEvidenceOf(results);
+  return {
+    results,
+    verdict: evidence.verdict,
+    document: evidence.repositories.length > NO_ITEMS ? evidence : null,
+  };
+}
+
+async function endedByBudget<T>(
+  run: ExecutionRun,
+  budget: ExecutionBudget,
+  work: () => Promise<T>,
+): Promise<T> {
+  try {
+    return await work();
+  } catch (error) {
+    if (
+      (error instanceof ContextCancelled ||
+        error instanceof DeadlineExceeded) &&
+      budget.exhausted() &&
+      !run.operationContext.signal.aborted
+    )
+      return run.stop(EndReason.AssessmentAbsent);
+    throw error;
+  }
 }
 
 async function evaluate(
@@ -256,13 +363,39 @@ async function evaluate(
     ],
     verification,
   });
+  const affected =
+    input.setup.intent === ExecutionIntent.Implement &&
+    prepared.checkouts.length > NO_ITEMS &&
+    prepared.setupFailure === null &&
+    verificationPassed(verification, verificationCommands(revision))
+      ? await endedByBudget(run, budget, () =>
+          runAffectedStep(input, run, prepared, budget),
+        )
+      : null;
+  const recordedAffected =
+    affected?.document == null
+      ? null
+      : await run.submitEvidence(input.claim.node_id, {
+          subject: AFFECTED_SUBJECT,
+          assets: [
+            {
+              kind: "produced",
+              content: {
+                media_type: "application/json",
+                encoding: "base64",
+                data: Buffer.from(canonicalJSON(affected.document)).toString(
+                  "base64",
+                ),
+              },
+            },
+          ],
+        });
   const dependencies =
     input.setup.intent === ExecutionIntent.Examine
       ? await readDependencies(run)
       : null;
-  let judgement: Awaited<ReturnType<typeof judge>>;
-  try {
-    judgement = await judge(
+  const judgement = await endedByBudget(run, budget, () =>
+    judge(
       input,
       run,
       revision,
@@ -273,19 +406,15 @@ async function evaluate(
       openAgent,
       dependencies,
       prepared.setupFailure,
-    );
-  } catch (error) {
-    if (
-      (error instanceof ContextCancelled ||
-        error instanceof DeadlineExceeded) &&
-      budget.exhausted() &&
-      !run.operationContext.signal.aborted
-    )
-      return run.stop(EndReason.AssessmentAbsent);
-    throw error;
-  }
+      affected,
+    ),
+  );
   return {
-    evidence_ids: [recorded.id, ...prepared.evidenceIds],
+    evidence_ids: [
+      recorded.id,
+      ...(recordedAffected ? [recordedAffected.id] : []),
+      ...prepared.evidenceIds,
+    ],
     dependency_outcome_ids:
       dependencies?.outcomes.map((outcome) => outcome.id) ?? [],
     result: judgement.result,

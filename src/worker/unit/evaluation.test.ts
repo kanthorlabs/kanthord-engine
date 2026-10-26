@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { PromptTemplate } from "../../agent/contract.ts";
 import { test, type TestContext } from "node:test";
 import { existsSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { temporary, hostEnvironment } from "../../kernel/test-support.ts";
 import { createIdentity } from "../../kernel/identity.ts";
 import {
@@ -15,12 +15,14 @@ import { EndReason, ExecutionRun, ExecutionStop } from "./execution-run.ts";
 import { executionBoundary } from "./native-method.ts";
 import { ExecutionIntent } from "../contract.ts";
 import {
+  affectedCommand,
   anthropicSetup,
   everyBindingSshAccess,
   repositorySetup,
   transport as localTransport,
 } from "./test-support.ts";
 import { WorkspaceRoot } from "./workspace.ts";
+import { AFFECTED_DECLARATION_FILE, AffectedVerdict } from "./affected.ts";
 import type { MethodClients } from "./method-clients.ts";
 import type { RepositoryTransport } from "../contract.ts";
 import type { NativeAgent } from "./native-agent.ts";
@@ -33,7 +35,7 @@ import {
 import { SetupEnd } from "./environment-setup.ts";
 import { VerificationClass } from "./verification.ts";
 import { ActionResultKind } from "../contract.ts";
-import { AssessmentResult } from "../../mission/contract.ts";
+import { AssessmentResult, AssetKind } from "../../mission/contract.ts";
 import { RecordKind, type TelemetryRecord } from "../../tracking/contract.ts";
 import {
   CauseAssigner,
@@ -584,6 +586,16 @@ test("an evaluation that its agent deadline cuts ends with no assessment and no 
 
 const TASK_ID = createIdentity("task");
 
+interface Submitted {
+  subject: string;
+  verification?: unknown;
+  requirement_key?: unknown;
+  assets: {
+    kind: string;
+    content: { media_type: string; encoding: string; data: string };
+  }[];
+}
+
 interface ReviewOptions {
   reply?: string;
   repository?: ReturnType<typeof repositorySetup>;
@@ -622,10 +634,13 @@ async function reviewOf(
   const assessments: {
     result: string;
     rationale: string;
+    evidence_ids: string[];
     cause?: unknown;
   }[] = [];
   const records: TelemetryRecord[] = [];
   const verifications: { results: { exit_code: number | null }[] }[] = [];
+  const submits: Submitted[] = [];
+  const instructions: string[] = [];
   const releases: unknown[] = [];
   const clients = {
     mission: {
@@ -692,8 +707,11 @@ async function reviewOf(
           media_type: "text/markdown",
         }),
       "evidence.submit": async (input: {
-        body: { verification: (typeof verifications)[number] };
+        body: Submitted & { verification?: (typeof verifications)[number] };
       }) => {
+        submits.push(input.body);
+        if (!input.body.verification)
+          return complete({ evidence: { id: "affected" } });
         verifications.push(input.body.verification);
         return complete({ evidence: { id: "verification" } });
       },
@@ -731,7 +749,9 @@ async function reviewOf(
     opens++;
     return {
       budget,
-      instruct: async () => {},
+      instruct: async (_work: WorkPrompt, instruction: string) => {
+        instructions.push(instruction);
+      },
       lastText: () =>
         options.reply ??
         'kanthord-judgement: {"result":"success","rationale":"met"}',
@@ -757,6 +777,8 @@ async function reviewOf(
     end,
     assessments,
     verifications,
+    submits,
+    instructions,
     releases,
     records,
     opens: () => opens,
@@ -990,4 +1012,192 @@ test("a failed node-head setup submits the cause with the suspects environment a
   });
   const attributes = evaluationEndOf(review.records).attributes;
   assert.equal(attributes[EvaluationAttribute.Stage], EvaluationStage.Setup);
+});
+
+const AFFECTED_SUBJECT_TEXT = "Affected test results";
+const JSON_MEDIA_TYPE = "application/json";
+const BASE64_ENCODING = "base64";
+const REPOSITORY_NAME = "repo";
+const BROKEN = "broken";
+const FAILS_WHEN_BROKEN = `grep -q ${BROKEN} file`;
+const COMMIT_IDENTITY = [
+  "-c",
+  "user.name=Test",
+  "-c",
+  "user.email=a@example.invalid",
+];
+
+async function affectedSnapshot(
+  t: TestContext,
+  declaredCommand: string | null,
+  nodeContent: string,
+) {
+  const origin = join(temporary(t), "origin");
+  mkdirSync(origin);
+  const git = simpleGit(origin);
+  await git.raw(["init", "-b", "main"]);
+  writeFileSync(join(origin, "file"), "base");
+  await git.add("file");
+  if (declaredCommand !== null) {
+    mkdirSync(join(origin, dirname(AFFECTED_DECLARATION_FILE)));
+    writeFileSync(
+      join(origin, AFFECTED_DECLARATION_FILE),
+      JSON.stringify({ version: 1, command: declaredCommand }),
+    );
+    await git.add(AFFECTED_DECLARATION_FILE);
+  }
+  await git.raw([...COMMIT_IDENTITY, "commit", "-m", "base"]);
+  await git.raw(["checkout", "-b", "node"]);
+  writeFileSync(join(origin, "file"), nodeContent);
+  await git.add("file");
+  await git.raw([...COMMIT_IDENTITY, "commit", "-m", "work"]);
+  const snapshot = (await git.revparse(["HEAD"])).trim();
+  await git.raw(["checkout", "main"]);
+  return {
+    repository: {
+      ...repositorySetup(),
+      address: origin,
+    } as unknown as ReturnType<typeof repositorySetup>,
+    snapshot,
+    transport: localTransport,
+  };
+}
+
+async function affectedReview(
+  t: TestContext,
+  declaredCommand: string | null,
+  nodeContent: string,
+  command = "true",
+) {
+  return reviewOf(t, command, undefined, {
+    ...(await affectedSnapshot(t, declaredCommand, nodeContent)),
+  });
+}
+
+function affectedEvidenceOf(review: Awaited<ReturnType<typeof reviewOf>>) {
+  return review.submits.filter(
+    (submit) => submit.subject === AFFECTED_SUBJECT_TEXT,
+  );
+}
+
+function affectedLineOf(instruction: string | undefined) {
+  const prefix = "Affected test results of this evaluation: ";
+  const line = instruction?.split("\n").find((text) => text.startsWith(prefix));
+  assert.ok(line);
+  return JSON.parse(line.slice(prefix.length));
+}
+
+function affectedEnd(review: Awaited<ReturnType<typeof reviewOf>>) {
+  return evaluationEndOf(review.records).attributes[
+    EvaluationAttribute.Affected
+  ];
+}
+
+test("a passing affected command submits its evidence, adds its id, informs the reviewer and ends the span with passed", async (t) => {
+  const review = await affectedReview(t, affectedCommand("false"), "changed");
+  assert.deepEqual(review.end, { kind: "closed", outcomeId: "outcome" });
+  const [evidence, ...others] = affectedEvidenceOf(review);
+  assert.equal(others.length, NO_RELEASES);
+  assert.equal("verification" in evidence!, false);
+  assert.equal("requirement_key" in evidence!, false);
+  assert.equal(evidence?.assets.length, SINGLE_RELEASE);
+  const [asset] = evidence!.assets;
+  assert.equal(asset?.kind, AssetKind.Produced);
+  assert.equal(asset?.content.media_type, JSON_MEDIA_TYPE);
+  assert.equal(asset?.content.encoding, BASE64_ENCODING);
+  const document = JSON.parse(
+    Buffer.from(asset!.content.data, "base64").toString("utf8"),
+  );
+  assert.equal(document.verdict, AffectedVerdict.Passed);
+  assert.equal(document.repositories[0].repository, REPOSITORY_NAME);
+  assert.deepEqual(review.assessments[0]?.evidence_ids, [
+    "verification",
+    "affected",
+    "snapshot",
+    "placed",
+  ]);
+  assert.equal(review.opens(), ONE_OPEN);
+  assert.deepEqual(affectedLineOf(review.instructions[0]), document);
+  assert.equal(affectedEnd(review), AffectedVerdict.Passed);
+});
+
+test("an affected test that fails at the head and passes at the base answers criterion-not-met with no agent turn", async (t) => {
+  const review = await affectedReview(
+    t,
+    affectedCommand(`echo head-output; ${FAILS_WHEN_BROKEN}`),
+    BROKEN,
+  );
+  assert.equal(review.opens(), NO_OPENS);
+  assert.equal(review.instructions.length, NO_OPENS);
+  const [assessment] = review.assessments;
+  assert.equal(assessment?.result, AssessmentResult.CriterionNotMet);
+  assert.match(
+    assessment?.rationale ?? "",
+    /^The affected test run of repository repo failed\./,
+  );
+  assert.match(
+    assessment?.rationale ?? "",
+    /1 test failed: a\.test\.ts > one\./,
+  );
+  assert.match(
+    assessment?.rationale ?? "",
+    /Output of the failed run \(the last 4 KiB\):\n\n```text\nhead-output\n\n```$/,
+  );
+  assert.deepEqual(assessment?.cause, {
+    category: CauseCategory.Unattributed,
+    assigner: CauseAssigner.Rule,
+    suspects: [CauseCategory.Model, CauseCategory.Plan],
+  });
+  assert.deepEqual(assessment?.evidence_ids, [
+    "verification",
+    "affected",
+    "snapshot",
+    "placed",
+  ]);
+  const attributes = evaluationEndOf(review.records).attributes;
+  assert.equal(attributes[EvaluationAttribute.Stage], EvaluationStage.Affected);
+  assert.equal(
+    attributes[EvaluationAttribute.Affected],
+    AffectedVerdict.Failed,
+  );
+});
+
+test("an affected test that fails at both heads goes to the reviewer with base_red", async (t) => {
+  const review = await affectedReview(t, affectedCommand("true"), "changed");
+  assert.equal(review.opens(), ONE_OPEN);
+  assert.equal(review.assessments[0]?.result, AssessmentResult.Success);
+  assert.equal(
+    affectedLineOf(review.instructions[0]).verdict,
+    AffectedVerdict.BaseRed,
+  );
+  assert.equal(affectedEnd(review), AffectedVerdict.BaseRed);
+});
+
+test("a node with no declaration submits no affected evidence and passes null to the reviewer", async (t) => {
+  const review = await affectedReview(t, null, "changed");
+  assert.equal(affectedEvidenceOf(review).length, NO_RELEASES);
+  assert.deepEqual(review.assessments[0]?.evidence_ids, [
+    "verification",
+    "snapshot",
+    "placed",
+  ]);
+  assert.equal(affectedLineOf(review.instructions[0]), null);
+  assert.equal(affectedEnd(review), AffectedVerdict.Absent);
+});
+
+test("a failed listed command runs no affected command", async (t) => {
+  const marker = join(temporary(t), "affected-ran");
+  const review = await affectedReview(
+    t,
+    affectedCommand(`touch ${marker}; true`),
+    "changed",
+    "false",
+  );
+  assert.equal(existsSync(marker), false);
+  assert.equal(affectedEvidenceOf(review).length, NO_RELEASES);
+  assert.equal(review.assessments[0]?.result, AssessmentResult.CriterionNotMet);
+  assert.equal(
+    EvaluationAttribute.Affected in evaluationEndOf(review.records).attributes,
+    false,
+  );
 });

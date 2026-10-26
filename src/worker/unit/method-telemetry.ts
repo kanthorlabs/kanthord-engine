@@ -355,6 +355,7 @@ export const EvaluationAttribute = {
   UnmetGrounds: "kanthord.evaluation.unmet_grounds",
   ProposalCount: "kanthord.evaluation.proposal_count",
   Repaired: "kanthord.judgement.repaired",
+  Affected: "kanthord.evaluation.affected",
 } as const;
 
 export function evaluationEnd(judgement: {
@@ -376,6 +377,9 @@ export function evaluationEnd(judgement: {
       ...(facts.repaired === null
         ? {}
         : { [EvaluationAttribute.Repaired]: facts.repaired }),
+      ...(facts.affected === null
+        ? {}
+        : { [EvaluationAttribute.Affected]: facts.affected }),
     },
     texts: { rationale: judgement.rationale },
   };

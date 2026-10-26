@@ -7,11 +7,13 @@ import {
   type FailureCause,
 } from "../../kernel/cause.ts";
 import { UnmetGround } from "./judgement.ts";
+import type { AffectedVerdict } from "./affected.ts";
 import { VerificationClass } from "./verification.ts";
 
 export const EvaluationStage = {
   Setup: "setup",
   Verification: "verification",
+  Affected: "affected",
   Judgement: "judgement",
 } as const;
 export type EvaluationStage =
@@ -24,6 +26,7 @@ export interface EvaluationFacts {
   proposal_count: number;
   repaired: boolean | null;
   verification_class: VerificationClass;
+  affected: AffectedVerdict | null;
 }
 
 const GROUND_CAUSES: Readonly<
@@ -47,6 +50,8 @@ export function reworkCauseOf(facts: EvaluationFacts): FailureCause {
     facts.stage === EvaluationStage.Verification &&
     facts.verification_class === VerificationClass.CodeFailure
   )
+    return unattributed([CauseCategory.Model, CauseCategory.Plan]);
+  if (facts.stage === EvaluationStage.Affected)
     return unattributed([CauseCategory.Model, CauseCategory.Plan]);
   const ground = facts.unmet_grounds[0];
   if (facts.stage !== EvaluationStage.Judgement || ground === undefined)

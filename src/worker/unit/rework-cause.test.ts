@@ -5,6 +5,7 @@ import {
   CauseCategory,
   CauseSubcategory,
 } from "../../kernel/cause.ts";
+import { AffectedVerdict } from "./affected.ts";
 import { UnmetGround } from "./judgement.ts";
 import { VerificationClass } from "./verification.ts";
 import {
@@ -21,6 +22,7 @@ function facts(overrides: Partial<EvaluationFacts>): EvaluationFacts {
     proposal_count: 0,
     repaired: false,
     verification_class: VerificationClass.Pass,
+    affected: null,
     ...overrides,
   };
 }
@@ -92,6 +94,23 @@ test("the first unmet ground decides over a later one", () => {
       category: CauseCategory.Model,
       subcategory: CauseSubcategory.StandardViolation,
       assigner: CauseAssigner.Reviewer,
+    },
+  );
+});
+
+test("the affected stage is unattributed with the suspects model and plan", () => {
+  assert.deepEqual(
+    reworkCauseOf(
+      facts({
+        stage: EvaluationStage.Affected,
+        repaired: null,
+        affected: AffectedVerdict.Failed,
+      }),
+    ),
+    {
+      category: CauseCategory.Unattributed,
+      assigner: CauseAssigner.Rule,
+      suspects: [CauseCategory.Model, CauseCategory.Plan],
     },
   );
 });
