@@ -117,6 +117,11 @@ test("agent prompts are valid published UTF-8 assets", () => {
       "The prose style and the finding format of a candidate report are no default-standard violation.",
     ),
   );
+  assert.ok(
+    RE_AGENT_PROMPT.includes(
+      "A change to a gate input that the requirement of the node does not ask for is a blocker.",
+    ),
+  );
   assert.ok(WORKBENCH_PROMPT.startsWith("## Human interlocutor"));
 });
 
