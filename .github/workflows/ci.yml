@@ -63,4 +63,7 @@ jobs:
           test -x /usr/sbin/sshd || { sudo apt-get update && sudo apt-get install -y --no-install-recommends openssh-server; }
           sudo mkdir -p /run/sshd
       - name: Test with sshd
-        run: pnpm run test:files --test-concurrency="$TEST_CONCURRENCY" $(git grep -l startTestSshd -- 'src/*.test.ts')
+        run: |
+          files=$(git grep -l startTestSshd -- 'src/*.test.ts')
+          test -n "$files"
+          pnpm run test:files --test-concurrency="$TEST_CONCURRENCY" $files
