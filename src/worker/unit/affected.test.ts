@@ -701,6 +701,10 @@ test("a time-limit end at both heads stops with affected_timeout", async (t) => 
   assert.equal(stop.code, EnvironmentFailure.AffectedTimeout);
   assert.equal(stop.detail.commit, REDACTED);
   assert.equal(stop.detail.time_limit_s, SHORT_LIMIT_S);
+  assert.equal(
+    readFileSync(f.probe, "utf8").split("\n").length - 1,
+    PROBE_LINES,
+  );
 });
 
 test("a time-limit end at the head stops with affected_timeout before the base check", async (t) => {
