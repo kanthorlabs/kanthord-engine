@@ -1,4 +1,4 @@
-import { addedFiles } from "./local-git.ts";
+import { addedFiles, modifiedFiles } from "./local-git.ts";
 import { writeFile } from "node:fs/promises";
 import { join, relative } from "node:path";
 import { ensureDirectory } from "../../kernel/files.ts";
@@ -154,6 +154,7 @@ async function prepareWorkspace(
           ...workspace,
           evidenceIds: [...new Set(found.map((item) => item.evidenceId))],
           addedFiles: await addedFilesOf(input, run, workspace, deadline),
+          changedFiles: await changedFilesOf(input, run, workspace, deadline),
         };
       } catch (error) {
         input.workspaces.release(workspace.key, WorkspaceKind.Execution);
@@ -169,6 +170,7 @@ async function prepareWorkspace(
       })),
       evidenceIds: [] as string[],
       addedFiles: [],
+      changedFiles: [],
     };
   const { directory } = input.workspaces.prepareExecution(common);
   return {
@@ -178,6 +180,7 @@ async function prepareWorkspace(
     tested_input: null,
     evidenceIds: [] as string[],
     addedFiles: [],
+    changedFiles: [],
   };
 }
 
@@ -200,6 +203,27 @@ async function addedFilesOf(
       files.push(prefix ? join(prefix, file) : file);
   }
   return files;
+}
+
+async function changedFilesOf(
+  input: StepsInput,
+  run: ExecutionRun,
+  workspace: { directory: string; checkouts: readonly ExamineCheckout[] },
+  deadline: number,
+): Promise<string[]> {
+  const files: string[] = [];
+  for (const checkout of workspace.checkouts) {
+    const prefix = relative(workspace.directory, checkout.directory);
+    for (const file of await modifiedFiles(
+      input.env,
+      checkout.directory,
+      `origin/${checkout.base_branch}`,
+      run.operationContext,
+      deadline - Date.now(),
+    ))
+      files.push(prefix ? join(prefix, file) : file);
+  }
+  return files.toSorted();
 }
 
 function testedCommits(testedInput: TestedInput): string[] {
@@ -310,6 +334,7 @@ export async function prepareEvaluation(
         evidence: evidence.filter((item) => evidenceIds.has(item.id)),
         assets,
         added_files: workspace.addedFiles,
+        changed_files: workspace.changedFiles,
       },
     };
   } catch (error) {

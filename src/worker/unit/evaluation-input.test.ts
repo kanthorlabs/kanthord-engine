@@ -205,6 +205,7 @@ test("B3 review bundle places all supporting assets in the evidence directory ou
       const ASSET_REVIEW_COUNT = 2;
       assert.equal(result.reviewBundle.assets.length, ASSET_REVIEW_COUNT);
       assert.deepEqual(result.reviewBundle.added_files, []);
+      assert.deepEqual(result.reviewBundle.changed_files, []);
       assert.equal(
         (result.tested_input as unknown[]).length,
         ASSET_REVIEW_COUNT,
@@ -327,6 +328,8 @@ test("an examine node with no binding places the produced evidence privately and
 
 const PLACED_REPORT = "placed report";
 const ADDED_FILE = "added.md";
+const MODIFIED_FILE = "base";
+const MODIFIED_CONTENT = "modified";
 
 test("an examine node with one binding places the produced evidence outside its clean checkout", async (t) => {
   const setup = anthropicSetup({ repositories: [repositorySetup()] });
@@ -407,8 +410,8 @@ test("an implement snapshot evaluation places the produced evidence outside its 
   const git = simpleGit(origin);
   await git.init();
   await git.raw(["checkout", "-b", "main"]);
-  const commit = async (name: string) => {
-    writeFileSync(join(origin, name), name);
+  const commit = async (name: string, content = name) => {
+    writeFileSync(join(origin, name), content);
     await git.add(name);
     await git.raw([
       "-c",
@@ -423,6 +426,7 @@ test("an implement snapshot evaluation places the produced evidence outside its 
   };
   await commit("base");
   await git.raw(["checkout", "-b", "node"]);
+  await commit(MODIFIED_FILE, MODIFIED_CONTENT);
   const snapshot = await commit(ADDED_FILE);
   await git.raw(["checkout", "main"]);
   const repository = { ...repositorySetup(), address: origin };
@@ -520,6 +524,10 @@ test("an implement snapshot evaluation places the produced evidence outside its 
     [join("..", "..", EVIDENCE_DIRECTORY, assetId)],
   );
   assert.deepEqual(prepared.reviewBundle.added_files, [ADDED_FILE]);
+  assert.deepEqual(prepared.reviewBundle.changed_files, [
+    ADDED_FILE,
+    MODIFIED_FILE,
+  ]);
   workspaces.release(prepared.key, WorkspaceKind.Execution);
   assert.equal(existsSync(prepared.key), false);
 });
@@ -634,6 +642,10 @@ test("two bindings check out two snapshots and record one tested commit for each
   );
   assert.deepEqual(prepared.evidenceIds, ["evidence_1"]);
   assert.deepEqual(prepared.reviewBundle.added_files, [
+    join("api", "api.md"),
+    join("web", "web.md"),
+  ]);
+  assert.deepEqual(prepared.reviewBundle.changed_files, [
     join("api", "api.md"),
     join("web", "web.md"),
   ]);
