@@ -60,6 +60,7 @@ function actionable(t: TestContext) {
     resolution: ActionResolution.Unrequested,
     request_evidence_id: null,
     eligible: true,
+    gate_files: [],
     reuse_candidates: [],
   };
   h.context.actions.push(entry);
@@ -832,6 +833,7 @@ function reworkable(t: TestContext) {
     resolution: ActionResolution.Unresolved,
     request_evidence_id: existingEvidenceId,
     eligible: false,
+    gate_files: [],
     reuse_candidates: [],
   };
   h.context.actions.push(entry);
@@ -984,4 +986,54 @@ test("a contained pull request snapshot of a kanthord landing makes no merge cal
     { kind: ActionResultKind.Submitted, evidence: h.evidence },
   ]);
   assert.equal(perform.mock.callCount(), SINGLE_CALL_COUNT);
+});
+
+const GATE_FILE_PATHS = ["package.json"];
+const MERGE_SKIPPED_MESSAGE = "merge skipped: gate files changed";
+
+test("kanthord landing with a gate file requests no merge and warns once", async (t) => {
+  const h = actionable(t);
+  h.entry.action.configuration.landing = "kanthord";
+  h.entry.gate_files = GATE_FILE_PATHS;
+  const warned: unknown[][] = [];
+  h.dependencies.logger = {
+    warn: (...args: unknown[]) => warned.push(args),
+  } as NonNullable<typeof h.dependencies.logger>;
+  const perform = t.mock.method(
+    h.dependencies.intakeActions,
+    "perform",
+    async () => PR,
+  );
+  assert.deepEqual((await h.perform()).items, [
+    { kind: ActionResultKind.Submitted, evidence: h.evidence },
+  ]);
+  assert.equal(perform.mock.callCount(), SINGLE_CALL_COUNT);
+  assert.deepEqual(warned, [
+    [
+      { evidence_id: h.evidence.id, gate_files: GATE_FILE_PATHS },
+      MERGE_SKIPPED_MESSAGE,
+    ],
+  ]);
+});
+
+test("rework: kanthord landing with a gate file requests no merge and warns once", async (t) => {
+  const h = reworkable(t);
+  h.entry.gate_files = GATE_FILE_PATHS;
+  const warned: unknown[][] = [];
+  h.dependencies.logger = {
+    warn: (...args: unknown[]) => warned.push(args),
+  } as NonNullable<typeof h.dependencies.logger>;
+  let performCount = NO_CALLS;
+  h.dependencies.intakeActions.perform = async () => {
+    performCount += 1;
+    return PR;
+  };
+  assert.deepEqual((await h.perform()).items, []);
+  assert.equal(performCount, NO_CALLS);
+  assert.deepEqual(warned, [
+    [
+      { evidence_id: h.existingEvidenceId, gate_files: GATE_FILE_PATHS },
+      MERGE_SKIPPED_MESSAGE,
+    ],
+  ]);
 });

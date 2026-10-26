@@ -686,6 +686,22 @@ test("createPullRequest posts head, base and title and answers the number", asyn
   });
 });
 
+test("createPullRequest sends the body only when it is present", async (t) => {
+  const server = await platform(t, answer(201, { number: 12 }));
+  const github = new GitHubPlatform({ baseUrl: server.baseUrl });
+  const pullRequest = { head: HEAD_BRANCH, base: BASE_BRANCH, title: "change" };
+  await github.createPullRequest(call(), TARGET, pullRequest);
+  await github.createPullRequest(call(), TARGET, {
+    ...pullRequest,
+    body: "text",
+  });
+  assert.deepEqual(JSON.parse(String(server.bodies[0])), pullRequest);
+  assert.deepEqual(JSON.parse(String(server.bodies[1])), {
+    ...pullRequest,
+    body: "text",
+  });
+});
+
 test("createPullRequest answers the class of a refused write", async (t) => {
   const server = await platform(t, answer(422, { message: "exists" }));
   const github = new GitHubPlatform({ baseUrl: server.baseUrl });

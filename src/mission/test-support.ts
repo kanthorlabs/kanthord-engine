@@ -28,6 +28,7 @@ import {
   AssetKind,
   PlatformAddressKind,
   RepositoryAction,
+  type GateFiles,
   type PlatformAddress,
   TransitionRule,
   type NodeTransition,
@@ -467,6 +468,7 @@ export function authorizationHarness(t: TestContext, identity: CallerIdentity) {
   const assess = (
     result: AssessmentResult = AssessmentResult.Success,
     commit: string = ASSESSED_COMMIT,
+    gateFiles: GateFiles | null = null,
   ) =>
     h.store.transaction((tx) =>
       insertAssessment(tx, {
@@ -482,7 +484,7 @@ export function authorizationHarness(t: TestContext, identity: CallerIdentity) {
           binding_id: h.repositoryId,
           commit,
         }),
-        gate_files: null,
+        gate_files: gateFiles === null ? null : canonicalJSON(gateFiles),
         execution_id: h.claim.executionId,
         actor: null,
         node_revision: FIRST_REVISION,

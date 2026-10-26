@@ -11,6 +11,7 @@ import {
 } from "./contract.ts";
 import { currentAssessmentOf } from "./currency.ts";
 import { actionStatesOf, eligibleUnrequested } from "./frozen-action.ts";
+import { gateFilesOf } from "./gate-files.ts";
 import { readRequests, readAssets } from "./record-store.ts";
 import { readNode } from "./store.ts";
 
@@ -89,6 +90,7 @@ export function actionContextOf(
         resolution,
         request_evidence_id: request?.id ?? null,
         eligible: eligible.has(action.key),
+        gate_files: gateFilesOf(assessment, action.binding_id),
         reuse_candidates: candidatesOf(tx, nodeId, attempt, action.key),
       };
     }),

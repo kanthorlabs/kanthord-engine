@@ -696,7 +696,7 @@ export class GitHubPlatform {
   async createPullRequest(
     call: GitHubCall,
     target: GitHubTarget,
-    pullRequest: { head: string; base: string; title: string },
+    pullRequest: { head: string; base: string; title: string; body?: string },
   ): Promise<GitHubAnswer<{ number: number }>> {
     assert.ok(pullRequest.head.length >= MIN_SEGMENT_LENGTH);
     assert.ok(pullRequest.base.length >= MIN_SEGMENT_LENGTH);

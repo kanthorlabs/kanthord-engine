@@ -998,6 +998,7 @@ export type ActionFacts = {
   snapshot_commit: string;
   reused_address: PullRequestAddress | null;
   merge_address: PullRequestAddress | null;
+  gate_files: string[];
 };
 export type RequestFacts = {
   frozen_action: FrozenAction;
@@ -1022,6 +1023,7 @@ export type ActionContext = {
     resolution: Resolution;
     request_evidence_id: string | null;
     eligible: boolean;
+    gate_files: string[];
     reuse_candidates: {
       evidence_id: string;
       attempt: number;

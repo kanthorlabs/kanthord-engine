@@ -64,6 +64,15 @@ type UncertainItem = Extract<
   { kind: typeof ActionResultKind.Uncertain }
 >;
 const IN_FLIGHT_CODE = "intake.outbound.request.in_flight";
+const MERGE_SKIPPED_MESSAGE = "merge skipped: gate files changed";
+const NO_GATE_FILES = 0;
+
+function landsByKanthorD(entry: Pending["entry"]): boolean {
+  return (
+    entry.action.configuration.landing === Landing.KanthorD &&
+    entry.gate_files.length === NO_GATE_FILES
+  );
+}
 
 function provesNoWrite(error: unknown): boolean {
   if (!(error instanceof OperationError)) return false;
@@ -256,6 +265,10 @@ export class ActionPerformer {
         pending.entry.action.configuration.landing === Landing.KanthorD
       ) {
         const evidenceId = recorded.evidence.id as string;
+        if (!landsByKanthorD(pending.entry)) {
+          this.warnMergeSkipped(evidenceId, pending.entry.gate_files);
+          return recorded;
+        }
         await this.requestMerge(
           call,
           claim.nodeId,
@@ -381,6 +394,10 @@ export class ActionPerformer {
       )
         continue;
       const evidenceId = entry.request_evidence_id;
+      if (!landsByKanthorD(entry)) {
+        this.warnMergeSkipped(evidenceId, entry.gate_files);
+        continue;
+      }
       await Promise.resolve()
         .then(() => {
           const operands = operandsOf(claim.nodeBranch, context, entry);
@@ -403,6 +420,13 @@ export class ActionPerformer {
           );
         });
     }
+  }
+
+  private warnMergeSkipped(evidenceId: string, gateFiles: string[]): void {
+    this.dependencies.logger?.warn(
+      { evidence_id: evidenceId, gate_files: gateFiles },
+      MERGE_SKIPPED_MESSAGE,
+    );
   }
 
   private async requestMerge(
