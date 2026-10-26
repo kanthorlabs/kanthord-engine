@@ -41,6 +41,7 @@ const TEST_REPORTER = fileURLToPath(
   new URL("./test-reporter.mjs", import.meta.url),
 );
 const RUN_TIMEOUT_MS = 120000;
+const INHERITED_ENVIRONMENT = ["KANTHORD_CHANGES", "KANTHORD_AFFECTED_REPORT"];
 const SUCCESS = 0;
 const FAILED = 1;
 const RUN_ERROR = 2;
@@ -453,8 +454,10 @@ function commitAll(root) {
 }
 
 function runNode(root, args, extra = {}) {
-  const env = { ...process.env, ...extra };
+  const env = { ...process.env };
   delete env.NODE_TEST_CONTEXT;
+  for (const name of INHERITED_ENVIRONMENT) delete env[name];
+  Object.assign(env, extra);
   const result = spawnSync(process.execPath, args, {
     cwd: root,
     env,
