@@ -778,6 +778,7 @@ export function checkImportCondition(
   assert.equal(resolved.violations.length, NO_VIOLATIONS);
   const violations: Violation[] = [];
   const modified = modifiedNodes(resolved);
+  const retiring = new Set(resolved.retirements);
   for (const id of [...new Set([...modified, ...resolved.updates])].sort()) {
     const node = readNode(tx, id);
     assert.ok(node, "Modified nodes exist in the transaction.");
@@ -786,7 +787,9 @@ export function checkImportCondition(
       violations.push(
         violation(
           MissionErrorCode.TerminalChange,
-          "Import cannot change a terminal node.",
+          retiring.has(id)
+            ? "Import cannot retire a terminal node. Keep its unchanged file in the plan."
+            : "Import cannot change a terminal node.",
           { node_id: id },
           locator,
         ),
@@ -797,7 +800,9 @@ export function checkImportCondition(
       violations.push(
         violation(
           MissionErrorCode.ConditionFailed,
-          "Node does not satisfy the import condition.",
+          retiring.has(id)
+            ? "Import cannot retire a node that holds an attempt. Discard the node, then keep its unchanged file in the plan."
+            : "Node does not satisfy the import condition.",
           { state: node.state, attempt: node.attempt },
           locator,
         ),
