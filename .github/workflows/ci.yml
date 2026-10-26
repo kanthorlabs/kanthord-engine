@@ -1,0 +1,84 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+env:
+  TEST_CONCURRENCY: "4"
+  SSHD_TESTS: |
+    src/apps/server/e2e-custody-handover.test.ts
+    src/apps/server/e2e-worker-host.test.ts
+    src/apps/worker/ssh-relay.test.ts
+    src/project/service.test.ts
+    src/repository/connector-sshd.test.ts
+    src/repository/git-failure.test.ts
+    src/repository/index.test.ts
+    src/repository/ssh-agent-sshd.test.ts
+    src/repository/ssh-relay-sshd.test.ts
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Format check
+        run: pnpm exec prettier --check src bin eslint.config.js scripts/pi-tools.mjs scripts/test-path.mjs scripts/test-path.test.mjs scripts/test-reporter.mjs scripts/test-reporter.test.mjs --log-level warn
+      - run: pnpm run typecheck
+      - run: pnpm run lint
+      - run: pnpm run build
+      - uses: actions/cache@v4
+        with:
+          path: .pi-tools
+          key: pi-tools-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('static/pi-tools.json') }}
+      - run: pnpm run pi-tools:fetch
+      - name: Test without sshd
+        run: |
+          git ls-files 'src/*.test.ts' | grep -vxF -f <(printf '%s' "$SSHD_TESTS") > "$RUNNER_TEMP/tests"
+          wc -l < "$RUNNER_TEMP/tests"
+          PATH="$(node scripts/test-path.mjs)" NODE_COMPILE_CACHE=node_modules/.cache/node-compile \
+            node --test --test-reporter=./scripts/test-reporter.mjs \
+            --test-concurrency="$TEST_CONCURRENCY" --test-timeout=60000 \
+            $(cat "$RUNNER_TEMP/tests") scripts/test-reporter.test.mjs scripts/test-path.test.mjs
+
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - uses: actions/cache@v4
+        with:
+          path: .pi-tools
+          key: pi-tools-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('static/pi-tools.json') }}
+      - run: pnpm run pi-tools:fetch
+      - name: Install sshd
+        run: |
+          test -x /usr/sbin/sshd || { sudo apt-get update && sudo apt-get install -y --no-install-recommends openssh-server; }
+          sudo mkdir -p /run/sshd
+      - name: Test with sshd
+        run: |
+          PATH="$(node scripts/test-path.mjs)" NODE_COMPILE_CACHE=node_modules/.cache/node-compile \
+            node --test --test-reporter=./scripts/test-reporter.mjs \
+            --test-concurrency="$TEST_CONCURRENCY" --test-timeout=60000 \
+            $SSHD_TESTS
