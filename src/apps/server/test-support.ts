@@ -871,6 +871,12 @@ const GITHUB_PULL_ROUTE =
 const GITHUB_MERGE_ROUTE =
   /^\/repos\/([^/]+)\/([^/]+)\/pulls\/([1-9][0-9]*)\/merge$/;
 const GITHUB_REPOSITORY_ROUTE = /^\/repos\/([^/]+)\/([^/]+)$/;
+const GITHUB_RULES_ROUTE = /^\/repos\/([^/]+)\/([^/]+)\/rules\/branches\/.+$/;
+const GITHUB_CHECK_RUNS_ROUTE =
+  /^\/repos\/([^/]+)\/([^/]+)\/commits\/([^/]+)\/check-runs$/;
+const GITHUB_STATUSES_ROUTE =
+  /^\/repos\/([^/]+)\/([^/]+)\/commits\/([^/]+)\/statuses$/;
+const GITHUB_REQUIRED_STATUS_CHECKS_RULE = "required_status_checks";
 const GITHUB_REPOSITORY_SETTINGS = {
   allow_merge_commit: true,
   allow_squash_merge: true,
@@ -934,6 +940,18 @@ export interface FakeReviewComment {
   body: string;
 }
 
+export interface FakeCheckRun {
+  id: number;
+  name: string;
+  status: string;
+  conclusion: string | null;
+}
+
+export interface FakeCommitStatus {
+  context: string;
+  state: string;
+}
+
 export interface FakeGitHubCall {
   method: string;
   path: string;
@@ -961,6 +979,9 @@ interface FakeGitHubState {
   refuseMerge: number | null;
   closeSequence: number;
   mergeHeadSha: string | null;
+  requiredChecks: string[];
+  checkRuns: Map<string, FakeCheckRun[]>;
+  commitStatuses: Map<string, FakeCommitStatus[]>;
 }
 
 interface FakeGitHubAnswer {
@@ -1152,6 +1173,43 @@ function routePull(
   };
 }
 
+function branchRules(state: FakeGitHubState): FakeGitHubAnswer {
+  const rules = state.requiredChecks.length
+    ? [
+        {
+          type: GITHUB_REQUIRED_STATUS_CHECKS_RULE,
+          parameters: {
+            required_status_checks: state.requiredChecks.map((context) => ({
+              context,
+            })),
+          },
+        },
+      ]
+    : [];
+  return { status: HttpStatus.OK, body: rules };
+}
+
+function routeCommitChecks(
+  state: FakeGitHubState,
+  pathname: string,
+): FakeGitHubAnswer | null {
+  const runs = GITHUB_CHECK_RUNS_ROUTE.exec(pathname);
+  if (runs) {
+    const [, , , ref] = runs;
+    assert.ok(ref);
+    const checkRuns = state.checkRuns.get(ref) ?? [];
+    return {
+      status: HttpStatus.OK,
+      body: { total_count: checkRuns.length, check_runs: checkRuns },
+    };
+  }
+  const statuses = GITHUB_STATUSES_ROUTE.exec(pathname);
+  if (!statuses) return null;
+  const [, , , ref] = statuses;
+  assert.ok(ref);
+  return { status: HttpStatus.OK, body: state.commitStatuses.get(ref) ?? [] };
+}
+
 function eventsEtag(events: unknown[]): string {
   const digest = createHash("sha256")
     .update(JSON.stringify(events))
@@ -1258,9 +1316,12 @@ async function gitHubRequest(
     return reply({ status: state.failPulls, body: GITHUB_SCRIPTED_FAILURE });
   const answer = GITHUB_REPOSITORY_ROUTE.test(url.pathname)
     ? { status: HttpStatus.OK, body: GITHUB_REPOSITORY_SETTINGS }
-    : GITHUB_MERGE_ROUTE.test(url.pathname)
-      ? mergePull(state, url, body)
-      : routePull(state, method, url, body, call.if_none_match);
+    : GITHUB_RULES_ROUTE.test(url.pathname)
+      ? branchRules(state)
+      : GITHUB_MERGE_ROUTE.test(url.pathname)
+        ? mergePull(state, url, body)
+        : (routeCommitChecks(state, url.pathname) ??
+          routePull(state, method, url, body, call.if_none_match));
   if (method !== HttpMethod.Get && state.dropNext) {
     state.dropNext = false;
     response.destroy();
@@ -1341,6 +1402,9 @@ export async function fakeGitHub(t: TestContext) {
     refuseMerge: null,
     mergeHeadSha: null,
     closeSequence: 0,
+    requiredChecks: [],
+    checkRuns: new Map(),
+    commitStatuses: new Map(),
   };
   const failures: unknown[] = [];
   let releaseGate = () => {};
@@ -1422,6 +1486,17 @@ export async function fakeGitHub(t: TestContext) {
     mergeability(number: number, answers: FakeMergeability[]): void {
       assert.ok(answers.length >= GITHUB_LAST_MERGEABILITY);
       changePull(state, number).mergeability = [...answers];
+    },
+    checks(input: {
+      required: readonly string[];
+      commit: string;
+      runs: readonly FakeCheckRun[];
+      statuses?: readonly FakeCommitStatus[];
+    }): void {
+      assert.ok(input.commit.length >= GITHUB_MIN_SEGMENT_LENGTH);
+      state.requiredChecks = [...input.required];
+      state.checkRuns.set(input.commit, [...input.runs]);
+      state.commitStatuses.set(input.commit, [...(input.statuses ?? [])]);
     },
     refuseMerge(status: number | null): void {
       assert.ok(status === null || Number.isInteger(status));

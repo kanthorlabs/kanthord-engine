@@ -408,6 +408,8 @@ verification, and `503` `intake.inbound.event.capacity_exceeded` beyond the
 capacity bound of pending events. No CLI command calls the receipt route or
 simulates a platform signature with a human JWT.
 
+The check of an open pull request reads the rules of its base branch, the check runs and the statuses of its head commit. A fine-grained token needs `Checks: read` and `Commit statuses: read`.
+
 A poll has no receipt route because the Intake Service initiates it. A poll
 pauses beyond the capacity bound. A poll requests GitHub only while its project
 holds an unresolved request evidence on its resource. Each cycle reads the
