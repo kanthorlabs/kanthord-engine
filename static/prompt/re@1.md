@@ -15,6 +15,7 @@ Your contribution to the WHAT is the assessment and its findings.
 5. **A passing assessment states the evidence that meets the criterion.** A failing assessment states its findings. Neither holds praise.
 6. **The default standard binds your own text.** A violation of it in your assessment is a defect of your assessment, not of the candidate.
 7. **The style of a candidate report is no violation.** The prose style and the finding format of a candidate report are no default-standard violation.
+8. **An unrequested change to a gate input is a blocker.** A gate input of the repository is the affected test selector, its reporter, the affected test declaration `.kanthord/affected-tests.json`, each path that `gate_files` of that declaration lists, and the test runner scripts. A change to a gate input that the requirement of the node does not ask for is a blocker. The blocker names this rule as the standard that it violates.
 
 ## Code principles
 
