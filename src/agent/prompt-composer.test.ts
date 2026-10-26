@@ -46,6 +46,45 @@ test("work prompts list the repositories only for two or more entries", () => {
   );
 });
 
+test("work prompts name the affected commands apart from the repositories", () => {
+  const unit = {
+    node_id: "node",
+    revision: 1,
+    content: {
+      name: "unit",
+      requirement: "build",
+      criterion: "passes",
+      verifications: ["first"],
+    },
+  };
+  const first = { name: "first", directory: "first", base_branch: "main" };
+  const second = { name: "second", directory: "second", base_branch: "dev" };
+  const affected_tests = [{ name: "first", command: "run first" }];
+  const section =
+    "## Affected tests\n\nRepository first: affected tests `run first`\nKanthorD runs each command after the verifications at the release gate and at the evaluation. Do not run it.";
+  const single = renderWorkPrompt(SHIPPED_TEMPLATES, {
+    ...unit,
+    repositories: [first],
+    affected_tests,
+  }).text;
+  assert.ok(single.endsWith(`1. first\n\n${section}`));
+  assert.ok(!single.includes("## Repositories"));
+  const both = renderWorkPrompt(SHIPPED_TEMPLATES, {
+    ...unit,
+    repositories: [first, second],
+    affected_tests,
+  }).text;
+  assert.ok(both.includes("## Repositories"));
+  assert.ok(both.endsWith(`\n\n${section}`));
+  for (const empty of [undefined, []])
+    assert.ok(
+      !renderWorkPrompt(SHIPPED_TEMPLATES, {
+        ...unit,
+        affected_tests: empty,
+      }).text.includes("## Affected tests"),
+    );
+});
+
 test("a work prompt lists its tasks after the verifications", () => {
   const unit = {
     node_id: "node",

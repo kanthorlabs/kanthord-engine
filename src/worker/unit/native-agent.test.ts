@@ -1,7 +1,14 @@
 import { ExecutionBudget } from "./budget.ts";
 import assert from "node:assert/strict";
-import { implementFixture, task, unusedHostTools } from "./test-support.ts";
+import {
+  declareAffected,
+  implementFixture,
+  nextExecution,
+  task,
+  unusedHostTools,
+} from "./test-support.ts";
 import { taskWork } from "./steps-implement.ts";
+import { nodeWork } from "./base-refresh.ts";
 import {
   existsSync,
   mkdirSync,
@@ -547,6 +554,38 @@ test("the work prompt lists both repositories", async (t) => {
     taskWork(single, current).text.includes("## Repositories"),
     false,
   );
+});
+
+const AFFECTED_COMMAND = "pnpm --silent run test:affected";
+const AFFECTED_SECTION = "## Affected tests";
+const BLANK_COMMAND = " ";
+
+test("the node work and the task work name the affected command of a declaring checkout", async (t) => {
+  const current = task("affected", "true");
+  const first = await implementFixture(t, [current], [], undefined, [
+    "api",
+    "web",
+  ]);
+  assert.deepEqual(first.affectedTests, []);
+  await declareAffected(first, t, AFFECTED_COMMAND);
+  const h = await nextExecution(t, first, []);
+  assert.deepEqual(h.affectedTests, [
+    { name: "api", command: AFFECTED_COMMAND },
+  ]);
+  const section = `${AFFECTED_SECTION}\n\nRepository api: affected tests \`${AFFECTED_COMMAND}\`\nKanthorD runs each command`;
+  assert.ok(taskWork(h, current).text.includes(section));
+  assert.ok(nodeWork(h).text.includes(section));
+  assert.ok(!first.affectedTests.length);
+  assert.ok(!taskWork(first, current).text.includes(AFFECTED_SECTION));
+});
+
+test("an invalid affected declaration gives no entry and no stop", async (t) => {
+  const current = task("invalid", "true");
+  const first = await implementFixture(t, [current], []);
+  await declareAffected(first, t, BLANK_COMMAND);
+  const h = await nextExecution(t, first, []);
+  assert.deepEqual(h.affectedTests, []);
+  assert.ok(!taskWork(h, current).text.includes(AFFECTED_SECTION));
 });
 
 test("native reviewer refuses a scripted write tool", async (t) => {
