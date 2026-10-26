@@ -42,6 +42,7 @@ import {
 export const AFFECTED_DECLARATION_FILE = ".kanthord/affected-tests.json";
 export const AFFECTED_REPORT_MAX_BYTES = 1048576;
 const MS_PER_SECOND = 1000;
+const BINDING_ID_KEY = "binding_id";
 const COMMIT_KEY = "commit";
 const STRING_TYPE = "string";
 const DECLARATION_VERSION = 1;
@@ -611,26 +612,24 @@ function baseStop(
   });
 }
 
-function redactedDetail(detail: object, kept: readonly string[]): object {
+const KEPT_KEYS: readonly string[] = [BINDING_ID_KEY, COMMIT_KEY];
+
+function redactedDetail(detail: object): object {
   return Object.fromEntries(
     Object.entries(detail).map(([key, value]) => [
       key,
-      !kept.includes(key) && typeof value === STRING_TYPE
+      !KEPT_KEYS.includes(key) && typeof value === STRING_TYPE
         ? redactReason(value)
         : value,
     ]),
   );
 }
 
-function environmentStop(
-  code: string,
-  detail: object,
-  kept: readonly string[] = [],
-): ExecutionStop {
+function environmentStop(code: string, detail: object): ExecutionStop {
   return new ExecutionStop(
     EndReason.EnvironmentFailed,
     code,
-    JSON.stringify(redactedDetail(detail, kept)),
+    JSON.stringify(redactedDetail(detail)),
   );
 }
 
@@ -689,16 +688,12 @@ async function decide(
   );
   if (head === null) return { budgetEnd: true };
   if ("failure" in head && head.failure.kind === HeadFailureKind.TimedOut)
-    throw environmentStop(
-      EnvironmentFailure.AffectedTimeout,
-      {
-        binding_id: checkout.binding_id,
-        commit: checkout.head,
-        command: declaration.command,
-        time_limit_s: head.failure.time_limit_s,
-      },
-      [COMMIT_KEY],
-    );
+    throw environmentStop(EnvironmentFailure.AffectedTimeout, {
+      binding_id: checkout.binding_id,
+      commit: checkout.head,
+      command: declaration.command,
+      time_limit_s: head.failure.time_limit_s,
+    });
   const report = "report" in head ? head.report : null;
   const failedIds = report ? headFailed(report, files) : [];
   const result: AffectedRun = {
