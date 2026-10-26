@@ -143,7 +143,8 @@ Reads one page of trace summaries, newest first by default. Each item is a
 trace summary of [`trace get`](#trace-get) with three more fields:
 `root_operation`, `root_attributes` and `cause`. The first two hold the
 `operation` and the `attributes` of the root span. Both are `null` while the
-store holds no root span. `cause` is the effective cause of the trace as
+store holds no root span. `root_attributes` of an execution trace holds
+`kanthord.node.name`, the node name of the revision at the claim. `cause` is the effective cause of the trace as
 `{ category, subcategory, assigner, suspects }`, or `null` when the trace has no
 cause. The cause of the cause label span wins when the store holds one, and its
 assigner is `human`. Otherwise `cause` is the cause that the root span end

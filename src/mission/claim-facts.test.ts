@@ -31,6 +31,7 @@ const FIRST_REVISION = 1;
 const SECOND_REVISION = 2;
 const NO_ACTIONS = 0;
 const LIVE_DEPENDENCIES = 2;
+const FIXTURE_NODE_NAME = "name";
 const ACTOR = { kind: ActorKind.Human, account: "ulrich", name: "Ulrich" };
 const MACOS = "platform.macos";
 const STORAGE_BINDING = createIdentity("binding");
@@ -422,6 +423,13 @@ test("opening facts answer a revision turn after a criterion-not-met assessment"
     }),
   );
   assert.equal(openingFacts()!.revision_turn, true);
+});
+
+test("opening facts answer the node name of the claim revision", (t) => {
+  const h = factsHarness(t);
+  const nodeId = h.node({});
+  const facts = h.store.transaction((tx) => h.service.openingFacts(tx, nodeId));
+  assert.equal(facts!.node_name, FIXTURE_NODE_NAME);
 });
 
 test("opening facts answer null for an absent node", (t) => {

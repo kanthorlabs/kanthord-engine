@@ -402,7 +402,11 @@ export interface MissionClaimFacts {
   openingFacts(
     tx: Transaction,
     nodeId: string,
-  ): { dependency_count: number; revision_turn: boolean } | null;
+  ): {
+    dependency_count: number;
+    revision_turn: boolean;
+    node_name: string;
+  } | null;
   claimFactsOf(
     tx: Transaction,
     projectId: string,

@@ -12,6 +12,7 @@ const NO_FACTS = {
   placement: null,
   revision_turn: null,
   dependency_count: null,
+  node_name: null,
 };
 
 test("the root start facts hold the kind, the worker name and the wait", () => {
@@ -31,6 +32,7 @@ test("the root start facts hold the kind, the worker name and the wait", () => {
       placement: null,
       revision_turn: null,
       dependency_count: null,
+      node_name: null,
     },
   );
   assert.deepEqual(
@@ -49,6 +51,7 @@ test("the root start facts hold the kind, the worker name and the wait", () => {
       placement: null,
       revision_turn: null,
       dependency_count: null,
+      node_name: null,
     },
   );
 });
@@ -59,6 +62,7 @@ test("the root start copies the facts", () => {
     placement: "container",
     revision_turn: true,
     dependency_count: 2,
+    node_name: "Write the report",
   };
   assert.deepEqual(
     executionOpening(
