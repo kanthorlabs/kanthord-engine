@@ -20,6 +20,7 @@ import {
   computeChanges,
   selectTests,
 } from "./affected-tests.mjs";
+import { affectedReportSchema } from "../src/worker/unit/affected.ts";
 
 const MODIFIED = "modified";
 const ADDED = "added";
@@ -40,6 +41,7 @@ const TEST_REPORTER = fileURLToPath(
   new URL("./test-reporter.mjs", import.meta.url),
 );
 const RUN_TIMEOUT_MS = 120000;
+const INHERITED_ENVIRONMENT = ["KANTHORD_CHANGES", "KANTHORD_AFFECTED_REPORT"];
 const SUCCESS = 0;
 const FAILED = 1;
 const RUN_ERROR = 2;
@@ -88,8 +90,8 @@ function change(path, status = MODIFIED, previous_path) {
     : { path, status, previous_path };
 }
 
-function selected(tests, excluded_e2e = []) {
-  return { selection: "selected", reason: null, tests, excluded_e2e };
+function related(tests, excluded_e2e = []) {
+  return { selection: "related", reason: null, tests, excluded_e2e };
 }
 
 const NONE = { selection: "none", reason: null, tests: [], excluded_e2e: [] };
@@ -103,7 +105,7 @@ test("an import edge selects the test of the importer", async (t) => {
   });
   assert.deepEqual(
     selectTests(root, [change("src/a.ts")]),
-    selected(["src/b.test.ts"]),
+    related(["src/b.test.ts"]),
   );
 });
 
@@ -123,7 +125,7 @@ test("a re-export makes an edge", async (t) => {
   });
   assert.deepEqual(
     selectTests(root, [change("src/a.ts")]),
-    selected(["src/index.test.ts"]),
+    related(["src/index.test.ts"]),
   );
 });
 
@@ -134,7 +136,7 @@ test("an import type makes an edge", async (t) => {
   });
   assert.deepEqual(
     selectTests(root, [change("src/a.ts")]),
-    selected(["src/b.test.ts"]),
+    related(["src/b.test.ts"]),
   );
 });
 
@@ -145,7 +147,7 @@ test("a dynamic import with a string literal makes an edge", async (t) => {
   });
   assert.deepEqual(
     selectTests(root, [change("src/a.ts")]),
-    selected(["src/b.test.ts"]),
+    related(["src/b.test.ts"]),
   );
 });
 
@@ -156,7 +158,7 @@ test("a URL with a string literal makes a file edge", async (t) => {
   });
   assert.deepEqual(
     selectTests(root, [change("static/data.json")]),
-    selected(["src/b.test.ts"]),
+    related(["src/b.test.ts"]),
   );
 });
 
@@ -168,7 +170,7 @@ test("a URL that ends with a slash makes a prefix edge", async (t) => {
   });
   assert.deepEqual(
     selectTests(root, [change("static/dir/one.json")]),
-    selected(["src/b.test.ts"]),
+    related(["src/b.test.ts"]),
   );
   assert.deepEqual(selectTests(root, [change("static/other.json")]), NONE);
 });
@@ -182,7 +184,7 @@ test("a template URL makes a prefix edge to the text before the substitution", a
   });
   assert.deepEqual(
     selectTests(root, [change("static/dir/part-one.json")]),
-    selected(["src/b.test.ts"]),
+    related(["src/b.test.ts"]),
   );
   assert.deepEqual(selectTests(root, [change("static/dir/other.json")]), NONE);
 });
@@ -205,7 +207,7 @@ test("the data table makes static/openapi/ an input of static/openapi.yaml", asy
   });
   assert.deepEqual(
     selectTests(root, [change("static/openapi/part.yaml")]),
-    selected(["src/spec.test.ts"]),
+    related(["src/spec.test.ts"]),
   );
 });
 
@@ -215,7 +217,7 @@ test("a deleted module selects each importer that still names it", async (t) => 
   });
   assert.deepEqual(
     selectTests(root, [change("src/gone.ts", DELETED)]),
-    selected(["src/b.test.ts"]),
+    related(["src/b.test.ts"]),
   );
 });
 
@@ -226,7 +228,7 @@ test("a rename selects the importers of the previous path", async (t) => {
   });
   assert.deepEqual(
     selectTests(root, [change("src/new.ts", RENAMED, "src/old.ts")]),
-    selected(["src/b.test.ts"]),
+    related(["src/b.test.ts"]),
   );
 });
 
@@ -237,7 +239,7 @@ test("an untracked file is a graph node", async (t) => {
   });
   assert.deepEqual(
     selectTests(root, [change("src/new.ts", ADDED)]),
-    selected(["src/new.test.ts"]),
+    related(["src/new.test.ts"]),
   );
 });
 
@@ -311,7 +313,7 @@ test("an inert path that an edge names selects the importer", async (t) => {
   });
   assert.deepEqual(
     selectTests(root, [change("docs/spec.md")]),
-    selected(["src/b.test.ts"]),
+    related(["src/b.test.ts"]),
   );
 });
 
@@ -345,7 +347,7 @@ test("an e2e path is excluded and never selected", async (t) => {
   });
   assert.deepEqual(
     selectTests(root, [change("src/a.ts")]),
-    selected(["src/a.test.ts"], ["src/apps/server/e2e-one.test.ts"]),
+    related(["src/a.test.ts"], ["src/apps/server/e2e-one.test.ts"]),
   );
 });
 
@@ -360,7 +362,7 @@ test("a test that imports startTestSshd is e2e", async (t) => {
   });
   assert.deepEqual(
     selectTests(root, [change(SSHD_MODULE)]),
-    selected(
+    related(
       ["src/repository/plain.test.ts"],
       ["src/repository/alias.test.ts", "src/repository/ssh.test.ts"],
     ),
@@ -374,11 +376,11 @@ test("a changed unit test selects itself", async (t) => {
   });
   assert.deepEqual(
     selectTests(root, [change("src/a.test.ts")]),
-    selected(["src/a.test.ts"]),
+    related(["src/a.test.ts"]),
   );
   assert.deepEqual(
     selectTests(root, [change("scripts/affected-tests.test.mjs")]),
-    selected(["scripts/affected-tests.test.mjs"]),
+    related(["scripts/affected-tests.test.mjs"]),
   );
 });
 
@@ -402,7 +404,7 @@ test("the change set of engine #285 selects the tracking test", async (t) => {
   });
   assert.deepEqual(
     selectTests(root, [change("src/tracking/contract.ts")]),
-    selected(["src/tracking/service.test.ts"]),
+    related(["src/tracking/service.test.ts"]),
   );
 });
 
@@ -415,7 +417,7 @@ test("the change set of engine #287 selects the changed worker test", async (t) 
   });
   assert.deepEqual(
     selectTests(root, [change("src/worker/service.test.ts")]),
-    selected(["src/worker/service.test.ts"]),
+    related(["src/worker/service.test.ts"]),
   );
 });
 
@@ -452,8 +454,10 @@ function commitAll(root) {
 }
 
 function runNode(root, args, extra = {}) {
-  const env = { ...process.env, ...extra };
+  const env = { ...process.env };
   delete env.NODE_TEST_CONTEXT;
+  for (const name of INHERITED_ENVIRONMENT) delete env[name];
+  Object.assign(env, extra);
   const result = spawnSync(process.execPath, args, {
     cwd: root,
     env,
@@ -467,7 +471,9 @@ function runNode(root, args, extra = {}) {
 function runEntry(root, args = [], extra = {}) {
   const result = runNode(root, [ENTRY_POINT, ...args], extra);
   const lines = result.stdout.trimEnd().split("\n");
-  return { ...result, report: JSON.parse(lines.at(-1)) };
+  const report = JSON.parse(lines.at(-1));
+  assert.ok(affectedReportSchema.safeParse(report).success);
+  return { ...result, report };
 }
 
 async function changesFile(root, files) {
@@ -524,7 +530,7 @@ test("a failed test gives the report, the report file and the exit code 1", asyn
   assert.equal(result.status, FAILED);
   assert.deepEqual(result.report, {
     version: 1,
-    selection: "selected",
+    selection: "related",
     reason: null,
     tests: ["src/a.test.ts"],
     failed: [{ file: "src/a.test.ts", name: "fails" }],
@@ -578,7 +584,7 @@ test("the input of --base is the change set against the merge base", async (t) =
   await writeFile(join(root, "src/c.test.ts"), PASSING_TEST);
   const result = runEntry(root, ["--base", "HEAD"]);
   assert.equal(result.status, SUCCESS);
-  assert.equal(result.report.selection, "selected");
+  assert.equal(result.report.selection, "related");
   assert.deepEqual(result.report.tests, ["src/a.test.ts", "src/c.test.ts"]);
   assert.deepEqual(result.report.failed, []);
   assert.deepEqual(result.report.flaky, []);
@@ -625,6 +631,25 @@ test("the none selection gives empty lists and the exit code 0", async (t) => {
     JSON.parse(await readFile(reportPath, "utf8")),
     result.report,
   );
+});
+
+test("a global input gives the all selection with a reason", async (t) => {
+  const root = await fixture(t, { "src/a.test.ts": PASSING_TEST });
+  const reportPath = join(root, "report.json");
+  const result = runEntry(root, [], {
+    KANTHORD_CHANGES: await changesFile(root, [change("package.json")]),
+    KANTHORD_AFFECTED_REPORT: reportPath,
+  });
+  assert.equal(result.status, SUCCESS);
+  assert.deepEqual(result.report, {
+    version: 1,
+    selection: "all",
+    reason: "global input: package.json",
+    tests: ["src/a.test.ts"],
+    failed: [],
+    flaky: [],
+    excluded_e2e: [],
+  });
 });
 
 test("a first run that fails with no failed id is a run error", async (t) => {
