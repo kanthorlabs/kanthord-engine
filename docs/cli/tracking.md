@@ -318,7 +318,10 @@ bucket rules are those of [`analytics cost`](#analytics-cost).
 `group_by` is one of `none`, `operation`, `tool_name`, `agent_name`, `model`,
 `worker_name`, `worker_instance`, `node_id` and `project_id`. The key
 `tool_name` is `gen_ai.tool.name`. The key `worker_instance` is
-`kanthord.worker.instance` of the span. The other keys follow `analytics cost`.
+`kanthord.worker.instance` of the span. The key of `worker_instance` is the
+instance name for a worker instance. It is `<binding name>/<slot name>` for a
+slot of the `server` or the `container` placement, for example
+`coder/server slot 0`. The other keys follow `analytics cost`.
 The measure `instance_busy_ratio` takes the `group_by` `worker_instance` only,
 and `worker_instance` takes that measure only. Another pairing answers `400`
 `gateway.request.validation_failed`.

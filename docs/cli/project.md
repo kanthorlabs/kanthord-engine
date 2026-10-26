@@ -618,7 +618,7 @@ The environment has these effects:
   - `proving`: a run proves the setup commands and the checks.
   - `ready`: the proof of the digest passed.
   - `failed`: the proof file of the digest holds a failure at the commit of the last read. A failure at another commit does not count, so the component runs again.
-- A slot starts on the image of the environment that its worker binding names. The slot waits until that environment is `ready`. A worker binding names the repository binding of its `environment` key, else the only repository binding of the project. A slot whose worker binding names no repository binding runs `<worker.container_image>:<version>`.
+- A slot starts on the image of the environment that its worker binding names. The slot waits until that environment is `ready`. A worker binding names the repository binding of its `environment` key, else the only repository binding of the project. A slot whose worker binding names no repository binding runs `<worker.container_image>:<version>`. A worker binding at the `container` placement claims only the nodes that name the repository binding of its `environment` key.
 - The claim skips a node whose repository binding holds an environment that is not `none` or `ready`. The node waits.
 - `environment rebuild` discards the proof file and the images of the digest, pulls the base image and runs the environment again. It answers the state of the group with the status of the new run. During an active run of the group, it answers `409 project.environment.run_active`.
 - A stored environment wins over the devcontainer files of the other repository bindings. While one binding stores an environment, the worker runs no repository devcontainer setup for the other bindings.
