@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import type { TestContext } from "node:test";
 import { appendFileSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { simpleGit } from "simple-git";
 import { InMemoryCredentialStore } from "@earendil-works/pi-ai";
 import { createModelRuntime, resolveModel } from "../../llm/model-connector.ts";
@@ -41,6 +41,7 @@ import {
   type RepositoryTransport,
 } from "../contract.ts";
 import { RecordKind, type TelemetryRecord } from "../../tracking/contract.ts";
+import { AFFECTED_DECLARATION_FILE } from "./affected.ts";
 import { ExecutionBudget } from "./budget.ts";
 import { SpanRecorder, type SpanOperation } from "./telemetry.ts";
 import { openNativeAgent } from "./native-agent.ts";
@@ -374,6 +375,45 @@ export async function advanceBase(
   writeFileSync(join(clone, path), content);
   await git.add(path);
   await git.raw([...IDENTITY, "commit", "-m", `base change of ${path}`]);
+  await git.push("origin", "main");
+}
+
+const AFFECTED_TEST_FILE = "a.test.ts";
+const AFFECTED_TEST_NAME = "one";
+
+function affectedReportText(failed: boolean): string {
+  return JSON.stringify({
+    version: 1,
+    selection: "related",
+    reason: null,
+    tests: [AFFECTED_TEST_FILE],
+    failed: failed
+      ? [{ file: AFFECTED_TEST_FILE, name: AFFECTED_TEST_NAME }]
+      : [],
+    flaky: [],
+    excluded_e2e: [],
+  });
+}
+
+export function affectedCommand(failWhen: string): string {
+  return `if ${failWhen}; then printf '%s' '${affectedReportText(true)}' > "$KANTHORD_AFFECTED_REPORT"; exit 1; fi; printf '%s' '${affectedReportText(false)}' > "$KANTHORD_AFFECTED_REPORT"`;
+}
+
+export async function declareAffected(
+  h: { bare: string },
+  t: TestContext,
+  command: string,
+) {
+  const clone = temporary(t);
+  const git = simpleGit(clone);
+  await git.clone(h.bare, clone, ["--branch", "main"]);
+  mkdirSync(join(clone, dirname(AFFECTED_DECLARATION_FILE)));
+  writeFileSync(
+    join(clone, AFFECTED_DECLARATION_FILE),
+    JSON.stringify({ version: 1, command }),
+  );
+  await git.add(AFFECTED_DECLARATION_FILE);
+  await git.raw([...IDENTITY, "commit", "-m", "declare affected tests"]);
   await git.push("origin", "main");
 }
 

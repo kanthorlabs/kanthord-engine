@@ -20,11 +20,16 @@ import {
   runStepsImplement,
   taskWork,
 } from "./steps-implement.ts";
+import { AFFECTED_DECLARATION_FILE } from "./affected.ts";
+import { refreshAtRelease } from "./base-refresh.ts";
 import { releaseGate, ReleaseGateKind } from "./release-gate.ts";
 import { NoProgressRule, noProgressDetail } from "./progress-rule.ts";
 import { RELEASE_DIRECTORY, WorkspaceKind } from "./workspace.ts";
 import {
   advanceBase,
+  affectedCommand,
+  commitOnNode,
+  declareAffected,
   fauxAssistantMessage,
   fauxToolCall,
   implementFixture as fixture,
@@ -339,6 +344,7 @@ test("a passing release gate writes one release gate span with the result passed
   assert.equal(ends[0]?.status, SpanStatus.Ok);
   assert.deepEqual(ends[0]?.attributes, {
     "kanthord.release_gate.result": "passed",
+    "kanthord.release_gate.affected": "absent",
   });
 });
 
@@ -395,4 +401,94 @@ test("a budget end writes the release gate result budget_end", async (t) => {
   assert.deepEqual(ends[0]?.attributes, {
     "kanthord.release_gate.result": "budget_end",
   });
+});
+
+const BROKEN = "broken";
+const FAILS_WHEN_BROKEN = `grep -q ${BROKEN} file`;
+const ALWAYS_FAILS = "true";
+const NEVER_FAILS = "false";
+const RATIONALE_START = "The affected test run of repository repo failed.";
+const RATIONALE_FAILED = "1 test failed: a.test.ts > one.";
+
+async function changeNode(h: Fixture, content: string) {
+  await commitOnNode(h.root, content);
+  h.checkouts[0]!.head = (await simpleGit(h.root).revparse(["HEAD"])).trim();
+}
+
+function gateEnd(records: ReturnType<typeof recordSpans>) {
+  const ends = spanEnds(records, SpanOperation.ReleaseGate);
+  assert.equal(ends.length, ONE_SPAN);
+  return ends[0]?.attributes;
+}
+
+test("an affected command that passes ends the gate with the verdict passed", async (t) => {
+  const h = await fixture(t, [task("pass", "true")], []);
+  await declareAffected(h, t, affectedCommand(NEVER_FAILS));
+  await changeNode(h, "changed");
+  const records = recordSpans(h);
+  assert.deepEqual(await releaseGate(h), { kind: ReleaseGateKind.Passed });
+  assert.deepEqual(gateEnd(records), {
+    "kanthord.release_gate.result": "passed",
+    "kanthord.release_gate.affected": "passed",
+  });
+});
+
+test("an affected command that fails at the node head and passes at the base routes one revision to the node unit", async (t) => {
+  const h = await fixture(t, [task("pass", "true")], []);
+  await declareAffected(h, t, affectedCommand(FAILS_WHEN_BROKEN));
+  await changeNode(h, BROKEN);
+  const records = recordSpans(h);
+  const gate = await releaseGate(h);
+  assert.equal(gate.kind, ReleaseGateKind.Routed);
+  assert.ok(gate.kind === ReleaseGateKind.Routed);
+  assert.equal(gate.unit.id, h.input.claim.node_id);
+  assert.ok(gate.instruction.startsWith(REVISION_TEXT));
+  assert.ok(gate.instruction.includes(RATIONALE_START));
+  assert.ok(gate.instruction.includes(RATIONALE_FAILED));
+  assert.deepEqual(gateEnd(records), {
+    "kanthord.release_gate.result": "routed",
+    "kanthord.release_gate.unit_id": h.input.claim.node_id,
+    "kanthord.release_gate.affected": "failed",
+  });
+});
+
+test("an affected test that fails at both heads passes the gate with the verdict base_red", async (t) => {
+  const h = await fixture(t, [task("pass", "true")], []);
+  await declareAffected(h, t, affectedCommand(ALWAYS_FAILS));
+  await changeNode(h, "changed");
+  const records = recordSpans(h);
+  assert.deepEqual(await releaseGate(h), { kind: ReleaseGateKind.Passed });
+  assert.deepEqual(gateEnd(records), {
+    "kanthord.release_gate.result": "passed",
+    "kanthord.release_gate.affected": "base_red",
+  });
+});
+
+test("a failed listed command routes its revision and runs no affected command", async (t) => {
+  const marker = join(temporary(t), "affected-ran");
+  const h = await fixture(t, [task("owner", "false")], []);
+  await declareAffected(
+    h,
+    t,
+    affectedCommand(`touch ${marker}; ${ALWAYS_FAILS}`),
+  );
+  await changeNode(h, "changed");
+  const records = recordSpans(h);
+  assert.equal((await releaseGate(h)).kind, ReleaseGateKind.Routed);
+  assert.equal(existsSync(marker), false);
+  assert.equal(gateEnd(records)?.["kanthord.release_gate.affected"], undefined);
+});
+
+test("a node change that edits the declaration does not change the command that judges it", async (t) => {
+  const h = await fixture(t, [task("pass", "true")], []);
+  await declareAffected(h, t, affectedCommand(FAILS_WHEN_BROKEN));
+  await refreshAtRelease(h);
+  writeFileSync(
+    join(h.root, AFFECTED_DECLARATION_FILE),
+    JSON.stringify({ version: 1, command: affectedCommand(NEVER_FAILS) }),
+  );
+  await simpleGit(h.root).add(AFFECTED_DECLARATION_FILE);
+  await changeNode(h, BROKEN);
+  const gate = await releaseGate(h);
+  assert.equal(gate.kind, ReleaseGateKind.Routed);
 });

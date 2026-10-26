@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
+  affectedRevisionInstruction,
   failedVerificationRationale,
   failedVerificationReport,
   parseJudgement,
@@ -18,6 +19,11 @@ import {
   requestedChangesText,
   REQUESTED_CHANGES_MAX_BYTES,
 } from "./judgement.ts";
+import {
+  affectedFailureText,
+  AffectedVerdict,
+  type AffectedRun,
+} from "./affected.ts";
 import { VerificationClass, type Verification } from "./verification.ts";
 import { SHIPPED_TEMPLATES } from "../../agent/prompt-templates.ts";
 import type { NativeAgent } from "./native-agent.ts";
@@ -431,4 +437,47 @@ test("parseRepaired marks a reply that the repair turn produced", async () => {
     ),
     { reply: ReplyRepair.Invalid, repaired: true },
   );
+});
+
+function failedRun(repository: string, output: string): AffectedRun {
+  const failed = [{ file: `${repository}.test.ts`, name: "one" }];
+  const command = `test ${repository}`;
+  return {
+    verdict: AffectedVerdict.Failed,
+    binding_id: `binding_${repository}`,
+    repository,
+    base_commit: "a",
+    head_commit: "b",
+    declaration: { version: 1, command, time_limit_s: 600 },
+    changed: 2,
+    report: null,
+    failed,
+    promoted_flaky: [],
+    head: { command, exit_code: 1, signal: null, timed_out: false },
+    output,
+    duration_ms: 1,
+    base_run: null,
+    failure_text: affectedFailureText({
+      repository,
+      command,
+      changed: 2,
+      tests: 1,
+      failed,
+    }),
+  };
+}
+
+test("the affected revision renders the rationale of each failed repository, the results and the first output", () => {
+  const first = failedRun("api", "first output");
+  const second = failedRun("web", "second output");
+  const instruction = affectedRevisionInstruction(SHIPPED_TEMPLATES, [
+    first,
+    second,
+  ]);
+  assert.ok(
+    instruction.includes(`${first.failure_text}\n\n${second.failure_text}`),
+  );
+  assert.ok(instruction.includes(JSON.stringify([first.head, second.head])));
+  assert.match(instruction, /```text\nfirst output\n```$/);
+  assert.doesNotMatch(instruction, /second output/);
 });

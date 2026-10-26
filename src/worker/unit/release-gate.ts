@@ -5,9 +5,19 @@ import type { Context } from "../../kernel/context.ts";
 import { ensureDirectory } from "../../kernel/files.ts";
 import type { Revision, TaskContent } from "../../mission/contract.ts";
 import { SpanStatus } from "../../tracking/contract.ts";
+import {
+  AffectedVerdict,
+  nodeVerdict,
+  runAffected,
+  type AffectedResult,
+  type AffectedRun,
+} from "./affected.ts";
 import { refreshAtRelease, RefreshResult } from "./base-refresh.ts";
 import { verificationCommands } from "./evaluation-input.ts";
-import { taskRevisionInstruction } from "./judgement.ts";
+import {
+  affectedRevisionInstruction,
+  taskRevisionInstruction,
+} from "./judgement.ts";
 import { checkoutDetached, cloneLocal, matchRemote } from "./local-git.ts";
 import {
   environmentDigestsOf,
@@ -35,6 +45,7 @@ const NOT_FOUND = -1;
 const PARENT = "..";
 const RELEASE_GATE_RESULT = "kanthord.release_gate.result";
 const RELEASE_GATE_UNIT_ID = "kanthord.release_gate.unit_id";
+const RELEASE_GATE_AFFECTED = "kanthord.release_gate.affected";
 
 export const ReleaseGateKind = {
   Passed: "passed",
@@ -72,16 +83,20 @@ export function commandOwners(
 
 export function releaseGate(state: StepsState): Promise<ReleaseGate> {
   const spans = state.run.spans;
+  const affected: AffectedNote = { verdict: null };
   return spans.within(
     {
       key: spans.key(SpanOperation.ReleaseGate),
       operation: SpanOperation.ReleaseGate,
     },
-    () => gateRelease(state),
+    () => gateRelease(state, affected),
     (gate) => ({
       status: SpanStatus.Ok,
       attributes: {
         [RELEASE_GATE_RESULT]: gate.kind,
+        ...(affected.verdict === null
+          ? {}
+          : { [RELEASE_GATE_AFFECTED]: affected.verdict }),
         ...(gate.kind === ReleaseGateKind.Routed
           ? { [RELEASE_GATE_UNIT_ID]: gate.unit.id }
           : {}),
@@ -90,7 +105,14 @@ export function releaseGate(state: StepsState): Promise<ReleaseGate> {
   );
 }
 
-async function gateRelease(state: StepsState): Promise<ReleaseGate> {
+interface AffectedNote {
+  verdict: AffectedVerdict | null;
+}
+
+async function gateRelease(
+  state: StepsState,
+  note: AffectedNote,
+): Promise<ReleaseGate> {
   if ((await refreshAtRelease(state)) === RefreshResult.BudgetEnd)
     return { kind: ReleaseGateKind.BudgetEnd };
   const commands = verificationCommands(state.revision);
@@ -107,16 +129,30 @@ async function gateRelease(state: StepsState): Promise<ReleaseGate> {
   }
   const stop = infrastructureStop(run) ?? environmentStop(run);
   if (stop) throw stop;
+  const affected = checked.affected;
+  note.verdict = affected?.verdict ?? null;
   const passed =
-    !checked.setup && verificationPassed(run.verification, commands);
+    !checked.setup &&
+    verificationPassed(run.verification, commands) &&
+    affected?.verdict !== AffectedVerdict.Failed;
   state.lastVerification = verificationFactsOf(passed, run.verification);
   state.run.log("release verified", {
     commits: state.checkouts.map((checkout) => checkout.head),
     passed,
     setup: checked.setup,
     exit_codes: run.verification.results.map((result) => result.exit_code),
+    ...(affected ? { affected: affected.verdict } : {}),
   });
   if (passed) return { kind: ReleaseGateKind.Passed };
+  if (affected?.verdict === AffectedVerdict.Failed)
+    return {
+      kind: ReleaseGateKind.Routed,
+      unit: nodeUnitOf(state.input.claim.node_id, state.revision),
+      instruction: affectedRevisionInstruction(
+        state.input.setup.templates,
+        affected.failed,
+      ),
+    };
   const owner = checked.setup
     ? nodeUnitOf(state.input.claim.node_id, state.revision)
     : owners[firstFailedIndex(run)];
@@ -145,6 +181,12 @@ interface ReleaseCheck {
   run: VerificationRun;
   commands: readonly string[];
   setup: boolean;
+  affected: AffectedCheck | null;
+}
+
+interface AffectedCheck {
+  verdict: AffectedVerdict;
+  failed: AffectedRun[];
 }
 
 function budgetEndRun(state: StepsState): VerificationRun {
@@ -179,9 +221,19 @@ async function setUpReleaseClones(
     state.checkouts.map((checkout) => checkout.head),
   );
   if (result.end === SetupEnd.BudgetEnd)
-    return { run: budgetEndRun(state), commands: [], setup: true };
+    return {
+      run: budgetEndRun(state),
+      commands: [],
+      setup: true,
+      affected: null,
+    };
   if (result.end === SetupEnd.Failed)
-    return { run: result.run, commands: result.commands, setup: true };
+    return {
+      run: result.run,
+      commands: result.commands,
+      setup: true,
+      affected: null,
+    };
   return null;
 }
 
@@ -218,11 +270,57 @@ async function verifyInReleaseClones(
       exhausted: () => state.agent.budget.exhausted(),
       baseline: (command) => state.base.exitOf(command),
     });
-    return { run, commands, setup: false };
+    const listed = { run, commands, setup: false, affected: null };
+    if (!verificationPassed(run.verification, commands)) return listed;
+    const affected = await runAffectedChecks(state, key, base);
+    if (affected === null)
+      return {
+        ...listed,
+        run: { ...run, outcome: VerificationClass.BudgetEnd },
+      };
+    return { ...listed, affected };
   } finally {
     rmSync(base, { recursive: true, force: true });
     cleanup.cancel();
   }
+}
+
+async function runAffectedChecks(
+  state: StepsState,
+  key: string,
+  base: string,
+): Promise<AffectedCheck | null> {
+  const checkouts = join(key, CHECKOUTS_DIRECTORY);
+  const results: AffectedResult[] = [];
+  for (const checkout of state.checkouts) {
+    const result = await runAffected({
+      env: state.input.env,
+      context: state.run.operationContext,
+      deadline: state.agent.budget.wallDeadline(),
+      exhausted: () => state.agent.budget.exhausted(),
+      spans: state.run.spans,
+      scope: VerificationContext.Release,
+      workspaceKey: key,
+      checkout: {
+        binding_id: checkout.binding_id,
+        name: checkout.name,
+        directory: join(base, layoutOf(checkouts, checkout.directory)),
+        base_branch: repositoryOf(state, checkout).strategy.base_branch,
+        head: checkout.head,
+      },
+      digests: environmentDigestsOf(state.input.setup.repositories),
+      base: state.base,
+    });
+    if ("budgetEnd" in result) return null;
+    results.push(result);
+  }
+  return {
+    verdict: nodeVerdict(results.map((result) => result.verdict)),
+    failed: results.filter(
+      (result): result is AffectedRun =>
+        result.verdict === AffectedVerdict.Failed,
+    ),
+  };
 }
 
 async function buildReleaseClones(
