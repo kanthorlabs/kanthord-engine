@@ -65,6 +65,7 @@ const EXIT_OK = 0;
 const DEADLINE_MS = 10000;
 const LIST_LIMIT = 10000;
 const LONG_STRING = "x".repeat(1025);
+const LONG_TOKEN = "t".repeat(40);
 const GATE_FILES = ["package.json", "scripts/affected-tests.mjs"];
 const ID_ONE = { file: "a.test.ts", name: "one" };
 const ONE_TEXT = "a.test.ts > one";
@@ -712,6 +713,7 @@ test("a time-limit end at the head stops with affected_timeout before the base c
     "command",
     "time_limit_s",
   ]);
+  assert.equal(stop.detail.binding_id, BINDING);
   assert.equal(stop.detail.commit, f.head);
   assert.equal(stop.detail.time_limit_s, SHORT_LIMIT_S);
   assert.equal(
@@ -737,13 +739,25 @@ test("an invalid declaration stops with affected_invalid", async (t) => {
   const stop = await stopOf(runOf(f));
   assert.equal(stop.code, EnvironmentFailure.AffectedInvalid);
   assert.deepEqual(stop.detail, {
-    binding_id: "[redacted]",
-    commit: "[redacted]",
+    binding_id: BINDING,
+    commit: f.mergeBase,
     file: AFFECTED_DECLARATION_FILE,
     error: stop.detail.error,
   });
   assert.match(stop.detail.error, /invalid declaration/);
   assert.equal(verificationSpans(f).length, NO_SPANS);
+});
+
+test("a stop detail redacts a long token in error", async (t) => {
+  const f = await fixture(t, {
+    base: "pass",
+    head: "pass",
+    declaration: JSON.stringify({ version: 1, [LONG_TOKEN]: true }),
+  });
+  const stop = await stopOf(runOf(f));
+  assert.equal(stop.code, EnvironmentFailure.AffectedInvalid);
+  assert.ok(!stop.detail.error.includes(LONG_TOKEN));
+  assert.match(stop.detail.error, /\[redacted\]/);
 });
 
 test("a budget end answers budgetEnd and removes the work directory", async (t) => {
