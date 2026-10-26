@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { existsSync, readFileSync } from "node:fs";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { setTimeout as delay } from "node:timers/promises";
 import { join } from "node:path";
 import { background, CancellationContext } from "../../kernel/context.ts";
@@ -27,6 +27,7 @@ import { EndReason, ExecutionStop } from "./execution-run.ts";
 import { REASON_MAX_LENGTH } from "../../kernel/probe.ts";
 import { EnvironmentFailure } from "../../scheduler/contract.ts";
 import {
+  pidsIn,
   PROCESS_TREE_PIDS,
   processTreeCommand,
   spawnedPids,
@@ -253,6 +254,40 @@ test("a command that reaches its limit leaves no process of its tree, also a pro
   assert.equal(run.verification.results[0]?.timed_out, true);
   assert.equal(spawned.length, PROCESS_TREE_PIDS);
   assert.deepEqual(await survivingProcesses(spawned), []);
+});
+
+const TREE_START_POLLS = 100;
+const TREE_START_POLL_MS = 50;
+const TREE_PROCESS_GROUPS = 2;
+
+function processGroupOf(pid: number): string {
+  return execFileSync("ps", ["-o", "pgid=", "-p", String(pid)], {
+    encoding: "utf8",
+  }).trim();
+}
+
+test("the sleep of the second process tree runs in its own process group", async (t) => {
+  const child = spawn("bash", ["-c", processTreeCommand()], {
+    detached: true,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  assert.ok(child.pid);
+  const leader = child.pid;
+  let output = "";
+  child.stdout.on("data", (chunk: Buffer) => (output += chunk.toString()));
+  child.stderr.on("data", (chunk: Buffer) => (output += chunk.toString()));
+  for (
+    let poll = 0;
+    poll < TREE_START_POLLS &&
+    pidsIn([{ type: "text", text: output }]).length < PROCESS_TREE_PIDS;
+    poll += 1
+  )
+    await delay(TREE_START_POLL_MS);
+  const spawned = spawnedPids(t, [{ type: "text", text: output }]);
+  t.after(() => killIfPresent(-leader));
+  assert.equal(spawned.length, PROCESS_TREE_PIDS);
+  assert.equal(output.trim().split("\n").length, PROCESS_TREE_PIDS);
+  assert.equal(new Set(spawned.map(processGroupOf)).size, TREE_PROCESS_GROUPS);
 });
 
 const FAILED_EXIT = 1;
