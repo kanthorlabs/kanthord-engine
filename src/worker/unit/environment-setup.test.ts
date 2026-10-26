@@ -18,13 +18,14 @@ import {
   setupEntries,
   type SetupCheckout,
 } from "./environment-setup.ts";
-import { headCommit } from "./local-git.ts";
+import { commitOf, headCommit } from "./local-git.ts";
 import {
   RecordKind,
   SpanStatus,
   type TelemetryRecord,
 } from "../../tracking/contract.ts";
 import { SpanOperation, SpanRecorder } from "./telemetry.ts";
+import { VerificationClass } from "./verification.ts";
 import { spanEnds } from "./test-support.ts";
 
 const env = hostEnvironment();
@@ -269,6 +270,58 @@ test("the base rerun runs on the base head after its setup and is cached within 
   );
   assert.equal(await next.base.exitOf(command), COMMAND_ABSENT_EXIT);
   assert.equal(readFileSync(counter, "utf8"), TWO_RUNS);
+});
+
+test("a run in the base head runs in the named clone at the base commit with the variables and runs again on a second call", async (t) => {
+  const { root, checkout } = await repository(t, { file: "base" });
+  await commit(checkout, "node", "node");
+  const counter = join(root, "runs");
+  const entry = setupCheckout(checkout, stored({}));
+  const { base } = await prepared(entry, root);
+  const baseCommit = await commitOf(
+    env,
+    checkout,
+    "origin/main",
+    background,
+    10000,
+  );
+  const command = `echo run >> ${counter}; test ! -e node && test "$(git rev-parse HEAD)" = "$BASE_COMMIT" && test "$VARIABLE" = value`;
+  const input = {
+    command,
+    variables: { BASE_COMMIT: baseCommit, VARIABLE: "value" },
+    commandLimitMs: 10000,
+  };
+  const first = await base.runIn("repo", input);
+  assert.equal(first?.outcome, VerificationClass.Pass);
+  assert.deepEqual(first.verification.tested_input, {
+    kind: "repository",
+    binding_id: entry.repository.binding_id,
+    commit: baseCommit,
+  });
+  assert.equal(
+    (await base.runIn("repo", input))?.outcome,
+    VerificationClass.Pass,
+  );
+  assert.equal(readFileSync(counter, "utf8"), TWO_RUNS);
+  assert.equal(await base.commitOf("repo"), baseCommit);
+});
+
+test("a run in the base head stops with setup_failed when the base setup fails", async (t) => {
+  const { root, checkout } = await repository(t, { file: "base" });
+  const { base } = await prepared(
+    setupCheckout(checkout, stored({ postCreateCommand: "exit 6" })),
+    root,
+  );
+  await assert.rejects(
+    base.runIn("repo", {
+      command: "true",
+      variables: {},
+      commandLimitMs: 1000,
+    }),
+    (error) =>
+      error instanceof ExecutionStop &&
+      error.code === EnvironmentFailure.SetupFailed,
+  );
 });
 
 test("the base rerun stops with setup_failed when the base setup fails", async (t) => {

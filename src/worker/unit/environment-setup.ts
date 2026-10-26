@@ -31,6 +31,7 @@ import { SpanOperation, type SpanRecorder } from "./telemetry.ts";
 import {
   runVerificationsWithOutput,
   VerificationClass,
+  type CommandObserver,
   type VerificationRun,
 } from "./verification.ts";
 
@@ -38,6 +39,7 @@ export const SETUP_COMMAND_LIMIT_MS = COMMAND_LIMIT_MS;
 export const BASE_DIRECTORY = "base";
 const SINGLE_CHECKOUT = 1;
 const NO_EXIT = -1;
+const MISSING_INDEX = -1;
 const NO_DOCUMENT = "none";
 const TRACKED_CHECK = "git status --porcelain --untracked-files=no";
 const TRACKED_CHANGE_EXIT = 1;
@@ -54,6 +56,13 @@ export interface SetupRepository {
 export interface SetupCheckout {
   repository: SetupRepository;
   directory: string;
+}
+
+export interface BaseRunInput {
+  command: string;
+  variables: Readonly<Record<string, string>>;
+  commandLimitMs: number;
+  observe?: CommandObserver;
 }
 
 export interface SetupInput {
@@ -326,6 +335,49 @@ export class BaseHead {
       ),
     );
     return this.commitsRead;
+  }
+
+  async commitOf(name: string): Promise<string> {
+    const commits = await this.commits();
+    const index = this.checkouts.findIndex(
+      (checkout) => checkout.repository.name === name,
+    );
+    assert.notEqual(
+      index,
+      MISSING_INDEX,
+      "A name belongs to a checkout of the base head.",
+    );
+    return commits[index]!;
+  }
+
+  async runIn(
+    name: string,
+    input: BaseRunInput,
+  ): Promise<VerificationRun | null> {
+    const checkout = this.checkouts.find(
+      (entry) => entry.repository.name === name,
+    );
+    assert.ok(checkout, "A name belongs to a checkout of the base head.");
+    const setup = await this.setup();
+    if (setup.end === SetupEnd.Failed) throw setupStop(setup);
+    if (setup.end === SetupEnd.BudgetEnd) return null;
+    const run = await runVerificationsWithOutput({
+      directory: join(this.directory, name),
+      commands: [input.command],
+      variables: input.variables,
+      commandLimitMs: input.commandLimitMs,
+      observe: input.observe,
+      tested_input: {
+        kind: "repository",
+        binding_id: checkout.repository.binding_id,
+        commit: await this.commitOf(name),
+      },
+      deadline: this.input.deadline,
+      context: this.input.context,
+      env: this.input.env,
+      exhausted: this.input.exhausted,
+    });
+    return run.outcome === VerificationClass.BudgetEnd ? null : run;
   }
 
   async holds(heads: readonly string[]): Promise<boolean> {
