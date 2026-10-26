@@ -40,7 +40,7 @@ jobs:
         run: |
           git ls-files 'src/*.test.ts' | grep -vxF -f <(git grep -l startTestSshd -- 'src/*.test.ts') > "$RUNNER_TEMP/tests"
           wc -l < "$RUNNER_TEMP/tests"
-          pnpm run test:files --test-concurrency="$TEST_CONCURRENCY" $(cat "$RUNNER_TEMP/tests") scripts/test-reporter.test.mjs scripts/test-path.test.mjs
+          pnpm run test:files --test-concurrency="$TEST_CONCURRENCY" $(cat "$RUNNER_TEMP/tests") scripts/test-reporter.test.mjs scripts/test-path.test.mjs scripts/affected-tests.test.mjs
 
   e2e:
     runs-on: ubuntu-latest
