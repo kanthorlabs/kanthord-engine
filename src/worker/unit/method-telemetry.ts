@@ -1,5 +1,9 @@
 import assert from "node:assert/strict";
-import { SpanStatus, type Attributes } from "../../tracking/contract.ts";
+import {
+  COLLECTION_MAX,
+  SpanStatus,
+  type Attributes,
+} from "../../tracking/contract.ts";
 import type { TaskContent } from "../../mission/contract.ts";
 import {
   SpanOperation,
@@ -20,11 +24,19 @@ import { CodedError, diagnostic, diagnosticRows } from "../../kernel/errors.ts";
 import { markGitStep, type GitStep } from "./git-step.ts";
 import { noProgressAttributes } from "./progress-rule.ts";
 import type { EvaluationFacts } from "./rework-cause.ts";
+import {
+  AffectedSelection,
+  AffectedVerdict,
+  testIdText,
+  type AffectedRun,
+} from "./affected.ts";
 
 const SUCCESS = 0;
 const NO_LENGTH = 0;
 const COMMIT_INPUT_KIND = "repository";
 const DIGEST_SEPARATOR = ",";
+const LIST_BYTES_MAX = 16384;
+const INVALID_SELECTION = "invalid";
 
 export function phaseSpan(phase: Phase): SpanStart {
   assert.ok(phase);
@@ -129,8 +141,22 @@ export interface VerificationScope {
   ownerOf: (index: number) => string | null;
 }
 
+export const VerificationKind = {
+  Listed: "listed",
+  Affected: "affected",
+  AffectedBase: "affected_base",
+} as const;
+export type VerificationKind =
+  (typeof VerificationKind)[keyof typeof VerificationKind];
+
 const VerificationAttribute = {
   Context: "kanthord.verification.context",
+  Kind: "kanthord.verification.kind",
+  TimedOut: "kanthord.verification.timed_out",
+  BindingId: "kanthord.binding.id",
+  Commit: "kanthord.commit",
+  Digest: "environment.digest",
+  ExitCode: "process.exit.code",
   Class: "kanthord.verification.class",
   OwnerId: "kanthord.verification.owner_id",
   Flaky: "kanthord.verification.flaky",
@@ -139,13 +165,13 @@ const VerificationAttribute = {
 function commandEnd(attempt: CommandAttempt, ran: CommandRun): SpanEnd {
   assert.ok(ran.result.command);
   const attributes: Attributes = {
-    "kanthord.verification.timed_out": ran.result.timed_out,
+    [VerificationAttribute.TimedOut]: ran.result.timed_out,
     [VerificationAttribute.Class]: commandClassOf(ran),
   };
   if (attempt.flaky_check && ran.result.exit_code === SUCCESS)
     attributes[VerificationAttribute.Flaky] = true;
   if (ran.result.exit_code !== null)
-    attributes["process.exit.code"] = ran.result.exit_code;
+    attributes[VerificationAttribute.ExitCode] = ran.result.exit_code;
   if (ran.result.signal !== null)
     attributes["kanthord.verification.signal"] = ran.result.signal;
   assert.ok(Object.keys(attributes).length > NO_LENGTH);
@@ -188,6 +214,7 @@ export function verificationObserver(
           "kanthord.verification.index": attempt.index,
           "kanthord.verification.run": attempt.run,
           [VerificationAttribute.Context]: scope.context,
+          [VerificationAttribute.Kind]: VerificationKind.Listed,
           ...(owner === null ? {} : { [VerificationAttribute.OwnerId]: owner }),
         },
         texts: { command: attempt.command },
@@ -195,6 +222,108 @@ export function verificationObserver(
       execute,
       (ran) => commandEnd(attempt, ran),
     );
+  };
+}
+
+export function affectedSpan(
+  spans: SpanRecorder,
+  input: {
+    context: VerificationContext;
+    kind: VerificationKind;
+    binding_id: string;
+    commit: string;
+    digests: readonly string[];
+    command: string;
+  },
+): SpanStart {
+  assert.ok(input.commit.length > NO_LENGTH);
+  return {
+    key: spans.key(SpanOperation.Verification),
+    operation: SpanOperation.Verification,
+    attributes: {
+      [VerificationAttribute.Context]: input.context,
+      [VerificationAttribute.Kind]: input.kind,
+      [VerificationAttribute.BindingId]: input.binding_id,
+      [VerificationAttribute.Commit]: input.commit,
+      ...(input.digests.length === NO_LENGTH
+        ? {}
+        : {
+            [VerificationAttribute.Digest]:
+              input.digests.join(DIGEST_SEPARATOR),
+          }),
+    },
+    texts: { command: input.command },
+  };
+}
+
+const AffectedAttribute = {
+  Verdict: "kanthord.affected.verdict",
+  Selection: "kanthord.affected.selection",
+  Reason: "kanthord.affected.reason",
+  ChangedCount: "kanthord.affected.changed_count",
+  TestCount: "kanthord.affected.test_count",
+  FailedCount: "kanthord.affected.failed_count",
+  FlakyCount: "kanthord.affected.flaky_count",
+  ExcludedE2eCount: "kanthord.affected.excluded_e2e_count",
+  Tests: "kanthord.affected.tests",
+  Failed: "kanthord.affected.failed",
+} as const;
+
+function boundedList(entries: readonly string[]): string[] {
+  const kept: string[] = [];
+  let bytes = NO_LENGTH;
+  for (const entry of entries) {
+    bytes += Buffer.byteLength(entry);
+    if (kept.length >= COLLECTION_MAX || bytes > LIST_BYTES_MAX) break;
+    kept.push(entry);
+  }
+  return kept;
+}
+
+export function affectedEnd(result: AffectedRun): SpanEnd {
+  const { report } = result;
+  const attributes: Attributes = {
+    [AffectedAttribute.Verdict]: result.verdict,
+    [AffectedAttribute.Selection]: report?.selection ?? INVALID_SELECTION,
+    [AffectedAttribute.ChangedCount]: report ? result.changed : NO_LENGTH,
+    [AffectedAttribute.TestCount]: report?.tests.length ?? NO_LENGTH,
+    [AffectedAttribute.FailedCount]: result.failed.length,
+    [AffectedAttribute.FlakyCount]: report
+      ? report.flaky.length - result.promoted_flaky.length
+      : NO_LENGTH,
+    [AffectedAttribute.ExcludedE2eCount]:
+      report?.excluded_e2e.length ?? NO_LENGTH,
+    [AffectedAttribute.Tests]: boundedList(report?.tests ?? []),
+    [AffectedAttribute.Failed]: boundedList(result.failed.map(testIdText)),
+    [VerificationAttribute.TimedOut]: result.head.timed_out,
+  };
+  if (report?.selection === AffectedSelection.All && report.reason !== null)
+    attributes[AffectedAttribute.Reason] = report.reason;
+  if (result.head.exit_code !== null)
+    attributes[VerificationAttribute.ExitCode] = result.head.exit_code;
+  return {
+    status:
+      result.verdict === AffectedVerdict.Failed
+        ? SpanStatus.Error
+        : SpanStatus.Ok,
+    attributes,
+    texts: { output: result.output },
+  };
+}
+
+export function affectedBaseEnd(
+  result: CommandRun["result"],
+  output: string,
+): SpanEnd {
+  const attributes: Attributes = {
+    [VerificationAttribute.TimedOut]: result.timed_out,
+  };
+  if (result.exit_code !== null)
+    attributes[VerificationAttribute.ExitCode] = result.exit_code;
+  return {
+    status: result.exit_code === SUCCESS ? SpanStatus.Ok : SpanStatus.Error,
+    attributes,
+    texts: { output },
   };
 }
 
