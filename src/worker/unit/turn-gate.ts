@@ -10,12 +10,17 @@ import {
 } from "../../kernel/commit-message.ts";
 import type { TaskContent } from "../../mission/contract.ts";
 import type { WorkPrompt } from "../../agent/prompt-composer.ts";
-import { SpanStatus, type Attributes } from "../../tracking/contract.ts";
+import {
+  COLLECTION_MAX,
+  SpanStatus,
+  type Attributes,
+} from "../../tracking/contract.ts";
 import { EndReason, ExecutionStop } from "./execution-run.ts";
 import { gitFailure } from "./method-telemetry.ts";
 import type { NativeAgent } from "./native-agent.ts";
 import {
   abortMerge,
+  changedFiles,
   commitWork,
   concludeMerge,
   conflictMarkerFiles,
@@ -57,6 +62,10 @@ const MERGE_SUBJECT = "merge";
 const GATE_MODE_ATTRIBUTE = "kanthord.gate.mode";
 const GATE_CHANGED_ATTRIBUTE = "kanthord.gate.changed";
 const GATE_VIOLATION_ATTRIBUTE = "kanthord.gate.violation";
+const CHANGED_FILE_COUNT_ATTRIBUTE = "kanthord.git.changed_file_count";
+const CHANGED_FILES_ATTRIBUTE = "kanthord.git.changed_files";
+const CHANGED_FILES_MAX_BYTES = 16384;
+const PATH_PREFIX_SEPARATOR = ":";
 
 export interface ConflictMerge {
   directory: string;
@@ -171,6 +180,7 @@ async function runGate(
 ): Promise<boolean> {
   assert.equal(before.length, state.checkouts.length);
   let violated: TurnViolation | null = null;
+  const changedPaths: string[] = [];
   return state.run.spans.within(
     {
       key: state.run.spans.key(SpanOperation.Gate),
@@ -210,11 +220,15 @@ async function runGate(
         state.run.stop(EndReason.OperationFailed, violation.code, detail);
       }
       let changed = false;
-      for (const [index, checkout] of state.checkouts.entries())
+      for (const [index, checkout] of state.checkouts.entries()) {
         if (
           await settleCheckout(state, checkout, before[index]!, turn, context)
         )
           changed = true;
+        changedPaths.push(
+          ...(await changedPathsOf(state, checkout, before[index]!, context)),
+        );
+      }
       removeRootEntries(state);
       return changed;
     },
@@ -222,11 +236,43 @@ async function runGate(
       status: SpanStatus.Ok,
       attributes: {
         [GATE_CHANGED_ATTRIBUTE]: changed,
+        [CHANGED_FILE_COUNT_ATTRIBUTE]: changedPaths.length,
+        [CHANGED_FILES_ATTRIBUTE]: boundedPaths(changedPaths),
         ...violationAttributes(violated),
       },
     }),
     (error) => gateFailure(violated)(error),
   );
+}
+
+async function changedPathsOf(
+  state: StepsState,
+  checkout: WorkspaceCheckout,
+  before: string,
+  context: Context,
+): Promise<string[]> {
+  if (checkout.head === before) return [];
+  const paths = await changedFiles(
+    state.input.env,
+    checkout.directory,
+    before,
+    checkout.head,
+    context,
+    remainingOf(state)(),
+  );
+  if (state.checkouts.length === SINGLE_CHECKOUT) return paths;
+  return paths.map((path) => `${checkout.name}${PATH_PREFIX_SEPARATOR}${path}`);
+}
+
+function boundedPaths(paths: readonly string[]): string[] {
+  const kept: string[] = [];
+  let bytes = 0;
+  for (const path of paths) {
+    bytes += Buffer.byteLength(path);
+    if (kept.length >= COLLECTION_MAX || bytes > CHANGED_FILES_MAX_BYTES) break;
+    kept.push(path);
+  }
+  return kept;
 }
 
 function violationAttributes(violation: TurnViolation | null): Attributes {

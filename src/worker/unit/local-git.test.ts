@@ -6,6 +6,7 @@ import {
   existsSync,
   mkdirSync,
   readFileSync,
+  rmSync,
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
@@ -20,6 +21,7 @@ import {
 } from "../../kernel/test-support.ts";
 import {
   addedFiles,
+  changedFiles,
   commitWork,
   discardChanges,
   excludeUntracked,
@@ -212,6 +214,28 @@ test("added files list only the files that the branch adds against its base", as
   assert.deepEqual(
     await addedFiles(env, directory, "main", background, 10000),
     ["debug.mjs"],
+  );
+});
+
+test("changed files list an added, a modified, a deleted and a spaced path of a commit range", async (t) => {
+  const directory = temporary(t);
+  const git = simpleGit(directory);
+  await git.init();
+  await git.addConfig("user.name", "Test");
+  await git.addConfig("user.email", "test@example.invalid");
+  writeFileSync(join(directory, "modified"), "base");
+  writeFileSync(join(directory, "deleted"), "base");
+  const from = await commitWork(env, directory, "base", background, 10000);
+  assert.ok(from);
+  writeFileSync(join(directory, "modified"), "changed");
+  rmSync(join(directory, "deleted"));
+  writeFileSync(join(directory, "added"), "new");
+  writeFileSync(join(directory, "with space.txt"), "new");
+  const to = await commitWork(env, directory, "work", background, 10000);
+  assert.ok(to);
+  assert.deepEqual(
+    await changedFiles(env, directory, from, to, background, 10000),
+    ["added", "deleted", "modified", "with space.txt"],
   );
 });
 
