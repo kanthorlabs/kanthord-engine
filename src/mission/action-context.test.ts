@@ -4,13 +4,19 @@ import { createIdentity } from "../kernel/identity.ts";
 import { canonicalJSON } from "../kernel/json.ts";
 import { testHumanIdentity } from "../kernel/test-identity.ts";
 import {
+  AssessmentResult,
   AssetKind,
   PlatformAddressKind,
   RepositoryAction,
   Resolution,
   type PlatformAddress,
 } from "./contract.ts";
-import { insertEvidence, openAttempt, closeAttempt } from "./record-store.ts";
+import {
+  insertAssessment,
+  insertEvidence,
+  openAttempt,
+  closeAttempt,
+} from "./record-store.ts";
 import { evidenceHarness, executionHarness } from "./test-support.ts";
 
 const NOW = 100;
@@ -18,6 +24,8 @@ const NO_CALLS = 0;
 const FIRST_ATTEMPT = 1;
 const SECOND_ATTEMPT = 2;
 const THIRD_ATTEMPT = 3;
+const COMMIT = "a".repeat(40);
+const GATE_FILE_PATHS = ["package.json"];
 const KEY = "repo.pull_request";
 const RESOURCE = "repository:github:owner/repo";
 const PR: PlatformAddress = {
@@ -167,4 +175,35 @@ test("action context uses only the caller transaction", (t) => {
     assert.equal(spy.mock.callCount(), NO_CALLS);
     spy.mock.restore();
   });
+});
+
+test("an action holds the gate files of its binding in the current assessment", (t) => {
+  const h = harness(t);
+  const assess = (gateFiles: { binding_id: string; paths: string[] }[]) =>
+    h.store.transaction((tx) =>
+      insertAssessment(tx, {
+        id: createIdentity("assessment"),
+        node_id: h.node_id,
+        attempt: FIRST_ATTEMPT,
+        result: AssessmentResult.Success,
+        rationale: "Reviewed",
+        evidence_ids: "[]",
+        dependency_outcome_ids: "[]",
+        tested_input: canonicalJSON({
+          kind: AssetKind.Repository,
+          binding_id: h.repositoryId,
+          commit: COMMIT,
+        }),
+        gate_files: canonicalJSON(gateFiles),
+        execution_id: h.claim.executionId,
+        actor: null,
+        node_revision: FIRST_ATTEMPT,
+        created_at: NOW,
+      }),
+    );
+  assert.deepEqual(h.read().actions[0]?.gate_files, []);
+  assess([{ binding_id: h.repositoryId, paths: GATE_FILE_PATHS }]);
+  assert.deepEqual(h.read().actions[0]?.gate_files, GATE_FILE_PATHS);
+  assess([{ binding_id: createIdentity("binding"), paths: GATE_FILE_PATHS }]);
+  assert.deepEqual(h.read().actions[0]?.gate_files, []);
 });

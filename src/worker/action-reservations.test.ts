@@ -112,6 +112,7 @@ test("prune clears only requested actions in the same attempt", () => {
       resolution: ActionResolution.Unrequested,
       request_evidence_id: null,
       eligible: true,
+      gate_files: [],
       reuse_candidates: [],
     },
   ];

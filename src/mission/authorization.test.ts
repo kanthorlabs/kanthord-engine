@@ -687,3 +687,44 @@ test("a merge address refuses a non-pull-request action with node_mismatch", (t)
     "node_mismatch",
   );
 });
+
+const GATE_FILE_PATHS = ["package.json"];
+const GATE_FILE_CHANGED = "gate_file_changed";
+
+test("a frozen action gives the gate files of the current assessment", (t) => {
+  const h = actionHarness(t);
+  h.assess();
+  assert.deepEqual(h.frozen().facts.gate_files, []);
+  h.assess(AssessmentResult.Success, ASSESSED_COMMIT, [
+    { binding_id: h.repositoryId, paths: GATE_FILE_PATHS },
+  ]);
+  assert.deepEqual(h.frozen().facts.gate_files, GATE_FILE_PATHS);
+  h.assess(AssessmentResult.Success, ASSESSED_COMMIT, [
+    { binding_id: createIdentity("binding"), paths: GATE_FILE_PATHS },
+  ]);
+  assert.deepEqual(h.frozen().facts.gate_files, []);
+});
+
+test("a merge request refuses a binding with a changed gate file", (t) => {
+  const h = kanthordHarness(t);
+  const id = h.request();
+  assert.deepEqual(
+    h.frozen({ mergeEvidenceId: id }).facts.merge_address,
+    h.pullRequest,
+  );
+  h.assess(AssessmentResult.Success, ASSESSED_COMMIT, [
+    { binding_id: h.repositoryId, paths: GATE_FILE_PATHS },
+  ]);
+  refuses(() => h.frozen({ mergeEvidenceId: id }), GATE_FILE_CHANGED);
+});
+
+test("a merge push refuses a binding with a changed gate file", (t) => {
+  const h = actionHarness(t);
+  h.policy.action = RepositoryAction.MergePush;
+  h.assess();
+  assert.deepEqual(h.frozen({ key: MERGE_PUSH_KEY }).facts.gate_files, []);
+  h.assess(AssessmentResult.Success, ASSESSED_COMMIT, [
+    { binding_id: h.repositoryId, paths: GATE_FILE_PATHS },
+  ]);
+  refuses(() => h.frozen({ key: MERGE_PUSH_KEY }), GATE_FILE_CHANGED);
+});

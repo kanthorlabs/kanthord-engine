@@ -28,6 +28,7 @@ const entry: ActionContext["actions"][number] = {
   resolution: ActionResolution.Unrequested,
   request_evidence_id: null,
   eligible: true,
+  gate_files: [],
   reuse_candidates: [],
 };
 const snapshot = {

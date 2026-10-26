@@ -59,6 +59,12 @@ const ACTION_UNMAPPED_STATUS = 422;
 const MATCHED_PULL_REQUEST_COUNT = 1;
 const EXPIRED_DEADLINE_MS = 0;
 const PULL_NUMBER_FLOOR = 0;
+const NO_GATE_FILES = 0;
+const GATE_FILE_BODY_INTRO =
+  "KanthorD does not merge this pull request. The change set of the node changes these gate files of the affected test declaration:";
+const GATE_FILE_BODY_OUTRO = "A human reviews and merges this pull request.";
+const GATE_FILE_BODY_PART_SEPARATOR = "\n\n";
+const GATE_FILE_LINE_SEPARATOR = "\n";
 
 export type PerformBody = {
   key: string;
@@ -317,6 +323,7 @@ async function createPullRequest(
       head: performer.claim.nodeBranch,
       base: facts.frozen_action.configuration.base_branch,
       title: commitHeader(facts.node.commit_type, facts.node.name),
+      ...gateFileBodyOf(facts),
     },
   );
   if (!answer.ok)
@@ -327,6 +334,18 @@ async function createPullRequest(
       message: answer.message,
     };
   return { ok: true, result: pullRequestAddress(facts, answer.value.number) };
+}
+
+function gateFileBodyOf(facts: Readonly<ActionFacts>): { body?: string } {
+  if (facts.gate_files.length === NO_GATE_FILES) return {};
+  const lines = facts.gate_files.map((path) => `- \`${path}\``);
+  return {
+    body: [
+      GATE_FILE_BODY_INTRO,
+      lines.join(GATE_FILE_LINE_SEPARATOR),
+      GATE_FILE_BODY_OUTRO,
+    ].join(GATE_FILE_BODY_PART_SEPARATOR),
+  };
 }
 
 async function mergePush(

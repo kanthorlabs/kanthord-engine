@@ -252,6 +252,7 @@ export type ActionContext = {
     resolution: (typeof ActionResolution)[keyof typeof ActionResolution];
     request_evidence_id: string | null;
     eligible: boolean;
+    gate_files: string[];
     reuse_candidates: {
       evidence_id: string;
       attempt: number;

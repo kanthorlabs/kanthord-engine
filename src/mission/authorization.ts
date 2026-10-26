@@ -45,6 +45,7 @@ import {
 } from "./evidence-content-read.ts";
 import { executionMismatch, invalidExecutionInput } from "./execution.ts";
 import { requiredActionsOf } from "./frozen-action.ts";
+import { gateFilesOf } from "./gate-files.ts";
 import { getRevision } from "./node-read.ts";
 import { recordNotFound } from "./record-list.ts";
 import {
@@ -65,6 +66,7 @@ export const AuthorizationRefusal = {
   BindingDisabled: "binding_disabled",
   BindingRemoved: "binding_removed",
   ServiceMismatch: "service_mismatch",
+  GateFileChanged: "gate_file_changed",
 } as const;
 type Refusal = (typeof AuthorizationRefusal)[keyof typeof AuthorizationRefusal];
 
@@ -197,6 +199,7 @@ type AuthorizationDependencies = Pick<
   "schedulerClaims" | "bindings"
 >;
 const SINGLE_PLATFORM_ASSET = 1;
+const NO_GATE_FILES = 0;
 
 function repositoryOf(
   tx: Transaction,
@@ -286,6 +289,15 @@ export function authorizeFrozenAction(
   const commit = assessedCommitOf(tx, claim, action.binding_id);
   if (commit === null || commit !== input.commit)
     authorizationRefused(AuthorizationRefusal.NodeMismatch);
+  const gateFiles = gateFilesOf(
+    currentAssessmentOf(tx, claim.nodeId, claim.attempt),
+    action.binding_id,
+  );
+  if (
+    action.action === RepositoryAction.MergePush &&
+    gateFiles.length > NO_GATE_FILES
+  )
+    authorizationRefused(AuthorizationRefusal.GateFileChanged);
   const { policy, repository } = repositoryOf(
     tx,
     dependencies.bindings,
@@ -328,6 +340,7 @@ export function authorizeFrozenAction(
       snapshot_commit: commit,
       reused_address: reused,
       merge_address: merge,
+      gate_files: gateFiles,
     },
   };
 }
@@ -346,6 +359,13 @@ function mergeAddressOf(
     action.configuration.landing !== RepositoryLanding.KanthorD
   )
     authorizationRefused(AuthorizationRefusal.NodeMismatch);
+  if (
+    gateFilesOf(
+      currentAssessmentOf(tx, claim.nodeId, claim.attempt),
+      action.binding_id,
+    ).length > NO_GATE_FILES
+  )
+    authorizationRefused(AuthorizationRefusal.GateFileChanged);
   const evidence = readEvidence(tx, evidenceId);
   if (
     !evidence ||

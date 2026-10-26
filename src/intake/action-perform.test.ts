@@ -55,6 +55,12 @@ const API_CREDENTIAL = "github";
 const API_KEY = "api-key";
 const FIRST_REVISION = 1;
 const PULL_NUMBER = 7;
+const GATE_FILE_PATHS = ["package.json", "scripts/affected-tests.mjs"];
+const GATE_FILE_BODY = [
+  "KanthorD does not merge this pull request. The change set of the node changes these gate files of the affected test declaration:",
+  "- `package.json`\n- `scripts/affected-tests.mjs`",
+  "A human reviews and merges this pull request.",
+].join("\n\n");
 const MERGE_PUSH_ACTION = "merge_push";
 const PULL_REQUEST_ACTION = "pull_request";
 const ONE_RELEASE = 1;
@@ -120,6 +126,7 @@ function actionFacts(
     snapshot_commit: SNAPSHOT,
     reused_address: null,
     merge_address: null,
+    gate_files: [],
     ...overrides,
   };
 }
@@ -172,6 +179,7 @@ function harness(t: TestContext, options: Options) {
     sshAccessOf: sshAccessOf(),
   };
   const githubCalls: string[] = [];
+  const pullRequests: unknown[] = [];
   const refused = async (name: string) => {
     githubCalls.push(name);
     return {
@@ -184,7 +192,14 @@ function harness(t: TestContext, options: Options) {
   };
   const github = {
     mergeMethodOf: () => refused("merge_method"),
-    createPullRequest: () => refused("create"),
+    createPullRequest: (
+      _call: unknown,
+      _target: unknown,
+      pullRequest: unknown,
+    ) => {
+      pullRequests.push(pullRequest);
+      return refused("create");
+    },
     openPullRequests: () => refused("open"),
   } as unknown as GitHubPlatform;
   const caller: CallerContext = {
@@ -234,6 +249,7 @@ function harness(t: TestContext, options: Options) {
     knownHosts,
     git,
     githubCalls,
+    pullRequests,
     perform,
     rows,
     sshRequests,
@@ -442,4 +458,30 @@ test("an SSH agent failure of the base landing read of a pull request create ans
   assert.equal(answer.code, SshAgentErrorCode.Failed);
   assert.deepEqual(h.githubCalls, []);
   assert.ok(h.materials.every((material) => material.dropped));
+});
+
+test("a pull request create names the gate files in its body", async (t) => {
+  const h = harness(t, {
+    facts: actionFacts(PULL_REQUEST_ACTION, { gate_files: GATE_FILE_PATHS }),
+    credential: API_CREDENTIAL,
+  });
+  await h.perform();
+  assert.deepEqual(h.pullRequests, [
+    {
+      head: claim.nodeBranch,
+      base: "main",
+      title: "feat: ship accounts",
+      body: GATE_FILE_BODY,
+    },
+  ]);
+});
+
+test("a pull request create without gate files sends no body", async (t) => {
+  const h = harness(t, {
+    facts: actionFacts(PULL_REQUEST_ACTION),
+    credential: API_CREDENTIAL,
+  });
+  await h.perform();
+  assert.equal(h.pullRequests.length, ONE_RELEASE);
+  assert.equal(Object.hasOwn(h.pullRequests[0] as object, "body"), false);
 });

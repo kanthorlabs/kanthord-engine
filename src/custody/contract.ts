@@ -231,6 +231,7 @@ export type ActionFacts = {
   snapshot_commit: string;
   reused_address: PullRequestAddressFacts | null;
   merge_address: PullRequestAddressFacts | null;
+  gate_files: string[];
 };
 export type RequestFacts = {
   frozen_action: FrozenActionFacts;
