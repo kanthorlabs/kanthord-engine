@@ -49,7 +49,6 @@ const SHELL_NAME = "bash";
 const SHELL_INDEX = 4;
 const METADATA_LABEL = "devcontainer.metadata";
 const IMAGE_PREFIX = "mcr.microsoft.com/devcontainers";
-const UNIVERSAL_PATH = "static/environment/universal.json";
 const SETTLED_STATUSES: readonly EnvironmentStatus[] = [
   EnvironmentStatus.Ready,
   EnvironmentStatus.None,
@@ -333,7 +332,10 @@ test(
     const builds = detection.devcontainer.builds();
     assert.equal(builds.length, SINGLE_SLOT);
     const { customizations, ...universal } = JSON.parse(
-      readFileSync(UNIVERSAL_PATH, "utf8"),
+      readFileSync(
+        new URL("../../../static/environment/universal.json", import.meta.url),
+        "utf8",
+      ),
     ) as { customizations: { kanthord: { checks: string[] } } };
     assert.deepEqual(builds[0], universal);
     assert.deepEqual(proofCommands(detection), customizations.kanthord.checks);
