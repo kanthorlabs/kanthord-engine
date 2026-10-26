@@ -22,6 +22,7 @@ import {
 } from "../../kernel/test-support.ts";
 import {
   addedFiles,
+  modifiedFiles,
   ChangeStatus,
   changedEntries,
   changedFiles,
@@ -218,6 +219,37 @@ test("added files list only the files that the branch adds against its base", as
   assert.deepEqual(
     await addedFiles(env, directory, "main", background, 10000),
     ["debug.mjs"],
+  );
+});
+
+test("modified files list the added, the modified and the deleted path of the branch", async (t) => {
+  const directory = temporary(t);
+  const git = simpleGit(directory);
+  const commit = (message: string) =>
+    git.raw([
+      "-c",
+      "user.name=Test",
+      "-c",
+      "user.email=test@example.invalid",
+      "commit",
+      "-m",
+      message,
+    ]);
+  await git.init();
+  await git.raw(["checkout", "-b", "main"]);
+  writeFileSync(join(directory, "modified"), "base");
+  writeFileSync(join(directory, "deleted"), "base");
+  await git.add(["modified", "deleted"]);
+  await commit("base");
+  await git.raw(["checkout", "-b", "work"]);
+  writeFileSync(join(directory, "modified"), "changed");
+  writeFileSync(join(directory, "added"), "new");
+  rmSync(join(directory, "deleted"));
+  await git.add(["modified", "added", "deleted"]);
+  await commit("work");
+  assert.deepEqual(
+    (await modifiedFiles(env, directory, "main", background, 10000)).sort(),
+    ["added", "deleted", "modified"],
   );
 });
 

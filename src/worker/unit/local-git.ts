@@ -584,6 +584,25 @@ export async function addedFiles(
   return output.split("\n").filter((line) => line.trim() !== CLEAN_STATUS);
 }
 
+export async function modifiedFiles(
+  env: NodeJS.ProcessEnv,
+  directory: string,
+  base: string,
+  context: Context,
+  deadlineMs: number,
+): Promise<string[]> {
+  assert.ok(base);
+  assert.ok(!base.startsWith("-"));
+  const output = await run(
+    env,
+    directory,
+    ["diff", "--name-only", "-z", "--no-renames", `${base}...HEAD`, "--"],
+    context,
+    deadlineMs,
+  );
+  return output.split(NUL).filter(Boolean);
+}
+
 export async function changedFiles(
   env: NodeJS.ProcessEnv,
   directory: string,
