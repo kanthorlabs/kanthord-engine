@@ -82,6 +82,7 @@ const OUTCOME_OK = "ok";
 const OUTCOME_ERROR = "error";
 const RATE_LIMITED = "rate_limited";
 const LAST_ASSISTANT_ENTRY = "00000004";
+const FIRST_ENTRY = "00000001";
 const EFFECTIVE_CONFIGURATION = {
   agent_provider: "zai",
   provider: "zai",
@@ -641,6 +642,38 @@ test("the agent tracer writes a turn and its tool call without a text", () => {
   assert.deepEqual(textRecordsOf(records), []);
   for (const span of spanRecords(records))
     assert.deepEqual(span.text_ids ?? [], []);
+});
+
+test("a tool start names the assistant entry that precedes it", () => {
+  const { records, spans } = recorder();
+  const scripted = scriptedSession();
+  traceAgent(scripted.session, spans, TRACED_AGENT, TRACING);
+  scripted.emit({ type: "turn_start" });
+  scripted.append({ type: "message", message: assistantMessage() });
+  scripted.emit({
+    type: "tool_execution_start",
+    toolCallId: TOOL_CALL,
+    toolName: "bash",
+    args: {},
+  });
+  const attributes = startOf(records, SpanOperation.Tool)?.attributes;
+  assert.equal(attributes?.["kanthord.session.entry_id"], FIRST_ENTRY);
+});
+
+test("a tool start holds no entry id without an assistant entry after the turn start", () => {
+  const { records, spans } = recorder();
+  const scripted = scriptedSession();
+  traceAgent(scripted.session, spans, TRACED_AGENT, TRACING);
+  scripted.append({ type: "message", message: assistantMessage() });
+  scripted.emit({ type: "turn_start" });
+  scripted.emit({
+    type: "tool_execution_start",
+    toolCallId: TOOL_CALL,
+    toolName: "bash",
+    args: {},
+  });
+  const attributes = startOf(records, SpanOperation.Tool)?.attributes ?? {};
+  assert.ok(!("kanthord.session.entry_id" in attributes));
 });
 
 const TURN_PROMPT: TurnPrompt = {
