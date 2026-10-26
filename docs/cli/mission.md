@@ -332,6 +332,9 @@ The execution reads that dependency at the revision that its current outcome pin
 - Every `node` of a task file and every `depends_on` names a plan file inside the import set, never a path or a boundary reference.
 - A task file names an `implement` node in `node`. A node file names its `intent`, its `depends_on` list, its `tags` list and an optional `commit_type`.
 - A stale mission version fails. A preview reserves no node against subsequent work.
+- An apply records a trace with the root operation `mission.import` and the attributes `kanthord.project.id`, `kanthord.mission.id`, `kanthord.mission.version.from`, `kanthord.mission.version.to`, `kanthord.import.creates`, `kanthord.import.updates`, `kanthord.import.retirements`, `kanthord.import.removed_edges` and `kanthord.human.username`.
+  A refused apply records it with status `Error`, `error.type` and `kanthord.import.violation_codes`.
+  A preview records no trace. A stale mission version records no trace.
 
 Creation, update and retirement require `Pending|Available` and attempt
 zero for each modified owner; task eligibility is the eligibility of its node.
