@@ -27,6 +27,7 @@ import { GitStep, markGitStep } from "./git-step.ts";
 
 const SETTLE_CALL_COUNT = 1;
 const CALLS = 2;
+const NO_CALLS = 0;
 const VALUE = "value";
 const ERROR = "test.operation.failed";
 const CLAIM = {
@@ -471,6 +472,77 @@ test("a stop release that the scheduler refuses as ended ends the run as revoked
       code,
     });
   }
+});
+
+test("a stop release whose credential report the server refuses as ended ends the run as revoked", async (t) => {
+  for (const [status, code] of [
+    [403, EXECUTION_PROOF_FAILED],
+    [409, EXECUTION_NOT_RUNNING],
+  ] as const) {
+    const run = fixture(async () => {
+      throw new CodedError(code, `Refused with ${status}`);
+    });
+    t.after(() => run.dispose());
+    let releases = 0;
+    run.clients.scheduler = {
+      executionRelease: async () => {
+        releases++;
+      },
+    } as unknown as MethodClients["scheduler"];
+    const stopped = await run.stopOf(
+      new ExecutionStop(EndReason.OperationFailed, null),
+    );
+    assert.deepEqual(await run.releaseStop(stopped), {
+      kind: "ended",
+      reason: EndReason.Revoked,
+      code,
+    });
+    assert.equal(releases, NO_CALLS);
+  }
+});
+
+test("a credential settlement that the server refuses as ended stops the run as revoked", async (t) => {
+  const run = fixture(async () => {
+    throw new CodedError(EXECUTION_PROOF_FAILED, "Refused");
+  });
+  t.after(() => run.dispose());
+  await assert.rejects(
+    run.settleCredentials(),
+    (error: unknown) =>
+      error instanceof ExecutionStop &&
+      error.reason === EndReason.Revoked &&
+      error.code === EXECUTION_PROOF_FAILED,
+  );
+});
+
+test("a lost release answer with a claim read that the server refuses as ended ends the run as revoked", async (t) => {
+  const run = fixture();
+  t.after(() => run.dispose());
+  const stopped = await run.stopOf(
+    new ExecutionStop(EndReason.OperationFailed, null),
+  );
+  run.clients.scheduler = {
+    executionRelease: async () => ({
+      type: OperationResultType.Indeterminate,
+    }),
+    claimGet: async () => ({
+      type: OperationResultType.Failure,
+      status: 403,
+      error: {
+        error: {
+          code: EXECUTION_PROOF_FAILED,
+          message: "Ended",
+          details: null,
+        },
+        request_id: "test",
+      },
+    }),
+  } as unknown as MethodClients["scheduler"];
+  assert.deepEqual(await run.releaseStop(stopped), {
+    kind: "ended",
+    reason: EndReason.Revoked,
+    code: EXECUTION_PROOF_FAILED,
+  });
 });
 
 test("the claim check stops the run as revoked only on a definite end", async () => {
