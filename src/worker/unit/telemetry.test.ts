@@ -27,6 +27,7 @@ import {
   taskSpan,
   verificationObserver,
   VerificationContext,
+  VerificationKind,
   type VerificationScope,
   withinGit,
 } from "./method-telemetry.ts";
@@ -439,6 +440,7 @@ async function verificationStart(digests: readonly string[]) {
 
 const CONTEXT_ATTRIBUTE = "kanthord.verification.context";
 const OWNER_ATTRIBUTE = "kanthord.verification.owner_id";
+const KIND_ATTRIBUTE = "kanthord.verification.kind";
 const CLASS_ATTRIBUTE = "kanthord.verification.class";
 const FLAKY_ATTRIBUTE = "kanthord.verification.flaky";
 const TASK_OWNER = "task_owner";
@@ -486,6 +488,7 @@ test("a verification span records its context, its owner and the class of the ru
     VerificationContext.Task,
   );
   assert.equal(start?.attributes?.[OWNER_ATTRIBUTE], TASK_OWNER);
+  assert.equal(start?.attributes?.[KIND_ATTRIBUTE], VerificationKind.Listed);
   assert.equal(end?.attributes?.[CLASS_ATTRIBUTE], VerificationClass.Pass);
   assert.equal(FLAKY_ATTRIBUTE in (end?.attributes ?? {}), false);
 });
