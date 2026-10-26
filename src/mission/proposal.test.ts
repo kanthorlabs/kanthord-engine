@@ -106,6 +106,7 @@ async function fixture(t: TestContext) {
       evidence_ids: "[]",
       dependency_outcome_ids: "[]",
       tested_input: null,
+      gate_files: null,
       execution_id: null,
       actor: canonicalJSON(h.actor),
       node_revision: FIRST_REVISION,

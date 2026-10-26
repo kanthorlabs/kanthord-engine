@@ -315,6 +315,7 @@ test("examine admission tracks replacement dependency outcomes and excludes reti
         evidence_ids: "[]",
         dependency_outcome_ids: "[]",
         tested_input: null,
+        gate_files: null,
         actor: canonicalJSON(h.actor),
         execution_id: null,
         node_revision: FIRST_REVISION,

@@ -57,6 +57,7 @@ export interface AssessmentRow {
   evidence_ids: string;
   dependency_outcome_ids: string;
   tested_input: string | null;
+  gate_files: string | null;
   execution_id: string | null;
   actor: string | null;
   node_revision: number;
@@ -400,7 +401,7 @@ export function insertAssessment(
   };
   tx.database
     .prepare(
-      "INSERT INTO mission_assessment (id, node_id, sequence, attempt, result, rationale, evidence_ids, dependency_outcome_ids, tested_input, execution_id, actor, node_revision, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      "INSERT INTO mission_assessment (id, node_id, sequence, attempt, result, rationale, evidence_ids, dependency_outcome_ids, tested_input, gate_files, execution_id, actor, node_revision, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .run(
       stored.id,
@@ -412,6 +413,7 @@ export function insertAssessment(
       stored.evidence_ids,
       stored.dependency_outcome_ids,
       stored.tested_input,
+      stored.gate_files,
       stored.execution_id,
       stored.actor,
       stored.node_revision,

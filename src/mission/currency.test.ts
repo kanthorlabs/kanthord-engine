@@ -65,6 +65,7 @@ function fixture(t: TestContext, intent: Intent = Intent.Implement) {
         evidence_ids: "[]",
         dependency_outcome_ids: "[]",
         tested_input: null,
+        gate_files: null,
         execution_id: createIdentity("execution"),
         actor: null,
         node_revision: FIRST_ATTEMPT,

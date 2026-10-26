@@ -1289,6 +1289,13 @@ export const proposalApproveResultSchema = z.strictObject({
   created: nodeChangeSchema,
   proposer: controlResultSchema,
 });
+export const gateFilesSchema = z.array(
+  z.strictObject({
+    binding_id: identitySchema("binding"),
+    paths: z.array(textSchema).min(1),
+  }),
+);
+export type GateFiles = z.infer<typeof gateFilesSchema>;
 export const assessmentSubmitSchema = executionContextSchema
   .extend({
     evidence_ids: z
@@ -1302,6 +1309,7 @@ export const assessmentSubmitSchema = executionContextSchema
     result: assessmentResultSchema,
     rationale: textSchema,
     tested_input: testedInputSchema,
+    gate_files: gateFilesSchema.optional(),
     proposals: z.array(proposalContentSchema).max(PROPOSAL_MAX).default([]),
     cause: failureCauseSchema.optional(),
   })

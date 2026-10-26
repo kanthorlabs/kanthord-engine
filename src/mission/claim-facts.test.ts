@@ -414,6 +414,7 @@ test("opening facts answer a revision turn after a criterion-not-met assessment"
       evidence_ids: "[]",
       dependency_outcome_ids: "[]",
       tested_input: null,
+      gate_files: null,
       execution_id: createIdentity("execution"),
       actor: null,
       node_revision: FIRST_REVISION,

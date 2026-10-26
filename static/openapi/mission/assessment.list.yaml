@@ -562,6 +562,27 @@ components:
                       - binding_id
                       - commit
                     additionalProperties: false
+            gate_files:
+              type: array
+              items:
+                type: object
+                properties:
+                  binding_id:
+                    type: string
+                    minLength: 34
+                    maxLength: 34
+                    pattern: ^binding_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                    description: binding_ followed by a canonical 26-character uppercase ULID.
+                  paths:
+                    minItems: 1
+                    type: array
+                    items:
+                      type: string
+                      minLength: 1
+                required:
+                  - binding_id
+                  - paths
+                additionalProperties: false
             proposals:
               default: []
               maxItems: 10
