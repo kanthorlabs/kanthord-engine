@@ -47,6 +47,13 @@ const CLOSED_PULL_REQUEST_EVENT_TYPE = "pull_request_closed";
 const REVIEW_PAGE_SIZE = 100;
 const REVIEW_PAGE_LIMIT = 30;
 const NO_CHANGE_REQUESTS = 0;
+const NO_REQUIRED_CHECKS = 0;
+const CHECK_RUN_PAGE_SIZE = 100;
+const BRANCH_RULES_ROUTE = "GET /repos/{owner}/{repo}/rules/branches/{branch}";
+const CHECK_RUNS_ROUTE = "GET /repos/{owner}/{repo}/commits/{ref}/check-runs";
+const COMMIT_STATUSES_ROUTE =
+  "GET /repos/{owner}/{repo}/commits/{ref}/statuses";
+const REQUIRED_STATUS_CHECKS_RULE = "required_status_checks";
 const EVENT_ID_PATTERN = /^(0|[1-9][0-9]*)$/;
 const MIN_JSON_LENGTH = 1;
 const REQUEST_TIMEOUT_STATUS = 408;
@@ -184,6 +191,32 @@ const DECISIVE_REVIEW_STATES: ReadonlySet<string> = new Set(
   Object.values(ReviewState),
 );
 
+const CHECK_RUN_COMPLETED = "completed";
+const CheckRunConclusion = {
+  Success: "success",
+  Neutral: "neutral",
+  Skipped: "skipped",
+} as const;
+const PASSING_CONCLUSIONS: ReadonlySet<string> = new Set(
+  Object.values(CheckRunConclusion),
+);
+
+const CommitStatusState = {
+  Success: "success",
+  Pending: "pending",
+  Failure: "failure",
+  Error: "error",
+} as const;
+const commitStatusStateSchema = z.enum(CommitStatusState);
+
+const RequiredCheckOutcome = {
+  Passed: "passed",
+  Pending: "pending",
+  Failed: "failed",
+} as const;
+type RequiredCheckOutcome =
+  (typeof RequiredCheckOutcome)[keyof typeof RequiredCheckOutcome];
+
 export const MergeMethod = {
   Merge: "merge",
   Squash: "squash",
@@ -215,6 +248,13 @@ export interface ChangeRequest {
 export interface ChangeRequestRead {
   head_commit: string;
   change_requests: ChangeRequest[];
+}
+
+export interface RequiredCheckRead {
+  head_commit: string;
+  base_branch: string;
+  pending: string[];
+  failed: string[];
 }
 
 export interface ReviewCommentPage {
@@ -277,6 +317,31 @@ const mergeabilityStateSchema = z.looseObject({
 const pullRequestHeadSchema = z.looseObject({
   head: z.looseObject({ sha: z.string().min(MIN_SEGMENT_LENGTH) }),
 });
+const requiredCheckPullRequestSchema = z.looseObject({
+  head: z.looseObject({ sha: z.string().min(MIN_SEGMENT_LENGTH) }),
+  base: z.looseObject({ ref: z.string().min(MIN_SEGMENT_LENGTH) }),
+});
+const branchRuleListSchema = z.array(
+  z.looseObject({ type: z.string(), parameters: z.unknown() }),
+);
+const requiredStatusChecksParametersSchema = z.looseObject({
+  required_status_checks: z.array(
+    z.looseObject({ context: z.string().min(MIN_SEGMENT_LENGTH) }),
+  ),
+});
+const checkRunsBodySchema = z.looseObject({
+  check_runs: z.array(
+    z.looseObject({
+      id: z.int(),
+      name: z.string(),
+      status: z.string(),
+      conclusion: z.string().nullable().optional(),
+    }),
+  ),
+});
+const commitStatusListSchema = z.array(
+  z.looseObject({ context: z.string(), state: commitStatusStateSchema }),
+);
 const reviewListSchema = z.array(
   z.looseObject({
     user: z.looseObject({ id: z.int() }).nullable(),
@@ -653,6 +718,76 @@ function currentChangeRequests<R extends Review>(
   );
 }
 
+function requiredContextsOf(rules: unknown): string[] {
+  const contexts = new Set<string>();
+  for (const rule of branchRuleListSchema.parse(rules)) {
+    if (rule.type !== REQUIRED_STATUS_CHECKS_RULE) continue;
+    const parameters = requiredStatusChecksParametersSchema.parse(
+      rule.parameters,
+    );
+    for (const check of parameters.required_status_checks)
+      contexts.add(check.context);
+  }
+  return [...contexts];
+}
+
+function outcomeOfRun(run: {
+  status: string;
+  conclusion?: string | null;
+}): RequiredCheckOutcome {
+  if (run.status !== CHECK_RUN_COMPLETED) return RequiredCheckOutcome.Pending;
+  return run.conclusion != null && PASSING_CONCLUSIONS.has(run.conclusion)
+    ? RequiredCheckOutcome.Passed
+    : RequiredCheckOutcome.Failed;
+}
+
+function outcomeOfStatus(
+  state: z.infer<typeof commitStatusStateSchema>,
+): RequiredCheckOutcome {
+  if (state === CommitStatusState.Success) return RequiredCheckOutcome.Passed;
+  return state === CommitStatusState.Pending
+    ? RequiredCheckOutcome.Pending
+    : RequiredCheckOutcome.Failed;
+}
+
+export function foldRequiredChecks(
+  required: readonly string[],
+  checkRuns: unknown,
+  statuses: unknown,
+): { pending: string[]; failed: string[] } {
+  const newestRuns = new Map<
+    string,
+    z.infer<typeof checkRunsBodySchema>["check_runs"][number]
+  >();
+  for (const run of checkRunsBodySchema.parse(checkRuns).check_runs) {
+    const known = newestRuns.get(run.name);
+    if (known === undefined || run.id > known.id) newestRuns.set(run.name, run);
+  }
+  const newestStates = new Map<
+    string,
+    z.infer<typeof commitStatusStateSchema>
+  >();
+  for (const status of commitStatusListSchema.parse(statuses)) {
+    if (!newestStates.has(status.context))
+      newestStates.set(status.context, status.state);
+  }
+  const pending: string[] = [];
+  const failed: string[] = [];
+  for (const name of new Set(required)) {
+    const run = newestRuns.get(name);
+    const state = newestStates.get(name);
+    const outcome =
+      run !== undefined
+        ? outcomeOfRun(run)
+        : state !== undefined
+          ? outcomeOfStatus(state)
+          : RequiredCheckOutcome.Pending;
+    if (outcome === RequiredCheckOutcome.Pending) pending.push(name);
+    if (outcome === RequiredCheckOutcome.Failed) failed.push(name);
+  }
+  return { pending: pending.sort(), failed: failed.sort() };
+}
+
 export function hasNextLink(link: string | null): boolean {
   assert.ok(link === null || isString(link));
   return (
@@ -934,6 +1069,51 @@ export class GitHubPlatform {
         change_requests: changeRequests,
       },
     };
+  }
+
+  async getRequiredChecks(
+    call: GitHubCall,
+    target: GitHubTarget,
+    pullRequest: { number: number },
+  ): Promise<GitHubAnswer<RequiredCheckRead>> {
+    const body = await this.getPullRequest(call, target, pullRequest);
+    if (!body.ok) return body;
+    const parsed = requiredCheckPullRequestSchema.safeParse(body.value);
+    if (!parsed.success) return unreadableBody(CallKind.Read);
+    const head = parsed.data.head.sha;
+    const base = parsed.data.base.ref;
+    const rules = await this.#listPages(call, target, BRANCH_RULES_ROUTE, {
+      branch: base,
+    });
+    if (!rules.ok) return rules;
+    const read = (checks: { pending: string[]; failed: string[] }) => ({
+      ok: true as const,
+      value: { head_commit: head, base_branch: base, ...checks },
+    });
+    try {
+      const required = requiredContextsOf(rules.value);
+      if (required.length === NO_REQUIRED_CHECKS)
+        return read({ pending: [], failed: [] });
+      const checkRuns = await this.#exchange(call, target, {
+        kind: CallKind.Read,
+        route: CHECK_RUNS_ROUTE,
+        parameters: { ref: head, per_page: CHECK_RUN_PAGE_SIZE },
+      });
+      if (!checkRuns.ok) return checkRuns;
+      const statuses = await this.#listPages(
+        call,
+        target,
+        COMMIT_STATUSES_ROUTE,
+        { ref: head },
+      );
+      if (!statuses.ok) return statuses;
+      return read(
+        foldRequiredChecks(required, checkRuns.value.data, statuses.value),
+      );
+    } catch (error) {
+      if (error instanceof z.ZodError) return unreadableBody(CallKind.Read);
+      throw error;
+    }
   }
 
   async #listPages(
