@@ -20,6 +20,7 @@ import {
   computeChanges,
   selectTests,
 } from "./affected-tests.mjs";
+import { affectedReportSchema } from "../src/worker/unit/affected.ts";
 
 const MODIFIED = "modified";
 const ADDED = "added";
@@ -89,7 +90,7 @@ function change(path, status = MODIFIED, previous_path) {
 }
 
 function selected(tests, excluded_e2e = []) {
-  return { selection: "selected", reason: null, tests, excluded_e2e };
+  return { selection: "related", reason: null, tests, excluded_e2e };
 }
 
 const NONE = { selection: "none", reason: null, tests: [], excluded_e2e: [] };
@@ -524,7 +525,7 @@ test("a failed test gives the report, the report file and the exit code 1", asyn
   assert.equal(result.status, FAILED);
   assert.deepEqual(result.report, {
     version: 1,
-    selection: "selected",
+    selection: "related",
     reason: null,
     tests: ["src/a.test.ts"],
     failed: [{ file: "src/a.test.ts", name: "fails" }],
@@ -578,7 +579,7 @@ test("the input of --base is the change set against the merge base", async (t) =
   await writeFile(join(root, "src/c.test.ts"), PASSING_TEST);
   const result = runEntry(root, ["--base", "HEAD"]);
   assert.equal(result.status, SUCCESS);
-  assert.equal(result.report.selection, "selected");
+  assert.equal(result.report.selection, "related");
   assert.deepEqual(result.report.tests, ["src/a.test.ts", "src/c.test.ts"]);
   assert.deepEqual(result.report.failed, []);
   assert.deepEqual(result.report.flaky, []);
@@ -644,4 +645,24 @@ test("a first run that fails with no failed id is a run error", async (t) => {
   assert.equal(result.status, RUN_ERROR);
   assert.equal(existsSync(reportPath), false);
   assert.match(result.stderr, /without a failed test/);
+});
+
+test("each selection of the selector passes affectedReportSchema", async (t) => {
+  const root = await fixture(t, {
+    "src/a.ts": EMPTY_MODULE,
+    "src/a.test.ts": `import "./a.ts";\n${PASSING_TEST}`,
+  });
+  const changesBySelection = {
+    related: [change("src/a.ts")],
+    all: [change("package.json")],
+    none: [change("docs/readme.txt")],
+  };
+  for (const [selection, files] of Object.entries(changesBySelection)) {
+    const result = runEntry(root, [], {
+      KANTHORD_CHANGES: await changesFile(root, files),
+    });
+    assert.equal(result.status, SUCCESS);
+    assert.equal(result.report.selection, selection);
+    assert.ok(affectedReportSchema.parse(result.report));
+  }
 });

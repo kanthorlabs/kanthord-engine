@@ -87,7 +87,7 @@ export const INERT_INPUTS = [
   ...INERT_FILES,
 ];
 
-const SELECTION = { all: "all", none: "none", selected: "selected" };
+const SELECTION = { all: "all", none: "none", related: "related" };
 const GLOBAL_REASON = "global input: ";
 const UNKNOWN_REASON = "unknown path: ";
 const REASON_MAX_BYTES = 256;
@@ -399,7 +399,7 @@ export function selectTests(root, changes) {
   );
   const tests = reached.filter((path) => isUnitTest(graph, path)).sort();
   return {
-    selection: tests.length === 0 ? SELECTION.none : SELECTION.selected,
+    selection: tests.length === 0 ? SELECTION.none : SELECTION.related,
     reason: null,
     tests,
     excluded_e2e: reached.filter((path) => isE2e(graph, path)).sort(),
