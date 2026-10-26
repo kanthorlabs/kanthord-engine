@@ -822,7 +822,7 @@ test("the end of an affected span holds the reason only for the selection all", 
   assert.equal("kanthord.affected.reason" in (related.attributes ?? {}), false);
 });
 
-test("the end of an affected span without a valid report holds zero counts and empty lists", () => {
+test("the end of an affected span without a valid report holds the changed count, zero counts and empty lists", () => {
   const end = affectedEnd(
     affectedRun({
       report: null,
@@ -838,7 +838,7 @@ test("the end of an affected span without a valid report holds zero counts and e
   assert.deepEqual(end.attributes, {
     "kanthord.affected.verdict": "failed",
     "kanthord.affected.selection": "invalid",
-    "kanthord.affected.changed_count": 0,
+    "kanthord.affected.changed_count": 3,
     "kanthord.affected.test_count": 0,
     "kanthord.affected.failed_count": 0,
     "kanthord.affected.flaky_count": 0,
