@@ -52,7 +52,7 @@ const PERMISSION_BITS = 0o777;
 const CREATE_EXCLUSIVE = "wx";
 const SINGLE_QUOTE = "'";
 const AGENT_SCRIPT =
-  'exec 3<&0; ssh-agent -D -a "$1" & agent=$!; { cat; kill "$agent"; } <&3 2>/dev/null & wait "$agent"';
+  'exec 3<&0; ssh-agent -D -a "$1" & agent=$!; { cat; kill 0; } <&3 2>/dev/null & wait "$agent"';
 const SOCKET_POLL_MS = 10;
 const SOCKET_PROBE_TIMEOUT_MS = 1000;
 const MS_PER_SECOND = 1000;
@@ -201,6 +201,7 @@ function spawnAgent(socket: string): Agent {
   const child = spawn("sh", ["-c", AGENT_SCRIPT, "sh", socket], {
     env: toolEnvironment(),
     stdio: ["pipe", "ignore", "pipe"],
+    detached: true,
   });
   const chunks: Buffer[] = [];
   child.stderr?.on("data", (chunk: Buffer) => chunks.push(chunk));
