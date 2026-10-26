@@ -13,8 +13,8 @@ import {
   type SshIdentitySubject,
 } from "../custody/contract.ts";
 import type { CallerIdentity } from "../kernel/caller.ts";
-import type { Context } from "../kernel/context.ts";
-import { Diagnostic, OperationError } from "../kernel/errors.ts";
+import { DEADLINE_EXCEEDED_CODE, type Context } from "../kernel/context.ts";
+import { CodedError, OperationError } from "../kernel/errors.ts";
 import type { CallerContext, ExecutionClaim } from "../kernel/operation.ts";
 import type { Store, Transaction } from "../kernel/store.ts";
 import { PlatformAddressKind } from "../mission/contract.ts";
@@ -43,11 +43,12 @@ const expectedEndStateSchema = z.enum(ExpectedEndState);
 export const GIT_TRANSPORT_CODES: readonly string[] = [
   GIT_FAILED_CODE,
   SshAgentErrorCode.Failed,
+  DEADLINE_EXCEEDED_CODE,
 ];
 
-export function isGitTransportFailure(error: unknown): error is Diagnostic {
+export function isGitTransportFailure(error: unknown): error is CodedError {
   return (
-    error instanceof Diagnostic && GIT_TRANSPORT_CODES.includes(error.code)
+    error instanceof CodedError && GIT_TRANSPORT_CODES.includes(error.code)
   );
 }
 

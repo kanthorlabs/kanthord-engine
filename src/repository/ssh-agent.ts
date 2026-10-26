@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { promisify } from "node:util";
-import { type Context } from "../kernel/context.ts";
+import { DeadlineExceeded, type Context } from "../kernel/context.ts";
 import { Diagnostic } from "../kernel/errors.ts";
 import { isolatedGitEnvironment } from "../kernel/git-environment.ts";
 import {
@@ -241,6 +241,7 @@ async function waitForSocket(
   }
   context.signal.throwIfAborted();
   if (await socketExists(socket)) return;
+  if (!exited && Date.now() >= deadlineAt) throw new DeadlineExceeded();
   throw agentFailure(
     SshAgentStep.Agent,
     agent.stderr() || "The SSH agent socket did not appear.",
@@ -333,6 +334,7 @@ export async function withSshAgent<T>(
     assertSocketPath(socket);
     await writeFiles(directory, access);
     context.signal.throwIfAborted();
+    if (Date.now() >= deadlineAt) throw new DeadlineExceeded();
     if ("relay" in access)
       relay = await startRelayAgent(socket, access, context);
     else {

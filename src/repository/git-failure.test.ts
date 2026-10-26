@@ -6,7 +6,7 @@ import { background, DeadlineExceeded } from "../kernel/context.ts";
 import { Diagnostic, OperationError } from "../kernel/errors.ts";
 import { ResourceFailureReason } from "../kernel/health.ts";
 import { HttpStatus } from "../kernel/http.ts";
-import { gitLsRemote } from "./connector.ts";
+import { GitStage, GitWriteError, gitLsRemote } from "./connector.ts";
 import { HostKeyErrorCode, RepositoryErrorCode } from "./contract.ts";
 import { classifyGitFailure, gitFailureReason } from "./git-failure.ts";
 import { SshAgentErrorCode } from "./ssh-agent.ts";
@@ -244,6 +244,15 @@ test("gitFailureReason answers deadline_exceeded for a real ls-remote that excee
 test("gitFailureReason answers deadline_exceeded for a deadline that fires outside a git process", () => {
   assert.equal(
     gitFailureReason(new DeadlineExceeded()),
+    ResourceFailureReason.DeadlineExceeded,
+  );
+});
+
+test("gitFailureReason answers deadline_exceeded for a deadline before the push", () => {
+  assert.equal(
+    gitFailureReason(
+      new GitWriteError(GitStage.BeforePush, new DeadlineExceeded()),
+    ),
     ResourceFailureReason.DeadlineExceeded,
   );
 });

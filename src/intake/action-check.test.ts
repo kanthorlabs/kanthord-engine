@@ -6,7 +6,11 @@ import {
   type RequestFacts,
 } from "../custody/contract.ts";
 import { IdentityKind, type ServiceIdentity } from "../kernel/caller.ts";
-import { background } from "../kernel/context.ts";
+import {
+  background,
+  DEADLINE_EXCEEDED_CODE,
+  DeadlineExceeded,
+} from "../kernel/context.ts";
 import { Diagnostic, OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import type { CallerContext } from "../kernel/operation.ts";
@@ -203,6 +207,21 @@ test("a branch push check answers 502 with ssh_agent_failed when the SSH agent f
       error instanceof OperationError &&
       error.status === BAD_GATEWAY_STATUS &&
       error.code === SshAgentErrorCode.Failed,
+  );
+  assert.equal(h.landings.length, ONE_LANDING);
+});
+
+test("a branch push check answers 502 with the deadline code when the deadline elapses", async (t) => {
+  const h = harness(t, {
+    facts: requestFacts(branchPush),
+    landingFailure: new DeadlineExceeded(),
+  });
+  await assert.rejects(
+    h.check(),
+    (error) =>
+      error instanceof OperationError &&
+      error.status === BAD_GATEWAY_STATUS &&
+      error.code === DEADLINE_EXCEEDED_CODE,
   );
   assert.equal(h.landings.length, ONE_LANDING);
 });

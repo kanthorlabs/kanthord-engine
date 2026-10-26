@@ -1,4 +1,4 @@
-import { DeadlineExceeded } from "../kernel/context.ts";
+import { DEADLINE_EXCEEDED_CODE, DeadlineExceeded } from "../kernel/context.ts";
 import { Diagnostic, OperationError } from "../kernel/errors.ts";
 import { ResourceFailureReason } from "../kernel/health.ts";
 import { HostKeyErrorCode, RepositoryErrorCode } from "./contract.ts";
@@ -39,6 +39,7 @@ export function classifyGitFailure(stderr: string): ResourceFailureReason {
 
 const REFUSAL_REASONS: ReadonlyMap<string, ResourceFailureReason> = new Map([
   [SshAgentErrorCode.Failed, ResourceFailureReason.IdentityUnavailable],
+  [DEADLINE_EXCEEDED_CODE, ResourceFailureReason.DeadlineExceeded],
   [RepositoryErrorCode.SshKeyLegacy, ResourceFailureReason.IdentityUnavailable],
   [HostKeyErrorCode.Unpinned, ResourceFailureReason.HostKeyUnknown],
 ]);
