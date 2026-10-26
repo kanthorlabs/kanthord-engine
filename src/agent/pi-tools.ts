@@ -30,6 +30,11 @@ const BINARY_MODE = 0o755;
 const LICENSE_MODE = 0o644;
 const VERSION_TIMEOUT_MS = 10000;
 const SUCCESS = 0;
+const TEXT_BUSY = "ETXTBSY";
+const TEXT_BUSY_ATTEMPTS = 20;
+const TEXT_BUSY_WAIT_MS = 25;
+const WAIT_CELL = 0;
+const WAIT_VALUE = 0;
 
 const targetSchema = z.strictObject({
   url: z.url(),
@@ -90,6 +95,28 @@ function publish(path: string, bytes: Buffer, mode: number): void {
   }
 }
 
+function runVersion(path: string, env: NodeJS.ProcessEnv) {
+  const cell = new Int32Array(
+    new SharedArrayBuffer(Int32Array.BYTES_PER_ELEMENT),
+  );
+  const check = () =>
+    spawnSync(path, ["--version"], {
+      timeout: VERSION_TIMEOUT_MS,
+      env: childEnvironment(env),
+    });
+  let run = check();
+  for (
+    let attempt = 1;
+    attempt < TEXT_BUSY_ATTEMPTS &&
+    (run.error as NodeJS.ErrnoException | undefined)?.code === TEXT_BUSY;
+    attempt++
+  ) {
+    Atomics.wait(cell, WAIT_CELL, WAIT_VALUE, TEXT_BUSY_WAIT_MS);
+    run = check();
+  }
+  return run;
+}
+
 function installTool(
   tool: string,
   entry: PiToolTarget,
@@ -134,10 +161,7 @@ function installTool(
       ["reason", (error as Error).message],
     ]);
   }
-  const run = spawnSync(path, ["--version"], {
-    timeout: VERSION_TIMEOUT_MS,
-    env: childEnvironment(options.env ?? process.env),
-  });
+  const run = runVersion(path, options.env ?? process.env);
   if (run.error || run.status !== SUCCESS)
     throw toolMissing(tool, "cannot run", [
       ["reason", run.error?.message],
