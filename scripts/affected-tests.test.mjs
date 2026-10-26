@@ -1,10 +1,25 @@
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { execFileSync, spawnSync } from "node:child_process";
+import {
+  copyFile,
+  mkdir,
+  mkdtemp,
+  readFile,
+  rename,
+  rm,
+  writeFile,
+} from "node:fs/promises";
+import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import test from "node:test";
-import { GLOBAL_INPUTS, INERT_INPUTS, selectTests } from "./affected-tests.mjs";
+import {
+  GLOBAL_INPUTS,
+  INERT_INPUTS,
+  computeChanges,
+  selectTests,
+} from "./affected-tests.mjs";
 
 const MODIFIED = "modified";
 const ADDED = "added";
@@ -15,6 +30,46 @@ const LONG_NAME_LENGTH = 400;
 const EMPTY_MODULE = "export {};\n";
 const TEST_BODY = 'import test from "node:test";\n';
 const SSHD_MODULE = "src/repository/test-sshd.ts";
+const ENTRY_POINT = fileURLToPath(
+  new URL("./affected-tests.mjs", import.meta.url),
+);
+const AFFECTED_REPORTER = fileURLToPath(
+  new URL("./affected-reporter.mjs", import.meta.url),
+);
+const TEST_REPORTER = fileURLToPath(
+  new URL("./test-reporter.mjs", import.meta.url),
+);
+const RUN_TIMEOUT_MS = 120000;
+const SUCCESS = 0;
+const FAILED = 1;
+const RUN_ERROR = 2;
+const FIXTURE_PACKAGE = {
+  type: "module",
+  scripts: {
+    "test:files":
+      "node --test --test-reporter=./scripts/test-reporter.mjs --test-timeout=60000",
+  },
+};
+const PASSING_TEST =
+  'import test from "node:test";\ntest("passes", () => {});\n';
+const FAILING_TEST =
+  'import test from "node:test";\ntest("fails", () => { throw new Error("boom"); });\n';
+const FLAKY_TEST = `import test from "node:test";
+import { existsSync, writeFileSync } from "node:fs";
+test("fails once", () => {
+  if (existsSync("marker")) return;
+  writeFileSync("marker", "");
+  throw new Error("first run");
+});
+`;
+const NESTED_TEST = `import { describe, it } from "node:test";
+describe("outer", () => {
+  describe("inner", () => {
+    it("leaf", () => { throw new Error("boom"); });
+  });
+});
+`;
+const UNLOADABLE_TEST = 'import "./missing.mjs";\n';
 
 async function repository(t, files) {
   const root = await mkdtemp(join(tmpdir(), "kanthord-affected-"));
@@ -362,4 +417,231 @@ test("the change set of engine #287 selects the changed worker test", async (t) 
     selectTests(root, [change("src/worker/service.test.ts")]),
     selected(["src/worker/service.test.ts"]),
   );
+});
+
+async function fixture(t, files, packageJson = FIXTURE_PACKAGE) {
+  const root = await repository(t, {
+    "package.json": JSON.stringify(packageJson),
+    ...files,
+  });
+  await mkdir(join(root, "scripts"));
+  await copyFile(TEST_REPORTER, join(root, "scripts/test-reporter.mjs"));
+  await copyFile(
+    AFFECTED_REPORTER,
+    join(root, "scripts/affected-reporter.mjs"),
+  );
+  return root;
+}
+
+function commitAll(root) {
+  execFileSync("git", ["add", "."], { cwd: root });
+  execFileSync(
+    "git",
+    [
+      "-c",
+      "user.name=test",
+      "-c",
+      "user.email=test@example.com",
+      "commit",
+      "--quiet",
+      "-m",
+      "fixture",
+    ],
+    { cwd: root },
+  );
+}
+
+function runNode(root, args, extra = {}) {
+  const env = { ...process.env, ...extra };
+  delete env.NODE_TEST_CONTEXT;
+  const result = spawnSync(process.execPath, args, {
+    cwd: root,
+    env,
+    encoding: "utf8",
+    timeout: RUN_TIMEOUT_MS,
+  });
+  assert.equal(result.signal, null);
+  return result;
+}
+
+function runEntry(root, args = [], extra = {}) {
+  const result = runNode(root, [ENTRY_POINT, ...args], extra);
+  const lines = result.stdout.trimEnd().split("\n");
+  return { ...result, report: JSON.parse(lines.at(-1)) };
+}
+
+async function changesFile(root, files) {
+  const path = join(root, "changes.json");
+  const changes = {
+    version: 1,
+    binding_id: "binding",
+    repository: "repository",
+    base_commit: "base",
+    head_commit: "head",
+    files,
+  };
+  await writeFile(path, JSON.stringify(changes));
+  return path;
+}
+
+test("the reporter names a nested test and a file that fails to load", async (t) => {
+  const root = await fixture(t, {
+    "src/nested.test.ts": NESTED_TEST,
+    "src/unloadable.test.ts": UNLOADABLE_TEST,
+  });
+  const result = runNode(root, [
+    "--test",
+    `--test-reporter=${AFFECTED_REPORTER}`,
+    "src/nested.test.ts",
+    "src/unloadable.test.ts",
+  ]);
+  const ids = result.stdout
+    .split("\n")
+    .filter((line) => line !== "")
+    .map((line) => JSON.parse(line));
+  assert.deepEqual(
+    ids.map(({ file, name }) => `${file}|${name}`).sort(),
+    [
+      "src/nested.test.ts|outer",
+      "src/nested.test.ts|outer > inner",
+      "src/nested.test.ts|outer > inner > leaf",
+      "src/unloadable.test.ts|src/unloadable.test.ts",
+    ].sort(),
+  );
+});
+
+test("a failed test gives the report, the report file and the exit code 1", async (t) => {
+  const root = await fixture(t, {
+    "src/a.ts": EMPTY_MODULE,
+    "src/a.test.ts": `import "./a.ts";\n${FAILING_TEST}`,
+    "src/b.test.ts": PASSING_TEST,
+  });
+  const reportPath = join(root, "report.json");
+  const result = runEntry(root, [], {
+    KANTHORD_CHANGES: await changesFile(root, [change("src/a.ts")]),
+    KANTHORD_AFFECTED_REPORT: reportPath,
+  });
+  assert.equal(result.status, FAILED);
+  assert.deepEqual(result.report, {
+    version: 1,
+    selection: "selected",
+    reason: null,
+    tests: ["src/a.test.ts"],
+    failed: [{ file: "src/a.test.ts", name: "fails" }],
+    flaky: [],
+    excluded_e2e: [],
+  });
+  assert.deepEqual(
+    JSON.parse(await readFile(reportPath, "utf8")),
+    result.report,
+  );
+});
+
+test("a test that fails once and passes on the rerun is flaky", async (t) => {
+  const root = await fixture(t, {
+    "src/a.ts": EMPTY_MODULE,
+    "src/a.test.ts": `import "./a.ts";\n${FLAKY_TEST}`,
+  });
+  const result = runEntry(root, [], {
+    KANTHORD_CHANGES: await changesFile(root, [change("src/a.ts")]),
+  });
+  assert.equal(result.status, SUCCESS);
+  assert.deepEqual(result.report.failed, []);
+  assert.deepEqual(result.report.flaky, [
+    { file: "src/a.test.ts", name: "fails once" },
+  ]);
+});
+
+test("a file that fails to load is a failed id with the file path as name", async (t) => {
+  const root = await fixture(t, {
+    "src/unloadable.test.ts": UNLOADABLE_TEST,
+  });
+  const result = runEntry(root, [], {
+    KANTHORD_CHANGES: await changesFile(root, [
+      change("src/unloadable.test.ts"),
+    ]),
+  });
+  assert.equal(result.status, FAILED);
+  assert.deepEqual(result.report.failed, [
+    { file: "src/unloadable.test.ts", name: "src/unloadable.test.ts" },
+  ]);
+});
+
+test("the input of --base is the change set against the merge base", async (t) => {
+  const root = await fixture(t, {
+    "src/a.ts": EMPTY_MODULE,
+    "src/a.test.ts": `import "./a.ts";\n${PASSING_TEST}`,
+    "src/b.test.ts": PASSING_TEST,
+  });
+  commitAll(root);
+  await writeFile(join(root, "src/a.ts"), "export const changed = 1;\n");
+  await writeFile(join(root, "src/c.test.ts"), PASSING_TEST);
+  const result = runEntry(root, ["--base", "HEAD"]);
+  assert.equal(result.status, SUCCESS);
+  assert.equal(result.report.selection, "selected");
+  assert.deepEqual(result.report.tests, ["src/a.test.ts", "src/c.test.ts"]);
+  assert.deepEqual(result.report.failed, []);
+  assert.deepEqual(result.report.flaky, []);
+});
+
+test("the change set of the working tree holds each status", async (t) => {
+  const root = await fixture(t, {
+    "src/modified.ts": EMPTY_MODULE,
+    "src/deleted.ts": EMPTY_MODULE,
+    "src/old.ts": "export const unchanged = 1;\n",
+  });
+  commitAll(root);
+  await writeFile(join(root, "src/modified.ts"), "export const x = 1;\n");
+  await rm(join(root, "src/deleted.ts"));
+  await rename(join(root, "src/old.ts"), join(root, "src/new.ts"));
+  await writeFile(join(root, "src/untracked.ts"), EMPTY_MODULE);
+  execFileSync("git", ["add", "src/new.ts", "src/old.ts"], { cwd: root });
+  assert.deepEqual(computeChanges(root, "HEAD"), [
+    change("src/deleted.ts", DELETED),
+    change("src/modified.ts", MODIFIED),
+    change("src/new.ts", RENAMED, "src/old.ts"),
+    change("src/untracked.ts", ADDED),
+  ]);
+});
+
+test("the none selection gives empty lists and the exit code 0", async (t) => {
+  const root = await fixture(t, { "src/a.test.ts": FAILING_TEST });
+  const reportPath = join(root, "report.json");
+  const result = runEntry(root, [], {
+    KANTHORD_CHANGES: await changesFile(root, [change("docs/readme.txt")]),
+    KANTHORD_AFFECTED_REPORT: reportPath,
+  });
+  assert.equal(result.status, SUCCESS);
+  assert.deepEqual(result.report, {
+    version: 1,
+    selection: "none",
+    reason: null,
+    tests: [],
+    failed: [],
+    flaky: [],
+    excluded_e2e: [],
+  });
+  assert.deepEqual(
+    JSON.parse(await readFile(reportPath, "utf8")),
+    result.report,
+  );
+});
+
+test("a first run that fails with no failed id is a run error", async (t) => {
+  const root = await fixture(
+    t,
+    {
+      "src/a.ts": EMPTY_MODULE,
+      "src/a.test.ts": `import "./a.ts";\n${PASSING_TEST}`,
+    },
+    { type: "module", scripts: { "test:files": 'node -e "process.exit(1)"' } },
+  );
+  const reportPath = join(root, "report.json");
+  const result = runNode(root, [ENTRY_POINT], {
+    KANTHORD_CHANGES: await changesFile(root, [change("src/a.ts")]),
+    KANTHORD_AFFECTED_REPORT: reportPath,
+  });
+  assert.equal(result.status, RUN_ERROR);
+  assert.equal(existsSync(reportPath), false);
+  assert.match(result.stderr, /without a failed test/);
 });

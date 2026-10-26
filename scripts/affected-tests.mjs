@@ -1,6 +1,15 @@
-import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { execFileSync, spawnSync } from "node:child_process";
+import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
 import { join, posix } from "node:path";
+import { pathToFileURL } from "node:url";
+import { parseArgs } from "node:util";
 import ts from "typescript";
 
 const GIT_LIST_ARGUMENTS = [
@@ -82,6 +91,39 @@ const SELECTION = { all: "all", none: "none", selected: "selected" };
 const GLOBAL_REASON = "global input: ";
 const UNKNOWN_REASON = "unknown path: ";
 const REASON_MAX_BYTES = 256;
+const REPORT_VERSION = 1;
+const TEXT_MAX_BYTES = 1024;
+const LIST_MAX_ENTRIES = 10000;
+const REPORT_MAX_BYTES = 1024 * 1024;
+const REPORT_LISTS = ["tests", "failed", "flaky", "excluded_e2e"];
+const DEFAULT_BASE = "origin/main";
+const GIT_MAX_BUFFER = 256 * 1024 * 1024;
+const NUL = "\0";
+const CHANGE_STATUS = {
+  added: "added",
+  modified: "modified",
+  deleted: "deleted",
+  renamed: "renamed",
+};
+const NAME_STATUS_LETTERS = {
+  A: CHANGE_STATUS.added,
+  M: CHANGE_STATUS.modified,
+  T: CHANGE_STATUS.modified,
+  U: CHANGE_STATUS.modified,
+  D: CHANGE_STATUS.deleted,
+  R: CHANGE_STATUS.renamed,
+};
+const SUCCESS_STATUS = 0;
+const FAILED_EXIT_CODE = 1;
+const ERROR_EXIT_CODE = 2;
+const FIRST_RUN_CONCURRENCY = 8;
+const RERUN_CONCURRENCY = 1;
+const RUN_TEMPORARY_PREFIX = "kanthord-affected-";
+const FAILED_FILE_NAME = "failed.jsonl";
+const AFFECTED_REPORTER = "./scripts/affected-reporter.mjs";
+const PNPM = "pnpm";
+const CHANGES_ENVIRONMENT = "KANTHORD_CHANGES";
+const REPORT_ENVIRONMENT = "KANTHORD_AFFECTED_REPORT";
 
 function listFiles(root) {
   const output = execFileSync("git", GIT_LIST_ARGUMENTS, {
@@ -326,4 +368,220 @@ export function selectTests(root, changes) {
     tests,
     excluded_e2e: reached.filter((path) => isE2e(graph, path)).sort(),
   };
+}
+
+function git(root, args) {
+  return execFileSync("git", args, {
+    cwd: root,
+    encoding: "utf8",
+    maxBuffer: GIT_MAX_BUFFER,
+  });
+}
+
+function parseNameStatus(output) {
+  const tokens = output.split(NUL);
+  tokens.pop();
+  const changes = [];
+  for (let index = 0; index < tokens.length;) {
+    const status = NAME_STATUS_LETTERS[tokens[index][0]];
+    if (status === undefined) {
+      throw new Error(`unknown git status: ${tokens[index]}`);
+    }
+    if (status === CHANGE_STATUS.renamed) {
+      changes.push({
+        path: tokens[index + 2],
+        status,
+        previous_path: tokens[index + 1],
+      });
+      index += 3;
+    } else {
+      changes.push({ path: tokens[index + 1], status });
+      index += 2;
+    }
+  }
+  return changes;
+}
+
+export function readChanges(path) {
+  return JSON.parse(readFileSync(path, "utf8")).files;
+}
+
+export function computeChanges(root, base) {
+  const mergeBase = git(root, ["merge-base", base, "HEAD"]).trim();
+  const tracked = parseNameStatus(
+    git(root, ["diff", "--name-status", "-z", "--find-renames", mergeBase]),
+  );
+  const untracked = git(root, [
+    "ls-files",
+    "--others",
+    "--exclude-standard",
+    "-z",
+  ])
+    .split(NUL)
+    .filter((path) => path !== "")
+    .map((path) => ({ path, status: CHANGE_STATUS.added }));
+  return [...tracked, ...untracked];
+}
+
+function runTests(root, files, concurrency) {
+  const directory = mkdtempSync(join(tmpdir(), RUN_TEMPORARY_PREFIX));
+  try {
+    const destination = join(directory, FAILED_FILE_NAME);
+    const result = spawnSync(
+      PNPM,
+      [
+        "--silent",
+        "run",
+        "test:files",
+        `--test-concurrency=${concurrency}`,
+        `--test-reporter=${AFFECTED_REPORTER}`,
+        "--test-reporter-destination=stdout",
+        `--test-reporter-destination=${destination}`,
+        ...files,
+      ],
+      { cwd: root, stdio: "inherit" },
+    );
+    if (result.error) throw result.error;
+    const ids = existsSync(destination)
+      ? readFileSync(destination, "utf8")
+          .split("\n")
+          .filter((line) => line !== "")
+          .map((line) => JSON.parse(line))
+      : [];
+    return { passed: result.status === SUCCESS_STATUS, ids };
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+}
+
+function idKey({ file, name }) {
+  return JSON.stringify([file, name]);
+}
+
+function uniqueIds(ids) {
+  return [...new Map(ids.map((id) => [idKey(id), id])).values()];
+}
+
+function compareText(left, right) {
+  if (left === right) return 0;
+  return left < right ? -1 : 1;
+}
+
+function compareIds(left, right) {
+  return (
+    compareText(left.file, right.file) || compareText(left.name, right.name)
+  );
+}
+
+function cutId({ file, name }) {
+  return {
+    file: truncateBytes(file, TEXT_MAX_BYTES),
+    name: truncateBytes(name, TEXT_MAX_BYTES),
+  };
+}
+
+function cutIds(ids) {
+  return uniqueIds(ids.map(cutId)).sort(compareIds).slice(0, LIST_MAX_ENTRIES);
+}
+
+function cutPaths(paths) {
+  return paths
+    .map((path) => truncateBytes(path, TEXT_MAX_BYTES))
+    .slice(0, LIST_MAX_ENTRIES);
+}
+
+function longestList(report) {
+  return REPORT_LISTS.reduce((longest, list) =>
+    report[list].length > report[longest].length ? list : longest,
+  );
+}
+
+function fitSize(report) {
+  let list = longestList(report);
+  while (
+    Buffer.byteLength(JSON.stringify(report)) > REPORT_MAX_BYTES &&
+    report[list].length > 1
+  ) {
+    report[list] = report[list].slice(0, Math.ceil(report[list].length / 2));
+    list = longestList(report);
+  }
+  return report;
+}
+
+function buildReport(selected, failed, flaky) {
+  const cutFailed = cutIds(failed);
+  const failedKeys = new Set(cutFailed.map(idKey));
+  return fitSize({
+    version: REPORT_VERSION,
+    selection: selected.selection,
+    reason: selected.reason,
+    tests: cutPaths(selected.tests),
+    failed: cutFailed,
+    flaky: cutIds(flaky).filter((id) => !failedKeys.has(idKey(id))),
+    excluded_e2e: cutPaths(selected.excluded_e2e),
+  });
+}
+
+function rerunFailures(root, file) {
+  const rerun = runTests(root, [file], RERUN_CONCURRENCY);
+  const crashed = !rerun.passed && rerun.ids.length === 0;
+  return { crashed, keys: new Set(rerun.ids.map(idKey)) };
+}
+
+export function affectedReport(root, changes) {
+  const selected = selectTests(root, changes);
+  if (selected.selection === SELECTION.none) {
+    return buildReport(selected, [], []);
+  }
+  const first = runTests(root, selected.tests, FIRST_RUN_CONCURRENCY);
+  const tests = new Set(selected.tests);
+  const failed = uniqueIds(first.ids.filter(({ file }) => tests.has(file)));
+  if (!first.passed && failed.length === 0) {
+    throw new Error("the test run failed without a failed test");
+  }
+  const reruns = new Map(
+    [...new Set(failed.map(({ file }) => file))].map((file) => [
+      file,
+      rerunFailures(root, file),
+    ]),
+  );
+  const stays = (id) => {
+    const rerun = reruns.get(id.file);
+    return rerun.crashed || rerun.keys.has(idKey(id));
+  };
+  return buildReport(
+    selected,
+    failed.filter(stays),
+    failed.filter((id) => !stays(id)),
+  );
+}
+
+function main() {
+  const { values } = parseArgs({
+    options: { base: { type: "string", default: DEFAULT_BASE } },
+  });
+  const root = process.cwd();
+  const changesPath = process.env[CHANGES_ENVIRONMENT];
+  const changes = changesPath
+    ? readChanges(changesPath)
+    : computeChanges(root, values.base);
+  const report = affectedReport(root, changes);
+  const text = JSON.stringify(report);
+  const reportPath = process.env[REPORT_ENVIRONMENT];
+  if (reportPath) writeFileSync(reportPath, text);
+  process.stdout.write(`${text}\n`);
+  process.exitCode =
+    report.failed.length === 0 ? SUCCESS_STATUS : FAILED_EXIT_CODE;
+}
+
+if (
+  process.argv[1] !== undefined &&
+  import.meta.url === pathToFileURL(process.argv[1]).href
+) {
+  try {
+    main();
+  } catch (error) {
+    process.stderr.write(`${error.message}\n`);
+    process.exitCode = ERROR_EXIT_CODE;
+  }
 }
