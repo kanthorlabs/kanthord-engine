@@ -11,6 +11,7 @@ import {
   type OperationResult,
 } from "../../kernel/operation.ts";
 import { isObject, isString, ValueType } from "../../kernel/values.ts";
+import { fakeContainerHost } from "./container-fakes.ts";
 import {
   fakeMachines,
   gatewayFixture,
@@ -92,7 +93,10 @@ function assertDirectOnly(result: OperationResult<unknown>): void {
 }
 
 test("every composed operation conforms across direct and HTTP adapters", async (t) => {
-  const fixture = await gatewayFixture(t, { machines: fakeMachines() });
+  const fixture = await gatewayFixture(t, {
+    machines: fakeMachines(),
+    containerRuntimeHost: fakeContainerHost(t).host,
+  });
   const machineToken = await fixture.machineToken(
     TEST_PROJECT_ID,
     TEST_WORKER_BINDING,
