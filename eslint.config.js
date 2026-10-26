@@ -65,7 +65,85 @@ const workerImportRule = ({ threads, production }) => [
   { paths: workerPaths(threads), patterns: workerPatterns(production) },
 ];
 
+const repositoryPathPrefixes = ["static/", "docs/", "src/", "scripts/", "bin/"];
+const cwdReadFunctions = new Set([
+  "readFileSync",
+  "readFile",
+  "existsSync",
+  "resolve",
+  "join",
+]);
+const cwdReadMessage =
+  "Read a repository file through new URL(<relative path>, import.meta.url).";
+
+const calleeName = (callee) => {
+  if (callee.type === "Identifier") return callee.name;
+  if (callee.type === "MemberExpression" && !callee.computed) {
+    return callee.property.name;
+  }
+  return undefined;
+};
+
+const constStringValue = (scope, name) => {
+  for (let current = scope; current; current = current.upper) {
+    const variable = current.set.get(name);
+    if (!variable) continue;
+    const definition = variable.defs[0];
+    if (
+      definition?.type !== "Variable" ||
+      definition.parent.kind !== "const" ||
+      definition.node.init?.type !== "Literal" ||
+      typeof definition.node.init.value !== "string"
+    ) {
+      return undefined;
+    }
+    return definition.node.init.value;
+  }
+  return undefined;
+};
+
+const pathText = (context, argument) => {
+  if (argument.type === "Literal") {
+    return typeof argument.value === "string" ? argument.value : undefined;
+  }
+  if (argument.type === "TemplateLiteral") {
+    return argument.quasis[0].value.cooked;
+  }
+  if (argument.type === "Identifier") {
+    return constStringValue(
+      context.sourceCode.getScope(argument),
+      argument.name,
+    );
+  }
+  return undefined;
+};
+
+const noCwdDataRead = {
+  meta: { type: "problem", schema: [] },
+  create: (context) => ({
+    CallExpression: (node) => {
+      if (!cwdReadFunctions.has(calleeName(node.callee))) return;
+      const [argument] = node.arguments;
+      if (!argument) return;
+      const text = pathText(context, argument);
+      if (!text) return;
+      if (!repositoryPathPrefixes.some((prefix) => text.startsWith(prefix))) {
+        return;
+      }
+      context.report({ node: argument, message: cwdReadMessage });
+    },
+  }),
+};
+
+const kanthordPlugin = { rules: { "no-cwd-data-read": noCwdDataRead } };
+
 const productionImportPatterns = [
+  {
+    group: ["**/repository/test-sshd.ts"],
+    importNames: ["startTestSshd"],
+    message:
+      "Only a test file imports startTestSshd, so the affected test selector sees each sshd test.",
+  },
   {
     group: ["**/test-identity.ts"],
     message: "Only test files may import test-identity.ts.",
@@ -618,6 +696,15 @@ export default tseslint.config(
         },
       ],
     },
+  },
+  {
+    files: [
+      "src/**/*.test.ts",
+      "src/**/*-support.ts",
+      "src/**/test-support.ts",
+    ],
+    plugins: { kanthord: kanthordPlugin },
+    rules: { "kanthord/no-cwd-data-read": "error" },
   },
   {
     files: ["src/**/*.ts"],
