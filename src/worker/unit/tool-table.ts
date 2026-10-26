@@ -22,9 +22,15 @@ const MINIMUM_SECONDS = 1;
 const MILLISECONDS_PER_SECOND = 1000;
 const PROCESSES_MAX = 1024;
 
+export interface ToolTimeout {
+  requestedMs: number | null;
+  appliedMs: number;
+}
+
 export class ToolProcesses {
   private readonly shell: ShellConfig;
   private readonly ended = new Map<string, BashProcess>();
+  private readonly timeouts = new Map<string, ToolTimeout>();
 
   constructor(shell: ShellConfig) {
     assert.ok(shell.shell);
@@ -43,6 +49,18 @@ export class ToolProcesses {
     const bashProcess = this.ended.get(toolCallId);
     this.ended.delete(toolCallId);
     return bashProcess;
+  }
+
+  recordTimeout(toolCallId: string, timeout: ToolTimeout): void {
+    assert.ok(toolCallId);
+    if (this.timeouts.size >= PROCESSES_MAX) this.timeouts.clear();
+    this.timeouts.set(toolCallId, timeout);
+  }
+
+  takeTimeout(toolCallId: string): ToolTimeout | undefined {
+    const timeout = this.timeouts.get(toolCallId);
+    this.timeouts.delete(toolCallId);
+    return timeout;
   }
 }
 
@@ -64,7 +82,10 @@ export function sessionTools(
   );
   if (!agent.tools.includes(BuiltinTool.Bash))
     return { allowlist, customTools };
-  const options = (operations: BashOperations): BashToolOptions => ({
+  const options = (
+    toolCallId: string,
+    operations: BashOperations,
+  ): BashToolOptions => ({
     exposeSessionEnvironment: false,
     spawnHook: (context) => ({
       ...context,
@@ -78,9 +99,17 @@ export function sessionTools(
         );
         if (limit < MINIMUM_SECONDS)
           return Promise.reject(new Error("resource budget ended"));
+        const applied = Math.min(execOptions.timeout ?? limit, limit);
+        processes.recordTimeout(toolCallId, {
+          requestedMs:
+            execOptions.timeout === undefined
+              ? null
+              : execOptions.timeout * MILLISECONDS_PER_SECOND,
+          appliedMs: applied * MILLISECONDS_PER_SECOND,
+        });
         return operations.exec(command, directory, {
           ...execOptions,
-          timeout: Math.min(execOptions.timeout ?? limit, limit),
+          timeout: applied,
           env: childEnvironment(execOptions.env ?? env),
         });
       },
@@ -95,7 +124,7 @@ export function sessionTools(
       pi
         .createBashToolDefinition(
           cwd,
-          options(processes.operations(toolCallId)),
+          options(toolCallId, processes.operations(toolCallId)),
         )
         .execute(toolCallId, params, signal, onUpdate, context),
   };
