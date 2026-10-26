@@ -99,6 +99,42 @@ const REPORT_LISTS = ["tests", "failed", "flaky", "excluded_e2e"];
 const DEFAULT_BASE = "origin/main";
 const GIT_MAX_BUFFER = 256 * 1024 * 1024;
 const NUL = "\0";
+const NEWLINE = "\n";
+const GIT = "git";
+const UTF8 = "utf8";
+const GIT_MERGE_BASE_ARGUMENTS = ["merge-base"];
+const GIT_HEAD = "HEAD";
+const GIT_DIFF_ARGUMENTS = ["diff", "--name-status", "-z", "--find-renames"];
+const GIT_UNTRACKED_ARGUMENTS = [
+  "ls-files",
+  "--others",
+  "--exclude-standard",
+  "-z",
+];
+const EMPTY = "";
+const EMPTY_LENGTH = 0;
+const STATUS_LETTER_INDEX = 0;
+const LIST_START = 0;
+const MIN_LIST_LENGTH = 1;
+const MAIN_MODULE_INDEX = 1;
+const ORDER_BEFORE = -1;
+const ORDER_AFTER = 1;
+const ORDER_EQUAL = 0;
+const STDIO_INHERIT = "inherit";
+const BASE_OPTION_TYPE = "string";
+const CONCURRENCY_OPTION = "--test-concurrency=";
+const REPORTER_OPTION = "--test-reporter=";
+const DESTINATION_OPTION = "--test-reporter-destination=";
+const PLAIN_ENTRY_TOKENS = 2;
+const RENAMED_ENTRY_TOKENS = 3;
+const STATUS_OFFSET = 0;
+const PATH_OFFSET = 1;
+const RENAMED_PATH_OFFSET = 2;
+const HALVING_DIVISOR = 2;
+const FAILED_RUN_MESSAGE = "the test run failed without a failed test";
+const UNKNOWN_STATUS_MESSAGE = "unknown git status: ";
+const PNPM_ARGUMENTS = ["--silent", "run", "test:files"];
+const STDOUT_DESTINATION = "--test-reporter-destination=stdout";
 const CHANGE_STATUS = {
   added: "added",
   modified: "modified",
@@ -126,12 +162,12 @@ const CHANGES_ENVIRONMENT = "KANTHORD_CHANGES";
 const REPORT_ENVIRONMENT = "KANTHORD_AFFECTED_REPORT";
 
 function listFiles(root) {
-  const output = execFileSync("git", GIT_LIST_ARGUMENTS, {
+  const output = execFileSync(GIT, GIT_LIST_ARGUMENTS, {
     cwd: root,
-    encoding: "utf8",
+    encoding: UTF8,
     maxBuffer: GIT_LIST_MAX_BUFFER,
   });
-  return output.split("\0").filter((path) => path !== "");
+  return output.split(NUL).filter((path) => path !== EMPTY);
 }
 
 function isOutside(path) {
@@ -371,9 +407,9 @@ export function selectTests(root, changes) {
 }
 
 function git(root, args) {
-  return execFileSync("git", args, {
+  return execFileSync(GIT, args, {
     cwd: root,
-    encoding: "utf8",
+    encoding: UTF8,
     maxBuffer: GIT_MAX_BUFFER,
   });
 }
@@ -383,42 +419,42 @@ function parseNameStatus(output) {
   tokens.pop();
   const changes = [];
   for (let index = 0; index < tokens.length;) {
-    const status = NAME_STATUS_LETTERS[tokens[index][0]];
+    const token = tokens[index + STATUS_OFFSET];
+    const status = NAME_STATUS_LETTERS[token[STATUS_LETTER_INDEX]];
     if (status === undefined) {
-      throw new Error(`unknown git status: ${tokens[index]}`);
+      throw new Error(`${UNKNOWN_STATUS_MESSAGE}${token}`);
     }
     if (status === CHANGE_STATUS.renamed) {
       changes.push({
-        path: tokens[index + 2],
+        path: tokens[index + RENAMED_PATH_OFFSET],
         status,
-        previous_path: tokens[index + 1],
+        previous_path: tokens[index + PATH_OFFSET],
       });
-      index += 3;
+      index += RENAMED_ENTRY_TOKENS;
     } else {
-      changes.push({ path: tokens[index + 1], status });
-      index += 2;
+      changes.push({ path: tokens[index + PATH_OFFSET], status });
+      index += PLAIN_ENTRY_TOKENS;
     }
   }
   return changes;
 }
 
 export function readChanges(path) {
-  return JSON.parse(readFileSync(path, "utf8")).files;
+  return JSON.parse(readFileSync(path, UTF8)).files;
 }
 
 export function computeChanges(root, base) {
-  const mergeBase = git(root, ["merge-base", base, "HEAD"]).trim();
+  const mergeBase = git(root, [
+    ...GIT_MERGE_BASE_ARGUMENTS,
+    base,
+    GIT_HEAD,
+  ]).trim();
   const tracked = parseNameStatus(
-    git(root, ["diff", "--name-status", "-z", "--find-renames", mergeBase]),
+    git(root, [...GIT_DIFF_ARGUMENTS, mergeBase]),
   );
-  const untracked = git(root, [
-    "ls-files",
-    "--others",
-    "--exclude-standard",
-    "-z",
-  ])
+  const untracked = git(root, GIT_UNTRACKED_ARGUMENTS)
     .split(NUL)
-    .filter((path) => path !== "")
+    .filter((path) => path !== EMPTY)
     .map((path) => ({ path, status: CHANGE_STATUS.added }));
   return [...tracked, ...untracked];
 }
@@ -430,22 +466,20 @@ function runTests(root, files, concurrency) {
     const result = spawnSync(
       PNPM,
       [
-        "--silent",
-        "run",
-        "test:files",
-        `--test-concurrency=${concurrency}`,
-        `--test-reporter=${AFFECTED_REPORTER}`,
-        "--test-reporter-destination=stdout",
-        `--test-reporter-destination=${destination}`,
+        ...PNPM_ARGUMENTS,
+        `${CONCURRENCY_OPTION}${concurrency}`,
+        `${REPORTER_OPTION}${AFFECTED_REPORTER}`,
+        STDOUT_DESTINATION,
+        `${DESTINATION_OPTION}${destination}`,
         ...files,
       ],
-      { cwd: root, stdio: "inherit" },
+      { cwd: root, stdio: STDIO_INHERIT },
     );
     if (result.error) throw result.error;
     const ids = existsSync(destination)
-      ? readFileSync(destination, "utf8")
-          .split("\n")
-          .filter((line) => line !== "")
+      ? readFileSync(destination, UTF8)
+          .split(NEWLINE)
+          .filter((line) => line !== EMPTY)
           .map((line) => JSON.parse(line))
       : [];
     return { passed: result.status === SUCCESS_STATUS, ids };
@@ -463,8 +497,8 @@ function uniqueIds(ids) {
 }
 
 function compareText(left, right) {
-  if (left === right) return 0;
-  return left < right ? -1 : 1;
+  if (left === right) return ORDER_EQUAL;
+  return left < right ? ORDER_BEFORE : ORDER_AFTER;
 }
 
 function compareIds(left, right) {
@@ -481,13 +515,15 @@ function cutId({ file, name }) {
 }
 
 function cutIds(ids) {
-  return uniqueIds(ids.map(cutId)).sort(compareIds).slice(0, LIST_MAX_ENTRIES);
+  return uniqueIds(ids.map(cutId))
+    .sort(compareIds)
+    .slice(LIST_START, LIST_MAX_ENTRIES);
 }
 
 function cutPaths(paths) {
   return paths
     .map((path) => truncateBytes(path, TEXT_MAX_BYTES))
-    .slice(0, LIST_MAX_ENTRIES);
+    .slice(LIST_START, LIST_MAX_ENTRIES);
 }
 
 function longestList(report) {
@@ -500,9 +536,12 @@ function fitSize(report) {
   let list = longestList(report);
   while (
     Buffer.byteLength(JSON.stringify(report)) > REPORT_MAX_BYTES &&
-    report[list].length > 1
+    report[list].length > MIN_LIST_LENGTH
   ) {
-    report[list] = report[list].slice(0, Math.ceil(report[list].length / 2));
+    report[list] = report[list].slice(
+      LIST_START,
+      Math.ceil(report[list].length / HALVING_DIVISOR),
+    );
     list = longestList(report);
   }
   return report;
@@ -524,7 +563,7 @@ function buildReport(selected, failed, flaky) {
 
 function rerunFailures(root, file) {
   const rerun = runTests(root, [file], RERUN_CONCURRENCY);
-  const crashed = !rerun.passed && rerun.ids.length === 0;
+  const crashed = !rerun.passed && rerun.ids.length === EMPTY_LENGTH;
   return { crashed, keys: new Set(rerun.ids.map(idKey)) };
 }
 
@@ -536,8 +575,8 @@ export function affectedReport(root, changes) {
   const first = runTests(root, selected.tests, FIRST_RUN_CONCURRENCY);
   const tests = new Set(selected.tests);
   const failed = uniqueIds(first.ids.filter(({ file }) => tests.has(file)));
-  if (!first.passed && failed.length === 0) {
-    throw new Error("the test run failed without a failed test");
+  if (!first.passed && failed.length === EMPTY_LENGTH) {
+    throw new Error(FAILED_RUN_MESSAGE);
   }
   const reruns = new Map(
     [...new Set(failed.map(({ file }) => file))].map((file) => [
@@ -558,7 +597,7 @@ export function affectedReport(root, changes) {
 
 function main() {
   const { values } = parseArgs({
-    options: { base: { type: "string", default: DEFAULT_BASE } },
+    options: { base: { type: BASE_OPTION_TYPE, default: DEFAULT_BASE } },
   });
   const root = process.cwd();
   const changesPath = process.env[CHANGES_ENVIRONMENT];
@@ -569,19 +608,19 @@ function main() {
   const text = JSON.stringify(report);
   const reportPath = process.env[REPORT_ENVIRONMENT];
   if (reportPath) writeFileSync(reportPath, text);
-  process.stdout.write(`${text}\n`);
+  process.stdout.write(`${text}${NEWLINE}`);
   process.exitCode =
-    report.failed.length === 0 ? SUCCESS_STATUS : FAILED_EXIT_CODE;
+    report.failed.length === EMPTY_LENGTH ? SUCCESS_STATUS : FAILED_EXIT_CODE;
 }
 
 if (
-  process.argv[1] !== undefined &&
-  import.meta.url === pathToFileURL(process.argv[1]).href
+  process.argv[MAIN_MODULE_INDEX] !== undefined &&
+  import.meta.url === pathToFileURL(process.argv[MAIN_MODULE_INDEX]).href
 ) {
   try {
     main();
   } catch (error) {
-    process.stderr.write(`${error.message}\n`);
+    process.stderr.write(`${error.message}${NEWLINE}`);
     process.exitCode = ERROR_EXIT_CODE;
   }
 }
