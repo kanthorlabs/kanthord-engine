@@ -1,0 +1,69 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+env:
+  TEST_CONCURRENCY: "4"
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run format:check
+      - run: pnpm run typecheck
+      - run: pnpm run lint
+      - run: pnpm run build
+      - uses: actions/cache@v6
+        with:
+          path: .pi-tools
+          key: pi-tools-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('static/pi-tools.json') }}
+      - run: pnpm run pi-tools:fetch
+      - name: Test without sshd
+        run: |
+          git ls-files 'src/*.test.ts' | grep -vxF -f <(git grep -l startTestSshd -- 'src/*.test.ts') > "$RUNNER_TEMP/tests"
+          wc -l < "$RUNNER_TEMP/tests"
+          pnpm run test:files --test-concurrency="$TEST_CONCURRENCY" $(cat "$RUNNER_TEMP/tests") scripts/test-reporter.test.mjs scripts/test-path.test.mjs
+
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - uses: actions/cache@v6
+        with:
+          path: .pi-tools
+          key: pi-tools-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('static/pi-tools.json') }}
+      - run: pnpm run pi-tools:fetch
+      - name: Install sshd
+        run: |
+          test -x /usr/sbin/sshd || { sudo apt-get update && sudo apt-get install -y --no-install-recommends openssh-server; }
+          sudo mkdir -p /run/sshd
+      - name: Test with sshd
+        run: |
+          files=$(git grep -l startTestSshd -- 'src/*.test.ts')
+          test -n "$files"
+          pnpm run test:files --test-concurrency="$TEST_CONCURRENCY" $files
