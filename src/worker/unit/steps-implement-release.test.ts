@@ -38,6 +38,8 @@ import { GitStep } from "./method-telemetry.ts";
 import { GIT_COMMIT_FAILED } from "./stop-codes.ts";
 import {
   advanceBase,
+  affectedCommand,
+  declareAffected,
   implementFixture as fixture,
   NO_PROVIDER_CALLS,
   recordDone,
@@ -52,6 +54,8 @@ const NO_PUSHES = 0;
 const PARTIAL_HEADER = "feat: partial";
 const STOPPED_HEADER = "feat: stopped";
 const LATE_MAIN_CHANGE = "late main change";
+const BROKEN_CONTENT = "broken";
+const FIXED_CONTENT = "fixed";
 
 async function recordNodeDone(h: Awaited<ReturnType<typeof fixture>>) {
   await recordDone(h, nodeUnitOf(h.input.claim.node_id, h.revision));
@@ -561,5 +565,50 @@ test("the evidence holds one asset for each binding", async (t) => {
   assert.deepEqual(
     submitted[0]!.map((address) => address.binding_id),
     h.input.setup.repositories.map((repository) => repository.binding_id),
+  );
+});
+
+test("a node whose change breaks an unlisted test gets a revision turn, fixes the test and releases", async (t) => {
+  const h = await fixture(
+    t,
+    [task("change", "true")],
+    [
+      fauxAssistantMessage(
+        fauxToolCall("write", { path: "file", content: BROKEN_CONTENT }),
+        { stopReason: "toolUse" },
+      ),
+      fauxAssistantMessage("done"),
+      fauxAssistantMessage(
+        fauxToolCall("write", { path: "file", content: FIXED_CONTENT }),
+        { stopReason: "toolUse" },
+      ),
+      fauxAssistantMessage("fixed"),
+    ],
+  );
+  await declareAffected(
+    h,
+    t,
+    affectedCommand(`grep -q ${BROKEN_CONTENT} file`),
+  );
+  const bodies = recordReleases(h);
+  h.run.clients.mission = {
+    "evidence.submit": async () => ({
+      type: "completed",
+      status: 200,
+      data: { evidence: {} },
+    }),
+  } as unknown as MethodClients["mission"];
+  assert.deepEqual(await runStepsImplement(h), {
+    kind: "released",
+    furtherWork: false,
+  });
+  assert.deepEqual(bodies, [{ further_work: false, stop: null }]);
+  assert.match(
+    JSON.stringify(h.provider.calls.at(-1)),
+    /The affected test run of repository repo failed/,
+  );
+  assert.equal(
+    await simpleGit(h.bare).raw(["show", `refs/heads/${h.nodeBranch}:file`]),
+    FIXED_CONTENT,
   );
 });

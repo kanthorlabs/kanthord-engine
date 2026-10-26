@@ -3,6 +3,7 @@ import { z } from "zod";
 import type { TaskContent } from "../../mission/contract.ts";
 import type { WorkPrompt } from "../../agent/prompt-composer.ts";
 import type { Verification, VerificationRun } from "./verification.ts";
+import type { AffectedRun } from "./affected.ts";
 import type { ChangeRequestRead } from "../contract.ts";
 import type { NativeAgent } from "./native-agent.ts";
 import { PromptTemplate, type PromptTemplates } from "../../agent/contract.ts";
@@ -12,6 +13,8 @@ export const JUDGEMENT_MARKER = "kanthord-judgement:";
 const SUCCESS_EXIT = 0;
 const NO_ITEMS = 0;
 const MIN_VERIFICATIONS = 1;
+const FIRST_ENTRY = 0;
+const RATIONALE_SEPARATOR = "\n\n";
 export const REQUESTED_CHANGES_MAX_BYTES = 4096;
 const AssessmentResult = {
   Success: "success",
@@ -193,6 +196,23 @@ export function taskRevisionInstruction(
     rationale: failedVerificationRationale(verification, commands),
     results: verification.results,
     output,
+  });
+}
+
+export function affectedRevisionInstruction(
+  templates: PromptTemplates,
+  failed: readonly AffectedRun[],
+): string {
+  assert.ok(failed.length > NO_ITEMS);
+  return renderTemplate(templates, PromptTemplate.TaskRevision, {
+    rationale: failed
+      .map((run) => {
+        assert.ok(run.failure_text);
+        return run.failure_text;
+      })
+      .join(RATIONALE_SEPARATOR),
+    results: failed.map((run) => run.head),
+    output: failed[FIRST_ENTRY]!.output,
   });
 }
 
