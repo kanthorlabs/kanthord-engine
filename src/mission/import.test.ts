@@ -1715,6 +1715,60 @@ for (const state of [NodeState.Pending, NodeState.Available]) {
   });
 }
 
+function messagesAfter(
+  t: Parameters<typeof fixture>[0],
+  state: NodeState,
+  attempt: number,
+  transform: (entries: NormalizedEntry[]) => NormalizedEntry[],
+): string[] {
+  const { store, entries, resolve } = fixture(t);
+  const id = entries[FIRST_ENTRY_INDEX]!.id!;
+  store.database
+    .prepare("UPDATE mission_node SET state = ?, attempt = ? WHERE id = ?")
+    .run(state, attempt, id);
+  const resolved = resolve(transform(entries));
+  assert.deepEqual(resolved.violations, []);
+  return store
+    .transaction((tx) => checkImportCondition(tx, resolved))
+    .map(({ message }) => message);
+}
+
+test("retiring an executing node names the discard exit", (t) => {
+  assert.deepEqual(
+    messagesAfter(t, NodeState.Executing, NO_ATTEMPT, () => []),
+    [
+      "Import cannot retire a node that holds an attempt. Discard the node, then keep its unchanged file in the plan.",
+    ],
+  );
+});
+
+test("retiring a discarded node names the keep-file exit", (t) => {
+  assert.deepEqual(
+    messagesAfter(t, NodeState.Discarded, FIRST_ATTEMPT, () => []),
+    [
+      "Import cannot retire a terminal node. Keep its unchanged file in the plan.",
+    ],
+  );
+});
+
+test("a content change of a node at attempt one keeps the condition message", (t) => {
+  assert.deepEqual(
+    messagesAfter(t, NodeState.Pending, FIRST_ATTEMPT, (entries) =>
+      change(entries, "a.md", { name: "Changed" }),
+    ),
+    ["Node does not satisfy the import condition."],
+  );
+});
+
+test("a new filename of a terminal node keeps the change message", (t) => {
+  assert.deepEqual(
+    messagesAfter(t, NodeState.Completed, FIRST_ATTEMPT, (entries) =>
+      change(entries, "a.md", { filename: "renamed.md" }),
+    ),
+    ["Import cannot change a terminal node."],
+  );
+});
+
 test("prepared import exposes the resolved state without resolving bindings twice", (t) => {
   const { store, mission, entries } = fixture(t, hierarchy());
   let resolutions = INITIAL_RESOLUTION_COUNT;
