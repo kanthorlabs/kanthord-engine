@@ -5,6 +5,7 @@ import {
   mkdirSync,
   mkdtempSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from "node:fs";
 import { mkdir, readdir, readFile, stat } from "node:fs/promises";
@@ -42,7 +43,7 @@ const PRIVATE_MODE = 0o700;
 const PERMISSION_BITS = 0o777;
 const SAMPLES = 5;
 const SLOW_AGENT_SECONDS = 6;
-const FAILED_AGENT_MS_MAX = 5000;
+const FAILED_AGENT_MS_MAX = 2000;
 const SCRIPT_MODE = 0o700;
 const SLOW_AGENT_START_MS = 15_000;
 const CANCEL_END_MS = 2000;
@@ -344,10 +345,10 @@ test("a cancel ends the wait for a slow agent socket and leaves no agent directo
 });
 
 test("an agent that exits before its socket appears fails the wait at once", async () => {
+  const exited = join(scratch, "agent-exited");
   await withAgentScript(
-    "#!/bin/sh\necho 'bind: No such file or directory' >&2\nexit 1\n",
+    `#!/bin/sh\necho 'bind: No such file or directory' >&2\ntouch '${exited}'\nexit 1\n`,
     async () => {
-      const started = Date.now();
       await assert.rejects(
         withSshAgent(access("failed"), background, DEADLINE_MS, async () => {
           assert.fail("The work must not run.");
@@ -359,7 +360,8 @@ test("an agent that exits before its socket appears fails the wait at once", asy
           return true;
         },
       );
-      assert.ok(Date.now() - started < FAILED_AGENT_MS_MAX);
+      assert.ok(Date.now() - statSync(exited).mtimeMs < FAILED_AGENT_MS_MAX);
+      rmSync(exited);
     },
   );
 });
