@@ -22,6 +22,7 @@ import {
   AffectedSelection,
   AffectedVerdict,
   affectedFailureText,
+  changedGateFiles,
   changesDocumentOf,
   headFailed,
   HeadFailureKind,
@@ -64,6 +65,7 @@ const EXIT_OK = 0;
 const DEADLINE_MS = 10000;
 const LIST_LIMIT = 10000;
 const LONG_STRING = "x".repeat(1025);
+const GATE_FILES = ["package.json", "scripts/affected-tests.mjs"];
 const ID_ONE = { file: "a.test.ts", name: "one" };
 const ONE_TEXT = "a.test.ts > one";
 const FAILURE_ONE =
@@ -95,6 +97,7 @@ test("a valid declaration resolves the default time limit", () => {
         version: 1,
         command: COMMAND,
         time_limit_s: DEFAULT_LIMIT,
+        gate_files: [],
       },
     },
   );
@@ -102,7 +105,41 @@ test("a valid declaration resolves the default time limit", () => {
     parseDeclaration(
       JSON.stringify({ version: 1, command: COMMAND, time_limit_s: 60 }),
     ),
-    { declaration: { version: 1, command: COMMAND, time_limit_s: 60 } },
+    {
+      declaration: {
+        version: 1,
+        command: COMMAND,
+        time_limit_s: 60,
+        gate_files: [],
+      },
+    },
+  );
+});
+
+test("a declaration with gate files parses and holds the list", () => {
+  const result = parseDeclaration(
+    JSON.stringify({ version: 1, command: COMMAND, gate_files: GATE_FILES }),
+  );
+  assert.ok("declaration" in result);
+  assert.deepEqual(result.declaration.gate_files, GATE_FILES);
+});
+
+test("the changed gate files hold each path and previous path once, sorted", () => {
+  const declaration = {
+    version: 1 as const,
+    command: COMMAND,
+    time_limit_s: DEFAULT_LIMIT,
+    gate_files: ["d.ts", "c.ts", "b.mjs", "a.json"],
+  };
+  assert.deepEqual(
+    changedGateFiles(declaration, [
+      { path: "a.json", status: ChangeStatus.Modified },
+      { path: "b.mjs", status: ChangeStatus.Deleted },
+      { path: "e.ts", status: ChangeStatus.Renamed, previous_path: "c.ts" },
+      { path: "d.ts", status: ChangeStatus.Renamed, previous_path: "y.ts" },
+      { path: "x.ts", status: ChangeStatus.Added },
+    ]),
+    ["a.json", "b.mjs", "c.ts", "d.ts"],
   );
 });
 
@@ -114,6 +151,7 @@ test("an invalid declaration answers an error", () => {
     JSON.stringify({ version: 1, command: "  " }),
     JSON.stringify({ version: 1, command: COMMAND, time_limit_s: 59 }),
     JSON.stringify({ version: 1, command: COMMAND, time_limit_s: 3601 }),
+    JSON.stringify({ version: 1, command: COMMAND, gate_files: ["  "] }),
     JSON.stringify({ version: 2, command: COMMAND }),
   ];
   for (const text of invalid) {
@@ -163,6 +201,7 @@ test("the declaration read answers null for an absent file and the declaration a
     version: 1,
     command: COMMAND,
     time_limit_s: DEFAULT_LIMIT,
+    gate_files: [],
   });
 });
 
@@ -405,7 +444,12 @@ async function commitAll(directory: string, message: string) {
 
 async function fixture(
   t: TestContext,
-  modes: { base: string; head: string; declaration?: string | null },
+  modes: {
+    base: string;
+    head: string;
+    declaration?: string | null;
+    gate_files?: string[];
+  },
 ): Promise<Fixture> {
   const root = temporary(t);
   const origin = join(root, "origin");
@@ -423,7 +467,13 @@ async function fixture(
     );
   const declaration =
     modes.declaration === undefined
-      ? JSON.stringify({ version: 1, command: `bash run.sh ${probe}` })
+      ? JSON.stringify({
+          version: 1,
+          command: `bash run.sh ${probe}`,
+          ...(modes.gate_files === undefined
+            ? {}
+            : { gate_files: modes.gate_files }),
+        })
       : modes.declaration;
   if (declaration !== null)
     writeFileSync(join(origin, AFFECTED_DECLARATION_FILE), declaration);
@@ -551,11 +601,22 @@ test("a passing head answers passed and runs no base check", async (t) => {
   assert.equal(result.failure_text, null);
   assert.deepEqual(result.failed, []);
   assert.equal(result.changed, CHANGED_COUNT);
+  assert.deepEqual(result.gate_files, []);
   assert.equal(result.head.exit_code, EXIT_OK);
   assert.equal(
     readFileSync(f.probe, "utf8").split("\n").length - 1,
     PROBE_LINES,
   );
+});
+
+test("a run holds the changed gate files of its change set", async (t) => {
+  const f = await fixture(t, {
+    base: "fail",
+    head: "pass",
+    gate_files: ["mode.txt", "run.sh"],
+  });
+  const result = await ran(f);
+  assert.deepEqual(result.gate_files, ["mode.txt"]);
 });
 
 test("a failed test that the base passes answers failed", async (t) => {
@@ -794,8 +855,14 @@ function affectedRun(overrides: Partial<AffectedRun>): AffectedRun {
     repository: "repo",
     base_commit: "b".repeat(40),
     head_commit: "c".repeat(40),
-    declaration: { version: 1, command: COMMAND, time_limit_s: 600 },
+    declaration: {
+      version: 1,
+      command: COMMAND,
+      time_limit_s: 600,
+      gate_files: [],
+    },
     changed: 3,
+    gate_files: [],
     report: report({ failed: [ID_ONE] }),
     failed: [ID_ONE],
     promoted_flaky: [],
