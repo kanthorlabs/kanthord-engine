@@ -8,6 +8,7 @@ import {
 import type { AddressInfo } from "node:net";
 import { test, type TestContext } from "node:test";
 import { setImmediate as turn } from "node:timers/promises";
+import { z } from "zod";
 import { ResultClass, type ResultClassValue } from "../intake/contract.ts";
 import type { ServiceIdentity } from "../kernel/caller.ts";
 import { OperationError } from "../kernel/errors.ts";
@@ -29,6 +30,7 @@ import {
   decodeCursor,
   decodeGitHubEvent,
   encodeCursor,
+  foldRequiredChecks,
   githubCheckpointSchema,
   repositoryOf,
   type GitHubCall,
@@ -1914,4 +1916,243 @@ test("getChangeRequests answers a failure for a failed call or an unreadable bod
     }).getChangeRequests(call(), TARGET, { number: 7 });
     assert.equal(unread.ok, false);
   }
+});
+
+const RULES_PATH = "/repos/octo/widgets/rules/branches/main";
+const CHECK_RUNS_PATH = `/repos/octo/widgets/commits/${HEAD_SHA}/check-runs`;
+const STATUSES_PATH = `/repos/octo/widgets/commits/${HEAD_SHA}/statuses`;
+const CHECK_PULL_REQUEST = {
+  ...PULL_REQUEST_BODY,
+  base: { ref: BASE_BRANCH },
+};
+const requiredRule = (...contexts: string[]) => ({
+  type: "required_status_checks",
+  parameters: {
+    required_status_checks: contexts.map((context) => ({
+      context,
+      integration_id: 15368,
+    })),
+  },
+});
+const run = (
+  id: number,
+  name: string,
+  status: string,
+  conclusion: string | null,
+) => ({ id, name, status, conclusion });
+const pathOf = (request: IncomingMessage) =>
+  new URL(String(request.url), "http://localhost").pathname;
+
+function checkServer(routes: Record<string, [number, unknown]>): Handler {
+  return (request, response, count) => {
+    const route = routes[pathOf(request)];
+    return route === undefined
+      ? answer(404, { message: "Not Found" })(request, response, count)
+      : answer(route[0], route[1])(request, response, count);
+  };
+}
+
+test("foldRequiredChecks splits the required checks by the run conclusion", () => {
+  const checkRuns = {
+    total_count: 9,
+    check_runs: [
+      run(1, "queued", "queued", null),
+      run(2, "working", "in_progress", null),
+      run(3, "green", "completed", "success"),
+      run(4, "grey", "completed", "neutral"),
+      run(5, "skip", "completed", "skipped"),
+      run(6, "red", "completed", "failure"),
+      run(7, "slow", "completed", "timed_out"),
+      run(8, "stopped", "completed", "cancelled"),
+      run(9, "manual", "completed", "action_required"),
+      run(10, "unrequired", "completed", "failure"),
+    ],
+  };
+  assert.deepEqual(
+    foldRequiredChecks(
+      [
+        "working",
+        "queued",
+        "green",
+        "grey",
+        "skip",
+        "stopped",
+        "red",
+        "slow",
+        "manual",
+      ],
+      checkRuns,
+      [],
+    ),
+    {
+      pending: ["queued", "working"],
+      failed: ["manual", "red", "slow", "stopped"],
+    },
+  );
+});
+
+test("foldRequiredChecks lets the run with the highest id decide", () => {
+  const checkRuns = {
+    total_count: 4,
+    check_runs: [
+      run(5, "retried", "completed", "success"),
+      run(2, "retried", "completed", "failure"),
+      run(3, "restarted", "completed", "success"),
+      run(8, "restarted", "in_progress", null),
+    ],
+  };
+  assert.deepEqual(
+    foldRequiredChecks(["retried", "restarted"], checkRuns, []),
+    { pending: ["restarted"], failed: [] },
+  );
+});
+
+test("foldRequiredChecks lets the newest status decide a name with no run", () => {
+  const statuses = [
+    { context: "ci/a", state: "success" },
+    { context: "ci/a", state: "failure" },
+    { context: "ci/b", state: "pending" },
+    { context: "ci/c", state: "error" },
+    { context: "ci/d", state: "failure" },
+    { context: "ci/d", state: "success" },
+  ];
+  assert.deepEqual(
+    foldRequiredChecks(
+      ["ci/a", "ci/b", "ci/c", "ci/d", "ci/none"],
+      { total_count: 0, check_runs: [] },
+      statuses,
+    ),
+    { pending: ["ci/b", "ci/none"], failed: ["ci/c", "ci/d"] },
+  );
+});
+
+test("foldRequiredChecks lets a run win over a status of the same name", () => {
+  assert.deepEqual(
+    foldRequiredChecks(
+      ["check"],
+      { total_count: 1, check_runs: [run(1, "check", "completed", "success")] },
+      [{ context: "check", state: "failure" }],
+    ),
+    { pending: [], failed: [] },
+  );
+});
+
+test("foldRequiredChecks throws for a body of an unexpected shape", () => {
+  assert.throws(
+    () => foldRequiredChecks(["check"], { total_count: 0 }, []),
+    z.ZodError,
+  );
+  assert.throws(
+    () => foldRequiredChecks(["check"], { total_count: 0, check_runs: [] }, {}),
+    z.ZodError,
+  );
+});
+
+test("getRequiredChecks folds the required checks of the head commit", async (t) => {
+  const server = await platform(
+    t,
+    checkServer({
+      [PULL_REQUEST_PATH]: [200, CHECK_PULL_REQUEST],
+      [RULES_PATH]: [
+        200,
+        [
+          { type: "pull_request", parameters: {} },
+          requiredRule("check", "lint"),
+          requiredRule("check", "deploy"),
+        ],
+      ],
+      [CHECK_RUNS_PATH]: [
+        200,
+        {
+          total_count: 2,
+          check_runs: [
+            run(1, "check", "completed", "failure"),
+            run(2, "lint", "queued", null),
+          ],
+        },
+      ],
+      [STATUSES_PATH]: [200, [{ context: "deploy", state: "pending" }]],
+    }),
+  );
+  const result = await new GitHubPlatform({
+    baseUrl: server.baseUrl,
+  }).getRequiredChecks(call(), TARGET, { number: 7 });
+  assert.deepEqual(result, {
+    ok: true,
+    value: {
+      head_commit: HEAD_SHA,
+      base_branch: BASE_BRANCH,
+      pending: ["deploy", "lint"],
+      failed: ["check"],
+    },
+  });
+  assert.deepEqual(server.requests.map(pathOf), [
+    PULL_REQUEST_PATH,
+    RULES_PATH,
+    CHECK_RUNS_PATH,
+    STATUSES_PATH,
+  ]);
+  assert.equal(
+    new URL(
+      String(server.requests[2]?.url),
+      "http://localhost",
+    ).searchParams.get("per_page"),
+    String(DEFAULT_PAGE_SIZE),
+  );
+});
+
+test("getRequiredChecks reads no check run when the rules require no check", async (t) => {
+  const server = await platform(
+    t,
+    checkServer({
+      [PULL_REQUEST_PATH]: [200, CHECK_PULL_REQUEST],
+      [RULES_PATH]: [200, [{ type: "pull_request", parameters: {} }]],
+    }),
+  );
+  const result = await new GitHubPlatform({
+    baseUrl: server.baseUrl,
+  }).getRequiredChecks(call(), TARGET, { number: 7 });
+  assert.deepEqual(result, {
+    ok: true,
+    value: {
+      head_commit: HEAD_SHA,
+      base_branch: BASE_BRANCH,
+      pending: [],
+      failed: [],
+    },
+  });
+  assert.deepEqual(server.requests.map(pathOf), [
+    PULL_REQUEST_PATH,
+    RULES_PATH,
+  ]);
+});
+
+test("getRequiredChecks answers a failed read unchanged", async (t) => {
+  const server = await platform(
+    t,
+    checkServer({
+      [PULL_REQUEST_PATH]: [200, CHECK_PULL_REQUEST],
+    }),
+  );
+  const result = await new GitHubPlatform({
+    baseUrl: server.baseUrl,
+  }).getRequiredChecks(call(), TARGET, { number: 7 });
+  assert.equal(!result.ok && result.class, ResultClass.FinalRefusal);
+  assert.equal(!result.ok && result.status, HttpStatus.NotFound);
+});
+
+test("getRequiredChecks answers an unreadable body for a body of an unexpected shape", async (t) => {
+  const server = await platform(
+    t,
+    checkServer({
+      [PULL_REQUEST_PATH]: [200, CHECK_PULL_REQUEST],
+      [RULES_PATH]: [200, [requiredRule("check")]],
+      [CHECK_RUNS_PATH]: [200, { total_count: 0 }],
+      [STATUSES_PATH]: [200, []],
+    }),
+  );
+  const result = await new GitHubPlatform({
+    baseUrl: server.baseUrl,
+  }).getRequiredChecks(call(), TARGET, { number: 7 });
+  assert.equal(!result.ok && result.class, ResultClass.RetryableRefusal);
 });
