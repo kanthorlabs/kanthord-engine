@@ -87,6 +87,14 @@ export function isExecutionEnd(result: OperationResult<unknown>): boolean {
   );
 }
 
+export function endsExecution(error: unknown): error is CodedError {
+  return (
+    error instanceof CodedError &&
+    (error.code === EXECUTION_PROOF_FAILED ||
+      error.code === EXECUTION_NOT_RUNNING)
+  );
+}
+
 export class ExecutionStop extends Error {
   readonly reason: EndReason;
   readonly code: string | null;
@@ -356,6 +364,7 @@ export class ExecutionRun {
     try {
       await this.settlement;
     } catch (error) {
+      if (endsExecution(error)) this.stop(EndReason.Revoked, error.code);
       this.stop(
         EndReason.OperationFailed,
         error instanceof CodedError ? error.code : null,
@@ -479,8 +488,17 @@ export class ExecutionRun {
     };
     const context = this.cleanupContext();
     try {
-      this.settlement ??= this.credentials.release();
-      await this.settlement;
+      try {
+        this.settlement ??= this.credentials.release();
+        await this.settlement;
+      } catch (error) {
+        if (!endsExecution(error)) throw error;
+        return {
+          kind: ExecutionEndKind.Ended,
+          reason: EndReason.Revoked,
+          code: error.code,
+        };
+      }
       this.closeTraces(SpanStatus.Error);
       await this.spans.flush(TELEMETRY_FLUSH_MS);
       const params = { execution_id: this.claim.execution_id };
@@ -499,6 +517,12 @@ export class ExecutionRun {
           claim.data.stop !== null
         )
           return { kind: ExecutionEndKind.Released, furtherWork: true, stop };
+        if (claim.type === OperationResultType.Failure && isExecutionEnd(claim))
+          return {
+            kind: ExecutionEndKind.Ended,
+            reason: EndReason.Revoked,
+            code: claim.error.error.code,
+          };
       }
       if (result.type === OperationResultType.Completed)
         return { kind: ExecutionEndKind.Released, furtherWork: true, stop };
