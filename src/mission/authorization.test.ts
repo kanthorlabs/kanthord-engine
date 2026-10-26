@@ -540,6 +540,7 @@ test("an examine node claim reads the object of a current dependency outcome and
       evidence_ids: canonicalJSON([named.evidenceId]),
       dependency_outcome_ids: "[]",
       tested_input: null,
+      gate_files: null,
       execution_id: null,
       actor: canonicalJSON(h.actor),
       node_revision: h.claim.pinnedRevision,

@@ -78,6 +78,7 @@ function fixture(t: TestContext) {
     evidence_ids: EMPTY_SET,
     dependency_outcome_ids: EMPTY_SET,
     tested_input: null,
+    gate_files: null,
     execution_id: null,
     actor: canonicalJSON(ACTOR),
     node_revision: FIRST_ATTEMPT,

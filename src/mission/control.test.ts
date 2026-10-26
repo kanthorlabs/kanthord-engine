@@ -23,6 +23,7 @@ import {
 import {
   openAttempt,
   readAttempt,
+  readAssessment,
   insertAssessment,
   insertEvidence,
 } from "./record-store.ts";
@@ -233,6 +234,23 @@ test("attempt-zero human records produce blocked context and no attempt", (t) =>
   });
 });
 
+test("an assessment of a human stores gate_files null", (t) => {
+  const h = controlHarness(t, IDENTITY);
+  const node = h.node();
+  h.store.transaction((tx) => {
+    const outcome = writeHumanRecords(
+      tx,
+      node,
+      AssessmentResult.Undetermined,
+      "Hold",
+      h.actor,
+      [],
+      NOW,
+    );
+    assert.equal(readAssessment(tx, outcome.assessment_id)?.gate_files, null);
+  });
+});
+
 test("transition replaces a claimable job and revokes only active claims", (t) => {
   const h = controlHarness(t, IDENTITY);
   const node = h.node();
@@ -305,6 +323,7 @@ for (const state of [NodeState.ExternalSuccess, NodeState.ExternalFailed]) {
         evidence_ids: "[]",
         dependency_outcome_ids: "[]",
         tested_input: null,
+        gate_files: null,
         execution_id: createIdentity("execution"),
         actor: null,
         node_revision: FIRST_ATTEMPT,
