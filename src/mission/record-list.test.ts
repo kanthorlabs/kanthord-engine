@@ -160,6 +160,7 @@ test("assessment and outcome reads filter attempt zero, evaluate currency, union
       ),
       dependency_outcome_ids: "[]",
       tested_input: null,
+      gate_files: null,
       execution_id: createIdentity("execution"),
       actor: null,
       created_at: NOW,

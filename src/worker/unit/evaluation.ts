@@ -113,8 +113,14 @@ function factsOf(
   };
 }
 
+interface GateFilesEntry {
+  binding_id: string;
+  paths: string[];
+}
+
 interface AffectedStep {
   results: AffectedResult[];
+  gate_files: GateFilesEntry[];
   verdict: AffectedVerdict;
   document: AffectedEvidence | null;
 }
@@ -288,6 +294,12 @@ async function runAffectedStep(
   const evidence = affectedEvidenceOf(results);
   return {
     results,
+    gate_files: results.flatMap((result) =>
+      result.verdict !== AffectedVerdict.Absent &&
+      result.gate_files.length > NO_ITEMS
+        ? [{ binding_id: result.binding_id, paths: result.gate_files }]
+        : [],
+    ),
     verdict: evidence.verdict,
     document: evidence.repositories.length > NO_ITEMS ? evidence : null,
   };
@@ -420,6 +432,7 @@ async function evaluate(
     result: judgement.result,
     rationale: judgement.rationale,
     proposals: judgement.proposals,
+    gate_files: affected?.gate_files ?? [],
     facts: judgement.facts,
   };
 }
@@ -451,6 +464,9 @@ export async function runEvaluation(
       rationale: assessment.rationale,
       proposals: assessment.proposals,
       tested_input: prepared.tested_input,
+      ...(assessment.gate_files.length > NO_ITEMS
+        ? { gate_files: assessment.gate_files }
+        : {}),
       ...(assessment.result === AssessmentResult.CriterionNotMet
         ? { cause: reworkCauseOf(assessment.facts) }
         : {}),

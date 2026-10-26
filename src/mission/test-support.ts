@@ -482,6 +482,7 @@ export function authorizationHarness(t: TestContext, identity: CallerIdentity) {
           binding_id: h.repositoryId,
           commit,
         }),
+        gate_files: null,
         execution_id: h.claim.executionId,
         actor: null,
         node_revision: FIRST_REVISION,

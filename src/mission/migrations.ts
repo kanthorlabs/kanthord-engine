@@ -86,6 +86,7 @@ const createMissionTables: Migration = (database) => {
       evidence_ids TEXT NOT NULL,
       dependency_outcome_ids TEXT NOT NULL,
       tested_input TEXT,
+      gate_files TEXT,
       execution_id TEXT,
       actor TEXT,
       node_revision INTEGER NOT NULL,

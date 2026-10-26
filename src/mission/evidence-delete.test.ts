@@ -258,6 +258,7 @@ test("whole evidence deletion clears assessment and outcome sets without changin
       evidence_ids: canonicalJSON([h.evidence_id]),
       dependency_outcome_ids: "[]",
       tested_input: null,
+      gate_files: null,
       execution_id: null,
       actor: canonicalJSON(h.actor),
       node_revision: FIRST_ATTEMPT,

@@ -87,6 +87,8 @@ export function submitAssessment(
     evidence_ids: canonicalJSON(body.evidence_ids),
     dependency_outcome_ids: canonicalJSON(body.dependency_outcome_ids),
     tested_input: canonicalJSON(body.tested_input),
+    gate_files:
+      body.gate_files === undefined ? null : canonicalJSON(body.gate_files),
     execution_id: claim.executionId,
     actor: null,
     node_revision: revision.revision,

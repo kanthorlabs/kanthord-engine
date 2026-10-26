@@ -178,6 +178,7 @@ test("examine currency follows real dependency outcomes and only current closure
       evidence_ids: "[]",
       dependency_outcome_ids: "[]",
       tested_input: null,
+      gate_files: null,
       execution_id: null,
       actor: canonicalJSON(h.actor),
       node_revision: FIRST_REVISION,
@@ -293,6 +294,67 @@ test("current passing assessments close attempts and revoke claims without an ex
     h.submit(),
     (error) => error instanceof OperationError && error.code === NOT_RUNNING,
   );
+});
+
+const GATE_PATH = "package.json";
+const OTHER_GATE_PATH = "pnpm-lock.yaml";
+
+async function gateFilesRefusal(
+  t: TestContext,
+  gateFiles: (bindingId: string) => AssessmentSubmit["gate_files"],
+) {
+  const h = await fixture(t);
+  await assert.rejects(
+    h.submit({ ...h.body, gate_files: gateFiles(h.address.binding_id) }),
+    (error) =>
+      error instanceof OperationError &&
+      error.code === VALIDATION &&
+      canonicalJSON(error.details).includes("gate_files"),
+  );
+}
+
+test("an assessment with gate_files stores the canonical JSON", async (t) => {
+  const h = await fixture(t);
+  const gateFiles = [
+    { binding_id: h.address.binding_id, paths: [GATE_PATH, OTHER_GATE_PATH] },
+  ];
+  const result = await h.submit({ ...h.body, gate_files: gateFiles });
+  assert.equal(
+    h.store.transaction(
+      (tx) => readAssessment(tx, result.assessment.id)?.gate_files,
+    ),
+    canonicalJSON(gateFiles),
+  );
+});
+
+test("an assessment without gate_files stores null", async (t) => {
+  const h = await fixture(t);
+  const result = await h.submit();
+  assert.equal(
+    h.store.transaction(
+      (tx) => readAssessment(tx, result.assessment.id)?.gate_files,
+    ),
+    null,
+  );
+});
+
+test("gate_files for a binding outside tested_input is refused", async (t) => {
+  await gateFilesRefusal(t, () => [
+    { binding_id: createIdentity("binding"), paths: [GATE_PATH] },
+  ]);
+});
+
+test("gate_files with two entries of one binding is refused", async (t) => {
+  await gateFilesRefusal(t, (bindingId) => [
+    { binding_id: bindingId, paths: [GATE_PATH] },
+    { binding_id: bindingId, paths: [OTHER_GATE_PATH] },
+  ]);
+});
+
+test("gate_files with a duplicate path is refused", async (t) => {
+  await gateFilesRefusal(t, (bindingId) => [
+    { binding_id: bindingId, paths: [GATE_PATH, GATE_PATH] },
+  ]);
 });
 
 test("a not-met assessment that sends rework and a passed assessment that completes the node end the root span with the assessment cause", async (t) => {
