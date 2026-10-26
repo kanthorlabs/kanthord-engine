@@ -375,7 +375,6 @@ const IDENTITY = [
   "user.email=test@example.invalid",
 ];
 const PROBE_LINES = 7;
-const REDACTED = "[redacted]";
 const NO_SPANS = 0;
 const CHANGED_COUNT = 2;
 const EXIT_ABSENT = 127;
@@ -699,7 +698,7 @@ test("a time-limit end at both heads stops with affected_timeout", async (t) => 
   const f = await fixture(t, { base: "slow", head: "slow" });
   const stop = await stopOf(runOf(f, { commandLimitMs: SHORT_LIMIT_MS }));
   assert.equal(stop.code, EnvironmentFailure.AffectedTimeout);
-  assert.equal(stop.detail.commit, REDACTED);
+  assert.equal(stop.detail.commit, f.head);
   assert.equal(stop.detail.time_limit_s, SHORT_LIMIT_S);
 });
 
@@ -713,7 +712,7 @@ test("a time-limit end at the head stops with affected_timeout before the base c
     "command",
     "time_limit_s",
   ]);
-  assert.equal(stop.detail.commit, REDACTED);
+  assert.equal(stop.detail.commit, f.head);
   assert.equal(stop.detail.time_limit_s, SHORT_LIMIT_S);
   assert.equal(
     readFileSync(f.probe, "utf8").split("\n").length - 1,
