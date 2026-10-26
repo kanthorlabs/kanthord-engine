@@ -29,6 +29,12 @@ const EXCLUDE_SPECIAL = /[\\*?[\]!#]/g;
 const COMMIT_PATTERN = /^[a-f0-9]{40,64}$/;
 const RENAME_LETTER = "R";
 const STATUS_LETTER_LENGTH = 1;
+const FIRST_RECORD = 0;
+const LETTER_START = 0;
+const PATH_OFFSET = 1;
+const RENAMED_PATH_OFFSET = 2;
+const PLAIN_RECORD_WIDTH = 2;
+const RENAME_RECORD_WIDTH = 3;
 export const MERGE_HEAD = "MERGE_HEAD";
 export const ChangeStatus = {
   Added: "added",
@@ -620,27 +626,27 @@ export async function changedEntries(
     .split(NUL)
     .filter(Boolean);
   const entries: ChangeEntry[] = [];
-  let index = 0;
+  let index = FIRST_RECORD;
   while (index < fields.length) {
-    const letter = fields[index]!.slice(0, STATUS_LETTER_LENGTH);
-    const path = fields[index + 1];
+    const letter = fields[index]!.slice(LETTER_START, STATUS_LETTER_LENGTH);
+    const path = fields[index + PATH_OFFSET];
     assert.ok(path !== undefined, "A change record holds a path.");
     if (letter === RENAME_LETTER) {
-      const renamed = fields[index + 2];
+      const renamed = fields[index + RENAMED_PATH_OFFSET];
       assert.ok(renamed !== undefined, "A rename record holds a new path.");
       entries.push({
         path: renamed,
         status: ChangeStatus.Renamed,
         previous_path: path,
       });
-      index += 3;
+      index += RENAME_RECORD_WIDTH;
       continue;
     }
     const status = PLAIN_STATUSES[letter];
     if (status === undefined)
       throw new Error(`Unsupported git change status ${letter}`);
     entries.push({ path, status });
-    index += 2;
+    index += PLAIN_RECORD_WIDTH;
   }
   return entries;
 }
