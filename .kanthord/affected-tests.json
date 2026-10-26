@@ -1,5 +1,14 @@
 {
   "version": 1,
   "command": "pnpm --silent run test:affected",
-  "time_limit_s": 1800
+  "time_limit_s": 1800,
+  "gate_files": [
+    ".kanthord/affected-tests.json",
+    "package.json",
+    "scripts/affected-tests.mjs",
+    "scripts/affected-reporter.mjs",
+    "scripts/test-reporter.mjs",
+    "scripts/test-path.mjs",
+    "scripts/pi-tools.mjs"
+  ]
 }
