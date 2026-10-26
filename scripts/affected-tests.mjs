@@ -206,6 +206,11 @@ function parseFile(root, path) {
   return parsed;
 }
 
+function addImporter(importersByFile, file, importer) {
+  if (!importersByFile.has(file)) importersByFile.set(file, new Set());
+  importersByFile.get(file).add(importer);
+}
+
 function buildGraph(root) {
   const nodes = new Set(listFiles(root));
   const present = new Set(
@@ -220,10 +225,7 @@ function buildGraph(root) {
   for (const path of present) {
     if (!PARSED_PATTERNS.some((pattern) => pattern.test(path))) continue;
     const parsed = parseFile(root, path);
-    for (const file of parsed.files) {
-      if (!importersByFile.has(file)) importersByFile.set(file, new Set());
-      importersByFile.get(file).add(path);
-    }
+    for (const file of parsed.files) addImporter(importersByFile, file, path);
     for (const prefix of parsed.prefixes) {
       prefixEdges.push({ prefix, importer: path });
     }
@@ -268,11 +270,11 @@ function walk(graph, starts) {
   const reached = new Set(starts);
   const queue = [...starts];
   for (const path of queue) {
-    for (const importer of importersOf(graph, path)) {
-      if (reached.has(importer)) continue;
-      reached.add(importer);
-      queue.push(importer);
-    }
+    const unreached = [...importersOf(graph, path)].filter(
+      (importer) => !reached.has(importer),
+    );
+    for (const importer of unreached) reached.add(importer);
+    queue.push(...unreached);
   }
   return reached;
 }
