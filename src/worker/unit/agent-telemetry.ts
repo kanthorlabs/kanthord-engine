@@ -36,6 +36,7 @@ const PROMPT_TEMPLATE_DIGEST_ATTRIBUTE = "kanthord.prompt.template.digest";
 const PROMPT_WORK_DIGEST_ATTRIBUTE = "kanthord.prompt.work.digest";
 const WORKER_BINDING_ATTRIBUTE = "kanthord.worker_binding.id";
 const AGENT_ENABLEMENT_ATTRIBUTE = "kanthord.agent_enablement.id";
+const SESSION_ENTRY_ATTRIBUTE = "kanthord.session.entry_id";
 const FIRST_SEQUENCE = 1;
 const NO_ENTRIES = 0;
 
@@ -73,7 +74,7 @@ function turnAttributes(
       : {}),
     "gen_ai.response.finish_reasons": [message.stopReason],
     ...(failure === null ? {} : { "error.type": failure }),
-    ...(entryId === null ? {} : { "kanthord.session.entry_id": entryId }),
+    ...(entryId === null ? {} : { [SESSION_ENTRY_ATTRIBUTE]: entryId }),
     ...(duration === null || duration === undefined
       ? {}
       : { "kanthord.turn.model_duration_ms": duration }),
@@ -281,6 +282,7 @@ class AgentTracer {
     assert.ok(this.tools.size <= TOOLS_OPEN_MAX);
     if (this.turn === null || !event.toolCallId) return;
     assert.ok(this.turn);
+    const entryId = this.assistantEntryId();
     this.tools.set(event.toolCallId, {
       started: Date.now(),
       span: this.spans.start({
@@ -292,6 +294,7 @@ class AgentTracer {
           "gen_ai.conversation.id": this.sessionId,
           "gen_ai.tool.name": event.toolName,
           "gen_ai.tool.call.id": event.toolCallId,
+          ...(entryId === null ? {} : { [SESSION_ENTRY_ATTRIBUTE]: entryId }),
         },
       }),
     });
