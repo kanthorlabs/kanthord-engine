@@ -375,6 +375,7 @@ const IDENTITY = [
   "user.email=test@example.invalid",
 ];
 const PROBE_LINES = 7;
+const REDACTED = "[redacted]";
 const NO_SPANS = 0;
 const CHANGED_COUNT = 2;
 const EXIT_ABSENT = 127;
@@ -698,15 +699,26 @@ test("a time-limit end at both heads stops with affected_timeout", async (t) => 
   const f = await fixture(t, { base: "slow", head: "slow" });
   const stop = await stopOf(runOf(f, { commandLimitMs: SHORT_LIMIT_MS }));
   assert.equal(stop.code, EnvironmentFailure.AffectedTimeout);
+  assert.equal(stop.detail.commit, REDACTED);
   assert.equal(stop.detail.time_limit_s, SHORT_LIMIT_S);
 });
 
-test("a time-limit end at the head with a valid base report answers failed", async (t) => {
+test("a time-limit end at the head stops with affected_timeout before the base check", async (t) => {
   const f = await fixture(t, { base: "pass", head: "slow" });
-  const result = await ran(f, { commandLimitMs: SHORT_LIMIT_MS });
-  assert.equal(result.verdict, AffectedVerdict.Failed);
-  assert.equal(result.head.timed_out, true);
-  assert.match(result.failure_text ?? "", /reached its time limit of 0.5 s/);
+  const stop = await stopOf(runOf(f, { commandLimitMs: SHORT_LIMIT_MS }));
+  assert.equal(stop.code, EnvironmentFailure.AffectedTimeout);
+  assert.deepEqual(Object.keys(stop.detail), [
+    "binding_id",
+    "commit",
+    "command",
+    "time_limit_s",
+  ]);
+  assert.equal(stop.detail.commit, REDACTED);
+  assert.equal(stop.detail.time_limit_s, SHORT_LIMIT_S);
+  assert.equal(
+    readFileSync(f.probe, "utf8").split("\n").length - 1,
+    PROBE_LINES,
+  );
 });
 
 test("exit 127 at both heads stops with command_absent", async (t) => {

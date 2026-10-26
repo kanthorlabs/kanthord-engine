@@ -671,6 +671,13 @@ async function decide(
     prepared,
   );
   if (head === null) return { budgetEnd: true };
+  if ("failure" in head && head.failure.kind === HeadFailureKind.TimedOut)
+    throw environmentStop(EnvironmentFailure.AffectedTimeout, {
+      binding_id: checkout.binding_id,
+      commit: checkout.head,
+      command: declaration.command,
+      time_limit_s: head.failure.time_limit_s,
+    });
   const report = "report" in head ? head.report : null;
   const failedIds = report ? headFailed(report, files) : [];
   const result: AffectedRun = {
