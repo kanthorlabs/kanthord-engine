@@ -285,7 +285,7 @@ export function affectedEnd(result: AffectedRun): SpanEnd {
   const attributes: Attributes = {
     [AffectedAttribute.Verdict]: result.verdict,
     [AffectedAttribute.Selection]: report?.selection ?? INVALID_SELECTION,
-    [AffectedAttribute.ChangedCount]: report ? result.changed : NO_LENGTH,
+    [AffectedAttribute.ChangedCount]: result.changed,
     [AffectedAttribute.TestCount]: report?.tests.length ?? NO_LENGTH,
     [AffectedAttribute.FailedCount]: result.failed.length,
     [AffectedAttribute.FlakyCount]: report
