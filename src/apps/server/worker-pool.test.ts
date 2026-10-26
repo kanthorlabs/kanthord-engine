@@ -103,8 +103,12 @@ async function serverPool(t: TestContext, count: number, slotLimit?: number) {
         setup.fixture.threadDriver.threadOf(slot.client_id),
         undefined,
       );
+    const failures = setup.fixture.logs.filter((line) =>
+      line.includes(FAILED_MESSAGE),
+    );
     assert.ok(
       !setup.fixture.logs.some((line) => line.includes(FAILED_MESSAGE)),
+      `${FAILED_MESSAGE} logged, see the reason field: ${failures.join("\n")}`,
     );
   };
   return {

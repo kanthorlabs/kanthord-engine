@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
+import { spawn, spawnSync } from "node:child_process";
+import { once } from "node:events";
 import {
   mkdirSync,
   readFileSync,
@@ -33,6 +35,10 @@ const MODE_MASK = 0o777;
 const RELEASE_TARGETS = ["darwin-arm64", "linux-arm64", "linux-x64"];
 const SHA256_HEX_LENGTH = 64;
 const NO_ITEMS = 0;
+const LINUX_PLATFORM = "linux";
+const TEXT_BUSY = "ETXTBSY";
+const BUSY_HOLD_SECONDS = 0.2;
+const READY_LINE = "ready";
 
 function digest(content: string): string {
   return createHash("sha256").update(content).digest("hex");
@@ -230,6 +236,46 @@ test("installer refuses a tool whose version command fails", (t) => {
     { code: "worker.start.tool_missing", message: "cannot run." },
   );
 });
+
+test(
+  "installer runs the version check again while the tool file is busy",
+  {
+    skip: process.platform !== LINUX_PLATFORM,
+  },
+  async (t) => {
+    const { env, bin } = state(t);
+    const options = {
+      env,
+      target: TARGET,
+      manifest: manifestOf(WORKING_BINARY),
+      root: developmentRoot(t, WORKING_BINARY),
+    };
+    installPiTools(options);
+    const path = join(bin, TOOL);
+    const holder = spawn(
+      "sh",
+      [
+        "-c",
+        `exec 3>>"$1"; echo ${READY_LINE}; sleep ${BUSY_HOLD_SECONDS}`,
+        "sh",
+        path,
+      ],
+      { stdio: ["ignore", "pipe", "inherit"] },
+    );
+    t.after(async () => {
+      const exited = once(holder, "exit");
+      holder.kill();
+      await exited;
+    });
+    const [ready] = await once(holder.stdout, "data");
+    assert.equal(String(ready).trim(), READY_LINE);
+    assert.equal(
+      (spawnSync(path, ["--version"]).error as NodeJS.ErrnoException).code,
+      TEXT_BUSY,
+    );
+    assert.doesNotThrow(() => installPiTools(options));
+  },
+);
 
 test("installer refuses a pi directory that cannot hold the tools", (t) => {
   const { env, bin } = state(t);
