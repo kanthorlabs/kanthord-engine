@@ -94,8 +94,16 @@ test("agent prompts are valid published UTF-8 assets", () => {
   assert.ok(SWE_AGENT_PROMPT.startsWith("## Role"));
   assert.ok(SWE_AGENT_PROMPT.includes("swe@1"));
   assert.ok(
+    SWE_AGENT_PROMPT.includes("Run every test file that the change edits."),
+  );
+  assert.ok(
     SWE_AGENT_PROMPT.includes(
-      "Run the test files that cover the change. Run the verification commands of the work prompt, also when a command runs a whole test suite. Do not run another whole test suite.",
+      "A symbol is an exported type, function or constant, an error code, an attribute name, a value of a closed set or a message text.",
+    ),
+  );
+  assert.ok(
+    SWE_AGENT_PROMPT.includes(
+      "Run every test file that names such a symbol. Run the verification commands of the work prompt, also when a command runs a whole test suite. Do not run another whole test suite.",
     ),
   );
   assert.ok(
