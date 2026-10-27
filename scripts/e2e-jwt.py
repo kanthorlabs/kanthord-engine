@@ -94,6 +94,7 @@ class Run:
         self.server_output = None
         self.console = None
         self.failure = None
+        apps_exist = (ROOT / "apps" / ".git").exists()
         self.metadata = {
             "startedAt": datetime.now(timezone.utc).isoformat(),
             "inquiry": INQUIRY, "criterionVerbatim": CRITERION,
@@ -101,8 +102,8 @@ class Run:
             "candidateObjectives": [], "taskFiles": [],
             "engineCommit": git(ENGINE, "rev-parse", "HEAD"),
             "engineDirty": git(ENGINE, "status", "--porcelain"),
-            "appsCommit": git(ROOT / "apps", "rev-parse", "HEAD"),
-            "appsDirty": git(ROOT / "apps", "status", "--porcelain"),
+            "appsCommit": git(ROOT / "apps", "rev-parse", "HEAD") if apps_exist else None,
+            "appsDirty": git(ROOT / "apps", "status", "--porcelain") if apps_exist else None,
             "mode": "Local CLI/API acceptance; browser screenshots explicitly waived",
             "startedOrReused": "Start a fresh compiled engine; no reused process",
             "recordTag": self.tag, "home": str(self.home), "steps": [],
@@ -150,15 +151,10 @@ class Run:
                                  stdout=slave, stderr=subprocess.PIPE)
         os.close(slave)
         try:
-            machine = "--binding" in args
-            pattern = rb"^token: +" + TOKEN + rb"client_secret: ([^\r\n]+)\r?\n" if machine else rb"^token: " + TOKEN
+            pattern = rb"^token: +" + TOKEN
             values = terminal_read(master, child, pattern)
             self.secrets.extend(values)
             token = values[0]
-            if machine:
-                secret = base64.b64decode(values[1], validate=True)
-                require(len(secret) == 32 and base64.b64encode(secret).decode() == values[1],
-                        "Machine client secret is not canonical 32-byte base64")
             require(child.wait(timeout=10) == 0, "JWT command failed")
             return token
         finally:
@@ -272,12 +268,13 @@ class Run:
         self.secrets.extend(value for value in invalid.values() if value)
         rejected = []
         for name, token in invalid.items():
+            code = "gateway.jwt.expired" if name == "expired" else "gateway.authentication.unauthorized"
             status, body = self.request("/api/auth/verify", token)
-            require(status == 401 and json.loads(body)["error"]["code"] == "gateway.authentication.unauthorized", "Invalid token API verification was not rejected")
+            require(status == 401 and json.loads(body)["error"]["code"] == code, "Invalid token API verification was not rejected")
             cli = self.verify(token)
-            require(cli.returncode == 1 and not cli.stdout and re.search(r"^status: +401$", cli.stderr, re.M) and cli.stderr.startswith("gateway.authentication.unauthorized:"), "Invalid token CLI verification was not rejected")
+            require(cli.returncode == 1 and not cli.stdout and re.search(r"^status: +401$", cli.stderr, re.M) and cli.stderr.startswith(f"{code}:"), "Invalid token CLI verification was not rejected")
             require(not any(value in cli.stderr for value in self.secrets), "CLI diagnostic disclosed a credential")
-            rejected.append({"case": name, "status": status, "exitCode": cli.returncode, "code": "gateway.authentication.unauthorized"})
+            rejected.append({"case": name, "status": status, "exitCode": cli.returncode, "code": code})
         self.step("invalid-verification", {"cases": rejected})
         self.env["KANTHORD_TOKEN"] = custom
         try:

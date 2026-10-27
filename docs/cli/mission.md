@@ -619,7 +619,7 @@ The required-action and request sets of an `examine` node are empty.
   60 s, at most 60 times. It merges a `kanthord` landing pull request when its
   required checks pass. A merge that answers `confirmed_failure`,
   `retryable_refusal` or `unknown_outcome` runs the next round after 60 s. Each
-  round sends a new request key. A `final_refusal` merge answer ends the check.
+  round sends a new request key. After a `final_refusal` merge answer or a thrown merge error, the check requests no further merge of that pull request until the next server start. The rounds continue while another request of the node is pending or failed.
   The last round ends the check. A human then merges the
   pull request. At each server start, KanthorD checks again each
   `External.Requested` node that holds an unresolved request, at most 50 nodes
@@ -644,7 +644,7 @@ The required-action and request sets of an `examine` node are empty.
   The address holds the oldest first-parent commit of the base branch that
   contains the snapshot. The check folds it to `pull_request_merged` with that
   landed commit.
-- A `merge_push` action whose current assessment holds a changed gate file of its binding, as the Intake Service computes it, gets no push. The action performer records a `branch_push` request on the base branch with the tested commit. The node waits in `External.Requested` until a human lands the node branch on the base branch. The check answers `none` until the base branch contains the tested commit, then `expected` with that commit. A squash or a rebase of the node branch never contains the tested commit, so the check never completes the node. A human who rejects the change, or lands it with a squash or a rebase, discards the node.
+- A `merge_push` action whose current assessment holds a changed gate file of its binding, as the Intake Service computes it, gets no push. The action performer records a `branch_push` request on the base branch with the tested commit. The node waits in `External.Requested` until a human lands the node branch on the base branch. The check answers `none` until the base branch contains the tested commit, then `expected` with that commit. Without a poll or webhook inbound for the repository, a human runs `node check` after the landing. A squash or a rebase of the node branch never contains the tested commit, so the check never completes the node. A human who rejects the change, or lands it with a squash or a rebase, discards the node.
 - Only delivery admission and node check set the end state of a request.
   Mission does not parse platform content. Inspection failure leaves the request
   unresolved and costs no attempt. An expected repository result adds landed

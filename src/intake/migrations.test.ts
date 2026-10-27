@@ -16,8 +16,9 @@ const INBOUND_TABLE = "intake_inbound";
 const INBOUND_EVENT_TABLE = "intake_inbound_event";
 const OUTBOUND_REQUEST_TABLE = "intake_outbound_request";
 const INBOUND_EVENT_INDEX = "intake_inbound_event_inbound_event";
-const OUTBOUND_REQUEST_INDEX = "intake_outbound_request_operation_key";
+const OUTBOUND_REQUEST_INDEX = "intake_outbound_request_project_operation_key";
 const PROJECT_ID = "project_01ARZ3NDEKTSV4RRFFQ69G5FAV";
+const OTHER_PROJECT_ID = "project_01ARZ3NDEKTSV4RRFFQ69G5FAW";
 const INBOUND_ID = "inbound_01ARZ3NDEKTSV4RRFFQ69G5FAV";
 const OTHER_INBOUND_ID = "inbound_01ARZ3NDEKTSV4RRFFQ69G5FAW";
 const ABSENT_INBOUND_ID = "inbound_01ARZ3NDEKTSV4RRFFQ69G5FAX";
@@ -26,6 +27,7 @@ const REQUEST_KEY = "request-key-1";
 const CREATED_AT = 1000;
 const UNIQUE_INDEX = 1;
 const EQUAL_INBOUNDS = 2;
+const TWO_PROJECT_REQUESTS = 2;
 const UNIQUE_CONSTRAINT = /UNIQUE constraint failed/;
 const FOREIGN_KEY_CONSTRAINT = /FOREIGN KEY constraint failed/;
 
@@ -73,14 +75,18 @@ function insertEvent(
     );
 }
 
-function insertOutboundRequest(store: Store, id: string): void {
+function insertOutboundRequest(
+  store: Store,
+  id: string,
+  projectId = PROJECT_ID,
+): void {
   store.database
     .prepare(
       `INSERT INTO ${OUTBOUND_REQUEST_TABLE} (id, project_id, operation, request_key, credential, state, result, error, created_at) VALUES (?, ?, ?, ?, NULL, ?, NULL, NULL, ?)`,
     )
     .run(
       id,
-      PROJECT_ID,
+      projectId,
       OutboundOperation.GitHubPullRequest,
       REQUEST_KEY,
       OutboundRequestState.Pending,
@@ -98,12 +104,24 @@ test("a second inbound event with the same inbound and event id throws", (t) => 
   );
 });
 
-test("a second outbound request with the same operation and request key throws", (t) => {
+test("a second outbound request with the same project, operation and request key throws", (t) => {
   const store = migratedStore(t);
   insertOutboundRequest(store, "outbound_request_1");
   assert.throws(
     () => insertOutboundRequest(store, "outbound_request_2"),
     UNIQUE_CONSTRAINT,
+  );
+});
+
+test("an outbound request of another project with the same operation and request key inserts", (t) => {
+  const store = migratedStore(t);
+  insertOutboundRequest(store, "outbound_request_1");
+  insertOutboundRequest(store, "outbound_request_2", OTHER_PROJECT_ID);
+  assert.equal(
+    store.database
+      .prepare(`SELECT COUNT(*) AS count FROM ${OUTBOUND_REQUEST_TABLE}`)
+      .get()?.count,
+    TWO_PROJECT_REQUESTS,
   );
 });
 
@@ -155,7 +173,7 @@ test("the intake indexes are exactly the two unique indexes on their columns", (
     [
       OUTBOUND_REQUEST_TABLE,
       OUTBOUND_REQUEST_INDEX,
-      ["operation", "request_key"],
+      ["project_id", "operation", "request_key"],
     ],
   ] as const) {
     const indexes = store.database

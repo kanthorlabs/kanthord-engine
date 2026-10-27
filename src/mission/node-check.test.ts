@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
+import { ResultClass } from "../intake/contract.ts";
 import { OperationError } from "../kernel/errors.ts";
 import { createIdentity } from "../kernel/identity.ts";
 import { testHumanIdentity } from "../kernel/test-identity.ts";
@@ -9,10 +10,15 @@ import {
   CheckEndState,
   MissionErrorCode,
   NodeState,
+  RepositoryLanding,
   Resolution,
   ClosingEvent,
 } from "./contract.ts";
-import { applyEndState } from "./node-check.ts";
+import {
+  DEFERRED_CHECK_RETRY_MS,
+  applyEndState,
+  scheduleDeferredCheck,
+} from "./node-check.ts";
 import { outcomeRecord } from "./record-read.ts";
 import {
   insertEvidence,
@@ -35,6 +41,12 @@ const FIRST_MISSION_VERSION = 1;
 const FIRST_ATTEMPT = 1;
 const LANDED_COMMIT_COUNT = 2;
 const COMMIT = "a".repeat(40);
+const MICROTASK_TURNS = 50;
+const FIRST_ROUND_DELAY_MS = 0;
+const CHECKS_PER_ROUND = 2;
+const ROUNDS_AFTER_FIRST = 2;
+const ONE_ROUND = 1;
+const ONE_MERGE = 1;
 
 test("node check reports Mission authorization refusal without calling Intake", async (t) => {
   const h = await fixture(t);
@@ -379,8 +391,9 @@ test("paused nodes keep their state and a concurrent conclusive end state wins",
   });
 });
 
-test("one other end blocks the node after a sibling landed", async (t) => {
-  const h = await externalRequestHarness(t, IDENTITY, true);
+function insertNextRequest(
+  h: Awaited<ReturnType<typeof externalRequestHarness>>,
+): void {
   const nextId = createIdentity("evidence");
   h.store.transaction((tx) =>
     insertEvidence(
@@ -411,6 +424,11 @@ test("one other end blocks the node after a sibling landed", async (t) => {
       ],
     ),
   );
+}
+
+test("one other end blocks the node after a sibling landed", async (t) => {
+  const h = await externalRequestHarness(t, IDENTITY, true);
+  insertNextRequest(h);
   h.dependencies.intakeCheck.check = async (_context, evidenceId) =>
     evidenceId === h.request.id
       ? { end_state: CheckEndState.Expected, landed_commits: [COMMIT] }
@@ -431,4 +449,43 @@ test("one other end blocks the node after a sibling landed", async (t) => {
       SINGLE_LANDED_COMMIT,
     ),
   );
+});
+
+test("a stopped merge gets no second call while another request of the node is pending", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "setImmediate"] });
+  const advance = async (ms: number) => {
+    t.mock.timers.tick(ms);
+    for (let turn = 0; turn < MICROTASK_TURNS; turn++) await Promise.resolve();
+  };
+  const h = await externalRequestHarness(t, IDENTITY, true);
+  insertNextRequest(h);
+  const policy = h.dependencies.bindings.repositoryPolicyOf;
+  h.dependencies.bindings.repositoryPolicyOf = (tx, bindingId) => ({
+    ...policy(tx, bindingId)!,
+    landing: RepositoryLanding.KanthorD,
+  });
+  let checkCalls = 0;
+  let mergeCalls = 0;
+  h.dependencies.intakeCheck.check = async (_context, evidenceId) => {
+    checkCalls++;
+    return evidenceId === h.request.id
+      ? { end_state: CheckEndState.None, landed_commits: [] }
+      : { end_state: CheckEndState.ChecksPending, landed_commits: [] };
+  };
+  h.dependencies.intakeCheck.merge = async () => {
+    mergeCalls++;
+    return {
+      class: ResultClass.FinalRefusal,
+      code: "github.final_refusal",
+      message: "refused",
+    };
+  };
+  scheduleDeferredCheck(h.dependencies, h.node_id, FIRST_ATTEMPT);
+  await advance(FIRST_ROUND_DELAY_MS);
+  assert.equal(checkCalls, CHECKS_PER_ROUND * ONE_ROUND);
+  assert.equal(mergeCalls, ONE_MERGE);
+  await advance(DEFERRED_CHECK_RETRY_MS);
+  await advance(DEFERRED_CHECK_RETRY_MS);
+  assert.equal(checkCalls, CHECKS_PER_ROUND * (ONE_ROUND + ROUNDS_AFTER_FIRST));
+  assert.equal(mergeCalls, ONE_MERGE);
 });

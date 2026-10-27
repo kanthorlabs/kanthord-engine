@@ -132,7 +132,7 @@ const ALL_INDEXES = [
   "agent_enablement_agent_name_revision",
   "credential_name_holder_revision",
   "intake_inbound_event_inbound_event",
-  "intake_outbound_request_operation_key",
+  "intake_outbound_request_project_operation_key",
   MISSION_ASSESSMENT_SEQUENCE_INDEX,
   MISSION_ATTEMPT_OPEN_INDEX,
   MISSION_EVIDENCE_ASSET_EVIDENCE_INDEX,

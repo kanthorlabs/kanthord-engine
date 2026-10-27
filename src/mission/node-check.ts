@@ -400,6 +400,7 @@ async function runDeferredCheck(
   nodeId: string,
   attempt: number,
   run: string,
+  stopped: Set<string>,
   round: number,
 ): Promise<RoundOutcome | null> {
   const prepared = dependencies.store.transaction((tx) => {
@@ -455,7 +456,7 @@ async function runDeferredCheck(
         applyEndState(tx, dependencies, item.request.id, answer, now);
       return null;
     });
-    if (mergeCommit === null) continue;
+    if (mergeCommit === null || stopped.has(item.request.id)) continue;
     const merge = await requestMerge(
       dependencies,
       item,
@@ -465,6 +466,7 @@ async function runDeferredCheck(
     );
     if (merge === MergeOutcome.Merged) outcome.merged = true;
     if (merge === MergeOutcome.Retry) outcome.failed = true;
+    if (merge === MergeOutcome.Stop) stopped.add(item.request.id);
   }
   dependencies.wakeup.wake(prepared.mission.project_id);
   return outcome;
@@ -475,6 +477,7 @@ function nextRound(
   nodeId: string,
   attempt: number,
   run: string,
+  stopped: Set<string>,
   round: number,
   outcome: RoundOutcome,
 ): void {
@@ -482,11 +485,11 @@ function nextRound(
   if (next >= DEFERRED_CHECK_ROUND_LIMIT) return;
   if (outcome.merged)
     return void setImmediate(() =>
-      runRound(dependencies, nodeId, attempt, run, next),
+      runRound(dependencies, nodeId, attempt, run, stopped, next),
     ).unref();
   if (outcome.pending || outcome.failed)
     setTimeout(
-      () => runRound(dependencies, nodeId, attempt, run, next),
+      () => runRound(dependencies, nodeId, attempt, run, stopped, next),
       DEFERRED_CHECK_RETRY_MS,
     ).unref();
 }
@@ -496,13 +499,14 @@ function runRound(
   nodeId: string,
   attempt: number,
   run: string,
+  stopped: Set<string>,
   round: number,
 ): void {
   if (dependencies.shutdown?.signal.aborted) return;
-  runDeferredCheck(dependencies, nodeId, attempt, run, round)
+  runDeferredCheck(dependencies, nodeId, attempt, run, stopped, round)
     .then((outcome) => {
       if (outcome === null) return;
-      nextRound(dependencies, nodeId, attempt, run, round, outcome);
+      nextRound(dependencies, nodeId, attempt, run, stopped, round, outcome);
     })
     .catch((error) => {
       dependencies.logger.warn(
@@ -518,8 +522,9 @@ export function scheduleDeferredCheck(
   attempt: number,
 ): void {
   const run = createIdentity(DEFERRED_RUN_PREFIX);
+  const stopped = new Set<string>();
   setImmediate(() =>
-    runRound(dependencies, nodeId, attempt, run, FIRST_ROUND),
+    runRound(dependencies, nodeId, attempt, run, stopped, FIRST_ROUND),
   ).unref();
 }
 

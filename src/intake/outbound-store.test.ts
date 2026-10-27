@@ -23,6 +23,7 @@ import {
 } from "./outbound-store.ts";
 
 const PROJECT_ID = "project_01ARZ3NDEKTSV4RRFFQ69G5FAV";
+const OTHER_PROJECT_ID = "project_01ARZ3NDEKTSV4RRFFQ69G5FAW";
 const REQUEST_KEY = "request-key-1";
 const OTHER_REQUEST_KEY = "request-key-2";
 const CREDENTIAL = "github-main";
@@ -80,7 +81,7 @@ test("An insert starts pending with null result and error and answers its identi
   const id = insert(store);
   assert.ok(identitySchema(OUTBOUND_REQUEST_ID_PREFIX).safeParse(id).success);
   const row = store.transaction((tx) =>
-    findByKey(tx, OutboundOperation.GitHubPullRequest, REQUEST_KEY),
+    findByKey(tx, PROJECT_ID, OutboundOperation.GitHubPullRequest, REQUEST_KEY),
   );
   assert.deepEqual(
     { ...row },
@@ -111,7 +112,11 @@ test("An insert starts pending with null result and error and answers its identi
 test("A second insert of one key throws OutboundKeyConflict", (t) => {
   const store = migratedStore(t);
   const id = insert(store);
-  assert.throws(() => insert(store), OutboundKeyConflict);
+  assert.throws(
+    () => insert(store),
+    (error) =>
+      error instanceof OutboundKeyConflict && error.projectId === PROJECT_ID,
+  );
   const other = store.transaction((tx) =>
     insertPending(tx, {
       ...pending(),
@@ -122,10 +127,31 @@ test("A second insert of one key throws OutboundKeyConflict", (t) => {
   assert.notEqual(other, id);
   assert.equal(
     store.transaction((tx) =>
-      findByKey(tx, OutboundOperation.S3DeleteObject, REQUEST_KEY),
+      findByKey(tx, PROJECT_ID, OutboundOperation.S3DeleteObject, REQUEST_KEY),
     ),
     null,
   );
+});
+
+test("one key in two projects inserts two rows and each project finds its own row", (t) => {
+  const store = migratedStore(t);
+  const id = insert(store);
+  const otherId = store.transaction((tx) =>
+    insertPending(tx, { ...pending(), project_id: OTHER_PROJECT_ID }),
+  );
+  assert.notEqual(otherId, id);
+  const find = (projectId: string) =>
+    store.transaction(
+      (tx) =>
+        findByKey(
+          tx,
+          projectId,
+          OutboundOperation.GitHubPullRequest,
+          REQUEST_KEY,
+        )?.id,
+    );
+  assert.equal(find(PROJECT_ID), id);
+  assert.equal(find(OTHER_PROJECT_ID), otherId);
 });
 
 test("An insert propagates a failure other than the key conflict", (t) => {
