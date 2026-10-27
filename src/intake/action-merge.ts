@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { isDeepStrictEqual } from "node:util";
 import {
   apiKeySecretSchema,
   GrantKind,
@@ -22,6 +23,7 @@ import { addressCodec, decodeAddress } from "./address-codec.ts";
 import {
   OutboundOperation,
   PLATFORM_CALL_DEADLINE_MS,
+  SERVICE_MERGE_REQUEST_KEY_PREFIX,
   ResultClass,
   type PlatformAddress,
   type ResultClassAnswer,
@@ -38,6 +40,8 @@ import {
 } from "./outbound.ts";
 
 const EXPIRED_DEADLINE_MS = 0;
+export const FOREIGN_MERGE_ANSWER_MESSAGE =
+  "The request key holds the answer of another merge.";
 
 export type MergeBody = {
   evidence_id: string;
@@ -62,7 +66,7 @@ export function mergeAction(
   );
   const held: { facts: Readonly<ActionFacts> | null } = { facts: null };
   return run({
-    requestKey: body.request_key,
+    requestKey: SERVICE_MERGE_REQUEST_KEY_PREFIX + body.request_key,
     deadlineMs: PLATFORM_CALL_DEADLINE_MS,
     resultCodec: addressCodec,
     authorize: (tx, now) =>
@@ -77,7 +81,7 @@ export function mergeAction(
         material,
         scope,
       }),
-    finalize: finalizeMerge,
+    finalize: (answer) => finalizeMerge(answer, factsOf(held)),
   });
 }
 
@@ -186,12 +190,24 @@ export async function readBackMergePullRequest(
   return { match: true, result: facts.merge_address };
 }
 
-function finalizeMerge(answer: OutboundAnswer): Finalization<MergeAnswer> {
-  if (answer.ok)
-    return {
-      kind: FinalizationKind.Answer,
-      body: decodeAddress(answer.result),
-    };
+function finalizeMerge(
+  answer: OutboundAnswer,
+  facts: Readonly<ActionFacts>,
+): Finalization<MergeAnswer> {
+  assert.ok(facts.merge_address !== null, "A merge names its address.");
+  if (answer.ok) {
+    const address = decodeAddress(answer.result);
+    if (!isDeepStrictEqual(address, facts.merge_address))
+      return {
+        kind: FinalizationKind.Answer,
+        body: {
+          class: ResultClass.FinalRefusal,
+          code: GITHUB_RESULT_CODE_PREFIX + ResultClass.FinalRefusal,
+          message: FOREIGN_MERGE_ANSWER_MESSAGE,
+        },
+      };
+    return { kind: FinalizationKind.Answer, body: address };
+  }
   return {
     kind: FinalizationKind.Answer,
     body: {

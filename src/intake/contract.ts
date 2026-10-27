@@ -31,6 +31,7 @@ export const ERROR_MESSAGE_MAX_BYTES = 1024;
 export const RESULT_MAX_BYTES = 65536;
 export const DELETE_IDS_MAX = 1000;
 export const PLATFORM_CALL_DEADLINE_MS = 30000;
+export const SERVICE_MERGE_REQUEST_KEY_PREFIX = "service_merge/";
 export const READ_ANSWER_MARGIN_MS = 1000;
 export const GIT_WRITE_DEADLINE_MS = 540000;
 export const ACTION_PERFORM_TIMEOUT_MS = 600000;
@@ -671,7 +672,10 @@ export const intakeOperations = {
         commit: commitSchema,
         reused_evidence_id: identitySchema("evidence").nullable(),
         merge_evidence_id: identitySchema("evidence").nullable(),
-        request_key: z.string().min(1),
+        request_key: z
+          .string()
+          .min(1)
+          .refine((key) => !key.startsWith(SERVICE_MERGE_REQUEST_KEY_PREFIX)),
       }),
     }),
     output: z.union([platformAddressSchema, resultClassAnswerSchema]),

@@ -897,6 +897,11 @@ test("a service merge refuses a disabled or removed binding", (t) => {
   bindingRefusals(h, () => h.merge());
 });
 
+test("a service merge refuses a disabled or removed binding before the commit check", (t) => {
+  const h = serviceMergeHarness(t);
+  bindingRefusals(h, () => h.merge({ commit: OTHER_COMMIT }));
+});
+
 test("a service merge refuses a paused project", (t) => {
   const h = serviceMergeHarness(t);
   h.dependencies.projectPaused = (_tx, projectId) => {
