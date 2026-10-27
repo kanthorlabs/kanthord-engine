@@ -261,6 +261,7 @@ export const CheckEndState = {
   None: "none",
   Conflict: "conflict",
   ChecksFailed: "checks_failed",
+  ChecksPending: "checks_pending",
 } as const;
 export const checkEndStateSchema = z.enum(CheckEndState);
 
@@ -272,6 +273,12 @@ export interface IntakeCheck {
     end_state: z.infer<typeof checkEndStateSchema>;
     landed_commits: string[];
   }>;
+  merge(
+    context: Context,
+    input: { evidence_id: string; commit: string; request_key: string },
+  ): Promise<
+    PlatformAddress | { class: string; code: string; message: string }
+  >;
 }
 
 export interface EventDecoder {

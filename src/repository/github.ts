@@ -49,6 +49,7 @@ const REVIEW_PAGE_LIMIT = 30;
 const NO_CHANGE_REQUESTS = 0;
 const NO_REQUIRED_CHECKS = 0;
 const NO_FAILED_CHECKS = 0;
+const NO_PENDING_CHECKS = 0;
 const CHECK_RUN_PAGE_SIZE = 100;
 const BRANCH_RULES_ROUTE = "GET /repos/{owner}/{repo}/rules/branches/{branch}";
 const CHECK_RUNS_ROUTE = "GET /repos/{owner}/{repo}/commits/{ref}/check-runs";
@@ -181,6 +182,7 @@ export const CheckEndState = {
   None: "none",
   Conflict: "conflict",
   ChecksFailed: "checks_failed",
+  ChecksPending: "checks_pending",
 } as const;
 export type CheckEndState = (typeof CheckEndState)[keyof typeof CheckEndState];
 
@@ -811,7 +813,7 @@ function mergeabilityPending(body: unknown): boolean {
 function openEndState(
   pullRequest: z.infer<typeof pullRequestStateSchema>,
   reviews: unknown,
-  checks: Pick<RequiredCheckRead, "head_commit" | "failed">,
+  checks: Pick<RequiredCheckRead, "head_commit" | "pending" | "failed">,
   headCommit: string,
 ): CheckEndState {
   if (
@@ -826,6 +828,11 @@ function openEndState(
     checks.failed.length > NO_FAILED_CHECKS
   )
     return CheckEndState.ChecksFailed;
+  if (
+    checks.head_commit !== headCommit ||
+    checks.pending.length > NO_PENDING_CHECKS
+  )
+    return CheckEndState.ChecksPending;
   return CheckEndState.None;
 }
 
@@ -1215,7 +1222,7 @@ export class GitHubPlatform {
   foldPullRequest(
     body: unknown,
     reviews: unknown,
-    checks: Pick<RequiredCheckRead, "head_commit" | "failed">,
+    checks: Pick<RequiredCheckRead, "head_commit" | "pending" | "failed">,
     expectedEndState: ExpectedEndState,
   ): CheckFold {
     assert.equal(expectedEndState, ExpectedEndState.PullRequestMerged);

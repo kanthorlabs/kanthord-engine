@@ -40,7 +40,7 @@ const BAD_GATEWAY_STATUS = 502;
 const GIT_FAILED_CODE = "repository.connector.git_failed";
 const UNEXPECTED_BODY_MESSAGE = "the GitHub answer holds an unexpected body";
 const PULL_REQUEST_STATE_OPEN = "open";
-const NO_CHECKS = { head_commit: "", failed: [] };
+const NO_CHECKS = { head_commit: "", pending: [], failed: [] };
 const expectedEndStateSchema = z.enum(ExpectedEndState);
 const openPullRequestSchema = z.looseObject({
   state: z.literal(PULL_REQUEST_STATE_OPEN),
@@ -265,7 +265,7 @@ function foldBody(
   github: GitHubPlatform,
   body: unknown,
   reviews: unknown,
-  checks: Pick<RequiredCheckRead, "head_commit" | "failed">,
+  checks: Pick<RequiredCheckRead, "head_commit" | "pending" | "failed">,
   expected: ExpectedEndState,
 ): CheckFold {
   assert.equal(expected, ExpectedEndState.PullRequestMerged);

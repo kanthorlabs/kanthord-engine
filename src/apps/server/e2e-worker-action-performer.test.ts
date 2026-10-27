@@ -46,7 +46,7 @@ import {
   mappedTransport,
   remoteHead,
 } from "./test-support.ts";
-import { environment, kanthord } from "./cli-support.ts";
+import { environment, kanthord, until } from "./cli-support.ts";
 import { createIdempotencyKey } from "../../kernel/identity.ts";
 
 const INITIAL_SEQUENCE = 0;
@@ -81,6 +81,8 @@ const FINAL_REFUSAL_CODE = "repository.platform.github.final_refusal";
 const PULL_REQUEST_OPERATION = "github.pull_request";
 const PUSH_COUNTER = "pre-receive.count";
 const MAIN_REF = "refs/heads/main";
+const KANTHORD_LANDING = "kanthord";
+const CHECK_RUNS_SEGMENT = "/check-runs";
 const REQUESTED_CHANGE = "Rename the account route.";
 const REQUESTED_COMMENT = {
   path: "node.md",
@@ -157,7 +159,7 @@ function rejectedPushes(bare: string): number {
   return readFileSync(counter, "utf8").split("\n").filter(Boolean).length;
 }
 
-async function setup(t: TestContext) {
+async function setup(t: TestContext, landing?: string) {
   const gitHub = await fakeGitHub(t);
   const gatedBare = await bareRepository(t, GATED);
   const pushedBare = await bareRepository(t, PUSHED);
@@ -210,7 +212,7 @@ async function setup(t: TestContext) {
     secret: { key: "test-secret" },
   });
   await createFakeSshCredential(read);
-  const repository = (name: string, action: string) => ({
+  const repository = (name: string, action: string, landing?: string) => ({
     kind: "repository",
     config: {
       available: true,
@@ -220,14 +222,18 @@ async function setup(t: TestContext) {
       credential: "github",
       strategy: {
         base_branch: "main",
-        action: { name: action, follows: { type: "assessment_passed" } },
+        action: {
+          name: action,
+          follows: { type: "assessment_passed" },
+          ...(landing === undefined ? {} : { landing }),
+        },
       },
     },
   });
   await write(["project", "binding", "apply", project.id], {
     version: FIRST_REVISION,
     bindings: {
-      gated: repository(GATED, "pull_request"),
+      gated: repository(GATED, "pull_request", landing),
       pushed: repository(PUSHED, "merge_push"),
       harness: {
         kind: "worker",
@@ -841,5 +847,38 @@ test(
         assert.equal((await h.node(h.G)).state, NodeState.Completed);
       },
     );
+  },
+);
+
+test(
+  "a reviewer release with a pending required check makes no merge call",
+  { timeout: TIMEOUT },
+  async (t) => {
+    const h = await setup(t, KANTHORD_LANDING);
+    h.gitHub.checks({ required: ["check"], commit: h.B, runs: [] });
+    const steps = await h.pull(h.G, FIRST_ATTEMPT);
+    const work = (await h.work(steps, h.gated.id, h.B)).evidence;
+    await h.release(steps);
+    const evaluation = await h.pull(h.G, FIRST_ATTEMPT);
+    const run = (await h.run(evaluation, h.gated.id, h.B)).evidence;
+    await h.pass(evaluation, [run.id, work.id], h.gated.id, h.B);
+    const item = completed(await h.request(evaluation)).items[FIRST_INDEX];
+    assert.ok(item?.kind === ActionResultKind.Submitted);
+    const before = h.gitHub.calls.length;
+    await h.release(evaluation);
+    await until(
+      () =>
+        h.gitHub.calls
+          .slice(before)
+          .filter((call) => call.path.includes(CHECK_RUNS_SEGMENT)),
+      (reads) => reads.length > NO_CALLS,
+      t.signal,
+    );
+    assert.equal(
+      h.gitHub.calls.filter((call) => call.method === HttpMethod.Put).length,
+      NO_CALLS,
+    );
+    assert.equal(h.gitHub.pulls[FIRST_INDEX]?.merged, false);
+    assert.equal((await h.node(h.G)).state, NodeState.ExternalRequested);
   },
 );

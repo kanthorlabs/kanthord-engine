@@ -817,6 +817,17 @@ export function composeServices(options: {
             { identity: missionIdentity, context },
           ),
         ),
+      merge: async (context, input) =>
+        resultOf(
+          await intakeClient["action.merge"](
+            { params: {}, query: {}, body: input },
+            {
+              identity: missionIdentity,
+              context,
+              idempotencyKey: createIdempotencyKey(),
+            },
+          ),
+        ),
     },
     config: options.config.mission,
     health: options.health,

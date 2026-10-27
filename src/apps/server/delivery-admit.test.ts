@@ -205,6 +205,19 @@ test("an open pull request answers accepted_observation and writes nothing", asy
   assert.equal(h.node().state, NodeState.ExternalRequested);
 });
 
+test("an admitted event whose check answers checks_pending changes no state", async (t) => {
+  const h = await fixture(t);
+  h.answer(CheckEndState.ChecksPending);
+  const before = await evidenceOf(h);
+  assert.deepEqual(await h.admit(), {
+    disposition: Disposition.AcceptedObservation,
+    reason: null,
+  });
+  assert.equal(h.checks.length, SINGLE_CALL);
+  assert.deepEqual(await evidenceOf(h), before);
+  assert.equal(h.node().state, NodeState.ExternalRequested);
+});
+
 test("a failed check propagates its code and writes nothing", async (t) => {
   const h = await fixture(t);
   h.dependencies.intakeCheck.check = async () => {

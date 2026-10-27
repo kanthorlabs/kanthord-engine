@@ -105,6 +105,7 @@ export const CheckEndState = {
   None: "none",
   Conflict: "conflict",
   ChecksFailed: "checks_failed",
+  ChecksPending: "checks_pending",
 } as const;
 
 export const ActionTableAction = {
