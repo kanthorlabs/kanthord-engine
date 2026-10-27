@@ -78,7 +78,7 @@ import { submitEvidence } from "./evidence-submit.ts";
 import { evidencePage, getEvidence } from "./evidence-read.ts";
 import { executionContentBound, readContent } from "./evidence-content-read.ts";
 import { submitAssessment } from "./assessment-submit.ts";
-import { checkNode } from "./node-check.ts";
+import { checkNode, resumeDeferredChecks } from "./node-check.ts";
 import {
   AdmissionQueue,
   admitDelivery,
@@ -151,6 +151,7 @@ import { requireActive, requireMission, requireNonterminal } from "./write.ts";
 
 const MISSION_STOPPED_CODE = "mission.lifecycle.stopped";
 const NO_VIOLATIONS = 0;
+const DEFERRED_CHECK_RESUME_FAILED = "Deferred check resume failed.";
 
 class ProbeRollback extends Error {}
 const QUERY_TRUE = "true";
@@ -1214,6 +1215,11 @@ export class MissionService
       return (await this.stop()) ?? reasonOf(context.signal);
     const error = await this.start();
     if (error) return error;
+    try {
+      resumeDeferredChecks(this.dependencies);
+    } catch (error) {
+      this.dependencies.logger.warn({ error }, DEFERRED_CHECK_RESUME_FAILED);
+    }
     await cancelled(this.shutdown.signal);
     return (await this.stop()) ?? reasonOf(context.signal);
   }

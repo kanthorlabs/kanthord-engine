@@ -36,6 +36,7 @@ import { revisionFromRow } from "./revision.ts";
 import {
   DEFERRED_CHECK_RETRY_MS,
   DEFERRED_CHECK_ROUND_LIMIT,
+  resumeDeferredChecks,
 } from "./node-check.ts";
 import { controlHarness, unexpectedCollaboration } from "./test-support.ts";
 
@@ -649,8 +650,11 @@ function deferredFixture(
   let checkCalls = 0;
   const mergeInputs: MergeInput[] = [];
   const warnings: { fields: unknown; message: string }[] = [];
+  const infos: { fields: unknown; message: string }[] = [];
   const h = fixture(t, Intent.Implement, {
     logger: {
+      info: (fields: unknown, message: string) =>
+        infos.push({ fields, message }),
       warn: (fields: unknown, message: string) =>
         warnings.push({ fields, message }),
     } as unknown as Dependencies["logger"],
@@ -736,6 +740,7 @@ function deferredFixture(
     evidenceId,
     mergeInputs,
     warnings,
+    infos,
     checkCalls: () => checkCalls,
   };
 }
@@ -1347,4 +1352,80 @@ test("a failure answers the states, the rule, the count and the limit", (t) => {
     limit: null,
     first_available_at: null,
   });
+});
+
+const RESUMED = "Deferred checks resumed.";
+const LIMIT_REACHED = "Deferred check start limit reached.";
+const SINGLE_NODE_LIMIT = 1;
+const EXPIRED_START = NOW - 1;
+const COMPLETING: CheckAnswer = {
+  end_state: CheckEndState.Expected,
+  landed_commits: [LANDED_COMMIT],
+};
+
+test("resume checks an external node with an unresolved request and completes it on expected", async (t) => {
+  const h = deferredFixture(t, COMPLETING);
+  h.store.transaction((tx) =>
+    setNodeState(tx, h.node_id, NodeState.ExternalRequested),
+  );
+  resumeDeferredChecks(h.dependencies);
+  await deferredCheckEnds(h.calls, t.signal);
+  assert.equal(h.checkCalls(), ONE_CALL);
+  assert.equal(h.node().state, NodeState.Completed);
+});
+
+test("resume schedules at most the limit and logs the count and the limit warning", async (t) => {
+  const h = deferredFixture(t, COMPLETING);
+  h.store.transaction((tx) => {
+    setNodeState(tx, h.node_id, NodeState.ExternalRequested);
+    const olderId = createIdentity("node");
+    insertNode(tx, {
+      id: olderId,
+      mission_id: h.mission_id,
+      filename: "older.md",
+      created_at: NOW,
+    });
+    const prior = revisionFromRow(tx, readCurrentRevision(tx, h.node_id)!);
+    insertRevision(tx, { ...prior, node_id: olderId, filename: "older.md" });
+    openAttempt(tx, olderId, FIRST_ATTEMPT, h.opener, EXPIRED_START);
+    setNodeState(tx, olderId, NodeState.ExternalRequested);
+    insertEvidence(
+      tx,
+      {
+        id: createIdentity("evidence"),
+        node_id: olderId,
+        attempt: FIRST_ATTEMPT,
+        subject: "Request",
+        requirement_key: "repo.pull_request",
+        end_state: null,
+        verification: null,
+        provenance: JSON.stringify(h.opener),
+        created_at: NOW,
+      },
+      [],
+    );
+  });
+  resumeDeferredChecks(h.dependencies, SINGLE_NODE_LIMIT);
+  await deferredCheckEnds(h.calls, t.signal);
+  await turn(undefined, { signal: t.signal });
+  assert.equal(h.checkCalls(), ONE_CALL);
+  assert.deepEqual(h.infos, [
+    {
+      fields: { count: SINGLE_NODE_LIMIT, limit: SINGLE_NODE_LIMIT },
+      message: RESUMED,
+    },
+  ]);
+  assert.deepEqual(h.warnings, [
+    { fields: { limit: SINGLE_NODE_LIMIT }, message: LIMIT_REACHED },
+  ]);
+});
+
+test("resume ignores a node in another state", async (t) => {
+  const h = deferredFixture(t, COMPLETING);
+  assert.equal(h.node().state, NodeState.Evaluating);
+  resumeDeferredChecks(h.dependencies);
+  await turn(undefined, { signal: t.signal });
+  await turn(undefined, { signal: t.signal });
+  assert.equal(h.checkCalls(), NO_CALLS);
+  assert.equal(h.node().state, NodeState.Evaluating);
 });

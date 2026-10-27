@@ -9,8 +9,10 @@ import {
   ActorService,
   AssessmentResult,
   AssetKind,
+  EndState,
+  NodeState,
 } from "./contract.ts";
-import { insertMission, insertNode, readNode } from "./store.ts";
+import { insertMission, insertNode, readNode, setNodeState } from "./store.ts";
 import { missionHarness } from "./test-support.ts";
 import {
   openAttempt,
@@ -34,6 +36,7 @@ import {
   readRequests,
   readReleaseEvidence,
   readLandedCommitEvidence,
+  readDeferredCheckNodes,
   failedBindingsOf,
   type AssessmentRow,
   type EvidenceRow,
@@ -380,4 +383,77 @@ test("failed assets list each binding once for its attempt in failure order", (t
     ]);
     assert.deepEqual(failedBindingsOf(tx, h.node_id, THIRD_ATTEMPT), []);
   });
+});
+
+const DEFERRED_LIMIT = 10;
+
+function requestRow(
+  nodeId: string,
+  attempt: number,
+  endState: EvidenceRow["end_state"] = null,
+): EvidenceRow {
+  return {
+    id: createIdentity("evidence"),
+    node_id: nodeId,
+    attempt,
+    subject: RATIONALE,
+    requirement_key: "repo.pull_request",
+    end_state: endState,
+    verification: null,
+    provenance: canonicalJSON(ACTOR),
+    created_at: NOW,
+  };
+}
+
+test("deferred check nodes hold an external request with an unresolved request of the open attempt", (t) => {
+  const h = fixture(t);
+  const externalNode = (state: NodeState, openedAt: number) => {
+    const nodeId = createIdentity("node");
+    h.store.transaction((tx) => {
+      insertNode(tx, {
+        id: nodeId,
+        mission_id: h.mission_id,
+        filename: `${nodeId}.md`,
+        created_at: NOW,
+      });
+      openAttempt(tx, nodeId, FIRST_ATTEMPT, ACTOR, openedAt);
+      setNodeState(tx, nodeId, state);
+    });
+    return nodeId;
+  };
+  const request = (
+    nodeId: string,
+    attempt = FIRST_ATTEMPT,
+    endState: EvidenceRow["end_state"] = null,
+  ) =>
+    h.store.transaction((tx) =>
+      insertEvidence(tx, requestRow(nodeId, attempt, endState), []),
+    );
+  const read = (limit = DEFERRED_LIMIT) =>
+    h.store.transaction((tx) => readDeferredCheckNodes(tx, limit));
+  const matching = externalNode(NodeState.ExternalRequested, NOW);
+  request(matching);
+  const newer = externalNode(NodeState.ExternalRequested, LATER);
+  request(newer);
+  request(externalNode(NodeState.Evaluating, NOW));
+  request(
+    externalNode(NodeState.ExternalRequested, NOW),
+    FIRST_ATTEMPT,
+    EndState.Other,
+  );
+  const closed = externalNode(NodeState.ExternalRequested, NOW);
+  request(closed);
+  h.store.transaction((tx) => closeAttempt(tx, closed, FIRST_ATTEMPT, LATER));
+  externalNode(NodeState.ExternalRequested, NOW);
+  assert.deepEqual(
+    read().map((row) => ({ ...row })),
+    [
+      { node_id: newer, attempt: FIRST_ATTEMPT },
+      { node_id: matching, attempt: FIRST_ATTEMPT },
+    ],
+  );
+  assert.deepEqual(
+    read(1).map((row) => ({ ...row })),
+    [{ node_id: newer, attempt: FIRST_ATTEMPT }],
+  );
 });

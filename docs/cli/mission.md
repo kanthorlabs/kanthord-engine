@@ -619,7 +619,9 @@ The required-action and request sets of an `examine` node are empty.
   After a reviewer release, KanthorD checks a pending pull request again every
   60 s, at most 60 times. It merges a `kanthord` landing pull request when its
   required checks pass. The last round ends the check. A human then merges the
-  pull request.
+  pull request. At each server start, KanthorD checks again each
+  `External.Requested` node that holds an unresolved request, at most 50 nodes
+  for each start.
   The [request record](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/mission-service.impl.md#the-request-record) defines the check.
 - The Worker action performer owns every configured external write for both
   harnesses, and the Intake Service performs it. The performer submits the

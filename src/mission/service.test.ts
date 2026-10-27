@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
 import pino from "pino";
-import { background } from "../kernel/context.ts";
+import { setImmediate as turn } from "node:timers/promises";
+import { background, CancellationContext } from "../kernel/context.ts";
 import { testHumanIdentity } from "../kernel/test-identity.ts";
 import { OperationError } from "../kernel/errors.ts";
 import { CommitType } from "../kernel/commit-message.ts";
@@ -76,6 +77,7 @@ import {
 import { importDigest, normalizeImportSnapshot } from "./import.ts";
 import { serializePlanFile } from "./export.ts";
 import { parsePlanFile } from "./parser.ts";
+import { DEFERRED_CHECK_START_LIMIT } from "./node-check.ts";
 import { MissionService, humanActor, type Dependencies } from "./service.ts";
 import {
   CONTENT_FIELDS,
@@ -338,6 +340,7 @@ type Collaborators = Pick<Dependencies, "bindings" | "workQueue"> &
       | "executionAttribution"
       | "environments"
       | "acts"
+      | "logger"
     >
   >;
 
@@ -561,6 +564,95 @@ test("MissionService healthcheck follows lifecycle", async (t) => {
   assert.deepEqual(await mission.healthcheck(), {
     operations: HealthStatus.Unavailable,
   });
+});
+
+const RESUMED_MESSAGE = "Deferred checks resumed.";
+const RESUME_FAILED_MESSAGE = "Deferred check resume failed.";
+const TURN_BOUND_MS = 5000;
+const ONE_RECORD = 1;
+const FAILED_LEVEL = "warn";
+
+function capturedLogger() {
+  const records: { level: string; fields: unknown; message: string }[] = [];
+  const logger = pino({ enabled: false });
+  for (const level of ["info", "warn"] as const)
+    logger[level] = ((fields: unknown, message: string) => {
+      records.push({ level, fields, message });
+    }) as typeof logger.info;
+  return { logger, records };
+}
+
+async function runUntilShutdown(
+  mission: MissionService,
+  signal: AbortSignal,
+  shutdown: CancellationContext,
+) {
+  let settled = false;
+  const running = mission.run(shutdown).finally(() => {
+    settled = true;
+  });
+  await turn(undefined, { signal });
+  const settledBeforeShutdown = settled;
+  shutdown.cancel();
+  await running;
+  return settledBeforeShutdown;
+}
+
+test("MissionService run logs the resumed deferred checks once", async (t) => {
+  const { store } = fixture(t);
+  const { logger, records } = capturedLogger();
+  const mission = makeService(new HealthRegistry(), store, {
+    bindings,
+    workQueue,
+    logger,
+  });
+  const settledBeforeShutdown = await runUntilShutdown(
+    mission,
+    AbortSignal.any([t.signal, AbortSignal.timeout(TURN_BOUND_MS)]),
+    new CancellationContext(),
+  );
+  assert.equal(settledBeforeShutdown, false);
+  assert.deepEqual(records, [
+    {
+      level: "info",
+      fields: { count: 0, limit: DEFERRED_CHECK_START_LIMIT },
+      message: RESUMED_MESSAGE,
+    },
+  ]);
+});
+
+test("MissionService run on a stopped service logs no resume", async (t) => {
+  const { store } = fixture(t);
+  const { logger, records } = capturedLogger();
+  const mission = makeService(new HealthRegistry(), store, {
+    bindings,
+    workQueue,
+    logger,
+  });
+  assert.equal(await mission.stop(), null);
+  assert.ok(await mission.run(background));
+  assert.deepEqual(records, []);
+});
+
+test("MissionService run logs a failed resume and keeps waiting", async (t) => {
+  const { store } = fixture(t);
+  store.database.exec("DROP TABLE mission_evidence");
+  const { logger, records } = capturedLogger();
+  const mission = makeService(new HealthRegistry(), store, {
+    bindings,
+    workQueue,
+    logger,
+  });
+  const settledBeforeShutdown = await runUntilShutdown(
+    mission,
+    AbortSignal.any([t.signal, AbortSignal.timeout(TURN_BOUND_MS)]),
+    new CancellationContext(),
+  );
+  assert.equal(settledBeforeShutdown, false);
+  assert.equal(records.length, ONE_RECORD);
+  assert.equal(records[0]?.level, FAILED_LEVEL);
+  assert.equal(records[0]?.message, RESUME_FAILED_MESSAGE);
+  assert.ok((records[0]?.fields as { error: unknown }).error instanceof Error);
 });
 
 test("MissionService registers its operations health probe", async (t) => {
