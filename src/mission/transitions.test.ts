@@ -14,6 +14,7 @@ import {
   AssessmentResult,
   CheckEndState,
   EndState,
+  MissionErrorCode,
   ReleaseObligation,
   RepositoryAction,
   RepositoryLanding,
@@ -22,6 +23,7 @@ import {
   missionOperations,
   type AssetKind as AssetType,
 } from "./contract.ts";
+import { AuthorizationRefusal } from "./authorization.ts";
 import type { Dependencies } from "./service.ts";
 import {
   closeAttempt,
@@ -1083,6 +1085,16 @@ test("an assessment that is no longer current at merge time calls no merge and e
   assert.equal(h.checkCalls(), ONE_CALL);
   assert.equal(h.warnings.length, ONE_CALL);
   assert.equal(h.warnings[FIRST_INDEX]!.message, CRASHED);
+  const fields = h.warnings[FIRST_INDEX]!.fields as {
+    error: unknown;
+    node_id: string;
+  };
+  assert.equal(fields.node_id, h.node_id);
+  assert.ok(fields.error instanceof OperationError);
+  assert.equal(fields.error.code, MissionErrorCode.AuthorizationRefused);
+  assert.deepEqual(fields.error.details, {
+    reason: AuthorizationRefusal.ClaimNotLive,
+  });
 });
 
 test("a failed check schedules the next round after the retry delay", async (t) => {

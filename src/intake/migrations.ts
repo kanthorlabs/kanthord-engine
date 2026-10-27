@@ -35,7 +35,7 @@ const createIntakeTables: Migration = (database) => {
       error TEXT,
       created_at INTEGER NOT NULL
     );
-    CREATE UNIQUE INDEX intake_outbound_request_operation_key ON intake_outbound_request (operation, request_key);
+    CREATE UNIQUE INDEX intake_outbound_request_project_operation_key ON intake_outbound_request (project_id, operation, request_key);
   `);
 };
 

@@ -67,6 +67,9 @@ const SECOND_ATTEMPT = 2;
 const FIRST_REWORK = 1;
 const HUMAN_REASON = "Hold";
 const TRANSITION_ARGUMENT = 2;
+const GIT_FAILED = "repository.connector.git_failed";
+const BAD_GATEWAY = 502;
+const ONE_ASSESSMENT = 1;
 const FAILURE_CAUSE_ARGUMENT = 3;
 const FIRST_QUEUED_AT = 40;
 const REWORK_CAUSE = attributed(
@@ -408,16 +411,17 @@ test("a change with no gate file stores null and keeps the service merge open", 
 
 test("a failed gate file read refuses the assessment and stores none", async (t) => {
   const h = await fixture(t, RepositoryAction.MergePush);
-  const code = "repository.connector.git_failed";
   h.dependencies.intakeGateFiles.read = async () => {
-    throw new OperationError(502, code, "The git read fails.");
+    throw new OperationError(BAD_GATEWAY, GIT_FAILED, "The git read fails.");
   };
   await assert.rejects(
     h.submit(),
-    (error) => error instanceof OperationError && error.code === code,
+    (error) => error instanceof OperationError && error.code === GIT_FAILED,
   );
   assert.deepEqual(
-    h.store.transaction((tx) => listAssessments(tx, h.node_id, null, null, 1)),
+    h.store.transaction((tx) =>
+      listAssessments(tx, h.node_id, null, null, ONE_ASSESSMENT),
+    ),
     [],
   );
   assert.equal(h.node().state, NodeState.Evaluating);

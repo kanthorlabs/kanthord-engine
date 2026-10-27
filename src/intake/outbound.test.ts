@@ -42,6 +42,7 @@ import { discardOutbound } from "./outbound-write.ts";
 import { unusedActionDependencies } from "./test-support.ts";
 
 const PROJECT_ID = "project_01ARZ3NDEKTSV4RRFFQ69G5FAV";
+const OTHER_PROJECT_ID = "project_01ARZ3NDEKTSV4RRFFQ69G5FAW";
 const REQUEST_KEY = "request-key-1";
 const OTHER_REQUEST_KEY = "request-key-2";
 const CREDENTIAL = "github-main";
@@ -65,6 +66,7 @@ const IDLE_IN_FLIGHT_SIZE = 0;
 const UNLOGGED_LINE_COUNT = 0;
 const UNRUN_COUNT = 0;
 const COUNT_STEP = 1;
+const TWO_RUNS = 2;
 const ERROR_ITEMS_PER_FAILURE = 1;
 const BYTES_ABOVE_LIMIT = 1;
 const DROPS_PER_MATERIAL = 1;
@@ -92,6 +94,7 @@ interface Script {
   encode?: (value: unknown) => unknown;
   refuse?: boolean;
   requestKey?: string;
+  projectId?: string;
   deadlineMs?: number;
 }
 
@@ -160,7 +163,7 @@ function request(counts: Counts, script: Script): OutboundRun<OutboundAnswer> {
       counts.materials.push(material);
       return {
         operation: OutboundOperation.GitHubPullRequest,
-        project_id: PROJECT_ID,
+        project_id: script.projectId ?? PROJECT_ID,
         credential: CREDENTIAL,
         material,
       };
@@ -189,9 +192,9 @@ function run(h: Harness, script: Script): Promise<OutboundAnswer> {
   );
 }
 
-function row(store: Store): OutboundRow | null {
+function row(store: Store, projectId = PROJECT_ID): OutboundRow | null {
   return store.transaction((tx) =>
-    findByKey(tx, OutboundOperation.GitHubPullRequest, REQUEST_KEY),
+    findByKey(tx, projectId, OutboundOperation.GitHubPullRequest, REQUEST_KEY),
   );
 }
 
@@ -369,6 +372,25 @@ test("Two concurrent runs of one key make one call, and the refused repeat keeps
   assert.deepEqual(await first, { ok: true, result: ADDRESS });
   assert.equal(h.counts.calls, RUNS_PER_REQUEST);
   assert.equal(h.inFlight.size, IDLE_IN_FLIGHT_SIZE);
+});
+
+test("two projects with one request key each store their own row and make their own call", async (t) => {
+  const h = harness(t);
+  const first = await run(h, {
+    call: async () => ({ ok: true, result: ADDRESS }),
+  });
+  const second = await run(h, {
+    projectId: OTHER_PROJECT_ID,
+    call: async () => ({ ok: true, result: OTHER_ADDRESS }),
+  });
+  assert.equal(h.counts.calls, TWO_RUNS);
+  assert.deepEqual(first, { ok: true, result: ADDRESS });
+  assert.deepEqual(second, { ok: true, result: OTHER_ADDRESS });
+  for (const projectId of [PROJECT_ID, OTHER_PROJECT_ID])
+    assert.equal(
+      row(h.store, projectId)?.state,
+      OutboundRequestState.Succeeded,
+    );
 });
 
 test("A repeat of succeeded answers its decoded result with no call and no read-back", async (t) => {

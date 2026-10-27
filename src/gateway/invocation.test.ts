@@ -355,6 +355,7 @@ function machineInvocation(
   const store = new Store(":memory:");
   t.after(() => store.close());
   registry.seal({ [StoreName.Operational]: store });
+  const heartbeats: string[] = [];
   const runtime = createIdentity("worker_registration");
   const identity = testMachineIdentity(
     {
@@ -400,7 +401,9 @@ function machineInvocation(
           project_id: identity.projectId,
           resource_identity: identity.resourceIdentity,
         }),
-        heartbeat: () => {},
+        heartbeat: (runtimeIdentity) => {
+          heartbeats.push(runtimeIdentity);
+        },
       },
     },
   });
@@ -410,7 +413,7 @@ function machineInvocation(
     error: (fields: Record<string, unknown>, message: string) =>
       failures.push({ fields, message }),
   } as unknown as Logger;
-  return { invocation, identity, logger, failures, masterKey };
+  return { invocation, identity, logger, failures, masterKey, heartbeats };
 }
 
 const clientOperation = {
@@ -474,6 +477,9 @@ test("an unknown failure answers 500 and logs the error with the request and the
 });
 
 const NO_HANDLER_CALLS = 0;
+const NO_RESERVE_CALLS = 0;
+const ONE_RESERVE_CALL = 1;
+const ONE_HEARTBEAT = 1;
 const ENDED_CODE = "worker.registration.ended";
 const ENDED_MESSAGE = "The worker group of the registration ended.";
 const ENDED_PATH = "/api/test/ended";
@@ -484,6 +490,13 @@ const endedOperation = {
   path: ENDED_PATH,
   requiresRegistration: false,
   endedGroup: { code: ENDED_CODE, message: ENDED_MESSAGE },
+} as const;
+const endedMutation = {
+  ...endedOperation,
+  id: "test.client.ended_mutation",
+  path: "/api/test/ended_mutation",
+  method: "DELETE",
+  mutation: true,
 } as const;
 const plainOperation = {
   ...clientOperation,
@@ -526,6 +539,49 @@ test("an operation with an ended group answer answers 404 for an ended group and
     );
   }
   assert.equal(calls, NO_HANDLER_CALLS);
+});
+
+test("an ended group answer of a mutation records no idempotency answer and sends no heartbeat", async (t) => {
+  let calls = 0;
+  const registry = new OperationRegistry();
+  registry.register(endedMutation, () => {
+    calls++;
+    return COMMITTED_VALUE;
+  });
+  const h = machineInvocation(t, registry, async () => {}, true);
+  const reserve = t.mock.method(h.invocation.idempotency, "reserve");
+  const token = await endedToken(h.masterKey, h.identity);
+  for (const credential of [
+    { authorization: `Bearer ${token}` },
+    { identity: h.identity },
+  ]) {
+    const response = await h.invocation.invoke(endedMutation.id, input, {
+      ...credential,
+      idempotencyKey: createIdempotencyKey(),
+    });
+    assert.equal(response.status, HttpStatus.NotFound);
+    assert.equal(
+      (response.body as { error: { code: string } }).error.code,
+      ENDED_CODE,
+    );
+  }
+  assert.equal(calls, NO_HANDLER_CALLS);
+  assert.equal(reserve.mock.callCount(), NO_RESERVE_CALLS);
+  assert.deepEqual(h.heartbeats, []);
+  const controlRegistry = new OperationRegistry();
+  controlRegistry.register(endedMutation, () => COMMITTED_VALUE);
+  const control = machineInvocation(t, controlRegistry, async () => {}, false);
+  const controlReserve = t.mock.method(
+    control.invocation.idempotency,
+    "reserve",
+  );
+  const answer = await control.invocation.invoke(endedMutation.id, input, {
+    identity: control.identity,
+    idempotencyKey: createIdempotencyKey(),
+  });
+  assert.equal(answer.status, HttpStatus.OK);
+  assert.equal(controlReserve.mock.callCount(), ONE_RESERVE_CALL);
+  assert.equal(control.heartbeats.length, ONE_HEARTBEAT);
 });
 
 test("an operation with no ended group answer answers 401 for an ended group", async (t) => {

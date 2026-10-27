@@ -185,7 +185,12 @@ function admit<TBody>(
   const authorization = request.authorize(tx, now);
   hold.material = authorization.material;
   assert.ok(authorization.project_id.length > EMPTY_TEXT_LENGTH);
-  const existing = findByKey(tx, authorization.operation, request.requestKey);
+  const existing = findByKey(
+    tx,
+    authorization.project_id,
+    authorization.operation,
+    request.requestKey,
+  );
   if (existing !== null)
     return repeat(inFlight, existing, request.resultCodec, hold);
   const id = insertOrConflict(tx, authorization, request.requestKey, now);
@@ -196,6 +201,7 @@ function admit<TBody>(
   }
   const conflicting = findByKey(
     tx,
+    authorization.project_id,
     authorization.operation,
     request.requestKey,
   );

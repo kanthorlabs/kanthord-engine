@@ -17,19 +17,25 @@ const EMPTY_TEXT_LENGTH = 0;
 const EARLIEST_TIME = 0;
 const ROWS_PER_WRITE = 1;
 const KEY_UNIQUE_FAILURE =
-  /UNIQUE constraint failed: intake_outbound_request\.operation, intake_outbound_request\.request_key/;
+  /UNIQUE constraint failed: intake_outbound_request\.project_id, intake_outbound_request\.operation, intake_outbound_request\.request_key/;
 const SUCCEED_SOURCES: readonly OutboundRequestStateValue[] = [
   OutboundRequestState.Pending,
   OutboundRequestState.Failed,
 ];
 
 export class OutboundKeyConflict extends Error {
+  readonly projectId: string;
   readonly operation: OutboundOperationValue;
   readonly requestKey: string;
 
-  constructor(operation: OutboundOperationValue, requestKey: string) {
+  constructor(
+    projectId: string,
+    operation: OutboundOperationValue,
+    requestKey: string,
+  ) {
     super(`An outbound request of ${operation} already holds this key.`);
     this.name = "OutboundKeyConflict";
+    this.projectId = projectId;
     this.operation = operation;
     this.requestKey = requestKey;
   }
@@ -82,7 +88,11 @@ export function insertPending(tx: Transaction, row: PendingOutbound): string {
       );
   } catch (error) {
     if (error instanceof Error && KEY_UNIQUE_FAILURE.test(error.message))
-      throw new OutboundKeyConflict(row.operation, row.request_key);
+      throw new OutboundKeyConflict(
+        row.project_id,
+        row.operation,
+        row.request_key,
+      );
     throw error;
   }
   return id;
@@ -90,9 +100,11 @@ export function insertPending(tx: Transaction, row: PendingOutbound): string {
 
 export function findByKey(
   tx: Transaction,
+  projectId: string,
   operation: OutboundOperationValue,
   requestKey: string,
 ): OutboundRow | null {
+  assert.ok(projectId.length > EMPTY_TEXT_LENGTH, "A project is required.");
   assert.ok(
     requestKey.length > EMPTY_TEXT_LENGTH,
     "A request key is required.",
@@ -100,9 +112,9 @@ export function findByKey(
   return (
     (tx.database
       .prepare(
-        "SELECT * FROM intake_outbound_request WHERE operation = ? AND request_key = ?",
+        "SELECT * FROM intake_outbound_request WHERE project_id = ? AND operation = ? AND request_key = ?",
       )
-      .get(operation, requestKey) as OutboundRow | undefined) ?? null
+      .get(projectId, operation, requestKey) as OutboundRow | undefined) ?? null
   );
 }
 

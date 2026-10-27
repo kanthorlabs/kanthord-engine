@@ -701,6 +701,24 @@ test("a push to the base branch with no exact match checks a human-landing branc
   assert.equal(h.node().state, NodeState.Completed);
 });
 
+test("a push to the base branch whose human-landing check answers none keeps the request unresolved", async (t) => {
+  const h = await humanLandingFixture(t, OTHER_COMMIT);
+  h.answer(CheckEndState.None);
+  assert.deepEqual(await h.admit(undefined, pushed("main"), "push"), {
+    disposition: Disposition.AcceptedObservation,
+    reason: null,
+  });
+  assert.deepEqual(h.checks, [h.landing]);
+  const stored = h.store.transaction(
+    (tx) =>
+      tx.database
+        .prepare("SELECT end_state FROM mission_evidence WHERE id = ?")
+        .get(h.landing) as { end_state: string | null },
+  );
+  assert.equal(stored.end_state, null);
+  assert.equal(h.node().state, NodeState.ExternalRequested);
+});
+
 test("a push to another branch checks no branch push request", async (t) => {
   const h = await humanLandingFixture(t, OTHER_COMMIT);
   h.answer(CheckEndState.Expected, [OTHER_COMMIT]);

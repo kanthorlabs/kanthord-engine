@@ -487,11 +487,12 @@ test("a stored session resumes from the last entry of each kind and lists throug
     timestamp: Date.now(),
   });
   const fixture = await workbenchFixture(t, [], state);
-  (
+  const dependencies = (
     fixture.workbenchService as unknown as {
       dependencies: { hostHome: string };
     }
-  ).dependencies.hostHome = HOST_HOME;
+  ).dependencies;
+  dependencies.hostHome = HOST_HOME;
   const listed = completed(
     await fixture.workbench["session.list"](
       { params: {}, query: { agent_name: AGENT }, body: null },
@@ -519,6 +520,18 @@ test("a stored session resumes from the last entry of each kind and lists throug
     ),
   );
   assert.equal(read.resume_command, `pi --session ${manager.getSessionFile()}`);
+  dependencies.hostHome = state;
+  const homeRead = completed(
+    await fixture.workbench["session.get"](
+      { params: { session_id: id }, query: {}, body: null },
+      fixture.options,
+    ),
+  );
+  assert.equal(
+    homeRead.resume_command,
+    `pi --session ~${manager.getSessionFile()!.slice(state.length)}`,
+  );
+  dependencies.hostHome = HOST_HOME;
   assert.deepEqual(read.configuration, {
     agent_provider: BACKUP,
     model_identifier: HAIKU,

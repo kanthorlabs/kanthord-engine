@@ -447,7 +447,8 @@ MCP server and the Mission Service reach them through the direct adapter.
 
 The callers of the outbound operations `intake.action.perform` and
 `intake.storage.delete`, the action performer and the Mission Service, track a
-request by a repeat with the same request key. A repeat
+request by a repeat with the same request key. Intake scopes a request key to
+its project and its operation. A repeat
 answers `409` `intake.outbound.request.in_flight` while the call runs and
 `409` `intake.outbound.request.discarded` for a discarded request.
 `intake.action.perform` answers `422` `intake.outbound.request.action_unmapped`
@@ -478,7 +479,7 @@ the read-back of `github.pull_request_merge` that `intake.action.perform` uses.
 It answers the pull request address, or a result class answer with the code
 `repository.platform.github.<class>`. Intake stores the request under the key `service_merge/<request_key>`. `intake.action.perform` answers `400` `gateway.request.validation_failed` for a `request_key` that starts with `service_merge/`. A stored answer that names another pull request answers `final_refusal` and calls no merge.
 
-Before the merge, the action performer reads the required checks with `github-pull-request-required-check-get`. While a required check of the head commit is pending or failed, it requests no merge. When the read fails or answers an unexpected body, it requests no merge. The deferred check of the Mission Service then merges the pull request.
+Before the merge, the action performer reads the required checks with `github-pull-request-required-check-get`. While a required check of the head commit is pending or failed, it requests no merge. When the read fails or answers an unexpected body, it requests no merge. The deferred check of the Mission Service can then request the merge.
 
 Only the Mission Service calls it, for the execution caller of `mission.assessment.submit`. `intake.execution.gate_files.read` runs for an execution caller and takes `{ binding_id, base_branch, commit }`. Intake keeps one bare repository for each binding at `intake/repositories/<binding id>.git` of the server state directory and reuses it. It fetches the commits of the base branch and the commit with `--filter=tree:0` and the SSH identity of the binding. It fetches each tree and blob that a read needs on demand. It reads `.kanthord/affected-tests.json` at the base branch. A path of its `gate_files` is changed when its mode or its object at the merge base differs from its mode or its object at the commit. A new path and a removed path are changed. A declared directory is changed when any entry below it changes. The answer is `{ paths }`. A git failure answers `502` with the git code and removes the bare repository, except after a deadline. A declaration that does not match the declaration shape of the worker, or that holds a path of `gate_files` that is not canonical, answers `502` `repository.gate_declaration.invalid`. The Intake Service keeps the bare repository for this error.
 

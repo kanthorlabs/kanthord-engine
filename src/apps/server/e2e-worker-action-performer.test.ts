@@ -88,7 +88,10 @@ const PULL_REQUEST_OPERATION = "github.pull_request";
 const PUSH_COUNTER = "pre-receive.count";
 const MAIN_REF = "refs/heads/main";
 const GATE_FILE_PATHS = ["package.json"];
-const GATE_DECLARATION_FILE = ".kanthord/affected-tests.json";
+const GATE_DECLARATION_DIRECTORY = ".kanthord";
+const GATE_DECLARATION_FILE = `${GATE_DECLARATION_DIRECTORY}/affected-tests.json`;
+const UNRELATED_FILE = "unrelated.md";
+const OTHER_BRANCH = "other";
 const GATE_DECLARATION = {
   version: 1,
   command: "true",
@@ -163,7 +166,7 @@ async function gateChangeOnBranch(t: TestContext, bare: string) {
   const git = simpleGit(directory);
   await git.addConfig("user.name", "Test Node");
   await git.addConfig("user.email", "test_node@example.invalid");
-  mkdirSync(join(directory, ".kanthord"));
+  mkdirSync(join(directory, GATE_DECLARATION_DIRECTORY));
   writeFileSync(
     join(directory, GATE_DECLARATION_FILE),
     JSON.stringify(GATE_DECLARATION),
@@ -189,6 +192,44 @@ async function mergeOnMain(t: TestContext, bare: string, commit: string) {
   await git.addConfig("user.email", "test_human@example.invalid");
   await git.raw(["merge", "--no-ff", "-m", "land", commit]);
   await git.push("origin", "main");
+}
+
+async function pushUnrelatedOnMain(t: TestContext, bare: string) {
+  const directory = join(temporary(t), "unrelated");
+  await simpleGit().clone(bare, directory);
+  const git = simpleGit(directory);
+  await git.addConfig("user.name", "Test Human");
+  await git.addConfig("user.email", "test_human@example.invalid");
+  writeFileSync(join(directory, UNRELATED_FILE), "unrelated\n");
+  await git.add(UNRELATED_FILE);
+  await git.commit("unrelated change");
+  await git.push("origin", "main");
+}
+
+async function squashOnMain(t: TestContext, bare: string, commit: string) {
+  const directory = join(temporary(t), "squash");
+  await simpleGit().clone(bare, directory);
+  const git = simpleGit(directory);
+  await git.addConfig("user.name", "Test Human");
+  await git.addConfig("user.email", "test_human@example.invalid");
+  await git.raw(["merge", "--squash", commit]);
+  await git.commit("land by squash");
+  await git.push("origin", "main");
+}
+
+async function pushToBranch(
+  t: TestContext,
+  bare: string,
+  commit: string,
+  branch: string,
+) {
+  const directory = join(temporary(t), "branch");
+  await simpleGit().clone(bare, directory);
+  await simpleGit(directory).raw([
+    "push",
+    "origin",
+    `${commit}:refs/heads/${branch}`,
+  ]);
 }
 
 function rejectPushes(bare: string) {
@@ -971,6 +1012,19 @@ test(
       (await check()).results[FIRST_INDEX]?.resolution,
       Resolution.Unresolved,
     );
+    const bare = h.pushedBare.bare;
+    for (const land of [
+      () => pushUnrelatedOnMain(t, bare),
+      () => squashOnMain(t, bare, G),
+      () => pushToBranch(t, bare, G, OTHER_BRANCH),
+    ]) {
+      await land();
+      assert.equal(
+        (await check()).results[FIRST_INDEX]?.resolution,
+        Resolution.Unresolved,
+      );
+      assert.equal((await h.node(h.P)).state, NodeState.ExternalRequested);
+    }
     await mergeOnMain(t, h.pushedBare.bare, G);
     assert.equal(
       (await check()).results[FIRST_INDEX]?.resolution,
