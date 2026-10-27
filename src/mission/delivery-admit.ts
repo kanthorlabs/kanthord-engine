@@ -12,7 +12,6 @@ import type { Transaction } from "../kernel/store.ts";
 import { AuthorizationRefusal, authorizationRefused } from "./authorization.ts";
 import {
   AdmissionRefusal,
-  CheckEndState,
   CONTENT_ENCODING,
   Disposition,
   MissionErrorCode,
@@ -29,7 +28,7 @@ import {
   unresolvedPullRequests,
   unresolvedRequestCount,
 } from "./delivery-match.ts";
-import { applyEndState, requestContext } from "./node-check.ts";
+import { applyEndState, changesNothing, requestContext } from "./node-check.ts";
 import { readEvidence } from "./record-store.ts";
 import type { Dependencies } from "./service.ts";
 
@@ -144,7 +143,7 @@ function commitBaseAdmission(
 ): AdmissionAnswer {
   const now = Date.now();
   for (const { evidenceId, check } of checked.base) {
-    if (check.end_state === CheckEndState.None) continue;
+    if (changesNothing(check.end_state)) continue;
     const request = readEvidence(tx, evidenceId);
     assert.ok(request !== null);
     if (request.end_state !== null) continue;
@@ -166,7 +165,7 @@ function commitExact(
   input: AdmissionInput,
   checked: Checked,
 ): AdmissionAnswer {
-  if (checked.check.end_state === CheckEndState.None) return ACCEPTED;
+  if (changesNothing(checked.check.end_state)) return ACCEPTED;
   const request = readEvidence(tx, checked.evidenceId);
   if (request !== null && request.end_state !== null) return DUPLICATE;
   const match = matchRequests(tx, input.project_id, checked.address);

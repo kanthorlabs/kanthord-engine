@@ -633,9 +633,27 @@ test("the token reaches no failure and no log record", async (t) => {
 const HEAD_SHA = "89abcdef0123456789abcdef0123456789abcdef";
 const OLDER_SHA = "fedcba9876543210fedcba9876543210fedcba98";
 const NO_REVIEWS: unknown[] = [];
-const NO_CHECKS = { head_commit: "", failed: [] };
-const FAILED_AT_HEAD = { head_commit: HEAD_SHA, failed: ["check"] };
-const FAILED_AT_OLDER = { head_commit: OLDER_SHA, failed: ["check"] };
+const NO_CHECKS = { head_commit: HEAD_SHA, pending: [], failed: [] };
+const FAILED_AT_HEAD = {
+  head_commit: HEAD_SHA,
+  pending: [],
+  failed: ["check"],
+};
+const FAILED_AT_OLDER = {
+  head_commit: OLDER_SHA,
+  pending: [],
+  failed: ["check"],
+};
+const PENDING_AT_HEAD = {
+  head_commit: HEAD_SHA,
+  pending: ["check"],
+  failed: [],
+};
+const FAILED_AND_PENDING_AT_HEAD = {
+  head_commit: HEAD_SHA,
+  pending: ["other"],
+  failed: ["check"],
+};
 const PULL_REQUEST_BODY = {
   number: 7,
   state: "open",
@@ -1706,7 +1724,7 @@ function decision(reviews: unknown[], body: object = PULL_REQUEST_BODY) {
 }
 
 function foldWithChecks(
-  checks: { head_commit: string; failed: string[] },
+  checks: { head_commit: string; pending: string[]; failed: string[] },
   reviews: unknown[] = NO_REVIEWS,
   body: object = PULL_REQUEST_BODY,
 ) {
@@ -1722,12 +1740,27 @@ test("an open pull request with a failed required check at its head folds to che
   assert.equal(foldWithChecks(FAILED_AT_HEAD), CheckEndState.ChecksFailed);
 });
 
-test("a pending required check or a check of another head folds to none", () => {
+test("a pending required check at the head folds to checks_pending", () => {
+  assert.equal(foldWithChecks(PENDING_AT_HEAD), CheckEndState.ChecksPending);
+});
+
+test("a failed required check wins over a pending required check", () => {
   assert.equal(
-    foldWithChecks({ head_commit: HEAD_SHA, failed: [] }),
-    CheckEndState.None,
+    foldWithChecks(FAILED_AND_PENDING_AT_HEAD),
+    CheckEndState.ChecksFailed,
   );
-  assert.equal(foldWithChecks(FAILED_AT_OLDER), CheckEndState.None);
+});
+
+test("checks of another head fold to checks_pending", () => {
+  assert.equal(foldWithChecks(FAILED_AT_OLDER), CheckEndState.ChecksPending);
+  assert.equal(
+    foldWithChecks({ head_commit: OLDER_SHA, pending: [], failed: [] }),
+    CheckEndState.ChecksPending,
+  );
+});
+
+test("settled required checks at the head fold to none", () => {
+  assert.equal(foldWithChecks(NO_CHECKS), CheckEndState.None);
 });
 
 test("a conflict or a current change request wins over a failed required check", () => {

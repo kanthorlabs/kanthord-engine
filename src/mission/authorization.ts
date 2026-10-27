@@ -232,7 +232,7 @@ function platformAddressOf(
   return platformAddressSchema.parse(JSON.parse(assets[0]!.content));
 }
 
-function assessedCommitOf(
+export function assessedCommitOf(
   tx: Transaction,
   nodeId: string,
   attempt: number,

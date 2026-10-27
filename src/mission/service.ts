@@ -199,6 +199,7 @@ export interface Dependencies {
   telemetry: MissionTelemetry;
   acts: ActTelemetry;
   logger: Logger;
+  shutdown?: Context;
   projectPaused(tx: Transaction, projectId: string): boolean;
 }
 
@@ -233,6 +234,7 @@ export class MissionService
 
   constructor(dependencies: Dependencies) {
     this.dependencies = dependencies;
+    dependencies.shutdown = this.shutdown;
     dependencies.health?.register(MISSION_SERVICE_NAME, () =>
       this.healthcheck(),
     );
