@@ -201,6 +201,7 @@ export async function setup(t: TestContext, options: SetupOptions = {}) {
       nodeId,
       `${filename}\n`,
     );
+    c.gitHub.branchHead(`kanthord/${nodeId}`, head);
     const x2 = await passingEvaluation(c.session, machine, {
       nodeId,
       bindingId: binding(GATED).id,
@@ -208,7 +209,7 @@ export async function setup(t: TestContext, options: SetupOptions = {}) {
       executing: opts?.executing,
       afterSteps: opts?.afterSteps,
     });
-    return { nodeId, x2 };
+    return { nodeId, x2, head };
   };
   const worker = httpClient(missionOperations, c.fixture.endpoint, token);
   const requestPullRequest = async (x: ExecutionRecord, number: number) =>
@@ -290,12 +291,14 @@ export async function setup(t: TestContext, options: SetupOptions = {}) {
         idempotencyKey: createIdempotencyKey(),
       },
     );
-  const rework = (nodeId: string, commit: string) =>
-    passingEvaluation(c.session, machine, {
+  const rework = (nodeId: string, commit: string) => {
+    c.gitHub.branchHead(`kanthord/${nodeId}`, commit);
+    return passingEvaluation(c.session, machine, {
       nodeId,
       bindingId: binding(GATED).id,
       commit,
     });
+  };
   return {
     ...c,
     projectId,

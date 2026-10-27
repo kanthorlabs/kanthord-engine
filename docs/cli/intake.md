@@ -465,6 +465,8 @@ The merge uses the first method that the repository allows, in the order
 `merge`, `squash`, `rebase`. A refused or failed merge leaves the pull request
 open and changes no answer.
 
+Before the merge, the action performer reads the required checks with `github-pull-request-required-check-get`. While a required check of the head commit is pending or failed, it requests no merge.
+
 ## Output and failure conventions
 
 The commands follow [shared output and exit behavior](./other.md#output-and-exit-behavior):
