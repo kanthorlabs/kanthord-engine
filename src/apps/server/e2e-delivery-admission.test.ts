@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { HttpStatus } from "../../kernel/http.ts";
+import { HttpMethod, HttpStatus } from "../../kernel/http.ts";
 import { createIdentity } from "../../kernel/identity.ts";
 import { OperationResultType } from "../../kernel/operation.ts";
 import {
@@ -29,6 +29,7 @@ import {
 } from "./delivery-support.ts";
 
 const FIRST_ATTEMPT = 1;
+const NO_CALLS = 0;
 const LANDED_EVIDENCE_COUNT = 1;
 const FIRST_PULL_REQUEST = 1;
 const UNMATCHED_PULL_REQUEST = 9;
@@ -443,6 +444,24 @@ test(
       t.signal,
     );
     assert.equal((await h.node(P.nodeId)).state, NodeState.Completed);
+  },
+);
+
+test(
+  "E08.13a kanthord landing: a pending required check sends no merge request",
+  { timeout: TIMEOUT },
+  async (t) => {
+    const h = await setup(t, { landing: "kanthord" });
+    const E = await h.create("examine-1.md");
+    const P = await h.implement("implement-p.md", E);
+    h.gitHub.checks({ required: ["check"], commit: P.head, runs: [] });
+    const action = await h.actionRequest(P.x2);
+    assert.equal(action.items[FIRST_INDEX]?.kind, ActionResultKind.Submitted);
+    assert.equal(
+      h.gitHub.calls.filter((call) => call.method === HttpMethod.Put).length,
+      NO_CALLS,
+    );
+    assert.equal(h.gitHub.pulls[FIRST_INDEX]?.merged, false);
   },
 );
 

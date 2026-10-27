@@ -979,6 +979,7 @@ interface FakeGitHubState {
   refuseMerge: number | null;
   closeSequence: number;
   mergeHeadSha: string | null;
+  branchHeads: Map<string, string>;
   requiredChecks: string[];
   checkRuns: Map<string, FakeCheckRun[]>;
   commitStatuses: Map<string, FakeCommitStatus[]>;
@@ -1073,9 +1074,9 @@ function insertPull(
     merged: false,
     merge_commit_sha: null,
     closed_at: null,
-    head_sha: createHash("sha1")
-      .update(`${owner}/${repo}#${input.head}`)
-      .digest("hex"),
+    head_sha:
+      state.branchHeads.get(input.head) ??
+      createHash("sha1").update(`${owner}/${repo}#${input.head}`).digest("hex"),
     reviews: [],
     mergeability: [],
   };
@@ -1401,6 +1402,7 @@ export async function fakeGitHub(t: TestContext) {
     eventsHold: null,
     refuseMerge: null,
     mergeHeadSha: null,
+    branchHeads: new Map(),
     closeSequence: 0,
     requiredChecks: [],
     checkRuns: new Map(),
@@ -1514,6 +1516,13 @@ export async function fakeGitHub(t: TestContext) {
     dropNextAfterApply(): void {
       assert.equal(state.dropNext, false);
       state.dropNext = true;
+    },
+    branchHead(branch: string, sha: string): void {
+      assert.match(sha, GITHUB_MERGE_SHA);
+      state.branchHeads.set(branch, sha);
+      for (const pull of state.pulls)
+        if (pull.head === branch && pull.state === FakePullState.Open)
+          pull.head_sha = sha;
     },
     mergeAtOtherHead(sha: string): void {
       assert.equal(state.mergeHeadSha, null);

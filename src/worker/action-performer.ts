@@ -19,6 +19,7 @@ import {
   ActionReadMethod,
   PlatformAddressKind,
   RepositoryAction,
+  requiredCheckReadSchema,
   Uncertainty,
   WorkerErrorCode,
   type ActionContext,
@@ -66,6 +67,12 @@ type UncertainItem = Extract<
 const IN_FLIGHT_CODE = "intake.outbound.request.in_flight";
 const MERGE_SKIPPED_MESSAGE = "merge skipped: gate files changed";
 const NO_GATE_FILES = 0;
+const NO_CHECKS = 0;
+const HEAD_COMMIT_CHANGED_MESSAGE = "merge skipped: head commit changed";
+const CHECKS_PENDING_MESSAGE = "merge deferred: required checks pending";
+const CHECKS_FAILED_MESSAGE = "merge skipped: required checks failed";
+const CHECK_READ_FAILED_MESSAGE = "required check read failed";
+const MERGE_REFUSED_MESSAGE = "merge request refused";
 
 function landsByKanthorD(entry: Pending["entry"]): boolean {
   return (
@@ -437,6 +444,7 @@ export class ActionPerformer {
     commit: string,
     evidenceId: string,
   ): Promise<void> {
+    if (await this.mergeBlocked(call, commit, evidenceId)) return;
     const mergeRequestKey = `${nodeId}/${attempt}/${actionKey}/merge/${commit}`;
     const answer = await this.dependencies.intakeActions.perform(
       call,
@@ -451,7 +459,58 @@ export class ActionPerformer {
     if (isResultClass(answer))
       this.dependencies.logger?.warn(
         { evidence_id: evidenceId, class: answer.class, code: answer.code },
-        "merge request refused",
+        MERGE_REFUSED_MESSAGE,
       );
+  }
+
+  private async mergeBlocked(
+    call: IntakeActionCall,
+    commit: string,
+    evidenceId: string,
+  ): Promise<boolean> {
+    const answer = await this.dependencies.intakeActions.read(
+      call,
+      ActionReadMethod.RequiredCheckGet,
+      evidenceId,
+      {},
+    );
+    if (isResultClass(answer)) {
+      this.dependencies.logger?.warn(
+        { evidence_id: evidenceId, class: answer.class, code: answer.code },
+        CHECK_READ_FAILED_MESSAGE,
+      );
+      return false;
+    }
+    const parsed = requiredCheckReadSchema.safeParse(answer.body);
+    if (!parsed.success) {
+      this.dependencies.logger?.warn(
+        { evidence_id: evidenceId },
+        CHECK_READ_FAILED_MESSAGE,
+      );
+      return false;
+    }
+    const { head_commit, pending, failed } = parsed.data;
+    if (head_commit !== commit) {
+      this.dependencies.logger?.warn(
+        { evidence_id: evidenceId },
+        HEAD_COMMIT_CHANGED_MESSAGE,
+      );
+      return true;
+    }
+    if (pending.length > NO_CHECKS) {
+      this.dependencies.logger?.warn(
+        { evidence_id: evidenceId, pending },
+        CHECKS_PENDING_MESSAGE,
+      );
+      return true;
+    }
+    if (failed.length > NO_CHECKS) {
+      this.dependencies.logger?.warn(
+        { evidence_id: evidenceId, failed },
+        CHECKS_FAILED_MESSAGE,
+      );
+      return true;
+    }
+    return false;
   }
 }

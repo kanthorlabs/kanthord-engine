@@ -41,6 +41,25 @@ const PR = {
   number: 42,
 };
 
+const READ_FAILED_MESSAGE = "required check read failed";
+const CHECKS_PENDING_MESSAGE = "merge deferred: required checks pending";
+const CHECKS_FAILED_MESSAGE = "merge skipped: required checks failed";
+const HEAD_COMMIT_CHANGED_MESSAGE = "merge skipped: head commit changed";
+const PENDING_CHECKS = ["check", "lint"];
+const FAILED_CHECKS = ["check"];
+
+function checksAt(headCommit: string, pending: string[], failed: string[]) {
+  return {
+    body: {
+      head_commit: headCommit,
+      base_branch: "main",
+      pending,
+      failed,
+    },
+    next_cursor: null,
+  };
+}
+
 function actionable(t: TestContext) {
   const h = harness(t);
   const snapshot = h.context.current_assessment!.tested_input;
@@ -735,6 +754,7 @@ test("mixed GitHub display capitalization reuses the earlier request without cha
 test("kanthord landing requests create, evidence, and merge in order", async (t) => {
   const h = actionable(t);
   h.entry.action.configuration.landing = "kanthord";
+  h.dependencies.intakeActions.read = async () => checksAt(COMMIT, [], []);
   const order: string[] = [];
   const perform = t.mock.method(
     h.dependencies.intakeActions,
@@ -793,6 +813,7 @@ test("human landing makes no merge call", async (t) => {
 test("a failed merge does not change the return item and warns with the evidence id", async (t) => {
   const h = actionable(t);
   h.entry.action.configuration.landing = "kanthord";
+  h.dependencies.intakeActions.read = async () => checksAt(COMMIT, [], []);
   const warned: unknown[] = [];
   h.dependencies.logger = { warn: (obj: unknown) => warned.push(obj) };
   let callCount = 0;
@@ -842,6 +863,7 @@ function reworkable(t: TestContext) {
 
 test("rework: unresolved kanthord pull request requests merge with the new tested commit key", async (t) => {
   const h = reworkable(t);
+  h.dependencies.intakeActions.read = async () => checksAt(COMMIT, [], []);
   const mergeKeys: string[] = [];
   h.dependencies.intakeActions.perform = async (_call, body, key) => {
     assert.ok(body.mergeEvidenceId, "expected a merge call, not a create");
@@ -870,6 +892,7 @@ test("rework: human landing with unresolved request makes no merge call", async 
 
 test("rework: failed merge does not propagate and warns with the evidence id and error code", async (t) => {
   const h = reworkable(t);
+  h.dependencies.intakeActions.read = async () => checksAt(COMMIT, [], []);
   const warned: unknown[] = [];
   h.dependencies.logger = { warn: (obj: unknown) => warned.push(obj) };
   h.dependencies.intakeActions.perform = async () => {
@@ -898,6 +921,7 @@ test("rework: an operands failure warns and continues; return items stay intact"
 
 test("rework: a merge refusal answer warns with evidence_id, class and code", async (t) => {
   const h = reworkable(t);
+  h.dependencies.intakeActions.read = async () => checksAt(COMMIT, [], []);
   const warned: unknown[] = [];
   h.dependencies.logger = { warn: (obj: unknown) => warned.push(obj) };
   h.dependencies.intakeActions.perform = async () => ({
@@ -1034,6 +1058,133 @@ test("rework: kanthord landing with a gate file requests no merge and warns once
     [
       { evidence_id: h.existingEvidenceId, gate_files: GATE_FILE_PATHS },
       MERGE_SKIPPED_MESSAGE,
+    ],
+  ]);
+});
+
+test("a pending required check requests no merge and warns once with the pending names", async (t) => {
+  const h = actionable(t);
+  h.entry.action.configuration.landing = "kanthord";
+  h.dependencies.intakeActions.read = async () =>
+    checksAt(COMMIT, PENDING_CHECKS, []);
+  const warned: unknown[][] = [];
+  h.dependencies.logger = {
+    warn: (...args: unknown[]) => warned.push(args),
+  } as NonNullable<typeof h.dependencies.logger>;
+  const perform = t.mock.method(
+    h.dependencies.intakeActions,
+    "perform",
+    async () => PR,
+  );
+  assert.deepEqual((await h.perform()).items, [
+    { kind: ActionResultKind.Submitted, evidence: h.evidence },
+  ]);
+  assert.equal(perform.mock.callCount(), SINGLE_CALL_COUNT);
+  assert.deepEqual(warned, [
+    [
+      { evidence_id: h.evidence.id, pending: PENDING_CHECKS },
+      CHECKS_PENDING_MESSAGE,
+    ],
+  ]);
+});
+
+test("a failed required check requests no merge and warns once with the failed names", async (t) => {
+  const h = actionable(t);
+  h.entry.action.configuration.landing = "kanthord";
+  h.dependencies.intakeActions.read = async () =>
+    checksAt(COMMIT, [], FAILED_CHECKS);
+  const warned: unknown[][] = [];
+  h.dependencies.logger = {
+    warn: (...args: unknown[]) => warned.push(args),
+  } as NonNullable<typeof h.dependencies.logger>;
+  const perform = t.mock.method(
+    h.dependencies.intakeActions,
+    "perform",
+    async () => PR,
+  );
+  assert.deepEqual((await h.perform()).items, [
+    { kind: ActionResultKind.Submitted, evidence: h.evidence },
+  ]);
+  assert.equal(perform.mock.callCount(), SINGLE_CALL_COUNT);
+  assert.deepEqual(warned, [
+    [
+      { evidence_id: h.evidence.id, failed: FAILED_CHECKS },
+      CHECKS_FAILED_MESSAGE,
+    ],
+  ]);
+});
+
+test("a head commit other than the tested commit requests no merge and warns once", async (t) => {
+  const h = actionable(t);
+  h.entry.action.configuration.landing = "kanthord";
+  h.dependencies.intakeActions.read = async () =>
+    checksAt("d".repeat(40), [], []);
+  const warned: unknown[][] = [];
+  h.dependencies.logger = {
+    warn: (...args: unknown[]) => warned.push(args),
+  } as NonNullable<typeof h.dependencies.logger>;
+  const perform = t.mock.method(
+    h.dependencies.intakeActions,
+    "perform",
+    async () => PR,
+  );
+  await h.perform();
+  assert.equal(perform.mock.callCount(), SINGLE_CALL_COUNT);
+  assert.deepEqual(warned, [
+    [{ evidence_id: h.evidence.id }, HEAD_COMMIT_CHANGED_MESSAGE],
+  ]);
+});
+
+test("a refused required check read warns with the class and the code, then requests the merge", async (t) => {
+  const h = actionable(t);
+  h.entry.action.configuration.landing = "kanthord";
+  h.dependencies.intakeActions.read = async () => ({
+    class: ResultClass.FinalRefusal,
+    code: "read.not_allowed",
+    message: "Not allowed",
+  });
+  const warned: unknown[][] = [];
+  h.dependencies.logger = {
+    warn: (...args: unknown[]) => warned.push(args),
+  } as NonNullable<typeof h.dependencies.logger>;
+  const perform = t.mock.method(
+    h.dependencies.intakeActions,
+    "perform",
+    async () => PR,
+  );
+  await h.perform();
+  assert.equal(perform.mock.callCount(), DUAL_CALL_COUNT);
+  assert.deepEqual(warned, [
+    [
+      {
+        evidence_id: h.evidence.id,
+        class: ResultClass.FinalRefusal,
+        code: "read.not_allowed",
+      },
+      READ_FAILED_MESSAGE,
+    ],
+  ]);
+});
+
+test("rework: a pending required check requests no merge and warns once", async (t) => {
+  const h = reworkable(t);
+  h.dependencies.intakeActions.read = async () =>
+    checksAt(COMMIT, PENDING_CHECKS, []);
+  const warned: unknown[][] = [];
+  h.dependencies.logger = {
+    warn: (...args: unknown[]) => warned.push(args),
+  } as NonNullable<typeof h.dependencies.logger>;
+  let performCount = NO_CALLS;
+  h.dependencies.intakeActions.perform = async () => {
+    performCount += 1;
+    return PR;
+  };
+  assert.deepEqual((await h.perform()).items, []);
+  assert.equal(performCount, NO_CALLS);
+  assert.deepEqual(warned, [
+    [
+      { evidence_id: h.existingEvidenceId, pending: PENDING_CHECKS },
+      CHECKS_PENDING_MESSAGE,
     ],
   ]);
 });
