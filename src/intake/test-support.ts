@@ -34,6 +34,7 @@ import {
 import type { Dependencies } from "./service.ts";
 
 const CLOSED_LOCAL_PORT = "http://127.0.0.1:9";
+const CLOSED_STATE_DIRECTORY = "/nonexistent/kanthord-intake-state";
 const MASTER_KEY_BYTES = 32;
 const SSH_PLATFORM = "ssh";
 const PUBLIC_KEY_FIELDS = 2;
@@ -91,6 +92,7 @@ export function unusedActionDependencies(): Pick<
   | "gitWriter"
   | "s3"
   | "masterKey"
+  | "stateDirectory"
   | "projects"
   | "consumers"
   | "unresolvedRequests"
@@ -113,6 +115,7 @@ export function unusedActionDependencies(): Pick<
     },
     s3: new S3Platform(),
     masterKey: randomBytes(MASTER_KEY_BYTES).toString("base64"),
+    stateDirectory: CLOSED_STATE_DIRECTORY,
     projects: { get: unexpectedCollaboration },
     consumers: recordingConsumers().consumers,
     unresolvedRequests: unexpectedCollaboration,

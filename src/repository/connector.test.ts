@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import {
+  appendFileSync,
+  chmodSync,
   existsSync,
   mkdtempSync,
   readdirSync,
@@ -1512,6 +1514,14 @@ const MISSING_OBJECT_MARK = "?";
 const MAINTENANCE_OFF = "false";
 const GC_OFF = "0";
 const EMPTY_REFS = "";
+const NON_CANONICAL_GATE_PATHS = ["scripts/", "./p.json"];
+const GATE_DECLARATION_ENTRY = "entry.txt";
+const SLOW_UPLOAD_SECONDS = 8;
+const FETCH_DEADLINE_MS = 3000;
+const UPLOAD_PACK_HOOK_NAME = "slow-upload-pack.sh";
+const FRESH_DIRECTORY_MODE = 0o700;
+const REPOSITORY_CONFIG_FILE = "config";
+const EXECUTABLE_FILE_MODE = 0o755;
 
 type GateEntries = Record<string, string | null>;
 
@@ -1781,6 +1791,32 @@ test("changedGateFiles throws for an invalid declaration", async (t) => {
   }
 });
 
+test("changedGateFiles refuses a non-canonical gate path", async (t) => {
+  const origin = await gateOrigin(t);
+  await origin.onMain({ "package.json": "one\n" });
+  await origin.startBranch();
+  const commit = await origin.onBranch({ "package.json": "two\n" });
+  for (const path of NON_CANONICAL_GATE_PATHS) {
+    await origin.onMain({ [GATE_DECLARATION_FILE]: gateDeclaration([path]) });
+    await assert.rejects(origin.changed(commit), {
+      code: GATE_DECLARATION_INVALID,
+    });
+  }
+});
+
+test("changedGateFiles refuses a declaration that is not a file", async (t) => {
+  const origin = await gateOrigin(t);
+  await origin.onMain({
+    [`${GATE_DECLARATION_FILE}/${GATE_DECLARATION_ENTRY}`]: "one\n",
+  });
+  await origin.startBranch();
+  const commit = await origin.onBranch({ "package.json": "two\n" });
+  await assert.rejects(origin.changed(commit), {
+    code: GATE_DECLARATION_INVALID,
+  });
+  assert.equal(existsSync(origin.directory), true);
+});
+
 test("changedGateFiles throws for an unreachable commit and removes the directory", async (t) => {
   const origin = await gateOrigin(t);
   await assert.rejects(origin.changed(UNKNOWN_COMMIT), { code: GIT_FAILED });
@@ -1798,6 +1834,34 @@ test("changedGateFiles keeps the directory after a deadline", async (t) => {
   assert.deepEqual(await origin.changed(commit), ["package.json"]);
   await assert.rejects(
     origin.changed(commit, { deadlineAt: Date.now() - EXPIRED_DEADLINE_MS }),
+  );
+  assert.equal(existsSync(origin.directory), true);
+});
+
+test("changedGateFiles keeps the directory after a git deadline", async (t) => {
+  const origin = await gateOrigin(t);
+  await origin.onMain({
+    [GATE_DECLARATION_FILE]: gateDeclaration(["package.json"]),
+    "package.json": "one\n",
+  });
+  await origin.startBranch();
+  const commit = await origin.onBranch({ "package.json": "two\n" });
+  const hook = join(temporary(t), UPLOAD_PACK_HOOK_NAME);
+  writeFileSync(hook, `#!/bin/sh\nexec sleep ${SLOW_UPLOAD_SECONDS}\n`, {
+    mode: EXECUTABLE_FILE_MODE,
+  });
+  mkdirSync(dirname(origin.directory), { recursive: true });
+  await simpleGit().raw(["init", "--bare", "--quiet", origin.directory]);
+  chmodSync(origin.directory, FRESH_DIRECTORY_MODE);
+  appendFileSync(
+    join(origin.directory, REPOSITORY_CONFIG_FILE),
+    `[remote "origin"]\n\tuploadpack = ${hook}\n`,
+  );
+  await assert.rejects(
+    origin.changed(commit, { deadlineAt: Date.now() + FETCH_DEADLINE_MS }),
+    (error: Error & { code?: string; cause?: Error }) =>
+      error.code === GIT_FAILED &&
+      /Git deadline exceeded$/m.test(error.cause?.message ?? ""),
   );
   assert.equal(existsSync(origin.directory), true);
 });

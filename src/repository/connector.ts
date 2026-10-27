@@ -96,6 +96,19 @@ const GATE_TIME_LIMIT_MIN_S = 60;
 const GATE_TIME_LIMIT_MAX_S = 3600;
 const GATE_LIST_MAX_ENTRIES = 10000;
 const NON_BLANK_PATTERN = /\S/;
+const GATE_PATH_SEPARATOR = "/";
+const GATE_PATH_CURRENT_PREFIX = "./";
+const PARENT_SEGMENT = "..";
+
+function isCanonicalGatePath(path: string): boolean {
+  return (
+    path === posix.normalize(path) &&
+    !path.endsWith(GATE_PATH_SEPARATOR) &&
+    !path.startsWith(GATE_PATH_CURRENT_PREFIX) &&
+    !path.startsWith(GATE_PATH_SEPARATOR) &&
+    !path.split(GATE_PATH_SEPARATOR).includes(PARENT_SEGMENT)
+  );
+}
 
 const gateDeclarationSchema = z.strictObject({
   version: z.literal(GATE_DECLARATION_VERSION),
@@ -107,7 +120,7 @@ const gateDeclarationSchema = z.strictObject({
     .max(GATE_TIME_LIMIT_MAX_S)
     .optional(),
   gate_files: z
-    .array(z.string().regex(NON_BLANK_PATTERN))
+    .array(z.string().regex(NON_BLANK_PATTERN).refine(isCanonicalGatePath))
     .max(GATE_LIST_MAX_ENTRIES)
     .default([]),
 });
@@ -1343,7 +1356,11 @@ async function changedGateFilesIn(
 
 function keepsRepository(error: unknown, context: Context): boolean {
   if (context.signal.aborted) return true;
-  if (error instanceof CodedError && error.code === DEADLINE_EXCEEDED_CODE)
+  if (
+    error instanceof CodedError &&
+    (error.code === DEADLINE_EXCEEDED_CODE ||
+      error.code === GATE_DECLARATION_INVALID)
+  )
     return true;
   return (
     error instanceof Diagnostic &&
@@ -1444,13 +1461,31 @@ async function gateDeclarationPaths(
   run: GitRun,
   tip: string,
 ): Promise<string[]> {
-  const id = (await objectIdsOf(run, tip, [GATE_DECLARATION_FILE]))[0] ?? null;
-  if (id === null) return [];
-  const text = await run(["cat-file", "blob", id]);
+  const tree: RepositoryTree = {
+    entries: new Map(),
+    listedPaths: new Set(),
+    listedDirectories: new Set(),
+    targets: new Map(),
+  };
+  addTreeEntries(
+    tree,
+    await run([
+      "--literal-pathspecs",
+      "ls-tree",
+      "-z",
+      tip,
+      "--",
+      GATE_DECLARATION_FILE,
+    ]),
+  );
+  const entry = tree.entries.get(GATE_DECLARATION_FILE);
+  if (entry === undefined) return [];
   const invalid = new Diagnostic(
     GATE_DECLARATION_INVALID,
     "The gate declaration of the base branch is invalid.",
   );
+  if (!REGULAR_FILE_MODES.includes(entry.mode)) throw invalid;
+  const text = await run(["cat-file", "blob", entry.object]);
   let declaration;
   try {
     declaration = gateDeclarationSchema.safeParse(JSON.parse(text));
