@@ -15,7 +15,7 @@ import {
 } from "../kernel/operation.ts";
 import { Store } from "../kernel/store.ts";
 import { createInvocation, gatewayMigrations } from "./index.ts";
-import { generateHumanJWT } from "./auth/jwt.ts";
+import { generateHumanJWT, generateMachineJWT } from "./auth/jwt.ts";
 import { createIdentity, createIdempotencyKey } from "../kernel/identity.ts";
 import {
   testMachineIdentity,
@@ -168,6 +168,7 @@ test("execution proof precedes reservation and replay and supplies only proven c
           project_id: identity.projectId,
           resource_identity: identity.resourceIdentity,
         }),
+        workerGroupEnded: async () => false,
       },
       worker: {
         findByClient: () =>
@@ -349,6 +350,7 @@ function machineInvocation(
   t: TestContext,
   registry: OperationRegistry,
   resolveWorkerGroup: (context: Context) => Promise<void>,
+  ended = false,
 ) {
   const store = new Store(":memory:");
   t.after(() => store.close());
@@ -365,10 +367,11 @@ function machineInvocation(
     "machine",
     runtime,
   );
+  const masterKey = randomBytes(MASTER_KEY_BYTES).toString("base64");
   const invocation = createInvocation({
     registry,
     stores: { [StoreName.Operational]: store },
-    masterKey: randomBytes(MASTER_KEY_BYTES).toString("base64"),
+    masterKey,
     authVersion: AUTH_VERSION,
     lookups: {
       project: {
@@ -379,11 +382,14 @@ function machineInvocation(
           context,
         ) => {
           await resolveWorkerGroup(context);
-          return {
-            project_id: identity.projectId,
-            resource_identity: identity.resourceIdentity,
-          };
+          return ended
+            ? null
+            : {
+                project_id: identity.projectId,
+                resource_identity: identity.resourceIdentity,
+              };
         },
+        workerGroupEnded: async () => ended,
       },
       worker: {
         findByClient: () => ({
@@ -404,7 +410,7 @@ function machineInvocation(
     error: (fields: Record<string, unknown>, message: string) =>
       failures.push({ fields, message }),
   } as unknown as Logger;
-  return { invocation, identity, logger, failures };
+  return { invocation, identity, logger, failures, masterKey };
 }
 
 const clientOperation = {
@@ -465,4 +471,81 @@ test("an unknown failure answers 500 and logs the error with the request and the
       message: "Request failed",
     },
   ]);
+});
+
+const NO_HANDLER_CALLS = 0;
+const ENDED_CODE = "worker.registration.ended";
+const ENDED_MESSAGE = "The worker group of the registration ended.";
+const ENDED_PATH = "/api/test/ended";
+const TOKEN_LIFETIME = 600;
+const endedOperation = {
+  ...clientOperation,
+  id: "test.client.ended",
+  path: ENDED_PATH,
+  requiresRegistration: false,
+  endedGroup: { code: ENDED_CODE, message: ENDED_MESSAGE },
+} as const;
+const plainOperation = {
+  ...clientOperation,
+  id: "test.client.plain",
+  path: "/api/test/plain",
+  requiresRegistration: false,
+} as const;
+
+async function endedToken(masterKey: string, identity: { projectId: string }) {
+  return (
+    await generateMachineJWT(masterKey, AUTH_VERSION, TOKEN_LIFETIME, {
+      projectId: identity.projectId,
+      bindingName: "general",
+    })
+  ).token;
+}
+
+test("an operation with an ended group answer answers 404 for an ended group and runs no handler", async (t) => {
+  let calls = 0;
+  const registry = new OperationRegistry();
+  registry.register(endedOperation, () => {
+    calls++;
+    return COMMITTED_VALUE;
+  });
+  const h = machineInvocation(t, registry, async () => {}, true);
+  const token = await endedToken(h.masterKey, h.identity);
+  for (const credential of [
+    { authorization: `Bearer ${token}` },
+    { identity: h.identity },
+  ]) {
+    const response = await h.invocation.invoke(
+      endedOperation.id,
+      input,
+      credential,
+    );
+    assert.equal(response.status, HttpStatus.NotFound);
+    assert.deepEqual(
+      (response.body as { error: { code: string; message: string } }).error,
+      { code: ENDED_CODE, message: ENDED_MESSAGE, details: null },
+    );
+  }
+  assert.equal(calls, NO_HANDLER_CALLS);
+});
+
+test("an operation with no ended group answer answers 401 for an ended group", async (t) => {
+  const registry = new OperationRegistry();
+  registry.register(plainOperation, () => assert.fail("Unexpected handler"));
+  const h = machineInvocation(t, registry, async () => {}, true);
+  const token = await endedToken(h.masterKey, h.identity);
+  for (const credential of [
+    { authorization: `Bearer ${token}` },
+    { identity: h.identity },
+  ]) {
+    const response = await h.invocation.invoke(
+      plainOperation.id,
+      input,
+      credential,
+    );
+    assert.equal(response.status, HttpStatus.Unauthorized);
+    assert.equal(
+      (response.body as { error: { code: string } }).error.code,
+      UNAUTHORIZED,
+    );
+  }
 });

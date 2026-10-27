@@ -20,13 +20,19 @@ import {
   isWorkerIdentity,
   type CallerIdentity,
 } from "../kernel/caller.ts";
-import { GatewayError, failure, unauthorized } from "./errors.ts";
+import {
+  GatewayError,
+  WorkerGroupEnded,
+  failure,
+  unauthorized,
+} from "./errors.ts";
 import {
   AccessPolicy,
   OperationLifetime,
   type StoreMap,
   type ExecutionProofRow,
   type ExecutionClaim,
+  type Operation,
 } from "../kernel/operation.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import { resolveRequestId } from "./request-id.ts";
@@ -271,18 +277,11 @@ export class Invocation {
     });
   }
 
-  private async execute(
-    { operation, handler }: RegisteredOperation,
-    raw: unknown,
-    options: InvocationOptions & { requestId: string },
-  ): Promise<RecordedResponse> {
-    let reservation: Reservation | undefined;
-    let committed: RecordedResponse | undefined;
-    const context = new CancellationContext(
-      options.context ? joined(this.shutdown, options.context) : this.shutdown,
-    );
-    const dispose = () => context.cancel();
-    let streaming = false;
+  private async callerOf(
+    operation: Operation,
+    options: InvocationOptions,
+    context: Context,
+  ): Promise<CallerIdentity | undefined> {
     try {
       let identity =
         options.identity === undefined
@@ -300,6 +299,32 @@ export class Invocation {
         );
         if (!admits(identity)) throw unauthorized();
       }
+      return identity;
+    } catch (thrown) {
+      if (!(thrown instanceof WorkerGroupEnded) || !operation.endedGroup)
+        throw thrown;
+      throw new GatewayError(
+        HttpStatus.NotFound,
+        operation.endedGroup.code,
+        operation.endedGroup.message,
+      );
+    }
+  }
+
+  private async execute(
+    { operation, handler }: RegisteredOperation,
+    raw: unknown,
+    options: InvocationOptions & { requestId: string },
+  ): Promise<RecordedResponse> {
+    let reservation: Reservation | undefined;
+    let committed: RecordedResponse | undefined;
+    const context = new CancellationContext(
+      options.context ? joined(this.shutdown, options.context) : this.shutdown,
+    );
+    const dispose = () => context.cancel();
+    let streaming = false;
+    try {
+      const identity = await this.callerOf(operation, options, context);
       if (
         operation.access === AccessPolicy.Service &&
         !isServiceIdentity(identity)

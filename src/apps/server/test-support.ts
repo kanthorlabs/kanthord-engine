@@ -451,6 +451,9 @@ export function fakeMachines(
         ? { project_id: projectId, resource_identity: resourceIdentity }
         : null;
     },
+    async workerGroupEnded() {
+      return false;
+    },
   };
   const worker = {
     registrations,

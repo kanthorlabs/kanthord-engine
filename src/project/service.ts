@@ -1864,6 +1864,31 @@ export class ProjectService implements Service, ProjectBindings {
       };
     });
   }
+  async workerGroupEnded(
+    projectId: string,
+    resourceIdentity: string,
+    issuedAt: number,
+    context: Context,
+  ): Promise<boolean> {
+    context.signal.throwIfAborted();
+    if (this.bindings)
+      return this.bindings.workerGroupEnded(
+        projectId,
+        resourceIdentity,
+        issuedAt,
+        context,
+      );
+    return this.operationalStore.transaction((tx) => {
+      const row = readLatestBinding(tx, projectId, resourceIdentity);
+      if (!row || kindOf(row.resource_identity) !== BindingKind.Worker)
+        return false;
+      if (row.removed_at !== null) return true;
+      const config = workerConfigSchema.parse(row.config);
+      if (effectiveInstanceCount(config) === INSTANCE_COUNT_MIN) return true;
+      const tombstone = readLatestTombstone(tx, projectId, resourceIdentity);
+      return tombstone !== null && tombstone.created_at > issuedAt;
+    });
+  }
   private readonly shutdown = new CancellationContext();
   private startTask?: Promise<Error | null>;
   private stopTask?: Promise<Error | null>;

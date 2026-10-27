@@ -10,6 +10,11 @@ import type { WorkerTransport } from "./transport.ts";
 import { WorkerErrorCode } from "../../worker/contract.ts";
 import { createIdempotencyKey } from "../../kernel/identity.ts";
 
+const ENDED_REGISTRATION_CODES: readonly string[] = [
+  WorkerErrorCode.RegistrationNotFound,
+  WorkerErrorCode.RegistrationEnded,
+];
+
 export interface Registration {
   runtime_identity: string;
   resource_identity: string;
@@ -99,7 +104,7 @@ export async function deregister(
   const notFound = 404;
   if (
     result.status === notFound &&
-    result.error.error.code === WorkerErrorCode.RegistrationNotFound
+    ENDED_REGISTRATION_CODES.includes(result.error.error.code)
   )
     return null;
   return new Diagnostic(result.error.error.code, result.error.error.message);

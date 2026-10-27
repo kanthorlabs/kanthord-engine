@@ -1090,6 +1090,12 @@ export interface ProjectBindings {
     placement?: WorkerPlacement | null;
     worker_instances?: string[];
   } | null>;
+  workerGroupEnded(
+    projectId: string,
+    resourceIdentity: string,
+    issuedAt: number,
+    context: Context,
+  ): Promise<boolean>;
 }
 
 export type InstanceOf = (

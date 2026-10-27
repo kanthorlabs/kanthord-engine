@@ -5,7 +5,8 @@ pathItem:
     tags:
       - worker
     description: End the caller's named live registration and free its slot
-      atomically. Same-key retries replay the recorded answer after the end.
+      atomically. Same-key retries replay the recorded answer after the end. An
+      ended worker group answers 404 worker.registration.ended.
     x-access-policy: client
     x-timeout-ms: 30000
     x-mutation: true

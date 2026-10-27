@@ -50,6 +50,9 @@ function instanceLookups() {
           };
         return null;
       },
+      async workerGroupEnded() {
+        return false;
+      },
     },
     instances: {
       liveInstance: (instanceId: string) => live.get(instanceId) ?? null,

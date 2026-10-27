@@ -33,7 +33,12 @@ import {
   type WorkerRegistrations,
 } from "../../worker/contract.ts";
 import { validText, signingKey } from "./jwt.ts";
-import { JwtCause, jwtRefused, unauthorized } from "../errors.ts";
+import {
+  JwtCause,
+  WorkerGroupEnded,
+  jwtRefused,
+  unauthorized,
+} from "../errors.ts";
 const MILLISECONDS_PER_SECOND = 1000;
 const BEARER_PREFIX_LENGTH = 7;
 const clientIdentitySchema = identitySchema(CLIENT_IDENTITY_PREFIX);
@@ -70,7 +75,7 @@ interface Claims {
   connection_id?: string;
 }
 export interface AuthenticationLookups {
-  project: Pick<ProjectBindings, "resolveWorkerGroup">;
+  project: Pick<ProjectBindings, "resolveWorkerGroup" | "workerGroupEnded">;
   worker: Pick<WorkerRegistrations, "findByClient" | "heartbeat">;
   instances?: WorkerInstanceLookups;
 }
@@ -187,8 +192,16 @@ export class Authentication {
       client.issuedAt,
       context,
     );
+    if (!resolved) {
+      const ended = await this.machines?.project.workerGroupEnded(
+        client.projectId,
+        client.resourceIdentity,
+        client.issuedAt,
+        context,
+      );
+      throw ended ? new WorkerGroupEnded() : unauthorized();
+    }
     if (
-      !resolved ||
       resolved.project_id !== client.projectId ||
       resolved.resource_identity !== client.resourceIdentity
     )
