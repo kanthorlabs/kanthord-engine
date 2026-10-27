@@ -324,6 +324,19 @@ export function readAssets(tx: Transaction, evidenceId: string): AssetRow[] {
     )
     .all(evidenceId) as unknown as AssetRow[];
 }
+export function writeEndState(
+  tx: Transaction,
+  evidenceId: string,
+  endState: EndState,
+): void {
+  assert.ok(tx.database.isTransaction);
+  const write = tx.database
+    .prepare(
+      "UPDATE mission_evidence SET end_state = ? WHERE id = ? AND end_state IS NULL",
+    )
+    .run(endState, evidenceId);
+  assert.equal(write.changes, EXPECTED_ROW_CHANGE);
+}
 export function deleteAsset(tx: Transaction, assetId: string): void {
   assert.ok(tx.database.isTransaction);
   const write = tx.database

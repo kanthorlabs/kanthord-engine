@@ -377,6 +377,60 @@ test("refused or thrown recording retains the known address as recording uncerta
   ]);
 });
 
+function humanLanding(t: TestContext) {
+  const h = actionable(t);
+  h.entry.action.action = RepositoryAction.MergePush;
+  h.entry.gate_files = GATE_FILE_PATHS;
+  const address = {
+    kind: PlatformAddressKind.BranchPush,
+    resource_identity: RESOURCE,
+    branch: "main",
+    commit: COMMIT,
+  };
+  const pushes = t.mock.method(h.dependencies.intakeActions, "perform");
+  return { ...h, address, pushes };
+}
+
+test("a merge push with a gate file records the branch push of the tested commit and pushes nothing", async (t) => {
+  const h = humanLanding(t);
+  const warned: unknown[][] = [];
+  h.dependencies.logger = {
+    warn: (...args: unknown[]) => warned.push(args),
+  } as NonNullable<typeof h.dependencies.logger>;
+  const request = t.mock.method(h.dependencies.evidenceRequests, "request");
+  assert.deepEqual((await h.perform()).items, [
+    { kind: ActionResultKind.Submitted, evidence: h.evidence },
+  ]);
+  assert.equal(h.pushes.mock.callCount(), NO_CALLS);
+  assert.equal(request.mock.callCount(), SINGLE_CALL_COUNT);
+  assert.deepEqual(request.mock.calls[0]?.arguments[0].body.address, h.address);
+  assert.deepEqual(warned, [
+    [
+      { evidence_id: h.evidence.id, gate_files: GATE_FILE_PATHS },
+      MERGE_SKIPPED_MESSAGE,
+    ],
+  ]);
+});
+
+test("a lost recording of a human landing keeps the branch push as recording uncertainty", async (t) => {
+  const h = humanLanding(t);
+  h.dependencies.evidenceRequests.request = async () => {
+    throw new Error("socket");
+  };
+  assert.deepEqual((await h.perform()).items, [
+    {
+      kind: ActionResultKind.Uncertain,
+      action: {
+        key: h.entry.action.key,
+        binding_id: h.entry.action.binding_id,
+      },
+      uncertainty: Uncertainty.Recording,
+      address: h.address,
+    },
+  ]);
+  assert.equal(h.pushes.mock.callCount(), NO_CALLS);
+});
+
 function reusable(t: TestContext) {
   const h = actionable(t);
   h.claim.attempt = SECOND_ATTEMPT;

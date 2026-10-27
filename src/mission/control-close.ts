@@ -10,6 +10,8 @@ import {
   OVERRIDE_STATES,
   Intent,
   AssetKind,
+  EndState,
+  PlatformAddressKind,
   type Override,
   type RepositoryAddress,
   type HumanAct,
@@ -23,10 +25,18 @@ import type { Dependencies } from "./service.ts";
 import type { NodeRow } from "./store.ts";
 import { getRevision } from "./node-read.ts";
 import { requireRepositoryInput } from "./evidence-content.ts";
+import { currentAssessmentOf } from "./currency.ts";
+import { gateFilesOf } from "./gate-files.ts";
+import { landsByHuman } from "./authorization.ts";
+import { requireNode } from "./node-read.ts";
+import { requestContext } from "./node-check.ts";
 import {
   closeAttempt,
   readLandedCommitEvidence,
+  readOpenAttempt,
+  readRequests,
   insertEvidence,
+  writeEndState,
 } from "./record-store.ts";
 import {
   admitControl,
@@ -40,6 +50,7 @@ import {
 } from "./control.ts";
 
 const NO_ATTEMPT = 0;
+const NO_REQUESTS = 0;
 const BINDING_MISMATCH = "mission.evidence.binding_mismatch";
 const LANDED_COMMIT_FIELD = "landed_commit";
 
@@ -256,6 +267,34 @@ export function blockNode(
   );
 }
 
+export function humanLandingRequests(
+  tx: Transaction,
+  dependencies: Dependencies,
+  node: NodeRow,
+): string[] | null {
+  if (node.state !== NodeState.ExternalRequested) return null;
+  const open = readOpenAttempt(tx, node.id);
+  if (open === null) return null;
+  const unresolved = readRequests(tx, node.id, open.attempt).filter(
+    (row) => row.end_state === null,
+  );
+  if (unresolved.length === NO_REQUESTS) return null;
+  const assessment = currentAssessmentOf(tx, node.id, open.attempt);
+  for (const row of unresolved) {
+    const { frozen_action: action, address } = requestContext(
+      tx,
+      dependencies,
+      row.id,
+    );
+    if (
+      address.kind !== PlatformAddressKind.BranchPush ||
+      !landsByHuman(action, gateFilesOf(assessment, action.binding_id))
+    )
+      return null;
+  }
+  return unresolved.map((row) => row.id);
+}
+
 export function discardNode(
   tx: Transaction,
   dependencies: Dependencies,
@@ -265,15 +304,24 @@ export function discardNode(
   now: number,
   ends: ExecutionEnds,
 ) {
+  const landing = humanLandingRequests(
+    tx,
+    dependencies,
+    requireNode(tx, nodeId),
+  );
   const { node, mission } = admitControl(
     tx,
     dependencies,
     nodeId,
     body,
-    DISCARD_STATES,
+    landing === null
+      ? DISCARD_STATES
+      : [...DISCARD_STATES, NodeState.ExternalRequested],
     now,
     ends,
   );
+  for (const evidenceId of landing ?? [])
+    writeEndState(tx, evidenceId, EndState.Other);
   requireNoUnresolvedAction(tx, node);
   const claim = endLiveClaim(
     tx,

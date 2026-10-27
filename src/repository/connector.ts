@@ -757,13 +757,18 @@ export function foldBranchPush(
   landed: boolean,
   commit: string,
   expectedEndState: ExpectedEndState,
+  humanLanding: boolean,
 ): CheckFold {
   assert.ok(
     expectedEndState === ExpectedEndState.BaseBranchPushed ||
       expectedEndState === ExpectedEndState.PullRequestMerged,
   );
   assert.match(commit, COMMIT_PATTERN);
-  if (!landed) return { end_state: CheckEndState.Other, landed_commits: [] };
+  if (!landed)
+    return {
+      end_state: humanLanding ? CheckEndState.None : CheckEndState.Other,
+      landed_commits: [],
+    };
   return { end_state: CheckEndState.Expected, landed_commits: [commit] };
 }
 

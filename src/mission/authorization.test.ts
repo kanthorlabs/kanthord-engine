@@ -731,6 +731,25 @@ test("a merge push refuses a binding with a changed gate file", (t) => {
   refuses(() => h.frozen({ key: MERGE_PUSH_KEY }), GATE_FILE_CHANGED);
 });
 
+test("a request evidence answers human_landing only for a merge push with a changed gate file", (t) => {
+  const h = actionHarness(t);
+  const pullRequestId = h.request();
+  h.policy.action = RepositoryAction.MergePush;
+  const pushId = h.request({
+    kind: PlatformAddressKind.BranchPush,
+    resource_identity: h.resourceIdentity,
+    branch: "main",
+    commit: ASSESSED_COMMIT,
+  });
+  assert.equal(h.evidence(pushId).facts.human_landing, false);
+  h.assess(AssessmentResult.Success, ASSESSED_COMMIT, [
+    { binding_id: h.repositoryId, paths: GATE_FILE_PATHS },
+  ]);
+  assert.equal(h.evidence(pushId).facts.human_landing, true);
+  h.policy.action = RepositoryAction.PullRequest;
+  assert.equal(h.evidence(pullRequestId).facts.human_landing, false);
+});
+
 const SERVICE_MERGE_NUMBER = 42;
 const serviceMergePullRequest = {
   kind: PlatformAddressKind.PullRequest,

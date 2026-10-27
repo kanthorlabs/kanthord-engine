@@ -774,23 +774,35 @@ test("an abort ends every git write and the landing read", async (t) => {
 test("foldBranchPush folds a landing against base_branch_pushed", () => {
   const commit = "a".repeat(40);
   assert.deepEqual(
-    foldBranchPush(true, commit, ExpectedEndState.BaseBranchPushed),
+    foldBranchPush(true, commit, ExpectedEndState.BaseBranchPushed, false),
     { end_state: CheckEndState.Expected, landed_commits: [commit] },
   );
   assert.deepEqual(
-    foldBranchPush(false, commit, ExpectedEndState.BaseBranchPushed),
+    foldBranchPush(false, commit, ExpectedEndState.BaseBranchPushed, false),
     { end_state: CheckEndState.Other, landed_commits: [] },
+  );
+});
+
+test("foldBranchPush answers none for a human landing that did not land", () => {
+  const commit = "a".repeat(40);
+  assert.deepEqual(
+    foldBranchPush(false, commit, ExpectedEndState.BaseBranchPushed, true),
+    { end_state: CheckEndState.None, landed_commits: [] },
+  );
+  assert.deepEqual(
+    foldBranchPush(true, commit, ExpectedEndState.BaseBranchPushed, true),
+    { end_state: CheckEndState.Expected, landed_commits: [commit] },
   );
 });
 
 test("the check folds that address to pull_request_merged with the landed commit", () => {
   const commit = "a".repeat(40);
   assert.deepEqual(
-    foldBranchPush(true, commit, ExpectedEndState.PullRequestMerged),
+    foldBranchPush(true, commit, ExpectedEndState.PullRequestMerged, false),
     { end_state: CheckEndState.Expected, landed_commits: [commit] },
   );
   assert.deepEqual(
-    foldBranchPush(false, commit, ExpectedEndState.PullRequestMerged),
+    foldBranchPush(false, commit, ExpectedEndState.PullRequestMerged, false),
     { end_state: CheckEndState.Other, landed_commits: [] },
   );
 });

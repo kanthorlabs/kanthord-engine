@@ -25,7 +25,7 @@ import {
 import {
   MatchKind,
   matchRequests,
-  unresolvedPullRequests,
+  unresolvedBaseRequests,
   unresolvedRequestCount,
 } from "./delivery-match.ts";
 import { applyEndState, changesNothing, requestContext } from "./node-check.ts";
@@ -93,7 +93,7 @@ async function prepareAdmission(
   );
   const base =
     address.kind === PlatformAddressKind.BranchPush
-      ? await checkBase(dependencies, caller, input, address)
+      ? await checkBase(dependencies, caller, input, address, match.evidence_id)
       : [];
   return { evidenceId: match.evidence_id, address, check, base };
 }
@@ -103,14 +103,16 @@ async function checkBase(
   caller: CallerContext,
   input: AdmissionInput,
   address: BranchPushAddress,
+  exactEvidenceId: string | null,
 ): Promise<BaseCheck[]> {
   const selected = dependencies.store.transaction((tx) =>
-    unresolvedPullRequests(
+    unresolvedBaseRequests(
       tx,
       input.project_id,
       address.resource_identity,
     ).filter(
       (evidenceId) =>
+        evidenceId !== exactEvidenceId &&
         requestContext(tx, dependencies, evidenceId).frozen_action.configuration
           .base_branch === address.branch,
     ),
@@ -131,7 +133,7 @@ async function checkBaseRequests(
   address: BranchPushAddress,
   unmatched: AdmissionAnswer,
 ): Promise<AdmissionAnswer | BaseChecked> {
-  const base = await checkBase(dependencies, caller, input, address);
+  const base = await checkBase(dependencies, caller, input, address, null);
   return base.length === NO_SELECTED_REQUESTS ? unmatched : { base };
 }
 

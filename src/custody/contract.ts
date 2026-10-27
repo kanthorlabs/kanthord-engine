@@ -237,6 +237,7 @@ export type RequestFacts = {
   frozen_action: FrozenActionFacts;
   address: PlatformAddressFacts;
   repository: RepositoryFacts;
+  human_landing: boolean;
 };
 export type AssetFacts = {
   storage: {

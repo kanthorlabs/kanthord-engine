@@ -44,6 +44,7 @@ const NO_STALLS = 0;
 const FURTHER_WORK_LIMIT = 3;
 const ONE_CALL = 1;
 const NO_CALLS = 0;
+const NO_GATE_FILES = 0;
 const FIRST_INDEX = 0;
 
 const IDENTITY = testHumanIdentity("ulrich", "Ulrich", "token");
@@ -998,6 +999,7 @@ test("no round runs after the Mission Service stops", async (t) => {
 function deferredBranchPushFixture(
   t: TestContext,
   check: Awaited<ReturnType<Dependencies["intakeCheck"]["check"]>>,
+  gateFiles: string[] = [],
 ) {
   const h = fixture(t, Intent.Implement, {
     intakeCheck: { check: async () => check, merge: unexpectedCollaboration },
@@ -1025,7 +1027,10 @@ function deferredBranchPushFixture(
       evidence_ids: "[]",
       dependency_outcome_ids: "[]",
       tested_input: null,
-      gate_files: null,
+      gate_files:
+        gateFiles.length === NO_GATE_FILES
+          ? null
+          : JSON.stringify([{ binding_id: h.binding_id, paths: gateFiles }]),
       execution_id: h.execution_id,
       actor: null,
       created_at: NOW,
@@ -1076,6 +1081,17 @@ test("deferred check resolves a branch_push request and completes the node", asy
     landed_commits: [LANDED_COMMIT],
   });
   h.release();
+  await deferredCheckEnds(h.calls, t.signal);
+  assert.equal(h.node().state, NodeState.Completed);
+});
+
+test("a human-landing merge push waits in External.Requested until the check answers expected", async (t) => {
+  const h = deferredBranchPushFixture(t, SETTLED, ["package.json"]);
+  h.release();
+  await deferredCheckEnds(h.calls, t.signal);
+  assert.equal(h.node().state, NodeState.ExternalRequested);
+  h.dependencies.intakeCheck.check = async () => COMPLETING;
+  resumeDeferredChecks(h.dependencies);
   await deferredCheckEnds(h.calls, t.signal);
   assert.equal(h.node().state, NodeState.Completed);
 });

@@ -1012,6 +1012,7 @@ export type RequestFacts = {
   frozen_action: FrozenAction;
   address: PlatformAddress;
   repository: RepositoryFacts;
+  human_landing: boolean;
 };
 export type Authorized<F> = {
   credential: string | null;
