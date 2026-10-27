@@ -14,7 +14,6 @@ import {
   AssessmentResult,
   CheckEndState,
   EndState,
-  MissionErrorCode,
   ReleaseObligation,
   RepositoryAction,
   RepositoryLanding,
@@ -23,7 +22,6 @@ import {
   missionOperations,
   type AssetKind as AssetType,
 } from "./contract.ts";
-import { AuthorizationRefusal } from "./authorization.ts";
 import type { Dependencies } from "./service.ts";
 import {
   closeAttempt,
@@ -805,7 +803,6 @@ const FIRST_ROUND_DELAY_MS = 0;
 const JUST_BEFORE_RETRY_MS = DEFERRED_CHECK_RETRY_MS - 1;
 const ONE_MS = 1;
 const MERGE_FAILED = "Deferred merge failed.";
-const CRASHED = "Deferred check crashed.";
 const FIRST_ROUND_LABEL = "0";
 const SECOND_ROUND_LABEL = "1";
 const PENDING: CheckAnswer = {
@@ -1068,7 +1065,7 @@ test("a server start merges under a new key after a failed run", async (t) => {
   assert.notEqual(first![1], second![1]);
 });
 
-test("an assessment that is no longer current at merge time calls no merge and ends the loop", async (t) => {
+test("an assessment that is no longer a success at merge time calls no merge and logs no crash", async (t) => {
   const advance = mockTimers(t);
   const h = deferredFixture(t, SETTLED, {
     landing: RepositoryLanding.KanthorD,
@@ -1081,20 +1078,9 @@ test("an assessment that is no longer current at merge time calls no merge and e
   );
   await advance(FIRST_ROUND_DELAY_MS);
   await advance(DEFERRED_CHECK_RETRY_MS);
-  assert.equal(h.mergeInputs.length, NO_CALLS);
   assert.equal(h.checkCalls(), ONE_CALL);
-  assert.equal(h.warnings.length, ONE_CALL);
-  assert.equal(h.warnings[FIRST_INDEX]!.message, CRASHED);
-  const fields = h.warnings[FIRST_INDEX]!.fields as {
-    error: unknown;
-    node_id: string;
-  };
-  assert.equal(fields.node_id, h.node_id);
-  assert.ok(fields.error instanceof OperationError);
-  assert.equal(fields.error.code, MissionErrorCode.AuthorizationRefused);
-  assert.deepEqual(fields.error.details, {
-    reason: AuthorizationRefusal.ClaimNotLive,
-  });
+  assert.equal(h.mergeInputs.length, NO_CALLS);
+  assert.equal(h.warnings.length, NO_CALLS);
 });
 
 test("a failed check schedules the next round after the retry delay", async (t) => {
