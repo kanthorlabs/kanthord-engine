@@ -31,6 +31,9 @@ const LONG_NAME_LENGTH = 400;
 const EMPTY_MODULE = "export {};\n";
 const TEST_BODY = 'import test from "node:test";\n';
 const SSHD_MODULE = "src/repository/test-sshd.ts";
+const SSHD_TEST =
+  'import { startTestSshd } from "../test-sshd.ts";\nstartTestSshd();\n';
+const SSHD_TEST_PATH = "src/repository/sub/ssh.test.ts";
 const ENTRY_POINT = fileURLToPath(
   new URL("./affected-tests.mjs", import.meta.url),
 );
@@ -251,8 +254,10 @@ test("an untracked file is a graph node", async (t) => {
 });
 
 for (const input of GLOBAL_INPUTS) {
-  test(`the global input ${input} selects all unit tests`, async (t) => {
+  test(`the global input ${input} selects each test that needs no sshd`, async (t) => {
     const root = await repository(t, {
+      [SSHD_MODULE]: EMPTY_MODULE,
+      [SSHD_TEST_PATH]: SSHD_TEST,
       "src/a.test.ts": TEST_BODY,
       "src/apps/server/e2e-one.test.ts": TEST_BODY,
       "scripts/test-path.test.mjs": TEST_BODY,
@@ -260,8 +265,12 @@ for (const input of GLOBAL_INPUTS) {
     const expected = {
       selection: "all",
       reason: `global input: ${input}`,
-      tests: ["scripts/test-path.test.mjs", "src/a.test.ts"],
-      excluded_e2e: ["src/apps/server/e2e-one.test.ts"],
+      tests: [
+        "scripts/test-path.test.mjs",
+        "src/a.test.ts",
+        "src/apps/server/e2e-one.test.ts",
+      ],
+      excluded_e2e: [SSHD_TEST_PATH],
     };
     assert.deepEqual(selectTests(root, [change(input)]), expected);
     assert.deepEqual(
@@ -324,16 +333,18 @@ test("an inert path that an edge names selects the importer", async (t) => {
   );
 });
 
-test("an unknown path selects all unit tests", async (t) => {
+test("an unknown path selects each test that needs no sshd", async (t) => {
   const root = await repository(t, {
+    [SSHD_MODULE]: EMPTY_MODULE,
+    [SSHD_TEST_PATH]: SSHD_TEST,
     "src/a.test.ts": TEST_BODY,
     "src/apps/server/e2e-one.test.ts": TEST_BODY,
   });
   assert.deepEqual(selectTests(root, [change("Makefile", ADDED)]), {
     selection: "all",
     reason: "unknown path: Makefile",
-    tests: ["src/a.test.ts"],
-    excluded_e2e: ["src/apps/server/e2e-one.test.ts"],
+    tests: ["src/a.test.ts", "src/apps/server/e2e-one.test.ts"],
+    excluded_e2e: [SSHD_TEST_PATH],
   });
 });
 
@@ -346,19 +357,20 @@ test("the reason holds at most 256 UTF-8 bytes", async (t) => {
   assert.ok(!reason.includes("\uFFFD"));
 });
 
-test("an e2e path is excluded and never selected", async (t) => {
+test("a reached e2e path is selected", async (t) => {
   const root = await repository(t, {
     "src/a.ts": EMPTY_MODULE,
     "src/apps/server/e2e-one.test.ts": 'import "../../a.ts";\n',
+    "src/apps/server/e2e-two.test.ts": TEST_BODY,
     "src/a.test.ts": 'import "./a.ts";\n',
   });
   assert.deepEqual(
     selectTests(root, [change("src/a.ts")]),
-    related(["src/a.test.ts"], ["src/apps/server/e2e-one.test.ts"]),
+    related(["src/a.test.ts", "src/apps/server/e2e-one.test.ts"]),
   );
 });
 
-test("a test that imports startTestSshd is e2e", async (t) => {
+test("a test that imports startTestSshd is excluded", async (t) => {
   const root = await repository(t, {
     [SSHD_MODULE]: "export function startTestSshd() {}\n",
     "src/repository/ssh.test.ts":
@@ -366,12 +378,18 @@ test("a test that imports startTestSshd is e2e", async (t) => {
     "src/repository/alias.test.ts":
       'import { startTestSshd as start } from "./test-sshd.ts";\nstart();\n',
     "src/repository/plain.test.ts": 'import "./test-sshd.ts";\n',
+    "src/apps/server/e2e-sshd.test.ts":
+      'import { startTestSshd } from "../../repository/test-sshd.ts";\nstartTestSshd();\n',
   });
   assert.deepEqual(
     selectTests(root, [change(SSHD_MODULE)]),
     related(
       ["src/repository/plain.test.ts"],
-      ["src/repository/alias.test.ts", "src/repository/ssh.test.ts"],
+      [
+        "src/apps/server/e2e-sshd.test.ts",
+        "src/repository/alias.test.ts",
+        "src/repository/ssh.test.ts",
+      ],
     ),
   );
 });
@@ -646,6 +664,21 @@ test("the change set of the working tree holds each status", async (t) => {
     change("src/modified.ts", MODIFIED),
     change("src/new.ts", RENAMED, "src/old.ts"),
     change("src/untracked.ts", ADDED),
+  ]);
+});
+
+test("a failed reached e2e test gives the exit code 1", async (t) => {
+  const root = await fixture(t, {
+    "src/a.ts": EMPTY_MODULE,
+    "src/apps/server/e2e-one.test.ts": `import "../../a.ts";\n${FAILING_TEST}`,
+  });
+  const result = runEntry(root, [], {
+    KANTHORD_CHANGES: await changesFile(root, [change("src/a.ts")]),
+  });
+  assert.equal(result.status, FAILED);
+  assert.deepEqual(result.report.tests, ["src/apps/server/e2e-one.test.ts"]);
+  assert.deepEqual(result.report.failed, [
+    { file: "src/apps/server/e2e-one.test.ts", name: "fails" },
   ]);
 });
 
