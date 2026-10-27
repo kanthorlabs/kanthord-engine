@@ -9,6 +9,7 @@ import {
   type AssetKind,
   type AssessmentResult,
   type EndState,
+  NodeState,
   StartPoint,
 } from "./contract.ts";
 import { readNode } from "./store.ts";
@@ -161,6 +162,29 @@ export function readOpenAttempt(
       )
       .get(nodeId) as unknown as AttemptRow | undefined) ?? null
   );
+}
+export function readDeferredCheckNodes(
+  tx: Transaction,
+  limit: number,
+): { node_id: string; attempt: number }[] {
+  return tx.database
+    .prepare(
+      `SELECT n.id AS node_id, a.attempt AS attempt
+       FROM mission_node n
+       JOIN mission_attempt a ON a.node_id = n.id AND a.closed_at IS NULL
+       WHERE n.state = ?
+         AND EXISTS (
+           SELECT 1 FROM mission_evidence e
+           WHERE e.node_id = a.node_id AND e.attempt = a.attempt
+             AND e.requirement_key IS NOT NULL AND e.end_state IS NULL
+         )
+       ORDER BY a.opened_at DESC, n.id
+       LIMIT ?`,
+    )
+    .all(NodeState.ExternalRequested, limit) as unknown as {
+    node_id: string;
+    attempt: number;
+  }[];
 }
 export function listAttempts(
   tx: Transaction,

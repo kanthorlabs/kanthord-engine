@@ -37,6 +37,7 @@ import {
   readAssets,
   readAttempt,
   readEvidence,
+  readDeferredCheckNodes,
   readOpenAttempt,
   readRequests,
 } from "./record-store.ts";
@@ -55,8 +56,13 @@ const EXPECTED_ROW_CHANGE = 1;
 const NO_GATE_FILES = 0;
 const FIRST_ROUND = 0;
 const NEXT_ROUND_STEP = 1;
+const FIRST_ROW_INDEX = 0;
+const OVERFLOW_PROBE_ROWS = 1;
 export const DEFERRED_CHECK_RETRY_MS = 60000;
 export const DEFERRED_CHECK_ROUND_LIMIT = 60;
+export const DEFERRED_CHECK_START_LIMIT = 50;
+const DEFERRED_CHECKS_RESUMED = "Deferred checks resumed.";
+const DEFERRED_CHECK_LIMIT_REACHED = "Deferred check start limit reached.";
 const DEFERRED_MERGE_FAILED = "Deferred merge failed.";
 export const LANDED_COMMIT_SUBJECT = "Landed commit";
 type CheckAnswer = Awaited<ReturnType<IntakeCheck["check"]>>;
@@ -482,4 +488,22 @@ export function scheduleDeferredCheck(
   round = FIRST_ROUND,
 ): void {
   setImmediate(() => runRound(dependencies, nodeId, attempt, round)).unref();
+}
+
+export function resumeDeferredChecks(
+  dependencies: Dependencies,
+  limit = DEFERRED_CHECK_START_LIMIT,
+): void {
+  const rows = dependencies.store.transaction((tx) =>
+    readDeferredCheckNodes(tx, limit + OVERFLOW_PROBE_ROWS),
+  );
+  const nodes = rows.slice(FIRST_ROW_INDEX, limit);
+  for (const { node_id, attempt } of nodes)
+    scheduleDeferredCheck(dependencies, node_id, attempt);
+  dependencies.logger.info(
+    { count: nodes.length, limit },
+    DEFERRED_CHECKS_RESUMED,
+  );
+  if (rows.length > limit)
+    dependencies.logger.warn({ limit }, DEFERRED_CHECK_LIMIT_REACHED);
 }
