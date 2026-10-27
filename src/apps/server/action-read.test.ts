@@ -55,6 +55,7 @@ const OUT_OF_RANGE_LIMIT = 101;
 const TIMEOUT = 180000;
 const GITHUB_KEY = "test-secret";
 const GATED_ADDRESS = "git@github.com:owner/gated.git";
+const GATED_NAME = "gated";
 const PUSHED_ADDRESS = "git@github.com:owner/pushed.git";
 const GITHUB_PREFIX = "repository.platform.github.";
 const UNKNOWN_CODE = "gateway.invocation.unknown";
@@ -94,12 +95,16 @@ function failed<T>(result: OperationResult<T>, status: number, code: string) {
 async function setup(t: TestContext) {
   const gitHub = await fakeGitHub(t);
   const pushed = await bareRepository(t, "pushed");
+  const gated = await bareRepository(t, "gated");
   const fixture = await gatewayFixture(t, {
     repositoryConnector: {
       gitLsRemote: async () => {},
     },
     github: { baseUrl: gitHub.endpoint },
-    repositoryTransport: mappedTransport({ [PUSHED_ADDRESS]: pushed.bare }),
+    repositoryTransport: mappedTransport({
+      [PUSHED_ADDRESS]: pushed.bare,
+      [GATED_ADDRESS]: gated.bare,
+    }),
   });
   const directory = temporary(t);
   const H = {
@@ -236,7 +241,7 @@ async function setup(t: TestContext) {
     const snapshot = {
       kind: "repository",
       binding_id: binding(name).id,
-      commit: pushed.head,
+      commit: name === GATED_NAME ? gated.head : pushed.head,
     };
     const steps = await pull(nodeId);
     await write(
@@ -279,6 +284,7 @@ async function setup(t: TestContext) {
       },
       W,
     );
+    const releasedBefore = materials.length;
     await write(
       ["mission", "assessment", "submit", nodeId],
       {
@@ -291,6 +297,8 @@ async function setup(t: TestContext) {
       },
       W,
     );
+    materials.splice(releasedBefore);
+    assessmentPins.set(evaluation.execution_id, pins(evaluation));
     const evidence = completed(
       await api["evidence.request"]({
         params: { node_id: nodeId },
@@ -333,12 +341,16 @@ async function setup(t: TestContext) {
     materials.push(material);
     return material;
   };
-  const pins = (execution: ExecutionRecord) =>
+  const assessmentPins = new Map<string, string[]>();
+  const pins = (execution: ExecutionRecord): string[] =>
     fixture.store.transaction((tx) => {
       const found = tx.database
         .prepare("SELECT credentials FROM scheduler_execution WHERE id = ?")
         .get(execution.execution_id) as { credentials: string };
-      return JSON.parse(found.credentials) as string[];
+      const own = assessmentPins.get(execution.execution_id) ?? [];
+      return (JSON.parse(found.credentials) as string[]).filter(
+        (credential) => !own.includes(credential),
+      );
     });
   const outboundCount = () =>
     fixture.store.transaction(

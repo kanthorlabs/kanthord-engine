@@ -58,6 +58,7 @@ const TIMEOUT = 180000;
 const GITHUB_KEY = "test-secret";
 const REQUIRED_CHECK = "check";
 const GATED_ADDRESS = "git@github.com:owner/gated.git";
+const GATED_NAME = "gated";
 const PUSHED_ADDRESS = "git@github.com:owner/pushed.git";
 const MERGE_SHA = "e".repeat(40);
 const GATED_RESOURCE = "repository:github:owner/gated";
@@ -122,12 +123,16 @@ async function rewriteMain(t: TestContext, bare: string) {
 async function setup(t: TestContext) {
   const gitHub = await fakeGitHub(t);
   const pushed = await bareRepository(t, "pushed");
+  const gated = await bareRepository(t, "gated");
   const fixture = await gatewayFixture(t, {
     repositoryConnector: {
       gitLsRemote: async () => {},
     },
     github: { baseUrl: gitHub.endpoint },
-    repositoryTransport: mappedTransport({ [PUSHED_ADDRESS]: pushed.bare }),
+    repositoryTransport: mappedTransport({
+      [PUSHED_ADDRESS]: pushed.bare,
+      [GATED_ADDRESS]: gated.bare,
+    }),
   });
   const directory = temporary(t);
   const H = {
@@ -261,7 +266,7 @@ async function setup(t: TestContext) {
     const snapshot = {
       kind: "repository",
       binding_id: binding(name).id,
-      commit: pushed.head,
+      commit: name === GATED_NAME ? gated.head : pushed.head,
     };
     const steps = await pull(nodeId);
     await write(

@@ -519,10 +519,10 @@ test(
   { timeout: TIMEOUT },
   async (t) => {
     const h = await setup(t);
-    const gated = await h.evaluated(h.nodes.gated, "gated", h.pushed.head);
+    const gated = await h.evaluated(h.nodes.gated, "gated", h.gatedSnapshot);
     const body = (requestKey: string) => ({
       key: "gated.pull_request",
-      commit: h.pushed.head,
+      commit: h.gatedSnapshot,
       reused_evidence_id: null,
       merge_evidence_id: null,
       request_key: requestKey,
@@ -558,10 +558,12 @@ test(
       h.gitHub.calls.filter(
         (call) => call.method === HttpMethod.Post && call.path === PULLS_PATH,
       ).length;
-    const gated = await h.evaluated(h.nodes.gated, "gated", h.pushed.head);
+    const gated = await h.evaluated(h.nodes.gated, "gated", h.gatedSnapshot);
+    const evaluationReleases = h.materials.length;
+    const evaluationPins = h.pins(gated);
     const gatedBody = (requestKey: string) => ({
       key: "gated.pull_request",
-      commit: h.pushed.head,
+      commit: h.gatedSnapshot,
       request_key: requestKey,
     });
     let created: PlatformAddress | null = null;
@@ -578,9 +580,9 @@ test(
           HttpStatus.Forbidden,
           MissionErrorCode.AuthorizationRefused,
         );
-        assert.equal(h.materials.length, NO_ROWS);
+        assert.equal(h.materials.length, evaluationReleases);
         assert.equal(h.rows().length, NO_ROWS);
-        assert.deepEqual(h.pins(gated), []);
+        assert.deepEqual(h.pins(gated), evaluationPins);
         assert.equal(h.gitHub.calls.length, NO_ROWS);
       },
     );
@@ -603,7 +605,7 @@ test(
           h.fixture.mission.authorizeFrozenAction = authorize;
         }
         assert.equal(h.rows().length, NO_ROWS);
-        assert.equal(h.materials.length, NO_ROWS);
+        assert.equal(h.materials.length, evaluationReleases);
       },
     );
 
