@@ -982,6 +982,7 @@ export function composeServices(options: {
     gitWriter,
     s3,
     masterKey: options.config.master_key,
+    stateDirectory: options.stateDirectory,
     projects: { get: projectClient.get },
     consumers: {
       [Consumer.MissionDeliveryAdmit]: (input, consumerOptions) =>

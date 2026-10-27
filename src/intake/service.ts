@@ -24,6 +24,7 @@ import type { GitHubPlatform } from "../repository/github.ts";
 import type { GitWriter } from "../repository/index.ts";
 import type { S3Platform } from "../storage/index.ts";
 import { checkAction, type IntakeCustody } from "./action-check.ts";
+import { readGateFiles } from "./gate-files.ts";
 import { mergeAction } from "./action-merge.ts";
 import { performAction } from "./action-perform.ts";
 import { readAction } from "./action-read.ts";
@@ -78,6 +79,7 @@ export interface Dependencies {
   gitWriter: GitWriter;
   s3: S3Platform;
   masterKey: string;
+  stateDirectory: string;
   projects: InboundProjects;
   consumers: IntakeConsumers;
   unresolvedRequests: UnresolvedRequestCounter;
@@ -93,6 +95,7 @@ export class IntakeService implements Service, IntakeCollaborations {
   private readonly quiesceTask = Promise.resolve(null);
   private started = false;
   private readonly outboundInFlight = new Set<string>();
+  private readonly gateFileRuns = new Map<string, Promise<unknown>>();
   readonly pollLoops: PollLoops;
   readonly dispatcher: Dispatcher;
 
@@ -252,6 +255,15 @@ export class IntakeService implements Service, IntakeCollaborations {
       intakeOperations["execution.storage.get"],
       ({ params }, caller) =>
         executionGetObject(this.dependencies, caller, params.asset_id),
+    );
+    registry.register(
+      intakeOperations["execution.gate_files.read"],
+      ({ body }, caller) =>
+        readGateFiles(
+          { ...this.dependencies, runs: this.gateFileRuns },
+          caller,
+          body,
+        ),
     );
     registry.register(intakeOperations["storage.get"], ({ params }, caller) =>
       getObject(this.dependencies, caller, params.asset_id),

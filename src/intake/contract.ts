@@ -778,6 +778,29 @@ export const intakeOperations = {
     description:
       "Sign a presigned GET of an evidence asset object for an execution.",
   },
+  "execution.gate_files.read": {
+    ...baseOperation,
+    access: AccessPolicy.Client,
+    direct: true,
+    requiresExecution: true,
+    method: HttpMethod.Post,
+    mutation: false,
+    body: true,
+    id: "intake.execution.gate_files.read",
+    path: "/api/intake/execution/:execution_id/gate_files",
+    input: z.strictObject({
+      params: z.strictObject({ execution_id: identitySchema("execution") }),
+      query: z.strictObject({}),
+      body: z.strictObject({
+        binding_id: identitySchema("binding"),
+        base_branch: z.string().min(1),
+        commit: commitSchema,
+      }),
+    }),
+    output: z.strictObject({ paths: z.array(z.string()) }),
+    description:
+      "Compute the changed gate files of a tested commit against the base branch of a repository binding for an execution.",
+  },
   "storage.get": {
     ...storageReadOperation,
     id: "intake.storage.get",
