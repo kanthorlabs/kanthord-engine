@@ -69,6 +69,7 @@ const INBOUND_VALIDATION_FAILED = "gateway.request.validation_failed";
 const INBOUND_UNAUTHORIZED = "gateway.authentication.unauthorized";
 const INBOUND_NOT_FOUND = "intake.inbound.not_found";
 const INBOUND_EMPTY_BODY = "";
+const FAILED_CHECK_OPERATION_ID = "worker.execution.failed_check.get";
 
 test("published native setup is an execution-scoped bodyless read", () => {
   const operation = workerOperations["execution.setup.get"];
@@ -83,6 +84,24 @@ test("published native setup is an execution-scoped bodyless read", () => {
   assert.equal(operation.requiresExecution, true);
   const index = parse(readFileSync(openapiPath(), "utf8"));
   assert.ok(index.paths["/api/worker/execution/{execution_id}/setup"]);
+});
+
+test("published failed check read is an execution-scoped bodyless read", () => {
+  const operation = workerOperations["execution.failed_check.get"];
+  const fragment = parse(
+    readFileSync(
+      join(
+        dirname(openapiPath()),
+        "openapi/worker/execution.failed_check.get.yaml",
+      ),
+      "utf8",
+    ),
+  );
+  assert.equal(fragment.pathItem.get.operationId, FAILED_CHECK_OPERATION_ID);
+  assert.equal(fragment.pathItem.get.requestBody, undefined);
+  assert.equal(operation.requiresExecution, true);
+  const index = parse(readFileSync(openapiPath(), "utf8"));
+  assert.ok(index.paths["/api/worker/execution/{execution_id}/failed-check"]);
 });
 
 const SETUP_TEMPLATE_NAMES = [
@@ -703,6 +722,7 @@ const OPERATION_INVENTORY: readonly (readonly [string, AccessPolicy])[] = [
   ["worker.action.request", AccessPolicy.Client],
   ["worker.execution.setup.get", AccessPolicy.Client],
   ["worker.execution.change_request.get", AccessPolicy.Client],
+  ["worker.execution.failed_check.get", AccessPolicy.Client],
   ["scheduler.queue.list", AccessPolicy.Human],
   ["scheduler.queue.peek", AccessPolicy.Human],
   ["scheduler.execution.list", AccessPolicy.Human],
@@ -840,8 +860,8 @@ const OPERATION_INVENTORY: readonly (readonly [string, AccessPolicy])[] = [
   ["tracking.session.entry.get", AccessPolicy.Human],
   ["tracking.cause.label", AccessPolicy.Human],
 ];
-const OPERATION_COUNT = 220;
-const ROUTED_OPERATION_COUNT = 210;
+const OPERATION_COUNT = 221;
+const ROUTED_OPERATION_COUNT = 211;
 const INTAKE_OPERATION_COUNT = 22;
 const INTAKE_ROUTED_OPERATION_COUNT = 14;
 const SERVICE_OPERATION_IDS = [

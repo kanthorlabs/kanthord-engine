@@ -439,6 +439,10 @@ MCP server and the Mission Service reach them through the direct adapter.
   review, each with `path`, `line` and `body`. The read calls GitHub once for
   the pull request, once for each page of the reviews and once for each page of
   the comments of each change request. `next_cursor` is `null`.
+- `github-pull-request-required-check-get` answers
+  `{ head_commit, base_branch, pending, failed }`. `pending` and `failed` name
+  the required checks of the base branch that have not ended and that failed on
+  the head commit. `next_cursor` is `null`.
 
 The callers of the outbound operations `intake.action.perform` and
 `intake.storage.delete`, the action performer and the Mission Service, track a

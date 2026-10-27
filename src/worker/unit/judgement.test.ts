@@ -17,6 +17,7 @@ import {
   JUDGEMENT_MARKER,
   repairInstruction,
   taskRevisionInstruction,
+  failedChecksText,
   requestedChangesText,
   REQUESTED_CHANGES_MAX_BYTES,
 } from "./judgement.ts";
@@ -369,6 +370,38 @@ test("each change request names its binding", () => {
       `Reviewer octo requests changes on api at commit ${"a".repeat(40)}: octo body`,
       `Reviewer hubot requests changes on web at commit ${"b".repeat(40)}: hubot body`,
     ].join("\n"),
+  );
+});
+
+test("the failed checks text names each check, binding and commit and stops at 4 KiB", () => {
+  const read = (binding: string, commit: string, failed: string[]) => ({
+    evidence_id: "evidence",
+    binding_id: `binding_${binding}`,
+    binding,
+    head_commit: commit,
+    failed,
+  });
+  assert.equal(failedChecksText([]), null);
+  assert.equal(
+    failedChecksText([
+      read("api", "a".repeat(40), ["lint", "unit"]),
+      read("web", "b".repeat(40), ["build"]),
+    ]),
+    [
+      "The pull request cannot merge:",
+      `The required checks lint, unit failed on api at commit ${"a".repeat(40)}.`,
+      `The required checks build failed on web at commit ${"b".repeat(40)}.`,
+    ].join("\n"),
+  );
+  const long = failedChecksText([
+    read("api", "a".repeat(40), ["x".repeat(REQUESTED_CHANGES_MAX_BYTES)]),
+  ]);
+  assert.ok(long);
+  assert.ok(long.startsWith("The pull request cannot merge:"));
+  assert.ok(long.endsWith("[The failed checks exceed 4 KiB and end here.]"));
+  assert.equal(
+    Buffer.byteLength(long.slice(0, long.lastIndexOf("\n")), "utf8"),
+    REQUESTED_CHANGES_MAX_BYTES,
   );
 });
 

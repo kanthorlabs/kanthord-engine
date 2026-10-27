@@ -8,7 +8,7 @@ import {
   type AffectedResult,
   type AffectedRun,
 } from "./affected.ts";
-import type { ChangeRequestRead } from "../contract.ts";
+import type { ChangeRequestRead, FailedChecks } from "../contract.ts";
 import type { NativeAgent } from "./native-agent.ts";
 import { PromptTemplate, type PromptTemplates } from "../../agent/contract.ts";
 import { renderTemplate } from "../../agent/prompt-templates.ts";
@@ -145,10 +145,30 @@ export function requestedChangesText(
     }
   }
   if (lines.length === NO_ITEMS) return null;
-  const text = `The pull request reviewers request these changes:\n${lines.join("\n")}`;
+  return cutAtLimit(
+    `The pull request reviewers request these changes:\n${lines.join("\n")}`,
+    "requested changes",
+  );
+}
+
+export function failedChecksText(
+  reads: readonly (FailedChecks["items"][number] & { binding: string })[],
+): string | null {
+  if (reads.length === NO_ITEMS) return null;
+  const lines = reads.map(
+    (read) =>
+      `The required checks ${read.failed.join(", ")} failed on ${read.binding} at commit ${read.head_commit}.`,
+  );
+  return cutAtLimit(
+    `The pull request cannot merge:\n${lines.join("\n")}`,
+    "failed checks",
+  );
+}
+
+function cutAtLimit(text: string, subject: string): string {
   const bytes = Buffer.from(text, "utf8");
   if (bytes.length <= REQUESTED_CHANGES_MAX_BYTES) return text;
-  return `${bytes.subarray(0, REQUESTED_CHANGES_MAX_BYTES).toString("utf8")}\n[The requested changes exceed 4 KiB and end here.]`;
+  return `${bytes.subarray(0, REQUESTED_CHANGES_MAX_BYTES).toString("utf8")}\n[The ${subject} exceed 4 KiB and end here.]`;
 }
 
 export function failedVerificationRationale(

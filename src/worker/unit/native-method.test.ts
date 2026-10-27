@@ -354,6 +354,9 @@ test("the end of the prepare phase span holds the shape of the pinned revision",
         complete({ items: [], next_cursor: null }),
     },
     scheduler: { executionRelease: async () => complete({}) },
+    worker: {
+      "execution.failed_check.get": async () => complete({ items: [] }),
+    },
   } as unknown as MethodClients;
   const written: TelemetryRecord[] = [];
   const store = new InMemoryCredentialStore();

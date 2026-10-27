@@ -24,6 +24,8 @@ export interface MethodClients {
   >;
   worker: Pick<
     ServiceClient<typeof workerOperations>,
-    "action.request" | "execution.change_request.get"
+    | "action.request"
+    | "execution.change_request.get"
+    | "execution.failed_check.get"
   >;
 }
