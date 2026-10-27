@@ -61,6 +61,7 @@ const CustomType = "custom";
 const ModelChange = "model_change";
 const ThinkingChange = "thinking_level_change";
 const SINGLE = 1;
+const HOST_HOME = "/home/kanthord_host";
 const MESSAGE_ENTRY = "message";
 const SYSTEM_ROLE = "system";
 const INVALID_OVERRIDE_TEXT = "bell\u0007";
@@ -486,6 +487,11 @@ test("a stored session resumes from the last entry of each kind and lists throug
     timestamp: Date.now(),
   });
   const fixture = await workbenchFixture(t, [], state);
+  (
+    fixture.workbenchService as unknown as {
+      dependencies: { hostHome: string };
+    }
+  ).dependencies.hostHome = HOST_HOME;
   const listed = completed(
     await fixture.workbench["session.list"](
       { params: {}, query: { agent_name: AGENT }, body: null },

@@ -32,14 +32,13 @@ const URL_PROPERTY = "url";
 const URL_ARGUMENT_COUNT = 2;
 const START_TEST_SSHD = "startTestSshd";
 const TEST_SSHD_MODULE = "src/repository/test-sshd.ts";
-const E2E_PATTERN = /^src\/apps\/server\/e2e-[^/]*\.test\.ts$/;
 const PARSED_PATTERNS = [
   /^src\/.*\.ts$/,
   /^scripts\/[^/]*\.mjs$/,
   /^bin\/[^/]*\.mjs$/,
 ];
-const UNIT_TEST_PATTERN = /^src\/.*\.test\.ts$/;
-const UNIT_TEST_SCRIPTS = new Set([
+const TEST_PATTERN = /^src\/.*\.test\.ts$/;
+const TEST_SCRIPTS = new Set([
   "scripts/test-reporter.test.mjs",
   "scripts/test-path.test.mjs",
   "scripts/affected-tests.test.mjs",
@@ -333,15 +332,14 @@ function isInert(path) {
   );
 }
 
-function isE2e(graph, path) {
-  if (E2E_PATTERN.test(path)) return true;
-  return UNIT_TEST_PATTERN.test(path) && graph.sshdImporters.has(path);
+function needsSshd(graph, path) {
+  return TEST_PATTERN.test(path) && graph.sshdImporters.has(path);
 }
 
-function isUnitTest(graph, path) {
+function isRunTest(graph, path) {
   return (
-    (UNIT_TEST_PATTERN.test(path) || UNIT_TEST_SCRIPTS.has(path)) &&
-    !isE2e(graph, path)
+    (TEST_PATTERN.test(path) || TEST_SCRIPTS.has(path)) &&
+    !needsSshd(graph, path)
   );
 }
 
@@ -374,8 +372,8 @@ function everything(graph, reason) {
   return {
     selection: SELECTION.all,
     reason: truncateBytes(reason, REASON_MAX_BYTES),
-    tests: present.filter((path) => isUnitTest(graph, path)).sort(),
-    excluded_e2e: present.filter((path) => isE2e(graph, path)).sort(),
+    tests: present.filter((path) => isRunTest(graph, path)).sort(),
+    excluded_e2e: present.filter((path) => needsSshd(graph, path)).sort(),
   };
 }
 
@@ -398,12 +396,12 @@ export function selectTests(root, changes) {
   const reached = [...walk(graph, new Set(paths))].filter((path) =>
     graph.present.has(path),
   );
-  const tests = reached.filter((path) => isUnitTest(graph, path)).sort();
+  const tests = reached.filter((path) => isRunTest(graph, path)).sort();
   return {
     selection: tests.length === 0 ? SELECTION.none : SELECTION.related,
     reason: null,
     tests,
-    excluded_e2e: reached.filter((path) => isE2e(graph, path)).sort(),
+    excluded_e2e: reached.filter((path) => needsSshd(graph, path)).sort(),
   };
 }
 
