@@ -41,7 +41,9 @@ const PUSHED_COMMIT = "a".repeat(40);
 const BASE_BRANCH = "main";
 const SECOND_PULL_REQUEST = 2;
 const CLOSED_AT = "2026-10-15T03:57:51Z";
-const PULL_READS_WITH_REQUIRED_CHECKS = 4;
+const PULL_READS_WITH_REQUIRED_CHECKS = 3;
+const GATED_RULES_PATH =
+  "/repos/owner/gated/rules/branches/main?per_page=100&page=1";
 const SERVICE_MISMATCH = "service_mismatch";
 const RETRYABLE_REFUSAL = "repository.platform.github.retryable_refusal";
 
@@ -246,6 +248,11 @@ test(
     assert.equal(action.items[FIRST_INDEX]?.kind, ActionResultKind.Submitted);
     await h.release(P.x2.execution_id);
     assert.equal((await h.node(P.nodeId)).state, NodeState.ExternalRequested);
+    await until(
+      () => h.gitHub.calls,
+      (calls) => calls.some((call) => call.path === GATED_RULES_PATH),
+      t.signal,
+    );
     h.gitHub.mergeability(FIRST_PULL_REQUEST, [
       { mergeable: null, mergeable_state: "unknown" },
       { mergeable: false, mergeable_state: "dirty" },
