@@ -33,7 +33,6 @@
     "format:check": "prettier --check src bin eslint.config.js scripts/pi-tools.mjs scripts/test-path.mjs scripts/test-path.test.mjs scripts/test-reporter.mjs scripts/test-reporter.test.mjs scripts/affected-tests.mjs scripts/affected-reporter.mjs scripts/affected-tests.test.mjs --log-level warn",
     "verify": "pnpm --silent run format:check && pnpm --silent run typecheck && pnpm --silent run lint && pnpm --silent run build && pnpm --silent test",
     "verify:guards": "node -e \"process.exit(0)\"",
-    "postinstall": "node scripts/pi-tools.mjs fetch",
     "prepare": "husky"
   },
   "lint-staged": {
