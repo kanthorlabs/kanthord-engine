@@ -98,6 +98,7 @@ const gitWriter: GitWriter = {
   mergePushFresh: unexpectedGit,
   pushSnapshotFresh: unexpectedGit,
   landedOn: unexpectedGit,
+  changedGateFiles: unexpectedGit,
   sshAccessOf: unexpectedGit,
 };
 

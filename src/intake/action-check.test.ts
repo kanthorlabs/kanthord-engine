@@ -126,6 +126,7 @@ function harness(
       if (options.landingFailure !== undefined) throw options.landingFailure;
       return { landed: options.landed ?? true, first_parent: PUSHED };
     },
+    changedGateFiles: () => assert.fail("A check pushes nothing."),
     sshAccessOf: sshAccessOf(),
   };
   const refusal = (failure: ResultClassValue) => ({

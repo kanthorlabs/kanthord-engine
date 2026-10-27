@@ -108,6 +108,7 @@ export function unusedActionDependencies(): Pick<
       mergePushFresh: unexpectedCollaboration,
       pushSnapshotFresh: unexpectedCollaboration,
       landedOn: unexpectedCollaboration,
+      changedGateFiles: unexpectedCollaboration,
       sshAccessOf: unexpectedCollaboration,
     },
     s3: new S3Platform(),
