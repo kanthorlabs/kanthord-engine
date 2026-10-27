@@ -67,6 +67,8 @@ const REQUIREMENT = "gated.pull_request";
 const UNRESOLVED = "unresolved";
 const EXPECTED_END = "expected-end";
 const LANDED_COMMIT = "c".repeat(40);
+const GATED_RULES_PATH =
+  "/repos/owner/gated/rules/branches/main?per_page=100&page=1";
 const TOOL_RESULT = "toolResult";
 const UPLOAD = "evidence-upload";
 const DEFAULTS = {
@@ -552,6 +554,22 @@ test(
             if_none_match: null,
             status: 200,
           },
+          {
+            method: "GET",
+            path: `/repos/owner/gated/pulls/${pr.number}`,
+            body: null,
+            token: GITHUB_KEY,
+            if_none_match: null,
+            status: 200,
+          },
+          {
+            method: "GET",
+            path: GATED_RULES_PATH,
+            body: null,
+            token: GITHUB_KEY,
+            if_none_match: null,
+            status: 200,
+          },
         ]);
       },
     );
@@ -586,6 +604,16 @@ test(
             {
               method: "GET",
               path: `/repos/owner/gated/pulls/${pr.number}/reviews?per_page=100&page=1`,
+              token: GITHUB_KEY,
+            },
+            {
+              method: "GET",
+              path: `/repos/owner/gated/pulls/${pr.number}`,
+              token: GITHUB_KEY,
+            },
+            {
+              method: "GET",
+              path: GATED_RULES_PATH,
               token: GITHUB_KEY,
             },
             {

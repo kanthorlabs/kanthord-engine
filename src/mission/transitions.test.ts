@@ -717,6 +717,16 @@ test("deferred check applies conflict and returns the node to Available", async 
   assert.equal(h.node().state, NodeState.Available);
 });
 
+test("deferred check applies checks_failed and returns the node to Available", async (t) => {
+  const h = deferredFixture(t, {
+    end_state: CheckEndState.ChecksFailed,
+    landed_commits: [],
+  });
+  h.release();
+  await deferredCheckEnds(h.calls, t.signal);
+  assert.equal(h.node().state, NodeState.Available);
+});
+
 test("deferred check with none leaves the node in ExternalRequested", async (t) => {
   const h = deferredFixture(t, {
     end_state: CheckEndState.None,

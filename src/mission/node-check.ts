@@ -133,7 +133,10 @@ export function applyEndState(
   const before = claimableMap(tx, mission.id, dependencies.bindings);
   if (request.end_state !== null || answer.end_state === CheckEndState.None)
     return;
-  if (answer.end_state === CheckEndState.Conflict) {
+  if (
+    answer.end_state === CheckEndState.Conflict ||
+    answer.end_state === CheckEndState.ChecksFailed
+  ) {
     if (
       node.state === NodeState.ExternalRequested &&
       readOpenAttempt(tx, node.id)?.attempt === request.attempt

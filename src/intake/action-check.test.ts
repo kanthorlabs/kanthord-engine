@@ -40,6 +40,7 @@ const OTHER_ADDRESS = `git@${SSH_HOST}:owner/other.git`;
 const RESOURCE_IDENTITY = "repository:github:owner/pushed";
 const PUSHED = "0123456789abcdef0123456789abcdef01234567";
 const PULL_NUMBER = 7;
+type ResultClassValue = (typeof ResultClass)[keyof typeof ResultClass];
 const BAD_GATEWAY_STATUS = 502;
 
 const ONE_LANDING = 1;
@@ -74,6 +75,13 @@ function requestFacts(address: RequestFacts["address"]): RequestFacts {
   };
 }
 
+const OPEN_PULL_REQUEST = {
+  state: "open",
+  merged: false,
+  merge_commit_sha: null,
+  head: { sha: PUSHED },
+};
+
 const branchPush: RequestFacts["address"] = {
   kind: "branch_push",
   resource_identity: RESOURCE_IDENTITY,
@@ -88,6 +96,7 @@ function harness(
     credential?: string;
     pinned?: boolean;
     landingFailure?: Error;
+    checksFailure?: ResultClassValue;
     sshFacts?: { binding_id: string; address: string };
   },
 ) {
@@ -114,14 +123,21 @@ function harness(
     },
     sshAccessOf: sshAccessOf(),
   };
+  const refusal = (failure: ResultClassValue) => ({
+    ok: false as const,
+    class: failure,
+    code: GITHUB_RESULT_CODE_PREFIX + failure,
+    status: null,
+    message: "refused",
+  });
   const github = {
-    getSettledPullRequest: async () => ({
-      ok: false as const,
-      class: ResultClass.FinalRefusal,
-      code: GITHUB_RESULT_CODE_PREFIX + ResultClass.FinalRefusal,
-      status: null,
-      message: "refused",
-    }),
+    getSettledPullRequest: async () =>
+      options.checksFailure === undefined
+        ? refusal(ResultClass.FinalRefusal)
+        : { ok: true as const, value: OPEN_PULL_REQUEST },
+    listReviews: async () => ({ ok: true as const, value: [] }),
+    getRequiredChecks: async () =>
+      refusal(options.checksFailure ?? ResultClass.FinalRefusal),
   } as unknown as GitHubPlatform;
   const caller: CallerContext = {
     identity: mission,
@@ -193,6 +209,26 @@ test("a pull request check takes no SSH release", async (t) => {
   );
   assert.deepEqual(h.sshRequests(), []);
   assert.deepEqual(h.landings, []);
+  assert.ok(h.materials.every((material) => material.dropped));
+});
+
+test("a pull request check answers 502 with the platform class when the read of the required checks fails", async (t) => {
+  const h = harness(t, {
+    facts: requestFacts({
+      kind: "pull_request",
+      resource_identity: RESOURCE_IDENTITY,
+      number: PULL_NUMBER,
+    }),
+    credential: "github",
+    checksFailure: ResultClass.RetryableRefusal,
+  });
+  await assert.rejects(
+    h.check(),
+    (error) =>
+      error instanceof OperationError &&
+      error.status === BAD_GATEWAY_STATUS &&
+      error.code === GITHUB_RESULT_CODE_PREFIX + ResultClass.RetryableRefusal,
+  );
   assert.ok(h.materials.every((material) => material.dropped));
 });
 

@@ -633,6 +633,9 @@ test("the token reaches no failure and no log record", async (t) => {
 const HEAD_SHA = "89abcdef0123456789abcdef0123456789abcdef";
 const OLDER_SHA = "fedcba9876543210fedcba9876543210fedcba98";
 const NO_REVIEWS: unknown[] = [];
+const NO_CHECKS = { head_commit: "", failed: [] };
+const FAILED_AT_HEAD = { head_commit: HEAD_SHA, failed: ["check"] };
+const FAILED_AT_OLDER = { head_commit: OLDER_SHA, failed: ["check"] };
 const PULL_REQUEST_BODY = {
   number: 7,
   state: "open",
@@ -873,6 +876,7 @@ test("foldPullRequest folds the three states of a pull request", () => {
         merge_commit_sha: MERGE_COMMIT,
       },
       NO_REVIEWS,
+      NO_CHECKS,
       merged,
     ),
     { end_state: CheckEndState.Expected, landed_commits: [MERGE_COMMIT] },
@@ -881,12 +885,13 @@ test("foldPullRequest folds the three states of a pull request", () => {
     github.foldPullRequest(
       { ...PULL_REQUEST_BODY, state: "closed", merge_commit_sha: MERGE_COMMIT },
       NO_REVIEWS,
+      NO_CHECKS,
       merged,
     ),
     { end_state: CheckEndState.Other, landed_commits: [] },
   );
   assert.deepEqual(
-    github.foldPullRequest(PULL_REQUEST_BODY, NO_REVIEWS, merged),
+    github.foldPullRequest(PULL_REQUEST_BODY, NO_REVIEWS, NO_CHECKS, merged),
     {
       end_state: CheckEndState.None,
       landed_commits: [],
@@ -896,17 +901,19 @@ test("foldPullRequest folds the three states of a pull request", () => {
     github.foldPullRequest(
       PULL_REQUEST_BODY,
       NO_REVIEWS,
+      NO_CHECKS,
       ExpectedEndState.BaseBranchPushed,
     ),
   );
   assert.throws(() =>
-    github.foldPullRequest({ number: 7 }, NO_REVIEWS, merged),
+    github.foldPullRequest({ number: 7 }, NO_REVIEWS, NO_CHECKS, merged),
   );
   assert.throws(
     () =>
       github.foldPullRequest(
         { ...PULL_REQUEST_BODY, state: "closed", merged: true },
         NO_REVIEWS,
+        NO_CHECKS,
         merged,
       ),
     { name: "ZodError" },
@@ -1558,6 +1565,7 @@ test("an open pull request with merge conflicts folds to the conflict end state"
     github.foldPullRequest(
       { ...open, mergeable_state: "dirty" },
       NO_REVIEWS,
+      NO_CHECKS,
       ExpectedEndState.PullRequestMerged,
     ).end_state,
     CheckEndState.Conflict,
@@ -1566,13 +1574,18 @@ test("an open pull request with merge conflicts folds to the conflict end state"
     github.foldPullRequest(
       { ...open, mergeable_state: "clean" },
       NO_REVIEWS,
+      NO_CHECKS,
       ExpectedEndState.PullRequestMerged,
     ).end_state,
     CheckEndState.None,
   );
   assert.equal(
-    github.foldPullRequest(open, NO_REVIEWS, ExpectedEndState.PullRequestMerged)
-      .end_state,
+    github.foldPullRequest(
+      open,
+      NO_REVIEWS,
+      NO_CHECKS,
+      ExpectedEndState.PullRequestMerged,
+    ).end_state,
     CheckEndState.None,
   );
 });
@@ -1624,6 +1637,7 @@ test("a pull request whose first read holds a null mergeable and whose second re
     github.foldPullRequest(
       result.value,
       NO_REVIEWS,
+      NO_CHECKS,
       ExpectedEndState.PullRequestMerged,
     ).end_state,
     CheckEndState.Conflict,
@@ -1643,6 +1657,7 @@ test("a null mergeable after the third read folds to none", async (t) => {
     github.foldPullRequest(
       result.value,
       NO_REVIEWS,
+      NO_CHECKS,
       ExpectedEndState.PullRequestMerged,
     ).end_state,
     CheckEndState.None,
@@ -1685,9 +1700,49 @@ function decision(reviews: unknown[], body: object = PULL_REQUEST_BODY) {
   return new GitHubPlatform().foldPullRequest(
     body,
     reviews,
+    NO_CHECKS,
     ExpectedEndState.PullRequestMerged,
   ).end_state;
 }
+
+function foldWithChecks(
+  checks: { head_commit: string; failed: string[] },
+  reviews: unknown[] = NO_REVIEWS,
+  body: object = PULL_REQUEST_BODY,
+) {
+  return new GitHubPlatform().foldPullRequest(
+    body,
+    reviews,
+    checks,
+    ExpectedEndState.PullRequestMerged,
+  ).end_state;
+}
+
+test("an open pull request with a failed required check at its head folds to checks_failed", () => {
+  assert.equal(foldWithChecks(FAILED_AT_HEAD), CheckEndState.ChecksFailed);
+});
+
+test("a pending required check or a check of another head folds to none", () => {
+  assert.equal(
+    foldWithChecks({ head_commit: HEAD_SHA, failed: [] }),
+    CheckEndState.None,
+  );
+  assert.equal(foldWithChecks(FAILED_AT_OLDER), CheckEndState.None);
+});
+
+test("a conflict or a current change request wins over a failed required check", () => {
+  assert.equal(
+    foldWithChecks(FAILED_AT_HEAD, NO_REVIEWS, {
+      ...PULL_REQUEST_BODY,
+      mergeable_state: "dirty",
+    }),
+    CheckEndState.Conflict,
+  );
+  assert.equal(
+    foldWithChecks(FAILED_AT_HEAD, [review(1, ReviewState.ChangesRequested)]),
+    CheckEndState.Other,
+  );
+});
 
 test("a current change request on an open pull request folds to other", () => {
   const changes = review(1, ReviewState.ChangesRequested);
@@ -1760,6 +1815,7 @@ test("an open pull request without a head commit or with a malformed review list
       new GitHubPlatform().foldPullRequest(
         PULL_REQUEST_BODY,
         {},
+        NO_CHECKS,
         ExpectedEndState.PullRequestMerged,
       ),
     { name: "ZodError" },

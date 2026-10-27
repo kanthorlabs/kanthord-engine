@@ -48,6 +48,7 @@ const REVIEW_PAGE_SIZE = 100;
 const REVIEW_PAGE_LIMIT = 30;
 const NO_CHANGE_REQUESTS = 0;
 const NO_REQUIRED_CHECKS = 0;
+const NO_FAILED_CHECKS = 0;
 const CHECK_RUN_PAGE_SIZE = 100;
 const BRANCH_RULES_ROUTE = "GET /repos/{owner}/{repo}/rules/branches/{branch}";
 const CHECK_RUNS_ROUTE = "GET /repos/{owner}/{repo}/commits/{ref}/check-runs";
@@ -179,6 +180,7 @@ export const CheckEndState = {
   Other: "other",
   None: "none",
   Conflict: "conflict",
+  ChecksFailed: "checks_failed",
 } as const;
 export type CheckEndState = (typeof CheckEndState)[keyof typeof CheckEndState];
 
@@ -806,6 +808,27 @@ function mergeabilityPending(body: unknown): boolean {
   );
 }
 
+function openEndState(
+  pullRequest: z.infer<typeof pullRequestStateSchema>,
+  reviews: unknown,
+  checks: Pick<RequiredCheckRead, "head_commit" | "failed">,
+  headCommit: string,
+): CheckEndState {
+  if (
+    currentChangeRequests(reviewListSchema.parse(reviews), headCommit).length >
+    NO_CHANGE_REQUESTS
+  )
+    return CheckEndState.Other;
+  if (pullRequest.mergeable_state === MERGEABLE_STATE_CONFLICT)
+    return CheckEndState.Conflict;
+  if (
+    checks.head_commit === headCommit &&
+    checks.failed.length > NO_FAILED_CHECKS
+  )
+    return CheckEndState.ChecksFailed;
+  return CheckEndState.None;
+}
+
 export class GitHubPlatform {
   readonly #baseUrl: string;
   readonly #mergeabilityRetryDelayMs: number;
@@ -1192,6 +1215,7 @@ export class GitHubPlatform {
   foldPullRequest(
     body: unknown,
     reviews: unknown,
+    checks: Pick<RequiredCheckRead, "head_commit" | "failed">,
     expectedEndState: ExpectedEndState,
   ): CheckFold {
     assert.equal(expectedEndState, ExpectedEndState.PullRequestMerged);
@@ -1207,13 +1231,7 @@ export class GitHubPlatform {
       return { end_state: CheckEndState.Other, landed_commits: [] };
     const { head } = pullRequestHeadSchema.parse(body);
     return {
-      end_state:
-        currentChangeRequests(reviewListSchema.parse(reviews), head.sha)
-          .length > NO_CHANGE_REQUESTS
-          ? CheckEndState.Other
-          : pullRequest.mergeable_state === MERGEABLE_STATE_CONFLICT
-            ? CheckEndState.Conflict
-            : CheckEndState.None,
+      end_state: openEndState(pullRequest, reviews, checks, head.sha),
       landed_commits: [],
     };
   }

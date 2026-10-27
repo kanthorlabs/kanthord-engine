@@ -32,6 +32,7 @@ const KEY = "prefix#tag?query%2F space/é/project/mission/node/1/asset";
 const BYTES = "hello";
 const LIFETIME = 3600000;
 const NO_OBJECTS = 0;
+const NO_CHECKS = { head_commit: "", failed: [] };
 const ONE_CALL = 1;
 const TWO_CALLS = 2;
 const LAST_CALLS = 3;
@@ -105,7 +106,12 @@ test("fake GitHub serves the pull-request routes and records each call", async (
   });
   assert.ok(merged.ok);
   assert.deepEqual(
-    platform.foldPullRequest(merged.value, [], "pull_request_merged"),
+    platform.foldPullRequest(
+      merged.value,
+      [],
+      NO_CHECKS,
+      "pull_request_merged",
+    ),
     {
       end_state: CheckEndState.Expected,
       landed_commits: [MERGE_SHA],
@@ -162,7 +168,8 @@ test("fake GitHub closes a pull request and scripts the failures", async (t) => 
   });
   assert.ok(closed.ok);
   assert.equal(
-    platform.foldPullRequest(closed.value, [], "pull_request_merged").end_state,
+    platform.foldPullRequest(closed.value, [], NO_CHECKS, "pull_request_merged")
+      .end_state,
     CheckEndState.Other,
   );
   gitHub.failPulls(HttpStatus.ServiceUnavailable);
@@ -189,7 +196,8 @@ test("fake GitHub opens a pull request without a recorded call", async (t) => {
   });
   assert.ok(opened.ok);
   assert.equal(
-    platform.foldPullRequest(opened.value, [], "pull_request_merged").end_state,
+    platform.foldPullRequest(opened.value, [], NO_CHECKS, "pull_request_merged")
+      .end_state,
     CheckEndState.None,
   );
   assert.equal(gitHub.calls.length, ONE_CALL);
@@ -210,6 +218,7 @@ test("fake GitHub serves the reviews of a pull request at its head commit", asyn
     return platform.foldPullRequest(
       pull.value,
       reviews.value,
+      NO_CHECKS,
       "pull_request_merged",
     ).end_state;
   };

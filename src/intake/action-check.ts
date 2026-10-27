@@ -25,6 +25,7 @@ import {
   type CheckFold,
   type GitHubFailure,
   type GitHubPlatform,
+  type RequiredCheckRead,
 } from "../repository/github.ts";
 import {
   foldBranchPush,
@@ -38,7 +39,13 @@ import { PLATFORM_CALL_DEADLINE_MS, ResultClass } from "./contract.ts";
 const BAD_GATEWAY_STATUS = 502;
 const GIT_FAILED_CODE = "repository.connector.git_failed";
 const UNEXPECTED_BODY_MESSAGE = "the GitHub answer holds an unexpected body";
+const PULL_REQUEST_STATE_OPEN = "open";
+const NO_CHECKS = { head_commit: "", failed: [] };
 const expectedEndStateSchema = z.enum(ExpectedEndState);
+const openPullRequestSchema = z.looseObject({
+  state: z.literal(PULL_REQUEST_STATE_OPEN),
+  merged: z.literal(false),
+});
 
 export const GIT_TRANSPORT_CODES: readonly string[] = [
   GIT_FAILED_CODE,
@@ -241,18 +248,29 @@ async function inspectPullRequest(
     number: request.number,
   });
   if (!reviews.ok) throw platformFailure(reviews);
-  return foldBody(github, answer.value, reviews.value, request.expected);
+  const checks = openPullRequestSchema.safeParse(answer.value).success
+    ? await github.getRequiredChecks(call, target, { number: request.number })
+    : { ok: true as const, value: NO_CHECKS };
+  if (!checks.ok) throw platformFailure(checks);
+  return foldBody(
+    github,
+    answer.value,
+    reviews.value,
+    checks.value,
+    request.expected,
+  );
 }
 
 function foldBody(
   github: GitHubPlatform,
   body: unknown,
   reviews: unknown,
+  checks: Pick<RequiredCheckRead, "head_commit" | "failed">,
   expected: ExpectedEndState,
 ): CheckFold {
   assert.equal(expected, ExpectedEndState.PullRequestMerged);
   try {
-    return github.foldPullRequest(body, reviews, expected);
+    return github.foldPullRequest(body, reviews, checks, expected);
   } catch (error) {
     if (!(error instanceof z.ZodError)) throw error;
     throw platformFailure({

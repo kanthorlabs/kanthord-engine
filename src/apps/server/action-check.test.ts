@@ -56,6 +56,7 @@ const BAD_GATEWAY_STATUS = 502;
 const UNAUTHORIZED_STATUS = 401;
 const TIMEOUT = 180000;
 const GITHUB_KEY = "test-secret";
+const REQUIRED_CHECK = "check";
 const GATED_ADDRESS = "git@github.com:owner/gated.git";
 const PUSHED_ADDRESS = "git@github.com:owner/pushed.git";
 const MERGE_SHA = "e".repeat(40);
@@ -64,7 +65,7 @@ const PUSHED_RESOURCE = "repository:github:owner/pushed";
 const OTHER_RESOURCE = "repository:github:owner/other";
 const OTHER_PROJECT = "project_01ARZ3NDEKTSV4RRFFQ69G5FAV";
 const ONE_REQUEST = 1;
-const DEFERRED_GITHUB_CALLS = 2;
+const DEFERRED_GITHUB_CALLS = 4;
 const AUTHORIZATION_REFUSED_STATUS = 403;
 const RETRYABLE_CODE = "repository.platform.github.retryable_refusal";
 const FINAL_CODE = "repository.platform.github.final_refusal";
@@ -390,6 +391,8 @@ async function setup(t: TestContext) {
       expected_mission_version: await version(),
     });
   const nodes = { gated: gatedNode, pushed: pushedNode };
+  const nodeState = async (nodeId: string) =>
+    (await read<{ state: string }>(["mission", "node", "get", nodeId])).state;
   return {
     projectId: project.id,
     fixture,
@@ -402,6 +405,7 @@ async function setup(t: TestContext) {
     materials,
     nodeCheck,
     nodes,
+    nodeState,
   };
 }
 
@@ -441,32 +445,19 @@ test(
           end_state: CheckEndState.Expected,
           landed_commits: [MERGE_SHA],
         });
+        const read = (path: string) => [HttpMethod.Get, path, GITHUB_KEY];
+        const pull = read(`/repos/owner/gated/pulls/${h.number}`);
+        const reviews = read(
+          `/repos/owner/gated/pulls/${h.number}/reviews?per_page=100&page=1`,
+        );
+        const rules = read(
+          "/repos/owner/gated/rules/branches/main?per_page=100&page=1",
+        );
+        const openCheck = [pull, reviews, pull, rules];
+        const settledCheck = [pull, reviews];
         assert.deepEqual(
           h.gitHub.calls.map((call) => [call.method, call.path, call.token]),
-          [
-            [
-              HttpMethod.Get,
-              `/repos/owner/gated/pulls/${h.number}`,
-              GITHUB_KEY,
-            ],
-            [
-              HttpMethod.Get,
-              `/repos/owner/gated/pulls/${h.number}/reviews?per_page=100&page=1`,
-              GITHUB_KEY,
-            ],
-            ...Array.from({ length: CHECK_COUNT }, () => [
-              [
-                HttpMethod.Get,
-                `/repos/owner/gated/pulls/${h.number}`,
-                GITHUB_KEY,
-              ],
-              [
-                HttpMethod.Get,
-                `/repos/owner/gated/pulls/${h.number}/reviews?per_page=100&page=1`,
-                GITHUB_KEY,
-              ],
-            ]).flat(),
-          ],
+          [...openCheck, ...openCheck, ...settledCheck, ...settledCheck],
         );
         dropped(h.materials, CHECK_COUNT);
       },
@@ -588,6 +579,36 @@ test(
       );
       assert.equal(count, NO_ROWS);
     });
+  },
+);
+
+test(
+  "a failed required check at the head of an open pull request returns the node to Available",
+  { timeout: TIMEOUT },
+  async (t) => {
+    const h = await setup(t);
+    const [pull] = h.gitHub.pulls;
+    assert.ok(pull);
+    assert.equal(await h.nodeState(h.nodes.gated), NodeState.ExternalRequested);
+    h.gitHub.checks({
+      required: [REQUIRED_CHECK],
+      commit: pull.head_sha,
+      runs: [
+        {
+          id: 1,
+          name: REQUIRED_CHECK,
+          status: "completed",
+          conclusion: "failure",
+        },
+      ],
+    });
+    assert.deepEqual(completed<Fold>(await h.check(h.pullRequestId)), {
+      end_state: CheckEndState.ChecksFailed,
+      landed_commits: [],
+    });
+    const answer = await h.nodeCheck(h.nodes.gated);
+    assert.equal(answer.results.length, ONE_REQUEST);
+    assert.equal(await h.nodeState(h.nodes.gated), NodeState.Available);
   },
 );
 
