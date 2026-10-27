@@ -23,6 +23,7 @@ import {
   mergePushFresh,
   pushSnapshotFresh,
   landedOn,
+  changedGateFiles,
   resolveBranchCommit,
   readFilesAtCommit,
   listFilesAtCommit,
@@ -58,8 +59,10 @@ export { decodeGitHubEvent } from "./github.ts";
 export {
   foldBranchPush,
   GitStage,
+  GATE_DECLARATION_INVALID,
   GitWriteError,
   type BranchCommitInput,
+  type GateFilesInput,
   type Landing,
   type MergePushInput,
 } from "./connector.ts";
@@ -68,6 +71,7 @@ export interface GitWriter {
   mergePushFresh: typeof mergePushFresh;
   pushSnapshotFresh: typeof pushSnapshotFresh;
   landedOn: typeof landedOn;
+  changedGateFiles: typeof changedGateFiles;
   sshAccessOf(
     tx: Transaction,
     granted: SshGrantFacts,
@@ -139,6 +143,7 @@ export class RepositoryComponent implements GitWriter {
   mergePushFresh = mergePushFresh;
   pushSnapshotFresh = pushSnapshotFresh;
   landedOn = landedOn;
+  changedGateFiles = changedGateFiles;
   private readonly knownHostsOf: KnownHostsOf;
   private readonly portOf: PortOf;
 

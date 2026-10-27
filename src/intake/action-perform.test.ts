@@ -180,6 +180,9 @@ function harness(t: TestContext, options: Options) {
         ? { landed: true, first_parent: MERGED }
         : { landed: false, first_parent: null };
     },
+    changedGateFiles: () => {
+      throw new Error("A perform computes no gate file.");
+    },
     sshAccessOf: sshAccessOf(),
   };
   const githubCalls: string[] = [];

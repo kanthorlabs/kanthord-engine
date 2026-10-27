@@ -6,12 +6,14 @@ import {
 } from "simple-git";
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { mkdtemp, rm, stat } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import { mkdir, mkdtemp, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, posix } from "node:path";
+import { dirname, isAbsolute, join, posix } from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { promisify } from "node:util";
+import { z } from "zod";
 import {
   CancellationContext,
   DEADLINE_EXCEEDED_CODE,
@@ -35,6 +37,7 @@ import {
 
 const GIT_FAILED = "repository.connector.git_failed";
 export const NODE_BRANCH_MISSING = "repository.node_branch.missing";
+export const GATE_DECLARATION_INVALID = "repository.gate_declaration.invalid";
 const EMPTY_STRING = "";
 const EXPIRED = 0;
 const TIMEOUT_PLUGIN = "timeout";
@@ -82,6 +85,32 @@ const EXIT_SUCCESS = 0;
 const EXIT_NOT_ANCESTOR = 1;
 const EXIT_DETACHED_HEAD = 1;
 const NO_EXIT = -1;
+const GATE_DECLARATION_FILE = ".kanthord/affected-tests.json";
+const BARE_HEAD_FILE = "HEAD";
+const REMOTE_BRANCH_PREFIX = "refs/remotes/origin/";
+const OPTION_PREFIX = "-";
+const GIT_DIR_OPTION = "--git-dir=";
+const ENTRY_FIELD_SEPARATOR = " ";
+const GATE_DECLARATION_VERSION = 1;
+const GATE_TIME_LIMIT_MIN_S = 60;
+const GATE_TIME_LIMIT_MAX_S = 3600;
+const GATE_LIST_MAX_ENTRIES = 10000;
+const NON_BLANK_PATTERN = /\S/;
+
+const gateDeclarationSchema = z.strictObject({
+  version: z.literal(GATE_DECLARATION_VERSION),
+  command: z.string().regex(NON_BLANK_PATTERN),
+  time_limit_s: z
+    .number()
+    .int()
+    .min(GATE_TIME_LIMIT_MIN_S)
+    .max(GATE_TIME_LIMIT_MAX_S)
+    .optional(),
+  gate_files: z
+    .array(z.string().regex(NON_BLANK_PATTERN))
+    .max(GATE_LIST_MAX_ENTRIES)
+    .default([]),
+});
 
 export const GitStage = {
   BeforePush: "before_push",
@@ -114,6 +143,13 @@ export interface BranchCommitInput {
   address: string;
   branch: string;
   commit: string;
+}
+
+export interface GateFilesInput {
+  address: string;
+  base_branch: string;
+  commit: string;
+  directory: string;
 }
 
 export interface Landing {
@@ -1268,6 +1304,163 @@ async function fetchTrees(
     "origin",
     commit,
   ]);
+}
+
+export async function changedGateFiles(
+  input: GateFilesInput,
+  context: Context,
+  deadlineAt: number,
+  ssh: SshAccess,
+): Promise<string[]> {
+  assert.match(input.commit, COMMIT_PATTERN);
+  assert.ok(!input.base_branch.startsWith(OPTION_PREFIX));
+  assert.ok(!input.address.startsWith(OPTION_PREFIX));
+  assert.ok(isAbsolute(input.directory));
+  return withAccess(ssh, context, remainingMs(deadlineAt), (agent) =>
+    changedGateFilesIn(input, context, deadlineAt, agent),
+  );
+}
+
+async function changedGateFilesIn(
+  input: GateFilesInput,
+  context: Context,
+  deadlineAt: number,
+  agent: AgentVariables,
+): Promise<string[]> {
+  await mkdir(input.directory, { recursive: true, mode: FRESH_CLONE_MODE });
+  assert.equal(
+    (await stat(input.directory)).mode & PERMISSION_BITS,
+    FRESH_CLONE_MODE,
+  );
+  try {
+    return await changedGateFilesWith(input, context, deadlineAt, agent);
+  } catch (error) {
+    if (!keepsRepository(error, context))
+      await rm(input.directory, { recursive: true, force: true });
+    throw error;
+  }
+}
+
+function keepsRepository(error: unknown, context: Context): boolean {
+  if (context.signal.aborted) return true;
+  if (error instanceof CodedError && error.code === DEADLINE_EXCEEDED_CODE)
+    return true;
+  return (
+    error instanceof Diagnostic &&
+    error.code === GIT_FAILED &&
+    error.cause instanceof Error &&
+    error.cause.message.endsWith(GIT_DEADLINE_EXCEEDED)
+  );
+}
+
+function bareEnvironment(directory: string): NodeJS.ProcessEnv {
+  const environment = { ...process.env };
+  delete environment.GIT_DIR;
+  delete environment.GIT_WORK_TREE;
+  environment.GIT_CEILING_DIRECTORIES = dirname(directory);
+  return environment;
+}
+
+async function changedGateFilesWith(
+  input: GateFilesInput,
+  context: Context,
+  deadlineAt: number,
+  agent: AgentVariables,
+): Promise<string[]> {
+  const git = gitIn(
+    input.directory,
+    context,
+    deadlineAt,
+    "changed gate files",
+    agent,
+  );
+  const environment = bareEnvironment(input.directory);
+  const run: GitRun = (args) =>
+    git([GIT_DIR_OPTION + input.directory, ...args], environment);
+  if (!existsSync(join(input.directory, BARE_HEAD_FILE))) {
+    await run(["init", "--bare", "--quiet"]);
+    await run(["remote", "add", "origin", "--", input.address]);
+  }
+  await run(["config", "maintenance.auto", "false"]);
+  await run(["config", "gc.auto", "0"]);
+  await run(["check-ref-format", "--branch", input.base_branch]);
+  await run(["config", "remote.origin.url", input.address]);
+  const base = REMOTE_BRANCH_PREFIX + input.base_branch;
+  await run([
+    "fetch",
+    "--filter=tree:0",
+    "--no-tags",
+    "origin",
+    `+refs/heads/${input.base_branch}:${base}`,
+    input.commit,
+  ]);
+  const tip = (await run(["rev-parse", "--verify", `${base}^{commit}`])).trim();
+  const mergeBase = (await run(["merge-base", base, input.commit])).trim();
+  assert.match(mergeBase, COMMIT_PATTERN);
+  const paths = await gateDeclarationPaths(run, tip);
+  if (!paths.length) return [];
+  const before = await gateEntriesOf(run, mergeBase, paths);
+  const after = await gateEntriesOf(run, input.commit, paths);
+  return paths.filter((_path, index) => before[index] !== after[index]);
+}
+
+async function gateEntriesOf(
+  run: GitRun,
+  commit: string,
+  paths: readonly string[],
+): Promise<Array<string | null>> {
+  const tree: RepositoryTree = {
+    entries: new Map(),
+    listedPaths: new Set(),
+    listedDirectories: new Set(),
+    targets: new Map(),
+  };
+  const nested = paths.filter((path) => path !== REPOSITORY_ROOT);
+  if (nested.length)
+    addTreeEntries(
+      tree,
+      await run([
+        "--literal-pathspecs",
+        "ls-tree",
+        "-z",
+        commit,
+        "--",
+        ...nested,
+      ]),
+    );
+  const root = paths.includes(REPOSITORY_ROOT)
+    ? (await run(["rev-parse", `${commit}^{tree}`])).trim()
+    : null;
+  return paths.map((path) => {
+    if (path === REPOSITORY_ROOT) return root;
+    const entry = tree.entries.get(path);
+    return entry
+      ? `${entry.mode}${ENTRY_FIELD_SEPARATOR}${entry.object}`
+      : null;
+  });
+}
+
+async function gateDeclarationPaths(
+  run: GitRun,
+  tip: string,
+): Promise<string[]> {
+  const id = (await objectIdsOf(run, tip, [GATE_DECLARATION_FILE]))[0] ?? null;
+  if (id === null) return [];
+  const text = await run(["cat-file", "blob", id]);
+  const invalid = new Diagnostic(
+    GATE_DECLARATION_INVALID,
+    "The gate declaration of the base branch is invalid.",
+  );
+  let declaration;
+  try {
+    declaration = gateDeclarationSchema.safeParse(JSON.parse(text));
+  } catch {
+    throw invalid;
+  }
+  if (!declaration.success) throw invalid;
+  return [...new Set(declaration.data.gate_files)].sort((left, right) =>
+    Buffer.compare(Buffer.from(left), Buffer.from(right)),
+  );
 }
 
 export async function readObjectIds(

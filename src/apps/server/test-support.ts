@@ -1733,6 +1733,11 @@ export function mappedTransport(
       ),
     landedOn: (input, ...args) =>
       connector.landedOn({ ...input, address: mapped(input.address) }, ...args),
+    changedGateFiles: (input, ...args) =>
+      connector.changedGateFiles(
+        { ...input, address: mapped(input.address) },
+        ...args,
+      ),
     sshAccessOf: (...args) => connector.sshAccessOf(...args),
   };
 }

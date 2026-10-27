@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import {
+  existsSync,
   mkdtempSync,
   readdirSync,
   readFileSync,
@@ -17,6 +18,7 @@ import {
   background,
   CancellationContext,
   DeadlineExceeded,
+  type Context,
 } from "../kernel/context.ts";
 import { RepositoryFileState } from "./contract.ts";
 import {
@@ -35,6 +37,8 @@ import {
   readFilesAtCommit,
   listFilesAtCommit,
   readObjectIds,
+  changedGateFiles,
+  GATE_DECLARATION_INVALID,
 } from "./connector.ts";
 import { CheckEndState, ExpectedEndState } from "./github.ts";
 import { isString } from "../kernel/values.ts";
@@ -1496,4 +1500,304 @@ test("readObjectIds answers the tree ids of the root and of a directory, and nul
   assert.notEqual(after[0], before[0]);
   assert.equal(after[1], before[1]);
   assert.equal(readdirSync(scratch).length, NO_ENTRIES);
+});
+
+const GATE_DECLARATION_FILE = ".kanthord/affected-tests.json";
+const GATE_DECLARATION_VERSION = 1;
+const GATE_COMMAND = "true";
+const GATE_DIRECTORY_NAME = "repositories";
+const GATE_BINDING_NAME = "binding.git";
+const GATE_FILE_MODE_EXECUTABLE = "+x";
+const MISSING_OBJECT_MARK = "?";
+const MAINTENANCE_OFF = "false";
+const GC_OFF = "0";
+const EMPTY_REFS = "";
+
+type GateEntries = Record<string, string | null>;
+
+function gateDeclaration(gateFiles: string[]): string {
+  return JSON.stringify({
+    version: GATE_DECLARATION_VERSION,
+    command: GATE_COMMAND,
+    gate_files: gateFiles,
+  });
+}
+
+async function gateOrigin(t: TestContext) {
+  const fixture = await remote(t);
+  const originGit = simpleGit(fixture.origin);
+  await originGit.raw(["config", "uploadpack.allowFilter", "true"]);
+  await originGit.raw(["config", "uploadpack.allowAnySHA1InWant", "true"]);
+  const git = simpleGit(fixture.seed);
+  const address = "file://" + fixture.origin;
+  const directory = join(temporary(t), GATE_DIRECTORY_NAME, GATE_BINDING_NAME);
+  const publish = async (branch: string) => {
+    await git.raw([...IDENTITY, "commit", "-m", branch]);
+    await git.raw(["push", "--force", "origin", branch]);
+    return (await git.revparse(["HEAD"])).trim();
+  };
+  const stage = async (entries: GateEntries) => {
+    for (const [name, value] of Object.entries(entries)) {
+      const path = join(fixture.seed, name);
+      if (value === null) rmSync(path, { force: true });
+      else {
+        mkdirSync(dirname(path), { recursive: true });
+        writeFileSync(path, value);
+      }
+    }
+    await git.raw(["add", "--all"]);
+  };
+  const onMain = async (entries: GateEntries) => {
+    await git.raw(["checkout", BASE_BRANCH]);
+    await stage(entries);
+    return publish(BASE_BRANCH);
+  };
+  const startBranch = () =>
+    git.raw(["checkout", "-B", NODE_BRANCH, BASE_BRANCH]);
+  const onBranch = async (entries: GateEntries) => {
+    await stage(entries);
+    return publish(NODE_BRANCH);
+  };
+  const changed = (
+    commit: string,
+    options: { deadlineAt?: number; context?: Context } = {},
+  ) =>
+    changedGateFiles(
+      { address, base_branch: BASE_BRANCH, commit, directory },
+      options.context ?? background,
+      options.deadlineAt ?? deadlineAt(),
+      LOCAL_GIT_SSH_ACCESS,
+    );
+  return {
+    ...fixture,
+    git,
+    directory,
+    onMain,
+    startBranch,
+    onBranch,
+    publish,
+    changed,
+  };
+}
+
+test("changedGateFiles counts a new, a removed and a modified gate path and skips an unchanged one", async (t) => {
+  const origin = await gateOrigin(t);
+  await origin.onMain({
+    [GATE_DECLARATION_FILE]: gateDeclaration([
+      "package.json",
+      "removed.txt",
+      "new.txt",
+      "README.md",
+    ]),
+    "package.json": "one\n",
+    "removed.txt": "one\n",
+    "README.md": "one\n",
+  });
+  await origin.startBranch();
+  const commit = await origin.onBranch({
+    "package.json": "two\n",
+    "removed.txt": null,
+    "new.txt": "one\n",
+  });
+  assert.deepEqual(await origin.changed(commit), [
+    "new.txt",
+    "package.json",
+    "removed.txt",
+  ]);
+});
+
+test("changedGateFiles counts a mode change of a gate path", async (t) => {
+  const origin = await gateOrigin(t);
+  await origin.onMain({
+    [GATE_DECLARATION_FILE]: gateDeclaration(["run.sh"]),
+    "run.sh": "true\n",
+  });
+  await origin.startBranch();
+  await origin.git.raw([
+    "update-index",
+    `--chmod=${GATE_FILE_MODE_EXECUTABLE}`,
+    "run.sh",
+  ]);
+  const commit = await origin.publish(NODE_BRANCH);
+  assert.deepEqual(await origin.changed(commit), ["run.sh"]);
+});
+
+test("changedGateFiles counts a change below a declared directory", async (t) => {
+  const origin = await gateOrigin(t);
+  await origin.onMain({
+    [GATE_DECLARATION_FILE]: gateDeclaration(["scripts"]),
+    "scripts/a.sh": "one\n",
+    "scripts/b.sh": "one\n",
+  });
+  await origin.startBranch();
+  const commit = await origin.onBranch({ "scripts/a.sh": "two\n" });
+  assert.deepEqual(await origin.changed(commit), ["scripts"]);
+});
+
+test("changedGateFiles answers no path for a change with no gate file", async (t) => {
+  const origin = await gateOrigin(t);
+  await origin.onMain({
+    [GATE_DECLARATION_FILE]: gateDeclaration(["package.json"]),
+    "package.json": "one\n",
+    "node.md": "one\n",
+  });
+  await origin.startBranch();
+  const commit = await origin.onBranch({ "node.md": "two\n" });
+  assert.deepEqual(await origin.changed(commit), []);
+});
+
+test("changedGateFiles answers no path when the base holds no declaration", async (t) => {
+  const origin = await gateOrigin(t);
+  await origin.onMain({ "package.json": "one\n" });
+  await origin.startBranch();
+  const commit = await origin.onBranch({
+    [GATE_DECLARATION_FILE]: gateDeclaration(["package.json"]),
+    "package.json": "two\n",
+  });
+  assert.deepEqual(await origin.changed(commit), []);
+});
+
+test("changedGateFiles reads the declaration of the base branch", async (t) => {
+  const origin = await gateOrigin(t);
+  await origin.onMain({
+    [GATE_DECLARATION_FILE]: gateDeclaration(["package.json"]),
+    "package.json": "one\n",
+  });
+  await origin.startBranch();
+  const commit = await origin.onBranch({
+    [GATE_DECLARATION_FILE]: gateDeclaration([]),
+    "package.json": "two\n",
+  });
+  assert.ok((await origin.changed(commit)).includes("package.json"));
+});
+
+test("changedGateFiles works on a treeless bare repository", async (t) => {
+  const origin = await gateOrigin(t);
+  await origin.onMain({
+    [GATE_DECLARATION_FILE]: gateDeclaration(["package.json"]),
+    "package.json": "one\n",
+  });
+  await origin.startBranch();
+  const commit = await origin.onBranch({ "package.json": "two\n" });
+  assert.deepEqual(await origin.changed(commit), ["package.json"]);
+  const objects = await simpleGit().raw([
+    `--git-dir=${origin.directory}`,
+    "rev-list",
+    "--objects",
+    "--all",
+    "--missing=print",
+  ]);
+  assert.ok(
+    objects.split("\n").some((line) => line.startsWith(MISSING_OBJECT_MARK)),
+  );
+});
+
+test("changedGateFiles reuses the bare repository of the binding", async (t) => {
+  const origin = await gateOrigin(t);
+  await origin.onMain({
+    [GATE_DECLARATION_FILE]: gateDeclaration(["package.json"]),
+    "package.json": "one\n",
+  });
+  await origin.startBranch();
+  const first = await origin.onBranch({ "package.json": "two\n" });
+  assert.deepEqual(await origin.changed(first), ["package.json"]);
+  const marker = join(origin.directory, "marker");
+  writeFileSync(marker, "kept");
+  const second = await origin.onBranch({ "package.json": "three\n" });
+  assert.deepEqual(await origin.changed(second), ["package.json"]);
+  assert.ok(existsSync(marker));
+  const configured = (name: string) =>
+    simpleGit().raw([`--git-dir=${origin.directory}`, "config", name]);
+  assert.equal((await configured("maintenance.auto")).trim(), MAINTENANCE_OFF);
+  assert.equal((await configured("gc.auto")).trim(), GC_OFF);
+});
+
+test("changedGateFiles follows a force-pushed base branch", async (t) => {
+  const origin = await gateOrigin(t);
+  await origin.onMain({
+    [GATE_DECLARATION_FILE]: gateDeclaration(["package.json"]),
+    "package.json": "one\n",
+  });
+  await origin.startBranch();
+  const first = await origin.onBranch({ "package.json": "two\n" });
+  assert.deepEqual(await origin.changed(first), ["package.json"]);
+  await origin.git.raw(["checkout", BASE_BRANCH]);
+  await origin.git.raw(["reset", "--hard", origin.base]);
+  await origin.onMain({
+    [GATE_DECLARATION_FILE]: gateDeclaration(["package.json", "added.txt"]),
+    "package.json": "one\n",
+    "added.txt": "one\n",
+  });
+  await origin.startBranch();
+  const second = await origin.onBranch({ "added.txt": "two\n" });
+  assert.deepEqual(await origin.changed(second), ["added.txt"]);
+});
+
+test("changedGateFiles removes a corrupt repository and refetches", async (t) => {
+  const origin = await gateOrigin(t);
+  await origin.onMain({
+    [GATE_DECLARATION_FILE]: gateDeclaration(["package.json"]),
+    "package.json": "one\n",
+  });
+  await origin.startBranch();
+  const commit = await origin.onBranch({ "package.json": "two\n" });
+  assert.deepEqual(await origin.changed(commit), ["package.json"]);
+  writeFileSync(join(origin.directory, "HEAD"), "");
+  await assert.rejects(origin.changed(commit), { code: GIT_FAILED });
+  assert.equal(existsSync(origin.directory), false);
+  assert.deepEqual(await origin.changed(commit), ["package.json"]);
+});
+
+test("changedGateFiles ignores GIT_DIR of the process", async (t) => {
+  const origin = await gateOrigin(t);
+  const other = join(temporary(t), "other.git");
+  mkdirSync(other);
+  await simpleGit(other).init(true);
+  await origin.onMain({
+    [GATE_DECLARATION_FILE]: gateDeclaration(["package.json"]),
+    "package.json": "one\n",
+  });
+  await origin.startBranch();
+  const commit = await origin.onBranch({ "package.json": "two\n" });
+  overrideEnvironment(t, { GIT_DIR: other });
+  assert.deepEqual(await origin.changed(commit), ["package.json"]);
+  const refs = await simpleGit().raw([`--git-dir=${other}`, "for-each-ref"]);
+  assert.equal(refs, EMPTY_REFS);
+});
+
+test("changedGateFiles throws for an invalid declaration", async (t) => {
+  const origin = await gateOrigin(t);
+  await origin.onMain({ "package.json": "one\n" });
+  await origin.startBranch();
+  const commit = await origin.onBranch({ "package.json": "two\n" });
+  for (const text of [
+    "not json",
+    JSON.stringify({ version: GATE_DECLARATION_VERSION, gate_files: [] }),
+  ]) {
+    await origin.onMain({ [GATE_DECLARATION_FILE]: text });
+    await assert.rejects(origin.changed(commit), {
+      code: GATE_DECLARATION_INVALID,
+    });
+  }
+});
+
+test("changedGateFiles throws for an unreachable commit and removes the directory", async (t) => {
+  const origin = await gateOrigin(t);
+  await assert.rejects(origin.changed(UNKNOWN_COMMIT), { code: GIT_FAILED });
+  assert.equal(existsSync(origin.directory), false);
+});
+
+test("changedGateFiles keeps the directory after a deadline", async (t) => {
+  const origin = await gateOrigin(t);
+  await origin.onMain({
+    [GATE_DECLARATION_FILE]: gateDeclaration(["package.json"]),
+    "package.json": "one\n",
+  });
+  await origin.startBranch();
+  const commit = await origin.onBranch({ "package.json": "two\n" });
+  assert.deepEqual(await origin.changed(commit), ["package.json"]);
+  await assert.rejects(
+    origin.changed(commit, { deadlineAt: Date.now() - EXPIRED_DEADLINE_MS }),
+  );
+  assert.equal(existsSync(origin.directory), true);
 });
