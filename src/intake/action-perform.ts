@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import {
-  apiKeySecretSchema,
   GrantKind,
   SshIdentitySubjectKind,
   type ActionFacts,
@@ -11,17 +10,19 @@ import { commitHeader } from "../kernel/commit-message.ts";
 import { OperationError } from "../kernel/errors.ts";
 import type { CallerContext, ExecutionClaim } from "../kernel/operation.ts";
 import type { Transaction } from "../kernel/store.ts";
-import {
-  GITHUB_RESULT_CODE_PREFIX,
-  GitHubTargetKind,
-  type GitHubCall,
-  type GitHubTarget,
-} from "../repository/github.ts";
+import { GITHUB_RESULT_CODE_PREFIX } from "../repository/github.ts";
 import {
   GitStage,
   GitWriteError,
   type SshAccess,
 } from "../repository/index.ts";
+import {
+  callMergePullRequest,
+  deadlineOf,
+  gitHubCall,
+  readBackMergePullRequest,
+  targetOf,
+} from "./action-merge.ts";
 import {
   GIT_TRANSPORT_CODES,
   isGitTransportFailure,
@@ -36,7 +37,6 @@ import {
   GIT_WRITE_DEADLINE_MS,
   IntakeErrorCode,
   OutboundOperation,
-  PLATFORM_CALL_DEADLINE_MS,
   ResultClass,
   type OutboundOperationValue,
   type PlatformAddress,
@@ -57,7 +57,6 @@ import {
 const GIT_FAILED_CODE = "repository.connector.git_failed";
 const ACTION_UNMAPPED_STATUS = 422;
 const MATCHED_PULL_REQUEST_COUNT = 1;
-const EXPIRED_DEADLINE_MS = 0;
 const PULL_NUMBER_FLOOR = 0;
 const NO_GATE_FILES = 0;
 const GATE_FILE_BODY_INTRO =
@@ -242,10 +241,15 @@ async function callAction(
   scope: OutboundScope,
 ): Promise<CallAnswer> {
   if (action.operation === OutboundOperation.GitHubPullRequestMerge)
-    return callMergePullRequest(dependencies, performer, action.facts, {
-      material,
-      scope,
-    });
+    return callMergePullRequest(
+      dependencies,
+      performer.identity,
+      action.facts,
+      {
+        material,
+        scope,
+      },
+    );
   if (reusesPullRequest(action))
     return pushSnapshot(dependencies, performer, action, scope);
   if (action.operation === OutboundOperation.GitHubPullRequest)
@@ -256,48 +260,6 @@ async function callAction(
   assert.equal(action.operation, OutboundOperation.GitMergePush);
   assert.equal(material, null, "A merge push holds no material.");
   return mergePush(dependencies, action, scope);
-}
-
-async function callMergePullRequest(
-  dependencies: ActionCheckDependencies,
-  performer: Performer,
-  facts: Readonly<ActionFacts>,
-  held: { material: Material | null; scope: OutboundScope },
-): Promise<CallAnswer> {
-  assert.ok(facts.merge_address !== null, "A merge call names its address.");
-  const call = gitHubCall(performer, held.material, held.scope);
-  const method = await dependencies.github.mergeMethodOf(call, targetOf(facts));
-  if (!method.ok)
-    return {
-      ok: false,
-      class: method.class,
-      code: method.code,
-      message: method.message,
-    };
-  if (method.value === null)
-    return {
-      ok: false,
-      class: ResultClass.FinalRefusal,
-      code: GITHUB_RESULT_CODE_PREFIX + ResultClass.FinalRefusal,
-      message: "The repository allows no merge method.",
-    };
-  const answer = await dependencies.github.mergePullRequest(
-    call,
-    targetOf(facts),
-    {
-      number: facts.merge_address.number,
-      sha: facts.snapshot_commit,
-      merge_method: method.value,
-    },
-  );
-  if (!answer.ok)
-    return {
-      ok: false,
-      class: answer.class,
-      code: answer.code,
-      message: answer.message,
-    };
-  return { ok: true, result: facts.merge_address };
 }
 
 async function createPullRequest(
@@ -315,7 +277,7 @@ async function createPullRequest(
   }
   if (contained !== null)
     return { ok: true, result: branchPushAddress(facts, contained) };
-  const call = gitHubCall(performer, held.material, held.scope);
+  const call = gitHubCall(performer.identity, held.material, held.scope);
   const answer = await dependencies.github.createPullRequest(
     call,
     targetOf(facts),
@@ -419,10 +381,15 @@ function readBackAction(
   scope: OutboundScope,
 ): Promise<ReadBack> {
   if (action.operation === OutboundOperation.GitHubPullRequestMerge)
-    return readBackMergePullRequest(dependencies, performer, action.facts, {
-      material,
-      scope,
-    });
+    return readBackMergePullRequest(
+      dependencies,
+      performer.identity,
+      action.facts,
+      {
+        material,
+        scope,
+      },
+    );
   if (reusesPullRequest(action))
     return landedSnapshot(dependencies, performer, action, scope);
   if (action.operation === OutboundOperation.GitHubPullRequest)
@@ -435,33 +402,13 @@ function readBackAction(
   return landedMerge(dependencies, action, scope);
 }
 
-async function readBackMergePullRequest(
-  dependencies: ActionCheckDependencies,
-  performer: Performer,
-  facts: Readonly<ActionFacts>,
-  held: { material: Material | null; scope: OutboundScope },
-): Promise<ReadBack> {
-  assert.ok(
-    facts.merge_address !== null,
-    "A merge read-back names its address.",
-  );
-  const call = gitHubCall(performer, held.material, held.scope);
-  const answer = await dependencies.github.pullRequestMergedAt(
-    call,
-    targetOf(facts),
-    { number: facts.merge_address.number, sha: facts.snapshot_commit },
-  );
-  if (!answer.ok || !answer.value) return { match: false };
-  return { match: true, result: facts.merge_address };
-}
-
 async function openPullRequest(
   dependencies: ActionCheckDependencies,
   performer: Performer,
   facts: Readonly<ActionFacts>,
   held: { material: Material | null; scope: OutboundScope },
 ): Promise<ReadBack> {
-  const call = gitHubCall(performer, held.material, held.scope);
+  const call = gitHubCall(performer.identity, held.material, held.scope);
   const answer = await dependencies.github.openPullRequests(
     call,
     targetOf(facts),
@@ -572,32 +519,6 @@ function resultCodeOf(action: Bound, resultClass: ResultClassValue): string {
     return GITHUB_RESULT_CODE_PREFIX + resultClass;
   assert.equal(action.operation, OutboundOperation.GitMergePush);
   return GIT_FAILED_CODE;
-}
-
-function gitHubCall(
-  performer: Performer,
-  material: Material | null,
-  scope: OutboundScope,
-): GitHubCall {
-  assert.ok(material, "A pull request call holds a released material.");
-  return {
-    token: apiKeySecretSchema.parse(material.value()).key,
-    requester: performer.identity,
-    signal: scope.signal,
-    deadlineAt: deadlineOf(scope, PLATFORM_CALL_DEADLINE_MS),
-  };
-}
-
-function deadlineOf(scope: OutboundScope, boundMs: number): number {
-  const deadline = scope.context.deadline;
-  assert.ok(deadline !== null, "An outbound scope holds a deadline.");
-  assert.ok(boundMs > EXPIRED_DEADLINE_MS);
-  return Math.min(deadline, Date.now() + boundMs);
-}
-
-function targetOf(facts: Readonly<ActionFacts>): GitHubTarget {
-  assert.ok(facts.repository.address.length, "A binding names its address.");
-  return { kind: GitHubTargetKind.Binding, address: facts.repository.address };
 }
 
 function pullRequestAddress(

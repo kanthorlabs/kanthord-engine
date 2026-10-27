@@ -164,6 +164,7 @@ function fixture(
     authorization: { authorizeModelInference: unexpectedCollaboration },
     missionAuthorization: {
       frozenAction: unexpectedCollaboration,
+      serviceMerge: unexpectedCollaboration,
       requestEvidence: unexpectedCollaboration,
       evidenceAsset: unexpectedCollaboration,
       objectPut: unexpectedCollaboration,

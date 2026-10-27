@@ -24,6 +24,7 @@ import type { GitHubPlatform } from "../repository/github.ts";
 import type { GitWriter } from "../repository/index.ts";
 import type { S3Platform } from "../storage/index.ts";
 import { checkAction, type IntakeCustody } from "./action-check.ts";
+import { mergeAction } from "./action-merge.ts";
 import { performAction } from "./action-perform.ts";
 import { readAction } from "./action-read.ts";
 import {
@@ -219,6 +220,14 @@ export class IntakeService implements Service, IntakeCollaborations {
     );
     registry.register(intakeOperations["action.check"], ({ body }, caller) =>
       checkAction(this.dependencies, caller, body.evidence_id),
+    );
+    registry.register(intakeOperations["action.merge"], ({ body }, caller) =>
+      mergeAction(
+        this.dependencies,
+        (request) => this.runOutbound(caller, request),
+        caller,
+        body,
+      ),
     );
     registry.register(intakeOperations["action.perform"], ({ body }, caller) =>
       performAction(

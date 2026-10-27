@@ -178,6 +178,7 @@ const unusedExecutionDependencies = {
   authorization: { authorizeModelInference: unexpectedCollaboration },
   missionAuthorization: {
     frozenAction: unexpectedCollaboration,
+    serviceMerge: unexpectedCollaboration,
     requestEvidence: unexpectedCollaboration,
     evidenceAsset: unexpectedCollaboration,
     objectPut: unexpectedCollaboration,
@@ -955,6 +956,7 @@ test("protected release pins once, keeps rotation overlap and refuses revoked or
 });
 
 const EVIDENCE_ID = createIdentity("evidence");
+const MERGE_COMMIT = "a".repeat(40);
 const ASSET_ID = createIdentity("evidence_asset");
 const human = testHumanIdentity("ulrich", "Ulrich", "token");
 const assetFacts: AssetFacts = {
@@ -1025,6 +1027,12 @@ function missionGrantFixture() {
         assert.equal(received, claim);
         return answer();
       },
+      serviceMerge: (tx, _identity, input) => {
+        assert(tx.database.isTransaction);
+        assert.equal(input.evidenceId, EVIDENCE_ID);
+        assert.equal(input.commit, MERGE_COMMIT);
+        return answer();
+      },
       requestEvidence: (tx, _identity, evidenceId) => {
         assert(tx.database.isTransaction);
         assert.equal(evidenceId, EVIDENCE_ID);
@@ -1068,6 +1076,18 @@ function missionGrantFixture() {
         key: "open",
         commit: "a".repeat(40),
         reusedEvidenceId: null,
+      },
+      Date.now(),
+    );
+  const serviceMerge = (tx: Transaction) =>
+    f.component.authorizeOperation(
+      tx,
+      {
+        kind: GrantKind.ServiceMerge,
+        identity: testServiceIdentity("mission"),
+        evidenceId: EVIDENCE_ID,
+        commit: MERGE_COMMIT,
+        claim: null,
       },
       Date.now(),
     );
@@ -1125,6 +1145,7 @@ function missionGrantFixture() {
     facts,
     assetFacts,
     frozenAction,
+    serviceMerge,
     requestEvidence,
     evidenceAsset,
     objectPut,
@@ -1180,6 +1201,37 @@ test("a grant without an execution pins nothing and releases the newest live rev
       ({ ended_at }) => ended_at !== null,
     );
     assert.equal(ended.length, FIRST_REVISION);
+  } finally {
+    m.f.store.close();
+  }
+});
+
+test("a service merge grant releases the credential of the binding with no execution", () => {
+  const m = missionGrantFixture();
+  try {
+    m.f.create(inputs[0]);
+    const rotated = m.f.rotate("github", {
+      expected_revision: FIRST_REVISION,
+      secret: apiSecret,
+    }) as CredentialAnswer;
+    const released = m.f.store.transaction((tx) => {
+      const grant = m.serviceMerge(tx);
+      assert.equal(grant.kind, GrantKind.ServiceMerge);
+      assert.equal(grant.execution, null);
+      assert.deepEqual(grantFacts(grant), {
+        project_id: m.row.project_id,
+        credential: "github",
+        facts: m.facts,
+      });
+      return m.releaseId(grant, tx);
+    });
+    assert.equal(released, rotated.revisions[0]!.id);
+    assert.deepEqual(m.row.credentials, []);
+    m.state.refused = true;
+    assert.throws(
+      () => m.f.store.transaction((tx) => m.serviceMerge(tx)),
+      /mission authorization refused/,
+    );
   } finally {
     m.f.store.close();
   }
@@ -1298,7 +1350,7 @@ test("a refusal of the mission authorization reaches no pin and no material", ()
   try {
     m.f.create(inputs[0]);
     m.state.refused = true;
-    for (const authorize of [m.frozenAction, m.requestEvidence])
+    for (const authorize of [m.frozenAction, m.serviceMerge, m.requestEvidence])
       assert.throws(
         () => m.f.store.transaction((tx) => authorize(tx)),
         /mission authorization refused/,

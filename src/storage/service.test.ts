@@ -81,6 +81,7 @@ function fixture(t: TestContext, logger: Logger = pino({ enabled: false })) {
     authorization: { authorizeModelInference: unexpected },
     missionAuthorization: {
       frozenAction: unexpected,
+      serviceMerge: unexpected,
       requestEvidence: unexpected,
       evidenceAsset: unexpected,
       objectPut: unexpected,

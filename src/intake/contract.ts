@@ -359,6 +359,11 @@ const serviceOperation = {
   mutation: false,
   body: true,
 } as const;
+const serviceMergeOperation = {
+  ...serviceOperation,
+  mutation: true,
+  timeoutMs: ACTION_PERFORM_TIMEOUT_MS,
+} as const;
 const performOperation = {
   ...baseOperation,
   access: AccessPolicy.Client,
@@ -671,6 +676,23 @@ export const intakeOperations = {
     output: z.union([platformAddressSchema, resultClassAnswerSchema]),
     description:
       "Perform a configured repository action of an execution and answer its platform address or its result class.",
+  },
+  "action.merge": {
+    ...serviceMergeOperation,
+    id: "intake.action.merge",
+    path: "/api/intake/action/merge",
+    input: z.strictObject({
+      params: z.strictObject({}),
+      query: z.strictObject({}),
+      body: z.strictObject({
+        evidence_id: identitySchema("evidence"),
+        commit: commitSchema,
+        request_key: z.string().min(1),
+      }),
+    }),
+    output: z.union([platformAddressSchema, resultClassAnswerSchema]),
+    description:
+      "Merge the pull request of a request evidence for the Mission Service and answer its platform address or its result class.",
   },
   "action.read": {
     ...actionReadOperation,

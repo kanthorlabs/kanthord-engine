@@ -5,6 +5,7 @@ import {
   isHumanIdentity,
   type CallerIdentity,
   type MachineIdentity,
+  type ServiceIdentity,
 } from "../kernel/caller.ts";
 import {
   background,
@@ -106,6 +107,7 @@ import {
   authorizeObjectPut,
   authorizeRequest,
   authorizeRequestEvidence,
+  authorizeServiceMerge,
   type AssetUse,
   type ObjectPutInput,
 } from "./authorization.ts";
@@ -197,6 +199,7 @@ export interface Dependencies {
   telemetry: MissionTelemetry;
   acts: ActTelemetry;
   logger: Logger;
+  projectPaused(tx: Transaction, projectId: string): boolean;
 }
 
 export class MissionService
@@ -1113,6 +1116,13 @@ export class MissionService
     },
   ) {
     return authorizeFrozenAction(tx, this.dependencies, identity, claim, input);
+  }
+  authorizeServiceMerge(
+    tx: Transaction,
+    identity: ServiceIdentity,
+    input: { evidenceId: string; commit: string },
+  ) {
+    return authorizeServiceMerge(tx, this.dependencies, identity, input);
   }
   authorizeRequestEvidence(
     tx: Transaction,
