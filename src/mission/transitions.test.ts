@@ -4,6 +4,7 @@ import { setImmediate as turn } from "node:timers/promises";
 import { testHumanIdentity } from "../kernel/test-identity.ts";
 import { createIdentity } from "../kernel/identity.ts";
 import { OperationError } from "../kernel/errors.ts";
+import { ResultClass } from "../intake/contract.ts";
 import {
   Intent,
   NodeState,
@@ -802,6 +803,9 @@ const FIRST_ROUND_DELAY_MS = 0;
 const JUST_BEFORE_RETRY_MS = DEFERRED_CHECK_RETRY_MS - 1;
 const ONE_MS = 1;
 const MERGE_FAILED = "Deferred merge failed.";
+const CRASHED = "Deferred check crashed.";
+const FIRST_ROUND_LABEL = "0";
+const SECOND_ROUND_LABEL = "1";
 const PENDING: CheckAnswer = {
   end_state: CheckEndState.ChecksPending,
   landed_commits: [],
@@ -845,13 +849,13 @@ test("a none answer of a kanthord landing merges the tested commit", async (t) =
   });
   h.release();
   await advance(FIRST_ROUND_DELAY_MS);
-  assert.deepEqual(h.mergeInputs, [
-    {
-      evidence_id: h.evidenceId,
-      commit: TESTED_COMMIT,
-      request_key: `${h.node_id}/${FIRST_ATTEMPT}/repo.pull_request/merge/${TESTED_COMMIT}/service`,
-    },
-  ]);
+  const requestKey = new RegExp(
+    `^${h.node_id}/${FIRST_ATTEMPT}/repo\\.pull_request/merge/${TESTED_COMMIT}/service/deferred_[0-9A-HJKMNP-TV-Z]{26}/0$`,
+  );
+  assert.equal(h.mergeInputs.length, ONE_CALL);
+  assert.equal(h.mergeInputs[FIRST_INDEX]!.evidence_id, h.evidenceId);
+  assert.equal(h.mergeInputs[FIRST_INDEX]!.commit, TESTED_COMMIT);
+  assert.match(h.mergeInputs[FIRST_INDEX]!.request_key, requestKey);
   assert.equal(h.node().state, NodeState.ExternalRequested);
 });
 
@@ -932,6 +936,9 @@ test("a refused merge logs a warning and changes no state", async (t) => {
     h.store.transaction((tx) => readEvidence(tx, h.evidenceId))?.end_state,
     null,
   );
+  await advance(DEFERRED_CHECK_RETRY_MS);
+  assert.equal(h.checkCalls(), ONE_CALL);
+  assert.equal(h.mergeInputs.length, ONE_CALL);
 });
 
 test("a thrown merge logs a warning and changes no state", async (t) => {
@@ -947,6 +954,135 @@ test("a thrown merge logs a warning and changes no state", async (t) => {
   assert.equal(h.warnings.length, ONE_CALL);
   assert.equal(h.warnings[FIRST_INDEX]!.message, MERGE_FAILED);
   assert.equal(h.node().state, NodeState.ExternalRequested);
+  await advance(DEFERRED_CHECK_RETRY_MS);
+  assert.equal(h.checkCalls(), ONE_CALL);
+});
+
+const REQUEST_KEY_RUN_PATTERN =
+  /\/service\/(deferred_[0-9A-HJKMNP-TV-Z]{26})\/(\d+)$/;
+
+function mergeRetryClass(resultClass: string): MergeAnswer {
+  return {
+    class: resultClass,
+    code: `github.${resultClass}`,
+    message: resultClass,
+  } as MergeAnswer;
+}
+
+test("a retryable merge failure schedules the next round after the retry delay", async (t) => {
+  const advance = mockTimers(t);
+  let mergeCalls = NO_CALLS;
+  const h = deferredFixture(
+    t,
+    async (call) =>
+      call <= ONE_CALL + 1
+        ? SETTLED
+        : {
+            end_state: CheckEndState.Expected,
+            landed_commits: [TESTED_COMMIT],
+          },
+    {
+      landing: RepositoryLanding.KanthorD,
+      merge: async () => {
+        mergeCalls++;
+        return mergeCalls === ONE_CALL
+          ? mergeRetryClass(ResultClass.RetryableRefusal)
+          : MERGE_ADDRESS;
+      },
+    },
+  );
+  h.release();
+  await advance(FIRST_ROUND_DELAY_MS);
+  assert.equal(h.mergeInputs.length, ONE_CALL);
+  await advance(JUST_BEFORE_RETRY_MS);
+  assert.equal(h.mergeInputs.length, ONE_CALL);
+  await advance(ONE_MS);
+  assert.equal(h.mergeInputs.length, ONE_CALL + 1);
+  await advance(FIRST_ROUND_DELAY_MS);
+  assert.equal(h.node().state, NodeState.Completed);
+});
+
+test("an unknown merge outcome schedules the next round after the retry delay", async (t) => {
+  const advance = mockTimers(t);
+  const h = deferredFixture(t, SETTLED, {
+    landing: RepositoryLanding.KanthorD,
+    merge: async () => mergeRetryClass(ResultClass.UnknownOutcome),
+  });
+  h.release();
+  await advance(FIRST_ROUND_DELAY_MS);
+  await advance(DEFERRED_CHECK_RETRY_MS);
+  assert.equal(h.checkCalls(), ONE_CALL + 1);
+  assert.equal(h.mergeInputs.length, ONE_CALL + 1);
+  const [first, second] = h.mergeInputs.map((input) =>
+    REQUEST_KEY_RUN_PATTERN.exec(input.request_key),
+  );
+  assert.equal(first![1], second![1]);
+  assert.equal(first![2], FIRST_ROUND_LABEL);
+  assert.equal(second![2], SECOND_ROUND_LABEL);
+  assert.notEqual(
+    h.mergeInputs[FIRST_INDEX]!.request_key,
+    h.mergeInputs[ONE_CALL]!.request_key,
+  );
+});
+
+test("a confirmed merge failure schedules the next round after the retry delay", async (t) => {
+  const advance = mockTimers(t);
+  const h = deferredFixture(t, SETTLED, {
+    landing: RepositoryLanding.KanthorD,
+    merge: async () => mergeRetryClass(ResultClass.ConfirmedFailure),
+  });
+  h.release();
+  await advance(FIRST_ROUND_DELAY_MS);
+  await advance(JUST_BEFORE_RETRY_MS);
+  assert.equal(h.checkCalls(), ONE_CALL);
+  await advance(ONE_MS);
+  assert.equal(h.checkCalls(), ONE_CALL + 1);
+  assert.equal(h.mergeInputs.length, ONE_CALL + 1);
+});
+
+test("a server start merges under a new key after a failed run", async (t) => {
+  const advance = mockTimers(t);
+  const stored = new Map<string, MergeAnswer>();
+  const calls: string[] = [];
+  const h = deferredFixture(t, SETTLED, {
+    landing: RepositoryLanding.KanthorD,
+    merge: async (input) => {
+      const known = stored.get(input.request_key);
+      if (known !== undefined) return known;
+      calls.push(input.request_key);
+      const answer = mergeRetryClass(ResultClass.RetryableRefusal);
+      stored.set(input.request_key, answer);
+      return answer;
+    },
+  });
+  h.release();
+  await advance(FIRST_ROUND_DELAY_MS);
+  resumeDeferredChecks(h.dependencies);
+  await advance(FIRST_ROUND_DELAY_MS);
+  assert.equal(calls.length, ONE_CALL + 1);
+  const [first, second] = calls.map((key) => REQUEST_KEY_RUN_PATTERN.exec(key));
+  assert.equal(first![2], FIRST_ROUND_LABEL);
+  assert.equal(second![2], FIRST_ROUND_LABEL);
+  assert.notEqual(first![1], second![1]);
+});
+
+test("an assessment that is no longer current at merge time calls no merge and ends the loop", async (t) => {
+  const advance = mockTimers(t);
+  const h = deferredFixture(t, SETTLED, {
+    landing: RepositoryLanding.KanthorD,
+  });
+  h.release();
+  h.store.transaction((tx) =>
+    tx.database
+      .prepare("UPDATE mission_assessment SET result = ?")
+      .run(AssessmentResult.CriterionNotMet),
+  );
+  await advance(FIRST_ROUND_DELAY_MS);
+  await advance(DEFERRED_CHECK_RETRY_MS);
+  assert.equal(h.mergeInputs.length, NO_CALLS);
+  assert.equal(h.checkCalls(), ONE_CALL);
+  assert.equal(h.warnings.length, ONE_CALL);
+  assert.equal(h.warnings[FIRST_INDEX]!.message, CRASHED);
 });
 
 test("a failed check schedules the next round after the retry delay", async (t) => {

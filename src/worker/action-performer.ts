@@ -509,7 +509,7 @@ export class ActionPerformer {
         { evidence_id: evidenceId, class: answer.class, code: answer.code },
         CHECK_READ_FAILED_MESSAGE,
       );
-      return false;
+      return true;
     }
     const parsed = requiredCheckReadSchema.safeParse(answer.body);
     if (!parsed.success) {
@@ -517,7 +517,7 @@ export class ActionPerformer {
         { evidence_id: evidenceId },
         CHECK_READ_FAILED_MESSAGE,
       );
-      return false;
+      return true;
     }
     const { head_commit, pending, failed } = parsed.data;
     if (head_commit !== commit) {
