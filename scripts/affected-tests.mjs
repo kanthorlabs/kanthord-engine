@@ -31,7 +31,6 @@ const URL_CONSTRUCTOR = "URL";
 const URL_PROPERTY = "url";
 const URL_ARGUMENT_COUNT = 2;
 const START_TEST_SSHD = "startTestSshd";
-const TEST_SSHD_MODULE = "src/repository/test-sshd.ts";
 const PARSED_PATTERNS = [
   /^src\/.*\.ts$/,
   /^scripts\/[^/]*\.mjs$/,
@@ -210,17 +209,6 @@ function isUrlConstruction(node) {
   );
 }
 
-function importsStartTestSshd(importer, node) {
-  const bindings = node.importClause?.namedBindings;
-  if (!bindings || !ts.isNamedImports(bindings)) return false;
-  const resolved = resolveImport(importer, node.moduleSpecifier.text);
-  if (resolved !== TEST_SSHD_MODULE) return false;
-  return bindings.elements.some(
-    (element) =>
-      (element.propertyName ?? element.name).text === START_TEST_SSHD,
-  );
-}
-
 function importSpecifier(node) {
   if (
     (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) &&
@@ -265,14 +253,15 @@ function dataEdge(importer, node) {
 function parseFile(root, path) {
   const source = readFileSync(join(root, path), "utf8");
   const tree = ts.createSourceFile(path, source, ts.ScriptTarget.Latest);
-  const parsed = { files: [], prefixes: [], importsStartTestSshd: false };
+  const parsed = {
+    files: [],
+    prefixes: [],
+    namesStartTestSshd: source.includes(START_TEST_SSHD),
+  };
   const visit = (node) => {
     const specifier = importSpecifier(node);
     const resolved = specifier === null ? null : resolveImport(path, specifier);
     if (resolved !== null) parsed.files.push(resolved);
-    if (ts.isImportDeclaration(node) && importsStartTestSshd(path, node)) {
-      parsed.importsStartTestSshd = true;
-    }
     if (isUrlConstruction(node)) {
       const edge = dataEdge(path, node);
       if (edge.file) parsed.files.push(edge.file);
@@ -307,7 +296,7 @@ function buildGraph(root) {
     for (const prefix of parsed.prefixes) {
       prefixEdges.push({ prefix, importer: path });
     }
-    if (parsed.importsStartTestSshd) sshdImporters.add(path);
+    if (parsed.namesStartTestSshd) sshdImporters.add(path);
   }
   return { nodes, present, importersByFile, prefixEdges, sshdImporters };
 }
