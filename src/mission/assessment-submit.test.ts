@@ -16,6 +16,7 @@ import {
   ClosingEvent,
   NodeState,
   RepositoryAction,
+  RepositoryLanding,
   PlatformAddressKind,
   Intent,
   MissionErrorCode,
@@ -28,6 +29,7 @@ import {
   readOpenAttempt,
   readEvidence,
   readAssessment,
+  listAssessments,
   readOutcomesOfAttempt,
   insertAssessment,
   insertOutcome,
@@ -40,10 +42,14 @@ import {
   insertDependency,
 } from "./store.ts";
 import { getRevision } from "./node-read.ts";
+import { landsByHuman } from "./authorization.ts";
+import { gateFilesOf } from "./gate-files.ts";
+import { requiredActionsOf } from "./frozen-action.ts";
 import {
   evidenceHarness,
   executionHarness,
   revokedExecution,
+  unexpectedCollaboration,
 } from "./test-support.ts";
 
 const IDENTITY = testHumanIdentity("ulrich", "Ulrich", "token");
@@ -210,7 +216,11 @@ test("examine currency follows real dependency outcomes and only current closure
   );
 });
 
-async function fixture(t: TestContext, action: RepositoryAction | null = null) {
+async function fixture(
+  t: TestContext,
+  action: RepositoryAction | null = null,
+  landing: (typeof RepositoryLanding)[keyof typeof RepositoryLanding] = RepositoryLanding.Human,
+) {
   const h = evidenceHarness(t, IDENTITY);
   h.dependencies.bindings.repositoryPolicyOf = () => ({
     binding_id: h.repositoryId,
@@ -222,7 +232,7 @@ async function fixture(t: TestContext, action: RepositoryAction | null = null) {
     credential: "github",
     base_branch: "main",
     action,
-    landing: "human" as const,
+    landing,
   });
   const address = {
     kind: AssetKind.Repository,
@@ -313,18 +323,135 @@ async function gateFilesRefusal(
   );
 }
 
-test("an assessment with gate_files stores the canonical JSON", async (t) => {
-  const h = await fixture(t);
-  const gateFiles = [
-    { binding_id: h.address.binding_id, paths: [GATE_PATH, OTHER_GATE_PATH] },
-  ];
-  const result = await h.submit({ ...h.body, gate_files: gateFiles });
+function answerGateFiles(
+  h: Awaited<ReturnType<typeof fixture>>,
+  paths: string[],
+) {
+  h.dependencies.intakeGateFiles.read = async () => ({ paths });
+}
+
+function storedGateFiles(
+  h: Awaited<ReturnType<typeof fixture>>,
+  assessmentId: string,
+) {
+  return h.store.transaction((tx) => readAssessment(tx, assessmentId)!);
+}
+
+test("an assessment stores the server gate files and ignores the worker list", async (t) => {
+  const h = await fixture(t, RepositoryAction.MergePush);
+  answerGateFiles(h, [OTHER_GATE_PATH]);
+  const result = await h.submit({
+    ...h.body,
+    gate_files: [
+      {
+        binding_id: h.address.binding_id,
+        paths: [GATE_PATH, OTHER_GATE_PATH],
+      },
+    ],
+  });
   assert.equal(
-    h.store.transaction(
-      (tx) => readAssessment(tx, result.assessment.id)?.gate_files,
-    ),
-    canonicalJSON(gateFiles),
+    storedGateFiles(h, result.assessment.id).gate_files,
+    canonicalJSON([
+      { binding_id: h.address.binding_id, paths: [OTHER_GATE_PATH] },
+    ]),
   );
+});
+
+test("a worker list without gate files keeps the human landing of a changed gate file", async (t) => {
+  const h = await fixture(t, RepositoryAction.MergePush);
+  answerGateFiles(h, [GATE_PATH]);
+  const result = await h.submit({ ...h.body, gate_files: [] });
+  const [action] = h.store.transaction((tx) =>
+    requiredActionsOf(
+      tx,
+      h.dependencies.bindings,
+      h.node_id,
+      h.claim.pinnedRevision,
+    ),
+  );
+  assert.equal(
+    landsByHuman(
+      action!,
+      gateFilesOf(storedGateFiles(h, result.assessment.id), h.repositoryId),
+    ),
+    true,
+  );
+});
+
+test("a worker list without gate files keeps the service merge closed for a changed gate file", async (t) => {
+  const h = await fixture(
+    t,
+    RepositoryAction.PullRequest,
+    RepositoryLanding.KanthorD,
+  );
+  answerGateFiles(h, [GATE_PATH]);
+  const result = await h.submit({ ...h.body, gate_files: [] });
+  assert.deepEqual(
+    gateFilesOf(storedGateFiles(h, result.assessment.id), h.repositoryId),
+    [GATE_PATH],
+  );
+});
+
+test("a change with no gate file stores null and keeps the service merge open", async (t) => {
+  const h = await fixture(
+    t,
+    RepositoryAction.PullRequest,
+    RepositoryLanding.KanthorD,
+  );
+  answerGateFiles(h, []);
+  const result = await h.submit({
+    ...h.body,
+    gate_files: [{ binding_id: h.address.binding_id, paths: [GATE_PATH] }],
+  });
+  assert.equal(storedGateFiles(h, result.assessment.id).gate_files, null);
+});
+
+test("a failed gate file read refuses the assessment and stores none", async (t) => {
+  const h = await fixture(t, RepositoryAction.MergePush);
+  const code = "repository.connector.git_failed";
+  h.dependencies.intakeGateFiles.read = async () => {
+    throw new OperationError(502, code, "The git read fails.");
+  };
+  await assert.rejects(
+    h.submit(),
+    (error) => error instanceof OperationError && error.code === code,
+  );
+  assert.deepEqual(
+    h.store.transaction((tx) => listAssessments(tx, h.node_id, null, null, 1)),
+    [],
+  );
+  assert.equal(h.node().state, NodeState.Evaluating);
+});
+
+test("a gate file read receives the binding, the base branch, the tested commit and the execution caller", async (t) => {
+  const h = await fixture(t, RepositoryAction.MergePush);
+  const reads: unknown[][] = [];
+  h.dependencies.intakeGateFiles.read = async (...args) => {
+    reads.push(args);
+    return { paths: [] };
+  };
+  await h.submit();
+  assert.deepEqual(reads, [
+    [
+      {
+        context: h.caller.context,
+        identity: IDENTITY,
+        executionId: h.claim.executionId,
+      },
+      {
+        binding_id: h.repositoryId,
+        base_branch: "main",
+        commit: "a".repeat(40),
+      },
+    ],
+  ]);
+});
+
+test("an assessment of a node with no action reads no gate files", async (t) => {
+  const h = await fixture(t);
+  h.dependencies.intakeGateFiles.read = unexpectedCollaboration;
+  const result = await h.submit();
+  assert.equal(result.assessment.result, AssessmentResult.Success);
 });
 
 test("an assessment without gate_files stores null", async (t) => {

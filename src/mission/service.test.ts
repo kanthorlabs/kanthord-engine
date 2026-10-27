@@ -363,6 +363,7 @@ function makeService(
       check: unexpectedCollaboration,
       merge: unexpectedCollaboration,
     },
+    intakeGateFiles: { read: unexpectedCollaboration },
     decoder: { decode: unexpectedCollaboration },
     config: {
       consecutive_failure_limit: CONSECUTIVE_FAILURE_LIMIT,
