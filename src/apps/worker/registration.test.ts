@@ -53,11 +53,22 @@ test("registration returns server facts with a fresh key and translates refusal 
   );
 });
 
-test("deregistration accepts only success or owned not-found and never retries", async (t) => {
+test("deregistration accepts success, owned not-found and an ended group and never retries", async (t) => {
   const api = httpTransport("http://127.0.0.1:1");
   const runtimeIdentity = "worker_registration_01ARZ3NDEKTSV4RRFFQ69G5FAA";
   const cases = [
     { status: 404, code: "worker.registration.not_found", expected: null },
+    { status: 404, code: "worker.registration.ended", expected: null },
+    {
+      status: 401,
+      code: "gateway.authentication.unauthorized",
+      expected: "gateway.authentication.unauthorized",
+    },
+    {
+      status: 401,
+      code: "worker.registration.ended",
+      expected: "worker.registration.ended",
+    },
     {
       status: 500,
       code: "gateway.invocation.unknown",

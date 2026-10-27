@@ -65,6 +65,9 @@ export function fakeLookups() {
           ? { project_id: projectId, resource_identity: resourceIdentity }
           : null;
       },
+      async workerGroupEnded() {
+        return false;
+      },
     },
     worker,
   } satisfies AuthenticationLookups;

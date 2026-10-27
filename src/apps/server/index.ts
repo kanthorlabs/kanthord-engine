@@ -280,6 +280,13 @@ export function composeServices(options: {
             issuedAt,
             context,
           ),
+        workerGroupEnded: (projectId, resourceIdentity, issuedAt, context) =>
+          project.workerGroupEnded(
+            projectId,
+            resourceIdentity,
+            issuedAt,
+            context,
+          ),
       },
       worker: {
         findByClient: (client) => worker.registrations.findByClient(client),

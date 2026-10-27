@@ -63,6 +63,7 @@ export interface Operation<
   body?: boolean;
   secret?: boolean;
   requiresRegistration?: boolean;
+  endedGroup?: { code: string; message: string };
   requiresExecution?: boolean;
   maxBodyBytes?: number;
   replayGuard?: (recorded: unknown, identity: CallerIdentity) => boolean;
@@ -152,6 +153,14 @@ export class OperationRegistry {
     )
       throw new Error(
         "An execution proof requires client access and a live registration.",
+      );
+    if (
+      operation.endedGroup &&
+      (operation.access !== AccessPolicy.Client ||
+        operation.requiresRegistration !== false)
+    )
+      throw new Error(
+        "An ended group answer requires client access and no live registration.",
       );
     if (
       operation.direct &&

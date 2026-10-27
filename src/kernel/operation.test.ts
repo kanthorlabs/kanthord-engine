@@ -67,6 +67,41 @@ test("execution proof requires client access and registration", () => {
     ),
   );
 });
+test("an ended group answer requires client access and no live registration", () => {
+  const registry = new OperationRegistry();
+  const endedGroup = { code: "test.group.ended", message: "The group ended." };
+  for (const invalid of [
+    { ...read, access: AccessPolicy.Human, endedGroup },
+    { ...read, access: AccessPolicy.Service, endedGroup },
+    { ...read, access: AccessPolicy.Client, endedGroup },
+    {
+      ...read,
+      access: AccessPolicy.Client,
+      requiresRegistration: true,
+      endedGroup,
+    },
+  ])
+    assert.throws(
+      () =>
+        registry.register(invalid, () => {
+          throw new Error("unused");
+        }),
+      /ended group answer requires/,
+    );
+  assert.doesNotThrow(() =>
+    registry.register(
+      {
+        ...read,
+        access: AccessPolicy.Client,
+        requiresRegistration: false,
+        endedGroup,
+      },
+      () => {
+        throw new Error("unused");
+      },
+    ),
+  );
+});
 test("registry rejects undeclared access policies, duplicates, versioned paths and late registration", () => {
   const registry = new OperationRegistry();
   assert.throws(

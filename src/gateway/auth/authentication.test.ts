@@ -23,6 +23,7 @@ import {
 import { generateHumanJWT, generateMachineJWT } from "./jwt.ts";
 import { isHumanIdentity, isMachineIdentity } from "../../kernel/caller.ts";
 import { gatewayOperations } from "../contract.ts";
+import { WorkerGroupEnded } from "../errors.ts";
 
 const TOKEN_LIFETIME = 600;
 const MILLISECONDS_PER_SECOND = 1000;
@@ -396,4 +397,101 @@ test("only successful authentication of a live registration renews its heartbeat
     /Authentication required/,
   );
   assert.equal(heartbeat.mock.calls.length, threeTimes);
+});
+
+const UNAUTHORIZED_CODE = "gateway.authentication.unauthorized";
+const isPlainUnauthorized = (error: unknown) =>
+  error instanceof OperationError &&
+  !(error instanceof WorkerGroupEnded) &&
+  error.status === HttpStatus.Unauthorized &&
+  error.code === UNAUTHORIZED_CODE;
+
+test("an ended worker group throws WorkerGroupEnded on authentication and recheck", async (t) => {
+  const machines = fakeLookups();
+  const fixture = await authenticationFixture(t, machines);
+  const token = await fixture.machineToken(
+    TEST_PROJECT_ID,
+    TEST_WORKER_BINDING,
+  );
+  const identity = await fixture.authentication.authenticate(`Bearer ${token}`);
+  const resolve = t.mock.method(
+    machines.project,
+    "resolveWorkerGroup",
+    async () => null,
+  );
+  const ended = t.mock.method(
+    machines.project,
+    "workerGroupEnded",
+    async () => true,
+  );
+  await assert.rejects(
+    fixture.authentication.authenticate(`Bearer ${token}`),
+    (error) => error instanceof WorkerGroupEnded,
+  );
+  await assert.rejects(
+    fixture.authentication.recheck(identity, background),
+    (error) => error instanceof WorkerGroupEnded,
+  );
+  assert.deepEqual(ended.mock.calls[0]!.arguments, [
+    ...resolve.mock.calls[0]!.arguments,
+  ]);
+});
+
+test("a failure that is no ended group keeps the plain 401", async (t) => {
+  const machines = fakeLookups();
+  const fixture = await authenticationFixture(t, machines);
+  const token = await fixture.machineToken(
+    TEST_PROJECT_ID,
+    TEST_WORKER_BINDING,
+  );
+  const identity = await fixture.authentication.authenticate(`Bearer ${token}`);
+  assert.ok(isMachineIdentity(identity));
+  const ended = t.mock.method(
+    machines.project,
+    "workerGroupEnded",
+    async () => true,
+  );
+  const resolve = t.mock.method(machines.project, "resolveWorkerGroup");
+
+  resolve.mock.mockImplementation(async () => null);
+  ended.mock.mockImplementation(async () => false);
+  await assert.rejects(
+    fixture.authentication.authenticate(`Bearer ${token}`),
+    isPlainUnauthorized,
+  );
+
+  resolve.mock.mockImplementation(async (_project, resource) => ({
+    project_id: "project_01ARZ3NDEKTSV4RRFFQ69G5FAW",
+    resource_identity: resource,
+  }));
+  ended.mock.mockImplementation(async () => true);
+  await assert.rejects(
+    fixture.authentication.authenticate(`Bearer ${token}`),
+    isPlainUnauthorized,
+  );
+
+  resolve.mock.restore();
+  machines.worker.registrations.set(identity.clientId, {
+    client_id: identity.clientId,
+    name: identity.name,
+    project_id: identity.projectId,
+    resource_identity: "worker:kanthord:other",
+    runtime_identity: "worker_registration_01ARZ3NDEKTSV4RRFFQ69G5FAV",
+    registered_at: Date.now(),
+  });
+  await assert.rejects(
+    fixture.authentication.authenticate(`Bearer ${token}`),
+    isPlainUnauthorized,
+  );
+
+  const old = await generateMachineJWT(
+    fixture.config.master_key,
+    fixture.config.gateway.auth.version + 1,
+    TOKEN_LIFETIME,
+    { projectId: TEST_PROJECT_ID, bindingName: TEST_WORKER_BINDING },
+  );
+  await assert.rejects(
+    fixture.authentication.authenticate(`Bearer ${old.token}`),
+    isPlainUnauthorized,
+  );
 });

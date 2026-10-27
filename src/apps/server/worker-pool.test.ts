@@ -30,6 +30,7 @@ const ONE_INSTANCE = 1;
 const TWO_INSTANCES = 2;
 const THREE_INSTANCES = 3;
 const FIRST_SLOT = 0;
+const CLEAN_EXIT_CODE = 0;
 const SLOT_ROOT = "/slot";
 const POOL_TEST_TIMEOUT = 120000;
 const TOMBSTONE_SETTLE_MS = 1100;
@@ -199,11 +200,20 @@ test(
   },
 );
 
+async function assertCleanExits(
+  instances: { exited: Promise<{ code: number }> }[],
+) {
+  assert.ok(instances.length);
+  for (const instance of instances)
+    assert.equal((await instance.exited).code, CLEAN_EXIT_CODE);
+}
+
 test(
   "a count change adds slots and drains the excess slots through deregistration",
   { timeout: POOL_TEST_TIMEOUT },
   async (t) => {
     const f = await serverPool(t, ONE_INSTANCE);
+    const launch = t.mock.method(f.fixture.threadDriver, "launch");
     f.fixture.worker.startPool();
     const first = await f.waitFor(ONE_INSTANCE);
     await f.setCount(THREE_INSTANCES);
@@ -216,6 +226,7 @@ test(
     await f.setCount(0);
     await f.waitFor(0);
     await f.settled();
+    await assertCleanExits(launch.mock.calls.map((call) => call.result!));
   },
 );
 
@@ -224,11 +235,13 @@ test(
   { timeout: POOL_TEST_TIMEOUT },
   async (t) => {
     const f = await serverPool(t, TWO_INSTANCES);
+    const launch = t.mock.method(f.fixture.threadDriver, "launch");
     f.fixture.worker.startPool();
     await f.waitFor(TWO_INSTANCES);
     await f.remove();
     await f.waitFor(0);
     await f.settled();
+    await assertCleanExits(launch.mock.calls.map((call) => call.result!));
   },
 );
 

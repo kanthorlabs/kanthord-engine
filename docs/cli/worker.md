@@ -484,8 +484,15 @@ registration and a newer registration of the same
 client identity, which stays intact. A retry after a restart runs the handler
 again: it ends a registration that is still live and answers `404` for one that
 already ended. The caller reads that `404` after its own call as the end of its
-registration. A revoked credential or unavailable binding gains no
-authentication bypass for cleanup.
+registration.
+
+A caller whose worker group ended answers `404` `worker.registration.ended`
+before the handler runs, with no state change. The group ended in three cases:
+its binding is removed, its binding has an instance count of 0, or its binding
+has a newer tombstone than the token. The caller reads that `404` as the end of
+its registration. Each other authentication failure keeps `401`. A revoked
+credential keeps `401`, also a token of an old auth version and a group
+mismatch. The ended group answer is the only answer that replaces a `401`.
 
 The effect is to end the registration, preventing later work pulls and execution
 operations under it. Scheduler owns any live execution's liveness disposition.
@@ -858,6 +865,7 @@ Every remote command can also answer the shared codes of [other.md](other.md#err
 | 409   | `worker.action_performer.snapshot_absent`                     | The current passing assessment names no repository snapshot of the binding of the action.                                                                                                                                         | worker.action.request (API only)                                                                                                                                            |
 | 400   | `worker.registration.binding_unknown`                         | `resource_identity` names no current worker binding of `project_id`.                                                                                                                                                              | registration list                                                                                                                                                           |
 | 404   | `worker.catalog.not_found`                                    | The worker name is absent from the catalog.                                                                                                                                                                                       | get                                                                                                                                                                         |
+| 404   | `worker.registration.ended`                                   | The worker group of the caller ended: its binding is removed, has an instance count of 0 or has a newer tombstone.                                                                                                                | registration deregister                                                                                                                                                     |
 | 404   | `worker.registration.not_found`                               | The runtime identity is unknown, ended or not owned.                                                                                                                                                                              | registration get, registration deregister, registration resume                                                                                                              |
 | 409   | `worker.registration.no_live_execution`                       | The registration is the claimant of no live execution.                                                                                                                                                                            | registration resume                                                                                                                                                         |
 | 409   | `worker.registration.client_live`                             | The client identity holds another live registration.                                                                                                                                                                              | registration resume                                                                                                                                                         |

@@ -792,6 +792,7 @@ export const WorkerErrorCode = {
   AssessmentNotCurrent: "worker.action_performer.assessment_not_current",
   SnapshotAbsent: "worker.action_performer.snapshot_absent",
   RegistrationNotFound: "worker.registration.not_found",
+  RegistrationEnded: "worker.registration.ended",
   NoLiveExecution: "worker.registration.no_live_execution",
   ClientLive: "worker.registration.client_live",
   BindingUnknown: "worker.registration.binding_unknown",
@@ -1047,6 +1048,8 @@ export const catalogEntrySchema = z.discriminatedUnion("host", [
   }),
 ]);
 
+const REGISTRATION_ENDED_MESSAGE =
+  "The worker group of the registration ended.";
 const emptyFields = z.strictObject({});
 const runtimeIdentityParams = z.strictObject({
   runtime_identity: identitySchema("worker_registration"),
@@ -1579,6 +1582,10 @@ export const workerOperations = {
     path: "/api/worker/registration/:runtime_identity",
     access: AccessPolicy.Client,
     requiresRegistration: false,
+    endedGroup: {
+      code: WorkerErrorCode.RegistrationEnded,
+      message: REGISTRATION_ENDED_MESSAGE,
+    },
     timeoutMs: 30000,
     mutation: true,
     status: HttpStatus.OK,
@@ -1589,7 +1596,7 @@ export const workerOperations = {
     }),
     output: runtimeIdentityParams.extend({ registered: z.literal(false) }),
     description:
-      "End the caller's named live registration and free its slot atomically. Same-key retries replay the recorded answer after the end.",
+      "End the caller's named live registration and free its slot atomically. Same-key retries replay the recorded answer after the end. An ended worker group answers 404 worker.registration.ended.",
   },
   "registration.resume": {
     service: WORKER_SERVICE_NAME,

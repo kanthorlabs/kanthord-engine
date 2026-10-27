@@ -63,6 +63,7 @@ function cancelled(context: Context | undefined) {
 function scripted(options: {
   pull: (context: Context | undefined) => Promise<unknown>;
   handover?: () => Promise<unknown>;
+  deregister?: () => unknown;
 }) {
   const deregistrations: string[] = [];
   const transport = {
@@ -78,6 +79,7 @@ function scripted(options: {
         params: { runtime_identity: string };
       }) => {
         deregistrations.push(input.params.runtime_identity);
+        if (options.deregister) return options.deregister();
         return completed({
           runtime_identity: input.params.runtime_identity,
           registered: false,
@@ -146,6 +148,50 @@ test("an idle unit deregisters and ends run at a drain", async (t) => {
   assert.deepEqual(await unit.healthcheck(), {
     client: HealthStatus.Unavailable,
   });
+});
+
+function deregisterFailure(status: number, code: string) {
+  return {
+    type: OperationResultType.Failure,
+    status,
+    error: {
+      error: { code, message: "test refusal", details: null },
+      request_id: "request_01ARZ3NDEKTSV4RRFFQ69G5FAA",
+    },
+  };
+}
+
+async function drainedWith(t: TestContext, deregister: () => unknown) {
+  const pulled = Promise.withResolvers<void>();
+  const { transport, deregistrations } = scripted({
+    pull: (context) => {
+      pulled.resolve();
+      return cancelled(context);
+    },
+    deregister,
+  });
+  const unit = unitOf(t, transport);
+  const running = unit.run();
+  await pulled.promise;
+  const drained = await unit.drain();
+  await running;
+  assert.deepEqual(deregistrations, [REGISTRATION.runtime_identity]);
+  return drained;
+}
+
+test("a drain of an ended worker group answers null", async (t) => {
+  const drained = await drainedWith(t, () =>
+    deregisterFailure(HttpStatus.NotFound, "worker.registration.ended"),
+  );
+  assert.equal(drained, null);
+});
+
+test("a drain whose deregistration answers 401 answers the failure", async (t) => {
+  const code = "gateway.authentication.unauthorized";
+  const drained = await drainedWith(t, () =>
+    deregisterFailure(HttpStatus.Unauthorized, code),
+  );
+  assert.equal((drained as { code?: string } | null)?.code, code);
 });
 
 test("a busy unit ends its execution before it deregisters at a drain", async (t) => {

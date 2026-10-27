@@ -993,6 +993,33 @@ test("worker group resolution rejects absence, disablement and removal", async (
   assert.equal(await resolve(), null);
 });
 
+test("worker group ended answers true for removal, a count of 0 and a newer tombstone", async (t) => {
+  const f = bindingFixture(t);
+  let now = GROUP_ISSUED_AT;
+  t.mock.method(Date, "now", () => now);
+  const ended = (issuedAt = GROUP_ISSUED_AT, resourceIdentity = WORKER_GROUP) =>
+    f.project.workerGroupEnded(
+      f.project_id,
+      resourceIdentity,
+      issuedAt,
+      background,
+    );
+  assert.equal(await ended(), false);
+  f.write(SINGLE_INSTANCE);
+  assert.equal(await ended(), false);
+  assert.equal(await ended(GROUP_ISSUED_AT, MISSING_GROUP), false);
+  f.write(INSTANCE_COUNT_MIN);
+  assert.equal(await ended(), true);
+  f.write(SINGLE_INSTANCE);
+  assert.equal(await ended(), false);
+  now = TOMBSTONE_AT;
+  f.write(null);
+  assert.equal(await ended(), true);
+  f.write(SINGLE_INSTANCE);
+  assert.equal(await ended(GROUP_ISSUED_AT), true);
+  assert.equal(await ended(TOMBSTONE_AT), false);
+});
+
 test("worker binding resolution retains pinned configuration and reports later disablement and removal", (t) => {
   const f = bindingFixture(t);
   const bindingId = f.write(SINGLE_INSTANCE);
@@ -1217,6 +1244,9 @@ test("worker group override receives the exact group, issuance and context witho
         assert.equal(issuedAt, GROUP_ISSUED_AT);
         assert.equal(context, background);
         return group;
+      },
+      async workerGroupEnded() {
+        return true;
       },
     },
   });
