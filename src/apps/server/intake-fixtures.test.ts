@@ -32,7 +32,7 @@ const KEY = "prefix#tag?query%2F space/é/project/mission/node/1/asset";
 const BYTES = "hello";
 const LIFETIME = 3600000;
 const NO_OBJECTS = 0;
-const NO_CHECKS = { head_commit: "", failed: [] };
+const NO_CHECKS = { head_commit: "", pending: [], failed: [] };
 const ONE_CALL = 1;
 const TWO_CALLS = 2;
 const LAST_CALLS = 3;
@@ -198,7 +198,7 @@ test("fake GitHub opens a pull request without a recorded call", async (t) => {
   assert.equal(
     platform.foldPullRequest(opened.value, [], NO_CHECKS, "pull_request_merged")
       .end_state,
-    CheckEndState.None,
+    CheckEndState.ChecksPending,
   );
   assert.equal(gitHub.calls.length, ONE_CALL);
 });
@@ -211,14 +211,17 @@ test("fake GitHub serves the reviews of a pull request at its head commit", asyn
     const pull = await platform.getPullRequest(gitHubCall(), target, {
       number,
     });
+    const checks = await platform.getRequiredChecks(gitHubCall(), target, {
+      number,
+    });
     const reviews = await platform.listReviews(gitHubCall(), target, {
       number,
     });
-    assert.ok(pull.ok && reviews.ok);
+    assert.ok(pull.ok && reviews.ok && checks.ok);
     return platform.foldPullRequest(
       pull.value,
       reviews.value,
-      NO_CHECKS,
+      checks.value,
       "pull_request_merged",
     ).end_state;
   };

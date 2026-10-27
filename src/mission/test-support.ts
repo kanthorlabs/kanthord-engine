@@ -324,7 +324,10 @@ export function missionHarness(
       executionGet: unexpectedCollaboration,
       delete: unexpectedCollaboration,
     },
-    intakeCheck: { check: unexpectedCollaboration },
+    intakeCheck: {
+      check: unexpectedCollaboration,
+      merge: unexpectedCollaboration,
+    },
     decoder: { decode: unexpectedCollaboration },
     config: {
       consecutive_failure_limit: CONSECUTIVE_FAILURE_LIMIT,

@@ -15,6 +15,7 @@ import {
   EndState,
   ReleaseObligation,
   RepositoryAction,
+  RepositoryLanding,
   StartPoint,
   TransitionRule,
   missionOperations,
@@ -32,11 +33,17 @@ import {
 import { setNodeState, insertNode, readNode } from "./store.ts";
 import { readCurrentRevision, insertRevision } from "./store.ts";
 import { revisionFromRow } from "./revision.ts";
-import { controlHarness } from "./test-support.ts";
+import {
+  DEFERRED_CHECK_RETRY_MS,
+  DEFERRED_CHECK_ROUND_LIMIT,
+} from "./node-check.ts";
+import { controlHarness, unexpectedCollaboration } from "./test-support.ts";
 
 const NO_STALLS = 0;
 const FURTHER_WORK_LIMIT = 3;
 const ONE_CALL = 1;
+const NO_CALLS = 0;
+const FIRST_INDEX = 0;
 
 const IDENTITY = testHumanIdentity("ulrich", "Ulrich", "token");
 const FIRST_ATTEMPT = 1;
@@ -618,19 +625,52 @@ async function deferredCheckEnds(
 const PULL_REQUEST_NUMBER = 1;
 const LANDED_COMMIT = "a".repeat(40);
 const GATED_RESOURCE = "repository:github:owner/repo";
+const TESTED_COMMIT = "b".repeat(40);
+const MERGE_ADDRESS: MergeAnswer = {
+  kind: "pull_request",
+  resource_identity: GATED_RESOURCE,
+  number: PULL_REQUEST_NUMBER,
+};
+
+type CheckAnswer = Awaited<ReturnType<Dependencies["intakeCheck"]["check"]>>;
+type MergeAnswer = Awaited<ReturnType<Dependencies["intakeCheck"]["merge"]>>;
+type MergeInput = Parameters<Dependencies["intakeCheck"]["merge"]>[1];
+type DeferredOptions = {
+  landing?: (typeof RepositoryLanding)[keyof typeof RepositoryLanding];
+  gateFiles?: { binding_id: string; paths: string[] }[];
+  merge?: (input: MergeInput) => Promise<MergeAnswer>;
+};
 
 function deferredFixture(
   t: TestContext,
-  check: Awaited<ReturnType<Dependencies["intakeCheck"]["check"]>>,
+  check: CheckAnswer | ((call: number) => Promise<CheckAnswer>),
+  options: DeferredOptions = {},
 ) {
   let checkCalls = 0;
+  const mergeInputs: MergeInput[] = [];
+  const warnings: { fields: unknown; message: string }[] = [];
   const h = fixture(t, Intent.Implement, {
+    logger: {
+      warn: (fields: unknown, message: string) =>
+        warnings.push({ fields, message }),
+    } as unknown as Dependencies["logger"],
     intakeCheck: {
       check: async () => {
         checkCalls++;
-        return check;
+        return check instanceof Function ? check(checkCalls) : check;
+      },
+      merge: async (_context, input) => {
+        mergeInputs.push(input);
+        return options.merge === undefined
+          ? MERGE_ADDRESS
+          : options.merge(input);
       },
     },
+  });
+  const policy = h.dependencies.bindings.repositoryPolicyOf;
+  h.dependencies.bindings.repositoryPolicyOf = (tx, bindingId) => ({
+    ...policy(tx, bindingId)!,
+    landing: options.landing ?? RepositoryLanding.Human,
   });
   h.store.transaction((tx) =>
     insertAssessment(tx, {
@@ -642,8 +682,15 @@ function deferredFixture(
       rationale: "Passed",
       evidence_ids: "[]",
       dependency_outcome_ids: "[]",
-      tested_input: null,
-      gate_files: null,
+      tested_input: JSON.stringify({
+        kind: AssetKind.Repository,
+        binding_id: h.binding_id,
+        commit: TESTED_COMMIT,
+      }),
+      gate_files:
+        options.gateFiles === undefined
+          ? null
+          : JSON.stringify(options.gateFiles),
       execution_id: h.execution_id,
       actor: null,
       created_at: NOW,
@@ -684,7 +731,13 @@ function deferredFixture(
       ],
     );
   });
-  return { ...h, evidenceId, checkCalls: () => checkCalls };
+  return {
+    ...h,
+    evidenceId,
+    mergeInputs,
+    warnings,
+    checkCalls: () => checkCalls,
+  };
 }
 
 test("deferred check applies expected end state and completes the node", async (t) => {
@@ -738,12 +791,211 @@ test("deferred check with none leaves the node in ExternalRequested", async (t) 
   assert.equal(h.checkCalls(), ONE_CALL);
 });
 
+const MICROTASK_TURNS = 50;
+const FIRST_ROUND_DELAY_MS = 0;
+const JUST_BEFORE_RETRY_MS = DEFERRED_CHECK_RETRY_MS - 1;
+const ONE_MS = 1;
+const MERGE_FAILED = "Deferred merge failed.";
+const PENDING: CheckAnswer = {
+  end_state: CheckEndState.ChecksPending,
+  landed_commits: [],
+};
+const SETTLED: CheckAnswer = {
+  end_state: CheckEndState.None,
+  landed_commits: [],
+};
+const REFUSAL: MergeAnswer = {
+  class: "final_refusal",
+  code: "github.final_refusal",
+  message: "refused",
+};
+
+function mockTimers(t: TestContext) {
+  t.mock.timers.enable({ apis: ["setTimeout", "setImmediate"] });
+  return async (ms: number) => {
+    t.mock.timers.tick(ms);
+    for (let turn = 0; turn < MICROTASK_TURNS; turn++) await Promise.resolve();
+  };
+}
+
+test("a pending answer schedules the next round after the retry delay", async (t) => {
+  const advance = mockTimers(t);
+  const h = deferredFixture(t, PENDING);
+  h.release();
+  await advance(FIRST_ROUND_DELAY_MS);
+  assert.equal(h.checkCalls(), ONE_CALL);
+  await advance(JUST_BEFORE_RETRY_MS);
+  assert.equal(h.checkCalls(), ONE_CALL);
+  await advance(ONE_MS);
+  assert.equal(h.checkCalls(), ONE_CALL + 1);
+  assert.equal(h.node().state, NodeState.ExternalRequested);
+  assert.equal(h.mergeInputs.length, NO_CALLS);
+});
+
+test("a none answer of a kanthord landing merges the tested commit", async (t) => {
+  const advance = mockTimers(t);
+  const h = deferredFixture(t, SETTLED, {
+    landing: RepositoryLanding.KanthorD,
+  });
+  h.release();
+  await advance(FIRST_ROUND_DELAY_MS);
+  assert.deepEqual(h.mergeInputs, [
+    {
+      evidence_id: h.evidenceId,
+      commit: TESTED_COMMIT,
+      request_key: `${h.node_id}/${FIRST_ATTEMPT}/repo.pull_request/merge/${TESTED_COMMIT}/service`,
+    },
+  ]);
+  assert.equal(h.node().state, NodeState.ExternalRequested);
+});
+
+test("a none answer of a human landing calls no merge and ends the loop", async (t) => {
+  const advance = mockTimers(t);
+  const h = deferredFixture(t, SETTLED);
+  h.release();
+  await advance(FIRST_ROUND_DELAY_MS);
+  await advance(DEFERRED_CHECK_RETRY_MS);
+  assert.equal(h.mergeInputs.length, NO_CALLS);
+  assert.equal(h.checkCalls(), ONE_CALL);
+});
+
+test("a none answer with a changed gate file calls no merge", async (t) => {
+  const advance = mockTimers(t);
+  const h = deferredFixture(t, SETTLED, {
+    landing: RepositoryLanding.KanthorD,
+    gateFiles: [],
+  });
+  h.store.transaction((tx) =>
+    tx.database
+      .prepare("UPDATE mission_assessment SET gate_files = ?")
+      .run(JSON.stringify([{ binding_id: h.binding_id, paths: ["ci.yml"] }])),
+  );
+  h.release();
+  await advance(FIRST_ROUND_DELAY_MS);
+  assert.equal(h.checkCalls(), ONE_CALL);
+  assert.equal(h.mergeInputs.length, NO_CALLS);
+});
+
+test("a none answer with a live claim calls no merge", async (t) => {
+  const advance = mockTimers(t);
+  const h = deferredFixture(t, SETTLED, {
+    landing: RepositoryLanding.KanthorD,
+  });
+  h.dependencies.schedulerClaims.liveExecutionOf = () => ({
+    execution_id: h.execution_id,
+    runtime_identity: createIdentity("runtime"),
+    attempt: FIRST_ATTEMPT,
+    pinned_revision: FIRST_ATTEMPT,
+  });
+  h.release();
+  await advance(FIRST_ROUND_DELAY_MS);
+  assert.equal(h.checkCalls(), ONE_CALL);
+  assert.equal(h.mergeInputs.length, NO_CALLS);
+});
+
+test("the loop stops after the round limit", async (t) => {
+  const advance = mockTimers(t);
+  const h = deferredFixture(t, PENDING);
+  h.release();
+  await advance(FIRST_ROUND_DELAY_MS);
+  for (let round = 1; round < DEFERRED_CHECK_ROUND_LIMIT; round++)
+    await advance(DEFERRED_CHECK_RETRY_MS);
+  assert.equal(h.checkCalls(), DEFERRED_CHECK_ROUND_LIMIT);
+  await advance(DEFERRED_CHECK_RETRY_MS);
+  assert.equal(h.checkCalls(), DEFERRED_CHECK_ROUND_LIMIT);
+});
+
+test("a refused merge logs a warning and changes no state", async (t) => {
+  const advance = mockTimers(t);
+  const h = deferredFixture(t, SETTLED, {
+    landing: RepositoryLanding.KanthorD,
+    merge: async () => REFUSAL,
+  });
+  h.release();
+  await advance(FIRST_ROUND_DELAY_MS);
+  assert.equal(h.mergeInputs.length, ONE_CALL);
+  assert.equal(h.warnings.length, ONE_CALL);
+  assert.equal(h.warnings[FIRST_INDEX]!.message, MERGE_FAILED);
+  assert.deepEqual(h.warnings[FIRST_INDEX]!.fields, {
+    evidence_id: h.evidenceId,
+    class: REFUSAL.class,
+    code: REFUSAL.code,
+  });
+  assert.equal(h.node().state, NodeState.ExternalRequested);
+  assert.equal(
+    h.store.transaction((tx) => readEvidence(tx, h.evidenceId))?.end_state,
+    null,
+  );
+});
+
+test("a thrown merge logs a warning and changes no state", async (t) => {
+  const advance = mockTimers(t);
+  const h = deferredFixture(t, SETTLED, {
+    landing: RepositoryLanding.KanthorD,
+    merge: async () => {
+      throw new Error("merge failed");
+    },
+  });
+  h.release();
+  await advance(FIRST_ROUND_DELAY_MS);
+  assert.equal(h.warnings.length, ONE_CALL);
+  assert.equal(h.warnings[FIRST_INDEX]!.message, MERGE_FAILED);
+  assert.equal(h.node().state, NodeState.ExternalRequested);
+});
+
+test("a failed check schedules the next round after the retry delay", async (t) => {
+  const advance = mockTimers(t);
+  const h = deferredFixture(t, async (call) => {
+    if (call === ONE_CALL) throw new Error("check failed");
+    return PENDING;
+  });
+  h.release();
+  await advance(FIRST_ROUND_DELAY_MS);
+  assert.equal(h.checkCalls(), ONE_CALL);
+  await advance(JUST_BEFORE_RETRY_MS);
+  assert.equal(h.checkCalls(), ONE_CALL);
+  await advance(ONE_MS);
+  assert.equal(h.checkCalls(), ONE_CALL + 1);
+});
+
+test("a merge that answers an address runs the next round at once and expected completes the node", async (t) => {
+  const advance = mockTimers(t);
+  const h = deferredFixture(
+    t,
+    async (call) =>
+      call === ONE_CALL
+        ? SETTLED
+        : {
+            end_state: CheckEndState.Expected,
+            landed_commits: [LANDED_COMMIT],
+          },
+    { landing: RepositoryLanding.KanthorD },
+  );
+  h.release();
+  await advance(FIRST_ROUND_DELAY_MS);
+  assert.equal(h.mergeInputs.length, ONE_CALL);
+  assert.equal(h.node().state, NodeState.ExternalRequested);
+  await advance(FIRST_ROUND_DELAY_MS);
+  assert.equal(h.checkCalls(), ONE_CALL + 1);
+  assert.equal(h.node().state, NodeState.Completed);
+});
+
+test("no round runs after the Mission Service stops", async (t) => {
+  const advance = mockTimers(t);
+  const h = deferredFixture(t, PENDING);
+  h.release();
+  await advance(FIRST_ROUND_DELAY_MS);
+  await h.service.stop();
+  await advance(DEFERRED_CHECK_RETRY_MS);
+  assert.equal(h.checkCalls(), ONE_CALL);
+});
+
 function deferredBranchPushFixture(
   t: TestContext,
   check: Awaited<ReturnType<Dependencies["intakeCheck"]["check"]>>,
 ) {
   const h = fixture(t, Intent.Implement, {
-    intakeCheck: { check: async () => check },
+    intakeCheck: { check: async () => check, merge: unexpectedCollaboration },
   });
   h.dependencies.bindings.repositoryPolicyOf = () => ({
     project_id: h.project_id,
@@ -831,6 +1083,7 @@ test("a failing deferred check leaves the node unchanged", async (t) => {
         checkCalls++;
         throw new Error("check failed");
       },
+      merge: unexpectedCollaboration,
     },
   });
   h.store.transaction((tx) =>

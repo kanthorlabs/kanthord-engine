@@ -15,6 +15,8 @@ import {
   CheckEndState,
   MissionErrorCode,
   NodeState,
+  RepositoryAction,
+  RepositoryLanding,
   Resolution,
   platformAddressSchema,
   checkEndStateSchema,
@@ -27,6 +29,7 @@ import {
   transition,
 } from "./control.ts";
 import { actionStatesOf, requiredActionsOf } from "./frozen-action.ts";
+import { gateFilesOf } from "./gate-files.ts";
 import { requireNode } from "./node-read.ts";
 import { recordNotFound } from "./record-list.ts";
 import {
@@ -41,13 +44,20 @@ import { claimableMap, reconcileMission } from "./routing.ts";
 import { readNode, setNodeState, type NodeRow } from "./store.ts";
 import type { Dependencies } from "./service.ts";
 import { requireMission } from "./write.ts";
-import { authorizeRequest } from "./authorization.ts";
+import { assessedCommitOf, authorizeRequest } from "./authorization.ts";
+import { currentAssessmentOf } from "./currency.ts";
 
 const NO_LANDED_COMMITS = 0;
 const FIRST_ASSET_INDEX = 0;
 const NO_UNRESOLVED_REQUESTS = 0;
 const SINGLE_ASSET_COUNT = 1;
 const EXPECTED_ROW_CHANGE = 1;
+const NO_GATE_FILES = 0;
+const FIRST_ROUND = 0;
+const NEXT_ROUND_STEP = 1;
+export const DEFERRED_CHECK_RETRY_MS = 60000;
+export const DEFERRED_CHECK_ROUND_LIMIT = 60;
+const DEFERRED_MERGE_FAILED = "Deferred merge failed.";
 export const LANDED_COMMIT_SUBJECT = "Landed commit";
 type CheckAnswer = Awaited<ReturnType<IntakeCheck["check"]>>;
 const checkAnswerSchema = z
@@ -60,6 +70,12 @@ const checkAnswerSchema = z
       ? answer.landed_commits.length > NO_LANDED_COMMITS
       : answer.landed_commits.length === NO_LANDED_COMMITS,
   );
+
+export function changesNothing(endState: CheckAnswer["end_state"]): boolean {
+  return (
+    endState === CheckEndState.None || endState === CheckEndState.ChecksPending
+  );
+}
 
 export function requestContext(
   tx: Transaction,
@@ -131,8 +147,7 @@ export function applyEndState(
   const node = requireNode(tx, request.node_id);
   const mission = requireMission(tx, node.mission_id);
   const before = claimableMap(tx, mission.id, dependencies.bindings);
-  if (request.end_state !== null || answer.end_state === CheckEndState.None)
-    return;
+  if (request.end_state !== null || changesNothing(answer.end_state)) return;
   if (
     answer.end_state === CheckEndState.Conflict ||
     answer.end_state === CheckEndState.ChecksFailed
@@ -259,14 +274,13 @@ export async function checkNode(
     const live = dependencies.store.transaction((tx) => {
       requireMission(tx, prepared.mission.id, expectedMissionVersion);
       const now = Date.now();
-      const claim =
-        answer.end_state === CheckEndState.None
-          ? null
-          : dependencies.schedulerClaims.liveExecutionOf(
-              tx,
-              item.request.node_id,
-              now,
-            );
+      const claim = changesNothing(answer.end_state)
+        ? null
+        : dependencies.schedulerClaims.liveExecutionOf(
+            tx,
+            item.request.node_id,
+            now,
+          );
       if (claim === null)
         applyEndState(tx, dependencies, item.request.id, answer, now);
       return claim;
@@ -310,11 +324,58 @@ export async function checkNode(
   return result;
 }
 
+type RequestItem = ReturnType<typeof requestContext>;
+type RoundOutcome = { merged: boolean; pending: boolean; failed: boolean };
+
+function mergeCommitOf(
+  tx: Transaction,
+  dependencies: Dependencies,
+  item: RequestItem,
+  now: number,
+): string | null {
+  const action = item.frozen_action;
+  if (
+    action.action !== RepositoryAction.PullRequest ||
+    action.configuration.landing !== RepositoryLanding.KanthorD
+  )
+    return null;
+  const { node_id: nodeId, attempt } = item.request;
+  const assessment = currentAssessmentOf(tx, nodeId, attempt);
+  if (gateFilesOf(assessment, action.binding_id).length > NO_GATE_FILES)
+    return null;
+  if (dependencies.schedulerClaims.liveExecutionOf(tx, nodeId, now) !== null)
+    return null;
+  return assessedCommitOf(tx, nodeId, attempt, action.binding_id);
+}
+
+async function requestMerge(
+  dependencies: Dependencies,
+  item: RequestItem,
+  commit: string,
+): Promise<boolean> {
+  const { node_id: nodeId, attempt, id } = item.request;
+  try {
+    const answer = await dependencies.intakeCheck.merge(background, {
+      evidence_id: id,
+      commit,
+      request_key: `${nodeId}/${attempt}/${item.frozen_action.key}/merge/${commit}/service`,
+    });
+    if ("kind" in answer) return true;
+    dependencies.logger.warn(
+      { evidence_id: id, class: answer.class, code: answer.code },
+      DEFERRED_MERGE_FAILED,
+    );
+  } catch (error) {
+    dependencies.logger.warn({ error, evidence_id: id }, DEFERRED_MERGE_FAILED);
+  }
+  return false;
+}
+
 async function runDeferredCheck(
   dependencies: Dependencies,
   nodeId: string,
   attempt: number,
-): Promise<void> {
+): Promise<RoundOutcome | null> {
   const prepared = dependencies.store.transaction((tx) => {
     const node = readNode(tx, nodeId);
     if (!node || node.state !== NodeState.ExternalRequested) return null;
@@ -328,7 +389,12 @@ async function runDeferredCheck(
     const mission = requireMission(tx, node.mission_id);
     return { mission, requests };
   });
-  if (prepared === null) return;
+  if (prepared === null) return null;
+  const outcome: RoundOutcome = {
+    merged: false,
+    pending: false,
+    failed: false,
+  };
   for (const item of prepared.requests) {
     let answer: CheckAnswer;
     try {
@@ -343,36 +409,77 @@ async function runDeferredCheck(
         { error, evidence_id: item.request.id },
         "Deferred check failed.",
       );
+      outcome.failed = true;
       continue;
     }
-    dependencies.store.transaction((tx) => {
+    if (answer.end_state === CheckEndState.ChecksPending)
+      outcome.pending = true;
+    const mergeCommit = dependencies.store.transaction((tx) => {
       const now = Date.now();
-      const claim =
-        answer.end_state === CheckEndState.None
-          ? null
-          : dependencies.schedulerClaims.liveExecutionOf(
-              tx,
-              item.request.node_id,
-              now,
-            );
+      if (answer.end_state === CheckEndState.None)
+        return mergeCommitOf(tx, dependencies, item, now);
+      const claim = changesNothing(answer.end_state)
+        ? null
+        : dependencies.schedulerClaims.liveExecutionOf(
+            tx,
+            item.request.node_id,
+            now,
+          );
       if (claim === null)
         applyEndState(tx, dependencies, item.request.id, answer, now);
+      return null;
     });
+    if (mergeCommit === null) continue;
+    if (await requestMerge(dependencies, item, mergeCommit))
+      outcome.merged = true;
   }
   dependencies.wakeup.wake(prepared.mission.project_id);
+  return outcome;
+}
+
+function nextRound(
+  dependencies: Dependencies,
+  nodeId: string,
+  attempt: number,
+  round: number,
+  outcome: RoundOutcome,
+): void {
+  const next = round + NEXT_ROUND_STEP;
+  if (next >= DEFERRED_CHECK_ROUND_LIMIT) return;
+  if (outcome.merged)
+    return scheduleDeferredCheck(dependencies, nodeId, attempt, next);
+  if (outcome.pending || outcome.failed)
+    setTimeout(
+      () => runRound(dependencies, nodeId, attempt, next),
+      DEFERRED_CHECK_RETRY_MS,
+    ).unref();
+}
+
+function runRound(
+  dependencies: Dependencies,
+  nodeId: string,
+  attempt: number,
+  round: number,
+): void {
+  if (dependencies.shutdown?.signal.aborted) return;
+  runDeferredCheck(dependencies, nodeId, attempt)
+    .then((outcome) => {
+      if (outcome === null) return;
+      nextRound(dependencies, nodeId, attempt, round, outcome);
+    })
+    .catch((error) => {
+      dependencies.logger.warn(
+        { error, node_id: nodeId },
+        "Deferred check crashed.",
+      );
+    });
 }
 
 export function scheduleDeferredCheck(
   dependencies: Dependencies,
   nodeId: string,
   attempt: number,
+  round = FIRST_ROUND,
 ): void {
-  setImmediate(() => {
-    runDeferredCheck(dependencies, nodeId, attempt).catch((error) => {
-      dependencies.logger.warn(
-        { error, node_id: nodeId },
-        "Deferred check crashed.",
-      );
-    });
-  });
+  setImmediate(() => runRound(dependencies, nodeId, attempt, round)).unref();
 }

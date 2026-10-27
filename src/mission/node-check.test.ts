@@ -263,6 +263,23 @@ test("a pull request with a failed required check returns the node to rework and
   );
 });
 
+test("checks_pending leaves the node External.Requested and the request unresolved", async (t) => {
+  const h = await fixture(t);
+  h.dependencies.intakeCheck.check = async () => ({
+    end_state: CheckEndState.ChecksPending,
+    landed_commits: [],
+  });
+  assert.equal(
+    (await h.check()).results[FIRST_RESULT_INDEX]!.resolution,
+    Resolution.Unresolved,
+  );
+  assert.equal(h.node().state, NodeState.ExternalRequested);
+  assert.equal(
+    h.store.transaction((tx) => readEvidence(tx, h.request.id))!.end_state,
+    null,
+  );
+});
+
 test("other checks block while none stays unresolved and failed checks retain failure envelopes", async (t) => {
   const h = await fixture(t);
   h.dependencies.intakeCheck.check = async () => ({
