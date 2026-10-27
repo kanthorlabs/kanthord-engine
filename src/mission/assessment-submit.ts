@@ -11,6 +11,7 @@ import {
   TransitionRule,
   type AssessmentSubmit,
   type ExecutionEnds,
+  type GateFiles,
 } from "./contract.ts";
 import { admitAssessment } from "./assessment-admit.ts";
 import {
@@ -40,6 +41,7 @@ import { requireMission } from "./write.ts";
 
 const NO_REQUIRED_ACTIONS = 0;
 const NO_REQUESTS = 0;
+const NO_GATE_FILE_ENTRIES = 0;
 
 function priorReworks(
   tx: Transaction,
@@ -65,6 +67,7 @@ export function submitAssessment(
   claim: ExecutionClaim,
   nodeId: string,
   body: AssessmentSubmit,
+  gateFiles: GateFiles,
   now: number,
   ends: ExecutionEnds,
 ) {
@@ -88,7 +91,9 @@ export function submitAssessment(
     dependency_outcome_ids: canonicalJSON(body.dependency_outcome_ids),
     tested_input: canonicalJSON(body.tested_input),
     gate_files:
-      body.gate_files === undefined ? null : canonicalJSON(body.gate_files),
+      gateFiles.length === NO_GATE_FILE_ENTRIES
+        ? null
+        : canonicalJSON(gateFiles),
     execution_id: claim.executionId,
     actor: null,
     node_revision: revision.revision,

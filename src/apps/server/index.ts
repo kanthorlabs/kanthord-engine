@@ -836,6 +836,19 @@ export function composeServices(options: {
           ),
         ),
     },
+    intakeGateFiles: {
+      read: async (call, input) =>
+        resultOf(
+          await intakeClient["execution.gate_files.read"](
+            {
+              params: { execution_id: call.executionId },
+              query: {},
+              body: input,
+            },
+            { identity: call.identity, context: call.context },
+          ),
+        ),
+    },
     config: options.config.mission,
     health: options.health,
     workQueue,

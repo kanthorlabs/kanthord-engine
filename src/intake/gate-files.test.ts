@@ -9,7 +9,9 @@ import {
 } from "../custody/contract.ts";
 import { background } from "../kernel/context.ts";
 import { Diagnostic, OperationError } from "../kernel/errors.ts";
+import { HttpStatus } from "../kernel/http.ts";
 import type { CallerContext, ExecutionClaim } from "../kernel/operation.ts";
+import { canonicalJSON } from "../kernel/json.ts";
 import { temporary } from "../kernel/test-support.ts";
 import { testMachineIdentity } from "../kernel/test-identity.ts";
 import {
@@ -17,6 +19,7 @@ import {
   type GitWriter,
   type SshAccess,
 } from "../repository/index.ts";
+import { ProjectErrorCode } from "../project/contract.ts";
 import { readGateFiles } from "./gate-files.ts";
 import { SSH_HOST, sshAccessOf, sshCustody, sshStore } from "./test-support.ts";
 
@@ -28,8 +31,12 @@ const WORKER_BINDING_ID = "binding_01ARZ3NDEKTSV4RRFFQ69G5FAW";
 const NODE_ID = "node_01ARZ3NDEKTSV4RRFFQ69G5FAV";
 const ADDRESS = `git@${SSH_HOST}:owner/gated.git`;
 const BASE_BRANCH = "main";
+const NODE_MISMATCH_REASON = "node_mismatch";
+const NO_REVISION = 0;
+const UNNAMING_REVISION = 2;
 const COMMIT = "0123456789abcdef0123456789abcdef01234567";
 const FIRST_REVISION = 1;
+const PINNED_BINDINGS = new Map([[FIRST_REVISION, [BINDING_ID]]]);
 const GATE_PATHS = ["package.json", "scripts/gate.mjs"];
 const GIT_FAILED_CODE = "repository.connector.git_failed";
 const BAD_GATEWAY_STATUS = 502;
@@ -125,7 +132,15 @@ function harness(t: TestContext, answer: GateAnswer) {
         { kind: typeof GrantKind.SshIdentity }
       > => request.kind === GrantKind.SshIdentity,
     );
-  return { calls, read, runs, sshRequests, stateDirectory };
+  return {
+    calls,
+    read,
+    runs,
+    sshRequests,
+    stateDirectory,
+    custody: fake.custody,
+    caller,
+  };
 }
 
 async function idle(): Promise<void> {
@@ -238,4 +253,38 @@ test("an invalid declaration answers 502 with repository.gate_declaration.invali
       error.status === BAD_GATEWAY_STATUS &&
       error.code === GATE_DECLARATION_INVALID,
   );
+});
+
+test("a gate file read refuses a binding that the claim does not name", async (t) => {
+  const h = harness(t, async () => GATE_PATHS);
+  const authorize = h.custody.authorizeOperation;
+  h.custody.authorizeOperation = ((tx, request, now) => {
+    assert.equal(request.kind, GrantKind.SshIdentity);
+    assert.notEqual(request.subject.kind, SshIdentitySubjectKind.Draft);
+    const named = PINNED_BINDINGS.get(
+      request.claim?.pinnedRevision ?? NO_REVISION,
+    );
+    if (
+      request.subject.kind !== SshIdentitySubjectKind.Binding ||
+      !named?.includes(request.subject.binding_id)
+    )
+      throw new OperationError(
+        HttpStatus.Forbidden,
+        ProjectErrorCode.AuthorizationRefused,
+        "The facility refuses the operation.",
+        { reason: NODE_MISMATCH_REASON },
+      );
+    return authorize(tx, request, now);
+  }) as typeof authorize;
+  h.caller.execution = { ...claim, pinnedRevision: UNNAMING_REVISION };
+  await assert.rejects(
+    h.read(),
+    (error: unknown) =>
+      error instanceof OperationError &&
+      error.status === HttpStatus.Forbidden &&
+      error.code === ProjectErrorCode.AuthorizationRefused &&
+      canonicalJSON(error.details) ===
+        canonicalJSON({ reason: NODE_MISMATCH_REASON }),
+  );
+  assert.equal(h.calls.length, NO_RUNS);
 });

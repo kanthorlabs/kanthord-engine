@@ -675,6 +675,8 @@ export async function gatewayFixture(
       },
     ),
   });
+  if (options.repositoryTransport === undefined)
+    gitWriter.changedGateFiles = async () => [];
   t.after(async () => {
     const failures: Error[] = [];
     try {

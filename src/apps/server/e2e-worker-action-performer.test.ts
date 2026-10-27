@@ -1,5 +1,11 @@
 import assert from "node:assert/strict";
-import { chmodSync, existsSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import { test, type TestContext } from "node:test";
 import { simpleGit } from "simple-git";
@@ -82,6 +88,13 @@ const PULL_REQUEST_OPERATION = "github.pull_request";
 const PUSH_COUNTER = "pre-receive.count";
 const MAIN_REF = "refs/heads/main";
 const GATE_FILE_PATHS = ["package.json"];
+const GATE_DECLARATION_FILE = ".kanthord/affected-tests.json";
+const GATE_DECLARATION = {
+  version: 1,
+  command: "true",
+  gate_files: GATE_FILE_PATHS,
+};
+const GATED_WORK_BRANCH = "gated-work";
 const LOWEST_PRIORITY = 1;
 const KANTHORD_LANDING = "kanthord";
 const CHECK_RUNS_SEGMENT = "/check-runs";
@@ -139,6 +152,30 @@ async function commitOnBranch(
   await git.add("node.md");
   await git.commit(content);
   await git.push("origin", branch);
+  const head = (await git.revparse(["HEAD"])).trim();
+  assert.match(head, /^[a-f0-9]{40}$/);
+  return head;
+}
+
+async function gateChangeOnBranch(t: TestContext, bare: string) {
+  const directory = join(temporary(t), "gate");
+  await simpleGit().clone(bare, directory);
+  const git = simpleGit(directory);
+  await git.addConfig("user.name", "Test Node");
+  await git.addConfig("user.email", "test_node@example.invalid");
+  mkdirSync(join(directory, ".kanthord"));
+  writeFileSync(
+    join(directory, GATE_DECLARATION_FILE),
+    JSON.stringify(GATE_DECLARATION),
+  );
+  await git.add(GATE_DECLARATION_FILE);
+  await git.commit("declare gate files");
+  await git.push("origin", "main");
+  await git.raw(["checkout", "-b", GATED_WORK_BRANCH]);
+  writeFileSync(join(directory, GATE_FILE_PATHS[FIRST_INDEX]!), "{}\n");
+  await git.add(GATE_FILE_PATHS[FIRST_INDEX]!);
+  await git.commit("change gate file");
+  await git.push("origin", GATED_WORK_BRANCH);
   const head = (await git.revparse(["HEAD"])).trim();
   assert.match(head, /^[a-f0-9]{40}$/);
   return head;
@@ -902,32 +939,29 @@ test(
   { timeout: TIMEOUT },
   async (t) => {
     const h = await setup(t);
+    const G = await gateChangeOnBranch(t, h.pushedBare.bare);
+    const mainHead = await remoteHead(h.pushedBare.bare, MAIN_REF);
     await h.write(["mission", "node", "priority", "set", h.G], {
       value: LOWEST_PRIORITY,
       expected_mission_version: h.M,
     });
     const steps = await h.pull(h.P, FIRST_ATTEMPT);
-    const work = (await h.work(steps, h.pushed.id, h.E)).evidence;
+    const work = (await h.work(steps, h.pushed.id, G)).evidence;
     await h.release(steps);
     const evaluation = await h.pull(h.P, FIRST_ATTEMPT);
-    const run = (await h.run(evaluation, h.pushed.id, h.E)).evidence;
-    await h.pass(evaluation, [run.id, work.id], h.pushed.id, h.E, [
-      { binding_id: h.pushed.id, paths: GATE_FILE_PATHS },
-    ]);
+    const run = (await h.run(evaluation, h.pushed.id, G)).evidence;
+    await h.pass(evaluation, [run.id, work.id], h.pushed.id, G, []);
     const [item] = completed(await h.request(evaluation)).items;
     assert.ok(item?.kind === ActionResultKind.Submitted, JSON.stringify(item));
     assert.deepEqual((item.evidence as Evidence).assets[FIRST_INDEX]?.address, {
       kind: PlatformAddressKind.BranchPush,
       resource_identity: h.pushed.resource_identity,
       branch: "main",
-      commit: h.E,
+      commit: G,
     });
     await h.release(evaluation);
     assert.equal((await h.node(h.P)).state, NodeState.ExternalRequested);
-    assert.equal(
-      await remoteHead(h.pushedBare.bare, MAIN_REF),
-      h.pushedBare.head,
-    );
+    assert.equal(await remoteHead(h.pushedBare.bare, MAIN_REF), mainHead);
     const check = () =>
       h.write<{ results: { resolution: string }[] }>(
         ["mission", "node", "check", h.P],
@@ -937,7 +971,7 @@ test(
       (await check()).results[FIRST_INDEX]?.resolution,
       Resolution.Unresolved,
     );
-    await mergeOnMain(t, h.pushedBare.bare, h.E);
+    await mergeOnMain(t, h.pushedBare.bare, G);
     assert.equal(
       (await check()).results[FIRST_INDEX]?.resolution,
       Resolution.ExpectedEnd,

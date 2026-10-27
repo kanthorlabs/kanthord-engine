@@ -50,6 +50,7 @@ import {
   type MissionActions,
   type IntakeStorage,
   type IntakeCheck,
+  type IntakeGateFiles,
   type EventDecoder,
   type Intent,
   type ImportApply,
@@ -78,6 +79,7 @@ import { submitEvidence } from "./evidence-submit.ts";
 import { evidencePage, getEvidence } from "./evidence-read.ts";
 import { executionContentBound, readContent } from "./evidence-content-read.ts";
 import { submitAssessment } from "./assessment-submit.ts";
+import { serverGateFiles } from "./gate-files.ts";
 import { checkNode, resumeDeferredChecks } from "./node-check.ts";
 import {
   AdmissionQueue,
@@ -187,6 +189,7 @@ export interface Dependencies {
   store: Store;
   intakeStorage: IntakeStorage;
   intakeCheck: IntakeCheck;
+  intakeGateFiles: IntakeGateFiles;
   decoder: EventDecoder;
   config: MissionConfig;
   health?: HealthRegistry;
@@ -371,9 +374,15 @@ export class MissionService
     );
     registry.register(
       missionOperations["assessment.submit"],
-      ({ params, body }, caller) => {
+      async ({ params, body }, caller) => {
         const claim = caller.execution;
         assert.ok(claim);
+        const gateFiles = await serverGateFiles(
+          this.dependencies,
+          caller,
+          params.node_id,
+          body,
+        );
         const ends = executionEnds();
         const result = caller.commit((tx) =>
           submitAssessment(
@@ -382,6 +391,7 @@ export class MissionService
             claim,
             params.node_id,
             body,
+            gateFiles,
             Date.now(),
             ends,
           ),

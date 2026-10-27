@@ -281,6 +281,13 @@ export interface IntakeCheck {
   >;
 }
 
+export interface IntakeGateFiles {
+  read(
+    call: IntakeExecutionCall,
+    input: { binding_id: string; base_branch: string; commit: string },
+  ): Promise<{ paths: string[] }>;
+}
+
 export interface EventDecoder {
   decode(input: {
     platform: string;
