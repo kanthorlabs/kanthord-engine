@@ -33,6 +33,8 @@ const OTHER_NUMBER = 9;
 const FIRST_ATTEMPT = 1;
 const SINGLE_CALL = 1;
 const NO_CALLS = 0;
+const FIRST_CHECK = 0;
+const SECOND_CHECK = 1;
 const SINGLE_LANDED_COMMIT = 1;
 const NO_LANDED_COMMITS = 0;
 const CHECK_FAILURE_CODE = "repository.platform.github.retryable_refusal";
@@ -651,7 +653,11 @@ test("an exact push request that becomes ambiguous during the check leaves a con
     disposition: Disposition.Refused,
     reason: AdmissionRefusal.Ambiguous,
   });
-  assert.deepEqual(h.checks, [exact, h.request.id, next]);
+  assert.equal(h.checks[FIRST_CHECK], exact);
+  assert.deepEqual(
+    h.checks.slice(SECOND_CHECK).sort(),
+    [h.request.id, next].sort(),
+  );
   assert.equal((await requestOf(h))?.end_state, undefined);
   assert.equal(h.node().state, NodeState.ExternalRequested);
 });

@@ -63,6 +63,7 @@ const WAIT_ROUNDS = 100;
 const WAIT_STEP_MS = 50;
 const SHORT_TIMEOUT_MS = 5000;
 const BUILD_TIMEOUT_MS = 1800000;
+const MINIMAL_VARIABLES = { PATH: "/usr/bin" };
 const MEMORY_MB = 4096;
 const BOUNDED_MEMORY_MB = 8192;
 const MEMORY_FLAG = "--memory";
@@ -375,6 +376,7 @@ test("the build writes the allowlisted document outside the checkout with absolu
       postCreateCommand: "npm ci",
     }),
     cli: REPORT_CLI,
+    variables: MINIMAL_VARIABLES,
     checkout: (target) => {
       checkout = realpathSync(target);
       writeCheckout(target, {
