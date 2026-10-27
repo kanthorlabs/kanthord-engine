@@ -14,6 +14,7 @@ import {
   OutboundOperation,
   OutboundRequestState,
   ResultClass,
+  SERVICE_MERGE_REQUEST_KEY_PREFIX,
   intakeOperations,
 } from "../../intake/contract.ts";
 import { Diagnostic } from "../../kernel/errors.ts";
@@ -86,6 +87,7 @@ const PUSHED_ADDRESS = "git@github.com:owner/pushed.git";
 const GITHUB_PREFIX = "repository.platform.github.";
 const GIT_FAILED_CODE = "repository.connector.git_failed";
 const UNKNOWN_CODE = "gateway.invocation.unknown";
+const VALIDATION_FAILED_CODE = "gateway.request.validation_failed";
 const ROUTE_NOT_FOUND_CODE = "gateway.routing.not_found";
 const PULLS_PATH = "/repos/owner/gated/pulls";
 const KANTHORD_LANDING = "kanthord";
@@ -484,6 +486,7 @@ async function setup(t: TestContext, landing = "human") {
     });
   return {
     fixture,
+    identity,
     gitHub,
     pushed,
     gated,
@@ -510,6 +513,41 @@ async function setup(t: TestContext, landing = "human") {
 function dropped(materials: Material[]) {
   for (const material of materials) assert.throws(() => material.value());
 }
+
+test(
+  "intake.action.perform refuses a request key of the service merge namespace",
+  { timeout: TIMEOUT },
+  async (t) => {
+    const h = await setup(t);
+    const gated = await h.evaluated(h.nodes.gated, "gated", h.pushed.head);
+    const body = (requestKey: string) => ({
+      key: "gated.pull_request",
+      commit: h.pushed.head,
+      reused_evidence_id: null,
+      merge_evidence_id: null,
+      request_key: requestKey,
+    });
+    const invoke = (requestKey: string) =>
+      h.fixture.invocation.invoke(
+        "intake.action.perform",
+        {
+          params: { execution_id: gated.execution_id },
+          query: {},
+          body: body(requestKey),
+        },
+        { identity: h.identity, idempotencyKey: createIdempotencyKey() },
+      );
+    const refused = await invoke(`${SERVICE_MERGE_REQUEST_KEY_PREFIX}key`);
+    assert.equal(refused.status, HttpStatus.BadRequest);
+    assert.equal(
+      (refused.body as { error: { code: string } }).error.code,
+      VALIDATION_FAILED_CODE,
+    );
+    assert.deepEqual(h.rows(), []);
+    assert.equal((await invoke("key")).status, HttpStatus.OK);
+    assert.equal(h.rows().length, ONE_CREATE);
+  },
+);
 
 test(
   "intake.action.perform creates a pull request and merges a branch through the outbound record",

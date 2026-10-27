@@ -235,6 +235,8 @@ export function sshCustody(script: SshCustodyScript): {
         materials.push(material);
         return material;
       }
+      if (grant.kind === GrantKind.ServiceMerge && script.refusal !== null)
+        throw script.refusal;
       const material = new TestMaterial(script.platform, script.secret);
       materials.push(material);
       return material;

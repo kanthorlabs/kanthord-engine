@@ -442,11 +442,11 @@ export function authorizeServiceMerge(
   ).find((item) => item.key === evidence.requirement_key);
   assert.ok(action);
   mergeLandingAdmitted(action);
-  const revision = dependencies.bindings.getBindingRevision(
+  const revision = authorizeBinding(
     tx,
+    dependencies.bindings,
     action.binding_id,
   );
-  assert.ok(revision);
   const address = pullRequestAddressOf(
     tx,
     evidence.id,
@@ -456,7 +456,6 @@ export function authorizeServiceMerge(
   gateFilesUnchanged(tx, node.id, open.attempt, action.binding_id);
   if (commit === null || commit !== input.commit)
     authorizationRefused(AuthorizationRefusal.NodeMismatch);
-  authorizeBinding(tx, dependencies.bindings, action.binding_id);
   const { policy, repository } = repositoryOf(
     tx,
     dependencies.bindings,
