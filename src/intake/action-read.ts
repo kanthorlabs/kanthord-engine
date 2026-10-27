@@ -142,6 +142,8 @@ async function readPlatform(
     return await pullRequest(github, call, request.read);
   if (request.query.method === ActionReadMethod.ChangeRequestGet)
     return await changeRequests(github, call, request.read);
+  if (request.query.method === ActionReadMethod.RequiredCheckGet)
+    return await requiredChecks(github, call, request.read);
   return await reviewComments(github, call, request.read, request.query);
 }
 
@@ -165,6 +167,19 @@ async function changeRequests(
 ): Promise<ReadAnswer> {
   assert.ok(call.token.length);
   const answer = await github.getChangeRequests(call, read.target, {
+    number: read.number,
+  });
+  if (!answer.ok) return resultClassAnswer(answer);
+  return { body: answer.value, next_cursor: null };
+}
+
+async function requiredChecks(
+  github: GitHubPlatform,
+  call: GitHubCall,
+  read: ReadTarget,
+): Promise<ReadAnswer> {
+  assert.ok(call.token.length);
+  const answer = await github.getRequiredChecks(call, read.target, {
     number: read.number,
   });
   if (!answer.ok) return resultClassAnswer(answer);

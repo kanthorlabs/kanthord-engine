@@ -1,0 +1,112 @@
+# Generated from the operation registry by kanthord gateway openapi.
+pathItem:
+  get:
+    operationId: worker.execution.failed_check.get
+    tags:
+      - worker
+    description: Read the failed required checks of the head commit on each pull
+      request that the claimed attempt left unresolved.
+    x-access-policy: client
+    x-timeout-ms: 60000
+    x-mutation: false
+    x-kanthord-lifetime: unary
+    security:
+      - bearerAuth: []
+    parameters:
+      - name: execution_id
+        in: path
+        required: true
+        schema:
+          $ref: "#/components/schemas/worker.execution.failed_check.get.Input/properties/\
+            params/properties/execution_id"
+    responses:
+      "200":
+        description: Completed result
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/worker.execution.failed_check.get.Output"
+      "400":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "401":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "403":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "404":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "409":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "413":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "415":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "500":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "503":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "504":
+        $ref: ../shared/components.yaml#/components/responses/Error
+components:
+  schemas:
+    worker.execution.failed_check.get.Input:
+      type: object
+      properties:
+        params:
+          type: object
+          properties:
+            execution_id:
+              type: string
+              minLength: 36
+              maxLength: 36
+              pattern: ^execution_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+              description: execution_ followed by a canonical 26-character uppercase ULID.
+          required:
+            - execution_id
+          additionalProperties: false
+        query:
+          type: object
+          properties: {}
+          additionalProperties: false
+        body:
+          type: "null"
+      required:
+        - params
+        - query
+        - body
+      additionalProperties: false
+    worker.execution.failed_check.get.Output:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            type: object
+            properties:
+              evidence_id:
+                type: string
+                minLength: 35
+                maxLength: 35
+                pattern: ^evidence_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                description: evidence_ followed by a canonical 26-character uppercase ULID.
+              binding_id:
+                type: string
+                minLength: 34
+                maxLength: 34
+                pattern: ^binding_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                description: binding_ followed by a canonical 26-character uppercase ULID.
+              head_commit:
+                type: string
+                minLength: 1
+              failed:
+                type: array
+                items:
+                  type: string
+            required:
+              - evidence_id
+              - binding_id
+              - head_commit
+              - failed
+            additionalProperties: false
+      required:
+        - items
+      additionalProperties: false

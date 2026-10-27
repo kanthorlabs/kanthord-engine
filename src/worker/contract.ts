@@ -91,6 +91,7 @@ export type Uncertainty = z.infer<typeof uncertaintySchema>;
 export const ActionReadMethod = {
   PullRequestGet: "github-pull-request-get",
   ChangeRequestGet: "github-pull-request-change-request-get",
+  RequiredCheckGet: "github-pull-request-required-check-get",
 } as const;
 export const actionReadMethodSchema = z.enum(ActionReadMethod);
 export type ActionReadMethod = z.infer<typeof actionReadMethodSchema>;
@@ -141,6 +142,24 @@ export const clearedChangeRequestsSchema = z.strictObject({
   ),
 });
 export type ClearedChangeRequests = z.infer<typeof clearedChangeRequestsSchema>;
+export const requiredCheckReadSchema = z.strictObject({
+  head_commit: z.string().min(1),
+  base_branch: z.string().min(1),
+  pending: z.array(z.string()),
+  failed: z.array(z.string()),
+});
+export type RequiredCheckRead = z.infer<typeof requiredCheckReadSchema>;
+export const failedChecksSchema = z.strictObject({
+  items: z.array(
+    z.strictObject({
+      evidence_id: identitySchema("evidence"),
+      binding_id: identitySchema("binding"),
+      head_commit: z.string().min(1),
+      failed: z.array(z.string()),
+    }),
+  ),
+});
+export type FailedChecks = z.infer<typeof failedChecksSchema>;
 export const actionRefSchema = z.strictObject({
   key: z.string().min(1),
   binding_id: identitySchema("binding"),
@@ -1332,6 +1351,28 @@ export const workerOperations = {
     output: clearedChangeRequestsSchema,
     description:
       "Read the current change requests on each pull request that ended with other in the attempt that an unblock cleared before the claimed attempt.",
+  },
+  "execution.failed_check.get": {
+    service: WORKER_SERVICE_NAME,
+    store: StoreName.Operational,
+    lifetime: OperationLifetime.Unary,
+    id: "worker.execution.failed_check.get",
+    method: HttpMethod.Get,
+    path: "/api/worker/execution/:execution_id/failed-check",
+    access: AccessPolicy.Client,
+    requiresExecution: true,
+    timeoutMs: CHANGE_REQUEST_TIMEOUT_MS,
+    mutation: false,
+    body: false,
+    status: HttpStatus.OK,
+    input: z.strictObject({
+      params: z.strictObject({ execution_id: identitySchema("execution") }),
+      query: emptyFields,
+      body: z.null(),
+    }),
+    output: failedChecksSchema,
+    description:
+      "Read the failed required checks of the head commit on each pull request that the claimed attempt left unresolved.",
   },
   handover: {
     service: WORKER_SERVICE_NAME,

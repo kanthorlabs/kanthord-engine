@@ -66,6 +66,7 @@ const API_ONLY_OPERATIONS = [
   "worker.action.request",
   "worker.execution.setup.get",
   "worker.execution.change_request.get",
+  "worker.execution.failed_check.get",
   "mission.evidence.asset.complete",
   "mission.evidence.request",
   "mission.delivery.admit",
@@ -105,7 +106,7 @@ const TOP_LEVEL_DEPTH = 1;
 const INTAKE_GROUP = "intake";
 const TRACKING_GROUP = "tracking";
 const IMPLEMENTED_COUNT = 188;
-const OPERATION_COUNT = 212;
+const OPERATION_COUNT = 213;
 const INTAKE_LEAVES = [
   "intake event delete",
   "intake event discard",

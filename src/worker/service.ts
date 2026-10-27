@@ -78,6 +78,7 @@ import type { Store, Transaction } from "../kernel/store.ts";
 import { ActionPerformer } from "./action-performer.ts";
 import { executionSetup } from "./execution-setup.ts";
 import { clearedChangeRequests } from "./change-request.ts";
+import { failedChecks } from "./failed-check.ts";
 import { authorizeModelInference } from "./authorization.ts";
 import { agentChoice, agentSelectionsAt, entryOf } from "./agent-selection.ts";
 import type {
@@ -1088,6 +1089,24 @@ export class WorkerService implements Service {
         assert.ok(isMachineIdentity(identity));
         assert.ok(caller.execution);
         const answer = await clearedChangeRequests(
+          this.dependencies,
+          {
+            context: caller.context,
+            identity,
+            executionId: caller.execution.executionId,
+          },
+          caller.execution,
+        );
+        return caller.commit(() => answer);
+      },
+    );
+    registry.register(
+      workerOperations["execution.failed_check.get"],
+      async (_input, caller) => {
+        const identity = caller.identity;
+        assert.ok(isMachineIdentity(identity));
+        assert.ok(caller.execution);
+        const answer = await failedChecks(
           this.dependencies,
           {
             context: caller.context,

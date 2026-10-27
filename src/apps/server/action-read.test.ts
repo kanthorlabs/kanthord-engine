@@ -47,7 +47,8 @@ const SINGLE_INSTANCE = 1;
 const NO_ROWS = 0;
 const ONE_PIN = 1;
 const FAILED_READS = 2;
-const READ_METHODS = 3;
+const READ_METHODS = 4;
+const REQUIRED_CHECK = "ci";
 const BAD_GATEWAY_STATUS = 502;
 const PAGE_LIMIT = 30;
 const OUT_OF_RANGE_LIMIT = 101;
@@ -396,6 +397,10 @@ test(
       h.readAction(gated.evaluation, gated.evidenceId, {
         method: ActionReadMethod.ChangeRequestGet,
       });
+    const requiredChecks = () =>
+      h.readAction(gated.evaluation, gated.evidenceId, {
+        method: ActionReadMethod.RequiredCheckGet,
+      });
     const comments = (page: { limit?: number; cursor?: string } = {}) =>
       h.readAction(gated.evaluation, gated.evidenceId, {
         method: ActionReadMethod.ReviewCommentList,
@@ -482,6 +487,40 @@ test(
       },
     );
 
+    await t.test(
+      "a required check get answers the failed check of the head commit",
+      async () => {
+        const materials = h.materials.length;
+        const head = h.gitHub.pulls.find(
+          (pull) => pull.number === number,
+        )?.head_sha;
+        assert.ok(head);
+        h.gitHub.checks({
+          required: [REQUIRED_CHECK],
+          commit: head,
+          runs: [
+            {
+              id: 1,
+              name: REQUIRED_CHECK,
+              status: "completed",
+              conclusion: "failure",
+            },
+          ],
+        });
+        const answer = completed(await requiredChecks());
+        assert.ok("body" in answer, JSON.stringify(answer));
+        assert.equal(answer.next_cursor, null);
+        assert.deepEqual(answer.body, {
+          head_commit: head,
+          base_branch: "main",
+          pending: [],
+          failed: [REQUIRED_CHECK],
+        });
+        assert.equal(h.pins(gated.evaluation).length, ONE_PIN);
+        dropped(h.materials, materials + ONE_PIN);
+      },
+    );
+
     await t.test("a GitHub failure answers its result class", async () => {
       const materials = h.materials.length;
       h.gitHub.failPulls(BAD_GATEWAY_STATUS);
@@ -490,6 +529,7 @@ test(
           await get(),
           await comments(),
           await changeRequests(),
+          await requiredChecks(),
         ]) {
           const answer = completed(result);
           assert.ok("class" in answer, JSON.stringify(answer));

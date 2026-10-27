@@ -142,6 +142,7 @@ export const ActionReadMethod = {
   PullRequestGet: "github-pull-request-get",
   ReviewCommentList: "github-pull-request-review-comment-list",
   ChangeRequestGet: "github-pull-request-change-request-get",
+  RequiredCheckGet: "github-pull-request-required-check-get",
 } as const;
 export const AddressKind = {
   PullRequest: "pull_request",

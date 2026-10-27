@@ -14,12 +14,13 @@ import {
   type TestedInput,
 } from "../../mission/contract.ts";
 import type { ChangeRequest, ChangeRequestRead } from "../contract.ts";
-import { requestedChangesText } from "./judgement.ts";
+import { failedChecksText, requestedChangesText } from "./judgement.ts";
 import { EndReason, ExecutionRun } from "./execution-run.ts";
 
 export const READ_PAGE_LIMIT = 1000;
 const FIRST_ATTEMPT = 1;
 const NO_TIME = "";
+const VERDICT_SEPARATOR = "\n\n";
 
 export async function readAllPages<T>(
   run: ExecutionRun,
@@ -181,6 +182,39 @@ export async function readRequestedChanges(
   return { text, judged: latestRequestCommits(read.items) };
 }
 
+async function readFailedChecks(
+  run: ExecutionRun,
+  repositories: readonly RepositoryName[],
+): Promise<Verdict | null> {
+  const read = await run.call((options) =>
+    run.clients.worker["execution.failed_check.get"](
+      {
+        params: { execution_id: run.claim.execution_id },
+        query: {},
+        body: null,
+      },
+      options,
+    ),
+  );
+  const text = failedChecksText(
+    read.items.map((item) => ({
+      ...item,
+      binding:
+        repositories.find(
+          (repository) => repository.binding_id === item.binding_id,
+        )?.name ?? item.binding_id,
+    })),
+  );
+  if (text === null) return null;
+  return {
+    text,
+    judged: read.items.map((item) => ({
+      binding_id: item.binding_id,
+      commit: item.head_commit,
+    })),
+  };
+}
+
 function latestRequestCommits(
   items: readonly (ChangeRequestRead & { binding_id: string })[],
 ): JudgedCommit[] {
@@ -234,7 +268,18 @@ export async function readPrior(
   run: ExecutionRun,
   repositories: readonly RepositoryName[],
 ): Promise<Prior> {
+  const failed = await readFailedChecks(run, repositories);
   const rework = await readReworkAssessment(run);
+  if (failed !== null)
+    return {
+      verdict: {
+        text: rework
+          ? `${failed.text}${VERDICT_SEPARATOR}${rework.rationale}`
+          : failed.text,
+        judged: failed.judged,
+      },
+      cleared: null,
+    };
   if (rework)
     return {
       verdict: {
