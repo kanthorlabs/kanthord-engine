@@ -10,6 +10,7 @@ import type { CallerContext } from "../kernel/operation.ts";
 import type { Transaction } from "../kernel/store.ts";
 import {
   ActorKind,
+  AssessmentResult,
   ActorService,
   AssetKind,
   actorSchema,
@@ -360,6 +361,7 @@ function mergeCommitOf(
     return null;
   const { node_id: nodeId, attempt } = item.request;
   const assessment = currentAssessmentOf(tx, nodeId, attempt);
+  if (assessment?.result !== AssessmentResult.Success) return null;
   if (gateFilesOf(assessment, action.binding_id).length > NO_GATE_FILES)
     return null;
   if (dependencies.schedulerClaims.liveExecutionOf(tx, nodeId, now) !== null)
