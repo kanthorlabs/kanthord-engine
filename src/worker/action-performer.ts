@@ -81,6 +81,13 @@ function landsByKanthorD(entry: Pending["entry"]): boolean {
   );
 }
 
+function landsByHuman(entry: Pending["entry"]): boolean {
+  return (
+    entry.action.action === RepositoryAction.MergePush &&
+    entry.gate_files.length > NO_GATE_FILES
+  );
+}
+
 function provesNoWrite(error: unknown): boolean {
   if (!(error instanceof OperationError)) return false;
   assert.ok(error.code.length, "A refusal names its code.");
@@ -242,6 +249,29 @@ export class ActionPerformer {
           pending.entry.action.key,
         ),
       );
+      if (landsByHuman(pending.entry)) {
+        const address: PlatformAddress = {
+          kind: PlatformAddressKind.BranchPush,
+          resource_identity: pending.entry.resource_identity,
+          branch: pending.operands.baseBranch,
+          commit: pending.operands.commit,
+        };
+        settlement = {
+          kind: ActionResultKind.Uncertain,
+          action: pending.key.action,
+          uncertainty: Uncertainty.Recording,
+          address,
+        };
+        const landing = await this.record(caller, claim, pending, address);
+        settlement =
+          landing.kind === ActionResultKind.Uncertain ? landing : null;
+        if (landing.kind === ActionResultKind.Submitted)
+          this.warnMergeSkipped(
+            landing.evidence.id as string,
+            pending.entry.gate_files,
+          );
+        return landing;
+      }
       settlement = {
         kind: ActionResultKind.Uncertain,
         action: pending.key.action,

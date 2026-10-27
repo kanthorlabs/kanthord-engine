@@ -49,7 +49,10 @@ const mission: ServiceIdentity = {
   service: MISSION_SERVICE_NAME,
 };
 
-function requestFacts(address: RequestFacts["address"]): RequestFacts {
+function requestFacts(
+  address: RequestFacts["address"],
+  humanLanding = false,
+): RequestFacts {
   return {
     frozen_action: {
       key: "pushed.merge_push",
@@ -72,6 +75,7 @@ function requestFacts(address: RequestFacts["address"]): RequestFacts {
       resource_identity: RESOURCE_IDENTITY,
       base_branch: "main",
     },
+    human_landing: humanLanding,
   };
 }
 
@@ -96,6 +100,7 @@ function harness(
     credential?: string;
     pinned?: boolean;
     landingFailure?: Error;
+    landed?: boolean;
     checksFailure?: ResultClassValue;
     sshFacts?: { binding_id: string; address: string };
   },
@@ -119,7 +124,7 @@ function harness(
     landedOn: async (_input, _context, _deadline, ssh) => {
       landings.push(ssh);
       if (options.landingFailure !== undefined) throw options.landingFailure;
-      return { landed: true, first_parent: PUSHED };
+      return { landed: options.landed ?? true, first_parent: PUSHED };
     },
     sshAccessOf: sshAccessOf(),
   };
@@ -178,6 +183,25 @@ test("a branch push check reads the landing with an SSH release of the request e
   assert.match(ssh.public_key, /^ssh-ed25519 /);
   assert.equal(ssh.known_hosts, `${h.knownHosts}\n`);
   assert.ok(h.materials.every((material) => material.dropped));
+});
+
+test("a human landing branch push check answers none when the commit did not land", async (t) => {
+  const h = harness(t, {
+    facts: requestFacts(branchPush, true),
+    landed: false,
+  });
+  assert.deepEqual(await h.check(), {
+    end_state: CheckEndState.None,
+    landed_commits: [],
+  });
+});
+
+test("a human landing branch push check answers expected when the commit landed", async (t) => {
+  const h = harness(t, { facts: requestFacts(branchPush, true) });
+  assert.deepEqual(await h.check(), {
+    end_state: CheckEndState.Expected,
+    landed_commits: [PUSHED],
+  });
 });
 
 test("a branch push check of an unpinned address host refuses before any git call", async (t) => {

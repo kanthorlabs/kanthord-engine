@@ -5,6 +5,7 @@ import { createIdentity } from "../kernel/identity.ts";
 import { canonicalJSON } from "../kernel/json.ts";
 import { testHumanIdentity } from "../kernel/test-identity.ts";
 import {
+  AssessmentResult,
   AssetKind,
   MissionErrorCode,
   Intent,
@@ -16,7 +17,11 @@ import {
 } from "./contract.ts";
 import { getRevision } from "./node-read.ts";
 import { actionStatesOf } from "./frozen-action.ts";
-import { insertEvidence, openAttempt } from "./record-store.ts";
+import {
+  insertAssessment,
+  insertEvidence,
+  openAttempt,
+} from "./record-store.ts";
 import { insertNode, insertRevision, setNodeState } from "./store.ts";
 import { executionHarness } from "./test-support.ts";
 
@@ -93,7 +98,7 @@ function fixture(t: TestContext) {
     });
   assert.equal(h.claim.nodeId, nodeId);
   assert.equal(body.attempt, FIRST_ATTEMPT);
-  return { ...h, node_id: nodeId, body, request };
+  return { ...h, node_id: nodeId, binding_id: bindingId, body, request };
 }
 
 test("an evaluation request records one published platform asset and leaves its action unresolved", async (t) => {
@@ -207,4 +212,82 @@ test("a pull request request admits a branch push address of its binding", async
     actionStatesOf(tx, h.dependencies.bindings, h.node_id, FIRST_ATTEMPT),
   );
   assert.equal(states[FIRST_INDEX]!.resolution, Resolution.Unresolved);
+});
+
+const MERGE_PUSH_KEY = "repo.merge_push";
+const TESTED_COMMIT = "a".repeat(40);
+const OTHER_COMMIT = "b".repeat(40);
+const GATE_FILE_PATHS = ["package.json"];
+const NO_GATE_FILES = 0;
+const OTHER_BRANCH = "develop";
+
+function mergePushFixture(t: TestContext, gateFiles: string[]) {
+  const h = fixture(t);
+  const policy = h.dependencies.bindings.repositoryPolicyOf;
+  h.dependencies.bindings.repositoryPolicyOf = (...args) => ({
+    ...policy(...args)!,
+    action: RepositoryAction.MergePush,
+  });
+  h.store.transaction((tx) =>
+    insertAssessment(tx, {
+      id: createIdentity("assessment"),
+      node_id: h.node_id,
+      attempt: FIRST_ATTEMPT,
+      result: AssessmentResult.Success,
+      rationale: "Reviewed",
+      evidence_ids: "[]",
+      dependency_outcome_ids: "[]",
+      tested_input: canonicalJSON({
+        kind: AssetKind.Repository,
+        binding_id: h.binding_id,
+        commit: TESTED_COMMIT,
+      }),
+      gate_files:
+        gateFiles.length === NO_GATE_FILES
+          ? null
+          : canonicalJSON([{ binding_id: h.binding_id, paths: gateFiles }]),
+      execution_id: h.claim.executionId,
+      actor: null,
+      node_revision: FIRST_ATTEMPT,
+      created_at: NOW,
+    }),
+  );
+  const pushTo = (branch: string, commit: string) => ({
+    ...h.body,
+    requirement_key: MERGE_PUSH_KEY,
+    address: {
+      kind: PlatformAddressKind.BranchPush,
+      resource_identity: RESOURCE,
+      branch,
+      commit,
+    },
+  });
+  return { ...h, pushTo };
+}
+
+test("a merge push with a changed gate file admits only the base branch and the tested commit", async (t) => {
+  const h = mergePushFixture(t, GATE_FILE_PATHS);
+  for (const body of [
+    h.pushTo(OTHER_BRANCH, TESTED_COMMIT),
+    h.pushTo("main", OTHER_COMMIT),
+  ])
+    await assert.rejects(h.request(body), (error) => {
+      assert.ok(error instanceof OperationError);
+      assert.equal(error.code, MissionErrorCode.RequestAddressMismatch);
+      return true;
+    });
+  const evidence = await h.request(h.pushTo("main", TESTED_COMMIT));
+  assert.equal(
+    (evidence.assets[FIRST_INDEX]!.address as { commit: string }).commit,
+    TESTED_COMMIT,
+  );
+});
+
+test("a merge push with no changed gate file keeps its current admission", async (t) => {
+  const h = mergePushFixture(t, []);
+  const evidence = await h.request(h.pushTo(OTHER_BRANCH, OTHER_COMMIT));
+  assert.equal(
+    (evidence.assets[FIRST_INDEX]!.address as { branch: string }).branch,
+    OTHER_BRANCH,
+  );
 });

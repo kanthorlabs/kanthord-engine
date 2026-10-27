@@ -3,10 +3,14 @@ import { test } from "node:test";
 import { testHumanIdentity } from "../kernel/test-identity.ts";
 import { createIdentity } from "../kernel/identity.ts";
 import { OperationError } from "../kernel/errors.ts";
+import { canonicalJSON } from "../kernel/json.ts";
 import {
   AssessmentResult,
+  AssetKind,
   ClosingEvent,
   Intent,
+  PlatformAddressKind,
+  RepositoryAction,
   RevokeCause,
   NodeState,
   type RevokedExecution,
@@ -15,6 +19,7 @@ import { Act, ActAttribute } from "./act-telemetry.ts";
 import { ControlError } from "./control.ts";
 import {
   openAttempt,
+  insertAssessment,
   insertEvidence,
   readEvidence,
   readAssets,
@@ -50,6 +55,9 @@ const SECOND_ATTEMPT = 2;
 const NO_ACTS = 0;
 const FIRST_QUEUED_AT = 40;
 const ONE_ACT = 1;
+const GATE_FILE_PATHS = ["package.json"];
+const REPOSITORY_RESOURCE = "repository:github:owner/repo";
+const CONTROL_REFUSED = "mission.node.control_refused";
 test("implement override validates its attempt repository pin after the current revision changes", async (t) => {
   const h = controlHarness(t, IDENTITY);
   const original = createIdentity("binding");
@@ -729,4 +737,169 @@ test("a block of a node that is not Paused writes no act trace", async (t) => {
       error instanceof OperationError && error.code === ControlError.Refused,
   );
   assert.equal(actCalls(h).length, NO_ACTS);
+});
+
+type LandingSpec = {
+  name: string;
+  action: RepositoryAction;
+  gateFiles: boolean;
+  address: PlatformAddressKind;
+};
+
+function landingHarness(
+  t: Parameters<typeof controlHarness>[0],
+  specs: LandingSpec[],
+) {
+  const h = controlHarness(t, IDENTITY);
+  const bindings = specs.map((spec) => ({
+    ...spec,
+    binding_id: createIdentity("binding"),
+    evidence_id: createIdentity("evidence"),
+  }));
+  const bindingOf = (id: string) => bindings.find((b) => b.binding_id === id)!;
+  h.dependencies.bindings.getBindingRevision = (_tx, bindingId) => ({
+    binding_id: bindingId,
+    project_id: h.project_id,
+    name: bindingOf(bindingId).name,
+    resource_identity: REPOSITORY_RESOURCE,
+    revision: FIRST_ATTEMPT,
+    disabled: false,
+    tombstone: false,
+  });
+  h.dependencies.bindings.repositoryPolicyOf = (_tx, bindingId) => ({
+    binding_id: bindingId,
+    project_id: h.project_id,
+    name: bindingOf(bindingId).name,
+    address: "git@github.com:owner/repo.git",
+    platform: "github",
+    ssh_credential: "github-ssh",
+    credential: "github",
+    base_branch: "main",
+    action: bindingOf(bindingId).action,
+    landing: "human",
+  });
+  const addressOf = (kind: PlatformAddressKind) =>
+    kind === PlatformAddressKind.BranchPush
+      ? {
+          kind,
+          resource_identity: REPOSITORY_RESOURCE,
+          branch: "main",
+          commit: COMMIT,
+        }
+      : { kind, resource_identity: REPOSITORY_RESOURCE, number: ONE_ACT };
+  h.store.transaction((tx) => {
+    tx.database
+      .prepare(
+        "UPDATE mission_node_revision SET intent = ?, bindings = ? WHERE node_id = ?",
+      )
+      .run(
+        Intent.Implement,
+        JSON.stringify(bindings.map((b) => b.binding_id)),
+        h.node_id,
+      );
+    openAttempt(tx, h.node_id, FIRST_ATTEMPT, h.actor, NOW);
+    insertAssessment(tx, {
+      id: createIdentity("assessment"),
+      node_id: h.node_id,
+      attempt: FIRST_ATTEMPT,
+      result: AssessmentResult.Success,
+      rationale: "Reviewed",
+      evidence_ids: "[]",
+      dependency_outcome_ids: "[]",
+      tested_input: canonicalJSON(
+        bindings.map((b) => ({
+          kind: AssetKind.Repository,
+          binding_id: b.binding_id,
+          commit: COMMIT,
+        })),
+      ),
+      gate_files: canonicalJSON(
+        bindings
+          .filter((b) => b.gateFiles)
+          .map((b) => ({ binding_id: b.binding_id, paths: GATE_FILE_PATHS })),
+      ),
+      execution_id: createIdentity("execution"),
+      actor: null,
+      node_revision: FIRST_ATTEMPT,
+      created_at: NOW,
+    });
+    for (const b of bindings)
+      insertEvidence(
+        tx,
+        {
+          id: b.evidence_id,
+          node_id: h.node_id,
+          attempt: FIRST_ATTEMPT,
+          subject: "Request",
+          requirement_key: `${b.name}.${b.action}`,
+          end_state: null,
+          verification: null,
+          provenance: canonicalJSON(h.actor),
+          created_at: NOW,
+        },
+        [
+          {
+            id: createIdentity("evidence_asset"),
+            evidence_id: b.evidence_id,
+            kind: AssetKind.Platform,
+            content: canonicalJSON(addressOf(b.address)),
+            published_at: NOW,
+            expired_at: null,
+          },
+        ],
+      );
+    setNodeState(tx, h.node_id, NodeState.ExternalRequested);
+  });
+  const discard = () =>
+    h.invoke("node.discard", {
+      params: { node_id: h.node_id },
+      query: {},
+      body: h.body(NodeState.ExternalRequested, FIRST_ATTEMPT),
+    });
+  const endStates = () =>
+    h.store.transaction((tx) =>
+      bindings.map((b) => readEvidence(tx, b.evidence_id)!.end_state),
+    );
+  return { ...h, discard, endStates };
+}
+
+const HUMAN_LANDING: LandingSpec = {
+  name: "repo",
+  action: RepositoryAction.MergePush,
+  gateFiles: true,
+  address: PlatformAddressKind.BranchPush,
+};
+const OPEN_PULL_REQUEST: LandingSpec = {
+  name: "other",
+  action: RepositoryAction.PullRequest,
+  gateFiles: false,
+  address: PlatformAddressKind.PullRequest,
+};
+
+test("discard of an External.Requested node with a human-landing request sets the end state other and closes the attempt", async (t) => {
+  const h = landingHarness(t, [HUMAN_LANDING]);
+  const result = await h.discard();
+  assert.equal(result.node.state, NodeState.Discarded);
+  assert.ok(result.attempt?.closed_at);
+  assert.deepEqual(h.endStates(), ["other"]);
+});
+
+test("discard of an External.Requested node refuses every other unresolved request without a write", async (t) => {
+  for (const specs of [
+    [OPEN_PULL_REQUEST],
+    [{ ...HUMAN_LANDING, gateFiles: false }],
+    [HUMAN_LANDING, OPEN_PULL_REQUEST],
+  ]) {
+    const h = landingHarness(t, specs);
+    await assert.rejects(
+      h.discard(),
+      (error) =>
+        error instanceof OperationError && error.code === CONTROL_REFUSED,
+    );
+    assert.equal(h.node().state, NodeState.ExternalRequested);
+    assert.deepEqual(
+      h.endStates(),
+      specs.map(() => null),
+    );
+  }
 });

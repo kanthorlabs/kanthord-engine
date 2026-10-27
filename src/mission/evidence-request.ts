@@ -12,12 +12,15 @@ import {
   RepositoryAction,
   type EvidenceRequest,
 } from "./contract.ts";
+import { assessedCommitOf, landsByHuman } from "./authorization.ts";
+import { currentAssessmentOf } from "./currency.ts";
 import {
   admitExecution,
   requireEvaluationClaim,
   requireTextBound,
 } from "./execution.ts";
 import { requiredActionsOf } from "./frozen-action.ts";
+import { gateFilesOf } from "./gate-files.ts";
 import { evidenceRecord } from "./record-read.ts";
 import { insertEvidence, readEvidence, readRequests } from "./record-store.ts";
 import type { Dependencies } from "./service.ts";
@@ -58,9 +61,23 @@ export function requestEvidence(
     action.action === RepositoryAction.PullRequest &&
     body.address.kind === PlatformAddressKind.BranchPush &&
     body.address.branch === action.configuration.base_branch;
+  const humanLanding = landsByHuman(
+    action,
+    gateFilesOf(
+      currentAssessmentOf(tx, nodeId, claim.attempt),
+      action.binding_id,
+    ),
+  );
+  const humanLandingMismatch =
+    humanLanding &&
+    body.address.kind === PlatformAddressKind.BranchPush &&
+    (body.address.branch !== action.configuration.base_branch ||
+      body.address.commit !==
+        assessedCommitOf(tx, nodeId, claim.attempt, action.binding_id));
   if (
     (body.address.kind !== kind && !containedLanding) ||
-    body.address.resource_identity !== binding.resource_identity
+    body.address.resource_identity !== binding.resource_identity ||
+    humanLandingMismatch
   )
     throw new OperationError(
       HttpStatus.BadRequest,

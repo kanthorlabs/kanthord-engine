@@ -115,7 +115,7 @@ provides a project ID; `mission get` returns that project's mission ID.
 - A terminal transition requires no unresolved requested external action.
   Pausing does not cancel a platform action, and blocking does not undo one.
   A request whose end state has not been observed cannot be bypassed by discard
-  or a success override.
+  or a success override. The discard of a human-landing node is the one exception.
 
 ## Common calling convention
 
@@ -461,8 +461,7 @@ tasks.
   human assessment and an outcome with `undetermined`, closing an attempt when one is open; from `Blocked`, no attempt closes. Eligible states are `Pending`, `Available`,
   `Executing`, `Waiting`, `Evaluating`, `Blocked`, `Paused`, `External.Success`,
   `External.Failed`, subject to no unresolved action. It reaches `Discarded`,
-  which satisfies no dependency. No command cancels an unresolved remote request
-  merely to make discard admissible.
+  which satisfies no dependency. Discard also admits an `External.Requested` node when each unresolved request of the open attempt is a human-landing `branch_push` request. It sets the end state `other` on those requests. No other command cancels an unresolved remote request.
 
 To redirect an open attempt, a human pauses, blocks, then unblocks with the
 changed content. A simple update leaves the old attempt's revision pinned.
@@ -642,6 +641,7 @@ The required-action and request sets of an `examine` node are empty.
   The address holds the oldest first-parent commit of the base branch that
   contains the snapshot. The check folds it to `pull_request_merged` with that
   landed commit.
+- A `merge_push` action whose current assessment lists a changed gate file of its binding gets no push. The action performer records a `branch_push` request on the base branch with the tested commit. The node waits in `External.Requested` until a human lands the node branch on the base branch. The check answers `none` until the base branch contains the tested commit, then `expected` with that commit. A squash or a rebase of the node branch never contains the tested commit, so the check never completes the node. A human who rejects the change, or lands it with a squash or a rebase, discards the node.
 - Only delivery admission and node check set the end state of a request.
   Mission does not parse platform content. Inspection failure leaves the request
   unresolved and costs no attempt. An expected repository result adds landed
@@ -1041,7 +1041,7 @@ aliases for internal mechanisms.
 - Claim, release, loss declaration and work pull belong to Scheduler.
   Worker registration and platform action performance belong to their owners.
   Mission records are not platform merge/push/notification commands.
-- Delivery admission, `mission.delivery.admit`, is a `service` operation that the Intake Service calls, and it has no CLI command. It sets the end state of a request evidence after the check of the Intake Service, without an execution claim. A generic human or client end-state write would manufacture authority that the identity contracts do not establish; a human uses `node check`. Its input holds `inbound_event_id`, `project_id`, `platform`, `resource`, `event` and `metadata`, and it answers `{ disposition, reason }`. A `branch_push` event with no exact match selects each unresolved `pull_request` request of the same resource whose frozen `base_branch` equals the pushed branch. Each selected request goes to the Intake check. A `conflict` result returns the node to rework, and admission skips a request whose node holds a live claim. Automatic detection needs a poll or webhook inbound for the repository.
+- Delivery admission, `mission.delivery.admit`, is a `service` operation that the Intake Service calls, and it has no CLI command. It sets the end state of a request evidence after the check of the Intake Service, without an execution claim. A generic human or client end-state write would manufacture authority that the identity contracts do not establish; a human uses `node check`. Its input holds `inbound_event_id`, `project_id`, `platform`, `resource`, `event` and `metadata`, and it answers `{ disposition, reason }`. A `branch_push` event selects each other unresolved `pull_request` or `branch_push` request of the same resource whose frozen `base_branch` equals the pushed branch. Each selected request goes to the Intake check. A `conflict` result returns the node to rework, and admission skips a request whose node holds a live claim. Automatic detection needs a poll or webhook inbound for the repository.
 - `mission.delivery.unresolved_request.count` is a `service` operation that only the Intake Service calls, and it has no CLI command. Its input holds `project_id` and `resource_identity`, and it answers `{ count }`: the request evidences of the open attempts of the project that hold no end state and name that resource, of every address kind. It writes nothing. A poll inbound requests its platform only while that count is above zero.
 - `mission.evidence.request` is the operation of the Worker action performer, and it has no CLI command. Its route is `POST /api/mission/node/:node_id/evidence/request` under access E, and its input holds every field of `ExecutionContext` plus `requirement_key: Key`, `subject: Text` and `address: PlatformAddress`; it answers `Evidence`.
 - Evidence and asset deletes have commands in this inventory; kanthord runs no automatic delete and no cleanup process.

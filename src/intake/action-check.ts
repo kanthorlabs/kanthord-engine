@@ -213,7 +213,12 @@ async function inspect(
     deadlineAt,
     ssh,
   });
-  return foldBranchPush(landing.landed, address.commit, expected);
+  return foldBranchPush(
+    landing.landed,
+    address.commit,
+    expected,
+    facts.human_landing,
+  );
 }
 
 async function inspectPullRequest(

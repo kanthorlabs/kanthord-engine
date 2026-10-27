@@ -273,6 +273,16 @@ function reusedAddressOf(
   return address;
 }
 
+export function landsByHuman(
+  action: FrozenAction,
+  gateFiles: readonly string[],
+): boolean {
+  return (
+    action.action === RepositoryAction.MergePush &&
+    gateFiles.length > NO_GATE_FILES
+  );
+}
+
 export function authorizeFrozenAction(
   tx: Transaction,
   dependencies: AuthorizationDependencies,
@@ -300,10 +310,7 @@ export function authorizeFrozenAction(
     currentAssessmentOf(tx, claim.nodeId, claim.attempt),
     action.binding_id,
   );
-  if (
-    action.action === RepositoryAction.MergePush &&
-    gateFiles.length > NO_GATE_FILES
-  )
+  if (landsByHuman(action, gateFiles))
     authorizationRefused(AuthorizationRefusal.GateFileChanged);
   const { policy, repository } = repositoryOf(
     tx,
@@ -526,6 +533,15 @@ export function authorizeRequestEvidence(
   );
   const address = platformAddressOf(tx, evidenceId);
   assert.equal(address.resource_identity, repository.resource_identity);
+  const evidence = readEvidence(tx, evidenceId);
+  assert.ok(evidence);
+  const humanLanding = landsByHuman(
+    action,
+    gateFilesOf(
+      currentAssessmentOf(tx, evidence.node_id, evidence.attempt),
+      action.binding_id,
+    ),
+  );
   return {
     credential:
       address.kind === PlatformAddressKind.PullRequest
@@ -533,7 +549,12 @@ export function authorizeRequestEvidence(
         : null,
     platform: policy.platform,
     project_id: policy.project_id,
-    facts: { frozen_action: action, address, repository },
+    facts: {
+      frozen_action: action,
+      address,
+      repository,
+      human_landing: humanLanding,
+    },
   };
 }
 

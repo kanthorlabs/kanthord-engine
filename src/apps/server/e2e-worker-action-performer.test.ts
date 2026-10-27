@@ -81,6 +81,8 @@ const FINAL_REFUSAL_CODE = "repository.platform.github.final_refusal";
 const PULL_REQUEST_OPERATION = "github.pull_request";
 const PUSH_COUNTER = "pre-receive.count";
 const MAIN_REF = "refs/heads/main";
+const GATE_FILE_PATHS = ["package.json"];
+const LOWEST_PRIORITY = 1;
 const KANTHORD_LANDING = "kanthord";
 const CHECK_RUNS_SEGMENT = "/check-runs";
 const REQUESTED_CHANGE = "Rename the account route.";
@@ -140,6 +142,16 @@ async function commitOnBranch(
   const head = (await git.revparse(["HEAD"])).trim();
   assert.match(head, /^[a-f0-9]{40}$/);
   return head;
+}
+
+async function mergeOnMain(t: TestContext, bare: string, commit: string) {
+  const directory = join(temporary(t), "merge");
+  await simpleGit().clone(bare, directory);
+  const git = simpleGit(directory);
+  await git.addConfig("user.name", "Test Human");
+  await git.addConfig("user.email", "test_human@example.invalid");
+  await git.raw(["merge", "--no-ff", "-m", "land", commit]);
+  await git.push("origin", "main");
 }
 
 function rejectPushes(bare: string) {
@@ -372,6 +384,7 @@ async function setup(t: TestContext, landing?: string) {
     evidenceIds: string[],
     bindingId: string,
     commit: string,
+    gateFiles?: { binding_id: string; paths: string[] }[],
   ) =>
     write<Assessment>(
       ["mission", "assessment", "submit", execution.node_id],
@@ -382,6 +395,7 @@ async function setup(t: TestContext, landing?: string) {
         result: "success",
         rationale: "met",
         tested_input: snapshot(bindingId, commit),
+        ...(gateFiles === undefined ? {} : { gate_files: gateFiles }),
       },
       W,
     );
@@ -880,5 +894,54 @@ test(
     );
     assert.equal(h.gitHub.pulls[FIRST_INDEX]?.merged, false);
     assert.equal((await h.node(h.G)).state, NodeState.ExternalRequested);
+  },
+);
+
+test(
+  "a merge push with a changed gate file waits for a human landing",
+  { timeout: TIMEOUT },
+  async (t) => {
+    const h = await setup(t);
+    await h.write(["mission", "node", "priority", "set", h.G], {
+      value: LOWEST_PRIORITY,
+      expected_mission_version: h.M,
+    });
+    const steps = await h.pull(h.P, FIRST_ATTEMPT);
+    const work = (await h.work(steps, h.pushed.id, h.E)).evidence;
+    await h.release(steps);
+    const evaluation = await h.pull(h.P, FIRST_ATTEMPT);
+    const run = (await h.run(evaluation, h.pushed.id, h.E)).evidence;
+    await h.pass(evaluation, [run.id, work.id], h.pushed.id, h.E, [
+      { binding_id: h.pushed.id, paths: GATE_FILE_PATHS },
+    ]);
+    const [item] = completed(await h.request(evaluation)).items;
+    assert.ok(item?.kind === ActionResultKind.Submitted, JSON.stringify(item));
+    assert.deepEqual((item.evidence as Evidence).assets[FIRST_INDEX]?.address, {
+      kind: PlatformAddressKind.BranchPush,
+      resource_identity: h.pushed.resource_identity,
+      branch: "main",
+      commit: h.E,
+    });
+    await h.release(evaluation);
+    assert.equal((await h.node(h.P)).state, NodeState.ExternalRequested);
+    assert.equal(
+      await remoteHead(h.pushedBare.bare, MAIN_REF),
+      h.pushedBare.head,
+    );
+    const check = () =>
+      h.write<{ results: { resolution: string }[] }>(
+        ["mission", "node", "check", h.P],
+        { expected_mission_version: h.M },
+      );
+    assert.equal(
+      (await check()).results[FIRST_INDEX]?.resolution,
+      Resolution.Unresolved,
+    );
+    await mergeOnMain(t, h.pushedBare.bare, h.E);
+    assert.equal(
+      (await check()).results[FIRST_INDEX]?.resolution,
+      Resolution.ExpectedEnd,
+    );
+    assert.equal((await h.node(h.P)).state, NodeState.Completed);
   },
 );

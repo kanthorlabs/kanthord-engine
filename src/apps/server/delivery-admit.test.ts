@@ -17,6 +17,7 @@ import {
   MissionErrorCode,
   NodeState,
   PlatformAddressKind,
+  RepositoryAction,
   missionOperations,
   type PlatformAddress,
 } from "../../mission/contract.ts";
@@ -32,6 +33,8 @@ const OTHER_NUMBER = 9;
 const FIRST_ATTEMPT = 1;
 const SINGLE_CALL = 1;
 const NO_CALLS = 0;
+const FIRST_CHECK = 0;
+const SECOND_CHECK = 1;
 const SINGLE_LANDED_COMMIT = 1;
 const NO_LANDED_COMMITS = 0;
 const CHECK_FAILURE_CODE = "repository.platform.github.retryable_refusal";
@@ -632,14 +635,15 @@ test("a live claim on the exact push request refuses the admission and leaves a 
 });
 
 test("an exact push request that becomes ambiguous during the check leaves a conflicting pull request untouched", async (t) => {
-  const h = await fixture(t);
+  const h = await fixture(t, true);
   const push = pushRequestOf(h);
   const exact = insertRequest(h, "repo.merge_push", push.nodeId, push.address);
+  let next = "";
   h.dependencies.intakeCheck.check = async (_context, evidenceId) => {
     h.checks.push(evidenceId);
     if (evidenceId !== exact)
       return { end_state: CheckEndState.Conflict, landed_commits: [] };
-    insertRequest(h, "next.merge_push", push.nodeId, push.address);
+    next = insertRequest(h, "next.pull_request", h.node_id, push.address);
     return {
       end_state: CheckEndState.Expected,
       landed_commits: [MERGE_COMMIT],
@@ -649,7 +653,72 @@ test("an exact push request that becomes ambiguous during the check leaves a con
     disposition: Disposition.Refused,
     reason: AdmissionRefusal.Ambiguous,
   });
-  assert.deepEqual(h.checks, [exact, h.request.id]);
+  assert.equal(h.checks[FIRST_CHECK], exact);
+  assert.deepEqual(
+    h.checks.slice(SECOND_CHECK).sort(),
+    [h.request.id, next].sort(),
+  );
   assert.equal((await requestOf(h))?.end_state, undefined);
   assert.equal(h.node().state, NodeState.ExternalRequested);
+});
+
+const OTHER_COMMIT = "c".repeat(40);
+
+function branchPushOf(commit: string): PlatformAddress {
+  return {
+    kind: PlatformAddressKind.BranchPush,
+    resource_identity: PUSH_RESOURCE,
+    branch: "main",
+    commit,
+  };
+}
+
+async function humanLandingFixture(t: TestContext, commit: string) {
+  const h = await fixture(t);
+  const policyOf = h.dependencies.bindings.repositoryPolicyOf;
+  h.dependencies.bindings.repositoryPolicyOf = (tx, bindingId) => ({
+    ...policyOf(tx, bindingId)!,
+    action: RepositoryAction.MergePush,
+  });
+  deleteRequest(h);
+  const landing = insertRequest(
+    h,
+    "repo.merge_push",
+    h.node_id,
+    branchPushOf(commit),
+  );
+  return { ...h, landing };
+}
+
+test("a push to the base branch with no exact match checks a human-landing branch push request and completes its node", async (t) => {
+  const h = await humanLandingFixture(t, OTHER_COMMIT);
+  h.answer(CheckEndState.Expected, [OTHER_COMMIT]);
+  assert.deepEqual(await h.admit(undefined, pushed("main"), "push"), {
+    disposition: Disposition.AcceptedObservation,
+    reason: null,
+  });
+  assert.deepEqual(h.checks, [h.landing]);
+  assert.equal(h.node().state, NodeState.Completed);
+});
+
+test("a push to another branch checks no branch push request", async (t) => {
+  const h = await humanLandingFixture(t, OTHER_COMMIT);
+  h.answer(CheckEndState.Expected, [OTHER_COMMIT]);
+  assert.deepEqual(await h.admit(undefined, pushed("feature"), "push"), {
+    disposition: Disposition.Refused,
+    reason: AdmissionRefusal.Unmatched,
+  });
+  assert.equal(h.checks.length, NO_CALLS);
+  assert.equal(h.node().state, NodeState.ExternalRequested);
+});
+
+test("an exact push match checks its request once", async (t) => {
+  const h = await humanLandingFixture(t, PUSHED_COMMIT);
+  h.answer(CheckEndState.Expected, [PUSHED_COMMIT]);
+  assert.deepEqual(await h.admit(undefined, pushed("main"), "push"), {
+    disposition: Disposition.AcceptedObservation,
+    reason: null,
+  });
+  assert.deepEqual(h.checks, [h.landing]);
+  assert.equal(h.node().state, NodeState.Completed);
 });

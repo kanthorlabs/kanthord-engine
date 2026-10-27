@@ -90,7 +90,7 @@ function unresolvedRequestAddresses(
   }));
 }
 
-export function unresolvedPullRequests(
+export function unresolvedBaseRequests(
   tx: Transaction,
   projectId: string,
   resourceIdentity: string,
@@ -99,7 +99,8 @@ export function unresolvedPullRequests(
   return unresolvedRequestAddresses(tx, projectId)
     .filter(
       ({ address }) =>
-        address.kind === PlatformAddressKind.PullRequest &&
+        (address.kind === PlatformAddressKind.PullRequest ||
+          address.kind === PlatformAddressKind.BranchPush) &&
         address.resource_identity === resourceIdentity,
     )
     .map(({ id }) => id);
