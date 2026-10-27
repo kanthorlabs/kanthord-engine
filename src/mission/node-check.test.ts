@@ -47,6 +47,12 @@ const CHECKS_PER_ROUND = 2;
 const ROUNDS_AFTER_FIRST = 2;
 const ONE_ROUND = 1;
 const ONE_MERGE = 1;
+const NO_MERGES = 0;
+const REFUSAL = {
+  class: ResultClass.FinalRefusal,
+  code: "github.final_refusal",
+  message: "refused",
+};
 
 test("node check reports Mission authorization refusal without calling Intake", async (t) => {
   const h = await fixture(t);
@@ -474,11 +480,7 @@ test("a stopped merge gets no second call while another request of the node is p
   };
   h.dependencies.intakeCheck.merge = async () => {
     mergeCalls++;
-    return {
-      class: ResultClass.FinalRefusal,
-      code: "github.final_refusal",
-      message: "refused",
-    };
+    return REFUSAL;
   };
   scheduleDeferredCheck(h.dependencies, h.node_id, FIRST_ATTEMPT);
   await advance(FIRST_ROUND_DELAY_MS);
@@ -488,4 +490,40 @@ test("a stopped merge gets no second call while another request of the node is p
   await advance(DEFERRED_CHECK_RETRY_MS);
   assert.equal(checkCalls, CHECKS_PER_ROUND * (ONE_ROUND + ROUNDS_AFTER_FIRST));
   assert.equal(mergeCalls, ONE_MERGE);
+});
+
+test("a request whose assessment is not a success skips the merge and keeps the check loop", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "setImmediate"] });
+  const advance = async (ms: number) => {
+    t.mock.timers.tick(ms);
+    for (let turn = 0; turn < MICROTASK_TURNS; turn++) await Promise.resolve();
+  };
+  const h = await externalRequestHarness(t, IDENTITY, true);
+  insertNextRequest(h);
+  const policy = h.dependencies.bindings.repositoryPolicyOf;
+  h.dependencies.bindings.repositoryPolicyOf = (tx, bindingId) => ({
+    ...policy(tx, bindingId)!,
+    landing: RepositoryLanding.KanthorD,
+  });
+  h.store.database
+    .prepare("UPDATE mission_assessment SET result = ? WHERE node_id = ?")
+    .run(AssessmentResult.CriterionNotMet, h.node_id);
+  let checkCalls = 0;
+  let mergeCalls = 0;
+  h.dependencies.intakeCheck.check = async (_context, evidenceId) => {
+    checkCalls++;
+    return evidenceId === h.request.id
+      ? { end_state: CheckEndState.None, landed_commits: [] }
+      : { end_state: CheckEndState.ChecksPending, landed_commits: [] };
+  };
+  h.dependencies.intakeCheck.merge = async () => {
+    mergeCalls++;
+    return REFUSAL;
+  };
+  scheduleDeferredCheck(h.dependencies, h.node_id, FIRST_ATTEMPT);
+  await advance(FIRST_ROUND_DELAY_MS);
+  await advance(DEFERRED_CHECK_RETRY_MS);
+  await advance(DEFERRED_CHECK_RETRY_MS);
+  assert.equal(checkCalls, CHECKS_PER_ROUND * (ONE_ROUND + ROUNDS_AFTER_FIRST));
+  assert.equal(mergeCalls, NO_MERGES);
 });
