@@ -617,7 +617,10 @@ The required-action and request sets of an `examine` node are empty.
   with no unresolved request answers 409 `mission.node.no_unresolved_request`.
   After a reviewer release, KanthorD checks a pending pull request again every
   60 s, at most 60 times. It merges a `kanthord` landing pull request when its
-  required checks pass. The last round ends the check. A human then merges the
+  required checks pass. A merge that answers `confirmed_failure`,
+  `retryable_refusal` or `unknown_outcome` runs the next round after 60 s. Each
+  round sends a new request key. A `final_refusal` merge answer ends the check.
+  The last round ends the check. A human then merges the
   pull request. At each server start, KanthorD checks again each
   `External.Requested` node that holds an unresolved request, at most 50 nodes
   for each start.

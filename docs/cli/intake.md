@@ -477,7 +477,7 @@ the read-back of `github.pull_request_merge` that `intake.action.perform` uses.
 It answers the pull request address, or a result class answer with the code
 `repository.platform.github.<class>`. Intake stores the request under the key `service_merge/<request_key>`. `intake.action.perform` answers `400` `gateway.request.validation_failed` for a `request_key` that starts with `service_merge/`. A stored answer that names another pull request answers `final_refusal` and calls no merge.
 
-Before the merge, the action performer reads the required checks with `github-pull-request-required-check-get`. While a required check of the head commit is pending or failed, it requests no merge.
+Before the merge, the action performer reads the required checks with `github-pull-request-required-check-get`. While a required check of the head commit is pending or failed, it requests no merge. When the read fails or answers an unexpected body, it requests no merge. The deferred check of the Mission Service then merges the pull request.
 
 ## Output and failure conventions
 

@@ -1189,7 +1189,7 @@ test("a head commit other than the tested commit requests no merge and warns onc
   ]);
 });
 
-test("a refused required check read warns with the class and the code, then requests the merge", async (t) => {
+test("a refused required check read warns with the class and the code and requests no merge", async (t) => {
   const h = actionable(t);
   h.entry.action.configuration.landing = "kanthord";
   h.dependencies.intakeActions.read = async () => ({
@@ -1207,11 +1207,95 @@ test("a refused required check read warns with the class and the code, then requ
     async () => PR,
   );
   await h.perform();
-  assert.equal(perform.mock.callCount(), DUAL_CALL_COUNT);
+  assert.equal(perform.mock.callCount(), SINGLE_CALL_COUNT);
   assert.deepEqual(warned, [
     [
       {
         evidence_id: h.evidence.id,
+        class: ResultClass.FinalRefusal,
+        code: "read.not_allowed",
+      },
+      READ_FAILED_MESSAGE,
+    ],
+  ]);
+});
+
+test("a retryable required check read requests no merge", async (t) => {
+  const h = actionable(t);
+  h.entry.action.configuration.landing = "kanthord";
+  h.dependencies.intakeActions.read = async () => ({
+    class: ResultClass.RetryableRefusal,
+    code: "repository.platform.github.retryable_refusal",
+    message: "Retry",
+  });
+  const warned: unknown[][] = [];
+  h.dependencies.logger = {
+    warn: (...args: unknown[]) => warned.push(args),
+  } as NonNullable<typeof h.dependencies.logger>;
+  const perform = t.mock.method(
+    h.dependencies.intakeActions,
+    "perform",
+    async () => PR,
+  );
+  await h.perform();
+  assert.equal(perform.mock.callCount(), SINGLE_CALL_COUNT);
+  assert.deepEqual(warned, [
+    [
+      {
+        evidence_id: h.evidence.id,
+        class: ResultClass.RetryableRefusal,
+        code: "repository.platform.github.retryable_refusal",
+      },
+      READ_FAILED_MESSAGE,
+    ],
+  ]);
+});
+
+test("an unexpected required check body requests no merge and warns once", async (t) => {
+  const h = actionable(t);
+  h.entry.action.configuration.landing = "kanthord";
+  h.dependencies.intakeActions.read = async () => ({
+    body: { head_commit: COMMIT },
+    next_cursor: null,
+  });
+  const warned: unknown[][] = [];
+  h.dependencies.logger = {
+    warn: (...args: unknown[]) => warned.push(args),
+  } as NonNullable<typeof h.dependencies.logger>;
+  const perform = t.mock.method(
+    h.dependencies.intakeActions,
+    "perform",
+    async () => PR,
+  );
+  await h.perform();
+  assert.equal(perform.mock.callCount(), SINGLE_CALL_COUNT);
+  assert.deepEqual(warned, [
+    [{ evidence_id: h.evidence.id }, READ_FAILED_MESSAGE],
+  ]);
+});
+
+test("rework: a refused required check read requests no merge", async (t) => {
+  const h = reworkable(t);
+  h.dependencies.intakeActions.read = async () => ({
+    class: ResultClass.FinalRefusal,
+    code: "read.not_allowed",
+    message: "Not allowed",
+  });
+  const warned: unknown[][] = [];
+  h.dependencies.logger = {
+    warn: (...args: unknown[]) => warned.push(args),
+  } as NonNullable<typeof h.dependencies.logger>;
+  const perform = t.mock.method(
+    h.dependencies.intakeActions,
+    "perform",
+    async () => PR,
+  );
+  await h.perform();
+  assert.equal(perform.mock.callCount(), NO_CALLS);
+  assert.deepEqual(warned, [
+    [
+      {
+        evidence_id: h.existingEvidenceId,
         class: ResultClass.FinalRefusal,
         code: "read.not_allowed",
       },
