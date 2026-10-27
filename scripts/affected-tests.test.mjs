@@ -394,6 +394,61 @@ test("a test that imports startTestSshd is excluded", async (t) => {
   );
 });
 
+test("a namespace import of test-sshd.ts is excluded", async (t) => {
+  const root = await repository(t, {
+    [SSHD_MODULE]: "export function startTestSshd() {}\n",
+    "src/repository/plain.test.ts": 'import "./test-sshd.ts";\n',
+    "src/repository/namespace.test.ts":
+      'import * as sshd from "./test-sshd.ts";\nsshd.startTestSshd();\n',
+  });
+  assert.deepEqual(
+    selectTests(root, [change(SSHD_MODULE)]),
+    related(
+      ["src/repository/plain.test.ts"],
+      ["src/repository/namespace.test.ts"],
+    ),
+  );
+});
+
+test("a dynamic import of test-sshd.ts is excluded", async (t) => {
+  const root = await repository(t, {
+    [SSHD_MODULE]: "export function startTestSshd() {}\n",
+    "src/repository/plain.test.ts": 'import "./test-sshd.ts";\n',
+    "src/repository/dynamic.test.ts":
+      'const sshd = await import("./test-sshd.ts");\nsshd.startTestSshd();\n',
+  });
+  assert.deepEqual(
+    selectTests(root, [change(SSHD_MODULE)]),
+    related(
+      ["src/repository/plain.test.ts"],
+      ["src/repository/dynamic.test.ts"],
+    ),
+  );
+});
+
+test("an unrelated namespace import is still run", async (t) => {
+  const root = await repository(t, {
+    "src/a.ts": "export function start() {}\n",
+    "src/a.test.ts": 'import * as a from "./a.ts";\na.start();\n',
+  });
+  assert.deepEqual(
+    selectTests(root, [change("src/a.ts")]),
+    related(["src/a.test.ts"]),
+  );
+});
+
+test("a test that names startTestSshd only in a comment is excluded", async (t) => {
+  const root = await repository(t, {
+    "src/a.ts": EMPTY_MODULE,
+    "src/a.test.ts": 'import "./a.ts";\n',
+    "src/b.test.ts": 'import "./a.ts";\n// startTestSshd\n',
+  });
+  assert.deepEqual(
+    selectTests(root, [change("src/a.ts")]),
+    related(["src/a.test.ts"], ["src/b.test.ts"]),
+  );
+});
+
 test("a changed unit test selects itself", async (t) => {
   const root = await repository(t, {
     "src/a.test.ts": TEST_BODY,
