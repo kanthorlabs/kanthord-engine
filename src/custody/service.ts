@@ -755,6 +755,14 @@ export class CustodyComponent implements Service, CredentialRecords {
         );
         return mintGrant({ kind: request.kind, execution, ...authorized });
       }
+      case GrantKind.ServiceMerge: {
+        const { evidenceId, commit } = request;
+        const authorized = mission.serviceMerge(tx, request.identity, {
+          evidenceId,
+          commit,
+        });
+        return mintGrant({ kind: request.kind, execution, ...authorized });
+      }
       case GrantKind.RequestEvidence: {
         const authorized = mission.requestEvidence(
           tx,

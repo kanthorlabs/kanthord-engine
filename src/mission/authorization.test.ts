@@ -3,6 +3,7 @@ import { test, type TestContext } from "node:test";
 import {
   testHumanIdentity,
   testMachineIdentity,
+  testServiceIdentity,
 } from "../kernel/test-identity.ts";
 import { createIdentity } from "../kernel/identity.ts";
 import type { ExecutionClaim } from "../kernel/operation.ts";
@@ -12,6 +13,7 @@ import {
   AssessmentResult,
   AssetKind,
   EndState,
+  MISSION_SERVICE_NAME,
   MissionErrorCode,
   OBJECT_SIZE_MAX,
   NodeState,
@@ -727,4 +729,179 @@ test("a merge push refuses a binding with a changed gate file", (t) => {
     { binding_id: h.repositoryId, paths: GATE_FILE_PATHS },
   ]);
   refuses(() => h.frozen({ key: MERGE_PUSH_KEY }), GATE_FILE_CHANGED);
+});
+
+const SERVICE_MERGE_NUMBER = 42;
+const serviceMergePullRequest = {
+  kind: PlatformAddressKind.PullRequest,
+  resource_identity: "repository:github:owner/repo",
+  number: SERVICE_MERGE_NUMBER,
+};
+const FIRST_NODE_REVISION = 1;
+const OTHER_SERVICE_NAME = "intake";
+
+function serviceMergeHarness(t: TestContext) {
+  const h = kanthordHarness(t);
+  h.store.transaction((tx) =>
+    setNodeState(tx, h.node_id, NodeState.ExternalRequested),
+  );
+  const evidenceId = h.request();
+  const merge = (
+    input: Partial<{ evidenceId: string; commit: string }> = {},
+    identity = testServiceIdentity(MISSION_SERVICE_NAME),
+  ) =>
+    h.store.transaction((tx) =>
+      h.service.authorizeServiceMerge(tx, identity, {
+        evidenceId,
+        commit: ASSESSED_COMMIT,
+        ...input,
+      }),
+    );
+  return { ...h, evidenceId, merge };
+}
+
+test("a service merge answers the tested commit, the merge address and the binding credential", (t) => {
+  const h = serviceMergeHarness(t);
+  const authorized = h.merge();
+  assert.equal(authorized.credential, HARNESS_CREDENTIAL);
+  assert.equal(authorized.platform, HARNESS_PLATFORM);
+  assert.equal(authorized.project_id, h.project_id);
+  assert.equal(authorized.facts.frozen_action.key, PULL_REQUEST_KEY);
+  assert.equal(authorized.facts.snapshot_commit, ASSESSED_COMMIT);
+  assert.deepEqual(authorized.facts.merge_address, h.pullRequest);
+  assert.equal(authorized.facts.merge_address?.number, SERVICE_MERGE_NUMBER);
+  assert.equal(authorized.facts.reused_address, null);
+  assert.deepEqual(authorized.facts.gate_files, []);
+  assert.ok(authorized.facts.node.name);
+});
+
+test("a service merge refuses an identity that is not the Mission Service", (t) => {
+  const h = serviceMergeHarness(t);
+  refuses(
+    () => h.merge({}, testServiceIdentity(OTHER_SERVICE_NAME)),
+    "service_mismatch",
+  );
+});
+
+test("a service merge refuses an unknown evidence", (t) => {
+  const h = serviceMergeHarness(t);
+  refuses(
+    () => h.merge({ evidenceId: createIdentity("evidence") }),
+    "node_mismatch",
+  );
+});
+
+test("a service merge refuses an evidence without a requirement key", (t) => {
+  const h = serviceMergeHarness(t);
+  h.store.transaction((tx) =>
+    tx.database
+      .prepare(
+        "UPDATE mission_evidence SET requirement_key = NULL WHERE id = ?",
+      )
+      .run(h.evidenceId),
+  );
+  refuses(() => h.merge(), "node_mismatch");
+});
+
+test("a service merge refuses a resolved evidence", (t) => {
+  const h = serviceMergeHarness(t);
+  h.store.transaction((tx) =>
+    tx.database
+      .prepare("UPDATE mission_evidence SET end_state = ? WHERE id = ?")
+      .run(EndState.Expected, h.evidenceId),
+  );
+  refuses(() => h.merge(), "node_mismatch");
+});
+
+test("a service merge refuses a node that is not External.Requested", (t) => {
+  const h = serviceMergeHarness(t);
+  for (const state of [NodeState.Evaluating, NodeState.Completed]) {
+    h.store.transaction((tx) => setNodeState(tx, h.node_id, state));
+    refuses(() => h.merge(), "claim_not_live");
+  }
+});
+
+test("a service merge refuses a closed attempt and an evidence of an earlier attempt", (t) => {
+  const h = serviceMergeHarness(t);
+  h.store.transaction((tx) =>
+    closeAttempt(tx, h.node_id, h.claim.attempt, Date.now()),
+  );
+  refuses(() => h.merge(), "claim_not_live");
+  h.store.transaction((tx) =>
+    openAttempt(
+      tx,
+      h.node_id,
+      FIRST_NODE_REVISION,
+      h.executionActor,
+      Date.now(),
+    ),
+  );
+  refuses(() => h.merge(), "claim_not_live");
+});
+
+test("a service merge refuses a non-pull-request address and an address of another resource", (t) => {
+  const addresses = [
+    {
+      kind: PlatformAddressKind.BranchPush,
+      resource_identity: "repository:github:owner/repo",
+      branch: "main",
+      commit: ASSESSED_COMMIT,
+    },
+    {
+      ...serviceMergePullRequest,
+      resource_identity: "repository:github:other/repo",
+    },
+  ];
+  for (const address of addresses) {
+    const h = serviceMergeHarness(t);
+    h.store.transaction((tx) =>
+      tx.database
+        .prepare(
+          "UPDATE mission_evidence_asset SET content = ? WHERE evidence_id = ?",
+        )
+        .run(canonicalJSON(address), h.evidenceId),
+    );
+    refuses(() => h.merge(), "node_mismatch");
+  }
+});
+
+test("a service merge refuses a human landing", (t) => {
+  const h = serviceMergeHarness(t);
+  h.policy.landing = RepositoryLanding.Human;
+  refuses(() => h.merge(), "node_mismatch");
+});
+
+test("a service merge refuses an assessment that is not success", (t) => {
+  const h = serviceMergeHarness(t);
+  h.assess(AssessmentResult.CriterionNotMet);
+  refuses(() => h.merge(), "claim_not_live");
+});
+
+test("a service merge refuses a changed gate file of the binding", (t) => {
+  const h = serviceMergeHarness(t);
+  h.assess(AssessmentResult.Success, ASSESSED_COMMIT, [
+    { binding_id: h.repositoryId, paths: GATE_FILE_PATHS },
+  ]);
+  refuses(() => h.merge(), GATE_FILE_CHANGED);
+});
+
+test("a service merge refuses a commit that is not the tested commit", (t) => {
+  const h = serviceMergeHarness(t);
+  refuses(() => h.merge({ commit: OTHER_COMMIT }), "node_mismatch");
+  h.assess(AssessmentResult.Success, OTHER_COMMIT);
+  refuses(() => h.merge(), "node_mismatch");
+});
+
+test("a service merge refuses a disabled or removed binding", (t) => {
+  const h = serviceMergeHarness(t);
+  bindingRefusals(h, () => h.merge());
+});
+
+test("a service merge refuses a paused project", (t) => {
+  const h = serviceMergeHarness(t);
+  h.dependencies.projectPaused = (_tx, projectId) => {
+    assert.equal(projectId, h.project_id);
+    return true;
+  };
+  refuses(() => h.merge(), "claim_not_live");
 });

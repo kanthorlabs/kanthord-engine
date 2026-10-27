@@ -379,6 +379,7 @@ export function missionHarness(
       },
     },
     schedulerMatch: { unmatchedClaims: () => [] },
+    projectPaused: () => false,
     environments: { environmentsMixed: () => false },
     wakeup: { wake: (...args) => record("wakeup.wake", args) },
     executionAttribution: {

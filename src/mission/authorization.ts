@@ -6,6 +6,7 @@ import {
   isServiceIdentity,
   type CallerIdentity,
   type MachineIdentity,
+  type ServiceIdentity,
 } from "../kernel/caller.ts";
 import type { ExecutionClaim } from "../kernel/operation.ts";
 import type { Transaction } from "../kernel/store.ts";
@@ -233,12 +234,13 @@ function platformAddressOf(
 
 function assessedCommitOf(
   tx: Transaction,
-  claim: ExecutionClaim,
+  nodeId: string,
+  attempt: number,
   bindingId: string,
 ): string | null {
-  assert.ok(Number.isSafeInteger(claim.attempt));
+  assert.ok(Number.isSafeInteger(attempt));
   assert.ok(bindingId);
-  const assessment = currentAssessmentOf(tx, claim.nodeId, claim.attempt);
+  const assessment = currentAssessmentOf(tx, nodeId, attempt);
   if (!assessment || assessment.result !== AssessmentResult.Success)
     authorizationRefused(AuthorizationRefusal.ClaimNotLive);
   assert.ok(assessment.tested_input !== null);
@@ -286,7 +288,12 @@ export function authorizeFrozenAction(
   assert.equal(identity.kind, IdentityKind.Client);
   assert.equal(identity.projectId, claim.projectId);
   const action = authorizeAction(tx, dependencies, claim, input.key);
-  const commit = assessedCommitOf(tx, claim, action.binding_id);
+  const commit = assessedCommitOf(
+    tx,
+    claim.nodeId,
+    claim.attempt,
+    action.binding_id,
+  );
   if (commit === null || commit !== input.commit)
     authorizationRefused(AuthorizationRefusal.NodeMismatch);
   const gateFiles = gateFilesOf(
@@ -318,7 +325,8 @@ export function authorizeFrozenAction(
       ? null
       : mergeAddressOf(
           tx,
-          claim,
+          claim.nodeId,
+          claim.attempt,
           action,
           input.mergeEvidenceId,
           repository.resource_identity,
@@ -345,36 +353,34 @@ export function authorizeFrozenAction(
   };
 }
 
-function mergeAddressOf(
-  tx: Transaction,
-  claim: ExecutionClaim,
-  action: FrozenAction,
-  evidenceId: string,
-  resourceIdentity: string,
-): PullRequestAddress {
+function mergeLandingAdmitted(action: FrozenAction): void {
   assert.ok(action.key);
-  assert.ok(resourceIdentity);
   if (
     action.action !== RepositoryAction.PullRequest ||
     action.configuration.landing !== RepositoryLanding.KanthorD
   )
     authorizationRefused(AuthorizationRefusal.NodeMismatch);
+}
+
+function gateFilesUnchanged(
+  tx: Transaction,
+  nodeId: string,
+  attempt: number,
+  bindingId: string,
+): void {
   if (
-    gateFilesOf(
-      currentAssessmentOf(tx, claim.nodeId, claim.attempt),
-      action.binding_id,
-    ).length > NO_GATE_FILES
+    gateFilesOf(currentAssessmentOf(tx, nodeId, attempt), bindingId).length >
+    NO_GATE_FILES
   )
     authorizationRefused(AuthorizationRefusal.GateFileChanged);
-  const evidence = readEvidence(tx, evidenceId);
-  if (
-    !evidence ||
-    evidence.node_id !== claim.nodeId ||
-    evidence.attempt !== claim.attempt ||
-    evidence.requirement_key !== action.key ||
-    evidence.end_state !== null
-  )
-    authorizationRefused(AuthorizationRefusal.NodeMismatch);
+}
+
+function pullRequestAddressOf(
+  tx: Transaction,
+  evidenceId: string,
+  resourceIdentity: string,
+): PullRequestAddress {
+  assert.ok(resourceIdentity);
   const address = platformAddressOf(tx, evidenceId);
   if (
     address.kind !== PlatformAddressKind.PullRequest ||
@@ -382,6 +388,100 @@ function mergeAddressOf(
   )
     authorizationRefused(AuthorizationRefusal.NodeMismatch);
   return address;
+}
+
+function mergeAddressOf(
+  tx: Transaction,
+  nodeId: string,
+  attempt: number,
+  action: FrozenAction,
+  evidenceId: string,
+  resourceIdentity: string,
+): PullRequestAddress {
+  mergeLandingAdmitted(action);
+  gateFilesUnchanged(tx, nodeId, attempt, action.binding_id);
+  const evidence = readEvidence(tx, evidenceId);
+  if (
+    !evidence ||
+    evidence.node_id !== nodeId ||
+    evidence.attempt !== attempt ||
+    evidence.requirement_key !== action.key ||
+    evidence.end_state !== null
+  )
+    authorizationRefused(AuthorizationRefusal.NodeMismatch);
+  return pullRequestAddressOf(tx, evidenceId, resourceIdentity);
+}
+
+export function authorizeServiceMerge(
+  tx: Transaction,
+  dependencies: AuthorizationDependencies & Pick<Dependencies, "projectPaused">,
+  identity: ServiceIdentity,
+  input: { evidenceId: string; commit: string },
+): Authorized<ActionFacts> {
+  assert.ok(tx.database.isTransaction);
+  assert.ok(input.evidenceId);
+  if (identity.service !== MISSION_SERVICE_NAME)
+    authorizationRefused(AuthorizationRefusal.ServiceMismatch);
+  const evidence = readEvidence(tx, input.evidenceId);
+  if (!evidence || !evidence.requirement_key || evidence.end_state !== null)
+    authorizationRefused(AuthorizationRefusal.NodeMismatch);
+  const node = readNode(tx, evidence.node_id);
+  assert.ok(node);
+  const open = readOpenAttempt(tx, node.id);
+  if (
+    node.state !== NodeState.ExternalRequested ||
+    !open ||
+    open.attempt !== evidence.attempt
+  )
+    authorizationRefused(AuthorizationRefusal.ClaimNotLive);
+  const action = requiredActionsOf(
+    tx,
+    dependencies.bindings,
+    node.id,
+    open.node_revision,
+  ).find((item) => item.key === evidence.requirement_key);
+  assert.ok(action);
+  mergeLandingAdmitted(action);
+  const revision = dependencies.bindings.getBindingRevision(
+    tx,
+    action.binding_id,
+  );
+  assert.ok(revision);
+  const address = pullRequestAddressOf(
+    tx,
+    evidence.id,
+    revision.resource_identity,
+  );
+  const commit = assessedCommitOf(tx, node.id, open.attempt, action.binding_id);
+  gateFilesUnchanged(tx, node.id, open.attempt, action.binding_id);
+  if (commit === null || commit !== input.commit)
+    authorizationRefused(AuthorizationRefusal.NodeMismatch);
+  authorizeBinding(tx, dependencies.bindings, action.binding_id);
+  const { policy, repository } = repositoryOf(
+    tx,
+    dependencies.bindings,
+    action,
+  );
+  if (dependencies.projectPaused(tx, policy.project_id))
+    authorizationRefused(AuthorizationRefusal.ClaimNotLive);
+  const { content } = getRevision(tx, node.id, open.node_revision);
+  return {
+    credential: policy.credential,
+    platform: policy.platform,
+    project_id: policy.project_id,
+    facts: {
+      frozen_action: action,
+      repository,
+      node: {
+        name: content.name,
+        commit_type: commitTypeOf(content.commit_type),
+      },
+      snapshot_commit: commit,
+      reused_address: null,
+      merge_address: address,
+      gate_files: [],
+    },
+  };
 }
 
 function authorizeRequestOf(

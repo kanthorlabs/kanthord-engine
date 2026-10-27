@@ -65,6 +65,7 @@ function custodyOf(store: Store) {
     authorization: { authorizeModelInference: unexpected },
     missionAuthorization: {
       frozenAction: unexpected,
+      serviceMerge: unexpected,
       requestEvidence: unexpected,
       evidenceAsset: unexpected,
       objectPut: unexpected,

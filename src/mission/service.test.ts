@@ -333,6 +333,7 @@ type Collaborators = Pick<Dependencies, "bindings" | "workQueue"> &
       Dependencies,
       | "schedulerClaims"
       | "schedulerMatch"
+      | "projectPaused"
       | "wakeup"
       | "executionAttribution"
       | "environments"
@@ -372,6 +373,7 @@ function makeService(
       liveExecutionOf: () => null,
     },
     schedulerMatch: { unmatchedClaims: () => [] },
+    projectPaused: () => false,
     environments: { environmentsMixed: () => false },
     wakeup: { wake: () => {} },
     executionAttribution: {

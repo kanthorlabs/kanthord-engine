@@ -294,6 +294,9 @@ function fixture(
       frozenAction: () => {
         throw new Error("UNEXPECTED_COLLABORATION");
       },
+      serviceMerge: () => {
+        throw new Error("UNEXPECTED_COLLABORATION");
+      },
       requestEvidence: () => {
         throw new Error("UNEXPECTED_COLLABORATION");
       },

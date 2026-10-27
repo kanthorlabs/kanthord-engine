@@ -659,6 +659,7 @@ function secretCustody(store: Store): CustodyComponent {
     authorization: { authorizeModelInference: unexpected },
     missionAuthorization: {
       frozenAction: unexpected,
+      serviceMerge: unexpected,
       requestEvidence: unexpected,
       evidenceAsset: unexpected,
       objectPut: unexpected,

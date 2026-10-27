@@ -283,6 +283,11 @@ export interface MissionAuthorization {
       mergeEvidenceId: string | null;
     },
   ): Authorized<ActionFacts>;
+  serviceMerge(
+    tx: Transaction,
+    identity: ServiceIdentity,
+    input: { evidenceId: string; commit: string },
+  ): Authorized<ActionFacts>;
   requestEvidence(
     tx: Transaction,
     identity: CallerIdentity,
@@ -307,6 +312,7 @@ export interface MissionAuthorization {
 export const GrantKind = {
   ModelInference: "model_inference",
   FrozenAction: "frozen_action",
+  ServiceMerge: "service_merge",
   RequestEvidence: "request_evidence",
   EvidenceAsset: "evidence_asset",
   ObjectPut: "object_put",
@@ -381,6 +387,13 @@ export type GrantRequest =
       mergeEvidenceId?: string | null;
     }
   | {
+      kind: typeof GrantKind.ServiceMerge;
+      identity: ServiceIdentity;
+      evidenceId: string;
+      commit: string;
+      claim: null;
+    }
+  | {
       kind: typeof GrantKind.RequestEvidence;
       identity: CallerIdentity;
       evidenceId: string;
@@ -425,6 +438,7 @@ export type ModelInferenceFacts = {
 type GrantFactsOfKind = {
   [GrantKind.ModelInference]: ModelInferenceFacts;
   [GrantKind.FrozenAction]: ActionFacts;
+  [GrantKind.ServiceMerge]: ActionFacts;
   [GrantKind.RequestEvidence]: RequestFacts;
   [GrantKind.EvidenceAsset]: AssetFacts;
   [GrantKind.ObjectPut]: AssetFacts;

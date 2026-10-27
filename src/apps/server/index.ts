@@ -503,6 +503,7 @@ export function composeServices(options: {
     },
     missionAuthorization: {
       frozenAction: (...args) => mission.authorizeFrozenAction(...args),
+      serviceMerge: (...args) => mission.authorizeServiceMerge(...args),
       requestEvidence: (...args) => mission.authorizeRequestEvidence(...args),
       evidenceAsset: (...args) => mission.authorizeEvidenceAsset(...args),
       objectPut: (...args) => mission.authorizeObjectPut(...args),
@@ -831,6 +832,7 @@ export function composeServices(options: {
       unmatchedClaims: (tx, projectId) =>
         scheduler.unmatchedClaims(tx, projectId),
     },
+    projectPaused: (tx, projectId) => project.projectPaused(tx, projectId),
     wakeup: { wake: (projectId) => scheduler.wake(projectId) },
     executionAttribution: {
       of: (...args) => scheduler.executionAttribution(...args),
