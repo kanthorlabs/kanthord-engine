@@ -21,6 +21,7 @@ export const CauseSubcategory = {
   InstructionConflict: "instruction_conflict",
   RuleAbsent: "rule_absent",
   CriterionUnstated: "criterion_unstated",
+  RequirementConflict: "requirement_conflict",
   Dependency: "dependency",
   VerificationContext: "verification_context",
   VerificationInsufficient: "verification_insufficient",
@@ -69,6 +70,7 @@ export const CAUSE_SUBCATEGORIES: Readonly<
   ],
   [CauseCategory.Plan]: [
     CauseSubcategory.CriterionUnstated,
+    CauseSubcategory.RequirementConflict,
     CauseSubcategory.Dependency,
     CauseSubcategory.VerificationContext,
     CauseSubcategory.VerificationInsufficient,

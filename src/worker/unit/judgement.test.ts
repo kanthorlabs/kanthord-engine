@@ -33,6 +33,10 @@ import type { NativeAgent } from "./native-agent.ts";
 import { PromptTemplate } from "../../agent/contract.ts";
 import type { WorkPrompt } from "../../agent/prompt-composer.ts";
 
+const PLAN_DEFECT_RATIONALE =
+  'plan defects\nPlan conflict:\n- node: "edit a.ts" vs "a.ts stays unchanged"\nPlan gap:\n- task_b: no test asked\nUnmet:\n- task_a: no route check\n- task_c: no lint';
+const PLAN_GAP_RATIONALE = "one gap\nPlan gap:\n- task_b: no test asked";
+const MET_RATIONALE = "met";
 const TWO_GAP_RATIONALE =
   "two gaps\nUnmet:\n- task_a: no route check\n- task_b: no restart test";
 
@@ -83,11 +87,47 @@ test("the final marker is strict and invalid handoffs are refused", () => {
     judgementRationale({
       rationale: "two gaps",
       unmet: [
-        { id: "task_a", reason: "no route check" },
-        { id: "task_b", reason: "no restart test" },
+        { id: "task_a", reason: "no route check", ground: UnmetGround.Stated },
+        {
+          id: "task_b",
+          reason: "no restart test",
+          ground: UnmetGround.Standard,
+        },
       ],
     }),
     TWO_GAP_RATIONALE,
+  );
+});
+
+test("the rationale writes plan conflict and plan gap blocks before the unmet block", () => {
+  assert.equal(
+    judgementRationale({
+      rationale: "plan defects",
+      unmet: [
+        { id: "task_a", reason: "no route check", ground: UnmetGround.Stated },
+        { id: "task_b", reason: "no test asked", ground: UnmetGround.Unstated },
+        {
+          id: "node",
+          reason: '"edit a.ts" vs "a.ts stays unchanged"',
+          ground: UnmetGround.Conflict,
+        },
+        { id: "task_c", reason: "no lint", ground: UnmetGround.Standard },
+      ],
+    }),
+    PLAN_DEFECT_RATIONALE,
+  );
+  assert.equal(
+    judgementRationale({
+      rationale: "one gap",
+      unmet: [
+        { id: "task_b", reason: "no test asked", ground: UnmetGround.Unstated },
+      ],
+    }),
+    PLAN_GAP_RATIONALE,
+  );
+  assert.equal(
+    judgementRationale({ rationale: MET_RATIONALE, unmet: [] }),
+    MET_RATIONALE,
   );
 });
 
@@ -455,6 +495,7 @@ test("an unmet item requires a ground of the closed set", () => {
     "stated",
     "standard",
     "unstated",
+    "conflict",
   ]);
   assert.equal(unmetGroundSchema.safeParse("other").success, false);
   assert.equal(

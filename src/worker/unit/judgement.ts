@@ -29,6 +29,7 @@ export const UnmetGround = {
   Stated: "stated",
   Standard: "standard",
   Unstated: "unstated",
+  Conflict: "conflict",
 } as const;
 export const unmetGroundSchema = z.enum(UnmetGround);
 export type UnmetGround = z.infer<typeof unmetGroundSchema>;
@@ -65,13 +66,36 @@ export const evaluationJudgementSchema = z
     { path: ["unmet"] },
   );
 
+const RATIONALE_BLOCKS: readonly {
+  heading: string;
+  holds: (ground: UnmetGround) => boolean;
+}[] = [
+  {
+    heading: "Plan conflict:",
+    holds: (ground) => ground === UnmetGround.Conflict,
+  },
+  {
+    heading: "Plan gap:",
+    holds: (ground) => ground === UnmetGround.Unstated,
+  },
+  {
+    heading: "Unmet:",
+    holds: (ground) =>
+      ground !== UnmetGround.Conflict && ground !== UnmetGround.Unstated,
+  },
+];
+
 export function judgementRationale(judgement: {
   rationale: string;
-  unmet: readonly { id: string; reason: string }[];
+  unmet: readonly { id: string; reason: string; ground: UnmetGround }[];
 }): string {
-  if (judgement.unmet.length === NO_ITEMS) return judgement.rationale;
-  const lines = judgement.unmet.map((item) => `- ${item.id}: ${item.reason}`);
-  return `${judgement.rationale}\nUnmet:\n${lines.join("\n")}`;
+  const blocks = RATIONALE_BLOCKS.flatMap(({ heading, holds }) => {
+    const lines = judgement.unmet
+      .filter((item) => holds(item.ground))
+      .map((item) => `- ${item.id}: ${item.reason}`);
+    return lines.length === NO_ITEMS ? [] : [`${heading}\n${lines.join("\n")}`];
+  });
+  return [judgement.rationale, ...blocks].join("\n");
 }
 
 export function parseJudgement<T extends z.ZodType>(

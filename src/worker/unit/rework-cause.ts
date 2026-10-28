@@ -41,7 +41,15 @@ const GROUND_CAUSES: Readonly<
     CauseCategory.Plan,
     CauseSubcategory.CriterionUnstated,
   ],
+  [UnmetGround.Conflict]: [
+    CauseCategory.Plan,
+    CauseSubcategory.RequirementConflict,
+  ],
 };
+const PLAN_GROUNDS: readonly UnmetGround[] = [
+  UnmetGround.Conflict,
+  UnmetGround.Unstated,
+];
 
 export function reworkCauseOf(facts: EvaluationFacts): FailureCause {
   if (facts.stage === EvaluationStage.Setup)
@@ -53,7 +61,9 @@ export function reworkCauseOf(facts: EvaluationFacts): FailureCause {
     return unattributed([CauseCategory.Model, CauseCategory.Plan]);
   if (facts.stage === EvaluationStage.Affected)
     return unattributed([CauseCategory.Model, CauseCategory.Plan]);
-  const ground = facts.unmet_grounds[0];
+  const ground =
+    PLAN_GROUNDS.find((plan) => facts.unmet_grounds.includes(plan)) ??
+    facts.unmet_grounds[0];
   if (facts.stage !== EvaluationStage.Judgement || ground === undefined)
     return unattributed([]);
   const [category, subcategory] = GROUND_CAUSES[ground];
