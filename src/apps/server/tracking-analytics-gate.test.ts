@@ -28,11 +28,13 @@ import {
   RecordKind,
   trackingOperations,
 } from "../../tracking/contract.ts";
-import { workerOperations } from "../../worker/contract.ts";
+import { InstancePlacement, workerOperations } from "../../worker/contract.ts";
 import {
+  createInstances,
   enableCoveringAgents,
   gatewayFixture,
   humanCaller,
+  instanceNames,
 } from "./test-support.ts";
 import {
   attributed,
@@ -168,6 +170,13 @@ async function project(fixture: Fixture, name: string) {
     ...EMPTY,
     body: { name },
   });
+  await createInstances(fixture, instanceNames(`${name}-${STEPS_BINDING}`, 1));
+  await createInstances(
+    fixture,
+    instanceNames(`${name}-${REVIEWER_BINDING}`, 1),
+    InstancePlacement.Server,
+    "reviewer@1",
+  );
   await human(projectOperations["bindingSet.write"], {
     params: { project_id: created.id },
     query: {},
@@ -178,8 +187,7 @@ async function project(fixture: Fixture, name: string) {
           kind: "worker",
           config: {
             worker: "coder@1",
-            placement: "server",
-            instance_count: 1,
+            worker_instances: instanceNames(`${name}-${STEPS_BINDING}`, 1),
             entries: [{ agent: "swe@1", ...CONFIGURATION }],
           },
         },
@@ -187,8 +195,7 @@ async function project(fixture: Fixture, name: string) {
           kind: "worker",
           config: {
             worker: "reviewer@1",
-            placement: "server",
-            instance_count: 1,
+            worker_instances: instanceNames(`${name}-${REVIEWER_BINDING}`, 1),
             entries: [{ agent: "re@1", ...CONFIGURATION }],
           },
         },

@@ -82,6 +82,7 @@ const STORED_ENVIRONMENT = {
   onCreateCommand: ON_CREATE_COMMAND,
   postCreateCommand: POST_CREATE_COMMAND,
 };
+const SLOT_COUNT = 2;
 const MEMORY_MB = 2048;
 const MIXED_NODE_FILE = "first.md";
 const SINGLE_NODE_FILE = "single.md";
@@ -412,6 +413,7 @@ async function containerWorker(
   fixture: Fixture,
   binding: string,
   environment: string,
+  instanceCount = SINGLE_ITEM,
 ) {
   return {
     kind: "worker",
@@ -419,7 +421,7 @@ async function containerWorker(
       worker: "coder@1",
       worker_instances: await createInstances(
         fixture,
-        instanceNames(binding, SINGLE_ITEM),
+        instanceNames(binding, instanceCount),
         InstancePlacement.Container,
       ),
       environment,
@@ -439,6 +441,7 @@ async function secretBindings(fixture: Fixture) {
       fixture,
       WORKER_BINDING,
       REPOSITORY_BINDING,
+      SLOT_COUNT,
     ),
     [REVIEWER_BINDING]: REVIEWER,
   };
@@ -943,7 +946,6 @@ test(
     await t.test(
       "the removal of the repository binding removes the cache volume",
       async () => {
-        const base = await secretBindings(fixture);
         await writeBindings(fixture, projectId, {
           [WORKER_BINDING]: {
             kind: "worker",
@@ -953,7 +955,7 @@ test(
               entries: [{ agent: "swe@1", ...CONFIGURATION }],
             },
           },
-          [REVIEWER_BINDING]: base[REVIEWER_BINDING],
+          [REVIEWER_BINDING]: REVIEWER,
         });
         await until(
           () => volumeCalled(l3, Subject.Remove, cacheName),

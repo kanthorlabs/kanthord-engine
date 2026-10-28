@@ -2533,7 +2533,7 @@ export async function provisionNativeServerProject(
             worker: "coder@1",
             worker_instances: await createInstances(
               fixture,
-              instanceNames(binding, 1),
+              instanceNames(`${name}-${binding}`, 1),
             ),
             entries: [{ agent: "swe@1", ...NATIVE_DEFAULTS }],
           },

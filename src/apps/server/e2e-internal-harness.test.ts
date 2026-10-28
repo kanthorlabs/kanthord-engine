@@ -18,14 +18,14 @@ import {
 import {
   bareRepository,
   createFakeSshCredential,
+  createInstancesByCli,
   fakeGitHub,
   fakeS3,
   gatewayFixture,
   inProcessWorker,
+  instanceNames,
   mappedTransport,
   remoteHead,
-  createInstancesByCli,
-  instanceNames,
 } from "./test-support.ts";
 import {
   fauxAssistantMessage,

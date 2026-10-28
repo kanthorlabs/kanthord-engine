@@ -35,9 +35,9 @@ import {
   WorkPullKind,
 } from "../../scheduler/contract.ts";
 import {
+  InstancePlacement,
   type RepositoryTransport,
   workerOperations,
-  InstancePlacement,
 } from "../../worker/contract.ts";
 import {
   handedSshAccess,
@@ -53,9 +53,9 @@ import {
 import { environment, kanthord } from "./cli-test-support.ts";
 import {
   createFakeSshCredential,
+  createInstancesByCli,
   fakeGitHub,
   gatewayFixture,
-  createInstancesByCli,
   instanceNames,
 } from "./test-support.ts";
 

@@ -208,7 +208,6 @@ async function instanceProject(t: TestContext) {
           kind: "worker",
           config: {
             worker: "coder@1",
-            placement: "worker",
             worker_instances: [INSTANCE],
             entries: [{ agent: "swe@1", ...CONFIGURATION }],
           },

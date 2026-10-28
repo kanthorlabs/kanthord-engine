@@ -63,11 +63,11 @@ import { environment, kanthord } from "./cli-test-support.ts";
 import {
   COVERING_WORKER_BINDINGS,
   createFakeSshCredential,
+  createInstancesByCli,
   enableCoveringAgents,
   FAKE_GITHUB_HOST_KEY,
   FAKE_SSH_HOST,
   gatewayFixture,
-  createInstancesByCli,
   instanceNames,
 } from "./test-support.ts";
 import { SHIPPED_TEMPLATES } from "../../agent/prompt-templates.ts";

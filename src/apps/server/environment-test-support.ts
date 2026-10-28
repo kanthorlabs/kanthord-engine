@@ -184,7 +184,9 @@ export interface ProjectInput {
 export function workerInstanceNames(input: ProjectInput): string[] {
   return instanceNames(
     `${input.name}-${WORKER_BINDING}`,
-    input.placement === "container" ? SINGLE_SLOT : input.instanceCount,
+    input.placement === InstancePlacement.Container
+      ? SINGLE_SLOT
+      : input.instanceCount,
   );
 }
 
@@ -229,7 +231,7 @@ export async function createProject(fixture: Fixture, input: ProjectInput) {
   await createInstances(
     fixture,
     workerInstanceNames(input),
-    input.placement === "container"
+    input.placement === InstancePlacement.Container
       ? InstancePlacement.Container
       : InstancePlacement.Server,
   );

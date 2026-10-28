@@ -17,9 +17,9 @@ import {
 import { environment, kanthord, until } from "./cli-test-support.ts";
 import {
   createFakeSshCredential,
+  createInstancesByCli,
   enableCoveringAgents,
   gatewayFixture,
-  createInstancesByCli,
   instanceNames,
 } from "./test-support.ts";
 import { InstancePlacement } from "../../worker/contract.ts";
