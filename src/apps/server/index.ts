@@ -625,6 +625,11 @@ export function composeServices(options: {
       authorizeAction: (...args) => mission.authorizeAction(...args),
       actionContextOf: (...args) => mission.actionContextOf(...args),
     },
+    instanceArchive: {
+      revokeForInstanceArchive: (...args) =>
+        mission.revokeForInstanceArchive(...args),
+      reportExecutionEnds: (...args) => mission.reportExecutionEnds(...args),
+    },
     evidenceRequests: {
       request: (input, options) =>
         missionClient["evidence.request"](input, options),

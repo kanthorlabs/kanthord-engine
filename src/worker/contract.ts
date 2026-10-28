@@ -1212,11 +1212,14 @@ export const instanceOperations = {
     input: z.strictObject({
       params: instanceParams,
       query: emptyFields,
-      body: z.strictObject({ expected_revision: z.number().int().positive() }),
+      body: z.strictObject({
+        expected_revision: z.number().int().positive(),
+        force: z.boolean().optional(),
+      }),
     }),
     output: instanceRecordSchema,
     description:
-      "Archive a worker instance that no binding lists and whose registrations hold no live execution, and end its registrations.",
+      "Archive a worker instance that no binding lists, and end its registrations. A live execution of the instance refuses the archive, unless force is true: force revokes the execution first.",
   },
   "instance.token": {
     ...instanceOperation,

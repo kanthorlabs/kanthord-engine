@@ -126,7 +126,7 @@ and deregistration require no live registration.
 | I      | `instance list`                                                    | `GET /api/worker/instance`                               | `worker.instance.list`           | `human`                                                                           |
 | I      | `instance get <name>`                                              | `GET /api/worker/instance/:instance_name`                | `worker.instance.get`            | `human`                                                                           |
 | I      | `instance rotate <name> --expected-revision <n>`                   | `POST /api/worker/instance/:instance_name/revision`      | `worker.instance.rotate`         | `human`; mutation                                                                 |
-| I      | `instance archive <name> --expected-revision <n>`                  | `POST /api/worker/instance/:instance_name/archive`       | `worker.instance.archive`        | `human`; mutation                                                                 |
+| I      | `instance archive <name> --expected-revision <n> [--force]`        | `POST /api/worker/instance/:instance_name/archive`       | `worker.instance.archive`        | `human`; mutation                                                                 |
 | I      | `join [--force]`                                                   | local                                                    | none                             | none; reads the instance configuration from standard input                        |
 
 `credential` runs inside the `worker` application alone and is no CLI command.
@@ -677,17 +677,25 @@ An archived instance answers `409 worker.instance.archived`.
 ### `instance archive`
 
 ```text
-kanthord worker instance archive <name> --expected-revision <n> [--idempotency-key <key>]
+kanthord worker instance archive <name> --expected-revision <n> [--force] [--idempotency-key <key>]
 ```
 
 Required `<name>: InstanceName` and `--expected-revision <n>`, as in `instance rotate`.
-The request body is `{ expected_revision }`. HTTP `200` returns the archived instance record.
+
+| Option    | Meaning                                                                                                                |
+| --------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `--force` | Optional. Stop the live execution of the instance. The node returns to `Available` or `Waiting` with no failure count. |
+
+The request body is `{ expected_revision, force? }`. The CLI sends `force: true` only with `--force`. HTTP `200` returns the archived instance record.
 The CLI prints one JSON line with the record and `idempotency_key`.
 
-The server archives the instance only when no binding lists it.
-It also refuses when a registration of the instance holds a live execution.
+A binding that is no tombstone and lists the instance refuses every archive, also with `--force`.
+Remove the instance from the binding first.
+Without `--force`, a live execution of a registration of the instance refuses the archive.
 Both refusals answer `409 worker.instance.in_use`.
 `details.bindings` lists the bindings, or `details.executions` lists the executions.
+With `--force`, the archive revokes each live execution of the instance through Mission in the transaction of the archive. Mission reports the revocation after the commit.
+The `worker` process of the instance learns of the end at its next call, which the Gateway refuses. It ends its tools and stops the execution.
 The archive ends the registrations of the instance.
 An archived name stays taken, and `instance create` cannot use it again.
 An indeterminate result fails with `cli.worker.instance.archive.indeterminate` and prints the key.
@@ -883,7 +891,7 @@ Every remote command can also answer the shared codes of [other.md](other.md#err
 | 409   | `worker.instance.key_conflict`                                | An instance revision holds the same key.                                                                                                                                                                                            | instance create, instance rotate                                                                                                                                            |
 | 409   | `worker.instance.revision_conflict`                           | `expected_revision` is not the live revision; `details.revision` names the live revision.                                                                                                                                           | instance rotate, instance archive                                                                                                                                           |
 | 409   | `worker.instance.archived`                                    | The instance is archived.                                                                                                                                                                                                           | instance rotate, instance archive                                                                                                                                           |
-| 409   | `worker.instance.in_use`                                      | A binding lists the instance, or a registration of the instance holds a live execution; `details` hold `bindings` or `executions`.                                                                                                  | instance archive                                                                                                                                                            |
+| 409   | `worker.instance.in_use`                                      | A binding lists the instance, also with `--force`, or a registration of the instance holds a live execution and the archive has no `--force`; `details` hold `bindings` or `executions`.                                            | instance archive                                                                                                                                                            |
 | 409   | `worker.instance.connection_superseded`                       | Another connection of the instance is current; `details.connection_name` names it. `serve worker` ends with `worker.instance.superseded`.                                                                                           | worker.instance.connect, worker.instance.heartbeat (API only)                                                                                                               |
 | 403   | `worker.authorization.refused`                                | The chain of the model inference credential breaks; details `{ reason }` with `binding_mismatch`, `binding_removed`, `binding_disabled` or `no_native_agent`.                                                                       | handover                                                                                                                                                                    |
 | 403   | `project.authorization.refused`                               | The SSH identity chain of a repository binding breaks; details `{ reason }` with `binding_not_found` (the binding is removed or is not a repository binding), `identity_refused` or `node_mismatch`.                                | handover                                                                                                                                                                    |

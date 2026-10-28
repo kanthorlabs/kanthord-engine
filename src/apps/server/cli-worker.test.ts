@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
 import { test, type TestContext } from "node:test";
 import { join } from "node:path";
 import { existsSync, readFileSync } from "node:fs";
@@ -591,4 +593,60 @@ test("instance create prints the server limit refusal like the other instance co
   assert.match(refused.stderr, /^worker\.instance\.server_limit:/);
   assert.match(refused.stderr, CONFLICT_STATUS);
   assert.match(refused.stderr, /^idempotency_key: /m);
+});
+
+const FIRST_REVISION = "1";
+const ARCHIVED_RECORD = {
+  id: "worker_instance_01ARZ3NDEKTSV4RRFFQ69G5FAV",
+  name: INSTANCE_NAME,
+  worker: INSTANCE_WORKER,
+  revision: 1,
+  placement: InstancePlacement.Server,
+  public_key: null,
+  fingerprint: null,
+  created_at: 1,
+  ended_at: 2,
+};
+
+async function archiveBodies(t: TestContext, ...options: string[]) {
+  const bodies: unknown[] = [];
+  const server = createServer((request, response) => {
+    const chunks: Buffer[] = [];
+    request.on("data", (chunk: Buffer) => chunks.push(chunk));
+    request.on("end", () => {
+      bodies.push(JSON.parse(Buffer.concat(chunks).toString()));
+      response.writeHead(200, { "Content-Type": "application/json" });
+      response.end(JSON.stringify(ARCHIVED_RECORD));
+    });
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  t.after(() => server.close());
+  const result = await command(
+    [
+      "worker",
+      "instance",
+      "archive",
+      INSTANCE_NAME,
+      "--expected-revision",
+      FIRST_REVISION,
+      ...options,
+    ],
+    {
+      ...environment(temporary(t)),
+      KANTHORD_ENDPOINT: `http://127.0.0.1:${(server.address() as AddressInfo).port}`,
+      KANTHORD_TOKEN: "human",
+    },
+  );
+  assert.equal(result.code, ExitCode.Success, result.stderr);
+  return bodies;
+}
+
+test("instance archive with --force sends force true", async (t) => {
+  assert.deepEqual(await archiveBodies(t, "--force"), [
+    { expected_revision: 1, force: true },
+  ]);
+});
+
+test("instance archive without --force sends no force", async (t) => {
+  assert.deepEqual(await archiveBodies(t), [{ expected_revision: 1 }]);
 });

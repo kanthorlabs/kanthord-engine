@@ -287,7 +287,10 @@ async function archive(name: string, command: Command): Promise<void> {
     {
       params: { instance_name: name },
       query: {},
-      body: { expected_revision: expected },
+      body: {
+        expected_revision: expected,
+        ...(options.force ? { force: true } : {}),
+      },
     },
     { idempotencyKey: key },
   );
@@ -394,6 +397,7 @@ export function addWorkerInstanceCommands(worker: Command): void {
       "Live revision of the instance",
       singleUse("--expected-revision"),
     )
+    .option("--force", "Stop the live execution of the instance and archive it")
     .option("--idempotency-key <key>", "Mutation key", singleUse(KEY_OPTION))
     .action((name: string, _options, command: Command) =>
       archive(name, command),

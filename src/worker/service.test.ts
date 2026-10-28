@@ -131,6 +131,14 @@ const fakeCollaborations = {
       throw new Error("UNEXPECTED_COLLABORATION");
     },
   },
+  instanceArchive: {
+    revokeForInstanceArchive: () => {
+      throw new Error("UNEXPECTED_COLLABORATION");
+    },
+    reportExecutionEnds: () => {
+      throw new Error("UNEXPECTED_COLLABORATION");
+    },
+  },
   intakeActions: {
     perform: async () => {
       throw new Error("UNEXPECTED_COLLABORATION");
@@ -1906,6 +1914,8 @@ function poolFixture(t: TestContext, instanceCount: number) {
     generation: POOL_GENERATION,
     failure: null as Error | null,
     executing: new Set<string>(),
+    revoked: [] as string[],
+    reported: 0,
     bindings: [
       { resource_identity: POOL_RESOURCE, environment: null, listed: [] },
     ] as PoolBinding[],
@@ -1952,8 +1962,21 @@ function poolFixture(t: TestContext, instanceCount: number) {
       return pool ? binding(pool, null) : null;
     },
     workerBindingsOf: bindingsOf,
+    instanceArchive: {
+      revokeForInstanceArchive: (_tx, executionId) => {
+        state.revoked.push(executionId);
+        return { lost: [], revoked: [] };
+      },
+      reportExecutionEnds: () => {
+        state.reported++;
+      },
+    },
     schedulerClaims: {
       ...fakeCollaborations.schedulerClaims,
+      unendedExecutionOf: (_tx, runtimeIdentity) =>
+        state.executing.has(runtimeIdentity)
+          ? { execution_id: POOL_EXECUTION }
+          : null,
       activityOf: (_tx, runtimeIdentity) =>
         state.executing.has(runtimeIdentity)
           ? {
@@ -2140,6 +2163,36 @@ test("an instance create starts one and an archive stops one after the change no
   assert.deepEqual(
     f.host.archived.map(({ name }) => name),
     ["server-0"],
+  );
+});
+
+test("a forced archive of a busy server instance revokes its execution and stops the instance after the commit", async (t) => {
+  const f = poolFixture(t, 1);
+  f.worker.startPool();
+  const registration = f.register(FIRST_INSTANCE);
+  f.state.executing.add(registration.runtime_identity);
+  f.unlist(FIRST_INSTANCE);
+  const archive = (force?: boolean) =>
+    f.invoke(
+      "instance.archive",
+      { expected_revision: FIRST_REVISION, force },
+      { instance_name: f.nameOf(FIRST_INSTANCE) },
+    );
+  assert.throws(
+    () => archive(),
+    (error: unknown) =>
+      error instanceof OperationError &&
+      error.code === WorkerErrorCode.InstanceInUse,
+  );
+  assert.deepEqual(f.state.revoked, []);
+  assert.deepEqual(f.host.archived, []);
+  archive(true);
+  assert.deepEqual(f.state.revoked, [POOL_EXECUTION]);
+  assert.equal(f.state.reported, POOL_ONE_START);
+  await changesApplied();
+  assert.deepEqual(
+    f.host.archived.map(({ name }) => name),
+    [f.nameOf(FIRST_INSTANCE)],
   );
 });
 
