@@ -6,8 +6,8 @@ import type { AddressInfo } from "node:net";
 import { promisify } from "node:util";
 import {
   existsSync,
-  readFileSync,
   readdirSync,
+  readFileSync,
   statSync,
   writeFileSync,
 } from "node:fs";
@@ -15,7 +15,7 @@ import { dirname, join, relative, resolve } from "node:path";
 import { requirePiTools, temporary } from "../../kernel/test-support.ts";
 import { initialConfig, loadConfig } from "../../config/index.ts";
 import { packageVersion } from "../../kernel/version.ts";
-import { IdentityKind, CLIENT_IDENTITY_PREFIX } from "../../kernel/caller.ts";
+import { CLIENT_IDENTITY_PREFIX, IdentityKind } from "../../kernel/caller.ts";
 import {
   deriveClientSecret,
   KANTHORD_AUTH_USERNAME,

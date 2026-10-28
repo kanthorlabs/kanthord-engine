@@ -5,10 +5,8 @@ import { createIdentity } from "../kernel/identity.ts";
 import { isObject } from "../kernel/values.ts";
 import type { Transaction } from "../kernel/store.ts";
 import {
-  MissionErrorCode,
-  NODE_IDENTITY_PREFIX,
-  TASK_IDENTITY_PREFIX,
   type Edge,
+  type ExecutionEnds,
   type HumanActor,
   type ImportApply,
   type ImportPreview,
@@ -16,18 +14,20 @@ import {
   type Mission,
   type MissionBindings,
   type MissionEnvironments,
+  MissionErrorCode,
+  NODE_IDENTITY_PREFIX,
   type Revision,
+  type SchedulerClaims,
+  TASK_IDENTITY_PREFIX,
   type Violation,
   type WorkQueue,
-  type SchedulerClaims,
-  type ExecutionEnds,
 } from "./contract.ts";
 import { addedPairs, UNMATCHED_MESSAGE } from "./coverage.ts";
 import type { Dependencies } from "./service.ts";
 import {
   isTaskEntry,
-  prepareImport,
   type PreparedImport,
+  prepareImport,
   type ResolvedImport,
   type ResolvedImportEntry,
 } from "./import.ts";

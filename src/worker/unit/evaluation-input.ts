@@ -13,19 +13,19 @@ import {
 import { EndReason, type ExecutionRun } from "./execution-run.ts";
 import {
   EVIDENCE_DIRECTORY,
-  WorkspaceKind,
   type ExamineCheckout,
+  WorkspaceKind,
 } from "./workspace.ts";
 import type { StepsInput } from "./steps-implement.ts";
 import type { TestedInput } from "./verification.ts";
 import {
   BASE_DIRECTORY,
   BaseHead,
-  SetupEnd,
-  setUpHeads,
-  setupEntries,
   namedCheckouts,
+  SetupEnd,
+  setupEntries,
   type SetupFailure,
+  setUpHeads,
 } from "./environment-setup.ts";
 import { ExecutionIntent } from "../contract.ts";
 import { AFFECTED_SUBJECT } from "./affected.ts";

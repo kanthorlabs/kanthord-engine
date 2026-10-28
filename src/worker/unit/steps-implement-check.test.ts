@@ -32,7 +32,7 @@ import {
   runStepsImplement,
   startCheck,
 } from "./steps-implement.ts";
-import { RefreshResult, refreshAtClaim } from "./base-refresh.ts";
+import { refreshAtClaim, RefreshResult } from "./base-refresh.ts";
 import { MERGE_MARKERS_LEFT } from "./turn-gate.ts";
 import { nodeUnitOf } from "./release-gate.ts";
 import { SHIPPED_TEMPLATES } from "../../agent/prompt-templates.ts";

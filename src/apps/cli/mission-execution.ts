@@ -3,10 +3,10 @@ import { Diagnostic } from "../../kernel/errors.ts";
 import { identitySchema } from "../../kernel/identity.ts";
 import { AssetKind } from "../../mission/contract.ts";
 import {
-  client,
-  printResult,
   addPagination,
+  client,
   pagination,
+  printResult,
 } from "./mission-support.ts";
 import { handleReadResult, parsePositiveInt } from "./shared.ts";
 

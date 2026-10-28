@@ -11,15 +11,15 @@ import type { CallerContext } from "../kernel/operation.ts";
 import type { Transaction } from "../kernel/store.ts";
 import { AuthorizationRefusal, authorizationRefused } from "./authorization.ts";
 import {
+  type AdmissionAnswer,
   AdmissionRefusal,
   CONTENT_ENCODING,
-  Disposition,
-  MissionErrorCode,
-  PlatformAddressKind,
-  type AdmissionAnswer,
   type deliveryAdmitSchema,
+  Disposition,
   type IntakeCheck,
+  MissionErrorCode,
   type PlatformAddress,
+  PlatformAddressKind,
   type unresolvedRequestCountSchema,
 } from "./contract.ts";
 import {

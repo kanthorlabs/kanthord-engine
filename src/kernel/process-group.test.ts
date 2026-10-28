@@ -6,9 +6,9 @@ import {
   FREEZE_PASSES_MAX,
   killChildTree,
   killProcessTree,
-  procStatRow,
   type ProcessRow,
   type ProcessSystem,
+  procStatRow,
 } from "./process-group.ts";
 import { killIfPresent } from "./test-support.ts";
 

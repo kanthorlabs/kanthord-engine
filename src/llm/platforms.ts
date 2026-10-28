@@ -6,12 +6,12 @@ import {
 } from "../kernel/pi-provider.ts";
 import {
   apiKeySecretSchema,
+  type CredentialPlatform,
   isNonblank,
   LoginSessionMode,
   oauthSecretSchema,
-  SecretShape,
-  type CredentialPlatform,
   type PlatformProbe,
+  SecretShape,
 } from "../custody/contract.ts";
 import {
   checkAnthropic,

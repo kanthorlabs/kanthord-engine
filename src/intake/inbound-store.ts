@@ -4,14 +4,14 @@ import { createIdentity } from "../kernel/identity.ts";
 import type { Transaction } from "../kernel/store.ts";
 import { configurationSchemaOf } from "./configuration.ts";
 import {
+  type ConsumerValue,
+  type Inbound,
   INBOUND_ID_PREFIX,
   InboundEventState,
   InboundKind,
-  inboundSchema,
-  type ConsumerValue,
-  type Inbound,
   type InboundKindValue,
   type InboundPlatformValue,
+  inboundSchema,
 } from "./contract.ts";
 
 const EMPTY_TEXT_LENGTH = 0;

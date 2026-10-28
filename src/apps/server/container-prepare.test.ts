@@ -21,9 +21,9 @@ import {
 import {
   cacheVolumeName,
   containerOwner,
-  SUCCESS_CODE,
   type RuntimeAnswer,
   type RuntimeHost,
+  SUCCESS_CODE,
 } from "./container-runtime.ts";
 import type { SlotLaunch } from "./slot-driver.ts";
 

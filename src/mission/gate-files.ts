@@ -2,10 +2,10 @@ import assert from "node:assert/strict";
 import type { CallerContext } from "../kernel/operation.ts";
 import {
   AssessmentResult,
-  AssetKind,
-  gateFilesSchema,
   type AssessmentSubmit,
+  AssetKind,
   type GateFiles,
+  gateFilesSchema,
 } from "./contract.ts";
 import { requiredActionsOf } from "./frozen-action.ts";
 import type { AssessmentRow } from "./record-store.ts";

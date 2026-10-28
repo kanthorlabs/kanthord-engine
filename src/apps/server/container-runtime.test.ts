@@ -4,8 +4,8 @@ import { test } from "node:test";
 import {
   ContainerRuntime,
   PlacementIssue,
-  PoolPlacement,
   type PlacementStatus,
+  PoolPlacement,
 } from "../../worker/contract.ts";
 import {
   boundedDetail,
@@ -23,11 +23,11 @@ import {
   parseCacheVolumes,
   removeArguments,
   runArguments,
+  type RuntimeAnswer,
+  type RuntimeHost,
   slotClientId,
   SUCCESS_CODE,
   volumeArguments,
-  type RuntimeAnswer,
-  type RuntimeHost,
 } from "./container-runtime.ts";
 
 const CLIENT_ID = "client_identity_01ARZ3NDEKTSV4RRFFQ69G5FAV";

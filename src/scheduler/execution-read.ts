@@ -8,8 +8,8 @@ import type { Dependencies } from "./service.ts";
 import {
   executionRecord,
   executionRecords,
-  readExecution,
   listExecutions,
+  readExecution,
 } from "./execution-store.ts";
 import type { schedulerOperations } from "./contract.ts";
 

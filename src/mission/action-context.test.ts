@@ -6,16 +6,16 @@ import { testHumanIdentity } from "../kernel/test-identity.ts";
 import {
   AssessmentResult,
   AssetKind,
+  type PlatformAddress,
   PlatformAddressKind,
   RepositoryAction,
   Resolution,
-  type PlatformAddress,
 } from "./contract.ts";
 import {
+  closeAttempt,
   insertAssessment,
   insertEvidence,
   openAttempt,
-  closeAttempt,
 } from "./record-store.ts";
 import { evidenceHarness, executionHarness } from "./test-support.ts";
 

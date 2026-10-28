@@ -3,11 +3,11 @@ import { hkdfSync } from "node:crypto";
 import { test } from "node:test";
 import {
   deriveHandoverKeys,
-  handoverAad,
   HANDOVER_KEY_INFO,
-  REPORT_KEY_INFO,
+  handoverAad,
   HandoverOpenError,
   openEnvelope,
+  REPORT_KEY_INFO,
   sealEnvelope,
 } from "./handover.ts";
 

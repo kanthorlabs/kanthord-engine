@@ -2,9 +2,9 @@ import assert from "node:assert/strict";
 import { z } from "zod";
 import { executionCredentialStore } from "../../custody/client.ts";
 import {
+  EXECUTION_CREDENTIAL_MAX_BYTES,
   handoverItemsSchema,
   handoverPayloadSchema,
-  EXECUTION_CREDENTIAL_MAX_BYTES,
 } from "../../custody/contract.ts";
 import { httpClient } from "../../gateway/client.ts";
 import {

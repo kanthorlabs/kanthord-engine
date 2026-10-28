@@ -26,14 +26,14 @@ import { Diagnostic } from "../kernel/errors.ts";
 import {
   DEADLINE_RADIX,
   SOCKET_PATH_BYTES_MAX,
-  SshAgentErrorCode,
-  SshAgentStep,
   SSH_AGENT_DIRECTORY_PREFIX,
   SSH_AGENT_SOCKET,
+  SshAgentErrorCode,
+  SshAgentStep,
+  type SshKeyAccess,
   SWEEP_GRACE_MS,
   sweepSshAgentDirectories,
   withSshAgent,
-  type SshKeyAccess,
 } from "./ssh-agent.ts";
 import { generateSshKey } from "./ssh-key.ts";
 

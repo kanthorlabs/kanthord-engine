@@ -5,22 +5,22 @@ import { createIdentity } from "../kernel/identity.ts";
 import { canonicalJSON } from "../kernel/json.ts";
 import { testHumanIdentity } from "../kernel/test-identity.ts";
 import {
+  AssessmentResult,
   AssetKind,
+  ClosingEvent,
   MissionErrorCode,
   NodeState,
   PlatformAddressKind,
-  AssessmentResult,
-  ClosingEvent,
   RevokeCause,
 } from "./contract.ts";
 import {
-  insertEvidence,
-  readAssets,
-  readEvidence,
   closeAttempt,
   insertAssessment,
+  insertEvidence,
   insertOutcome,
   readAssessment,
+  readAssets,
+  readEvidence,
   readOutcome,
 } from "./record-store.ts";
 import { outcomeRecord } from "./record-read.ts";

@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
-  GITHUB_RESOURCE_PATTERN,
   configurationSchemaOf,
+  GITHUB_RESOURCE_PATTERN,
   resourceIdentityOf,
 } from "./configuration.ts";
 import { InboundKind, InboundPlatform } from "./contract.ts";

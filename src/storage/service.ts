@@ -1,6 +1,6 @@
 import {
-  credentialPlatformList,
   type BindingsNamingFn,
+  credentialPlatformList,
   type CredentialPlatformSet,
   type CredentialRecords,
 } from "../custody/contract.ts";
@@ -8,7 +8,7 @@ import { IdentityKind } from "../kernel/caller.ts";
 import type { ResourceEntry } from "../kernel/health.ts";
 import type { CallerContext, OperationRegistry } from "../kernel/operation.ts";
 import type { Transaction } from "../kernel/store.ts";
-import { storageOperations, type StorageCredentialAnswer } from "./contract.ts";
+import { type StorageCredentialAnswer, storageOperations } from "./contract.ts";
 import { STORAGE_PLATFORMS } from "./platforms.ts";
 
 export interface Dependencies {

@@ -8,9 +8,9 @@ import type { Revision } from "../../mission/contract.ts";
 import { SHIPPED_TEMPLATES } from "../../agent/prompt-templates.ts";
 import {
   conflictInstruction,
-  RefreshResult,
   refreshAtClaim,
   refreshAtRelease,
+  RefreshResult,
 } from "./base-refresh.ts";
 import { releaseGate, ReleaseGateKind } from "./release-gate.ts";
 import {

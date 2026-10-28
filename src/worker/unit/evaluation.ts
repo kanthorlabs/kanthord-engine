@@ -10,18 +10,18 @@ import {
 } from "../../mission/contract.ts";
 import {
   AFFECTED_SUBJECT,
+  type AffectedEvidence,
   affectedEvidenceOf,
+  type AffectedResult,
   AffectedVerdict,
   runAffected,
-  type AffectedEvidence,
-  type AffectedResult,
 } from "./affected.ts";
 import type { ExecutionBudget } from "./budget.ts";
 import { ContextCancelled, DeadlineExceeded } from "../../kernel/context.ts";
 import {
   EndReason,
-  ExecutionEndKind,
   type ExecutionEnd,
+  ExecutionEndKind,
   type ExecutionRun,
 } from "./execution-run.ts";
 import {
@@ -43,33 +43,33 @@ import {
   affectedFailureReport,
   evaluationInstruction,
   evaluationJudgementSchema,
-  judgementRationale,
   failedVerificationReport,
+  judgementRationale,
   parseRepaired,
   ReplyRepair,
   type UnmetGround,
 } from "./judgement.ts";
 import {
+  type EvaluationFacts,
   EvaluationStage,
   reworkCauseOf,
-  type EvaluationFacts,
 } from "./rework-cause.ts";
 import { renderWorkPrompt } from "../../agent/prompt-composer.ts";
 import type { StepsInput } from "./steps-implement.ts";
 import { commandOwners } from "./release-gate.ts";
 import {
-  WorkspaceKind,
-  workRepositoriesOf,
   type ExamineCheckout,
+  workRepositoriesOf,
+  WorkspaceKind,
 } from "./workspace.ts";
 import { ActionResultKind, ExecutionIntent } from "../contract.ts";
 import {
+  environmentDigestsOf,
   evaluationEnd,
   evaluationSpan,
   testedCommitOf,
-  environmentDigestsOf,
-  verificationObserver,
   VerificationContext,
+  verificationObserver,
 } from "./method-telemetry.ts";
 import type { TestedInput } from "./verification.ts";
 

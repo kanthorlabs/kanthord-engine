@@ -15,9 +15,9 @@ import { temporary } from "../../kernel/test-support.ts";
 import { HttpStatus } from "../../kernel/http.ts";
 import { MissionErrorCode, missionOperations } from "../../mission/contract.ts";
 import {
+  environmentSecretOperations,
   EnvironmentStatus,
   EnvironmentTarget,
-  environmentSecretOperations,
   projectOperations,
 } from "../../project/contract.ts";
 import { workerOperations } from "../../worker/contract.ts";
@@ -31,32 +31,32 @@ import { trackingOperations } from "../../tracking/contract.ts";
 import { until } from "./cli-support.ts";
 import { fakeContainerHost, fakeRepositoryFiles } from "./container-fakes.ts";
 import {
-  cacheVolumeName,
   CACHE_MOUNT,
   CACHE_PROJECT_LABEL,
   CACHE_RESOURCE_LABEL,
+  cacheVolumeName,
   containerOwner,
-  SUCCESS_CODE,
   type RuntimeAnswer,
   type RuntimeHost,
+  SUCCESS_CODE,
 } from "./container-runtime.ts";
 import {
   completed,
   CONFIGURATION,
   createProject,
   environmentList,
+  type Fixture,
   gateFixture,
   importNode,
   NO_ITEMS,
   recordingSlotDriver,
   REPOSITORY_BINDING,
   REVIEWER_BINDING,
-  slotRuns,
   SLOT_NAME_PREFIX,
+  slotRuns,
+  type SlotStart,
   worker,
   WORKER_BINDING,
-  type Fixture,
-  type SlotStart,
 } from "./environment-test-support.ts";
 import { humanCaller } from "./test-support.ts";
 

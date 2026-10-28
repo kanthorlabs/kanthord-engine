@@ -3,13 +3,13 @@ import { join } from "node:path";
 import { test, type TestContext } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 import { parse, stringify } from "yaml";
-import { configuration, CONFIG_VERSION } from "../../config/index.ts";
+import { CONFIG_VERSION, configuration } from "../../config/index.ts";
 import { writePrivate } from "../../kernel/files.ts";
 import {
-  createIdentity,
-  identitySchema,
   createIdempotencyKey,
+  createIdentity,
   idempotencyKeySchema,
+  identitySchema,
 } from "../../kernel/identity.ts";
 import { temporary } from "../../kernel/test-support.ts";
 import type {

@@ -4,26 +4,26 @@ import { HttpStatus } from "../kernel/http.ts";
 import type { Transaction } from "../kernel/store.ts";
 import {
   CONTENT_FIELDS,
-  TASKS_FIELD,
   ContentField,
+  TASKS_FIELD,
   validateNodeContent,
   validateText,
 } from "./content.ts";
 import {
-  MissionErrorCode,
-  RevisionWrite,
   type Content,
   type CriterionSet,
   type HumanActor,
+  type Intent,
   type Mission,
   type MissionBindings,
   type MissionEnvironments,
+  MissionErrorCode,
   type NodeChange,
   type NodeUpdate,
   type Revision,
   type RevisionChange,
+  RevisionWrite,
   type TaskContent,
-  type Intent,
 } from "./contract.ts";
 import { guardEnvironmentMix } from "./environment-mix.ts";
 import { resolveContent, resolveTasks } from "./node-create.ts";
@@ -35,10 +35,10 @@ import {
   filenameTaken,
   incrementMissionVersion,
   insertRevision,
+  type NodeRow,
   readCurrentRevision,
   readRevision,
   updateNodeFilename,
-  type NodeRow,
 } from "./store.ts";
 import { requireActive, requireMission, requireNonterminal } from "./write.ts";
 

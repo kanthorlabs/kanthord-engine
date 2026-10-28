@@ -17,7 +17,7 @@ export const unusedHostTools: HostTools = {
 import { createIdentity } from "../kernel/identity.ts";
 import { ChainLevel } from "../agent/contract.ts";
 import { SHIPPED_TEMPLATES } from "../agent/prompt-templates.ts";
-import { ExecutionIntent, alwaysAvailable } from "./contract.ts";
+import { alwaysAvailable, ExecutionIntent } from "./contract.ts";
 
 export const TWO_AGENT_WORKER = "two-agent@1";
 export function twoAgentDeclarationOf(name: string): WorkerDeclaration | null {

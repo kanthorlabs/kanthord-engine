@@ -2,10 +2,10 @@ import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
 import pino from "pino";
 import {
-  GrantKind,
-  SshIdentitySubjectKind,
   type ActionFacts,
+  GrantKind,
   type GrantRequest,
+  SshIdentitySubjectKind,
 } from "../custody/contract.ts";
 import {
   background,

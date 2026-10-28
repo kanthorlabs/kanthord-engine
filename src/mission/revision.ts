@@ -1,4 +1,4 @@
-import { revisionSchema, type Revision } from "./contract.ts";
+import { type Revision, revisionSchema } from "./contract.ts";
 import type { RevisionRow } from "./store.ts";
 import type { Transaction } from "../kernel/store.ts";
 import { readAttemptPins } from "./record-store.ts";

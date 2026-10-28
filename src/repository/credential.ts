@@ -1,7 +1,7 @@
 import {
-  credentialPlatformList,
   type BindingsNamingFn,
   type CredentialCheckAnswer,
+  credentialPlatformList,
   type CredentialPlatformSet,
   type CredentialRecords,
   type GeneratedRevision,
@@ -12,8 +12,8 @@ import type { ResourceEntry } from "../kernel/health.ts";
 import type { CallerContext, OperationRegistry } from "../kernel/operation.ts";
 import type { Store, Transaction } from "../kernel/store.ts";
 import {
-  repositoryOperations,
   type RepositoryCredentialAnswer,
+  repositoryOperations,
 } from "./contract.ts";
 import { Platform, REPOSITORY_PLATFORMS } from "./credential-platform.ts";
 import { generateSshKey } from "./ssh-key.ts";

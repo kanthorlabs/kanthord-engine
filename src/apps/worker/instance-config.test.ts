@@ -10,11 +10,11 @@ import { temporary } from "../../kernel/test-support.ts";
 import { instanceConfigurationValue } from "../../worker/contract.ts";
 import {
   decodeInstanceConfiguration,
+  InstanceConfigSource,
   instanceDirectories,
   instanceFilePath,
   resolveInstanceConfiguration,
   writeInstanceFile,
-  InstanceConfigSource,
 } from "./instance-config.ts";
 
 const NAME = "laptop";

@@ -15,26 +15,26 @@ import { projectOperations } from "../../project/contract.ts";
 import { ClaimState, schedulerOperations } from "../../scheduler/contract.ts";
 import {
   instanceConfigurationSchema,
+  type RepositoryTransport,
   WORKER_TOKEN_INFO,
   workerOperations,
   workerTokenPayloadSchema,
-  type RepositoryTransport,
 } from "../../worker/contract.ts";
 import {
   fauxAssistantMessage,
   fauxToolCall,
+  transport as localTransport,
   scriptedModelRuntime,
   scriptedProvider,
-  transport as localTransport,
 } from "../../worker/unit/test-support.ts";
 import { Worker } from "../worker/index.ts";
 import { completed, until } from "./cli-support.ts";
 import {
+  COVERING_WORKER_BINDINGS,
   enableCoveringAgents,
   gatewayFixture,
   humanCaller,
   provisionRepositoryCredentials,
-  COVERING_WORKER_BINDINGS,
 } from "./test-support.ts";
 
 const TEST_TIMEOUT_MS = 180000;

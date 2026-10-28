@@ -11,19 +11,19 @@ import { Diagnostic } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import { canonicalJSON } from "../kernel/json.ts";
 import {
-  OperationResultType,
   type OperationResult,
+  OperationResultType,
 } from "../kernel/operation.ts";
 import { IN_MEMORY_DATABASE, Store } from "../kernel/store.ts";
 import { temporary } from "../kernel/test-support.ts";
 import {
   Consumer,
   ERROR_ARRAY_MAX_BYTES,
-  INTAKE_SERVICE_NAME,
+  type ErrorItem,
   InboundEventState,
   InboundKind,
   InboundPlatform,
-  type ErrorItem,
+  INTAKE_SERVICE_NAME,
   type IntakeConsumers,
 } from "./contract.ts";
 import { Dispatcher, nextCandidate, reserve } from "./dispatcher.ts";
@@ -35,9 +35,9 @@ import {
 import { allocateInboundId, insertInbound } from "./inbound-store.ts";
 import { intakeMigrations } from "./migrations.ts";
 import {
-  scriptedConsumers,
   type ConsumerAnswer,
   type ConsumerCall,
+  scriptedConsumers,
 } from "./test-support.ts";
 
 const PROJECT_ID = "project_01ARZ3NDEKTSV4RRFFQ69G5FAV";

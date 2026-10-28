@@ -8,22 +8,22 @@ import { setTimeout as delay } from "node:timers/promises";
 import { simpleGit } from "simple-git";
 import { isString } from "../../kernel/values.ts";
 import { parse, stringify } from "yaml";
-import { configuration, CONFIG_VERSION } from "../../config/index.ts";
+import { CONFIG_VERSION, configuration } from "../../config/index.ts";
 import { writePrivate } from "../../kernel/files.ts";
 import { HttpStatus } from "../../kernel/http.ts";
 import {
-  OperationResultType,
   type OperationResult,
+  OperationResultType,
 } from "../../kernel/operation.ts";
 import { temporary } from "../../kernel/test-support.ts";
 import {
   AssessmentResult,
-  NodeState,
   type Evidence,
+  NodeState,
 } from "../../mission/contract.ts";
 import {
-  WorkPullKind,
   type ExecutionRecord,
+  WorkPullKind,
 } from "../../scheduler/contract.ts";
 import {
   createFakeSshCredential,

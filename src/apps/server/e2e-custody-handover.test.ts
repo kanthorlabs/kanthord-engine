@@ -2,10 +2,10 @@ import assert from "node:assert/strict";
 import { join } from "node:path";
 import { test, type TestContext } from "node:test";
 import { parse, stringify } from "yaml";
-import { configuration, CONFIG_VERSION } from "../../config/index.ts";
+import { CONFIG_VERSION, configuration } from "../../config/index.ts";
 import {
-  plainHandoverPayloadSchema,
   type CredentialAnswer,
+  plainHandoverPayloadSchema,
 } from "../../custody/contract.ts";
 import { Intent } from "../../mission/contract.ts";
 import { httpClient } from "../../gateway/client.ts";
@@ -13,10 +13,10 @@ import { writePrivate } from "../../kernel/files.ts";
 import {
   deriveHandoverKeys,
   handoverAad,
+  type HandoverEnvelope,
   HandoverOpenError,
   openEnvelope,
   sealEnvelope,
-  type HandoverEnvelope,
 } from "../../kernel/handover.ts";
 import { HttpStatus } from "../../kernel/http.ts";
 import {
@@ -25,8 +25,8 @@ import {
 } from "../../kernel/identity.ts";
 import { digest } from "../../kernel/json.ts";
 import {
-  OperationResultType,
   type OperationResult,
+  OperationResultType,
 } from "../../kernel/operation.ts";
 import { temporary, testContext } from "../../kernel/test-support.ts";
 import {
@@ -42,11 +42,11 @@ import {
 import { workerOperations } from "../../worker/contract.ts";
 import { environment, kanthord, kanthordTerminal } from "./cli-support.ts";
 import {
+  COVERING_WORKER_BINDINGS,
   createFakeSshCredential,
+  enableCoveringAgents,
   FAKE_SSH_CREDENTIAL,
   gatewayFixture,
-  COVERING_WORKER_BINDINGS,
-  enableCoveringAgents,
 } from "./test-support.ts";
 
 const SUCCESS = 0;

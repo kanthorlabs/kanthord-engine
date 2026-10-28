@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
-import { execFile, spawn, type ChildProcess } from "node:child_process";
+import { type ChildProcess, execFile, spawn } from "node:child_process";
 import { lstat, mkdtemp, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { connect } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { promisify } from "node:util";
-import { DeadlineExceeded, type Context } from "../kernel/context.ts";
+import { type Context, DeadlineExceeded } from "../kernel/context.ts";
 import { Diagnostic } from "../kernel/errors.ts";
 import { isolatedGitEnvironment } from "../kernel/git-environment.ts";
 import {
@@ -14,7 +14,7 @@ import {
   type SshAccess,
   type SshRelayAccess,
 } from "./contract.ts";
-import { serveRelayAgent, type RelayAgent } from "./ssh-relay-agent.ts";
+import { type RelayAgent, serveRelayAgent } from "./ssh-relay-agent.ts";
 
 export type {
   SshAccess,

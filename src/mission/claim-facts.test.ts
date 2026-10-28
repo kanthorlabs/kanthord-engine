@@ -8,10 +8,10 @@ import {
   ActorKind,
   AssessmentResult,
   ClaimableState,
-  NodeState,
-  RepositoryAction,
   Intent,
   type MissionBindings,
+  NodeState,
+  RepositoryAction,
 } from "./contract.ts";
 import { isTerminal } from "./admission.ts";
 import { actionsOfRevision } from "./frozen-action.ts";
@@ -20,8 +20,8 @@ import {
   insertDependency,
   insertMission,
   insertNode,
-  readNode,
   readClaimRevisions,
+  readNode,
   setNodeState,
 } from "./store.ts";
 import { missionHarness } from "./test-support.ts";

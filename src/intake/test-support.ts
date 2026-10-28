@@ -3,18 +3,18 @@ import { randomBytes } from "node:crypto";
 import type { TestContext } from "node:test";
 import { ulid } from "ulid";
 import {
-  GrantKind,
-  SshIdentitySubjectKind,
   type Grant,
   type GrantExecution,
+  GrantKind,
   type GrantRequest,
   type Material,
   type SshIdentitySubject,
+  SshIdentitySubjectKind,
 } from "../custody/contract.ts";
 import {
-  OperationResultType,
   type ClientOptions,
   type OperationResult,
+  OperationResultType,
 } from "../kernel/operation.ts";
 import { IN_MEMORY_DATABASE, Store } from "../kernel/store.ts";
 import { REPOSITORY_COMPONENT_NAME } from "../repository/contract.ts";
@@ -27,8 +27,8 @@ import { intakeMigrations } from "./migrations.ts";
 import { S3Platform } from "../storage/index.ts";
 import {
   Consumer,
-  INTAKE_SERVICE_NAME,
   type ConsumerValue,
+  INTAKE_SERVICE_NAME,
   type IntakeConsumers,
 } from "./contract.ts";
 import type { Dependencies } from "./service.ts";

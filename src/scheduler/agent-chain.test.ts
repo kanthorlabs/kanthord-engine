@@ -21,8 +21,8 @@ import {
 import { agentMigrations } from "../agent/migrations.ts";
 import {
   AgentComponent,
-  SelectionKind,
   type Dependencies as AgentDependencies,
+  SelectionKind,
 } from "../agent/service.ts";
 import { background } from "../kernel/context.ts";
 import { ResourceStatus } from "../kernel/health.ts";
@@ -31,15 +31,15 @@ import type { CallerContext } from "../kernel/operation.ts";
 import { testMachineIdentity } from "../kernel/test-identity.ts";
 import {
   AgentChoiceKind,
+  type AgentPin,
+  type AgentSelection,
   ClaimIntent,
   ClaimNodeState,
+  type CooldownChange,
   CooldownChangeKind,
   EnvironmentFailure,
   ExecutionStopReason,
   ProviderFailure,
-  type AgentPin,
-  type AgentSelection,
-  type CooldownChange,
   type ReleaseStop,
 } from "./contract.ts";
 import { claimOnce, ClaimOutcome } from "./claim.ts";
@@ -51,8 +51,8 @@ import {
 } from "./execution-store.ts";
 import {
   executionFixture,
-  schedulerHarness,
   FIXTURE_NOW,
+  schedulerHarness,
   transitionFixture,
 } from "./test-support.ts";
 

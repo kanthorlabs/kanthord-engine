@@ -8,8 +8,8 @@ import { CommandName } from "./constants.ts";
 import {
   addCredentialCommand,
   credentialCode,
-  IDEMPOTENCY_KEY_OPTION,
   type CredentialGroup,
+  IDEMPOTENCY_KEY_OPTION,
 } from "./credential.ts";
 import {
   handleMutationResult,

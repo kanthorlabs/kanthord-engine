@@ -1,12 +1,12 @@
 import { addAbortListener } from "node:events";
 import assert from "node:assert/strict";
-import { join, dirname } from "node:path";
+import { dirname, join } from "node:path";
 import { randomBytes } from "node:crypto";
 import { homedir } from "node:os";
 import { deriveClientSecret } from "../../gateway/auth/jwt.ts";
 import {
-  directories,
   configPath,
+  directories,
   loadConfig,
   type ServerConfig,
 } from "../../config/index.ts";
@@ -21,23 +21,23 @@ import {
 import { CUSTODY_SERVICE_NAME, SERVER_HOLDER } from "../../custody/contract.ts";
 import {
   executionTrace,
-  SchedulerService,
   schedulerMigrations,
+  SchedulerService,
 } from "../../scheduler/index.ts";
 import {
   SCHEDULER_SERVICE_NAME,
   type WorkQueue,
 } from "../../scheduler/contract.ts";
-import { TrackingService, trackingMigrations } from "../../tracking/index.ts";
+import { trackingMigrations, TrackingService } from "../../tracking/index.ts";
 import {
   MISSION_PRODUCER,
   PROJECT_PRODUCER,
-  WORKER_PRODUCER,
   TRACKING_SERVICE_NAME,
+  WORKER_PRODUCER,
 } from "../../tracking/contract.ts";
 import {
-  MissionService,
   missionMigrations,
+  MissionService,
   uploadCheckSpan,
 } from "../../mission/index.ts";
 import {
@@ -46,11 +46,11 @@ import {
 } from "../../mission/contract.ts";
 import {
   PROJECT_SERVICE_NAME,
-  RepositoryPlatform,
-  projectOperations,
   type ProjectBindings,
+  projectOperations,
   type RepositoryConnector,
   type RepositoryFiles,
+  RepositoryPlatform,
 } from "../../project/contract.ts";
 import type {
   PoolPlacement,
@@ -59,24 +59,24 @@ import type {
 import type { SlotDriver } from "./slot-driver.ts";
 import { audit, ensureDirectory } from "../../kernel/files.ts";
 import {
-  Diagnostic,
-  diagnostic,
-  diagnosticFields,
   asError,
+  diagnostic,
+  Diagnostic,
+  diagnosticFields,
   OperationError,
 } from "../../kernel/errors.ts";
 import {
-  healthy,
-  HealthStatus,
-  lifecycle,
   type Healthcheck,
+  HealthStatus,
+  healthy,
+  lifecycle,
   type Service,
 } from "../../kernel/service.ts";
 import { OperationalLog } from "../../kernel/log.ts";
 import { HttpStatus } from "../../kernel/http.ts";
 import {
-  Store,
   type Migrations,
+  Store,
   type Transaction,
 } from "../../kernel/store.ts";
 import {
@@ -87,21 +87,21 @@ import {
 import { GatewayService } from "../../gateway/index.ts";
 import type { ResourceInventories } from "../../gateway/contract.ts";
 import {
-  gatewayMigrations,
-  directClient,
-  createInvocation,
   collectInventories,
+  createInvocation,
+  directClient,
+  gatewayMigrations,
 } from "../../gateway/index.ts";
 import {
+  enforceBindingPlacements,
+  ENVIRONMENT_SECRET_PLATFORMS,
   EnvironmentAgent,
   type EnvironmentModelRuntimeFactory,
-  ProjectService,
-  ENVIRONMENT_SECRET_PLATFORMS,
-  enforceBindingPlacements,
   projectMigrations,
+  ProjectService,
   projectSshIdentityAuthorization,
 } from "../../project/index.ts";
-import { IntakeService, intakeMigrations } from "../../intake/index.ts";
+import { intakeMigrations, IntakeService } from "../../intake/index.ts";
 import {
   Consumer,
   INTAKE_SERVICE_NAME,
@@ -109,11 +109,11 @@ import {
 } from "../../intake/contract.ts";
 import { mintServiceIdentity } from "../../kernel/service-mint.ts";
 import {
-  WorkerService,
-  isHostedWorker,
-  workerMigrations,
-  toolDeclarations,
   agentPromptContribution,
+  isHostedWorker,
+  toolDeclarations,
+  workerMigrations,
+  WorkerService,
 } from "../../worker/index.ts";
 import { installPiTools } from "../../agent/pi-tools.ts";
 import { ThreadDriver } from "./thread-driver.ts";
@@ -125,47 +125,47 @@ import type { EnvironmentRuntime } from "../../project/environment-state.ts";
 import { COMMAND_LIMIT_MS } from "../../worker/unit/budget.ts";
 import {
   containerOwner,
-  systemRuntimeHost,
   type RuntimeHost,
+  systemRuntimeHost,
 } from "./container-runtime.ts";
 import { packageVersion } from "../../kernel/version.ts";
 import { WorkerPool } from "./worker-pool.ts";
 import { instanceIssuer } from "./instance-issuer.ts";
 import { AgentComponent, agentMigrations } from "../../agent/index.ts";
 import {
-  WorkbenchService,
   workbenchMigrations,
   type WorkbenchModelRuntimeFactory,
+  WorkbenchService,
 } from "../../workbench/index.ts";
 import { WORKBENCH_SERVICE_NAME } from "../../workbench/contract.ts";
 import { AGENT_COMPONENT_NAME } from "../../agent/contract.ts";
 import { loadPi } from "../../agent/pi.ts";
 import { PromptConsumer } from "../../agent/prompt-render.ts";
 import {
-  RepositoryComponent,
   checkServerRepositoryTools,
-  RepositoryCredentials,
-  RepositoryHostKeys,
-  REPOSITORY_PLATFORMS,
   decodeGitHubEvent,
-  platformImplementations,
-  repositoryFiles,
-  repositoryMigrations,
   type GitWriter,
   type HostKeySources,
+  platformImplementations,
+  REPOSITORY_PLATFORMS,
+  RepositoryComponent,
+  RepositoryCredentials,
+  repositoryFiles,
+  RepositoryHostKeys,
+  repositoryMigrations,
 } from "../../repository/index.ts";
 import { REPOSITORY_COMPONENT_NAME } from "../../repository/contract.ts";
-import { LlmComponent, LLM_PLATFORMS } from "../../llm/index.ts";
+import { LLM_PLATFORMS, LlmComponent } from "../../llm/index.ts";
 import {
-  StorageComponent,
   STORAGE_PLATFORMS,
+  StorageComponent,
   storageImplementations,
 } from "../../storage/index.ts";
 import {
   OperationRegistry,
+  type OperationResult,
   OperationResultType,
   StoreName,
-  type OperationResult,
 } from "../../kernel/operation.ts";
 import {
   background,

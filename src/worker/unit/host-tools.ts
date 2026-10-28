@@ -3,7 +3,7 @@ import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { canonicalJSON } from "../../kernel/json.ts";
 import { Diagnostic } from "../../kernel/errors.ts";
 import { EVIDENCE_UPLOAD_PARAMETERS } from "../../agent/catalog.ts";
-import { HostTool, uploadResultSchema, type HostTools } from "../contract.ts";
+import { HostTool, type HostTools, uploadResultSchema } from "../contract.ts";
 
 export function evidenceUploadTool(
   hostTools: HostTools,

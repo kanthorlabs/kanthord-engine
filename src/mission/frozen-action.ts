@@ -4,15 +4,15 @@ import type { Transaction } from "../kernel/store.ts";
 import {
   EndState,
   ExpectedEndState,
+  type FrozenAction,
+  frozenActionSchema,
+  Intent,
   MissionBindingKind,
+  type MissionBindings,
   RepositoryAction,
   Resolution,
-  Intent,
-  frozenActionSchema,
-  type FrozenAction,
-  type MissionBindings,
 } from "./contract.ts";
-import { readAttempt, readRequests, type EvidenceRow } from "./record-store.ts";
+import { type EvidenceRow, readAttempt, readRequests } from "./record-store.ts";
 import { readRevision, type RevisionRow } from "./store.ts";
 
 const bindingIdsSchema = z.array(z.string());

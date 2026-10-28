@@ -5,16 +5,16 @@ import type { Transaction } from "../kernel/store.ts";
 import { isTerminal } from "./admission.ts";
 import { ContentField, validateText } from "./content.ts";
 import {
-  MissionErrorCode,
-  RebindSkipCondition,
-  RevisionWrite,
   type HumanActor,
   type Mission,
   type MissionBindings,
   type MissionEnvironments,
+  MissionErrorCode,
   type Rebind,
   type RebindResult,
+  RebindSkipCondition,
   type Revision,
+  RevisionWrite,
 } from "./contract.ts";
 import { guardEnvironmentMix } from "./environment-mix.ts";
 import { nodeRecord, requireNode } from "./node-read.ts";
@@ -23,9 +23,9 @@ import { openAttemptsOf } from "./store.ts";
 import {
   incrementMissionVersion,
   insertRevision,
+  type NodeRow,
   readCurrentRevision,
   readMissionNodes,
-  type NodeRow,
 } from "./store.ts";
 import { requireActive, requireMission, requireNonterminal } from "./write.ts";
 

@@ -3,13 +3,13 @@ import { OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import type { Transaction } from "../kernel/store.ts";
 import {
+  type ExecutionEnds,
+  type HumanActor,
+  Intent,
   MissionErrorCode,
   NodeState,
-  Intent,
   PROPOSAL_IDENTITY_PREFIX,
-  type HumanActor,
   type ProposalApprove,
-  type ExecutionEnds,
 } from "./contract.ts";
 import { stateConflict } from "./control.ts";
 import { unblockNode } from "./control-unblock.ts";
@@ -19,7 +19,7 @@ import { markProposalApproved } from "./proposal-store.ts";
 import { proposalRecord, requireProposal } from "./proposal-read.ts";
 import { revisionFromRow } from "./revision.ts";
 import type { Dependencies } from "./service.ts";
-import { insertDependency, readCurrentRevision, intentOf } from "./store.ts";
+import { insertDependency, intentOf, readCurrentRevision } from "./store.ts";
 import { requireActive, requireMission } from "./write.ts";
 
 const IDENTITY_SEPARATOR_LENGTH = 1;

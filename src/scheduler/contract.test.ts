@@ -3,17 +3,17 @@ import { test } from "node:test";
 import {
   ClaimState,
   executionRecordSchema,
-  workPullSchema,
   executionReleaseSchema,
-  schedulerOperations,
-  traceIdSchema,
-  spanIdSchema,
   releaseStopSchema,
+  schedulerOperations,
+  spanIdSchema,
+  traceIdSchema,
+  workPullSchema,
 } from "./contract.ts";
 import {
   executionFixture,
-  FIXTURE_TRACE_ID,
   FIXTURE_SPAN_ID,
+  FIXTURE_TRACE_ID,
 } from "./test-support.ts";
 
 test("Scheduler inputs are closed and runtime identities are canonical", () => {

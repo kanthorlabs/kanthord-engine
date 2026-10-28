@@ -18,12 +18,12 @@ import type { CallerContext } from "../kernel/operation.ts";
 import type { Store, Transaction } from "../kernel/store.ts";
 import {
   IntakeErrorCode,
+  type OutboundOperationValue,
   OutboundRequestState,
+  type OutboundRequestStateValue,
   RESULT_MAX_BYTES,
   ResultClass,
   resultClassSchema,
-  type OutboundOperationValue,
-  type OutboundRequestStateValue,
   type ResultClassValue,
 } from "./contract.ts";
 import {
@@ -31,11 +31,11 @@ import {
   findById,
   findByKey,
   insertPending,
+  type OutboundFailure,
   OutboundKeyConflict,
   outboundRecord,
-  succeed,
-  type OutboundFailure,
   type OutboundRow,
+  succeed,
 } from "./outbound-store.ts";
 
 const EMPTY_LIST_LENGTH = 0;

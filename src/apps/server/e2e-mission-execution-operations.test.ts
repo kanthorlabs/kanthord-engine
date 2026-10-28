@@ -6,41 +6,41 @@ import { httpClient } from "../../gateway/client.ts";
 import { writePrivate } from "../../kernel/files.ts";
 import { HttpStatus } from "../../kernel/http.ts";
 import {
-  OperationResultType,
   type OperationResult,
+  OperationResultType,
 } from "../../kernel/operation.ts";
 import { temporary } from "../../kernel/test-support.ts";
 import type {
-  evidenceSubmitResultSchema,
   assessmentSubmitResultSchema,
+  evidenceSubmitResultSchema,
 } from "../../mission/contract.ts";
 import {
   ActorKind,
   ActorService,
   AssessmentResult,
   AssetKind,
-  PlatformAddressKind,
-  ClosingEvent,
-  NodeState,
-  Resolution,
-  missionOperations,
-  Intent,
-  type Evidence,
-  type Node,
-  type Outcome,
-  type Revision,
   type Attempt,
+  ClosingEvent,
+  type Evidence,
+  Intent,
+  missionOperations,
+  type Node,
+  NodeState,
+  type Outcome,
+  PlatformAddressKind,
+  Resolution,
+  type Revision,
 } from "../../mission/contract.ts";
 import {
   ClaimState,
-  WorkPullKind,
   type ExecutionRecord,
+  WorkPullKind,
 } from "../../scheduler/contract.ts";
 import {
   createFakeSshCredential,
-  gatewayFixture,
   fakeGitHub,
   fakeS3,
+  gatewayFixture,
 } from "./test-support.ts";
 import { environment, kanthord } from "./cli-support.ts";
 

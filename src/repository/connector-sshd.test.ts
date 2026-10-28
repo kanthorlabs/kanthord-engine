@@ -26,7 +26,7 @@ import {
 } from "./connector.ts";
 import { RepositoryFileState } from "./contract.ts";
 import { gitFailureReason } from "./git-failure.ts";
-import { SshAgentErrorCode, type SshAccess } from "./ssh-agent.ts";
+import { type SshAccess, SshAgentErrorCode } from "./ssh-agent.ts";
 import { generateSshKey } from "./ssh-key.ts";
 import {
   createBareRepository,

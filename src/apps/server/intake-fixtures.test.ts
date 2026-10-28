@@ -16,11 +16,11 @@ import {
   ReviewState,
 } from "../../repository/github.ts";
 import {
-  fakeGitHub,
-  fakeS3,
-  FakePullState,
-  gatewayFixture,
   bareRepository,
+  fakeGitHub,
+  FakePullState,
+  fakeS3,
+  gatewayFixture,
   mappedTransport,
   remoteHead,
 } from "./test-support.ts";

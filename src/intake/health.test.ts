@@ -2,9 +2,9 @@ import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
 import {
   GrantKind,
-  InboundOperation,
   type GrantOf,
   type GrantRequest,
+  InboundOperation,
   type Material,
 } from "../custody/contract.ts";
 import { IdentityKind } from "../kernel/caller.ts";
@@ -26,17 +26,17 @@ import type {
 } from "../repository/github.ts";
 import {
   Consumer,
-  INTAKE_SERVICE_NAME,
   InboundKind,
-  InboundPlatform,
-  ResultClass,
   type InboundKindValue,
+  InboundPlatform,
+  INTAKE_SERVICE_NAME,
+  ResultClass,
 } from "./contract.ts";
 import {
   INBOUND_TARGET_KIND,
   InboundCapability,
-  inboundInventory,
   type InboundHealthDependencies,
+  inboundInventory,
 } from "./health.ts";
 import { allocateInboundId, insertInbound } from "./inbound-store.ts";
 import { intakeMigrations } from "./migrations.ts";

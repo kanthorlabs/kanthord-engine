@@ -7,7 +7,7 @@ import {
   type Context,
   DeadlineExceeded,
 } from "./context.ts";
-import { HealthStatus, type Healthcheck } from "./service.ts";
+import { type Healthcheck, HealthStatus } from "./service.ts";
 import { ValueType } from "./values.ts";
 
 export const componentHealthSchema = z.record(

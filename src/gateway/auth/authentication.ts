@@ -3,20 +3,20 @@ import { identitySchema, ulidSchema } from "../../kernel/identity.ts";
 import { isString } from "../../kernel/values.ts";
 import { background, type Context } from "../../kernel/context.ts";
 import {
-  IdentityKind,
+  type CallerIdentity,
   CLIENT_IDENTITY_PREFIX,
   CONNECTION_PREFIX,
-  WORKER_INSTANCE_PREFIX,
-  MAX_HUMAN_USERNAME_LENGTH,
-  MAX_DISPLAY_NAME_LENGTH,
+  type HumanIdentity,
+  IdentityKind,
   isHumanIdentity,
   isMachineIdentity,
   isServiceIdentity,
   isWorkerIdentity,
-  type HumanIdentity,
   type MachineIdentity,
+  MAX_DISPLAY_NAME_LENGTH,
+  MAX_HUMAN_USERNAME_LENGTH,
+  WORKER_INSTANCE_PREFIX,
   type WorkerIdentity,
-  type CallerIdentity,
 } from "../../kernel/caller.ts";
 import {
   mintHumanIdentity,
@@ -24,20 +24,20 @@ import {
   mintWorkerIdentity,
 } from "../../kernel/caller-mint.ts";
 import {
-  WorkerPlacement,
   type ProjectBindings,
+  WorkerPlacement,
 } from "../../project/contract.ts";
 import {
-  workerResourceIdentitySchema,
   type WorkerInstanceLookups,
   type WorkerRegistrations,
+  workerResourceIdentitySchema,
 } from "../../worker/contract.ts";
-import { validText, signingKey } from "./jwt.ts";
+import { signingKey, validText } from "./jwt.ts";
 import {
   JwtCause,
-  WorkerGroupEnded,
   jwtRefused,
   unauthorized,
+  WorkerGroupEnded,
 } from "../errors.ts";
 const MILLISECONDS_PER_SECOND = 1000;
 const BEARER_PREFIX_LENGTH = 7;

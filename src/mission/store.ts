@@ -4,14 +4,14 @@ import { HttpStatus } from "../kernel/http.ts";
 import { createIdentity } from "../kernel/identity.ts";
 import type { Transaction } from "../kernel/store.ts";
 import {
+  type Intent,
+  intentSchema,
+  type Mission,
   MISSION_IDENTITY_PREFIX,
   MISSION_INITIAL_VERSION,
   MissionErrorCode,
   NodeState,
-  intentSchema,
-  type Mission,
   type Revision,
-  type Intent,
 } from "./contract.ts";
 import type { DepEdge } from "./graph.ts";
 

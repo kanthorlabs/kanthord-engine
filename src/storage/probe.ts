@@ -6,8 +6,8 @@ import {
 import type { Context } from "../kernel/context.ts";
 import {
   ResourceFailureReason,
-  ResourceStatus,
   type ResourceObserver,
+  ResourceStatus,
   type ResourceStatusValue,
 } from "../kernel/health.ts";
 import { HttpStatus } from "../kernel/http.ts";

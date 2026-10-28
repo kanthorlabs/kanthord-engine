@@ -3,16 +3,16 @@ import { test, type TestContext } from "node:test";
 import { background } from "../kernel/context.ts";
 import { IdentityKind, type ServiceIdentity } from "../kernel/caller.ts";
 import { canonicalJSON } from "../kernel/json.ts";
-import { OperationRegistry, type CallerContext } from "../kernel/operation.ts";
+import { type CallerContext, OperationRegistry } from "../kernel/operation.ts";
 import { IN_MEMORY_DATABASE, Store } from "../kernel/store.ts";
 import { temporary } from "../kernel/test-support.ts";
 import { repositoryMigrations } from "../repository/index.ts";
 import {
   BINDING_SET_INITIAL_VERSION,
   BindingKind,
+  bindingSetWriteInputSchema,
   PROJECT_SERVICE_NAME,
   ProjectErrorCode,
-  bindingSetWriteInputSchema,
   projectOperations,
   repositoryConfigSchema,
 } from "./contract.ts";
@@ -21,11 +21,11 @@ import {
   DEFAULT_ENVIRONMENT_MEMORY_MB,
 } from "./config.ts";
 import {
-  PROBE_ALLOWLIST,
+  type EnvironmentAgentPort,
   environmentAgentTools,
   parseProbeCommand,
+  PROBE_ALLOWLIST,
   writeStoredEnvironment,
-  type EnvironmentAgentPort,
 } from "./environment-agent-tools.ts";
 import { ProjectEnvironments } from "./environment.ts";
 import type {

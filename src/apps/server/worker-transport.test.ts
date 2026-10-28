@@ -3,9 +3,9 @@ import { test } from "node:test";
 import { request as httpRequest } from "node:http";
 import { testClient } from "hono/testing";
 import {
-  gatewayFixture,
   domainHealth,
   fakeMachines,
+  gatewayFixture,
   TEST_PROJECT_ID,
   TEST_WORKER_BINDING,
 } from "./test-support.ts";

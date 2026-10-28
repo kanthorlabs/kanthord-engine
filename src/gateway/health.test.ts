@@ -2,10 +2,10 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { HealthRegistry } from "../kernel/health.ts";
 import {
-  gatewayFixture,
   fakeLookups,
-  TEST_WORKER_BINDING,
+  gatewayFixture,
   TEST_PROJECT_ID,
+  TEST_WORKER_BINDING,
 } from "./test-support.ts";
 import { directClient } from "./index.ts";
 import { OperationResultType } from "../kernel/operation.ts";

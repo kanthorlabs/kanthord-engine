@@ -8,13 +8,13 @@ import type { ApprovedModelsFn } from "../agent/contract.ts";
 import type { Environment } from "../kernel/devcontainer.ts";
 import { EnvironmentSource } from "../kernel/devcontainer.ts";
 import {
+  type CredentialMetadataRecord,
+  type ExecutionEnvironment,
+  type ExecutionSetup,
   executionSetupSchema,
   InstancePlacement,
-  WorkerErrorCode,
-  type ExecutionEnvironment,
-  type CredentialMetadataRecord,
-  type ExecutionSetup,
   type SchedulerClaims,
+  WorkerErrorCode,
 } from "./contract.ts";
 import {
   bindingParts,

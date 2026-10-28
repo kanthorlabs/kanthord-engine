@@ -5,16 +5,16 @@ import { isString } from "../kernel/values.ts";
 import { HttpMethod, HttpStatus } from "../kernel/http.ts";
 import {
   AccessPolicy,
+  type Operation,
   OperationLifetime,
   StoreName,
-  type Operation,
 } from "../kernel/operation.ts";
 import type { Transaction } from "../kernel/store.ts";
 import type { Context } from "../kernel/context.ts";
 import type { CallerIdentity } from "../kernel/caller.ts";
 import { errorSchema } from "../kernel/errors.ts";
 import { tagSchema } from "../kernel/tag.ts";
-import { failureCauseSchema, type FailureCause } from "../kernel/cause.ts";
+import { type FailureCause, failureCauseSchema } from "../kernel/cause.ts";
 import { CommitType } from "../kernel/commit-message.ts";
 
 export const MISSION_SERVICE_NAME = "mission";

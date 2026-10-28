@@ -4,15 +4,15 @@ import { createIdentity } from "../kernel/identity.ts";
 import { canonicalJSON } from "../kernel/json.ts";
 import { testHumanIdentity } from "../kernel/test-identity.ts";
 import { ActorKind, AssessmentResult, Intent, NodeState } from "./contract.ts";
-import { currencyOf, currentAssessmentOf, CurrencyReason } from "./currency.ts";
+import { currencyOf, CurrencyReason, currentAssessmentOf } from "./currency.ts";
 import { assessmentRecord } from "./record-read.ts";
 import {
-  openAttempt,
+  type AssessmentRow,
   closeAttempt,
   insertAssessment,
-  insertOutcome,
   insertEvidence,
-  type AssessmentRow,
+  insertOutcome,
+  openAttempt,
 } from "./record-store.ts";
 import {
   deleteDependency,

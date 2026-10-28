@@ -4,12 +4,12 @@ import {
   createFauxCore,
   createProvider,
   envApiKeyAuth,
+  type FauxResponseStep,
   getCurrentTools,
   getSystemMessageText,
-  type FauxResponseStep,
+  type Context as ModelContext,
   type SimpleStreamOptions,
   type StreamFunction,
-  type Context as ModelContext,
 } from "@earendil-works/pi-ai";
 import pino from "pino";
 import type {

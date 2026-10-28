@@ -4,9 +4,9 @@ import { setTimeout as delay } from "node:timers/promises";
 import type { z } from "zod";
 import { directClient } from "../../gateway/index.ts";
 import {
-  OperationResultType,
   type Operation,
   type OperationResult,
+  OperationResultType,
 } from "../../kernel/operation.ts";
 import {
   EnvironmentStatus,

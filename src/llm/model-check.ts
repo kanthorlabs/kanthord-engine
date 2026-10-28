@@ -1,16 +1,16 @@
 import {
-  getSupportedThinkingLevels,
-  Type,
   type Api,
   type AssistantMessage,
   type Credential,
   type CredentialStore,
+  getSupportedThinkingLevels,
   type Message,
   type Model,
-  type ModelThinkingLevel,
   type ModelsSimpleStreamOptions,
+  type ModelThinkingLevel,
   type Tool,
   type ToolCall,
+  Type,
 } from "@earendil-works/pi-ai";
 import type { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import {
@@ -24,8 +24,8 @@ import { HttpStatus } from "../kernel/http.ts";
 import { redactReason, thrownReason } from "../kernel/probe.ts";
 import {
   LlmErrorCode,
-  ModelCheckResult,
   type ModelCheckAnswer,
+  ModelCheckResult,
 } from "./contract.ts";
 import {
   createModelRuntime,
@@ -35,8 +35,8 @@ import { MODEL_CALL_FAILURES } from "./probes.ts";
 import {
   LLM_PLATFORMS,
   piProviderId,
-  ReasoningLevel,
   type Platform,
+  ReasoningLevel,
 } from "./platforms.ts";
 import { providerFailureOf } from "./provider-failure.ts";
 import {

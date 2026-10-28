@@ -4,19 +4,19 @@ import { testHumanIdentity } from "../kernel/test-identity.ts";
 import { OperationError } from "../kernel/errors.ts";
 import { createIdentity } from "../kernel/identity.ts";
 import {
+  EndState,
   Intent,
   NodeState,
-  ResumeTarget,
-  EndState,
   RepositoryAction,
+  ResumeTarget,
   RevokeCause,
-  StartPoint,
   type RevokedExecution,
+  StartPoint,
 } from "./contract.ts";
 import { Act, ActAttribute } from "./act-telemetry.ts";
 import { ControlError } from "./control.ts";
-import { openAttempt, readAttempt, insertEvidence } from "./record-store.ts";
-import { setNodeState, insertNode, insertDependency } from "./store.ts";
+import { insertEvidence, openAttempt, readAttempt } from "./record-store.ts";
+import { insertDependency, insertNode, setNodeState } from "./store.ts";
 import { actCalls, controlHarness, revokedExecution } from "./test-support.ts";
 
 const IDENTITY = testHumanIdentity("ulrich", "Ulrich", "token");

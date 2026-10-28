@@ -12,13 +12,13 @@ import {
 } from "../custody/contract.ts";
 import {
   amazonBedrockMetadataSchema,
+  approvedModels,
   approvedModelSchema,
   azureMetadataSchema,
   cloudflareAIGatewayMetadataSchema,
   cloudflareWorkersAIMetadataSchema,
   googleVertexMetadataSchema,
   isLlmPlatform,
-  approvedModels,
   LLM_PLATFORMS,
   LLM_PROVIDERS,
   MODEL_DEFAULT_CONTEXT_WINDOW,

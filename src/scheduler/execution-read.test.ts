@@ -5,9 +5,9 @@ import { createIdentity } from "../kernel/identity.ts";
 import { testMachineIdentity } from "../kernel/test-identity.ts";
 import {
   executionFixture,
-  schedulerHarness,
-  FIXTURE_NOW,
   FIXTURE_DEADLINE,
+  FIXTURE_NOW,
+  schedulerHarness,
 } from "./test-support.ts";
 import { insertExecution, readExecution } from "./execution-store.ts";
 import { ClaimState } from "./contract.ts";

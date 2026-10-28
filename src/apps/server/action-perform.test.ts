@@ -11,44 +11,44 @@ import { directClient } from "../../gateway/index.ts";
 import {
   CheckEndState,
   IntakeErrorCode,
+  intakeOperations,
   OutboundOperation,
   OutboundRequestState,
   ResultClass,
   SERVICE_MERGE_REQUEST_KEY_PREFIX,
-  intakeOperations,
 } from "../../intake/contract.ts";
 import { Diagnostic } from "../../kernel/errors.ts";
 import { writePrivate } from "../../kernel/files.ts";
 import { HttpMethod, HttpStatus } from "../../kernel/http.ts";
 import {
-  OperationResultType,
   type OperationResult,
+  OperationResultType,
 } from "../../kernel/operation.ts";
 import { mintServiceIdentity } from "../../kernel/service-mint.ts";
 import { temporary } from "../../kernel/test-support.ts";
 import {
+  Intent,
   MISSION_SERVICE_NAME,
   MissionErrorCode,
-  PlatformAddressKind,
-  StartPoint,
   missionOperations,
   type PlatformAddress,
+  PlatformAddressKind,
   type Revision,
-  Intent,
+  StartPoint,
 } from "../../mission/contract.ts";
 import { httpClient } from "../../gateway/client.ts";
 import { GitStage, GitWriteError } from "../../repository/index.ts";
 import type { ExecutionRecord } from "../../scheduler/contract.ts";
 import { environment, kanthord } from "./cli-support.ts";
 import {
-  FAKE_SSH_CREDENTIAL,
   bareRepository,
   createFakeSshCredential,
+  FAKE_SSH_CREDENTIAL,
   fakeGitHub,
+  type FakeGitHubCall,
   gatewayFixture,
   mappedTransport,
   remoteHead,
-  type FakeGitHubCall,
 } from "./test-support.ts";
 import { createIdempotencyKey } from "../../kernel/identity.ts";
 

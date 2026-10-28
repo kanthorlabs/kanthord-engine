@@ -9,10 +9,10 @@ import { canonicalJSON } from "../kernel/json.ts";
 import { testHumanIdentity } from "../kernel/test-identity.ts";
 import {
   AssetKind,
+  type EvidenceSubmit,
   MissionErrorCode,
   NodeState,
   UPLOAD_LIFETIME_MS,
-  type EvidenceSubmit,
 } from "./contract.ts";
 import { IntakeErrorCode, ResultClass } from "../intake/contract.ts";
 import { S3_RESULT_CODE_PREFIX } from "../storage/contract.ts";

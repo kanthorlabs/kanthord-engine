@@ -16,23 +16,23 @@ import { promisify } from "node:util";
 import { z } from "zod";
 import {
   CancellationContext,
+  type Context,
   DEADLINE_EXCEEDED_CODE,
   DeadlineExceeded,
-  type Context,
 } from "../kernel/context.ts";
 import { CodedError, Diagnostic } from "../kernel/errors.ts";
 import {
   GIT_UNSAFE_OPTIONS,
   isolatedGitEnvironment,
 } from "../kernel/git-environment.ts";
-import { RepositoryFileState, type RepositoryFile } from "./contract.ts";
+import { type RepositoryFile, RepositoryFileState } from "./contract.ts";
 import { GIT_DEADLINE_EXCEEDED } from "./git-failure.ts";
-import { CheckEndState, ExpectedEndState, type CheckFold } from "./github.ts";
+import { CheckEndState, type CheckFold, ExpectedEndState } from "./github.ts";
 import { NODE_BRANCH_PATTERN } from "./node-branch.ts";
 import {
+  type SshAccess,
   SshAgentErrorCode,
   withSshAgent,
-  type SshAccess,
 } from "./ssh-agent.ts";
 
 const GIT_FAILED = "repository.connector.git_failed";

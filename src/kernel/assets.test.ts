@@ -5,14 +5,14 @@ import { test } from "node:test";
 import { pathToFileURL } from "node:url";
 import {
   DASHBOARD_ASSET_PREFIX,
-  PACKAGE_MANIFEST,
   dashboardAsset,
-  PI_TOOLS_ASSET_PREFIX,
+  PACKAGE_MANIFEST,
   packageManifest,
+  PI_TOOLS_ASSET_PREFIX,
   piToolAsset,
   shippedAsset,
-  workerThreadAsset,
   WORKER_THREAD_ASSET,
+  workerThreadAsset,
 } from "./assets.ts";
 import { temporary } from "./test-support.ts";
 

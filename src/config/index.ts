@@ -3,10 +3,10 @@ import convict, { type Field, type Schema } from "convict";
 import { stringify } from "yaml";
 import { dirname } from "node:path";
 import {
-  parseMapping,
   inspectTree,
-  MAX_CONFIG_NODES,
   MAX_CONFIG_DEPTH,
+  MAX_CONFIG_NODES,
+  parseMapping,
 } from "../kernel/yaml.ts";
 export { directories, type Directories } from "../kernel/xdg.ts";
 export { parseMapping } from "../kernel/yaml.ts";
@@ -23,23 +23,23 @@ import {
 import { isObject } from "../kernel/values.ts";
 
 import {
+  type GlobalConfig,
   globalConfigSchema,
   MASTER_KEY_BYTES,
-  type GlobalConfig,
 } from "./global.ts";
-import { gatewayConfigSchema, type GatewayConfig } from "../gateway/config.ts";
-import { missionConfigSchema, type MissionConfig } from "../mission/config.ts";
-import { agentConfigSchema, type AgentConfig } from "../agent/config.ts";
-import { projectConfigSchema, type ProjectConfig } from "../project/index.ts";
+import { type GatewayConfig, gatewayConfigSchema } from "../gateway/config.ts";
+import { type MissionConfig, missionConfigSchema } from "../mission/config.ts";
+import { type AgentConfig, agentConfigSchema } from "../agent/config.ts";
+import { type ProjectConfig, projectConfigSchema } from "../project/index.ts";
 import { intakeConfigSchema } from "../intake/index.ts";
-import { workerConfigSchema, type WorkerConfig } from "../worker/config.ts";
+import { type WorkerConfig, workerConfigSchema } from "../worker/config.ts";
 import {
-  schedulerConfigSchema,
   type SchedulerConfig,
+  schedulerConfigSchema,
 } from "../scheduler/config.ts";
 import {
-  trackingConfigSchema,
   type TrackingConfig,
+  trackingConfigSchema,
 } from "../tracking/config.ts";
 const EMPTY_SCHEMA_FIELD_COUNT = 0;
 const CONTAINER_INIT_COMMAND =

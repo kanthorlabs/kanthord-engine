@@ -3,8 +3,8 @@ import {
   CauseAssigner,
   CauseCategory,
   CauseSubcategory,
-  unattributed,
   type FailureCause,
+  unattributed,
 } from "../../kernel/cause.ts";
 import { UnmetGround } from "./judgement.ts";
 import type { AffectedVerdict } from "./affected.ts";

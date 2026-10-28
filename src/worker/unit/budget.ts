@@ -2,8 +2,8 @@ import { addAbortListener } from "node:events";
 import assert from "node:assert/strict";
 import {
   CancellationContext,
-  DeadlineExceeded,
   type Context,
+  DeadlineExceeded,
 } from "../../kernel/context.ts";
 import { BudgetLimit } from "../../scheduler/contract.ts";
 

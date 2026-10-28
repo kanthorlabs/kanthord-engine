@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { unusedHostTools } from "../../worker/test-support.ts";
-import { mkdirSync, writeFileSync, existsSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test, type TestContext } from "node:test";
 import { simpleGit } from "simple-git";
@@ -16,32 +16,32 @@ import {
   sealEnvelope,
 } from "../../kernel/handover.ts";
 import {
-  OperationResultType,
   type OperationResult,
+  OperationResultType,
 } from "../../kernel/operation.ts";
-import { temporary, hostEnvironment } from "../../kernel/test-support.ts";
+import { hostEnvironment, temporary } from "../../kernel/test-support.ts";
 import {
   ActorKind,
   AssessmentResult,
+  type Evidence,
+  Intent,
   missionOperations,
   NodeState,
-  Intent,
-  type Evidence,
 } from "../../mission/contract.ts";
 import { RepositoryComponent } from "../../repository/index.ts";
 import {
+  type ExecutionRecord,
   schedulerOperations,
   WorkPullKind,
-  type ExecutionRecord,
 } from "../../scheduler/contract.ts";
 import {
-  workerOperations,
   type RepositoryTransport,
+  workerOperations,
 } from "../../worker/contract.ts";
 import {
-  WorkspaceRoot,
-  runNativeExecution,
   handedSshAccess,
+  runNativeExecution,
+  WorkspaceRoot,
 } from "../../worker/unit/index.ts";
 import {
   fauxAssistantMessage,

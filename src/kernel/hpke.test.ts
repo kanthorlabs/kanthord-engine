@@ -8,9 +8,9 @@ import {
   keyFingerprint,
   openBytes,
   openJSON,
-  sealJSON,
-  SealedOpenError,
   SEALED_ALGORITHM,
+  SealedOpenError,
+  sealJSON,
   x25519PublicKeyOf,
 } from "./hpke.ts";
 

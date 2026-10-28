@@ -9,10 +9,10 @@ import {
   PlatformAddressKind,
 } from "../../mission/contract.ts";
 import {
+  authorizationHarness,
   HARNESS_ACTION_KEY,
   HARNESS_CREDENTIAL,
   HARNESS_PLATFORM,
-  authorizationHarness,
 } from "../../mission/test-support.ts";
 
 function refuses(fn: () => unknown, reason: string) {

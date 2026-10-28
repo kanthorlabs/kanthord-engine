@@ -10,14 +10,14 @@ import { HttpMethod, HttpStatus } from "../kernel/http.ts";
 import { digest } from "../kernel/json.ts";
 import {
   AccessPolicy,
-  OperationRegistry,
   type CallerContext,
+  OperationRegistry,
 } from "../kernel/operation.ts";
 import { createIdentity, identitySchema } from "../kernel/identity.ts";
 import { Diagnostic } from "../kernel/errors.ts";
 import { HealthRegistry } from "../kernel/health.ts";
-import { SpanStatus, type ServerTrace } from "../tracking/contract.ts";
-import { ImportAttribute, IMPORT_OPERATION } from "./import-telemetry.ts";
+import { type ServerTrace, SpanStatus } from "../tracking/contract.ts";
+import { IMPORT_OPERATION, ImportAttribute } from "./import-telemetry.ts";
 import type { ActContribution } from "./act-telemetry.ts";
 import { HealthStatus } from "../kernel/service.ts";
 import {
@@ -27,63 +27,63 @@ import {
 } from "../kernel/store.ts";
 import {
   ActorKind,
-  ImportFormat,
-  importPreviewSchema,
-  exportAnswerSchema,
+  type CriterionSet,
+  edgeSchema,
   type ExportAnswer,
-  importResultSchema,
+  exportAnswerSchema,
   type ImportApply,
-  type ImportResult,
   type ImportEntry,
+  ImportFormat,
   type ImportNodeEntry,
-  type ImportTaskEntry,
+  importPreviewSchema,
+  type ImportResult,
+  importResultSchema,
   type ImportSnapshot,
+  type ImportTaskEntry,
+  Intent,
   MISSION_IDENTITY_PREFIX,
   MISSION_INITIAL_VERSION,
   MISSION_SERVICE_NAME,
+  type MissionBindings,
   MissionErrorCode,
   missionOperations,
-  NODE_IDENTITY_PREFIX,
-  NodeState,
-  RevisionWrite,
-  Intent,
-  RebindSkipCondition,
-  type Rebind,
-  TaskChange,
-  nodeChangeSchema,
-  edgeSchema,
-  nodeSchema,
-  revisionSchema,
-  pageOf,
-  type NodeCreate,
-  type NodeUpdate,
-  type CriterionSet,
   type Node,
+  NODE_IDENTITY_PREFIX,
   type NodeChange,
+  nodeChangeSchema,
+  type NodeCreate,
+  nodeSchema,
+  NodeState,
+  type NodeUpdate,
+  pageOf,
+  type Rebind,
+  RebindSkipCondition,
   type Retire,
   type RetirePreview,
-  type MissionBindings,
+  revisionSchema,
+  RevisionWrite,
+  TaskChange,
   type WorkQueue,
 } from "./contract.ts";
 import { missionMigrations } from "./migrations.ts";
 import { nodeRecord } from "./node-read.ts";
 import { getRevision } from "./node-read.ts";
 import {
-  openAttempt,
   closeAttempt,
   insertEvidence,
+  openAttempt,
   readOpenAttempt,
 } from "./record-store.ts";
 import { importDigest, normalizeImportSnapshot } from "./import.ts";
 import { serializePlanFile } from "./export.ts";
 import { parsePlanFile } from "./parser.ts";
 import { DEFERRED_CHECK_START_LIMIT } from "./node-check.ts";
-import { MissionService, humanActor, type Dependencies } from "./service.ts";
+import { type Dependencies, humanActor, MissionService } from "./service.ts";
 import {
   CONTENT_FIELDS,
-  TASKS_FIELD,
-  TASK_CONTENT_FIELDS,
   ContentField,
+  TASK_CONTENT_FIELDS,
+  TASKS_FIELD,
 } from "./content.ts";
 import { ControlError } from "./control.ts";
 import { revisionFromRow } from "./revision.ts";
@@ -97,9 +97,9 @@ import { claimableMap, reconcileMission, routeMission } from "./routing.ts";
 import {
   insertDependency,
   insertNode as insertNodeRow,
-  readNode,
-  readMissionNodes,
   readCurrentRevision,
+  readMissionNodes,
+  readNode,
   taskOwnerOf,
   updateNodeFilename,
 } from "./store.ts";

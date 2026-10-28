@@ -3,11 +3,11 @@ import { test } from "node:test";
 import { z } from "zod";
 import {
   AccessPolicy,
-  StoreName,
-  OperationLifetime,
   emptyInput,
-  OperationRegistry,
   type Operation,
+  OperationLifetime,
+  OperationRegistry,
+  StoreName,
 } from "./operation.ts";
 import { componentHealthSchema } from "./health.ts";
 import { HttpMethod, HttpStatus } from "./http.ts";

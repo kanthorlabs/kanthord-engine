@@ -14,9 +14,9 @@ import { storageImplementations } from "./index.ts";
 import {
   CHECKSUM_SHA256_HEADER,
   CONTENT_LENGTH_HEADER,
-  S3Platform,
   type S3Call,
   type S3Location,
+  S3Platform,
 } from "./s3.ts";
 
 const ACCESS_KEY_ID = "test_private-s3-access-id";

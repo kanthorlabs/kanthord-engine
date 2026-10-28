@@ -6,9 +6,9 @@ import { CAUSE_LABEL_SUFFIX, effectiveCauseOf } from "./cause-label.ts";
 import type { trackingOperations } from "./contract.ts";
 import {
   FACET_VALUES_MAX,
-  TraceSort,
-  traceListItemSchema,
   type TraceListItem,
+  traceListItemSchema,
+  TraceSort,
 } from "./contract.ts";
 import { TRACE_COLUMNS, traceSummaryOf } from "./trace-store.ts";
 

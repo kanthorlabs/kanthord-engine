@@ -1,18 +1,18 @@
 import assert from "node:assert/strict";
 import {
-  OperationResultType,
   type OperationResult,
+  OperationResultType,
 } from "../kernel/operation.ts";
 import { isObject } from "../kernel/values.ts";
 import {
-  ActionResultKind,
-  RefusalClass,
-  ResultClass,
-  Uncertainty,
   type ActionRef,
   type ActionResultItem,
+  ActionResultKind,
   type PlatformAddress,
+  RefusalClass,
+  ResultClass,
   type ResultClassAnswer,
+  Uncertainty,
 } from "./contract.ts";
 
 export function isResultClass(

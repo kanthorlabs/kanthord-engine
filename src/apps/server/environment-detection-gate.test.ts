@@ -8,12 +8,12 @@ import { temporary } from "../../kernel/test-support.ts";
 import {
   EnvironmentStatus,
   EnvironmentTarget,
-  WorkerPlacement,
   type RepositoryFiles,
+  WorkerPlacement,
 } from "../../project/contract.ts";
 import {
-  environmentTagOf,
   type EnvironmentState,
+  environmentTagOf,
 } from "../../project/environment-state.ts";
 import { RepositoryFileState } from "../../repository/contract.ts";
 import { until } from "./cli-support.ts";
@@ -21,18 +21,18 @@ import { fakeContainerHost } from "./container-fakes.ts";
 import type { RuntimeHost } from "./container-runtime.ts";
 import {
   createProject,
-  type ProjectInput,
   environmentList,
   gateFixture,
-  NO_ITEMS,
-  SINGLE_SLOT,
   importNode,
+  NO_ITEMS,
+  type ProjectInput,
   recordingSlotDriver,
-  RUN_VERB,
-  slotRuns,
-  worker,
   REPOSITORY_BINDING,
+  RUN_VERB,
+  SINGLE_SLOT,
+  slotRuns,
   type SlotStart,
+  worker,
 } from "./environment-test-support.ts";
 
 const TEST_TIMEOUT_MS = 120000;

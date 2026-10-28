@@ -6,19 +6,19 @@ import { createIdentity } from "../kernel/identity.ts";
 import { canonicalJSON } from "../kernel/json.ts";
 import {
   AssessmentResult,
-  NodeState,
-  OVERRIDE_STATES,
-  Intent,
   AssetKind,
   EndState,
-  PlatformAddressKind,
-  type Override,
-  type RepositoryAddress,
+  type ExecutionEnds,
   type HumanAct,
   type HumanActor,
-  RevokeCause,
+  Intent,
   type Mission,
-  type ExecutionEnds,
+  NodeState,
+  type Override,
+  OVERRIDE_STATES,
+  PlatformAddressKind,
+  type RepositoryAddress,
+  RevokeCause,
 } from "./contract.ts";
 import type { ExecutionTrace } from "../tracking/contract.ts";
 import type { Dependencies } from "./service.ts";
@@ -32,21 +32,21 @@ import { requireNode } from "./node-read.ts";
 import { requestContext } from "./node-check.ts";
 import {
   closeAttempt,
+  insertEvidence,
   readLandedCommitEvidence,
   readOpenAttempt,
   readRequests,
-  insertEvidence,
   writeEndState,
 } from "./record-store.ts";
 import {
-  admitControl,
-  requireNoUnresolvedAction,
-  endLiveClaim,
-  writeHumanRecords,
-  transition,
-  controlResult,
-  actRevision,
   actedOn,
+  actRevision,
+  admitControl,
+  controlResult,
+  endLiveClaim,
+  requireNoUnresolvedAction,
+  transition,
+  writeHumanRecords,
 } from "./control.ts";
 
 const NO_ATTEMPT = 0;

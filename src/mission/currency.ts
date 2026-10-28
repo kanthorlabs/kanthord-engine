@@ -1,21 +1,21 @@
 import assert from "node:assert/strict";
 import { z } from "zod";
 import type { Transaction } from "../kernel/store.ts";
-import { Intent, type Currency } from "./contract.ts";
+import { type Currency, Intent } from "./contract.ts";
 import {
+  type AssessmentRow,
+  readAssessmentsOfAttempt,
   readAttempt,
+  readCurrentOutcome,
   readEvidence,
   readOutcome,
-  readCurrentOutcome,
-  readAssessmentsOfAttempt,
-  type AssessmentRow,
 } from "./record-store.ts";
 import { directDependenciesOf } from "./graph.ts";
 import {
+  type NodeRow,
   readDependencies,
   readNode,
   readRevision,
-  type NodeRow,
 } from "./store.ts";
 
 export const CurrencyReason = {

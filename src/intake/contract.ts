@@ -4,10 +4,10 @@ import { identitySchema } from "../kernel/identity.ts";
 import { timestamp } from "../kernel/json.ts";
 import {
   AccessPolicy,
-  OperationLifetime,
-  StoreName,
   type ClientOptions,
+  OperationLifetime,
   type OperationResult,
+  StoreName,
 } from "../kernel/operation.ts";
 import type { ResourceEntry } from "../kernel/health.ts";
 import type { Transaction } from "../kernel/store.ts";

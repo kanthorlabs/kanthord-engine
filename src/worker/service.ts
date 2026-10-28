@@ -8,16 +8,16 @@ import {
 } from "../kernel/context.ts";
 import { asError, Diagnostic } from "../kernel/errors.ts";
 import {
-  HealthStatus,
   type Healthcheck,
+  HealthStatus,
   type Service,
 } from "../kernel/service.ts";
 import {
-  HealthScope,
-  ResourceStatus,
-  type ResourceCheck,
   type HealthRegistry,
+  HealthScope,
+  type ResourceCheck,
   type ResourceEntry,
+  ResourceStatus,
 } from "../kernel/health.ts";
 import type { OperationRegistry } from "../kernel/operation.ts";
 import assert from "node:assert/strict";
@@ -28,39 +28,39 @@ import { AccessPolicy } from "../kernel/operation.ts";
 import { OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import {
-  workerOperations,
-  WORKER_SERVICE_NAME,
+  type AgentConfiguration,
+  alwaysAvailable,
+  type CredentialMetadataOf,
+  type CustodyHandover,
+  type EvidenceRequests,
+  HANDOVER_REFRESH_WAIT_MS,
+  hostsPoolSlot,
+  type InstanceIssuer,
+  InstancePlacement,
+  type IntakeActions,
+  type IntentOf,
+  type MissionActions,
+  type PinnedCredentialMetadataFn,
+  type PlacementStatus,
+  POOL_SLOT_COUNT,
+  type PoolHost,
   REGISTRATION_CAPABILITY,
   REGISTRATION_TARGET_KIND,
-  WorkerHost,
   RegistrationActivity,
-  hostsPoolSlot,
-  POOL_SLOT_COUNT,
-  alwaysAvailable,
-  HANDOVER_REFRESH_WAIT_MS,
-  InstancePlacement,
-  type PlacementStatus,
-  type WorkerRegistrations,
-  type WorkerBindingOf,
-  type WorkerBindingsOf,
-  type WorkerBindingRowOf,
-  type PoolHost,
-  type InstanceIssuer,
-  type RepositoryPolicyOf,
   type RepositoryBindingIdsOf,
-  type IntentOf,
-  type PinnedCredentialMetadataFn,
-  type CredentialMetadataOf,
-  type SshHostKeysOf,
+  type RepositoryPolicyOf,
   type SchedulerClaims,
-  type CustodyHandover,
-  type MissionActions,
-  type IntakeActions,
-  type EvidenceRequests,
-  type AgentConfiguration,
-  type WorkerEntry,
+  type SshHostKeysOf,
+  WORKER_SERVICE_NAME,
   type WorkerAgentView,
+  type WorkerBindingOf,
+  type WorkerBindingRowOf,
+  type WorkerBindingsOf,
+  type WorkerEntry,
   WorkerErrorCode,
+  WorkerHost,
+  workerOperations,
+  type WorkerRegistrations,
 } from "./contract.ts";
 import {
   AgentErrorCode,
@@ -70,9 +70,9 @@ import {
 import { bindingHolders } from "../project/contract.ts";
 import {
   CredentialRefreshInFlight,
-  SERVER_HOLDER,
   type HeldCopy,
   type InstanceKey,
+  SERVER_HOLDER,
 } from "../custody/contract.ts";
 import type { Store, Transaction } from "../kernel/store.ts";
 import { ActionPerformer } from "./action-performer.ts";
@@ -95,26 +95,26 @@ import {
 import { resumeRegistration, TableRegistrations } from "./registrations.ts";
 import { Pool } from "./pool.ts";
 import {
-  registrationRecord,
   listRegistrationRecords,
+  registrationRecord,
 } from "./registration-record.ts";
 import type { PromptPartAnswer, PromptTemplates } from "../agent/contract.ts";
 import type { WorkerConfig } from "./config.ts";
 import {
-  HeartbeatClock,
   HEARTBEAT_SWEEP_INTERVAL_MS,
+  HeartbeatClock,
   MILLISECONDS_PER_SECOND,
 } from "./heartbeat.ts";
 import {
-  readAllLive,
-  endRegistration,
   endGroup,
+  endRegistration,
+  readAllLive,
   readRow,
 } from "./registration-rows.ts";
 import {
-  NO_CREDENTIAL_VERSION,
   type CopyHealth,
   type LoginSessionEntry,
+  NO_CREDENTIAL_VERSION,
 } from "../llm/contract.ts";
 import { unreportedHealth } from "../llm/copy-health.ts";
 import { WorkerInstances } from "./instances.ts";

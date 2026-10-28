@@ -6,20 +6,20 @@ import { anthropicProvider } from "@earendil-works/pi-ai/providers/anthropic";
 import { githubCopilotProvider } from "@earendil-works/pi-ai/providers/github-copilot";
 import { openaiCodexProvider } from "@earendil-works/pi-ai/providers/openai-codex";
 import {
-  credentialPlatformList,
-  RevisionChange,
-  SecretShape,
-  SERVER_HOLDER,
   type AgentProvidersDependentOnFn,
   type CredentialCopy,
+  credentialPlatformList,
   type CredentialPlatformSet,
   type CredentialRecords,
   type HeldCopy,
   type InstanceKey,
   type InstanceKeys,
   type MetadataRevision,
+  RevisionChange,
+  SecretShape,
+  SERVER_HOLDER,
 } from "../custody/contract.ts";
-import { sealedObjectSchema, type SealedObject } from "../kernel/hpke.ts";
+import { type SealedObject, sealedObjectSchema } from "../kernel/hpke.ts";
 import {
   IdentityKind,
   isWorkerIdentity,
@@ -34,41 +34,41 @@ import {
 } from "../kernel/context.ts";
 import { Diagnostic, OperationError } from "../kernel/errors.ts";
 import {
-  ResourceFailureReason,
-  ResourceStatus,
   type ResourceCheck,
   type ResourceEntry,
+  ResourceFailureReason,
+  ResourceStatus,
 } from "../kernel/health.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import type { CallerContext, OperationRegistry } from "../kernel/operation.ts";
 import {
-  HealthStatus,
   type Healthcheck,
+  HealthStatus,
   type Service,
 } from "../kernel/service.ts";
 import type { Store, Transaction } from "../kernel/store.ts";
 import {
-  LlmErrorCode,
-  llmOperations,
-  MODEL_CHECK_TIMEOUT_MS,
-  PROVIDER_CHECK_TIMEOUT_MS,
-  providerCheckBodySchema,
   type CopyHealth,
   type CopyReportBody,
   type EnablementsDependentOnModelFn,
   type LlmCredentialAnswer,
   type LlmCredentialCreate,
   type LlmCredentialRotate,
+  LlmErrorCode,
+  llmOperations,
   type LoginSessionEntry,
+  MODEL_CHECK_TIMEOUT_MS,
   type ModelCheckAnswer,
+  PROVIDER_CHECK_TIMEOUT_MS,
   type ProviderCheckAnswer,
+  providerCheckBodySchema,
 } from "./contract.ts";
 import {
   isLoopbackHost,
   LOGIN_INSTANCE_UNAVAILABLE,
+  LOGIN_VALUE_NOT_AWAITED,
   loginMode,
   loginNotFound,
-  LOGIN_VALUE_NOT_AWAITED,
   OAuthLogin,
   type OAuthSecret,
 } from "./login.ts";
@@ -77,6 +77,7 @@ import { CopyHealthBook } from "./copy-health.ts";
 import { checkModel } from "./model-check.ts";
 import type { ModelRuntimeModule } from "./model-connector.ts";
 import {
+  type ApprovedModel,
   approvedModels,
   CAPABILITY_NONE,
   isLlmPlatform,
@@ -84,12 +85,11 @@ import {
   LLM_PROVIDERS,
   openaiCompatibleMetadataSchema,
   Platform,
-  type ApprovedModel,
 } from "./platforms.ts";
 import {
-  LoginSessionStore,
-  LoginSessionState,
   type LoginSession,
+  LoginSessionState,
+  LoginSessionStore,
 } from "./sessions.ts";
 
 export interface Dependencies {

@@ -1,9 +1,9 @@
 import { z } from "zod";
 import {
+  type CredentialPlatform,
   isNonblank,
   s3AccessKeySecretSchema,
   SecretShape,
-  type CredentialPlatform,
 } from "../custody/contract.ts";
 import { probeS3 } from "./probe.ts";
 

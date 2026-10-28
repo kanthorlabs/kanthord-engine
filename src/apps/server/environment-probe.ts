@@ -8,8 +8,8 @@ import type { ContainerRuntime } from "../../worker/contract.ts";
 import {
   CONTAINER_UID,
   OWNER_LABEL,
-  SUCCESS_CODE,
   type RuntimeHost,
+  SUCCESS_CODE,
 } from "./container-runtime.ts";
 import { IMAGE_COMMAND_TIMEOUT_MS } from "./environment-image.ts";
 

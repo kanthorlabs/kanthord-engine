@@ -13,23 +13,23 @@ import {
   testMachineIdentity,
 } from "../kernel/test-identity.ts";
 import {
+  type CredentialPlatformSet,
   CUSTODY_SERVICE_NAME,
+  type CustodyExecution,
   GrantKind,
   SecretShape,
-  SshIdentitySubjectKind,
-  type CredentialPlatformSet,
-  type CustodyExecution,
   type SshIdentityAuthorization,
   type SshIdentitySubject,
+  SshIdentitySubjectKind,
 } from "./contract.ts";
 import { custodyMigrations } from "./migrations.ts";
 import { CustodyComponent } from "./service.ts";
 import {
-  mintGrant,
   consumeGrant,
+  FacilityError,
   grantFacts,
   MaterialBuffer,
-  FacilityError,
+  mintGrant,
 } from "./facility.ts";
 
 const FIELDS = {

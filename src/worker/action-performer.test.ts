@@ -10,18 +10,18 @@ import { testMachineIdentity } from "../kernel/test-identity.ts";
 import {
   ACTION_REQUEST_TOOL_NAME,
   ActionAssessmentResult,
+  type ActionContext,
   ActionNodeState,
+  ActionReadMethod,
   ActionResolution,
   ActionResultKind,
-  ActionReadMethod,
   PlatformAddressKind,
   RefusalClass,
   RepositoryAction,
   ResultClass,
-  Uncertainty,
   TestedInputKind,
+  Uncertainty,
   WorkerErrorCode,
-  type ActionContext,
 } from "./contract.ts";
 import { ActionPerformer } from "./action-performer.ts";
 

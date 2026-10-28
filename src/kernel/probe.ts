@@ -1,8 +1,8 @@
-import { DeadlineExceeded, type Context } from "./context.ts";
+import { type Context, DeadlineExceeded } from "./context.ts";
 import {
   ResourceFailureReason,
-  ResourceStatus,
   type ResourceObserver,
+  ResourceStatus,
   type ResourceStatusValue,
 } from "./health.ts";
 import { HttpMethod, HttpStatus } from "./http.ts";

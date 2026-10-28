@@ -8,8 +8,8 @@ import { approvedModels } from "../llm/platforms.ts";
 import type { ApprovedModelsFn } from "../agent/contract.ts";
 import {
   AuthorizationRefusal,
-  WorkerErrorCode,
   type SchedulerClaims,
+  WorkerErrorCode,
 } from "./contract.ts";
 import type { Dependencies, WorkerService } from "./service.ts";
 

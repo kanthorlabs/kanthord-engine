@@ -7,9 +7,9 @@ import { canonicalJSON } from "../kernel/json.ts";
 import { background } from "../kernel/context.ts";
 import { createIdentity } from "../kernel/identity.ts";
 import {
-  OperationRegistry,
   type CallerContext,
   type ExecutionClaim,
+  OperationRegistry,
 } from "../kernel/operation.ts";
 import {
   IN_MEMORY_DATABASE,
@@ -17,37 +17,37 @@ import {
   type Transaction,
 } from "../kernel/store.ts";
 import {
-  MISSION_SERVICE_NAME,
-  missionOperations,
   ActorKind,
-  Intent,
-  NodeState,
-  RevisionWrite,
-  type HumanAct,
   AssessmentResult,
   AssetKind,
+  type FailureHold,
+  type GateFiles,
+  type HumanAct,
+  Intent,
+  MISSION_SERVICE_NAME,
+  missionOperations,
+  NodeState,
+  type NodeTransition,
+  type PlatformAddress,
   PlatformAddressKind,
   RepositoryAction,
-  type GateFiles,
-  type PlatformAddress,
-  TransitionRule,
-  type FailureHold,
-  type NodeTransition,
+  RevisionWrite,
   type RevokedExecution,
+  TransitionRule,
 } from "./contract.ts";
 import {
   insertDependency,
   insertMission,
   insertNode,
   insertRevision,
+  intentOf,
   readNode,
   setNodeState,
-  intentOf,
 } from "./store.ts";
 import type { ServerTrace } from "../tracking/contract.ts";
 import type { ActContribution } from "./act-telemetry.ts";
 import { missionMigrations } from "./migrations.ts";
-import { MissionService, type Dependencies } from "./service.ts";
+import { type Dependencies, MissionService } from "./service.ts";
 import {
   insertAssessment,
   insertEvidence,

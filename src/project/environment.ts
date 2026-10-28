@@ -3,16 +3,16 @@ import { posix } from "node:path";
 import type { ServiceIdentity } from "../kernel/caller.ts";
 import {
   CancellationContext,
-  DeadlineExceeded,
   type Context,
+  DeadlineExceeded,
 } from "../kernel/context.ts";
 import {
   DEVCONTAINER_DIRECTORY,
   DEVCONTAINER_FILE,
+  type Environment,
   environmentRefusal,
   environmentSchema,
   parseEnvironmentText,
-  type Environment,
 } from "../kernel/devcontainer.ts";
 import { Diagnostic, OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
@@ -27,20 +27,20 @@ import type { RepositoryFile, SshAccess } from "../repository/contract.ts";
 import { gitFailureReason } from "../repository/git-failure.ts";
 import type { projectOperations } from "./contract.ts";
 import {
-  REPOSITORY_FILES_READ_TIMEOUT_MS,
+  bindingSetWriteInputSchema,
   ENVIRONMENT_FILE_MAX_BYTES,
   EnvironmentSource,
   ProjectErrorCode,
-  bindingSetWriteInputSchema,
+  REPOSITORY_FILES_READ_TIMEOUT_MS,
   repositoryConfigSchema,
   type RepositoryFiles,
   type SlotEnvironment,
 } from "./contract.ts";
 import {
+  detectEnvironment,
   DETECTION_PATHS,
   WORKFLOW_DIRECTORY,
   WORKFLOW_FILES_MAX,
-  detectEnvironment,
   workflowPaths,
 } from "./detection.ts";
 import { EnvironmentTarget } from "./environment-state.ts";

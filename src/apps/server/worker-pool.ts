@@ -3,8 +3,8 @@ import { readdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { MessageChannel, type MessagePort } from "node:worker_threads";
 import type { Logger } from "pino";
-import { generateSlotJWT, deriveClientSecret } from "../../gateway/auth/jwt.ts";
-import { servePort, type createInvocation } from "../../gateway/index.ts";
+import { deriveClientSecret, generateSlotJWT } from "../../gateway/auth/jwt.ts";
+import { type createInvocation, servePort } from "../../gateway/index.ts";
 import { ensureDirectory, openPrivate } from "../../kernel/files.ts";
 import type {
   PlacementStatus,

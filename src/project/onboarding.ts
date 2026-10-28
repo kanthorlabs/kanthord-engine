@@ -4,19 +4,19 @@ import type { Logger } from "pino";
 import { z } from "zod";
 import { CancellationContext, type Context } from "../kernel/context.ts";
 import {
-  EnvironmentSource,
   checksOf,
-  setupScriptsOf,
   type Environment,
+  EnvironmentSource,
+  setupScriptsOf,
 } from "../kernel/devcontainer.ts";
 import { OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import { isObject, isString } from "../kernel/values.ts";
-import { SpanStatus, type ServerTrace } from "../tracking/contract.ts";
+import { type ServerTrace, SpanStatus } from "../tracking/contract.ts";
 import {
+  type CheckResult,
   ProjectErrorCode,
   WorkerPlacement,
-  type CheckResult,
 } from "./contract.ts";
 import type { GroupResolution } from "./environment.ts";
 import type {
@@ -24,8 +24,8 @@ import type {
   EnvironmentSessionHandle,
 } from "./environment-agent.ts";
 import {
-  environmentAgentTools,
   type EnvironmentAgentPort,
+  environmentAgentTools,
   type WriteAnswer,
 } from "./environment-agent-tools.ts";
 import type {
@@ -33,41 +33,41 @@ import type {
   ProbeCommand,
 } from "./environment-probe-contract.ts";
 import {
-  SecretReleaseOutcome,
   type EnvironmentSecrets,
   type SecretRelease,
+  SecretReleaseOutcome,
 } from "./environment-secrets.ts";
 import {
-  EnvironmentSpan,
+  type EnvironmentContribution,
   environmentRootEnd,
   environmentRootStart,
-  environmentStepSpan,
-  type EnvironmentContribution,
+  EnvironmentSpan,
   type EnvironmentStepSpan,
+  environmentStepSpan,
   type EnvironmentTelemetry,
 } from "./environment-telemetry.ts";
 import {
   BASE_SUFFIX,
-  EnvironmentFailureClass,
-  EnvironmentStatus,
-  EnvironmentTarget,
-  FailureOrigin,
-  ImageBuildOutcome,
-  PROVED_SUFFIX,
-  ProofOutcome,
   classifyProof,
-  environmentDigest,
-  environmentPath,
-  environmentTagOf,
   type CommandResult,
+  environmentDigest,
+  EnvironmentFailureClass,
+  environmentPath,
   type EnvironmentRuntime,
   type EnvironmentSecretEntry,
+  type EnvironmentState,
+  EnvironmentStatus,
+  environmentTagOf,
+  EnvironmentTarget,
+  FailureOrigin,
   type ImageBuildInput,
+  ImageBuildOutcome,
   type ImageBuildResult,
   type ProofFile,
   type ProofFiles,
-  type EnvironmentState,
+  ProofOutcome,
   type ProofVerdict,
+  PROVED_SUFFIX,
 } from "./environment-state.ts";
 
 export {

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import type { SQLInputValue } from "node:sqlite";
 import { createIdentity } from "../kernel/identity.ts";
 import type { Store, Transaction } from "../kernel/store.ts";
-import { WORKER_INSTANCE_ID_PREFIX, type InstanceRecord } from "./contract.ts";
+import { type InstanceRecord, WORKER_INSTANCE_ID_PREFIX } from "./contract.ts";
 
 const NO_ROWS = 0;
 const FIRST_REVISION = 1;

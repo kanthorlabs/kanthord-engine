@@ -3,26 +3,26 @@ import type { Transaction } from "../kernel/store.ts";
 import { OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import {
+  type ExecutionEnds,
+  type HumanAct,
+  type HumanActor,
   NodeState,
   Resolution,
-  ResumeTarget,
   type Resume,
-  type HumanAct,
+  ResumeTarget,
   RevokeCause,
-  type HumanActor,
-  type ExecutionEnds,
 } from "./contract.ts";
 import { readinessOf } from "./conditions.ts";
 import { actionStatesOf } from "./frozen-action.ts";
 import { openAttempt } from "./record-store.ts";
-import { readCurrentRevision, readNode, type NodeRow } from "./store.ts";
+import { type NodeRow, readCurrentRevision, readNode } from "./store.ts";
 import {
+  actedOn,
   admitControl,
+  closeExternalAttempt,
+  controlResult,
   endLiveClaim,
   transition,
-  controlResult,
-  closeExternalAttempt,
-  actedOn,
 } from "./control.ts";
 import type { Dependencies } from "./service.ts";
 

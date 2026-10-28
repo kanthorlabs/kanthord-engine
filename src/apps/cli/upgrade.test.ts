@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdirSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { mkdirSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import {
@@ -12,9 +12,9 @@ import { Store } from "../../kernel/store.ts";
 import { requirePiTools, temporary } from "../../kernel/test-support.ts";
 import {
   DATABASE_FILE,
-  TRACKING_DATABASE_FILE,
   enforceMasterKey,
   serverMigrations,
+  TRACKING_DATABASE_FILE,
   trackingDatabaseMigrations,
 } from "../server/index.ts";
 import { Diagnostic } from "../../kernel/errors.ts";

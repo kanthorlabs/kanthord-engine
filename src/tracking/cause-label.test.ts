@@ -10,23 +10,23 @@ import { IN_MEMORY_DATABASE, Store } from "../kernel/store.ts";
 import {
   CAUSE_LABEL_OPERATION,
   CAUSE_LABEL_SUFFIX,
+  type CauseLabelBody,
   CauseLabelCode,
-  HUMAN_USERNAME_ATTRIBUTE,
-  TRACKING_PRODUCER,
   causeLabelReasonTextId,
   causeLabelSpanId,
   causeLabelSpanIdSchema,
   causeLabelTextIdSchema,
   effectiveCauseOf,
+  HUMAN_USERNAME_ATTRIBUTE,
+  TRACKING_PRODUCER,
   writeCauseLabel,
-  type CauseLabelBody,
 } from "./cause-label.ts";
 import {
   CAUSE_REASON_MAX_CHARACTERS,
   SpanOrigin,
+  spanSchema,
   SpanStatus,
   TRACKING_SERVICE_NAME,
-  spanSchema,
   trackingOperations,
 } from "./contract.ts";
 import { trackingMigrations } from "./migrations.ts";

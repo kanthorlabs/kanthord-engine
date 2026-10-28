@@ -2,12 +2,12 @@ import assert from "node:assert/strict";
 import { identitySchema } from "../kernel/identity.ts";
 import type { Transaction } from "../kernel/store.ts";
 import {
+  type Edge,
   NODE_IDENTITY_PREFIX,
   NODE_LIST_LIMIT_DEFAULT,
-  type Edge,
 } from "./contract.ts";
 import { decode, encode, invalidCursor } from "./node-read.ts";
-import { listEdges, type EdgeListFilter, type EdgeRow } from "./store.ts";
+import { type EdgeListFilter, type EdgeRow, listEdges } from "./store.ts";
 import { requireMission } from "./write.ts";
 
 const KEY_SEPARATOR = "|";

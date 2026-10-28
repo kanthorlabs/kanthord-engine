@@ -2,7 +2,6 @@ import { z } from "zod";
 import {
   CREATE_MAX_BODY_BYTES,
   CREDENTIAL_TIMEOUT_MS,
-  LIST_LIMIT_MAX,
   credentialAnswerSchema,
   credentialCheckAnswerSchema,
   credentialCheckBodySchema,
@@ -14,15 +13,16 @@ import {
   credentialRevisionParamsSchema,
   credentialRotateBodySchema,
   credentialUpdateMetadataBodySchema,
+  LIST_LIMIT_MAX,
   METADATA_MAX_BODY_BYTES,
 } from "../custody/contract.ts";
 import type { Context } from "../kernel/context.ts";
 import { HttpMethod, HttpStatus } from "../kernel/http.ts";
 import {
   AccessPolicy,
+  type Operation,
   OperationLifetime,
   StoreName,
-  type Operation,
 } from "../kernel/operation.ts";
 
 export const REPOSITORY_COMPONENT_NAME = "repository";

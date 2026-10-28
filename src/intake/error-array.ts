@@ -4,8 +4,8 @@ import { canonicalJSON } from "../kernel/json.ts";
 import {
   ERROR_ARRAY_MAX_BYTES,
   ERROR_MESSAGE_MAX_BYTES,
-  errorItemSchema,
   type ErrorItem,
+  errorItemSchema,
 } from "./contract.ts";
 
 const errorItemsSchema = z.array(errorItemSchema);

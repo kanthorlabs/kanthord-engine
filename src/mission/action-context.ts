@@ -2,17 +2,17 @@ import assert from "node:assert/strict";
 import { canonicalJSON } from "../kernel/json.ts";
 import type { Transaction } from "../kernel/store.ts";
 import {
+  type ActionContext,
   AssetKind,
+  type MissionBindings,
   PlatformAddressKind,
   platformAddressSchema,
   testedInputSchema,
-  type ActionContext,
-  type MissionBindings,
 } from "./contract.ts";
 import { currentAssessmentOf } from "./currency.ts";
 import { actionStatesOf, eligibleUnrequested } from "./frozen-action.ts";
 import { gateFilesOf } from "./gate-files.ts";
-import { readRequests, readAssets } from "./record-store.ts";
+import { readAssets, readRequests } from "./record-store.ts";
 import { readNode } from "./store.ts";
 
 type Candidate = ActionContext["actions"][number]["reuse_candidates"][number];

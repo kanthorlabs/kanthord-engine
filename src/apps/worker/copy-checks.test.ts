@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   CREDENTIAL_SEAL_INFO,
-  credentialSealAad,
   type CredentialAnswer,
+  credentialSealAad,
   type SealedCopyAnswer,
 } from "../../custody/contract.ts";
 import type { InstanceCopyKey } from "../../custody/client.ts";
@@ -15,8 +15,8 @@ import {
 import { Diagnostic } from "../../kernel/errors.ts";
 import {
   ResourceFailureReason,
-  ResourceStatus,
   type ResourceObserver,
+  ResourceStatus,
 } from "../../kernel/health.ts";
 import {
   generateX25519KeyPair,

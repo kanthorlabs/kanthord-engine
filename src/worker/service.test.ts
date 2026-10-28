@@ -6,48 +6,48 @@ import {
 } from "../custody/contract.ts";
 import { test, type TestContext } from "node:test";
 import pino from "pino";
-import { WorkerService, type Dependencies } from "./service.ts";
+import { type Dependencies, WorkerService } from "./service.ts";
 import { ActionPerformer } from "./action-performer.ts";
 import {
+  ACTION_REQUEST_TOOL_NAME,
+  alwaysAvailable,
+  ContainerRuntime,
+  ExecutionIntent,
+  type ExecutionSetup,
   HANDOVER_REFRESH_WAIT_MS,
   HANDOVER_TIMEOUT_MS,
-  workerOperations,
-  ACTION_REQUEST_TOOL_NAME,
-  WorkerErrorCode,
-  WORKER_SERVICE_NAME,
+  InstancePlacement,
+  PlacementIssue,
+  type PlacementStatus,
+  POOL_SLOT_COUNT,
+  PoolPlacement,
   REGISTRATION_CAPABILITY,
   REGISTRATION_TARGET_KIND,
   RegistrationActivity,
-  InstancePlacement,
-  PlacementIssue,
-  POOL_SLOT_COUNT,
-  PoolPlacement,
-  ContainerRuntime,
-  alwaysAvailable,
-  type PlacementStatus,
+  WORKER_SERVICE_NAME,
+  type WorkerBindingOf,
+  type WorkerEntry,
+  WorkerErrorCode,
   WorkerHost,
   WorkerMethod,
-  ExecutionIntent,
-  type ExecutionSetup,
-  type WorkerEntry,
-  type WorkerBindingOf,
+  workerOperations,
 } from "./contract.ts";
 import { SHIPPED_TEMPLATES } from "../agent/prompt-templates.ts";
 import { approvedModels, Platform } from "../llm/platforms.ts";
 import { workerMigrations } from "./migrations.ts";
 import {
   AgentComponent,
-  agentMigrations,
   type Dependencies as AgentDependencies,
+  agentMigrations,
 } from "../agent/index.ts";
 import { memoryCredentialHolds } from "../agent/test-support.ts";
 import {
-  agentOperations,
-  AgentErrorCode,
   AGENT_COMPONENT_NAME,
+  AgentErrorCode,
+  agentOperations,
 } from "../agent/contract.ts";
 import { AgentProviderKind } from "../agent/enablements.ts";
-import { OperationRegistry, type CallerContext } from "../kernel/operation.ts";
+import { type CallerContext, OperationRegistry } from "../kernel/operation.ts";
 import { background, CancellationContext } from "../kernel/context.ts";
 import {
   HealthRegistry,
@@ -56,8 +56,8 @@ import {
 } from "../kernel/health.ts";
 import { HealthStatus } from "../kernel/service.ts";
 import {
-  Store,
   IN_MEMORY_DATABASE,
+  Store,
   type Transaction,
 } from "../kernel/store.ts";
 import {

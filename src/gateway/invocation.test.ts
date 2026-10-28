@@ -16,10 +16,10 @@ import {
 import { Store } from "../kernel/store.ts";
 import { createInvocation, gatewayMigrations } from "./index.ts";
 import { generateHumanJWT, generateMachineJWT } from "./auth/jwt.ts";
-import { createIdentity, createIdempotencyKey } from "../kernel/identity.ts";
+import { createIdempotencyKey, createIdentity } from "../kernel/identity.ts";
 import {
-  testMachineIdentity,
   testHumanIdentity,
+  testMachineIdentity,
 } from "../kernel/test-identity.ts";
 import type { ExecutionProofRow } from "../kernel/operation.ts";
 

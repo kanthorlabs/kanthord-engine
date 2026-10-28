@@ -10,9 +10,9 @@ import {
   generateHumanJWT,
   generateMachineJWT,
   KANTHORD_AUTH_USERNAME,
+  parseBindingName,
   parseDisplayName,
   parseHumanUsername,
-  parseBindingName,
   parseProjectId,
   requireTokenTerminal,
 } from "../../gateway/auth/jwt.ts";

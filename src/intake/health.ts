@@ -3,9 +3,9 @@ import type { ServiceIdentity } from "../kernel/caller.ts";
 import type { Context } from "../kernel/context.ts";
 import { OperationError } from "../kernel/errors.ts";
 import {
+  type ResourceCheck,
   ResourceFailureReason,
   ResourceStatus,
-  type ResourceCheck,
 } from "../kernel/health.ts";
 import type { Store, Transaction } from "../kernel/store.ts";
 import type { IntakeCustody } from "./action-check.ts";
@@ -13,14 +13,14 @@ import { InboundKind, type IntakeInventoryEntry } from "./contract.ts";
 import { allInbounds, type InboundRow } from "./inbound-store.ts";
 import {
   etagOf,
-  POLL_READS,
-  pollTargetOf,
-  releasePollGrant,
-  requestPollRead,
   type Hold,
+  POLL_READS,
   type PollGitHub,
   type PollRead,
   type PollTarget,
+  pollTargetOf,
+  releasePollGrant,
+  requestPollRead,
 } from "./poll.ts";
 
 const EMPTY_IDENTIFIER_LENGTH = 0;

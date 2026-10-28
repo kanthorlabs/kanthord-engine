@@ -14,12 +14,12 @@ import {
 import { isObject } from "../../kernel/values.ts";
 import { packageVersion } from "../../kernel/version.ts";
 import { WorkPullKind } from "../../scheduler/contract.ts";
-import { Worker, runWorker, type WorkerOptions } from "./index.ts";
+import { runWorker, Worker, type WorkerOptions } from "./index.ts";
 import {
   FAKE_INSTANCE_NAME,
   FAKE_WORKER,
-  FakePath,
   fakeInstanceServer,
+  FakePath,
   testClaim,
 } from "./test-support.ts";
 

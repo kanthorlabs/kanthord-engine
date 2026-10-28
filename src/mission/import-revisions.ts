@@ -5,18 +5,18 @@ import {
   commitTypeField,
   CONTENT_FIELDS,
   ContentField,
-  TASKS_FIELD,
   TASK_CONTENT_FIELDS,
+  TASKS_FIELD,
 } from "./content.ts";
 import {
-  RevisionWrite,
-  TaskChange,
   type Content,
   type HumanActor,
+  type Intent,
   type Revision,
   type RevisionChange,
+  RevisionWrite,
+  TaskChange,
   type TaskContent,
-  type Intent,
 } from "./contract.ts";
 import {
   isTaskEntry,

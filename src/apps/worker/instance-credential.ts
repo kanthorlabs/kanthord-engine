@@ -1,9 +1,9 @@
 import { Diagnostic } from "../../kernel/errors.ts";
 import {
   keyFingerprint,
+  type SealedObject,
   sealJSON,
   x25519PublicKeyOf,
-  type SealedObject,
 } from "../../kernel/hpke.ts";
 import { canonicalJSON } from "../../kernel/json.ts";
 import { validateClientEndpoint } from "../../gateway/client.ts";

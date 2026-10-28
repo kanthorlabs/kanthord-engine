@@ -2,11 +2,11 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { CancellationContext, type Context } from "./context.ts";
 import {
+  type HealthProbe,
   HealthRegistry,
   HealthScope,
-  ResourceStatus,
   MAX_HEALTH_PROBES,
-  type HealthProbe,
+  ResourceStatus,
 } from "./health.ts";
 import { healthy } from "./service.ts";
 

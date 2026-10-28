@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import {
+  type AgentName,
   PromptOrigin,
   PromptPart,
-  PromptTemplate,
-  type AgentName,
   type PromptPartAnswer,
+  PromptTemplate,
   type PromptTemplates,
 } from "./contract.ts";
 import { digest } from "./prompt-composer.ts";

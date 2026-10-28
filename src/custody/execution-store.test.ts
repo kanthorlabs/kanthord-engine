@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { digest } from "../kernel/json.ts";
-import { SecretShape, type RefreshReport } from "./contract.ts";
+import { type RefreshReport, SecretShape } from "./contract.ts";
 import {
+  type ExecutionCredentials,
   executionCredentialStore,
   ExecutionStoreError,
-  type ExecutionCredentials,
 } from "./client.ts";
 
 const ID = "credential_01ARZ3NDEKTSV4RRFFQ69G5FAV";

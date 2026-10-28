@@ -3,9 +3,9 @@ import { createServer, type IncomingMessage } from "node:http";
 import type { AddressInfo } from "node:net";
 import { test, type TestContext } from "node:test";
 import {
+  type CredentialStore,
   fauxAssistantMessage,
   fauxToolCall,
-  type CredentialStore,
   type OAuthAuth,
 } from "@earendil-works/pi-ai";
 import { loadPi } from "../agent/pi.ts";

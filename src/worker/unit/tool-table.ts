@@ -12,8 +12,8 @@ import { evidenceUploadTool } from "./host-tools.ts";
 export { ToolSource } from "../../agent/contract.ts";
 import { childEnvironment } from "../../agent/environment.ts";
 import {
-  processBashOperations,
   type BashProcess,
+  processBashOperations,
   type ShellConfig,
 } from "../../agent/bash-process.ts";
 export { childEnvironment } from "../../agent/environment.ts";

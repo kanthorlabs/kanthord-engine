@@ -11,10 +11,10 @@ import { dirname, join } from "node:path";
 import { test, type TestContext } from "node:test";
 import {
   fauxAssistantMessage,
+  type FauxResponseStep,
   fauxToolCall,
   InMemoryCredentialStore,
   Type,
-  type FauxResponseStep,
 } from "@earendil-works/pi-ai";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { SHIPPED_TEMPLATES } from "../agent/prompt-templates.ts";
@@ -42,8 +42,8 @@ import { PROJECT_SERVICE_NAME } from "./contract.ts";
 import {
   ENV_AGENT_NAME,
   EnvironmentAgent,
-  EnvironmentSessionEnd,
   type EnvironmentModelRuntimeFactory,
+  EnvironmentSessionEnd,
   type EnvironmentSessionHandle,
   type EnvironmentSessionInput,
 } from "./environment-agent.ts";

@@ -3,8 +3,8 @@ import { test, type TestContext } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 import {
   fauxAssistantMessage,
-  fauxToolCall,
   type FauxResponseStep,
+  fauxToolCall,
 } from "@earendil-works/pi-ai";
 import { agentOperations } from "../../agent/contract.ts";
 import { loadPi } from "../../agent/pi.ts";
@@ -22,18 +22,18 @@ import {
   projectOperations,
 } from "../../project/contract.ts";
 import {
+  type CommandResult,
   ENVIRONMENT_DIRECTORY,
   environmentPath,
-  environmentTagOf,
-  ImageBuildOutcome,
-  PROVED_SUFFIX,
-  ProofFiles,
-  ProofOutcome,
-  ProofPhase,
-  type CommandResult,
   type EnvironmentRuntime,
   type EnvironmentState,
+  environmentTagOf,
+  ImageBuildOutcome,
+  ProofFiles,
   type ProofInput,
+  ProofOutcome,
+  ProofPhase,
+  PROVED_SUFFIX,
 } from "../../project/environment-state.ts";
 import type { EnvironmentModelRuntimeFactory } from "../../project/index.ts";
 import { until } from "./cli-support.ts";
@@ -42,6 +42,7 @@ import {
   CONFIGURATION,
   createProject,
   environmentList,
+  type Fixture,
   gateFixture,
   importNode,
   NO_ITEMS,
@@ -49,9 +50,8 @@ import {
   RUN_VERB,
   SINGLE_SLOT,
   slotRuns,
-  worker,
-  type Fixture,
   type SlotStart,
+  worker,
 } from "./environment-test-support.ts";
 import { humanCaller } from "./test-support.ts";
 import { join } from "node:path";

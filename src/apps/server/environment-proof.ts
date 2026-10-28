@@ -6,26 +6,26 @@ import { Diagnostic } from "../../kernel/errors.ts";
 import { ensureDirectory } from "../../kernel/files.ts";
 import { killProcessGroup } from "../../kernel/process-group.ts";
 import {
-  ENVIRONMENT_DIRECTORY,
-  ProofPhase,
   type CommandResult,
+  ENVIRONMENT_DIRECTORY,
   type ProofInput,
+  ProofPhase,
 } from "../../project/environment-state.ts";
 import { COMMAND_LIMIT_MS } from "../../worker/unit/budget.ts";
 import type { ContainerRuntime } from "../../worker/contract.ts";
 import {
+  absentVolume,
   CACHE_MOUNT,
+  cacheVolumeArguments,
+  cacheVolumeName,
   CONTAINER_UID,
+  containerRemovalFailure,
   OWNER_LABEL,
+  presentVolume,
+  type RuntimeHost,
   SLOT_HOME,
   SUCCESS_CODE,
   TMP_MOUNT,
-  absentVolume,
-  cacheVolumeArguments,
-  cacheVolumeName,
-  containerRemovalFailure,
-  presentVolume,
-  type RuntimeHost,
 } from "./container-runtime.ts";
 
 export const OUTPUT_TAIL_BYTES = 4096;

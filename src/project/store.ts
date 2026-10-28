@@ -9,18 +9,18 @@ import { isObject, isString } from "../kernel/values.ts";
 import {
   BINDING_ID_PREFIX,
   BINDING_SET_INITIAL_VERSION,
-  PROJECT_ID_PREFIX,
+  type BindingChange,
   BindingKind,
   BindingState,
   ChangeKind,
   EMPTY_LENGTH,
   LIST_LIMIT_MAX,
+  PROJECT_ID_PREFIX,
   ProjectErrorCode,
   REPOSITORY_PLATFORM,
   repositoryConfigSchema,
   STORAGE_PLATFORM,
   workerResourceIdentity,
-  type BindingChange,
 } from "./contract.ts";
 
 const INITIAL_REVISION = 1;

@@ -8,9 +8,9 @@ import { ENVIRONMENT_IMAGE_PREFIX } from "../../project/environment-state.ts";
 import { RepositoryFileState } from "../../repository/contract.ts";
 import { ContainerRuntime } from "../../worker/contract.ts";
 import {
-  SUCCESS_CODE,
   type RuntimeAnswer,
   type RuntimeHost,
+  SUCCESS_CODE,
 } from "./container-runtime.ts";
 
 const SERVER_UID = 1000;

@@ -5,16 +5,16 @@ import { HttpStatus } from "../kernel/http.ts";
 import type { CallerContext } from "../kernel/operation.ts";
 import type { Transaction } from "../kernel/store.ts";
 import {
-  WORK_PULL_WAIT_MS,
-  WorkPullKind,
   type EndedExecution,
+  WORK_PULL_WAIT_MS,
   type WorkPull,
+  WorkPullKind,
 } from "./contract.ts";
 import type { WaitingPulls } from "./wakeup.ts";
 import {
+  type ClaimDependencies,
   claimOnce,
   ClaimOutcome,
-  type ClaimDependencies,
   type ClaimResult,
 } from "./claim.ts";
 import { executionRecord } from "./execution-store.ts";

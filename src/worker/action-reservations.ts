@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
 import {
-  ActionResolution,
-  ActionResultKind,
-  Uncertainty,
   type ActionContext,
   type ActionRef,
+  ActionResolution,
   type ActionResultItem,
+  ActionResultKind,
+  Uncertainty,
 } from "./contract.ts";
 
 export class ExecutionMutex {

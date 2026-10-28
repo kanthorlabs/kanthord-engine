@@ -12,8 +12,8 @@ import { createIdempotencyKey, identitySchema } from "../../kernel/identity.ts";
 import {
   BINDING_ID_PREFIX,
   BindingKind,
-  BindingState,
   bindingSetWriteInputSchema,
+  BindingState,
   ENVIRONMENT_SECRET_PLATFORM,
   ENVIRONMENT_SECRET_VARIABLE,
   environmentSecretOperations,

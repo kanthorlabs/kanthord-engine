@@ -1,15 +1,15 @@
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
 import {
+  type CredentialPlatformSet,
   GrantKind,
   InboundOperation,
-  type CredentialPlatformSet,
 } from "../../custody/contract.ts";
 import {
   Consumer,
-  INTAKE_SERVICE_NAME,
   InboundKind,
   InboundPlatform,
+  INTAKE_SERVICE_NAME,
 } from "../../intake/contract.ts";
 import { HttpStatus } from "../../kernel/http.ts";
 import type { ServiceIdentity } from "../../kernel/caller.ts";
@@ -19,8 +19,8 @@ import { REPOSITORY_PLATFORMS } from "../../repository/credential-platform.ts";
 import { sshKeyRevision } from "../../repository/credential.ts";
 import {
   FAKE_SSH_CREDENTIAL,
-  TEST_PROJECT_ID,
   gatewayFixture,
+  TEST_PROJECT_ID,
 } from "./test-support.ts";
 import { createIdempotencyKey } from "../../kernel/identity.ts";
 

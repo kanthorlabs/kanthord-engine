@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
-import { MissionErrorCode, Intent } from "./contract.ts";
-import { parsePlanFile, type ParsedNodeFile } from "./parser.ts";
+import { Intent, MissionErrorCode } from "./contract.ts";
+import { type ParsedNodeFile, parsePlanFile } from "./parser.ts";
 
 const FILENAME = "add-password-reset.md";
 const FOUNDATION_NAME = "Establish the Express API foundation";

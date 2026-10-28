@@ -3,8 +3,8 @@ import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { test, type TestContext } from "node:test";
 import {
-  InMemoryCredentialStore,
   type CredentialStore,
+  InMemoryCredentialStore,
 } from "@earendil-works/pi-ai";
 import { SecretShape } from "../custody/contract.ts";
 import { background, CancellationContext } from "../kernel/context.ts";
@@ -21,8 +21,8 @@ import {
   CAPABILITY_NONE,
   LLM_PLATFORMS,
   LLM_PROVIDERS,
-  Platform,
   piProviderId,
+  Platform,
 } from "./platforms.ts";
 import {
   ACCESS_TOKEN_EXPIRED_REASON,
@@ -42,6 +42,7 @@ import {
   checkOpenRouter,
   GITHUB_COPILOT_TOKEN_URL,
   MODEL_CALL_CHECK_PROMPT,
+  type ModelCall,
   MODELS_PATH,
   OPENAI_CODEX_CHECK_MODEL,
   OPENAI_CODEX_CHECK_REASONING,
@@ -52,7 +53,6 @@ import {
   OPENCODE_GO_PROVIDER_ID,
   OPENROUTER_KEY_URL,
   statusOfErrorMessage,
-  type ModelCall,
 } from "./probes.ts";
 import { HEALTH_OF_CONNECTION } from "./provider.ts";
 

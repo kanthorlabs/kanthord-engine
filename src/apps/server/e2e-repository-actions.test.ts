@@ -8,22 +8,22 @@ import {
   ActorKind,
   ActorService,
   AssetKind,
+  type Evidence,
+  Intent,
   NodeState,
   Resolution,
-  type Evidence,
   type Revision,
-  Intent,
 } from "../../mission/contract.ts";
 import type { ExecutionRecord } from "../../scheduler/contract.ts";
 import {
-  workerOperations,
   ActionResultKind,
   PlatformAddressKind,
+  workerOperations,
 } from "../../worker/contract.ts";
 import {
-  gatewayFixture,
-  fakeGitHub,
   bareRepository,
+  fakeGitHub,
+  gatewayFixture,
   mappedTransport,
   remoteHead,
 } from "./test-support.ts";

@@ -6,11 +6,11 @@ import {
   chmodSync,
   constants,
   existsSync,
+  mkdirSync,
   mkdtempSync,
   readdirSync,
   readFileSync,
   rmSync,
-  mkdirSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
@@ -21,28 +21,28 @@ import { simpleGit } from "simple-git";
 import {
   background,
   CancellationContext,
-  DeadlineExceeded,
   type Context,
+  DeadlineExceeded,
 } from "../kernel/context.ts";
 import { RepositoryFileState } from "./contract.ts";
 import {
-  gitLsRemote,
+  changedGateFiles,
   clone,
   cloneSnapshot,
   fetchAndCheckout,
-  pushNodeBranch,
-  mergePushFresh,
-  pushSnapshotFresh,
-  landedOn,
   foldBranchPush,
+  GATE_DECLARATION_INVALID,
+  gitLsRemote,
   GitStage,
   GitWriteError,
-  resolveBranchCommit,
-  readFilesAtCommit,
+  landedOn,
   listFilesAtCommit,
+  mergePushFresh,
+  pushNodeBranch,
+  pushSnapshotFresh,
+  readFilesAtCommit,
   readObjectIds,
-  changedGateFiles,
-  GATE_DECLARATION_INVALID,
+  resolveBranchCommit,
 } from "./connector.ts";
 import { CheckEndState, ExpectedEndState } from "./github.ts";
 import { isString } from "../kernel/values.ts";

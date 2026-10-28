@@ -6,23 +6,23 @@ import { OperationError } from "../kernel/errors.ts";
 import { HealthRegistry } from "../kernel/health.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import { createIdentity, identitySchema } from "../kernel/identity.ts";
-import { OperationRegistry, type CallerContext } from "../kernel/operation.ts";
+import { type CallerContext, OperationRegistry } from "../kernel/operation.ts";
 import { HealthStatus } from "../kernel/service.ts";
 import { IN_MEMORY_DATABASE, Store } from "../kernel/store.ts";
 import {
-  schedulerOperations,
-  SCHEDULER_SERVICE_NAME,
-  QUEUE_LIST_LIMIT_DEFAULT,
   LOSS_SWEEP_INTERVAL_MS,
+  QUEUE_LIST_LIMIT_DEFAULT,
+  SCHEDULER_SERVICE_NAME,
+  schedulerOperations,
   TransitionRule,
 } from "./contract.ts";
 import { schedulerMigrations } from "./migrations.ts";
 import {
-  schedulerHarness,
   executionFixture,
+  FIRST_LOSS_WITHOUT_JOB,
   FIXTURE_DEADLINE,
   FIXTURE_NOW,
-  FIRST_LOSS_WITHOUT_JOB,
+  schedulerHarness,
   transitionFixture,
 } from "./test-support.ts";
 import { ExecutionEnd, RevokeCause } from "../tracking/contract.ts";

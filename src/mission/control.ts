@@ -7,38 +7,38 @@ import { canonicalJSON } from "../kernel/json.ts";
 import type { Transaction } from "../kernel/store.ts";
 import type { RevokeCause } from "./contract.ts";
 import {
-  AssessmentResult,
-  NodeState,
   type Actor,
-  type HumanActor,
-  type HumanAct,
-  type Mission,
+  AssessmentResult,
   type ControlResult,
-  TransitionRule,
   type ExecutionEnds,
+  type HumanAct,
+  type HumanActor,
+  type Mission,
+  NodeState,
   type NodeTransition,
   type RevokedClaim,
   type SchedulerClaims,
+  TransitionRule,
   type WorkQueue,
 } from "./contract.ts";
 import type { ExecutionTrace } from "../tracking/contract.ts";
 import type { Acted } from "./act-telemetry.ts";
 import type { Dependencies } from "./service.ts";
 import { currentAssessmentOf } from "./currency.ts";
-import { requireNode, nodeRecord } from "./node-read.ts";
+import { nodeRecord, requireNode } from "./node-read.ts";
 import { attemptRecord, outcomeRecord } from "./record-read.ts";
 import {
   closeAttempt,
-  readAttempt,
-  readOpenAttempt,
-  readRequests,
-  readLandedCommitEvidence,
   insertAssessment,
   insertOutcome,
   type OutcomeRow,
+  readAttempt,
+  readLandedCommitEvidence,
+  readOpenAttempt,
+  readRequests,
 } from "./record-store.ts";
 import { claimableMap, reconcileMission, routeMission } from "./routing.ts";
-import { readCurrentRevision, setNodeState, type NodeRow } from "./store.ts";
+import { type NodeRow, readCurrentRevision, setNodeState } from "./store.ts";
 import { requireActive, requireMission, requireNonterminal } from "./write.ts";
 import { validateText } from "./content.ts";
 

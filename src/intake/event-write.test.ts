@@ -9,22 +9,22 @@ import { HealthRegistry } from "../kernel/health.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import { createIdentity } from "../kernel/identity.ts";
 import {
-  OperationRegistry,
-  OperationResultType,
   type CallerContext,
+  OperationRegistry,
   type OperationResult,
+  OperationResultType,
 } from "../kernel/operation.ts";
 import { IN_MEMORY_DATABASE, Store } from "../kernel/store.ts";
 import {
   Consumer,
   DELETE_IDS_MAX,
   INBOUND_EVENT_ID_PREFIX,
-  INTAKE_SERVICE_NAME,
   InboundEventState,
+  type InboundEventStateValue,
   InboundKind,
   InboundPlatform,
+  INTAKE_SERVICE_NAME,
   intakeOperations,
-  type InboundEventStateValue,
 } from "./contract.ts";
 import {
   discardEventFrom,
@@ -36,10 +36,10 @@ import { IntakeService } from "./index.ts";
 import { allocateInboundId, insertInbound } from "./inbound-store.ts";
 import { intakeMigrations } from "./migrations.ts";
 import {
-  scriptedConsumers,
-  unusedActionDependencies,
   type ConsumerAnswer,
   type ConsumerCall,
+  scriptedConsumers,
+  unusedActionDependencies,
 } from "./test-support.ts";
 
 const PROJECT_ID = "project_01ARZ3NDEKTSV4RRFFQ69G5FAV";

@@ -5,9 +5,9 @@ import { IN_MEMORY_DATABASE, Store } from "../kernel/store.ts";
 import { diagnosticText } from "../kernel/test-support.ts";
 import {
   enforceMasterKey,
-  masterKeyVerifier,
   MASTER_KEY_MISMATCH_CODE,
   MASTER_KEY_TABLE,
+  masterKeyVerifier,
   verifyMasterKey,
 } from "./key-check.ts";
 import { custodyMigrations } from "./migrations.ts";

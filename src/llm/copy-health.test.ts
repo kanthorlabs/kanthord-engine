@@ -6,8 +6,8 @@ import {
   CREDENTIAL_SEAL_INFO,
   credentialSealAad,
   CUSTODY_SERVICE_NAME,
-  SERVER_HOLDER,
   type InstanceKey,
+  SERVER_HOLDER,
 } from "../custody/contract.ts";
 import { background } from "../kernel/context.ts";
 import { OperationError } from "../kernel/errors.ts";
@@ -20,14 +20,14 @@ import {
 } from "../kernel/hpke.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import { createIdentity } from "../kernel/identity.ts";
-import { OperationRegistry, type CallerContext } from "../kernel/operation.ts";
+import { type CallerContext, OperationRegistry } from "../kernel/operation.ts";
 import { IN_MEMORY_DATABASE, Store } from "../kernel/store.ts";
 import { testWorkerIdentity } from "../kernel/test-identity.ts";
 import { INTAKE_SERVICE_NAME } from "../intake/contract.ts";
 import { PROJECT_SERVICE_NAME } from "../project/contract.ts";
 import { REPOSITORY_PLATFORMS } from "../repository/index.ts";
 import { STORAGE_PLATFORMS } from "../storage/index.ts";
-import { llmOperations, type CopyReportBody } from "./contract.ts";
+import { type CopyReportBody, llmOperations } from "./contract.ts";
 import {
   CAPABILITY_MODEL_LIST_READ,
   LLM_PLATFORMS,

@@ -14,11 +14,11 @@ import { HttpStatus } from "../kernel/http.ts";
 import { IN_MEMORY_DATABASE, Store } from "../kernel/store.ts";
 import { redactingLogger } from "../kernel/test-support.ts";
 import {
-  CUSTODY_SERVICE_NAME,
-  SecretShape,
   type CredentialPlatform,
   type CredentialPlatformSet,
+  CUSTODY_SERVICE_NAME,
   type PlatformProbe,
+  SecretShape,
 } from "./contract.ts";
 import { decrypt, encrypt } from "./envelope.ts";
 import { custodyMigrations } from "./migrations.ts";

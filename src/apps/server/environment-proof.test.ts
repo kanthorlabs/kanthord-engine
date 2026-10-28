@@ -11,8 +11,8 @@ import { test } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 import { temporary } from "../../kernel/test-support.ts";
 import {
-  ProofPhase,
   type ProofInput,
+  ProofPhase,
 } from "../../project/environment-state.ts";
 import { ContainerRuntime } from "../../worker/contract.ts";
 import {
@@ -22,7 +22,7 @@ import {
   type RuntimeAnswer,
   type RuntimeHost,
 } from "./container-runtime.ts";
-import { proveInImage, type ProofOptions } from "./environment-proof.ts";
+import { type ProofOptions, proveInImage } from "./environment-proof.ts";
 
 const OWNER = "OWNER";
 const TAG = "localhost/kanthord-env/repository/github/acme/app:digest";

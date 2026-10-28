@@ -1,9 +1,9 @@
 import type { Transaction } from "../kernel/store.ts";
-import { NodeState, type MissionBindings } from "./contract.ts";
+import { type MissionBindings, NodeState } from "./contract.ts";
 import { actionStatesOf, eligibleUnrequested } from "./frozen-action.ts";
 import { directDependenciesOf } from "./graph.ts";
 import { readOpenAttempt } from "./record-store.ts";
-import { readDependencies, readMissionNodes, type NodeRow } from "./store.ts";
+import { type NodeRow, readDependencies, readMissionNodes } from "./store.ts";
 
 const NO_ATTEMPT = 0;
 const NO_PENDING_ITEMS = 0;

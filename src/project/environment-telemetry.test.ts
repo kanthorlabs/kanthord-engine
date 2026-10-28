@@ -1,14 +1,14 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { SpanStatus, type ServerTrace } from "../tracking/contract.ts";
+import { type ServerTrace, SpanStatus } from "../tracking/contract.ts";
 import {
   EnvironmentAttribute,
-  EnvironmentSpan,
-  type EnvironmentStepSpan,
   environmentRootEnd,
   environmentRootStart,
+  EnvironmentSpan,
   environmentSpanSchema,
   environmentStepSpan,
+  type EnvironmentStepSpan,
 } from "./environment-telemetry.ts";
 
 const TRACE: ServerTrace = {

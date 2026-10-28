@@ -16,32 +16,32 @@ import { HealthRegistry } from "../kernel/health.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import { createIdentity } from "../kernel/identity.ts";
 import {
-  OperationRegistry,
-  OperationResultType,
   type CallerContext,
+  OperationRegistry,
   type OperationResult,
+  OperationResultType,
 } from "../kernel/operation.ts";
 import { HealthStatus } from "../kernel/service.ts";
 import { IN_MEMORY_DATABASE, Store } from "../kernel/store.ts";
 import { testHumanIdentity } from "../kernel/test-identity.ts";
 import {
-  GitHubPlatform,
   type GitHubAnswer,
   type GitHubCheckpoint,
   type GitHubEvent,
   type GitHubEventsAnswer,
+  GitHubPlatform,
 } from "../repository/github.ts";
 import type { IntakeCustody } from "./action-check.ts";
 import {
   Consumer,
-  INTAKE_SERVICE_NAME,
+  type InboundCreate,
   InboundEventState,
   InboundKind,
-  InboundPlatform,
-  intakeOperations,
-  type InboundCreate,
   type InboundKindValue,
+  InboundPlatform,
+  INTAKE_SERVICE_NAME,
   type IntakeConsumers,
+  intakeOperations,
 } from "./contract.ts";
 import { eventState, insertEvent } from "./event-store.ts";
 import { INBOUND_TARGET_KIND, InboundCapability } from "./health.ts";

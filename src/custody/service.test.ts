@@ -14,17 +14,17 @@ import {
 } from "../kernel/store.ts";
 import type { CallerIdentity, ServiceIdentity } from "../kernel/caller.ts";
 import {
-  CUSTODY_SERVICE_NAME,
-  SecretShape,
-  SERVER_HOLDER,
+  type AgentProvidersDependentOnFn,
+  type BindingsNamingFn,
+  type CredentialAnswer,
   type CredentialMetadataFn,
   type CredentialPlatform,
   type CredentialPlatformSet,
+  CUSTODY_SERVICE_NAME,
   type CustodySuitabilityFn,
-  type AgentProvidersDependentOnFn,
-  type BindingsNamingFn,
   type InboundsNamingFn,
-  type CredentialAnswer,
+  SecretShape,
+  SERVER_HOLDER,
 } from "./contract.ts";
 import { decrypt, encrypt } from "./envelope.ts";
 import { custodyMigrations } from "./migrations.ts";
@@ -38,12 +38,12 @@ import { createIdentity } from "../kernel/identity.ts";
 import { canonicalJSON } from "../kernel/json.ts";
 import { FacilityError, grantFacts } from "./facility.ts";
 import {
-  AssetUse,
-  GrantKind,
   type ActionFacts,
   type AssetFacts,
+  AssetUse,
   type CustodyExecution,
   type Grant,
+  GrantKind,
   type GrantRequest,
 } from "./contract.ts";
 import type { ExecutionClaim } from "../kernel/operation.ts";

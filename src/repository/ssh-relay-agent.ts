@@ -3,7 +3,7 @@ import { createServer, type Server, type Socket } from "node:net";
 import { CancellationContext, type Context } from "../kernel/context.ts";
 import { asError } from "../kernel/errors.ts";
 import type { SshRelayAccess } from "./contract.ts";
-import { SshReader, SshWriter, sshPublicKeyBlob } from "./ssh-key.ts";
+import { sshPublicKeyBlob, SshReader, SshWriter } from "./ssh-key.ts";
 
 export const SshAgentMessage = {
   Failure: 5,

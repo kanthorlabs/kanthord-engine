@@ -1,17 +1,17 @@
 import {
-  constants,
   closeSync,
+  constants,
   fstatSync,
+  fsyncSync,
   linkSync,
   lstatSync,
   mkdirSync,
   openSync,
   readFileSync,
   renameSync,
+  type Stats,
   unlinkSync,
   writeFileSync,
-  fsyncSync,
-  type Stats,
 } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { dirname, join } from "node:path";

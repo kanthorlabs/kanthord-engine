@@ -8,10 +8,10 @@ import { LogDestination } from "../../kernel/log.ts";
 import { isObject, isString } from "../../kernel/values.ts";
 import {
   bridgePort,
-  FrameKind,
   frameInvalid,
-  serverFrameSchema,
+  FrameKind,
   type ServerFrame,
+  serverFrameSchema,
 } from "./frames.ts";
 import { SlotControl, type ThreadData } from "./thread-data.ts";
 import { startThread } from "./thread-start.ts";

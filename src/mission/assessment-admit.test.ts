@@ -12,25 +12,25 @@ import { canonicalJSON } from "../kernel/json.ts";
 import { testHumanIdentity } from "../kernel/test-identity.ts";
 import {
   AssessmentResult,
-  AssetKind,
-  MissionErrorCode,
-  Intent,
   type AssessmentSubmit,
+  AssetKind,
+  Intent,
+  MissionErrorCode,
   type Verification,
 } from "./contract.ts";
 import { admitAssessment } from "./assessment-admit.ts";
 import { getRevision } from "./node-read.ts";
 import {
-  insertEvidence,
-  readOpenAttempt,
   insertAssessment,
+  insertEvidence,
   insertOutcome,
+  readOpenAttempt,
 } from "./record-store.ts";
 import {
   insertDependency,
-  readNode,
   insertNode,
   insertRevision,
+  readNode,
 } from "./store.ts";
 import { executionHarness } from "./test-support.ts";
 

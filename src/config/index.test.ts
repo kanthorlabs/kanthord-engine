@@ -4,8 +4,8 @@ import { isDeepStrictEqual, promisify } from "node:util";
 import {
   chmodSync,
   mkdirSync,
-  readFileSync,
   readdirSync,
+  readFileSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
@@ -16,9 +16,9 @@ import { fileURLToPath } from "node:url";
 import { diagnosticText, temporary } from "../kernel/test-support.ts";
 import { isNumber } from "../kernel/values.ts";
 import {
-  configuration,
   CONFIG_VERSION,
   configPath,
+  configuration,
   initialConfig,
   loadConfig,
   parseMapping,

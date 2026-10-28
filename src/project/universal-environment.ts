@@ -1,7 +1,7 @@
 import { shippedAsset } from "../kernel/assets.ts";
 import {
-  parseEnvironmentText,
   type Environment,
+  parseEnvironmentText,
 } from "../kernel/devcontainer.ts";
 
 const UNIVERSAL_ASSET = "environment/universal.json";

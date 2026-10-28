@@ -2,9 +2,9 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { SQLInputValue } from "node:sqlite";
 import {
-  Store,
   IN_MEMORY_DATABASE,
   type Migrations,
+  Store,
 } from "../../kernel/store.ts";
 import { CUSTODY_SERVICE_NAME } from "../../custody/contract.ts";
 import { custodyMigrations } from "../../custody/index.ts";

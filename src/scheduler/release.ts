@@ -2,13 +2,13 @@ import assert from "node:assert/strict";
 import { unattributed } from "../kernel/cause.ts";
 import type { CallerContext } from "../kernel/operation.ts";
 import {
-  environmentFailureSchema,
-  ExecutionStopReason,
-  isAdvancingProviderFailure,
   type CooldownChange,
+  environmentFailureSchema,
   type ExecutionRelease,
   type ExecutionRow,
+  ExecutionStopReason,
   type FailureHold,
+  isAdvancingProviderFailure,
   type NodeTransition,
 } from "./contract.ts";
 import { ExecutionEnd } from "../tracking/contract.ts";

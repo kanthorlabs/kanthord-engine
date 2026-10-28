@@ -5,7 +5,7 @@ import pino from "pino";
 import { background } from "../kernel/context.ts";
 import { OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
-import { OperationRegistry, type CallerContext } from "../kernel/operation.ts";
+import { type CallerContext, OperationRegistry } from "../kernel/operation.ts";
 import { IN_MEMORY_DATABASE, Store } from "../kernel/store.ts";
 import { childRun } from "../kernel/test-support.ts";
 import {
@@ -15,11 +15,11 @@ import {
   repositoryOperations,
 } from "./contract.ts";
 import {
+  type HostKeySources,
   keyscanArguments,
   parseGitHubMeta,
   parseKeyscan,
   RepositoryHostKeys,
-  type HostKeySources,
 } from "./host-key.ts";
 import { repositoryMigrations } from "./migrations.ts";
 import {

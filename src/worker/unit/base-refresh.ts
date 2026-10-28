@@ -5,8 +5,8 @@ import { renderWorkPrompt } from "../../agent/prompt-composer.ts";
 import { renderTemplate } from "../../agent/prompt-templates.ts";
 import { commitOf, headCommit, isAncestor, mergeRef } from "./local-git.ts";
 import {
-  repositoryOf,
   implementRepositoriesOf,
+  repositoryOf,
   type StepsState,
 } from "./steps-implement.ts";
 import { sshAccessOf, type WorkspaceCheckout } from "./workspace.ts";

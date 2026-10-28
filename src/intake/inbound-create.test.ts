@@ -15,9 +15,9 @@ import { HealthRegistry } from "../kernel/health.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import { createIdentity } from "../kernel/identity.ts";
 import {
+  type CallerContext,
   OperationRegistry,
   OperationResultType,
-  type CallerContext,
 } from "../kernel/operation.ts";
 import {
   IN_MEMORY_DATABASE,
@@ -26,21 +26,21 @@ import {
 } from "../kernel/store.ts";
 import { testHumanIdentity } from "../kernel/test-identity.ts";
 import {
-  GitHubPlatform,
   type GitHubAnswer,
   type GitHubCall,
   type GitHubEventsAnswer,
   type GitHubEventsQuery,
+  GitHubPlatform,
 } from "../repository/github.ts";
 import type { IntakeCustody } from "./action-check.ts";
 import {
   Consumer,
-  INTAKE_SERVICE_NAME,
+  type InboundCreate,
   InboundKind,
   InboundPlatform,
+  INTAKE_SERVICE_NAME,
   intakeOperations,
   ResultClass,
-  type InboundCreate,
 } from "./contract.ts";
 import { commitInbound, credentialRefusal } from "./inbound-create.ts";
 import { IntakeService } from "./index.ts";

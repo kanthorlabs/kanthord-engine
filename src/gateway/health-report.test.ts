@@ -1,17 +1,17 @@
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
 import {
-  setImmediate as turn,
   setTimeout as delay,
+  setImmediate as turn,
 } from "node:timers/promises";
 import pino from "pino";
 import { mintHumanIdentity } from "../kernel/caller-mint.ts";
 import { CancellationContext, type Context } from "../kernel/context.ts";
 import {
   HealthScope,
+  type ResourceEntry,
   ResourceFailureReason,
   ResourceStatus,
-  type ResourceEntry,
   type ResourceStatusValue,
 } from "../kernel/health.ts";
 import { HttpStatus } from "../kernel/http.ts";
@@ -19,14 +19,14 @@ import type { CallerContext } from "../kernel/operation.ts";
 import { Store } from "../kernel/store.ts";
 import {
   gatewayOperations,
+  type InventorySnapshot,
+  OWNER_AGENT,
+  OWNER_INTAKE,
   OWNER_LLM,
+  OWNER_PROJECT,
   OWNER_REPOSITORY,
   OWNER_STORAGE,
-  OWNER_AGENT,
   OWNER_WORKER,
-  OWNER_PROJECT,
-  OWNER_INTAKE,
-  type InventorySnapshot,
 } from "./contract.ts";
 import { collectInventories, resourceHealthReport } from "./health-report.ts";
 

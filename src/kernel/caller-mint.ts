@@ -2,13 +2,13 @@ import assert from "node:assert/strict";
 import { identitySchema } from "./identity.ts";
 import {
   callerProvenance,
-  IdentityKind,
   CLIENT_IDENTITY_PREFIX,
-  WORKER_INSTANCE_PREFIX,
-  MAX_HUMAN_USERNAME_LENGTH,
-  MAX_DISPLAY_NAME_LENGTH,
   type HumanIdentity,
+  IdentityKind,
   type MachineIdentity,
+  MAX_DISPLAY_NAME_LENGTH,
+  MAX_HUMAN_USERNAME_LENGTH,
+  WORKER_INSTANCE_PREFIX,
   type WorkerIdentity,
 } from "./caller.ts";
 const clientIdentitySchema = identitySchema(CLIENT_IDENTITY_PREFIX);

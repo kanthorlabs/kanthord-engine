@@ -6,11 +6,11 @@ import { ensureDirectory } from "../../kernel/files.ts";
 import type { Revision, TaskContent } from "../../mission/contract.ts";
 import { SpanStatus } from "../../tracking/contract.ts";
 import {
+  type AffectedResult,
+  type AffectedRun,
   AffectedVerdict,
   nodeVerdict,
   runAffected,
-  type AffectedResult,
-  type AffectedRun,
 } from "./affected.ts";
 import { refreshAtRelease, RefreshResult } from "./base-refresh.ts";
 import { verificationCommands } from "./evaluation-input.ts";
@@ -22,8 +22,8 @@ import { checkoutDetached, cloneLocal, matchRemote } from "./local-git.ts";
 import {
   environmentDigestsOf,
   testedCommitOf,
-  verificationObserver,
   VerificationContext,
+  verificationObserver,
 } from "./method-telemetry.ts";
 import { repositoryOf, type StepsState } from "./steps-implement.ts";
 import {
@@ -38,7 +38,7 @@ import {
 import { verificationFactsOf } from "./progress-rule.ts";
 import { CHECKOUTS_DIRECTORY, RELEASE_DIRECTORY } from "./workspace.ts";
 import { SpanOperation } from "./telemetry.ts";
-import { SetupEnd, setUpHeads, type SetupEntry } from "./environment-setup.ts";
+import { SetupEnd, type SetupEntry, setUpHeads } from "./environment-setup.ts";
 
 const EXIT_SUCCESS = 0;
 const NOT_FOUND = -1;

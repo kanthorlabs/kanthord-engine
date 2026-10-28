@@ -5,25 +5,25 @@ import { httpClient } from "../../gateway/client.ts";
 import { writePrivate } from "../../kernel/files.ts";
 import { HttpStatus } from "../../kernel/http.ts";
 import {
-  OperationResultType,
   type OperationResult,
+  OperationResultType,
 } from "../../kernel/operation.ts";
 import { temporary } from "../../kernel/test-support.ts";
 import {
+  type Assessment,
   AssessmentResult,
   AssetKind,
-  MissionErrorCode,
-  Intent,
-  NodeState,
-  TASK_IDENTITY_PREFIX,
-  missionOperations,
-  type Assessment,
   type ControlResult,
+  Intent,
   type Mission,
+  MissionErrorCode,
+  missionOperations,
   type Node,
   type NodeChange,
+  NodeState,
   type Outcome,
   type Proposal,
+  TASK_IDENTITY_PREFIX,
 } from "../../mission/contract.ts";
 import { gatewayFixture } from "./test-support.ts";
 import {

@@ -26,8 +26,8 @@ import type {
   OperationRegistry,
 } from "../kernel/operation.ts";
 import {
-  HealthStatus,
   type Healthcheck,
+  HealthStatus,
   type Service,
 } from "../kernel/service.ts";
 import type { Store, Transaction } from "../kernel/store.ts";
@@ -41,7 +41,7 @@ import { pinnedLayers } from "../agent/pinned-layers.ts";
 import { toolApproval } from "../agent/hooks/tool-approval.ts";
 import { loadPi } from "../agent/pi.ts";
 import type { PromptPartAnswer, PromptTemplates } from "../agent/contract.ts";
-import { systemPrompt, PromptConsumer } from "../agent/prompt-render.ts";
+import { PromptConsumer, systemPrompt } from "../agent/prompt-render.ts";
 import {
   connectModel,
   type ModelConnectorInput,
@@ -53,26 +53,26 @@ import type {
   WorkbenchCredentialsFn,
 } from "../custody/contract.ts";
 import {
-  WORKBENCH_CONFIGURATION_ENTRY,
-  WORKBENCH_SESSION_PREFIX,
-  WORKBENCH_EVENTS_WAIT_MS,
-  WORKBENCH_REJECTION_REASON,
-  WorkbenchErrorCode,
-  workbenchConfigurationSchema,
-  workbenchOperations,
   type PendingApproval,
   type RunSnapshot,
   type SessionEntry,
   type SessionEvents,
+  WORKBENCH_CONFIGURATION_ENTRY,
+  WORKBENCH_EVENTS_WAIT_MS,
+  WORKBENCH_REJECTION_REASON,
+  WORKBENCH_SESSION_PREFIX,
   type WorkbenchConfiguration,
+  workbenchConfigurationSchema,
+  WorkbenchErrorCode,
+  workbenchOperations,
   type WorkbenchSession,
 } from "./contract.ts";
 import {
   builtinTools,
-  operationTool,
-  toolOperations,
   type InvokeOperation,
+  operationTool,
   toolName,
+  toolOperations,
 } from "./tools.ts";
 import {
   createSession,
@@ -81,9 +81,9 @@ import {
   lastThinkingLevel,
   listSessions,
   resumeCommand,
+  type SessionPlace,
   sessionPlace,
   storedConfiguration,
-  type SessionPlace,
 } from "./sessions.ts";
 
 export type WorkbenchModelRuntimeFactory = (

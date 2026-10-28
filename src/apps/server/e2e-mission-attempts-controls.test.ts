@@ -4,30 +4,30 @@ import { join } from "node:path";
 import { temporary } from "../../kernel/test-support.ts";
 import { writePrivate } from "../../kernel/files.ts";
 import {
-  Intent,
-  NodeState,
   ActorKind,
+  type Assessment,
   AssessmentResult,
+  type Attempt,
   ClosingEvent,
-  RepositoryAction,
-  ExpectedEndState,
-  Resolution,
-  StartPoint,
   type ControlResult,
+  ExpectedEndState,
+  type ExternalAction,
+  Intent,
+  type Mission,
   type Node,
   type NodeChange,
-  type Mission,
-  type Attempt,
-  type ExternalAction,
-  type Assessment,
+  NodeState,
   type Outcome,
+  RepositoryAction,
+  Resolution,
+  StartPoint,
 } from "../../mission/contract.ts";
-import { kanthord, environment } from "./cli-support.ts";
+import { environment, kanthord } from "./cli-support.ts";
 import {
-  createFakeSshCredential,
-  gatewayFixture,
   COVERING_WORKER_BINDINGS,
+  createFakeSshCredential,
   enableCoveringAgents,
+  gatewayFixture,
 } from "./test-support.ts";
 import { createIdempotencyKey } from "../../kernel/identity.ts";
 

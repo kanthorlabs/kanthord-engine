@@ -1,9 +1,9 @@
 import { HttpStatus } from "../kernel/http.ts";
 import {
   emptyInput,
+  OperationLifetime,
   OperationRegistry,
   StoreName,
-  OperationLifetime,
 } from "../kernel/operation.ts";
 import { gatewayFixture } from "./test-support.ts";
 const REQUEST_LOG_RECORD_COUNT = 2;
@@ -12,10 +12,10 @@ import { test } from "node:test";
 import { ulid } from "ulid";
 import { z } from "zod";
 import {
-  createIdentity,
   createIdempotencyKey,
-  idempotencyKeySchema,
+  createIdentity,
   IDEMPOTENCY_KEY_PREFIX,
+  idempotencyKeySchema,
 } from "../kernel/identity.ts";
 import { OperationResultType } from "../kernel/operation.ts";
 import { errorSchema } from "../kernel/errors.ts";

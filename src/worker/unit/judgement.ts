@@ -4,9 +4,9 @@ import type { TaskContent } from "../../mission/contract.ts";
 import type { WorkPrompt } from "../../agent/prompt-composer.ts";
 import type { Verification, VerificationRun } from "./verification.ts";
 import {
-  AffectedVerdict,
   type AffectedResult,
   type AffectedRun,
+  AffectedVerdict,
 } from "./affected.ts";
 import type { ChangeRequestRead, FailedChecks } from "../contract.ts";
 import type { NativeAgent } from "./native-agent.ts";

@@ -10,11 +10,11 @@ import {
   BINDING_ID_PREFIX,
   BINDING_SET_INITIAL_VERSION,
   BindingKind,
-  WorkerPlacement,
   bindingSetWriteInputSchema,
   ChangeKind,
   PROJECT_ID_PREFIX,
   REPOSITORY_PLATFORM,
+  WorkerPlacement,
 } from "../../project/contract.ts";
 import { type AgentEnablement, AgentErrorCode } from "../../agent/contract.ts";
 import { environment, kanthord } from "./cli-support.ts";

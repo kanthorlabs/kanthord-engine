@@ -4,17 +4,17 @@ import { canonicalJSON } from "../kernel/json.ts";
 import { identitySchema } from "../kernel/identity.ts";
 import type { Transaction } from "../kernel/store.ts";
 import {
-  agentPinSchema,
-  ClaimState,
-  ExecutionStopReason,
-  releaseStopSchema,
   type AgentChains,
+  agentPinSchema,
   type AgentSelection,
-  type ReleaseStop,
-  type ExecutionRow,
+  ClaimState,
   type ExecutionRecord,
-  type Registrations,
+  type ExecutionRow,
+  ExecutionStopReason,
   type MissionBranches,
+  type Registrations,
+  type ReleaseStop,
+  releaseStopSchema,
 } from "./contract.ts";
 
 const NO_ROWS = 0;

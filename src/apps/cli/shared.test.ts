@@ -6,12 +6,12 @@ import { isDeepStrictEqual } from "node:util";
 import { z } from "zod";
 import { Diagnostic } from "../../kernel/errors.ts";
 import {
-  idempotencyKeySchema,
   IDEMPOTENCY_KEY_PREFIX,
+  idempotencyKeySchema,
 } from "../../kernel/identity.ts";
 import {
-  OperationResultType,
   type OperationResult,
+  OperationResultType,
 } from "../../kernel/operation.ts";
 import { temporary } from "../../kernel/test-support.ts";
 import {

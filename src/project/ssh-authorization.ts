@@ -1,16 +1,16 @@
 import assert from "node:assert/strict";
 import {
-  SshIdentitySubjectKind,
   type Authorized,
   type SshIdentityAuthorization,
   type SshIdentityFacts,
   type SshIdentitySubject,
+  SshIdentitySubjectKind,
 } from "../custody/contract.ts";
 import {
+  type CallerIdentity,
   isHumanIdentity,
   isMachineIdentity,
   isServiceIdentity,
-  type CallerIdentity,
 } from "../kernel/caller.ts";
 import { OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
@@ -19,13 +19,13 @@ import type { Transaction } from "../kernel/store.ts";
 import { MISSION_SERVICE_NAME } from "../mission/contract.ts";
 import {
   BindingKind,
+  type CustodySuitability,
   PROJECT_SERVICE_NAME,
   ProjectErrorCode,
-  SSH_CREDENTIAL_PLATFORM,
-  repositoryConfigSchema,
-  type CustodySuitability,
   type RepositoryBindingIdsOf,
+  repositoryConfigSchema,
   type RequestEvidenceBindingOf,
+  SSH_CREDENTIAL_PLATFORM,
 } from "./contract.ts";
 import {
   hasBindingTombstone,

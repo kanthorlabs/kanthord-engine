@@ -11,40 +11,40 @@ import { join } from "node:path";
 import { test, type TestContext } from "node:test";
 import pino from "pino";
 import { temporary } from "../kernel/test-support.ts";
-import { AgentComponent, SelectionKind, type Dependencies } from "./service.ts";
+import { AgentComponent, type Dependencies, SelectionKind } from "./service.ts";
 import {
-  agentOperations,
-  AgentErrorCode,
-  ChainLevel,
-  FALLBACK_CONFIGURATIONS_MAX,
   AdvancingFailure,
-  CooldownChangeKind,
-  type AgentSelection,
-  type ChainEntry,
-  PromptOrigin,
-  PromptPart,
   AGENT_COMPONENT_NAME,
   AGENT_PROVIDER_TARGET_KIND,
-  LIST_LIMIT_DEFAULT,
-  agentProviderKindSchema,
-  ToolSource,
   type AgentDependentBinding,
   type AgentEntry,
+  AgentErrorCode,
+  agentOperations,
+  agentProviderKindSchema,
+  type AgentSelection,
   type ApprovedModel,
+  type ChainEntry,
+  ChainLevel,
+  CooldownChangeKind,
+  FALLBACK_CONFIGURATIONS_MAX,
   type HolderScope,
+  LIST_LIMIT_DEFAULT,
+  PromptOrigin,
+  PromptPart,
+  ToolSource,
 } from "./contract.ts";
 import { agentMigrations } from "./migrations.ts";
 import { getAgentDeclaration } from "./catalog.ts";
 import {
   AgentProviderKind,
   EnablementState,
-  insertEnablementRevision,
   getLatestRevision,
+  insertEnablementRevision,
 } from "./enablements.ts";
-import { OperationRegistry, type CallerContext } from "../kernel/operation.ts";
+import { type CallerContext, OperationRegistry } from "../kernel/operation.ts";
 import { background } from "../kernel/context.ts";
 import { HealthScope, ResourceStatus } from "../kernel/health.ts";
-import { Store, IN_MEMORY_DATABASE } from "../kernel/store.ts";
+import { IN_MEMORY_DATABASE, Store } from "../kernel/store.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import { CodedError, OperationError } from "../kernel/errors.ts";
 import { ProjectErrorCode } from "../project/contract.ts";

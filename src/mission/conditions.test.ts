@@ -14,12 +14,12 @@ import {
   continuationHolds,
   readinessOf,
 } from "./conditions.ts";
-import { openAttempt, closeAttempt, insertEvidence } from "./record-store.ts";
+import { closeAttempt, insertEvidence, openAttempt } from "./record-store.ts";
 import { claimableMap } from "./routing.ts";
 import {
+  insertDependency,
   insertMission,
   insertNode,
-  insertDependency,
   readNode,
   setNodeState,
 } from "./store.ts";

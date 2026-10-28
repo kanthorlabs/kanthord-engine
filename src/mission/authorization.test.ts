@@ -15,8 +15,8 @@ import {
   EndState,
   MISSION_SERVICE_NAME,
   MissionErrorCode,
-  OBJECT_SIZE_MAX,
   NodeState,
+  OBJECT_SIZE_MAX,
   PlatformAddressKind,
   RepositoryAction,
   RepositoryLanding,
@@ -38,11 +38,11 @@ import {
 import { setNodeState } from "./store.ts";
 import {
   ASSESSED_COMMIT,
+  authorizationHarness,
+  evidenceHarness,
   HARNESS_ACTION_KEY,
   HARNESS_CREDENTIAL,
   HARNESS_PLATFORM,
-  authorizationHarness,
-  evidenceHarness,
 } from "./test-support.ts";
 
 test("Mission proves live claim, node, open attempt and binding before granting a frozen action", (t) => {

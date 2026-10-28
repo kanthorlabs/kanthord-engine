@@ -16,11 +16,11 @@ import { deriveClientSecret } from "../../gateway/auth/jwt.ts";
 import {
   CREDENTIAL_SEAL_INFO,
   credentialSealAad,
+  EXECUTION_CREDENTIAL_MAX_BYTES,
   handoverPayloadSchema,
   plainHandoverPayloadSchema,
   SecretShape,
   sshSignAnswerSchema,
-  EXECUTION_CREDENTIAL_MAX_BYTES,
 } from "../../custody/contract.ts";
 import { llmOperations } from "../../llm/contract.ts";
 import { LLM_PLATFORMS } from "../../llm/platforms.ts";
@@ -30,11 +30,11 @@ import { httpTransport } from "../worker/transport.ts";
 import { repositoryOperations } from "../../repository/contract.ts";
 import { projectOperations } from "../../project/contract.ts";
 import {
+  connectionPayloadSchema,
+  HANDOVER_TIMEOUT_MS,
   INSTANCE_CONNECTION_INFO,
   WORKER_TOKEN_INFO,
-  HANDOVER_TIMEOUT_MS,
   WorkerErrorCode,
-  connectionPayloadSchema,
   workerOperations,
   workerTokenPayloadSchema,
 } from "../../worker/contract.ts";
@@ -42,32 +42,32 @@ import {
   generateX25519KeyPair,
   keyFingerprint,
   openJSON,
-  sealJSON,
   type SealedObject,
+  sealJSON,
 } from "../../kernel/hpke.ts";
 import { agentOperations, ChainLevel } from "../../agent/contract.ts";
-import { missionOperations, Intent } from "../../mission/contract.ts";
+import { Intent, missionOperations } from "../../mission/contract.ts";
 import { schedulerOperations, WorkPullKind } from "../../scheduler/contract.ts";
 import {
-  OperationResultType,
+  type ClientOptions,
   type Operation,
   type OperationResult,
-  type ClientOptions,
+  OperationResultType,
 } from "../../kernel/operation.ts";
 import { HttpStatus } from "../../kernel/http.ts";
 import { SWE_AGENT_PROMPT } from "../../agent/prompt-assets.ts";
 import { framing, PromptConsumer } from "../../agent/prompt-render.ts";
-import { createIdentity, createIdempotencyKey } from "../../kernel/identity.ts";
+import { createIdempotencyKey, createIdentity } from "../../kernel/identity.ts";
 import { canonicalJSON, digest } from "../../kernel/json.ts";
 import {
   deriveHandoverKeys,
   deriveSshSignKeys,
-  handoverAad,
-  openEnvelope,
-  sealEnvelope,
   HANDOVER_CIPHER,
   HANDOVER_NONCE_BYTES,
   HANDOVER_TAG_BYTES,
+  handoverAad,
+  openEnvelope,
+  sealEnvelope,
 } from "../../kernel/handover.ts";
 import {
   COVERING_WORKER_BINDINGS,

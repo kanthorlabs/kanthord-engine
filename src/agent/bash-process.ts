@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { spawn, type ChildProcess } from "node:child_process";
+import { type ChildProcess, spawn } from "node:child_process";
 import { access } from "node:fs/promises";
 import { constants as osConstants } from "node:os";
 import type { BashOperations } from "@earendil-works/pi-coding-agent";

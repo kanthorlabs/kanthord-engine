@@ -7,8 +7,8 @@ import {
 import { Diagnostic } from "../../kernel/errors.ts";
 import { OperationResultType } from "../../kernel/operation.ts";
 import {
-  WorkPullKind,
   type ExecutionRecord,
+  WorkPullKind,
 } from "../../scheduler/contract.ts";
 import type { Backoff } from "./api.ts";
 import { sleep } from "./api.ts";

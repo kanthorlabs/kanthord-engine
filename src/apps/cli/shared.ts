@@ -9,8 +9,8 @@ import {
 } from "../../kernel/identity.ts";
 import { isNumber, ValueType } from "../../kernel/values.ts";
 import {
-  OperationResultType,
   type OperationResult,
+  OperationResultType,
 } from "../../kernel/operation.ts";
 
 const INVALID_PATH = "cli.file.invalid_path";

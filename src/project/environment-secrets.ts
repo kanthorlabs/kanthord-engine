@@ -2,11 +2,11 @@ import assert from "node:assert/strict";
 import { rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
-  GrantKind,
   apiKeySecretSchema,
   type CredentialPlatformSet,
   type CredentialRecords,
   type Grant,
+  GrantKind,
   type GrantOf,
   type GrantRequest,
   type Material,

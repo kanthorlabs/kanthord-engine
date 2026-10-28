@@ -3,11 +3,11 @@ import { canonicalJSON } from "../kernel/json.ts";
 import { createIdentity } from "../kernel/identity.ts";
 import type { Transaction } from "../kernel/store.ts";
 import {
-  INBOUND_EVENT_ID_PREFIX,
-  InboundEventState,
-  inboundEventSchema,
   type ErrorItem,
+  INBOUND_EVENT_ID_PREFIX,
   type InboundEvent,
+  inboundEventSchema,
+  InboundEventState,
   type InboundEventStateValue,
 } from "./contract.ts";
 import { appendError } from "./error-array.ts";

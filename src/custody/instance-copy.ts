@@ -2,9 +2,9 @@ import type { Credential } from "@earendil-works/pi-ai";
 import type { z } from "zod";
 import {
   openJSON,
-  sealJSON,
-  SealedOpenError,
   type SealedObject,
+  SealedOpenError,
+  sealJSON,
 } from "../kernel/hpke.ts";
 import { digest } from "../kernel/json.ts";
 import {

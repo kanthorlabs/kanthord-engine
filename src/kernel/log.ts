@@ -1,4 +1,4 @@
-import { constants, closeSync, fstatSync } from "node:fs";
+import { closeSync, constants, fstatSync } from "node:fs";
 import { join } from "node:path";
 import pino from "pino";
 import { openPrivate } from "./files.ts";

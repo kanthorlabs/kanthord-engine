@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
-import { Store, IN_MEMORY_DATABASE } from "../kernel/store.ts";
+import { IN_MEMORY_DATABASE, Store } from "../kernel/store.ts";
 import {
   Consumer,
-  INTAKE_SERVICE_NAME,
   InboundEventState,
   InboundKind,
   InboundPlatform,
+  INTAKE_SERVICE_NAME,
   OutboundOperation,
   OutboundRequestState,
 } from "./contract.ts";

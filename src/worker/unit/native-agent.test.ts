@@ -23,7 +23,7 @@ import { InMemoryCredentialStore } from "@earendil-works/pi-ai";
 import { background, CancellationContext } from "../../kernel/context.ts";
 import { Diagnostic } from "../../kernel/errors.ts";
 import { createIdentity } from "../../kernel/identity.ts";
-import { temporary, hostEnvironment } from "../../kernel/test-support.ts";
+import { hostEnvironment, temporary } from "../../kernel/test-support.ts";
 import {
   credentialRedaction,
   openNativeAgent,

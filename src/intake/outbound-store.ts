@@ -4,12 +4,12 @@ import { createIdentity } from "../kernel/identity.ts";
 import type { Transaction } from "../kernel/store.ts";
 import {
   OUTBOUND_REQUEST_ID_PREFIX,
-  OutboundRequestState,
-  RESULT_MAX_BYTES,
-  outboundRequestSchema,
   type OutboundOperationValue,
   type OutboundRequest,
+  outboundRequestSchema,
+  OutboundRequestState,
   type OutboundRequestStateValue,
+  RESULT_MAX_BYTES,
 } from "./contract.ts";
 import { appendError } from "./error-array.ts";
 

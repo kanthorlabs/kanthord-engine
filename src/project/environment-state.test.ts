@@ -5,17 +5,17 @@ import { test } from "node:test";
 import { canonicalJSON } from "../kernel/json.ts";
 import { temporary } from "../kernel/test-support.ts";
 import {
-  EnvironmentTarget,
-  ProofFiles,
-  ProofPhase,
   classifyProof,
+  type CommandResult,
   environmentDigest,
+  type EnvironmentDigestInput,
   environmentPath,
   environmentTagOf,
-  type CommandResult,
-  type EnvironmentDigestInput,
+  EnvironmentTarget,
   type ProofFile,
   type ProofFileInput,
+  ProofFiles,
+  ProofPhase,
 } from "./environment-state.ts";
 
 const MIXED_IDENTITY = "repository:github:Acme/My_App";

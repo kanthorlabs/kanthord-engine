@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test, type TestContext } from "node:test";
-import { setImmediate, setTimeout as delay } from "node:timers/promises";
+import { setTimeout as delay, setImmediate } from "node:timers/promises";
 import { simpleGit } from "simple-git";
 import type { Material } from "../../custody/contract.ts";
 import { directClient } from "../../gateway/index.ts";
@@ -15,28 +15,28 @@ import {
 import { writePrivate } from "../../kernel/files.ts";
 import { HttpMethod, HttpStatus } from "../../kernel/http.ts";
 import {
-  OperationResultType,
   type OperationResult,
+  OperationResultType,
 } from "../../kernel/operation.ts";
 import { mintServiceIdentity } from "../../kernel/service-mint.ts";
 import { temporary } from "../../kernel/test-support.ts";
 import {
+  type Evidence,
+  Intent,
   MISSION_SERVICE_NAME,
   MissionErrorCode,
-  NodeState,
-  PlatformAddressKind,
   missionOperations,
-  type Evidence,
+  NodeState,
   type PlatformAddress,
+  PlatformAddressKind,
   type Revision,
-  Intent,
 } from "../../mission/contract.ts";
 import type { ExecutionRecord } from "../../scheduler/contract.ts";
 import { environment, kanthord } from "./cli-support.ts";
 import {
-  FAKE_SSH_CREDENTIAL,
   bareRepository,
   createFakeSshCredential,
+  FAKE_SSH_CREDENTIAL,
   fakeGitHub,
   gatewayFixture,
   mappedTransport,

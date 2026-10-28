@@ -1,15 +1,15 @@
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
 import {
-  writeFile,
-  symlink,
+  lstat,
   mkdir,
   open,
-  lstat,
   realpath,
   rename,
-  unlink,
+  symlink,
   truncate,
+  unlink,
+  writeFile,
 } from "node:fs/promises";
 import { createServer } from "node:http";
 import { join } from "node:path";
@@ -19,10 +19,10 @@ import { temporary } from "../../kernel/test-support.ts";
 import { OperationResultType } from "../../kernel/operation.ts";
 import { httpTransport } from "./transport.ts";
 import {
-  uploadEvidence,
   openEvidence,
-  WorkerErrorCode,
   PathRefusal,
+  uploadEvidence,
+  WorkerErrorCode,
 } from "./evidence-upload.ts";
 import { testClaim } from "./test-support.ts";
 import { isString } from "../../kernel/values.ts";

@@ -9,11 +9,11 @@ import {
   reasonOf,
 } from "../../kernel/context.ts";
 import { Diagnostic } from "../../kernel/errors.ts";
-import { OperationalLog, type LogConfig } from "../../kernel/log.ts";
+import { type LogConfig, OperationalLog } from "../../kernel/log.ts";
 import {
+  type Healthcheck,
   HealthStatus,
   lifecycle,
-  type Healthcheck,
 } from "../../kernel/service.ts";
 import { isString } from "../../kernel/values.ts";
 import { packageVersion } from "../../kernel/version.ts";
@@ -22,18 +22,18 @@ import { PI_DIRECTORY_NAME, usePiDirectory } from "../../agent/pi.ts";
 import { Backoff } from "./api.ts";
 import type { WorkerTransport } from "./transport.ts";
 import {
-  register,
   deregister,
-  startHeartbeat,
+  register,
   type Registration,
+  startHeartbeat,
 } from "./registration.ts";
 import {
-  installPiTools,
   defaultModelRuntimeFactory,
-  WorkspaceRoot,
+  executionSessionRoot,
+  installPiTools,
   type ModelRuntimeFactory,
   type RepositoryTransport,
-  executionSessionRoot,
+  WorkspaceRoot,
 } from "../../worker/unit/index.ts";
 import { hostExecution } from "./execution.ts";
 import type { InstanceCopyKey } from "../../custody/client.ts";

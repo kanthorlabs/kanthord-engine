@@ -2,10 +2,10 @@ import assert from "node:assert/strict";
 import { OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import {
-  TestedInputKind,
-  WorkerErrorCode,
   type ActionContext,
   type ActionOperands,
+  TestedInputKind,
+  WorkerErrorCode,
 } from "./contract.ts";
 
 export function operandsOf(

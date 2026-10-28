@@ -5,7 +5,7 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { AssistantMessage } from "@earendil-works/pi-ai";
-import { SpanStatus, type Attributes } from "../../tracking/contract.ts";
+import { type Attributes, SpanStatus } from "../../tracking/contract.ts";
 import type { AgentSetup } from "../contract.ts";
 import { isObject } from "../../kernel/values.ts";
 import { providerFailureOf } from "../../llm/provider-failure.ts";

@@ -10,9 +10,9 @@ import type { SshAccess } from "../../repository/contract.ts";
 import { join } from "node:path";
 import {
   sshAccessOf,
-  WorkspaceKind,
   workRepositoriesOf,
   type WorkspaceCheckout,
+  WorkspaceKind,
   type WorkspaceRoot,
 } from "./workspace.ts";
 import type { Context } from "../../kernel/context.ts";
@@ -30,13 +30,13 @@ import {
 import type { ExecutionRun } from "./execution-run.ts";
 import {
   EndReason,
+  type ExecutionEnd,
   ExecutionStop,
   type MethodClaim,
-  type ExecutionEnd,
 } from "./execution-run.ts";
 import {
-  renderWorkPrompt,
   type AffectedTest,
+  renderWorkPrompt,
 } from "../../agent/prompt-composer.ts";
 import { readDeclaration } from "./affected.ts";
 import { headCommit } from "./local-git.ts";
@@ -54,42 +54,42 @@ import {
   BaseHead,
   runSetup,
   SetupEnd,
-  setUpHeads,
   setupEntries,
   type SetupEntry,
+  setUpHeads,
 } from "./environment-setup.ts";
 import { BudgetLimit } from "../../scheduler/contract.ts";
 import { setupScriptsOf } from "../../kernel/devcontainer.ts";
 import {
-  taskRevisionInstruction,
   criterionRevisionInstruction,
+  taskRevisionInstruction,
 } from "./judgement.ts";
 import { isDone, readDoneRecords, writeDoneRecord } from "./done-record.ts";
 import { readAttemptEvidence, type Verdict } from "./node-reads.ts";
 import {
+  type JudgedCheckout,
   judgedCheckouts,
   verdictRuleHolds,
-  type JudgedCheckout,
 } from "./verdict-rule.ts";
 import { Phase } from "./telemetry.ts";
 import {
+  environmentDigestsOf,
   GitStep,
-  withinGit,
   phaseSpan,
   taskEnd,
   taskFailure,
   taskSpan,
   testedCommitOf,
-  environmentDigestsOf,
-  verificationObserver,
   VerificationContext,
+  verificationObserver,
+  withinGit,
 } from "./method-telemetry.ts";
-import { nodeWork, RefreshResult, refreshAtClaim } from "./base-refresh.ts";
+import { nodeWork, refreshAtClaim, RefreshResult } from "./base-refresh.ts";
 import {
-  NoProgressRule,
   noProgressDetail,
-  verificationFactsOf,
+  NoProgressRule,
   type VerificationFacts,
+  verificationFactsOf,
 } from "./progress-rule.ts";
 import { nodeUnitOf, releaseGate, ReleaseGateKind } from "./release-gate.ts";
 

@@ -8,11 +8,11 @@ import { canonicalJSON } from "../kernel/json.ts";
 import type { HumanIdentity } from "../kernel/caller.ts";
 import {
   AccessPolicy,
-  OperationLifetime,
-  OperationResultType,
   type ClientOptions,
   type Operation,
+  OperationLifetime,
   type OperationResult,
+  OperationResultType,
 } from "../kernel/operation.ts";
 import { BuiltinTool, getAgentDeclaration } from "../agent/catalog.ts";
 import { childEnvironment } from "../agent/environment.ts";

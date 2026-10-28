@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
+  type DepEdge,
   detectCycle,
   directDependenciesOf,
   hasDependencyCycle,
-  type DepEdge,
 } from "./graph.ts";
 
 const edge = (dependent: string, dependsOn: string): DepEdge => ({

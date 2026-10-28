@@ -22,9 +22,9 @@ import {
   CHECKOUTS_DIRECTORY,
   handedSshAccess,
   SCRATCH_DIRECTORY,
+  WORKSPACE_RETENTION_MS,
   WorkspaceKind,
   WorkspaceRoot,
-  WORKSPACE_RETENTION_MS,
 } from "./workspace.ts";
 import {
   everyBindingSshAccess,

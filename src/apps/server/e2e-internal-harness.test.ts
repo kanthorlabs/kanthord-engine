@@ -6,22 +6,22 @@ import { setTimeout as delay } from "node:timers/promises";
 import { simpleGit } from "simple-git";
 import { temporary, testContext } from "../../kernel/test-support.ts";
 import {
-  REPOSITORY_ADDRESS,
-  GATED_ADDRESS,
-  GITHUB_KEY,
-  PROVIDER_KEY,
-  JOURNEY_TIMEOUT_MS,
-  journeyClient,
   createJourneyNode,
   createJourneyTask,
+  GATED_ADDRESS,
+  GITHUB_KEY,
+  JOURNEY_TIMEOUT_MS,
+  journeyClient,
+  PROVIDER_KEY,
+  REPOSITORY_ADDRESS,
 } from "./journey-support.ts";
 import {
-  gatewayFixture,
+  bareRepository,
   createFakeSshCredential,
   fakeGitHub,
   fakeS3,
+  gatewayFixture,
   inProcessWorker,
-  bareRepository,
   mappedTransport,
   remoteHead,
 } from "./test-support.ts";
@@ -33,13 +33,13 @@ import {
   TEST_SSH_ACCESS,
 } from "../../worker/unit/test-support.ts";
 import {
-  AssetKind,
-  NodeState,
-  Intent,
+  type Assessment,
   AssessmentResult,
+  AssetKind,
   ClosingEvent,
   type Evidence,
-  type Assessment,
+  Intent,
+  NodeState,
   type Outcome,
 } from "../../mission/contract.ts";
 import { ClaimState, type ExecutionRecord } from "../../scheduler/contract.ts";

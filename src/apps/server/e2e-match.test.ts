@@ -7,12 +7,12 @@ import { temporary } from "../../kernel/test-support.ts";
 import {
   ClaimableState,
   ImportFormat,
-  NodeState,
   Intent,
+  NodeState,
 } from "../../mission/contract.ts";
 import {
-  WorkPullKind,
   type ExecutionRecord,
+  WorkPullKind,
 } from "../../scheduler/contract.ts";
 import { environment, kanthord, until } from "./cli-support.ts";
 import {

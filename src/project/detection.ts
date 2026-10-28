@@ -4,8 +4,8 @@ import { Diagnostic } from "../kernel/errors.ts";
 import { isNumber, isObject, isString } from "../kernel/values.ts";
 import { parseMapping } from "../kernel/yaml.ts";
 import {
-  RepositoryFileState,
   type RepositoryFile,
+  RepositoryFileState,
 } from "../repository/contract.ts";
 
 const Path = {

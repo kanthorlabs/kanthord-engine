@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { Store, IN_MEMORY_DATABASE } from "../kernel/store.ts";
+import { IN_MEMORY_DATABASE, Store } from "../kernel/store.ts";
 import { testMachineIdentity } from "../kernel/test-identity.ts";
 import { createIdentity } from "../kernel/identity.ts";
 import { HttpStatus } from "../kernel/http.ts";
@@ -10,8 +10,8 @@ import { TWO_AGENT_WORKER, twoAgentDeclarationOf } from "./test-support.ts";
 import {
   AuthorizationRefusal,
   InstancePlacement,
-  WorkerErrorCode,
   type WorkerBindingRowOf,
+  WorkerErrorCode,
 } from "./contract.ts";
 import { AgentErrorCode, ChainLevel } from "../agent/contract.ts";
 import type { AgentSelection } from "../scheduler/contract.ts";

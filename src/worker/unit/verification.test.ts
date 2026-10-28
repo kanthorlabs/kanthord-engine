@@ -17,11 +17,11 @@ import {
   infrastructureStop,
   runVerifications,
   runVerificationsWithOutput,
-  verificationPassed,
+  testedInputOf,
   VERIFICATION_INFRASTRUCTURE_FAILED,
   VerificationClass,
   type VerificationInput,
-  testedInputOf,
+  verificationPassed,
 } from "./verification.ts";
 import { EndReason, ExecutionStop } from "./execution-run.ts";
 import { REASON_MAX_LENGTH } from "../../kernel/probe.ts";

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { Store, IN_MEMORY_DATABASE } from "../kernel/store.ts";
+import { IN_MEMORY_DATABASE, Store } from "../kernel/store.ts";
 import { AGENT_COMPONENT_NAME } from "./contract.ts";
 import { agentMigrations } from "./migrations.ts";
 

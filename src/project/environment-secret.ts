@@ -1,6 +1,6 @@
 import {
-  credentialPlatformList,
   type BindingsNamingFn,
+  credentialPlatformList,
   type CredentialPlatformSet,
   type CredentialRecords,
 } from "../custody/contract.ts";
@@ -8,8 +8,8 @@ import { IdentityKind } from "../kernel/caller.ts";
 import type { CallerContext, OperationRegistry } from "../kernel/operation.ts";
 import type { Transaction } from "../kernel/store.ts";
 import {
-  environmentSecretOperations,
   type EnvironmentSecretCredentialAnswer,
+  environmentSecretOperations,
 } from "./contract.ts";
 import { ENVIRONMENT_SECRET_PLATFORMS } from "./environment-secret-platform.ts";
 

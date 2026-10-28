@@ -12,9 +12,9 @@ import {
 } from "./contract.ts";
 import { trackingMigrations } from "./migrations.ts";
 import {
-  readDuration,
   type DurationQuery,
   type DurationRead,
+  readDuration,
 } from "./analytics-duration.ts";
 import { insertSpan } from "./trace-store.ts";
 

@@ -14,11 +14,11 @@ import { packageVersion } from "../../kernel/version.ts";
 import { temporary } from "../../kernel/test-support.ts";
 import { projectOperations } from "../../project/contract.ts";
 import {
+  type ContainerRuntime,
   InstancePlacement,
   PoolPlacement,
-  workerOperations,
-  type ContainerRuntime,
   type PoolSlot,
+  workerOperations,
 } from "../../worker/contract.ts";
 import { SlotControl } from "../worker/thread-data.ts";
 import { ContainerDriver } from "./container-driver.ts";
@@ -33,7 +33,7 @@ import {
 } from "./container-runtime.ts";
 import { slotClientIdentity } from "./slot-identity.ts";
 import { humanCaller } from "./test-support.ts";
-import { workerAcceptance, WORKER_DEFAULTS } from "./worker-acceptance.ts";
+import { WORKER_DEFAULTS, workerAcceptance } from "./worker-acceptance.ts";
 
 const IMAGE_NAME = process.env.KANTHORD_TEST_CONTAINER_IMAGE;
 const SKIP = IMAGE_NAME

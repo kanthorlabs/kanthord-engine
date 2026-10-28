@@ -3,15 +3,15 @@ import { z } from "zod";
 import { canonicalJSON } from "../kernel/json.ts";
 import type { Transaction } from "../kernel/store.ts";
 import {
-  sessionEntrySchema,
-  spanSchema,
-  traceStateSchema,
   type ExecutionTrace,
   type RecordKind,
   type ServerTrace,
   type SessionEntry,
   type SessionEntryRecord,
+  sessionEntrySchema,
   type Span,
+  spanSchema,
+  traceStateSchema,
   type TraceSummary,
 } from "./contract.ts";
 

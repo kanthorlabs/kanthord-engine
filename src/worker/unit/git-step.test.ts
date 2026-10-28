@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { gitStepOf, GitStep, markGitStep } from "./git-step.ts";
+import { GitStep, gitStepOf, markGitStep } from "./git-step.ts";
 import { withinGit } from "./method-telemetry.ts";
 import { noTelemetry, SpanRecorder } from "./telemetry.ts";
 

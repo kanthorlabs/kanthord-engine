@@ -5,14 +5,14 @@ import { createIdentity } from "../kernel/identity.ts";
 import { canonicalJSON } from "../kernel/json.ts";
 import { testHumanIdentity } from "../kernel/test-identity.ts";
 import {
+  AssessmentResult,
   AssetKind,
   MissionErrorCode,
   PlatformAddressKind,
-  AssessmentResult,
 } from "./contract.ts";
 import {
-  insertEvidence,
   insertAssessment,
+  insertEvidence,
   insertOutcome,
 } from "./record-store.ts";
 import { evidenceHarness } from "./test-support.ts";

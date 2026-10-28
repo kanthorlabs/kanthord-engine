@@ -6,33 +6,33 @@ import { createIdentity } from "../kernel/identity.ts";
 import { OperationError } from "../kernel/errors.ts";
 import { ResultClass } from "../intake/contract.ts";
 import {
-  Intent,
-  NodeState,
   ActorKind,
-  ClaimKind,
-  AssetKind,
   AssessmentResult,
+  AssetKind,
+  type AssetKind as AssetType,
   CheckEndState,
+  ClaimKind,
   EndState,
+  Intent,
+  missionOperations,
+  NodeState,
   ReleaseObligation,
   RepositoryAction,
   RepositoryLanding,
   StartPoint,
   TransitionRule,
-  missionOperations,
-  type AssetKind as AssetType,
 } from "./contract.ts";
 import type { Dependencies } from "./service.ts";
 import {
   closeAttempt,
-  insertEvidence,
   insertAssessment,
+  insertEvidence,
   openAttempt,
-  readOpenAttempt,
   readEvidence,
+  readOpenAttempt,
 } from "./record-store.ts";
-import { setNodeState, insertNode, readNode } from "./store.ts";
-import { readCurrentRevision, insertRevision } from "./store.ts";
+import { insertNode, readNode, setNodeState } from "./store.ts";
+import { insertRevision, readCurrentRevision } from "./store.ts";
 import { revisionFromRow } from "./revision.ts";
 import {
   DEFERRED_CHECK_RETRY_MS,

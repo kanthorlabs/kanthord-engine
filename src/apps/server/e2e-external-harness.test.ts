@@ -2,10 +2,10 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { gatewayOperations } from "../../gateway/contract.ts";
 import {
-  NodeState,
-  Intent,
-  type Evidence,
   type Assessment,
+  type Evidence,
+  Intent,
+  NodeState,
   type Outcome,
 } from "../../mission/contract.ts";
 import { ClaimState, type ExecutionRecord } from "../../scheduler/contract.ts";
@@ -17,10 +17,10 @@ import {
   outboundHosts,
 } from "./test-support.ts";
 import {
-  journeyClient,
   createJourneyNode,
-  JOURNEY_TIMEOUT_MS,
   GITHUB_KEY,
+  JOURNEY_TIMEOUT_MS,
+  journeyClient,
   REPOSITORY_ADDRESS,
 } from "./journey-support.ts";
 

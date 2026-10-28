@@ -3,30 +3,30 @@ import { join } from "node:path";
 import { test, type TestContext } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 import { parse, stringify } from "yaml";
-import { configuration, CONFIG_VERSION } from "../../config/index.ts";
+import { CONFIG_VERSION, configuration } from "../../config/index.ts";
 import { writePrivate } from "../../kernel/files.ts";
 import {
   createIdempotencyKey,
   idempotencyKeySchema,
 } from "../../kernel/identity.ts";
 import { temporary } from "../../kernel/test-support.ts";
-import { NodeState, Intent } from "../../mission/contract.ts";
+import { Intent, NodeState } from "../../mission/contract.ts";
 import {
   ClaimState,
-  WorkPullKind,
   type ExecutionRecord,
+  WorkPullKind,
 } from "../../scheduler/contract.ts";
 import {
-  createFakeSshCredential,
-  gatewayFixture,
   COVERING_WORKER_BINDINGS,
+  createFakeSshCredential,
   enableCoveringAgents,
+  gatewayFixture,
 } from "./test-support.ts";
 import {
   ExecutionEnd,
   ROOT_SPAN_OPERATION,
-  SpanStatus,
   type Span,
+  SpanStatus,
 } from "../../tracking/contract.ts";
 import { environment, kanthord, kanthordTerminal } from "./cli-support.ts";
 

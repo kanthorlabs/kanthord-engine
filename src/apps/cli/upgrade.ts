@@ -1,12 +1,12 @@
 import { join } from "node:path";
 import { audit, writePrivate } from "../../kernel/files.ts";
 import {
-  Store,
   type Migrations,
   type PendingMigration,
+  Store,
 } from "../../kernel/store.ts";
 import { directories } from "../../kernel/xdg.ts";
-import { formatRows, rowWidth, type RowValue } from "../../kernel/rows.ts";
+import { formatRows, type RowValue, rowWidth } from "../../kernel/rows.ts";
 import { ConfigChangeKind } from "../../config/steps.ts";
 
 const STAMP_LENGTH = 15;

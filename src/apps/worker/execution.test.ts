@@ -6,7 +6,7 @@ import { mkdirSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { simpleGit } from "simple-git";
 import { background } from "../../kernel/context.ts";
-import { temporary, hostEnvironment } from "../../kernel/test-support.ts";
+import { hostEnvironment, temporary } from "../../kernel/test-support.ts";
 import {
   deriveHandoverKeys,
   deriveSshSignKeys,
@@ -17,8 +17,8 @@ import {
 import { OperationResultType } from "../../kernel/operation.ts";
 import {
   EndReason,
-  WorkspaceRoot,
   type NativeExecutionInput,
+  WorkspaceRoot,
 } from "../../worker/unit/index.ts";
 import { RepositoryComponent } from "../../repository/index.ts";
 import type { ExecutionSetup } from "../../worker/contract.ts";

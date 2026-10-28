@@ -11,7 +11,7 @@ import {
   DEFAULT_ENVIRONMENT_BUILD_TIMEOUT_MS,
   DEFAULT_ENVIRONMENT_MEMORY_MB,
 } from "./config.ts";
-import { ProjectService, type Dependencies } from "./service.ts";
+import { type Dependencies, ProjectService } from "./service.ts";
 import {
   background,
   CancellationContext,
@@ -28,8 +28,8 @@ import {
 import { HealthStatus } from "../kernel/service.ts";
 import {
   AccessPolicy,
-  OperationRegistry,
   type CallerContext,
+  OperationRegistry,
 } from "../kernel/operation.ts";
 import {
   IN_MEMORY_DATABASE,
@@ -51,38 +51,38 @@ import {
   PROMPT_SOURCE_MAX_BYTES,
 } from "../agent/prompt-source.ts";
 import {
+  BINDING_CHECK_TIMEOUT_MS,
   BINDING_ID_PREFIX,
   BINDING_SET_INITIAL_VERSION,
+  type BindingCheckEntry,
   BindingKind,
+  bindingSetWriteInputSchema,
   BindingState,
   ChangeKind,
-  BINDING_CHECK_TIMEOUT_MS,
-  REPOSITORY_FILES_READ_TIMEOUT_MS,
+  ENVIRONMENT_SECRETS_MAX,
   EnvironmentSource,
   FollowsType,
   GitHubAction,
-  Landing,
-  INSTANCE_COUNT_MIN,
   INSTANCE_COUNT_MAX,
+  INSTANCE_COUNT_MIN,
+  Landing,
   LS_REMOTE_TIMEOUT_MS,
-  REPOSITORY_PLATFORM,
-  SSH_CREDENTIAL_PLATFORM,
-  RepositoryPlatform,
-  repositoryConfigSchema,
-  RESOURCE_CAPABILITY_NETWORK_GIT_READ,
-  RESOURCE_TARGET_KIND_REPOSITORY,
-  STORAGE_PLATFORM,
-  StablePlacementIssue,
-  WorkerField,
-  WorkerPlacement,
-  bindingSetWriteInputSchema,
-  type BindingCheckEntry,
-  type WorkerEntry,
   PROJECT_ID_PREFIX,
   PROJECT_SERVICE_NAME,
   ProjectErrorCode,
-  ENVIRONMENT_SECRETS_MAX,
   projectOperations,
+  REPOSITORY_FILES_READ_TIMEOUT_MS,
+  REPOSITORY_PLATFORM,
+  repositoryConfigSchema,
+  RepositoryPlatform,
+  RESOURCE_CAPABILITY_NETWORK_GIT_READ,
+  RESOURCE_TARGET_KIND_REPOSITORY,
+  SSH_CREDENTIAL_PLATFORM,
+  StablePlacementIssue,
+  STORAGE_PLATFORM,
+  type WorkerEntry,
+  WorkerField,
+  WorkerPlacement,
 } from "./contract.ts";
 import {
   HostKeyErrorCode,
@@ -101,21 +101,21 @@ import {
 import { Onboarding } from "./onboarding.ts";
 import {
   EnvironmentFailureClass,
-  EnvironmentStatus,
-  environmentStateSchema,
   type EnvironmentRuntime,
+  environmentStateSchema,
+  EnvironmentStatus,
 } from "./environment-state.ts";
 import {
   DEVCONTAINER_FILE,
   EnvironmentRefusalReason,
 } from "../kernel/devcontainer.ts";
 import {
-  GrantKind,
-  SshIdentitySubjectKind,
   type Grant,
   type GrantFacts,
+  GrantKind,
   type Material,
   type SshIdentitySubject,
+  SshIdentitySubjectKind,
 } from "../custody/contract.ts";
 import type { CallerIdentity, ServiceIdentity } from "../kernel/caller.ts";
 import {

@@ -1,7 +1,7 @@
 import { setImmediate } from "node:timers/promises";
 import assert from "node:assert/strict";
 import type { Store, Transaction } from "../kernel/store.ts";
-import { attributesSchema, type Attributes } from "./contract.ts";
+import { type Attributes, attributesSchema } from "./contract.ts";
 
 export interface AnalyticsRange {
   from: number;

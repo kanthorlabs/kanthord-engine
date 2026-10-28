@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
 import {
+  type AssetFacts,
   AssetUse,
   GrantKind,
-  s3AccessKeySecretSchema,
-  type AssetFacts,
   type Material,
+  s3AccessKeySecretSchema,
 } from "../custody/contract.ts";
-import { isHumanIdentity, type CallerIdentity } from "../kernel/caller.ts";
+import { type CallerIdentity, isHumanIdentity } from "../kernel/caller.ts";
 import { OperationError } from "../kernel/errors.ts";
 import type { CallerContext } from "../kernel/operation.ts";
 import type { Transaction } from "../kernel/store.ts";
@@ -14,16 +14,16 @@ import { S3_RESULT_CODE_PREFIX } from "../storage/contract.ts";
 import type { S3Call, S3Failure } from "../storage/s3.ts";
 import type { IntakeCustody } from "./action-check.ts";
 import {
+  type ObjectCheck,
   objectCheckSchema,
   OutboundOperation,
   PLATFORM_CALL_DEADLINE_MS,
   ResultClass,
-  type ObjectCheck,
 } from "./contract.ts";
 import {
-  FinalizationKind,
   type CallAnswer,
   type Finalization,
+  FinalizationKind,
   type OutboundAnswer,
   type OutboundAuthorization,
   type OutboundRun,

@@ -3,9 +3,9 @@ import { test, type TestContext } from "node:test";
 import pino, { type Logger } from "pino";
 import { CustodyComponent, custodyMigrations } from "../custody/index.ts";
 import {
+  type CredentialAnswer,
   CUSTODY_SERVICE_NAME,
   SecretShape,
-  type CredentialAnswer,
 } from "../custody/contract.ts";
 import { background } from "../kernel/context.ts";
 import { OperationError } from "../kernel/errors.ts";
@@ -17,8 +17,8 @@ import {
 import { HttpMethod, HttpStatus } from "../kernel/http.ts";
 import {
   AccessPolicy,
-  OperationRegistry,
   type CallerContext,
+  OperationRegistry,
 } from "../kernel/operation.ts";
 import { AUTHORIZATION_HEADER } from "../kernel/probe.ts";
 import { IN_MEMORY_DATABASE, Store } from "../kernel/store.ts";

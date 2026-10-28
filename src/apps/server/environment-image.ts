@@ -20,9 +20,9 @@ import { isSea } from "node:sea";
 import { z } from "zod";
 import { background, type Context } from "../../kernel/context.ts";
 import {
-  type Environment,
   buildDocument,
   devcontainerPath,
+  type Environment,
   isLocalFeature,
   lifecycleCommandSchema,
   lifecycleScripts,
@@ -33,40 +33,40 @@ import { digest } from "../../kernel/json.ts";
 import type { SlotEnvironment } from "../../project/contract.ts";
 import {
   BASE_SUFFIX,
+  type CommandResult,
   ENVIRONMENT_DIRECTORY,
   ENVIRONMENT_IMAGE_PREFIX,
-  ImageBuildOutcome,
-  PROVED_SUFFIX,
-  UNCHECKED_SUFFIX,
   type EnvironmentFailureClass,
   type EnvironmentRuntime,
   type ImageBuildInput,
+  ImageBuildOutcome,
   type ImageBuildResult,
-  type CommandResult,
   type ProofInput,
+  PROVED_SUFFIX,
+  UNCHECKED_SUFFIX,
 } from "../../project/environment-state.ts";
 import { ContainerRuntime } from "../../worker/contract.ts";
 import {
-  OUTPUT_TAIL_BYTES,
   buildEnvironment,
   endGroup,
+  OUTPUT_TAIL_BYTES,
   proveInImage,
   runCommand,
 } from "./environment-proof.ts";
 import {
   absentVolume,
+  CACHE_MOUNT,
   cacheVolumeName,
+  CONTAINER_UID,
   inspectVolumeArguments,
   linesOf,
   ownedCacheVolumeArguments,
+  OWNER_LABEL,
   parseCacheVolumes,
   removeNamedVolumeArguments,
-  CACHE_MOUNT,
-  CONTAINER_UID,
-  OWNER_LABEL,
+  type RuntimeHost,
   SLOT_HOME,
   SUCCESS_CODE,
-  type RuntimeHost,
 } from "./container-runtime.ts";
 
 export const EnvironmentImageFailure = {

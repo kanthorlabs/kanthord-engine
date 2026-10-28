@@ -1,19 +1,19 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
-  InMemoryCredentialStore,
   getSupportedThinkingLevels,
+  InMemoryCredentialStore,
 } from "@earendil-works/pi-ai";
 import type { CredentialStore } from "@earendil-works/pi-ai";
 import {
+  type AgentSetup,
   SetupRefusal,
   WorkerErrorCode,
-  type AgentSetup,
 } from "../worker/contract.ts";
 import {
+  resolveModel as connectorModel,
   createModelRuntime as connectorRuntime,
   metadataEnv,
-  resolveModel as connectorModel,
 } from "./model-connector.ts";
 import { loadPi } from "../agent/pi.ts";
 import { piProviderId, Platform, ReasoningLevel } from "./platforms.ts";

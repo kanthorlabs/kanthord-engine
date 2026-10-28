@@ -7,15 +7,15 @@ import { OperationError } from "../kernel/errors.ts";
 import { HealthRegistry } from "../kernel/health.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import { createIdentity } from "../kernel/identity.ts";
-import { OperationRegistry, type CallerContext } from "../kernel/operation.ts";
+import { type CallerContext, OperationRegistry } from "../kernel/operation.ts";
 import { IN_MEMORY_DATABASE, Store } from "../kernel/store.ts";
 import {
   Consumer,
   INBOUND_EVENT_ID_PREFIX,
-  INTAKE_SERVICE_NAME,
   InboundEventState,
   InboundKind,
   InboundPlatform,
+  INTAKE_SERVICE_NAME,
   intakeOperations,
 } from "./contract.ts";
 import { IntakeService } from "./index.ts";

@@ -14,25 +14,25 @@ import {
 import { lifecycle } from "../kernel/service.ts";
 import type { Authentication } from "./auth/authentication.ts";
 import {
+  type CallerIdentity,
   isHumanIdentity,
   isMachineIdentity,
   isServiceIdentity,
   isWorkerIdentity,
-  type CallerIdentity,
 } from "../kernel/caller.ts";
 import {
-  GatewayError,
-  WorkerGroupEnded,
   failure,
+  GatewayError,
   unauthorized,
+  WorkerGroupEnded,
 } from "./errors.ts";
 import {
   AccessPolicy,
+  type ExecutionClaim,
+  type ExecutionProofRow,
+  type Operation,
   OperationLifetime,
   type StoreMap,
-  type ExecutionProofRow,
-  type ExecutionClaim,
-  type Operation,
 } from "../kernel/operation.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import { resolveRequestId } from "./request-id.ts";

@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import {
+  type Api,
   createProvider,
+  type CredentialStore,
   envApiKeyAuth,
   getSupportedThinkingLevels,
-  type Api,
-  type CredentialStore,
   type Model,
   type ThinkingLevelMap,
 } from "@earendil-works/pi-ai";
@@ -19,8 +19,8 @@ import {
   MODEL_DEFAULT_MAX_TOKENS,
   MODEL_DEFAULT_REASONING_LEVELS,
   openaiCompatibleMetadataSchema,
-  Platform,
   piProviderId,
+  Platform,
   ReasoningLevel,
 } from "./platforms.ts";
 

@@ -12,34 +12,34 @@ import { createIdentity } from "../kernel/identity.ts";
 import { canonicalJSON } from "../kernel/json.ts";
 import {
   AssessmentResult,
+  type AssessmentSubmit,
   AssetKind,
   ClosingEvent,
-  NodeState,
-  RepositoryAction,
-  RepositoryLanding,
-  PlatformAddressKind,
   Intent,
   MissionErrorCode,
+  NodeState,
+  PlatformAddressKind,
+  RepositoryAction,
+  RepositoryLanding,
   RevokeCause,
-  TransitionRule,
-  type AssessmentSubmit,
   type RevokedExecution,
+  TransitionRule,
 } from "./contract.ts";
 import {
-  readOpenAttempt,
-  readEvidence,
-  readAssessment,
-  listAssessments,
-  readOutcomesOfAttempt,
   insertAssessment,
   insertOutcome,
+  listAssessments,
   openAttempt,
+  readAssessment,
+  readEvidence,
+  readOpenAttempt,
+  readOutcomesOfAttempt,
 } from "./record-store.ts";
 import {
-  setNodeState,
+  insertDependency,
   insertNode,
   insertRevision,
-  insertDependency,
+  setNodeState,
 } from "./store.ts";
 import { getRevision } from "./node-read.ts";
 import { landsByHuman } from "./authorization.ts";

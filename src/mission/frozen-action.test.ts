@@ -8,19 +8,19 @@ import {
   EndState,
   ExpectedEndState,
   Intent,
+  type MissionBindings,
   RepositoryAction,
   Resolution,
-  type MissionBindings,
 } from "./contract.ts";
 import {
-  actionStatesOf,
   actionsOfRevision,
+  type ActionState,
+  actionStatesOf,
   eligibleUnrequested,
   requiredActionsOf,
   unresolvedKeys,
-  type ActionState,
 } from "./frozen-action.ts";
-import { openAttempt, insertEvidence } from "./record-store.ts";
+import { insertEvidence, openAttempt } from "./record-store.ts";
 import { insertMission, insertNode, readRevision } from "./store.ts";
 import { missionHarness } from "./test-support.ts";
 

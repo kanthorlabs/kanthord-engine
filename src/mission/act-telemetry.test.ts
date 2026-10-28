@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { SpanStatus, type ExecutionTrace } from "../tracking/contract.ts";
+import { type ExecutionTrace, SpanStatus } from "../tracking/contract.ts";
 import {
   Act,
   ActAttribute,
+  type ActFacts,
   actSchema,
   actTrace,
-  type ActFacts,
 } from "./act-telemetry.ts";
 
 const REVOKED: ExecutionTrace = {

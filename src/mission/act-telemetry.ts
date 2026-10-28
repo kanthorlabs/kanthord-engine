@@ -2,11 +2,11 @@ import { randomBytes } from "node:crypto";
 import type { Logger } from "pino";
 import { z } from "zod";
 import {
-  SpanStatus,
   type Attributes,
   type ExecutionTrace,
   type ServerTrace,
   type SpanLink,
+  SpanStatus,
 } from "../tracking/contract.ts";
 
 const TRACE_ID_BYTES = 16;

@@ -3,18 +3,18 @@ import { test } from "node:test";
 import { checksOf, environmentSchema } from "../kernel/devcontainer.ts";
 import type { RepositoryFile } from "../repository/contract.ts";
 import {
-  DETECTION_PATHS,
   DetectedStack,
+  detectEnvironment,
+  DETECTION_PATHS,
+  detectStacks,
   NIX_BASE_IMAGE,
   NIX_CHECK,
   NIX_ENV_FILE,
   NIX_FEATURE,
   NIX_FLAKE_DIRECTORY,
+  packageManagerVersion,
   WORKFLOW_DIRECTORY,
   WORKFLOW_FILES_MAX,
-  detectEnvironment,
-  detectStacks,
-  packageManagerVersion,
   workflowPaths,
 } from "./detection.ts";
 

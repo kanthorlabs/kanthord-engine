@@ -11,10 +11,10 @@ import { z } from "zod";
 import { Diagnostic } from "../kernel/errors.ts";
 import type { gatewayOperations } from "./contract.ts";
 import {
-  OperationResultType,
-  OperationLifetime,
   type ClientOptions,
   type Operation,
+  OperationLifetime,
+  OperationResultType,
   type ServiceClient,
 } from "../kernel/operation.ts";
 import { background, CancellationContext } from "../kernel/context.ts";

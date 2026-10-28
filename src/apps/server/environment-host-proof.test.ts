@@ -1,15 +1,15 @@
 import assert from "node:assert/strict";
-import { existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test, type TestContext } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 import type { Context } from "../../kernel/context.ts";
 import { temporary } from "../../kernel/test-support.ts";
 import {
-  ProofPhase,
   classifyProof,
   EnvironmentFailureClass,
   type ProofInput,
+  ProofPhase,
 } from "../../project/environment-state.ts";
 import { HostProofs } from "./environment-host-proof.ts";
 import { threadEnvironment } from "./thread-driver.ts";

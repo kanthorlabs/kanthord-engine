@@ -14,26 +14,26 @@ import {
 import {
   ActorKind,
   ClaimableState,
-  ImportFormat,
-  MISSION_SERVICE_NAME,
-  MissionErrorCode,
-  NodeState,
-  RevisionWrite,
-  TaskChange,
-  importApplySchema,
-  importSnapshotSchema,
-  nodeCreateSchema,
-  planFileNameSchema,
   type Content,
+  importApplySchema,
   type ImportEntry,
-  type TaskBody,
+  ImportFormat,
   type ImportSnapshot,
+  importSnapshotSchema,
+  Intent,
   type Mission,
+  MISSION_SERVICE_NAME,
   type MissionBindings,
   type MissionEnvironments,
+  MissionErrorCode,
+  nodeCreateSchema,
+  NodeState,
+  planFileNameSchema,
+  RevisionWrite,
   type SchedulerClaims,
+  type TaskBody,
+  TaskChange,
   type WorkQueue,
-  Intent,
 } from "./contract.ts";
 import { exportMission } from "./export.ts";
 import { applyImport } from "./import-apply.ts";
@@ -42,10 +42,10 @@ import {
   checkImportCondition,
   importDigest,
   isTaskEntry,
+  type NormalizedEntry,
   normalizeImportSnapshot,
   prepareImport,
   resolveImportSet,
-  type NormalizedEntry,
 } from "./import.ts";
 import { missionMigrations } from "./migrations.ts";
 import {
@@ -54,7 +54,7 @@ import {
   lostTransition,
   missionHarness,
 } from "./test-support.ts";
-import { parsePlanFile, type ParsedNodeFile } from "./parser.ts";
+import { type ParsedNodeFile, parsePlanFile } from "./parser.ts";
 import { revisionFromRow } from "./revision.ts";
 import {
   insertDependency,

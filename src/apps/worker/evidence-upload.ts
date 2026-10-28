@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { constants } from "node:fs";
-import { open, realpath, lstat, type FileHandle } from "node:fs/promises";
+import { type FileHandle, lstat, open, realpath } from "node:fs/promises";
 import { platform } from "node:os";
-import { isAbsolute, relative, resolve, dirname, sep } from "node:path";
+import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import { Readable } from "node:stream";
 import { createHash } from "node:crypto";
 import { CancellationContext, type Context } from "../../kernel/context.ts";
@@ -11,8 +11,8 @@ import { IntakeErrorCode } from "../../intake/contract.ts";
 import type { z } from "zod";
 import {
   AssetKind,
-  OBJECT_SIZE_MAX,
   type evidenceSubmitResultSchema,
+  OBJECT_SIZE_MAX,
 } from "../../mission/contract.ts";
 import type { ExecutionRecord } from "../../scheduler/contract.ts";
 import { S3_RESULT_CODE_PREFIX } from "../../storage/contract.ts";

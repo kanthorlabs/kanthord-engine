@@ -2,30 +2,30 @@ import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
 import { setImmediate } from "node:timers/promises";
 import {
+  type AuthPrompt,
   createModels,
   createProvider,
-  type AuthPrompt,
+  type OAuthCredential,
   type Provider,
   type ProviderAuthInteraction,
-  type OAuthCredential,
 } from "@earendil-works/pi-ai";
 import { githubCopilotProvider } from "@earendil-works/pi-ai/providers/github-copilot";
 import type { Logger } from "pino";
 import {
+  type AgentProvidersDependentOnFn,
   CustodyComponent,
   custodyMigrations,
-  type AgentProvidersDependentOnFn,
 } from "../custody/index.ts";
 import {
+  CREDENTIAL_SEAL_INFO,
+  type CredentialAnswer,
+  credentialSealAad,
   CUSTODY_SERVICE_NAME,
   EXECUTION_CREDENTIAL_MAX_BYTES,
-  CREDENTIAL_SEAL_INFO,
-  credentialSealAad,
-  SecretShape,
-  SERVER_HOLDER,
-  type CredentialAnswer,
   type InstanceKey,
   type InstanceKeys,
+  SecretShape,
+  SERVER_HOLDER,
 } from "../custody/contract.ts";
 import { decrypt, encrypt } from "../custody/envelope.ts";
 import { background, CancellationContext } from "../kernel/context.ts";
@@ -44,8 +44,8 @@ import { testWorkerIdentity } from "../kernel/test-identity.ts";
 import { createIdentity } from "../kernel/identity.ts";
 import {
   AccessPolicy,
-  OperationRegistry,
   type CallerContext,
+  OperationRegistry,
 } from "../kernel/operation.ts";
 import {
   IN_MEMORY_DATABASE,
@@ -57,9 +57,9 @@ import { REPOSITORY_PLATFORMS } from "../repository/index.ts";
 import { STORAGE_PLATFORMS } from "../storage/index.ts";
 import {
   Connection,
+  type EnablementsDependentOnModelFn,
   llmOperations,
   ModelCheckResult,
-  type EnablementsDependentOnModelFn,
 } from "./contract.ts";
 import { COPILOT_ENTERPRISE_DOMAIN_PLACEHOLDER } from "./login.ts";
 import {

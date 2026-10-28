@@ -3,15 +3,15 @@ import { z } from "zod";
 import { resolveRequestId } from "./request-id.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import {
+  type ErrorBody,
   errorSchema,
   validationIssues,
-  type ErrorBody,
 } from "../kernel/errors.ts";
 import {
-  OperationResultType,
-  OperationLifetime,
-  type Operation,
   type ClientOptions,
+  type Operation,
+  OperationLifetime,
+  OperationResultType,
   type ServiceClient,
 } from "../kernel/operation.ts";
 import type { RecordedResponse } from "./idempotency.ts";

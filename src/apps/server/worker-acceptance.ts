@@ -5,16 +5,16 @@ import { decode } from "hono/jwt";
 import { parse, stringify } from "yaml";
 import { deriveClientSecret } from "../../gateway/auth/jwt.ts";
 import { isString } from "../../kernel/values.ts";
-import { configuration, CONFIG_VERSION } from "../../config/index.ts";
+import { CONFIG_VERSION, configuration } from "../../config/index.ts";
 import { writePrivate } from "../../kernel/files.ts";
 import { temporary } from "../../kernel/test-support.ts";
 import { environment, kanthord, kanthordTerminal } from "./cli-support.ts";
 import {
+  COVERING_WORKER_BINDINGS,
   createFakeSshCredential,
+  enableCoveringAgents,
   fakeS3,
   gatewayFixture,
-  COVERING_WORKER_BINDINGS,
-  enableCoveringAgents,
 } from "./test-support.ts";
 
 const SUCCESS = 0;

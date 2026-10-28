@@ -22,10 +22,9 @@ import {
 } from "../../kernel/test-support.ts";
 import {
   addedFiles,
-  modifiedFiles,
-  ChangeStatus,
   changedEntries,
   changedFiles,
+  ChangeStatus,
   commitWork,
   discardChanges,
   excludeUntracked,
@@ -33,6 +32,7 @@ import {
   headCommit,
   isAncestor,
   mergeBase,
+  modifiedFiles,
 } from "./local-git.ts";
 import { GIT_COMMIT_FAILED } from "./stop-codes.ts";
 

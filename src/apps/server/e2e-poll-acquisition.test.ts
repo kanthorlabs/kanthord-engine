@@ -17,16 +17,16 @@ import {
   ActorKind,
   ActorService,
   AssetKind,
-  NodeState,
   type Evidence,
+  NodeState,
 } from "../../mission/contract.ts";
 import { ActionResultKind } from "../../worker/contract.ts";
 import { environment, kanthord, until } from "./cli-support.ts";
 import {
   FIRST_INDEX,
   RESOURCE as GATED_REPOSITORY,
-  setup,
   type Page,
+  setup,
 } from "./delivery-support.ts";
 import {
   fakeGitHub,

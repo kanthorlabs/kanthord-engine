@@ -8,15 +8,15 @@ import {
   FACET_VALUES_MAX,
   SpanOrigin,
   SpanStatus,
-  TRACKING_SERVICE_NAME,
-  TraceSort,
   TRACE_LIST_LIMIT_DEFAULT,
+  TraceSort,
+  TRACKING_SERVICE_NAME,
   trackingOperations,
 } from "./contract.ts";
 import {
   CAUSE_LABEL_OPERATION,
-  TRACKING_PRODUCER,
   causeLabelSpanId,
+  TRACKING_PRODUCER,
   writeCauseLabel,
 } from "./cause-label.ts";
 import { trackingMigrations } from "./migrations.ts";

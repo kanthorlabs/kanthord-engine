@@ -4,15 +4,15 @@ import { testHumanIdentity } from "../kernel/test-identity.ts";
 import { OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import { createIdentity } from "../kernel/identity.ts";
-import { MissionErrorCode, Intent, NodeState, TaskChange } from "./contract.ts";
+import { Intent, MissionErrorCode, NodeState, TaskChange } from "./contract.ts";
 import { Act, ActAttribute } from "./act-telemetry.ts";
 import { ControlError } from "./control.ts";
 import { openAttempt } from "./record-store.ts";
 import {
-  insertNode,
   insertDependency,
-  setNodeState,
+  insertNode,
   readCurrentRevision,
+  setNodeState,
 } from "./store.ts";
 import { actCalls, controlHarness, settlesExpired } from "./test-support.ts";
 

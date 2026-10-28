@@ -8,19 +8,19 @@ import {
   AssessmentResult,
   AssetKind,
   ClaimableState,
-  MissionErrorCode,
   Intent,
+  MissionErrorCode,
   NodeState,
-  StartPoint,
   type ProposalContent,
+  StartPoint,
 } from "./contract.ts";
 import { Act, ActAttribute } from "./act-telemetry.ts";
 import { ControlError } from "./control.ts";
 import { getRevision } from "./node-read.ts";
 import {
   insertAssessment,
-  readOpenAttempt,
   insertOutcome,
+  readOpenAttempt,
   readOutcomesOfAttempt,
 } from "./record-store.ts";
 import { claimableMap, routeMission } from "./routing.ts";

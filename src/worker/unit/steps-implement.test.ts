@@ -18,11 +18,11 @@ import type { MethodClients } from "./method-clients.ts";
 import { CHECKOUTS_DIRECTORY, WorkspaceKind } from "./workspace.ts";
 import { DONE_TRAILER, doneRecordOf } from "./done-record.ts";
 import {
-  startCheck,
-  runTask,
   runStepsImplement,
-  taskWork,
+  runTask,
+  startCheck,
   TaskResultKind,
+  taskWork,
   verifyTaskRun,
 } from "./steps-implement.ts";
 import { nodeWork } from "./base-refresh.ts";

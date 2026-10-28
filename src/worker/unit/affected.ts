@@ -15,27 +15,27 @@ import { COMMAND_LIMIT_MS } from "./budget.ts";
 import type { BaseHead } from "./environment-setup.ts";
 import { EndReason, ExecutionStop } from "./execution-run.ts";
 import {
-  ChangeStatus,
   changedEntries,
+  type ChangeEntry,
+  ChangeStatus,
   fileAtRevision,
   mergeBase,
-  type ChangeEntry,
 } from "./local-git.ts";
 import {
   affectedBaseEnd,
   affectedEnd,
   affectedSpan,
-  VerificationKind,
   type VerificationContext,
+  VerificationKind,
 } from "./method-telemetry.ts";
 import type { SpanRecorder } from "./telemetry.ts";
 import {
   CommandEnd,
+  type CommandObserver,
+  type CommandRun,
   infrastructureStop,
   runVerificationsWithOutput,
   VerificationClass,
-  type CommandObserver,
-  type CommandRun,
   type VerificationRun,
 } from "./verification.ts";
 

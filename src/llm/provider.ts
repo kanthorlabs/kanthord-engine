@@ -1,8 +1,8 @@
 import type { CredentialStore } from "@earendil-works/pi-ai";
 import type { Context } from "../kernel/context.ts";
 import {
-  ResourceStatus,
   type ResourceObserver,
+  ResourceStatus,
   type ResourceStatusValue,
 } from "../kernel/health.ts";
 import { Connection, type ProviderCheckAnswer } from "./contract.ts";

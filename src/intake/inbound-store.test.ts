@@ -5,21 +5,21 @@ import { IN_MEMORY_DATABASE, Store } from "../kernel/store.ts";
 import {
   Consumer,
   INBOUND_ID_PREFIX,
-  INTAKE_SERVICE_NAME,
   InboundEventState,
   InboundKind,
   InboundPlatform,
+  INTAKE_SERVICE_NAME,
 } from "./contract.ts";
 import {
   allocateInboundId,
   deleteInbound,
   inboundRecord,
   insertInbound,
+  type NewInbound,
   pendingEventCount,
   pollInboundIds,
   readInbound,
   writeCheckpoint,
-  type NewInbound,
 } from "./inbound-store.ts";
 import { intakeMigrations } from "./migrations.ts";
 

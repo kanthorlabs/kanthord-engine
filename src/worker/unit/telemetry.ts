@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import { createHash, randomBytes } from "node:crypto";
 import {
-  RecordKind,
-  SpanStatus,
   type Attributes,
+  RecordKind,
   type SessionEntryRecord,
+  SpanStatus,
   type TelemetryRecord,
 } from "../../tracking/contract.ts";
 

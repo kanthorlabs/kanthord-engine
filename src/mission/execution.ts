@@ -5,12 +5,12 @@ import type { ExecutionClaim } from "../kernel/operation.ts";
 import type { Transaction } from "../kernel/store.ts";
 import {
   ActorKind,
-  MissionErrorCode,
-  NodeState,
   type ExecutionActor,
   type ExecutionContext,
+  MissionErrorCode,
+  NodeState,
 } from "./contract.ts";
-import { requireNode, getRevision } from "./node-read.ts";
+import { getRevision, requireNode } from "./node-read.ts";
 import { readOpenAttempt } from "./record-store.ts";
 import type { Dependencies } from "./service.ts";
 import type { NodeRow } from "./store.ts";

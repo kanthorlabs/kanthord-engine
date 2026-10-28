@@ -2,13 +2,13 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   ActionAssessmentResult,
+  type ActionContext,
   ActionNodeState,
   ActionResolution,
   RepositoryAction,
+  type TestedInput,
   TestedInputKind,
   WorkerErrorCode,
-  type ActionContext,
-  type TestedInput,
 } from "./contract.ts";
 import { operandsOf } from "./action-operands.ts";
 

@@ -16,8 +16,8 @@ import {
 import {
   findEvent,
   insertEvent,
-  pendingCount,
   type NewInboundEvent,
+  pendingCount,
 } from "./event-store.ts";
 import { readInbound } from "./inbound-store.ts";
 import { webhookSecret } from "./webhook-secret.ts";

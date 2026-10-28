@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
 import {
+  type AssetFacts,
   AssetUse,
   GrantKind,
-  s3AccessKeySecretSchema,
-  type AssetFacts,
   type GrantRequest,
   type Material,
+  s3AccessKeySecretSchema,
 } from "../custody/contract.ts";
 import {
   isHumanIdentity,
@@ -27,12 +27,12 @@ import type {
 import type { IntakeCustody } from "./action-check.ts";
 import {
   IntakeErrorCode,
-  PLATFORM_CALL_DEADLINE_MS,
-  READ_ANSWER_MARGIN_MS,
-  ResultClass,
   type ObjectCheck,
+  PLATFORM_CALL_DEADLINE_MS,
   type PresignedGetAnswer,
   type PresignedPutAnswer,
+  READ_ANSWER_MARGIN_MS,
+  ResultClass,
 } from "./contract.ts";
 
 const BAD_GATEWAY_STATUS = 502;

@@ -13,15 +13,15 @@ import { background } from "../../kernel/context.ts";
 import { hostEnvironment, temporary } from "../../kernel/test-support.ts";
 import {
   AFFECTED_DECLARATION_FILE,
+  AFFECTED_REPORT_MAX_BYTES,
   AFFECTED_SUBJECT,
   affectedEvidenceOf,
-  runAffected,
+  affectedFailureText,
   type AffectedInput,
+  type AffectedReport,
   type AffectedRun,
-  AFFECTED_REPORT_MAX_BYTES,
   AffectedSelection,
   AffectedVerdict,
-  affectedFailureText,
   changesDocumentOf,
   headFailed,
   HeadFailureKind,
@@ -31,8 +31,8 @@ import {
   parseReport,
   promotedFlaky,
   readDeclaration,
+  runAffected,
   testIdText,
-  type AffectedReport,
 } from "./affected.ts";
 import { EnvironmentFailure } from "../../scheduler/contract.ts";
 import {

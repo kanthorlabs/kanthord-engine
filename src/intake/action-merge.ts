@@ -1,37 +1,37 @@
 import assert from "node:assert/strict";
 import { isDeepStrictEqual } from "node:util";
 import {
+  type ActionFacts,
   apiKeySecretSchema,
   GrantKind,
-  type ActionFacts,
   type Material,
 } from "../custody/contract.ts";
-import { isServiceIdentity, type CallerIdentity } from "../kernel/caller.ts";
+import { type CallerIdentity, isServiceIdentity } from "../kernel/caller.ts";
 import type { CallerContext } from "../kernel/operation.ts";
 import type { Transaction } from "../kernel/store.ts";
 import {
   GITHUB_RESULT_CODE_PREFIX,
-  GitHubTargetKind,
   type GitHubCall,
   type GitHubTarget,
+  GitHubTargetKind,
 } from "../repository/github.ts";
 import {
-  GIT_TRANSPORT_CODES,
   type ActionCheckDependencies,
+  GIT_TRANSPORT_CODES,
 } from "./action-check.ts";
 import { addressCodec, decodeAddress } from "./address-codec.ts";
 import {
   OutboundOperation,
   PLATFORM_CALL_DEADLINE_MS,
-  SERVICE_MERGE_REQUEST_KEY_PREFIX,
-  ResultClass,
   type PlatformAddress,
+  ResultClass,
   type ResultClassAnswer,
+  SERVICE_MERGE_REQUEST_KEY_PREFIX,
 } from "./contract.ts";
 import {
-  FinalizationKind,
   type CallAnswer,
   type Finalization,
+  FinalizationKind,
   type OutboundAnswer,
   type OutboundAuthorization,
   type OutboundRun,

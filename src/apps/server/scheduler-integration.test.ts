@@ -11,31 +11,31 @@ import { projectOperations } from "../../project/contract.ts";
 import { workerOperations } from "../../worker/contract.ts";
 import { agentOperations } from "../../agent/contract.ts";
 import {
+  Intent,
   missionOperations,
   NodeState,
-  Intent,
 } from "../../mission/contract.ts";
 import {
-  schedulerOperations,
   ClaimState,
   ExecutionStopReason,
-  WorkPullKind,
   type ReleaseStop,
-  WORK_PULL_TIMEOUT_MS,
   SCHEDULER_TIMEOUT_MS,
+  schedulerOperations,
+  WORK_PULL_TIMEOUT_MS,
+  WorkPullKind,
 } from "../../scheduler/contract.ts";
 import {
   AccessPolicy,
-  OperationResultType,
-  OperationLifetime,
-  type Operation,
-  type OperationResult,
   type ClientOptions,
+  type Operation,
+  OperationLifetime,
+  type OperationResult,
+  OperationResultType,
 } from "../../kernel/operation.ts";
 import { CancellationContext } from "../../kernel/context.ts";
 import { HttpStatus } from "../../kernel/http.ts";
 import { temporary } from "../../kernel/test-support.ts";
-import { createIdentity, createIdempotencyKey } from "../../kernel/identity.ts";
+import { createIdempotencyKey, createIdentity } from "../../kernel/identity.ts";
 import {
   FAKE_GITHUB_HOST_KEY_FINGERPRINT,
   FAKE_SSH_CREDENTIAL,

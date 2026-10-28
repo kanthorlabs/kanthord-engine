@@ -5,8 +5,8 @@ import type { AddressInfo } from "node:net";
 import { test, type TestContext } from "node:test";
 import pino from "pino";
 import {
-  GrantKind,
   type ActionFacts,
+  GrantKind,
   type GrantRequest,
 } from "../custody/contract.ts";
 import { background } from "../kernel/context.ts";
