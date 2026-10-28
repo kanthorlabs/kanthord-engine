@@ -193,6 +193,12 @@ test("the conflict template names the binding, the directory and the base branch
   );
 });
 
+const GATE_FILES_LINE = "Gate files of repository engine: ";
+const GATE_FILES_RULE =
+  "Change a gate file only when the requirement names it.";
+const PACKAGE_FILE = "package.json";
+const TEST_PATH_FILE = "scripts/test-path.mjs";
+
 test("the shipped work text renders the affected test line", () => {
   const { text } = renderWorkPrompt(SHIPPED_TEMPLATES, {
     node_id: "node",
@@ -204,12 +210,42 @@ test("the shipped work text renders the affected test line", () => {
       verifications: ["first"],
     },
     affected_tests: [
-      { name: "engine", command: "pnpm --silent run test:affected" },
+      {
+        name: "engine",
+        command: "pnpm --silent run test:affected",
+        gate_files: [],
+      },
     ],
   });
   assert.ok(
     text.includes(
       "Repository engine: affected tests `pnpm --silent run test:affected`\n",
+    ),
+  );
+  assert.ok(!text.includes(GATE_FILES_LINE));
+});
+
+test("the shipped work text names the gate files of a repository", () => {
+  const { text } = renderWorkPrompt(SHIPPED_TEMPLATES, {
+    node_id: "node",
+    revision: 1,
+    content: {
+      name: "unit",
+      requirement: "build",
+      criterion: "passes",
+      verifications: ["first"],
+    },
+    affected_tests: [
+      {
+        name: "engine",
+        command: "pnpm --silent run test:affected",
+        gate_files: [PACKAGE_FILE, TEST_PATH_FILE],
+      },
+    ],
+  });
+  assert.ok(
+    text.includes(
+      `${GATE_FILES_LINE}\`${PACKAGE_FILE}\`, \`${TEST_PATH_FILE}\`. ${GATE_FILES_RULE}\n`,
     ),
   );
 });

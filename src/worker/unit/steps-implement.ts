@@ -562,7 +562,11 @@ async function affectedTestsOf(
       deadline - Date.now(),
     );
     if (declaration === null || "error" in declaration) continue;
-    tests.push({ name: checkout.name, command: declaration.command });
+    tests.push({
+      name: checkout.name,
+      command: declaration.command,
+      gate_files: declaration.gate_files,
+    });
   }
   return tests;
 }

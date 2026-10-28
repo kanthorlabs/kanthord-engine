@@ -24,6 +24,7 @@ export interface WorkRepository {
 export interface AffectedTest {
   name: string;
   command: string;
+  gate_files: readonly string[];
 }
 
 export interface WorkTask {

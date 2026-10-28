@@ -55,6 +55,9 @@ Repository {{name}}: directory `{{directory}}`, base branch `{{base_branch}}`
 
 {{#each affected_tests}}
 Repository {{name}}: affected tests `{{command}}`
+{{#if gate_files}}
+Gate files of repository {{name}}: {{#each gate_files}}`{{this}}`{{#unless @last}}, {{/unless}}{{/each}}. Change a gate file only when the requirement names it.
+{{/if}}
 {{/each}}
 KanthorD runs each command after the verifications at the release gate and at the evaluation. Do not run it.
 {{/if}}
