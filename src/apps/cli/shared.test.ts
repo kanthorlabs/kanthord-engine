@@ -102,7 +102,7 @@ test("duplicate keys are detected at each object depth after escape decoding", (
   }
   detectDuplicateKeys('[{"a":1},{"a":2}]');
   detectDuplicateKeys('{"a":{"x":1},"b":{"x":2}}');
-  detectDuplicateKeys('{"a":"\\\"a\\\"", "b": 2}');
+  detectDuplicateKeys('{"a":"\\"a\\"", "b": 2}');
   assert.throws(() => detectDuplicateKeys('{"a":'), diagnosticCode(NOT_JSON));
 });
 

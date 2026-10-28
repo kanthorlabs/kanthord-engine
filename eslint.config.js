@@ -270,7 +270,7 @@ export default tseslint.config(
   },
   {
     files: ["src/**/*.ts"],
-    extends: [tseslint.configs.recommended],
+    extends: [js.configs.recommended, tseslint.configs.recommended],
     plugins: { boundaries },
     settings: {
       "boundaries/elements": [
@@ -749,6 +749,7 @@ export default tseslint.config(
         },
       ],
       "no-restricted-syntax": ["error", ...syntaxRules],
+      "no-control-regex": "off",
       "@typescript-eslint/no-unused-vars": [
         "error",
         { ignoreUsingDeclarations: true },
