@@ -269,7 +269,7 @@ export class SchedulerService implements Service, WorkQueue {
     assert.ok(transition, "a revocation by an assessment moved its node");
     this.dependencies.telemetry.executionTransition(
       execution.trace,
-      executionTransition(transition, execution.ended_at),
+      executionTransition(transition, execution.ended_at, null),
     );
   }
   liveExecutionOf(tx: Transaction, nodeId: string, now: number) {

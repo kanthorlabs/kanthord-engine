@@ -818,6 +818,12 @@ function transitionAttributes(transition: ExecutionTransition): Attributes {
     ...(transition.lead_time_ms === null
       ? {}
       : { [OpeningAttribute.LeadTimeMs]: transition.lead_time_ms }),
+    ...(transition.failure_count === null
+      ? {}
+      : { "kanthord.transition.failure_count": transition.failure_count }),
+    ...(transition.available_at === null
+      ? {}
+      : { "kanthord.node.available_at": transition.available_at }),
   };
 }
 

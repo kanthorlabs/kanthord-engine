@@ -6,6 +6,8 @@ import { transitionFixture } from "./test-support.ts";
 
 const QUEUED_AT = 10000;
 const CLAIMED_AT = 12500;
+const HELD_FAILURES = 2;
+const HELD_UNTIL = 72500;
 const NO_WAIT = 0;
 const NO_FACTS = {
   worker_instance: null,
@@ -100,7 +102,7 @@ test("a transition to Completed with a first available time answers the lead tim
     to: "Completed",
     first_available_at: QUEUED_AT,
   });
-  assert.deepEqual(executionTransition(transition, CLAIMED_AT), {
+  assert.deepEqual(executionTransition(transition, CLAIMED_AT, null), {
     transitioned_at: CLAIMED_AT,
     from: transition.from,
     to: "Completed",
@@ -108,7 +110,16 @@ test("a transition to Completed with a first available time answers the lead tim
     count: null,
     limit: null,
     lead_time_ms: 2500,
+    failure_count: null,
+    available_at: null,
   });
+});
+
+test("a transition with a failure hold answers its failure count and its hold end", () => {
+  const hold = { failure_count: HELD_FAILURES, available_at: HELD_UNTIL };
+  const answered = executionTransition(transitionFixture(), CLAIMED_AT, hold);
+  assert.equal(answered.failure_count, HELD_FAILURES);
+  assert.equal(answered.available_at, HELD_UNTIL);
 });
 
 test("a transition to another state or with no first available time answers no lead time", () => {
@@ -116,6 +127,7 @@ test("a transition to another state or with no first available time answers no l
     executionTransition(
       transitionFixture({ to: "Available", first_available_at: QUEUED_AT }),
       CLAIMED_AT,
+      null,
     ).lead_time_ms,
     null,
   );
@@ -123,6 +135,7 @@ test("a transition to another state or with no first available time answers no l
     executionTransition(
       transitionFixture({ to: "Completed", first_available_at: null }),
       CLAIMED_AT,
+      null,
     ).lead_time_ms,
     null,
   );
@@ -133,6 +146,7 @@ test("a lead time below zero is refused", () => {
     executionTransition(
       transitionFixture({ to: "Completed", first_available_at: CLAIMED_AT }),
       QUEUED_AT,
+      null,
     ),
   );
 });

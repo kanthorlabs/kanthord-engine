@@ -31,6 +31,7 @@ import {
   type GateFiles,
   type PlatformAddress,
   TransitionRule,
+  type FailureHold,
   type NodeTransition,
   type RevokedExecution,
 } from "./contract.ts";
@@ -55,6 +56,7 @@ import {
 import { getRevision } from "./node-read.ts";
 
 const CONSECUTIVE_FAILURE_LIMIT = 3;
+const LOST_FAILURES = 1;
 const FURTHER_WORK_LIMIT = 3;
 const REWORK_LIMIT = 2;
 const TEXT_MAX_BYTES = 32768;
@@ -88,6 +90,10 @@ export function lostTransition(): NodeTransition {
   };
 }
 
+export function lostHold(): FailureHold {
+  return { failure_count: LOST_FAILURES, available_at: null };
+}
+
 export function revokedExecution(
   executionId: string,
   nodeId: string,
@@ -115,6 +121,7 @@ export function settlesExpired(
     {
       ...revokedExecution(executionId, nodeId, now),
       transition: lostTransition(),
+      hold: lostHold(),
     },
   ];
 }

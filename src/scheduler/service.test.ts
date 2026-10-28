@@ -22,6 +22,7 @@ import {
   executionFixture,
   FIXTURE_DEADLINE,
   FIXTURE_NOW,
+  firstLossHold,
   transitionFixture,
 } from "./test-support.ts";
 import { ExecutionEnd, RevokeCause } from "../tracking/contract.ts";
@@ -33,6 +34,8 @@ import {
   CauseSubcategory,
 } from "../kernel/cause.ts";
 import { insertExecution, readExecution } from "./execution-store.ts";
+import { heldUntil } from "./settlement.ts";
+import { DEFAULT_STOP_BACKOFF_SECONDS } from "./config.ts";
 
 const EXECUTION_ENDED = "executionEnded";
 const EXECUTION_TRANSITION = "executionTransition";
@@ -601,7 +604,7 @@ test("a revocation by an assessment writes the root end and then one transition 
   );
   assert.deepEqual(h.telemetry[1]!.arguments, [
     executionTrace(row),
-    executionTransition(transition, FIXTURE_NOW),
+    executionTransition(transition, FIXTURE_NOW, null),
   ]);
 });
 
@@ -621,7 +624,7 @@ test("a revocation by an assessment hands the lead time to the transition span",
   h.service.executionRevoked(revoked, RevokeCause.Assessment, transition, null);
   assert.deepEqual(h.telemetry[1]!.arguments, [
     executionTrace(row),
-    executionTransition(transition, FIXTURE_NOW),
+    executionTransition(transition, FIXTURE_NOW, null),
   ]);
   assert.equal(
     (h.telemetry[1]!.arguments[1] as { lead_time_ms: number }).lead_time_ms,
@@ -661,6 +664,7 @@ test("settle answers each execution that it ends with its trace and writes no en
       trace: executionTrace(row),
       ended_at: FIXTURE_DEADLINE,
       transition: transitionFixture(),
+      hold: firstLossHold(FIXTURE_DEADLINE),
     },
   ]);
   assert.deepEqual(h.telemetry, []);
@@ -686,7 +690,11 @@ test("settle answers each execution that it ends with its trace and writes no en
       method: EXECUTION_TRANSITION,
       arguments: [
         executionTrace(row),
-        executionTransition(transitionFixture(), FIXTURE_DEADLINE),
+        executionTransition(
+          transitionFixture(),
+          FIXTURE_DEADLINE,
+          firstLossHold(FIXTURE_DEADLINE),
+        ),
       ],
     },
   ]);
@@ -736,11 +744,22 @@ test("a sweep loss below the failure limit writes Executing to Available and at 
   );
   assert.deepEqual(h.telemetry[1]!.arguments, [
     executionTrace(first),
-    executionTransition(transitionFixture(), FIXTURE_DEADLINE),
+    executionTransition(
+      transitionFixture(),
+      FIXTURE_DEADLINE,
+      firstLossHold(FIXTURE_DEADLINE),
+    ),
   ]);
   assert.deepEqual(h.telemetry[3]!.arguments, [
     executionTrace(second),
-    executionTransition(paused, FIXTURE_DEADLINE + 1),
+    executionTransition(paused, FIXTURE_DEADLINE + 1, {
+      failure_count: FAILURE_LIMIT,
+      available_at: heldUntil(
+        FAILURE_LIMIT,
+        FIXTURE_DEADLINE + 1,
+        DEFAULT_STOP_BACKOFF_SECONDS,
+      ),
+    }),
   ]);
 });
 

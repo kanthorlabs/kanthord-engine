@@ -8,6 +8,7 @@ import {
   AdvancingProviderFailure,
   ExecutionStopReason,
   type EndedExecution,
+  type FailureHold,
   type ExecutionRow,
   type MissionTransitions,
   type NodeTransition,
@@ -58,7 +59,7 @@ export function recordFailure(
   nodeId: string,
   failures: number,
   now: number,
-): NodeTransition {
+): { transition: NodeTransition; hold: FailureHold } {
   const transition = dependencies.transitions.failure(
     tx,
     nodeId,
@@ -66,11 +67,12 @@ export function recordFailure(
     now,
   );
   const until = heldUntil(failures, now, dependencies.config.stop_backoff);
-  if (until === null) return transition;
+  const hold = { failure_count: failures, available_at: until };
+  if (until === null) return { transition, hold };
   tx.database
     .prepare("UPDATE scheduler_job SET available_at = ? WHERE node_id = ?")
     .run(until, nodeId);
-  return transition;
+  return { transition, hold };
 }
 
 export function pinCredential(
@@ -183,7 +185,7 @@ export function declareLoss(
   assert.equal(row.ended_at, null);
   assert.ok(now >= row.expired_at);
   endExecution(tx, row.execution_id, now);
-  const transition = recordFailure(
+  const { transition, hold } = recordFailure(
     tx,
     dependencies,
     row.node_id,
@@ -195,6 +197,7 @@ export function declareLoss(
     trace: executionTrace(row),
     ended_at: now,
     transition,
+    hold,
   };
 }
 export function settleNode(

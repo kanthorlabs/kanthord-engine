@@ -53,6 +53,12 @@ const CURRENT_STALL = 1;
 const FIRST_FAILURE = 1;
 const SECOND_FAILURE = 2;
 const RELEASE_ROUTING = "release";
+const MILLISECONDS_PER_SECOND = 1000;
+const FIRST_HOLD = {
+  failure_count: FIRST_FAILURE,
+  available_at:
+    FIXTURE_NOW + DEFAULT_STOP_BACKOFF_SECONDS * MILLISECONDS_PER_SECOND,
+};
 const STOP: ReleaseStop = {
   reason: ExecutionStopReason.JudgementInvalid,
   code: null,
@@ -268,7 +274,7 @@ test("a release with a stop stores the stop and routes the failure count", async
       method: "executionTransition",
       arguments: [
         executionTrace(h.row),
-        executionTransition(transitionFixture(), FIXTURE_NOW),
+        executionTransition(transitionFixture(), FIXTURE_NOW, FIRST_HOLD),
       ],
     },
   ]);
@@ -303,7 +309,7 @@ test("a release stores the cause detail of its stop and hands it to telemetry", 
       method: "executionTransition",
       arguments: [
         executionTrace(h.row),
-        executionTransition(transitionFixture(), FIXTURE_NOW),
+        executionTransition(transitionFixture(), FIXTURE_NOW, FIRST_HOLD),
       ],
     },
   ]);
@@ -360,6 +366,8 @@ test("a release writes one transition span after its root end", async (t) => {
       count: null,
       limit: null,
       lead_time_ms: null,
+      failure_count: null,
+      available_at: null,
       transitioned_at: FIXTURE_NOW,
     },
   ]);
@@ -376,6 +384,7 @@ test("a release of an evaluating node hands over the state at the commit", async
     executionTransition(
       transitionFixture({ from: "Evaluating", to: "Completed" }),
       FIXTURE_NOW,
+      null,
     ),
   );
 });
@@ -394,7 +403,7 @@ test("a stop at the failure limit writes the failure limit rule with its count a
   await h.release(true, STOP);
   assert.deepEqual(h.telemetry[1]!.arguments, [
     executionTrace(h.row),
-    executionTransition(paused, FIXTURE_NOW),
+    executionTransition(paused, FIXTURE_NOW, FIRST_HOLD),
   ]);
 });
 
@@ -412,7 +421,7 @@ test("a stalled release at the further work limit writes the further work limit 
   await h.release(true, BUDGET_END);
   assert.deepEqual(h.telemetry[1]!.arguments, [
     executionTrace(h.row),
-    executionTransition(paused, FIXTURE_NOW),
+    executionTransition(paused, FIXTURE_NOW, null),
   ]);
 });
 

@@ -50,6 +50,7 @@ import {
 import { missionMigrations } from "./migrations.ts";
 import {
   databaseSnapshot,
+  lostHold,
   lostTransition,
   missionHarness,
 } from "./test-support.ts";
@@ -2063,6 +2064,7 @@ test("an import that adds a dependency to a node settles its expired execution a
         },
         ended_at: now,
         transition: lostTransition(),
+        hold: lostHold(),
       },
     ],
   });

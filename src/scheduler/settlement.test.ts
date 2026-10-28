@@ -7,6 +7,7 @@ import {
   schedulerHarness,
   FIXTURE_NOW,
   FIXTURE_DEADLINE,
+  firstLossHold,
   transitionFixture,
 } from "./test-support.ts";
 import { executionTrace } from "./telemetry.ts";
@@ -138,6 +139,7 @@ test("settlement records exactly one loss at the transaction reading", (t) => {
         trace: executionTrace(row),
         ended_at: FIXTURE_DEADLINE,
         transition: transitionFixture(),
+        hold: firstLossHold(FIXTURE_DEADLINE),
       },
     );
     assert.equal(

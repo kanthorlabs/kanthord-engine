@@ -159,8 +159,14 @@ export interface RevokedExecution {
   ended_at: number;
 }
 
+export interface FailureHold {
+  failure_count: number;
+  available_at: number | null;
+}
+
 export interface EndedExecution extends RevokedExecution {
   transition: NodeTransition;
+  hold: FailureHold;
 }
 
 export interface RevokedClaim {

@@ -445,6 +445,8 @@ export interface ExecutionTransition {
   count: number | null;
   limit: number | null;
   lead_time_ms: number | null;
+  failure_count: number | null;
+  available_at: number | null;
 }
 export const ExecutionKind = {
   Steps: "steps",

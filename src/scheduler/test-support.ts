@@ -15,6 +15,7 @@ import {
   schedulerOperations,
   TransitionRule,
   type ExecutionRow,
+  type FailureHold,
   type NodeTransition,
 } from "./contract.ts";
 import { schedulerMigrations } from "./migrations.ts";
@@ -25,6 +26,8 @@ export const FIXTURE_SPAN_ID = "1234567890abcdef";
 export const FIXTURE_NOW = 1000;
 export const FIXTURE_DEADLINE = 2000;
 const NO_REVISION = 0;
+const FIRST_LOSS = 1;
+const MILLISECONDS_PER_SECOND = 1000;
 
 export function executionFixture(
   overrides: Partial<ExecutionRow> = {},
@@ -64,6 +67,14 @@ export function transitionFixture(
     limit: null,
     first_available_at: null,
     ...overrides,
+  };
+}
+
+export function firstLossHold(endedAt: number): FailureHold {
+  return {
+    failure_count: FIRST_LOSS,
+    available_at:
+      endedAt + DEFAULT_STOP_BACKOFF_SECONDS * MILLISECONDS_PER_SECOND,
   };
 }
 

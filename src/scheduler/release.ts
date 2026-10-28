@@ -10,6 +10,7 @@ import {
   type CooldownChange,
   type ExecutionRelease,
   type ExecutionRow,
+  type FailureHold,
   type NodeTransition,
 } from "./contract.ts";
 import { ExecutionEnd } from "../tracking/contract.ts";
@@ -74,6 +75,7 @@ export function release(
   assert.equal(proof.executionId, executionId);
   let released: ExecutionRow | undefined;
   let transition: NodeTransition | undefined;
+  let hold: FailureHold | null = null;
   let siblings: string[] = [];
   let cooldowns: CooldownChange[] = [];
   let environmentRepositories: string[] | null = null;
@@ -121,13 +123,13 @@ export function release(
           ...(dependencies.facts.claimFacts(tx, row.node_id)?.repositories ??
             []),
         ];
-      transition = recordFailure(
+      ({ transition, hold } = recordFailure(
         tx,
         dependencies,
         row.node_id,
         consecutiveFailures(tx, row, countsFailure(body.stop)),
         now,
-      );
+      ));
       return { execution_id: executionId, ended_at: now };
     }
     endExecution(tx, executionId, now, body.stop);
@@ -154,7 +156,7 @@ export function release(
   });
   dependencies.telemetry.executionTransition(
     executionTrace(released),
-    executionTransition(transition, result.ended_at),
+    executionTransition(transition, result.ended_at, hold),
   );
   if (environmentRepositories !== null && body.stop !== null)
     reportEnvironmentFailure(
