@@ -46,7 +46,8 @@ const NODE_NAME = "Write the report";
 const CLAIM_METHOD = "claim";
 const FIRST_JOB = 0;
 const DEFAULT_INSTANCE_KEY = "general/worker";
-const SLOT_INSTANCE_KEY = "coder/server slot 0";
+const HARNESS_INSTANCE_KEY = "coder/harness-1";
+const INSTANCE_NAME = "coder-1";
 const QUEUE_TICK_MS = 2;
 const BACKOFF_MS = DEFAULT_STOP_BACKOFF_SECONDS * 1000;
 
@@ -870,14 +871,33 @@ test("the opening keys a claimant with no instance by binding name and identity 
   assert.equal(h.claim().opening!.worker_instance, DEFAULT_INSTANCE_KEY);
 });
 
-test("instanceKeyOf takes the binding name from the last segment of the resource identity", (t) => {
+test("the opening of a server and a container instance carries its instance name", (t) => {
+  for (const placement of ["server", "container"]) {
+    const h = claimHarness(t);
+    h.binding.placement = placement;
+    h.store.transaction((tx) =>
+      h.service.insert(tx, h.row.node_id, h.row.project_id, 0),
+    );
+    const instance = {
+      ...h.identity,
+      name: INSTANCE_NAME,
+      instanceId: createIdentity("worker_instance"),
+    };
+    const result = h.store.transaction((tx) =>
+      claimOnce(tx, h.dependencies, instance, h.pull, FIXTURE_NOW),
+    );
+    assert.equal(result.opening!.worker_instance, INSTANCE_NAME);
+  }
+});
+
+test("instanceKeyOf keys an external harness by the last segment of the resource identity and its name", (t) => {
   const h = claimHarness(t);
-  const slot = {
+  const harness = {
     ...h.identity,
-    name: "server slot 0",
+    name: "harness-1",
     resourceIdentity: "worker:kanthord:coder",
   };
-  assert.equal(instanceKeyOf(slot), SLOT_INSTANCE_KEY);
+  assert.equal(instanceKeyOf(harness), HARNESS_INSTANCE_KEY);
 });
 
 test("the opening holds the placement of the binding and the facts of Mission", (t) => {

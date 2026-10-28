@@ -1895,17 +1895,31 @@ function poolFixture(t: TestContext, initialCount: number) {
     }>,
     failure: null as Error | null,
     executing: new Set<string>(),
+    listed: [] as string[],
   };
+  const instanceIds = new Map<number, string>();
   const binding = () => ({
     ...fakeCollaborations.workerBindingOf(),
     worker_name: WORKER,
     instance_count: state.count,
     placement: state.placement,
-    worker_instances: [],
+    worker_instances: state.listed,
     environment: state.environment,
     generation: state.generation,
   });
   const f = enablementFixture(t, {
+    instanceIssuer: {
+      ...fakeCollaborations.instanceIssuer,
+      clientIdentity: (instanceId, projectId, resourceIdentity, generation) => {
+        const slot = [...instanceIds].find(([, id]) => id === instanceId)![0];
+        return host.clientIdentity(
+          projectId,
+          resourceIdentity,
+          generation,
+          slot,
+        );
+      },
+    },
     workerBindingOf: () => binding(),
     schedulerClaims: {
       ...fakeCollaborations.schedulerClaims,
@@ -1939,14 +1953,42 @@ function poolFixture(t: TestContext, initialCount: number) {
   });
   const slotId = (slot: number) =>
     host.clientIdentity(POOL_PROJECT, POOL_RESOURCE, POOL_GENERATION, slot);
-  function register(clientId: string) {
+  function instanceOfSlot(slot: number) {
+    let id = instanceIds.get(slot);
+    if (id === undefined) {
+      const name = `server-${slot}`;
+      id = f.store.transaction(
+        (tx) =>
+          insertInstance(
+            tx,
+            {
+              name,
+              worker: WORKER,
+              placement: InstancePlacement.Server,
+              public_key: null,
+              fingerprint: null,
+            },
+            Date.now(),
+          ).id,
+      );
+      instanceIds.set(slot, id);
+      state.listed.push(name);
+    }
+    return id;
+  }
+  function registerAs(
+    clientId: string,
+    instanceId: string | undefined,
+    resourceIdentity = POOL_RESOURCE,
+  ) {
     f.caller.identity = testMachineIdentity(
       {
         clientId,
-        name: "server slot",
-        resourceIdentity: POOL_RESOURCE,
+        name: instanceId === undefined ? "stranger" : "coder-1",
+        resourceIdentity,
         projectId: POOL_PROJECT,
         issuedAt: Date.now(),
+        ...(instanceId === undefined ? {} : { instanceId }),
       },
       "session",
     );
@@ -1956,7 +1998,28 @@ function poolFixture(t: TestContext, initialCount: number) {
         .handler({ params: {}, query: {}, body: null }, f.caller),
     );
   }
-  return { ...f, host, state, logs, slotId, register };
+  function register(slot: number, resourceIdentity = POOL_RESOURCE) {
+    return registerAs(
+      host.clientIdentity(
+        POOL_PROJECT,
+        resourceIdentity,
+        state.generation,
+        slot,
+      ),
+      instanceOfSlot(slot),
+      resourceIdentity,
+    );
+  }
+  return {
+    ...f,
+    host,
+    state,
+    logs,
+    slotId,
+    register,
+    registerAs,
+    instanceOfSlot,
+  };
 }
 
 test("the pool starts at startPool and a change notice before it does nothing", async (t) => {
@@ -2024,53 +2087,98 @@ test("a binding at the worker placement gets no pool slot", (t) => {
   assert.deepEqual(f.host.started, []);
 });
 
-test("a binding at the server placement accepts a registration only from a current pool slot", async (t) => {
+test("the derived identity of a listed server instance registers and the row holds its instance_id", (t) => {
   const f = poolFixture(t, 2);
   f.worker.startPool();
-  const registered = f.register(f.slotId(1));
-  assert.equal(
-    workerOperations.register.output.parse(registered).resource_identity,
-    POOL_RESOURCE,
-  );
+  const registered = f.register(1);
+  assert.equal(registered.resource_identity, POOL_RESOURCE);
+  const [row] = f.store.transaction(readAllLive);
+  assert.equal(row!.runtime_identity, registered.runtime_identity);
+  assert.equal(row!.instance_id, f.instanceOfSlot(1));
+  assert.equal(row!.client_id, f.slotId(1));
+});
+
+test("a client identity that the binding does not list for an instance refuses with placement_mismatch", (t) => {
+  const f = poolFixture(t, 2);
+  f.worker.startPool();
+  const instanceId = f.instanceOfSlot(0);
   refuses(
-    () => f.register(createIdentity("client_identity")),
+    () => f.registerAs(createIdentity("client_identity"), instanceId),
     WorkerErrorCode.PlacementMismatch,
     HttpStatus.Conflict,
   );
-  f.state.count = 1;
-  f.worker.bindingsChanged(POOL_PROJECT);
-  await changesApplied();
-  assert.ok(f.worker.registrations.findByClient(f.slotId(1)));
-  f.host.end(f.slotId(1));
   refuses(
-    () => f.register(f.slotId(1)),
+    () => f.registerAs(f.slotId(0), undefined),
     WorkerErrorCode.PlacementMismatch,
     HttpStatus.Conflict,
   );
+  f.state.listed.length = 0;
+  refuses(
+    () => f.register(0),
+    WorkerErrorCode.PlacementMismatch,
+    HttpStatus.Conflict,
+  );
+  f.state.listed.push("server-0");
   f.state.generation = POOL_GENERATION + 1;
   refuses(
-    () => f.register(f.slotId(0)),
+    () => f.registerAs(f.slotId(0), instanceId),
     WorkerErrorCode.PlacementMismatch,
     HttpStatus.Conflict,
   );
 });
 
-test("a binding at the worker placement refuses every client identity", (t) => {
+test("a registration resumes under the same identity after its instance leaves the list and its healthcheck fails", (t) => {
+  const f = poolFixture(t, 1);
+  f.invokeAgent("enablement.put", putBody);
+  f.worker.startPool();
+  const first = f.register(0);
+  const healthy = () =>
+    f.store.transaction((tx) =>
+      f.worker.registrationHealthcheck(tx, first.runtime_identity),
+    );
+  assert.equal(healthy(), true);
+  f.state.listed.length = 0;
+  assert.deepEqual(f.register(0), first);
+  assert.equal(healthy(), false);
+  const record = f.invoke("registration.list", null, {}).items[0];
+  assert.equal(record?.draining, true);
+});
+
+test("one server instance that two bindings list holds two registrations that one execution covers", (t) => {
+  const f = poolFixture(t, 1);
+  f.worker.startPool();
+  const first = f.register(0);
+  const second = f.register(0, `${POOL_RESOURCE}-other`);
+  assert.notEqual(first.runtime_identity, second.runtime_identity);
+  const rows = f.store.transaction(readAllLive);
+  assert.deepEqual(
+    rows.map((row) => row.instance_id),
+    [f.instanceOfSlot(0), f.instanceOfSlot(0)],
+  );
+  const covered = (runtimeIdentity: string) =>
+    f.store.transaction((tx) =>
+      f.worker.registrationsOfInstance(tx, runtimeIdentity),
+    );
+  assert.deepEqual(covered(first.runtime_identity), [second.runtime_identity]);
+  assert.deepEqual(covered(second.runtime_identity), [first.runtime_identity]);
+});
+
+test("a binding at the worker placement applies the same listing rule", (t) => {
   const f = poolFixture(t, 2);
   f.state.placement = InstancePlacement.Worker;
   f.worker.startPool();
-  for (const clientId of [createIdentity("client_identity"), f.slotId(0)])
-    refuses(
-      () => f.register(clientId),
-      WorkerErrorCode.PlacementMismatch,
-      HttpStatus.Conflict,
-    );
+  refuses(
+    () => f.registerAs(createIdentity("client_identity"), f.instanceOfSlot(0)),
+    WorkerErrorCode.PlacementMismatch,
+    HttpStatus.Conflict,
+  );
+  assert.equal(f.register(0).resource_identity, POOL_RESOURCE);
 });
 
 test("the start of the pool starts a slot above the target with a live registration in drain mode", (t) => {
   const f = poolFixture(t, 1);
   f.state.placement = null;
-  f.register(f.slotId(2));
+  f.register(2);
   f.state.placement = InstancePlacement.Server;
   f.worker.startPool();
   assert.deepEqual(
@@ -2085,8 +2193,8 @@ test("the start of the pool starts a slot above the target with a live registrat
 test("a registration record shows the placement and the drain flag of its slot", async (t) => {
   const f = poolFixture(t, 2);
   f.worker.startPool();
-  f.register(f.slotId(0));
-  f.register(f.slotId(1));
+  f.register(0);
+  f.register(1);
   f.state.count = 1;
   f.worker.bindingsChanged(POOL_PROJECT);
   await changesApplied();
@@ -2112,8 +2220,8 @@ test("a draining slot gets no claim while its running execution stays answerable
   const f = poolFixture(t, 2);
   f.invokeAgent("enablement.put", putBody);
   f.worker.startPool();
-  const active = f.register(f.slotId(0)).runtime_identity;
-  const draining = f.register(f.slotId(1)).runtime_identity;
+  const active = f.register(0).runtime_identity;
+  const draining = f.register(1).runtime_identity;
   const healthy = (runtimeIdentity: string) =>
     f.store.transaction((tx) =>
       f.worker.registrationHealthcheck(tx, runtimeIdentity),
@@ -2134,8 +2242,8 @@ test("a draining slot gets no claim while its running execution stays answerable
 test("a restart of the pool host starts a busy slot above the target in drain mode", (t) => {
   const f = poolFixture(t, POOL_FOUR_STARTS);
   f.state.placement = null;
-  const busy = f.register(f.slotId(2)).runtime_identity;
-  f.register(f.slotId(3));
+  const busy = f.register(2).runtime_identity;
+  f.register(3);
   f.state.executing.add(busy);
   f.state.placement = InstancePlacement.Server;
   f.state.count = 1;

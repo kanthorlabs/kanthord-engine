@@ -372,6 +372,8 @@ export function composeServices(options: {
     logger: options.logger,
     runtimeIdentity: (clientId) =>
       worker.registrations.findByClient(clientId)?.runtime_identity,
+    listedInstanceOf: (projectId, resourceIdentity) =>
+      worker.listedInstanceOf(projectId, resourceIdentity),
   });
   const missionClient = directClient(missionOperations, invocation);
   const intakeClient = directClient(intakeOperations, invocation);

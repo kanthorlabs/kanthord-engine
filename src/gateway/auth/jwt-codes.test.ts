@@ -7,7 +7,7 @@ import { HttpStatus } from "../../kernel/http.ts";
 import { OperationError } from "../../kernel/errors.ts";
 import { isMachineIdentity, isWorkerIdentity } from "../../kernel/caller.ts";
 import { WorkerPlacement } from "../../project/contract.ts";
-import type { LiveInstance } from "../../worker/contract.ts";
+import { InstancePlacement, type LiveInstance } from "../../worker/contract.ts";
 import {
   authenticationFixture,
   fakeLookups,
@@ -85,6 +85,7 @@ async function fixtureOf(t: TestContext) {
     id: instanceId,
     name: INSTANCE_NAME,
     worker: "coder@1",
+    placement: InstancePlacement.Worker,
   });
   const key = await crypto.subtle.importKey(
     "raw",

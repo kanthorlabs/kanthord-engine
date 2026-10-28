@@ -397,6 +397,7 @@ export interface LiveInstance {
   id: string;
   name: string;
   worker: string;
+  placement: InstancePlacement;
 }
 
 export interface WorkerInstanceLookups {

@@ -182,6 +182,7 @@ function fixture(
     stateDirectory,
     logger,
     runtimeIdentity: () => (registered ? RUNTIME_IDENTITY : undefined),
+    listedInstanceOf: () => null,
   });
   const ended: string[] = [];
   pool.onEnded((clientId) => ended.push(clientId));

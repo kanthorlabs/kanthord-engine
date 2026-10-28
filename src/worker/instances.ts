@@ -256,7 +256,12 @@ export class WorkerInstances implements WorkerInstanceLookups {
   liveInstance(instanceId: string): LiveInstance | null {
     const instance = readLiveInstanceById(this.dependencies.store, instanceId);
     return instance
-      ? { id: instance.id, name: instance.name, worker: instance.worker }
+      ? {
+          id: instance.id,
+          name: instance.name,
+          worker: instance.worker,
+          placement: instance.placement,
+        }
       : null;
   }
 

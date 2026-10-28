@@ -90,7 +90,7 @@ function fixture() {
   return { host, pool, slotId, run };
 }
 
-test("a reconciliation starts one slot for each unit of the count and records them as pool slots", () => {
+test("a reconciliation starts one slot for each unit of the count", () => {
   const f = fixture();
   f.run(null, [target(THREE_SLOTS)]);
   assert.deepEqual(
@@ -100,14 +100,6 @@ test("a reconciliation starts one slot for each unit of the count and records th
       [1, false],
       [2, false],
     ],
-  );
-  assert.ok(f.pool.isSlot(PROJECT_ID, RESOURCE, GENERATION, f.slotId(1)));
-  assert.ok(
-    !f.pool.isSlot(OTHER_PROJECT_ID, RESOURCE, GENERATION, f.slotId(1)),
-  );
-  assert.ok(!f.pool.isSlot(PROJECT_ID, RESOURCE, NEXT_GENERATION, f.slotId(1)));
-  assert.ok(
-    !f.pool.isSlot(PROJECT_ID, RESOURCE, GENERATION, "client_identity_other"),
   );
   f.run(null, [target(THREE_SLOTS)]);
   assert.equal(f.host.started.length, THREE_SLOTS);
@@ -124,9 +116,8 @@ test("a lowered count drains the excess slots and keeps them as pool slots that 
   assert.ok(f.pool.draining(f.slotId(1)));
   assert.ok(f.pool.draining(f.slotId(0)));
   assert.ok(!f.pool.draining(f.slotId(2)));
-  assert.ok(f.pool.isSlot(PROJECT_ID, RESOURCE, GENERATION, f.slotId(0)));
   f.host.end(f.slotId(1));
-  assert.ok(!f.pool.isSlot(PROJECT_ID, RESOURCE, GENERATION, f.slotId(1)));
+  assert.equal(f.pool.slotOf(f.slotId(1)), undefined);
 });
 
 test("a raise during a drain starts the draining slot again instead of a new slot", () => {

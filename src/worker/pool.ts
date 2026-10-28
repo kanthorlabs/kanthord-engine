@@ -100,20 +100,6 @@ export class Pool {
     host.onEnded((clientId) => this.ended(clientId));
   }
 
-  isSlot(
-    projectId: string,
-    resourceIdentity: string,
-    generation: number,
-    clientId: string,
-  ): boolean {
-    const slot = this.slotOf(clientId);
-    return (
-      slot?.project_id === projectId &&
-      slot.resource_identity === resourceIdentity &&
-      slot.generation === generation
-    );
-  }
-
   slotsOf(
     projectId: string,
     resourceIdentity: string,

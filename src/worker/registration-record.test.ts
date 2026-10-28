@@ -28,6 +28,7 @@ const PROJECT = createIdentity("project");
 const RESOURCE = "worker:kanthord:general";
 const NATIVE = "coder@1";
 const PLACEMENT = "worker";
+const INSTANCE_NAME = "coder-1";
 const CURSOR_INVALID = "system.pagination.cursor_invalid";
 const BINDING = {
   binding_id: "binding",
@@ -264,5 +265,56 @@ test("registration inventory pages live rows descending with both filters and ca
       }).success,
       false,
     );
+  });
+});
+
+test("a registration whose instance the latest binding revision does not list answers draining at every placement", (t) => {
+  const store = fixture(t);
+  store.transaction((tx) => {
+    const instanceId = createIdentity("worker_instance");
+    const registration = insertRegistration(
+      tx,
+      {
+        project_id: PROJECT,
+        resource_identity: RESOURCE,
+        client_id: createIdentity("client_identity"),
+        name: INSTANCE_NAME,
+        instance_id: instanceId,
+      },
+      NOW,
+    );
+    const recordOf = (
+      placement: InstancePlacement,
+      worker_instances: string[],
+    ) =>
+      registrationRecord(
+        tx,
+        {
+          workerBindingOf: () => ({ ...BINDING, placement, worker_instances }),
+          instanceNameOf: () => INSTANCE_NAME,
+          schedulerClaims: {
+            agentSelectionsOf: () => [],
+            agentPinsOf: () => null,
+            unendedExecutionOf: () => null,
+            requireRunning: () => assert.fail("UNEXPECTED_COLLABORATION"),
+            runningExecutionOfRuntime: () => null,
+            activityOf: () => ({
+              activity: RegistrationActivity.Idle,
+              execution_id: null,
+            }),
+          },
+        },
+        registration,
+        NOW,
+      );
+    for (const placement of [
+      InstancePlacement.Server,
+      InstancePlacement.Worker,
+    ]) {
+      const dropped = recordOf(placement, []);
+      assert.equal(dropped.draining, true);
+      assert.equal(dropped.instance, INSTANCE_NAME);
+      assert.equal(recordOf(placement, [INSTANCE_NAME]).draining, false);
+    }
   });
 });

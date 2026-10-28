@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { test } from "node:test";
+import { test, type TestContext } from "node:test";
 import { decode, sign } from "hono/jwt";
 import { ulid } from "ulid";
 import { background } from "../../kernel/context.ts";
@@ -23,7 +23,8 @@ import {
 import { generateHumanJWT, generateMachineJWT } from "./jwt.ts";
 import { isHumanIdentity, isMachineIdentity } from "../../kernel/caller.ts";
 import { gatewayOperations } from "../contract.ts";
-import { WorkerGroupEnded } from "../errors.ts";
+import { JwtCause, WorkerGroupEnded } from "../errors.ts";
+import { InstancePlacement } from "../../worker/contract.ts";
 
 const TOKEN_LIFETIME = 600;
 const MILLISECONDS_PER_SECOND = 1000;
@@ -538,4 +539,85 @@ test("a failure that is no ended group keeps the plain 401", async (t) => {
     fixture.authentication.authenticate(`Bearer ${old.token}`),
     isPlainUnauthorized,
   );
+});
+
+const INSTANCE_NAME = "coder-1";
+const INSTANCE_RESOURCE = `worker:kanthord:${TEST_WORKER_BINDING}`;
+
+async function instanceFixture(t: TestContext, placement: InstancePlacement) {
+  const instanceId = identitySchema("worker_instance").parse(
+    `worker_instance_${ulid()}`,
+  );
+  const connectionId = `connection_${ulid()}`;
+  const machines = {
+    ...fakeLookups(),
+    instances: {
+      liveInstance: (id: string) =>
+        id === instanceId
+          ? { id, name: INSTANCE_NAME, worker: "coder@1", placement }
+          : null,
+      holdConnection: () => true,
+    },
+  };
+  t.mock.method(machines.project, "resolveWorkerGroup", async () => ({
+    project_id: TEST_PROJECT_ID,
+    resource_identity: INSTANCE_RESOURCE,
+    placement,
+    worker_instances: [INSTANCE_NAME],
+  }));
+  const fixture = await authenticationFixture(t, machines);
+  const key = await tokenKey(fixture.config.master_key);
+  const claims = decode(
+    await fixture.machineToken(TEST_PROJECT_ID, TEST_WORKER_BINDING),
+  ).payload;
+  const token = (overrides: Record<string, unknown>) =>
+    sign({ ...claims, name: INSTANCE_NAME, ...overrides }, key, "HS256");
+  const refuse = async (bearer: string, cause: JwtCause) =>
+    assert.rejects(
+      fixture.authentication.authenticate(`Bearer ${bearer}`),
+      (error: unknown) =>
+        error instanceof OperationError &&
+        error.status === HttpStatus.Unauthorized &&
+        error.code === `gateway.jwt.${cause}`,
+    );
+  return { fixture, instanceId, connectionId, token, refuse };
+}
+
+test("a machine token of a server instance needs instance_id and no connection_id", async (t) => {
+  for (const placement of [
+    InstancePlacement.Server,
+    InstancePlacement.Container,
+  ]) {
+    const subject = await instanceFixture(t, placement);
+    const identity = await subject.fixture.authentication.authenticate(
+      `Bearer ${await subject.token({ instance_id: subject.instanceId })}`,
+    );
+    assert.ok(isMachineIdentity(identity));
+    assert.equal(identity.instanceId, subject.instanceId);
+    assert.equal(identity.connectionId, undefined);
+    await subject.refuse(await subject.token({}), JwtCause.InstanceRequired);
+    await subject.refuse(
+      await subject.token({
+        instance_id: subject.instanceId,
+        connection_id: subject.connectionId,
+      }),
+      JwtCause.ForbiddenClaim,
+    );
+  }
+});
+
+test("a machine token of a worker instance still needs connection_id", async (t) => {
+  const subject = await instanceFixture(t, InstancePlacement.Worker);
+  await subject.refuse(
+    await subject.token({ instance_id: subject.instanceId }),
+    JwtCause.InstanceRequired,
+  );
+  const identity = await subject.fixture.authentication.authenticate(
+    `Bearer ${await subject.token({
+      instance_id: subject.instanceId,
+      connection_id: subject.connectionId,
+    })}`,
+  );
+  assert.ok(isMachineIdentity(identity));
+  assert.equal(identity.connectionId, subject.connectionId);
 });

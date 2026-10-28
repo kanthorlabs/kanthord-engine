@@ -33,6 +33,10 @@ export interface WorkerPoolOptions {
   stateDirectory: string;
   logger: Logger;
   runtimeIdentity: (clientId: string) => string | undefined;
+  listedInstanceOf: (
+    projectId: string,
+    resourceIdentity: string,
+  ) => { id: string; name: string } | null;
   drivers: ReadonlyMap<PoolPlacement, SlotDriver>;
   environment?: NodeJS.ProcessEnv;
 }
@@ -261,14 +265,26 @@ export class WorkerPool implements PoolHost {
     }
   }
 
-  private token(slot: PoolSlot): Promise<string> {
-    return generateSlotJWT(this.options.masterKey, this.options.authVersion, {
-      clientId: slot.client_id,
-      projectId: slot.project_id,
-      bindingName:
-        slot.resource_identity.split(IDENTITY_SEPARATOR)[BINDING_NAME_INDEX]!,
-      slot: slot.slot,
-    }).then(({ token }) => token);
+  private async token(slot: PoolSlot): Promise<string> {
+    const instance = this.options.listedInstanceOf(
+      slot.project_id,
+      slot.resource_identity,
+    );
+    if (!instance)
+      throw new Error("worker pool: the binding of the slot lists no instance");
+    const { token } = await generateSlotJWT(
+      this.options.masterKey,
+      this.options.authVersion,
+      {
+        clientId: slot.client_id,
+        projectId: slot.project_id,
+        bindingName:
+          slot.resource_identity.split(IDENTITY_SEPARATOR)[BINDING_NAME_INDEX]!,
+        instanceId: instance.id,
+        instanceName: instance.name,
+      },
+    );
+    return token;
   }
 
   private driver(placement: PoolPlacement): SlotDriver {

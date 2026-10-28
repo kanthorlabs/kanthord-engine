@@ -740,13 +740,19 @@ export async function gatewayFixture(
   const slotTokenOf = async (slot: PoolSlot) => {
     const { sign } = await import("hono/jwt");
     const iat = Math.floor(Date.now() / MILLISECONDS_PER_SECOND);
+    const instance = worker.listedInstanceOf(
+      slot.project_id,
+      slot.resource_identity,
+    );
+    assert.ok(instance);
     return sign(
       {
         sub: slot.client_id,
-        name: `server slot ${slot.slot}`,
+        name: instance.name,
         kind: IdentityKind.Client,
         project_id: slot.project_id,
         resource_identity: slot.resource_identity,
+        instance_id: instance.id,
         iat,
         exp: iat + config.gateway.auth.token_lifetime,
         jti: ulid(),

@@ -29,6 +29,16 @@ function hostedPlacement(placement: InstancePlacement | null) {
   return placement;
 }
 
+export function instanceDropped(
+  binding: { worker_instances?: string[] },
+  registration: Registration,
+  instanceName: (instanceId: string) => string | null,
+): boolean {
+  if (!registration.instance_id) return false;
+  const name = instanceName(registration.instance_id);
+  return name === null || !(binding.worker_instances ?? []).includes(name);
+}
+
 export function registrationRecord(
   tx: Transaction,
   dependencies: Dependencies,
@@ -70,7 +80,13 @@ export function registrationRecord(
     ...(activity.activity === RegistrationActivity.Executing
       ? { execution_id: activity.execution_id }
       : {}),
-    draining: dependencies.draining?.(registration.client_id) ?? false,
+    draining:
+      (dependencies.draining?.(registration.client_id) ?? false) ||
+      instanceDropped(
+        binding,
+        registration,
+        (instanceId) => dependencies.instanceNameOf?.(tx, instanceId) ?? null,
+      ),
     registered: true,
   });
 }

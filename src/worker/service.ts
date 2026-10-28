@@ -95,6 +95,7 @@ import {
 import { resumeRegistration, TableRegistrations } from "./registrations.ts";
 import { Pool } from "./pool.ts";
 import {
+  instanceDropped,
   listRegistrationRecords,
   registrationRecord,
 } from "./registration-record.ts";
@@ -123,6 +124,7 @@ import { declareInstances } from "./instance-operations.ts";
 import type { AgentPromptFacts } from "./prompt-telemetry.ts";
 
 const NO_ITEMS = 0;
+const FIRST_INDEX = 0;
 
 function invalidWorkerConfiguration(workerName: string): OperationError {
   return new OperationError(
@@ -629,6 +631,12 @@ export class WorkerService implements Service {
     );
     if (!binding || binding.tombstone || binding.instance_count === NO_ITEMS)
       return false;
+    if (
+      instanceDropped(binding, registration, (instanceId) =>
+        this.instanceNameOf(tx, instanceId),
+      )
+    )
+      return false;
     const declaration = getWorkerDeclaration(binding.worker_name);
     assert.ok(declaration);
     if (declaration.host === WorkerHost.ExternalHarness) return true;
@@ -786,6 +794,21 @@ export class WorkerService implements Service {
     };
   }
 
+  listedInstanceOf(
+    projectId: string,
+    resourceIdentity: string,
+  ): { id: string; name: string } | null {
+    return this.dependencies.store.transaction((tx) => {
+      const name = this.dependencies.workerBindingOf(
+        tx,
+        projectId,
+        resourceIdentity,
+      )?.worker_instances?.[FIRST_INDEX];
+      const instance = name === undefined ? null : readLiveInstance(tx, name);
+      return instance ? { id: instance.id, name: instance.name } : null;
+    });
+  }
+
   instanceOf(
     tx: Transaction,
     name: string,
@@ -841,7 +864,7 @@ export class WorkerService implements Service {
     );
   }
 
-  private requirePoolSlot(
+  private requireNativeInstance(
     tx: Transaction,
     identity: {
       clientId: string;
@@ -855,31 +878,10 @@ export class WorkerService implements Service {
       identity.projectId,
       identity.resourceIdentity,
     );
-    if (
-      binding &&
-      !binding.tombstone &&
-      binding.placement === InstancePlacement.Worker
-    ) {
-      this.requireListedInstance(tx, identity, binding);
+    if (!binding || binding.tombstone) return;
+    if (getWorkerDeclaration(binding.worker_name)?.host !== WorkerHost.Kanthord)
       return;
-    }
-    if (
-      !binding ||
-      binding.tombstone ||
-      !hostsPoolSlot(binding.placement) ||
-      this.pool?.isSlot(
-        identity.projectId,
-        identity.resourceIdentity,
-        binding.generation,
-        identity.clientId,
-      )
-    )
-      return;
-    throw new OperationError(
-      HttpStatus.Conflict,
-      WorkerErrorCode.PlacementMismatch,
-      "Worker binding accepts a registration only from a pool slot.",
-    );
+    this.requireListedInstance(tx, identity, binding);
   }
 
   private declareCatalog(registry: OperationRegistry): void {
@@ -1195,7 +1197,7 @@ export class WorkerService implements Service {
             "Authentication required.",
           );
         const result = caller.commit((transaction) => {
-          this.requirePoolSlot(transaction, identity);
+          this.requireNativeInstance(transaction, identity);
           const registration = worker.register(
             transaction,
             {
