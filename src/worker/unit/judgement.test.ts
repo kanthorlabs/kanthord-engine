@@ -243,11 +243,11 @@ test("failed and unrun rationale names the command and cause", () => {
   );
   assert.match(
     instruction,
-    /conflict for two stated requirements or criteria that the work cannot meet together\. For example, a criterion needs a change to a file that the requirement forbids\. For a conflict, write the reason as the two requirements in quotes, joined by " vs ": "requirement A" vs "requirement B"\. Write every reason in full/,
+    /conflict for two stated requirements or criteria that the work cannot meet together\. For example, correct work fails a criterion, a verification or an affected test unless it changes a file that the requirement forbids\. A failure that a defect of the work causes is no conflict\. For a conflict, write the reason as the two requirements in quotes, joined by " vs ": "requirement A" vs "requirement B"\. Write every reason in full/,
   );
   assert.match(
     instruction,
-    /A changed file that the requirement forbids and that no criterion needs is an unmet stated item\./,
+    /A changed file that the requirement forbids is an unmet stated item\. The exception is a change that correct work needs for a criterion, a verification or an affected test\./,
   );
   assert.equal(
     instruction.match(/ground conflict|conflict for/g)?.length,
@@ -325,6 +325,10 @@ test("the task revision carries the output of the failed verification when it ha
     /Verification 1 `npm test` failed with exit code 1\./,
   );
   assert.match(withOutput, /```text\n✖ shutdown test timed out\n```$/);
+  assert.match(
+    withOutput,
+    /^Revise the task work to satisfy its criterion and verifications\. When a verification or an affected test needs a change to a forbidden file, make the smallest such change\. Verification 1/,
+  );
   const withoutOutput = taskRevisionInstruction(
     SHIPPED_TEMPLATES,
     verification,
@@ -339,6 +343,8 @@ const RELEASE_COMMAND = "npm test";
 const FAILED_EXIT = 1;
 const NO_OUTPUT = "";
 const RELEASE_CLONE = /The release clone holds only tracked files/;
+const FORBIDDEN_FILE_RULE =
+  /When a verification or an affected test needs a change to a forbidden file, make the smallest such change\./;
 
 test("only the release revision names the content of the release clone", () => {
   const verification: Verification = {
@@ -360,6 +366,15 @@ test("only the release revision names the content of the release clone", () => {
       NO_OUTPUT,
     ),
     RELEASE_CLONE,
+  );
+  assert.match(
+    releaseRevisionInstruction(
+      SHIPPED_TEMPLATES,
+      verification,
+      [RELEASE_COMMAND],
+      NO_OUTPUT,
+    ),
+    FORBIDDEN_FILE_RULE,
   );
   assert.doesNotMatch(
     taskRevisionInstruction(
@@ -625,6 +640,7 @@ test("the affected revision renders the rationale of each failed repository, the
   assert.ok(instruction.includes(JSON.stringify([first.head, second.head])));
   assert.match(instruction, /```text\nfirst output\n```$/);
   assert.doesNotMatch(instruction, /second output/);
+  assert.match(instruction, FORBIDDEN_FILE_RULE);
 });
 
 test("the affected failure report joins the text of each failed repository and ends with the first output", () => {
