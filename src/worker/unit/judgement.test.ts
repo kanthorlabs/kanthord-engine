@@ -37,6 +37,7 @@ const PLAN_DEFECT_RATIONALE =
   'plan defects\nPlan conflict:\n- node: "edit a.ts" vs "a.ts stays unchanged"\nPlan gap:\n- task_b: no test asked\nUnmet:\n- task_a: no route check\n- task_c: no lint';
 const PLAN_GAP_RATIONALE = "one gap\nPlan gap:\n- task_b: no test asked";
 const MET_RATIONALE = "met";
+const SINGLE_CONFLICT_DEFINITION = 1;
 const TWO_GAP_RATIONALE =
   "two gaps\nUnmet:\n- task_a: no route check\n- task_b: no restart test";
 
@@ -242,9 +243,16 @@ test("failed and unrun rationale names the command and cause", () => {
   );
   assert.match(
     instruction,
-    /When the work cannot meet two stated requirements or criteria together, give the unmet item the ground conflict\. For example, a criterion needs a change to a file that the requirement forbids\. For a conflict, write the reason as the two requirements in quotes, joined by " vs ": "requirement A" vs "requirement B"\./,
+    /conflict for two stated requirements or criteria that the work cannot meet together\. For example, a criterion needs a change to a file that the requirement forbids\. For a conflict, write the reason as the two requirements in quotes, joined by " vs ": "requirement A" vs "requirement B"\. Write every reason in full/,
   );
-  assert.doesNotMatch(instruction, /unmet stated item/);
+  assert.match(
+    instruction,
+    /A changed file that the requirement forbids and that no criterion needs is an unmet stated item\./,
+  );
+  assert.equal(
+    instruction.match(/ground conflict|conflict for/g)?.length,
+    SINGLE_CONFLICT_DEFINITION,
+  );
   assert.match(instruction, /"ground": "stated"/);
   assert.doesNotMatch(
     instruction,
