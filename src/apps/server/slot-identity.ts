@@ -1,4 +1,3 @@
-import { CLIENT_IDENTITY_PREFIX } from "../../kernel/caller.ts";
 import { ULID_LENGTH } from "../../kernel/identity.ts";
 import { deriveKey } from "../../kernel/json.ts";
 
@@ -6,7 +5,6 @@ const CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 const BITS_PER_CHARACTER = 5n;
 const CHARACTER_MASK = 31n;
 const IDENTITY_BYTES = 16;
-const LABEL_PREFIX = "worker/server-client";
 
 export function derivedCrockford(masterKey: string, label: string): string {
   const key = deriveKey(masterKey, label);
@@ -17,18 +15,4 @@ export function derivedCrockford(masterKey: string, label: string): string {
     value >>= BITS_PER_CHARACTER;
   }
   return text;
-}
-
-export function slotClientIdentity(
-  masterKey: string,
-  projectId: string,
-  resourceIdentity: string,
-  generation: number,
-  slot: number,
-): string {
-  const text = derivedCrockford(
-    masterKey,
-    [LABEL_PREFIX, projectId, resourceIdentity, generation, slot].join("/"),
-  );
-  return `${CLIENT_IDENTITY_PREFIX}_${text}`;
 }

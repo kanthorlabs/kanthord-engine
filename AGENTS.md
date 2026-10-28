@@ -40,7 +40,7 @@ document.
 - A handler that calls a peer for its caller passes `caller.identity` in
   `ClientOptions.identity`. Only a background producer passes its own service
   identity.
-- A slot of the server pool logs under `workers/<client_id>/` of the server
+- A server instance logs under `workers/<instance name>/` of the server
   state directory. The server log holds no record of a worker unit.
 
 ## Plans

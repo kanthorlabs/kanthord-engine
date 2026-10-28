@@ -2,8 +2,6 @@ import assert from "node:assert/strict";
 import { join } from "node:path";
 import { test, type TestContext } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
-import { parse, stringify } from "yaml";
-import { CONFIG_VERSION, configuration } from "../../config/index.ts";
 import { writePrivate } from "../../kernel/files.ts";
 import {
   createIdempotencyKey,
@@ -31,7 +29,7 @@ import {
   type Span,
   SpanStatus,
 } from "../../tracking/contract.ts";
-import { environment, kanthord, kanthordTerminal } from "./cli-test-support.ts";
+import { environment, kanthord } from "./cli-test-support.ts";
 
 const SUCCESS = 0;
 const FAILURE = 1;
@@ -75,37 +73,6 @@ type Attempt = {
   opened_by: { kind: string; execution_id: string };
 };
 type Change = { revisions: { node_id: string }[] };
-
-async function machineToken(
-  directory: string,
-  projectId: string,
-  binding: string,
-  name: string,
-  env: NodeJS.ProcessEnv,
-): Promise<string> {
-  assert.ok(projectId);
-  assert.ok(binding);
-  const args = [
-    "auth",
-    "jwt",
-    "generate",
-    "--project",
-    projectId,
-    "--binding",
-    binding,
-    "--name",
-    name,
-    "--config",
-    join(directory, "server.yaml"),
-  ];
-  const result = await kanthordTerminal(args, env);
-  assert.equal(result.code, SUCCESS, result.stderr);
-  assert.equal(result.stderr, NO_OUTPUT);
-  const fragment = parse(result.stdout) as { token: string };
-  assert.ok(fragment.token);
-  assert.doesNotMatch(result.stdout, /client_secret/);
-  return fragment.token;
-}
 
 async function setup(t: TestContext, short = false) {
   const fixture = await gatewayFixture(t, {
@@ -253,15 +220,6 @@ async function setup(t: TestContext, short = false) {
   );
   const revision = (await read<Node>(["mission", "node", "get", implementId]))
     .visible_revision;
-  writePrivate(
-    join(directory, "server.yaml"),
-    stringify(
-      configuration({
-        version: CONFIG_VERSION,
-        master_key: fixture.config.master_key,
-      }).getProperties(),
-    ),
-  );
   const G = {
     ...H,
     KANTHORD_TOKEN: (await fixture.slotClient(project.id, "general")).token,
@@ -277,12 +235,10 @@ async function setup(t: TestContext, short = false) {
     ? H
     : {
         ...H,
-        KANTHORD_TOKEN: await machineToken(
-          directory,
+        KANTHORD_TOKEN: await fixture.strangerClient(
           project.id,
           "general",
-          "general-b",
-          H,
+          instanceNames("general", 1)[0]!,
         ),
       };
   const general = (
