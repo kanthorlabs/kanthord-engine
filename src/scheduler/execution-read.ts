@@ -11,7 +11,7 @@ import {
   readExecution,
   listExecutions,
 } from "./execution-store.ts";
-import { schedulerOperations } from "./contract.ts";
+import type { schedulerOperations } from "./contract.ts";
 
 const FIRST_ROW = 0;
 const TEXT_ENCODING = "utf8";

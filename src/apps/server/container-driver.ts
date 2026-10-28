@@ -3,8 +3,8 @@ import { constants } from "node:os";
 import { performance } from "node:perf_hooks";
 import type { Readable, Writable } from "node:stream";
 import { Diagnostic } from "../../kernel/errors.ts";
+import type { ContainerRuntime } from "../../worker/contract.ts";
 import {
-  ContainerRuntime,
   PoolPlacement,
   type PlacementStatus,
   type PoolSlot,

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { z } from "zod";
+import type { z } from "zod";
 import {
   ADMISSION_CONCURRENCY,
   INTAKE_SERVICE_NAME,

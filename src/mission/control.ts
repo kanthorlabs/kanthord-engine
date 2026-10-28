@@ -5,6 +5,7 @@ import { HttpStatus } from "../kernel/http.ts";
 import { createIdentity } from "../kernel/identity.ts";
 import { canonicalJSON } from "../kernel/json.ts";
 import type { Transaction } from "../kernel/store.ts";
+import type { RevokeCause } from "./contract.ts";
 import {
   AssessmentResult,
   NodeState,
@@ -12,7 +13,6 @@ import {
   type HumanActor,
   type HumanAct,
   type Mission,
-  RevokeCause,
   type ControlResult,
   TransitionRule,
   type ExecutionEnds,

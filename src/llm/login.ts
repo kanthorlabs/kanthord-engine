@@ -10,10 +10,10 @@ import { OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import { oauthSecretSchema } from "../custody/contract.ts";
 import { LLM_PLATFORMS, piProviderId, Platform } from "./platforms.ts";
+import type { LoginSessionStore } from "./sessions.ts";
 import {
   LoginSessionMode,
   LoginSessionState,
-  LoginSessionStore,
   type LoginSession,
 } from "./sessions.ts";
 

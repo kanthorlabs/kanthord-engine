@@ -4,13 +4,13 @@ import { HttpStatus } from "../kernel/http.ts";
 import { identitySchema } from "../kernel/identity.ts";
 import type { Transaction } from "../kernel/store.ts";
 import { getWorkerDeclaration } from "./catalog.ts";
+import type { workerOperations } from "./contract.ts";
 import {
   RegistrationActivity,
   type InstancePlacement,
   WorkerHost,
   WorkerErrorCode,
   registrationRecordSchema,
-  workerOperations,
   type Registration,
   type WorkerBindingOf,
   type SchedulerClaims,

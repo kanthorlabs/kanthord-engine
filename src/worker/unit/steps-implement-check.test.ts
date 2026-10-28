@@ -8,10 +8,10 @@ import { temporary } from "../../kernel/test-support.ts";
 import * as connector from "../../repository/connector.ts";
 import { nodeBranchOf } from "../../repository/node-branch.ts";
 import type { Revision } from "../../mission/contract.ts";
+import type { scriptedProvider } from "./test-support.ts";
 import {
   fauxAssistantMessage,
   fauxToolCall,
-  scriptedProvider,
   TEST_SSH_ACCESS,
 } from "./test-support.ts";
 import {

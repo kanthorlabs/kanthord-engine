@@ -12,7 +12,7 @@ import {
   joined,
 } from "../kernel/context.ts";
 import { lifecycle } from "../kernel/service.ts";
-import { Authentication } from "./auth/authentication.ts";
+import type { Authentication } from "./auth/authentication.ts";
 import {
   isHumanIdentity,
   isMachineIdentity,
@@ -36,11 +36,8 @@ import {
 } from "../kernel/operation.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import { resolveRequestId } from "./request-id.ts";
-import {
-  Idempotency,
-  type RecordedResponse,
-  type Reservation,
-} from "./idempotency.ts";
+import type { Idempotency } from "./idempotency.ts";
+import type { RecordedResponse, Reservation } from "./idempotency.ts";
 import type {
   CallerContext,
   OperationRegistry,

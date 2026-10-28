@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { PromptTemplate } from "../../agent/contract.ts";
+import type { PromptTemplate } from "../../agent/contract.ts";
 import { readdirSync, rmSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import type { Context } from "../../kernel/context.ts";

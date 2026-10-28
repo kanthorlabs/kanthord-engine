@@ -37,7 +37,8 @@ import {
   workerOperations,
   type RepositoryTransport,
 } from "../../worker/contract.ts";
-import { agentOperations, ChainLevel } from "../../agent/contract.ts";
+import type { agentOperations } from "../../agent/contract.ts";
+import { ChainLevel } from "../../agent/contract.ts";
 import { SWE_AGENT_PROMPT } from "../../agent/prompt-assets.ts";
 import { framing, PromptConsumer } from "../../agent/prompt-render.ts";
 import {

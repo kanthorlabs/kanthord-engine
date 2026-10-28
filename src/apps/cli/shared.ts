@@ -1,5 +1,5 @@
 import { readFileSync, statSync } from "node:fs";
-import { z } from "zod";
+import type { z } from "zod";
 import { Diagnostic, validationIssues } from "../../kernel/errors.ts";
 import { readPrivate } from "../../kernel/files.ts";
 import type { Row } from "../../kernel/rows.ts";

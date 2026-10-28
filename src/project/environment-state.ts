@@ -12,7 +12,8 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
-import { EnvironmentSource, type Environment } from "../kernel/devcontainer.ts";
+import type { EnvironmentSource } from "../kernel/devcontainer.ts";
+import type { Environment } from "../kernel/devcontainer.ts";
 import { digest, timestamp } from "../kernel/json.ts";
 import {
   EnvironmentFailureClass,

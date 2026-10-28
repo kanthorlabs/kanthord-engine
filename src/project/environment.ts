@@ -25,13 +25,13 @@ import type { CallerIdentity } from "../kernel/caller.ts";
 import { RepositoryFileState } from "../repository/contract.ts";
 import type { RepositoryFile, SshAccess } from "../repository/contract.ts";
 import { gitFailureReason } from "../repository/git-failure.ts";
+import type { projectOperations } from "./contract.ts";
 import {
   REPOSITORY_FILES_READ_TIMEOUT_MS,
   ENVIRONMENT_FILE_MAX_BYTES,
   EnvironmentSource,
   ProjectErrorCode,
   bindingSetWriteInputSchema,
-  projectOperations,
   repositoryConfigSchema,
   type RepositoryFiles,
   type SlotEnvironment,

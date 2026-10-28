@@ -10,7 +10,8 @@ import {
   WorkPullKind,
   type ExecutionRecord,
 } from "../../scheduler/contract.ts";
-import { Backoff, sleep } from "./api.ts";
+import type { Backoff } from "./api.ts";
+import { sleep } from "./api.ts";
 import type { WorkerTransport } from "./transport.ts";
 import type { Registration } from "./registration.ts";
 import { createIdempotencyKey } from "../../kernel/identity.ts";

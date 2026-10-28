@@ -11,8 +11,8 @@ import {
   type OperationResult,
 } from "../../kernel/operation.ts";
 import { Intent, missionOperations } from "../../mission/contract.ts";
+import type { EnvironmentStatus } from "../../project/contract.ts";
 import {
-  EnvironmentStatus,
   projectOperations,
   workerResourceIdentity,
   type RepositoryFiles,

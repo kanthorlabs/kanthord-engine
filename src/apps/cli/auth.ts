@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { resolve } from "node:path";
-import { Command } from "commander";
+import type { Command } from "commander";
 import type { ServerConfig } from "../../config/index.ts";
 import { Diagnostic } from "../../kernel/errors.ts";
 import { writePrivate } from "../../kernel/files.ts";

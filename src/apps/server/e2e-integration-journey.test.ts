@@ -23,7 +23,7 @@ import {
   type Revision,
   Intent,
 } from "../../mission/contract.ts";
-import { type ExecutionRecord } from "../../scheduler/contract.ts";
+import type { ExecutionRecord } from "../../scheduler/contract.ts";
 import {
   ActionResultKind,
   PlatformAddressKind,

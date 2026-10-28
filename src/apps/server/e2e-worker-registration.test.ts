@@ -12,11 +12,11 @@ import {
   idempotencyKeySchema,
 } from "../../kernel/identity.ts";
 import { temporary } from "../../kernel/test-support.ts";
-import {
-  RegistrationActivity,
+import type {
   registrationRecordSchema,
   workerOperations,
 } from "../../worker/contract.ts";
+import { RegistrationActivity } from "../../worker/contract.ts";
 import { environment, kanthord, kanthordTerminal } from "./cli-support.ts";
 import { gatewayFixture } from "./test-support.ts";
 

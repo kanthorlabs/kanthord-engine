@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
-import { HeadBucketCommand, S3Client } from "@aws-sdk/client-s3";
+import type { HeadBucketCommand } from "@aws-sdk/client-s3";
+import { S3Client } from "@aws-sdk/client-s3";
 import pino, { type Logger } from "pino";
 import { CustodyComponent, custodyMigrations } from "../custody/index.ts";
 import {

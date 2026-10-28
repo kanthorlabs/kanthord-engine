@@ -27,9 +27,9 @@ import {
   unitCommitMessage,
   ViolationEnd,
 } from "./turn-gate.ts";
+import type { ExecutionRun } from "./execution-run.ts";
 import {
   EndReason,
-  ExecutionRun,
   ExecutionStop,
   type MethodClaim,
   type ExecutionEnd,

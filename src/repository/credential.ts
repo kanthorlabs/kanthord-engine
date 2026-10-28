@@ -7,7 +7,7 @@ import {
   type GeneratedRevision,
 } from "../custody/contract.ts";
 import { IdentityKind } from "../kernel/caller.ts";
-import { type Context } from "../kernel/context.ts";
+import type { Context } from "../kernel/context.ts";
 import type { ResourceEntry } from "../kernel/health.ts";
 import type { CallerContext, OperationRegistry } from "../kernel/operation.ts";
 import type { Store, Transaction } from "../kernel/store.ts";

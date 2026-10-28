@@ -10,8 +10,8 @@ import {
 } from "../config/global.ts";
 import { Store } from "../kernel/store.ts";
 import { OperationRegistry, StoreName } from "../kernel/operation.ts";
-import { HealthRegistry } from "../kernel/health.ts";
-import { type Context } from "../kernel/context.ts";
+import type { HealthRegistry } from "../kernel/health.ts";
+import type { Context } from "../kernel/context.ts";
 import type { Registration } from "../worker/contract.ts";
 import {
   Authentication,

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { Command } from "commander";
+import type { Command } from "commander";
 import type { z } from "zod";
 import { httpClient, resolveClient } from "../../gateway/client.ts";
 import { causeCategorySchema } from "../../kernel/cause.ts";

@@ -8,7 +8,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { basename, join } from "node:path";
-import { Command } from "commander";
+import type { Command } from "commander";
 import { z } from "zod";
 import { Diagnostic } from "../../kernel/errors.ts";
 import type { Row } from "../../kernel/rows.ts";

@@ -1,4 +1,4 @@
-import { type OperationRegistry, type StoreMap } from "../kernel/operation.ts";
+import type { OperationRegistry, StoreMap } from "../kernel/operation.ts";
 import type { Store } from "../kernel/store.ts";
 import {
   Authentication,

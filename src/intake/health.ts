@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import type { ServiceIdentity } from "../kernel/caller.ts";
-import { type Context } from "../kernel/context.ts";
+import type { Context } from "../kernel/context.ts";
 import { OperationError } from "../kernel/errors.ts";
 import {
   ResourceFailureReason,

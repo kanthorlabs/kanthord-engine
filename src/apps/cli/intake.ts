@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { Command } from "commander";
+import type { Command } from "commander";
 import { Diagnostic } from "../../kernel/errors.ts";
 import { identitySchema } from "../../kernel/identity.ts";
 import { AccessPolicy } from "../../kernel/operation.ts";

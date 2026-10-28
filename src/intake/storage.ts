@@ -17,12 +17,12 @@ import { HttpStatus } from "../kernel/http.ts";
 import type { CallerContext, ExecutionClaim } from "../kernel/operation.ts";
 import type { Store, Transaction } from "../kernel/store.ts";
 import { S3_RESULT_CODE_PREFIX } from "../storage/contract.ts";
-import {
-  type ObjectHead,
-  type S3Call,
-  type S3Failure,
-  type S3ObjectTarget,
-  type S3Platform,
+import type {
+  ObjectHead,
+  S3Call,
+  S3Failure,
+  S3ObjectTarget,
+  S3Platform,
 } from "../storage/s3.ts";
 import type { IntakeCustody } from "./action-check.ts";
 import {

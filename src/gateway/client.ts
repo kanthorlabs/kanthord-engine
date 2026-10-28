@@ -9,7 +9,7 @@ import { parseMapping } from "../kernel/yaml.ts";
 import { audit, readPrivate } from "../kernel/files.ts";
 import { z } from "zod";
 import { Diagnostic } from "../kernel/errors.ts";
-import { gatewayOperations } from "./contract.ts";
+import type { gatewayOperations } from "./contract.ts";
 import {
   OperationResultType,
   OperationLifetime,

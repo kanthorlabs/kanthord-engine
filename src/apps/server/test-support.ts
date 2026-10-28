@@ -104,7 +104,7 @@ export interface MachineDependencies {
 }
 import type { Registration, VerifiedClient } from "../../worker/contract.ts";
 import type { Transaction } from "../../kernel/store.ts";
-import { type Context } from "../../kernel/context.ts";
+import type { Context } from "../../kernel/context.ts";
 import { createIdentity } from "../../kernel/identity.ts";
 import { HttpMethod, HttpStatus } from "../../kernel/http.ts";
 import { isString } from "../../kernel/values.ts";

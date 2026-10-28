@@ -3,10 +3,7 @@ import assert from "node:assert/strict";
 import type { AgentSession } from "@earendil-works/pi-coding-agent";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { AssistantMessage } from "@earendil-works/pi-ai";
-import {
-  type Context,
-  type CancellationContext,
-} from "../../kernel/context.ts";
+import type { Context, CancellationContext } from "../../kernel/context.ts";
 import type {
   AgentSetup,
   ExecutionSetup,

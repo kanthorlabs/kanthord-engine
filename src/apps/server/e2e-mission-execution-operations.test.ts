@@ -10,6 +10,10 @@ import {
   type OperationResult,
 } from "../../kernel/operation.ts";
 import { temporary } from "../../kernel/test-support.ts";
+import type {
+  evidenceSubmitResultSchema,
+  assessmentSubmitResultSchema,
+} from "../../mission/contract.ts";
 import {
   ActorKind,
   ActorService,
@@ -20,8 +24,6 @@ import {
   NodeState,
   Resolution,
   missionOperations,
-  evidenceSubmitResultSchema,
-  assessmentSubmitResultSchema,
   Intent,
   type Evidence,
   type Node,

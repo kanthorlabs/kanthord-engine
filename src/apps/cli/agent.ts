@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { Command } from "commander";
+import type { Command } from "commander";
 import { z } from "zod";
 import { Diagnostic } from "../../kernel/errors.ts";
 import { httpClient } from "../../gateway/client.ts";

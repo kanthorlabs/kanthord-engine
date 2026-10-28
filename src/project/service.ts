@@ -59,6 +59,11 @@ import {
   type CredentialRecords,
 } from "../custody/contract.ts";
 import type { SshAccess, SshGrantFacts } from "../repository/index.ts";
+import type {
+  bindingEditSchema,
+  bindingSetWriteInputSchema,
+  workerConfigWriteSchema,
+} from "./contract.ts";
 import {
   BINDING_SET_INITIAL_VERSION,
   BindingKind,
@@ -82,14 +87,11 @@ import {
   ENVIRONMENT_SECRET_VARIABLE,
   ENVIRONMENT_SECRETS_MAX,
   WorkerField,
-  bindingEditSchema,
   bindingSchema,
-  bindingSetWriteInputSchema,
   projectOperations,
   repositoryConfigSchema,
   storageConfigSchema,
   workerConfigSchema,
-  workerConfigWriteSchema,
   workerTagsSchema,
   workerInstancesSchema,
   bindingHolders,
@@ -162,10 +164,10 @@ import type { EnvironmentProbeRunner } from "./environment-probe-contract.ts";
 import { EnvironmentSecretRoutes } from "./environment-secret.ts";
 import { EnvironmentSecrets } from "./environment-secrets.ts";
 import type { EnvironmentTelemetry } from "./environment-telemetry.ts";
+import type { EnvironmentTarget } from "./environment-state.ts";
 import {
   ENVIRONMENT_DIRECTORY,
   ProofFiles,
-  EnvironmentTarget,
   type EnvironmentRuntime,
 } from "./environment-state.ts";
 import {

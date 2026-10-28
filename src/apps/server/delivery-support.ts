@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { type TestContext } from "node:test";
+import type { TestContext } from "node:test";
 import { directClient } from "../../gateway/index.ts";
 import { httpClient } from "../../gateway/client.ts";
 import { INTAKE_SERVICE_NAME } from "../../intake/contract.ts";
@@ -9,7 +9,7 @@ import {
   Intent,
   type Revision,
 } from "../../mission/contract.ts";
-import { type ExecutionRecord } from "../../scheduler/contract.ts";
+import type { ExecutionRecord } from "../../scheduler/contract.ts";
 import {
   PlatformAddressKind,
   workerOperations,
