@@ -1292,6 +1292,7 @@ export class Server implements Service {
         throw new AggregateError(
           [asError(error), cleanup],
           "Server start and cleanup failed.",
+          { cause: error },
         );
       throw error;
     }
