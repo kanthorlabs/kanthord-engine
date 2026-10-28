@@ -41,7 +41,7 @@ async function invokeUpload(
     return await hostTools.evidenceUpload(path, signal);
   } catch (error) {
     if (error instanceof Diagnostic)
-      throw new Error(`${error.code}: ${error.message}`);
+      throw new Error(`${error.code}: ${error.message}`, { cause: error });
     throw error;
   }
 }
