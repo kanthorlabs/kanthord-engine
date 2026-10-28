@@ -3,12 +3,12 @@ import { isNumber, isString } from "../kernel/values.ts";
 
 export interface WorkerConfig {
   heartbeat_window: number;
-  server_slot_limit: number;
+  server_instance_limit: number;
   container_image: string;
 }
 
 const DEFAULT_HEARTBEAT_WINDOW = 300;
-const DEFAULT_SERVER_SLOT_LIMIT = 16;
+const DEFAULT_SERVER_INSTANCE_LIMIT = 16;
 const NO_VALUE = 0;
 const DEFAULT_CONTAINER_IMAGE = "docker.io/kanthorlabs/kanthord";
 const DIGEST_SEPARATOR = "@";
@@ -33,10 +33,10 @@ export const workerConfigSchema: Schema<WorkerConfig> = {
     format: positiveSafeInteger,
     default: DEFAULT_HEARTBEAT_WINDOW,
   },
-  server_slot_limit: {
-    doc: "Maximum count of started pool slots of the server.",
+  server_instance_limit: {
+    doc: "Maximum count of live server instances.",
     format: positiveSafeInteger,
-    default: DEFAULT_SERVER_SLOT_LIMIT,
+    default: DEFAULT_SERVER_INSTANCE_LIMIT,
   },
   container_image: {
     doc: "Image name of the container placement, with no tag and no digest.",

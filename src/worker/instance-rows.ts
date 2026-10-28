@@ -2,12 +2,16 @@ import assert from "node:assert/strict";
 import type { SQLInputValue } from "node:sqlite";
 import { createIdentity } from "../kernel/identity.ts";
 import type { Store, Transaction } from "../kernel/store.ts";
-import { type InstanceRecord, WORKER_INSTANCE_ID_PREFIX } from "./contract.ts";
+import {
+  InstancePlacement,
+  type InstanceRecord,
+  WORKER_INSTANCE_ID_PREFIX,
+} from "./contract.ts";
 
 const NO_ROWS = 0;
 const FIRST_REVISION = 1;
 const COLUMNS =
-  "id, name, worker, revision, public_key, fingerprint, created_at, ended_at";
+  "id, name, worker, revision, placement, public_key, fingerprint, created_at, ended_at";
 
 function record(row: unknown): InstanceRecord {
   const value = row as InstanceRecord;
@@ -18,6 +22,7 @@ function record(row: unknown): InstanceRecord {
     name: value.name,
     worker: value.worker,
     revision: value.revision,
+    placement: value.placement,
     public_key: value.public_key,
     fingerprint: value.fingerprint,
     created_at: value.created_at,
@@ -93,14 +98,27 @@ export function fingerprintTaken(
   );
 }
 
+export function countLiveServerInstances(tx: Transaction): number {
+  assert.ok(tx.database.isTransaction);
+  const row = tx.database
+    .prepare(
+      "SELECT COUNT(*) AS count FROM worker_instance WHERE ended_at IS NULL AND placement IN (?, ?)",
+    )
+    .get(InstancePlacement.Server, InstancePlacement.Container) as {
+    count: number;
+  };
+  return row.count;
+}
+
 export function insertInstance(
   tx: Transaction,
   value: {
     name: string;
     worker: string;
     revision?: number;
-    public_key: string;
-    fingerprint: string;
+    placement: InstancePlacement;
+    public_key: string | null;
+    fingerprint: string | null;
   },
   now: number,
 ): InstanceRecord {
@@ -111,6 +129,7 @@ export function insertInstance(
     name: value.name,
     worker: value.worker,
     revision: value.revision ?? FIRST_REVISION,
+    placement: value.placement,
     public_key: value.public_key,
     fingerprint: value.fingerprint,
     created_at: now,
@@ -118,13 +137,14 @@ export function insertInstance(
   };
   tx.database
     .prepare(
-      `INSERT INTO worker_instance (${COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?, NULL)`,
+      `INSERT INTO worker_instance (${COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL)`,
     )
     .run(
       row.id,
       row.name,
       row.worker,
       row.revision,
+      row.placement,
       row.public_key,
       row.fingerprint,
       row.created_at,

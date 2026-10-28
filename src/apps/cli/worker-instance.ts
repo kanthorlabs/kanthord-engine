@@ -276,11 +276,17 @@ export function addWorkerInstanceCommands(worker: Command): void {
         "--worker <worker>",
         "Hosted worker name",
         singleUse("--worker"),
+      )
+      .option(
+        "--placement <placement>",
+        "Placement of the instance: server, container or worker",
+        singleUse("--placement"),
       ),
   ).action((name: string, _options, command: Command) =>
     keyed(name, command, KeyOperation.Create, (publicKey) => ({
       name,
       worker: command.optsWithGlobals().worker,
+      placement: command.optsWithGlobals().placement,
       public_key: publicKey,
     })),
   );

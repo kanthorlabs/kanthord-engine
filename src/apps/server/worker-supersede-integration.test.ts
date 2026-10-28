@@ -15,6 +15,7 @@ import { projectOperations } from "../../project/contract.ts";
 import { ClaimState, schedulerOperations } from "../../scheduler/contract.ts";
 import {
   instanceConfigurationSchema,
+  InstancePlacement,
   type RepositoryTransport,
   WORKER_TOKEN_INFO,
   workerOperations,
@@ -163,7 +164,12 @@ async function instanceProject(t: TestContext) {
   await provisionRepositoryCredentials(fixture);
   const instance = await call(workerOperations["instance.create"], {
     ...empty,
-    body: { name: INSTANCE, worker: "coder@1", endpoint: fixture.endpoint },
+    body: {
+      name: INSTANCE,
+      worker: "coder@1",
+      placement: InstancePlacement.Worker,
+      endpoint: fixture.endpoint,
+    },
   });
   assert.ok(instance.instance_configuration);
   await call(llmOperations.create, {

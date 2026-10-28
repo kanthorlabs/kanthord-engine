@@ -600,7 +600,7 @@ export async function gatewayFixture(
     worker: {
       ...(options.serverSlotLimit === undefined
         ? {}
-        : { server_slot_limit: options.serverSlotLimit }),
+        : { server_instance_limit: options.serverSlotLimit }),
       ...(options.containerImage === undefined
         ? {}
         : { container_image: options.containerImage }),

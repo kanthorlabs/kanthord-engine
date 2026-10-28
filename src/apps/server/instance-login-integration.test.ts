@@ -10,7 +10,7 @@ import { httpClient } from "../../gateway/client.ts";
 import { CancellationContext } from "../../kernel/context.ts";
 import { temporary } from "../../kernel/test-support.ts";
 import { llmOperations } from "../../llm/contract.ts";
-import { workerOperations } from "../../worker/contract.ts";
+import { InstancePlacement, workerOperations } from "../../worker/contract.ts";
 import { Worker } from "../worker/index.ts";
 import { completed } from "./cli-test-support.ts";
 import { gatewayFixture } from "./test-support.ts";
@@ -52,7 +52,12 @@ test("a live worker instance signs in through a fake pi-ai copy_code flow, and t
     await worker["instance.create"]({
       params: {},
       query: {},
-      body: { name: INSTANCE, worker: "coder@1", endpoint: f.endpoint },
+      body: {
+        name: INSTANCE,
+        worker: "coder@1",
+        placement: InstancePlacement.Worker,
+        endpoint: f.endpoint,
+      },
     }),
   );
   assert.ok(created.instance_configuration);

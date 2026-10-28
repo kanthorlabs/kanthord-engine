@@ -1,15 +1,18 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
 import { test, type TestContext } from "node:test";
 import { type Dependencies, WorkerService } from "./service.ts";
 import { workerMigrations } from "./migrations.ts";
 import {
+  alwaysAvailable,
   BindingEntryState,
   connectionPayloadSchema,
   INSTANCE_CONNECTED_WINDOW_MS,
   INSTANCE_CONNECTION_INFO,
   instanceConfigurationSchema,
   InstancePlacement,
+  PlacementIssue,
   WORKER_SERVICE_NAME,
   WORKER_TOKEN_INFO,
   type WorkerAgentView,
@@ -62,9 +65,11 @@ const SECOND_VERSION = 2;
 const NO_ROWS = 0;
 const WORKER_CONFIG = {
   heartbeat_window: 300,
-  server_slot_limit: 16,
+  server_instance_limit: 16,
   container_image: "docker.io/kanthorlabs/kanthord",
 };
+const SERVER_INSTANCE_LIMIT = 2;
+const INVALID_PLACEMENT = "thread";
 
 type Binding = ReturnType<WorkerBindingsOf>[number];
 
@@ -116,7 +121,10 @@ function bindingOf(projectId: string, name: string, instances: string[]) {
   } satisfies Binding;
 }
 
-function instanceFixture(t: TestContext) {
+function instanceFixture(
+  t: TestContext,
+  config: Partial<typeof WORKER_CONFIG> = {},
+) {
   const store = new Store(IN_MEMORY_DATABASE);
   t.after(() => store.close());
   store.migrate([
@@ -126,7 +134,7 @@ function instanceFixture(t: TestContext) {
   const scopes: HolderScope[] = [];
   const unended = new Map<string, string>();
   const dependencies: Dependencies = {
-    config: WORKER_CONFIG,
+    config: { ...WORKER_CONFIG, ...config },
     store,
     missionActions: {
       authorizeRequest: unexpected,
@@ -247,9 +255,22 @@ function instanceFixture(t: TestContext) {
     const record = await invoke("instance.create", {
       name,
       worker: WORKER,
+      placement: InstancePlacement.Worker,
       public_key: pair.public_key.toString(BASE64URL),
     });
     return { record, pair };
+  }
+  function createdAt(
+    name: string,
+    placement: InstancePlacement,
+    extra: Record<string, unknown> = {},
+  ) {
+    return invoke("instance.create", {
+      name,
+      worker: WORKER,
+      placement,
+      ...extra,
+    });
   }
   function asWorker(instanceId: string, name = INSTANCE) {
     caller.identity = testWorkerIdentity(instanceId, name, "jti");
@@ -297,6 +318,7 @@ function instanceFixture(t: TestContext) {
     invoke,
     refuses,
     created,
+    createdAt,
     asWorker,
     asHuman,
     register,
@@ -312,6 +334,7 @@ test("create stores a public key and answers no instance configuration", async (
   assert.equal(record.name, INSTANCE);
   assert.equal(record.worker, WORKER);
   assert.equal(record.revision, FIRST_REVISION);
+  assert.equal(record.placement, InstancePlacement.Worker);
   assert.equal(record.public_key, pair.public_key.toString(BASE64URL));
   assert.equal(record.fingerprint, keyFingerprint(pair.public_key));
   assert.equal(record.ended_at, null);
@@ -323,6 +346,7 @@ test("create with an endpoint answers an instance configuration of a generated k
   const record = await f.invoke("instance.create", {
     name: INSTANCE,
     worker: WORKER,
+    placement: InstancePlacement.Worker,
     endpoint: ENDPOINT,
   });
   assert.ok(record.instance_configuration);
@@ -359,48 +383,234 @@ test("create refuses each invalid input with its code", async (t) => {
   const other = (await generateX25519KeyPair()).public_key.toString(BASE64URL);
   const cases: [Record<string, unknown>, number, string][] = [
     [
-      { name: INSTANCE, worker: WORKER, public_key: other },
+      {
+        name: INSTANCE,
+        worker: WORKER,
+        placement: InstancePlacement.Worker,
+        public_key: other,
+      },
       HttpStatus.Conflict,
       WorkerErrorCode.InstanceNameConflict,
     ],
     [
-      { name: "token", worker: WORKER, public_key: other },
+      {
+        name: "token",
+        worker: WORKER,
+        placement: InstancePlacement.Worker,
+        public_key: other,
+      },
       HttpStatus.BadRequest,
       WorkerErrorCode.InstanceNameInvalid,
     ],
     [
-      { name: "Upper", worker: WORKER, public_key: other },
+      {
+        name: "Upper",
+        worker: WORKER,
+        placement: InstancePlacement.Worker,
+        public_key: other,
+      },
       HttpStatus.BadRequest,
       WorkerErrorCode.InstanceNameInvalid,
     ],
     [
-      { name: "other", worker: "absent@1", public_key: other },
+      {
+        name: "other",
+        worker: "absent@1",
+        placement: InstancePlacement.Worker,
+        public_key: other,
+      },
       HttpStatus.BadRequest,
       WorkerErrorCode.InstanceWorkerInvalid,
     ],
     [
-      { name: "other", worker: WORKER, public_key: zero },
+      {
+        name: "other",
+        worker: WORKER,
+        placement: InstancePlacement.Worker,
+        public_key: zero,
+      },
       HttpStatus.BadRequest,
       WorkerErrorCode.InstanceKeyInvalid,
     ],
     [
-      { name: "other", worker: WORKER },
+      { name: "other", worker: WORKER, placement: InstancePlacement.Worker },
       HttpStatus.BadRequest,
       WorkerErrorCode.InstanceKeyInvalid,
     ],
     [
-      { name: "other", worker: WORKER, public_key: other, endpoint: ENDPOINT },
+      {
+        name: "other",
+        worker: WORKER,
+        placement: InstancePlacement.Worker,
+        public_key: other,
+        endpoint: ENDPOINT,
+      },
       HttpStatus.BadRequest,
       WorkerErrorCode.InstanceKeyInvalid,
     ],
     [
-      { name: "other", worker: WORKER, public_key: key },
+      {
+        name: "other",
+        worker: WORKER,
+        placement: InstancePlacement.Worker,
+        public_key: key,
+      },
       HttpStatus.Conflict,
       WorkerErrorCode.InstanceKeyConflict,
     ],
   ];
   for (const [body, status, code] of cases)
     await f.refuses(() => f.invoke("instance.create", body), status, code);
+});
+
+test("create at a server or a container placement stores null key fields", async (t) => {
+  const f = instanceFixture(t);
+  for (const [name, placement] of [
+    ["thread-host", InstancePlacement.Server],
+    ["box", InstancePlacement.Container],
+  ] as const) {
+    const record = await f.createdAt(name, placement);
+    assert.equal(record.placement, placement);
+    assert.equal(record.public_key, null);
+    assert.equal(record.fingerprint, null);
+    assert.ok(!("instance_configuration" in record));
+  }
+});
+
+test("create refuses an absent or an unknown placement", async (t) => {
+  const f = instanceFixture(t);
+  await f.refuses(
+    () => f.invoke("instance.create", { name: INSTANCE, worker: WORKER }),
+    HttpStatus.BadRequest,
+    WorkerErrorCode.InstancePlacementInvalid,
+  );
+  await f.refuses(
+    () =>
+      f.createdAt(INSTANCE, INVALID_PLACEMENT as InstancePlacement, {
+        endpoint: ENDPOINT,
+      }),
+    HttpStatus.BadRequest,
+    WorkerErrorCode.InstancePlacementInvalid,
+  );
+});
+
+test("create of a server instance refuses a public key or an endpoint", async (t) => {
+  const f = instanceFixture(t);
+  const key = (await generateX25519KeyPair()).public_key.toString(BASE64URL);
+  for (const placement of [
+    InstancePlacement.Server,
+    InstancePlacement.Container,
+  ])
+    for (const extra of [{ public_key: key }, { endpoint: ENDPOINT }])
+      await f.refuses(
+        () => f.createdAt(INSTANCE, placement, extra),
+        HttpStatus.BadRequest,
+        WorkerErrorCode.InstanceKeyForbidden,
+      );
+});
+
+test("create at the container placement refuses an unavailable runtime and passes a failed probe", async (t) => {
+  const f = instanceFixture(t);
+  const status = (reason: PlacementIssue) => ({
+    ...alwaysAvailable(InstancePlacement.Container),
+    available: false,
+    reason,
+  });
+  const read = t.mock.method(f.worker(), "placementStatus", async () =>
+    status(PlacementIssue.RuntimeAbsent),
+  );
+  await assert.rejects(
+    () => f.createdAt(INSTANCE, InstancePlacement.Container),
+    (error: unknown) =>
+      error instanceof OperationError &&
+      error.status === HttpStatus.Conflict &&
+      error.code === WorkerErrorCode.InstancePlacementUnavailable &&
+      isDeepStrictEqual(error.details, {
+        placement: InstancePlacement.Container,
+        reason: PlacementIssue.RuntimeAbsent,
+      }),
+  );
+  for (const reason of [
+    PlacementIssue.ServerInContainer,
+    PlacementIssue.RuntimeRootful,
+  ]) {
+    read.mock.mockImplementation(async () => status(reason));
+    await f.refuses(
+      () => f.createdAt(INSTANCE, InstancePlacement.Container),
+      HttpStatus.Conflict,
+      WorkerErrorCode.InstancePlacementUnavailable,
+    );
+  }
+  read.mock.mockImplementation(async () =>
+    status(PlacementIssue.RuntimeFailed),
+  );
+  const record = await f.createdAt(INSTANCE, InstancePlacement.Container);
+  assert.equal(record.placement, InstancePlacement.Container);
+});
+
+test("create of a server instance refuses at the server instance limit and a worker instance and an archived place pass", async (t) => {
+  const f = instanceFixture(t, {
+    server_instance_limit: SERVER_INSTANCE_LIMIT,
+  });
+  await f.createdAt("first", InstancePlacement.Server);
+  await f.createdAt("second", InstancePlacement.Container);
+  for (const placement of [
+    InstancePlacement.Server,
+    InstancePlacement.Container,
+  ])
+    await assert.rejects(
+      () => f.createdAt("third", placement),
+      (error: unknown) =>
+        error instanceof OperationError &&
+        error.status === HttpStatus.Conflict &&
+        error.code === WorkerErrorCode.InstanceServerLimit &&
+        isDeepStrictEqual(error.details, { limit: SERVER_INSTANCE_LIMIT }),
+    );
+  await f.created("laptop");
+  await f.invoke(
+    "instance.archive",
+    { expected_revision: FIRST_REVISION },
+    { instance_name: "first" },
+  );
+  const third = await f.createdAt("third", InstancePlacement.Server);
+  assert.equal(third.placement, InstancePlacement.Server);
+});
+
+test("a Reset key of a server instance refuses", async (t) => {
+  const f = instanceFixture(t);
+  await f.createdAt(INSTANCE, InstancePlacement.Server);
+  const key = (await generateX25519KeyPair()).public_key.toString(BASE64URL);
+  await assert.rejects(
+    () =>
+      f.invoke(
+        "instance.rotate",
+        { public_key: key, expected_revision: FIRST_REVISION },
+        { instance_name: INSTANCE },
+      ),
+    (error: unknown) =>
+      error instanceof OperationError &&
+      error.status === HttpStatus.Conflict &&
+      error.code === WorkerErrorCode.InstancePlacementUnsupported &&
+      isDeepStrictEqual(error.details, { placement: InstancePlacement.Server }),
+  );
+});
+
+test("list and get answer the placement of every instance", async (t) => {
+  const f = instanceFixture(t);
+  await f.created("alpha");
+  await f.createdAt("beta", InstancePlacement.Server);
+  await f.createdAt("gamma", InstancePlacement.Container);
+  const listed = await f.invoke("instance.list", null, {}, {});
+  assert.deepEqual(
+    listed.items.map((item) => [item.name, item.placement]),
+    [
+      ["alpha", InstancePlacement.Worker],
+      ["beta", InstancePlacement.Server],
+      ["gamma", InstancePlacement.Container],
+    ],
+  );
+  const got = await f.invoke("instance.get", null, { instance_name: "beta" });
+  assert.equal(got.placement, InstancePlacement.Server);
 });
 
 test("the token opens only with the instance key and refuses an unknown or ended revision", async (t) => {

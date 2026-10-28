@@ -369,7 +369,7 @@ export function composeServices(options: {
     invocation,
     masterKey: options.config.master_key,
     authVersion: options.config.gateway.auth.version,
-    slotLimit: options.config.worker.server_slot_limit,
+    slotLimit: options.config.worker.server_instance_limit,
     stateDirectory: options.stateDirectory,
     logger: options.logger,
     runtimeIdentity: (clientId) =>

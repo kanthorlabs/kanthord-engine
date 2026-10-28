@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { z } from "zod";
 import { OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import { createIdentity } from "../kernel/identity.ts";
@@ -26,6 +27,8 @@ import {
   InstancePlacement,
   type InstanceRecord,
   type LiveInstance,
+  PlacementIssue,
+  type PlacementStatus,
   WORKER_TOKEN_INFO,
   type WorkerBindingsOf,
   WorkerErrorCode,
@@ -33,6 +36,7 @@ import {
   type WorkerInstanceLookups,
 } from "./contract.ts";
 import {
+  countLiveServerInstances,
   endInstance,
   fingerprintTaken,
   insertInstance,
@@ -65,6 +69,8 @@ export interface InstanceKeyInput {
 
 export interface InstanceDependencies {
   store: Store;
+  serverInstanceLimit: number;
+  placementStatus: (placement: InstancePlacement) => Promise<PlacementStatus>;
   issuer: InstanceIssuer;
   workerBindingsOf: WorkerBindingsOf;
   unendedExecutionOf: (
@@ -104,6 +110,14 @@ function keyInvalid(): OperationError {
   );
 }
 
+function keyForbidden(): OperationError {
+  return new OperationError(
+    HttpStatus.BadRequest,
+    WorkerErrorCode.InstanceKeyForbidden,
+    "A server instance takes neither public_key nor endpoint.",
+  );
+}
+
 function notFound(): OperationError {
   return new OperationError(
     HttpStatus.NotFound,
@@ -121,6 +135,23 @@ function superseded(current: CurrentConnection | undefined): OperationError {
   );
 }
 
+function refusePlacement(placement: string | undefined): InstancePlacement {
+  const parsed = z.enum(InstancePlacement).safeParse(placement);
+  if (!parsed.success)
+    throw new OperationError(
+      HttpStatus.BadRequest,
+      WorkerErrorCode.InstancePlacementInvalid,
+      "placement is absent or is not server, container or worker.",
+    );
+  return parsed.data;
+}
+
+const UNAVAILABLE_CONTAINER_REASONS: readonly PlacementIssue[] = [
+  PlacementIssue.ServerInContainer,
+  PlacementIssue.RuntimeAbsent,
+  PlacementIssue.RuntimeRootful,
+];
+
 function refuseName(name: string): void {
   if (!instanceNameSchema.safeParse(name).success)
     throw new OperationError(
@@ -137,6 +168,11 @@ function refuseWorker(worker: string): void {
       WorkerErrorCode.InstanceWorkerInvalid,
       "The worker is unknown or is a worker of an external harness.",
     );
+}
+
+function refuseKeyInput(input: InstanceKeyInput): void {
+  if (input.public_key !== undefined || input.endpoint !== undefined)
+    throw keyForbidden();
 }
 
 async function prepareKey(input: InstanceKeyInput): Promise<PreparedKey> {
@@ -288,11 +324,17 @@ export class WorkerInstances implements WorkerInstanceLookups {
 
   async create(
     commit: <T>(write: (tx: Transaction) => T) => T,
-    input: InstanceKeyInput & { name: string; worker: string },
+    input: InstanceKeyInput & {
+      name: string;
+      worker: string;
+      placement?: string;
+    },
   ): Promise<InstanceRecord & { instance_configuration?: string }> {
     refuseName(input.name);
     refuseWorker(input.worker);
-    const key = await prepareKey(input);
+    const placement = refusePlacement(input.placement);
+    const key = await this.prepareKeyAt(placement, input);
+    await this.refuseUnavailableRuntime(placement);
     try {
       return commit((tx) => {
         if (readLatestInstance(tx, input.name))
@@ -301,12 +343,69 @@ export class WorkerInstances implements WorkerInstanceLookups {
             WorkerErrorCode.InstanceNameConflict,
             "The instance name is taken by a live or an archived instance.",
           );
-        const record = this.insertKey(tx, input.name, input.worker, key, null);
+        if (placement !== InstancePlacement.Worker) this.refuseServerLimit(tx);
+        const record = this.insertKey(
+          tx,
+          { name: input.name, worker: input.worker, placement },
+          key,
+          null,
+        );
         return this.answer(record, key);
       });
     } finally {
-      key.private_key?.fill(ZERO_BYTE);
+      key?.private_key?.fill(ZERO_BYTE);
     }
+  }
+
+  private async prepareKeyAt(
+    placement: InstancePlacement,
+    input: InstanceKeyInput,
+  ): Promise<PreparedKey | null> {
+    if (placement === InstancePlacement.Worker) return prepareKey(input);
+    refuseKeyInput(input);
+    return null;
+  }
+
+  private async refuseUnavailableRuntime(
+    placement: InstancePlacement,
+  ): Promise<void> {
+    if (placement !== InstancePlacement.Container) return;
+    const status = await this.dependencies.placementStatus(placement);
+    if (
+      status.reason === null ||
+      !UNAVAILABLE_CONTAINER_REASONS.includes(status.reason)
+    )
+      return;
+    throw new OperationError(
+      HttpStatus.Conflict,
+      WorkerErrorCode.InstancePlacementUnavailable,
+      "The container runtime is unavailable.",
+      { placement, reason: status.reason },
+    );
+  }
+
+  private refuseServerLimit(tx: Transaction): void {
+    const limit = this.dependencies.serverInstanceLimit;
+    if (countLiveServerInstances(tx) < limit) return;
+    throw new OperationError(
+      HttpStatus.Conflict,
+      WorkerErrorCode.InstanceServerLimit,
+      "The live server instances reach worker.server_instance_limit.",
+      { limit },
+    );
+  }
+
+  private refuseServerReset(name: string): void {
+    const latest = this.dependencies.store.transaction((tx) =>
+      readLatestInstance(tx, name),
+    );
+    if (!latest || latest.placement === InstancePlacement.Worker) return;
+    throw new OperationError(
+      HttpStatus.Conflict,
+      WorkerErrorCode.InstancePlacementUnsupported,
+      "Reset key applies only at the worker placement.",
+      { placement: latest.placement },
+    );
   }
 
   async rotate(
@@ -315,6 +414,7 @@ export class WorkerInstances implements WorkerInstanceLookups {
     input: InstanceKeyInput & { expected_revision: number },
     ended: (previous: string, registrations: string[]) => void,
   ): Promise<InstanceRecord & { instance_configuration?: string }> {
+    this.refuseServerReset(name);
     const key = await prepareKey(input);
     try {
       return commit((tx) => {
@@ -322,7 +422,12 @@ export class WorkerInstances implements WorkerInstanceLookups {
         const now = Date.now();
         endInstance(tx, live.id, now);
         const registrations = endOfInstances(tx, [live.id], now);
-        const record = this.insertKey(tx, live.name, live.worker, key, live);
+        const record = this.insertKey(
+          tx,
+          { name: live.name, worker: live.worker, placement: live.placement },
+          key,
+          live,
+        );
         ended(live.id, registrations);
         return this.answer(record, key);
       });
@@ -427,7 +532,8 @@ export class WorkerInstances implements WorkerInstanceLookups {
     const instance = this.dependencies.store.transaction((tx) =>
       readInstanceById(tx, instanceId),
     );
-    if (!instance || instance.ended_at !== null) throw notFound();
+    if (!instance || instance.ended_at !== null || instance.public_key === null)
+      throw notFound();
     const issued = await this.dependencies.issuer.workerToken({
       instanceId: instance.id,
       name: instance.name,
@@ -459,8 +565,17 @@ export class WorkerInstances implements WorkerInstanceLookups {
   }> {
     const plan = this.dependencies.store.transaction((tx) => {
       const instance = readInstanceById(tx, instanceId);
-      if (!instance || instance.ended_at !== null) throw notFound();
-      return { instance, entries: this.entriesOf(tx, instance) };
+      if (
+        !instance ||
+        instance.ended_at !== null ||
+        instance.public_key === null
+      )
+        throw notFound();
+      return {
+        instance,
+        publicKey: instance.public_key,
+        entries: this.entriesOf(tx, instance),
+      };
     });
     const connectionId = this.takeConnection(
       instanceId,
@@ -488,7 +603,7 @@ export class WorkerInstances implements WorkerInstanceLookups {
       connection_id: connectionId,
       binding_version: this.bindingVersionOf(plan.instance.name),
       sealed: await sealJSON(
-        Buffer.from(plan.instance.public_key, BASE64URL),
+        Buffer.from(plan.publicKey, BASE64URL),
         INSTANCE_CONNECTION_INFO,
         `${instanceId}${connectionId}`,
         { bindings },
@@ -607,13 +722,12 @@ export class WorkerInstances implements WorkerInstanceLookups {
 
   private insertKey(
     tx: Transaction,
-    name: string,
-    worker: string,
-    key: PreparedKey,
+    instance: { name: string; worker: string; placement: InstancePlacement },
+    key: PreparedKey | null,
     previous: InstanceRecord | null,
   ): InstanceRecord {
-    const fingerprint = keyFingerprint(key.public_key);
-    if (fingerprintTaken(tx, fingerprint))
+    const fingerprint = key ? keyFingerprint(key.public_key) : null;
+    if (fingerprint !== null && fingerprintTaken(tx, fingerprint))
       throw new OperationError(
         HttpStatus.Conflict,
         WorkerErrorCode.InstanceKeyConflict,
@@ -622,10 +736,9 @@ export class WorkerInstances implements WorkerInstanceLookups {
     return insertInstance(
       tx,
       {
-        name,
-        worker,
+        ...instance,
         revision: previous ? previous.revision + 1 : undefined,
-        public_key: key.public_key.toString(BASE64URL),
+        public_key: key ? key.public_key.toString(BASE64URL) : null,
         fingerprint,
       },
       Date.now(),
@@ -634,9 +747,9 @@ export class WorkerInstances implements WorkerInstanceLookups {
 
   private answer(
     record: InstanceRecord,
-    key: PreparedKey,
+    key: PreparedKey | null,
   ): InstanceRecord & { instance_configuration?: string } {
-    if (!key.private_key || key.endpoint === null) return record;
+    if (!key?.private_key || key.endpoint === null) return record;
     return {
       ...record,
       instance_configuration: instanceConfigurationValue({

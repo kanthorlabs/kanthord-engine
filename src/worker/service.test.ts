@@ -34,6 +34,7 @@ import {
 } from "./contract.ts";
 import { SHIPPED_TEMPLATES } from "../agent/prompt-templates.ts";
 import { approvedModels, Platform } from "../llm/platforms.ts";
+import { endInstance, insertInstance } from "./instance-rows.ts";
 import { workerMigrations } from "./migrations.ts";
 import {
   AgentComponent,
@@ -236,7 +237,7 @@ const fakeAgentCollaborations: Omit<AgentDependencies, "store"> = {
 };
 const WORKER_CONFIG = {
   heartbeat_window: 300,
-  server_slot_limit: 16,
+  server_instance_limit: 16,
   container_image: "docker.io/kanthorlabs/kanthord",
 };
 
@@ -2400,4 +2401,80 @@ test("a handover whose credential refresh outlasts the wait answers 503 worker.h
 
 test("the handover refresh wait ends before the route timeout with a margin", () => {
   assert.ok(HANDOVER_REFRESH_WAIT_MS < HANDOVER_TIMEOUT_MS);
+});
+
+test("instanceOf answers the placement of a live instance and instanceKeyOf answers only a worker instance", (t) => {
+  const f = enablementFixture(t);
+  const WORKER_NAME = "coder@1";
+  const KEY = "a2V5";
+  const FINGERPRINT = "fingerprint";
+  const NOW = 1000;
+  const ENDED = 2000;
+  const rows = f.store.transaction((tx) => ({
+    server: insertInstance(
+      tx,
+      {
+        name: "hosted",
+        worker: WORKER_NAME,
+        placement: InstancePlacement.Server,
+        public_key: null,
+        fingerprint: null,
+      },
+      NOW,
+    ),
+    container: insertInstance(
+      tx,
+      {
+        name: "boxed",
+        worker: WORKER_NAME,
+        placement: InstancePlacement.Container,
+        public_key: null,
+        fingerprint: null,
+      },
+      NOW,
+    ),
+    remote: insertInstance(
+      tx,
+      {
+        name: "laptop",
+        worker: WORKER_NAME,
+        placement: InstancePlacement.Worker,
+        public_key: KEY,
+        fingerprint: FINGERPRINT,
+      },
+      NOW,
+    ),
+    archived: insertInstance(
+      tx,
+      {
+        name: "gone",
+        worker: WORKER_NAME,
+        placement: InstancePlacement.Server,
+        public_key: null,
+        fingerprint: null,
+      },
+      NOW,
+    ),
+  }));
+  f.store.transaction((tx) => endInstance(tx, rows.archived.id, ENDED));
+  f.store.transaction((tx) => {
+    assert.deepEqual(f.worker.instanceOf(tx, "hosted"), {
+      name: "hosted",
+      worker: WORKER_NAME,
+      placement: InstancePlacement.Server,
+    });
+    assert.deepEqual(f.worker.instanceOf(tx, "laptop"), {
+      name: "laptop",
+      worker: WORKER_NAME,
+      placement: InstancePlacement.Worker,
+    });
+    assert.equal(f.worker.instanceOf(tx, "gone"), null);
+    assert.equal(f.worker.instanceKeyOf(tx, "hosted"), null);
+    assert.equal(f.worker.instanceKeyOf(tx, "boxed"), null);
+    assert.deepEqual(f.worker.instanceKeyOf(tx, "laptop"), {
+      name: "laptop",
+      public_key: KEY,
+      fingerprint: FINGERPRINT,
+    });
+  });
 });
