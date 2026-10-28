@@ -65,7 +65,6 @@ export class HealthRegistry {
 
   async check(context: Context = background): Promise<ServiceHealthchecks> {
     context.signal.throwIfAborted();
-    // Snapshot registration once; a failed probe must not skip its siblings.
     const entries = [...this.probes];
     assert.ok(entries.length <= MAX_HEALTH_PROBES);
     const results = await Promise.all(

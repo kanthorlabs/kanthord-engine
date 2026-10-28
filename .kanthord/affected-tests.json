@@ -4,6 +4,8 @@
   "time_limit_s": 1800,
   "gate_files": [
     ".kanthord/affected-tests.json",
+    ".kanthord/comments.json",
+    "eslint.config.js",
     "package.json",
     "scripts/affected-tests.mjs",
     "scripts/affected-reporter.mjs",

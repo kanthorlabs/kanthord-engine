@@ -10,7 +10,6 @@ const ulidPattern = /^[0-7][0-9A-HJKMNP-TV-Z]{25}$/;
 
 export const ulidSchema = z.string().length(ULID_LENGTH).regex(ulidPattern);
 
-/** The owning service declares a stable, singular prefix for each entity kind. */
 export function identitySchema(prefix: string) {
   assert.ok(
     prefix.length > EMPTY_PREFIX_LENGTH,

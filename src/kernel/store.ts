@@ -160,7 +160,6 @@ class StatementCache extends DatabaseSync {
   }
 }
 
-/** One connection and transaction owner for the operational database. */
 function sqliteReason(error: unknown): string {
   const reason = (error as { errstr?: unknown } | null)?.errstr;
   return isString(reason) ? reason : "unknown SQLite failure";

@@ -4,7 +4,6 @@ import { asError } from "./errors.ts";
 export const HealthStatus = { Healthy: 200, Unavailable: 503 } as const;
 const EMPTY_COMPONENT_COUNT = 0;
 
-/** Owned component name to integer status: 200 healthy, 503 unavailable. */
 export type Healthcheck = Record<string, number>;
 
 export function healthy(components: Healthcheck): boolean {
@@ -24,7 +23,6 @@ export interface Service {
   healthcheck(): Promise<Healthcheck>;
 }
 
-/** Lifecycle failures are values; preserve the original Error for the caller. */
 export async function lifecycle(
   work: () => Promise<void>,
 ): Promise<Error | null> {

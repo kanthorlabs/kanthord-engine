@@ -1,4 +1,3 @@
-/** HTTP values shared by transport declarations, clients, and their tests. */
 export const HttpStatus = {
   OK: 200,
   Accepted: 202,

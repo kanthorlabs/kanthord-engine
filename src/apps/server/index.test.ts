@@ -758,12 +758,11 @@ test("serve starts with redirected stdout without issuing a JWT; SIGTERM drains 
           if (record.msg.startsWith(GATEWAY_STARTED_MESSAGE))
             resolve(record.port);
         } catch {
-          /* Wait for a complete JSON log record. */
+          continue;
         }
       }
     });
   });
-  // Hono's in-process request and the real listener have the same Host policy.
   const { request } = await import("node:http");
   const health = await new Promise<{ status: number; body: string }>(
     (resolve, reject) => {
@@ -881,7 +880,6 @@ test("unsafe SIGHUP replacement initiates shutdown and receives no log record", 
   const paths = layout(temporary(t));
   paths.config.log.destination = "file";
   writePrivate(paths.env.KANTHORD_CONFIG!, stringify(paths.config), true);
-  // The server's run/start boundary supplies deterministic readiness to this subprocess test.
   const child = spawn(
     process.execPath,
     [

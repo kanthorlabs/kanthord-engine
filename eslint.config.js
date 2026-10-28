@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import { relative } from "node:path";
+import { fileURLToPath } from "node:url";
 import js from "@eslint/js";
 import globals from "globals";
 import tseslint from "typescript-eslint";
@@ -137,7 +140,43 @@ const noCwdDataRead = {
   }),
 };
 
-const kanthordPlugin = { rules: { "no-cwd-data-read": noCwdDataRead } };
+const repositoryRoot = fileURLToPath(new URL(".", import.meta.url));
+const allowedComments = JSON.parse(
+  readFileSync(new URL(".kanthord/comments.json", import.meta.url), "utf8"),
+);
+const commentKey = (path, text) => JSON.stringify([path, text]);
+const allowedCommentKeys = new Set(
+  allowedComments.map(({ path, text }) => commentKey(path, text)),
+);
+const directivePattern = /^(\/\/|\/\*)\s*(eslint|global|globals|exported)\b/;
+const inlineConfigFiles = [
+  ...new Set(
+    allowedComments
+      .filter(({ text }) => directivePattern.test(text))
+      .map(({ path }) => path),
+  ),
+];
+const noCommentsMessage =
+  "Write no comment. Only a human adds a comment to .kanthord/comments.json.";
+
+const noComments = {
+  meta: { type: "problem", schema: [] },
+  create: (context) => ({
+    Program: () => {
+      const path = relative(repositoryRoot, context.filename);
+      for (const comment of context.sourceCode.getAllComments()) {
+        if (comment.type === "Shebang") continue;
+        const text = context.sourceCode.getText(comment);
+        if (allowedCommentKeys.has(commentKey(path, text))) continue;
+        context.report({ loc: comment.loc, message: noCommentsMessage });
+      }
+    },
+  }),
+};
+
+const kanthordPlugin = {
+  rules: { "no-cwd-data-read": noCwdDataRead, "no-comments": noComments },
+};
 
 const productionImportPatterns = [
   {
@@ -197,6 +236,15 @@ const syntaxRules = [
 
 export default tseslint.config(
   { ignores: ["node_modules/**", "dist/**", ".data/**"] },
+  {
+    files: ["**/*.{ts,js,mjs}"],
+    plugins: { kanthord: kanthordPlugin },
+    rules: { "kanthord/no-comments": "error" },
+  },
+  { linterOptions: { noInlineConfig: true } },
+  ...(inlineConfigFiles.length > 0
+    ? [{ files: inlineConfigFiles, linterOptions: { noInlineConfig: false } }]
+    : []),
   {
     files: ["bin/**/*.mjs", "scripts/**/*.mjs", "eslint.config.js"],
     extends: [js.configs.recommended],

@@ -97,7 +97,6 @@ export function readPrivate(path: string): string {
   }
 }
 
-/** Same-directory publication: init never overwrites; explicit replacements are atomic. */
 export function writePrivate(
   path: string,
   content: string,

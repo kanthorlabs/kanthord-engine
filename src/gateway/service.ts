@@ -249,7 +249,6 @@ export class GatewayService implements Service {
           },
         );
       });
-      // A listener failure after startup is fatal, rather than silently restarting.
       server.on("error", (error) => {
         throw error;
       });
@@ -380,7 +379,6 @@ export class GatewayService implements Service {
       }),
     );
     app.use("*", async (context, next) => {
-      // Hono accepts arbitrary short IDs; enforce our entity format before use.
       const id = resolveRequestId(context.get("requestId"));
       context.set("requestId", id);
       context.header("X-Request-Id", id);
@@ -452,7 +450,6 @@ export class GatewayService implements Service {
         );
       await next();
     });
-    // Check that a preflight names a registered route before CORS answers it.
     app.use("*", async (context, next) => {
       if (context.req.method === HttpMethod.Options) {
         const method = context.req.header("access-control-request-method");
@@ -637,7 +634,6 @@ export class GatewayService implements Service {
                 operation.id === gatewayOperations.openapi.id ||
                 operation.id === gatewayOperations.openapiFile.id
               ) {
-                // Serve the package asset through Hono's static-file adapter.
                 const response = await serveStatic({
                   path: "openapi.yaml",
                   mimes: { yaml: "application/yaml" },
@@ -660,7 +656,6 @@ export class GatewayService implements Service {
             return await work;
           } finally {
             this.httpPending.delete(work);
-            // Streaming responses retain their disconnect subscription until close.
             if (operation.lifetime !== OperationLifetime.Stream) cleanup();
           }
         },

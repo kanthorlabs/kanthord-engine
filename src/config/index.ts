@@ -201,7 +201,6 @@ export function configuration(value: unknown) {
       },
     );
   const issues: string[] = [];
-  // Inspect the raw keys before Convict can flatten or discard any of them.
   inspect(schema, value, "", issues);
   if (issues.length)
     throw new Diagnostic(
@@ -210,7 +209,6 @@ export function configuration(value: unknown) {
       { details: issues },
     );
   const config = convict<ServerConfig>(schema, { args: [], env: {} });
-  // Keep even unexpected load/validation failures from disclosing values.
   try {
     config.load(value);
     config.validate({ allowed: "strict" });

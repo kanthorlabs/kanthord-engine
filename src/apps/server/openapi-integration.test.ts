@@ -1659,7 +1659,6 @@ test("published OpenAPI validates, matches the registry exactly, and describes r
     assert.match(response.headers.get("content-type")!, /application\/yaml/);
     assert.equal(await response.text(), readFileSync(join(root, file), "utf8"));
   }
-  // Resolve external references over HTTP as an actual consumer would.
   const remote = await SwaggerParser.validate(
     `${fixture.endpoint}/api/openapi.yaml`,
     { resolve: { http: { safeUrlResolver: false } } },

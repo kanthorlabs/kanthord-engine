@@ -218,7 +218,6 @@ test("failed remote deletion reads back on repeat and requires human request rem
   await assert.rejects(h.remove(true), (error) => error === failure);
   assert.equal(calls, FIRST_ATTEMPT);
   assert.equal(readBacks, FIRST_ATTEMPT);
-  // The fake models a human deleting the failed Intake outbound request.
   failedRequest = false;
   fail = false;
   await h.remove(true);

@@ -1216,7 +1216,6 @@ export class Server implements Service {
       ensureDirectory(paths.data);
       ensureDirectory(paths.state);
       installPiTools();
-      // Validate all files owned by this implementation, including inactive logs.
       audit(join(paths.state, "kanthord.log"), "file", true);
       this.log = new OperationalLog(config.log, paths.state);
       this.releases.push(() => this.log!.close());

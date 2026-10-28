@@ -8,7 +8,6 @@ export function installFatalHandlers(descriptor: () => number): () => void {
         kind,
         error_type:
           reason instanceof Error ? reason.constructor.name : typeof reason,
-        // Keep frames only; multiline messages and rejection values are excluded.
         frames:
           reason instanceof Error
             ? (reason.stack ?? "")
@@ -17,10 +16,9 @@ export function installFatalHandlers(descriptor: () => number): () => void {
             : [],
       };
       writeSync(descriptor(), `${JSON.stringify(record)}\n`);
-    } catch {
-      /* Fatal output is best effort; termination is mandatory. */
+    } finally {
+      process.exit(1);
     }
-    process.exit(1);
   }
   const exception = (reason: Error) => fatal("uncaughtException", reason);
   const rejection = (reason: unknown) => fatal("unhandledRejection", reason);
