@@ -148,14 +148,6 @@ const commentKey = (path, text) => JSON.stringify([path, text]);
 const allowedCommentKeys = new Set(
   allowedComments.map(({ path, text }) => commentKey(path, text)),
 );
-const directivePattern = /^(\/\/|\/\*)\s*(eslint|global|globals|exported)\b/;
-const inlineConfigFiles = [
-  ...new Set(
-    allowedComments
-      .filter(({ text }) => directivePattern.test(text))
-      .map(({ path }) => path),
-  ),
-];
 const noCommentsMessage =
   "Write no comment. Only a human adds a comment to .kanthord/comments.json.";
 
@@ -266,9 +258,6 @@ export default tseslint.config(
     },
   },
   { linterOptions: { noInlineConfig: true } },
-  ...(inlineConfigFiles.length > 0
-    ? [{ files: inlineConfigFiles, linterOptions: { noInlineConfig: false } }]
-    : []),
   {
     files: ["bin/**/*.mjs", "scripts/**/*.mjs", "eslint.config.js"],
     extends: [js.configs.recommended],

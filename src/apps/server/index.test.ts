@@ -757,9 +757,7 @@ test("serve starts with redirected stdout without issuing a JWT; SIGTERM drains 
           const record = JSON.parse(line);
           if (record.msg.startsWith(GATEWAY_STARTED_MESSAGE))
             resolve(record.port);
-        } catch {
-          continue;
-        }
+        } catch {}
       }
     });
   });

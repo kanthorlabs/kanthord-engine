@@ -16,9 +16,8 @@ export function installFatalHandlers(descriptor: () => number): () => void {
             : [],
       };
       writeSync(descriptor(), `${JSON.stringify(record)}\n`);
-    } finally {
-      process.exit(1);
-    }
+    } catch {}
+    process.exit(1);
   }
   const exception = (reason: Error) => fatal("uncaughtException", reason);
   const rejection = (reason: unknown) => fatal("unhandledRejection", reason);
