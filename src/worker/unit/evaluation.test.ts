@@ -1020,6 +1020,7 @@ const BASE64_ENCODING = "base64";
 const REPOSITORY_NAME = "repo";
 const BROKEN = "broken";
 const FAILS_WHEN_BROKEN = `grep -q ${BROKEN} file`;
+const GATE_FILES_KEY = "gate_files";
 const COMMIT_IDENTITY = [
   "-c",
   "user.name=Test",
@@ -1123,7 +1124,7 @@ test("a passing affected command submits its evidence, adds its id, informs the 
 
 test("an assessment submits no gate_files key", async (t) => {
   const review = await affectedReview(t, affectedCommand("false"), "changed");
-  assert.equal("gate_files" in (review.assessments[0] ?? {}), false);
+  assert.equal(GATE_FILES_KEY in (review.assessments[0] ?? {}), false);
 });
 
 test("an affected test that fails at the head and passes at the base answers criterion-not-met with no agent turn", async (t) => {

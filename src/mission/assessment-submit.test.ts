@@ -433,7 +433,7 @@ test("an assessment of a node with no action reads no gate files", async (t) => 
   assert.equal(result.assessment.result, AssessmentResult.Success);
 });
 
-test("an assessment without gate_files stores null", async (t) => {
+test("an assessment of a node with no action stores gate_files null", async (t) => {
   const h = await fixture(t);
   const result = await h.submit();
   assert.equal(
