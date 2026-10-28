@@ -40,7 +40,7 @@ import {
   pushNodeBranch,
   repositoryBinding,
   until,
-} from "./cli-support.ts";
+} from "./cli-test-support.ts";
 import { createIdempotencyKey } from "../../kernel/identity.ts";
 
 const ExitCode = { Success: 0, Failure: 1 } as const;

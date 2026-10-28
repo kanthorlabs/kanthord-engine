@@ -36,7 +36,11 @@ import {
   fakeS3,
   gatewayFixture,
 } from "./test-support.ts";
-import { environment, generateMachineToken, kanthord } from "./cli-support.ts";
+import {
+  environment,
+  generateMachineToken,
+  kanthord,
+} from "./cli-test-support.ts";
 import { uploadEvidence } from "../worker/evidence-upload.ts";
 import { httpTransport } from "../worker/transport.ts";
 import {

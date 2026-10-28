@@ -16,7 +16,7 @@ import { HttpStatus } from "../../kernel/http.ts";
 import { idempotencyKeySchema } from "../../kernel/identity.ts";
 import { isString } from "../../kernel/values.ts";
 import { temporary } from "../../kernel/test-support.ts";
-import { environment, kanthord, until } from "./cli-support.ts";
+import { environment, kanthord, until } from "./cli-test-support.ts";
 import { deliver, gatewayFixture } from "./test-support.ts";
 
 const ExitCode = { Success: 0, Failure: 1 } as const;

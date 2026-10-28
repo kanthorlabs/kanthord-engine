@@ -28,7 +28,7 @@ import {
   type Span,
   SpanStatus,
 } from "../../tracking/contract.ts";
-import { environment, kanthord, kanthordTerminal } from "./cli-support.ts";
+import { environment, kanthord, kanthordTerminal } from "./cli-test-support.ts";
 
 const SUCCESS = 0;
 const FAILURE = 1;

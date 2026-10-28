@@ -38,9 +38,9 @@ import { gitLsRemote } from "../../repository/connector.ts";
 import {
   createBareRepository,
   startTestSshd,
-} from "../../repository/test-sshd.ts";
+} from "../../repository/sshd-test-support.ts";
 import { workerOperations } from "../../worker/contract.ts";
-import { environment, kanthord, kanthordTerminal } from "./cli-support.ts";
+import { environment, kanthord, kanthordTerminal } from "./cli-test-support.ts";
 import {
   COVERING_WORKER_BINDINGS,
   createFakeSshCredential,

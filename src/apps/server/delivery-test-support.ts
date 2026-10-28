@@ -29,7 +29,7 @@ import {
   passingEvaluation,
   pushNodeBranch,
   repositoryBinding,
-} from "./cli-support.ts";
+} from "./cli-test-support.ts";
 import { createIdempotencyKey } from "../../kernel/identity.ts";
 
 export const FIRST_INDEX = 0;

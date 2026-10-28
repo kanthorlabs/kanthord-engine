@@ -14,7 +14,7 @@ import {
   knownHostsKeyBlob,
   sshSignatureVerifies,
   userAuthenticationData,
-} from "./test-sshd.ts";
+} from "./sshd-test-support.ts";
 
 const HOST_KEY_LINE =
   "github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl\n";

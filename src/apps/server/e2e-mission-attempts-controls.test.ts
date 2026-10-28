@@ -22,7 +22,7 @@ import {
   Resolution,
   StartPoint,
 } from "../../mission/contract.ts";
-import { environment, kanthord } from "./cli-support.ts";
+import { environment, kanthord } from "./cli-test-support.ts";
 import {
   COVERING_WORKER_BINDINGS,
   createFakeSshCredential,

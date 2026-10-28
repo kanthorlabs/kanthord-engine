@@ -53,7 +53,7 @@ import {
   UNSET_GIT_ENVIRONMENT,
 } from "../kernel/test-support.ts";
 import { SshAgentErrorCode } from "./ssh-agent.ts";
-import { LOCAL_GIT_SSH_ACCESS } from "./test-sshd.ts";
+import { LOCAL_GIT_SSH_ACCESS } from "./sshd-test-support.ts";
 
 const DEADLINE_MS = 60_000;
 const ORIGIN_NAME = "origin";

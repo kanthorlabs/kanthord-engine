@@ -49,7 +49,7 @@ import {
   scriptedModelRuntime,
   scriptedProvider,
 } from "../../worker/unit/test-support.ts";
-import { environment, kanthord } from "./cli-support.ts";
+import { environment, kanthord } from "./cli-test-support.ts";
 import {
   createFakeSshCredential,
   fakeGitHub,

@@ -31,7 +31,7 @@ import { ExecutionIntent } from "../../worker/contract.ts";
 import { TEST_SSH_PUBLIC_KEY } from "../../worker/test-support.ts";
 import { generateSshKey } from "../../repository/ssh-key.ts";
 import type { SshAccess } from "../../repository/contract.ts";
-import { DEFAULT_SSH_PORT } from "../../repository/test-sshd.ts";
+import { DEFAULT_SSH_PORT } from "../../repository/sshd-test-support.ts";
 
 const SECRET = Buffer.alloc(32, 7).toString("base64");
 const ENDED_RECORD = "execution ended";

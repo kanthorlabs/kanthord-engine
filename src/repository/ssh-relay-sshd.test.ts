@@ -25,7 +25,7 @@ import {
   TEST_REPOSITORY_TEXT,
   TEST_SSHD_HOST,
   type TestSshd,
-} from "./test-sshd.ts";
+} from "./sshd-test-support.ts";
 
 const execFileAsync = promisify(execFile);
 const DEADLINE_MS = 30_000;

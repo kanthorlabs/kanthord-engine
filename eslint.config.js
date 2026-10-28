@@ -172,7 +172,7 @@ const kanthordPlugin = {
 
 const productionImportPatterns = [
   {
-    group: ["**/repository/test-sshd.ts"],
+    group: ["**/repository/sshd-test-support.ts"],
     importNames: ["startTestSshd"],
     message:
       "Only a test file imports startTestSshd, so the affected test selector sees each sshd test.",
@@ -409,7 +409,7 @@ export default tseslint.config(
             },
             {
               from: element("apps-server", {
-                fileInternalPath: "cli-support.ts",
+                fileInternalPath: "cli-test-support.ts",
               }),
               allow: [
                 {
@@ -547,7 +547,7 @@ export default tseslint.config(
                   to: element("component", {
                     captured: { name: "repository" },
                     fileInternalPath:
-                      "{connector,node-branch,ssh-key,test-sshd}.ts",
+                      "{connector,node-branch,ssh-key,sshd-test-support}.ts",
                   }),
                 },
                 {

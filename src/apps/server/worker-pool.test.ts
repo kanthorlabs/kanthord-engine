@@ -16,11 +16,14 @@ import {
 } from "../../worker/contract.ts";
 import { httpClient } from "../../gateway/client.ts";
 import { OperationResultType } from "../../kernel/operation.ts";
-import { until } from "./cli-support.ts";
+import { until } from "./cli-test-support.ts";
 import { humanCaller } from "./test-support.ts";
 import { threadEnvironment } from "./thread-driver.ts";
 import { POOL_BACKOFF_INITIAL_MS } from "./worker-pool.ts";
-import { WORKER_DEFAULTS, workerAcceptance } from "./worker-acceptance.ts";
+import {
+  WORKER_DEFAULTS,
+  workerAcceptance,
+} from "./worker-acceptance-test-support.ts";
 
 const BINDING = "general";
 const RESOURCE_IDENTITY = `worker:kanthord:${BINDING}`;

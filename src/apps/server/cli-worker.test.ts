@@ -13,7 +13,7 @@ import {
 } from "./test-support.ts";
 import { writePrivate } from "../../kernel/files.ts";
 import { directories } from "../../config/index.ts";
-import { kanthord as command, environment } from "./cli-support.ts";
+import { kanthord as command, environment } from "./cli-test-support.ts";
 import { WorkerMethod } from "../../worker/contract.ts";
 import { errorSchema } from "../../kernel/errors.ts";
 import { createIdempotencyKey } from "../../kernel/identity.ts";

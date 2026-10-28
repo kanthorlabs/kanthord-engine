@@ -16,8 +16,8 @@ import {
   environmentTagOf,
 } from "../../project/environment-state.ts";
 import { RepositoryFileState } from "../../repository/contract.ts";
-import { until } from "./cli-support.ts";
-import { fakeContainerHost } from "./container-fakes.ts";
+import { until } from "./cli-test-support.ts";
+import { fakeContainerHost } from "./container-fakes-test-support.ts";
 import type { RuntimeHost } from "./container-runtime.ts";
 import {
   createProject,

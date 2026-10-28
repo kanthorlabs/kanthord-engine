@@ -42,7 +42,7 @@ import {
   fakeS3,
   gatewayFixture,
 } from "./test-support.ts";
-import { environment, kanthord } from "./cli-support.ts";
+import { environment, kanthord } from "./cli-test-support.ts";
 
 const SUCCESSFUL_EXIT_CODE = 0;
 const FIRST_ITEM_INDEX = 0;

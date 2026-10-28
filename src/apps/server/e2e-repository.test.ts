@@ -8,7 +8,7 @@ import { HttpStatus } from "../../kernel/http.ts";
 import { HealthStatus } from "../../kernel/service.ts";
 import { temporary } from "../../kernel/test-support.ts";
 import { CheckErrorCode } from "../../repository/check.ts";
-import { environment, kanthord, spawnKanthord } from "./cli-support.ts";
+import { environment, kanthord, spawnKanthord } from "./cli-test-support.ts";
 import { gatewayFixture } from "./test-support.ts";
 
 const EXIT_SUCCESS = 0;

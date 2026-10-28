@@ -10,7 +10,7 @@ import {
 } from "../../mission/contract.ts";
 import { ClaimState, type ExecutionRecord } from "../../scheduler/contract.ts";
 import { RegistrationActivity } from "../../worker/contract.ts";
-import { generateMachineToken } from "./cli-support.ts";
+import { generateMachineToken } from "./cli-test-support.ts";
 import {
   createFakeSshCredential,
   gatewayFixture,
@@ -22,7 +22,7 @@ import {
   JOURNEY_TIMEOUT_MS,
   journeyClient,
   REPOSITORY_ADDRESS,
-} from "./journey-support.ts";
+} from "./journey-test-support.ts";
 
 const INITIAL_BINDING_VERSION = 1;
 const SINGLE_INSTANCE = 1;

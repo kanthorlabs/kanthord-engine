@@ -28,7 +28,7 @@ import {
   scriptedProvider,
 } from "../../worker/unit/test-support.ts";
 import { Worker } from "../worker/index.ts";
-import { completed, until } from "./cli-support.ts";
+import { completed, until } from "./cli-test-support.ts";
 import {
   COVERING_WORKER_BINDINGS,
   enableCoveringAgents,

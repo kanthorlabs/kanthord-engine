@@ -24,7 +24,7 @@ import {
   startTestSshd,
   TEST_REPOSITORY_FILE,
   TEST_REPOSITORY_TEXT,
-} from "./test-sshd.ts";
+} from "./sshd-test-support.ts";
 
 const CREDENTIAL_ID = "credential_01ARZ3NDEKTSV4RRFFQ69G5FAV";
 const CREDENTIAL_NAME = "deploy";

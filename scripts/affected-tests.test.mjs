@@ -30,9 +30,9 @@ const REASON_MAX_BYTES = 256;
 const LONG_NAME_LENGTH = 400;
 const EMPTY_MODULE = "export {};\n";
 const TEST_BODY = 'import test from "node:test";\n';
-const SSHD_MODULE = "src/repository/test-sshd.ts";
+const SSHD_MODULE = "src/repository/sshd-test-support.ts";
 const SSHD_TEST =
-  'import { startTestSshd } from "../test-sshd.ts";\nstartTestSshd();\n';
+  'import { startTestSshd } from "../sshd-test-support.ts";\nstartTestSshd();\n';
 const SSHD_TEST_PATH = "src/repository/sub/ssh.test.ts";
 const ENTRY_POINT = fileURLToPath(
   new URL("./affected-tests.mjs", import.meta.url),
@@ -374,12 +374,12 @@ test("a test that imports startTestSshd is excluded", async (t) => {
   const root = await repository(t, {
     [SSHD_MODULE]: "export function startTestSshd() {}\n",
     "src/repository/ssh.test.ts":
-      'import { startTestSshd } from "./test-sshd.ts";\nstartTestSshd();\n',
+      'import { startTestSshd } from "./sshd-test-support.ts";\nstartTestSshd();\n',
     "src/repository/alias.test.ts":
-      'import { startTestSshd as start } from "./test-sshd.ts";\nstart();\n',
-    "src/repository/plain.test.ts": 'import "./test-sshd.ts";\n',
+      'import { startTestSshd as start } from "./sshd-test-support.ts";\nstart();\n',
+    "src/repository/plain.test.ts": 'import "./sshd-test-support.ts";\n',
     "src/apps/server/e2e-sshd.test.ts":
-      'import { startTestSshd } from "../../repository/test-sshd.ts";\nstartTestSshd();\n',
+      'import { startTestSshd } from "../../repository/sshd-test-support.ts";\nstartTestSshd();\n',
   });
   assert.deepEqual(
     selectTests(root, [change(SSHD_MODULE)]),
@@ -394,12 +394,12 @@ test("a test that imports startTestSshd is excluded", async (t) => {
   );
 });
 
-test("a namespace import of test-sshd.ts is excluded", async (t) => {
+test("a namespace import of sshd-test-support.ts is excluded", async (t) => {
   const root = await repository(t, {
     [SSHD_MODULE]: "export function startTestSshd() {}\n",
-    "src/repository/plain.test.ts": 'import "./test-sshd.ts";\n',
+    "src/repository/plain.test.ts": 'import "./sshd-test-support.ts";\n',
     "src/repository/namespace.test.ts":
-      'import * as sshd from "./test-sshd.ts";\nsshd.startTestSshd();\n',
+      'import * as sshd from "./sshd-test-support.ts";\nsshd.startTestSshd();\n',
   });
   assert.deepEqual(
     selectTests(root, [change(SSHD_MODULE)]),
@@ -410,12 +410,12 @@ test("a namespace import of test-sshd.ts is excluded", async (t) => {
   );
 });
 
-test("a dynamic import of test-sshd.ts is excluded", async (t) => {
+test("a dynamic import of sshd-test-support.ts is excluded", async (t) => {
   const root = await repository(t, {
     [SSHD_MODULE]: "export function startTestSshd() {}\n",
-    "src/repository/plain.test.ts": 'import "./test-sshd.ts";\n',
+    "src/repository/plain.test.ts": 'import "./sshd-test-support.ts";\n',
     "src/repository/dynamic.test.ts":
-      'const sshd = await import("./test-sshd.ts");\nsshd.startTestSshd();\n',
+      'const sshd = await import("./sshd-test-support.ts");\nsshd.startTestSshd();\n',
   });
   assert.deepEqual(
     selectTests(root, [change(SSHD_MODULE)]),

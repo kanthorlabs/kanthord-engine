@@ -18,7 +18,7 @@ import {
   serverFrameSchema,
 } from "../worker/frames.ts";
 import { httpTransport, type WorkerTransport } from "../worker/transport.ts";
-import { until } from "./cli-support.ts";
+import { until } from "./cli-test-support.ts";
 import {
   gatewayFixture,
   provisionNativeAgent,
