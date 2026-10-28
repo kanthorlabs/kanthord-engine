@@ -23,7 +23,7 @@ import {
   createBareRepository,
   relayedSignature,
   startTestSshd,
-} from "../../repository/test-sshd.ts";
+} from "../../repository/sshd-test-support.ts";
 import { relaySigner } from "./ssh-relay.ts";
 import { fakeInstanceServer, testClaim } from "./test-support.ts";
 import { httpTransport } from "./transport.ts";

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { temporary } from "../../kernel/test-support.ts";
-import { environment, kanthord } from "./cli-support.ts";
+import { environment, kanthord } from "./cli-test-support.ts";
 import { gatewayFixture } from "./test-support.ts";
 
 const SYNTHETIC_PROJECT_ID = "project_01ARZ3NDEKTSV4RRFFQ69G5FAA";

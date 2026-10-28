@@ -17,7 +17,7 @@ import {
   WorkerPlacement,
 } from "../../project/contract.ts";
 import { type AgentEnablement, AgentErrorCode } from "../../agent/contract.ts";
-import { environment, kanthord } from "./cli-support.ts";
+import { environment, kanthord } from "./cli-test-support.ts";
 import type { SshAccess } from "../../repository/index.ts";
 import {
   createFakeSshCredential,

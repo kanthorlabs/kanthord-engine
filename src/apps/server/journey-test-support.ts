@@ -3,7 +3,7 @@ import { join } from "node:path";
 import type { TestContext } from "node:test";
 import { writePrivate } from "../../kernel/files.ts";
 import { temporary } from "../../kernel/test-support.ts";
-import { environment, kanthord } from "./cli-support.ts";
+import { environment, kanthord } from "./cli-test-support.ts";
 import { Intent, type TaskWrite } from "../../mission/contract.ts";
 
 const SUCCESS = 0;

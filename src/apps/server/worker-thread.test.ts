@@ -17,7 +17,7 @@ import {
 import { directories } from "../../kernel/xdg.ts";
 import { workerOperations } from "../../worker/contract.ts";
 import { threadDataSchema } from "../worker/thread-data.ts";
-import { until } from "./cli-support.ts";
+import { until } from "./cli-test-support.ts";
 import {
   gatewayFixture,
   humanCaller,

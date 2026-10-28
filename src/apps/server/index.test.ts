@@ -38,7 +38,7 @@ import {
   serverMigrations,
   trackingDatabaseMigrations,
 } from "./index.ts";
-import { until } from "./cli-support.ts";
+import { until } from "./cli-test-support.ts";
 import { testHumanIdentity } from "../../kernel/test-identity.ts";
 import type { Material } from "../../custody/contract.ts";
 import pino from "pino";
@@ -49,9 +49,15 @@ import {
   gatewayFixture,
   humanCaller,
 } from "./test-support.ts";
-import { fakeContainerHost, fakeRepositoryFiles } from "./container-fakes.ts";
+import {
+  fakeContainerHost,
+  fakeRepositoryFiles,
+} from "./container-fakes-test-support.ts";
 import { slotRuns } from "./environment-test-support.ts";
-import { WORKER_DEFAULTS, workerAcceptance } from "./worker-acceptance.ts";
+import {
+  WORKER_DEFAULTS,
+  workerAcceptance,
+} from "./worker-acceptance-test-support.ts";
 import type { EnvironmentRuntime } from "../../project/environment-state.ts";
 import type { SlotDriver } from "./slot-driver.ts";
 import { llmOperations } from "../../llm/contract.ts";

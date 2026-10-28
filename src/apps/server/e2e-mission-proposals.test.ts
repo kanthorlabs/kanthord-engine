@@ -35,7 +35,7 @@ import {
   kanthord,
   passingEvaluation,
   repositorySnapshot,
-} from "./cli-support.ts";
+} from "./cli-test-support.ts";
 import { createIdempotencyKey } from "../../kernel/identity.ts";
 
 const FAILURE_EXIT_CODE = 1;

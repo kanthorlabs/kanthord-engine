@@ -14,7 +14,7 @@ import {
   type ExecutionRecord,
   WorkPullKind,
 } from "../../scheduler/contract.ts";
-import { environment, kanthord, until } from "./cli-support.ts";
+import { environment, kanthord, until } from "./cli-test-support.ts";
 import {
   createFakeSshCredential,
   enableCoveringAgents,

@@ -10,7 +10,7 @@ import { writePrivate } from "../../kernel/files.ts";
 import { generateX25519KeyPair } from "../../kernel/hpke.ts";
 import { temporary } from "../../kernel/test-support.ts";
 import { instanceConfigurationValue } from "../../worker/contract.ts";
-import { environment, kanthord, spawnKanthord } from "./cli-support.ts";
+import { environment, kanthord, spawnKanthord } from "./cli-test-support.ts";
 import {
   enableCoveringAgents,
   gatewayFixture,

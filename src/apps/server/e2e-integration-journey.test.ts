@@ -50,7 +50,7 @@ import {
   repositoryBinding,
   repositorySnapshot,
   until,
-} from "./cli-support.ts";
+} from "./cli-test-support.ts";
 import { createIdempotencyKey } from "../../kernel/identity.ts";
 
 const FIRST_INDEX = 0;

@@ -15,7 +15,7 @@ import {
   createBareRepository,
   LOCAL_GIT_SSH_ACCESS,
   startTestSshd,
-} from "./test-sshd.ts";
+} from "./sshd-test-support.ts";
 
 const GIT_FAILED = "repository.connector.git_failed";
 const DEADLINE_MS = 60_000;

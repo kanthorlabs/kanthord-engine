@@ -4,7 +4,7 @@ import { test } from "node:test";
 import { IdentityKind } from "../../kernel/caller.ts";
 import { temporary } from "../../kernel/test-support.ts";
 import { packageVersion } from "../../kernel/version.ts";
-import { environment, kanthord, spawnKanthord } from "./cli-support.ts";
+import { environment, kanthord, spawnKanthord } from "./cli-test-support.ts";
 import { gatewayFixture } from "./test-support.ts";
 
 const EXIT_SUCCESS = 0;

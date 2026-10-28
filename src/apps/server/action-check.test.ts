@@ -32,7 +32,7 @@ import {
   type Revision,
 } from "../../mission/contract.ts";
 import type { ExecutionRecord } from "../../scheduler/contract.ts";
-import { environment, kanthord } from "./cli-support.ts";
+import { environment, kanthord } from "./cli-test-support.ts";
 import {
   bareRepository,
   createFakeSshCredential,

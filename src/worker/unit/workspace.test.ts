@@ -17,7 +17,7 @@ import { fixtureTemplate, temporary } from "../../kernel/test-support.ts";
 import { createIdentity } from "../../kernel/identity.ts";
 import { nodeBranchOf } from "../../repository/node-branch.ts";
 import { generateSshKey } from "../../repository/ssh-key.ts";
-import { DEFAULT_SSH_PORT } from "../../repository/test-sshd.ts";
+import { DEFAULT_SSH_PORT } from "../../repository/sshd-test-support.ts";
 import {
   CHECKOUTS_DIRECTORY,
   handedSshAccess,

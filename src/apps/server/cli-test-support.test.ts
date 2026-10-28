@@ -6,7 +6,11 @@ import { test } from "node:test";
 import { parseAllDocuments } from "yaml";
 import { temporary } from "../../kernel/test-support.ts";
 import { createIdentity } from "../../kernel/identity.ts";
-import { environment, generateMachineToken, kanthord } from "./cli-support.ts";
+import {
+  environment,
+  generateMachineToken,
+  kanthord,
+} from "./cli-test-support.ts";
 
 const KEY_BYTES = 32;
 const SUCCESS = 0;

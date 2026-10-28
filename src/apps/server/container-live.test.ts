@@ -33,7 +33,10 @@ import {
 } from "./container-runtime.ts";
 import { slotClientIdentity } from "./slot-identity.ts";
 import { humanCaller } from "./test-support.ts";
-import { WORKER_DEFAULTS, workerAcceptance } from "./worker-acceptance.ts";
+import {
+  WORKER_DEFAULTS,
+  workerAcceptance,
+} from "./worker-acceptance-test-support.ts";
 
 const IMAGE_NAME = process.env.KANTHORD_TEST_CONTAINER_IMAGE;
 const SKIP = IMAGE_NAME

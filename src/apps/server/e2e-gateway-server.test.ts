@@ -40,7 +40,7 @@ import type { projectOperations } from "../../project/contract.ts";
 import { BindingKind } from "../../project/contract.ts";
 import type { Job } from "../../scheduler/contract.ts";
 import type { AgentEnablement } from "../../agent/contract.ts";
-import { environment, kanthord } from "./cli-support.ts";
+import { environment, kanthord } from "./cli-test-support.ts";
 import {
   applyCoveringBindings,
   createFakeSshCredential,

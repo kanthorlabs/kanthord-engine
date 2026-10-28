@@ -26,7 +26,7 @@ import {
   createCredentials,
   kanthord,
   repositoryBinding,
-} from "./cli-support.ts";
+} from "./cli-test-support.ts";
 import {
   COVERING_WORKER_BINDINGS,
   enableCoveringAgents,

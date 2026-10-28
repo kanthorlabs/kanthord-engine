@@ -128,7 +128,7 @@ import {
   createBareRepository,
   DEFAULT_SSH_PORT,
   startTestSshd,
-} from "../repository/test-sshd.ts";
+} from "../repository/sshd-test-support.ts";
 import type { SshAccess } from "../repository/index.ts";
 import {
   insertProject,

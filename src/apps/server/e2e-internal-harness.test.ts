@@ -14,7 +14,7 @@ import {
   journeyClient,
   PROVIDER_KEY,
   REPOSITORY_ADDRESS,
-} from "./journey-support.ts";
+} from "./journey-test-support.ts";
 import {
   bareRepository,
   createFakeSshCredential,

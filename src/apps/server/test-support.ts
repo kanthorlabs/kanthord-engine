@@ -68,8 +68,8 @@ import { agentMigrations } from "../../agent/index.ts";
 import { workbenchMigrations } from "../../workbench/index.ts";
 import { WORKBENCH_SERVICE_NAME } from "../../workbench/contract.ts";
 import { AGENT_COMPONENT_NAME } from "../../agent/contract.ts";
-import { fakeRepositoryFiles } from "./container-fakes.ts";
-import { environment, kanthord } from "./cli-support.ts";
+import { fakeRepositoryFiles } from "./container-fakes-test-support.ts";
+import { environment, kanthord } from "./cli-test-support.ts";
 import { composeServices, trackingDatabaseMigrations } from "./index.ts";
 import {
   type GitWriter,
@@ -78,7 +78,7 @@ import {
   repositoryMigrations,
 } from "../../repository/index.ts";
 import { GITHUB_API_VERSION } from "../../repository/github.ts";
-import { LOCAL_GIT_SSH_ACCESS } from "../../repository/test-sshd.ts";
+import { LOCAL_GIT_SSH_ACCESS } from "../../repository/sshd-test-support.ts";
 import {
   alwaysAvailable,
   InstancePlacement,

@@ -3,8 +3,8 @@ import { test } from "node:test";
 import { simpleGit } from "simple-git";
 import { background } from "../../kernel/context.ts";
 import { temporary } from "../../kernel/test-support.ts";
-import { LOCAL_GIT_SSH_ACCESS } from "../../repository/test-sshd.ts";
-import { fakeRepositoryFiles } from "./container-fakes.ts";
+import { LOCAL_GIT_SSH_ACCESS } from "../../repository/sshd-test-support.ts";
+import { fakeRepositoryFiles } from "./container-fakes-test-support.ts";
 
 const FAKE_ADDRESS = "git@github.com:owner/repo.git";
 const FAKE_REVISION = "a".repeat(40);

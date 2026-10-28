@@ -2,7 +2,11 @@ import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
 import { idempotencyKeySchema } from "../../kernel/identity.ts";
 import { temporary } from "../../kernel/test-support.ts";
-import { environment, generateMachineToken, kanthord } from "./cli-support.ts";
+import {
+  environment,
+  generateMachineToken,
+  kanthord,
+} from "./cli-test-support.ts";
 import { gatewayFixture } from "./test-support.ts";
 
 const ExitCode = { Success: 0, Failure: 1 } as const;

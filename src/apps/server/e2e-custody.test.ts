@@ -10,7 +10,7 @@ import { ResourceFailureReason, ResourceStatus } from "../../kernel/health.ts";
 import { HttpStatus } from "../../kernel/http.ts";
 import { CAPABILITY_MODEL_LIST_READ } from "../../llm/platforms.ts";
 import { temporary } from "../../kernel/test-support.ts";
-import { environment, kanthord } from "./cli-support.ts";
+import { environment, kanthord } from "./cli-test-support.ts";
 import { gatewayFixture } from "./test-support.ts";
 import { createIdempotencyKey } from "../../kernel/identity.ts";
 

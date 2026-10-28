@@ -36,8 +36,11 @@ import {
   PROVED_SUFFIX,
 } from "../../project/environment-state.ts";
 import type { EnvironmentModelRuntimeFactory } from "../../project/index.ts";
-import { until } from "./cli-support.ts";
-import { fakeContainerHost, fakeRepositoryFiles } from "./container-fakes.ts";
+import { until } from "./cli-test-support.ts";
+import {
+  fakeContainerHost,
+  fakeRepositoryFiles,
+} from "./container-fakes-test-support.ts";
 import {
   CONFIGURATION,
   createProject,

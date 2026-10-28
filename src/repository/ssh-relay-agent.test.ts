@@ -30,7 +30,7 @@ import {
   knownHostsKeyBlob,
   sshSignatureVerifies,
   userAuthenticationData,
-} from "./test-sshd.ts";
+} from "./sshd-test-support.ts";
 
 const execFileAsync = promisify(execFile);
 const HOST_KEY_LINE =
