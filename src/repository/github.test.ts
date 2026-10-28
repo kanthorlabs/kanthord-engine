@@ -2216,6 +2216,43 @@ test("getRequiredChecks reads no check run when the rules require no check", asy
   ]);
 });
 
+test("getRequiredChecks reads a rule that holds no parameters", async (t) => {
+  const server = await platform(
+    t,
+    checkServer({
+      [PULL_REQUEST_PATH]: [200, CHECK_PULL_REQUEST],
+      [RULES_PATH]: [
+        200,
+        [
+          { type: "deletion" },
+          { type: "non_fast_forward" },
+          requiredRule("check"),
+        ],
+      ],
+      [CHECK_RUNS_PATH]: [
+        200,
+        {
+          total_count: 1,
+          check_runs: [run(1, "check", "completed", "success")],
+        },
+      ],
+      [STATUSES_PATH]: [200, []],
+    }),
+  );
+  const result = await new GitHubPlatform({
+    baseUrl: server.baseUrl,
+  }).getRequiredChecks(call(), TARGET, { number: 7 });
+  assert.deepEqual(result, {
+    ok: true,
+    value: {
+      head_commit: HEAD_SHA,
+      base_branch: BASE_BRANCH,
+      pending: [],
+      failed: [],
+    },
+  });
+});
+
 test("getRequiredChecks answers a failed read unchanged", async (t) => {
   const server = await platform(
     t,

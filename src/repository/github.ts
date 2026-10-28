@@ -325,7 +325,7 @@ const requiredCheckPullRequestSchema = z.looseObject({
   base: z.looseObject({ ref: z.string().min(MIN_SEGMENT_LENGTH) }),
 });
 const branchRuleListSchema = z.array(
-  z.looseObject({ type: z.string(), parameters: z.unknown() }),
+  z.looseObject({ type: z.string(), parameters: z.unknown().optional() }),
 );
 const requiredStatusChecksParametersSchema = z.looseObject({
   required_status_checks: z.array(
