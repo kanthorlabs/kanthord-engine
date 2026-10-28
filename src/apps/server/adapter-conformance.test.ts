@@ -11,7 +11,7 @@ import {
   OperationResultType,
 } from "../../kernel/operation.ts";
 import { isObject, isString, ValueType } from "../../kernel/values.ts";
-import { fakeContainerHost } from "./container-fakes.ts";
+import { fakeContainerHost } from "./container-fakes-test-support.ts";
 import {
   fakeMachines,
   gatewayFixture,

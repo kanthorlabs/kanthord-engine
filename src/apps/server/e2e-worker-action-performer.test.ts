@@ -52,7 +52,7 @@ import {
   mappedTransport,
   remoteHead,
 } from "./test-support.ts";
-import { environment, kanthord, until } from "./cli-support.ts";
+import { environment, kanthord, until } from "./cli-test-support.ts";
 import { createIdempotencyKey } from "../../kernel/identity.ts";
 
 const INITIAL_SEQUENCE = 0;

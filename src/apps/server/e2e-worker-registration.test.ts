@@ -17,7 +17,7 @@ import type {
   workerOperations,
 } from "../../worker/contract.ts";
 import { RegistrationActivity } from "../../worker/contract.ts";
-import { environment, kanthord, kanthordTerminal } from "./cli-support.ts";
+import { environment, kanthord, kanthordTerminal } from "./cli-test-support.ts";
 import { gatewayFixture } from "./test-support.ts";
 
 const SUCCESS = 0;

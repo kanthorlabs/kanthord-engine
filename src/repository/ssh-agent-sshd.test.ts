@@ -14,7 +14,7 @@ import {
   TEST_REPOSITORY_FILE,
   TEST_REPOSITORY_TEXT,
   TEST_SSHD_HOST,
-} from "./test-sshd.ts";
+} from "./sshd-test-support.ts";
 import { temporary } from "../kernel/test-support.ts";
 
 const execFileAsync = promisify(execFile);

@@ -12,7 +12,7 @@ import { temporary } from "../../kernel/test-support.ts";
 import { llmOperations } from "../../llm/contract.ts";
 import { workerOperations } from "../../worker/contract.ts";
 import { Worker } from "../worker/index.ts";
-import { completed } from "./cli-support.ts";
+import { completed } from "./cli-test-support.ts";
 import { gatewayFixture } from "./test-support.ts";
 
 const INSTANCE = "laptop";

@@ -10,7 +10,7 @@ import {
   hostKeyScanAnswerSchema,
   HostKeySource,
 } from "../../repository/contract.ts";
-import { environment, kanthord } from "./cli-support.ts";
+import { environment, kanthord } from "./cli-test-support.ts";
 import { gatewayFixture } from "./test-support.ts";
 import { createIdempotencyKey } from "../../kernel/identity.ts";
 

@@ -39,7 +39,7 @@ import {
 import { httpClient } from "../../gateway/client.ts";
 import { GitStage, GitWriteError } from "../../repository/index.ts";
 import type { ExecutionRecord } from "../../scheduler/contract.ts";
-import { environment, kanthord } from "./cli-support.ts";
+import { environment, kanthord } from "./cli-test-support.ts";
 import {
   bareRepository,
   createFakeSshCredential,

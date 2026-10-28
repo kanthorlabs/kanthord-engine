@@ -36,7 +36,7 @@ import {
   pushNodeBranch,
   repositoryBinding,
   until,
-} from "./cli-support.ts";
+} from "./cli-test-support.ts";
 import { createIdempotencyKey } from "../../kernel/identity.ts";
 
 const FIRST_INDEX = 0;

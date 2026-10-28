@@ -21,7 +21,7 @@ import * as connector from "../../repository/connector.ts";
 import {
   DEFAULT_SSH_PORT,
   LOCAL_GIT_SSH_ACCESS,
-} from "../../repository/test-sshd.ts";
+} from "../../repository/sshd-test-support.ts";
 import type { Revision, TaskContent } from "../../mission/contract.ts";
 import {
   anthropicSetup,
@@ -52,7 +52,7 @@ import { prepareStepsWorkspace } from "./steps-implement.ts";
 import type { Verdict } from "./node-reads.ts";
 import type { VerificationFacts } from "./progress-rule.ts";
 import { doneTrailerOf } from "./done-record.ts";
-export { LOCAL_GIT_SSH_ACCESS } from "../../repository/test-sshd.ts";
+export { LOCAL_GIT_SSH_ACCESS } from "../../repository/sshd-test-support.ts";
 export {
   scriptedProvider,
   type ScriptedProvider,

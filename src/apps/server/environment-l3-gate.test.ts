@@ -28,8 +28,11 @@ import {
 } from "../../project/environment-state.ts";
 import { ExecutionStopReason } from "../../scheduler/contract.ts";
 import { trackingOperations } from "../../tracking/contract.ts";
-import { until } from "./cli-support.ts";
-import { fakeContainerHost, fakeRepositoryFiles } from "./container-fakes.ts";
+import { until } from "./cli-test-support.ts";
+import {
+  fakeContainerHost,
+  fakeRepositoryFiles,
+} from "./container-fakes-test-support.ts";
 import {
   CACHE_MOUNT,
   CACHE_PROJECT_LABEL,

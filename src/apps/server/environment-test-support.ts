@@ -19,15 +19,15 @@ import {
 } from "../../project/contract.ts";
 import type { EnvironmentState } from "../../project/environment-state.ts";
 import { repositoryFiles } from "../../repository/index.ts";
-import { LOCAL_GIT_SSH_ACCESS } from "../../repository/test-sshd.ts";
+import { LOCAL_GIT_SSH_ACCESS } from "../../repository/sshd-test-support.ts";
 import {
   type ReleaseStop,
   schedulerOperations,
   WorkPullKind,
 } from "../../scheduler/contract.ts";
 import { type PoolSlot, workerOperations } from "../../worker/contract.ts";
-import type { fakeContainerHost } from "./container-fakes.ts";
-import { until } from "./cli-support.ts";
+import type { fakeContainerHost } from "./container-fakes-test-support.ts";
+import { until } from "./cli-test-support.ts";
 import type { SlotDriver, SlotInstance } from "./slot-driver.ts";
 import {
   bareRepository,

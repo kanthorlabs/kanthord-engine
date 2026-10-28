@@ -45,7 +45,7 @@ import {
   type StalePin,
 } from "../../project/contract.ts";
 import type { Job } from "../../scheduler/contract.ts";
-import { environment, kanthord } from "./cli-support.ts";
+import { environment, kanthord } from "./cli-test-support.ts";
 import {
   applyCoveringBindings,
   COVERING_WORKER_BINDINGS,

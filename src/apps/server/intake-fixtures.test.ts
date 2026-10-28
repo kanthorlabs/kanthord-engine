@@ -9,7 +9,7 @@ import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { simpleGit } from "simple-git";
 import { temporary } from "../../kernel/test-support.ts";
-import { LOCAL_GIT_SSH_ACCESS } from "../../repository/test-sshd.ts";
+import { LOCAL_GIT_SSH_ACCESS } from "../../repository/sshd-test-support.ts";
 import {
   GitHubPlatform,
   GitHubTargetKind,

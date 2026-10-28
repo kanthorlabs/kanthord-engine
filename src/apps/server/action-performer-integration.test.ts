@@ -28,7 +28,7 @@ import {
 import { HttpMethod, HttpStatus } from "../../kernel/http.ts";
 import { OperationError } from "../../kernel/errors.ts";
 import { GrantKind } from "../../custody/contract.ts";
-import { until } from "./cli-support.ts";
+import { until } from "./cli-test-support.ts";
 import {
   FAKE_GITHUB_HOST_KEY_FINGERPRINT,
   FAKE_SSH_CREDENTIAL,

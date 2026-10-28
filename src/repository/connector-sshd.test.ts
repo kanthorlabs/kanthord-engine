@@ -33,7 +33,7 @@ import {
   startTestSshd,
   TEST_REPOSITORY_FILE,
   TEST_REPOSITORY_TEXT,
-} from "./test-sshd.ts";
+} from "./sshd-test-support.ts";
 
 const execFileAsync = promisify(execFile);
 const DEADLINE_MS = 30_000;

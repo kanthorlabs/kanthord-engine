@@ -17,7 +17,7 @@
     "static"
   ],
   "scripts": {
-    "build": "tsrs -p tsconfig.build.json --checkers 2 && ! grep -rlE 'import[(]\"[^\"]+[.]ts\"[)]' dist",
+    "build": "tsrs -p tsconfig.build.json --checkers 2 && ! grep -rlE 'import[(]\"[^\"]+[.]ts\"[)]' dist && ! find dist -name '*test-support*' | grep .",
     "prepack": "pnpm run build",
     "pi-tools:fetch": "node scripts/pi-tools.mjs fetch",
     "pi-tools:update": "node scripts/pi-tools.mjs update",

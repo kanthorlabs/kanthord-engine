@@ -12,7 +12,7 @@ import { HttpMethod, HttpStatus } from "../../kernel/http.ts";
 import { temporary } from "../../kernel/test-support.ts";
 import { ModelCheckResult } from "../../llm/contract.ts";
 import { scriptedModelRuntime } from "../../llm/test-support.ts";
-import { environment, kanthord } from "./cli-support.ts";
+import { environment, kanthord } from "./cli-test-support.ts";
 import { gatewayFixture } from "./test-support.ts";
 
 const ExitCode = { Success: 0, Failure: 1 } as const;

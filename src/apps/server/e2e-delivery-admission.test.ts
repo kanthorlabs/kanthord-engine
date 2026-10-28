@@ -17,7 +17,11 @@ import {
   Resolution,
 } from "../../mission/contract.ts";
 import { ActionResultKind } from "../../worker/contract.ts";
-import { completed, pushNextNodeBranchCommit, until } from "./cli-support.ts";
+import {
+  completed,
+  pushNextNodeBranchCommit,
+  until,
+} from "./cli-test-support.ts";
 import {
   FIRST_INDEX,
   GATED_KEY,
@@ -26,7 +30,7 @@ import {
   RESOURCE,
   setup,
   type Webhook,
-} from "./delivery-support.ts";
+} from "./delivery-test-support.ts";
 
 const FIRST_ATTEMPT = 1;
 const NO_CALLS = 0;

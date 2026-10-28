@@ -23,8 +23,8 @@ import {
   projectOperations,
 } from "../../project/contract.ts";
 import { ExecutionStopReason, WorkPullKind } from "../../scheduler/contract.ts";
-import { fakeContainerHost } from "./container-fakes.ts";
-import { until } from "./cli-support.ts";
+import { fakeContainerHost } from "./container-fakes-test-support.ts";
+import { until } from "./cli-test-support.ts";
 import { humanCaller } from "./test-support.ts";
 import {
   awaitStatus,

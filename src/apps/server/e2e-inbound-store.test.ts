@@ -11,7 +11,7 @@ import { writePrivate } from "../../kernel/files.ts";
 import { idempotencyKeySchema } from "../../kernel/identity.ts";
 import { isString } from "../../kernel/values.ts";
 import { temporary } from "../../kernel/test-support.ts";
-import { environment, kanthord } from "./cli-support.ts";
+import { environment, kanthord } from "./cli-test-support.ts";
 import { gatewayFixture } from "./test-support.ts";
 
 const ExitCode = { Success: 0, Failure: 1 } as const;

@@ -84,7 +84,7 @@ import {
   knownHostsKeyBlob,
   sshSignatureVerifies,
   userAuthenticationData,
-} from "../../repository/test-sshd.ts";
+} from "../../repository/sshd-test-support.ts";
 
 const SECRET = "test_handover-integration-secret-one";
 const REFRESHED = "test_handover-integration-secret-two";

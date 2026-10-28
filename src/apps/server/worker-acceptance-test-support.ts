@@ -8,7 +8,7 @@ import { isString } from "../../kernel/values.ts";
 import { CONFIG_VERSION, configuration } from "../../config/index.ts";
 import { writePrivate } from "../../kernel/files.ts";
 import { temporary } from "../../kernel/test-support.ts";
-import { environment, kanthord, kanthordTerminal } from "./cli-support.ts";
+import { environment, kanthord, kanthordTerminal } from "./cli-test-support.ts";
 import {
   COVERING_WORKER_BINDINGS,
   createFakeSshCredential,

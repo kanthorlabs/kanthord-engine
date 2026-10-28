@@ -73,7 +73,7 @@ import {
   knownHostsKeyBlob,
   sshSignatureVerifies,
   userAuthenticationData,
-} from "../repository/test-sshd.ts";
+} from "../repository/sshd-test-support.ts";
 import { sshPublicKeyBlob } from "../repository/ssh-key.ts";
 
 const SECRET = Buffer.alloc(32, 9).toString("base64");

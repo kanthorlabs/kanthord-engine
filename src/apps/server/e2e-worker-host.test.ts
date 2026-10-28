@@ -14,7 +14,10 @@ import {
 import type { CredentialAnswer } from "../../custody/contract.ts";
 import type { SshAccess } from "../../repository/contract.ts";
 import { RepositoryComponent } from "../../repository/index.ts";
-import { DEFAULT_SSH_PORT, startTestSshd } from "../../repository/test-sshd.ts";
+import {
+  DEFAULT_SSH_PORT,
+  startTestSshd,
+} from "../../repository/sshd-test-support.ts";
 import { ClaimState, type ExecutionRecord } from "../../scheduler/contract.ts";
 import type { Span } from "../../tracking/contract.ts";
 import type { RepositoryTransport } from "../../worker/contract.ts";
@@ -29,7 +32,10 @@ import {
   FAKE_SSH_CREDENTIAL,
   inProcessWorker,
 } from "./test-support.ts";
-import { WORKER_TEST_KEY, workerAcceptance } from "./worker-acceptance.ts";
+import {
+  WORKER_TEST_KEY,
+  workerAcceptance,
+} from "./worker-acceptance-test-support.ts";
 
 const FIRST_REVISION = 1;
 const SINGLE_ITEM = 1;
