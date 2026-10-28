@@ -67,6 +67,8 @@ import {
   FAKE_GITHUB_HOST_KEY,
   FAKE_SSH_HOST,
   gatewayFixture,
+  createInstancesByCli,
+  instanceNames,
 } from "./test-support.ts";
 import { SHIPPED_TEMPLATES } from "../../agent/prompt-templates.ts";
 
@@ -166,12 +168,14 @@ test(
       "--name",
       "runtime",
     ]);
-    const worker = {
+    const worker = async (binding: string) => ({
       worker: "coder@1",
-      placement: "server",
-      instance_count: SINGLE_INSTANCE,
+      worker_instances: await createInstancesByCli(
+        read,
+        instanceNames(binding, SINGLE_INSTANCE),
+      ),
       entries: [{ agent: "swe@1", ...DEFAULTS }],
-    };
+    });
     const bindingSet = await write<{
       bindings: Record<string, { id: string }>;
     }>(["project", "binding", "apply", project.id], {
@@ -190,11 +194,11 @@ test(
             prompts: { [SWE]: PROJECT },
           },
         },
-        general: { kind: "worker", config: worker },
+        general: { kind: "worker", config: await worker("general") },
         lab: {
           kind: "worker",
           config: {
-            ...worker,
+            ...(await worker("lab")),
             resource_budget: { turns: SINGLE_TURN, wall_time_ms: 600000 },
           },
         },

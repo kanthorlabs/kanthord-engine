@@ -19,7 +19,10 @@ import {
   createFakeSshCredential,
   enableCoveringAgents,
   gatewayFixture,
+  createInstancesByCli,
+  instanceNames,
 } from "./test-support.ts";
+import { InstancePlacement } from "../../worker/contract.ts";
 
 const SUCCESS = 0;
 const FAILURE = 1;
@@ -64,10 +67,21 @@ type Violation = {
   details: { claims: { node_id: string | null; claim: string }[] };
 };
 
-function worker(name: string, tags: string[]) {
+const WORKER_BINDINGS = [
+  ["linux-coder", "coder@1"],
+  ["linux-reviewer", "reviewer@1"],
+  ["macos-coder", "coder@1"],
+  ["macos-reviewer", "reviewer@1"],
+] as const;
+
+function worker(binding: string, name: string, tags: string[]) {
   return {
     kind: "worker",
-    config: { worker: name, placement: "server", instance_count: 1, tags },
+    config: {
+      worker: name,
+      worker_instances: instanceNames(binding, 1),
+      tags,
+    },
   };
 }
 
@@ -128,10 +142,17 @@ async function setup(t: TestContext) {
     "--name",
     "atlas",
   ]);
+  for (const [binding, name] of WORKER_BINDINGS)
+    await createInstancesByCli(
+      read,
+      instanceNames(binding, 1),
+      InstancePlacement.Server,
+      name,
+    );
   const linux = {
     "api-repo": REPOSITORY,
-    "linux-coder": worker("coder@1", []),
-    "linux-reviewer": worker("reviewer@1", []),
+    "linux-coder": worker("linux-coder", "coder@1", []),
+    "linux-reviewer": worker("linux-reviewer", "reviewer@1", []),
   };
   const applied = await write<{
     binding_set_version: number;
@@ -220,8 +241,8 @@ test("EF05.1-EF05.8 the match admits a node by intent and tags and refuses an un
   const h = await setup(t);
   const macos = {
     ...h.linux,
-    "macos-coder": worker("coder@1", [MACOS, XCODE]),
-    "macos-reviewer": worker("reviewer@1", [MACOS]),
+    "macos-coder": worker("macos-coder", "coder@1", [MACOS, XCODE]),
+    "macos-reviewer": worker("macos-reviewer", "reviewer@1", [MACOS]),
   };
   const nodes = () =>
     h.read<Page<{ id: string; state: string }>>([
@@ -269,7 +290,10 @@ test("EF05.1-EF05.8 the match admits a node by intent and tags and refuses an un
   );
   await t.test("EF05.4 an upper-case tag is refused", async () => {
     await h.refusedApply(
-      { ...macos, "macos-coder": worker("coder@1", ["platform.macOS"]) },
+      {
+        ...macos,
+        "macos-coder": worker("macos-coder", "coder@1", ["platform.macOS"]),
+      },
       "project.bindings.worker.tags_invalid",
     );
   });

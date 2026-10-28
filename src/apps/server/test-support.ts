@@ -85,6 +85,7 @@ import {
   type PlacementStatus,
   PoolPlacement,
   type RepositoryTransport,
+  workerOperations,
 } from "../../worker/contract.ts";
 import {
   AccessPolicy,
@@ -2295,6 +2296,49 @@ export function humanCaller(
   };
 }
 
+export function instanceNames(binding: string, count: number): string[] {
+  return Array.from(
+    { length: count },
+    (_value, index) => `${binding}-${index + 1}`,
+  );
+}
+
+export async function createInstances(
+  fixture: Parameters<typeof humanCaller>[0],
+  names: readonly string[],
+  placement: InstancePlacement = InstancePlacement.Server,
+  worker = "coder@1",
+): Promise<string[]> {
+  const call = humanCaller(fixture);
+  for (const name of names)
+    await call(workerOperations["instance.create"], {
+      params: {},
+      query: {},
+      body: { name, worker, placement },
+    });
+  return [...names];
+}
+
+export async function createInstancesByCli(
+  read: (args: string[]) => Promise<unknown>,
+  names: readonly string[],
+  placement: InstancePlacement = InstancePlacement.Server,
+  worker = "coder@1",
+): Promise<string[]> {
+  for (const name of names)
+    await read([
+      "worker",
+      "instance",
+      "create",
+      name,
+      "--worker",
+      worker,
+      "--placement",
+      placement,
+    ]);
+  return [...names];
+}
+
 export async function provisionRepositoryCredentials(
   fixture: Parameters<typeof humanCaller>[0],
 ) {
@@ -2487,8 +2531,10 @@ export async function provisionNativeServerProject(
           kind: "worker",
           config: {
             worker: "coder@1",
-            instance_count: 1,
-            placement: InstancePlacement.Server,
+            worker_instances: await createInstances(
+              fixture,
+              instanceNames(binding, 1),
+            ),
             entries: [{ agent: "swe@1", ...NATIVE_DEFAULTS }],
           },
         },

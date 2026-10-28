@@ -25,14 +25,20 @@ import {
   schedulerOperations,
   WorkPullKind,
 } from "../../scheduler/contract.ts";
-import { type PoolSlot, workerOperations } from "../../worker/contract.ts";
+import {
+  InstancePlacement,
+  type PoolSlot,
+  workerOperations,
+} from "../../worker/contract.ts";
 import type { fakeContainerHost } from "./container-fakes-test-support.ts";
 import { until } from "./cli-test-support.ts";
 import type { SlotDriver, SlotInstance } from "./slot-driver.ts";
 import {
   bareRepository,
+  createInstances,
   gatewayFixture,
   humanCaller,
+  instanceNames,
   provisionNativeAgent,
   provisionRepositoryCredentials,
 } from "./test-support.ts";
@@ -175,6 +181,13 @@ export interface ProjectInput {
   workerEnvironment?: string;
 }
 
+export function workerInstanceNames(input: ProjectInput): string[] {
+  return instanceNames(
+    `${input.name}-${WORKER_BINDING}`,
+    input.placement === "container" ? SINGLE_SLOT : input.instanceCount,
+  );
+}
+
 export function bindingsOf(input: ProjectInput) {
   return {
     [REPOSITORY_BINDING]: {
@@ -195,8 +208,7 @@ export function bindingsOf(input: ProjectInput) {
       kind: "worker",
       config: {
         worker: "coder@1",
-        placement: input.placement,
-        instance_count: input.instanceCount,
+        worker_instances: workerInstanceNames(input),
         ...(input.workerEnvironment === undefined
           ? {}
           : { environment: input.workerEnvironment }),
@@ -207,14 +219,20 @@ export function bindingsOf(input: ProjectInput) {
       kind: "worker",
       config: {
         worker: "reviewer@1",
-        placement: "server",
-        instance_count: NO_ITEMS,
+        worker_instances: [],
       },
     },
   };
 }
 
 export async function createProject(fixture: Fixture, input: ProjectInput) {
+  await createInstances(
+    fixture,
+    workerInstanceNames(input),
+    input.placement === "container"
+      ? InstancePlacement.Container
+      : InstancePlacement.Server,
+  );
   const call = humanCaller(fixture);
   const project = await call(projectOperations.create, {
     params: {},
