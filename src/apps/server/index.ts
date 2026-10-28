@@ -403,6 +403,8 @@ export function composeServices(options: {
         worker.registrationHealthcheck(tx, runtimeIdentity),
       registrationsOfInstance: (tx, runtimeIdentity) =>
         worker.registrationsOfInstance(tx, runtimeIdentity),
+      placementOf: (tx, runtimeIdentity) =>
+        worker.placementOf(tx, runtimeIdentity),
     },
     declarations: {
       declarationOf: (workerName) => worker.declarationOf(workerName),
@@ -442,11 +444,7 @@ export function composeServices(options: {
         agent.recordProviderFailure(
           tx,
           selections,
-          worker.claimantHolder(
-            tx,
-            claimant.worker_binding_id,
-            claimant.runtime_identity,
-          ),
+          worker.claimantHolder(tx, claimant.runtime_identity),
           code,
           executionId,
           now,
@@ -455,11 +453,7 @@ export function composeServices(options: {
         agent.recordSuccess(
           tx,
           selections,
-          worker.claimantHolder(
-            tx,
-            claimant.worker_binding_id,
-            claimant.runtime_identity,
-          ),
+          worker.claimantHolder(tx, claimant.runtime_identity),
           executionId,
         ),
       selected: (selections, executionId) => {

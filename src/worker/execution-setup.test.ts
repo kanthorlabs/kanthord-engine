@@ -219,6 +219,7 @@ test("setup answers the system and agent prompt after its single snapshot and su
   };
   const worker = {
     declarationOf: (name: string) => getWorkerDeclaration(name) ?? null,
+    placementOf: () => InstancePlacement.Server,
     pinnedAgentView: (
       ...args: Parameters<
         import("./service.ts").WorkerService["pinnedAgentView"]
@@ -393,10 +394,6 @@ test("setup answers the system and agent prompt after its single snapshot and su
         {
           ...dependencies,
           environmentOf: () => recorded,
-          workerBindingRowOf: () => ({
-            ...dependencies.workerBindingRowOf(),
-            placement,
-          }),
           repositoryBindingIdsOf: () => [bindingId],
           repositoryPolicyOf: () => ({
             binding_id: bindingId,
@@ -412,7 +409,7 @@ test("setup answers the system and agent prompt after its single snapshot and su
           }),
           sshHostKeysOf: () => knownHosts,
         },
-        worker,
+        { ...worker, placementOf: () => placement },
         caller,
       )
     ).repositories[0]?.environment;
@@ -462,7 +459,6 @@ test("setup answers the system and agent prompt after its single snapshot and su
         ...dependencies,
         workerBindingRowOf: () => ({
           ...dependencies.workerBindingRowOf(),
-          placement,
           environment: API_IDENTITY,
         }),
         repositoryBindingIdsOf: () => [bindingId],
@@ -480,7 +476,7 @@ test("setup answers the system and agent prompt after its single snapshot and su
         }),
         sshHostKeysOf: () => knownHosts,
       },
-      worker,
+      { ...worker, placementOf: () => placement },
       caller,
     );
     return [...claimed];
@@ -568,6 +564,7 @@ test("setup claims no environment for a container slot whose worker binding name
     },
     {
       declarationOf: (name: string) => getWorkerDeclaration(name) ?? null,
+      placementOf: () => InstancePlacement.Container,
       pinnedAgentView: () => ({
         effective: agent.effective_configuration,
         valid: true,
@@ -583,6 +580,114 @@ test("setup claims no environment for a container slot whose worker binding name
     },
   );
   assert.deepEqual(claimed, []);
+});
+
+test("one binding that lists a server and a container instance claims the environment for the container instance only", async (t) => {
+  const store = new Store(":memory:");
+  t.after(() => store.close());
+  const setup = anthropicSetup();
+  const agent = setup.agents[0]!;
+  const claimed: string[][] = [];
+  const coderRuntime = createIdentity("worker_registration");
+  const builderRuntime = createIdentity("worker_registration");
+  const placements = new Map([
+    [coderRuntime, InstancePlacement.Server],
+    [builderRuntime, InstancePlacement.Container],
+  ]);
+  const claimOf = (runtimeIdentity: string) => ({
+    executionId: setup.execution_id,
+    runtimeIdentity,
+    workerBindingId: "binding",
+    nodeId: createIdentity("node"),
+    pinnedRevision: 1,
+    nodeBranch: "kanthord/node_01ARZ3NDEKTSV4RRFFQ69G5FAA",
+    attempt: 1,
+    projectId: "project",
+  });
+  const claimedBy = async (runtimeIdentity: string) => {
+    claimed.length = NO_REQUESTS;
+    const claim = claimOf(runtimeIdentity);
+    await executionSetup(
+      {
+        store,
+        promptTelemetry: { agentPrompted: () => {} },
+        agentPrompt: {
+          templates: async () => SHIPPED_TEMPLATES,
+          compose: async () => promptParts,
+        },
+        workerBindingRowOf: () => ({
+          binding_id: claim.workerBindingId,
+          project_id: claim.projectId,
+          resource_identity: "worker:coder@1",
+          tombstone: false,
+          disabled: false,
+          placement: null,
+          worker_instances: ["coder-1", "builder-1"],
+          environment: API_IDENTITY,
+          worker_name: setup.worker_name,
+          entries: [],
+          resource_budget: null,
+        }),
+        pinnedCredentialMetadata: (_tx, _claim, name) => ({
+          id: agent.credential_id,
+          name,
+          platform: agent.effective_configuration.provider,
+          metadata: null,
+        }),
+        environmentClaimed: (projectId, resourceIdentity) => {
+          claimed.push([projectId, resourceIdentity]);
+        },
+        environmentDigestOf: () => ENVIRONMENT_DIGEST,
+        environmentOf: () => null,
+        repositoryBindingIdsOf: () => [],
+        intentOf: () => ExecutionIntent.Implement,
+        repositoryPolicyOf: () => null,
+        sshHostKeysOf: () => {
+          throw new Error("UNEXPECTED_COLLABORATION");
+        },
+        custodyHandover: publicKeyCustody,
+        schedulerClaims: {
+          agentSelectionsOf: () => [
+            {
+              agent_name: agent.agent_name,
+              position: 0,
+              level: ChainLevel.Enablement,
+              agent_provider: "default",
+              provider: agent.effective_configuration.provider,
+              credential: "key",
+              model_identifier: agent.effective_configuration.model_identifier,
+              reasoning_effort: "low",
+            },
+          ],
+          agentPinsOf: () => ({
+            worker_binding_id: claim.workerBindingId,
+            pins: [],
+          }),
+        },
+      },
+      {
+        declarationOf: (name: string) => getWorkerDeclaration(name) ?? null,
+        placementOf: (_tx, identity) => placements.get(identity) ?? null,
+        pinnedAgentView: () => ({
+          effective: agent.effective_configuration,
+          valid: true,
+          issues: [],
+        }),
+      },
+      {
+        identity: testHumanIdentity("ulrich", "Ulrich", "jti"),
+        context: background,
+        requestId: "request",
+        execution: claim,
+        commit: (fn) => store.transaction(fn),
+      },
+    );
+    return [...claimed];
+  };
+  assert.deepEqual(await claimedBy(builderRuntime), [
+    ["project", API_IDENTITY],
+  ]);
+  assert.deepEqual(await claimedBy(coderRuntime), []);
 });
 
 test("setup of a container worker binding with an environment claims inside a real transaction and its compute reads the binding facts", async (t) => {
@@ -679,6 +784,7 @@ test("setup of a container worker binding with an environment claims inside a re
     },
     {
       declarationOf: (name: string) => getWorkerDeclaration(name) ?? null,
+      placementOf: () => InstancePlacement.Container,
       pinnedAgentView: () => ({
         effective: agent.effective_configuration,
         valid: true,
@@ -829,6 +935,7 @@ async function twoAgentAnswer(
     },
     {
       declarationOf: twoAgentDeclarationOf,
+      placementOf: () => InstancePlacement.Server,
       pinnedAgentView: (_tx, _worker, selection) => ({
         effective: {
           ...setup.agents[0]!.effective_configuration,
@@ -1020,6 +1127,7 @@ async function repositorySetup(t: TestContext, address: string, pin: boolean) {
     },
     {
       declarationOf: (name: string) => getWorkerDeclaration(name) ?? null,
+      placementOf: () => InstancePlacement.Server,
       pinnedAgentView: () => ({
         effective: agent.effective_configuration,
         valid: true,

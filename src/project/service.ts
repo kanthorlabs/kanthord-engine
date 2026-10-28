@@ -391,17 +391,6 @@ function listsContainer(
   );
 }
 
-function transitionalPlacement(
-  tx: Transaction,
-  instanceOf: InstanceOf,
-  config: { worker_instances?: readonly string[] },
-): WorkerPlacement | null {
-  const first = config.worker_instances?.[FIRST_INDEX];
-  return first === undefined
-    ? null
-    : (instanceOf(tx, first)?.placement ?? null);
-}
-
 function endsGroup(config: {
   instance_count?: number;
   worker_instances?: readonly string[];
@@ -539,7 +528,6 @@ function workerRowOf(
     worker_name: config.worker,
     instance_count: effectiveInstanceCount(config),
     worker_instances: config.worker_instances ?? [],
-    placement: transitionalPlacement(tx, instanceOf, config),
     environment: resolveEnvironment(tx, instanceOf, config, row.project_id),
     generation:
       readGeneration(tx, row.project_id, row.resource_identity) ??
@@ -1097,10 +1085,7 @@ export class ProjectService implements Service, ProjectBindings {
       config.worker,
       agent,
       entry,
-      bindingScope({
-        ...config,
-        placement: transitionalPlacement(tx, this.instanceOf, config),
-      }),
+      bindingScope(listedInstances(tx, this.instanceOf, config)),
     );
     assert.ok(view, "Declared agents must have a worker view.");
     assert.ok(project.binding_set_version >= BINDING_SET_INITIAL_VERSION);
@@ -1462,12 +1447,11 @@ export class ProjectService implements Service, ProjectBindings {
         tx,
         config.worker,
         entries.get(agent) ?? null,
-        bindingHolders({
-          placement: transitionalPlacement(tx, this.instanceOf, {
+        bindingHolders(
+          listedInstances(tx, this.instanceOf, {
             worker_instances: instances,
           }),
-          worker_instances: instances,
-        }),
+        ),
       );
   }
   private validateWorkerInstances(
@@ -1518,10 +1502,9 @@ export class ProjectService implements Service, ProjectBindings {
             binding_id: binding.id,
             worker_name: config.worker,
             entry: entries.get(agentName) ?? null,
-            holders: bindingHolders({
-              ...config,
-              placement: transitionalPlacement(tx, this.instanceOf, config),
-            }),
+            holders: bindingHolders(
+              listedInstances(tx, this.instanceOf, config),
+            ),
           },
         ];
       },
@@ -1623,7 +1606,6 @@ export class ProjectService implements Service, ProjectBindings {
       resource_identity: binding.resource_identity,
       tombstone: resolution.tombstone,
       disabled: resolution.disabled,
-      placement: transitionalPlacement(tx, this.instanceOf, config),
       worker_instances: config.worker_instances ?? [],
       environment: resolveEnvironment(
         tx,
@@ -1923,7 +1905,6 @@ export class ProjectService implements Service, ProjectBindings {
       return {
         project_id: projectId,
         resource_identity: resourceIdentity,
-        placement: transitionalPlacement(tx, this.instanceOf, config),
         ...(config.worker_instances === undefined
           ? {}
           : { worker_instances: config.worker_instances }),

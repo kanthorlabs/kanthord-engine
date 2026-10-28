@@ -2775,6 +2775,39 @@ test("the holder rule refuses a holder without a live copy at the entry write, t
   );
 });
 
+test("the holders of a binding that lists a server and a worker instance need the server copy and the copy of that instance", (t) => {
+  const RELAY_A = "relay-a";
+  const held = new Set([
+    `${provider.credential}/${SERVER_HOLDER}`,
+    `${provider.credential}/${RELAY_A}`,
+  ]);
+  const f = enablementFixture(t, {
+    copyHeld: (_tx, credential, holder) => held.has(`${credential}/${holder}`),
+  });
+  f.invoke("enablement.put", putBody);
+  const holders = [RELAY_A, SERVER_HOLDER];
+  const validate = () =>
+    f.store.transaction((tx) =>
+      f.agent.validateEntry(tx, AGENT, null, holders),
+    );
+  validate();
+  for (const missing of holders) {
+    held.delete(`${provider.credential}/${missing}`);
+    refuses(
+      validate,
+      AgentErrorCode.CredentialHolderMismatch,
+      HttpStatus.BadRequest,
+      {
+        agent: AGENT,
+        agent_provider: provider.name,
+        credential: provider.credential,
+        holder: missing,
+      },
+    );
+    held.add(`${provider.credential}/${missing}`);
+  }
+});
+
 test("a view without a claimant shows the hold with the latest available_at over the holders of the binding", (t) => {
   const RELAY_A = "relay-a";
   const RELAY_B = "relay-b";

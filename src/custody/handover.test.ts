@@ -836,6 +836,38 @@ test("a server placement handover never releases an instance copy", async (t) =>
   assert.deepEqual(f.row.credentials, []);
 });
 
+test("one binding that lists a server and a worker instance hands each execution the copy of its instance placement", async (t) => {
+  const box = await instancePair("box-1");
+  const f = fixture(t, ["anthro-1"], [], new Map([["box-1", box]]));
+  const [copy] = await f.holdCopies("anthro-1", ["box-1"]);
+  const copyId = copy!.revisions[0]!.id;
+  const server = plainHandoverPayloadSchema.parse(
+    openEnvelope(
+      f.keys.handover,
+      f.aad,
+      f.handover([], HandoverPlacement.Server),
+    ),
+  );
+  assert.deepEqual(
+    server.items.map(({ credential_id }) => credential_id),
+    [f.credentialId],
+  );
+  const worker = fixture(t, ["anthro-1"], [], new Map([["box-1", box]]));
+  const [workerCopy] = await worker.holdCopies("anthro-1", ["box-1"]);
+  const sealed = handoverPayloadSchema.parse(
+    openEnvelope(
+      worker.keys.handover,
+      worker.aad,
+      worker.handover([], HandoverPlacement.Worker),
+    ),
+  );
+  assert.deepEqual(
+    sealed.items.map(({ credential_id }) => credential_id),
+    [workerCopy!.revisions[0]!.id],
+  );
+  assert.notEqual(copyId, f.credentialId);
+});
+
 for (const placement of [HandoverPlacement.Server, HandoverPlacement.Container])
   test(`a ${placement} placement handover carries the server-held item and the SSH identities`, (t) => {
     const f = fixture(t, ["anthro-1"], ["deploy"]);

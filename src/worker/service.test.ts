@@ -72,6 +72,7 @@ import { createIdentity } from "../kernel/identity.ts";
 import { testMachineIdentity } from "../kernel/test-identity.ts";
 import {
   endRegistration,
+  insertRegistration,
   readAllLive,
   readRow,
   reopenRegistration,
@@ -1348,22 +1349,6 @@ test("handover handlers pass the proven execution and one transactional clock re
       assert.equal(revision, execution.pinnedRevision);
       return repositoryBindingIds;
     },
-    workerBindingRowOf: (tx, bindingId) => {
-      assert(tx.database.isTransaction);
-      assert.equal(bindingId, execution.workerBindingId);
-      return {
-        binding_id: bindingId,
-        project_id: execution.projectId,
-        resource_identity: "worker:kanthord:general",
-        worker_name: "coder@1",
-        entries: [],
-        resource_budget: null,
-        tombstone: false,
-        disabled: false,
-        placement: InstancePlacement.Container,
-        worker_instances: [],
-      };
-    },
     custodyHandover: {
       handover: (
         tx,
@@ -1414,6 +1399,30 @@ test("handover handlers pass the proven execution and one transactional clock re
         throw new Error("UNEXPECTED_COLLABORATION");
       },
     },
+  });
+  execution.runtimeIdentity = f.store.transaction((tx) => {
+    const instance = insertInstance(
+      tx,
+      {
+        name: LAPTOP,
+        worker: WORKER,
+        placement: InstancePlacement.Container,
+        public_key: null,
+        fingerprint: null,
+      },
+      now,
+    );
+    return insertRegistration(
+      tx,
+      {
+        project_id: execution.projectId,
+        resource_identity: "worker:kanthord:general",
+        client_id: identity.clientId,
+        name: "machine",
+        instance_id: instance.id,
+      },
+      now,
+    ).runtime_identity;
   });
   const caller = { ...f.caller, identity, execution };
   const body = { execution_id: createIdentity("execution"), ...envelope };
@@ -1878,6 +1887,7 @@ const NO_STARTS = 0;
 const FIRST_INSTANCE = 0;
 const SECOND_INSTANCE = 1;
 const THIRD_INSTANCE = 2;
+const LAPTOP = "laptop";
 
 const POOL_EXECUTION = "execution_01ARZ3NDEKTSV4RRFFQ69G5FAV";
 
@@ -1914,8 +1924,7 @@ function poolFixture(t: TestContext, instanceCount: number) {
     project_id: POOL_PROJECT,
     resource_identity: pool.resource_identity,
   });
-  const bindingsOf = () =>
-    state.bindings.map((pool) => binding(pool, InstancePlacement.Server));
+  const bindingsOf = () => state.bindings.map((pool) => binding(pool, null));
   const clientIdentityOf = (
     instanceId: string,
     projectId: string,
@@ -1940,7 +1949,7 @@ function poolFixture(t: TestContext, instanceCount: number) {
       const pool = state.bindings.find(
         (item) => item.resource_identity === resourceIdentity,
       );
-      return pool ? binding(pool, InstancePlacement.Server) : null;
+      return pool ? binding(pool, null) : null;
     },
     workerBindingsOf: bindingsOf,
     schedulerClaims: {
@@ -2238,6 +2247,50 @@ test("a binding that drops an instance with a live registration keeps a draining
     ),
     false,
   );
+});
+
+function mixedPool(t: TestContext) {
+  const f = poolFixture(t, 1);
+  const instanceId = f.addInstance(LAPTOP, InstancePlacement.Worker);
+  f.worker.startPool();
+  const server = f.register(FIRST_INSTANCE);
+  const laptop = f.registerAs(f.clientOf(LAPTOP), instanceId);
+  return { ...f, server, laptop };
+}
+
+test("placementOf answers the placement of the instance of a registration and null for an external harness", (t) => {
+  const f = mixedPool(t);
+  const placementOf = (runtimeIdentity: string) =>
+    f.store.transaction((tx) => f.worker.placementOf(tx, runtimeIdentity));
+  assert.equal(
+    placementOf(f.server.runtime_identity),
+    InstancePlacement.Server,
+  );
+  assert.equal(
+    placementOf(f.laptop.runtime_identity),
+    InstancePlacement.Worker,
+  );
+  const external = f.store.transaction((tx) =>
+    insertRegistration(
+      tx,
+      {
+        project_id: POOL_PROJECT,
+        resource_identity: POOL_RESOURCE,
+        client_id: createIdentity("client_identity"),
+        name: "external",
+      },
+      Date.now(),
+    ),
+  );
+  assert.equal(placementOf(external.runtime_identity), null);
+});
+
+test("claimantHolder answers the instance name at the worker placement and server otherwise in one binding", (t) => {
+  const f = mixedPool(t);
+  const holderOf = (runtimeIdentity: string) =>
+    f.store.transaction((tx) => f.worker.claimantHolder(tx, runtimeIdentity));
+  assert.equal(holderOf(f.laptop.runtime_identity), LAPTOP);
+  assert.equal(holderOf(f.server.runtime_identity), SERVER_HOLDER);
 });
 
 test("a registration record shows the placement and the drain flag of its instance", (t) => {

@@ -117,7 +117,11 @@ import {
 } from "../llm/contract.ts";
 import { unreportedHealth } from "../llm/copy-health.ts";
 import { WorkerInstances } from "./instances.ts";
-import { readInstanceById, readLiveInstance } from "./instance-rows.ts";
+import {
+  readInstanceById,
+  readLiveInstance,
+  readLiveInstances,
+} from "./instance-rows.ts";
 import { declareInstances } from "./instance-operations.ts";
 import type { AgentPromptFacts } from "./prompt-telemetry.ts";
 
@@ -184,15 +188,14 @@ export interface Dependencies {
     logger: Logger;
   };
 }
-function claimantOf(
-  tx: Transaction,
-  placement: string | null | undefined,
-  runtimeIdentity: string,
-): string {
-  if (placement !== InstancePlacement.Worker) return SERVER_HOLDER;
+function instanceOfRegistration(tx: Transaction, runtimeIdentity: string) {
   const instanceId = readRow(tx, runtimeIdentity)?.instance_id;
-  const instance = instanceId ? readInstanceById(tx, instanceId) : null;
-  assert.ok(instance, "A worker placement claimant names its instance.");
+  return instanceId ? readInstanceById(tx, instanceId) : null;
+}
+
+function claimantOf(tx: Transaction, runtimeIdentity: string): string {
+  const instance = instanceOfRegistration(tx, runtimeIdentity);
+  if (instance?.placement !== InstancePlacement.Worker) return SERVER_HOLDER;
   return instance.name;
 }
 
@@ -250,16 +253,18 @@ export class WorkerService implements Service {
       this,
       tx,
       workerBindingId,
-      this.claimantHolder(tx, workerBindingId, runtimeIdentity),
+      this.claimantHolder(tx, runtimeIdentity),
     );
   }
-  claimantHolder(
+  claimantHolder(tx: Transaction, runtimeIdentity: string): string {
+    return claimantOf(tx, runtimeIdentity);
+  }
+  placementOf(
     tx: Transaction,
-    workerBindingId: string,
     runtimeIdentity: string,
-  ): string {
-    const binding = this.dependencies.workerBindingRowOf(tx, workerBindingId);
-    return claimantOf(tx, binding?.placement, runtimeIdentity);
+  ): InstancePlacement | null {
+    assert.ok(tx.database.isTransaction);
+    return instanceOfRegistration(tx, runtimeIdentity)?.placement ?? null;
   }
   bindingsListingInstance(
     tx: Transaction,
@@ -601,8 +606,10 @@ export class WorkerService implements Service {
     assert.ok(declaration);
     if (declaration.host === WorkerHost.ExternalHarness) return true;
     const scope = {
-      holders: bindingHolders(binding),
-      claimant: claimantOf(tx, binding.placement, runtimeIdentity),
+      holders: bindingHolders(
+        readLiveInstances(tx, binding.worker_instances ?? []),
+      ),
+      claimant: claimantOf(tx, runtimeIdentity),
     };
     const agents = agentsOfWorker(binding.worker_name);
     assert.ok(agents.length > NO_ITEMS);
@@ -965,10 +972,7 @@ export class WorkerService implements Service {
               tx,
               identity,
               execution,
-              this.dependencies.workerBindingRowOf(
-                tx,
-                execution.workerBindingId,
-              )?.placement ?? null,
+              this.placementOf(tx, execution.runtimeIdentity),
               this.dependencies.repositoryBindingIdsOf(
                 tx,
                 execution.nodeId,
@@ -1010,8 +1014,7 @@ export class WorkerService implements Service {
           tx,
           identity,
           execution,
-          this.dependencies.workerBindingRowOf(tx, execution.workerBindingId)
-            ?.placement ?? null,
+          this.placementOf(tx, execution.runtimeIdentity),
           { nonce: body.nonce, ciphertext: body.ciphertext },
           Date.now(),
         ),

@@ -112,7 +112,6 @@ function bindingOf(projectId: string, name: string, instances: string[]) {
     revision: 1,
     worker_name: WORKER,
     instance_count: instances.length,
-    placement: InstancePlacement.Worker,
     generation: 1,
     resource_budget: null,
     entries: [],

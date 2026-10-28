@@ -1002,7 +1002,6 @@ test("worker group resolution rejects absence, disablement and removal", async (
   assert.deepEqual(await resolve(), {
     project_id: f.project_id,
     resource_identity: WORKER_GROUP,
-    placement: null,
   });
   assert.equal(await resolve(MISSING_GROUP), null);
   f.write(INSTANCE_COUNT_MIN);
@@ -1026,14 +1025,12 @@ test("worker group resolution answers the group of a native binding with no list
   assert.deepEqual(await resolve(), {
     project_id: f.project_id,
     resource_identity: WORKER_GROUP,
-    placement: null,
     worker_instances: [],
   });
   f.write([SERVER_INSTANCE, WORKER_INSTANCE]);
   assert.deepEqual(await resolve(), {
     project_id: f.project_id,
     resource_identity: WORKER_GROUP,
-    placement: WorkerPlacement.Server,
     worker_instances: [SERVER_INSTANCE, WORKER_INSTANCE],
   });
   f.write(null);
@@ -1134,7 +1131,6 @@ test("worker group resolution uses the latest tombstone and accepts equality at 
     {
       project_id: f.project_id,
       resource_identity: WORKER_GROUP,
-      placement: null,
     },
   );
   const secondTombstoneAt = TOMBSTONE_AT + GROUP_ISSUED_AT;
@@ -1160,7 +1156,6 @@ test("worker group resolution uses the latest tombstone and accepts equality at 
     {
       project_id: f.project_id,
       resource_identity: WORKER_GROUP,
-      placement: null,
     },
   );
 });
@@ -1181,7 +1176,6 @@ test("workerBindingOf reads current configuration, disablement and tombstone in 
     worker_name: GROUP_WORKER_NAME,
     instance_count: SINGLE_INSTANCE,
     worker_instances: [],
-    placement: null,
     environment: null,
     generation: revisionOf(f, first),
     resource_budget: null,
@@ -1207,14 +1201,13 @@ test("workerBindingOf reads current configuration, disablement and tombstone in 
   assert.equal(read()?.project_name, RENAMED_NAME);
 });
 
-test("workerBindingOf reads the placement and the generation of a binding group", (t) => {
+test("workerBindingOf reads the generation of a binding group", (t) => {
   const f = bindingFixture(t);
   const read = () =>
     f.store.transaction((tx) =>
       f.project.workerBindingOf(tx, f.project_id, WORKER_GROUP),
     );
   const first = f.write([SERVER_INSTANCE]);
-  assert.equal(read()?.placement, WorkerPlacement.Server);
   assert.equal(read()?.generation, revisionOf(f, first));
   f.write([SERVER_INSTANCE, WORKER_INSTANCE]);
   assert.equal(read()?.generation, revisionOf(f, first));
@@ -1222,7 +1215,6 @@ test("workerBindingOf reads the placement and the generation of a binding group"
   f.write(null);
   assert.equal(read()?.generation, NO_GENERATION);
   const second = f.write([WORKER_INSTANCE]);
-  assert.equal(read()?.placement, WorkerPlacement.Worker);
   assert.equal(read()?.generation, revisionOf(f, second));
   assert.notEqual(read()?.generation, revisionOf(f, first));
 });
@@ -1233,16 +1225,14 @@ test("workerBindingsOf lists the current worker bindings of one project or of ev
   const list = (projectId: string | null) =>
     f.store.transaction((tx) => f.project.workerBindingsOf(tx, projectId));
   assert.deepEqual(
-    list(f.project_id).map(({ project_id, resource_identity, placement }) => ({
+    list(f.project_id).map(({ project_id, resource_identity }) => ({
       project_id,
       resource_identity,
-      placement,
     })),
     [
       {
         project_id: f.project_id,
         resource_identity: WORKER_GROUP,
-        placement: WorkerPlacement.Server,
       },
     ],
   );
@@ -1970,7 +1960,7 @@ function workerRowOfGroup(f: ReturnType<typeof writeFixture>) {
   );
 }
 
-test("a native worker binding lists instances at different placements and answers their count and the placement of the first", async (t) => {
+test("a native worker binding lists instances at different placements and answers their count", async (t) => {
   const f = writeFixture(t);
   const written = await f.write({
     [WORKER_NAME]: nativeBinding([SERVER_INSTANCE, WORKER_INSTANCE]),
@@ -1982,7 +1972,6 @@ test("a native worker binding lists instances at different placements and answer
   const row = workerRowOfGroup(f);
   assert.equal(row?.instance_count, TWO_INSTANCES);
   assert.deepEqual(row?.worker_instances, [SERVER_INSTANCE, WORKER_INSTANCE]);
-  assert.equal(row?.placement, WorkerPlacement.Server);
   const unchanged = await f.write(
     { [WORKER_NAME]: nativeBinding([SERVER_INSTANCE, WORKER_INSTANCE]) },
     written.binding_set_version,
@@ -1990,30 +1979,36 @@ test("a native worker binding lists instances at different placements and answer
   assert.equal(unchanged.binding_set_version, written.binding_set_version);
 });
 
-test("the transitional placement follows the first listed instance and is null for an empty list and an external harness", async (t) => {
+test("the binding answers hold no placement for any listing", async (t) => {
   const f = writeFixture(t);
+  const holdsNoPlacement = () => {
+    const bindingId = workerRowOfGroup(f)?.binding_id;
+    assert.ok(bindingId);
+    const answers = [
+      workerRowOfGroup(f),
+      ...f.store.transaction((tx) =>
+        f.project.workerBindingsOf(tx, f.params.project_id),
+      ),
+      f.store.transaction((tx) => f.project.workerBindingRowOf(tx, bindingId)),
+    ];
+    for (const answer of answers)
+      assert.equal(Object.hasOwn(answer!, "placement"), false);
+  };
   const first = await f.write({
     [WORKER_NAME]: nativeBinding([WORKER_INSTANCE, SERVER_INSTANCE]),
   });
-  assert.equal(workerRowOfGroup(f)?.placement, WorkerPlacement.Worker);
-  const listed = f.store.transaction((tx) =>
-    f.project.workerBindingsOf(tx, f.params.project_id),
-  );
-  assert.deepEqual(
-    listed.map(({ placement }) => placement),
-    [WorkerPlacement.Worker],
-  );
+  holdsNoPlacement();
   const empty = await f.write(
     { [WORKER_NAME]: nativeBinding([]) },
     first.binding_set_version,
   );
-  assert.equal(workerRowOfGroup(f)?.placement, null);
+  holdsNoPlacement();
   const removed = await f.write({}, empty.binding_set_version);
   await f.write(
     { [WORKER_NAME]: workerBinding(EXTERNAL_WORKER) },
     removed.binding_set_version,
   );
-  assert.equal(workerRowOfGroup(f)?.placement, null);
+  holdsNoPlacement();
 });
 
 for (const field of [WorkerField.Placement, WorkerField.InstanceCount])
@@ -2059,7 +2054,7 @@ test("a native worker binding at the old shape refuses the entire edit of a stor
   assert.deepEqual(f.snapshot(), before);
 });
 
-test("an external worker binding reads a null placement and keeps instance_count", async (t) => {
+test("an external worker binding keeps instance_count", async (t) => {
   const f = writeFixture(t);
   const written = await f.write({
     [WORKER_NAME]: {
@@ -2072,7 +2067,6 @@ test("an external worker binding reads a null placement and keeps instance_count
     instance_count: THREE_INSTANCES,
   });
   const row = workerRowOfGroup(f);
-  assert.equal(row?.placement, null);
   assert.equal(row?.instance_count, THREE_INSTANCES);
   assert.deepEqual(row?.worker_instances, []);
 });
@@ -2110,7 +2104,6 @@ test("a worker binding revises its listed instances and keeps its generation", a
   );
   const after = workerRowOfGroup(f);
   assert.equal(after?.generation, before?.generation);
-  assert.equal(after?.placement, WorkerPlacement.Worker);
 });
 
 test("a worker binding that lists no instance answers a count of 0 and is disabled", async (t) => {
@@ -2201,6 +2194,49 @@ test("the agent view of a native worker that lists a worker instance checks the 
   const [item] = f.invoke("agentConfiguration.list", null, params).items;
   assert.equal(item?.valid, true);
   assert.deepEqual(scopes, [{ holders: [WORKER_INSTANCE], claimant: null }]);
+});
+
+test("a binding that lists a server and a worker instance validates its entries against the worker instance and the server", async (t) => {
+  const holders: Array<readonly string[]> = [];
+  const f = writeFixture(t, {
+    workerAgentsOf: () => [AGENT],
+    validateEntry: (_tx, _worker, _entry, received) => {
+      holders.push(received);
+    },
+  });
+  await f.write({
+    [WORKER_NAME]: nativeBinding([SERVER_INSTANCE, WORKER_INSTANCE]),
+  });
+  assert.deepEqual(holders, [[WORKER_INSTANCE, SERVER_HOLDER]]);
+});
+
+test("the agent view of a native worker that lists a server and a worker instance reads an unknown claimant over both holders", async (t) => {
+  const scopes: HolderScope[] = [];
+  const f = writeFixture(t, {
+    workerAgentsOf: () => [AGENT],
+    workerAgentView: (_tx, _worker, _agent, _entry, scope) => {
+      scopes.push(scope);
+      return {
+        defaults: null,
+        effective: null,
+        chain: [],
+        active_position: null,
+        cooling: null,
+        valid: true,
+        issues: [],
+      };
+    },
+  });
+  const written = await f.write({
+    [WORKER_NAME]: nativeBinding([SERVER_INSTANCE, WORKER_INSTANCE]),
+  });
+  f.invoke("agentConfiguration.list", null, {
+    ...f.params,
+    binding_id: written.bindings[WORKER_NAME]!.id,
+  });
+  assert.deepEqual(scopes, [
+    { holders: [WORKER_INSTANCE, SERVER_HOLDER], claimant: null },
+  ]);
 });
 
 const INSTANCE_REFUSALS: Array<
@@ -4864,7 +4900,6 @@ test("workerBindingRowOf retains the pinned configuration in the caller transact
         resource_identity: pinned[WORKER_NAME]!.resource_identity,
         tombstone: false,
         disabled: false,
-        placement: WorkerPlacement.Server,
         worker_instances: [SERVER_INSTANCE],
         environment: null,
         entries: [],

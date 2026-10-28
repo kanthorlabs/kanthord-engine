@@ -8,6 +8,7 @@ import {
 } from "../scheduler/contract.ts";
 import type { WorkerEntry } from "./contract.ts";
 import { bindingHolders } from "../project/contract.ts";
+import { readLiveInstances } from "./instance-rows.ts";
 import type { Dependencies, WorkerService } from "./service.ts";
 
 const NO_PINS = 0;
@@ -31,7 +32,9 @@ export function agentChoice(
 ): AgentChoice {
   const row = dependencies.workerBindingRowOf(tx, workerBindingId);
   const scope = {
-    holders: row ? bindingHolders(row) : [],
+    holders: row
+      ? bindingHolders(readLiveInstances(tx, row.worker_instances))
+      : [],
     claimant,
   };
   const agents = row

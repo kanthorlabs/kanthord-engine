@@ -438,7 +438,6 @@ export type WorkerBindingOf = (
   worker_name: string;
   instance_count: number;
   worker_instances?: string[];
-  placement: InstancePlacement | null;
   environment?: string | null;
   generation: number;
   resource_budget: { turns: number; wall_time_ms: number } | null;
@@ -475,7 +474,6 @@ export type WorkerBindingRowOf = (
   tombstone: boolean;
   disabled: boolean;
   worker_name: string;
-  placement: InstancePlacement | null;
   worker_instances: string[];
   environment?: string | null;
   entries: Array<WorkerEntry & { agent: string }>;

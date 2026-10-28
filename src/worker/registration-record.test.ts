@@ -27,7 +27,7 @@ const NOW = 1000;
 const PROJECT = createIdentity("project");
 const RESOURCE = "worker:kanthord:general";
 const NATIVE = "coder@1";
-const PLACEMENT = "worker";
+const PLACEMENT = InstancePlacement.Worker;
 const INSTANCE_NAME = "coder-1";
 const CURSOR_INVALID = "system.pagination.cursor_invalid";
 const BINDING = {
@@ -109,6 +109,7 @@ test("registration records distinguish native/external placement and pure Schedu
         resource_identity: RESOURCE,
         client_id: createIdentity("client_identity"),
         name: "worker-a",
+        instance_id: createIdentity("worker_instance"),
       },
       NOW,
     );
@@ -119,7 +120,13 @@ test("registration records distinguish native/external placement and pure Schedu
         const record = registrationRecord(
           tx,
           {
-            workerBindingOf: () => ({ ...BINDING, worker_name: workerName }),
+            workerBindingOf: () => ({
+              ...BINDING,
+              worker_name: workerName,
+              worker_instances: [INSTANCE_NAME],
+            }),
+            instanceNameOf: () => INSTANCE_NAME,
+            instancePlacementOf: () => PLACEMENT,
             schedulerClaims: {
               agentSelectionsOf: () => [],
               agentPinsOf: () => null,
@@ -162,6 +169,7 @@ test("registration inventory pages live rows descending with both filters and ca
     let binding: ReturnType<WorkerBindingOf> = BINDING;
     const dependencies = {
       workerBindingOf: () => binding,
+      instancePlacementOf: () => PLACEMENT,
       schedulerClaims: {
         agentSelectionsOf: () => [],
         agentPinsOf: () => null,
@@ -183,6 +191,7 @@ test("registration inventory pages live rows descending with both filters and ca
             resource_identity: resourceIdentity,
             client_id: createIdentity("client_identity"),
             name: "worker",
+            instance_id: createIdentity("worker_instance"),
           },
           NOW,
         ),
@@ -194,6 +203,7 @@ test("registration inventory pages live rows descending with both filters and ca
         resource_identity: RESOURCE,
         client_id: createIdentity("client_identity"),
         name: "other",
+        instance_id: createIdentity("worker_instance"),
       },
       NOW,
     );
@@ -290,8 +300,9 @@ test("a registration whose instance the latest binding revision does not list an
       registrationRecord(
         tx,
         {
-          workerBindingOf: () => ({ ...BINDING, placement, worker_instances }),
+          workerBindingOf: () => ({ ...BINDING, worker_instances }),
           instanceNameOf: () => INSTANCE_NAME,
+          instancePlacementOf: () => placement,
           schedulerClaims: {
             agentSelectionsOf: () => [],
             agentPinsOf: () => null,
@@ -338,7 +349,6 @@ test("a registration whose binding lists no instance takes the placement of its 
       {
         workerBindingOf: () => ({
           ...BINDING,
-          placement: null,
           worker_instances: [],
         }),
         instanceNameOf: () => INSTANCE_NAME,
@@ -360,5 +370,66 @@ test("a registration whose binding lists no instance takes the placement of its 
     );
     assert.equal(record.draining, true);
     assert.equal(record.placement, InstancePlacement.Container);
+  });
+});
+
+test("a registration record takes the placement and the name of its own instance in a mixed binding", (t) => {
+  const store = fixture(t);
+  store.transaction((tx) => {
+    const instances = new Map([
+      [
+        createIdentity("worker_instance"),
+        { name: INSTANCE_NAME, placement: InstancePlacement.Server },
+      ],
+      [
+        createIdentity("worker_instance"),
+        { name: "builder-1", placement: InstancePlacement.Worker },
+      ],
+    ]);
+    const recordOf = (instanceId: string | undefined, workerName: string) =>
+      registrationRecord(
+        tx,
+        {
+          workerBindingOf: () => ({
+            ...BINDING,
+            worker_name: workerName,
+            worker_instances: [...instances.values()].map(({ name }) => name),
+          }),
+          instanceNameOf: (_tx, id) => instances.get(id)?.name ?? null,
+          instancePlacementOf: (_tx, id) =>
+            instances.get(id)?.placement ?? null,
+          schedulerClaims: {
+            agentSelectionsOf: () => [],
+            agentPinsOf: () => null,
+            unendedExecutionOf: () => null,
+            requireRunning: () => assert.fail("UNEXPECTED_COLLABORATION"),
+            runningExecutionOfRuntime: () => null,
+            activityOf: () => ({
+              activity: RegistrationActivity.Idle,
+              execution_id: null,
+            }),
+          },
+        },
+        insertRegistration(
+          tx,
+          {
+            project_id: PROJECT,
+            resource_identity: RESOURCE,
+            client_id: createIdentity("client_identity"),
+            name: "registration",
+            instance_id: instanceId,
+          },
+          NOW,
+        ),
+        NOW,
+      );
+    for (const [instanceId, instance] of instances) {
+      const record = recordOf(instanceId, NATIVE);
+      assert.equal(record.placement, instance.placement);
+      assert.equal(record.instance, instance.name);
+    }
+    const external = recordOf(undefined, "claude-code@1");
+    assert.equal(external.placement, undefined);
+    assert.equal(external.instance, null);
   });
 });

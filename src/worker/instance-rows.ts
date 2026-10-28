@@ -51,6 +51,13 @@ export function readLiveInstance(
   return latest?.ended_at === null ? latest : null;
 }
 
+export function readLiveInstances(
+  tx: Transaction,
+  names: readonly string[],
+): InstanceRecord[] {
+  return names.flatMap((name) => readLiveInstance(tx, name) ?? []);
+}
+
 export function readInstanceById(
   tx: Transaction,
   instanceId: string,
