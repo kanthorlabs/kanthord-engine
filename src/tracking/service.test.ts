@@ -279,6 +279,27 @@ for (const rule of [TransitionRule.None, TransitionRule.PlanDefect])
     assert.equal(service.droppedRecords(), NO_DROP);
   });
 
+test("a transition span refuses a count and a limit that do not match its rule", (t) => {
+  const { service } = harness(t);
+  service.executionOpened(TRACE, CREATED, OPENING);
+  const transition = {
+    from: "Evaluating",
+    to: "Blocked",
+    lead_time_ms: null,
+    failure_count: null,
+    available_at: null,
+    transitioned_at: ENDED,
+  };
+  for (const mismatch of [
+    { rule: TransitionRule.PlanDefect, count: 3, limit: 3 },
+    { rule: TransitionRule.ReworkLimit, count: null, limit: null },
+  ])
+    assert.throws(
+      () => service.executionTransition(TRACE, { ...transition, ...mismatch }),
+      assert.AssertionError,
+    );
+});
+
 for (const [cause, status, state] of [
   [RevokeCause.Human, SpanStatus.Error, TraceState.Error],
   [RevokeCause.Assessment, SpanStatus.Ok, TraceState.Ok],
