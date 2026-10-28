@@ -55,11 +55,8 @@ export async function until<T>(
 type CliTestSupport = typeof import("../cli/test-support.ts");
 export type CliResult = Awaited<ReturnType<CliTestSupport["runKanthord"]>>;
 
-const CLI_TEST_SUPPORT = new URL("../cli/test-support.ts", import.meta.url)
-  .href;
-
 function cliTestSupport(): Promise<CliTestSupport> {
-  return import(CLI_TEST_SUPPORT) as Promise<CliTestSupport>;
+  return import("../cli/test-support.ts");
 }
 
 export async function spawnKanthord(

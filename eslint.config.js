@@ -245,6 +245,11 @@ const syntaxRules = [
     selector: `VariableDeclarator[id.name=${valueNamePattern}][init.type="Literal"]`,
     message: valueNameMessage,
   },
+  {
+    selector: "ImportExpression[source.type!='Literal']",
+    message:
+      "Import a module by a literal specifier, so that the boundaries rule sees the import.",
+  },
 ];
 
 export default tseslint.config(
@@ -401,6 +406,18 @@ export default tseslint.config(
                 {
                   to: element("service", {
                     captured: { name: "{worker,mission}" },
+                    fileInternalPath: "test-support.ts",
+                  }),
+                },
+              ],
+            },
+            {
+              from: element("apps-server", {
+                fileInternalPath: "cli-support.ts",
+              }),
+              allow: [
+                {
+                  to: element("apps-cli", {
                     fileInternalPath: "test-support.ts",
                   }),
                 },
