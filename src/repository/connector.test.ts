@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import {
+  accessSync,
   appendFileSync,
   chmodSync,
+  constants,
   existsSync,
   mkdtempSync,
   readdirSync,
@@ -1237,6 +1239,20 @@ function blobObject(text: string): string {
 const TRACE_BIN_DIRECTORY = "bin";
 const GIT_BINARY = "git";
 const TRACE_WRAPPER_MODE = 0o700;
+const SHELL_QUOTE_ESCAPE = "'\\''";
+
+function executable(candidate: string) {
+  try {
+    accessSync(candidate, constants.X_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function quoted(text: string) {
+  return `'${text.replaceAll("'", SHELL_QUOTE_ESCAPE)}'`;
+}
 
 async function tracedRead(t: TestContext, files: Record<string, SeedEntry>) {
   const { address, scratch, commit } = await instructionOrigin(t);
@@ -1249,11 +1265,11 @@ async function tracedRead(t: TestContext, files: Record<string, SeedEntry>) {
   const git = (process.env.PATH ?? NO_TEXT)
     .split(delimiter)
     .map((directory) => join(directory, GIT_BINARY))
-    .find((candidate) => existsSync(candidate));
+    .find(executable);
   assert.ok(git);
   writeFileSync(
     join(bin, GIT_BINARY),
-    `#!/bin/sh\nGIT_TRACE2_EVENT='${events}' GIT_TRACE_PACKET='${packets}' exec '${git}' "$@"\n`,
+    `#!/bin/sh\nGIT_TRACE2_EVENT=${quoted(events)} GIT_TRACE_PACKET=${quoted(packets)} exec ${quoted(git)} "$@"\n`,
     { mode: TRACE_WRAPPER_MODE },
   );
   const path = process.env.PATH;
@@ -1282,7 +1298,8 @@ async function tracedRead(t: TestContext, files: Record<string, SeedEntry>) {
     );
     return { head, read, starts, wants };
   } finally {
-    process.env.PATH = path;
+    if (path === undefined) delete process.env.PATH;
+    else process.env.PATH = path;
   }
 }
 

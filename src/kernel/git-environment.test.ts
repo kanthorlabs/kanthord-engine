@@ -4,8 +4,6 @@ import { isolatedGitEnvironment } from "./git-environment.ts";
 
 const PATH_VALUE = "/bin";
 const GIT_PREFIX = "GIT_";
-const GIT_CONFIG_PREFIX = "GIT_CONFIG_";
-const ATTR_NOSYSTEM = "GIT_ATTR_NOSYSTEM";
 const GIVEN_AUTHOR = "Given";
 
 test("isolatedGitEnvironment replaces the global and system configuration and keeps the rest", () => {
@@ -119,23 +117,30 @@ test("isolatedGitEnvironment removes every host GIT_ variable except the identit
     GIT_NAMESPACE: "other",
     GIT_AUTHOR_NAME: GIVEN_AUTHOR,
     GIT_CEILING_DIRECTORIES: ceiling,
+    GIT_CONFIG_SYSTEM: "/tmp/system",
+    GIT_CONFIG_KEY_7: "core.fsmonitor",
     PATH: PATH_VALUE,
   });
   assert.deepEqual(
     Object.keys(output)
-      .filter(
-        (name) =>
-          name.startsWith(GIT_PREFIX) &&
-          !name.startsWith(GIT_CONFIG_PREFIX) &&
-          name !== ATTR_NOSYSTEM,
-      )
+      .filter((name) => name.startsWith(GIT_PREFIX))
       .sort(),
     [
+      "GIT_ATTR_NOSYSTEM",
       "GIT_AUTHOR_EMAIL",
       "GIT_AUTHOR_NAME",
       "GIT_CEILING_DIRECTORIES",
       "GIT_COMMITTER_EMAIL",
       "GIT_COMMITTER_NAME",
+      "GIT_CONFIG_COUNT",
+      "GIT_CONFIG_GLOBAL",
+      "GIT_CONFIG_KEY_0",
+      "GIT_CONFIG_KEY_1",
+      "GIT_CONFIG_KEY_2",
+      "GIT_CONFIG_NOSYSTEM",
+      "GIT_CONFIG_VALUE_0",
+      "GIT_CONFIG_VALUE_1",
+      "GIT_CONFIG_VALUE_2",
     ],
   );
   assert.equal(output.GIT_AUTHOR_NAME, GIVEN_AUTHOR);
