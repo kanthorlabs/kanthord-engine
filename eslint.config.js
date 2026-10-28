@@ -775,6 +775,11 @@ export default tseslint.config(
       "@typescript-eslint/consistent-indexed-object-style": "error",
       "@typescript-eslint/consistent-generic-constructors": "error",
       "@typescript-eslint/no-inferrable-types": "error",
+      "@typescript-eslint/consistent-type-imports": [
+        "error",
+        { disallowTypeAnnotations: false },
+      ],
+      "@typescript-eslint/no-import-type-side-effects": "error",
       "@typescript-eslint/no-unused-vars": [
         "error",
         { ignoreUsingDeclarations: true },
