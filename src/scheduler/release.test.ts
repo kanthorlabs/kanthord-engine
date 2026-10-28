@@ -557,7 +557,15 @@ test("a stop at the failure limit that pauses the node writes no hold end", asyn
     count: FIRST_FAILURE,
     limit: FIRST_FAILURE,
   });
-  h.dependencies.transitions.failure = () => paused;
+  h.store.transaction((tx) =>
+    h.service.insert(tx, h.row.node_id, h.row.project_id, 0),
+  );
+  h.dependencies.transitions.failure = (tx, nodeId) => {
+    tx.database
+      .prepare("DELETE FROM scheduler_job WHERE node_id = ?")
+      .run(nodeId);
+    return paused;
+  };
   await h.release(true, STOP);
   assert.deepEqual(
     h.telemetry[1]!.arguments[1],
@@ -662,11 +670,13 @@ const DIGEST_STOP: ReleaseStop = {
 test("an environment_failed release with digests neither counts a failure nor holds the job", async (t) => {
   const h = environmentHarness(t);
   await h.release(true, DIGEST_STOP);
-  assert.deepEqual(h.telemetry[1]!.arguments[1], {
-    ...executionTransition(transitionFixture(), FIXTURE_NOW, null),
-    failure_count: NO_FAILURES,
-    available_at: null,
-  });
+  assert.deepEqual(
+    h.telemetry[1]!.arguments[1],
+    executionTransition(transitionFixture(), FIXTURE_NOW, {
+      failure_count: NO_FAILURES,
+      available_at: null,
+    }),
+  );
   assert.deepEqual(
     h.calls.map((call) => [call.method, ...call.arguments.slice(1)]),
     [["failure", h.row.node_id, NO_FAILURES, FIXTURE_NOW]],
