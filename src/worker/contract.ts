@@ -352,7 +352,11 @@ export interface EvidenceRequests {
 }
 export const HANDOVER_MAX_BODY_BYTES = 1024;
 export const SSH_SIGN_MAX_BODY_BYTES = 16384;
-export const CREDENTIAL_REPORT_MAX_BODY_BYTES = 64 * 1024;
+export const CREDENTIAL_REPORT_MAX_BODY_BYTES = 65536;
+const REGISTER_MAX_BODY_BYTES = 40960;
+const REGISTRATION_NAME_MAX_LENGTH = 64;
+const INSTANCE_NAME_MAX_LENGTH = 63;
+const CONNECTION_NAME_MAX_LENGTH = 255;
 export interface CustodyHandover {
   handover(
     tx: Transaction,
@@ -583,7 +587,7 @@ export const registrationRecordSchema = z
     host: z.enum(WorkerHost),
     placement: z.enum(InstancePlacement).optional(),
     client_id: identitySchema("client_identity").optional(),
-    name: z.string().min(1).max(64).optional(),
+    name: z.string().min(1).max(REGISTRATION_NAME_MAX_LENGTH).optional(),
     instance: z.string().min(1).nullable(),
     activity: z.enum(RegistrationActivity),
     draining: z.boolean(),
@@ -607,7 +611,7 @@ export const registrationRecordSchema = z
       z.looseObject({
         registered: z.literal(true),
         client_id: identitySchema("client_identity"),
-        name: z.string().min(1).max(64),
+        name: z.string().min(1).max(REGISTRATION_NAME_MAX_LENGTH),
       }),
       z.looseObject({
         registered: z.literal(false),
@@ -837,7 +841,7 @@ export const connectionIdSchema = identitySchema(CONNECTION_ID_PREFIX);
 export const instanceNameSchema = z
   .string()
   .min(1)
-  .max(63)
+  .max(INSTANCE_NAME_MAX_LENGTH)
   .regex(/^[a-z][a-z0-9-]*$/)
   .refine((name) => !RESERVED_INSTANCE_NAMES.includes(name));
 export const instanceRecordSchema = z.strictObject({
@@ -1250,7 +1254,7 @@ export const instanceOperations = {
       query: emptyFields,
       body: z.strictObject({
         connection_id: connectionIdSchema.optional(),
-        connection_name: z.string().min(1).max(255),
+        connection_name: z.string().min(1).max(CONNECTION_NAME_MAX_LENGTH),
       }),
     }),
     output: z.strictObject({
@@ -1274,7 +1278,7 @@ export const instanceOperations = {
       query: emptyFields,
       body: z.strictObject({
         connection_id: connectionIdSchema,
-        connection_name: z.string().min(1).max(255),
+        connection_name: z.string().min(1).max(CONNECTION_NAME_MAX_LENGTH),
       }),
     }),
     output: z.strictObject({
@@ -1629,7 +1633,7 @@ export const workerOperations = {
     requiresRegistration: false,
     timeoutMs: 10000,
     mutation: true,
-    maxBodyBytes: 40 * 1024,
+    maxBodyBytes: REGISTER_MAX_BODY_BYTES,
     status: HttpStatus.OK,
     input: emptyInput,
     output: z.strictObject({

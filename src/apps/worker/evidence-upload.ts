@@ -36,7 +36,7 @@ const PARENT_DIRECTORY = "..";
 const DARWIN = "darwin";
 const LINUX = "linux";
 const DARWIN_NOFOLLOW_ANY = 0x20000000;
-const HASH_CHUNK_BYTES = 64 * 1024;
+const HASH_CHUNK_BYTES = 65536;
 const NO_BYTES = 0;
 const UPLOADS_PER_SUBMISSION = 1;
 

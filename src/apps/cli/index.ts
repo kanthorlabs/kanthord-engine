@@ -17,7 +17,7 @@ import { intakeOperations } from "../../intake/contract.ts";
 import assert from "node:assert/strict";
 import { Command, CommanderError, Option } from "commander";
 import { dirname } from "node:path";
-import { writePrivate } from "../../kernel/files.ts";
+import { PRIVATE_UMASK, writePrivate } from "../../kernel/files.ts";
 import { Diagnostic, diagnostic, diagnosticRows } from "../../kernel/errors.ts";
 import type { Server } from "../server/index.ts";
 import { gatewayOperations } from "../../gateway/contract.ts";
@@ -395,7 +395,7 @@ export async function runCLI(
   args: string[],
   onServer?: (server: Server) => void,
 ): Promise<number> {
-  process.umask(0o077);
+  process.umask(PRIVATE_UMASK);
   try {
     await createProgram(onServer).parseAsync(args);
     return ExitCode.Success;

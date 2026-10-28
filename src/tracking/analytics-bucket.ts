@@ -2,9 +2,12 @@ import assert from "node:assert/strict";
 import { AnalyticsBucket } from "./contract.ts";
 
 const HOUR_MS = 3_600_000;
-const DAY_MS = 24 * HOUR_MS;
-const WEEK_MS = 7 * DAY_MS;
-const FIRST_MONDAY_MS = 4 * DAY_MS;
+const HOURS_PER_DAY = 24;
+const DAYS_PER_WEEK = 7;
+const FIRST_MONDAY_DAYS = 4;
+const DAY_MS = HOURS_PER_DAY * HOUR_MS;
+const WEEK_MS = DAYS_PER_WEEK * DAY_MS;
+const FIRST_MONDAY_MS = FIRST_MONDAY_DAYS * DAY_MS;
 const BUCKET_SIZES: Record<Exclude<AnalyticsBucket, "none">, number> = {
   [AnalyticsBucket.Hour]: HOUR_MS,
   [AnalyticsBucket.Day]: DAY_MS,

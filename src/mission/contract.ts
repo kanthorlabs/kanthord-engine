@@ -1239,8 +1239,8 @@ export const controlResultSchema = z.strictObject({
   accepted_at: timestamp,
 });
 export type ControlResult = z.infer<typeof controlResultSchema>;
-export const OBJECT_SIZE_MAX = 5 * 1024 ** 3;
-export const INLINE_BYTES_MAX = 5 * 1024 ** 2;
+export const OBJECT_SIZE_MAX = 5_368_709_120;
+export const INLINE_BYTES_MAX = 5242880;
 export const UPLOAD_LIFETIME_MS = 3600000;
 export const CONTENT_ENCODING = "base64";
 const MEDIA_TYPE_MAX = 255;

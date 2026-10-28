@@ -2,12 +2,12 @@ import assert from "node:assert/strict";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { execFile } from "node:child_process";
 import { isNumber, isString, ValueType } from "../../kernel/values.ts";
+import { PRIVATE_UMASK } from "../../kernel/files.ts";
 import { CommandName, ExitCode, PROGRAM_NAME } from "./constants.ts";
 import { runCLI } from "./index.ts";
 
 const EMPTY_ARGUMENT_COUNT = 0;
 const EMPTY_OUTPUT = "";
-const PRIVATE_UMASK = 0o077;
 const DEFAULT_ENCODING = "utf8";
 const NO_ACTIVE_RUNS = 0;
 const TERMINAL_PROPERTY = "isTTY";

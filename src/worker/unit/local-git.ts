@@ -35,6 +35,7 @@ const PATH_OFFSET = 1;
 const RENAMED_PATH_OFFSET = 2;
 const PLAIN_RECORD_WIDTH = 2;
 const RENAME_RECORD_WIDTH = 3;
+const RAW_RECORD_WIDTH = 2;
 export const MERGE_HEAD = "MERGE_HEAD";
 export const ChangeStatus = {
   Added: "added",
@@ -162,7 +163,7 @@ async function conversionOnlyPaths(
     )
   ).split(NUL);
   const modified: IndexEntry[] = [];
-  for (let index = 0; index + 1 < fields.length; index += 2) {
+  for (let index = 0; index + 1 < fields.length; index += RAW_RECORD_WIDTH) {
     const [oldMode, newMode, blob, , status] =
       fields[index]!.slice(1).split(" ");
     assert.ok(status !== undefined && blob !== undefined);

@@ -21,7 +21,7 @@ import type { HandoverSshIdentity } from "../../custody/contract.ts";
 export const WORKSPACES_DIRECTORY = "workspaces";
 export const SCRATCH_DIRECTORY = ".kanthord-scratch/";
 const GIT_EXCLUDE = [".git", "info", "exclude"];
-export const WORKSPACE_RETENTION_MS = 7 * 24 * 3600 * 1000;
+export const WORKSPACE_RETENTION_MS = 604800000;
 export const SWEEP_INTERVAL_MS = 3600000;
 export const CHECKOUTS_DIRECTORY = "checkouts";
 export const RELEASE_DIRECTORY = "release";

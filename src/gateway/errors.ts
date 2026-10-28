@@ -1,6 +1,7 @@
 import { type ErrorBody, OperationError } from "../kernel/errors.ts";
 export { OperationError as GatewayError } from "../kernel/errors.ts";
 import { OperationError as GatewayError } from "../kernel/errors.ts";
+import { HttpStatus } from "../kernel/http.ts";
 export function failure(
   error: unknown,
   requestId: string,
@@ -9,7 +10,7 @@ export function failure(
     error instanceof OperationError
       ? error
       : new GatewayError(
-          500,
+          HttpStatus.InternalServerError,
           "gateway.invocation.unknown",
           "Internal server error.",
         );
@@ -28,18 +29,17 @@ export function respondError(error: unknown, requestId: string): Response {
   return Response.json(result.body, { status: result.status });
 }
 
-const UNAUTHORIZED_STATUS = 401;
 const UNAUTHORIZED_CODE = "gateway.authentication.unauthorized";
 const UNAUTHORIZED_MESSAGE = "Authentication required.";
 export const unauthorized = () =>
   new GatewayError(
-    UNAUTHORIZED_STATUS,
+    HttpStatus.Unauthorized,
     UNAUTHORIZED_CODE,
     UNAUTHORIZED_MESSAGE,
   );
 export class WorkerGroupEnded extends GatewayError {
   constructor() {
-    super(UNAUTHORIZED_STATUS, UNAUTHORIZED_CODE, UNAUTHORIZED_MESSAGE);
+    super(HttpStatus.Unauthorized, UNAUTHORIZED_CODE, UNAUTHORIZED_MESSAGE);
   }
 }
 export const JwtCause = {
@@ -71,10 +71,14 @@ const JWT_MESSAGES: Record<JwtCause, string> = {
     "The binding does not list the worker instance.",
 };
 export const jwtRefused = (cause: JwtCause) =>
-  new GatewayError(401, `gateway.jwt.${cause}`, JWT_MESSAGES[cause]);
+  new GatewayError(
+    HttpStatus.Unauthorized,
+    `gateway.jwt.${cause}`,
+    JWT_MESSAGES[cause],
+  );
 export const conflict = () =>
   new GatewayError(
-    409,
+    HttpStatus.Conflict,
     "gateway.idempotency.conflict",
     "The idempotency key cannot be replayed for this request.",
   );

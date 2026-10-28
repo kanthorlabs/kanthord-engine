@@ -13,6 +13,7 @@ import {
 } from "./contract.ts";
 import { resourceHealthReport } from "./health-report.ts";
 import { shippedAsset } from "../kernel/assets.ts";
+import { HttpStatus } from "../kernel/http.ts";
 
 const EMPTY_SERVICE_COUNT = 0;
 
@@ -27,7 +28,7 @@ export function registerGatewayOperations(
     const checks = Object.values(services);
     if (checks.length === EMPTY_SERVICE_COUNT || !checks.every(healthy))
       throw new GatewayError(
-        503,
+        HttpStatus.ServiceUnavailable,
         "gateway.liveness.unhealthy",
         "One or more services are unavailable.",
         services,
@@ -56,7 +57,7 @@ export function registerGatewayOperations(
       ).includes(file)
     )
       throw new GatewayError(
-        404,
+        HttpStatus.NotFound,
         "gateway.openapi.not_found",
         "OpenAPI file not found.",
       );
@@ -69,7 +70,7 @@ function readOpenAPIFile(file: string): string {
     return shippedAsset(file);
   } catch {
     throw new GatewayError(
-      503,
+      HttpStatus.ServiceUnavailable,
       "gateway.openapi.unavailable",
       "Published OpenAPI contract is unavailable.",
     );

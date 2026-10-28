@@ -925,4 +925,23 @@ export default tseslint.config(
       ],
     },
   },
+  {
+    files: ["src/**/*.ts"],
+    ignores: ["src/**/*.test.ts", "src/**/*test-support.ts"],
+    rules: {
+      "@typescript-eslint/no-magic-numbers": [
+        "error",
+        {
+          ignore: [0, 1, -1],
+          ignoreEnums: true,
+          ignoreArrayIndexes: true,
+          ignoreDefaultValues: true,
+          ignoreClassFieldInitialValues: true,
+          ignoreNumericLiteralTypes: true,
+          ignoreReadonlyClassProperties: true,
+          ignoreTypeIndexes: true,
+        },
+      ],
+    },
+  },
 );

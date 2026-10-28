@@ -43,7 +43,11 @@ const operationsById = new Map<string, Operation>(
 
 function absentRoute(requestId: string): RecordedResponse {
   return failure(
-    new GatewayError(404, "gateway.routing.not_found", "Route not found."),
+    new GatewayError(
+      HttpStatus.NotFound,
+      "gateway.routing.not_found",
+      "Route not found.",
+    ),
     requestId,
   );
 }
@@ -79,7 +83,7 @@ async function invokeCall(
   )
     return failure(
       new GatewayError(
-        413,
+        HttpStatus.PayloadTooLarge,
         "gateway.request.body_too_large",
         "Request body exceeds the route limit.",
       ),
@@ -96,7 +100,7 @@ async function invokeCall(
     }
   } else if (call.body)
     rejection = new GatewayError(
-      400,
+      HttpStatus.BadRequest,
       "gateway.request.unexpected_body",
       "This operation accepts no request body.",
     );
@@ -137,7 +141,7 @@ export function servePort(
         call_id: callId,
         ...failure(
           new GatewayError(
-            500,
+            HttpStatus.InternalServerError,
             "gateway.invocation.invalid_response",
             "Operation returned an invalid response.",
           ),
@@ -211,7 +215,7 @@ export function servePort(
         callId,
         failure(
           new GatewayError(
-            400,
+            HttpStatus.BadRequest,
             "gateway.request.validation_failed",
             "Request validation failed.",
           ),

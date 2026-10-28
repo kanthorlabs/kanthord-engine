@@ -37,6 +37,7 @@ export interface AnalyticsSpan {
 
 const STEP_TRACES_MAX = 100;
 const FIRST_OFFSET = 0;
+const ROOT_KEY_WIDTH = 2;
 const TRACE_FILTERS = ["project_id", "node_id"] as const;
 
 function textOrNull(value: unknown): string | null {
@@ -106,7 +107,9 @@ function stepQuery(
   filter: SpanFilter,
 ): { sql: string; params: (string | number)[] } {
   const clauses = filter.roots
-    ? [`(trace_id, span_id) IN (VALUES ${marks(traces.length, 2)})`]
+    ? [
+        `(trace_id, span_id) IN (VALUES ${marks(traces.length, ROOT_KEY_WIDTH)})`,
+      ]
     : [`trace_id IN (VALUES ${marks(traces.length, 1)})`];
   const params: (string | number)[] = filter.roots
     ? traces.flatMap((trace) => [trace.trace_id, trace.root_span_id])

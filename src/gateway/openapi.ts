@@ -175,16 +175,16 @@ function emitOperation(operation: Operation, schemas: Record<string, unknown>) {
     },
   };
   for (const status of new Set([
-    400,
-    401,
-    403,
-    404,
-    409,
-    413,
-    415,
-    500,
-    503,
-    504,
+    HttpStatus.BadRequest,
+    HttpStatus.Unauthorized,
+    HttpStatus.Forbidden,
+    HttpStatus.NotFound,
+    HttpStatus.Conflict,
+    HttpStatus.PayloadTooLarge,
+    HttpStatus.UnsupportedMediaType,
+    HttpStatus.InternalServerError,
+    HttpStatus.ServiceUnavailable,
+    HttpStatus.GatewayTimeout,
     ...(operation.errors ?? []),
   ]))
     responses[status] = { $ref: `${sharedRef}/responses/Error` };

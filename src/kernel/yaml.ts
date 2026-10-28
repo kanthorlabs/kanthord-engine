@@ -4,7 +4,7 @@ import { Diagnostic } from "./errors.ts";
 import { isObject } from "./values.ts";
 
 const EXHAUSTED_NODE_BUDGET = 0;
-export const MAX_CONFIG_BYTES = 1024 * 1024;
+export const MAX_CONFIG_BYTES = 1048576;
 export const MAX_CONFIG_NODES = 4096;
 export const MAX_CONFIG_DEPTH = 32;
 

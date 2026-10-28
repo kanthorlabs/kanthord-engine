@@ -19,7 +19,7 @@ import {
 } from "./store.ts";
 import { requireMission } from "./write.ts";
 
-const EXPORT_MAX_BYTES = 10 * 1024 * 1024;
+const EXPORT_MAX_BYTES = 10485760;
 const TEXT_ENCODING = "utf8";
 
 export function serializePlanFile(entry: ExportEntry): string {

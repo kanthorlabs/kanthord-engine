@@ -9,7 +9,14 @@ import {
 } from "../../tracking/contract.ts";
 
 export const SESSION_ENTRY_MAX_BYTES = 61440;
-export const ENTRY_CUT_LIMITS = [4096, 1024, 256];
+const ENTRY_CUT_LOOSE_LIMIT = 4096;
+const ENTRY_CUT_MEDIUM_LIMIT = 1024;
+const ENTRY_CUT_TIGHT_LIMIT = 256;
+export const ENTRY_CUT_LIMITS = [
+  ENTRY_CUT_LOOSE_LIMIT,
+  ENTRY_CUT_MEDIUM_LIMIT,
+  ENTRY_CUT_TIGHT_LIMIT,
+];
 export const PINNED_CONTEXT_TYPE = "kanthord.pinned_context";
 
 const REDACTED = "[redacted]";

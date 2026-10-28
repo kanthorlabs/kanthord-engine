@@ -20,6 +20,7 @@ export const WORK_PULL_TIMEOUT_MS = 120000;
 export const WORK_PULL_WAIT_MS = 90000;
 export const LOSS_SWEEP_INTERVAL_MS = 30000;
 const EMPTY_TEXT_LENGTH = 0;
+const REGISTRATION_NAME_MAX_LENGTH = 64;
 
 export const ClaimState = {
   Running: "running",
@@ -173,7 +174,7 @@ export const claimantSchema = z.strictObject({
   name: z
     .string()
     .min(1)
-    .max(64)
+    .max(REGISTRATION_NAME_MAX_LENGTH)
     .refine((value) => value.trim().length > EMPTY_TEXT_LENGTH)
     .optional(),
 });

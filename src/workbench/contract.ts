@@ -15,8 +15,8 @@ export const WORKBENCH_DIRECTORY_NAME = "workbench";
 export const WORKBENCH_CONFIGURATION_ENTRY = "kanthord.workbench.configuration";
 export const WORKBENCH_TIMEOUT_MS = 30000;
 export const WORKBENCH_EVENTS_WAIT_MS = 25000;
-export const WORKBENCH_MAX_BODY_BYTES = 64 * 1024;
-export const WORKBENCH_MESSAGE_MAX_BODY_BYTES = 1024 * 1024;
+export const WORKBENCH_MAX_BODY_BYTES = 65536;
+export const WORKBENCH_MESSAGE_MAX_BODY_BYTES = 1048576;
 
 export const WorkbenchErrorCode = {
   Stopped: "workbench.lifecycle.stopped",
