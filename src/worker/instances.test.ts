@@ -22,6 +22,7 @@ import {
   workerTokenPayloadSchema,
 } from "./contract.ts";
 import { AgentErrorCode, type HolderScope } from "../agent/contract.ts";
+import type { ExecutionEnds } from "../mission/contract.ts";
 import {
   insertRegistration,
   readAllLive,
@@ -70,6 +71,11 @@ const WORKER_CONFIG = {
 };
 const SERVER_INSTANCE_LIMIT = 2;
 const INVALID_PLACEMENT = "thread";
+
+const ANSWERED_ENDS: ExecutionEnds = { lost: [], revoked: [] };
+const REVOKE_FAILURE = "revoke failed";
+const NO_CALLS = 0;
+const SINGLE_CALL = 1;
 
 type Binding = ReturnType<WorkerBindingsOf>[number];
 
@@ -132,6 +138,9 @@ function instanceFixture(
   const bindings: Binding[] = [];
   const scopes: HolderScope[] = [];
   const unended = new Map<string, string>();
+  const revoked: string[] = [];
+  const reports: { ends: ExecutionEnds; inTransaction: boolean }[] = [];
+  const revocation = { failure: null as Error | null };
   const dependencies: Dependencies = {
     config: { ...WORKER_CONFIG, ...config },
     store,
@@ -139,6 +148,16 @@ function instanceFixture(
       authorizeRequest: unexpected,
       authorizeAction: unexpected,
       actionContextOf: unexpected,
+    },
+    instanceArchive: {
+      revokeForInstanceArchive: (_tx, executionId) => {
+        if (revocation.failure) throw revocation.failure;
+        revoked.push(executionId);
+        return ANSWERED_ENDS;
+      },
+      reportExecutionEnds: (ends) => {
+        reports.push({ ends, inTransaction: store.database.isTransaction });
+      },
     },
     intakeActions: { perform: unexpected, read: unexpected },
     evidenceRequests: { request: unexpected },
@@ -314,6 +333,9 @@ function instanceFixture(
     bindings,
     scopes,
     unended,
+    revoked,
+    reports,
+    revocation,
     invoke,
     refuses,
     created,
@@ -896,6 +918,106 @@ test("archive refuses a listed or busy instance and then ends it with its regist
     HttpStatus.Conflict,
     WorkerErrorCode.InstanceNameConflict,
   );
+});
+
+function archiveFixture(f: ReturnType<typeof instanceFixture>) {
+  const archive = (force?: boolean) =>
+    f.invoke(
+      "instance.archive",
+      force === undefined
+        ? { expected_revision: FIRST_REVISION }
+        : { expected_revision: FIRST_REVISION, force },
+      { instance_name: INSTANCE },
+    );
+  const refusesWith = (task: () => Promise<unknown>, details: unknown) =>
+    assert.rejects(
+      task,
+      (error: unknown) =>
+        error instanceof OperationError &&
+        error.status === HttpStatus.Conflict &&
+        error.code === WorkerErrorCode.InstanceInUse &&
+        isDeepStrictEqual(error.details, details),
+    );
+  return { archive, refusesWith };
+}
+
+async function busyInstance(f: ReturnType<typeof instanceFixture>) {
+  const { record } = await f.created();
+  const binding = bindingOf(createIdentity("project"), "general", [INSTANCE]);
+  f.bindings.push(binding);
+  const registration = await f.register(binding, record.id);
+  f.asHuman();
+  return { record, binding, registration };
+}
+
+test("a listing binding refuses an archive with and without force and lists the bindings", async (t) => {
+  const f = instanceFixture(t);
+  const { binding, registration } = await busyInstance(f);
+  const { archive, refusesWith } = archiveFixture(f);
+  f.unended.set(registration.runtime_identity, createIdentity("execution"));
+  const details = {
+    bindings: [{ project_id: binding.project_id, binding: binding.name }],
+  };
+  await refusesWith(() => archive(), details);
+  await refusesWith(() => archive(true), details);
+  assert.equal(f.revoked.length, NO_CALLS);
+  assert.equal(f.reports.length, NO_CALLS);
+});
+
+test("an archive without force refuses an unlisted instance with a live execution and revokes nothing", async (t) => {
+  const f = instanceFixture(t);
+  const { binding, registration } = await busyInstance(f);
+  const { archive, refusesWith } = archiveFixture(f);
+  binding.worker_instances = [];
+  const executionId = createIdentity("execution");
+  f.unended.set(registration.runtime_identity, executionId);
+  await refusesWith(() => archive(), { executions: [executionId] });
+  await refusesWith(() => archive(false), { executions: [executionId] });
+  assert.equal(f.revoked.length, NO_CALLS);
+  assert.equal(f.reports.length, NO_CALLS);
+});
+
+test("an archive with force revokes the live execution, ends the instance in one transaction and reports after the commit", async (t) => {
+  const f = instanceFixture(t);
+  const { record, binding, registration } = await busyInstance(f);
+  const { archive } = archiveFixture(f);
+  binding.worker_instances = [];
+  const executionId = createIdentity("execution");
+  f.unended.set(registration.runtime_identity, executionId);
+  const commits = f.commits();
+  const archived = await archive(true);
+  assert.equal(f.commits(), commits + SINGLE_CALL);
+  assert.equal(archived.id, record.id);
+  assert.ok(archived.ended_at);
+  assert.equal(f.store.transaction(readAllLive).length, NO_ROWS);
+  assert.deepEqual(f.revoked, [executionId]);
+  assert.equal(f.reports.length, SINGLE_CALL);
+  assert.deepEqual(f.reports[0]!.ends, ANSWERED_ENDS);
+  assert.equal(f.reports[0]!.inTransaction, false);
+});
+
+test("a failure of the revocation rolls the archive back and reports nothing", async (t) => {
+  const f = instanceFixture(t);
+  const { record, binding, registration } = await busyInstance(f);
+  const { archive } = archiveFixture(f);
+  binding.worker_instances = [];
+  f.unended.set(registration.runtime_identity, createIdentity("execution"));
+  f.revocation.failure = new Error(REVOKE_FAILURE);
+  await assert.rejects(() => archive(true), { message: REVOKE_FAILURE });
+  assert.ok(f.worker().instances.liveInstance(record.id));
+  assert.equal(f.store.transaction(readAllLive).length, SINGLE_CALL);
+  assert.equal(f.reports.length, NO_CALLS);
+});
+
+test("an archive with force of an instance with no live execution calls neither collaboration", async (t) => {
+  const f = instanceFixture(t);
+  const { binding } = await busyInstance(f);
+  const { archive } = archiveFixture(f);
+  binding.worker_instances = [];
+  const archived = await archive(true);
+  assert.ok(archived.ended_at);
+  assert.equal(f.revoked.length, NO_CALLS);
+  assert.equal(f.reports.length, NO_CALLS);
 });
 
 test("a server restart keeps the registrations of a live instance and adopts the first valid connection", async (t) => {

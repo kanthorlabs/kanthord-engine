@@ -4,6 +4,7 @@ import type { OperationRegistry } from "../kernel/operation.ts";
 import type { Transaction } from "../kernel/store.ts";
 import type { HeldCopy } from "../custody/contract.ts";
 import type { CopyHealth } from "../llm/contract.ts";
+import type { ExecutionEnds } from "../mission/contract.ts";
 import {
   instanceOperations,
   type registrationRecordSchema,
@@ -103,15 +104,14 @@ function declareHumanWrites(
     instanceOperations["instance.archive"],
     ({ params, body }, caller) => {
       let ended: string[] = [];
+      let executionEnds: ExecutionEnds[] = [];
       const record = caller.commit((tx) => {
-        const result = instances.archive(
-          tx,
-          params.instance_name,
-          body.expected_revision,
-        );
+        const result = instances.archive(tx, params.instance_name, body);
         ended = result.ended;
+        executionEnds = result.executionEnds;
         return result.record;
       });
+      instances.reportExecutionEnds(executionEnds);
       instances.dropConnection(record.id);
       dropEnded(heartbeatClock, ended);
       instancesChanged();

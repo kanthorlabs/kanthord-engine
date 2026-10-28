@@ -28,6 +28,7 @@ import { AccessPolicy } from "../kernel/operation.ts";
 import { OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import type { PoolPlacement } from "./contract.ts";
+import type { MissionCollaborations } from "../mission/contract.ts";
 import {
   type AgentConfiguration,
   alwaysAvailable,
@@ -139,6 +140,10 @@ function invalidWorkerConfiguration(workerName: string): OperationError {
 export interface Dependencies {
   handoverRefreshWaitMs?: number;
   missionActions: MissionActions;
+  instanceArchive: Pick<
+    MissionCollaborations,
+    "revokeForInstanceArchive" | "reportExecutionEnds"
+  >;
   intakeActions: IntakeActions;
   evidenceRequests: EvidenceRequests;
   custodyHandover: CustodyHandover;
@@ -347,6 +352,10 @@ export class WorkerService implements Service {
         dependencies.schedulerClaims.unendedExecutionOf(tx, runtimeIdentity),
       archiveHeld: (tx, holder, now) =>
         dependencies.instanceCopies?.archiveHeld(tx, holder, now),
+      revokeForInstanceArchive: (tx, executionId) =>
+        dependencies.instanceArchive.revokeForInstanceArchive(tx, executionId),
+      reportExecutionEnds: (ends) =>
+        dependencies.instanceArchive.reportExecutionEnds(ends),
       holderMismatch: (tx, instanceName, bindings) =>
         this.holderMismatch(tx, instanceName, bindings),
       loginSessionsOf: (holder) => dependencies.loginSessionsOf?.(holder) ?? [],

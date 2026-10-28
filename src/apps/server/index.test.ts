@@ -62,7 +62,7 @@ import type { EnvironmentRuntime } from "../../project/environment-state.ts";
 import type { SlotDriver } from "./slot-driver.ts";
 import { llmOperations } from "../../llm/contract.ts";
 import { agentOperations } from "../../agent/contract.ts";
-import { workerOperations } from "../../worker/contract.ts";
+import { InstancePlacement, workerOperations } from "../../worker/contract.ts";
 import { gatewayOperations, OWNER_INTAKE } from "../../gateway/contract.ts";
 import {
   HealthRegistry,
@@ -102,6 +102,12 @@ const PROVIDER_NAME = "primary";
 const PROVIDER_KIND = "openai-compatible";
 const MODEL_NAME = "composition-model";
 const FIRST_REVISION = 1;
+const SINGLE_CALL = 1;
+const INSTANCE_NAME = "coder-1";
+const INSTANCE_WORKER = "coder@1";
+const ENDED_AT = 2;
+const BINDING_RESOURCE = "worker:kanthord:general";
+const ENDED_EXECUTIONS = { lost: [], revoked: [] };
 const REASONING_LEVEL = "off";
 const BASE_URL = "https://example.com/v1";
 const INVENTORY_PROJECT_NAME = "inventory";
@@ -530,6 +536,69 @@ test("composed Custody and Worker share credential and enablement collaborations
       CREDENTIAL_NAME,
     );
   });
+});
+
+test("composed Worker revokes and reports the live execution of a forced instance archive through Mission", async (t) => {
+  const fixture = await gatewayFixture(t);
+  const post = (path: string, body: unknown) =>
+    fixture.request(path, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${fixture.token}`,
+        "Content-Type": "application/json",
+        "Idempotency-Key": createIdempotencyKey(),
+      },
+      body: JSON.stringify(body),
+    });
+  const created = await post(workerOperations["instance.create"].path, {
+    name: INSTANCE_NAME,
+    worker: INSTANCE_WORKER,
+    placement: InstancePlacement.Server,
+  });
+  const createdText = await created.text();
+  assert.equal(created.status, HttpStatus.OK, createdText);
+  const instance = JSON.parse(createdText) as { id: string };
+  fixture.store.transaction((tx) =>
+    tx.database
+      .prepare(
+        "INSERT INTO worker_registration (id, project_id, resource_identity, client_id, client_name, instance_id, registered_at, ended_at) VALUES (?, ?, ?, ?, ?, ?, ?, NULL)",
+      )
+      .run(
+        createIdentity("worker_registration"),
+        createIdentity("project"),
+        BINDING_RESOURCE,
+        createIdentity("client_identity"),
+        INSTANCE_NAME,
+        instance.id,
+        ENDED_AT,
+      ),
+  );
+  const executionId = createIdentity("execution");
+  t.mock.method(fixture.scheduler, "unendedExecutionOf", () => ({
+    execution_id: executionId,
+  }));
+  const revoke = t.mock.method(
+    fixture.mission,
+    "revokeForInstanceArchive",
+    () => ENDED_EXECUTIONS,
+  );
+  const report = t.mock.method(
+    fixture.mission,
+    "reportExecutionEnds",
+    () => {},
+  );
+  const archived = await post(
+    workerOperations["instance.archive"].path.replace(
+      ":instance_name",
+      INSTANCE_NAME,
+    ),
+    { expected_revision: FIRST_REVISION, force: true },
+  );
+  assert.equal(archived.status, HttpStatus.OK, await archived.text());
+  assert.equal(revoke.mock.callCount(), SINGLE_CALL);
+  assert.equal(revoke.mock.calls[0]!.arguments[1], executionId);
+  assert.equal(report.mock.callCount(), SINGLE_CALL);
+  assert.deepEqual(report.mock.calls[0]!.arguments, [ENDED_EXECUTIONS]);
 });
 
 test("serve rejects unsafe owned directories/files and releases earlier resources after startup failure", async (t) => {

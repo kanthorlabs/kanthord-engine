@@ -4,8 +4,9 @@ pathItem:
     operationId: worker.instance.archive
     tags:
       - worker
-    description: Archive a worker instance that no binding lists and whose
-      registrations hold no live execution, and end its registrations.
+    description: "Archive a worker instance that no binding lists, and end its
+      registrations. A live execution of the instance refuses the archive,
+      unless force is true: force revokes the execution first."
     x-access-policy: human
     x-timeout-ms: 30000
     x-mutation: true
@@ -78,6 +79,8 @@ components:
               type: integer
               exclusiveMinimum: 0
               maximum: 9007199254740991
+            force:
+              type: boolean
           required:
             - expected_revision
           additionalProperties: false

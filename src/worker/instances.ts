@@ -13,6 +13,10 @@ import {
 import type { Store, Transaction } from "../kernel/store.ts";
 import { packageVersion } from "../kernel/version.ts";
 import type { LoginSessionEntry } from "../llm/contract.ts";
+import type {
+  ExecutionEnds,
+  MissionCollaborations,
+} from "../mission/contract.ts";
 import { getWorkerDeclaration } from "./catalog.ts";
 import {
   BindingEntryState,
@@ -80,6 +84,8 @@ export interface InstanceDependencies {
     runtimeIdentity: string,
   ) => { execution_id: string } | null;
   archiveHeld: (tx: Transaction, holder: string, now: number) => void;
+  revokeForInstanceArchive: MissionCollaborations["revokeForInstanceArchive"];
+  reportExecutionEnds: MissionCollaborations["reportExecutionEnds"];
   holderMismatch: (
     tx: Transaction,
     instanceName: string,
@@ -444,43 +450,70 @@ export class WorkerInstances implements WorkerInstanceLookups {
   archive(
     tx: Transaction,
     name: string,
-    expectedRevision: number,
-  ): { record: InstanceRecord; ended: string[] } {
-    const live = this.requireLive(tx, name, expectedRevision);
-    const bindings = this.bindingsListing(tx, name);
-    if (bindings.length)
-      throw new OperationError(
-        HttpStatus.Conflict,
-        WorkerErrorCode.InstanceInUse,
-        "A binding lists the worker instance.",
-        {
-          bindings: bindings.map((binding) => ({
-            project_id: binding.project_id,
-            binding: binding.name,
-          })),
-        },
-      );
+    input: { expected_revision: number; force?: boolean },
+  ): {
+    record: InstanceRecord;
+    ended: string[];
+    executionEnds: ExecutionEnds[];
+  } {
+    const live = this.requireLive(tx, name, input.expected_revision);
+    this.refuseListed(tx, name);
     const revisions = revisionIdsOf(tx, name);
-    const executions = revisions.flatMap((instanceId) =>
-      registrationIdsOfInstance(tx, instanceId).flatMap((id) => {
-        const execution = this.dependencies.unendedExecutionOf(tx, id);
-        return execution ? [execution.execution_id] : [];
-      }),
-    );
-    if (executions.length)
+    const executions = this.liveExecutionsOf(tx, revisions);
+    if (executions.length && !input.force)
       throw new OperationError(
         HttpStatus.Conflict,
         WorkerErrorCode.InstanceInUse,
         "A registration of the worker instance holds a live execution.",
         { executions },
       );
+    const executionEnds = executions.flatMap((executionId) => {
+      const ends = this.dependencies.revokeForInstanceArchive(tx, executionId);
+      return ends ? [ends] : [];
+    });
     const now = Date.now();
     endInstance(tx, live.id, now);
     const ended = endOfInstances(tx, revisions, now);
     this.dependencies.archiveHeld(tx, name, now);
     const record = readInstanceById(tx, live.id);
     assert.ok(record);
-    return { record, ended };
+    return { record, ended, executionEnds };
+  }
+
+  reportExecutionEnds(ends: readonly ExecutionEnds[]): void {
+    if (!ends.length) return;
+    this.dependencies.reportExecutionEnds({
+      lost: ends.flatMap((end) => end.lost),
+      revoked: ends.flatMap((end) => end.revoked),
+    });
+  }
+
+  private refuseListed(tx: Transaction, name: string): void {
+    const bindings = this.bindingsListing(tx, name);
+    if (!bindings.length) return;
+    throw new OperationError(
+      HttpStatus.Conflict,
+      WorkerErrorCode.InstanceInUse,
+      "A binding lists the worker instance.",
+      {
+        bindings: bindings.map((binding) => ({
+          project_id: binding.project_id,
+          binding: binding.name,
+        })),
+      },
+    );
+  }
+
+  private liveExecutionsOf(
+    tx: Transaction,
+    revisions: readonly string[],
+  ): string[] {
+    return revisions.flatMap((instanceId) =>
+      registrationIdsOfInstance(tx, instanceId).flatMap((id) => {
+        const execution = this.dependencies.unendedExecutionOf(tx, id);
+        return execution ? [execution.execution_id] : [];
+      }),
+    );
   }
 
   list(

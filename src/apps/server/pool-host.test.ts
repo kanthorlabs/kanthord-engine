@@ -377,6 +377,20 @@ test("an archive stops the instance through stop, terminates it after 5 s and re
   assert.equal(f.driver.launches.length, FIRST_LAUNCH);
 });
 
+test("an archive of a busy server instance with entries sends stop and starts no replacement", async (t) => {
+  const f = fixture(t);
+  const busy = f.instanceOf("coder-1");
+  f.pool.start(busy, [f.entryOf("a"), f.entryOf("b", OTHER_RESOURCE)]);
+  const running = f.driver.instances[0]!;
+  const archived = f.pool.archive(busy);
+  assert.deepEqual(running.controls, [SlotControl.Stop]);
+  running.end(CLEAN_CODE);
+  await archived;
+  assert.equal(f.driver.launches.length, FIRST_LAUNCH);
+  assert.equal(running.terminated, NO_TERMINATE);
+  assert.deepEqual(f.records, []);
+});
+
 test("an archive removes the root and the volume of the driver of the placement", async (t) => {
   const f = fixture(t);
   const container = f.instanceOf("boxed-1", PoolPlacement.Container);
