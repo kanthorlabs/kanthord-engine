@@ -30,6 +30,7 @@ import type { ExecutionRecord } from "../../scheduler/contract.ts";
 import { WorkerErrorCode } from "../../worker/contract.ts";
 import { retryIndeterminate } from "./api.ts";
 import type { WorkerTransport } from "./transport.ts";
+import { HttpStatus } from "../../kernel/http.ts";
 
 export class HandoverRefused extends Diagnostic {
   readonly status: number;
@@ -58,7 +59,7 @@ export function completed<T>(result: OperationResult<T>): T {
   throw new HandoverRefused(
     "gateway.invocation.timeout",
     "worker: operation answer is indeterminate.",
-    504,
+    HttpStatus.GatewayTimeout,
   );
 }
 

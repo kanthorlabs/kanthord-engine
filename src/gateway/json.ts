@@ -1,5 +1,6 @@
 import { canonicalJSON } from "../kernel/json.ts";
 import { GatewayError } from "./errors.ts";
+import { HttpStatus } from "../kernel/http.ts";
 
 const MAX_JSON_DEPTH = 128;
 const JsonToken = {
@@ -18,7 +19,7 @@ export function parseJSON(source: string): unknown {
   let index = 0;
   const invalid = () => {
     throw new GatewayError(
-      400,
+      HttpStatus.BadRequest,
       "gateway.request.invalid_json",
       "Expected valid JSON with unique object members.",
     );

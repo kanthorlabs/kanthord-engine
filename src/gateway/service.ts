@@ -410,7 +410,7 @@ export class GatewayService implements Service {
       )
         return respondError(
           new GatewayError(
-            403,
+            HttpStatus.Forbidden,
             "gateway.http.host_not_allowed",
             "Host is not allowed. Add it to gateway.allowed_hosts.",
             {
@@ -423,7 +423,7 @@ export class GatewayService implements Service {
       if (!this.ready)
         return respondError(
           new GatewayError(
-            503,
+            HttpStatus.ServiceUnavailable,
             "gateway.lifecycle.not_ready",
             "Server is not ready.",
           ),
@@ -442,7 +442,7 @@ export class GatewayService implements Service {
       if (stripBasePath(basePath, path) === undefined)
         return respondError(
           new GatewayError(
-            404,
+            HttpStatus.NotFound,
             "gateway.routing.not_found",
             "Route not found.",
           ),
@@ -456,7 +456,7 @@ export class GatewayService implements Service {
         if (!method || !this.routeOf(method, context.req.path))
           return respondError(
             new GatewayError(
-              404,
+              HttpStatus.NotFound,
               "gateway.routing.not_found",
               "Route not found.",
             ),
@@ -509,7 +509,7 @@ export class GatewayService implements Service {
         ) ??
         respondError(
           new GatewayError(
-            404,
+            HttpStatus.NotFound,
             "gateway.routing.not_found",
             "Route not found.",
           ),
@@ -536,7 +536,7 @@ export class GatewayService implements Service {
           onError: (context) =>
             respondError(
               new GatewayError(
-                413,
+                HttpStatus.PayloadTooLarge,
                 "gateway.request.body_too_large",
                 "Request body exceeds the route limit.",
               ),
@@ -578,7 +578,7 @@ export class GatewayService implements Service {
                   .toLowerCase() !== MediaType.JSON
               )
                 rejection = new GatewayError(
-                  415,
+                  HttpStatus.UnsupportedMediaType,
                   "gateway.request.unsupported_media_type",
                   "Request body requires application/json.",
                 );
@@ -595,7 +595,7 @@ export class GatewayService implements Service {
             ) {
               if ((await context.req.text()).length)
                 rejection = new GatewayError(
-                  400,
+                  HttpStatus.BadRequest,
                   "gateway.request.unexpected_body",
                   "This operation accepts no request body.",
                 );

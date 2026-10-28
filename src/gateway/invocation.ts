@@ -156,7 +156,7 @@ export class Invocation {
     if (this.stopped)
       return failure(
         new GatewayError(
-          503,
+          HttpStatus.ServiceUnavailable,
           "gateway.invocation.stopping",
           "Server is stopping.",
         ),
@@ -175,7 +175,7 @@ export class Invocation {
               resolve(
                 failure(
                   new GatewayError(
-                    504,
+                    HttpStatus.GatewayTimeout,
                     "gateway.invocation.timeout",
                     "Request timed out; the operation may still complete.",
                   ),
@@ -344,7 +344,7 @@ export class Invocation {
         : operation.input.safeParse(raw);
       if (!parsed.success)
         throw new GatewayError(
-          400,
+          HttpStatus.BadRequest,
           "gateway.request.validation_failed",
           "Request validation failed.",
           validationIssues(parsed.error).map((issue) => ({
@@ -359,7 +359,7 @@ export class Invocation {
       };
       if (context.signal.aborted)
         throw new GatewayError(
-          503,
+          HttpStatus.ServiceUnavailable,
           "gateway.invocation.cancelled",
           "Request cancelled.",
         );
@@ -458,7 +458,7 @@ export class Invocation {
       const error =
         thrown !== null && thrown === context.signal.reason
           ? new GatewayError(
-              503,
+              HttpStatus.ServiceUnavailable,
               "gateway.invocation.cancelled",
               "Request cancelled.",
             )
@@ -475,7 +475,7 @@ export class Invocation {
       const response = failure(
         error instanceof z.ZodError
           ? new GatewayError(
-              500,
+              HttpStatus.InternalServerError,
               "gateway.invocation.invalid_response",
               "Operation returned an invalid response.",
             )
