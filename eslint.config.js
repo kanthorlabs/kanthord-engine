@@ -268,6 +268,7 @@ export default tseslint.config(
     extends: [js.configs.recommended, tseslint.configs.recommended],
     plugins: { boundaries },
     settings: {
+      "boundaries/root-path": repositoryRoot,
       "boundaries/elements": [
         { type: "kernel", pattern: "src/kernel" },
         { type: "worker-unit", pattern: "src/worker/unit" },
