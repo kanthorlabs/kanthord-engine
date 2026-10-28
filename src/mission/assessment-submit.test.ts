@@ -78,6 +78,12 @@ const REWORK_CAUSE = attributed(
   CauseAssigner.Reviewer,
 );
 
+const PLAN_CAUSE = attributed(
+  CauseCategory.Plan,
+  CauseSubcategory.RequirementConflict,
+  CauseAssigner.Reviewer,
+);
+
 function revokedTransition(calls: { method: string; arguments: unknown[] }[]) {
   const ends = calls.filter((call) => call.method === EXECUTION_REVOKED);
   return ends.at(-1)!.arguments[TRANSITION_ARGUMENT];
@@ -570,34 +576,43 @@ test("current nonpassing assessments block and a required-action pass keeps eval
 });
 
 test("a criterion-not-met assessment of an attempt with a request closes into Blocked below the rework limit and preserves the request", async (t) => {
-  const h = await fixture(t, RepositoryAction.PullRequest);
-  await h.submit();
-  const request = await h.invoke("evidence.request", {
-    params: { node_id: h.node_id },
-    query: {},
-    body: {
-      ...h.context,
-      subject: "PR",
-      requirement_key: "repo.pull_request",
-      address: {
-        kind: PlatformAddressKind.PullRequest,
-        resource_identity: "repository:github:owner/repo",
-        number: FIRST_REVISION,
+  for (const [cause, rule] of [
+    [REWORK_CAUSE, TransitionRule.None],
+    [PLAN_CAUSE, TransitionRule.PlanDefect],
+  ] as const) {
+    const h = await fixture(t, RepositoryAction.PullRequest);
+    await h.submit();
+    const request = await h.invoke("evidence.request", {
+      params: { node_id: h.node_id },
+      query: {},
+      body: {
+        ...h.context,
+        subject: "PR",
+        requirement_key: "repo.pull_request",
+        address: {
+          kind: PlatformAddressKind.PullRequest,
+          resource_identity: "repository:github:owner/repo",
+          number: FIRST_REVISION,
+        },
       },
-    },
-  });
-  const answer = await h.submit({
-    ...h.body,
-    result: AssessmentResult.CriterionNotMet,
-    cause: REWORK_CAUSE,
-  });
-  assert.ok("state" in answer.node);
-  assert.equal(answer.node.state, NodeState.Blocked);
-  assert.equal(h.revokes(), FIRST_REVISION);
-  h.store.transaction((tx) => {
-    assert.equal(readOpenAttempt(tx, h.node_id), null);
-    assert.equal(readEvidence(tx, request.id)?.end_state, null);
-  });
+    });
+    const answer = await h.submit({
+      ...h.body,
+      result: AssessmentResult.CriterionNotMet,
+      cause,
+    });
+    assert.ok("state" in answer.node);
+    assert.equal(answer.node.state, NodeState.Blocked);
+    assert.equal(h.revokes(), FIRST_REVISION);
+    assert.equal(
+      (revokedTransition(h.calls) as { rule: TransitionRule }).rule,
+      rule,
+    );
+    h.store.transaction((tx) => {
+      assert.equal(readOpenAttempt(tx, h.node_id), null);
+      assert.equal(readEvidence(tx, request.id)?.end_state, null);
+    });
+  }
 });
 
 test("a criterion-not-met assessment below the rework limit returns the node to Available and blocks at the limit", async (t) => {
@@ -726,6 +741,46 @@ test("a criterion-not-met assessment below the rework limit returns the node to 
   assert.ok("state" in next.node);
   assert.equal(next.node.state, NodeState.Available);
   assert.equal(next.outcome, null);
+});
+
+test("a plan cause blocks at the first criterion-not-met assessment with the rule plan_defect", async (t) => {
+  for (const subcategory of [
+    CauseSubcategory.RequirementConflict,
+    CauseSubcategory.CriterionUnstated,
+  ]) {
+    const h = await fixture(t);
+    assert.ok(h.dependencies.config.rework_limit > REWORK_OFF);
+    const cause = attributed(
+      CauseCategory.Plan,
+      subcategory,
+      CauseAssigner.Reviewer,
+    );
+    const answer = await h.submit({
+      ...h.body,
+      result: AssessmentResult.CriterionNotMet,
+      cause,
+    });
+    assert.ok("state" in answer.node);
+    assert.equal(answer.node.state, NodeState.Blocked);
+    assert.equal(
+      answer.outcome?.closing_event,
+      ClosingEvent.AssessmentNotPassed,
+    );
+    assert.equal(h.revokes(), FIRST_REVISION);
+    assert.deepEqual(revokedFailureCause(h.calls), cause);
+    assert.deepEqual(revokedTransition(h.calls), {
+      from: NodeState.Evaluating,
+      to: NodeState.Blocked,
+      rule: TransitionRule.PlanDefect,
+      count: null,
+      limit: null,
+      first_available_at: null,
+    });
+    assert.equal(
+      h.store.transaction((tx) => readOpenAttempt(tx, h.node_id)),
+      null,
+    );
+  }
 });
 
 test("the cleared assessment read answers the assessment that the cleared outcome names", async (t) => {

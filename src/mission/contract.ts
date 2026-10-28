@@ -133,6 +133,7 @@ export const TransitionRule = {
   FailureLimit: "failure_limit",
   FurtherWorkLimit: "further_work_limit",
   ReworkLimit: "rework_limit",
+  PlanDefect: "plan_defect",
 } as const;
 export const transitionRuleSchema = z.enum(TransitionRule);
 export type TransitionRule = z.infer<typeof transitionRuleSchema>;

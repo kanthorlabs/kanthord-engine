@@ -577,12 +577,15 @@ A task record or a task attempt is not manufactured for convenience.
   domain rules; clients cannot submit an ordinary node outcome directly.
 - A current execution assessment with the result `criterion-not-met` causes a
   rework while the attempt holds fewer reworks than `mission.rework_limit` and
-  no request evidence. The reworks of an attempt are its earlier execution assessments with the result
+  no request evidence, and its `cause` has a category other than `plan`. A
+  `plan` cause, for example `requirement_conflict` or `criterion_unstated`,
+  causes no rework: the attempt closes into `Blocked` with the transition rule
+  `plan_defect`, and the transition holds no count and no limit. The reworks of an attempt are its earlier execution assessments with the result
   `criterion-not-met`. A rework ends the claim, writes no outcome and keeps the
   attempt open. It moves the node from `Evaluating` to `Available` with a job
   when the node is claimable. Every other current assessment that does not pass
-  closes into `Blocked`, whether its result is `criterion-not-met` at the limit
-  or `undetermined`. A current pass with no required
+  closes into `Blocked`, whether its result is `criterion-not-met` at the limit,
+  `criterion-not-met` with a `plan` cause, or `undetermined`. A current pass with no required
   external action closes successfully. Otherwise external-action processing
   remains necessary. A stale assessment is historical, not current; stale-assessment recovery remains **blocked** under [HANDOFF B2](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/HANDOFF.md#mission-service-1).
 - Outcome list/get return `Page<Outcome>` / `Outcome`. Every outcome names an
