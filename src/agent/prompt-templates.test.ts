@@ -194,6 +194,10 @@ test("the conflict template names the binding, the directory and the base branch
 });
 
 const GATE_FILES_LINE = "Gate files of repository engine: ";
+const GATE_FILES_RULE =
+  "Change a gate file only when the requirement names it.";
+const PACKAGE_FILE = "package.json";
+const TEST_PATH_FILE = "scripts/test-path.mjs";
 
 test("the shipped work text renders the affected test line", () => {
   const { text } = renderWorkPrompt(SHIPPED_TEMPLATES, {
@@ -235,13 +239,13 @@ test("the shipped work text names the gate files of a repository", () => {
       {
         name: "engine",
         command: "pnpm --silent run test:affected",
-        gate_files: ["package.json", "scripts/test-path.mjs"],
+        gate_files: [PACKAGE_FILE, TEST_PATH_FILE],
       },
     ],
   });
   assert.ok(
     text.includes(
-      `${GATE_FILES_LINE}\`package.json\`, \`scripts/test-path.mjs\`. Change a gate file only when the requirement names it.\n`,
+      `${GATE_FILES_LINE}\`${PACKAGE_FILE}\`, \`${TEST_PATH_FILE}\`. ${GATE_FILES_RULE}\n`,
     ),
   );
 });

@@ -560,6 +560,8 @@ const AFFECTED_COMMAND = "pnpm --silent run test:affected";
 const AFFECTED_SECTION = "## Affected tests";
 const BLANK_COMMAND = " ";
 const GATE_FILE = "package.json";
+const GATE_FILES_RULE =
+  "Change a gate file only when the requirement names it.";
 
 test("the node work and the task work name the affected command of a declaring checkout", async (t) => {
   const current = task("affected", "true");
@@ -582,13 +584,13 @@ test("the node work and the task work name the affected command of a declaring c
 
 test("the task work names the gate files of a declaring checkout", async (t) => {
   const current = task("gated", "true");
-  const first = await implementFixture(t, [current], []);
+  const first = await implementFixture(t, [current], [], undefined, ["api"]);
   await declareAffected(first, t, AFFECTED_COMMAND, [GATE_FILE]);
   const h = await nextExecution(t, first, []);
   assert.deepEqual(h.affectedTests[0]?.gate_files, [GATE_FILE]);
   assert.ok(
     taskWork(h, current).text.includes(
-      `: \`${GATE_FILE}\`. Change a gate file only when the requirement names it.`,
+      `Gate files of repository api: \`${GATE_FILE}\`. ${GATE_FILES_RULE}`,
     ),
   );
 });
