@@ -83,7 +83,6 @@ function selectJob(
   identity: MachineIdentity,
   claimant: Claimant,
   workerName: string,
-  placement: string | null,
   executionId: string,
   now: number,
 ) {
@@ -134,7 +133,10 @@ function selectJob(
           now,
           {
             worker_instance: instanceKeyOf(identity),
-            placement,
+            placement: dependencies.registrations.placementOf(
+              tx,
+              identity.runtimeIdentity,
+            ),
             revision_turn: openingFacts?.revision_turn ?? null,
             dependency_count: openingFacts?.dependency_count ?? null,
             node_name: openingFacts?.node_name ?? null,
@@ -168,7 +170,6 @@ function acquire(
       environment: binding.environment,
     },
     binding.worker_name,
-    binding.placement,
     executionId,
     now,
   );

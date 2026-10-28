@@ -127,6 +127,10 @@ export function schedulerHarness(
         return true;
       },
       registrationsOfInstance: () => [],
+      placementOf: (...args) => {
+        record("placementOf", args);
+        return null;
+      },
     },
     agentChains: {
       select: () => ({

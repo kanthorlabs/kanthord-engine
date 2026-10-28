@@ -874,7 +874,7 @@ test("the opening keys a claimant with no instance by binding name and identity 
 test("the opening of a server and a container instance carries its instance name", (t) => {
   for (const placement of ["server", "container"]) {
     const h = claimHarness(t);
-    h.binding.placement = placement;
+    h.dependencies.registrations.placementOf = () => placement;
     h.store.transaction((tx) =>
       h.service.insert(tx, h.row.node_id, h.row.project_id, 0),
     );
@@ -887,6 +887,7 @@ test("the opening of a server and a container instance carries its instance name
       claimOnce(tx, h.dependencies, instance, h.pull, FIXTURE_NOW),
     );
     assert.equal(result.opening!.worker_instance, INSTANCE_NAME);
+    assert.equal(result.opening!.placement, placement);
   }
 });
 
@@ -900,9 +901,13 @@ test("instanceKeyOf keys an external harness by the last segment of the resource
   assert.equal(instanceKeyOf(harness), HARNESS_INSTANCE_KEY);
 });
 
-test("the opening holds the placement of the binding and the facts of Mission", (t) => {
+test("the opening holds the placement of the registration instance and the facts of Mission", (t) => {
   const h = claimHarness(t);
-  h.binding.placement = PLACEMENT;
+  const placed: string[] = [];
+  h.dependencies.registrations.placementOf = (_tx, runtimeIdentity) => {
+    placed.push(runtimeIdentity);
+    return PLACEMENT;
+  };
   const reads: string[] = [];
   h.dependencies.facts.openingFacts = (_tx, nodeId) => {
     reads.push(nodeId);
@@ -922,9 +927,19 @@ test("the opening holds the placement of the binding and the facts of Mission", 
   );
   const opening = h.claim().opening!;
   assert.equal(opening.placement, PLACEMENT);
+  assert.deepEqual(placed, [h.row.runtime_identity]);
   assert.equal(opening.revision_turn, true);
   assert.equal(opening.dependency_count, DEPENDENCIES);
   assert.equal(opening.node_name, NODE_NAME);
+});
+
+test("the opening of an external harness claim holds no placement", (t) => {
+  const h = claimHarness(t);
+  h.dependencies.registrations.placementOf = () => null;
+  h.store.transaction((tx) =>
+    h.service.insert(tx, h.row.node_id, h.row.project_id, 0),
+  );
+  assert.equal(h.claim().opening!.placement, null);
 });
 
 test("the job of a revision turn measures the wait from its own queued_at", (t) => {

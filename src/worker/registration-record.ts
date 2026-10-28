@@ -74,13 +74,12 @@ export function registrationRecord(
     ...(declaration.host === WorkerHost.Kanthord
       ? {
           placement: hostedPlacement(
-            binding.placement ??
-              (registration.instance_id
-                ? (dependencies.instancePlacementOf?.(
-                    tx,
-                    registration.instance_id,
-                  ) ?? null)
-                : null),
+            registration.instance_id
+              ? (dependencies.instancePlacementOf?.(
+                  tx,
+                  registration.instance_id,
+                ) ?? null)
+              : null,
           ),
         }
       : {}),

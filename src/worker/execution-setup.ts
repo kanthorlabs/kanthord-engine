@@ -73,7 +73,10 @@ export async function executionSetup(
   > & {
     schedulerClaims: Pick<SchedulerClaims, "agentSelectionsOf" | "agentPinsOf">;
   },
-  worker: Pick<WorkerService, "declarationOf" | "pinnedAgentView">,
+  worker: Pick<
+    WorkerService,
+    "declarationOf" | "pinnedAgentView" | "placementOf"
+  >,
   caller: CallerContext,
 ): Promise<ExecutionSetup> {
   const claim = caller.execution;
@@ -97,6 +100,7 @@ export async function executionSetup(
     assert.ok(row);
     const declaration = worker.declarationOf(row.worker_name);
     assert.ok(declaration);
+    const placement = worker.placementOf(tx, claim.runtimeIdentity);
     const agentNames = declaration.agent_names ?? [];
     const selections = dependencies.schedulerClaims.agentSelectionsOf(
       tx,
@@ -223,7 +227,7 @@ export async function executionSetup(
       environment: executionEnvironment(
         repository.environment,
         repository.repository_environment,
-        row.placement,
+        placement,
         dependencies.environmentDigestOf(
           claim.projectId,
           repository.resource_identity,
@@ -234,7 +238,7 @@ export async function executionSetup(
         ),
       ),
     }));
-    if (row.placement === InstancePlacement.Container && row.environment)
+    if (placement === InstancePlacement.Container && row.environment)
       dependencies.environmentClaimed(claim.projectId, row.environment);
     return executionSetupSchema.parse({
       execution_id: claim.executionId,

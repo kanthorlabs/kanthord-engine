@@ -363,6 +363,7 @@ export interface Registrations {
   ): { client_id: string; name: string } | null;
   registrationHealthcheck(tx: Transaction, runtimeIdentity: string): boolean;
   registrationsOfInstance(tx: Transaction, runtimeIdentity: string): string[];
+  placementOf(tx: Transaction, runtimeIdentity: string): string | null;
 }
 export interface ProjectPauses {
   projectPaused(tx: Transaction, projectId: string): boolean;

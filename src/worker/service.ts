@@ -184,15 +184,14 @@ export interface Dependencies {
     logger: Logger;
   };
 }
-function claimantOf(
-  tx: Transaction,
-  placement: string | null | undefined,
-  runtimeIdentity: string,
-): string {
-  if (placement !== InstancePlacement.Worker) return SERVER_HOLDER;
+function instanceOfRegistration(tx: Transaction, runtimeIdentity: string) {
   const instanceId = readRow(tx, runtimeIdentity)?.instance_id;
-  const instance = instanceId ? readInstanceById(tx, instanceId) : null;
-  assert.ok(instance, "A worker placement claimant names its instance.");
+  return instanceId ? readInstanceById(tx, instanceId) : null;
+}
+
+function claimantOf(tx: Transaction, runtimeIdentity: string): string {
+  const instance = instanceOfRegistration(tx, runtimeIdentity);
+  if (instance?.placement !== InstancePlacement.Worker) return SERVER_HOLDER;
   return instance.name;
 }
 
@@ -250,16 +249,18 @@ export class WorkerService implements Service {
       this,
       tx,
       workerBindingId,
-      this.claimantHolder(tx, workerBindingId, runtimeIdentity),
+      this.claimantHolder(tx, runtimeIdentity),
     );
   }
-  claimantHolder(
+  claimantHolder(tx: Transaction, runtimeIdentity: string): string {
+    return claimantOf(tx, runtimeIdentity);
+  }
+  placementOf(
     tx: Transaction,
-    workerBindingId: string,
     runtimeIdentity: string,
-  ): string {
-    const binding = this.dependencies.workerBindingRowOf(tx, workerBindingId);
-    return claimantOf(tx, binding?.placement, runtimeIdentity);
+  ): InstancePlacement | null {
+    assert.ok(tx.database.isTransaction);
+    return instanceOfRegistration(tx, runtimeIdentity)?.placement ?? null;
   }
   bindingsListingInstance(
     tx: Transaction,
@@ -602,7 +603,7 @@ export class WorkerService implements Service {
     if (declaration.host === WorkerHost.ExternalHarness) return true;
     const scope = {
       holders: bindingHolders(binding),
-      claimant: claimantOf(tx, binding.placement, runtimeIdentity),
+      claimant: claimantOf(tx, runtimeIdentity),
     };
     const agents = agentsOfWorker(binding.worker_name);
     assert.ok(agents.length > NO_ITEMS);
