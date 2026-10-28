@@ -77,9 +77,21 @@ const ONE_FAILURE = 1;
 const TWO_FAILURES = 2;
 const THREE_FAILURES = 3;
 const FIRST_STRIKE = 1;
+const FOUR_FAILURES = 4;
+const DIGESTS_DETAIL = JSON.stringify({
+  digests: { "repository:github:acme/api": "sha256:aaaa" },
+});
 
 function stopOf(reason: ReleaseStop["reason"], code: string | null) {
   return { reason, code };
+}
+
+function digestStopOf(code: EnvironmentFailure) {
+  return {
+    reason: ExecutionStopReason.EnvironmentFailed,
+    code,
+    detail: DIGESTS_DETAIL,
+  };
 }
 
 function releaseHarness(t: TestContext) {
@@ -232,7 +244,7 @@ test("a first advancing provider stop counts no failure", async (t) => {
   assert.equal(h.failureCount(), NO_FAILURES);
 });
 
-test("three consecutive environment stops set no hold and never pause the node", async (t) => {
+test("three consecutive environment stops with digests set no hold and never pause the node", async (t) => {
   const h = releaseHarness(t);
   t.mock.method(h.service, "wake", () => {});
   t.mock.method(Date, "now", () => FIXTURE_NOW);
@@ -242,18 +254,8 @@ test("three consecutive environment stops set no hold and never pause the node",
     return transitionFixture();
   };
   for (let index = 0; index < TWO_FAILURES; index += 1)
-    h.prior(
-      stopOf(
-        ExecutionStopReason.EnvironmentFailed,
-        EnvironmentFailure.CommandAbsent,
-      ),
-    );
-  await h.release(
-    stopOf(
-      ExecutionStopReason.EnvironmentFailed,
-      EnvironmentFailure.SetupFailed,
-    ),
-  );
+    h.prior(digestStopOf(EnvironmentFailure.CommandAbsent));
+  await h.release(digestStopOf(EnvironmentFailure.SetupFailed));
   assert.equal(h.failureCount(), NO_FAILURES);
   assert.deepEqual(
     h.store.database
@@ -264,20 +266,36 @@ test("three consecutive environment stops set no hold and never pause the node",
   );
 });
 
-test("environment stops between two code failures change no count of the other failures", async (t) => {
+test("environment stops with digests between two code failures change no count of the other failures", async (t) => {
   const h = releaseHarness(t);
   t.mock.method(h.service, "wake", () => {});
   t.mock.method(Date, "now", () => FIXTURE_NOW);
   h.prior(stopOf(ExecutionStopReason.JudgementInvalid, null));
   for (let index = 0; index < THREE_FAILURES; index += 1)
+    h.prior(digestStopOf(EnvironmentFailure.SetupFailed));
+  await h.release(stopOf(ExecutionStopReason.NoProgress, null));
+  assert.equal(h.failureCount(), TWO_FAILURES);
+});
+
+test("environment stops without digests count as failures", async (t) => {
+  const h = releaseHarness(t);
+  t.mock.method(h.service, "wake", () => {});
+  t.mock.method(Date, "now", () => FIXTURE_NOW);
+  h.prior(stopOf(ExecutionStopReason.JudgementInvalid, null));
+  for (let index = 0; index < TWO_FAILURES; index += 1)
     h.prior(
       stopOf(
         ExecutionStopReason.EnvironmentFailed,
-        EnvironmentFailure.SetupFailed,
+        EnvironmentFailure.AffectedInvalid,
       ),
     );
-  await h.release(stopOf(ExecutionStopReason.NoProgress, null));
-  assert.equal(h.failureCount(), TWO_FAILURES);
+  await h.release(
+    stopOf(
+      ExecutionStopReason.EnvironmentFailed,
+      EnvironmentFailure.AffectedInvalid,
+    ),
+  );
+  assert.equal(h.failureCount(), FOUR_FAILURES);
 });
 
 test("a non-advancing provider stop counts as a failure and keeps the hold", async (t) => {
