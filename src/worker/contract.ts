@@ -352,7 +352,8 @@ export interface EvidenceRequests {
 }
 export const HANDOVER_MAX_BODY_BYTES = 1024;
 export const SSH_SIGN_MAX_BODY_BYTES = 16384;
-export const CREDENTIAL_REPORT_MAX_BODY_BYTES = 64 * 1024;
+export const CREDENTIAL_REPORT_MAX_BODY_BYTES = 65536;
+const REGISTER_MAX_BODY_BYTES = 40960;
 export interface CustodyHandover {
   handover(
     tx: Transaction,
@@ -1629,7 +1630,7 @@ export const workerOperations = {
     requiresRegistration: false,
     timeoutMs: 10000,
     mutation: true,
-    maxBodyBytes: 40 * 1024,
+    maxBodyBytes: REGISTER_MAX_BODY_BYTES,
     status: HttpStatus.OK,
     input: emptyInput,
     output: z.strictObject({

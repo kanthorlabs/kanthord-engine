@@ -21,7 +21,7 @@ export type TelemetryWrite = ServiceClient<
 
 export const TELEMETRY_QUEUE_RECORDS = 5000;
 export const TELEMETRY_BATCH_RECORDS = 200;
-export const TELEMETRY_BATCH_BYTES = 768 * 1024;
+export const TELEMETRY_BATCH_BYTES = 786432;
 export const TELEMETRY_INTERVAL_MS = 1000;
 const CALL_TIMEOUT_MS = 10000;
 const SEND_ATTEMPTS = 3;

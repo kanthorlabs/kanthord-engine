@@ -6,8 +6,10 @@ import { Diagnostic } from "../../kernel/errors.ts";
 import { createIdentity } from "../../kernel/identity.ts";
 import { SlotControl } from "./thread-data.ts";
 
-const MEBIBYTE = 1024 * 1024;
-export const FRAME_LINE_LIMIT_BYTES = 64 * MEBIBYTE;
+const KIBIBYTE = 1024;
+const MEBIBYTE = KIBIBYTE * KIBIBYTE;
+const FRAME_LINE_LIMIT_MEBIBYTES = 64;
+export const FRAME_LINE_LIMIT_BYTES = FRAME_LINE_LIMIT_MEBIBYTES * MEBIBYTE;
 const LINE_FEED = 0x0a;
 const ABSENT = -1;
 const INVALID_RESPONSE_STATUS = 500;

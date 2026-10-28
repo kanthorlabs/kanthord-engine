@@ -25,7 +25,7 @@ import {
 export const AGENT_COMPONENT_NAME = "agent";
 export const AGENT_NAMES = ["swe@1", "re@1", "env@1"] as const;
 export type AgentName = (typeof AGENT_NAMES)[number];
-export const ENABLEMENT_MAX_BODY_BYTES = 64 * 1024;
+export const ENABLEMENT_MAX_BODY_BYTES = 65536;
 export const ENABLEMENT_TIMEOUT_MS = 30000;
 export const LIST_LIMIT_DEFAULT = 100;
 export const LIST_LIMIT_MAX = 1000;
