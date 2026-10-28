@@ -179,17 +179,19 @@ export async function generateSlotJWT(
     clientId: string;
     projectId: string;
     bindingName: string;
-    slot: number;
+    instanceId: string;
+    instanceName: string;
   },
 ): Promise<TokenResponse> {
   return generateJWT(masterKey, authVersion, SLOT_TOKEN_LIFETIME, {
     sub: identitySchema(CLIENT_IDENTITY_PREFIX).parse(slot.clientId),
-    name: parseDisplayName(`server slot ${slot.slot}`),
+    name: parseDisplayName(slot.instanceName),
     kind: IdentityKind.Client,
     project_id: parseProjectId(slot.projectId),
     resource_identity: workerResourceIdentity(
       parseBindingName(slot.bindingName),
     ),
+    instance_id: identitySchema(WORKER_INSTANCE_PREFIX).parse(slot.instanceId),
   });
 }
 

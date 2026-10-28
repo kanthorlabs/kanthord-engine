@@ -1,8 +1,6 @@
 import assert from "node:assert/strict";
 import { join } from "node:path";
 import { test, type TestContext } from "node:test";
-import { parse, stringify } from "yaml";
-import { CONFIG_VERSION, configuration } from "../../config/index.ts";
 import {
   type CredentialAnswer,
   plainHandoverPayloadSchema,
@@ -40,7 +38,7 @@ import {
   startTestSshd,
 } from "../../repository/sshd-test-support.ts";
 import { workerOperations } from "../../worker/contract.ts";
-import { environment, kanthord, kanthordTerminal } from "./cli-test-support.ts";
+import { environment, kanthord } from "./cli-test-support.ts";
 import {
   COVERING_WORKER_BINDINGS,
   createFakeSshCredential,
@@ -143,34 +141,6 @@ function cli(directory: string, env: NodeJS.ProcessEnv) {
   return { read, write, refuses, env };
 }
 
-async function machine(
-  directory: string,
-  projectId: string,
-  name: string,
-  env: NodeJS.ProcessEnv,
-) {
-  const args = [
-    "auth",
-    "jwt",
-    "generate",
-    "--project",
-    projectId,
-    "--binding",
-    "general",
-    "--name",
-    name,
-    "--config",
-    join(directory, "server.yaml"),
-  ];
-  const result = await kanthordTerminal(args, env);
-  assert.equal(result.code, SUCCESS, result.stderr);
-  assert.equal(result.stderr, NO_OUTPUT);
-  const fragment = parse(result.stdout) as { token: string };
-  assert.ok(fragment.token);
-  assert.doesNotMatch(result.stdout, /client_secret/);
-  return fragment;
-}
-
 async function resources(c: ReturnType<typeof cli>) {
   await c.write(["llm", "credential", "create"], {
     name: NAME,
@@ -266,17 +236,12 @@ async function setup(t: TestContext) {
   const c = cli(directory, human);
   const { project_id: projectId, binding_id: bindingId } = await resources(c);
   await graph(c, projectId, bindingId);
-  writePrivate(
-    join(directory, "server.yaml"),
-    stringify(
-      configuration({
-        version: CONFIG_VERSION,
-        master_key: fixture.config.master_key,
-      }).getProperties(),
-    ),
-  );
   const general = await fixture.slotClient(projectId, "general");
-  const spare = await machine(directory, projectId, "general-b", human);
+  const spare = await fixture.strangerClient(
+    projectId,
+    "general",
+    instanceNames("general", SINGLE_INSTANCE)[0]!,
+  );
   const env = { ...human, KANTHORD_TOKEN: general.token };
   const registration = await c.read<{ runtime_identity: string }>(
     ["worker", "register"],
@@ -602,7 +567,7 @@ test(
           "gateway.authentication.unauthorized",
         );
         await h.refuses(
-          ["worker", "handover", X, "--token", h.spare.token],
+          ["worker", "handover", X, "--token", h.spare],
           "gateway.registration.required",
         );
         await h.refuses(

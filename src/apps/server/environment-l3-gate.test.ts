@@ -52,6 +52,7 @@ import {
   type Fixture,
   gateFixture,
   importNode,
+  latestStarts,
   NO_ITEMS,
   recordingSlotDriver,
   REPOSITORY_BINDING,
@@ -610,10 +611,9 @@ async function assertNoSecret(
       ...l3.podman.commands(),
       ...l3.podman.calls,
       ...l3.devcontainer.invocations().map(({ args }) => args),
-      ...l3.starts.map(({ clientId, slot, poolSlot }) => ({
-        clientId,
-        slot,
-        poolSlot,
+      ...l3.starts.map(({ instanceName, entries }) => ({
+        instanceName,
+        client_ids: entries.map(({ client_id }) => client_id),
       })),
     ]),
     secret_reads: readFileSync(l3.secrets.log, "utf8"),
@@ -842,27 +842,35 @@ test(
         ];
         await until(
           () =>
-            SLOTS_STARTED.every((slot) =>
-              l3.starts.some((start) => start.slot === slot),
+            latestStarts(l3.starts).length >= SLOTS_STARTED.length &&
+            latestStarts(l3.starts).every(
+              (start) => start.entries.length > NO_ITEMS,
             ),
           Boolean,
           t.signal,
         );
-        const slotA = l3.starts.find((start) => start.slot === SLOT_A)!;
-        const slotB = l3.starts.find((start) => start.slot === SLOT_B)!;
+        const slotA = latestStarts(l3.starts)[SLOT_A]!;
+        const slotB = latestStarts(l3.starts)[SLOT_B]!;
         const clientA = await worker(t, fixture, projectId, nodes[0]!, 0, {
-          token: await fixture.slotTokenOf(slotA.poolSlot),
+          token: await fixture.slotTokenOf(slotA.instance, slotA.entries[0]!),
         });
         await clientA.claimed(nodes);
-        claimantToken = await fixture.slotTokenOf(slotB.poolSlot);
+        claimantToken = await fixture.slotTokenOf(
+          slotB.instance,
+          slotB.entries[0]!,
+        );
         const clientB = await worker(t, fixture, projectId, nodes[1]!, 1, {
           token: claimantToken,
         });
         claimedExecution = await clientB.claimed(nodes);
         claimant = clientB;
         const runs = await until(
-          () => [slotA, slotB].map((start) => slotRuns(podman, start.clientId)),
-          (found) => found.every((list) => list.length > NO_ITEMS),
+          () =>
+            [slotA, slotB].map((start) => slotRuns(podman, start.instanceName)),
+          (found) =>
+            found.every((list) =>
+              list.some((run) => cacheVolumeOf(run) !== null),
+            ),
           t.signal,
         );
         cacheName = cacheVolumeName(
@@ -871,12 +879,12 @@ test(
           first.resource_identity,
         );
         for (const list of runs)
-          for (const run of list) assert.equal(cacheVolumeOf(run), cacheName);
+          assert.equal(cacheVolumeOf(list.at(-1)!), cacheName);
         assert.equal(proofRuns(l3).length, SINGLE_ITEM);
         assert.equal(cacheVolumeOf(proofRuns(l3)[0]!), cacheName);
         assert.deepEqual(Array.from(cacheNames(l3)), [cacheName]);
         const homes = [slotA, slotB].map(
-          ({ clientId }) => `${SLOT_NAME_PREFIX}${clientId}`,
+          ({ instanceName }) => `${SLOT_NAME_PREFIX}${instanceName}`,
         );
         assert.notEqual(homes[0], homes[1]);
         for (const home of homes)

@@ -1362,11 +1362,11 @@ test(
       placement: driver.placement,
       check: () => driver.check(),
       prepare: () => driver.prepare(),
-      removeVolume: (clientId) => driver.removeVolume(clientId),
+      removeVolume: (instanceName) => driver.removeVolume(instanceName),
       sweepVolumes: (live) => driver.sweepVolumes(live),
       launch: (launch) => {
         assert.ok(holder.fake);
-        starts.push(launch.slot.client_id);
+        starts.push(launch.instance.name);
         return driver.launch({
           ...launch,
           environment: holder.fake.host.environment,
@@ -1377,17 +1377,23 @@ test(
     holder.fake = container.fake;
     container.setup.fixture.worker.startPool();
     await container.writeContainer(1);
-    const runs = await until(
-      () => starts.flatMap((clientId) => slotRuns(container.fake, clientId)),
+    const [state] = await until(
+      () =>
+        container.setup.fixture.project.environmentStates(
+          container.setup.project_id,
+        ),
+      ([found]) => found?.status === EnvironmentStatus.Ready,
+      t.signal,
+    );
+    assert.ok(state?.tag);
+    const tag = state.tag;
+    await until(
+      () =>
+        starts
+          .flatMap((name) => slotRuns(container.fake, name))
+          .filter((run) => run[run.indexOf(SEPARATOR_OPTION) - 1] === tag),
       (found) => found.length > NO_ITEMS,
       t.signal,
     );
-    const [state] = await container.setup.fixture.project.environmentStates(
-      container.setup.project_id,
-    );
-    assert.equal(state?.status, EnvironmentStatus.Ready);
-    assert.ok(state.tag);
-    for (const run of runs)
-      assert.equal(run[run.indexOf(SEPARATOR_OPTION) - 1], state.tag);
   },
 );

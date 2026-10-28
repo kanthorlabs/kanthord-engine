@@ -2,8 +2,6 @@ import assert from "node:assert/strict";
 import { join } from "node:path";
 import { test, type TestContext } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
-import { parse, stringify } from "yaml";
-import { CONFIG_VERSION, configuration } from "../../config/index.ts";
 import { writePrivate } from "../../kernel/files.ts";
 import {
   createIdempotencyKey,
@@ -20,7 +18,7 @@ import {
   InstancePlacement,
   RegistrationActivity,
 } from "../../worker/contract.ts";
-import { environment, kanthord, kanthordTerminal } from "./cli-test-support.ts";
+import { environment, kanthord } from "./cli-test-support.ts";
 import {
   createInstancesByCli,
   gatewayFixture,
@@ -96,36 +94,6 @@ function file(directory: string, name: string, value: unknown): string {
   return path;
 }
 
-async function machineToken(
-  directory: string,
-  projectId: string,
-  name: string,
-  env: NodeJS.ProcessEnv,
-): Promise<string> {
-  assert.ok(identitySchema("project").safeParse(projectId).success);
-  assert.ok(name);
-  const args = [
-    "auth",
-    "jwt",
-    "generate",
-    "--project",
-    projectId,
-    "--binding",
-    BINDING,
-    "--name",
-    name,
-    "--config",
-    join(directory, "issuance.yaml"),
-  ];
-  const result = await kanthordTerminal(args, env);
-  assert.equal(result.code, SUCCESS, result.stderr);
-  assert.equal(result.stderr, NO_OUTPUT);
-  const fragment = parse(result.stdout) as { token: string };
-  assert.ok(fragment.token);
-  assert.doesNotMatch(result.stdout, /client_secret/);
-  return fragment.token;
-}
-
 function bindings(instanceCount: number) {
   assert.ok(Number.isSafeInteger(instanceCount));
   assert.ok(instanceCount >= SUCCESS);
@@ -197,22 +165,17 @@ async function setup(t: TestContext) {
     ),
   );
   assert.equal(applied.binding_set_version, SECOND_BINDING_VERSION);
-  writePrivate(
-    join(directory, "issuance.yaml"),
-    stringify(
-      configuration({
-        version: CONFIG_VERSION,
-        master_key: fixture.config.master_key,
-      }).getProperties(),
-    ),
-  );
   const A = {
     ...H,
     KANTHORD_TOKEN: (await fixture.slotClient(project.id, BINDING)).token,
   };
   const B = {
     ...H,
-    KANTHORD_TOKEN: await machineToken(directory, project.id, "worker-b", H),
+    KANTHORD_TOKEN: await fixture.strangerClient(
+      project.id,
+      BINDING,
+      instanceNames("general", SINGLE_INSTANCE)[FIRST_ITEM]!,
+    ),
   };
   return { directory, project_id: project.id, H, A, B, fixture };
 }
@@ -339,8 +302,13 @@ test(
         ridA,
       ),
     );
-    await t.test("E02.9 an identity that is no pool slot refuses B", async () =>
-      refusal(await kanthord(["worker", "register"], f.B), ErrorCode.Placement),
+    await t.test(
+      "E02.9 an identity that no listed instance derives refuses B",
+      async () =>
+        refusal(
+          await kanthord(["worker", "register"], f.B),
+          ErrorCode.Placement,
+        ),
     );
     await t.test("E02.10 heartbeat prints null", async () =>
       assert.equal(success(await kanthord(["worker", "heartbeat"], f.A)), null),
@@ -364,8 +332,8 @@ test(
         host: HOST,
         placement: "server",
         client_id: record.client_id,
-        name: "server slot 0",
-        instance: null,
+        name: instanceNames("general", SINGLE_INSTANCE)[FIRST_ITEM],
+        instance: instanceNames("general", SINGLE_INSTANCE)[FIRST_ITEM],
         activity: RegistrationActivity.Idle,
         draining: false,
         registered: true,
@@ -440,13 +408,19 @@ test(
         ErrorCode.Execution,
       ),
     );
-    await t.test("E02.18 freed slot admits A again and refuses B", async () => {
-      ridB = success<Registration>(
-        await kanthord(["worker", "register"], f.A),
-      ).runtime_identity;
-      assert.notEqual(ridB, ridA);
-      refusal(await kanthord(["worker", "register"], f.B), ErrorCode.Placement);
-    });
+    await t.test(
+      "E02.18 a freed binding admits A again and refuses B",
+      async () => {
+        ridB = success<Registration>(
+          await kanthord(["worker", "register"], f.A),
+        ).runtime_identity;
+        assert.notEqual(ridB, ridA);
+        refusal(
+          await kanthord(["worker", "register"], f.B),
+          ErrorCode.Placement,
+        );
+      },
+    );
     await t.test("E02.19 removing binding ends registration", async () => {
       assert.equal(
         await apply(f, SECOND_BINDING_VERSION, null),

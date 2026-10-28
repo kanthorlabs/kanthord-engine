@@ -33,7 +33,7 @@ export async function workerAcceptance(
   host = false,
   options: {
     stateDirectory?: string;
-    slotLimit?: number;
+    instanceLimit?: number;
     containerImage?: string;
     fakeSlots?: boolean;
     fixtureOptions?: Parameters<typeof gatewayFixture>[1];
@@ -43,7 +43,7 @@ export async function workerAcceptance(
   const fixture = await gatewayFixture(t, {
     ...options.fixtureOptions,
     stateDirectory: options.stateDirectory,
-    serverSlotLimit: options.slotLimit,
+    serverInstanceLimit: options.instanceLimit,
     containerImage: options.containerImage,
     fakeSlots: options.fakeSlots,
     repositoryConnector: {

@@ -15,8 +15,13 @@ import {
   temporary,
 } from "../../kernel/test-support.ts";
 import { directories } from "../../kernel/xdg.ts";
-import { workerOperations } from "../../worker/contract.ts";
-import { threadDataSchema } from "../worker/thread-data.ts";
+import { BindingEntryState, workerOperations } from "../../worker/contract.ts";
+import {
+  entryPorts,
+  threadDataSchema,
+  type ThreadEntry,
+  ThreadMessageKind,
+} from "../worker/thread-data.ts";
 import { until } from "./cli-test-support.ts";
 import {
   gatewayFixture,
@@ -26,7 +31,9 @@ import {
 } from "./test-support.ts";
 
 const CLIENT_SECRET_BYTES = 32;
-const DATA_KEYS = ["client_secret", "log", "port"];
+const DATA_KEYS = ["entries", "log"];
+const ENTRY_KEYS = ["client_id", "client_secret", "port", "state"];
+const TWO_INSTANCES = 2;
 const SINGLE_INSTANCE = 1;
 const RESOURCE_IDENTITY = "worker:kanthord:general";
 const FINISHED_MESSAGE = "Request finished";
@@ -48,12 +55,21 @@ function threadEnvironment(root: string): NodeJS.ProcessEnv {
   };
 }
 
-function threadData(port: MessageChannel["port2"]) {
+function entryOf(
+  port: MessageChannel["port2"] | null,
+  clientId = "client_identity_a",
+  state: BindingEntryState = BindingEntryState.Serving,
+): ThreadEntry {
   return {
+    client_id: clientId,
     port,
     client_secret: randomBytes(CLIENT_SECRET_BYTES).toString("base64"),
-    log: LogDestination.File,
+    state,
   };
+}
+
+function threadData(...entries: ThreadEntry[]) {
+  return { entries, log: LogDestination.File };
 }
 
 function startThread(
@@ -62,23 +78,32 @@ function startThread(
 ): Worker {
   return new Worker(new URL("../worker/thread.ts", import.meta.url), {
     workerData: data,
-    transferList: [data.port],
+    transferList: entryPorts(data.entries),
     env,
   });
 }
 
-test("the worker data of a thread holds a port, a client secret and a log destination only", () => {
+test("the worker data of a thread holds an entry list and a log destination only", () => {
   const { port1, port2 } = new MessageChannel();
   try {
-    const data = {
-      port: port1,
-      client_secret: randomBytes(CLIENT_SECRET_BYTES).toString("base64"),
-      log: LogDestination.File,
-    };
+    const data = threadData(entryOf(port1));
     assert.deepEqual(Object.keys(threadDataSchema.shape).sort(), DATA_KEYS);
+    assert.deepEqual(Object.keys(data.entries[0]!).sort(), ENTRY_KEYS);
     assert.ok(threadDataSchema.safeParse(data).success);
+    assert.ok(threadDataSchema.safeParse(threadData()).success);
     assert.ok(!threadDataSchema.safeParse({ ...data, env: {} }).success);
-    assert.ok(!threadDataSchema.safeParse({ ...data, port: {} }).success);
+    assert.ok(
+      !threadDataSchema.safeParse({
+        ...data,
+        entries: [{ ...data.entries[0], port: {} }],
+      }).success,
+    );
+    assert.ok(
+      !threadDataSchema.safeParse({
+        ...data,
+        entries: [{ ...data.entries[0], state: "serving-now" }],
+      }).success,
+    );
     assert.ok(!threadDataSchema.safeParse({ ...data, log: "x" }).success);
     assert.ok(
       threadDataSchema.safeParse({
@@ -113,7 +138,7 @@ test("a worker thread registers its worker unit through the port and the invocat
   const { port1, port2 } = new MessageChannel();
   servePort(port1, fixture.invocation, () => token, logger);
   const root = temporary(t);
-  const data = threadData(port2);
+  const data = threadData(entryOf(port2));
   assert.deepEqual(Object.keys(data).sort(), DATA_KEYS);
   const env = threadEnvironment(root);
   const thread = startThread(data, env);
@@ -150,7 +175,7 @@ test("a worker thread refuses to start without an absolute directory variable", 
       const env = threadEnvironment(temporary(t));
       if (value === undefined) delete env[name];
       else env[name] = value;
-      const thread = startThread(threadData(port2), env);
+      const thread = startThread(threadData(entryOf(port2)), env);
       const [error] = await once(thread, "error");
       assert.deepEqual(error.fields, [["variables", name]], name);
       port1.close();
@@ -161,7 +186,7 @@ test("a worker thread exits by itself after its run ends", async (t) => {
   requirePiTools();
   const { port1, port2 } = new MessageChannel();
   const thread = startThread(
-    threadData(port2),
+    threadData(entryOf(port2)),
     threadEnvironment(temporary(t)),
   );
   t.after(() => thread.terminate());
@@ -194,7 +219,7 @@ test("the release bundle of the worker thread starts as an eval worker", async (
   const { port1, port2 } = new MessageChannel();
   const thread = new Worker(bundle.outputFiles[0]!.text, {
     eval: true,
-    workerData: threadData(port2),
+    workerData: threadData(entryOf(port2)),
     transferList: [port2],
     env: threadEnvironment(temporary(t)),
   });
@@ -206,4 +231,67 @@ test("the release bundle of the worker thread starts as an eval worker", async (
     `ENOENT: no such file or directory, open '${join(root, "package.json")}'`,
   );
   await once(thread, "exit");
+});
+
+test("a thread instance gets two entries, registers both and drains one after a new entry list", async (t) => {
+  requirePiTools();
+  const fixture = await gatewayFixture(t, {
+    repositoryConnector: {
+      gitLsRemote: async () => {},
+    },
+  });
+  await provisionRepositoryCredentials(fixture);
+  const project = await provisionWorkerProject(fixture, "thread-pair", {
+    general: SINGLE_INSTANCE,
+    reviewer: SINGLE_INSTANCE,
+  });
+  await project.pause();
+  const logger = pino({ level: "silent" });
+  const served = new Map<string, MessageChannel>();
+  const entryFor = async (binding: string, clientId: string) => {
+    const channel = new MessageChannel();
+    const token = await fixture.machineToken(project.id, binding, "slot");
+    servePort(channel.port1, fixture.invocation, () => token, logger);
+    served.set(clientId, channel);
+    return entryOf(channel.port2, clientId);
+  };
+  const general = await entryFor("general", "client_identity_general");
+  const reviewer = await entryFor("reviewer", "client_identity_reviewer");
+  const thread = startThread(
+    threadData(general, reviewer),
+    threadEnvironment(temporary(t)),
+  );
+  t.after(async () => {
+    await thread.terminate();
+    for (const channel of served.values()) channel.port1.close();
+  });
+  const list = humanCaller(fixture);
+  const registrations = () =>
+    list(workerOperations["registration.list"], {
+      params: {},
+      query: { project_id: project.id },
+      body: null,
+    });
+  const both = await until(
+    registrations,
+    (candidate) => candidate.items.length === TWO_INSTANCES,
+    t.signal,
+  );
+  assert.deepEqual(both.items.map((item) => item.resource_identity).sort(), [
+    "worker:kanthord:general",
+    "worker:kanthord:reviewer",
+  ]);
+  thread.postMessage({
+    kind: ThreadMessageKind.Bindings,
+    entries: [
+      { ...general, port: null },
+      { ...reviewer, port: null, state: BindingEntryState.Draining },
+    ],
+  });
+  const remaining = await until(
+    registrations,
+    (candidate) => candidate.items.length === SINGLE_INSTANCE,
+    t.signal,
+  );
+  assert.equal(remaining.items[0]?.resource_identity, RESOURCE_IDENTITY);
 });

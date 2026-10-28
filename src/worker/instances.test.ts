@@ -1000,7 +1000,7 @@ test("the registrations of an instance are empty for a registration with no inst
       tx,
       {
         client_id: createIdentity("client_identity"),
-        name: "server slot 0",
+        name: "coder-1",
         project_id: projectId,
         resource_identity: "worker:kanthord:general",
         instance_id: null,
@@ -1013,7 +1013,7 @@ test("the registrations of an instance are empty for a registration with no inst
       tx,
       {
         client_id: createIdentity("client_identity"),
-        name: "server slot 1",
+        name: "coder-2",
         project_id: projectId,
         resource_identity: "worker:kanthord:general",
         instance_id: null,

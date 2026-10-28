@@ -27,6 +27,7 @@ import { isMachineIdentity } from "../kernel/caller.ts";
 import { AccessPolicy } from "../kernel/operation.ts";
 import { OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
+import type { PoolPlacement } from "./contract.ts";
 import {
   type AgentConfiguration,
   alwaysAvailable,
@@ -34,7 +35,6 @@ import {
   type CustodyHandover,
   type EvidenceRequests,
   HANDOVER_REFRESH_WAIT_MS,
-  hostsPoolSlot,
   type InstanceIssuer,
   InstancePlacement,
   type IntakeActions,
@@ -42,11 +42,9 @@ import {
   type MissionActions,
   type PinnedCredentialMetadataFn,
   type PlacementStatus,
-  POOL_SLOT_COUNT,
   type PoolHost,
   REGISTRATION_CAPABILITY,
   REGISTRATION_TARGET_KIND,
-  RegistrationActivity,
   type RepositoryBindingIdsOf,
   type RepositoryPolicyOf,
   type SchedulerClaims,
@@ -95,6 +93,7 @@ import {
 import { resumeRegistration, TableRegistrations } from "./registrations.ts";
 import { Pool } from "./pool.ts";
 import {
+  instanceDropped,
   listRegistrationRecords,
   registrationRecord,
 } from "./registration-record.ts";
@@ -438,8 +437,8 @@ export class WorkerService implements Service {
     this.poolStarted = true;
     const host = this.dependencies.pool!.host;
     host.prepare();
-    void host.sweep(this.liveSlotIdentities());
-    this.reconcile(null, true);
+    void host.sweep(this.liveInstanceNames());
+    this.reconcile();
     void this.logUnavailableContainerDriver();
   }
 
@@ -452,33 +451,18 @@ export class WorkerService implements Service {
     return host.placementStatus(placement);
   }
 
-  private liveSlotIdentities(): Set<string> {
-    const pool = this.dependencies.pool!;
-    const identities = new Set<string>();
-    const bindings = this.dependencies.store.transaction((tx) =>
-      pool.workerBindingsOf(tx, null),
+  private liveInstanceNames(): Set<string> {
+    return new Set(
+      this.dependencies.store
+        .transaction((tx) => this.instances.liveServerInstances(tx))
+        .map(({ name }) => name),
     );
-    for (const binding of bindings) {
-      if (!hostsPoolSlot(binding.placement)) continue;
-      for (let slot = NO_ITEMS; slot < POOL_SLOT_COUNT; slot++)
-        identities.add(
-          pool.host.clientIdentity(
-            binding.project_id,
-            binding.resource_identity,
-            binding.generation,
-            slot,
-          ),
-        );
-    }
-    return identities;
   }
 
   private async logUnavailableContainerDriver(): Promise<void> {
-    const live = this.dependencies.store.transaction((tx) =>
-      this.dependencies
-        .pool!.workerBindingsOf(tx, null)
-        .some((binding) => binding.placement === InstancePlacement.Container),
-    );
+    const live = this.dependencies.store
+      .transaction((tx) => this.instances.liveServerInstances(tx))
+      .some(({ placement }) => placement === InstancePlacement.Container);
     if (!live) return;
     const status = await this.placementStatus(InstancePlacement.Container);
     if (status.available) return;
@@ -501,14 +485,22 @@ export class WorkerService implements Service {
     this.dependencies.store.transaction((tx) =>
       this.instances.bindingsChanged(tx, projectId),
     );
+    this.scheduleReconcile({ project_id: projectId });
+  }
+
+  instancesChanged(): void {
+    this.scheduleReconcile({});
+  }
+
+  private scheduleReconcile(fields: { project_id?: string }): void {
     if (!this.poolStarted) return;
     setImmediate(() => {
       if (!this.poolStarted) return;
       try {
-        this.reconcile(projectId, false);
+        this.reconcile();
       } catch (error) {
         this.dependencies.pool?.logger.error(
-          { err: asError(error), project_id: projectId },
+          { err: asError(error), ...fields },
           "worker.pool.reconcile_failed",
         );
       }
@@ -523,64 +515,35 @@ export class WorkerService implements Service {
     const pool = this.pool;
     if (!pool) return;
     const { host, workerBindingsOf } = this.dependencies.pool!;
-    const bindings = this.dependencies.store.transaction((tx) =>
-      workerBindingsOf(tx, projectId),
+    const names = this.dependencies.store.transaction((tx) =>
+      workerBindingsOf(tx, projectId)
+        .filter((binding) => binding.environment === resourceIdentity)
+        .flatMap((binding) => binding.worker_instances ?? []),
     );
-    for (const binding of bindings) {
+    for (const instance of pool.instances())
       if (
-        binding.placement !== InstancePlacement.Container ||
-        binding.environment !== resourceIdentity
+        instance.placement === InstancePlacement.Container &&
+        names.includes(instance.name) &&
+        host.imageOf(instance) !== tag
       )
-        continue;
-      for (const slot of pool.slotsOf(
-        projectId,
-        binding.resource_identity,
-        binding.generation,
-      ))
-        if (host.imageOf(slot) !== tag) pool.restart(slot);
-    }
+        pool.restart(instance);
   }
 
-  private reconcile(projectId: string | null, restore: boolean): void {
+  private reconcile(): void {
     const pool = this.pool!;
-    const effects = this.dependencies.store.transaction((tx) => {
-      const now = Date.now();
-      const targets = this.dependencies
-        .pool!.workerBindingsOf(tx, projectId)
-        .flatMap((binding) =>
-          hostsPoolSlot(binding.placement)
-            ? [
-                {
-                  project_id: binding.project_id,
-                  resource_identity: binding.resource_identity,
-                  generation: binding.generation,
-                  placement: binding.placement,
-                  count: binding.instance_count,
-                },
-              ]
-            : [],
-        );
-      return pool.reconcile(
-        projectId,
-        targets,
-        {
-          busy: (clientId) => {
-            const registration = this.registrations.findByClient(clientId);
-            return (
-              registration !== undefined &&
-              this.dependencies.schedulerClaims.activityOf(
-                tx,
-                registration.runtime_identity,
-                now,
-              ).activity === RegistrationActivity.Executing
-            );
+    const effects = this.dependencies.store.transaction((tx) =>
+      pool.reconcile(
+        this.instances.liveServerInstances(tx).map((instance) => ({
+          instance: {
+            id: instance.id,
+            name: instance.name,
+            placement: instance.placement as PoolPlacement,
+            created_at: instance.created_at,
           },
-          live: (clientId) =>
-            this.registrations.findByClient(clientId) !== undefined,
-        },
-        restore,
-      );
-    });
+          entries: this.instances.entriesOf(tx, instance),
+        })),
+      ),
+    );
     pool.execute(effects);
   }
 
@@ -620,14 +583,19 @@ export class WorkerService implements Service {
       tx,
       runtimeIdentity,
     );
-    if (!registration || this.pool?.draining(registration.client_id))
-      return false;
+    if (!registration) return false;
     const binding = this.dependencies.workerBindingOf(
       tx,
       registration.project_id,
       registration.resource_identity,
     );
     if (!binding || binding.tombstone || binding.instance_count === NO_ITEMS)
+      return false;
+    if (
+      instanceDropped(binding, registration, (instanceId) =>
+        this.instanceNameOf(tx, instanceId),
+      )
+    )
       return false;
     const declaration = getWorkerDeclaration(binding.worker_name);
     assert.ok(declaration);
@@ -780,9 +748,10 @@ export class WorkerService implements Service {
   private recordDependencies() {
     return {
       ...this.dependencies,
-      draining: (clientId: string) => this.pool?.draining(clientId) ?? false,
       instanceNameOf: (tx: Transaction, instanceId: string) =>
         readInstanceById(tx, instanceId)?.name ?? null,
+      instancePlacementOf: (tx: Transaction, instanceId: string) =>
+        readInstanceById(tx, instanceId)?.placement ?? null,
     };
   }
 
@@ -841,7 +810,7 @@ export class WorkerService implements Service {
     );
   }
 
-  private requirePoolSlot(
+  private requireNativeInstance(
     tx: Transaction,
     identity: {
       clientId: string;
@@ -855,31 +824,10 @@ export class WorkerService implements Service {
       identity.projectId,
       identity.resourceIdentity,
     );
-    if (
-      binding &&
-      !binding.tombstone &&
-      binding.placement === InstancePlacement.Worker
-    ) {
-      this.requireListedInstance(tx, identity, binding);
+    if (!binding || binding.tombstone) return;
+    if (getWorkerDeclaration(binding.worker_name)?.host !== WorkerHost.Kanthord)
       return;
-    }
-    if (
-      !binding ||
-      binding.tombstone ||
-      !hostsPoolSlot(binding.placement) ||
-      this.pool?.isSlot(
-        identity.projectId,
-        identity.resourceIdentity,
-        binding.generation,
-        identity.clientId,
-      )
-    )
-      return;
-    throw new OperationError(
-      HttpStatus.Conflict,
-      WorkerErrorCode.PlacementMismatch,
-      "Worker binding accepts a registration only from a pool slot.",
-    );
+    this.requireListedInstance(tx, identity, binding);
   }
 
   private declareCatalog(registry: OperationRegistry): void {
@@ -1158,6 +1106,7 @@ export class WorkerService implements Service {
     declareInstances(registry, {
       instances: this.instances,
       heartbeatClock: this.heartbeatClock,
+      instancesChanged: () => this.instancesChanged(),
       registrationRecordOf: (tx, row) =>
         registrationRecord(tx, this.recordDependencies(), row, Date.now()),
       heldCopies: (tx, holder) =>
@@ -1195,7 +1144,7 @@ export class WorkerService implements Service {
             "Authentication required.",
           );
         const result = caller.commit((transaction) => {
-          this.requirePoolSlot(transaction, identity);
+          this.requireNativeInstance(transaction, identity);
           const registration = worker.register(
             transaction,
             {

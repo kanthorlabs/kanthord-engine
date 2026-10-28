@@ -14,6 +14,7 @@ import { HttpStatus } from "../kernel/http.ts";
 import { errorSchema } from "../kernel/errors.ts";
 import { fakeLookups, gatewayFixture } from "./test-support.ts";
 import { generateWorkerJWT } from "./auth/jwt.ts";
+import { InstancePlacement } from "../worker/contract.ts";
 
 const FOREIGN_HOST = "kanthord:31415";
 const HOST_NOT_ALLOWED = "gateway.http.host_not_allowed";
@@ -59,7 +60,12 @@ async function hostFixture(
     instances: {
       liveInstance: (id: string) =>
         id === instanceId
-          ? { id, name: INSTANCE_NAME, worker: "coder@1" }
+          ? {
+              id,
+              name: INSTANCE_NAME,
+              worker: "coder@1",
+              placement: InstancePlacement.Worker,
+            }
           : null,
       holdConnection: () => true,
     },

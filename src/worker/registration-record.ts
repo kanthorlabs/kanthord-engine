@@ -20,13 +20,26 @@ import { listLive, WORKER_REGISTRATION_PREFIX } from "./registration-rows.ts";
 interface Dependencies {
   workerBindingOf: WorkerBindingOf;
   schedulerClaims: SchedulerClaims;
-  draining?: (clientId: string) => boolean;
   instanceNameOf?: (tx: Transaction, instanceId: string) => string | null;
+  instancePlacementOf?: (
+    tx: Transaction,
+    instanceId: string,
+  ) => InstancePlacement | null;
 }
 
 function hostedPlacement(placement: InstancePlacement | null) {
   assert.ok(placement);
   return placement;
+}
+
+export function instanceDropped(
+  binding: { worker_instances?: string[] },
+  registration: Registration,
+  instanceName: (instanceId: string) => string | null,
+): boolean {
+  if (!registration.instance_id) return false;
+  const name = instanceName(registration.instance_id);
+  return name === null || !(binding.worker_instances ?? []).includes(name);
 }
 
 export function registrationRecord(
@@ -59,7 +72,17 @@ export function registrationRecord(
     worker_name: binding.worker_name,
     host: declaration.host,
     ...(declaration.host === WorkerHost.Kanthord
-      ? { placement: hostedPlacement(binding.placement) }
+      ? {
+          placement: hostedPlacement(
+            binding.placement ??
+              (registration.instance_id
+                ? (dependencies.instancePlacementOf?.(
+                    tx,
+                    registration.instance_id,
+                  ) ?? null)
+                : null),
+          ),
+        }
       : {}),
     client_id: registration.client_id,
     name: registration.name,
@@ -70,7 +93,11 @@ export function registrationRecord(
     ...(activity.activity === RegistrationActivity.Executing
       ? { execution_id: activity.execution_id }
       : {}),
-    draining: dependencies.draining?.(registration.client_id) ?? false,
+    draining: instanceDropped(
+      binding,
+      registration,
+      (instanceId) => dependencies.instanceNameOf?.(tx, instanceId) ?? null,
+    ),
     registered: true,
   });
 }

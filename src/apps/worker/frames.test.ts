@@ -15,6 +15,7 @@ import {
   type ServerFrame,
   serverFrameSchema,
 } from "./frames.ts";
+import { BindingEntryState } from "../../worker/contract.ts";
 import { SlotControl } from "./thread-data.ts";
 
 const FRAME_INVALID = "worker.slot.frame_invalid";
@@ -23,10 +24,26 @@ const SERVER_ERROR = 500;
 const ANSWERED = 200;
 const SPLIT_INSIDE_SEQUENCE = 1;
 const CALL_ID = "call";
+const CLIENT_ID = "client_identity_a";
+const SECOND_CLIENT_ID = "client_identity_b";
+const ENTRIES = [
+  {
+    client_id: CLIENT_ID,
+    client_secret: "secret ü 秘密",
+    state: BindingEntryState.Serving,
+  },
+  {
+    client_id: "client_identity_b",
+    client_secret: "other",
+    state: BindingEntryState.Draining,
+  },
+];
 const SERVER_FRAMES: ServerFrame[] = [
-  { kind: FrameKind.Init, client_secret: "secret ü 秘密" },
+  { kind: FrameKind.Init, entries: ENTRIES },
+  { kind: FrameKind.Bindings, entries: [] },
   {
     kind: FrameKind.Port,
+    client_id: CLIENT_ID,
     message: { call_id: "call", status: ANSWERED, body: { text: "a\nb" } },
   },
   { kind: FrameKind.Control, control: SlotControl.Drain },
@@ -63,18 +80,19 @@ function bridge(port: FakePort) {
   const frames: unknown[] = [];
   const invalid: Diagnostic[] = [];
   const ended: boolean[] = [];
-  bridgePort(port as unknown as MessagePort, readable, writable, {
+  const attached = bridgePort(readable, writable, {
     frames: instanceFrameSchema,
     onFrame: (frame) => frames.push(frame),
     onInvalid: (error) => invalid.push(error),
     onEnd: () => ended.push(true),
   });
+  attached.attach(CLIENT_ID, port as unknown as MessagePort);
   const written = () =>
     String(writable.read() ?? "")
       .split("\n")
       .filter(Boolean)
       .map((line) => JSON.parse(line));
-  return { readable, frames, invalid, ended, written };
+  return { readable, frames, invalid, ended, written, attached };
 }
 
 test("each server frame survives an encode and a decode unchanged", () => {
@@ -97,11 +115,11 @@ test("a chunk split inside a UTF-8 sequence decodes to the same frame", () => {
 test("two frames in one chunk decode to two frames", () => {
   const decoder = new FrameDecoder();
   const chunk = Buffer.from(
-    encodeFrame(SERVER_FRAMES[2]!) + encodeFrame(SERVER_FRAMES[4]!),
+    encodeFrame(SERVER_FRAMES[3]!) + encodeFrame(SERVER_FRAMES[5]!),
   );
   assert.deepEqual(decodeAll(decoder, [chunk]), [
-    SERVER_FRAMES[2],
-    SERVER_FRAMES[4],
+    SERVER_FRAMES[3],
+    SERVER_FRAMES[5],
   ]);
 });
 
@@ -119,6 +137,10 @@ test("an unknown kind, an unknown key, a non-JSON line and invalid UTF-8 are ref
     '{"kind":"hello"}',
     '{"kind":"ping","extra":true}',
     '{"kind":"init"}',
+    '{"kind":"init","client_secret":"secret"}',
+    '{"kind":"bindings"}',
+    '{"kind":"port","message":{"call_id":"call"}}',
+    '{"kind":"port","client_id":"","message":{"call_id":"call"}}',
     '{"kind":"control","control":"pause"}',
     "not json",
   ])
@@ -144,13 +166,18 @@ test("the bridge posts each port frame unchanged and writes each port message as
   const port = new FakePort();
   const side = bridge(port);
   const call = { call_id: "call", cancel: true };
-  side.readable.write(encodeFrame({ kind: FrameKind.Port, message: call }));
+  side.readable.write(
+    encodeFrame({ kind: FrameKind.Port, client_id: CLIENT_ID, message: call }),
+  );
   assert.deepEqual(port.posted, [call]);
-  assert.deepEqual(side.frames, [{ kind: FrameKind.Port, message: call }]);
+  assert.deepEqual(side.frames, [
+    { kind: FrameKind.Port, client_id: CLIENT_ID, message: call },
+  ]);
   port.emit("message", { call_id: "call", status: ANSWERED, body: null });
   assert.deepEqual(side.written(), [
     {
       kind: FrameKind.Port,
+      client_id: CLIENT_ID,
       message: { call_id: "call", status: ANSWERED, body: null },
     },
   ]);
@@ -168,6 +195,7 @@ test("the bridge writes an answer body as JSON, so a Date becomes text and an un
   assert.deepEqual(side.written(), [
     {
       kind: FrameKind.Port,
+      client_id: CLIENT_ID,
       message: {
         call_id: "call",
         status: ANSWERED,
@@ -201,7 +229,11 @@ test("an invalid line ends the bridge with frame_invalid, and the end of the inp
   const invalid = bridge(port);
   invalid.readable.write('{"kind":"ping"}\n');
   invalid.readable.write(
-    encodeFrame({ kind: FrameKind.Port, message: { call_id: "late" } }),
+    encodeFrame({
+      kind: FrameKind.Port,
+      client_id: CLIENT_ID,
+      message: { call_id: "late" },
+    }),
   );
   assert.deepEqual(
     invalid.invalid.map((error) => error.code),
@@ -217,4 +249,37 @@ test("an invalid line ends the bridge with frame_invalid, and the end of the inp
       resolve();
     }),
   );
+});
+
+test("the bridge routes a port frame to the port of its client_id and drops the frame of an unknown client", () => {
+  const first = new FakePort();
+  const second = new FakePort();
+  const side = bridge(first);
+  side.attached.attach("client_identity_b", second as unknown as MessagePort);
+  const call = { call_id: "call", cancel: true };
+  side.readable.write(
+    encodeFrame({
+      kind: FrameKind.Port,
+      client_id: "client_identity_b",
+      message: call,
+    }),
+  );
+  side.readable.write(
+    encodeFrame({
+      kind: FrameKind.Port,
+      client_id: "client_identity_c",
+      message: call,
+    }),
+  );
+  assert.deepEqual(first.posted, []);
+  assert.deepEqual(second.posted, [call]);
+  second.emit("message", { call_id: "call", status: ANSWERED, body: null });
+  assert.equal(
+    (side.written() as { client_id: string }[])[0]!.client_id,
+    SECOND_CLIENT_ID,
+  );
+  side.attached.detach(SECOND_CLIENT_ID);
+  assert.equal(side.attached.has(SECOND_CLIENT_ID), false);
+  second.emit("message", { call_id: "call", status: ANSWERED, body: null });
+  assert.deepEqual(side.written(), []);
 });

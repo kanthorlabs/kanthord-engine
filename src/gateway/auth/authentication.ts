@@ -23,11 +23,9 @@ import {
   mintMachineIdentity,
   mintWorkerIdentity,
 } from "../../kernel/caller-mint.ts";
+import type { ProjectBindings } from "../../project/contract.ts";
 import {
-  type ProjectBindings,
-  WorkerPlacement,
-} from "../../project/contract.ts";
-import {
+  InstancePlacement,
   type WorkerInstanceLookups,
   type WorkerRegistrations,
   workerResourceIdentitySchema,
@@ -166,10 +164,14 @@ export class Authentication {
     instanceId: string | undefined,
     connectionId: string | undefined,
   ): void {
-    if (instanceId === undefined || connectionId === undefined)
-      throw jwtRefused(JwtCause.InstanceRequired);
+    if (instanceId === undefined) throw jwtRefused(JwtCause.InstanceRequired);
     const instance = this.machines?.instances?.liveInstance(instanceId);
     if (!instance) throw jwtRefused(JwtCause.InstanceEnded);
+    const connected = instance.placement === InstancePlacement.Worker;
+    if (connected && connectionId === undefined)
+      throw jwtRefused(JwtCause.InstanceRequired);
+    if (!connected && connectionId !== undefined)
+      throw jwtRefused(JwtCause.ForbiddenClaim);
     if (!listed.includes(instance.name)) {
       const registration = this.machines!.worker.findByClient(clientId);
       if (
@@ -178,7 +180,10 @@ export class Authentication {
       )
         throw jwtRefused(JwtCause.InstanceNotListed);
     }
-    if (!this.machines!.instances!.holdConnection(instanceId, connectionId))
+    if (
+      connected &&
+      !this.machines!.instances!.holdConnection(instanceId, connectionId!)
+    )
       throw jwtRefused(JwtCause.ConnectionSuperseded);
   }
 
@@ -208,19 +213,17 @@ export class Authentication {
     )
       throw unauthorized();
     const registration = this.machines!.worker.findByClient(client.clientId);
+    const listed = resolved.worker_instances ?? [];
     const drained = resolved.worker_instances?.length === NO_INSTANCES;
     if (drained && !registration) throw unauthorized();
     const claimsInstance =
       client.instanceId !== undefined || client.connectionId !== undefined;
-    if (
-      resolved.placement === WorkerPlacement.Worker ||
-      (drained && claimsInstance)
-    )
+    if (listed.length > NO_INSTANCES || (drained && claimsInstance))
       this.refuseInstance(
         client.clientId,
         resolved.project_id,
         resolved.resource_identity,
-        resolved.worker_instances ?? [],
+        listed,
         client.instanceId,
         client.connectionId,
       );

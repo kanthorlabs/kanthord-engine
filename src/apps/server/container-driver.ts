@@ -2,15 +2,18 @@ import { type ChildProcessByStdio, spawn } from "node:child_process";
 import { constants } from "node:os";
 import { performance } from "node:perf_hooks";
 import type { Readable, Writable } from "node:stream";
+import type { MessagePort } from "node:worker_threads";
 import { Diagnostic } from "../../kernel/errors.ts";
 import type { ContainerRuntime } from "../../worker/contract.ts";
 import {
   type PlacementStatus,
+  type PoolEntry,
   PoolPlacement,
-  type PoolSlot,
 } from "../../worker/contract.ts";
 import {
+  type Bridge,
   bridgePort,
+  type FrameEntry,
   FrameKind,
   instanceFrameSchema,
   writeFrame,
@@ -32,13 +35,14 @@ import {
   runArguments,
   RUNTIME_CHECK_TIMEOUT_MS,
   type RuntimeHost,
-  slotClientId,
+  slotInstanceName,
   slotName,
   SUCCESS_CODE,
   volumeArguments,
 } from "./container-runtime.ts";
 import type {
   SlotDriver,
+  SlotEntry,
   SlotExit,
   SlotInstance,
   SlotLaunch,
@@ -59,10 +63,10 @@ export interface ContainerDriverOptions {
   readonly host: RuntimeHost;
   imageFor?(
     runtime: ContainerRuntime,
-    slot: PoolSlot,
+    entries: readonly PoolEntry[],
     signal: AbortSignal,
   ): Promise<string>;
-  cacheGroupOf?(slot: PoolSlot, image: string): string | null;
+  cacheGroupOf?(entries: readonly PoolEntry[], image: string): string | null;
 }
 
 interface StatusEntry {
@@ -102,6 +106,14 @@ function exitError(code: number): Error | null {
   return null;
 }
 
+function frameEntries(entries: readonly SlotEntry[]): FrameEntry[] {
+  return entries.map(({ client_id, client_secret, state }) => ({
+    client_id,
+    client_secret,
+    state,
+  }));
+}
+
 function exitCode(code: number | null, signal: NodeJS.Signals | null): number {
   if (code !== null) return code;
   return signal === null
@@ -114,6 +126,9 @@ class ContainerInstance implements SlotInstance {
   private readonly driver: ContainerDriver;
   private readonly launch: SlotLaunch;
   private readonly name: string;
+  private readonly channels = new Map<string, MessagePort>();
+  private entries: readonly SlotEntry[];
+  private bridge: Bridge | null = null;
   private readonly queued: SlotControl["kind"][] = [];
   private readonly waiting = new AbortController();
   private settle: (exit: SlotExit) => void = () => {};
@@ -126,7 +141,9 @@ class ContainerInstance implements SlotInstance {
   constructor(driver: ContainerDriver, launch: SlotLaunch) {
     this.driver = driver;
     this.launch = launch;
-    this.name = slotName(launch.slot.client_id);
+    this.name = slotName(launch.instance.name);
+    this.entries = launch.entries;
+    this.remember(launch.entries);
     this.exited = new Promise((resolve) => {
       this.settle = resolve;
     });
@@ -143,6 +160,29 @@ class ContainerInstance implements SlotInstance {
     if (this.client)
       writeFrame(this.client.stdin, { kind: FrameKind.Control, control: kind });
     else this.queued.push(kind);
+  }
+
+  bindings(entries: readonly SlotEntry[]): void {
+    this.entries = entries;
+    this.remember(entries);
+    if (!this.client || !this.bridge) return;
+    this.attach(this.bridge);
+    writeFrame(this.client.stdin, {
+      kind: FrameKind.Bindings,
+      entries: frameEntries(entries),
+    });
+  }
+
+  private remember(entries: readonly SlotEntry[]): void {
+    for (const entry of entries)
+      if (entry.channel) this.channels.set(entry.client_id, entry.channel);
+  }
+
+  private attach(bridge: Bridge): void {
+    for (const { client_id } of this.entries) {
+      const channel = this.channels.get(client_id);
+      if (channel && !bridge.has(client_id)) bridge.attach(client_id, channel);
+    }
   }
 
   terminate(): void {
@@ -167,7 +207,7 @@ class ContainerInstance implements SlotInstance {
     this.runtime = runtime;
     await this.driver.prepare();
     await this.driver.removeContainer(runtime, this.name);
-    await this.driver.createVolume(runtime, this.launch.slot.client_id);
+    await this.driver.createVolume(runtime, this.launch.instance.name);
     const image = await this.waitForImage(runtime);
     if (image === null) {
       this.finish(SUCCESS_CODE, null);
@@ -187,10 +227,10 @@ class ContainerInstance implements SlotInstance {
     runtime: ContainerRuntime,
     image: string,
   ): Promise<string | null> {
-    const { slot } = this.launch;
-    const group = this.driver.cacheGroupOf(slot, image);
-    if (group === null) return null;
-    return this.driver.createCacheVolume(runtime, slot.project_id, group);
+    const group = this.driver.cacheGroupOf(this.entries, image);
+    const first = this.entries.at(0);
+    if (group === null || !first) return null;
+    return this.driver.createCacheVolume(runtime, first.project_id, group);
   }
 
   private waitForImage(runtime: ContainerRuntime): Promise<string | null> {
@@ -198,7 +238,7 @@ class ContainerInstance implements SlotInstance {
     return new Promise((resolve, reject) => {
       if (signal.aborted) return resolve(null);
       signal.addEventListener("abort", () => resolve(null), { once: true });
-      this.driver.imageFor(runtime, this.launch.slot, signal).then(
+      this.driver.imageFor(runtime, this.entries, signal).then(
         (image) => resolve(signal.aborted ? null : image),
         (error: unknown) => (signal.aborted ? resolve(null) : reject(error)),
       );
@@ -214,7 +254,7 @@ class ContainerInstance implements SlotInstance {
       runtime,
       runArguments({
         image,
-        clientId: this.launch.slot.client_id,
+        instanceName: this.launch.instance.name,
         owner: this.driver.owner,
         environment: this.launch.environment,
         cacheVolume,
@@ -226,26 +266,23 @@ class ContainerInstance implements SlotInstance {
       },
     );
     this.client = client;
-    this.driver.recordImage(this.launch.slot.client_id, image);
+    this.driver.recordImage(this.launch.instance.name, image);
     client.stdin.on("error", () => {});
     client.stderr.pipe(this.launch.output, { end: false });
-    const closeBridge = bridgePort(
-      this.launch.channel,
-      client.stdout,
-      client.stdin,
-      {
-        frames: instanceFrameSchema,
-        onFrame: () => {},
-        onInvalid: (error) => {
-          this.error = error;
-          this.terminate();
-        },
-        onEnd: () => {},
+    const bridge = bridgePort(client.stdout, client.stdin, {
+      frames: instanceFrameSchema,
+      onFrame: () => {},
+      onInvalid: (error) => {
+        this.error = error;
+        this.terminate();
       },
-    );
+      onEnd: () => {},
+    });
+    this.bridge = bridge;
+    this.attach(bridge);
     writeFrame(client.stdin, {
       kind: FrameKind.Init,
-      client_secret: this.launch.client_secret,
+      entries: frameEntries(this.entries),
     });
     for (const kind of this.queued.splice(0))
       writeFrame(client.stdin, { kind: FrameKind.Control, control: kind });
@@ -256,13 +293,13 @@ class ContainerInstance implements SlotInstance {
     client.once("error", (error) => {
       if (client.pid === undefined) {
         clearInterval(ping);
-        closeBridge();
+        bridge.close();
         this.finish(FAILED_CODE, error);
       }
     });
     client.once("close", (code, signal) => {
       clearInterval(ping);
-      closeBridge();
+      bridge.close();
       const exit = exitCode(code, signal);
       this.finish(exit, this.error ?? exitError(exit));
     });
@@ -271,7 +308,7 @@ class ContainerInstance implements SlotInstance {
   private finish(code: number, error: Error | null): void {
     if (this.settled) return;
     this.settled = true;
-    this.driver.forgetImage(this.launch.slot.client_id);
+    this.driver.forgetImage(this.launch.instance.name);
     this.settle({ code, error });
   }
 }
@@ -295,30 +332,30 @@ export class ContainerDriver implements SlotDriver {
     this.resolveCacheGroup = options.cacheGroupOf;
   }
 
-  cacheGroupOf(slot: PoolSlot, image: string): string | null {
-    return this.resolveCacheGroup?.(slot, image) ?? null;
+  cacheGroupOf(entries: readonly PoolEntry[], image: string): string | null {
+    return this.resolveCacheGroup?.(entries, image) ?? null;
   }
 
   imageFor(
     runtime: ContainerRuntime,
-    slot: PoolSlot,
+    entries: readonly PoolEntry[],
     signal: AbortSignal,
   ): Promise<string> {
     return this.resolveImage
-      ? this.resolveImage(runtime, slot, signal)
+      ? this.resolveImage(runtime, entries, signal)
       : Promise.resolve(this.image);
   }
 
-  imageOf(clientId: string): string | null {
-    return this.images.get(clientId) ?? null;
+  imageOf(instanceName: string): string | null {
+    return this.images.get(instanceName) ?? null;
   }
 
-  recordImage(clientId: string, image: string): void {
-    this.images.set(clientId, image);
+  recordImage(instanceName: string, image: string): void {
+    this.images.set(instanceName, image);
   }
 
-  forgetImage(clientId: string): void {
-    this.images.delete(clientId);
+  forgetImage(instanceName: string): void {
+    this.images.delete(instanceName);
   }
 
   check(): Promise<PlacementStatus> {
@@ -376,14 +413,14 @@ export class ContainerDriver implements SlotDriver {
     if (failed !== null) throw commandFailure(`rm ${name}`, failed.stderr);
   }
 
-  async createVolume(runtime: ContainerRuntime, clientId: string) {
+  async createVolume(runtime: ContainerRuntime, instanceName: string) {
     const answer = await this.command(
       runtime,
-      volumeArguments(clientId, this.owner),
+      volumeArguments(instanceName, this.owner),
     );
     if (!presentVolume(answer))
       throw commandFailure(
-        `volume create ${slotName(clientId)}`,
+        `volume create ${slotName(instanceName)}`,
         answer.stderr,
       );
   }
@@ -403,10 +440,10 @@ export class ContainerDriver implements SlotDriver {
     return name;
   }
 
-  async removeVolume(clientId: string): Promise<void> {
+  async removeVolume(instanceName: string): Promise<void> {
     const runtime = await this.answeringRuntime();
     if (runtime === null) return;
-    await this.removeVolumeOf(runtime, clientId);
+    await this.removeVolumeOf(runtime, instanceName);
   }
 
   async sweepVolumes(live: ReadonlySet<string>): Promise<void> {
@@ -419,9 +456,9 @@ export class ContainerDriver implements SlotDriver {
     if (answer.code !== SUCCESS_CODE)
       throw commandFailure("volume ls", answer.stderr);
     for (const name of linesOf(answer.stdout)) {
-      const clientId = slotClientId(name);
-      if (clientId !== null && !live.has(clientId))
-        await this.removeVolumeOf(runtime, clientId);
+      const instanceName = slotInstanceName(name);
+      if (instanceName !== null && !live.has(instanceName))
+        await this.removeVolumeOf(runtime, instanceName);
     }
   }
 
@@ -430,10 +467,19 @@ export class ContainerDriver implements SlotDriver {
     return status.available ? status.container_runtime : null;
   }
 
-  private async removeVolumeOf(runtime: ContainerRuntime, clientId: string) {
-    const answer = await this.command(runtime, removeVolumeArguments(clientId));
+  private async removeVolumeOf(
+    runtime: ContainerRuntime,
+    instanceName: string,
+  ) {
+    const answer = await this.command(
+      runtime,
+      removeVolumeArguments(instanceName),
+    );
     if (!absentVolume(answer))
-      throw commandFailure(`volume rm ${slotName(clientId)}`, answer.stderr);
+      throw commandFailure(
+        `volume rm ${slotName(instanceName)}`,
+        answer.stderr,
+      );
   }
 
   private async removeOwned(): Promise<boolean> {

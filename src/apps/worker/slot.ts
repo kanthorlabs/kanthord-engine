@@ -5,15 +5,23 @@ import type { Readable, Writable } from "node:stream";
 import { MessageChannel, type Worker } from "node:worker_threads";
 import { Diagnostic, diagnostic, diagnosticRows } from "../../kernel/errors.ts";
 import { LogDestination } from "../../kernel/log.ts";
+import { BindingEntryState } from "../../worker/contract.ts";
 import { isObject, isString } from "../../kernel/values.ts";
 import {
+  type Bridge,
   bridgePort,
+  type FrameEntry,
   frameInvalid,
   FrameKind,
   type ServerFrame,
   serverFrameSchema,
 } from "./frames.ts";
-import { SlotControl, type ThreadData } from "./thread-data.ts";
+import {
+  entryPorts,
+  type ThreadData,
+  type ThreadEntry,
+  ThreadMessageKind,
+} from "./thread-data.ts";
 import { startThread } from "./thread-start.ts";
 
 const INIT_DEADLINE_MS = 10000;
@@ -61,14 +69,14 @@ function initAbsent(): Diagnostic {
 export class SlotSession {
   readonly exited: Promise<number>;
   private readonly options: SlotOptions;
-  private readonly channel = new MessageChannel();
   private settle: (code: number) => void = () => {};
   private settled = false;
   private thread?: Worker;
   private stopping = false;
   private lastFrame = performance.now();
   private readonly timers = new Set<NodeJS.Timeout>();
-  private closeBridge: () => void = () => {};
+  private bridge?: Bridge;
+  private readonly channels: MessageChannel[] = [];
 
   constructor(options: SlotOptions) {
     this.options = options;
@@ -82,17 +90,12 @@ export class SlotSession {
     this.options.frames.on("error", () =>
       this.fail(channelClosed("the frame output failed")),
     );
-    this.closeBridge = bridgePort(
-      this.channel.port1,
-      this.options.input,
-      this.options.frames,
-      {
-        frames: serverFrameSchema,
-        onFrame: (frame) => this.receive(frame),
-        onInvalid: (error) => this.fail(error),
-        onEnd: () => this.fail(channelClosed("stdin reached its end")),
-      },
-    );
+    this.bridge = bridgePort(this.options.input, this.options.frames, {
+      frames: serverFrameSchema,
+      onFrame: (frame) => this.receive(frame),
+      onInvalid: (error) => this.fail(error),
+      onEnd: () => this.fail(channelClosed("stdin reached its end")),
+    });
     this.arm(this.options.initDeadlineMs, () => {
       if (!this.thread) this.fail(initAbsent());
     });
@@ -105,7 +108,7 @@ export class SlotSession {
     this.stopping = true;
     const thread = this.thread;
     if (!thread) return this.finish(STOPPED_BEFORE_START);
-    thread.postMessage({ kind: SlotControl.Stop });
+    thread.postMessage({ kind: ThreadMessageKind.Stop });
     this.arm(this.options.stopDeadlineMs, () => void thread.terminate());
   }
 
@@ -117,18 +120,45 @@ export class SlotSession {
 
   private receive(frame: ServerFrame): void {
     this.lastFrame = performance.now();
-    if (frame.kind === FrameKind.Init) return this.launch(frame.client_secret);
+    if (frame.kind === FrameKind.Init) return this.launch(frame.entries);
     if (!this.thread) throw frameInvalid("the first frame is no init frame");
     if (frame.kind === FrameKind.Control)
       this.thread.postMessage({ kind: frame.control });
+    if (frame.kind === FrameKind.Bindings) this.update(this.thread, frame);
   }
 
-  private launch(clientSecret: string): void {
+  private open(entry: FrameEntry): ThreadEntry {
+    const channel = new MessageChannel();
+    this.channels.push(channel);
+    this.bridge!.attach(entry.client_id, channel.port1);
+    return {
+      client_id: entry.client_id,
+      port: channel.port2,
+      client_secret: entry.client_secret,
+      state: entry.state,
+    };
+  }
+
+  private update(
+    thread: Worker,
+    frame: { entries: readonly FrameEntry[] },
+  ): void {
+    const entries = frame.entries.map((entry) =>
+      this.bridge!.has(entry.client_id) ||
+      entry.state === BindingEntryState.Draining
+        ? { ...entry, port: null }
+        : this.open(entry),
+    );
+    thread.postMessage({ kind: ThreadMessageKind.Bindings, entries }, [
+      ...entryPorts(entries),
+    ]);
+  }
+
+  private launch(frameEntries: readonly FrameEntry[]): void {
     if (this.thread) throw frameInvalid("a second init frame arrived");
     const thread = this.options.start(
       {
-        port: this.channel.port2,
-        client_secret: clientSecret,
+        entries: frameEntries.map((entry) => this.open(entry)),
         log: LogDestination.StandardError,
       },
       this.options.env,
@@ -174,7 +204,8 @@ export class SlotSession {
     this.settled = true;
     for (const timer of this.timers) clearTimeout(timer);
     this.timers.clear();
-    this.closeBridge();
+    this.bridge?.close();
+    for (const channel of this.channels) channel.port1.close();
     this.settle(code);
   }
 }

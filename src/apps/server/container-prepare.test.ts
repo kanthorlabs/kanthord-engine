@@ -12,7 +12,16 @@ import { setTimeout as delay } from "node:timers/promises";
 import { Writable } from "node:stream";
 import { MessageChannel } from "node:worker_threads";
 import { temporary, temporaryDirectory } from "../../kernel/test-support.ts";
-import { ContainerRuntime, PoolPlacement } from "../../worker/contract.ts";
+import {
+  BindingEntryState,
+  ContainerRuntime,
+  PoolPlacement,
+} from "../../worker/contract.ts";
+import {
+  frameEntrySchema,
+  FrameKind,
+  serverFrameSchema,
+} from "../worker/frames.ts";
 import { SlotControl } from "../worker/thread-data.ts";
 import {
   ContainerDriver,
@@ -25,7 +34,7 @@ import {
   type RuntimeHost,
   SUCCESS_CODE,
 } from "./container-runtime.ts";
-import type { SlotLaunch } from "./slot-driver.ts";
+import type { SlotEntry, SlotLaunch } from "./slot-driver.ts";
 
 const Verb = {
   Info: "info",
@@ -42,6 +51,9 @@ const SERVER_UID = 1000;
 const FAILED_CODE = 1;
 const MASTER_KEY = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
 const CLIENT_ID = "client_identity_01ARZ3NDEKTSV4RRFFQ69G5FAV";
+const INSTANCE_NAME = "coder-1";
+const PROJECT_ID = "project_01ARZ3NDEKTSV4RRFFQ69G5FAV";
+const RESOURCE = "worker:kanthord:general";
 const PRIOR_NAMES = "kanthord_slot_one\nkanthord_slot_two\n";
 const PRIOR_COUNT = 2;
 const ONE_CALL = 1;
@@ -102,20 +114,34 @@ function hostWith(
   return { driver, calls, verbs };
 }
 
-function launchOf(environment: NodeJS.ProcessEnv = {}): SlotLaunch {
-  const { port2 } = new MessageChannel();
+function entryOf(
+  clientId = CLIENT_ID,
+  channel: SlotEntry["channel"] = new MessageChannel().port2,
+  state: BindingEntryState = BindingEntryState.Serving,
+  resourceIdentity = RESOURCE,
+): SlotEntry {
   return {
-    slot: {
-      project_id: "project_01ARZ3NDEKTSV4RRFFQ69G5FAV",
-      resource_identity: "worker:kanthord:general",
-      generation: 1,
-      placement: PoolPlacement.Container,
-      slot: 0,
-      client_id: CLIENT_ID,
-      draining: false,
-    },
-    channel: port2,
+    project_id: PROJECT_ID,
+    resource_identity: resourceIdentity,
+    client_id: clientId,
+    state,
     client_secret: "unused",
+    channel,
+  };
+}
+
+function launchOf(
+  environment: NodeJS.ProcessEnv = {},
+  entries: SlotEntry[] = [entryOf()],
+): SlotLaunch {
+  return {
+    instance: {
+      id: "worker_instance_01ARZ3NDEKTSV4RRFFQ69G5FAV",
+      name: INSTANCE_NAME,
+      placement: PoolPlacement.Container,
+      created_at: 1,
+    },
+    entries,
     root: "unused",
     output: new Writable({ write: (_chunk, _encoding, done) => done() }),
     environment,
@@ -240,8 +266,8 @@ test("a launch whose environment image fails starts no container and exits with 
   const f = hostWith(
     true,
     () => ok(),
-    (_runtime, slot) => {
-      slots.push(slot.project_id);
+    (_runtime, entries) => {
+      slots.push(entries[0]!.project_id);
       return Promise.reject(new Error("environment image refused"));
     },
   );
@@ -249,7 +275,7 @@ test("a launch whose environment image fails starts no container and exits with 
   const exit = await instance.exited;
   assert.equal(exit.code, FAILED_CODE);
   assert.match(exit.error?.message ?? "", /environment image refused/);
-  assert.deepEqual(slots, [launchOf().slot.project_id]);
+  assert.deepEqual(slots, [PROJECT_ID]);
   assert.equal(f.verbs(Verb.Run).length, NO_CALLS);
 });
 
@@ -263,7 +289,7 @@ function imageGate() {
   const asked = Promise.withResolvers<AbortSignal>();
   const imageFor: NonNullable<ContainerDriverOptions["imageFor"]> = (
     _runtime,
-    _slot,
+    _entries,
     signal,
   ) => {
     asked.resolve(signal);
@@ -327,7 +353,7 @@ test("an instance spawns no container while the image answer is pending", async 
   await gate.asked;
   await delay(SETTLE_MS);
   assert.equal(runtime.spawned(), false);
-  assert.equal(f.driver.imageOf(CLIENT_ID), null);
+  assert.equal(f.driver.imageOf(INSTANCE_NAME), null);
   assert.equal(
     await Promise.race([instance.exited, delay(SETTLE_MS, null)]),
     null,
@@ -347,7 +373,7 @@ test("a stop during the image wait aborts the signal, spawns no container and en
   assert.equal(exit.code, SUCCESS_CODE);
   assert.equal(exit.error, null);
   assert.equal(runtime.spawned(), false);
-  assert.equal(f.driver.imageOf(CLIENT_ID), null);
+  assert.equal(f.driver.imageOf(INSTANCE_NAME), null);
 });
 
 test("a drain during the image wait aborts the signal and ends the instance with no error", async () => {
@@ -363,11 +389,7 @@ test("a drain during the image wait aborts the signal and ends the instance with
 
 test("a stop during the cache volume command spawns no container and ends the instance", async (t) => {
   const group = "repository:github:acme/app";
-  const cache = cacheVolumeName(
-    containerOwner(MASTER_KEY),
-    "project_01ARZ3NDEKTSV4RRFFQ69G5FAV",
-    group,
-  );
+  const cache = cacheVolumeName(containerOwner(MASTER_KEY), PROJECT_ID, group);
   const runtime = recordingRuntime(t);
   const asked = Promise.withResolvers<void>();
   const held = Promise.withResolvers<RuntimeAnswer>();
@@ -401,10 +423,10 @@ test("a resolved image answer starts the container on that image and imageOf ans
   gate.answer.resolve(READY_TAG);
   const lines = await runtime.recorded();
   assert.ok(lines.includes(READY_TAG));
-  assert.equal(f.driver.imageOf(CLIENT_ID), READY_TAG);
+  assert.equal(f.driver.imageOf(INSTANCE_NAME), READY_TAG);
   runtime.release();
   await instance.exited;
-  assert.equal(f.driver.imageOf(CLIENT_ID), null);
+  assert.equal(f.driver.imageOf(INSTANCE_NAME), null);
 });
 
 test("the image wait logs no line", async (t) => {
@@ -431,18 +453,14 @@ test("the image wait logs no line", async (t) => {
 
 test("a slot on the image of its group creates the cache volume and mounts it, and a slot on another image mounts none", async (t) => {
   const group = "repository:github:acme/app";
-  const cache = cacheVolumeName(
-    containerOwner(MASTER_KEY),
-    "project_01ARZ3NDEKTSV4RRFFQ69G5FAV",
-    group,
-  );
+  const cache = cacheVolumeName(containerOwner(MASTER_KEY), PROJECT_ID, group);
   const mounts = async (image: string) => {
     const runtime = recordingRuntime(t);
     const f = hostWith(
       true,
       () => ok(),
       () => Promise.resolve(image),
-      (_slot, answered) => (answered === READY_TAG ? group : null),
+      (_entries, answered) => (answered === READY_TAG ? group : null),
     );
     const instance = f.driver.launch(launchOf(runtime.environment));
     const lines = await runtime.recorded();
@@ -464,15 +482,15 @@ test("a slot on the image of its group creates the cache volume and mounts it, a
 const VOLUME_OPTION = "--volume";
 const VolumeAction = { List: "ls", Remove: "rm" } as const;
 const VOLUME_PREFIX = "kanthord_slot_";
-const LIVE_ID = "client_identity_live";
-const ORPHAN_ID = "client_identity_orphan";
+const LIVE_ID = "coder-live";
+const ORPHAN_ID = "coder-archived";
 const OTHER_VOLUME = "unrelated_volume";
 
 function volumeCalls(f: ReturnType<typeof hostWith>, action: string) {
   return f.verbs(Verb.Volume).filter((call) => call.args[1] === action);
 }
 
-test("removeVolume removes the volume of the slot and tolerates an absent volume", async () => {
+test("removeVolume removes the volume of the instance and tolerates an absent volume", async () => {
   const f = hostWith(true, () =>
     Promise.resolve({
       code: FAILED_CODE,
@@ -507,7 +525,7 @@ test("removeVolume and sweepVolumes with no runtime do nothing and log nothing",
   assert.deepEqual(writes, []);
 });
 
-test("sweepVolumes removes each owner volume of no live identity and only that volume", async () => {
+test("sweepVolumes removes the volume of each archived instance and of no live instance and only that volume", async () => {
   const names = [
     `${VOLUME_PREFIX}${LIVE_ID}`,
     `${VOLUME_PREFIX}${ORPHAN_ID}`,
@@ -545,4 +563,145 @@ test("sweepVolumes keeps a cache volume", async () => {
 test("sweepVolumes rejects when the listing fails", async () => {
   const f = hostWith(true, () => refused());
   await assert.rejects(f.driver.sweepVolumes(new Set()), /volume ls/);
+});
+
+let framedBin: string | null = null;
+
+function framedRuntimeBin(): string {
+  if (framedBin !== null) return framedBin;
+  const root = temporaryDirectory();
+  const bin = join(root, "bin");
+  mkdirSync(bin);
+  writeFileSync(
+    join(bin, ContainerRuntime.Podman),
+    `#!/bin/sh
+printf '%s\\n' "$@" > "$KANTHORD_TEST_ARGUMENTS"
+exec cat >> "$KANTHORD_TEST_STDIN"
+`,
+    { mode: 0o755 },
+  );
+  process.on("exit", () => rmSync(root, { recursive: true, force: true }));
+  framedBin = bin;
+  return bin;
+}
+
+function framedRuntime(t: TestContext) {
+  const directory = temporary(t);
+  const argumentsFile = join(directory, "arguments");
+  const stdinFile = join(directory, "stdin");
+  writeFileSync(stdinFile, "");
+  const frames = () =>
+    readFileSync(stdinFile, "utf8")
+      .split("\n")
+      .filter(Boolean)
+      .map((line) => serverFrameSchema.parse(JSON.parse(line)));
+  const framesCount = async (count: number) => {
+    for (let round = 0; round < POLL_ROUNDS; round++) {
+      if (frames().length >= count) return frames();
+      await delay(POLL_MS);
+    }
+    assert.fail("The container did not receive the frames.");
+  };
+  return {
+    environment: {
+      PATH: `${framedRuntimeBin()}:${process.env.PATH}`,
+      KANTHORD_TEST_ARGUMENTS: argumentsFile,
+      KANTHORD_TEST_STDIN: stdinFile,
+    },
+    arguments: () => readFileSync(argumentsFile, "utf8").split("\n"),
+    framesCount,
+  };
+}
+
+test("the container and the volume carry the instance name", async (t) => {
+  const runtime = framedRuntime(t);
+  const f = hostWith(true, () => ok());
+  const instance = f.driver.launch(launchOf(runtime.environment));
+  t.after(() => instance.terminate());
+  await runtime.framesCount(1);
+  const name = `${VOLUME_PREFIX}${INSTANCE_NAME}`;
+  const lines = runtime.arguments();
+  assert.equal(lines[lines.indexOf("--name") + 1], name);
+  assert.ok(lines.includes(`${name}:/var/lib/kanthord`));
+  assert.ok(
+    f.verbs(Verb.Volume).some((call) => call.args.at(-1) === name),
+    JSON.stringify(f.calls),
+  );
+  assert.equal(
+    lines[lines.indexOf("--label") + 3],
+    `io.kanthord.instance=${INSTANCE_NAME}`,
+  );
+});
+
+test("an unlisted container instance runs the default image of the driver", async (t) => {
+  const runtime = framedRuntime(t);
+  const f = hostWith(true, () => ok());
+  const instance = f.driver.launch(launchOf(runtime.environment, []));
+  t.after(() => instance.terminate());
+  await runtime.framesCount(1);
+  assert.ok(runtime.arguments().includes("kanthord:test"));
+});
+
+test("the init frame carries the entries, a bindings frame changes them and a port frame carries client_id", async (t) => {
+  const runtime = framedRuntime(t);
+  const first = new MessageChannel();
+  const second = new MessageChannel();
+  t.after(() => {
+    first.port1.close();
+    second.port1.close();
+  });
+  const f = hostWith(true, () => ok());
+  const instance = f.driver.launch(
+    launchOf(runtime.environment, [entryOf(CLIENT_ID, first.port2)]),
+  );
+  t.after(() => instance.terminate());
+  const [init] = await runtime.framesCount(1);
+  assert.deepEqual(init, {
+    kind: FrameKind.Init,
+    entries: [
+      {
+        client_id: CLIENT_ID,
+        client_secret: "unused",
+        state: BindingEntryState.Serving,
+      },
+    ],
+  });
+  const next = [
+    entryOf(CLIENT_ID, null, BindingEntryState.Draining),
+    entryOf("client_identity_other", second.port2),
+  ];
+  instance.bindings(next);
+  const [, bindings] = await runtime.framesCount(2);
+  assert.deepEqual(bindings, {
+    kind: FrameKind.Bindings,
+    entries: next.map((entry) =>
+      frameEntrySchema.parse({
+        client_id: entry.client_id,
+        client_secret: entry.client_secret,
+        state: entry.state,
+      }),
+    ),
+  });
+  const call = { call_id: "call", cancel: true };
+  second.port1.postMessage(call);
+  const frames = await runtime.framesCount(3);
+  assert.deepEqual(frames[2], {
+    kind: FrameKind.Port,
+    client_id: "client_identity_other",
+    message: call,
+  });
+});
+
+test("the start sweep removes the volume of an archived instance and keeps the volume of a live one", async () => {
+  const names = [`${VOLUME_PREFIX}coder-1`, `${VOLUME_PREFIX}gone-1`].join(
+    "\n",
+  );
+  const f = hostWith(true, (call) =>
+    call.args[1] === VolumeAction.List ? ok(names) : ok(),
+  );
+  await f.driver.sweepVolumes(new Set(["coder-1"]));
+  assert.deepEqual(
+    volumeCalls(f, VolumeAction.Remove).map((call) => call.args[2]),
+    [`${VOLUME_PREFIX}gone-1`],
+  );
 });

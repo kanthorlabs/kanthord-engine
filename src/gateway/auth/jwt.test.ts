@@ -17,8 +17,8 @@ const SUBJECT = "client_01ARZ3NDEKTSV4RRFFQ69G5FAV";
 const OTHER_SUBJECT = "client_01ARZ3NDEKTSV4RRFFQ69G5FAW";
 const SLOT_CLIENT = "client_identity_01ARZ3NDEKTSV4RRFFQ69G5FAV";
 const PROJECT_ID = "project_01ARZ3NDEKTSV4RRFFQ69G5FAV";
-const SLOT_NUMBER = 2;
-const SLOT_NAME = "server slot 2";
+const SLOT_INSTANCE_ID = "worker_instance_01ARZ3NDEKTSV4RRFFQ69G5FAV";
+const SLOT_INSTANCE_NAME = "coder-1";
 const SLOT_BINDING = "coder-main";
 const SLOT_RESOURCE_IDENTITY = "worker:kanthord:coder-main";
 const SLOT_LIFETIME_SECONDS = 60;
@@ -72,13 +72,14 @@ test("an auth version increment changes every client secret", () => {
   );
 });
 
-test("a slot token names the slot, lives 60 seconds and is minted for each call", async () => {
+test("a slot token names the instance, lives 60 seconds and is minted for each call", async () => {
   const masterKey = randomBytes(KEY_BYTES).toString("base64");
   const slot = {
     clientId: SLOT_CLIENT,
     projectId: PROJECT_ID,
     bindingName: SLOT_BINDING,
-    slot: SLOT_NUMBER,
+    instanceId: SLOT_INSTANCE_ID,
+    instanceName: SLOT_INSTANCE_NAME,
   };
   const first = await generateSlotJWT(masterKey, AUTH_VERSION, slot);
   const second = await generateSlotJWT(masterKey, AUTH_VERSION, slot);
@@ -87,7 +88,9 @@ test("a slot token names the slot, lives 60 seconds and is minted for each call"
   assert.equal(claims.exp! - claims.iat!, SLOT_LIFETIME_SECONDS);
   assert.equal(first.expiresAt, claims.exp! * MILLISECONDS_PER_SECOND);
   assert.equal(claims.sub, SLOT_CLIENT);
-  assert.equal(claims.name, SLOT_NAME);
+  assert.equal(claims.name, SLOT_INSTANCE_NAME);
+  assert.equal(claims.instance_id, SLOT_INSTANCE_ID);
+  assert.equal("connection_id" in claims, false);
   assert.equal(claims.kind, IdentityKind.Client);
   assert.equal(claims.project_id, PROJECT_ID);
   assert.equal(claims.resource_identity, SLOT_RESOURCE_IDENTITY);

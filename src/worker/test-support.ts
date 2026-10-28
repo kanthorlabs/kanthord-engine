@@ -4,9 +4,10 @@ import type {
   ExecutionSetup,
   HostTools,
   PlacementStatus,
+  PoolEntry,
   PoolHost,
+  PoolInstance,
   PoolPlacement,
-  PoolSlot,
 } from "./contract.ts";
 import { getWorkerDeclaration, type WorkerDeclaration } from "./catalog.ts";
 
@@ -14,7 +15,6 @@ export const unusedHostTools: HostTools = {
   evidenceUpload: () =>
     Promise.reject(new Error("Unexpected evidence upload in fixture")),
 };
-import { createIdentity } from "../kernel/identity.ts";
 import { ChainLevel } from "../agent/contract.ts";
 import { SHIPPED_TEMPLATES } from "../agent/prompt-templates.ts";
 import { alwaysAvailable, ExecutionIntent } from "./contract.ts";
@@ -78,65 +78,48 @@ export function anthropicSetup(
   return setup;
 }
 
+export interface FakeStart {
+  instance: PoolInstance;
+  entries: readonly PoolEntry[];
+}
+
 export class FakePoolHost implements PoolHost {
-  readonly started: PoolSlot[] = [];
-  readonly drained: PoolSlot[] = [];
-  readonly restarted: PoolSlot[] = [];
+  readonly started: FakeStart[] = [];
+  readonly updated: FakeStart[] = [];
+  readonly restarted: PoolInstance[] = [];
+  readonly archived: PoolInstance[] = [];
   readonly images = new Map<string, string>();
   prepared = 0;
-  readonly removed: PoolSlot[] = [];
   readonly swept: Array<ReadonlySet<string>> = [];
-  private listener: (clientId: string) => void = () => {};
-  clientIdentity(
-    projectId: string,
-    resourceIdentity: string,
-    generation: number,
-    slot: number,
-  ): string {
-    const key = [projectId, resourceIdentity, generation, slot].join("/");
-    let identity = this.identities.get(key);
-    if (!identity) {
-      identity = createIdentity("client_identity");
-      this.identities.set(key, identity);
-    }
-    return identity;
-  }
+  stopped = false;
+  statuses = new Map<PoolPlacement, PlacementStatus>();
+  statusReads = 0;
   prepare(): void {
     this.prepared++;
   }
-  remove(slot: PoolSlot): Promise<void> {
-    this.removed.push({ ...slot });
+  start(instance: PoolInstance, entries: readonly PoolEntry[]): void {
+    this.started.push({ instance, entries });
+  }
+  update(instance: PoolInstance, entries: readonly PoolEntry[]): void {
+    this.updated.push({ instance, entries });
+  }
+  restart(instance: PoolInstance): void {
+    this.restarted.push(instance);
+  }
+  imageOf(instance: PoolInstance): string | null {
+    return this.images.get(instance.name) ?? null;
+  }
+  archive(instance: PoolInstance): Promise<void> {
+    this.archived.push(instance);
     return Promise.resolve();
   }
   sweep(live: ReadonlySet<string>): Promise<void> {
     this.swept.push(live);
     return Promise.resolve();
   }
-  start(slot: PoolSlot): void {
-    this.started.push({ ...slot });
-  }
-  drain(slot: PoolSlot): void {
-    this.drained.push({ ...slot });
-  }
-  restart(slot: PoolSlot): void {
-    this.restarted.push({ ...slot });
-  }
-  imageOf(slot: PoolSlot): string | null {
-    return this.images.get(slot.client_id) ?? null;
-  }
-  stopped = false;
-  private readonly identities = new Map<string, string>();
   async stop(): Promise<void> {
     this.stopped = true;
   }
-  onEnded(listener: (clientId: string) => void): void {
-    this.listener = listener;
-  }
-  end(clientId: string): void {
-    this.listener(clientId);
-  }
-  statuses = new Map<PoolPlacement, PlacementStatus>();
-  statusReads = 0;
   async placementStatus(placement: PoolPlacement): Promise<PlacementStatus> {
     this.statusReads++;
     return this.statuses.get(placement) ?? alwaysAvailable(placement);

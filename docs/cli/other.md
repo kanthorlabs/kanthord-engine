@@ -430,20 +430,24 @@ The implemented fields are:
   `300`. A 30-second sweep ends expired registrations.
 - `worker.server_instance_limit`: optional positive safe integer, default `16`.
   The maximum count of live server instances. A create at the limit answers
-  `worker.instance.server_limit`. A slot above the cap stays unstarted and the
-  server logs `worker.pool.slot_limit`. `kanthord upgrade` renames the former key
+  `worker.instance.server_limit`. A start with more live server instances than
+  the limit starts the oldest ones up to the limit. Each other instance stays
+  pending and the server logs `worker.pool.instance_limit` with `instance`. The
+  server starts the oldest pending instance when a running one ends.
+  `kanthord upgrade` renames the former key
   `worker.server_slot_limit` and prints
   `renamed: worker.server_slot_limit -> worker.server_instance_limit`.
 - `worker.container_image`: optional image name, default
   `docker.io/kanthorlabs/kanthord`. It holds the name with no tag and no digest.
-  The server appends its package version as the tag, so a slot container runs the
-  server version. A value with a tag or a digest fails with
+  The server appends its package version as the tag, so a `container` instance
+  that no binding lists runs `<worker.container_image>:<version>`. A value with a tag or a digest fails with
   `system.config.invalid_field`. A change takes effect at the next start. When a
-  live binding holds the `container` placement and the container runtime is
+  live `container` instance exists and the container runtime is
   unavailable at the server start, the server logs `worker.pool.driver_unavailable`
-  with `placement`, `reason` and `detail`, and it still starts. The slots start
+  with `placement`, `reason` and `detail`, and it still starts. The instances start
   again with a backoff when the runtime recovers.
-  A container slot waits for the `ready` image of its environment and pulls no
+  A `container` instance that a binding lists runs the environment image of that
+  binding and waits for the `ready` image of its environment. It pulls no
   work while it waits.
 
 - `scheduler.release_reserve`: optional positive safe integer in seconds, default
@@ -641,6 +645,22 @@ and Gateway services, and open the listener only after domain startup. Starting
 the current composition does not establish implementation of the future
 Mission, Scheduler, Tracking, or native-worker runtime contracts.
 
+The server runs each live server instance from its create to its archive. A
+server instance is an instance at the `server` or the `container` placement.
+The server starts the live server instances at startup, starts one after its
+create and stops one after its archive. A server instance that no binding lists
+runs, holds no registration and idles. Each server instance registers once for
+each binding that lists it. A binding write sends a new entry list to the running
+instances and starts no instance. A binding that drops an instance keeps a
+`draining` entry while the instance holds a live registration of it. The
+instance ends that execution and deregisters that registration. The slot root
+of an instance is `workers/<instance name>/` of the state directory with mode
+`0700`, and its container and volume are `kanthord_slot_<instance name>`. The
+archive stops the instance, then removes the slot root and the volume. Each
+start removes the roots and the volumes of no live server instance. An instance
+that exits with no stop restarts with a backoff under the same client
+identities. The server logs `instance` with the instance name.
+
 Files/effects: validate or create the XDG configuration, data, and state
 directories as needed; read the selected configuration; open/create
 `kanthord.db` and its SQLite `-wal`/`-shm` sidecars in the data directory; and
@@ -815,11 +835,18 @@ kanthord serve slot
 ```
 
 **Implemented; internal; route/access: none.** The `container` slot driver runs
-this mode as the command of a slot container. A human never runs it, and help
-does not list it. It takes no option.
+this mode as the command of the container of one server instance. A human never
+runs it, and help does not list it. It takes no option.
 
 - It reads the frames of the slot channel from standard input, one JSON object
-  for each line. Its first frame is `init` with the `client_secret` of the slot.
+  for each line. Its first frame is `init` with `entries`. Each entry holds
+  `client_id`, `client_secret` and `state`, which is `serving` or `draining`.
+  One entry stands for each binding that lists the instance.
+- A `bindings` frame holds the full entry list and replaces the current one. An
+  entry of the `draining` state ends its execution, deregisters its registration
+  and leaves the next list.
+- A `port` frame carries `client_id` and the message of the port of that entry.
+  A `port` frame with no `client_id` is no valid frame.
 - It writes frames to file descriptor 3 only. The container command moves the
   standard output to file descriptor 3 and points file descriptor 1 at standard
   error, so every other output lands in standard error.

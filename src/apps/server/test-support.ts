@@ -81,6 +81,7 @@ import { GITHUB_API_VERSION } from "../../repository/github.ts";
 import { LOCAL_GIT_SSH_ACCESS } from "../../repository/sshd-test-support.ts";
 import {
   alwaysAvailable,
+  BindingEntryState,
   InstancePlacement,
   type PlacementStatus,
   PoolPlacement,
@@ -98,7 +99,11 @@ import {
   type ProjectBindings,
   workerResourceIdentity,
 } from "../../project/contract.ts";
-import type { PoolSlot, WorkerRegistrations } from "../../worker/contract.ts";
+import type {
+  PoolEntry,
+  PoolInstance,
+  WorkerRegistrations,
+} from "../../worker/contract.ts";
 export interface MachineDependencies {
   project: ProjectBindings;
   worker: WorkerRegistrations;
@@ -118,6 +123,7 @@ import {
 } from "../../gateway/auth/jwt.ts";
 import type {
   SlotDriver,
+  SlotEntry,
   SlotExit,
   SlotInstance,
   SlotLaunch,
@@ -164,12 +170,29 @@ const FIRST_SLOT = 0;
 const MILLISECONDS_PER_SECOND = 1000;
 const SLOT_EXIT: SlotExit = { code: 0, error: null };
 
+interface FakeRun {
+  launch: SlotLaunch;
+  entries: readonly SlotEntry[];
+}
+
 export class FakeSlotInstance implements SlotInstance {
   private readonly exit = Promise.withResolvers<SlotExit>();
   readonly exited = this.exit.promise;
+  private readonly run: FakeRun;
+  private readonly changed: () => void;
+
+  constructor(run: FakeRun, changed: () => void) {
+    this.run = run;
+    this.changed = changed;
+  }
 
   control(): void {
     this.exit.resolve(SLOT_EXIT);
+  }
+
+  bindings(entries: readonly SlotEntry[]): void {
+    this.run.entries = entries;
+    this.changed();
   }
 
   terminate(): void {
@@ -179,7 +202,7 @@ export class FakeSlotInstance implements SlotInstance {
 
 export class FakeSlotDriver implements SlotDriver {
   readonly placement = PoolPlacement.Server;
-  private readonly launches: SlotLaunch[] = [];
+  private readonly runs = new Map<string, FakeRun>();
   private readonly waiters: Array<() => void> = [];
 
   check(): Promise<PlacementStatus> {
@@ -199,24 +222,31 @@ export class FakeSlotDriver implements SlotDriver {
   }
 
   launch(launch: SlotLaunch): SlotInstance {
-    this.launches.push(launch);
+    const run = { launch, entries: launch.entries };
+    this.runs.set(launch.instance.name, run);
+    this.wake();
+    return new FakeSlotInstance(run, () => this.wake());
+  }
+
+  private wake(): void {
     for (const wake of this.waiters.splice(0)) wake();
-    return new FakeSlotInstance();
   }
 
   async launched(
     projectId: string,
     resourceIdentity: string,
-    slot: number,
-  ): Promise<SlotLaunch> {
+    index: number,
+  ): Promise<{ instance: PoolInstance; entry: SlotEntry }> {
     for (;;) {
-      const found = this.launches.findLast(
-        (launch) =>
-          launch.slot.project_id === projectId &&
-          launch.slot.resource_identity === resourceIdentity &&
-          launch.slot.slot === slot,
-      );
-      if (found) return found;
+      const found = Array.from(this.runs.values()).flatMap((run) => {
+        const entry = run.entries.find(
+          (item) =>
+            item.project_id === projectId &&
+            item.resource_identity === resourceIdentity,
+        );
+        return entry ? [{ instance: run.launch.instance, entry }] : [];
+      });
+      if (found[index]) return found[index];
       await new Promise<void>((resolve) => this.waiters.push(resolve));
     }
   }
@@ -564,7 +594,7 @@ export async function gatewayFixture(
     >[0]["environmentModelRuntimeFactory"];
     stateDirectory?: string;
     agentDirectory?: string;
-    serverSlotLimit?: number;
+    serverInstanceLimit?: number;
     containerImage?: string;
     intake?: { pendingEventLimit?: number; pollIntervalMs?: number };
     handoverRefreshWaitMs?: number;
@@ -597,9 +627,9 @@ export async function gatewayFixture(
         ? {}
         : { prompt: { agent_directory: options.agentDirectory } },
     worker: {
-      ...(options.serverSlotLimit === undefined
+      ...(options.serverInstanceLimit === undefined
         ? {}
-        : { server_instance_limit: options.serverSlotLimit }),
+        : { server_instance_limit: options.serverInstanceLimit }),
       ...(options.containerImage === undefined
         ? {}
         : { container_image: options.containerImage }),
@@ -737,16 +767,24 @@ export async function gatewayFixture(
   const endpoint = `http://127.0.0.1:${port}`;
   const request = (path: string, init?: RequestInit) =>
     fetch(endpoint + path, init);
-  const slotTokenOf = async (slot: PoolSlot) => {
+  const humanToken = (
+    await generateHumanJWT(
+      config.master_key,
+      config.gateway.auth.version,
+      config.gateway.auth.token_lifetime,
+    )
+  ).token;
+  const slotTokenOf = async (instance: PoolInstance, entry: PoolEntry) => {
     const { sign } = await import("hono/jwt");
     const iat = Math.floor(Date.now() / MILLISECONDS_PER_SECOND);
     return sign(
       {
-        sub: slot.client_id,
-        name: `server slot ${slot.slot}`,
+        sub: entry.client_id,
+        name: instance.name,
         kind: IdentityKind.Client,
-        project_id: slot.project_id,
-        resource_identity: slot.resource_identity,
+        project_id: entry.project_id,
+        resource_identity: entry.resource_identity,
+        instance_id: instance.id,
         iat,
         exp: iat + config.gateway.auth.token_lifetime,
         jti: ulid(),
@@ -779,13 +817,7 @@ export async function gatewayFixture(
     trackingStore,
     endpoint,
     request,
-    token: (
-      await generateHumanJWT(
-        config.master_key,
-        config.gateway.auth.version,
-        config.gateway.auth.token_lifetime,
-      )
-    ).token,
+    token: humanToken,
     machineToken: async (
       projectId: string,
       bindingName: string,
@@ -804,19 +836,47 @@ export async function gatewayFixture(
     slotClient: async (
       projectId: string,
       bindingName: string,
-      slot = FIRST_SLOT,
+      index = FIRST_SLOT,
     ) => {
       assert.ok(slotDriver);
-      const launch = await slotDriver.launched(
+      const { instance, entry } = await slotDriver.launched(
         projectId,
         workerResourceIdentity(bindingName),
-        slot,
+        index,
       );
       return {
-        client_id: launch.slot.client_id,
-        token: await slotTokenOf(launch.slot),
-        client_secret: launch.client_secret,
+        client_id: entry.client_id,
+        token: await slotTokenOf(instance, entry),
+        client_secret: entry.client_secret,
       };
+    },
+    strangerClient: async (
+      projectId: string,
+      bindingName: string,
+      instanceName: string,
+    ) => {
+      const record = await humanCaller({
+        endpoint,
+        token: humanToken,
+      })(workerOperations["instance.get"], {
+        params: { instance_name: instanceName },
+        query: {},
+        body: null,
+      });
+      return slotTokenOf(
+        {
+          id: record.id,
+          name: record.name,
+          placement: PoolPlacement.Server,
+          created_at: record.created_at,
+        },
+        {
+          project_id: projectId,
+          resource_identity: workerResourceIdentity(bindingName),
+          client_id: createIdentity("client_identity"),
+          state: BindingEntryState.Serving,
+        },
+      );
     },
     config,
     accountId: KANTHORD_AUTH_USERNAME,
@@ -2272,12 +2332,7 @@ export async function createFakeSshCredential(
   ]);
 }
 
-export function humanCaller(
-  fixture: Pick<
-    Awaited<ReturnType<typeof gatewayFixture>>,
-    "endpoint" | "token"
-  >,
-) {
+export function humanCaller(fixture: { endpoint: string; token: string }) {
   return async <T extends Operation>(
     operation: T,
     input: z.input<T["input"]>,
@@ -2520,6 +2575,10 @@ export async function provisionNativeServerProject(
     ...empty,
     body: { name },
   });
+  const instances = await createInstances(
+    fixture,
+    instanceNames(`${name}-${binding}`, 1),
+  );
   await call(projectOperations["bindingSet.write"], {
     params: { project_id: project.id },
     query: {},
@@ -2531,15 +2590,12 @@ export async function provisionNativeServerProject(
           kind: "worker",
           config: {
             worker: "coder@1",
-            worker_instances: await createInstances(
-              fixture,
-              instanceNames(`${name}-${binding}`, 1),
-            ),
+            worker_instances: instances,
             entries: [{ agent: "swe@1", ...NATIVE_DEFAULTS }],
           },
         },
       } as never,
     },
   });
-  return { id: project.id };
+  return { id: project.id, instance: instances[0]! };
 }

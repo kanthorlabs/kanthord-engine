@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 import { EnvironmentSource } from "../../kernel/devcontainer.ts";
+import { packageVersion } from "../../kernel/version.ts";
 import { missionOperations, NodeState } from "../../mission/contract.ts";
 import {
   type CommandResult,
@@ -37,7 +38,6 @@ import {
   importNode,
   NO_ITEMS,
   recordingSlotDriver,
-  RUN_VERB,
   SINGLE_SLOT,
   SLOT_NAME_PREFIX,
   slotRuns,
@@ -384,7 +384,7 @@ test(
 );
 
 test(
-  "a container slot starts only on the ready image of its environment, and a stop ends the slot wait",
+  "a container instance runs the default image while unlisted, restarts on the ready image of its environment, and a stop ends the instance wait",
   { timeout: TEST_TIMEOUT_MS },
   async (t) => {
     const environment = fakeEnvironmentRuntime();
@@ -399,12 +399,12 @@ test(
       containerSlotDriver: wrap,
     });
     fixture.worker.startPool();
-    const volumeCreated = (clientId: string) =>
+    const volumeCreated = (instanceName: string) =>
       fake.calls.some(
         (call) =>
           call[0] === VOLUME_VERB &&
           call[1] === CREATE_VERB &&
-          call.at(-1) === `${SLOT_NAME_PREFIX}${clientId}`,
+          call.at(-1) === `${SLOT_NAME_PREFIX}${instanceName}`,
       );
 
     const firstBuild = environment.hold();
@@ -416,15 +416,18 @@ test(
     });
     await awaitStatus(t, fixture, project.id, EnvironmentStatus.Building);
     await until(
-      () => starts.length > NO_ITEMS && volumeCreated(starts[0]!.clientId),
+      () => starts.length > NO_ITEMS && volumeCreated(starts[0]!.instanceName),
       Boolean,
       t.signal,
     );
-    assert.deepEqual(slotRuns(fake), []);
-    assert.deepEqual(
-      fake.calls.filter((call) => call[0] === RUN_VERB),
-      [],
+    const defaultImage = `${CONTAINER_IMAGE}:${packageVersion()}`;
+    const imageOf = (run: string[]) => run[run.indexOf("--") - 1];
+    const initial = await until(
+      () => slotRuns(fake),
+      (found) => found.length > NO_ITEMS,
+      t.signal,
     );
+    assert.equal(imageOf(initial[0]!), defaultImage);
 
     firstBuild.resolve();
     const ready = await awaitStatus(
@@ -438,12 +441,12 @@ test(
       ready.tag,
       environmentTagOf(ready.resource_identity, ready.digest),
     );
-    const runs = await until(
+    await until(
       () => slotRuns(fake),
-      (found) => found.length > NO_ITEMS,
+      (found) => found.some((run) => imageOf(run) === ready.tag),
       t.signal,
     );
-    assert.equal(runs[0]![runs[0]!.indexOf("--") - 1], ready.tag);
+    assert.equal(imageOf(slotRuns(fake).at(-1)!), ready.tag);
 
     const before = starts.length;
     const runsBefore = slotRuns(fake).length;
@@ -469,7 +472,7 @@ test(
     await until(
       () =>
         starts.length > before &&
-        starts.slice(before).some((start) => volumeCreated(start.clientId)),
+        starts.slice(before).some((start) => volumeCreated(start.instanceName)),
       Boolean,
       t.signal,
     );
@@ -478,11 +481,12 @@ test(
     await fixture.worker.stopPool();
     const later = starts.slice(before);
     await Promise.race([
-      Promise.all(later.map((start) => start.instance.exited)),
+      Promise.all(later.map((start) => start.launched.exited)),
       delay(SETTLE_WAIT_MS).then(() =>
         assert.fail("a slot wait outlived the stop"),
       ),
     ]);
-    assert.deepEqual(slotRuns(fake).slice(runsBefore), []);
+    for (const run of slotRuns(fake).slice(runsBefore))
+      assert.equal(imageOf(run), defaultImage);
   },
 );

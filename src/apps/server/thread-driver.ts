@@ -3,9 +3,15 @@ import type { Worker } from "node:worker_threads";
 import { LogDestination } from "../../kernel/log.ts";
 import { type PlacementStatus, PoolPlacement } from "../../worker/contract.ts";
 import { startThread } from "../worker/thread-start.ts";
-import type { SlotControl } from "../worker/thread-data.ts";
+import {
+  entryPorts,
+  type SlotControl,
+  type ThreadEntry,
+  ThreadMessageKind,
+} from "../worker/thread-data.ts";
 import type {
   SlotDriver,
+  SlotEntry,
   SlotExit,
   SlotInstance,
   SlotLaunch,
@@ -46,6 +52,15 @@ export function threadEnvironment(
   return env;
 }
 
+function threadEntries(entries: readonly SlotEntry[]): ThreadEntry[] {
+  return entries.map((entry) => ({
+    client_id: entry.client_id,
+    port: entry.channel,
+    client_secret: entry.client_secret,
+    state: entry.state,
+  }));
+}
+
 class ThreadInstance implements SlotInstance {
   readonly exited: Promise<SlotExit>;
   private readonly worker: Worker;
@@ -66,6 +81,14 @@ class ThreadInstance implements SlotInstance {
 
   control(kind: SlotControl["kind"]): void {
     this.worker.postMessage({ kind });
+  }
+
+  bindings(entries: readonly SlotEntry[]): void {
+    const wire = threadEntries(entries);
+    this.worker.postMessage(
+      { kind: ThreadMessageKind.Bindings, entries: wire },
+      entryPorts(wire),
+    );
   }
 
   terminate(): void {
@@ -100,24 +123,23 @@ export class ThreadDriver implements SlotDriver {
   }
 
   launch(launch: SlotLaunch): SlotInstance {
-    const clientId = launch.slot.client_id;
+    const name = launch.instance.name;
     const worker = startThread(
       {
-        port: launch.channel,
-        client_secret: launch.client_secret,
+        entries: threadEntries(launch.entries),
         log: LogDestination.File,
       },
       threadEnvironment(launch.environment, launch.root),
     );
     worker.stdout.pipe(launch.output, { end: false });
     worker.stderr.pipe(launch.output, { end: false });
-    this.threads.set(clientId, worker);
+    this.threads.set(name, worker);
     return new ThreadInstance(worker, () => {
-      if (this.threads.get(clientId) === worker) this.threads.delete(clientId);
+      if (this.threads.get(name) === worker) this.threads.delete(name);
     });
   }
 
-  threadOf(clientId: string): Worker | undefined {
-    return this.threads.get(clientId);
+  threadOf(instanceName: string): Worker | undefined {
+    return this.threads.get(instanceName);
   }
 }

@@ -11,13 +11,15 @@ import { MessageChannel } from "node:worker_threads";
 import { deriveClientSecret } from "../../gateway/auth/jwt.ts";
 import { isNumber } from "../../kernel/values.ts";
 import { packageVersion } from "../../kernel/version.ts";
+import { createIdentity } from "../../kernel/identity.ts";
 import { temporary } from "../../kernel/test-support.ts";
 import { projectOperations } from "../../project/contract.ts";
 import {
+  BindingEntryState,
   type ContainerRuntime,
   InstancePlacement,
+  type PoolInstance,
   PoolPlacement,
-  type PoolSlot,
   workerOperations,
 } from "../../worker/contract.ts";
 import { SlotControl } from "../worker/thread-data.ts";
@@ -31,7 +33,7 @@ import {
   SUCCESS_CODE,
   systemRuntimeHost,
 } from "./container-runtime.ts";
-import { slotClientIdentity } from "./slot-identity.ts";
+import { instanceClientIdentity } from "./instance-issuer.ts";
 import { createInstances, humanCaller, instanceNames } from "./test-support.ts";
 import {
   WORKER_DEFAULTS,
@@ -182,21 +184,34 @@ async function liveDriver(t: TestContext) {
   return { driver, runtime, masterKey };
 }
 
-function poolSlot(masterKey: string, slot: number): PoolSlot {
+function poolInstance(name: string): PoolInstance {
+  return {
+    id: createIdentity("worker_instance"),
+    name,
+    placement: PoolPlacement.Container,
+    created_at: Date.now(),
+  };
+}
+
+function launchEntry(
+  masterKey: string,
+  instance: PoolInstance,
+  channel: MessageChannel["port2"],
+) {
+  const clientId = instanceClientIdentity(
+    masterKey,
+    instance.id,
+    PROJECT,
+    RESOURCE,
+    GENERATION,
+  );
   return {
     project_id: PROJECT,
     resource_identity: RESOURCE,
-    generation: GENERATION,
-    placement: PoolPlacement.Container,
-    slot,
-    client_id: slotClientIdentity(
-      masterKey,
-      PROJECT,
-      RESOURCE,
-      GENERATION,
-      slot,
-    ),
-    draining: false,
+    client_id: clientId,
+    state: BindingEntryState.Serving,
+    client_secret: deriveClientSecret(masterKey, AUTH_VERSION, clientId),
+    channel,
   };
 }
 
@@ -285,6 +300,7 @@ async function containerPool(t: TestContext) {
   };
   return {
     ...setup,
+    containerInstance,
     stateDirectory,
     runtime,
     owner,
@@ -314,7 +330,7 @@ test(
     assert.equal(item!.placement, InstancePlacement.Container);
     assert.equal(item!.draining, false);
     const clientId = item!.client_id!;
-    const name = slotName(clientId);
+    const name = slotName(f.containerInstance[0]!);
     const tag = f.environmentTag();
     assert.equal(await f.imageOf(name), tag);
 
@@ -367,7 +383,12 @@ test(
       `criterion 2: CapDrop ${JSON.stringify(container!.HostConfig.CapDrop)} SecurityOpt ${JSON.stringify(container!.HostConfig.SecurityOpt)}`,
     );
 
-    const stderrLog = join(f.stateDirectory, "workers", clientId, "stderr.log");
+    const stderrLog = join(
+      f.stateDirectory,
+      "workers",
+      f.containerInstance[0]!,
+      "stderr.log",
+    );
     await waitUntil(
       () => Promise.resolve(readFileSync(stderrLog, "utf8")),
       (text) => text.includes(READY_MESSAGE),
@@ -391,13 +412,14 @@ test(
     await f.setCount(0);
     const drainStarted = performance.now();
     await waitUntil(
-      () => containerNames(f.runtime, `name=${name}`),
-      (names) => names.length === NO_ITEMS,
+      f.instances,
+      (items) => items.length === NO_ITEMS,
       t.signal,
     );
     t.diagnostic(
-      `criterion 3: container gone ${Math.round(performance.now() - drainStarted)} ms after the drain`,
+      `criterion 3: registration gone ${Math.round(performance.now() - drainStarted)} ms after the unlist`,
     );
+    assert.ok(await running(f.runtime, name), "criterion 3: container stays");
     assert.ok(await volumeExists(f.runtime, name), "criterion 3: volume stays");
     assert.ok(
       !f.fixture.logs.some((line) => line.includes(FAILED_MESSAGE)),
@@ -443,23 +465,18 @@ test(
   { skip: SKIP, timeout: LIVE_TIMEOUT_MS },
   async (t) => {
     const { driver, runtime, masterKey } = await liveDriver(t);
-    const slot = poolSlot(masterKey, 0);
+    const slot = poolInstance("boxed-live");
     const root = temporary(t);
     const { port1, port2 } = new MessageChannel();
     t.after(() => port1.close());
     const instance = driver.launch({
-      slot,
-      channel: port2,
-      client_secret: deriveClientSecret(
-        masterKey,
-        AUTH_VERSION,
-        slot.client_id,
-      ),
+      instance: slot,
+      entries: [launchEntry(masterKey, slot, port2)],
       root,
       output: createWriteStream(join(root, "stderr.log")),
       environment: process.env,
     });
-    const name = slotName(slot.client_id);
+    const name = slotName(slot.name);
     await waitUntil(() => running(runtime, name), Boolean, t.signal);
     await shell(runtime, name, `kill -STOP ${SERVE_SLOT_PID}`);
     instance.control(SlotControl.Stop);
@@ -486,7 +503,8 @@ test(
   { skip: SKIP, timeout: LIVE_TIMEOUT_MS },
   async (t) => {
     const { driver, runtime, masterKey } = await liveDriver(t);
-    const slot = poolSlot(masterKey, 1);
+    const slot = poolInstance("boxed-killed");
+    const entry = launchEntry(masterKey, slot, new MessageChannel().port2);
     const root = temporary(t);
     const driverPath = join(import.meta.dirname, "container-driver.ts");
     const runtimePath = join(import.meta.dirname, "container-runtime.ts");
@@ -497,7 +515,7 @@ test(
       `import { systemRuntimeHost } from ${JSON.stringify(runtimePath)};`,
       `const driver = new ContainerDriver({ masterKey: ${JSON.stringify(masterKey)}, image: ${JSON.stringify(`${IMAGE_NAME}:${packageVersion()}`)}, host: systemRuntimeHost(process.env) });`,
       `const { port2 } = new MessageChannel();`,
-      `driver.launch({ slot: ${JSON.stringify(slot)}, channel: port2, client_secret: ${JSON.stringify(deriveClientSecret(masterKey, AUTH_VERSION, slot.client_id))}, root: ${JSON.stringify(root)}, output: createWriteStream(${JSON.stringify(join(root, "stderr.log"))}), environment: process.env });`,
+      `driver.launch({ instance: ${JSON.stringify(slot)}, entries: [{ project_id: ${JSON.stringify(PROJECT)}, resource_identity: ${JSON.stringify(RESOURCE)}, client_id: ${JSON.stringify(entry.client_id)}, state: ${JSON.stringify(entry.state)}, client_secret: ${JSON.stringify(entry.client_secret)}, channel: port2 }], root: ${JSON.stringify(root)}, output: createWriteStream(${JSON.stringify(join(root, "stderr.log"))}), environment: process.env });`,
       `setInterval(() => {}, 1000);`,
     ].join("\n");
     const launcher = spawn(
@@ -506,7 +524,7 @@ test(
       { stdio: ["ignore", "ignore", "inherit"] },
     );
     t.after(() => launcher.kill("SIGKILL"));
-    const name = slotName(slot.client_id);
+    const name = slotName(slot.name);
     await waitUntil(() => running(runtime, name), Boolean, t.signal);
     launcher.kill("SIGKILL");
     await once(launcher, "exit");
