@@ -13,7 +13,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { delimiter, dirname, join } from "node:path";
 import test, { type TestContext } from "node:test";
 import { simpleGit } from "simple-git";
 import {
@@ -1234,15 +1234,30 @@ function blobObject(text: string): string {
     .digest("hex");
 }
 
+const TRACE_BIN_DIRECTORY = "bin";
+const GIT_BINARY = "git";
+const TRACE_WRAPPER_MODE = 0o700;
+
 async function tracedRead(t: TestContext, files: Record<string, SeedEntry>) {
   const { address, scratch, commit } = await instructionOrigin(t);
   const head = await commit(files);
   const traces = temporary(t);
   const events = join(traces, "trace2");
   const packets = join(traces, "packet");
-  const previous = [process.env.GIT_TRACE2_EVENT, process.env.GIT_TRACE_PACKET];
-  process.env.GIT_TRACE2_EVENT = events;
-  process.env.GIT_TRACE_PACKET = packets;
+  const bin = join(traces, TRACE_BIN_DIRECTORY);
+  mkdirSync(bin);
+  const git = (process.env.PATH ?? NO_TEXT)
+    .split(delimiter)
+    .map((directory) => join(directory, GIT_BINARY))
+    .find((candidate) => existsSync(candidate));
+  assert.ok(git);
+  writeFileSync(
+    join(bin, GIT_BINARY),
+    `#!/bin/sh\nGIT_TRACE2_EVENT='${events}' GIT_TRACE_PACKET='${packets}' exec '${git}' "$@"\n`,
+    { mode: TRACE_WRAPPER_MODE },
+  );
+  const path = process.env.PATH;
+  process.env.PATH = `${bin}${delimiter}${path}`;
   try {
     const read = await readFilesAtCommit(
       address,
@@ -1267,7 +1282,7 @@ async function tracedRead(t: TestContext, files: Record<string, SeedEntry>) {
     );
     return { head, read, starts, wants };
   } finally {
-    [process.env.GIT_TRACE2_EVENT, process.env.GIT_TRACE_PACKET] = previous;
+    process.env.PATH = path;
   }
 }
 
