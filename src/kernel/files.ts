@@ -106,6 +106,7 @@ export function writePrivate(
   if (replace) audit(path, FileKind.File, true);
   const temporary = join(dirname(path), `.${randomUUID()}.tmp`);
   let fd: number | undefined;
+  let failure: unknown;
   try {
     fd = openPrivate(
       temporary,
@@ -118,18 +119,21 @@ export function writePrivate(
     if (replace) renameSync(temporary, path);
     else linkSync(temporary, path);
   } catch (error) {
-    if (error instanceof Diagnostic) throw error;
-    throw new Diagnostic(
-      "system.files.publish_failed",
-      "cannot publish file; the destination must be absent",
-      { fields: [["path", path]] },
-    );
-  } finally {
-    if (fd !== undefined) closeSync(fd);
-    try {
-      unlinkSync(temporary);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== FILE_NOT_FOUND) throw error;
-    }
+    failure =
+      error instanceof Diagnostic
+        ? error
+        : new Diagnostic(
+            "system.files.publish_failed",
+            "cannot publish file; the destination must be absent",
+            { fields: [["path", path]] },
+          );
   }
+  if (fd !== undefined) closeSync(fd);
+  try {
+    unlinkSync(temporary);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== FILE_NOT_FOUND)
+      failure ??= error;
+  }
+  if (failure !== undefined) throw failure;
 }
