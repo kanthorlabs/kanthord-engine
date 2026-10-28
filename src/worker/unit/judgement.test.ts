@@ -502,7 +502,6 @@ function failedRun(repository: string, output: string): AffectedRun {
     head_commit: "b",
     declaration: { version: 1, command, time_limit_s: 600, gate_files: [] },
     changed: 2,
-    gate_files: [],
     report: null,
     failed,
     promoted_flaky: [],

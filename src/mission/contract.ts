@@ -1327,7 +1327,6 @@ export const assessmentSubmitSchema = executionContextSchema
     result: assessmentResultSchema,
     rationale: textSchema,
     tested_input: testedInputSchema,
-    gate_files: gateFilesSchema.optional(),
     proposals: z.array(proposalContentSchema).max(PROPOSAL_MAX).default([]),
     cause: failureCauseSchema.optional(),
   })

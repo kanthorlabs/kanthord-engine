@@ -22,7 +22,6 @@ import {
   AffectedSelection,
   AffectedVerdict,
   affectedFailureText,
-  changedGateFiles,
   changesDocumentOf,
   headFailed,
   HeadFailureKind,
@@ -123,25 +122,6 @@ test("a declaration with gate files parses and holds the list", () => {
   );
   assert.ok("declaration" in result);
   assert.deepEqual(result.declaration.gate_files, GATE_FILES);
-});
-
-test("the changed gate files hold each path and previous path once, sorted", () => {
-  const declaration = {
-    version: 1 as const,
-    command: COMMAND,
-    time_limit_s: DEFAULT_LIMIT,
-    gate_files: ["d.ts", "c.ts", "b.mjs", "a.json"],
-  };
-  assert.deepEqual(
-    changedGateFiles(declaration, [
-      { path: "a.json", status: ChangeStatus.Modified },
-      { path: "b.mjs", status: ChangeStatus.Deleted },
-      { path: "e.ts", status: ChangeStatus.Renamed, previous_path: "c.ts" },
-      { path: "d.ts", status: ChangeStatus.Renamed, previous_path: "y.ts" },
-      { path: "x.ts", status: ChangeStatus.Added },
-    ]),
-    ["a.json", "b.mjs", "c.ts", "d.ts"],
-  );
 });
 
 test("an invalid declaration answers an error", () => {
@@ -449,7 +429,6 @@ async function fixture(
     base: string;
     head: string;
     declaration?: string | null;
-    gate_files?: string[];
   },
 ): Promise<Fixture> {
   const root = temporary(t);
@@ -471,9 +450,6 @@ async function fixture(
       ? JSON.stringify({
           version: 1,
           command: `bash run.sh ${probe}`,
-          ...(modes.gate_files === undefined
-            ? {}
-            : { gate_files: modes.gate_files }),
         })
       : modes.declaration;
   if (declaration !== null)
@@ -602,22 +578,11 @@ test("a passing head answers passed and runs no base check", async (t) => {
   assert.equal(result.failure_text, null);
   assert.deepEqual(result.failed, []);
   assert.equal(result.changed, CHANGED_COUNT);
-  assert.deepEqual(result.gate_files, []);
   assert.equal(result.head.exit_code, EXIT_OK);
   assert.equal(
     readFileSync(f.probe, "utf8").split("\n").length - 1,
     PROBE_LINES,
   );
-});
-
-test("a run holds the changed gate files of its change set", async (t) => {
-  const f = await fixture(t, {
-    base: "fail",
-    head: "pass",
-    gate_files: ["mode.txt", "run.sh"],
-  });
-  const result = await ran(f);
-  assert.deepEqual(result.gate_files, ["mode.txt"]);
 });
 
 test("a failed test that the base passes answers failed", async (t) => {
@@ -887,7 +852,6 @@ function affectedRun(overrides: Partial<AffectedRun>): AffectedRun {
       gate_files: [],
     },
     changed: 3,
-    gate_files: [],
     report: report({ failed: [ID_ONE] }),
     failed: [ID_ONE],
     promoted_flaky: [],
