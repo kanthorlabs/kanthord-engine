@@ -443,7 +443,6 @@ test("a native group with no listed instance admits a client identity with a liv
   t.mock.method(machines.project, "resolveWorkerGroup", async () => ({
     project_id: TEST_PROJECT_ID,
     resource_identity: `worker:kanthord:${TEST_WORKER_BINDING}`,
-    placement: null,
     worker_instances: [],
   }));
   const fixture = await authenticationFixture(t, machines);

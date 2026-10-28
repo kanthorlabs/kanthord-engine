@@ -1349,22 +1349,6 @@ test("handover handlers pass the proven execution and one transactional clock re
       assert.equal(revision, execution.pinnedRevision);
       return repositoryBindingIds;
     },
-    workerBindingRowOf: (tx, bindingId) => {
-      assert(tx.database.isTransaction);
-      assert.equal(bindingId, execution.workerBindingId);
-      return {
-        binding_id: bindingId,
-        project_id: execution.projectId,
-        resource_identity: "worker:kanthord:general",
-        worker_name: "coder@1",
-        entries: [],
-        resource_budget: null,
-        tombstone: false,
-        disabled: false,
-        placement: InstancePlacement.Container,
-        worker_instances: [],
-      };
-    },
     custodyHandover: {
       handover: (
         tx,
@@ -1415,6 +1399,30 @@ test("handover handlers pass the proven execution and one transactional clock re
         throw new Error("UNEXPECTED_COLLABORATION");
       },
     },
+  });
+  execution.runtimeIdentity = f.store.transaction((tx) => {
+    const instance = insertInstance(
+      tx,
+      {
+        name: LAPTOP,
+        worker: WORKER,
+        placement: InstancePlacement.Container,
+        public_key: null,
+        fingerprint: null,
+      },
+      now,
+    );
+    return insertRegistration(
+      tx,
+      {
+        project_id: execution.projectId,
+        resource_identity: "worker:kanthord:general",
+        client_id: identity.clientId,
+        name: "machine",
+        instance_id: instance.id,
+      },
+      now,
+    ).runtime_identity;
   });
   const caller = { ...f.caller, identity, execution };
   const body = { execution_id: createIdentity("execution"), ...envelope };

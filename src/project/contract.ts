@@ -277,22 +277,25 @@ export const workerConfigSchema = z.strictObject({
   worker_instances: workerInstancesSchema.optional(),
   tags: workerTagsSchema.optional(),
 });
-export function bindingHolders(config: {
-  placement?: WorkerPlacement | null;
-  worker_instances?: readonly string[];
-}): string[] {
-  return config.placement === WorkerPlacement.Worker
-    ? [...(config.worker_instances ?? [])]
-    : [SERVER_HOLDER];
+export function bindingHolders(
+  instances: ReadonlyArray<{ name: string; placement: WorkerPlacement }>,
+): string[] {
+  const workers = instances
+    .filter(({ placement }) => placement === WorkerPlacement.Worker)
+    .map(({ name }) => name);
+  return workers.length < instances.length
+    ? [...workers, SERVER_HOLDER]
+    : workers;
 }
-export function bindingScope(config: {
-  placement?: WorkerPlacement | null;
-  worker_instances?: readonly string[];
-}): HolderScope {
+export function bindingScope(
+  instances: ReadonlyArray<{ name: string; placement: WorkerPlacement }>,
+): HolderScope {
+  const holders = bindingHolders(instances);
   return {
-    holders: bindingHolders(config),
-    claimant:
-      config.placement === WorkerPlacement.Worker ? null : SERVER_HOLDER,
+    holders,
+    claimant: holders.some((holder) => holder !== SERVER_HOLDER)
+      ? null
+      : SERVER_HOLDER,
   };
 }
 export function effectiveInstanceCount(config: {
@@ -1077,7 +1080,6 @@ export interface ProjectBindings {
   ): Promise<{
     project_id: string;
     resource_identity: string;
-    placement?: WorkerPlacement | null;
     worker_instances?: string[];
   } | null>;
   workerGroupEnded(
@@ -1121,7 +1123,6 @@ export interface WorkerBindingRow {
   worker_name: string;
   instance_count: number;
   worker_instances: string[];
-  placement: WorkerPlacement | null;
   environment: string | null;
   generation: number;
   resource_budget: { turns: number; wall_time_ms: number } | null;

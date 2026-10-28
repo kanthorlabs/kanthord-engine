@@ -1266,6 +1266,18 @@ for (const adapter of ["direct", "http"] as const) {
     assert.equal(pull.kind, WorkPullKind.NoWork);
   });
 
+  test(`${adapter} a revision to an empty instance list during a worker instance execution keeps its handover of the copy of the instance`, async (t) => {
+    const h = await setup(t, adapter, undefined, {
+      workerInstances: RELAY_INSTANCES,
+    });
+    await h.reviseInstances([]);
+    const [item] = h.openSealed(completed(await h.handover())).items;
+    assert.ok(item && "sealed" in item);
+    const [relayA, relayB] = RELAY_INSTANCES as [string, string];
+    assert.deepEqual(await h.openCopy(relayA, item.sealed), { key: SECRET });
+    assert.equal(await h.openCopy(relayB, item.sealed), null);
+  });
+
   test(`${adapter} failed execution proof reserves no key and malformed reports expose no secret`, async (t) => {
     const h = await setup(t, adapter);
     const key = createIdempotencyKey();

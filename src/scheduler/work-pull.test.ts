@@ -66,7 +66,6 @@ function harness(t: TestContext) {
     instance_count: 2,
     tags: [],
     environment: null,
-    placement: null,
     tombstone: false,
   });
   h.dependencies.declarations.declarationOf = () => ({

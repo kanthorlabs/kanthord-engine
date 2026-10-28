@@ -557,7 +557,6 @@ function pinHarness(
     instance_count: 1,
     tags: [],
     environment: null,
-    placement: null,
     tombstone: false,
     resource_budget: null,
   });

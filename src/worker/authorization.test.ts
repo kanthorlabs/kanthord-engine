@@ -9,7 +9,6 @@ import { getWorkerDeclaration } from "./catalog.ts";
 import { TWO_AGENT_WORKER, twoAgentDeclarationOf } from "./test-support.ts";
 import {
   AuthorizationRefusal,
-  InstancePlacement,
   type WorkerBindingRowOf,
   WorkerErrorCode,
 } from "./contract.ts";
@@ -45,7 +44,6 @@ test("Worker authorizes the pinned inference configuration and refuses each brok
     resource_budget: null,
     tombstone: false,
     disabled: false,
-    placement: InstancePlacement.Server,
     worker_instances: [],
   };
   const identity = testMachineIdentity(
@@ -185,7 +183,6 @@ test("Worker authorizes one credential per distinct credential of the agents of 
     resource_budget: null,
     tombstone: false,
     disabled: false,
-    placement: InstancePlacement.Server,
     worker_instances: [],
   };
   const identity = testMachineIdentity(

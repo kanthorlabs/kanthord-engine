@@ -6,7 +6,6 @@ import { deriveKey } from "../../kernel/json.ts";
 import { HttpStatus } from "../../kernel/http.ts";
 import { OperationError } from "../../kernel/errors.ts";
 import { isMachineIdentity, isWorkerIdentity } from "../../kernel/caller.ts";
-import { WorkerPlacement } from "../../project/contract.ts";
 import { InstancePlacement, type LiveInstance } from "../../worker/contract.ts";
 import {
   authenticationFixture,
@@ -42,21 +41,18 @@ function instanceLookups() {
           return {
             project_id: projectId,
             resource_identity: resourceIdentity,
-            placement: WorkerPlacement.Worker,
             worker_instances: listed,
           };
         if (resourceIdentity === DRAINED_RESOURCE)
           return {
             project_id: projectId,
             resource_identity: resourceIdentity,
-            placement: null,
             worker_instances: [],
           };
         if (resourceIdentity === SERVER_RESOURCE)
           return {
             project_id: projectId,
             resource_identity: resourceIdentity,
-            placement: WorkerPlacement.Server,
           };
         return null;
       },

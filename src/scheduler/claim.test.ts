@@ -83,7 +83,6 @@ export function claimHarness(
     instance_count: 1,
     tags: [] as string[],
     environment: null as string | null,
-    placement: null as string | null,
     tombstone: false,
     resource_budget: null as { wall_time_ms: number } | null,
   };

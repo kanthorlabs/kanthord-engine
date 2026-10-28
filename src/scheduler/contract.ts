@@ -387,7 +387,6 @@ export interface WorkerBindings {
     resource_budget?: { wall_time_ms: number } | null;
     tags: readonly string[];
     environment: string | null;
-    placement: string | null;
     tombstone: boolean;
   } | null;
   workerBindingsOf(

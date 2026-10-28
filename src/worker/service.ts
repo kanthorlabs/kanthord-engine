@@ -117,7 +117,11 @@ import {
 } from "../llm/contract.ts";
 import { unreportedHealth } from "../llm/copy-health.ts";
 import { WorkerInstances } from "./instances.ts";
-import { readInstanceById, readLiveInstance } from "./instance-rows.ts";
+import {
+  readInstanceById,
+  readLiveInstance,
+  readLiveInstances,
+} from "./instance-rows.ts";
 import { declareInstances } from "./instance-operations.ts";
 import type { AgentPromptFacts } from "./prompt-telemetry.ts";
 
@@ -602,7 +606,9 @@ export class WorkerService implements Service {
     assert.ok(declaration);
     if (declaration.host === WorkerHost.ExternalHarness) return true;
     const scope = {
-      holders: bindingHolders(binding),
+      holders: bindingHolders(
+        readLiveInstances(tx, binding.worker_instances ?? []),
+      ),
       claimant: claimantOf(tx, runtimeIdentity),
     };
     const agents = agentsOfWorker(binding.worker_name);
@@ -966,10 +972,7 @@ export class WorkerService implements Service {
               tx,
               identity,
               execution,
-              this.dependencies.workerBindingRowOf(
-                tx,
-                execution.workerBindingId,
-              )?.placement ?? null,
+              this.placementOf(tx, execution.runtimeIdentity),
               this.dependencies.repositoryBindingIdsOf(
                 tx,
                 execution.nodeId,
@@ -1011,8 +1014,7 @@ export class WorkerService implements Service {
           tx,
           identity,
           execution,
-          this.dependencies.workerBindingRowOf(tx, execution.workerBindingId)
-            ?.placement ?? null,
+          this.placementOf(tx, execution.runtimeIdentity),
           { nonce: body.nonce, ciphertext: body.ciphertext },
           Date.now(),
         ),
