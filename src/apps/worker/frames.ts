@@ -4,6 +4,7 @@ import { z } from "zod";
 import { type PortAnswer, portAnswerSchema } from "../../gateway/client.ts";
 import { Diagnostic } from "../../kernel/errors.ts";
 import { createIdentity } from "../../kernel/identity.ts";
+import { HttpStatus } from "../../kernel/http.ts";
 import { SlotControl } from "./thread-data.ts";
 
 const KIBIBYTE = 1024;
@@ -12,7 +13,6 @@ const FRAME_LINE_LIMIT_MEBIBYTES = 64;
 export const FRAME_LINE_LIMIT_BYTES = FRAME_LINE_LIMIT_MEBIBYTES * MEBIBYTE;
 const LINE_FEED = 0x0a;
 const ABSENT = -1;
-const INVALID_RESPONSE_STATUS = 500;
 
 export const FrameKind = {
   Init: "init",
@@ -118,7 +118,7 @@ export function decodeFrame<T extends Frame>(
 function invalidResponse(callId: string): PortAnswer {
   return {
     call_id: callId,
-    status: INVALID_RESPONSE_STATUS,
+    status: HttpStatus.InternalServerError,
     body: {
       error: {
         code: "gateway.invocation.invalid_response",

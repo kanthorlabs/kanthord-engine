@@ -57,7 +57,7 @@ import type {
   WorkerRegistrations,
 } from "../../worker/contract.ts";
 import type { SlotDriver } from "./slot-driver.ts";
-import { audit, ensureDirectory } from "../../kernel/files.ts";
+import { audit, ensureDirectory, PRIVATE_UMASK } from "../../kernel/files.ts";
 import {
   asError,
   diagnostic,
@@ -180,7 +180,6 @@ export { enforceMasterKey, verifyMasterKey } from "../../custody/index.ts";
 const TRACE_ID_BYTES = 16;
 const SPAN_ID_BYTES = 8;
 const STDERR_DESCRIPTOR = 2;
-const PRIVATE_UMASK = 0o077;
 const STOP_WATCHDOG_MS = 10000;
 
 function resultOf<T>(result: OperationResult<T>): T {

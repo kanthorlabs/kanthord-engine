@@ -22,6 +22,7 @@ export type FileKind = (typeof FileKind)[keyof typeof FileKind];
 export const FILE_NOT_FOUND = "ENOENT";
 export const PRIVATE_FILE_MODE = 0o600;
 export const PRIVATE_DIRECTORY_MODE = 0o700;
+export const PRIVATE_UMASK = 0o077;
 const PERMISSION_BITS = 0o7777;
 const OCTAL_RADIX = 8;
 

@@ -9,6 +9,7 @@ import { OperationResultType } from "../../kernel/operation.ts";
 import type { WorkerTransport } from "./transport.ts";
 import { WorkerErrorCode } from "../../worker/contract.ts";
 import { createIdempotencyKey } from "../../kernel/identity.ts";
+import { HttpStatus } from "../../kernel/http.ts";
 
 const ENDED_REGISTRATION_CODES: readonly string[] = [
   WorkerErrorCode.RegistrationNotFound,
@@ -101,9 +102,8 @@ export async function deregister(
       "worker.stop.deregistration_indeterminate",
       "worker: deregistration answer is indeterminate.",
     );
-  const notFound = 404;
   if (
-    result.status === notFound &&
+    result.status === HttpStatus.NotFound &&
     ENDED_REGISTRATION_CODES.includes(result.error.error.code)
   )
     return null;

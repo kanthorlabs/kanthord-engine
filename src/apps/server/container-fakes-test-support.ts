@@ -18,8 +18,7 @@ const ABSENT_CODE = 1;
 const FORMAT_OPTION = "--format";
 const Verb = { Info: "info", Image: "image" } as const;
 const Subject = { Inspect: "inspect" } as const;
-const COMMIT_HEX_LENGTH = 40;
-const FAKE_COMMIT = "a".repeat(COMMIT_HEX_LENGTH);
+const FAKE_COMMIT = "a".repeat(40);
 const IMAGE_SETTINGS = JSON.stringify([{ Config: { Env: [], Labels: null } }]);
 const INFO_ANSWER: RuntimeAnswer = {
   code: SUCCESS_CODE,

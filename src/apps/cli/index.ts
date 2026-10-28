@@ -17,7 +17,7 @@ import { intakeOperations } from "../../intake/contract.ts";
 import assert from "node:assert/strict";
 import { Command, CommanderError, Option } from "commander";
 import { dirname } from "node:path";
-import { writePrivate } from "../../kernel/files.ts";
+import { PRIVATE_UMASK, writePrivate } from "../../kernel/files.ts";
 import { Diagnostic, diagnostic, diagnosticRows } from "../../kernel/errors.ts";
 import type { Server } from "../server/index.ts";
 import { gatewayOperations } from "../../gateway/contract.ts";
@@ -49,7 +49,6 @@ import {
 
 const HOST_PROBE_SCHEME = "http://";
 const HOST_PROBE_DEFAULT_PORT = ":80";
-const PRIVATE_UMASK = 0o077;
 
 function allowedHost(value: string): string {
   const host = value.toLowerCase();

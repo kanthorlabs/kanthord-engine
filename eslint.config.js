@@ -927,7 +927,7 @@ export default tseslint.config(
   },
   {
     files: ["src/**/*.ts"],
-    ignores: ["src/**/*.test.ts", "src/**/*support.ts"],
+    ignores: ["src/**/*.test.ts", "src/**/*test-support.ts"],
     rules: {
       "@typescript-eslint/no-magic-numbers": [
         "error",

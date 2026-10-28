@@ -6,6 +6,7 @@ import {
 } from "../../kernel/context.ts";
 import { Diagnostic } from "../../kernel/errors.ts";
 import { OperationResultType } from "../../kernel/operation.ts";
+import { HttpStatus } from "../../kernel/http.ts";
 import {
   type ExecutionRecord,
   WorkPullKind,
@@ -16,7 +17,6 @@ import type { WorkerTransport } from "./transport.ts";
 import type { Registration } from "./registration.ts";
 import { createIdempotencyKey } from "../../kernel/identity.ts";
 
-const SERVER_ERROR = 500;
 const REGISTRATION_REQUIRED = "gateway.registration.required";
 const CONNECTION_SUPERSEDED = "gateway.jwt.connection_superseded";
 const NO_DELAY = 0;
@@ -94,7 +94,7 @@ export async function pullLoop(
     }
     if (
       result.type === OperationResultType.Failure &&
-      result.status < SERVER_ERROR &&
+      result.status < HttpStatus.InternalServerError &&
       result.error.error.code !== CONNECTION_SUPERSEDED
     ) {
       if (result.error.error.code !== REGISTRATION_REQUIRED)

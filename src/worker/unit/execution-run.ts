@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import { CancellationContext, type Context } from "../../kernel/context.ts";
 import { CodedError } from "../../kernel/errors.ts";
 import { thrownReason } from "../../kernel/probe.ts";
+import { HttpStatus } from "../../kernel/http.ts";
 import {
   type ClientOptions,
   type OperationResult,
@@ -62,8 +63,6 @@ export const EXECUTION_NOT_RUNNING = "scheduler.execution.not_running";
 const NO_TELEMETRY_FAULTS = 0;
 const TELEMETRY_FLUSH_MS = 5000;
 const UNNAMED_WORKER = "unnamed";
-const FORBIDDEN = 403;
-const CONFLICT = 409;
 
 export interface MethodClaim {
   execution_id: string;
@@ -80,9 +79,9 @@ export interface MethodClaim {
 export function isExecutionEnd(result: OperationResult<unknown>): boolean {
   return (
     result.type === OperationResultType.Failure &&
-    ((result.status === FORBIDDEN &&
+    ((result.status === HttpStatus.Forbidden &&
       result.error.error.code === EXECUTION_PROOF_FAILED) ||
-      (result.status === CONFLICT &&
+      (result.status === HttpStatus.Conflict &&
         result.error.error.code === EXECUTION_NOT_RUNNING))
   );
 }

@@ -58,7 +58,6 @@ const COMMIT_STATUSES_ROUTE =
 const REQUIRED_STATUS_CHECKS_RULE = "required_status_checks";
 const EVENT_ID_PATTERN = /^(0|[1-9][0-9]*)$/;
 const MIN_JSON_LENGTH = 1;
-const REQUEST_TIMEOUT_STATUS = 408;
 const CAUSE_DEPTH_LIMIT = 4;
 const NO_TIME_LEFT_MS = 0;
 const MIN_SEGMENT_LENGTH = 1;
@@ -496,7 +495,7 @@ function statusClass(
       ? ResultClass.RetryableRefusal
       : ResultClass.UnknownOutcome;
   }
-  if (rateLimited || status === REQUEST_TIMEOUT_STATUS) {
+  if (rateLimited || status === HttpStatus.RequestTimeout) {
     return ResultClass.RetryableRefusal;
   }
   return ResultClass.FinalRefusal;

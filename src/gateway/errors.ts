@@ -29,18 +29,17 @@ export function respondError(error: unknown, requestId: string): Response {
   return Response.json(result.body, { status: result.status });
 }
 
-const UNAUTHORIZED_STATUS = 401;
 const UNAUTHORIZED_CODE = "gateway.authentication.unauthorized";
 const UNAUTHORIZED_MESSAGE = "Authentication required.";
 export const unauthorized = () =>
   new GatewayError(
-    UNAUTHORIZED_STATUS,
+    HttpStatus.Unauthorized,
     UNAUTHORIZED_CODE,
     UNAUTHORIZED_MESSAGE,
   );
 export class WorkerGroupEnded extends GatewayError {
   constructor() {
-    super(UNAUTHORIZED_STATUS, UNAUTHORIZED_CODE, UNAUTHORIZED_MESSAGE);
+    super(HttpStatus.Unauthorized, UNAUTHORIZED_CODE, UNAUTHORIZED_MESSAGE);
   }
 }
 export const JwtCause = {
