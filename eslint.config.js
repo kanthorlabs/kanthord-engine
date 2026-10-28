@@ -215,7 +215,20 @@ const valueNameMessage =
 const comparisonMessage =
   "Use a meaningfully named enum member or constant instead of a string or numeric literal in a comparison.";
 
+const sqlCheckPattern = String.raw`/\bCHECK\s*\(/`;
+const sqlIndexPattern = String.raw`/CREATE\s+INDEX/i`;
+const sqlCheckMessage =
+  "Declare no SQL CHECK constraint. The owning service validates the closed value set.";
+const sqlIndexMessage = "Declare only a unique index.";
+
 const syntaxRules = [
+  ...[
+    [sqlCheckPattern, sqlCheckMessage],
+    [sqlIndexPattern, sqlIndexMessage],
+  ].flatMap(([pattern, message]) => [
+    { selector: `Literal[value=${pattern}]`, message },
+    { selector: `TemplateElement[value.raw=${pattern}]`, message },
+  ]),
   {
     selector: `BinaryExpression[operator=/^(===|!==|==|!=|<|<=|>|>=)$/] > ${comparisonLiteral}`,
     message: comparisonMessage,
