@@ -400,16 +400,8 @@ export default tseslint.config(
                       "prompt-composer",
                       "prompt-render",
                       "prompt-templates",
-                      "prompt-source",
-                      "prompt-assets",
                       "pinned-layers",
                     ].join(",")}}.ts`,
-                  }),
-                },
-                {
-                  to: element("component", {
-                    captured: { name: "agent" },
-                    fileInternalPath: "hooks/**",
                   }),
                 },
                 {
