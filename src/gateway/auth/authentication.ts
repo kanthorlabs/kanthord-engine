@@ -41,6 +41,7 @@ import {
 } from "../errors.ts";
 const MILLISECONDS_PER_SECOND = 1000;
 const BEARER_PREFIX_LENGTH = 7;
+const NO_INSTANCES = 0;
 const clientIdentitySchema = identitySchema(CLIENT_IDENTITY_PREFIX);
 const instanceIdentitySchema = identitySchema(WORKER_INSTANCE_PREFIX);
 const connectionIdentitySchema = identitySchema(CONNECTION_PREFIX);
@@ -206,7 +207,15 @@ export class Authentication {
       resolved.resource_identity !== client.resourceIdentity
     )
       throw unauthorized();
-    if (resolved.placement === WorkerPlacement.Worker)
+    const registration = this.machines!.worker.findByClient(client.clientId);
+    const drained = resolved.worker_instances?.length === NO_INSTANCES;
+    if (drained && !registration) throw unauthorized();
+    const claimsInstance =
+      client.instanceId !== undefined || client.connectionId !== undefined;
+    if (
+      resolved.placement === WorkerPlacement.Worker ||
+      (drained && claimsInstance)
+    )
       this.refuseInstance(
         client.clientId,
         resolved.project_id,
@@ -215,12 +224,7 @@ export class Authentication {
         client.instanceId,
         client.connectionId,
       );
-    else if (
-      client.instanceId !== undefined ||
-      client.connectionId !== undefined
-    )
-      throw jwtRefused(JwtCause.ForbiddenClaim);
-    const registration = this.machines!.worker.findByClient(client.clientId);
+    else if (claimsInstance) throw jwtRefused(JwtCause.ForbiddenClaim);
     if (
       registration &&
       (registration.client_id !== client.clientId ||

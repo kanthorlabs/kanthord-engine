@@ -366,12 +366,6 @@ components:
                         type: integer
                         minimum: -9007199254740991
                         maximum: 9007199254740991
-                      placement:
-                        type: string
-                        enum:
-                          - server
-                          - container
-                          - worker
                       environment:
                         type: string
                         minLength: 1
@@ -752,12 +746,6 @@ components:
                             type: integer
                             minimum: -9007199254740991
                             maximum: 9007199254740991
-                          placement:
-                            type: string
-                            enum:
-                              - server
-                              - container
-                              - worker
                           environment:
                             type: string
                             minLength: 1
@@ -820,6 +808,7 @@ components:
                               required:
                                 - agent
                               additionalProperties: false
+                          placement: {}
                           worker_instances: {}
                           tags: {}
                         required:

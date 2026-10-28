@@ -145,8 +145,7 @@ export const COVERING_WORKER_BINDINGS = {
     kind: "worker",
     config: {
       worker: "coder@1",
-      placement: "server",
-      instance_count: 0,
+      worker_instances: [],
       tags: [],
     },
   },
@@ -154,8 +153,7 @@ export const COVERING_WORKER_BINDINGS = {
     kind: "worker",
     config: {
       worker: "reviewer@1",
-      placement: "server",
-      instance_count: 0,
+      worker_instances: [],
       tags: [],
     },
   },

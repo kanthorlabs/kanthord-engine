@@ -152,15 +152,13 @@ export const ProjectErrorCode = {
   WorkerEnvironmentUnknown: "project.bindings.worker.environment_unknown",
   WorkerInstanceCountRange: "project.bindings.worker.instance_count_range",
   WorkerResourceChanged: "project.bindings.worker.resource_changed",
-  WorkerPlacementChanged: "project.bindings.worker.placement_changed",
-  WorkerPlacementRequired: "project.bindings.worker.placement_required",
-  WorkerPlacementUnavailable: "project.bindings.worker.placement_unavailable",
   WorkerTagsInvalid: "project.bindings.worker.tags_invalid",
   WorkerInstancesRequired: "project.bindings.worker.instances_required",
   WorkerInstancesInvalid: "project.bindings.worker.instances_invalid",
   WorkerInstanceUnknown: "project.bindings.worker.instance_unknown",
   WorkerInstanceWorkerMismatch:
     "project.bindings.worker.instance_worker_mismatch",
+  WorkerInstanceShared: "project.bindings.worker.instance_shared",
   WorkerNodeUnmatched: "project.bindings.worker.node_unmatched",
 } as const;
 
@@ -239,20 +237,12 @@ export const WorkerPlacement = {
 } as const;
 export type WorkerPlacement =
   (typeof WorkerPlacement)[keyof typeof WorkerPlacement];
-export const StablePlacementIssue = {
-  ServerInContainer: "server_in_container",
-  RuntimeAbsent: "runtime_absent",
-  RuntimeRootful: "runtime_rootful",
-} as const;
-export type StablePlacementIssue =
-  (typeof StablePlacementIssue)[keyof typeof StablePlacementIssue];
 export const workerTagsSchema = z
   .array(tagSchema)
   .refine((keys) => new Set(keys).size === keys.length);
 const workerConfigFields = {
   worker: z.string().min(1),
   instance_count: z.number().int().optional(),
-  placement: z.enum(WorkerPlacement).optional(),
   environment: z.string().min(1).optional(),
   resource_budget: z
     .strictObject({
@@ -274,6 +264,7 @@ const workerConfigFields = {
 };
 export const workerConfigWriteSchema = z.strictObject({
   ...workerConfigFields,
+  placement: z.unknown().optional(),
   worker_instances: z.unknown().optional(),
   tags: z.unknown().optional(),
 });
@@ -306,12 +297,11 @@ export function bindingScope(config: {
 }
 export function effectiveInstanceCount(config: {
   instance_count?: number;
-  placement?: WorkerPlacement;
   worker_instances?: readonly string[];
 }): number {
-  return config.placement === WorkerPlacement.Worker
-    ? (config.worker_instances?.length ?? INSTANCE_COUNT_MIN)
-    : (config.instance_count ?? INSTANCE_COUNT_MIN);
+  return config.worker_instances === undefined
+    ? (config.instance_count ?? INSTANCE_COUNT_MIN)
+    : config.worker_instances.length;
 }
 export const storageConfigSchema = z.strictObject({
   available: z.boolean(),
@@ -1101,13 +1091,9 @@ export interface ProjectBindings {
 export type InstanceOf = (
   tx: Transaction,
   instanceName: string,
-) => { name: string; worker: string } | null;
+) => { name: string; worker: string; placement: WorkerPlacement } | null;
 
 export type BindingsChanged = (projectId: string) => void;
-
-export type PlacementStatusOf = (
-  placement: WorkerPlacement,
-) => Promise<{ available: boolean; reason: string | null }>;
 
 export type EndRegistrations = (
   tx: Transaction,

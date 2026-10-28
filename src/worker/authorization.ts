@@ -53,8 +53,9 @@ export function authorizeModelInference(
   )
     refused(AuthorizationRefusal.BindingMismatch);
   if (row.tombstone) refused(AuthorizationRefusal.BindingRemoved);
-  if (row.disabled) refused(AuthorizationRefusal.BindingDisabled);
   const agents = worker.declarationOf(row.worker_name)?.agent_names ?? [];
+  if (row.disabled && agents.length === NO_AGENTS)
+    refused(AuthorizationRefusal.BindingDisabled);
   const selections = dependencies.schedulerClaims.agentSelectionsOf(
     tx,
     execution.execution_id,

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { decode } from "hono/jwt";
-import { gatewayFixture } from "./test-support.ts";
+import { enableCoveringAgents, gatewayFixture } from "./test-support.ts";
 import { httpClient } from "../../gateway/client.ts";
 import { BindingKind, projectOperations } from "../../project/contract.ts";
 import { workerOperations } from "../../worker/contract.ts";
@@ -88,4 +88,55 @@ test("binding availability changes end real registrations atomically and count r
   const removed = await write(null);
   assert.ok(removed.type === OperationResultType.Completed);
   assert.equal(f.worker.registrations.findByClient(clientA), undefined);
+});
+
+test("a revision of a native binding to an empty instance list ends no registration and a removal ends them", async (t) => {
+  const f = await gatewayFixture(t);
+  await enableCoveringAgents({
+    KANTHORD_ENDPOINT: f.endpoint,
+    KANTHORD_TOKEN: f.token,
+  });
+  const workers = httpClient(workerOperations, f.endpoint, f.token);
+  const instance = await workers["instance.create"]({
+    params: {},
+    query: {},
+    body: { name: "server-1", worker: "coder@1", placement: "server" },
+  });
+  assert.ok(instance.type === OperationResultType.Completed);
+  const project = httpClient(projectOperations, f.endpoint, f.token);
+  const created = await project.create({
+    params: {},
+    query: {},
+    body: { name: "empty-list" },
+  });
+  assert.ok(created.type === OperationResultType.Completed);
+  const projectId = created.data.id;
+  let version = INITIAL_BINDING_VERSION;
+  const write = async (instances: string[] | null) => {
+    const written = await project["bindingSet.write"]({
+      params: { project_id: projectId },
+      query: {},
+      body: {
+        version,
+        bindings:
+          instances === null
+            ? {}
+            : {
+                main: {
+                  kind: BindingKind.Worker,
+                  config: { worker: "coder@1", worker_instances: instances },
+                },
+              },
+      },
+    });
+    assert.ok(written.type === OperationResultType.Completed);
+    version = written.data.binding_set_version;
+  };
+  const end = t.mock.method(f.worker, "endRegistrations");
+  await write(["server-1"]);
+  await write([]);
+  assert.equal(end.mock.callCount(), NO_INSTANCES);
+  await write(["server-1"]);
+  await write(null);
+  assert.equal(end.mock.callCount(), SINGLE_INSTANCE);
 });

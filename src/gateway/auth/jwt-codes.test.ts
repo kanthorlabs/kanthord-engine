@@ -24,6 +24,9 @@ const SECONDS_PER_HOUR = 3600;
 const MILLISECONDS_PER_SECOND = 1000;
 const WORKER_RESOURCE = `worker:kanthord:${TEST_WORKER_BINDING}`;
 const SERVER_RESOURCE = `worker:kanthord:${SERVER_BINDING}`;
+const UNAUTHORIZED_CODE = "gateway.authentication.unauthorized";
+const DRAINED_BINDING = "drained-binding";
+const DRAINED_RESOURCE = `worker:kanthord:${DRAINED_BINDING}`;
 
 function instanceLookups() {
   const base = fakeLookups();
@@ -41,6 +44,13 @@ function instanceLookups() {
             resource_identity: resourceIdentity,
             placement: WorkerPlacement.Worker,
             worker_instances: listed,
+          };
+        if (resourceIdentity === DRAINED_RESOURCE)
+          return {
+            project_id: projectId,
+            resource_identity: resourceIdentity,
+            placement: null,
+            worker_instances: [],
           };
         if (resourceIdentity === SERVER_RESOURCE)
           return {
@@ -93,14 +103,18 @@ async function fixtureOf(t: TestContext) {
     )
   ).token;
   const clientToken = async (
-    overrides: { resourceIdentity?: string; connectionId?: string } = {},
+    overrides: {
+      resourceIdentity?: string;
+      connectionId?: string;
+      clientId?: string;
+    } = {},
   ) =>
     (
       await generateInstanceClientJWT(
         fixture.config.master_key,
         fixture.config.gateway.auth.version,
         {
-          clientId: `client_identity_${ulid()}`,
+          clientId: overrides.clientId ?? `client_identity_${ulid()}`,
           projectId: TEST_PROJECT_ID,
           resourceIdentity: overrides.resourceIdentity ?? WORKER_RESOURCE,
           instanceId,
@@ -264,4 +278,35 @@ test("gateway.jwt.instance_not_listed refuses an instance that the binding does 
   subject.listed.splice(0, subject.listed.length, OTHER_INSTANCE_NAME);
   await subject.refuse(await subject.clientToken(), JwtCause.InstanceNotListed);
   assert.equal(subject.connections.has(subject.instanceId), false);
+});
+
+test("an instance client token of a group with no listed instance needs a live registration of the group", async (t) => {
+  const subject = await fixtureOf(t);
+  const clientId = `client_identity_${ulid()}`;
+  const token = await subject.clientToken({
+    resourceIdentity: DRAINED_RESOURCE,
+    clientId,
+  });
+  await assert.rejects(
+    subject.fixture.authentication.authenticate(`Bearer ${token}`),
+    (error: unknown) =>
+      error instanceof OperationError &&
+      error.status === HttpStatus.Unauthorized &&
+      error.code === UNAUTHORIZED_CODE,
+  );
+  subject.lookups.worker.registrations.set(clientId, {
+    client_id: clientId,
+    name: INSTANCE_NAME,
+    project_id: TEST_PROJECT_ID,
+    resource_identity: DRAINED_RESOURCE,
+    runtime_identity: `worker_registration_${ulid()}`,
+    registered_at: Date.now(),
+  });
+  const identity = await subject.fixture.authentication.authenticate(
+    `Bearer ${token}`,
+  );
+  assert.ok(isMachineIdentity(identity));
+  assert.equal(identity.instanceId, subject.instanceId);
+  subject.live.delete(subject.instanceId);
+  await subject.refuse(token, JwtCause.InstanceEnded);
 });

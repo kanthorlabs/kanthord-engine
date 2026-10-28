@@ -254,7 +254,6 @@ function storeFixture(t: TestContext, beforeWrite: () => void = () => {}) {
     sshAccessOf: () => ({}) as never,
     workerAgentsOf: unexpected,
     workerAgentView: unexpected,
-    placementStatus: unexpected,
     instanceOf: unexpected,
     endRegistrations: () => {},
     bindingsChanged: () => {},

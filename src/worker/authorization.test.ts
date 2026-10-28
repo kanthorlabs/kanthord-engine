@@ -138,10 +138,20 @@ test("Worker authorizes the pinned inference configuration and refuses each brok
       details: { reason: AuthorizationRefusal.BindingMismatch },
     });
   row.disabled = true;
+  assert.deepEqual(authorize(), [
+    {
+      credential: "anthro-2",
+      platform: "anthropic",
+      provider_id: "anthropic",
+      agent_provider: "override",
+    },
+  ]);
+  row.worker_name = "claude-code@1";
   assert.throws(authorize, {
     code: WorkerErrorCode.AuthorizationRefused,
     details: { reason: AuthorizationRefusal.BindingDisabled },
   });
+  row.worker_name = "coder@1";
   row.disabled = false;
   row.tombstone = true;
   assert.throws(authorize, {

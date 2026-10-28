@@ -62,6 +62,7 @@ import type { EnvironmentRuntime } from "../../project/environment-state.ts";
 import type { SlotDriver } from "./slot-driver.ts";
 import { llmOperations } from "../../llm/contract.ts";
 import { agentOperations } from "../../agent/contract.ts";
+import { workerOperations } from "../../worker/contract.ts";
 import { gatewayOperations, OWNER_INTAKE } from "../../gateway/contract.ts";
 import {
   HealthRegistry,
@@ -81,7 +82,6 @@ import {
 } from "../../intake/contract.ts";
 import { repositoryOperations } from "../../repository/contract.ts";
 import {
-  BINDING_ID_PREFIX,
   EnvironmentStatus,
   PROJECT_ID_PREFIX,
   projectOperations,
@@ -697,40 +697,6 @@ test("serve refuses a tracking.db that another migration text created", async (t
   assert.match(refused.stderr, RESET_INSTRUCTION);
 });
 
-test("serve refuses a stored hosted worker binding with no placement and names the binding", async (t) => {
-  const paths = layout(temporary(t));
-  createDatabase(paths.database, serverMigrations);
-  const store = new Store(paths.database);
-  store.transaction(({ database }) => {
-    const projectId = createIdentity(PROJECT_ID_PREFIX);
-    database
-      .prepare(
-        "INSERT INTO project_project (id, name, created_at) VALUES (?, ?, ?)",
-      )
-      .run(projectId, "planted", Date.now());
-    database
-      .prepare(
-        "INSERT INTO project_binding (id, project_id, name, resource_identity, revision, config, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-      )
-      .run(
-        createIdentity(BINDING_ID_PREFIX),
-        projectId,
-        "general",
-        "worker:kanthord:general",
-        1,
-        JSON.stringify({ worker: "coder@1", instance_count: 1 }),
-        Date.now(),
-      );
-  });
-  store.close();
-  const refused = await serveOnce(paths.env, t.signal);
-  assert.equal(refused.status, ExitCode.Failure);
-  assert.match(refused.stderr, /system\.database\.binding_placement_missing/);
-  assert.match(refused.stderr, /general/);
-  assert.match(refused.stderr, /docs\/reference\/upgrade\.md/);
-  assert.match(refused.stderr, RESET_INSTRUCTION);
-});
-
 test("serve starts with redirected stdout without issuing a JWT; SIGTERM drains and releases the database", async (t) => {
   requirePiTools();
   const paths = layout(temporary(t));
@@ -1247,10 +1213,28 @@ async function containerSetup(
   });
   const call = humanCaller(setup.fixture);
   const params = { project_id: setup.project_id };
+  const created = new Set<string>();
+  const containerInstances = async (instanceCount: number) => {
+    const names = Array.from(
+      { length: instanceCount },
+      (_value, index) => `container-${index + 1}`,
+    );
+    for (const name of names) {
+      if (created.has(name)) continue;
+      created.add(name);
+      await call(workerOperations["instance.create"], {
+        params: {},
+        query: {},
+        body: { name, worker: "coder@1", placement: "container" },
+      });
+    }
+    return names;
+  };
   const writeContainer = async (
     instanceCount: number,
     environment?: { image: string },
   ) => {
+    const instances = await containerInstances(instanceCount);
     const current = await call(projectOperations["bindingSet.get"], {
       params,
       query: {},
@@ -1277,8 +1261,7 @@ async function containerSetup(
             kind: "worker",
             config: {
               worker: "coder@1",
-              instance_count: instanceCount,
-              placement: "container",
+              worker_instances: instances,
               entries: [{ agent: "swe@1", ...WORKER_DEFAULTS }],
             },
           },
@@ -1319,7 +1302,7 @@ test(
     const { setup, writeContainer } = await containerSetup(t, {
       environmentRuntime,
     });
-    await writeContainer(NO_ITEMS, { image: STORED_BASE_IMAGE });
+    await writeContainer(1, { image: STORED_BASE_IMAGE });
     await until(
       () => builds.length,
       (count) => count > NO_ITEMS,
@@ -1346,7 +1329,7 @@ test(
   { timeout: CONTAINER_TEST_TIMEOUT_MS },
   async (t) => {
     const { fake, setup, writeContainer } = await containerSetup(t);
-    await writeContainer(NO_ITEMS, { image: STORED_BASE_IMAGE });
+    await writeContainer(1, { image: STORED_BASE_IMAGE });
     const builds = await until(
       () => fake.commands().filter((command) => command[0] === Verb.Build),
       (found) => found.length > NO_ITEMS,

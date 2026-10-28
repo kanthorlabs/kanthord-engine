@@ -472,19 +472,13 @@ function classify(
       insertion: { name, resourceIdentity, config },
     };
   if (kindOf(previous.resource_identity) === BindingKind.Worker) {
-    const stored = previous.config as { worker: string; placement?: string };
-    const submitted = entry.config as { worker: string; placement?: string };
+    const stored = previous.config as { worker: string };
+    const submitted = entry.config as { worker: string };
     if (stored.worker !== submitted.worker)
       throw new OperationError(
         HttpStatus.Conflict,
         ProjectErrorCode.WorkerResourceChanged,
         "A binding cannot change its worker.",
-      );
-    if (stored.placement !== submitted.placement)
-      throw new OperationError(
-        HttpStatus.Conflict,
-        ProjectErrorCode.WorkerPlacementChanged,
-        "A binding cannot change its placement.",
       );
   }
   if (previous.resource_identity !== resourceIdentity)
