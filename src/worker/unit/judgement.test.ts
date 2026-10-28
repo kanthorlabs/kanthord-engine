@@ -243,11 +243,11 @@ test("failed and unrun rationale names the command and cause", () => {
   );
   assert.match(
     instruction,
-    /conflict for two stated requirements or criteria that the work cannot meet together\. For example, a criterion needs a change to a file that the requirement forbids\. For a conflict, write the reason as the two requirements in quotes, joined by " vs ": "requirement A" vs "requirement B"\. Write every reason in full/,
+    /conflict for two stated requirements or criteria that the work cannot meet together\. For example, a criterion or a verification needs a change to a file that the requirement forbids\. For a conflict, write the reason as the two requirements in quotes, joined by " vs ": "requirement A" vs "requirement B"\. Write every reason in full/,
   );
   assert.match(
     instruction,
-    /A changed file that the requirement forbids and that no criterion needs is an unmet stated item\./,
+    /A changed file that the requirement forbids and that no criterion or verification needs is an unmet stated item\./,
   );
   assert.equal(
     instruction.match(/ground conflict|conflict for/g)?.length,
@@ -325,6 +325,10 @@ test("the task revision carries the output of the failed verification when it ha
     /Verification 1 `npm test` failed with exit code 1\./,
   );
   assert.match(withOutput, /```text\n✖ shutdown test timed out\n```$/);
+  assert.match(
+    withOutput,
+    /^Revise the task work to satisfy its criterion and verifications\. When a verification passes only with a change to a file that the requirement forbids, make the smallest such change\. Verification 1/,
+  );
   const withoutOutput = taskRevisionInstruction(
     SHIPPED_TEMPLATES,
     verification,
