@@ -93,7 +93,6 @@ import {
   gatewayMigrations,
 } from "../../gateway/index.ts";
 import {
-  enforceBindingPlacements,
   ENVIRONMENT_SECRET_PLATFORMS,
   EnvironmentAgent,
   type EnvironmentModelRuntimeFactory,
@@ -110,7 +109,6 @@ import {
 import { mintServiceIdentity } from "../../kernel/service-mint.ts";
 import {
   agentPromptContribution,
-  isHostedWorker,
   toolDeclarations,
   workerMigrations,
   WorkerService,
@@ -937,7 +935,6 @@ export function composeServices(options: {
     endRegistrations: (tx, projectId, resourceIdentity, now) =>
       worker.endRegistrations(tx, projectId, resourceIdentity, now),
     bindingsChanged: (projectId) => worker.bindingsChanged(projectId),
-    placementStatus: (placement) => worker.placementStatus(placement),
     instanceOf: (tx, name) => worker.instanceOf(tx, name),
     createMission: (tx, pid, actor) => mission.createMission(tx, pid, actor),
     liveNodesPinning: (tx, bid) => mission.liveNodesPinning(tx, bid),
@@ -1235,7 +1232,6 @@ export class Server implements Service {
         trackingDatabaseMigrations,
       );
       this.releases.push(() => trackingStore.close());
-      enforceBindingPlacements(this.store, isHostedWorker);
       enforceMasterKey(this.store, config.master_key, this.path);
       this.shutdown.signal.throwIfAborted();
       const {

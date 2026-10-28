@@ -19,9 +19,12 @@ import {
 import {
   COVERING_WORKER_BINDINGS,
   createFakeSshCredential,
+  createInstancesByCli,
   enableCoveringAgents,
   gatewayFixture,
+  instanceNames,
 } from "./test-support.ts";
+import { InstancePlacement } from "../../worker/contract.ts";
 import {
   ExecutionEnd,
   ROOT_SPAN_OPERATION,
@@ -162,6 +165,14 @@ async function setup(t: TestContext, short = false) {
     "--name",
     "execution",
   ]);
+  await createInstancesByCli(read, instanceNames("general", 1));
+  if (!short)
+    await createInstancesByCli(
+      read,
+      instanceNames("reviewer", 1),
+      InstancePlacement.Server,
+      "reviewer@1",
+    );
   const bindings = {
     repo: {
       kind: "repository",
@@ -178,8 +189,7 @@ async function setup(t: TestContext, short = false) {
       kind: "worker",
       config: {
         worker: "coder@1",
-        placement: "server",
-        instance_count: 1,
+        worker_instances: instanceNames("general", 1),
         entries: [{ agent: "swe@1", ...CONFIGURATION }],
         ...(short ? { resource_budget: { turns: 1, wall_time_ms: 1 } } : {}),
       },
@@ -190,8 +200,7 @@ async function setup(t: TestContext, short = false) {
             kind: "worker",
             config: {
               worker: "reviewer@1",
-              placement: "server",
-              instance_count: 1,
+              worker_instances: instanceNames("reviewer", 1),
               entries: [{ agent: "re@1", ...CONFIGURATION }],
             },
           },

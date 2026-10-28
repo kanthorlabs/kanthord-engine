@@ -18,10 +18,12 @@ import {
 import {
   bareRepository,
   createFakeSshCredential,
+  createInstancesByCli,
   fakeGitHub,
   fakeS3,
   gatewayFixture,
   inProcessWorker,
+  instanceNames,
   mappedTransport,
   remoteHead,
 } from "./test-support.ts";
@@ -43,6 +45,7 @@ import {
   type Outcome,
 } from "../../mission/contract.ts";
 import { ClaimState, type ExecutionRecord } from "../../scheduler/contract.ts";
+import { InstancePlacement } from "../../worker/contract.ts";
 
 const GIT_TIMEOUT_MS = 60000;
 const MAIN_REF = "refs/heads/main";
@@ -198,12 +201,16 @@ async function setupInternal(t: TestContext) {
       },
     },
   });
-  const worker = (name: string, agent: string) => ({
+  const worker = async (binding: string, name: string, agent: string) => ({
     kind: "worker",
     config: {
       worker: name,
-      placement: "server",
-      instance_count: SINGLE_INSTANCE,
+      worker_instances: await createInstancesByCli(
+        cli.read,
+        instanceNames(binding, SINGLE_INSTANCE),
+        InstancePlacement.Server,
+        name,
+      ),
       entries: [{ agent, ...DEFAULTS }],
     },
   });
@@ -223,8 +230,8 @@ async function setupInternal(t: TestContext) {
           credential: "store",
         },
       },
-      general: worker(GENERAL, "swe@1"),
-      review: worker(REVIEWER, "re@1"),
+      general: await worker("general", GENERAL, "swe@1"),
+      review: await worker("review", REVIEWER, "re@1"),
     },
   });
   const examine = await createJourneyNode(

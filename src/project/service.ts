@@ -96,7 +96,6 @@ import {
   LIST_LIMIT_MAX,
   type LiveNodesPinning,
   LS_REMOTE_TIMEOUT_MS,
-  type PlacementStatusOf,
   type ProjectBindings,
   ProjectErrorCode,
   projectOperations,
@@ -109,7 +108,6 @@ import {
   RESOURCE_TARGET_KIND_REPOSITORY,
   type SchedulerWakeup,
   SSH_CREDENTIAL_PLATFORM,
-  StablePlacementIssue,
   type StalePin,
   STORAGE_PLATFORM,
   type StorageBinding,
@@ -315,17 +313,7 @@ function refuseInvalidTags(name: string, tags: unknown): void {
   }
   assert.ok(workerTagsSchema.safeParse(tags).success);
 }
-function refuseInstanceCount(
-  name: string,
-  config: { instance_count?: number; worker_instances?: unknown },
-): void {
-  if (config.worker_instances !== undefined)
-    throw new OperationError(
-      HttpStatus.BadRequest,
-      ProjectErrorCode.WorkerFieldForbidden,
-      "Only a binding at the worker placement lists worker instances.",
-      { binding: name, field: WorkerField.WorkerInstances },
-    );
+function refuseInstanceCount(config: { instance_count?: number }): void {
   if (
     config.instance_count === undefined ||
     config.instance_count < INSTANCE_COUNT_MIN ||
@@ -383,12 +371,54 @@ function requireBinding(tx: Transaction, projectId: string, bindingId: string) {
   return binding;
 }
 
+function listedInstances(
+  tx: Transaction,
+  instanceOf: InstanceOf,
+  config: { worker_instances?: readonly string[] },
+) {
+  return (config.worker_instances ?? []).flatMap(
+    (name) => instanceOf(tx, name) ?? [],
+  );
+}
+
+function listsContainer(
+  tx: Transaction,
+  instanceOf: InstanceOf,
+  config: { worker_instances?: readonly string[] },
+): boolean {
+  return listedInstances(tx, instanceOf, config).some(
+    ({ placement }) => placement === WorkerPlacement.Container,
+  );
+}
+
+function transitionalPlacement(
+  tx: Transaction,
+  instanceOf: InstanceOf,
+  config: { worker_instances?: readonly string[] },
+): WorkerPlacement | null {
+  const first = config.worker_instances?.[FIRST_INDEX];
+  return first === undefined
+    ? null
+    : (instanceOf(tx, first)?.placement ?? null);
+}
+
+function endsGroup(config: {
+  instance_count?: number;
+  worker_instances?: readonly string[];
+}): boolean {
+  return (
+    config.worker_instances === undefined &&
+    effectiveInstanceCount(config) === INSTANCE_COUNT_MIN
+  );
+}
+
 function resolveEnvironment(
   tx: Transaction,
-  config: { placement?: WorkerPlacement; environment?: string },
+  instanceOf: InstanceOf,
+  config: { worker_instances?: readonly string[]; environment?: string },
   projectId: string,
 ): string | null {
-  if (config.placement !== WorkerPlacement.Container) return null;
+  if (!listsContainer(tx, instanceOf, config)) return null;
   const repositories = Array.from(
     readCurrentBindingSet(tx, projectId).entries(),
   ).filter(
@@ -406,23 +436,28 @@ function resolveEnvironment(
 }
 
 function refuseWorkerEnvironments(
+  tx: Transaction,
+  instanceOf: InstanceOf,
   submission: ReadonlyMap<string, BindingEdit>,
 ): void {
   const repositories = Array.from(submission.values()).filter(
     (binding) => binding.kind === BindingKind.Repository,
   ).length;
   for (const [name, binding] of submission) {
-    if (
-      binding.kind !== BindingKind.Worker ||
-      binding.config.placement !== WorkerPlacement.Container
-    )
-      continue;
+    if (binding.kind !== BindingKind.Worker) continue;
     const { environment } = binding.config;
-    if (environment === undefined && repositories > SINGLE_REPOSITORY)
+    const worker_instances = workerInstancesSchema.parse(
+      binding.config.worker_instances ?? [],
+    );
+    if (
+      environment === undefined &&
+      repositories > SINGLE_REPOSITORY &&
+      listsContainer(tx, instanceOf, { worker_instances })
+    )
       throw new OperationError(
         HttpStatus.BadRequest,
         ProjectErrorCode.WorkerEnvironmentRequired,
-        "A container worker binding names one repository binding when the project holds several.",
+        "A worker binding that lists a container instance names one repository binding when the project holds several.",
         { binding: name },
       );
     if (
@@ -438,8 +473,60 @@ function refuseWorkerEnvironments(
   }
 }
 
+function containerInstancesOf(
+  tx: Transaction,
+  instanceOf: InstanceOf,
+  config: { worker_instances?: readonly string[] },
+): string[] {
+  return listedInstances(tx, instanceOf, config)
+    .filter(({ placement }) => placement === WorkerPlacement.Container)
+    .map(({ name }) => name);
+}
+
+function refuseSharedContainerInstances(
+  tx: Transaction,
+  instanceOf: InstanceOf,
+  projectId: string,
+  submission: ReadonlyMap<string, BindingEdit>,
+): void {
+  const listedBy = new Map<string, { project_id: string; binding: string }>();
+  for (const stored of readCurrentBindings(tx)) {
+    if (
+      stored.project_id === projectId ||
+      kindOf(stored.resource_identity) !== BindingKind.Worker
+    )
+      continue;
+    const config = workerConfigSchema.parse(stored.config);
+    for (const instance of containerInstancesOf(tx, instanceOf, config))
+      listedBy.set(instance, {
+        project_id: stored.project_id,
+        binding: stored.name,
+      });
+  }
+  for (const [name, binding] of submission) {
+    if (binding.kind !== BindingKind.Worker) continue;
+    const worker_instances = workerInstancesSchema.parse(
+      binding.config.worker_instances ?? [],
+    );
+    for (const instance of containerInstancesOf(tx, instanceOf, {
+      worker_instances,
+    })) {
+      const listed = listedBy.get(instance);
+      if (listed)
+        throw new OperationError(
+          HttpStatus.Conflict,
+          ProjectErrorCode.WorkerInstanceShared,
+          "A container instance is listed by one worker binding only.",
+          { binding: name, instance, listed_by: listed },
+        );
+      listedBy.set(instance, { project_id: projectId, binding: name });
+    }
+  }
+}
+
 function workerRowOf(
   tx: Transaction,
+  instanceOf: InstanceOf,
   row: StoredBinding,
   projectName: string,
 ): WorkerBindingRow {
@@ -452,8 +539,8 @@ function workerRowOf(
     worker_name: config.worker,
     instance_count: effectiveInstanceCount(config),
     worker_instances: config.worker_instances ?? [],
-    placement: config.placement ?? null,
-    environment: resolveEnvironment(tx, config, row.project_id),
+    placement: transitionalPlacement(tx, instanceOf, config),
+    environment: resolveEnvironment(tx, instanceOf, config, row.project_id),
     generation:
       readGeneration(tx, row.project_id, row.resource_identity) ??
       NO_GENERATION,
@@ -563,7 +650,6 @@ export interface Dependencies {
   workerAgentView: WorkerAgentViewFn;
   endRegistrations: EndRegistrations;
   bindingsChanged: BindingsChanged;
-  placementStatus: PlacementStatusOf;
   instanceOf: InstanceOf;
   wakeup: SchedulerWakeup;
   environmentRuntime: EnvironmentRuntime;
@@ -628,7 +714,6 @@ export class ProjectService implements Service, ProjectBindings {
   private readonly workerAgentView: WorkerAgentViewFn;
   private readonly endRegistrations: EndRegistrations;
   private readonly bindingsChanged: BindingsChanged;
-  private readonly placementStatus: PlacementStatusOf;
   private readonly instanceOf: InstanceOf;
   private readonly wakeup: SchedulerWakeup;
   private readonly environments: ProjectEnvironments;
@@ -656,7 +741,6 @@ export class ProjectService implements Service, ProjectBindings {
     this.workerAgentView = dependencies.workerAgentView;
     this.endRegistrations = dependencies.endRegistrations;
     this.bindingsChanged = dependencies.bindingsChanged;
-    this.placementStatus = dependencies.placementStatus;
     this.instanceOf = dependencies.instanceOf;
     this.wakeup = dependencies.wakeup;
     this.environments = new ProjectEnvironments({
@@ -1013,7 +1097,10 @@ export class ProjectService implements Service, ProjectBindings {
       config.worker,
       agent,
       entry,
-      bindingScope(config),
+      bindingScope({
+        ...config,
+        placement: transitionalPlacement(tx, this.instanceOf, config),
+      }),
     );
     assert.ok(view, "Declared agents must have a worker view.");
     assert.ok(project.binding_set_version >= BINDING_SET_INITIAL_VERSION);
@@ -1097,7 +1184,6 @@ export class ProjectService implements Service, ProjectBindings {
   ) {
     const submission = uniqueSubmission(body.bindings);
     const saved = this.savedBindingSet(projectId, body.version);
-    const unavailable = await this.unavailablePlacement(projectId, submission);
     for (const [name, binding] of submission) {
       if (binding.kind !== BindingKind.Repository) continue;
       refuseRepositoryAction(binding.config);
@@ -1111,8 +1197,13 @@ export class ProjectService implements Service, ProjectBindings {
       assert.equal(submission.size, Object.keys(body.bindings).length);
       for (const [name, binding] of submission)
         this.validateBinding(tx, name, binding);
-      refuseWorkerEnvironments(submission);
-      if (unavailable) throw unavailable;
+      refuseWorkerEnvironments(tx, this.instanceOf, submission);
+      refuseSharedContainerInstances(
+        tx,
+        this.instanceOf,
+        projectId,
+        submission,
+      );
       const before = new Set(
         this.unmatchedClaims(tx, projectId).map(unmatchedKey),
       );
@@ -1171,37 +1262,6 @@ export class ProjectService implements Service, ProjectBindings {
         };
       })
       .sort(byNodeThenName);
-  }
-  private async unavailablePlacement(
-    projectId: string,
-    submission: ReturnType<typeof uniqueSubmission>,
-  ): Promise<OperationError | null> {
-    const live = this.operationalStore.transaction((tx) =>
-      readCurrentBindingSet(tx, projectId),
-    );
-    const firstAdded = (placement: WorkerPlacement) =>
-      Array.from(submission)
-        .flatMap(([name, binding]) =>
-          binding.kind === BindingKind.Worker &&
-          binding.config.placement === placement &&
-          !live.has(name)
-            ? [name]
-            : [],
-        )
-        .at(FIRST_INDEX);
-    const first = firstAdded(WorkerPlacement.Container);
-    if (first === undefined) return null;
-    const { available, reason } = await this.placementStatus(
-      WorkerPlacement.Container,
-    );
-    const stable = Object.values<string>(StablePlacementIssue);
-    if (available || reason === null || !stable.includes(reason)) return null;
-    return new OperationError(
-      HttpStatus.Conflict,
-      ProjectErrorCode.WorkerPlacementUnavailable,
-      "The server cannot run the container placement.",
-      { binding: first, placement: WorkerPlacement.Container, reason },
-    );
   }
   private savedBindingSet(
     projectId: string,
@@ -1282,8 +1342,7 @@ export class ProjectService implements Service, ProjectBindings {
       assert.ok(latest);
       if (
         latest.removed_at !== null ||
-        effectiveInstanceCount(workerConfigSchema.parse(latest.config)) ===
-          INSTANCE_COUNT_MIN
+        endsGroup(workerConfigSchema.parse(latest.config))
       )
         this.endRegistrations(tx, row.project_id, row.resource_identity, now);
     }
@@ -1374,32 +1433,19 @@ export class ProjectService implements Service, ProjectBindings {
           { binding: name, field },
         );
       }
-      refuseInstanceCount(name, config);
+      refuseInstanceCount(config);
       return;
     }
-    if (config.placement === undefined)
-      throw new OperationError(
-        HttpStatus.BadRequest,
-        ProjectErrorCode.WorkerPlacementRequired,
-        "A hosted worker binding states its placement.",
-        { binding: name },
-      );
-    if (
-      config.environment !== undefined &&
-      config.placement !== WorkerPlacement.Container
-    )
+    for (const field of [WorkerField.Placement, WorkerField.InstanceCount]) {
+      if (config[field] === undefined) continue;
       throw new OperationError(
         HttpStatus.BadRequest,
         ProjectErrorCode.WorkerFieldForbidden,
-        "Only a binding at the container placement names an environment.",
-        { binding: name, field: WorkerField.Environment },
+        "A native worker binding lists worker_instances and states no placement and no instance_count.",
+        { binding: name, field },
       );
-    const instances =
-      config.placement === WorkerPlacement.Worker
-        ? this.validateWorkerInstances(tx, name, config)
-        : [];
-    if (config.placement !== WorkerPlacement.Worker)
-      refuseInstanceCount(name, config);
+    }
+    const instances = this.validateWorkerInstances(tx, name, config);
     const entries = new Map(
       (config.entries ?? []).map(({ agent, ...entry }) => [agent, entry]),
     );
@@ -1417,7 +1463,9 @@ export class ProjectService implements Service, ProjectBindings {
         config.worker,
         entries.get(agent) ?? null,
         bindingHolders({
-          placement: config.placement,
+          placement: transitionalPlacement(tx, this.instanceOf, {
+            worker_instances: instances,
+          }),
           worker_instances: instances,
         }),
       );
@@ -1427,18 +1475,11 @@ export class ProjectService implements Service, ProjectBindings {
     name: string,
     config: typeof workerConfigWriteSchema._output,
   ): string[] {
-    if (config.instance_count !== undefined)
-      throw new OperationError(
-        HttpStatus.BadRequest,
-        ProjectErrorCode.WorkerFieldForbidden,
-        "The worker placement holds worker_instances in place of instance_count.",
-        { binding: name, field: WorkerField.InstanceCount },
-      );
     if (config.worker_instances === undefined)
       throw new OperationError(
         HttpStatus.BadRequest,
         ProjectErrorCode.WorkerInstancesRequired,
-        "A binding at the worker placement lists its worker instances.",
+        "A native worker binding lists its worker instances.",
         { binding: name },
       );
     const instances = refuseInvalidInstances(name, config.worker_instances);
@@ -1477,7 +1518,10 @@ export class ProjectService implements Service, ProjectBindings {
             binding_id: binding.id,
             worker_name: config.worker,
             entry: entries.get(agentName) ?? null,
-            holders: bindingHolders(config),
+            holders: bindingHolders({
+              ...config,
+              placement: transitionalPlacement(tx, this.instanceOf, config),
+            }),
           },
         ];
       },
@@ -1579,9 +1623,14 @@ export class ProjectService implements Service, ProjectBindings {
       resource_identity: binding.resource_identity,
       tombstone: resolution.tombstone,
       disabled: resolution.disabled,
-      placement: config.placement ?? null,
+      placement: transitionalPlacement(tx, this.instanceOf, config),
       worker_instances: config.worker_instances ?? [],
-      environment: resolveEnvironment(tx, config, binding.project_id),
+      environment: resolveEnvironment(
+        tx,
+        this.instanceOf,
+        config,
+        binding.project_id,
+      ),
       entries: config.entries ?? [],
       resource_budget: config.resource_budget ?? null,
     };
@@ -1648,36 +1697,41 @@ export class ProjectService implements Service, ProjectBindings {
     return targetOf(group, facts);
   }
   private bindingFactsOf(projectId: string): BindingFacts {
-    const bindings = this.operationalStore.transaction((tx) =>
-      Array.from(readCurrentBindingSet(tx, projectId).values()),
-    );
-    return {
-      repositories: bindings
-        .filter(
-          (binding) =>
-            kindOf(binding.resource_identity) === BindingKind.Repository,
-        )
-        .map((binding) => ({
-          binding_id: binding.id,
-          binding_name: binding.name,
-          resource_identity: binding.resource_identity,
-          environment_secrets:
-            repositoryConfigSchema.parse(binding.config).environment_secrets ??
-            {},
-        })),
-      workers: bindings
-        .filter(
-          (binding) => kindOf(binding.resource_identity) === BindingKind.Worker,
-        )
-        .map((binding) => {
-          const config = workerConfigSchema.parse(binding.config);
-          return {
-            placement: config.placement ?? null,
-            external: config.placement === undefined,
-            environment: config.environment ?? null,
-          };
-        }),
-    };
+    return this.operationalStore.transaction((tx) => {
+      const bindings = Array.from(
+        readCurrentBindingSet(tx, projectId).values(),
+      );
+      return {
+        repositories: bindings
+          .filter(
+            (binding) =>
+              kindOf(binding.resource_identity) === BindingKind.Repository,
+          )
+          .map((binding) => ({
+            binding_id: binding.id,
+            binding_name: binding.name,
+            resource_identity: binding.resource_identity,
+            environment_secrets:
+              repositoryConfigSchema.parse(binding.config)
+                .environment_secrets ?? {},
+          })),
+        workers: bindings
+          .filter(
+            (binding) =>
+              kindOf(binding.resource_identity) === BindingKind.Worker,
+          )
+          .map((binding) => {
+            const config = workerConfigSchema.parse(binding.config);
+            return {
+              placements: listedInstances(tx, this.instanceOf, config).map(
+                ({ placement }) => placement,
+              ),
+              external: config.worker_instances === undefined,
+              environment: config.environment ?? null,
+            };
+          }),
+      };
+    });
   }
   private workerEnvironmentOf(
     projectId: string,
@@ -1773,8 +1827,11 @@ export class ProjectService implements Service, ProjectBindings {
     const atContainer = current.some(
       (entry) =>
         kindOf(entry.resource_identity) === BindingKind.Worker &&
-        workerConfigSchema.parse(entry.config).placement ===
-          WorkerPlacement.Container,
+        listsContainer(
+          tx,
+          this.instanceOf,
+          workerConfigSchema.parse(entry.config),
+        ),
     );
     if (!atContainer) return false;
     const forms = new Set(
@@ -1801,7 +1858,12 @@ export class ProjectService implements Service, ProjectBindings {
     if (!row || kindOf(row.resource_identity) !== BindingKind.Worker)
       return null;
     assert.equal(row.project_id, projectId);
-    return workerRowOf(tx, row, requireProject(tx, projectId).name);
+    return workerRowOf(
+      tx,
+      this.instanceOf,
+      row,
+      requireProject(tx, projectId).name,
+    );
   }
   workerBindingsOf(
     tx: Transaction,
@@ -1823,7 +1885,7 @@ export class ProjectService implements Service, ProjectBindings {
       projectNames.set(row.project_id, projectName);
       return [
         {
-          ...workerRowOf(tx, row, projectName),
+          ...workerRowOf(tx, this.instanceOf, row, projectName),
           project_id: row.project_id,
           resource_identity: row.resource_identity,
         },
@@ -1855,14 +1917,16 @@ export class ProjectService implements Service, ProjectBindings {
       assert.equal(row.project_id, projectId);
       assert.equal(row.resource_identity, resourceIdentity);
       const config = workerConfigSchema.parse(row.config);
-      if (effectiveInstanceCount(config) === INSTANCE_COUNT_MIN) return null;
+      if (endsGroup(config)) return null;
       const tombstone = readLatestTombstone(tx, projectId, resourceIdentity);
       if (tombstone && tombstone.created_at > issuedAt) return null;
       return {
         project_id: projectId,
         resource_identity: resourceIdentity,
-        placement: config.placement ?? null,
-        worker_instances: config.worker_instances ?? [],
+        placement: transitionalPlacement(tx, this.instanceOf, config),
+        ...(config.worker_instances === undefined
+          ? {}
+          : { worker_instances: config.worker_instances }),
       };
     });
   }
@@ -1886,7 +1950,7 @@ export class ProjectService implements Service, ProjectBindings {
         return false;
       if (row.removed_at !== null) return true;
       const config = workerConfigSchema.parse(row.config);
-      if (effectiveInstanceCount(config) === INSTANCE_COUNT_MIN) return true;
+      if (endsGroup(config)) return true;
       const tombstone = readLatestTombstone(tx, projectId, resourceIdentity);
       return tombstone !== null && tombstone.created_at > issuedAt;
     });

@@ -35,6 +35,7 @@ import {
   WorkPullKind,
 } from "../../scheduler/contract.ts";
 import {
+  InstancePlacement,
   type RepositoryTransport,
   workerOperations,
 } from "../../worker/contract.ts";
@@ -52,8 +53,10 @@ import {
 import { environment, kanthord } from "./cli-test-support.ts";
 import {
   createFakeSshCredential,
+  createInstancesByCli,
   fakeGitHub,
   gatewayFixture,
+  instanceNames,
 } from "./test-support.ts";
 
 const SUCCESSFUL_EXIT = 0;
@@ -158,12 +161,14 @@ async function methodsFixture(t: TestContext) {
     "--name",
     "methods",
   ]);
-  const worker = {
+  const worker = async (binding: string) => ({
     worker: "coder@1",
-    placement: "server",
-    instance_count: SINGLE_INSTANCE,
+    worker_instances: await createInstancesByCli(
+      read,
+      instanceNames(binding, SINGLE_INSTANCE),
+    ),
     entries: [{ agent: "swe@1", ...DEFAULTS }],
-  };
+  });
   const repository = (name: string) => ({
     available: true,
     platform: "github",
@@ -194,11 +199,11 @@ async function methodsFixture(t: TestContext) {
       gated: pullRequestBinding("gated"),
       api: pullRequestBinding("api"),
       web: pullRequestBinding("web"),
-      general: { kind: "worker", config: worker },
+      general: { kind: "worker", config: await worker("general") },
       lab: {
         kind: "worker",
         config: {
-          ...worker,
+          ...(await worker("lab")),
           resource_budget: { turns: SINGLE_TURN, wall_time_ms: 600000 },
         },
       },
@@ -206,8 +211,12 @@ async function methodsFixture(t: TestContext) {
         kind: "worker",
         config: {
           worker: "reviewer@1",
-          placement: "server",
-          instance_count: SINGLE_INSTANCE,
+          worker_instances: await createInstancesByCli(
+            read,
+            instanceNames("review", SINGLE_INSTANCE),
+            InstancePlacement.Server,
+            "reviewer@1",
+          ),
           entries: [{ agent: "re@1", ...DEFAULTS }],
         },
       },

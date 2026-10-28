@@ -134,7 +134,7 @@ export interface RepositoryGroup {
 }
 
 export interface WorkerBindingFacts {
-  placement: WorkerPlacement | null;
+  placements: readonly WorkerPlacement[];
   external: boolean;
   environment: string | null;
 }
@@ -256,7 +256,7 @@ export function targetOf(
   if (
     workers.some(
       (worker) =>
-        worker.placement === WorkerPlacement.Container && names(worker),
+        worker.placements.includes(WorkerPlacement.Container) && names(worker),
     )
   )
     return EnvironmentTarget.Image;
@@ -264,7 +264,10 @@ export function targetOf(
     workers.length > NO_WORKER_BINDING &&
     workers.every(
       (worker) =>
-        worker.placement === WorkerPlacement.Worker || worker.external,
+        worker.external ||
+        worker.placements.every(
+          (placement) => placement === WorkerPlacement.Worker,
+        ),
     )
   )
     return EnvironmentTarget.Remote;

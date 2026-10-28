@@ -163,8 +163,7 @@ async function detectionFixture(
   const project = await createProject(fixture, {
     name: "environment-detection-gate",
     placement,
-    instanceCount:
-      placement === WorkerPlacement.Container ? SINGLE_SLOT : NO_ITEMS,
+    instanceCount: SINGLE_SLOT,
     ...(placement === WorkerPlacement.Container
       ? { workerEnvironment: REPOSITORY_BINDING }
       : {}),

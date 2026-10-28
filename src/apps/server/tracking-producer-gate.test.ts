@@ -31,11 +31,13 @@ import {
   TRANSITION_SPAN_OPERATION,
   TransitionRule,
 } from "../../tracking/contract.ts";
-import { workerOperations } from "../../worker/contract.ts";
+import { InstancePlacement, workerOperations } from "../../worker/contract.ts";
 import {
+  createInstances,
   enableCoveringAgents,
   gatewayFixture,
   humanCaller,
+  instanceNames,
 } from "./test-support.ts";
 import {
   attributed,
@@ -132,6 +134,13 @@ async function setup(t: TestContext) {
     ...EMPTY,
     body: { name: "tracking" },
   });
+  await createInstances(fixture, instanceNames(STEPS_BINDING, 1));
+  await createInstances(
+    fixture,
+    instanceNames(REVIEWER_BINDING, 1),
+    InstancePlacement.Server,
+    "reviewer@1",
+  );
   await human(projectOperations["bindingSet.write"], {
     params: { project_id: project.id },
     query: {},
@@ -142,8 +151,7 @@ async function setup(t: TestContext) {
           kind: "worker",
           config: {
             worker: "coder@1",
-            placement: "server",
-            instance_count: 1,
+            worker_instances: instanceNames(STEPS_BINDING, 1),
             entries: [{ agent: "swe@1", ...CONFIGURATION }],
           },
         },
@@ -151,8 +159,7 @@ async function setup(t: TestContext) {
           kind: "worker",
           config: {
             worker: "reviewer@1",
-            placement: "server",
-            instance_count: 1,
+            worker_instances: instanceNames(REVIEWER_BINDING, 1),
             entries: [{ agent: "re@1", ...CONFIGURATION }],
           },
         },

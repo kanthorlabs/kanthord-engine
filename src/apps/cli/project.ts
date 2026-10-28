@@ -60,8 +60,7 @@ const BINDING_APPLY_EXAMPLE = {
       kind: "worker",
       config: {
         worker: "coder@1",
-        placement: "server",
-        instance_count: 1,
+        worker_instances: ["coder-1"],
         entries: [{ agent: "swe@1", reasoning_effort: "high" }],
       },
     },

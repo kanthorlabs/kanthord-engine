@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { StablePlacementIssue, WorkerPlacement } from "../project/contract.ts";
+import { WorkerPlacement } from "../project/contract.ts";
 import { EnvironmentSource } from "../kernel/devcontainer.ts";
 import {
   ACTION_REQUEST_TOOL_NAME,
@@ -43,17 +43,6 @@ test("the instance placement and the binding placement hold the same values", ()
   );
   assert.deepEqual(POOL_PLACEMENTS, ["server", "container"]);
 });
-test("the stable placement reasons of the binding write are placement issues", () => {
-  const issues: readonly string[] = Object.values(PlacementIssue);
-  for (const reason of Object.values(StablePlacementIssue))
-    assert.ok(issues.includes(reason));
-  assert.ok(
-    !(Object.values(StablePlacementIssue) as string[]).includes(
-      PlacementIssue.RuntimeFailed,
-    ),
-  );
-});
-
 test("the placement status schema accepts an available and an unavailable answer", () => {
   assert.deepEqual(
     placementStatusSchema.parse(alwaysAvailable(InstancePlacement.Worker)),

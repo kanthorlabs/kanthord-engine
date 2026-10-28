@@ -538,6 +538,21 @@ async function setup(
       public_key: pair.public_key,
     });
   }
+  const serverInstances =
+    setupOptions.workerName || setupOptions.workerInstances
+      ? []
+      : Array.from(
+          { length: setupOptions.instanceCount ?? 1 },
+          (_value, index) => `server-${index + 1}`,
+        );
+  for (const name of serverInstances)
+    completed(
+      await call(workerOperations["instance.create"], {
+        params: {},
+        query: {},
+        body: { name, worker: "coder@1", placement: InstancePlacement.Server },
+      }),
+    );
   if (instanceKeys.size)
     completed(
       await call(llmOperations.create, {
@@ -571,52 +586,55 @@ async function setup(
       prompts: { "swe@1": "Follow repository conventions." },
     },
   };
-  const bindingSet = completed(
-    await call(projectOperations["bindingSet.write"], {
-      params: { project_id: projectId },
-      query: {},
-      body: {
-        version: 1,
-        bindings: {
-          ...COVERING_WORKER_BINDINGS,
-          repo: repository,
-          ...(setupOptions.extraRepository
-            ? {
-                other: {
-                  ...repository,
-                  config: {
-                    ...repository.config,
-                    address: "git@github.com:owner/other.git",
-                  },
-                },
-              }
-            : {}),
-          general: {
-            kind: "worker",
+  const bindingsOf = (generalInstances: readonly string[]) => ({
+    ...COVERING_WORKER_BINDINGS,
+    repo: repository,
+    ...(setupOptions.extraRepository
+      ? {
+          other: {
+            ...repository,
             config: {
-              worker: setupOptions.workerName ?? "coder@1",
-              placement: setupOptions.workerName
-                ? undefined
-                : setupOptions.workerInstances
-                  ? "worker"
-                  : "server",
-              instance_count: setupOptions.workerInstances
-                ? undefined
-                : (setupOptions.instanceCount ?? 1),
-              worker_instances: setupOptions.workerInstances,
-              resource_budget: setupOptions.resourceBudget && {
-                turns: setupOptions.resourceBudget.turns,
-                wall_time_ms: setupOptions.resourceBudget.wall_time_ms,
-              },
-              entries:
-                setupOptions.workerName || setupOptions.noEntries
-                  ? undefined
-                  : [{ agent: "swe@1", ...configuration }],
+              ...repository.config,
+              address: "git@github.com:owner/other.git",
             },
           },
+        }
+      : {}),
+    general: {
+      kind: "worker" as const,
+      config: {
+        worker: setupOptions.workerName ?? "coder@1",
+        ...(setupOptions.workerName
+          ? { instance_count: setupOptions.instanceCount ?? 1 }
+          : { worker_instances: [...generalInstances] }),
+        resource_budget: setupOptions.resourceBudget && {
+          turns: setupOptions.resourceBudget.turns,
+          wall_time_ms: setupOptions.resourceBudget.wall_time_ms,
         },
+        entries:
+          setupOptions.workerName || setupOptions.noEntries
+            ? undefined
+            : [{ agent: "swe@1", ...configuration }],
       },
-    }),
+    },
+  });
+  let bindingSetVersion = 1;
+  const writeBindings = async (generalInstances: readonly string[]) => {
+    const written = completed(
+      await call(projectOperations["bindingSet.write"], {
+        params: { project_id: projectId },
+        query: {},
+        body: {
+          version: bindingSetVersion,
+          bindings: bindingsOf(generalInstances),
+        },
+      }),
+    );
+    bindingSetVersion = written.binding_set_version;
+    return written;
+  };
+  const bindingSet = await writeBindings(
+    setupOptions.workerInstances ?? serverInstances,
   );
   const mission = completed(
     await call(missionOperations.get, {
@@ -887,6 +905,7 @@ async function setup(
     handover,
     report,
     release,
+    reviseInstances: writeBindings,
     read,
     open,
     sign,
@@ -1220,6 +1239,31 @@ for (const adapter of ["direct", "http"] as const) {
     );
     for (const secret of [SECRET, REFRESHED, ROTATED])
       assert.equal(h.f.logs.join("").includes(secret), false);
+  });
+
+  test(`${adapter} a revision to an empty instance list during an execution keeps its handover and inference grant and a new pull gets no work`, async (t) => {
+    const h = await setup(t, adapter);
+    await h.reviseInstances([]);
+    assert.equal(
+      h.open(completed(await h.handover())).items[0]!.credential_id,
+      h.credentialId,
+    );
+    completed(await h.release());
+    const pull = completed(
+      await h.call(
+        schedulerOperations.workPull,
+        {
+          params: {},
+          query: {},
+          body: {
+            resource_identity: GENERAL_RESOURCE,
+            runtime_identity: h.runtime_identity,
+          },
+        },
+        h.token,
+      ),
+    );
+    assert.equal(pull.kind, WorkPullKind.NoWork);
   });
 
   test(`${adapter} failed execution proof reserves no key and malformed reports expose no secret`, async (t) => {

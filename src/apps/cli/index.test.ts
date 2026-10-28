@@ -678,7 +678,7 @@ const REPOSITORY_CONFIG = {
 };
 const WORKER_BINDING = {
   kind: "worker",
-  config: { worker: "coder@1", placement: "server", instance_count: 1 },
+  config: { worker: "coder@1", worker_instances: ["coder-1"] },
 };
 const SECRET_BINDING_SET = {
   version: 4,

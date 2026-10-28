@@ -437,6 +437,50 @@ test("an ended worker group throws WorkerGroupEnded on authentication and rechec
   ]);
 });
 
+test("a native group with no listed instance admits a client identity with a live registration and refuses one without", async (t) => {
+  const machines = fakeLookups();
+  t.mock.method(machines.project, "resolveWorkerGroup", async () => ({
+    project_id: TEST_PROJECT_ID,
+    resource_identity: `worker:kanthord:${TEST_WORKER_BINDING}`,
+    placement: null,
+    worker_instances: [],
+  }));
+  const fixture = await authenticationFixture(t, machines);
+  const token = await fixture.machineToken(
+    TEST_PROJECT_ID,
+    TEST_WORKER_BINDING,
+  );
+  await assert.rejects(
+    fixture.authentication.authenticate(`Bearer ${token}`),
+    isPlainUnauthorized,
+  );
+  const [, payload] = token.split(".");
+  const clientId = JSON.parse(
+    Buffer.from(payload!, "base64url").toString("utf8"),
+  ).sub as string;
+  const runtimeIdentity = "worker_registration_01ARZ3NDEKTSV4RRFFQ69G5FAV";
+  machines.worker.registrations.set(clientId, {
+    client_id: clientId,
+    name: MACHINE_NAME,
+    project_id: TEST_PROJECT_ID,
+    resource_identity: `worker:kanthord:${TEST_WORKER_BINDING}`,
+    runtime_identity: runtimeIdentity,
+    registered_at: Date.now(),
+  });
+  const identity = await fixture.authentication.authenticate(`Bearer ${token}`);
+  assert.ok(isMachineIdentity(identity));
+  assert.equal(identity.runtimeIdentity, runtimeIdentity);
+  await fixture.authentication.recheck(identity, background);
+  machines.worker.registrations.set(clientId, {
+    ...machines.worker.registrations.get(clientId)!,
+    resource_identity: "worker:kanthord:other",
+  });
+  await assert.rejects(
+    fixture.authentication.authenticate(`Bearer ${token}`),
+    isPlainUnauthorized,
+  );
+});
+
 test("a failure that is no ended group keeps the plain 401", async (t) => {
   const machines = fakeLookups();
   const fixture = await authenticationFixture(t, machines);

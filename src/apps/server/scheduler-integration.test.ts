@@ -8,7 +8,7 @@ import { httpClient } from "../../gateway/client.ts";
 import { llmOperations } from "../../llm/contract.ts";
 import { repositoryOperations } from "../../repository/contract.ts";
 import { projectOperations } from "../../project/contract.ts";
-import { workerOperations } from "../../worker/contract.ts";
+import { InstancePlacement, workerOperations } from "../../worker/contract.ts";
 import { agentOperations } from "../../agent/contract.ts";
 import {
   Intent,
@@ -41,6 +41,7 @@ import {
   FAKE_SSH_CREDENTIAL,
   FAKE_SSH_HOST,
   gatewayFixture,
+  instanceNames,
 } from "./test-support.ts";
 
 const FIRST_ATTEMPT = 1;
@@ -194,6 +195,18 @@ async function setup(t: TestContext, adapter: Adapter, path?: string) {
       body: { name: "execution" },
     }),
   ).id;
+  for (const [binding, count, worker] of [
+    ["general", 2, "coder@1"],
+    ["reviewer", 1, "reviewer@1"],
+  ] as const)
+    for (const name of instanceNames(binding, count))
+      completed(
+        await call(workerOperations["instance.create"], {
+          params: {},
+          query: {},
+          body: { name, worker, placement: InstancePlacement.Server },
+        }),
+      );
   const bindingSet = completed(
     await call(projectOperations["bindingSet.write"], {
       params: { project_id: projectId },
@@ -216,8 +229,7 @@ async function setup(t: TestContext, adapter: Adapter, path?: string) {
             kind: "worker",
             config: {
               worker: "coder@1",
-              placement: "server",
-              instance_count: 2,
+              worker_instances: instanceNames("general", 2),
               entries: [{ agent: "swe@1", ...CONFIGURATION }],
             },
           },
@@ -225,8 +237,7 @@ async function setup(t: TestContext, adapter: Adapter, path?: string) {
             kind: "worker",
             config: {
               worker: "reviewer@1",
-              placement: "server",
-              instance_count: 1,
+              worker_instances: instanceNames("reviewer", 1),
               entries: [{ agent: "re@1", ...CONFIGURATION }],
             },
           },

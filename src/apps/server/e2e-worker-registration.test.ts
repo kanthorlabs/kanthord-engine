@@ -16,9 +16,16 @@ import type {
   registrationRecordSchema,
   workerOperations,
 } from "../../worker/contract.ts";
-import { RegistrationActivity } from "../../worker/contract.ts";
+import {
+  InstancePlacement,
+  RegistrationActivity,
+} from "../../worker/contract.ts";
 import { environment, kanthord, kanthordTerminal } from "./cli-test-support.ts";
-import { gatewayFixture } from "./test-support.ts";
+import {
+  createInstancesByCli,
+  gatewayFixture,
+  instanceNames,
+} from "./test-support.ts";
 
 const SUCCESS = 0;
 const FAILURE = 1;
@@ -127,8 +134,7 @@ function bindings(instanceCount: number) {
       kind: "worker",
       config: {
         worker: NATIVE,
-        placement: "server",
-        instance_count: instanceCount,
+        worker_instances: instanceNames("general", instanceCount),
         entries: [{ agent: AGENT, ...CONFIGURATION }],
       },
     },
@@ -174,6 +180,12 @@ async function setup(t: TestContext) {
     ),
   );
   assert.equal(enabled.revision, FIRST_REVISION);
+  await createInstancesByCli(
+    async (args) => success(await kanthord(args, H)),
+    instanceNames("general", SINGLE_INSTANCE),
+    InstancePlacement.Server,
+    NATIVE,
+  );
   const initial = file(directory, "v1.json", {
     version: FIRST_REVISION,
     bindings: bindings(SINGLE_INSTANCE),
@@ -435,9 +447,9 @@ test(
       assert.notEqual(ridB, ridA);
       refusal(await kanthord(["worker", "register"], f.B), ErrorCode.Placement);
     });
-    await t.test("E02.19 disabling binding ends registration", async () => {
+    await t.test("E02.19 removing binding ends registration", async () => {
       assert.equal(
-        await apply(f, SECOND_BINDING_VERSION, SUCCESS),
+        await apply(f, SECOND_BINDING_VERSION, null),
         THIRD_BINDING_VERSION,
       );
       assert.deepEqual(success(await kanthord(list, f.H)), {
@@ -449,13 +461,19 @@ test(
         ErrorCode.Unauthorized,
       );
     });
-    await t.test("E02.20 reenable admits a new identity", async () => {
+    await t.test("E02.20 re-adding admits a new identity", async () => {
       assert.equal(
         await apply(f, THIRD_BINDING_VERSION, SINGLE_INSTANCE),
         FOURTH_BINDING_VERSION,
       );
+      await delay(TOKEN_DELAY);
+      const reissued = {
+        ...f.H,
+        KANTHORD_TOKEN: (await f.fixture.slotClient(f.project_id, BINDING))
+          .token,
+      };
       ridB2 = success<Registration>(
-        await kanthord(["worker", "register"], f.A),
+        await kanthord(["worker", "register"], reissued),
       ).runtime_identity;
       assert.notEqual(ridB2, ridB);
     });

@@ -28,6 +28,7 @@ import {
 } from "../../project/environment-state.ts";
 import { ExecutionStopReason } from "../../scheduler/contract.ts";
 import { trackingOperations } from "../../tracking/contract.ts";
+import { InstancePlacement } from "../../worker/contract.ts";
 import { until } from "./cli-test-support.ts";
 import {
   fakeContainerHost,
@@ -61,7 +62,7 @@ import {
   worker,
   WORKER_BINDING,
 } from "./environment-test-support.ts";
-import { humanCaller } from "./test-support.ts";
+import { createInstances, humanCaller, instanceNames } from "./test-support.ts";
 
 const TEST_TIMEOUT_MS = 120000;
 const CONTAINER_IMAGE = "kanthord-test";
@@ -144,7 +145,7 @@ const RELEASE_STOP = {
 };
 const REVIEWER = {
   kind: "worker",
-  config: { worker: "reviewer@1", placement: "server", instance_count: 0 },
+  config: { worker: "reviewer@1", worker_instances: [] },
 };
 
 interface CacheVolume {
@@ -408,32 +409,45 @@ function repositoryBinding(
   };
 }
 
-function containerWorker(instanceCount: number, environment: string) {
+async function containerWorker(
+  fixture: Fixture,
+  binding: string,
+  environment: string,
+  instanceCount = SINGLE_ITEM,
+) {
   return {
     kind: "worker",
     config: {
       worker: "coder@1",
-      placement: "container",
-      instance_count: instanceCount,
+      worker_instances: await createInstances(
+        fixture,
+        instanceNames(binding, instanceCount),
+        InstancePlacement.Container,
+      ),
       environment,
       entries: [{ agent: "swe@1", ...CONFIGURATION }],
     },
   };
 }
 
-function secretBindings() {
+async function secretBindings(fixture: Fixture) {
   return {
     [REPOSITORY_BINDING]: repositoryBinding(
       "git@github.com:owner/repo.git",
       STORED_ENVIRONMENT,
       { [REGISTRY_VARIABLE]: REGISTRY_CREDENTIAL },
     ),
-    [WORKER_BINDING]: containerWorker(SLOT_COUNT, REPOSITORY_BINDING),
+    [WORKER_BINDING]: await containerWorker(
+      fixture,
+      WORKER_BINDING,
+      REPOSITORY_BINDING,
+      SLOT_COUNT,
+    ),
     [REVIEWER_BINDING]: REVIEWER,
   };
 }
 
-function mixedBindings() {
+async function mixedBindings(fixture: Fixture) {
   return {
     [NODE_REPOSITORY]: repositoryBinding("git@github.com:owner/node.git", {
       image: NODE_IMAGE,
@@ -441,8 +455,12 @@ function mixedBindings() {
     [PYTHON_REPOSITORY]: repositoryBinding("git@github.com:owner/python.git", {
       image: PYTHON_IMAGE,
     }),
-    [NODE_WORKER]: containerWorker(0, NODE_REPOSITORY),
-    [PYTHON_WORKER]: containerWorker(0, PYTHON_REPOSITORY),
+    [NODE_WORKER]: await containerWorker(fixture, NODE_WORKER, NODE_REPOSITORY),
+    [PYTHON_WORKER]: await containerWorker(
+      fixture,
+      PYTHON_WORKER,
+      PYTHON_REPOSITORY,
+    ),
     [REVIEWER_BINDING]: REVIEWER,
   };
 }
@@ -707,7 +725,11 @@ test(
     const call = humanCaller(fixture);
     await createSecret(fixture, SECRET);
     const projectId = await createEmptyProject(fixture, "environment-l3-gate");
-    const written = await writeBindings(fixture, projectId, secretBindings());
+    const written = await writeBindings(
+      fixture,
+      projectId,
+      await secretBindings(fixture),
+    );
     const repositoryId = written.bindings[REPOSITORY_BINDING]!.id;
     const project = { id: projectId, repositoryId };
     const first = await settledItem(t, fixture, projectId);
@@ -924,18 +946,16 @@ test(
     await t.test(
       "the removal of the repository binding removes the cache volume",
       async () => {
-        const base = secretBindings();
         await writeBindings(fixture, projectId, {
           [WORKER_BINDING]: {
             kind: "worker",
             config: {
               worker: "coder@1",
-              placement: "container",
-              instance_count: 0,
+              worker_instances: [],
               entries: [{ agent: "swe@1", ...CONFIGURATION }],
             },
           },
-          [REVIEWER_BINDING]: base[REVIEWER_BINDING],
+          [REVIEWER_BINDING]: REVIEWER,
         });
         await until(
           () => volumeCalled(l3, Subject.Remove, cacheName),
@@ -956,7 +976,11 @@ test(
     const projectId = await createEmptyProject(fixture, "environment-l3-mixed");
     const release = l3.hold();
     try {
-      const written = await writeBindings(fixture, projectId, mixedBindings());
+      const written = await writeBindings(
+        fixture,
+        projectId,
+        await mixedBindings(fixture),
+      );
       const bindingIds = [NODE_REPOSITORY, PYTHON_REPOSITORY].map(
         (name) => written.bindings[name]!.id,
       );

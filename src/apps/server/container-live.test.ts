@@ -32,7 +32,7 @@ import {
   systemRuntimeHost,
 } from "./container-runtime.ts";
 import { slotClientIdentity } from "./slot-identity.ts";
-import { humanCaller } from "./test-support.ts";
+import { createInstances, humanCaller, instanceNames } from "./test-support.ts";
 import {
   WORKER_DEFAULTS,
   workerAcceptance,
@@ -216,7 +216,17 @@ async function containerPool(t: TestContext) {
   });
   const call = humanCaller(setup.fixture);
   const params = { project_id: setup.project_id };
+  const containerInstance = instanceNames(BINDING, 1);
+  let created = false;
   const setCount = async (instanceCount: number) => {
+    if (instanceCount > NO_ITEMS && !created) {
+      created = true;
+      await createInstances(
+        setup.fixture,
+        containerInstance,
+        InstancePlacement.Container,
+      );
+    }
     const current = await call(projectOperations["bindingSet.get"], {
       params,
       query: {},
@@ -239,8 +249,8 @@ async function containerPool(t: TestContext) {
             kind: "worker",
             config: {
               worker: "coder@1",
-              instance_count: instanceCount,
-              placement: InstancePlacement.Container,
+              worker_instances:
+                instanceCount > NO_ITEMS ? containerInstance : [],
               entries: [{ agent: "swe@1", ...WORKER_DEFAULTS }],
             },
           },

@@ -44,9 +44,11 @@ import { environment, kanthord, kanthordTerminal } from "./cli-test-support.ts";
 import {
   COVERING_WORKER_BINDINGS,
   createFakeSshCredential,
+  createInstancesByCli,
   enableCoveringAgents,
   FAKE_SSH_CREDENTIAL,
   gatewayFixture,
+  instanceNames,
 } from "./test-support.ts";
 
 const SUCCESS = 0;
@@ -216,8 +218,10 @@ async function resources(c: ReturnType<typeof cli>) {
         kind: "worker",
         config: {
           worker: "coder@1",
-          placement: "server",
-          instance_count: SINGLE_INSTANCE,
+          worker_instances: await createInstancesByCli(
+            c.read,
+            instanceNames("general", SINGLE_INSTANCE),
+          ),
           entries: [{ agent: "swe@1", ...CONFIGURATION }],
         },
       },

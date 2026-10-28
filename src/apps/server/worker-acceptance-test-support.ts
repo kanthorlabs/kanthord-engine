@@ -26,6 +26,8 @@ export const WORKER_DEFAULTS = {
   reasoning_effort: "off",
 } as const;
 
+export const serverInstanceName = (index: number) => `server-${index + 1}`;
+
 export async function workerAcceptance(
   t: TestContext,
   host = false,
@@ -98,6 +100,16 @@ export async function workerAcceptance(
         secret_access_key: "test_secret_key",
       },
     });
+  await read([
+    "worker",
+    "instance",
+    "create",
+    serverInstanceName(0),
+    "--worker",
+    "coder@1",
+    "--placement",
+    "server",
+  ]);
   const project = await read<{ id: string }>([
     "project",
     "create",
@@ -138,8 +150,7 @@ export async function workerAcceptance(
         kind: "worker",
         config: {
           worker: "coder@1",
-          placement: "server",
-          instance_count: 1,
+          worker_instances: [serverInstanceName(0)],
           entries: [{ agent: "swe@1", ...WORKER_DEFAULTS }],
         },
       },

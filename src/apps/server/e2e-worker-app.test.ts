@@ -298,7 +298,6 @@ async function liveInstance(t: TestContext) {
             kind: "worker",
             config: {
               worker: INSTANCE_WORKER,
-              placement: "worker",
               worker_instances: [INSTANCE_NAME],
               tags: [],
             },

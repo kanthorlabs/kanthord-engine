@@ -316,7 +316,7 @@ it cannot acquire a chosen node or authorize its own claim.
    declared node state and the [match](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/scheduler-service.md#match).
    A claimant admits a node when its worker declares the `intent` of the node
    and the `tags` of its worker binding include every tag of the node.
-   A worker binding at the `container` placement claims only the nodes that name the repository binding of its `environment` key. A container slot thus stays idle while no claimable node names that repository binding, and `instance_busy_ratio` shows this idle time.
+   A worker binding that lists a `container` instance claims only the nodes that name the repository binding of its `environment` key. A container slot thus stays idle while no claimable node names that repository binding, and `instance_busy_ratio` shows this idle time.
    The match reads the pinned revision of an open attempt or the current revision before the first claim.
    The claim walk skips each job that the claimant does not admit.
    The claim skips a node whose repository binding holds an environment that is not `none` or `ready`.

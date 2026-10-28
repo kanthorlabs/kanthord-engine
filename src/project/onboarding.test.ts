@@ -207,22 +207,22 @@ const NOTHING: GroupResolution = {
 };
 
 const container = (environment: string | null): WorkerBindingFacts => ({
-  placement: WorkerPlacement.Container,
+  placements: [WorkerPlacement.Container],
   external: false,
   environment,
 });
 const server: WorkerBindingFacts = {
-  placement: WorkerPlacement.Server,
+  placements: [WorkerPlacement.Server],
   external: false,
   environment: null,
 };
 const remoteWorker: WorkerBindingFacts = {
-  placement: WorkerPlacement.Worker,
+  placements: [WorkerPlacement.Worker],
   external: false,
   environment: null,
 };
 const external: WorkerBindingFacts = {
-  placement: null,
+  placements: [],
   external: true,
   environment: null,
 };
@@ -760,6 +760,44 @@ test("targetOf answers remote when every worker binding is at the worker placeme
     targetOf(APP, facts([APP], [remoteWorker, server])),
     EnvironmentTarget.Host,
   );
+});
+
+test("targetOf answers image for a binding that lists a container instance next to other placements", () => {
+  const mixed: WorkerBindingFacts = {
+    placements: [
+      WorkerPlacement.Server,
+      WorkerPlacement.Container,
+      WorkerPlacement.Worker,
+    ],
+    external: false,
+    environment: "app",
+  };
+  assert.equal(targetOf(APP, facts([APP], [mixed])), EnvironmentTarget.Image);
+  assert.equal(
+    targetOf(DOCS, facts([APP, DOCS], [mixed])),
+    EnvironmentTarget.Host,
+  );
+});
+
+test("targetOf answers remote when every listed instance is at the worker placement", () => {
+  const several: WorkerBindingFacts = {
+    placements: [WorkerPlacement.Worker, WorkerPlacement.Worker],
+    external: false,
+    environment: null,
+  };
+  assert.equal(
+    targetOf(APP, facts([APP], [several])),
+    EnvironmentTarget.Remote,
+  );
+});
+
+test("targetOf answers host when a listed instance is at the server placement", () => {
+  const mixed: WorkerBindingFacts = {
+    placements: [WorkerPlacement.Worker, WorkerPlacement.Server],
+    external: false,
+    environment: null,
+  };
+  assert.equal(targetOf(APP, facts([APP], [mixed])), EnvironmentTarget.Host);
 });
 
 test("targetOf answers host with no worker binding", () => {

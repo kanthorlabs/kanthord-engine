@@ -14,17 +14,19 @@ import {
   ChangeKind,
   PROJECT_ID_PREFIX,
   REPOSITORY_PLATFORM,
-  WorkerPlacement,
 } from "../../project/contract.ts";
+import { InstancePlacement } from "../../worker/contract.ts";
 import { type AgentEnablement, AgentErrorCode } from "../../agent/contract.ts";
 import { environment, kanthord } from "./cli-test-support.ts";
 import type { SshAccess } from "../../repository/index.ts";
 import {
   createFakeSshCredential,
+  createInstancesByCli,
   FAKE_GITHUB_HOST_KEY,
   FAKE_SSH_CREDENTIAL,
   FAKE_SSH_HOST,
   gatewayFixture,
+  instanceNames,
 } from "./test-support.ts";
 import { createIdempotencyKey } from "../../kernel/identity.ts";
 
@@ -37,6 +39,7 @@ const NO_OUTPUT = "";
 const ROOT = "/";
 const JSON_SUFFIX = ".json";
 const SINGLE_INSTANCE = 1;
+const WORKER_INSTANCES = instanceNames("general", SINGLE_INSTANCE);
 const INITIAL_BINDING_VERSION = 1;
 const FIRST_REVISION = 1;
 const SINGLE_ITEM = 1;
@@ -90,8 +93,7 @@ const WORKER_BINDING = {
   kind: BindingKind.Worker,
   config: {
     worker: WORKER,
-    placement: WorkerPlacement.Server,
-    instance_count: SINGLE_INSTANCE,
+    worker_instances: WORKER_INSTANCES,
     entries: [{ agent: AGENT, ...CONFIGURATION }],
   },
 };
@@ -182,6 +184,12 @@ async function setup(
   };
   assert.ok(env.KANTHORD_ENDPOINT);
   assert.ok(env.KANTHORD_TOKEN);
+  await createInstancesByCli(
+    async (args) => success(await kanthord(args, env)),
+    WORKER_INSTANCES,
+    InstancePlacement.Server,
+    WORKER,
+  );
   return { directory, env };
 }
 
@@ -585,8 +593,7 @@ test("E05.16 tuning entry without an enablement is refused", async (t) => {
         kind: BindingKind.Worker,
         config: {
           worker: WORKER,
-          placement: "server",
-          instance_count: SINGLE_INSTANCE,
+          worker_instances: WORKER_INSTANCES,
           entries: [{ agent: AGENT, model_identifier: SONNET }],
         },
       },
@@ -675,8 +682,7 @@ test("E05.19 changing defaults that invalidate a tuning entry is refused atomica
         kind: BindingKind.Worker,
         config: {
           worker: WORKER,
-          placement: "server",
-          instance_count: SINGLE_INSTANCE,
+          worker_instances: WORKER_INSTANCES,
           entries: [{ agent: AGENT, ...entry }],
         },
       },

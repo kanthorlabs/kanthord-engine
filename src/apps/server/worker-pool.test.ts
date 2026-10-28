@@ -3,7 +3,7 @@ import { existsSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { test, type TestContext } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
-import { ProjectErrorCode, projectOperations } from "../../project/contract.ts";
+import { projectOperations } from "../../project/contract.ts";
 import { requirePiTools, temporary } from "../../kernel/test-support.ts";
 import { HttpStatus } from "../../kernel/http.ts";
 import {
@@ -21,6 +21,7 @@ import { humanCaller } from "./test-support.ts";
 import { threadEnvironment } from "./thread-driver.ts";
 import { POOL_BACKOFF_INITIAL_MS } from "./worker-pool.ts";
 import {
+  serverInstanceName,
   WORKER_DEFAULTS,
   workerAcceptance,
 } from "./worker-acceptance-test-support.ts";
@@ -39,12 +40,11 @@ const POOL_TEST_TIMEOUT = 120000;
 const TOMBSTONE_SETTLE_MS = 1100;
 const READY_MESSAGE = "Worker application ready";
 const FAILED_MESSAGE = "worker.pool.instance_failed";
-const LIMIT_MESSAGE = "worker.pool.slot_limit";
 
-async function serverPool(t: TestContext, count: number, slotLimit?: number) {
+async function serverPool(t: TestContext, count: number) {
   requirePiTools();
   const stateDirectory = temporary(t);
-  const setup = await workerAcceptance(t, true, { stateDirectory, slotLimit });
+  const setup = await workerAcceptance(t, true, { stateDirectory });
   const call = humanCaller(setup.fixture);
   const params = { project_id: setup.project_id };
   const started = t.mock.method(setup.fixture.workerPool, "start");
@@ -65,12 +65,27 @@ async function serverPool(t: TestContext, count: number, slotLimit?: number) {
       },
     });
   };
-  const worker = (instanceCount: number) => ({
+  const created = new Set([serverInstanceName(0)]);
+  const instancesOf = async (instanceCount: number) => {
+    const names = Array.from({ length: instanceCount }, (_value, index) =>
+      serverInstanceName(index),
+    );
+    for (const name of names) {
+      if (created.has(name)) continue;
+      created.add(name);
+      await call(workerOperations["instance.create"], {
+        params: {},
+        query: {},
+        body: { name, worker: "coder@1", placement: InstancePlacement.Server },
+      });
+    }
+    return names;
+  };
+  const worker = (names: readonly string[]) => ({
     kind: "worker",
     config: {
       worker: "coder@1",
-      instance_count: instanceCount,
-      placement: InstancePlacement.Server,
+      worker_instances: [...names],
       entries: [{ agent: "swe@1", ...WORKER_DEFAULTS }],
     },
   });
@@ -81,7 +96,8 @@ async function serverPool(t: TestContext, count: number, slotLimit?: number) {
       ),
     );
   await remove();
-  await rewrite((bindings) => ({ ...bindings, [BINDING]: worker(count) }));
+  const initial = await instancesOf(count);
+  await rewrite((bindings) => ({ ...bindings, [BINDING]: worker(initial) }));
   await delay(TOMBSTONE_SETTLE_MS);
   const instances = () =>
     call(workerOperations["registration.list"], {
@@ -89,8 +105,10 @@ async function serverPool(t: TestContext, count: number, slotLimit?: number) {
       query: { project_id: setup.project_id },
       body: null,
     }).then((page) => page.items);
-  const setCount = (instanceCount: number) =>
-    rewrite((bindings) => ({ ...bindings, [BINDING]: worker(instanceCount) }));
+  const setCount = async (instanceCount: number) => {
+    const names = await instancesOf(instanceCount);
+    return rewrite((bindings) => ({ ...bindings, [BINDING]: worker(names) }));
+  };
   const waitFor = (size: number) =>
     until(instances, (items) => items.length === size, t.signal);
   const slots = () => started.mock.calls.map((call) => call.arguments[0]);
@@ -227,7 +245,11 @@ test(
     assert.equal(shrunk[0]!.client_id, first[0]!.client_id);
     assert.equal(shrunk[0]!.runtime_identity, first[0]!.runtime_identity);
     await f.setCount(0);
-    await f.waitFor(0);
+    await until(
+      () => f.fixture.worker.registrations.findByClient(first[0]!.client_id!),
+      (registration) => registration === undefined,
+      t.signal,
+    );
     await f.settled();
     await assertCleanExits(launch.mock.calls.map((call) => call.result!));
   },
@@ -303,45 +325,6 @@ test(
     await f.waitFor(TWO_INSTANCES);
     await f.fixture.worker.stopPool();
     await f.waitFor(0);
-  },
-);
-
-test(
-  "a slot above the server slot limit stays unstarted and is logged",
-  { timeout: POOL_TEST_TIMEOUT },
-  async (t) => {
-    const f = await serverPool(t, TWO_INSTANCES, ONE_INSTANCE);
-    f.fixture.worker.startPool();
-    await f.waitFor(ONE_INSTANCE);
-    const warning = f.fixture.logs
-      .map((line) => JSON.parse(line) as Record<string, unknown>)
-      .find((record) => record.msg === LIMIT_MESSAGE);
-    assert.equal(warning?.binding, RESOURCE_IDENTITY);
-    assert.equal(warning?.project_id, f.project_id);
-    assert.equal(warning?.slot, ONE_INSTANCE);
-    assert.equal((await f.instances()).length, ONE_INSTANCE);
-  },
-);
-
-test(
-  "a slot above the server slot limit starts when a started slot leaves",
-  { timeout: POOL_TEST_TIMEOUT },
-  async (t) => {
-    const f = await serverPool(t, TWO_INSTANCES, ONE_INSTANCE);
-    f.fixture.worker.startPool();
-    await f.waitFor(ONE_INSTANCE);
-    const [first, second] = f.slots();
-    assert.ok(first && second);
-    assert.equal(f.fixture.threadDriver.threadOf(second.client_id), undefined);
-    f.fixture.workerPool.drain({ ...first, draining: true });
-    const [next] = await until(
-      () => f.instances(),
-      (items) =>
-        items.length === ONE_INSTANCE &&
-        items[0]!.client_id === second.client_id,
-      t.signal,
-    );
-    assert.equal(next!.draining, false);
   },
 );
 
@@ -424,7 +407,7 @@ test("the thread environment holds the allowlist and the slot directories only",
 });
 
 test(
-  "the placement list and the binding write read the placement status of the pool host",
+  "the placement list and the instance create read the placement status of the pool host",
   { timeout: POOL_TEST_TIMEOUT },
   async (t) => {
     const setup = await workerAcceptance(t, true, {
@@ -450,32 +433,17 @@ test(
       unavailable,
       alwaysAvailable(InstancePlacement.Worker),
     ]);
-    const params = { project_id: setup.project_id };
-    const call = humanCaller(setup.fixture);
-    const current = await call(projectOperations["bindingSet.get"], {
-      params,
-      query: {},
-      body: null,
-    });
-    const container = {
-      kind: "worker",
-      config: {
-        worker: "coder@1",
-        instance_count: ONE_INSTANCE,
-        placement: InstancePlacement.Container,
-        entries: [{ agent: "swe@1", ...WORKER_DEFAULTS }],
-      },
-    };
     const refused = await httpClient(
-      { operation: projectOperations["bindingSet.write"] },
+      { operation: workerOperations["instance.create"] },
       setup.fixture.endpoint,
       setup.fixture.token,
     ).operation({
-      params,
+      params: {},
       query: {},
       body: {
-        version: current.version,
-        bindings: { ...current.bindings, container } as never,
+        name: "container-1",
+        worker: "coder@1",
+        placement: InstancePlacement.Container,
       },
     });
     assert.equal(refused.type, OperationResultType.Failure);
@@ -483,10 +451,9 @@ test(
     assert.equal(refused.status, HttpStatus.Conflict);
     assert.equal(
       refused.error.error.code,
-      ProjectErrorCode.WorkerPlacementUnavailable,
+      WorkerErrorCode.InstancePlacementUnavailable,
     );
     assert.deepEqual(refused.error.error.details, {
-      binding: "container",
       placement: InstancePlacement.Container,
       reason: PlacementIssue.RuntimeAbsent,
     });

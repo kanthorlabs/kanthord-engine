@@ -351,6 +351,7 @@ function machineInvocation(
   registry: OperationRegistry,
   resolveWorkerGroup: (context: Context) => Promise<void>,
   ended = false,
+  drained: { registered: boolean } | null = null,
 ) {
   const store = new Store(":memory:");
   t.after(() => store.close());
@@ -388,19 +389,23 @@ function machineInvocation(
             : {
                 project_id: identity.projectId,
                 resource_identity: identity.resourceIdentity,
+                ...(drained === null ? {} : { worker_instances: [] }),
               };
         },
         workerGroupEnded: async () => ended,
       },
       worker: {
-        findByClient: () => ({
-          runtime_identity: runtime,
-          registered_at: Date.now(),
-          client_id: identity.clientId,
-          name: identity.name,
-          project_id: identity.projectId,
-          resource_identity: identity.resourceIdentity,
-        }),
+        findByClient: () =>
+          drained?.registered === false
+            ? undefined
+            : {
+                runtime_identity: runtime,
+                registered_at: Date.now(),
+                client_id: identity.clientId,
+                name: identity.name,
+                project_id: identity.projectId,
+                resource_identity: identity.resourceIdentity,
+              },
         heartbeat: (runtimeIdentity) => {
           heartbeats.push(runtimeIdentity);
         },
@@ -477,6 +482,7 @@ test("an unknown failure answers 500 and logs the error with the request and the
 });
 
 const NO_HANDLER_CALLS = 0;
+const ONE_HANDLER_CALL = 1;
 const NO_RESERVE_CALLS = 0;
 const ONE_RESERVE_CALL = 1;
 const ONE_HEARTBEAT = 1;
@@ -539,6 +545,35 @@ test("an operation with an ended group answer answers 404 for an ended group and
     );
   }
   assert.equal(calls, NO_HANDLER_CALLS);
+});
+
+test("a native group with no listed instance runs the handler for a live registration and answers 401 for none", async (t) => {
+  let calls = 0;
+  const registry = new OperationRegistry();
+  registry.register(endedOperation, () => {
+    calls++;
+    return COMMITTED_VALUE;
+  });
+  const live = machineInvocation(t, registry, async () => {}, false, {
+    registered: true,
+  });
+  const answered = await live.invocation.invoke(endedOperation.id, input, {
+    identity: live.identity,
+  });
+  assert.equal(answered.status, HttpStatus.OK);
+  assert.equal(calls, ONE_HANDLER_CALL);
+  const none = machineInvocation(t, registry, async () => {}, false, {
+    registered: false,
+  });
+  const refused = await none.invocation.invoke(endedOperation.id, input, {
+    identity: none.identity,
+  });
+  assert.equal(refused.status, HttpStatus.Unauthorized);
+  assert.equal(
+    (refused.body as { error: { code: string } }).error.code,
+    UNAUTHORIZED,
+  );
+  assert.equal(calls, ONE_HANDLER_CALL);
 });
 
 test("an ended group answer of a mutation records no idempotency answer and sends no heartbeat", async (t) => {
