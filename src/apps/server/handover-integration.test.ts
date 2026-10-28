@@ -33,6 +33,7 @@ import {
   connectionPayloadSchema,
   HANDOVER_TIMEOUT_MS,
   INSTANCE_CONNECTION_INFO,
+  InstancePlacement,
   WORKER_TOKEN_INFO,
   WorkerErrorCode,
   workerOperations,
@@ -526,6 +527,7 @@ async function setup(
         body: {
           name,
           worker: "coder@1",
+          placement: InstancePlacement.Worker,
           public_key: pair.public_key.toString("base64url"),
         },
       }),

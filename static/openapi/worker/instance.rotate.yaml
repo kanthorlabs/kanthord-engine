@@ -4,9 +4,9 @@ pathItem:
     operationId: worker.instance.rotate
     tags:
       - worker
-    description: "Reset the key of a worker instance: insert the next revision and
-      end the old revision, its tokens and its registrations in one
-      transaction."
+    description: "Reset the key of a worker instance at the worker placement: insert
+      the next revision and end the old revision, its tokens and its
+      registrations in one transaction."
     x-access-policy: human
     x-timeout-ms: 30000
     x-mutation: true
@@ -114,13 +114,23 @@ components:
           type: integer
           exclusiveMinimum: 0
           maximum: 9007199254740991
+        placement:
+          type: string
+          enum:
+            - server
+            - container
+            - worker
         public_key:
-          type: string
-          minLength: 1
-          pattern: ^[A-Za-z0-9_-]+$
+          anyOf:
+            - type: string
+              minLength: 1
+              pattern: ^[A-Za-z0-9_-]+$
+            - type: "null"
         fingerprint:
-          type: string
-          minLength: 1
+          anyOf:
+            - type: string
+              minLength: 1
+            - type: "null"
         created_at:
           type: integer
           minimum: 0
@@ -142,6 +152,7 @@ components:
         - name
         - worker
         - revision
+        - placement
         - public_key
         - fingerprint
         - created_at

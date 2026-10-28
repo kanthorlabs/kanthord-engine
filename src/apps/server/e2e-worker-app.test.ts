@@ -9,7 +9,10 @@ import { directories } from "../../config/index.ts";
 import { writePrivate } from "../../kernel/files.ts";
 import { generateX25519KeyPair } from "../../kernel/hpke.ts";
 import { temporary } from "../../kernel/test-support.ts";
-import { instanceConfigurationValue } from "../../worker/contract.ts";
+import {
+  instanceConfigurationValue,
+  InstancePlacement,
+} from "../../worker/contract.ts";
 import { environment, kanthord, spawnKanthord } from "./cli-test-support.ts";
 import {
   enableCoveringAgents,
@@ -270,6 +273,8 @@ async function liveInstance(t: TestContext) {
       INSTANCE_NAME,
       "--worker",
       INSTANCE_WORKER,
+      "--placement",
+      InstancePlacement.Worker,
       "--output",
     ],
     { ...human, XDG_CONFIG_HOME: env.XDG_CONFIG_HOME },
@@ -480,6 +485,8 @@ test("llm credential create and rotate with --holder seal locally with the insta
       INSTANCE_NAME,
       "--worker",
       INSTANCE_WORKER,
+      "--placement",
+      InstancePlacement.Worker,
       "--output",
     ],
     { ...human, XDG_CONFIG_HOME: env.XDG_CONFIG_HOME },

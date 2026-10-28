@@ -169,7 +169,7 @@ the code, the HTTP status and the `details` line with that identity. It never pr
 
 ## Instance copies
 
-A credential name holds one copy for each holder: `server` or a [worker instance](worker.md). Every copy of a name holds the same platform. A create of an existing name with another platform answers `409 credential.name.platform_conflict`.
+A credential name holds one copy for each holder: `server` or a live [worker instance](worker.md) at the `worker` placement. A server instance, at the `server` or the `container` placement, holds no key and is no holder. Every copy of a name holds the same platform. A create of an existing name with another platform answers `409 credential.name.platform_conflict`.
 The server never opens an instance copy. It stores the copy as a sealed object to the X25519 key of the instance, and only the worker unit of that instance opens it.
 
 `--holder <name>` on `create` and `rotate` selects the copy:
@@ -372,7 +372,7 @@ answer exposes one. The login flow proves the OAuth record without an extra
 validation call.
 
 Optional `--holder` names the holder of the new copy: `server` or a live worker
-instance. It defaults to `server`. With an instance name, the
+instance at the `worker` placement. It defaults to `server`. With an instance name, the
 [login of an instance](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/llm.impl.md#the-login-of-an-instance)
 runs the flow on that instance. The instance receives the session in its next
 heartbeat answer, reports the address and the code, and seals the result to its own
@@ -512,7 +512,7 @@ Every remote command can also answer the shared codes of [other.md](other.md#err
 | 409   | `credential.name.platform_conflict`          | Another copy of the name holds another platform. Details: `{ platform }`.                       | create, login                                                          |
 | 400   | `credential.sealed.invalid`                  | The sealed object fails its form or its budget, or `sealed_to` is not the current fingerprint.  | create, rotate                                                         |
 | 409   | `credential.credential.held_by_instance`     | The command needs the copy of `server`, and only an instance holds the name.                    | verify, provider check, model check                                    |
-| 400   | `llm.credential.instance_unknown`            | A holder names no live worker instance.                                                         | create, rotate, login                                                  |
+| 400   | `llm.credential.instance_unknown`            | A holder names no live instance at the `worker` placement. A server instance is no holder.      | create, rotate, login                                                  |
 | 403   | `llm.credential.instance_forbidden`          | A worker token names a copy of another holder.                                                  | create, rotate, list, get                                              |
 | local | `cli.llm.credential.secret_invalid`          | The local seal takes no `api_key` secret within 32,768 bytes.                                   | create, rotate                                                         |
 

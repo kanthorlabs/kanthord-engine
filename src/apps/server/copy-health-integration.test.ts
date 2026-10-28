@@ -10,7 +10,7 @@ import {
 } from "../../kernel/health.ts";
 import { temporary } from "../../kernel/test-support.ts";
 import { Connection, llmOperations } from "../../llm/contract.ts";
-import { workerOperations } from "../../worker/contract.ts";
+import { InstancePlacement, workerOperations } from "../../worker/contract.ts";
 import { Worker } from "../worker/index.ts";
 import { completed } from "./cli-test-support.ts";
 import { gatewayFixture } from "./test-support.ts";
@@ -47,7 +47,12 @@ test("a live worker instance checks its own bad key and the instance page answer
     await worker["instance.create"]({
       params: {},
       query: {},
-      body: { name: INSTANCE, worker: "coder@1", endpoint: f.endpoint },
+      body: {
+        name: INSTANCE,
+        worker: "coder@1",
+        placement: InstancePlacement.Worker,
+        endpoint: f.endpoint,
+      },
     }),
   );
   assert.ok(created.instance_configuration);

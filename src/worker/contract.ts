@@ -813,6 +813,11 @@ export const WorkerErrorCode = {
   InstanceArchived: "worker.instance.archived",
   InstanceInUse: "worker.instance.in_use",
   InstanceConnectionSuperseded: "worker.instance.connection_superseded",
+  InstancePlacementInvalid: "worker.instance.placement_invalid",
+  InstanceKeyForbidden: "worker.instance.key_forbidden",
+  InstancePlacementUnavailable: "worker.instance.placement_unavailable",
+  InstanceServerLimit: "worker.instance.server_limit",
+  InstancePlacementUnsupported: "worker.instance.placement_unsupported",
 } as const;
 
 export const WORKER_INSTANCE_ID_PREFIX = "worker_instance";
@@ -849,8 +854,9 @@ export const instanceRecordSchema = z.strictObject({
   name: z.string().min(1),
   worker: z.string().min(1),
   revision: z.number().int().positive(),
-  public_key: base64urlSchema,
-  fingerprint: z.string().min(1),
+  placement: z.enum(InstancePlacement),
+  public_key: base64urlSchema.nullable(),
+  fingerprint: z.string().min(1).nullable(),
   created_at: timestamp,
   ended_at: timestamp.nullable(),
 });
@@ -1109,12 +1115,18 @@ export const instanceOperations = {
       body: z.strictObject({
         name: z.string(),
         worker: z.string(),
+        placement: z
+          .string()
+          .optional()
+          .describe(
+            "server, container or worker; required. A server or container instance takes neither public_key nor endpoint.",
+          ),
         ...instanceKeyFields,
       }),
     }),
     output: instanceWriteAnswer,
     description:
-      "Register a worker instance of a hosted worker. With endpoint, the server generates the key pair and answers the instance configuration once.",
+      "Register a worker instance of a hosted worker at a placement. At the worker placement with endpoint, the server generates the key pair and answers the instance configuration once.",
   },
   "instance.list": {
     ...humanOperation,
@@ -1201,7 +1213,7 @@ export const instanceOperations = {
     }),
     output: instanceWriteAnswer,
     description:
-      "Reset the key of a worker instance: insert the next revision and end the old revision, its tokens and its registrations in one transaction.",
+      "Reset the key of a worker instance at the worker placement: insert the next revision and end the old revision, its tokens and its registrations in one transaction.",
   },
   "instance.archive": {
     ...humanOperation,

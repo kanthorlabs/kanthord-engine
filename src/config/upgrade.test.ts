@@ -21,6 +21,7 @@ const LEGACY_VERSION = 1;
 const MIGRATED_LIMIT = 4;
 const MIGRATED_VERSION = 2;
 const MIGRATED_LIFETIME = 600;
+const MIGRATED_SERVER_LIMIT = 8;
 const PROMPT_FILES_VERSION = 2;
 const PROMPT_DIRECTORY_LINE = "  prompt:\n    agent_directory: agents\n";
 
@@ -183,5 +184,33 @@ test("upgrade removes the system file and the host file keys of the agent prompt
   assert.deepEqual(
     configuration(parseMapping(upgrade.content!)).getProperties().agent.prompt,
     { agent_directory: "agents" },
+  );
+});
+
+test("upgrade renames the server slot limit to the server instance limit and raises the version by one", () => {
+  const previous = CONFIG_VERSION - 1;
+  const current = initialConfig();
+  assert.ok(current.includes("  server_instance_limit: 16\n"));
+  const legacy = current
+    .replace(CURRENT_VERSION_LINE, `version: ${previous}\n`)
+    .replace(
+      "  server_instance_limit: 16\n",
+      `  server_slot_limit: ${MIGRATED_SERVER_LIMIT}\n`,
+    );
+  const upgrade = upgradeConfig(legacy);
+  assert.equal(upgrade.from, previous);
+  assert.equal(upgrade.to, CONFIG_VERSION);
+  assert.deepEqual(upgrade.changes, [
+    {
+      kind: "rename",
+      from: "worker.server_slot_limit",
+      to: "worker.server_instance_limit",
+    },
+  ]);
+  assert.ok(!upgrade.content!.includes("server_slot_limit"));
+  assert.equal(
+    configuration(parseMapping(upgrade.content!)).getProperties().worker
+      .server_instance_limit,
+    MIGRATED_SERVER_LIMIT,
   );
 });

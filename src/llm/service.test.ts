@@ -2517,6 +2517,8 @@ test("verify takes no body and no mutation key", () => {
 });
 
 const RELAY_A = "relay-a";
+const SERVER_INSTANCE = "hosted";
+const CONTAINER_INSTANCE = "boxed";
 const ROTATED_REVISIONS = 2;
 const HUMAN_ROTATED_REVISIONS = 3;
 const SEALED_INVALID_CODE = "credential.sealed.invalid";
@@ -2839,6 +2841,43 @@ test("an instance archive between the server seal and the commit refuses the cre
       HttpStatus.BadRequest,
       INSTANCE_UNKNOWN_CODE,
     );
+  } finally {
+    f.store.close();
+  }
+});
+
+test("a holder that names a server or a container instance refuses the create with llm.credential.instance_unknown", async () => {
+  const pair = await generateX25519KeyPair();
+  const live: InstanceKey = {
+    name: RELAY_A,
+    public_key: pair.public_key.toString("base64url"),
+    fingerprint: keyFingerprint(pair.public_key),
+  };
+  const f = fixture({
+    instanceKeys: {
+      keyOf: (_tx, name) => (name === RELAY_A ? live : null),
+      nameOf: () => null,
+    },
+  });
+  try {
+    for (const holders of [
+      [SERVER_INSTANCE],
+      [CONTAINER_INSTANCE],
+      [RELAY_A, SERVER_INSTANCE],
+    ])
+      await failsAsync(
+        async () =>
+          f.create({
+            name: "hosted-credential",
+            platform: Platform.Anthropic,
+            metadata: null,
+            secret: apiSecret,
+            holders,
+          }),
+        HttpStatus.BadRequest,
+        INSTANCE_UNKNOWN_CODE,
+      );
+    assert.equal(credentialCount(f), NO_CREDENTIALS);
   } finally {
     f.store.close();
   }

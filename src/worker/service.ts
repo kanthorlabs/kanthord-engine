@@ -278,13 +278,12 @@ export class WorkerService implements Service {
   }
   instanceKeyOf(tx: Transaction, name: string): InstanceKey | null {
     const instance = readLiveInstance(tx, name);
-    return instance
-      ? {
-          name: instance.name,
-          public_key: instance.public_key,
-          fingerprint: instance.fingerprint,
-        }
-      : null;
+    if (!instance?.public_key || !instance.fingerprint) return null;
+    return {
+      name: instance.name,
+      public_key: instance.public_key,
+      fingerprint: instance.fingerprint,
+    };
   }
   instanceConnected(name: string): boolean {
     return this.instances.connected(name);
@@ -336,6 +335,8 @@ export class WorkerService implements Service {
     this.dependencies = dependencies;
     this.instances = new WorkerInstances({
       store: dependencies.store,
+      serverInstanceLimit: dependencies.config.server_instance_limit,
+      placementStatus: (placement) => this.placementStatus(placement),
       issuer: dependencies.instanceIssuer,
       workerBindingsOf: dependencies.workerBindingsOf,
       unendedExecutionOf: (tx, runtimeIdentity) =>
@@ -788,10 +789,16 @@ export class WorkerService implements Service {
   instanceOf(
     tx: Transaction,
     name: string,
-  ): { name: string; worker: string } | null {
+  ): { name: string; worker: string; placement: InstancePlacement } | null {
     assert.ok(tx.database.isTransaction);
     const instance = readLiveInstance(tx, name);
-    return instance ? { name: instance.name, worker: instance.worker } : null;
+    return instance
+      ? {
+          name: instance.name,
+          worker: instance.worker,
+          placement: instance.placement,
+        }
+      : null;
   }
 
   registrationsOfInstance(tx: Transaction, runtimeIdentity: string): string[] {

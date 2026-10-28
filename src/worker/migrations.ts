@@ -18,8 +18,9 @@ const createWorkerTables: Migration = (database) => {
       name TEXT NOT NULL,
       worker TEXT NOT NULL,
       revision INTEGER NOT NULL,
-      public_key TEXT NOT NULL,
-      fingerprint TEXT NOT NULL,
+      placement TEXT NOT NULL,
+      public_key TEXT,
+      fingerprint TEXT,
       created_at INTEGER NOT NULL,
       ended_at INTEGER
     );

@@ -9,13 +9,20 @@ import {
 import { httpClient } from "../../gateway/client.ts";
 import { CancellationContext } from "../../kernel/context.ts";
 import { temporary } from "../../kernel/test-support.ts";
-import { llmOperations } from "../../llm/contract.ts";
-import { workerOperations } from "../../worker/contract.ts";
+import { LlmErrorCode, llmOperations } from "../../llm/contract.ts";
+import { HttpStatus } from "../../kernel/http.ts";
+import {
+  type OperationResult,
+  OperationResultType,
+} from "../../kernel/operation.ts";
+import { InstancePlacement, workerOperations } from "../../worker/contract.ts";
 import { Worker } from "../worker/index.ts";
 import { completed } from "./cli-test-support.ts";
 import { gatewayFixture } from "./test-support.ts";
 
 const INSTANCE = "laptop";
+const SERVER_INSTANCE = "hosted";
+const SERVER_SECRET = "server-instance-secret";
 const CREDENTIAL_NAME = "claude";
 const PLATFORM = "anthropic-subscription";
 const PI_PROVIDER = "anthropic";
@@ -52,7 +59,12 @@ test("a live worker instance signs in through a fake pi-ai copy_code flow, and t
     await worker["instance.create"]({
       params: {},
       query: {},
-      body: { name: INSTANCE, worker: "coder@1", endpoint: f.endpoint },
+      body: {
+        name: INSTANCE,
+        worker: "coder@1",
+        placement: InstancePlacement.Worker,
+        endpoint: f.endpoint,
+      },
     }),
   );
   assert.ok(created.instance_configuration);
@@ -189,4 +201,57 @@ test("a live worker instance signs in through a fake pi-ai copy_code flow, and t
   const text = JSON.stringify([login, status, copy, records, f.logs]);
   assert.equal(text.includes(OAUTH_SECRET.access), false);
   assert.equal(text.includes(OAUTH_SECRET.refresh), false);
+});
+
+function refusedAsUnknownInstance(result: OperationResult<unknown>): void {
+  assert.ok(result.type === OperationResultType.Failure);
+  assert.equal(result.status, HttpStatus.BadRequest);
+  assert.equal(result.error.error.code, LlmErrorCode.InstanceUnknown);
+}
+
+test("a server instance is no credential holder and no instance login target", async (t) => {
+  const f = await gatewayFixture(t);
+  const worker = httpClient(workerOperations, f.endpoint, f.token);
+  const llm = httpClient(llmOperations, f.endpoint, f.token);
+  completed(
+    await worker["instance.create"]({
+      params: {},
+      query: {},
+      body: {
+        name: SERVER_INSTANCE,
+        worker: "coder@1",
+        placement: InstancePlacement.Server,
+      },
+    }),
+  );
+  refusedAsUnknownInstance(
+    await llm.create(
+      {
+        params: {},
+        query: {},
+        body: {
+          name: CREDENTIAL_NAME,
+          platform: PLATFORM,
+          metadata: null,
+          secret: { key: SERVER_SECRET },
+          holders: [SERVER_INSTANCE],
+        },
+      },
+      { idempotencyKey: "idempotency_key_01ARZ3NDEKTSV4RRFFQ69G5FA3" },
+    ),
+  );
+  refusedAsUnknownInstance(
+    await llm.login(
+      {
+        params: {},
+        query: {},
+        body: {
+          platform: PLATFORM,
+          name: CREDENTIAL_NAME,
+          holder: SERVER_INSTANCE,
+        },
+      },
+      { idempotencyKey: "idempotency_key_01ARZ3NDEKTSV4RRFFQ69G5FA4" },
+    ),
+  );
 });

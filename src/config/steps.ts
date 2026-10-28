@@ -71,6 +71,12 @@ export const CONFIG_STEPS: readonly ConfigStep[] = [
     ...removeKey(document, "agent.prompt.system_file"),
     ...removeKey(document, "agent.prompt.host_file"),
   ],
+  (document) =>
+    renameKey(
+      document,
+      "worker.server_slot_limit",
+      "worker.server_instance_limit",
+    ),
 ];
 
 export const CONFIG_VERSION = ABSENT_CONFIG_VERSION + CONFIG_STEPS.length;
