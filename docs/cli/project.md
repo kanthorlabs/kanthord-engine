@@ -363,8 +363,9 @@ The key of the action is `<binding name>.<name>`, which the Mission Service free
 - The binding write refuses the `action_end_state` shape until a retry-safe claim-source contract exists, under the [frozen action rule](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/mission-service.impl.md#the-attempt). The refusal is one issue of the validation failure of `binding apply`, at the `follows` path.
 - Absent references and invalid dependency cycles fail validation.
 - `pull_request` opens a pull request from the node branch into the base branch. It requires the platform action capability and expects the merge of that pull request.
-- `merge_push` merges the node branch into the base branch and pushes. It requires the network git write capability and expects the push to the base branch. A change that touches a gate file of the binding gets no push; a human lands it. The Intake Service computes the changed gate files on the server. Before you make the gate list stricter, land or pause each node in `External.Requested` on that binding.
+- `merge_push` merges the node branch into the base branch and pushes. It requires the network git write capability and expects the push to the base branch. A change that touches a gate file of the binding gets no push; a human lands it. The Intake Service computes the changed gate files on the server.
 - Each action implies its expected end state and takes no parameter.
+- Intake stores the changed gate files of a node at its assessment. Before you add a path to `gate_files` in `.kanthord/affected-tests.json`, find each node that holds a required action of that binding. Pause each such node in `Evaluating` or `External.Requested`. Then block and unblock it, so that a new assessment reads the new declaration. A human can also land or close the pull request of such a node.
 
 Coverage and suitability follow [Repository configuration and policy](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/project-service.md#repository-configuration-and-policy).
 

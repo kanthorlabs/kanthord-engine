@@ -45,8 +45,8 @@ document.
 - Before you ask for a ruling on a shared token, list `.agents/plan/` again.
   Search the sibling plans for the token and name each sibling that chose it.
 - A node whose verification runs a test file that contains `startTestSshd`
-  carries the tag `sshd`. Only a worker binding whose host runs sshd carries
-  that tag.
+  carries the tag `sshd`. Only a worker binding whose host has an executable
+  `sshd` binary carries that tag.
 - Re-anchor a drifted `file:line` citation to the sentence or code block that
   the text means, not to the first match. Re-anchor only the citations that
   your own edit shifted, in the files that you edited.
