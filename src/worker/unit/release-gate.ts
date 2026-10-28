@@ -16,7 +16,7 @@ import { refreshAtRelease, RefreshResult } from "./base-refresh.ts";
 import { verificationCommands } from "./evaluation-input.ts";
 import {
   affectedRevisionInstruction,
-  taskRevisionInstruction,
+  releaseRevisionInstruction,
 } from "./judgement.ts";
 import { checkoutDetached, cloneLocal, matchRemote } from "./local-git.ts";
 import {
@@ -160,7 +160,7 @@ async function gateRelease(
   return {
     kind: ReleaseGateKind.Routed,
     unit: owner,
-    instruction: taskRevisionInstruction(
+    instruction: releaseRevisionInstruction(
       state.input.setup.templates,
       run.verification,
       checked.commands,

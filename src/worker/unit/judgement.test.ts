@@ -16,6 +16,7 @@ import {
   evaluationInstruction,
   JUDGEMENT_MARKER,
   repairInstruction,
+  releaseRevisionInstruction,
   taskRevisionInstruction,
   failedChecksText,
   requestedChangesText,
@@ -278,6 +279,44 @@ test("the task revision carries the output of the failed verification when it ha
     "",
   );
   assert.doesNotMatch(withoutOutput, /Output of the last verification/);
+});
+
+const PRODUCED_DIGEST = "hash";
+const RELEASE_COMMAND = "npm test";
+const FAILED_EXIT = 1;
+const NO_OUTPUT = "";
+const RELEASE_CLONE = /The release clone holds only tracked files/;
+
+test("only the release revision names the content of the release clone", () => {
+  const verification: Verification = {
+    tested_input: { kind: "produced", sha256: PRODUCED_DIGEST },
+    results: [
+      {
+        command: RELEASE_COMMAND,
+        exit_code: FAILED_EXIT,
+        signal: null,
+        timed_out: false,
+      },
+    ],
+  };
+  assert.match(
+    releaseRevisionInstruction(
+      SHIPPED_TEMPLATES,
+      verification,
+      [RELEASE_COMMAND],
+      NO_OUTPUT,
+    ),
+    RELEASE_CLONE,
+  );
+  assert.doesNotMatch(
+    taskRevisionInstruction(
+      SHIPPED_TEMPLATES,
+      verification,
+      [RELEASE_COMMAND],
+      NO_OUTPUT,
+    ),
+    RELEASE_CLONE,
+  );
 });
 
 test("a failed verification report names a flaky command and carries its output", () => {

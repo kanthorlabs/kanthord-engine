@@ -210,17 +210,37 @@ export function failedVerificationReport(
   return parts.join("\n\n");
 }
 
+function revisionInstruction(
+  templates: PromptTemplates,
+  verification: Verification,
+  commands: readonly string[],
+  output: string,
+  release: boolean,
+): string {
+  return renderTemplate(templates, PromptTemplate.TaskRevision, {
+    rationale: failedVerificationRationale(verification, commands),
+    results: verification.results,
+    output,
+    release,
+  });
+}
+
 export function taskRevisionInstruction(
   templates: PromptTemplates,
   verification: Verification,
   commands: readonly string[],
   output: string,
 ): string {
-  return renderTemplate(templates, PromptTemplate.TaskRevision, {
-    rationale: failedVerificationRationale(verification, commands),
-    results: verification.results,
-    output,
-  });
+  return revisionInstruction(templates, verification, commands, output, false);
+}
+
+export function releaseRevisionInstruction(
+  templates: PromptTemplates,
+  verification: Verification,
+  commands: readonly string[],
+  output: string,
+): string {
+  return revisionInstruction(templates, verification, commands, output, true);
 }
 
 export function affectedRevisionInstruction(
@@ -237,6 +257,7 @@ export function affectedRevisionInstruction(
       .join(RATIONALE_SEPARATOR),
     results: failed.map((run) => run.head),
     output: failed[FIRST_ENTRY]!.output,
+    release: true,
   });
 }
 

@@ -9,6 +9,7 @@
     "scripts/affected-reporter.mjs",
     "scripts/test-reporter.mjs",
     "scripts/test-path.mjs",
-    "scripts/pi-tools.mjs"
+    "scripts/pi-tools.mjs",
+    ".devcontainer/devcontainer.json"
   ]
 }

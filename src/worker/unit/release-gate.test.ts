@@ -48,6 +48,8 @@ const NO_PROGRESS_LIMIT = 2;
 const RELEASE_COMMANDS_RAN = 2;
 const FAILED_EXIT_CODE = 1;
 const REVISION_TEXT = "Revise the task work";
+const RELEASE_CLONE_TEXT =
+  "The release clone holds only tracked files and the setup commands of the environment.";
 const REVISED_CONTENT = "base two";
 const SECRET = "secret";
 const MARKER = "release-directory";
@@ -354,6 +356,8 @@ test("a failed release command writes the result routed with the unit id of its 
   const records = recordSpans(h);
   const gate = await releaseGate(h);
   assert.equal(gate.kind, ReleaseGateKind.Routed);
+  assert.ok(gate.kind === ReleaseGateKind.Routed);
+  assert.ok(gate.instruction.includes(RELEASE_CLONE_TEXT));
   const ends = spanEnds(records, SpanOperation.ReleaseGate);
   assert.equal(ends.length, ONE_SPAN);
   assert.equal(ends[0]?.status, SpanStatus.Ok);
@@ -445,6 +449,7 @@ test("an affected command that fails at the node head and passes at the base rou
   assert.ok(gate.instruction.startsWith(REVISION_TEXT));
   assert.ok(gate.instruction.includes(RATIONALE_START));
   assert.ok(gate.instruction.includes(RATIONALE_FAILED));
+  assert.ok(gate.instruction.includes(RELEASE_CLONE_TEXT));
   assert.deepEqual(gateEnd(records), {
     "kanthord.release_gate.result": "routed",
     "kanthord.release_gate.unit_id": h.input.claim.node_id,

@@ -1,0 +1,15 @@
+{
+  "image": "mcr.microsoft.com/devcontainers/javascript-node:24-bookworm",
+  "containerEnv": {
+    "PATH": "/var/lib/kanthord/.local/bin:${containerEnv:PATH}",
+    "GOPATH": "/var/lib/kanthord/go",
+    "CARGO_HOME": "/var/lib/kanthord/.cache/cargo"
+  },
+  "onCreateCommand": "npm install -g pnpm@11.24.0",
+  "updateContentCommand": "pnpm install --frozen-lockfile && pnpm run pi-tools:fetch",
+  "customizations": {
+    "kanthord": {
+      "checks": ["node --version", "pnpm --version"]
+    }
+  }
+}
