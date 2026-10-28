@@ -1,17 +1,17 @@
 import assert from "node:assert/strict";
-import { Command } from "commander";
+import type { Command } from "commander";
 import { httpClient, resolveClient } from "../../gateway/client.ts";
 import { Diagnostic } from "../../kernel/errors.ts";
 import { identitySchema } from "../../kernel/identity.ts";
 import { OperationResultType } from "../../kernel/operation.ts";
 import {
-  schedulerOperations,
-  workPullSchema,
   executionReleaseSchema,
   ExecutionStopReason,
   QUEUE_LIST_LIMIT_DEFAULT,
-  QUEUE_LIST_LIMIT_MIN,
   QUEUE_LIST_LIMIT_MAX,
+  QUEUE_LIST_LIMIT_MIN,
+  schedulerOperations,
+  workPullSchema,
 } from "../../scheduler/contract.ts";
 import { CommandName } from "./constants.ts";
 import { addFileBodyHelp } from "./file-body.ts";

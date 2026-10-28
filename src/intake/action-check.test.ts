@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
 import {
   GrantKind,
-  SshIdentitySubjectKind,
   type RequestFacts,
+  SshIdentitySubjectKind,
 } from "../custody/contract.ts";
 import { IdentityKind, type ServiceIdentity } from "../kernel/caller.ts";
 import {

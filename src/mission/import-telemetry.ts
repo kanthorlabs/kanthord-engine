@@ -1,10 +1,10 @@
 import { randomBytes } from "node:crypto";
 import type { Logger } from "pino";
 import {
-  SpanStatus,
-  COLLECTION_MAX,
   type Attributes,
+  COLLECTION_MAX,
   type ServerTrace,
+  SpanStatus,
 } from "../tracking/contract.ts";
 import type { ActContribution, ActTelemetry } from "./act-telemetry.ts";
 

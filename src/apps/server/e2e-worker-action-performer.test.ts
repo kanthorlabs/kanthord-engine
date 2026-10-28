@@ -14,41 +14,41 @@ import { writePrivate } from "../../kernel/files.ts";
 import { HttpMethod, HttpStatus } from "../../kernel/http.ts";
 import { OutboundRequestState } from "../../intake/contract.ts";
 import {
-  OperationResultType,
   type OperationResult,
+  OperationResultType,
 } from "../../kernel/operation.ts";
 import { temporary } from "../../kernel/test-support.ts";
 import {
-  NodeState,
-  Resolution,
   type Evidence,
-  type Revision,
   type ExternalAction,
   Intent,
   missionOperations,
+  NodeState,
+  Resolution,
+  type Revision,
 } from "../../mission/contract.ts";
 import {
-  WorkPullKind,
   type ExecutionRecord,
+  WorkPullKind,
 } from "../../scheduler/contract.ts";
 import {
-  workerOperations,
   ACTION_REQUEST_TOOL_NAME,
   ActionResultKind,
+  type PlatformAddress,
+  PlatformAddressKind,
   RefusalClass,
   Uncertainty,
   WorkerErrorCode,
-  PlatformAddressKind,
-  type PlatformAddress,
+  workerOperations,
 } from "../../worker/contract.ts";
 import { ReviewState } from "../../repository/github.ts";
 import {
-  FAKE_SSH_CREDENTIAL,
-  FakePullState,
-  createFakeSshCredential,
-  gatewayFixture,
-  fakeGitHub,
   bareRepository,
+  createFakeSshCredential,
+  FAKE_SSH_CREDENTIAL,
+  fakeGitHub,
+  FakePullState,
+  gatewayFixture,
   mappedTransport,
   remoteHead,
 } from "./test-support.ts";

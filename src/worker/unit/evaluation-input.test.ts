@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
-  readFileSync,
-  readdirSync,
-  statSync,
   existsSync,
   mkdirSync,
+  readdirSync,
+  readFileSync,
+  statSync,
   writeFileSync,
 } from "node:fs";
 import { createServer } from "node:http";
@@ -14,31 +14,31 @@ import type { AddressInfo } from "node:net";
 import { join } from "node:path";
 import { simpleGit } from "simple-git";
 import { background } from "../../kernel/context.ts";
-import { temporary, hostEnvironment } from "../../kernel/test-support.ts";
+import { hostEnvironment, temporary } from "../../kernel/test-support.ts";
 import { createIdentity } from "../../kernel/identity.ts";
 import type { Evidence } from "../../mission/contract.ts";
 import type { MethodClients } from "./method-clients.ts";
 import {
   anthropicSetup,
+  everyBindingSshAccess,
+  transport as localTransport,
   repositorySetup,
   TEST_SSH_HOST_KEY,
   TEST_SSH_PUBLIC_KEY,
-  everyBindingSshAccess,
-  transport as localTransport,
 } from "./test-support.ts";
 import { EndReason, ExecutionRun, ExecutionStop } from "./execution-run.ts";
 import { ExecutionIntent } from "../contract.ts";
 import {
   CHECKOUTS_DIRECTORY,
   EVIDENCE_DIRECTORY,
-  WorkspaceRoot,
   WorkspaceKind,
+  WorkspaceRoot,
 } from "./workspace.ts";
 import type { RepositoryTransport } from "../contract.ts";
 import {
-  snapshotOf,
   placedOf,
   prepareEvaluation,
+  snapshotOf,
   verificationCommands,
 } from "./evaluation-input.ts";
 

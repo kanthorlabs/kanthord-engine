@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdirSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { mkdirSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import {
@@ -12,9 +12,9 @@ import { Store } from "../../kernel/store.ts";
 import { requirePiTools, temporary } from "../../kernel/test-support.ts";
 import {
   DATABASE_FILE,
-  TRACKING_DATABASE_FILE,
   enforceMasterKey,
   serverMigrations,
+  TRACKING_DATABASE_FILE,
   trackingDatabaseMigrations,
 } from "../server/index.ts";
 import { Diagnostic } from "../../kernel/errors.ts";
@@ -104,13 +104,13 @@ test("serve refuses an older configuration and an older database, and upgrade br
   const behind = await run(paths.env, "serve", t.signal);
   assert.equal(behind.status, ExitCode.Failure);
   assert.match(behind.stderr, /system\.config\.version_behind/);
-  assert.match(behind.stderr, /^command:           kanthord upgrade$/m);
+  assert.match(behind.stderr, /^command: {11}kanthord upgrade$/m);
 
   writePrivate(paths.config, currentConfig(), true);
   const pending = await run(paths.env, "serve", t.signal);
   assert.equal(pending.status, ExitCode.Failure);
   assert.match(pending.stderr, /system\.database\.migration\.pending/);
-  assert.match(pending.stderr, /^path:    .+\ncommand: kanthord upgrade\n$/m);
+  assert.match(pending.stderr, /^path: {4}.+\ncommand: kanthord upgrade\n$/m);
   writePrivate(paths.config, legacy, true);
 
   const upgraded = await run(paths.env, "upgrade", t.signal);

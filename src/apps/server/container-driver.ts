@@ -1,12 +1,12 @@
-import { spawn, type ChildProcessByStdio } from "node:child_process";
+import { type ChildProcessByStdio, spawn } from "node:child_process";
 import { constants } from "node:os";
 import { performance } from "node:perf_hooks";
 import type { Readable, Writable } from "node:stream";
 import { Diagnostic } from "../../kernel/errors.ts";
+import type { ContainerRuntime } from "../../worker/contract.ts";
 import {
-  ContainerRuntime,
-  PoolPlacement,
   type PlacementStatus,
+  PoolPlacement,
   type PoolSlot,
 } from "../../worker/contract.ts";
 import {
@@ -22,6 +22,7 @@ import {
   cacheVolumeName,
   containerOwner,
   containerRemovalFailure,
+  detectRuntime,
   killArguments,
   linesOf,
   ownedArguments,
@@ -30,12 +31,11 @@ import {
   removeVolumeArguments,
   runArguments,
   RUNTIME_CHECK_TIMEOUT_MS,
+  type RuntimeHost,
   slotClientId,
   slotName,
   SUCCESS_CODE,
   volumeArguments,
-  detectRuntime,
-  type RuntimeHost,
 } from "./container-runtime.ts";
 import type {
   SlotDriver,

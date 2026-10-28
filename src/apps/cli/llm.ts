@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { Command } from "commander";
+import type { Command } from "commander";
 import { llmOperations } from "../../llm/contract.ts";
 import { httpClient, resolveClient } from "../../gateway/client.ts";
 import { Diagnostic } from "../../kernel/errors.ts";
@@ -8,8 +8,8 @@ import { CommandName } from "./constants.ts";
 import {
   addCredentialCommand,
   credentialCode,
-  IDEMPOTENCY_KEY_OPTION,
   type CredentialGroup,
+  IDEMPOTENCY_KEY_OPTION,
 } from "./credential.ts";
 import {
   handleMutationResult,

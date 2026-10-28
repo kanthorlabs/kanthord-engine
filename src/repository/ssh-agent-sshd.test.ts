@@ -6,7 +6,7 @@ import { join } from "node:path";
 import test from "node:test";
 import { promisify } from "node:util";
 import { background } from "../kernel/context.ts";
-import { withSshAgent, type SshAccess } from "./ssh-agent.ts";
+import { type SshAccess, withSshAgent } from "./ssh-agent.ts";
 import { generateSshKey } from "./ssh-key.ts";
 import {
   createBareRepository,

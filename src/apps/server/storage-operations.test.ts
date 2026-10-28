@@ -6,21 +6,21 @@ import { directClient } from "../../gateway/index.ts";
 import { httpClient } from "../../gateway/client.ts";
 import {
   IntakeErrorCode,
+  intakeOperations,
   PRESIGN_LIFETIME_S,
   READ_ANSWER_MARGIN_MS,
   ResultClass,
-  intakeOperations,
 } from "../../intake/contract.ts";
 import {
-  CancellationContext,
   background,
+  CancellationContext,
   type Context,
 } from "../../kernel/context.ts";
 import { HttpMethod, HttpStatus } from "../../kernel/http.ts";
 import { createIdentity } from "../../kernel/identity.ts";
 import {
-  OperationResultType,
   type OperationResult,
+  OperationResultType,
 } from "../../kernel/operation.ts";
 import {
   AssetKind,

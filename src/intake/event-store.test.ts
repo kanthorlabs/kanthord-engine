@@ -5,10 +5,10 @@ import { IN_MEMORY_DATABASE, Store } from "../kernel/store.ts";
 import {
   Consumer,
   INBOUND_EVENT_ID_PREFIX,
-  INTAKE_SERVICE_NAME,
   InboundEventState,
   InboundKind,
   InboundPlatform,
+  INTAKE_SERVICE_NAME,
 } from "./contract.ts";
 import {
   eventRecord,

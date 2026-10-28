@@ -3,11 +3,11 @@ import { z } from "zod";
 import { canonicalJSON } from "../kernel/json.ts";
 import type { Transaction } from "../kernel/store.ts";
 import {
+  type Actor,
   ActorKind,
   ActorService,
-  type Actor,
-  type AssetKind,
   type AssessmentResult,
+  type AssetKind,
   type EndState,
   NodeState,
   StartPoint,

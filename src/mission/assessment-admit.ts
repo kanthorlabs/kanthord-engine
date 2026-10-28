@@ -5,12 +5,12 @@ import { canonicalJSON } from "../kernel/json.ts";
 import type { Transaction } from "../kernel/store.ts";
 import {
   AssessmentResult,
-  MissionErrorCode,
-  Intent,
-  verificationSchema,
   type AssessmentSubmit,
+  Intent,
+  MissionErrorCode,
   type Revision,
   type Verification,
+  verificationSchema,
 } from "./contract.ts";
 import {
   requiredVerifications,
@@ -20,18 +20,18 @@ import {
 } from "./evidence-content.ts";
 import { invalidExecutionInput, requireTextBound } from "./execution.ts";
 import {
+  type AttemptRow,
   readAssets,
   readCurrentOutcome,
   readEvidence,
-  type AttemptRow,
 } from "./record-store.ts";
 import type { Dependencies } from "./service.ts";
 import { directDependenciesOf } from "./graph.ts";
 import {
-  readDependencies,
-  readMissionNodes,
   intentOf,
   type NodeRow,
+  readDependencies,
+  readMissionNodes,
 } from "./store.ts";
 
 const FIRST_COVERING_INDEX = 0;

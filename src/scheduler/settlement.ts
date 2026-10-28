@@ -6,11 +6,11 @@ import { canonicalJSON } from "../kernel/json.ts";
 import { identitySchema } from "../kernel/identity.ts";
 import type { Transaction } from "../kernel/store.ts";
 import {
-  ExecutionStopReason,
-  isAdvancingStop,
   type EndedExecution,
-  type FailureHold,
   type ExecutionRow,
+  ExecutionStopReason,
+  type FailureHold,
+  isAdvancingStop,
   type MissionTransitions,
   type NodeTransition,
   type Registrations,

@@ -8,10 +8,10 @@ import pino from "pino";
 import { MASTER_KEY_BYTES } from "../config/global.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import {
+  type Operation,
   OperationLifetime,
   OperationRegistry,
   StoreName,
-  type Operation,
 } from "../kernel/operation.ts";
 import { Store } from "../kernel/store.ts";
 import { intakeOperations } from "../intake/contract.ts";

@@ -3,10 +3,10 @@ import { test } from "node:test";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
-  InMemoryCredentialStore,
   contentText,
-  normalizeContext,
   getSystemMessageText,
+  InMemoryCredentialStore,
+  normalizeContext,
 } from "@earendil-works/pi-ai";
 import type { AgentSession } from "@earendil-works/pi-coding-agent";
 import type { StreamFn } from "@earendil-works/pi-agent-core";

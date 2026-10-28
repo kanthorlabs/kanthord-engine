@@ -6,14 +6,14 @@ import type { Transaction } from "../kernel/store.ts";
 import { importAdmissible, isTerminal } from "./admission.ts";
 import { validateText } from "./content.ts";
 import {
-  MissionErrorCode,
   type Edge,
   type HumanActor,
+  type MissionBindings,
+  MissionErrorCode,
   type NodeChange,
   type Retire,
   type RetirePreview,
   type WorkQueue,
-  type MissionBindings,
 } from "./contract.ts";
 import { ControlError } from "./control.ts";
 import { dependencyEditGuarded } from "./dependency.ts";
@@ -22,9 +22,9 @@ import { claimableMap, reconcileMission, routeMission } from "./routing.ts";
 import {
   deleteDependency,
   incrementMissionVersion,
+  type NodeRow,
   readDependencies,
   readMissionNodes,
-  type NodeRow,
 } from "./store.ts";
 import { requireActive, requireMission } from "./write.ts";
 

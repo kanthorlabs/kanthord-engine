@@ -8,10 +8,10 @@ import type { Dependencies } from "./service.ts";
 import {
   executionRecord,
   executionRecords,
-  readExecution,
   listExecutions,
+  readExecution,
 } from "./execution-store.ts";
-import { schedulerOperations } from "./contract.ts";
+import type { schedulerOperations } from "./contract.ts";
 
 const FIRST_ROW = 0;
 const TEXT_ENCODING = "utf8";

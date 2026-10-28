@@ -12,8 +12,8 @@ import {
   FrameDecoder,
   FrameKind,
   instanceFrameSchema,
-  serverFrameSchema,
   type ServerFrame,
+  serverFrameSchema,
 } from "./frames.ts";
 import { SlotControl } from "./thread-data.ts";
 

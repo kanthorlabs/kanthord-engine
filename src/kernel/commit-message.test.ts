@@ -2,9 +2,9 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   COMMIT_HEADER_MAX_LENGTH,
-  CommitType,
   commitHeader,
   commitMessage,
+  CommitType,
   commitTypeOf,
   isCommitHeader,
   isCommitMessage,

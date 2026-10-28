@@ -9,12 +9,12 @@ import {
 } from "../../project/contract.ts";
 import { isString } from "../../kernel/values.ts";
 import {
-  IdentityKind,
   CLIENT_IDENTITY_PREFIX,
   CONNECTION_PREFIX,
-  WORKER_INSTANCE_PREFIX,
-  MAX_HUMAN_USERNAME_LENGTH,
+  IdentityKind,
   MAX_DISPLAY_NAME_LENGTH,
+  MAX_HUMAN_USERNAME_LENGTH,
+  WORKER_INSTANCE_PREFIX,
 } from "../../kernel/caller.ts";
 export const KANTHORD_AUTH_USERNAME = "kanthorlabs";
 const MILLISECONDS_PER_SECOND = 1000;

@@ -1,4 +1,4 @@
-import { SecretShape, type CredentialPlatform } from "../custody/contract.ts";
+import { type CredentialPlatform, SecretShape } from "../custody/contract.ts";
 import { ENVIRONMENT_SECRET_PLATFORM } from "./contract.ts";
 
 export { ENVIRONMENT_SECRET_PLATFORM };

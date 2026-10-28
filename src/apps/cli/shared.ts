@@ -1,5 +1,5 @@
 import { readFileSync, statSync } from "node:fs";
-import { z } from "zod";
+import type { z } from "zod";
 import { Diagnostic, validationIssues } from "../../kernel/errors.ts";
 import { readPrivate } from "../../kernel/files.ts";
 import type { Row } from "../../kernel/rows.ts";
@@ -9,8 +9,8 @@ import {
 } from "../../kernel/identity.ts";
 import { isNumber, ValueType } from "../../kernel/values.ts";
 import {
-  OperationResultType,
   type OperationResult,
+  OperationResultType,
 } from "../../kernel/operation.ts";
 
 const INVALID_PATH = "cli.file.invalid_path";

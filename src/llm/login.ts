@@ -1,20 +1,20 @@
 import {
-  createModels,
-  ModelsError,
   type AuthEvent,
   type AuthPrompt,
+  createModels,
   type CredentialStore,
+  ModelsError,
   type Provider,
 } from "@earendil-works/pi-ai";
 import { OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import { oauthSecretSchema } from "../custody/contract.ts";
 import { LLM_PLATFORMS, piProviderId, Platform } from "./platforms.ts";
+import type { LoginSessionStore } from "./sessions.ts";
 import {
+  type LoginSession,
   LoginSessionMode,
   LoginSessionState,
-  LoginSessionStore,
-  type LoginSession,
 } from "./sessions.ts";
 
 export const COPILOT_ENTERPRISE_DOMAIN_PLACEHOLDER = "company.ghe.com";

@@ -3,11 +3,11 @@ import type { Store, Transaction } from "../kernel/store.ts";
 import { OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import {
-  WorkerErrorCode,
   type Registration,
   type SchedulerClaims,
   type VerifiedClient,
   type WorkerBindingOf,
+  WorkerErrorCode,
   type WorkerRegistrations,
 } from "./contract.ts";
 import {

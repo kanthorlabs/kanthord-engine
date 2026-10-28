@@ -3,31 +3,32 @@ import {
   closeSync,
   mkdirSync,
   openSync,
-  readFileSync,
   readdirSync,
+  readFileSync,
   renameSync,
-  rmSync,
   rmdirSync,
+  rmSync,
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
-import { EnvironmentSource, type Environment } from "../kernel/devcontainer.ts";
+import type { EnvironmentSource } from "../kernel/devcontainer.ts";
+import type { Environment } from "../kernel/devcontainer.ts";
 import { digest, timestamp } from "../kernel/json.ts";
 import {
-  EnvironmentFailureClass,
-  EnvironmentStatus,
-  EnvironmentTarget,
-  FailureOrigin,
-  MAX_CHECKS,
+  type CheckResult,
   checkResultSchema,
+  EnvironmentFailureClass,
   environmentFailureClassSchema,
   environmentFailureSchema,
   environmentStateSchema,
+  EnvironmentStatus,
   environmentStatusSchema,
+  EnvironmentTarget,
   environmentTargetSchema,
+  FailureOrigin,
   failureOriginSchema,
-  type CheckResult,
+  MAX_CHECKS,
 } from "./contract.ts";
 
 export {

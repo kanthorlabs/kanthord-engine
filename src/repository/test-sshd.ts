@@ -3,7 +3,7 @@ import { execFile, spawn } from "node:child_process";
 import { accessSync, constants } from "node:fs";
 import { createPublicKey, randomBytes, verify } from "node:crypto";
 import { appendFile, readFile, writeFile } from "node:fs/promises";
-import { connect, createServer, type AddressInfo } from "node:net";
+import { type AddressInfo, connect, createServer } from "node:net";
 import { userInfo } from "node:os";
 import { join } from "node:path";
 import type { TestContext } from "node:test";
@@ -16,9 +16,9 @@ import { SSH_SIGN_USER } from "./contract.ts";
 import {
   generateSshKey,
   SSH_KEY_TYPE,
+  sshPublicKeyBlob,
   SshReader,
   SshWriter,
-  sshPublicKeyBlob,
 } from "./ssh-key.ts";
 import {
   relayedSignature,

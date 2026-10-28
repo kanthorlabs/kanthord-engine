@@ -1,17 +1,17 @@
 import {
-  constants,
   closeSync,
+  constants,
   fstatSync,
+  fsyncSync,
   linkSync,
   lstatSync,
   mkdirSync,
   openSync,
   readFileSync,
   renameSync,
+  type Stats,
   unlinkSync,
   writeFileSync,
-  fsyncSync,
-  type Stats,
 } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { dirname, join } from "node:path";
@@ -97,7 +97,6 @@ export function readPrivate(path: string): string {
   }
 }
 
-/** Same-directory publication: init never overwrites; explicit replacements are atomic. */
 export function writePrivate(
   path: string,
   content: string,
@@ -107,6 +106,7 @@ export function writePrivate(
   if (replace) audit(path, FileKind.File, true);
   const temporary = join(dirname(path), `.${randomUUID()}.tmp`);
   let fd: number | undefined;
+  let failure: unknown;
   try {
     fd = openPrivate(
       temporary,
@@ -119,18 +119,21 @@ export function writePrivate(
     if (replace) renameSync(temporary, path);
     else linkSync(temporary, path);
   } catch (error) {
-    if (error instanceof Diagnostic) throw error;
-    throw new Diagnostic(
-      "system.files.publish_failed",
-      "cannot publish file; the destination must be absent",
-      { fields: [["path", path]] },
-    );
-  } finally {
-    if (fd !== undefined) closeSync(fd);
-    try {
-      unlinkSync(temporary);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== FILE_NOT_FOUND) throw error;
-    }
+    failure =
+      error instanceof Diagnostic
+        ? error
+        : new Diagnostic(
+            "system.files.publish_failed",
+            "cannot publish file; the destination must be absent",
+            { fields: [["path", path]] },
+          );
   }
+  if (fd !== undefined) closeSync(fd);
+  try {
+    unlinkSync(temporary);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== FILE_NOT_FOUND)
+      failure ??= error;
+  }
+  if (failure !== undefined) throw failure;
 }

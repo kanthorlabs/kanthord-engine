@@ -2,28 +2,28 @@ import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
 import {
   execFile,
+  type ExecFileException,
   spawn,
   spawnSync,
-  type ExecFileException,
 } from "node:child_process";
 import {
   chmodSync,
   mkdirSync,
-  readFileSync,
   readdirSync,
+  readFileSync,
   renameSync,
   writeFileSync,
 } from "node:fs";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 import { stringify } from "yaml";
-import { configuration, CONFIG_VERSION } from "../../config/index.ts";
+import { CONFIG_VERSION, configuration } from "../../config/index.ts";
 import { requirePiTools, temporary } from "../../kernel/test-support.ts";
 import { createServer } from "node:http";
 import { writePrivate } from "../../kernel/files.ts";
 import {
-  Store,
   type Migrations,
+  Store,
   type Transaction,
 } from "../../kernel/store.ts";
 import { CancellationContext } from "../../kernel/context.ts";
@@ -51,7 +51,7 @@ import {
 } from "./test-support.ts";
 import { fakeContainerHost, fakeRepositoryFiles } from "./container-fakes.ts";
 import { slotRuns } from "./environment-test-support.ts";
-import { workerAcceptance, WORKER_DEFAULTS } from "./worker-acceptance.ts";
+import { WORKER_DEFAULTS, workerAcceptance } from "./worker-acceptance.ts";
 import type { EnvironmentRuntime } from "../../project/environment-state.ts";
 import type { SlotDriver } from "./slot-driver.ts";
 import { llmOperations } from "../../llm/contract.ts";
@@ -69,9 +69,9 @@ import {
   INBOUND_CREATED_STATUS,
   InboundKind,
   InboundPlatform,
-  intakeOperations,
   INTAKE_SERVICE_NAME,
   type IntakeInventoryEntry,
+  intakeOperations,
 } from "../../intake/contract.ts";
 import { repositoryOperations } from "../../repository/contract.ts";
 import {
@@ -80,7 +80,7 @@ import {
   PROJECT_ID_PREFIX,
   projectOperations,
 } from "../../project/contract.ts";
-import { createIdentity, createIdempotencyKey } from "../../kernel/identity.ts";
+import { createIdempotencyKey, createIdentity } from "../../kernel/identity.ts";
 import { errorSchema } from "../../kernel/errors.ts";
 
 const ExitCode = { Success: 0, Failure: 1 } as const;
@@ -757,13 +757,10 @@ test("serve starts with redirected stdout without issuing a JWT; SIGTERM drains 
           const record = JSON.parse(line);
           if (record.msg.startsWith(GATEWAY_STARTED_MESSAGE))
             resolve(record.port);
-        } catch {
-          /* Wait for a complete JSON log record. */
-        }
+        } catch {}
       }
     });
   });
-  // Hono's in-process request and the real listener have the same Host policy.
   const { request } = await import("node:http");
   const health = await new Promise<{ status: number; body: string }>(
     (resolve, reject) => {
@@ -881,7 +878,6 @@ test("unsafe SIGHUP replacement initiates shutdown and receives no log record", 
   const paths = layout(temporary(t));
   paths.config.log.destination = "file";
   writePrivate(paths.env.KANTHORD_CONFIG!, stringify(paths.config), true);
-  // The server's run/start boundary supplies deterministic readiness to this subprocess test.
   const child = spawn(
     process.execPath,
     [

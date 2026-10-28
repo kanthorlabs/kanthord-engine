@@ -3,8 +3,8 @@ import type { Logger } from "pino";
 import {
   apiKeySecretSchema,
   GrantKind,
-  InboundOperation,
   type InboundGrantInput,
+  InboundOperation,
   type Material,
 } from "../custody/contract.ts";
 import type { CallerIdentity, ServiceIdentity } from "../kernel/caller.ts";
@@ -14,15 +14,15 @@ import { OperationResultType } from "../kernel/operation.ts";
 import { canonicalJSON } from "../kernel/json.ts";
 import type { Store, Transaction } from "../kernel/store.ts";
 import {
-  GitHubTargetKind,
-  githubCheckpointSchema,
-  repositoryOf,
   type GitHubAnswer,
   type GitHubCheckpoint,
-  type GitHubFailure,
+  githubCheckpointSchema,
   type GitHubEvent,
   type GitHubEventsAnswer,
+  type GitHubFailure,
   type GitHubPlatform,
+  GitHubTargetKind,
+  repositoryOf,
 } from "../repository/github.ts";
 import type { IntakeCustody } from "./action-check.ts";
 import { configurationSchemaOf, resourceIdentityOf } from "./configuration.ts";
@@ -36,9 +36,9 @@ import {
 } from "./contract.ts";
 import { findEvent, insertEvent, pendingCount } from "./event-store.ts";
 import {
+  type InboundRow,
   readInbound,
   writeCheckpoint,
-  type InboundRow,
 } from "./inbound-store.ts";
 
 const RUNNING_AFTER_STOP = 0;

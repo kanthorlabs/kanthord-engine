@@ -3,12 +3,12 @@ import type { z } from "zod";
 import { CauseAttribute } from "../kernel/cause.ts";
 import type { Transaction } from "../kernel/store.ts";
 import { CAUSE_LABEL_SUFFIX, effectiveCauseOf } from "./cause-label.ts";
+import type { trackingOperations } from "./contract.ts";
 import {
   FACET_VALUES_MAX,
-  TraceSort,
-  traceListItemSchema,
-  trackingOperations,
   type TraceListItem,
+  traceListItemSchema,
+  TraceSort,
 } from "./contract.ts";
 import { TRACE_COLUMNS, traceSummaryOf } from "./trace-store.ts";
 

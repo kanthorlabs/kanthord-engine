@@ -3,9 +3,9 @@ import type { Transaction } from "../kernel/store.ts";
 import { isNumber, isString } from "../kernel/values.ts";
 import {
   COLLECTION_MAX,
+  type Span,
   SpanStatus,
   TraceState,
-  type Span,
   type TraceState as TraceStateValue,
 } from "./contract.ts";
 

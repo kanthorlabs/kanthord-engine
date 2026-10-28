@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { identitySchema } from "../kernel/identity.ts";
-import { sealedObjectSchema, type SealedObject } from "../kernel/hpke.ts";
+import { type SealedObject, sealedObjectSchema } from "../kernel/hpke.ts";
 import { canonicalJSON } from "../kernel/json.ts";
 import type { CommitType } from "../kernel/commit-message.ts";
 import type { CredentialStore } from "@earendil-works/pi-ai";
@@ -13,11 +13,11 @@ import type {
 import type { Context } from "../kernel/context.ts";
 import type { ExecutionClaim } from "../kernel/operation.ts";
 import {
-  resourceFailureReasonSchema,
-  ResourceStatus,
   type ResourceCheck,
   type ResourceEntry,
+  resourceFailureReasonSchema,
   type ResourceObserver,
+  ResourceStatus,
   type ResourceStatusValue,
 } from "../kernel/health.ts";
 import type { Transaction } from "../kernel/store.ts";

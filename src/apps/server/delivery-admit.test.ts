@@ -15,15 +15,15 @@ import {
   EndState,
   MISSION_SERVICE_NAME,
   MissionErrorCode,
+  missionOperations,
   NodeState,
+  type PlatformAddress,
   PlatformAddressKind,
   RepositoryAction,
-  missionOperations,
-  type PlatformAddress,
 } from "../../mission/contract.ts";
 import {
-  REQUEST_NUMBER,
   externalRequestHarness,
+  REQUEST_NUMBER,
 } from "../../mission/test-support.ts";
 import { decodeGitHubEvent } from "../../repository/index.ts";
 

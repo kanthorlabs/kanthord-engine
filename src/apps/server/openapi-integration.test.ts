@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { ulid } from "ulid";
 import { parse } from "yaml";
-import { readFileSync, readdirSync, existsSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import SwaggerParser from "@apidevtools/swagger-parser";
 import { gatewayFixture } from "./test-support.ts";
@@ -24,9 +24,9 @@ import {
   projectOperations,
 } from "../../project/contract.ts";
 import {
-  MISSION_INITIAL_VERSION,
   AssetKind,
   Intent,
+  MISSION_INITIAL_VERSION,
   missionOperations,
   missionSchema,
 } from "../../mission/contract.ts";
@@ -36,9 +36,9 @@ import {
   webhookInboundSchema,
 } from "../../intake/contract.ts";
 import {
-  openapiPath,
   emitOpenAPI,
   emitOpenAPIFiles,
+  openapiPath,
   serializeOpenAPIFile,
 } from "../../gateway/local.ts";
 import {
@@ -47,14 +47,14 @@ import {
   causeSubcategorySchema,
 } from "../../kernel/cause.ts";
 import { errorSchema } from "../../kernel/errors.ts";
-import { createIdentity, createIdempotencyKey } from "../../kernel/identity.ts";
+import { createIdempotencyKey, createIdentity } from "../../kernel/identity.ts";
 import { HttpStatus } from "../../kernel/http.ts";
 import {
   AccessPolicy,
   hasHttpRoute,
+  type Operation,
   OperationRegistry,
   OperationResultType,
-  type Operation,
 } from "../../kernel/operation.ts";
 import { testMachineIdentity } from "../../kernel/test-identity.ts";
 import { directClient } from "../../gateway/index.ts";
@@ -1659,7 +1659,6 @@ test("published OpenAPI validates, matches the registry exactly, and describes r
     assert.match(response.headers.get("content-type")!, /application\/yaml/);
     assert.equal(await response.text(), readFileSync(join(root, file), "utf8"));
   }
-  // Resolve external references over HTTP as an actual consumer would.
   const remote = await SwaggerParser.validate(
     `${fixture.endpoint}/api/openapi.yaml`,
     { resolve: { http: { safeUrlResolver: false } } },

@@ -3,18 +3,18 @@ import { test } from "node:test";
 import { decode, sign } from "hono/jwt";
 import { deriveKey } from "../../kernel/json.ts";
 import { HttpStatus } from "../../kernel/http.ts";
-import { isHumanIdentity, IdentityKind } from "../../kernel/caller.ts";
+import { IdentityKind, isHumanIdentity } from "../../kernel/caller.ts";
 import { gatewayOperations } from "../../gateway/contract.ts";
 import { workerOperations } from "../../worker/contract.ts";
-import { projectOperations, BindingKind } from "../../project/contract.ts";
+import { BindingKind, projectOperations } from "../../project/contract.ts";
 import { httpClient } from "../../gateway/client.ts";
 import { directClient } from "../../gateway/index.ts";
 import { OperationResultType } from "../../kernel/operation.ts";
 import {
   fakeMachines,
   gatewayFixture,
-  TEST_WORKER_BINDING,
   TEST_PROJECT_ID,
+  TEST_WORKER_BINDING,
 } from "./test-support.ts";
 import { createIdempotencyKey } from "../../kernel/identity.ts";
 const MILLISECONDS_PER_SECOND = 1000;

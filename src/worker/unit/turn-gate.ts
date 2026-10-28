@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { PromptTemplate } from "../../agent/contract.ts";
+import type { PromptTemplate } from "../../agent/contract.ts";
 import { readdirSync, rmSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import type { Context } from "../../kernel/context.ts";
@@ -11,9 +11,9 @@ import {
 import type { TaskContent } from "../../mission/contract.ts";
 import type { WorkPrompt } from "../../agent/prompt-composer.ts";
 import {
+  type Attributes,
   COLLECTION_MAX,
   SpanStatus,
-  type Attributes,
 } from "../../tracking/contract.ts";
 import { EndReason, ExecutionStop } from "./execution-run.ts";
 import { gitFailure } from "./method-telemetry.ts";
@@ -38,7 +38,7 @@ import {
 } from "./local-git.ts";
 import { MERGE_MARKERS_LEFT, TurnViolation } from "./stop-codes.ts";
 import type { StepsState } from "./steps-implement.ts";
-import { SpanOperation, type SpanEnd } from "./telemetry.ts";
+import { type SpanEnd, SpanOperation } from "./telemetry.ts";
 import { SCRATCH_DIRECTORY, type WorkspaceCheckout } from "./workspace.ts";
 
 export const GateMode = {

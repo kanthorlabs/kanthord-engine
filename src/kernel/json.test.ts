@@ -12,7 +12,7 @@ test("RFC 8785 canonicalization preserves numeric-name ordering, nested order, a
     CANONICAL_NESTED_OBJECT,
   );
   assert.equal(
-    canonicalJSON([333333333.33333329, 1e30, 4.5, 2e-3, 1e-27]),
+    canonicalJSON([Number("333333333.33333329"), 1e30, 4.5, 2e-3, 1e-27]),
     CANONICAL_NUMBERS,
   );
   assert.equal(digest({ b: 1, a: 2 }), digest({ a: 2, b: 1 }));

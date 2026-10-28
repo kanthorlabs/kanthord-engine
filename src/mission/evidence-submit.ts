@@ -9,12 +9,12 @@ import { isObject } from "../kernel/values.ts";
 import { S3_RESULT_CODE_PREFIX } from "../storage/contract.ts";
 import {
   AssetKind,
-  MissionErrorCode,
-  UPLOAD_LIFETIME_MS,
-  Intent,
   type EvidenceSubmit,
+  Intent,
   type MissionBindings,
+  MissionErrorCode,
   type Revision,
+  UPLOAD_LIFETIME_MS,
 } from "./contract.ts";
 import { admitExecution, requireTextBound } from "./execution.ts";
 import {
@@ -28,10 +28,10 @@ import {
 } from "./evidence-content.ts";
 import { evidenceRecord } from "./record-read.ts";
 import {
-  failedBindingsOf,
-  insertEvidence,
   type AssetRow,
   type EvidenceRow,
+  failedBindingsOf,
+  insertEvidence,
 } from "./record-store.ts";
 import type { Dependencies } from "./service.ts";
 import {

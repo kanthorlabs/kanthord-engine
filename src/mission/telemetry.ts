@@ -1,5 +1,5 @@
-import { SpanStatus, type ExecutionTrace } from "../tracking/contract.ts";
-import { UploadCheckSpan, type UploadCheckFailure } from "./contract.ts";
+import { type ExecutionTrace, SpanStatus } from "../tracking/contract.ts";
+import { type UploadCheckFailure, UploadCheckSpan } from "./contract.ts";
 
 const END_RECORD = "end";
 

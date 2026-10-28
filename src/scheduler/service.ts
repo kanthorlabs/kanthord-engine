@@ -21,16 +21,16 @@ import {
   type OperationRegistry,
 } from "../kernel/operation.ts";
 import {
-  HealthStatus,
   type Healthcheck,
+  HealthStatus,
   type Service,
 } from "../kernel/service.ts";
 import type { Store, Transaction } from "../kernel/store.ts";
 import type { SchedulerConfig } from "./config.ts";
 import {
   ExecutionEnd,
-  RevokeCause,
   type ExecutionTelemetry,
+  RevokeCause,
 } from "../tracking/contract.ts";
 import { executionTransition, reportLost } from "./telemetry.ts";
 import {
@@ -52,30 +52,30 @@ import { workPull } from "./work-pull.ts";
 import { release } from "./release.ts";
 import { claimGet, executionGet, executionList } from "./execution-read.ts";
 import {
-  JOB_IDENTITY_PREFIX,
+  type AgentChains,
+  type AgentPin,
+  type AgentSelection,
+  type EndedExecution,
+  type EnvironmentGate,
   EXECUTION_IDENTITY_PREFIX,
+  type Job,
+  JOB_IDENTITY_PREFIX,
   LOSS_SWEEP_INTERVAL_MS,
+  type MissionBranches,
+  type MissionClaimFacts,
+  type MissionTransitions,
+  type NodeTransition,
+  type ProjectPauses,
   QUEUE_LIST_LIMIT_DEFAULT,
+  type Registrations,
+  type RevokedExecution,
   SCHEDULER_SERVICE_NAME,
   schedulerOperations,
-  type Job,
-  type WorkQueue,
-  type MissionTransitions,
-  type MissionBranches,
-  type AgentChains,
-  type AgentSelection,
-  type AgentPin,
-  type Registrations,
-  type WorkerDeclarations,
-  type ProjectPauses,
-  type WorkerBindings,
-  type EnvironmentGate,
-  type MissionClaimFacts,
-  type EndedExecution,
-  type NodeTransition,
-  type RevokedExecution,
   type TraceIdentity,
   type UnmatchedClaim,
+  type WorkerBindings,
+  type WorkerDeclarations,
+  type WorkQueue,
 } from "./contract.ts";
 import { unmatchedClaims } from "./match.ts";
 

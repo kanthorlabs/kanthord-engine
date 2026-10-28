@@ -22,35 +22,36 @@ import {
 } from "../../kernel/handover.ts";
 import { HttpStatus } from "../../kernel/http.ts";
 import {
-  OperationResultType,
   type OperationResult,
+  OperationResultType,
 } from "../../kernel/operation.ts";
-import { temporary, hostEnvironment } from "../../kernel/test-support.ts";
-import { missionOperations, Intent } from "../../mission/contract.ts";
+import { hostEnvironment, temporary } from "../../kernel/test-support.ts";
+import { Intent, missionOperations } from "../../mission/contract.ts";
 import { RepositoryComponent } from "../../repository/index.ts";
 import {
-  WorkPullKind,
   type ExecutionRecord,
+  WorkPullKind,
 } from "../../scheduler/contract.ts";
 import {
   ExecutionIntent,
-  workerOperations,
   type RepositoryTransport,
+  workerOperations,
 } from "../../worker/contract.ts";
-import { agentOperations, ChainLevel } from "../../agent/contract.ts";
+import type { agentOperations } from "../../agent/contract.ts";
+import { ChainLevel } from "../../agent/contract.ts";
 import { SWE_AGENT_PROMPT } from "../../agent/prompt-assets.ts";
 import { framing, PromptConsumer } from "../../agent/prompt-render.ts";
 import {
-  WorkspaceRoot,
-  WorkspaceKind,
+  discardChanges,
   ExecutionBudget,
+  handedSshAccess,
+  headCommit,
   openNativeAgent,
   renderWorkPrompt,
   runVerifications,
   verificationPassed,
-  discardChanges,
-  headCommit,
-  handedSshAccess,
+  WorkspaceKind,
+  WorkspaceRoot,
 } from "../../worker/unit/index.ts";
 import {
   fauxAssistantMessage,
@@ -60,12 +61,12 @@ import {
 } from "../../worker/unit/test-support.ts";
 import { environment, kanthord } from "./cli-support.ts";
 import {
+  COVERING_WORKER_BINDINGS,
+  createFakeSshCredential,
+  enableCoveringAgents,
   FAKE_GITHUB_HOST_KEY,
   FAKE_SSH_HOST,
-  createFakeSshCredential,
   gatewayFixture,
-  COVERING_WORKER_BINDINGS,
-  enableCoveringAgents,
 } from "./test-support.ts";
 import { SHIPPED_TEMPLATES } from "../../agent/prompt-templates.ts";
 

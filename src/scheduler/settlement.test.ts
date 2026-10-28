@@ -4,26 +4,26 @@ import { createIdentity } from "../kernel/identity.ts";
 import { ClaimState, ExecutionStopReason, TransitionRule } from "./contract.ts";
 import {
   executionFixture,
-  schedulerHarness,
-  FIXTURE_NOW,
-  FIXTURE_DEADLINE,
   FIRST_LOSS_WITHOUT_JOB,
+  FIXTURE_DEADLINE,
+  FIXTURE_NOW,
+  schedulerHarness,
   transitionFixture,
 } from "./test-support.ts";
 import { executionTrace } from "./telemetry.ts";
 import {
-  insertExecution,
-  readExecution,
   claimStateOf,
   endExecution,
+  insertExecution,
+  readExecution,
 } from "./execution-store.ts";
 import {
   consecutiveFailures,
+  EXECUTION_NOT_RUNNING,
+  requireRunning,
+  revoke,
   settleNode,
   settleRuntime,
-  revoke,
-  requireRunning,
-  EXECUTION_NOT_RUNNING,
 } from "./settlement.ts";
 
 const ONE_LOSS = 1;

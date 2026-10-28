@@ -5,11 +5,11 @@ import type { Context } from "../../kernel/context.ts";
 import { ensureDirectory } from "../../kernel/files.ts";
 import { killProcessGroup } from "../../kernel/process-group.ts";
 import {
+  type CommandResult,
   ENVIRONMENT_DIRECTORY,
+  type ProofInput,
   ProofPhase,
   TAIL_BYTES,
-  type CommandResult,
-  type ProofInput,
 } from "../../project/environment-state.ts";
 import { threadEnvironment } from "./thread-driver.ts";
 

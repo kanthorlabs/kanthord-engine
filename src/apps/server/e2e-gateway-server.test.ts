@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { mkdirSync, statSync } from "node:fs";
 import { request } from "node:http";
@@ -8,7 +8,7 @@ import { createInterface } from "node:readline";
 import { test, type TestContext } from "node:test";
 import { stringify } from "yaml";
 import { z } from "zod";
-import { configuration, CONFIG_VERSION } from "../../config/index.ts";
+import { CONFIG_VERSION, configuration } from "../../config/index.ts";
 import type { CredentialAnswer } from "../../custody/contract.ts";
 import {
   gatewayOperations,
@@ -24,19 +24,20 @@ import {
 } from "../../kernel/files.ts";
 import {
   HealthScope,
-  ResourceFailureReason,
-  ResourceStatus,
   type ResourceCheck,
   type ResourceEntry,
+  ResourceFailureReason,
+  ResourceStatus,
 } from "../../kernel/health.ts";
 import { HttpStatus } from "../../kernel/http.ts";
 import { temporary } from "../../kernel/test-support.ts";
 import {
+  Intent,
   type Mission,
   type NodeChange,
-  Intent,
 } from "../../mission/contract.ts";
-import { BindingKind, projectOperations } from "../../project/contract.ts";
+import type { projectOperations } from "../../project/contract.ts";
+import { BindingKind } from "../../project/contract.ts";
 import type { Job } from "../../scheduler/contract.ts";
 import type { AgentEnablement } from "../../agent/contract.ts";
 import { environment, kanthord } from "./cli-support.ts";

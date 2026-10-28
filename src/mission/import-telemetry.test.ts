@@ -4,8 +4,8 @@ import { COLLECTION_MAX, SpanStatus } from "../tracking/contract.ts";
 import {
   IMPORT_OPERATION,
   ImportAttribute,
-  importTrace,
   type ImportFacts,
+  importTrace,
 } from "./import-telemetry.ts";
 
 const APPLIED_AT = 700;

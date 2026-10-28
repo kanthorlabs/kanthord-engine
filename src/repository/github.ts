@@ -7,7 +7,7 @@ import type { CallerIdentity } from "../kernel/caller.ts";
 import { OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import { canonicalJSON } from "../kernel/json.ts";
-import { ValueType, isString } from "../kernel/values.ts";
+import { isString, ValueType } from "../kernel/values.ts";
 
 export const GITHUB_API_BASE_URL = "https://api.github.com";
 export const GITHUB_API_VERSION = "2022-11-28";

@@ -8,10 +8,10 @@ import { temporary } from "../../kernel/test-support.ts";
 import * as connector from "../../repository/connector.ts";
 import { nodeBranchOf } from "../../repository/node-branch.ts";
 import type { Revision } from "../../mission/contract.ts";
+import type { scriptedProvider } from "./test-support.ts";
 import {
   fauxAssistantMessage,
   fauxToolCall,
-  scriptedProvider,
   TEST_SSH_ACCESS,
 } from "./test-support.ts";
 import {
@@ -32,7 +32,7 @@ import {
   runStepsImplement,
   startCheck,
 } from "./steps-implement.ts";
-import { RefreshResult, refreshAtClaim } from "./base-refresh.ts";
+import { refreshAtClaim, RefreshResult } from "./base-refresh.ts";
 import { MERGE_MARKERS_LEFT } from "./turn-gate.ts";
 import { nodeUnitOf } from "./release-gate.ts";
 import { SHIPPED_TEMPLATES } from "../../agent/prompt-templates.ts";

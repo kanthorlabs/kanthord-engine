@@ -9,12 +9,12 @@ import {
   AdmissionRefusal,
   AssetKind,
   Disposition,
+  type Evidence,
+  type ExternalAction,
   MISSION_SERVICE_NAME,
   MissionErrorCode,
   NodeState,
   Resolution,
-  type Evidence,
-  type ExternalAction,
 } from "../../mission/contract.ts";
 import { ActionResultKind } from "../../worker/contract.ts";
 import { completed, pushNextNodeBranchCommit, until } from "./cli-support.ts";
@@ -22,9 +22,9 @@ import {
   FIRST_INDEX,
   GATED_KEY,
   MERGE_KEY,
+  type Page,
   RESOURCE,
   setup,
-  type Page,
   type Webhook,
 } from "./delivery-support.ts";
 

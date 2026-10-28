@@ -7,16 +7,16 @@ import { OperationError } from "../kernel/errors.ts";
 import { HealthRegistry } from "../kernel/health.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import { createIdentity } from "../kernel/identity.ts";
-import { OperationRegistry, type CallerContext } from "../kernel/operation.ts";
+import { type CallerContext, OperationRegistry } from "../kernel/operation.ts";
 import { IN_MEMORY_DATABASE, Store } from "../kernel/store.ts";
 import {
   DELETE_IDS_MAX,
   INTAKE_SERVICE_NAME,
+  intakeOperations,
   OutboundOperation,
   OutboundRequestState,
-  ResultClass,
-  intakeOperations,
   type OutboundRequestStateValue,
+  ResultClass,
 } from "./contract.ts";
 import { IntakeService } from "./index.ts";
 import { intakeMigrations } from "./migrations.ts";
@@ -27,7 +27,7 @@ import {
   insertPending,
   succeed,
 } from "./outbound-store.ts";
-import { FinalizationKind, type CallAnswer } from "./outbound.ts";
+import { type CallAnswer, FinalizationKind } from "./outbound.ts";
 import { unusedActionDependencies } from "./test-support.ts";
 
 const PROJECT_ID = "project_01ARZ3NDEKTSV4RRFFQ69G5FAV";

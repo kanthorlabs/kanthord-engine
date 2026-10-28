@@ -7,12 +7,12 @@ import { ProjectErrorCode, projectOperations } from "../../project/contract.ts";
 import { requirePiTools, temporary } from "../../kernel/test-support.ts";
 import { HttpStatus } from "../../kernel/http.ts";
 import {
+  alwaysAvailable,
   InstancePlacement,
   PlacementIssue,
-  WorkerErrorCode,
-  alwaysAvailable,
-  workerOperations,
   type PlacementStatus,
+  WorkerErrorCode,
+  workerOperations,
 } from "../../worker/contract.ts";
 import { httpClient } from "../../gateway/client.ts";
 import { OperationResultType } from "../../kernel/operation.ts";
@@ -20,7 +20,7 @@ import { until } from "./cli-support.ts";
 import { humanCaller } from "./test-support.ts";
 import { threadEnvironment } from "./thread-driver.ts";
 import { POOL_BACKOFF_INITIAL_MS } from "./worker-pool.ts";
-import { workerAcceptance, WORKER_DEFAULTS } from "./worker-acceptance.ts";
+import { WORKER_DEFAULTS, workerAcceptance } from "./worker-acceptance.ts";
 
 const BINDING = "general";
 const RESOURCE_IDENTITY = `worker:kanthord:${BINDING}`;

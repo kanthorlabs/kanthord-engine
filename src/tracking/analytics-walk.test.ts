@@ -4,10 +4,10 @@ import { IN_MEMORY_DATABASE, Store } from "../kernel/store.ts";
 import { SpanOrigin, SpanStatus, TRACKING_SERVICE_NAME } from "./contract.ts";
 import { trackingMigrations } from "./migrations.ts";
 import {
-  selectTraces,
-  walkSpans,
   type AnalyticsSpan,
   type SelectedTrace,
+  selectTraces,
+  walkSpans,
 } from "./analytics-walk.ts";
 import { insertSpan } from "./trace-store.ts";
 

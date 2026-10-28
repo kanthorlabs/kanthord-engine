@@ -1,11 +1,11 @@
-import { type OperationRegistry, type StoreMap } from "../kernel/operation.ts";
+import type { OperationRegistry, StoreMap } from "../kernel/operation.ts";
 import type { Store } from "../kernel/store.ts";
 import {
   Authentication,
   type AuthenticationLookups,
 } from "./auth/authentication.ts";
 import { Idempotency } from "./idempotency.ts";
-import { Invocation, type ExecutionLookup } from "./invocation.ts";
+import { type ExecutionLookup, Invocation } from "./invocation.ts";
 export { GatewayService, type GatewayDependencies } from "./service.ts";
 export { gatewayMigrations } from "./migrations.ts";
 export { collectInventories, resourceHealthReport } from "./health-report.ts";

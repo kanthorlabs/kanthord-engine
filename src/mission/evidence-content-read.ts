@@ -7,19 +7,19 @@ import type { Transaction } from "../kernel/store.ts";
 import {
   AssetKind,
   CONTENT_ENCODING,
-  storedContentSchema,
-  MissionErrorCode,
-  Intent,
   type EvidenceAsset,
+  Intent,
+  MissionErrorCode,
+  storedContentSchema,
 } from "./contract.ts";
 import { admitExecution } from "./execution.ts";
 import { evidenceRecord, outcomeRecord } from "./record-read.ts";
 import { recordNotFound } from "./record-list.ts";
 import {
-  readCurrentOutcome,
-  readEvidence,
   type AssetRow,
   type EvidenceRow,
+  readCurrentOutcome,
+  readEvidence,
 } from "./record-store.ts";
 import { directDependenciesOf } from "./graph.ts";
 import { readDependencies } from "./store.ts";

@@ -19,7 +19,7 @@ test("ingress rejects duplicate members before JSON.parse drops them, including 
       },
     );
   }
-  assert.deepEqual(parseJSON('{"a":[true,null,1e3,"\\\""]}'), {
+  assert.deepEqual(parseJSON('{"a":[true,null,1e3,"\\""]}'), {
     a: [true, null, 1000, '"'],
   });
 });

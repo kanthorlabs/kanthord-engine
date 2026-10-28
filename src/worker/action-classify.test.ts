@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
-  OperationResultType,
   type OperationResult,
+  OperationResultType,
 } from "../kernel/operation.ts";
 import {
   ActionResultKind,
@@ -12,10 +12,10 @@ import {
   Uncertainty,
 } from "./contract.ts";
 import {
+  isResultClass,
   performedItem,
   readRefusalItem,
   recordedItem,
-  isResultClass,
 } from "./action-classify.ts";
 
 const ref = { key: "repo.pull_request", binding_id: "binding" };

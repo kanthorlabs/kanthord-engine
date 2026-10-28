@@ -8,7 +8,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { basename, join } from "node:path";
-import { Command } from "commander";
+import type { Command } from "commander";
 import { z } from "zod";
 import { Diagnostic } from "../../kernel/errors.ts";
 import type { Row } from "../../kernel/rows.ts";
@@ -18,12 +18,12 @@ import {
 } from "../../kernel/files.ts";
 import { identitySchema } from "../../kernel/identity.ts";
 import {
-  client,
-  printResult,
-  pagination,
-  mutate,
-  addPagination,
   addMutationOptions,
+  addPagination,
+  client,
+  mutate,
+  pagination,
+  printResult,
 } from "./mission-support.ts";
 import { IMPORT_MARKDOWN_NOTE, missionExamples } from "./mission-examples.ts";
 import { addFileBodyHelp } from "./file-body.ts";
@@ -35,19 +35,19 @@ import { addExecutionCommands } from "./mission-execution.ts";
 import {
   criterionSetSchema,
   graphEditSchema,
+  importApplySchema,
   ImportFormat,
   importFormatSchema,
   importSnapshotSchema,
-  importApplySchema,
-  retireSchema,
+  intentSchema,
   MISSION_IDENTITY_PREFIX,
   NODE_IDENTITY_PREFIX,
   nodeCreateSchema,
+  nodeStateSchema,
   nodeUpdateSchema,
   prioritySetSchema,
   rebindSchema,
-  nodeStateSchema,
-  intentSchema,
+  retireSchema,
 } from "../../mission/contract.ts";
 import { CommandName, PROGRAM_NAME } from "./constants.ts";
 import { validateProjectId } from "./project.ts";

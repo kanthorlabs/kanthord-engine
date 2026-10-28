@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import type { Transaction } from "../kernel/store.ts";
 import type {
-  ClaimFacts,
   Claimant,
+  ClaimFacts,
   ClaimNodeState,
   UnmatchedClaim,
 } from "./contract.ts";

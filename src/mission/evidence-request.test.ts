@@ -7,13 +7,13 @@ import { testHumanIdentity } from "../kernel/test-identity.ts";
 import {
   AssessmentResult,
   AssetKind,
-  MissionErrorCode,
+  type EvidenceRequest,
   Intent,
+  MissionErrorCode,
   NodeState,
   PlatformAddressKind,
   RepositoryAction,
   Resolution,
-  type EvidenceRequest,
 } from "./contract.ts";
 import { getRevision } from "./node-read.ts";
 import { actionStatesOf } from "./frozen-action.ts";

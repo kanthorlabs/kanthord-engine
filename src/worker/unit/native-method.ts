@@ -1,29 +1,29 @@
 import assert from "node:assert/strict";
 import {
   EndReason,
-  ExecutionEndKind,
-  type ExecutionStop,
   type ExecutionEnd,
+  ExecutionEndKind,
   type ExecutionRun,
+  type ExecutionStop,
 } from "./execution-run.ts";
 import {
   credentialRedaction,
-  openNativeAgent,
   type NativeAgent,
+  openNativeAgent,
 } from "./native-agent.ts";
 import { Phase, type SpanEnd, type TelemetrySink } from "./telemetry.ts";
 import { SpanStatus } from "../../tracking/contract.ts";
 import type { Revision } from "../../mission/contract.ts";
 import { verificationCommands } from "./evaluation-input.ts";
 import type { Context } from "../../kernel/context.ts";
-import { ExecutionRun as Run, type MethodClaim } from "./execution-run.ts";
+import { type MethodClaim, ExecutionRun as Run } from "./execution-run.ts";
 import type { MethodClients } from "./method-clients.ts";
 import {
   ExecutionIntent,
-  WorkerMethod,
   type ExecutionSetup,
-  type RepositoryTransport,
   type HostTools,
+  type RepositoryTransport,
+  WorkerMethod,
 } from "../contract.ts";
 import type { SshAccess } from "../../repository/contract.ts";
 import { getWorkerDeclaration } from "../catalog.ts";
@@ -33,7 +33,7 @@ import type {
   ModelRuntimeFactory,
 } from "./model-runtime.ts";
 import { ExecutionBudget } from "./budget.ts";
-import { readPrior, readPinnedRevision } from "./node-reads.ts";
+import { readPinnedRevision, readPrior } from "./node-reads.ts";
 import { prepareStepsWorkspace, runStepsImplement } from "./steps-implement.ts";
 import { runStepsExamine } from "./steps-examine.ts";
 import { runEvaluation } from "./evaluation.ts";

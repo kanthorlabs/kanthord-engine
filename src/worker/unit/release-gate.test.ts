@@ -23,7 +23,7 @@ import {
 import { AFFECTED_DECLARATION_FILE } from "./affected.ts";
 import { refreshAtRelease } from "./base-refresh.ts";
 import { releaseGate, ReleaseGateKind } from "./release-gate.ts";
-import { NoProgressRule, noProgressDetail } from "./progress-rule.ts";
+import { noProgressDetail, NoProgressRule } from "./progress-rule.ts";
 import { RELEASE_DIRECTORY, WorkspaceKind } from "./workspace.ts";
 import {
   advanceBase,

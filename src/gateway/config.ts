@@ -1,7 +1,7 @@
 import { isIP } from "node:net";
-import { isString, isNumber } from "../kernel/values.ts";
-import { ROOT_BASE_PATH, BASE_PATH_FORMAT } from "./base-path.ts";
-import { authConfigSchema, type AuthConfig } from "./auth/config.ts";
+import { isNumber, isString } from "../kernel/values.ts";
+import { BASE_PATH_FORMAT, ROOT_BASE_PATH } from "./base-path.ts";
+import { type AuthConfig, authConfigSchema } from "./auth/config.ts";
 const NO_LIFETIME = 0;
 export interface GatewayConfig {
   bind: string;

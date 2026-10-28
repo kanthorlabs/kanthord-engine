@@ -2,8 +2,8 @@ import { addAbortListener } from "node:events";
 import assert from "node:assert/strict";
 import type { Context } from "../../kernel/context.ts";
 import {
-  OperationResultType,
   type OperationResult,
+  OperationResultType,
 } from "../../kernel/operation.ts";
 import { createIdempotencyKey } from "../../kernel/identity.ts";
 

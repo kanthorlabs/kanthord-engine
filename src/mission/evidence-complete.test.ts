@@ -10,8 +10,8 @@ import {
 import {
   AssetKind,
   MissionErrorCode,
-  UPLOAD_LIFETIME_MS,
   type StorageBinding,
+  UPLOAD_LIFETIME_MS,
 } from "./contract.ts";
 import { IntakeErrorCode, ResultClass } from "../intake/contract.ts";
 import { S3_RESULT_CODE_PREFIX } from "../storage/contract.ts";

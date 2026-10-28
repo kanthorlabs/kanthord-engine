@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { z } from "zod";
 import { background } from "../kernel/context.ts";
-import { OperationError, type ErrorBody } from "../kernel/errors.ts";
+import { type ErrorBody, OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import { ResultClass } from "../intake/contract.ts";
 import { createIdentity } from "../kernel/identity.ts";
@@ -10,20 +10,20 @@ import type { CallerContext } from "../kernel/operation.ts";
 import type { Transaction } from "../kernel/store.ts";
 import {
   ActorKind,
-  AssessmentResult,
-  ActorService,
-  AssetKind,
   actorSchema,
+  ActorService,
+  AssessmentResult,
+  AssetKind,
   CheckEndState,
-  MissionErrorCode,
-  NodeState,
-  RepositoryAction,
-  RepositoryLanding,
-  Resolution,
-  platformAddressSchema,
   checkEndStateSchema,
   commitSchema,
   type IntakeCheck,
+  MissionErrorCode,
+  NodeState,
+  platformAddressSchema,
+  RepositoryAction,
+  RepositoryLanding,
+  Resolution,
 } from "./contract.ts";
 import {
   closeExternalAttempt,
@@ -38,13 +38,13 @@ import {
   insertEvidence,
   readAssets,
   readAttempt,
-  readEvidence,
   readDeferredCheckNodes,
+  readEvidence,
   readOpenAttempt,
   readRequests,
 } from "./record-store.ts";
 import { claimableMap, reconcileMission } from "./routing.ts";
-import { readNode, setNodeState, type NodeRow } from "./store.ts";
+import { type NodeRow, readNode, setNodeState } from "./store.ts";
 import type { Dependencies } from "./service.ts";
 import { requireMission } from "./write.ts";
 import { assessedCommitOf, authorizeRequest } from "./authorization.ts";

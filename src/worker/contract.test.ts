@@ -4,21 +4,21 @@ import { StablePlacementIssue, WorkerPlacement } from "../project/contract.ts";
 import { EnvironmentSource } from "../kernel/devcontainer.ts";
 import {
   ACTION_REQUEST_TOOL_NAME,
+  actionRequestResultSchema,
+  actionResultItemSchema,
+  ActionResultKind,
+  alwaysAvailable,
   ContainerRuntime,
+  executionEnvironmentSchema,
   InstancePlacement,
   PlacementIssue,
-  POOL_PLACEMENTS,
-  alwaysAvailable,
   placementStatusSchema,
-  ActionResultKind,
   PlatformAddressKind,
+  platformAddressSchema,
+  POOL_PLACEMENTS,
   RefusalClass,
   ResultClass,
   Uncertainty,
-  actionRequestResultSchema,
-  actionResultItemSchema,
-  executionEnvironmentSchema,
-  platformAddressSchema,
 } from "./contract.ts";
 
 const ID = "01ARZ3NDEKTSV4RRFFQ69G5FAV";

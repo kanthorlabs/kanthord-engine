@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { Command } from "commander";
+import type { Command } from "commander";
 import { httpClient, resolveClient } from "../../gateway/client.ts";
 import { Diagnostic } from "../../kernel/errors.ts";
 import { HttpStatus } from "../../kernel/http.ts";
@@ -12,8 +12,8 @@ import { createIdempotencyKey, identitySchema } from "../../kernel/identity.ts";
 import {
   BINDING_ID_PREFIX,
   BindingKind,
-  BindingState,
   bindingSetWriteInputSchema,
+  BindingState,
   ENVIRONMENT_SECRET_PLATFORM,
   ENVIRONMENT_SECRET_VARIABLE,
   environmentSecretOperations,

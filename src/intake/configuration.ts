@@ -1,8 +1,8 @@
 import { z } from "zod";
 import {
   InboundKind,
-  InboundPlatform,
   type InboundKindValue,
+  InboundPlatform,
   type InboundPlatformValue,
 } from "./contract.ts";
 

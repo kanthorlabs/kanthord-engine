@@ -8,22 +8,22 @@ import { setTimeout as delay } from "node:timers/promises";
 import { simpleGit } from "simple-git";
 import { isString } from "../../kernel/values.ts";
 import { parse, stringify } from "yaml";
-import { configuration, CONFIG_VERSION } from "../../config/index.ts";
+import { CONFIG_VERSION, configuration } from "../../config/index.ts";
 import { writePrivate } from "../../kernel/files.ts";
 import { HttpStatus } from "../../kernel/http.ts";
 import {
-  OperationResultType,
   type OperationResult,
+  OperationResultType,
 } from "../../kernel/operation.ts";
 import { temporary } from "../../kernel/test-support.ts";
 import {
   AssessmentResult,
-  NodeState,
   type Evidence,
+  NodeState,
 } from "../../mission/contract.ts";
 import {
-  WorkPullKind,
   type ExecutionRecord,
+  WorkPullKind,
 } from "../../scheduler/contract.ts";
 import {
   createFakeSshCredential,
@@ -55,11 +55,8 @@ export async function until<T>(
 type CliTestSupport = typeof import("../cli/test-support.ts");
 export type CliResult = Awaited<ReturnType<CliTestSupport["runKanthord"]>>;
 
-const CLI_TEST_SUPPORT = new URL("../cli/test-support.ts", import.meta.url)
-  .href;
-
 function cliTestSupport(): Promise<CliTestSupport> {
-  return import(CLI_TEST_SUPPORT) as Promise<CliTestSupport>;
+  return import("../cli/test-support.ts");
 }
 
 export async function spawnKanthord(

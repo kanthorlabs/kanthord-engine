@@ -13,6 +13,7 @@ import {
   BINDING_ID_PREFIX,
   BINDING_SET_INITIAL_VERSION,
   BindingKind,
+  bindingSetWriteInputSchema,
   BindingState,
   ChangeKind,
   LIST_LIMIT_DEFAULT,
@@ -20,7 +21,6 @@ import {
   PROJECT_SERVICE_NAME,
   ProjectErrorCode,
   REPOSITORY_PLATFORM,
-  bindingSetWriteInputSchema,
 } from "./contract.ts";
 
 test("action follows accepts assessment and refuses action dependencies before relation diagnostics", () => {

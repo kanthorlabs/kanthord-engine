@@ -4,9 +4,9 @@ import { setImmediate as turn } from "node:timers/promises";
 import pino from "pino";
 import {
   GrantKind,
-  InboundOperation,
   type GrantOf,
   type GrantRequest,
+  InboundOperation,
   type Material,
 } from "../custody/contract.ts";
 import { IdentityKind } from "../kernel/caller.ts";
@@ -15,9 +15,9 @@ import { background, CancellationContext } from "../kernel/context.ts";
 import { OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import {
-  OperationResultType,
   type ClientOptions,
   type OperationResult,
+  OperationResultType,
 } from "../kernel/operation.ts";
 import { IN_MEMORY_DATABASE, Store } from "../kernel/store.ts";
 import type {
@@ -29,10 +29,10 @@ import type {
 } from "../repository/github.ts";
 import {
   Consumer,
-  INTAKE_SERVICE_NAME,
   InboundEventState,
   InboundKind,
   InboundPlatform,
+  INTAKE_SERVICE_NAME,
   IntakeErrorCode,
   PLATFORM_CALL_DEADLINE_MS,
   ResultClass,
@@ -49,10 +49,10 @@ import {
   CycleAnswer,
   CycleOutcome,
   pollCycle,
+  type PollCycleDependencies,
+  PollLoops,
   PollRead,
   storeBatch,
-  PollLoops,
-  type PollCycleDependencies,
 } from "./poll.ts";
 
 const PROJECT_ID = "project_01ARZ3NDEKTSV4RRFFQ69G5FAV";

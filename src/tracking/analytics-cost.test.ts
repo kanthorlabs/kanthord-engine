@@ -9,7 +9,7 @@ import {
   TRACKING_SERVICE_NAME,
 } from "./contract.ts";
 import { trackingMigrations } from "./migrations.ts";
-import { readCost, type CostItem, type CostQuery } from "./analytics-cost.ts";
+import { type CostItem, type CostQuery, readCost } from "./analytics-cost.ts";
 import { insertSpan } from "./trace-store.ts";
 
 interface Turn {

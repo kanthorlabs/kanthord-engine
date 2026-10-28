@@ -1,7 +1,7 @@
 import { join } from "node:path";
 import type { Worker } from "node:worker_threads";
 import { LogDestination } from "../../kernel/log.ts";
-import { PoolPlacement, type PlacementStatus } from "../../worker/contract.ts";
+import { type PlacementStatus, PoolPlacement } from "../../worker/contract.ts";
 import { startThread } from "../worker/thread-start.ts";
 import type { SlotControl } from "../worker/thread-data.ts";
 import type {

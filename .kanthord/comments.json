@@ -1,0 +1,54 @@
+[
+  {
+    "path": "bin/kanthord.mjs",
+    "text": "// Keep this gate parseable on runtimes older than the supported floor."
+  },
+  {
+    "path": "src/config/index.ts",
+    "text": "// Convict errors may contain values; collect only schema-owned field names."
+  },
+  {
+    "path": "src/custody/contract.ts",
+    "text": "/** Supplied by Worker, which owns inference authorization through the claim's worker binding. */"
+  },
+  {
+    "path": "src/gateway/errors.ts",
+    "text": "/** The sole HTTP failure envelope, including middleware-owned responses. */"
+  },
+  {
+    "path": "src/gateway/json.ts",
+    "text": "/** Validate the text before JSON.parse can discard duplicate member names. */"
+  },
+  {
+    "path": "src/kernel/errors.ts",
+    "text": "/** Only explicitly safe diagnostics may cross the process boundary. */"
+  },
+  {
+    "path": "src/kernel/health.ts",
+    "text": "/** Borrows probes; service owners retain responsibility for their resources. */"
+  },
+  {
+    "path": "src/kernel/health.ts",
+    "text": "// Diagnostic boundary: rejection, invalid output and timeout are failures,"
+  },
+  {
+    "path": "src/kernel/health.ts",
+    "text": "// never a healthy fallback. Do not expose probe exceptions on a public API."
+  },
+  {
+    "path": "src/kernel/json.ts",
+    "text": "/** RFC 8785: emit members directly, including numeric-looking names. */"
+  },
+  {
+    "path": "src/kernel/log.ts",
+    "text": "// close() joins every descriptor, including files retired by SIGHUP."
+  },
+  {
+    "path": "src/kernel/operation.ts",
+    "text": "/** Exact delivery bytes and headers; never reconstructed from parsed JSON. */"
+  },
+  {
+    "path": "src/kernel/values.ts",
+    "text": "// TypeScript does not narrow typeof comparisons against named constants."
+  }
+]

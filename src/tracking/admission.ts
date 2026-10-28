@@ -2,20 +2,20 @@ import assert from "node:assert/strict";
 import { canonicalJSON } from "../kernel/json.ts";
 import type { Transaction } from "../kernel/store.ts";
 import {
-  Disposition,
-  EXECUTION_RECORD_LIMIT,
-  RecordKind,
-  RefusalReason,
-  SpanStatus,
-  TELEMETRY_RECORD_MAX_BYTES,
-  TELEMETRY_WRITE_RECORDS_MAX,
   type Acknowledgement,
   type Attributes,
+  Disposition,
+  EXECUTION_RECORD_LIMIT,
   type RecordDisposition,
+  RecordKind,
+  RefusalReason,
   type SessionEntryRecord,
   type Span,
   type SpanContribution,
   type SpanOrigin,
+  SpanStatus,
+  TELEMETRY_RECORD_MAX_BYTES,
+  TELEMETRY_WRITE_RECORDS_MAX,
   type TelemetryRecord,
   type TextRecord,
 } from "./contract.ts";
@@ -29,8 +29,8 @@ import {
   readText,
   recordExists,
   sessionSequenceTaken,
-  updateSpan,
   type TraceRow,
+  updateSpan,
 } from "./trace-store.ts";
 import { updateTraceSummary } from "./trace-summary.ts";
 

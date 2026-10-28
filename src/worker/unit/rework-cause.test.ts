@@ -9,9 +9,9 @@ import { AffectedVerdict } from "./affected.ts";
 import { UnmetGround } from "./judgement.ts";
 import { VerificationClass } from "./verification.ts";
 import {
+  type EvaluationFacts,
   EvaluationStage,
   reworkCauseOf,
-  type EvaluationFacts,
 } from "./rework-cause.ts";
 
 function facts(overrides: Partial<EvaluationFacts>): EvaluationFacts {

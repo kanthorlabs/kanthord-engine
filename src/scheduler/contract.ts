@@ -5,9 +5,9 @@ import { identitySchema } from "../kernel/identity.ts";
 import { timestamp } from "../kernel/json.ts";
 import {
   AccessPolicy,
+  type Operation,
   OperationLifetime,
   StoreName,
-  type Operation,
 } from "../kernel/operation.ts";
 import type { Transaction } from "../kernel/store.ts";
 

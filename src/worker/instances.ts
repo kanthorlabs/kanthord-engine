@@ -6,8 +6,8 @@ import {
   decodeX25519Key,
   generateX25519KeyPair,
   keyFingerprint,
-  sealJSON,
   type SealedObject,
+  sealJSON,
 } from "../kernel/hpke.ts";
 import type { Store, Transaction } from "../kernel/store.ts";
 import { packageVersion } from "../kernel/version.ts";
@@ -16,20 +16,20 @@ import { getWorkerDeclaration } from "./catalog.ts";
 import {
   BindingEntryState,
   CONNECTION_ID_PREFIX,
+  type ConnectionBinding,
   INSTANCE_CONNECTED_WINDOW_MS,
   INSTANCE_CONNECTION_INFO,
-  InstancePlacement,
-  WORKER_TOKEN_INFO,
-  WorkerErrorCode,
-  WorkerHost,
-  instanceNameSchema,
   instanceConfigurationValue,
-  type ConnectionBinding,
   type InstanceConnection,
   type InstanceIssuer,
+  instanceNameSchema,
+  InstancePlacement,
   type InstanceRecord,
   type LiveInstance,
+  WORKER_TOKEN_INFO,
   type WorkerBindingsOf,
+  WorkerErrorCode,
+  WorkerHost,
   type WorkerInstanceLookups,
 } from "./contract.ts";
 import {

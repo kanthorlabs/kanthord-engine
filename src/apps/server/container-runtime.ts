@@ -7,8 +7,8 @@ import { isNumber, isObject, isString } from "../../kernel/values.ts";
 import {
   ContainerRuntime,
   PlacementIssue,
-  PoolPlacement,
   type PlacementStatus,
+  PoolPlacement,
 } from "../../worker/contract.ts";
 import { derivedCrockford } from "./slot-identity.ts";
 

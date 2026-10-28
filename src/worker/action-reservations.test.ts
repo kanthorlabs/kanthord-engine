@@ -6,10 +6,10 @@ import {
   type ReservationKey,
 } from "./action-reservations.ts";
 import {
+  type ActionContext,
   ActionResolution,
   ActionResultKind,
   Uncertainty,
-  type ActionContext,
 } from "./contract.ts";
 
 const FIRST_ATTEMPT = 1;

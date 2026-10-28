@@ -1,26 +1,26 @@
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
 import { createIdentity } from "../kernel/identity.ts";
-import { Store, IN_MEMORY_DATABASE } from "../kernel/store.ts";
+import { IN_MEMORY_DATABASE, Store } from "../kernel/store.ts";
 import { OperationError } from "../kernel/errors.ts";
 import { workerMigrations } from "./migrations.ts";
 import {
-  RegistrationActivity,
   InstancePlacement,
+  RegistrationActivity,
   registrationRecordSchema,
-  WorkerHost,
-  WorkerErrorCode,
-  workerOperations,
   type WorkerBindingOf,
+  WorkerErrorCode,
+  WorkerHost,
+  workerOperations,
 } from "./contract.ts";
 import {
-  insertRegistration,
   endRegistration,
+  insertRegistration,
   readAllLive,
 } from "./registration-rows.ts";
 import {
-  registrationRecord,
   listRegistrationRecords,
+  registrationRecord,
 } from "./registration-record.ts";
 
 const NOW = 1000;

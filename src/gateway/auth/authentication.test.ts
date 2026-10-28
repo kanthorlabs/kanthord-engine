@@ -8,11 +8,11 @@ import { identitySchema } from "../../kernel/identity.ts";
 import { HttpStatus } from "../../kernel/http.ts";
 import { OperationError } from "../../kernel/errors.ts";
 import {
-  fakeLookups,
   authenticationFixture,
+  fakeLookups,
   gatewayFixture,
-  TEST_WORKER_BINDING,
   TEST_PROJECT_ID,
+  TEST_WORKER_BINDING,
 } from "../test-support.ts";
 import {
   CLIENT_IDENTITY_PREFIX,

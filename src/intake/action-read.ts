@@ -12,21 +12,21 @@ import type { Transaction } from "../kernel/store.ts";
 import { PlatformAddressKind } from "../mission/contract.ts";
 import {
   GITHUB_RESULT_CODE_PREFIX,
-  GitHubTargetKind,
   type GitHubCall,
   type GitHubFailure,
   type GitHubPlatform,
   type GitHubTarget,
+  GitHubTargetKind,
   type ReviewCommentQuery,
 } from "../repository/github.ts";
 import type { ActionCheckDependencies, IntakeCustody } from "./action-check.ts";
 import {
   ActionReadMethod,
+  type ActionReadMethodValue,
+  type ActionReadPage,
   PLATFORM_CALL_DEADLINE_MS,
   READ_ANSWER_MARGIN_MS,
   ResultClass,
-  type ActionReadMethodValue,
-  type ActionReadPage,
   type ResultClassAnswer,
 } from "./contract.ts";
 

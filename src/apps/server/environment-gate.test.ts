@@ -4,22 +4,22 @@ import { setTimeout as delay } from "node:timers/promises";
 import { EnvironmentSource } from "../../kernel/devcontainer.ts";
 import { missionOperations, NodeState } from "../../mission/contract.ts";
 import {
-  environmentTagOf,
-  ImageBuildOutcome,
-  PROVED_SUFFIX,
-  ProofPhase,
   type CommandResult,
   type EnvironmentRuntime,
   type EnvironmentState,
+  environmentTagOf,
+  ImageBuildOutcome,
   type ProofInput,
+  ProofPhase,
+  PROVED_SUFFIX,
 } from "../../project/environment-state.ts";
 import {
   BindingKind,
   BindingState,
+  EnvironmentFailureClass,
   EnvironmentStatus,
   EnvironmentTarget,
   FailureOrigin,
-  EnvironmentFailureClass,
   projectOperations,
 } from "../../project/contract.ts";
 import { ExecutionStopReason, WorkPullKind } from "../../scheduler/contract.ts";
@@ -32,17 +32,17 @@ import {
   completed,
   createProject,
   environmentList,
+  type Fixture,
   gateFixture,
   importNode,
   NO_ITEMS,
   recordingSlotDriver,
   RUN_VERB,
   SINGLE_SLOT,
-  slotRuns,
   SLOT_NAME_PREFIX,
-  worker,
-  type Fixture,
+  slotRuns,
   type SlotStart,
+  worker,
 } from "./environment-test-support.ts";
 
 const TEST_TIMEOUT_MS = 120000;

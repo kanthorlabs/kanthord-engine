@@ -15,17 +15,17 @@ import { openJSON } from "../../kernel/hpke.ts";
 import { HttpStatus } from "../../kernel/http.ts";
 import {
   CREDENTIAL_SEAL_INFO,
-  credentialSealAad,
   type CredentialAnswer,
+  credentialSealAad,
   type SealedCopyAnswer,
 } from "../../custody/contract.ts";
 import type { InstanceCopyKey } from "../../custody/client.ts";
 import {
+  Connection,
   COPY_REPORT_MODELS_MAX,
   COPY_REPORT_TEXT_MAX_LENGTH,
-  Connection,
-  PROVIDER_CHECK_TIMEOUT_MS,
   type CopyReportBody,
+  PROVIDER_CHECK_TIMEOUT_MS,
   type ProviderCheckAnswer,
 } from "../../llm/contract.ts";
 import { HEALTH_OF_CONNECTION, type LlmProvider } from "../../llm/provider.ts";

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import type { TestContext } from "node:test";
 import type { z } from "zod";
-import { OperationRegistry, type CallerContext } from "../kernel/operation.ts";
+import { type CallerContext, OperationRegistry } from "../kernel/operation.ts";
 import { IN_MEMORY_DATABASE, Store } from "../kernel/store.ts";
 import { createIdentity } from "../kernel/identity.ts";
 import {
@@ -11,15 +11,15 @@ import {
 import {
   AgentChoiceKind,
   ClaimIntent,
-  SCHEDULER_SERVICE_NAME,
-  schedulerOperations,
-  TransitionRule,
   type ExecutionRow,
   type FailureHold,
   type NodeTransition,
+  SCHEDULER_SERVICE_NAME,
+  schedulerOperations,
+  TransitionRule,
 } from "./contract.ts";
 import { schedulerMigrations } from "./migrations.ts";
-import { SchedulerService, type Dependencies } from "./service.ts";
+import { type Dependencies, SchedulerService } from "./service.ts";
 
 export const FIXTURE_TRACE_ID = "1234567890abcdef1234567890abcdef";
 export const FIXTURE_SPAN_ID = "1234567890abcdef";

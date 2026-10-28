@@ -16,12 +16,12 @@ import {
   ActorKind,
   ActorService,
   AssetKind,
-  NodeState,
   type Evidence,
-  type Revision,
   Intent,
+  NodeState,
+  type Revision,
 } from "../../mission/contract.ts";
-import { type ExecutionRecord } from "../../scheduler/contract.ts";
+import type { ExecutionRecord } from "../../scheduler/contract.ts";
 import { ActionResultKind, workerOperations } from "../../worker/contract.ts";
 import {
   bareRepository,

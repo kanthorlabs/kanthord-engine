@@ -1,15 +1,15 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
-  createIdentity,
-  identitySchema,
-  ulidSchema,
-  ULID_LENGTH,
-  IDENTITY_SUFFIX_LENGTH,
   createIdempotencyKey,
-  idempotencyKeySchema,
-  identityTime,
+  createIdentity,
   IDEMPOTENCY_KEY_PREFIX,
+  idempotencyKeySchema,
+  IDENTITY_SUFFIX_LENGTH,
+  identitySchema,
+  identityTime,
+  ULID_LENGTH,
+  ulidSchema,
 } from "./identity.ts";
 
 const suffix = "01ARZ3NDEKTSV4RRFFQ69G5FAV";

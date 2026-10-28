@@ -3,17 +3,17 @@ import type { Store } from "../kernel/store.ts";
 import { isNumber, isString } from "../kernel/values.ts";
 import { bucketEnd, bucketStart } from "./analytics-bucket.ts";
 import {
-  selectTraces,
-  walkSpanGroups,
-  walkSpans,
   type AnalyticsSpan,
   type SelectedTrace,
+  selectTraces,
   type TraceFilter,
+  walkSpanGroups,
+  walkSpans,
 } from "./analytics-walk.ts";
 import {
+  type AnalyticsBucket,
   AnalyticsMeasure,
   DurationGroupBy,
-  type AnalyticsBucket,
 } from "./contract.ts";
 
 export interface DurationQuery extends TraceFilter {

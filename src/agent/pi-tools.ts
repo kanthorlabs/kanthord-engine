@@ -11,11 +11,11 @@ import {
 import { basename, dirname, join } from "node:path";
 import { z } from "zod";
 import {
+  type BinaryAssetSource,
   PI_TOOLS_MANIFEST,
   piToolAsset,
   piToolCurrent,
   shippedAsset,
-  type BinaryAssetSource,
 } from "../kernel/assets.ts";
 import { Diagnostic } from "../kernel/errors.ts";
 import { PRIVATE_DIRECTORY_MODE } from "../kernel/files.ts";

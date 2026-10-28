@@ -1,13 +1,13 @@
 import assert from "node:assert/strict";
 import type { Transaction } from "../kernel/store.ts";
 import {
+  type Span,
+  spanSchema,
   TIMELINE_LIMIT_DEFAULT,
   TIMELINE_LIMIT_MAX,
   TIMELINE_LIMIT_MIN,
   TimelineDepth,
   TimelineScope,
-  spanSchema,
-  type Span,
 } from "./contract.ts";
 
 export const TRACE_END_TIME = Number.MAX_SAFE_INTEGER;

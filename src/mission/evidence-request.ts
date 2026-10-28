@@ -7,10 +7,10 @@ import type { ExecutionClaim } from "../kernel/operation.ts";
 import type { Transaction } from "../kernel/store.ts";
 import {
   AssetKind,
+  type EvidenceRequest,
   MissionErrorCode,
   PlatformAddressKind,
   RepositoryAction,
-  type EvidenceRequest,
 } from "./contract.ts";
 import { assessedCommitOf, landsByHuman } from "./authorization.ts";
 import { currentAssessmentOf } from "./currency.ts";

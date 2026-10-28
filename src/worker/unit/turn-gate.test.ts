@@ -22,11 +22,11 @@ import {
 import { BudgetLimit, ExecutionStopReason } from "../../scheduler/contract.ts";
 import {
   EndReason,
-  ExecutionEndKind,
   type ExecutionEnd,
+  ExecutionEndKind,
 } from "./execution-run.ts";
 import { executionBoundary } from "./native-method.ts";
-import { RefreshResult, refreshAtClaim } from "./base-refresh.ts";
+import { refreshAtClaim, RefreshResult } from "./base-refresh.ts";
 import {
   prepareStepsWorkspace,
   runStepsImplement,

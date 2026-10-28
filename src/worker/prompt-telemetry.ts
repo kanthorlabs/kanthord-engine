@@ -4,9 +4,9 @@ import type { PromptPartAnswer, PromptTemplates } from "../agent/contract.ts";
 import { digest } from "../agent/prompt-composer.ts";
 import { canonicalJSON } from "../kernel/json.ts";
 import {
-  SpanStatus,
   type ExecutionTrace,
   type SpanContribution,
+  SpanStatus,
 } from "../tracking/contract.ts";
 
 const SPAN_ID_LENGTH = 16;

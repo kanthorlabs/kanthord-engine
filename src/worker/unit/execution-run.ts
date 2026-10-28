@@ -5,22 +5,22 @@ import { CancellationContext, type Context } from "../../kernel/context.ts";
 import { CodedError } from "../../kernel/errors.ts";
 import { thrownReason } from "../../kernel/probe.ts";
 import {
-  OperationResultType,
   type ClientOptions,
   type OperationResult,
+  OperationResultType,
 } from "../../kernel/operation.ts";
 import type { MethodClients } from "./method-clients.ts";
 import { noTelemetry, SpanRecorder, type TelemetrySink } from "./telemetry.ts";
 import {
+  type BudgetLimit,
   ClaimState,
   ExecutionStopReason,
-  type BudgetLimit,
   type ReleaseStop,
 } from "../../scheduler/contract.ts";
 import { createIdempotencyKey } from "../../kernel/identity.ts";
 import { SpanStatus } from "../../tracking/contract.ts";
-import { unattributed, type FailureCause } from "../../kernel/cause.ts";
-import { gitStepOf, type GitStep } from "./git-step.ts";
+import { type FailureCause, unattributed } from "../../kernel/cause.ts";
+import { type GitStep, gitStepOf } from "./git-step.ts";
 import { GIT_COMMIT_FAILED } from "./stop-codes.ts";
 import { stopCauseOf } from "./stop-cause.ts";
 

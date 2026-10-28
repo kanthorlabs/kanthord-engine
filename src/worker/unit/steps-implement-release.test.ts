@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import {
   CauseCategory,
-  unattributed,
   type FailureCause,
+  unattributed,
 } from "../../kernel/cause.ts";
 
 const PLAN_MODEL_CAUSE = unattributed([
@@ -23,7 +23,7 @@ import { EndReason } from "./execution-run.ts";
 import { executionBoundary } from "./native-method.ts";
 import type { MethodClients } from "./method-clients.ts";
 import type { TaskRunner } from "./steps-implement.ts";
-import { runTask, runStepsImplement } from "./steps-implement.ts";
+import { runStepsImplement, runTask } from "./steps-implement.ts";
 import { nodeUnitOf, releaseGate, ReleaseGateKind } from "./release-gate.ts";
 import { Diagnostic } from "../../kernel/errors.ts";
 import { background } from "../../kernel/context.ts";

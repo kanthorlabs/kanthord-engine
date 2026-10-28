@@ -16,13 +16,13 @@ import { Diagnostic } from "../../kernel/errors.ts";
 import { HttpStatus } from "../../kernel/http.ts";
 import { LogDestination, OperationalLog } from "../../kernel/log.ts";
 import {
-  OperationResultType,
   type OperationResult,
+  OperationResultType,
 } from "../../kernel/operation.ts";
 import {
+  type Healthcheck,
   HealthStatus,
   lifecycle,
-  type Healthcheck,
   type Service,
 } from "../../kernel/service.ts";
 import { packageVersion } from "../../kernel/version.ts";
@@ -40,22 +40,22 @@ import {
   INSTANCE_SUPERSEDED_CODE,
   WorkerErrorCode,
 } from "../../worker/contract.ts";
-import { WorkerUnit, type UnitBinding } from "./unit.ts";
+import { type UnitBinding, WorkerUnit } from "./unit.ts";
 import { httpTransport, observedTransport } from "./transport.ts";
 import {
   instanceDirectories,
   resolveInstanceConfiguration,
 } from "./instance-config.ts";
 import {
-  refuseInsecureEndpoint,
   type AddressLookup,
+  refuseInsecureEndpoint,
 } from "./endpoint-check.ts";
 import {
+  type Connection,
+  type ConnectionEntry,
   EXCHANGE_UNAVAILABLE,
   ExchangeFailure,
   InstanceExchange,
-  type Connection,
-  type ConnectionEntry,
 } from "./instance-exchange.ts";
 import { instanceCopyKey } from "./instance-credential.ts";
 import { InstanceLogins } from "./instance-login.ts";

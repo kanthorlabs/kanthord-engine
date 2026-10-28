@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import type { Transaction } from "../kernel/store.ts";
 import {
-  AgentChoiceKind,
   type AgentChoice,
+  AgentChoiceKind,
   type AgentPin,
   type AgentSelection,
 } from "../scheduler/contract.ts";

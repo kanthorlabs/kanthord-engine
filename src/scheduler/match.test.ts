@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { createIdentity } from "../kernel/identity.ts";
-import { ClaimNodeState, ClaimIntent, type Claimant } from "./contract.ts";
+import { type Claimant, ClaimIntent, ClaimNodeState } from "./contract.ts";
 import { admits, covered } from "./match.ts";
 import { schedulerHarness } from "./test-support.ts";
 

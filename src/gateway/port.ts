@@ -5,8 +5,8 @@ import { CancellationContext } from "../kernel/context.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import {
   hasHttpRoute,
-  OperationLifetime,
   type Operation,
+  OperationLifetime,
 } from "../kernel/operation.ts";
 import { isString } from "../kernel/values.ts";
 import { gatewayOperations } from "./contract.ts";
@@ -16,12 +16,12 @@ import { missionOperations } from "../mission/contract.ts";
 import { trackingOperations } from "../tracking/contract.ts";
 import { bodyLimitOf } from "./body-limit.ts";
 import {
-  portCallSchema,
-  portCancelSchema,
   type PortAnswer,
   type PortCall,
+  portCallSchema,
+  portCancelSchema,
 } from "./client.ts";
-import { GatewayError, failure } from "./errors.ts";
+import { failure, GatewayError } from "./errors.ts";
 import type { RecordedResponse } from "./idempotency.ts";
 import type { Invocation } from "./invocation.ts";
 import { parseJSON } from "./json.ts";

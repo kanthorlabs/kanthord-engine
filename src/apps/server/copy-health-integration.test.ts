@@ -5,8 +5,8 @@ import { httpClient } from "../../gateway/client.ts";
 import { CancellationContext, type Context } from "../../kernel/context.ts";
 import {
   ResourceFailureReason,
-  ResourceStatus,
   type ResourceObserver,
+  ResourceStatus,
 } from "../../kernel/health.ts";
 import { temporary } from "../../kernel/test-support.ts";
 import { Connection, llmOperations } from "../../llm/contract.ts";

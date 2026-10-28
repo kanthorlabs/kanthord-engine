@@ -11,8 +11,8 @@ import type { createInvocation } from "../../gateway/index.ts";
 import { temporary } from "../../kernel/test-support.ts";
 import {
   PlacementIssue,
-  PoolPlacement,
   type PlacementStatus,
+  PoolPlacement,
   type PoolSlot,
 } from "../../worker/contract.ts";
 import { SlotControl } from "../worker/thread-data.ts";

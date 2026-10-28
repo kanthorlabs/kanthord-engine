@@ -1,7 +1,7 @@
 import type { Readable, Writable } from "node:stream";
 import type { MessagePort } from "node:worker_threads";
 import { z } from "zod";
-import { portAnswerSchema, type PortAnswer } from "../../gateway/client.ts";
+import { type PortAnswer, portAnswerSchema } from "../../gateway/client.ts";
 import { Diagnostic } from "../../kernel/errors.ts";
 import { createIdentity } from "../../kernel/identity.ts";
 import { SlotControl } from "./thread-data.ts";

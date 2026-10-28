@@ -17,13 +17,13 @@ import {
   ActorService,
   AssessmentResult,
   AssetKind,
-  NodeState,
-  missionOperations,
   type Evidence,
-  type Revision,
   Intent,
+  missionOperations,
+  NodeState,
+  type Revision,
 } from "../../mission/contract.ts";
-import { type ExecutionRecord } from "../../scheduler/contract.ts";
+import type { ExecutionRecord } from "../../scheduler/contract.ts";
 import {
   ActionResultKind,
   PlatformAddressKind,

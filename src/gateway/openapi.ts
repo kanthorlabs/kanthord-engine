@@ -1,8 +1,8 @@
 import {
   existsSync,
   mkdirSync,
-  readFileSync,
   readdirSync,
+  readFileSync,
   unlinkSync,
   writeFileSync,
 } from "node:fs";
@@ -38,7 +38,6 @@ export type OpenAPIFiles = Record<string, object> & {
   [OPENAPI_INDEX_FILE]: OpenAPIDocument;
 };
 
-/** Service ownership also determines the public artifact directory. */
 export function validateOpenAPIScope(operation: Operation): void {
   if (
     !/^[a-z][a-z0-9-]*$/.test(operation.service) ||
@@ -86,7 +85,6 @@ function pathGroups(operations: readonly Operation[]) {
   });
 }
 
-/** The serving allowlist is derived without emitting or reading any document. */
 export function openAPIFileNames(operations: readonly Operation[]): string[] {
   return [
     OPENAPI_INDEX_FILE,
@@ -102,8 +100,6 @@ function jsonSchema(
 ): Record<string, unknown> {
   const { $schema: _dialect, ...result } = z.toJSONSchema(schema, {
     override: ({ zodSchema, jsonSchema }) => {
-      // Any JSON value is the empty JSON Schema. Avoid recursively enumerating
-      // that domain across every path's shared error response.
       if (zodSchema === errorDetailsSchema)
         for (const key of Object.keys(jsonSchema)) delete jsonSchema[key];
       if (request && zodSchema instanceof z.ZodObject && jsonSchema.required)
@@ -234,7 +230,6 @@ function emitOperation(operation: Operation, schemas: Record<string, unknown>) {
   };
 }
 
-/** Root index -> service-owned path items and schemas -> shared components. */
 export function emitOpenAPIFiles(
   operations: readonly Operation[],
 ): OpenAPIFiles {
@@ -306,7 +301,6 @@ export function writeOpenAPI(
   root: string,
 ): void {
   const files = emitOpenAPIFiles(operations);
-  // Publish dependencies before the index that references them.
   for (const name of [
     ...Object.keys(files).filter((name) => name !== OPENAPI_INDEX_FILE),
     OPENAPI_INDEX_FILE,
@@ -315,7 +309,6 @@ export function writeOpenAPI(
     mkdirSync(dirname(path), { recursive: true });
     writeFileSync(path, serializeOpenAPIFile(files[name]!));
   }
-  // Remove obsolete generated fragments only; preserve other package assets.
   const prune = (directory: string, relative: string): void => {
     if (!existsSync(directory)) return;
     for (const entry of readdirSync(directory, { withFileTypes: true })) {

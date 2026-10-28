@@ -4,8 +4,8 @@ import { spawn, spawnSync } from "node:child_process";
 import { once } from "node:events";
 import {
   mkdirSync,
-  readFileSync,
   readdirSync,
+  readFileSync,
   statSync,
   writeFileSync,
 } from "node:fs";
@@ -13,15 +13,15 @@ import { join } from "node:path";
 import { test, type TestContext } from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
+  type BinaryAssetSource,
   PI_TOOLS_MANIFEST,
   shippedAsset,
-  type BinaryAssetSource,
 } from "../kernel/assets.ts";
 import { requirePiTools, temporary } from "../kernel/test-support.ts";
 import {
   installPiTools,
-  piToolsManifestSchema,
   type PiToolsManifest,
+  piToolsManifestSchema,
 } from "./pi-tools.ts";
 
 const TARGET = "test-target";

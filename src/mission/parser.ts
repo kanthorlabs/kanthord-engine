@@ -5,9 +5,9 @@ import { identitySchema } from "../kernel/identity.ts";
 import {
   MissionErrorCode,
   NODE_IDENTITY_PREFIX,
-  TASK_IDENTITY_PREFIX,
   planFileIdSchema,
   planFileNameSchema,
+  TASK_IDENTITY_PREFIX,
 } from "./contract.ts";
 
 const DELIMITER = "---";

@@ -5,10 +5,10 @@ import { HttpMethod, HttpStatus } from "../../kernel/http.ts";
 import { temporary } from "../../kernel/test-support.ts";
 import {
   HostKeyErrorCode,
-  HostKeySource,
   hostKeyItemSchema,
   hostKeyListAnswerSchema,
   hostKeyScanAnswerSchema,
+  HostKeySource,
 } from "../../repository/contract.ts";
 import { environment, kanthord } from "./cli-support.ts";
 import { gatewayFixture } from "./test-support.ts";

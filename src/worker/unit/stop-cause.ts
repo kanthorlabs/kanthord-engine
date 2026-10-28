@@ -3,8 +3,8 @@ import {
   attributed,
   CauseCategory,
   CauseSubcategory,
-  unattributed,
   type FailureCause,
+  unattributed,
 } from "../../kernel/cause.ts";
 import {
   EnvironmentFailure,

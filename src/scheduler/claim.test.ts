@@ -1,13 +1,13 @@
 import { ExecutionKind } from "../tracking/contract.ts";
 import assert from "node:assert/strict";
 import {
-  setImmediate as turn,
   setTimeout as sleep,
+  setImmediate as turn,
 } from "node:timers/promises";
 import { test, type TestContext } from "node:test";
 import { createIdentity } from "../kernel/identity.ts";
 import { testMachineIdentity } from "../kernel/test-identity.ts";
-import { AgentChoiceKind, ClaimNodeState, ClaimIntent } from "./contract.ts";
+import { AgentChoiceKind, ClaimIntent, ClaimNodeState } from "./contract.ts";
 import { claimOnce, ClaimOutcome, instanceKeyOf } from "./claim.ts";
 import { InstanceQueue } from "./instance-queue.ts";
 import {
@@ -17,10 +17,10 @@ import {
 } from "./execution-store.ts";
 import {
   executionFixture,
-  schedulerHarness,
-  FIXTURE_NOW,
-  FIXTURE_DEADLINE,
   FIRST_LOSS_WITHOUT_JOB,
+  FIXTURE_DEADLINE,
+  FIXTURE_NOW,
+  schedulerHarness,
   transitionFixture,
 } from "./test-support.ts";
 import { DEFAULT_STOP_BACKOFF_SECONDS } from "./config.ts";

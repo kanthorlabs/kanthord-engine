@@ -1,3 +1,8 @@
+import { readFileSync } from "node:fs";
+import { relative } from "node:path";
+import { fileURLToPath } from "node:url";
+import js from "@eslint/js";
+import globals from "globals";
 import tseslint from "typescript-eslint";
 import boundaries from "eslint-plugin-boundaries";
 
@@ -135,7 +140,35 @@ const noCwdDataRead = {
   }),
 };
 
-const kanthordPlugin = { rules: { "no-cwd-data-read": noCwdDataRead } };
+const repositoryRoot = fileURLToPath(new URL(".", import.meta.url));
+const allowedComments = JSON.parse(
+  readFileSync(new URL(".kanthord/comments.json", import.meta.url), "utf8"),
+);
+const commentKey = (path, text) => JSON.stringify([path, text]);
+const allowedCommentKeys = new Set(
+  allowedComments.map(({ path, text }) => commentKey(path, text)),
+);
+const noCommentsMessage =
+  "Write no comment. Only a human adds a comment to .kanthord/comments.json.";
+
+const noComments = {
+  meta: { type: "problem", schema: [] },
+  create: (context) => ({
+    Program: () => {
+      const path = relative(repositoryRoot, context.filename);
+      for (const comment of context.sourceCode.getAllComments()) {
+        if (comment.type === "Shebang") continue;
+        const text = context.sourceCode.getText(comment);
+        if (allowedCommentKeys.has(commentKey(path, text))) continue;
+        context.report({ loc: comment.loc, message: noCommentsMessage });
+      }
+    },
+  }),
+};
+
+const kanthordPlugin = {
+  rules: { "no-cwd-data-read": noCwdDataRead, "no-comments": noComments },
+};
 
 const productionImportPatterns = [
   {
@@ -174,7 +207,20 @@ const valueNameMessage =
 const comparisonMessage =
   "Use a meaningfully named enum member or constant instead of a string or numeric literal in a comparison.";
 
+const sqlCheckPattern = String.raw`/\bCHECK\s*\(/`;
+const sqlIndexPattern = String.raw`/CREATE\s+INDEX/i`;
+const sqlCheckMessage =
+  "Declare no SQL CHECK constraint. The owning service validates the closed value set.";
+const sqlIndexMessage = "Declare only a unique index.";
+
 const syntaxRules = [
+  ...[
+    [sqlCheckPattern, sqlCheckMessage],
+    [sqlIndexPattern, sqlIndexMessage],
+  ].flatMap(([pattern, message]) => [
+    { selector: `Literal[value=${pattern}]`, message },
+    { selector: `TemplateElement[value.raw=${pattern}]`, message },
+  ]),
   {
     selector: `BinaryExpression[operator=/^(===|!==|==|!=|<|<=|>|>=)$/] > ${comparisonLiteral}`,
     message: comparisonMessage,
@@ -191,15 +237,38 @@ const syntaxRules = [
     selector: `VariableDeclarator[id.name=${valueNamePattern}][init.type="Literal"]`,
     message: valueNameMessage,
   },
+  {
+    selector: "ImportExpression[source.type!='Literal']",
+    message:
+      "Import a module by a literal specifier, so that the boundaries rule sees the import.",
+  },
 ];
 
 export default tseslint.config(
   { ignores: ["node_modules/**", "dist/**", ".data/**"] },
   {
+    files: ["**/*.{ts,js,mjs}"],
+    plugins: { kanthord: kanthordPlugin },
+    rules: {
+      "kanthord/no-comments": "error",
+      "sort-imports": [
+        "error",
+        { ignoreDeclarationSort: true, ignoreCase: true },
+      ],
+    },
+  },
+  { linterOptions: { noInlineConfig: true } },
+  {
+    files: ["bin/**/*.mjs", "scripts/**/*.mjs", "eslint.config.js"],
+    extends: [js.configs.recommended],
+    languageOptions: { globals: globals.node },
+  },
+  {
     files: ["src/**/*.ts"],
-    extends: [tseslint.configs.recommended],
+    extends: [js.configs.recommended, tseslint.configs.recommended],
     plugins: { boundaries },
     settings: {
+      "boundaries/root-path": repositoryRoot,
       "boundaries/elements": [
         { type: "kernel", pattern: "src/kernel" },
         { type: "worker-unit", pattern: "src/worker/unit" },
@@ -339,6 +408,18 @@ export default tseslint.config(
               ],
             },
             {
+              from: element("apps-server", {
+                fileInternalPath: "cli-support.ts",
+              }),
+              allow: [
+                {
+                  to: element("apps-cli", {
+                    fileInternalPath: "test-support.ts",
+                  }),
+                },
+              ],
+            },
+            {
               from: element("apps-cli"),
               allow: [
                 ...allow("kernel"),
@@ -400,16 +481,8 @@ export default tseslint.config(
                       "prompt-composer",
                       "prompt-render",
                       "prompt-templates",
-                      "prompt-source",
-                      "prompt-assets",
                       "pinned-layers",
                     ].join(",")}}.ts`,
-                  }),
-                },
-                {
-                  to: element("component", {
-                    captured: { name: "agent" },
-                    fileInternalPath: "hooks/**",
                   }),
                 },
                 {
@@ -672,6 +745,37 @@ export default tseslint.config(
         },
       ],
       "no-restricted-syntax": ["error", ...syntaxRules],
+      "no-control-regex": "off",
+      "no-empty": ["error", { allowEmptyCatch: true }],
+      eqeqeq: ["error", "always", { null: "ignore" }],
+      "no-else-return": "error",
+      "no-param-reassign": "error",
+      "no-lonely-if": "error",
+      "prefer-object-spread": "error",
+      "no-throw-literal": "error",
+      "no-useless-rename": "error",
+      "no-console": "error",
+      "object-shorthand": "error",
+      "no-useless-return": "error",
+      "@typescript-eslint/no-extraneous-class": "error",
+      "@typescript-eslint/no-useless-constructor": "error",
+      "@typescript-eslint/prefer-literal-enum-member": "error",
+      "@typescript-eslint/unified-signatures": "error",
+      "@typescript-eslint/no-non-null-asserted-nullish-coalescing": "error",
+      "@typescript-eslint/no-confusing-non-null-assertion": "error",
+      "@typescript-eslint/adjacent-overload-signatures": "error",
+      "@typescript-eslint/ban-tslint-comment": "error",
+      "@typescript-eslint/class-literal-property-style": "error",
+      "@typescript-eslint/consistent-type-assertions": "error",
+      "@typescript-eslint/prefer-function-type": "error",
+      "@typescript-eslint/consistent-indexed-object-style": "error",
+      "@typescript-eslint/consistent-generic-constructors": "error",
+      "@typescript-eslint/no-inferrable-types": "error",
+      "@typescript-eslint/consistent-type-imports": [
+        "error",
+        { disallowTypeAnnotations: false },
+      ],
+      "@typescript-eslint/no-import-type-side-effects": "error",
       "@typescript-eslint/no-unused-vars": [
         "error",
         { ignoreUsingDeclarations: true },

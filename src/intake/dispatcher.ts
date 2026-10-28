@@ -4,15 +4,15 @@ import type { ServiceIdentity } from "../kernel/caller.ts";
 import type { Context } from "../kernel/context.ts";
 import { diagnostic, diagnosticFields } from "../kernel/errors.ts";
 import {
-  OperationResultType,
   type OperationResult,
+  OperationResultType,
 } from "../kernel/operation.ts";
 import type { Store, Transaction } from "../kernel/store.ts";
 import { ValueType } from "../kernel/values.ts";
 import { configurationSchemaOf } from "./configuration.ts";
 import {
-  InboundEventState,
   type ConsumerValue,
+  InboundEventState,
   type IntakeConsumers,
 } from "./contract.ts";
 import {

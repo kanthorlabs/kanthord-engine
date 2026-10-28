@@ -3,15 +3,15 @@ import { test, type TestContext } from "node:test";
 import { directClient } from "../../gateway/index.ts";
 import { httpClient } from "../../gateway/client.ts";
 import {
+  intakeOperations,
   OutboundOperation,
   OutboundRequestState,
   ResultClass,
-  intakeOperations,
 } from "../../intake/contract.ts";
 import { HttpMethod, HttpStatus } from "../../kernel/http.ts";
 import {
-  OperationResultType,
   type OperationResult,
+  OperationResultType,
 } from "../../kernel/operation.ts";
 import {
   AssetKind,

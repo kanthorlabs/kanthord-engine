@@ -4,20 +4,20 @@ import type { TestContext } from "node:test";
 import convict from "convict";
 import pino, { type Logger } from "pino";
 import {
+  type GlobalConfig,
   globalConfigSchema,
   MASTER_KEY_BYTES,
-  type GlobalConfig,
 } from "../config/global.ts";
 import { Store } from "../kernel/store.ts";
 import { OperationRegistry, StoreName } from "../kernel/operation.ts";
-import { HealthRegistry } from "../kernel/health.ts";
-import { type Context } from "../kernel/context.ts";
+import type { HealthRegistry } from "../kernel/health.ts";
+import type { Context } from "../kernel/context.ts";
 import type { Registration } from "../worker/contract.ts";
 import {
   Authentication,
   type AuthenticationLookups,
 } from "./auth/authentication.ts";
-import { gatewayConfigSchema, type GatewayConfig } from "./config.ts";
+import { type GatewayConfig, gatewayConfigSchema } from "./config.ts";
 import type { InventoryCollector } from "./contract.ts";
 import { gatewayMigrations } from "./migrations.ts";
 import { GatewayService } from "./service.ts";

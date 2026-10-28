@@ -7,7 +7,7 @@ import {
   type Context,
   DeadlineExceeded,
 } from "./context.ts";
-import { HealthStatus, type Healthcheck } from "./service.ts";
+import { type Healthcheck, HealthStatus } from "./service.ts";
 import { ValueType } from "./values.ts";
 
 export const componentHealthSchema = z.record(
@@ -65,7 +65,6 @@ export class HealthRegistry {
 
   async check(context: Context = background): Promise<ServiceHealthchecks> {
     context.signal.throwIfAborted();
-    // Snapshot registration once; a failed probe must not skip its siblings.
     const entries = [...this.probes];
     assert.ok(entries.length <= MAX_HEALTH_PROBES);
     const results = await Promise.all(

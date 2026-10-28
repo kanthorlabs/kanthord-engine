@@ -1,6 +1,6 @@
 import { OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
-import { MissionErrorCode, type IntakeStorage } from "./contract.ts";
+import { type IntakeStorage, MissionErrorCode } from "./contract.ts";
 
 function refuse(): never {
   throw new OperationError(

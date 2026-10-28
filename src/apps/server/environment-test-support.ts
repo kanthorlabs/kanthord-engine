@@ -5,27 +5,27 @@ import { agentOperations } from "../../agent/contract.ts";
 import { httpClient } from "../../gateway/client.ts";
 import { CancellationContext } from "../../kernel/context.ts";
 import {
-  OperationResultType,
   type ClientOptions,
   type Operation,
   type OperationResult,
+  OperationResultType,
 } from "../../kernel/operation.ts";
 import { Intent, missionOperations } from "../../mission/contract.ts";
+import type { EnvironmentStatus } from "../../project/contract.ts";
 import {
-  EnvironmentStatus,
   projectOperations,
-  workerResourceIdentity,
   type RepositoryFiles,
+  workerResourceIdentity,
 } from "../../project/contract.ts";
 import type { EnvironmentState } from "../../project/environment-state.ts";
 import { repositoryFiles } from "../../repository/index.ts";
 import { LOCAL_GIT_SSH_ACCESS } from "../../repository/test-sshd.ts";
 import {
+  type ReleaseStop,
   schedulerOperations,
   WorkPullKind,
-  type ReleaseStop,
 } from "../../scheduler/contract.ts";
-import { workerOperations, type PoolSlot } from "../../worker/contract.ts";
+import { type PoolSlot, workerOperations } from "../../worker/contract.ts";
 import type { fakeContainerHost } from "./container-fakes.ts";
 import { until } from "./cli-support.ts";
 import type { SlotDriver, SlotInstance } from "./slot-driver.ts";

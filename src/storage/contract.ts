@@ -18,9 +18,9 @@ import {
 import { HttpMethod, HttpStatus } from "../kernel/http.ts";
 import {
   AccessPolicy,
+  type Operation,
   OperationLifetime,
   StoreName,
-  type Operation,
 } from "../kernel/operation.ts";
 
 export const STORAGE_COMPONENT_NAME = "storage";

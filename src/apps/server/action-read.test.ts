@@ -6,32 +6,32 @@ import { directClient } from "../../gateway/index.ts";
 import { httpClient } from "../../gateway/client.ts";
 import {
   ActionReadMethod,
-  ResultClass,
-  intakeOperations,
   type ActionReadMethodValue,
+  intakeOperations,
+  ResultClass,
 } from "../../intake/contract.ts";
 import { writePrivate } from "../../kernel/files.ts";
 import { HttpMethod, HttpStatus } from "../../kernel/http.ts";
 import {
-  OperationResultType,
   type OperationResult,
+  OperationResultType,
 } from "../../kernel/operation.ts";
 import { temporary } from "../../kernel/test-support.ts";
 import {
-  MissionErrorCode,
-  PlatformAddressKind,
-  missionOperations,
   type Evidence,
-  type PlatformAddress,
-  type Revision,
   Intent,
+  MissionErrorCode,
+  missionOperations,
+  type PlatformAddress,
+  PlatformAddressKind,
+  type Revision,
 } from "../../mission/contract.ts";
 import type { ExecutionRecord } from "../../scheduler/contract.ts";
 import { environment, kanthord } from "./cli-support.ts";
 import {
-  FAKE_SSH_CREDENTIAL,
   bareRepository,
   createFakeSshCredential,
+  FAKE_SSH_CREDENTIAL,
   fakeGitHub,
   gatewayFixture,
   mappedTransport,

@@ -1,4 +1,4 @@
-import { OperationError, type ErrorBody } from "../kernel/errors.ts";
+import { type ErrorBody, OperationError } from "../kernel/errors.ts";
 export { OperationError as GatewayError } from "../kernel/errors.ts";
 import { OperationError as GatewayError } from "../kernel/errors.ts";
 export function failure(

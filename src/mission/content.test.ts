@@ -3,17 +3,17 @@ import { test } from "node:test";
 import { OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import type { Transaction } from "../kernel/store.ts";
-import { MissionBindingKind, MissionErrorCode, Intent } from "./contract.ts";
+import { Intent, MissionBindingKind, MissionErrorCode } from "./contract.ts";
 import {
   bindingKind,
   checkBindingRuleTable,
+  type ResolvedBinding,
   resolveNodeBindings,
   validateFilename,
   validateNodeContent,
   validatePlanContent,
   validateTaskCount,
   validateText,
-  type ResolvedBinding,
 } from "./content.ts";
 
 const DEFAULT_MAX = 32768;

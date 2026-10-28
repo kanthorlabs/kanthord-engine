@@ -22,9 +22,9 @@ import {
   CHECKOUTS_DIRECTORY,
   handedSshAccess,
   SCRATCH_DIRECTORY,
+  WORKSPACE_RETENTION_MS,
   WorkspaceKind,
   WorkspaceRoot,
-  WORKSPACE_RETENTION_MS,
 } from "./workspace.ts";
 import {
   everyBindingSshAccess,
@@ -205,7 +205,7 @@ test("workspace preparation refreshes implement branches and creates disposable 
         examine.tested_input,
         [repository, another].map(({ binding_id }) => ({
           kind: "repository",
-          binding_id: binding_id,
+          binding_id,
           commit: base,
         })),
       );

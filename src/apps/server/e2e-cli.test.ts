@@ -16,7 +16,7 @@ const NOT_FOUND = -1;
 const NO_COMMANDS = 0;
 const HELP = "--help";
 const COMMANDS_HEADER = "Commands:";
-const COMMAND_ROW = /^  (\S+)(?:\s|$)/gm;
+const COMMAND_ROW = /^ {2}(\S+)(?:\s|$)/gm;
 
 const cases = [
   {

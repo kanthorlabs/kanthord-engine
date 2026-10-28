@@ -3,12 +3,12 @@ import { PromptTemplate } from "../../agent/contract.ts";
 import { test, type TestContext } from "node:test";
 import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { temporary, hostEnvironment } from "../../kernel/test-support.ts";
+import { hostEnvironment, temporary } from "../../kernel/test-support.ts";
 import { createIdentity } from "../../kernel/identity.ts";
 import {
   background,
-  DeadlineExceeded,
   type CancellationContext,
+  DeadlineExceeded,
 } from "../../kernel/context.ts";
 import { ExecutionBudget } from "./budget.ts";
 import { EndReason, ExecutionRun, ExecutionStop } from "./execution-run.ts";
@@ -18,8 +18,8 @@ import {
   affectedCommand,
   anthropicSetup,
   everyBindingSshAccess,
-  repositorySetup,
   transport as localTransport,
+  repositorySetup,
 } from "./test-support.ts";
 import { WorkspaceRoot } from "./workspace.ts";
 import { AFFECTED_DECLARATION_FILE, AffectedVerdict } from "./affected.ts";

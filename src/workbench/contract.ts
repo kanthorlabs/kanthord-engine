@@ -3,9 +3,9 @@ import { HttpMethod, HttpStatus } from "../kernel/http.ts";
 import { identitySchema } from "../kernel/identity.ts";
 import {
   AccessPolicy,
+  type Operation,
   OperationLifetime,
   StoreName,
-  type Operation,
 } from "../kernel/operation.ts";
 import { reasoningEffortSchema } from "../agent/contract.ts";
 

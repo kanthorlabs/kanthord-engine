@@ -23,7 +23,7 @@ import { InMemoryCredentialStore } from "@earendil-works/pi-ai";
 import { background, CancellationContext } from "../../kernel/context.ts";
 import { Diagnostic } from "../../kernel/errors.ts";
 import { createIdentity } from "../../kernel/identity.ts";
-import { temporary, hostEnvironment } from "../../kernel/test-support.ts";
+import { hostEnvironment, temporary } from "../../kernel/test-support.ts";
 import {
   credentialRedaction,
   openNativeAgent,
@@ -32,7 +32,7 @@ import {
 import { EndReason, ExecutionStop } from "./execution-run.ts";
 import { CodedError } from "../../kernel/errors.ts";
 import { ExecutionIntent } from "../contract.ts";
-import { type ExecutionSetup, type HostTools } from "../contract.ts";
+import type { ExecutionSetup, HostTools } from "../contract.ts";
 import { digest, renderWorkPrompt } from "../../agent/prompt-composer.ts";
 import { PromptTemplate } from "../../agent/contract.ts";
 import {

@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
-import { MissionErrorCode, Intent } from "./contract.ts";
-import { parsePlanFile, type ParsedNodeFile } from "./parser.ts";
+import { Intent, MissionErrorCode } from "./contract.ts";
+import { type ParsedNodeFile, parsePlanFile } from "./parser.ts";
 
 const FILENAME = "add-password-reset.md";
 const FOUNDATION_NAME = "Establish the Express API foundation";
@@ -257,8 +257,11 @@ test("a new node file defaults lists and omits identity", () => {
       .replace("intent: implement", "intent: examine")
       .replace(/depends_on: \[\]\n/, "")
       .replace(/tags: \[\]\n/, "")
-      .replace(/bindings:\n  - api-repo\n/, "")
-      .replace(/verifications:\n  - npm run e2e\n  - npm run test:reset\n/, ""),
+      .replace(/bindings:\n {2}- api-repo\n/, "")
+      .replace(
+        /verifications:\n {2}- npm run e2e\n {2}- npm run test:reset\n/,
+        "",
+      ),
   ) as ParsedNodeFile;
   assert.equal(result.intent, Intent.Examine);
   assert.equal(result.id, undefined);

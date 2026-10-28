@@ -10,17 +10,17 @@ import { readDependencies } from "./node-reads.ts";
 import { examineInstruction } from "./judgement.ts";
 import { renderWorkPrompt } from "../../agent/prompt-composer.ts";
 import {
-  WorkspaceKind,
-  workRepositoriesOf,
   type ExamineCheckout,
+  workRepositoriesOf,
+  WorkspaceKind,
 } from "./workspace.ts";
 import {
+  namedCheckouts,
   runSetup,
   SetupEnd,
   setupEntries,
-  namedCheckouts,
-  setupStop,
   type SetupResult,
+  setupStop,
 } from "./environment-setup.ts";
 import type { StepsInput } from "./steps-implement.ts";
 import type { ExecutionBudget } from "./budget.ts";
@@ -30,8 +30,8 @@ import { reportFacts } from "./report-facts.ts";
 import {
   environmentDigestsOf,
   testedCommitOf,
-  verificationObserver,
   VerificationContext,
+  verificationObserver,
 } from "./method-telemetry.ts";
 
 export const REPORT_SUBJECT = "Report on current dependency outcomes";

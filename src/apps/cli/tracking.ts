@@ -1,34 +1,34 @@
 import assert from "node:assert/strict";
-import { Command } from "commander";
+import type { Command } from "commander";
 import type { z } from "zod";
 import { httpClient, resolveClient } from "../../gateway/client.ts";
 import { causeCategorySchema } from "../../kernel/cause.ts";
 import { Diagnostic } from "../../kernel/errors.ts";
 import { identitySchema } from "../../kernel/identity.ts";
 import {
-  ENTRY_LIST_LIMIT_DEFAULT,
-  ENTRY_LIST_LIMIT_MAX,
-  ENTRY_LIST_LIMIT_MIN,
-  SPAN_LIST_LIMIT_DEFAULT,
-  SPAN_LIST_LIMIT_MAX,
-  SPAN_LIST_LIMIT_MIN,
-  TRACE_LIST_LIMIT_DEFAULT,
-  TRACE_LIST_LIMIT_MAX,
-  TRACE_LIST_LIMIT_MIN,
-  TIMELINE_LIMIT_MAX,
-  TIMELINE_LIMIT_MIN,
-  TimelineScope,
-  TraceSort,
   analyticsBucketSchema,
   analyticsDurationQuerySchema,
   analyticsMeasureSchema,
   causeLabelTextIdSchema,
   costGroupBySchema,
   durationGroupBySchema,
+  ENTRY_LIST_LIMIT_DEFAULT,
+  ENTRY_LIST_LIMIT_MAX,
+  ENTRY_LIST_LIMIT_MIN,
   entryIdentitySchema,
+  SPAN_LIST_LIMIT_DEFAULT,
+  SPAN_LIST_LIMIT_MAX,
+  SPAN_LIST_LIMIT_MIN,
   spanIdSchema,
+  TIMELINE_LIMIT_MAX,
+  TIMELINE_LIMIT_MIN,
   timelineDepthSchema,
+  TimelineScope,
+  TRACE_LIST_LIMIT_DEFAULT,
+  TRACE_LIST_LIMIT_MAX,
+  TRACE_LIST_LIMIT_MIN,
   traceIdSchema,
+  TraceSort,
   traceSortSchema,
   traceStateSchema,
   trackingOperations,

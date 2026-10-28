@@ -14,16 +14,16 @@ import {
 import type { CallerContext } from "../kernel/operation.ts";
 import {
   executionFixture,
-  schedulerHarness,
-  FIXTURE_NOW,
   FIXTURE_DEADLINE,
+  FIXTURE_NOW,
+  schedulerHarness,
   transitionFixture,
 } from "./test-support.ts";
 import {
+  claimStateOf,
   consecutiveStalls,
   insertExecution,
   readExecution,
-  claimStateOf,
 } from "./execution-store.ts";
 import type { Dependencies } from "./service.ts";
 import {
@@ -32,9 +32,9 @@ import {
   ClaimState,
   EnvironmentFailure,
   ExecutionStopReason,
+  type ReleaseStop,
   schedulerOperations,
   TransitionRule,
-  type ReleaseStop,
 } from "./contract.ts";
 import {
   consecutiveFailures,

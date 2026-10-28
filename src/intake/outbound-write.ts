@@ -5,9 +5,9 @@ import type { Transaction } from "../kernel/store.ts";
 import {
   DELETE_IDS_MAX,
   IntakeErrorCode,
-  OutboundRequestState,
   type OutboundDelete,
   type OutboundRequest,
+  OutboundRequestState,
   type OutboundRequestStateValue,
 } from "./contract.ts";
 import { discard, findById, outboundRecord } from "./outbound-store.ts";

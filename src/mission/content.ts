@@ -4,14 +4,14 @@ import type { Transaction } from "../kernel/store.ts";
 import { isObject, isString } from "../kernel/values.ts";
 import { isCommitSubject } from "../kernel/commit-message.ts";
 import {
-  MissionBindingKind,
-  MissionErrorCode,
-  Intent,
-  planFileNameSchema,
-  tagsSchema,
-  intentSchema,
   commitTypeSchema,
   type Content,
+  Intent,
+  intentSchema,
+  MissionBindingKind,
+  MissionErrorCode,
+  planFileNameSchema,
+  tagsSchema,
 } from "./contract.ts";
 
 export const ContentField = {

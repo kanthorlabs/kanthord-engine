@@ -5,11 +5,11 @@ import type { PromptPartAnswer } from "../agent/contract.ts";
 import { digest } from "../agent/prompt-composer.ts";
 import { SHIPPED_TEMPLATES } from "../agent/prompt-templates.ts";
 import { canonicalJSON } from "../kernel/json.ts";
-import { SpanStatus, type ExecutionTrace } from "../tracking/contract.ts";
+import { type ExecutionTrace, SpanStatus } from "../tracking/contract.ts";
 import {
-  AgentPromptSpan,
   agentPromptContribution,
   agentPromptFacts,
+  AgentPromptSpan,
   agentPromptSpanId,
 } from "./prompt-telemetry.ts";
 

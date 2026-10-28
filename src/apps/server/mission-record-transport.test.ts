@@ -6,14 +6,14 @@ import { OperationResultType } from "../../kernel/operation.ts";
 import { createIdentity } from "../../kernel/identity.ts";
 import {
   ActorKind,
-  NodeState,
   missionOperations,
+  NodeState,
 } from "../../mission/contract.ts";
 import {
   fakeMachines,
   gatewayFixture,
-  TEST_WORKER_BINDING,
   TEST_PROJECT_ID,
+  TEST_WORKER_BINDING,
 } from "./test-support.ts";
 
 const UNAUTHORIZED = "gateway.authentication.unauthorized";

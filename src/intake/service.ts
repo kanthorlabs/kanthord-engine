@@ -13,9 +13,9 @@ import { Diagnostic } from "../kernel/errors.ts";
 import type { HealthRegistry } from "../kernel/health.ts";
 import type { CallerContext, OperationRegistry } from "../kernel/operation.ts";
 import {
+  type Healthcheck,
   HealthStatus,
   lifecycle,
-  type Healthcheck,
   type Service,
 } from "../kernel/service.ts";
 import type { Store, Transaction } from "../kernel/store.ts";
@@ -31,13 +31,13 @@ import { readAction } from "./action-read.ts";
 import {
   Consumer,
   INTAKE_SERVICE_NAME,
+  type IntakeCollaborations,
+  type IntakeConsumers,
+  type IntakeInventoryEntry,
   intakeOperations,
   PENDING_EVENT_LIMIT,
   POLL_INTERVAL_MS,
-  type IntakeCollaborations,
-  type IntakeConsumers,
   type UnresolvedRequestCounter,
-  type IntakeInventoryEntry,
 } from "./contract.ts";
 import { Dispatcher } from "./dispatcher.ts";
 import { inboundInventory } from "./health.ts";
@@ -49,7 +49,7 @@ import { getInbound, listInbound } from "./inbound-read.ts";
 import { getOutbound, listOutbound } from "./outbound-read.ts";
 import { receiveEvent } from "./receipt.ts";
 import { deleteOutbound, discardOutbound } from "./outbound-write.ts";
-import { runOutbound, type OutboundRun } from "./outbound.ts";
+import { type OutboundRun, runOutbound } from "./outbound.ts";
 import { pollInboundIds } from "./inbound-store.ts";
 import { PollLoops } from "./poll.ts";
 import { deleteStoredObject } from "./storage-delete.ts";

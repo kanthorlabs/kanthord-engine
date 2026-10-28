@@ -10,9 +10,9 @@ import { gatewayFixture } from "./test-support.ts";
 import { deriveKey } from "../kernel/json.ts";
 import {
   emptyInput,
-  StoreName,
-  OperationRegistry,
   type Operation,
+  OperationRegistry,
+  StoreName,
 } from "../kernel/operation.ts";
 import { createInvocation } from "./index.ts";
 import { generateHumanJWT } from "./auth/jwt.ts";
@@ -27,8 +27,8 @@ import { gatewayOperations } from "./contract.ts";
 import { AccessPolicy, OperationLifetime } from "../kernel/operation.ts";
 import { KANTHORD_AUTH_USERNAME } from "./auth/jwt.ts";
 import {
-  CancellationContext,
   cancelled as aborted,
+  CancellationContext,
 } from "../kernel/context.ts";
 import { HealthStatus } from "../kernel/service.ts";
 import { compareRouteSpecificity } from "./service.ts";

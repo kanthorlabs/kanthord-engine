@@ -10,9 +10,9 @@ import {
 import type { AgentProviderItem, DefaultConfiguration } from "./contract.ts";
 import { AGENT_COMPONENT_NAME } from "./contract.ts";
 import {
-  EnablementState,
   agentProvidersDependentOn,
   enablementsByModel,
+  EnablementState,
   getEnablement,
   getLatestRevision,
   insertEnablementRevision,

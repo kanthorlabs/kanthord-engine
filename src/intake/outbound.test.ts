@@ -22,14 +22,14 @@ import {
 import { IntakeService } from "./index.ts";
 import { intakeMigrations } from "./migrations.ts";
 import {
-  FinalizationKind,
-  runOutbound,
   type CallAnswer,
   type Finalization,
+  FinalizationKind,
   type OutboundAnswer,
   type OutboundRun,
   type OutboundScope,
   type ReadBack,
+  runOutbound,
 } from "./outbound.ts";
 import {
   discard,

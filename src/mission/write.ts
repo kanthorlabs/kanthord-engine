@@ -2,8 +2,8 @@ import { OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import type { Transaction } from "../kernel/store.ts";
 import { isTerminal } from "./admission.ts";
-import { MissionErrorCode, type Mission } from "./contract.ts";
-import { readMission, type NodeRow } from "./store.ts";
+import { type Mission, MissionErrorCode } from "./contract.ts";
+import { type NodeRow, readMission } from "./store.ts";
 
 export function requireActive(node: NodeRow): void {
   if (node.retired_at !== null)

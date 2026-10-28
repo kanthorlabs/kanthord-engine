@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
 import { once } from "node:events";
-import { createServer, type AddressInfo, type Socket } from "node:net";
+import { type AddressInfo, createServer, type Socket } from "node:net";
 import test from "node:test";
 import { background, DeadlineExceeded } from "../kernel/context.ts";
 import { Diagnostic, OperationError } from "../kernel/errors.ts";
 import { ResourceFailureReason } from "../kernel/health.ts";
 import { HttpStatus } from "../kernel/http.ts";
-import { GitStage, GitWriteError, gitLsRemote } from "./connector.ts";
+import { gitLsRemote, GitStage, GitWriteError } from "./connector.ts";
 import { HostKeyErrorCode, RepositoryErrorCode } from "./contract.ts";
 import { classifyGitFailure, gitFailureReason } from "./git-failure.ts";
 import { SshAgentErrorCode } from "./ssh-agent.ts";

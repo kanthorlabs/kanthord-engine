@@ -32,6 +32,9 @@ document.
 - Change a table only in the one migration of its service. Edit its
   `CREATE TABLE` or `CREATE UNIQUE INDEX` text in place. Add no `ALTER TABLE`,
   no `UPDATE` and no second migration.
+- Never declare a SQL `CHECK` constraint. Define a closed value set as an enum
+  in code. The owning service validates the value before the write.
+- Never declare an index that is not a unique index.
 - Change operation declarations, never the generated YAML under `static/`.
   Regenerate it with `pnpm run build && node bin/kanthord.mjs gateway openapi`.
 - A handler that calls a peer for its caller passes `caller.identity` in

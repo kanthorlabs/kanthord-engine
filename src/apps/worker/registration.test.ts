@@ -4,10 +4,10 @@ import { OperationResultType } from "../../kernel/operation.ts";
 import { Diagnostic } from "../../kernel/errors.ts";
 import { httpTransport } from "./transport.ts";
 import {
-  register,
   deregister,
-  startHeartbeat,
   HEARTBEAT_INTERVAL_MS,
+  register,
+  startHeartbeat,
 } from "./registration.ts";
 
 test("registration returns server facts with a fresh key and translates refusal and uncertainty", async (t) => {

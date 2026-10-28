@@ -13,9 +13,9 @@ import { isString } from "../../kernel/values.ts";
 import { packageVersion } from "../../kernel/version.ts";
 import {
   INSTANCE_CONNECTION_INFO,
-  WORKER_TOKEN_INFO,
-  instanceConfigurationValue,
   type InstanceConfiguration,
+  instanceConfigurationValue,
+  WORKER_TOKEN_INFO,
 } from "../../worker/contract.ts";
 import type { ExecutionRecord } from "../../scheduler/contract.ts";
 

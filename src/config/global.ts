@@ -1,4 +1,4 @@
-import { LogDestination, type LogConfig } from "../kernel/log.ts";
+import { type LogConfig, LogDestination } from "../kernel/log.ts";
 import { isString } from "../kernel/values.ts";
 export { LogDestination } from "../kernel/log.ts";
 export const MASTER_KEY_BYTES = 32;

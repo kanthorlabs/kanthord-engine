@@ -9,26 +9,26 @@ import {
   AssetKind,
   ClosingEvent,
   Intent,
+  NodeState,
   PlatformAddressKind,
   RepositoryAction,
   RevokeCause,
-  NodeState,
   type RevokedExecution,
 } from "./contract.ts";
 import { Act, ActAttribute } from "./act-telemetry.ts";
 import { ControlError } from "./control.ts";
 import {
-  openAttempt,
   insertAssessment,
   insertEvidence,
-  readEvidence,
+  openAttempt,
   readAssets,
+  readEvidence,
 } from "./record-store.ts";
 import {
-  insertNode,
   insertDependency,
-  setNodeState,
+  insertNode,
   readNode,
+  setNodeState,
 } from "./store.ts";
 import {
   actCalls,
@@ -36,7 +36,7 @@ import {
   revokedExecution,
   settlesExpired,
 } from "./test-support.ts";
-import { readCurrentRevision, insertRevision } from "./store.ts";
+import { insertRevision, readCurrentRevision } from "./store.ts";
 import { revisionFromRow } from "./revision.ts";
 
 const IDENTITY = testHumanIdentity("ulrich", "Ulrich", "token");

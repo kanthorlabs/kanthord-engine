@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { PassThrough } from "node:stream";
-import { MessageChannel, Worker, type MessagePort } from "node:worker_threads";
+import { MessageChannel, type MessagePort, Worker } from "node:worker_threads";
 import { test, type TestContext } from "node:test";
 import pino from "pino";
 import { servePort } from "../../gateway/index.ts";

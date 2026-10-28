@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 import ts from "typescript";
-import { loadPi, piAgentDirectory, PI_OFFLINE_VALUE } from "./pi.ts";
+import { loadPi, PI_OFFLINE_VALUE, piAgentDirectory } from "./pi.ts";
 
 test("only the pi loader imports the runtime as a value", () => {
   const root = fileURLToPath(new URL("../", import.meta.url));

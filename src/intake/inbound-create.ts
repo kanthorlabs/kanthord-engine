@@ -5,16 +5,16 @@ import type { ServiceIdentity } from "../kernel/caller.ts";
 import { OperationError, validationIssues } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import {
-  OperationResultType,
   type CallerContext,
+  OperationResultType,
   type ServiceClient,
 } from "../kernel/operation.ts";
 import type { Store, Transaction } from "../kernel/store.ts";
 import type { projectOperations } from "../project/contract.ts";
 import {
+  type GitHubFailure,
   GitHubTargetKind,
   repositoryOf,
-  type GitHubFailure,
 } from "../repository/github.ts";
 import type { IntakeCustody } from "./action-check.ts";
 import {
@@ -22,10 +22,10 @@ import {
   type GitHubConfiguration,
 } from "./configuration.ts";
 import {
-  InboundKind,
-  IntakeErrorCode,
   type Inbound,
   type InboundCreate,
+  InboundKind,
+  IntakeErrorCode,
 } from "./contract.ts";
 import {
   allocateInboundId,
@@ -35,10 +35,10 @@ import {
 } from "./inbound-store.ts";
 import {
   POLL_READS,
-  releasePollGrant,
-  requestPollRead,
   type PollGitHub,
   type PollRead,
+  releasePollGrant,
+  requestPollRead,
 } from "./poll.ts";
 
 const VALIDATION_FAILED_CODE = "gateway.request.validation_failed";

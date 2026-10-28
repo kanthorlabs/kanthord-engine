@@ -13,8 +13,8 @@ import {
 import { background } from "../../kernel/context.ts";
 import {
   fixtureTemplate,
-  temporary,
   hostEnvironment,
+  temporary,
 } from "../../kernel/test-support.ts";
 import { createIdentity } from "../../kernel/identity.ts";
 import * as connector from "../../repository/connector.ts";
@@ -35,15 +35,15 @@ import {
   type ModelRuntimeFactory,
 } from "./model-runtime.ts";
 import {
-  ExecutionIntent,
   type ExecutionEnvironment,
+  ExecutionIntent,
   type ExecutionSetup,
   type RepositoryTransport,
 } from "../contract.ts";
 import { RecordKind, type TelemetryRecord } from "../../tracking/contract.ts";
 import { AFFECTED_DECLARATION_FILE } from "./affected.ts";
 import { ExecutionBudget } from "./budget.ts";
-import { SpanRecorder, type SpanOperation } from "./telemetry.ts";
+import { type SpanOperation, SpanRecorder } from "./telemetry.ts";
 import { openNativeAgent } from "./native-agent.ts";
 import { ExecutionRun, type MethodClaim } from "./execution-run.ts";
 import type { MethodClients } from "./method-clients.ts";

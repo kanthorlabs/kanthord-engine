@@ -7,9 +7,9 @@ import { simpleGit } from "simple-git";
 import { Diagnostic } from "../../kernel/errors.ts";
 import {
   AssetKind,
-  NodeState,
-  Intent,
   type Evidence,
+  Intent,
+  NodeState,
 } from "../../mission/contract.ts";
 import type { CredentialAnswer } from "../../custody/contract.ts";
 import type { SshAccess } from "../../repository/contract.ts";
@@ -29,7 +29,7 @@ import {
   FAKE_SSH_CREDENTIAL,
   inProcessWorker,
 } from "./test-support.ts";
-import { workerAcceptance, WORKER_TEST_KEY } from "./worker-acceptance.ts";
+import { WORKER_TEST_KEY, workerAcceptance } from "./worker-acceptance.ts";
 
 const FIRST_REVISION = 1;
 const SINGLE_ITEM = 1;

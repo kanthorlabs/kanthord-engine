@@ -1,4 +1,3 @@
-/** Names for JavaScript's typeof results, not application discriminants. */
 export const ValueType = {
   String: "string",
   Number: "number",

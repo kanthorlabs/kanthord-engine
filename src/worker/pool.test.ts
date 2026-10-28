@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { POOL_SLOT_COUNT, PoolPlacement } from "./contract.ts";
 import { FakePoolHost } from "./test-support.ts";
-import { Pool, planPool, type PoolProbes, type PoolTarget } from "./pool.ts";
+import { planPool, Pool, type PoolProbes, type PoolTarget } from "./pool.ts";
 
 const PROJECT_ID = "project_01ARZ3NDEKTSV4RRFFQ69G5FAV";
 const OTHER_PROJECT_ID = "project_01ARZ3NDEKTSV4RRFFQ69G5FAW";

@@ -15,12 +15,12 @@ import { isString } from "../kernel/values.ts";
 import {
   HOST_KEY_SCAN_FAILED_STATUS,
   HostKeyErrorCode,
-  HostKeySource,
-  repositoryOperations,
   type HostKeyItem,
   type HostKeyListAnswer,
   type HostKeyListQuery,
   type HostKeyScanAnswer,
+  HostKeySource,
+  repositoryOperations,
 } from "./contract.ts";
 import {
   isGitHubSshHost,

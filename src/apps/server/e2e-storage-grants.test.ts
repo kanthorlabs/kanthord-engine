@@ -12,23 +12,23 @@ import {
   OutboundRequestState,
 } from "../../intake/contract.ts";
 import {
-  OperationResultType,
   type OperationResult,
+  OperationResultType,
 } from "../../kernel/operation.ts";
 import { temporary } from "../../kernel/test-support.ts";
 import {
   AssetKind,
+  type EvidenceAsset,
+  Intent,
   MissionErrorCode,
   missionOperations,
-  Intent,
-  UploadCheckSpan,
-  type EvidenceAsset,
   type Revision,
+  UploadCheckSpan,
 } from "../../mission/contract.ts";
 import { SpanStatus } from "../../tracking/contract.ts";
 import {
-  WorkPullKind,
   type ExecutionRecord,
+  WorkPullKind,
 } from "../../scheduler/contract.ts";
 import {
   createFakeSshCredential,

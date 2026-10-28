@@ -2,9 +2,9 @@ import assert from "node:assert/strict";
 import type { Credential, CredentialStore } from "@earendil-works/pi-ai";
 import { digest } from "../kernel/json.ts";
 import {
+  type HandoverItems,
   handoverItemsSchema,
   piCredentialSchema,
-  type HandoverItems,
   type RefreshReport,
 } from "./contract.ts";
 import { normalizeCredential } from "./payload.ts";

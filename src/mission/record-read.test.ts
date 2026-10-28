@@ -8,12 +8,12 @@ import {
   AssessmentResult,
   AssetKind,
   ClosingEvent,
+  type MissionBindings,
+  nodeSchema,
   NodeState,
   RepositoryAction,
-  RevisionWrite,
   Resolution,
-  nodeSchema,
-  type MissionBindings,
+  RevisionWrite,
 } from "./contract.ts";
 import {
   attemptRecord,
@@ -23,12 +23,12 @@ import {
   outcomeRecord,
 } from "./record-read.ts";
 import {
-  openAttempt,
-  insertEvidence,
-  insertAssessment,
-  insertOutcome,
-  readEvidence,
   type AssetRow,
+  insertAssessment,
+  insertEvidence,
+  insertOutcome,
+  openAttempt,
+  readEvidence,
 } from "./record-store.ts";
 import { insertMission, insertNode, readNode, setNodeState } from "./store.ts";
 import { nodeRecord } from "./node-read.ts";

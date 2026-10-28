@@ -4,10 +4,10 @@ import type { ExecutionClaim } from "../kernel/operation.ts";
 import {
   ActionReadMethod,
   ActionResolution,
-  RepositoryAction,
-  requiredCheckReadSchema,
   type FailedChecks,
   type IntakeActionCall,
+  RepositoryAction,
+  requiredCheckReadSchema,
 } from "./contract.ts";
 import { isResultClass } from "./action-classify.ts";
 import type { Dependencies } from "./service.ts";

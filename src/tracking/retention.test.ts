@@ -2,9 +2,9 @@ import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
 import { IN_MEMORY_DATABASE, Store } from "../kernel/store.ts";
 import {
-  TRACKING_SERVICE_NAME,
   type ExecutionTrace,
   type ServerTrace,
+  TRACKING_SERVICE_NAME,
 } from "./contract.ts";
 import { trackingMigrations } from "./migrations.ts";
 import { DAY_MS, retentionCutoff, sweepExpiredTraces } from "./retention.ts";

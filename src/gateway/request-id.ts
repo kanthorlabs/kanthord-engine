@@ -3,7 +3,6 @@ import { createIdentity, identitySchema } from "../kernel/identity.ts";
 
 export const requestIdSchema = identitySchema("request");
 
-/** Invalid correlation IDs are replaced, never forwarded or logged. */
 export function resolveRequestId(value?: string): string {
   const parsed = requestIdSchema.safeParse(value);
   const result = parsed.success ? parsed.data : createIdentity("request");

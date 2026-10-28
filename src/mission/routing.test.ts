@@ -5,7 +5,7 @@ import { testHumanIdentity } from "../kernel/test-identity.ts";
 import { isTerminal } from "./admission.ts";
 import { continuationHolds, readinessOf } from "./conditions.ts";
 import { NodeState } from "./contract.ts";
-import { directDependenciesOf, type DepEdge } from "./graph.ts";
+import { type DepEdge, directDependenciesOf } from "./graph.ts";
 import {
   claimableMap,
   nodeClaimable,

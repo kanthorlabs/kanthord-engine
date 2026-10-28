@@ -2,18 +2,18 @@ import { identitySchema } from "../kernel/identity.ts";
 import type { Transaction } from "../kernel/store.ts";
 import {
   NODE_LIST_LIMIT_DEFAULT,
+  type Proposal,
   PROPOSAL_IDENTITY_PREFIX,
   proposalContentSchema,
   proposalSchema,
-  type Proposal,
 } from "./contract.ts";
 import { requireRunnable } from "./control.ts";
 import { decode, encode, invalidCursor, requireNode } from "./node-read.ts";
 import { recordNotFound } from "./record-list.ts";
 import {
   listProposals,
-  readProposal,
   type ProposalRow,
+  readProposal,
 } from "./proposal-store.ts";
 
 const SLICE_FROM_START = 0;

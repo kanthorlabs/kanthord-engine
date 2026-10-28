@@ -18,10 +18,10 @@ import {
 } from "../../llm/contract.ts";
 import { OAuthLogin, type OAuthSecret } from "../../llm/login.ts";
 import {
+  type LoginSession,
   LoginSessionState,
   LoginSessionStore,
   SESSION_EXPIRY_MS,
-  type LoginSession,
 } from "../../llm/sessions.ts";
 import { EXCHANGE_UNAVAILABLE } from "./instance-exchange.ts";
 import { createIdempotencyKey } from "../../kernel/identity.ts";

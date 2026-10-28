@@ -4,8 +4,8 @@ import {
   appendFileSync,
   existsSync,
   mkdirSync,
-  readFileSync,
   readdirSync,
+  readFileSync,
   readlinkSync,
   realpathSync,
   symlinkSync,
@@ -20,13 +20,13 @@ import { EnvironmentSource } from "../../kernel/devcontainer.ts";
 import type { SlotEnvironment } from "../../project/contract.ts";
 import {
   BASE_SUFFIX,
-  UNCHECKED_SUFFIX,
   EnvironmentFailureClass,
-  ImageBuildOutcome,
   environmentPath,
   environmentTagOf,
   type ImageBuildInput,
+  ImageBuildOutcome,
   type ImageBuildResult,
+  UNCHECKED_SUFFIX,
 } from "../../project/environment-state.ts";
 import {
   OWNER_LABEL,
@@ -35,9 +35,9 @@ import {
 } from "./container-runtime.ts";
 import {
   devcontainerBuildArguments,
+  environmentDigest,
   EnvironmentImageFailure,
   EnvironmentImages,
-  environmentDigest,
   imageSettings,
   layerContainerfile,
 } from "./environment-image.ts";

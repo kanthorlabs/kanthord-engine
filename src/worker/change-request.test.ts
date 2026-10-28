@@ -5,11 +5,11 @@ import { OperationError } from "../kernel/errors.ts";
 import type { ExecutionClaim } from "../kernel/operation.ts";
 import { clearedChangeRequests } from "./change-request.ts";
 import {
+  type ActionContext,
   ActionReadMethod,
   ActionResolution,
-  RepositoryAction,
-  type ActionContext,
   type IntakeActionCall,
+  RepositoryAction,
 } from "./contract.ts";
 import type { Dependencies } from "./service.ts";
 

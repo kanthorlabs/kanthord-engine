@@ -2,9 +2,9 @@ import assert from "node:assert/strict";
 import { OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import {
+  type CallerIdentity,
   IdentityKind,
   isServiceIdentity,
-  type CallerIdentity,
   type MachineIdentity,
   type ServiceIdentity,
 } from "../kernel/caller.ts";
@@ -12,26 +12,26 @@ import type { ExecutionClaim } from "../kernel/operation.ts";
 import type { Transaction } from "../kernel/store.ts";
 import { commitTypeOf } from "../kernel/commit-message.ts";
 import {
+  type ActionFacts,
   AssessmentResult,
   AssetKind,
+  type Authorized,
+  type FrozenAction,
   MISSION_SERVICE_NAME,
+  type MissionBindings,
   MissionErrorCode,
   NodeState,
   OBJECT_SIZE_MAX,
-  PlatformAddressKind,
-  RepositoryAction,
-  RepositoryLanding,
-  platformAddressSchema,
-  testedInputSchema,
-  type ActionFacts,
-  type Authorized,
-  type FrozenAction,
-  type MissionBindings,
   type PlatformAddress,
+  PlatformAddressKind,
+  platformAddressSchema,
   type PullRequestAddress,
+  RepositoryAction,
   type RepositoryFacts,
+  RepositoryLanding,
   type RequestFacts,
   type StorageBinding,
+  testedInputSchema,
 } from "./contract.ts";
 import { currentAssessmentOf } from "./currency.ts";
 import {
@@ -50,12 +50,12 @@ import { gateFilesOf } from "./gate-files.ts";
 import { getRevision } from "./node-read.ts";
 import { recordNotFound } from "./record-list.ts";
 import {
-  readOpenAttempt,
-  readAttempt,
-  readEvidence,
-  readAssets,
   type AssetRow,
   type EvidenceRow,
+  readAssets,
+  readAttempt,
+  readEvidence,
+  readOpenAttempt,
 } from "./record-store.ts";
 import { readNode } from "./store.ts";
 import type { Dependencies } from "./service.ts";

@@ -11,18 +11,18 @@ import {
   credentialPlatformListAnswerSchema,
   credentialRevisionParamsSchema,
   credentialUpdateMetadataBodySchema,
-  sealedCopyAnswerSchema,
   LoginSessionMode,
   METADATA_MAX_BODY_BYTES,
+  sealedCopyAnswerSchema,
 } from "../custody/contract.ts";
 import { resourceFailureReasonSchema } from "../kernel/health.ts";
 import { sealedObjectSchema } from "../kernel/hpke.ts";
 import { HttpMethod, HttpStatus } from "../kernel/http.ts";
 import {
   AccessPolicy,
+  type Operation,
   OperationLifetime,
   StoreName,
-  type Operation,
 } from "../kernel/operation.ts";
 import type { Transaction } from "../kernel/store.ts";
 import { ProviderFailure } from "../scheduler/contract.ts";

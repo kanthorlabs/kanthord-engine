@@ -1,34 +1,34 @@
 import assert from "node:assert/strict";
 import {
+  type Attributes,
   COLLECTION_MAX,
   SpanStatus,
-  type Attributes,
 } from "../../tracking/contract.ts";
 import type { TaskContent } from "../../mission/contract.ts";
 import {
-  SpanOperation,
   type Phase,
   type SpanEnd,
+  SpanOperation,
   type SpanRecorder,
   type SpanStart,
 } from "./telemetry.ts";
 import {
-  commandClassOf,
   type CommandAttempt,
+  commandClassOf,
   type CommandObserver,
   type CommandRun,
   type TestedInput,
 } from "./verification.ts";
 import type { ExecutionEnvironment } from "../contract.ts";
 import { CodedError, diagnostic, diagnosticRows } from "../../kernel/errors.ts";
-import { markGitStep, type GitStep } from "./git-step.ts";
+import { type GitStep, markGitStep } from "./git-step.ts";
 import { noProgressAttributes } from "./progress-rule.ts";
 import type { EvaluationFacts } from "./rework-cause.ts";
 import {
+  type AffectedRun,
   AffectedSelection,
   AffectedVerdict,
   testIdText,
-  type AffectedRun,
 } from "./affected.ts";
 
 const SUCCESS = 0;

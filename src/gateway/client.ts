@@ -9,12 +9,12 @@ import { parseMapping } from "../kernel/yaml.ts";
 import { audit, readPrivate } from "../kernel/files.ts";
 import { z } from "zod";
 import { Diagnostic } from "../kernel/errors.ts";
-import { gatewayOperations } from "./contract.ts";
+import type { gatewayOperations } from "./contract.ts";
 import {
-  OperationResultType,
-  OperationLifetime,
   type ClientOptions,
   type Operation,
+  OperationLifetime,
+  OperationResultType,
   type ServiceClient,
 } from "../kernel/operation.ts";
 import { background, CancellationContext } from "../kernel/context.ts";

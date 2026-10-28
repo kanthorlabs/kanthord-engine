@@ -6,28 +6,28 @@ import type { Context } from "../kernel/context.ts";
 import { OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import {
-  OperationResultType,
   type ExecutionClaim,
   type OperationResult,
+  OperationResultType,
 } from "../kernel/operation.ts";
 import {
   ACTION_REQUEST_TOOL_NAME,
   ActionAssessmentResult,
+  type ActionContext,
   ActionNodeState,
-  ActionResolution,
-  ActionResultKind,
+  type ActionOperands,
   ActionReadMethod,
+  type ActionRequestResult,
+  ActionResolution,
+  type ActionResultItem,
+  ActionResultKind,
+  type IntakeActionCall,
+  type PlatformAddress,
   PlatformAddressKind,
   RepositoryAction,
   requiredCheckReadSchema,
   Uncertainty,
   WorkerErrorCode,
-  type ActionContext,
-  type ActionRequestResult,
-  type ActionResultItem,
-  type ActionOperands,
-  type PlatformAddress,
-  type IntakeActionCall,
 } from "./contract.ts";
 import {
   DispatchReservations,
@@ -38,8 +38,8 @@ import { operandsOf } from "./action-operands.ts";
 import {
   isResultClass,
   performedItem,
-  recordedItem,
   readRefusalItem,
+  recordedItem,
 } from "./action-classify.ts";
 import { fulfils, sameRepository } from "./action-reuse.ts";
 import type { Dependencies } from "./service.ts";

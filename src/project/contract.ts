@@ -5,9 +5,9 @@ import type { Context } from "../kernel/context.ts";
 import { HttpMethod, HttpStatus } from "../kernel/http.ts";
 import {
   AccessPolicy,
+  type Operation,
   OperationLifetime,
   StoreName,
-  type Operation,
 } from "../kernel/operation.ts";
 import type { Transaction } from "../kernel/store.ts";
 import { isString } from "../kernel/values.ts";
@@ -19,13 +19,13 @@ import { tagSchema } from "../kernel/tag.ts";
 import { SERVER_HOLDER } from "../kernel/holder.ts";
 import {
   AGENT_NAMES,
-  fallbackConfigurationsSchema,
   type AgentName,
+  fallbackConfigurationsSchema,
   type HolderScope,
 } from "../agent/contract.ts";
 import {
-  SSH_AGENT_CLEANUP_TIMEOUT_MS,
   type RepositoryFile,
+  SSH_AGENT_CLEANUP_TIMEOUT_MS,
   type SshAccess,
 } from "../repository/contract.ts";
 import { timestamp } from "../kernel/json.ts";
@@ -46,9 +46,9 @@ import {
   METADATA_MAX_BODY_BYTES,
 } from "../custody/contract.ts";
 import {
-  EnvironmentSource,
-  environmentSchema,
   type Environment,
+  environmentSchema,
+  EnvironmentSource,
 } from "../kernel/devcontainer.ts";
 
 export const BINDING_CHECK_TIMEOUT_MS = 10000;
@@ -190,7 +190,7 @@ export const ENVIRONMENT_FILE_MAX_BYTES = 65536;
 export const bindingPromptsSchema = z.strictObject(
   Object.fromEntries(
     AGENT_NAMES.map((name) => [name, z.string().optional()]),
-  ) as { [Name in AgentName]: z.ZodOptional<z.ZodString> },
+  ) as Record<AgentName, z.ZodOptional<z.ZodString>>,
 );
 export type BindingPrompts = z.infer<typeof bindingPromptsSchema>;
 

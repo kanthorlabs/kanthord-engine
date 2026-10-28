@@ -7,16 +7,16 @@ import { httpClient } from "../../gateway/client.ts";
 import { gatewayOperations } from "../../gateway/contract.ts";
 import {
   AccessPolicy,
-  OperationResultType,
   type OperationResult,
+  OperationResultType,
 } from "../../kernel/operation.ts";
 import { isObject, isString, ValueType } from "../../kernel/values.ts";
 import { fakeContainerHost } from "./container-fakes.ts";
 import {
   fakeMachines,
   gatewayFixture,
-  TEST_WORKER_BINDING,
   TEST_PROJECT_ID,
+  TEST_WORKER_BINDING,
 } from "./test-support.ts";
 
 const MAX_WIRE_NODES = 10000;

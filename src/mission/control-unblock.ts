@@ -4,14 +4,14 @@ import { HttpStatus } from "../kernel/http.ts";
 import { canonicalJSON } from "../kernel/json.ts";
 import type { Transaction } from "../kernel/store.ts";
 import {
-  MissionErrorCode,
-  NodeState,
-  RevisionWrite,
-  StartPoint,
   type Content,
   type ExecutionEnds,
   type HumanActor,
+  MissionErrorCode,
+  NodeState,
   type Revision,
+  RevisionWrite,
+  StartPoint,
   type Unblock,
   type UnblockChange,
 } from "./contract.ts";
@@ -22,22 +22,22 @@ import { requireNode } from "./node-read.ts";
 import { resolveContent, resolveTasks } from "./node-create.ts";
 import { requireIntentUnlocked } from "./node-update.ts";
 import {
-  requireRunnable,
+  actedOn,
+  controlResult,
   requireControlState,
+  requireRunnable,
   settleClaim,
   stateConflict,
   transition,
-  controlResult,
-  actedOn,
 } from "./control.ts";
 import { openAttempt } from "./record-store.ts";
 import { revisionFromRow } from "./revision.ts";
 import { requireActive, requireMission, requireNonterminal } from "./write.ts";
 import {
-  readCurrentRevision,
-  insertRevision,
   incrementMissionVersion,
+  insertRevision,
   type NodeRow,
+  readCurrentRevision,
 } from "./store.ts";
 
 const NO_CHANGED_FIELDS = 0;

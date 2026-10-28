@@ -2,12 +2,12 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { getAgentDeclaration } from "../agent/catalog.ts";
 import {
+  agentsOfWorker,
+  getWorkerDeclaration,
   RELEASED_WORKER_NAMES,
   WORKER_CATALOG,
   WorkerHost,
   WorkerMethod,
-  agentsOfWorker,
-  getWorkerDeclaration,
 } from "./catalog.ts";
 
 const declaredIntents = ["implement", "examine"];

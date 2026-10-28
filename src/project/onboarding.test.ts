@@ -3,50 +3,50 @@ import { existsSync, readFileSync, statSync } from "node:fs";
 import { join, posix } from "node:path";
 import { test, type TestContext } from "node:test";
 import {
-  setImmediate as turn,
   setTimeout as pause,
+  setImmediate as turn,
 } from "node:timers/promises";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import pino from "pino";
 import { CustodyComponent, custodyMigrations } from "../custody/index.ts";
 import {
-  CUSTODY_SERVICE_NAME,
   type CredentialAnswer,
+  CUSTODY_SERVICE_NAME,
 } from "../custody/contract.ts";
 import { INTAKE_SERVICE_NAME } from "../intake/contract.ts";
 import { IdentityKind } from "../kernel/caller.ts";
 import { CancellationContext } from "../kernel/context.ts";
 import {
   DEVCONTAINER_FILE,
-  EnvironmentSource,
-  environmentSchema,
   type Environment,
+  environmentSchema,
+  EnvironmentSource,
 } from "../kernel/devcontainer.ts";
 import { OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import { IN_MEMORY_DATABASE, Store } from "../kernel/store.ts";
 import { temporary } from "../kernel/test-support.ts";
 import { testServiceIdentity } from "../kernel/test-identity.ts";
-import { SpanStatus, type ServerTrace } from "../tracking/contract.ts";
+import { type ServerTrace, SpanStatus } from "../tracking/contract.ts";
 import {
-  RepositoryFileState,
   type RepositoryFile,
+  RepositoryFileState,
 } from "../repository/contract.ts";
 import {
   BindingKind,
+  bindingSetWriteInputSchema,
   PROJECT_SERVICE_NAME,
   ProjectErrorCode,
-  WorkerPlacement,
-  bindingSetWriteInputSchema,
   type RepositoryFiles,
+  WorkerPlacement,
 } from "./contract.ts";
 import {
+  detectEnvironment,
   DETECTION_PATHS,
   WORKFLOW_DIRECTORY,
   WORKFLOW_FILES_MAX,
-  detectEnvironment,
 } from "./detection.ts";
-import { ProjectEnvironments, type GroupResolution } from "./environment.ts";
+import { type GroupResolution, ProjectEnvironments } from "./environment.ts";
 import type {
   EnvironmentSessionHandle,
   EnvironmentSessionInput,
@@ -60,32 +60,32 @@ import { EnvironmentSecrets } from "./environment-secrets.ts";
 import type { EnvironmentContribution } from "./environment-telemetry.ts";
 import {
   BASE_SUFFIX,
-  EnvironmentStatus,
-  EnvironmentTarget,
-  PROVED_SUFFIX,
-  ProofFiles,
+  type CommandResult,
   environmentDigest,
   environmentPath,
-  environmentTagOf,
-  type CommandResult,
   type EnvironmentRuntime,
+  EnvironmentStatus,
+  environmentTagOf,
+  EnvironmentTarget,
   type ImageBuildInput,
   type ImageBuildResult,
   type ProofFile,
+  ProofFiles,
   type ProofInput,
+  PROVED_SUFFIX,
 } from "./environment-state.ts";
 import {
+  type BindingFacts,
   ENV_AGENT_ATTEMPT_LIMIT,
   ENV_AGENT_TOOL_CALL_LIMIT,
-  Onboarding,
-  environmentStateSchema,
-  statusOf,
-  targetOf,
-  type BindingFacts,
   type EnvironmentFailedInput,
+  environmentStateSchema,
   type GroupRecord,
+  Onboarding,
   type OnboardingDependencies,
   type RepositoryGroup,
+  statusOf,
+  targetOf,
   type WorkerBindingFacts,
 } from "./onboarding.ts";
 import { projectMigrations } from "./migrations.ts";

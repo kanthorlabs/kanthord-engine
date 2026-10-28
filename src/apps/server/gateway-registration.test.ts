@@ -10,19 +10,19 @@ import {
 } from "./test-support.ts";
 import {
   emptyInput,
+  OperationLifetime,
   OperationRegistry,
   StoreName,
-  OperationLifetime,
 } from "../../kernel/operation.ts";
 import { isMachineIdentity } from "../../kernel/caller.ts";
-import { directClient, createInvocation } from "../../gateway/index.ts";
+import { createInvocation, directClient } from "../../gateway/index.ts";
 import { httpClient } from "../../gateway/client.ts";
 import { OperationResultType } from "../../kernel/operation.ts";
 import { AccessPolicy } from "../../kernel/operation.ts";
 import { HttpMethod, HttpStatus } from "../../kernel/http.ts";
 import { errorSchema } from "../../kernel/errors.ts";
 import { workerOperations } from "../../worker/contract.ts";
-import { Store, IN_MEMORY_DATABASE } from "../../kernel/store.ts";
+import { IN_MEMORY_DATABASE, Store } from "../../kernel/store.ts";
 import { createIdempotencyKey } from "../../kernel/identity.ts";
 
 const NO_REGISTRATIONS = 0;

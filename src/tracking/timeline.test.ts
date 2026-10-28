@@ -3,11 +3,11 @@ import { test, type TestContext } from "node:test";
 import type { DatabaseSync } from "node:sqlite";
 import { IN_MEMORY_DATABASE, Store } from "../kernel/store.ts";
 import {
+  type Span,
   SpanOrigin,
   SpanStatus,
-  TRACKING_SERVICE_NAME,
   TimelineDepth,
-  type Span,
+  TRACKING_SERVICE_NAME,
 } from "./contract.ts";
 import { trackingMigrations } from "./migrations.ts";
 import {

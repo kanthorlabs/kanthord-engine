@@ -1,33 +1,33 @@
 import assert from "node:assert/strict";
 import {
-  sshKeySecretSchema,
   type GrantFacts,
   type GrantKind,
   type GrantOf,
   type Material,
+  sshKeySecretSchema,
 } from "../custody/contract.ts";
 import { background, type Context } from "../kernel/context.ts";
 import { OperationError } from "../kernel/errors.ts";
 import type { HealthRegistry } from "../kernel/health.ts";
 import { HttpStatus } from "../kernel/http.ts";
-import { HealthStatus, type Healthcheck } from "../kernel/service.ts";
+import { type Healthcheck, HealthStatus } from "../kernel/service.ts";
 import type { Transaction } from "../kernel/store.ts";
 import { checkRepositoryTools, probeRepositoryTools } from "./check.ts";
 import {
-  gitLsRemote,
+  changedGateFiles,
   clone,
   cloneSnapshot,
   fetchAndCheckout,
   fetchBase,
-  pushNodeBranch,
-  mergePushFresh,
-  pushSnapshotFresh,
+  gitLsRemote,
   landedOn,
-  changedGateFiles,
-  resolveBranchCommit,
-  readFilesAtCommit,
   listFilesAtCommit,
+  mergePushFresh,
+  pushNodeBranch,
+  pushSnapshotFresh,
+  readFilesAtCommit,
   readObjectIds,
+  resolveBranchCommit,
 } from "./connector.ts";
 import { RepositoryErrorCode } from "./contract.ts";
 import { GitHubPlatform } from "./github.ts";

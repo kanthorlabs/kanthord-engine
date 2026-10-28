@@ -12,9 +12,9 @@ import {
   loginNotFound,
 } from "./login.ts";
 import {
+  type LoginSession,
   LoginSessionMode,
   LoginSessionState,
-  type LoginSession,
   type LoginSessionStore,
 } from "./sessions.ts";
 

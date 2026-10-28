@@ -1,14 +1,14 @@
 import assert from "node:assert/strict";
 import type { Transaction } from "../kernel/store.ts";
 import { reconcileJob } from "./admission.ts";
-import { NodeState, type WorkQueue, type MissionBindings } from "./contract.ts";
-import { readinessOf, continuationHolds } from "./conditions.ts";
+import { type MissionBindings, NodeState, type WorkQueue } from "./contract.ts";
+import { continuationHolds, readinessOf } from "./conditions.ts";
 import {
+  type NodeRow,
   readLiveMissionNodes,
   readNode,
   readRoutableNodes,
   setNodeState,
-  type NodeRow,
 } from "./store.ts";
 
 const NO_UNMET_DEPENDENCIES = 0;

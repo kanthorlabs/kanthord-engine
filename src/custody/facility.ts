@@ -5,8 +5,8 @@ import { isObject } from "../kernel/values.ts";
 import type {
   Grant,
   GrantFacts,
-  GrantOf,
   GrantKind,
+  GrantOf,
   Material,
   WorkbenchGrant,
 } from "./contract.ts";

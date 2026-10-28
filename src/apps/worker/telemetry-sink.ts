@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import { CancellationContext } from "../../kernel/context.ts";
 import { CodedError } from "../../kernel/errors.ts";
 import {
-  OperationResultType,
   type OperationResult,
+  OperationResultType,
   type ServiceClient,
 } from "../../kernel/operation.ts";
 import type {

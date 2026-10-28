@@ -5,8 +5,8 @@ import { OperationResultType } from "../../kernel/operation.ts";
 import {
   deriveHandoverKeys,
   handoverAad,
-  sealEnvelope,
   openEnvelope,
+  sealEnvelope,
 } from "../../kernel/handover.ts";
 import {
   generateX25519KeyPair,

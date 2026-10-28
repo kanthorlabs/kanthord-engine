@@ -7,26 +7,26 @@ import type { CallerContext } from "../kernel/operation.ts";
 import type { Transaction } from "../kernel/store.ts";
 import {
   AssetKind,
-  NodeState,
-  MissionErrorCode,
-  Intent,
-  RevokeCause,
   type evidenceDeleteSchema,
+  Intent,
+  MissionErrorCode,
+  NodeState,
+  RevokeCause,
 } from "./contract.ts";
 import { isTerminal } from "./admission.ts";
-import { Act, recordAct, type ActFacts } from "./act-telemetry.ts";
+import { Act, type ActFacts, recordAct } from "./act-telemetry.ts";
 import type { ExecutionTrace } from "../tracking/contract.ts";
 import { objectContentSchema } from "./evidence-content-read.ts";
 import { requireTextBound } from "./execution.ts";
 import { requireNode } from "./node-read.ts";
 import { recordNotFound } from "./record-list.ts";
 import {
+  type AssetRow,
   deleteAsset,
   deleteEvidence,
   readAssets,
   readEvidence,
   readOpenAttempt,
-  type AssetRow,
 } from "./record-store.ts";
 import {
   endLiveClaim,
@@ -36,10 +36,10 @@ import {
   transition,
 } from "./control.ts";
 import {
-  readDependencies,
-  readMissionNodes,
   intentOf,
   type NodeRow,
+  readDependencies,
+  readMissionNodes,
 } from "./store.ts";
 import type { Dependencies } from "./service.ts";
 import { requireMission } from "./write.ts";

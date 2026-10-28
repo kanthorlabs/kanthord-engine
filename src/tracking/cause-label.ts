@@ -4,19 +4,19 @@ import {
   CauseAssigner,
   CauseAttribute,
   CauseCategory,
-  effectiveCauseSchema,
   type CauseSubcategory,
   type EffectiveCause,
+  effectiveCauseSchema,
 } from "../kernel/cause.ts";
 import { OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import type { Transaction } from "../kernel/store.ts";
 import {
+  type Attributes,
+  type Span,
   SpanOrigin,
   SpanStatus,
   TraceState,
-  type Attributes,
-  type Span,
 } from "./contract.ts";
 import { readTrace } from "./trace-store.ts";
 

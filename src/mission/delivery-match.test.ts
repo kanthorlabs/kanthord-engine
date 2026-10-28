@@ -11,9 +11,9 @@ import {
   Disposition,
   EndState,
   MISSION_SERVICE_NAME,
+  type PlatformAddress,
   PlatformAddressKind,
   StartPoint,
-  type PlatformAddress,
 } from "./contract.ts";
 import { MatchKind, matchRequests } from "./delivery-match.ts";
 import { missionMigrations } from "./migrations.ts";

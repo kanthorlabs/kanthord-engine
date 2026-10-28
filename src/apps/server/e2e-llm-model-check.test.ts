@@ -3,8 +3,8 @@ import { join } from "node:path";
 import { test, type TestContext } from "node:test";
 import {
   fauxAssistantMessage,
-  fauxToolCall,
   type FauxResponseStep,
+  fauxToolCall,
 } from "@earendil-works/pi-ai";
 import { loadPi } from "../../agent/pi.ts";
 import { writePrivate } from "../../kernel/files.ts";

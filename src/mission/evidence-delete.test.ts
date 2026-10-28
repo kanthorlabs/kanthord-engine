@@ -5,22 +5,22 @@ import { createIdentity } from "../kernel/identity.ts";
 import { canonicalJSON } from "../kernel/json.ts";
 import { testHumanIdentity } from "../kernel/test-identity.ts";
 import {
+  AssessmentResult,
   AssetKind,
+  ClosingEvent,
   MissionErrorCode,
   NodeState,
   PlatformAddressKind,
-  AssessmentResult,
-  ClosingEvent,
   RevokeCause,
 } from "./contract.ts";
 import {
-  insertEvidence,
-  readAssets,
-  readEvidence,
   closeAttempt,
   insertAssessment,
+  insertEvidence,
   insertOutcome,
   readAssessment,
+  readAssets,
+  readEvidence,
   readOutcome,
 } from "./record-store.ts";
 import { outcomeRecord } from "./record-read.ts";
@@ -218,7 +218,6 @@ test("failed remote deletion reads back on repeat and requires human request rem
   await assert.rejects(h.remove(true), (error) => error === failure);
   assert.equal(calls, FIRST_ATTEMPT);
   assert.equal(readBacks, FIRST_ATTEMPT);
-  // The fake models a human deleting the failed Intake outbound request.
   failedRequest = false;
   fail = false;
   await h.remove(true);

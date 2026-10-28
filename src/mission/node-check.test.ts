@@ -8,23 +8,23 @@ import {
   AssessmentResult,
   AssetKind,
   CheckEndState,
+  ClosingEvent,
   MissionErrorCode,
   NodeState,
   RepositoryLanding,
   Resolution,
-  ClosingEvent,
 } from "./contract.ts";
 import {
-  DEFERRED_CHECK_RETRY_MS,
   applyEndState,
+  DEFERRED_CHECK_RETRY_MS,
   scheduleDeferredCheck,
 } from "./node-check.ts";
 import { outcomeRecord } from "./record-read.ts";
 import {
   insertEvidence,
   readCurrentOutcome,
-  readLandedCommitEvidence,
   readEvidence,
+  readLandedCommitEvidence,
 } from "./record-store.ts";
 import { readMission, setNodeState } from "./store.ts";
 import { externalRequestHarness } from "./test-support.ts";

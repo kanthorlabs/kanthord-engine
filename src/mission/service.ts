@@ -2,8 +2,8 @@ import { addAbortListener } from "node:events";
 import assert from "node:assert/strict";
 import type { Logger } from "pino";
 import {
-  isHumanIdentity,
   type CallerIdentity,
+  isHumanIdentity,
   type MachineIdentity,
   type ServiceIdentity,
 } from "../kernel/caller.ts";
@@ -23,8 +23,8 @@ import type {
   OperationRegistry,
 } from "../kernel/operation.ts";
 import {
-  HealthStatus,
   type Healthcheck,
+  HealthStatus,
   type Service,
 } from "../kernel/service.ts";
 import type { Store, Transaction } from "../kernel/store.ts";
@@ -32,40 +32,40 @@ import { isTerminal } from "./admission.ts";
 import type { MissionConfig } from "./config.ts";
 import {
   ActorKind,
-  MISSION_SERVICE_NAME,
-  MissionErrorCode,
-  missionOperations,
-  type HumanActor,
   type CurrentNodePin,
-  type MissionBindings,
-  type MissionCollaborations,
-  type MissionEnvironments,
-  type WorkQueue,
-  type SchedulerClaims,
-  type SchedulerMatch,
-  type SchedulerWakeup,
-  type ExecutionAttribution,
-  type MissionTelemetry,
-  type MissionTransitions,
-  type MissionActions,
-  type IntakeStorage,
-  type IntakeCheck,
-  type IntakeGateFiles,
   type EventDecoder,
-  type Intent,
+  type ExecutionAttribution,
+  type ExecutionEnds,
+  type HumanActor,
   type ImportApply,
   type ImportPreview,
   type ImportResult,
-  type ExecutionEnds,
+  type IntakeCheck,
+  type IntakeGateFiles,
+  type IntakeStorage,
+  type Intent,
+  MISSION_SERVICE_NAME,
+  type MissionActions,
+  type MissionBindings,
+  type MissionCollaborations,
+  type MissionEnvironments,
+  MissionErrorCode,
+  missionOperations,
+  type MissionTelemetry,
+  type MissionTransitions,
+  type SchedulerClaims,
+  type SchedulerMatch,
+  type SchedulerWakeup,
+  type WorkQueue,
 } from "./contract.ts";
 import {
   Act,
-  recordAct,
+  type Acted,
   type ActFacts,
   type ActTelemetry,
-  type Acted,
+  recordAct,
 } from "./act-telemetry.ts";
-import { recordImport, type ImportFacts } from "./import-telemetry.ts";
+import { type ImportFacts, recordImport } from "./import-telemetry.ts";
 import { executionEnds, reportEnds } from "./control.ts";
 import { addDependency, removeDependency } from "./dependency.ts";
 import { pauseNode, readyNode, resumeNode } from "./control-hold.ts";
@@ -88,21 +88,22 @@ import {
 } from "./delivery-admit.ts";
 import { deleteEvidenceAsset, removeEvidence } from "./evidence-delete.ts";
 import {
+  clearedAssessment,
+  clearedOutcome,
+  executionDependencies,
+  executionDependencyEvidence,
+  executionDependencyOutcomes,
+  executionEvidencePage,
   executionRevision,
   executionRevisionPage,
-  executionEvidencePage,
-  clearedOutcome,
-  clearedAssessment,
   reworkAssessment,
-  executionDependencies,
-  executionDependencyOutcomes,
-  executionDependencyEvidence,
 } from "./execution-read.ts";
-import { claim, release, failure, nodeBranchesOf } from "./transitions.ts";
+import { claim, failure, nodeBranchesOf, release } from "./transitions.ts";
 import { actionContextOf } from "./action-context.ts";
 import { claimFacts, claimFactsOf, openingFacts } from "./claim-facts.ts";
 import { guardCoverage } from "./coverage.ts";
 import {
+  type AssetUse,
   authorizeAction,
   authorizeEvidenceAsset,
   authorizeFrozenAction,
@@ -110,19 +111,18 @@ import {
   authorizeRequest,
   authorizeRequestEvidence,
   authorizeServiceMerge,
-  type AssetUse,
   type ObjectPutInput,
 } from "./authorization.ts";
 import { repositoryBindingIdsOf } from "./evidence-content.ts";
 import {
-  attemptPage,
-  getAttempt,
-  externalActionPage,
-  getExternalAction,
   assessmentPage,
+  attemptPage,
+  externalActionPage,
   getAssessment,
-  outcomePage,
+  getAttempt,
+  getExternalAction,
   getOutcome,
+  outcomePage,
 } from "./record-list.ts";
 import { edgeCursor, edgePage } from "./edge-read.ts";
 import { exportMission } from "./export.ts";
@@ -135,17 +135,17 @@ import { setCriterion, updateNode } from "./node-update.ts";
 import {
   getNode,
   getRevision,
-  nodeRecord,
   nodeCursor,
   nodePage,
+  nodeRecord,
   requireNode,
   revisionCursor,
   revisionPage,
 } from "./node-read.ts";
 import {
   insertMission,
-  readLiveNodesPinning,
   readCurrentPins,
+  readLiveNodesPinning,
   readMissionByProject,
   updateNodePriority,
 } from "./store.ts";

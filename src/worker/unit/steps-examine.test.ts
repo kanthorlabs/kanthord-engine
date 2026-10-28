@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { join } from "node:path";
-import { temporary, hostEnvironment } from "../../kernel/test-support.ts";
+import { hostEnvironment, temporary } from "../../kernel/test-support.ts";
 import { CauseCategory, unattributed } from "../../kernel/cause.ts";
 import { createIdentity } from "../../kernel/identity.ts";
 import { background } from "../../kernel/context.ts";
@@ -19,8 +19,8 @@ import type { RepositoryTransport } from "../contract.ts";
 import type { NativeAgent } from "./native-agent.ts";
 import { runStepsExamine } from "./steps-examine.ts";
 import {
-  DeadlineExceeded,
   type CancellationContext,
+  DeadlineExceeded,
 } from "../../kernel/context.ts";
 import { ExecutionBudget } from "./budget.ts";
 import { executionBoundary } from "./native-method.ts";

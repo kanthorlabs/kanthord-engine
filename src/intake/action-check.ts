@@ -2,29 +2,29 @@ import assert from "node:assert/strict";
 import { z } from "zod";
 import {
   apiKeySecretSchema,
-  GrantKind,
-  SshIdentitySubjectKind,
   type Grant,
   type GrantFacts,
+  GrantKind,
   type GrantOf,
   type GrantRequest,
   type Material,
   type RequestFacts,
   type SshIdentitySubject,
+  SshIdentitySubjectKind,
 } from "../custody/contract.ts";
 import type { CallerIdentity } from "../kernel/caller.ts";
-import { DEADLINE_EXCEEDED_CODE, type Context } from "../kernel/context.ts";
+import { type Context, DEADLINE_EXCEEDED_CODE } from "../kernel/context.ts";
 import { CodedError, OperationError } from "../kernel/errors.ts";
 import type { CallerContext, ExecutionClaim } from "../kernel/operation.ts";
 import type { Store, Transaction } from "../kernel/store.ts";
 import { PlatformAddressKind } from "../mission/contract.ts";
 import {
+  type CheckFold,
   ExpectedEndState,
   GITHUB_RESULT_CODE_PREFIX,
-  GitHubTargetKind,
-  type CheckFold,
   type GitHubFailure,
   type GitHubPlatform,
+  GitHubTargetKind,
   type RequiredCheckRead,
 } from "../repository/github.ts";
 import {

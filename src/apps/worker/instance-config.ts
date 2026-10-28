@@ -11,9 +11,9 @@ import { decodeX25519Key } from "../../kernel/hpke.ts";
 import { directories } from "../../kernel/xdg.ts";
 import { parseMapping } from "../../kernel/yaml.ts";
 import {
+  type InstanceConfiguration,
   instanceConfigurationSchema,
   instanceNameSchema,
-  type InstanceConfiguration,
 } from "../../worker/contract.ts";
 
 export const INSTANCE_CONFIG_VARIABLE = "KANTHORD_WORKER_CONFIG";

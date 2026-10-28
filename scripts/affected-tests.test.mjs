@@ -15,9 +15,9 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 import {
+  computeChanges,
   GLOBAL_INPUTS,
   INERT_INPUTS,
-  computeChanges,
   selectTests,
 } from "./affected-tests.mjs";
 import { affectedReportSchema } from "../src/worker/unit/affected.ts";

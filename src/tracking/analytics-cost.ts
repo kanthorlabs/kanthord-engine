@@ -3,13 +3,13 @@ import type { Store } from "../kernel/store.ts";
 import { isNumber, isString } from "../kernel/values.ts";
 import { bucketStart } from "./analytics-bucket.ts";
 import {
-  selectTraces,
-  walkSpans,
   type AnalyticsSpan,
   type SelectedTrace,
+  selectTraces,
   type TraceFilter,
+  walkSpans,
 } from "./analytics-walk.ts";
-import { CostGroupBy, type AnalyticsBucket } from "./contract.ts";
+import { type AnalyticsBucket, CostGroupBy } from "./contract.ts";
 
 export interface CostQuery extends TraceFilter {
   from: number;

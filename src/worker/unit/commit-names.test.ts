@@ -5,7 +5,7 @@ import { simpleGit } from "simple-git";
 import { background } from "../../kernel/context.ts";
 import { executionBoundary } from "./native-method.ts";
 import type { MethodClients } from "./method-clients.ts";
-import { RefreshResult, refreshAtClaim } from "./base-refresh.ts";
+import { refreshAtClaim, RefreshResult } from "./base-refresh.ts";
 import { runStepsImplement } from "./steps-implement.ts";
 import { DONE_TRAILER, doneRecordOf } from "./done-record.ts";
 import { nodeUnitOf } from "./release-gate.ts";

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { isObject } from "../kernel/values.ts";
-import { platformAddressSchema, type PlatformAddress } from "./contract.ts";
+import { type PlatformAddress, platformAddressSchema } from "./contract.ts";
 import type { ResultCodec } from "./outbound.ts";
 
 export type StoredAddress = PlatformAddress;

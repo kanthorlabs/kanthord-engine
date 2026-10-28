@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import {
-  GrantKind,
-  SshIdentitySubjectKind,
   type ActionFacts,
+  GrantKind,
   type Material,
+  SshIdentitySubjectKind,
 } from "../custody/contract.ts";
 import { isMachineIdentity, type MachineIdentity } from "../kernel/caller.ts";
 import { commitHeader } from "../kernel/commit-message.ts";
@@ -24,10 +24,10 @@ import {
   targetOf,
 } from "./action-merge.ts";
 import {
+  type ActionCheckDependencies,
   GIT_TRANSPORT_CODES,
   isGitTransportFailure,
   releaseSshAccess,
-  type ActionCheckDependencies,
   type SshRelease,
 } from "./action-check.ts";
 import { addressCodec, decodeAddress } from "./address-codec.ts";
@@ -37,16 +37,16 @@ import {
   GIT_WRITE_DEADLINE_MS,
   IntakeErrorCode,
   OutboundOperation,
-  ResultClass,
   type OutboundOperationValue,
   type PlatformAddress,
+  ResultClass,
   type ResultClassAnswer,
   type ResultClassValue,
 } from "./contract.ts";
 import {
-  FinalizationKind,
   type CallAnswer,
   type Finalization,
+  FinalizationKind,
   type OutboundAnswer,
   type OutboundAuthorization,
   type OutboundRun,

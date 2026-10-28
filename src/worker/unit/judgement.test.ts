@@ -3,31 +3,31 @@ import { test } from "node:test";
 import {
   affectedFailureReport,
   affectedRevisionInstruction,
+  evaluationInstruction,
+  evaluationJudgementSchema,
+  examineInstruction,
+  failedChecksText,
   failedVerificationRationale,
   failedVerificationReport,
-  parseJudgement,
-  evaluationJudgementSchema,
+  JUDGEMENT_MARKER,
   judgementRationale,
+  parseJudgement,
   parseRepaired,
+  releaseRevisionInstruction,
+  repairInstruction,
   ReplyRepair,
+  REQUESTED_CHANGES_MAX_BYTES,
+  requestedChangesText,
+  taskRevisionInstruction,
   UnmetGround,
   unmetGroundSchema,
-  examineInstruction,
-  evaluationInstruction,
-  JUDGEMENT_MARKER,
-  repairInstruction,
-  releaseRevisionInstruction,
-  taskRevisionInstruction,
-  failedChecksText,
-  requestedChangesText,
-  REQUESTED_CHANGES_MAX_BYTES,
 } from "./judgement.ts";
 import {
   affectedFailureText,
-  AffectedVerdict,
   type AffectedRun,
+  AffectedVerdict,
 } from "./affected.ts";
-import { VerificationClass, type Verification } from "./verification.ts";
+import { type Verification, VerificationClass } from "./verification.ts";
 import { SHIPPED_TEMPLATES } from "../../agent/prompt-templates.ts";
 import type { NativeAgent } from "./native-agent.ts";
 import { PromptTemplate } from "../../agent/contract.ts";

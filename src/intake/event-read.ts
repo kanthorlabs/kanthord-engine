@@ -5,15 +5,15 @@ import type { Transaction } from "../kernel/store.ts";
 import {
   INBOUND_EVENT_ID_PREFIX,
   INBOUND_EVENT_LIST_LIMIT_DEFAULT,
-  IntakeErrorCode,
   type InboundEvent,
   type InboundEventStateValue,
+  IntakeErrorCode,
 } from "./contract.ts";
 import {
   EVENT_PROJECTION_COLUMNS,
   eventRecord,
-  readEventProjection,
   type InboundEventProjectionRow,
+  readEventProjection,
 } from "./event-store.ts";
 
 const CURSOR_ENCODING = "base64url";

@@ -10,10 +10,10 @@ import {
 import {
   AccessPolicy,
   OperationRegistry,
-  OperationResultType,
   type OperationResult,
+  OperationResultType,
 } from "../../kernel/operation.ts";
-import { IdentityKind, type CallerIdentity } from "../../kernel/caller.ts";
+import { type CallerIdentity, IdentityKind } from "../../kernel/caller.ts";
 import { mintServiceIdentity } from "../../kernel/service-mint.ts";
 import { testHumanIdentity } from "../../kernel/test-identity.ts";
 import { HttpMethod, HttpStatus, MediaType } from "../../kernel/http.ts";

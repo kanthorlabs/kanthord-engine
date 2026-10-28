@@ -3,20 +3,20 @@ import { test } from "node:test";
 import { OperationError } from "../kernel/errors.ts";
 import { createIdentity } from "../kernel/identity.ts";
 import { testHumanIdentity } from "../kernel/test-identity.ts";
-import { MissionErrorCode, AssessmentResult, NodeState } from "./contract.ts";
+import { AssessmentResult, MissionErrorCode, NodeState } from "./contract.ts";
 import { canonicalJSON } from "../kernel/json.ts";
 import {
   closeAttempt,
-  openAttempt,
-  insertEvidence,
   insertAssessment,
+  insertEvidence,
   insertOutcome,
+  openAttempt,
 } from "./record-store.ts";
 import { getRevision } from "./node-read.ts";
 import {
   insertDependency,
-  insertRevision,
   insertNode,
+  insertRevision,
   setNodeState,
 } from "./store.ts";
 import { evidenceHarness, executionHarness } from "./test-support.ts";

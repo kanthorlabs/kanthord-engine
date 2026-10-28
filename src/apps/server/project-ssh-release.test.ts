@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
 import {
   GrantKind,
-  SshIdentitySubjectKind,
   type SshIdentitySubject,
+  SshIdentitySubjectKind,
 } from "../../custody/contract.ts";
 import { grantFacts } from "../../custody/index.ts";
 import type { CallerIdentity } from "../../kernel/caller.ts";
@@ -19,9 +19,9 @@ import { gatewayOperations } from "../../gateway/contract.ts";
 import {
   PROJECT_SERVICE_NAME,
   ProjectErrorCode,
+  projectOperations,
   RESOURCE_CAPABILITY_NETWORK_GIT_READ,
   SSH_CREDENTIAL_PLATFORM,
-  projectOperations,
 } from "../../project/contract.ts";
 import { projectSshIdentityAuthorization } from "../../project/index.ts";
 import type { SshAccess } from "../../repository/index.ts";

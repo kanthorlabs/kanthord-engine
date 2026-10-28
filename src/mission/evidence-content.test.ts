@@ -7,8 +7,8 @@ import { testHumanIdentity } from "../kernel/test-identity.ts";
 import {
   AssetKind,
   INLINE_BYTES_MAX,
-  MissionErrorCode,
   Intent,
+  MissionErrorCode,
   NodeState,
   repositoryAddressSchema,
   type Revision,

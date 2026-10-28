@@ -1,22 +1,22 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { test, type TestContext } from "node:test";
-import { WorkerService, type Dependencies } from "./service.ts";
+import { type Dependencies, WorkerService } from "./service.ts";
 import { workerMigrations } from "./migrations.ts";
 import {
   BindingEntryState,
+  connectionPayloadSchema,
   INSTANCE_CONNECTED_WINDOW_MS,
   INSTANCE_CONNECTION_INFO,
+  instanceConfigurationSchema,
   InstancePlacement,
   WORKER_SERVICE_NAME,
   WORKER_TOKEN_INFO,
-  WorkerErrorCode,
-  connectionPayloadSchema,
-  instanceConfigurationSchema,
-  workerOperations,
-  workerTokenPayloadSchema,
   type WorkerAgentView,
   type WorkerBindingsOf,
+  WorkerErrorCode,
+  workerOperations,
+  workerTokenPayloadSchema,
 } from "./contract.ts";
 import { AgentErrorCode, type HolderScope } from "../agent/contract.ts";
 import {
@@ -29,9 +29,9 @@ import {
   keyFingerprint,
   openJSON,
 } from "../kernel/hpke.ts";
-import { OperationRegistry, type CallerContext } from "../kernel/operation.ts";
+import { type CallerContext, OperationRegistry } from "../kernel/operation.ts";
 import { background } from "../kernel/context.ts";
-import { Store, IN_MEMORY_DATABASE } from "../kernel/store.ts";
+import { IN_MEMORY_DATABASE, Store } from "../kernel/store.ts";
 import { OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import { createIdentity } from "../kernel/identity.ts";

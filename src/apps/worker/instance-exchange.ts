@@ -2,8 +2,8 @@ import { background, type Context } from "../../kernel/context.ts";
 import { Diagnostic, type ErrorDetails } from "../../kernel/errors.ts";
 import { openJSON } from "../../kernel/hpke.ts";
 import {
-  OperationResultType,
   type OperationResult,
+  OperationResultType,
 } from "../../kernel/operation.ts";
 import { httpClient } from "../../gateway/client.ts";
 import type {
@@ -11,18 +11,18 @@ import type {
   SealedCopyAnswer,
 } from "../../custody/contract.ts";
 import {
-  llmOperations,
   type CopyReportBody,
+  llmOperations,
   type LoginReportBody,
 } from "../../llm/contract.ts";
 import {
-  INSTANCE_CONNECTION_INFO,
-  WORKER_TOKEN_INFO,
   connectionPayloadSchema,
-  workerOperations,
-  workerTokenPayloadSchema,
+  INSTANCE_CONNECTION_INFO,
   type InstanceConfiguration,
+  WORKER_TOKEN_INFO,
+  workerOperations,
   type WorkerTokenPayload,
+  workerTokenPayloadSchema,
 } from "../../worker/contract.ts";
 import { createIdempotencyKey } from "../../kernel/identity.ts";
 

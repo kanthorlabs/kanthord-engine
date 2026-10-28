@@ -8,35 +8,35 @@ import { test, type TestContext } from "node:test";
 import { background } from "../../kernel/context.ts";
 import {
   EndReason,
-  ExecutionEndKind,
-  ExecutionStop,
-  ExecutionRun,
   EXECUTION_NOT_RUNNING,
   EXECUTION_PROOF_FAILED,
+  ExecutionEndKind,
+  ExecutionRun,
+  ExecutionStop,
 } from "./execution-run.ts";
 import {
-  executionBoundary,
-  stopOnEnd,
-  runNativeExecution,
   disposeAgent,
   environmentDigestsOf,
+  executionBoundary,
+  runNativeExecution,
+  stopOnEnd,
 } from "./native-method.ts";
-import { temporary, hostEnvironment } from "../../kernel/test-support.ts";
+import { hostEnvironment, temporary } from "../../kernel/test-support.ts";
 import { createIdentity } from "../../kernel/identity.ts";
 import { InMemoryCredentialStore } from "@earendil-works/pi-ai";
 import {
   anthropicAgent,
   anthropicSetup,
+  everyBindingSshAccess,
   fauxAssistantMessage,
   fauxToolCall,
-  scriptedProvider,
-  scriptedModelRuntime,
-  repositorySetup,
-  everyBindingSshAccess,
   implementFixture,
+  repositorySetup,
+  scriptedModelRuntime,
+  scriptedProvider,
   task,
-  transport,
   testSshAccess,
+  transport,
 } from "./test-support.ts";
 import { WorkspaceRoot } from "./workspace.ts";
 import {
@@ -49,7 +49,7 @@ import { Phase, SpanOperation } from "./telemetry.ts";
 import { ExecutionIntent, type RepositoryTransport } from "../contract.ts";
 import { EnvironmentSource } from "../../kernel/devcontainer.ts";
 import type { MethodClients } from "./method-clients.ts";
-import { openNativeAgent, type NativeAgent } from "./native-agent.ts";
+import { type NativeAgent, openNativeAgent } from "./native-agent.ts";
 import { renderWorkPrompt } from "../../agent/prompt-composer.ts";
 import { SHIPPED_TEMPLATES } from "../../agent/prompt-templates.ts";
 
@@ -120,7 +120,7 @@ async function startedSession(t: TestContext, clients: MethodClients) {
     credential: {
       credential_id: setup.agents[0]!.credential_id,
       provider_id: "anthropic",
-      store: store,
+      store,
     },
     budget: new ExecutionBudget({
       created_at: Date.now(),

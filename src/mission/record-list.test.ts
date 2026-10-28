@@ -4,22 +4,22 @@ import { testHumanIdentity } from "../kernel/test-identity.ts";
 import { OperationError } from "../kernel/errors.ts";
 import { createIdentity } from "../kernel/identity.ts";
 import {
-  Intent,
-  RepositoryAction,
-  MissionErrorCode,
-  AssessmentResult,
   ActorKind,
+  AssessmentResult,
+  Intent,
+  MissionErrorCode,
+  RepositoryAction,
 } from "./contract.ts";
 import { closeAttempt, openAttempt } from "./record-store.ts";
 import {
   insertAssessment,
-  insertOutcome,
   insertEvidence,
+  insertOutcome,
 } from "./record-store.ts";
 import { writeHumanRecords } from "./control.ts";
 import { controlHarness } from "./test-support.ts";
 import { encode } from "./node-read.ts";
-import { readCurrentRevision, insertRevision } from "./store.ts";
+import { insertRevision, readCurrentRevision } from "./store.ts";
 import { revisionFromRow } from "./revision.ts";
 
 const IDENTITY = testHumanIdentity("ulrich", "Ulrich", "token");

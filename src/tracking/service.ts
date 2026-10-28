@@ -17,8 +17,8 @@ import {
   type OperationRegistry,
 } from "../kernel/operation.ts";
 import {
-  HealthStatus,
   type Healthcheck,
+  HealthStatus,
   type Service,
 } from "../kernel/service.ts";
 import { causeAttributes } from "../kernel/cause.ts";
@@ -27,53 +27,53 @@ import { identityTime } from "../kernel/identity.ts";
 import type { Store } from "../kernel/store.ts";
 import { readCost } from "./analytics-cost.ts";
 import { readDuration } from "./analytics-duration.ts";
-import { admitRecords, admitServerSpan, type Admission } from "./admission.ts";
+import { type Admission, admitRecords, admitServerSpan } from "./admission.ts";
 import {
+  type Acknowledgement,
   ANALYTICS_ITEMS_MAX,
   ANALYTICS_RANGE_DAYS_DEFAULT,
   ANALYTICS_RANGE_DAYS_MAX,
-  ROOT_SPAN_OPERATION,
-  SCHEDULER_PRODUCER,
-  TRANSITION_SPAN_OPERATION,
-  Disposition,
-  ExecutionEnd,
-  RefusalReason,
-  RevokeCause,
-  revokeCauseSchema,
-  SpanOrigin,
-  SpanStatus,
-  TRACKING_SERVICE_NAME,
-  TransitionRule,
-  transitionRuleSchema,
-  traceIdSchema,
-  spanIdSchema,
-  traceSortSchema,
-  trackingOperations,
-  type Acknowledgement,
   type AnalyticsCostQuery,
   type AnalyticsDurationQuery,
   type Attributes,
+  Disposition,
+  ExecutionEnd,
   type ExecutionOpening,
   type ExecutionTelemetry,
   type ExecutionTrace,
   type ExecutionTraces,
   type ExecutionTransition,
+  RefusalReason,
+  RevokeCause,
+  revokeCauseSchema,
+  ROOT_SPAN_OPERATION,
   type RootSpanEnd,
+  SCHEDULER_PRODUCER,
   type ServerTrace,
+  type SpanContribution,
+  spanIdSchema,
+  SpanOrigin,
+  SpanStatus,
   type TelemetryRecord,
   type TimelineListQuery,
+  traceIdSchema,
   type TraceSort,
-  type SpanContribution,
+  traceSortSchema,
+  TRACKING_SERVICE_NAME,
+  trackingOperations,
+  TRANSITION_SPAN_OPERATION,
+  TransitionRule,
+  transitionRuleSchema,
 } from "./contract.ts";
 import {
+  type CauseLabelBody,
   effectiveCauseOf,
   writeCauseLabel,
-  type CauseLabelBody,
 } from "./cause-label.ts";
 import {
-  TRACE_END_SPAN_ID,
   listTimeline,
   type TimelineCursor,
+  TRACE_END_SPAN_ID,
 } from "./timeline.ts";
 import {
   RETENTION_SWEEP_INTERVAL_MS,
@@ -93,8 +93,8 @@ import {
   readSessionEntry,
   readText,
   readTrace,
-  traceRowOf,
   type TraceRow,
+  traceRowOf,
 } from "./trace-store.ts";
 
 const OpeningAttribute = {

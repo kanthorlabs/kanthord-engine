@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
 import {
-  SshIdentitySubjectKind,
   type SshIdentitySubject,
+  SshIdentitySubjectKind,
 } from "../custody/contract.ts";
-import { IdentityKind, type CallerIdentity } from "../kernel/caller.ts";
+import { type CallerIdentity, IdentityKind } from "../kernel/caller.ts";
 import { OperationError } from "../kernel/errors.ts";
 import { createIdentity } from "../kernel/identity.ts";
 import { HttpStatus } from "../kernel/http.ts";

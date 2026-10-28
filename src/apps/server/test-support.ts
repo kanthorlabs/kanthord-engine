@@ -20,19 +20,19 @@ import { projectOperations } from "../../project/contract.ts";
 import { llmOperations } from "../../llm/contract.ts";
 import { agentOperations } from "../../agent/contract.ts";
 import {
-  missionOperations,
   Intent,
+  missionOperations,
   NodeState,
 } from "../../mission/contract.ts";
 import {
-  OperationResultType,
   type Operation,
   type OperationResult,
+  OperationResultType,
 } from "../../kernel/operation.ts";
 import { createHash, createHmac, randomBytes } from "node:crypto";
 import {
-  createServer,
   type ClientRequest,
+  createServer,
   type IncomingMessage,
   type ServerResponse,
 } from "node:http";
@@ -41,13 +41,13 @@ import { subscribe, unsubscribe } from "node:diagnostics_channel";
 import type { TestContext } from "node:test";
 import pino from "pino";
 import { z } from "zod";
-import { configuration, CONFIG_VERSION } from "../../config/index.ts";
+import { CONFIG_VERSION, configuration } from "../../config/index.ts";
 import { custodyMigrations } from "../../custody/index.ts";
 import { CUSTODY_SERVICE_NAME } from "../../custody/contract.ts";
 import { schedulerMigrations } from "../../scheduler/index.ts";
 import {
-  SCHEDULER_SERVICE_NAME,
   type ExecutionRecord,
+  SCHEDULER_SERVICE_NAME,
 } from "../../scheduler/contract.ts";
 import type { SchedulerConfig } from "../../scheduler/index.ts";
 import { Store } from "../../kernel/store.ts";
@@ -72,30 +72,30 @@ import { fakeRepositoryFiles } from "./container-fakes.ts";
 import { environment, kanthord } from "./cli-support.ts";
 import { composeServices, trackingDatabaseMigrations } from "./index.ts";
 import {
-  RepositoryComponent,
-  repositoryMigrations,
   type GitWriter,
   type HostKeySources,
+  RepositoryComponent,
+  repositoryMigrations,
 } from "../../repository/index.ts";
 import { GITHUB_API_VERSION } from "../../repository/github.ts";
 import { LOCAL_GIT_SSH_ACCESS } from "../../repository/test-sshd.ts";
 import {
   alwaysAvailable,
   InstancePlacement,
-  PoolPlacement,
   type PlacementStatus,
+  PoolPlacement,
   type RepositoryTransport,
 } from "../../worker/contract.ts";
 import {
   AccessPolicy,
   emptyInput,
   OperationLifetime,
-  StoreName,
   type OperationRegistry,
+  StoreName,
 } from "../../kernel/operation.ts";
 import {
-  workerResourceIdentity,
   type ProjectBindings,
+  workerResourceIdentity,
 } from "../../project/contract.ts";
 import type { PoolSlot, WorkerRegistrations } from "../../worker/contract.ts";
 export interface MachineDependencies {
@@ -104,7 +104,7 @@ export interface MachineDependencies {
 }
 import type { Registration, VerifiedClient } from "../../worker/contract.ts";
 import type { Transaction } from "../../kernel/store.ts";
-import { type Context } from "../../kernel/context.ts";
+import type { Context } from "../../kernel/context.ts";
 import { createIdentity } from "../../kernel/identity.ts";
 import { HttpMethod, HttpStatus } from "../../kernel/http.ts";
 import { isString } from "../../kernel/values.ts";

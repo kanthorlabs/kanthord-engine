@@ -13,41 +13,41 @@ import {
   validateText,
 } from "./content.ts";
 import {
-  ImportFormat,
-  MissionErrorCode,
-  NODE_IDENTITY_PREFIX,
-  TASK_IDENTITY_PREFIX,
-  Intent,
-  planFileNameSchema,
   type Content,
   type Edge,
   type ImportEntry,
+  ImportFormat,
   type ImportPreview,
   type ImportSnapshot,
+  Intent,
   type Mission,
   type MissionBindings,
   type MissionEnvironments,
+  MissionErrorCode,
+  NODE_IDENTITY_PREFIX,
+  planFileNameSchema,
+  TASK_IDENTITY_PREFIX,
   type TaskBody,
   type TaskContent,
   type Violation,
 } from "./contract.ts";
 import { ControlError } from "./control.ts";
 import { dependencyEditGuarded } from "./dependency.ts";
-import { hasDependencyCycle, type DepEdge } from "./graph.ts";
+import { type DepEdge, hasDependencyCycle } from "./graph.ts";
 import { nodeRecord } from "./node-read.ts";
 import {
-  parsePlanFile,
   type ParsedNodeFile,
   type ParsedTaskFile,
+  parsePlanFile,
 } from "./parser.ts";
 import { revisionFromRow } from "./revision.ts";
 import {
+  type NodeRow,
   readCurrentRevision,
   readDependencies,
   readMissionNodes,
   readNode,
   taskOwnerOf,
-  type NodeRow,
 } from "./store.ts";
 
 const EMPTY_FIELD_LENGTH = 0;

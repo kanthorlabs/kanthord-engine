@@ -2,15 +2,15 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { background } from "../../kernel/context.ts";
 import {
-  OperationResultType,
   type OperationResult,
+  OperationResultType,
 } from "../../kernel/operation.ts";
 import {
   EndReason,
-  ExecutionRun,
-  ExecutionStop,
   EXECUTION_NOT_RUNNING,
   EXECUTION_PROOF_FAILED,
+  ExecutionRun,
+  ExecutionStop,
 } from "./execution-run.ts";
 import type { MethodClients } from "./method-clients.ts";
 import { ProviderFailure } from "../../scheduler/contract.ts";

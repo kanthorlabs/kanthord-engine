@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { decode } from "hono/jwt";
 import { gatewayFixture } from "./test-support.ts";
 import { httpClient } from "../../gateway/client.ts";
-import { projectOperations, BindingKind } from "../../project/contract.ts";
+import { BindingKind, projectOperations } from "../../project/contract.ts";
 import { workerOperations } from "../../worker/contract.ts";
 import { OperationResultType } from "../../kernel/operation.ts";
 import { HttpStatus } from "../../kernel/http.ts";

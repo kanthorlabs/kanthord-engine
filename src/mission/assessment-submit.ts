@@ -5,13 +5,13 @@ import type { ExecutionClaim } from "../kernel/operation.ts";
 import type { Transaction } from "../kernel/store.ts";
 import {
   AssessmentResult,
+  type AssessmentSubmit,
+  type ExecutionEnds,
+  type GateFiles,
   NodeState,
   PROPOSAL_IDENTITY_PREFIX,
   RevokeCause,
   TransitionRule,
-  type AssessmentSubmit,
-  type ExecutionEnds,
-  type GateFiles,
 } from "./contract.ts";
 import { admitAssessment } from "./assessment-admit.ts";
 import {
@@ -27,14 +27,14 @@ import { nodeRecord, requireNode } from "./node-read.ts";
 import { insertProposal } from "./proposal-store.ts";
 import { assessmentRecord, outcomeRecord } from "./record-read.ts";
 import {
+  type AssessmentRow,
   closeAttempt,
   insertAssessment,
   insertOutcome,
+  type OutcomeRow,
   readExecutionAssessmentsOfAttempt,
   readLandedCommitEvidence,
   readRequests,
-  type AssessmentRow,
-  type OutcomeRow,
 } from "./record-store.ts";
 import type { Dependencies } from "./service.ts";
 import { requireMission } from "./write.ts";

@@ -1,13 +1,13 @@
 import assert from "node:assert/strict";
-import { Command } from "commander";
+import type { Command } from "commander";
 import { Diagnostic } from "../../kernel/errors.ts";
 import { identitySchema } from "../../kernel/identity.ts";
 import { AccessPolicy } from "../../kernel/operation.ts";
 import { httpClient, resolveClient } from "../../gateway/client.ts";
 import {
+  intakeOperations,
   OUTBOUND_LIST_LIMIT_MAX,
   OUTBOUND_REQUEST_ID_PREFIX,
-  intakeOperations,
 } from "../../intake/contract.ts";
 import { CommandName, PROGRAM_NAME } from "./constants.ts";
 import { addEventCommands } from "./intake-event.ts";

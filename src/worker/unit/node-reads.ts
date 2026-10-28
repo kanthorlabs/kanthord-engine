@@ -1,21 +1,22 @@
 import { HttpStatus } from "../../kernel/http.ts";
 import {
-  OperationResultType,
   type ClientOptions,
   type OperationResult,
+  OperationResultType,
 } from "../../kernel/operation.ts";
 import {
+  type Assessment,
   AssessmentResult,
   AssetKind,
   ClosingEvent,
   MissionErrorCode,
-  type Assessment,
   type Outcome,
   type TestedInput,
 } from "../../mission/contract.ts";
 import type { ChangeRequest, ChangeRequestRead } from "../contract.ts";
 import { failedChecksText, requestedChangesText } from "./judgement.ts";
-import { EndReason, ExecutionRun } from "./execution-run.ts";
+import type { ExecutionRun } from "./execution-run.ts";
+import { EndReason } from "./execution-run.ts";
 
 export const READ_PAGE_LIMIT = 1000;
 const FIRST_ATTEMPT = 1;

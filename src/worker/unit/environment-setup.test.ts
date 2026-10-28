@@ -13,10 +13,10 @@ import { EndReason, ExecutionStop } from "./execution-run.ts";
 import {
   BaseHead,
   runSetup,
-  SetupEnd,
-  setUpHeads,
-  setupEntries,
   type SetupCheckout,
+  SetupEnd,
+  setupEntries,
+  setUpHeads,
 } from "./environment-setup.ts";
 import { commitOf, headCommit } from "./local-git.ts";
 import {

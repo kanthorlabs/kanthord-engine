@@ -4,15 +4,15 @@ import type { Transaction } from "../kernel/store.ts";
 import {
   EndState,
   ExpectedEndState,
+  type FrozenAction,
+  frozenActionSchema,
+  Intent,
   MissionBindingKind,
+  type MissionBindings,
   RepositoryAction,
   Resolution,
-  Intent,
-  frozenActionSchema,
-  type FrozenAction,
-  type MissionBindings,
 } from "./contract.ts";
-import { readAttempt, readRequests, type EvidenceRow } from "./record-store.ts";
+import { type EvidenceRow, readAttempt, readRequests } from "./record-store.ts";
 import { readRevision, type RevisionRow } from "./store.ts";
 
 const bindingIdsSchema = z.array(z.string());
@@ -64,7 +64,7 @@ export function actionsOfRevision(
   tx: Transaction,
   bindings: MissionBindings,
   revision: RevisionRow,
-  actions: Map<string, FrozenAction | null> = new Map(),
+  actions = new Map<string, FrozenAction | null>(),
 ): FrozenAction[] {
   if (revision.intent === Intent.Examine) return [];
   const found: FrozenAction[] = [];

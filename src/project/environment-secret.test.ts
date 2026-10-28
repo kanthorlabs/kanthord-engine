@@ -3,14 +3,14 @@ import { test, type TestContext } from "node:test";
 import pino from "pino";
 import { CustodyComponent, custodyMigrations } from "../custody/index.ts";
 import {
+  type CredentialAnswer,
   CUSTODY_SERVICE_NAME,
   SecretShape,
-  type CredentialAnswer,
 } from "../custody/contract.ts";
 import { background } from "../kernel/context.ts";
 import { OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
-import { OperationRegistry, type CallerContext } from "../kernel/operation.ts";
+import { type CallerContext, OperationRegistry } from "../kernel/operation.ts";
 import { IN_MEMORY_DATABASE, Store } from "../kernel/store.ts";
 import { gatewayFixture } from "../gateway/test-support.ts";
 import { INTAKE_SERVICE_NAME } from "../intake/contract.ts";

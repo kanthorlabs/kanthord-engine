@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { OperationError } from "../kernel/errors.ts";
-import { sealedObjectSchema, type SealedObject } from "../kernel/hpke.ts";
+import { type SealedObject, sealedObjectSchema } from "../kernel/hpke.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import { SERVER_HOLDER } from "./contract.ts";
 import { decrypt } from "./envelope.ts";

@@ -3,13 +3,13 @@ import { identitySchema } from "../kernel/identity.ts";
 import { canonicalJSON } from "../kernel/json.ts";
 import type { Transaction } from "../kernel/store.ts";
 import {
+  type AdmissionAnswer,
   AdmissionRefusal,
   AssetKind,
   Disposition,
+  type PlatformAddress,
   PlatformAddressKind,
   platformAddressSchema,
-  type AdmissionAnswer,
-  type PlatformAddress,
 } from "./contract.ts";
 
 const SINGLE_MATCH = 1;

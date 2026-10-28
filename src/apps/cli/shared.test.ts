@@ -6,12 +6,12 @@ import { isDeepStrictEqual } from "node:util";
 import { z } from "zod";
 import { Diagnostic } from "../../kernel/errors.ts";
 import {
-  idempotencyKeySchema,
   IDEMPOTENCY_KEY_PREFIX,
+  idempotencyKeySchema,
 } from "../../kernel/identity.ts";
 import {
-  OperationResultType,
   type OperationResult,
+  OperationResultType,
 } from "../../kernel/operation.ts";
 import { temporary } from "../../kernel/test-support.ts";
 import {
@@ -102,7 +102,7 @@ test("duplicate keys are detected at each object depth after escape decoding", (
   }
   detectDuplicateKeys('[{"a":1},{"a":2}]');
   detectDuplicateKeys('{"a":{"x":1},"b":{"x":2}}');
-  detectDuplicateKeys('{"a":"\\\"a\\\"", "b": 2}');
+  detectDuplicateKeys('{"a":"\\"a\\"", "b": 2}');
   assert.throws(() => detectDuplicateKeys('{"a":'), diagnosticCode(NOT_JSON));
 });
 

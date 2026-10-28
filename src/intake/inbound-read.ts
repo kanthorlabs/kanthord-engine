@@ -3,21 +3,21 @@ import { HttpStatus } from "../kernel/http.ts";
 import { identitySchema } from "../kernel/identity.ts";
 import type { Transaction } from "../kernel/store.ts";
 import {
+  type Inbound,
   INBOUND_ID_PREFIX,
   INBOUND_LIST_LIMIT_DEFAULT,
   InboundKind,
-  IntakeErrorCode,
-  WEBHOOK_ADDRESS_PREFIX,
-  webhookInboundSchema,
-  type Inbound,
   type InboundKindValue,
   type InboundPlatformValue,
+  IntakeErrorCode,
+  WEBHOOK_ADDRESS_PREFIX,
   type WebhookInbound,
+  webhookInboundSchema,
 } from "./contract.ts";
 import {
   inboundRecord,
-  readInbound,
   type InboundRow,
+  readInbound,
 } from "./inbound-store.ts";
 import { webhookSecret } from "./webhook-secret.ts";
 

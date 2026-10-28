@@ -2,12 +2,12 @@ import type { Command } from "commander";
 import { Diagnostic } from "../../kernel/errors.ts";
 import { identitySchema } from "../../kernel/identity.ts";
 import {
-  humanActSchema,
-  resumeSchema,
-  overrideSchema,
-  unblockSchema,
   AssessmentResult,
+  humanActSchema,
   nodeCheckSchema,
+  overrideSchema,
+  resumeSchema,
+  unblockSchema,
 } from "../../mission/contract.ts";
 import { singleUse } from "./shared.ts";
 import { missionExamples } from "./mission-examples.ts";

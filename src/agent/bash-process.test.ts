@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { processBashOperations, type BashProcess } from "./bash-process.ts";
+import { type BashProcess, processBashOperations } from "./bash-process.ts";
 import { temporary } from "../kernel/test-support.ts";
 
 const SHELL = { shell: "/bin/bash", args: ["-c"] };

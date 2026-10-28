@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
 import pino from "pino";
 import { z } from "zod";
-import { Store, IN_MEMORY_DATABASE } from "../kernel/store.ts";
+import { IN_MEMORY_DATABASE, Store } from "../kernel/store.ts";
 import { createIdentity } from "../kernel/identity.ts";
 import {
   testHumanIdentity,
@@ -15,9 +15,9 @@ import {
   deriveHandoverKeys,
   deriveSshSignKeys,
   handoverAad,
+  HandoverOpenError,
   openEnvelope,
   sealEnvelope,
-  HandoverOpenError,
 } from "../kernel/handover.ts";
 import { redactionPaths } from "../kernel/log.ts";
 import { custodyMigrations } from "./migrations.ts";
@@ -31,28 +31,28 @@ import {
   SSH_SIGN_PLACEMENT_REFUSED,
 } from "./handover.ts";
 import {
+  CREDENTIAL_SEAL_INFO,
+  type CredentialPlatformSet,
   CredentialRefreshInFlight,
+  credentialSealAad,
   CUSTODY_SERVICE_NAME,
+  type CustodyExecution,
   handoverPayloadSchema,
-  plainHandoverPayloadSchema,
   HandoverPlacement,
   HolderRefusal,
+  type InstanceKey,
   LoginSessionMode,
-  CREDENTIAL_SEAL_INFO,
-  credentialSealAad,
+  plainHandoverPayloadSchema,
   SecretShape,
+  type SshIdentityAuthorization,
   SshIdentitySubjectKind,
   sshSignAnswerSchema,
-  type CredentialPlatformSet,
-  type CustodyExecution,
-  type InstanceKey,
-  type SshIdentityAuthorization,
 } from "./contract.ts";
 import { CREDENTIAL_HELD_BY_INSTANCE } from "./secret.ts";
 import {
+  type InstanceCopyKey,
   openSealedCopy,
   sealedCopyReporter,
-  type InstanceCopyKey,
 } from "./instance-copy.ts";
 import {
   generateX25519KeyPair,

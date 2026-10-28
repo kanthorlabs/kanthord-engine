@@ -10,9 +10,9 @@ import { isString } from "../kernel/values.ts";
 import { WORKBENCH_AGENT_NAMES } from "../agent/catalog.ts";
 import { loadPi, PI_DIRECTORY_NAME } from "../agent/pi.ts";
 import {
+  type SessionEntry,
   WORKBENCH_CONFIGURATION_ENTRY,
   WORKBENCH_DIRECTORY_NAME,
-  type SessionEntry,
   type WorkbenchConfiguration,
 } from "./contract.ts";
 

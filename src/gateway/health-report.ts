@@ -14,8 +14,8 @@ import {
   HealthScope,
   observeDeadline,
   ResourceFailureReason,
-  ResourceStatus,
   type ResourceObserver,
+  ResourceStatus,
   type ResourceStatusValue,
 } from "../kernel/health.ts";
 import { HttpStatus } from "../kernel/http.ts";
@@ -23,18 +23,18 @@ import type { CallerContext } from "../kernel/operation.ts";
 import type { Transaction } from "../kernel/store.ts";
 import {
   gatewayOperations,
-  MAX_CONCURRENT_CHECKS,
-  RESOURCE_CHECK_DEADLINE_MS,
-  REPORT_MARGIN_MS,
-  OWNER_LLM,
-  OWNER_REPOSITORY,
-  OWNER_STORAGE,
-  OWNER_AGENT,
-  OWNER_WORKER,
-  OWNER_PROJECT,
-  OWNER_INTAKE,
   type InventoryCollector,
   type InventorySnapshot,
+  MAX_CONCURRENT_CHECKS,
+  OWNER_AGENT,
+  OWNER_INTAKE,
+  OWNER_LLM,
+  OWNER_PROJECT,
+  OWNER_REPOSITORY,
+  OWNER_STORAGE,
+  OWNER_WORKER,
+  REPORT_MARGIN_MS,
+  RESOURCE_CHECK_DEADLINE_MS,
   type ResourceInventories,
 } from "./contract.ts";
 import { GatewayError } from "./errors.ts";

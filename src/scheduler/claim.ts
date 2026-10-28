@@ -4,13 +4,13 @@ import { createIdentity } from "../kernel/identity.ts";
 import type { Transaction } from "../kernel/store.ts";
 import {
   AgentChoiceKind,
-  EXECUTION_IDENTITY_PREFIX,
   type AgentPin,
   type Claimant,
-  traceIdSchema,
-  spanIdSchema,
   type EndedExecution,
+  EXECUTION_IDENTITY_PREFIX,
   type ExecutionRow,
+  spanIdSchema,
+  traceIdSchema,
   type WorkPull,
 } from "./contract.ts";
 import type { Dependencies } from "./service.ts";

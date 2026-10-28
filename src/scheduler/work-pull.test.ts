@@ -12,20 +12,20 @@ import { createIdentity } from "../kernel/identity.ts";
 import { testMachineIdentity } from "../kernel/test-identity.ts";
 import type { CallerContext } from "../kernel/operation.ts";
 import {
-  ClaimNodeState,
-  ClaimIntent,
-  WorkPullKind,
-  WORK_PULL_WAIT_MS,
   AgentChoiceKind,
   type AgentPin,
   type AgentSelection,
+  ClaimIntent,
+  ClaimNodeState,
+  WORK_PULL_WAIT_MS,
+  WorkPullKind,
 } from "./contract.ts";
 import { insertExecution, readExecution } from "./execution-store.ts";
 import {
-  schedulerHarness,
   executionFixture,
   FIRST_LOSS_WITHOUT_JOB,
   firstLossHold,
+  schedulerHarness,
   transitionFixture,
 } from "./test-support.ts";
 import { ExecutionEnd } from "../tracking/contract.ts";

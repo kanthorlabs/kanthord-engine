@@ -4,9 +4,9 @@ import { join } from "node:path";
 import type { Context } from "../../kernel/context.ts";
 import {
   DEVCONTAINER_FILE,
+  type Environment,
   parseEnvironmentText,
   setupScriptsOf,
-  type Environment,
 } from "../../kernel/devcontainer.ts";
 import { ensureDirectory } from "../../kernel/files.ts";
 import { canonicalJSON, digest } from "../../kernel/json.ts";
@@ -29,9 +29,9 @@ import {
 } from "./local-git.ts";
 import { SpanOperation, type SpanRecorder } from "./telemetry.ts";
 import {
+  type CommandObserver,
   runVerificationsWithOutput,
   VerificationClass,
-  type CommandObserver,
   type VerificationRun,
 } from "./verification.ts";
 

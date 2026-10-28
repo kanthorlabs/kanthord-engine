@@ -4,8 +4,8 @@ import { setImmediate as nextMacrotask } from "node:timers/promises";
 import { test, type TestContext } from "node:test";
 import {
   GrantKind,
-  SshIdentitySubjectKind,
   type GrantRequest,
+  SshIdentitySubjectKind,
 } from "../custody/contract.ts";
 import { background } from "../kernel/context.ts";
 import { Diagnostic, OperationError } from "../kernel/errors.ts";

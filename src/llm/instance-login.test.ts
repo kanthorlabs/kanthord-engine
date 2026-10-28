@@ -20,7 +20,7 @@ import {
 } from "../kernel/hpke.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import { createIdentity } from "../kernel/identity.ts";
-import { OperationRegistry, type CallerContext } from "../kernel/operation.ts";
+import { type CallerContext, OperationRegistry } from "../kernel/operation.ts";
 import { IN_MEMORY_DATABASE, Store } from "../kernel/store.ts";
 import { testWorkerIdentity } from "../kernel/test-identity.ts";
 import { INTAKE_SERVICE_NAME } from "../intake/contract.ts";

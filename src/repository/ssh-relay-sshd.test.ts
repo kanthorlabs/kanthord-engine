@@ -11,9 +11,9 @@ import { temporary } from "../kernel/test-support.ts";
 import { clone, fetchBase, gitLsRemote, pushNodeBranch } from "./connector.ts";
 import {
   SSH_SIGN_USER,
-  SshSignErrorCode,
   type SshKeyAccess,
   type SshRelayAccess,
+  SshSignErrorCode,
 } from "./contract.ts";
 import { withSshAgent } from "./ssh-agent.ts";
 import { generateSshKey } from "./ssh-key.ts";

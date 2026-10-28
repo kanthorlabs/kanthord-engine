@@ -11,15 +11,15 @@ import {
 } from "./contract.ts";
 import { intakeMigrations } from "./migrations.ts";
 import {
-  OutboundKeyConflict,
   discard,
   fail,
   findById,
   findByKey,
   insertPending,
+  OutboundKeyConflict,
   outboundRecord,
-  succeed,
   type PendingOutbound,
+  succeed,
 } from "./outbound-store.ts";
 
 const PROJECT_ID = "project_01ARZ3NDEKTSV4RRFFQ69G5FAV";

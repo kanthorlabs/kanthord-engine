@@ -7,11 +7,11 @@ import {
   ActorKind,
   ClaimableState,
   ImportFormat,
+  Intent,
+  type MissionBindings,
   MissionErrorCode,
   NodeState,
   RepositoryAction,
-  Intent,
-  type MissionBindings,
   type UnmatchedClaim,
 } from "./contract.ts";
 import { openAttempt } from "./record-store.ts";

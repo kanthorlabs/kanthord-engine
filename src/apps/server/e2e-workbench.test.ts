@@ -4,9 +4,9 @@ import { join } from "node:path";
 import { test, type TestContext } from "node:test";
 import {
   fauxAssistantMessage,
+  type FauxResponseStep,
   fauxToolCall,
   getSystemMessageText,
-  type FauxResponseStep,
   type SystemMessage,
 } from "@earendil-works/pi-ai";
 import {
@@ -18,8 +18,8 @@ import { directClient } from "../../gateway/index.ts";
 import { testHumanIdentity } from "../../kernel/test-identity.ts";
 import { HttpStatus } from "../../kernel/http.ts";
 import {
-  OperationResultType,
   type OperationResult,
+  OperationResultType,
 } from "../../kernel/operation.ts";
 import { temporary } from "../../kernel/test-support.ts";
 import { isString } from "../../kernel/values.ts";
@@ -31,9 +31,9 @@ import { createModelRuntime, resolveModel } from "../../llm/model-connector.ts";
 import {
   WORKBENCH_CONFIGURATION_ENTRY,
   WORKBENCH_REJECTION_REASON,
+  type WorkbenchConfiguration,
   WorkbenchErrorCode,
   workbenchOperations,
-  type WorkbenchConfiguration,
 } from "../../workbench/contract.ts";
 import {
   toolName,

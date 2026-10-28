@@ -10,11 +10,11 @@ import {
   type TelemetryRecord,
 } from "../../tracking/contract.ts";
 import {
+  mintRunKey,
   SpanOperation,
   SpanRecorder,
-  mintRunKey,
-  telemetrySpanId,
   type TelemetrySink,
+  telemetrySpanId,
 } from "./telemetry.ts";
 import { AgentErrorType, traceAgent } from "./agent-telemetry.ts";
 import type { TurnPrompt } from "./native-agent.ts";
@@ -25,14 +25,14 @@ import {
   taskEnd,
   taskFailure,
   taskSpan,
-  verificationObserver,
   VerificationContext,
   VerificationKind,
+  verificationObserver,
   type VerificationScope,
   withinGit,
 } from "./method-telemetry.ts";
 import { EndReason, ExecutionStop } from "./execution-run.ts";
-import { NoProgressRule, noProgressDetail } from "./progress-rule.ts";
+import { noProgressDetail, NoProgressRule } from "./progress-rule.ts";
 import type { TaskContent } from "../../mission/contract.ts";
 import {
   CommandEnd,

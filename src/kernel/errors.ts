@@ -14,7 +14,6 @@ export const errorCodeSchema = z
     "Error location and condition: namespace.component[.component...].error; lower-case words separated by underscores.",
   );
 
-/** An engine-defined code; native and dependency errors retain their own codes. */
 export class FacilityError extends Error {
   constructor() {
     super("The credential facility refuses this use.");
