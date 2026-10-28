@@ -31,6 +31,7 @@ import type { SchedulerConfig } from "./config.ts";
 export const EXECUTION_NOT_RUNNING = "scheduler.execution.not_running";
 const NO_FAILURES = 0;
 const ENDING_FAILURE = 1;
+const ONE_JOB = 1;
 const EXPIRED = 1;
 const NO_DIGESTS = 0;
 const digestsDetailSchema = z.looseObject({
@@ -75,12 +76,21 @@ export function recordFailure(
     now,
   );
   const until = heldUntil(failures, now, dependencies.config.stop_backoff);
-  const hold = { failure_count: failures, available_at: until };
-  if (until === null) return { transition, hold };
-  tx.database
+  if (until === null)
+    return {
+      transition,
+      hold: { failure_count: failures, available_at: null },
+    };
+  const held = tx.database
     .prepare("UPDATE scheduler_job SET available_at = ? WHERE node_id = ?")
     .run(until, nodeId);
-  return { transition, hold };
+  return {
+    transition,
+    hold: {
+      failure_count: failures,
+      available_at: Number(held.changes) === ONE_JOB ? until : null,
+    },
+  };
 }
 
 export function pinCredential(

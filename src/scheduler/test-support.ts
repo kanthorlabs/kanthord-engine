@@ -70,6 +70,11 @@ export function transitionFixture(
   };
 }
 
+export const FIRST_LOSS_WITHOUT_JOB: FailureHold = {
+  failure_count: FIRST_LOSS,
+  available_at: null,
+};
+
 export function firstLossHold(endedAt: number): FailureHold {
   return {
     failure_count: FIRST_LOSS,

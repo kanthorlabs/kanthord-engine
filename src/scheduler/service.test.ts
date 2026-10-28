@@ -22,7 +22,7 @@ import {
   executionFixture,
   FIXTURE_DEADLINE,
   FIXTURE_NOW,
-  firstLossHold,
+  FIRST_LOSS_WITHOUT_JOB,
   transitionFixture,
 } from "./test-support.ts";
 import { ExecutionEnd, RevokeCause } from "../tracking/contract.ts";
@@ -34,8 +34,6 @@ import {
   CauseSubcategory,
 } from "../kernel/cause.ts";
 import { insertExecution, readExecution } from "./execution-store.ts";
-import { heldUntil } from "./settlement.ts";
-import { DEFAULT_STOP_BACKOFF_SECONDS } from "./config.ts";
 
 const EXECUTION_ENDED = "executionEnded";
 const EXECUTION_TRANSITION = "executionTransition";
@@ -664,7 +662,7 @@ test("settle answers each execution that it ends with its trace and writes no en
       trace: executionTrace(row),
       ended_at: FIXTURE_DEADLINE,
       transition: transitionFixture(),
-      hold: firstLossHold(FIXTURE_DEADLINE),
+      hold: FIRST_LOSS_WITHOUT_JOB,
     },
   ]);
   assert.deepEqual(h.telemetry, []);
@@ -693,7 +691,7 @@ test("settle answers each execution that it ends with its trace and writes no en
         executionTransition(
           transitionFixture(),
           FIXTURE_DEADLINE,
-          firstLossHold(FIXTURE_DEADLINE),
+          FIRST_LOSS_WITHOUT_JOB,
         ),
       ],
     },
@@ -747,18 +745,14 @@ test("a sweep loss below the failure limit writes Executing to Available and at 
     executionTransition(
       transitionFixture(),
       FIXTURE_DEADLINE,
-      firstLossHold(FIXTURE_DEADLINE),
+      FIRST_LOSS_WITHOUT_JOB,
     ),
   ]);
   assert.deepEqual(h.telemetry[3]!.arguments, [
     executionTrace(second),
     executionTransition(paused, FIXTURE_DEADLINE + 1, {
       failure_count: FAILURE_LIMIT,
-      available_at: heldUntil(
-        FAILURE_LIMIT,
-        FIXTURE_DEADLINE + 1,
-        DEFAULT_STOP_BACKOFF_SECONDS,
-      ),
+      available_at: null,
     }),
   ]);
 });
