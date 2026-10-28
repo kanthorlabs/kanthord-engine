@@ -27,7 +27,7 @@ import {
   readLandedCommitEvidence,
 } from "./record-store.ts";
 import { readMission, setNodeState } from "./store.ts";
-import { externalRequestHarness } from "./test-support.ts";
+import { externalRequestHarness, revokedExecution } from "./test-support.ts";
 
 const IDENTITY = testHumanIdentity("ulrich", "Ulrich", "token");
 const NO_REMOTE_CALLS = 0;
@@ -526,4 +526,62 @@ test("a request whose assessment is not a success skips the merge and keeps the 
   await advance(DEFERRED_CHECK_RETRY_MS);
   assert.equal(checkCalls, CHECKS_PER_ROUND * (ONE_ROUND + ROUNDS_AFTER_FIRST));
   assert.equal(mergeCalls, NO_MERGES);
+});
+
+const EndedClaim = { Revoked: "revoked", Lost: "lost" } as const;
+
+async function deferredCheckAfter(
+  t: TestContext,
+  ended: (typeof EndedClaim)[keyof typeof EndedClaim],
+) {
+  const h = await externalRequestHarness(t, IDENTITY);
+  const executionId = createIdentity("execution");
+  let live = false;
+  h.dependencies.schedulerClaims.liveExecutionOf = (_tx, nodeId) =>
+    live && nodeId === h.node_id
+      ? {
+          execution_id: executionId,
+          runtime_identity: createIdentity("worker_registration"),
+          attempt: FIRST_ATTEMPT,
+          pinned_revision: FIRST_ATTEMPT,
+        }
+      : null;
+  h.dependencies.schedulerClaims.revoke = (_tx, nodeId, now) => {
+    live = false;
+    return revokedExecution(executionId, nodeId, now);
+  };
+  h.dependencies.intakeCheck.check = async () => {
+    h.store.transaction((tx) => {
+      setNodeState(tx, h.node_id, NodeState.Evaluating);
+      live = true;
+    });
+    h.store.transaction((tx) => {
+      if (ended === EndedClaim.Revoked)
+        return h.service.revokeForInstanceArchive(tx, executionId);
+      live = false;
+      return h.service.failure(tx, h.node_id, FIRST_ATTEMPT, Date.now());
+    });
+    return { end_state: CheckEndState.Expected, landed_commits: [COMMIT] };
+  };
+  scheduleDeferredCheck(h.dependencies, h.node_id, FIRST_ATTEMPT);
+  t.mock.timers.tick(FIRST_ROUND_DELAY_MS);
+  for (let turn = 0; turn < MICROTASK_TURNS; turn++) await Promise.resolve();
+  const state = h.node().state;
+  return h.store.transaction((tx) => ({
+    state,
+    live,
+    end_state: readEvidence(tx, h.request.id)?.end_state,
+    landed: readLandedCommitEvidence(tx, h.node_id, FIRST_ATTEMPT).length,
+  }));
+}
+
+test("a forced revocation of a live evaluation claim during a deferred check leaves the state that a loss leaves", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "setImmediate"] });
+  const revoked = await deferredCheckAfter(t, EndedClaim.Revoked);
+  const lost = await deferredCheckAfter(t, EndedClaim.Lost);
+  assert.deepEqual(revoked, lost);
+  assert.equal(revoked.state, NodeState.Waiting);
+  assert.equal(revoked.live, false);
+  assert.equal(revoked.end_state, CheckEndState.Expected);
+  assert.equal(revoked.landed, SINGLE_LANDED_COMMIT);
 });

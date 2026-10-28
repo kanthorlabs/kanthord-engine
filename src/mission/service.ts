@@ -68,7 +68,12 @@ import {
 import { type ImportFacts, recordImport } from "./import-telemetry.ts";
 import { executionEnds, reportEnds } from "./control.ts";
 import { addDependency, removeDependency } from "./dependency.ts";
-import { pauseNode, readyNode, resumeNode } from "./control-hold.ts";
+import {
+  pauseNode,
+  readyNode,
+  resumeNode,
+  revokeForInstanceArchive,
+} from "./control-hold.ts";
 import { blockNode, discardNode, overrideNode } from "./control-close.ts";
 import { unblockNode } from "./control-unblock.ts";
 import { approveProposal } from "./proposal-approve.ts";
@@ -1098,6 +1103,19 @@ export class MissionService
 
   claimFactsOf(tx: Transaction, projectId: string) {
     return claimFactsOf(tx, this.dependencies.bindings, projectId);
+  }
+
+  revokeForInstanceArchive(tx: Transaction, executionId: string) {
+    return revokeForInstanceArchive(
+      tx,
+      this.dependencies,
+      executionId,
+      Date.now(),
+    );
+  }
+
+  reportExecutionEnds(ends: ExecutionEnds): void {
+    reportEnds(this.dependencies, ends);
   }
 
   actionContextOf(tx: Transaction, nodeId: string, attempt: number) {

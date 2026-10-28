@@ -116,6 +116,9 @@ provides a project ID; `mission get` returns that project's mission ID.
   Pausing does not cancel a platform action, and blocking does not undo one.
   A request whose end state has not been observed cannot be bypassed by discard
   or a success override. The discard of a human-landing node is the one exception.
+- A forced archive of a worker instance revokes the live claim of its node with no loss and no failure count.
+  The node moves `Executing -> Available` or `Evaluating -> Waiting`.
+  The attempt stays open, and the job has no hold.
 
 ## Common calling convention
 
