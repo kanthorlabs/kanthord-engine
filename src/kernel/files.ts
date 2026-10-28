@@ -22,18 +22,20 @@ export type FileKind = (typeof FileKind)[keyof typeof FileKind];
 export const FILE_NOT_FOUND = "ENOENT";
 export const PRIVATE_FILE_MODE = 0o600;
 export const PRIVATE_DIRECTORY_MODE = 0o700;
+const PERMISSION_BITS = 0o7777;
+const OCTAL_RADIX = 8;
 
 function validate(stats: Stats, path: string, kind: FileKind) {
   const mode =
     kind === FileKind.File ? PRIVATE_FILE_MODE : PRIVATE_DIRECTORY_MODE;
   if (
     (kind === FileKind.File ? !stats.isFile() : !stats.isDirectory()) ||
-    (stats.mode & 0o7777) !== mode ||
+    (stats.mode & PERMISSION_BITS) !== mode ||
     stats.uid !== process.getuid?.()
   ) {
     throw new Diagnostic(
       "system.files.invalid_permissions",
-      `expected an owned ${kind} with mode ${mode.toString(8)} on a POSIX filesystem`,
+      `expected an owned ${kind} with mode ${mode.toString(OCTAL_RADIX)} on a POSIX filesystem`,
       { fields: [["path", path]] },
     );
   }

@@ -49,6 +49,7 @@ import {
 
 const HOST_PROBE_SCHEME = "http://";
 const HOST_PROBE_DEFAULT_PORT = ":80";
+const PRIVATE_UMASK = 0o077;
 
 function allowedHost(value: string): string {
   const host = value.toLowerCase();
@@ -395,7 +396,7 @@ export async function runCLI(
   args: string[],
   onServer?: (server: Server) => void,
 ): Promise<number> {
-  process.umask(0o077);
+  process.umask(PRIVATE_UMASK);
   try {
     await createProgram(onServer).parseAsync(args);
     return ExitCode.Success;

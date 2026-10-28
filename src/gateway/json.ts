@@ -3,6 +3,7 @@ import { GatewayError } from "./errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
 
 const MAX_JSON_DEPTH = 128;
+const ESCAPE_SEQUENCE_LENGTH = 2;
 const JsonToken = {
   Escape: "\\",
   Quote: '"',
@@ -31,7 +32,7 @@ export function parseJSON(source: string): unknown {
     const start = index++;
     while (index < source.length) {
       if (source[index] === JsonToken.Escape) {
-        index += 2;
+        index += ESCAPE_SEQUENCE_LENGTH;
         continue;
       }
       if (source[index++] === JsonToken.Quote)

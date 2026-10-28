@@ -20,6 +20,8 @@ import {
 import { background, CancellationContext } from "../kernel/context.ts";
 import { createClient, inputValidationFailure } from "./client-result.ts";
 import type { RecordedResponse } from "./idempotency.ts";
+
+const DEADLINE_GRACE_MS = 1000;
 const endpoint = z.url().refine((value) => {
   const url = URL.parse(value);
   return (
@@ -116,7 +118,7 @@ export function httpClient<T extends Record<string, Operation>>(
     if (operation.body) headers.set("Content-Type", "application/json");
     const context = new CancellationContext(
       options.context ?? background,
-      Date.now() + operation.timeoutMs + 1000,
+      Date.now() + operation.timeoutMs + DEADLINE_GRACE_MS,
     );
     const dispose = () => context.cancel();
     let streaming = false;
@@ -289,7 +291,7 @@ export function portCaller(port: MessagePort) {
     );
     const context = new CancellationContext(
       options.context ?? background,
-      Date.now() + operation.timeoutMs + 1000,
+      Date.now() + operation.timeoutMs + DEADLINE_GRACE_MS,
     );
     if (context.signal.aborted) return Promise.reject(context.signal.reason);
     return new Promise<RecordedResponse>((resolve, reject) => {

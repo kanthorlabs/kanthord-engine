@@ -14,7 +14,7 @@ export type LoginSessionState =
 
 export { LoginSessionMode } from "../custody/contract.ts";
 
-export const SESSION_EXPIRY_MS = 15 * 60 * 1000;
+export const SESSION_EXPIRY_MS = 900000;
 const LOGIN_PENDING_CODE = "credential.login.pending";
 
 export interface LoginSession {

@@ -5,7 +5,7 @@ import { CodedError } from "./errors.ts";
 export const DEADLINE_EXCEEDED_CODE = "system.context.deadline_exceeded";
 
 const EXPIRED_REMAINING_MS = 0;
-const MAX_TIMER_DELAY_MS = 2 ** 31 - 1;
+const MAX_TIMER_DELAY_MS = 2_147_483_647;
 
 export interface Context {
   readonly signal: AbortSignal;

@@ -1368,7 +1368,8 @@ const GitHubEventType = {
 } as const;
 
 const RESOURCE_IDENTITY_PREFIX = "repository:github:";
-const ZERO_COMMIT = "0".repeat(40);
+const COMMIT_HEX_LENGTH = 40;
+const ZERO_COMMIT = "0".repeat(COMMIT_HEX_LENGTH);
 const BRANCH_REF_PREFIX = "refs/heads/";
 const BRANCH_REF_PATTERN = /^refs\/heads\/[^\n]+$/;
 

@@ -177,6 +177,12 @@ import { createIdempotencyKey } from "../../kernel/identity.ts";
 
 export { enforceMasterKey, verifyMasterKey } from "../../custody/index.ts";
 
+const TRACE_ID_BYTES = 16;
+const SPAN_ID_BYTES = 8;
+const STDERR_DESCRIPTOR = 2;
+const PRIVATE_UMASK = 0o077;
+const STOP_WATCHDOG_MS = 10000;
+
 function resultOf<T>(result: OperationResult<T>): T {
   if (result.type === OperationResultType.Completed) return result.data;
   if (result.type === OperationResultType.Failure)
@@ -458,8 +464,8 @@ export function composeServices(options: {
     },
     traceIdentity: {
       mint: () => ({
-        trace_id: randomBytes(16).toString("hex"),
-        root_span_id: randomBytes(8).toString("hex"),
+        trace_id: randomBytes(TRACE_ID_BYTES).toString("hex"),
+        root_span_id: randomBytes(SPAN_ID_BYTES).toString("hex"),
       }),
     },
     telemetry: {
@@ -876,7 +882,11 @@ export function composeServices(options: {
         tracking.serverSpan(
           trace,
           MISSION_PRODUCER,
-          uploadCheckSpan(trace, failure, randomBytes(8).toString("hex")),
+          uploadCheckSpan(
+            trace,
+            failure,
+            randomBytes(SPAN_ID_BYTES).toString("hex"),
+          ),
         );
       },
     },
@@ -1191,7 +1201,7 @@ export class Server implements Service {
     this.health.register("server", () => this.healthcheck());
   }
   logDescriptor(): number {
-    return this.log?.descriptor() ?? 2;
+    return this.log?.descriptor() ?? STDERR_DESCRIPTOR;
   }
 
   start(): Promise<Error | null> {
@@ -1207,7 +1217,7 @@ export class Server implements Service {
   }
 
   private async open(): Promise<void> {
-    process.umask(0o077);
+    process.umask(PRIVATE_UMASK);
     try {
       const config = loadConfig(this.path);
       const paths = directories();
@@ -1331,7 +1341,7 @@ export class Server implements Service {
     this.project?.cancelEnvironmentRuns();
     this.environmentImages?.stop();
     this.stopTask = lifecycle(async () => {
-      const watchdog = setTimeout(() => process.exit(1), 10000);
+      const watchdog = setTimeout(() => process.exit(1), STOP_WATCHDOG_MS);
       try {
         await this.worker?.stopPool();
         const quiesceError = await this.quiesce();

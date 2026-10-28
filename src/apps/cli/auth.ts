@@ -29,6 +29,7 @@ const JWT = "jwt";
 const IAT_CLAIM = "iat";
 const EXP_CLAIM = "exp";
 const MAX_DATE_SECONDS = 8640000000000;
+const MILLISECONDS_PER_SECOND = 1000;
 const BASE64URL_SEGMENT = /^[A-Za-z0-9_-]+$/;
 const PUBLISH_FAILED = "system.files.publish_failed";
 const SECOND_CLIENT_FILE_HINT = "pass --output <path> for a second client file";
@@ -86,7 +87,7 @@ async function renderClaims(token: string): Promise<string> {
       isNumber(value) &&
       Number.isSafeInteger(value) &&
       Math.abs(value) <= MAX_DATE_SECONDS
-        ? ` # ${new Date(value * 1000).toISOString().replace(".000Z", "Z")}`
+        ? ` # ${new Date(value * MILLISECONDS_PER_SECOND).toISOString().replace(".000Z", "Z")}`
         : "";
     return `${key}: ${text}${timestamp}`;
   });
