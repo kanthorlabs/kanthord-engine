@@ -1,4 +1,4 @@
-Revise the task work to satisfy its criterion and verifications. When a verification or an affected test needs a file that the requirement forbids, make the smallest change to that file. {{rationale}}
+Revise the task work to satisfy its criterion and verifications. When a verification or an affected test needs a change to a forbidden file, make the smallest such change. {{rationale}}
 Verification results: {{json results}}
 {{#if release}}
 

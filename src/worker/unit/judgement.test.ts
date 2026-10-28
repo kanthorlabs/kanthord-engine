@@ -327,7 +327,7 @@ test("the task revision carries the output of the failed verification when it ha
   assert.match(withOutput, /```text\n✖ shutdown test timed out\n```$/);
   assert.match(
     withOutput,
-    /^Revise the task work to satisfy its criterion and verifications\. When a verification or an affected test needs a file that the requirement forbids, make the smallest change to that file\. Verification 1/,
+    /^Revise the task work to satisfy its criterion and verifications\. When a verification or an affected test needs a change to a forbidden file, make the smallest such change\. Verification 1/,
   );
   const withoutOutput = taskRevisionInstruction(
     SHIPPED_TEMPLATES,
@@ -344,7 +344,7 @@ const FAILED_EXIT = 1;
 const NO_OUTPUT = "";
 const RELEASE_CLONE = /The release clone holds only tracked files/;
 const FORBIDDEN_FILE_RULE =
-  /When a verification or an affected test needs a file that the requirement forbids, make the smallest change to that file\./;
+  /When a verification or an affected test needs a change to a forbidden file, make the smallest such change\./;
 
 test("only the release revision names the content of the release clone", () => {
   const verification: Verification = {
