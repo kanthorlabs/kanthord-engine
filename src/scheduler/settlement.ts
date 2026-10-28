@@ -8,7 +8,6 @@ import type { Transaction } from "../kernel/store.ts";
 import {
   ExecutionStopReason,
   isAdvancingStop,
-  releaseStopSchema,
   type EndedExecution,
   type ExecutionRow,
   type MissionTransitions,
@@ -24,6 +23,7 @@ import {
   readExecution,
   readUnendedOfNode,
   readUnendedOfRuntime,
+  storedStop,
 } from "./execution-store.ts";
 import type { SchedulerConfig } from "./config.ts";
 
@@ -32,7 +32,6 @@ const NO_FAILURES = 0;
 const ENDING_FAILURE = 1;
 const EXPIRED = 1;
 const NO_DIGESTS = 0;
-const storedStop = releaseStopSchema.nullable();
 const digestsDetailSchema = z.looseObject({
   digests: z.record(z.string(), z.string()),
 });
