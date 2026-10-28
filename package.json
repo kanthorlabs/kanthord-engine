@@ -36,8 +36,11 @@
     "prepare": "husky"
   },
   "lint-staged": {
-    "*.{ts,js,mjs,json,md,yml,yaml}": "prettier --write",
-    "*.{ts,js,mjs}": "eslint --fix"
+    "*.{ts,js,mjs}": [
+      "eslint --fix --max-warnings 0",
+      "prettier --write"
+    ],
+    "*.{json,md,yml,yaml}": "prettier --write"
   },
   "devDependencies": {
     "@apidevtools/swagger-parser": "12.1.0",
