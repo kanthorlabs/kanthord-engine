@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import type { Command } from "commander";
+import { z } from "zod";
 import { Diagnostic } from "../../kernel/errors.ts";
 import { generateX25519KeyPair } from "../../kernel/hpke.ts";
 import { AccessPolicy } from "../../kernel/operation.ts";
@@ -15,6 +16,7 @@ import {
   type InstanceConfiguration,
   instanceConfigurationValue,
   instanceNameSchema,
+  InstancePlacement,
   LIST_LIMIT_DEFAULT,
   LIST_LIMIT_MAX,
   WorkerErrorCode,
@@ -44,6 +46,7 @@ const KEY_OPTION = "--idempotency-key";
 const LIMIT_INVALID = "cli.pagination.limit_invalid";
 const LIMIT_OUT_OF_RANGE = "cli.pagination.limit_out_of_range";
 const REVISION_INVALID = "cli.worker.instance.revision_invalid";
+const PLACEMENT_INVALID = "cli.worker.instance.placement_invalid";
 const KeyOperation = {
   Create: "instance.create",
   Rotate: "instance.rotate",
@@ -51,6 +54,7 @@ const KeyOperation = {
 type KeyOperation = (typeof KeyOperation)[keyof typeof KeyOperation];
 
 interface KeyedOptions {
+  placement?: string;
   workerEndpoint?: string;
   output?: boolean;
   force?: boolean;
@@ -63,6 +67,24 @@ function refuseName(name: string): void {
       WorkerErrorCode.InstanceNameInvalid,
       "worker instance: the name breaks the binding name form or is reserved.",
     );
+}
+
+function refusePlacement(options: KeyedOptions): InstancePlacement {
+  const parsed = z.enum(InstancePlacement).safeParse(options.placement);
+  if (!parsed.success)
+    throw new Diagnostic(
+      PLACEMENT_INVALID,
+      "worker instance: --placement is required and is server, container or worker.",
+    );
+  if (
+    parsed.data !== InstancePlacement.Worker &&
+    (options.output || options.workerEndpoint !== undefined)
+  )
+    throw new Diagnostic(
+      PLACEMENT_INVALID,
+      "worker instance: --output and --worker-endpoint apply only at the worker placement.",
+    );
+  return parsed.data;
 }
 
 function refuseForceWithoutOutput(options: KeyedOptions): void {
@@ -156,6 +178,49 @@ async function keyed(
   } finally {
     pair.private_key.fill(0);
   }
+}
+
+async function createKeyless(
+  name: string,
+  command: Command,
+  placement: InstancePlacement,
+): Promise<void> {
+  const options = command.optsWithGlobals<
+    KeyedOptions & { endpoint?: string; token?: string; worker?: string }
+  >();
+  refuseName(name);
+  refuseForceWithoutOutput(options);
+  const { endpoint, token } = resolveClient(options);
+  requireToken(token, `cli.worker.${KeyOperation.Create}.token_required`);
+  const key = resolveKey(options);
+  const result = await httpClient(workerOperations, endpoint, token)[
+    "instance.create"
+  ](
+    {
+      params: {},
+      query: {},
+      body: { name, worker: options.worker!, placement },
+    },
+    { idempotencyKey: key },
+  );
+  const record = handleMutationResult(
+    result,
+    `cli.worker.${KeyOperation.Create}.indeterminate`,
+    key,
+  );
+  process.stdout.write(`${JSON.stringify(record)}\n`);
+}
+
+function create(name: string, command: Command): Promise<void> {
+  const placement = refusePlacement(command.optsWithGlobals<KeyedOptions>());
+  if (placement !== InstancePlacement.Worker)
+    return createKeyless(name, command, placement);
+  return keyed(name, command, KeyOperation.Create, (publicKey) => ({
+    name,
+    worker: command.optsWithGlobals().worker,
+    placement,
+    public_key: publicKey,
+  }));
 }
 
 function parseRevision(value: string | undefined): number {
@@ -279,17 +344,10 @@ export function addWorkerInstanceCommands(worker: Command): void {
       )
       .option(
         "--placement <placement>",
-        "Placement of the instance: server, container or worker",
+        "Placement of the instance: server, container or worker (required)",
         singleUse("--placement"),
       ),
-  ).action((name: string, _options, command: Command) =>
-    keyed(name, command, KeyOperation.Create, (publicKey) => ({
-      name,
-      worker: command.optsWithGlobals().worker,
-      placement: command.optsWithGlobals().placement,
-      public_key: publicKey,
-    })),
-  );
+  ).action((name: string, _options, command: Command) => create(name, command));
   instance
     .command("list")
     .description("List worker instances as JSON")

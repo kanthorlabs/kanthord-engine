@@ -42,6 +42,8 @@ import { LlmComponent } from "./service.ts";
 
 const INSTANCE = "laptop";
 const OTHER_INSTANCE = "desktop";
+const SERVER_INSTANCE = "hosted";
+const CONTAINER_INSTANCE = "boxed";
 const CREDENTIAL_NAME = "claude";
 const CLOCK_START = 1700000000000;
 const AUTHORIZATION_URL = "https://claude.ai/oauth/authorize?state=abc";
@@ -459,6 +461,16 @@ test("an instance login refuses an unknown holder and an instance with no curren
     code: Code.InstanceUnavailable,
     status: HttpStatus.Conflict,
   });
+  assert.deepEqual(f.component.loginSessionsOf(INSTANCE), []);
+});
+
+test("an instance login of a server or a container instance answers llm.credential.instance_unknown", async (t) => {
+  const f = await fixture(t);
+  for (const holder of [SERVER_INSTANCE, CONTAINER_INSTANCE])
+    await assert.rejects(
+      f.login({ platform: Platform.AnthropicSubscription, holder }),
+      { code: Code.InstanceUnknown, status: HttpStatus.BadRequest },
+    );
   assert.deepEqual(f.component.loginSessionsOf(INSTANCE), []);
 });
 

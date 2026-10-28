@@ -428,10 +428,12 @@ The implemented fields are:
 
 - `worker.heartbeat_window`: optional positive safe integer in seconds, default
   `300`. A 30-second sweep ends expired registrations.
-- `worker.server_slot_limit`: optional positive safe integer, default `16`. It
-  caps the pool slots that the server starts at the `server` and the `container`
-  placements. A slot above the cap stays unstarted and the server logs
-  `worker.pool.slot_limit`.
+- `worker.server_instance_limit`: optional positive safe integer, default `16`.
+  The maximum count of live server instances. A create at the limit answers
+  `worker.instance.server_limit`. A slot above the cap stays unstarted and the
+  server logs `worker.pool.slot_limit`. `kanthord upgrade` renames the former key
+  `worker.server_slot_limit` and prints
+  `renamed: worker.server_slot_limit -> worker.server_instance_limit`.
 - `worker.container_image`: optional image name, default
   `docker.io/kanthorlabs/kanthord`. It holds the name with no tag and no digest.
   The server appends its package version as the tag, so a slot container runs the

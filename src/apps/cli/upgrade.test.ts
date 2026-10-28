@@ -33,6 +33,9 @@ const NO_OUTPUT = "";
 const CURRENT_VERSION_LINE = `version: ${CONFIG_VERSION}\n`;
 const OLD_KEY = "consecutive_loss_limit";
 const NEW_KEY = "consecutive_failure_limit";
+const SERVER_SLOT_KEY = "server_slot_limit";
+const SERVER_INSTANCE_KEY = "server_instance_limit";
+const LEGACY_SERVER_LIMIT = 8;
 const PROMPT_DIRECTORY_LINE = "    agent_directory: agents\n";
 const BEHIND_SERVICE = serverMigrations.find(
   ({ migrations }) => migrations.length,
@@ -78,6 +81,10 @@ function legacyConfig(): string {
   return currentConfig()
     .replace(CURRENT_VERSION_LINE, "")
     .replace(`${NEW_KEY}: 3`, `${OLD_KEY}: 4`)
+    .replace(
+      `${SERVER_INSTANCE_KEY}: 16`,
+      `${SERVER_SLOT_KEY}: ${LEGACY_SERVER_LIMIT}`,
+    )
     .replace(
       PROMPT_DIRECTORY_LINE,
       `${PROMPT_DIRECTORY_LINE}    host_file: true\n`,
@@ -129,6 +136,13 @@ test("serve refuses an older configuration and an older database, and upgrade br
   assert.match(
     upgraded.stdout,
     new RegExp(`^renamed: +mission\\.${OLD_KEY} -> mission\\.${NEW_KEY}$`, "m"),
+  );
+  assert.match(
+    upgraded.stdout,
+    new RegExp(
+      `^renamed: +worker\\.${SERVER_SLOT_KEY} -> worker\\.${SERVER_INSTANCE_KEY}$`,
+      "m",
+    ),
   );
   assert.match(upgraded.stdout, /^removed: +agent\.prompt\.host_file$/m);
   assert.equal(loadConfig(paths.config).version, CONFIG_VERSION);
