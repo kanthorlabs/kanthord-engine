@@ -263,6 +263,12 @@ export function readLiveMissionNodes(
     ) as unknown as NodeRow[];
 }
 
+export function readClaimedNodes(tx: Transaction): NodeRow[] {
+  return tx.database
+    .prepare("SELECT * FROM mission_node WHERE state IN (?, ?) ORDER BY id")
+    .all(NodeState.Executing, NodeState.Evaluating) as unknown as NodeRow[];
+}
+
 export function readRoutableNodes(
   tx: Transaction,
   missionId: string,

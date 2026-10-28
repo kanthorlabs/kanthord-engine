@@ -15,16 +15,23 @@ import {
 import { readinessOf } from "./conditions.ts";
 import { actionStatesOf } from "./frozen-action.ts";
 import { openAttempt } from "./record-store.ts";
-import { type NodeRow, readCurrentRevision, readNode } from "./store.ts";
+import {
+  type NodeRow,
+  readClaimedNodes,
+  readCurrentRevision,
+  readNode,
+} from "./store.ts";
 import {
   actedOn,
   admitControl,
   closeExternalAttempt,
   controlResult,
   endLiveClaim,
+  executionEnds,
   transition,
 } from "./control.ts";
 import type { Dependencies } from "./service.ts";
+import { requireMission } from "./write.ts";
 
 const NO_ATTEMPT = 0;
 const NOT_READY = "mission.node.not_ready";
@@ -182,4 +189,51 @@ export function pauseNode(
     controlResult(tx, dependencies, nodeId, null, actor, now),
     claim?.execution.trace ?? null,
   );
+}
+
+function claimedNodeOf(
+  tx: Transaction,
+  dependencies: Dependencies,
+  executionId: string,
+  now: number,
+): NodeRow | null {
+  return (
+    readClaimedNodes(tx).find(
+      (node) =>
+        dependencies.schedulerClaims.liveExecutionOf(tx, node.id, now)
+          ?.execution_id === executionId,
+    ) ?? null
+  );
+}
+
+export function revokeForInstanceArchive(
+  tx: Transaction,
+  dependencies: Dependencies,
+  executionId: string,
+  now: number,
+): ExecutionEnds | null {
+  const node = claimedNodeOf(tx, dependencies, executionId, now);
+  if (node === null) return null;
+  const ends = executionEnds();
+  const claim = endLiveClaim(
+    tx,
+    dependencies,
+    node,
+    now,
+    RevokeCause.Human,
+    null,
+    ends,
+  );
+  assert.ok(claim);
+  transition(
+    tx,
+    dependencies,
+    requireMission(tx, node.mission_id),
+    node,
+    node.state === NodeState.Executing
+      ? NodeState.Available
+      : NodeState.Waiting,
+    now,
+  );
+  return ends;
 }

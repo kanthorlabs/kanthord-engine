@@ -119,6 +119,11 @@ export interface MissionCollaborations {
   ): CurrentNodePin[];
   claimFacts(tx: Transaction, nodeId: string): ClaimFacts | null;
   claimFactsOf(tx: Transaction, projectId: string): ClaimFactsRow[];
+  revokeForInstanceArchive(
+    tx: Transaction,
+    executionId: string,
+  ): ExecutionEnds | null;
+  reportExecutionEnds(ends: ExecutionEnds): void;
 }
 
 export const RevokeCause = {
