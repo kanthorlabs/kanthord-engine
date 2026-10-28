@@ -312,20 +312,6 @@ test("current passing assessments close attempts and revoke claims without an ex
 const GATE_PATH = "package.json";
 const OTHER_GATE_PATH = "pnpm-lock.yaml";
 
-async function gateFilesRefusal(
-  t: TestContext,
-  gateFiles: (bindingId: string) => AssessmentSubmit["gate_files"],
-) {
-  const h = await fixture(t);
-  await assert.rejects(
-    h.submit({ ...h.body, gate_files: gateFiles(h.address.binding_id) }),
-    (error) =>
-      error instanceof OperationError &&
-      error.code === VALIDATION &&
-      canonicalJSON(error.details).includes("gate_files"),
-  );
-}
-
 function answerGateFiles(
   h: Awaited<ReturnType<typeof fixture>>,
   paths: string[],
@@ -340,18 +326,10 @@ function storedGateFiles(
   return h.store.transaction((tx) => readAssessment(tx, assessmentId)!);
 }
 
-test("an assessment stores the server gate files and ignores the worker list", async (t) => {
+test("an assessment stores the server gate files", async (t) => {
   const h = await fixture(t, RepositoryAction.MergePush);
   answerGateFiles(h, [OTHER_GATE_PATH]);
-  const result = await h.submit({
-    ...h.body,
-    gate_files: [
-      {
-        binding_id: h.address.binding_id,
-        paths: [GATE_PATH, OTHER_GATE_PATH],
-      },
-    ],
-  });
+  const result = await h.submit();
   assert.equal(
     storedGateFiles(h, result.assessment.id).gate_files,
     canonicalJSON([
@@ -360,10 +338,10 @@ test("an assessment stores the server gate files and ignores the worker list", a
   );
 });
 
-test("a worker list without gate files keeps the human landing of a changed gate file", async (t) => {
+test("a server gate file keeps the human landing of a merge push", async (t) => {
   const h = await fixture(t, RepositoryAction.MergePush);
   answerGateFiles(h, [GATE_PATH]);
-  const result = await h.submit({ ...h.body, gate_files: [] });
+  const result = await h.submit();
   const [action] = h.store.transaction((tx) =>
     requiredActionsOf(
       tx,
@@ -381,14 +359,14 @@ test("a worker list without gate files keeps the human landing of a changed gate
   );
 });
 
-test("a worker list without gate files keeps the service merge closed for a changed gate file", async (t) => {
+test("a server gate file keeps the service merge closed", async (t) => {
   const h = await fixture(
     t,
     RepositoryAction.PullRequest,
     RepositoryLanding.KanthorD,
   );
   answerGateFiles(h, [GATE_PATH]);
-  const result = await h.submit({ ...h.body, gate_files: [] });
+  const result = await h.submit();
   assert.deepEqual(
     gateFilesOf(storedGateFiles(h, result.assessment.id), h.repositoryId),
     [GATE_PATH],
@@ -402,10 +380,7 @@ test("a change with no gate file stores null and keeps the service merge open", 
     RepositoryLanding.KanthorD,
   );
   answerGateFiles(h, []);
-  const result = await h.submit({
-    ...h.body,
-    gate_files: [{ binding_id: h.address.binding_id, paths: [GATE_PATH] }],
-  });
+  const result = await h.submit();
   assert.equal(storedGateFiles(h, result.assessment.id).gate_files, null);
 });
 
@@ -467,25 +442,6 @@ test("an assessment without gate_files stores null", async (t) => {
     ),
     null,
   );
-});
-
-test("gate_files for a binding outside tested_input is refused", async (t) => {
-  await gateFilesRefusal(t, () => [
-    { binding_id: createIdentity("binding"), paths: [GATE_PATH] },
-  ]);
-});
-
-test("gate_files with two entries of one binding is refused", async (t) => {
-  await gateFilesRefusal(t, (bindingId) => [
-    { binding_id: bindingId, paths: [GATE_PATH] },
-    { binding_id: bindingId, paths: [OTHER_GATE_PATH] },
-  ]);
-});
-
-test("gate_files with a duplicate path is refused", async (t) => {
-  await gateFilesRefusal(t, (bindingId) => [
-    { binding_id: bindingId, paths: [GATE_PATH, GATE_PATH] },
-  ]);
 });
 
 test("a not-met assessment that sends rework and a passed assessment that completes the node end the root span with the assessment cause", async (t) => {

@@ -636,7 +636,6 @@ async function reviewOf(
     rationale: string;
     evidence_ids: string[];
     cause?: unknown;
-    gate_files?: { binding_id: string; paths: string[] }[];
   }[] = [];
   const records: TelemetryRecord[] = [];
   const verifications: { results: { exit_code: number | null }[] }[] = [];
@@ -1019,7 +1018,6 @@ const AFFECTED_SUBJECT_TEXT = "Affected test results";
 const JSON_MEDIA_TYPE = "application/json";
 const BASE64_ENCODING = "base64";
 const REPOSITORY_NAME = "repo";
-const GATE_FILE = "package.json";
 const BROKEN = "broken";
 const FAILS_WHEN_BROKEN = `grep -q ${BROKEN} file`;
 const COMMIT_IDENTITY = [
@@ -1033,7 +1031,6 @@ async function affectedSnapshot(
   t: TestContext,
   declaredCommand: string | null,
   nodeContent: string,
-  gateFiles: string[] = [],
 ) {
   const origin = join(temporary(t), "origin");
   mkdirSync(origin);
@@ -1045,11 +1042,7 @@ async function affectedSnapshot(
     mkdirSync(join(origin, dirname(AFFECTED_DECLARATION_FILE)));
     writeFileSync(
       join(origin, AFFECTED_DECLARATION_FILE),
-      JSON.stringify({
-        version: 1,
-        command: declaredCommand,
-        gate_files: gateFiles,
-      }),
+      JSON.stringify({ version: 1, command: declaredCommand }),
     );
     await git.add(AFFECTED_DECLARATION_FILE);
   }
@@ -1057,10 +1050,6 @@ async function affectedSnapshot(
   await git.raw(["checkout", "-b", "node"]);
   writeFileSync(join(origin, "file"), nodeContent);
   await git.add("file");
-  for (const gateFile of gateFiles) {
-    writeFileSync(join(origin, gateFile), nodeContent);
-    await git.add(gateFile);
-  }
   await git.raw([...COMMIT_IDENTITY, "commit", "-m", "work"]);
   const snapshot = (await git.revparse(["HEAD"])).trim();
   await git.raw(["checkout", "main"]);
@@ -1132,20 +1121,7 @@ test("a passing affected command submits its evidence, adds its id, informs the 
   assert.equal(affectedEnd(review), AffectedVerdict.Passed);
 });
 
-test("an affected run that reports a changed gate file submits it on the assessment", async (t) => {
-  const snapshot = await affectedSnapshot(
-    t,
-    affectedCommand("false"),
-    "changed",
-    [GATE_FILE],
-  );
-  const review = await reviewOf(t, "true", undefined, snapshot);
-  assert.deepEqual(review.assessments[0]?.gate_files, [
-    { binding_id: snapshot.repository.binding_id, paths: [GATE_FILE] },
-  ]);
-});
-
-test("an affected run with no changed gate file submits no gate_files key", async (t) => {
+test("an assessment submits no gate_files key", async (t) => {
   const review = await affectedReview(t, affectedCommand("false"), "changed");
   assert.equal("gate_files" in (review.assessments[0] ?? {}), false);
 });

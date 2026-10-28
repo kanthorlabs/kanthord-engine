@@ -5,7 +5,6 @@ import { canonicalJSON } from "../kernel/json.ts";
 import type { Transaction } from "../kernel/store.ts";
 import {
   AssessmentResult,
-  AssetKind,
   MissionErrorCode,
   Intent,
   verificationSchema,
@@ -40,7 +39,6 @@ const NO_REQUIRED_VERIFICATIONS = 0;
 const SINGLE_COVERING_VERIFICATION = 1;
 const NO_PROPOSALS = 0;
 const PROPOSALS_FIELD = "proposals";
-const GATE_FILES_FIELD = "gate_files";
 
 function requireDependencyOutcomes(
   tx: Transaction,
@@ -110,27 +108,6 @@ function requireProposals(
         dependencies.config.text_max_bytes,
       );
   }
-}
-
-function requireGateFiles(body: AssessmentSubmit): void {
-  if (body.gate_files === undefined) return;
-  const addresses = Array.isArray(body.tested_input)
-    ? body.tested_input
-    : [body.tested_input];
-  const tested = new Set(
-    addresses.flatMap((address) =>
-      address.kind === AssetKind.Repository ? [address.binding_id] : [],
-    ),
-  );
-  const named = body.gate_files.map((entry) => entry.binding_id);
-  if (
-    named.some((id) => !tested.has(id)) ||
-    new Set(named).size !== named.length ||
-    body.gate_files.some(
-      (entry) => new Set(entry.paths).size !== entry.paths.length,
-    )
-  )
-    invalidExecutionInput(GATE_FILES_FIELD);
 }
 
 function requireResult(
@@ -229,6 +206,5 @@ export function admitAssessment(
     revision,
     body.tested_input,
   );
-  requireGateFiles(body);
   requireResult(body, verifications, requiredVerifications(tx, node, revision));
 }
