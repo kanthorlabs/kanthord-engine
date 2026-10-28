@@ -257,7 +257,13 @@ export default tseslint.config(
   {
     files: ["**/*.{ts,js,mjs}"],
     plugins: { kanthord: kanthordPlugin },
-    rules: { "kanthord/no-comments": "error" },
+    rules: {
+      "kanthord/no-comments": "error",
+      "sort-imports": [
+        "error",
+        { ignoreDeclarationSort: true, ignoreCase: true },
+      ],
+    },
   },
   { linterOptions: { noInlineConfig: true } },
   ...(inlineConfigFiles.length > 0
