@@ -106,6 +106,7 @@ const OpeningAttribute = {
   LeadTimeMs: "kanthord.node.lead_time_ms",
 } as const;
 const NO_LEAD_TIME = 0;
+const NO_FAILURE_COUNT = 0;
 const ROOT_START_RECORD = "start";
 const ROOT_END_RECORD = "end";
 const TRANSITION_RECORD = "transition";
@@ -805,6 +806,16 @@ function transitionAttributes(transition: ExecutionTransition): Attributes {
       (Number.isSafeInteger(transition.lead_time_ms) &&
         transition.lead_time_ms >= NO_LEAD_TIME),
   );
+  assert.ok(
+    transition.failure_count === null ||
+      (Number.isSafeInteger(transition.failure_count) &&
+        transition.failure_count >= NO_FAILURE_COUNT),
+  );
+  assert.ok(
+    transition.available_at === null ||
+      (transition.failure_count !== null &&
+        Number.isSafeInteger(transition.available_at)),
+  );
   return {
     "kanthord.node.state.from": transition.from,
     "kanthord.node.state.to": transition.to,
@@ -818,6 +829,12 @@ function transitionAttributes(transition: ExecutionTransition): Attributes {
     ...(transition.lead_time_ms === null
       ? {}
       : { [OpeningAttribute.LeadTimeMs]: transition.lead_time_ms }),
+    ...(transition.failure_count === null
+      ? {}
+      : { "kanthord.transition.failure_count": transition.failure_count }),
+    ...(transition.available_at === null
+      ? {}
+      : { "kanthord.node.available_at": transition.available_at }),
   };
 }
 

@@ -74,6 +74,8 @@ const PLACEMENT = "local";
 const NODE_NAME = "Write the report";
 const DEPENDENCY_COUNT = 2;
 const LEAD_TIME_MS = 4000;
+const HELD_FAILURES = 2;
+const HELD_UNTIL = 90000;
 const SPAN = "2".repeat(16);
 const RUNTIME = "worker_registration_01JZ8R2B3C4D5E6F7G8H9J0K1M";
 const CREATED = 1000;
@@ -210,6 +212,8 @@ test("a transition span is a child of the root span with the states, the rule an
     count: 3,
     limit: 3,
     lead_time_ms: null,
+    failure_count: null,
+    available_at: null,
     transitioned_at: ENDED,
   };
   service.executionTransition(TRACE, transition);
@@ -259,6 +263,8 @@ test("a transition span with the rule none holds neither the count nor the limit
     count: null,
     limit: null,
     lead_time_ms: null,
+    failure_count: null,
+    available_at: null,
     transitioned_at: ENDED,
   });
   const span = service
@@ -438,6 +444,35 @@ test("a transition with a lead time writes the lead time and a transition with n
     .spanList(TRACE.trace_id, { limit: SPAN_PAGE }, caller(store))
     .items.find((item) => item.operation === TRANSITION_SPAN);
   assert.equal(span?.attributes["kanthord.node.lead_time_ms"], LEAD_TIME_MS);
+});
+
+test("a transition with a failure hold writes the failure count and the hold end", (t) => {
+  const { store, service } = harness(t);
+  service.executionOpened(TRACE, CREATED, OPENING);
+  service.executionTransition(TRACE, {
+    ...TRANSITION,
+    failure_count: HELD_FAILURES,
+    available_at: HELD_UNTIL,
+  });
+  const span = service
+    .spanList(TRACE.trace_id, { limit: SPAN_PAGE }, caller(store))
+    .items.find((item) => item.operation === TRANSITION_SPAN);
+  assert.equal(
+    span?.attributes["kanthord.transition.failure_count"],
+    HELD_FAILURES,
+  );
+  assert.equal(span?.attributes["kanthord.node.available_at"], HELD_UNTIL);
+});
+
+test("a transition without a failure hold writes no hold attribute", (t) => {
+  const { store, service } = harness(t);
+  service.executionOpened(TRACE, CREATED, OPENING);
+  service.executionTransition(TRACE, TRANSITION);
+  const span = service
+    .spanList(TRACE.trace_id, { limit: SPAN_PAGE }, caller(store))
+    .items.find((item) => item.operation === TRANSITION_SPAN);
+  assert.equal("kanthord.transition.failure_count" in span!.attributes, false);
+  assert.equal("kanthord.node.available_at" in span!.attributes, false);
 });
 
 test("a transition without a lead time writes no lead time attribute", (t) => {
@@ -815,6 +850,8 @@ const TRANSITION = {
   count: null,
   limit: null,
   lead_time_ms: null,
+  failure_count: null,
+  available_at: null,
   transitioned_at: 2000,
 };
 

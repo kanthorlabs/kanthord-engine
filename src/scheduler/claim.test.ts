@@ -20,6 +20,7 @@ import {
   schedulerHarness,
   FIXTURE_NOW,
   FIXTURE_DEADLINE,
+  FIRST_LOSS_WITHOUT_JOB,
   transitionFixture,
 } from "./test-support.ts";
 import { DEFAULT_STOP_BACKOFF_SECONDS } from "./config.ts";
@@ -334,6 +335,7 @@ test("a claim walk answers each execution that it settles with its trace", (t) =
       trace: executionTrace(h.row),
       ended_at: FIXTURE_DEADLINE,
       transition: transitionFixture(),
+      hold: FIRST_LOSS_WITHOUT_JOB,
     },
   ]);
   const other = executionFixture({
@@ -373,6 +375,7 @@ test("an inline loss of a claim walk writes one transition span after its commit
       count: null,
       limit: null,
       lead_time_ms: null,
+      ...FIRST_LOSS_WITHOUT_JOB,
       transitioned_at: FIXTURE_DEADLINE,
     },
   ]);

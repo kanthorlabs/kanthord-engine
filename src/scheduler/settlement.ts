@@ -9,6 +9,7 @@ import {
   ExecutionStopReason,
   isAdvancingStop,
   type EndedExecution,
+  type FailureHold,
   type ExecutionRow,
   type MissionTransitions,
   type NodeTransition,
@@ -30,6 +31,7 @@ import type { SchedulerConfig } from "./config.ts";
 export const EXECUTION_NOT_RUNNING = "scheduler.execution.not_running";
 const NO_FAILURES = 0;
 const ENDING_FAILURE = 1;
+const ONE_JOB = 1;
 const EXPIRED = 1;
 const NO_DIGESTS = 0;
 const digestsDetailSchema = z.looseObject({
@@ -66,7 +68,7 @@ export function recordFailure(
   nodeId: string,
   failures: number,
   now: number,
-): NodeTransition {
+): { transition: NodeTransition; hold: FailureHold } {
   const transition = dependencies.transitions.failure(
     tx,
     nodeId,
@@ -74,11 +76,21 @@ export function recordFailure(
     now,
   );
   const until = heldUntil(failures, now, dependencies.config.stop_backoff);
-  if (until === null) return transition;
-  tx.database
+  if (until === null)
+    return {
+      transition,
+      hold: { failure_count: failures, available_at: null },
+    };
+  const held = tx.database
     .prepare("UPDATE scheduler_job SET available_at = ? WHERE node_id = ?")
     .run(until, nodeId);
-  return transition;
+  return {
+    transition,
+    hold: {
+      failure_count: failures,
+      available_at: Number(held.changes) === ONE_JOB ? until : null,
+    },
+  };
 }
 
 export function pinCredential(
@@ -210,7 +222,7 @@ export function declareLoss(
   assert.equal(row.ended_at, null);
   assert.ok(now >= row.expired_at);
   endExecution(tx, row.execution_id, now);
-  const transition = recordFailure(
+  const { transition, hold } = recordFailure(
     tx,
     dependencies,
     row.node_id,
@@ -222,6 +234,7 @@ export function declareLoss(
     trace: executionTrace(row),
     ended_at: now,
     transition,
+    hold,
   };
 }
 export function settleNode(

@@ -24,6 +24,8 @@ import { insertExecution, readExecution } from "./execution-store.ts";
 import {
   schedulerHarness,
   executionFixture,
+  FIRST_LOSS_WITHOUT_JOB,
+  firstLossHold,
   transitionFixture,
 } from "./test-support.ts";
 import { ExecutionEnd } from "../tracking/contract.ts";
@@ -162,7 +164,11 @@ for (const [name, sameRuntime] of [
         method: "executionTransition",
         arguments: [
           executionTrace(expired),
-          executionTransition(transitionFixture(), ended),
+          executionTransition(
+            transitionFixture(),
+            ended,
+            sameRuntime ? FIRST_LOSS_WITHOUT_JOB : firstLossHold(ended),
+          ),
         ],
       },
     ]);

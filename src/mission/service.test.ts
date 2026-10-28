@@ -89,6 +89,7 @@ import { ControlError } from "./control.ts";
 import { revisionFromRow } from "./revision.ts";
 import {
   databaseSnapshot,
+  lostHold,
   lostTransition,
   unexpectedCollaboration,
 } from "./test-support.ts";
@@ -4350,6 +4351,7 @@ test("an import apply that settles an expired execution of a dependent writes on
                 },
                 ended_at: now,
                 transition: lostTransition(),
+                hold: lostHold(),
               },
             ]
           : [],

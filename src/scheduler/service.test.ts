@@ -22,6 +22,7 @@ import {
   executionFixture,
   FIXTURE_DEADLINE,
   FIXTURE_NOW,
+  FIRST_LOSS_WITHOUT_JOB,
   transitionFixture,
 } from "./test-support.ts";
 import { ExecutionEnd, RevokeCause } from "../tracking/contract.ts";
@@ -601,7 +602,7 @@ test("a revocation by an assessment writes the root end and then one transition 
   );
   assert.deepEqual(h.telemetry[1]!.arguments, [
     executionTrace(row),
-    executionTransition(transition, FIXTURE_NOW),
+    executionTransition(transition, FIXTURE_NOW, null),
   ]);
 });
 
@@ -621,7 +622,7 @@ test("a revocation by an assessment hands the lead time to the transition span",
   h.service.executionRevoked(revoked, RevokeCause.Assessment, transition, null);
   assert.deepEqual(h.telemetry[1]!.arguments, [
     executionTrace(row),
-    executionTransition(transition, FIXTURE_NOW),
+    executionTransition(transition, FIXTURE_NOW, null),
   ]);
   assert.equal(
     (h.telemetry[1]!.arguments[1] as { lead_time_ms: number }).lead_time_ms,
@@ -661,6 +662,7 @@ test("settle answers each execution that it ends with its trace and writes no en
       trace: executionTrace(row),
       ended_at: FIXTURE_DEADLINE,
       transition: transitionFixture(),
+      hold: FIRST_LOSS_WITHOUT_JOB,
     },
   ]);
   assert.deepEqual(h.telemetry, []);
@@ -686,7 +688,11 @@ test("settle answers each execution that it ends with its trace and writes no en
       method: EXECUTION_TRANSITION,
       arguments: [
         executionTrace(row),
-        executionTransition(transitionFixture(), FIXTURE_DEADLINE),
+        executionTransition(
+          transitionFixture(),
+          FIXTURE_DEADLINE,
+          FIRST_LOSS_WITHOUT_JOB,
+        ),
       ],
     },
   ]);
@@ -736,11 +742,18 @@ test("a sweep loss below the failure limit writes Executing to Available and at 
   );
   assert.deepEqual(h.telemetry[1]!.arguments, [
     executionTrace(first),
-    executionTransition(transitionFixture(), FIXTURE_DEADLINE),
+    executionTransition(
+      transitionFixture(),
+      FIXTURE_DEADLINE,
+      FIRST_LOSS_WITHOUT_JOB,
+    ),
   ]);
   assert.deepEqual(h.telemetry[3]!.arguments, [
     executionTrace(second),
-    executionTransition(paused, FIXTURE_DEADLINE + 1),
+    executionTransition(paused, FIXTURE_DEADLINE + 1, {
+      failure_count: FAILURE_LIMIT,
+      available_at: null,
+    }),
   ]);
 });
 

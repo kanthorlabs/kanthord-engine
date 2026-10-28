@@ -12,7 +12,11 @@ import {
   type ExecutionTrace,
   type ExecutionTransition,
 } from "../tracking/contract.ts";
-import type { EndedExecution, NodeTransition } from "./contract.ts";
+import type {
+  EndedExecution,
+  FailureHold,
+  NodeTransition,
+} from "./contract.ts";
 
 const NO_WAIT = 0;
 const COMPLETED_STATE = "Completed";
@@ -20,6 +24,7 @@ const COMPLETED_STATE = "Completed";
 export function executionTransition(
   transition: NodeTransition,
   transitionedAt: number,
+  hold: FailureHold | null,
 ): ExecutionTransition {
   const leadTimeMs =
     transition.to === COMPLETED_STATE && transition.first_available_at !== null
@@ -34,6 +39,8 @@ export function executionTransition(
     count: transition.count,
     limit: transition.limit,
     lead_time_ms: leadTimeMs,
+    failure_count: hold?.failure_count ?? null,
+    available_at: hold?.available_at ?? null,
   };
 }
 
@@ -55,7 +62,11 @@ export function reportLost(
     });
     telemetry.executionTransition(
       execution.trace,
-      executionTransition(execution.transition, execution.ended_at),
+      executionTransition(
+        execution.transition,
+        execution.ended_at,
+        execution.hold,
+      ),
     );
   }
 }
