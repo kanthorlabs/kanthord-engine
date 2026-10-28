@@ -190,7 +190,7 @@ export const ENVIRONMENT_FILE_MAX_BYTES = 65536;
 export const bindingPromptsSchema = z.strictObject(
   Object.fromEntries(
     AGENT_NAMES.map((name) => [name, z.string().optional()]),
-  ) as { [Name in AgentName]: z.ZodOptional<z.ZodString> },
+  ) as Record<AgentName, z.ZodOptional<z.ZodString>>,
 );
 export type BindingPrompts = z.infer<typeof bindingPromptsSchema>;
 

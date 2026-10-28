@@ -1095,9 +1095,7 @@ export class Onboarding {
   private emit(trace: ServerTrace, contribution: EnvironmentContribution) {
     try {
       this.dependencies.telemetry.span(trace, contribution);
-    } catch {
-      return;
-    }
+    } catch {}
   }
 
   private openTrace(record: GroupRecord, startedAt: number): ServerTrace {

@@ -205,7 +205,7 @@ test("workspace preparation refreshes implement branches and creates disposable 
         examine.tested_input,
         [repository, another].map(({ binding_id }) => ({
           kind: "repository",
-          binding_id: binding_id,
+          binding_id,
           commit: base,
         })),
       );

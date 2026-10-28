@@ -64,7 +64,7 @@ export function actionsOfRevision(
   tx: Transaction,
   bindings: MissionBindings,
   revision: RevisionRow,
-  actions: Map<string, FrozenAction | null> = new Map(),
+  actions = new Map<string, FrozenAction | null>(),
 ): FrozenAction[] {
   if (revision.intent === Intent.Examine) return [];
   const found: FrozenAction[] = [];

@@ -68,7 +68,7 @@ export type PromptTemplates = Readonly<Record<PromptTemplate, string>>;
 export const promptTemplatesSchema = z.strictObject(
   Object.fromEntries(
     Object.values(PromptTemplate).map((name) => [name, z.string()]),
-  ) as { [Name in PromptTemplate]: z.ZodString },
+  ) as Record<PromptTemplate, z.ZodString>,
 );
 
 export const AgentErrorCode = {

@@ -511,7 +511,7 @@ export function authorizationHarness(t: TestContext, identity: CallerIdentity) {
   const request = (
     address: PlatformAddress = pullRequest,
     nodeId: string = h.node_id,
-    key: string = `repo.${policy.action}`,
+    key = `repo.${policy.action}`,
   ) => {
     const id = createIdentity("evidence");
     h.store.transaction((tx) =>

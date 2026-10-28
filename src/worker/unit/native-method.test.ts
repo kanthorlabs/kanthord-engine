@@ -120,7 +120,7 @@ async function startedSession(t: TestContext, clients: MethodClients) {
     credential: {
       credential_id: setup.agents[0]!.credential_id,
       provider_id: "anthropic",
-      store: store,
+      store,
     },
     budget: new ExecutionBudget({
       created_at: Date.now(),
