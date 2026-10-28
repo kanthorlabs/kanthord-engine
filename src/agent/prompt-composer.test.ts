@@ -59,7 +59,9 @@ test("work prompts name the affected commands apart from the repositories", () =
   };
   const first = { name: "first", directory: "first", base_branch: "main" };
   const second = { name: "second", directory: "second", base_branch: "dev" };
-  const affected_tests = [{ name: "first", command: "run first" }];
+  const affected_tests = [
+    { name: "first", command: "run first", gate_files: [] },
+  ];
   const section =
     "## Affected tests\n\nRepository first: affected tests `run first`\nKanthorD runs each command after the verifications at the release gate and at the evaluation. Do not run it.";
   const single = renderWorkPrompt(SHIPPED_TEMPLATES, {

@@ -403,6 +403,7 @@ export async function declareAffected(
   h: { bare: string },
   t: TestContext,
   command: string,
+  gateFiles: string[] = [],
 ) {
   const clone = temporary(t);
   const git = simpleGit(clone);
@@ -410,7 +411,7 @@ export async function declareAffected(
   mkdirSync(join(clone, dirname(AFFECTED_DECLARATION_FILE)));
   writeFileSync(
     join(clone, AFFECTED_DECLARATION_FILE),
-    JSON.stringify({ version: 1, command }),
+    JSON.stringify({ version: 1, command, gate_files: gateFiles }),
   );
   await git.add(AFFECTED_DECLARATION_FILE);
   await git.raw([...IDENTITY, "commit", "-m", "declare affected tests"]);

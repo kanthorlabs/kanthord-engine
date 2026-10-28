@@ -559,6 +559,7 @@ test("the work prompt lists both repositories", async (t) => {
 const AFFECTED_COMMAND = "pnpm --silent run test:affected";
 const AFFECTED_SECTION = "## Affected tests";
 const BLANK_COMMAND = " ";
+const GATE_FILE = "package.json";
 
 test("the node work and the task work name the affected command of a declaring checkout", async (t) => {
   const current = task("affected", "true");
@@ -570,13 +571,26 @@ test("the node work and the task work name the affected command of a declaring c
   await declareAffected(first, t, AFFECTED_COMMAND);
   const h = await nextExecution(t, first, []);
   assert.deepEqual(h.affectedTests, [
-    { name: "api", command: AFFECTED_COMMAND },
+    { name: "api", command: AFFECTED_COMMAND, gate_files: [] },
   ]);
   const section = `${AFFECTED_SECTION}\n\nRepository api: affected tests \`${AFFECTED_COMMAND}\`\nKanthorD runs each command`;
   assert.ok(taskWork(h, current).text.includes(section));
   assert.ok(nodeWork(h).text.includes(section));
   assert.ok(!first.affectedTests.length);
   assert.ok(!taskWork(first, current).text.includes(AFFECTED_SECTION));
+});
+
+test("the task work names the gate files of a declaring checkout", async (t) => {
+  const current = task("gated", "true");
+  const first = await implementFixture(t, [current], []);
+  await declareAffected(first, t, AFFECTED_COMMAND, [GATE_FILE]);
+  const h = await nextExecution(t, first, []);
+  assert.deepEqual(h.affectedTests[0]?.gate_files, [GATE_FILE]);
+  assert.ok(
+    taskWork(h, current).text.includes(
+      `: \`${GATE_FILE}\`. Change a gate file only when the requirement names it.`,
+    ),
+  );
 });
 
 test("an invalid affected declaration gives no entry and no stop", async (t) => {
