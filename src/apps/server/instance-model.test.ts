@@ -333,8 +333,8 @@ class ModelThreadDriver implements SlotDriver, UnitHost {
   }
 
   crash(): void {
-    for (const units of this.units.values())
-      for (const unit of units) if (!unit.ended) unit.crash();
+    const live = [...this.units.values()].flat().filter((unit) => !unit.ended);
+    for (const unit of live) unit.crash();
   }
 }
 
