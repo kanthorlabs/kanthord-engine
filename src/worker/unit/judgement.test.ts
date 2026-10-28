@@ -238,8 +238,13 @@ test("failed and unrun rationale names the command and cause", () => {
   assert.match(instruction, /List every unmet item that you find/);
   assert.match(
     instruction,
-    /Give each unmet item a ground: stated for a requirement or criterion of the work prompt, standard for a default-standard rule, unstated for a defect that neither states\./,
+    /Give each unmet item a ground: stated for a requirement or criterion of the work prompt, standard for a default-standard rule, unstated for a defect that neither states, conflict for two stated requirements or criteria that the work cannot meet together\./,
   );
+  assert.match(
+    instruction,
+    /When the work cannot meet two stated requirements or criteria together, give the unmet item the ground conflict\. For example, a criterion needs a change to a file that the requirement forbids\. For a conflict, write the reason as the two requirements in quotes, joined by " vs ": "requirement A" vs "requirement B"\./,
+  );
+  assert.doesNotMatch(instruction, /unmet stated item/);
   assert.match(instruction, /"ground": "stated"/);
   assert.doesNotMatch(
     instruction,
