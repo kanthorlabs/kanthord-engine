@@ -595,6 +595,8 @@ export async function gatewayFixture(
     stateDirectory?: string;
     agentDirectory?: string;
     serverInstanceLimit?: number;
+    masterKey?: string;
+    serverSlotDriver?: SlotDriver;
     containerImage?: string;
     intake?: { pendingEventLimit?: number; pollIntervalMs?: number };
     handoverRefreshWaitMs?: number;
@@ -618,7 +620,7 @@ export async function gatewayFixture(
   const slotDriver = options.fakeSlots ? new FakeSlotDriver() : undefined;
   const config = configuration({
     version: CONFIG_VERSION,
-    master_key: randomBytes(32).toString("base64"),
+    master_key: options.masterKey ?? randomBytes(32).toString("base64"),
     gateway: { port: 0, allowed_hosts: ["localhost"] },
     scheduler: options.scheduler ?? {},
     project: options.project ?? {},
@@ -689,7 +691,7 @@ export async function gatewayFixture(
     inventoryOverrides: options.inventoryOverrides,
     intake: options.intake,
     handoverRefreshWaitMs: options.handoverRefreshWaitMs,
-    serverSlotDriver: slotDriver,
+    serverSlotDriver: slotDriver ?? options.serverSlotDriver,
     environmentRuntime: options.environmentRuntime,
     containerRuntimeHost: options.containerRuntimeHost,
     environmentDevcontainerCli: options.environmentDevcontainerCli,
