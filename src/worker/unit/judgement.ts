@@ -257,7 +257,7 @@ export function affectedRevisionInstruction(
       .join(RATIONALE_SEPARATOR),
     results: failed.map((run) => run.head),
     output: failed[FIRST_ENTRY]!.output,
-    release: false,
+    release: true,
   });
 }
 
