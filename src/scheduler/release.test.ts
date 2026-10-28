@@ -615,9 +615,12 @@ for (const detail of [
   });
 }
 
-test("an environment_failed release neither counts a failure nor holds the job", async (t) => {
+test("an environment_failed release with digests neither counts a failure nor holds the job", async (t) => {
   const h = environmentHarness(t);
-  await h.release(true, ENVIRONMENT_STOP);
+  await h.release(true, {
+    ...ENVIRONMENT_STOP,
+    detail: JSON.stringify({ digests: { [API]: APP_DIGEST } }),
+  });
   assert.deepEqual(
     h.calls.map((call) => [call.method, ...call.arguments.slice(1)]),
     [["failure", h.row.node_id, NO_FAILURES, FIXTURE_NOW]],
@@ -625,6 +628,15 @@ test("an environment_failed release neither counts a failure nor holds the job",
   assert.deepEqual(
     h.store.database.prepare("SELECT * FROM scheduler_job").all(),
     [],
+  );
+});
+
+test("an environment_failed release without digests counts a failure", async (t) => {
+  const h = environmentHarness(t);
+  await h.release(true, ENVIRONMENT_STOP);
+  assert.deepEqual(
+    h.calls.map((call) => [call.method, ...call.arguments.slice(1)]),
+    [["failure", h.row.node_id, FIRST_FAILURE, FIXTURE_NOW]],
   );
 });
 

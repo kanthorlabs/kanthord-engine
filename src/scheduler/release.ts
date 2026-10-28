@@ -1,12 +1,10 @@
 import assert from "node:assert/strict";
-import { z } from "zod";
 import { unattributed } from "../kernel/cause.ts";
 import type { CallerContext } from "../kernel/operation.ts";
 import {
   environmentFailureSchema,
   ExecutionStopReason,
   isAdvancingProviderFailure,
-  isAdvancingStop,
   type CooldownChange,
   type ExecutionRelease,
   type ExecutionRow,
@@ -18,33 +16,13 @@ import type { Dependencies } from "./service.ts";
 import { consecutiveStalls, endExecution } from "./execution-store.ts";
 import {
   consecutiveFailures,
+  countsFailure,
+  digestsOf,
   recordFailure,
   requireRunning,
 } from "./settlement.ts";
 
 const NO_STALLS = 0;
-const digestsDetailSchema = z.looseObject({
-  digests: z.record(z.string(), z.string()),
-});
-
-function countsFailure(stop: ExecutionRelease["stop"]): boolean {
-  return (
-    !isAdvancingStop(stop) &&
-    stop?.reason !== ExecutionStopReason.EnvironmentFailed
-  );
-}
-
-function digestsOf(detail: string | null): Record<string, string> {
-  if (detail === null) return {};
-  let value: unknown;
-  try {
-    value = JSON.parse(detail);
-  } catch {
-    return {};
-  }
-  const parsed = digestsDetailSchema.safeParse(value);
-  return parsed.success ? parsed.data.digests : {};
-}
 
 function reportEnvironmentFailure(
   dependencies: Dependencies,

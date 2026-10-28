@@ -21,7 +21,7 @@ const NO_ROWS = 0;
 const ONE_ROW = 1;
 const credentialList = z.array(identitySchema("credential"));
 const pinList = z.array(agentPinSchema);
-const storedStop = releaseStopSchema.nullable();
+export const storedStop = releaseStopSchema.nullable();
 interface RecordDependencies {
   registrations: Registrations;
   branches: MissionBranches;
