@@ -1,3 +1,5 @@
+import js from "@eslint/js";
+import globals from "globals";
 import tseslint from "typescript-eslint";
 import boundaries from "eslint-plugin-boundaries";
 
@@ -195,6 +197,11 @@ const syntaxRules = [
 
 export default tseslint.config(
   { ignores: ["node_modules/**", "dist/**", ".data/**"] },
+  {
+    files: ["bin/**/*.mjs", "scripts/**/*.mjs", "eslint.config.js"],
+    extends: [js.configs.recommended],
+    languageOptions: { globals: globals.node },
+  },
   {
     files: ["src/**/*.ts"],
     extends: [tseslint.configs.recommended],

@@ -41,11 +41,13 @@
   },
   "devDependencies": {
     "@apidevtools/swagger-parser": "12.1.0",
+    "@eslint/js": "10.0.1",
     "@types/node": "26.6.2",
     "@types/supertest": "7.2.1",
     "esbuild": "0.28.2",
     "eslint": "10.7.0",
     "eslint-plugin-boundaries": "7.0.2",
+    "globals": "17.11.0",
     "husky": "9.1.7",
     "lint-staged": "17.0.8",
     "prettier": "3.9.5",
