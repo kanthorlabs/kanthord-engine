@@ -462,7 +462,6 @@ async function setup(t: TestContext, landing?: string) {
     evidenceIds: string[],
     bindingId: string,
     commit: string,
-    gateFiles?: { binding_id: string; paths: string[] }[],
   ) =>
     write<Assessment>(
       ["mission", "assessment", "submit", execution.node_id],
@@ -473,7 +472,6 @@ async function setup(t: TestContext, landing?: string) {
         result: "success",
         rationale: "met",
         tested_input: snapshot(bindingId, commit),
-        ...(gateFiles === undefined ? {} : { gate_files: gateFiles }),
       },
       W,
     );
@@ -991,7 +989,7 @@ test(
     await h.release(steps);
     const evaluation = await h.pull(h.P, FIRST_ATTEMPT);
     const run = (await h.run(evaluation, h.pushed.id, G)).evidence;
-    await h.pass(evaluation, [run.id, work.id], h.pushed.id, G, []);
+    await h.pass(evaluation, [run.id, work.id], h.pushed.id, G);
     const [item] = completed(await h.request(evaluation)).items;
     assert.ok(item?.kind === ActionResultKind.Submitted, JSON.stringify(item));
     assert.deepEqual((item.evidence as Evidence).assets[FIRST_INDEX]?.address, {

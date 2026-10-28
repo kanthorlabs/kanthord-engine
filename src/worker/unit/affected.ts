@@ -297,22 +297,6 @@ export function promotedFlaky(
   return report.flaky.filter((id) => changed.has(id.file));
 }
 
-export function changedGateFiles(
-  declaration: AffectedDeclaration,
-  files: readonly ChangeEntry[],
-): string[] {
-  const changed = new Set(
-    files.flatMap((entry) =>
-      entry.previous_path === undefined
-        ? [entry.path]
-        : [entry.path, entry.previous_path],
-    ),
-  );
-  return [...new Set(declaration.gate_files)]
-    .filter((path) => changed.has(path))
-    .sort();
-}
-
 export function headFailed(
   report: AffectedReport,
   files: readonly ChangeEntry[],
@@ -379,7 +363,6 @@ export interface AffectedRun {
   head_commit: string;
   declaration: AffectedDeclaration;
   changed: number;
-  gate_files: string[];
   report: AffectedReport | null;
   failed: AffectedTestId[];
   promoted_flaky: AffectedTestId[];
@@ -704,7 +687,6 @@ async function decide(
     head_commit: checkout.head,
     declaration,
     changed: files.length,
-    gate_files: changedGateFiles(declaration, files),
     report,
     failed: failedIds,
     promoted_flaky: report ? promotedFlaky(report, files) : [],

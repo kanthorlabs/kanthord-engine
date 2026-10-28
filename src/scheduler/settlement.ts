@@ -1,18 +1,20 @@
 import assert from "node:assert/strict";
+import { z } from "zod";
 import { OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import { canonicalJSON } from "../kernel/json.ts";
 import { identitySchema } from "../kernel/identity.ts";
 import type { Transaction } from "../kernel/store.ts";
 import {
-  AdvancingProviderFailure,
   ExecutionStopReason,
+  isAdvancingStop,
   type EndedExecution,
   type FailureHold,
   type ExecutionRow,
   type MissionTransitions,
   type NodeTransition,
   type Registrations,
+  type ReleaseStop,
   type RevokedExecution,
   type WorkerBindings,
 } from "./contract.ts";
@@ -22,12 +24,18 @@ import {
   readExecution,
   readUnendedOfNode,
   readUnendedOfRuntime,
+  storedStop,
 } from "./execution-store.ts";
 import type { SchedulerConfig } from "./config.ts";
 
 export const EXECUTION_NOT_RUNNING = "scheduler.execution.not_running";
 const NO_FAILURES = 0;
 const ENDING_FAILURE = 1;
+const EXPIRED = 1;
+const NO_DIGESTS = 0;
+const digestsDetailSchema = z.looseObject({
+  digests: z.record(z.string(), z.string()),
+});
 const MILLISECONDS_PER_SECOND = 1000;
 export interface SettlementDependencies {
   transitions: MissionTransitions;
@@ -138,40 +146,59 @@ export function executionAttribution(
   };
 }
 
+export function digestsOf(detail: string | null): Record<string, string> {
+  if (detail === null) return {};
+  let value: unknown;
+  try {
+    value = JSON.parse(detail);
+  } catch {
+    return {};
+  }
+  const parsed = digestsDetailSchema.safeParse(value);
+  return parsed.success ? parsed.data.digests : {};
+}
+
+export function countsFailure(stop: ReleaseStop | null): boolean {
+  if (stop === null || stop.reason === ExecutionStopReason.BudgetEnd)
+    return false;
+  if (isAdvancingStop(stop)) return false;
+  return (
+    stop.reason !== ExecutionStopReason.EnvironmentFailed ||
+    Object.keys(digestsOf(stop.detail ?? null)).length === NO_DIGESTS
+  );
+}
+
 export function consecutiveFailures(
   tx: Transaction,
   ending: ExecutionRow,
   endingCounts = true,
 ): number {
   assert.ok(tx.database.isTransaction);
-  const result = tx.database
+  const rows = tx.database
     .prepare(
-      `SELECT count(*) AS count FROM scheduler_execution
+      `SELECT stop, ended_at >= expired_at AS expired FROM scheduler_execution
     WHERE node_id = ? AND attempt = ? AND id != ?
-    AND (ended_at >= expired_at
-      OR (coalesce(json_extract(stop, '$.reason'), ?) NOT IN (?, ?)
-        AND NOT (json_extract(stop, '$.reason') = ?
-          AND json_extract(stop, '$.code') IN (SELECT value FROM json_each(?)))))
     AND rowid > coalesce((SELECT max(rowid) FROM scheduler_execution
       WHERE node_id = ? AND attempt = ? AND ended_at < expired_at
       AND coalesce(json_extract(stop, '$.reason'), ?) = ?), -1)`,
     )
-    .get(
+    .all(
       ending.node_id,
       ending.attempt,
       ending.execution_id,
-      ExecutionStopReason.BudgetEnd,
-      ExecutionStopReason.BudgetEnd,
-      ExecutionStopReason.EnvironmentFailed,
-      ExecutionStopReason.ProviderFailed,
-      canonicalJSON(Object.values(AdvancingProviderFailure)),
       ending.node_id,
       ending.attempt,
       ExecutionStopReason.BudgetEnd,
       ExecutionStopReason.BudgetEnd,
-    )!;
-  const count =
-    Number(result.count) + (endingCounts ? ENDING_FAILURE : NO_FAILURES);
+    ) as { stop: string | null; expired: number | null }[];
+  const previous = rows.filter(
+    (row) =>
+      row.expired === EXPIRED ||
+      countsFailure(
+        storedStop.parse(row.stop === null ? null : JSON.parse(row.stop)),
+      ),
+  ).length;
+  const count = previous + (endingCounts ? ENDING_FAILURE : NO_FAILURES);
   assert.ok(Number.isSafeInteger(count) && count >= NO_FAILURES);
   return count;
 }
