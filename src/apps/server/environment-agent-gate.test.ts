@@ -45,9 +45,11 @@ import {
   CONFIGURATION,
   createProject,
   environmentList,
+  FIRST_SLOT,
   type Fixture,
   gateFixture,
   importNode,
+  latestStarts,
   NO_ITEMS,
   recordingSlotDriver,
   RUN_VERB,
@@ -445,15 +447,17 @@ test(
       ProofOutcome.Passed,
     );
 
-    const slot = await until(() => starts[0], Boolean, t.signal);
+    const firstStart = await until(() => starts[0], Boolean, t.signal);
+    const imageOf = (run: string[]) => run[run.indexOf("--") - 1];
     const runs = await until(
-      () => slotRuns(podman, slot!.clientId),
-      (found) => found.length > NO_ITEMS,
+      () => slotRuns(podman, firstStart!.instanceName),
+      (found) => found.some((run) => imageOf(run) === ready.tag),
       t.signal,
     );
-    for (const run of runs) assert.equal(run[run.indexOf("--") - 1], ready.tag);
-    const client = await worker(t, fixture, project.id, nodeId, slot!.slot, {
-      token: await fixture.slotTokenOf(slot!.poolSlot),
+    assert.equal(imageOf(runs.at(-1)!), ready.tag);
+    const slot = latestStarts(starts)[0]!;
+    const client = await worker(t, fixture, project.id, nodeId, FIRST_SLOT, {
+      token: await fixture.slotTokenOf(slot.instance, slot.entries[0]!),
     });
     await client.claimed();
 

@@ -323,10 +323,22 @@ export function composeServices(options: {
     masterKey: options.config.master_key,
     image: containerImage,
     host: containerHost,
-    imageFor: (_runtime, slot, signal) =>
-      project.slotImage(slot.project_id, slot.resource_identity, signal),
-    cacheGroupOf: (slot, image) =>
-      project.slotCacheGroupOf(slot.project_id, slot.resource_identity, image),
+    imageFor: (_runtime, entries, signal) => {
+      const first = entries.at(0);
+      return first
+        ? project.slotImage(first.project_id, first.resource_identity, signal)
+        : Promise.resolve(containerImage);
+    },
+    cacheGroupOf: (entries, image) => {
+      const first = entries.at(0);
+      return first
+        ? project.slotCacheGroupOf(
+            first.project_id,
+            first.resource_identity,
+            image,
+          )
+        : null;
+    },
   });
   const hostProofs = new HostProofs({
     stateDirectory: options.stateDirectory,
@@ -367,13 +379,9 @@ export function composeServices(options: {
     invocation,
     masterKey: options.config.master_key,
     authVersion: options.config.gateway.auth.version,
-    slotLimit: options.config.worker.server_instance_limit,
+    instanceLimit: options.config.worker.server_instance_limit,
     stateDirectory: options.stateDirectory,
     logger: options.logger,
-    runtimeIdentity: (clientId) =>
-      worker.registrations.findByClient(clientId)?.runtime_identity,
-    listedInstanceOf: (projectId, resourceIdentity) =>
-      worker.listedInstanceOf(projectId, resourceIdentity),
   });
   const missionClient = directClient(missionOperations, invocation);
   const intakeClient = directClient(intakeOperations, invocation);

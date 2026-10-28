@@ -1362,11 +1362,11 @@ test(
       placement: driver.placement,
       check: () => driver.check(),
       prepare: () => driver.prepare(),
-      removeVolume: (clientId) => driver.removeVolume(clientId),
+      removeVolume: (instanceName) => driver.removeVolume(instanceName),
       sweepVolumes: (live) => driver.sweepVolumes(live),
       launch: (launch) => {
         assert.ok(holder.fake);
-        starts.push(launch.slot.client_id);
+        starts.push(launch.instance.name);
         return driver.launch({
           ...launch,
           environment: holder.fake.host.environment,
@@ -1378,7 +1378,7 @@ test(
     container.setup.fixture.worker.startPool();
     await container.writeContainer(1);
     const runs = await until(
-      () => starts.flatMap((clientId) => slotRuns(container.fake, clientId)),
+      () => starts.flatMap((name) => slotRuns(container.fake, name)),
       (found) => found.length > NO_ITEMS,
       t.signal,
     );

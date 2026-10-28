@@ -110,6 +110,16 @@ export function countLiveServerInstances(tx: Transaction): number {
   return row.count;
 }
 
+export function readLiveServerInstances(tx: Transaction): InstanceRecord[] {
+  assert.ok(tx.database.isTransaction);
+  return tx.database
+    .prepare(
+      `SELECT ${COLUMNS} FROM worker_instance WHERE ended_at IS NULL AND placement IN (?, ?) ORDER BY created_at, name`,
+    )
+    .all(InstancePlacement.Server, InstancePlacement.Container)
+    .map(record);
+}
+
 export function insertInstance(
   tx: Transaction,
   value: {

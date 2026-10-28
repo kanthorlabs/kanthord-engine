@@ -16,7 +16,7 @@ export const RUNTIME_CHECK_TIMEOUT_MS = 10000;
 export const CONTAINER_UID = 10001;
 export const SLOT_HOME = "/var/lib/kanthord";
 export const OWNER_LABEL = "io.kanthord.owner";
-export const CLIENT_ID_LABEL = "io.kanthord.client_id";
+export const INSTANCE_LABEL = "io.kanthord.instance";
 export const CACHE_MOUNT = "/var/lib/kanthord/.cache";
 export const CACHE_VOLUME_PREFIX = "kanthord_cache_";
 export const CACHE_PROJECT_LABEL = "io.kanthord.cache_project";
@@ -81,7 +81,7 @@ export interface RuntimeHost {
 
 export interface RunCommand {
   readonly image: string;
-  readonly clientId: string;
+  readonly instanceName: string;
   readonly owner: string;
   readonly environment: NodeJS.ProcessEnv;
   readonly cacheVolume: string | null;
@@ -93,8 +93,8 @@ interface RuntimeAttempt {
   readonly detail: string;
 }
 
-export function slotName(clientId: string): string {
-  return `${SLOT_NAME_PREFIX}${clientId}`;
+export function slotName(instanceName: string): string {
+  return `${SLOT_NAME_PREFIX}${instanceName}`;
 }
 
 export function containerOwner(masterKey: string): string {
@@ -131,11 +131,11 @@ export function ownedVolumeArguments(owner: string): string[] {
   ];
 }
 
-export function removeVolumeArguments(clientId: string): string[] {
-  return ["volume", "rm", slotName(clientId)];
+export function removeVolumeArguments(instanceName: string): string[] {
+  return ["volume", "rm", slotName(instanceName)];
 }
 
-export function slotClientId(volumeName: string): string | null {
+export function slotInstanceName(volumeName: string): string | null {
   return volumeName.startsWith(SLOT_NAME_PREFIX)
     ? volumeName.slice(SLOT_NAME_PREFIX.length)
     : null;
@@ -145,15 +145,15 @@ export function killArguments(name: string): string[] {
   return ["kill", "--signal", "KILL", name];
 }
 
-export function volumeArguments(clientId: string, owner: string): string[] {
+export function volumeArguments(instanceName: string, owner: string): string[] {
   return [
     "volume",
     "create",
     "--label",
     `${OWNER_LABEL}=${owner}`,
     "--label",
-    `${CLIENT_ID_LABEL}=${clientId}`,
-    slotName(clientId),
+    `${INSTANCE_LABEL}=${instanceName}`,
+    slotName(instanceName),
   ];
 }
 
@@ -245,7 +245,7 @@ export function parseCacheVolumes(stdout: string): CacheVolumeListing[] {
 }
 
 export function runArguments(command: RunCommand): string[] {
-  const name = slotName(command.clientId);
+  const name = slotName(command.instanceName);
   const directories = Object.entries(SLOT_DIRECTORIES).flatMap(
     ([variable, directory]) => [
       "--env",
@@ -265,7 +265,7 @@ export function runArguments(command: RunCommand): string[] {
     "--label",
     `${OWNER_LABEL}=${command.owner}`,
     "--label",
-    `${CLIENT_ID_LABEL}=${command.clientId}`,
+    `${INSTANCE_LABEL}=${command.instanceName}`,
     "--user",
     String(CONTAINER_UID),
     "--sig-proxy=false",

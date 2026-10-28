@@ -537,11 +537,6 @@ export const PoolPlacement = {
 export type PoolPlacement = (typeof PoolPlacement)[keyof typeof PoolPlacement];
 export const POOL_PLACEMENTS: readonly InstancePlacement[] =
   Object.values(PoolPlacement);
-export function hostsPoolSlot(
-  placement: InstancePlacement | null,
-): placement is PoolPlacement {
-  return placement !== null && POOL_PLACEMENTS.includes(placement);
-}
 export const PlacementIssue = {
   ServerInContainer: "server_in_container",
   RuntimeAbsent: "runtime_absent",
@@ -752,32 +747,25 @@ export interface WorkerRegistrations {
   heartbeat(runtimeIdentity: string): void;
 }
 
-export const POOL_SLOT_COUNT = 64;
-export interface PoolSlot {
-  project_id: string;
-  resource_identity: string;
-  generation: number;
+export interface PoolInstance {
+  id: string;
+  name: string;
   placement: PoolPlacement;
-  slot: number;
-  client_id: string;
-  draining: boolean;
+  created_at: number;
 }
+export type PoolEntry = Omit<
+  ConnectionBinding,
+  "token" | "expired_at" | "client_secret"
+>;
 export interface PoolHost {
-  clientIdentity(
-    projectId: string,
-    resourceIdentity: string,
-    generation: number,
-    slot: number,
-  ): string;
   prepare(): void;
-  start(slot: PoolSlot): void;
-  drain(slot: PoolSlot): void;
-  restart(slot: PoolSlot): void;
-  imageOf(slot: PoolSlot): string | null;
-  remove(slot: PoolSlot): Promise<void>;
+  start(instance: PoolInstance, entries: readonly PoolEntry[]): void;
+  update(instance: PoolInstance, entries: readonly PoolEntry[]): void;
+  restart(instance: PoolInstance): void;
+  imageOf(instance: PoolInstance): string | null;
+  archive(instance: PoolInstance): Promise<void>;
   sweep(live: ReadonlySet<string>): Promise<void>;
   stop(): Promise<void>;
-  onEnded(listener: (clientId: string) => void): void;
   placementStatus(placement: PoolPlacement): Promise<PlacementStatus>;
 }
 

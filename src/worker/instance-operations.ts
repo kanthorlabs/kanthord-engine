@@ -15,6 +15,7 @@ import type { RegistrationRow } from "./registration-rows.ts";
 export interface InstanceOperationDependencies {
   instances: WorkerInstances;
   heartbeatClock: HeartbeatClock;
+  instancesChanged: () => void;
   registrationRecordOf: (
     tx: Transaction,
     row: RegistrationRow,
@@ -61,10 +62,22 @@ function declareHumanReads(
 
 function declareHumanWrites(
   registry: OperationRegistry,
-  { instances, heartbeatClock }: InstanceOperationDependencies,
+  {
+    instances,
+    heartbeatClock,
+    instancesChanged,
+  }: InstanceOperationDependencies,
 ): void {
-  registry.register(instanceOperations["instance.create"], ({ body }, caller) =>
-    instances.create((write) => caller.commit(write), body),
+  registry.register(
+    instanceOperations["instance.create"],
+    async ({ body }, caller) => {
+      const answer = await instances.create(
+        (write) => caller.commit(write),
+        body,
+      );
+      instancesChanged();
+      return answer;
+    },
   );
   registry.register(
     instanceOperations["instance.rotate"],
@@ -101,6 +114,7 @@ function declareHumanWrites(
       });
       instances.dropConnection(record.id);
       dropEnded(heartbeatClock, ended);
+      instancesChanged();
       return record;
     },
   );

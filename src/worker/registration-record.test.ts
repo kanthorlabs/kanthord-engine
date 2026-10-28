@@ -318,3 +318,47 @@ test("a registration whose instance the latest binding revision does not list an
     }
   });
 });
+
+test("a registration whose binding lists no instance takes the placement of its instance", (t) => {
+  const store = fixture(t);
+  store.transaction((tx) => {
+    const registration = insertRegistration(
+      tx,
+      {
+        project_id: PROJECT,
+        resource_identity: RESOURCE,
+        client_id: createIdentity("client_identity"),
+        name: INSTANCE_NAME,
+        instance_id: createIdentity("worker_instance"),
+      },
+      NOW,
+    );
+    const record = registrationRecord(
+      tx,
+      {
+        workerBindingOf: () => ({
+          ...BINDING,
+          placement: null,
+          worker_instances: [],
+        }),
+        instanceNameOf: () => INSTANCE_NAME,
+        instancePlacementOf: () => InstancePlacement.Container,
+        schedulerClaims: {
+          agentSelectionsOf: () => [],
+          agentPinsOf: () => null,
+          unendedExecutionOf: () => null,
+          requireRunning: () => assert.fail("UNEXPECTED_COLLABORATION"),
+          runningExecutionOfRuntime: () => null,
+          activityOf: () => ({
+            activity: RegistrationActivity.Idle,
+            execution_id: null,
+          }),
+        },
+      },
+      registration,
+      NOW,
+    );
+    assert.equal(record.draining, true);
+    assert.equal(record.placement, InstancePlacement.Container);
+  });
+});

@@ -27,12 +27,12 @@ import {
 } from "../../scheduler/contract.ts";
 import {
   InstancePlacement,
-  type PoolSlot,
+  type PoolInstance,
   workerOperations,
 } from "../../worker/contract.ts";
 import type { fakeContainerHost } from "./container-fakes-test-support.ts";
 import { until } from "./cli-test-support.ts";
-import type { SlotDriver, SlotInstance } from "./slot-driver.ts";
+import type { SlotDriver, SlotEntry, SlotInstance } from "./slot-driver.ts";
 import {
   bareRepository,
   createInstances,
@@ -383,24 +383,30 @@ export async function worker(
 }
 
 export interface SlotStart {
-  clientId: string;
-  slot: number;
-  poolSlot: PoolSlot;
-  instance: SlotInstance;
+  instanceName: string;
+  instance: PoolInstance;
+  entries: readonly SlotEntry[];
+  launched: SlotInstance;
+}
+
+export function latestStarts(starts: readonly SlotStart[]): SlotStart[] {
+  const latest = new Map<string, SlotStart>();
+  for (const start of starts) latest.set(start.instanceName, start);
+  return Array.from(latest.values());
 }
 
 export function slotRuns(
   fake: ReturnType<typeof fakeContainerHost>,
-  clientId?: string,
+  instanceName?: string,
 ): string[][] {
   return fake
     .commands()
     .filter(
       (command) =>
         command[0] === RUN_VERB &&
-        (clientId === undefined ||
+        (instanceName === undefined ||
           command[command.indexOf(NAME_OPTION) + 1] ===
-            `${SLOT_NAME_PREFIX}${clientId}`),
+            `${SLOT_NAME_PREFIX}${instanceName}`),
     );
 }
 
@@ -412,21 +418,21 @@ export function recordingSlotDriver(
     placement: driver.placement,
     check: () => driver.check(),
     prepare: () => driver.prepare(),
-    removeVolume: (clientId) => driver.removeVolume(clientId),
+    removeVolume: (instanceName) => driver.removeVolume(instanceName),
     sweepVolumes: (live) => driver.sweepVolumes(live),
-    imageOf: (clientId) => driver.imageOf?.(clientId) ?? null,
+    imageOf: (instanceName) => driver.imageOf?.(instanceName) ?? null,
     launch: (launch) => {
-      const instance = driver.launch({
+      const launched = driver.launch({
         ...launch,
         environment: fake.host.environment,
       });
       starts.push({
-        clientId: launch.slot.client_id,
-        slot: launch.slot.slot,
-        poolSlot: launch.slot,
-        instance,
+        instanceName: launch.instance.name,
+        instance: launch.instance,
+        entries: launch.entries,
+        launched,
       });
-      return instance;
+      return launched;
     },
   });
 }

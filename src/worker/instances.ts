@@ -29,6 +29,7 @@ import {
   type LiveInstance,
   PlacementIssue,
   type PlacementStatus,
+  type PoolEntry,
   WORKER_TOKEN_INFO,
   type WorkerBindingsOf,
   WorkerErrorCode,
@@ -45,6 +46,7 @@ import {
   readLatestInstance,
   readLiveInstance,
   readLiveInstanceById,
+  readLiveServerInstances,
   revisionIdsOf,
 } from "./instance-rows.ts";
 import {
@@ -223,9 +225,7 @@ export class WorkerInstances implements WorkerInstanceLookups {
   }
 
   private namesOf(binding: ListedBinding): string[] {
-    return binding.placement === InstancePlacement.Worker && !binding.tombstone
-      ? (binding.worker_instances ?? [])
-      : [];
+    return binding.tombstone ? [] : (binding.worker_instances ?? []);
   }
 
   private listed(projectId: string): Set<string> {
@@ -662,10 +662,11 @@ export class WorkerInstances implements WorkerInstanceLookups {
     return connectionId;
   }
 
-  private entriesOf(
-    tx: Transaction,
-    instance: InstanceRecord,
-  ): Omit<ConnectionBinding, "token" | "expired_at" | "client_secret">[] {
+  liveServerInstances(tx: Transaction): InstanceRecord[] {
+    return readLiveServerInstances(tx);
+  }
+
+  entriesOf(tx: Transaction, instance: InstanceRecord): PoolEntry[] {
     const entry = (binding: ListedBinding, state: BindingEntryState) => ({
       project_id: binding.project_id,
       resource_identity: binding.resource_identity,

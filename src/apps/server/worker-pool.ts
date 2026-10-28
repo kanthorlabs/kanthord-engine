@@ -6,15 +6,16 @@ import type { Logger } from "pino";
 import { deriveClientSecret, generateSlotJWT } from "../../gateway/auth/jwt.ts";
 import { type createInvocation, servePort } from "../../gateway/index.ts";
 import { ensureDirectory, openPrivate } from "../../kernel/files.ts";
-import type {
-  PlacementStatus,
-  PoolHost,
-  PoolPlacement,
-  PoolSlot,
+import {
+  BindingEntryState,
+  type PlacementStatus,
+  type PoolEntry,
+  type PoolHost,
+  type PoolInstance,
+  type PoolPlacement,
 } from "../../worker/contract.ts";
 import { SlotControl } from "../worker/thread-data.ts";
-import type { SlotDriver, SlotInstance } from "./slot-driver.ts";
-import { slotClientIdentity } from "./slot-identity.ts";
+import type { SlotDriver, SlotEntry, SlotInstance } from "./slot-driver.ts";
 
 export const POOL_BACKOFF_INITIAL_MS = 1000;
 export const POOL_BACKOFF_MAX_MS = 30000;
@@ -29,23 +30,19 @@ export interface WorkerPoolOptions {
   invocation: ReturnType<typeof createInvocation>;
   masterKey: string;
   authVersion: number;
-  slotLimit: number;
+  instanceLimit: number;
   stateDirectory: string;
   logger: Logger;
-  runtimeIdentity: (clientId: string) => string | undefined;
-  listedInstanceOf: (
-    projectId: string,
-    resourceIdentity: string,
-  ) => { id: string; name: string } | null;
   drivers: ReadonlyMap<PoolPlacement, SlotDriver>;
   environment?: NodeJS.ProcessEnv;
 }
 
-interface Entry {
-  slot: PoolSlot;
+interface Hosted {
+  instance: PoolInstance;
+  entries: readonly PoolEntry[];
   pending: boolean;
-  instance?: SlotInstance;
-  port?: MessagePort;
+  running?: SlotInstance;
+  ports: Map<string, MessagePort>;
   log?: WriteStream;
   requested: SlotControl["kind"] | null;
   resume: boolean;
@@ -56,33 +53,20 @@ interface Entry {
   exit: PromiseWithResolvers<void>;
 }
 
+function olderThan(left: PoolInstance, right: PoolInstance): boolean {
+  return (
+    left.created_at < right.created_at ||
+    (left.created_at === right.created_at && left.name < right.name)
+  );
+}
+
 export class WorkerPool implements PoolHost {
   private readonly options: WorkerPoolOptions;
-  private readonly entries = new Map<string, Entry>();
-  private readonly listeners: Array<(clientId: string) => void> = [];
+  private readonly hosted = new Map<string, Hosted>();
   private stopping = false;
 
   constructor(options: WorkerPoolOptions) {
     this.options = options;
-  }
-
-  clientIdentity(
-    projectId: string,
-    resourceIdentity: string,
-    generation: number,
-    slot: number,
-  ): string {
-    return slotClientIdentity(
-      this.options.masterKey,
-      projectId,
-      resourceIdentity,
-      generation,
-      slot,
-    );
-  }
-
-  onEnded(listener: (clientId: string) => void): void {
-    this.listeners.push(listener);
   }
 
   placementStatus(placement: PoolPlacement): Promise<PlacementStatus> {
@@ -94,16 +78,6 @@ export class WorkerPool implements PoolHost {
       driver.prepare().catch(() => {});
   }
 
-  async remove(slot: PoolSlot): Promise<void> {
-    const { client_id: clientId } = slot;
-    await Promise.all([
-      this.guarded(clientId, () => this.removeRoot(clientId)),
-      this.guarded(clientId, () =>
-        this.driver(slot.placement).removeVolume(clientId),
-      ),
-    ]);
-  }
-
   async sweep(live: ReadonlySet<string>): Promise<void> {
     await Promise.all([
       this.guarded(null, () => this.sweepRoots(live)),
@@ -113,28 +87,24 @@ export class WorkerPool implements PoolHost {
     ]);
   }
 
-  start(slot: PoolSlot): void {
+  start(instance: PoolInstance, entries: readonly PoolEntry[]): void {
     if (this.stopping) return;
-    const existing = this.entries.get(slot.client_id);
+    const existing = this.hosted.get(instance.id);
     if (existing) {
-      existing.slot = slot;
-      if (existing.requested === SlotControl.Drain && !slot.draining)
-        existing.resume = true;
+      this.update(instance, entries);
       return;
     }
-    const pending = this.started() >= this.options.slotLimit;
+    const pending = this.started() >= this.options.instanceLimit;
     if (pending)
       this.options.logger.warn(
-        {
-          project_id: slot.project_id,
-          binding: slot.resource_identity,
-          slot: slot.slot,
-        },
-        "worker.pool.slot_limit",
+        { instance: instance.name },
+        "worker.pool.instance_limit",
       );
-    const entry: Entry = {
-      slot,
+    const hosted: Hosted = {
+      instance,
+      entries,
       pending,
+      ports: new Map(),
       requested: null,
       resume: false,
       failure: null,
@@ -142,82 +112,83 @@ export class WorkerPool implements PoolHost {
       startedAt: 0,
       exit: Promise.withResolvers<void>(),
     };
-    this.entries.set(slot.client_id, entry);
-    if (!pending) this.launch(entry);
+    this.hosted.set(instance.id, hosted);
+    if (!pending) this.launch(hosted);
   }
 
-  drain(slot: PoolSlot): void {
-    const entry = this.entries.get(slot.client_id);
-    if (!entry) {
-      this.ended(slot.client_id);
-      return;
-    }
-    entry.slot = slot;
-    entry.resume = false;
-    if (
-      entry.pending &&
-      this.options.runtimeIdentity(slot.client_id) === undefined
-    ) {
-      this.entries.delete(slot.client_id);
-      this.ended(slot.client_id);
-      return;
-    }
-    if (entry.instance && entry.requested !== SlotControl.Drain) {
-      entry.requested = SlotControl.Drain;
-      entry.instance.control(SlotControl.Drain);
-    }
+  update(instance: PoolInstance, entries: readonly PoolEntry[]): void {
+    const hosted = this.hosted.get(instance.id);
+    if (!hosted) return;
+    hosted.entries = entries;
+    hosted.running?.bindings(this.slotEntries(hosted));
   }
 
-  restart(slot: PoolSlot): void {
-    const entry = this.entries.get(slot.client_id);
-    if (!entry) return;
-    slot.draining = true;
-    this.drain(slot);
-    entry.resume = true;
+  restart(instance: PoolInstance): void {
+    const hosted = this.hosted.get(instance.id);
+    if (!hosted?.running) return;
+    hosted.resume = true;
+    if (hosted.requested === SlotControl.Drain) return;
+    hosted.requested = SlotControl.Drain;
+    hosted.running.control(SlotControl.Drain);
   }
 
-  imageOf(slot: PoolSlot): string | null {
-    return this.driver(slot.placement).imageOf?.(slot.client_id) ?? null;
+  imageOf(instance: PoolInstance): string | null {
+    return this.driver(instance.placement).imageOf?.(instance.name) ?? null;
+  }
+
+  async archive(instance: PoolInstance): Promise<void> {
+    const hosted = this.hosted.get(instance.id);
+    if (hosted) await this.halt(hosted);
+    await Promise.all([
+      this.guarded(instance.name, () => this.removeRoot(instance.name)),
+      this.guarded(instance.name, () =>
+        this.driver(instance.placement).removeVolume(instance.name),
+      ),
+    ]);
+    this.promote();
   }
 
   async stop(): Promise<void> {
     this.stopping = true;
     await Promise.all(
-      Array.from(this.entries.values(), (entry) => this.halt(entry)),
+      Array.from(this.hosted.values(), (hosted) => this.halt(hosted)),
     );
   }
 
   private started(): number {
     let count = 0;
-    for (const entry of this.entries.values()) if (!entry.pending) count++;
+    for (const hosted of this.hosted.values()) if (!hosted.pending) count++;
     return count;
   }
 
   private promote(): void {
-    if (this.stopping || this.started() >= this.options.slotLimit) return;
-    let next: Entry | undefined;
-    for (const candidate of this.entries.values())
-      if (candidate.pending && (!next || candidate.slot.slot < next.slot.slot))
+    if (this.stopping || this.started() >= this.options.instanceLimit) return;
+    let next: Hosted | undefined;
+    for (const candidate of this.hosted.values())
+      if (
+        candidate.pending &&
+        (!next || olderThan(candidate.instance, next.instance))
+      )
         next = candidate;
     if (!next) return;
     next.pending = false;
     this.launch(next);
   }
 
-  private async halt(entry: Entry): Promise<void> {
-    clearTimeout(entry.timer);
-    const instance = entry.instance;
-    if (!instance) {
-      this.entries.delete(entry.slot.client_id);
+  private async halt(hosted: Hosted): Promise<void> {
+    clearTimeout(hosted.timer);
+    const running = hosted.running;
+    if (!running) {
+      this.hosted.delete(hosted.instance.id);
       return;
     }
-    entry.requested = SlotControl.Stop;
-    instance.control(SlotControl.Stop);
+    hosted.requested = SlotControl.Stop;
+    running.control(SlotControl.Stop);
     const deadline = setTimeout(() => {
-      instance.terminate();
+      running.terminate();
     }, POOL_STOP_DEADLINE_MS);
     try {
-      await entry.exit.promise;
+      await hosted.exit.promise;
     } finally {
       clearTimeout(deadline);
     }
@@ -227,12 +198,8 @@ export class WorkerPool implements PoolHost {
     return join(this.options.stateDirectory, WORKERS_DIRECTORY);
   }
 
-  private root(slot: PoolSlot): string {
-    return join(this.workersDirectory(), slot.client_id);
-  }
-
-  private removeRoot(clientId: string): Promise<void> {
-    return rm(join(this.workersDirectory(), clientId), {
+  private removeRoot(instanceName: string): Promise<void> {
+    return rm(join(this.workersDirectory(), instanceName), {
       recursive: true,
       force: true,
     });
@@ -249,7 +216,7 @@ export class WorkerPool implements PoolHost {
   }
 
   private async guarded(
-    clientId: string | null,
+    instanceName: string | null,
     action: () => Promise<void>,
   ): Promise<void> {
     try {
@@ -258,33 +225,54 @@ export class WorkerPool implements PoolHost {
       this.options.logger.error(
         {
           err: error instanceof Error ? error : new Error(String(error)),
-          client_id: clientId ?? undefined,
+          instance: instanceName ?? undefined,
         },
         "worker.pool.cleanup_failed",
       );
     }
   }
 
-  private async token(slot: PoolSlot): Promise<string> {
-    const instance = this.options.listedInstanceOf(
-      slot.project_id,
-      slot.resource_identity,
+  private token(instance: PoolInstance, entry: PoolEntry): Promise<string> {
+    return generateSlotJWT(this.options.masterKey, this.options.authVersion, {
+      clientId: entry.client_id,
+      projectId: entry.project_id,
+      bindingName:
+        entry.resource_identity.split(IDENTITY_SEPARATOR)[BINDING_NAME_INDEX]!,
+      instanceId: instance.id,
+      instanceName: instance.name,
+    }).then(({ token }) => token);
+  }
+
+  private open(hosted: Hosted, entry: PoolEntry): MessagePort {
+    const { port1, port2 } = new MessageChannel();
+    hosted.ports.set(entry.client_id, port1);
+    port1.once("close", () => {
+      if (hosted.ports.get(entry.client_id) === port1)
+        hosted.ports.delete(entry.client_id);
+    });
+    servePort(
+      port1,
+      this.options.invocation,
+      () => this.token(hosted.instance, entry),
+      this.options.logger,
     );
-    if (!instance)
-      throw new Error("worker pool: the binding of the slot lists no instance");
-    const { token } = await generateSlotJWT(
-      this.options.masterKey,
-      this.options.authVersion,
-      {
-        clientId: slot.client_id,
-        projectId: slot.project_id,
-        bindingName:
-          slot.resource_identity.split(IDENTITY_SEPARATOR)[BINDING_NAME_INDEX]!,
-        instanceId: instance.id,
-        instanceName: instance.name,
-      },
-    );
-    return token;
+    return port2;
+  }
+
+  private slotEntries(hosted: Hosted): SlotEntry[] {
+    return hosted.entries.map((entry) => {
+      const known = hosted.ports.has(entry.client_id);
+      const opens = !known && entry.state === BindingEntryState.Serving;
+      return {
+        ...entry,
+        client_secret: deriveClientSecret(
+          this.options.masterKey,
+          this.options.authVersion,
+          entry.client_id,
+        ),
+        channel: opens ? this.open(hosted, entry) : null,
+      };
+    });
   }
 
   private driver(placement: PoolPlacement): SlotDriver {
@@ -294,11 +282,11 @@ export class WorkerPool implements PoolHost {
     return driver;
   }
 
-  private launch(entry: Entry): void {
+  private launch(hosted: Hosted): void {
     if (this.stopping) return;
-    const { slot } = entry;
+    const { instance } = hosted;
     try {
-      const root = this.root(slot);
+      const root = join(this.workersDirectory(), instance.name);
       ensureDirectory(root);
       const logPath = join(root, STDERR_LOG);
       const log = createWriteStream(logPath, {
@@ -307,100 +295,74 @@ export class WorkerPool implements PoolHost {
           constants.O_WRONLY | constants.O_CREAT | constants.O_APPEND,
         ),
       });
-      entry.log = log;
-      const { port1, port2 } = new MessageChannel();
-      entry.port = port1;
-      servePort(
-        port1,
-        this.options.invocation,
-        () => this.token(slot),
-        this.options.logger,
-      );
-      const instance = this.driver(slot.placement).launch({
-        slot,
-        channel: port2,
+      hosted.log = log;
+      const entries = hosted.entries.map((entry) => ({
+        ...entry,
         client_secret: deriveClientSecret(
           this.options.masterKey,
           this.options.authVersion,
-          slot.client_id,
+          entry.client_id,
         ),
+        channel: this.open(hosted, entry),
+      }));
+      const running = this.driver(instance.placement).launch({
+        instance,
+        entries,
         root,
         output: log,
         environment: this.options.environment ?? process.env,
       });
-      entry.instance = instance;
-      entry.failure = null;
-      entry.requested = null;
-      entry.startedAt = Date.now();
-      entry.exit = Promise.withResolvers<void>();
-      void instance.exited.then(({ code, error }) => {
-        if (error) entry.failure = error;
-        this.exited(entry, code);
+      hosted.running = running;
+      hosted.failure = null;
+      hosted.requested = null;
+      hosted.startedAt = Date.now();
+      hosted.exit = Promise.withResolvers<void>();
+      void running.exited.then(({ code, error }) => {
+        if (error) hosted.failure = error;
+        this.exited(hosted, code);
       });
-      if (slot.draining) {
-        entry.requested = SlotControl.Drain;
-        instance.control(SlotControl.Drain);
-      }
     } catch (error) {
-      entry.failure = error instanceof Error ? error : new Error(String(error));
-      this.exited(entry, 1);
+      hosted.failure =
+        error instanceof Error ? error : new Error(String(error));
+      this.exited(hosted, 1);
     }
   }
 
-  private exited(entry: Entry, code: number): void {
-    entry.port?.close();
-    entry.port = undefined;
-    entry.log?.end();
-    entry.log = undefined;
-    entry.instance = undefined;
-    const requested = entry.requested;
-    entry.requested = null;
-    entry.exit.resolve();
+  private exited(hosted: Hosted, code: number): void {
+    for (const port of hosted.ports.values()) port.close();
+    hosted.ports.clear();
+    hosted.log?.end();
+    hosted.log = undefined;
+    hosted.running = undefined;
+    const requested = hosted.requested;
+    hosted.requested = null;
+    hosted.exit.resolve();
     if (this.stopping || requested === SlotControl.Stop) {
-      this.entries.delete(entry.slot.client_id);
+      this.hosted.delete(hosted.instance.id);
       return;
     }
-    if (entry.resume) {
-      entry.resume = false;
-      entry.slot.draining = false;
-      this.launch(entry);
+    if (hosted.resume) {
+      hosted.resume = false;
+      this.launch(hosted);
       return;
     }
-    const drained = requested === SlotControl.Drain && !entry.failure && !code;
-    const unregistered =
-      entry.slot.draining &&
-      this.options.runtimeIdentity(entry.slot.client_id) === undefined;
-    if (drained || unregistered) {
-      this.entries.delete(entry.slot.client_id);
-      this.ended(entry.slot.client_id);
-      this.promote();
-      return;
-    }
-    this.fail(entry, code);
+    this.fail(hosted, code);
   }
 
-  private fail(entry: Entry, code: number): void {
-    const { slot } = entry;
+  private fail(hosted: Hosted, code: number): void {
     this.options.logger.error(
       {
-        err: entry.failure ?? undefined,
+        err: hosted.failure ?? undefined,
         exit_code: code,
-        project_id: slot.project_id,
-        binding: slot.resource_identity,
-        slot: slot.slot,
-        runtime_identity: this.options.runtimeIdentity(slot.client_id),
+        instance: hosted.instance.name,
       },
       "worker.pool.instance_failed",
     );
-    if (Date.now() - entry.startedAt >= POOL_BACKOFF_MAX_MS)
-      entry.delay = POOL_BACKOFF_INITIAL_MS;
-    const delay = entry.delay;
-    entry.delay = Math.min(delay * BACKOFF_FACTOR, POOL_BACKOFF_MAX_MS);
-    entry.timer = setTimeout(() => this.launch(entry), delay);
-    entry.timer.unref();
-  }
-
-  private ended(clientId: string): void {
-    for (const listener of this.listeners) listener(clientId);
+    if (Date.now() - hosted.startedAt >= POOL_BACKOFF_MAX_MS)
+      hosted.delay = POOL_BACKOFF_INITIAL_MS;
+    const delay = hosted.delay;
+    hosted.delay = Math.min(delay * BACKOFF_FACTOR, POOL_BACKOFF_MAX_MS);
+    hosted.timer = setTimeout(() => this.launch(hosted), delay);
+    hosted.timer.unref();
   }
 }

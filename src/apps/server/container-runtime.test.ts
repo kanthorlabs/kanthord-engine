@@ -25,15 +25,15 @@ import {
   runArguments,
   type RuntimeAnswer,
   type RuntimeHost,
-  slotClientId,
+  slotInstanceName,
   SUCCESS_CODE,
   volumeArguments,
 } from "./container-runtime.ts";
 
-const CLIENT_ID = "client_identity_01ARZ3NDEKTSV4RRFFQ69G5FAV";
+const INSTANCE_NAME = "coder-1";
 const OWNER = "0123456789ABCDEFGHJKMNPQRS";
 const IMAGE = "localhost/kanthord-dev:28.0.1";
-const NAME_OF_SLOT = `kanthord_slot_${CLIENT_ID}`;
+const NAME_OF_SLOT = `kanthord_slot_${INSTANCE_NAME}`;
 const SECRET = "slot_client_secret_value";
 const SERVER_USER = "kanthord";
 const SERVER_UID = 1000;
@@ -78,11 +78,11 @@ const GOLDEN_RUN = [
   "-i",
   "--pull=missing",
   "--name",
-  `kanthord_slot_${CLIENT_ID}`,
+  `kanthord_slot_${INSTANCE_NAME}`,
   "--label",
   `io.kanthord.owner=${OWNER}`,
   "--label",
-  `io.kanthord.client_id=${CLIENT_ID}`,
+  `io.kanthord.instance=${INSTANCE_NAME}`,
   "--user",
   "10001",
   "--sig-proxy=false",
@@ -97,7 +97,7 @@ const GOLDEN_RUN = [
   "--tmpfs",
   "/tmp:rw,nosuid,nodev,size=64m",
   "--volume",
-  `kanthord_slot_${CLIENT_ID}:/var/lib/kanthord`,
+  `kanthord_slot_${INSTANCE_NAME}:/var/lib/kanthord`,
   "--workdir",
   "/var/lib/kanthord",
   "--env",
@@ -214,7 +214,7 @@ for (const runtime of Object.values(ContainerRuntime))
   test(`the ${runtime} run command holds every documented option and no secret or env value`, () => {
     const args = runArguments({
       image: IMAGE,
-      clientId: CLIENT_ID,
+      instanceName: INSTANCE_NAME,
       owner: OWNER,
       environment: HOST_ENVIRONMENT,
       cacheVolume: null,
@@ -247,7 +247,7 @@ for (const runtime of Object.values(ContainerRuntime))
 test("the run command forwards only the env names that the server sets", () => {
   const args = runArguments({
     image: IMAGE,
-    clientId: CLIENT_ID,
+    instanceName: INSTANCE_NAME,
     owner: OWNER,
     environment: { TZ: "UTC" },
     cacheVolume: null,
@@ -268,32 +268,35 @@ test("the runtime commands of the driver hold their documented argv", () => {
     "--format",
     "{{.Names}}",
   ]);
-  assert.deepEqual(removeArguments(`kanthord_slot_${CLIENT_ID}`), [
+  assert.deepEqual(removeArguments(`kanthord_slot_${INSTANCE_NAME}`), [
     "rm",
     "--force",
-    `kanthord_slot_${CLIENT_ID}`,
+    `kanthord_slot_${INSTANCE_NAME}`,
   ]);
-  assert.deepEqual(inspectContainerArguments(`kanthord_slot_${CLIENT_ID}`), [
-    "container",
-    "inspect",
-    "--format",
-    "{{.Id}}",
-    `kanthord_slot_${CLIENT_ID}`,
-  ]);
-  assert.deepEqual(killArguments(`kanthord_slot_${CLIENT_ID}`), [
+  assert.deepEqual(
+    inspectContainerArguments(`kanthord_slot_${INSTANCE_NAME}`),
+    [
+      "container",
+      "inspect",
+      "--format",
+      "{{.Id}}",
+      `kanthord_slot_${INSTANCE_NAME}`,
+    ],
+  );
+  assert.deepEqual(killArguments(`kanthord_slot_${INSTANCE_NAME}`), [
     "kill",
     "--signal",
     "KILL",
-    `kanthord_slot_${CLIENT_ID}`,
+    `kanthord_slot_${INSTANCE_NAME}`,
   ]);
-  assert.deepEqual(volumeArguments(CLIENT_ID, OWNER), [
+  assert.deepEqual(volumeArguments(INSTANCE_NAME, OWNER), [
     "volume",
     "create",
     "--label",
     `io.kanthord.owner=${OWNER}`,
     "--label",
-    `io.kanthord.client_id=${CLIENT_ID}`,
-    `kanthord_slot_${CLIENT_ID}`,
+    `io.kanthord.instance=${INSTANCE_NAME}`,
+    `kanthord_slot_${INSTANCE_NAME}`,
   ]);
 });
 
@@ -562,7 +565,7 @@ test("cacheVolumeName answers one name for one group and another name for anothe
 test("the run command mounts the cache volume after the slot volume and only when it is set", () => {
   const base = {
     image: IMAGE,
-    clientId: CLIENT_ID,
+    instanceName: INSTANCE_NAME,
     owner: OWNER,
     environment: {},
   };
@@ -571,7 +574,7 @@ test("the run command mounts the cache volume after the slot volume and only whe
     mounted[index - 1] === VOLUME_OPTION ? [arg] : [],
   );
   assert.deepEqual(volumes, [
-    `kanthord_slot_${CLIENT_ID}:/var/lib/kanthord`,
+    `kanthord_slot_${INSTANCE_NAME}:/var/lib/kanthord`,
     `kanthord_cache_abc:${CACHE_MOUNT}`,
   ]);
   const bare = runArguments({ ...base, cacheVolume: null });
@@ -595,9 +598,9 @@ test("cacheVolumeArguments creates the named volume with the owner and group lab
   ]);
 });
 
-test("slotClientId answers null for a cache volume name", () => {
+test("slotInstanceName answers null for a cache volume name", () => {
   assert.equal(
-    slotClientId(cacheVolumeName(OWNER, PROJECT_ID, RESOURCE)),
+    slotInstanceName(cacheVolumeName(OWNER, PROJECT_ID, RESOURCE)),
     null,
   );
 });
@@ -633,7 +636,7 @@ test("parseCacheVolumes answers the name and the two labels of each inspected vo
       },
     },
     {
-      Name: `kanthord_slot_${CLIENT_ID}`,
+      Name: `kanthord_slot_${INSTANCE_NAME}`,
       Labels: { "io.kanthord.owner": OWNER },
     },
     {

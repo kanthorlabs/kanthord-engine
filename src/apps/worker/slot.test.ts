@@ -11,6 +11,7 @@ import {
   instanceFrameSchema,
   type ServerFrame,
 } from "./frames.ts";
+import { BindingEntryState } from "../../worker/contract.ts";
 import { SlotControl } from "./thread-data.ts";
 
 const SHELL = "/bin/sh";
@@ -19,6 +20,7 @@ const FRAME_DESCRIPTOR_REDIRECT = 'exec 3>&1 1>&2; exec "$0" "$@"';
 const SLOT_URL = new URL("./slot.ts", import.meta.url).href;
 const MAIN_URL = new URL("../../main.ts", import.meta.url).href;
 const SHORT_DEADLINE_MS = 300;
+const POLL_MS = 20;
 const LONG_DEADLINE_MS = 60000;
 const DEADLINE_MARGIN_MS = 5000;
 const PRIVATE_DIRECTORY_MODE = 0o700;
@@ -29,15 +31,24 @@ const CLIENT_SECRET = "slot-secret";
 const IGNORING_SECRET = "ignore-stop";
 const CONSOLE_LINE = "stray console line";
 const DIRECT_LINE = "stray direct line";
+const CLIENT_ID = "client_identity_a";
+const SECOND_CLIENT_ID = "client_identity_b";
 const PROBE = { call_id: "probe", cancel: true };
 const THREAD_SOURCE = `
 const { parentPort, workerData } = require("node:worker_threads");
 const { writeSync } = require("node:fs");
 console.log(${JSON.stringify(CONSOLE_LINE)});
 writeSync(1, ${JSON.stringify(`${DIRECT_LINE}\n`)});
-workerData.port.postMessage(${JSON.stringify(PROBE)});
+const host = (entry) => {
+  entry.port.on("message", (message) => entry.port.postMessage({ echo: message }));
+  entry.port.postMessage(${JSON.stringify(PROBE)});
+};
+for (const entry of workerData.entries) host(entry);
 parentPort.on("message", (message) => {
-  if (message.kind === "stop" && workerData.client_secret !== ${JSON.stringify(IGNORING_SECRET)}) process.exit(0);
+  if (message.kind === "bindings")
+    for (const entry of message.entries)
+      if (entry.port) host(entry);
+  if (message.kind === "stop" && workerData.entries[0].client_secret !== ${JSON.stringify(IGNORING_SECRET)}) process.exit(0);
 });
 `;
 
@@ -119,14 +130,32 @@ const { Worker } = await import("node:worker_threads");
 const { runSlot } = await import(${JSON.stringify(SLOT_URL)});
 await runSlot({
   ...${JSON.stringify(options)},
-  start: (data, env) => new Worker(${JSON.stringify(THREAD_SOURCE)}, { eval: true, execArgv: [], workerData: data, transferList: [data.port], env, stdout: true, stderr: true }),
+  start: (data, env) => new Worker(${JSON.stringify(THREAD_SOURCE)}, { eval: true, execArgv: [], workerData: data, transferList: data.entries.map((entry) => entry.port), env, stdout: true, stderr: true }),
 });
 `;
   return spawnSlot(t, ["--input-type=module", "-e", script], env);
 }
 
+const entryOf = (
+  clientId = CLIENT_ID,
+  secret = CLIENT_SECRET,
+  state: BindingEntryState = BindingEntryState.Serving,
+) => ({ client_id: clientId, client_secret: secret, state });
+
 function init(secret = CLIENT_SECRET): ServerFrame {
-  return { kind: FrameKind.Init, client_secret: secret };
+  return { kind: FrameKind.Init, entries: [entryOf(CLIENT_ID, secret)] };
+}
+
+function portFrames(stdout: string) {
+  return stdout
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => instanceFrameSchema.parse(JSON.parse(line)));
+}
+
+async function framesCount(instance: SlotProcess, count: number) {
+  while (portFrames(instance.stdout).length < count)
+    await new Promise((resolve) => setTimeout(resolve, POLL_MS));
 }
 
 test("serve slot exits 1 with worker.slot.init_absent when no init frame arrives", async (t) => {
@@ -189,11 +218,9 @@ test("a thread write to stdout never reaches the frame descriptor, and serve slo
   instance.send({ kind: FrameKind.Control, control: SlotControl.Stop });
   const exit = await instance.exited;
   assert.equal(exit.code, THREAD_STOPPED);
-  const frames = exit.stdout
-    .split("\n")
-    .filter(Boolean)
-    .map((line) => instanceFrameSchema.parse(JSON.parse(line)));
-  assert.deepEqual(frames, [{ kind: FrameKind.Port, message: PROBE }]);
+  assert.deepEqual(portFrames(exit.stdout), [
+    { kind: FrameKind.Port, client_id: CLIENT_ID, message: PROBE },
+  ]);
   assert.ok(!exit.stdout.includes(CONSOLE_LINE));
   assert.ok(!exit.stdout.includes(DIRECT_LINE));
   assert.ok(exit.stderr.includes(CONSOLE_LINE));
@@ -236,4 +263,69 @@ test("kanthord serve slot exits 1 with worker.slot.channel_closed at the end of 
   assert.equal(exit.code, SLOT_FAILURE);
   assert.match(exit.stderr, /worker\.slot\.channel_closed/);
   assert.equal(exit.stdout, NO_OUTPUT);
+});
+
+test("serve slot accepts the entry list of the init frame and gives each entry its own port", async (t) => {
+  const instance = slot(t, {});
+  instance.send({
+    kind: FrameKind.Init,
+    entries: [entryOf(CLIENT_ID), entryOf(SECOND_CLIENT_ID, "other")],
+  });
+  await framesCount(instance, 2);
+  instance.send({
+    kind: FrameKind.Port,
+    client_id: SECOND_CLIENT_ID,
+    message: { call_id: "to-second" },
+  });
+  await framesCount(instance, 3);
+  instance.send({ kind: FrameKind.Control, control: SlotControl.Stop });
+  const exit = await instance.exited;
+  assert.equal(exit.code, THREAD_STOPPED);
+  const frames = portFrames(exit.stdout);
+  assert.deepEqual(frames.map(({ client_id }) => client_id).sort(), [
+    CLIENT_ID,
+    SECOND_CLIENT_ID,
+    SECOND_CLIENT_ID,
+  ]);
+  assert.deepEqual(frames.find((frame) => "echo" in frame.message)?.message, {
+    echo: { call_id: "to-second" },
+  });
+});
+
+test("serve slot applies a bindings frame and opens a port for the new entry only", async (t) => {
+  const instance = slot(t, {});
+  instance.send(init());
+  await framesCount(instance, 1);
+  instance.send({
+    kind: FrameKind.Bindings,
+    entries: [
+      entryOf(CLIENT_ID),
+      entryOf(SECOND_CLIENT_ID, "other"),
+      entryOf("client_identity_c", "third", BindingEntryState.Draining),
+    ],
+  });
+  await framesCount(instance, 2);
+  instance.send({ kind: FrameKind.Control, control: SlotControl.Stop });
+  const exit = await instance.exited;
+  assert.equal(exit.code, THREAD_STOPPED);
+  assert.deepEqual(
+    portFrames(exit.stdout).map(({ client_id }) => client_id),
+    [CLIENT_ID, SECOND_CLIENT_ID],
+  );
+});
+
+test("serve slot exits 1 with worker.slot.frame_invalid on a port frame with no client_id and on a bindings frame before init", async (t) => {
+  for (const lines of [
+    [
+      encodeFrame(init()),
+      `${JSON.stringify({ kind: FrameKind.Port, message: PROBE })}\n`,
+    ],
+    [encodeFrame({ kind: FrameKind.Bindings, entries: [] })],
+  ]) {
+    const instance = slot(t, {});
+    for (const line of lines) instance.child.stdin.write(line);
+    const exit = await instance.exited;
+    assert.equal(exit.code, SLOT_FAILURE, lines.join(""));
+    assert.match(exit.stderr, /worker\.slot\.frame_invalid/, lines.join(""));
+  }
 });

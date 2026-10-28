@@ -485,7 +485,7 @@ const CONFLICT_STATUS = /^status: +409$/m;
 
 async function instanceHuman(t: TestContext, serverInstanceLimit?: number) {
   const fixture = await gatewayFixture(t, {
-    serverSlotLimit: serverInstanceLimit,
+    serverInstanceLimit,
   });
   const env = {
     ...environment(temporary(t)),

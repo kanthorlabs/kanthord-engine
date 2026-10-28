@@ -80,7 +80,7 @@ const VOLATILE_KEYS = new Set(["request_id", "idempotencyKey"]);
 const EXPECTED_FAILURES = [
   ["registration above the count", 409, "worker.registration.slot_unavailable"],
   [
-    "registration of a client that is no pool slot",
+    "registration of a client that no listed instance derives",
     409,
     "worker.registration.placement_mismatch",
   ],
@@ -217,6 +217,8 @@ function failOnInvalid(error: Error): never {
   throw error;
 }
 
+const LINK_CLIENT = "client_identity_link";
+
 const bridgeLink: Link = (port, opened) => {
   const toServer = new PassThrough();
   const toInstance = new PassThrough();
@@ -224,18 +226,18 @@ const bridgeLink: Link = (port, opened) => {
   opened.push(port1, port2);
   opened.push({ close: () => toServer.destroy() });
   opened.push({ close: () => toInstance.destroy() });
-  bridgePort(port, toServer, toInstance, {
+  bridgePort(toServer, toInstance, {
     frames: instanceFrameSchema,
     onFrame: () => {},
     onInvalid: failOnInvalid,
     onEnd: () => {},
-  });
-  bridgePort(port1, toInstance, toServer, {
+  }).attach(LINK_CLIENT, port);
+  bridgePort(toInstance, toServer, {
     frames: serverFrameSchema,
     onFrame: () => {},
     onInvalid: failOnInvalid,
     onEnd: () => {},
-  });
+  }).attach(LINK_CLIENT, port1);
   return port2;
 };
 
@@ -361,7 +363,7 @@ async function scenarioOf(fixture: Fixture, suffix: string): Promise<Scenario> {
     o: await fixture.machineToken(general.id, OTHER, "o"),
     c: await fixture.machineToken(other.id, GENERAL, "c"),
     p: await fixture.machineToken(paused.id, GENERAL, "p"),
-    s: await fixture.machineToken(placed.id, PLACED, "s"),
+    s: await fixture.strangerClient(placed.id, PLACED, placed.instance),
     h: fixture.token,
   };
   return { projects: { general, other, paused, placed }, tokens };
@@ -388,7 +390,7 @@ async function run(t: TestContext, side: Side, scenario: Scenario) {
     side.typed("b", "worker", "register", empty),
   );
   await record(
-    "registration of a client that is no pool slot",
+    "registration of a client that no listed instance derives",
     side.typed("s", "worker", "register", empty),
   );
   await record("heartbeat", side.typed("a", "worker", "heartbeat", empty));

@@ -11,6 +11,7 @@ import { ActionPerformer } from "./action-performer.ts";
 import {
   ACTION_REQUEST_TOOL_NAME,
   alwaysAvailable,
+  BindingEntryState,
   ContainerRuntime,
   ExecutionIntent,
   type ExecutionSetup,
@@ -19,7 +20,6 @@ import {
   InstancePlacement,
   PlacementIssue,
   type PlacementStatus,
-  POOL_SLOT_COUNT,
   PoolPlacement,
   REGISTRATION_CAPABILITY,
   REGISTRATION_TARGET_KIND,
@@ -1870,57 +1870,79 @@ test("setup answers the pinned credential after a newer enablement revision maps
 
 const POOL_PROJECT = "project_01ARZ3NDEKTSV4RRFFQ69G5FAV";
 const POOL_RESOURCE = "worker:kanthord:binding";
+const OTHER_POOL_RESOURCE = "worker:kanthord:other";
 const POOL_GENERATION = 11;
 const POOL_ONE_START = 1;
 const POOL_TWO_STARTS = 2;
-const POOL_FOUR_STARTS = 4;
-const NO_SWEPT = 0;
+const NO_STARTS = 0;
+const FIRST_INSTANCE = 0;
+const SECOND_INSTANCE = 1;
+const THIRD_INSTANCE = 2;
 
 const POOL_EXECUTION = "execution_01ARZ3NDEKTSV4RRFFQ69G5FAV";
 
 const changesApplied = () => new Promise((resolve) => setImmediate(resolve));
 
-function poolFixture(t: TestContext, initialCount: number) {
+interface PoolBinding {
+  resource_identity: string;
+  environment: string | null;
+  listed: string[];
+}
+
+function poolFixture(t: TestContext, instanceCount: number) {
   const host = new FakePoolHost();
   const logs: string[] = [];
   const state = {
-    count: initialCount,
-    placement: InstancePlacement.Server as InstancePlacement | null,
     generation: POOL_GENERATION,
-    environment: null as string | null,
-    others: [] as Array<{
-      resource_identity: string;
-      placement: InstancePlacement;
-      environment: string | null;
-    }>,
     failure: null as Error | null,
     executing: new Set<string>(),
-    listed: [] as string[],
+    bindings: [
+      { resource_identity: POOL_RESOURCE, environment: null, listed: [] },
+    ] as PoolBinding[],
   };
-  const instanceIds = new Map<number, string>();
-  const binding = () => ({
+  const identities = new Map<string, string>();
+  const instanceIds = new Map<string, string>();
+  let clock = 0;
+  const binding = (pool: PoolBinding, placement: InstancePlacement | null) => ({
     ...fakeCollaborations.workerBindingOf(),
     worker_name: WORKER,
-    instance_count: state.count,
-    placement: state.placement,
-    worker_instances: state.listed,
-    environment: state.environment,
+    instance_count: pool.listed.length,
+    placement,
+    worker_instances: pool.listed,
+    environment: pool.environment,
     generation: state.generation,
+    project_id: POOL_PROJECT,
+    resource_identity: pool.resource_identity,
   });
+  const bindingsOf = () =>
+    state.bindings.map((pool) => binding(pool, InstancePlacement.Server));
+  const clientIdentityOf = (
+    instanceId: string,
+    projectId: string,
+    resourceIdentity: string,
+    generation: number,
+  ) => {
+    if (state.failure) throw state.failure;
+    const key = [instanceId, projectId, resourceIdentity, generation].join("/");
+    let identity = identities.get(key);
+    if (!identity) {
+      identity = createIdentity("client_identity");
+      identities.set(key, identity);
+    }
+    return identity;
+  };
   const f = enablementFixture(t, {
     instanceIssuer: {
       ...fakeCollaborations.instanceIssuer,
-      clientIdentity: (instanceId, projectId, resourceIdentity, generation) => {
-        const slot = [...instanceIds].find(([, id]) => id === instanceId)![0];
-        return host.clientIdentity(
-          projectId,
-          resourceIdentity,
-          generation,
-          slot,
-        );
-      },
+      clientIdentity: clientIdentityOf,
     },
-    workerBindingOf: () => binding(),
+    workerBindingOf: (_tx, _project, resourceIdentity) => {
+      const pool = state.bindings.find(
+        (item) => item.resource_identity === resourceIdentity,
+      );
+      return pool ? binding(pool, InstancePlacement.Server) : null;
+    },
+    workerBindingsOf: bindingsOf,
     schedulerClaims: {
       ...fakeCollaborations.schedulerClaims,
       activityOf: (_tx, runtimeIdentity) =>
@@ -1933,49 +1955,45 @@ function poolFixture(t: TestContext, initialCount: number) {
     },
     pool: {
       host,
-      workerBindingsOf: () => {
-        if (state.failure) throw state.failure;
-        return [
-          {
-            ...binding(),
-            project_id: POOL_PROJECT,
-            resource_identity: POOL_RESOURCE,
-          },
-          ...state.others.map((other) => ({
-            ...binding(),
-            ...other,
-            project_id: POOL_PROJECT,
-          })),
-        ];
-      },
+      workerBindingsOf: bindingsOf,
       logger: pino({ level: "error" }, { write: (line) => logs.push(line) }),
     },
   });
-  const slotId = (slot: number) =>
-    host.clientIdentity(POOL_PROJECT, POOL_RESOURCE, POOL_GENERATION, slot);
-  function instanceOfSlot(slot: number) {
-    let id = instanceIds.get(slot);
-    if (id === undefined) {
-      const name = `server-${slot}`;
-      id = f.store.transaction(
-        (tx) =>
-          insertInstance(
-            tx,
-            {
-              name,
-              worker: WORKER,
-              placement: InstancePlacement.Server,
-              public_key: null,
-              fingerprint: null,
-            },
-            Date.now(),
-          ).id,
-      );
-      instanceIds.set(slot, id);
-      state.listed.push(name);
-    }
+  function addInstance(
+    name: string,
+    placement: InstancePlacement = InstancePlacement.Server,
+    listedBy: string[] = [POOL_RESOURCE],
+  ) {
+    const id = f.store.transaction(
+      (tx) =>
+        insertInstance(
+          tx,
+          {
+            name,
+            worker: WORKER,
+            placement,
+            public_key: null,
+            fingerprint: null,
+          },
+          ++clock,
+        ).id,
+    );
+    instanceIds.set(name, id);
+    for (const pool of state.bindings)
+      if (listedBy.includes(pool.resource_identity)) pool.listed.push(name);
     return id;
   }
+  for (let index = 0; index < instanceCount; index++)
+    addInstance(`server-${index}`);
+  const nameOf = (index: number) => `server-${index}`;
+  const clientOf = (name: string, resourceIdentity = POOL_RESOURCE): string => {
+    return clientIdentityOf(
+      instanceIds.get(name)!,
+      POOL_PROJECT,
+      resourceIdentity,
+      state.generation,
+    );
+  };
   function registerAs(
     clientId: string,
     instanceId: string | undefined,
@@ -1998,130 +2016,160 @@ function poolFixture(t: TestContext, initialCount: number) {
         .handler({ params: {}, query: {}, body: null }, f.caller),
     );
   }
-  function register(slot: number, resourceIdentity = POOL_RESOURCE) {
+  function register(index: number, resourceIdentity = POOL_RESOURCE) {
+    const name = nameOf(index);
     return registerAs(
-      host.clientIdentity(
-        POOL_PROJECT,
-        resourceIdentity,
-        state.generation,
-        slot,
-      ),
-      instanceOfSlot(slot),
+      clientOf(name, resourceIdentity),
+      instanceIds.get(name),
       resourceIdentity,
     );
   }
+  const unlist = (index: number, resourceIdentity = POOL_RESOURCE) => {
+    const pool = state.bindings.find(
+      (item) => item.resource_identity === resourceIdentity,
+    )!;
+    pool.listed = pool.listed.filter((name) => name !== nameOf(index));
+  };
+  const archive = (index: number) =>
+    f.store.transaction((tx) =>
+      endInstance(tx, instanceIds.get(nameOf(index))!, ++clock),
+    );
   return {
     ...f,
     host,
     state,
     logs,
-    slotId,
     register,
     registerAs,
-    instanceOfSlot,
+    addInstance,
+    clientOf,
+    nameOf,
+    unlist,
+    archive,
+    instanceIdOf: (index: number) => instanceIds.get(nameOf(index))!,
   };
 }
 
 test("the pool starts at startPool and a change notice before it does nothing", async (t) => {
   const f = poolFixture(t, 2);
   f.worker.bindingsChanged(POOL_PROJECT);
+  f.worker.instancesChanged();
   await changesApplied();
-  assert.deepEqual(f.host.started, []);
+  assert.equal(f.host.started.length, NO_STARTS);
   f.worker.startPool();
   assert.deepEqual(
-    f.host.started.map(({ slot }) => slot),
-    [0, 1],
+    f.host.started.map(({ instance }) => instance.name),
+    ["server-0", "server-1"],
   );
   f.worker.startPool();
   assert.equal(f.host.started.length, POOL_TWO_STARTS);
 });
 
-test("startPool prepares the pool host once when no container binding is live", (t) => {
+test("startPool prepares the pool host once when no instance is live", (t) => {
   const f = poolFixture(t, 0);
   f.worker.startPool();
   f.worker.startPool();
   assert.equal(f.host.prepared, POOL_ONE_START);
-  assert.deepEqual(f.host.started, []);
+  assert.equal(f.host.started.length, NO_STARTS);
 });
 
-test("startPool sweeps with the identity of the binding at every slot number", (t) => {
-  const f = poolFixture(t, 1);
+test("startPool sweeps with the name of each live server instance and no worker instance", (t) => {
+  const f = poolFixture(t, 2);
+  f.addInstance("laptop", InstancePlacement.Worker, []);
   f.worker.startPool();
   assert.equal(f.host.swept.length, POOL_ONE_START);
-  const live = f.host.swept[0]!;
-  assert.equal(live.size, POOL_SLOT_COUNT);
-  for (let slot = 0; slot < POOL_SLOT_COUNT; slot++)
-    assert.ok(live.has(f.slotId(slot)));
+  assert.deepEqual([...f.host.swept[0]!].sort(), ["server-0", "server-1"]);
 });
 
-test("startPool sweeps with no identity for a binding at the worker placement", (t) => {
-  const f = poolFixture(t, 1);
-  f.state.placement = InstancePlacement.Worker;
+test("startPool starts an instance that no binding lists with no entry", (t) => {
+  const f = poolFixture(t, 0);
+  f.addInstance("idle", InstancePlacement.Server, []);
   f.worker.startPool();
-  assert.equal(f.host.swept[0]!.size, NO_SWEPT);
+  assert.deepEqual(
+    f.host.started.map(({ instance, entries }) => [instance.name, entries]),
+    [["idle", []]],
+  );
+  assert.deepEqual(f.store.transaction(readAllLive), []);
 });
 
-test("a change notice reconciles the pool with the instance count of the binding", async (t) => {
+test("a binding write sends the entries of the running instances and starts none", async (t) => {
   const f = poolFixture(t, 1);
   f.worker.startPool();
-  f.state.count = 3;
+  assert.deepEqual(
+    f.host.started[0]!.entries.map(({ state }) => state),
+    [BindingEntryState.Serving],
+  );
+  f.state.bindings.push({
+    resource_identity: OTHER_POOL_RESOURCE,
+    environment: null,
+    listed: [f.nameOf(FIRST_INSTANCE)],
+  });
   f.worker.bindingsChanged(POOL_PROJECT);
   await changesApplied();
+  assert.equal(f.host.started.length, POOL_ONE_START);
   assert.deepEqual(
-    f.host.started.map(({ slot }) => slot),
-    [0, 1, 2],
-  );
-  f.state.count = 1;
-  f.worker.bindingsChanged(POOL_PROJECT);
-  await changesApplied();
-  assert.deepEqual(
-    f.host.drained.map(({ slot }) => slot),
-    [2, 1],
+    f.host.updated[0]!.entries.map(
+      ({ resource_identity }) => resource_identity,
+    ),
+    [POOL_RESOURCE, OTHER_POOL_RESOURCE],
   );
 });
 
-test("a binding at the worker placement gets no pool slot", (t) => {
-  const f = poolFixture(t, 2);
-  f.state.placement = InstancePlacement.Worker;
+test("an instance create starts one and an archive stops one after the change notice", async (t) => {
+  const f = poolFixture(t, 1);
   f.worker.startPool();
-  assert.deepEqual(f.host.started, []);
+  f.addInstance("server-1");
+  f.worker.instancesChanged();
+  await changesApplied();
+  assert.deepEqual(
+    f.host.started.map(({ instance }) => instance.name),
+    ["server-0", "server-1"],
+  );
+  f.archive(FIRST_INSTANCE);
+  f.worker.instancesChanged();
+  await changesApplied();
+  assert.deepEqual(
+    f.host.archived.map(({ name }) => name),
+    ["server-0"],
+  );
+});
+
+test("an instance at the worker placement is not hosted", (t) => {
+  const f = poolFixture(t, 0);
+  f.addInstance("laptop", InstancePlacement.Worker);
+  f.worker.startPool();
+  assert.equal(f.host.started.length, NO_STARTS);
 });
 
 test("the derived identity of a listed server instance registers and the row holds its instance_id", (t) => {
   const f = poolFixture(t, 2);
   f.worker.startPool();
-  const registered = f.register(1);
+  const registered = f.register(SECOND_INSTANCE);
   assert.equal(registered.resource_identity, POOL_RESOURCE);
   const [row] = f.store.transaction(readAllLive);
   assert.equal(row!.runtime_identity, registered.runtime_identity);
-  assert.equal(row!.instance_id, f.instanceOfSlot(1));
-  assert.equal(row!.client_id, f.slotId(1));
+  assert.equal(row!.instance_id, f.instanceIdOf(SECOND_INSTANCE));
+  assert.equal(row!.client_id, f.clientOf(f.nameOf(SECOND_INSTANCE)));
 });
 
 test("a client identity that the binding does not list for an instance refuses with placement_mismatch", (t) => {
   const f = poolFixture(t, 2);
   f.worker.startPool();
-  const instanceId = f.instanceOfSlot(0);
+  const instanceId = f.instanceIdOf(FIRST_INSTANCE);
+  const clientId = f.clientOf(f.nameOf(FIRST_INSTANCE));
   refuses(
     () => f.registerAs(createIdentity("client_identity"), instanceId),
     WorkerErrorCode.PlacementMismatch,
     HttpStatus.Conflict,
   );
   refuses(
-    () => f.registerAs(f.slotId(0), undefined),
+    () => f.registerAs(clientId, undefined),
     WorkerErrorCode.PlacementMismatch,
     HttpStatus.Conflict,
   );
-  f.state.listed.length = 0;
+  f.unlist(FIRST_INSTANCE);
   refuses(
-    () => f.register(0),
-    WorkerErrorCode.PlacementMismatch,
-    HttpStatus.Conflict,
-  );
-  f.state.listed.push("server-0");
-  f.state.generation = POOL_GENERATION + 1;
-  refuses(
-    () => f.registerAs(f.slotId(0), instanceId),
+    () => f.register(FIRST_INSTANCE),
     WorkerErrorCode.PlacementMismatch,
     HttpStatus.Conflict,
   );
@@ -2131,29 +2179,36 @@ test("a registration resumes under the same identity after its instance leaves t
   const f = poolFixture(t, 1);
   f.invokeAgent("enablement.put", putBody);
   f.worker.startPool();
-  const first = f.register(0);
+  const first = f.register(FIRST_INSTANCE);
   const healthy = () =>
     f.store.transaction((tx) =>
       f.worker.registrationHealthcheck(tx, first.runtime_identity),
     );
   assert.equal(healthy(), true);
-  f.state.listed.length = 0;
-  assert.deepEqual(f.register(0), first);
+  f.unlist(FIRST_INSTANCE);
+  assert.deepEqual(f.register(FIRST_INSTANCE), first);
   assert.equal(healthy(), false);
-  const record = f.invoke("registration.list", null, {}).items[0];
-  assert.equal(record?.draining, true);
+  assert.equal(
+    f.invoke("registration.list", null, {}).items[0]?.draining,
+    true,
+  );
 });
 
 test("one server instance that two bindings list holds two registrations that one execution covers", (t) => {
   const f = poolFixture(t, 1);
+  f.state.bindings.push({
+    resource_identity: OTHER_POOL_RESOURCE,
+    environment: null,
+    listed: [f.nameOf(FIRST_INSTANCE)],
+  });
   f.worker.startPool();
-  const first = f.register(0);
-  const second = f.register(0, `${POOL_RESOURCE}-other`);
+  const first = f.register(FIRST_INSTANCE);
+  const second = f.register(FIRST_INSTANCE, OTHER_POOL_RESOURCE);
   assert.notEqual(first.runtime_identity, second.runtime_identity);
   const rows = f.store.transaction(readAllLive);
   assert.deepEqual(
     rows.map((row) => row.instance_id),
-    [f.instanceOfSlot(0), f.instanceOfSlot(0)],
+    [f.instanceIdOf(FIRST_INSTANCE), f.instanceIdOf(FIRST_INSTANCE)],
   );
   const covered = (runtimeIdentity: string) =>
     f.store.transaction((tx) =>
@@ -2163,46 +2218,43 @@ test("one server instance that two bindings list holds two registrations that on
   assert.deepEqual(covered(second.runtime_identity), [first.runtime_identity]);
 });
 
-test("a binding at the worker placement applies the same listing rule", (t) => {
-  const f = poolFixture(t, 2);
-  f.state.placement = InstancePlacement.Worker;
-  f.worker.startPool();
-  refuses(
-    () => f.registerAs(createIdentity("client_identity"), f.instanceOfSlot(0)),
-    WorkerErrorCode.PlacementMismatch,
-    HttpStatus.Conflict,
-  );
-  assert.equal(f.register(0).resource_identity, POOL_RESOURCE);
-});
-
-test("the start of the pool starts a slot above the target with a live registration in drain mode", (t) => {
-  const f = poolFixture(t, 1);
-  f.state.placement = null;
-  f.register(2);
-  f.state.placement = InstancePlacement.Server;
-  f.worker.startPool();
-  assert.deepEqual(
-    f.host.started.map(({ slot, draining }) => [slot, draining]),
-    [
-      [0, false],
-      [2, true],
-    ],
-  );
-});
-
-test("a registration record shows the placement and the drain flag of its slot", async (t) => {
+test("a binding that drops an instance with a live registration keeps a draining entry for it", async (t) => {
   const f = poolFixture(t, 2);
   f.worker.startPool();
-  f.register(0);
-  f.register(1);
-  f.state.count = 1;
+  f.register(FIRST_INSTANCE);
+  f.unlist(FIRST_INSTANCE);
   f.worker.bindingsChanged(POOL_PROJECT);
   await changesApplied();
+  const update = f.host.updated.find(
+    ({ instance }) => instance.name === f.nameOf(FIRST_INSTANCE),
+  );
+  assert.deepEqual(
+    update!.entries.map(({ state }) => state),
+    [BindingEntryState.Draining],
+  );
+  assert.equal(
+    f.host.updated.some(
+      ({ instance }) => instance.name === f.nameOf(SECOND_INSTANCE),
+    ),
+    false,
+  );
+});
+
+test("a registration record shows the placement and the drain flag of its instance", (t) => {
+  const f = poolFixture(t, 2);
+  f.worker.startPool();
+  f.register(FIRST_INSTANCE);
+  f.register(SECOND_INSTANCE);
+  f.unlist(SECOND_INSTANCE);
   const items = f.invoke("registration.list", null, {}).items;
   const byClient = new Map(items.map((item) => [item.client_id, item]));
-  assert.equal(byClient.get(f.slotId(0))?.placement, InstancePlacement.Server);
-  assert.equal(byClient.get(f.slotId(0))?.draining, false);
-  assert.equal(byClient.get(f.slotId(1))?.draining, true);
+  const first = byClient.get(f.clientOf(f.nameOf(FIRST_INSTANCE)));
+  assert.equal(first?.placement, InstancePlacement.Server);
+  assert.equal(first?.draining, false);
+  assert.equal(
+    byClient.get(f.clientOf(f.nameOf(SECOND_INSTANCE)))?.draining,
+    true,
+  );
 });
 
 test("stopPool stops the host and ignores later change notices", async (t) => {
@@ -2210,53 +2262,41 @@ test("stopPool stops the host and ignores later change notices", async (t) => {
   f.worker.startPool();
   await f.worker.stopPool();
   assert.ok(f.host.stopped);
-  f.state.count = 2;
-  f.worker.bindingsChanged(POOL_PROJECT);
+  f.addInstance("server-1");
+  f.worker.instancesChanged();
   await changesApplied();
   assert.equal(f.host.started.length, POOL_ONE_START);
 });
 
-test("a draining slot gets no claim while its running execution stays answerable", async (t) => {
+test("an unlisted instance registration gets no claim while its running execution stays answerable", (t) => {
   const f = poolFixture(t, 2);
   f.invokeAgent("enablement.put", putBody);
   f.worker.startPool();
-  const active = f.register(0).runtime_identity;
-  const draining = f.register(1).runtime_identity;
+  const active = f.register(FIRST_INSTANCE).runtime_identity;
+  const dropped = f.register(SECOND_INSTANCE).runtime_identity;
   const healthy = (runtimeIdentity: string) =>
     f.store.transaction((tx) =>
       f.worker.registrationHealthcheck(tx, runtimeIdentity),
     );
   assert.equal(healthy(active), true);
-  assert.equal(healthy(draining), true);
-  f.state.count = 1;
-  f.worker.bindingsChanged(POOL_PROJECT);
-  await changesApplied();
+  assert.equal(healthy(dropped), true);
+  f.unlist(SECOND_INSTANCE);
   assert.equal(healthy(active), true);
-  assert.equal(healthy(draining), false);
-  f.state.count = 2;
-  f.worker.bindingsChanged(POOL_PROJECT);
-  await changesApplied();
-  assert.equal(healthy(draining), true);
+  assert.equal(healthy(dropped), false);
 });
 
-test("a restart of the pool host starts a busy slot above the target in drain mode", (t) => {
-  const f = poolFixture(t, POOL_FOUR_STARTS);
-  f.state.placement = null;
-  const busy = f.register(2).runtime_identity;
-  f.register(3);
-  f.state.executing.add(busy);
-  f.state.placement = InstancePlacement.Server;
-  f.state.count = 1;
+test("a restart of the server keeps the draining entry of a live registration of an unlisted instance", (t) => {
+  const f = poolFixture(t, 2);
+  f.register(THIRD_INSTANCE - 1);
+  f.unlist(SECOND_INSTANCE);
   f.worker.startPool();
+  const entries = f.host.started.find(
+    ({ instance }) => instance.name === f.nameOf(SECOND_INSTANCE),
+  )!.entries;
   assert.deepEqual(
-    f.host.started.map(({ slot, draining }) => [slot, draining]),
-    [
-      [0, false],
-      [2, true],
-      [3, true],
-    ],
+    entries.map(({ state }) => state),
+    [BindingEntryState.Draining],
   );
-  assert.deepEqual(f.host.drained, []);
 });
 
 test("a failed reconciliation in a change notice is logged and does not reach the writer", async (t) => {
@@ -2336,9 +2376,9 @@ test("the placement list reports no unavailable server or worker placement", asy
   assert.equal(items[2]!.available, true);
 });
 
-test("start with an unavailable runtime and a live container binding logs the driver once and starts the pool", async (t) => {
-  const f = poolFixture(t, 1);
-  f.state.placement = InstancePlacement.Container;
+test("start with an unavailable runtime and a live container instance logs the driver once and starts the pool", async (t) => {
+  const f = poolFixture(t, 0);
+  f.addInstance("boxed", InstancePlacement.Container);
   f.host.statuses.set(PoolPlacement.Container, UNAVAILABLE_CONTAINER);
   const lines = await loggedAfterStart(f);
   assert.equal(lines.length, DRIVER_RECORDS);
@@ -2350,12 +2390,12 @@ test("start with an unavailable runtime and a live container binding logs the dr
 });
 
 test("start logs no driver record for an available runtime", async (t) => {
-  const f = poolFixture(t, 1);
-  f.state.placement = InstancePlacement.Container;
+  const f = poolFixture(t, 0);
+  f.addInstance("boxed", InstancePlacement.Container);
   assert.deepEqual(await loggedAfterStart(f), []);
 });
 
-test("start checks no runtime when no live binding holds the container placement", async (t) => {
+test("start checks no runtime when no live instance holds the container placement", async (t) => {
   const f = poolFixture(t, 1);
   f.host.statuses.set(PoolPlacement.Container, UNAVAILABLE_CONTAINER);
   assert.deepEqual(await loggedAfterStart(f), []);
@@ -2365,59 +2405,40 @@ test("start checks no runtime when no live binding holds the container placement
 const READY_ENVIRONMENT = "repository:github:Acme/app";
 const READY_TAG = "localhost/kanthord-env/app:ready";
 const STALE_TAG = "localhost/kanthord-env/app:stale";
-const OTHER_WORKER = "worker:kanthord:other";
-const SERVER_WORKER = "worker:kanthord:inline";
 
-test("environmentReady marks the slots to restart as draining before it returns and restarts each container slot of the environment on another image", (t) => {
-  const f = poolFixture(t, 3);
-  f.state.placement = InstancePlacement.Container;
-  f.state.environment = READY_ENVIRONMENT;
+test("environmentReady restarts each container instance of the environment on another image", (t) => {
+  const f = poolFixture(t, 0);
+  f.addInstance("box-0", InstancePlacement.Container);
+  f.addInstance("box-1", InstancePlacement.Container);
+  f.addInstance("box-2", InstancePlacement.Container);
+  f.state.bindings[0]!.environment = READY_ENVIRONMENT;
   f.worker.startPool();
-  f.host.images.set(f.slotId(0), READY_TAG);
-  f.host.images.set(f.slotId(1), STALE_TAG);
+  f.host.images.set("box-0", READY_TAG);
+  f.host.images.set("box-1", STALE_TAG);
   f.worker.environmentReady(POOL_PROJECT, READY_ENVIRONMENT, READY_TAG);
   assert.deepEqual(
-    f.host.restarted.map(({ client_id, draining }) => [client_id, draining]),
-    [
-      [f.slotId(1), true],
-      [f.slotId(2), true],
-    ],
-  );
-  assert.deepEqual(f.host.drained, []);
-});
-
-test("environmentReady keeps the slots of another repository binding and of a server binding", (t) => {
-  const f = poolFixture(t, 1);
-  f.state.placement = InstancePlacement.Container;
-  f.state.environment = READY_ENVIRONMENT;
-  f.state.others = [
-    {
-      resource_identity: OTHER_WORKER,
-      placement: InstancePlacement.Container,
-      environment: "repository:github:Acme/other",
-    },
-    {
-      resource_identity: SERVER_WORKER,
-      placement: InstancePlacement.Server,
-      environment: READY_ENVIRONMENT,
-    },
-  ];
-  f.worker.startPool();
-  f.worker.environmentReady(POOL_PROJECT, READY_ENVIRONMENT, READY_TAG);
-  assert.deepEqual(
-    f.host.restarted.map(({ resource_identity }) => resource_identity),
-    [POOL_RESOURCE],
+    f.host.restarted.map(({ name }) => name),
+    ["box-1", "box-2"],
   );
 });
 
-test("environmentReady restarts no slot that is already draining", (t) => {
-  const f = poolFixture(t, 2);
-  f.state.placement = InstancePlacement.Container;
-  f.state.environment = READY_ENVIRONMENT;
+test("environmentReady keeps the instances of another repository binding and of a server instance", (t) => {
+  const f = poolFixture(t, 0);
+  f.addInstance("box-0", InstancePlacement.Container);
+  f.addInstance("box-1", InstancePlacement.Container, [OTHER_POOL_RESOURCE]);
+  f.addInstance("server-0", InstancePlacement.Server);
+  f.state.bindings[0]!.environment = READY_ENVIRONMENT;
+  f.state.bindings.push({
+    resource_identity: OTHER_POOL_RESOURCE,
+    environment: "repository:github:Acme/other",
+    listed: ["box-1"],
+  });
   f.worker.startPool();
   f.worker.environmentReady(POOL_PROJECT, READY_ENVIRONMENT, READY_TAG);
-  f.worker.environmentReady(POOL_PROJECT, READY_ENVIRONMENT, READY_TAG);
-  assert.equal(f.host.restarted.length, POOL_TWO_STARTS);
+  assert.deepEqual(
+    f.host.restarted.map(({ name }) => name),
+    ["box-0"],
+  );
 });
 
 const FIRST_HANDOVER_ATTEMPT = 1;

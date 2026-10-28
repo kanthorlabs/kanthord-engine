@@ -22,8 +22,10 @@ import type { RuntimeHost } from "./container-runtime.ts";
 import {
   createProject,
   environmentList,
+  FIRST_SLOT,
   gateFixture,
   importNode,
+  latestStarts,
   NO_ITEMS,
   type ProjectInput,
   recordingSlotDriver,
@@ -217,26 +219,31 @@ async function claimOnReadyTag(
     ready.tag,
     environmentTagOf(ready.resource_identity, ready.digest),
   );
+  const imageOf = (run: string[]) => run[run.indexOf(SEPARATOR_OPTION) - 1];
   const runs = await until(
     () =>
       detection.starts.flatMap((start) =>
-        slotRuns(detection.podman, start.clientId),
+        slotRuns(detection.podman, start.instanceName),
       ),
-    (found) => found.length > NO_ITEMS,
+    (found) => found.some((run) => imageOf(run) === ready.tag),
     t.signal,
   );
-  for (const run of runs)
-    assert.equal(run[run.indexOf(SEPARATOR_OPTION) - 1], ready.tag);
+  assert.equal(imageOf(runs.at(-1)!), ready.tag);
   assert.ok(detection.starts.length > NO_ITEMS);
   const nodeId = await importNode(detection.fixture, detection.project);
-  const slot = detection.starts[0]!.poolSlot;
+  const slot = latestStarts(detection.starts)[0]!;
   const client = await worker(
     t,
     detection.fixture,
     detection.project.id,
     nodeId,
-    slot.slot,
-    { token: await detection.fixture.slotTokenOf(slot) },
+    FIRST_SLOT,
+    {
+      token: await detection.fixture.slotTokenOf(
+        slot.instance,
+        slot.entries[0]!,
+      ),
+    },
   );
   await client.claimed();
 }

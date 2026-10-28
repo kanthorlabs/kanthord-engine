@@ -5,6 +5,7 @@ import { type PortAnswer, portAnswerSchema } from "../../gateway/client.ts";
 import { Diagnostic } from "../../kernel/errors.ts";
 import { createIdentity } from "../../kernel/identity.ts";
 import { HttpStatus } from "../../kernel/http.ts";
+import { BindingEntryState } from "../../worker/contract.ts";
 import { SlotControl } from "./thread-data.ts";
 
 const KIBIBYTE = 1024;
@@ -14,22 +15,37 @@ export const FRAME_LINE_LIMIT_BYTES = FRAME_LINE_LIMIT_MEBIBYTES * MEBIBYTE;
 const LINE_FEED = 0x0a;
 const ABSENT = -1;
 
+type Listener = (message: unknown) => void;
+
 export const FrameKind = {
   Init: "init",
+  Bindings: "bindings",
   Port: "port",
   Control: "control",
   Ping: "ping",
 } as const;
 
+export const frameEntrySchema = z.strictObject({
+  client_id: z.string().min(1),
+  client_secret: z.string().min(1),
+  state: z.enum(BindingEntryState),
+});
+export type FrameEntry = z.infer<typeof frameEntrySchema>;
+
 const portFrameSchema = z.strictObject({
   kind: z.literal(FrameKind.Port),
+  client_id: z.string().min(1),
   message: z.record(z.string(), z.unknown()),
 });
 
 export const serverFrameSchema = z.discriminatedUnion("kind", [
   z.strictObject({
     kind: z.literal(FrameKind.Init),
-    client_secret: z.string().min(1),
+    entries: z.array(frameEntrySchema),
+  }),
+  z.strictObject({
+    kind: z.literal(FrameKind.Bindings),
+    entries: z.array(frameEntrySchema),
   }),
   portFrameSchema,
   z.strictObject({
@@ -130,10 +146,11 @@ function invalidResponse(callId: string): PortAnswer {
   };
 }
 
-function portLine(message: unknown): string | null {
+function portLine(clientId: string, message: unknown): string | null {
   try {
     return encodeFrame({
       kind: FrameKind.Port,
+      client_id: clientId,
       message: message as Record<string, unknown>,
     });
   } catch {
@@ -141,6 +158,7 @@ function portLine(message: unknown): string | null {
     return answer.success
       ? encodeFrame({
           kind: FrameKind.Port,
+          client_id: clientId,
           message: invalidResponse(answer.data.call_id),
         })
       : null;
@@ -154,26 +172,40 @@ export interface BridgeOptions<T extends Frame> {
   readonly onEnd: () => void;
 }
 
+export interface Bridge {
+  attach(clientId: string, port: MessagePort): void;
+  detach(clientId: string): void;
+  has(clientId: string): boolean;
+  close(): void;
+}
+
 export function bridgePort<T extends Frame>(
-  port: MessagePort,
   readable: Readable,
   writable: Writable,
   options: BridgeOptions<T>,
-): () => void {
+): Bridge {
   const decoder = new FrameDecoder();
+  const ports = new Map<string, { port: MessagePort; send: Listener }>();
   let open = true;
+  const detach = (clientId: string) => {
+    const attached = ports.get(clientId);
+    if (!attached) return;
+    ports.delete(clientId);
+    attached.port.off("message", attached.send);
+  };
   const close = () => {
     if (!open) return;
     open = false;
     readable.off("data", read);
     readable.off("end", end);
     readable.off("error", end);
-    port.off("message", send);
+    for (const clientId of [...ports.keys()]) detach(clientId);
   };
   const deliver = (line: string) => {
     const frame = decodeFrame(line, options.frames);
     options.onFrame(frame);
-    if (open && frame.kind === FrameKind.Port) port.postMessage(frame.message);
+    if (open && frame.kind === FrameKind.Port)
+      ports.get(frame.client_id)?.port.postMessage(frame.message);
   };
   const read = (chunk: Buffer | string) => {
     try {
@@ -191,13 +223,24 @@ export function bridgePort<T extends Frame>(
     close();
     options.onEnd();
   };
-  const send = (message: unknown) => {
-    const line = portLine(message);
-    if (line !== null) writable.write(line);
-  };
   readable.on("data", read);
   readable.on("end", end);
   readable.on("error", end);
-  port.on("message", send);
-  return close;
+  return {
+    attach(clientId, port) {
+      detach(clientId);
+      const send: Listener = (message) => {
+        const line = portLine(clientId, message);
+        if (line !== null) writable.write(line);
+      };
+      ports.set(clientId, { port, send });
+      port.on("message", send);
+      port.once("close", () => {
+        if (ports.get(clientId)?.port === port) detach(clientId);
+      });
+    },
+    detach,
+    has: (clientId) => ports.has(clientId),
+    close,
+  };
 }
