@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { CauseCategory } from "../kernel/cause.ts";
 import { createIdentity } from "../kernel/identity.ts";
 import { canonicalJSON } from "../kernel/json.ts";
 import type { ExecutionClaim } from "../kernel/operation.ts";
@@ -109,15 +110,17 @@ export function submitAssessment(
   let outcome: OutcomeRow | null = null;
   const reworks = current ? priorReworks(tx, assessment) : null;
   const reworkLimit = dependencies.config.rework_limit;
-  const limited =
-    reworks === null
+  const planDefect = current && body.cause?.category === CauseCategory.Plan;
+  const limited = planDefect
+    ? { rule: TransitionRule.PlanDefect, count: null, limit: null }
+    : reworks === null
       ? null
       : {
           rule: TransitionRule.ReworkLimit,
           count: reworks,
           limit: reworkLimit,
         };
-  if (reworks !== null && reworks < reworkLimit) {
+  if (reworks !== null && !planDefect && reworks < reworkLimit) {
     const revoked = endLiveClaim(
       tx,
       dependencies,

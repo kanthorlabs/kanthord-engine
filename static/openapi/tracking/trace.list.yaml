@@ -482,6 +482,7 @@ components:
                           - instruction_conflict
                           - rule_absent
                           - criterion_unstated
+                          - requirement_conflict
                           - dependency
                           - verification_context
                           - verification_insufficient

@@ -107,6 +107,11 @@ const OpeningAttribute = {
 } as const;
 const NO_LEAD_TIME = 0;
 const NO_FAILURE_COUNT = 0;
+const LIMIT_RULES: readonly TransitionRule[] = [
+  TransitionRule.FailureLimit,
+  TransitionRule.FurtherWorkLimit,
+  TransitionRule.ReworkLimit,
+];
 const ROOT_START_RECORD = "start";
 const ROOT_END_RECORD = "end";
 const TRANSITION_RECORD = "transition";
@@ -798,7 +803,7 @@ function openingAttributes(opening: ExecutionOpening): Attributes {
 function transitionAttributes(transition: ExecutionTransition): Attributes {
   assert.ok(transition.from);
   assert.ok(transition.to);
-  const limited = transition.rule !== TransitionRule.None;
+  const limited = LIMIT_RULES.includes(transition.rule);
   assert.equal(limited, transition.count !== null);
   assert.equal(limited, transition.limit !== null);
   assert.ok(

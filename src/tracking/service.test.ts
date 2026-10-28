@@ -253,31 +253,51 @@ test("a transition span is a child of the root span with the states, the rule an
   assert.equal(service.droppedRecords(), NO_DROP);
 });
 
-test("a transition span with the rule none holds neither the count nor the limit", (t) => {
-  const { store, service } = harness(t);
+for (const rule of [TransitionRule.None, TransitionRule.PlanDefect])
+  test(`a transition span with the rule ${rule} holds neither the count nor the limit`, (t) => {
+    const { store, service } = harness(t);
+    service.executionOpened(TRACE, CREATED, OPENING);
+    service.executionTransition(TRACE, {
+      from: KEPT_STATE,
+      to: KEPT_STATE,
+      rule,
+      count: null,
+      limit: null,
+      lead_time_ms: null,
+      failure_count: null,
+      available_at: null,
+      transitioned_at: ENDED,
+    });
+    const span = service
+      .spanList(TRACE.trace_id, { limit: SPAN_PAGE }, caller(store))
+      .items.find((item) => item.operation === TRANSITION_SPAN);
+    assert.equal(span?.attributes["kanthord.node.state.from"], KEPT_STATE);
+    assert.equal(span?.attributes["kanthord.node.state.to"], KEPT_STATE);
+    assert.equal(span?.attributes["kanthord.transition.rule"], rule);
+    assert.equal("kanthord.transition.count" in span!.attributes, false);
+    assert.equal("kanthord.transition.limit" in span!.attributes, false);
+    assert.equal(service.droppedRecords(), NO_DROP);
+  });
+
+test("a transition span refuses a count and a limit that do not match its rule", (t) => {
+  const { service } = harness(t);
   service.executionOpened(TRACE, CREATED, OPENING);
-  service.executionTransition(TRACE, {
-    from: KEPT_STATE,
-    to: KEPT_STATE,
-    rule: TransitionRule.None,
-    count: null,
-    limit: null,
+  const transition = {
+    from: "Evaluating",
+    to: "Blocked",
     lead_time_ms: null,
     failure_count: null,
     available_at: null,
     transitioned_at: ENDED,
-  });
-  const span = service
-    .spanList(TRACE.trace_id, { limit: SPAN_PAGE }, caller(store))
-    .items.find((item) => item.operation === TRANSITION_SPAN);
-  assert.equal(span?.attributes["kanthord.node.state.from"], KEPT_STATE);
-  assert.equal(span?.attributes["kanthord.node.state.to"], KEPT_STATE);
-  assert.equal(
-    span?.attributes["kanthord.transition.rule"],
-    TransitionRule.None,
-  );
-  assert.equal("kanthord.transition.count" in span!.attributes, false);
-  assert.equal("kanthord.transition.limit" in span!.attributes, false);
+  };
+  for (const mismatch of [
+    { rule: TransitionRule.PlanDefect, count: 3, limit: 3 },
+    { rule: TransitionRule.ReworkLimit, count: null, limit: null },
+  ])
+    assert.throws(
+      () => service.executionTransition(TRACE, { ...transition, ...mismatch }),
+      assert.AssertionError,
+    );
 });
 
 for (const [cause, status, state] of [

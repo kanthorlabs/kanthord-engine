@@ -13,11 +13,12 @@ import {
   unattributed,
 } from "./cause.ts";
 
-const SUBCATEGORY_COUNT = 38;
+const SUBCATEGORY_COUNT = 39;
 const EXPECTED_SUBCATEGORIES = {
   prompt: ["context_missing", "instruction_conflict", "rule_absent"],
   plan: [
     "criterion_unstated",
+    "requirement_conflict",
     "dependency",
     "verification_context",
     "verification_insufficient",

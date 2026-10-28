@@ -907,7 +907,7 @@ test("the verification spans of a review name the owner of each command with the
 });
 
 const STATED_REPLY =
-  'kanthord-judgement: {"result":"criterion-not-met","rationale":"unmet","unmet":[{"id":"task","reason":"a","ground":"stated"},{"id":"other","reason":"b","ground":"unstated"}]}';
+  'kanthord-judgement: {"result":"criterion-not-met","rationale":"unmet","unmet":[{"id":"task","reason":"a","ground":"stated"},{"id":"other","reason":"b","ground":"standard"}]}';
 
 function evaluationEndOf(records: readonly TelemetryRecord[]) {
   const ends = records.filter(
@@ -950,7 +950,7 @@ test("a judgement with a stated first unmet item submits the work defect cause a
     [EvaluationAttribute.Result]: AssessmentResult.CriterionNotMet,
     [EvaluationAttribute.Stage]: EvaluationStage.Judgement,
     [EvaluationAttribute.UnmetIds]: ["task", "other"],
-    [EvaluationAttribute.UnmetGrounds]: ["stated", "unstated"],
+    [EvaluationAttribute.UnmetGrounds]: ["stated", "standard"],
     [EvaluationAttribute.ProposalCount]: NO_RELEASES,
     [EvaluationAttribute.Repaired]: false,
   });

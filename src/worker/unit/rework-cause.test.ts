@@ -74,6 +74,11 @@ test("a judgement decides by its first unmet ground", () => {
       CauseCategory.Plan,
       CauseSubcategory.CriterionUnstated,
     ],
+    [
+      UnmetGround.Conflict,
+      CauseCategory.Plan,
+      CauseSubcategory.RequirementConflict,
+    ],
   ] as const;
   for (const [ground, category, subcategory] of cases)
     assert.deepEqual(
@@ -96,6 +101,37 @@ test("the first unmet ground decides over a later one", () => {
       assigner: CauseAssigner.Reviewer,
     },
   );
+});
+
+test("a plan ground decides over a stated or standard ground in any position", () => {
+  const cases = [
+    [
+      [UnmetGround.Stated, UnmetGround.Unstated],
+      CauseSubcategory.CriterionUnstated,
+    ],
+    [
+      [UnmetGround.Standard, UnmetGround.Stated, UnmetGround.Conflict],
+      CauseSubcategory.RequirementConflict,
+    ],
+    [
+      [UnmetGround.Unstated, UnmetGround.Conflict],
+      CauseSubcategory.RequirementConflict,
+    ],
+  ] as const;
+  for (const [grounds, subcategory] of cases)
+    assert.deepEqual(
+      reworkCauseOf(
+        facts({
+          unmet_ids: grounds.map((_, index) => `item_${index}`),
+          unmet_grounds: [...grounds],
+        }),
+      ),
+      {
+        category: CauseCategory.Plan,
+        subcategory,
+        assigner: CauseAssigner.Reviewer,
+      },
+    );
 });
 
 test("the affected stage is unattributed with the suspects model and plan", () => {

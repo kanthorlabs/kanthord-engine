@@ -33,6 +33,11 @@ import type { NativeAgent } from "./native-agent.ts";
 import { PromptTemplate } from "../../agent/contract.ts";
 import type { WorkPrompt } from "../../agent/prompt-composer.ts";
 
+const PLAN_DEFECT_RATIONALE =
+  'plan defects\nPlan conflict:\n- node: "edit a.ts" vs "a.ts stays unchanged"\nPlan gap:\n- task_b: no test asked\nUnmet:\n- task_a: no route check\n- task_c: no lint';
+const PLAN_GAP_RATIONALE = "one gap\nPlan gap:\n- task_b: no test asked";
+const MET_RATIONALE = "met";
+const SINGLE_CONFLICT_DEFINITION = 1;
 const TWO_GAP_RATIONALE =
   "two gaps\nUnmet:\n- task_a: no route check\n- task_b: no restart test";
 
@@ -83,11 +88,47 @@ test("the final marker is strict and invalid handoffs are refused", () => {
     judgementRationale({
       rationale: "two gaps",
       unmet: [
-        { id: "task_a", reason: "no route check" },
-        { id: "task_b", reason: "no restart test" },
+        { id: "task_a", reason: "no route check", ground: UnmetGround.Stated },
+        {
+          id: "task_b",
+          reason: "no restart test",
+          ground: UnmetGround.Standard,
+        },
       ],
     }),
     TWO_GAP_RATIONALE,
+  );
+});
+
+test("the rationale writes plan conflict and plan gap blocks before the unmet block", () => {
+  assert.equal(
+    judgementRationale({
+      rationale: "plan defects",
+      unmet: [
+        { id: "task_a", reason: "no route check", ground: UnmetGround.Stated },
+        { id: "task_b", reason: "no test asked", ground: UnmetGround.Unstated },
+        {
+          id: "node",
+          reason: '"edit a.ts" vs "a.ts stays unchanged"',
+          ground: UnmetGround.Conflict,
+        },
+        { id: "task_c", reason: "no lint", ground: UnmetGround.Standard },
+      ],
+    }),
+    PLAN_DEFECT_RATIONALE,
+  );
+  assert.equal(
+    judgementRationale({
+      rationale: "one gap",
+      unmet: [
+        { id: "task_b", reason: "no test asked", ground: UnmetGround.Unstated },
+      ],
+    }),
+    PLAN_GAP_RATIONALE,
+  );
+  assert.equal(
+    judgementRationale({ rationale: MET_RATIONALE, unmet: [] }),
+    MET_RATIONALE,
   );
 });
 
@@ -198,7 +239,19 @@ test("failed and unrun rationale names the command and cause", () => {
   assert.match(instruction, /List every unmet item that you find/);
   assert.match(
     instruction,
-    /Give each unmet item a ground: stated for a requirement or criterion of the work prompt, standard for a default-standard rule, unstated for a defect that neither states\./,
+    /Give each unmet item a ground: stated for a requirement or criterion of the work prompt, standard for a default-standard rule, unstated for a defect that neither states, conflict for two stated requirements or criteria that the work cannot meet together\./,
+  );
+  assert.match(
+    instruction,
+    /conflict for two stated requirements or criteria that the work cannot meet together\. For example, a criterion needs a change to a file that the requirement forbids\. For a conflict, write the reason as the two requirements in quotes, joined by " vs ": "requirement A" vs "requirement B"\. Write every reason in full/,
+  );
+  assert.match(
+    instruction,
+    /A changed file that the requirement forbids and that no criterion needs is an unmet stated item\./,
+  );
+  assert.equal(
+    instruction.match(/ground conflict|conflict for/g)?.length,
+    SINGLE_CONFLICT_DEFINITION,
   );
   assert.match(instruction, /"ground": "stated"/);
   assert.doesNotMatch(
@@ -455,6 +508,7 @@ test("an unmet item requires a ground of the closed set", () => {
     "stated",
     "standard",
     "unstated",
+    "conflict",
   ]);
   assert.equal(unmetGroundSchema.safeParse("other").success, false);
   assert.equal(

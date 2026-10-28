@@ -258,7 +258,7 @@ export function nodeTransition(
   workQueue: WorkQueue,
   nodeId: string,
   from: NodeState,
-  limited: { rule: TransitionRule; count: number; limit: number } | null,
+  limited: Pick<NodeTransition, "rule" | "count" | "limit"> | null,
 ): NodeTransition {
   const to = requireNode(tx, nodeId).state;
   assert.ok(to);
