@@ -3,6 +3,8 @@ import { test } from "node:test";
 import { isolatedGitEnvironment } from "./git-environment.ts";
 
 const PATH_VALUE = "/bin";
+const GIT_PREFIX = "GIT_";
+const GIVEN_AUTHOR = "Given";
 
 test("isolatedGitEnvironment replaces the global and system configuration and keeps the rest", () => {
   assert.deepEqual(
@@ -100,5 +102,48 @@ test("isolatedGitEnvironment removes the git configuration parameters of the hos
     PATH: PATH_VALUE,
   });
   assert.equal(output.GIT_CONFIG_PARAMETERS, undefined);
+  assert.deepEqual(output.PATH, PATH_VALUE);
+});
+
+test("isolatedGitEnvironment removes every host GIT_ variable except the identity and the ceiling", () => {
+  const ceiling = "/srv/state";
+  const output = isolatedGitEnvironment({
+    GIT_EXEC_PATH: "/tmp/exec",
+    GIT_SSL_NO_VERIFY: "1",
+    GIT_TRACE_CURL: "1",
+    GIT_DIR: "/tmp/other.git",
+    GIT_INDEX_FILE: "/tmp/index",
+    GIT_ALTERNATE_OBJECT_DIRECTORIES: "/tmp/objects",
+    GIT_NAMESPACE: "other",
+    GIT_AUTHOR_NAME: GIVEN_AUTHOR,
+    GIT_CEILING_DIRECTORIES: ceiling,
+    GIT_CONFIG_SYSTEM: "/tmp/system",
+    GIT_CONFIG_KEY_7: "core.fsmonitor",
+    PATH: PATH_VALUE,
+  });
+  assert.deepEqual(
+    Object.keys(output)
+      .filter((name) => name.startsWith(GIT_PREFIX))
+      .sort(),
+    [
+      "GIT_ATTR_NOSYSTEM",
+      "GIT_AUTHOR_EMAIL",
+      "GIT_AUTHOR_NAME",
+      "GIT_CEILING_DIRECTORIES",
+      "GIT_COMMITTER_EMAIL",
+      "GIT_COMMITTER_NAME",
+      "GIT_CONFIG_COUNT",
+      "GIT_CONFIG_GLOBAL",
+      "GIT_CONFIG_KEY_0",
+      "GIT_CONFIG_KEY_1",
+      "GIT_CONFIG_KEY_2",
+      "GIT_CONFIG_NOSYSTEM",
+      "GIT_CONFIG_VALUE_0",
+      "GIT_CONFIG_VALUE_1",
+      "GIT_CONFIG_VALUE_2",
+    ],
+  );
+  assert.equal(output.GIT_AUTHOR_NAME, GIVEN_AUTHOR);
+  assert.equal(output.GIT_CEILING_DIRECTORIES, ceiling);
   assert.deepEqual(output.PATH, PATH_VALUE);
 });

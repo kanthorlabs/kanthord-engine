@@ -1372,8 +1372,6 @@ function keepsRepository(error: unknown, context: Context): boolean {
 
 function bareEnvironment(directory: string): NodeJS.ProcessEnv {
   const environment = { ...process.env };
-  delete environment.GIT_DIR;
-  delete environment.GIT_WORK_TREE;
   environment.GIT_CEILING_DIRECTORIES = dirname(directory);
   return environment;
 }
