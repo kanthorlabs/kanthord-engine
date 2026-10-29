@@ -21,6 +21,7 @@ import { insertSpan } from "./trace-store.ts";
 interface Seed {
   trace?: number;
   root?: boolean;
+  span_id?: string;
   start: number;
   end?: number | null;
   operation?: string;
@@ -37,6 +38,8 @@ const SPAN_COUNT = 100;
 const ONE_ITEM = 1;
 const TWO_INSTANCES = 2;
 const THREE_SPANS = 3;
+const LARGER_SPAN = 200;
+const SMALLER_SPAN = 150;
 const ALL_DURATIONS = 3;
 const TURN_DURATIONS = 2;
 const TURN_MAX = 30;
@@ -117,7 +120,9 @@ function addSpans(store: Store, seeds: readonly Seed[]): void {
       const trace = seed.trace ?? 1;
       insertSpan(tx, {
         trace_id: traceIdOf(trace),
-        span_id: seed.root ? spanIdOf(trace) : spanIdOf(100 + index),
+        span_id: seed.root
+          ? spanIdOf(trace)
+          : (seed.span_id ?? spanIdOf(100 + index)),
         parent_span_id: null,
         producer: "worker",
         origin: SpanOrigin.Observed,
@@ -642,7 +647,12 @@ function floorSpan(
   start: number,
   floor: number | undefined,
   total: number | undefined,
-  overrides: { kind?: string; context?: string; trace?: number } = {},
+  overrides: {
+    kind?: string;
+    context?: string;
+    trace?: number;
+    span_id?: string;
+  } = {},
 ): Seed {
   const attributes: Record<string, string | number> = {
     [VERIFICATION_KIND]: overrides.kind ?? "affected",
@@ -652,6 +662,7 @@ function floorSpan(
   if (total !== undefined) attributes[TOTAL_SECONDS] = total;
   return {
     trace: overrides.trace ?? 1,
+    span_id: overrides.span_id,
     start,
     operation: VERIFICATION_OPERATION,
     attributes,
@@ -740,18 +751,20 @@ test("test_floor_share keeps one item for each bucket", async (t) => {
 test("test_floor_share takes the span with the larger span_id on a tie of start_time", async (t) => {
   const store = seededStore(t);
   addSpans(store, [
-    floorSpan(MONDAY + 1000, 10, 100),
-    floorSpan(MONDAY + 1000, 50, 100),
-    floorSpan(MONDAY + 1000, 30, 100, { trace: 3 }),
+    floorSpan(MONDAY + 1000, 50, 100, { span_id: spanIdOf(LARGER_SPAN) }),
+    floorSpan(MONDAY + 1000, 10, 100, {
+      trace: 3,
+      span_id: spanIdOf(SMALLER_SPAN),
+    }),
   ]);
   const { items } = await readFloorShare(store, {
     group_by: DurationGroupBy.ProjectId,
   });
   assert.equal(items.length, ONE_ITEM);
   const item = items[0]!;
-  assert.equal(item.count, THREE_SPANS);
+  assert.equal(item.count, TWO_INSTANCES);
   assert.ok("share" in item);
-  assertClose(item.share, 0.3);
+  assertClose(item.share, 0.5);
 });
 
 test("test_floor_share refuses the group_by worker_instance", () => {
