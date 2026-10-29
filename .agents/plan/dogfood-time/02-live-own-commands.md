@@ -56,7 +56,8 @@ Opus at medium effort. The change crosses the task loop, the verdict loop, the n
   1. In `steps-implement-verification.test.ts`, add the test "a task unit skips each node command in the live checkout and runs each own command". Give the node the verification `N` and one task the verifications `N` and `T`. `N` and `T` each append one line to their own count file in a temporary directory outside the workspace. Run `runStepsImplement` with one work turn that writes a file. Assert a release with `furtherWork: false`, one line in the count file of `N` and 2 lines in the count file of `T`. Assert with `recordSpans` that no `worker.verification` span with the context `task` runs `N`.
   2. In the same file, add the test "an implement node with no task runs no live verification and runs each node verification once at the release gate". Give the node the verification `N` and no task. Assert a release with `furtherWork: false`, one line in the count file of `N` and no `worker.verification` span with the context `node`.
   3. In `steps-implement-verdict.test.ts`, add the test "a verdict unit runs no node command in the live checkout". Record the done record of the one task as the test "a persistent kill in a node verification of the verdict unit stops with the infrastructure code" does (`src/worker/unit/steps-implement-verification.test.ts:74-103`). Give the node the count-file command `N` and give the task the commands `N` and `true`. Send a verdict with a judged commit and one agent turn that writes a file. Assert a release with `furtherWork: false` and one line in the count file of `N`.
-- Verify: `PATH="$(node scripts/test-path.mjs)" node --test --test-timeout=60000 src/worker/unit/steps-implement-verification.test.ts src/worker/unit/steps-implement-verdict.test.ts` fails on the three new tests only.
+  4. In `steps-implement-verification.test.ts`, add the test "a setup budget end before an empty own list writes no done record and releases further work". Give a stored environment whose setup command reaches the wall deadline, as the setup tests of the file build it (`:164-253`). Give the node the verification `N` and one task the verification `N` only, so the task holds no own command. Assert no `Kanthord-Done` trailer on the node branch and a release with `furtherWork: true`.
+- Verify: `PATH="$(node scripts/test-path.mjs)" node --test --test-timeout=60000 src/worker/unit/steps-implement-verification.test.ts src/worker/unit/steps-implement-verdict.test.ts` fails on the tests of steps 1 to 3 only. Run the test of step 4 again after task 02.2.
 
 ### 02.2 Run the own commands in the live checkout
 
@@ -64,12 +65,12 @@ Opus at medium effort. The change crosses the task loop, the verdict loop, the n
 - Do:
   1. Add `export function ownCommandsOf(unit: TaskContent, revision: Pick<Revision, "content">): string[]`. It answers the items of `unit.content.verifications` whose text is no item of `revision.content.verifications`, in list order. For the node unit, every item is a node command, so it answers the empty list.
   2. `verifyTaskRun` (`:702-707`) passes `ownCommandsOf(task, state.revision)` to `verifyCommands`.
-  3. `runTask` (`:484`) checks `verificationPassed(verification, checked.commands)`.
-  4. `runNodeInstruction` (`:385`) sets `commands` to `ownCommandsOf(unit, state.revision)`.
+  3. `runTask` (`:484`) checks `checked.outcome === VerificationClass.Pass && verificationPassed(verification, checked.commands)`. A setup failure or a setup budget end answers its setup commands in `checked.commands`, so an empty own list never passes it.
+  4. `runNodeInstruction` (`:385`) sets `commands` to `ownCommandsOf(unit, state.revision)`. At `:414` it checks `checked.outcome === VerificationClass.Pass && verificationPassed(verification, checked.commands)`, as step 3 does.
   5. Keep `pendingSetup` and the restore sequence of `verifyCommands` (`:747-794`) for an empty list. A pending setup still runs before the first live verification, as `worker-service.impl.md:1512` states.
   6. Change no other code of the done record. `writeDoneRecord` keeps the digest of the unit content.
 - Cite: decision D3.
-- Verify: the three tests of task 02.1 pass.
+- Verify: the four tests of task 02.1 pass.
 
 ### 02.3 Move the steps tests to the own-command rule
 
@@ -86,6 +87,6 @@ Opus at medium effort. The change crosses the task loop, the verdict loop, the n
 ### 02.E Gate
 
 - Run `pnpm run verify`. Report each failure and each check that did not run.
-- Confirm that the three tests of task 02.1 failed before task 02.2 and pass after it.
+- Confirm that the tests of task 02.1 steps 1 to 3 failed before task 02.2, and that the four tests of task 02.1 pass after it.
 - Run `rg -n 'content\.verifications' src/worker/unit/steps-implement.ts`. It prints only lines of the function `ownCommandsOf`.
 - The pull request body states the saving of `00-index.md` for the live checkout, and names each test that task 02.3 renamed or moved.

@@ -62,7 +62,7 @@ The contract of plan 02:
 - Files: `src/worker/unit/verification.ts` (edit)
 - Do:
   1. Add `copyRepeated?: boolean` to `VerificationInput` (`:88-101`).
-  2. In `runVerificationsWithOutput` (`:298-333`), keep a map from the command text to the index of its first pass. Before `unstartedClass`, check the map. When `copyRepeated` is true and the map holds the command, push the first result, the first output and `false` to `results`, `outputs` and `flaky`. Then continue with the next item. Call no observer for the copy.
+  2. In `runVerificationsWithOutput` (`:298-333`), keep a map from the command text to the index of its first pass. Call `unstartedClass` first, as today. After it, check the map. When `copyRepeated` is true and the map holds the command, push the first result, the first output and `false` to `results`, `outputs` and `flaky`. Then continue with the next item. Call no observer for the copy.
   3. After a run with the class `pass`, add its command to the map when the map does not hold it.
   4. Keep the order of the other rules: the stop at the first failed item, the infrastructure rerun, the flaky reruns and the base rerun of exit 127.
 - Cite: decision D2.
@@ -72,12 +72,13 @@ The contract of plan 02:
 
 - Files: `src/worker/unit/release-gate.ts`, `src/worker/unit/evaluation.ts`, `src/worker/unit/release-gate.test.ts`, `src/worker/unit/evaluation.test.ts` (edit)
 - Do:
-  1. Pass `copyRepeated: true` in `verifyInReleaseClones` (`src/worker/unit/release-gate.ts:254-272`).
-  2. Pass `copyRepeated: true` in `evaluate` (`src/worker/unit/evaluation.ts:326-343`).
-  3. Pass nothing new in `verifyCommands` of `src/worker/unit/steps-implement.ts`, in `src/worker/unit/affected.ts`, in `src/worker/unit/environment-setup.ts` and in `src/worker/unit/steps-examine.ts`.
-  4. The test "the verification spans of a release name the owner of each command with the context release" (`src/worker/unit/release-gate.test.ts:370`) shares `true` between the node and a task. Give the task a different command, for example `true && true`, so the test still asserts one span for each owner.
-  5. The test "the verification spans of a review name the owner of each command with the context evaluation" (`src/worker/unit/evaluation.test.ts:895`) shares `true` too. Give the task a different command in the same way.
-  6. The test "a release failure goes to the owner of the first failed index when the node and a task share one command" (`src/worker/unit/release-gate.test.ts:257`) needs a second run of the shared command to fail. With the copy, that second run never happens. Rewrite it as "a failed command that the node and a task share routes its revision to the node unit". The shared command fails at its first release run until the agent writes `fixed`. Assert one revision of the node unit and a release with `furtherWork: false`.
+  1. Run `PATH="$(node scripts/test-path.mjs)" node --test --test-timeout=60000 src/worker/unit/verification.test.ts src/worker/unit/release-gate.test.ts src/worker/unit/evaluation.test.ts src/worker/unit/steps-implement-release.test.ts src/worker/unit/native-method.test.ts` after steps 2 and 3. List each failed test. Change only its count of runs or of spans, and keep every other assert.
+  2. Pass `copyRepeated: true` in `verifyInReleaseClones` (`src/worker/unit/release-gate.ts:254-272`).
+  3. Pass `copyRepeated: true` in `evaluate` (`src/worker/unit/evaluation.ts:326-343`).
+  4. Pass nothing new in `verifyCommands` of `src/worker/unit/steps-implement.ts`, in `src/worker/unit/affected.ts`, in `src/worker/unit/environment-setup.ts` and in `src/worker/unit/steps-examine.ts`.
+  5. The test "the verification spans of a release name the owner of each command with the context release" (`src/worker/unit/release-gate.test.ts:370`) shares `true` between the node and a task. Give the task a different command, for example `true && true`, so the test still asserts one span for each owner.
+  6. The test "the verification spans of a review name the owner of each command with the context evaluation" (`src/worker/unit/evaluation.test.ts:895`) shares `true` too. Give the task a different command in the same way.
+  7. The test "a release failure goes to the owner of the first failed index when the node and a task share one command" (`src/worker/unit/release-gate.test.ts:257`) needs a second run of the shared command to fail. With the copy, that second run never happens. Rewrite it as "a failed command that the node and a task share routes its revision to the node unit". The shared command is `case "$PWD" in */release/*) test -e fixed;; esac`. It passes in the live checkout and fails in the release clone until the agent writes `fixed`. Assert `revisions` equal to `[digestOf(h, nodeUnit)]`, where `nodeUnit` is `nodeUnitOf(h.input.claim.node_id, h.revision)`. Assert a release with `furtherWork: false`.
 - Cite: decision D2; `worker-service.impl.md:1480`.
 - Verify: `PATH="$(node scripts/test-path.mjs)" node --test --test-timeout=60000 src/worker/unit/verification.test.ts src/worker/unit/release-gate.test.ts src/worker/unit/evaluation.test.ts src/worker/unit/steps-implement-release.test.ts src/worker/unit/native-method.test.ts` passes.
 

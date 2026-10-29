@@ -1,6 +1,6 @@
 # Dogfood time plan decisions
 
-The plans cite these decisions as D1 to D7. Each decision binds every plan and every task of this set.
+The plans cite these decisions as D1 to D9. Each decision binds every plan and every task of this set.
 
 ## D1 — Source and gaps
 
@@ -29,7 +29,7 @@ The rule of `docs/brainstorm/worker-service.impl.md:1276`, `:1368-1370` and `:14
 
 ## D4 — The release gate run and the reviewer run stay
 
-No plan of this set lets a live result count at the release gate. No plan lets the reviewer skip a listed command on the evidence of the coder. The design pages require both runs (`docs/brainstorm/worker-service.impl.md:1490`, `docs/brainstorm/worker-service.md:617-629`, `docs/brainstorm/mission-service.md:343-344`). Open items O1 and O2 of `00-index.md` hold the choice for Ulrich.
+RULED 2026-10-29 by Ulrich (open items O1 and O2, option A). The release gate runs every listed command in its clean clone, and a live result never counts there. The reviewer runs every listed command of the pinned revision, and the coder evidence replaces none of them. Plan 01 copies a repeated command inside one run list (decision D2). Plan 02 removes the node commands from the live checkout (decision D3).
 
 ## D5 — T3: no rule for the plan text
 
@@ -42,3 +42,16 @@ The next dogfood epic runs the full engine suite on the host once, after the las
 ## D7 — Orphans
 
 A plan removes each field, prop and helper that only fed the code that the plan removes. A plan removes no other dead code. It names other dead code in its pull request body.
+
+## D8 — The usage of a stopped turn
+
+RULED 2026-10-29 by Ulrich (open item O3, option B).
+
+- At `message_end` of an assistant reply, the tracer keeps the usage attributes of that reply for the open turn.
+- A turn that `stop` ends holds `error.type: stopped` and the usage attributes of its last finished reply. A turn with no finished reply holds `error.type: stopped` only.
+- A turn that `turn_end` ends keeps its attributes of today.
+- Root `docs/brainstorm/tracking-service.impl.md` adds this text after line 39: "A revoked or lost execution counts no usage of a turn with no end. The session entry of the reply keeps the usage." Aelita opens the root pull request.
+
+## D9 — The checks before completion of `swe@1`
+
+RULED 2026-10-29 by Ulrich (suggestion S1, option A). Step 4 of `engine/static/prompt/swe@1.md` takes the text of step 4 of root `docs/brainstorm/assets/prompt/swe@1.md` at `c8c41e7`, word for word. No other line of the prompt changes. Aelita opens the root pull request that deletes the prompt clause of root `docs/brainstorm/HANDOFF.md:89`.
