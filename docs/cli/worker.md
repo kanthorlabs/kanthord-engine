@@ -625,7 +625,7 @@ Required token: human JWT. Empty params, absent body. HTTP `200` returns one pag
 Each item holds the instance record, `connection`, `binding_count` and `holder_mismatch`.
 `connection` is `{ connection_name, connected_at, last_heartbeat_at }` for a current connection whose last heartbeat is at most 60 seconds old, otherwise `null`.
 `binding_count` counts the bindings that list the instance.
-`holder_mismatch` is true when a binding that lists the instance names a credential with no live copy of the instance sealed to its current key.
+`holder_mismatch` is true when a binding that lists the instance names a credential with no live copy of the instance sealed to its current key. It is `false` for a `server` or a `container` instance, which uses the copy of the holder `server`.
 
 ### `instance get`
 

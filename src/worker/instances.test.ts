@@ -1113,6 +1113,28 @@ test("list pages instances by name with their binding count and holder mismatch"
   assert.equal(second.next_cursor, null);
 });
 
+test("list answers no holder mismatch for a server and a container instance", async (t) => {
+  const f = instanceFixture(t);
+  await f.createdAt("beta", InstancePlacement.Server);
+  await f.createdAt("gamma", InstancePlacement.Container);
+  f.bindings.push(
+    bindingOf(createIdentity("project"), "coder", ["beta", "gamma"]),
+  );
+  const page = await f.invoke("instance.list", null, {}, {});
+  assert.deepEqual(
+    page.items.map((item) => [
+      item.name,
+      item.binding_count,
+      item.holder_mismatch,
+    ]),
+    [
+      ["beta", 1, false],
+      ["gamma", 1, false],
+    ],
+  );
+  assert.deepEqual(f.scopes, []);
+});
+
 test("the registrations of an instance are empty for a registration with no instance", (t) => {
   const f = instanceFixture(t);
   const projectId = createIdentity("project");
