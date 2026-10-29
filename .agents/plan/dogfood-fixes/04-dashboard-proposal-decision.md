@@ -107,7 +107,7 @@ The dashboard of the decision contract. No engine seam.
 
 - Files: `src/api/types.ts`, `src/lib/span-labels.ts`, `src/lib/span-labels.test.ts` (edit)
 - Do:
-  1. In `ACT_OPERATIONS` (`src/api/types.ts:1528-1537`), replace `"mission.proposal.approve"` with `"mission.proposal.decide"`.
+  1. In `ACT_OPERATIONS` (`src/api/types.ts:1526-1536`), replace `"mission.proposal.approve"` with `"mission.proposal.decide"`.
   2. In `ACT_LABELS` (`src/lib/span-labels.ts:59`), replace `"mission.proposal.approve": "Proposal approved"` with `"mission.proposal.decide": "Proposals decided"`.
   3. In `src/lib/span-labels.test.ts:86`, replace the row with `["mission.proposal.decide", "Proposals decided"]`.
 - Cite: `architecture.impl.md:1461`.
