@@ -48,6 +48,7 @@ import { HttpStatus } from "../kernel/http.ts";
 import { AgentErrorCode, type HolderScope } from "../agent/contract.ts";
 import { SERVER_HOLDER } from "../custody/contract.ts";
 import { Intent, nodeCreateSchema } from "../mission/contract.ts";
+import { shippedAsset } from "../kernel/assets.ts";
 import { CommitType } from "../kernel/commit-message.ts";
 import {
   InvalidReason,
@@ -182,6 +183,7 @@ const CORE_OPERATIONS = [
   "project.agentConfiguration.get",
   "project.binding.verify",
   "project.binding.environment.get",
+  "project.binding.suite_pass.plan.get",
   "project.binding.environment.set",
   "project.binding.environment.rebuild",
   "project.environment.list",
@@ -402,6 +404,7 @@ function fixture(t: TestContext, overrides: Partial<Dependencies> = {}) {
       },
     },
     createMission: unexpected,
+    nodeBodyOf: unexpected,
     liveNodesPinning: unexpected,
     currentNodePins: () => [],
     unmatchedClaims: () => [],
@@ -6005,31 +6008,50 @@ test("binding.environment.get keeps the stored environment and answers suite_pas
   );
   aborted.cancel();
   await assert.rejects(
-    f.registry
-      .get(operation.id)
-      .handler(operation.input.parse({ params, query: {}, body: null }), {
-        ...f.caller,
-        context: aborted,
-      }),
+    async () =>
+      f.registry
+        .get(operation.id)
+        .handler(operation.input.parse({ params, query: {}, body: null }), {
+          ...f.caller,
+          context: aborted,
+        }),
     ContextCancelled,
   );
 });
 
 const SETUP_BINDING_NAME = "engine";
-const SETUP_VERIFICATIONS = [
-  "test -f .kanthord/suite-pass.json",
-  "! git check-ignore -q .kanthord/suite-pass.json",
-  "test ! -f .kanthord/affected-tests.json || grep -qF .kanthord/suite-pass.json .kanthord/affected-tests.json",
-];
+const SETUP_CONTENT = {
+  name: "Set up",
+  requirement: "Write the setup.",
+  criterion: "The setup exists.",
+  verifications: ["true"],
+  bindings: [],
+  intent: Intent.Implement,
+  tags: [],
+  commit_type: CommitType.Chore,
+};
 
 function setupPlanFixture(t: TestContext, action?: Record<string, unknown>) {
-  const f = fixture(t);
+  const bodyCalls: Array<[string, string]> = [];
+  const f = fixture(t, {
+    nodeBodyOf: (filename, text) => {
+      bodyCalls.push([filename, text]);
+      return { filename, content: { ...SETUP_CONTENT }, tasks: [] };
+    },
+  });
   const binding = repositoryBinding();
   const config = {
     ...binding.config,
     strategy: {
       base_branch: "main",
-      ...(action === undefined ? {} : { action }),
+      ...(action === undefined
+        ? {}
+        : {
+            action: {
+              ...action,
+              follows: { type: FollowsType.AssessmentPassed },
+            },
+          }),
     },
   };
   return f.store.transaction((tx) => {
@@ -6043,6 +6065,7 @@ function setupPlanFixture(t: TestContext, action?: Record<string, unknown>) {
     assert.ok(repository && worker);
     return {
       f,
+      bodyCalls,
       params: { project_id: project.id, binding_id: repository.id },
       worker: { project_id: project.id, binding_id: worker.id },
     };
@@ -6054,20 +6077,18 @@ test("binding.suite_pass.plan.get answers the node create body of the setup node
     { name: GitHubAction.PullRequest, landing: Landing.Human },
     { name: GitHubAction.PullRequest },
   ]) {
-    const { f, params } = setupPlanFixture(t, action);
+    const { f, params, bodyCalls } = setupPlanFixture(t, action);
     const answer = f.invoke("binding.suite_pass.plan.get", null, params);
-    assert.equal(answer.filename, `suite-pass-setup-${SETUP_BINDING_NAME}.md`);
-    assert.deepEqual(answer.content.bindings, [params.binding_id]);
-    assert.equal(answer.content.intent, Intent.Implement);
-    assert.equal(answer.content.commit_type, CommitType.Chore);
-    assert.deepEqual(answer.content.verifications, SETUP_VERIFICATIONS);
-    assert.deepEqual(answer.tasks, []);
-    assert.equal(
-      answer.reason,
-      `Add the suite pass record to ${SETUP_BINDING_NAME}.`,
-    );
-    assert.equal(Object.hasOwn(answer.content, "filename"), false);
-    assert.equal(Object.hasOwn(answer.content, "depends_on"), false);
+    const filename = `suite-pass-setup-${SETUP_BINDING_NAME}.md`;
+    assert.deepEqual(bodyCalls, [
+      [filename, shippedAsset("plan/suite-pass-setup.md")],
+    ]);
+    assert.deepEqual(answer, {
+      filename,
+      content: { ...SETUP_CONTENT, bindings: [params.binding_id] },
+      tasks: [],
+      reason: `Add the suite pass record to ${SETUP_BINDING_NAME}.`,
+    });
     assert.ok(
       nodeCreateSchema.safeParse({ ...answer, expected_mission_version: 1 })
         .success,

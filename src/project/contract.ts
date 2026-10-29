@@ -160,6 +160,7 @@ export const ProjectErrorCode = {
     "project.bindings.worker.instance_worker_mismatch",
   WorkerInstanceShared: "project.bindings.worker.instance_shared",
   WorkerNodeUnmatched: "project.bindings.worker.node_unmatched",
+  SuitePassNotProposed: "project.suite_pass.not_proposed",
 } as const;
 
 export const projectNameSchema = z
@@ -803,6 +804,21 @@ const environmentAnswerSchema = z.strictObject({
   reason: z.string().min(1).nullable(),
   suite_pass: z.enum(SuitePassState).nullable(),
 });
+const suitePassPlanSchema = z.strictObject({
+  filename: z.string().min(1),
+  content: z.strictObject({
+    name: z.string().min(1),
+    requirement: z.string().min(1),
+    criterion: z.string().min(1),
+    verifications: z.array(z.string().min(1)).min(1),
+    bindings: z.array(z.string()),
+    intent: z.unknown().optional(),
+    tags: z.unknown().optional(),
+    commit_type: z.unknown().optional(),
+  }),
+  tasks: z.array(z.never()),
+  reason: z.string().min(1),
+});
 const pageOf = <T extends z.ZodType>(item: T) =>
   z.strictObject({ items: z.array(item), next_cursor: z.string().nullable() });
 const baseOperation = {
@@ -1021,6 +1037,16 @@ export const projectOperations = {
     output: environmentAnswerSchema,
     description:
       "Read the environment of one repository binding with its source: stored, repository, detected, universal or none.",
+  },
+  "binding.suite_pass.plan.get": {
+    ...readOperation,
+    id: "project.binding.suite_pass.plan.get",
+    method: HttpMethod.Get,
+    path: "/api/project/:project_id/binding/:binding_id/suite-pass/plan",
+    input: readInput(bindingParams, emptyFields),
+    output: suitePassPlanSchema,
+    description:
+      "Read the body of the node create of the suite pass setup node of one repository binding.",
   },
   "binding.environment.set": {
     ...writeOperation,

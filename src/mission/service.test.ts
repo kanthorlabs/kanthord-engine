@@ -8,6 +8,7 @@ import { OperationError } from "../kernel/errors.ts";
 import { CommitType } from "../kernel/commit-message.ts";
 import { HttpMethod, HttpStatus } from "../kernel/http.ts";
 import { digest } from "../kernel/json.ts";
+import { shippedAsset } from "../kernel/assets.ts";
 import {
   AccessPolicy,
   type CallerContext,
@@ -52,6 +53,7 @@ import {
   type NodeChange,
   nodeChangeSchema,
   type NodeCreate,
+  nodeCreateSchema,
   nodeSchema,
   NodeState,
   type NodeUpdate,
@@ -6189,4 +6191,29 @@ test("nodeBodyOf parses a node file and refuses a task file, an id and a nonempt
         error instanceof OperationError &&
         error.code === MissionErrorCode.PlanInvalid,
     );
+});
+
+test("nodeBodyOf gives the node create body of the shipped suite pass setup node", () => {
+  const body = nodeBodyOf(
+    "suite-pass-setup-engine.md",
+    shippedAsset("plan/suite-pass-setup.md"),
+  );
+  assert.equal(body.content.intent, Intent.Implement);
+  assert.equal(body.content.commit_type, CommitType.Chore);
+  assert.deepEqual(body.content.verifications, [
+    "test -f .kanthord/suite-pass.json",
+    "! git check-ignore -q .kanthord/suite-pass.json",
+    "test ! -f .kanthord/affected-tests.json || grep -qF .kanthord/suite-pass.json .kanthord/affected-tests.json",
+  ]);
+  assert.deepEqual(body.content.bindings, []);
+  assert.deepEqual(body.tasks, []);
+  assert.equal(Object.hasOwn(body.content, "filename"), false);
+  assert.equal(Object.hasOwn(body.content, "depends_on"), false);
+  assert.ok(
+    nodeCreateSchema.safeParse({
+      ...body,
+      reason: "Add the suite pass record to engine.",
+      expected_mission_version: MISSION_INITIAL_VERSION,
+    }).success,
+  );
 });
