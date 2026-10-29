@@ -263,6 +263,7 @@ async function verifyInReleaseClones(
       ),
       directory,
       commands,
+      copyRepeated: true,
       tested_input: testedInput,
       deadline: state.agent.budget.wallDeadline(),
       context: state.run.operationContext,

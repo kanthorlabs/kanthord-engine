@@ -22,7 +22,7 @@ import {
 } from "./steps-implement.ts";
 import { AFFECTED_DECLARATION_FILE } from "./affected.ts";
 import { refreshAtRelease } from "./base-refresh.ts";
-import { releaseGate, ReleaseGateKind } from "./release-gate.ts";
+import { nodeUnitOf, releaseGate, ReleaseGateKind } from "./release-gate.ts";
 import { noProgressDetail, NoProgressRule } from "./progress-rule.ts";
 import { RELEASE_DIRECTORY, WorkspaceKind } from "./workspace.ts";
 import {
@@ -58,8 +58,7 @@ const TAG = "x";
 const CONFIG_KEY = "a.b";
 const BASE_CHANGE = "base change";
 const LEFTOVER = "leftover";
-const RUN_ONCE =
-  "if [ -e .ran ] && [ ! -e fixed ]; then exit 1; fi; touch .ran";
+const FAILS_IN_RELEASE = 'case "$PWD" in */release/*) test -e fixed;; esac';
 
 function write(path: string, content: string) {
   return fauxAssistantMessage(fauxToolCall("write", { path, content }), {
@@ -254,8 +253,8 @@ test("a wall deadline during a release verification releases with the timed-out 
   assert.deepEqual(bodies, [{ further_work: true, stop: BUDGET_STOP }]);
 });
 
-test("a release failure goes to the owner of the first failed index when the node and a task share one command", async (t) => {
-  const current = task("shared", RUN_ONCE);
+test("a failed command that the node and a task share routes its revision to the node unit", async (t) => {
+  const current = task("shared", FAILS_IN_RELEASE);
   const h = await fixture(
     t,
     [current],
@@ -263,8 +262,9 @@ test("a release failure goes to the owner of the first failed index when the nod
   );
   h.revision = {
     ...h.revision,
-    content: { ...h.revision.content, verifications: [RUN_ONCE] },
+    content: { ...h.revision.content, verifications: [FAILS_IN_RELEASE] },
   };
+  const nodeUnit = nodeUnitOf(h.input.claim.node_id, h.revision);
   const revisions = recordRevisions(h);
   acceptEvidence(h);
   recordReleases(h);
@@ -272,7 +272,7 @@ test("a release failure goes to the owner of the first failed index when the nod
     kind: "released",
     furtherWork: false,
   });
-  assert.deepEqual(revisions, [digestOf(h, current)]);
+  assert.deepEqual(revisions, [digestOf(h, nodeUnit)]);
 });
 
 test("a release verification that writes git state leaves the live checkout unchanged", async (t) => {
@@ -368,7 +368,7 @@ test("a failed release command writes the result routed with the unit id of its 
 });
 
 test("the verification spans of a release name the owner of each command with the context release", async (t) => {
-  const owner = task("owner", "true");
+  const owner = task("owner", "true && true");
   const h = await fixture(t, [owner], []);
   h.revision = {
     ...h.revision,
@@ -393,6 +393,40 @@ test("the verification spans of a release name the owner of each command with th
       ["release", owner.id],
     ],
   );
+});
+
+test("a command that the node and a task share runs once at the release gate and holds two results", async (t) => {
+  const count = join(temporary(t), "count");
+  const shared = `echo x >> ${count}`;
+  const owner = task("owner", shared);
+  const h = await fixture(t, [owner], []);
+  h.revision = {
+    ...h.revision,
+    content: { ...h.revision.content, verifications: [shared] },
+  };
+  const records = recordSpans(h);
+  assert.deepEqual(await releaseGate(h), { kind: ReleaseGateKind.Passed });
+  assert.equal(readFileSync(count, "utf8").trim().split("\n").length, ONE_SPAN);
+  const starts = records.flatMap((record) =>
+    record.kind === RecordKind.Span &&
+    record.operation === SpanOperation.Verification &&
+    record.start_time !== undefined
+      ? [record.attributes]
+      : [],
+  );
+  assert.deepEqual(
+    starts.map((attributes) => [
+      attributes?.["kanthord.verification.context"],
+      attributes?.["kanthord.verification.owner_id"],
+    ]),
+    [["release", h.input.claim.node_id]],
+  );
+  assert.deepEqual(h.lastVerification, {
+    passed: true,
+    ran: RELEASE_COMMANDS_RAN,
+    exit_code: 0,
+    timed_out: false,
+  });
 });
 
 test("a budget end writes the release gate result budget_end", async (t) => {

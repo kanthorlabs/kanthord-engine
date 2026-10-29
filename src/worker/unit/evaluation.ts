@@ -335,6 +335,7 @@ async function evaluate(
     ),
     directory: prepared.directory,
     commands: verificationCommands(revision),
+    copyRepeated: true,
     tested_input: prepared.tested_input,
     deadline: budget.wallDeadline(),
     context: run.operationContext,

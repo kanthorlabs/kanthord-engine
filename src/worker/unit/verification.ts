@@ -95,6 +95,7 @@ export interface VerificationInput {
   env: NodeJS.ProcessEnv;
   variables?: Readonly<Record<string, string>>;
   commandLimitMs?: number;
+  copyRepeated?: boolean;
   reruns?: number;
   exhausted?: () => boolean;
   baseline?: (command: string) => Promise<number | null>;
@@ -303,6 +304,7 @@ export async function runVerificationsWithOutput(
   const results: Verification["results"] = [];
   const outputs: string[] = [];
   const flaky: boolean[] = [];
+  const firstPass = new Map<string, number>();
   let outcome: VerificationClass = VerificationClass.Pass;
   for (const [index, command] of input.commands.entries()) {
     const unstarted = unstartedClass(input);
@@ -310,12 +312,20 @@ export async function runVerificationsWithOutput(
       outcome = unstarted;
       break;
     }
+    const first = firstPass.get(command);
+    if (input.copyRepeated && first !== undefined) {
+      results.push({ ...results[first]! });
+      outputs.push(outputs[first]!);
+      flaky.push(false);
+      continue;
+    }
     const classified = await classifiedCommand(command, index, input);
     results.push(classified.ran.result);
     outputs.push(classified.ran.output);
     outcome = classified.outcome;
     if (outcome === VerificationClass.Pass) {
       flaky.push(false);
+      if (!firstPass.has(command)) firstPass.set(command, index);
       continue;
     }
     flaky.push(
