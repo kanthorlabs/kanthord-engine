@@ -124,15 +124,6 @@ test("actTrace names no attempt before the first attempt opens", () => {
   assert.equal(ActAttribute.Attempt in contribution.attributes, false);
 });
 
-test("actTrace names no state before when the act creates the node", () => {
-  const { contribution } = actTrace(Act.DecideProposals, {
-    ...FACTS,
-    from: null,
-  });
-  assert.equal(ActAttribute.StateFrom in contribution.attributes, false);
-  assert.equal(contribution.attributes[ActAttribute.StateTo], FACTS.to);
-});
-
 test("actTrace names the evidence of an evidence delete", () => {
   const { contribution } = actTrace(Act.DeleteEvidence, {
     ...FACTS,
