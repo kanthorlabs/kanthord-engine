@@ -28,6 +28,7 @@ Sonnet at medium effort. The change is one prompt line and one test assert.
 ## Depends on
 
 - Start from `origin/main` of `kanthorlabs/kanthord-engine`. Plans 01, 02 and 04 touch no file of this plan.
+- Work on the branch `fix/swe-prompt-checks` in the worktree `engine/.dev/swe-prompt-checks`. Each commit has the type `fix(prompt)`.
 
 ## Tasks
 

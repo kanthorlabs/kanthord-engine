@@ -50,7 +50,7 @@ RULED 2026-10-29 by Ulrich (open item O3, option B).
 - At `message_end` of an assistant reply, the tracer keeps the usage attributes of that reply for the open turn.
 - A turn that `stop` ends holds `error.type: stopped` and the usage attributes of its last finished reply. A turn with no finished reply holds `error.type: stopped` only.
 - A turn that `turn_end` ends keeps its attributes of today.
-- Root `docs/brainstorm/tracking-service.impl.md` adds this text after line 39: "A revoked or lost execution counts no usage of a turn with no end. The session entry of the reply keeps the usage." Aelita opens the root pull request.
+- Root `docs/brainstorm/tracking-service.impl.md` adds this text after line 39: "A turn that the close of the agent trace ends also holds the usage attributes of its last finished reply. A revoked or lost execution counts no usage of a turn with no end. The session entry of the reply keeps the usage." Aelita opens the root pull request.
 
 ## D9 — The checks before completion of `swe@1`
 

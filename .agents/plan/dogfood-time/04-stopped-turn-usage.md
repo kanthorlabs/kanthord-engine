@@ -25,7 +25,7 @@ Sonnet at high effort. The change is one class of the tracer and its test.
 
 - Root `docs/brainstorm/tracking-service.impl.md:33` — the usage attributes of `agent.turn`.
 - Root `docs/brainstorm/tracking-service.impl.md:39` — a turn that the close of the agent trace ends holds `stopped`.
-- Decision D8.
+- Decision D8. Its root line: "A turn that the close of the agent trace ends also holds the usage attributes of its last finished reply."
 
 ## Depends on
 
