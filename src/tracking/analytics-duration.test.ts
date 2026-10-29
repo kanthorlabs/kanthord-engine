@@ -707,7 +707,7 @@ test("test_floor_share answers the share of the latest release affected span of 
   assert.ok(!("p50" in item));
 });
 
-test("test_floor_share skips a span of the evaluation, a span with no total and a span with a total of 0", async (t) => {
+test("test_floor_share skips a span of the evaluation, a span with no total and a span with a total of 0 or less", async (t) => {
   const store = seededStore(t);
   addSpans(store, [
     floorSpan(MONDAY + 1000, 10, 100),
