@@ -324,21 +324,17 @@ function importsOf(graph, path) {
   return reached;
 }
 
-function reachFrom(graph, path, isEntered) {
+export function closureOf(graph, path) {
   const reached = new Set([path]);
   const queue = [path];
   for (const current of queue) {
     for (const file of importsOf(graph, current)) {
-      if (reached.has(file) || !isEntered(file)) continue;
+      if (reached.has(file)) continue;
       reached.add(file);
       queue.push(file);
     }
   }
   return [...reached].filter((file) => graph.present.has(file)).sort();
-}
-
-export function closureOf(graph, path) {
-  return reachFrom(graph, path, () => true);
 }
 
 function importersOf(graph, path) {
@@ -374,12 +370,8 @@ export function isRunTest(graph, path) {
 
 export const PRODUCTION_ENTRY = "src/main.ts";
 
-export function productionOf(graph) {
-  return reachFrom(graph, PRODUCTION_ENTRY, (file) => !isRunTest(graph, file));
-}
-
 export function floorOf(graph) {
-  const production = productionOf(graph);
+  const production = closureOf(graph, PRODUCTION_ENTRY);
   return [...graph.present]
     .filter((path) => isRunTest(graph, path))
     .filter((path) => {
