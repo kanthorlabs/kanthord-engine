@@ -805,7 +805,7 @@ const environmentAnswerSchema = z.strictObject({
   suite_pass: z.enum(SuitePassState).nullable(),
 });
 const suitePassPlanSchema = z.strictObject({
-  filename: z.string().min(1),
+  filename: z.string().regex(/^[a-z][a-z0-9_-]*\.md$/),
   content: z.strictObject({
     name: z.string().min(1),
     requirement: z.string().min(1),

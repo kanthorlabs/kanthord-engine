@@ -86,7 +86,7 @@ components:
       properties:
         filename:
           type: string
-          minLength: 1
+          pattern: ^[a-z][a-z0-9_-]*\.md$
         content:
           type: object
           properties:
