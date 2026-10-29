@@ -76,8 +76,8 @@ import {
 } from "./control-hold.ts";
 import { blockNode, discardNode, overrideNode } from "./control-close.ts";
 import { unblockNode } from "./control-unblock.ts";
-import { approveProposal } from "./proposal-approve.ts";
-import { proposalPage, requireProposal } from "./proposal-read.ts";
+import { decideProposals } from "./proposal-decide.ts";
+import { proposalPage, requireAssessment } from "./proposal-read.ts";
 import { completeEvidence } from "./evidence-complete.ts";
 import { requestEvidence } from "./evidence-request.ts";
 import { submitEvidence } from "./evidence-submit.ts";
@@ -177,7 +177,7 @@ export function humanActor(caller: CallerContext): HumanActor {
 }
 
 type WriteScope =
-  { mission_id: string } | { node_id: string } | { proposal_id: string };
+  { mission_id: string } | { node_id: string } | { assessment_id: string };
 
 function projectOf(tx: Transaction, scope: WriteScope): string {
   const missionId =
@@ -185,7 +185,7 @@ function projectOf(tx: Transaction, scope: WriteScope): string {
       ? scope.mission_id
       : "node_id" in scope
         ? requireNode(tx, scope.node_id).mission_id
-        : requireNode(tx, requireProposal(tx, scope.proposal_id).node_id)
+        : requireNode(tx, requireAssessment(tx, scope.assessment_id).node_id)
             .mission_id;
   return requireMission(tx, missionId).project_id;
 }
@@ -539,18 +539,18 @@ export class MissionService
         caller.commit((tx) => proposalPage(tx, params.node_id, query)),
     );
     registry.register(
-      missionOperations["proposal.approve"],
+      missionOperations["proposal.decide"],
       ({ params, body }, caller) =>
         this.commitAct(
-          Act.ApproveProposal,
+          Act.DecideProposals,
           caller,
-          { proposal_id: params.proposal_id },
+          { assessment_id: params.assessment_id },
           (tx, ends) =>
-            this.covered(tx, { proposal_id: params.proposal_id }, (tx) =>
-              approveProposal(
+            this.covered(tx, { assessment_id: params.assessment_id }, (tx) =>
+              decideProposals(
                 tx,
                 this.dependencies,
-                params.proposal_id,
+                params.assessment_id,
                 body,
                 humanActor(caller),
                 Date.now(),

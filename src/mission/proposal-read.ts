@@ -10,11 +10,8 @@ import {
 import { requireRunnable } from "./control.ts";
 import { decode, encode, invalidCursor, requireNode } from "./node-read.ts";
 import { recordNotFound } from "./record-list.ts";
-import {
-  listProposals,
-  type ProposalRow,
-  readProposal,
-} from "./proposal-store.ts";
+import { listProposals, type ProposalRow } from "./proposal-store.ts";
+import { type AssessmentRow, readAssessment } from "./record-store.ts";
 
 const SLICE_FROM_START = 0;
 const PAGINATION_LOOKAHEAD = 1;
@@ -27,8 +24,8 @@ export function proposalRecord(row: ProposalRow): Proposal {
   });
 }
 
-export function requireProposal(tx: Transaction, id: string): ProposalRow {
-  const row = readProposal(tx, id);
+export function requireAssessment(tx: Transaction, id: string): AssessmentRow {
+  const row = readAssessment(tx, id);
   if (row === null) recordNotFound();
   return row;
 }

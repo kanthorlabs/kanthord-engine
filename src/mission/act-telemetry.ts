@@ -23,7 +23,7 @@ export const Act = {
   Override: "mission.node.override",
   Block: "mission.node.block",
   Discard: "mission.node.discard",
-  ApproveProposal: "mission.proposal.approve",
+  DecideProposals: "mission.proposal.decide",
   DeleteEvidence: "mission.evidence.delete",
 } as const;
 export type Act = (typeof Act)[keyof typeof Act];
@@ -46,7 +46,7 @@ export interface ActFacts {
   attempt: number;
   acted_at: number;
   mission_version: number;
-  from: string | null;
+  from: string;
   to: string;
   reason: string | null;
   revoked: ExecutionTrace | null;
@@ -87,7 +87,7 @@ function attributesOf(facts: ActFacts): Attributes {
     [ActAttribute.ProjectId]: facts.project_id,
     [ActAttribute.NodeId]: facts.node_id,
     ...(attempt === null ? {} : { [ActAttribute.Attempt]: attempt }),
-    ...(facts.from === null ? {} : { [ActAttribute.StateFrom]: facts.from }),
+    [ActAttribute.StateFrom]: facts.from,
     [ActAttribute.StateTo]: facts.to,
     [ActAttribute.MissionVersion]: facts.mission_version,
     ...(facts.evidence_id === null

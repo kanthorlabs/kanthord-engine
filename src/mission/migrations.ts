@@ -111,6 +111,7 @@ const createMissionTables: Migration = (database) => {
       content TEXT NOT NULL,
       created_node_id TEXT REFERENCES mission_node(id),
       approved_at INTEGER,
+      rejected_at INTEGER,
       created_at INTEGER NOT NULL
     );
     CREATE UNIQUE INDEX mission_node_mission ON mission_node (mission_id, id);

@@ -30,6 +30,7 @@ import { gateFilesOf } from "./gate-files.ts";
 import { landsByHuman } from "./authorization.ts";
 import { requireNode } from "./node-read.ts";
 import { requestContext } from "./node-check.ts";
+import { markProposalsRejected } from "./proposal-store.ts";
 import {
   closeAttempt,
   insertEvidence,
@@ -156,6 +157,8 @@ export function overrideNode(
         now,
       ),
     );
+  if (node.state === NodeState.Blocked)
+    markProposalsRejected(tx, nodeId, node.attempt, now);
   if (node.attempt > NO_ATTEMPT && node.state !== NodeState.Blocked)
     closeAttempt(tx, nodeId, node.attempt, now);
   const outcome = writeHumanRecords(
@@ -332,6 +335,10 @@ export function discardNode(
     null,
     ends,
   );
+  if (node.state === NodeState.Blocked) {
+    assert.ok(node.attempt !== null);
+    markProposalsRejected(tx, nodeId, node.attempt, now);
+  }
   return closeHuman(
     tx,
     dependencies,
