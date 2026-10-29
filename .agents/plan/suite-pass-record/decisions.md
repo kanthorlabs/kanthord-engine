@@ -136,7 +136,7 @@ RULED 2026-10-29 by Ulrich (O2). The rule of `docs/brainstorm/project-service.im
 - For an unstored source, the path joins the paths of the base read of the resolution. `read` removes it from `files` before it builds the answer, so it never enters `GroupResolution.files` and never changes the digest. `resolveGroup` of the Onboarding run reads no such file.
 - For a stored source, `read` runs one base read with that path only.
 - `suite_pass` is `absent` only for the `RepositoryFileState` `absent`. It is `present` for `present`, `too_large` and `not_utf8`.
-- When the SSH read or the base-branch read of a stored source fails, `suite_pass` is null and the answer keeps the stored environment. An aborted `caller.context.signal` rethrows. A failed read of an unstored source refuses the request as it does today.
+- When the SSH read or the base-branch read of a stored source fails, `suite_pass` is null and the answer keeps the stored environment. An aborted `caller.context.signal` rethrows. An error that is not a `CodedError` rethrows. A failed read of an unstored source refuses the request as it does today.
 - A binding with `suite_pass` null gets no proposal.
 
 ## D14 — The proposal on the dashboard

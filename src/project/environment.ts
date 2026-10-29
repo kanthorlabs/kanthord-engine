@@ -14,7 +14,7 @@ import {
   environmentSchema,
   parseEnvironmentText,
 } from "../kernel/devcontainer.ts";
-import { Diagnostic, OperationError } from "../kernel/errors.ts";
+import { CodedError, Diagnostic, OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import { isObject } from "../kernel/values.ts";
 import type { CallerContext } from "../kernel/operation.ts";
@@ -268,7 +268,8 @@ export class ProjectEnvironments {
       );
       return suitePassOf(read.files);
     } catch (error) {
-      if (caller.context.signal.aborted) throw error;
+      if (caller.context.signal.aborted || !(error instanceof CodedError))
+        throw error;
       return null;
     }
   }
