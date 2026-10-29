@@ -8,6 +8,7 @@ const MS_PER_SECOND = 1000;
 const ROOT_NESTING = 0;
 const NAME_SEPARATOR = " > ";
 const PATH_SEPARATOR = "/";
+const NO_TESTS = 0;
 
 function relativePath(file) {
   return relative(process.cwd(), file).split(sep).join(PATH_SEPARATOR);
@@ -20,9 +21,10 @@ function isFileFailure({ file, name, nesting }) {
   );
 }
 
-function secondsLine(file, durationMs) {
+function secondsLine(file, durationMs, counts) {
   const seconds = durationMs / MS_PER_SECOND;
-  return `${JSON.stringify({ file: relativePath(file), seconds })}\n`;
+  const skipped = (counts?.skipped ?? NO_TESTS) + (counts?.todo ?? NO_TESTS);
+  return `${JSON.stringify({ file: relativePath(file), seconds, skipped })}\n`;
 }
 
 export default async function* reporter(source) {
@@ -38,7 +40,7 @@ export default async function* reporter(source) {
     }
     if (type === SUMMARY_EVENT && data.file !== undefined) {
       summarized.add(data.file);
-      yield secondsLine(data.file, data.duration_ms);
+      yield secondsLine(data.file, data.duration_ms, data.counts);
     }
     if (
       (type === COMPLETE_EVENT || type === FAIL_EVENT) &&

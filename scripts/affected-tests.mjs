@@ -525,7 +525,12 @@ export function runTests(root, files, concurrency) {
         .filter((line) => "seconds" in line)
         .map(({ file, seconds }) => [file, seconds]),
     );
-    return { passed: result.status === SUCCESS_STATUS, ids, seconds };
+    const skipped = new Set(
+      lines
+        .filter((line) => line.skipped > EMPTY_LENGTH)
+        .map(({ file }) => file),
+    );
+    return { passed: result.status === SUCCESS_STATUS, ids, seconds, skipped };
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }

@@ -54,7 +54,12 @@ const SUCCESS_STATUS = 0;
 const FAILED_EXIT_CODE = 1;
 const ERROR_EXIT_CODE = 2;
 const SUMMARY_ENVIRONMENT = "GITHUB_STEP_SUMMARY";
-const EMPTY_RUN = { passed: true, ids: [], seconds: new Map() };
+const EMPTY_RUN = {
+  passed: true,
+  ids: [],
+  seconds: new Map(),
+  skipped: new Set(),
+};
 const USAGE_MESSAGE =
   "usage: suite-pass.mjs run --job <name> [--write] [--full] --concurrency <n> <test file>...";
 const INVALID_CONFIG_MESSAGE = `invalid ${CONFIG_PATH}: `;
@@ -193,7 +198,7 @@ function sumSeconds(files, secondsOf) {
   return files.reduce((sum, file) => sum + (secondsOf(file) ?? NO_SECONDS), 0);
 }
 
-function passedFiles(run, files) {
+function unfailedFiles(run, files) {
   const failed = new Set(run.ids.map(({ file }) => file));
   return files.filter((file) => run.seconds.has(file) && !failed.has(file));
 }
@@ -238,7 +243,8 @@ function execute(root, { job, write, full, concurrency }, files) {
   const writtenAt = new Date().toISOString();
   const run =
     selected.length === 0 ? EMPTY_RUN : runTests(root, selected, concurrency);
-  const passed = passedFiles(run, selected);
+  const unfailed = unfailedFiles(run, selected);
+  const passed = unfailed.filter((file) => !run.skipped.has(file));
   if (write) {
     if (isDirty(root)) throw new Error(DIRTY_AFTER_MESSAGE);
     for (const file of passed) {
@@ -268,7 +274,7 @@ function execute(root, { job, write, full, concurrency }, files) {
       sumSeconds(selected, ranSeconds),
     ),
   });
-  return run.passed && passed.length === selected.length
+  return run.passed && unfailed.length === selected.length
     ? SUCCESS_STATUS
     : FAILED_EXIT_CODE;
 }
