@@ -15,9 +15,14 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 import {
+  affectedReport,
+  buildGraph,
+  closureOf,
   computeChanges,
+  floorOf,
   GLOBAL_INPUTS,
   INERT_INPUTS,
+  runTests,
   selectTests,
 } from "./affected-tests.mjs";
 import { affectedReportSchema } from "../src/worker/unit/affected.ts";
@@ -81,6 +86,15 @@ describe("outer", () => {
   });
 });
 `;
+const WAITING_TEST =
+  'import test from "node:test";\ntest("waits", async () => { await new Promise((done) => setTimeout(done, 200)); });\n';
+const FLOOR_FILES = {
+  "src/a.ts": EMPTY_MODULE,
+  "src/b.ts": EMPTY_MODULE,
+  "src/main.ts": 'import "./a.ts";\nimport "./b.ts";\n',
+  "src/full.test.ts": `import "./main.ts";\n${WAITING_TEST}`,
+  "src/part.test.ts": `import "./a.ts";\n${WAITING_TEST}`,
+};
 const UNLOADABLE_TEST = 'import "./missing.mjs";\n';
 
 async function repository(t, files) {
@@ -92,6 +106,11 @@ async function repository(t, files) {
   }
   execFileSync("git", ["init", "--quiet"], { cwd: root });
   return root;
+}
+
+function withoutFloor({ floor, ...report }) {
+  assert.ok(Number.isInteger(floor.tests));
+  return report;
 }
 
 function change(path, status = MODIFIED, previous_path) {
@@ -584,7 +603,8 @@ test("the reporter names a nested test and a file that fails to load", async (t)
   const ids = result.stdout
     .split("\n")
     .filter((line) => line !== "")
-    .map((line) => JSON.parse(line));
+    .map((line) => JSON.parse(line))
+    .filter((line) => "name" in line);
   assert.deepEqual(
     ids.map(({ file, name }) => `${file}|${name}`).sort(),
     [
@@ -608,8 +628,8 @@ test("a failed test gives the report, the report file and the exit code 1", asyn
     KANTHORD_AFFECTED_REPORT: reportPath,
   });
   assert.equal(result.status, FAILED);
-  assert.deepEqual(result.report, {
-    version: 1,
+  assert.deepEqual(withoutFloor(result.report), {
+    version: 2,
     selection: "related",
     reason: null,
     tests: ["src/a.test.ts"],
@@ -745,8 +765,8 @@ test("the none selection gives empty lists and the exit code 0", async (t) => {
     KANTHORD_AFFECTED_REPORT: reportPath,
   });
   assert.equal(result.status, SUCCESS);
-  assert.deepEqual(result.report, {
-    version: 1,
+  assert.deepEqual(withoutFloor(result.report), {
+    version: 2,
     selection: "none",
     reason: null,
     tests: [],
@@ -768,8 +788,8 @@ test("a global input gives the all selection with a reason", async (t) => {
     KANTHORD_AFFECTED_REPORT: reportPath,
   });
   assert.equal(result.status, SUCCESS);
-  assert.deepEqual(result.report, {
-    version: 1,
+  assert.deepEqual(withoutFloor(result.report), {
+    version: 2,
     selection: "all",
     reason: "global input: package.json",
     tests: ["src/a.test.ts"],
@@ -796,4 +816,71 @@ test("a first run that fails with no failed id is a run error", async (t) => {
   assert.equal(result.status, RUN_ERROR);
   assert.equal(existsSync(reportPath), false);
   assert.match(result.stderr, /without a failed test/);
+});
+
+function outsideTestContext(run) {
+  const context = process.env.NODE_TEST_CONTEXT;
+  delete process.env.NODE_TEST_CONTEXT;
+  try {
+    return run();
+  } finally {
+    process.env.NODE_TEST_CONTEXT = context;
+  }
+}
+
+test("the floor holds each test file whose closure holds every production file", async (t) => {
+  const root = await repository(t, FLOOR_FILES);
+  assert.deepEqual(floorOf(buildGraph(root)), ["src/full.test.ts"]);
+});
+
+test("a data edge counts in the closure", async (t) => {
+  const root = await repository(t, {
+    "src/main.ts": 'new URL("../static/openapi/", import.meta.url);\n',
+    "src/full.test.ts": 'import "./main.ts";\n',
+    "static/openapi/one.yaml": "a: 1\n",
+    "static/openapi/two.yaml": "b: 2\n",
+  });
+  const closure = closureOf(buildGraph(root), "src/full.test.ts");
+  assert.ok(closure.includes("static/openapi/one.yaml"));
+  assert.ok(closure.includes("static/openapi/two.yaml"));
+});
+
+test("a selection all writes version 2 with the floor and the total test time", async (t) => {
+  const root = await fixture(t, FLOOR_FILES);
+  const report = outsideTestContext(() =>
+    affectedReport(root, [change("package.json")]),
+  );
+  assert.equal(report.version, 2);
+  assert.equal(report.floor.tests, 1);
+  assert.ok(report.floor.seconds > 0);
+  assert.ok(report.floor.total_seconds >= report.floor.seconds);
+});
+
+test("a related selection writes a floor with a null total", async (t) => {
+  const root = await fixture(t, FLOOR_FILES);
+  const report = outsideTestContext(() =>
+    affectedReport(root, [change("src/a.ts")]),
+  );
+  assert.equal(report.floor.tests, 1);
+  assert.equal(report.floor.total_seconds, null);
+});
+
+test("a selection none writes a floor of 0 seconds", async (t) => {
+  const root = await fixture(t, FLOOR_FILES);
+  const report = outsideTestContext(() =>
+    affectedReport(root, [change("docs/readme.txt")]),
+  );
+  assert.equal(report.selection, "none");
+  assert.equal(report.floor.tests, 1);
+  assert.equal(report.floor.seconds, 0);
+  assert.equal(report.floor.total_seconds, null);
+});
+
+test("the reporter writes the test time of each file", async (t) => {
+  const root = await fixture(t, FLOOR_FILES);
+  const run = outsideTestContext(() =>
+    runTests(root, ["src/full.test.ts", "src/part.test.ts"], 2),
+  );
+  assert.ok(run.seconds.get("src/full.test.ts") > 0);
+  assert.ok(run.seconds.get("src/part.test.ts") > 0);
 });
