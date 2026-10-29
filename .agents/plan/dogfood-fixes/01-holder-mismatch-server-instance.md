@@ -32,7 +32,7 @@ Sonnet at high effort. The change is one condition in one service, with one test
 
 ## Depends on
 
-Nothing. Start from `origin/main` of `kanthorlabs/kanthord-engine`.
+Nothing. Start from `origin/main` of `kanthorlabs/kanthord-engine`. Plan 03 also edits the engine, in other files.
 
 ## Provides
 

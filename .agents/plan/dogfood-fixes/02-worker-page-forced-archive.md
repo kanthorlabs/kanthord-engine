@@ -17,13 +17,13 @@ The design gives one rule for both pages (decision D3):
 
 - A listing binding keeps Archive disabled (`docs/brainstorm/architecture.impl.md:1282`).
 - With no listing binding and a live execution, the dialog holds the checkbox `Stop the live execution` (`architecture.impl.md:1283`).
-- The worker page row of an unlisted server instance reads "Runs with no binding. Archive it to stop it." (`architecture.impl.md:1254`). Ruling N2 of 2026-10-25 gives Archive the force option that stops the live execution.
+- The worker page row of an unlisted server instance reads "Runs with no binding. Archive it to stop it." (`architecture.impl.md:1254`). Ruling N2 of 2026-10-25 gives Archive the force option that stops the live execution (root `docs/brainstorm/HANDOFF.md:89`).
 
 Out of scope:
 
 - The instance page. It already follows the rule.
 - `mock/`. The mock daemon already answers a forced archive (`mock/instances.mjs:373-393`).
-- The Bindings section of the worker page. It shows the bindings of the current project by design (`architecture.impl.md:1255`).
+- The project of the worker page. Plan 05 owns it.
 
 ## Model
 
@@ -39,7 +39,7 @@ Sonnet at high effort. The change removes one block kind from one hook and the p
 
 ## Depends on
 
-Nothing. Start from `origin/main` of `kanthorlabs/kanthord-apps`. Plan 01 runs in parallel. No file overlaps.
+Nothing. Start from `origin/main` of `kanthorlabs/kanthord-apps`. Plans 01, 03 and 04 run in parallel. Plan 05 starts after this plan merges, because both plans edit `src/features/workers/worker/use-worker-page.ts`.
 
 ## Provides
 
@@ -52,8 +52,8 @@ The worker page row offers Archive on an unlisted instance with a live execution
 - Files: `src/features/workers/worker/worker-screen.test.tsx`, `src/features/workers/instance/use-instance-archive.test.tsx` (edit)
 - Do:
   1. In `worker-screen.test.tsx`, add the test "offers Archive with Stop the live execution on an unlisted instance with a live execution". Mock `listWorkerInstances` with `[{ ...CODER_ONE, binding_count: 0 }]`. Mock `listAllWorkerRegistrations` with one registration of `coder@1` with `instance: "coder-1"`, `activity: "executing"`, `draining: true` and `execution_id: "execution_a"`. Mock `readWorkerInstance` with a detail of `coder-1` with `bindings: []` and the same registration.
-  2. In that test, assert that the button "Archive coder-1" has no `aria-disabled="true"`. Click it. Assert that the alert dialog shows the checkbox "Stop the live execution" and a disabled confirm "Archive coder-1". Check the box, click the confirm, and assert that `archiveWorkerInstance` is called with `("coder-1", <revision of the detail>, { force: true })`.
-  3. In `use-instance-archive.test.tsx`, replace the test "waits for a live execution" (`:67-73`) with the test "answers null for an unlisted instance with a live execution". Assert that `blockedOf({ ...FREE, liveExecutions: ["exec_1"] })` is `null`. Task 02.2 removes `liveExecutions` from `ArchiveSubject`. At that task, change the call to `blockedOf(FREE)` and keep the test name.
+  2. In that test, assert that the button "Archive coder-1" has no `aria-disabled="true"`. Click it. Find the alert dialog with `screen.findByRole("alertdialog")`. Assert that it shows the checkbox "Stop the live execution". Query the confirm with `within(dialog).getByRole("button", { name: "Archive coder-1" })`, as `use-instance-archive.test.tsx:195` does, and assert that it is disabled. Check the box, click the confirm, and assert that `archiveWorkerInstance` is called with `("coder-1", <revision of the detail>, { force: true })`.
+  3. In `use-instance-archive.test.tsx`, add the test "opens the dialog for a guarded subject whose fresh read shows a live execution" to `describe("useInstanceArchive")`. Mock `readWorkerInstance` with `EXECUTING` (`:136-153`). Render the hook with the guarded subject `FREE` (`:23-28`), call `request`, and assert that `open` becomes `true` and `executions` deep-equals `["execution_a"]`. Today the fresh read finds the `executing` block (`use-instance-archive.tsx:120`, `:170`) and keeps the dialog closed.
   4. Copy the shapes of the existing fixtures: `CODER_ONE` (`worker-screen.test.tsx:55-66`), `EXECUTING` (`use-instance-archive.test.tsx:136-153`) and the mocks of `worker-screen.test.tsx:120-128`.
 - Verify: `pnpm exec vitest run src/features/workers` fails on the two new tests only.
 
@@ -64,10 +64,11 @@ The worker page row offers Archive on an unlisted instance with a live execution
   1. `archiveBlockKindOf` (`use-instance-archive.tsx:91-97`) answers `"listed"` for a subject with a listing binding, else `null`. `ArchiveBlock` holds `"listed"` alone. `blockNoticeOf` loses the `executing` case (`:108-109`).
   2. Remove `liveExecutions` from `ArchiveSubject` (`:23`) and from `archiveSubjectOf` (`:87`). `guarded` reads `subject.bindingCount !== undefined` alone (`:149`). Keep the exported `liveExecutionsOf` (`:76-80`), because `readingOf` (`:127`) still reads the executions for the dialog.
   3. Remove the prop `liveExecutions` of `InstanceRowActions` (`instance-row-actions.tsx:13`, `:21`, `:32`) and its value in `worker-screen.tsx:357`.
-  4. Remove `liveExecutionsOf` from `WorkerPage` and `useWorkerPage` (`use-worker-page.ts:25`, `:62-67`, `:78`) when no other reader is left. Check with `rg -n 'liveExecutionsOf' src`.
-  5. Update each test fixture that sets `liveExecutions` on an `ArchiveSubject`, for example `FREE` (`use-instance-archive.test.tsx:23-28`).
+  4. Remove `liveExecutionsOf` from `WorkerPage` and `useWorkerPage` (`use-worker-page.ts:25`, `:62-67`, `:78`). Its only reader is `worker-screen.tsx:357`, which step 3 removes.
+  5. Delete the test "waits for a live execution" (`use-instance-archive.test.tsx:67-73`). The test "answers null for a free instance" (`:75-77`) already covers a subject with no listing binding.
+  6. Update each test fixture that sets `liveExecutions` on an `ArchiveSubject`, for example `FREE` (`use-instance-archive.test.tsx:23-28`).
 - Cite: decisions D3, D4; `architecture.impl.md:1281-1283`.
-- Verify: `pnpm exec vitest run src/features/workers` passes. `rg -n 'executing' src/features/workers/instance/use-instance-archive.tsx` prints nothing. The test "offers Detach and a disabled Archive on an instance that a binding lists" (`worker-screen.test.tsx:158`) still passes.
+- Verify: `pnpm exec vitest run src/features/workers` passes. `rg -n 'executing' src/features/workers/instance/use-instance-archive.tsx` prints nothing. `rg -n 'liveExecutionsOf' src/features/workers/worker` prints nothing. The test "offers Detach and a disabled Archive on an instance that a binding lists" (`worker-screen.test.tsx:158`) still passes.
 
 ### 02.E Run the gate
 

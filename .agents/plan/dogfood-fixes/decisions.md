@@ -1,6 +1,6 @@
 # Dogfood fix plan decisions
 
-The plans cite these decisions as D1 to D4. Each decision binds every plan and every task of this set.
+The plans cite these decisions as D1 to D9. Each decision binds every plan and every task of this set.
 
 ## D1 — Source and gaps
 
@@ -20,3 +20,25 @@ The Archive row action of the worker page follows the same rule as the instance 
 ## D4 — Orphans
 
 A plan removes each field, prop and helper that only fed the code that the plan removes. A plan removes no other dead code. It names other dead code in its pull request body.
+
+## D5 — K2: the budget end in the run report
+
+RULED 2026-10-29 by Ulrich (open item O1, option A): the dogfood run report reads the `worker.task` spans of each trace with `tracking span list` and prints each `kanthord.task.result: budget_end`. Aelita added that section to the local `report.mjs` files of the dogfood run. No plan of this set changes the engine or the dashboard for K2.
+
+## D6 — K3 and K4: one decision for each assessment
+
+RULED 2026-10-29 by Ulrich (open item O2, option B). One operation, `mission.proposal.decide`, takes the approved proposal identities of one assessment. In one transaction it creates every fix node and its dependency, rejects every other open proposal of the assessment and unblocks the proposer once. A repeated or stale decision answers a clean refusal and writes nothing. `mission.proposal.approve` goes away, with no backward compatibility.
+
+An approval of one proposal at a time keeps a window: after the first fix node completes, the proposer leaves `Pending`, and a later approval fails again. One decision for each assessment closes that window. It also removes K4, because no proposal stays open after the proposer leaves `Blocked`.
+
+## D7 — Source of plans 03 and 04
+
+The pages of root pull request #276 (branch `docs/assessment-decision`, head `14bc18a`) are the rule for plans 03 and 04. The rules are in `docs/brainstorm/mission-service.impl.md` "The fix-node proposal" and "The mission screen of the dashboard", and in `docs/reference/mission/assessment.md` "Fix-node proposals". Plan 03 starts after Ulrich approves pull request #276. When a later commit of pull request #276 shifts a line, the executor re-anchors the citation before the task.
+
+## D8 — The proposal record adds `rejected_at`
+
+`mission_proposal` adds the nullable column `rejected_at INTEGER`. The executor edits the `CREATE TABLE mission_proposal` text of `src/mission/migrations.ts` in place and adds no migration (`engine/AGENTS.md` "Code rules"). The project has no deployment, so no data migration exists. A developer discards a local database after the merge.
+
+## D9 — The project of the worker pages
+
+`/workers` and the worker page read the query `?project=<project id>` with `useScopedProject` (apps `src/hooks/use-scoped-project.ts`). A value that names no listed project, or no value, falls back to the current project of `ProjectProvider`, which is the first project of the project list (apps `src/features/projects/project-context.tsx:23`). A link from `/workers` to a worker page keeps the `?project=` value. The design link `Open workers` opens `/workers?project=<project>` (root `docs/brainstorm/architecture.impl.md:1657`).
