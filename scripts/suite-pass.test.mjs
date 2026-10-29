@@ -69,7 +69,7 @@ async function fixture(t, files = {}) {
   t.after(() => rm(root, { recursive: true, force: true }));
   const all = {
     "package.json": fixturePackage(),
-    ".gitignore": "node_modules/\n",
+    ".gitignore": "node_modules/\npnpm-lock.yaml\n",
     ".kanthord/affected-tests.json": declaration(),
     ".kanthord/suite-pass.json": configuration(),
     "scripts/gate.mjs": EMPTY_MODULE,
