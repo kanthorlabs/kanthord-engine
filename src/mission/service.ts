@@ -53,6 +53,7 @@ import {
   missionOperations,
   type MissionTelemetry,
   type MissionTransitions,
+  type NodeBody,
   type SchedulerClaims,
   type SchedulerMatch,
   type SchedulerWakeup,
@@ -155,10 +156,17 @@ import {
   updateNodePriority,
 } from "./store.ts";
 import { requireActive, requireMission, requireNonterminal } from "./write.ts";
+import { parsePlanFile } from "./parser.ts";
 
 const MISSION_STOPPED_CODE = "mission.lifecycle.stopped";
 const NO_VIOLATIONS = 0;
 const DEFERRED_CHECK_RESUME_FAILED = "Deferred check resume failed.";
+const NO_DEPENDENCIES = 0;
+const NodeBodyRefusal = {
+  TaskFile: "task_file_forbidden",
+  Id: "id_forbidden",
+  DependsOn: "depends_on_forbidden",
+} as const;
 
 class ProbeRollback extends Error {}
 const QUERY_TRUE = "true";
@@ -173,6 +181,39 @@ export function humanActor(caller: CallerContext): HumanActor {
     kind: ActorKind.Human,
     account: identity.accountId,
     name: identity.name,
+  };
+}
+
+function refuseNodeBody(filename: string, reason: string): never {
+  throw new OperationError(
+    HttpStatus.BadRequest,
+    MissionErrorCode.PlanInvalid,
+    `Plan file ${filename}: ${reason}.`,
+    { filename, reason },
+  );
+}
+
+export function nodeBodyOf(filename: string, text: string): NodeBody {
+  const parsed = parsePlanFile(filename, text);
+  if ("node" in parsed) refuseNodeBody(filename, NodeBodyRefusal.TaskFile);
+  if (parsed.id !== undefined) refuseNodeBody(filename, NodeBodyRefusal.Id);
+  if (parsed.depends_on.length > NO_DEPENDENCIES)
+    refuseNodeBody(filename, NodeBodyRefusal.DependsOn);
+  return {
+    filename,
+    content: {
+      name: parsed.name,
+      requirement: parsed.requirement,
+      criterion: parsed.criterion,
+      verifications: parsed.verifications,
+      bindings: parsed.bindings,
+      intent: parsed.intent,
+      tags: parsed.tags,
+      ...(parsed.commit_type === undefined
+        ? {}
+        : { commit_type: parsed.commit_type }),
+    },
+    tasks: [],
   };
 }
 

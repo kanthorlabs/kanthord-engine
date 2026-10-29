@@ -208,6 +208,8 @@ paths:
     $ref: ./openapi/project/binding.get.yaml#/pathItem
   /api/project/{project_id}/binding:
     $ref: ./openapi/project/binding.list.yaml#/pathItem
+  /api/project/{project_id}/binding/{binding_id}/suite-pass/plan:
+    $ref: ./openapi/project/binding.suite_pass.plan.get.yaml#/pathItem
   /api/project/{project_id}/binding/{binding_id}/verify:
     $ref: ./openapi/project/binding.verify.yaml#/pathItem
   /api/project/{project_id}/binding/{binding_id}/revision:

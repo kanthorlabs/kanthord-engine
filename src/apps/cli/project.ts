@@ -157,6 +157,8 @@ const SET = "set";
 const REBUILD = "rebuild";
 const UNSET = "unset";
 const SECRET_SET = "secret.set";
+const SUITE_PASS = "suite-pass";
+const SUITE_PASS_PLAN = "suite_pass.plan";
 const ENVIRONMENT_SECRET_VARIABLE_RULE =
   "use uppercase letters, digits and underscores, and start with a letter or an underscore";
 const ENVIRONMENT_EXPORT_ABSENT =
@@ -561,6 +563,35 @@ async function environmentExport(
   );
 }
 
+async function environmentSuitePassPlan(
+  projectId: string,
+  bindingId: string,
+  command: Command,
+): Promise<void> {
+  validateProjectId(
+    projectId,
+    environmentCode(SUITE_PASS_PLAN, "invalid_project_id"),
+  );
+  validateBindingId(
+    bindingId,
+    environmentCode(SUITE_PASS_PLAN, "invalid_binding_id"),
+  );
+  const { endpoint, token } = resolveClient(command.optsWithGlobals());
+  requireToken(token, environmentCode(SUITE_PASS_PLAN, "token_required"));
+  const result = await httpClient(projectOperations, endpoint, token)[
+    "binding.suite_pass.plan.get"
+  ]({
+    params: { project_id: projectId, binding_id: bindingId },
+    query: {},
+    body: null,
+  });
+  const answer = handleReadResult(
+    result,
+    environmentCode(SUITE_PASS_PLAN, "indeterminate"),
+  );
+  process.stdout.write(`${JSON.stringify(answer, null, EXPORT_INDENT)}\n`);
+}
+
 async function environmentList(
   projectId: string,
   command: Command,
@@ -880,6 +911,21 @@ function addEnvironmentCommands(project: Command): void {
     .action(
       (projectId: string, bindingId: string, _options, command: Command) =>
         environmentShow(projectId, bindingId, command),
+    );
+  const suitePass = environment
+    .command(SUITE_PASS)
+    .description("Suite pass proposal commands");
+  suitePass.action(() => suitePass.help());
+  suitePass
+    .command("plan")
+    .description(
+      "Print the node create body of the suite pass setup node of a repository binding as indented JSON",
+    )
+    .argument("<project-id>", "Project ID")
+    .argument("<binding-id>", "Repository binding ID")
+    .action(
+      (projectId: string, bindingId: string, _options, command: Command) =>
+        environmentSuitePassPlan(projectId, bindingId, command),
     );
   const secret = environment
     .command("secret")

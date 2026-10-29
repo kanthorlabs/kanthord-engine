@@ -587,6 +587,7 @@ test("project environment export prints only the environment as indented JSON", 
     commit: null,
     environment: STORED_ENVIRONMENT,
     reason: null,
+    suite_pass: null,
   });
   const result = await environmentCommand(t, endpoint, [
     "export",
@@ -613,6 +614,7 @@ const DETECTED_ANSWER = {
   commit: "c1",
   environment: DETECTED_ENVIRONMENT,
   reason: null,
+  suite_pass: "present",
 };
 
 test("project environment export prints the detected document as indented JSON", async (t) => {
@@ -640,12 +642,85 @@ test("project environment show prints the source detected", async (t) => {
   assert.deepEqual(JSON.parse(result.stdout), DETECTED_ANSWER);
 });
 
+const SUITE_PASS_ABSENT = "absent";
+
+test("environment show prints suite_pass", async (t) => {
+  const answer = { ...DETECTED_ANSWER, suite_pass: SUITE_PASS_ABSENT };
+  const { endpoint } = await environmentServer(t, answer);
+  const result = await environmentCommand(t, endpoint, [
+    "show",
+    PROJECT_ID,
+    BINDING_ID,
+  ]);
+  assert.equal(result.status, ExitCode.Success, result.stderr);
+  assert.equal(JSON.parse(result.stdout).suite_pass, SUITE_PASS_ABSENT);
+});
+
+const SETUP_NODE_BODY = {
+  filename: "suite-pass-setup-main-repo.md",
+  content: {
+    name: "Add the suite pass record",
+    requirement: "Write the suite pass record.",
+    criterion: "The suite pass record exists.",
+    verifications: ["test -f .kanthord/suite-pass.json"],
+    bindings: [BINDING_ID],
+    intent: "implement",
+    tags: [],
+    commit_type: "chore",
+  },
+  tasks: [],
+  reason: "Add the suite pass record to main-repo.",
+};
+
+test("environment suite-pass plan prints the setup node body", async (t) => {
+  const { endpoint, seen } = await environmentServer(t, SETUP_NODE_BODY);
+  const result = await environmentCommand(t, endpoint, [
+    "suite-pass",
+    "plan",
+    PROJECT_ID,
+    BINDING_ID,
+  ]);
+  assert.equal(result.status, ExitCode.Success, result.stderr);
+  assert.deepEqual(seen, [
+    {
+      method: "GET",
+      url: `/api/project/${PROJECT_ID}/binding/${BINDING_ID}/suite-pass/plan`,
+      body: EMPTY_OUTPUT,
+    },
+  ]);
+  assert.equal(result.stdout, `${JSON.stringify(SETUP_NODE_BODY, null, 2)}\n`);
+  const env = environment(temporary(t));
+  for (const [args, code] of [
+    [
+      ["invalid", BINDING_ID],
+      "cli.project.environment.suite_pass.plan.invalid_project_id",
+    ],
+    [
+      [PROJECT_ID, "invalid"],
+      "cli.project.environment.suite_pass.plan.invalid_binding_id",
+    ],
+  ] as const) {
+    const refused = await invocation(
+      ["project", "environment", "suite-pass", "plan", ...args],
+      env,
+      t.signal,
+    );
+    assert.equal(refused.status, ExitCode.Failure, refused.stderr);
+    assert.match(
+      refused.stderr,
+      new RegExp(`^${code.replaceAll(".", "\\.")}:`),
+    );
+    assert.equal(refused.stdout, EMPTY_OUTPUT);
+  }
+});
+
 test("project environment export stops when the binding holds no environment", async (t) => {
   const { endpoint } = await environmentServer(t, {
     source: "none",
     commit: "c1",
     environment: null,
     reason: null,
+    suite_pass: "absent",
   });
   const result = await environmentCommand(t, endpoint, [
     "export",

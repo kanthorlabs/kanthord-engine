@@ -8,6 +8,7 @@ import { OperationError } from "../kernel/errors.ts";
 import { CommitType } from "../kernel/commit-message.ts";
 import { HttpMethod, HttpStatus } from "../kernel/http.ts";
 import { digest } from "../kernel/json.ts";
+import { shippedAsset } from "../kernel/assets.ts";
 import {
   AccessPolicy,
   type CallerContext,
@@ -52,6 +53,7 @@ import {
   type NodeChange,
   nodeChangeSchema,
   type NodeCreate,
+  nodeCreateSchema,
   nodeSchema,
   NodeState,
   type NodeUpdate,
@@ -78,7 +80,12 @@ import { importDigest, normalizeImportSnapshot } from "./import.ts";
 import { serializePlanFile } from "./export.ts";
 import { parsePlanFile } from "./parser.ts";
 import { DEFERRED_CHECK_START_LIMIT } from "./node-check.ts";
-import { type Dependencies, humanActor, MissionService } from "./service.ts";
+import {
+  type Dependencies,
+  humanActor,
+  MissionService,
+  nodeBodyOf,
+} from "./service.ts";
 import {
   CONTENT_FIELDS,
   ContentField,
@@ -6128,4 +6135,85 @@ test("node create, node update and a rebind pass when the environments are not m
   assert.equal(updated.revisions.length, SINGLE_ITEM);
   const rebound = f.rebindTo(nodeId);
   assert.equal(rebound.node_change.revisions.length, SINGLE_ITEM);
+});
+
+const SETUP_FILENAME = "setup.md";
+const SETUP_NODE_TEXT = `---
+intent: implement
+commit_type: chore
+verifications:
+  - "! git check-ignore -q setup.json"
+---
+
+# Set up
+
+## Requirement
+
+Write setup.json.
+
+## Criterion
+
+setup.json exists.
+`;
+
+test("nodeBodyOf parses a node file and refuses a task file, an id and a nonempty depends_on", () => {
+  assert.deepEqual(nodeBodyOf(SETUP_FILENAME, SETUP_NODE_TEXT), {
+    filename: SETUP_FILENAME,
+    content: {
+      name: "Set up",
+      requirement: "Write setup.json.",
+      criterion: "setup.json exists.",
+      verifications: ["! git check-ignore -q setup.json"],
+      bindings: [],
+      intent: Intent.Implement,
+      tags: [],
+      commit_type: CommitType.Chore,
+    },
+    tasks: [],
+  });
+  for (const text of [
+    SETUP_NODE_TEXT.replace(
+      "intent: implement\ncommit_type: chore",
+      "node: other.md",
+    ),
+    SETUP_NODE_TEXT.replace(
+      "intent: implement",
+      `intent: implement\nid: ${createIdentity(NODE_IDENTITY_PREFIX)}`,
+    ),
+    SETUP_NODE_TEXT.replace(
+      "intent: implement",
+      "intent: implement\ndepends_on: [other.md]",
+    ),
+  ])
+    assert.throws(
+      () => nodeBodyOf(SETUP_FILENAME, text),
+      (error) =>
+        error instanceof OperationError &&
+        error.code === MissionErrorCode.PlanInvalid,
+    );
+});
+
+test("nodeBodyOf gives the node create body of the shipped suite pass setup node", () => {
+  const body = nodeBodyOf(
+    "suite-pass-setup-engine.md",
+    shippedAsset("plan/suite-pass-setup.md"),
+  );
+  assert.equal(body.content.intent, Intent.Implement);
+  assert.equal(body.content.commit_type, CommitType.Chore);
+  assert.deepEqual(body.content.verifications, [
+    "test -f .kanthord/suite-pass.json",
+    "! git check-ignore -q .kanthord/suite-pass.json",
+    "test ! -f .kanthord/affected-tests.json || grep -qF .kanthord/suite-pass.json .kanthord/affected-tests.json",
+  ]);
+  assert.deepEqual(body.content.bindings, []);
+  assert.deepEqual(body.tasks, []);
+  assert.equal(Object.hasOwn(body.content, "filename"), false);
+  assert.equal(Object.hasOwn(body.content, "depends_on"), false);
+  assert.ok(
+    nodeCreateSchema.safeParse({
+      ...body,
+      reason: "Add the suite pass record to engine.",
+      expected_mission_version: MISSION_INITIAL_VERSION,
+    }).success,
+  );
 });

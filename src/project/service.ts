@@ -12,6 +12,8 @@ import {
 } from "../kernel/caller.ts";
 import type { Store, Transaction } from "../kernel/store.ts";
 import { HttpStatus } from "../kernel/http.ts";
+import { shippedAsset } from "../kernel/assets.ts";
+import type { NodeBodyOf } from "../mission/contract.ts";
 import {
   background,
   CancellationContext,
@@ -177,6 +179,7 @@ import {
 
 const SSH_UNREACHABLE_STATUS = 422;
 const PROJECTS_DIRECTORY = "projects";
+const SUITE_PASS_SETUP_ASSET = "plan/suite-pass-setup.md";
 const NO_GENERATION = 0;
 const BEFORE = -1;
 const SAME = 0;
@@ -622,6 +625,7 @@ export interface Dependencies {
   stateDirectory: string;
   hostHome?: string;
   createMission: CreateMission;
+  nodeBodyOf: NodeBodyOf;
   liveNodesPinning: LiveNodesPinning;
   currentNodePins: CurrentNodePins;
   unmatchedClaims: UnmatchedClaims;
@@ -687,6 +691,7 @@ export class ProjectService implements Service, ProjectBindings {
   private readonly stateDirectory: string;
   private readonly hostHome?: string;
   private readonly createMission: CreateMission;
+  private readonly nodeBodyOf: NodeBodyOf;
   private readonly liveNodesPinning: LiveNodesPinning;
   private readonly currentNodePins: CurrentNodePins;
   private readonly unmatchedClaims: UnmatchedClaims;
@@ -714,6 +719,7 @@ export class ProjectService implements Service, ProjectBindings {
     this.stateDirectory = dependencies.stateDirectory;
     this.hostHome = dependencies.hostHome;
     this.createMission = dependencies.createMission;
+    this.nodeBodyOf = dependencies.nodeBodyOf;
     this.liveNodesPinning = dependencies.liveNodesPinning;
     this.currentNodePins = dependencies.currentNodePins;
     this.unmatchedClaims = dependencies.unmatchedClaims;
@@ -916,6 +922,31 @@ export class ProjectService implements Service, ProjectBindings {
     registry.register(
       projectOperations["binding.environment.get"],
       ({ params }, caller) => this.environments.read(params, caller),
+    );
+    registry.register(
+      projectOperations["binding.suite_pass.plan.get"],
+      ({ params }, caller) => {
+        const text = shippedAsset(SUITE_PASS_SETUP_ASSET);
+        return caller.commit((tx) => {
+          const { id, name, config } = requireRepositoryBinding(tx, params);
+          const action = config.strategy.action;
+          if (
+            action?.name !== GitHubAction.PullRequest ||
+            (action.landing ?? Landing.Human) !== Landing.Human
+          )
+            throw new OperationError(
+              HttpStatus.Conflict,
+              ProjectErrorCode.SuitePassNotProposed,
+              "The binding gets no suite pass proposal.",
+            );
+          const body = this.nodeBodyOf(`suite-pass-setup-${name}.md`, text);
+          return {
+            ...body,
+            content: { ...body.content, bindings: [id] },
+            reason: `Add the suite pass record to ${name}.`,
+          };
+        });
+      },
     );
     registry.register(
       projectOperations["environment.list"],

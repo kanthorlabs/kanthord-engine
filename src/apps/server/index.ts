@@ -38,6 +38,7 @@ import {
 import {
   missionMigrations,
   MissionService,
+  nodeBodyOf,
   uploadCheckSpan,
 } from "../../mission/index.ts";
 import {
@@ -946,6 +947,7 @@ export function composeServices(options: {
     bindingsChanged: (projectId) => worker.bindingsChanged(projectId),
     instanceOf: (tx, name) => worker.instanceOf(tx, name),
     createMission: (tx, pid, actor) => mission.createMission(tx, pid, actor),
+    nodeBodyOf,
     liveNodesPinning: (tx, bid) => mission.liveNodesPinning(tx, bid),
     currentNodePins: (tx, projectId, bindingIds) =>
       mission.currentNodePins(tx, projectId, bindingIds),

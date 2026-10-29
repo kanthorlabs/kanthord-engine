@@ -676,6 +676,10 @@ export const nodeCreateSchema = z.strictObject({
   expected_mission_version: z.number().int().positive(),
 });
 export type NodeCreate = z.infer<typeof nodeCreateSchema>;
+export type NodeBody = Pick<NodeCreate, "filename" | "content"> & {
+  tasks: never[];
+};
+export type NodeBodyOf = (filename: string, text: string) => NodeBody;
 export const nodeUpdateSchema = z.strictObject({
   filename: planFileNameSchema,
   content: contentWriteSchema,

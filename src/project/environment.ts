@@ -35,6 +35,7 @@ import {
   repositoryConfigSchema,
   type RepositoryFiles,
   type SlotEnvironment,
+  SuitePassState,
 } from "./contract.ts";
 import {
   detectEnvironment,
@@ -58,6 +59,7 @@ export const EnvironmentErrorCode = {
   Invalid: "project.environment.invalid",
   KeyRefused: "project.environment.key_refused",
 } as const;
+export const SUITE_PASS_FILE = ".kanthord/suite-pass.json";
 const SSH_UNREACHABLE_STATUS = 422;
 const ENVIRONMENT_KEY = "environment";
 
@@ -69,6 +71,10 @@ export interface GroupResolution {
   document: Environment | null;
   files: RepositoryFile[];
   reason?: string;
+}
+interface ProbedResolution {
+  resolution: GroupResolution;
+  probed: RepositoryFile[];
 }
 interface ResolvedSlot {
   readonly revisions: string;
@@ -114,6 +120,14 @@ function refuseUnreadable(context: Context, error: unknown): never {
     "Repository SSH read failed.",
     { failure_reason: gitFailureReason(error) },
   );
+}
+
+function suitePassOf(files: RepositoryFile[]): SuitePassState {
+  const file = files.find(({ path }) => path === SUITE_PASS_FILE);
+  assert.ok(file);
+  return file.state === RepositoryFileState.Absent
+    ? SuitePassState.Absent
+    : SuitePassState.Present;
 }
 
 function dockerfilePath(document: Environment): string | null {
@@ -214,25 +228,49 @@ export class ProjectEnvironments {
       requireRepositoryBinding(tx, params),
     );
     const stored = config.environment;
-    if (stored !== undefined)
+    if (stored !== undefined) {
+      const suitePass = await this.storedSuitePass(id, config, caller);
       return caller.commit(() => ({
         source: EnvironmentSource.Stored,
         commit: null,
         environment: stored,
         reason: null,
+        suite_pass: suitePass,
       }));
-    const resolved = await this.resolveUnstored(
+    }
+    const { resolution, probed } = await this.resolveUnstored(
       id,
       config,
       this.dependencies.targetOf(params.project_id, id),
       caller.context,
+      [SUITE_PASS_FILE],
     );
     return caller.commit(() => ({
-      source: resolved.source,
-      commit: resolved.commit,
-      environment: resolved.document,
-      reason: resolved.reason ?? null,
+      source: resolution.source,
+      commit: resolution.commit,
+      environment: resolution.document,
+      reason: resolution.reason ?? null,
+      suite_pass: suitePassOf(probed),
     }));
+  }
+
+  private async storedSuitePass(
+    bindingId: string,
+    config: RepositoryConfig,
+    caller: Pick<CallerContext, "context">,
+  ): Promise<SuitePassState | null> {
+    try {
+      const read = await this.readBase(
+        bindingId,
+        config,
+        [SUITE_PASS_FILE],
+        caller,
+      );
+      return suitePassOf(read.files);
+    } catch (error) {
+      if (caller.context.signal.aborted) throw error;
+      return null;
+    }
   }
 
   async write(
@@ -294,7 +332,14 @@ export class ProjectEnvironments {
         files: read.files,
       };
     }
-    return this.resolveUnstored(bindingId, config, target, context);
+    const { resolution } = await this.resolveUnstored(
+      bindingId,
+      config,
+      target,
+      context,
+      [],
+    );
+    return resolution;
   }
 
   async baseCommitOf(bindingId: string, context: Context): Promise<string> {
@@ -312,13 +357,20 @@ export class ProjectEnvironments {
     config: RepositoryConfig,
     target: EnvironmentTarget,
     context: Context,
-  ): Promise<GroupResolution> {
+    probes: readonly string[],
+  ): Promise<ProbedResolution> {
     const deadline = new CancellationContext(
       context,
       Date.now() + REPOSITORY_FILES_READ_TIMEOUT_MS,
     );
     try {
-      return await this.resolveWithin(bindingId, config, target, deadline);
+      return await this.resolveWithin(
+        bindingId,
+        config,
+        target,
+        deadline,
+        probes,
+      );
     } finally {
       deadline.cancel();
     }
@@ -329,14 +381,39 @@ export class ProjectEnvironments {
     config: RepositoryConfig,
     target: EnvironmentTarget,
     context: Context,
-  ): Promise<GroupResolution> {
+    probes: readonly string[],
+  ): Promise<ProbedResolution> {
     const atImage = target === EnvironmentTarget.Image;
-    const base = await this.readBase(
+    const read = await this.readBase(
       bindingId,
       config,
-      atImage ? [DEVCONTAINER_FILE] : [],
+      [...(atImage ? [DEVCONTAINER_FILE] : []), ...probes],
       { context },
     );
+    const probed = read.files.filter(({ path }) => probes.includes(path));
+    const base = {
+      commit: read.commit,
+      files: read.files.filter(({ path }) => !probes.includes(path)),
+    };
+    return {
+      resolution: await this.resolveFrom(
+        bindingId,
+        config,
+        atImage,
+        base,
+        context,
+      ),
+      probed,
+    };
+  }
+
+  private async resolveFrom(
+    bindingId: string,
+    config: RepositoryConfig,
+    atImage: boolean,
+    base: BaseRead,
+    context: Context,
+  ): Promise<GroupResolution> {
     if (atImage) {
       const file = base.files[0];
       assert.ok(file);
