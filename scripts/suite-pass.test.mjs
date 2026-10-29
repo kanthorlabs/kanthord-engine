@@ -257,7 +257,7 @@ test("an always_run file that dirties the tree writes no record", async (t) => {
   });
   assert.equal(result.status, RUN_ERROR);
   assert.deepEqual(result.ran, ["src/b.test.ts"]);
-  assert.match(result.stderr, /clean/);
+  assert.match(result.stderr, /left the work tree/);
   assert.equal(await readFile(join(root, STORE_PATH), "utf8"), stored);
 });
 
