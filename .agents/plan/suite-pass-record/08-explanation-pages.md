@@ -93,7 +93,7 @@ No code seam.
 
 - Files: `docs/brainstorm/HANDOFF.md` (edit)
 - Do:
-  1. Replace the item of `:89` with one item: "Build the suite pass proposal: `suite_pass` in `project.binding.environment.get`, the shipped plan `suite-pass-setup` and the dashboard line of [the suite pass proposal](project-service.impl.md#the-suite-pass-proposal). The engine plan set `suite-pass-record` plans it in plans 09 and 10, after the rulings O1 and O2 of that set."
+  1. Replace the item of `:89` with one item: "Build the suite pass proposal: `suite_pass` in `project.binding.environment.get`, the shipped plan `suite-pass-setup` and the dashboard line of [the suite pass proposal](project-service.impl.md#the-suite-pass-proposal). The engine plan set `suite-pass-record` plans it in plans 09 and 10."
   2. Keep every other item.
 - Verify: `rg -n 'gate_files' docs/brainstorm/HANDOFF.md` names no item of `suite-pass.json`. `npx prettier --check docs/brainstorm/HANDOFF.md` passes.
 

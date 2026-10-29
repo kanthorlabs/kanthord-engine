@@ -1,10 +1,10 @@
 # Suite pass record plan decisions
 
-The plans cite these decisions as D1 to D11. Each decision binds every plan and every task of this set.
+The plans cite these decisions as D1 to D14. Each decision binds every plan and every task of this set.
 
 ## D1 — Source and gaps
 
-The design pages under `docs/brainstorm/` of the root repository at `c8c41e7` are the rule (`engine/AGENTS.md:3-6`). `docs/brainstorm/HANDOFF.md:89` follows root pull request #279 at head `c418936`. A plan task implements the page as written. A task that meets a gap that no decision below covers writes one `DEBATE:` line in its report with the page line that proves the gap. Aelita brings it to Ulrich as one open item.
+The design pages under `docs/brainstorm/` of the root repository at `c8c41e7` are the rule (`engine/AGENTS.md:3-6`). `docs/brainstorm/HANDOFF.md:89` follows root pull request #279 at head `c418936`. The rulings of 2026-10-29 on O1, O2, O3, S1 and S8 follow root pull request #281 at head `7c0e114`. A plan task implements the page as written. A task that meets a gap that no decision below covers writes one `DEBATE:` line in its report with the page line that proves the gap. Aelita brings it to Ulrich as one open item.
 
 ## D2 — The base of plan 01
 
@@ -48,7 +48,7 @@ An `affected_base` span and an `affected` span with no valid report hold none of
 
 ## D6 — The measure `test_floor_share`
 
-The rule of `docs/brainstorm/tracking-service.impl.md:347`, `:352` and `:357-358`:
+The rule of `docs/brainstorm/tracking-service.impl.md:348`, `:353` and `:358-359` at root pull request #281 head `7c0e114`. The total above 0 is part of that rule (S8, approved by Ulrich on 2026-10-29):
 
 - A matching span is a `worker.verification` span with `kanthord.verification.kind` `affected`, `kanthord.verification.context` `release`, a finite `kanthord.affected.floor_seconds` and a finite `kanthord.affected.total_seconds` above 0.
 - The group key and the bucket follow the duration read. A span counts in the bucket of its `start_time`.
@@ -59,9 +59,9 @@ The rule of `docs/brainstorm/tracking-service.impl.md:347`, `:352` and `:357-358
 
 ## D7 — The floor of the engine selector
 
-Plan 05 follows open item O3, option A. Ulrich rules O3 before plan 05 starts. Another ruling changes only task 05.2 step 2.
+RULED 2026-10-29 by Ulrich (O3). The rule of `docs/brainstorm/worker-service.impl.md:1599` at root pull request #281 head `7c0e114`: "A production file is a file in the import closure of the entry that the program runs. The engine entry is `src/main.ts`."
 
-- A production file is a file of the import closure of `src/main.ts`.
+- A production file is a file of the import closure of the program entry. The engine entry is `src/main.ts`, which `bin/kanthord.mjs` loads as `dist/main.js`.
 - The import closure of a file is the file and each file that it reaches through the forward edges of the selector graph: the import edges and the data edges of `DATA_TABLE` and of `new URL(..., import.meta.url)`.
 - A floor test file is a run test file whose import closure holds every production file. `floor.tests` counts every floor test file of the repository, also when the selection runs none of them.
 - The test time of a file is `duration_ms / 1000` of the `test:summary` event of the node test runner that holds `data.file` of that file. Node.js 24 sends no file-level `test:pass` for a passing file.
@@ -89,7 +89,7 @@ The rule of `docs/brainstorm/project-service.impl.md:403-435`:
 - The schedule trigger `cron: "0 3 * * *"` runs the workflow on `main` with `--full`.
 - `.kanthord/suite-pass.json` holds `version: 1` and `always_run`. `always_run` lists each test file that bundles code, reaches `bin/` or `dist/`, or reads a path that it builds at run time.
 - `.gitignore` adds `!/.kanthord/suite-pass.json` after `!/.kanthord/comments.json`.
-- `gate_files` adds `.kanthord/suite-pass.json`, `.github/workflows/ci.yml` and `scripts/suite-pass.mjs`.
+- `gate_files` adds `.kanthord/suite-pass.json`, `.github/workflows/ci.yml` and `scripts/suite-pass.mjs`, the record steps (S1, approved by Ulrich on 2026-10-29; `docs/brainstorm/project-service.impl.md:435` at root pull request #281).
 
 ## D9 — The suite pass record of the apps repository
 
@@ -102,7 +102,7 @@ The apps selector runs `vitest related` and gives no import graph (apps `scripts
 - The environment variable `SUITE_PASS_TEST_COMMAND` replaces the vitest command in the tests of the script. CI never sets it.
 - `.kanthord/suite-pass.json` holds `version: 1` and `always_run: []`, unless a test file of apps meets the rule of `project-service.impl.md:433`.
 - `.gitignore` adds `!/.kanthord/suite-pass.json`.
-- `gate_files` adds `.kanthord/suite-pass.json`, `.github/workflows/ci.yml` and `scripts/suite-pass.mjs`.
+- `gate_files` adds `.kanthord/suite-pass.json`, `.github/workflows/ci.yml` and `scripts/suite-pass.mjs`, the record steps (S1, approved by Ulrich on 2026-10-29; `docs/brainstorm/project-service.impl.md:435` at root pull request #281).
 - The `check` job runs `typecheck`, `lint`, `format:check` and `build` as steps, and the test run as the suite pass step.
 
 ## D10 — Gate files and the landing
@@ -112,3 +112,31 @@ A gate file is a path of `gate_files` of `.kanthord/affected-tests.json` at the 
 ## D11 — Orphans
 
 A plan removes each field, prop and helper that only fed the code that the plan removes. A plan removes no other dead code. It names other dead code in its pull request body.
+
+## D12 — The setup node of the suite pass proposal
+
+RULED 2026-10-29 by Ulrich (O1). The rule of `docs/brainstorm/project-service.impl.md:640` and `:803` at root pull request #281 head `7c0e114`:
+
+- A human accepts the proposal with one `mission.node.create`. The node create changes no other node, and `expected_mission_version` refuses a concurrent edit of the mission.
+- The engine ships `static/plan/suite-pass-setup.md`, one node file with `intent: implement`, `commit_type: chore`, no task and no `bindings` key.
+- The `human` read `project.binding.suite_pass.plan.get` at `GET /api/project/:project_id/binding/:binding_id/suite-pass/plan` answers `{ filename, content, tasks, reason }`, the body of `mission.node.create` without `expected_mission_version`. The client adds the current mission version.
+- `filename` is `suite-pass-setup-<binding name>.md`. `content` is the parsed node file with `bindings: [<binding name>]`. `tasks` is `[]`. `reason` is `Add the suite pass record to <binding name>.`
+- The Project Service imports only `contract.ts` of the Mission Service. The composition root gives it the Mission collaboration `nodeBodyOf(filename, text)`, as it gives `createMission` (`src/apps/server/index.ts:948`). The Mission Service parses the text with `parsePlanFile` of `src/mission/parser.ts` and refuses a task file.
+- The read refuses a binding that is absent, removed or no repository binding with 404 `project.binding.not_found`. It refuses a binding with no `pull_request` action with `landing: human` with 409 `project.suite_pass.not_proposed`. It reads no repository file.
+- The CLI leaf `kanthord project environment suite-pass plan <project-id> <binding-id>` calls the read and prints the answer as indented JSON. A human adds `expected_mission_version` and passes the file to `kanthord mission node create <mission-id> --file <path>`.
+- The dashboard action is `Add setup node`. It reads the mission of the project for its version, then calls `mission.node.create` with the body of the read.
+
+## D13 — The read of the suite pass configuration
+
+RULED 2026-10-29 by Ulrich (O2). The rule of `docs/brainstorm/project-service.impl.md:636-638` at root pull request #281 head `7c0e114`:
+
+- `project.binding.environment.get` reads `.kanthord/suite-pass.json` with `repositoryFiles.readFilesAtCommit` at the base commit, for every source.
+- For an unstored source, the path joins the paths of the base read of the resolution. `read` removes it from `files` before it builds the answer, so it never enters `GroupResolution.files` and never changes the digest. `resolveGroup` of the Onboarding run reads no such file.
+- For a stored source, `read` runs one base read with that path only.
+- `suite_pass` is `present` when the file exists at the base commit, and `absent` when it does not.
+- When the read of a stored source fails, `suite_pass` is null and the answer keeps the stored environment. A failed read of an unstored source refuses the request as it does today.
+- A binding with `suite_pass` null gets no proposal.
+
+## D14 — The proposal on the dashboard
+
+The dashboard shows the proposal when `suite_pass` is `absent` and the binding configuration holds a `pull_request` action with `landing: human` (`project-service.impl.md:639`, `:803`). The dashboard derives it from the binding configuration. No answer field carries it.

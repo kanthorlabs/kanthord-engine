@@ -29,12 +29,11 @@ Sonnet at high effort. The change stays in two scripts and their test file. The 
 - `docs/brainstorm/worker-service.impl.md:1595-1598` — version 2, the floor and its keys.
 - `docs/brainstorm/worker-service.impl.md:1600-1611` — the version 2 example.
 - `docs/brainstorm/project-service.impl.md:411` — the import closure comes from the graph of the selector, and no second map exists.
-- Open item O3 of `00-index.md` — the production file.
+- `docs/brainstorm/worker-service.impl.md:1599` at root pull request #281 head `7c0e114` — the production file (decision D7).
 
 ## Depends on
 
 - Plan 02 of this set merged. The worker then accepts version 2 (ruling of root pull request #275).
-- Ulrich ruled open item O3. With a ruling other than option A, change only task 05.2 step 2.
 - Start from `origin/main` of `kanthorlabs/kanthord-engine`.
 
 ## Provides
@@ -69,7 +68,7 @@ The contract of plan 06:
 - Files: `scripts/affected-tests.mjs` (edit)
 - Do:
   1. In `buildGraph` (`:281-301`), also record `importsByFile`, from each parsed file to the files and the prefixes that it names. Keep `importersByFile` and `prefixEdges` as they are.
-  2. Add `PRODUCTION_ENTRY = "src/main.ts"`. A production file is a file of `closureOf(graph, PRODUCTION_ENTRY)`.
+  2. Add `PRODUCTION_ENTRY = "src/main.ts"`, the program entry. A production file is a file of `closureOf(graph, PRODUCTION_ENTRY)` (decision D7).
   3. Add `closureOf(graph, path)`. It walks the forward edges from `path`. A prefix edge reaches each present file whose path starts with the prefix. It answers the sorted present files.
   4. Add `floorOf(graph)`. It answers each present file with `isRunTest` true whose closure holds every production file, sorted.
   5. Export `buildGraph`, `closureOf`, `floorOf`, `isRunTest` and `runTests`.
