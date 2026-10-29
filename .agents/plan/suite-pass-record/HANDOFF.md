@@ -39,18 +39,15 @@ Ruling O4 of `dogfood-time/` gives these rules to this plan set. These rules are
 - Plan 02: engine #380. The worker accepts the affected report version 2 with `floor`. The affected span writes `kanthord.affected.floor_count`, `floor_seconds` and `total_seconds`.
 - Plan 03: engine #381. The measure `test_floor_share` of `tracking.analytics.duration`, the OpenAPI document and `docs/cli/tracking.md`.
 - Plan 04: apps #146. The `Test floor share` row of the `Time` section of `/analytics`.
+- Plan 05: engine #383. The engine selector writes the version 2 report with `floor`. The production set is the import closure of `src/main.ts`: 622 files. The floor holds 83 test files.
+- Plan 07: apps #145. One record for the whole apps tree, the CI record cache, the job summary and the nightly full run. A dirty tree without `--write` runs every test. The CI re-run on a clean tree skipped the test run and printed `Saved share: 100%`.
 - Root #281 (the rulings O1 to O3, S1, S6 and S8 in the design pages) and #282 (a dirty work tree reads no record).
-
-### Open, reviewed, waiting for Ulrich to land
-
-- Plan 05: engine #383, branch `feat/selector-floor`, worktree `engine/.dev/selector-floor`. The engine selector writes the version 2 report with `floor`. The production set is the import closure of `src/main.ts`: 622 files. The floor holds 83 test files. The review answered MERGE.
-- Plan 07: apps #145, branch `feat/suite-pass-record`, worktree `apps/.dev/suite-pass-record`. One record for the whole apps tree, the CI record cache, the job summary and the nightly full run. A dirty tree without `--write` runs every test. The CI re-run on a clean tree skipped the test run and printed `Saved share: 100%`. The review answered MERGE.
 
 ### Not started
 
-- Plan 06: the suite pass record of the engine. It starts after plan 05 lands, because it imports `floorOf` and `closureOf` of plan 05. It includes the dirty-tree rule of engine #382.
-- Plan 08: the root explanation pages. It starts after plans 02, 06 and 07 land.
-- Plan 09: the suite pass proposal in the Project Service, its read, its CLI leaf and the shipped plan `suite-pass-setup`. It starts after plans 06 and 07 land.
+- Plan 06: the suite pass record of the engine. It can start now. It imports `floorOf` and `closureOf` of plan 05, and it includes the dirty-tree rule of engine #382.
+- Plan 08: the root explanation pages. It starts after plan 06 lands.
+- Plan 09: the suite pass proposal in the Project Service, its read, its CLI leaf and the shipped plan `suite-pass-setup`. It starts after plan 06 lands.
 - Plan 10: the dashboard line and the action `Add setup node`. It starts after plan 09 merges.
 
 ## Open items
