@@ -790,11 +790,18 @@ export const environmentStateSchema = z.strictObject({
 });
 export type EnvironmentState = z.infer<typeof environmentStateSchema>;
 
+export const SuitePassState = {
+  Present: "present",
+  Absent: "absent",
+} as const;
+export type SuitePassState =
+  (typeof SuitePassState)[keyof typeof SuitePassState];
 const environmentAnswerSchema = z.strictObject({
   source: z.enum(EnvironmentSource),
   commit: z.string().min(1).nullable(),
   environment: environmentSchema.nullable(),
   reason: z.string().min(1).nullable(),
+  suite_pass: z.enum(SuitePassState).nullable(),
 });
 const pageOf = <T extends z.ZodType>(item: T) =>
   z.strictObject({ items: z.array(item), next_cursor: z.string().nullable() });

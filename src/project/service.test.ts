@@ -83,6 +83,7 @@ import {
   RESOURCE_TARGET_KIND_REPOSITORY,
   SSH_CREDENTIAL_PLATFORM,
   STORAGE_PLATFORM,
+  SuitePassState,
   type WorkerEntry,
   WorkerField,
   WorkerPlacement,
@@ -94,7 +95,7 @@ import {
 } from "../repository/contract.ts";
 import { TAG_MAX_BYTES } from "../kernel/tag.ts";
 import { projectMigrations } from "./migrations.ts";
-import { EnvironmentErrorCode } from "./environment.ts";
+import { EnvironmentErrorCode, SUITE_PASS_FILE } from "./environment.ts";
 import {
   inertEnvironmentAgent,
   inertEnvironmentProbe,
@@ -5517,9 +5518,7 @@ test("binding.verify returns 404 for a non-repository binding", async (t) => {
 
 const INSTRUCTION_COMMIT = "a".repeat(40);
 const TREE_PREFIX = "tree-";
-const SUITE_PASS_FILE = ".kanthord/suite-pass.json";
 const SUITE_PASS_TEXT = '{ "version": 1, "always_run": [] }';
-const SuitePassState = { Present: "present", Absent: "absent" } as const;
 type InstructionTexts = Array<string | null>;
 
 function environmentReadFixture(
@@ -6126,9 +6125,13 @@ test("binding.environment.get reads the devcontainer file of the repository at t
         postCreateCommand: "npm ci",
       },
       reason: null,
+      suite_pass: SuitePassState.Absent,
     },
   );
-  assert.deepEqual(present.readCalls[NO_ITEMS]?.paths, [DEVCONTAINER_FILE]);
+  assert.deepEqual(present.readCalls[NO_ITEMS]?.paths, [
+    DEVCONTAINER_FILE,
+    SUITE_PASS_FILE,
+  ]);
   const invalid = environmentReadFixture(t, {
     texts: ["{"],
     placement: WorkerPlacement.Container,
@@ -6172,6 +6175,7 @@ test("binding.environment.get answers the detected source at the image target wi
     commit: INSTRUCTION_COMMIT,
     environment: detected.document,
     reason: null,
+    suite_pass: SuitePassState.Absent,
   });
 });
 
@@ -6278,6 +6282,7 @@ test("binding.environment.get answers the universal source at the image target w
       ),
     ),
     reason: null,
+    suite_pass: SuitePassState.Absent,
   });
 });
 
@@ -6292,6 +6297,7 @@ test("binding.environment.get at the host target ignores the repository devconta
       commit: INSTRUCTION_COMMIT,
       environment: null,
       reason: null,
+      suite_pass: SuitePassState.Absent,
     },
   );
   assert.ok(
