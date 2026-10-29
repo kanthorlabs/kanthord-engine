@@ -24,6 +24,8 @@ import {
   verificationPassed,
 } from "./verification.ts";
 import { EndReason, ExecutionStop } from "./execution-run.ts";
+import { VerificationContext } from "./method-telemetry.ts";
+import { VerificationMemo } from "./verification-memo.ts";
 import { REASON_MAX_LENGTH } from "../../kernel/probe.ts";
 import { EnvironmentFailure } from "../../scheduler/contract.ts";
 import {
@@ -444,6 +446,7 @@ const COMMAND_ABSENT_EXIT = 127;
 const SINGLE_RUN = 1;
 const THREE_RESULTS = 3;
 const RUN_AND_RERUN = 2;
+const TWO_COMMANDS_RUN = 2;
 
 function countedInput(directory: string, commands: readonly string[]) {
   const runs: number[] = [];
@@ -505,6 +508,26 @@ test("a kill on the run and a code failure on the rerun keeps the flaky reruns",
   assert.deepEqual(runs, [1, 2, 3, 4]);
   assert.deepEqual(run.flaky, [false]);
   assert.equal(run.verification.results[0]?.exit_code, FAILED_EXIT);
+});
+
+const REPEATED = "echo once >> count";
+const ONCE_LINE = "once\n";
+const TWICE_LINES = "once\nonce\n";
+
+test("a repeated command after a failure never runs and never copies", async (t) => {
+  const { input, runs } = countedInput(temporary(t), [
+    "false",
+    "true",
+    "false",
+  ]);
+  const run = await runVerificationsWithOutput({
+    ...input,
+    reruns: 0,
+    copyRepeated: true,
+  });
+  assert.equal(run.outcome, VerificationClass.CodeFailure);
+  assert.equal(runs.length, SINGLE_RUN);
+  assert.equal(run.verification.results.length, SINGLE_RUN);
 });
 
 test("a command over the command limit is a code failure with no rerun", async (t) => {
@@ -657,4 +680,149 @@ test("a cancel in the middle of a command is a code failure with one run", async
   assert.equal(runs.length, SINGLE_RUN);
   assert.equal(run.verification.results[0]?.timed_out, false);
   assert.equal(run.verification.results[0]?.signal, KILL_SIGNAL);
+});
+
+const MEMO_TREES = ["tree"];
+const MEMO_DIGESTS = ["digest"];
+const MEMO_LIMIT_MS = 300;
+const NO_RUNS = 0;
+
+function memoInput(
+  directory: string,
+  commands: readonly string[],
+  memo: VerificationMemo,
+  context: Parameters<VerificationMemo["scope"]>[0],
+) {
+  const counted = countedInput(directory, commands);
+  const input: VerificationInput = {
+    ...counted.input,
+    reruns: 0,
+    memo: memo.scope(context, MEMO_TREES, MEMO_DIGESTS),
+  };
+  return { input, runs: counted.runs };
+}
+
+test("a memo replay of a whole list runs no command and calls no observer", async (t) => {
+  const directory = temporary(t);
+  const memo = new VerificationMemo();
+  const commands = [REPEATED, "true"];
+  const first = memoInput(directory, commands, memo, VerificationContext.Task);
+  const fresh = await runVerificationsWithOutput(first.input);
+  assert.equal(first.runs.length, TWO_COMMANDS_RUN);
+  const second = memoInput(directory, commands, memo, VerificationContext.Task);
+  const replayed = await runVerificationsWithOutput(second.input);
+  assert.deepEqual(second.runs, []);
+  assert.equal(replayed.outcome, VerificationClass.Pass);
+  assert.deepEqual(replayed.verification.results, fresh.verification.results);
+  assert.deepEqual(replayed.outputs, fresh.outputs);
+  assert.deepEqual(replayed.flaky, [false, false]);
+  assert.equal(readFileSync(join(directory, "count"), "utf8"), ONCE_LINE);
+});
+
+test("a memo miss in the list runs the whole list again", async (t) => {
+  const directory = temporary(t);
+  const memo = new VerificationMemo();
+  await runVerificationsWithOutput(
+    memoInput(directory, [REPEATED], memo, VerificationContext.Task).input,
+  );
+  const second = memoInput(
+    directory,
+    [REPEATED, "true"],
+    memo,
+    VerificationContext.Task,
+  );
+  const run = await runVerificationsWithOutput(second.input);
+  assert.equal(second.runs.length, TWO_COMMANDS_RUN);
+  assert.equal(run.verification.results.length, TWO_COMMANDS_RUN);
+  assert.equal(readFileSync(join(directory, "count"), "utf8"), TWICE_LINES);
+});
+
+test("a release memo replays a code failure and a live memo runs it again", async (t) => {
+  for (const [context, secondRuns] of [
+    [VerificationContext.Release, NO_RUNS],
+    [VerificationContext.Task, TWO_COMMANDS_RUN],
+  ] as const) {
+    const memo = new VerificationMemo();
+    const commands = ["true", "false", "true"];
+    const first = memoInput(temporary(t), commands, memo, context);
+    await runVerificationsWithOutput(first.input);
+    assert.equal(first.runs.length, TWO_COMMANDS_RUN);
+    const second = memoInput(temporary(t), commands, memo, context);
+    const run = await runVerificationsWithOutput(second.input);
+    assert.equal(run.outcome, VerificationClass.CodeFailure);
+    assert.equal(run.verification.results.length, TWO_COMMANDS_RUN);
+    assert.equal(second.runs.length, secondRuns);
+  }
+});
+
+test("a timeout in a release run is stored in no memo entry and runs again on the next round", async (t) => {
+  const memo = new VerificationMemo();
+  for (const round of [1, 2]) {
+    const { input, runs } = memoInput(
+      temporary(t),
+      ["sleep 30"],
+      memo,
+      VerificationContext.Release,
+    );
+    const run = await runVerificationsWithOutput({
+      ...input,
+      commandLimitMs: MEMO_LIMIT_MS,
+    });
+    assert.equal(run.outcome, VerificationClass.CodeFailure, `round ${round}`);
+    assert.equal(run.verification.results[0]?.timed_out, true);
+    assert.equal(runs.length, SINGLE_RUN);
+  }
+});
+
+test("a cancellation in a release run is stored in no memo entry and runs again on the next round", async (t) => {
+  const memo = new VerificationMemo();
+  const context = new CancellationContext();
+  const cancel = setTimeout(() => context.cancel(), CANCEL_AFTER_MS);
+  t.after(() => clearTimeout(cancel));
+  const first = memoInput(
+    temporary(t),
+    ["sleep 30"],
+    memo,
+    VerificationContext.Release,
+  );
+  const cancelled = await runVerificationsWithOutput({
+    ...first.input,
+    context,
+  });
+  assert.equal(cancelled.outcome, VerificationClass.CodeFailure);
+  assert.equal(first.runs.length, SINGLE_RUN);
+  const second = memoInput(
+    temporary(t),
+    ["sleep 30"],
+    memo,
+    VerificationContext.Release,
+  );
+  await runVerificationsWithOutput({
+    ...second.input,
+    commandLimitMs: MEMO_LIMIT_MS,
+  });
+  assert.equal(second.runs.length, SINGLE_RUN);
+});
+
+test("a memo replay does not start after the deadline passed", async (t) => {
+  const memo = new VerificationMemo();
+  const first = memoInput(
+    temporary(t),
+    ["true"],
+    memo,
+    VerificationContext.Task,
+  );
+  await runVerificationsWithOutput(first.input);
+  const second = memoInput(
+    temporary(t),
+    ["true"],
+    memo,
+    VerificationContext.Task,
+  );
+  const run = await runVerificationsWithOutput({
+    ...second.input,
+    deadline: Date.now(),
+  });
+  assert.equal(run.outcome, VerificationClass.BudgetEnd);
+  assert.deepEqual(run.verification.results, []);
 });

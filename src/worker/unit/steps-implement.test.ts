@@ -8,10 +8,12 @@ import { REASON_MAX_LENGTH } from "../../kernel/probe.ts";
 import {
   fauxAssistantMessage,
   fauxToolCall,
+  listedVerificationSpans,
   recordSpans,
   spanEnds,
 } from "./test-support.ts";
 import { SpanOperation } from "./telemetry.ts";
+import { VerificationContext } from "./method-telemetry.ts";
 import { CauseCategory, unattributed } from "../../kernel/cause.ts";
 import { EndReason, ExecutionStop } from "./execution-run.ts";
 import type { MethodClients } from "./method-clients.ts";
@@ -43,7 +45,7 @@ import { executionBoundary } from "./native-method.ts";
 
 const TASK_VERIFIED = "task verified";
 const REVISION_COUNT_ATTRIBUTE = "kanthord.task.revision_count";
-const WALL_DEADLINE_MS = 2000;
+const WALL_DEADLINE_MS = 5000;
 
 function writeFile(content: string) {
   return fauxAssistantMessage(
@@ -316,6 +318,45 @@ test("a revision that changes nothing twice stops the task with no_progress", as
   );
 });
 
+test("a live failure runs again on the next turn with an unchanged tree", async (t) => {
+  const current = task("stuck", "false");
+  const h = await fixture(
+    t,
+    [current],
+    [
+      fauxAssistantMessage("nothing"),
+      fauxAssistantMessage("nothing again"),
+      fauxAssistantMessage("still nothing"),
+    ],
+  );
+  const records = recordSpans(h);
+  await stopOf(runTask(h, current));
+  assert.deepEqual(
+    listedVerificationSpans(records).map((span) => [span.context, span.index]),
+    [
+      [VerificationContext.Task, 0],
+      [VerificationContext.Task, 0],
+    ],
+  );
+});
+
+test("a pass of an own command on an unchanged tree is reused by the next task", async (t) => {
+  const first = task("first", "test -d .");
+  const second = task("second", "test -d .");
+  const h = await fixture(
+    t,
+    [first, second],
+    [fauxAssistantMessage("nothing"), fauxAssistantMessage("nothing again")],
+  );
+  const records = recordSpans(h);
+  assert.equal((await runTask(h, first)).kind, TaskResultKind.Complete);
+  assert.equal((await runTask(h, second)).kind, TaskResultKind.Complete);
+  assert.deepEqual(
+    listedVerificationSpans(records).map((span) => [span.context, span.owner]),
+    [[VerificationContext.Task, first.id]],
+  );
+});
+
 test("a revoked claim stops the task loop before the next cycle", async (t) => {
   const current = task("revoked", "false");
   const h = await fixture(t, [current], [fauxAssistantMessage("never")]);
@@ -415,6 +456,70 @@ test("an implement node with no task commits its change with the node identity i
   const log = await simpleGit(h.root).log();
   assert.equal(log.latest!.body.split("\n")[0], nodeId);
   assert.ok(existsSync(join(h.root, "node-file")));
+});
+
+test("a task skips each node command in the live checkout and runs each own command", async (t) => {
+  const current = task("work", "true");
+  current.content.verifications = ["true", "test -d .", "true", "test -d ."];
+  const h = await fixture(t, [current], []);
+  const records = recordSpans(h);
+  const { verification } = await verifyTaskRun(h, current);
+  assert.deepEqual(
+    verification.results.map((result) => result.command),
+    ["test -d .", "test -d ."],
+  );
+  assert.deepEqual(
+    listedVerificationSpans(records).map((span) => [span.context, span.index]),
+    [
+      [VerificationContext.Task, 0],
+      [VerificationContext.Task, 1],
+    ],
+  );
+  const node = await verifyTaskRun(
+    h,
+    nodeUnitOf(h.input.claim.node_id, h.revision),
+  );
+  assert.deepEqual(node.verification.results, []);
+  assert.deepEqual(node.commands, []);
+});
+
+test("a node with no task runs no live verification, and the release gate runs each node verification once", async (t) => {
+  const h = await fixture(
+    t,
+    [],
+    [
+      fauxAssistantMessage(
+        fauxToolCall("write", { path: "node-file", content: "node" }),
+        { stopReason: "toolUse" },
+      ),
+      fauxAssistantMessage("done"),
+    ],
+  );
+  h.revision = {
+    ...h.revision,
+    content: {
+      ...h.revision.content,
+      verifications: ["test -f node-file", "true"],
+    },
+  };
+  const records = recordSpans(h);
+  acceptEvidence(h);
+  recordReleases(h);
+  assert.deepEqual(await runStepsImplement(h), {
+    kind: "released",
+    furtherWork: false,
+  });
+  const spans = listedVerificationSpans(records);
+  assert.deepEqual(
+    spans.filter((span) => span.context === VerificationContext.Node),
+    [],
+  );
+  assert.deepEqual(
+    spans
+      .filter((span) => span.context === VerificationContext.Release)
+      .map((span) => span.index),
+    [0, 1],
+  );
 });
 
 const NODE_FRAME =

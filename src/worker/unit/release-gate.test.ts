@@ -33,6 +33,7 @@ import {
   fauxAssistantMessage,
   fauxToolCall,
   implementFixture as fixture,
+  listedVerificationSpans,
   recordReleases,
   recordSpans,
   spanEnds,
@@ -40,6 +41,7 @@ import {
 } from "./test-support.ts";
 import { RecordKind, SpanStatus } from "../../tracking/contract.ts";
 import { SpanOperation } from "./telemetry.ts";
+import { VerificationContext } from "./method-telemetry.ts";
 
 type Fixture = Awaited<ReturnType<typeof fixture>>;
 
@@ -273,6 +275,54 @@ test("a failed command that the node and a task share routes its revision to the
     furtherWork: false,
   });
   assert.deepEqual(revisions, [digestOf(h, nodeUnit)]);
+});
+
+test("a node command that fails at the release gate sends the node unit back to the gate with no live command, and an unchanged revision counts toward no_progress", async (t) => {
+  const current = task("plain", "true");
+  const h = await fixture(
+    t,
+    [current],
+    [
+      NOTHING,
+      fauxAssistantMessage("nothing again"),
+      fauxAssistantMessage("still nothing"),
+    ],
+  );
+  h.revision = {
+    ...h.revision,
+    content: { ...h.revision.content, verifications: [`test -e ${SECRET}`] },
+  };
+  appendFileSync(join(h.root, ".git", "info", "exclude"), `${SECRET}\n`);
+  writeFileSync(join(h.root, SECRET), SECRET);
+  const records = recordSpans(h);
+  const revisions = recordRevisions(h);
+  recordReleases(h);
+  acceptEvidence(h);
+  const end = await executionBoundary(h.run, () => runStepsImplement(h));
+  const node = nodeUnitOf(h.input.claim.node_id, h.revision);
+  assert.deepEqual(revisions, [digestOf(h, node), digestOf(h, node)]);
+  assert.ok("stop" in end && end.stop);
+  assert.equal(end.stop.reason, EndReason.NoProgress);
+  assert.deepEqual(JSON.parse(end.stop.detail!), {
+    rule: NoProgressRule.UnchangedRevision,
+    count: NO_PROGRESS_LIMIT,
+    limit: NO_PROGRESS_LIMIT,
+    verification: {
+      passed: false,
+      ran: ONE_SPAN,
+      exit_code: FAILED_EXIT_CODE,
+      timed_out: false,
+    },
+  });
+  const spans = listedVerificationSpans(records);
+  assert.deepEqual(
+    spans.filter((span) => span.context === VerificationContext.Node),
+    [],
+  );
+  assert.equal(
+    spans.filter((span) => span.context === VerificationContext.Release).length,
+    ONE_SPAN,
+  );
 });
 
 test("a release verification that writes git state leaves the live checkout unchanged", async (t) => {

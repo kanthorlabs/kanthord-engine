@@ -33,6 +33,7 @@ import {
   isAncestor,
   mergeBase,
   modifiedFiles,
+  treeOf,
 } from "./local-git.ts";
 import { GIT_COMMIT_FAILED } from "./stop-codes.ts";
 
@@ -124,6 +125,30 @@ test("verification cleanup discards tracked and untracked edits but keeps ignore
   assert.equal(readFileSync(join(directory, "tracked"), "utf8"), original);
   assert.equal(existsSync(join(directory, "untracked")), false);
   assert.equal(existsSync(join(directory, "ignored")), true);
+});
+
+test("a tree id stays the same when an amend changes only the commit and differs when a file changes", async (t) => {
+  const directory = temporary(t);
+  const git = simpleGit(directory);
+  await git.init();
+  await git.addConfig("user.name", "Test");
+  await git.addConfig("user.email", "test@example.invalid");
+  writeFileSync(join(directory, "tracked"), "original");
+  await commitWork(env, directory, "first", background, 10000);
+  const first = await headCommit(env, directory, background, 10000);
+  const tree = await treeOf(env, directory, first, background, 10000);
+  assert.match(tree, /^[a-f0-9]{40,64}$/);
+  await git.raw(["commit", "--amend", "--no-edit", "--trailer", "Done: x"]);
+  const amended = await headCommit(env, directory, background, 10000);
+  assert.notEqual(amended, first);
+  assert.equal(await treeOf(env, directory, amended, background, 10000), tree);
+  writeFileSync(join(directory, "tracked"), "changed");
+  await commitWork(env, directory, "second", background, 10000);
+  const second = await headCommit(env, directory, background, 10000);
+  assert.notEqual(
+    await treeOf(env, directory, second, background, 10000),
+    tree,
+  );
 });
 
 test("work commits include new and tracked files, preserve history and ignore ignored files", async (t) => {

@@ -15,6 +15,7 @@ import { Phase, type SpanEnd, type TelemetrySink } from "./telemetry.ts";
 import { SpanStatus } from "../../tracking/contract.ts";
 import type { Revision } from "../../mission/contract.ts";
 import { verificationCommands } from "./evaluation-input.ts";
+import { VerificationMemo } from "./verification-memo.ts";
 import type { Context } from "../../kernel/context.ts";
 import { type MethodClaim, ExecutionRun as Run } from "./execution-run.ts";
 import type { MethodClients } from "./method-clients.ts";
@@ -166,6 +167,7 @@ export async function runNativeExecution(
         unchangedTurns: 0,
         lastVerification: null,
         revisionCount: 0,
+        memo: new VerificationMemo(),
       };
       return runStepsImplement(state);
     });

@@ -32,6 +32,8 @@ const TWO_TURNS = 2;
 const TWO_BINDINGS = ["api", "web"];
 const RELEASED = { kind: "released", furtherWork: false };
 const BUDGET_END = "budget_end";
+const SETUP_DEADLINE_MS = 2000;
+const WALL_DEADLINE_MS = 60000;
 const SECOND_RUN_PASSES = "test -f .git/seen || { touch .git/seen; false; }";
 const MET = `${JUDGEMENT_MARKER} {"criterion_met":true,"rationale":"met"}`;
 
@@ -188,6 +190,28 @@ test("a task that passes with no change writes no record, and a budget end then 
     if (JSON.stringify(work).includes(second.content.name))
       h.agent.budget.exhausted = () => true;
   };
+  const bodies = recordFinish(h);
+  const end = await executionBoundary(h.run, () => runStepsImplement(h));
+  assert.ok("stop" in end && end.stop);
+  assert.equal(end.stop.reason, BUDGET_END);
+  assert.equal(end.furtherWork, true);
+  assert.equal(bodies.length, ONE_TURN);
+  assert.deepEqual(await remoteRecords(h), []);
+});
+
+test("a node unit whose pending setup ends by the budget writes no done record and releases the budget_end stop", async (t) => {
+  const h = await fixture(t, [], [write("work"), fauxAssistantMessage("done")]);
+  h.setup = h.setup.map((entry) => ({
+    ...entry,
+    environment: { postCreateCommand: "sleep 30" },
+  }));
+  h.setupPending = true;
+  let deadline = Date.now() + WALL_DEADLINE_MS;
+  h.agent.budget.wallDeadline = () => {
+    deadline = Date.now() + SETUP_DEADLINE_MS;
+    return deadline;
+  };
+  h.agent.budget.exhausted = () => Date.now() >= deadline;
   const bodies = recordFinish(h);
   const end = await executionBoundary(h.run, () => runStepsImplement(h));
   assert.ok("stop" in end && end.stop);
