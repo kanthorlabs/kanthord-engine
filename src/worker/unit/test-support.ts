@@ -53,6 +53,7 @@ import type { Verdict } from "./node-reads.ts";
 import type { VerificationFacts } from "./progress-rule.ts";
 import { doneTrailerOf } from "./done-record.ts";
 import { VerificationKind } from "./method-telemetry.ts";
+import { VerificationMemo } from "./verification-memo.ts";
 export { LOCAL_GIT_SSH_ACCESS } from "../../repository/sshd-test-support.ts";
 export {
   scriptedProvider,
@@ -358,6 +359,7 @@ async function openExecution(
     unchangedTurns: 0,
     lastVerification: null as VerificationFacts,
     revisionCount: 0,
+    memo: new VerificationMemo(),
     provider,
     bare: bares[0]!,
     bares,

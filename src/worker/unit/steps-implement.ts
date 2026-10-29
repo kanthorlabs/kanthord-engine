@@ -92,6 +92,7 @@ import {
   verificationFactsOf,
 } from "./progress-rule.ts";
 import { nodeUnitOf, releaseGate, ReleaseGateKind } from "./release-gate.ts";
+import { memoScopeOf, type VerificationMemo } from "./verification-memo.ts";
 
 export const HEAD_COMMIT_SUBJECT = "Head commit of the node branch";
 const NO_TASKS = 0;
@@ -545,6 +546,7 @@ export interface StepsState {
   setup: SetupEntry[];
   affectedTests: AffectedTest[];
   base: BaseHead;
+  memo: VerificationMemo;
   setupPending: boolean;
   setupInstruction: string | null;
   task?: TaskContent;
@@ -767,19 +769,18 @@ async function verifyCommands(
   const setup = await pendingSetup(state);
   if (setup !== null) return setup;
   const testedInput = testedInputOf(state.checkouts);
+  const context =
+    task.id === state.input.claim.node_id
+      ? VerificationContext.Node
+      : VerificationContext.Task;
   const run = await runVerificationsWithOutput({
     observe: verificationObserver(
       state.run.spans,
       testedCommitOf(testedInput),
       environmentDigestsOf(state.input.setup.repositories),
-      {
-        context:
-          task.id === state.input.claim.node_id
-            ? VerificationContext.Node
-            : VerificationContext.Task,
-        ownerOf: () => task.id,
-      },
+      { context, ownerOf: () => task.id },
     ),
+    memo: await memoScopeOf(state, context, commands),
     directory: state.root,
     commands,
     tested_input: testedInput,

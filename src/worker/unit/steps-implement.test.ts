@@ -318,6 +318,45 @@ test("a revision that changes nothing twice stops the task with no_progress", as
   );
 });
 
+test("a live failure runs again on the next turn with an unchanged tree", async (t) => {
+  const current = task("stuck", "false");
+  const h = await fixture(
+    t,
+    [current],
+    [
+      fauxAssistantMessage("nothing"),
+      fauxAssistantMessage("nothing again"),
+      fauxAssistantMessage("still nothing"),
+    ],
+  );
+  const records = recordSpans(h);
+  await stopOf(runTask(h, current));
+  assert.deepEqual(
+    listedVerificationSpans(records).map((span) => [span.context, span.index]),
+    [
+      [VerificationContext.Task, 0],
+      [VerificationContext.Task, 0],
+    ],
+  );
+});
+
+test("a pass of an own command on an unchanged tree is reused by the next task", async (t) => {
+  const first = task("first", "test -d .");
+  const second = task("second", "test -d .");
+  const h = await fixture(
+    t,
+    [first, second],
+    [fauxAssistantMessage("nothing"), fauxAssistantMessage("nothing again")],
+  );
+  const records = recordSpans(h);
+  assert.equal((await runTask(h, first)).kind, TaskResultKind.Complete);
+  assert.equal((await runTask(h, second)).kind, TaskResultKind.Complete);
+  assert.deepEqual(
+    listedVerificationSpans(records).map((span) => [span.context, span.owner]),
+    [[VerificationContext.Task, first.id]],
+  );
+});
+
 test("a revoked claim stops the task loop before the next cycle", async (t) => {
   const current = task("revoked", "false");
   const h = await fixture(t, [current], [fauxAssistantMessage("never")]);

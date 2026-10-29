@@ -267,6 +267,7 @@ test("a release failure goes to the node unit when the node and a task share one
     ...h.revision,
     content: { ...h.revision.content, verifications: [SHARED_COMMAND] },
   };
+  const records = recordSpans(h);
   const revisions = recordRevisions(h);
   acceptEvidence(h);
   recordReleases(h);
@@ -277,6 +278,13 @@ test("a release failure goes to the node unit when the node and a task share one
   assert.deepEqual(revisions, [
     digestOf(h, nodeUnitOf(h.input.claim.node_id, h.revision)),
   ]);
+  assert.deepEqual(
+    listedVerificationSpans(records).map((span) => [span.context, span.index]),
+    [
+      [VerificationContext.Release, 0],
+      [VerificationContext.Release, 0],
+    ],
+  );
 });
 
 test("a node command that fails at the release gate sends the node unit back to the gate with no live command, and an unchanged revision counts toward no_progress", async (t) => {
@@ -316,11 +324,14 @@ test("a node command that fails at the release gate sends the node unit back to 
       timed_out: false,
     },
   });
+  const spans = listedVerificationSpans(records);
   assert.deepEqual(
-    listedVerificationSpans(records).filter(
-      (span) => span.context === VerificationContext.Node,
-    ),
+    spans.filter((span) => span.context === VerificationContext.Node),
     [],
+  );
+  assert.equal(
+    spans.filter((span) => span.context === VerificationContext.Release).length,
+    ONE_SPAN,
   );
 });
 

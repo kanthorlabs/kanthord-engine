@@ -26,6 +26,7 @@ import {
   verificationObserver,
 } from "./method-telemetry.ts";
 import { repositoryOf, type StepsState } from "./steps-implement.ts";
+import { memoScopeOf } from "./verification-memo.ts";
 import {
   environmentStop,
   infrastructureStop,
@@ -270,6 +271,7 @@ async function verifyInReleaseClones(
       exhausted: () => state.agent.budget.exhausted(),
       baseline: (command) => state.base.exitOf(command),
       copyRepeated: true,
+      memo: await memoScopeOf(state, VerificationContext.Release, commands),
     });
     const listed = { run, commands, setup: false, affected: null };
     if (!verificationPassed(run.verification, commands)) return listed;

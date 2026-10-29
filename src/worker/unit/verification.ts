@@ -10,6 +10,7 @@ import { childEnvironment } from "./tool-table.ts";
 import { COMMAND_LIMIT_MS } from "./budget.ts";
 import { VERIFICATION_INFRASTRUCTURE_FAILED } from "./stop-codes.ts";
 import type { WorkspaceCheckout } from "./workspace.ts";
+import type { MemoEntry, MemoScope } from "./verification-memo.ts";
 
 export type TestedInput =
   | { kind: "repository"; binding_id: string; commit: string }
@@ -99,6 +100,7 @@ export interface VerificationInput {
   exhausted?: () => boolean;
   baseline?: (command: string) => Promise<number | null>;
   copyRepeated?: boolean;
+  memo?: MemoScope;
 }
 
 function outputTail(chunks: Buffer[]): string {
@@ -301,6 +303,9 @@ export async function runVerificationsWithOutput(
 ): Promise<VerificationRun> {
   assert.ok(input.directory);
   assert.ok(Number.isSafeInteger(input.deadline));
+  const replayed = input.memo?.replay(input.commands) ?? null;
+  if (replayed !== null && unstartedClass(input) === null)
+    return replayedRun(input, replayed);
   const results: Verification["results"] = [];
   const outputs: string[] = [];
   const flaky: boolean[] = [];
@@ -320,6 +325,7 @@ export async function runVerificationsWithOutput(
       continue;
     }
     const classified = await classifiedCommand(command, index, input);
+    input.memo?.ran(command, classified.ran, classified.outcome);
     results.push(classified.ran.result);
     outputs.push(classified.ran.output);
     outcome = classified.outcome;
@@ -340,6 +346,23 @@ export async function runVerificationsWithOutput(
     outputs,
     flaky,
     outcome,
+  };
+}
+
+function replayedRun(
+  input: VerificationInput,
+  entries: readonly MemoEntry[],
+): VerificationRun {
+  const last = entries.at(-1);
+  assert.ok(last);
+  return {
+    verification: {
+      tested_input: input.tested_input,
+      results: entries.map((entry) => entry.result),
+    },
+    outputs: entries.map((entry) => entry.output),
+    flaky: entries.map(() => false),
+    outcome: last.outcome,
   };
 }
 
