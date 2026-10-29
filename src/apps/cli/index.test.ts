@@ -587,6 +587,7 @@ test("project environment export prints only the environment as indented JSON", 
     commit: null,
     environment: STORED_ENVIRONMENT,
     reason: null,
+    suite_pass: null,
   });
   const result = await environmentCommand(t, endpoint, [
     "export",
@@ -613,6 +614,7 @@ const DETECTED_ANSWER = {
   commit: "c1",
   environment: DETECTED_ENVIRONMENT,
   reason: null,
+  suite_pass: "present",
 };
 
 test("project environment export prints the detected document as indented JSON", async (t) => {
@@ -691,11 +693,11 @@ test("environment suite-pass plan prints the setup node body", async (t) => {
   for (const [args, code] of [
     [
       ["invalid", BINDING_ID],
-      "cli.project.environment.suite-pass.plan.invalid_project_id",
+      "cli.project.environment.suite_pass.plan.invalid_project_id",
     ],
     [
       [PROJECT_ID, "invalid"],
-      "cli.project.environment.suite-pass.plan.invalid_binding_id",
+      "cli.project.environment.suite_pass.plan.invalid_binding_id",
     ],
   ] as const) {
     const refused = await invocation(
@@ -718,6 +720,7 @@ test("project environment export stops when the binding holds no environment", a
     commit: "c1",
     environment: null,
     reason: null,
+    suite_pass: "absent",
   });
   const result = await environmentCommand(t, endpoint, [
     "export",
